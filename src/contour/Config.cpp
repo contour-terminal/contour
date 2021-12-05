@@ -314,6 +314,16 @@ namespace // {{{ helper
         ifs.read(text.data(), static_cast<std::streamsize>(size));
         return {text};
     }
+
+    terminal::CellRGBColor parseCellColor(std::string const& _text)
+    {
+        auto const text = toUpper(_text);
+        if (text == "CELLBACKGROUND"sv)
+            return terminal::CellBackgroundColor{};
+        if (text == "CELLFOREGROUND"sv)
+            return terminal::CellForegroundColor{};
+        return terminal::RGBColor(_text);
+    }
 }
 // }}}
 
@@ -853,8 +863,26 @@ terminal::ColorPalette loadColorScheme(
     if (auto cursor = _node["cursor"]; cursor)
     {
         _usedKeys.emplace(_path + ".cursor");
-        if (cursor.IsScalar() && !cursor.as<string>().empty())
-            colors.cursor = cursor.as<string>();
+        if (cursor.IsMap())
+        {
+            if (auto color = cursor["default"]; color.IsScalar())
+            {
+                _usedKeys.emplace(_path + ".cursor.default");
+                colors.cursor.color = parseCellColor(color.as<string>());
+            }
+            if (auto color = cursor["text"]; color.IsScalar())
+            {
+                _usedKeys.emplace(_path + ".cursor.text");
+                colors.cursor.textOverrideColor = parseCellColor(color.as<string>());
+            }
+        }
+        else if (cursor.IsScalar())
+        {
+            errorlog()("Deprecated cursor config colorscheme entry. Please update your colorscheme entry for cursor.");
+            colors.cursor.color = RGBColor(cursor.as<string>());
+        }
+        else
+            errorlog()("Invalid cursor config colorscheme entry.");
     }
 
     if (auto hyperlink = _node["hyperlink_decoration"]; hyperlink)

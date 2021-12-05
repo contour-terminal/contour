@@ -146,7 +146,6 @@ public:
     terminal::PageSize screenSize() const { return screenSizeForPixels(pixelSize(), renderer_.gridMetrics()); }
     void assertInitialized();
     double contentScale() const;
-    void blinkingCursorUpdate();
     void updateMinimumSize();
 
     void statsSummary();

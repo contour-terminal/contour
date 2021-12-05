@@ -31,13 +31,15 @@
 #include <memory>
 
 using std::array;
-using std::scoped_lock;
 using std::chrono::steady_clock;
+using std::get;
+using std::holds_alternative;
 using std::make_unique;
 using std::move;
 using std::nullopt;
 using std::optional;
 using std::reference_wrapper;
+using std::scoped_lock;
 using std::tuple;
 using std::unique_ptr;
 using std::vector;
@@ -159,12 +161,13 @@ Renderer::Renderer(PageSize _screenSize,
     fontDescriptions_{ _fontDescriptions },
     fonts_{ loadFontKeys(fontDescriptions_, *textShaper_) },
     gridMetrics_{ loadGridMetrics(fonts_.regular, _screenSize, *textShaper_) },
+    colorPalette_{ _colorPalette },
     backgroundOpacity_{ _backgroundOpacity },
     backgroundRenderer_{ gridMetrics_, _colorPalette.defaultBackground },
     imageRenderer_{ cellSize() },
     textRenderer_{ gridMetrics_, *textShaper_, fontDescriptions_, fonts_ },
     decorationRenderer_{ gridMetrics_, _hyperlinkNormal, _hyperlinkHover },
-    cursorRenderer_{ gridMetrics_, CursorShape::Block, _colorPalette.cursor }
+    cursorRenderer_{ gridMetrics_, CursorShape::Block }
 {
 }
 
@@ -267,13 +270,11 @@ void Renderer::setBackgroundOpacity(terminal::Opacity _opacity)
     backgroundOpacity_ = _opacity;
 }
 
-uint64_t Renderer::render(Terminal& _terminal,
-                          steady_clock::time_point _now,
-                          bool _pressure)
+uint64_t Renderer::render(Terminal& _terminal, bool _pressure)
 {
     gridMetrics_.pageSize = _terminal.screenSize();
 
-    auto const changes = _terminal.tick(_now);
+    auto const changes = _terminal.tick(steady_clock::now());
 
     executeImageDiscards();
 
@@ -281,7 +282,7 @@ uint64_t Renderer::render(Terminal& _terminal,
     // Windows 10 (ConPTY) workaround. ConPTY can't handle non-blocking I/O,
     // so we have to explicitly refresh the render buffer
     // from within the render (reader) thread instead ofthe terminal (writer) thread.
-    _terminal.refreshRenderBuffer(_now);
+    _terminal.refreshRenderBuffer();
     #endif // }}}
 
     optional<terminal::RenderCursor> cursorOpt;
@@ -294,11 +295,21 @@ uint64_t Renderer::render(Terminal& _terminal,
     }
     textRenderer_.endFrame();
 
-    if (cursorOpt && _terminal.cursorCurrentlyVisible())
+    if (cursorOpt && _terminal.cursorShape() != CursorShape::Block)
     {
+        // Note. Block cursor is implicitly rendered via standard grid cell rendering.
         auto const cursor = *cursorOpt;
         cursorRenderer_.setShape(cursor.shape);
-        cursorRenderer_.render(gridMetrics_.map(cursor.position), cursor.width);
+        auto const cursorColor = [&]()
+        {
+            if (holds_alternative<CellForegroundColor>(colorPalette_.cursor.color))
+                return colorPalette_.defaultForeground;
+            else if (holds_alternative<CellBackgroundColor>(colorPalette_.cursor.color))
+                return colorPalette_.defaultBackground;
+            else
+                return get<RGBColor>(colorPalette_.cursor.color);
+        }();
+        cursorRenderer_.render(gridMetrics_.map(cursor.position), cursor.width, cursorColor);
     }
 
     renderTarget().execute();

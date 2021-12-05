@@ -279,7 +279,7 @@ TerminalWidget::TerminalWidget(
     // setAttribute(Qt::WA_NoSystemBackground, false);
 
     updateTimer_.setSingleShot(true);
-    connect(&updateTimer_, &QTimer::timeout, this, QOverload<>::of(&TerminalWidget::blinkingCursorUpdate));
+    connect(&updateTimer_, &QTimer::timeout, [this]() { scheduleRedraw(); });
 
     connect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
 
@@ -446,7 +446,7 @@ void TerminalWidget::paintGL()
                 ? RGBAColor(profile().colors.defaultForeground, uint8_t(renderer_.backgroundOpacity()))
                 : RGBAColor(profile().colors.defaultBackground, uint8_t(renderer_.backgroundOpacity()))
         );
-        renderer_.render(terminal(), steady_clock::now(), renderingPressure_);
+        renderer_.render(terminal(), renderingPressure_);
     }
     catch (exception const& e)
     {
@@ -456,14 +456,10 @@ void TerminalWidget::paintGL()
 
 void TerminalWidget::onFrameSwapped()
 {
-    if (state_.finish())
-    {
-        if (profile().cursorDisplay == terminal::CursorDisplay::Blink
-                && terminal().screen().cursor().visible)
-            updateTimer_.start(terminal().nextRender(steady_clock::now()));
-    }
-    else
+    if (!state_.finish())
         update();
+    else if (auto timeout = terminal().nextRender(); timeout.has_value())
+        updateTimer_.start(timeout.value());
 }
 // }}}
 
@@ -593,11 +589,6 @@ void TerminalWidget::assertInitialized()
 void TerminalWidget::onScrollBarValueChanged(int _value)
 {
     terminal().viewport().scrollToAbsolute(terminal::StaticScrollbackPosition::cast_from(_value));
-    scheduleRedraw();
-}
-
-void TerminalWidget::blinkingCursorUpdate()
-{
     scheduleRedraw();
 }
 

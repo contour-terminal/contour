@@ -2199,7 +2199,12 @@ void Screen::requestDynamicColor(DynamicColorName _name)
             case DynamicColorName::DefaultBackgroundColor:
                 return colorPalette_.defaultBackground;
             case DynamicColorName::TextCursorColor:
-                return colorPalette_.cursor;
+                if (holds_alternative<CellForegroundColor>(colorPalette_.cursor.color))
+                    return colorPalette_.defaultForeground;
+                else if (holds_alternative<CellBackgroundColor>(colorPalette_.cursor.color))
+                    return colorPalette_.defaultBackground;
+                else
+                    return get<RGBColor>(colorPalette_.cursor.color);
             case DynamicColorName::MouseForegroundColor:
                 return colorPalette_.mouseForeground;
             case DynamicColorName::MouseBackgroundColor:
@@ -2479,7 +2484,7 @@ void Screen::setDynamicColor(DynamicColorName _name, RGBColor _value)
             colorPalette_.defaultBackground = _value;
             break;
         case DynamicColorName::TextCursorColor:
-            colorPalette_.cursor = _value;
+            colorPalette_.cursor.color = _value;
             break;
         case DynamicColorName::MouseForegroundColor:
             colorPalette_.mouseForeground = _value;

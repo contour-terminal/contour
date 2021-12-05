@@ -100,7 +100,6 @@ class Renderer : public Renderable {
      * @p _now The time hint to use when rendering the eventually blinking cursor.
      */
     uint64_t render(Terminal& _terminal,
-                    std::chrono::steady_clock::time_point _now,
                     bool _pressure);
 
     // Converts given RGBColor with its given opacity to a 4D-vector of values between 0.0 and 1.0
@@ -145,6 +144,7 @@ class Renderer : public Renderable {
 
     GridMetrics gridMetrics_;
 
+    ColorPalette const& colorPalette_;
     Opacity backgroundOpacity_;
 
     std::mutex imageDiscardLock_;               //!< Lock guard for accessing discardImageQueue_.
