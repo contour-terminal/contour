@@ -200,6 +200,16 @@ constexpr Color UndefinedColor() noexcept { return Color::Undefined(); }
 constexpr Color DefaultColor() noexcept { return Color::Default(); }
 // }}}
 
+struct CellForegroundColor{};
+struct CellBackgroundColor{};
+using CellRGBColor = std::variant<RGBColor, CellForegroundColor, CellBackgroundColor>;
+
+struct CursorColor
+{
+    CellRGBColor color = CellForegroundColor{};
+    CellRGBColor textOverrideColor = CellBackgroundColor{};
+};
+
 // {{{ ColorPalette
 struct ColorPalette
 {
@@ -269,7 +279,8 @@ struct ColorPalette
     RGBColor defaultBackground = 0x000000;
     std::optional<RGBColor> selectionForeground = std::nullopt;
     std::optional<RGBColor> selectionBackground = std::nullopt;
-	RGBColor cursor = 0x707020;
+
+    CursorColor cursor;
 
     RGBColor mouseForeground = 0x800000;
     RGBColor mouseBackground = 0x808000;

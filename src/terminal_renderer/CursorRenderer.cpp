@@ -26,12 +26,23 @@ using std::string;
 
 namespace terminal::renderer {
 
+namespace
+{
+    std::array<float, 4> toVec4(RGBColor v)
+    {
+        return {
+            float(v.red) / 255.0f,
+            float(v.green) / 255.0f,
+            float(v.blue) / 255.0f,
+            1.0f
+        };
+    }
+}
+
 CursorRenderer::CursorRenderer(GridMetrics const& _gridMetrics,
-                               CursorShape _shape,
-                               RGBColor const& _color) :
+                               CursorShape _shape):
     gridMetrics_{ _gridMetrics },
     shape_{ _shape },
-    color_{ _color },
     columnWidth_{ 1 }
 {
 }
@@ -141,7 +152,7 @@ optional<CursorRenderer::DataRef> CursorRenderer::getDataRef(CursorShape _shape)
     return nullopt;
 }
 
-void CursorRenderer::render(crispy::Point _pos, int _columnWidth)
+void CursorRenderer::render(crispy::Point _pos, int _columnWidth, RGBColor _color)
 {
     if (columnWidth_ != _columnWidth) // TODO we should optimize here by keying for (shape, columnWidth).
     {
@@ -155,18 +166,8 @@ void CursorRenderer::render(crispy::Point _pos, int _columnWidth)
         auto const x = _pos.x;
         auto const y = _pos.y;
         auto constexpr z = 0;
-        textureScheduler().renderTexture({textureInfo, x, y, z, color()});
+        textureScheduler().renderTexture({textureInfo, x, y, z, toVec4(_color)});
     }
-}
-
-std::array<float, 4> CursorRenderer::color() const noexcept
-{
-    return {
-        float(color_.red) / 255.0f,
-        float(color_.green) / 255.0f,
-        float(color_.blue) / 255.0f,
-        1.0f
-    };
 }
 
 } // namespace terminal::view

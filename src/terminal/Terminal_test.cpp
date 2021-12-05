@@ -160,12 +160,12 @@ TEST_CASE("Terminal.BlinkingCursor", "[terminal]")
     {
         auto const clockBeforeTurn = clockBase + BlinkInterval - chrono::milliseconds(1);
         terminal.tick(clockBeforeTurn);
-        terminal.ensureFreshRenderBuffer(clockBeforeTurn);
+        terminal.ensureFreshRenderBuffer();
         CHECK(terminal.cursorCurrentlyVisible());
 
         auto const clockAfterTurn = clockBase + BlinkInterval + chrono::milliseconds(1);
         terminal.tick(clockAfterTurn);
-        terminal.ensureFreshRenderBuffer(clockAfterTurn);
+        terminal.ensureFreshRenderBuffer();
         CHECK(!terminal.cursorCurrentlyVisible());
     }
 
@@ -174,7 +174,7 @@ TEST_CASE("Terminal.BlinkingCursor", "[terminal]")
         // get a state where the blinking cursor is not visible
         auto const clockBeforeTurn = clockBase + BlinkInterval + chrono::milliseconds(1);
         terminal.tick(clockBeforeTurn);
-        terminal.ensureFreshRenderBuffer(clockBeforeTurn);
+        terminal.ensureFreshRenderBuffer();
         CHECK(!terminal.cursorCurrentlyVisible());
 
         // type something into the terminal
@@ -183,7 +183,7 @@ TEST_CASE("Terminal.BlinkingCursor", "[terminal]")
 
         // now the cursor is visible before the interval has passed
         terminal.tick(clockBeforeTurn);
-        terminal.ensureFreshRenderBuffer(clockBeforeTurn);
+        terminal.ensureFreshRenderBuffer();
         CHECK(terminal.cursorCurrentlyVisible());
     }
 }
@@ -198,14 +198,17 @@ TEST_CASE("Terminal.SynchronizedOutput", "[terminal]")
 
     mc.writeToStdout(BatchOn);
     mc.writeToStdout("Hello ");
-    mc.terminal().ensureFreshRenderBuffer(now);
+    mc.terminal().tick(now);
+    mc.terminal().ensureFreshRenderBuffer();
     CHECK("" == trimmedTextScreenshot(mc));
 
     mc.writeToStdout(" World");
-    mc.terminal().ensureFreshRenderBuffer(now);
+    mc.terminal().tick(now);
+    mc.terminal().ensureFreshRenderBuffer();
     CHECK("" == trimmedTextScreenshot(mc));
 
     mc.writeToStdout(BatchOff);
-    mc.terminal().ensureFreshRenderBuffer(now);
+    mc.terminal().tick(now);
+    mc.terminal().ensureFreshRenderBuffer();
     CHECK("Hello  World" == trimmedTextScreenshot(mc));
 }

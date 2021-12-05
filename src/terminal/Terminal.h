@@ -87,6 +87,7 @@ class Terminal : public ScreenEvents {
 
     /// Retrieves the time point this terminal instance has been spawned.
     std::chrono::steady_clock::time_point startTime() const noexcept { return startTime_; }
+    std::chrono::steady_clock::time_point currentTime() const noexcept { return currentTime_; }
 
     /// Retrieves reference to the underlying PTY device.
     Pty& device() noexcept { return pty_; }
@@ -134,26 +135,13 @@ class Terminal : public ScreenEvents {
     Viewport const& viewport() const noexcept { return viewport_; }
 
     // {{{ Screen Render Proxy
-    /// Checks if a render() method should be called by checking the dirty bit,
-    /// and if so, clears the dirty bit and returns true, false otherwise.
-    bool shouldRender(std::chrono::steady_clock::time_point const& _now) const;
+    std::optional<std::chrono::milliseconds> nextRender() const;
 
-    std::chrono::milliseconds nextRender(std::chrono::steady_clock::time_point _now) const;
-
-    /// Thread-safe access to screen data for rendering.
-    template <typename Renderer, typename... RenderPasses>
-    uint64_t render(std::chrono::steady_clock::time_point _now, Renderer const& pass, RenderPasses... passes) const
-    {
-        auto _l = std::lock_guard{*this};
-        auto const changes = tick(_now);
-        renderPass(pass, std::forward<RenderPasses>(passes)...);
-        return changes;
-    }
-
-    uint64_t tick(std::chrono::steady_clock::time_point _now) const
+    uint64_t tick(std::chrono::steady_clock::time_point _now)
     {
         auto const changes = changes_.exchange(0);
-        updateCursorVisibilityState(_now);
+        currentTime_ = _now;
+        updateCursorVisibilityState();
         return changes;
     }
     // }}}
@@ -170,7 +158,6 @@ class Terminal : public ScreenEvents {
     /// and it is attempted to swap the back/front buffers.
     /// but the swap has NOT been invoked yet.
     ///
-    /// @param _now    the current time
     /// @param _locked whether or not the Terminal object's lock is already held by the caller.
     ///
     /// @retval true   front buffer now contains the refreshed render buffer.
@@ -179,10 +166,13 @@ class Terminal : public ScreenEvents {
     ///                be successfully invoked to swap back/front buffers
     ///                in order to access the refreshed render buffer.
     ///
+    /// @note The current time must have been updated in order to get the
+    ///       correct cursor blinking state drawn.
+    ///
     /// @see RenderDoubleBuffer::swapBuffers()
     /// @see renderBuffer()
     ///
-    bool refreshRenderBuffer(std::chrono::steady_clock::time_point _now, bool _locked = false);
+    bool refreshRenderBuffer(bool _locked = false);
 
     /// Eventually refreshes the render buffer iff
     /// - the screen contents has changed AND refresh rate satisfied,
@@ -194,7 +184,7 @@ class Terminal : public ScreenEvents {
     ///
     /// @see RenderDoubleBuffer::swapBuffers()
     /// @see renderBuffer()
-    bool ensureFreshRenderBuffer(std::chrono::steady_clock::time_point _now, bool _locked = false);
+    bool ensureFreshRenderBuffer(bool _locked = false);
 
     /// Aquuires read-access handle to front render buffer.
     ///
@@ -297,6 +287,7 @@ class Terminal : public ScreenEvents {
     bool processInputOnce();
 
     void markScreenDirty() { screenDirty_ = true; }
+    bool screenDirty() const noexcept { return screenDirty_; }
 
     uint64_t lastFrameID() const noexcept { return lastFrameID_.load(); }
 
@@ -306,7 +297,7 @@ class Terminal : public ScreenEvents {
     void refreshRenderBuffer(RenderBuffer& _output); // <- acquires the lock
     void refreshRenderBufferInternal(RenderBuffer& _output);
     std::optional<RenderCursor> renderCursor();
-    void updateCursorVisibilityState(std::chrono::steady_clock::time_point _now) const;
+    void updateCursorVisibilityState() const;
     bool updateCursorHoveringState();
 
     template <typename Renderer, typename... RemainingPasses>
@@ -365,13 +356,14 @@ class Terminal : public ScreenEvents {
 
     Pty& pty_;
 
+    std::chrono::steady_clock::time_point startTime_;
+    std::chrono::steady_clock::time_point currentTime_;
+
+	mutable std::chrono::steady_clock::time_point lastCursorBlink_;
     CursorDisplay cursorDisplay_;
     CursorShape cursorShape_;
     std::chrono::milliseconds cursorBlinkInterval_;
 	mutable unsigned cursorBlinkState_;
-	mutable std::chrono::steady_clock::time_point lastCursorBlink_;
-
-    std::chrono::steady_clock::time_point startTime_;
 
     std::u32string wordDelimiters_;
 

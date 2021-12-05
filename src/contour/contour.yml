@@ -274,8 +274,21 @@ color_schemes:
             # Default foreground text color.
             foreground: '#d5d8d6'
 
-        # Mandates the color of the cursor.
-        cursor: '#b0b030'
+        # Mandates the color of the cursor and potentially overridden text.
+        #
+        # The color can be specified in RGB as usual, plus
+        # - CellForeground: Selects the cell's foreground color.
+        # - CellBackground: Selects the cell's background color.
+        cursor:
+            # Specifies the color to be used for the actual cursor shape.
+            #
+            # Default: CellForeground
+            default: CellForeground
+            # Specifies the color to be used for the characters that would
+            # be covered otherwise.
+            #
+            # Default: CellBackground
+            text: CellBackground
 
         # color to pick for hyperlinks decoration, when hovering
         hyperlink_decoration:

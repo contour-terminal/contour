@@ -28,9 +28,7 @@ namespace terminal::renderer {
 /// Takes care of rendering the text cursor.
 class CursorRenderer : public Renderable {
   public:
-    CursorRenderer(GridMetrics const& _gridMetrics,
-                   CursorShape _shape,
-                   RGBColor const& _color);
+    CursorRenderer(GridMetrics const& _gridMetrics, CursorShape _shape);
 
     void setRenderTarget(RenderTarget& _renderTarget) override;
     void clearCache() override;
@@ -38,7 +36,7 @@ class CursorRenderer : public Renderable {
     CursorShape shape() const noexcept { return shape_; }
     void setShape(CursorShape _shape);
 
-    void render(crispy::Point _pos, int _columnWidth);
+    void render(crispy::Point _pos, int _columnWidth, RGBColor _color);
 
   private:
     using TextureAtlas = atlas::MetadataTextureAtlas<CursorShape, int>;
@@ -54,7 +52,6 @@ class CursorRenderer : public Renderable {
     GridMetrics const& gridMetrics_;
 
     CursorShape shape_;
-    RGBColor const& color_;
     uint8_t columnWidth_;
 };
 

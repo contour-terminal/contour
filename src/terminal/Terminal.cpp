@@ -48,15 +48,41 @@ namespace // {{{ helpers
             value.pop_back();
     }
 
-    tuple<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette, Cell const& _cell, bool _reverseVideo, bool _selected)
+    constexpr RGBColor makeRGBColor(RGBColor fg, RGBColor bg, CellRGBColor cellColor) noexcept
+    {
+        if (holds_alternative<CellForegroundColor>(cellColor))
+            return fg;
+        if (holds_alternative<CellBackgroundColor>(cellColor))
+            return bg;
+        return get<RGBColor>(cellColor);
+    }
+
+    tuple<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette,
+                                         Cell const& _cell,
+                                         bool _reverseVideo,
+                                         bool _selected,
+                                         bool _isCursor)
     {
         auto const [fg, bg] = _cell.attributes().makeColors(_colorPalette, _reverseVideo);
-        if (!_selected)
+        if (!_selected && !_isCursor)
             return tuple{fg, bg};
 
-        auto const a = _colorPalette.selectionForeground.value_or(bg);
-        auto const b = _colorPalette.selectionBackground.value_or(fg);
-        return tuple{a, b};
+        auto const [selectionFg, selectionBg] =
+                [](auto fg, auto bg, bool selected, ColorPalette const& colors) -> tuple<RGBColor, RGBColor> {
+            auto const a = colors.selectionForeground.value_or(bg);
+            auto const b = colors.selectionBackground.value_or(fg);
+            if (selected)
+                return tuple{a, b};
+            else
+                return tuple{b, a};
+        }(fg, bg, _selected, _colorPalette);
+        if (!_isCursor)
+            return tuple{selectionFg, selectionBg};
+
+        auto const cursorFg = makeRGBColor(selectionFg, selectionBg, _colorPalette.cursor.textOverrideColor);
+        auto const cursorBg = makeRGBColor(selectionFg, selectionBg, _colorPalette.cursor.color);
+
+        return tuple{cursorFg, cursorBg};
     }
 
     void logRenderBufferSwap(bool _success, uint64_t _frameID)
@@ -93,12 +119,13 @@ Terminal::Terminal(Pty& _pty,
     refreshInterval_{ static_cast<long long>(1000.0 / _refreshRate) },
     renderBuffer_{},
     pty_{ _pty },
+    startTime_{ _now },
+    currentTime_{ _now },
+    lastCursorBlink_{ _now },
     cursorDisplay_{ CursorDisplay::Steady }, // TODO: pass via param
     cursorShape_{ CursorShape::Block }, // TODO: pass via param
     cursorBlinkInterval_{ _cursorBlinkInterval },
     cursorBlinkState_{ 1 },
-    lastCursorBlink_{ _now },
-    startTime_{ _now },
     wordDelimiters_{ unicode::from_utf8(_wordDelimiters) },
     mouseProtocolBypassModifier_{ _mouseProtocolBypassModifier },
     inputGenerator_{},
@@ -192,8 +219,7 @@ bool Terminal::processInputOnce()
     writeToScreen(buf);
 
     #if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
-    auto const now = std::chrono::steady_clock::now();
-    ensureFreshRenderBuffer(now);
+    ensureFreshRenderBuffer();
     #endif
 
     return true;
@@ -211,14 +237,14 @@ void Terminal::breakLoopAndRefreshRenderBuffer()
     pty_.wakeupReader();
 }
 
-bool Terminal::refreshRenderBuffer(std::chrono::steady_clock::time_point _now, bool _locked)
+bool Terminal::refreshRenderBuffer(bool _locked)
 {
     renderBuffer_.state = RenderBufferState::RefreshBuffersAndTrySwap;
-    ensureFreshRenderBuffer(_now, _locked);
+    ensureFreshRenderBuffer(_locked);
     return renderBuffer_.state == RenderBufferState::WaitingForRefresh;
 }
 
-bool Terminal::ensureFreshRenderBuffer(std::chrono::steady_clock::time_point _now, bool _locked)
+bool Terminal::ensureFreshRenderBuffer(bool _locked)
 {
     if (!renderBufferUpdateEnabled_)
     {
@@ -226,19 +252,13 @@ bool Terminal::ensureFreshRenderBuffer(std::chrono::steady_clock::time_point _no
         return false;
     }
 
-    if (!screenDirty_)
-    {
-        renderBuffer_.state = RenderBufferState::WaitingForRefresh;
-        return false;
-    }
-
-    auto const elapsed = _now - renderBuffer_.lastUpdate;
+    auto const elapsed = currentTime_ - renderBuffer_.lastUpdate;
     auto const avoidRefresh = elapsed < refreshInterval_;
 
     switch (renderBuffer_.state)
     {
         case RenderBufferState::WaitingForRefresh:
-            if (avoidRefresh || !screenDirty_)
+            if (avoidRefresh)
                 break;
             renderBuffer_.state = RenderBufferState::RefreshBuffersAndTrySwap;
             [[fallthrough]];
@@ -251,7 +271,7 @@ bool Terminal::ensureFreshRenderBuffer(std::chrono::steady_clock::time_point _no
             [[fallthrough]];
         case RenderBufferState::TrySwapBuffers:
             {
-                [[maybe_unused]] auto const success = renderBuffer_.swapBuffers(_now);
+                [[maybe_unused]] auto const success = renderBuffer_.swapBuffers(currentTime_);
 
                 #if defined(CONTOUR_PERF_STATS)
                 logRenderBufferSwap(success, lastFrameID_);
@@ -292,9 +312,15 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
     };
 
     changes_.store(0);
-
+    screenDirty_ = false;
     ++lastFrameID_;
+
+    _output.clear();
     _output.frameID = lastFrameID_;
+
+    enum class State { Gap, Sequence };
+    State state = State::Gap;
+
 #if defined(CONTOUR_PERF_STATS)
     if (TerminalLog)
         LOGSTORE(TerminalLog)("{}: Refreshing render buffer.\n", lastFrameID_.load());
@@ -349,28 +375,22 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
         _output.screen.emplace_back(std::move(cell));
     }; // }}}
 
-    screenDirty_ = false;
-    _output.clear();
-
-    enum class State {
-        Gap,
-        Sequence,
-    };
-    State state = State::Gap;
-
+    _output.cursor = renderCursor();
     int lineNr = 1;
     screen_.render(
-        [&](Coordinate const& _pos, Cell const& _cell) // mutable
+        [&](Coordinate _pos, Cell const& _cell)
         {
             auto const absolutePos = Coordinate{baseLine + (_pos.row - 1), _pos.column};
             auto const selected = isSelectedAbsolute(absolutePos);
-            auto const [fg, bg] = makeColors(screen_.colorPalette(), _cell, reverseVideo, selected);
+            auto const hasCursor = _pos == screen_.realCursorPosition();
+            bool const paintCursor = hasCursor
+                                  && _output.cursor.has_value()
+                                  && _output.cursor->shape == CursorShape::Block;
+            auto const [fg, bg] = makeColors(screen_.colorPalette(), _cell,
+                                             reverseVideo, selected,
+                                             paintCursor);
 
-            auto const cellEmpty = (_cell.codepoints().empty() || _cell.codepoints()[0] == 0x20)
-#if defined(LIBTERMINAL_IMAGES)
-                                && !_cell.imageFragment().has_value()
-#endif
-                                ;
+            auto const cellEmpty = _cell.empty();
             auto const customBackground = bg != screen_.colorPalette().defaultBackground
                                        || !!_cell.attributes().styles;
 
@@ -420,16 +440,11 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
             cellAtMouse.hyperlink()->state = HyperlinkState::Inactive;
     }
     #endif
-
-    _output.cursor = renderCursor();
 }
 
 optional<RenderCursor> Terminal::renderCursor()
 {
-    bool const shouldDisplayCursor = screen_.cursor().visible
-        && (cursorDisplay() == CursorDisplay::Steady || cursorBlinkActive());
-
-    if (!shouldDisplayCursor || !viewport().isLineVisible(screen_.cursor().position.row))
+    if (!cursorCurrentlyVisible() || !viewport().isLineVisible(screen_.cursor().position.row))
         return nullopt;
 
     // TODO: check if CursorStyle has changed, and update render context accordingly.
@@ -674,22 +689,17 @@ void Terminal::writeToScreen(string_view _data)
     screen_.write(_data);
 }
 
-// TODO: this family of functions seems we don't need anymore
-bool Terminal::shouldRender(steady_clock::time_point const& _now) const
+void Terminal::updateCursorVisibilityState() const
 {
-    return changes_.load() || (
-        cursorDisplay_ == CursorDisplay::Blink &&
-        chrono::duration_cast<chrono::milliseconds>(_now - lastCursorBlink_) >= cursorBlinkInterval());
-}
+    if (cursorDisplay_ == CursorDisplay::Steady)
+        return;
 
-void Terminal::updateCursorVisibilityState(std::chrono::steady_clock::time_point _now) const
-{
-    auto const diff = chrono::duration_cast<chrono::milliseconds>(_now - lastCursorBlink_);
-    if (diff >= cursorBlinkInterval())
-    {
-        lastCursorBlink_ = _now;
-        cursorBlinkState_ = (cursorBlinkState_ + 1) % 2;
-    }
+    auto const passed = chrono::duration_cast<chrono::milliseconds>(currentTime_ - lastCursorBlink_);
+    if (passed < cursorBlinkInterval_)
+        return;
+
+    lastCursorBlink_ = currentTime_;
+    cursorBlinkState_ = (cursorBlinkState_ + 1) % 2;
 }
 
 bool Terminal::updateCursorHoveringState()
@@ -711,11 +721,17 @@ bool Terminal::updateCursorHoveringState()
     return newState != oldState;
 }
 
-std::chrono::milliseconds Terminal::nextRender(chrono::steady_clock::time_point _now) const
+optional<chrono::milliseconds> Terminal::nextRender() const
 {
-    auto const diff = chrono::duration_cast<chrono::milliseconds>(_now - lastCursorBlink_);
-    if (diff <= cursorBlinkInterval())
-        return {cursorBlinkInterval_ - diff};
+    if (!screen_.cursor().visible)
+        return nullopt;
+
+    if (cursorDisplay_ != CursorDisplay::Blink)
+        return nullopt;
+
+    auto const passed = chrono::duration_cast<chrono::milliseconds>(currentTime_ - lastCursorBlink_);
+    if (passed <= cursorBlinkInterval_)
+        return cursorBlinkInterval_ - passed;
     else
         return chrono::milliseconds::min();
 }
@@ -983,14 +999,14 @@ void Terminal::synchronizedOutput(bool _enabled)
     if (_enabled)
         return;
 
-    auto const diff = steady_clock::now() - renderBuffer_.lastUpdate;
+    auto const diff = currentTime_ - renderBuffer_.lastUpdate;
     if (diff < refreshInterval_)
         return;
 
     if (renderBuffer_.state == RenderBufferState::TrySwapBuffers)
         return;
 
-    refreshRenderBuffer(steady_clock::now(), true);
+    refreshRenderBuffer(true);
     eventListener_.screenUpdated();
 }
 // }}}

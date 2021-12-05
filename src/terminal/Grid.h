@@ -306,11 +306,14 @@ class Cell {
 #endif
     }
 
+    bool empty() const noexcept
+    {
+        return (codepointCount() == 0 || codepoint(0) == 0x20)
 #if defined(LIBTERMINAL_IMAGES)
-    bool empty() const noexcept { return codepointCount() == 0 && !imageFragment_; }
-#else
-    bool empty() const noexcept { return codepointCount() == 0; }
+            && !imageFragment_
 #endif
+            ;
+    }
 
     constexpr int width() const noexcept { return width_; }
 
