@@ -439,18 +439,18 @@ static_assert(boxDrawingDefinitions.size() == 0x80);
 
 // {{{ block element construction
 // Helper to write ratios like 1/8_th
-struct Ratio1 { float value; };
-constexpr Ratio1 operator "" _th(unsigned long long ratio) { return Ratio1{static_cast<float>(ratio)}; }
-constexpr float operator/(int a, Ratio1 b) noexcept { return static_cast<float>(a) / b.value; }
+struct Ratio1 { double value; };
+constexpr Ratio1 operator "" _th(unsigned long long ratio) { return Ratio1{static_cast<double>(ratio)}; }
+constexpr double operator/(int a, Ratio1 b) noexcept { return static_cast<double>(a) / b.value; }
 
 // ratio between 0.0 and 1.0 for x (horizontal) and y (vertical).
-struct Ratio { float x; float y; };
+struct Ratio { double x; double y; };
 
 struct RatioBlock { Ratio from{}; Ratio to{}; };
-constexpr RatioBlock lower(float r) noexcept { return RatioBlock{{0, 1 - r}, {1, 1}}; }
-constexpr RatioBlock upper(float r) noexcept { return RatioBlock{{0, 0}, {1, r}}; }
-constexpr RatioBlock left(float r)  noexcept { return RatioBlock{{0, 0}, {r, 1}}; }
-constexpr RatioBlock right(float r) noexcept { return RatioBlock{{1.f - r, 0.f}, {1.f, 1.f}}; }
+constexpr RatioBlock lower(double r) noexcept { return RatioBlock{{0, 1 - r}, {1, 1}}; }
+constexpr RatioBlock upper(double r) noexcept { return RatioBlock{{0, 0}, {1, r}}; }
+constexpr RatioBlock left(double r)  noexcept { return RatioBlock{{0, 0}, {r, 1}}; }
+constexpr RatioBlock right(double r) noexcept { return RatioBlock{{1.f - r, 0.f}, {1.f, 1.f}}; }
 
 enum class Dir { Top, Right, Bottom, Left };
 enum class Inverted { No, Yes };
@@ -466,12 +466,12 @@ constexpr void fillBlock(Container& image,
 {
     auto const h = unbox<int>(size.height) - 1;
 
-    for (auto y = int(unbox<float>(size.height) * from.y);
-              y < int(unbox<float>(size.height) * to.y);
+    for (auto y = int(unbox<double>(size.height) * from.y);
+              y < int(unbox<double>(size.height) * to.y);
               ++y)
     {
-        for (auto x = int(unbox<float>(size.width) * from.x);
-                  x < int(unbox<float>(size.width) * to.x);
+        for (auto x = int(unbox<double>(size.width) * from.x);
+                  x < int(unbox<double>(size.width) * to.x);
                   ++x)
         {
             image[(h - y) * *size.width + x] = filler(x, y);
@@ -482,17 +482,17 @@ constexpr void fillBlock(Container& image,
 constexpr Point operator*(ImageSize a, Ratio b) noexcept
 {
     return Point{
-        static_cast<int>(a.width.as<float>() * b.x),
-        static_cast<int>(a.height.as<float>() * b.y)
+        static_cast<int>(a.width.as<double>() * b.x),
+        static_cast<int>(a.height.as<double>() * b.y)
     };
 }
 
 constexpr auto linearEq(Point p1, Point p2) noexcept
 {
     assert(p2.x != p1.x);
-    auto const m = float(p2.y - p1.y) / float(p2.x - p1.x);
-    auto const n = float(p1.y) - m * float(p1.x);
-    return [m, n](int x) -> int { return int(float(m) * float(x) + n); };
+    auto const m = double(p2.y - p1.y) / double(p2.x - p1.x);
+    auto const n = double(p1.y) - m * double(p1.x);
+    return [m, n](int x) -> int { return int(double(m) * double(x) + n); };
 }
 
 struct Pixmap
@@ -723,7 +723,7 @@ auto dbar(ImageSize size)
     };
 }
 
-struct Lower { float value; };
+struct Lower { double value; };
 constexpr RatioBlock operator*(RatioBlock a, Lower b) noexcept
 {
     a.from.y = 0;
@@ -731,7 +731,7 @@ constexpr RatioBlock operator*(RatioBlock a, Lower b) noexcept
     return a;
 }
 
-struct Upper { float value; };
+struct Upper { double value; };
 constexpr RatioBlock operator*(RatioBlock a, Upper b) noexcept
 {
     a.from.y = b.value;
@@ -743,8 +743,8 @@ struct DiagonalMosaic
 {
     enum class Body { Lower, Upper };
     Body body = Body::Lower;
-    float a;
-    float b;
+    double a;
+    double b;
 };
 
 template <Dir Direction>
@@ -930,7 +930,7 @@ inline MosaicBlock operator+(MosaicBlock a, RatioBlock b)
 
 inline RatioBlock operator*(RatioBlock a, RatioBlock b) noexcept
 {
-    auto const merge = [](float x, float y)
+    auto const merge = [](double x, double y)
     {
         if (x == 0) return y;
         if (y == 0) return x;
@@ -944,14 +944,14 @@ inline RatioBlock operator*(RatioBlock a, RatioBlock b) noexcept
 }
 
 // 1 <= n <= r*n
-constexpr inline RatioBlock horiz_nth(float r, int n) noexcept
+constexpr inline RatioBlock horiz_nth(double r, int n) noexcept
 {
-    return RatioBlock{{0, r * float(n - 1)}, {1, r * float(n)}};
+    return RatioBlock{{0, r * double(n - 1)}, {1, r * double(n)}};
 }
 
-constexpr inline RatioBlock vert_nth(float r, int n) noexcept
+constexpr inline RatioBlock vert_nth(double r, int n) noexcept
 {
-    return RatioBlock{{r * float(n - 1), 0}, {r * float(n), 1}};
+    return RatioBlock{{r * double(n - 1), 0}, {r * double(n), 1}};
 }
 
 inline Pixmap operator*(Pixmap&& image, RatioBlock block)
