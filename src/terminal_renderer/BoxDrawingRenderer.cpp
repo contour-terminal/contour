@@ -30,6 +30,40 @@ using ranges::views::filter;
 using ranges::views::iota;
 using ranges::views::zip;
 
+namespace terminal::renderer::detail
+{
+    enum Arc
+    {
+        NoArc, TopLeft, TopRight, BottomRight, BottomLeft
+    };
+}
+
+namespace fmt
+{
+    template <>
+    struct formatter<terminal::renderer::detail::Arc> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx)
+        {
+            return ctx.begin();
+        }
+        template <typename FormatContext>
+        auto format(terminal::renderer::detail::Arc value, FormatContext& ctx)
+        {
+            using terminal::renderer::detail::Arc;
+            switch (value)
+            {
+                case Arc::NoArc: return format_to(ctx.out(), "NoArc");
+                case Arc::TopLeft: return format_to(ctx.out(), "TopLeft");
+                case Arc::TopRight: return format_to(ctx.out(), "TopRight");
+                case Arc::BottomLeft: return format_to(ctx.out(), "BottomLeft");
+                case Arc::BottomRight: return format_to(ctx.out(), "BottomRight");
+            }
+            return format_to(ctx.out(), "?");
+        }
+    };
+}
+
 namespace terminal::renderer {
 
 namespace
@@ -86,11 +120,6 @@ enum Diagonal : uint8_t
     Crossing    = 0x03
 };
 
-enum Arc
-{
-    NoArc, TopLeft, TopRight, BottomRight, BottomLeft
-};
-
 /// Used to record all the pixel coordinates that have been written to per scanline.
 ///
 /// The vector index represents the y-axis.
@@ -99,35 +128,36 @@ enum Arc
 /// have been written to at that line.
 ///
 /// This is needed in order to fill the gaps.
-using GapFills = std::vector<std::basic_string<unsigned>>;
+using GapFills = std::vector<std::vector<unsigned>>;
 
-template <typename PutPixel>
-constexpr void drawArc(PutPixel _putpixel,
-                       int _width,
-                       int _height,
-                       int rx,
-                       int ry,
-                       Arc _arc)
+template <typename F>
+auto makeDraw4WaySymmetric(Arc arc, ImageSize size, F putpixel)
 {
-    auto const cx = _width  / 2;
-    auto const cy = _height / 2;
-
-    auto const draw4WaySymmetric = [&](double x, double y)
+    return [=](int x, int y)
     {
-        switch (_arc)
+        auto const w = unbox<int>(size.width);
+        auto const h = unbox<int>(size.height);
+        switch (arc)
         {
-            case Arc::BottomLeft:  _putpixel(_width - x, _height - y); break;
-            case Arc::TopLeft:     _putpixel(_width - x,           y); break;
-
-            case Arc::TopRight:    _putpixel(         x,           y); break;
-            case Arc::BottomRight: _putpixel(         x, _height - y); break;
+            case Arc::TopLeft:     putpixel(w - x,     y); break;
+            case Arc::TopRight:    putpixel(    x,     y); break;
+            case Arc::BottomLeft:  putpixel(w - x, h - y); break;
+            case Arc::BottomRight: putpixel(    x, h - y); break;
             case Arc::NoArc:       break;
         }
     };
+}
 
-    double dx, dy, d1, d2, x, y;
-    x = 0;
-    y = ry;
+template <typename F>
+constexpr void drawArc4th(F draw4WaySymmetric,
+                          crispy::Point radius)
+{
+    auto const rx = radius.x;
+    auto const ry = radius.y;
+
+    double dx{}, dy{}, d1{}, d2{};
+    double x {0};
+    double y {static_cast<double>(ry)};
 
     // Initial decision parameter of region 1
     d1 = (ry * ry) - (rx * rx * ry) +
@@ -183,52 +213,66 @@ constexpr void drawArc(PutPixel _putpixel,
     }
 }
 
+template <typename PutPixel>
+constexpr void drawEllipseArc(PutPixel putpixel,
+                              ImageSize imageSize,
+                              crispy::Point radius,
+                              Arc arc)
+{
+    drawArc4th(makeDraw4WaySymmetric(arc, imageSize, move(putpixel)), radius);
+}
+
 void drawArc(atlas::Buffer& _buffer,
-             int _width,
-             int _height,
+             ImageSize _imageSize,
              int _thickness,
              Arc _arc)
 {
     GapFills gaps;
-    gaps.resize(_height);
+    gaps.resize(unbox<size_t>(_imageSize.height));
 
-    auto const putpixel = [&](double x, double y, uint8_t _alpha = 0xFFu)
+    auto const w = unbox<int>(_imageSize.width);
+    auto const h = unbox<int>(_imageSize.height);
+
+    // fmt::print("{}.drawArc: size={}\n", _arc, _imageSize);
+    auto const putpixel = [&](int x, int y, uint8_t _alpha = 0xFFu)
     {
-        auto const fy = min(_height - 1, static_cast<int>(y));
-        auto const fx = min(_width - 1, static_cast<int>(x));
-        _buffer[fy * _width + fx] = _alpha;
-        gaps.at(fy).push_back(fx);
+        auto const fy = clamp(y, 0, h - 1);
+        auto const fx = clamp(x, 0, w - 1);
+        _buffer[fy * w + fx] = _alpha;
+        gaps[fy].push_back(fx);
     };
 
     // inner circle
-    drawArc(putpixel,
-            _width,
-            _height,
-            _width / 2 - _thickness/2,
-            _height / 2 - _thickness/2,
-            _arc);
+    drawEllipseArc(putpixel,
+                   _imageSize,
+                   crispy::Point{ // radius
+                       unbox<int>(_imageSize.width)  / 2 - _thickness/2,
+                       unbox<int>(_imageSize.height) / 2 - _thickness/2
+                   },
+                   _arc);
 
     // outer circle
-    drawArc(putpixel,
-            _width,
-            _height,
-            _width / 2 + _thickness/2 - 1,
-            _height / 2 + _thickness/2 - 1,
-            _arc);
+    drawEllipseArc(putpixel,
+                   _imageSize,
+                   crispy::Point{ // radius
+                       unbox<int>(_imageSize.width)  / 2 + _thickness/2 - 1,
+                       unbox<int>(_imageSize.height) / 2 + _thickness/2 - 1
+                   },
+                   _arc);
 
-    // close arc at open ends to filling works
-    bool const isLeft = _arc == Arc::TopLeft || _arc == Arc::BottomLeft;
-    auto const xCorner = isLeft ? static_cast<unsigned>(_width) : 0u;
-    for (auto const i: iota(0, _thickness))
-        gaps.at(_height / 2 - _thickness/2 + i).push_back(xCorner);
+    // Close arc at open ends to filling works.
+    // bool const isLeft = _arc == Arc::TopLeft || _arc == Arc::BottomLeft;
+    // auto const xCorner = isLeft ? unbox<unsigned>(_imageSize.width) : 0u;
+    // for (auto const i: iota(0, _thickness))
+    //     gaps.at(unbox<size_t>(_imageSize.height) / 2 - _thickness/2 + i).push_back(xCorner);
 
     // fill gap
     for (auto && [y, gap]: zip(ranges::views::ints, gaps) |
-                               filter([](auto x) { return !get<1>(x).empty(); }))
+                               filter([](auto const& x) { return !get<1>(x).empty(); }))
     {
         sort(begin(gap), end(gap));
         for (auto const xi: iota(gap.front(), gap.back()))
-            _buffer.at(y * _width + xi) = 0xFF;
+            _buffer.at(y * unbox<size_t>(_imageSize.width) + xi) = 0xFF;
     }
 }
 
@@ -519,6 +563,43 @@ struct Pixmap
         return *this;
     }
 
+    Pixmap& halfFilledCircleLeft()
+    {
+        auto const w = unbox<int>(_size.width);
+        auto const h = unbox<int>(_size.height);
+        auto const putpixel = [&](int x, int y)
+        {
+            auto const xf = clamp(x, 0, w - 1);
+            auto const yf = clamp(y, 0, h - 1);
+            for (int xi = xf; xi < w; ++xi)
+                paint(xi, yf, 0xFF);
+        };
+        auto const putAbove = [&](int x, int y) { putpixel(x, y - h/2); };
+        auto const putBelow = [&](int x, int y) { putpixel(x, y + h/2); };
+        auto const radius   = crispy::Point{ w, h / 2 };
+        drawEllipseArc(putAbove, _size, radius, Arc::BottomLeft);
+        drawEllipseArc(putBelow, _size, radius, Arc::TopLeft);
+        return *this;
+    }
+
+    Pixmap& halfFilledCircleRight()
+    {
+        auto const w = unbox<int>(_size.width);
+        auto const h = unbox<int>(_size.height);
+        auto const putpixel = [&](int x, int y)
+        {
+            auto const fx = min(w - 1, x);
+            for (int x = 0; x < fx; ++x)
+                paint(x, y, 0xFF);
+        };
+        auto const putAbove = [&](int x, int y) { putpixel(x, y - h/2); };
+        auto const putBelow = [&](int x, int y) { putpixel(x, y + h/2); };
+        auto const radius   = crispy::Point{ w, h / 2 };
+        drawEllipseArc(putAbove, _size, radius, Arc::BottomRight);
+        drawEllipseArc(putBelow, _size, radius, Arc::TopRight);
+        return *this;
+    }
+
     Pixmap& lineThickness(int n)
     {
         _lineThickness = n;
@@ -682,6 +763,16 @@ auto checker(ImageSize size)
 
 template <size_t N>
 auto hbar(ImageSize size)
+{
+    auto const s = *size.height / N;
+    return [s](int x, int y)
+    {
+        return (y / s) % 2 ? 255 : 0;
+    };
+}
+
+template <size_t N>
+auto right_circ(ImageSize size)
 {
     auto const s = *size.height / N;
     return [s](int x, int y)
@@ -1120,6 +1211,10 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) const noexcept
         || ascending(0x2594, 0x259F)    // Terminal graphic characters
         || ascending(0x1FB00, 0x1FBAF)  // more block sextants
         || ascending(0x1FBF0, 0x1FBF9)  // digits
+        || codepoint == 0xE0B4
+        || codepoint == 0xE0B6
+        || codepoint == 0xE0BC
+        || codepoint == 0xE0BE
         ;
 }
 
@@ -1552,6 +1647,11 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
         case 0x1FBF8: return segmentArt().segment_bar(1, 2, 3, 4, 5, 6, 7);
         case 0x1FBF9: return segmentArt().segment_bar(1, 2, 3, 4, 5, 6);
         // }}}
+
+        case 0xE0B4: return /*  */ blockElement<2>(size).halfFilledCircleRight();
+        case 0xE0B6: return /*  */ blockElement<2>(size).halfFilledCircleLeft();
+        case 0xE0BC: return /*  */ ud({0, 1}, {1, 0});
+        case 0xE0BE: return /*  */ ud({0, 0}, {1, 1});
     }
 
     return nullopt;
@@ -1772,7 +1872,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint
     }
 
     if (box.arc_ != detail::NoArc)
-        drawArc(image, *width, *height, lightThickness, box.arc_);
+        detail::drawArc(image, _size, lightThickness, box.arc_);
 
     LOGSTORE(BoxDrawingLog)("BoxDrawing: build U+{:04X} ({})", static_cast<uint32_t>(_codepoint), _size);
 
