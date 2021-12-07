@@ -1211,6 +1211,8 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) const noexcept
         || ascending(0x2594, 0x259F)    // Terminal graphic characters
         || ascending(0x1FB00, 0x1FBAF)  // more block sextants
         || ascending(0x1FBF0, 0x1FBF9)  // digits
+        || codepoint == 0x25D6
+        || codepoint == 0x25D7
         || codepoint == 0xE0B4
         || codepoint == 0xE0B6
         || codepoint == 0xE0BC
@@ -1383,8 +1385,8 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
         // TODO: ◓  U+25D3  CIRCLE WITH UPPER HALF BLACK
         // TODO: ◔  U+25D4  CIRCLE WITH UPPER RIGHT QUADRANT BLACK
         // TODO: ◕  U+25D5  CIRCLE WITH ALL BUT UPPER LEFT QUADRANT BLACK
-        // TODO: ◖  U+25D6  LEFT HALF BLACK CIRCLE
-        // TODO: ◗  U+25D7  RIGHT HALF BLACK CIRCLE
+        case 0x25D6: return /* ◖ */ blockElement<2>(size).halfFilledCircleLeft();
+        case 0x25D7: return /* ◗ */ blockElement<2>(size).halfFilledCircleRight();
         // TODO: ◘  U+25D8  INVERSE BULLET
         // TODO: ◙  U+25D9  INVERSE WHITE CIRCLE
         // TODO: ◚  U+25DA  UPPER HALF INVERSE WHITE CIRCLE

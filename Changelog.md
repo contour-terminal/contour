@@ -10,6 +10,7 @@
 - Adds support for CoreText for matching font descriptions and font fallback (#479).
 - Adds support for font feature settings (#520).
 - Adds pixel-perfect box-drawing for U+E0B4, U+E0B6, U+E0BC, U+E0BE (some [Powerline extended codepoints](https://github.com/ryanoasis/powerline-extra-symbols#glyphs)).
+- Adds pixel-perfect box-drawing for U+25D6, U+25D7.
 
 ### 0.2.2 (2021-11-19)
 
