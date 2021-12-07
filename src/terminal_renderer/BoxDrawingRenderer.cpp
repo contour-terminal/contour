@@ -30,6 +30,40 @@ using ranges::views::filter;
 using ranges::views::iota;
 using ranges::views::zip;
 
+namespace terminal::renderer::detail
+{
+    enum Arc
+    {
+        NoArc, TopLeft, TopRight, BottomRight, BottomLeft
+    };
+}
+
+namespace fmt
+{
+    template <>
+    struct formatter<terminal::renderer::detail::Arc> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx)
+        {
+            return ctx.begin();
+        }
+        template <typename FormatContext>
+        auto format(terminal::renderer::detail::Arc value, FormatContext& ctx)
+        {
+            using terminal::renderer::detail::Arc;
+            switch (value)
+            {
+                case Arc::NoArc: return format_to(ctx.out(), "NoArc");
+                case Arc::TopLeft: return format_to(ctx.out(), "TopLeft");
+                case Arc::TopRight: return format_to(ctx.out(), "TopRight");
+                case Arc::BottomLeft: return format_to(ctx.out(), "BottomLeft");
+                case Arc::BottomRight: return format_to(ctx.out(), "BottomRight");
+            }
+            return format_to(ctx.out(), "?");
+        }
+    };
+}
+
 namespace terminal::renderer {
 
 namespace
@@ -86,11 +120,6 @@ enum Diagonal : uint8_t
     Crossing    = 0x03
 };
 
-enum Arc
-{
-    NoArc, TopLeft, TopRight, BottomRight, BottomLeft
-};
-
 /// Used to record all the pixel coordinates that have been written to per scanline.
 ///
 /// The vector index represents the y-axis.
@@ -99,42 +128,36 @@ enum Arc
 /// have been written to at that line.
 ///
 /// This is needed in order to fill the gaps.
-using GapFills = std::vector<std::basic_string<unsigned>>;
+using GapFills = std::vector<std::vector<unsigned>>;
 
-void drawArc(atlas::Buffer& _buffer,
-             int _width,
-             int _height,
-             int rx,
-             int ry,
-             Arc _arc,
-             GapFills& _rec)
+template <typename F>
+auto makeDraw4WaySymmetric(Arc arc, ImageSize size, F putpixel)
 {
-    auto const cx = _width  / 2;
-    auto const cy = _height / 2;
-
-    auto const draw4WaySymmetric = [&](double x, double y)
+    return [=](int x, int y)
     {
-        auto const putpixel = [&](double x, double y, uint8_t _alpha = 0xFFu)
+        auto const w = unbox<int>(size.width);
+        auto const h = unbox<int>(size.height);
+        switch (arc)
         {
-            auto const fy = min(_height - 1, static_cast<int>(y));
-            auto const fx = min(_width - 1, static_cast<int>(x));
-            _buffer[fy * _width + fx] = _alpha;
-            _rec.at(fy).push_back(fx);
-        };
-        switch (_arc)
-        {
-            case Arc::BottomLeft:  putpixel(_width - x, _height - y); break;
-            case Arc::TopLeft:     putpixel(_width - x,           y); break;
-
-            case Arc::TopRight:    putpixel(         x,           y); break;
-            case Arc::BottomRight: putpixel(         x, _height - y); break;
+            case Arc::TopLeft:     putpixel(w - x,     y); break;
+            case Arc::TopRight:    putpixel(    x,     y); break;
+            case Arc::BottomLeft:  putpixel(w - x, h - y); break;
+            case Arc::BottomRight: putpixel(    x, h - y); break;
             case Arc::NoArc:       break;
         }
     };
+}
 
-    double dx, dy, d1, d2, x, y;
-    x = 0;
-    y = ry;
+template <typename F>
+constexpr void drawArc4th(F draw4WaySymmetric,
+                          crispy::Point radius)
+{
+    auto const rx = radius.x;
+    auto const ry = radius.y;
+
+    double dx{}, dy{}, d1{}, d2{};
+    double x {0};
+    double y {static_cast<double>(ry)};
 
     // Initial decision parameter of region 1
     d1 = (ry * ry) - (rx * rx * ry) +
@@ -190,46 +213,66 @@ void drawArc(atlas::Buffer& _buffer,
     }
 }
 
+template <typename PutPixel>
+constexpr void drawEllipseArc(PutPixel putpixel,
+                              ImageSize imageSize,
+                              crispy::Point radius,
+                              Arc arc)
+{
+    drawArc4th(makeDraw4WaySymmetric(arc, imageSize, move(putpixel)), radius);
+}
+
 void drawArc(atlas::Buffer& _buffer,
-             int _width,
-             int _height,
+             ImageSize _imageSize,
              int _thickness,
              Arc _arc)
 {
     GapFills gaps;
-    gaps.resize(_height);
+    gaps.resize(unbox<size_t>(_imageSize.height));
+
+    auto const w = unbox<int>(_imageSize.width);
+    auto const h = unbox<int>(_imageSize.height);
+
+    // fmt::print("{}.drawArc: size={}\n", _arc, _imageSize);
+    auto const putpixel = [&](int x, int y, uint8_t _alpha = 0xFFu)
+    {
+        auto const fy = clamp(y, 0, h - 1);
+        auto const fx = clamp(x, 0, w - 1);
+        _buffer[fy * w + fx] = _alpha;
+        gaps[fy].push_back(fx);
+    };
 
     // inner circle
-    drawArc(_buffer,
-            _width,
-            _height,
-            _width / 2 - _thickness/2,
-            _height / 2 - _thickness/2,
-            _arc,
-            gaps);
+    drawEllipseArc(putpixel,
+                   _imageSize,
+                   crispy::Point{ // radius
+                       unbox<int>(_imageSize.width)  / 2 - _thickness/2,
+                       unbox<int>(_imageSize.height) / 2 - _thickness/2
+                   },
+                   _arc);
 
     // outer circle
-    drawArc(_buffer,
-            _width,
-            _height,
-            _width / 2 + _thickness/2 - 1,
-            _height / 2 + _thickness/2 - 1,
-            _arc,
-            gaps);
+    drawEllipseArc(putpixel,
+                   _imageSize,
+                   crispy::Point{ // radius
+                       unbox<int>(_imageSize.width)  / 2 + _thickness/2 - 1,
+                       unbox<int>(_imageSize.height) / 2 + _thickness/2 - 1
+                   },
+                   _arc);
 
-    // close arc at open ends to filling works
-    bool const isLeft = _arc == Arc::TopLeft || _arc == Arc::BottomLeft;
-    auto const xCorner = isLeft ? static_cast<unsigned>(_width) : 0u;
-    for (auto const i: iota(0, _thickness))
-        gaps.at(_height / 2 - _thickness/2 + i).push_back(xCorner);
+    // Close arc at open ends to filling works.
+    // bool const isLeft = _arc == Arc::TopLeft || _arc == Arc::BottomLeft;
+    // auto const xCorner = isLeft ? unbox<unsigned>(_imageSize.width) : 0u;
+    // for (auto const i: iota(0, _thickness))
+    //     gaps.at(unbox<size_t>(_imageSize.height) / 2 - _thickness/2 + i).push_back(xCorner);
 
     // fill gap
     for (auto && [y, gap]: zip(ranges::views::ints, gaps) |
-                               filter([](auto x) { return !get<1>(x).empty(); }))
+                               filter([](auto const& x) { return !get<1>(x).empty(); }))
     {
         sort(begin(gap), end(gap));
         for (auto const xi: iota(gap.front(), gap.back()))
-            _buffer.at(y * _width + xi) = 0xFF;
+            _buffer.at(y * unbox<size_t>(_imageSize.width) + xi) = 0xFF;
     }
 }
 
@@ -440,18 +483,18 @@ static_assert(boxDrawingDefinitions.size() == 0x80);
 
 // {{{ block element construction
 // Helper to write ratios like 1/8_th
-struct Ratio1 { float value; };
-constexpr Ratio1 operator "" _th(unsigned long long ratio) { return Ratio1{static_cast<float>(ratio)}; }
-constexpr float operator/(int a, Ratio1 b) noexcept { return static_cast<float>(a) / b.value; }
+struct Ratio1 { double value; };
+constexpr Ratio1 operator "" _th(unsigned long long ratio) { return Ratio1{static_cast<double>(ratio)}; }
+constexpr double operator/(int a, Ratio1 b) noexcept { return static_cast<double>(a) / b.value; }
 
 // ratio between 0.0 and 1.0 for x (horizontal) and y (vertical).
-struct Ratio { float x; float y; };
+struct Ratio { double x; double y; };
 
 struct RatioBlock { Ratio from{}; Ratio to{}; };
-constexpr RatioBlock lower(float r) noexcept { return RatioBlock{{0, 1 - r}, {1, 1}}; }
-constexpr RatioBlock upper(float r) noexcept { return RatioBlock{{0, 0}, {1, r}}; }
-constexpr RatioBlock left(float r)  noexcept { return RatioBlock{{0, 0}, {r, 1}}; }
-constexpr RatioBlock right(float r) noexcept { return RatioBlock{{1.f - r, 0.f}, {1.f, 1.f}}; }
+constexpr RatioBlock lower(double r) noexcept { return RatioBlock{{0, 1 - r}, {1, 1}}; }
+constexpr RatioBlock upper(double r) noexcept { return RatioBlock{{0, 0}, {1, r}}; }
+constexpr RatioBlock left(double r)  noexcept { return RatioBlock{{0, 0}, {r, 1}}; }
+constexpr RatioBlock right(double r) noexcept { return RatioBlock{{1.f - r, 0.f}, {1.f, 1.f}}; }
 
 enum class Dir { Top, Right, Bottom, Left };
 enum class Inverted { No, Yes };
@@ -467,12 +510,12 @@ constexpr void fillBlock(Container& image,
 {
     auto const h = unbox<int>(size.height) - 1;
 
-    for (auto y = int(unbox<float>(size.height) * from.y);
-              y < int(unbox<float>(size.height) * to.y);
+    for (auto y = int(unbox<double>(size.height) * from.y);
+              y < int(unbox<double>(size.height) * to.y);
               ++y)
     {
-        for (auto x = int(unbox<float>(size.width) * from.x);
-                  x < int(unbox<float>(size.width) * to.x);
+        for (auto x = int(unbox<double>(size.width) * from.x);
+                  x < int(unbox<double>(size.width) * to.x);
                   ++x)
         {
             image[(h - y) * *size.width + x] = filler(x, y);
@@ -483,17 +526,17 @@ constexpr void fillBlock(Container& image,
 constexpr Point operator*(ImageSize a, Ratio b) noexcept
 {
     return Point{
-        static_cast<int>(a.width.as<float>() * b.x),
-        static_cast<int>(a.height.as<float>() * b.y)
+        static_cast<int>(a.width.as<double>() * b.x),
+        static_cast<int>(a.height.as<double>() * b.y)
     };
 }
 
 constexpr auto linearEq(Point p1, Point p2) noexcept
 {
     assert(p2.x != p1.x);
-    auto const m = float(p2.y - p1.y) / float(p2.x - p1.x);
-    auto const n = float(p1.y) - m * float(p1.x);
-    return [m, n](int x) -> int { return int(float(m) * float(x) + n); };
+    auto const m = double(p2.y - p1.y) / double(p2.x - p1.x);
+    auto const n = double(p1.y) - m * double(p1.x);
+    return [m, n](int x) -> int { return int(double(m) * double(x) + n); };
 }
 
 struct Pixmap
@@ -517,6 +560,43 @@ struct Pixmap
         for (auto const y: ranges::views::iota(0, unbox<int>(_size.height)))
             for (auto const x: ranges::views::iota(0, unbox<int>(_size.width)))
                 _buffer[(h - y) * *_size.width + x] = filler(x, y);
+        return *this;
+    }
+
+    Pixmap& halfFilledCircleLeft()
+    {
+        auto const w = unbox<int>(_size.width);
+        auto const h = unbox<int>(_size.height);
+        auto const putpixel = [&](int x, int y)
+        {
+            auto const xf = clamp(x, 0, w - 1);
+            auto const yf = clamp(y, 0, h - 1);
+            for (int xi = xf; xi < w; ++xi)
+                paint(xi, yf, 0xFF);
+        };
+        auto const putAbove = [&](int x, int y) { putpixel(x, y - h/2); };
+        auto const putBelow = [&](int x, int y) { putpixel(x, y + h/2); };
+        auto const radius   = crispy::Point{ w, h / 2 };
+        drawEllipseArc(putAbove, _size, radius, Arc::BottomLeft);
+        drawEllipseArc(putBelow, _size, radius, Arc::TopLeft);
+        return *this;
+    }
+
+    Pixmap& halfFilledCircleRight()
+    {
+        auto const w = unbox<int>(_size.width);
+        auto const h = unbox<int>(_size.height);
+        auto const putpixel = [&](int x, int y)
+        {
+            auto const fx = min(w - 1, x);
+            for (int x = 0; x < fx; ++x)
+                paint(x, y, 0xFF);
+        };
+        auto const putAbove = [&](int x, int y) { putpixel(x, y - h/2); };
+        auto const putBelow = [&](int x, int y) { putpixel(x, y + h/2); };
+        auto const radius   = crispy::Point{ w, h / 2 };
+        drawEllipseArc(putAbove, _size, radius, Arc::BottomRight);
+        drawEllipseArc(putBelow, _size, radius, Arc::TopRight);
         return *this;
     }
 
@@ -692,6 +772,16 @@ auto hbar(ImageSize size)
 }
 
 template <size_t N>
+auto right_circ(ImageSize size)
+{
+    auto const s = *size.height / N;
+    return [s](int x, int y)
+    {
+        return (y / s) % 2 ? 255 : 0;
+    };
+}
+
+template <size_t N>
 auto dotted(ImageSize size)
 {
     auto const s = *size.width / N;
@@ -724,7 +814,7 @@ auto dbar(ImageSize size)
     };
 }
 
-struct Lower { float value; };
+struct Lower { double value; };
 constexpr RatioBlock operator*(RatioBlock a, Lower b) noexcept
 {
     a.from.y = 0;
@@ -732,7 +822,7 @@ constexpr RatioBlock operator*(RatioBlock a, Lower b) noexcept
     return a;
 }
 
-struct Upper { float value; };
+struct Upper { double value; };
 constexpr RatioBlock operator*(RatioBlock a, Upper b) noexcept
 {
     a.from.y = b.value;
@@ -744,8 +834,8 @@ struct DiagonalMosaic
 {
     enum class Body { Lower, Upper };
     Body body = Body::Lower;
-    float a;
-    float b;
+    double a;
+    double b;
 };
 
 template <Dir Direction>
@@ -931,7 +1021,7 @@ inline MosaicBlock operator+(MosaicBlock a, RatioBlock b)
 
 inline RatioBlock operator*(RatioBlock a, RatioBlock b) noexcept
 {
-    auto const merge = [](float x, float y)
+    auto const merge = [](double x, double y)
     {
         if (x == 0) return y;
         if (y == 0) return x;
@@ -945,14 +1035,14 @@ inline RatioBlock operator*(RatioBlock a, RatioBlock b) noexcept
 }
 
 // 1 <= n <= r*n
-constexpr inline RatioBlock horiz_nth(float r, int n) noexcept
+constexpr inline RatioBlock horiz_nth(double r, int n) noexcept
 {
-    return RatioBlock{{0, r * float(n - 1)}, {1, r * float(n)}};
+    return RatioBlock{{0, r * double(n - 1)}, {1, r * double(n)}};
 }
 
-constexpr inline RatioBlock vert_nth(float r, int n) noexcept
+constexpr inline RatioBlock vert_nth(double r, int n) noexcept
 {
-    return RatioBlock{{r * float(n - 1), 0}, {r * float(n), 1}};
+    return RatioBlock{{r * double(n - 1), 0}, {r * double(n), 1}};
 }
 
 inline Pixmap operator*(Pixmap&& image, RatioBlock block)
@@ -1121,6 +1211,10 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) const noexcept
         || ascending(0x2594, 0x259F)    // Terminal graphic characters
         || ascending(0x1FB00, 0x1FBAF)  // more block sextants
         || ascending(0x1FBF0, 0x1FBF9)  // digits
+        || codepoint == 0xE0B4
+        || codepoint == 0xE0B6
+        || codepoint == 0xE0BC
+        || codepoint == 0xE0BE
         ;
 }
 
@@ -1553,6 +1647,11 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
         case 0x1FBF8: return segmentArt().segment_bar(1, 2, 3, 4, 5, 6, 7);
         case 0x1FBF9: return segmentArt().segment_bar(1, 2, 3, 4, 5, 6);
         // }}}
+
+        case 0xE0B4: return /*  */ blockElement<2>(size).halfFilledCircleRight();
+        case 0xE0B6: return /*  */ blockElement<2>(size).halfFilledCircleLeft();
+        case 0xE0BC: return /*  */ ud({0, 1}, {1, 0});
+        case 0xE0BE: return /*  */ ud({0, 0}, {1, 1});
     }
 
     return nullopt;
@@ -1773,7 +1872,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint
     }
 
     if (box.arc_ != detail::NoArc)
-        drawArc(image, *width, *height, lightThickness, box.arc_);
+        detail::drawArc(image, _size, lightThickness, box.arc_);
 
     LOGSTORE(BoxDrawingLog)("BoxDrawing: build U+{:04X} ({})", static_cast<uint32_t>(_codepoint), _size);
 
