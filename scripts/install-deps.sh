@@ -63,7 +63,7 @@ main_linux()
         fedora)
             install_deps_fedora
             ;;
-        Ubuntu|Neon)
+        ubuntu|neon)
             install_deps_ubuntu
             ;;
         *)
