@@ -885,6 +885,9 @@ void TerminalWidget::setFonts(terminal::renderer::FontDescriptions _fontDescript
 
 bool TerminalWidget::setFontSize(text::font_size _size)
 {
+    LOGSTORE(DisplayLog)("Setting display font size and recompute metrics: {}pt",
+            _size.pt);
+
     if (!renderer_.setFontSize(_size))
         return false;
 

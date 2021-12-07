@@ -14,6 +14,7 @@
 #include <terminal_renderer/DecorationRenderer.h>
 #include <terminal_renderer/GridMetrics.h>
 #include <terminal_renderer/Atlas.h>
+#include <terminal_renderer/Pixmap.h>
 
 #include <crispy/times.h>
 
@@ -26,6 +27,9 @@
 using crispy::Size;
 
 using std::array;
+using std::ceil;
+using std::clamp;
+using std::floor;
 using std::get;
 using std::max;
 using std::min;
@@ -139,26 +143,30 @@ void DecorationRenderer::rebuild()
         );
     } // }}}
     { // {{{ curly underline
-        auto const height = Height::cast_from(ceil(double(gridMetrics_.baseline) * 2.0) / 3.0);
-        auto image = atlas::Buffer(*width * *height, 0);
+        auto const height = Height::cast_from(gridMetrics_.baseline);
+        auto const h2 = max(unbox<int>(height) / 2, 1);
+        auto const yScalar = h2 - 1;
+        auto const xScalar = 2 * M_PI / *width;
+        auto const yBase = h2;
+        auto block = blockElement(ImageSize{Width(width), height});
 
         for (int x = 0; x < *width; ++x)
         {
-            auto const normalizedX = static_cast<double>(x) / unbox<double>(width);
-            auto const sin_x = normalizedX * 2.0 * M_PI;
-            auto const normalizedY = (cos(sin_x) + 1.0) / 2.0;
-            assert(0.0f <= normalizedY && normalizedY <= 1.0f);
-            auto const y = static_cast<int>(normalizedY * static_cast<float>(*height - underlineThickness()));
-            auto const yLim = std::min(unbox<int>(height), y + underlineThickness()) - 1;
-            for (int yi = y; yi < yLim; ++yi)
-                image[y * *width + x] = 0xFF;
+            // Using Wu's antialiasing algorithm to paint the curved line.
+            // See: https://www-users.mat.umk.pl//~gruby/teaching/lgim/1_wu.pdf
+            auto const y = yScalar * cos(xScalar * x);
+            auto const y1 = static_cast<int>(floor(y));
+            auto const y2 = static_cast<int>(ceil(y));
+            auto const intensity = static_cast<int>(255 * abs(y - y1));
+            block.paintOver(x, yBase + y1, 255 - intensity);
+            block.paintOver(x, yBase + y2, intensity);
         }
 
         atlas_->insert(
             Decorator::CurlyUnderline,
-            ImageSize{width, height},
-            ImageSize{width, height},
-            move(image)
+            block.downsampledSize(),
+            block.downsampledSize(),
+            block.take()
         );
     } // }}}
     { // {{{ dotted underline
