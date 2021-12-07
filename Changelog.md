@@ -3,6 +3,7 @@
 - Fixes Sixel image rendering when scrolling is needed and ANSI cursor is not on left margin.
 - Fixes Qt-related CLI options that that were largely ignored.
 - Fixes crash caused by VT sequence PM and SOS (#513).
+- Fixes parsing VT sequence RGB color parsing for cell decoratioins (e.g. underline).
 - Changes `contour` exit code to reflect the shell's exit code of the last closed window.
 - Improves text cursor rendering and extends cursor configuration accordingly (#526).
 - Adds CLI option `terminal early-exit-threshold SECS` (defaulting to 6) to only report and wait if the process did exit below this threshold seconds.
