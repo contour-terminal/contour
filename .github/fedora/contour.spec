@@ -2,6 +2,10 @@
 # https://docs.fedoraproject.org/en-US/packaging-guidelines/CMake/#_notes
 %undefine __cmake_in_source_build
 
+# Shut up rpmbuild complaining about this file hen finishing the build
+# error: Empty %files file /app/rpmbuild/BUILD/contour-0.3.0/debugsourcefiles.list
+%global debug_package %{nil}
+
 Name:           contour
 Version:        0.3.0
 Release:        1%{?dist}
@@ -16,6 +20,7 @@ BuildRequires:  extra-cmake-modules
 BuildRequires:  ninja-build
 BuildRequires:  gcc-c++
 BuildRequires:  pkgconf
+BuildRequires:  fontconfig-devel
 BuildRequires:  freetype-devel
 BuildRequires:  harfbuzz-devel
 BuildRequires:  qt5-qtbase-devel
@@ -32,11 +37,13 @@ It is aiming for power users with a modern feature mindset.
 
 
 %build
-BUILD_TYPE=Release ./autogen.sh
+./autogen.sh Release
+cd target/Release
 %ninja_build
 
 
 %install
+cd target/Release
 %ninja_install
 # Create needed directories
 mkdir -p %{buildroot}%{_bindir}
@@ -44,20 +51,20 @@ mkdir -p %{buildroot}%{_datadir}/applications
 mkdir -p %{buildroot}%{_datadir}/terminfo
 mkdir -p %{buildroot}%{_datadir}/pixmaps
 mkdir -p %{buildroot}%{_datadir}/contour
-# Move /usr/local files to /usr to follow build standards
-mv %{buildroot}/usr/local/bin/%{name} %{buildroot}%{_bindir}/%{name}
-for _dir in $(ls "%{buildroot}/usr/local/share"); do
+# Move /app/usr/opt files to /usr to follow build standards
+mv %{buildroot}/app/usr/opt/contour/bin/%{name} %{buildroot}%{_bindir}/%{name}
+for _dir in $(ls "%{buildroot}/app/usr/opt/contour/share"); do
     # Moved directories:
     # - applications
     # - terminfo
     # - pixmaps
     # - contour
-    mv "%{buildroot}/usr/local/share/$_dir" "%{buildroot}%{_datadir}"
+    mv "%{buildroot}/app/usr/opt/contour/share/$_dir" "%{buildroot}%{_datadir}"
 done
-# Remove non-needed /usr/local directory
-rm -rf %{buildroot}/usr/local
-# verify desktop file
-desktop-file-validate %{buildroot}%{_datadir}/applications/%{name}.desktop
+# Remove non-needed /usr/opt directory
+rm -rf %{buildroot}/app/usr/opt
+# verify desktop file (not possible in github actions)
+# desktop-file-validate %{buildroot}%{_datadir}/applications/%{name}.desktop
 
 
 %check
@@ -71,5 +78,5 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/%{name}.desktop
 
 
 %changelog
-* Sun Dec 05 2021 NTBBloodbath <bloodbathalchemist@protonmail.com> 0.3.0-1
+* Sun Dec 07 2021 NTBBloodbath <bloodbathalchemist@protonmail.com> 0.3.0-1
 - Initial RPM package

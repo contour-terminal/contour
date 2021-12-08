@@ -459,7 +459,7 @@ jobs:
       matrix:
         arch:
           [
-            "linux/adm64 x86_64"
+            "linux/amd64 x86_64"
           ]
     name: "Fedora ${{ matrix.arch }}"
     runs-on: ubuntu-latest
