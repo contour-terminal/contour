@@ -6,6 +6,7 @@ add_library(terminal_renderer STATIC
     DecorationRenderer.cpp DecorationRenderer.h
     GridMetrics.h
     ImageRenderer.cpp ImageRenderer.h
+    Pixmap.cpp Pixmap.h
     Renderer.cpp Renderer.h
     TextRenderer.cpp TextRenderer.h
     utils.cpp utils.h

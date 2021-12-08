@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal_renderer/BoxDrawingRenderer.h>
+#include <terminal_renderer/Pixmap.h>
 #include <terminal_renderer/utils.h>
 
 #include <crispy/logstore.h>
@@ -26,43 +27,10 @@
 
 using namespace std;
 
+using crispy::Point;
 using ranges::views::filter;
 using ranges::views::iota;
 using ranges::views::zip;
-
-namespace terminal::renderer::detail
-{
-    enum Arc
-    {
-        NoArc, TopLeft, TopRight, BottomRight, BottomLeft
-    };
-}
-
-namespace fmt
-{
-    template <>
-    struct formatter<terminal::renderer::detail::Arc> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx)
-        {
-            return ctx.begin();
-        }
-        template <typename FormatContext>
-        auto format(terminal::renderer::detail::Arc value, FormatContext& ctx)
-        {
-            using terminal::renderer::detail::Arc;
-            switch (value)
-            {
-                case Arc::NoArc: return format_to(ctx.out(), "NoArc");
-                case Arc::TopLeft: return format_to(ctx.out(), "TopLeft");
-                case Arc::TopRight: return format_to(ctx.out(), "TopRight");
-                case Arc::BottomLeft: return format_to(ctx.out(), "BottomLeft");
-                case Arc::BottomRight: return format_to(ctx.out(), "BottomRight");
-            }
-            return format_to(ctx.out(), "?");
-        }
-    };
-}
 
 namespace terminal::renderer {
 
@@ -120,113 +88,20 @@ enum Diagonal : uint8_t
     Crossing    = 0x03
 };
 
-/// Used to record all the pixel coordinates that have been written to per scanline.
-///
-/// The vector index represents the y-axis.
-///
-/// The element-array for each y-coordinate represent the x-coordinates that
-/// have been written to at that line.
-///
-/// This is needed in order to fill the gaps.
-using GapFills = std::vector<std::vector<unsigned>>;
-
-template <typename F>
-auto makeDraw4WaySymmetric(Arc arc, ImageSize size, F putpixel)
-{
-    return [=](int x, int y)
-    {
-        auto const w = unbox<int>(size.width);
-        auto const h = unbox<int>(size.height);
-        switch (arc)
-        {
-            case Arc::TopLeft:     putpixel(w - x,     y); break;
-            case Arc::TopRight:    putpixel(    x,     y); break;
-            case Arc::BottomLeft:  putpixel(w - x, h - y); break;
-            case Arc::BottomRight: putpixel(    x, h - y); break;
-            case Arc::NoArc:       break;
-        }
-    };
-}
-
-template <typename F>
-constexpr void drawArc4th(F draw4WaySymmetric,
-                          crispy::Point radius)
-{
-    auto const rx = radius.x;
-    auto const ry = radius.y;
-
-    double dx{}, dy{}, d1{}, d2{};
-    double x {0};
-    double y {static_cast<double>(ry)};
-
-    // Initial decision parameter of region 1
-    d1 = (ry * ry) - (rx * rx * ry) +
-                     (0.25 * rx * rx);
-    dx = 2 * ry * ry * x;
-    dy = 2 * rx * rx * y;
-
-    while (dx < dy)
-    {
-        draw4WaySymmetric(x, y);
-
-        // Checking and updating value of decision parameter based on algorithm
-        if (d1 < 0)
-        {
-            x++;
-            dx = dx + (2 * ry * ry);
-            d1 = d1 + dx + (ry * ry);
-        }
-        else
-        {
-            x++;
-            y--;
-            dx = dx + (2 * ry * ry);
-            dy = dy - (2 * rx * rx);
-            d1 = d1 + dx - dy + (ry * ry);
-        }
-    }
-
-    // Decision parameter of region 2
-    d2 = ((ry * ry) * ((x + 0.5) * (x + 0.5))) +
-         ((rx * rx) * ((y - 1) * (y - 1))) -
-          (rx * rx * ry * ry);
-
-    while (y >= 0)
-    {
-        draw4WaySymmetric(x, y);
-
-        // Checking and updating parameter value based on algorithm
-        if (d2 > 0)
-        {
-            y--;
-            dy = dy - (2 * rx * rx);
-            d2 = d2 + (rx * rx) - dy;
-        }
-        else
-        {
-            y--;
-            x++;
-            dx = dx + (2 * ry * ry);
-            dy = dy - (2 * rx * rx);
-            d2 = d2 + dx - dy + (rx * rx);
-        }
-    }
-}
-
-template <typename PutPixel>
-constexpr void drawEllipseArc(PutPixel putpixel,
-                              ImageSize imageSize,
-                              crispy::Point radius,
-                              Arc arc)
-{
-    drawArc4th(makeDraw4WaySymmetric(arc, imageSize, move(putpixel)), radius);
-}
-
 void drawArc(atlas::Buffer& _buffer,
              ImageSize _imageSize,
              int _thickness,
              Arc _arc)
 {
+    // Used to record all the pixel coordinates that have been written to per scanline.
+    //
+    // The vector index represents the y-axis.
+    //
+    // The element-array for each y-coordinate represent the x-coordinates that
+    // have been written to at that line.
+    //
+    // This is needed in order to fill the gaps.
+    using GapFills = std::vector<std::vector<unsigned>>;
     GapFills gaps;
     gaps.resize(unbox<size_t>(_imageSize.height));
 
@@ -482,23 +357,6 @@ constexpr auto boxDrawingDefinitions = std::array<Box, 0x80> // {{{
 static_assert(boxDrawingDefinitions.size() == 0x80);
 
 // {{{ block element construction
-// Helper to write ratios like 1/8_th
-struct Ratio1 { double value; };
-constexpr Ratio1 operator "" _th(unsigned long long ratio) { return Ratio1{static_cast<double>(ratio)}; }
-constexpr double operator/(int a, Ratio1 b) noexcept { return static_cast<double>(a) / b.value; }
-
-// ratio between 0.0 and 1.0 for x (horizontal) and y (vertical).
-struct Ratio { double x; double y; };
-
-struct RatioBlock { Ratio from{}; Ratio to{}; };
-constexpr RatioBlock lower(double r) noexcept { return RatioBlock{{0, 1 - r}, {1, 1}}; }
-constexpr RatioBlock upper(double r) noexcept { return RatioBlock{{0, 0}, {1, r}}; }
-constexpr RatioBlock left(double r)  noexcept { return RatioBlock{{0, 0}, {r, 1}}; }
-constexpr RatioBlock right(double r) noexcept { return RatioBlock{{1.f - r, 0.f}, {1.f, 1.f}}; }
-
-enum class Dir { Top, Right, Bottom, Left };
-enum class Inverted { No, Yes };
-struct Point { int x; int y; };
 
 // Arguments from and to are passed as percentage.
 template <typename Container, typename F>
@@ -521,228 +379,6 @@ constexpr void fillBlock(Container& image,
             image[(h - y) * *size.width + x] = filler(x, y);
         }
     }
-}
-
-constexpr Point operator*(ImageSize a, Ratio b) noexcept
-{
-    return Point{
-        static_cast<int>(a.width.as<double>() * b.x),
-        static_cast<int>(a.height.as<double>() * b.y)
-    };
-}
-
-constexpr auto linearEq(Point p1, Point p2) noexcept
-{
-    assert(p2.x != p1.x);
-    auto const m = double(p2.y - p1.y) / double(p2.x - p1.x);
-    auto const n = double(p1.y) - m * double(p1.x);
-    return [m, n](int x) -> int { return int(double(m) * double(x) + n); };
-}
-
-struct Pixmap
-{
-    atlas::Buffer _buffer;
-    ImageSize _size;
-    ImageSize _downsampledSize;
-    std::function<int(int, int)> _filler = [](int, int) { return 0xFF; };
-    int _lineThickness = 1;
-    int _baseLine = 0;  // baseline position relative to cell bottom.
-
-    Pixmap& fill()
-    {
-        return fill(_filler);
-    }
-
-    template <typename F>
-    Pixmap& fill(F const& filler)
-    {
-        auto const h = unbox<int>(_size.height) - 1;
-        for (auto const y: ranges::views::iota(0, unbox<int>(_size.height)))
-            for (auto const x: ranges::views::iota(0, unbox<int>(_size.width)))
-                _buffer[(h - y) * *_size.width + x] = filler(x, y);
-        return *this;
-    }
-
-    Pixmap& halfFilledCircleLeft()
-    {
-        auto const w = unbox<int>(_size.width);
-        auto const h = unbox<int>(_size.height);
-        auto const putpixel = [&](int x, int y)
-        {
-            auto const xf = clamp(x, 0, w - 1);
-            auto const yf = clamp(y, 0, h - 1);
-            for (int xi = xf; xi < w; ++xi)
-                paint(xi, yf, 0xFF);
-        };
-        auto const putAbove = [&](int x, int y) { putpixel(x, y - h/2); };
-        auto const putBelow = [&](int x, int y) { putpixel(x, y + h/2); };
-        auto const radius   = crispy::Point{ w, h / 2 };
-        drawEllipseArc(putAbove, _size, radius, Arc::BottomLeft);
-        drawEllipseArc(putBelow, _size, radius, Arc::TopLeft);
-        return *this;
-    }
-
-    Pixmap& halfFilledCircleRight()
-    {
-        auto const w = unbox<int>(_size.width);
-        auto const h = unbox<int>(_size.height);
-        auto const putpixel = [&](int x, int y)
-        {
-            auto const fx = min(w - 1, x);
-            for (int x = 0; x < fx; ++x)
-                paint(x, y, 0xFF);
-        };
-        auto const putAbove = [&](int x, int y) { putpixel(x, y - h/2); };
-        auto const putBelow = [&](int x, int y) { putpixel(x, y + h/2); };
-        auto const radius   = crispy::Point{ w, h / 2 };
-        drawEllipseArc(putAbove, _size, radius, Arc::BottomRight);
-        drawEllipseArc(putBelow, _size, radius, Arc::TopRight);
-        return *this;
-    }
-
-    Pixmap& lineThickness(int n)
-    {
-        _lineThickness = n;
-        return *this;
-    }
-
-    Pixmap& segment_bar(int which)
-    {
-        assert(1 <= which && which <= 7);
-
-        //   --1--
-        //  4     2
-        //   --3--
-        //  7     5
-        //   --6--
-
-        auto const Z = _lineThickness;
-
-        auto const L = 2 * Z;
-        auto const R = unbox<int>(_size.width) - Z;
-
-        auto const T = static_cast<int>(ceil(unbox<double>(_size.height) * 1/8_th)); // Z;
-        auto const B = unbox<int>(_size.height) - _baseLine - Z / 2;
-        auto const M = T + (B - T) / 2;
-
-        switch (which)
-        {
-            case 1: return segment_line(Orientation::Horizontal, BaseOffset{T}, From{L},   To{R});
-            case 2: return segment_line(Orientation::Vertical,   BaseOffset{R}, From{T+Z}, To{M-Z});
-            case 3: return segment_line(Orientation::Horizontal, BaseOffset{M}, From{L},   To{R});
-            case 4: return segment_line(Orientation::Vertical,   BaseOffset{L}, From{T+Z}, To{M-Z});
-            case 5: return segment_line(Orientation::Vertical,   BaseOffset{R}, From{M+Z}, To{B-Z});
-            case 6: return segment_line(Orientation::Horizontal, BaseOffset{B}, From{L},   To{R});
-            case 7: return segment_line(Orientation::Vertical,   BaseOffset{L}, From{M+Z}, To{B-Z});
-        }
-
-        assert(false);
-        return *this;
-    }
-
-    template <typename... More>
-    Pixmap& segment_bar(int which, More... more)
-    {
-        segment_bar(which);
-        return segment_bar(more...);
-    }
-
-    Pixmap& line(Ratio _from, Ratio _to)
-    {
-        if (_from.y > _to.y)
-            std::swap(_from, _to);
-        auto const from = _size * _from;
-        auto const to = _size * _to;
-        auto const z = max(1, _lineThickness / 2);
-        if (from.x != to.x)
-        {
-            auto const f = linearEq(from, to);
-            for (auto const x: ranges::views::iota(0, unbox<int>(_size.width)))
-                if (auto const y = f(x); from.y <= y && y <= to.y)
-                    for (auto const i: ranges::views::iota(-z, z))
-                        paint(x, y + i);
-        }
-        else
-        {
-            for (auto const y: ranges::views::iota(from.y, to.y))
-                for (auto const i: ranges::views::iota(-z, z))
-                    paint(from.x, y + i);
-        }
-        return *this;
-    }
-
-    void paint(int x, int y, uint8_t _value = 0xFF)
-    {
-        auto const w = unbox<int>(_size.width);
-        auto const h = unbox<int>(_size.height) - 1;
-        if (!(0 <= y && y <= h))
-            return;
-        if (!(0 <= x && x < w))
-            return;
-        _buffer.at((h - y) * w + x) = _value;
-    }
-
-    operator atlas::Buffer ()
-    {
-        return take();
-    }
-
-    atlas::Buffer take()
-    {
-        if (_size != _downsampledSize)
-            return downsample(_buffer, 1, _size, _downsampledSize);
-        else
-            return std::move(_buffer);
-    }
-
-    // {{{ helpers
-private:
-    struct From { int value; };
-    struct To { int value; };
-    struct BaseOffset { int value; };
-    enum class Orientation { Horizontal, Vertical };
-
-    Pixmap& segment_line(Orientation orientation, BaseOffset base, From from, To to)
-    {
-        // If the font size is very very small, line length calculation might cause negative values.
-        // Be sensible here then to not cause an infinite loop.
-        to.value = max(from.value, to.value);
-
-        switch (orientation)
-        {
-            case Orientation::Horizontal:
-                for (auto const y: ranges::views::iota(base.value - 1, base.value + 1))
-                    for (auto const x: ranges::views::iota(from.value, to.value))
-                        paint(x, y);
-                break;
-            case Orientation::Vertical:
-                for (auto const y: ranges::views::iota(from.value, to.value))
-                    for (auto const x: ranges::views::iota(base.value - 1, base.value + 1))
-                        paint(x, y);
-                break;
-        }
-        return *this;
-    }
-    // }}}
-};
-
-template <std::size_t SupersamplingFactor = 1>
-inline Pixmap blockElement(ImageSize size)
-{
-    auto const superSize = size * SupersamplingFactor;
-    return Pixmap{
-        atlas::Buffer(superSize.width.as<size_t>() * superSize.height.as<size_t>(), 0x00),
-        superSize,
-        size
-    };
-}
-
-template <size_t N, typename F>
-Pixmap blockElement(ImageSize size, F f)
-{
-    auto p = blockElement<N>(size);
-    p._filler = f;
-    return p;
 }
 
 template <size_t N, Inverted Inv>
@@ -1144,7 +780,7 @@ constexpr inline bool containsNonCanonicalLines(char32_t codepoint)
         return false;
     auto const& box = detail::boxDrawingDefinitions[codepoint - 0x2500];
     return box.diagonal_ != detail::NoDiagonal
-        || box.arc_ != detail::NoArc;
+        || box.arc_ != NoArc;
 }
 
 optional<BoxDrawingRenderer::DataRef> BoxDrawingRenderer::getDataRef(char32_t codepoint)
@@ -1233,10 +869,9 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
     };
     auto const segmentArt = [=]() {
         auto constexpr AntiAliasingSamplingFactor = 1;
-        auto b = blockElement<AntiAliasingSamplingFactor>(size);
-        b.lineThickness(gridMetrics_.underline.thickness);
-        b._baseLine = gridMetrics_.baseline * AntiAliasingSamplingFactor;
-        return b;
+        return blockElement<AntiAliasingSamplingFactor>(size)
+                .lineThickness(gridMetrics_.underline.thickness)
+                .baseline(gridMetrics_.baseline * AntiAliasingSamplingFactor);
     };
 
     // TODO: just check notcurses-info to get an idea what may be missing
@@ -1871,7 +1506,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint
         }
     }
 
-    if (box.arc_ != detail::NoArc)
+    if (box.arc_ != NoArc)
         detail::drawArc(image, _size, lightThickness, box.arc_);
 
     LOGSTORE(BoxDrawingLog)("BoxDrawing: build U+{:04X} ({})", static_cast<uint32_t>(_codepoint), _size);

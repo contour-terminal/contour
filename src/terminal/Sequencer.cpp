@@ -233,13 +233,15 @@ namespace impl // {{{ some command generator helpers
         {
             switch (_seq.subparam(i, 0))
             {
-                case 2: // ":2::R:G:B"
-                    if (_seq.subParameterCount(i) == 5)
+                case 2: // ":2::R:G:B" and ":2:R:G:B"
+                {
+                    auto const len = _seq.subParameterCount(i);
+                    if (len == 4 || len == 5)
                     {
-                        // NB: subparam(i, 1) ignored
-                        auto const r = _seq.subparam(i, 2);
-                        auto const g = _seq.subparam(i, 3);
-                        auto const b = _seq.subparam(i, 4);
+                        // NB: subparam(i, 1) may be ignored
+                        auto const r = _seq.subparam(i, len - 3);
+                        auto const g = _seq.subparam(i, len - 2);
+                        auto const b = _seq.subparam(i, len - 1);
                         if (r <= 255 && g <= 255 && b <= 255)
                         {
                             *pi = i + 1;
@@ -247,6 +249,7 @@ namespace impl // {{{ some command generator helpers
                         }
                     }
                     break;
+                }
                 case 3: // ":3:F:C:M:Y" (TODO)
                 case 4: // ":4:F:C:M:Y:K" (TODO)
                     break;
