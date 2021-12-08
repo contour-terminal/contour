@@ -454,3 +454,54 @@ jobs:
         if-no-files-found: error
         retention-days: 7
 
+  fedora:
+    strategy:
+      matrix:
+        arch:
+          [
+            "linux/adm64 x86_64"
+          ]
+    name: "Fedora ${{ matrix.arch }}"
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v1
+      with:
+        platforms: all
+    - name: Set up Docker Buildx
+      id: buildx
+      uses: docker/setup-buildx-action@v1
+      with:
+        version: latest
+    - name: Read info
+      id: tags
+      shell: bash
+      run: |
+        arch="${{ matrix.arch }}"
+        echo ::set-output name=PLATFORM::${arch%% *}
+        echo ::set-output name=ARCH::${arch##* }
+    - name: set environment variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - name: Build ${{ matrix.arch }} release
+      shell: bash
+      run: |
+        docker buildx build --platform ${{ steps.tags.outputs.PLATFORM }} \
+        --tag contour:${{ steps.tags.outputs.ARCH }} \
+        -f .github/fedora/Dockerfile \
+        --load \
+        .
+        docker create --name contour-${{ steps.tags.outputs.ARCH }} contour:${{ steps.tags.outputs.ARCH }}
+        docker cp contour-${{ steps.tags.outputs.ARCH }}:/app/rpmbuild/RPMS/${{ steps.tags.outputs.ARCH }}/*.rpm contour-${{ steps.tags.outputs.ARCH }}.rpm
+        docker container rm contour-${{ steps.tags.outputs.ARCH }}
+    - name: "Uploading Fedora RPM package"
+      uses: actions/upload-artifact@v2
+      with:
+        name: "contour_${{ steps.set_vars.outputs.VERSION_STRING }}-fc35_${{ steps.tags.outputs.ARCH }}.rpm"
+        path: "contour-${{ steps.tags.outputs.ARCH }}.rpm"
+        if-no-files-found: error
+        retention-days: 7
+
