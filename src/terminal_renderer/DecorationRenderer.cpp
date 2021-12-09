@@ -143,7 +143,7 @@ void DecorationRenderer::rebuild()
         );
     } // }}}
     { // {{{ curly underline
-        auto const height = Height::cast_from(gridMetrics_.baseline);
+        auto const height = Height::cast_from(gridMetrics_.underline.position);
         auto const h2 = max(unbox<int>(height) / 2, 1);
         auto const yScalar = h2 - 1;
         auto const xScalar = 2 * M_PI / *width;
@@ -157,7 +157,7 @@ void DecorationRenderer::rebuild()
             auto const y = yScalar * cos(xScalar * x);
             auto const y1 = static_cast<int>(floor(y));
             auto const y2 = static_cast<int>(ceil(y));
-            auto const intensity = static_cast<int>(255 * abs(y - y1));
+            auto const intensity = static_cast<int>(255 * fabs(y - y1));
             block.paintOver(x, yBase + y1, 255 - intensity);
             block.paintOver(x, yBase + y2, intensity);
         }
