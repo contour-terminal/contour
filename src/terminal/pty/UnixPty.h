@@ -21,7 +21,7 @@
 
 #if defined(__APPLE__)
 #include <util.h>
-#else
+#elif defined(__linux__)
 #include <pty.h>
 #endif
 

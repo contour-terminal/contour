@@ -27,12 +27,17 @@
 
 #if defined(__APPLE__)
 #include <util.h>
+#elif defined(__FreeBSD__)
+#include <termios.h>
+#include <libutil.h>
 #else
 #include <pty.h>
 #endif
 
 #include <fcntl.h>
+#if !defined(__FreeBSD__)
 #include <utmp.h>
+#endif
 #include <pwd.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -100,7 +105,7 @@ UnixPty::UnixPty(PageSize const& _windowSize, optional<ImageSize> _pixels) :
 #endif
 
     // TODO: termios term{};
-    if (openpty(&master_, &slave_, nullptr, /*&term*/ nullptr, wsa) < 0)
+    if (openpty(&master_, &slave_, nullptr, /*&term*/ nullptr, (winsize *)wsa) < 0)
         throw runtime_error{ "Failed to open PTY. "s + strerror(errno) };
 
 #if defined(__linux__)
