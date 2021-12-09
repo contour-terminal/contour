@@ -163,6 +163,16 @@ class Viewport
         return true;
     }
 
+    /// Translates a screen coordinate to a Grid-coordinate by applying
+    /// the scroll-offset to it.
+    Coordinate translateScreenToGridCoordinate(Coordinate p) const noexcept
+    {
+        return Coordinate{
+            p.row - *relativeScrollOffset(),
+            p.column,
+        };
+    }
+
   private:
     LineCount historyLineCount() const noexcept { return screen_.historyLineCount(); }
     LineCount screenLineCount() const noexcept { return screen_.size().lines; }

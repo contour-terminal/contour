@@ -382,7 +382,7 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
         {
             auto const absolutePos = Coordinate{baseLine + (_pos.row - 1), _pos.column};
             auto const selected = isSelectedAbsolute(absolutePos);
-            auto const hasCursor = _pos == screen_.realCursorPosition();
+            auto const hasCursor = viewport_.translateScreenToGridCoordinate(_pos) == screen_.realCursorPosition();
             bool const paintCursor = hasCursor
                                   && _output.cursor.has_value()
                                   && _output.cursor->shape == CursorShape::Block;
