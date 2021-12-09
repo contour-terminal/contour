@@ -33,8 +33,7 @@
 #include <libproc.h>
 #include <terminal/pty/UnixPty.h>
 #include <util.h>
-#elif defined(__FreeBSD__)
-#else
+#elif defined(__linux__)
 #include <pty.h>
 #endif
 
