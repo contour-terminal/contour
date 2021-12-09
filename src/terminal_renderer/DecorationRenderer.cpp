@@ -169,39 +169,29 @@ void DecorationRenderer::rebuild()
             block.take()
         );
     } // }}}
-    { // {{{ dotted underline
-        auto const radius = max(1, int(ceil(underlineThickness() / 2.0)));
-        auto const diameter = radius * 2;
-        auto const y0 = max(radius, underlinePosition() - radius); // offset to the bottom line of the grid-cell.
-        auto const height = Height(1 + y0 + radius);
-        auto image = atlas::Buffer(*width * *height, 0);
+    { // {{{ dotted underline (use square dots)
+        auto const dotHeight = gridMetrics_.underline.thickness;
+        auto const dotWidth = dotHeight;
+        auto const height = Height(gridMetrics_.underline.position + dotHeight);
+        auto const y0 = gridMetrics_.underline.position - dotHeight;
+        auto const x0 = 0;
+        auto const x1 = unbox<int>(width) / 2;
+        auto block = blockElement(ImageSize{width, height});
 
-        auto const numberOfCircles = int(ceil(unbox<double>(width) / double(diameter) / 3.0));
-
-        auto const xOffsetStart = radius;
-        for (int circle = 0; circle < numberOfCircles; ++circle)
+        for (int y = 0; y < dotHeight; ++y)
         {
-            auto const bitmapStartX = xOffsetStart + circle * diameter * 3;
-
-            for (int y = -radius; y <= radius; ++y)
+            for (int x = 0; x < dotWidth; ++x)
             {
-                for (int x = -radius; x <= radius; ++x)
-                {
-                    if (pointVisibleInCircle(x, y, radius))
-                    {
-                        auto const bitmapX = min(width.as<int>() - 1, bitmapStartX + x);
-                        auto const bitmapY = min(*height - 1, (*height - 1 - y0 - (y)));
-                        image.at(bitmapY * *width + bitmapX) = 0xFF;
-                    }
-                }
+                block.paint(x + x0, y + y0);
+                block.paint(x + x1, y + y0);
             }
         }
 
         atlas_->insert(
             Decorator::DottedUnderline,
-            ImageSize{width, height},
-            ImageSize{width, height},
-            move(image)
+            block.downsampledSize(),
+            block.downsampledSize(),
+            block.take()
         );
     } // }}}
     { // {{{ dashed underline

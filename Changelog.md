@@ -11,6 +11,7 @@ from a previous release.**
 - Applies antialiasing to curly underline.
 - Changes `contour` exit code to reflect the shell's exit code of the last closed window.
 - Improves text cursor rendering and extends cursor configuration accordingly (#526).
+- Improves visual appearance of dotted underline SGR.
 - Adds CLI option `terminal early-exit-threshold SECS` (defaulting to 6) to only report and wait if the process did exit below this threshold seconds.
 - Adds CLI option `terminal dump-state-at-exit` to auto-dump internal state at exit.
 - Adds support for CoreText for matching font descriptions and font fallback (#479).
