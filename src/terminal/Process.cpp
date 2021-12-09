@@ -29,7 +29,9 @@
 #include <unordered_map>
 
 #if !defined(_WIN32)
+#if !defined(__FreeBSD__)
 #include <utmp.h>
+#endif
 #include <pwd.h>
 #include <signal.h>
 #include <sys/types.h>
