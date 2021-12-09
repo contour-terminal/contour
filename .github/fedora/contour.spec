@@ -2,7 +2,7 @@
 # https://docs.fedoraproject.org/en-US/packaging-guidelines/CMake/#_notes
 %undefine __cmake_in_source_build
 
-# Shut up rpmbuild complaining about this file hen finishing the build
+# Shut up rpmbuild complaining about this file when finishing the build
 # error: Empty %files file /app/rpmbuild/BUILD/contour-0.3.0/debugsourcefiles.list
 %global debug_package %{nil}
 
