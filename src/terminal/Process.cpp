@@ -157,11 +157,12 @@ namespace {
 
 char** createArgv(string const& _arg0, std::vector<string> const& _args, size_t i = 0)
 {
-    char** argv = new char* [_args.size() + 2 - i];
+    auto const argCount = _args.size(); // factor out in order to avoid false-positive by static analysers.
+    char** argv = new char* [argCount + 2 - i];
     argv[0] = const_cast<char*>(_arg0.c_str());
-    for (size_t i = 0; i < _args.size(); ++i)
+    for (size_t i = 0; i < argCount; ++i)
         argv[i + 1] = const_cast<char*>(_args[i].c_str());
-    argv[_args.size() + 1] = nullptr;
+    argv[argCount + 1] = nullptr;
     return argv;
 }
 
