@@ -122,7 +122,7 @@ void DecorationRenderer::rebuild()
         auto const thickness_half = max(1, int(ceil(underlineThickness() / 3.0)));
         auto const thickness = max(1, int(ceil(double(underlineThickness()) * 2.0) / 3.0));
         auto const y1 = max(0, underlinePosition() + thickness);
-        auto const y0 = max(0, y1 - 2 * thickness);
+        auto const y0 = max(0, y1 - 3 * thickness);
         auto const height = Height(y1 + thickness);
         auto image = atlas::Buffer(*width * *height, 0);
 
