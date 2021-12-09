@@ -15,7 +15,7 @@ from a previous release.**
 - Adds CLI option `terminal early-exit-threshold SECS` (defaulting to 6) to only report and wait if the process did exit below this threshold seconds.
 - Adds CLI option `terminal dump-state-at-exit` to auto-dump internal state at exit.
 - Adds support for CoreText for matching font descriptions and font fallback (#479).
-- Adds support for font feature settings (#520).
+- Adds support for font feature settings. This is currently only implemented for `openshaper`, not yet for `dwrite` (#520).
 - Adds pixel-perfect box-drawing for U+E0B4, U+E0B6, U+E0BC, U+E0BE (some [Powerline extended codepoints](https://github.com/ryanoasis/powerline-extra-symbols#glyphs)).
 
 ### 0.2.2 (2021-11-19)

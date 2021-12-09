@@ -950,7 +950,8 @@ terminal::ColorPalette loadColorScheme(
     return colors;
 }
 
-void softLoadFont(UsedKeys& _usedKeys,
+void softLoadFont(terminal::renderer::TextShapingEngine _textShapingEngine,
+                  UsedKeys& _usedKeys,
                   string_view _basePath,
                   YAML::Node const& _node,
                   string_view _key,
@@ -1003,6 +1004,16 @@ void softLoadFont(UsedKeys& _usedKeys,
                 }
                 auto const tag = featureNode.as<string>();
                 _store.features.emplace_back(tag[0], tag[1], tag[2], tag[3]);
+            }
+            using terminal::renderer::TextShapingEngine;
+            switch (_textShapingEngine)
+            {
+                case TextShapingEngine::OpenShaper:
+                    break;
+                case TextShapingEngine::CoreText:
+                case TextShapingEngine::DWrite:
+                    // TODO: Implement font feature settings handling for these engines.
+                    errorlog()("The configured text shaping engine {} does not yet support font feature settings. Ignoring.", _textShapingEngine);
             }
         }
     }
@@ -1278,24 +1289,24 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     profile.fonts.regular.familyName = "regular";
     profile.fonts.regular.spacing = text::font_spacing::mono;
     profile.fonts.regular.strict_spacing = strictSpacing;
-    softLoadFont(_usedKeys, fontBasePath, _doc["profiles"][_name]["font"], "regular", profile.fonts.regular);
+    softLoadFont(profile.fonts.textShapingEngine, _usedKeys, fontBasePath, _doc["profiles"][_name]["font"], "regular", profile.fonts.regular);
 
     profile.fonts.bold = profile.fonts.regular;
     profile.fonts.bold.weight = text::font_weight::bold;
-    softLoadFont(_usedKeys, fontBasePath, _doc["profiles"][_name]["font"], "bold", profile.fonts.bold);
+    softLoadFont(profile.fonts.textShapingEngine, _usedKeys, fontBasePath, _doc["profiles"][_name]["font"], "bold", profile.fonts.bold);
 
     profile.fonts.italic = profile.fonts.regular;
     profile.fonts.italic.slant = text::font_slant::italic;
-    softLoadFont(_usedKeys, fontBasePath, _doc["profiles"][_name]["font"], "italic", profile.fonts.italic);
+    softLoadFont(profile.fonts.textShapingEngine, _usedKeys, fontBasePath, _doc["profiles"][_name]["font"], "italic", profile.fonts.italic);
 
     profile.fonts.boldItalic = profile.fonts.regular;
     profile.fonts.boldItalic.weight = text::font_weight::bold;
     profile.fonts.boldItalic.slant = text::font_slant::italic;
-    softLoadFont(_usedKeys, fontBasePath, _doc["profiles"][_name]["font"], "bold_italic", profile.fonts.boldItalic);
+    softLoadFont(profile.fonts.textShapingEngine, _usedKeys, fontBasePath, _doc["profiles"][_name]["font"], "bold_italic", profile.fonts.boldItalic);
 
     profile.fonts.emoji.familyName = "emoji";
     profile.fonts.emoji.spacing = text::font_spacing::mono;
-    softLoadFont(_usedKeys, fontBasePath, _doc["profiles"][_name]["font"], "emoji", profile.fonts.emoji);
+    softLoadFont(profile.fonts.textShapingEngine, _usedKeys, fontBasePath, _doc["profiles"][_name]["font"], "emoji", profile.fonts.emoji);
 
 #if defined(_WIN32)
     // Windows does not understand font family "emoji", but fontconfig does. Rewrite user-input here.
