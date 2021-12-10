@@ -399,7 +399,7 @@ namespace // {{{ helper
         FT_Pos maxAdvance = 0;
         for (FT_ULong i = 32; i < 128; i++)
         {
-            if (auto ci = FT_Get_Char_Index(_face, i); ci == FT_Err_Ok)
+            if (auto ci = FT_Get_Char_Index(_face, i); ci != 0)
                 if (FT_Load_Glyph(_face, ci, FT_LOAD_DEFAULT) == FT_Err_Ok)
                     maxAdvance = max(maxAdvance, _face->glyph->metrics.horiAdvance);
         }
