@@ -495,7 +495,7 @@ jobs:
         --load \
         .
         docker create --name contour-${{ steps.tags.outputs.ARCH }} contour:${{ steps.tags.outputs.ARCH }}
-        docker cp contour-${{ steps.tags.outputs.ARCH }}:/app/rpmbuild/RPMS/${{ steps.tags.outputs.ARCH }}/*.rpm contour-${{ steps.tags.outputs.ARCH }}.rpm
+        docker cp contour-${{ steps.tags.outputs.ARCH }}:/app/rpmbuild/RPMS/${{ steps.tags.outputs.ARCH }}/contour-${{ steps.set_vars.outputs.VERSION_STRING }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm contour-${{ steps.tags.outputs.ARCH }}.rpm
         docker container rm contour-${{ steps.tags.outputs.ARCH }}
     - name: "Uploading Fedora RPM package"
       uses: actions/upload-artifact@v2
