@@ -1,4 +1,7 @@
-FROM fedora:latest
+FROM fedora:latest AS base
+
+ARG VERSION_STRING
+ARG CONTOUR_VERSION=$VERSION_STRING
 
 WORKDIR /app
 
@@ -23,9 +26,8 @@ RUN mkdir -p /app/rpmbuild/{BUILD,BUILDROOT,RPMS,SOURCES,SPECS,SRPMS}
 # Clone contour, copy tarball and spec file to rpmbuild directories
 RUN git clone https://github.com/NTBBloodbath/contour.git \
     && cd contour \
-    && export version="$(cat .github/fedora/contour.spec | awk -F: '$1=="Version" { print $2 }' | tr -d ' ')" \
     && cp .github/fedora/contour.spec /app/rpmbuild/SPECS/contour.spec \
-    && git archive --output=/app/rpmbuild/SOURCES/contour-${version}.tar.gz --prefix=contour-${version}/ HEAD
+    && git archive --output=/app/rpmbuild/SOURCES/contour-${CONTOUR_VERSION}.tar.gz --prefix=contour-${CONTOUR_VERSION}/ HEAD
 
 # Build contour
 RUN cd /app/rpmbuild \

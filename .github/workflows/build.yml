@@ -491,6 +491,7 @@ jobs:
       run: |
         docker buildx build --platform ${{ steps.tags.outputs.PLATFORM }} \
         --tag contour:${{ steps.tags.outputs.ARCH }} \
+        --build-arg VERSION_STRING=${{ steps.set_vars.outputs.VERSION_STRING }} \
         -f .github/fedora/Dockerfile \
         --load \
         .
