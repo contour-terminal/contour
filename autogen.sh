@@ -1,18 +1,18 @@
-#! /bin/bash
+#! /bin/sh
 set -ex
 
 # Minor helper to avoid repeating myself,
 # This shortcut allows you to simply invoke ../../autogen.sh when being
 # in directories like:
 #     ./target/{Debug,RelWithDebInfo,Release}
-if [[ -e ../../autogen.sh ]] && [[ "$1" == "" ]] &&
-   [[ -x "$(command -v realpath)" ]] &&
-   [[ "$(basename $(realpath ${PWD}/..))" = "target" ]]
+if [ -e ../../autogen.sh ] && [ "$1" == "" ] &&
+   [ -x "$(command -v realpath)" ] &&
+   [ "$(basename $(realpath ${PWD}/..))" = "target" ]
 then
     exec ../../autogen.sh $(basename $(realpath ${PWD}))
 fi
 
-if [[ -x "$(command -v realpath)" ]]; then
+if [ -x "$(command -v realpath)" ]; then
     ROOTDIR="$(realpath $(dirname $0))"
 else
     ROOTDIR="$(dirname $0)"
@@ -33,7 +33,7 @@ case "$OSTYPE" in
         ;;
 esac
 
-if [[ "${BUILD_TYPE}" != "Debug" ]]; then
+if [ "${BUILD_TYPE}" != "Debug" ]; then
     EXTRA_CMAKE_FLAGS="${EXTRA_CMAKE_FLAGS} -DCMAKE_INSTALL_PREFIX=~/usr/opt/contour"
 fi
 
