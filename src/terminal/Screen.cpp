@@ -470,6 +470,8 @@ void Screen<T>::resize(PageSize _newSize)
     auto const oldCursorPos = cursor_.position;
 
     cursor_.position = activeGrid_->resize(_newSize, oldCursorPos, wrapPending_);
+    if (_newSize.columns > pageSize_.columns)
+        wrapPending_ = false;
     pageSize_ = _newSize;
 
     // Reset margin to their default.

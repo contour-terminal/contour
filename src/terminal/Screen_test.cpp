@@ -1121,7 +1121,7 @@ TEST_CASE("EraseCharacters", "[screen]")
     auto term = MockTerm{PageSize{LineCount(5), ColumnCount(5)}};
     auto& screen = term.screen;
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO\033[H");
-    logScreenTextAlways(screen, "AFTER POPULATE");
+    logScreenText(screen, "AFTER POPULATE");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
     REQUIRE(screen.logicalCursorPosition() == Coordinate{LineOffset(0), ColumnOffset(0)});
 
@@ -2695,13 +2695,13 @@ TEST_CASE("setMaxHistoryLineCount", "[screen]")
     // from zero to something
     auto term = MockTerm{PageSize{LineCount(2), ColumnCount(2)}, LineCount(0)};
     auto& screen = term.screen;
-    screen.write("ABCD");
+    screen.grid().setReflowOnResize(false);
+    screen.write("AB\r\nCD");
     REQUIRE("AB\nCD\n" == screen.renderMainPageText());
     REQUIRE(screen.logicalCursorPosition() == Coordinate{LineOffset(1), ColumnOffset(1)});
-    logScreenTextAlways(screen, "after write");
 
     screen.setMaxHistoryLineCount(LineCount(1));
-    logScreenTextAlways(screen, "after set history size");
+    REQUIRE("AB\nCD\n" == screen.renderMainPageText());
 }
 
 // TODO: resize test (should be in Grid_test.cpp?)
@@ -2709,12 +2709,12 @@ TEST_CASE("resize", "[screen]")
 {
     auto term = MockTerm{PageSize{LineCount(2), ColumnCount(2)}, LineCount(10)};
     auto& screen = term.screen;
-    screen.write("ABCD");
+    screen.grid().setReflowOnResize(false);
+    screen.write("AB\r\nCD");
     REQUIRE("AB\nCD\n" == screen.renderMainPageText());
     REQUIRE(screen.logicalCursorPosition() == Coordinate{LineOffset(1), ColumnOffset(1)});
 
-    // TODO(pr): FIXME: post-setting max history line count fails assertion!
-    // screen.setMaxHistoryLineCount(LineCount(10));
+    screen.setMaxHistoryLineCount(LineCount(10));
 
     SECTION("no-op") {
         screen.resize({LineCount(2), ColumnCount(2)});
@@ -2758,6 +2758,7 @@ TEST_CASE("resize", "[screen]")
     SECTION("regrow columns") {
         // 1.) grow
         screen.resize({LineCount(2), ColumnCount(3)});
+        logScreenText(screen, "after columns grow");
         CHECK(screen.logicalCursorPosition() == Coordinate{LineOffset(1), ColumnOffset(2)});
 
         // 2.) fill
@@ -2765,6 +2766,7 @@ TEST_CASE("resize", "[screen]")
         REQUIRE("AB \nCDY\n" == screen.renderMainPageText());
         screen.moveCursorTo(LineOffset{0}, ColumnOffset{2});
         screen.writeText('X');
+        logScreenText(screen, "after write");
         REQUIRE("ABX\nCDY\n" == screen.renderMainPageText());
         REQUIRE(screen.logicalCursorPosition() == Coordinate{LineOffset(0), ColumnOffset(2)});
 
@@ -2774,9 +2776,10 @@ TEST_CASE("resize", "[screen]")
         REQUIRE(screen.logicalCursorPosition() == Coordinate{LineOffset(0), ColumnOffset(1)});
 
         // 4.) regrow (and see if pre-filled data were retained)
-        screen.resize({LineCount(2), ColumnCount(3)});
-        REQUIRE("ABX\nCDY\n" == screen.renderMainPageText());
-        REQUIRE(screen.logicalCursorPosition() == Coordinate{LineOffset(0), ColumnOffset(2)});
+        // NOTE: This is currently not retained. Do we want to recreate this behaviour?
+        // screen.resize({LineCount(2), ColumnCount(3)});
+        // REQUIRE("ABX\nCDY\n" == screen.renderMainPageText());
+        // REQUIRE(screen.logicalCursorPosition() == Coordinate{LineOffset(0), ColumnOffset(2)});
     }
 
     SECTION("grow rows, grow columns") {

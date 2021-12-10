@@ -416,9 +416,9 @@ TEST_CASE("resize_shrink_lines_with_history", "[grid]")
     grid.setLineText(LineOffset(-1), "ABC"); // history line
     grid.setLineText(LineOffset(0),  "DEF"); // main page: line 1
     grid.setLineText(LineOffset(1),  "GHI"); // main page: line 2
-    CHECK(grid.historyLineCount() == LineCount(1));
+    CHECK(grid.historyLineCount() == LineCount(1)); // TODO: move line up, below scrollUp()
 
-    // shrink by one line
+    // shrink by one line (=> move page one line up into scrollback)
     auto const newPageSize = PageSize{LineCount(1), ColumnCount(3)};
     auto const curCursorPos = Coordinate{LineOffset(1), ColumnOffset(1)};
     logGridText(grid, "BEFORE");
@@ -426,7 +426,7 @@ TEST_CASE("resize_shrink_lines_with_history", "[grid]")
     logGridText(grid, "AFTER");
     CHECK(grid.pageSize().columns == ColumnCount(3));
     CHECK(grid.pageSize().lines == LineCount(1));
-    CHECK(grid.historyLineCount() == LineCount(2));
+    CHECK(grid.historyLineCount() == LineCount(2)); // XXX FIXME: test failing
     CHECK(grid.lineText(LineOffset(-2)) == "ABC");
     CHECK(grid.lineText(LineOffset(-1)) == "DEF");
     CHECK(grid.lineText(LineOffset( 0)) == "GHI");

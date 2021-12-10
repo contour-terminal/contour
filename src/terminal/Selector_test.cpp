@@ -99,7 +99,6 @@ TEST_CASE("Selector.Linear", "[selector]")
         /* 2 */ "12345,67890"s
     );
 
-    logScreenTextAlways(screen, "init");
     REQUIRE(screen.grid().lineText(LineOffset(0)) == "12345,67890");
     REQUIRE(screen.grid().lineText(LineOffset(1)) == "ab,cdefg,hi");
     REQUIRE(screen.grid().lineText(LineOffset(2)) == "12345,67890");
@@ -179,7 +178,6 @@ TEST_CASE("Selector.Linear", "[selector]")
          2 | "bar"
         */
 
-        logScreenTextAlways(screen);
         auto selector = LinearSelection(selectionHelper, Coordinate{LineOffset(-2), ColumnOffset(6)});
         selector.extend(Coordinate{LineOffset(-1), ColumnOffset(2)});
         selector.complete();
@@ -205,9 +203,7 @@ TEST_CASE("Selector.Linear", "[selector]")
     }
 
     SECTION("multiple lines from history into main buffer") {
-        logScreenTextAlways(screen, "just before next test-write");
         screen.write("foo\r\nbar\r\n"); // move first two lines into history.
-        logScreenTextAlways(screen, "just after next test-write");
         /*
         -3 | "12345,67890"
         -2 | "ab,cdefg,hi"         (--

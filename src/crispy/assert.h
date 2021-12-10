@@ -14,6 +14,7 @@
 #pragma once
 
 #include <exception>
+#include <functional>
 #include <string_view>
 
 #include <fmt/format.h>
