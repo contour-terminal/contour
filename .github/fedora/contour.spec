@@ -2,10 +2,6 @@
 # https://docs.fedoraproject.org/en-US/packaging-guidelines/CMake/#_notes
 %undefine __cmake_in_source_build
 
-# Shut up rpmbuild complaining about this file when finishing the build
-# error: Empty %files file /app/rpmbuild/BUILD/contour-0.3.0/debugsourcefiles.list
-%global debug_package %{nil}
-
 # Get contour version
 %{!?_version: %define _version %{getenv:CONTOUR_VERSION} }
 
@@ -20,15 +16,23 @@ Source0:        %{name}-%{version}.tar.gz
 
 BuildRequires:  cmake
 BuildRequires:  extra-cmake-modules
-BuildRequires:  ninja-build
-BuildRequires:  gcc-c++
-BuildRequires:  pkgconf
 BuildRequires:  fontconfig-devel
 BuildRequires:  freetype-devel
+BuildRequires:  gcc-c++
 BuildRequires:  harfbuzz-devel
+BuildRequires:  kf5-kwindowsystem-devel
+BuildRequires:  ninja-build
+BuildRequires:  pkgconf
 BuildRequires:  qt5-qtbase-devel
 BuildRequires:  qt5-qtbase-gui
-BuildRequires:  kf5-kwindowsystem-devel
+
+Requires:       fontconfig
+Requires:       freetype
+Requires:       harfbuzz
+Requires:       kf5-kwindowsystem
+Requires:       qt5-qtbase
+Requires:       qt5-qtbase-gui
+Requires:       yaml-cpp
 
 %description
 contour is a modern terminal emulator, for everyday use.
@@ -40,32 +44,21 @@ It is aiming for power users with a modern feature mindset.
 
 
 %build
-./autogen.sh Release
-cd target/Release
+cmake . \
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+    -DCONTOUR_BLUR_PLATFORM_KWIN=ON \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -B build \
+    -GNinja
+cd build
 %ninja_build
 
 
 %install
-cd target/Release
+cd build
 %ninja_install
-# Create needed directories
-mkdir -p %{buildroot}%{_bindir}
-mkdir -p %{buildroot}%{_datadir}/applications
-mkdir -p %{buildroot}%{_datadir}/terminfo
-mkdir -p %{buildroot}%{_datadir}/pixmaps
-mkdir -p %{buildroot}%{_datadir}/contour
-# Move /app/usr/opt files to /usr to follow build standards
-mv %{buildroot}/app/usr/opt/contour/bin/%{name} %{buildroot}%{_bindir}/%{name}
-for _dir in $(ls "%{buildroot}/app/usr/opt/contour/share"); do
-    # Moved directories:
-    # - applications
-    # - terminfo
-    # - pixmaps
-    # - contour
-    mv "%{buildroot}/app/usr/opt/contour/share/$_dir" "%{buildroot}%{_datadir}"
-done
-# Remove non-needed /usr/opt directory
-rm -rf %{buildroot}/app/usr/opt
+
+# TODO: Make this an if-statement to be decided via env var from the outside.
 # verify desktop file (not possible in github actions)
 # desktop-file-validate %{buildroot}%{_datadir}/applications/%{name}.desktop
 
@@ -81,5 +74,3 @@ rm -rf %{buildroot}/app/usr/opt
 
 
 %changelog
-* Sun Dec 07 2021 NTBBloodbath <bloodbathalchemist@protonmail.com> 0.3.0-1
-- Initial RPM package
