@@ -6,3 +6,5 @@ debian/tmp/usr/share/contour/README.md
 debian/tmp/usr/share/contour/shell-integration.zsh
 debian/tmp/usr/share/kservices5/ServiceMenus/contour-run.desktop
 debian/tmp/usr/share/pixmaps/contour.png
+debian/tmp/usr/share/terminfo/c/contour
+debian/tmp/usr/share/terminfo/c/contour-latest
