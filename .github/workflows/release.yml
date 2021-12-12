@@ -456,7 +456,7 @@ jobs:
 
       # -------------------------------------------------------------
       - name: Upload Fedora package x86_64
-        id: upload-release-asset-archlinux-x86_64
+        id: upload-release-asset-fedora-x86_64
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -468,7 +468,7 @@ jobs:
 
       # -------------------------------------------------------------
       - name: Upload Fedora (debuginfo) package x86_64
-        id: upload-release-asset-archlinux-x86_64
+        id: upload-release-asset-fedora-debuginfo-x86_64
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -480,7 +480,7 @@ jobs:
 
       # -------------------------------------------------------------
       - name: Upload Fedora (debugsource) package x86_64
-        id: upload-release-asset-archlinux-x86_64
+        id: upload-release-asset-fedora-debugsource-x86_64
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
