@@ -1,6 +1,7 @@
 ---
 name: Feature Request
 about: Contour terminal emulator feature request
+labels: bug
 ---
 
 <!--## Prerequisites
