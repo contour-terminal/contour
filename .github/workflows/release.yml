@@ -113,11 +113,13 @@ jobs:
         uses: actions/upload-artifact@v2
         with:
           path: contour_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb
+          if-no-files-found: error
           retention-days: 7
       - name: "Uploading artifact .ddeb package (debugging symbols)"
         uses: actions/upload-artifact@v2
         with:
           path: contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb
+          if-no-files-found: error
           retention-days: 7
 
   build_ubuntu2004:
@@ -217,6 +219,7 @@ jobs:
         with:
           path: contour-${{ steps.set_vars.outputs.version }}-osx.dmg
           retention-days: 7
+
   build_archlinux:
     strategy:
       matrix:
@@ -331,21 +334,18 @@ jobs:
     - name: "Uploading Fedora RPM package"
       uses: actions/upload-artifact@v2
       with:
-        name: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
         path: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
         if-no-files-found: error
         retention-days: 7
     - name: "Uploading Fedora RPM package (debuginfo)"
       uses: actions/upload-artifact@v2
       with:
-        name: "contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
         path: "contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
         if-no-files-found: error
         retention-days: 7
     - name: "Uploading Fedora RPM package (debugsource)"
       uses: actions/upload-artifact@v2
       with:
-        name: "contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
         path: "contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
         if-no-files-found: error
         retention-days: 7
@@ -456,38 +456,38 @@ jobs:
 
       # -------------------------------------------------------------
       - name: Upload Fedora package x86_64
-        id: upload-release-asset-archlinux-x86_64
+        id: upload-release-asset-fedora-x86_64
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: "./contour-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
-          asset_name: contour-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm
+          asset_path: "./contour-${{ steps.set_vars.outputs.VERSION }}-1.fc35.x86_64.rpm"
+          asset_name: contour-${{ steps.set_vars.outputs.VERSION }}-1.fc35.x86_64.rpm
           asset_content_type: application/x-rpm
 
       # -------------------------------------------------------------
       - name: Upload Fedora (debuginfo) package x86_64
-        id: upload-release-asset-archlinux-x86_64
+        id: upload-release-asset-fedora-debuginfo-x86_64
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: "./contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
-          asset_name: contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm
+          asset_path: "./contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc35.x86_64.rpm"
+          asset_name: contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc35.x86_64.rpm
           asset_content_type: application/x-rpm
 
       # -------------------------------------------------------------
       - name: Upload Fedora (debugsource) package x86_64
-        id: upload-release-asset-archlinux-x86_64
+        id: upload-release-asset-fedora-debugsource-x86_64
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: "./contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
-          asset_name: contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm
+          asset_path: "./contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc35.x86_64.rpm"
+          asset_name: contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc35.x86_64.rpm
           asset_content_type: application/x-rpm
 
       # -------------------------------------------------------------
