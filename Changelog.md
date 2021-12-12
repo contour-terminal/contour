@@ -1,4 +1,4 @@
-### 0.3.0 (unreleased)
+### 0.2.3 (2021-12-12)
 
 **Important: It is recommended to also use the latest `contour` termcap file if you are already using one
 from a previous release.**
