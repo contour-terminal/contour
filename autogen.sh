@@ -5,7 +5,7 @@ set -ex
 # This shortcut allows you to simply invoke ../../autogen.sh when being
 # in directories like:
 #     ./target/{Debug,RelWithDebInfo,Release}
-if [ -e ../../autogen.sh ] && [ "$1" == "" ] &&
+if [ -e ../../autogen.sh ] && [ "x$1" == "x" ] &&
    [ -x "$(command -v realpath)" ] &&
    [ "$(basename $(realpath ${PWD}/..))" = "target" ]
 then

@@ -27,7 +27,7 @@ set(crispy_SOURCES
 add_library(crispy-core ${crispy_SOURCES})
 add_library(crispy::core ALIAS crispy-core)
 
-set(CRISPY_CORE_LIBS range-v3 fmt::fmt-header-only unicode::core GSL)
+set(CRISPY_CORE_LIBS range-v3::range-v3 fmt::fmt-header-only unicode::core GSL)
 if(${USING_BOOST_FILESYSTEM})
     target_compile_definitions(crispy-core PUBLIC USING_BOOST_FILESYSTEM=1)
     list(APPEND CRISPY_CORE_LIBS Boost::filesystem)
@@ -108,7 +108,7 @@ if(CRISPY_TESTING)
         sort_test.cpp
         test_main.cpp
     )
-    target_link_libraries(crispy_test fmt::fmt-header-only range-v3 Catch2::Catch2 crispy::core)
+    target_link_libraries(crispy_test fmt::fmt-header-only range-v3::range-v3 Catch2::Catch2 crispy::core)
     add_test(crispy_test ./crispy_test)
 endif()
 message(STATUS "[crispy] Compile unit tests: ${CRISPY_TESTING}")

@@ -76,7 +76,7 @@ jobs:
       run: |
         set -ex
         sudo apt -q update
-        sudo ./scripts/install-deps.sh
+        sudo ./scripts/install-deps.sh --with-hb-ft
     - name: "create build directory"
       run: mkdir build
     - name: "cmake"
@@ -339,9 +339,6 @@ jobs:
       run: |
         cmake . \
               -DCMAKE_BUILD_TYPE=Release \
-              -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
-              -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
-              -DYAML_CPP_INSTALL=OFF \
               -DCONTOUR_BUILD_WITH_QT6=ON \
               -B build/
     - name: "Build"
@@ -366,13 +363,18 @@ jobs:
       run: .\scripts\ci-set-vars.ps1
       env:
         REPOSITORY: ${{ github.event.repository.name }}
+    - name: "Fetch embedded dependencies"
+      shell: powershell
+      run: |
+        ./scripts/install-deps.ps1
+        type ./_deps/sources/CMakeLists.txt
     - name: Install Qt
       uses: jurplel/install-qt-action@v2
     - name: "vcpkg: Install dependencies"
       uses: lukka/run-vcpkg@v5
       id: runvcpkg
       with:
-        vcpkgArguments: freetype fontconfig harfbuzz angle
+        vcpkgArguments: angle freetype fontconfig harfbuzz fmt yaml-cpp ms-gsl range-v3
         vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
         vcpkgGitCommitId: 69478c5caafcde4c490bb1fccb960296801dbb5f
         vcpkgTriplet: x64-windows
@@ -384,7 +386,7 @@ jobs:
               New-Item -ItemType Directory -Force -Path build
         }
     - name: "Generate build files"
-      run: cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DYAML_BUILD_SHARED_LIBS=OFF -DCONTOUR_EXAMPLES=OFF -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -DYAML_CPP_BUILD_CONTRIB=OFF -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF -DYAML_CPP_INSTALL=OFF -B build .
+      run: cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -B build .
     - name: "Build"
       run: cmake --build build/ --config Release
     - name: "test: libcrispy"
@@ -492,6 +494,12 @@ jobs:
       run: ./scripts/ci-set-vars.sh
       env:
         REPOSITORY: ${{ github.event.repository.name }}
+    - name: Fetch and unpack embeds
+      run: ./scripts/install-deps.sh
+      env:
+        PREPARE_ONLY_EMBEDS: ON
+        SYSDEP_ASSUME_YES: ON
+        OS_OVERRIDE: fedora
     - name: prepare distfile
       run: |
         set -x
