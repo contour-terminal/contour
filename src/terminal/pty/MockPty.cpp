@@ -7,8 +7,7 @@ using std::string_view;
 namespace terminal
 {
 
-MockPty::MockPty(PageSize _size):
-    screenSize_{ _size }
+MockPty::MockPty(PageSize _size): screenSize_ { _size }
 {
 }
 
@@ -19,7 +18,7 @@ MockPty::~MockPty()
 optional<string_view> MockPty::read(size_t _size, std::chrono::milliseconds)
 {
     auto const n = std::min(outputBuffer_.size() - outputReadOffset_, _size);
-    auto const result = string_view{outputBuffer_.data() + outputReadOffset_, n};
+    auto const result = string_view { outputBuffer_.data() + outputReadOffset_, n };
     outputReadOffset_ += n;
     return result;
 }
@@ -65,4 +64,4 @@ bool MockPty::isClosed() const
     return closed_;
 }
 
-}
+} // namespace terminal

@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include "Actions.h"
+
 #include <crispy/utils.h>
 
 #include <algorithm>
@@ -25,20 +26,21 @@ using namespace std;
 
 using crispy::toLower;
 
-namespace contour::actions {
+namespace contour::actions
+{
 
 namespace
 {
     template <typename T>
     inline auto mapAction(string_view _name)
     {
-        return pair{_name, Action{T{}}};
+        return pair { _name, Action { T {} } };
     }
-}
+} // namespace
 
 optional<Action> fromString(string const& _name)
 {
-    auto static const mappings = array{
+    auto static const mappings = array {
         mapAction<actions::CancelSelection>("CancelSelection"),
         mapAction<actions::ChangeProfile>("ChangeProfile"),
         mapAction<actions::ClearHistoryAndReset>("ClearHistoryAndReset"),
@@ -76,11 +78,11 @@ optional<Action> fromString(string const& _name)
     };
 
     auto const name = toLower(_name);
-    for (auto const& mapping : mappings)
+    for (auto const& mapping: mappings)
         if (name == toLower(mapping.first))
-            return {mapping.second};
+            return { mapping.second };
 
     return nullopt;
 }
 
-} // end namespace
+} // namespace contour::actions

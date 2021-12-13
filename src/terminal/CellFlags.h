@@ -13,14 +13,15 @@
  */
 #pragma once
 
+#include <fmt/format.h>
+
 #include <array>
 #include <cstdint>
 #include <string_view>
 #include <utility>
 
-#include <fmt/format.h>
-
-namespace terminal {
+namespace terminal
+{
 
 enum class CellFlags : uint16_t
 {
@@ -46,13 +47,13 @@ enum class CellFlags : uint16_t
 constexpr CellFlags& operator|=(CellFlags& a, CellFlags b) noexcept
 {
     a = static_cast<CellFlags>(static_cast<unsigned>(a) | static_cast<unsigned>(b));
-	return a;
+    return a;
 }
 
 constexpr CellFlags& operator&=(CellFlags& a, CellFlags b) noexcept
 {
     a = static_cast<CellFlags>(static_cast<unsigned>(a) & static_cast<unsigned>(b));
-	return a;
+    return a;
 }
 
 /// Tests if @p b is contained in @p a.
@@ -84,45 +85,49 @@ constexpr bool operator!(CellFlags a) noexcept
     return static_cast<unsigned>(a) == 0;
 }
 
-}
+} // namespace terminal
 
 namespace fmt // {{{
 {
-    template <>
-    struct formatter<terminal::CellFlags> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(const terminal::CellFlags _flags, FormatContext& ctx)
+template <>
+struct formatter<terminal::CellFlags>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(const terminal::CellFlags _flags, FormatContext& ctx)
+    {
+        static const std::array<std::pair<terminal::CellFlags, std::string_view>, 15> nameMap = {
+            std::pair { terminal::CellFlags::Bold, std::string_view("Bold") },
+            std::pair { terminal::CellFlags::Faint, std::string_view("Faint") },
+            std::pair { terminal::CellFlags::Italic, std::string_view("Italic") },
+            std::pair { terminal::CellFlags::Underline, std::string_view("Underline") },
+            std::pair { terminal::CellFlags::Blinking, std::string_view("Blinking") },
+            std::pair { terminal::CellFlags::Inverse, std::string_view("Inverse") },
+            std::pair { terminal::CellFlags::Hidden, std::string_view("Hidden") },
+            std::pair { terminal::CellFlags::CrossedOut, std::string_view("CrossedOut") },
+            std::pair { terminal::CellFlags::DoublyUnderlined, std::string_view("DoublyUnderlined") },
+            std::pair { terminal::CellFlags::CurlyUnderlined, std::string_view("CurlyUnderlined") },
+            std::pair { terminal::CellFlags::DottedUnderline, std::string_view("DottedUnderline") },
+            std::pair { terminal::CellFlags::DashedUnderline, std::string_view("DashedUnderline") },
+            std::pair { terminal::CellFlags::Framed, std::string_view("Framed") },
+            std::pair { terminal::CellFlags::Encircled, std::string_view("Encircled") },
+            std::pair { terminal::CellFlags::Overline, std::string_view("Overline") },
+        };
+        std::string s;
+        for (auto const& mapping: nameMap)
         {
-            static const std::array<std::pair<terminal::CellFlags, std::string_view>, 15> nameMap = {
-                std::pair{terminal::CellFlags::Bold, std::string_view("Bold")},
-                std::pair{terminal::CellFlags::Faint, std::string_view("Faint")},
-                std::pair{terminal::CellFlags::Italic, std::string_view("Italic")},
-                std::pair{terminal::CellFlags::Underline, std::string_view("Underline")},
-                std::pair{terminal::CellFlags::Blinking, std::string_view("Blinking")},
-                std::pair{terminal::CellFlags::Inverse, std::string_view("Inverse")},
-                std::pair{terminal::CellFlags::Hidden, std::string_view("Hidden")},
-                std::pair{terminal::CellFlags::CrossedOut, std::string_view("CrossedOut")},
-                std::pair{terminal::CellFlags::DoublyUnderlined, std::string_view("DoublyUnderlined")},
-                std::pair{terminal::CellFlags::CurlyUnderlined, std::string_view("CurlyUnderlined")},
-                std::pair{terminal::CellFlags::DottedUnderline, std::string_view("DottedUnderline")},
-                std::pair{terminal::CellFlags::DashedUnderline, std::string_view("DashedUnderline")},
-                std::pair{terminal::CellFlags::Framed, std::string_view("Framed")},
-                std::pair{terminal::CellFlags::Encircled, std::string_view("Encircled")},
-                std::pair{terminal::CellFlags::Overline, std::string_view("Overline")},
-            };
-            std::string s;
-            for (auto const& mapping : nameMap)
+            if (mapping.first & _flags)
             {
-                if (mapping.first & _flags)
-                {
-                    if (!s.empty())
-                        s += ",";
-                    s += mapping.second;
-                }
+                if (!s.empty())
+                    s += ",";
+                s += mapping.second;
             }
-            return format_to(ctx.out(), s);
         }
-    };
-} // }}}
+        return format_to(ctx.out(), s);
+    }
+};
+} // namespace fmt

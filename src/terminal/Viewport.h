@@ -21,26 +21,29 @@
 #include <algorithm>
 #include <optional>
 
-namespace terminal {
+namespace terminal
+{
 
 // #define CONTOUR_LOG_VIEWPORT 1
 
-template <typename EventListener> class Screen;
+template <typename EventListener>
+class Screen;
 
 template <typename T>
 class Viewport
 {
-public:
-    #if defined(CONTOUR_LOG_VIEWPORT)
+  public:
+#if defined(CONTOUR_LOG_VIEWPORT)
     static auto inline Log = logstore::Category("vt.viewport", "Logs viewport details.");
-    #endif
+#endif
 
     using ModifyEvent = std::function<void()>;
 
-    explicit Viewport(Screen<T>& _screen, ModifyEvent _onModify = {}) :
-        screen_{ _screen },
-        modified_{ _onModify ? std::move(_onModify) : []() {} }
-    {}
+    explicit Viewport(Screen<T>& _screen, ModifyEvent _onModify = {}):
+        screen_ { _screen }, modified_ { _onModify ? std::move(_onModify) : []() {
+        } }
+    {
+    }
 
     ScrollOffset scrollOffset() const noexcept { return scrollOffset_; }
 
@@ -48,14 +51,11 @@ public:
     ///
     /// @retval true viewport has been moved/scrolled off its main view position.
     /// @retval false viewport has NOT been moved/scrolled and is still located at its main view position.
-    bool scrolled() const noexcept
-    {
-        return scrollOffset_.value != 0;
-    }
+    bool scrolled() const noexcept { return scrollOffset_.value != 0; }
 
     bool isLineVisible(LineOffset _line) const noexcept
     {
-        auto const a = - scrollOffset_.as<int>();
+        auto const a = -scrollOffset_.as<int>();
         auto const b = _line.as<int>();
         auto const c = unbox<int>(screenLineCount()) - scrollOffset_.as<int>();
         return a <= b && b < c;
@@ -63,7 +63,8 @@ public:
 
     bool scrollUp(LineCount _numLines)
     {
-        scrollOffset_ = std::min(scrollOffset_ + _numLines.as<ScrollOffset>(), boxed_cast<ScrollOffset>(historyLineCount()));
+        scrollOffset_ = std::min(scrollOffset_ + _numLines.as<ScrollOffset>(),
+                                 boxed_cast<ScrollOffset>(historyLineCount()));
         return scrollTo(scrollOffset_);
     }
 
@@ -73,10 +74,7 @@ public:
         return scrollTo(scrollOffset_);
     }
 
-    bool scrollToTop()
-    {
-        return scrollTo(boxed_cast<ScrollOffset>(historyLineCount()));
-    }
+    bool scrollToTop() { return scrollTo(boxed_cast<ScrollOffset>(historyLineCount())); }
 
     bool scrollToBottom()
     {
@@ -91,9 +89,9 @@ public:
         if (!scrollOffset_)
             return false;
 
-        #if defined(CONTOUR_LOG_VIEWPORT)
+#if defined(CONTOUR_LOG_VIEWPORT)
         LOGSTORE(Log)("forcing scroll to bottom from {}", scrollOffset_);
-        #endif
+#endif
         scrollOffset_ = ScrollOffset(0);
         modified_();
         return true;
@@ -109,9 +107,9 @@ public:
 
         if (0 <= *_offset && _offset <= boxed_cast<ScrollOffset>(historyLineCount()))
         {
-            #if defined(CONTOUR_LOG_VIEWPORT)
+#if defined(CONTOUR_LOG_VIEWPORT)
             LOGSTORE(Log)("Scroll to offset {}", _offset);
-            #endif
+#endif
             scrollOffset_ = _offset;
             modified_();
             return true;
@@ -150,7 +148,7 @@ public:
     /// the scroll-offset to it.
     constexpr Coordinate translateScreenToGridCoordinate(Coordinate p) const noexcept
     {
-        return Coordinate{
+        return Coordinate {
             p.line - boxed_cast<LineOffset>(scrollOffset_),
             p.column,
         };
@@ -170,7 +168,8 @@ public:
     //
     Screen<T>& screen_;
     ModifyEvent modified_;
-    ScrollOffset scrollOffset_; //!< scroll offset relative to scroll top (0) or nullopt if not scrolled into history
+    ScrollOffset
+        scrollOffset_; //!< scroll offset relative to scroll top (0) or nullopt if not scrolled into history
 };
 
-}
+} // namespace terminal

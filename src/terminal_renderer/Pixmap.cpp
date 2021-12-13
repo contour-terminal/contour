@@ -15,8 +15,8 @@
 #include <terminal_renderer/utils.h>
 
 using std::clamp;
-using std::min;
 using std::max;
+using std::min;
 using std::move;
 using std::swap;
 
@@ -25,10 +25,23 @@ namespace terminal::renderer
 
 namespace
 {
-    struct From { int value; };
-    struct To { int value; };
-    struct BaseOffset { int value; };
-    enum class Orientation { Horizontal, Vertical };
+    struct From
+    {
+        int value;
+    };
+    struct To
+    {
+        int value;
+    };
+    struct BaseOffset
+    {
+        int value;
+    };
+    enum class Orientation
+    {
+        Horizontal,
+        Vertical
+    };
 
     Pixmap& segment_line(Pixmap& pixmap, Orientation orientation, BaseOffset base, From from, To to)
     {
@@ -38,20 +51,20 @@ namespace
 
         switch (orientation)
         {
-            case Orientation::Horizontal:
-                for (auto const y: ranges::views::iota(base.value - 1, base.value + 1))
-                    for (auto const x: ranges::views::iota(from.value, to.value))
-                        pixmap.paint(x, y);
-                break;
-            case Orientation::Vertical:
-                for (auto const y: ranges::views::iota(from.value, to.value))
-                    for (auto const x: ranges::views::iota(base.value - 1, base.value + 1))
-                        pixmap.paint(x, y);
-                break;
+        case Orientation::Horizontal:
+            for (auto const y: ranges::views::iota(base.value - 1, base.value + 1))
+                for (auto const x: ranges::views::iota(from.value, to.value))
+                    pixmap.paint(x, y);
+            break;
+        case Orientation::Vertical:
+            for (auto const y: ranges::views::iota(from.value, to.value))
+                for (auto const x: ranges::views::iota(base.value - 1, base.value + 1))
+                    pixmap.paint(x, y);
+            break;
         }
         return pixmap;
     }
-}
+} // namespace
 
 atlas::Buffer Pixmap::take()
 {
@@ -89,16 +102,19 @@ Pixmap& Pixmap::halfFilledCircleLeft()
 {
     auto const w = unbox<int>(_size.width);
     auto const h = unbox<int>(_size.height);
-    auto const putpixel = [&](int x, int y)
-    {
+    auto const putpixel = [&](int x, int y) {
         auto const xf = clamp(x, 0, w - 1);
         auto const yf = clamp(y, 0, h - 1);
         for (int xi = xf; xi < w; ++xi)
             paint(xi, yf, 0xFF);
     };
-    auto const putAbove = [&](int x, int y) { putpixel(x, y - h/2); };
-    auto const putBelow = [&](int x, int y) { putpixel(x, y + h/2); };
-    auto const radius   = crispy::Point{ w, h / 2 };
+    auto const putAbove = [&](int x, int y) {
+        putpixel(x, y - h / 2);
+    };
+    auto const putBelow = [&](int x, int y) {
+        putpixel(x, y + h / 2);
+    };
+    auto const radius = crispy::Point { w, h / 2 };
     drawEllipseArc(putAbove, _size, radius, Arc::BottomLeft);
     drawEllipseArc(putBelow, _size, radius, Arc::TopLeft);
     return *this;
@@ -108,15 +124,18 @@ Pixmap& Pixmap::halfFilledCircleRight()
 {
     auto const w = unbox<int>(_size.width);
     auto const h = unbox<int>(_size.height);
-    auto const putpixel = [&](int x, int y)
-    {
+    auto const putpixel = [&](int x, int y) {
         auto const fx = min(w - 1, x);
         for (int x = 0; x < fx; ++x)
             paint(x, y, 0xFF);
     };
-    auto const putAbove = [&](int x, int y) { putpixel(x, y - h/2); };
-    auto const putBelow = [&](int x, int y) { putpixel(x, y + h/2); };
-    auto const radius   = crispy::Point{ w, h / 2 };
+    auto const putAbove = [&](int x, int y) {
+        putpixel(x, y - h / 2);
+    };
+    auto const putBelow = [&](int x, int y) {
+        putpixel(x, y + h / 2);
+    };
+    auto const radius = crispy::Point { w, h / 2 };
     drawEllipseArc(putAbove, _size, radius, Arc::BottomRight);
     drawEllipseArc(putBelow, _size, radius, Arc::TopRight);
     return *this;
@@ -137,19 +156,19 @@ Pixmap& Pixmap::segment_bar(int which)
     auto const L = 2 * Z;
     auto const R = unbox<int>(_size.width) - Z;
 
-    auto const T = static_cast<int>(ceil(unbox<double>(_size.height) * 1/8_th)); // Z;
+    auto const T = static_cast<int>(ceil(unbox<double>(_size.height) * 1 / 8_th)); // Z;
     auto const B = unbox<int>(_size.height) - _baseLine - Z / 2;
     auto const M = T + (B - T) / 2;
 
     switch (which)
     {
-        case 1: return segment_line(*this, Orientation::Horizontal, BaseOffset{T}, From{L},   To{R});
-        case 2: return segment_line(*this, Orientation::Vertical,   BaseOffset{R}, From{T+Z}, To{M-Z});
-        case 3: return segment_line(*this, Orientation::Horizontal, BaseOffset{M}, From{L},   To{R});
-        case 4: return segment_line(*this, Orientation::Vertical,   BaseOffset{L}, From{T+Z}, To{M-Z});
-        case 5: return segment_line(*this, Orientation::Vertical,   BaseOffset{R}, From{M+Z}, To{B-Z});
-        case 6: return segment_line(*this, Orientation::Horizontal, BaseOffset{B}, From{L},   To{R});
-        case 7: return segment_line(*this, Orientation::Vertical,   BaseOffset{L}, From{M+Z}, To{B-Z});
+    case 1: return segment_line(*this, Orientation::Horizontal, BaseOffset { T }, From { L }, To { R });
+    case 2: return segment_line(*this, Orientation::Vertical, BaseOffset { R }, From { T + Z }, To { M - Z });
+    case 3: return segment_line(*this, Orientation::Horizontal, BaseOffset { M }, From { L }, To { R });
+    case 4: return segment_line(*this, Orientation::Vertical, BaseOffset { L }, From { T + Z }, To { M - Z });
+    case 5: return segment_line(*this, Orientation::Vertical, BaseOffset { R }, From { M + Z }, To { B - Z });
+    case 6: return segment_line(*this, Orientation::Horizontal, BaseOffset { B }, From { L }, To { R });
+    case 7: return segment_line(*this, Orientation::Vertical, BaseOffset { L }, From { M + Z }, To { B - Z });
     }
 
     assert(false);

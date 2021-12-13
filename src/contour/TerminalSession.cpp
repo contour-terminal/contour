@@ -11,7 +11,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <algorithm>
 #include <contour/TerminalSession.h>
 #include <contour/helper.h>
 
@@ -21,8 +20,6 @@
 #include <terminal/pty/PtyProcess.h>
 
 #include <crispy/StackTrace.h>
-
-#include <range/v3/all.hpp>
 
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
@@ -38,36 +35,36 @@
 #include <QtNetwork/QHostInfo>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QMessageBox>
-
+#include <algorithm>
 #include <fstream>
+#include <range/v3/all.hpp>
 
 #if defined(CONTOUR_BLUR_PLATFORM_KWIN)
-#include <KWindowEffects>
+    #include <KWindowEffects>
 #endif
 
 #if !defined(_MSC_VER)
-#include <unistd.h>
-#include <signal.h>
+    #include <signal.h>
+    #include <unistd.h>
 #endif
 
 #if defined(_MSC_VER)
-#define __PRETTY_FUNCTION__ __FUNCDNAME__
+    #define __PRETTY_FUNCTION__ __FUNCDNAME__
 #endif
 
 using std::chrono::steady_clock;
 using namespace std;
 using namespace terminal;
 
-namespace contour {
+namespace contour
+{
 
 namespace // {{{ helper
 {
     constexpr crispy::Point scale(crispy::Point p, double s)
     {
-        return crispy::Point{
-            static_cast<int>(static_cast<double>(p.x) * s),
-            static_cast<int>(static_cast<double>(p.y) * s)
-        };
+        return crispy::Point { static_cast<int>(static_cast<double>(p.x) * s),
+                               static_cast<int>(static_cast<double>(p.y) * s) };
     }
 
     string unhandledExceptionMessage(string_view const& where, exception const& e)
@@ -75,7 +72,7 @@ namespace // {{{ helper
         return fmt::format("{}: Unhandled exception caught ({}). {}", where, typeid(e).name(), e.what());
     }
 
-} //  }}}
+} // namespace
 
 TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
                                  std::chrono::seconds _earlyExitThreshold,
@@ -83,43 +80,41 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
                                  bool _liveConfig,
                                  string _profileName,
                                  string _programPath,
-                                 Controller &_controller,
+                                 Controller& _controller,
                                  unique_ptr<TerminalDisplay> _display,
                                  std::function<void()> _displayInitialized,
                                  std::function<void()> _onExit):
-    startTime_{ steady_clock::now() },
-    earlyExitThreshold_{ _earlyExitThreshold },
-    config_{ move(_config) },
-    profileName_{ move(_profileName) },
-    profile_{ *config_.profile(profileName_) },
-    programPath_{ move(_programPath ) },
-    controller_{ _controller },
-    displayInitialized_{ move(_displayInitialized) },
-    onExit_{ move(_onExit) },
-    pty_{ move(_pty) },
-    terminal_{
-        *pty_,
-        config_.ptyReadBufferSize,
-        *this,
-        config_.profile(profileName_)->maxHistoryLineCount,
-        config_.profile(profileName_)->copyLastMarkRangeOffset,
-        config_.profile(profileName_)->cursorBlinkInterval,
-        steady_clock::now(),
-        config_.wordDelimiters, // TODO: move to profile!
-        config_.bypassMouseProtocolModifier, // TODO: you too
-        config_.maxImageSize,
-        config_.maxImageColorRegisters,
-        config_.sixelCursorConformance,
-        profile_.colors,
-        _display ? _display->refreshRate() : 50.0,
-        config_.reflowOnResize
-    },
-    display_{move(_display)}
+    startTime_ { steady_clock::now() },
+    earlyExitThreshold_ { _earlyExitThreshold },
+    config_ { move(_config) },
+    profileName_ { move(_profileName) },
+    profile_ { *config_.profile(profileName_) },
+    programPath_ { move(_programPath) },
+    controller_ { _controller },
+    displayInitialized_ { move(_displayInitialized) },
+    onExit_ { move(_onExit) },
+    pty_ { move(_pty) },
+    terminal_ { *pty_,
+                config_.ptyReadBufferSize,
+                *this,
+                config_.profile(profileName_)->maxHistoryLineCount,
+                config_.profile(profileName_)->copyLastMarkRangeOffset,
+                config_.profile(profileName_)->cursorBlinkInterval,
+                steady_clock::now(),
+                config_.wordDelimiters,              // TODO: move to profile!
+                config_.bypassMouseProtocolModifier, // TODO: you too
+                config_.maxImageSize,
+                config_.maxImageColorRegisters,
+                config_.sixelCursorConformance,
+                profile_.colors,
+                _display ? _display->refreshRate() : 50.0,
+                config_.reflowOnResize },
+    display_ { move(_display) }
 {
     if (_liveConfig)
     {
-        LOGSTORE(SessionLog)("Enable live configuration reloading of file {}.",
-                             config_.backingFilePath.generic_string());
+        LOGSTORE(SessionLog)
+        ("Enable live configuration reloading of file {}.", config_.backingFilePath.generic_string());
         configFileChangeWatcher_.emplace(config_.backingFilePath,
                                          [this](FileChangeWatcher::Event event) { onConfigReload(event); });
     }
@@ -131,7 +126,8 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
 
 TerminalSession::~TerminalSession()
 {
-    (void) display_.release(); // TODO: due to Qt, this is currently not owned by us. That's sad, or is it not?
+    (void)
+        display_.release(); // TODO: due to Qt, this is currently not owned by us. That's sad, or is it not?
 }
 
 void TerminalSession::setDisplay(unique_ptr<TerminalDisplay> _display)
@@ -144,10 +140,9 @@ void TerminalSession::setDisplay(unique_ptr<TerminalDisplay> _display)
     profile_ = *config_.profile(profileName_); // XXX do it again. but we've to be more efficient here
 
     // NB: Inform connected TTY and local Screen instance about initial cell pixel size.
-    auto const pixels = ImageSize{
-        display_->cellSize().width * boxed_cast<Width>(terminal_.screenSize().columns),
-        display_->cellSize().height * boxed_cast<Height>(terminal_.screenSize().lines)
-    };
+    auto const pixels =
+        ImageSize { display_->cellSize().width * boxed_cast<Width>(terminal_.screenSize().columns),
+                    display_->cellSize().height * boxed_cast<Height>(terminal_.screenSize().lines) };
     terminal_.resizeScreen(terminal_.screenSize(), pixels);
 }
 
@@ -183,10 +178,7 @@ void TerminalSession::bell()
 
 void TerminalSession::bufferChanged(terminal::ScreenType _type)
 {
-    display_->post([this, _type] ()
-    {
-        display_->bufferChanged(_type);
-    });
+    display_->post([this, _type]() { display_->bufferChanged(_type); });
 }
 
 void TerminalSession::screenUpdated()
@@ -212,8 +204,7 @@ void TerminalSession::renderBufferUpdated()
 
 void TerminalSession::requestCaptureBuffer(int _absoluteStartLine, int _lineCount)
 {
-    display_->post([this, _absoluteStartLine, _lineCount]()
-    {
+    display_->post([this, _absoluteStartLine, _lineCount]() {
         if (display_->requestPermission(profile_.permissions.captureBuffer, "capture screen buffer"))
         {
             terminal_.screen().captureBuffer(_absoluteStartLine, _lineCount);
@@ -228,8 +219,7 @@ terminal::FontDef TerminalSession::getFontDef()
 
 void TerminalSession::setFontDef(terminal::FontDef const& _fontDef)
 {
-    display_->post([this, spec = terminal::FontDef(_fontDef)]()
-    {
+    display_->post([this, spec = terminal::FontDef(_fontDef)]() {
         if (!display_->requestPermission(profile_.permissions.changeFont, "changing font"))
             return;
 
@@ -237,7 +227,7 @@ void TerminalSession::setFontDef(terminal::FontDef const& _fontDef)
         terminal::renderer::FontDescriptions newFonts = currentFonts;
 
         if (spec.size != 0.0)
-            newFonts.size = text::font_size{ spec.size };
+            newFonts.size = text::font_size { spec.size };
 
         if (!spec.regular.empty())
             newFonts.regular = text::font_description::parse(spec.regular);
@@ -284,7 +274,6 @@ void TerminalSession::dumpState()
         display_->closeDisplay();
 }
 
-
 void TerminalSession::notify(string_view _title, string_view _content)
 {
     if (!display_)
@@ -302,9 +291,9 @@ void TerminalSession::onClosed()
     {
         auto const exitStatus = pty->process().checkStatus();
         if (exitStatus)
-            LOGSTORE(SessionLog)("Process terminated after {} seconds with exit status {}.", diff.count(), *exitStatus);
-        else
-            LOGSTORE(SessionLog)("Process terminated after {} seconds.", diff.count());
+            LOGSTORE(SessionLog)
+        ("Process terminated after {} seconds with exit status {}.", diff.count(), *exitStatus);
+        else LOGSTORE(SessionLog)("Process terminated after {} seconds.", diff.count());
     }
     else
         LOGSTORE(SessionLog)("Process terminated after {} seconds.", diff.count());
@@ -314,13 +303,11 @@ void TerminalSession::onClosed()
 
     if (diff < earlyExitThreshold_)
     {
-        //auto const w = terminal_.screenSize().columns.as<int>();
+        // auto const w = terminal_.screenSize().columns.as<int>();
         auto constexpr SGR = "\e[1;38:2::255:255:255m\e[48:2::255:0:0m"sv;
         auto constexpr EL = "\e[K"sv;
-        auto constexpr TextLines = array<string_view, 2>{
-            "Shell terminated too quickly.",
-            "The window will not be closed automatically."
-        };
+        auto constexpr TextLines = array<string_view, 2> { "Shell terminated too quickly.",
+                                                           "The window will not be closed automatically." };
         for (auto const text: TextLines)
             terminal_.writeToScreen(fmt::format("\r\n{}{}{}", SGR, EL, text));
         terminal_.writeToScreen("\r\n");
@@ -338,22 +325,24 @@ void TerminalSession::onSelectionCompleted()
 {
     switch (config_.onMouseSelection)
     {
-        case config::SelectionAction::CopyToSelectionClipboard:
-            if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr && clipboard->supportsSelection())
-            {
-                string const text = terminal().extractSelectionText();
-                clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())), QClipboard::Selection);
-            }
-            break;
-        case config::SelectionAction::CopyToClipboard:
-            if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
-            {
-                string const text = terminal().extractSelectionText();
-                clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())), QClipboard::Clipboard);
-            }
-            break;
-        case config::SelectionAction::Nothing:
-            break;
+    case config::SelectionAction::CopyToSelectionClipboard:
+        if (QClipboard* clipboard = QGuiApplication::clipboard();
+            clipboard != nullptr && clipboard->supportsSelection())
+        {
+            string const text = terminal().extractSelectionText();
+            clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())),
+                               QClipboard::Selection);
+        }
+        break;
+    case config::SelectionAction::CopyToClipboard:
+        if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
+        {
+            string const text = terminal().extractSelectionText();
+            clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())),
+                               QClipboard::Clipboard);
+        }
+        break;
+    case config::SelectionAction::Nothing: break;
     }
 }
 
@@ -380,9 +369,7 @@ void TerminalSession::setWindowTitle(string_view _title)
     if (!display_)
         return;
 
-    display_->post([this, terminalTitle = string(_title)]() {
-        display_->setWindowTitle(terminalTitle);
-    });
+    display_->post([this, terminalTitle = string(_title)]() { display_->setWindowTitle(terminalTitle); });
 }
 
 void TerminalSession::setTerminalProfile(string const& _configProfileName)
@@ -390,9 +377,7 @@ void TerminalSession::setTerminalProfile(string const& _configProfileName)
     if (!display_)
         return;
 
-    display_->post([this, name = string(_configProfileName)]() {
-        activateProfile(name);
-    });
+    display_->post([this, name = string(_configProfileName)]() { activateProfile(name); });
 }
 
 void TerminalSession::discardImage(terminal::Image const& _image)
@@ -402,9 +387,7 @@ void TerminalSession::discardImage(terminal::Image const& _image)
 
 // }}}
 // {{{ Input Events
-void TerminalSession::sendKeyPressEvent(Key _key,
-                                        Modifier _modifier,
-                                        Timestamp _now)
+void TerminalSession::sendKeyPressEvent(Key _key, Modifier _modifier, Timestamp _now)
 {
     LOGSTORE(InputLog)("{} {}", _modifier, _key);
 
@@ -416,10 +399,8 @@ void TerminalSession::sendKeyPressEvent(Key _key,
 
     display_->setMouseCursorShape(MouseCursorShape::Hidden);
 
-    if (auto const* actions = config::apply(config_.inputMappings.keyMappings,
-                                            _key,
-                                            _modifier,
-                                            matchModeFlags()))
+    if (auto const* actions =
+            config::apply(config_.inputMappings.keyMappings, _key, _modifier, matchModeFlags()))
         executeAllActions(*actions);
     else
         terminal().sendKeyPressEvent(_key, _modifier, _now);
@@ -438,10 +419,8 @@ void TerminalSession::sendCharPressEvent(char32_t _value, Modifier _modifier, Ti
 
     display_->setMouseCursorShape(MouseCursorShape::Hidden);
 
-    if (auto const* actions = config::apply(config_.inputMappings.charMappings,
-                                            _value,
-                                            _modifier,
-                                            matchModeFlags()))
+    if (auto const* actions =
+            config::apply(config_.inputMappings.charMappings, _value, _modifier, matchModeFlags()))
         executeAllActions(*actions);
     else
         terminal().sendCharPressEvent(_value, _modifier, _now); // TODO: get rid of Event{} struct here, too!
@@ -458,10 +437,8 @@ void TerminalSession::sendMousePressEvent(MouseButton _button, Modifier _modifie
         return;
     }
 
-    if (auto const* actions = config::apply(config_.inputMappings.mouseMappings,
-                                            _button,
-                                            _modifier,
-                                            matchModeFlags()))
+    if (auto const* actions =
+            config::apply(config_.inputMappings.mouseMappings, _button, _modifier, matchModeFlags()))
     {
         if (executeAllActions(*actions))
             return;
@@ -474,7 +451,9 @@ void TerminalSession::sendMousePressEvent(MouseButton _button, Modifier _modifie
     scheduleRedraw();
 }
 
-void TerminalSession::sendMouseMoveEvent(terminal::Coordinate _pos, terminal::Modifier _modifier, Timestamp _now)
+void TerminalSession::sendMouseMoveEvent(terminal::Coordinate _pos,
+                                         terminal::Modifier _modifier,
+                                         Timestamp _now)
 {
     if (_pos == currentMousePosition_)
         return;
@@ -489,7 +468,8 @@ void TerminalSession::sendMouseMoveEvent(terminal::Coordinate _pos, terminal::Mo
     else
         setDefaultCursor();
 
-    if (mouseHoveringHyperlink || handled || terminal().isSelectionInProgress()) // && only if selection has changed!
+    if (mouseHoveringHyperlink || handled
+        || terminal().isSelectionInProgress()) // && only if selection has changed!
     {
         terminal().breakLoopAndRefreshRenderBuffer();
         scheduleRedraw();
@@ -550,10 +530,7 @@ bool TerminalSession::operator()(actions::ClearHistoryAndReset)
     auto const pixelSize = display_->pixelSize();
 
     terminal_.resetHard();
-    auto const tmpScreenSize = PageSize{
-        screenSize.lines,
-        screenSize.columns + ColumnCount(1)
-    };
+    auto const tmpScreenSize = PageSize { screenSize.lines, screenSize.columns + ColumnCount(1) };
     terminal_.resizeScreen(tmpScreenSize, pixelSize);
     this_thread::yield();
     terminal_.resizeScreen(screenSize, pixelSize);
@@ -574,7 +551,7 @@ bool TerminalSession::operator()(actions::CopySelection)
 
 bool TerminalSession::operator()(actions::DecreaseFontSize)
 {
-    auto constexpr OnePt = text::font_size{ 1.0 };
+    auto constexpr OnePt = text::font_size { 1.0 };
     setFontSize(profile().fonts.size - OnePt);
     // auto const currentFontSize = view().renderer().fontDescriptions().size;
     // auto const newFontSize = currentFontSize - OnePt;
@@ -594,12 +571,12 @@ bool TerminalSession::operator()(actions::DecreaseOpacity)
 
 bool TerminalSession::operator()(actions::FollowHyperlink)
 {
-    auto const _l = scoped_lock{terminal()};
+    auto const _l = scoped_lock { terminal() };
     auto const currentMousePosition = terminal().currentMousePosition();
-    auto const currentMousePositionRel = terminal::Coordinate{
-        currentMousePosition.line + terminal().viewport().scrollOffset().as<LineOffset>(),
-        currentMousePosition.column
-    };
+    auto const currentMousePositionRel =
+        terminal::Coordinate { currentMousePosition.line
+                                   + terminal().viewport().scrollOffset().as<LineOffset>(),
+                               currentMousePosition.column };
     if (terminal().screen().contains(currentMousePosition))
     {
         if (auto hyperlink = terminal().screen().hyperlinkAt(currentMousePositionRel))
@@ -613,7 +590,7 @@ bool TerminalSession::operator()(actions::FollowHyperlink)
 
 bool TerminalSession::operator()(actions::IncreaseFontSize)
 {
-    auto constexpr OnePt = text::font_size{ 1.0 };
+    auto constexpr OnePt = text::font_size { 1.0 };
     // auto const currentFontSize = view().renderer().fontDescriptions().size;
     // auto const newFontSize = currentFontSize + OnePt;
     // setFontSize(newFontSize);
@@ -647,7 +624,7 @@ bool TerminalSession::operator()(actions::OpenConfiguration)
 
 bool TerminalSession::operator()(actions::OpenFileManager)
 {
-    auto const _l = scoped_lock{terminal()};
+    auto const _l = scoped_lock { terminal() };
     auto const& cwd = terminal().screen().currentWorkingDirectory();
     if (!QDesktopServices::openUrl(QUrl(QString::fromUtf8(cwd.c_str()))))
         errorlog()("Could not open file \"{}\".", cwd);
@@ -660,7 +637,7 @@ bool TerminalSession::operator()(actions::PasteClipboard)
     if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
     {
         string const text = clipboard->text(QClipboard::Clipboard).toUtf8().toStdString();
-        terminal().sendPaste(string_view{text});
+        terminal().sendPaste(string_view { text });
     }
 
     return true;
@@ -671,7 +648,7 @@ bool TerminalSession::operator()(actions::PasteSelection)
     if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
     {
         string const text = clipboard->text(QClipboard::Selection).toUtf8().toStdString();
-        terminal().sendPaste(string_view{text});
+        terminal().sendPaste(string_view { text });
     }
 
     return true;
@@ -679,7 +656,7 @@ bool TerminalSession::operator()(actions::PasteSelection)
 
 bool TerminalSession::operator()(actions::Quit)
 {
-    //TODO: later warn here when more then one terminal view is open
+    // TODO: later warn here when more then one terminal view is open
     terminal().device().close();
     exit(EXIT_SUCCESS);
 }
@@ -708,9 +685,9 @@ bool TerminalSession::operator()(actions::ResetFontSize)
 
 bool TerminalSession::operator()(actions::ScreenshotVT)
 {
-    auto _l = lock_guard{ terminal() };
+    auto _l = lock_guard { terminal() };
     auto const screenshot = terminal().screen().screenshot();
-    ofstream ofs{ "screenshot.vt", ios::trunc | ios::binary };
+    ofstream ofs { "screenshot.vt", ios::trunc | ios::binary };
     ofs << screenshot;
     return true;
 }
@@ -783,9 +760,7 @@ bool TerminalSession::operator()(actions::SendChars const& _event)
 
     for (auto const ch: _event.chars)
     {
-        terminal().sendCharPressEvent(static_cast<char32_t>(ch),
-                                      terminal::Modifier::None,
-                                      now);
+        terminal().sendCharPressEvent(static_cast<char32_t>(ch), terminal::Modifier::None, now);
     }
     return true;
 }
@@ -793,10 +768,7 @@ bool TerminalSession::operator()(actions::SendChars const& _event)
 bool TerminalSession::operator()(actions::ToggleAllKeyMaps)
 {
     allowKeyMappings_ = !allowKeyMappings_;
-    LOGSTORE(InputLog)(
-        "{} key mappings.",
-        allowKeyMappings_ ? "Enabling" : "Disabling"
-    );
+    LOGSTORE(InputLog)("{} key mappings.", allowKeyMappings_ ? "Enabling" : "Disabling");
     return true;
 }
 
@@ -819,12 +791,8 @@ void TerminalSession::setDefaultCursor()
     using Type = terminal::ScreenType;
     switch (terminal().screen().bufferType())
     {
-        case Type::Main:
-            display_->setMouseCursorShape(MouseCursorShape::IBeam);
-            break;
-        case Type::Alternate:
-            display_->setMouseCursorShape(MouseCursorShape::Arrow);
-            break;
+    case Type::Main: display_->setMouseCursorShape(MouseCursorShape::IBeam); break;
+    case Type::Alternate: display_->setMouseCursorShape(MouseCursorShape::Arrow); break;
     }
 }
 
@@ -841,9 +809,8 @@ void TerminalSession::sanitizeConfig(config::Config& _config)
 
 bool TerminalSession::reloadConfig(config::Config _newConfig, string const& _profileName)
 {
-    LOGSTORE(SessionLog)("Reloading configuration from {} with profile {}",
-                         _newConfig.backingFilePath.string(),
-                         _profileName);
+    LOGSTORE(SessionLog)
+    ("Reloading configuration from {} with profile {}", _newConfig.backingFilePath.string(), _profileName);
 
     sanitizeConfig(_newConfig);
 
@@ -858,27 +825,22 @@ int TerminalSession::executeAllActions(std::vector<actions::Action> const& _acti
     if (allowKeyMappings_)
     {
         int executionCount = 0;
-        for (actions::Action const& action : _actions)
+        for (actions::Action const& action: _actions)
             if (executeAction(action))
                 ++executionCount;
         scheduleRedraw();
         return executionCount;
     }
 
-    auto const containsToggleKeybind = [](std::vector<actions::Action> const& _actions)
-    {
-        return std::any_of(
-            _actions.begin(),
-            _actions.end(),
-            [](actions::Action const& action) {
-                return holds_alternative<actions::ToggleAllKeyMaps>(action);
-            }
-        );
+    auto const containsToggleKeybind = [](std::vector<actions::Action> const& _actions) {
+        return std::any_of(_actions.begin(), _actions.end(), [](actions::Action const& action) {
+            return holds_alternative<actions::ToggleAllKeyMaps>(action);
+        });
     };
 
     if (containsToggleKeybind(_actions))
     {
-        bool const ex = executeAction(actions::ToggleAllKeyMaps{});
+        bool const ex = executeAction(actions::ToggleAllKeyMaps {});
         scheduleRedraw();
         return ex;
     }
@@ -904,24 +866,23 @@ void TerminalSession::spawnNewTerminal(string const& _profileName)
 {
     auto const wd = [this]() -> string {
 #if defined(__APPLE__)
-        if (auto const* ptyProcess = dynamic_cast<PtyProcess const*>(pty_.get())) {
+        if (auto const* ptyProcess = dynamic_cast<PtyProcess const*>(pty_.get()))
+        {
             return ptyProcess->process().workingDirectory(&ptyProcess->pty());
         }
 #else
-        auto const _l = scoped_lock{terminal_};
+        auto const _l = scoped_lock { terminal_ };
         return terminal_.screen().currentWorkingDirectory();
 #endif
         return "."s;
-        }();
+    }();
 
-    if (config_.spawnNewProcess) {
-        ::contour::spawnNewTerminal(
-            programPath_,
-            config_.backingFilePath.generic_string(),
-            _profileName,
-            wd
-        );
-    } else {
+    if (config_.spawnNewProcess)
+    {
+        ::contour::spawnNewTerminal(programPath_, config_.backingFilePath.generic_string(), _profileName, wd);
+    }
+    else
+    {
         auto config = config_;
         config.profile(profileName_)->shell.workingDirectory = FileSystem::path(wd);
         controller_.newWindow(config);
@@ -946,7 +907,7 @@ void TerminalSession::activateProfile(string const& _newProfileName)
 
 void TerminalSession::configureTerminal()
 {
-    auto const _l = scoped_lock{terminal_};
+    auto const _l = scoped_lock { terminal_ };
     LOGSTORE(SessionLog)("Configuring terminal.");
     auto& screen = terminal_.screen();
 
@@ -960,8 +921,8 @@ void TerminalSession::configureTerminal()
     screen.setSixelCursorConformance(config_.sixelCursorConformance);
     screen.setMaxImageColorRegisters(config_.maxImageColorRegisters);
     screen.setMaxImageSize(config_.maxImageSize);
-    LOGSTORE(SessionLog)("maxImageSize={}, sixelScrolling={}",
-            config_.maxImageSize, config_.sixelScrolling ? "yes" : "no");
+    LOGSTORE(SessionLog)
+    ("maxImageSize={}, sixelScrolling={}", config_.maxImageSize, config_.sixelScrolling ? "yes" : "no");
     screen.setMode(terminal::DECMode::SixelScrolling, config_.sixelScrolling);
 
     // XXX
@@ -1001,11 +962,9 @@ void TerminalSession::configureDisplay()
     display_->setFonts(profile_.fonts);
     // TODO: maybe update margin after this call?
 
-    display_->setHyperlinkDecoration(profile_.hyperlinkDecoration.normal,
-                                     profile_.hyperlinkDecoration.hover);
+    display_->setHyperlinkDecoration(profile_.hyperlinkDecoration.normal, profile_.hyperlinkDecoration.hover);
 
     display_->setWindowTitle(terminal_.screen().windowTitle());
-
 }
 
 uint8_t TerminalSession::matchModeFlags() const
@@ -1037,8 +996,8 @@ void TerminalSession::setFontSize(text::font_size _size)
 
 bool TerminalSession::reloadConfigWithProfile(string const& _profileName)
 {
-    auto newConfig = config::Config{};
-    auto configFailures = int{0};
+    auto newConfig = config::Config {};
+    auto configFailures = int { 0 };
 
     try
     {
@@ -1046,7 +1005,7 @@ bool TerminalSession::reloadConfigWithProfile(string const& _profileName)
     }
     catch (exception const& e)
     {
-        //TODO: logger_.error(e.what());
+        // TODO: logger_.error(e.what());
         errorlog()("Configuration failure. {}", unhandledExceptionMessage(__PRETTY_FUNCTION__, e));
         ++configFailures;
     }
@@ -1094,7 +1053,8 @@ bool TerminalSession::resetConfig()
 void TerminalSession::followHyperlink(terminal::HyperlinkInfo const& _hyperlink)
 {
     auto const fileInfo = QFileInfo(QString::fromStdString(string(_hyperlink.path())));
-    auto const isLocal = _hyperlink.isLocal() && _hyperlink.host() == QHostInfo::localHostName().toStdString();
+    auto const isLocal =
+        _hyperlink.isLocal() && _hyperlink.host() == QHostInfo::localHostName().toStdString();
     auto const editorEnv = getenv("EDITOR");
 
     if (isLocal && fileInfo.isFile() && fileInfo.isExecutable())
@@ -1127,9 +1087,7 @@ bool TerminalSession::requestPermission(config::Permission _allowedByConfig, str
 
 void TerminalSession::onConfigReload(FileChangeWatcher::Event /*_event*/)
 {
-    display_->post([this]() {
-        reloadConfigWithProfile(profileName_);
-    });
+    display_->post([this]() { reloadConfigWithProfile(profileName_); });
 
     // TODO: needed still?
     // if (setScreenDirty())
@@ -1138,4 +1096,4 @@ void TerminalSession::onConfigReload(FileChangeWatcher::Event /*_event*/)
 
 // }}}
 
-} // end namespace
+} // namespace contour

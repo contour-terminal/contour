@@ -13,68 +13,65 @@
  */
 #include <terminal/pty/ConPty.h>
 
-#include <utility>
-
 #include <Windows.h>
+#include <utility>
 
 using namespace std;
 
-namespace {
-    string GetLastErrorAsString()
-    {
-        DWORD errorMessageID = GetLastError();
-        if (errorMessageID == 0)
-            return "";
+namespace
+{
+string GetLastErrorAsString()
+{
+    DWORD errorMessageID = GetLastError();
+    if (errorMessageID == 0)
+        return "";
 
-        LPSTR messageBuffer = nullptr;
-        size_t size = FormatMessageA(
-            FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-            nullptr,
-            errorMessageID,
-            MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-            (LPSTR)& messageBuffer,
-            0,
-            nullptr
-        );
+    LPSTR messageBuffer = nullptr;
+    size_t size = FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM
+                                     | FORMAT_MESSAGE_IGNORE_INSERTS,
+                                 nullptr,
+                                 errorMessageID,
+                                 MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                                 (LPSTR) &messageBuffer,
+                                 0,
+                                 nullptr);
 
-        string message(messageBuffer, size);
+    string message(messageBuffer, size);
 
-        LocalFree(messageBuffer);
+    LocalFree(messageBuffer);
 
-        return message;
-    }
+    return message;
+}
 } // anonymous namespace
 
-namespace terminal {
+namespace terminal
+{
 
-ConPty::ConPty(PageSize const& _windowSize) :
-    size_{ _windowSize }
+ConPty::ConPty(PageSize const& _windowSize): size_ { _windowSize }
 {
     master_ = INVALID_HANDLE_VALUE;
     input_ = INVALID_HANDLE_VALUE;
     output_ = INVALID_HANDLE_VALUE;
 
-    HANDLE hPipePTYIn{ INVALID_HANDLE_VALUE };
-    HANDLE hPipePTYOut{ INVALID_HANDLE_VALUE };
+    HANDLE hPipePTYIn { INVALID_HANDLE_VALUE };
+    HANDLE hPipePTYOut { INVALID_HANDLE_VALUE };
 
     // Create the pipes to which the ConPty will connect to
     if (!CreatePipe(&hPipePTYIn, &output_, NULL, 0))
-        throw runtime_error{ GetLastErrorAsString() };
+        throw runtime_error { GetLastErrorAsString() };
 
     if (!CreatePipe(&input_, &hPipePTYOut, NULL, 0))
     {
         CloseHandle(hPipePTYIn);
-        throw runtime_error{ GetLastErrorAsString() };
+        throw runtime_error { GetLastErrorAsString() };
     }
 
     // Create the Pseudo Console of the required size, attached to the PTY-end of the pipes
-    HRESULT hr = CreatePseudoConsole(
-        { unbox<SHORT>(_windowSize.columns), unbox<SHORT>(_windowSize.lines) },
-        hPipePTYIn,
-        hPipePTYOut,
-        0,
-        &master_
-    );
+    HRESULT hr = CreatePseudoConsole({ unbox<SHORT>(_windowSize.columns), unbox<SHORT>(_windowSize.lines) },
+                                     hPipePTYIn,
+                                     hPipePTYOut,
+                                     0,
+                                     &master_);
 
     if (hPipePTYIn != INVALID_HANDLE_VALUE)
         CloseHandle(hPipePTYIn);
@@ -83,7 +80,7 @@ ConPty::ConPty(PageSize const& _windowSize) :
         CloseHandle(hPipePTYOut);
 
     if (hr != S_OK)
-        throw runtime_error{ GetLastErrorAsString() };
+        throw runtime_error { GetLastErrorAsString() };
 
     buffer_.resize(10240);
 }
@@ -100,7 +97,7 @@ bool ConPty::isClosed() const
 
 void ConPty::close()
 {
-    auto const _ = std::lock_guard{mutex_};
+    auto const _ = std::lock_guard { mutex_ };
 
     if (master_ != INVALID_HANDLE_VALUE)
     {
@@ -136,11 +133,11 @@ optional<string_view> ConPty::read(size_t _size, std::chrono::milliseconds _time
 
     auto const n = static_cast<DWORD>(min(_size, buffer_.size()));
 
-    DWORD nread{};
+    DWORD nread {};
     if (!ReadFile(input_, buffer_.data(), n, &nread, nullptr))
         return nullopt;
 
-    return string_view{buffer_.data(), nread};
+    return string_view { buffer_.data(), nread };
 }
 
 void ConPty::wakeupReader()
@@ -151,7 +148,7 @@ void ConPty::wakeupReader()
 
 int ConPty::write(char const* buf, size_t size)
 {
-    DWORD nwritten{};
+    DWORD nwritten {};
     if (WriteFile(output_, buf, static_cast<DWORD>(size), &nwritten, nullptr))
         return static_cast<int>(nwritten);
     else
@@ -173,9 +170,9 @@ void ConPty::resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels)
 
     HRESULT const result = ResizePseudoConsole(master_, coords);
     if (result != S_OK)
-        throw runtime_error{ GetLastErrorAsString() };
+        throw runtime_error { GetLastErrorAsString() };
 
     size_ = _cells;
 }
 
-}  // namespace terminal
+} // namespace terminal

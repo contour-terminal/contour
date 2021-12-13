@@ -75,4 +75,4 @@ bool MockViewPty::isClosed() const
     return closed_;
 }
 
-}
+} // namespace terminal

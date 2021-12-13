@@ -15,18 +15,24 @@
 
 #include <crispy/times.h>
 
-#include <range/v3/view/iota.hpp>
-
 #include <algorithm>
 #include <cassert>
 #include <deque>
+#include <range/v3/view/iota.hpp>
 #include <sstream>
 
 #if 0 // !defined(NDEBUG)
     #include <iostream>
-    #define CLI_DEBUG(that) do { std::cerr << (that) << std::endl; } while (0)
+    #define CLI_DEBUG(that)                   \
+        do                                    \
+        {                                     \
+            std::cerr << (that) << std::endl; \
+        } while (0)
 #else
-    #define CLI_DEBUG(that) do { } while (0)
+    #define CLI_DEBUG(that) \
+        do                  \
+        {                   \
+        } while (0)
 #endif
 
 /*
@@ -86,7 +92,8 @@ namespace crispy::cli // {{{ Parser
 
 namespace // {{{ helper
 {
-    struct ParseContext {
+    struct ParseContext
+    {
         StringViewList const& args;
         size_t pos = 0;
 
@@ -113,20 +120,14 @@ namespace // {{{ helper
     auto currentToken(ParseContext const& _context) -> string_view
     {
         if (_context.pos >= _context.args.size())
-            return string_view{}; // not enough arguments available
+            return string_view {}; // not enough arguments available
 
         return _context.args.at(_context.pos);
     }
 
-    auto isTrue(string_view _token) -> bool
-    {
-        return _token == "true" || _token == "yes";
-    }
+    auto isTrue(string_view _token) -> bool { return _token == "true" || _token == "yes"; }
 
-    auto isFalse(string_view _token) -> bool
-    {
-        return _token == "false" || _token == "no";
-    }
+    auto isFalse(string_view _token) -> bool { return _token == "false" || _token == "no"; }
 
     bool matchPrefix(string_view _text, string_view _prefix)
     {
@@ -140,7 +141,7 @@ namespace // {{{ helper
 
     Option const* findOption(ParseContext const& _context, string_view _name)
     {
-        for (auto const& option : _context.currentCommand.back()->options)
+        for (auto const& option: _context.currentCommand.back()->options)
             if (option.name == _name)
                 return &option;
         return nullptr;
@@ -165,10 +166,10 @@ namespace // {{{ helper
         if (holds_alternative<bool>(_context.currentOption->value))
         {
             if (isTrue(_text))
-                return Value{true};
+                return Value { true };
 
             if (isFalse(_text))
-                return Value{false};
+                return Value { false };
 
             throw ParserError("Boolean value expected but something else specified.");
         }
@@ -178,7 +179,7 @@ namespace // {{{ helper
         {
             if (holds_alternative<double>(_context.currentOption->value))
             {
-                return Value{stod(string(_text))}; // TODO: avoid malloc
+                return Value { stod(string(_text)) }; // TODO: avoid malloc
             }
         }
         catch (...)
@@ -190,7 +191,7 @@ namespace // {{{ helper
         try
         {
             if (holds_alternative<unsigned>(_context.currentOption->value))
-                return Value{unsigned(stoul(string(_text)))};
+                return Value { unsigned(stoul(string(_text))) };
         }
         catch (...)
         {
@@ -201,7 +202,7 @@ namespace // {{{ helper
         try
         {
             if (holds_alternative<int>(_context.currentOption->value))
-                return Value{stoi(string(_text))};
+                return Value { stoi(string(_text)) };
         }
         catch (...)
         {
@@ -209,8 +210,8 @@ namespace // {{{ helper
         }
 
         // STR
-        return Value{string(_text)};
-    } // }}}
+        return Value { string(_text) };
+    }                                        // }}}
     Value parseValue(ParseContext& _context) // {{{
     {
         if (holds_alternative<bool>(_context.currentOption->value))
@@ -219,38 +220,47 @@ namespace // {{{ helper
             if (isTrue(text))
             {
                 consumeToken(_context);
-                return Value{true};
+                return Value { true };
             }
 
             if (isFalse(text))
             {
                 consumeToken(_context);
-                return Value{false};
+                return Value { false };
             }
 
             // Booleans can be specified just by `--flag` or `flag` without any value
             // and are considered to be true (implicit).
-            return Value{true};
+            return Value { true };
         }
         return parseValue(_context, consumeToken(_context));
     } // }}}
 
-    struct ScopedOption {
+    struct ScopedOption
+    {
         ParseContext& context;
-        ScopedOption(ParseContext& _context, Option const& _option) : context{_context} { context.currentOption = &_option; }
+        ScopedOption(ParseContext& _context, Option const& _option): context { _context }
+        {
+            context.currentOption = &_option;
+        }
         ~ScopedOption() { context.currentOption = nullptr; }
     };
 
-    struct ScopedCommand {
+    struct ScopedCommand
+    {
         ParseContext& context;
-        ScopedCommand(ParseContext& _context, Command const& _command) : context{_context} { context.currentCommand.emplace_back(&_command); }
+        ScopedCommand(ParseContext& _context, Command const& _command): context { _context }
+        {
+            context.currentCommand.emplace_back(&_command);
+        }
         ~ScopedCommand() { context.currentCommand.pop_back(); }
     };
 
     /// Tries parsing an option name and, if matching, also its value if provided.
     ///
     /// @throw ParserError on parserfailures
-    /// @returns nullptr if current token is no option name a pair of an @c Option pointer and its optional value otherwise.
+    /// @returns nullptr if current token is no option name a pair of an @c Option pointer and its optional
+    /// value otherwise.
     optional<pair<Option const*, Value>> tryParseOption(ParseContext& _context)
     {
         // NAME [VALUE]
@@ -269,8 +279,8 @@ namespace // {{{ helper
                     if (valueText.empty() && !holds_alternative<string>(opt->value))
                         throw ParserError("Explicit empty value passed but a non-string value expected.");
 
-                    auto const _optionScope = ScopedOption{_context, *opt};
-                    return pair{opt, parseValue(_context, valueText)};
+                    auto const _optionScope = ScopedOption { _context, *opt };
+                    return pair { opt, parseValue(_context, valueText) };
                 }
             }
             else
@@ -279,8 +289,8 @@ namespace // {{{ helper
                 if (Option const* opt = findOption(_context, name)) // --NAME
                 {
                     consumeToken(_context);
-                    auto const _optionScope = ScopedOption{_context, *opt};
-                    return pair{opt, parseValue(_context)};
+                    auto const _optionScope = ScopedOption { _context, *opt };
+                    return pair { opt, parseValue(_context) };
                 }
             }
         }
@@ -290,8 +300,8 @@ namespace // {{{ helper
             if (Option const* opt = findOption(_context, name)) // -NAME
             {
                 consumeToken(_context);
-                auto const _optionScope = ScopedOption{_context, *opt};
-                return pair{opt, parseValue(_context)};
+                auto const _optionScope = ScopedOption { _context, *opt };
+                return pair { opt, parseValue(_context) };
             }
         }
         else // Natural style option
@@ -300,8 +310,8 @@ namespace // {{{ helper
             if (Option const* opt = findOption(_context, name)) // -NAME
             {
                 consumeToken(_context);
-                auto const _optionScope = ScopedOption{_context, *opt};
-                return pair{opt, parseValue(_context)};
+                auto const _optionScope = ScopedOption { _context, *opt };
+                return pair { opt, parseValue(_context) };
             }
         }
 
@@ -333,11 +343,10 @@ namespace // {{{ helper
 
     auto tryLookupCommand(ParseContext const& _context) -> Command const*
     {
-        auto const token = matchPrefix(currentToken(_context), "--")
-                         ? currentToken(_context).substr(2)
-                         : currentToken(_context);
+        auto const token = matchPrefix(currentToken(_context), "--") ? currentToken(_context).substr(2)
+                                                                     : currentToken(_context);
 
-        for (Command const& command : _context.currentCommand.back()->children)
+        for (Command const& command: _context.currentCommand.back()->children)
         {
             if (token == command.name)
                 return &command;
@@ -360,10 +369,10 @@ namespace // {{{ helper
 
     void prefillDefaults(ParseContext& _context, Command const& _command)
     {
-        auto const _commandScope = ScopedCommand{_context, _command};
+        auto const _commandScope = ScopedCommand { _context, _command };
         auto const prefix = namePrefix(_context) + ".";
 
-        for (Option const& option : _context.currentCommand.back()->options)
+        for (Option const& option: _context.currentCommand.back()->options)
         {
             if (option.presence == Presence::Required)
                 continue; // Do not prefill options that are required anyways.
@@ -373,10 +382,10 @@ namespace // {{{ helper
             setOption(_context, fqdn, option.value);
         }
 
-        for (Command const& _subcmd : _command.children)
+        for (Command const& _subcmd: _command.children)
         {
             auto const fqdn = prefix + Name(_subcmd.name);
-            setOption(_context, fqdn, Value{false});
+            setOption(_context, fqdn, Value { false });
 
             prefillDefaults(_context, _subcmd);
         }
@@ -385,8 +394,8 @@ namespace // {{{ helper
     auto parseCommand(Command const& _command, ParseContext& _context) -> bool
     {
         // Command := NAME Option* Section*
-        auto const _commandScope = ScopedCommand{_context, _command};
-        _context.output.values[namePrefix(_context)] = Value{true};
+        auto const _commandScope = ScopedCommand { _context, _command };
+        _context.output.values[namePrefix(_context)] = Value { true };
 
         parseOptionList(_context);
 
@@ -410,45 +419,45 @@ namespace // {{{ helper
         }
 
         if (_context.pos == _context.args.size())
-            _context.output.values[namePrefix(_context)] = Value{true};
+            _context.output.values[namePrefix(_context)] = Value { true };
 
         // A command must not leave any trailing tokens at the end of parsing
         return _context.pos == _context.args.size();
     }
 
-StringViewList stringViewList(int argc, char const * const * _argv)
-{
-    StringViewList output;
-    output.resize(static_cast<unsigned>(argc));
-
-    for (auto const i: ranges::views::iota(0u, static_cast<unsigned>(argc)))
-        output[i] = _argv[i];
-
-    return output;
-}
-
-void validate(Command const& _command, ParseContext& _context, string const& _keyPrefix)
-{
-    auto const key = _keyPrefix.empty() ? string(_command.name)
-                                        : fmt::format("{}.{}", _keyPrefix, _command.name);
-
-    // Ensure all required fields are provided for those commands that have been provided.
-    for (Option const& option: _command.options)
+    StringViewList stringViewList(int argc, char const* const* _argv)
     {
-        auto const optionKey = fmt::format("{}.{}", key, option.name);
-        if (option.presence == Presence::Required && !_context.output.values.count(optionKey))
-            throw invalid_argument(fmt::format("Missing option: {}", optionKey));
+        StringViewList output;
+        output.resize(static_cast<unsigned>(argc));
+
+        for (auto const i: ranges::views::iota(0u, static_cast<unsigned>(argc)))
+            output[i] = _argv[i];
+
+        return output;
     }
 
-    for (Command const& subcmd: _command.children)
+    void validate(Command const& _command, ParseContext& _context, string const& _keyPrefix)
     {
-        auto const commandKey  = fmt::format("{}.{}", key, subcmd.name);
-        if (_context.output.get<bool>(commandKey))
-            validate(subcmd, _context, key);
-    }
-}
+        auto const key =
+            _keyPrefix.empty() ? string(_command.name) : fmt::format("{}.{}", _keyPrefix, _command.name);
 
-} // }}}
+        // Ensure all required fields are provided for those commands that have been provided.
+        for (Option const& option: _command.options)
+        {
+            auto const optionKey = fmt::format("{}.{}", key, option.name);
+            if (option.presence == Presence::Required && !_context.output.values.count(optionKey))
+                throw invalid_argument(fmt::format("Missing option: {}", optionKey));
+        }
+
+        for (Command const& subcmd: _command.children)
+        {
+            auto const commandKey = fmt::format("{}.{}", key, subcmd.name);
+            if (_context.output.get<bool>(commandKey))
+                validate(subcmd, _context, key);
+        }
+    }
+
+} // namespace
 
 void validate(Command const& _command)
 {
@@ -464,7 +473,7 @@ optional<FlagStore> parse(Command const& _command, StringViewList const& _args)
 {
     validate(_command);
 
-    auto context = ParseContext{ _args };
+    auto context = ParseContext { _args };
 
     prefillDefaults(context, _command);
 
@@ -491,16 +500,13 @@ optional<FlagStore> parse(Command const& _command, int _argc, char const* const*
     return parse(_command, stringViewList(_argc, _argv));
 }
 
-} // }}}
+} // namespace crispy::cli
 namespace crispy::cli // {{{ Help output
 {
 
 namespace // {{{ helpers
 {
-    string spaces(size_t _count)
-    {
-        return string(_count, ' ');
-    }
+    string spaces(size_t _count) { return string(_count, ' '); }
 
     string indent(unsigned _level, unsigned* _cursor = nullptr)
     {
@@ -518,9 +524,9 @@ namespace // {{{ helpers
         return [_style](string_view _text, HelpElement _element) -> string {
             auto const [pre, post] = [&]() -> pair<string_view, string_view> {
                 if (_style.colors.has_value() && _style.colors.value().count(_element))
-                    return {_style.colors.value().at(_element), "\033[m"sv};
+                    return { _style.colors.value().at(_element), "\033[m"sv };
                 else
-                    return {""sv, ""sv};
+                    return { ""sv, ""sv };
             }();
 
             if (!_style.hyperlink)
@@ -566,7 +572,7 @@ namespace // {{{ helpers
 
     auto colorizer(optional<HelpStyle::ColorMap> const& _colors) -> function<string(string_view, HelpElement)>
     {
-        HelpStyle style{};
+        HelpStyle style {};
         style.colors = _colors;
         return stylizer(style);
     }
@@ -639,16 +645,17 @@ namespace // {{{ helpers
             os << colorize("[", HelpElement::Braces);
         switch (_optionStyle)
         {
-            case OptionStyle::Natural:
-                os << colorize(_name, HelpElement::OptionName);
-                if (!_placeholder.empty())
-                    os << ' ' << colorize(_placeholder, HelpElement::OptionValue);
-                break;
-            case OptionStyle::Posix:
-                os << colorize("--", HelpElement::OptionDash) << colorize(_name, HelpElement::OptionName);
-                if (!_placeholder.empty())
-                    os << colorize("=", HelpElement::OptionEqual) << colorize(_placeholder, HelpElement::OptionValue);
-                break;
+        case OptionStyle::Natural:
+            os << colorize(_name, HelpElement::OptionName);
+            if (!_placeholder.empty())
+                os << ' ' << colorize(_placeholder, HelpElement::OptionValue);
+            break;
+        case OptionStyle::Posix:
+            os << colorize("--", HelpElement::OptionDash) << colorize(_name, HelpElement::OptionName);
+            if (!_placeholder.empty())
+                os << colorize("=", HelpElement::OptionEqual)
+                   << colorize(_placeholder, HelpElement::OptionValue);
+            break;
         }
         if (_presense == Presence::Optional)
             os << colorize("]", HelpElement::Braces);
@@ -661,29 +668,36 @@ namespace // {{{ helpers
                        OptionStyle _optionStyle)
     {
         // TODO: make use of _option.placeholder
-        auto const placeholder = [](Option const& _option, string_view _type) -> string_view
-        {
+        auto const placeholder = [](Option const& _option, string_view _type) -> string_view {
             return !_option.placeholder.empty() ? _option.placeholder : _type;
         };
 
         if (holds_alternative<bool>(_option.value))
-            return printParam(_colors, _optionStyle, _option.name, placeholder(_option, ""), _option.presence);
+            return printParam(
+                _colors, _optionStyle, _option.name, placeholder(_option, ""), _option.presence);
         else if (holds_alternative<int>(_option.value))
-            return printParam(_colors, _optionStyle, _option.name, placeholder(_option, "INT"), _option.presence);
+            return printParam(
+                _colors, _optionStyle, _option.name, placeholder(_option, "INT"), _option.presence);
         else if (holds_alternative<unsigned int>(_option.value))
-            return printParam(_colors, _optionStyle, _option.name, placeholder(_option, "UINT"), _option.presence);
+            return printParam(
+                _colors, _optionStyle, _option.name, placeholder(_option, "UINT"), _option.presence);
         else if (holds_alternative<double>(_option.value))
-            return printParam(_colors, _optionStyle, _option.name, placeholder(_option, "FLOAT"), _option.presence);
+            return printParam(
+                _colors, _optionStyle, _option.name, placeholder(_option, "FLOAT"), _option.presence);
         else
-            return printParam(_colors, _optionStyle, _option.name, placeholder(_option, "STRING"), _option.presence);
+            return printParam(
+                _colors, _optionStyle, _option.name, placeholder(_option, "STRING"), _option.presence);
     }
 
     string printOption(Option const& _option,
                        optional<HelpStyle::ColorMap> const& _colors,
                        OptionStyle _displayStyle,
-                       unsigned _indent, unsigned _margin, unsigned* _cursor)
+                       unsigned _indent,
+                       unsigned _margin,
+                       unsigned* _cursor)
     {
-        auto const plainTextLength = static_cast<unsigned>(printOption(_option, nullopt, _displayStyle).size());
+        auto const plainTextLength =
+            static_cast<unsigned>(printOption(_option, nullopt, _displayStyle).size());
         if (*_cursor + plainTextLength < _margin)
         {
             *_cursor += plainTextLength;
@@ -699,24 +713,28 @@ namespace // {{{ helpers
     size_t longestOptionText(OptionList const& _options, OptionStyle _displayStyle)
     {
         size_t result = 0;
-        for (Option const& option : _options)
+        for (Option const& option: _options)
             result = max(result, printOption(option, nullopt, _displayStyle).size());
         return result;
     }
 
-    void detailedDescription(ostream& _os, Command const& _command,
-                             HelpStyle const& _style, unsigned _margin, vector<Command const*>& _parents)
+    void detailedDescription(ostream& _os,
+                             Command const& _command,
+                             HelpStyle const& _style,
+                             unsigned _margin,
+                             vector<Command const*>& _parents)
     {
         // NOTE: We asume that cursor position is at first column!
         auto const stylize = stylizer(_style);
         bool const hasParentCommand = !_parents.empty();
         bool const isLeafCommand = _command.children.empty();
 
-        if (isLeafCommand || !_command.options.empty() || _command.verbatim.has_value()) // {{{ print command sequence
+        if (isLeafCommand || !_command.options.empty()
+            || _command.verbatim.has_value()) // {{{ print command sequence
         {
             _os << indent(1);
-            for (Command const* parent : _parents)
-                _os << stylize(parent->name, HelpElement::OptionValue/*well, yeah*/) << ' ';
+            for (Command const* parent: _parents)
+                _os << stylize(parent->name, HelpElement::OptionValue /*well, yeah*/) << ' ';
 
             if (_command.select == CommandSelect::Explicit)
                 _os << _command.name;
@@ -733,7 +751,9 @@ namespace // {{{ helpers
             {
                 unsigned cursor = 1;
                 _os << indent(2, &cursor);
-                _os << stylize(wordWrapped(_command.helpText, cursor, _margin, &cursor), HelpElement::HelpText) << "\n\n";
+                _os << stylize(wordWrapped(_command.helpText, cursor, _margin, &cursor),
+                               HelpElement::HelpText)
+                    << "\n\n";
             }
         }
         // }}}
@@ -744,19 +764,23 @@ namespace // {{{ helpers
             auto const leftPadding = indent(3);
             auto const minRightPadSize = 2;
             auto const maxOptionTextSize = longestOptionText(_command.options, _style.optionStyle);
-            auto const columnWidth = static_cast<unsigned>(leftPadding.size() + maxOptionTextSize + minRightPadSize);
+            auto const columnWidth =
+                static_cast<unsigned>(leftPadding.size() + maxOptionTextSize + minRightPadSize);
 
-            for (Option const& option : _command.options)
+            for (Option const& option: _command.options)
             {
-                auto const leftSize = leftPadding.size() + printOption(option, nullopt, _style.optionStyle).size();
+                auto const leftSize =
+                    leftPadding.size() + printOption(option, nullopt, _style.optionStyle).size();
                 assert(columnWidth >= leftSize);
                 auto const actualRightPaddingSize = columnWidth - leftSize;
-                auto const left = leftPadding + printOption(option, _style.colors, _style.optionStyle) + spaces(actualRightPaddingSize);
+                auto const left = leftPadding + printOption(option, _style.colors, _style.optionStyle)
+                                  + spaces(actualRightPaddingSize);
 
                 _os << left;
 
                 auto cursor = columnWidth + 1;
-                _os << stylize(wordWrapped(option.helpText, columnWidth, _margin, &cursor), HelpElement::HelpText);
+                _os << stylize(wordWrapped(option.helpText, columnWidth, _margin, &cursor),
+                               HelpElement::HelpText);
 
                 // {{{ append default value, if any
                 auto const defaultValueStr = fmt::format("{}", option.value);
@@ -764,11 +788,11 @@ namespace // {{{ helpers
                     || (holds_alternative<bool>(option.value) && get<bool>(option.value)))
                 {
                     auto const DefaultTextPrefix = string("default:");
-                    auto const defaultText = stylize("[", HelpElement::Braces)
-                                           + DefaultTextPrefix + " "
-                                           + stylize(defaultValueStr, HelpElement::OptionValue)
-                                           + stylize("]", HelpElement::Braces);
-                    auto const defaultTextLength = 1 + DefaultTextPrefix.size() + 1 + defaultValueStr.size() + 1;
+                    auto const defaultText = stylize("[", HelpElement::Braces) + DefaultTextPrefix + " "
+                                             + stylize(defaultValueStr, HelpElement::OptionValue)
+                                             + stylize("]", HelpElement::Braces);
+                    auto const defaultTextLength =
+                        1 + DefaultTextPrefix.size() + 1 + defaultValueStr.size() + 1;
                     if (cursor + defaultTextLength > _margin)
                         _os << "\n" << spaces(columnWidth) << defaultText;
                     else
@@ -781,18 +805,18 @@ namespace // {{{ helpers
             if (_command.verbatim.has_value())
             {
                 auto const& verbatim = _command.verbatim.value();
-                auto const leftSize = static_cast<unsigned>(leftPadding.size() + 2 + verbatim.placeholder.size());
+                auto const leftSize =
+                    static_cast<unsigned>(leftPadding.size() + 2 + verbatim.placeholder.size());
                 assert(columnWidth > leftSize);
                 auto const actualRightPaddingSize = columnWidth - leftSize;
-                auto const left = leftPadding
-                    + stylize("[", HelpElement::Braces)
-                    + stylize(verbatim.placeholder, HelpElement::Verbatim)
-                    + stylize("]", HelpElement::Braces)
-                    + spaces(actualRightPaddingSize);
+                auto const left = leftPadding + stylize("[", HelpElement::Braces)
+                                  + stylize(verbatim.placeholder, HelpElement::Verbatim)
+                                  + stylize("]", HelpElement::Braces) + spaces(actualRightPaddingSize);
 
                 _os << left;
                 auto cursor = columnWidth + 1;
-                _os << stylize(wordWrapped(verbatim.helpText, columnWidth, _margin, &cursor), HelpElement::HelpText);
+                _os << stylize(wordWrapped(verbatim.helpText, columnWidth, _margin, &cursor),
+                               HelpElement::HelpText);
                 _os << '\n';
             }
             _os << '\n';
@@ -801,7 +825,7 @@ namespace // {{{ helpers
         if (!_command.children.empty()) // {{{ recurse to sub commands
         {
             _parents.emplace_back(&_command);
-            for (Command const& subcmd : _command.children)
+            for (Command const& subcmd: _command.children)
                 detailedDescription(_os, subcmd, _style, _margin, _parents);
             _parents.pop_back();
         } // }}}
@@ -812,20 +836,16 @@ namespace // {{{ helpers
         vector<Command const*> parents;
         detailedDescription(_os, _command, _style, _margin, parents);
     }
-} // }}}
+} // namespace
 
 HelpStyle::ColorMap HelpStyle::defaultColors()
 {
-    return ColorMap{
-        {HelpElement::Header, "\033[32;1;4:2m"},
-        {HelpElement::Braces, "\033[37;1m"},
-        {HelpElement::OptionDash, "\033[34;1m"},
-        {HelpElement::OptionName, "\033[37m"},
-        {HelpElement::OptionEqual, "\033[34;1m"},
-        {HelpElement::OptionValue, "\033[36m"},
-        {HelpElement::ImplicitCommand, "\033[33;1m"},
-        {HelpElement::Verbatim, "\033[36m"},
-        {HelpElement::HelpText, "\033[38m"},
+    return ColorMap {
+        { HelpElement::Header, "\033[32;1;4:2m" },      { HelpElement::Braces, "\033[37;1m" },
+        { HelpElement::OptionDash, "\033[34;1m" },      { HelpElement::OptionName, "\033[37m" },
+        { HelpElement::OptionEqual, "\033[34;1m" },     { HelpElement::OptionValue, "\033[36m" },
+        { HelpElement::ImplicitCommand, "\033[33;1m" }, { HelpElement::Verbatim, "\033[36m" },
+        { HelpElement::HelpText, "\033[38m" },
     };
 }
 
@@ -841,12 +861,10 @@ string usageText(Command const& _command, HelpStyle const& _style, unsigned _mar
     auto const colorize = colorizer(_style.colors);
     auto const indentationWidth = static_cast<unsigned>(_cmdPrefix.size());
 
-    auto const printOptionList = [&](ostream& _os, OptionList const& _options, unsigned* _cursor)
-    {
+    auto const printOptionList = [&](ostream& _os, OptionList const& _options, unsigned* _cursor) {
         auto const indent = *_cursor;
-        for (Option const& option : _options)
-            _os << ' ' << printOption(option, _style.colors, _style.optionStyle,
-                                      indent, _margin, _cursor);
+        for (Option const& option: _options)
+            _os << ' ' << printOption(option, _style.colors, _style.optionStyle, indent, _margin, _cursor);
     };
 
     auto cursor = indentationWidth + 1;
@@ -898,7 +916,7 @@ string usageText(Command const& _command, HelpStyle const& _style, unsigned _mar
 
         string const prefixStr = prefix.str();
         stringstream sstr;
-        for (Command const& subcmd : _command.children)
+        for (Command const& subcmd: _command.children)
             sstr << usageText(subcmd, _style, _margin, prefixStr);
         if (_command.children.empty())
             sstr << '\n';
@@ -918,7 +936,7 @@ string helpText(Command const& _command, HelpStyle const& _style, unsigned _marg
     output << usageText(_command, _style, _margin, indent(1));
     output << '\n';
 
-    auto constexpr DescriptionHeader = string_view{"Detailed description:"};
+    auto constexpr DescriptionHeader = string_view { "Detailed description:" };
 
     output << "  " << stylize(DescriptionHeader, HelpElement::Header) << "\n\n";
     detailedDescription(output, _command, _style, _margin);
@@ -926,4 +944,4 @@ string helpText(Command const& _command, HelpStyle const& _style, unsigned _marg
     return output.str();
 }
 
-} // }}}
+} // namespace crispy::cli

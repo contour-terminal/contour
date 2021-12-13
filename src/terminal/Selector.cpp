@@ -11,56 +11,54 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/Selector.h>
 #include <terminal/Screen.h>
+#include <terminal/Selector.h>
 #include <terminal/Terminal.h>
+
 #include <crispy/times.h>
+
 #include <cassert>
 
 using namespace std;
 
-namespace terminal {
+namespace terminal
+{
 
 namespace // {{{ helper
 {
 
-tuple<vector<Selection::Range>, Coordinate const, Coordinate const> prepare(Selection const& _selection)
-{
-    vector<Selection::Range> result;
+    tuple<vector<Selection::Range>, Coordinate const, Coordinate const> prepare(Selection const& _selection)
+    {
+        vector<Selection::Range> result;
 
-    auto const [from, to] = [&]() {
-        if (_selection.from() <= _selection.to())
-            return pair{_selection.from(), _selection.to()};
-        else
-            return pair{_selection.to(), _selection.from()};
-    }();
+        auto const [from, to] = [&]() {
+            if (_selection.from() <= _selection.to())
+                return pair { _selection.from(), _selection.to() };
+            else
+                return pair { _selection.to(), _selection.from() };
+        }();
 
-    auto const numLines = to.line - from.line + 1;
-    result.resize(numLines.as<size_t>());
+        auto const numLines = to.line - from.line + 1;
+        result.resize(numLines.as<size_t>());
 
-    return {move(result), from, to};
-}
+        return { move(result), from, to };
+    }
 
-// Constructs a top-left and bottom-right coordinate-pair from given input.
-constexpr pair<Coordinate, Coordinate> orderedPoints(Coordinate a, Coordinate b) noexcept
-{
-    auto const topLeft = Coordinate{
-        min(a.line, b.line),
-        min(a.column, b.column)
-    };
-    auto const bottomRight = Coordinate{
-        max(a.line, b.line),
-        max(a.column, b.column)
-    };
-    return pair{topLeft, bottomRight};
-}
+    // Constructs a top-left and bottom-right coordinate-pair from given input.
+    constexpr pair<Coordinate, Coordinate> orderedPoints(Coordinate a, Coordinate b) noexcept
+    {
+        auto const topLeft = Coordinate { min(a.line, b.line), min(a.column, b.column) };
+        auto const bottomRight = Coordinate { max(a.line, b.line), max(a.column, b.column) };
+        return pair { topLeft, bottomRight };
+    }
 
-} // }}}
+} // namespace
 
 // {{{ Selection
 void Selection::extend(Coordinate _to)
 {
-    assert(state_ != State::Complete && "In order extend a selection, the selector must be active (started).");
+    assert(state_ != State::Complete
+           && "In order extend a selection, the selector must be active (started).");
     state_ = State::InProgress;
     to_ = _to;
 }
@@ -98,8 +96,7 @@ Coordinate Selection::stretchedColumn(SelectionHelper const& _grid, Coordinate _
 
 bool Selection::contains(Coordinate _coord) const noexcept
 {
-    return crispy::ascending(from_, _coord, to_)
-        || crispy::ascending(to_, _coord, from_);
+    return crispy::ascending(from_, _coord, to_) || crispy::ascending(to_, _coord, from_);
 }
 
 bool Selection::intersects(Rect _area) const noexcept
@@ -107,7 +104,7 @@ bool Selection::intersects(Rect _area) const noexcept
     // TODO: make me more efficient
     for (auto line = _area.top.as<LineOffset>(); line <= _area.bottom.as<LineOffset>(); ++line)
         for (auto col = _area.left.as<ColumnOffset>(); col <= _area.right.as<ColumnOffset>(); ++col)
-            if (contains({line, col}))
+            if (contains({ line, col }))
                 return true;
 
     return false;
@@ -120,26 +117,24 @@ std::vector<Selection::Range> Selection::ranges() const
 
     switch (result.size())
     {
-        case 1:
-            result[0] = Range{from.line, from.column, min(to.column, rightMargin)};
-            break;
-        case 2:
-            // Render first line partial from selected column to end.
-            result[0] = Range{from.line, from.column, rightMargin};
-            // Render last (second) line partial from beginning to last selected column.
-            result[1] = Range{to.line, ColumnOffset(0), min(to.column, rightMargin)};
-            break;
-        default:
-            // Render first line partial from selected column to end.
-            result[0] = Range{from.line, from.column, rightMargin};
+    case 1: result[0] = Range { from.line, from.column, min(to.column, rightMargin) }; break;
+    case 2:
+        // Render first line partial from selected column to end.
+        result[0] = Range { from.line, from.column, rightMargin };
+        // Render last (second) line partial from beginning to last selected column.
+        result[1] = Range { to.line, ColumnOffset(0), min(to.column, rightMargin) };
+        break;
+    default:
+        // Render first line partial from selected column to end.
+        result[0] = Range { from.line, from.column, rightMargin };
 
-            // Render inner full.
-            for (size_t n = 1; n < result.size(); ++n)
-                result[n] = Range{from.line + LineOffset::cast_from(n), ColumnOffset(0), rightMargin};
+        // Render inner full.
+        for (size_t n = 1; n < result.size(); ++n)
+            result[n] = Range { from.line + LineOffset::cast_from(n), ColumnOffset(0), rightMargin };
 
-            // Render last (second) line partial from beginning to last selected column.
-            result[result.size() - 1] = Range{to.line, ColumnOffset(0), min(to.column, rightMargin)};
-            break;
+        // Render last (second) line partial from beginning to last selected column.
+        result[result.size() - 1] = Range { to.line, ColumnOffset(0), min(to.column, rightMargin) };
+        break;
     }
 
     return result;
@@ -163,8 +158,10 @@ Coordinate WordWiseSelection::extendSelectionBackward(Coordinate _pos) const noe
 {
     auto last = _pos;
     auto current = last;
-    for (;;) {
-        auto const wrapIntoPreviousLine = *current.column == 0 && *current.line > 0 && helper_.wrappedLine(current.line);
+    for (;;)
+    {
+        auto const wrapIntoPreviousLine =
+            *current.column == 0 && *current.line > 0 && helper_.wrappedLine(current.line);
         if (*current.column > 0)
             current.column--;
         else if (*current.line > 0 || wrapIntoPreviousLine)
@@ -187,19 +184,19 @@ Coordinate WordWiseSelection::extendSelectionForward(Coordinate _pos) const noex
 {
     auto last = _pos;
     auto current = last;
-    for (;;) {
-        if (*current.column == *helper_.pageSize().columns - 1 &&
-            *current.line + 1 < *helper_.pageSize().lines &&
-            helper_.wrappedLine(current.line))
+    for (;;)
+    {
+        if (*current.column == *helper_.pageSize().columns - 1
+            && *current.line + 1 < *helper_.pageSize().lines && helper_.wrappedLine(current.line))
         {
             current.line++;
             current.column = ColumnOffset(0);
-            current = stretchedColumn(helper_, {current.line, current.column + 1});
+            current = stretchedColumn(helper_, { current.line, current.column + 1 });
         }
 
         if (*current.column + 1 < *helper_.pageSize().columns)
         {
-            current = stretchedColumn(helper_, {current.line, current.column + 1});
+            current = stretchedColumn(helper_, { current.line, current.column + 1 });
         }
         else if (*current.line + 1 < *helper_.pageSize().lines)
         {
@@ -242,7 +239,7 @@ bool RectangularSelection::contains(Coordinate _coord) const noexcept
     auto const [from, to] = orderedPoints(from_, to_);
 
     return crispy::ascending(from.line, _coord.line, to.line)
-        && crispy::ascending(from.column, _coord.column, to.column);
+           && crispy::ascending(from.column, _coord.column, to.column);
 }
 
 bool RectangularSelection::intersects(Rect _area) const noexcept
@@ -259,17 +256,14 @@ bool RectangularSelection::intersects(Rect _area) const noexcept
 
     // selection starts at area-top
     if (from.line == _area.top.as<LineOffset>())
-        return _area.left.as<ColumnOffset>() <= from.column &&
-               from.column <= _area.right.as<ColumnOffset>();
+        return _area.left.as<ColumnOffset>() <= from.column && from.column <= _area.right.as<ColumnOffset>();
 
     // selection ends at area-top
     if (to.line == _area.bottom.as<LineOffset>())
-        return _area.left.as<ColumnOffset>() <= to.column &&
-               to.column <= _area.right.as<ColumnOffset>();
+        return _area.left.as<ColumnOffset>() <= to.column && to.column <= _area.right.as<ColumnOffset>();
 
     // innser
-    return _area.top.as<LineOffset>() < from.line &&
-           to.line < _area.bottom.as<LineOffset>();
+    return _area.top.as<LineOffset>() < from.line && to.line < _area.bottom.as<LineOffset>();
 }
 
 vector<Selection::Range> RectangularSelection::ranges() const
@@ -284,8 +278,8 @@ vector<Selection::Range> RectangularSelection::ranges() const
     {
         auto const line = from.line + LineOffset::cast_from(i);
         auto const left = from.column;
-        auto const right= stretchedColumn(helper_, Coordinate{line, to.column}).column;
-        result[i] = Range{line, left, right};
+        auto const right = stretchedColumn(helper_, Coordinate { line, to.column }).column;
+        result[i] = Range { line, left, right };
     }
 
     return result;

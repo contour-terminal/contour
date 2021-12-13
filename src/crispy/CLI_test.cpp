@@ -12,13 +12,16 @@
  * limitations under the License.
  */
 #include <crispy/CLI.h>
+
 #include <fmt/format.h>
+
 #include <catch2/catch_all.hpp>
 
 // TODO API / impl:
 //
 // - [ ] int-casts in cli.h are a nightmare. use size_t when applicable then.
-// - [ ] Add ValueDef { Value defaultValue; std::string_view placeholder; } and use this where Value{} was used.
+// - [ ] Add ValueDef { Value defaultValue; std::string_view placeholder; } and use this where Value{} was
+// used.
 // - [x] option presence validation (optional, required)
 // - [x] option variation parsing: posix
 // - [x] usage output
@@ -55,79 +58,76 @@ using namespace std::string_literals;
 
 TEST_CASE("CLI.option.type.bool")
 {
-    auto const cmd = cli::Command{
+    auto const cmd = cli::Command {
         "contour",
         "help here",
-        cli::OptionList{
-            cli::Option{"verbose"sv, cli::Value{false}, "Help text here"sv}
-        },
+        cli::OptionList { cli::Option { "verbose"sv, cli::Value { false }, "Help text here"sv } },
     };
 
-    SECTION("set") {
-        auto const args = cli::StringViewList{"contour", "verbose"};
+    SECTION("set")
+    {
+        auto const args = cli::StringViewList { "contour", "verbose" };
         optional<cli::FlagStore> const flagsOpt = cli::parse(cmd, args);
         REQUIRE(flagsOpt.has_value());
-        CHECK(flagsOpt.value().values.at("contour.verbose") == cli::Value{true});
+        CHECK(flagsOpt.value().values.at("contour.verbose") == cli::Value { true });
     }
 
-    SECTION("set true") {
-        auto const args = cli::StringViewList{"contour", "verbose", "true"};
+    SECTION("set true")
+    {
+        auto const args = cli::StringViewList { "contour", "verbose", "true" };
         optional<cli::FlagStore> const flagsOpt = cli::parse(cmd, args);
         REQUIRE(flagsOpt.has_value());
-        CHECK(flagsOpt.value().values.at("contour.verbose") == cli::Value{true});
+        CHECK(flagsOpt.value().values.at("contour.verbose") == cli::Value { true });
     }
 
-    SECTION("set true") {
-        auto const args = cli::StringViewList{"contour", "verbose", "false"};
+    SECTION("set true")
+    {
+        auto const args = cli::StringViewList { "contour", "verbose", "false" };
         optional<cli::FlagStore> const flagsOpt = cli::parse(cmd, args);
         REQUIRE(flagsOpt.has_value());
-        CHECK(flagsOpt.value().values.at("contour.verbose") == cli::Value{false});
+        CHECK(flagsOpt.value().values.at("contour.verbose") == cli::Value { false });
     }
 
-    SECTION("unset") {
-        auto const args = cli::StringViewList{"contour"};
+    SECTION("unset")
+    {
+        auto const args = cli::StringViewList { "contour" };
         optional<cli::FlagStore> const flagsOpt = cli::parse(cmd, args);
         REQUIRE(flagsOpt.has_value());
-        CHECK(flagsOpt.value().values.at("contour.verbose") == cli::Value{false});
+        CHECK(flagsOpt.value().values.at("contour.verbose") == cli::Value { false });
     }
 }
 
 TEST_CASE("CLI.contour-full-test")
 {
-    auto const cmd = cli::Command{
+    auto const cmd = cli::Command {
         "contour",
         "help here",
-        cli::OptionList{
-            cli::Option{"debug"sv, cli::Value{""s}, "Help text here"sv},
-            cli::Option{"config", cli::Value{"~/.config/contour/contour.yml"s}, "Help text there"sv},
-            cli::Option{"profile", cli::Value{""s}, "Help text over here"sv}
-        },
-        cli::CommandList{
-            cli::Command{
-                "capture",
-                "some capture help text",
-                {
-                    cli::Option{"logical", cli::Value{false}, "help there"},
-                    cli::Option{"timeout", cli::Value{1.0}, "help here"},
-                    cli::Option{"output", cli::Value{""s}},
-                }
-            }
-        }
+        cli::OptionList {
+            cli::Option { "debug"sv, cli::Value { ""s }, "Help text here"sv },
+            cli::Option { "config", cli::Value { "~/.config/contour/contour.yml"s }, "Help text there"sv },
+            cli::Option { "profile", cli::Value { ""s }, "Help text over here"sv } },
+        cli::CommandList { cli::Command { "capture",
+                                          "some capture help text",
+                                          {
+                                              cli::Option { "logical", cli::Value { false }, "help there" },
+                                              cli::Option { "timeout", cli::Value { 1.0 }, "help here" },
+                                              cli::Option { "output", cli::Value { ""s } },
+                                          } } }
     };
 
-    auto const args = cli::StringViewList{"contour", "capture", "logical", "output", "out.vt"};
+    auto const args = cli::StringViewList { "contour", "capture", "logical", "output", "out.vt" };
     optional<cli::FlagStore> const flagsOpt = cli::parse(cmd, args);
     REQUIRE(flagsOpt.has_value());
 
     cli::FlagStore const& flags = flagsOpt.value();
 
     CHECK(flags.values.size() == 8);
-    CHECK(flags.values.at("contour") == cli::Value{true}); // command
-    CHECK(flags.values.at("contour.debug") == cli::Value{""s});
-    CHECK(flags.values.at("contour.config") == cli::Value{"~/.config/contour/contour.yml"s});
-    CHECK(flags.values.at("contour.profile") == cli::Value{""s});
-    CHECK(flags.values.at("contour.capture") == cli::Value{true}); // command
-    CHECK(flags.values.at("contour.capture.logical") == cli::Value{true});
-    CHECK(flags.values.at("contour.capture.output") == cli::Value{"out.vt"s});
-    CHECK(flags.values.at("contour.capture.timeout") == cli::Value{1.0});
+    CHECK(flags.values.at("contour") == cli::Value { true }); // command
+    CHECK(flags.values.at("contour.debug") == cli::Value { ""s });
+    CHECK(flags.values.at("contour.config") == cli::Value { "~/.config/contour/contour.yml"s });
+    CHECK(flags.values.at("contour.profile") == cli::Value { ""s });
+    CHECK(flags.values.at("contour.capture") == cli::Value { true }); // command
+    CHECK(flags.values.at("contour.capture.logical") == cli::Value { true });
+    CHECK(flags.values.at("contour.capture.output") == cli::Value { "out.vt"s });
+    CHECK(flags.values.at("contour.capture.timeout") == cli::Value { 1.0 });
 }

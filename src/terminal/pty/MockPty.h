@@ -17,10 +17,11 @@
 
 #include <string>
 
-namespace terminal {
+namespace terminal
+{
 
 /// Mock-PTY, to be used in unit tests.
-class MockPty : public Pty
+class MockPty: public Pty
 {
   public:
     explicit MockPty(PageSize windowSize);
@@ -61,4 +62,4 @@ class MockPty : public Pty
     bool closed_ = false;
 };
 
-} // end namespace
+} // namespace terminal

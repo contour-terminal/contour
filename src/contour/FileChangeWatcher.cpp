@@ -12,16 +12,16 @@
  * limitations under the License.
  */
 #include "FileChangeWatcher.h"
-#include <thread>
+
 #include <chrono>
+#include <thread>
 
 using namespace std;
 
-FileChangeWatcher::FileChangeWatcher(FileSystem::path _filePath, Notifier _notifier) :
-    filePath_{ move(_filePath) },
-    notifier_{ move(_notifier) },
-    exit_{ false },
-    watcher_{ [this]() { watch(); } }
+FileChangeWatcher::FileChangeWatcher(FileSystem::path _filePath, Notifier _notifier):
+    filePath_ { move(_filePath) }, notifier_ { move(_notifier) }, exit_ { false }, watcher_ { [this]() {
+        watch();
+    } }
 {
 }
 

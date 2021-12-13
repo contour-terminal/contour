@@ -14,11 +14,11 @@
 #pragma once
 
 #include <terminal/InputGenerator.h>
-#include <terminal/pty/Pty.h>
+#include <terminal/RenderBuffer.h>
 #include <terminal/ScreenEvents.h>
 #include <terminal/Selector.h>
 #include <terminal/Viewport.h>
-#include <terminal/RenderBuffer.h>
+#include <terminal/pty/Pty.h>
 
 #include <fmt/format.h>
 
@@ -31,9 +31,11 @@
 #include <thread>
 #include <vector>
 
-namespace terminal {
+namespace terminal
+{
 
-template <typename EventListener> class Screen;
+template <typename EventListener>
+class Screen;
 
 /// Terminal API to manage input and output devices of a pseudo terminal, such as keyboard, mouse, and screen.
 ///
@@ -43,8 +45,9 @@ template <typename EventListener> class Screen;
 /// send(...) member functions.
 class Terminal
 {
-public:
-    class Events {
+  public:
+    class Events
+    {
       public:
         virtual ~Events() = default;
 
@@ -72,11 +75,11 @@ public:
              Events& _eventListener,
              LineCount _maxHistoryLineCount = LineCount(0),
              LineOffset _copyLastMarkRangeOffset = LineOffset(0),
-             std::chrono::milliseconds _cursorBlinkInterval = std::chrono::milliseconds{500},
+             std::chrono::milliseconds _cursorBlinkInterval = std::chrono::milliseconds { 500 },
              std::chrono::steady_clock::time_point _now = std::chrono::steady_clock::now(),
              std::string const& _wordDelimiters = "",
              Modifier _mouseProtocolBypassModifier = Modifier::Shift,
-             ImageSize _maxImageSize = ImageSize{Width(800), Height(600)},
+             ImageSize _maxImageSize = ImageSize { Width(800), Height(600) },
              int _maxImageColorRegisters = 256,
              bool _sixelCursorConformance = true,
              ColorPalette _colorPalette = {},
@@ -193,8 +196,16 @@ public:
     RenderBufferState renderBufferState() const noexcept { return renderBuffer_.state; }
     // }}}
 
-    void lock() const { outerLock_.lock(); innerLock_.lock(); }
-    void unlock() const { outerLock_.unlock(); innerLock_.unlock(); }
+    void lock() const
+    {
+        outerLock_.lock();
+        innerLock_.lock();
+    }
+    void unlock() const
+    {
+        outerLock_.unlock();
+        innerLock_.unlock();
+    }
 
     /// Only access this when having the terminal object locked.
     Screen<Terminal> const& screen() const noexcept { return screen_; }
@@ -217,24 +228,17 @@ public:
 
     bool cursorCurrentlyVisible() const noexcept
     {
-        return screen_.cursor().visible
-            && (cursorDisplay_ == CursorDisplay::Steady || cursorBlinkState_);
+        return screen_.cursor().visible && (cursorDisplay_ == CursorDisplay::Steady || cursorBlinkState_);
     }
 
-    std::chrono::steady_clock::time_point lastCursorBlink() const noexcept
-    {
-        return lastCursorBlink_;
-    }
+    std::chrono::steady_clock::time_point lastCursorBlink() const noexcept { return lastCursorBlink_; }
 
     constexpr void setCursorBlinkingInterval(std::chrono::milliseconds _value)
     {
         cursorBlinkInterval_ = _value;
     }
 
-    constexpr std::chrono::milliseconds cursorBlinkInterval() const noexcept
-    {
-        return cursorBlinkInterval_;
-    }
+    constexpr std::chrono::milliseconds cursorBlinkInterval() const noexcept { return cursorBlinkInterval_; }
     // }}}
 
     // {{{ selection management
@@ -249,22 +253,30 @@ public:
     void renderSelection(RenderTarget _renderTarget) const
     {
         if (selection_)
-            terminal::renderSelection(*selection_, [&](Coordinate _pos) { _renderTarget(_pos, screen_.at(_pos)); });
+            terminal::renderSelection(*selection_,
+                                      [&](Coordinate _pos) { _renderTarget(_pos, screen_.at(_pos)); });
     }
 
     void clearSelection();
 
     /// Tests whether some area has been selected.
-    bool isSelectionAvailable() const noexcept { return selection_ && selection_->state() != Selection::State::Waiting; }
-    bool isSelectionInProgress() const noexcept { return selection_ && selection_->state() != Selection::State::Complete; }
-    bool isSelectionComplete() const noexcept { return selection_ && selection_->state() == Selection::State::Complete; }
+    bool isSelectionAvailable() const noexcept
+    {
+        return selection_ && selection_->state() != Selection::State::Waiting;
+    }
+    bool isSelectionInProgress() const noexcept
+    {
+        return selection_ && selection_->state() != Selection::State::Complete;
+    }
+    bool isSelectionComplete() const noexcept
+    {
+        return selection_ && selection_->state() == Selection::State::Complete;
+    }
 
     /// Tests whether given absolute coordinate is covered by a current selection.
     bool isSelected(Coordinate _coord) const noexcept
     {
-        return selection_
-            && selection_->state() != Selection::State::Waiting
-            && selection_->contains(_coord);
+        return selection_ && selection_->state() != Selection::State::Waiting && selection_->contains(_coord);
     }
 
     /// Sets or resets to a new selection.
@@ -332,7 +344,7 @@ public:
     bool updateCursorHoveringState();
 
     template <typename Renderer, typename... RemainingPasses>
-    void renderPass(Renderer && pass, RemainingPasses... remainingPasses) const
+    void renderPass(Renderer&& pass, RemainingPasses... remainingPasses) const
     {
         screen_.render(std::forward<Renderer>(pass), viewport_.scrollOffset());
 
@@ -346,35 +358,35 @@ public:
     /// Boolean, indicating whether the terminal's screen buffer contains updates to be rendered.
     mutable std::atomic<uint64_t> changes_;
 
-    std::thread::id mainLoopThreadID_{};
+    std::thread::id mainLoopThreadID_ {};
     int ptyReadBufferSize_;
     Events& eventListener_;
 
     std::chrono::milliseconds refreshInterval_;
     bool screenDirty_ = false;
-    RenderDoubleBuffer renderBuffer_{};
+    RenderDoubleBuffer renderBuffer_ {};
 
     Pty& pty_;
 
     std::chrono::steady_clock::time_point startTime_;
     std::chrono::steady_clock::time_point currentTime_;
 
-	mutable std::chrono::steady_clock::time_point lastCursorBlink_;
+    mutable std::chrono::steady_clock::time_point lastCursorBlink_;
     CursorDisplay cursorDisplay_;
     CursorShape cursorShape_;
     std::chrono::milliseconds cursorBlinkInterval_;
-	mutable unsigned cursorBlinkState_;
+    mutable unsigned cursorBlinkState_;
 
     std::u32string wordDelimiters_;
 
     // helpers for detecting double/tripple clicks
-    std::chrono::steady_clock::time_point lastClick_{};
+    std::chrono::steady_clock::time_point lastClick_ {};
     unsigned int speedClicks_ = 0;
 
-    terminal::Coordinate currentMousePosition_{}; // current mouse position
+    terminal::Coordinate currentMousePosition_ {}; // current mouse position
     Modifier mouseProtocolBypassModifier_ = Modifier::Shift;
     Modifier mouseBlockSelectionModifier_ = Modifier::Control;
-    bool respectMouseProtocol_ = true; // shift-click can disable that, button release sets it back to true
+    bool respectMouseProtocol_ = true;    // shift-click can disable that, button release sets it back to true
     bool leftMouseButtonPressed_ = false; // tracks left-mouse button pressed state (used for cell selection).
 
     InputGenerator inputGenerator_;
@@ -394,7 +406,7 @@ public:
     struct SelectionHelper: public terminal::SelectionHelper
     {
         Terminal* terminal;
-        explicit SelectionHelper(Terminal* self): terminal{self} {}
+        explicit SelectionHelper(Terminal* self): terminal { self } {}
         PageSize pageSize() const noexcept override;
         bool wordDelimited(Coordinate _pos) const noexcept override;
         bool wrappedLine(LineOffset _line) const noexcept override;
@@ -404,4 +416,4 @@ public:
     SelectionHelper selectionHelper_;
 };
 
-}  // namespace terminal
+} // namespace terminal

@@ -13,14 +13,16 @@
  */
 #pragma once
 
+#include <fmt/format.h>
+
 #include <optional>
 #include <string>
 #include <variant>
 
-#include <fmt/format.h>
+namespace contour::actions
+{
 
-namespace contour::actions {
-
+// clang-format off
 struct CancelSelection{};
 struct ChangeProfile{ std::string name; };
 struct ClearHistoryAndReset{};
@@ -59,61 +61,65 @@ struct WriteScreen{ std::string chars; }; // "\033[2J\033[3J"
 // FocusNextTab
 // FocusPreviousTab
 // OpenTab
+// clang-format on
 
-using Action = std::variant<
-    CancelSelection,
-    ChangeProfile,
-    ClearHistoryAndReset,
-    CopyPreviousMarkRange,
-    CopySelection,
-    DecreaseFontSize,
-    DecreaseOpacity,
-    FollowHyperlink,
-    IncreaseFontSize,
-    IncreaseOpacity,
-    NewTerminal,
-    OpenConfiguration,
-    OpenFileManager,
-    PasteClipboard,
-    PasteSelection,
-    Quit,
-    ReloadConfig,
-    ResetConfig,
-    ResetFontSize,
-    ScreenshotVT,
-    ScrollDown,
-    ScrollMarkDown,
-    ScrollMarkUp,
-    ScrollOneDown,
-    ScrollOneUp,
-    ScrollPageDown,
-    ScrollPageUp,
-    ScrollToBottom,
-    ScrollToTop,
-    ScrollUp,
-    SendChars,
-    ToggleAllKeyMaps,
-    ToggleFullscreen,
-    WriteScreen
->;
+using Action = std::variant<CancelSelection,
+                            ChangeProfile,
+                            ClearHistoryAndReset,
+                            CopyPreviousMarkRange,
+                            CopySelection,
+                            DecreaseFontSize,
+                            DecreaseOpacity,
+                            FollowHyperlink,
+                            IncreaseFontSize,
+                            IncreaseOpacity,
+                            NewTerminal,
+                            OpenConfiguration,
+                            OpenFileManager,
+                            PasteClipboard,
+                            PasteSelection,
+                            Quit,
+                            ReloadConfig,
+                            ResetConfig,
+                            ResetFontSize,
+                            ScreenshotVT,
+                            ScrollDown,
+                            ScrollMarkDown,
+                            ScrollMarkUp,
+                            ScrollOneDown,
+                            ScrollOneUp,
+                            ScrollPageDown,
+                            ScrollPageUp,
+                            ScrollToBottom,
+                            ScrollToTop,
+                            ScrollUp,
+                            SendChars,
+                            ToggleAllKeyMaps,
+                            ToggleFullscreen,
+                            WriteScreen>;
 
 std::optional<Action> fromString(std::string const& _name);
 
 } // namespace contour::actions
 
 // {{{ fmtlib custom formatters
-#define DECLARE_ACTION_FMT(T) \
-    namespace fmt { \
-        template <> \
-        struct formatter<contour::actions:: T> { \
-            template <typename ParseContext> \
-            constexpr auto parse(ParseContext& ctx) { return ctx.begin(); } \
-            template <typename FormatContext> \
-            auto format(contour::actions:: T const&, FormatContext& ctx) \
-            { \
-                return format_to(ctx.out(), "{}", #T); \
-            } \
-        }; \
+#define DECLARE_ACTION_FMT(T)                                           \
+    namespace fmt                                                       \
+    {                                                                   \
+        template <>                                                     \
+        struct formatter<contour::actions::T>                           \
+        {                                                               \
+            template <typename ParseContext>                            \
+            constexpr auto parse(ParseContext& ctx)                     \
+            {                                                           \
+                return ctx.begin();                                     \
+            }                                                           \
+            template <typename FormatContext>                           \
+            auto format(contour::actions::T const&, FormatContext& ctx) \
+            {                                                           \
+                return format_to(ctx.out(), "{}", #T);                  \
+            }                                                           \
+        };                                                              \
     }
 
 // {{{ declare
@@ -153,59 +159,64 @@ DECLARE_ACTION_FMT(WriteScreen)
 // }}}
 #undef DECLARE_ACTION_FMT
 
-#define HANDLE_ACTION(T) \
-    if (std::holds_alternative<contour::actions:: T>(_action)) \
-    { \
-        contour::actions:: T const& a = std::get<contour::actions:: T>(_action); \
-        return format_to(ctx.out(), "{}", a); \
+#define HANDLE_ACTION(T)                                                       \
+    if (std::holds_alternative<contour::actions::T>(_action))                  \
+    {                                                                          \
+        contour::actions::T const& a = std::get<contour::actions::T>(_action); \
+        return format_to(ctx.out(), "{}", a);                                  \
     }
 
-namespace fmt {
-    template <>
-    struct formatter<contour::actions::Action> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(contour::actions::Action const& _action, FormatContext& ctx)
-        {
-            // {{{ handle
-            HANDLE_ACTION(CancelSelection);
-            HANDLE_ACTION(ChangeProfile);
-            HANDLE_ACTION(CopyPreviousMarkRange);
-            HANDLE_ACTION(CopySelection);
-            HANDLE_ACTION(DecreaseFontSize);
-            HANDLE_ACTION(DecreaseOpacity);
-            HANDLE_ACTION(FollowHyperlink);
-            HANDLE_ACTION(IncreaseFontSize);
-            HANDLE_ACTION(IncreaseOpacity);
-            HANDLE_ACTION(NewTerminal);
-            HANDLE_ACTION(OpenConfiguration);
-            HANDLE_ACTION(OpenFileManager);
-            HANDLE_ACTION(PasteClipboard);
-            HANDLE_ACTION(PasteSelection);
-            HANDLE_ACTION(Quit);
-            HANDLE_ACTION(ReloadConfig);
-            HANDLE_ACTION(ResetConfig);
-            HANDLE_ACTION(ResetFontSize);
-            HANDLE_ACTION(ScreenshotVT);
-            HANDLE_ACTION(ScrollDown);
-            HANDLE_ACTION(ScrollMarkDown);
-            HANDLE_ACTION(ScrollMarkUp);
-            HANDLE_ACTION(ScrollOneDown);
-            HANDLE_ACTION(ScrollOneUp);
-            HANDLE_ACTION(ScrollPageDown);
-            HANDLE_ACTION(ScrollPageUp);
-            HANDLE_ACTION(ScrollToBottom);
-            HANDLE_ACTION(ScrollToTop);
-            HANDLE_ACTION(ScrollUp);
-            HANDLE_ACTION(SendChars);
-            HANDLE_ACTION(ToggleAllKeyMaps);
-            HANDLE_ACTION(ToggleFullscreen);
-            HANDLE_ACTION(WriteScreen);
-            // }}}
-            return format_to(ctx.out(), "UNKNOWN ACTION");
-        }
-    };
-}
+namespace fmt
+{
+template <>
+struct formatter<contour::actions::Action>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(contour::actions::Action const& _action, FormatContext& ctx)
+    {
+        // {{{ handle
+        HANDLE_ACTION(CancelSelection);
+        HANDLE_ACTION(ChangeProfile);
+        HANDLE_ACTION(CopyPreviousMarkRange);
+        HANDLE_ACTION(CopySelection);
+        HANDLE_ACTION(DecreaseFontSize);
+        HANDLE_ACTION(DecreaseOpacity);
+        HANDLE_ACTION(FollowHyperlink);
+        HANDLE_ACTION(IncreaseFontSize);
+        HANDLE_ACTION(IncreaseOpacity);
+        HANDLE_ACTION(NewTerminal);
+        HANDLE_ACTION(OpenConfiguration);
+        HANDLE_ACTION(OpenFileManager);
+        HANDLE_ACTION(PasteClipboard);
+        HANDLE_ACTION(PasteSelection);
+        HANDLE_ACTION(Quit);
+        HANDLE_ACTION(ReloadConfig);
+        HANDLE_ACTION(ResetConfig);
+        HANDLE_ACTION(ResetFontSize);
+        HANDLE_ACTION(ScreenshotVT);
+        HANDLE_ACTION(ScrollDown);
+        HANDLE_ACTION(ScrollMarkDown);
+        HANDLE_ACTION(ScrollMarkUp);
+        HANDLE_ACTION(ScrollOneDown);
+        HANDLE_ACTION(ScrollOneUp);
+        HANDLE_ACTION(ScrollPageDown);
+        HANDLE_ACTION(ScrollPageUp);
+        HANDLE_ACTION(ScrollToBottom);
+        HANDLE_ACTION(ScrollToTop);
+        HANDLE_ACTION(ScrollUp);
+        HANDLE_ACTION(SendChars);
+        HANDLE_ACTION(ToggleAllKeyMaps);
+        HANDLE_ACTION(ToggleFullscreen);
+        HANDLE_ACTION(WriteScreen);
+        // }}}
+        return format_to(ctx.out(), "UNKNOWN ACTION");
+    }
+};
+} // namespace fmt
 #undef HANDLE_ACTION
 // ]}}

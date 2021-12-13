@@ -15,8 +15,8 @@
 
 #include <terminal/CellFlags.h>
 #include <terminal/Color.h>
-#include <terminal/Image.h>
 #include <terminal/Grid.h>
+#include <terminal/Image.h>
 #include <terminal/primitives.h>
 
 #include <atomic>
@@ -25,7 +25,8 @@
 #include <optional>
 #include <vector>
 
-namespace terminal {
+namespace terminal
+{
 
 struct RenderCell
 {
@@ -50,11 +51,15 @@ struct RenderCursor
 
 struct RenderBuffer
 {
-    std::vector<RenderCell> screen{};
-    std::optional<RenderCursor> cursor{};
-    uint64_t frameID{};
+    std::vector<RenderCell> screen {};
+    std::optional<RenderCursor> cursor {};
+    uint64_t frameID {};
 
-    void clear() { screen.clear(); cursor.reset(); }
+    void clear()
+    {
+        screen.clear();
+        cursor.reset();
+    }
 };
 
 /// Lock-guarded handle to a read-only RenderBuffer object.
@@ -67,16 +72,12 @@ struct RenderBufferRef
 
     RenderBuffer const& get() const noexcept { return buffer; }
 
-    RenderBufferRef(RenderBuffer const& _buf, std::mutex& _lock):
-        buffer{_buf}, guard{_lock}
+    RenderBufferRef(RenderBuffer const& _buf, std::mutex& _lock): buffer { _buf }, guard { _lock }
     {
         guard.lock();
     }
 
-    ~RenderBufferRef()
-    {
-        guard.unlock();
-    }
+    ~RenderBufferRef() { guard.unlock(); }
 };
 
 /// Reflects the current state of a RenderDoubleBuffer object.
@@ -92,9 +93,9 @@ constexpr std::string_view to_string(RenderBufferState _state) noexcept
 {
     switch (_state)
     {
-        case RenderBufferState::WaitingForRefresh: return "WaitingForRefresh";
-        case RenderBufferState::RefreshBuffersAndTrySwap: return "RefreshBuffersAndTrySwap";
-        case RenderBufferState::TrySwapBuffers: return "TrySwapBuffers";
+    case RenderBufferState::WaitingForRefresh: return "WaitingForRefresh";
+    case RenderBufferState::RefreshBuffersAndTrySwap: return "RefreshBuffersAndTrySwap";
+    case RenderBufferState::TrySwapBuffers: return "TrySwapBuffers";
     }
     return "INVALID";
 }
@@ -103,9 +104,9 @@ struct RenderDoubleBuffer
 {
     std::mutex mutable readerLock;
     std::atomic<size_t> currentBackBufferIndex = 0;
-    std::array<RenderBuffer, 2> buffers{};
+    std::array<RenderBuffer, 2> buffers {};
     std::atomic<RenderBufferState> state = RenderBufferState::WaitingForRefresh;
-    std::chrono::steady_clock::time_point lastUpdate{};
+    std::chrono::steady_clock::time_point lastUpdate {};
 
     RenderBuffer& backBuffer() noexcept { return buffers[currentBackBufferIndex]; }
 
@@ -117,13 +118,10 @@ struct RenderDoubleBuffer
         return RenderBufferRef(frontBuffer, readerLock);
     }
 
-    void clear()
-    {
-        backBuffer().clear();
-    }
+    void clear() { backBuffer().clear(); }
 
     // Swaps front with back buffer. May only be invoked by the writer thread.
     bool swapBuffers(std::chrono::steady_clock::time_point _now) noexcept;
 };
 
-} // end namespace
+} // namespace terminal

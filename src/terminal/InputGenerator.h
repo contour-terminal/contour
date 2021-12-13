@@ -16,8 +16,9 @@
 #include <terminal/Sequencer.h> // MouseProtocol
 #include <terminal/primitives.h>
 
-#include <crispy/overloaded.h>
 #include <crispy/escape.h>
+#include <crispy/overloaded.h>
+
 #include <unicode/convert.h>
 
 #include <optional>
@@ -28,11 +29,14 @@
 #include <variant>
 #include <vector>
 
-namespace terminal {
+namespace terminal
+{
 
-class Modifier { // {{{
+class Modifier
+{ // {{{
   public:
-    enum Key : unsigned {
+    enum Key : unsigned
+    {
         None = 0,
         Shift = 1,
         Alt = 2,
@@ -40,7 +44,7 @@ class Modifier { // {{{
         Meta = 8,
     };
 
-    constexpr Modifier(Key _key) : mask_{static_cast<unsigned>(_key)} {}
+    constexpr Modifier(Key _key): mask_ { static_cast<unsigned>(_key) } {}
 
     constexpr Modifier() = default;
     constexpr Modifier(Modifier&&) = default;
@@ -57,7 +61,7 @@ class Modifier { // {{{
     constexpr bool control() const noexcept { return value() & Control; }
     constexpr bool meta() const noexcept { return value() & Meta; }
 
-    constexpr operator unsigned () const noexcept { return mask_; }
+    constexpr operator unsigned() const noexcept { return mask_; }
 
     constexpr bool any() const noexcept { return mask_ != 0; }
 
@@ -77,20 +81,11 @@ class Modifier { // {{{
         return Modifier(static_cast<Key>(mask_ & ~_other.mask_));
     }
 
-    bool contains(Modifier const& _other) const noexcept
-    {
-        return (mask_ & _other.mask_) == _other.mask_;
-    }
+    bool contains(Modifier const& _other) const noexcept { return (mask_ & _other.mask_) == _other.mask_; }
 
-    constexpr void enable(Key _key) noexcept
-    {
-        mask_ |= _key;
-    }
+    constexpr void enable(Key _key) noexcept { mask_ |= _key; }
 
-    constexpr void disable(Key _key) noexcept
-    {
-        mask_ &= ~static_cast<unsigned>(_key);
-    }
+    constexpr void disable(Key _key) noexcept { mask_ &= ~static_cast<unsigned>(_key); }
 
   private:
     unsigned mask_ = 0;
@@ -133,7 +128,8 @@ std::string to_string(Modifier _modifier);
 
 // }}}
 // {{{ KeyInputEvent, Key
-enum class Key {
+enum class Key
+{
     // function keys
     F1,
     F2,
@@ -194,13 +190,15 @@ enum class Key {
 
 std::string to_string(Key _key);
 
-enum class KeyMode {
+enum class KeyMode
+{
     Normal,
     Application
 };
 // }}}
 // {{{ Mouse
-enum class MouseButton {
+enum class MouseButton
+{
     Left,
     Right,
     Middle,
@@ -211,7 +209,8 @@ enum class MouseButton {
 
 std::string to_string(MouseButton _button);
 
-enum class MouseTransport {
+enum class MouseTransport
+{
     // CSI M Cb Cx Cy, with Cb, Cx, Cy incremented by 0x20
     Default,
     // CSI M Cb Coords, with Coords being UTF-8 encoded, Coords is a tuple, each value incremented by 0x20.
@@ -223,7 +222,8 @@ enum class MouseTransport {
 };
 // }}}
 
-class InputGenerator {
+class InputGenerator
+{
   public:
     using Sequence = std::vector<char>;
 
@@ -251,7 +251,8 @@ class InputGenerator {
     void setMouseTransport(MouseTransport _mouseTransport);
     MouseTransport mouseTransport() const noexcept { return mouseTransport_; }
 
-    enum class MouseWheelMode {
+    enum class MouseWheelMode
+    {
         // mouse wheel generates mouse wheel events as determined by mouse protocol + transport.
         Default,
         // mouse wheel generates normal cursor key events
@@ -291,16 +292,18 @@ class InputGenerator {
         return std::string_view(pendingSequence_.data(), pendingSequence_.size());
     }
 
-    enum class MouseEventType { Press, Drag, Release };
+    enum class MouseEventType
+    {
+        Press,
+        Drag,
+        Release
+    };
 
     /// Resets the input generator's state, as required by the RIS (hard reset) VT sequence.
     void reset();
 
   private:
-    bool generateMouse(MouseButton _button,
-                       Modifier _modifier,
-                       Coordinate _pos,
-                       MouseEventType _eventType);
+    bool generateMouse(MouseButton _button, Modifier _modifier, Coordinate _pos, MouseEventType _eventType);
 
     bool mouseTransport(uint8_t _button, uint8_t _modifier, Coordinate _pos, MouseEventType _type);
     bool mouseTransportX10(uint8_t _button, uint8_t _modifier, Coordinate _pos);
@@ -321,125 +324,142 @@ class InputGenerator {
     std::optional<MouseProtocol> mouseProtocol_ = std::nullopt;
     MouseTransport mouseTransport_ = MouseTransport::Default;
     MouseWheelMode mouseWheelMode_ = MouseWheelMode::Default;
-    Sequence pendingSequence_{};
+    Sequence pendingSequence_ {};
 
-    std::set<MouseButton> currentlyPressedMouseButtons_{};
-    Coordinate currentMousePosition_{}; // current mouse position
+    std::set<MouseButton> currentlyPressedMouseButtons_ {};
+    Coordinate currentMousePosition_ {}; // current mouse position
 };
 
 inline std::string to_string(InputGenerator::MouseEventType _value)
 {
     switch (_value)
     {
-        case InputGenerator::MouseEventType::Press: return "Press";
-        case InputGenerator::MouseEventType::Drag: return "Drag";
-        case InputGenerator::MouseEventType::Release: return "Release";
+    case InputGenerator::MouseEventType::Press: return "Press";
+    case InputGenerator::MouseEventType::Drag: return "Drag";
+    case InputGenerator::MouseEventType::Release: return "Release";
     }
     return "???";
 }
 
-}  // namespace terminal
+} // namespace terminal
 
 namespace fmt // {{{
 {
-    template <>
-    struct formatter<terminal::Modifier> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::Modifier _modifier, FormatContext& _ctx)
-        {
-            std::string s;
-            auto const advance = [&](bool _cond, std::string_view _text) {
-                if (!_cond)
-                    return;
-                if (!s.empty())
-                    s += ',';
-                s += _text;
-            };
-            advance(_modifier.alt(), "Alt");
-            advance(_modifier.shift(), "Shift");
-            advance(_modifier.control(), "Control");
-            advance(_modifier.meta(), "Meta");
-            if (s.empty())
-                s = "None";
-            return format_to(_ctx.out(), "{}", s);
-        }
-    };
+template <>
+struct formatter<terminal::Modifier>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::Modifier _modifier, FormatContext& _ctx)
+    {
+        std::string s;
+        auto const advance = [&](bool _cond, std::string_view _text) {
+            if (!_cond)
+                return;
+            if (!s.empty())
+                s += ',';
+            s += _text;
+        };
+        advance(_modifier.alt(), "Alt");
+        advance(_modifier.shift(), "Shift");
+        advance(_modifier.control(), "Control");
+        advance(_modifier.meta(), "Meta");
+        if (s.empty())
+            s = "None";
+        return format_to(_ctx.out(), "{}", s);
+    }
+};
 
-    template <>
-    struct formatter<terminal::InputGenerator::MouseWheelMode> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::InputGenerator::MouseWheelMode _value, FormatContext& _ctx)
+template <>
+struct formatter<terminal::InputGenerator::MouseWheelMode>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::InputGenerator::MouseWheelMode _value, FormatContext& _ctx)
+    {
+        switch (_value)
         {
-            switch (_value)
-            {
-                case terminal::InputGenerator::MouseWheelMode::Default:
-                    return format_to(_ctx.out(), "Default");
-                case terminal::InputGenerator::MouseWheelMode::NormalCursorKeys:
-                    return format_to(_ctx.out(), "NormalCursorKeys");
-                case terminal::InputGenerator::MouseWheelMode::ApplicationCursorKeys:
-                    return format_to(_ctx.out(), "ApplicationCursorKeys");
-            }
-            return format_to(_ctx.out(), "<{}>", unsigned(_value));
+        case terminal::InputGenerator::MouseWheelMode::Default: return format_to(_ctx.out(), "Default");
+        case terminal::InputGenerator::MouseWheelMode::NormalCursorKeys:
+            return format_to(_ctx.out(), "NormalCursorKeys");
+        case terminal::InputGenerator::MouseWheelMode::ApplicationCursorKeys:
+            return format_to(_ctx.out(), "ApplicationCursorKeys");
         }
-    };
+        return format_to(_ctx.out(), "<{}>", unsigned(_value));
+    }
+};
 
-    template <>
-    struct formatter<terminal::KeyMode> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::KeyMode _value, FormatContext& _ctx)
+template <>
+struct formatter<terminal::KeyMode>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::KeyMode _value, FormatContext& _ctx)
+    {
+        switch (_value)
         {
-            switch (_value)
-            {
-                case terminal::KeyMode::Application:
-                    return format_to(_ctx.out(), "Application");
-                case terminal::KeyMode::Normal:
-                    return format_to(_ctx.out(), "Normal");
-            }
-            return format_to(_ctx.out(), "<{}>", unsigned(_value));
+        case terminal::KeyMode::Application: return format_to(_ctx.out(), "Application");
+        case terminal::KeyMode::Normal: return format_to(_ctx.out(), "Normal");
         }
-    };
+        return format_to(_ctx.out(), "<{}>", unsigned(_value));
+    }
+};
 
-    template <>
-    struct formatter<terminal::MouseButton> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::MouseButton _value, FormatContext& _ctx)
+template <>
+struct formatter<terminal::MouseButton>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::MouseButton _value, FormatContext& _ctx)
+    {
+        switch (_value)
         {
-            switch (_value)
-            {
-                case terminal::MouseButton::Left: return format_to(_ctx.out(), "Left");
-                case terminal::MouseButton::Right: return format_to(_ctx.out(), "Right");
-                case terminal::MouseButton::Middle: return format_to(_ctx.out(), "Middle");
-                case terminal::MouseButton::Release: return format_to(_ctx.out(), "Release");
-                case terminal::MouseButton::WheelUp: return format_to(_ctx.out(), "WheelUp");
-                case terminal::MouseButton::WheelDown: return format_to(_ctx.out(), "WheelDown");
-            }
-            return format_to(_ctx.out(), "<{}>", unsigned(_value));
+        case terminal::MouseButton::Left: return format_to(_ctx.out(), "Left");
+        case terminal::MouseButton::Right: return format_to(_ctx.out(), "Right");
+        case terminal::MouseButton::Middle: return format_to(_ctx.out(), "Middle");
+        case terminal::MouseButton::Release: return format_to(_ctx.out(), "Release");
+        case terminal::MouseButton::WheelUp: return format_to(_ctx.out(), "WheelUp");
+        case terminal::MouseButton::WheelDown: return format_to(_ctx.out(), "WheelDown");
         }
-    };
+        return format_to(_ctx.out(), "<{}>", unsigned(_value));
+    }
+};
 
-    template <>
-    struct formatter<terminal::MouseTransport> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::MouseTransport _value, FormatContext& _ctx)
+template <>
+struct formatter<terminal::MouseTransport>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::MouseTransport _value, FormatContext& _ctx)
+    {
+        switch (_value)
         {
-            switch (_value)
-            {
-                case terminal::MouseTransport::Default: return format_to(_ctx.out(), "Default");
-                case terminal::MouseTransport::Extended: return format_to(_ctx.out(), "Extended");
-                case terminal::MouseTransport::SGR: return format_to(_ctx.out(), "SGR");
-                case terminal::MouseTransport::URXVT: return format_to(_ctx.out(), "URXVT");
-            }
-            return format_to(_ctx.out(), "<{}>", unsigned(_value));
+        case terminal::MouseTransport::Default: return format_to(_ctx.out(), "Default");
+        case terminal::MouseTransport::Extended: return format_to(_ctx.out(), "Extended");
+        case terminal::MouseTransport::SGR: return format_to(_ctx.out(), "SGR");
+        case terminal::MouseTransport::URXVT: return format_to(_ctx.out(), "URXVT");
         }
-    };
-} // }}}
+        return format_to(_ctx.out(), "<{}>", unsigned(_value));
+    }
+};
+} // namespace fmt

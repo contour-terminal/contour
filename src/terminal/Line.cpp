@@ -1,5 +1,5 @@
-#include <terminal/Line.h>
 #include <terminal/Cell.h>
+#include <terminal/Line.h>
 
 #include <unicode/grapheme_segmenter.h>
 #include <unicode/utf8.h>
@@ -17,35 +17,30 @@ typename Line<Cell, Optimize>::InflatedBuffer Line<Cell, Optimize>::reflow(Colum
     using crispy::Comparison;
     switch (crispy::strongCompare(_newColumnCount, columnsUsed()))
     {
-        case Comparison::Equal:
-            break;
-        case Comparison::Greater:
-            buffer_.resize(unbox<size_t>(_newColumnCount));
-            break;
-        case Comparison::Less:
+    case Comparison::Equal: break;
+    case Comparison::Greater: buffer_.resize(unbox<size_t>(_newColumnCount)); break;
+    case Comparison::Less: {
+        // TODO: properly handle wide character cells
+        // - when cutting in the middle of a wide char, the wide char gets wrapped and an empty
+        //   cell needs to be injected to match the expected column width.
+
+        if (wrappable())
         {
-            // TODO: properly handle wide character cells
-            // - when cutting in the middle of a wide char, the wide char gets wrapped and an empty
-            //   cell needs to be injected to match the expected column width.
+            auto const [reflowStart, reflowEnd] = [this, _newColumnCount]() {
+                auto const reflowStart =
+                    next(buffer_.begin(), *_newColumnCount /* - buffer_[_newColumnCount].width()*/);
 
-            if (wrappable())
-            {
-                auto const [reflowStart, reflowEnd] = [this, _newColumnCount]()
-                {
-                    auto const reflowStart =
-                        next(buffer_.begin(), *_newColumnCount /* - buffer_[_newColumnCount].width()*/);
+                auto reflowEnd = buffer_.end();
 
-                    auto reflowEnd = buffer_.end();
+                while (reflowEnd != reflowStart && prev(reflowEnd)->empty())
+                    reflowEnd = prev(reflowEnd);
 
-                    while (reflowEnd != reflowStart && prev(reflowEnd)->empty())
-                        reflowEnd = prev(reflowEnd);
+                return std::tuple { reflowStart, reflowEnd };
+            }();
 
-                    return std::tuple{reflowStart, reflowEnd};
-                }();
-
-                auto removedColumns = InflatedBuffer(reflowStart, reflowEnd);
-                buffer_.erase(reflowStart, buffer_.end());
-                assert(columnsUsed() == _newColumnCount);
+            auto removedColumns = InflatedBuffer(reflowStart, reflowEnd);
+            buffer_.erase(reflowStart, buffer_.end());
+            assert(columnsUsed() == _newColumnCount);
 #if 0
                 if (removedColumns.size() > 0 &&
                         std::any_of(removedColumns.begin(), removedColumns.end(),
@@ -57,15 +52,15 @@ typename Line<Cell, Optimize>::InflatedBuffer Line<Cell, Optimize>::reflow(Colum
                             }))
                     printf("Wrapping around\n");
 #endif
-                return removedColumns;
-            }
-            else
-            {
-                buffer_.resize(unbox<size_t>(_newColumnCount));
-                assert(columnsUsed() == _newColumnCount);
-                return {};
-            }
+            return removedColumns;
         }
+        else
+        {
+            buffer_.resize(unbox<size_t>(_newColumnCount));
+            assert(columnsUsed() == _newColumnCount);
+            return {};
+        }
+    }
     }
     return {};
 }
@@ -115,13 +110,13 @@ std::string Line<Cell, Optimize>::toUtf8Trimmed() const
 template <typename Cell>
 InflatedLineBuffer<Cell> inflate(SimpleLineBuffer const& input)
 {
-    static constexpr char32_t ReplacementCharacter {0xFFFD};
+    static constexpr char32_t ReplacementCharacter { 0xFFFD };
 
-    auto columns = InflatedLineBuffer<Cell>{};
+    auto columns = InflatedLineBuffer<Cell> {};
     columns.reserve(unbox<size_t>(input.width));
 
-    auto lastChar = char32_t{0};
-    auto utf8DecoderState = unicode::utf8_decoder_state{};
+    auto lastChar = char32_t { 0 };
+    auto utf8DecoderState = unicode::utf8_decoder_state {};
 
     for (size_t i = 0; i < input.text.size(); ++i)
     {
@@ -130,16 +125,16 @@ InflatedLineBuffer<Cell> inflate(SimpleLineBuffer const& input)
         if (holds_alternative<unicode::Incomplete>(r))
             continue;
 
-        auto const nextChar = holds_alternative<unicode::Success>(r)
-                            ? get<unicode::Success>(r).value
-                            : ReplacementCharacter;
-        auto const isAsciiBreakable = lastChar < 128 && nextChar < 128; // NB: This is an optimization for US-ASCII text versus grapheme cluster segmentation.
+        auto const nextChar =
+            holds_alternative<unicode::Success>(r) ? get<unicode::Success>(r).value : ReplacementCharacter;
+        auto const isAsciiBreakable =
+            lastChar < 128 && nextChar < 128; // NB: This is an optimization for US-ASCII text versus grapheme
+                                              // cluster segmentation.
 
         if (!lastChar || isAsciiBreakable || unicode::grapheme_segmenter::breakable(lastChar, nextChar))
         {
-            columns.emplace_back(Cell{});
-            columns.back().write(input.attributes, nextChar,
-                                 static_cast<uint8_t>(unicode::width(nextChar)));
+            columns.emplace_back(Cell {});
+            columns.back().write(input.attributes, nextChar, static_cast<uint8_t>(unicode::width(nextChar)));
         }
         else
         {
@@ -150,13 +145,13 @@ InflatedLineBuffer<Cell> inflate(SimpleLineBuffer const& input)
                 auto const cellsAvailable = *input.width - static_cast<int>(columns.size()) + 1;
                 auto const n = min(extendedWidth, cellsAvailable);
                 for (int i = 1; i < n; ++i)
-                    columns.emplace_back(Cell{input.attributes});
+                    columns.emplace_back(Cell { input.attributes });
             }
         }
     }
 
     while (columns.size() < unbox<size_t>(input.width))
-        columns.emplace_back(Cell{input.attributes});
+        columns.emplace_back(Cell { input.attributes });
 
     return columns;
 }

@@ -15,14 +15,16 @@
 
 #include <string_view>
 
-namespace terminal {
+namespace terminal
+{
 
 /**
  * Interface of all events that can be emitted by the Parser.
  *
  * @see Parser
  */
-class ParserEvents {
+class ParserEvents
+{
   public:
     virtual ~ParserEvents() = default;
 
@@ -152,7 +154,8 @@ class ParserEvents {
     virtual void dispatchPM() = 0;
 };
 
-class BasicParserEvents : public ParserEvents {
+class BasicParserEvents: public ParserEvents
+{
   public:
     void error(std::string_view const&) override {}
     void print(char) override {}

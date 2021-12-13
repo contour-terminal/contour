@@ -11,12 +11,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/InputGenerator.h>
 #include <terminal/ControlCode.h>
+#include <terminal/InputGenerator.h>
 #include <terminal/logging.h>
+
 #include <crispy/utils.h>
 
 #include <unicode/convert.h>
+
+#include <fmt/format.h>
 
 #include <algorithm>
 #include <array>
@@ -25,16 +28,17 @@
 #include <unordered_map>
 #include <utility>
 
-#include <fmt/format.h>
-
 using namespace std;
 
-namespace terminal {
+namespace terminal
+{
 
-namespace mappings {
-    struct KeyMapping {
+namespace mappings
+{
+    struct KeyMapping
+    {
         Key const key;
-        std::string_view const mapping{};
+        std::string_view const mapping {};
     };
 
     // TODO: implement constexpr-binary-search by:
@@ -42,114 +46,102 @@ namespace mappings {
     // - constexpr-evaluated sort()ed array returned in lambda-expr to be assigned to these globals here.
     // - make use of this property and let tryMap() do a std::binary_search()
 
-    #define ESC "\x1B"
-    #define CSI "\x1B["
-    #define SS3 "\x1BO"
+#define ESC "\x1B"
+#define CSI "\x1B["
+#define SS3 "\x1BO"
 
     // the modifier parameter is going to be replaced via fmt::format()
-    array<KeyMapping, 30> functionKeysWithModifiers{
+    array<KeyMapping, 30> functionKeysWithModifiers {
         // Note, that F1..F4 is using CSI too instead of ESC when used with modifier keys.
         // XXX: Maybe I am blind when reading ctlseqs.txt, but F1..F4 with "1;{}P".. seems not to
         // match what other terminal emulators send out with modifiers and I don't see how to match
         // xterm's behaviour along with getting for example vim working to bind to these.
-        KeyMapping{Key::F1, ESC "O{}P"}, // "1;{}P"
-        KeyMapping{Key::F2, ESC "O{}Q"}, // "1;{}Q"
-        KeyMapping{Key::F3, ESC "O{}R"}, // "1;{}R"
-        KeyMapping{Key::F4, ESC "O{}S"}, // "1;{}S"
-        KeyMapping{Key::F5, CSI "15;{}~"},
-        KeyMapping{Key::F6, CSI "17;{}~"},
-        KeyMapping{Key::F7, CSI "18;{}~"},
-        KeyMapping{Key::F8, CSI "19;{}~"},
-        KeyMapping{Key::F9, CSI "20;{}~"},
-        KeyMapping{Key::F10, CSI "21;{}~"},
-        KeyMapping{Key::F11, CSI "23;{}~"},
-        KeyMapping{Key::F12, CSI "24;{}~"},
-        KeyMapping{Key::F13, CSI "25;{}~"},
-        KeyMapping{Key::F14, CSI "26;{}~"},
-        KeyMapping{Key::F15, CSI "28;{}~"},
-        KeyMapping{Key::F16, CSI "29;{}~"},
-        KeyMapping{Key::F17, CSI "31;{}~"},
-        KeyMapping{Key::F18, CSI "32;{}~"},
-        KeyMapping{Key::F19, CSI "33;{}~"},
-        KeyMapping{Key::F20, CSI "34;{}~"},
+        KeyMapping { Key::F1, ESC "O{}P" }, // "1;{}P"
+        KeyMapping { Key::F2, ESC "O{}Q" }, // "1;{}Q"
+        KeyMapping { Key::F3, ESC "O{}R" }, // "1;{}R"
+        KeyMapping { Key::F4, ESC "O{}S" }, // "1;{}S"
+        KeyMapping { Key::F5, CSI "15;{}~" },
+        KeyMapping { Key::F6, CSI "17;{}~" },
+        KeyMapping { Key::F7, CSI "18;{}~" },
+        KeyMapping { Key::F8, CSI "19;{}~" },
+        KeyMapping { Key::F9, CSI "20;{}~" },
+        KeyMapping { Key::F10, CSI "21;{}~" },
+        KeyMapping { Key::F11, CSI "23;{}~" },
+        KeyMapping { Key::F12, CSI "24;{}~" },
+        KeyMapping { Key::F13, CSI "25;{}~" },
+        KeyMapping { Key::F14, CSI "26;{}~" },
+        KeyMapping { Key::F15, CSI "28;{}~" },
+        KeyMapping { Key::F16, CSI "29;{}~" },
+        KeyMapping { Key::F17, CSI "31;{}~" },
+        KeyMapping { Key::F18, CSI "32;{}~" },
+        KeyMapping { Key::F19, CSI "33;{}~" },
+        KeyMapping { Key::F20, CSI "34;{}~" },
 
         // cursor keys
-        KeyMapping{Key::UpArrow, CSI "1;{}A"},
-        KeyMapping{Key::DownArrow, CSI "1;{}B"},
-        KeyMapping{Key::RightArrow, CSI "1;{}C"},
-        KeyMapping{Key::LeftArrow, CSI "1;{}D"},
+        KeyMapping { Key::UpArrow, CSI "1;{}A" },
+        KeyMapping { Key::DownArrow, CSI "1;{}B" },
+        KeyMapping { Key::RightArrow, CSI "1;{}C" },
+        KeyMapping { Key::LeftArrow, CSI "1;{}D" },
 
         // 6-key editing pad
-        KeyMapping{Key::Insert, CSI "2;{}~"},
-        KeyMapping{Key::Delete, CSI "3;{}~"},
-        KeyMapping{Key::Home, CSI "1;{}H"},
-        KeyMapping{Key::End, CSI "1;{}F"},
-        KeyMapping{Key::PageUp, CSI "5;{}~"},
-        KeyMapping{Key::PageDown, CSI "6;{}~"},
+        KeyMapping { Key::Insert, CSI "2;{}~" },
+        KeyMapping { Key::Delete, CSI "3;{}~" },
+        KeyMapping { Key::Home, CSI "1;{}H" },
+        KeyMapping { Key::End, CSI "1;{}F" },
+        KeyMapping { Key::PageUp, CSI "5;{}~" },
+        KeyMapping { Key::PageDown, CSI "6;{}~" },
     };
 
-    array<KeyMapping, 22> standard{
+    array<KeyMapping, 22> standard {
         // cursor keys
-        KeyMapping{Key::UpArrow, CSI "A"},
-        KeyMapping{Key::DownArrow, CSI "B"},
-        KeyMapping{Key::RightArrow, CSI "C"},
-        KeyMapping{Key::LeftArrow, CSI "D"},
+        KeyMapping { Key::UpArrow, CSI "A" },
+        KeyMapping { Key::DownArrow, CSI "B" },
+        KeyMapping { Key::RightArrow, CSI "C" },
+        KeyMapping { Key::LeftArrow, CSI "D" },
 
         // 6-key editing pad
-        KeyMapping{Key::Insert, CSI "2~"},
-        KeyMapping{Key::Delete, CSI "3~"},
-        KeyMapping{Key::Home, CSI "H"},
-        KeyMapping{Key::End, CSI "F"},
-        KeyMapping{Key::PageUp, CSI "5~"},
-        KeyMapping{Key::PageDown, CSI "6~"},
+        KeyMapping { Key::Insert, CSI "2~" },
+        KeyMapping { Key::Delete, CSI "3~" },
+        KeyMapping { Key::Home, CSI "H" },
+        KeyMapping { Key::End, CSI "F" },
+        KeyMapping { Key::PageUp, CSI "5~" },
+        KeyMapping { Key::PageDown, CSI "6~" },
 
         // function keys
-        KeyMapping{Key::F1, ESC "OP"},
-        KeyMapping{Key::F2, ESC "OQ"},
-        KeyMapping{Key::F3, ESC "OR"},
-        KeyMapping{Key::F4, ESC "OS"},
-        KeyMapping{Key::F5, CSI "15~"},
-        KeyMapping{Key::F6, CSI "17~"},
-        KeyMapping{Key::F7, CSI "18~"},
-        KeyMapping{Key::F8, CSI "19~"},
-        KeyMapping{Key::F9, CSI "20~"},
-        KeyMapping{Key::F10, CSI "21~"},
-        KeyMapping{Key::F11, CSI "23~"},
-        KeyMapping{Key::F12, CSI "24~"},
+        KeyMapping { Key::F1, ESC "OP" },
+        KeyMapping { Key::F2, ESC "OQ" },
+        KeyMapping { Key::F3, ESC "OR" },
+        KeyMapping { Key::F4, ESC "OS" },
+        KeyMapping { Key::F5, CSI "15~" },
+        KeyMapping { Key::F6, CSI "17~" },
+        KeyMapping { Key::F7, CSI "18~" },
+        KeyMapping { Key::F8, CSI "19~" },
+        KeyMapping { Key::F9, CSI "20~" },
+        KeyMapping { Key::F10, CSI "21~" },
+        KeyMapping { Key::F11, CSI "23~" },
+        KeyMapping { Key::F12, CSI "24~" },
     };
 
     /// (DECCKM) Cursor key mode: mappings in when cursor key application mode is set.
-    array<KeyMapping, 6> applicationCursorKeys{
-        KeyMapping{Key::UpArrow, SS3 "A"},
-        KeyMapping{Key::DownArrow, SS3 "B"},
-        KeyMapping{Key::RightArrow, SS3 "C"},
-        KeyMapping{Key::LeftArrow, SS3 "D"},
-        KeyMapping{Key::Home, SS3 "H"},
-        KeyMapping{Key::End, SS3 "F"},
+    array<KeyMapping, 6> applicationCursorKeys {
+        KeyMapping { Key::UpArrow, SS3 "A" },    KeyMapping { Key::DownArrow, SS3 "B" },
+        KeyMapping { Key::RightArrow, SS3 "C" }, KeyMapping { Key::LeftArrow, SS3 "D" },
+        KeyMapping { Key::Home, SS3 "H" },       KeyMapping { Key::End, SS3 "F" },
     };
 
-    array<KeyMapping, 21> applicationKeypad{
-        KeyMapping{Key::Numpad_NumLock, SS3 "P"},
-        KeyMapping{Key::Numpad_Divide, SS3 "Q"},
-        KeyMapping{Key::Numpad_Multiply, SS3 "Q"},
-        KeyMapping{Key::Numpad_Subtract, SS3 "Q"},
-        KeyMapping{Key::Numpad_CapsLock, SS3 "m"},
-        KeyMapping{Key::Numpad_Add, SS3 "l"},
-        KeyMapping{Key::Numpad_Decimal, SS3 "n"},
-        KeyMapping{Key::Numpad_Enter, SS3 "M"},
-        KeyMapping{Key::Numpad_Equal, SS3 "X"},
-        KeyMapping{Key::Numpad_0, SS3 "p"},
-        KeyMapping{Key::Numpad_1, SS3 "q"},
-        KeyMapping{Key::Numpad_2, SS3 "r"},
-        KeyMapping{Key::Numpad_3, SS3 "s"},
-        KeyMapping{Key::Numpad_4, SS3 "t"},
-        KeyMapping{Key::Numpad_5, SS3 "u"},
-        KeyMapping{Key::Numpad_6, SS3 "v"},
-        KeyMapping{Key::Numpad_7, SS3 "w"},
-        KeyMapping{Key::Numpad_8, SS3 "x"},
-        KeyMapping{Key::Numpad_9, SS3 "y"},
-        KeyMapping{Key::PageUp,   CSI "5~"},
-        KeyMapping{Key::PageDown, CSI "6~"},
+    array<KeyMapping, 21> applicationKeypad
+    {
+        KeyMapping { Key::Numpad_NumLock, SS3 "P" }, KeyMapping { Key::Numpad_Divide, SS3 "Q" },
+            KeyMapping { Key::Numpad_Multiply, SS3 "Q" }, KeyMapping { Key::Numpad_Subtract, SS3 "Q" },
+            KeyMapping { Key::Numpad_CapsLock, SS3 "m" }, KeyMapping { Key::Numpad_Add, SS3 "l" },
+            KeyMapping { Key::Numpad_Decimal, SS3 "n" }, KeyMapping { Key::Numpad_Enter, SS3 "M" },
+            KeyMapping { Key::Numpad_Equal, SS3 "X" }, KeyMapping { Key::Numpad_0, SS3 "p" },
+            KeyMapping { Key::Numpad_1, SS3 "q" }, KeyMapping { Key::Numpad_2, SS3 "r" },
+            KeyMapping { Key::Numpad_3, SS3 "s" }, KeyMapping { Key::Numpad_4, SS3 "t" },
+            KeyMapping { Key::Numpad_5, SS3 "u" }, KeyMapping { Key::Numpad_6, SS3 "v" },
+            KeyMapping { Key::Numpad_7, SS3 "w" }, KeyMapping { Key::Numpad_8, SS3 "x" },
+            KeyMapping { Key::Numpad_9, SS3 "y" }, KeyMapping { Key::PageUp, CSI "5~" },
+            KeyMapping { Key::PageDown, CSI "6~" },
 #if 0 // TODO
         KeyMapping{Key::Space,    SS3 " "}, // TODO
         KeyMapping{Key::Tab,      SS3 "I"},
@@ -157,25 +149,22 @@ namespace mappings {
 #endif
     };
 
-    #undef ESC
-    #undef CSI
-    #undef SS3
+#undef ESC
+#undef CSI
+#undef SS3
 
-    constexpr bool operator==(KeyMapping const& _km, Key _key) noexcept
-    {
-        return _km.key == _key;
-    }
+    constexpr bool operator==(KeyMapping const& _km, Key _key) noexcept { return _km.key == _key; }
 
-    template<size_t N>
+    template <size_t N>
     optional<string_view> tryMap(array<KeyMapping, N> const& _mappings, Key _key) noexcept
     {
-        for (KeyMapping const& km : _mappings)
+        for (KeyMapping const& km: _mappings)
             if (km.key == _key)
                 return { km.mapping };
 
         return nullopt;
     }
-}
+} // namespace mappings
 
 string to_string(Modifier _modifier)
 {
@@ -202,55 +191,55 @@ string to_string(Key _key)
 {
     switch (_key)
     {
-        case Key::F1: return "F1";
-        case Key::F2: return "F2";
-        case Key::F3: return "F3";
-        case Key::F4: return "F4";
-        case Key::F5: return "F5";
-        case Key::F6: return "F6";
-        case Key::F7: return "F7";
-        case Key::F8: return "F8";
-        case Key::F9: return "F9";
-        case Key::F10: return "F10";
-        case Key::F11: return "F11";
-        case Key::F12: return "F12";
-        case Key::F13: return "F13";
-        case Key::F14: return "F14";
-        case Key::F15: return "F15";
-        case Key::F16: return "F16";
-        case Key::F17: return "F17";
-        case Key::F18: return "F18";
-        case Key::F19: return "F19";
-        case Key::F20: return "F20";
-        case Key::DownArrow: return "DownArrow";
-        case Key::LeftArrow: return "LeftArrow";
-        case Key::RightArrow: return "RightArrow";
-        case Key::UpArrow: return "UpArrow";
-        case Key::Insert: return "Insert";
-        case Key::Delete: return "Delete";
-        case Key::Home: return "Home";
-        case Key::End: return "End";
-        case Key::PageUp: return "PageUp";
-        case Key::PageDown: return "PageDown";
-        case Key::Numpad_NumLock: return "Numpad_NumLock";
-        case Key::Numpad_Divide: return "Numpad_Divide";
-        case Key::Numpad_Multiply: return "Numpad_Multiply";
-        case Key::Numpad_Subtract: return "Numpad_Subtract";
-        case Key::Numpad_CapsLock: return "Numpad_CapsLock";
-        case Key::Numpad_Add: return "Numpad_Add";
-        case Key::Numpad_Decimal: return "Numpad_Decimal";
-        case Key::Numpad_Enter: return "Numpad_Enter";
-        case Key::Numpad_Equal: return "Numpad_Equal";
-        case Key::Numpad_0: return "Numpad_0";
-        case Key::Numpad_1: return "Numpad_1";
-        case Key::Numpad_2: return "Numpad_2";
-        case Key::Numpad_3: return "Numpad_3";
-        case Key::Numpad_4: return "Numpad_4";
-        case Key::Numpad_5: return "Numpad_5";
-        case Key::Numpad_6: return "Numpad_6";
-        case Key::Numpad_7: return "Numpad_7";
-        case Key::Numpad_8: return "Numpad_8";
-        case Key::Numpad_9: return "Numpad_9";
+    case Key::F1: return "F1";
+    case Key::F2: return "F2";
+    case Key::F3: return "F3";
+    case Key::F4: return "F4";
+    case Key::F5: return "F5";
+    case Key::F6: return "F6";
+    case Key::F7: return "F7";
+    case Key::F8: return "F8";
+    case Key::F9: return "F9";
+    case Key::F10: return "F10";
+    case Key::F11: return "F11";
+    case Key::F12: return "F12";
+    case Key::F13: return "F13";
+    case Key::F14: return "F14";
+    case Key::F15: return "F15";
+    case Key::F16: return "F16";
+    case Key::F17: return "F17";
+    case Key::F18: return "F18";
+    case Key::F19: return "F19";
+    case Key::F20: return "F20";
+    case Key::DownArrow: return "DownArrow";
+    case Key::LeftArrow: return "LeftArrow";
+    case Key::RightArrow: return "RightArrow";
+    case Key::UpArrow: return "UpArrow";
+    case Key::Insert: return "Insert";
+    case Key::Delete: return "Delete";
+    case Key::Home: return "Home";
+    case Key::End: return "End";
+    case Key::PageUp: return "PageUp";
+    case Key::PageDown: return "PageDown";
+    case Key::Numpad_NumLock: return "Numpad_NumLock";
+    case Key::Numpad_Divide: return "Numpad_Divide";
+    case Key::Numpad_Multiply: return "Numpad_Multiply";
+    case Key::Numpad_Subtract: return "Numpad_Subtract";
+    case Key::Numpad_CapsLock: return "Numpad_CapsLock";
+    case Key::Numpad_Add: return "Numpad_Add";
+    case Key::Numpad_Decimal: return "Numpad_Decimal";
+    case Key::Numpad_Enter: return "Numpad_Enter";
+    case Key::Numpad_Equal: return "Numpad_Equal";
+    case Key::Numpad_0: return "Numpad_0";
+    case Key::Numpad_1: return "Numpad_1";
+    case Key::Numpad_2: return "Numpad_2";
+    case Key::Numpad_3: return "Numpad_3";
+    case Key::Numpad_4: return "Numpad_4";
+    case Key::Numpad_5: return "Numpad_5";
+    case Key::Numpad_6: return "Numpad_6";
+    case Key::Numpad_7: return "Numpad_7";
+    case Key::Numpad_8: return "Numpad_8";
+    case Key::Numpad_9: return "Numpad_9";
     }
     return "(unknown)";
 }
@@ -259,12 +248,12 @@ string to_string(MouseButton _button)
 {
     switch (_button)
     {
-        case MouseButton::Left: return "Left"s;
-        case MouseButton::Right: return "Right"s;
-        case MouseButton::Middle: return "Middle"s;
-        case MouseButton::Release: return "Release"s;
-        case MouseButton::WheelUp: return "WheelUp"s;
-        case MouseButton::WheelDown: return "WheelDown"s;
+    case MouseButton::Left: return "Left"s;
+    case MouseButton::Right: return "Right"s;
+    case MouseButton::Middle: return "Middle"s;
+    case MouseButton::Release: return "Release"s;
+    case MouseButton::WheelUp: return "WheelUp"s;
+    case MouseButton::WheelDown: return "WheelDown"s;
     }
     return ""; // should never be reached
 }
@@ -357,14 +346,14 @@ bool InputGenerator::generate(char32_t _characterEvent, Modifier _modifier)
     else
         append(unicode::convert_to<char>(_characterEvent));
 
-    LOGSTORE(InputLog)("Sending \"{}\" {}.", crispy::escape(unicode::convert_to<char>(_characterEvent)), _modifier);
+    LOGSTORE(InputLog)
+    ("Sending \"{}\" {}.", crispy::escape(unicode::convert_to<char>(_characterEvent)), _modifier);
     return true;
 }
 
 bool InputGenerator::generate(Key _key, Modifier _modifier)
 {
-    auto const logged = [_key, _modifier](bool success) -> bool
-    {
+    auto const logged = [_key, _modifier](bool success) -> bool {
         if (success)
             LOGSTORE(InputLog)("Sending {} {}.", _key, _modifier);
         return success;
@@ -501,32 +490,24 @@ namespace
     {
         switch (_button)
         {
-            case MouseButton::Left:
-                return 0;
-            case MouseButton::Middle:
-                return 1;
-            case MouseButton::Right:
-                return 2;
-            case MouseButton::Release:
-                return 3;
-            case MouseButton::WheelUp:
-                return 4;
-            case MouseButton::WheelDown:
-                return 5;
+        case MouseButton::Left: return 0;
+        case MouseButton::Middle: return 1;
+        case MouseButton::Right: return 2;
+        case MouseButton::Release: return 3;
+        case MouseButton::WheelUp: return 4;
+        case MouseButton::WheelDown: return 5;
         }
         return 0; // should never happen
     }
 
     constexpr bool isMouseWheel(MouseButton _button) noexcept
     {
-        return _button == MouseButton::WheelUp
-            || _button == MouseButton::WheelDown;
+        return _button == MouseButton::WheelUp || _button == MouseButton::WheelDown;
     }
 
     constexpr uint8_t buttonX10(MouseButton _button) noexcept
     {
-        return isMouseWheel(_button) ? buttonNumber(_button) + 0x3c
-                                     : buttonNumber(_button);
+        return isMouseWheel(_button) ? buttonNumber(_button) + 0x3c : buttonNumber(_button);
     }
 
     constexpr uint8_t buttonNormal(MouseButton _button, InputGenerator::MouseEventType _eventType) noexcept
@@ -537,9 +518,9 @@ namespace
     constexpr uint8_t buttonButton(MouseButton _button, InputGenerator::MouseEventType _eventType) noexcept
     {
         return buttonNormal(_button, _eventType)
-             + (_eventType == InputGenerator::MouseEventType::Drag ? 0x20 : 0);
+               + (_eventType == InputGenerator::MouseEventType::Drag ? 0x20 : 0);
     }
-}
+} // namespace
 
 bool InputGenerator::generateMouse(MouseButton _button,
                                    Modifier _modifier,
@@ -555,73 +536,68 @@ bool InputGenerator::generateMouse(MouseButton _button,
 
     switch (*mouseProtocol_)
     {
-        case MouseProtocol::X10: // Old X10 mouse protocol
-            if (_eventType == MouseEventType::Press)
-                mouseTransport(buttonX10(_button), modifierBits(_modifier), _pos, _eventType);
+    case MouseProtocol::X10: // Old X10 mouse protocol
+        if (_eventType == MouseEventType::Press)
+            mouseTransport(buttonX10(_button), modifierBits(_modifier), _pos, _eventType);
+        return true;
+    case MouseProtocol::NormalTracking: // Normal tracking mode, that's X10 with mouse release events and
+                                        // modifiers
+        if (_eventType == MouseEventType::Press || _eventType == MouseEventType::Release)
+        {
+            auto const button = mouseTransport_ != MouseTransport::SGR ? buttonNormal(_button, _eventType)
+                                                                       : buttonX10(_button);
+            mouseTransport(button, modifierBits(_modifier), _pos, _eventType);
+        }
+        return true;
+    case MouseProtocol::ButtonTracking: // Button-event tracking protocol.
+        // like normal event tracking, but with drag events
+        if (_eventType == MouseEventType::Press || _eventType == MouseEventType::Drag
+            || _eventType == MouseEventType::Release)
+        {
+            auto const button = mouseTransport_ != MouseTransport::SGR ? buttonNormal(_button, _eventType)
+                                                                       : buttonX10(_button);
+
+            uint8_t const draggableButton = _eventType == MouseEventType::Drag ? button + 0x20 : button;
+
+            mouseTransport(draggableButton, modifierBits(_modifier), _pos, _eventType);
             return true;
-        case MouseProtocol::NormalTracking: // Normal tracking mode, that's X10 with mouse release events and modifiers
-            if (_eventType == MouseEventType::Press ||
-                _eventType == MouseEventType::Release)
-            {
-                auto const button = mouseTransport_ != MouseTransport::SGR
-                                  ? buttonNormal(_button, _eventType)
-                                  : buttonX10(_button);
-                mouseTransport(button, modifierBits(_modifier), _pos, _eventType);
-            }
-            return true;
-        case MouseProtocol::ButtonTracking: // Button-event tracking protocol.
-            // like normal event tracking, but with drag events
-            if (_eventType == MouseEventType::Press ||
-                _eventType == MouseEventType::Drag ||
-                _eventType == MouseEventType::Release)
-            {
-                auto const button = mouseTransport_ != MouseTransport::SGR
-                                  ? buttonNormal(_button, _eventType)
-                                  : buttonX10(_button);
+        }
+        return false;
+    case MouseProtocol::AnyEventTracking: // Like ButtonTracking but any motion events (not just dragging)
+        // TODO: make sure we can receive mouse-move events even without mouse pressed.
+        {
+            auto const button = mouseTransport_ != MouseTransport::SGR ? buttonNormal(_button, _eventType)
+                                                                       : buttonX10(_button);
 
-                uint8_t const draggableButton = _eventType == MouseEventType::Drag
-                                              ? button + 0x20
-                                              : button;
+            uint8_t const draggableButton = _eventType == MouseEventType::Drag ? button + 0x20 : button;
 
-                mouseTransport(draggableButton, modifierBits(_modifier), _pos, _eventType);
-                return true;
-            }
-            return false;
-        case MouseProtocol::AnyEventTracking: // Like ButtonTracking but any motion events (not just dragging)
-            // TODO: make sure we can receive mouse-move events even without mouse pressed.
-            {
-                auto const button = mouseTransport_ != MouseTransport::SGR
-                                  ? buttonNormal(_button, _eventType)
-                                  : buttonX10(_button);
-
-                uint8_t const draggableButton = _eventType == MouseEventType::Drag
-                                              ? button + 0x20
-                                              : button;
-
-                mouseTransport(draggableButton, modifierBits(_modifier), _pos, _eventType);
-            }
-            return true;
-        case MouseProtocol::HighlightTracking: // Highlight mouse tracking
-            return false; // TODO: do we want to implement this?
+            mouseTransport(draggableButton, modifierBits(_modifier), _pos, _eventType);
+        }
+        return true;
+    case MouseProtocol::HighlightTracking: // Highlight mouse tracking
+        return false;                      // TODO: do we want to implement this?
     }
 
     return false;
 }
 
-bool InputGenerator::mouseTransport(uint8_t _button, uint8_t _modifier, Coordinate _pos, MouseEventType _eventType)
+bool InputGenerator::mouseTransport(uint8_t _button,
+                                    uint8_t _modifier,
+                                    Coordinate _pos,
+                                    MouseEventType _eventType)
 {
     switch (mouseTransport_)
     {
-        case MouseTransport::Default: // mode: 9
-            mouseTransportX10(_button, _modifier, _pos);
-            return true;
-        case MouseTransport::Extended: // mode: 1005
-            // TODO (like Default but with UTF-8 encoded coords)
-            return false;
-        case MouseTransport::SGR:      // mode: 1006
-            return mouseTransportSGR(_button, _modifier, _pos, _eventType);
-        case MouseTransport::URXVT:    // mode: 1015
-            return mouseTransportURXVT(_button, _modifier, _pos, _eventType);
+    case MouseTransport::Default: // mode: 9
+        mouseTransportX10(_button, _modifier, _pos);
+        return true;
+    case MouseTransport::Extended: // mode: 1005
+        // TODO (like Default but with UTF-8 encoded coords)
+        return false;
+    case MouseTransport::SGR: // mode: 1006
+        return mouseTransportSGR(_button, _modifier, _pos, _eventType);
+    case MouseTransport::URXVT: // mode: 1015
+        return mouseTransportURXVT(_button, _modifier, _pos, _eventType);
     }
 
     return false;
@@ -647,7 +623,10 @@ bool InputGenerator::mouseTransportX10(uint8_t _button, uint8_t _modifier, Coord
         return false;
 }
 
-bool InputGenerator::mouseTransportSGR(uint8_t _button, uint8_t _modifier, Coordinate _pos, MouseEventType _eventType)
+bool InputGenerator::mouseTransportSGR(uint8_t _button,
+                                       uint8_t _modifier,
+                                       Coordinate _pos,
+                                       MouseEventType _eventType)
 {
     append("\033[<");
     append(static_cast<unsigned>(_button | _modifier));
@@ -660,7 +639,10 @@ bool InputGenerator::mouseTransportSGR(uint8_t _button, uint8_t _modifier, Coord
     return true;
 }
 
-bool InputGenerator::mouseTransportURXVT(uint8_t _button, uint8_t _modifier, Coordinate _pos, MouseEventType _eventType)
+bool InputGenerator::mouseTransportURXVT(uint8_t _button,
+                                         uint8_t _modifier,
+                                         Coordinate _pos,
+                                         MouseEventType _eventType)
 {
     if (_eventType == MouseEventType::Press)
     {
@@ -677,8 +659,7 @@ bool InputGenerator::mouseTransportURXVT(uint8_t _button, uint8_t _modifier, Coo
 
 bool InputGenerator::generateMousePress(MouseButton _button, Modifier _modifier, Coordinate _pos)
 {
-    auto const logged = [=](bool success) -> bool
-    {
+    auto const logged = [=](bool success) -> bool {
         if (success)
             LOGSTORE(InputLog)("Sending mouse press {} {} at {}.", _button, _modifier, _pos);
         return success;
@@ -691,30 +672,23 @@ bool InputGenerator::generateMousePress(MouseButton _button, Modifier _modifier,
 
     switch (mouseWheelMode())
     {
-        case MouseWheelMode::NormalCursorKeys:
-            switch (_button)
-            {
-                case MouseButton::WheelUp:
-                    return logged(append("\033[A"));
-                case MouseButton::WheelDown:
-                    return logged(append("\033[B"));
-                default:
-                    break;
-            }
-            break;
-        case MouseWheelMode::ApplicationCursorKeys:
-            switch (_button)
-            {
-                case MouseButton::WheelUp:
-                    return logged(append("\033OA"));
-                case MouseButton::WheelDown:
-                    return logged(append("\033OB"));
-                default:
-                    break;
-            }
-            break;
-        case MouseWheelMode::Default:
-            break;
+    case MouseWheelMode::NormalCursorKeys:
+        switch (_button)
+        {
+        case MouseButton::WheelUp: return logged(append("\033[A"));
+        case MouseButton::WheelDown: return logged(append("\033[B"));
+        default: break;
+        }
+        break;
+    case MouseWheelMode::ApplicationCursorKeys:
+        switch (_button)
+        {
+        case MouseButton::WheelUp: return logged(append("\033OA"));
+        case MouseButton::WheelDown: return logged(append("\033OB"));
+        default: break;
+        }
+        break;
+    case MouseWheelMode::Default: break;
     }
 
     if (!isMouseWheel(_button))
@@ -726,8 +700,7 @@ bool InputGenerator::generateMousePress(MouseButton _button, Modifier _modifier,
 
 bool InputGenerator::generateMouseRelease(MouseButton _button, Modifier _modifier, Coordinate _pos)
 {
-    auto const logged = [=](bool success) -> bool
-    {
+    auto const logged = [=](bool success) -> bool {
         if (success)
             LOGSTORE(InputLog)("Sending mouse release {} {} at {}.", _button, _modifier, _pos);
         return success;
@@ -743,8 +716,7 @@ bool InputGenerator::generateMouseRelease(MouseButton _button, Modifier _modifie
 
 bool InputGenerator::generateMouseMove(Coordinate _pos, Modifier _modifier)
 {
-    auto const logged = [=](bool success) -> bool
-    {
+    auto const logged = [=](bool success) -> bool {
         if (success)
             LOGSTORE(InputLog)("Sending mouse move at {} {}.", _pos, _modifier);
         return success;
@@ -761,14 +733,15 @@ bool InputGenerator::generateMouseMove(Coordinate _pos, Modifier _modifier)
     bool const buttonsPressed = !currentlyPressedMouseButtons_.empty();
 
     bool const report = (mouseProtocol_.value() == MouseProtocol::ButtonTracking && buttonsPressed)
-                      || mouseProtocol_.value() == MouseProtocol::AnyEventTracking;
+                        || mouseProtocol_.value() == MouseProtocol::AnyEventTracking;
 
     if (report)
-        return logged(generateMouse(buttonsPressed ? *currentlyPressedMouseButtons_.begin() // what if multiple are pressed?
-                                                   : MouseButton::Release,
-                                    _modifier,
-                                    _pos,
-                                    MouseEventType::Drag));
+        return logged(generateMouse(
+            buttonsPressed ? *currentlyPressedMouseButtons_.begin() // what if multiple are pressed?
+                           : MouseButton::Release,
+            _modifier,
+            _pos,
+            MouseEventType::Drag));
 
     return false;
 }

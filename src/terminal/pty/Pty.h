@@ -14,15 +14,18 @@
 #pragma once
 
 #include <terminal/primitives.h>
+
 #include <crispy/logstore.h>
 
 #include <chrono>
 #include <optional>
 #include <string_view>
 
-namespace terminal {
+namespace terminal
+{
 
-class Pty {
+class Pty
+{
   public:
     virtual ~Pty() = default;
 
@@ -79,4 +82,4 @@ auto const inline PtyLog = logstore::Category("pty", "Logs general PTY informati
 auto const inline PtyInLog = logstore::Category("pty.input", "Logs PTY raw input.");
 auto const inline PtyOutLog = logstore::Category("pty.output", "Logs PTY raw output.");
 
-}  // namespace terminal
+} // namespace terminal

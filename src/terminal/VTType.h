@@ -13,10 +13,12 @@
  */
 #pragma once
 
-#include <string>
 #include <fmt/format.h>
 
-namespace terminal {
+#include <string>
+
+namespace terminal
+{
 
 /**
  * Virtual Terminal Types.
@@ -25,7 +27,8 @@ namespace terminal {
  *
  * The integer representational values match the one for DA2's first response parameter.
  */
-enum class VTType {
+enum class VTType
+{
     VT100 = 0,
     VT220 = 1,
     VT240 = 2,
@@ -43,7 +46,8 @@ enum class VTType {
  *
  * Used in response to SendDeviceAttributes.
  */
-enum class DeviceAttributes : uint16_t {
+enum class DeviceAttributes : uint16_t
+{
     Columns132 = (1 << 0),
     Printer = (1 << 1),
     SelectiveErase = (1 << 2),
@@ -55,7 +59,7 @@ enum class DeviceAttributes : uint16_t {
     SixelGraphics = (1 << 8),
     RectangularEditing = (1 << 9),
     Windowing = (1 << 10),
-    CaptureScreenBuffer  = (1 << 11),
+    CaptureScreenBuffer = (1 << 11),
 };
 
 constexpr DeviceAttributes operator|(DeviceAttributes a, DeviceAttributes b)
@@ -74,31 +78,35 @@ std::string to_string(DeviceAttributes v);
 //! Generates a parameter list that can be used to generate the CSI response.
 std::string to_params(DeviceAttributes v);
 
-}  // namespace terminal
+} // namespace terminal
 
 namespace fmt // {{{
 {
-    template <>
-    struct formatter<terminal::VTType> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(const terminal::VTType _id, FormatContext& ctx)
+template <>
+struct formatter<terminal::VTType>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(const terminal::VTType _id, FormatContext& ctx)
+    {
+        switch (_id)
         {
-            switch (_id)
-            {
-                case terminal::VTType::VT100: return format_to(ctx.out(), "VT100");
-                case terminal::VTType::VT220: return format_to(ctx.out(), "VT220");
-                case terminal::VTType::VT240: return format_to(ctx.out(), "VT240");
-                case terminal::VTType::VT320: return format_to(ctx.out(), "VT320");
-                case terminal::VTType::VT330: return format_to(ctx.out(), "VT330");
-                case terminal::VTType::VT340: return format_to(ctx.out(), "VT340");
-                case terminal::VTType::VT420: return format_to(ctx.out(), "VT420");
-                case terminal::VTType::VT510: return format_to(ctx.out(), "VT510");
-                case terminal::VTType::VT520: return format_to(ctx.out(), "VT520");
-                case terminal::VTType::VT525: return format_to(ctx.out(), "VT525");
-            }
-            return format_to(ctx.out(), "INVALID-{}", static_cast<unsigned>(_id));
+        case terminal::VTType::VT100: return format_to(ctx.out(), "VT100");
+        case terminal::VTType::VT220: return format_to(ctx.out(), "VT220");
+        case terminal::VTType::VT240: return format_to(ctx.out(), "VT240");
+        case terminal::VTType::VT320: return format_to(ctx.out(), "VT320");
+        case terminal::VTType::VT330: return format_to(ctx.out(), "VT330");
+        case terminal::VTType::VT340: return format_to(ctx.out(), "VT340");
+        case terminal::VTType::VT420: return format_to(ctx.out(), "VT420");
+        case terminal::VTType::VT510: return format_to(ctx.out(), "VT510");
+        case terminal::VTType::VT520: return format_to(ctx.out(), "VT520");
+        case terminal::VTType::VT525: return format_to(ctx.out(), "VT525");
         }
-    };
-} // }}}
+        return format_to(ctx.out(), "INVALID-{}", static_cast<unsigned>(_id));
+    }
+};
+} // namespace fmt

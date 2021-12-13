@@ -16,8 +16,8 @@
 #include <contour/Config.h>
 #include <contour/helper.h>
 
-#include <terminal/InputGenerator.h>
 #include <terminal/Image.h>
+#include <terminal/InputGenerator.h>
 #include <terminal/ScreenEvents.h>
 
 #include <crispy/point.h>
@@ -26,7 +26,8 @@
 #include <chrono>
 #include <functional>
 
-namespace contour {
+namespace contour
+{
 
 /**
  * VT Display interface.
@@ -37,7 +38,7 @@ namespace contour {
  */
 class TerminalDisplay
 {
-public:
+  public:
     virtual ~TerminalDisplay() = default;
 
     /// Ensures @p _fn is being executed within the thread context of the display.
@@ -66,7 +67,8 @@ public:
     virtual void resizeWindow(terminal::Width, terminal::Height) = 0;
     virtual void setBackgroundBlur(bool _enabled) = 0;
     virtual void setFonts(terminal::renderer::FontDescriptions _fontDescriptions) = 0;
-    virtual void setHyperlinkDecoration(terminal::renderer::Decorator _normal, terminal::renderer::Decorator _hover) = 0;
+    virtual void setHyperlinkDecoration(terminal::renderer::Decorator _normal,
+                                        terminal::renderer::Decorator _hover) = 0;
     virtual void setMouseCursorShape(MouseCursorShape _shape) = 0;
     virtual void setWindowFullScreen() = 0;
     virtual void setWindowMaximized() = 0;
@@ -76,11 +78,11 @@ public:
     virtual void setBackgroundOpacity(terminal::Opacity _opacity) = 0;
 
     // terminal events
-    virtual void bufferChanged(terminal::ScreenType) = 0; // primary/alt buffer has flipped
+    virtual void bufferChanged(terminal::ScreenType) = 0;  // primary/alt buffer has flipped
     virtual void discardImage(terminal::Image const&) = 0; // the given image is not in use anymore
-    virtual void onSelectionCompleted() = 0; // a visual selection has completed
-    virtual void renderBufferUpdated() = 0; // notify on RenderBuffer updates
-    virtual void scheduleRedraw() = 0; //!< forced redraw of the screen
+    virtual void onSelectionCompleted() = 0;               // a visual selection has completed
+    virtual void renderBufferUpdated() = 0;                // notify on RenderBuffer updates
+    virtual void scheduleRedraw() = 0;                     //!< forced redraw of the screen
 };
 
-}
+} // namespace contour

@@ -21,39 +21,28 @@ using std::max;
 using std::min;
 using std::vector;
 
-namespace terminal {
+namespace terminal
+{
 
 namespace
 {
-    constexpr bool isDigit(char _value) noexcept
-    {
-        return _value >= '0' && _value <= '9';
-    }
+    constexpr bool isDigit(char _value) noexcept { return _value >= '0' && _value <= '9'; }
 
-    constexpr int toDigit(char _value) noexcept
-    {
-        return static_cast<int>(_value) - '0';
-    }
+    constexpr int toDigit(char _value) noexcept { return static_cast<int>(_value) - '0'; }
 
-    constexpr bool isSixel(char _value) noexcept
-    {
-        return _value >= 63 && _value <= 126;
-    }
+    constexpr bool isSixel(char _value) noexcept { return _value >= 63 && _value <= 126; }
 
     constexpr int8_t toSixel(char _value) noexcept
     {
         return static_cast<int8_t>(static_cast<int>(_value) - 63);
     }
 
-    constexpr RGBColor rgb(uint8_t r, uint8_t g, uint8_t b)
-    {
-        return RGBColor{r, g, b};
-    }
-}
+    constexpr RGBColor rgb(uint8_t r, uint8_t g, uint8_t b) { return RGBColor { r, g, b }; }
+} // namespace
 
 // VT 340 default color palette (https://www.vt100.net/docs/vt3xx-gp/chapter2.html#S2.4)
 constexpr inline std::array<RGBColor, 16> defaultColors = {
-    rgb(0,   0,  0),    //  0: black
+    rgb(0, 0, 0),       //  0: black
     rgb(51, 51, 204),   //  1: blue
     rgb(204, 33, 33),   //  2: red
     rgb(51, 204, 51),   //  3: green
@@ -72,9 +61,7 @@ constexpr inline std::array<RGBColor, 16> defaultColors = {
 };
 
 // {{{ SixelColorPalette
-SixelColorPalette::SixelColorPalette(int _size, int _maxSize) :
-    palette_{},
-    maxSize_{_maxSize}
+SixelColorPalette::SixelColorPalette(int _size, int _maxSize): palette_ {}, maxSize_ { _maxSize }
 {
     if (_size > 0)
         palette_.resize(_size);
@@ -116,9 +103,8 @@ RGBColor SixelColorPalette::at(int _index) const noexcept
 }
 // }}}
 
-SixelParser::SixelParser(Events& _events, OnFinalize _finalizer) :
-    events_{ _events },
-    finalizer_{ move(_finalizer) }
+SixelParser::SixelParser(Events& _events, OnFinalize _finalizer):
+    events_ { _events }, finalizer_ { move(_finalizer) }
 {
 }
 
@@ -126,52 +112,50 @@ void SixelParser::parse(char _value)
 {
     switch (state_)
     {
-        case State::Ground:
+    case State::Ground: fallback(_value); break;
+
+    case State::RepeatIntroducer:
+        // '!' NUMBER BYTE
+        if (isDigit(_value))
+            paramShiftAndAddDigit(toDigit(_value));
+        else if (isSixel(_value))
+        {
+            auto const sixel = toSixel(_value);
+            for (int i = 0; i < params_[0]; ++i)
+                events_.render(sixel);
+            transitionTo(State::Ground);
+        }
+        else
             fallback(_value);
-            break;
+        break;
 
-        case State::RepeatIntroducer:
-            // '!' NUMBER BYTE
-            if (isDigit(_value))
-                paramShiftAndAddDigit(toDigit(_value));
-            else if (isSixel(_value))
-            {
-                auto const sixel = toSixel(_value);
-                for (int i = 0; i < params_[0]; ++i)
-                    events_.render(sixel);
-                transitionTo(State::Ground);
-            }
-            else
-                fallback(_value);
-            break;
+    case State::ColorIntroducer:
+        if (isDigit(_value))
+        {
+            paramShiftAndAddDigit(toDigit(_value));
+            transitionTo(State::ColorParam);
+        }
+        else
+            fallback(_value);
+        break;
 
-        case State::ColorIntroducer:
-            if (isDigit(_value))
-            {
-                paramShiftAndAddDigit(toDigit(_value));
-                transitionTo(State::ColorParam);
-            }
-            else
-                fallback(_value);
-            break;
+    case State::ColorParam:
+        if (isDigit(_value))
+            paramShiftAndAddDigit(toDigit(_value));
+        else if (_value == ';')
+            params_.push_back(0);
+        else
+            fallback(_value);
+        break;
 
-        case State::ColorParam:
-            if (isDigit(_value))
-                paramShiftAndAddDigit(toDigit(_value));
-            else if (_value == ';')
-                params_.push_back(0);
-            else
-                fallback(_value);
-            break;
-
-        case State::RasterSettings:
-            if (isDigit(_value))
-                paramShiftAndAddDigit(toDigit(_value));
-            else if (_value == ';')
-                params_.push_back(0);
-            else
-                fallback(_value);
-            break;
+    case State::RasterSettings:
+        if (isDigit(_value))
+            paramShiftAndAddDigit(toDigit(_value));
+        else if (_value == ';')
+            params_.push_back(0);
+        else
+            fallback(_value);
+        break;
     }
 }
 
@@ -230,16 +214,15 @@ void SixelParser::enterState()
 {
     switch (state_)
     {
-        case State::ColorIntroducer:
-        case State::RepeatIntroducer:
-        case State::RasterSettings:
-            params_.clear();
-            params_.push_back(0);
-            break;
+    case State::ColorIntroducer:
+    case State::RepeatIntroducer:
+    case State::RasterSettings:
+        params_.clear();
+        params_.push_back(0);
+        break;
 
-        case State::Ground:
-        case State::ColorParam:
-            break;
+    case State::Ground:
+    case State::ColorParam: break;
     }
 }
 
@@ -247,47 +230,48 @@ void SixelParser::leaveState()
 {
     switch (state_)
     {
-        case State::Ground:
-        case State::ColorIntroducer:
-        case State::RepeatIntroducer:
-            break;
+    case State::Ground:
+    case State::ColorIntroducer:
+    case State::RepeatIntroducer: break;
 
-        case State::RasterSettings:
-            if (params_.size() == 4)
-            {
-                auto const pan = params_[0];
-                auto const pad = params_[1];
-                auto const xPixels = Width(params_[2]);
-                auto const yPixels = Height(params_[3]);
-                events_.setRaster(pan, pad, ImageSize{xPixels, yPixels});
-                state_ = State::Ground;
-            }
-            break;
+    case State::RasterSettings:
+        if (params_.size() == 4)
+        {
+            auto const pan = params_[0];
+            auto const pad = params_[1];
+            auto const xPixels = Width(params_[2]);
+            auto const yPixels = Height(params_[3]);
+            events_.setRaster(pan, pad, ImageSize { xPixels, yPixels });
+            state_ = State::Ground;
+        }
+        break;
 
-        case State::ColorParam:
-            if (params_.size() == 1)
+    case State::ColorParam:
+        if (params_.size() == 1)
+        {
+            auto const index = params_[0];
+            events_.useColor(
+                index); // TODO: move color palette into image builder (to have access to it during clear!)
+        }
+        else if (params_.size() == 5)
+        {
+            auto constexpr convertValue = [](int _value) {
+                // converts a color from range 0..100 to 0..255
+                return static_cast<uint8_t>(static_cast<int>((static_cast<float>(_value) * 255.0f) / 100.0f)
+                                            % 256);
+            };
+            auto const index = params_[0];
+            auto const colorSpace = params_[1] == 2 ? Colorspace::RGB : Colorspace::HSL;
+            if (colorSpace == Colorspace::RGB)
             {
-                auto const index = params_[0];
-                events_.useColor(index); // TODO: move color palette into image builder (to have access to it during clear!)
+                auto const p1 = convertValue(params_[2]);
+                auto const p2 = convertValue(params_[3]);
+                auto const p3 = convertValue(params_[4]);
+                auto const color = RGBColor { p1, p2, p3 }; // TODO: convert HSL if requested
+                events_.setColor(index, color);
             }
-            else if (params_.size() == 5)
-            {
-                auto constexpr convertValue = [](int _value) {
-                    // converts a color from range 0..100 to 0..255
-                    return static_cast<uint8_t>(static_cast<int>((static_cast<float>(_value) * 255.0f) / 100.0f) % 256);
-                };
-                auto const index = params_[0];
-                auto const colorSpace = params_[1] == 2 ? Colorspace::RGB : Colorspace::HSL;
-                if (colorSpace == Colorspace::RGB)
-                {
-                    auto const p1 = convertValue(params_[2]);
-                    auto const p2 = convertValue(params_[3]);
-                    auto const p3 = convertValue(params_[4]);
-                    auto const color = RGBColor{p1, p2, p3}; // TODO: convert HSL if requested
-                    events_.setColor(index, color);
-                }
-            }
-            break;
+        }
+        break;
     }
 }
 
@@ -312,14 +296,14 @@ SixelImageBuilder::SixelImageBuilder(ImageSize _maxSize,
                                      int _aspectVertical,
                                      int _aspectHorizontal,
                                      RGBAColor _backgroundColor,
-                                     std::shared_ptr<SixelColorPalette> _colorPalette) :
-    maxSize_{ _maxSize },
-    colors_{ std::move(_colorPalette) },
-    size_{ _maxSize },
+                                     std::shared_ptr<SixelColorPalette> _colorPalette):
+    maxSize_ { _maxSize },
+    colors_ { std::move(_colorPalette) },
+    size_ { _maxSize },
     buffer_(*size_.width * *size_.height * 4),
-    sixelCursor_{},
-    currentColor_{0},
-    aspectRatio_{ _aspectVertical, _aspectHorizontal }
+    sixelCursor_ {},
+    currentColor_ { 0 },
+    aspectRatio_ { _aspectVertical, _aspectHorizontal }
 {
     clear(_backgroundColor);
 }
@@ -344,12 +328,13 @@ RGBAColor SixelImageBuilder::at(Coordinate _coord) const noexcept
     auto const col = *_coord.column % *size_.width;
     auto const base = line * *size_.width * 4 + col * 4;
     auto const color = &buffer_[base];
-    return RGBAColor{color[0], color[1], color[2], color[3]};
+    return RGBAColor { color[0], color[1], color[2], color[3] };
 }
 
 void SixelImageBuilder::write(Coordinate const& _coord, RGBColor const& _value) noexcept
 {
-    if (*_coord.line >= 0 && *_coord.line < *size_.height && *_coord.column >= 0 && *_coord.column < *size_.width)
+    if (*_coord.line >= 0 && *_coord.line < *size_.height && *_coord.column >= 0
+        && *_coord.column < *size_.width)
     {
         auto const base = *_coord.line * *size_.width * 4 + *_coord.column * 4;
         buffer_[base + 0] = _value.red;
@@ -401,7 +386,7 @@ void SixelImageBuilder::render(int8_t _sixel)
         for (int i = 0; i < 6; ++i)
         {
             auto const y = sixelCursor_.line + i;
-            auto const pos = Coordinate{y, x};
+            auto const pos = Coordinate { y, x };
             auto const pin = 1 << i;
             auto const pinned = (_sixel & pin) != 0;
             if (pinned)
@@ -411,4 +396,4 @@ void SixelImageBuilder::render(int8_t _sixel)
     }
 }
 
-}
+} // namespace terminal

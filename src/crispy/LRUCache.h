@@ -26,14 +26,14 @@ namespace crispy
 template <typename Key, typename Value>
 class LRUCache
 {
-public:
+  public:
     using Item = std::pair<Key, Value>;
     using ItemList = std::list<Item>;
 
     using iterator = typename ItemList::iterator;
     using const_iterator = typename ItemList::const_iterator;
 
-    explicit LRUCache(std::size_t _capacity): capacity_{_capacity} {}
+    explicit LRUCache(std::size_t _capacity): capacity_ { _capacity } {}
 
     std::size_t size() const noexcept { return items_.size(); }
     std::size_t capacity() const noexcept { return capacity_; }
@@ -44,20 +44,11 @@ public:
         items_.clear();
     }
 
-    void touch(Key _key) noexcept
-    {
-        (void) try_get(_key);
-    }
+    void touch(Key _key) noexcept { (void) try_get(_key); }
 
-    [[nodiscard]] bool contains(Key _key) const noexcept
-    {
-        return try_get(_key) != nullptr;
-    }
+    [[nodiscard]] bool contains(Key _key) const noexcept { return try_get(_key) != nullptr; }
 
-    [[nodiscard]] Value* try_get(Key _key) const
-    {
-        return const_cast<LRUCache*>(this)->try_get(_key);
-    }
+    [[nodiscard]] Value* try_get(Key _key) const { return const_cast<LRUCache*>(this)->try_get(_key); }
 
     [[nodiscard]] Value* try_get(Key _key)
     {
@@ -97,7 +88,7 @@ public:
         if (items_.size() == capacity_)
             return evict_one_and_push_front(_key)->second;
 
-        items_.emplace_front(Item{_key, Value{}});
+        items_.emplace_front(Item { _key, Value {} });
         itemByKeyMapping_.emplace(_key, items_.begin());
         return items_.front().second;
     }
@@ -116,7 +107,7 @@ public:
             evict_one_and_push_front(_key)->second = _constructValue();
         else
         {
-            items_.emplace_front(Item{_key, _constructValue()});
+            items_.emplace_front(Item { _key, _constructValue() });
             itemByKeyMapping_.emplace(_key, items_.begin());
         }
         return true;
@@ -137,7 +128,7 @@ public:
         if (items_.size() == capacity_)
             return evict_one_and_push_front(_key)->second = std::move(_value);
 
-        items_.emplace_front(Item{_key, std::move(_value)});
+        items_.emplace_front(Item { _key, std::move(_value) });
         itemByKeyMapping_.emplace(_key, items_.begin());
         return items_.front().second;
     }
@@ -173,7 +164,7 @@ public:
             erase(i->second);
     }
 
-private:
+  private:
     /// Evicts least recently used item and prepares (/reuses) its storage for a new item.
     [[nodiscard]] iterator evict_one_and_push_front(Key _newKey)
     {
@@ -197,4 +188,4 @@ private:
     std::size_t capacity_;
 };
 
-}
+} // namespace crispy

@@ -1,11 +1,13 @@
 #pragma once
-#include <type_traits>
 #include <iterator>
+#include <type_traits>
 
-namespace crispy {
+namespace crispy
+{
 
 template <typename T>
-class span {
+class span
+{
   public:
     using element_type = T;
 
@@ -20,13 +22,18 @@ class span {
 
     // constructors
     //
-    constexpr span(iterator _begin, iterator _end) noexcept : begin_{_begin}, end_{_end} {}
-    constexpr span(iterator _begin, size_t _count) noexcept : begin_{_begin}, end_{std::next(_begin, _count)} {}
+    constexpr span(iterator _begin, iterator _end) noexcept: begin_ { _begin }, end_ { _end } {}
+    constexpr span(iterator _begin, size_t _count) noexcept:
+        begin_ { _begin }, end_ { std::next(_begin, _count) }
+    {
+    }
 
     template <std::size_t N>
-    constexpr span(element_type (&_array)[N]) noexcept : begin_{_array}, end_{_array + N} {}
+    constexpr span(element_type (&_array)[N]) noexcept: begin_ { _array }, end_ { _array + N }
+    {
+    }
 
-    constexpr span() noexcept : begin_{}, end_{} {}
+    constexpr span() noexcept: begin_ {}, end_ {} {}
     constexpr span(span<T> const&) noexcept = default;
     constexpr span(span<T>&&) noexcept = default;
     constexpr span& operator=(span<T> const&) noexcept = default;
@@ -74,7 +81,8 @@ class span {
 template <typename T>
 span(T, size_t) -> span<decltype(std::declval<T>().begin())>;
 
-template <typename T> constexpr bool operator==(span<T> const& a, span<T> const& b) noexcept
+template <typename T>
+constexpr bool operator==(span<T> const& a, span<T> const& b) noexcept
 {
     if (a.size() != b.size())
         return false;
@@ -86,9 +94,21 @@ template <typename T> constexpr bool operator==(span<T> const& a, span<T> const&
     return true;
 }
 
-template <typename T> constexpr bool operator!=(span<T> const& a, span<T> const& b) noexcept { return !(a == b); }
-
-template <typename T> constexpr auto begin(span<T>& _span) noexcept { return _span.begin(); }
-template <typename T> constexpr auto end(span<T>& _span) noexcept { return _span.end(); }
-
+template <typename T>
+constexpr bool operator!=(span<T> const& a, span<T> const& b) noexcept
+{
+    return !(a == b);
 }
+
+template <typename T>
+constexpr auto begin(span<T>& _span) noexcept
+{
+    return _span.begin();
+}
+template <typename T>
+constexpr auto end(span<T>& _span) noexcept
+{
+    return _span.end();
+}
+
+} // namespace crispy

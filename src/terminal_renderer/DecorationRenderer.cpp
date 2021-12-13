@@ -11,9 +11,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <terminal_renderer/Atlas.h>
 #include <terminal_renderer/DecorationRenderer.h>
 #include <terminal_renderer/GridMetrics.h>
-#include <terminal_renderer/Atlas.h>
 #include <terminal_renderer/Pixmap.h>
 
 #include <crispy/times.h>
@@ -38,35 +38,34 @@ using std::optional;
 using std::pair;
 using std::string;
 
-namespace terminal::renderer {
+namespace terminal::renderer
+{
 
 optional<Decorator> to_decorator(std::string const& _value)
 {
-    auto constexpr mappings = array{
-        pair{"underline", Decorator::Underline},
-        pair{"dotted-underline", Decorator::DottedUnderline},
-        pair{"double-underline", Decorator::DoubleUnderline},
-        pair{"curly-underline", Decorator::CurlyUnderline},
-        pair{"dashed-underline", Decorator::DashedUnderline},
-        pair{"overline", Decorator::Overline},
-        pair{"crossed-out", Decorator::CrossedOut},
-        pair{"framed", Decorator::Framed},
-        pair{"encircle", Decorator::Encircle},
+    auto constexpr mappings = array {
+        pair { "underline", Decorator::Underline },
+        pair { "dotted-underline", Decorator::DottedUnderline },
+        pair { "double-underline", Decorator::DoubleUnderline },
+        pair { "curly-underline", Decorator::CurlyUnderline },
+        pair { "dashed-underline", Decorator::DashedUnderline },
+        pair { "overline", Decorator::Overline },
+        pair { "crossed-out", Decorator::CrossedOut },
+        pair { "framed", Decorator::Framed },
+        pair { "encircle", Decorator::Encircle },
     };
 
-    for (auto const& mapping : mappings)
+    for (auto const& mapping: mappings)
         if (mapping.first == _value)
-            return {mapping.second};
+            return { mapping.second };
 
     return nullopt;
 }
 
 DecorationRenderer::DecorationRenderer(GridMetrics const& _gridMetrics,
                                        Decorator _hyperlinkNormal,
-                                       Decorator _hyperlinkHover) :
-    gridMetrics_{ _gridMetrics },
-    hyperlinkNormal_{ _hyperlinkNormal },
-    hyperlinkHover_{ _hyperlinkHover }
+                                       Decorator _hyperlinkHover):
+    gridMetrics_ { _gridMetrics }, hyperlinkNormal_ { _hyperlinkNormal }, hyperlinkHover_ { _hyperlinkHover }
 {
 }
 
@@ -85,16 +84,13 @@ namespace
 {
     constexpr bool pointVisibleInCircle(int x, int y, int r)
     {
-        return x*x + y*y <= r*r;
+        return x * x + y * y <= r * r;
         // return -1.0f <= x && x <= +1.0f
         //     && -1.0f <= y && y <= +1.0f;
     }
 
-    constexpr double normalize(int _actual, int _max)
-    {
-        return double(_actual) / double(_max);
-    }
-}
+    constexpr double normalize(int _actual, int _max) { return double(_actual) / double(_max); }
+} // namespace
 
 void DecorationRenderer::rebuild()
 {
@@ -112,11 +108,7 @@ void DecorationRenderer::rebuild()
                 image[(*height - y0 - y) * *width + x] = 0xFF;
 
         atlas_->insert(
-            Decorator::Underline,
-            ImageSize{width, height},
-            ImageSize{width, height},
-            move(image)
-        );
+            Decorator::Underline, ImageSize { width, height }, ImageSize { width, height }, move(image));
     } // }}}
     { // {{{ double underline
         auto const thickness_half = max(1, int(ceil(underlineThickness() / 3.0)));
@@ -135,12 +127,10 @@ void DecorationRenderer::rebuild()
             }
         }
 
-        atlas_->insert(
-            Decorator::DoubleUnderline,
-            ImageSize{width, height},
-            ImageSize{width, height},
-            move(image)
-        );
+        atlas_->insert(Decorator::DoubleUnderline,
+                       ImageSize { width, height },
+                       ImageSize { width, height },
+                       move(image));
     } // }}}
     { // {{{ curly underline
         auto const height = Height::cast_from(gridMetrics_.underline.position);
@@ -148,7 +138,7 @@ void DecorationRenderer::rebuild()
         auto const yScalar = h2 - 1;
         auto const xScalar = 2 * M_PI / *width;
         auto const yBase = h2;
-        auto block = blockElement(ImageSize{Width(width), height});
+        auto block = blockElement(ImageSize { Width(width), height });
 
         for (int x = 0; x < *width; ++x)
         {
@@ -163,11 +153,7 @@ void DecorationRenderer::rebuild()
         }
 
         atlas_->insert(
-            Decorator::CurlyUnderline,
-            block.downsampledSize(),
-            block.downsampledSize(),
-            block.take()
-        );
+            Decorator::CurlyUnderline, block.downsampledSize(), block.downsampledSize(), block.take());
     } // }}}
     { // {{{ dotted underline (use square dots)
         auto const dotHeight = gridMetrics_.underline.thickness;
@@ -176,7 +162,7 @@ void DecorationRenderer::rebuild()
         auto const y0 = gridMetrics_.underline.position - dotHeight;
         auto const x0 = 0;
         auto const x1 = unbox<int>(width) / 2;
-        auto block = blockElement(ImageSize{width, height});
+        auto block = blockElement(ImageSize { width, height });
 
         for (int y = 0; y < dotHeight; ++y)
         {
@@ -188,11 +174,7 @@ void DecorationRenderer::rebuild()
         }
 
         atlas_->insert(
-            Decorator::DottedUnderline,
-            block.downsampledSize(),
-            block.downsampledSize(),
-            block.take()
-        );
+            Decorator::DottedUnderline, block.downsampledSize(), block.downsampledSize(), block.take());
     } // }}}
     { // {{{ dashed underline
         // Devides a grid cell's underline in three sub-ranges and only renders first and third one,
@@ -208,12 +190,10 @@ void DecorationRenderer::rebuild()
                 if (fabsf(float(x) / float(*width) - 0.5f) >= 0.25f)
                     image[(*height - y0 - y) * *width + x] = 0xFF;
 
-        atlas_->insert(
-            Decorator::DashedUnderline,
-            ImageSize{width, height},
-            ImageSize{width, height},
-            move(image)
-        );
+        atlas_->insert(Decorator::DashedUnderline,
+                       ImageSize { width, height },
+                       ImageSize { width, height },
+                       move(image));
     } // }}}
     { // {{{ framed
         auto const cellHeight = gridMetrics_.cellSize.height;
@@ -238,11 +218,7 @@ void DecorationRenderer::rebuild()
             }
 
         atlas_->insert(
-            Decorator::Framed,
-            ImageSize{width, cellHeight},
-            ImageSize{width, cellHeight},
-            move(image)
-        );
+            Decorator::Framed, ImageSize { width, cellHeight }, ImageSize { width, cellHeight }, move(image));
     } // }}}
     { // {{{ overline
         auto const cellHeight = gridMetrics_.cellSize.height;
@@ -253,12 +229,10 @@ void DecorationRenderer::rebuild()
             for (int x = 0; x < *width; ++x)
                 image[(*cellHeight - y - 1) * *width + x] = 0xFF;
 
-        atlas_->insert(
-            Decorator::Overline,
-            ImageSize{width, cellHeight},
-            ImageSize{width, cellHeight},
-            move(image)
-        );
+        atlas_->insert(Decorator::Overline,
+                       ImageSize { width, cellHeight },
+                       ImageSize { width, cellHeight },
+                       move(image));
     } // }}}
     { // {{{ crossed-out
         auto const height = Height(*gridMetrics_.cellSize.height / 2);
@@ -270,27 +244,23 @@ void DecorationRenderer::rebuild()
                 image[(*height - y) * *width + x] = 0xFF;
 
         atlas_->insert(
-            Decorator::CrossedOut,
-            ImageSize{width, height},
-            ImageSize{width, height},
-            move(image)
-        );
+            Decorator::CrossedOut, ImageSize { width, height }, ImageSize { width, height }, move(image));
     } // }}}
     // TODO: Encircle
 }
 
 void DecorationRenderer::renderCell(RenderCell const& _cell)
 {
-    auto constexpr mappings = array{
-        pair{CellFlags::Underline, Decorator::Underline},
-        pair{CellFlags::DoublyUnderlined, Decorator::DoubleUnderline},
-        pair{CellFlags::CurlyUnderlined, Decorator::CurlyUnderline},
-        pair{CellFlags::DottedUnderline, Decorator::DottedUnderline},
-        pair{CellFlags::DashedUnderline, Decorator::DashedUnderline},
-        pair{CellFlags::Overline, Decorator::Overline},
-        pair{CellFlags::CrossedOut, Decorator::CrossedOut},
-        pair{CellFlags::Framed, Decorator::Framed},
-        pair{CellFlags::Encircled, Decorator::Encircle},
+    auto constexpr mappings = array {
+        pair { CellFlags::Underline, Decorator::Underline },
+        pair { CellFlags::DoublyUnderlined, Decorator::DoubleUnderline },
+        pair { CellFlags::CurlyUnderlined, Decorator::CurlyUnderline },
+        pair { CellFlags::DottedUnderline, Decorator::DottedUnderline },
+        pair { CellFlags::DashedUnderline, Decorator::DashedUnderline },
+        pair { CellFlags::Overline, Decorator::Overline },
+        pair { CellFlags::CrossedOut, Decorator::CrossedOut },
+        pair { CellFlags::Framed, Decorator::Framed },
+        pair { CellFlags::Encircled, Decorator::Encircle },
     };
 
     for (auto const& mapping: mappings)
@@ -339,16 +309,12 @@ void DecorationRenderer::renderDecoration(Decorator _decoration,
     auto const x = _pos.x;
     auto const y = _pos.y;
     auto const z = 0;
-    auto const color = array{
-        float(_color.red) / 255.0f,
-        float(_color.green) / 255.0f,
-        float(_color.blue) / 255.0f,
-        1.0f
-    };
+    auto const color =
+        array { float(_color.red) / 255.0f, float(_color.green) / 255.0f, float(_color.blue) / 255.0f, 1.0f };
     atlas::TextureInfo const& textureInfo = get<0>(dataRef.value()).get();
     auto const advanceX = unbox<int>(gridMetrics_.cellSize.width);
-    for (int const i : crispy::times(_columnCount))
-        textureScheduler().renderTexture({textureInfo, i * advanceX + x, y, z, color});
+    for (int const i: crispy::times(_columnCount))
+        textureScheduler().renderTexture({ textureInfo, i * advanceX + x, y, z, color });
 }
 
-} // end namespace
+} // namespace terminal::renderer

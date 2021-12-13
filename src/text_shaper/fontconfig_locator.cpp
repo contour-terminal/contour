@@ -11,13 +11,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <text_shaper/fontconfig_locator.h>
 #include <text_shaper/font.h>
-
-#include <range/v3/view/iota.hpp>
+#include <text_shaper/fontconfig_locator.h>
 
 #include <fontconfig/fontconfig.h>
-
+#include <range/v3/view/iota.hpp>
 #include <string_view>
 
 using std::nullopt;
@@ -35,73 +33,59 @@ namespace text
 namespace // {{{ support
 {
 
-constexpr string_view fcSpacingStr(int _value) noexcept
-{
-    using namespace std::string_view_literals;
-    switch (_value)
+    constexpr string_view fcSpacingStr(int _value) noexcept
     {
+        using namespace std::string_view_literals;
+        switch (_value)
+        {
         case FC_PROPORTIONAL: return "proportional"sv;
         case FC_DUAL: return "dual"sv;
         case FC_MONO: return "mono"sv;
         case FC_CHARCELL: return "charcell"sv;
         default: return "INVALID"sv;
+        }
     }
-}
 
-constexpr int fcWeight(font_weight _weight) noexcept
-{
-    switch (_weight)
+    constexpr int fcWeight(font_weight _weight) noexcept
     {
-        case font_weight::thin:
-            return FC_WEIGHT_THIN;
-        case font_weight::extra_light:
-            return FC_WEIGHT_EXTRALIGHT;
-        case font_weight::light:
-            return FC_WEIGHT_LIGHT;
+        switch (_weight)
+        {
+        case font_weight::thin: return FC_WEIGHT_THIN;
+        case font_weight::extra_light: return FC_WEIGHT_EXTRALIGHT;
+        case font_weight::light: return FC_WEIGHT_LIGHT;
         case font_weight::demilight:
 #if defined(FC_WEIGHT_DEMILIGHT)
             return FC_WEIGHT_DEMILIGHT;
 #else
             return FC_WEIGHT_LIGHT; // Is this a good fallback? Maybe.
 #endif
-        case font_weight::book:
-            return FC_WEIGHT_BOOK;
-        case font_weight::normal:
-            return FC_WEIGHT_NORMAL;
-        case font_weight::medium:
-            return FC_WEIGHT_MEDIUM;
-        case font_weight::demibold:
-            return FC_WEIGHT_DEMIBOLD;
-        case font_weight::bold:
-            return FC_WEIGHT_BOLD;
-        case font_weight::extra_bold:
-            return FC_WEIGHT_EXTRABOLD;
-        case font_weight::black:
-            return FC_WEIGHT_BLACK;
-        case font_weight::extra_black:
-            return FC_WEIGHT_EXTRABLACK;
+        case font_weight::book: return FC_WEIGHT_BOOK;
+        case font_weight::normal: return FC_WEIGHT_NORMAL;
+        case font_weight::medium: return FC_WEIGHT_MEDIUM;
+        case font_weight::demibold: return FC_WEIGHT_DEMIBOLD;
+        case font_weight::bold: return FC_WEIGHT_BOLD;
+        case font_weight::extra_bold: return FC_WEIGHT_EXTRABOLD;
+        case font_weight::black: return FC_WEIGHT_BLACK;
+        case font_weight::extra_black: return FC_WEIGHT_EXTRABLACK;
+        }
+        return FC_WEIGHT_NORMAL;
     }
-    return FC_WEIGHT_NORMAL;
-}
 
-constexpr int fcSlant(font_slant _slant) noexcept
-{
-    switch (_slant)
+    constexpr int fcSlant(font_slant _slant) noexcept
     {
-        case font_slant::italic:
-            return FC_SLANT_ITALIC;
-        case font_slant::oblique:
-            return FC_SLANT_OBLIQUE;
-        case font_slant::normal:
-            return FC_SLANT_ROMAN;
+        switch (_slant)
+        {
+        case font_slant::italic: return FC_SLANT_ITALIC;
+        case font_slant::oblique: return FC_SLANT_OBLIQUE;
+        case font_slant::normal: return FC_SLANT_ROMAN;
+        }
+        return FC_SLANT_ROMAN;
     }
-    return FC_SLANT_ROMAN;
-}
 
-char const* fcWeightStr(int _value)
-{
-    switch (_value)
+    char const* fcWeightStr(int _value)
     {
+        switch (_value)
+        {
         case FC_WEIGHT_THIN: return "Thin";
         case FC_WEIGHT_EXTRALIGHT: return "ExtraLight";
         case FC_WEIGHT_LIGHT: return "Light";
@@ -117,21 +101,21 @@ char const* fcWeightStr(int _value)
         case FC_WEIGHT_BLACK: return "Black";
         case FC_WEIGHT_EXTRABLACK: return "ExtraBlack";
         default: return "?";
+        }
     }
-}
 
-char const* fcSlantStr(int _value)
-{
-    switch (_value)
+    char const* fcSlantStr(int _value)
     {
+        switch (_value)
+        {
         case FC_SLANT_ROMAN: return "Roman";
         case FC_SLANT_ITALIC: return "Italic";
         case FC_SLANT_OBLIQUE: return "Oblique";
         default: return "?";
+        }
     }
-}
 
-} // }}}
+} // namespace
 
 struct fontconfig_locator::Private
 {
@@ -139,7 +123,9 @@ struct fontconfig_locator::Private
 };
 
 fontconfig_locator::fontconfig_locator():
-    d{new Private(), [](Private* p) { delete p; }}
+    d { new Private(), [](Private* p) {
+           delete p;
+       } }
 {
     FcInit();
 }
@@ -152,13 +138,12 @@ fontconfig_locator::~fontconfig_locator()
 font_source_list fontconfig_locator::locate(font_description const& _fd)
 {
     LOGSTORE(LocatorLog)("Locating font chain for: {}", _fd);
-    auto pat = unique_ptr<FcPattern, void(*)(FcPattern*)>(
-        FcPatternCreate(),
-        [](auto p) { FcPatternDestroy(p); });
+    auto pat =
+        unique_ptr<FcPattern, void (*)(FcPattern*)>(FcPatternCreate(), [](auto p) { FcPatternDestroy(p); });
 
     FcPatternAddBool(pat.get(), FC_OUTLINE, true);
     FcPatternAddBool(pat.get(), FC_SCALABLE, true);
-    //FcPatternAddBool(pat.get(), FC_EMBEDDED_BITMAP, false);
+    // FcPatternAddBool(pat.get(), FC_EMBEDDED_BITMAP, false);
 
     // XXX It should be recommended to turn that on if you are looking for colored fonts,
     //     such as for emoji, but it seems like fontconfig doesn't care, it works either way.
@@ -174,11 +159,11 @@ font_source_list fontconfig_locator::locate(font_description const& _fd)
 #if defined(_WIN32)
         // On Windows FontConfig can't find "monospace". We need to use "Consolas" instead.
         if (_fd.familyName == "monospace")
-            FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*)"Consolas");
+            FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) "Consolas");
 #elif defined(__APPLE__)
         // Same for macOS, we use "Menlo" for "monospace".
         if (_fd.familyName == "monospace")
-            FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*)"Menlo");
+            FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) "Menlo");
 #else
         if (_fd.familyName != "monospace")
             FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) "monospace");
@@ -196,8 +181,8 @@ font_source_list fontconfig_locator::locate(font_description const& _fd)
     FcDefaultSubstitute(pat.get());
 
     FcResult result = FcResultNoMatch;
-    auto fs = unique_ptr<FcFontSet, void(*)(FcFontSet*)>(
-        FcFontSort(nullptr, pat.get(), /*unicode-trim*/FcTrue, /*FcCharSet***/nullptr, &result),
+    auto fs = unique_ptr<FcFontSet, void (*)(FcFontSet*)>(
+        FcFontSort(nullptr, pat.get(), /*unicode-trim*/ FcTrue, /*FcCharSet***/ nullptr, &result),
         [](auto p) { FcFontSetDestroy(p); });
 
     if (!fs || result != FcResultMatch)
@@ -205,9 +190,8 @@ font_source_list fontconfig_locator::locate(font_description const& _fd)
 
     font_source_list output;
 
-    auto const addFontFile = [&](std::string_view path)
-    {
-        output.emplace_back(font_path{string{path}});
+    auto const addFontFile = [&](std::string_view path) {
+        output.emplace_back(font_path { string { path } });
     };
 
     for (int i = 0; i < fs->nfont; ++i)
@@ -218,58 +202,66 @@ font_source_list fontconfig_locator::locate(font_description const& _fd)
         if (FcPatternGetString(font, FC_FILE, 0, &file) != FcResultMatch)
             continue;
 
-        #if defined(FC_COLOR) // Not available on OS/X?
-        // FcBool color = FcFalse;
-        // FcPatternGetInteger(font, FC_COLOR, 0, &color);
-        // if (color && !_color)
-        // {
-        //     LOGSTORE(LocatorLog)("Skipping font (contains color). {}", (char const*) file);
-        //     continue;
-        // }
-        #endif
+#if defined(FC_COLOR) // Not available on OS/X?
+// FcBool color = FcFalse;
+// FcPatternGetInteger(font, FC_COLOR, 0, &color);
+// if (color && !_color)
+// {
+//     LOGSTORE(LocatorLog)("Skipping font (contains color). {}", (char const*) file);
+//     continue;
+// }
+#endif
 
         int spacing = -1; // ignore font if we cannot retrieve spacing information
         FcPatternGetInteger(font, FC_SPACING, 0, &spacing);
         if (_fd.strict_spacing)
         {
-            if ((_fd.spacing == font_spacing::proportional && spacing < FC_PROPORTIONAL) ||
-                (_fd.spacing == font_spacing::mono && spacing < FC_MONO))
+            if ((_fd.spacing == font_spacing::proportional && spacing < FC_PROPORTIONAL)
+                || (_fd.spacing == font_spacing::mono && spacing < FC_MONO))
             {
-                LOGSTORE(LocatorLog)("Skipping font: {} ({} < {}).",
-                    (char const*)(file), fcSpacingStr(spacing), fcSpacingStr(FC_DUAL));
+                LOGSTORE(LocatorLog)
+                ("Skipping font: {} ({} < {}).",
+                 (char const*) (file),
+                 fcSpacingStr(spacing),
+                 fcSpacingStr(FC_DUAL));
                 continue;
             }
         }
 
-        output.emplace_back(font_path{string{(char const*)(file)}});
+        output.emplace_back(font_path { string { (char const*) (file) } });
         // LOGSTORE(LocatorLog)("Found font: {}", (char const*) file);
     }
 
-    #if defined(_WIN32)
+#if defined(_WIN32)
     #define FONTDIR "C:\\Windows\\Fonts\\"
-    if (_fd.familyName == "emoji") {
+    if (_fd.familyName == "emoji")
+    {
         addFontFile(FONTDIR "seguiemj.ttf");
         addFontFile(FONTDIR "seguisym.ttf");
     }
-    else if (_fd.weight != font_weight::normal && _fd.slant != font_slant::normal) {
+    else if (_fd.weight != font_weight::normal && _fd.slant != font_slant::normal)
+    {
         addFontFile(FONTDIR "consolaz.ttf");
         addFontFile(FONTDIR "seguisbi.ttf");
     }
-    else if (_fd.weight != font_weight::normal) {
+    else if (_fd.weight != font_weight::normal)
+    {
         addFontFile(FONTDIR "consolab.ttf");
         addFontFile(FONTDIR "seguisb.ttf");
     }
-    else if (_fd.slant != font_slant::normal) {
+    else if (_fd.slant != font_slant::normal)
+    {
         addFontFile(FONTDIR "consolai.ttf");
         addFontFile(FONTDIR "seguisli.ttf");
     }
-    else {
+    else
+    {
         addFontFile(FONTDIR "consola.ttf");
         addFontFile(FONTDIR "seguisym.ttf");
     }
 
     #undef FONTDIR
-    #endif
+#endif
 
     return output;
 }
@@ -297,8 +289,7 @@ font_source_list fontconfig_locator::all()
         FC_STYLE,
         FC_WEIGHT,
         FC_WIDTH,
-        NULL
-    );
+        NULL);
     FcFontSet* fs = FcFontList(nullptr, pat, os);
 
     font_source_list output;
@@ -325,11 +316,8 @@ font_source_list fontconfig_locator::all()
         if (spacing < FC_DUAL)
             continue;
 
-        LOGSTORE(LocatorLog)("font({}, {}, {})",
-                             fcWeightStr(weight),
-                             fcSlantStr(slant),
-                             (char*) family);
-        output.emplace_back(font_path{(char const*) filename});
+        LOGSTORE(LocatorLog)("font({}, {}, {})", fcWeightStr(weight), fcSlantStr(slant), (char*) family);
+        output.emplace_back(font_path { (char const*) filename });
     }
 
     FcObjectSetDestroy(os);
@@ -345,4 +333,4 @@ font_source_list fontconfig_locator::resolve(gsl::span<const char32_t> codepoint
     return {}; // TODO
 }
 
-}
+} // namespace text

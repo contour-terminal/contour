@@ -16,10 +16,11 @@
 #include <functional>
 
 template <typename T>
-class reference {
-public:
-    constexpr explicit reference(T& _ref) noexcept : ref_{&_ref} {}
-    constexpr reference(std::reference_wrapper<T> _ref) noexcept : ref_{&_ref.get()} {}
+class reference
+{
+  public:
+    constexpr explicit reference(T& _ref) noexcept: ref_ { &_ref } {}
+    constexpr reference(std::reference_wrapper<T> _ref) noexcept: ref_ { &_ref.get() } {}
 
     reference(reference const&) = default;
     reference(reference&&) noexcept = default;
@@ -35,11 +36,12 @@ public:
     constexpr T& get() noexcept { return *ref_; }
     constexpr T const& get() const noexcept { return *ref_; }
 
-private:
+  private:
     T* ref_;
 };
 
 template <typename T>
-constexpr reference<T> mut(T& _ref) noexcept {
+constexpr reference<T> mut(T& _ref) noexcept
+{
     return reference<T>(_ref);
 }

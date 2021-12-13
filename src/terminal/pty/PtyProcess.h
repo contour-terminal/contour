@@ -1,13 +1,14 @@
 #pragma once
-#include <terminal/pty/Pty.h>
 #include <terminal/Process.h>
+#include <terminal/pty/Pty.h>
 
 #include <crispy/point.h>
 
 #include <memory>
 #include <thread>
 
-namespace terminal {
+namespace terminal
+{
 
 /**
  * Manages a local process that is connected to a PTY.
@@ -49,4 +50,4 @@ class PtyProcess: public Pty
     std::thread processExitWatcher_;
 };
 
-}
+} // namespace terminal

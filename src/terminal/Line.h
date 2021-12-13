@@ -13,15 +13,14 @@
  */
 #pragma once
 
-#include <terminal/primitives.h>
 #include <terminal/GraphicsAttributes.h>
-
-#include <gsl/span>
-#include <gsl/span_ext>
+#include <terminal/primitives.h>
 
 #include <crispy/Comparison.h>
 #include <crispy/assert.h>
 
+#include <gsl/span>
+#include <gsl/span_ext>
 #include <iterator>
 #include <sstream>
 #include <string>
@@ -32,22 +31,30 @@ namespace terminal
 
 enum class LineFlags : uint8_t
 {
-    None      = 0x0000,
+    None = 0x0000,
     Wrappable = 0x0001,
-    Wrapped   = 0x0002,
-    Marked    = 0x0004,
+    Wrapped = 0x0002,
+    Marked = 0x0004,
     // TODO: DoubleWidth  = 0x0010,
     // TODO: DoubleHeight = 0x0020,
 };
 
-template <typename, bool> struct OptionalProperty;
-template <typename T> struct OptionalProperty<T, false> {};
-template <typename T> struct OptionalProperty<T, true> { T value; };
+template <typename, bool>
+struct OptionalProperty;
+template <typename T>
+struct OptionalProperty<T, false>
+{
+};
+template <typename T>
+struct OptionalProperty<T, true>
+{
+    T value;
+};
 
 struct SimpleLineBuffer
 {
     GraphicsAttributes attributes;
-    std::string text; // TODO: Try std::string_view later to avoid scattered copies.
+    std::string text;  // TODO: Try std::string_view later to avoid scattered copies.
     ColumnCount width; // page display width
 };
 
@@ -69,7 +76,7 @@ using LineStorage = std::variant<SimpleLineBuffer, InflatedLineBuffer<Cell>>;
 template <typename Cell, bool Optimize = false>
 class Line
 {
-public:
+  public:
     Line() = default;
     Line(Line const&) = default;
     Line(Line&&) noexcept = default;
@@ -83,28 +90,29 @@ public:
     using const_iterator = typename InflatedBuffer::const_iterator;
 
     Line(ColumnCount _width, LineFlags _flags, Cell _template = {}):
-        buffer_(_width.as<size_t>(), _template /*, _allocator*/),
-        flags_{static_cast<unsigned>(_flags)}
-    {}
+        buffer_(_width.as<size_t>(), _template /*, _allocator*/), flags_ { static_cast<unsigned>(_flags) }
+    {
+    }
 
     Line(ColumnCount _width, InflatedBuffer _buffer, LineFlags _flags):
-        buffer_{std::move(_buffer)},
-        flags_{static_cast<unsigned>(_flags)}
+        buffer_ { std::move(_buffer) }, flags_ { static_cast<unsigned>(_flags) }
     {
         buffer_.resize(unbox<size_t>(_width));
     }
 
     Line(InflatedBuffer _buffer, LineFlags _flags):
-        buffer_{std::move(_buffer)},
-        flags_{static_cast<unsigned>(_flags)}
-    {}
+        buffer_ { std::move(_buffer) }, flags_ { static_cast<unsigned>(_flags) }
+    {
+    }
 
     constexpr static inline bool ColumnOptimized = Optimize;
 
     // This is experimental (aka. buggy) and going to be replaced with another optimization idea soon.
     //#define LINE_AVOID_CELL_RESET 1
 
-    void reset(LineFlags _flags, GraphicsAttributes _attributes) noexcept // TODO: optimize by having no need to O(n) iterate through all buffer cells.
+    void reset(LineFlags _flags,
+               GraphicsAttributes _attributes) noexcept // TODO: optimize by having no need to O(n) iterate
+                                                        // through all buffer cells.
     {
         flags_ = static_cast<unsigned>(_flags);
 
@@ -133,8 +141,10 @@ public:
         //     usedColumns_.value = _n;
     }
 
-    void reset(LineFlags _flags, GraphicsAttributes const& _attributes,
-               char32_t _codepoint, int _width) noexcept
+    void reset(LineFlags _flags,
+               GraphicsAttributes const& _attributes,
+               char32_t _codepoint,
+               int _width) noexcept
     {
         flags_ = static_cast<unsigned>(_flags);
         markUsedFirst(size());
@@ -190,7 +200,7 @@ public:
         // if constexpr (ColumnOptimized)
         //     return usedColumns_.value;
         // else
-            return size();
+        return size();
     }
 
     void resize(ColumnCount _count);
@@ -201,8 +211,7 @@ public:
 
     gsl::span<Cell> useRange(ColumnOffset _start, ColumnCount _count) noexcept
     {
-        markUsedFirst(std::max(columnsUsed(),
-                               boxed_cast<ColumnCount>(_start) + _count));
+        markUsedFirst(std::max(columnsUsed(), boxed_cast<ColumnCount>(_start) + _count));
         return gsl::span(buffer_).subspan(unbox<size_t>(_start), unbox<size_t>(_count));
     }
 
@@ -251,8 +260,7 @@ public:
 
     LineFlags inheritableFlags() const noexcept
     {
-        auto constexpr Inheritables = unsigned(LineFlags::Wrappable)
-                                    | unsigned(LineFlags::Marked);
+        auto constexpr Inheritables = unsigned(LineFlags::Wrappable) | unsigned(LineFlags::Marked);
         return static_cast<LineFlags>(flags_ & Inheritables);
     }
 
@@ -279,7 +287,7 @@ public:
     // the line will be first unpacked into a vector of grid cells.
     InflatedBuffer& editable();
 
-private:
+  private:
     InflatedBuffer buffer_;
     Storage storage_;
     unsigned flags_ = 0;
@@ -317,33 +325,37 @@ inline typename Line<Cell, Optimize>::InflatedBuffer& Line<Cell, Optimize>::edit
 #endif
 }
 
-}
+} // namespace terminal
 
 namespace fmt // {{{
 {
-    template <>
-    struct formatter<terminal::LineFlags> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(const terminal::LineFlags _flags, FormatContext& ctx)
+template <>
+struct formatter<terminal::LineFlags>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(const terminal::LineFlags _flags, FormatContext& ctx)
+    {
+        static const std::array<std::pair<terminal::LineFlags, std::string_view>, 3> nameMap = {
+            std::pair { terminal::LineFlags::Wrappable, std::string_view("Wrappable") },
+            std::pair { terminal::LineFlags::Wrapped, std::string_view("Wrapped") },
+            std::pair { terminal::LineFlags::Marked, std::string_view("Marked") },
+        };
+        std::string s;
+        for (auto const& mapping: nameMap)
         {
-            static const std::array<std::pair<terminal::LineFlags, std::string_view>, 3> nameMap = {
-                std::pair{terminal::LineFlags::Wrappable, std::string_view("Wrappable")},
-                std::pair{terminal::LineFlags::Wrapped, std::string_view("Wrapped")},
-                std::pair{terminal::LineFlags::Marked, std::string_view("Marked")},
-            };
-            std::string s;
-            for (auto const& mapping : nameMap)
+            if ((mapping.first & _flags) != terminal::LineFlags::None)
             {
-                if ((mapping.first & _flags) != terminal::LineFlags::None)
-                {
-                    if (!s.empty())
-                        s += ",";
-                    s += mapping.second;
-                }
+                if (!s.empty())
+                    s += ",";
+                s += mapping.second;
             }
-            return format_to(ctx.out(), s);
         }
-    };
-} // }}}
+        return format_to(ctx.out(), s);
+    }
+};
+} // namespace fmt

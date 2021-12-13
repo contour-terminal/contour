@@ -18,23 +18,22 @@
 
 #include <utility>
 
-namespace terminal {
+namespace terminal
+{
 
 /// Character graphics rendition information.
 struct GraphicsAttributes
 {
-    Color foregroundColor{DefaultColor()};
-    Color backgroundColor{DefaultColor()};
-    Color underlineColor{DefaultColor()};
-    CellFlags styles{};
+    Color foregroundColor { DefaultColor() };
+    Color backgroundColor { DefaultColor() };
+    Color underlineColor { DefaultColor() };
+    CellFlags styles {};
 };
 
 constexpr bool operator==(GraphicsAttributes const& a, GraphicsAttributes const& b) noexcept
 {
-    return a.backgroundColor == b.backgroundColor
-        && a.foregroundColor == b.foregroundColor
-        && a.styles == b.styles
-        && a.underlineColor == b.underlineColor;
+    return a.backgroundColor == b.backgroundColor && a.foregroundColor == b.foregroundColor
+           && a.styles == b.styles && a.underlineColor == b.underlineColor;
 }
 
 constexpr bool operator!=(GraphicsAttributes const& a, GraphicsAttributes const& b) noexcept
@@ -42,4 +41,4 @@ constexpr bool operator!=(GraphicsAttributes const& a, GraphicsAttributes const&
     return !(a == b);
 }
 
-}
+} // namespace terminal

@@ -11,16 +11,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/Grid.h>
 #include <terminal/Cell.h>
+#include <terminal/Grid.h>
 
 #include <crispy/assert.h>
 #include <crispy/logstore.h>
 
+#include <fmt/format.h>
+
 #include <algorithm>
 #include <iostream>
-
-#include <fmt/format.h>
 
 using std::max;
 using std::min;
@@ -29,11 +29,11 @@ using std::vector;
 namespace terminal
 {
 
-auto inline GridLog = logstore::Category("vt.grid", "Grid related",
-                                         logstore::Category::State::Disabled,
-                                         logstore::Category::Visibility::Hidden);
+auto inline GridLog = logstore::Category(
+    "vt.grid", "Grid related", logstore::Category::State::Disabled, logstore::Category::Visibility::Hidden);
 
-namespace detail { // {{{
+namespace detail
+{ // {{{
     template <typename... Args>
     void logf([[maybe_unused]] Args&&... args)
     {
@@ -58,9 +58,7 @@ namespace detail { // {{{
                             bool _reflowOnResize,
                             GraphicsAttributes _initialSGR)
     {
-        auto const defaultLineFlags = _reflowOnResize
-                                    ? LineFlags::Wrappable
-                                    : LineFlags::None;
+        auto const defaultLineFlags = _reflowOnResize ? LineFlags::Wrappable : LineFlags::None;
         auto const totalLineCount = unbox<size_t>(_pageSize.lines + _maxHistoryLineCount);
         size_t const pitch = unbox<size_t>(_pageSize.columns);
 
@@ -68,7 +66,7 @@ namespace detail { // {{{
         lines.reserve(totalLineCount);
 
         for (auto const _: ranges::views::iota(0u, totalLineCount))
-            lines.emplace_back(_pageSize.columns, defaultLineFlags, Cell{});
+            lines.emplace_back(_pageSize.columns, defaultLineFlags, Cell {});
 
         return lines;
     }
@@ -118,15 +116,16 @@ namespace detail { // {{{
         return LineCount::cast_from(i);
     }
 
-} // }}}
+} // namespace detail
 // {{{ Grid impl
 template <typename Cell>
-Grid<Cell>::Grid(PageSize _pageSize, bool _reflowOnResize, LineCount _maxHistoryLineCount) :
-    pageSize_{ _pageSize },
-    reflowOnResize_{ _reflowOnResize },
-    maxHistoryLineCount_{ _maxHistoryLineCount },
-    lines_{detail::createLines<Cell>(_pageSize, _maxHistoryLineCount, _reflowOnResize, GraphicsAttributes{})},
-    linesUsed_{_pageSize.lines}
+Grid<Cell>::Grid(PageSize _pageSize, bool _reflowOnResize, LineCount _maxHistoryLineCount):
+    pageSize_ { _pageSize },
+    reflowOnResize_ { _reflowOnResize },
+    maxHistoryLineCount_ { _maxHistoryLineCount },
+    lines_ { detail::createLines<Cell>(
+        _pageSize, _maxHistoryLineCount, _reflowOnResize, GraphicsAttributes {}) },
+    linesUsed_ { _pageSize.lines }
 {
     verifyState();
 }
@@ -162,8 +161,7 @@ template <typename Cell>
 std::string Grid<Cell>::renderAllText() const
 {
     std::string text;
-    text.reserve(unbox<size_t>(historyLineCount() + pageSize_.lines)
-               * unbox<size_t>(pageSize_.columns + 1));
+    text.reserve(unbox<size_t>(historyLineCount() + pageSize_.lines) * unbox<size_t>(pageSize_.columns + 1));
 
     for (auto y = LineOffset(0); y < LineOffset::cast_from(lines_.size()); ++y)
     {
@@ -228,7 +226,7 @@ gsl::span<Line<Cell>> Grid<Cell>::pageAtScrollOffset(ScrollOffset _scrollOffset)
     Line<Cell>* startLine = &lines_[offset];
     auto const count = unbox<size_t>(pageSize_.lines);
 
-    return gsl::span<Line<Cell>>{startLine, count};
+    return gsl::span<Line<Cell>> { startLine, count };
 }
 
 template <typename Cell>
@@ -240,7 +238,7 @@ gsl::span<Line<Cell> const> Grid<Cell>::pageAtScrollOffset(ScrollOffset _scrollO
     Line<Cell> const* startLine = &lines_[offset];
     auto const count = unbox<size_t>(pageSize_.lines);
 
-    return gsl::span<Line<Cell> const>{startLine, count};
+    return gsl::span<Line<Cell> const> { startLine, count };
 }
 
 template <typename Cell>
@@ -311,8 +309,7 @@ void Grid<Cell>::setLineText(LineOffset _line, std::string_view _text)
 template <typename Cell>
 bool Grid<Cell>::isLineBlank(LineOffset _line) const noexcept
 {
-    auto const is_blank = [](auto const& _cell) noexcept
-    {
+    auto const is_blank = [](auto const& _cell) noexcept {
         return _cell.empty();
     };
 
@@ -344,7 +341,7 @@ int Grid<Cell>::computeLogicalLineNumberFromBottom(LineCount _n) const noexcept
     // beginning of the top-most logical line (the one that does not have the wrapped-flag set).
     while (i != lines_.rend() && i->wrapped())
     {
-        //printf("further upwards: l %d, p %d\n", logicalLineCount, outputRelativePhysicalLine);
+        // printf("further upwards: l %d, p %d\n", logicalLineCount, outputRelativePhysicalLine);
         outputRelativePhysicalLine--;
         ++i;
     }
@@ -363,7 +360,9 @@ LineCount Grid<Cell>::scrollUp(LineCount _n, GraphicsAttributes _defaultAttribut
         rotateBuffersLeft(_n);
 
         // Initialize (/reset) new lines.
-        for (auto y = boxed_cast<LineOffset>(pageSize_.lines - _n); y < boxed_cast<LineOffset>(pageSize_.lines); ++y)
+        for (auto y = boxed_cast<LineOffset>(pageSize_.lines - _n);
+             y < boxed_cast<LineOffset>(pageSize_.lines);
+             ++y)
             lineAt(y).reset(defaultLineFlags(), _defaultAttributes);
 
         return _n;
@@ -376,11 +375,9 @@ LineCount Grid<Cell>::scrollUp(LineCount _n, GraphicsAttributes _defaultAttribut
         if (n != 0)
         {
             linesUsed_.value += n;
-            fill_n(
-                next(lines_.begin(), *pageSize_.lines),
-                n,
-                Line{pageSize_.columns, defaultLineFlags(), Cell{_defaultAttributes}}
-            );
+            fill_n(next(lines_.begin(), *pageSize_.lines),
+                   n,
+                   Line { pageSize_.columns, defaultLineFlags(), Cell { _defaultAttributes } });
             rotateBuffersLeft(LineCount::cast_from(n));
         }
         if (n < unbox<size_t>(_n))
@@ -389,7 +386,9 @@ LineCount Grid<Cell>::scrollUp(LineCount _n, GraphicsAttributes _defaultAttribut
             linesUsed_ += LineCount::cast_from(incrementCount);
 
             // Initialize (/reset) new lines.
-            for (auto y = boxed_cast<LineOffset>(pageSize_.lines - _n); y < boxed_cast<LineOffset>(pageSize_.lines); ++y)
+            for (auto y = boxed_cast<LineOffset>(pageSize_.lines - _n);
+                 y < boxed_cast<LineOffset>(pageSize_.lines);
+                 ++y)
                 lineAt(y).reset(defaultLineFlags(), _defaultAttributes);
         }
         return LineCount::cast_from(n);
@@ -405,8 +404,11 @@ LineCount Grid<Cell>::scrollUp(LineCount _n, GraphicsAttributes _defaultAttribut
 
     // these two booleans could be cached and updated whenever _margin updates,
     // so not even this needs to be computed for the general case.
-    auto const fullHorizontal = _margin.horizontal == Margin::Horizontal{ColumnOffset{0}, unbox<ColumnOffset>(pageSize_.columns) - 1};
-    auto const fullVertical = _margin.vertical == Margin::Vertical{LineOffset(0), unbox<LineOffset>(pageSize_.lines) - 1};
+    auto const fullHorizontal =
+        _margin.horizontal
+        == Margin::Horizontal { ColumnOffset { 0 }, unbox<ColumnOffset>(pageSize_.columns) - 1 };
+    auto const fullVertical =
+        _margin.vertical == Margin::Vertical { LineOffset(0), unbox<LineOffset>(pageSize_.lines) - 1 };
 
     if (fullHorizontal)
     {
@@ -425,13 +427,9 @@ LineCount Grid<Cell>::scrollUp(LineCount _n, GraphicsAttributes _defaultAttribut
             rotate(u, v, w);
         }
 
-        std::for_each(
-            next(begin(lines_), *_margin.vertical.to - *n + 1),
-            next(begin(lines_), *_margin.vertical.to + 1),
-            [&](Line<Cell>& line) {
-                line.reset(defaultLineFlags(), _defaultAttributes);
-            }
-        );
+        std::for_each(next(begin(lines_), *_margin.vertical.to - *n + 1),
+                      next(begin(lines_), *_margin.vertical.to + 1),
+                      [&](Line<Cell>& line) { line.reset(defaultLineFlags(), _defaultAttributes); });
     }
     else
     {
@@ -464,15 +462,22 @@ LineCount Grid<Cell>::scrollUp(LineCount _n, GraphicsAttributes _defaultAttribut
 }
 
 template <typename Cell>
-void Grid<Cell>::scrollDown(LineCount v_n, GraphicsAttributes const& _defaultAttributes, Margin const& _margin)
+void Grid<Cell>::scrollDown(LineCount v_n,
+                            GraphicsAttributes const& _defaultAttributes,
+                            Margin const& _margin)
 {
     verifyState();
     Expects(v_n >= LineCount(0));
 
     // these two booleans could be cached and updated whenever _margin updates,
     // so not even this needs to be computed for the general case.
-    auto const fullHorizontal = _margin.horizontal == Margin::Horizontal{ColumnOffset{0}, unbox<ColumnOffset>(pageSize_.columns) - ColumnOffset(1)};
-    auto const fullVertical = _margin.vertical == Margin::Vertical{LineOffset(0), unbox<LineOffset>(pageSize_.lines) - LineOffset(1)};
+    auto const fullHorizontal =
+        _margin.horizontal
+        == Margin::Horizontal { ColumnOffset { 0 },
+                                unbox<ColumnOffset>(pageSize_.columns) - ColumnOffset(1) };
+    auto const fullVertical =
+        _margin.vertical
+        == Margin::Vertical { LineOffset(0), unbox<LineOffset>(pageSize_.lines) - LineOffset(1) };
 
     auto const n = std::min(v_n, _margin.vertical.length());
 
@@ -486,10 +491,7 @@ void Grid<Cell>::scrollDown(LineCount v_n, GraphicsAttributes const& _defaultAtt
 
         auto const marginHeight = LineCount(_margin.vertical.length());
         std::rotate(
-            std::begin(mainPage()),
-            std::next(begin(mainPage()), *marginHeight - *n),
-            std::end(mainPage())
-        );
+            std::begin(mainPage()), std::next(begin(mainPage()), *marginHeight - *n), std::end(mainPage()));
         for (Line<Cell>& line: mainPage().subspan(0, *n))
             line.reset(defaultLineFlags(), _defaultAttributes);
         return;
@@ -510,8 +512,7 @@ void Grid<Cell>::scrollDown(LineCount v_n, GraphicsAttributes const& _defaultAtt
         // a full "inside" scroll-down
         if (n <= _margin.vertical.length())
         {
-            for (LineOffset line = _margin.vertical.to;
-                    line >= _margin.vertical.to - *n; --line)
+            for (LineOffset line = _margin.vertical.to; line >= _margin.vertical.to - *n; --line)
             {
                 auto s = &at(line - *n, _margin.horizontal.from);
                 auto t = &at(line, _margin.horizontal.from);
@@ -524,7 +525,7 @@ void Grid<Cell>::scrollDown(LineCount v_n, GraphicsAttributes const& _defaultAtt
                 auto b = &at(line, _margin.horizontal.to + 1);
                 while (a != b)
                 {
-                    *a = Cell{_defaultAttributes};
+                    *a = Cell { _defaultAttributes };
                     a++;
                 }
             }
@@ -539,7 +540,7 @@ void Grid<Cell>::reset()
     linesUsed_ = pageSize_.lines;
     lines_.rotate_right(lines_.zero_index());
     for (int i = 0; i < unbox<int>(pageSize_.lines); ++i)
-        lines_[i].reset(defaultLineFlags(), GraphicsAttributes{});
+        lines_[i].reset(defaultLineFlags(), GraphicsAttributes {});
     verifyState();
 }
 
@@ -560,16 +561,15 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
     using LineBuffer = typename Line<Cell>::InflatedBuffer;
 
     // {{{ helper methods
-    auto const growLines = [this](LineCount _newHeight, Coordinate _cursor) -> Coordinate
-    {
+    auto const growLines = [this](LineCount _newHeight, Coordinate _cursor) -> Coordinate {
         // Grow line count by splicing available lines from history back into buffer, if available,
         // or create new ones until pageSize_.lines == _newHeight.
 
         Expects(_newHeight > pageSize_.lines);
-        //lines_.reserve(unbox<size_t>(maxHistoryLineCount_ + _newHeight));
+        // lines_.reserve(unbox<size_t>(maxHistoryLineCount_ + _newHeight));
 
         // Pull down from history if cursor is at bottom and if scrollback available.
-        Coordinate cursorMove{};
+        Coordinate cursorMove {};
         if (*_cursor.line + 1 == *pageSize_.lines)
         {
             auto const extendCount0 = _newHeight - pageSize_.lines;
@@ -590,7 +590,7 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
         auto const linesFill =
             max(0, unbox<int>(maxHistoryLineCount_ + _newHeight) - static_cast<int>(lines_.size()));
         for (auto const _: ranges::views::iota(0, linesFill))
-            lines_.emplace_back(pageSize_.columns, wrappableFlag, Cell{});
+            lines_.emplace_back(pageSize_.columns, wrappableFlag, Cell {});
         pageSize_.lines += extendCount;
         linesUsed_ += extendCount;
 
@@ -601,8 +601,7 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
         return cursorMove;
     };
 
-    auto const shrinkLines = [this](LineCount _newHeight, Coordinate _cursor) -> Coordinate
-    {
+    auto const shrinkLines = [this](LineCount _newHeight, Coordinate _cursor) -> Coordinate {
         // Shrink existing line count to _newSize.lines
         // by splicing the number of lines to be shrinked by into savedLines bottom.
 
@@ -611,14 +610,20 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
         // FIXME: in alt screen, when shrinking more then available below screen cursor -> assertion failure
 
         auto const numLinesToShrink = pageSize_.lines - _newHeight;
-        auto const linesAvailableBelowCursorBeforeShrink = pageSize_.lines - boxed_cast<LineCount>(_cursor.line + 1);
+        auto const linesAvailableBelowCursorBeforeShrink =
+            pageSize_.lines - boxed_cast<LineCount>(_cursor.line + 1);
         auto const cutoffCount = min(numLinesToShrink, linesAvailableBelowCursorBeforeShrink);
         auto const numLinesToPushUp = numLinesToShrink - cutoffCount;
         auto const numLinesToPushUpCapped = min(numLinesToPushUp, maxHistoryLineCount_);
 
-        LOGSTORE(GridLog)(" -> shrink lines: numLinesToShrink {}, linesAvailableBelowCursorBeforeShrink {}, cutoff {}, pushUp {}/{}",
-                          numLinesToShrink, linesAvailableBelowCursorBeforeShrink, cutoffCount,
-                          numLinesToPushUp, numLinesToPushUpCapped);
+        LOGSTORE(GridLog)
+        (" -> shrink lines: numLinesToShrink {}, linesAvailableBelowCursorBeforeShrink {}, cutoff {}, pushUp "
+         "{}/{}",
+         numLinesToShrink,
+         linesAvailableBelowCursorBeforeShrink,
+         cutoffCount,
+         numLinesToPushUp,
+         numLinesToPushUpCapped);
 
         Ensures(numLinesToShrink == cutoffCount + numLinesToPushUp);
 
@@ -641,15 +646,14 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
             pageSize_.lines -= numLinesToPushUp;
             clampHistory();
             verifyState();
-            return Coordinate{-boxed_cast<LineOffset>(numLinesToPushUp), {}};
+            return Coordinate { -boxed_cast<LineOffset>(numLinesToPushUp), {} };
         }
 
         verifyState();
-        return Coordinate{};
+        return Coordinate {};
     };
 
-    auto const growColumns = [this, _wrapPending](ColumnCount _newColumnCount) -> Coordinate
-    {
+    auto const growColumns = [this, _wrapPending](ColumnCount _newColumnCount) -> Coordinate {
         using LineBuffer = typename Line<Cell>::InflatedBuffer;
 
         if (!reflowOnResize_)
@@ -659,7 +663,7 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
                     line.resize(_newColumnCount);
             pageSize_.columns = _newColumnCount;
             verifyState();
-            return Coordinate{LineOffset(0), ColumnOffset(_wrapPending ? 1 : 0)};
+            return Coordinate { LineOffset(0), ColumnOffset(_wrapPending ? 1 : 0) };
         }
         else
         {
@@ -670,44 +674,43 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
             Expects(*extendCount > 0);
 
             Lines<Cell> grownLines;
-            LineBuffer logicalLineBuffer; // Temporary state, representing wrapped columns from the line "below".
+            LineBuffer
+                logicalLineBuffer; // Temporary state, representing wrapped columns from the line "below".
             LineFlags logicalLineFlags = LineFlags::None;
 
-            auto const appendToLogicalLine =
-                [&logicalLineBuffer](gsl::span<Cell const> cells)
-                {
-                    for (auto const& cell: cells)
-                        logicalLineBuffer.push_back(cell);
-                };
+            auto const appendToLogicalLine = [&logicalLineBuffer](gsl::span<Cell const> cells) {
+                for (auto const& cell: cells)
+                    logicalLineBuffer.push_back(cell);
+            };
 
             auto const flushLogicalLine =
-                [_newColumnCount, &grownLines, &logicalLineBuffer, &logicalLineFlags]()
-                {
+                [_newColumnCount, &grownLines, &logicalLineBuffer, &logicalLineFlags]() {
                     if (!logicalLineBuffer.empty())
                     {
-                        detail::addNewWrappedLines(grownLines, _newColumnCount, move(logicalLineBuffer), logicalLineFlags, true);
+                        detail::addNewWrappedLines(
+                            grownLines, _newColumnCount, move(logicalLineBuffer), logicalLineFlags, true);
                         logicalLineBuffer.clear();
                     }
                 };
 
             [[maybe_unused]] auto const logLogicalLine =
-                [&logicalLineBuffer]([[maybe_unused]] LineFlags lineFlags, [[maybe_unused]] std::string_view msg)
-                {
-                    LOGSTORE(GridLog)("{} |> \"{}\"",
-                        msg,
-                        Line<Cell>(LineBuffer(logicalLineBuffer), lineFlags).toUtf8()
-                    );
+                [&logicalLineBuffer]([[maybe_unused]] LineFlags lineFlags,
+                                     [[maybe_unused]] std::string_view msg) {
+                    LOGSTORE(GridLog)
+                    ("{} |> \"{}\"", msg, Line<Cell>(LineBuffer(logicalLineBuffer), lineFlags).toUtf8());
                 };
 
             for (int i = -*historyLineCount(); i < *pageSize_.lines; ++i)
             {
                 auto& line = lines_[i];
-                // logLogicalLine(line.flags(), fmt::format("Line[{:>2}]: next line: \"{}\"", i, line.toUtf8()));
+                // logLogicalLine(line.flags(), fmt::format("Line[{:>2}]: next line: \"{}\"", i,
+                // line.toUtf8()));
                 Expects(line.size() >= pageSize_.columns);
 
                 if (line.wrapped())
                 {
-                    // logLogicalLine(line.flags(), fmt::format(" - appending: \"{}\"", line.toUtf8Trimmed()));
+                    // logLogicalLine(line.flags(), fmt::format(" - appending: \"{}\"",
+                    // line.toUtf8Trimmed()));
                     appendToLogicalLine(line.trim_blank_right());
                 }
                 else // line is not wrapped
@@ -721,7 +724,7 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
 
             flushLogicalLine(); // Flush last (bottom) line, if anything pending.
 
-            //auto diff = int(lines_.size()) - unbox<int>(pageSize_.lines);
+            // auto diff = int(lines_.size()) - unbox<int>(pageSize_.lines);
             auto cy = LineCount(0);
             if (pageSize_.lines > LineCount::cast_from(grownLines.size()))
             {
@@ -748,12 +751,12 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
             rotateBuffersLeft(newHistoryLineCount);
 
             verifyState();
-            return Coordinate{-boxed_cast<LineOffset>(cy), ColumnOffset(_wrapPending ? 1 : 0)};
+            return Coordinate { -boxed_cast<LineOffset>(cy), ColumnOffset(_wrapPending ? 1 : 0) };
         }
     };
 
-    auto const shrinkColumns = [this](ColumnCount _newColumnCount, LineCount _newLineCount, Coordinate _cursor) -> Coordinate
-    {
+    auto const shrinkColumns =
+        [this](ColumnCount _newColumnCount, LineCount _newLineCount, Coordinate _cursor) -> Coordinate {
         using LineBuffer = typename Line<Cell>::InflatedBuffer;
 
         if (!reflowOnResize_)
@@ -818,7 +821,8 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
                     else
                     {
                         // Insert NEW line(s) between previous and this line with previously wrapped columns.
-                        auto const numLinesInserted = detail::addNewWrappedLines(shrinkedLines, _newColumnCount, move(wrappedColumns), previousFlags, false);
+                        auto const numLinesInserted = detail::addNewWrappedLines(
+                            shrinkedLines, _newColumnCount, move(wrappedColumns), previousFlags, false);
                         numLinesWritten += numLinesInserted;
                         previousFlags = line.inheritableFlags();
                     }
@@ -834,14 +838,16 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
                 numLinesWritten++;
                 Ensures(shrinkedLines.back().size() >= _newColumnCount);
             }
-            numLinesWritten += detail::addNewWrappedLines(shrinkedLines, _newColumnCount, move(wrappedColumns), previousFlags, false);
+            numLinesWritten += detail::addNewWrappedLines(
+                shrinkedLines, _newColumnCount, move(wrappedColumns), previousFlags, false);
             Expects(unbox<size_t>(numLinesWritten) == shrinkedLines.size());
             Expects(numLinesWritten >= pageSize_.lines);
 
             while (shrinkedLines.size() < totalLineCount)
                 shrinkedLines.emplace_back(_newColumnCount, LineFlags::None); // defaultLineFlags());
 
-            shrinkedLines.rotate_left(unbox<int>(numLinesWritten - pageSize_.lines)); // maybe to be done outisde?
+            shrinkedLines.rotate_left(
+                unbox<int>(numLinesWritten - pageSize_.lines)); // maybe to be done outisde?
             linesUsed_ = LineCount::cast_from(numLinesWritten);
 
             // if (LineCount::cast_from(shrinkedLines.size()) > pageSize_.lines)
@@ -866,27 +872,17 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
     using crispy::Comparison;
     switch (crispy::strongCompare(_newSize.columns, pageSize_.columns))
     {
-        case Comparison::Greater:
-            cursor += growColumns(_newSize.columns);
-            break;
-        case Comparison::Less:
-            cursor = shrinkColumns(_newSize.columns, _newSize.lines, cursor);
-            break;
-        case Comparison::Equal:
-            break;
+    case Comparison::Greater: cursor += growColumns(_newSize.columns); break;
+    case Comparison::Less: cursor = shrinkColumns(_newSize.columns, _newSize.lines, cursor); break;
+    case Comparison::Equal: break;
     }
 
     // grow/shrink lines
     switch (crispy::strongCompare(_newSize.lines, pageSize_.lines))
     {
-        case Comparison::Greater:
-            cursor += growLines(_newSize.lines, cursor);
-            break;
-        case Comparison::Less:
-            cursor += shrinkLines(_newSize.lines, cursor);
-            break;
-        case Comparison::Equal:
-            break;
+    case Comparison::Greater: cursor += growLines(_newSize.lines, cursor); break;
+    case Comparison::Less: cursor += shrinkLines(_newSize.lines, cursor); break;
+    case Comparison::Equal: break;
     }
 
     Ensures(pageSize_ == _newSize);
@@ -923,11 +919,9 @@ void Grid<Cell>::appendNewLines(LineCount _count, GraphicsAttributes _attr)
 
     if (auto const n = std::min(_count, pageSize_.lines); *n > 0)
     {
-        generate_n(
-            back_inserter(lines_),
-            *n,
-            [&]() { return Line<Cell>(pageSize_.columns, wrappableFlag, Cell{_attr}); }
-        );
+        generate_n(back_inserter(lines_), *n, [&]() {
+            return Line<Cell>(pageSize_.columns, wrappableFlag, Cell { _attr });
+        });
         clampHistory();
     }
 }
@@ -936,20 +930,21 @@ void Grid<Cell>::appendNewLines(LineCount _count, GraphicsAttributes _attr)
 template <typename Cell>
 std::ostream& dumpGrid(std::ostream& os, Grid<Cell> const& grid)
 {
-    os << fmt::format("main page lines: scrollback cur {} max {}, main page lines {}, used lines {}, zero index {}\n",
-                      grid.historyLineCount(),
-                      grid.maxHistoryLineCount(),
-                      grid.pageSize().lines,
-                      grid.linesUsed(),
-                      grid.zero_index());
+    os << fmt::format(
+        "main page lines: scrollback cur {} max {}, main page lines {}, used lines {}, zero index {}\n",
+        grid.historyLineCount(),
+        grid.maxHistoryLineCount(),
+        grid.pageSize().lines,
+        grid.linesUsed(),
+        grid.zero_index());
 
-    for (auto const line: ranges::views::iota(-unbox<int>(grid.historyLineCount()), unbox<int>(grid.pageSize().lines)))
+    for (auto const line:
+         ranges::views::iota(-unbox<int>(grid.historyLineCount()), unbox<int>(grid.pageSize().lines)))
     {
         terminal::Line<Cell> const& lineAttribs = grid.lineAt(LineOffset(line));
 
-        os << fmt::format("[{:>2}] \"{}\" | {}\n",
-                          line, grid.lineText(LineOffset::cast_from(line)),
-                          lineAttribs.flags());
+        os << fmt::format(
+            "[{:>2}] \"{}\" | {}\n", line, grid.lineText(LineOffset::cast_from(line)), lineAttribs.flags());
     }
 
     return os;

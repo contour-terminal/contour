@@ -19,13 +19,11 @@
 #include <terminal/Terminal.h>
 #include <terminal/Viewport.h>
 
-namespace contour {
+namespace contour
+{
 
 ScrollableDisplay::ScrollableDisplay(QWidget* _parent, TerminalSession& _session, QWidget* _main):
-    QWidget(_parent),
-    session_{ _session },
-    mainWidget_{ _main },
-    scrollBar_{ nullptr }
+    QWidget(_parent), session_ { _session }, mainWidget_ { _main }, scrollBar_ { nullptr }
 {
     mainWidget_->setParent(this);
 
@@ -35,8 +33,7 @@ ScrollableDisplay::ScrollableDisplay(QWidget* _parent, TerminalSession& _session
     scrollBar_->setValue(0);
     scrollBar_->setCursor(Qt::ArrowCursor);
 
-    connect(scrollBar_, &QScrollBar::valueChanged,
-            this, QOverload<>::of(&ScrollableDisplay::onValueChanged));
+    connect(scrollBar_, &QScrollBar::valueChanged, this, QOverload<>::of(&ScrollableDisplay::onValueChanged));
 
     QSize ms = mainWidget_->sizeHint();
     QSize ss = scrollBar_->sizeHint();
@@ -91,9 +88,8 @@ void ScrollableDisplay::updateValues()
 
 void ScrollableDisplay::updatePosition()
 {
-    //terminalWidget_->setGeometry(calculateWidgetGeometry());
-    LOGSTORE(DisplayLog)("called with {}x{} in {}", width(), height(),
-                         session_.currentScreenType());
+    // terminalWidget_->setGeometry(calculateWidgetGeometry());
+    LOGSTORE(DisplayLog)("called with {}x{} in {}", width(), height(), session_.currentScreenType());
 
     auto const resizeMainAndScrollArea = [&]() {
         QSize ms = mainWidget_->sizeHint();
@@ -113,40 +109,39 @@ void ScrollableDisplay::updatePosition()
         LOGSTORE(DisplayLog)("Scrollbar Pos: {}", session_.profile().scrollbarPosition);
         switch (session_.profile().scrollbarPosition)
         {
-            case config::ScrollBarPosition::Right:
-                resizeMainAndScrollArea();
-                scrollBar_->show();
-                mainWidget_->move(0, 0);
-                scrollBar_->move(mainWidth, 0);
-                break;
-            case config::ScrollBarPosition::Left:
-                resizeMainAndScrollArea();
-                scrollBar_->show();
-                mainWidget_->move(sbWidth, 0);
-                scrollBar_->move(0, 0);
-                break;
-            case config::ScrollBarPosition::Hidden:
-            {
-                scrollBar_->hide();
-                auto const cr = contentsRect();
-                mainWidget_->resize(cr.right(), cr.bottom());
-                mainWidget_->move(0, 0);
-                break;
-            }
+        case config::ScrollBarPosition::Right:
+            resizeMainAndScrollArea();
+            scrollBar_->show();
+            mainWidget_->move(0, 0);
+            scrollBar_->move(mainWidth, 0);
+            break;
+        case config::ScrollBarPosition::Left:
+            resizeMainAndScrollArea();
+            scrollBar_->show();
+            mainWidget_->move(sbWidth, 0);
+            scrollBar_->move(0, 0);
+            break;
+        case config::ScrollBarPosition::Hidden: {
+            scrollBar_->hide();
+            auto const cr = contentsRect();
+            mainWidget_->resize(cr.right(), cr.bottom());
+            mainWidget_->move(0, 0);
+            break;
         }
-        LOGSTORE(DisplayLog)(
-            "TW {}x{}+{}x{}, SB {}, {}x{}+{}x{}, value: {}/{}",
-            mainWidget_->pos().x(),
-            mainWidget_->pos().y(),
-            mainWidget_->width(),
-            mainWidget_->height(),
-            scrollBar_->isVisible() ? "visible" : "invisible",
-            scrollBar_->pos().x(),
-            scrollBar_->pos().y(),
-            scrollBar_->width(),
-            scrollBar_->height(),
-            scrollBar_->value(), scrollBar_->maximum()
-        );
+        }
+        LOGSTORE(DisplayLog)
+        ("TW {}x{}+{}x{}, SB {}, {}x{}+{}x{}, value: {}/{}",
+         mainWidget_->pos().x(),
+         mainWidget_->pos().y(),
+         mainWidget_->width(),
+         mainWidget_->height(),
+         scrollBar_->isVisible() ? "visible" : "invisible",
+         scrollBar_->pos().x(),
+         scrollBar_->pos().y(),
+         scrollBar_->width(),
+         scrollBar_->height(),
+         scrollBar_->value(),
+         scrollBar_->maximum());
     }
     else
     {
@@ -158,8 +153,7 @@ void ScrollableDisplay::updatePosition()
 void ScrollableDisplay::onValueChanged()
 {
     session_.terminal().viewport().scrollTo(
-        terminal::ScrollOffset::cast_from(scrollBar_->maximum() - scrollBar_->value())
-    );
+        terminal::ScrollOffset::cast_from(scrollBar_->maximum() - scrollBar_->value()));
     session_.scheduleRedraw();
 }
 

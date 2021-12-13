@@ -13,20 +13,22 @@
  */
 #pragma once
 
-#include <terminal_renderer/Atlas.h>
-#include <terminal_renderer/RenderTarget.h>
-
 #include <terminal/RenderBuffer.h>
 #include <terminal/Screen.h>
 
-namespace terminal::renderer {
+#include <terminal_renderer/Atlas.h>
+#include <terminal_renderer/RenderTarget.h>
+
+namespace terminal::renderer
+{
 
 struct GridMetrics;
 
 /// Dectorator, to decorate a grid cell, eventually containing a character
 ///
 /// It should be possible to render multiple decoration onto the same coordinates.
-enum class Decorator {
+enum class Decorator
+{
     /// Draws an underline
     Underline,
     /// Draws a doubly underline
@@ -53,7 +55,8 @@ enum class Decorator {
 std::optional<Decorator> to_decorator(std::string const& _value);
 
 /// Renders any kind of grid cell decorations, ranging from basic underline to surrounding boxes.
-class DecorationRenderer : public Renderable {
+class DecorationRenderer: public Renderable
+{
   public:
     /// Constructs the decoration renderer.
     ///
@@ -69,7 +72,7 @@ class DecorationRenderer : public Renderable {
 
     void setHyperlinkDecoration(Decorator _normal, Decorator _hover)
     {
-        hyperlinkNormal_  = _normal;
+        hyperlinkNormal_ = _normal;
         hyperlinkHover_ = _hover;
     }
 
@@ -104,4 +107,4 @@ class DecorationRenderer : public Renderable {
     std::unique_ptr<Atlas> atlas_;
 };
 
-} // end namespace
+} // namespace terminal::renderer

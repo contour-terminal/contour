@@ -13,11 +13,11 @@
  */
 #include <crispy/LRUCache.h>
 
-#include <functional>
-#include <iostream>
+#include <fmt/format.h>
 
 #include <catch2/catch_all.hpp>
-#include <fmt/format.h>
+#include <functional>
+#include <iostream>
 
 using namespace std;
 using namespace std::string_view_literals;
@@ -164,4 +164,3 @@ TEST_CASE("LRUCache.try_emplace", "[lrucache]")
     CHECK(cache.at(2) == 4);
     CHECK(cache.at(3) == 6);
 }
-

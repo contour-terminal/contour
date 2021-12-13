@@ -15,8 +15,6 @@
 #include <contour/Config.h>
 #include <contour/ContourApp.h>
 
-#include "shell_integration_zsh.h"
-
 #include <terminal/Capabilities.h>
 #include <terminal/Parser.h>
 
@@ -24,24 +22,25 @@
 #include <crispy/StackTrace.h>
 #include <crispy/utils.h>
 
-#include <fmt/format.h>
 #include <fmt/chrono.h>
+#include <fmt/format.h>
 
-#include <cstdio>
 #include <chrono>
-#include <iostream>
+#include <cstdio>
 #include <fstream>
+#include <iostream>
 #include <memory>
-
 #include <signal.h>
 
+#include "shell_integration_zsh.h"
+
 #if !defined(_WIN32)
-#include <unistd.h>
-#include <sys/ioctl.h>
+    #include <sys/ioctl.h>
+    #include <unistd.h>
 #endif
 
 #if defined(_WIN32)
-#include <Windows.h>
+    #include <Windows.h>
 #endif
 
 using std::bind;
@@ -57,13 +56,14 @@ using namespace std::string_literals;
 
 namespace CLI = crispy::cli;
 
-namespace contour {
+namespace contour
+{
 
 namespace // {{{ helper
 {
     CLI::HelpStyle helpStyle()
     {
-        auto style = CLI::HelpStyle{};
+        auto style = CLI::HelpStyle {};
 
         style.optionStyle = CLI::OptionStyle::Natural;
 
@@ -75,7 +75,7 @@ namespace // {{{ helper
         }
 #endif
 
-         return style;
+        return style;
     }
 
     int screenWidth()
@@ -83,7 +83,7 @@ namespace // {{{ helper
         constexpr auto DefaultWidth = 80;
 
 #if !defined(_WIN32)
-        auto ws = winsize{};
+        auto ws = winsize {};
         if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != -1)
             return ws.ws_col;
 #endif
@@ -94,12 +94,10 @@ namespace // {{{ helper
 #if defined(__linux__)
     void crashLogger(std::ostream& out)
     {
-        out
-            << "Contour version: " << CONTOUR_VERSION_STRING << "\r\n"
+        out << "Contour version: " << CONTOUR_VERSION_STRING << "\r\n"
             << "\r\n"
             << "Stack Trace:\r\n"
-            << "------------\r\n"
-            ;
+            << "------------\r\n";
 
         auto stackTrace = crispy::StackTrace();
         auto symbols = stackTrace.symbols();
@@ -120,37 +118,28 @@ namespace // {{{ helper
         string crashLog = sstr.str();
 
         auto const logFileName = fmt::format(
-            "contour-crash-{:%Y-%m-%d-%H-%M-%S}-pid-{}.log",
-            std::chrono::system_clock::now(),
-            getpid()
-        );
+            "contour-crash-{:%Y-%m-%d-%H-%M-%S}-pid-{}.log", std::chrono::system_clock::now(), getpid());
         if (chdir(crashLogDir.c_str()) < 0)
             perror("chdir");
-        char hostname[80] = {0};
+        char hostname[80] = { 0 };
         gethostname(hostname, sizeof(hostname));
 
-        cerr
-            << "\r\n"
-            << "========================================================================\r\n"
-            << "  An internal error caused the terminal to crash ;-( 😭\r\n"
-            << "-------------------------------------------------------\r\n"
-            << "\r\n"
-            << "Please report this to https://github.com/contour-terminal/contour/issues/\r\n"
-            << "\r\n"
-            << crashLog
-            << "========================================================================\r\n"
-            << "\r\n"
-            << "Please report the above information and help making this project better.\r\n"
-            << "\r\n"
-            << "This log will also be written to: \033[1m"
-                << "\033]8;;file://" << hostname << "/"
-                    << crashLogDir << "/" << logFileName
-                << "\033\\"
-                << crashLogDir << "/" << logFileName
-                << "\033]8;;\033\\"
-                << "\033[m\r\n"
-            << "\r\n"
-            ;
+        cerr << "\r\n"
+             << "========================================================================\r\n"
+             << "  An internal error caused the terminal to crash ;-( 😭\r\n"
+             << "-------------------------------------------------------\r\n"
+             << "\r\n"
+             << "Please report this to https://github.com/contour-terminal/contour/issues/\r\n"
+             << "\r\n"
+             << crashLog << "========================================================================\r\n"
+             << "\r\n"
+             << "Please report the above information and help making this project better.\r\n"
+             << "\r\n"
+             << "This log will also be written to: \033[1m"
+             << "\033]8;;file://" << hostname << "/" << crashLogDir << "/" << logFileName << "\033\\"
+             << crashLogDir << "/" << logFileName << "\033]8;;\033\\"
+             << "\033[m\r\n"
+             << "\r\n";
         cerr.flush();
 
         ofstream logFile(logFileName);
@@ -159,26 +148,24 @@ namespace // {{{ helper
         abort();
     }
 #endif
-} // }}}
+} // namespace
 
-ContourApp::ContourApp() :
-    App("contour", "Contour Terminal Emulator", CONTOUR_VERSION_STRING, "Apache-2.0")
+ContourApp::ContourApp(): App("contour", "Contour Terminal Emulator", CONTOUR_VERSION_STRING, "Apache-2.0")
 {
     using Project = crispy::cli::about::Project;
     crispy::cli::about::registerProjects(
-        #if defined(CONTOUR_BUILD_WITH_MIMALLOC)
-        Project{"mimalloc", "", ""},
-        #endif
-        Project{"Qt", "GPL", "https://www.qt.io/"},
-        Project{"FreeType", "GPL, FreeType License", "https://freetype.org/"},
-        Project{"HarfBuzz", "Old MIT", "https://harfbuzz.org/"},
-        //Project{"Catch2", "BSL-1.0", "https://github.com/catchorg/Catch2"},
-        Project{"libunicode", "Apache-2.0", "https://github.com/contour-terminal/libunicode"},
-        Project{"range-v3", "Boost Software License 1.0", "https://github.com/ericniebler/range-v3"},
-        Project{"yaml-cpp", "MIT", "https://github.com/jbeder/yaml-cpp"},
-        Project{"termbench-pro", "Apache-2.0", "https://github.com/contour-terminal/termbench-pro"},
-        Project{"fmt", "MIT", "https://github.com/fmtlib/fmt"}
-    );
+#if defined(CONTOUR_BUILD_WITH_MIMALLOC)
+        Project { "mimalloc", "", "" },
+#endif
+        Project { "Qt", "GPL", "https://www.qt.io/" },
+        Project { "FreeType", "GPL, FreeType License", "https://freetype.org/" },
+        Project { "HarfBuzz", "Old MIT", "https://harfbuzz.org/" },
+        // Project{"Catch2", "BSL-1.0", "https://github.com/catchorg/Catch2"},
+        Project { "libunicode", "Apache-2.0", "https://github.com/contour-terminal/libunicode" },
+        Project { "range-v3", "Boost Software License 1.0", "https://github.com/ericniebler/range-v3" },
+        Project { "yaml-cpp", "MIT", "https://github.com/jbeder/yaml-cpp" },
+        Project { "termbench-pro", "Apache-2.0", "https://github.com/contour-terminal/termbench-pro" },
+        Project { "fmt", "MIT", "https://github.com/fmtlib/fmt" });
 
 #if defined(__linux__)
     auto crashLogDirPath = crispy::App::instance()->localStateDir() / "crash";
@@ -191,7 +178,7 @@ ContourApp::ContourApp() :
 #if defined(_WIN32)
     // Enable VT output processing on Conhost.
     HANDLE stdoutHandle = GetStdHandle(STD_OUTPUT_HANDLE);
-    DWORD savedModes{}; // NOTE: Is it required to restore that upon process exit?
+    DWORD savedModes {}; // NOTE: Is it required to restore that upon process exit?
     if (GetConsoleMode(stdoutHandle, &savedModes) != FALSE)
     {
         DWORD modes = savedModes;
@@ -215,7 +202,7 @@ auto withOutput(crispy::cli::FlagStore const& _flags, std::string const& _name, 
     std::ostream* out = &cout;
 
     auto const& outputFileName = _flags.get<string>(_name); // TODO: support string_view
-    auto ownedOutput = unique_ptr<std::ostream>{};
+    auto ownedOutput = unique_ptr<std::ostream> {};
     if (outputFileName != "-")
     {
         ownedOutput = make_unique<std::ofstream>(outputFileName);
@@ -236,7 +223,8 @@ int ContourApp::integrationAction()
         }
         else
         {
-            std::cerr << fmt::format("Cannot generate shell integration for an unsupported shell, {}.\n", shell);
+            std::cerr << fmt::format("Cannot generate shell integration for an unsupported shell, {}.\n",
+                                     shell);
             return EXIT_FAILURE;
         }
     });
@@ -253,14 +241,14 @@ int ContourApp::configAction()
 int ContourApp::terminfoAction()
 {
     withOutput(parameters(), "contour.generate.terminfo.to", [](auto& _stream) {
-        _stream << terminal::capabilities::StaticDatabase{}.terminfo();
+        _stream << terminal::capabilities::StaticDatabase {}.terminfo();
     });
     return EXIT_SUCCESS;
 }
 
 int ContourApp::captureAction()
 {
-    auto captureSettings = contour::CaptureSettings{};
+    auto captureSettings = contour::CaptureSettings {};
     captureSettings.logicalLines = parameters().get<bool>("contour.capture.logical");
     captureSettings.timeout = parameters().get<double>("contour.capture.timeout");
     captureSettings.lineCount = parameters().get<unsigned>("contour.capture.lines");
@@ -294,95 +282,95 @@ int ContourApp::profileAction()
 
 crispy::cli::Command ContourApp::parameterDefinition() const
 {
-    return CLI::Command{
+    return CLI::Command {
         "contour",
-        "Contour Terminal Emulator " CONTOUR_VERSION_STRING " - https://github.com/contour-terminal/contour/ ;-)",
-        CLI::OptionList{},
-        CLI::CommandList{
-            CLI::Command{"help", "Shows this help and exits."},
-            CLI::Command{"version", "Shows the version and exits."},
-            CLI::Command{"license", "Shows the license, and project URL of the used projects and Contour."},
-            CLI::Command{"parser-table", "Dumps parser table"},
-            CLI::Command{"list-debug-tags", "Lists all available debug tags and exits."},
-            CLI::Command{
+        "Contour Terminal Emulator " CONTOUR_VERSION_STRING
+        " - https://github.com/contour-terminal/contour/ ;-)",
+        CLI::OptionList {},
+        CLI::CommandList {
+            CLI::Command { "help", "Shows this help and exits." },
+            CLI::Command { "version", "Shows the version and exits." },
+            CLI::Command { "license",
+                           "Shows the license, and project URL of the used projects and Contour." },
+            CLI::Command { "parser-table", "Dumps parser table" },
+            CLI::Command { "list-debug-tags", "Lists all available debug tags and exits." },
+            CLI::Command {
                 "generate",
                 "Generation utilities.",
-                CLI::OptionList{},
-                CLI::CommandList{
-                    CLI::Command{
+                CLI::OptionList {},
+                CLI::CommandList {
+                    CLI::Command {
                         "terminfo",
-                        "Generates the terminfo source file that will reflect the features of this version of contour. Using - as value will write to stdout instead.",
+                        "Generates the terminfo source file that will reflect the features of this version "
+                        "of contour. Using - as value will write to stdout instead.",
                         {
-                            CLI::Option{
-                                "to",
-                                CLI::Value{""s},
-                                "Output file name to store the screen capture to. If - (dash) is given, the output will be written to standard output.",
-                                "FILE",
-                                CLI::Presence::Required
-                            },
-                        }
-                    },
-                    CLI::Command{
+                            CLI::Option { "to",
+                                          CLI::Value { ""s },
+                                          "Output file name to store the screen capture to. If - (dash) is "
+                                          "given, the output will be written to standard output.",
+                                          "FILE",
+                                          CLI::Presence::Required },
+                        } },
+                    CLI::Command {
                         "config",
                         "Generates configuration file with the default configuration.",
-                        CLI::OptionList{
-                            CLI::Option{
-                                "to",
-                                CLI::Value{""s},
-                                "Output file name to store the config file to. If - (dash) is given, the output will be written to standard output.",
-                                "FILE",
-                                CLI::Presence::Required
-                            },
-                        }
-                    },
-                    CLI::Command{
+                        CLI::OptionList {
+                            CLI::Option { "to",
+                                          CLI::Value { ""s },
+                                          "Output file name to store the config file to. If - (dash) is "
+                                          "given, the output will be written to standard output.",
+                                          "FILE",
+                                          CLI::Presence::Required },
+                        } },
+                    CLI::Command {
                         "integration",
                         "Generates shell integration script.",
-                        CLI::OptionList{
-                            CLI::Option{
+                        CLI::OptionList {
+                            CLI::Option {
                                 "shell",
-                                CLI::Value{""s},
+                                CLI::Value { ""s },
                                 "Shell name to create the integration for. Currently only zsh is supported.",
                                 "SHELL",
-                                CLI::Presence::Required
-                            },
-                            CLI::Option{
-                                "to",
-                                CLI::Value{""s},
-                                "Output file name to store the shell integration file to. If - (dash) is given, the output will be written to standard output.",
-                                "FILE",
-                                CLI::Presence::Required
-                            },
-                        }
-                    }
-                }
-            },
-            CLI::Command{
+                                CLI::Presence::Required },
+                            CLI::Option { "to",
+                                          CLI::Value { ""s },
+                                          "Output file name to store the shell integration file to. If - "
+                                          "(dash) is given, the output will be written to standard output.",
+                                          "FILE",
+                                          CLI::Presence::Required },
+                        } } } },
+            CLI::Command {
                 "capture",
                 "Captures the screen buffer of the currently running terminal.",
                 {
-                    CLI::Option{"logical", CLI::Value{false}, "Tells the terminal to use logical lines for counting and capturing."},
-                    CLI::Option{"timeout", CLI::Value{1.0}, "Sets timeout seconds to wait for terminal to respond.", "SECONDS"},
-                    CLI::Option{"lines", CLI::Value{0u}, "The number of lines to capture", "COUNT"},
-                    CLI::Option{"to", CLI::Value{""s}, "Output file name to store the screen capture to. If - (dash) is given, the capture will be written to standard output.", "FILE", CLI::Presence::Required},
-                }
-            },
-            CLI::Command{
+                    CLI::Option { "logical",
+                                  CLI::Value { false },
+                                  "Tells the terminal to use logical lines for counting and capturing." },
+                    CLI::Option { "timeout",
+                                  CLI::Value { 1.0 },
+                                  "Sets timeout seconds to wait for terminal to respond.",
+                                  "SECONDS" },
+                    CLI::Option { "lines", CLI::Value { 0u }, "The number of lines to capture", "COUNT" },
+                    CLI::Option { "to",
+                                  CLI::Value { ""s },
+                                  "Output file name to store the screen capture to. If - (dash) is given, "
+                                  "the capture will be written to standard output.",
+                                  "FILE",
+                                  CLI::Presence::Required },
+                } },
+            CLI::Command {
                 "set",
                 "Sets various aspects of the connected terminal.",
-                CLI::OptionList{},
-                CLI::CommandList{
-                    CLI::Command{
-                        "profile",
-                        "Changes the terminal profile of the currently attached terminal to the given value.",
-                        CLI::OptionList{
-                            CLI::Option{"to", CLI::Value{""s}, "Profile name to activate in the currently connected terminal.", "NAME"}
-                        }
-                    }
-                }
-            }
-        }
+                CLI::OptionList {},
+                CLI::CommandList { CLI::Command {
+                    "profile",
+                    "Changes the terminal profile of the currently attached terminal to the given value.",
+                    CLI::OptionList {
+                        CLI::Option { "to",
+                                      CLI::Value { ""s },
+                                      "Profile name to activate in the currently connected terminal.",
+                                      "NAME" } } } } } }
     };
 }
 
-}
+} // namespace contour

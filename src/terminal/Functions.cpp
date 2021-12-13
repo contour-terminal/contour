@@ -11,8 +11,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/Functions.h>
 #include <terminal/Color.h>
+#include <terminal/Functions.h>
 
 #include <crispy/algorithm.h>
 #include <crispy/escape.h>
@@ -23,14 +23,14 @@
 
 #include <fmt/format.h>
 
-#include <array>
 #include <algorithm>
+#include <array>
 #include <numeric>
 #include <sstream>
 #include <string>
 
-using crispy::times;
 using crispy::for_each;
+using crispy::times;
 
 using std::accumulate;
 using std::array;
@@ -41,22 +41,24 @@ using std::string;
 using std::string_view;
 using std::stringstream;
 
-namespace terminal {
+namespace terminal
+{
 
 FunctionDefinition const* select(FunctionSelector const& _selector) noexcept
 {
     auto static const& funcs = functions();
 
-    //std::cout << fmt::format("select: {}\n", _selector);
+    // std::cout << fmt::format("select: {}\n", _selector);
 
-    auto a = size_t{0};
+    auto a = size_t { 0 };
     auto b = funcs.size() - 1;
     while (a <= b)
     {
         auto const i = (a + b) / 2;
         auto const& I = funcs[i];
         auto const rel = compare(_selector, I);
-        //std::cout << fmt::format(" - a:{:>2} b:{:>2} i:{} rel:{} I: {}\n", a, b, i, rel < 0 ? '<' : rel > 0 ? '>' : '=', I);
+        // std::cout << fmt::format(" - a:{:>2} b:{:>2} i:{} rel:{} I: {}\n", a, b, i, rel < 0 ? '<' : rel > 0
+        // ? '>' : '=', I);
         if (rel > 0)
             a = i + 1;
         else if (rel < 0)
@@ -71,4 +73,4 @@ FunctionDefinition const* select(FunctionSelector const& _selector) noexcept
     return nullptr;
 }
 
-} // end namespace
+} // namespace terminal

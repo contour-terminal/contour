@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/Color.h>
+
 #include <catch2/catch_all.hpp>
 
 using namespace terminal;
@@ -32,16 +33,15 @@ TEST_CASE("Color.Indexed", "[Color]")
 
 TEST_CASE("Color.RGB", "[Color]")
 {
-    RGBColor rgb0 = RGBColor{0x12, 0x34, 0x56};
+    RGBColor rgb0 = RGBColor { 0x12, 0x34, 0x56 };
     CHECK(rgb0.red == 0x12);
     CHECK(rgb0.green == 0x34);
     CHECK(rgb0.blue == 0x56);
 
-    Color const c = Color(RGBColor{0x12, 0x34, 0x56});
+    Color const c = Color(RGBColor { 0x12, 0x34, 0x56 });
     REQUIRE(isRGBColor(c));
     auto const rgb = getRGBColor(c);
     CHECK(rgb.red == 0x12);
     CHECK(rgb.green == 0x34);
     CHECK(rgb.blue == 0x56);
 }
-

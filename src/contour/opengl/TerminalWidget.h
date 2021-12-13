@@ -22,6 +22,7 @@
 #include <terminal/Color.h>
 #include <terminal/Metrics.h>
 #include <terminal/primitives.h>
+
 #include <terminal_renderer/Renderer.h>
 
 #include <QtCore/QPoint>
@@ -34,27 +35,24 @@
     #include <QtWidgets/QOpenGLWidget>
 #endif
 #include <QtWidgets/QMainWindow>
-#include <QtWidgets/QSystemTrayIcon>
 #include <QtWidgets/QScrollBar>
-
+#include <QtWidgets/QSystemTrayIcon>
 #include <atomic>
 #include <fstream>
 #include <memory>
 #include <optional>
 #include <vector>
 
-namespace contour::opengl {
+namespace contour::opengl
+{
 
 // It currently just handles one terminal inside, but ideally later it can handle
 // multiple terminals in tabbed views as well tiled.
-class TerminalWidget :
-    public QOpenGLWidget,
-    public TerminalDisplay,
-    private QOpenGLExtraFunctions
+class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpenGLExtraFunctions
 {
     Q_OBJECT
 
-public:
+  public:
     TerminalWidget(config::TerminalProfile const& _profile,
                    TerminalSession& _session,
                    std::function<void()> _adaptSize,
@@ -142,7 +140,10 @@ public:
     //
     config::TerminalProfile const& profile() const noexcept { return session_.profile(); }
     terminal::Terminal& terminal() noexcept { return session_.terminal(); }
-    terminal::PageSize screenSize() const { return screenSizeForPixels(pixelSize(), renderer_.gridMetrics()); }
+    terminal::PageSize screenSize() const
+    {
+        return screenSizeForPixels(pixelSize(), renderer_.gridMetrics());
+    }
     void assertInitialized();
     double contentScale() const;
     void updateMinimumSize();
@@ -153,7 +154,8 @@ public:
 
     /// Flags the screen as dirty.
     ///
-    /// @returns boolean indicating whether the screen was clean before and made dirty (true), false otherwise.
+    /// @returns boolean indicating whether the screen was clean before and made dirty (true), false
+    /// otherwise.
     bool setScreenDirty()
     {
 #if defined(CONTOUR_PERF_STATS)
@@ -171,7 +173,7 @@ public:
     std::atomic<bool> initialized_ = false;
     bool renderingPressure_ = false;
     std::unique_ptr<terminal::renderer::RenderTarget> renderTarget_;
-    PermissionCache rememberedPermissions_{};
+    PermissionCache rememberedPermissions_ {};
     bool maximizedState_ = false;
 
     // update() timer used to animate the blinking cursor.
@@ -182,7 +184,8 @@ public:
     // ======================================================================
 
 #if defined(CONTOUR_PERF_STATS)
-    struct Stats {
+    struct Stats
+    {
         std::atomic<uint64_t> updatesSinceRendering = 0;
         std::atomic<uint64_t> consecutiveRenderCount = 0;
     };
@@ -191,4 +194,4 @@ public:
 #endif
 };
 
-} // namespace contour
+} // namespace contour::opengl

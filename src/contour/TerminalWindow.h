@@ -32,17 +32,17 @@
     #include <QtGui/QOpenGLWindow>
 #endif
 #include <QtGui/QVector4D>
+#include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QMainWindow>
 #include <QtWidgets/QSystemTrayIcon>
-#include <QtWidgets/QWidget>
 #include <QtWidgets/QTabWidget>
-#include <QtWidgets/QHBoxLayout>
-
+#include <QtWidgets/QWidget>
 #include <atomic>
 #include <fstream>
 #include <memory>
 
-namespace contour {
+namespace contour
+{
 
 class ScrollableDisplay;
 
@@ -50,8 +50,7 @@ class ScrollableDisplay;
 //
 // It currently just handles one terminal inside, but ideally later it can handle
 // multiple terminals in tabbed views as well tiled.
-class TerminalWindow :
-    public QMainWindow
+class TerminalWindow: public QMainWindow
 {
     Q_OBJECT
 
@@ -66,7 +65,7 @@ class TerminalWindow :
     bool event(QEvent* _event) override;
     void resizeEvent(QResizeEvent* _event) override;
 
-    //QSize sizeHint() const override;
+    // QSize sizeHint() const override;
 
     config::TerminalProfile const* profile() const { return config_.profile(profileName_); }
 

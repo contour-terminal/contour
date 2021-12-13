@@ -24,14 +24,16 @@
 #include <string>
 #include <vector>
 
-namespace terminal {
+namespace terminal
+{
 
-enum class FunctionCategory : uint8_t {
-    C0   = 0,
-    ESC  = 1,
-    CSI  = 2,
-    OSC  = 3,
-    DCS  = 4,
+enum class FunctionCategory : uint8_t
+{
+    C0 = 0,
+    ESC = 1,
+    CSI = 2,
+    OSC = 3,
+    DCS = 4,
 };
 
 /// Defines a function with all its syntax requirements plus some additional meta information.
@@ -52,12 +54,14 @@ struct FunctionDefinition // TODO: rename Function
 
     constexpr id_type id() const noexcept
     {
-        unsigned constexpr CategoryShift      = 0;
-        unsigned constexpr LeaderShift        = 3;
-        unsigned constexpr IntermediateShift  = 3+3;
-        unsigned constexpr FinalShift         = 3+3+4;
-        unsigned constexpr MinParamShift      = 3+3+4+7;
-        unsigned constexpr MaxParamShift      = 3+3+4+7+4;
+        // clang-format off
+        unsigned constexpr CategoryShift     = 0;
+        unsigned constexpr LeaderShift       = 3;
+        unsigned constexpr IntermediateShift = 3 + 3;
+        unsigned constexpr FinalShift        = 3 + 3 + 4;
+        unsigned constexpr MinParamShift     = 3 + 3 + 4 + 7;
+        unsigned constexpr MaxParamShift     = 3 + 3 + 4 + 7 + 4;
+        // clang-format on
 
         // if (category == FunctionCategory::C0)
         //     return static_cast<id_type>(category) | finalSymbol << 3;
@@ -65,27 +69,21 @@ struct FunctionDefinition // TODO: rename Function
         auto const maskCat = static_cast<id_type>(category) << CategoryShift;
 
         // 0x3C..0x3F; (one of: < = > ?, or 0x00 for none)
-        auto const maskLeader = !leader
-            ? 0 : (static_cast<id_type>(leader) - 0x3C) << LeaderShift;
+        auto const maskLeader = !leader ? 0 : (static_cast<id_type>(leader) - 0x3C) << LeaderShift;
 
         // 0x20..0x2F: (intermediates, usually just one, or 0x00 if none)
-        auto const maskInterm = !intermediate
-            ? 0 : (static_cast<id_type>(intermediate) - 0x20 + 1) << IntermediateShift;
+        auto const maskInterm =
+            !intermediate ? 0 : (static_cast<id_type>(intermediate) - 0x20 + 1) << IntermediateShift;
 
         // 0x40..0x7E: final character
-        auto const maskFinalS = !finalSymbol  ? 0 : (static_cast<id_type>(finalSymbol) - 0x40) << FinalShift;
+        auto const maskFinalS = !finalSymbol ? 0 : (static_cast<id_type>(finalSymbol) - 0x40) << FinalShift;
         auto const maskMinPar = static_cast<id_type>(minimumParameters) << MinParamShift;
         auto const maskMaxPar = static_cast<id_type>(maximumParameters) << MaxParamShift;
 
-        return maskCat
-             | maskLeader
-             | maskInterm
-             | maskFinalS
-             | maskMinPar
-             | maskMaxPar;
+        return maskCat | maskLeader | maskInterm | maskFinalS | maskMinPar | maskMaxPar;
     }
 
-    constexpr operator id_type () const noexcept { return id(); }
+    constexpr operator id_type() const noexcept { return id(); }
 };
 
 constexpr int compare(FunctionDefinition const& a, FunctionDefinition const& b)
@@ -108,12 +106,14 @@ constexpr int compare(FunctionDefinition const& a, FunctionDefinition const& b)
     return static_cast<int>(a.maximumParameters) - static_cast<int>(b.maximumParameters);
 }
 
+// clang-format off
 constexpr bool operator==(FunctionDefinition const& a, FunctionDefinition const& b) noexcept { return compare(a, b) == 0; }
 constexpr bool operator!=(FunctionDefinition const& a, FunctionDefinition const& b) noexcept { return compare(a, b) != 0; }
 constexpr bool operator<=(FunctionDefinition const& a, FunctionDefinition const& b) noexcept { return compare(a, b) <= 0; }
 constexpr bool operator>=(FunctionDefinition const& a, FunctionDefinition const& b) noexcept { return compare(a, b) >= 0; }
 constexpr bool operator<(FunctionDefinition const& a, FunctionDefinition const& b) noexcept { return compare(a, b) < 0; }
 constexpr bool operator>(FunctionDefinition const& a, FunctionDefinition const& b) noexcept { return compare(a, b) > 0; }
+// clang-format on
 
 struct FunctionSelector
 {
@@ -159,51 +159,71 @@ namespace detail // {{{
 {
     constexpr auto C0(char _final, std::string_view _mnemonic, std::string_view _description) noexcept
     {
-        return FunctionDefinition{FunctionCategory::C0, 0, 0, _final, 0, 0, VTType::VT100, _mnemonic, _description};
+        return FunctionDefinition { FunctionCategory::C0, 0,         0,           _final, 0, 0,
+                                    VTType::VT100,        _mnemonic, _description };
     }
 
     constexpr auto OSC(uint16_t _code, std::string_view _mnemonic, std::string_view _description) noexcept
     {
-        return FunctionDefinition{FunctionCategory::OSC, 0, 0, 0, 0, _code, VTType::VT100, _mnemonic, _description};
+        return FunctionDefinition { FunctionCategory::OSC, 0,         0,           0, 0, _code,
+                                    VTType::VT100,         _mnemonic, _description };
     }
 
-    constexpr auto ESC(std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
+    constexpr auto ESC(std::optional<char> _intermediate,
+                       char _final,
+                       VTType _vt,
+                       std::string_view _mnemonic,
+                       std::string_view _description) noexcept
     {
-        return FunctionDefinition{FunctionCategory::ESC, 0, _intermediate.value_or(0), _final, 0, 0, _vt, _mnemonic, _description};
-    }
-
-    constexpr auto CSI(std::optional<char> _leader, uint8_t _argc0, uint8_t _argc1, std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
-    {
-        // TODO: static_assert on _leader/_intermediate range-or-null
-        return FunctionDefinition{
-            FunctionCategory::CSI,
-            _leader.value_or(0),
-            _intermediate.value_or(0),
-            _final,
-            _argc0,
-            _argc1,
-            _vt,
-            _mnemonic,
-            _description
+        return FunctionDefinition {
+            FunctionCategory::ESC, 0, _intermediate.value_or(0), _final, 0, 0, _vt, _mnemonic, _description
         };
     }
 
-    constexpr auto DCS(std::optional<char> _leader, uint8_t _argc0, uint8_t _argc1, std::optional<char> _intermediate, char _final, VTType _vt, std::string_view _mnemonic, std::string_view _description) noexcept
+    constexpr auto CSI(std::optional<char> _leader,
+                       uint8_t _argc0,
+                       uint8_t _argc1,
+                       std::optional<char> _intermediate,
+                       char _final,
+                       VTType _vt,
+                       std::string_view _mnemonic,
+                       std::string_view _description) noexcept
     {
         // TODO: static_assert on _leader/_intermediate range-or-null
-        return FunctionDefinition{
-            FunctionCategory::DCS,
-            _leader.value_or(0),
-            _intermediate.value_or(0),
-            _final,
-            _argc0,
-            _argc1,
-            _vt,
-            _mnemonic,
-            _description
-        };
+        return FunctionDefinition { FunctionCategory::CSI,
+                                    _leader.value_or(0),
+                                    _intermediate.value_or(0),
+                                    _final,
+                                    _argc0,
+                                    _argc1,
+                                    _vt,
+                                    _mnemonic,
+                                    _description };
     }
-} // }}}
+
+    constexpr auto DCS(std::optional<char> _leader,
+                       uint8_t _argc0,
+                       uint8_t _argc1,
+                       std::optional<char> _intermediate,
+                       char _final,
+                       VTType _vt,
+                       std::string_view _mnemonic,
+                       std::string_view _description) noexcept
+    {
+        // TODO: static_assert on _leader/_intermediate range-or-null
+        return FunctionDefinition { FunctionCategory::DCS,
+                                    _leader.value_or(0),
+                                    _intermediate.value_or(0),
+                                    _final,
+                                    _argc0,
+                                    _argc1,
+                                    _vt,
+                                    _mnemonic,
+                                    _description };
+    }
+} // namespace detail
+
+// clang-format off
 
 // C0
 constexpr inline auto EOT = detail::C0('\x04', "EOT", "End of Transmission");
@@ -326,7 +346,6 @@ constexpr inline auto XTSHIFTESCAPE=detail::CSI('>', 0, 1, std::nullopt, 's', VT
 constexpr inline auto XTVERSION   = detail::CSI('>', 0, 1, std::nullopt, 'q', VTType::VT525 /*Xterm*/, "XTVERSION", "Query terminal name and version");
 constexpr inline auto CAPTURE     = detail::CSI('>', 0, 2, std::nullopt, 't', VTType::VT525 /*Extension*/, "CAPTURE", "Report screen buffer capture.");
 
-
 // DCS functions
 constexpr inline auto STP         = detail::DCS(std::nullopt, 0, 0, '$', 'p', VTType::VT525, "STP", "Set Terminal Profile");
 constexpr inline auto DECRQSS     = detail::DCS(std::nullopt, 0, 0, '$', 'q', VTType::VT420, "DECRQSS", "Request Status String");
@@ -366,10 +385,13 @@ constexpr inline auto RCOLORHIGHLIGHTBG = detail::OSC(117, "RCOLORHIGHLIGHTBG", 
 constexpr inline auto NOTIFY        = detail::OSC(777, "NOTIFY", "Send Notification.");
 constexpr inline auto DUMPSTATE     = detail::OSC(888, "DUMPSTATE", "Dumps internal state to debug stream.");
 
+// clang-format on
+
 inline auto const& functions() noexcept
 {
-    static auto const funcs = []() constexpr { // {{{
-        auto f = std::array{
+    static auto const funcs = []() constexpr
+    { // {{{
+        auto f = std::array {
             // C0
             EOT,
             BEL,
@@ -498,9 +520,12 @@ inline auto const& functions() noexcept
             NOTIFY,
             DUMPSTATE,
         };
-        crispy::sort(f, [](FunctionDefinition const& a, FunctionDefinition const& b) constexpr { return compare(a, b); });
+        crispy::sort(
+            f,
+            [](FunctionDefinition const& a, FunctionDefinition const& b) constexpr { return compare(a, b); });
         return f;
-    }();  // }}}
+    }
+    (); // }}}
 
 #if 0
     for (auto [a, b] : crispy::indexed(funcs))
@@ -525,7 +550,7 @@ FunctionDefinition const* select(FunctionSelector const& _selector) noexcept;
 /// @return the matching FunctionDefinition or nullptr if none matched.
 inline FunctionDefinition const* selectEscape(char _intermediate, char _final)
 {
-    return select({FunctionCategory::ESC, 0, 0, _intermediate, _final});
+    return select({ FunctionCategory::ESC, 0, 0, _intermediate, _final });
 }
 
 /// Selects a FunctionDefinition based on given input control sequence fields.
@@ -540,7 +565,7 @@ inline FunctionDefinition const* selectEscape(char _intermediate, char _final)
 /// @return the matching FunctionDefinition or nullptr if none matched.
 inline FunctionDefinition const* selectControl(char _leader, int _argc, char _intermediate, char _final)
 {
-    return select({FunctionCategory::CSI, _leader, _argc, _intermediate, _final});
+    return select({ FunctionCategory::CSI, _leader, _argc, _intermediate, _final });
 }
 
 /// Selects a FunctionDefinition based on given input control sequence fields.
@@ -552,138 +577,127 @@ inline FunctionDefinition const* selectControl(char _leader, int _argc, char _in
 /// @return the matching FunctionDefinition or nullptr if none matched.
 inline FunctionDefinition const* selectOSCommand(int _id)
 {
-    return select({FunctionCategory::OSC, 0, _id, 0, 0});
+    return select({ FunctionCategory::OSC, 0, _id, 0, 0 });
 }
 
-} // end namespace
+} // namespace terminal
 
-namespace std {
-    template<>
-    struct hash<terminal::FunctionDefinition> {
-        /// This is actually perfect hashing.
-        constexpr uint32_t operator()(terminal::FunctionDefinition const& _fun) const noexcept {
-            return _fun.id();
-        }
-    };
-}
+namespace std
+{
+template <>
+struct hash<terminal::FunctionDefinition>
+{
+    /// This is actually perfect hashing.
+    constexpr uint32_t operator()(terminal::FunctionDefinition const& _fun) const noexcept
+    {
+        return _fun.id();
+    }
+};
+} // namespace std
 
 namespace fmt // {{{
 {
-    template <>
-    struct formatter<terminal::FunctionCategory> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(const terminal::FunctionCategory value, FormatContext& ctx)
+template <>
+struct formatter<terminal::FunctionCategory>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(const terminal::FunctionCategory value, FormatContext& ctx)
+    {
+        using terminal::FunctionCategory;
+        switch (value)
         {
-            using terminal::FunctionCategory;
-            switch (value)
-            {
-                case FunctionCategory::C0:   return format_to(ctx.out(), "C0");
-                case FunctionCategory::ESC:  return format_to(ctx.out(), "ESC");
-                case FunctionCategory::CSI:  return format_to(ctx.out(), "CSI");
-                case FunctionCategory::OSC:  return format_to(ctx.out(), "OSC");
-                case FunctionCategory::DCS:  return format_to(ctx.out(), "DCS");
-            }
-            return format_to(ctx.out(), "({})", static_cast<unsigned>(value));
+        case FunctionCategory::C0: return format_to(ctx.out(), "C0");
+        case FunctionCategory::ESC: return format_to(ctx.out(), "ESC");
+        case FunctionCategory::CSI: return format_to(ctx.out(), "CSI");
+        case FunctionCategory::OSC: return format_to(ctx.out(), "OSC");
+        case FunctionCategory::DCS: return format_to(ctx.out(), "DCS");
         }
-    };
+        return format_to(ctx.out(), "({})", static_cast<unsigned>(value));
+    }
+};
 
-    template <>
-    struct formatter<terminal::FunctionDefinition> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(const terminal::FunctionDefinition f, FormatContext& ctx)
+template <>
+struct formatter<terminal::FunctionDefinition>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(const terminal::FunctionDefinition f, FormatContext& ctx)
+    {
+        switch (f.category)
         {
-            switch (f.category)
-            {
-                case terminal::FunctionCategory::C0:
-                    return format_to(
-                        ctx.out(),
-                        "{}",
-                        f.mnemonic
-                    );
-                case terminal::FunctionCategory::ESC:
-                    return format_to(
-                        ctx.out(),
-                        "{} {} {}",
-                        f.category,
-                        f.intermediate ? f.intermediate : ' ',
-                        f.finalSymbol ? f.finalSymbol : ' '
-                    );
-                case terminal::FunctionCategory::OSC:
-                    return format_to(
-                        ctx.out(),
-                        "{} {}",
-                        f.category,
-                        f.maximumParameters
-                    );
-                case terminal::FunctionCategory::DCS:
-                case terminal::FunctionCategory::CSI:
-                    if (f.minimumParameters == f.maximumParameters)
-                        return format_to(
-                            ctx.out(),
-                            "{} {} {}    {} {}",
-                            f.category,
-                            f.leader ? f.leader : ' ',
-                            f.minimumParameters,
-                            f.intermediate ? f.intermediate : ' ',
-                            f.finalSymbol
-                        );
-                    else if (f.maximumParameters == terminal::ArgsMax)
-                        return format_to(
-                            ctx.out(),
-                            "{} {} {}..  {} {}",
-                            f.category,
-                            f.leader ? f.leader : ' ',
-                            f.minimumParameters,
-                            f.intermediate ? f.intermediate : ' ',
-                            f.finalSymbol
-                        );
-                    else
-                        return format_to(
-                            ctx.out(),
-                            "{} {} {}..{} {} {}",
-                            f.category,
-                            f.leader ? f.leader : ' ',
-                            f.minimumParameters,
-                            f.maximumParameters,
-                            f.intermediate ? f.intermediate : ' ',
-                            f.finalSymbol
-                        );
-            }
-            return format_to(ctx.out(), "?");
+        case terminal::FunctionCategory::C0: return format_to(ctx.out(), "{}", f.mnemonic);
+        case terminal::FunctionCategory::ESC:
+            return format_to(ctx.out(),
+                             "{} {} {}",
+                             f.category,
+                             f.intermediate ? f.intermediate : ' ',
+                             f.finalSymbol ? f.finalSymbol : ' ');
+        case terminal::FunctionCategory::OSC:
+            return format_to(ctx.out(), "{} {}", f.category, f.maximumParameters);
+        case terminal::FunctionCategory::DCS:
+        case terminal::FunctionCategory::CSI:
+            if (f.minimumParameters == f.maximumParameters)
+                return format_to(ctx.out(),
+                                 "{} {} {}    {} {}",
+                                 f.category,
+                                 f.leader ? f.leader : ' ',
+                                 f.minimumParameters,
+                                 f.intermediate ? f.intermediate : ' ',
+                                 f.finalSymbol);
+            else if (f.maximumParameters == terminal::ArgsMax)
+                return format_to(ctx.out(),
+                                 "{} {} {}..  {} {}",
+                                 f.category,
+                                 f.leader ? f.leader : ' ',
+                                 f.minimumParameters,
+                                 f.intermediate ? f.intermediate : ' ',
+                                 f.finalSymbol);
+            else
+                return format_to(ctx.out(),
+                                 "{} {} {}..{} {} {}",
+                                 f.category,
+                                 f.leader ? f.leader : ' ',
+                                 f.minimumParameters,
+                                 f.maximumParameters,
+                                 f.intermediate ? f.intermediate : ' ',
+                                 f.finalSymbol);
         }
-    };
+        return format_to(ctx.out(), "?");
+    }
+};
 
-    template <>
-    struct formatter<terminal::FunctionSelector> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(const terminal::FunctionSelector f, FormatContext& ctx)
+template <>
+struct formatter<terminal::FunctionSelector>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(const terminal::FunctionSelector f, FormatContext& ctx)
+    {
+        switch (f.category)
         {
-            switch (f.category)
-            {
-                case terminal::FunctionCategory::OSC:
-                    return format_to(
-                        ctx.out(),
-                        "{} {}",
-                        f.category,
-                        f.argc
-                    );
-                default:
-                    return format_to(
-                        ctx.out(),
-                        "{} {} {} {} {}",
-                        f.category,
-                        f.leader ? f.leader : ' ',
-                        f.argc,
-                        f.intermediate ? f.intermediate : ' ',
-                        f.finalSymbol ? f.finalSymbol : ' '
-                    );
-            }
+        case terminal::FunctionCategory::OSC: return format_to(ctx.out(), "{} {}", f.category, f.argc);
+        default:
+            return format_to(ctx.out(),
+                             "{} {} {} {} {}",
+                             f.category,
+                             f.leader ? f.leader : ' ',
+                             f.argc,
+                             f.intermediate ? f.intermediate : ' ',
+                             f.finalSymbol ? f.finalSymbol : ' ');
         }
-    };
-} // }}}
+    }
+};
+} // namespace fmt

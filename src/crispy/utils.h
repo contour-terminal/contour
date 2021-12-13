@@ -1,5 +1,7 @@
 #pragma once
 
+#include <fmt/format.h>
+
 #include <algorithm>
 #include <functional>
 #include <optional>
@@ -8,9 +10,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include <fmt/format.h>
-
-namespace crispy {
+namespace crispy
+{
 
 template <typename T>
 constexpr bool ascending(T low, T val, T high) noexcept
@@ -20,8 +21,8 @@ constexpr bool ascending(T low, T val, T high) noexcept
 
 constexpr unsigned long strntoul(char const* _data, size_t _count, char const** _eptr, unsigned _base = 10)
 {
-    constexpr auto values = std::string_view{"0123456789ABCDEF"};
-    constexpr auto lowerLetters = std::string_view{"abcdef"};
+    constexpr auto values = std::string_view { "0123456789ABCDEF" };
+    constexpr auto lowerLetters = std::string_view { "abcdef" };
 
     unsigned long result = 0;
     while (_count != 0)
@@ -51,9 +52,7 @@ constexpr unsigned long strntoul(char const* _data, size_t _count, char const** 
 }
 
 template <typename T, typename Callback>
-constexpr inline bool split(std::basic_string_view<T> _text,
-                            T _delimiter,
-                            Callback&& _callback)
+constexpr inline bool split(std::basic_string_view<T> _text, T _delimiter, Callback&& _callback)
 {
     size_t a = 0;
     size_t b = 0;
@@ -72,10 +71,14 @@ constexpr inline bool split(std::basic_string_view<T> _text,
 }
 
 template <typename T>
-constexpr inline auto split(std::basic_string_view<T> _text, T _delimiter) -> std::vector<std::basic_string_view<T>>
+constexpr inline auto split(std::basic_string_view<T> _text, T _delimiter)
+    -> std::vector<std::basic_string_view<T>>
 {
-    std::vector<std::basic_string_view<T>> output{};
-    split(_text, _delimiter, [&](auto value) { output.emplace_back(value); return true; });
+    std::vector<std::basic_string_view<T>> output {};
+    split(_text, _delimiter, [&](auto value) {
+        output.emplace_back(value);
+        return true;
+    });
     return output;
 }
 
@@ -85,7 +88,8 @@ inline auto split(std::basic_string<T> const& _text, T _delimiter) -> std::vecto
     return split(std::basic_string_view<T>(_text), _delimiter);
 }
 
-inline std::unordered_map<std::string_view, std::string_view> splitKeyValuePairs(std::string_view const&  _text, char _delimiter)
+inline std::unordered_map<std::string_view, std::string_view> splitKeyValuePairs(
+    std::string_view const& _text, char _delimiter)
 {
     // params := pair (':' pair)*
     // pair := TEXT '=' TEXT
@@ -160,41 +164,41 @@ constexpr std::optional<T> to_integer(std::basic_string_view<C> _text) noexcept
     if (_text.empty())
         return std::nullopt;
 
-    auto value = T{0};
+    auto value = T { 0 };
 
     for (auto const ch: _text)
     {
         value *= Base;
         switch (Base)
         {
-            case 2:
-                if ('0' <= ch && ch <= '1')
-                    value += ch - '0';
-                else
-                    return std::nullopt;
-                break;
-            case 8:
-                if ('0' <= ch && ch <= '7')
-                    value += ch - '0';
-                else
-                    return std::nullopt;
-                break;
-            case 10:
-                if ('0' <= ch && ch <= '9')
-                    value += ch - '0';
-                else
-                    return std::nullopt;
-                break;
-            case 16:
-                if ('0' <= ch && ch <= '9')
-                    value += ch - '0';
-                else if ('a' <= ch && ch <= 'f')
-                    value += 10 + ch - 'a';
-                else if (ch >= 'A' && ch <= 'F')
-                    value += 10 + ch - 'A';
-                else
-                    return std::nullopt;
-                break;
+        case 2:
+            if ('0' <= ch && ch <= '1')
+                value += ch - '0';
+            else
+                return std::nullopt;
+            break;
+        case 8:
+            if ('0' <= ch && ch <= '7')
+                value += ch - '0';
+            else
+                return std::nullopt;
+            break;
+        case 10:
+            if ('0' <= ch && ch <= '9')
+                value += ch - '0';
+            else
+                return std::nullopt;
+            break;
+        case 16:
+            if ('0' <= ch && ch <= '9')
+                value += ch - '0';
+            else if ('a' <= ch && ch <= 'f')
+                value += 10 + ch - 'a';
+            else if (ch >= 'A' && ch <= 'F')
+                value += 10 + ch - 'A';
+            else
+                return std::nullopt;
+            break;
         }
     }
 
@@ -207,8 +211,9 @@ constexpr std::optional<T> to_integer(std::basic_string<C> _text) noexcept
     return to_integer<Base, T, C>(std::basic_string_view<C>(_text));
 }
 
-struct finally {
-    std::function<void()> hook{};
+struct finally
+{
+    std::function<void()> hook {};
     ~finally() { hook(); }
 };
 
@@ -264,12 +269,7 @@ inline std::basic_string<T> toLower(std::basic_string_view<T> _value)
 {
     std::basic_string<T> result;
     result.reserve(_value.size());
-    transform(
-        begin(_value),
-        end(_value),
-        back_inserter(result),
-        [](auto ch) { return tolower(ch); }
-    );
+    transform(begin(_value), end(_value), back_inserter(result), [](auto ch) { return tolower(ch); });
     return result;
 }
 
@@ -285,11 +285,7 @@ inline std::basic_string<T> toUpper(std::basic_string_view<T> _value)
     std::basic_string<T> result;
     result.reserve(_value.size());
     std::transform(
-        begin(_value),
-        end(_value),
-        back_inserter(result),
-        [](auto ch) { return std::toupper(ch); }
-    );
+        begin(_value), end(_value), back_inserter(result), [](auto ch) { return std::toupper(ch); });
     return result;
 }
 
@@ -299,4 +295,4 @@ inline std::basic_string<T> toUpper(std::basic_string<T> const& _value)
     return toUpper<T>(std::basic_string_view<T>(_value));
 }
 
-} // end namespace
+} // namespace crispy

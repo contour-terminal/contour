@@ -14,24 +14,27 @@
 #pragma once
 
 #include <contour/Config.h>
+
 #include <terminal/Process.h>
+
 #include <crispy/stdfs.h>
 
 #include <QtCore/QThread>
 #include <QtWidgets/QSystemTrayIcon>
-
 #include <chrono>
 #include <memory>
 #include <optional>
 #include <string>
 #include <thread>
 
-namespace contour {
+namespace contour
+{
 
 class TerminalSession;
 class TerminalWindow;
 
-class Controller : public QThread {
+class Controller: public QThread
+{
   public:
     Controller(std::string _programPath,
                std::chrono::seconds _earlyExitThreshold,
@@ -75,4 +78,4 @@ class Controller : public QThread {
     QSystemTrayIcon* systrayIcon_ = nullptr;
 };
 
-} // end namespace
+} // namespace contour

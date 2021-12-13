@@ -13,25 +13,23 @@
  */
 #pragma once
 
+#include <fmt/format.h>
+
 #include <array>
 #include <cstdint>
 #include <optional>
-#include <string_view>
 #include <string>
+#include <string_view>
 
-#include <fmt/format.h>
-
-namespace terminal::capabilities {
+namespace terminal::capabilities
+{
 
 // TCap Code - terminal capability code, a unique 2-byte identifier.
 struct Code
 {
-    uint16_t code{};
+    uint16_t code {};
 
-    constexpr operator uint16_t () const noexcept
-    {
-        return code;
-    }
+    constexpr operator uint16_t() const noexcept { return code; }
 
     std::string hex() const
     {
@@ -41,11 +39,11 @@ struct Code
     constexpr Code() noexcept = default;
     constexpr Code(Code const&) noexcept = default;
     constexpr Code& operator=(Code const&) noexcept = default;
-    constexpr Code(Code &&) noexcept = default;
-    constexpr Code& operator=(Code &&) noexcept = default;
-    constexpr explicit Code(uint16_t _code) noexcept : code{_code} {}
+    constexpr Code(Code&&) noexcept = default;
+    constexpr Code& operator=(Code&&) noexcept = default;
+    constexpr explicit Code(uint16_t _code) noexcept: code { _code } {}
 
-    constexpr explicit Code(std::string_view _code) noexcept : code{uint16_t(_code[0] << 8 | _code[1])}
+    constexpr explicit Code(std::string_view _code) noexcept: code { uint16_t(_code[0] << 8 | _code[1]) }
     {
         code = uint16_t(_code[0] << 8 | _code[1]);
     }
@@ -70,21 +68,22 @@ struct Def
 };
 
 // {{{ variable names
-constexpr auto inline auto_left_margin      = Def{Code{"am"}, "am"};
-constexpr auto inline can_change            = Def{Code{"cc"}, "ccc"};
-constexpr auto inline eat_newline_glitch    = Def{Code{"xn"}, "xenl"};
+constexpr auto inline auto_left_margin = Def { Code { "am" }, "am" };
+constexpr auto inline can_change = Def { Code { "cc" }, "ccc" };
+constexpr auto inline eat_newline_glitch = Def { Code { "xn" }, "xenl" };
 // TODO ... (all the rest that is at least needed by us)
 // }}}
 
 namespace literals
 {
-    constexpr Code operator "" _tcap (char const* _code, size_t)
+    constexpr Code operator"" _tcap(char const* _code, size_t)
     {
-        return Code{uint16_t(_code[0] << 8 | _code[1])};
+        return Code { uint16_t(_code[0] << 8 | _code[1]) };
     }
-}
+} // namespace literals
 
-class Database {
+class Database
+{
   public:
     virtual ~Database() = default;
 
@@ -101,7 +100,8 @@ class Database {
     virtual std::string terminfo() const = 0;
 };
 
-class StaticDatabase : public Database {
+class StaticDatabase: public Database
+{
   public:
     bool booleanCapability(Code _cap) const override;
     unsigned numericCapability(Code _cap) const override;
@@ -116,24 +116,29 @@ class StaticDatabase : public Database {
     std::string terminfo() const override;
 };
 
-} // end namespace
+} // namespace terminal::capabilities
 
 namespace fmt
 {
-    template <>
-    struct formatter<terminal::capabilities::Code> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::capabilities::Code _value, FormatContext& ctx)
-        {
-            if (_value.code & 0xFF0000)
-                return format_to(ctx.out(), "{}{}{}", char((_value.code >> 16) & 0xFF),
-                                                      char((_value.code >> 8) & 0xFF),
-                                                      char(_value.code & 0xFF));
+template <>
+struct formatter<terminal::capabilities::Code>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::capabilities::Code _value, FormatContext& ctx)
+    {
+        if (_value.code & 0xFF0000)
+            return format_to(ctx.out(),
+                             "{}{}{}",
+                             char((_value.code >> 16) & 0xFF),
+                             char((_value.code >> 8) & 0xFF),
+                             char(_value.code & 0xFF));
 
-            return format_to(ctx.out(), "{}{}", char((_value.code >> 8) & 0xFF),
-                                                char(_value.code & 0xFF));
-        }
-    };
-}
+        return format_to(ctx.out(), "{}{}", char((_value.code >> 8) & 0xFF), char(_value.code & 0xFF));
+    }
+};
+} // namespace fmt

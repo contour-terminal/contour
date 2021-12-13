@@ -20,7 +20,6 @@
 
 #include <gsl/span>
 #include <gsl/span_ext>
-
 #include <optional>
 #include <variant>
 #include <vector>
@@ -29,13 +28,16 @@ namespace text
 {
 
 /// Holds the system path to a font file.
-struct font_path { std::string value; };
+struct font_path
+{
+    std::string value;
+};
 
 /// Holds a view into the contents of a font file.
 struct font_memory_ref
 {
-    std::string identifier;     //!< a unique identifier for this font
-    gsl::span<uint8_t> data;    //!< font file contents (non-owned)
+    std::string identifier;  //!< a unique identifier for this font
+    gsl::span<uint8_t> data; //!< font file contents (non-owned)
 };
 
 /// Represents a font source (such as file path or memory).
@@ -52,7 +54,7 @@ using font_source_list = std::vector<font_source>;
  */
 class font_locator
 {
-public:
+  public:
     virtual ~font_locator() = default;
 
     /**
@@ -74,47 +76,56 @@ public:
     virtual font_source_list resolve(gsl::span<const char32_t> codepoints) = 0;
 };
 
-}
+} // namespace text
 
 namespace fmt // {{{
 {
-    template <>
-    struct formatter<text::font_path>
+template <>
+struct formatter<text::font_path>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
     {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(text::font_path path, FormatContext& ctx)
-        {
-            return format_to(ctx.out(), "path {}", path.value);
-        }
-    };
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(text::font_path path, FormatContext& ctx)
+    {
+        return format_to(ctx.out(), "path {}", path.value);
+    }
+};
 
-    template <>
-    struct formatter<text::font_memory_ref>
+template <>
+struct formatter<text::font_memory_ref>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
     {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(text::font_memory_ref ref, FormatContext& ctx)
-        {
-            return format_to(ctx.out(), "in-memory: {}", ref.identifier);
-        }
-    };
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(text::font_memory_ref ref, FormatContext& ctx)
+    {
+        return format_to(ctx.out(), "in-memory: {}", ref.identifier);
+    }
+};
 
-    template <>
-    struct formatter<text::font_source>
+template <>
+struct formatter<text::font_source>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
     {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(text::font_source source, FormatContext& ctx)
-        {
-            if (std::holds_alternative<text::font_path>(source))
-                return format_to(ctx.out(), "{}", std::get<text::font_path>(source));
-            if (std::holds_alternative<text::font_memory_ref>(source))
-                return format_to(ctx.out(), "{}", std::get<text::font_memory_ref>(source));
-            return format_to(ctx.out(), "UNKNOWN SOURCE");
-        }
-    };
-} // }}}
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(text::font_source source, FormatContext& ctx)
+    {
+        if (std::holds_alternative<text::font_path>(source))
+            return format_to(ctx.out(), "{}", std::get<text::font_path>(source));
+        if (std::holds_alternative<text::font_memory_ref>(source))
+            return format_to(ctx.out(), "{}", std::get<text::font_memory_ref>(source));
+        return format_to(ctx.out(), "UNKNOWN SOURCE");
+    }
+};
+} // namespace fmt

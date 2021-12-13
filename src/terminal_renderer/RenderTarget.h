@@ -13,12 +13,12 @@
  */
 #pragma once
 
-#include <terminal_renderer/Atlas.h>
-#include <terminal_renderer/GridMetrics.h>
-
 #include <terminal/Color.h>
 #include <terminal/Grid.h> // cell attribs
 #include <terminal/primitives.h>
+
+#include <terminal_renderer/Atlas.h>
+#include <terminal_renderer/GridMetrics.h>
 
 #include <crispy/size.h>
 #include <crispy/stdfs.h>
@@ -30,9 +30,11 @@
 #include <optional>
 #include <vector>
 
-namespace terminal::renderer {
+namespace terminal::renderer
+{
 
-struct AtlasTextureInfo {
+struct AtlasTextureInfo
+{
     std::string atlasName;
     int atlasInstanceId;
     ImageSize size;
@@ -59,20 +61,17 @@ class RenderTarget
 
     std::array<atlas::TextureAtlasAllocator*, 3> allAtlasAllocators() noexcept
     {
-        return {
-            &monochromeAtlasAllocator(),
-            &coloredAtlasAllocator(),
-            &lcdAtlasAllocator()
-        };
+        return { &monochromeAtlasAllocator(), &coloredAtlasAllocator(), &lcdAtlasAllocator() };
     }
 
     virtual atlas::AtlasBackend& textureScheduler() = 0;
 
     /// Fills a rectangular area with the given solid color.
-    virtual void renderRectangle(int _x, int _y, int _width, int _height,
-                                 float _r, float _g, float _b, float _a) = 0;
+    virtual void renderRectangle(
+        int _x, int _y, int _width, int _height, float _r, float _g, float _b, float _a) = 0;
 
-    using ScreenshotCallback = std::function<void(std::vector<uint8_t> const& /*_rgbaBuffer*/, ImageSize /*_pixelSize*/)>;
+    using ScreenshotCallback =
+        std::function<void(std::vector<uint8_t> const& /*_rgbaBuffer*/, ImageSize /*_pixelSize*/)>;
 
     /// Schedules taking a screenshot of the current scene and forwards it to the given callback.
     virtual void scheduleScreenshot(ScreenshotCallback _callback) = 0;
@@ -87,10 +86,12 @@ class RenderTarget
     virtual void clearCache() = 0;
 
     /// Reads out the given texture atlas.
-    virtual std::optional<AtlasTextureInfo> readAtlas(atlas::TextureAtlasAllocator const& _allocator, atlas::AtlasID _instanceId) = 0;
+    virtual std::optional<AtlasTextureInfo> readAtlas(atlas::TextureAtlasAllocator const& _allocator,
+                                                      atlas::AtlasID _instanceId) = 0;
 };
 
-class Renderable {
+class Renderable
+{
   public:
     virtual ~Renderable() = default;
 
@@ -99,8 +100,14 @@ class Renderable {
     RenderTarget& renderTarget() { return *renderTarget_; }
     constexpr bool renderTargetAvailable() const noexcept { return renderTarget_; }
 
-    atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept { return renderTarget_->monochromeAtlasAllocator(); }
-    atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept { return renderTarget_->coloredAtlasAllocator(); }
+    atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept
+    {
+        return renderTarget_->monochromeAtlasAllocator();
+    }
+    atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept
+    {
+        return renderTarget_->coloredAtlasAllocator();
+    }
     atlas::TextureAtlasAllocator& lcdAtlasAllocator() noexcept { return renderTarget_->lcdAtlasAllocator(); }
 
     atlas::AtlasBackend& textureScheduler() { return renderTarget_->textureScheduler(); }
@@ -109,4 +116,4 @@ class Renderable {
     RenderTarget* renderTarget_ = nullptr;
 };
 
-} // end namespace
+} // namespace terminal::renderer

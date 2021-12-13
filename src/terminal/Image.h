@@ -13,10 +13,10 @@
  */
 #pragma once
 
-#include <crispy/LRUCache.h>
-
 #include <terminal/Color.h>
 #include <terminal/primitives.h>
+
+#include <crispy/LRUCache.h>
 
 #include <fmt/format.h>
 
@@ -27,7 +27,8 @@
 #include <memory>
 #include <vector>
 
-namespace terminal {
+namespace terminal
+{
 
 // XXX DRAFT
 // Do we want to keep an Image that keeps the whole image together, and then cut it into grid-cell
@@ -35,19 +36,26 @@ namespace terminal {
 // Or do we want to deal with Image slices right away and just keep those?
 // The latter doesn't require reference counting.
 
-enum class ImageFormat {
+enum class ImageFormat
+{
     RGB,
     RGBA,
     PNG,
 };
 
-namespace detail { struct ImageId{}; }
+namespace detail
+{
+    struct ImageId
+    {
+    };
+} // namespace detail
 using ImageId = crispy::boxed<uint32_t, detail::ImageId>; // unique numerical image identifier
 
 /**
  * Represents an image that can be displayed in the terminal by being placed into the grid cells
  */
-class Image {
+class Image
+{
   public:
     using Data = std::vector<uint8_t>; // raw RGBA data
 
@@ -55,12 +63,10 @@ class Image {
     ///
     /// @param _data      RGBA buffer data
     /// @param _pixelSize image dimensionss in pixels
-    Image(ImageId _id, ImageFormat _format, Data _data, ImageSize _pixelSize) :
-        id_{ _id },
-        format_{ _format },
-        data_{ move(_data) },
-        size_{ _pixelSize }
-    {}
+    Image(ImageId _id, ImageFormat _format, Data _data, ImageSize _pixelSize):
+        id_ { _id }, format_ { _format }, data_ { move(_data) }, size_ { _pixelSize }
+    {
+    }
 
     Image(Image const&) = delete;
     Image& operator=(Image const&) = delete;
@@ -82,7 +88,8 @@ class Image {
 };
 
 /// Image resize hints are used to properly fit/fill the area to place the image onto.
-enum class ImageResize {
+enum class ImageResize
+{
     NoResize,
     ResizeToFit, // default
     ResizeToFill,
@@ -91,7 +98,8 @@ enum class ImageResize {
 
 /// Image alignment policy are used to properly align the image to a given spot when not fully
 /// filling the area this image as to be placed to.
-enum class ImageAlignment {
+enum class ImageAlignment
+{
     TopStart,
     TopCenter,
     TopEnd,
@@ -104,7 +112,8 @@ enum class ImageAlignment {
 };
 
 /**
- * RasterizedImage wraps an Image into a fixed-size grid with some additional graphical properties for rasterization.
+ * RasterizedImage wraps an Image into a fixed-size grid with some additional graphical properties for
+ * rasterization.
  */
 class RasterizedImage
 {
@@ -114,14 +123,15 @@ class RasterizedImage
                     ImageResize _resizePolicy,
                     RGBAColor _defaultColor,
                     GridSize _cellSpan,
-                    ImageSize _cellSize)
-      : image_{ _image },
-        alignmentPolicy_{ _alignmentPolicy },
-        resizePolicy_{ _resizePolicy },
-        defaultColor_{ _defaultColor },
-        cellSpan_{ _cellSpan },
-        cellSize_{ _cellSize }
-    {}
+                    ImageSize _cellSize):
+        image_ { _image },
+        alignmentPolicy_ { _alignmentPolicy },
+        resizePolicy_ { _resizePolicy },
+        defaultColor_ { _defaultColor },
+        cellSpan_ { _cellSpan },
+        cellSize_ { _cellSize }
+    {
+    }
 
     RasterizedImage(RasterizedImage const&) = delete;
     RasterizedImage(RasterizedImage&&) = delete;
@@ -139,22 +149,22 @@ class RasterizedImage
     Image::Data fragment(Coordinate _pos) const;
 
   private:
-    std::shared_ptr<Image const> const image_;  //!< Reference to the Image to be rasterized.
-    ImageAlignment const alignmentPolicy_;      //!< Alignment policy of the image inside the raster size.
-    ImageResize const resizePolicy_;            //!< Image resize policy
-    RGBAColor const defaultColor_;              //!< Default color to be applied at corners when needed.
-    GridSize const cellSpan_;                   //!< Number of grid cells to span the pixel image onto.
-    ImageSize const cellSize_;               //!< number of pixels in X and Y dimension one grid cell has to fill.
+    std::shared_ptr<Image const> const image_; //!< Reference to the Image to be rasterized.
+    ImageAlignment const alignmentPolicy_;     //!< Alignment policy of the image inside the raster size.
+    ImageResize const resizePolicy_;           //!< Image resize policy
+    RGBAColor const defaultColor_;             //!< Default color to be applied at corners when needed.
+    GridSize const cellSpan_;                  //!< Number of grid cells to span the pixel image onto.
+    ImageSize const cellSize_; //!< number of pixels in X and Y dimension one grid cell has to fill.
 };
 
 /// An ImageFragment holds a graphical image that ocupies one full grid cell.
-class ImageFragment {
+class ImageFragment
+{
   public:
     /// @param _image  the Image this fragment is being cut off from
     /// @param _offset 0-based grid-offset into the rasterized image
-    ImageFragment(std::shared_ptr<RasterizedImage const> const& _image, Coordinate _offset) :
-        rasterizedImage_{ _image },
-        offset_{ _offset }
+    ImageFragment(std::shared_ptr<RasterizedImage const> const& _image, Coordinate _offset):
+        rasterizedImage_ { _image }, offset_ { _offset }
     {
     }
 
@@ -177,13 +187,15 @@ class ImageFragment {
     Coordinate offset_;
 };
 
-namespace detail { struct ImageFragmentId; }
+namespace detail
+{
+    struct ImageFragmentId;
+}
 using ImageFragmentId = crispy::boxed<uint16_t, detail::ImageFragmentId>;
 
 inline bool operator==(ImageFragment const& a, ImageFragment const& b) noexcept
 {
-    return a.rasterizedImage().image().id() == b.rasterizedImage().image().id()
-        && a.offset() == b.offset();
+    return a.rasterizedImage().image().id() == b.rasterizedImage().image().id() && a.offset() == b.offset();
 }
 
 inline bool operator!=(ImageFragment const& a, ImageFragment const& b) noexcept
@@ -194,26 +206,29 @@ inline bool operator!=(ImageFragment const& a, ImageFragment const& b) noexcept
 inline bool operator<(ImageFragment const& a, ImageFragment const& b) noexcept
 {
     return (a.rasterizedImage().image().id() < b.rasterizedImage().image().id())
-        || (a.rasterizedImage().image().id() == b.rasterizedImage().image().id() && a.offset() < b.offset());
+           || (a.rasterizedImage().image().id() == b.rasterizedImage().image().id()
+               && a.offset() < b.offset());
 }
 
 /// Highlevel Image Storage Pool.
 ///
 /// Stores RGBA images in host memory, also taking care of eviction.
-class ImagePool {
+class ImagePool
+{
   public:
     using OnImageRemove = std::function<void(Image const*)>;
 
     constexpr static inline std::size_t MaxCapacity = 1024;
 
-    ImagePool(OnImageRemove _onImageRemove = [](auto) {},
-              ImageId _nextImageId = ImageId(1)):
-        nextImageId_{ _nextImageId },
-        namedImages_{ MaxCapacity },
-        images_{ MaxCapacity },
-        rasterizedImages_{},
-        onImageRemove_{ std::move(_onImageRemove) }
-    {}
+    ImagePool(
+        OnImageRemove _onImageRemove = [](auto) {}, ImageId _nextImageId = ImageId(1)):
+        nextImageId_ { _nextImageId },
+        namedImages_ { MaxCapacity },
+        images_ { MaxCapacity },
+        rasterizedImages_ {},
+        onImageRemove_ { std::move(_onImageRemove) }
+    {
+    }
 
     /// Creates an RGBA image of given size in pixels.
     Image const& create(ImageFormat _format, ImageSize _pixelSize, Image::Data&& _data);
@@ -237,127 +252,122 @@ class ImagePool {
     size_t namedImageCount() const noexcept { return namedImages_.size(); }
 
   private:
-    void removeImage(Image* _image);                        //!< Removes given image from pool.
-    void removeRasterizedImage(RasterizedImage* _image);    //!< Removes a rasterized image from pool.
+    void removeImage(Image* _image);                     //!< Removes given image from pool.
+    void removeRasterizedImage(RasterizedImage* _image); //!< Removes a rasterized image from pool.
 
     // data members
     //
-    ImageId nextImageId_;                                   //!< ID for next image to be put into the pool
-    crispy::LRUCache<std::string, ImageId> namedImages_;    //!< keeps mapping from name to raw image
-    crispy::LRUCache<ImageId, Image> images_;               //!< pool of raw images
-    std::list<RasterizedImage> rasterizedImages_;           //!< pool of rasterized images
-    OnImageRemove const onImageRemove_;                     //!< Callback to be invoked when image gets removed from pool.
+    ImageId nextImageId_;                                //!< ID for next image to be put into the pool
+    crispy::LRUCache<std::string, ImageId> namedImages_; //!< keeps mapping from name to raw image
+    crispy::LRUCache<ImageId, Image> images_;            //!< pool of raw images
+    std::list<RasterizedImage> rasterizedImages_;        //!< pool of rasterized images
+    OnImageRemove const onImageRemove_; //!< Callback to be invoked when image gets removed from pool.
 };
 
-} // end namespace
+} // namespace terminal
 
 namespace fmt // {{{
 {
-    template <>
-    struct formatter<terminal::Image>
+template <>
+struct formatter<terminal::Image>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
     {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx)
-        {
-            return ctx.begin();
-        }
+        return ctx.begin();
+    }
 
-        template <typename FormatContext>
-        auto format(const terminal::Image& _image, FormatContext& ctx)
-        {
-            return format_to(
-                ctx.out(),
-                "Image<{}, size={}>",
-                _image.id(),
-                _image.size()
-            );
-        }
-    };
-
-    template <>
-    struct formatter<terminal::ImageResize>
+    template <typename FormatContext>
+    auto format(const terminal::Image& _image, FormatContext& ctx)
     {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(const terminal::ImageResize _value, FormatContext& ctx)
-        {
-            switch (_value)
-            {
-                case terminal::ImageResize::NoResize: return format_to(ctx.out(), "NoResize");
-                case terminal::ImageResize::ResizeToFit: return format_to(ctx.out(), "ResizeToFit");
-                case terminal::ImageResize::ResizeToFill: return format_to(ctx.out(), "ResizeToFill");
-                case terminal::ImageResize::StretchToFill: return format_to(ctx.out(), "StretchToFill");
-            }
-            return format_to(ctx.out(), "ResizePolicy({})", int(_value));
-        }
-    };
+        return format_to(ctx.out(), "Image<{}, size={}>", _image.id(), _image.size());
+    }
+};
 
-    template <>
-    struct formatter<terminal::ImageAlignment>
+template <>
+struct formatter<terminal::ImageResize>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
     {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(const terminal::ImageAlignment _value, FormatContext& ctx)
-        {
-            switch (_value)
-            {
-                case terminal::ImageAlignment::TopStart: return format_to(ctx.out(), "TopStart");
-                case terminal::ImageAlignment::TopCenter: return format_to(ctx.out(), "TopCenter");
-                case terminal::ImageAlignment::TopEnd: return format_to(ctx.out(), "TopEnd");
-                case terminal::ImageAlignment::MiddleStart: return format_to(ctx.out(), "MiddleStart");
-                case terminal::ImageAlignment::MiddleCenter: return format_to(ctx.out(), "MiddleCenter");
-                case terminal::ImageAlignment::MiddleEnd: return format_to(ctx.out(), "MiddleEnd");
-                case terminal::ImageAlignment::BottomStart: return format_to(ctx.out(), "BottomStart");
-                case terminal::ImageAlignment::BottomCenter: return format_to(ctx.out(), "BottomCenter");
-                case terminal::ImageAlignment::BottomEnd: return format_to(ctx.out(), "BottomEnd");
-            }
-            return format_to(ctx.out(), "ImageAlignment({})", int(_value));
-        }
-    };
-
-    template <>
-    struct formatter<terminal::RasterizedImage>
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(const terminal::ImageResize _value, FormatContext& ctx)
     {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx)
+        switch (_value)
         {
-            return ctx.begin();
+        case terminal::ImageResize::NoResize: return format_to(ctx.out(), "NoResize");
+        case terminal::ImageResize::ResizeToFit: return format_to(ctx.out(), "ResizeToFit");
+        case terminal::ImageResize::ResizeToFill: return format_to(ctx.out(), "ResizeToFill");
+        case terminal::ImageResize::StretchToFill: return format_to(ctx.out(), "StretchToFill");
         }
+        return format_to(ctx.out(), "ResizePolicy({})", int(_value));
+    }
+};
 
-        template <typename FormatContext>
-        auto format(const terminal::RasterizedImage& _image, FormatContext& ctx)
-        {
-            return format_to(
-                ctx.out(),
-                "RasterizedImage<extent={}, {}, {}, {}>",
-                _image.cellSpan(),
-                _image.resizePolicy(),
-                _image.alignmentPolicy(),
-                _image.image()
-            );
-        }
-    };
-
-    template <>
-    struct formatter<terminal::ImageFragment>
+template <>
+struct formatter<terminal::ImageAlignment>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
     {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx)
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(const terminal::ImageAlignment _value, FormatContext& ctx)
+    {
+        switch (_value)
         {
-            return ctx.begin();
+        case terminal::ImageAlignment::TopStart: return format_to(ctx.out(), "TopStart");
+        case terminal::ImageAlignment::TopCenter: return format_to(ctx.out(), "TopCenter");
+        case terminal::ImageAlignment::TopEnd: return format_to(ctx.out(), "TopEnd");
+        case terminal::ImageAlignment::MiddleStart: return format_to(ctx.out(), "MiddleStart");
+        case terminal::ImageAlignment::MiddleCenter: return format_to(ctx.out(), "MiddleCenter");
+        case terminal::ImageAlignment::MiddleEnd: return format_to(ctx.out(), "MiddleEnd");
+        case terminal::ImageAlignment::BottomStart: return format_to(ctx.out(), "BottomStart");
+        case terminal::ImageAlignment::BottomCenter: return format_to(ctx.out(), "BottomCenter");
+        case terminal::ImageAlignment::BottomEnd: return format_to(ctx.out(), "BottomEnd");
         }
+        return format_to(ctx.out(), "ImageAlignment({})", int(_value));
+    }
+};
 
-        template <typename FormatContext>
-        auto format(const terminal::ImageFragment& _fragment, FormatContext& ctx)
-        {
-            return format_to(
-                ctx.out(),
-                "ImageFragment<offset={}, {}>",
-                _fragment.offset(),
-                _fragment.rasterizedImage()
-            );
-        }
-    };
-} // }}}
+template <>
+struct formatter<terminal::RasterizedImage>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const terminal::RasterizedImage& _image, FormatContext& ctx)
+    {
+        return format_to(ctx.out(),
+                         "RasterizedImage<extent={}, {}, {}, {}>",
+                         _image.cellSpan(),
+                         _image.resizePolicy(),
+                         _image.alignmentPolicy(),
+                         _image.image());
+    }
+};
+
+template <>
+struct formatter<terminal::ImageFragment>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const terminal::ImageFragment& _fragment, FormatContext& ctx)
+    {
+        return format_to(
+            ctx.out(), "ImageFragment<offset={}, {}>", _fragment.offset(), _fragment.rasterizedImage());
+    }
+};
+} // namespace fmt

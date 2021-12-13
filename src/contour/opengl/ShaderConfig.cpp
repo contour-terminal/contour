@@ -11,26 +11,27 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <contour/opengl/ShaderConfig.h>
 #include <contour/helper.h>
+#include <contour/opengl/ShaderConfig.h>
+#include <contour/opengl/background_frag.h>
+#include <contour/opengl/background_vert.h>
+#include <contour/opengl/text_frag.h>
+#include <contour/opengl/text_vert.h>
 
 #include <iostream>
 #include <string>
 
-#include <contour/opengl/background_vert.h>
-#include <contour/opengl/background_frag.h>
-#include <contour/opengl/text_vert.h>
-#include <contour/opengl/text_frag.h>
+namespace contour::opengl
+{
 
-namespace contour::opengl {
-
-namespace {
+namespace
+{
     template <size_t N>
     inline std::string s(std::array<uint8_t, N> const& data)
     {
         return std::string(reinterpret_cast<char const*>(data.data()), data.size());
     }
-}
+} // namespace
 
 ShaderConfig defaultShaderConfig(ShaderClass _shaderClass)
 {
@@ -38,10 +39,11 @@ ShaderConfig defaultShaderConfig(ShaderClass _shaderClass)
 
     switch (_shaderClass)
     {
-        case ShaderClass::Background:
-            return {s(background_vert), s(background_frag), "builtin.background.vert", "builtin.background.frag"};
-        case ShaderClass::Text:
-            return {s(text_vert), s(text_frag), "builtin.text.vert", "builtin.text.frag"};
+    case ShaderClass::Background:
+        return {
+            s(background_vert), s(background_frag), "builtin.background.vert", "builtin.background.frag"
+        };
+    case ShaderClass::Text: return { s(text_vert), s(text_frag), "builtin.text.vert", "builtin.text.frag" };
     }
 
     throw std::invalid_argument(fmt::format("ShaderClass<{}>", static_cast<unsigned>(_shaderClass)));
@@ -71,9 +73,9 @@ std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderCo
     if (!shader->link())
     {
         errorlog()("Linking shaders {} & {} failed. {}",
-                 _shaderConfig.vertexShaderFileName,
-                 _shaderConfig.fragmentShaderFileName,
-                 shader->log().toStdString());
+                   _shaderConfig.vertexShaderFileName,
+                   _shaderConfig.fragmentShaderFileName,
+                   shader->log().toStdString());
         return {};
     }
 
@@ -83,4 +85,4 @@ std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderCo
     return shader;
 }
 
-} // end namespace
+} // namespace contour::opengl

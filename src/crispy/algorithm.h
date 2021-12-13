@@ -15,48 +15,49 @@
 
 #include <algorithm>
 
-namespace crispy {
+namespace crispy
+{
 
 // XXX Some C++20 backports
 
 template <typename Container, typename Pred>
-auto find_if(Container && _container, Pred && _pred)
+auto find_if(Container&& _container, Pred&& _pred)
 {
     return std::find_if(begin(_container), end(_container), std::forward<Pred>(_pred));
 }
 
 template <typename Container, typename Fn>
-constexpr bool any_of(Container && _container, Fn && _fn)
+constexpr bool any_of(Container&& _container, Fn&& _fn)
 {
     return std::any_of(begin(_container), end(_container), std::forward<Fn>(_fn));
 }
 
 template <typename Container, typename Fn>
-bool none_of(Container && _container, Fn && _fn)
+bool none_of(Container&& _container, Fn&& _fn)
 {
     return std::none_of(begin(_container), end(_container), std::forward<Fn>(_fn));
 }
 
 template <typename ExecutionPolicy, typename Container, typename Fn>
-bool any_of(ExecutionPolicy _ep, Container && _container, Fn && _fn)
+bool any_of(ExecutionPolicy _ep, Container&& _container, Fn&& _fn)
 {
     return std::any_of(_ep, begin(_container), end(_container), std::forward<Fn>(_fn));
 }
 
 template <typename Container, typename OutputIterator>
-void copy(Container && _container, OutputIterator _outputIterator)
+void copy(Container&& _container, OutputIterator _outputIterator)
 {
     std::copy(std::begin(_container), std::end(_container), _outputIterator);
 }
 
 template <typename Container, typename Fn>
-void for_each(Container && _container, Fn && _fn)
+void for_each(Container&& _container, Fn&& _fn)
 {
     std::for_each(begin(_container), end(_container), std::forward<Fn>(_fn));
 }
 
 template <typename ExecutionPolicy, typename Container, typename Fn>
-void for_each(ExecutionPolicy _ep, Container && _container, Fn && _fn)
+void for_each(ExecutionPolicy _ep, Container&& _container, Fn&& _fn)
 {
     std::for_each(_ep, begin(_container), end(_container), std::forward<Fn>(_fn));
 }
@@ -67,4 +68,4 @@ auto count(Container&& _container, T&& _value)
     return std::count(begin(_container), end(_container), std::forward<T>(_value));
 }
 
-} // end namespace
+} // namespace crispy

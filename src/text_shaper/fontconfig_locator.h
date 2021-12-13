@@ -14,10 +14,11 @@
 
 #pragma once
 
-#include <text_shaper/font_locator.h>
 #include <text_shaper/font.h>
+#include <text_shaper/font_locator.h>
 
-namespace text {
+namespace text
+{
 
 /**
  * Font locator API implementation using `fontconfig` library.
@@ -28,7 +29,7 @@ namespace text {
  */
 class fontconfig_locator: public font_locator
 {
-public:
+  public:
     fontconfig_locator();
     ~fontconfig_locator() override;
 
@@ -36,9 +37,9 @@ public:
     font_source_list all() override;
     font_source_list resolve(gsl::span<const char32_t> codepoints) override;
 
-private:
+  private:
     struct Private;
-    std::unique_ptr<Private, void(*)(Private*)> d;
+    std::unique_ptr<Private, void (*)(Private*)> d;
 };
 
-}
+} // namespace text

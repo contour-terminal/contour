@@ -13,7 +13,8 @@
  */
 #include <terminal/Cell.h>
 
-namespace terminal {
+namespace terminal
+{
 
 std::u32string Cell::codepoints() const
 {
@@ -47,7 +48,7 @@ std::string Cell::toUtf8() const
 
 GraphicsAttributes Cell::attributes() const noexcept
 {
-    GraphicsAttributes sgr{};
+    GraphicsAttributes sgr {};
     sgr.foregroundColor = foregroundColor();
     sgr.backgroundColor = backgroundColor();
     sgr.underlineColor = underlineColor();
@@ -55,4 +56,4 @@ GraphicsAttributes Cell::attributes() const noexcept
     return sgr;
 }
 
-}
+} // namespace terminal

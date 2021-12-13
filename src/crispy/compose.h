@@ -38,18 +38,15 @@
 template <typename F, typename... Args>
 constexpr auto compose(F _fun, Args... _args) -> std::pair<F, std::tuple<Args...>>
 {
-    return std::pair{std::move(_fun), std::make_tuple(std::forward<Args>(_args)...)};
+    return std::pair { std::move(_fun), std::make_tuple(std::forward<Args>(_args)...) };
 }
 
 /**
  * Function composition operator, to be used with the compose() function.
  */
-template<typename S, typename F, typename... Args>
+template <typename S, typename F, typename... Args>
 constexpr auto operator>>(S _input, std::pair<F, std::tuple<Args...>> _chain)
 {
-    return std::apply(
-        _chain.first,
-        std::tuple_cat(std::move(_chain.second), std::tuple<S>{std::move(_input)})
-    );
+    return std::apply(_chain.first,
+                      std::tuple_cat(std::move(_chain.second), std::tuple<S> { std::move(_input) }));
 }
-

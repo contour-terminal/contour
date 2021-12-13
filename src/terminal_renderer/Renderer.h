@@ -13,17 +13,16 @@
  */
 #pragma once
 
-#include <terminal_renderer/RenderTarget.h>
-#include <terminal_renderer/GridMetrics.h>
+#include <terminal/Image.h>
+#include <terminal/Terminal.h>
 
 #include <terminal_renderer/BackgroundRenderer.h>
 #include <terminal_renderer/CursorRenderer.h>
 #include <terminal_renderer/DecorationRenderer.h>
+#include <terminal_renderer/GridMetrics.h>
 #include <terminal_renderer/ImageRenderer.h>
+#include <terminal_renderer/RenderTarget.h>
 #include <terminal_renderer/TextRenderer.h>
-
-#include <terminal/Image.h>
-#include <terminal/Terminal.h>
 
 #include <crispy/size.h>
 
@@ -31,10 +30,11 @@
 
 #include <chrono>
 #include <memory>
-#include <vector>
 #include <utility>
+#include <vector>
 
-namespace terminal::renderer {
+namespace terminal::renderer
+{
 
 struct RenderCursor
 {
@@ -46,7 +46,8 @@ struct RenderCursor
 /**
  * Renders a terminal's screen to the current OpenGL context.
  */
-class Renderer : public Renderable {
+class Renderer: public Renderable
+{
   public:
     /** Constructs a Renderer instances.
      *
@@ -82,10 +83,7 @@ class Renderer : public Renderable {
         decorationRenderer_.setHyperlinkDecoration(_normal, _hover);
     }
 
-    void setScreenSize(PageSize _screenSize) noexcept
-    {
-        gridMetrics_.pageSize = _screenSize;
-    }
+    void setScreenSize(PageSize _screenSize) noexcept { gridMetrics_.pageSize = _screenSize; }
 
     void setMargin(PageMargin _margin) noexcept
     {
@@ -99,18 +97,16 @@ class Renderer : public Renderable {
      *
      * @p _now The time hint to use when rendering the eventually blinking cursor.
      */
-    uint64_t render(Terminal& _terminal,
-                    bool _pressure);
+    uint64_t render(Terminal& _terminal, bool _pressure);
 
     // Converts given RGBColor with its given opacity to a 4D-vector of values between 0.0 and 1.0
-    static constexpr std::array<float, 4> canonicalColor(RGBColor const& _rgb, Opacity _opacity = Opacity::Opaque)
+    static constexpr std::array<float, 4> canonicalColor(RGBColor const& _rgb,
+                                                         Opacity _opacity = Opacity::Opaque)
     {
-        return std::array<float, 4>{
-            static_cast<float>(_rgb.red) / 255.0f,
-            static_cast<float>(_rgb.green) / 255.0f,
-            static_cast<float>(_rgb.blue) / 255.0f,
-            static_cast<float>(_opacity) / 255.0f
-        };
+        return std::array<float, 4> { static_cast<float>(_rgb.red) / 255.0f,
+                                      static_cast<float>(_rgb.green) / 255.0f,
+                                      static_cast<float>(_rgb.blue) / 255.0f,
+                                      static_cast<float>(_opacity) / 255.0f };
     }
 
     void discardImage(Image const& _image);
@@ -121,12 +117,8 @@ class Renderer : public Renderable {
 
     std::array<std::reference_wrapper<Renderable>, 5> renderables()
     {
-        return std::array<std::reference_wrapper<Renderable>, 5>{
-            backgroundRenderer_,
-            imageRenderer_,
-            textRenderer_,
-            decorationRenderer_,
-            cursorRenderer_
+        return std::array<std::reference_wrapper<Renderable>, 5> {
+            backgroundRenderer_, imageRenderer_, textRenderer_, decorationRenderer_, cursorRenderer_
         };
     }
 
@@ -147,8 +139,8 @@ class Renderer : public Renderable {
     ColorPalette const& colorPalette_;
     Opacity backgroundOpacity_;
 
-    std::mutex imageDiscardLock_;               //!< Lock guard for accessing discardImageQueue_.
-    std::vector<ImageId> discardImageQueue_;    //!< List of images to be discarded.
+    std::mutex imageDiscardLock_;            //!< Lock guard for accessing discardImageQueue_.
+    std::vector<ImageId> discardImageQueue_; //!< List of images to be discarded.
 
     BackgroundRenderer backgroundRenderer_;
     ImageRenderer imageRenderer_;
@@ -157,4 +149,4 @@ class Renderer : public Renderable {
     CursorRenderer cursorRenderer_;
 };
 
-} // end namespace
+} // namespace terminal::renderer

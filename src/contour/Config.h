@@ -14,16 +14,15 @@
 #pragma once
 
 #include <contour/Actions.h>
-
 #include <contour/opengl/ShaderConfig.h>
-
-#include <terminal_renderer/TextRenderer.h>         // FontDescriptions
-#include <terminal_renderer/DecorationRenderer.h>   // Decorator
 
 #include <terminal/Color.h>
 #include <terminal/InputBinding.h>
 #include <terminal/Process.h>
-#include <terminal/Sequencer.h>                 // CursorDisplay
+#include <terminal/Sequencer.h> // CursorDisplay
+
+#include <terminal_renderer/DecorationRenderer.h> // Decorator
+#include <terminal_renderer/TextRenderer.h>       // FontDescriptions
 
 #include <text_shaper/font.h>
 
@@ -31,14 +30,15 @@
 #include <crispy/stdfs.h>
 
 #include <chrono>
-#include <system_error>
 #include <optional>
 #include <set>
 #include <string>
-#include <variant>
+#include <system_error>
 #include <unordered_map>
+#include <variant>
 
-namespace contour::config {
+namespace contour::config
+{
 
 enum class ScrollBarPosition
 {
@@ -76,49 +76,45 @@ struct InputMappings
 namespace helper
 {
     inline bool testMatchMode(uint8_t _actualModeFlags,
-                       terminal::MatchModes _expected,
-                       terminal::MatchModes::Flag _testFlag)
+                              terminal::MatchModes _expected,
+                              terminal::MatchModes::Flag _testFlag)
     {
         using MatchModes = terminal::MatchModes;
         switch (_expected.status(_testFlag))
         {
-            case MatchModes::Status::Enabled:
-                if (!(_actualModeFlags & _testFlag))
-                    return false;
-                break;
-            case MatchModes::Status::Disabled:
-                if ((_actualModeFlags & _testFlag))
-                    return false;
-            case MatchModes::Status::Any:
-                break;
+        case MatchModes::Status::Enabled:
+            if (!(_actualModeFlags & _testFlag))
+                return false;
+            break;
+        case MatchModes::Status::Disabled:
+            if ((_actualModeFlags & _testFlag))
+                return false;
+        case MatchModes::Status::Any: break;
         }
         return true;
     }
 
-    inline bool testMatchMode(uint8_t _actualModeFlags,
-                       terminal::MatchModes _expected)
+    inline bool testMatchMode(uint8_t _actualModeFlags, terminal::MatchModes _expected)
     {
         using Flag = terminal::MatchModes::Flag;
         return testMatchMode(_actualModeFlags, _expected, Flag::AlternateScreen)
-            && testMatchMode(_actualModeFlags, _expected, Flag::AppCursor)
-            && testMatchMode(_actualModeFlags, _expected, Flag::AppKeypad)
-            && testMatchMode(_actualModeFlags, _expected, Flag::Select);
+               && testMatchMode(_actualModeFlags, _expected, Flag::AppCursor)
+               && testMatchMode(_actualModeFlags, _expected, Flag::AppKeypad)
+               && testMatchMode(_actualModeFlags, _expected, Flag::Select);
     }
-}
+} // namespace helper
 
 template <typename Input>
 std::vector<actions::Action> const* apply(
     std::vector<terminal::InputBinding<Input, ActionList>> const& _mappings,
     Input _input,
     terminal::Modifier _modifier,
-    uint8_t _actualModeFlags
-)
+    uint8_t _actualModeFlags)
 {
     for (terminal::InputBinding<Input, ActionList> const& mapping: _mappings)
     {
-        if (mapping.modifier == _modifier &&
-            mapping.input == _input &&
-            helper::testMatchMode(_actualModeFlags, mapping.modes))
+        if (mapping.modifier == _modifier && mapping.input == _input
+            && helper::testMatchMode(_actualModeFlags, mapping.modes))
         {
             return &mapping.binding;
         }
@@ -126,7 +122,8 @@ std::vector<actions::Action> const* apply(
     return nullptr;
 }
 
-struct TerminalProfile {
+struct TerminalProfile
+{
     terminal::Process::ExecInfo shell;
     bool maximized = false;
     bool fullscreen = false;
@@ -135,7 +132,7 @@ struct TerminalProfile {
 
     std::string wmClass;
 
-    terminal::PageSize terminalSize = {terminal::LineCount(10), terminal::ColumnCount(40)};
+    terminal::PageSize terminalSize = { terminal::LineCount(10), terminal::ColumnCount(40) };
     terminal::VTType terminalId = terminal::VTType::VT525;
 
     terminal::LineCount maxHistoryLineCount;
@@ -147,31 +144,34 @@ struct TerminalProfile {
 
     terminal::renderer::FontDescriptions fonts;
 
-    struct {
+    struct
+    {
         Permission captureBuffer = Permission::Ask;
         Permission changeFont = Permission::Ask;
     } permissions;
 
-    terminal::ColorPalette colors{};
+    terminal::ColorPalette colors {};
 
     terminal::CursorShape cursorShape;
     terminal::CursorDisplay cursorDisplay;
     std::chrono::milliseconds cursorBlinkInterval;
 
     terminal::Opacity backgroundOpacity; // value between 0 (fully transparent) and 0xFF (fully visible).
-    bool backgroundBlur; // On Windows 10, this will enable Acrylic Backdrop.
+    bool backgroundBlur;                 // On Windows 10, this will enable Acrylic Backdrop.
 
-    struct {
+    struct
+    {
         terminal::renderer::Decorator normal = terminal::renderer::Decorator::DottedUnderline;
         terminal::renderer::Decorator hover = terminal::renderer::Decorator::Underline;
     } hyperlinkDecoration;
 };
 
-using opengl::ShaderConfig;
 using opengl::ShaderClass;
+using opengl::ShaderConfig;
 
 // NB: All strings in here must be UTF8-encoded.
-struct Config {
+struct Config
+{
     FileSystem::path backingFilePath;
 
     std::optional<FileSystem::path> logFilePath;
@@ -243,49 +243,48 @@ std::string defaultConfigFilePath();
 
 namespace fmt // {{{
 {
-    template <>
-    struct formatter<contour::config::Permission> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(contour::config::Permission const& _perm, FormatContext& ctx)
-        {
-            switch (_perm)
-            {
-                case contour::config::Permission::Allow:
-                    return format_to(ctx.out(), "allow");
-                case contour::config::Permission::Deny:
-                    return format_to(ctx.out(), "deny");
-                case contour::config::Permission::Ask:
-                    return format_to(ctx.out(), "ask");
-            }
-            return format_to(ctx.out(), "({})", unsigned(_perm));
-        }
-    };
-
-    template <>
-    struct formatter<contour::config::SelectionAction>
+template <>
+struct formatter<contour::config::Permission>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
     {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx)
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(contour::config::Permission const& _perm, FormatContext& ctx)
+    {
+        switch (_perm)
         {
-            return ctx.begin();
+        case contour::config::Permission::Allow: return format_to(ctx.out(), "allow");
+        case contour::config::Permission::Deny: return format_to(ctx.out(), "deny");
+        case contour::config::Permission::Ask: return format_to(ctx.out(), "ask");
         }
-        using SelectionAction = contour::config::SelectionAction;
-        template <typename FormatContext>
-        auto format(SelectionAction _value, FormatContext& ctx)
-        {
-            switch (_value)
-            {
-                case SelectionAction::CopyToClipboard:
-                    return format_to(ctx.out(), "CopyToClipboard");
-                case SelectionAction::CopyToSelectionClipboard:
-                    return format_to(ctx.out(), "CopyToSelectionClipboard");
-                case SelectionAction::Nothing:
-                    return format_to(ctx.out(), "Waiting");
-            }
-            return format_to(ctx.out(), "{}", static_cast<unsigned>(_value));
-        }
-    };
+        return format_to(ctx.out(), "({})", unsigned(_perm));
+    }
+};
 
-} // }}}
+template <>
+struct formatter<contour::config::SelectionAction>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    using SelectionAction = contour::config::SelectionAction;
+    template <typename FormatContext>
+    auto format(SelectionAction _value, FormatContext& ctx)
+    {
+        switch (_value)
+        {
+        case SelectionAction::CopyToClipboard: return format_to(ctx.out(), "CopyToClipboard");
+        case SelectionAction::CopyToSelectionClipboard:
+            return format_to(ctx.out(), "CopyToSelectionClipboard");
+        case SelectionAction::Nothing: return format_to(ctx.out(), "Waiting");
+        }
+        return format_to(ctx.out(), "{}", static_cast<unsigned>(_value));
+    }
+};
+
+} // namespace fmt

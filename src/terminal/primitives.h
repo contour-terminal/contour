@@ -15,8 +15,8 @@
 
 #include <terminal/defines.h>
 
-#include <crispy/boxed.h>
 #include <crispy/ImageSize.h>
+#include <crispy/boxed.h>
 
 #include <cassert>
 #include <cstdint>
@@ -27,36 +27,65 @@
 // - [ ] rename all History to Scrollback
 // - [ ] make sense out of all the semantically different line primitives.
 
-namespace terminal {
+namespace terminal
+{
 
 namespace detail::tags // {{{
 {
     // column types
-    struct ColumnCount{};
-    struct ColumnOffset{};
-    struct ColumnPosition{};
+    struct ColumnCount
+    {
+    };
+    struct ColumnOffset
+    {
+    };
+    struct ColumnPosition
+    {
+    };
 
     // line types
-    struct LineCount{};
-    struct LineOffset{};
-    struct ScrollOffset{};
+    struct LineCount
+    {
+    };
+    struct LineOffset
+    {
+    };
+    struct ScrollOffset
+    {
+    };
 
     // misc.
-    struct TabStopCount{};
+    struct TabStopCount
+    {
+    };
 
     // generic length
-    struct Length{};
+    struct Length
+    {
+    };
 
     // range
-    struct From{};
-    struct To{};
+    struct From
+    {
+    };
+    struct To
+    {
+    };
 
     // margin
-    struct Top{};
-    struct Left{};
-    struct Bottom{};
-    struct Right{};
-}
+    struct Top
+    {
+    };
+    struct Left
+    {
+    };
+    struct Bottom
+    {
+    };
+    struct Right
+    {
+    };
+} // namespace detail::tags
 // }}}
 
 // {{{ Column types
@@ -92,12 +121,19 @@ using LineOffset = crispy::boxed<int, detail::tags::LineOffset>;
 /// to the top.
 using ScrollOffset = crispy::boxed<int, detail::tags::ScrollOffset>;
 
-constexpr int operator*(LineCount a, ColumnCount b) noexcept { return a.as<int>() * b.as<int>(); }
-constexpr int operator*(ColumnCount a, LineCount b) noexcept { return a.as<int>() * b.as<int>(); }
+constexpr int operator*(LineCount a, ColumnCount b) noexcept
+{
+    return a.as<int>() * b.as<int>();
+}
+constexpr int operator*(ColumnCount a, LineCount b) noexcept
+{
+    return a.as<int>() * b.as<int>();
+}
 // }}}
-struct [[nodiscard]] Coordinate { // {{{
-    LineOffset line{};
-    ColumnOffset column{};
+struct [[nodiscard]] Coordinate
+{ // {{{
+    LineOffset line {};
+    ColumnOffset column {};
 
     constexpr Coordinate& operator+=(Coordinate a) noexcept
     {
@@ -106,8 +142,16 @@ struct [[nodiscard]] Coordinate { // {{{
         return *this;
     }
 
-    constexpr Coordinate& operator+=(ColumnOffset x) noexcept { column += x; return *this; }
-    constexpr Coordinate& operator+=(LineOffset y) noexcept { line += y; return *this; }
+    constexpr Coordinate& operator+=(ColumnOffset x) noexcept
+    {
+        column += x;
+        return *this;
+    }
+    constexpr Coordinate& operator+=(LineOffset y) noexcept
+    {
+        line += y;
+        return *this;
+    }
 };
 
 inline std::ostream& operator<<(std::ostream& os, Coordinate coord)
@@ -115,8 +159,14 @@ inline std::ostream& operator<<(std::ostream& os, Coordinate coord)
     return os << fmt::format("({}, {})", coord.line, coord.column);
 }
 
-constexpr bool operator==(Coordinate a, Coordinate b) noexcept { return a.line == b.line && a.column == b.column; }
-constexpr bool operator!=(Coordinate a, Coordinate b) noexcept { return !(a == b); }
+constexpr bool operator==(Coordinate a, Coordinate b) noexcept
+{
+    return a.line == b.line && a.column == b.column;
+}
+constexpr bool operator!=(Coordinate a, Coordinate b) noexcept
+{
+    return !(a == b);
+}
 
 constexpr bool operator<(Coordinate a, Coordinate b) noexcept
 {
@@ -144,16 +194,19 @@ constexpr bool operator>(Coordinate a, Coordinate b) noexcept
     return !(a == b || a < b);
 }
 
-inline Coordinate operator+(Coordinate a, Coordinate b) noexcept { return {a.line + b.line, a.column + b.column}; }
+inline Coordinate operator+(Coordinate a, Coordinate b) noexcept
+{
+    return { a.line + b.line, a.column + b.column };
+}
 
 constexpr Coordinate operator+(Coordinate c, LineOffset y) noexcept
 {
-    return Coordinate{c.line + y, c.column};
+    return Coordinate { c.line + y, c.column };
 }
 
 constexpr Coordinate operator+(Coordinate c, ColumnOffset x) noexcept
 {
-    return Coordinate{c.line, c.column + x};
+    return Coordinate { c.line, c.column + x };
 }
 
 // }}}
@@ -172,10 +225,12 @@ struct Range
     To to;
 
     // So you can do: for (auto const v: Range{3, 5}) { ... }
-    struct ValueTag{};
+    struct ValueTag
+    {
+    };
     using iterator = crispy::boxed<int, ValueTag>;
-    iterator begin() const { return iterator{from.value}; }
-    auto end() const { return iterator{to.value + 1}; }
+    iterator begin() const { return iterator { from.value }; }
+    auto end() const { return iterator { to.value + 1 }; }
     // iterator end() const { return crispy::boxed_cast<iterator>(to) + iterator{1}; }
 };
 
@@ -191,14 +246,32 @@ using Right = crispy::boxed<int, detail::tags::Right>;
 
 // Rectangular screen operations
 //
-struct Rect { Top top; Left left; Bottom bottom; Right right; };
+struct Rect
+{
+    Top top;
+    Left left;
+    Bottom bottom;
+    Right right;
+};
 
 // Screen's page margin
 //
-struct PageMargin { Top top; Left left; Bottom bottom; Right right; };
+struct PageMargin
+{
+    Top top;
+    Left left;
+    Bottom bottom;
+    Right right;
+};
 
-constexpr Range horizontal(PageMargin m) noexcept { return Range{ From{*m.top}, To{*m.bottom} }; }
-constexpr Range vertical(PageMargin m) noexcept { return Range{ From{*m.left}, To{*m.right} }; }
+constexpr Range horizontal(PageMargin m) noexcept
+{
+    return Range { From { *m.top }, To { *m.bottom } };
+}
+constexpr Range vertical(PageMargin m) noexcept
+{
+    return Range { From { *m.left }, To { *m.right } };
+}
 
 // }}}
 // {{{ Length
@@ -212,13 +285,16 @@ struct PageSize
 {
     LineCount lines;
     ColumnCount columns;
-    int area() const noexcept
-    {
-        return *lines * *columns;
-    }
+    int area() const noexcept { return *lines * *columns; }
 };
-constexpr bool operator==(PageSize a, PageSize b) noexcept { return a.lines == b.lines && a.columns == b.columns; }
-constexpr bool operator!=(PageSize a, PageSize b) noexcept { return !(a == b); }
+constexpr bool operator==(PageSize a, PageSize b) noexcept
+{
+    return a.lines == b.lines && a.columns == b.columns;
+}
+constexpr bool operator!=(PageSize a, PageSize b) noexcept
+{
+    return !(a == b);
+}
 // }}}
 // {{{ Coordinate types
 
@@ -237,18 +313,18 @@ struct GridSize
     LineCount lines;
     ColumnCount columns;
 
-    struct Offset {
+    struct Offset
+    {
         LineOffset line;
         ColumnOffset column;
     };
 
     /// This iterator can be used to iterate through each and every point between (0, 0) and (width, height).
-    struct iterator {
+    struct iterator
+    {
       public:
-        constexpr iterator(ColumnCount _width, int _next) noexcept :
-            width{ _width },
-            next{ _next },
-            offset{ makeOffset(_next) }
+        constexpr iterator(ColumnCount _width, int _next) noexcept:
+            width { _width }, next { _next }, offset { makeOffset(_next) }
         {
         }
 
@@ -276,22 +352,25 @@ struct GridSize
 
         constexpr Offset makeOffset(int offset) noexcept
         {
-            return Offset{
-                LineOffset(offset / *width),
-                ColumnOffset(offset % *width)
-            };
+            return Offset { LineOffset(offset / *width), ColumnOffset(offset % *width) };
         }
     };
 
-    constexpr iterator begin() const noexcept { return iterator{columns, 0}; }
-    constexpr iterator end() const noexcept { return iterator{columns, *columns * *lines}; }
+    constexpr iterator begin() const noexcept { return iterator { columns, 0 }; }
+    constexpr iterator end() const noexcept { return iterator { columns, *columns * *lines }; }
 
-    constexpr iterator begin() noexcept { return iterator{columns, 0}; }
-    constexpr iterator end() noexcept { return iterator{columns, *columns * *lines}; }
+    constexpr iterator begin() noexcept { return iterator { columns, 0 }; }
+    constexpr iterator end() noexcept { return iterator { columns, *columns * *lines }; }
 };
 
-constexpr GridSize::iterator begin(GridSize const& s) noexcept { return s.begin(); }
-constexpr GridSize::iterator end(GridSize const& s) noexcept { return s.end(); }
+constexpr GridSize::iterator begin(GridSize const& s) noexcept
+{
+    return s.begin();
+}
+constexpr GridSize::iterator end(GridSize const& s) noexcept
+{
+    return s.end();
+}
 // }}}
 // {{{ misc
 
@@ -302,8 +381,8 @@ using TabStopCount = crispy::boxed<int, detail::tags::TabStopCount>;
 
 constexpr Length length(Range range) noexcept
 {
-    //assert(range.to.value >= range.from.value);
-    return Length::cast_from(*range.to - *range.from) + Length{1};
+    // assert(range.to.value >= range.from.value);
+    return Length::cast_from(*range.to - *range.from) + Length { 1 };
 }
 
 // }}}
@@ -316,22 +395,47 @@ using ImageSize = crispy::ImageSize;
 
 constexpr ImageSize operator*(ImageSize a, PageSize b) noexcept
 {
-    return ImageSize{
-        a.width * boxed_cast<Width>(b.columns),
-        a.height * boxed_cast<Height>(b.lines)
-    };
+    return ImageSize { a.width * boxed_cast<Width>(b.columns), a.height * boxed_cast<Height>(b.lines) };
 }
 // }}}
 // {{{ Mixed boxed types operator overloads
-constexpr LineCount operator+(LineCount a, LineOffset b) noexcept { return a + b.value; }
-constexpr LineCount operator-(LineCount a, LineOffset b) noexcept { return a - b.value; }
-constexpr LineOffset& operator+=(LineOffset& a, LineCount b) noexcept { a.value += b.value; return a; }
-constexpr LineOffset& operator-=(LineOffset& a, LineCount b) noexcept { a.value -= b.value; return a; }
+constexpr LineCount operator+(LineCount a, LineOffset b) noexcept
+{
+    return a + b.value;
+}
+constexpr LineCount operator-(LineCount a, LineOffset b) noexcept
+{
+    return a - b.value;
+}
+constexpr LineOffset& operator+=(LineOffset& a, LineCount b) noexcept
+{
+    a.value += b.value;
+    return a;
+}
+constexpr LineOffset& operator-=(LineOffset& a, LineCount b) noexcept
+{
+    a.value -= b.value;
+    return a;
+}
 
-constexpr ColumnCount operator+(ColumnCount a, ColumnOffset b) noexcept { return a + b.value; }
-constexpr ColumnCount operator-(ColumnCount a, ColumnOffset b) noexcept { return a - b.value; }
-constexpr ColumnOffset& operator+=(ColumnOffset& a, ColumnCount b) noexcept { a.value += b.value; return a; }
-constexpr ColumnOffset& operator-=(ColumnOffset& a, ColumnCount b) noexcept { a.value -= b.value; return a; }
+constexpr ColumnCount operator+(ColumnCount a, ColumnOffset b) noexcept
+{
+    return a + b.value;
+}
+constexpr ColumnCount operator-(ColumnCount a, ColumnOffset b) noexcept
+{
+    return a - b.value;
+}
+constexpr ColumnOffset& operator+=(ColumnOffset& a, ColumnCount b) noexcept
+{
+    a.value += b.value;
+    return a;
+}
+constexpr ColumnOffset& operator-=(ColumnOffset& a, ColumnCount b) noexcept
+{
+    a.value -= b.value;
+    return a;
+}
 // }}}
 
 // TODO: Maybe make boxed.h into its own C++ github repo?
@@ -360,34 +464,37 @@ enum class CursorShape
     Bar,
 };
 
-}
+} // namespace terminal
 
-namespace fmt { // {{{
-    template <>
-    struct formatter<terminal::Coordinate> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx)
-        {
-            return ctx.begin();
-        }
-        template <typename FormatContext>
-        auto format(terminal::Coordinate coord, FormatContext& ctx)
-        {
-            return format_to(ctx.out(), "({}, {})", coord.line, coord.column);
-        }
-    };
+namespace fmt
+{ // {{{
+template <>
+struct formatter<terminal::Coordinate>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::Coordinate coord, FormatContext& ctx)
+    {
+        return format_to(ctx.out(), "({}, {})", coord.line, coord.column);
+    }
+};
 
-    template <>
-    struct formatter<terminal::PageSize> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx)
-        {
-            return ctx.begin();
-        }
-        template <typename FormatContext>
-        auto format(terminal::PageSize value, FormatContext& ctx)
-        {
-            return format_to(ctx.out(), "{}x{}", value.columns, value.lines);
-        }
-    };
-} // }}}
+template <>
+struct formatter<terminal::PageSize>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::PageSize value, FormatContext& ctx)
+    {
+        return format_to(ctx.out(), "{}x{}", value.columns, value.lines);
+    }
+};
+} // namespace fmt

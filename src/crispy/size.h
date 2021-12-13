@@ -7,19 +7,20 @@
 #include <cmath>
 #include <utility>
 
-namespace crispy {
+namespace crispy
+{
 
-struct [[nodiscard]] Size {
+struct [[nodiscard]] Size
+{
     int width;
-	int height;
+    int height;
 
     /// This iterator can be used to iterate through each and every point between (0, 0) and (width, height).
-    struct iterator {
+    struct iterator
+    {
       public:
-        constexpr iterator(int _width, int _next) noexcept :
-            width{ _width },
-            next{ _next },
-            coord{ makeCoordinate(_next) }
+        constexpr iterator(int _width, int _next) noexcept:
+            width { _width }, next { _next }, coord { makeCoordinate(_next) }
         {
         }
 
@@ -43,26 +44,29 @@ struct [[nodiscard]] Size {
       private:
         int width;
         int next;
-        Point coord{0, 0};
+        Point coord { 0, 0 };
 
         constexpr Point makeCoordinate(int offset) noexcept
         {
-            return Point{
-                offset % width,
-                offset / width
-            };
+            return Point { offset % width, offset / width };
         }
     };
 
-    constexpr iterator begin() const noexcept { return iterator{width, 0}; }
-    constexpr iterator end() const noexcept { return iterator{width, width * height}; }
+    constexpr iterator begin() const noexcept { return iterator { width, 0 }; }
+    constexpr iterator end() const noexcept { return iterator { width, width * height }; }
 
-    constexpr iterator begin() noexcept { return iterator{width, 0}; }
-    constexpr iterator end() noexcept { return iterator{width, width * height}; }
+    constexpr iterator begin() noexcept { return iterator { width, 0 }; }
+    constexpr iterator end() noexcept { return iterator { width, width * height }; }
 };
 
-constexpr Size::iterator begin(Size const& s) noexcept { return s.begin(); }
-constexpr Size::iterator end(Size const& s) noexcept { return s.end(); }
+constexpr Size::iterator begin(Size const& s) noexcept
+{
+    return s.begin();
+}
+constexpr Size::iterator end(Size const& s) noexcept
+{
+    return s.end();
+}
 
 constexpr int area(Size size) noexcept
 {
@@ -86,58 +90,45 @@ constexpr bool operator!=(Size const& _a, Size const& _b) noexcept
 
 constexpr Size operator+(Size _a, Size _b) noexcept
 {
-    return Size{
-        _a.width + _b.width,
-        _a.height + _b.height
-    };
+    return Size { _a.width + _b.width, _a.height + _b.height };
 }
 
 constexpr Size operator-(Size _a, Size _b) noexcept
 {
-    return Size{
-        _a.width - _b.width,
-        _a.height - _b.height
-    };
+    return Size { _a.width - _b.width, _a.height - _b.height };
 }
 
 constexpr Size operator*(Size _a, Size _b) noexcept
 {
-    return Size{
-        _a.width * _b.width,
-        _a.height * _b.height
-    };
+    return Size { _a.width * _b.width, _a.height * _b.height };
 }
 
 inline Size operator*(Size _a, double _scalar) noexcept
 {
-    return Size{
-        int(ceil(double(_a.width) * _scalar)),
-        int(ceil(double(_a.height) * _scalar))
-    };
+    return Size { int(ceil(double(_a.width) * _scalar)), int(ceil(double(_a.height) * _scalar)) };
 }
 
 constexpr Size operator/(Size _a, Size _b) noexcept
 {
-    return Size{
-        _a.width / _b.width,
-        _a.height / _b.height
-    };
+    return Size { _a.width / _b.width, _a.height / _b.height };
 }
 
 } // end namespace crispy
 
-namespace fmt {
-    template <>
-    struct formatter<crispy::Size> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx)
-        {
-            return ctx.begin();
-        }
-        template <typename FormatContext>
-        auto format(const crispy::Size& value, FormatContext& ctx)
-        {
-            return format_to(ctx.out(), "{}x{}", value.width, value.height);
-        }
-    };
-}
+namespace fmt
+{
+template <>
+struct formatter<crispy::Size>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(const crispy::Size& value, FormatContext& ctx)
+    {
+        return format_to(ctx.out(), "{}x{}", value.width, value.height);
+    }
+};
+} // namespace fmt

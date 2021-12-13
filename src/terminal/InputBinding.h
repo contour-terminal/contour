@@ -13,12 +13,13 @@
  */
 #pragma once
 
-#include <terminal/MatchModes.h>
 #include <terminal/InputGenerator.h>
+#include <terminal/MatchModes.h>
 
 #include <fmt/format.h>
 
-namespace terminal {
+namespace terminal
+{
 
 template <typename Input, typename Binding>
 struct InputBinding
@@ -30,22 +31,15 @@ struct InputBinding
 };
 
 template <typename Input, typename Binding>
-bool match(InputBinding<Input, Binding> const& _binding,
-           MatchModes _modes,
-           Modifier _modifier,
-           Input _input)
+bool match(InputBinding<Input, Binding> const& _binding, MatchModes _modes, Modifier _modifier, Input _input)
 {
-    return _binding.modes == _modes
-        && _binding.modifier == _modifier
-        && _binding.input == _input;
+    return _binding.modes == _modes && _binding.modifier == _modifier && _binding.input == _input;
 }
 
 template <typename I, typename O>
 bool operator==(InputBinding<I, O> const& a, InputBinding<I, O> const& b) noexcept
 {
-    return a.modes == b.modes
-        && a.modifier == b.modifier
-        && a.input == b.input;
+    return a.modes == b.modes && a.modifier == b.modifier && a.input == b.input;
 }
 
 template <typename I, typename O>
@@ -73,21 +67,22 @@ bool operator<(InputBinding<I, O> const& a, InputBinding<I, O> const& b) noexcep
     return false;
 }
 
-}
+} // namespace terminal
 
 namespace fmt
 {
-    template <typename I, typename O>
-    struct formatter<terminal::InputBinding<I, O>> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::InputBinding<I, O> const& _binding, FormatContext& _ctx)
-        {
-            return format_to(_ctx.out(), "{} {} {}",
-                    _binding.modes,
-                    _binding.modifier,
-                    _binding.input);
-        }
-    };
-}
+template <typename I, typename O>
+struct formatter<terminal::InputBinding<I, O>>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::InputBinding<I, O> const& _binding, FormatContext& _ctx)
+    {
+        return format_to(_ctx.out(), "{} {} {}", _binding.modes, _binding.modifier, _binding.input);
+    }
+};
+} // namespace fmt

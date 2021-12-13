@@ -15,10 +15,11 @@
 
 #include <contour/ContourApp.h>
 
-namespace contour {
+namespace contour
+{
 
 /// Extends ContourApp with terminal GUI capability.
-class ContourGuiApp : public ContourApp
+class ContourGuiApp: public ContourApp
 {
   public:
     ContourGuiApp();
@@ -32,4 +33,4 @@ class ContourGuiApp : public ContourApp
     int terminalGuiAction();
 };
 
-}
+} // namespace contour

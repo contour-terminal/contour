@@ -13,13 +13,16 @@
  */
 #include <terminal/Parser.h>
 #include <terminal/ParserEvents.h>
+
 #include <unicode/convert.h>
+
 #include <catch2/catch_all.hpp>
 
 using namespace std;
 using namespace terminal;
 
-class MockParserEvents : public terminal::BasicParserEvents {
+class MockParserEvents: public terminal::BasicParserEvents
+{
   public:
     std::string text;
     std::string apc;
@@ -43,7 +46,7 @@ TEST_CASE("Parser.utf8_single", "[Parser]")
     MockParserEvents textListener;
     auto p = parser::Parser(textListener);
 
-    p.parseFragment("\xC3\xB6");  // ö
+    p.parseFragment("\xC3\xB6"); // ö
 
     REQUIRE(textListener.text == "\xC3\xB6");
 }
@@ -69,4 +72,3 @@ TEST_CASE("Parser.APC")
     REQUIRE(listener.apc == "{Gi=1,a=q;}");
     REQUIRE(listener.text == "ABCDEF");
 }
-

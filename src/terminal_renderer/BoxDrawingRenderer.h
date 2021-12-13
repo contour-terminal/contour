@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal/Color.h>
+
 #include <terminal_renderer/Atlas.h>
 #include <terminal_renderer/GridMetrics.h>
 #include <terminal_renderer/RenderTarget.h>
@@ -22,7 +23,8 @@
 
 #include <array>
 
-namespace terminal::renderer {
+namespace terminal::renderer
+{
 
 // TODO: I think I should cincerely rename this class to
 // something more suitable. it's not about box-drawing alone anymore,
@@ -33,12 +35,13 @@ namespace terminal::renderer {
 // - mathematical symbols
 
 /// Takes care of rendering the text cursor.
-class BoxDrawingRenderer : public Renderable {
+class BoxDrawingRenderer: public Renderable
+{
   public:
     explicit BoxDrawingRenderer(GridMetrics const& _gridMetrics):
-        gridMetrics_{_gridMetrics},
-        textureAtlas_{}
-    {}
+        gridMetrics_ { _gridMetrics }, textureAtlas_ {}
+    {
+    }
 
     void setRenderTarget(RenderTarget& _renderTarget) override;
     void clearCache() override;
@@ -64,4 +67,4 @@ class BoxDrawingRenderer : public Renderable {
     std::unique_ptr<TextureAtlas> textureAtlas_;
 };
 
-} // namespace terminal::view
+} // namespace terminal::renderer

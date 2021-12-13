@@ -12,23 +12,23 @@
  * limitations under the License.
  */
 #include <text_shaper/shaper.h>
-#include <crispy/ImageSize.h>
 
+#include <crispy/ImageSize.h>
 #include <crispy/logstore.h>
 
 #include <range/v3/view/iota.hpp>
-
 #include <utility>
 #include <vector>
 
-using std::tuple;
-using std::min;
 using std::max;
+using std::min;
+using std::tuple;
 using std::vector;
 
 using ranges::views::iota;
 
-namespace text {
+namespace text
+{
 
 tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::ImageSize _newSize)
 {
@@ -44,8 +44,14 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::Im
     vector<uint8_t> dest;
     dest.resize(*_newSize.height * *_newSize.width * 4);
 
-    LOGSTORE(RasterizerLog)("scaling from {} to {}, ratio {}x{} ({}), factor {}",
-                            _bitmap.size, _newSize, ratioX, ratioY, ratio, factor);
+    LOGSTORE(RasterizerLog)
+    ("scaling from {} to {}, ratio {}x{} ({}), factor {}",
+     _bitmap.size,
+     _newSize,
+     ratioX,
+     ratioY,
+     ratio,
+     factor);
 
     uint8_t* d = dest.data();
     for (unsigned i = 0, sr = 0; i < *_newSize.height; i++, sr += factor)
@@ -76,13 +82,13 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::Im
         }
     }
 
-    auto output = rasterized_glyph{};
+    auto output = rasterized_glyph {};
     output.format = _bitmap.format;
     output.size = _newSize;
     output.position = _bitmap.position; // TODO Actually, left/top position should be adjusted
     output.bitmap = move(dest);
 
-    return {output, factor};
+    return { output, factor };
 }
 
-}
+} // namespace text

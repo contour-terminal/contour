@@ -12,29 +12,31 @@
  * limitations under the License.
  */
 #include <crispy/ring.h>
-#include <catch2/catch_all.hpp>
-#include <fmt/format.h>
-#include <array>
 
-using crispy::ring;
+#include <fmt/format.h>
+
+#include <array>
+#include <catch2/catch_all.hpp>
+
 using crispy::fixed_size_ring;
+using crispy::ring;
 using std::generate_n;
 
 namespace
 {
-    template <typename T>
-    [[maybe_unused]]
-    void dump(ring<T> const& r)
+template <typename T>
+[[maybe_unused]] void dump(ring<T> const& r)
+{
+    fmt::print("ring(@{}): {{", r.zero_index());
+    for (size_t i = 0; i < r.size(); ++i)
     {
-        fmt::print("ring(@{}): {{", r.zero_index());
-        for (size_t i = 0; i < r.size(); ++i)
-        {
-            if (i) fmt::print(", ");
-            fmt::print("{}", r[i]);
-        }
-        fmt::print("}}\n");
+        if (i)
+            fmt::print(", ");
+        fmt::print("{}", r[i]);
     }
+    fmt::print("}}\n");
 }
+} // namespace
 
 TEST_CASE("ring.init")
 {
