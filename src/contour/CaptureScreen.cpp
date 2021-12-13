@@ -30,13 +30,13 @@
 #include <tuple>
 
 #if defined(_WIN32)
-    #include <Winsock2.h>
     #include <Windows.h>
+    #include <Winsock2.h>
 #else
+    #include <fcntl.h>
     #include <sys/select.h>
     #include <termios.h>
     #include <unistd.h>
-    #include <fcntl.h>
 #endif
 
 #if !defined(STDIN_FILENO)
@@ -60,7 +60,8 @@ using std::unique_ptr;
 
 using namespace std::string_view_literals;
 
-namespace contour {
+namespace contour
+{
 
 namespace
 {
@@ -69,9 +70,9 @@ namespace
         bool configured = false;
 #if !defined(_WIN32)
         int fd = -1;
-        termios savedModes{};
+        termios savedModes {};
 #else
-        DWORD savedModes{};
+        DWORD savedModes {};
 #endif
 
         ~TTY()
@@ -103,19 +104,19 @@ namespace
 
             // {{{ in case I want to do more with this
             // input flags
-            tio.c_iflag &= ~IXON;     // Disable CTRL-S / CTRL-Q on output.
-            tio.c_iflag &= ~IXOFF;    // Disable CTRL-S / CTRL-Q on input.
-            tio.c_iflag &= ~ICRNL;    // Ensure CR isn't translated to NL.
-            tio.c_iflag &= ~INLCR;    // Ensure NL isn't translated to CR.
-            tio.c_iflag &= ~IGNCR;    // Ensure CR isn't ignored.
-            tio.c_iflag &= ~IMAXBEL;  // Ensure beeping on full input buffer isn't enabled.
-            tio.c_iflag &= ~ISTRIP;   // Ensure stripping of 8th bit on input isn't enabled.
+            tio.c_iflag &= ~IXON;    // Disable CTRL-S / CTRL-Q on output.
+            tio.c_iflag &= ~IXOFF;   // Disable CTRL-S / CTRL-Q on input.
+            tio.c_iflag &= ~ICRNL;   // Ensure CR isn't translated to NL.
+            tio.c_iflag &= ~INLCR;   // Ensure NL isn't translated to CR.
+            tio.c_iflag &= ~IGNCR;   // Ensure CR isn't ignored.
+            tio.c_iflag &= ~IMAXBEL; // Ensure beeping on full input buffer isn't enabled.
+            tio.c_iflag &= ~ISTRIP;  // Ensure stripping of 8th bit on input isn't enabled.
 
             // output flags
-            tio.c_oflag &= ~OPOST;   // Don't enable implementation defined output processing.
-            tio.c_oflag &= ~ONLCR;   // Don't map NL to CR-NL.
-            tio.c_oflag &= ~OCRNL;   // Don't map CR to NL.
-            tio.c_oflag &= ~ONLRET;  // Don't output CR.
+            tio.c_oflag &= ~OPOST;  // Don't enable implementation defined output processing.
+            tio.c_oflag &= ~ONLCR;  // Don't map NL to CR-NL.
+            tio.c_oflag &= ~OCRNL;  // Don't map CR to NL.
+            tio.c_oflag &= ~ONLRET; // Don't output CR.
             // }}}
 
             if (tcsetattr(fd, TCSANOW, &tio) < 0)
@@ -145,14 +146,11 @@ namespace
             DWORD const result = WaitForSingleObject(fd0, timeoutMillis);
             switch (result)
             {
-                case WSA_WAIT_EVENT_0:
-                    return 1;
-                case WSA_WAIT_TIMEOUT:
-                    return 0;
-                case WAIT_FAILED:
-                case WAIT_ABANDONED:
-                default:
-                    return -1;
+            case WSA_WAIT_EVENT_0: return 1;
+            case WSA_WAIT_TIMEOUT: return 0;
+            case WAIT_FAILED:
+            case WAIT_ABANDONED:
+            default: return -1;
             }
 #else
             fd_set sin, sout, serr;
@@ -168,8 +166,9 @@ namespace
         int write(char const* _buf, size_t _size)
         {
 #if defined(_WIN32)
-            DWORD nwritten{};
-            if (WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), _buf, static_cast<DWORD>(_size), &nwritten, nullptr))
+            DWORD nwritten {};
+            if (WriteFile(
+                    GetStdHandle(STD_OUTPUT_HANDLE), _buf, static_cast<DWORD>(_size), &nwritten, nullptr))
                 return static_cast<int>(nwritten);
             else
                 return -1;
@@ -178,15 +177,12 @@ namespace
 #endif
         }
 
-        int write(string_view _text)
-        {
-            return write(_text.data(), _text.size());
-        }
+        int write(string_view _text) { return write(_text.data(), _text.size()); }
 
         int read(void* _buf, size_t _size)
         {
 #if defined(_WIN32)
-            DWORD nread{};
+            DWORD nread {};
             if (ReadFile(GetStdHandle(STD_INPUT_HANDLE), _buf, static_cast<DWORD>(_size), &nread, nullptr))
                 return static_cast<int>(nread);
             else
@@ -208,7 +204,7 @@ namespace
                 if (wait(_timeout) <= 0)
                     return nullopt;
 
-                char ch{};
+                char ch {};
                 if (read(&ch, sizeof(ch)) != sizeof(ch))
                     return nullopt;
 
@@ -224,7 +220,7 @@ namespace
 
             auto const columns = stoi(string(screenSizeReply.at(1)));
             auto const lines = stoi(string(screenSizeReply.at(2)));
-            return tuple{columns, lines};
+            return tuple { columns, lines };
         }
     };
 
@@ -263,7 +259,8 @@ namespace
 
             if (n == 0 && !crispy::startsWith(string_view(_reply), ReplyPrefix))
             {
-                cerr << fmt::format("Invalid response from terminal received. Does not start with expected reply prefix.\n");
+                cerr << fmt::format(
+                    "Invalid response from terminal received. Does not start with expected reply prefix.\n");
                 return false;
             }
             n++;
@@ -274,17 +271,17 @@ namespace
             return true;
         }
     }
-}
+} // namespace
 
 bool captureScreen(CaptureSettings const& _settings)
 {
-    auto tty = TTY{};
+    auto tty = TTY {};
     if (!tty.configured)
         return false;
 
     auto constexpr MicrosPerSecond = 1'000'000;
     auto const timeoutMicros = int(_settings.timeout * MicrosPerSecond);
-    auto timeout = timeval{};
+    auto timeout = timeval {};
     timeout.tv_sec = timeoutMicros / MicrosPerSecond;
     timeout.tv_usec = timeoutMicros % MicrosPerSecond;
 
@@ -298,7 +295,8 @@ bool captureScreen(CaptureSettings const& _settings)
 
     if (_settings.verbosityLevel > 0)
         cerr << fmt::format("Screen size: {}x{}. Capturing lines {} to file {}.\n",
-                            numColumns, numLines,
+                            numColumns,
+                            numLines,
                             _settings.logicalLines ? "logical" : "physical",
                             _settings.lineCount,
                             _settings.outputFile.data());
@@ -311,14 +309,12 @@ bool captureScreen(CaptureSettings const& _settings)
     unique_ptr<ostream> customOutput;
     if (_settings.outputFile != "-"sv)
     {
-        //cerr << "Opening output stream: '" << _settings.outputFile << "'\n";
+        // cerr << "Opening output stream: '" << _settings.outputFile << "'\n";
         customOutput = make_unique<ofstream>(_settings.outputFile.data(), std::ios::trunc);
         output = *customOutput;
     }
 
-    tty.write(fmt::format("\033[>{};{}t",
-                          _settings.logicalLines ? '1' : '0',
-                          _settings.lineCount));
+    tty.write(fmt::format("\033[>{};{}t", _settings.logicalLines ? '1' : '0', _settings.lineCount));
 
     while (true)
     {
@@ -335,4 +331,4 @@ bool captureScreen(CaptureSettings const& _settings)
     }
 }
 
-} // end namespace
+} // namespace contour

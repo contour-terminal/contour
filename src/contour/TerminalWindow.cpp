@@ -17,31 +17,32 @@
 #include <contour/helper.h>
 
 #if defined(CONTOUR_SCROLLBAR)
-#include <contour/ScrollableDisplay.h>
+    #include <contour/ScrollableDisplay.h>
 #endif
 
 #include <contour/opengl/TerminalWidget.h>
 
-#include <qnamespace.h>
 #include <terminal/Metrics.h>
 #include <terminal/pty/Pty.h>
 #include <terminal/pty/PtyProcess.h>
 
+#include <qnamespace.h>
+
 #if defined(_MSC_VER)
-#include <terminal/pty/ConPty.h>
+    #include <terminal/pty/ConPty.h>
 #else
-#include <terminal/pty/UnixPty.h>
+    #include <terminal/pty/UnixPty.h>
 #endif
 
 #include <QtCore/QDebug>
-#include <QtGui/QScreen>
 #include <QtGui/QGuiApplication>
+#include <QtGui/QScreen>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QMainWindow>
 #include <QtWidgets/QVBoxLayout>
 
 #if defined(CONTOUR_BLUR_PLATFORM_KWIN)
-#include <KWindowEffects>
+    #include <KWindowEffects>
 #endif
 
 #include <cstring>
@@ -51,17 +52,18 @@
 using namespace std;
 using namespace std::placeholders;
 
-using terminal::Width;
 using terminal::Height;
 using terminal::ImageSize;
+using terminal::Width;
 
 #if defined(_MSC_VER)
-#define __PRETTY_FUNCTION__ __FUNCDNAME__
+    #define __PRETTY_FUNCTION__ __FUNCDNAME__
 #endif
 
 #include <QtWidgets/QStatusBar>
 
-namespace contour {
+namespace contour
+{
 
 using actions::Action;
 
@@ -71,11 +73,11 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
                                string _profileName,
                                string _programPath,
                                Controller& _controller):
-    config_{ std::move(_config) },
-    liveConfig_{ _liveConfig },
-    profileName_{ std::move(_profileName) },
-    programPath_{ std::move(_programPath) },
-    controller_{ _controller }
+    config_ { std::move(_config) },
+    liveConfig_ { _liveConfig },
+    profileName_ { std::move(_profileName) },
+    programPath_ { std::move(_programPath) },
+    controller_ { _controller }
 {
     // connect(this, SIGNAL(screenChanged(QScreen*)), this, SLOT(onScreenChanged(QScreen*)));
 
@@ -91,16 +93,13 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
     // {{{ fill config's maxImageSize if not yet set.
     auto const defaultMaxImageSize = [&]() -> ImageSize {
         QScreen const* screen = QGuiApplication::primaryScreen();
-        auto constexpr fallbackDefaultMaxImageSize = ImageSize{ Width(800), Height(600) };
+        auto constexpr fallbackDefaultMaxImageSize = ImageSize { Width(800), Height(600) };
         if (!screen)
             return fallbackDefaultMaxImageSize;
         QSize const size = screen->size();
         if (size.isEmpty())
             return fallbackDefaultMaxImageSize;
-        return ImageSize{
-            Width::cast_from(size.width()),
-            Height::cast_from(size.height())
-        };
+        return ImageSize { Width::cast_from(size.width()), Height::cast_from(size.height()) };
     }();
     if (config_.maxImageSize.width <= Width(0))
         config_.maxImageSize.width = defaultMaxImageSize.width;
@@ -109,41 +108,40 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
     // }}}
 
     terminalSession_ = make_unique<TerminalSession>(
-        make_unique<terminal::PtyProcess>(
-            profile()->shell,
-            profile()->terminalSize
-        ),
+        make_unique<terminal::PtyProcess>(profile()->shell, profile()->terminalSize),
         _earlyExitThreshold,
         config_,
         liveConfig_,
         profileName_,
         programPath_,
         controller_,
-        unique_ptr<TerminalDisplay>{},
+        unique_ptr<TerminalDisplay> {},
         [this]() {
-            // NB: This is invoked whenever the newly assigned display
-            //     has finished initialization.
+    // NB: This is invoked whenever the newly assigned display
+    //     has finished initialization.
 #if defined(CONTOUR_SCROLLBAR)
             scrollableDisplay_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
 #else
             (void) this;
 #endif
         },
-        [this]() {
-            controller_.onExit(*terminalSession_);
-        }
-    );
+        [this]() { controller_.onExit(*terminalSession_); });
 
     terminalSession_->setDisplay(make_unique<opengl::TerminalWidget>(
         *profile(),
         *terminalSession_,
-        [this]() { centralWidget()->updateGeometry(); update(); },
-        [this](bool _enable) { WindowBackgroundBlur::setEnabled(winId(), _enable); }
-    ));
+        [this]() {
+            centralWidget()->updateGeometry();
+            update();
+        },
+        [this](bool _enable) { WindowBackgroundBlur::setEnabled(winId(), _enable); }));
     terminalWidget_ = static_cast<opengl::TerminalWidget*>(terminalSession_->display());
 
     connect(terminalWidget_, SIGNAL(terminated()), this, SLOT(onTerminalClosed()));
-    connect(terminalWidget_, SIGNAL(terminalBufferChanged(terminal::ScreenType)), this, SLOT(terminalBufferChanged(terminal::ScreenType)));
+    connect(terminalWidget_,
+            SIGNAL(terminalBufferChanged(terminal::ScreenType)),
+            this,
+            SLOT(terminalBufferChanged(terminal::ScreenType)));
 
 #if defined(CONTOUR_SCROLLBAR)
     scrollableDisplay_ = new ScrollableDisplay(nullptr, *terminalSession_, terminalWidget_);
@@ -155,7 +153,7 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
 
     terminalWidget_->setFocus();
 
-    //statusBar()->showMessage("blurb");
+    // statusBar()->showMessage("blurb");
 
     terminalSession_->start();
 }
@@ -187,9 +185,8 @@ void TerminalWindow::terminalBufferChanged(terminal::ScreenType _type)
 {
 #if defined(CONTOUR_SCROLLBAR)
     LOGSTORE(DisplayLog)("Screen buffer type has changed to {}.", _type);
-    scrollableDisplay_->showScrollBar(
-        _type == terminal::ScreenType::Main || !profile()->hideScrollbarInAltScreen
-    );
+    scrollableDisplay_->showScrollBar(_type == terminal::ScreenType::Main
+                                      || !profile()->hideScrollbarInAltScreen);
 
     scrollableDisplay_->updatePosition();
     scrollableDisplay_->updateValues();
@@ -198,15 +195,16 @@ void TerminalWindow::terminalBufferChanged(terminal::ScreenType _type)
 
 void TerminalWindow::resizeEvent(QResizeEvent* _event)
 {
-    LOGSTORE(DisplayLog)("TerminalWindow.resizeEvent: size {}x{} ({}x{})",
-        width(), height(),
-        _event->size().width(),
-        _event->size().height()
-    );
+    LOGSTORE(DisplayLog)
+    ("TerminalWindow.resizeEvent: size {}x{} ({}x{})",
+     width(),
+     height(),
+     _event->size().width(),
+     _event->size().height());
 
     QMainWindow::resizeEvent(_event);
-    //centralWidget()->resize(_event->size());
-    //updatePosition();
+    // centralWidget()->resize(_event->size());
+    // updatePosition();
 }
 
 bool TerminalWindow::event(QEvent* _event)

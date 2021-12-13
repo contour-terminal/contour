@@ -13,17 +13,19 @@
  */
 #include <terminal/Functions.h>
 #include <terminal/Parser.h>
-#include <catch2/catch_all.hpp>
+
 #include <fmt/format.h>
+
+#include <catch2/catch_all.hpp>
 
 namespace terminal
 {
-    // purely for proper diagnostic printing in Catch2
-    inline std::ostream& operator<<(std::ostream& os, FunctionDefinition const& f)
-    {
-        return os << fmt::format("{}", f);
-    }
+// purely for proper diagnostic printing in Catch2
+inline std::ostream& operator<<(std::ostream& os, FunctionDefinition const& f)
+{
+    return os << fmt::format("{}", f);
 }
+} // namespace terminal
 
 using namespace std;
 using namespace terminal;

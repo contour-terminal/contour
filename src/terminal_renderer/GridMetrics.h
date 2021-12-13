@@ -13,13 +13,15 @@
  */
 #pragma once
 
+#include <terminal/primitives.h>
+
 #include <crispy/point.h>
 #include <crispy/size.h>
-#include <terminal/primitives.h>
 
 #include <fmt/format.h>
 
-namespace terminal::renderer {
+namespace terminal::renderer
+{
 
 struct CellMargin
 {
@@ -39,17 +41,18 @@ struct PageMargin
 struct GridMetrics
 {
     PageSize pageSize;  // page size in column- and line count
-    ImageSize cellSize;  // grid cell size in pixels
+    ImageSize cellSize; // grid cell size in pixels
 
-    int baseline;           // glyph's baseline position relative to cell bottom.
+    int baseline; // glyph's baseline position relative to cell bottom.
 
-    struct {
-        int position = 1;   // center underline position relative to cell bottom
-        int thickness = 1;  // underline thickness
-    } underline{};
+    struct
+    {
+        int position = 1;  // center underline position relative to cell bottom
+        int thickness = 1; // underline thickness
+    } underline {};
 
-    CellMargin cellMargin{}; // TODO: implement respecting cell margins.
-    PageMargin pageMargin{};
+    CellMargin cellMargin {}; // TODO: implement respecting cell margins.
+    PageMargin pageMargin {};
 
     /// Maps screen coordinates to target surface coordinates.
     ///
@@ -62,38 +65,38 @@ struct GridMetrics
         auto const x = pageMargin.left + *_column * cellSize.width.as<int>();
         auto const y = pageMargin.bottom + (*pageSize.lines - *_line - 1) * cellSize.height.as<int>();
 
-        return {x, y};
+        return { x, y };
     }
 
-    constexpr crispy::Point map(Coordinate _pos) const noexcept
-    {
-        return map(_pos.line, _pos.column);
-    }
+    constexpr crispy::Point map(Coordinate _pos) const noexcept { return map(_pos.line, _pos.column); }
 };
 
-} // end namespace
+} // namespace terminal::renderer
 
 namespace fmt
 {
-    template <>
-    struct formatter<terminal::renderer::GridMetrics> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::renderer::GridMetrics const& v, FormatContext& ctx)
-        {
-            return format_to(
-                ctx.out(),
-                "(pageSize={}, cellSize={}, baseline={}, underline={}@{}, margin=(left={}, bottom={}))",
-                v.pageSize,
-                v.cellSize,
-                v.baseline,
-                v.underline.position,
-                v.underline.thickness,
-                v.pageMargin.left,
-                v.pageMargin.bottom
-            );
-        }
-    };
+template <>
+struct formatter<terminal::renderer::GridMetrics>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::renderer::GridMetrics const& v, FormatContext& ctx)
+    {
+        return format_to(
+            ctx.out(),
+            "(pageSize={}, cellSize={}, baseline={}, underline={}@{}, margin=(left={}, bottom={}))",
+            v.pageSize,
+            v.cellSize,
+            v.baseline,
+            v.underline.position,
+            v.underline.thickness,
+            v.pageMargin.left,
+            v.pageMargin.bottom);
+    }
+};
 
-}
+} // namespace fmt

@@ -16,7 +16,8 @@
 #include <iterator>
 #include <utility>
 
-namespace crispy {
+namespace crispy
+{
 
 template <typename Iter>
 struct range
@@ -27,7 +28,7 @@ struct range
     Iter const begin_;
     Iter const end_;
 
-    range(Iter _begin, Iter _end) : begin_{_begin}, end_{_end} {}
+    range(Iter _begin, Iter _end): begin_ { _begin }, end_ { _end } {}
 
     constexpr iterator begin() const { return begin_; }
     constexpr iterator end() const { return end_; }
@@ -41,9 +42,9 @@ template <typename Iter>
 range(Iter, Iter) -> range<Iter>;
 
 template <typename Container>
-auto reversed(Container && _container)
+auto reversed(Container&& _container)
 {
     return range(_container.rbegin(), _container.rend());
 }
 
-}
+} // namespace crispy

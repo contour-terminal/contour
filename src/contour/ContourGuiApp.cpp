@@ -16,14 +16,14 @@
 #include <crispy/logstore.h>
 
 #if defined(CONTOUR_FRONTEND_GUI)
-#include <contour/Config.h>
-#include <contour/Controller.h>
-#include <contour/opengl/TerminalWidget.h>
+    #include <contour/Config.h>
+    #include <contour/Controller.h>
+    #include <contour/opengl/TerminalWidget.h>
 #endif
 
 #if defined(CONTOUR_FRONTEND_GUI)
-#include <QtWidgets/QApplication>
-#include <QSurfaceFormat>
+    #include <QSurfaceFormat>
+    #include <QtWidgets/QApplication>
 #endif
 
 #include <iostream>
@@ -44,10 +44,10 @@ using namespace std::string_literals;
 
 namespace CLI = crispy::cli;
 
-namespace contour {
+namespace contour
+{
 
-ContourGuiApp::ContourGuiApp() :
-    ContourApp()
+ContourGuiApp::ContourGuiApp(): ContourApp()
 {
     link("contour.terminal", bind(&ContourGuiApp::terminalGuiAction, this));
 }
@@ -66,38 +66,62 @@ crispy::cli::Command ContourGuiApp::parameterDefinition() const
 
     command.children.insert(
         command.children.begin(),
-        CLI::Command{
+        CLI::Command {
             "terminal",
             "Spawns a new terminal application.",
-            CLI::OptionList{
-                CLI::Option{"config", CLI::Value{contour::config::defaultConfigFilePath()}, "Path to configuration file to load at startup.", "FILE"},
-                CLI::Option{"profile", CLI::Value{""s}, "Terminal Profile to load (overriding config).", "NAME"},
-                CLI::Option{"debug", CLI::Value{""s}, "Enables debug logging, using a comma (,) seperated list of tags.", "TAGS"},
-                CLI::Option{"live-config", CLI::Value{false}, "Enables live config reloading."},
-                CLI::Option{"dump-state-at-exit", CLI::Value{""s}, "Dumps internal state at exit into the given directory. This is for debugging contour.", "PATH"},
-                CLI::Option{"early-exit-threshold", CLI::Value{6u}, "If the spawned process exits earlier than the given threshold seconds, an error message will be printed and the window not closed immediately."},
-                CLI::Option{"working-directory", CLI::Value{""s}, "Sets initial working directory (overriding config).", "DIRECTORY"},
-                CLI::Option{"class", CLI::Value{""s}, "Sets the class part of the WM_CLASS property for the window (overriding config).", "WM_CLASS"},
-                CLI::Option{"platform", CLI::Value{""s}, "Sets the QPA platform.", "PLATFORM[:OPTIONS]"},
-                CLI::Option{"session", CLI::Value{""s}, "Sets the sessioni ID used for resuming a prior session.", "SESSION_ID"},
-                #if defined(__linux__)
-                CLI::Option{"display", CLI::Value{""s}, "Sets the X11 display to connect to.", "DISPLAY_ID"},
-                #endif
+            CLI::OptionList {
+                CLI::Option { "config",
+                              CLI::Value { contour::config::defaultConfigFilePath() },
+                              "Path to configuration file to load at startup.",
+                              "FILE" },
+                CLI::Option {
+                    "profile", CLI::Value { ""s }, "Terminal Profile to load (overriding config).", "NAME" },
+                CLI::Option { "debug",
+                              CLI::Value { ""s },
+                              "Enables debug logging, using a comma (,) seperated list of tags.",
+                              "TAGS" },
+                CLI::Option { "live-config", CLI::Value { false }, "Enables live config reloading." },
+                CLI::Option {
+                    "dump-state-at-exit",
+                    CLI::Value { ""s },
+                    "Dumps internal state at exit into the given directory. This is for debugging contour.",
+                    "PATH" },
+                CLI::Option { "early-exit-threshold",
+                              CLI::Value { 6u },
+                              "If the spawned process exits earlier than the given threshold seconds, an "
+                              "error message will be printed and the window not closed immediately." },
+                CLI::Option { "working-directory",
+                              CLI::Value { ""s },
+                              "Sets initial working directory (overriding config).",
+                              "DIRECTORY" },
+                CLI::Option {
+                    "class",
+                    CLI::Value { ""s },
+                    "Sets the class part of the WM_CLASS property for the window (overriding config).",
+                    "WM_CLASS" },
+                CLI::Option {
+                    "platform", CLI::Value { ""s }, "Sets the QPA platform.", "PLATFORM[:OPTIONS]" },
+                CLI::Option { "session",
+                              CLI::Value { ""s },
+                              "Sets the sessioni ID used for resuming a prior session.",
+                              "SESSION_ID" },
+#if defined(__linux__)
+                CLI::Option {
+                    "display", CLI::Value { ""s }, "Sets the X11 display to connect to.", "DISPLAY_ID" },
+#endif
             },
-            CLI::CommandList{},
+            CLI::CommandList {},
             CLI::CommandSelect::Implicit,
-            CLI::Verbatim{"PROGRAM ARGS...", "Executes given program instead of the configuration profided one."}
-        }
-    );
+            CLI::Verbatim { "PROGRAM ARGS...",
+                            "Executes given program instead of the configuration profided one." } });
 
     return command;
 }
 
 int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
 {
-    auto configFailures = int{0};
-    auto const configLogger = [&](string const& _msg)
-    {
+    auto configFailures = int { 0 };
+    auto const configLogger = [&](string const& _msg) {
         cerr << "Configuration failure. " << _msg << '\n';
         ++configFailures;
     };
@@ -119,10 +143,7 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
                         return category.get().name() == filterPattern;
                     // TODO: '*' excludes hidden categories
                     return std::equal(
-                        begin(filterPattern),
-                        prev(end(filterPattern)),
-                        begin(category.get().name())
-                    );
+                        begin(filterPattern), prev(end(filterPattern)), begin(category.get().name()));
                 }));
             }
         }
@@ -130,9 +151,8 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
 
     auto const configPath = QString::fromStdString(_flags.get<string>("contour.terminal.config"));
 
-    auto config =
-        configPath.isEmpty() ? contour::config::loadConfig()
-                             : contour::config::loadConfigFromFile(configPath.toStdString());
+    auto config = configPath.isEmpty() ? contour::config::loadConfig()
+                                       : contour::config::loadConfigFromFile(configPath.toStdString());
 
     string const profileName = [&]() {
         if (auto profile = _flags.get<string>("contour.terminal.profile"); !profile.empty())
@@ -149,15 +169,13 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
 
     if (!config.profile(profileName))
     {
-        auto const s = accumulate(
-            begin(config.profiles),
-            end(config.profiles),
-            ""s,
-            [](string const& acc, auto const& profile) -> string {
-                return acc.empty() ? profile.first
-                                   : fmt::format("{}, {}", acc, profile.first);
-            }
-        );
+        auto const s =
+            accumulate(begin(config.profiles),
+                       end(config.profiles),
+                       ""s,
+                       [](string const& acc, auto const& profile) -> string {
+                           return acc.empty() ? profile.first : fmt::format("{}, {}", acc, profile.first);
+                       });
         configLogger(fmt::format("No profile with name '{}' found. Available profiles: {}", profileName, s));
     }
 
@@ -183,7 +201,7 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
         shell.program = _flags.verbatim.front();
         shell.arguments.clear();
         for (size_t i = 1; i < _flags.verbatim.size(); ++i)
-             shell.arguments.push_back(string(_flags.verbatim.at(i)));
+            shell.arguments.push_back(string(_flags.verbatim.at(i)));
     }
 
     if (auto const wmClass = _flags.get<string>("contour.terminal.class"); !wmClass.empty())
@@ -194,20 +212,19 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
     QCoreApplication::setOrganizationName("contour");
     QCoreApplication::setApplicationVersion(CONTOUR_VERSION_STRING);
 
-    // NB: High DPI scaling should be enabled, but that sadly also applies to QOpenGLWidget
-    // which makes the text look pixelated on HighDPI screens. We want to apply HighDPI
-    // manually in QOpenGLWidget.
-    //QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling, true);
-    #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+// NB: High DPI scaling should be enabled, but that sadly also applies to QOpenGLWidget
+// which makes the text look pixelated on HighDPI screens. We want to apply HighDPI
+// manually in QOpenGLWidget.
+// QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling, true);
+#if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     QCoreApplication::setAttribute(Qt::AA_DisableHighDpiScaling);
-    #endif
+#endif
 
     vector<string> qtArgsStore;
     vector<char const*> qtArgsPtr;
     qtArgsPtr.push_back(argv[0]);
 
-    auto const addQtArgIfSet = [&](string const& key, char const* arg)
-    {
+    auto const addQtArgIfSet = [&](string const& key, char const* arg) {
         if (string const& s = _flags.get<string>(key); !s.empty())
         {
             qtArgsPtr.push_back(arg);
@@ -219,16 +236,17 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
     addQtArgIfSet("contour.terminal.session", "-session");
     addQtArgIfSet("contour.terminal.platform", "-platform");
 
-    #if defined(__linux__)
+#if defined(__linux__)
     addQtArgIfSet("contour.terminal.display", "-display");
-    #endif
+#endif
 
     auto qtArgsCount = static_cast<int>(qtArgsPtr.size());
     QApplication app(qtArgsCount, (char**) qtArgsPtr.data());
 
     QSurfaceFormat::setDefaultFormat(contour::opengl::TerminalWidget::surfaceFormat());
 
-    contour::Controller controller(qtArgsPtr[0], earlyExitThreshold, config, liveConfig, profileName, dumpStateAtExit);
+    contour::Controller controller(
+        qtArgsPtr[0], earlyExitThreshold, config, liveConfig, profileName, dumpStateAtExit);
     controller.start();
 
     // auto const HTS = "\033H";
@@ -257,4 +275,4 @@ int ContourGuiApp::terminalGuiAction()
     return terminalGUI(argc_, argv_, parameters());
 }
 
-}
+} // namespace contour

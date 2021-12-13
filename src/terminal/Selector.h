@@ -21,10 +21,11 @@
 #include <fmt/format.h>
 
 #include <functional>
-#include <vector>
 #include <utility>
+#include <vector>
 
-namespace terminal {
+namespace terminal
+{
 
 struct SelectionHelper
 {
@@ -61,7 +62,7 @@ struct SelectionHelper
  */
 class Selection
 {
-public:
+  public:
     enum class State
     {
         /// Inactive, but waiting for the selection to be started (by moving the cursor).
@@ -86,14 +87,17 @@ public:
     };
 
     Selection(SelectionHelper const& _helper, Coordinate _start):
-        helper_{_helper}, from_{_start}, to_{_start} {}
+        helper_ { _helper }, from_ { _start }, to_ { _start }
+    {
+    }
 
     virtual ~Selection() = default;
 
     constexpr Coordinate from() const noexcept { return from_; }
     constexpr Coordinate to() const noexcept { return to_; }
 
-    /// @returns boolean indicating whether or not given absolute coordinate is within the range of the selection.
+    /// @returns boolean indicating whether or not given absolute coordinate is within the range of the
+    /// selection.
     virtual bool contains(Coordinate _coord) const noexcept;
     virtual bool intersects(Rect _area) const noexcept;
 
@@ -103,8 +107,8 @@ public:
     /// Extends the selection to the given coordinate.
     virtual void extend(Coordinate _to);
 
-	/// Constructs a vector of ranges for this selection.
-	virtual std::vector<Range> ranges() const;
+    /// Constructs a vector of ranges for this selection.
+    virtual std::vector<Range> ranges() const;
 
     /// Marks the selection as completed.
     void complete();
@@ -114,7 +118,7 @@ public:
 
     static Coordinate stretchedColumn(SelectionHelper const& _helper, Coordinate _coord) noexcept;
 
-protected:
+  protected:
     State state_ = State::Waiting;
     Coordinate from_;
     Coordinate to_;
@@ -123,22 +127,22 @@ protected:
 
 class RectangularSelection: public Selection
 {
-public:
+  public:
     RectangularSelection(SelectionHelper const& _helper, Coordinate _start);
     bool contains(Coordinate _coord) const noexcept override;
     bool intersects(Rect _area) const noexcept override;
-	std::vector<Range> ranges() const override;
+    std::vector<Range> ranges() const override;
 };
 
 class LinearSelection: public Selection
 {
-public:
+  public:
     LinearSelection(SelectionHelper const& _helper, Coordinate _start);
 };
 
 class WordWiseSelection: public Selection
 {
-public:
+  public:
     WordWiseSelection(SelectionHelper const& _helper, Coordinate _start);
 
     void extend(Coordinate _to) override;
@@ -149,7 +153,7 @@ public:
 
 class FullLineSelection: public Selection
 {
-public:
+  public:
     explicit FullLineSelection(SelectionHelper const& _helper, Coordinate _start);
     void extend(Coordinate _to) override;
 };
@@ -171,7 +175,7 @@ void renderSelection(Selection const& _selection, Renderer&& _render)
 {
     for (Selection::Range const& range: _selection.ranges())
         for (auto const col: crispy::times(*range.fromColumn, *range.length()))
-            _render(Coordinate{range.line, ColumnOffset::cast_from(col)});
+            _render(Coordinate { range.line, ColumnOffset::cast_from(col) });
 }
 // }}}
 
@@ -179,53 +183,51 @@ void renderSelection(Selection const& _selection, Renderer&& _render)
 
 namespace fmt // {{{
 {
-    template <>
-    struct formatter<terminal::Selection::State>
+template <>
+struct formatter<terminal::Selection::State>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
     {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx)
-        {
-            return ctx.begin();
-        }
-        using State = terminal::Selection::State;
-        template <typename FormatContext>
-        auto format(State _state, FormatContext& ctx)
-        {
-            switch (_state)
-            {
-                case State::Waiting:
-                    return format_to(ctx.out(), "Waiting");
-                case State::InProgress:
-                    return format_to(ctx.out(), "InProgress");
-                case State::Complete:
-                    return format_to(ctx.out(), "Complete");
-            }
-            return format_to(ctx.out(), "{}", static_cast<unsigned>(_state));
-        }
-    };
-
-    template <>
-    struct formatter<terminal::Selection>
+        return ctx.begin();
+    }
+    using State = terminal::Selection::State;
+    template <typename FormatContext>
+    auto format(State _state, FormatContext& ctx)
     {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx)
+        switch (_state)
         {
-            return ctx.begin();
+        case State::Waiting: return format_to(ctx.out(), "Waiting");
+        case State::InProgress: return format_to(ctx.out(), "InProgress");
+        case State::Complete: return format_to(ctx.out(), "Complete");
         }
+        return format_to(ctx.out(), "{}", static_cast<unsigned>(_state));
+    }
+};
 
-        template <typename FormatContext>
-        auto format(const terminal::Selection& _selector, FormatContext& ctx)
-        {
-            return format_to(ctx.out(),
-                             "{}({} from {} to {})",
-                             dynamic_cast<terminal::WordWiseSelection const*>(&_selector) ? "WordWiseSelection" :
-                             dynamic_cast<terminal::FullLineSelection const*>(&_selector) ? "FullLineSelection" :
-                             dynamic_cast<terminal::RectangularSelection const*>(&_selector) ? "RectangularSelection" :
-                             dynamic_cast<terminal::LinearSelection const*>(&_selector) ? "LinearSelection" :
-                             "Selection",
-                             _selector.state(),
-                             _selector.from(),
-                             _selector.to());
-        }
-    };
-} // }}}
+template <>
+struct formatter<terminal::Selection>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const terminal::Selection& _selector, FormatContext& ctx)
+    {
+        return format_to(ctx.out(),
+                         "{}({} from {} to {})",
+                         dynamic_cast<terminal::WordWiseSelection const*>(&_selector)   ? "WordWiseSelection"
+                         : dynamic_cast<terminal::FullLineSelection const*>(&_selector) ? "FullLineSelection"
+                         : dynamic_cast<terminal::RectangularSelection const*>(&_selector)
+                             ? "RectangularSelection"
+                         : dynamic_cast<terminal::LinearSelection const*>(&_selector) ? "LinearSelection"
+                                                                                      : "Selection",
+                         _selector.state(),
+                         _selector.from(),
+                         _selector.to());
+    }
+};
+} // namespace fmt

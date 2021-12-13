@@ -13,10 +13,10 @@
  */
 #pragma once
 
-#include <contour/Controller.h>
 #include <contour/Config.h>
-#include <contour/TerminalDisplay.h>
+#include <contour/Controller.h>
 #include <contour/FileChangeWatcher.h>
+#include <contour/TerminalDisplay.h>
 
 #include <terminal/Terminal.h>
 
@@ -26,7 +26,8 @@
 
 #include <functional>
 
-namespace contour {
+namespace contour
+{
 
 /**
  * Manages a single terminal session (Client, Terminal, Display)
@@ -192,8 +193,8 @@ class TerminalSession: public terminal::Terminal::Events
     // state vars
     //
     terminal::ScreenType currentScreenType_ = terminal::ScreenType::Main;
-    terminal::Coordinate currentMousePosition_ = terminal::Coordinate{};
+    terminal::Coordinate currentMousePosition_ = terminal::Coordinate {};
     bool allowKeyMappings_ = true;
 };
 
-}
+} // namespace contour

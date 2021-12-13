@@ -15,10 +15,12 @@
 
 #include <terminal/Sequencer.h>
 
-#include <array>
 #include <fmt/format.h>
 
-namespace terminal {
+#include <array>
+
+namespace terminal
+{
 
 using CharsetMap = std::array<char32_t, 127>;
 
@@ -28,16 +30,18 @@ CharsetMap const* charsetMap(CharsetId _id) noexcept;
 /// Charset mapping API for tables G0, G1, G2, and G3.
 ///
 /// Relevant VT sequences are: SCS, SS2, SS3.
-class CharsetMapping {
+class CharsetMapping
+{
   public:
-    CharsetMapping() noexcept :
-        tables_{
+    CharsetMapping() noexcept:
+        tables_ {
             charsetMap(CharsetId::USASCII),
             charsetMap(CharsetId::USASCII),
             charsetMap(CharsetId::USASCII),
             charsetMap(CharsetId::USASCII),
         }
-    {}
+    {
+    }
 
     char32_t map(char32_t _code) noexcept
     {
@@ -63,10 +67,7 @@ class CharsetMapping {
         return (*tables_[static_cast<size_t>(_table)])[static_cast<uint8_t>(_code)];
     }
 
-    constexpr void singleShift(CharsetTable _table) noexcept
-    {
-        shift_ = _table;
-    }
+    constexpr void singleShift(CharsetTable _table) noexcept { shift_ = _table; }
 
     constexpr void selectDefaultTable(CharsetTable _table) noexcept
     {
@@ -89,4 +90,4 @@ class CharsetMapping {
     Tables tables_;
 };
 
-} // end namespace
+} // namespace terminal

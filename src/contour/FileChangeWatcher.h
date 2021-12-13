@@ -18,9 +18,11 @@
 #include <functional>
 #include <thread>
 
-class FileChangeWatcher {
+class FileChangeWatcher
+{
   public:
-    enum class Event {
+    enum class Event
+    {
         Modified,
         Erased,
     };

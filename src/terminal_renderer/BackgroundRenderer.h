@@ -13,19 +13,21 @@
  */
 #pragma once
 
-#include <terminal_renderer/RenderTarget.h>
-
 #include <terminal/RenderBuffer.h>
 #include <terminal/Screen.h>
 
+#include <terminal_renderer/RenderTarget.h>
+
 #include <memory>
 
-namespace terminal::renderer {
+namespace terminal::renderer
+{
 
 struct GridMetrics;
 class RenderTarget;
 
-class BackgroundRenderer : public Renderable {
+class BackgroundRenderer: public Renderable
+{
   public:
     /// Constructs the decoration renderer.
     ///
@@ -51,4 +53,4 @@ class BackgroundRenderer : public Renderable {
     float opacity_ = 1.0f; // normalized opacity value between 0.0 .. 1.0
 };
 
-} // end namespace
+} // namespace terminal::renderer

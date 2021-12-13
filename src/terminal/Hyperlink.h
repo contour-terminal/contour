@@ -13,16 +13,19 @@
  */
 #pragma once
 
-#include <crispy/boxed.h>
 #include <crispy/LRUCache.h>
-#include <string>
-#include <unordered_map>
+#include <crispy/boxed.h>
+
 #include <list>
 #include <memory>
+#include <string>
+#include <unordered_map>
 
-namespace terminal {
+namespace terminal
+{
 
-enum class HyperlinkState {
+enum class HyperlinkState
+{
     /// Default hyperlink state.
     Inactive,
 
@@ -30,26 +33,24 @@ enum class HyperlinkState {
     Hover,
 
     /// mouse or cursor is hovering and has this item selected (e.g. via pressing Ctrl)
-    //Active,
+    // Active,
 };
 
 using URI = std::string;
 
-struct HyperlinkInfo { // TODO: rename to Hyperlink
+struct HyperlinkInfo
+{                       // TODO: rename to Hyperlink
     std::string userId; //!< application provied ID
     URI uri;
     HyperlinkState state = HyperlinkState::Inactive;
 
-    bool isLocal() const noexcept
-    {
-        return uri.size() >= 7 && uri.substr(0, 7) == "file://";
-    }
+    bool isLocal() const noexcept { return uri.size() >= 7 && uri.substr(0, 7) == "file://"; }
 
     std::string_view host() const noexcept
     {
         if (auto const i = uri.find("://"); i != uri.npos)
             if (auto const j = uri.find('/', i + 3); j != uri.npos)
-                return std::string_view{uri.data() + i + 3, j - i - 3};
+                return std::string_view { uri.data() + i + 3, j - i - 3 };
 
         return "";
     }
@@ -58,7 +59,7 @@ struct HyperlinkInfo { // TODO: rename to Hyperlink
     {
         if (auto const i = uri.find("://"); i != uri.npos)
             if (auto const j = uri.find('/', i + 3); j != uri.npos)
-                return std::string_view{uri.data() + j};
+                return std::string_view { uri.data() + j };
 
         return "";
     }
@@ -66,13 +67,18 @@ struct HyperlinkInfo { // TODO: rename to Hyperlink
     std::string_view scheme() const noexcept
     {
         if (auto const i = uri.find("://"); i != uri.npos)
-            return std::string_view{uri.data(), i};
+            return std::string_view { uri.data(), i };
         else
             return {};
     }
 };
 
-namespace detail { struct HyperlinkTag{}; }
+namespace detail
+{
+    struct HyperlinkTag
+    {
+    };
+} // namespace detail
 using HyperlinkId = crispy::boxed<uint16_t, detail::HyperlinkTag>;
 
 bool is_local(HyperlinkInfo const& _hyperlink);
@@ -81,7 +87,7 @@ using HyperlinkCache = crispy::LRUCache<HyperlinkId, std::shared_ptr<HyperlinkIn
 
 struct HyperlinkStorage
 {
-    HyperlinkCache cache{1024};
+    HyperlinkCache cache { 1024 };
     HyperlinkId nextHyperlinkId = HyperlinkId(1);
 
     std::shared_ptr<HyperlinkInfo> hyperlinkById(HyperlinkId _id) noexcept
@@ -110,8 +116,8 @@ struct HyperlinkStorage
                 return href.first;
             }
         }
-        return HyperlinkId{};
+        return HyperlinkId {};
     }
 };
 
-} // end namespace
+} // namespace terminal

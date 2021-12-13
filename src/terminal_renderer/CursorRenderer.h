@@ -15,6 +15,7 @@
 
 #include <terminal/Color.h>
 #include <terminal/Sequencer.h> // CursorShape
+
 #include <terminal_renderer/Atlas.h>
 #include <terminal_renderer/GridMetrics.h>
 #include <terminal_renderer/RenderTarget.h>
@@ -23,10 +24,12 @@
 
 #include <array>
 
-namespace terminal::renderer {
+namespace terminal::renderer
+{
 
 /// Takes care of rendering the text cursor.
-class CursorRenderer : public Renderable {
+class CursorRenderer: public Renderable
+{
   public:
     CursorRenderer(GridMetrics const& _gridMetrics, CursorShape _shape);
 
@@ -55,4 +58,4 @@ class CursorRenderer : public Renderable {
     uint8_t columnWidth_;
 };
 
-} // namespace terminal::view
+} // namespace terminal::renderer

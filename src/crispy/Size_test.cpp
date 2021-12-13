@@ -12,12 +12,13 @@
  * limitations under the License.
  */
 #include <terminal/Size.h>
+
+#include <array>
 #include <catch2/catch_all.hpp>
 #include <string_view>
-#include <array>
 
-using terminal::Size;
 using terminal::Coordinate;
+using terminal::Size;
 
 TEST_CASE("Size.iterator", "")
 {
@@ -26,22 +27,22 @@ TEST_CASE("Size.iterator", "")
     Size::iterator e = s.end();
     REQUIRE(i != e);
 
-    REQUIRE(*i == Coordinate{0, 0});
+    REQUIRE(*i == Coordinate { 0, 0 });
 
     ++i;
-    REQUIRE(*i == Coordinate{0, 1});
+    REQUIRE(*i == Coordinate { 0, 1 });
 
     ++i;
-    REQUIRE(*i == Coordinate{0, 2});
+    REQUIRE(*i == Coordinate { 0, 2 });
 
     ++i;
-    REQUIRE(*i == Coordinate{1, 0});
+    REQUIRE(*i == Coordinate { 1, 0 });
 
     ++i;
-    REQUIRE(*i == Coordinate{1, 1});
+    REQUIRE(*i == Coordinate { 1, 1 });
 
     ++i;
-    REQUIRE(*i == Coordinate{1, 2});
+    REQUIRE(*i == Coordinate { 1, 2 });
 
     ++i;
     REQUIRE(i == e);

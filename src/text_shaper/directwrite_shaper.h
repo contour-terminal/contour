@@ -18,13 +18,15 @@
 
 #include <memory>
 
-namespace text {
+namespace text
+{
 
 /**
  * Text shaping and rendering engine using open source technologies,
  * fontconfig + harfbuzz + freetype.
  */
-class directwrite_shaper : public shaper {
+class directwrite_shaper: public shaper
+{
   public:
     directwrite_shaper(crispy::Point _dpi, std::unique_ptr<font_locator> _locator);
 
@@ -43,14 +45,13 @@ class directwrite_shaper : public shaper {
                unicode::PresentationStyle _presentation,
                shape_result& _result) override;
 
-    std::optional<glyph_position> shape(font_key _font,
-                                        char32_t _codepoint) override;
+    std::optional<glyph_position> shape(font_key _font, char32_t _codepoint) override;
 
     std::optional<rasterized_glyph> rasterize(glyph_key _glyph, render_mode _mode) override;
 
   private:
     struct Private;
-    std::unique_ptr<Private, void(*)(Private*)> d;
+    std::unique_ptr<Private, void (*)(Private*)> d;
 };
 
-} // end namespace
+} // namespace text

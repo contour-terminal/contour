@@ -13,9 +13,15 @@
  */
 #pragma once
 
-namespace crispy {
+namespace crispy
+{
 
-enum class Comparison { Less, Equal, Greater };
+enum class Comparison
+{
+    Less,
+    Equal,
+    Greater
+};
 
 template <typename T>
 constexpr Comparison strongCompare(T const& a, T const& b)
@@ -28,4 +34,4 @@ constexpr Comparison strongCompare(T const& a, T const& b)
         return Comparison::Greater;
 }
 
-}
+} // namespace crispy

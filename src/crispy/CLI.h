@@ -70,7 +70,7 @@ struct Command
     std::string_view name;
     std::string_view helpText = {};
     OptionList options = {};
-    //std::vector<Command> children = {};
+    // std::vector<Command> children = {};
     CommandList children = {};
     CommandSelect select = CommandSelect::Explicit;
     std::optional<Verbatim> verbatim = {}; // Unly allowed if no sub commands were specified.
@@ -84,10 +84,10 @@ enum class OptionStyle
     Posix,
 };
 
-class ParserError : public std::runtime_error
+class ParserError: public std::runtime_error
 {
-   public:
-    explicit ParserError(std::string const& _msg) : std::runtime_error(_msg) {}
+  public:
+    explicit ParserError(std::string const& _msg): std::runtime_error(_msg) {}
 };
 
 struct FlagStore
@@ -101,7 +101,11 @@ struct FlagStore
     double real(std::string const& _key) const { return std::get<double>(values.at(_key)); }
     std::string const& str(std::string const& _key) const { return std::get<std::string>(values.at(_key)); }
 
-    template <typename T> T get(std::string const& _key) const { return std::get<T>(values.at(_key)); }
+    template <typename T>
+    T get(std::string const& _key) const
+    {
+        return std::get<T>(values.at(_key));
+    }
 };
 
 /*
@@ -145,7 +149,7 @@ struct HelpStyle // TODO: maybe call HelpDisplayStyle?
     static ColorMap defaultColors();
 
     std::optional<ColorMap> colors = defaultColors();
-    bool hyperlink = true;   // whether or not to enable OSC 8 (Hyperlink).
+    bool hyperlink = true; // whether or not to enable OSC 8 (Hyperlink).
     OptionStyle optionStyle = OptionStyle::Natural;
 };
 
@@ -157,7 +161,9 @@ struct HelpStyle // TODO: maybe call HelpDisplayStyle?
  * @param _margin       Number of characters to write at most per line.
  * @param _cmdPrefix    Some text to prepend in front of each generated line in the output.
  */
-std::string usageText(Command const& _command, HelpStyle const& _style, unsigned _margin,
+std::string usageText(Command const& _command,
+                      HelpStyle const& _style,
+                      unsigned _margin,
                       std::string const& _cmdPrefix = {});
 
 /**
@@ -191,42 +197,47 @@ namespace about
     {
         store().emplace_back(_project);
         using crispy::toLower;
-        std::sort(store().begin(), store().end(),
-            [](auto const& a, auto const& b) { return toLower(a.title) < toLower(b.title); });
+        std::sort(store().begin(), store().end(), [](auto const& a, auto const& b) {
+            return toLower(a.title) < toLower(b.title);
+        });
     }
 
     template <typename... Args>
-    void registerProjects(Project && _project0, Args&&... _more)
+    void registerProjects(Project&& _project0, Args&&... _more)
     {
         store().emplace_back(_project0);
         registerProjects(std::forward<Args>(_more)...);
     }
-}
+} // namespace about
 
 } // end namespace crispy::cli
 
 namespace fmt // {{{ type formatters
 {
-    template <>
-    struct formatter<crispy::cli::Value> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(crispy::cli::Value const& _value, FormatContext& ctx)
-        {
-            if (std::holds_alternative<bool>(_value))
-                return format_to(ctx.out(), "{}", std::get<bool>(_value));
-            else if (std::holds_alternative<int>(_value))
-                return format_to(ctx.out(), "{}", std::get<int>(_value));
-            else if (std::holds_alternative<unsigned>(_value))
-                return format_to(ctx.out(), "{}", std::get<unsigned>(_value));
-            else if (std::holds_alternative<double>(_value))
-                return format_to(ctx.out(), "{}", std::get<double>(_value));
-            else if (std::holds_alternative<std::string>(_value))
-                return format_to(ctx.out(), "{}", std::get<std::string>(_value));
-            else
-                return format_to(ctx.out(), "?");
-            //return format_to(ctx.out(), "{}..{}", range.from, range.to);
-        }
-    };
-} // }}}
+template <>
+struct formatter<crispy::cli::Value>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(crispy::cli::Value const& _value, FormatContext& ctx)
+    {
+        if (std::holds_alternative<bool>(_value))
+            return format_to(ctx.out(), "{}", std::get<bool>(_value));
+        else if (std::holds_alternative<int>(_value))
+            return format_to(ctx.out(), "{}", std::get<int>(_value));
+        else if (std::holds_alternative<unsigned>(_value))
+            return format_to(ctx.out(), "{}", std::get<unsigned>(_value));
+        else if (std::holds_alternative<double>(_value))
+            return format_to(ctx.out(), "{}", std::get<double>(_value));
+        else if (std::holds_alternative<std::string>(_value))
+            return format_to(ctx.out(), "{}", std::get<std::string>(_value));
+        else
+            return format_to(ctx.out(), "?");
+        // return format_to(ctx.out(), "{}..{}", range.from, range.to);
+    }
+};
+} // namespace fmt

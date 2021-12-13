@@ -16,10 +16,12 @@
 #include <string>
 #include <string_view>
 
-namespace crispy::base64 {
+namespace crispy::base64
+{
 
 namespace detail
 {
+    // clang-format off
     constexpr inline unsigned char indexmap[256] = {
         /* ASCII table */
         64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, //   0..15
@@ -40,7 +42,8 @@ namespace detail
         64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, // 224..239
         64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64  // 240..255
     };
-}
+    // clang-format on
+} // namespace detail
 
 template <typename Iterator, typename Alphabet>
 std::string encode(Iterator begin, Iterator end, Alphabet alphabet)
@@ -60,11 +63,9 @@ std::string encode(Iterator begin, Iterator end, Alphabet alphabet)
     {
         *out++ = alphabet[(input[i] >> 2) & 0x3F];
 
-        *out++ = alphabet[((input[i] & 0x03) << 4) |
-                           ((uint8_t)(input[i + 1] & 0xF0) >> 4)];
+        *out++ = alphabet[((input[i] & 0x03) << 4) | ((uint8_t) (input[i + 1] & 0xF0) >> 4)];
 
-        *out++ = alphabet[((input[i + 1] & 0x0F) << 2) |
-                          ((uint8_t)(input[i + 2] & 0xC0) >> 6)];
+        *out++ = alphabet[((input[i + 1] & 0x0F) << 2) | ((uint8_t) (input[i + 2] & 0xC0) >> 6)];
 
         *out++ = alphabet[input[i + 2] & 0x3F];
 
@@ -82,8 +83,7 @@ std::string encode(Iterator begin, Iterator end, Alphabet alphabet)
         }
         else
         {
-            *out++ = alphabet[((input[i] & 0x03) << 4) |
-                              ((uint8_t)(input[i + 1] & 0xF0) >> 4)];
+            *out++ = alphabet[((input[i] & 0x03) << 4) | ((uint8_t) (input[i + 1] & 0xF0) >> 4)];
             *out++ = alphabet[((input[i + 1] & 0x0F) << 2)];
         }
         *out++ = '=';
@@ -98,13 +98,11 @@ std::string encode(Iterator begin, Iterator end, Alphabet alphabet)
 template <typename Iterator>
 std::string encode(Iterator begin, Iterator end)
 {
-    static constexpr char alphabet[] =
-        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        "abcdefghijklmnopqrstuvwxyz"
-        "0123456789+/";
+    static constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                                       "abcdefghijklmnopqrstuvwxyz"
+                                       "0123456789+/";
     return encode(begin, end, alphabet);
 }
-
 
 inline std::string encode(const std::string_view& value)
 {
@@ -208,4 +206,4 @@ inline std::string decode(const std::string_view& input)
     return output;
 }
 
-} // end namespace xzero
+} // namespace crispy::base64

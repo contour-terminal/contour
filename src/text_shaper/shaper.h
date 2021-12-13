@@ -13,21 +13,22 @@
  */
 #pragma once
 
-#include <unicode/ucd.h>
-#include <unicode/emoji_segmenter.h>
-
 #include <text_shaper/font.h>
 
+#include <crispy/ImageSize.h>
 #include <crispy/logstore.h>
 #include <crispy/point.h>
 #include <crispy/size.h>
-#include <crispy/ImageSize.h>
 
-#include <gsl/span>
-#include <gsl/span_ext>
+#include <unicode/emoji_segmenter.h>
+#include <unicode/ucd.h>
+
+#include <fmt/format.h>
 
 #include <cstdint>
 #include <functional>
+#include <gsl/span>
+#include <gsl/span_ext>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -35,25 +36,26 @@
 #include <utility>
 #include <vector>
 
-#include <fmt/format.h>
-
-namespace text {
+namespace text
+{
 
 auto const inline RasterizerLog = logstore::Category("font.render", "Logs details about rendering glyphs.");
 auto const inline TextShapingLog = logstore::Category("font.textshaping", "Logs details about text shaping.");
 
-enum class bitmap_format { alpha_mask, rgb, rgba };
+enum class bitmap_format
+{
+    alpha_mask,
+    rgb,
+    rgba
+};
 
 constexpr int pixel_size(bitmap_format _format) noexcept
 {
     switch (_format)
     {
-        case bitmap_format::rgba:
-            return 4;
-        case bitmap_format::rgb:
-            return 3;
-        case bitmap_format::alpha_mask:
-            return 1;
+    case bitmap_format::rgba: return 4;
+    case bitmap_format::rgb: return 3;
+    case bitmap_format::alpha_mask: return 1;
     }
     return 1;
 }
@@ -68,9 +70,8 @@ struct rasterized_glyph
 
     bool valid() const
     {
-        return bitmap.size() == text::pixel_size(format) *
-                                unbox<size_t>(size.width) *
-                                unbox<size_t>(size.height);
+        return bitmap.size()
+               == text::pixel_size(format) * unbox<size_t>(size.width) * unbox<size_t>(size.height);
     }
 };
 
@@ -92,7 +93,8 @@ class font_locator;
 /**
  * Platform-independent font loading, text shaping, and glyph rendering API.
  */
-class shaper {
+class shaper
+{
   public:
     virtual ~shaper() = default;
 
@@ -146,8 +148,7 @@ class shaper {
                        unicode::PresentationStyle _presentation,
                        shape_result& _result) = 0;
 
-    virtual std::optional<glyph_position> shape(font_key _font,
-                                                char32_t _codepoint) = 0;
+    virtual std::optional<glyph_position> shape(font_key _font, char32_t _codepoint) = 0;
 
     /**
      * Rasterizes (renders) the glyph using the given render mode.
@@ -160,58 +161,67 @@ class shaper {
 
 } // end namespace text
 
-
-namespace fmt { // {{{
-    template <>
-    struct formatter<text::bitmap_format> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(text::bitmap_format value, FormatContext& ctx)
+namespace fmt
+{ // {{{
+template <>
+struct formatter<text::bitmap_format>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(text::bitmap_format value, FormatContext& ctx)
+    {
+        switch (value)
         {
-            switch (value)
-            {
-                case text::bitmap_format::alpha_mask: return format_to(ctx.out(), "alpha_mask");
-                case text::bitmap_format::rgb: return format_to(ctx.out(), "rgb");
-                case text::bitmap_format::rgba: return format_to(ctx.out(), "rgba");
-                default: return format_to(ctx.out(), "{}", static_cast<unsigned>(value));
-            }
+        case text::bitmap_format::alpha_mask: return format_to(ctx.out(), "alpha_mask");
+        case text::bitmap_format::rgb: return format_to(ctx.out(), "rgb");
+        case text::bitmap_format::rgba: return format_to(ctx.out(), "rgba");
+        default: return format_to(ctx.out(), "{}", static_cast<unsigned>(value));
         }
-    };
+    }
+};
 
-    template <>
-    struct formatter<text::glyph_position> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(text::glyph_position const& _gpos, FormatContext& ctx)
-        {
-            return format_to(
-                ctx.out(),
-                "({}+{}+{}|{}+{})",
-                _gpos.glyph.index.value,
-                _gpos.offset.x,
-                _gpos.offset.y,
-                _gpos.advance.x,
-                _gpos.advance.y);
-        }
-    };
+template <>
+struct formatter<text::glyph_position>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(text::glyph_position const& _gpos, FormatContext& ctx)
+    {
+        return format_to(ctx.out(),
+                         "({}+{}+{}|{}+{})",
+                         _gpos.glyph.index.value,
+                         _gpos.offset.x,
+                         _gpos.offset.y,
+                         _gpos.advance.x,
+                         _gpos.advance.y);
+    }
+};
 
-    template <>
-    struct formatter<text::rasterized_glyph> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(text::rasterized_glyph const& _glyph, FormatContext& ctx)
-        {
-            return format_to(
-                ctx.out(),
-                "rasterized_glyph({}, {}+{}, {})",
-                _glyph.index.value,
-                _glyph.size,
-                _glyph.position,
-                _glyph.format
-            );
-        }
-    };
-} // }}}
+template <>
+struct formatter<text::rasterized_glyph>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(text::rasterized_glyph const& _glyph, FormatContext& ctx)
+    {
+        return format_to(ctx.out(),
+                         "rasterized_glyph({}, {}+{}, {})",
+                         _glyph.index.value,
+                         _glyph.size,
+                         _glyph.position,
+                         _glyph.format);
+    }
+};
+} // namespace fmt

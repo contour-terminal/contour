@@ -15,15 +15,15 @@
 
 #include <terminal/pty/Pty.h>
 
+#include <Windows.h>
 #include <mutex>
 #include <vector>
 
-#include <Windows.h>
-
-namespace terminal {
+namespace terminal
+{
 
 /// ConPty implementation for newer Windows 10 versions.
-class ConPty : public Pty
+class ConPty: public Pty
 {
   public:
     explicit ConPty(PageSize const& windowSize);
@@ -52,4 +52,4 @@ class ConPty : public Pty
     std::vector<char> buffer_;
 };
 
-}  // namespace terminal
+} // namespace terminal

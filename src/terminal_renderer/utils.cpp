@@ -13,20 +13,17 @@
  */
 #include <terminal_renderer/utils.h>
 
+#include <algorithm> // max?
+#include <cassert>
 #include <range/v3/view/iota.hpp>
 
-#include <algorithm> // max?
-
-#include <cassert>
-
-namespace terminal::renderer {
+namespace terminal::renderer
+{
 
 using namespace std;
 using ranges::views::iota;
 
-vector<uint8_t> downsampleRGBA(vector<uint8_t> const& _bitmap,
-                               ImageSize _size,
-                               ImageSize _newSize)
+vector<uint8_t> downsampleRGBA(vector<uint8_t> const& _bitmap, ImageSize _size, ImageSize _newSize)
 {
     assert(_size.width >= _newSize.width);
     assert(_size.height >= _newSize.height);
@@ -90,8 +87,8 @@ vector<uint8_t> downsample(vector<uint8_t> const& _bitmap,
 
     std::vector<uint8_t> dest(*_newSize.width * *_newSize.height * _numComponents, 0);
 
-    LOGSTORE(RasterizerLog)("downsample from {} to {}, ratio {}x{} ({}), factor {}",
-                            _size, _newSize, ratioX, ratioY, ratio, factor);
+    LOGSTORE(RasterizerLog)
+    ("downsample from {} to {}, ratio {}x{} ({}), factor {}", _size, _newSize, ratioX, ratioY, ratio, factor);
 
     uint8_t* d = dest.data();
     // TODO: use iota
@@ -122,9 +119,7 @@ vector<uint8_t> downsample(vector<uint8_t> const& _bitmap,
     return dest;
 }
 
-vector<uint8_t> downsample(vector<uint8_t> const& _sourceBitmap,
-                           ImageSize _targetSize,
-                           uint8_t _factor)
+vector<uint8_t> downsample(vector<uint8_t> const& _sourceBitmap, ImageSize _targetSize, uint8_t _factor)
 {
     vector<uint8_t> targetBitmap(*_targetSize.width * *_targetSize.height, 0);
 
@@ -146,13 +141,10 @@ vector<uint8_t> downsample(vector<uint8_t> const& _sourceBitmap,
     {
         auto const offset = *_targetSize.width * y;
         for (auto const x: iota(0u, *_targetSize.width))
-            targetBitmap[offset + x] = min(
-                255,
-                targetBitmap[offset + x] + average_intensity_in_src(x, y)
-            );
+            targetBitmap[offset + x] = min(255, targetBitmap[offset + x] + average_intensity_in_src(x, y));
     }
 
     return targetBitmap;
 }
 
-}
+} // namespace terminal::renderer

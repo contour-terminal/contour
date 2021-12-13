@@ -22,10 +22,12 @@
 #include <string_view>
 #include <vector>
 
-namespace terminal {
+namespace terminal
+{
 
 /// Helps constructing VT functions as they're being parsed by the VT parser.
-class Sequence {
+class Sequence
+{
   public:
     using Parameter = unsigned;
     using ParameterList = std::vector<std::vector<Parameter>>;
@@ -48,7 +50,7 @@ class Sequence {
     Sequence()
     {
         parameters_.resize(MaxParameters);
-        for (auto& param : parameters_)
+        for (auto& param: parameters_)
             param.reserve(MaxSubParameters);
         parameters_.clear();
     }
@@ -80,27 +82,25 @@ class Sequence {
     /// @returns the raw VT-sequence string.
     std::string raw() const;
 
-    FunctionDefinition const* functionDefinition() const noexcept
-    {
-        return select(selector());
-    }
+    FunctionDefinition const* functionDefinition() const noexcept { return select(selector()); }
 
-    /// Converts a FunctionSpinto a FunctionSelector, applicable for finding the corresponding FunctionDefinition.
+    /// Converts a FunctionSpinto a FunctionSelector, applicable for finding the corresponding
+    /// FunctionDefinition.
     FunctionSelector selector() const noexcept
     {
         switch (category_)
         {
-            case FunctionCategory::OSC:
-                return FunctionSelector{category_, 0, static_cast<int>(parameters_[0][0]), 0, 0};
-            default:
-            {
-                // Only support CSI sequences with 0 or 1 intermediate characters.
-                char const intermediate = intermediateCharacters_.size() == 1
-                    ? static_cast<char>(intermediateCharacters_[0])
-                    : char{};
+        case FunctionCategory::OSC:
+            return FunctionSelector { category_, 0, static_cast<int>(parameters_[0][0]), 0, 0 };
+        default: {
+            // Only support CSI sequences with 0 or 1 intermediate characters.
+            char const intermediate =
+                intermediateCharacters_.size() == 1 ? static_cast<char>(intermediateCharacters_[0]) : char {};
 
-                return FunctionSelector{category_, leaderSymbol_, static_cast<int>(parameters_.size()), intermediate, finalChar_};
-            }
+            return FunctionSelector {
+                category_, leaderSymbol_, static_cast<int>(parameters_.size()), intermediate, finalChar_
+            };
+        }
         }
     }
 
@@ -118,7 +118,7 @@ class Sequence {
     std::optional<T> param_opt(size_t _index) const noexcept
     {
         if (_index < parameters_.size() && parameters_[_index][0])
-            return {static_cast<T>(parameters_[_index][0])};
+            return { static_cast<T>(parameters_[_index][0]) };
         else
             return std::nullopt;
     }
@@ -155,4 +155,4 @@ class Sequence {
     }
 };
 
-}
+} // namespace terminal

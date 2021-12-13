@@ -13,11 +13,11 @@
  */
 #pragma once
 
+#include <fmt/format.h>
+
 #include <exception>
 #include <functional>
 #include <string_view>
-
-#include <fmt/format.h>
 
 namespace crispy
 {
@@ -26,30 +26,25 @@ namespace crispy
 //     I cannot *just* define Expects() nor Ensures().
 
 #if defined(Expects)
-#undef Expects
+    #undef Expects
 #endif
 
 #if defined(Ensures)
-#undef Ensures
+    #undef Ensures
 #endif
 
 /// Function signature for custom assertion failure handlers.
-using fail_handler_t = std::function<void(std::string_view,
-                                          std::string_view,
-                                          std::string_view,
-                                          int)>;
+using fail_handler_t = std::function<void(std::string_view, std::string_view, std::string_view, int)>;
 
 namespace detail
 {
     inline fail_handler_t& fail_handler()
     {
-        static fail_handler_t storage{};
+        static fail_handler_t storage {};
         return storage;
     }
 
-    inline void fail(std::string_view _text,
-                     std::string_view _message,
-                     std::string_view _file, int _line)
+    inline void fail(std::string_view _text, std::string_view _message, std::string_view _file, int _line)
     {
         if (fail_handler())
             fail_handler()(_text, _message, _file, _line);
@@ -60,16 +55,15 @@ namespace detail
         }
     }
 
-    inline void check(bool _cond, std::string_view _text,
-                      std::string_view _message,
-                      std::string_view _file, int _line)
+    inline void check(
+        bool _cond, std::string_view _text, std::string_view _message, std::string_view _file, int _line)
     {
         if (!_cond)
         {
             fail(_text, _message, _file, _line);
         }
     }
-}
+} // namespace detail
 
 /// Sets a custom fail handler to be invoked when Expects() or Ensures() fails.
 ///
@@ -80,22 +74,16 @@ inline void set_fail_handler(fail_handler_t _handler)
     detail::fail_handler() = std::move(_handler);
 }
 
-#define Expects(cond) \
-    do { \
-        ::crispy::detail::check( \
-            (cond), #cond, \
-            "Precondition failed.", \
-            __FILE__, __LINE__ \
-        ); \
+#define Expects(cond)                                                                       \
+    do                                                                                      \
+    {                                                                                       \
+        ::crispy::detail::check((cond), #cond, "Precondition failed.", __FILE__, __LINE__); \
     } while (0)
 
-#define Ensures(cond) \
-    do { \
-        ::crispy::detail::check( \
-            (cond), #cond, \
-            "Postcondition failed.", \
-            __FILE__, __LINE__ \
-        ); \
+#define Ensures(cond)                                                                        \
+    do                                                                                       \
+    {                                                                                        \
+        ::crispy::detail::check((cond), #cond, "Postcondition failed.", __FILE__, __LINE__); \
     } while (0)
 
-}
+} // namespace crispy

@@ -24,7 +24,8 @@
 #include <string_view>
 #include <vector>
 
-namespace terminal {
+namespace terminal
+{
 
 /// Sixel Stream Parser API.
 ///
@@ -32,18 +33,23 @@ namespace terminal {
 /// that must be done by the parent parser.
 ///
 /// TODO: make this parser O(1) with state table lookup tables, just like the VT parser.
-class SixelParser : public ParserExtension
+class SixelParser: public ParserExtension
 {
   public:
-    enum class State {
-        Ground,             // Sixel data
-        RasterSettings,     // '"', configuring the raster
-        RepeatIntroducer,   // '!'
-        ColorIntroducer,    // '#', color-set or color-use
-        ColorParam          // color parameter
+    enum class State
+    {
+        Ground,           // Sixel data
+        RasterSettings,   // '"', configuring the raster
+        RepeatIntroducer, // '!'
+        ColorIntroducer,  // '#', color-set or color-use
+        ColorParam        // color parameter
     };
 
-    enum class Colorspace { RGB, HSL };
+    enum class Colorspace
+    {
+        RGB,
+        HSL
+    };
 
     /// SixelParser's event handler
     class Events
@@ -78,7 +84,7 @@ class SixelParser : public ParserExtension
 
     void parseFragment(iterator _begin, iterator _end)
     {
-        for (auto const ch : crispy::range(_begin, _end))
+        for (auto const ch: crispy::range(_begin, _end))
             parse(ch);
     }
 
@@ -92,7 +98,7 @@ class SixelParser : public ParserExtension
 
     static void parse(std::string_view _range, Events& _events)
     {
-        auto parser = SixelParser{_events};
+        auto parser = SixelParser { _events };
         parser.parseFragment(_range.data(), _range.data() + _range.size());
         parser.done();
     }
@@ -141,7 +147,7 @@ class SixelColorPalette
 /// Sixel Image Builder API
 ///
 /// Implements the SixelParser::Events event listener to construct a Sixel image.
-class SixelImageBuilder : public SixelParser::Events
+class SixelImageBuilder: public SixelParser::Events
 {
   public:
     using Buffer = std::vector<uint8_t>;
@@ -184,10 +190,11 @@ class SixelImageBuilder : public SixelParser::Events
     Buffer buffer_; /// RGBA buffer
     Coordinate sixelCursor_;
     int currentColor_;
-    struct {
+    struct
+    {
         int nominator;
         int denominator;
     } aspectRatio_;
 };
 
-} // end namespace
+} // namespace terminal

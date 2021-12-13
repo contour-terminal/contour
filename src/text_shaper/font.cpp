@@ -12,12 +12,14 @@
  * limitations under the License.
  */
 #include <text_shaper/font.h>
+
 #include <fmt/format.h>
 
 using std::string;
 using std::string_view;
 
-namespace text {
+namespace text
+{
 
 string font_description::toPattern() const
 {
@@ -31,7 +33,7 @@ string font_description::toPattern() const
 
 font_description font_description::parse(string_view _pattern)
 {
-    font_description fd{};
+    font_description fd {};
 
     // TODO: find proper style suffix
     // auto const i = _pattern.rfind(' ');
@@ -41,9 +43,9 @@ font_description font_description::parse(string_view _pattern)
     //     fd.styleName = _pattern.substr(i + 1);
     // }
     // else
-        fd.familyName = _pattern;
+    fd.familyName = _pattern;
 
     return fd;
 }
 
-} // end namespace
+} // namespace text

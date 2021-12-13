@@ -17,8 +17,8 @@
 #include <terminal/GraphicsAttributes.h>
 #include <terminal/Hyperlink.h>
 #include <terminal/Image.h>
-#include <terminal/primitives.h>
 #include <terminal/defines.h>
+#include <terminal/primitives.h>
 
 #include <crispy/times.h>
 
@@ -30,7 +30,8 @@
 
 #define LIBTERMINAL_GRAPHEME_CLUSTERS 1
 
-namespace terminal {
+namespace terminal
+{
 
 /**
  * Owned<T> behaves mostly like std::unique_ptr<T> except that it can be also
@@ -46,15 +47,31 @@ struct CONTOUR_PACKED Owned
     constexpr T& operator*() noexcept { return *ptr_; }
     constexpr T const& operator*() const noexcept { return *ptr_; }
 
-    constexpr operator bool () const noexcept { return ptr_ != nullptr; }
+    constexpr operator bool() const noexcept { return ptr_ != nullptr; }
 
-    void reset(T* p = nullptr) { if (ptr_) { delete ptr_; } ptr_ = p; }
-    T* release() noexcept { auto p = ptr_; ptr_ = nullptr; return p; }
+    void reset(T* p = nullptr)
+    {
+        if (ptr_)
+        {
+            delete ptr_;
+        }
+        ptr_ = p;
+    }
+    T* release() noexcept
+    {
+        auto p = ptr_;
+        ptr_ = nullptr;
+        return p;
+    }
 
     ~Owned() { reset(); }
     Owned() noexcept {}
-    Owned(Owned&& v) noexcept: ptr_{v.release()} {}
-    Owned& operator=(Owned&& v) noexcept { ptr_ = v.release(); return *this; }
+    Owned(Owned&& v) noexcept: ptr_ { v.release() } {}
+    Owned& operator=(Owned&& v) noexcept
+    {
+        ptr_ = v.release();
+        return *this;
+    }
 
     Owned(Owned const& v) noexcept = delete;
     Owned& operator=(Owned const& v) = delete;
@@ -79,7 +96,7 @@ struct CellExtra
 /// - Requires moving out CellExtra into Line<T>?
 class CONTOUR_PACKED Cell
 {
-public:
+  public:
     static int constexpr MaxCodepoints = 7;
 
     Cell() noexcept;
@@ -96,7 +113,10 @@ public:
     void reset(GraphicsAttributes const& _attributes, HyperlinkId _hyperlink) noexcept;
 
     void write(GraphicsAttributes const& _attributes, char32_t _ch, uint8_t _width) noexcept;
-    void write(GraphicsAttributes const& _attributes, char32_t _ch, uint8_t _width, HyperlinkId _hyperlink) noexcept;
+    void write(GraphicsAttributes const& _attributes,
+               char32_t _ch,
+               uint8_t _width,
+               HyperlinkId _hyperlink) noexcept;
 
     std::u32string codepoints() const;
     char32_t codepoint(size_t i) const noexcept;
@@ -121,7 +141,8 @@ public:
 
     RGBColor getUnderlineColor(ColorPalette const& _colorPalette, RGBColor _defaultColor) const noexcept;
 
-    std::pair<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette, bool _reverseVideo) const noexcept;
+    std::pair<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette,
+                                             bool _reverseVideo) const noexcept;
 
     ImageFragmentId imageFragment() const noexcept;
     void setImage(ImageFragmentId _imageFragment);
@@ -137,12 +158,13 @@ public:
 
     CellExtra& extra() noexcept;
 
-private:
+  private:
     // Cell data
     char32_t codepoint_ = 0; /// Primary Unicode codepoint to be displayed.
     Color foregroundColor_ = DefaultColor();
     Color backgroundColor_ = DefaultColor();
-    Owned<CellExtra> extra_ = {}; // TODO(perf) ^^ use CellExtraId = boxed<int24_t> into pre-alloc'ed vector<CellExtra>.
+    Owned<CellExtra>
+        extra_ = {}; // TODO(perf) ^^ use CellExtraId = boxed<int24_t> into pre-alloc'ed vector<CellExtra>.
 };
 
 // {{{ impl: ctor's
@@ -158,9 +180,9 @@ inline Cell::Cell(GraphicsAttributes _attrib) noexcept
 }
 
 inline Cell::Cell(Cell const& v) noexcept:
-    codepoint_{v.codepoint_},
-    foregroundColor_{v.foregroundColor_},
-    backgroundColor_{v.backgroundColor_}
+    codepoint_ { v.codepoint_ },
+    foregroundColor_ { v.foregroundColor_ },
+    backgroundColor_ { v.backgroundColor_ }
 {
     if (v.extra_)
         extra_.reset(new CellExtra(*v.extra_));
@@ -215,7 +237,10 @@ inline void Cell::write(GraphicsAttributes const& _attributes, char32_t _ch, uin
         extra().underlineColor = _attributes.underlineColor;
 }
 
-inline void Cell::write(GraphicsAttributes const& _attributes, char32_t _ch, uint8_t _width, HyperlinkId _hyperlink) noexcept
+inline void Cell::write(GraphicsAttributes const& _attributes,
+                        char32_t _ch,
+                        uint8_t _width,
+                        HyperlinkId _hyperlink) noexcept
 {
     setWidth(_width);
 
@@ -226,10 +251,8 @@ inline void Cell::write(GraphicsAttributes const& _attributes, char32_t _ch, uin
     foregroundColor_ = _attributes.foregroundColor;
     backgroundColor_ = _attributes.backgroundColor;
 
-    if (_attributes.styles != CellFlags::None ||
-        extra_ ||
-        _attributes.underlineColor != DefaultColor() ||
-        !!_hyperlink)
+    if (_attributes.styles != CellFlags::None || extra_ || _attributes.underlineColor != DefaultColor()
+        || !!_hyperlink)
     {
         CellExtra& ext = extra();
         ext.underlineColor = _attributes.underlineColor;
@@ -255,16 +278,16 @@ inline void Cell::reset(GraphicsAttributes const& _attributes, HyperlinkId _hype
 inline constexpr int Cell::width() const noexcept
 {
     return !extra_ ? 1 : extra_->width;
-    //return static_cast<int>((codepoint_ >> 21) & 0x03); //return width_;
+    // return static_cast<int>((codepoint_ >> 21) & 0x03); //return width_;
 }
 
 inline void Cell::setWidth(uint8_t _width) noexcept
 {
     assert(_width < MaxCodepoints);
-    //codepoint_ = codepoint_ | ((_width << 21) & 0x03);
+    // codepoint_ = codepoint_ | ((_width << 21) & 0x03);
     if (_width > 1 || extra_)
         extra().width = _width;
-    //TODO(perf) use u32_unused_bit_mask()
+    // TODO(perf) use u32_unused_bit_mask()
 }
 
 inline void Cell::setCharacter(char32_t _codepoint, uint8_t _width) noexcept
@@ -308,12 +331,9 @@ inline int Cell::appendCharacter(char32_t _codepoint) noexcept
         auto const w = [&]() {
             switch (_codepoint)
             {
-                case 0xFE0E:
-                    return 1;
-                case 0xFE0F:
-                    return 2;
-                default:
-                    return unicode::width(_codepoint);
+            case 0xFE0E: return 1;
+            case 0xFE0F: return 2;
+            default: return unicode::width(_codepoint);
             }
         }();
 
@@ -347,11 +367,11 @@ inline char32_t Cell::codepoint(size_t i) const noexcept
     if (!extra_)
         return 0;
 
-    #if !defined(NDEBUG)
+#if !defined(NDEBUG)
     return extra_->codepoints.at(i - 1);
-    #else
+#else
     return extra_->codepoints[i - 1];
-    #endif
+#endif
 }
 // }}}
 // {{{ attrs
@@ -424,7 +444,8 @@ inline void Cell::setUnderlineColor(Color color) noexcept
         extra().underlineColor = color;
 }
 
-inline RGBColor Cell::getUnderlineColor(ColorPalette const& _colorPalette, RGBColor _defaultColor) const noexcept
+inline RGBColor Cell::getUnderlineColor(ColorPalette const& _colorPalette,
+                                        RGBColor _defaultColor) const noexcept
 {
     if (isDefaultColor(underlineColor()))
         return _defaultColor;
@@ -440,7 +461,8 @@ inline RGBColor Cell::getUnderlineColor(ColorPalette const& _colorPalette, RGBCo
     return apply(_colorPalette, underlineColor(), ColorTarget::Foreground, bright) * opacity;
 }
 
-inline std::pair<RGBColor, RGBColor> Cell::makeColors(ColorPalette const& _colorPalette, bool _reverseVideo) const noexcept
+inline std::pair<RGBColor, RGBColor> Cell::makeColors(ColorPalette const& _colorPalette,
+                                                      bool _reverseVideo) const noexcept
 {
     float const opacity = [this]() { // TODO: don't make opacity dependant on Faint-attribute.
         if (styles() & CellFlags::Faint)
@@ -452,15 +474,14 @@ inline std::pair<RGBColor, RGBColor> Cell::makeColors(ColorPalette const& _color
     bool const bright = (styles() & CellFlags::Bold);
 
     auto const [fgColorTarget, bgColorTarget] =
-        _reverseVideo
-            ? std::pair{ ColorTarget::Background, ColorTarget::Foreground }
-            : std::pair{ ColorTarget::Foreground, ColorTarget::Background };
+        _reverseVideo ? std::pair { ColorTarget::Background, ColorTarget::Foreground }
+                      : std::pair { ColorTarget::Foreground, ColorTarget::Background };
 
     return (styles() & CellFlags::Inverse) == 0
-        ? std::pair{ apply(_colorPalette, foregroundColor(), fgColorTarget, bright) * opacity,
-                     apply(_colorPalette, backgroundColor(), bgColorTarget, false) }
-        : std::pair{ apply(_colorPalette, backgroundColor(), bgColorTarget, bright) * opacity,
-                     apply(_colorPalette, foregroundColor(), fgColorTarget, false) };
+               ? std::pair { apply(_colorPalette, foregroundColor(), fgColorTarget, bright) * opacity,
+                             apply(_colorPalette, backgroundColor(), bgColorTarget, false) }
+               : std::pair { apply(_colorPalette, backgroundColor(), bgColorTarget, bright) * opacity,
+                             apply(_colorPalette, foregroundColor(), fgColorTarget, false) };
 }
 
 inline ImageFragmentId Cell::imageFragment() const noexcept
@@ -491,7 +512,7 @@ inline HyperlinkId Cell::hyperlink() const noexcept
     if (extra_)
         return extra_->hyperlink;
     else
-        return HyperlinkId{};
+        return HyperlinkId {};
 }
 
 inline void Cell::setHyperlink(HyperlinkId _hyperlink)
@@ -503,25 +524,29 @@ inline void Cell::setHyperlink(HyperlinkId _hyperlink)
 }
 // }}}
 
-}
+} // namespace terminal
 
 namespace fmt // {{{
 {
-    template <>
-    struct formatter<terminal::Cell> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::Cell const& cell, FormatContext& ctx)
+template <>
+struct formatter<terminal::Cell>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::Cell const& cell, FormatContext& ctx)
+    {
+        std::string codepoints;
+        for (auto const i: crispy::times(cell.codepointCount()))
         {
-            std::string codepoints;
-            for (auto const i : crispy::times(cell.codepointCount()))
-            {
-                if (i)
-                    codepoints += ", ";
-                codepoints += fmt::format("{:02X}", static_cast<unsigned>(cell.codepoint(i)));
-            }
-            return format_to(ctx.out(), "(chars={}, width={})", codepoints, cell.width());
+            if (i)
+                codepoints += ", ";
+            codepoints += fmt::format("{:02X}", static_cast<unsigned>(cell.codepoint(i)));
         }
-    };
-} // }}}
+        return format_to(ctx.out(), "(chars={}, width={})", codepoints, cell.width());
+    }
+};
+} // namespace fmt

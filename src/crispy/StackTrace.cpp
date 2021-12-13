@@ -3,6 +3,8 @@
 // #include <xzero/Buffer.h>
 // #include <xzero/sysconfig.h>
 
+#include <fmt/format.h>
+
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
@@ -12,72 +14,67 @@
 #include <regex>
 #include <typeinfo>
 
-#include <fmt/format.h>
-
 #if !defined(_WIN32)
-#include <sys/types.h>
-#include <sys/wait.h>
-#include <fcntl.h>
-#include <unistd.h>
+    #include <fcntl.h>
+    #include <sys/types.h>
+    #include <sys/wait.h>
+    #include <unistd.h>
 #endif
 
 #if defined(HAVE_CXXABI_H)
-#include <cxxabi.h>
+    #include <cxxabi.h>
 #endif
 
 #if defined(HAVE_EXECINFO_H)
-#include <execinfo.h>
+    #include <execinfo.h>
 #endif
 
 #if defined(HAVE_DLFCN_H)
-#include <dlfcn.h>
+    #include <dlfcn.h>
 #endif
 
 #if defined(HAVE_UNWIND_H)
-#include <unwind.h>
+    #include <unwind.h>
 #endif
 
 #include <iostream>
 
+using std::nullopt;
+using std::optional;
+using std::regex;
 using std::string;
 using std::vector;
-using std::optional;
-using std::nullopt;
-using std::regex;
 
-namespace crispy {
+namespace crispy
+{
 
-constexpr size_t MAX_FRAMES {128};
-constexpr size_t SKIP_FRAMES {0};
+constexpr size_t MAX_FRAMES { 128 };
+constexpr size_t SKIP_FRAMES { 0 };
 
 #if defined(__linux__) || defined(__APPLE__)
 struct Pipe // {{{
 {
     int pfd[2];
 
-    Pipe(): pfd{-1, -1}
+    Pipe(): pfd { -1, -1 }
     {
         if (pipe(pfd))
             perror("pipe");
     }
 
-    bool good() const noexcept
-    {
-        return pfd[0] != -1 && pfd[1] != -1;
-    }
+    bool good() const noexcept { return pfd[0] != -1 && pfd[1] != -1; }
 
     int reader() noexcept { return pfd[0]; }
     int writer() noexcept { return pfd[1]; }
 
-    ~Pipe()
-    {
-        close();
-    }
+    ~Pipe() { close(); }
 
     void close()
     {
-        if (pfd[0] != -1) ::close(pfd[0]);
-        if (pfd[1] != -1) ::close(pfd[1]);
+        if (pfd[0] != -1)
+            ::close(pfd[0]);
+        if (pfd[1] != -1)
+            ::close(pfd[1]);
     }
 };
 // }}}
@@ -91,9 +88,7 @@ vector<void*> StackTrace::getFrames(size_t _skip, size_t _max)
     frames.resize(_skip + _max);
     frames.resize(::backtrace(&frames[0], static_cast<int>(_skip + _max)));
     std::copy(std::next(frames.begin(), _skip), frames.end(), frames.begin());
-    frames.resize(frames.size() > _skip
-            ? frames.size() - _skip
-            : std::min(frames.size(), _skip));
+    frames.resize(frames.size() > _skip ? frames.size() - _skip : std::min(frames.size(), _skip));
 #endif
 
     return frames;
@@ -111,55 +106,47 @@ optional<DebugInfo> StackTrace::getDebugInfoForFrame(void* p)
     pid_t childPid = fork();
     switch (childPid)
     {
-        case -1:
-            perror("vfork");
-            return nullopt;
-        case 0: // in child
+    case -1: perror("vfork"); return nullopt;
+    case 0: // in child
+    {
+        std::string addr2lineExe = "/usr/bin/addr2line";
+        char exe[512] {};
+        int rv = readlink("/proc/self/exe", exe, sizeof(exe));
+        if (rv < 0)
+            _exit(EXIT_FAILURE);
+        char addr[32];
+        snprintf(addr, sizeof(addr), "%p", p);
+        char const* const argv[] = { addr2lineExe.c_str(), "-pe", exe, addr, nullptr };
+        close(STDIN_FILENO);
+        if (pipe.writer() != STDOUT_FILENO)
         {
-            std::string addr2lineExe = "/usr/bin/addr2line";
-            char exe[512]{};
-            int rv = readlink("/proc/self/exe", exe, sizeof(exe));
-            if (rv < 0)
-                _exit(EXIT_FAILURE);
-            char addr[32];
-            snprintf(addr, sizeof(addr), "%p", p);
-            char const* const argv[] = {
-                addr2lineExe.c_str(),
-                "-pe",
-                exe,
-                addr,
-                nullptr
-            };
-            close(STDIN_FILENO);
-            if (pipe.writer() != STDOUT_FILENO)
-            {
-                dup2(pipe.writer(), STDOUT_FILENO);
-                close(pipe.writer());
-            }
-            close(pipe.reader());
-            close(STDERR_FILENO);
-            rv = execv(argv[0], (char **) argv);
-            perror("execvp");
-            _exit(rv);
+            dup2(pipe.writer(), STDOUT_FILENO);
+            close(pipe.writer());
         }
-        default: // in parent
-        {
-            int status = 0;
-            waitpid(childPid, &status, 0);
-            // if (!WIFEXITED(status))
-            //     return nullopt;
-            // if (WEXITSTATUS(status) != EXIT_SUCCESS)
-            //     return nullopt;
+        close(pipe.reader());
+        close(STDERR_FILENO);
+        rv = execv(argv[0], (char**) argv);
+        perror("execvp");
+        _exit(rv);
+    }
+    default: // in parent
+    {
+        int status = 0;
+        waitpid(childPid, &status, 0);
+        // if (!WIFEXITED(status))
+        //     return nullopt;
+        // if (WEXITSTATUS(status) != EXIT_SUCCESS)
+        //     return nullopt;
 
-            char buf[4096];
-            ssize_t len = 0;
-            len = ::read(pipe.reader(), buf, sizeof(buf));
-            while (len > 0 && std::isspace(buf[len - 1]))
-                --len;
+        char buf[4096];
+        ssize_t len = 0;
+        len = ::read(pipe.reader(), buf, sizeof(buf));
+        while (len > 0 && std::isspace(buf[len - 1]))
+            --len;
 
-            // result on success:
-            DebugInfo info;
-#if 0
+        // result on success:
+        DebugInfo info;
+    #if 0
             auto static const re = regex(R"(^(.*):\d+$)");
             std::cmatch cm;
             if (!std::regex_search((char const*)buf, (char const*)buf + len, cm, re))
@@ -167,16 +154,16 @@ optional<DebugInfo> StackTrace::getDebugInfoForFrame(void* p)
 
             info.text = cm[1].str();
             try { info.text = stoi(cm[2].str()); } catch (...) {}
-#else
-            if (len > 0)
-                info.text = string(buf, len);
-#endif
+    #else
+        if (len > 0)
+            info.text = string(buf, len);
+    #endif
 
-            if (info.text == "??:0")
-                return nullopt;
+        if (info.text == "??:0")
+            return nullopt;
 
-            return {std::move(info)};
-        }
+        return { std::move(info) };
+    }
     }
 #else
     return nullopt;
@@ -185,9 +172,14 @@ optional<DebugInfo> StackTrace::getDebugInfoForFrame(void* p)
 
 StackTrace::StackTrace():
 #if defined(HAVE_BACKTRACE)
-    frames_{SKIP_FRAMES + MAX_FRAMES}
+    frames_
+{
+    SKIP_FRAMES + MAX_FRAMES
+}
 #else
-    frames_{}
+    frames_
+{
+}
 #endif
 {
 #if defined(HAVE_BACKTRACE)
@@ -201,11 +193,14 @@ string StackTrace::demangleSymbol(const char* symbol)
     int status = 0;
     char* demangled = abi::__cxa_demangle(symbol, nullptr, 0, &status);
 
-    if (demangled) {
+    if (demangled)
+    {
         string result(demangled, strlen(demangled));
         free(demangled);
         return result;
-    } else {
+    }
+    else
+    {
         return symbol;
     }
 #else
@@ -235,4 +230,4 @@ vector<string> StackTrace::symbols() const
     return output;
 }
 
-} // namespace xzero
+} // namespace crispy

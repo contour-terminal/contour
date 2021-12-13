@@ -4,14 +4,16 @@
 #include <string>
 #include <vector>
 
-namespace crispy {
+namespace crispy
+{
 
 struct DebugInfo
 {
     std::string text;
 };
 
-class StackTrace {
+class StackTrace
+{
   public:
     StackTrace();
     StackTrace(StackTrace&&) = default;
@@ -32,4 +34,4 @@ class StackTrace {
     std::vector<void*> frames_;
 };
 
-} // namespace xzero
+} // namespace crispy

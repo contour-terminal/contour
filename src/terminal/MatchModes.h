@@ -17,18 +17,19 @@
 
 #include <cstdint>
 
-namespace terminal {
+namespace terminal
+{
 
 class MatchModes
 {
-public:
+  public:
     enum Flag : uint8_t
     {
-        Default             = 0x00,
-        AlternateScreen     = 0x01,
-        AppCursor           = 0x02,
-        AppKeypad           = 0x04,
-        Select              = 0x08,
+        Default = 0x00,
+        AlternateScreen = 0x01,
+        AppCursor = 0x02,
+        AppKeypad = 0x04,
+        Select = 0x08,
         // future modes
         // ViSearch            = 0x10, // TODO: This mode we want.
     };
@@ -66,8 +67,7 @@ public:
 
     constexpr bool has_value(Flag _flag) const noexcept
     {
-        return enabled_ & static_cast<uint8_t>(_flag)
-           || disabled_ & static_cast<uint8_t>(_flag);
+        return enabled_ & static_cast<uint8_t>(_flag) || disabled_ & static_cast<uint8_t>(_flag);
     }
 
     constexpr void clear(Flag _flag) noexcept
@@ -82,17 +82,11 @@ public:
         disabled_ = 0;
     }
 
-    constexpr bool any() const noexcept
-    {
-        return enabled_ || disabled_;
-    }
+    constexpr bool any() const noexcept { return enabled_ || disabled_; }
 
-    constexpr uint16_t hashcode() const noexcept
-    {
-        return static_cast<uint16_t>(enabled_ << 8) | disabled_;
-    }
+    constexpr uint16_t hashcode() const noexcept { return static_cast<uint16_t>(enabled_ << 8) | disabled_; }
 
-private:
+  private:
     uint8_t enabled_ = 0;
     uint8_t disabled_ = 0;
 };
@@ -111,35 +105,40 @@ class Terminal;
 
 bool testMatch(Terminal const& _terminal, MatchModes _mode);
 
-}
+} // namespace terminal
 
-namespace fmt { // {{{
-    template <>
-    struct formatter<terminal::MatchModes> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::MatchModes m, FormatContext& _ctx)
-        {
-            std::string s;
-            auto const advance = [&](terminal::MatchModes::Flag _cond, std::string_view _text) {
-                auto const status = m.status(_cond);
-                if (status == terminal::MatchModes::Status::Any)
-                    return;
-                if (!s.empty())
-                    s += '|';
-                if (status == terminal::MatchModes::Status::Disabled)
-                    s += "~";
-                s += _text;
-            };
-            advance(terminal::MatchModes::AppCursor, "AppCursor");
-            advance(terminal::MatchModes::AppKeypad, "AppKeypad");
-            advance(terminal::MatchModes::AlternateScreen, "AltScreen");
-            advance(terminal::MatchModes::Select, "Select");
-            if (s.empty())
-                s = "Any";
-            return format_to(_ctx.out(), "{}", s);
-        }
-    };
-}
+namespace fmt
+{ // {{{
+template <>
+struct formatter<terminal::MatchModes>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::MatchModes m, FormatContext& _ctx)
+    {
+        std::string s;
+        auto const advance = [&](terminal::MatchModes::Flag _cond, std::string_view _text) {
+            auto const status = m.status(_cond);
+            if (status == terminal::MatchModes::Status::Any)
+                return;
+            if (!s.empty())
+                s += '|';
+            if (status == terminal::MatchModes::Status::Disabled)
+                s += "~";
+            s += _text;
+        };
+        advance(terminal::MatchModes::AppCursor, "AppCursor");
+        advance(terminal::MatchModes::AppKeypad, "AppKeypad");
+        advance(terminal::MatchModes::AlternateScreen, "AltScreen");
+        advance(terminal::MatchModes::Select, "Select");
+        if (s.empty())
+            s = "Any";
+        return format_to(_ctx.out(), "{}", s);
+    }
+};
+} // namespace fmt
 // }}}

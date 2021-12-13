@@ -14,23 +14,21 @@
 #pragma once
 
 #include <terminal_renderer/Atlas.h>
+
 #include <crispy/logstore.h>
 
-namespace terminal::renderer {
+namespace terminal::renderer
+{
 
 auto const inline RasterizerLog = logstore::Category("vt.renderer", "Logs details about text rendering.");
 
-std::vector<uint8_t> downsampleRGBA(std::vector<uint8_t> const& _bitmap,
-                                    ImageSize _size,
-                                    ImageSize _newSize);
+std::vector<uint8_t> downsampleRGBA(std::vector<uint8_t> const& _bitmap, ImageSize _size, ImageSize _newSize);
 
-std::vector<uint8_t> downsample(std::vector<uint8_t> const& _src,
-                                ImageSize _targetSize,
-                                uint8_t _factor);
+std::vector<uint8_t> downsample(std::vector<uint8_t> const& _src, ImageSize _targetSize, uint8_t _factor);
 
 std::vector<uint8_t> downsample(std::vector<uint8_t> const& _bitmap,
                                 uint8_t _numComponents,
                                 ImageSize _size,
                                 ImageSize _newSize);
 
-} // terminal::renderer
+} // namespace terminal::renderer

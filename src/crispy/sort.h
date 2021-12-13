@@ -14,9 +14,11 @@
 #pragma once
 
 #include <crispy/times.h>
+
 #include <utility>
 
-namespace crispy {
+namespace crispy
+{
 
 namespace detail
 {
@@ -26,7 +28,7 @@ namespace detail
         auto i = _low - 1;
         auto& pivot = _container[_high];
 
-        for (auto const j : crispy::times(_low, static_cast<decltype(_low)>(_high - _low)))
+        for (auto const j: crispy::times(_low, static_cast<decltype(_low)>(_high - _low)))
         {
             if (_compare(_container[j], pivot) <= 0)
             {
@@ -39,7 +41,7 @@ namespace detail
         std::swap(_container[i], _container[_high]);
         return i;
     }
-}
+} // namespace detail
 
 template <typename Container, typename Comp>
 constexpr void sort(Container& _container, Comp _compare, size_t _low, size_t _high)
@@ -64,7 +66,13 @@ template <typename Container>
 constexpr void sort(Container& _container)
 {
     if (auto const count = std::size(_container); count > 1)
-        sort(_container, [](auto const& a, auto const& b) { return a < b ? -1 : a > b ? +1 : 0; }, 0, count - 1);
+        sort(
+            _container,
+            [](auto const& a, auto const& b) { return a < b   ? -1
+                                                      : a > b ? +1
+                                                              : 0; },
+            0,
+            count - 1);
 }
 
-} // end namespaces
+} // namespace crispy

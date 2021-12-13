@@ -20,14 +20,15 @@
 #include <vector>
 
 #if defined(__APPLE__)
-#include <util.h>
+    #include <util.h>
 #elif defined(__linux__)
-#include <pty.h>
+    #include <pty.h>
 #endif
 
-namespace terminal {
+namespace terminal
+{
 
-class UnixPty : public Pty
+class UnixPty: public Pty
 {
   public:
     explicit UnixPty(PageSize const& windowSize, std::optional<ImageSize> _pixels = std::nullopt);
@@ -53,4 +54,4 @@ class UnixPty : public Pty
     std::vector<char> buffer_;
 };
 
-}  // namespace terminal
+} // namespace terminal

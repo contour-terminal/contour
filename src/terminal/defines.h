@@ -5,4 +5,3 @@
 #else
     #define CONTOUR_PACKED /*!*/
 #endif
-

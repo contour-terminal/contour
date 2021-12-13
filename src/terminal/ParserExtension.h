@@ -3,7 +3,8 @@
 #include <functional>
 #include <string>
 
-namespace terminal {
+namespace terminal
+{
 
 /// VT parser protocol extension.
 ///
@@ -20,22 +21,14 @@ class ParserExtension
     virtual void finalize() = 0;
 };
 
-class SimpleStringCollector : public ParserExtension
+class SimpleStringCollector: public ParserExtension
 {
   public:
-    explicit SimpleStringCollector(std::function<void(std::string_view)> _done):
-        done_{ std::move(_done) }
-    {}
+    explicit SimpleStringCollector(std::function<void(std::string_view)> _done): done_ { std::move(_done) } {}
 
-    void start() override
-    {
-        data_.clear();
-    }
+    void start() override { data_.clear(); }
 
-    void pass(char _char) override
-    {
-        data_.push_back(_char);
-    }
+    void pass(char _char) override { data_.push_back(_char); }
 
     void finalize() override
     {
@@ -48,4 +41,4 @@ class SimpleStringCollector : public ParserExtension
     std::function<void(std::string_view)> done_;
 };
 
-} // end namespace
+} // namespace terminal

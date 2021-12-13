@@ -11,19 +11,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <contour/opengl/TerminalWidget.h>
-#include <contour/opengl/OpenGLRenderer.h>
-
 #include <contour/Actions.h>
 #include <contour/helper.h>
+#include <contour/opengl/OpenGLRenderer.h>
+#include <contour/opengl/TerminalWidget.h>
 
 #include <terminal/Color.h>
 #include <terminal/Metrics.h>
 #include <terminal/pty/Pty.h>
 
 #include <crispy/App.h>
-#include <crispy/stdfs.h>
 #include <crispy/logstore.h>
+#include <crispy/stdfs.h>
 
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
@@ -31,27 +30,26 @@
 #include <QtCore/QProcess>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
-#include <QtGui/QGuiApplication>
-#include <QtNetwork/QHostInfo>
 #include <QtGui/QClipboard>
 #include <QtGui/QDesktopServices>
+#include <QtGui/QGuiApplication>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QScreen>
 #include <QtGui/QWindow>
+#include <QtNetwork/QHostInfo>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QMessageBox>
 
 #if defined(CONTOUR_BLUR_PLATFORM_KWIN)
-#include <KWindowEffects>
+    #include <KWindowEffects>
 #endif
 
-#include <fmt/format.h>
 #include <fmt/chrono.h>
-
-#include <range/v3/all.hpp>
+#include <fmt/format.h>
 
 #include <algorithm>
 #include <cstring>
+#include <range/v3/all.hpp>
 // #include <execution>
 #include <fstream>
 #include <stdexcept>
@@ -62,28 +60,29 @@
 // Temporarily disabled (I think it was OS/X that didn't like glDebugMessageCallback).
 // #define CONTOUR_DEBUG_OPENGL 1
 
-#define CHECKED_GL(code) \
-    do { \
-        (code); \
-        GLenum err{}; \
-        while ((err = glGetError()) != GL_NO_ERROR) \
+#define CHECKED_GL(code)                                                      \
+    do                                                                        \
+    {                                                                         \
+        (code);                                                               \
+        GLenum err {};                                                        \
+        while ((err = glGetError()) != GL_NO_ERROR)                           \
             LOGSTORE(DisplayLog)("OpenGL error {} for call: {}", err, #code); \
     } while (0)
 
 #if defined(_MSC_VER)
-#define __PRETTY_FUNCTION__ __FUNCDNAME__
+    #define __PRETTY_FUNCTION__ __FUNCDNAME__
 #endif
 
 namespace contour::opengl
 {
 
+using terminal::Height;
 using terminal::ImageSize;
 using terminal::Width;
-using terminal::Height;
 
-using terminal::PageSize;
-using terminal::LineCount;
 using terminal::ColumnCount;
+using terminal::LineCount;
+using terminal::PageSize;
 using terminal::RGBAColor;
 
 using namespace std::string_literals;
@@ -97,130 +96,112 @@ using actions::Action;
 namespace // {{{
 {
 #if !defined(NDEBUG) && defined(GL_DEBUG_OUTPUT) && defined(CONTOUR_DEBUG_OPENGL)
-    void glMessageCallback(
-        GLenum _source,
-        GLenum _type,
-        [[maybe_unused]] GLuint _id,
-        GLenum _severity,
-        [[maybe_unused]] GLsizei _length,
-        GLchar const* _message,
-        [[maybe_unused]] void const* _userParam)
+    void glMessageCallback(GLenum _source,
+                           GLenum _type,
+                           [[maybe_unused]] GLuint _id,
+                           GLenum _severity,
+                           [[maybe_unused]] GLsizei _length,
+                           GLchar const* _message,
+                           [[maybe_unused]] void const* _userParam)
     {
         string const sourceName = [&]() {
             switch (_source)
             {
-#if defined(GL_DEBUG_SOURCE_API_ARB)
-                case GL_DEBUG_SOURCE_API_ARB:
-                    return "API"s;
-#endif
-#if defined(GL_DEBUG_SOURCE_WINDOW_SYSTEM_ARB)
-                case GL_DEBUG_SOURCE_WINDOW_SYSTEM_ARB:
-                    return "window system"s;
-#endif
-#if defined(GL_DEBUG_SOURCE_SHADER_COMPILER_ARB)
-                case GL_DEBUG_SOURCE_SHADER_COMPILER_ARB:
-                    return "shader compiler"s;
-#endif
-#if defined(GL_DEBUG_SOURCE_THIRD_PARTY_ARB)
-                case GL_DEBUG_SOURCE_THIRD_PARTY_ARB:
-                    return "third party"s;
-#endif
-#if defined(GL_DEBUG_SOURCE_APPLICATION_ARB)
-                case GL_DEBUG_SOURCE_APPLICATION_ARB:
-                    return "application"s;
-#endif
-#if defined(GL_DEBUG_SOURCE_OTHER_ARB)
-                case GL_DEBUG_SOURCE_OTHER_ARB:
-                    return "other"s;
-#endif
-                default:
-                    return fmt::format("{}", _severity);
+    #if defined(GL_DEBUG_SOURCE_API_ARB)
+            case GL_DEBUG_SOURCE_API_ARB: return "API"s;
+    #endif
+    #if defined(GL_DEBUG_SOURCE_WINDOW_SYSTEM_ARB)
+            case GL_DEBUG_SOURCE_WINDOW_SYSTEM_ARB: return "window system"s;
+    #endif
+    #if defined(GL_DEBUG_SOURCE_SHADER_COMPILER_ARB)
+            case GL_DEBUG_SOURCE_SHADER_COMPILER_ARB: return "shader compiler"s;
+    #endif
+    #if defined(GL_DEBUG_SOURCE_THIRD_PARTY_ARB)
+            case GL_DEBUG_SOURCE_THIRD_PARTY_ARB: return "third party"s;
+    #endif
+    #if defined(GL_DEBUG_SOURCE_APPLICATION_ARB)
+            case GL_DEBUG_SOURCE_APPLICATION_ARB: return "application"s;
+    #endif
+    #if defined(GL_DEBUG_SOURCE_OTHER_ARB)
+            case GL_DEBUG_SOURCE_OTHER_ARB: return "other"s;
+    #endif
+            default: return fmt::format("{}", _severity);
             }
         }();
         string const typeName = [&]() {
             switch (_type)
             {
-#if defined(GL_DEBUG_TYPE_ERROR)
-                case GL_DEBUG_TYPE_ERROR:
-                    return "error"s;
-#endif
-#if defined(GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR)
-                case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR:
-                    return "deprecated"s;
-#endif
-#if defined(GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR)
-                case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR:
-                    return "undefined"s;
-#endif
-#if defined(GL_DEBUG_TYPE_PORTABILITY)
-                case GL_DEBUG_TYPE_PORTABILITY:
-                    return "portability"s;
-#endif
-#if defined(GL_DEBUG_TYPE_PERFORMANCE)
-                case GL_DEBUG_TYPE_PERFORMANCE:
-                    return "performance"s;
-#endif
-#if defined(GL_DEBUG_TYPE_OTHER)
-                case GL_DEBUG_TYPE_OTHER:
-                    return "other"s;
-#endif
-                default:
-                    return fmt::format("{}", _severity);
+    #if defined(GL_DEBUG_TYPE_ERROR)
+            case GL_DEBUG_TYPE_ERROR: return "error"s;
+    #endif
+    #if defined(GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR)
+            case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR: return "deprecated"s;
+    #endif
+    #if defined(GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR)
+            case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR: return "undefined"s;
+    #endif
+    #if defined(GL_DEBUG_TYPE_PORTABILITY)
+            case GL_DEBUG_TYPE_PORTABILITY: return "portability"s;
+    #endif
+    #if defined(GL_DEBUG_TYPE_PERFORMANCE)
+            case GL_DEBUG_TYPE_PERFORMANCE: return "performance"s;
+    #endif
+    #if defined(GL_DEBUG_TYPE_OTHER)
+            case GL_DEBUG_TYPE_OTHER: return "other"s;
+    #endif
+            default: return fmt::format("{}", _severity);
             }
         }();
         string const debugSeverity = [&]() {
             switch (_severity)
             {
-#if defined(GL_DEBUG_SEVERITY_LOW)
-                case GL_DEBUG_SEVERITY_LOW:
-                    return "low"s;
-#endif
-#if defined(GL_DEBUG_SEVERITY_MEDIUM)
-                case GL_DEBUG_SEVERITY_MEDIUM:
-                    return "medium"s;
-#endif
-#if defined(GL_DEBUG_SEVERITY_HIGH)
-                case GL_DEBUG_SEVERITY_HIGH:
-                    return "high"s;
-#endif
-#if defined(GL_DEBUG_SEVERITY_NOTIFICATION)
-                case GL_DEBUG_SEVERITY_NOTIFICATION:
-                    return "notification"s;
-#endif
-                default:
-                    return fmt::format("{}", _severity);
+    #if defined(GL_DEBUG_SEVERITY_LOW)
+            case GL_DEBUG_SEVERITY_LOW: return "low"s;
+    #endif
+    #if defined(GL_DEBUG_SEVERITY_MEDIUM)
+            case GL_DEBUG_SEVERITY_MEDIUM: return "medium"s;
+    #endif
+    #if defined(GL_DEBUG_SEVERITY_HIGH)
+            case GL_DEBUG_SEVERITY_HIGH: return "high"s;
+    #endif
+    #if defined(GL_DEBUG_SEVERITY_NOTIFICATION)
+            case GL_DEBUG_SEVERITY_NOTIFICATION: return "notification"s;
+    #endif
+            default: return fmt::format("{}", _severity);
             }
         }();
         auto const tag = []([[maybe_unused]] GLint _type) {
             switch (_type)
             {
-            #ifdef GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR
-                case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR: return "DEPRECATED";
-            #endif
-            #ifdef GL_DEBUG_TYPE_MARKER
-                case GL_DEBUG_TYPE_MARKER: return "MARKER";
-            #endif
-            #ifdef GL_DEBUG_TYPE_OTHER
-                case GL_DEBUG_TYPE_OTHER: return "OTHER";
-            #endif
-            #ifdef GL_DEBUG_TYPE_PORTABILITY
-                case GL_DEBUG_TYPE_PORTABILITY: return "PORTABILITY";
-            #endif
-            #ifdef GL_DEBUG_TYPE_PERFORMANCE
-                case GL_DEBUG_TYPE_PERFORMANCE: return "PERFORMANCE";
-            #endif
-            #ifdef GL_DEBUG_TYPE_ERROR
-                case GL_DEBUG_TYPE_ERROR: return "ERROR";
-            #endif
-                default:
-                    return "UNKNOWN";
+    #ifdef GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR
+            case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR: return "DEPRECATED";
+    #endif
+    #ifdef GL_DEBUG_TYPE_MARKER
+            case GL_DEBUG_TYPE_MARKER: return "MARKER";
+    #endif
+    #ifdef GL_DEBUG_TYPE_OTHER
+            case GL_DEBUG_TYPE_OTHER: return "OTHER";
+    #endif
+    #ifdef GL_DEBUG_TYPE_PORTABILITY
+            case GL_DEBUG_TYPE_PORTABILITY: return "PORTABILITY";
+    #endif
+    #ifdef GL_DEBUG_TYPE_PERFORMANCE
+            case GL_DEBUG_TYPE_PERFORMANCE: return "PERFORMANCE";
+    #endif
+    #ifdef GL_DEBUG_TYPE_ERROR
+            case GL_DEBUG_TYPE_ERROR: return "ERROR";
+    #endif
+            default: return "UNKNOWN";
             }
         }(_type);
 
-        LOGSTORE(DisplayLog)(
-            "[OpenGL/{}]: type:{}, source:{}, severity:{}; {}",
-            tag, typeName, sourceName, debugSeverity, _message
-        );
+        LOGSTORE(DisplayLog)
+        ("[OpenGL/{}]: type:{}, source:{}, severity:{}; {}",
+         tag,
+         typeName,
+         sourceName,
+         debugSeverity,
+         _message);
     }
 #endif
 
@@ -234,37 +215,36 @@ namespace // {{{
         LOGSTORE(DisplayLog)("{}", unhandledExceptionMessage(where, e));
         cerr << unhandledExceptionMessage(where, e) << endl;
     }
-} // }}}
+} // namespace
 
 // {{{ Widget creation and QOpenGLWidget overides
-TerminalWidget::TerminalWidget(
-    config::TerminalProfile const& _profile, // TODO(PR): OH I am unused!
-    TerminalSession& _session,
-    function<void()> _adaptSize,
-    function<void(bool)> _enableBackgroundBlur
-):
+TerminalWidget::TerminalWidget(config::TerminalProfile const& _profile, // TODO(PR): OH I am unused!
+                               TerminalSession& _session,
+                               function<void()> _adaptSize,
+                               function<void(bool)> _enableBackgroundBlur):
     QOpenGLWidget(),
-    session_{ _session },
-    adaptSize_{ std::move(_adaptSize) },
-    enableBackgroundBlur_{ std::move(_enableBackgroundBlur) },
-    renderer_{
+    session_ { _session },
+    adaptSize_ { std::move(_adaptSize) },
+    enableBackgroundBlur_ { std::move(_enableBackgroundBlur) },
+    renderer_ {
         terminal().screenSize(),
         sanitizeFontDescription(profile().fonts, screenDPI()),
         terminal().screen().colorPalette(),
         profile().backgroundOpacity,
         profile().hyperlinkDecoration.normal,
         profile().hyperlinkDecoration.hover
-        //TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
+        // TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
     }
 {
-    LOGSTORE(DisplayLog)("ctor: terminalSize={}, fontSize={}, contentScale={}, geometry={}:{}..{}:{}",
-                         profile().terminalSize,
-                         profile().fonts.size,
-                         contentScale(),
-                         geometry().top(),
-                         geometry().left(),
-                         geometry().bottom(),
-                         geometry().right());
+    LOGSTORE(DisplayLog)
+    ("ctor: terminalSize={}, fontSize={}, contentScale={}, geometry={}:{}..{}:{}",
+     profile().terminalSize,
+     profile().fonts.size,
+     contentScale(),
+     geometry().top(),
+     geometry().left(),
+     geometry().bottom(),
+     geometry().right());
 
     setMouseTracking(true);
     setFormat(surfaceFormat());
@@ -272,8 +252,7 @@ TerminalWidget::TerminalWidget(
     setAttribute(Qt::WA_InputMethodEnabled, true);
     setAttribute(Qt::WA_OpaquePaintEvent);
 
-    setMinimumSize(gridMetrics().cellSize.width.as<int>() * 3,
-                   gridMetrics().cellSize.height.as<int>() * 2);
+    setMinimumSize(gridMetrics().cellSize.width.as<int>() * 3, gridMetrics().cellSize.height.as<int>() * 2);
 
     // setAttribute(Qt::WA_TranslucentBackground);
     // setAttribute(Qt::WA_NoSystemBackground, false);
@@ -318,27 +297,27 @@ QSurfaceFormat TerminalWidget::surfaceFormat()
 
 QSize TerminalWidget::minimumSizeHint() const
 {
-    auto constexpr MinimumScreenSize = PageSize{LineCount(2), ColumnCount(3)};
+    auto constexpr MinimumScreenSize = PageSize { LineCount(2), ColumnCount(3) };
 
     auto const cellSize = gridMetrics().cellSize;
 
-    return QSize(
-        cellSize.width.as<int>() * MinimumScreenSize.columns.as<int>(),
-        cellSize.height.as<int>() * MinimumScreenSize.lines.as<int>()
-    );
+    return QSize(cellSize.width.as<int>() * MinimumScreenSize.columns.as<int>(),
+                 cellSize.height.as<int>() * MinimumScreenSize.lines.as<int>());
 }
 
 QSize TerminalWidget::sizeHint() const
 {
     auto const cellSize = renderer_.gridMetrics().cellSize;
-    auto const viewSize = ImageSize{
-        Width(*gridMetrics().cellSize.width * *profile().terminalSize.columns),
-        Height(*gridMetrics().cellSize.height * *profile().terminalSize.lines)
-    };
+    auto const viewSize =
+        ImageSize { Width(*gridMetrics().cellSize.width * *profile().terminalSize.columns),
+                    Height(*gridMetrics().cellSize.height * *profile().terminalSize.lines) };
 
-    LOGSTORE(DisplayLog)("sizeHint: {}, cellSize: {}, terminalSize: {}, dpi: {}",
-                         viewSize, cellSize, profile().terminalSize,
-                         renderer_.fontDescriptions().dpi);
+    LOGSTORE(DisplayLog)
+    ("sizeHint: {}, cellSize: {}, terminalSize: {}, dpi: {}",
+     viewSize,
+     cellSize,
+     profile().terminalSize,
+     renderer_.fontDescriptions().dpi);
 
     return QSize(viewSize.width.as<int>(), viewSize.height.as<int>());
 }
@@ -347,12 +326,12 @@ void TerminalWidget::initializeGL()
 {
     initializeOpenGLFunctions();
 
-    renderTarget_ = make_unique<OpenGLRenderer>(
-        *config::Config::loadShaderConfig(config::ShaderClass::Text),
-        *config::Config::loadShaderConfig(config::ShaderClass::Background),
-        ImageSize{Width(width()), Height(height())},
-        terminal::renderer::PageMargin{} // TODO margin
-    );
+    renderTarget_ =
+        make_unique<OpenGLRenderer>(*config::Config::loadShaderConfig(config::ShaderClass::Text),
+                                    *config::Config::loadShaderConfig(config::ShaderClass::Background),
+                                    ImageSize { Width(width()), Height(height()) },
+                                    terminal::renderer::PageMargin {} // TODO margin
+        );
 
     renderer_.setRenderTarget(*renderTarget_);
 
@@ -361,27 +340,31 @@ void TerminalWidget::initializeGL()
     if (!infoPrinted)
     {
         infoPrinted = true;
-        LOGSTORE(DisplayLog)("[FYI] DPI             : {} physical; {} logical",
-                             crispy::Size{physicalDpiX(), physicalDpiY()},
-                             crispy::Size{logicalDpiX(), logicalDpiY()});
+        LOGSTORE(DisplayLog)
+        ("[FYI] DPI             : {} physical; {} logical",
+         crispy::Size { physicalDpiX(), physicalDpiY() },
+         crispy::Size { logicalDpiX(), logicalDpiY() });
         auto const fontSizeInPx = int(ceil(profile().fonts.size.pt / 72.0 * 96.0 * contentScale()));
         LOGSTORE(DisplayLog)("[FYI] Font size       : {} ({}px)", profile().fonts.size, fontSizeInPx);
-        LOGSTORE(DisplayLog)("[FYI] OpenGL type     : {}", (QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL"));
+        LOGSTORE(DisplayLog)
+        ("[FYI] OpenGL type     : {}",
+         (QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL"));
         LOGSTORE(DisplayLog)("[FYI] OpenGL renderer : {}", glGetString(GL_RENDERER));
         LOGSTORE(DisplayLog)("[FYI] Qt platform     : {}", QGuiApplication::platformName().toStdString());
 
-        GLint versionMajor{};
-        GLint versionMinor{};
+        GLint versionMajor {};
+        GLint versionMinor {};
         QOpenGLContext::currentContext()->functions()->glGetIntegerv(GL_MAJOR_VERSION, &versionMajor);
         QOpenGLContext::currentContext()->functions()->glGetIntegerv(GL_MINOR_VERSION, &versionMinor);
         LOGSTORE(DisplayLog)("[FYI] OpenGL version  : {}.{}", versionMajor, versionMinor);
 
-        auto glslVersionMsg = fmt::format("[FYI] GLSL version    : {}", glGetString(GL_SHADING_LANGUAGE_VERSION));
+        auto glslVersionMsg =
+            fmt::format("[FYI] GLSL version    : {}", glGetString(GL_SHADING_LANGUAGE_VERSION));
 
         // TODO: pass phys()/logical?) dpi to font manager, so font size can be applied right
         // TODO: also take window monitor switches into account
 
-        GLint glslNumShaderVersions{};
+        GLint glslNumShaderVersions {};
 #if defined(GL_NUM_SHADING_LANGUAGE_VERSIONS)
         glGetIntegerv(GL_NUM_SHADING_LANGUAGE_VERSIONS, &glslNumShaderVersions);
         glGetError(); // consume possible OpenGL error.
@@ -403,8 +386,8 @@ void TerminalWidget::initializeGL()
     // }}}
 
 #if !defined(NDEBUG) && defined(GL_DEBUG_OUTPUT) && defined(CONTOUR_DEBUG_OPENGL)
-    CHECKED_GL( glEnable(GL_DEBUG_OUTPUT) );
-    CHECKED_GL( glDebugMessageCallback(&glMessageCallback, this) );
+    CHECKED_GL(glEnable(GL_DEBUG_OUTPUT));
+    CHECKED_GL(glDebugMessageCallback(&glMessageCallback, this));
 #endif
 
     initialized_ = true;
@@ -414,8 +397,7 @@ void TerminalWidget::initializeGL()
 void TerminalWidget::resizeGL(int _width, int _height)
 {
     QOpenGLWidget::resizeGL(_width, _height);
-    applyResize(terminal::ImageSize{Width(_width), Height(_height)}, session_, renderer_);
-
+    applyResize(terminal::ImageSize { Width(_width), Height(_height) }, session_, renderer_);
 }
 
 void TerminalWidget::paintGL()
@@ -430,22 +412,20 @@ void TerminalWidget::paintGL()
             auto const updateCount = stats_.updatesSinceRendering.exchange(0);
             auto const renderCount = stats_.consecutiveRenderCount.exchange(0);
             if (DisplayLog)
-                LOGSTORE(DisplayLog)(
-                    "paintGL/{}: {} renders, {} updates since last paint ({}/{}).",
-                    renderCount_.load(),
-                    renderCount,
-                    updateCount,
-                    lastState,
-                    to_string(session_.terminal().renderBufferState())
-                );
+                LOGSTORE(DisplayLog)
+            ("paintGL/{}: {} renders, {} updates since last paint ({}/{}).",
+             renderCount_.load(),
+             renderCount,
+             updateCount,
+             lastState,
+             to_string(session_.terminal().renderBufferState()));
         }
 #endif
 
         renderTarget_->clear(
             terminal().screen().isModeEnabled(terminal::DECMode::ReverseVideo)
                 ? RGBAColor(profile().colors.defaultForeground, uint8_t(renderer_.backgroundOpacity()))
-                : RGBAColor(profile().colors.defaultBackground, uint8_t(renderer_.backgroundOpacity()))
-        );
+                : RGBAColor(profile().colors.defaultBackground, uint8_t(renderer_.backgroundOpacity())));
         renderer_.render(terminal(), renderingPressure_);
     }
     catch (exception const& e)
@@ -522,12 +502,12 @@ void TerminalWidget::inputMethodEvent(QInputMethodEvent* _event)
 QVariant TerminalWidget::inputMethodQuery(Qt::InputMethodQuery _query) const
 {
     const QPoint cursorPos = QPoint(); // TODO: realCursorPosition();
-    switch (_query) {
+    switch (_query)
+    {
     // TODO?: case Qt::ImCursorRectangle:
     // case Qt::ImMicroFocus:
     //     return imageToWidget(QRect(cursorPos.x(), cursorPos.y(), 1, 1));
-    case Qt::ImFont:
-        return font();
+    case Qt::ImFont: return font();
     case Qt::ImCursorPosition:
         // return the cursor position within the current line
         return cursorPos.x();
@@ -544,10 +524,8 @@ QVariant TerminalWidget::inputMethodQuery(Qt::InputMethodQuery _query) const
     //     decoder.end();
     //     return lineText;
     // }
-    case Qt::ImCurrentSelection:
-        return QString();
-    default:
-        break;
+    case Qt::ImCurrentSelection: return QString();
+    default: break;
     }
 
     return QVariant();
@@ -557,7 +535,7 @@ bool TerminalWidget::event(QEvent* _event)
 {
     try
     {
-        //qDebug() << "TerminalWidget.event():" << _event;
+        // qDebug() << "TerminalWidget.event():" << _event;
         if (_event->type() == QEvent::Close)
         {
             session_.pty().close();
@@ -580,10 +558,8 @@ void TerminalWidget::assertInitialized()
     if (initialized_)
         return;
 
-    throw std::runtime_error(
-        "Internal error. "
-        "TerminalWidget function invoked before initialization has finished."
-    );
+    throw std::runtime_error("Internal error. "
+                             "TerminalWidget function invoked before initialization has finished.");
 }
 
 void TerminalWidget::onScrollBarValueChanged(int _value)
@@ -602,11 +578,9 @@ double TerminalWidget::contentScale() const
 
 void TerminalWidget::updateMinimumSize()
 {
-    auto const MinimumGridSize = PageSize{LineCount(2), ColumnCount(3)};
-    auto const minSize = ImageSize{
-        Width(*gridMetrics().cellSize.width * *MinimumGridSize.columns),
-        Height(*gridMetrics().cellSize.width * *MinimumGridSize.columns)
-    };
+    auto const MinimumGridSize = PageSize { LineCount(2), ColumnCount(3) };
+    auto const minSize = ImageSize { Width(*gridMetrics().cellSize.width * *MinimumGridSize.columns),
+                                     Height(*gridMetrics().cellSize.width * *MinimumGridSize.columns) };
     setMinimumSize(minSize.width.as<int>(), minSize.height.as<int>());
 }
 // }}}
@@ -627,7 +601,7 @@ double TerminalWidget::refreshRate() const
 
 crispy::Point TerminalWidget::screenDPI() const
 {
-    return crispy::Point{ logicalDpiX(), logicalDpiY() };
+    return crispy::Point { logicalDpiX(), logicalDpiY() };
 }
 
 bool TerminalWidget::isFullScreen() const
@@ -654,10 +628,7 @@ void TerminalWidget::post(std::function<void()> _fn)
 
 bool TerminalWidget::requestPermission(config::Permission _allowedByConfig, string_view _topicText)
 {
-    return contour::requestPermission(rememberedPermissions_,
-                                      this,
-                                      _allowedByConfig,
-                                      _topicText);
+    return contour::requestPermission(rememberedPermissions_, this, _allowedByConfig, _topicText);
 }
 
 terminal::FontDef TerminalWidget::getFontDef()
@@ -685,13 +656,9 @@ void TerminalWidget::doDumpState()
 {
     makeCurrent();
 
-    auto const targetDir =
-        session_.controller().dumpStateAtExit().value_or(
-            crispy::App::instance()->localStateDir()
-            / "dump"
-            / fmt::format("contour-dump-{:%Y-%m-%d-%H-%M-%S}",
-                          std::chrono::system_clock::now())
-        );
+    auto const targetDir = session_.controller().dumpStateAtExit().value_or(
+        crispy::App::instance()->localStateDir() / "dump"
+        / fmt::format("contour-dump-{:%Y-%m-%d-%H-%M-%S}", std::chrono::system_clock::now()));
 
     FileSystem::create_directories(targetDir);
 
@@ -703,7 +670,7 @@ void TerminalWidget::doDumpState()
     // TODO: use this file store for everything that needs to be dumped.
     {
         auto const screenStateDump = [&]() {
-            auto os = std::stringstream{};
+            auto os = std::stringstream {};
             terminal().screen().dumpState("Screen state dump.", os);
             renderer_.dumpState(os);
             return os.str();
@@ -712,20 +679,26 @@ void TerminalWidget::doDumpState()
         std::cout << screenStateDump;
 
         auto const screenStateDumpFilePath = targetDir / "screen-state-dump.vt";
-        auto fs = ofstream{screenStateDumpFilePath.string(), ios::trunc | ios::binary};
+        auto fs = ofstream { screenStateDumpFilePath.string(), ios::trunc | ios::binary };
         fs << screenStateDump;
     }
 
-    enum class ImageBufferFormat { RGBA, RGB, Alpha };
+    enum class ImageBufferFormat
+    {
+        RGBA,
+        RGB,
+        Alpha
+    };
 
     auto screenshotSaver = [](FileSystem::path const& _filename, ImageBufferFormat _format) {
         auto const [qImageFormat, elementCount] = [&]() -> tuple<QImage::Format, int> {
-            switch (_format) {
-                case ImageBufferFormat::RGBA: return tuple{QImage::Format_RGBA8888, 4};
-                case ImageBufferFormat::RGB: return tuple{QImage::Format_RGB888, 3};
-                case ImageBufferFormat::Alpha: return tuple{QImage::Format_Grayscale8, 1};
+            switch (_format)
+            {
+            case ImageBufferFormat::RGBA: return tuple { QImage::Format_RGBA8888, 4 };
+            case ImageBufferFormat::RGB: return tuple { QImage::Format_RGB888, 3 };
+            case ImageBufferFormat::Alpha: return tuple { QImage::Format_Grayscale8, 1 };
             }
-            return tuple{QImage::Format_Grayscale8, 1};
+            return tuple { QImage::Format_Grayscale8, 1 };
         }();
 
         // That's a little workaround for MacOS/X's C++ Clang compiler.
@@ -734,15 +707,17 @@ void TerminalWidget::doDumpState()
 
         return [_filename, theImageFormat, theElementCount](vector<uint8_t> const& _buffer, ImageSize _size) {
             auto image = make_unique<QImage>(_size.width.as<int>(), _size.height.as<int>(), theImageFormat);
-            // Vertically flip the image, because the coordinate system between OpenGL and desktop screens is inverse.
+            // Vertically flip the image, because the coordinate system between OpenGL and desktop screens is
+            // inverse.
             crispy::for_each(
                 // TODO: std::execution::seq,
                 crispy::times(_size.height.as<int>()),
                 [&_buffer, &image, theElementCount, _size](int i) {
                     uint8_t const* sourceLine = &_buffer.data()[i * _size.width.as<int>() * theElementCount];
-                    copy(sourceLine, sourceLine + _size.width.as<int>() * theElementCount, image->scanLine(_size.height.as<int>() - i - 1));
-                }
-            );
+                    copy(sourceLine,
+                         sourceLine + _size.width.as<int>() * theElementCount,
+                         image->scanLine(_size.height.as<int>() - i - 1));
+                });
             image->save(QString::fromStdString(_filename.generic_string()));
             LOGSTORE(DisplayLog)("Saving image: {}", _filename.generic_string());
         };
@@ -752,16 +727,19 @@ void TerminalWidget::doDumpState()
                                                                      unsigned _instanceId,
                                                                      vector<uint8_t> const& _buffer,
                                                                      ImageSize _size) {
-        return [&screenshotSaver, &targetDir, &_buffer, _size, _allocatorName, _instanceId](ImageBufferFormat _format) {
+        return [&screenshotSaver, &targetDir, &_buffer, _size, _allocatorName, _instanceId](
+                   ImageBufferFormat _format) {
             auto const formatText = [&]() {
-                switch (_format) {
-                    case ImageBufferFormat::RGBA: return "rgba"sv;
-                    case ImageBufferFormat::RGB: return "rgb"sv;
-                    case ImageBufferFormat::Alpha: return "alpha"sv;
+                switch (_format)
+                {
+                case ImageBufferFormat::RGBA: return "rgba"sv;
+                case ImageBufferFormat::RGB: return "rgb"sv;
+                case ImageBufferFormat::Alpha: return "alpha"sv;
                 }
                 return "unknown"sv;
             }();
-            auto const fileName = targetDir / fmt::format("atlas-{}-{}-{}.png", _allocatorName, formatText, _instanceId);
+            auto const fileName =
+                targetDir / fmt::format("atlas-{}-{}-{}.png", _allocatorName, formatText, _instanceId);
             return screenshotSaver(fileName, _format)(_buffer, _size);
         };
     };
@@ -777,36 +755,27 @@ void TerminalWidget::doDumpState()
                 continue;
 
             terminal::renderer::AtlasTextureInfo& info = infoOpt.value();
-            auto const saveScreenshot = atlasScreenshotSaver(allocator->name(), atlasID.value, info.buffer, info.size);
+            auto const saveScreenshot =
+                atlasScreenshotSaver(allocator->name(), atlasID.value, info.buffer, info.size);
             switch (info.format)
             {
-                case terminal::renderer::atlas::Format::RGBA:
-                    saveScreenshot(ImageBufferFormat::RGBA);
-                    break;
-                case terminal::renderer::atlas::Format::RGB:
-                    saveScreenshot(ImageBufferFormat::RGB);
-                    break;
-                case terminal::renderer::atlas::Format::Red:
-                    saveScreenshot(ImageBufferFormat::Alpha);
-                    break;
+            case terminal::renderer::atlas::Format::RGBA: saveScreenshot(ImageBufferFormat::RGBA); break;
+            case terminal::renderer::atlas::Format::RGB: saveScreenshot(ImageBufferFormat::RGB); break;
+            case terminal::renderer::atlas::Format::Red: saveScreenshot(ImageBufferFormat::Alpha); break;
             }
         }
     }
 
-    renderTarget.scheduleScreenshot(
-        [this, targetDir, screenshotSaver](auto a, auto b)
-        {
-            screenshotSaver(targetDir / "screenshot.png", ImageBufferFormat::RGBA)(a, b);
+    renderTarget.scheduleScreenshot([this, targetDir, screenshotSaver](auto a, auto b) {
+        screenshotSaver(targetDir / "screenshot.png", ImageBufferFormat::RGBA)(a, b);
 
-            // If this dump-state was triggered due to the PTY being closed
-            // and a dump was requested at the end, then terminate this session here now.
-            if (session_.terminal().device().isClosed() &&
-                session_.controller().dumpStateAtExit().has_value())
-            {
-                session_.terminate();
-            }
+        // If this dump-state was triggered due to the PTY being closed
+        // and a dump was requested at the end, then terminate this session here now.
+        if (session_.terminal().device().isClosed() && session_.controller().dumpStateAtExit().has_value())
+        {
+            session_.terminate();
         }
-    );
+    });
 
     // force an update to actually render the screenshot
     update();
@@ -826,20 +795,17 @@ void TerminalWidget::resizeWindow(terminal::Width _width, terminal::Height _heig
     }
 
     auto requestedScreenSize = terminal().screenSize();
-    auto const pixelSize = terminal::ImageSize{
-        terminal::Width(*_width ? *_width : width()),
-        terminal::Height(*_height ? *_height : height())
-    };
+    auto const pixelSize = terminal::ImageSize { terminal::Width(*_width ? *_width : width()),
+                                                 terminal::Height(*_height ? *_height : height()) };
     requestedScreenSize.columns = terminal::ColumnCount(*pixelSize.width / *gridMetrics().cellSize.width);
     requestedScreenSize.lines = terminal::LineCount(*pixelSize.height / *gridMetrics().cellSize.height);
 
-    //setSizePolicy(QSizePolicy::Policy::Fixed, QSizePolicy::Policy::Fixed);
+    // setSizePolicy(QSizePolicy::Policy::Fixed, QSizePolicy::Policy::Fixed);
     const_cast<config::TerminalProfile&>(profile()).terminalSize = requestedScreenSize;
     renderer_.setScreenSize(requestedScreenSize);
-    auto const pixels = terminal::ImageSize{
-        terminal::Width(*requestedScreenSize.columns * *gridMetrics().cellSize.width),
-        terminal::Height(*requestedScreenSize.lines * *gridMetrics().cellSize.height)
-    };
+    auto const pixels =
+        terminal::ImageSize { terminal::Width(*requestedScreenSize.columns * *gridMetrics().cellSize.width),
+                              terminal::Height(*requestedScreenSize.lines * *gridMetrics().cellSize.height) };
     terminal().resizeScreen(requestedScreenSize, pixels);
     updateGeometry();
     adaptSize_();
@@ -859,13 +825,12 @@ void TerminalWidget::resizeWindow(terminal::LineCount _lines, terminal::ColumnCo
     if (*_lines)
         requestedScreenSize.lines = _lines;
 
-    //setSizePolicy(QSizePolicy::Policy::Fixed, QSizePolicy::Policy::Fixed);
+    // setSizePolicy(QSizePolicy::Policy::Fixed, QSizePolicy::Policy::Fixed);
     const_cast<config::TerminalProfile&>(profile()).terminalSize = requestedScreenSize;
     renderer_.setScreenSize(requestedScreenSize);
-    auto const pixels = terminal::ImageSize{
-        terminal::Width(*requestedScreenSize.columns * *gridMetrics().cellSize.width),
-        terminal::Height(*requestedScreenSize.lines * *gridMetrics().cellSize.height)
-    };
+    auto const pixels =
+        terminal::ImageSize { terminal::Width(*requestedScreenSize.columns * *gridMetrics().cellSize.width),
+                              terminal::Height(*requestedScreenSize.lines * *gridMetrics().cellSize.height) };
     terminal().resizeScreen(requestedScreenSize, pixels);
     updateGeometry();
     adaptSize_();
@@ -873,25 +838,20 @@ void TerminalWidget::resizeWindow(terminal::LineCount _lines, terminal::ColumnCo
 
 void TerminalWidget::setFonts(terminal::renderer::FontDescriptions _fontDescriptions)
 {
-    if (applyFontDescription(gridMetrics().cellSize,
-                             screenSize(), pixelSize(), screenDPI(),
-                             renderer_, _fontDescriptions))
+    if (applyFontDescription(
+            gridMetrics().cellSize, screenSize(), pixelSize(), screenDPI(), renderer_, _fontDescriptions))
         // resize widget (same pixels, but adjusted terminal rows/columns and margin)
         applyResize(pixelSize(), session_, renderer_);
 }
 
 bool TerminalWidget::setFontSize(text::font_size _size)
 {
-    LOGSTORE(DisplayLog)("Setting display font size and recompute metrics: {}pt",
-            _size.pt);
+    LOGSTORE(DisplayLog)("Setting display font size and recompute metrics: {}pt", _size.pt);
 
     if (!renderer_.setFontSize(_size))
         return false;
 
-    auto currentWidgetPixelSize = ImageSize{
-        terminal::Width(width()),
-        terminal::Height(height())
-    };
+    auto currentWidgetPixelSize = ImageSize { terminal::Width(width()), terminal::Height(height()) };
     renderer_.setMargin(computeMargin(gridMetrics().cellSize, screenSize(), currentWidgetPixelSize));
     // resize widget (same pixels, but adjusted terminal rows/columns and margin)
     applyResize(currentWidgetPixelSize, session_, renderer_);
@@ -904,10 +864,9 @@ bool TerminalWidget::setScreenSize(PageSize _newScreenSize)
     if (_newScreenSize == terminal().screenSize())
         return false;
 
-    auto const viewSize = ImageSize{
-        Width(*gridMetrics().cellSize.width * *profile().terminalSize.columns),
-        Height(*gridMetrics().cellSize.width * *profile().terminalSize.columns)
-    };
+    auto const viewSize =
+        ImageSize { Width(*gridMetrics().cellSize.width * *profile().terminalSize.columns),
+                    Height(*gridMetrics().cellSize.width * *profile().terminalSize.columns) };
     renderer_.setScreenSize(_newScreenSize);
     terminal().resizeScreen(_newScreenSize, viewSize);
     return true;
@@ -921,11 +880,10 @@ void TerminalWidget::setMouseCursorShape(MouseCursorShape _shape)
 
 void TerminalWidget::setWindowTitle(string_view _title)
 {
-    auto const title = _title.empty()
-        ? "contour"s
-        : fmt::format("{} - contour", _title);
+    auto const title = _title.empty() ? "contour"s : fmt::format("{} - contour", _title);
 
-    // TODO: since we do not control the whole window, it would be best to emit a signal (or call back) instead.
+    // TODO: since we do not control the whole window, it would be best to emit a signal (or call back)
+    // instead.
     if (window() && window()->windowHandle())
         window()->windowHandle()->setTitle(QString::fromUtf8(title.c_str()));
 }
@@ -1002,7 +960,7 @@ void TerminalWidget::scheduleRedraw()
 
     if (setScreenDirty())
     {
-        update(); //QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
+        update(); // QCoreApplication::postEvent(this, new QEvent(QEvent::UpdateRequest));
 
         emit terminalBufferUpdated(); // TODO: should not be invoked, as it's not guarranteed to be updated.
     }
@@ -1023,7 +981,8 @@ void TerminalWidget::onSelectionCompleted()
     if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
     {
         string const text = terminal().extractSelectionText();
-        clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())), QClipboard::Selection);
+        clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())),
+                           QClipboard::Selection);
     }
 }
 
@@ -1032,15 +991,11 @@ void TerminalWidget::bufferChanged(terminal::ScreenType _type)
     using Type = terminal::ScreenType;
     switch (_type)
     {
-        case Type::Main:
-            setCursor(Qt::IBeamCursor);
-            break;
-        case Type::Alternate:
-            setCursor(Qt::ArrowCursor);
-            break;
+    case Type::Main: setCursor(Qt::IBeamCursor); break;
+    case Type::Alternate: setCursor(Qt::ArrowCursor); break;
     }
     emit terminalBufferChanged(_type);
-    //scheduleRedraw();
+    // scheduleRedraw();
 }
 
 void TerminalWidget::discardImage(terminal::Image const& _image)
@@ -1049,4 +1004,4 @@ void TerminalWidget::discardImage(terminal::Image const& _image)
 }
 // }}}
 
-} // namespace contour
+} // namespace contour::opengl

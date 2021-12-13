@@ -12,41 +12,41 @@
  * limitations under the License.
  */
 #include <terminal/pty/UnixPty.h>
-#include <crispy/logstore.h>
+
 #include <crispy/escape.h>
+#include <crispy/logstore.h>
 
 #include <cassert>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <iostream>
 #include <limits>
 #include <stdexcept>
 #include <string>
 
-#include <iostream>
-
 #if defined(__APPLE__)
-#include <util.h>
+    #include <util.h>
 #elif defined(__FreeBSD__)
-#include <termios.h>
-#include <libutil.h>
+    #include <libutil.h>
+    #include <termios.h>
 #else
-#include <pty.h>
+    #include <pty.h>
 #endif
 
 #include <fcntl.h>
 #if !defined(__FreeBSD__)
-#include <utmp.h>
+    #include <utmp.h>
 #endif
 #include <pwd.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 #include <sys/ioctl.h>
 #include <sys/select.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
-using std::min;
 using std::max;
+using std::min;
 using std::nullopt;
 using std::numeric_limits;
 using std::optional;
@@ -55,13 +55,14 @@ using std::string_view;
 
 using namespace std::string_literals;
 
-namespace terminal {
+namespace terminal
+{
 
 namespace
 {
     static termios getTerminalSettings(int fd)
     {
-        termios tio{};
+        termios tio {};
         tcgetattr(fd, &tio);
         return tio;
     }
@@ -72,31 +73,29 @@ namespace
 
         // input flags
 #if defined(IUTF8)
-        tio.c_iflag |= IUTF8;     // Input is UTF-8; this allows character-erase to be properly applied in cooked mode.
+        tio.c_iflag |=
+            IUTF8; // Input is UTF-8; this allows character-erase to be properly applied in cooked mode.
 #endif
 
         // special characters
-        tio.c_cc[VMIN] = 1;   // Report as soon as 1 character is available.
-        tio.c_cc[VTIME] = 0;  // Disable timeout (no need).
+        tio.c_cc[VMIN] = 1;  // Report as soon as 1 character is available.
+        tio.c_cc[VTIME] = 0; // Disable timeout (no need).
 
         return tio;
     }
-}
+} // namespace
 
-UnixPty::UnixPty(PageSize const& _windowSize, optional<ImageSize> _pixels) :
-    size_{ _windowSize },
-    buffer_(4 * 1024 * 1024, {})
+UnixPty::UnixPty(PageSize const& _windowSize, optional<ImageSize> _pixels):
+    size_ { _windowSize }, buffer_(4 * 1024 * 1024, {})
 {
     // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
     assert(*_windowSize.lines <= numeric_limits<unsigned short>::max());
     assert(*_windowSize.columns <= numeric_limits<unsigned short>::max());
 
-    winsize const ws{
-        unbox<unsigned short>(_windowSize.lines),
-        unbox<unsigned short>(_windowSize.columns),
-        unbox<unsigned short>(_pixels.value_or(ImageSize{}).width),
-        unbox<unsigned short>(_pixels.value_or(ImageSize{}).height)
-    };
+    winsize const ws { unbox<unsigned short>(_windowSize.lines),
+                       unbox<unsigned short>(_windowSize.columns),
+                       unbox<unsigned short>(_pixels.value_or(ImageSize {}).width),
+                       unbox<unsigned short>(_pixels.value_or(ImageSize {}).height) };
 
 #if defined(__APPLE__)
     winsize* wsa = const_cast<winsize*>(&ws);
@@ -105,33 +104,33 @@ UnixPty::UnixPty(PageSize const& _windowSize, optional<ImageSize> _pixels) :
 #endif
 
     // TODO: termios term{};
-    if (openpty(&master_, &slave_, nullptr, /*&term*/ nullptr, (winsize *)wsa) < 0)
-        throw runtime_error{ "Failed to open PTY. "s + strerror(errno) };
+    if (openpty(&master_, &slave_, nullptr, /*&term*/ nullptr, (winsize*) wsa) < 0)
+        throw runtime_error { "Failed to open PTY. "s + strerror(errno) };
 
 #if defined(__linux__)
     if (pipe2(pipe_.data(), O_NONBLOCK /* | O_CLOEXEC | O_NONBLOCK*/) < 0)
-        throw runtime_error{ "Failed to create PTY pipe. "s + strerror(errno) };
+        throw runtime_error { "Failed to create PTY pipe. "s + strerror(errno) };
 #else
     if (pipe(pipe_.data()) < 0)
-        throw runtime_error{ "Failed to create PTY pipe. "s + strerror(errno) };
+        throw runtime_error { "Failed to create PTY pipe. "s + strerror(errno) };
     for (auto const fd: pipe_)
     {
-        int currentFlags{};
+        int currentFlags {};
         if (fcntl(fd, F_GETFL, &currentFlags) < 0)
             break;
         if (fcntl(fd, F_SETFL, currentFlags | O_CLOEXEC | O_NONBLOCK) < 0)
             break;
     }
 #endif
-    LOGSTORE(PtyLog)("PTY opened. master={}, slave={}, pipe=({}, {})",
-                     master_, slave_, pipe_.at(0), pipe_.at(1));
+    LOGSTORE(PtyLog)
+    ("PTY opened. master={}, slave={}, pipe=({}, {})", master_, slave_, pipe_.at(0), pipe_.at(1));
 }
 
 UnixPty::~UnixPty()
 {
     LOGSTORE(PtyLog)("Destructing.");
 
-    for (auto* fd: {&pipe_.at(0), &pipe_.at(1), &master_, &slave_})
+    for (auto* fd: { &pipe_.at(0), &pipe_.at(1), &master_, &slave_ })
     {
         if (*fd < 0)
             continue;
@@ -148,10 +147,10 @@ bool UnixPty::isClosed() const
 
 void UnixPty::close()
 {
-    LOGSTORE(PtyLog)("PTY closing. master={}, slave={}, pipe=({}, {})",
-                     master_, slave_, pipe_.at(0), pipe_.at(1));
+    LOGSTORE(PtyLog)
+    ("PTY closing. master={}, slave={}, pipe=({}, {})", master_, slave_, pipe_.at(0), pipe_.at(1));
 
-    for (auto* fd: {&master_, &slave_})
+    for (auto* fd: { &master_, &slave_ })
     {
         if (*fd < 0)
             continue;
@@ -167,7 +166,7 @@ void UnixPty::wakeupReader()
 {
     if (PtyLog)
         LOGSTORE(PtyLog)("waking up via pipe {}", pipe_[1]);
-    char dummy{};
+    char dummy {};
     auto const rv = ::write(pipe_[1], &dummy, sizeof(dummy));
     (void) rv;
 }
@@ -182,7 +181,7 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
         return nullopt;
     }
 
-    timeval tv{};
+    timeval tv {};
     tv.tv_sec = _timeout.count() / 1000;
     tv.tv_usec = (_timeout.count() % 1000) * 1000;
 
@@ -198,11 +197,8 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
         auto const nfds = 1 + max(master_, pipe_[0]);
 
         if (PtyInLog)
-            LOGSTORE(PtyInLog)(
-                "read: select({}, {}) for {}.{:04}s.",
-                master_, pipe_[0],
-                tv.tv_sec, tv.tv_usec / 1000
-            );
+            LOGSTORE(PtyInLog)
+        ("read: select({}, {}) for {}.{:04}s.", master_, pipe_[0], tv.tv_sec, tv.tv_usec / 1000);
 
         int rv = select(nfds, &rfd, &wfd, &efd, &tv);
 
@@ -226,7 +222,7 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
         {
             piped = true;
             int n = 0;
-            for (bool done = false; !done; )
+            for (bool done = false; !done;)
             {
                 char dummy[256];
                 rv = static_cast<int>(::read(pipe_[0], dummy, sizeof(dummy)));
@@ -243,12 +239,12 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
             {
                 if (PtyInLog)
                     LOGSTORE(PtyInLog)("Received: {}", crispy::escape(buffer_.data(), buffer_.data() + n));
-                return string_view{buffer_.data(), static_cast<size_t>(rv)};
+                return string_view { buffer_.data(), static_cast<size_t>(rv) };
             }
             else
             {
                 LOGSTORE(PtyLog)("PTY read: endpoint closed.");
-                return string_view{};
+                return string_view {};
             }
         }
 
@@ -278,7 +274,7 @@ void UnixPty::resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels)
     if (master_ < 0)
         return;
 
-    auto w = winsize{};
+    auto w = winsize {};
     w.ws_col = unbox<unsigned short>(_cells.columns);
     w.ws_row = unbox<unsigned short>(_cells.lines);
 
@@ -289,7 +285,7 @@ void UnixPty::resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels)
     }
 
     if (ioctl(master_, TIOCSWINSZ, &w) == -1)
-        throw runtime_error{strerror(errno)};
+        throw runtime_error { strerror(errno) };
 
     size_ = _cells;
 }
@@ -319,4 +315,4 @@ void UnixPty::prepareChildProcess()
         _exit(EXIT_FAILURE);
 }
 
-}  // namespace terminal
+} // namespace terminal

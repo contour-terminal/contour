@@ -14,6 +14,7 @@
 #pragma once
 
 #include <fmt/format.h>
+
 #include <QtCore/QtGlobal>
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     #include <QtOpenGL/QOpenGLShaderProgram>
@@ -22,17 +23,20 @@
 #endif
 
 #include <memory>
-#include <string>
 #include <stdexcept>
+#include <string>
 
-namespace contour::opengl {
+namespace contour::opengl
+{
 
-enum class ShaderClass {
+enum class ShaderClass
+{
     Background,
     Text
 };
 
-struct ShaderConfig {
+struct ShaderConfig
+{
     std::string vertexShader;
     std::string fragmentShader;
     std::string vertexShaderFileName;
@@ -43,10 +47,8 @@ inline std::string to_string(ShaderClass _shaderClass)
 {
     switch (_shaderClass)
     {
-        case ShaderClass::Background:
-            return "background";
-        case ShaderClass::Text:
-            return "text";
+    case ShaderClass::Background: return "background";
+    case ShaderClass::Text: return "text";
     }
 
     throw std::invalid_argument(fmt::format("ShaderClass<{}>", static_cast<unsigned>(_shaderClass)));
@@ -56,4 +58,4 @@ ShaderConfig defaultShaderConfig(ShaderClass _shaderClass);
 
 std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderConfig);
 
-} // namespace
+} // namespace contour::opengl

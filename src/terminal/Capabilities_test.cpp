@@ -12,9 +12,12 @@
  * limitations under the License.
  */
 #include <terminal/Capabilities.h>
+
 #include <crispy/utils.h>
-#include <catch2/catch_all.hpp>
+
 #include <fmt/format.h>
+
+#include <catch2/catch_all.hpp>
 
 using namespace std::string_view_literals;
 using crispy::fromHexString;

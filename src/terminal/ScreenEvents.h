@@ -20,11 +20,13 @@
 #include <string_view>
 #include <vector>
 
-namespace terminal {
+namespace terminal
+{
 
 class Image;
 
-enum class ScreenType {
+enum class ScreenType
+{
     Main = 0,
     Alternate = 1
 };
@@ -39,7 +41,8 @@ struct FontDef
     std::string emoji;
 };
 
-class ScreenEvents {
+class ScreenEvents
+{
   public:
     virtual ~ScreenEvents() = default;
 
@@ -79,7 +82,8 @@ class ScreenEvents {
     virtual void setTerminalProfile(std::string const& /*_configProfileName*/) {}
 };
 
-class MockScreenEvents : public ScreenEvents {
+class MockScreenEvents: public ScreenEvents
+{
   public:
     void reply(std::string_view _response) override { replyData += _response; }
     void setWindowTitle(std::string_view _title) override { windowTitle = _title; }
@@ -88,4 +92,4 @@ class MockScreenEvents : public ScreenEvents {
     std::string windowTitle;
 };
 
-} // end namespace
+} // namespace terminal

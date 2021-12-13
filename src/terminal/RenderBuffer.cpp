@@ -13,11 +13,12 @@
  */
 #include <terminal/RenderBuffer.h>
 
-#include <mutex>
-
 #include <fmt/format.h>
 
-namespace terminal {
+#include <mutex>
+
+namespace terminal
+{
 
 bool RenderDoubleBuffer::swapBuffers(std::chrono::steady_clock::time_point _now) noexcept
 {
@@ -44,4 +45,4 @@ bool RenderDoubleBuffer::swapBuffers(std::chrono::steady_clock::time_point _now)
     return true;
 }
 
-}
+} // namespace terminal

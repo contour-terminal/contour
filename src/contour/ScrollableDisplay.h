@@ -13,10 +13,11 @@
  */
 #pragma once
 
-#include <QtWidgets/QWidget>
 #include <QtWidgets/QScrollBar>
+#include <QtWidgets/QWidget>
 
-namespace contour {
+namespace contour
+{
 
 class TerminalSession;
 
@@ -24,7 +25,7 @@ class ScrollableDisplay: public QWidget
 {
     Q_OBJECT
 
-public:
+  public:
     ScrollableDisplay(QWidget* _parent, TerminalSession& _session, QWidget* _main);
 
     QSize sizeHint() const override;
@@ -33,11 +34,11 @@ public:
     void showScrollBar(bool _show);
     void updatePosition();
 
-public Q_SLOTS:
+  public Q_SLOTS:
     void updateValues();
     void onValueChanged();
 
-private:
+  private:
     TerminalSession& session_;
     QWidget* mainWidget_;
     QScrollBar* scrollBar_;

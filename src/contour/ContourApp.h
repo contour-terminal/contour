@@ -15,12 +15,13 @@
 
 #include <crispy/App.h>
 
-namespace contour {
+namespace contour
+{
 
 /// Contour TUI application.
 ///
 /// TODO: provide special installable targets in debian packageS (cmake and PPA)
-class ContourApp : public crispy::App
+class ContourApp: public crispy::App
 {
   public:
     ContourApp();
@@ -37,4 +38,4 @@ class ContourApp : public crispy::App
     int integrationAction();
 };
 
-}
+} // namespace contour

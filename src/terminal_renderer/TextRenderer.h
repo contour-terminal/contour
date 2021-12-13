@@ -13,28 +13,27 @@
  */
 #pragma once
 
-#include <terminal_renderer/Atlas.h>
-#include <terminal_renderer/RenderTarget.h>
-#include <terminal_renderer/BoxDrawingRenderer.h>
-
 #include <terminal/Color.h>
 #include <terminal/RenderBuffer.h>
 #include <terminal/Screen.h>
 
+#include <terminal_renderer/Atlas.h>
+#include <terminal_renderer/BoxDrawingRenderer.h>
+#include <terminal_renderer/RenderTarget.h>
+
 #include <text_shaper/font.h>
 #include <text_shaper/shaper.h>
 
-#include <crispy/LRUCache.h>
 #include <crispy/FNV.h>
+#include <crispy/LRUCache.h>
 #include <crispy/point.h>
 #include <crispy/size.h>
 
 #include <unicode/run_segmenter.h>
 
+#include <functional>
 #include <gsl/span>
 #include <gsl/span_ext>
-
-#include <functional>
 #include <list>
 #include <memory>
 #include <unordered_map>
@@ -45,11 +44,11 @@ namespace terminal::renderer
 
 enum class TextStyle
 {
-    Invalid     = 0x00,
-    Regular     = 0x10,
-    Bold        = 0x11,
-    Italic      = 0x12,
-    BoldItalic  = 0x13,
+    Invalid = 0x00,
+    Regular = 0x10,
+    Bold = 0x11,
+    Italic = 0x12,
+    BoldItalic = 0x13,
 };
 
 constexpr TextStyle operator|(TextStyle a, TextStyle b) noexcept
@@ -80,30 +79,23 @@ struct TextCacheKey
         return text == _rhs.text && style == _rhs.style;
     }
 
-    constexpr bool operator!=(TextCacheKey const& _rhs) const noexcept
-    {
-        return !(*this == _rhs);
-    }
+    constexpr bool operator!=(TextCacheKey const& _rhs) const noexcept { return !(*this == _rhs); }
 };
 
 } // end namespace terminal::renderer
 
 namespace std
 {
-    template <>
-    struct hash<terminal::renderer::TextCacheKey>
+template <>
+struct hash<terminal::renderer::TextCacheKey>
+{
+    size_t operator()(terminal::renderer::TextCacheKey const& _key) const noexcept
     {
-        size_t operator()(terminal::renderer::TextCacheKey const& _key) const noexcept
-        {
-            auto fnv = crispy::FNV<char32_t>{};
-            return static_cast<size_t>(fnv(
-                fnv.basis(),
-                _key.text,
-                static_cast<char32_t>(_key.style)
-            ));
-        }
-    };
-}
+        auto fnv = crispy::FNV<char32_t> {};
+        return static_cast<size_t>(fnv(fnv.basis(), _key.text, static_cast<char32_t>(_key.style)));
+    }
+};
+} // namespace std
 
 namespace terminal::renderer
 {
@@ -112,22 +104,22 @@ struct GridMetrics;
 
 enum class TextShapingEngine
 {
-    OpenShaper,     //!< Uses open-source implementation: harfbuzz/freetype/fontconfig
-    DWrite,         //!< native platform support: Windows
-    CoreText,       //!< native platform support: OS/X
+    OpenShaper, //!< Uses open-source implementation: harfbuzz/freetype/fontconfig
+    DWrite,     //!< native platform support: Windows
+    CoreText,   //!< native platform support: OS/X
 };
 
 enum class FontLocatorEngine
 {
-    FontConfig,     //!< platform independant font locator API
-    DWrite,         //!< native platform support: Windows
-    CoreText,       //!< native font locator on OS/X
+    FontConfig, //!< platform independant font locator API
+    DWrite,     //!< native platform support: Windows
+    CoreText,   //!< native font locator on OS/X
 };
 
 struct FontDescriptions
 {
     double dpiScale = 1.0;
-    crispy::Point dpi = {0, 0}; // 0 => auto-fill with defaults
+    crispy::Point dpi = { 0, 0 }; // 0 => auto-fill with defaults
     text::font_size size;
     text::font_description regular;
     text::font_description bold;
@@ -142,13 +134,8 @@ struct FontDescriptions
 
 inline bool operator==(FontDescriptions const& a, FontDescriptions const& b) noexcept
 {
-    return a.size.pt == b.size.pt
-        && a.regular == b.regular
-        && a.bold == b.bold
-        && a.italic == b.italic
-        && a.boldItalic == b.boldItalic
-        && a.emoji == b.emoji
-        && a.renderMode == b.renderMode;
+    return a.size.pt == b.size.pt && a.regular == b.regular && a.bold == b.bold && a.italic == b.italic
+           && a.boldItalic == b.boldItalic && a.emoji == b.emoji && a.renderMode == b.renderMode;
 }
 
 inline bool operator!=(FontDescriptions const& a, FontDescriptions const& b) noexcept
@@ -168,7 +155,7 @@ struct FontKeys
 /// Text Rendering Pipeline
 class TextRenderer: public Renderable
 {
-public:
+  public:
     TextRenderer(GridMetrics const& _gridMetrics,
                  text::shaper& _textShaper,
                  FontDescriptions& _fontDescriptions,
@@ -190,16 +177,13 @@ public:
     /// transformed into a RenderCell.
     void renderCell(RenderCell const& _cell);
 
-
     /// Must be invoked when rendering the terminal's text has finished for this frame.
     void endFrame();
 
   private:
     /// Puts a sequence of codepoints that belong to the same grid cell at @p _pos
     /// at the end of the currently filled line.
-    void appendCell(gsl::span<char32_t const> _codepoints,
-                    TextStyle _style,
-                    RGBColor _color);
+    void appendCell(gsl::span<char32_t const> _codepoints, TextStyle _style, RGBColor _color);
     text::shape_result const& cachedGlyphPositions();
     text::shape_result requestGlyphPositions();
     text::shape_result shapeRun(unicode::run_segmenter::range const& _run);
@@ -218,8 +202,8 @@ public:
     //
     struct GlyphMetrics
     {
-        ImageSize bitmapSize;    // glyph size in pixels
-        crispy::Point bearing;   // offset baseline and left to top and left of the glyph's bitmap
+        ImageSize bitmapSize;  // glyph size in pixels
+        crispy::Point bearing; // offset baseline and left to top and left of the glyph's bitmap
     };
 
     using TextureAtlas = atlas::MetadataTextureAtlas<text::glyph_key, GlyphMetrics>;
@@ -238,10 +222,10 @@ public:
     {
         switch (_format)
         {
-            case text::bitmap_format::alpha_mask: return monochromeAtlas_.get();
-            case text::bitmap_format::rgba: return colorAtlas_.get();
-            case text::bitmap_format::rgb: return lcdAtlas_.get();
-            default: return nullptr; // Should NEVER EVER happen.
+        case text::bitmap_format::alpha_mask: return monochromeAtlas_.get();
+        case text::bitmap_format::rgba: return colorAtlas_.get();
+        case text::bitmap_format::rgb: return lcdAtlas_.get();
+        default: return nullptr; // Should NEVER EVER happen.
         }
     }
 
@@ -270,7 +254,7 @@ public:
 
     // render states
     TextStyle style_ = TextStyle::Invalid;
-    RGBColor color_{};
+    RGBColor color_ {};
 
     crispy::Point textPosition_;
     std::vector<char32_t> codepoints_;
@@ -289,68 +273,74 @@ public:
     std::vector<text::shape_result> shapedLines_;
 };
 
-} // end namespace
+} // namespace terminal::renderer
 
-namespace fmt { // {{{
-    template <>
-    struct formatter<terminal::renderer::FontDescriptions> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::renderer::FontDescriptions const& fd, FormatContext& ctx)
-        {
-            return format_to(
-                ctx.out(),
-                "({}, {}, {}, {}, {}, {})",
-                fd.size,
-                fd.regular,
-                fd.bold,
-                fd.italic,
-                fd.boldItalic,
-                fd.emoji,
-                fd.renderMode);
-        }
-    };
+namespace fmt
+{ // {{{
+template <>
+struct formatter<terminal::renderer::FontDescriptions>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::renderer::FontDescriptions const& fd, FormatContext& ctx)
+    {
+        return format_to(ctx.out(),
+                         "({}, {}, {}, {}, {}, {})",
+                         fd.size,
+                         fd.regular,
+                         fd.bold,
+                         fd.italic,
+                         fd.boldItalic,
+                         fd.emoji,
+                         fd.renderMode);
+    }
+};
 
-    template <>
-    struct formatter<terminal::renderer::FontLocatorEngine> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::renderer::FontLocatorEngine value, FormatContext& ctx)
+template <>
+struct formatter<terminal::renderer::FontLocatorEngine>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::renderer::FontLocatorEngine value, FormatContext& ctx)
+    {
+        using terminal::renderer::FontLocatorEngine;
+        switch (value)
         {
-            using terminal::renderer::FontLocatorEngine;
-            switch (value)
-            {
-                case FontLocatorEngine::FontConfig:
-                    return format_to(ctx.out(), "FontConfig");
-                case FontLocatorEngine::DWrite:
-                    return format_to(ctx.out(), "DirectWrite");
-                case FontLocatorEngine::CoreText:
-                    return format_to(ctx.out(), "CoreText");
-            }
-            return format_to(ctx.out(), "UNKNOWN");
+        case FontLocatorEngine::FontConfig: return format_to(ctx.out(), "FontConfig");
+        case FontLocatorEngine::DWrite: return format_to(ctx.out(), "DirectWrite");
+        case FontLocatorEngine::CoreText: return format_to(ctx.out(), "CoreText");
         }
-    };
+        return format_to(ctx.out(), "UNKNOWN");
+    }
+};
 
-    template <>
-    struct formatter<terminal::renderer::TextShapingEngine> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::renderer::TextShapingEngine value, FormatContext& ctx)
+template <>
+struct formatter<terminal::renderer::TextShapingEngine>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::renderer::TextShapingEngine value, FormatContext& ctx)
+    {
+        using terminal::renderer::TextShapingEngine;
+        switch (value)
         {
-            using terminal::renderer::TextShapingEngine;
-            switch (value)
-            {
-                case TextShapingEngine::OpenShaper:
-                    return format_to(ctx.out(), "OpenShaper");
-                case TextShapingEngine::DWrite:
-                    return format_to(ctx.out(), "DirectWrite");
-                case TextShapingEngine::CoreText:
-                    return format_to(ctx.out(), "CoreText");
-            }
-            return format_to(ctx.out(), "UNKNOWN");
+        case TextShapingEngine::OpenShaper: return format_to(ctx.out(), "OpenShaper");
+        case TextShapingEngine::DWrite: return format_to(ctx.out(), "DirectWrite");
+        case TextShapingEngine::CoreText: return format_to(ctx.out(), "CoreText");
         }
-    };
-} // }}}
+        return format_to(ctx.out(), "UNKNOWN");
+    }
+};
+} // namespace fmt

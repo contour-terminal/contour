@@ -12,9 +12,9 @@
  * limitations under the License.
  */
 #include <crispy/App.h>
+#include <crispy/indexed.h>
 #include <crispy/logstore.h>
 #include <crispy/utils.h>
-#include <crispy/indexed.h>
 
 #include <algorithm>
 #include <array>
@@ -23,9 +23,9 @@
 #include <optional>
 
 #if !defined(_WIN32)
-#include <pwd.h>
-#include <sys/ioctl.h>
-#include <unistd.h>
+    #include <pwd.h>
+    #include <sys/ioctl.h>
+    #include <unistd.h>
 #endif
 
 using namespace std::string_view_literals;
@@ -47,169 +47,161 @@ namespace CLI = crispy::cli;
 
 namespace // {{{ helper
 {
-    std::string operator*(std::string_view a, size_t n)
-    {
-        std::string s;
-        for (size_t i = 0; i < n; ++i)
-            s += a;
-        return s;
-    }
+std::string operator*(std::string_view a, size_t n)
+{
+    std::string s;
+    for (size_t i = 0; i < n; ++i)
+        s += a;
+    return s;
+}
 
-    CLI::HelpStyle helpStyle()
-    {
-        auto style = CLI::HelpStyle{};
+CLI::HelpStyle helpStyle()
+{
+    auto style = CLI::HelpStyle {};
 
-        style.optionStyle = CLI::OptionStyle::Natural;
+    style.optionStyle = CLI::OptionStyle::Natural;
 
 #if !defined(_WIN32)
-        if (!isatty(STDOUT_FILENO))
-        {
-            style.colors.reset();
-            style.hyperlink = false;
-        }
+    if (!isatty(STDOUT_FILENO))
+    {
+        style.colors.reset();
+        style.hyperlink = false;
+    }
 #endif
 
-         return style;
-    }
+    return style;
+}
 
-    int screenWidth()
-    {
-        constexpr auto DefaultWidth = 80;
+int screenWidth()
+{
+    constexpr auto DefaultWidth = 80;
 
 #if !defined(_WIN32)
-        auto ws = winsize{};
-        if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != -1)
-            return ws.ws_col;
+    auto ws = winsize {};
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != -1)
+        return ws.ws_col;
 #endif
 
-        return DefaultWidth;
-    }
+    return DefaultWidth;
+}
 
-    void customizeDebugLog()
-    {
-        // A curated list of colors.
-        static const bool colorized =
+void customizeDebugLog()
+{
+    // A curated list of colors.
+    static const bool colorized =
 #if !defined(_WIN32)
-            isatty(STDOUT_FILENO);
+        isatty(STDOUT_FILENO);
 #else
-            true;
+        true;
 #endif
-        static constexpr auto colors = std::array<int, 23>{
-            2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15,
-            150, 155, 159, 165, 170, 175, 180, 185, 190, 195, 200,
-        };
-        logstore::set_formatter([](logstore::MessageBuilder const& _msg) -> std::string
-        {
-            auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string>
-            {
-                if (!colorized)
-                    return {"", "", ""};
-                auto const tagStart = "\033[1m";
-                auto const colorIndex = colors.at(std::hash<string_view>{}(_msg.category().name()) % colors.size());
-                auto const msgStart = fmt::format("\033[38;5;{}m", colorIndex);
-                auto const resetSGR = fmt::format("\033[m");
-                return {tagStart, msgStart, resetSGR};
-            }();
+    static constexpr auto colors = std::array<int, 23> {
+        2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 150, 155, 159, 165, 170, 175, 180, 185, 190, 195, 200,
+    };
+    logstore::set_formatter([](logstore::MessageBuilder const& _msg) -> std::string {
+        auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string> {
+            if (!colorized)
+                return { "", "", "" };
+            auto const tagStart = "\033[1m";
+            auto const colorIndex =
+                colors.at(std::hash<string_view> {}(_msg.category().name()) % colors.size());
+            auto const msgStart = fmt::format("\033[38;5;{}m", colorIndex);
+            auto const resetSGR = fmt::format("\033[m");
+            return { tagStart, msgStart, resetSGR };
+        }();
 
 #if 1
-            auto const fileName = FileSystem::path(_msg.location().file_name()).filename().string();
+        auto const fileName = FileSystem::path(_msg.location().file_name()).filename().string();
 #else
-            // fileName with path to file relative to project root
-            auto const srcIndex = string_view(_msg.location().file_name()).find("src");
-            auto const fileName =
-                string(srcIndex != string_view::npos
-                    ? string_view(_msg.location().file_name()).substr(srcIndex + 4)
-                    : string(_msg.location().file_name()));
+        // fileName with path to file relative to project root
+        auto const srcIndex = string_view(_msg.location().file_name()).find("src");
+        auto const fileName = string(srcIndex != string_view::npos
+                                         ? string_view(_msg.location().file_name()).substr(srcIndex + 4)
+                                         : string(_msg.location().file_name()));
 #endif
 
-            auto result = string{};
+        auto result = string {};
 
-            for (auto const [i, line] : crispy::indexed(crispy::split(_msg.text(), '\n')))
+        for (auto const [i, line]: crispy::indexed(crispy::split(_msg.text(), '\n')))
+        {
+            if (i != 0)
+                result += "        ";
+            else
             {
-                if (i != 0)
-                    result += "        ";
-                else
-                {
-                    result += sgrTag;
-                    result += fmt::format("[{}:{}:{}] ",
-                                          _msg.category().name(),
-                                          fileName,
-                                          _msg.location().line());
-                    result += sgrReset;
-                }
-
-                result += sgrMessage;
-                result += line;
+                result += sgrTag;
+                result +=
+                    fmt::format("[{}:{}:{}] ", _msg.category().name(), fileName, _msg.location().line());
                 result += sgrReset;
-                result += '\n';
             }
 
-            return result;
-        });
+            result += sgrMessage;
+            result += line;
+            result += sgrReset;
+            result += '\n';
+        }
 
-        logstore::ErrorLog.set_formatter(
-            [](logstore::MessageBuilder const& _msg) -> std::string
+        return result;
+    });
+
+    logstore::ErrorLog.set_formatter([](logstore::MessageBuilder const& _msg) -> std::string {
+        auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string> {
+            if (!colorized)
+                return { "", "", "" };
+            auto const tagStart = "\033[1;31m";
+            auto const msgStart = "\033[31m";
+            auto const resetSGR = "\033[m";
+            return { tagStart, msgStart, resetSGR };
+        }();
+
+        auto result = string {};
+
+        for (auto const [i, line]: crispy::indexed(crispy::split(_msg.text(), '\n')))
+        {
+            if (i != 0)
+                result += "        ";
+            else
             {
-                auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string>
-                {
-                    if (!colorized)
-                        return {"", "", ""};
-                    auto const tagStart = "\033[1;31m";
-                    auto const msgStart = "\033[31m";
-                    auto const resetSGR = "\033[m";
-                    return {tagStart, msgStart, resetSGR};
-                }();
-
-                auto result = string{};
-
-                for (auto const [i, line] : crispy::indexed(crispy::split(_msg.text(), '\n')))
-                {
-                    if (i != 0)
-                        result += "        ";
-                    else
-                    {
-                        result += sgrTag;
-                        result += fmt::format("[{}] ", "error");
-                        result += sgrReset;
-                    }
-
-                    result += sgrMessage;
-                    result += line;
-                    result += sgrReset;
-                    result += '\n';
-                }
-                return result;
+                result += sgrTag;
+                result += fmt::format("[{}] ", "error");
+                result += sgrReset;
             }
-        );
-    }
 
-    FileSystem::path xdgStateHome()
-    {
-        if (auto const* p = getenv("XDG_STATE_HOME"); p && *p)
-            return FileSystem::path(p);
+            result += sgrMessage;
+            result += line;
+            result += sgrReset;
+            result += '\n';
+        }
+        return result;
+    });
+}
+
+FileSystem::path xdgStateHome()
+{
+    if (auto const* p = getenv("XDG_STATE_HOME"); p && *p)
+        return FileSystem::path(p);
 
 #if defined(_WIN32)
-        if (auto const* p = getenv("LOCALAPPDATA"); p && *p)
-            return FileSystem::path(p);
+    if (auto const* p = getenv("LOCALAPPDATA"); p && *p)
+        return FileSystem::path(p);
 #else
-        if (passwd const* pw = getpwuid(getuid()); pw && pw->pw_dir)
-            return FileSystem::path(pw->pw_dir) / ".local" / "state";
+    if (passwd const* pw = getpwuid(getuid()); pw && pw->pw_dir)
+        return FileSystem::path(pw->pw_dir) / ".local" / "state";
 #endif
 
-        return FileSystem::temp_directory_path();
-    }
-} // }}}
+    return FileSystem::temp_directory_path();
+}
+} // namespace
 
-namespace crispy {
+namespace crispy
+{
 
 App* App::instance_ = nullptr;
 
-App::App(std::string _appName, std::string _appTitle, std::string _appVersion, std::string _appLicense) :
-    appName_{ std::move(_appName) },
-    appTitle_{ std::move(_appTitle) },
-    appVersion_{ std::move(_appVersion) },
-    appLicense_{ std::move(_appLicense) },
-    localStateDir_{xdgStateHome() / appName_}
+App::App(std::string _appName, std::string _appTitle, std::string _appVersion, std::string _appLicense):
+    appName_ { std::move(_appName) },
+    appTitle_ { std::move(_appTitle) },
+    appVersion_ { std::move(_appVersion) },
+    appLicense_ { std::move(_appLicense) },
+    localStateDir_ { xdgStateHome() / appName_ }
 {
     instance_ = this;
 
@@ -231,22 +223,14 @@ void App::link(std::string _command, std::function<int()> _handler)
 void App::listDebugTags()
 {
     auto categories = logstore::get();
-    sort(
-        begin(categories),
-        end(categories),
-        [](auto const& a, auto const& b) {
-            return a.get().name() < b.get().name();
-        }
-    );
+    sort(begin(categories), end(categories), [](auto const& a, auto const& b) {
+        return a.get().name() < b.get().name();
+    });
 
-    auto const maxNameLength = std::accumulate(
-        begin(categories),
-        end(categories),
-        size_t{0},
-        [&](auto acc, auto const& cat) {
+    auto const maxNameLength =
+        std::accumulate(begin(categories), end(categories), size_t { 0 }, [&](auto acc, auto const& cat) {
             return !cat.get().visible() ? acc : max(acc, cat.get().name().size());
-        }
-    );
+        });
     auto const column1Length = maxNameLength + 2;
 
     for (auto const& category: categories)
@@ -255,9 +239,8 @@ void App::listDebugTags()
             continue;
 
         // TODO: maybe have color assigned per category AND have that colored here then too?
-        std::cout
-            << left << setw(int(column1Length)) << category.get().name()
-            << "; " << category.get().description() << '\n';
+        std::cout << left << setw(int(column1Length)) << category.get().name() << "; "
+                  << category.get().description() << '\n';
     }
 }
 
@@ -270,15 +253,17 @@ int App::helpAction()
 int App::licenseAction()
 {
     auto const& store = crispy::cli::about::store();
-    auto const titleWidth = std::accumulate(store.begin(), store.end(),
-            0, [](int a, auto const& b) { return std::max(a, (int) b.title.size()); });
-    auto const licenseWidth = std::accumulate(store.begin(), store.end(),
-            0, [](int a, auto const& b) { return std::max(a, (int) b.license.size()); });
-    auto const urlWidth = std::accumulate(store.begin(), store.end(),
-            0, [](int a, auto const& b) { return std::max(a, (int) b.url.size()); });
+    auto const titleWidth = std::accumulate(store.begin(), store.end(), 0, [](int a, auto const& b) {
+        return std::max(a, (int) b.title.size());
+    });
+    auto const licenseWidth = std::accumulate(store.begin(), store.end(), 0, [](int a, auto const& b) {
+        return std::max(a, (int) b.license.size());
+    });
+    auto const urlWidth = std::accumulate(
+        store.begin(), store.end(), 0, [](int a, auto const& b) { return std::max(a, (int) b.url.size()); });
 
     auto const Horiz = "\u2550"sv;
-    auto const Vert  = "\u2502"sv;
+    auto const Vert = "\u2502"sv;
     auto const Cross = "\u256A"sv;
 
     cout << endl
@@ -287,19 +272,15 @@ int App::licenseAction()
          << "\u2550"sv * (appTitle_.size() + appVersion_.size() + 1) << endl
          << endl;
 
-    cout << setw(titleWidth) << "Project" << ' ' << Vert << ' '
-         << setw(licenseWidth) << "License" << ' ' << Vert << ' '
-         << "Project URL" << endl;
+    cout << setw(titleWidth) << "Project" << ' ' << Vert << ' ' << setw(licenseWidth) << "License" << ' '
+         << Vert << ' ' << "Project URL" << endl;
 
-    cout << Horiz * titleWidth << Horiz << Cross << Horiz
-         << Horiz * licenseWidth << Horiz << Cross << Horiz
-         << Horiz * urlWidth
-         << endl;
+    cout << Horiz * titleWidth << Horiz << Cross << Horiz << Horiz * licenseWidth << Horiz << Cross << Horiz
+         << Horiz * urlWidth << endl;
 
     for (auto const& project: crispy::cli::about::store())
-        cout << setw(titleWidth) << project.title << ' ' << Vert << ' '
-             << setw(licenseWidth) << project.license << ' ' << Vert << ' '
-             << project.url << endl;
+        cout << setw(titleWidth) << project.title << ' ' << Vert << ' ' << setw(licenseWidth)
+             << project.license << ' ' << Vert << ' ' << project.url << endl;
 
     return EXIT_SUCCESS;
 }
@@ -345,4 +326,4 @@ int App::run(int argc, char const* argv[])
     }
 }
 
-}
+} // namespace crispy

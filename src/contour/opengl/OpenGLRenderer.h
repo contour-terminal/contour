@@ -13,8 +13,8 @@
  */
 #pragma once
 
-#include <terminal_renderer/RenderTarget.h>
 #include <terminal_renderer/Atlas.h>
+#include <terminal_renderer/RenderTarget.h>
 
 #include <QtGui/QMatrix4x4>
 #include <QtGui/QOpenGLExtraFunctions>
@@ -27,13 +27,12 @@
 #include <memory>
 #include <optional>
 
-namespace contour::opengl {
+namespace contour::opengl
+{
 
 struct ShaderConfig;
 
-class OpenGLRenderer final :
-    public terminal::renderer::RenderTarget,
-    public QOpenGLExtraFunctions
+class OpenGLRenderer final: public terminal::renderer::RenderTarget, public QOpenGLExtraFunctions
 {
   private:
     struct TextureScheduler;
@@ -58,15 +57,17 @@ class OpenGLRenderer final :
     void scheduleScreenshot(ScreenshotCallback _callback) override;
     std::pair<crispy::ImageSize, std::vector<uint8_t>> takeScreenshot();
 
-    void renderRectangle(int _x, int _y, int _width, int _height,
-                         float _r, float _g, float _b, float _a) override;
+    void renderRectangle(
+        int _x, int _y, int _width, int _height, float _r, float _g, float _b, float _a) override;
 
     void clear(terminal::RGBAColor _fillColor) override;
     void execute() override;
 
     void clearCache() override;
 
-    std::optional<terminal::renderer::AtlasTextureInfo> readAtlas(terminal::renderer::atlas::TextureAtlasAllocator const& _allocator, terminal::renderer::atlas::AtlasID _instanceId) override;
+    std::optional<terminal::renderer::AtlasTextureInfo> readAtlas(
+        terminal::renderer::atlas::TextureAtlasAllocator const& _allocator,
+        terminal::renderer::atlas::AtlasID _instanceId) override;
 
   private:
     // private helper methods
@@ -92,7 +93,10 @@ class OpenGLRenderer final :
 
     void bindTexture(GLuint _textureId);
     GLuint textureAtlasID(terminal::renderer::atlas::AtlasID _atlasID) const noexcept;
-    void clearTextureAtlas(GLuint _textureId, int _width, int _height, terminal::renderer::atlas::Format _format);
+    void clearTextureAtlas(GLuint _textureId,
+                           int _width,
+                           int _height,
+                           terminal::renderer::atlas::Format _format);
 
     // -------------------------------------------------------------------------------------------
     // private data members
@@ -101,16 +105,16 @@ class OpenGLRenderer final :
     crispy::ImageSize size_;
     QMatrix4x4 projectionMatrix_;
 
-    terminal::renderer::PageMargin margin_{};
+    terminal::renderer::PageMargin margin_ {};
 
     std::unique_ptr<QOpenGLShaderProgram> textShader_;
     int textProjectionLocation_;
 
     // private data members for rendering textures
     //
-    GLuint vao_{};              // Vertex Array Object, covering all buffer objects
-    GLuint vbo_{};              // Buffer containing the vertex coordinates
-    //TODO: GLuint ebo_{};
+    GLuint vao_ {}; // Vertex Array Object, covering all buffer objects
+    GLuint vbo_ {}; // Buffer containing the vertex coordinates
+    // TODO: GLuint ebo_{};
     std::unordered_map<terminal::renderer::atlas::AtlasID, GLuint> atlasMap_; // maps atlas IDs to texture IDs
     GLuint currentTextureId_ = std::numeric_limits<GLuint>::max();
     std::unique_ptr<TextureScheduler> textureScheduler_;
@@ -129,10 +133,10 @@ class OpenGLRenderer final :
     std::optional<ScreenshotCallback> pendingScreenshotCallback_;
 
     // render state cache
-    struct {
-        terminal::RGBAColor backgroundColor{};
+    struct
+    {
+        terminal::RGBAColor backgroundColor {};
     } renderStateCache_;
 };
 
-} // end namespace
-
+} // namespace contour::opengl

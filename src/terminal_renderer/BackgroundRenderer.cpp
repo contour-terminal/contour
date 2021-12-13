@@ -20,12 +20,11 @@
 #include <algorithm>
 #include <iostream>
 
-namespace terminal::renderer {
+namespace terminal::renderer
+{
 
-BackgroundRenderer::BackgroundRenderer(GridMetrics const& _gridMetrics,
-                                       RGBColor const& _defaultColor) :
-    gridMetrics_{ _gridMetrics },
-    defaultColor_{ _defaultColor }
+BackgroundRenderer::BackgroundRenderer(GridMetrics const& _gridMetrics, RGBColor const& _defaultColor):
+    gridMetrics_ { _gridMetrics }, defaultColor_ { _defaultColor }
 {
 }
 
@@ -41,16 +40,14 @@ void BackgroundRenderer::renderCell(RenderCell const& _cell)
 
     auto const pos = gridMetrics_.map(_cell.position);
 
-    renderTarget().renderRectangle(
-        pos.x,
-        pos.y,
-        gridMetrics_.cellSize.width.as<int>(),
-        gridMetrics_.cellSize.height.as<int>(),
-        static_cast<float>(_cell.backgroundColor.red) / 255.0f,
-        static_cast<float>(_cell.backgroundColor.green) / 255.0f,
-        static_cast<float>(_cell.backgroundColor.blue) / 255.0f,
-        opacity_
-    );
+    renderTarget().renderRectangle(pos.x,
+                                   pos.y,
+                                   gridMetrics_.cellSize.width.as<int>(),
+                                   gridMetrics_.cellSize.height.as<int>(),
+                                   static_cast<float>(_cell.backgroundColor.red) / 255.0f,
+                                   static_cast<float>(_cell.backgroundColor.green) / 255.0f,
+                                   static_cast<float>(_cell.backgroundColor.blue) / 255.0f,
+                                   opacity_);
 }
 
-} // end namespace
+} // namespace terminal::renderer

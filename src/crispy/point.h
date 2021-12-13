@@ -26,20 +26,19 @@ struct [[nodiscard]] Point
     int y;
 };
 
-template <typename T> constexpr inline T Zero{};
-template <> constexpr inline Point Zero<Point> = Point{0, 0};
+template <typename T>
+constexpr inline T Zero {};
+template <>
+constexpr inline Point Zero<Point> = Point { 0, 0 };
 
 constexpr Point operator*(Point a, double s) noexcept
 {
-    return Point{
-        static_cast<int>(a.x * s),
-        static_cast<int>(a.y * s)
-    };
+    return Point { static_cast<int>(a.x * s), static_cast<int>(a.y * s) };
 }
 
 constexpr Point operator+(Point a, Point b) noexcept
 {
-    return Point{a.x + b.x, a.y + b.y};
+    return Point { a.x + b.x, a.y + b.y };
 }
 
 constexpr Point& operator+=(Point& a, Point b) noexcept
@@ -94,20 +93,22 @@ constexpr inline bool operator!=(Point const& a, Point const& b) noexcept
     return !(a == b);
 }
 
-}
+} // namespace crispy
 
-namespace fmt {
-    template <>
-    struct formatter<crispy::Point> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx)
-        {
-            return ctx.begin();
-        }
-        template <typename FormatContext>
-        auto format(crispy::Point coord, FormatContext& ctx)
-        {
-            return format_to(ctx.out(), "({}, {})", coord.x, coord.y);
-        }
-    };
-}
+namespace fmt
+{
+template <>
+struct formatter<crispy::Point>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(crispy::Point coord, FormatContext& ctx)
+    {
+        return format_to(ctx.out(), "({}, {})", coord.x, coord.y);
+    }
+};
+} // namespace fmt

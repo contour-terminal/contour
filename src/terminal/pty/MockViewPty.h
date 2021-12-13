@@ -21,10 +21,8 @@ namespace terminal
 
 class MockViewPty: public Pty
 {
-public:
-    explicit MockViewPty(PageSize _windowSize):
-        screenSize_{_windowSize}
-    {}
+  public:
+    explicit MockViewPty(PageSize _windowSize): screenSize_ { _windowSize } {}
 
     ~MockViewPty() {}
 
@@ -44,7 +42,7 @@ public:
     std::string& stdinBuffer() noexcept { return inputBuffer_; }
     std::string_view& stdoutBuffer() noexcept { return outputBuffer_; }
 
-private:
+  private:
     PageSize screenSize_;
     std::optional<ImageSize> pixelSize_;
     std::string inputBuffer_;
@@ -52,4 +50,4 @@ private:
     bool closed_ = false;
 };
 
-}
+} // namespace terminal

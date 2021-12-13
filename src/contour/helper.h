@@ -14,15 +14,16 @@
 #pragma once
 
 #include <contour/Config.h>
+
 #include <terminal/InputGenerator.h>
+
 #include <crispy/logstore.h>
 
-#include <QtCore/Qt>
 #include <QtCore/QCoreApplication>
+#include <QtCore/Qt>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QScreen>
 #include <QtWidgets/QWidget>
-
 #include <cctype>
 #include <map>
 #include <string>
@@ -30,30 +31,33 @@
 
 namespace terminal::renderer
 {
-    class Renderer;
+class Renderer;
 }
 
 namespace contour
 {
 
-auto inline const DisplayLog = logstore::Category("gui.display", "Logs display driver details (e.g. OpenGL).");
-auto inline const InputLog = logstore::Category("gui.input", "Logs input driver details (e.g. GUI input events).");
+auto inline const DisplayLog =
+    logstore::Category("gui.display", "Logs display driver details (e.g. OpenGL).");
+auto inline const InputLog =
+    logstore::Category("gui.input", "Logs input driver details (e.g. GUI input events).");
 auto inline const SessionLog = logstore::Category("gui.session", "VT terminal session logs");
 
 namespace detail
 {
     template <typename F>
-    class FunctionCallEvent : public QEvent
+    class FunctionCallEvent: public QEvent
     {
-    private:
+      private:
         using Fun = typename std::decay<F>::type;
         Fun fun;
-    public:
-        FunctionCallEvent(Fun && fun) : QEvent(QEvent::None), fun(std::move(fun)) {}
-        FunctionCallEvent(Fun const& fun) : QEvent(QEvent::None), fun(fun) {}
+
+      public:
+        FunctionCallEvent(Fun&& fun): QEvent(QEvent::None), fun(std::move(fun)) {}
+        FunctionCallEvent(Fun const& fun): QEvent(QEvent::None), fun(fun) {}
         ~FunctionCallEvent() { fun(); }
     };
-}
+} // namespace detail
 
 enum class MouseCursorShape
 {
@@ -81,13 +85,11 @@ constexpr inline bool isModifier(Qt::Key _key)
 {
     switch (_key)
     {
-        case Qt::Key_Alt:
-        case Qt::Key_Control:
-        case Qt::Key_Shift:
-        case Qt::Key_Meta:
-            return true;
-        default:
-            return false;
+    case Qt::Key_Alt:
+    case Qt::Key_Control:
+    case Qt::Key_Shift:
+    case Qt::Key_Meta: return true;
+    default: return false;
     }
 }
 
@@ -108,7 +110,7 @@ constexpr inline terminal::Modifier makeModifier(Qt::KeyboardModifiers _mods)
 {
     using terminal::Modifier;
 
-    Modifier mods{};
+    Modifier mods {};
 
     if (_mods & Qt::AltModifier)
         mods |= Modifier::Alt;
@@ -136,14 +138,11 @@ constexpr inline terminal::MouseButton makeMouseButton(Qt::MouseButton _button)
 {
     switch (_button)
     {
-        case Qt::MouseButton::RightButton:
-            return terminal::MouseButton::Right;
-        case Qt::MiddleButton:
-            return terminal::MouseButton::Middle;
-        case Qt::LeftButton:
-            [[fallthrough]];
-        default: // d'oh
-            return terminal::MouseButton::Left;
+    case Qt::MouseButton::RightButton: return terminal::MouseButton::Right;
+    case Qt::MiddleButton: return terminal::MouseButton::Middle;
+    case Qt::LeftButton: [[fallthrough]];
+    default: // d'oh
+        return terminal::MouseButton::Left;
     }
 }
 
@@ -172,7 +171,8 @@ terminal::renderer::PageMargin computeMargin(terminal::ImageSize _cellSize,
                                              terminal::PageSize _charCells,
                                              terminal::ImageSize _pixels) noexcept;
 
-terminal::renderer::FontDescriptions sanitizeFontDescription(terminal::renderer::FontDescriptions _fonts, crispy::Point _screenDPI);
+terminal::renderer::FontDescriptions sanitizeFontDescription(terminal::renderer::FontDescriptions _fonts,
+                                                             crispy::Point _screenDPI);
 
 terminal::PageSize screenSizeForPixels(terminal::ImageSize _pixelSize,
                                        terminal::renderer::GridMetrics const& _gridMetrics);
@@ -181,26 +181,21 @@ void applyResize(terminal::ImageSize _newPixelSize,
                  TerminalSession& _session,
                  terminal::renderer::Renderer& _renderer);
 
-bool applyFontDescription(
-    terminal::ImageSize _cellSize,
-    terminal::PageSize _screenSize,
-    terminal::ImageSize _pixelSize,
-    crispy::Point _screenDPI,
-    terminal::renderer::Renderer& _renderer,
-    terminal::renderer::FontDescriptions _fontDescriptions);
+bool applyFontDescription(terminal::ImageSize _cellSize,
+                          terminal::PageSize _screenSize,
+                          terminal::ImageSize _pixelSize,
+                          crispy::Point _screenDPI,
+                          terminal::renderer::Renderer& _renderer,
+                          terminal::renderer::FontDescriptions _fontDescriptions);
 
 constexpr Qt::CursorShape toQtMouseShape(MouseCursorShape _shape)
 {
     switch (_shape)
     {
-        case contour::MouseCursorShape::Hidden:
-            return Qt::CursorShape::BlankCursor;
-        case contour::MouseCursorShape::Arrow:
-            return Qt::CursorShape::ArrowCursor;
-        case contour::MouseCursorShape::IBeam:
-            return Qt::CursorShape::IBeamCursor;
-        case contour::MouseCursorShape::PointingHand:
-            return Qt::CursorShape::PointingHandCursor;
+    case contour::MouseCursorShape::Hidden: return Qt::CursorShape::BlankCursor;
+    case contour::MouseCursorShape::Arrow: return Qt::CursorShape::ArrowCursor;
+    case contour::MouseCursorShape::IBeam: return Qt::CursorShape::IBeamCursor;
+    case contour::MouseCursorShape::PointingHand: return Qt::CursorShape::PointingHandCursor;
     }
 
     // should never be reached
@@ -210,10 +205,10 @@ constexpr Qt::CursorShape toQtMouseShape(MouseCursorShape _shape)
 /// Declares the screen-dirtiness-vs-rendering state.
 enum class RenderState
 {
-    CleanIdle,      //!< No screen updates and no rendering currently in progress.
-    DirtyIdle,      //!< Screen updates pending and no rendering currently in progress.
-    CleanPainting,  //!< No screen updates and rendering currently in progress.
-    DirtyPainting   //!< Screen updates pending and rendering currently in progress.
+    CleanIdle,     //!< No screen updates and no rendering currently in progress.
+    DirtyIdle,     //!< Screen updates pending and no rendering currently in progress.
+    CleanPainting, //!< No screen updates and rendering currently in progress.
+    DirtyPainting  //!< Screen updates pending and rendering currently in progress.
 };
 
 /// Defines the current screen-dirtiness-vs-rendering state.
@@ -232,10 +227,7 @@ struct RenderStateManager
     std::atomic<RenderState> state_ = RenderState::CleanIdle;
     bool renderingPressure_ = false;
 
-    RenderState fetchAndClear()
-    {
-        return state_.exchange(RenderState::CleanPainting);
-    }
+    RenderState fetchAndClear() { return state_.exchange(RenderState::CleanPainting); }
 
     bool touch()
     {
@@ -244,17 +236,16 @@ struct RenderStateManager
             auto state = state_.load();
             switch (state)
             {
-                case RenderState::CleanIdle:
-                    if (state_.compare_exchange_strong(state, RenderState::DirtyIdle))
-                        return true;
-                    break;
-                case RenderState::CleanPainting:
-                    if (state_.compare_exchange_strong(state, RenderState::DirtyPainting))
-                        return false;
-                    break;
-                case RenderState::DirtyIdle:
-                case RenderState::DirtyPainting:
+            case RenderState::CleanIdle:
+                if (state_.compare_exchange_strong(state, RenderState::DirtyIdle))
+                    return true;
+                break;
+            case RenderState::CleanPainting:
+                if (state_.compare_exchange_strong(state, RenderState::DirtyPainting))
                     return false;
+                break;
+            case RenderState::DirtyIdle:
+            case RenderState::DirtyPainting: return false;
             }
         }
     }
@@ -268,49 +259,45 @@ struct RenderStateManager
             auto state = state_.load();
             switch (state)
             {
-                case RenderState::DirtyIdle:
-                    //assert(!"The impossible happened, painting but painting. Shakesbeer.");
-                    //qDebug() << "The impossible happened, onFrameSwapped() called in wrong state DirtyIdle.";
-                    [[fallthrough]];
-                case RenderState::DirtyPainting:
-                    return false;
-                case RenderState::CleanPainting:
-                    if (!state_.compare_exchange_strong(state, RenderState::CleanIdle))
-                        break;
-                    [[fallthrough]];
-                case RenderState::CleanIdle:
-                    renderingPressure_ = false;
-                    return true;
+            case RenderState::DirtyIdle:
+                // assert(!"The impossible happened, painting but painting. Shakesbeer.");
+                // qDebug() << "The impossible happened, onFrameSwapped() called in wrong state DirtyIdle.";
+                [[fallthrough]];
+            case RenderState::DirtyPainting: return false;
+            case RenderState::CleanPainting:
+                if (!state_.compare_exchange_strong(state, RenderState::CleanIdle))
+                    break;
+                [[fallthrough]];
+            case RenderState::CleanIdle: renderingPressure_ = false; return true;
             }
         }
     }
 };
 
-}
+} // namespace contour
 
 namespace fmt
 {
-    template <>
-    struct formatter<contour::RenderState>
+template <>
+struct formatter<contour::RenderState>
+{
+    using State = contour::RenderState;
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
     {
-        using State = contour::RenderState;
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(State state, FormatContext& ctx)
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(State state, FormatContext& ctx)
+    {
+        switch (state)
         {
-            switch (state)
-            {
-                case State::CleanIdle:
-                    return format_to(ctx.out(), "clean-idle");
-                case State::CleanPainting:
-                    return format_to(ctx.out(), "clean-painting");
-                case State::DirtyIdle:
-                    return format_to(ctx.out(), "dirty-idle");
-                case State::DirtyPainting:
-                    return format_to(ctx.out(), "dirty-painting");
-            }
-            return format_to(ctx.out(), "Invalid");
+        case State::CleanIdle: return format_to(ctx.out(), "clean-idle");
+        case State::CleanPainting: return format_to(ctx.out(), "clean-painting");
+        case State::DirtyIdle: return format_to(ctx.out(), "dirty-idle");
+        case State::DirtyPainting: return format_to(ctx.out(), "dirty-painting");
         }
-    };
-}
+        return format_to(ctx.out(), "Invalid");
+    }
+};
+} // namespace fmt

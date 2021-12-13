@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <crispy/utils.h>
+
 #include <catch2/catch_all.hpp>
 
 using namespace std::string_view_literals;
@@ -50,30 +51,23 @@ TEST_CASE("utils.split.2")
     CHECK(result2.size() == 2);
 }
 
-template<typename R, typename... A> R ret(R(*)(A...));
-template<typename C, typename R, typename... A> R ret(R(C::*)(A...));
+template <typename R, typename... A>
+R ret(R (*)(A...));
+template <typename C, typename R, typename... A>
+R ret(R (C::*)(A...));
 
 TEST_CASE("utils.to_integer.integer_type")
 {
-    static_assert(std::is_same_v<
-            uint8_t,
-            std::remove_reference_t<decltype(*crispy::to_integer<10, uint8_t>(""sv))>
-    >);
+    static_assert(
+        std::is_same_v<uint8_t, std::remove_reference_t<decltype(*crispy::to_integer<10, uint8_t>(""sv))>>);
 
-    static_assert(std::is_same_v<
-            int,
-            std::remove_reference_t<decltype(*crispy::to_integer<10, int>(""sv))>
-    >);
+    static_assert(std::is_same_v<int, std::remove_reference_t<decltype(*crispy::to_integer<10, int>(""sv))>>);
 
-    static_assert(std::is_same_v<
-            unsigned,
-            std::remove_reference_t<decltype(*crispy::to_integer<10, unsigned>(""sv))>
-    >);
+    static_assert(
+        std::is_same_v<unsigned, std::remove_reference_t<decltype(*crispy::to_integer<10, unsigned>(""sv))>>);
 
-    static_assert(std::is_same_v<
-            uint64_t,
-            std::remove_reference_t<decltype(*crispy::to_integer<10, uint64_t>(""sv))>
-    >);
+    static_assert(
+        std::is_same_v<uint64_t, std::remove_reference_t<decltype(*crispy::to_integer<10, uint64_t>(""sv))>>);
 }
 
 TEST_CASE("utils.to_integer.bad")

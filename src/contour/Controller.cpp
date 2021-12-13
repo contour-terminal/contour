@@ -21,7 +21,8 @@
 
 using namespace std;
 
-namespace contour {
+namespace contour
+{
 
 Controller* Controller::self_ = nullptr;
 
@@ -31,12 +32,12 @@ Controller::Controller(std::string _programPath,
                        bool _liveConfig,
                        std::string _profileName,
                        std::optional<FileSystem::path> _dumpStateAtExit):
-    programPath_{ move(_programPath) },
-    earlyExitThreshold_{ _earlyExitThreshold },
-    config_{ move(_config) },
-    liveConfig_{ _liveConfig },
-    profileName_{ move(_profileName) },
-    dumpStateAtExit_{ _dumpStateAtExit }
+    programPath_ { move(_programPath) },
+    earlyExitThreshold_ { _earlyExitThreshold },
+    config_ { move(_config) },
+    liveConfig_ { _liveConfig },
+    profileName_ { move(_profileName) },
+    dumpStateAtExit_ { _dumpStateAtExit }
 {
     // systrayIcon_ = new QSystemTrayIcon(nullptr);
     // systrayIcon_->show();
@@ -63,14 +64,12 @@ void Controller::onExit(TerminalSession& _session)
 
 void Controller::newWindow(contour::config::Config const& _config)
 {
-    auto mainWindow = new TerminalWindow{
-        earlyExitThreshold_,
-        _config,
-        liveConfig_,
-        profileName_,
-        _config.profile(profileName_)->shell.workingDirectory.string(),
-        *this
-    };
+    auto mainWindow = new TerminalWindow { earlyExitThreshold_,
+                                           _config,
+                                           liveConfig_,
+                                           profileName_,
+                                           _config.profile(profileName_)->shell.workingDirectory.string(),
+                                           *this };
 
     mainWindow->show();
 
@@ -83,14 +82,8 @@ void Controller::newWindow(contour::config::Config const& _config)
 
 void Controller::newWindow()
 {
-    auto mainWindow = new TerminalWindow{
-        earlyExitThreshold_,
-        config_,
-        liveConfig_,
-        profileName_,
-        programPath_,
-        *this
-    };
+    auto mainWindow =
+        new TerminalWindow { earlyExitThreshold_, config_, liveConfig_, profileName_, programPath_, *this };
 
     mainWindow->show();
 
@@ -122,4 +115,4 @@ void Controller::showNotification(QString const& _title, QString const& _content
 #endif
 }
 
-} // end namespace
+} // namespace contour

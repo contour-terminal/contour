@@ -21,7 +21,8 @@ using std::min;
 using std::move;
 using std::shared_ptr;
 
-namespace terminal {
+namespace terminal
+{
 
 Image::Data RasterizedImage::fragment(Coordinate _pos) const
 {
@@ -30,12 +31,14 @@ Image::Data RasterizedImage::fragment(Coordinate _pos) const
 
     auto const xOffset = _pos.column * unbox<int>(cellSize_.width);
     auto const yOffset = _pos.line * unbox<int>(cellSize_.height);
-    auto const pixelOffset = Coordinate{yOffset, xOffset};
+    auto const pixelOffset = Coordinate { yOffset, xOffset };
 
     Image::Data fragData;
     fragData.resize(*cellSize_.width * *cellSize_.height * 4); // RGBA
-    auto const availableWidth = min(unbox<int>(image_->width()) - *pixelOffset.column, unbox<int>(cellSize_.width));
-    auto const availableHeight = min(unbox<int>(image_->height()) - *pixelOffset.line, unbox<int>(cellSize_.height));
+    auto const availableWidth =
+        min(unbox<int>(image_->width()) - *pixelOffset.column, unbox<int>(cellSize_.width));
+    auto const availableHeight =
+        min(unbox<int>(image_->height()) - *pixelOffset.line, unbox<int>(cellSize_.height));
 
     // auto const availableSize = Size{availableWidth, availableHeight};
     // std::cout << fmt::format(
@@ -71,7 +74,8 @@ Image::Data RasterizedImage::fragment(Coordinate _pos) const
 
     for (int y = 0; y < availableHeight; ++y)
     {
-        auto const startOffset = ((*pixelOffset.line + (availableHeight - 1 - y)) * *image_->width() + *pixelOffset.column) * 4;
+        auto const startOffset =
+            ((*pixelOffset.line + (availableHeight - 1 - y)) * *image_->width() + *pixelOffset.column) * 4;
         auto const source = &image_->data()[startOffset];
         target = copy(source, source + availableWidth * 4, target);
 
@@ -90,9 +94,10 @@ Image::Data RasterizedImage::fragment(Coordinate _pos) const
 
 Image const& ImagePool::create(ImageFormat _format, ImageSize _size, Image::Data&& _data)
 {
-    // TODO: This operation should be idempotent, i.e. if that image has been created already, return a reference to that.
+    // TODO: This operation should be idempotent, i.e. if that image has been created already, return a
+    // reference to that.
     auto const id = nextImageId_++;
-    return images_.emplace(id, Image{id, _format, move(_data), _size});
+    return images_.emplace(id, Image { id, _format, move(_data), _size });
 }
 
 std::shared_ptr<RasterizedImage const> ImagePool::rasterize(ImageId _imageId,
@@ -102,18 +107,16 @@ std::shared_ptr<RasterizedImage const> ImagePool::rasterize(ImageId _imageId,
                                                             GridSize _cellSpan,
                                                             ImageSize _cellSize)
 {
-    rasterizedImages_.emplace_back(&images_.at(_imageId),
-                                   _alignmentPolicy, _resizePolicy,
-                                   _defaultColor, _cellSpan, _cellSize);
+    rasterizedImages_.emplace_back(
+        &images_.at(_imageId), _alignmentPolicy, _resizePolicy, _defaultColor, _cellSpan, _cellSize);
     return shared_ptr<RasterizedImage>(&rasterizedImages_.back(),
                                        [this](RasterizedImage* _image) { removeRasterizedImage(_image); });
 }
 
 void ImagePool::removeImage(Image* _image)
 {
-    if (auto i = find_if(images_.begin(),
-                         images_.end(),
-                         [&](auto const& p) { return &p.second == _image; }); i != images_.end())
+    if (auto i = find_if(images_.begin(), images_.end(), [&](auto const& p) { return &p.second == _image; });
+        i != images_.end())
     {
         onImageRemove_(_image);
         images_.erase(i);
@@ -124,7 +127,8 @@ void ImagePool::removeRasterizedImage(RasterizedImage* _image)
 {
     if (auto i = find_if(rasterizedImages_.begin(),
                          rasterizedImages_.end(),
-                         [&](RasterizedImage const& p) { return &p == _image; }); i != rasterizedImages_.end())
+                         [&](RasterizedImage const& p) { return &p == _image; });
+        i != rasterizedImages_.end())
         rasterizedImages_.erase(i);
 }
 
@@ -146,4 +150,4 @@ void ImagePool::unlink(std::string const& _name)
     namedImages_.erase(_name);
 }
 
-} // end namespace
+} // namespace terminal

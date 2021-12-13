@@ -21,7 +21,8 @@
 #include <optional>
 #include <string>
 
-namespace crispy {
+namespace crispy
+{
 
 /// General purpose Application main with CLI parameter handling and stuff.
 class App
@@ -63,4 +64,4 @@ class App
     std::map<std::string, std::function<int()>> handlers_;
 };
 
-}
+} // namespace crispy

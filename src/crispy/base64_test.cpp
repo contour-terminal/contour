@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <crispy/base64.h>
+
 #include <catch2/catch_all.hpp>
 
 using namespace crispy;
