@@ -1,3 +1,8 @@
+- [x] box drawing (e.g. helping fira code to not look shit w/ p10k zsh prompts): https://github.com/s417-lama/terminal-glyph-patcher#preset-glyphs
+- [ ] dump creation should create (overwrite) symlink to always point to the latest dump (`.../dump/latest` -> `.../dump/TIMESTAMP`)
+- [ ] reduce font cache key capacity. `notcurses-demo u` generates 10 atlases just for glyphs. That's too much and makes it slow. what makes it slow exactly?
+- [ ] enusre LRU rolling works on the atlas-side, too
+- [ ] [FEATURE;PERF] Do not evict ASCII (32..127?) from cache! Aka. have a speed-optimization code path for ASCII in glyph image caching.
 
 - [x] get screenshot before exit working
 - [ ] CI: notcureses test for each scene
@@ -5,12 +10,13 @@
 
 # TODO requirements before merge
 
+- [ ] line reflow seems to be broken on shrink "sometimes"?
 - [ ] ring: add negative and overflowing (r)iterator tests (should wrap around & succeed)
-- [ ] frontend: scrolling up/down works as expected (currently overflowing and inverted)
-- [ ] Terminal: Writing text, leading to page-scroll properly updates scrollbar.
-- [ ] Terminal: Writing text, leading to page-scroll properly updates active selection.
-- [ ] grid: revive logical line iterators, try to make them zero-copy
 - [ ] notify on dirty screen regions should become an area-test: `is (x,y) within ((x0,y0), (x1,y1))`
+- [x] frontend: scrolling up/down works as expected (currently overflowing and inverted)
+- [x] Terminal: Writing text, leading to page-scroll properly updates active selection.
+- [x] grid: revive logical line iterators, try to make them zero-copy
+- [x] Terminal: Writing text, leading to page-scroll properly updates scrollbar.
 
 # FIXMEs / CODEHALTH checklist
 

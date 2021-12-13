@@ -102,7 +102,8 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
         config_.ptyReadBufferSize,
         *this,
         config_.profile(profileName_)->maxHistoryLineCount,
-        {}, // TODO: that's actually dead param (_cursorBlinkInterval,)
+        config_.profile(profileName_)->copyLastMarkRangeOffset,
+        config_.profile(profileName_)->cursorBlinkInterval,
         steady_clock::now(),
         config_.wordDelimiters, // TODO: move to profile!
         config_.bypassMouseProtocolModifier, // TODO: you too
@@ -448,7 +449,7 @@ void TerminalSession::sendCharPressEvent(char32_t _value, Modifier _modifier, Ti
 
 void TerminalSession::sendMousePressEvent(MouseButton _button, Modifier _modifier, Timestamp _now)
 {
-    // debuglog(MouseInputTag).write("sendMousePressEvent: {}", _event);
+    // LOGSTORE(InputLog)("sendMousePressEvent: {} {} at {}", _button, _modifier, currentMousePosition_);
 
     // First try to pass the mouse event to the application, as it might have requested that.
     if (terminal().sendMousePressEvent(_button, _modifier, _now))
@@ -462,8 +463,8 @@ void TerminalSession::sendMousePressEvent(MouseButton _button, Modifier _modifie
                                             _modifier,
                                             matchModeFlags()))
     {
-        executeAllActions(*actions);
-        return;
+        if (executeAllActions(*actions))
+            return;
     }
 
     if (_button != MouseButton::Left)
@@ -525,28 +526,30 @@ void TerminalSession::sendFocusOutEvent()
 
 // }}}
 // {{{ Actions
-void TerminalSession::operator()(actions::CancelSelection)
+bool TerminalSession::operator()(actions::CancelSelection)
 {
     terminal_.clearSelection();
+    return true;
 }
 
-void TerminalSession::operator()(actions::ChangeProfile const& _action)
+bool TerminalSession::operator()(actions::ChangeProfile const& _action)
 {
     LOGSTORE(SessionLog)("Changing profile to: {}", _action.name);
     if (_action.name == profileName_)
-        return;
+        return true;
 
     activateProfile(_action.name);
+    return true;
 }
 
-void TerminalSession::operator()(actions::ClearHistoryAndReset)
+bool TerminalSession::operator()(actions::ClearHistoryAndReset)
 {
     LOGSTORE(SessionLog)("Clearing history and perform terminal hard reset");
 
     auto const screenSize = terminal_.screenSize();
     auto const pixelSize = display_->pixelSize();
 
-    terminal_.screen().resetHard();
+    terminal_.resetHard();
     auto const tmpScreenSize = PageSize{
         screenSize.lines,
         screenSize.columns + ColumnCount(1)
@@ -554,197 +557,227 @@ void TerminalSession::operator()(actions::ClearHistoryAndReset)
     terminal_.resizeScreen(tmpScreenSize, pixelSize);
     this_thread::yield();
     terminal_.resizeScreen(screenSize, pixelSize);
+    return true;
 }
 
-void TerminalSession::operator()(actions::CopyPreviousMarkRange)
+bool TerminalSession::operator()(actions::CopyPreviousMarkRange)
 {
     copyToClipboard(terminal().extractLastMarkRange());
+    return true;
 }
 
-void TerminalSession::operator()(actions::CopySelection)
+bool TerminalSession::operator()(actions::CopySelection)
 {
     copyToClipboard(terminal().extractSelectionText());
+    return true;
 }
 
-void TerminalSession::operator()(actions::DecreaseFontSize)
+bool TerminalSession::operator()(actions::DecreaseFontSize)
 {
     auto constexpr OnePt = text::font_size{ 1.0 };
     setFontSize(profile().fonts.size - OnePt);
     // auto const currentFontSize = view().renderer().fontDescriptions().size;
     // auto const newFontSize = currentFontSize - OnePt;
     // setFontSize(newFontSize);
+    return true;
 }
 
-void TerminalSession::operator()(actions::DecreaseOpacity)
+bool TerminalSession::operator()(actions::DecreaseOpacity)
 {
     if (static_cast<uint8_t>(profile_.backgroundOpacity) == 0)
-        return;
+        return true;
 
     --profile_.backgroundOpacity;
     display_->setBackgroundOpacity(profile_.backgroundOpacity);
+    return true;
 }
 
-void TerminalSession::operator()(actions::FollowHyperlink)
+bool TerminalSession::operator()(actions::FollowHyperlink)
 {
-    #if defined(LIBTERMINAL_HYPERLINKS)
     auto const _l = scoped_lock{terminal()};
     auto const currentMousePosition = terminal().currentMousePosition();
     auto const currentMousePositionRel = terminal::Coordinate{
-        currentMousePosition.row - terminal().viewport().relativeScrollOffset().as<int>(),
+        currentMousePosition.line + terminal().viewport().scrollOffset().as<LineOffset>(),
         currentMousePosition.column
     };
     if (terminal().screen().contains(currentMousePosition))
     {
-        if (auto hyperlink = terminal().screen().at(currentMousePositionRel).hyperlink(); hyperlink != nullptr)
+        if (auto hyperlink = terminal().screen().hyperlinkAt(currentMousePositionRel))
         {
             followHyperlink(*hyperlink);
-            return;
+            return true;
         }
     }
-    #endif
+    return false;
 }
 
-void TerminalSession::operator()(actions::IncreaseFontSize)
+bool TerminalSession::operator()(actions::IncreaseFontSize)
 {
     auto constexpr OnePt = text::font_size{ 1.0 };
     // auto const currentFontSize = view().renderer().fontDescriptions().size;
     // auto const newFontSize = currentFontSize + OnePt;
     // setFontSize(newFontSize);
     setFontSize(profile().fonts.size + OnePt);
+    return true;
 }
 
-void TerminalSession::operator()(actions::IncreaseOpacity)
+bool TerminalSession::operator()(actions::IncreaseOpacity)
 {
     if (static_cast<uint8_t>(profile_.backgroundOpacity) >= 255)
-        return;
+        return true;
 
     ++profile_.backgroundOpacity;
     display_->setBackgroundOpacity(profile_.backgroundOpacity);
+    return true;
 }
 
-void TerminalSession::operator()(actions::NewTerminal const& _action)
+bool TerminalSession::operator()(actions::NewTerminal const& _action)
 {
     spawnNewTerminal(_action.profileName.value_or(profileName_));
+    return true;
 }
 
-void TerminalSession::operator()(actions::OpenConfiguration)
+bool TerminalSession::operator()(actions::OpenConfiguration)
 {
     if (!QDesktopServices::openUrl(QUrl(QString::fromUtf8(config_.backingFilePath.string().c_str()))))
-        cerr << "Could not open configuration file \"" << config_.backingFilePath << "\"" << endl;
+        errorlog()("Could not open configuration file \"{}\".", config_.backingFilePath.generic_string());
+
+    return true;
 }
 
-void TerminalSession::operator()(actions::OpenFileManager)
+bool TerminalSession::operator()(actions::OpenFileManager)
 {
     auto const _l = scoped_lock{terminal()};
     auto const& cwd = terminal().screen().currentWorkingDirectory();
     if (!QDesktopServices::openUrl(QUrl(QString::fromUtf8(cwd.c_str()))))
-        cerr << "Could not open file \"" << cwd << "\"" << endl;
+        errorlog()("Could not open file \"{}\".", cwd);
+
+    return true;
 }
 
-void TerminalSession::operator()(actions::PasteClipboard)
+bool TerminalSession::operator()(actions::PasteClipboard)
 {
     if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
     {
         string const text = clipboard->text(QClipboard::Clipboard).toUtf8().toStdString();
         terminal().sendPaste(string_view{text});
     }
+
+    return true;
 }
 
-void TerminalSession::operator()(actions::PasteSelection)
+bool TerminalSession::operator()(actions::PasteSelection)
 {
     if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
     {
         string const text = clipboard->text(QClipboard::Selection).toUtf8().toStdString();
         terminal().sendPaste(string_view{text});
     }
+
+    return true;
 }
 
-void TerminalSession::operator()(actions::Quit)
+bool TerminalSession::operator()(actions::Quit)
 {
     //TODO: later warn here when more then one terminal view is open
     terminal().device().close();
     exit(EXIT_SUCCESS);
 }
 
-void TerminalSession::operator()(actions::ReloadConfig const& _action)
+bool TerminalSession::operator()(actions::ReloadConfig const& _action)
 {
     if (_action.profileName.has_value())
         reloadConfigWithProfile(_action.profileName.value());
     else
         reloadConfigWithProfile(profileName_);
+
+    return true;
 }
 
-void TerminalSession::operator()(actions::ResetConfig)
+bool TerminalSession::operator()(actions::ResetConfig)
 {
     resetConfig();
+    return true;
 }
 
-void TerminalSession::operator()(actions::ResetFontSize)
+bool TerminalSession::operator()(actions::ResetFontSize)
 {
     setFontSize(config_.profile(profileName_)->fonts.size);
+    return true;
 }
 
-void TerminalSession::operator()(actions::ScreenshotVT)
+bool TerminalSession::operator()(actions::ScreenshotVT)
 {
     auto _l = lock_guard{ terminal() };
     auto const screenshot = terminal().screen().screenshot();
     ofstream ofs{ "screenshot.vt", ios::trunc | ios::binary };
     ofs << screenshot;
+    return true;
 }
 
-void TerminalSession::operator()(actions::ScrollDown)
+bool TerminalSession::operator()(actions::ScrollDown)
 {
     terminal().viewport().scrollDown(profile_.historyScrollMultiplier);
+    return true;
 }
 
-void TerminalSession::operator()(actions::ScrollMarkDown)
+bool TerminalSession::operator()(actions::ScrollMarkDown)
 {
     terminal().viewport().scrollMarkDown();
+    return true;
 }
 
-void TerminalSession::operator()(actions::ScrollMarkUp)
+bool TerminalSession::operator()(actions::ScrollMarkUp)
 {
     terminal().viewport().scrollMarkUp();
+    return true;
 }
 
-void TerminalSession::operator()(actions::ScrollOneDown)
+bool TerminalSession::operator()(actions::ScrollOneDown)
 {
     terminal().viewport().scrollDown(LineCount(1));
+    return true;
 }
 
-void TerminalSession::operator()(actions::ScrollOneUp)
+bool TerminalSession::operator()(actions::ScrollOneUp)
 {
     terminal().viewport().scrollUp(LineCount(1));
+    return true;
 }
 
-void TerminalSession::operator()(actions::ScrollPageDown)
+bool TerminalSession::operator()(actions::ScrollPageDown)
 {
     auto const stepSize = terminal().screenSize().lines / LineCount(2);
     terminal().viewport().scrollDown(stepSize);
+    return true;
 }
 
-void TerminalSession::operator()(actions::ScrollPageUp)
+bool TerminalSession::operator()(actions::ScrollPageUp)
 {
     auto const stepSize = terminal().screenSize().lines / LineCount(2);
     terminal().viewport().scrollUp(stepSize);
+    return true;
 }
 
-void TerminalSession::operator()(actions::ScrollToBottom)
+bool TerminalSession::operator()(actions::ScrollToBottom)
 {
     terminal().viewport().scrollToBottom();
+    return true;
 }
 
-void TerminalSession::operator()(actions::ScrollToTop)
+bool TerminalSession::operator()(actions::ScrollToTop)
 {
     terminal().viewport().scrollToTop();
+    return true;
 }
 
-void TerminalSession::operator()(actions::ScrollUp)
+bool TerminalSession::operator()(actions::ScrollUp)
 {
     terminal().viewport().scrollUp(profile_.historyScrollMultiplier);
+    return true;
 }
 
-void TerminalSession::operator()(actions::SendChars const& _event)
+bool TerminalSession::operator()(actions::SendChars const& _event)
 {
     auto const now = steady_clock::now();
 
@@ -754,28 +787,31 @@ void TerminalSession::operator()(actions::SendChars const& _event)
                                       terminal::Modifier::None,
                                       now);
     }
+    return true;
 }
 
-void TerminalSession::operator()(actions::ToggleAllKeyMaps)
+bool TerminalSession::operator()(actions::ToggleAllKeyMaps)
 {
     allowKeyMappings_ = !allowKeyMappings_;
     LOGSTORE(InputLog)(
         "{} key mappings.",
         allowKeyMappings_ ? "Enabling" : "Disabling"
     );
+    return true;
 }
 
-void TerminalSession::operator()(actions::ToggleFullscreen)
+bool TerminalSession::operator()(actions::ToggleFullscreen)
 {
     if (display_)
         display_->toggleFullScreen();
+    return true;
 }
 
-void TerminalSession::operator()(actions::WriteScreen const& _event)
+bool TerminalSession::operator()(actions::WriteScreen const& _event)
 {
     terminal().writeToScreen(_event.chars);
+    return true;
 }
-
 // }}}
 // {{{ implementation helpers
 void TerminalSession::setDefaultCursor()
@@ -817,14 +853,16 @@ bool TerminalSession::reloadConfig(config::Config _newConfig, string const& _pro
     return true;
 }
 
-void TerminalSession::executeAllActions(std::vector<actions::Action> const& _actions)
+int TerminalSession::executeAllActions(std::vector<actions::Action> const& _actions)
 {
     if (allowKeyMappings_)
     {
+        int executionCount = 0;
         for (actions::Action const& action : _actions)
-            executeAction(action);
+            if (executeAction(action))
+                ++executionCount;
         scheduleRedraw();
-        return;
+        return executionCount;
     }
 
     auto const containsToggleKeybind = [](std::vector<actions::Action> const& _actions)
@@ -840,18 +878,26 @@ void TerminalSession::executeAllActions(std::vector<actions::Action> const& _act
 
     if (containsToggleKeybind(_actions))
     {
-        executeAction(actions::ToggleAllKeyMaps{});
+        bool const ex = executeAction(actions::ToggleAllKeyMaps{});
         scheduleRedraw();
-        return;
+        return ex;
     }
 
     LOGSTORE(InputLog)("Key mappings are currently disabled via ToggleAllKeyMaps input mapping action.");
+    return 0;
 }
 
-void TerminalSession::executeAction(actions::Action const& _action)
+// Executes given action @p _action.
+//
+// The return value indicates whether or not this action did apply or not.
+// For example a FollowHyperlink only applies when there is a hyperlink
+// at the current cursor position to follow,
+// however, a ScrollToTop applies regardless of the current viewport
+// scrolling position.
+bool TerminalSession::executeAction(actions::Action const& _action)
 {
     LOGSTORE(SessionLog)("executeAction: {}", _action);
-    visit(*this, _action);
+    return visit(*this, _action);
 }
 
 void TerminalSession::spawnNewTerminal(string const& _profileName)
@@ -902,10 +948,12 @@ void TerminalSession::configureTerminal()
 {
     auto const _l = scoped_lock{terminal_};
     LOGSTORE(SessionLog)("Configuring terminal.");
-    terminal::Screen& screen = terminal_.screen();
+    auto& screen = terminal_.screen();
 
     terminal_.setWordDelimiters(config_.wordDelimiters);
     terminal_.setMouseProtocolBypassModifier(config_.bypassMouseProtocolModifier);
+    terminal_.setMouseBlockSelectionModifier(config_.mouseBlockSelectionModifier);
+    terminal_.setLastMarkRangeOffset(profile_.copyLastMarkRangeOffset);
 
     LOGSTORE(SessionLog)("Setting terminal ID to {}.", profile_.terminalId);
     screen.setTerminalId(profile_.terminalId);
@@ -991,11 +1039,6 @@ bool TerminalSession::reloadConfigWithProfile(string const& _profileName)
 {
     auto newConfig = config::Config{};
     auto configFailures = int{0};
-    auto const configLogger = [&](string const& _msg)
-    {
-        cerr << "Configuration failure. " << _msg << '\n';
-        ++configFailures;
-    };
 
     try
     {
@@ -1004,15 +1047,19 @@ bool TerminalSession::reloadConfigWithProfile(string const& _profileName)
     catch (exception const& e)
     {
         //TODO: logger_.error(e.what());
-        configLogger(unhandledExceptionMessage(__PRETTY_FUNCTION__, e));
+        errorlog()("Configuration failure. {}", unhandledExceptionMessage(__PRETTY_FUNCTION__, e));
+        ++configFailures;
     }
 
     if (!newConfig.profile(_profileName))
-        configLogger(fmt::format("Currently active profile with name '{}' gone.", _profileName));
+    {
+        errorlog()(fmt::format("Currently active profile with name '{}' gone.", _profileName));
+        ++configFailures;
+    }
 
     if (configFailures)
     {
-        cerr << "Failed to load configuration.\n";
+        errorlog()("Failed to load configuration.");
         return false;
     }
 
@@ -1024,10 +1071,10 @@ bool TerminalSession::resetConfig()
     auto const ec = config::createDefaultConfig(config_.backingFilePath);
     if (ec)
     {
-        cerr << fmt::format("Failed to load default config at {}; ({}) {}\n",
-                            config_.backingFilePath.string(),
-                            ec.category().name(),
-                            ec.message());
+        errorlog()("Failed to load default config at {}; ({}) {}",
+                   config_.backingFilePath.string(),
+                   ec.category().name(),
+                   ec.message());
         return false;
     }
 

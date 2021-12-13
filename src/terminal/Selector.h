@@ -14,7 +14,6 @@
 #pragma once
 
 #include <terminal/InputGenerator.h>
-//#include <terminal/Screen.h>
 
 #include <crispy/size.h>
 #include <crispy/utils.h>
@@ -27,8 +26,15 @@
 
 namespace terminal {
 
-class Screen;
-class Cell;
+struct SelectionHelper
+{
+    virtual ~SelectionHelper() = default;
+    virtual PageSize pageSize() const noexcept = 0;
+    virtual bool wordDelimited(Coordinate _pos) const noexcept = 0;
+    virtual bool wrappedLine(LineOffset _line) const noexcept = 0;
+    virtual bool cellEmpty(Coordinate _pos) const noexcept = 0;
+    virtual int cellWidth(Coordinate _pos) const noexcept = 0;
+};
 
 /**
  * Selector API.
@@ -53,9 +59,11 @@ class Cell;
  * Third mouse press AND on same coordinate as prior mouse presses -> reselects line
  * Mouse moves -> resets last recorded mouse press coordinate
  */
-class Selector {
-  public:
-    enum class State {
+class Selection
+{
+public:
+    enum class State
+    {
         /// Inactive, but waiting for the selection to be started (by moving the cursor).
         Waiting,
         /// Active, with selection in progress.
@@ -64,146 +72,122 @@ class Selector {
         Complete,
     };
 
-    struct Range {
-        int line;
-        int fromColumn;
-        int toColumn;
+    /// Defines a columnar range at a given line.
+    struct Range
+    {
+        LineOffset line;
+        ColumnOffset fromColumn;
+        ColumnOffset toColumn;
 
-        constexpr int length() const noexcept { return toColumn - fromColumn + 1; }
+        constexpr ColumnCount length() const noexcept
+        {
+            return boxed_cast<ColumnCount>(toColumn - fromColumn + 1);
+        }
     };
 
+    Selection(SelectionHelper const& _helper, Coordinate _start):
+        helper_{_helper}, from_{_start}, to_{_start} {}
 
-    enum class Mode { Linear, LinearWordWise, FullLine, Rectangular };
-	using GetCellAt = std::function<Cell const*(Coordinate)>;
-    using GetWrappedFlag = std::function<bool(int)>;
+    virtual ~Selection() = default;
 
-    Selector(Mode _mode,
-			 GetCellAt _at,
-             GetWrappedFlag _wrappedFlag,
-			 std::u32string const& _wordDelimiters,
-			 LineCount _totalRowCount,
-             ColumnCount _columnCount,
-			 Coordinate _from);
+    constexpr Coordinate from() const noexcept { return from_; }
+    constexpr Coordinate to() const noexcept { return to_; }
 
-	/// Convenience constructor when access to Screen is available.
-    Selector(Mode _mode,
-			 std::u32string const& _wordDelimiters,
-			 Screen const& _screen,
-			 Coordinate _from);
+    /// @returns boolean indicating whether or not given absolute coordinate is within the range of the selection.
+    virtual bool contains(Coordinate _coord) const noexcept;
+    virtual bool intersects(Rect _area) const noexcept;
 
     /// Tests whether the a selection is currently in progress.
     constexpr State state() const noexcept { return state_; }
 
-    /// @todo Should be able to handle negative (or 0) and overflow coordinates,
-    ///       which should potentially adjust the screen's view (aka. modifying scrolling offset).
-    ///
-    /// @retval true TerminalView requires scrolling offset adjustments.
-    /// @retval false TerminalView's scrolling offset does not need adjustments.
-    bool extend(Coordinate const& _to);
+    /// Extends the selection to the given coordinate.
+    virtual void extend(Coordinate _to);
+
+	/// Constructs a vector of ranges for this selection.
+	virtual std::vector<Range> ranges() const;
 
     /// Marks the selection as completed.
-    void stop();
+    void complete();
 
-    constexpr Coordinate const& from() const noexcept { return from_; }
-    constexpr Coordinate const& to() const noexcept { return to_; }
+    /// Applies any scroll action to the line offsets.
+    void applyScroll(LineOffset _value, LineCount _historyLineCount);
 
-    /// @returns boolean indicating whether or not given absolute coordinate is within the range of the selection.
-    constexpr bool contains(Coordinate _coord) const noexcept
-    {
-        switch (mode_)
-        {
-            case Mode::FullLine:
-                return crispy::ascending(from_.row, _coord.row, to_.row)
-                    || crispy::ascending(to_.row, _coord.row, from_.row);
-            case Mode::Linear:
-            case Mode::LinearWordWise:
-                return crispy::ascending(from_, _coord, to_)
-                    || crispy::ascending(to_, _coord, from_);
-            case Mode::Rectangular:
-                return crispy::ascending(from_.row, _coord.row, to_.row)
-                    && crispy::ascending(from_.column, _coord.column, to_.column);
-        }
-        return false;
-    }
+    static Coordinate stretchedColumn(SelectionHelper const& _helper, Coordinate _coord) noexcept;
 
-    constexpr Mode mode() const noexcept { return mode_; }
-
-    /// Tests whether selection is upwards.
-    constexpr bool negativeSelection() const noexcept { return to_ < from_; }
-    constexpr bool singleLineSelection() const noexcept { return from_.row == to_.row; }
-
-    constexpr void swapDirection() noexcept
-    {
-        swap(from_, to_);
-    }
-
-    /// Eventually stretches the coordinate a few cells to the right if the cell at given coordinate
-    /// contains a wide character - or if the cell is empty, until the end of emptyness.
-    Coordinate stretchedColumn(Coordinate _pos) const noexcept;
-
-	/// Retrieves a vector of ranges (with one range per line) of selected cells.
-	std::vector<Range> selection() const;
-
-	/// Constructs a vector of ranges for a linear selection strategy.
-	std::vector<Range> linear() const;
-
-	/// Constructs a vector of ranges for a full-line selection strategy.
-	std::vector<Range> lines() const;
-
-	/// Constructs a vector of ranges for a rectangular selection strategy.
-	std::vector<Range> rectangular() const;
-
-    /// Renders the current selection into @p _render.
-    template <typename Renderer>
-    void render(Renderer&& _render) const
-    {
-        for (auto const& range : selection())
-            for (auto const col : crispy::times(range.fromColumn, range.length()))
-                if (Cell const* cell = at({range.line, col}); cell != nullptr)
-                    _render(Coordinate{range.line, col}, *cell);
-    }
-
-  private:
-	bool isWordWiseSelection() const noexcept
-	{
-		switch (mode_)
-		{
-			case Mode::LinearWordWise:
-				return true;
-			default:
-				return false;
-		}
-	}
-
-	Cell const* at(Coordinate const& _pos) const { return getCellAt_(_pos); }
-
-	void extendSelectionBackward();
-	void extendSelectionForward();
-
-  private:
-    State state_{State::Waiting};
-	Mode mode_;
-	GetCellAt getCellAt_;
-    GetWrappedFlag wrapped_;
-	std::u32string wordDelimiters_;
-	LineCount totalRowCount_;
-    ColumnCount columnCount_;
-    Coordinate start_{};
-    Coordinate from_{};
-    Coordinate to_{};
+protected:
+    State state_ = State::Waiting;
+    Coordinate from_;
+    Coordinate to_;
+    SelectionHelper const& helper_;
 };
+
+class RectangularSelection: public Selection
+{
+public:
+    RectangularSelection(SelectionHelper const& _helper, Coordinate _start);
+    bool contains(Coordinate _coord) const noexcept override;
+    bool intersects(Rect _area) const noexcept override;
+	std::vector<Range> ranges() const override;
+};
+
+class LinearSelection: public Selection
+{
+public:
+    LinearSelection(SelectionHelper const& _helper, Coordinate _start);
+};
+
+class WordWiseSelection: public Selection
+{
+public:
+    WordWiseSelection(SelectionHelper const& _helper, Coordinate _start);
+
+    void extend(Coordinate _to) override;
+
+    Coordinate extendSelectionBackward(Coordinate _pos) const noexcept;
+    Coordinate extendSelectionForward(Coordinate _pos) const noexcept;
+};
+
+class FullLineSelection: public Selection
+{
+public:
+    explicit FullLineSelection(SelectionHelper const& _helper, Coordinate _start);
+    void extend(Coordinate _to) override;
+};
+
+template <typename Renderer>
+void renderSelection(Selection const& _selection, Renderer&& _render);
+
+// {{{ impl
+inline void Selection::applyScroll(LineOffset _value, LineCount _historyLineCount)
+{
+    auto const n = -boxed_cast<LineOffset>(_historyLineCount);
+
+    from_.line = std::max(from_.line - _value, n);
+    to_.line = std::max(to_.line - _value, n);
+}
+
+template <typename Renderer>
+void renderSelection(Selection const& _selection, Renderer&& _render)
+{
+    for (Selection::Range const& range: _selection.ranges())
+        for (auto const col: crispy::times(*range.fromColumn, *range.length()))
+            _render(Coordinate{range.line, ColumnOffset::cast_from(col)});
+}
+// }}}
 
 } // namespace terminal
 
-namespace fmt { // {{{
+namespace fmt // {{{
+{
     template <>
-    struct formatter<terminal::Selector::State> {
+    struct formatter<terminal::Selection::State>
+    {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx)
         {
             return ctx.begin();
         }
-        using State = terminal::Selector::State;
+        using State = terminal::Selection::State;
         template <typename FormatContext>
         auto format(State _state, FormatContext& ctx)
         {
@@ -221,7 +205,8 @@ namespace fmt { // {{{
     };
 
     template <>
-    struct formatter<terminal::Selector> {
+    struct formatter<terminal::Selection>
+    {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx)
         {
@@ -229,13 +214,18 @@ namespace fmt { // {{{
         }
 
         template <typename FormatContext>
-        auto format(const terminal::Selector& _selector, FormatContext& ctx)
+        auto format(const terminal::Selection& _selector, FormatContext& ctx)
         {
             return format_to(ctx.out(),
-                             "({} .. {}; state: {})",
+                             "{}({} from {} to {})",
+                             dynamic_cast<terminal::WordWiseSelection const*>(&_selector) ? "WordWiseSelection" :
+                             dynamic_cast<terminal::FullLineSelection const*>(&_selector) ? "FullLineSelection" :
+                             dynamic_cast<terminal::RectangularSelection const*>(&_selector) ? "RectangularSelection" :
+                             dynamic_cast<terminal::LinearSelection const*>(&_selector) ? "LinearSelection" :
+                             "Selection",
+                             _selector.state(),
                              _selector.from(),
-                             _selector.to(),
-                             _selector.state());
+                             _selector.to());
         }
     };
 } // }}}

@@ -14,7 +14,7 @@
 #pragma once
 
 #include <terminal/Sequencer.h> // MouseProtocol
-#include <terminal/Coordinate.h>
+#include <terminal/primitives.h>
 
 #include <crispy/overloaded.h>
 #include <crispy/escape.h>
@@ -312,7 +312,8 @@ class InputGenerator {
     inline bool append(uint8_t _byte);
     inline bool append(unsigned int _asciiChar);
 
-  private:
+    // private fields
+    //
     KeyMode cursorKeysMode_ = KeyMode::Normal;
     KeyMode numpadKeysMode_ = KeyMode::Normal;
     bool bracketedPaste_ = false;
@@ -323,7 +324,7 @@ class InputGenerator {
     Sequence pendingSequence_{};
 
     std::set<MouseButton> currentlyPressedMouseButtons_{};
-    Coordinate currentMousePosition_{0, 0}; // current mouse position
+    Coordinate currentMousePosition_{}; // current mouse position
 };
 
 inline std::string to_string(InputGenerator::MouseEventType _value)

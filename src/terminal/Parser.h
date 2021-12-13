@@ -14,12 +14,12 @@
 #pragma once
 
 #include <terminal/ControlCode.h>
-#include <terminal/ParserEvents.h>
 
 #include <crispy/overloaded.h>
 #include <crispy/range.h>
 
 #include <unicode/utf8.h>
+#include <unicode/convert.h>
 
 #include <array>
 #include <cstdint>
@@ -493,20 +493,11 @@ namespace std { // {{{
 
 namespace terminal::parser {
 
-namespace helper
+struct ParserTable
 {
-    constexpr uint8_t operator "" _b(unsigned long long  _value)
-    {
-        return static_cast<uint8_t>(_value);
-    }
-}
-
-struct ParserTable {
-    enum UnicodeCodepoint { Value = 256 };
-
     //! State transition map from (State, Byte) to (State).
-    std::array<std::array<State, 257>, std::numeric_limits<State>::size()> transitions{
-        std::array<State, 257>{State::Ground /*XXX or Undefined?*/}};
+    std::array<std::array<State, 256>, std::numeric_limits<State>::size()> transitions{
+        std::array<State, 256>{State::Ground /*XXX or Undefined?*/}};
 
     //! actions to be invoked upon state entry
     std::array<Action, std::numeric_limits<Action>::size()> entryEvents{Action::Undefined};
@@ -515,7 +506,7 @@ struct ParserTable {
     std::array<Action, std::numeric_limits<Action>::size()> exitEvents{Action::Undefined};
 
     //! actions to be invoked for a given (State, Byte) pair.
-    std::array<std::array<Action, 257>, std::numeric_limits<Action>::size()> events;
+    std::array<std::array<Action, 256>, std::numeric_limits<Action>::size()> events;
 
     //! Standard state machine tables parsing VT225 to VT525.
     static constexpr ParserTable get();
@@ -528,23 +519,18 @@ struct ParserTable {
 
     constexpr void entry(State _state, Action _action)
     {
-        entryEvents[static_cast<size_t>(_state)] = _action;
+        entryEvents.at(static_cast<size_t>(_state)) = _action;
     }
 
     constexpr void exit(State _state, Action _action)
     {
-        exitEvents[static_cast<size_t>(_state)] = _action;
+        exitEvents.at(static_cast<size_t>(_state)) = _action;
     }
 
     // Events
     constexpr void event(State _state, Action _action, uint8_t _input)
     {
-        events[static_cast<size_t>(_state)][_input] = _action;
-    }
-
-    constexpr void event(State _state, Action _action, UnicodeCodepoint)
-    {
-        events[static_cast<size_t>(_state)][UnicodeCodepoint::Value] = _action;
+        events.at(static_cast<size_t>(_state)).at(_input) = _action;
     }
 
     constexpr void event(State _state, Action _action, Range _input)
@@ -605,175 +591,6 @@ struct ParserTable {
     // }}}
 };
 
-constexpr ParserTable ParserTable::get() // {{{
-{
-    using namespace helper;
-
-    auto t = ParserTable{};
-
-    // Ground
-    t.event(State::Ground, Action::Execute, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
-    t.event(State::Ground, Action::Print, Range{0x20_b, 0x7F_b});
-    t.event(State::Ground, Action::Print, Range{0xA0_b, 0xFF_b});
-    t.event(State::Ground, Action::Print, UnicodeCodepoint::Value);
-
-    // EscapeIntermediate
-    t.event(State::EscapeIntermediate, Action::Execute, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
-    t.event(State::EscapeIntermediate, Action::Collect, Range{0x20_b, 0x2F_b});
-    t.event(State::EscapeIntermediate, Action::Ignore, 0x7F_b);
-    t.transition(State::EscapeIntermediate, State::Ground, Action::ESC_Dispatch, Range{0x30_b, 0x7E_b});
-
-    // Escape
-    t.entry(State::Escape, Action::Clear);
-    t.event(State::Escape, Action::Execute, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
-    t.event(State::Escape, Action::Ignore, 0x7F_b);
-    t.transition(State::Escape, State::IgnoreUntilST, 0x58_b); // SOS (start of string): ESC X
-    t.transition(State::Escape, State::PM_String, 0x5E_b);     // PM (private message): ESC ^
-    t.transition(State::Escape, State::APC_String, 0x5F_b);    // APC (application program command): ESC _
-    t.transition(State::Escape, State::DCS_Entry, 0x50_b);
-    t.transition(State::Escape, State::OSC_String, 0x5D_b);
-    t.transition(State::Escape, State::CSI_Entry, 0x5B_b);
-    t.transition(State::Escape, State::Ground, Action::ESC_Dispatch, Range{0x30_b, 0x4F_b});
-    t.transition(State::Escape, State::Ground, Action::ESC_Dispatch, Range{0x51_b, 0x57_b});
-    t.transition(State::Escape, State::Ground, Action::ESC_Dispatch, 0x59_b);
-    t.transition(State::Escape, State::Ground, Action::ESC_Dispatch, 0x5A_b);
-    t.transition(State::Escape, State::Ground, Action::Ignore, 0x5C_b); // ST for OSC, DCS, ...
-    t.transition(State::Escape, State::Ground, Action::ESC_Dispatch, Range{0x60_b, 0x7E_b});
-    t.transition(State::Escape, State::EscapeIntermediate, Action::Collect, Range{0x20_b, 0x2F_b});
-
-    // IgnoreUntilST
-    t.event(State::IgnoreUntilST, Action::Ignore, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
-    t.transition(State::IgnoreUntilST, State::Ground, 0x9C_b);
-
-    // DCS_Entry
-    t.entry(State::DCS_Entry, Action::Clear);
-    t.event(State::DCS_Entry, Action::Ignore, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
-    t.event(State::DCS_Entry, Action::Ignore, 0x7F_b);
-    t.transition(State::DCS_Entry, State::DCS_Intermediate, Action::Collect, Range{0x20_b, 0x2F_b});
-    t.transition(State::DCS_Entry, State::DCS_Ignore, 0x3A_b);
-    t.transition(State::DCS_Entry, State::DCS_Param, Action::Param, Range{0x30_b, 0x39_b});
-    t.transition(State::DCS_Entry, State::DCS_Param, Action::Param, 0x3B_b);
-    t.transition(State::DCS_Entry, State::DCS_Param, Action::CollectLeader, Range{0x3C_b, 0x3F_b});
-    t.transition(State::DCS_Entry, State::DCS_PassThrough, Range{0x40_b, 0x7E_b});
-
-    // DCS_Ignore
-    t.event(State::DCS_Ignore, Action::Ignore, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b}, Range{0x20_b, 0x7F_b});
-    t.event(State::DCS_Ignore, Action::Print, Range{0xA0_b, 0xFF_b});
-    t.event(State::DCS_Ignore, Action::Print, UnicodeCodepoint::Value);
-    t.transition(State::DCS_Ignore, State::Ground, 0x9C_b);
-
-    // DCS_Intermediate
-    t.event(State::DCS_Intermediate, Action::Ignore, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
-    t.event(State::DCS_Intermediate, Action::Collect, Range{0x20_b, 0x2F_b});
-    t.event(State::DCS_Intermediate, Action::Ignore, 0x7F_b);
-    t.transition(State::DCS_Intermediate, State::DCS_PassThrough, Range{0x40_b, 0x7E_b});
-
-    // DCS_PassThrough
-    t.entry(State::DCS_PassThrough, Action::Hook);
-    t.event(State::DCS_PassThrough, Action::Put, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b}, Range{0x20_b, 0x7E_b});
-    t.event(State::DCS_PassThrough, Action::Ignore, 0x7F_b);
-    t.exit(State::DCS_PassThrough, Action::Unhook);
-    t.transition(State::DCS_PassThrough, State::Ground, 0x9C_b);
-
-    // DCS_Param
-    t.event(State::DCS_Param, Action::Execute, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
-    t.event(State::DCS_Param, Action::Param, Range{0x30_b, 0x39_b}, 0x3B_b);
-    t.event(State::DCS_Param, Action::Ignore, 0x7F_b);
-    t.transition(State::DCS_Param, State::DCS_Ignore, 0x3A_b);
-    t.transition(State::DCS_Param, State::DCS_Ignore, Range{0x3C_b, 0x3F_b});
-    t.transition(State::DCS_Param, State::DCS_Intermediate, Range{0x20_b, 0x2F_b});
-    t.transition(State::DCS_Param, State::DCS_PassThrough, Range{0x40_b, 0x7E_b});
-
-    // OSC_String
-	// (xterm extension to also allow BEL (0x07) as OSC terminator)
-    t.entry(State::OSC_String, Action::OSC_Start);
-    t.event(State::OSC_String, Action::Ignore, Range{0x00_b, 0x06_b}, Range{0x08_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
-    t.event(State::OSC_String, Action::OSC_Put, Range{0x20_b, 0x7F_b});
-    t.event(State::OSC_String, Action::OSC_Put, Range{0xA0_b, 0xFF_b});
-    t.event(State::OSC_String, Action::OSC_Put, UnicodeCodepoint::Value);
-    t.exit(State::OSC_String, Action::OSC_End);
-    t.transition(State::OSC_String, State::Ground, 0x9C_b);
-    t.transition(State::OSC_String, State::Ground, 0x07_b);
-
-    // APC_String
-    // APC := ESC _ ... ST
-    t.entry(State::APC_String, Action::APC_Start);
-    t.event(State::APC_String, Action::APC_Put, Range{0x20_b, 0x7F_b});
-    t.event(State::APC_String, Action::APC_Put, Range{0xA0_b, 0xFF_b});
-    t.event(State::APC_String, Action::APC_Put, UnicodeCodepoint::Value);
-    t.exit(State::APC_String, Action::APC_End);
-    t.transition(State::APC_String, State::Ground, 0x9C_b); // ST
-    t.transition(State::APC_String, State::Ground, 0x07_b); // BEL
-
-    // PM_String
-    // PM := ESC ^ ... ST
-    t.entry(State::PM_String, Action::PM_Start);
-    t.event(State::PM_String, Action::PM_Put, Range{0x00_b, 0x17_b}, 0x19_b,
-                                              Range{0x1C_b, 0x1F_b},
-                                              Range{0x20_b, 0x7F_b},
-                                              Range{0xA0_b, 0xFF_b});
-    t.event(State::PM_String, Action::PM_Put, UnicodeCodepoint::Value);
-    t.exit(State::PM_String, Action::PM_End);
-    t.transition(State::PM_String, State::Ground, 0x9C_b); // ST
-    t.transition(State::PM_String, State::Ground, 0x07_b); // BEL
-
-    // CSI_Entry
-    t.entry(State::CSI_Entry, Action::Clear);
-    t.event(State::CSI_Entry, Action::Execute, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
-    t.event(State::CSI_Entry, Action::Ignore, 0x7F_b);
-    t.transition(State::CSI_Entry, State::Ground, Action::CSI_Dispatch, Range{0x40_b, 0x7E_b});
-    t.transition(State::CSI_Entry, State::CSI_Intermediate, Action::Collect, Range{0x20_b, 0x2F_b});
-    t.transition(State::CSI_Entry, State::CSI_Ignore, 0x3A_b);
-    t.transition(State::CSI_Entry, State::CSI_Param, Action::Param, Range{0x30_b, 0x39_b});
-    t.transition(State::CSI_Entry, State::CSI_Param, Action::Param, 0x3B_b);
-    t.transition(State::CSI_Entry, State::CSI_Param, Action::CollectLeader, Range{0x3C_b, 0x3F_b});
-
-    // CSI_Param
-    t.event(State::CSI_Param, Action::Execute, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
-    t.event(State::CSI_Param, Action::Param, Range{0x30_b, 0x39_b});
-    t.event(State::CSI_Param, Action::Param, 0x3A_b);
-    t.event(State::CSI_Param, Action::Param, 0x3B_b);
-    t.event(State::CSI_Param, Action::Ignore, 0x7F_b);
-    t.transition(State::CSI_Param, State::CSI_Ignore, Range{0x3C_b, 0x3F_b});
-    t.transition(State::CSI_Param, State::CSI_Intermediate, Action::Collect, Range{0x20_b, 0x2F_b});
-    t.transition(State::CSI_Param, State::Ground, Action::CSI_Dispatch, Range{0x40_b, 0x7E_b});
-
-    // CSI_Ignore
-    t.event(State::CSI_Ignore, Action::Execute, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
-    t.event(State::CSI_Ignore, Action::Ignore, Range{0x20_b, 0x3F_b}, 0x7F_b);
-    t.transition(State::CSI_Ignore, State::Ground, Range{0x40_b, 0x7E_b});
-
-    // CSI_Intermediate
-    t.event(State::CSI_Intermediate, Action::Execute, Range{0x00_b, 0x17_b}, 0x19_b, Range{0x1C_b, 0x1F_b});
-    t.event(State::CSI_Intermediate, Action::Collect, Range{0x20_b, 0x2F_b});
-    t.event(State::CSI_Intermediate, Action::Ignore, 0x7F_b);
-    t.transition(State::CSI_Intermediate, State::CSI_Ignore, Range{0x30_b, 0x3F_b});
-    t.transition(State::CSI_Intermediate, State::Ground, Action::CSI_Dispatch, Range{0x40_b, 0x7E_b});
-
-    // * -> Ground, ...
-    for (State anywhere = std::numeric_limits<State>::min(); anywhere <= std::numeric_limits<State>::max(); ++anywhere)
-    {
-        t.transition(anywhere, State::Ground, 0x18_b);
-        t.transition(anywhere, State::Ground, 0x1A_b);
-        t.transition(anywhere, State::Escape, 0x1B_b);
-
-        // C1 control need special 2-byte treatment due to this Parser
-        // being UTF-8.
-        // t.transition(anywhere, State::Ground, 0x9C_b);
-        // t.transition(anywhere, State::Ground, Range{0x80_b, 0x8F_b});
-        // t.transition(anywhere, State::Ground, Range{0x91_b, 0x97_b});
-        // t.transition(anywhere, State::DCS_Entry, 0x90_b);     // C1: DCS
-        // t.transition(anywhere, State::IgnoreUntilST, 0x98_b); // C1: SOS
-        // t.transition(anywhere, State::PM_String, 0x9E_b);     // C1: PM
-        // t.transition(anywhere, State::APC_String, 0x9F_b);    // C1: APC
-    }
-
-    // TODO: verify the above is correct (programatically as much as possible)
-    // TODO: see if we can reduce the preassure on L2 caches (is this even an issue?)
-
-    return t;
-} // }}}
-
 /**
  * Terminal Parser.
  *
@@ -783,146 +600,46 @@ constexpr ParserTable ParserTable::get() // {{{
  * The code comments for enum values have been mostly copied into this source for better
  * understanding when working with this parser.
  */
+template <typename EventListener>
+// TODO: C++20 concepts: EventListener must satisfy the original ParserEvents interface
 class Parser {
+  private:
+    Parser() = default;
+    friend EventListener;
+
   public:
     using ParseError = std::function<void(std::string const&)>;
     using iterator = uint8_t const*;
 
-    explicit Parser(ParserEvents& _listener) :
+    explicit Parser(EventListener& _listener) :
         eventListener_{ _listener }
     {
     }
 
-
     void parseFragment(std::string_view s);
+
     void parseFragment(std::u32string_view s)
     {
-        for (auto const codepoint : s)
-            processInput(codepoint);
+        for (char32_t const u32: s)
+            parseFragment(unicode::convert_to<char>(u32));
     }
 
     State state() const noexcept { return state_; }
 
   private:
-    void processInput(char32_t _ch);
-    void handle(ActionClass _actionClass, Action _action, char32_t _char);
+    void handle(ActionClass _actionClass, Action _action, char _char);
 
-  private:
+    // private properties
+    //
     State state_ = State::Ground;
-    unicode::utf8_decoder_state utf8DecoderState_{};
-
-    ParserEvents& eventListener_;
+    EventListener& eventListener_;
 };
-
-inline void Parser::processInput(char32_t _ch)
-{
-    auto const s = static_cast<size_t>(state_);
-
-    ParserTable static constexpr table = ParserTable::get();
-
-    auto const ch = _ch < 0xFF ? _ch : static_cast<char32_t>(ParserTable::UnicodeCodepoint::Value);
-
-    if (auto const t = table.transitions[s][ch]; t != State::Undefined)
-    {
-        // handle(_actionClass, _action, currentChar());
-        handle(ActionClass::Leave, table.exitEvents[s], _ch);
-        handle(ActionClass::Transition, table.events[s][ch], _ch);
-        state_ = t;
-        handle(ActionClass::Enter, table.entryEvents[static_cast<size_t>(t)], _ch);
-    }
-    else if (Action const a = table.events[s][ch]; a != Action::Undefined)
-        handle(ActionClass::Event, a, _ch);
-    else
-    {
-        if (ch < 128)
-            eventListener_.error(fmt::format("Parser Error: Unknown action for state/input pair ({}, '{}' 0x{:02X})", state_, char(ch), static_cast<uint32_t>(ch)));
-        else
-            eventListener_.error(fmt::format("Parser Error: Unknown action for state/input pair ({}, 0x{:02X})", state_, static_cast<uint32_t>(ch)));
-    }
-}
-
-inline void Parser::handle(ActionClass _actionClass, Action _action, char32_t _char)
-{
-    (void) _actionClass;
-    // if (_action != Action::Ignore && _action != Action::Undefined)
-    //     fmt::print("Parser.handle: {} {} {} {}\n",
-    //         state_,
-    //         _actionClass,
-    //         _action,
-    //         crispy::escape(unicode::convert_to<char>(_char))
-    //     );
-
-    switch (_action)
-    {
-        case Action::Clear:
-            eventListener_.clear();
-            break;
-        case Action::CollectLeader:
-            eventListener_.collectLeader(static_cast<char>(_char));
-            break;
-        case Action::Collect:
-            eventListener_.collect(static_cast<char>(_char));
-            break;
-        case Action::Param:
-            eventListener_.param(static_cast<char>(_char));
-            break;
-        case Action::Execute:
-            eventListener_.execute(static_cast<char>(_char));
-            break;
-        case Action::ESC_Dispatch:
-            eventListener_.dispatchESC(static_cast<char>(_char));
-            break;
-        case Action::CSI_Dispatch:
-            eventListener_.dispatchCSI(static_cast<char>(_char));
-            break;
-        case Action::Print:
-            eventListener_.print(_char);
-            break;
-        case Action::OSC_Start:
-            eventListener_.startOSC();
-            break;
-        case Action::OSC_Put:
-            eventListener_.putOSC(_char);
-            break;
-        case Action::OSC_End:
-            eventListener_.dispatchOSC();
-            break;
-        case Action::Hook:
-            eventListener_.hook(static_cast<char>(_char));
-            break;
-        case Action::Put:
-            eventListener_.put(_char);
-            break;
-        case Action::Unhook:
-            eventListener_.unhook();
-            break;
-        case Action::APC_Start:
-            eventListener_.startAPC();
-            break;
-        case Action::APC_Put:
-            eventListener_.putAPC(_char);
-            break;
-        case Action::APC_End:
-            eventListener_.dispatchAPC();
-            break;
-        case Action::PM_Start:
-            eventListener_.startPM();
-            break;
-        case Action::PM_Put:
-            eventListener_.putPM(_char);
-            break;
-        case Action::PM_End:
-            eventListener_.dispatchPM();
-            break;
-        case Action::Ignore:
-        case Action::Undefined:
-            break;
-    }
-}
 
 void dot(std::ostream& _os, ParserTable const& _table);
 
 }  // end namespace terminal::parser
+
+#include <terminal/Parser-impl.h>
 
 namespace fmt { // {{{
     template <>

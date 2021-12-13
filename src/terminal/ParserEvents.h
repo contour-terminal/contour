@@ -37,7 +37,7 @@ class ParserEvents {
      * be displayed. 20 (SP) and 7F (DEL) have special behaviour in later VT series, as
      * described in ground.
      */
-    virtual void print(char32_t _text) = 0;
+    virtual void print(char _text) = 0;
 
     /// Optimization that passes in ASCII chars between [0x20 .. 0x7F].
     virtual void print(std::string_view _chars) = 0;
@@ -111,7 +111,7 @@ class ParserEvents {
      * This action passes characters from the control string to the OSC Handler as they arrive.
      * There is therefore no need to buffer characters until the end of the control string is recognised.
      */
-    virtual void putOSC(char32_t _char) = 0;
+    virtual void putOSC(char _char) = 0;
 
     /**
      * This action is called when the OSC string is terminated by ST, CAN, SUB or ESC,
@@ -134,7 +134,7 @@ class ParserEvents {
      * handler that has previously been selected by the hook action. C0 controls are also passed
      * to the handler.
      */
-    virtual void put(char32_t _char) = 0;
+    virtual void put(char _char) = 0;
 
     /**
      * When a device control string is terminated by ST, CAN, SUB or ESC, this action calls the
@@ -144,7 +144,7 @@ class ParserEvents {
     virtual void unhook() = 0;
 
     virtual void startAPC() = 0;
-    virtual void putAPC(char32_t) = 0;
+    virtual void putAPC(char) = 0;
     virtual void dispatchAPC() = 0;
 
     virtual void startPM() = 0;
@@ -155,7 +155,7 @@ class ParserEvents {
 class BasicParserEvents : public ParserEvents {
   public:
     void error(std::string_view const&) override {}
-    void print(char32_t) override {}
+    void print(char) override {}
     void print(std::string_view) override {}
     void execute(char) override {}
     void clear() override {}
@@ -165,13 +165,13 @@ class BasicParserEvents : public ParserEvents {
     void dispatchESC(char) override {}
     void dispatchCSI(char) override {}
     void startOSC() override {}
-    void putOSC(char32_t) override {}
+    void putOSC(char) override {}
     void dispatchOSC() override {}
     void hook(char) override {}
-    void put(char32_t) override {}
+    void put(char) override {}
     void unhook() override {}
     void startAPC() override {}
-    void putAPC(char32_t) override {}
+    void putAPC(char) override {}
     void dispatchAPC() override {}
     void startPM() override {}
     void putPM(char32_t) override {}

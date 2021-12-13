@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include <crispy/boxed.h>
+#include <crispy/LRUCache.h>
 #include <string>
 #include <unordered_map>
 #include <list>
@@ -34,7 +36,7 @@ enum class HyperlinkState {
 using URI = std::string;
 
 struct HyperlinkInfo { // TODO: rename to Hyperlink
-    std::string id;
+    std::string userId; //!< application provied ID
     URI uri;
     HyperlinkState state = HyperlinkState::Inactive;
 
@@ -70,8 +72,46 @@ struct HyperlinkInfo { // TODO: rename to Hyperlink
     }
 };
 
-using HyperlinkRef = std::shared_ptr<HyperlinkInfo>;
+namespace detail { struct HyperlinkTag{}; }
+using HyperlinkId = crispy::boxed<uint16_t, detail::HyperlinkTag>;
 
 bool is_local(HyperlinkInfo const& _hyperlink);
+
+using HyperlinkCache = crispy::LRUCache<HyperlinkId, std::shared_ptr<HyperlinkInfo>>;
+
+struct HyperlinkStorage
+{
+    HyperlinkCache cache{1024};
+    HyperlinkId nextHyperlinkId = HyperlinkId(1);
+
+    std::shared_ptr<HyperlinkInfo> hyperlinkById(HyperlinkId _id) noexcept
+    {
+        if (!!_id)
+            if (auto href = cache.try_get(_id))
+                return *href;
+        return {};
+    }
+
+    std::shared_ptr<HyperlinkInfo const> hyperlinkById(HyperlinkId _id) const noexcept
+    {
+        if (!!_id)
+            if (auto href = cache.try_get(_id))
+                return *href;
+        return {};
+    }
+
+    HyperlinkId hyperlinkIdByUserId(std::string const& _id) noexcept
+    {
+        for (auto& href: cache)
+        {
+            if (href.second->userId == _id)
+            {
+                cache.touch(href.first);
+                return href.first;
+            }
+        }
+        return HyperlinkId{};
+    }
+};
 
 } // end namespace

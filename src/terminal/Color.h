@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include <terminal/defines.h>
+
 #include <fmt/format.h>
 
 #include <cassert>
@@ -66,6 +68,11 @@ struct RGBColor {
         green{static_cast<uint8_t>((rgb >> 8) & 0xFF)},
         blue{static_cast<uint8_t>(rgb & 0xFF)}
     {}
+
+    constexpr uint32_t value() const noexcept
+    {
+        return (red << 16) | (green << 8) | blue;
+    }
 
     explicit RGBColor(std::string const& _hexCode);
 
@@ -139,37 +146,54 @@ constexpr bool operator!=(RGBAColor a, RGBAColor b) noexcept
 // {{{ Color
 enum class ColorType : uint8_t { Undefined, Default, Bright, Indexed, RGB };
 
-struct Color
+struct CONTOUR_PACKED Color
 {
-    ColorType type;
-    union {
-        uint8_t index;
-        RGBColor rgb;
-    };
+    // Layout:
+    //
+    // 31                                         0
+    //  │uint8        │ uint8   │ uint8  │  uint8 │
+    //  ╞═════════════╪═════════╪════════╪════════╡
+    //  │type=RGB     │     RED │  GREEN │   BLUE │
+    //  │type=Index   │  unused │ unused │  index │
+    //  │type=Bright  │  unused │ unused │  index │
+    //  │type=Default │  unused │ unused │ unused │
+    //
+    uint32_t content = 0;
 
-    constexpr Color() noexcept : type{ColorType::Undefined}, index{} {}
+    constexpr Color() noexcept = default;
     constexpr Color(Color const&) noexcept = default;
     constexpr Color(Color&&) noexcept = default;
     constexpr Color& operator=(Color const&) noexcept = default;
     constexpr Color& operator=(Color&&) noexcept = default;
 
-    constexpr Color(BrightColor _value) noexcept : type{ColorType::Bright}, index{static_cast<uint8_t>(_value)} {}
-    constexpr Color(IndexedColor _value) noexcept : type{ColorType::Indexed}, index{static_cast<uint8_t>(_value)} {}
-    constexpr Color(RGBColor _rgb) noexcept : type{ColorType::RGB}, rgb{_rgb} {}
+    constexpr Color(BrightColor _value) noexcept:
+        content{unsigned(_value) & 0xFF | (unsigned(ColorType::Bright) << 24)} {}
+    constexpr Color(IndexedColor _value) noexcept:
+        content{unsigned(_value) & 0xFF | (unsigned(ColorType::Indexed) << 24)} {}
+    constexpr Color(RGBColor _rgb) noexcept:
+        content{_rgb.value() | (unsigned(ColorType::RGB) << 24)} {}
 
-    constexpr explicit Color(ColorType _type, uint8_t _index) noexcept : type{_type}, index{_index} {}
+    constexpr ColorType type() const noexcept { return static_cast<ColorType>((content >> 24) & 0xFF); }
+    constexpr uint8_t index() const noexcept { return content & 0xFF; }
+    constexpr RGBColor rgb() const noexcept { return RGBColor(content & 0xFFFFFF); }
 
     constexpr static Color Undefined() noexcept { return Color{ColorType::Undefined, 0}; }
     constexpr static Color Default() noexcept { return Color{ColorType::Default, 0}; }
     constexpr static Color Bright(uint8_t _index) noexcept { return Color{ColorType::Bright, _index}; }
     constexpr static Color Indexed(uint8_t _index) noexcept { return Color{ColorType::Indexed, _index}; }
-    // The line below breaks on Windows, most likely because RGB is a PPD, let's find out. ;-)
+    constexpr static Color Indexed(IndexedColor _index) noexcept { return Color{ColorType::Indexed, (uint8_t) _index}; }
+    // TODO: The line below breaks on Windows, most likely because RGB is a PPD, let's find out. ;-)
     //constexpr static Color RGB(RGBColor _color) noexcept { return Color{_color}; }
+
+private:
+    constexpr Color(ColorType _type, uint8_t _value) noexcept:
+        content{(static_cast<uint32_t>(_type) << 24)
+              | (static_cast<uint32_t>(_value) & 0xFF)} {}
 };
 
 constexpr bool operator==(Color a, Color b) noexcept
 {
-    return a.type == b.type && a.index == b.index;
+    return a.content == b.content;
 }
 
 constexpr bool operator!=(Color a, Color b) noexcept
@@ -177,16 +201,16 @@ constexpr bool operator!=(Color a, Color b) noexcept
     return !(a == b);
 }
 
-constexpr bool isUndefined(Color _color) noexcept { return _color.type == ColorType::Undefined; }
-constexpr bool isDefaultColor(Color _color) noexcept { return _color.type == ColorType::Default; }
+constexpr bool isUndefined(Color _color) noexcept { return _color.type() == ColorType::Undefined; }
+constexpr bool isDefaultColor(Color _color) noexcept { return _color.type() == ColorType::Default; }
 
-constexpr bool isIndexedColor(Color _color) noexcept { return _color.type == ColorType::Undefined; }
-constexpr bool isBrightColor(Color _color) noexcept { return _color.type == ColorType::Bright; }
-constexpr bool isRGBColor(Color _color) noexcept { return _color.type == ColorType::RGB; }
+constexpr bool isIndexedColor(Color _color) noexcept { return _color.type() == ColorType::Indexed; }
+constexpr bool isBrightColor(Color _color) noexcept { return _color.type() == ColorType::Bright; }
+constexpr bool isRGBColor(Color _color) noexcept { return _color.type() == ColorType::RGB; }
 
-constexpr int getIndexedColor(Color _color) noexcept { return _color.index; }
-constexpr int getBrightColor(Color _color) noexcept { return _color.index; }
-constexpr RGBColor getRGBColor(Color _color) noexcept { return _color.rgb; }
+constexpr int getIndexedColor(Color _color) noexcept { return _color.index(); }
+constexpr int getBrightColor(Color _color) noexcept { return _color.index(); }
+constexpr RGBColor getRGBColor(Color _color) noexcept { return _color.rgb(); }
 
 std::string to_string(Color color);
 std::string to_string(IndexedColor color);

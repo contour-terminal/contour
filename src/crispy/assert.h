@@ -14,6 +14,7 @@
 #pragma once
 
 #include <exception>
+#include <functional>
 #include <string_view>
 
 #include <fmt/format.h>
@@ -28,8 +29,8 @@ namespace crispy
 #undef Expects
 #endif
 
-#if defined(Ensure)
-#undef Ensure
+#if defined(Ensures)
+#undef Ensures
 #endif
 
 /// Function signature for custom assertion failure handlers.
@@ -88,7 +89,7 @@ inline void set_fail_handler(fail_handler_t _handler)
         ); \
     } while (0)
 
-#define Ensure(cond) \
+#define Ensures(cond) \
     do { \
         ::crispy::detail::check( \
             (cond), #cond, \

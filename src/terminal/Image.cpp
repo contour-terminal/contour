@@ -29,13 +29,13 @@ Image::Data RasterizedImage::fragment(Coordinate _pos) const
     // TODO: respect resize hint
 
     auto const xOffset = _pos.column * unbox<int>(cellSize_.width);
-    auto const yOffset = _pos.row * unbox<int>(cellSize_.height);
+    auto const yOffset = _pos.line * unbox<int>(cellSize_.height);
     auto const pixelOffset = Coordinate{yOffset, xOffset};
 
     Image::Data fragData;
     fragData.resize(*cellSize_.width * *cellSize_.height * 4); // RGBA
-    auto const availableWidth = min(unbox<int>(image_->width()) - pixelOffset.column, unbox<int>(cellSize_.width));
-    auto const availableHeight = min(unbox<int>(image_->height()) - pixelOffset.row, unbox<int>(cellSize_.height));
+    auto const availableWidth = min(unbox<int>(image_->width()) - *pixelOffset.column, unbox<int>(cellSize_.width));
+    auto const availableHeight = min(unbox<int>(image_->height()) - *pixelOffset.line, unbox<int>(cellSize_.height));
 
     // auto const availableSize = Size{availableWidth, availableHeight};
     // std::cout << fmt::format(
@@ -47,7 +47,7 @@ Image::Data RasterizedImage::fragment(Coordinate _pos) const
     // );
 
     // auto const fitsWidth = pixelOffset.column + cellSize_.width < image_.get().width();
-    // auto const fitsHeight = pixelOffset.row + cellSize_.height < image_.get().height();
+    // auto const fitsHeight = pixelOffset.line + cellSize_.height < image_.get().height();
     // if (!fitsWidth || !fitsHeight)
     //     std::cout << fmt::format("ImageFragment: out of bounds{}{} ({}x{}); {}\n",
     //             fitsWidth ? "" : " (width)",
@@ -71,7 +71,7 @@ Image::Data RasterizedImage::fragment(Coordinate _pos) const
 
     for (int y = 0; y < availableHeight; ++y)
     {
-        auto const startOffset = ((pixelOffset.row + (availableHeight - 1 - y)) * *image_->width() + pixelOffset.column) * 4;
+        auto const startOffset = ((*pixelOffset.line + (availableHeight - 1 - y)) * *image_->width() + *pixelOffset.column) * 4;
         auto const source = &image_->data()[startOffset];
         target = copy(source, source + availableWidth * 4, target);
 
@@ -88,22 +88,23 @@ Image::Data RasterizedImage::fragment(Coordinate _pos) const
     return fragData;
 }
 
-shared_ptr<Image const> ImagePool::create(ImageFormat _format, ImageSize _size, Image::Data&& _data)
+Image const& ImagePool::create(ImageFormat _format, ImageSize _size, Image::Data&& _data)
 {
     // TODO: This operation should be idempotent, i.e. if that image has been created already, return a reference to that.
-    images_.emplace_back(nextImageId_++, _format, move(_data), _size);
-    return shared_ptr<Image>(&images_.back(),
-                             [this](Image* _image) { removeImage(_image); });
+    auto const id = nextImageId_++;
+    return images_.emplace(id, Image{id, _format, move(_data), _size});
 }
 
-shared_ptr<RasterizedImage const> ImagePool::rasterize(shared_ptr<Image const> _image,
-                                                       ImageAlignment _alignmentPolicy,
-                                                       ImageResize _resizePolicy,
-                                                       RGBAColor _defaultColor,
-                                                       GridSize _cellSpan,
-                                                       ImageSize _cellSize)
+std::shared_ptr<RasterizedImage const> ImagePool::rasterize(ImageId _imageId,
+                                                            ImageAlignment _alignmentPolicy,
+                                                            ImageResize _resizePolicy,
+                                                            RGBAColor _defaultColor,
+                                                            GridSize _cellSpan,
+                                                            ImageSize _cellSize)
 {
-    rasterizedImages_.emplace_back(move(_image), _alignmentPolicy, _resizePolicy, _defaultColor, _cellSpan, _cellSize);
+    rasterizedImages_.emplace_back(&images_.at(_imageId),
+                                   _alignmentPolicy, _resizePolicy,
+                                   _defaultColor, _cellSpan, _cellSize);
     return shared_ptr<RasterizedImage>(&rasterizedImages_.back(),
                                        [this](RasterizedImage* _image) { removeRasterizedImage(_image); });
 }
@@ -112,7 +113,7 @@ void ImagePool::removeImage(Image* _image)
 {
     if (auto i = find_if(images_.begin(),
                          images_.end(),
-                         [&](Image const& p) { return &p == _image; }); i != images_.end())
+                         [&](auto const& p) { return &p.second == _image; }); i != images_.end())
     {
         onImageRemove_(_image);
         images_.erase(i);
@@ -127,15 +128,15 @@ void ImagePool::removeRasterizedImage(RasterizedImage* _image)
         rasterizedImages_.erase(i);
 }
 
-void ImagePool::link(std::string const& _name, std::shared_ptr<Image const> _imageRef)
+void ImagePool::link(std::string const& _name, Image const& _imageRef)
 {
-    namedImages_[_name] = std::move(_imageRef);
+    namedImages_[_name] = _imageRef.id();
 }
 
-std::shared_ptr<Image const> ImagePool::findImageByName(std::string const& _name) const
+Image const* ImagePool::findImageByName(std::string const& _name) const noexcept
 {
-    if (auto const i = namedImages_.find(_name); i != namedImages_.end())
-        return i->second;
+    if (ImageId const* id = namedImages_.try_get(_name))
+        return &images_.at(*id);
 
     return {};
 }

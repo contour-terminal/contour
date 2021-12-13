@@ -13,588 +13,297 @@
  */
 #pragma once
 
-#include <terminal/Charset.h>
-#include <terminal/Color.h>
-#include <terminal/Coordinate.h>
-#include <terminal/Hyperlink.h>
-#include <terminal/Image.h>
+#include <terminal/GraphicsAttributes.h>
+#include <terminal/Line.h>
 #include <terminal/primitives.h>
 
+#include <crispy/assert.h>
 #include <crispy/algorithm.h>
-#include <crispy/indexed.h>
-#include <crispy/point.h>
-#include <crispy/range.h>
-#include <crispy/size.h>
-#include <crispy/span.h>
-#include <crispy/times.h>
-#include <crispy/utils.h>
+#include <crispy/ring.h>
 
-#include <unicode/grapheme_segmenter.h>
-#include <unicode/width.h>
-#include <unicode/utf8.h>
+#include <unicode/convert.h>
 
-#include <fmt/format.h>
+#include <gsl/span>
+#include <gsl/span_ext>
+
+#include <range/v3/view/iota.hpp>
+#include <range/v3/algorithm/copy.hpp>
+#include <range/v3/iterator/insert_iterators.hpp>
 
 #include <algorithm>
 #include <array>
-#include <deque>
-#include <functional>
-#include <list>
-#include <map>
-#include <memory>
-#include <optional>
-#include <set>
 #include <sstream>
-#include <stack>
 #include <string>
 #include <string_view>
-#include <vector>
+#include <utility>
 
 namespace terminal {
 
 // {{{ Margin
-struct Margin {
-	struct Range {
-		int from;
-		int to;
+struct Margin
+{
+	struct Horizontal
+    {
+		ColumnOffset from;
+		ColumnOffset to; // TODO: call it begin and end and have end point to to+1 to avoid unnecessary +1's later
 
-		constexpr int length() const noexcept { return to - from + 1; }
-		constexpr bool operator==(Range const& rhs) const noexcept { return from == rhs.from && to == rhs.to; }
-		constexpr bool operator!=(Range const& rhs) const noexcept { return !(*this == rhs); }
-
-		constexpr bool contains(int _value) const noexcept { return from <= _value && _value <= to; }
+		constexpr ColumnCount length() const noexcept { return unbox<ColumnCount>(to - from) + ColumnCount(1); }
+		constexpr bool contains(ColumnOffset _value) const noexcept { return from <= _value && _value < to; }
+		constexpr bool operator==(Horizontal rhs) const noexcept { return from == rhs.from && to == rhs.to; }
+		constexpr bool operator!=(Horizontal rhs) const noexcept { return !(*this == rhs); }
 	};
 
-	Range vertical{}; // top-bottom
-	Range horizontal{}; // left-right
-};
-// }}}
-
-// {{{ CellFlags
-enum class CellFlags : uint32_t
-{
-    Bold = (1 << 0),
-    Faint = (1 << 1),
-    Italic = (1 << 2),
-    Underline = (1 << 3),
-    Blinking = (1 << 4),
-    Inverse = (1 << 5),
-    Hidden = (1 << 6),
-    CrossedOut = (1 << 7),
-    DoublyUnderlined = (1 << 8),
-    CurlyUnderlined = (1 << 9),
-    DottedUnderline = (1 << 10),
-    DashedUnderline = (1 << 11),
-    Framed = (1 << 12),
-    Encircled = (1 << 13),
-    Overline = (1 << 14),
-    Image = (1 << 15),
-
-    // The following flags are for internal use only.
-    Hover = (1 << 16), // Marks the cell with "Hyperlink is currently hovered" hint.
-    CellSequenceStart = (1 << 17), // Marks the beginning of a consecutive sequence of non-empty grid cells.
-    CellSequenceEnd = (1 << 18), // Marks the end of a consecutive sequence of non-empty grid cells.
-};
-
-constexpr CellFlags& operator|=(CellFlags& a, CellFlags b) noexcept
-{
-    a = static_cast<CellFlags>(static_cast<unsigned>(a) | static_cast<unsigned>(b));
-	return a;
-}
-
-constexpr CellFlags& operator&=(CellFlags& a, CellFlags b) noexcept
-{
-    a = static_cast<CellFlags>(static_cast<unsigned>(a) & static_cast<unsigned>(b));
-	return a;
-}
-
-/// Tests if @p b is contained in @p a.
-constexpr bool operator&(CellFlags a, CellFlags b) noexcept
-{
-    return (static_cast<unsigned>(a) & static_cast<unsigned>(b)) != 0;
-}
-
-constexpr bool contains_all(CellFlags _base, CellFlags _test) noexcept
-{
-    return (static_cast<unsigned>(_base) & static_cast<unsigned>(_test)) == static_cast<unsigned>(_test);
-}
-
-/// Merges two CellFlags sets.
-constexpr CellFlags operator|(CellFlags a, CellFlags b) noexcept
-{
-    return static_cast<CellFlags>(static_cast<unsigned>(a) | static_cast<unsigned>(b));
-}
-
-/// Inverts the flags set.
-constexpr CellFlags operator~(CellFlags a) noexcept
-{
-    return static_cast<CellFlags>(~static_cast<unsigned>(a));
-}
-
-/// Tests for all flags cleared state.
-constexpr bool operator!(CellFlags a) noexcept
-{
-    return static_cast<unsigned>(a) == 0;
-}
-// }}}
-
-// {{{ GraphicsAttributes
-/// Character graphics rendition information.
-struct GraphicsAttributes {
-    Color foregroundColor{DefaultColor()};
-    Color backgroundColor{DefaultColor()};
-    Color underlineColor{DefaultColor()};
-    CellFlags styles{};
-
-    RGBColor getUnderlineColor(ColorPalette const& _colorPalette, RGBColor _defaultColor) const noexcept
+	struct Vertical
     {
-        if (isDefaultColor(underlineColor))
-            return _defaultColor;
+		LineOffset from;
+		LineOffset to; // TODO: call it begin and end and have end point to to+1 to avoid unnecessary +1's later
 
-        float const opacity = [this]() {
-            if (styles & CellFlags::Faint)
-                return 0.5f;
-            else
-                return 1.0f;
-        }();
+		constexpr LineCount length() const noexcept { return unbox<LineCount>(to - from) + LineCount(1); }
+		constexpr bool contains(LineOffset _value) const noexcept { return from <= _value && _value < to; }
+		constexpr bool operator==(Vertical const& rhs) const noexcept { return from == rhs.from && to == rhs.to; }
+		constexpr bool operator!=(Vertical const& rhs) const noexcept { return !(*this == rhs); }
+	};
 
-        bool const bright = (styles & CellFlags::Bold) != 0;
-        return apply(_colorPalette, underlineColor, ColorTarget::Foreground, bright) * opacity;
-    }
-
-    std::pair<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette, bool _reverseVideo) const noexcept
-    {
-        float const opacity = [this]() { // TODO: don't make opacity dependant on Faint-attribute.
-            if (styles & CellFlags::Faint)
-                return 0.5f;
-            else
-                return 1.0f;
-        }();
-
-        bool const bright = (styles & CellFlags::Bold);
-
-        auto const [fgColorTarget, bgColorTarget] =
-            _reverseVideo
-                ? std::pair{ ColorTarget::Background, ColorTarget::Foreground }
-                : std::pair{ ColorTarget::Foreground, ColorTarget::Background };
-
-        return (styles & CellFlags::Inverse) == 0
-            ? std::pair{ apply(_colorPalette, foregroundColor, fgColorTarget, bright) * opacity,
-                         apply(_colorPalette, backgroundColor, bgColorTarget, false) }
-            : std::pair{ apply(_colorPalette, backgroundColor, bgColorTarget, bright) * opacity,
-                         apply(_colorPalette, foregroundColor, fgColorTarget, false) };
-    }
+	Vertical vertical{}; // top-bottom
+	Horizontal horizontal{}; // left-right
 };
 
-constexpr bool operator==(GraphicsAttributes const& a, GraphicsAttributes const& b) noexcept
+constexpr bool operator==(Margin const& a, PageSize b) noexcept
 {
-    return a.backgroundColor == b.backgroundColor
-        && a.foregroundColor == b.foregroundColor
-        && a.styles == b.styles
-        && a.underlineColor == b.underlineColor;
+    return a.horizontal.from.value == 0
+        && a.horizontal.to.value + 1 == b.columns.value
+        && a.vertical.from.value == 0
+        && a.vertical.to.value + 1 == b.lines.value;
 }
 
-constexpr bool operator!=(GraphicsAttributes const& a, GraphicsAttributes const& b) noexcept
+constexpr bool operator!=(Margin const& a, PageSize b) noexcept
 {
     return !(a == b);
 }
 // }}}
 
-// {{{ Cell
-/// Grid cell with character and graphics rendition information.
-class Cell {
-  public:
-    static size_t constexpr MaxCodepoints = 9;
+template <typename Cell> using Lines = crispy::ring<Line<Cell>>;
 
-    Cell(char32_t _codepoint, GraphicsAttributes _attrib) noexcept :
-#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
-        codepoints_{},
-#else
-        codepointCount_{0},
-        codepoints_{},
-#endif
-        width_{1},
-        attributes_{_attrib}
+/**
+ * Represents a logical grid line, i.e. a sequence lines that were written without
+ * an explicit linefeed, triggering an auto-wrap.
+ */
+template <typename Cell>
+struct LogicalLine
+{
+    LineOffset top{};
+    LineOffset bottom{};
+    std::vector<std::reference_wrapper<Line<Cell>>> lines{};
+
+    Line<Cell> joinWithRightTrimmed() const
     {
-        // setCharacter(_codepoint);
-        if (_codepoint)
+        // TODO: determine final line's column count and pass it to ctor.
+        typename Line<Cell>::Buffer output;
+        int i = 0;
+        auto lineFlags = lines.front().get().flags();
+        for (Line<Cell> const& line: lines)
+            for (Cell const& cell: line.cells())
+                output.emplace_back(cell);
+
+        while (!output.empty() && output.back().empty())
+            output.pop_back();
+
+        return Line<Cell>(output, lineFlags);
+    }
+
+    std::string text() const
+    {
+        std::string output;
+        for (auto const& line: lines)
+            output += line.get().toUtf8();
+        return output;
+    }
+};
+
+template <typename Cell>
+bool operator==(LogicalLine<Cell> const& a, LogicalLine<Cell> const& b) noexcept
+{
+    return a.top == b.top
+        && a.bottom == b.bottom;
+}
+
+template <typename Cell>
+bool operator!=(LogicalLine<Cell> const& a, LogicalLine<Cell> const& b) noexcept
+{
+    return !(a == b);
+}
+
+template <typename Cell>
+struct LogicalLines
+{
+    LineOffset topMostLine;
+    LineOffset bottomMostLine;
+    std::reference_wrapper<Lines<Cell>> lines;
+
+    struct iterator // {{{
+    {
+        std::reference_wrapper<Lines<Cell>> lines;
+        LineOffset top;
+        LineOffset next; // index to next logical line's beginning
+        LineOffset bottom;
+        LogicalLine<Cell> current;
+
+        iterator(std::reference_wrapper<Lines<Cell>> _lines,
+                 LineOffset _top, LineOffset _next, LineOffset _bottom):
+            lines{_lines},
+            top{_top},
+            next{_next},
+            bottom{_bottom}
         {
-#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
-            codepoints_.assign(1, _codepoint);
-#else
-            codepointCount_ = 1;
-            codepoints_[0] = _codepoint;
-#endif
-            width_ = static_cast<uint8_t>(std::max(unicode::width(_codepoint), 1));
+            Expects(_top <= next);
+            Expects(next <= _bottom+1);
+            ++*this;
         }
-    }
 
-    Cell() noexcept :
-#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
-        codepoints_{},
-#else
-        codepointCount_{0},
-        codepoints_{},
-#endif
-        width_{1},
-        attributes_{}
-    {}
+        LogicalLine<Cell> const& operator*() const noexcept { return current; }
+        LogicalLine<Cell> const* operator->() const noexcept { return &current; }
 
-    void reset(GraphicsAttributes _attributes = {}) noexcept
-    {
-        attributes_ = _attributes;
-        width_ = 1;
-#if defined(LIBTERMINAL_HYPERLINKS)
-        hyperlink_ = nullptr;
-#endif
-#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
-        codepoints_.clear();
-#else
-        codepointCount_ = 0;
-#endif
-#if defined(LIBTERMINAL_IMAGES)
-        imageFragment_.reset();
-#endif
-    }
-
-#if defined(LIBTERMINAL_HYPERLINKS)
-    void reset(GraphicsAttributes _attribs, HyperlinkRef const& _hyperlink) noexcept
-    {
-        attributes_ = _attribs;
-        width_ = 1;
-#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
-        codepoints_.clear();
-#else
-        codepointCount_ = 0;
-#endif
-        hyperlink_ = _hyperlink;
-#if defined(LIBTERMINAL_IMAGES)
-        imageFragment_.reset();
-#endif
-    }
-#endif
-
-    Cell(Cell const&) = default;
-    Cell(Cell&&) noexcept = default;
-    Cell& operator=(Cell const&) = default;
-    Cell& operator=(Cell&&) noexcept = default;
-
-    std::u32string_view codepoints() const noexcept
-    {
-#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
-        return codepoints_;
-#else
-        return {codepoints_.data(), codepointCount_};
-#endif
-    }
-
-    char32_t codepoint(size_t i) const noexcept
-    {
-#if !defined(NDEBUG)
-        return codepoints_.at(i);
-#else
-        return codepoints_[i];
-#endif
-    }
-
-    std::size_t codepointCount() const noexcept
-    {
-#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
-        return codepoints_.size();
-#else
-        return codepointCount_;
-#endif
-    }
-
-    bool empty() const noexcept
-    {
-        return (codepointCount() == 0 || codepoint(0) == 0x20)
-#if defined(LIBTERMINAL_IMAGES)
-            && !imageFragment_
-#endif
-            ;
-    }
-
-    constexpr int width() const noexcept { return width_; }
-
-    constexpr GraphicsAttributes const& attributes() const noexcept { return attributes_; }
-
-#if defined(LIBTERMINAL_IMAGES)
-    std::optional<ImageFragment> const& imageFragment() const noexcept { return imageFragment_; }
-
-    void setImage(ImageFragment _imageFragment)
-    {
-        imageFragment_.emplace(std::move(_imageFragment));
-    }
-
-#if defined(LIBTERMINAL_HYPERLINKS)
-    void setImage(ImageFragment _imageFragment, HyperlinkRef _hyperlink)
-    {
-        setImage(std::move(_imageFragment));
-        hyperlink_ = std::move(_hyperlink);
-    }
-#endif
-#endif
-
-    void setCharacter(char32_t _codepoint) noexcept
-    {
-#if defined(LIBTERMINAL_IMAGES)
-        imageFragment_.reset();
-#endif
-        if (_codepoint)
+        iterator& operator++()
         {
-#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
-            codepoints_.assign(1, _codepoint);
-#else
-            codepointCount_ = 1;
-            codepoints_[0] = _codepoint;
-#endif
-            width_ = static_cast<uint8_t>(std::max(unicode::width(_codepoint), 1));
-        }
-        else
-        {
-#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
-            codepoints_.clear();
-#else
-            codepointCount_ = 0;
-#endif
-            width_ = 1;
-        }
-    }
-
-    void setWidth(uint8_t _width) noexcept
-    {
-        width_ = _width;
-    }
-
-    int appendCharacter(char32_t _codepoint) noexcept
-    {
-#if defined(LIBTERMINAL_IMAGES)
-        imageFragment_.reset();
-#endif
-        if (codepointCount() < MaxCodepoints)
-        {
-#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
-            codepoints_.push_back(_codepoint);
-#else
-            codepoints_[codepointCount_++] = _codepoint;
-#endif
-
-            constexpr bool AllowWidthChange = false; // TODO: make configurable
-
-            auto const width = [&]() {
-                switch (_codepoint)
-                {
-                    case 0xFE0E:
-                        return 1;
-                    case 0xFE0F:
-                        return 2;
-                    default:
-                        return unicode::width(_codepoint);
-                }
-            }();
-
-            if (width != width_ && AllowWidthChange)
+            if (next == bottom + 1)
             {
-                int const diff = width - width_;
-                width_ = static_cast<uint8_t>(width);
-                return diff;
+                current.top = next;
+                current.bottom = next;
+                return *this;
             }
+
+            Expects(!lines.get()[unbox<int>(next)].wrapped());
+
+            current.top = LineOffset::cast_from(next);
+            current.lines.clear();
+            do current.lines.emplace_back(lines.get()[unbox<int>(next++)]);
+            while (next <= bottom && lines.get()[unbox<int>(next)].wrapped());
+
+            current.bottom = LineOffset::cast_from(next - 1);
+
+            return *this;
         }
-        return 0;
-    }
 
-    void setAttributes(GraphicsAttributes _attributes) noexcept
-    {
-        attributes_ = _attributes;
-    }
+        iterator& operator--()
+        {
+            if (next == top - 1)
+            {
+                current.top = top - 1;
+                current.bottom = top - 1;
+                return *this;
+            }
 
-    std::string toUtf8() const;
+            auto const bottomMost = next - 1;
+            do --next;
+            while (lines.get()[unbox<int>(next)].wrapped());
+            auto const topMost = next;
 
-#if defined(LIBTERMINAL_HYPERLINKS)
-    HyperlinkRef hyperlink() const noexcept { return hyperlink_; }
-    void setHyperlink(HyperlinkRef const& _hyperlink) { hyperlink_ = _hyperlink; }
-#endif
+            current.top = topMost;
+            current.bottom = bottomMost;
 
-  private:
-    /// Unicode codepoint to be displayed.
-#if defined(CONTOUR_TERMINAL_CELL_USE_STRING)
-    std::u32string codepoints_;
-#else
-    uint8_t codepointCount_;
-    std::array<char32_t, 8> codepoints_;
-#endif
+            current.lines.clear();
+            for (auto i = topMost; i <= bottomMost; ++i)
+                current.lines.emplace_back(lines.get()[unbox<int>(i)]);
 
-    /// number of cells this cell spans. Usually this is 1, but it may be also 0 or >= 2.
-    uint8_t width_;
+            return *this;
+        }
 
-    /// Graphics renditions, such as foreground/background color or other grpahics attributes.
-    GraphicsAttributes attributes_;
+        iterator& operator++(int) { auto c = *this; ++*this; return c; }
+        iterator& operator--(int) { auto c = *this; --*this; return c; }
 
-#if defined(LIBTERMINAL_HYPERLINKS)
-    HyperlinkRef hyperlink_ = nullptr;
-#endif
+        bool operator==(iterator const& other) const noexcept { return current == other.current; }
+        bool operator!=(iterator const& other) const noexcept { return current != other.current; }
+    }; // }}}
 
-    /// Image fragment to be rendered in this cell.
-#if defined(LIBTERMINAL_IMAGES)
-    std::optional<ImageFragment> imageFragment_;
-#endif
+    iterator begin() const { return iterator(lines, topMostLine, topMostLine, bottomMostLine); }
+    iterator end() const { return iterator(lines, topMostLine, bottomMostLine + 1, bottomMostLine); }
 };
 
-inline bool operator==(Cell const& a, Cell const& b) noexcept
+template <typename Cell>
+struct ReverseLogicalLines
 {
-    if (a.codepointCount() != b.codepointCount())
-        return false;
+    LineOffset topMostLine;
+    LineOffset bottomMostLine;
+    std::reference_wrapper<Lines<Cell>> lines;
 
-    if (!(a.attributes() == b.attributes()))
-        return false;
-
-    for (auto const i : crispy::times(a.codepointCount()))
-        if (a.codepoint(i) != b.codepoint(i))
-            return false;
-
-    return true;
-}
-
-// }}}
-
-class Line { // {{{
-  public:
-    enum class Flags : uint8_t {
-        None      = 0x0000,
-        Wrappable = 0x0001,
-        Wrapped   = 0x0002,
-        Marked    = 0x0004,
-    };
-
-    using Buffer = std::vector<Cell>;
-    using iterator = Buffer::iterator;
-    using const_iterator = Buffer::const_iterator;
-    using reverse_iterator = Buffer::reverse_iterator;
-
-    Line(ColumnCount _numCols, Cell const& _defaultCell, Flags _flags) :
-        buffer_(unbox<size_t>(_numCols), _defaultCell),
-        flags_{static_cast<unsigned>(_flags)}
-    {}
-
-    Line(Buffer const& _init, Flags _flags) : Line(Buffer(_init), _flags) {}
-    Line(Buffer&& _init, Flags _flags);
-    Line(iterator const& _begin, iterator const& _end, Flags _flags);
-    Line(ColumnCount _numCols, Buffer&& _init, Flags _flags);
-    Line(ColumnCount _numCols, std::string_view const& _s, Flags _flags);
-
-    Buffer& buffer() noexcept { return buffer_; }
-
-    Line() = default;
-    Line(Line const&) = default;
-    Line(Line&&) = default;
-    Line& operator=(Line const&) = default;
-    Line& operator=(Line&&) = default;
-
-    void reset(GraphicsAttributes _attributes) noexcept
+    struct iterator // {{{
     {
-        for (Cell& cell: buffer_)
-            cell.reset(_attributes);
-    }
+        std::reference_wrapper<Lines<Cell>> lines;
+        LineOffset top;
+        LineOffset next; // index to next logical line's beginning
+        LineOffset bottom;
+        LogicalLine<Cell> current;
 
-    Buffer* operator->() noexcept { return &buffer_; }
-    Buffer const* operator->() const noexcept { return &buffer_; }
-    auto& operator[](std::size_t _index) { return buffer_[_index]; }
-    auto const& operator[](std::size_t _index) const { return buffer_[_index]; }
+        iterator(std::reference_wrapper<Lines<Cell>> _lines,
+                 LineOffset _top, LineOffset _next, LineOffset _bottom):
+            lines{_lines},
+            top{_top},
+            next{_next},
+            bottom{_bottom}
+        {
+            Expects(_top - 1 <= next);
+            Expects(next <= _bottom);
+            ++*this;
+        }
 
-    void prepend(Buffer const&);
-    void append(Buffer const&);
-    void append(int _count, Cell const& _initial);
+        LogicalLine<Cell> const& operator*() const noexcept { return current; }
 
-    Buffer remove(iterator const& _from, iterator const& _to);
+        iterator& operator--()
+        {
+            if (next == bottom + 1)
+            {
+                current.top = bottom + 1;
+                current.bottom = bottom + 1;
+                return *this;
+            }
 
-    /// Shhift left by @p _count cells and fill right with cells of @p _fill.
-    ///
-    /// @returns sequence of cells that have been shifted out.
-    Buffer shift_left(int _count, Cell const& _fill);
+            Expects(!lines.get()[unbox<int>(next)].wrapped());
 
-    crispy::range<const_iterator> trim_blank_right() const;
+            current.top = LineOffset::cast_from(next);
+            current.lines.clear();
+            do current.lines.emplace_back(lines.get()[unbox<int>(next++)]);
+            while (next <= bottom && lines.get()[unbox<int>(next)].wrapped());
 
-    ColumnCount size() const noexcept { return ColumnCount::cast_from(buffer_.size()); }
+            current.bottom = LineOffset::cast_from(next - 1);
 
-    bool blank() const noexcept;
+            return *this;
+        }
 
-    // TODO (trimmed version of size()): int maxOccupiedColumns() const noexcept { return size(); }
+        iterator& operator++()
+        {
+            if (next == top - 1)
+            {
+                current.top = next;
+                current.bottom = next;
+                return *this;
+            }
 
-    void resize(ColumnCount _size);
-    [[nodiscard]] Buffer reflow(ColumnCount _column);
+            auto const bottomMost = next;
+            while (lines.get()[unbox<int>(next)].wrapped())
+                --next;
+            auto const topMost = next;
+            --next; // jump to next logical line's bottom line above the current logical one
 
-    iterator begin() { return buffer_.begin(); }
-    iterator end() { return buffer_.end(); }
-    const_iterator begin() const { return buffer_.begin(); }
-    const_iterator end() const { return buffer_.end(); }
-    reverse_iterator rbegin() { return buffer_.rbegin(); }
-    reverse_iterator rend() { return buffer_.rend(); }
-    const_iterator cbegin() const { return buffer_.cbegin(); }
-    const_iterator cend() const { return buffer_.cend(); }
+            current.top = topMost;
+            current.bottom = bottomMost;
 
-    bool marked() const noexcept { return isFlagEnabled(Flags::Marked); }
-    void setMarked(bool _enable) { setFlag(Flags::Marked, _enable); }
+            current.lines.clear();
+            for (auto i = topMost; i <= bottomMost; ++i)
+                current.lines.emplace_back(lines.get()[unbox<int>(i)]);
 
-    bool wrapped() const noexcept { return isFlagEnabled(Flags::Wrapped); }
-    void setWrapped(bool _enable) { setFlag(Flags::Wrapped, _enable); }
+            return *this;
+        }
 
-    bool wrappable() const noexcept { return isFlagEnabled(Flags::Wrappable); }
-    void setWrappable(bool _enable) { setFlag(Flags::Wrappable, _enable); }
+        iterator& operator++(int) { auto c = *this; ++*this; return c; }
+        iterator& operator--(int) { auto c = *this; --*this; return c; }
 
-    Flags wrappableFlag() const noexcept { return wrappable() ? Line::Flags::Wrappable : Line::Flags::None; }
-    Flags markedFlag() const noexcept { return marked() ? Line::Flags::Marked : Line::Flags::None; }
+        bool operator==(iterator const& other) const noexcept { return current == other.current; }
+        bool operator!=(iterator const& other) const noexcept { return current != other.current; }
+    }; // }}}
 
-    std::string toUtf8() const;
-    std::string toUtf8Trimmed() const;
-
-    void setText(std::string_view _u8string);
-
-    Flags flags() const noexcept { return static_cast<Flags>(flags_); }
-
-    Flags inheritableFlags() const noexcept
-    {
-        auto constexpr Inheritables = unsigned(Flags::Wrappable)
-                                    | unsigned(Flags::Marked);
-        return static_cast<Flags>(flags_ & Inheritables);
-    }
-
-    void setFlag(Flags _flag, bool _enable) noexcept
-    {
-        if (_enable)
-            flags_ |= static_cast<unsigned>(_flag);
-        else
-            flags_ &= ~static_cast<unsigned>(_flag);
-    }
-
-    bool isFlagEnabled(Flags _flag) const noexcept { return (flags_ & static_cast<unsigned>(_flag)) != 0; }
-
-  private:
-    Buffer buffer_;
-    unsigned flags_;
+    iterator begin() const { return iterator(lines, topMostLine, bottomMostLine, bottomMostLine); }
+    iterator end() const { return iterator(lines, topMostLine, topMostLine - 1, bottomMostLine); }
 };
-
-constexpr Line::Flags operator|(Line::Flags a, Line::Flags b) noexcept
-{
-    return Line::Flags(unsigned(a) | unsigned(b));
-}
-
-constexpr bool operator&(Line::Flags a, Line::Flags b) noexcept
-{
-    return (unsigned(a) & unsigned(b)) != 0;
-}
-// }}}
-
-using Lines = std::deque<Line>;
-using ColumnIterator = Line::iterator;
-using LineIterator = Lines::iterator;
-
-inline auto begin(Line& _line) { return _line.begin(); }
-inline auto end(Line& _line) { return _line.end(); }
-inline auto begin(Line const& _line) { return _line.cbegin(); }
-inline auto end(Line const& _line) { return _line.cend(); }
-inline Line::const_iterator cbegin(Line const& _line) { return _line.cbegin(); }
-inline Line::const_iterator cend(Line const& _line) { return _line.cend(); }
 
 /**
  * Manages the screen grid buffer (main screen + scrollback history).
@@ -619,75 +328,99 @@ inline Line::const_iterator cend(Line const& _line) { return _line.cend(); }
  *      |7                         4|   <-- main page bottom
  *      +---------------------------+
  *       ^                          ^
- *       1                          screenSize.columns
+ *       1                          pageSize.columns
  * </pre>
  */
-class Grid {
-  public:
+template <typename Cell>
+class Grid
+{
     // TODO: Rename all "History" to "Scrollback"?
-
-    Grid(PageSize _screenSize, bool _reflowOnResize, std::optional<LineCount> _maxHistoryLineCount);
+public:
+    Grid(PageSize _pageSize, bool _reflowOnResize, LineCount _maxHistoryLineCount);
 
     Grid(): Grid(PageSize{LineCount(25), ColumnCount(80)}, false, LineCount(0)) {}
 
-    PageSize screenSize() const noexcept { return screenSize_; }
+    void reset();
 
-    /// Resizes the main page area of the grid and adapts the scrollback area's width accordingly.
-    ///
-    /// @param _screenSize          new size of the main page area
-    /// @param _currentCursorPos    current cursor position
-    /// @param _wrapPending         indicates whether a cursor wrap is pending before the next text write.
-    ///
-    /// @returns updated cursor position.
-    Coordinate resize(PageSize _screenSize, Coordinate _currentCursorPos, bool _wrapPending);
+    // {{{ grid global properties
+    LineCount maxHistoryLineCount() const noexcept { return maxHistoryLineCount_; }
+    void setMaxHistoryLineCount(LineCount _maxHistoryLineCount);
 
-    std::optional<LineCount> maxHistoryLineCount() const noexcept { return maxHistoryLineCount_; }
-    void setMaxHistoryLineCount(std::optional<LineCount> _maxHistoryLineCount);
+    LineCount totalLineCount() const noexcept { return maxHistoryLineCount_ + pageSize_.lines; }
+
+    LineCount historyLineCount() const noexcept { return linesUsed_ - pageSize_.lines; }
 
     bool reflowOnResize() const noexcept { return reflowOnResize_; }
     void setReflowOnResize(bool _enabled) { reflowOnResize_ = _enabled; }
 
-    LineCount historyLineCount() const noexcept
+    PageSize pageSize() const noexcept { return pageSize_; }
+
+    /// Resizes the main page area of the grid and adapts the scrollback area's width accordingly.
+    ///
+    /// @param _pageSize          new size of the main page area
+    /// @param _currentCursorPos  current cursor position
+    /// @param _wrapPending       AutoWrap is on and a wrap is pending
+    ///
+    /// @returns updated cursor position.
+    Coordinate resize(PageSize _pageSize, Coordinate _currentCursorPos, bool _wrapPending);
+    // }}}
+
+    // {{{ Line API
+    /// @returns reference to Line at given relative offset @p _line.
+    Line<Cell>& lineAt(LineOffset _line) noexcept;
+    Line<Cell> const& lineAt(LineOffset _line) const noexcept;
+
+    gsl::span<Cell const> lineBuffer(LineOffset _line) const noexcept { return lineAt(_line).cells(); }
+    gsl::span<Cell const> lineBuffer(Line<Cell> const& _line) const noexcept { return _line.cells(); }
+    gsl::span<Cell const> lineBufferRightTrimmed(LineOffset _line) const noexcept;
+
+    std::string lineText(LineOffset _line) const;
+    std::string lineTextTrimmed(LineOffset _line) const;
+    std::string lineText(Line<Cell> const& _line) const;
+
+    void setLineText(LineOffset _line, std::string_view _text);
+
+    //void resetLine(LineOffset _line, GraphicsAttributes _attribs) noexcept { lineAt(_line).reset(_attribs); }
+
+    ColumnCount lineLength(LineOffset _line) const noexcept { return lineAt(_line).size(); }
+    bool isLineBlank(LineOffset _line) const noexcept;
+    bool isLineWrapped(LineOffset _line) const noexcept;
+
+    int computeLogicalLineNumberFromBottom(LineCount _n) const noexcept;
+
+    size_t zero_index() const noexcept { return lines_.zero_index(); }
+    // }}}
+
+    /// Gets a reference to the cell relative to screen origin (top left, 0:0).
+    Cell& useCellAt(LineOffset _line, ColumnOffset _column) noexcept;
+    Cell& at(LineOffset _line, ColumnOffset _column) noexcept;
+    Cell const& at(LineOffset _line, ColumnOffset _column) const noexcept;
+
+    // page view API
+    gsl::span<Line<Cell>> pageAtScrollOffset(ScrollOffset _scrollOffset);
+    gsl::span<Line<Cell> const> pageAtScrollOffset(ScrollOffset _scrollOffset) const;
+    gsl::span<Line<Cell>> mainPage();
+    gsl::span<Line<Cell> const> mainPage() const;
+
+    LogicalLines<Cell> logicalLines()
     {
-        return LineCount::cast_from(lines_.size()) - screenSize_.lines;
+        return LogicalLines<Cell>{
+            boxed_cast<LineOffset>(-historyLineCount()),
+            boxed_cast<LineOffset>(pageSize_.lines - 1),
+            lines_
+        };
     }
 
-    /// Renders the full screen by passing every grid cell to the callback.
-    template <typename RendererT>
-    void render(RendererT && _render, std::optional<StaticScrollbackPosition> _scrollOffset = std::nullopt) const;
+    ReverseLogicalLines<Cell> logicalLinesReverse()
+    {
+        return ReverseLogicalLines<Cell>{
+            boxed_cast<LineOffset>(-historyLineCount()),
+            boxed_cast<LineOffset>(pageSize_.lines - 1),
+            lines_
+        };
+    }
 
-    Line& absoluteLineAt(int _line) noexcept;
-    Line const& absoluteLineAt(int _line) const noexcept;
-
-    /// @returns reference to Line at given relative offset @p _line.
-    Line& lineAt(int _line) noexcept;
-    Line const& lineAt(int _line) const noexcept;
-
-    /// Converts a relative line number into an absolute line number.
-    int toAbsoluteLine(int _relativeLine) const noexcept;
-
-    /// Converts an absolute line number into a relative line number.
-    int toRelativeLine(int _absoluteLine) const noexcept;
-
-    int computeRelativeLineNumberFromBottom(int _n) const noexcept;
-
-    /// Gets a reference to the cell relative to screen origin (top left, 1:1).
-    Cell& at(Coordinate const& _coord) noexcept;
-
-    /// Gets a reference to the cell relative to screen origin (top left, 1:1).
-    Cell const& at(Coordinate const& _coord) const noexcept;
-
-    crispy::range<Lines::const_iterator> lines(LinePosition _start, LinePosition _end) const;
-    crispy::range<Lines::iterator> lines(LinePosition _start, LinePosition _end);
-    // TODO: ^^ these are actually of type HistoryLinePostiion ^^
-
-    crispy::range<Lines::const_iterator> pageAtScrollOffset(std::optional<StaticScrollbackPosition> _scrollOffset) const;
-    crispy::range<Lines::iterator> pageAtScrollOffset(std::optional<StaticScrollbackPosition> _scrollOffset);
-
-    crispy::range<Lines::const_iterator> mainPage() const;
-    crispy::range<Lines::iterator> mainPage();
-
-    crispy::range<Lines::const_iterator> scrollbackLines() const;
+    // {{{ buffer manipulation
 
     /// Completely deletes all scrollback lines.
     void clearHistory();
@@ -697,7 +430,10 @@ class Grid {
     /// @param _n number of lines to scroll up within the given margin.
     /// @param _defaultAttributes SGR attributes the newly created grid cells will be initialized with.
     /// @param _margin the margin coordinates to perform the scrolling action into.
-    void scrollUp(LineCount _n, GraphicsAttributes const& _defaultAttributes, Margin const& _margin);
+    LineCount scrollUp(LineCount _n, GraphicsAttributes _defaultAttributes, Margin _margin) noexcept;
+
+    /// Scrolls up main page by @p _n lines and re-initializes grid cells with @p _defaultAttributes.
+    LineCount scrollUp(LineCount _n, GraphicsAttributes _defaultAttributes = {}) noexcept;
 
     /// Scrolls down by @p _n lines within the given margin.
     ///
@@ -705,205 +441,143 @@ class Grid {
     /// @param _defaultAttributes SGR attributes the newly created grid cells will be initialized with.
     /// @param _margin the margin coordinates to perform the scrolling action into.
     void scrollDown(LineCount _n, GraphicsAttributes const& _defaultAttributes, Margin const& _margin);
+    // }}}
 
-    std::string renderTextLineAbsolute(int row) const;
-    std::string renderTextLine(int row) const;
-    std::string renderText() const;
+    // {{{ Rendering API
+    /// Renders the full screen by passing every grid cell to the callback.
+    template <typename RendererT>
+    void render(RendererT && _render, ScrollOffset _scrollOffset = {}) const;
+
+    /// Takes text-screenshot of the main page.
+    std::string renderMainPageText() const;
 
     /// Renders the full grid's text characters.
     ///
     /// Empty cells are represented as strings and lines split by LF.
     std::string renderAllText() const;
+    // }}}
+
+    constexpr LineFlags defaultLineFlags() const noexcept;
+
+    constexpr LineCount linesUsed() const noexcept;
 
   private:
-    /// Ensures the maxHistoryLineCount attribute will be satisified, potentially deleting any
-    /// overflowing history line.
-    void clampHistory();
+    void verifyState();
     void appendNewLines(LineCount _count, GraphicsAttributes _attr);
+    void clampHistory();
+
+    // {{{ buffer helpers
+    void resizeBuffers(PageSize _newSize)
+    {
+        auto const newTotalLineCount = historyLineCount() + _newSize.lines;
+        lines_.resize(unbox<size_t>(newTotalLineCount));
+        pageSize_ = _newSize;
+    }
+
+    void rezeroBuffers() noexcept
+    {
+        lines_.rezero();
+    }
+
+    void rotateBuffers(int offset) noexcept
+    {
+        lines_.rotate(offset);
+    }
+
+    void rotateBuffersLeft(LineCount count) noexcept
+    {
+        lines_.rotate_left(unbox<size_t>(count));
+    }
+
+    void rotateBuffersRight(LineCount count) noexcept
+    {
+        lines_.rotate_right(unbox<size_t>(count));
+    }
+    // }}}
 
     // private fields
     //
-    PageSize screenSize_;
+    PageSize pageSize_;
     bool reflowOnResize_;
-    std::optional<LineCount> maxHistoryLineCount_;
-    Lines lines_;
+    LineCount maxHistoryLineCount_;
+
+    // Number of lines is at least the sum of maxHistoryLineCount_ + pageSize_.lines,
+    // because shrinking the page height does not necessarily
+    // have to resize the array (as optimization).
+    Lines<Cell> lines_;
+
+    // Number of lines used in the Lines buffer.
+    LineCount linesUsed_;
 };
 
-// {{{ inlines
+template <typename Cell>
+std::ostream& dumpGrid(std::ostream& os, Grid<Cell> const& grid);
+
+template <typename Cell>
+std::string dumpGrid(Grid<Cell> const& grid);
+
+// {{{ impl
+template <typename Cell>
+constexpr LineFlags Grid<Cell>::defaultLineFlags() const noexcept
+{
+    return reflowOnResize_ ? LineFlags::Wrappable
+                           : LineFlags::None;
+}
+
+template <typename Cell>
+constexpr LineCount Grid<Cell>::linesUsed() const noexcept
+{
+    return linesUsed_;
+}
+
+template <typename Cell>
+bool Grid<Cell>::isLineWrapped(LineOffset _line) const noexcept
+{
+    return _line >= -boxed_cast<LineOffset>(historyLineCount())
+        && boxed_cast<LineCount>(_line) < pageSize_.lines
+        && lineAt(_line).wrapped();
+}
+
+template <typename Cell>
 template <typename RendererT>
-inline void Grid::render(RendererT && _render, std::optional<StaticScrollbackPosition> _scrollOffset) const
+void Grid<Cell>::render(RendererT && _render, ScrollOffset _scrollOffset) const
 {
-    for (auto const && [rowNumber, line] : crispy::indexed(pageAtScrollOffset(_scrollOffset), 1))
+    assert(!_scrollOffset || unbox<LineCount>(_scrollOffset) <= historyLineCount());
+
+    auto const topLineOffset = - unbox<long>(_scrollOffset);
+    auto const topLeftOffset = topLineOffset * unbox<long>(pageSize_.columns);
+    auto const pageCellCount = pageSize_.lines * pageSize_.columns;
+    auto const bottomRightOffset = topLeftOffset + pageCellCount;
+
+    //assert(bottomRightOffset >= pageCellCount);
+
+    auto const static emptyCell = Cell{};
+
+    auto y = LineOffset(0);
+    for (int i = -*_scrollOffset, e = i + *pageSize_.lines; i != e; ++i, ++y)
     {
-        for (auto const && [colNumber, column] : crispy::indexed(line, 1))
-            _render({rowNumber, colNumber}, column);
-
-        auto const columnCount = std::max(
-            ColumnCount(0),
-            screenSize_.columns - line.size()
-        );
-        for (auto const colNumber : crispy::times(unbox<int>(line.size()) + 1, unbox<int>(columnCount)))
-            _render({rowNumber, colNumber}, Cell{});
+        auto x = ColumnOffset(0);
+        Line<Cell> const& line = lines_[i];
+        if constexpr (Line<Cell>::ColumnOptimized)
+        {
+            Cell const* cell = &*line.begin();
+            Cell const* cellUsedEnd = cell + *line.columnsUsed();
+            Cell const* cellEnd = cell + *line.size();
+            while (cell != cellUsedEnd)
+                _render(*cell++, y, x++);
+            while (cell != cellEnd)
+            {
+                _render(emptyCell, y, x++);
+                ++cell;
+            }
+        }
+        else
+        {
+            for (Cell const& cell: line.cells())
+                _render(cell, y, x++);
+        }
     }
-}
-
-inline Line& Grid::absoluteLineAt(int _line) noexcept
-{
-    assert(crispy::ascending(0, _line, static_cast<int>(lines_.size()) - 1));
-    return *next(lines_.begin(), _line);
-}
-
-inline Line const& Grid::absoluteLineAt(int _line) const noexcept
-{
-    return const_cast<Grid&>(*this).absoluteLineAt(_line);
-}
-
-inline Line& Grid::lineAt(int _line) noexcept
-{
-    assert(crispy::ascending(1 - *historyLineCount(), _line, *screenSize_.lines));
-
-    return *next(lines_.begin(), *historyLineCount() + _line - 1);
-}
-
-inline Line const& Grid::lineAt(int _line) const noexcept
-{
-    return const_cast<Grid&>(*this).lineAt(_line);
-}
-
-inline int Grid::toAbsoluteLine(int _relativeLine) const noexcept
-{
-    return *historyLineCount() + _relativeLine - 1;
-}
-
-inline int Grid::toRelativeLine(int _absoluteLine) const noexcept
-{
-    return _absoluteLine - *historyLineCount();
-}
-
-inline Cell& Grid::at(Coordinate const& _coord) noexcept
-{
-    assert(crispy::ascending(1 - unbox<int>(historyLineCount()), _coord.row, unbox<int>(screenSize_.lines)));
-    assert(crispy::ascending(1, _coord.column, unbox<int>(screenSize_.columns)));
-
-    if (_coord.row > 0)
-        return (*next(lines_.rbegin(), unbox<int>(screenSize_.lines) - _coord.row))[static_cast<size_t>(_coord.column - 1)];
-    else
-        return (*next(lines_.begin(), unbox<int>(historyLineCount()) + _coord.row - 1))[static_cast<size_t>(_coord.column - 1)];
-}
-
-inline Cell const& Grid::at(Coordinate const& _coord) const noexcept
-{
-    return const_cast<Grid&>(*this).at(_coord);
-}
-
-inline crispy::range<Lines::const_iterator> Grid::lines(LinePosition _start, LinePosition _end) const
-{
-    assert(crispy::ascending(0, *_start, int(lines_.size()) - 1) && "Absolute scroll offset must not be negative or overflowing.");
-    assert(crispy::ascending(_start, _end, LinePosition::cast_from(lines_.size() - 1)) && "Absolute scroll offset must not be negative or overflowing.");
-
-    return crispy::range<Lines::const_iterator>(
-        next(lines_.cbegin(), unbox<long>(_start)),
-        next(lines_.cbegin(), unbox<long>(_end))
-    );
-}
-
-inline crispy::range<Lines::iterator> Grid::lines(LinePosition _start, LinePosition _end)
-{
-    assert(crispy::ascending(LinePosition{0}, _start, LinePosition::cast_from(lines_.size())) && "Absolute scroll offset must not be negative or overflowing.");
-    assert(crispy::ascending(_start, _end, LinePosition::cast_from(lines_.size())) && "Absolute scroll offset must not be negative or overflowing.");
-
-    return crispy::range<Lines::iterator>(
-        next(lines_.begin(), unbox<long>(_start)),
-        next(lines_.begin(), unbox<long>(_end))
-    );
-}
-
-inline crispy::range<Lines::const_iterator> Grid::pageAtScrollOffset(std::optional<StaticScrollbackPosition> _scrollOffset) const
-{
-    assert(
-        crispy::ascending(
-            StaticScrollbackPosition(0),
-            _scrollOffset.value_or(StaticScrollbackPosition{0}),
-            boxed_cast<StaticScrollbackPosition>(historyLineCount())
-        ) &&
-        "Absolute scroll offset must not be negative or overflowing."
-    );
-
-    auto const start = std::next(lines_.cbegin(),
-                                 unbox<long>(_scrollOffset.value_or(boxed_cast<StaticScrollbackPosition>(historyLineCount()))));
-    auto const end = std::next(start, unbox<long>(screenSize_.lines));
-
-    return crispy::range<Lines::const_iterator>(start, end);
-}
-
-inline crispy::range<Lines::iterator> Grid::pageAtScrollOffset(std::optional<StaticScrollbackPosition> _scrollOffset)
-{
-    assert(
-        crispy::ascending(
-            StaticScrollbackPosition{0},
-            _scrollOffset.value_or(StaticScrollbackPosition{0}),
-            boxed_cast<StaticScrollbackPosition>(historyLineCount())
-        ) &&
-        "Absolute scroll offset must not be negative or overflowing."
-    );
-
-    return crispy::range<Lines::iterator>(
-        std::next(
-            lines_.begin(),
-            unbox<long>(_scrollOffset.value_or(boxed_cast<StaticScrollbackPosition>(historyLineCount())))
-        ),
-        lines_.end()
-    );
-}
-
-inline crispy::range<Lines::const_iterator> Grid::mainPage() const
-{
-    return pageAtScrollOffset(std::nullopt);
-}
-
-inline crispy::range<Lines::iterator> Grid::mainPage()
-{
-    return pageAtScrollOffset(std::nullopt);
-}
-
-inline crispy::range<Lines::const_iterator> Grid::scrollbackLines() const
-{
-    return crispy::range<Lines::const_iterator>(
-        lines_.cbegin(),
-        std::next(
-            lines_.cbegin(),
-            unbox<long>(historyLineCount())
-        )
-    );
 }
 // }}}
 
 } // end namespace
-
-namespace fmt {
-    template <>
-    struct formatter<terminal::Line::Flags> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(const terminal::Line::Flags _flags, FormatContext& ctx)
-        {
-            static const std::array<std::pair<terminal::Line::Flags, std::string_view>, 3> nameMap = {
-                std::pair{ terminal::Line::Flags::Wrappable, std::string_view("Wrappable")},
-                std::pair{ terminal::Line::Flags::Wrapped, std::string_view("Wrapped")},
-                std::pair{ terminal::Line::Flags::Marked, std::string_view("Marked")}
-            };
-            std::string s;
-            for (auto const& mapping : nameMap)
-            {
-                if (mapping.first & _flags)
-                {
-                    if (!s.empty())
-                        s += ",";
-                    s += mapping.second;
-                }
-            }
-            return format_to(ctx.out(), s);
-        }
-    };
-}

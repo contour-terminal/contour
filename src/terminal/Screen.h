@@ -15,6 +15,7 @@
 
 #include <terminal/Capabilities.h>
 #include <terminal/Charset.h>
+#include <terminal/Cell.h>
 #include <terminal/Color.h>
 #include <terminal/Grid.h>
 #include <terminal/Hyperlink.h>
@@ -27,7 +28,6 @@
 #include <crispy/algorithm.h>
 #include <crispy/size.h>
 #include <crispy/span.h>
-#include <crispy/times.h>
 #include <crispy/utils.h>
 
 #include <unicode/grapheme_segmenter.h>
@@ -106,17 +106,20 @@ class Modes {
 /// NB: Take care what to store here, as DECSC/DECRC will save/restore this struct.
 struct Cursor
 {
-    Coordinate position{1, 1};
+    Coordinate position{LineOffset(0), ColumnOffset(0)};
     bool autoWrap = true; // false;
     bool originMode = false;
     bool visible = true;
     GraphicsAttributes graphicsRendition{};
     CharsetMapping charsets{};
+    HyperlinkId hyperlink{};
     // TODO: selective erase attribute
     // TODO: SS2/SS3 states
     // TODO: CharacterSet for GL and GR
 };
 // }}}
+
+using ImageFragmentCache = crispy::LRUCache<ImageFragmentId, ImageFragment>;
 
 /**
  * Terminal Screen.
@@ -126,7 +129,8 @@ struct Cursor
  * allowing the object owner to control which part of the screen (or history)
  * to be viewn.
  */
-class Screen : public capabilities::StaticDatabase {
+template <typename EventListener>
+class Screen: public capabilities::StaticDatabase {
   public:
     /**
      * Initializes the screen with the given screen size and callbaks.
@@ -138,10 +142,10 @@ class Screen : public capabilities::StaticDatabase {
      * @param _maxHistoryLineCount number of lines the history must not exceed.
      */
     Screen(PageSize _size,
-           ScreenEvents& _eventListener,
+           EventListener& _eventListener,
            bool _logRaw = false,
            bool _logTrace = false,
-           std::optional<LineCount> _maxHistoryLineCount = std::nullopt,
+           LineCount _maxHistoryLineCount = LineCount(0),
            ImageSize _maxImageSize = ImageSize{Width(800), Height(600)},
            int _maxImageColorRegisters = 256,
            bool _sixelCursorConformance = true,
@@ -174,8 +178,8 @@ class Screen : public capabilities::StaticDatabase {
         terminalId_ = _id;
     }
 
-    void setMaxHistoryLineCount(std::optional<LineCount> _maxHistoryLineCount);
-    std::optional<LineCount> maxHistoryLineCount() const noexcept { return grid().maxHistoryLineCount(); }
+    void setMaxHistoryLineCount(LineCount _maxHistoryLineCount);
+    LineCount maxHistoryLineCount() const noexcept { return grid().maxHistoryLineCount(); }
 
     LineCount historyLineCount() const noexcept { return grid().historyLineCount(); }
 
@@ -188,16 +192,13 @@ class Screen : public capabilities::StaticDatabase {
 
     /// Renders the full screen by passing every grid cell to the callback.
     template <typename Renderer>
-    void render(Renderer&& _render, std::optional<StaticScrollbackPosition> _scrollOffset = std::nullopt) const
+    void render(Renderer&& _render, ScrollOffset _scrollOffset = {}) const
     {
         activeGrid_->render(std::forward<Renderer>(_render), _scrollOffset);
     }
 
-    /// Renders a single text line.
-    std::string renderTextLine(int _row) const;
-
     /// Renders the full screen as text into the given string. Each line will be terminated by LF.
-    std::string renderText() const;
+    std::string renderMainPageText() const;
 
     /// Takes a screenshot by outputting VT sequences needed to render the current state of the screen.
     ///
@@ -205,7 +206,7 @@ class Screen : public capabilities::StaticDatabase {
     ///
     /// @returns necessary commands needed to draw the current screen state,
     ///          including initial clear screen, and initial cursor hide.
-    std::string screenshot(std::function<std::string(int)> const& _postLine = {}) const;
+    std::string screenshot(std::function<std::string(LineOffset)> const& _postLine = {}) const;
 
     void setFocus(bool _focused) { focused_ = _focused; }
     bool focused() const noexcept { return focused_; }
@@ -230,10 +231,8 @@ class Screen : public capabilities::StaticDatabase {
     void insertLines(LineCount _n);      // IL
     void insertColumns(ColumnCount _n);    // DECIC
 
-    void copyArea(
-        int _top, int _left, int _bottom, int _right, int _page,
-        int _targetTop, int _targetLeft, int _targetPage
-    );
+    void copyArea(Rect sourceArea, int page,
+                  Coordinate targetTopLeft, int targetPage);
 
     void eraseArea(int _top, int _left, int _bottom, int _right);
 
@@ -248,8 +247,8 @@ class Screen : public capabilities::StaticDatabase {
     void moveCursorDown(LineCount _n);          // CUD
     void moveCursorForward(ColumnCount _n);     // CUF
     void moveCursorToBeginOfLine();             // CR
-    void moveCursorToColumn(ColumnPosition _n); // CHA
-    void moveCursorToLine(LinePosition _n);     // VPA
+    void moveCursorToColumn(ColumnOffset _n);   // CHA
+    void moveCursorToLine(LineOffset _n);       // VPA
     void moveCursorToNextLine(LineCount _n);    // CNL
     void moveCursorToNextTab();                 // HT
     void moveCursorToPrevLine(LineCount _n);    // CPL
@@ -281,7 +280,7 @@ class Screen : public capabilities::StaticDatabase {
     /// @returns either an empty string or a file:// URL of the last set working directory.
     std::string const& currentWorkingDirectory() const noexcept { return currentWorkingDirectory_; }
 
-    void hyperlink(std::string const& _id, std::string const& _uri);      // OSC 8
+    void hyperlink(std::string _id, std::string _uri);                    // OSC 8
     void notify(std::string const& _title, std::string const& _content);  // OSC 777
 
     void captureBuffer(int _numLines, bool _logicalLines);
@@ -291,8 +290,8 @@ class Screen : public capabilities::StaticDatabase {
     void setUnderlineColor(Color _color);
     void setCursorStyle(CursorDisplay _display, CursorShape _shape);
     void setGraphicsRendition(GraphicsRendition _rendition);
-    void setTopBottomMargin(std::optional<int> _top, std::optional<int> _bottom);
-    void setLeftRightMargin(std::optional<int> _left, std::optional<int> _right);
+    void setTopBottomMargin(std::optional<LineOffset> _top, std::optional<LineOffset> _bottom);
+    void setLeftRightMargin(std::optional<ColumnOffset> _left, std::optional<ColumnOffset> _right);
     void screenAlignmentPattern();
     void sendMouseEvents(MouseProtocol _protocol, bool _enable);
     void applicationKeypadMode(bool _enable);
@@ -318,12 +317,12 @@ class Screen : public capabilities::StaticDatabase {
     ImageSize maxImageSize() const noexcept { return maxImageSize_; }
     ImageSize maxImageSizeLimit() const noexcept { return maxImageSizeLimit_; }
 
-    std::shared_ptr<Image const> uploadImage(ImageFormat _format, ImageSize _imageSize, Image::Data&& _pixmap);
+    Image const& uploadImage(ImageFormat _format, ImageSize _imageSize, Image::Data&& _pixmap);
 
     /**
      * Renders an image onto the screen.
      *
-     * @p _imageRef Reference to the image to be rendered.
+     * @p _imageId ID to the image to be rendered.
      * @p _topLeft Screen coordinate to start rendering the top/left corner of the image.
      * @p _gridSize Screen grid size to span the image into.
      * @p _imageOffset Offset into the image in screen grid coordinate to start rendering from.
@@ -332,7 +331,7 @@ class Screen : public capabilities::StaticDatabase {
      * @p _resizePolicy render the image using the given image resize policy.
      * @p _autoScroll Boolean indicating whether or not the screen should scroll if the image cannot be fully displayed otherwise.
      */
-    void renderImage(std::shared_ptr<Image const> const& _imageRef,
+    void renderImage(ImageId _imageId,
                      Coordinate _topLeft,
                      GridSize _gridSize,
                      Coordinate _imageOffset,
@@ -340,6 +339,8 @@ class Screen : public capabilities::StaticDatabase {
                      ImageAlignment _alignmentPolicy,
                      ImageResize _resizePolicy,
                      bool _autoScroll);
+
+    ImageFragmentCache const& imageFragments() const noexcept { return imageFragments_; }
 
     void dumpState(std::string const& _message, std::ostream& _os) const;
 
@@ -358,7 +359,7 @@ class Screen : public capabilities::StaticDatabase {
     void requestAnsiMode(int _mode);
     void requestDECMode(int _mode);
 
-    PageSize size() const noexcept { return size_; }
+    PageSize pageSize() const noexcept { return pageSize_; }
     void resize(PageSize _newSize);
 
     /// Implements semantics for  DECCOLM / DECSCPP.
@@ -366,7 +367,7 @@ class Screen : public capabilities::StaticDatabase {
 
     bool isCursorInsideMargins() const noexcept
     {
-        bool const insideVerticalMargin = margin_.vertical.contains(cursor_.position.row);
+        bool const insideVerticalMargin = margin_.vertical.contains(cursor_.position.line);
         bool const insideHorizontalMargin = !isModeEnabled(DECMode::LeftRightMargin)
                                          || margin_.horizontal.contains(cursor_.position.column);
         return insideVerticalMargin && insideHorizontalMargin;
@@ -374,38 +375,41 @@ class Screen : public capabilities::StaticDatabase {
 
     constexpr Coordinate realCursorPosition() const noexcept { return cursor_.position; }
 
-    constexpr Coordinate cursorPosition() const noexcept {
+    constexpr Coordinate logicalCursorPosition() const noexcept
+    {
         if (!cursor_.originMode)
             return realCursorPosition();
         else
             return Coordinate{
-                cursor_.position.row - margin_.vertical.from + 1,
-                cursor_.position.column - margin_.horizontal.from + 1
+                cursor_.position.line - margin_.vertical.from,
+                cursor_.position.column - margin_.horizontal.from
             };
     }
 
-    constexpr Coordinate origin() const noexcept {
-        if (cursor_.originMode)
-            return {margin_.vertical.from, margin_.horizontal.from};
-        else
-            return {1, 1};
+    constexpr Coordinate origin() const noexcept
+    {
+        if (!cursor_.originMode)
+            return {};
+
+        return {
+            margin_.vertical.from,
+            margin_.horizontal.from
+        };
     }
 
     Cursor const& cursor() const noexcept { return cursor_; }
 
-    int wrapPending() const noexcept { return wrapPending_; }
-
     /// Returns identity if DECOM is disabled (default), but returns translated coordinates if DECOM is enabled.
-    Coordinate toRealCoordinate(Coordinate const& pos) const noexcept
+    Coordinate toRealCoordinate(Coordinate pos) const noexcept
     {
         if (!cursor_.originMode)
             return pos;
         else
-            return { pos.row + margin_.vertical.from - 1, pos.column + margin_.horizontal.from - 1 };
+            return { pos.line + margin_.vertical.from, pos.column + margin_.horizontal.from };
     }
 
     /// Clamps given coordinates, respecting DECOM (Origin Mode).
-    Coordinate clampCoordinate(Coordinate const& coord) const noexcept
+    Coordinate clampCoordinate(Coordinate coord) const noexcept
     {
         if (!cursor_.originMode)
             return clampToOrigin(coord);
@@ -414,64 +418,59 @@ class Screen : public capabilities::StaticDatabase {
     }
 
     /// Clamps given logical coordinates to margins as used in when DECOM (origin mode) is enabled.
-    Coordinate clampToOrigin(Coordinate const& coord) const noexcept
+    Coordinate clampToOrigin(Coordinate coord) const noexcept
     {
         return {
-            std::clamp(coord.row, int{0}, margin_.vertical.length()),
-            std::clamp(coord.column, int{0}, margin_.horizontal.length())
+            std::clamp(coord.line, LineOffset{0}, margin_.vertical.length().template as<LineOffset>() - LineOffset(1)),
+            std::clamp(coord.column, ColumnOffset{0}, margin_.horizontal.length().template as<ColumnOffset>() - ColumnOffset(1))
         };
     }
 
-    Coordinate clampToScreen(Coordinate const& coord) const noexcept
+    LineOffset clampedLine(LineOffset _line) const noexcept
+    {
+        return std::clamp(_line, LineOffset(0), pageSize_.lines.as<LineOffset>() - 1);
+    }
+
+    ColumnOffset clampedColumn(ColumnOffset _column) const noexcept
+    {
+        return std::clamp(_column, ColumnOffset(0), pageSize_.columns.as<ColumnOffset>() - 1);
+    }
+
+    Coordinate clampToScreen(Coordinate coord) const noexcept
     {
         return {
-            std::clamp(coord.row, int{1}, unbox<int>(size_.lines)),
-            std::clamp(coord.column, int{1}, unbox<int>(size_.columns))
+            clampedLine(coord.line),
+            clampedColumn(coord.column)
         };
     }
 
     // Tests if given coordinate is within the visible screen area.
     constexpr bool contains(Coordinate _coord) const noexcept
     {
-        return 1 <= _coord.row && _coord.row <= unbox<int>(size_.lines)
-            && 1 <= _coord.column && _coord.column <= unbox<int>(size_.columns);
+        return LineOffset(0) <= _coord.line && _coord.line < pageSize_.lines.as<LineOffset>()
+            && ColumnOffset(0) <= _coord.column && _coord.column <= pageSize_.columns.as<ColumnOffset>();
     }
 
-    Cell& lastPosition() noexcept { return grid().at(lastCursorPosition_); }
-    Cell const& lastPosition() const noexcept { return grid().at(lastCursorPosition_); }
+    Cell& usePreviousCell() noexcept { return useCellAt(lastCursorPosition_.line, lastCursorPosition_.column); }
 
-    auto currentColumn() noexcept
-    {
-        return std::next(currentLine_->begin(), cursor_.position.column - 1);
-    }
+    Line<Cell>& currentLine() { return grid().lineAt(cursor_.position.line); }
+    Line<Cell> const& currentLine() const { return grid().lineAt(cursor_.position.line); }
 
-    auto currentColumn() const noexcept
-    {
-        return std::next(currentLine_->cbegin(), cursor_.position.column - 1);
-    }
+    Cell& useCurrentCell() noexcept { return useCellAt(cursor_.position); }
+    Cell const& currentCell() const noexcept { return at(cursor_.position); }
 
-    Cell const& currentCell() const noexcept
-    {
-        return (*currentLine_)[cursor_.position.column - 1];
-    }
-
-    Cell& currentCell() noexcept
-    {
-        return (*currentLine_)[cursor_.position.column - 1];
-    }
-
-    Cell& currentCell(Cell value)
-    {
-        return (*currentLine_)[cursor_.position.column - 1] = std::move(value);
-    }
-
-    void moveCursorTo(Coordinate to);
+    void moveCursorTo(LineOffset _line, ColumnOffset _column);
 
     /// Gets a reference to the cell relative to screen origin (top left, 1:1).
-    Cell& at(Coordinate const& _coord) noexcept { return grid().at(_coord); }
+    Cell& at(LineOffset _line, ColumnOffset _column) noexcept { return grid().useCellAt(_line, _column); }
+    Cell& useCellAt(LineOffset _line, ColumnOffset _column) noexcept { return grid().lineAt(_line).useCellAt(_column); }
 
     /// Gets a reference to the cell relative to screen origin (top left, 1:1).
-    Cell const& at(Coordinate const& _coord) const noexcept { return grid().at(_coord); }
+    Cell const& at(LineOffset _line, ColumnOffset _column) const noexcept { return grid().at(_line, _column); }
+
+    Cell& at(Coordinate p) noexcept { return useCellAt(p.line, p.column); }
+    Cell& useCellAt(Coordinate p) noexcept { return useCellAt(p.line, p.column); }
+    Cell const& at(Coordinate p) const noexcept { return grid().at(p.line, p.column); }
 
     bool isPrimaryScreen() const noexcept { return activeGrid_ == &grids_[0]; }
     bool isAlternateScreen() const noexcept { return activeGrid_ == &grids_[1]; }
@@ -489,20 +488,9 @@ class Screen : public capabilities::StaticDatabase {
     bool verticalMarginsEnabled() const noexcept { return isModeEnabled(DECMode::Origin); }
     bool horizontalMarginsEnabled() const noexcept { return isModeEnabled(DECMode::LeftRightMargin); }
 
-    Margin const& margin() const noexcept { return margin_; }
+    Margin margin() const noexcept { return margin_; }
 
-    auto scrollbackLines() const noexcept { return grid().scrollbackLines(); }
-
-    void setTabWidth(uint8_t _value) { tabWidth_ = _value; }
-
-    /**
-     * Returns the n'th saved line into the history scrollback buffer.
-     *
-     * @param _lineNumberIntoHistory the 1-based offset into the history buffer.
-     *
-     * @returns the textual representation of the n'th line into the history.
-     */
-    std::string renderHistoryTextLine(int _lineNumberIntoHistory) const;
+    void setTabWidth(ColumnCount _value) { tabWidth_ = _value; }
 
     std::string const& windowTitle() const noexcept { return windowTitle_; }
 
@@ -512,7 +500,7 @@ class Screen : public capabilities::StaticDatabase {
     ///                            (0..-N) for savedLines area
     /// @return cursor position relative to screen origin (1, 1), that is, if line Number os >= 1, it's
     ///         in the screen area, and in the savedLines area otherwise.
-    std::optional<int> findMarkerForward(int _currentCursorLine) const;
+    std::optional<LineOffset> findMarkerDownwards(LineOffset _currentCursorLine) const;
 
     /// Finds the previous marker right next to the given line position.
     ///
@@ -520,15 +508,15 @@ class Screen : public capabilities::StaticDatabase {
     ///                            (0..-N) for savedLines area
     /// @return cursor position relative to screen origin (1, 1), that is, if line Number os >= 1, it's
     ///         in the screen area, and in the savedLines area otherwise.
-    std::optional<int> findMarkerBackward(int _currentCursorLine) const;
+    std::optional<LineOffset> findMarkerUpwards(LineOffset _currentCursorLine) const;
 
     /// ScreenBuffer's type, such as main screen or alternate screen.
     ScreenType bufferType() const noexcept { return screenType_; }
 
     bool synchronizeOutput() const noexcept { return false; } // TODO
 
-    ScreenEvents& eventListener() noexcept { return eventListener_; }
-    ScreenEvents const& eventListener()  const noexcept { return eventListener_; }
+    EventListener& eventListener() noexcept { return eventListener_; }
+    EventListener const& eventListener()  const noexcept { return eventListener_; }
 
     void setWindowTitle(std::string const& _title);
     void saveWindowTitle();
@@ -554,28 +542,19 @@ class Screen : public capabilities::StaticDatabase {
     }
 
     /// @returns the primary screen's grid.
-    Grid& primaryGrid() noexcept { return grids_[0]; }
+    Grid<Cell>& primaryGrid() noexcept { return grids_[0]; }
 
     /// @returns the alternate  screen's grid.
-    Grid& alternateGrid() noexcept { return grids_[1]; }
+    Grid<Cell>& alternateGrid() noexcept { return grids_[1]; }
 
     /// @returns the primary screen's grid if primary screen is active.
-    Grid const& grid() const noexcept { return *activeGrid_; }
+    Grid<Cell> const& grid() const noexcept { return *activeGrid_; }
 
     /// @returns the primary screen's grid if primary screen is active.
-    Grid& grid() noexcept { return *activeGrid_; }
-
-    /// @returns the primary screen's grid if alternate screen is active, and the alternate screen's grid otherwise.
-    Grid& backgroundGrid() noexcept { return isPrimaryScreen() ? alternateGrid() : primaryGrid(); }
+    Grid<Cell>& grid() noexcept { return *activeGrid_; }
 
     /// @returns true iff given absolute line number is wrapped, false otherwise.
-    bool lineWrapped(int _lineNumber) const { return activeGrid_->absoluteLineAt(_lineNumber).wrapped(); }
-
-    int toAbsoluteLine(int _relativeLine) const noexcept { return activeGrid_->toAbsoluteLine(_relativeLine); }
-    Coordinate toAbsolute(Coordinate _coord) const noexcept { return {activeGrid_->toAbsoluteLine(_coord.row), _coord.column}; }
-
-    int toRelativeLine(int _absoluteLine) const noexcept { return activeGrid_->toRelativeLine(_absoluteLine); }
-    Coordinate toRelative(Coordinate _coord) const noexcept { return {activeGrid_->toRelativeLine(_coord.row), _coord.column}; }
+    bool isLineWrapped(LineOffset _lineNumber) const noexcept { return activeGrid_->isLineWrapped(_lineNumber); }
 
     ColorPalette& colorPalette() noexcept { return colorPalette_; }
     ColorPalette const& colorPalette() const noexcept { return colorPalette_; }
@@ -583,55 +562,44 @@ class Screen : public capabilities::StaticDatabase {
     ColorPalette& defaultColorPalette() noexcept { return defaultColorPalette_; }
     ColorPalette const& defaultColorPalette() const noexcept { return defaultColorPalette_; }
 
+    std::shared_ptr<HyperlinkInfo> hyperlinkAt(Coordinate pos) noexcept
+    {
+        return hyperlinks_.hyperlinkById(at(pos).hyperlink());
+    }
+
+    HyperlinkStorage const& hyperlinks() const noexcept
+    {
+        return hyperlinks_;
+    }
+
   private:
     void setBuffer(ScreenType _type);
+    void applyPageSizeToCurrentBuffer();
 
     void clearAllTabs();
     void clearTabUnderCursor();
     void setTabUnderCursor();
 
     /// Applies LF but also moves cursor to given column @p _column.
-    void linefeed(int _column);
+    void linefeed(ColumnOffset _column);
 
-    void writeCharToCurrentAndAdvance(char32_t _codepoint);
-    void clearAndAdvance(int _offset);
+    void writeCharToCurrentAndAdvance(char32_t _codepoint) noexcept;
+    void clearAndAdvance(int _offset) noexcept;
 
     void fail(std::string const& _message) const;
 
-    void updateCursorIterators()
-    {
-        currentLine_ = next(begin(grid().mainPage()), cursor_.position.row - 1);
-    }
-
-    /// @returns an iterator to @p _n columns after column @p _begin.
-    ColumnIterator columnIteratorAt(ColumnIterator _begin, int _n)
-    {
-        return next(_begin, _n - 1);
-    }
-
-    /// @returns an iterator to the real column number @p _n.
-    ColumnIterator columnIteratorAt(int _n)
-    {
-        return columnIteratorAt(std::begin(*currentLine_), _n);
-    }
-
-    /// @returns an iterator to the real column number @p _n.
-    ColumnIterator columnIteratorAt(int _n) const
-    {
-        return const_cast<Screen*>(this)->columnIteratorAt(_n);
-    }
-
-    void scrollUp(LineCount n, Margin const& margin);
-    void scrollDown(LineCount n, Margin const& margin);
-    void insertChars(int _lineNo, ColumnCount _n);
-    void deleteChars(int _lineNo, ColumnCount _n);
+    void scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin);
+    void scrollUp(LineCount n, Margin margin);
+    void scrollDown(LineCount n, Margin margin);
+    void insertChars(LineOffset _lineNo, ColumnCount _n);
+    void deleteChars(LineOffset _lineNo, ColumnOffset _column, ColumnCount _count);
 
     /// Sets the current column to given logical column number.
-    void setCurrentColumn(ColumnPosition _n);
+    void setCurrentColumn(ColumnOffset _n);
 
     // private fields
     //
-    ScreenEvents& eventListener_;
+    EventListener& eventListener_;
 
     bool logRaw_ = false;
     bool logTrace_ = false;
@@ -652,12 +620,14 @@ class Screen : public capabilities::StaticDatabase {
     ImageSize maxImageSizeLimit_;
     std::shared_ptr<SixelColorPalette> imageColorPalette_;
     ImagePool imagePool_;
+    ImageFragmentCache imageFragments_;
+    ImageFragmentId nextImageFragmentId_ = ImageFragmentId(1);
 
-    Sequencer sequencer_;
-    parser::Parser parser_;
+    Sequencer<EventListener> sequencer_;
+    parser::Parser<Sequencer<EventListener>> parser_;
     int64_t instructionCounter_ = 0;
 
-    PageSize size_;
+    PageSize pageSize_;
     std::string windowTitle_{};
     std::stack<std::string> savedWindowTitles_{};
 
@@ -665,9 +635,8 @@ class Screen : public capabilities::StaticDatabase {
 
     // XXX moved from ScreenBuffer
     Margin margin_;
-    int wrapPending_ = 0;
-    uint8_t tabWidth_{8};
-    std::vector<ColumnPosition> tabs_;
+    ColumnCount tabWidth_{8};
+    std::vector<ColumnOffset> tabs_;
 
     // main/alt screen and history
     //
@@ -677,16 +646,16 @@ class Screen : public capabilities::StaticDatabase {
     // Lines savedLines_{};
 
     bool allowReflowOnResize_;
-    std::array<Grid, 2> grids_;
-    Grid* activeGrid_;
+    std::array<Grid<Cell>, 2> grids_;
+    Grid<Cell>* activeGrid_;
 
     // cursor related
     //
     Cursor cursor_;
     Cursor savedCursor_;
     Cursor savedPrimaryCursor_; //!< saved cursor of primary-screen when switching to alt-screen.
-    LineIterator currentLine_;
     Coordinate lastCursorPosition_;
+    bool wrapPending_ = false;
 
     CursorDisplay cursorDisplay_ = CursorDisplay::Steady;
     CursorShape cursorShape_ = CursorShape::Block;
@@ -695,14 +664,23 @@ class Screen : public capabilities::StaticDatabase {
 
     // Hyperlink related
     //
-#if defined(LIBTERMINAL_HYPERLINKS)
-    HyperlinkRef currentHyperlink_ = {};
-    std::unordered_map<std::string, HyperlinkRef> hyperlinks_; // TODO: use a deque<> instead, always push_back, lookup reverse, evict in front.
-#endif
+
+    HyperlinkStorage hyperlinks_{};
 
     // experimental features
     //
     bool respondToTCapQuery_ = true;
+};
+
+class MockTerm: public MockScreenEvents
+{
+public:
+    explicit MockTerm(PageSize _size, LineCount _hist = {}):
+        screen(_size, *this, false, false, _hist)
+    {
+    }
+
+    Screen<MockTerm> screen;
 };
 
 }  // namespace terminal
@@ -710,11 +688,22 @@ class Screen : public capabilities::StaticDatabase {
 namespace fmt // {{{
 {
     template <>
-    struct formatter<terminal::Margin::Range> {
+    struct formatter<terminal::Margin::Horizontal> {
         template <typename ParseContext>
         constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
         template <typename FormatContext>
-        auto format(const terminal::Margin::Range range, FormatContext& ctx)
+        auto format(const terminal::Margin::Horizontal range, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "{}..{}", range.from, range.to);
+        }
+    };
+
+    template <>
+    struct formatter<terminal::Margin::Vertical> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
+        template <typename FormatContext>
+        auto format(const terminal::Margin::Vertical range, FormatContext& ctx)
         {
             return format_to(ctx.out(), "{}..{}", range.from, range.to);
         }
@@ -727,25 +716,7 @@ namespace fmt // {{{
         template <typename FormatContext>
         auto format(const terminal::Cursor cursor, FormatContext& ctx)
         {
-            return format_to(ctx.out(), "({}:{}{})", cursor.position.row, cursor.position.column, cursor.visible ? "" : ", (invis)");
-        }
-    };
-
-    template <>
-    struct formatter<terminal::Cell> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx) { return ctx.begin(); }
-        template <typename FormatContext>
-        auto format(terminal::Cell const& cell, FormatContext& ctx)
-        {
-            std::string codepoints;
-            for (auto const i : crispy::times(cell.codepointCount()))
-            {
-                if (i)
-                    codepoints += ", ";
-                codepoints += fmt::format("{:02X}", static_cast<unsigned>(cell.codepoint(i)));
-            }
-            return format_to(ctx.out(), "(chars={}, width={})", codepoints, cell.width());
+            return format_to(ctx.out(), "({}:{}{})", cursor.position.line, cursor.position.column, cursor.visible ? "" : ", (invis)");
         }
     };
 
@@ -768,46 +739,6 @@ namespace fmt // {{{
                     return format_to(ctx.out(), "alternate");
             }
             return format_to(ctx.out(), "({})", static_cast<unsigned>(value));
-        }
-    };
-
-    template <>
-    struct formatter<terminal::CellFlags> {
-        template <typename ParseContext>
-        constexpr auto parse(ParseContext& ctx)
-        {
-            return ctx.begin();
-        }
-
-        template <typename FormatContext>
-        auto format(terminal::CellFlags const& _mask, FormatContext& ctx)
-        {
-            using Mask = terminal::CellFlags;
-            auto constexpr mappings = std::array<std::pair<Mask, std::string_view>, 12>{
-                std::pair{Mask::Bold, "bold"},
-                std::pair{Mask::Faint, "faint"},
-                std::pair{Mask::Italic, "italic"},
-                std::pair{Mask::Underline, "underline"},
-                std::pair{Mask::Blinking, "blinking"},
-                std::pair{Mask::Inverse, "inverse"},
-                std::pair{Mask::Hidden, "hidden"},
-                std::pair{Mask::CrossedOut, "crossedOut"},
-                std::pair{Mask::DoublyUnderlined, "doublyUnderlined"},
-                std::pair{Mask::CurlyUnderlined, "curlyUnderlined"},
-                std::pair{Mask::Framed, "framed"},
-                std::pair{Mask::Overline, "overline"}
-            };
-            int i = 0;
-            std::ostringstream os;
-            for (auto const& mapping : mappings)
-            {
-                if (_mask & mapping.first)
-                {
-                    if (i) os << ", ";
-                    os << mapping.second;
-                }
-            }
-            return format_to(ctx.out(), "{}", os.str());
         }
     };
 } // }}}

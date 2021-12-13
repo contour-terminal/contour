@@ -118,7 +118,7 @@ class Sequence {
     std::optional<T> param_opt(size_t _index) const noexcept
     {
         if (_index < parameters_.size() && parameters_[_index][0])
-            return {T(parameters_[_index][0])};
+            return {static_cast<T>(parameters_[_index][0])};
         else
             return std::nullopt;
     }

@@ -14,7 +14,6 @@
 #pragma once
 
 #include <terminal/Color.h>
-#include <terminal/Coordinate.h>
 #include <terminal/ParserExtension.h>
 #include <terminal/primitives.h>
 
@@ -75,7 +74,7 @@ class SixelParser : public ParserExtension
     using OnFinalize = std::function<void()>;
     explicit SixelParser(Events& _events, OnFinalize _finisher = {});
 
-    using iterator = char32_t const*;
+    using iterator = char const*;
 
     void parseFragment(iterator _begin, iterator _end)
     {
@@ -83,21 +82,15 @@ class SixelParser : public ParserExtension
             parse(ch);
     }
 
-    void parseFragment(std::u32string_view _range)
+    void parseFragment(std::string_view _range)
     {
         parseFragment(_range.data(), _range.data() + _range.size());
     }
 
-    void parseFragment(std::string_view _range)
-    {
-        for (auto const ch : _range)
-            parse(static_cast<char32_t>(ch)); // XXX only used in unit tests
-    }
-
-    void parse(char32_t _value);
+    void parse(char _value);
     void done();
 
-    static void parse(std::u32string_view _range, Events& _events)
+    static void parse(std::string_view _range, Events& _events)
     {
         auto parser = SixelParser{_events};
         parser.parseFragment(_range.data(), _range.data() + _range.size());
@@ -106,7 +99,7 @@ class SixelParser : public ParserExtension
 
     // ParserExtension overrides
     void start() override;
-    void pass(char32_t _char) override;
+    void pass(char _char) override;
     void finalize() override;
 
   private:
@@ -114,7 +107,7 @@ class SixelParser : public ParserExtension
     void transitionTo(State _newState);
     void enterState();
     void leaveState();
-    void fallback(char32_t _value);
+    void fallback(char _value);
 
   private:
     State state_ = State::Ground;

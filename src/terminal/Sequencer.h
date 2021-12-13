@@ -21,6 +21,9 @@
 #include <terminal/SixelParser.h>
 #include <terminal/primitives.h>
 
+#include <unicode/utf8.h>
+#include <unicode/convert.h>
+
 #include <cassert>
 #include <memory>
 #include <string>
@@ -29,27 +32,17 @@
 
 namespace terminal {
 
-class Screen;
+template <typename EventListener> class Screen;
 
 // {{{ enums
-enum class CursorDisplay {
-    Steady,
-    Blink
-};
-
-enum class CursorShape {
-    Block,
-    Rectangle,
-    Underscore,
-    Bar,
-};
-
-enum class ControlTransmissionMode {
+enum class ControlTransmissionMode
+{
     S7C1T, // 7-bit controls
     S8C1T, // 8-bit controls
 };
 
-enum class GraphicsRendition {
+enum class GraphicsRendition
+{
     Reset = 0,              //!< Reset any rendition (style as well as foreground / background coloring).
 
     Bold = 1,               //!< Bold glyph width
@@ -80,7 +73,8 @@ enum class GraphicsRendition {
 };
 
 /// Mutualy exclusive mouse protocls.
-enum class MouseProtocol {
+enum class MouseProtocol
+{
     /// Old X10 mouse protocol
     X10 = 9,
     /// Normal tracking mode, that's X10 with mouse release events and modifiers
@@ -189,14 +183,16 @@ enum class DECMode { // {{{
     // }}}
 }; // }}}
 
-enum class CharsetTable {
+enum class CharsetTable
+{
     G0 = 0,
     G1 = 1,
     G2 = 2,
     G3 = 3
 };
 
-enum class CharsetId {
+enum class CharsetId
+{
     Special, // Special Character and Line Drawing Set
 
     British,
@@ -213,7 +209,8 @@ enum class CharsetId {
 };
 
 /// OSC color-setting related commands that can be grouped into one
-enum class DynamicColorName {
+enum class DynamicColorName
+{
     DefaultForegroundColor,
     DefaultBackgroundColor,
     TextCursorColor,
@@ -241,7 +238,7 @@ constexpr unsigned toAnsiModeNum(AnsiMode m)
     return static_cast<unsigned>(m);
 }
 
-constexpr bool isValidAnsiMode(unsigned _mode) noexcept
+constexpr bool isValidAnsiMode(int _mode) noexcept
 {
     switch (static_cast<AnsiMode>(_mode))
     {
@@ -298,7 +295,7 @@ constexpr unsigned toDECModeNum(DECMode m)
     return static_cast<unsigned>(m);
 }
 
-constexpr bool isValidDECMode(unsigned _mode) noexcept
+constexpr bool isValidDECMode(int _mode) noexcept
 {
     switch (static_cast<DECMode>(_mode))
     {
@@ -459,10 +456,11 @@ enum class ApplyResult {
 ///
 /// Sequencer implements the translation from VT parser events, forming a higher level Sequence,
 /// that can be matched against actions to perform on the target Screen.
-class Sequencer : public ParserEvents {
+template <typename EventListener>
+class Sequencer {
   public:
     /// Constructs the sequencer stage.
-    Sequencer(Screen& _screen,
+    Sequencer(Screen<EventListener>& _screen,
               ImageSize _maxImageSize,
               RGBAColor _backgroundColor,
               std::shared_ptr<SixelColorPalette> _imageColorPalette);
@@ -471,33 +469,34 @@ class Sequencer : public ParserEvents {
     void setMaxImageColorRegisters(unsigned _value) { maxImageRegisterCount_ = _value; }
     void setUsePrivateColorRegisters(bool _value) { usePrivateColorRegisters_ = _value; }
 
-    int64_t instructionCounter() const noexcept { return instructionCounter_; }
+    uint64_t instructionCounter() const noexcept { return instructionCounter_; }
     void resetInstructionCounter() noexcept { instructionCounter_ = 0; }
+    char32_t precedingGraphicCharacter() const noexcept { return precedingGraphicCharacter_; }
 
     // ParserEvents
     //
-    void error(std::string_view const& _errorString) override;
-    void print(char32_t _text) override;
-    void print(std::string_view _chars) override;
-    void execute(char _controlCode) override;
-    void clear() override;
-    void collect(char _char) override;
-    void collectLeader(char _leader) override;
-    void param(char _char) override;
-    void dispatchESC(char _function) override;
-    void dispatchCSI(char _function) override;
-    void startOSC() override;
-    void putOSC(char32_t _char) override;
-    void dispatchOSC() override;
-    void hook(char _function) override;
-    void put(char32_t _char) override;
-    void unhook() override;
-    void startAPC() override {}
-    void putAPC(char32_t) override {}
-    void dispatchAPC() override {}
-    void startPM() override {}
-    void putPM(char32_t) override {}
-    void dispatchPM() override {}
+    void error(std::string_view _errorString);
+    void print(char _text);
+    void print(std::string_view _chars);
+    void execute(char _controlCode);
+    void clear();
+    void collect(char _char);
+    void collectLeader(char _leader);
+    void param(char _char);
+    void dispatchESC(char _function);
+    void dispatchCSI(char _function);
+    void startOSC();
+    void putOSC(char _char);
+    void dispatchOSC();
+    void hook(char _function);
+    void put(char _char);
+    void unhook();
+    void startAPC() {}
+    void putAPC(char) {}
+    void dispatchAPC() {}
+    void startPM() {}
+    void putPM(char) {}
+    void dispatchPM() {}
 
   private:
     void executeControlFunction(char _c0);
@@ -514,9 +513,10 @@ class Sequencer : public ParserEvents {
     // private data
     //
     Sequence sequence_{};
-    Screen& screen_;
+    Screen<EventListener>& screen_;
     char32_t precedingGraphicCharacter_ = {};
-    int64_t instructionCounter_ = 0;
+    uint64_t instructionCounter_ = 0;
+    unicode::utf8_decoder_state utf8DecoderState_ = {};
 
     std::unique_ptr<ParserExtension> hookedParser_;
     std::unique_ptr<SixelImageBuilder> sixelImageBuilder_;

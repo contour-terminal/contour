@@ -183,10 +183,6 @@ sudo apt install libkf5windowsystem-dev
 
 And set pass `-DCONTOUR_BLUR_PLATFORM_KWIN=ON` to cmake when configuring the project.
 
-In case you want to improve performance slightly and run at at least Linux, you can add
-`-DLIBTERMINAL_EXECUTION_PAR=ON` to the cmake configuration and make sure to have `libtbb-dev`
-installed beforehand.
-
 ### Prerequisites Windows 10
 
 For Windows, you must have Windows 10, 2018 Fall Creators Update, and Visual Studio 2019, installed.

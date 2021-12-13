@@ -13,7 +13,11 @@
  */
 #pragma once
 
+#include <terminal/CellFlags.h>
+#include <terminal/Color.h>
+#include <terminal/Image.h>
 #include <terminal/Grid.h>
+#include <terminal/primitives.h>
 
 #include <atomic>
 #include <chrono>
@@ -32,6 +36,9 @@ struct RenderCell
     RGBColor backgroundColor;
     RGBColor decorationColor;
     std::optional<ImageFragment> image;
+
+    bool groupStart = false;
+    bool groupEnd = false;
 };
 
 struct RenderCursor

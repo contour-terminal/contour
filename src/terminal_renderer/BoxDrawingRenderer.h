@@ -48,7 +48,7 @@ class BoxDrawingRenderer : public Renderable {
     /// Renders boxdrawing character.
     ///
     /// @param _char the boxdrawing character's codepoint.
-    bool render(LinePosition _line, ColumnPosition _column, char32_t codepoint, RGBColor _color);
+    bool render(LineOffset _line, ColumnOffset _column, char32_t codepoint, RGBColor _color);
 
   private:
     using TextureAtlas = atlas::MetadataTextureAtlas<char32_t, int>;

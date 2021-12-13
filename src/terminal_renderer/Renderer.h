@@ -148,7 +148,7 @@ class Renderer : public Renderable {
     Opacity backgroundOpacity_;
 
     std::mutex imageDiscardLock_;               //!< Lock guard for accessing discardImageQueue_.
-    std::vector<Image::Id> discardImageQueue_;  //!< List of images to be discarded.
+    std::vector<ImageId> discardImageQueue_;    //!< List of images to be discarded.
 
     BackgroundRenderer backgroundRenderer_;
     ImageRenderer imageRenderer_;

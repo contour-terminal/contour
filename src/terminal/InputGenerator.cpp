@@ -629,18 +629,18 @@ bool InputGenerator::mouseTransport(uint8_t _button, uint8_t _modifier, Coordina
 
 bool InputGenerator::mouseTransportX10(uint8_t _button, uint8_t _modifier, Coordinate _pos)
 {
-    constexpr uint8_t SkipCount = 0x20; // TODO std::numeric_limits<ControlCode>::max();
-    constexpr uint8_t MaxCoordValue = std::numeric_limits<uint8_t>::max() - SkipCount;
+    constexpr int SkipCount = 0x20; // TODO std::numeric_limits<ControlCode>::max();
+    constexpr int MaxCoordValue = std::numeric_limits<uint8_t>::max() - SkipCount;
 
-    if (_pos.row <= MaxCoordValue && _pos.column <= MaxCoordValue)
+    if (*_pos.line < MaxCoordValue && *_pos.column < MaxCoordValue)
     {
         uint8_t const button = SkipCount + static_cast<uint8_t>(_button | _modifier);
-        uint8_t const row = static_cast<uint8_t>(SkipCount + _pos.row);
-        uint8_t const column = static_cast<uint8_t>(SkipCount + _pos.column);
+        uint8_t const line = static_cast<uint8_t>(SkipCount + *_pos.line + 1);
+        uint8_t const column = static_cast<uint8_t>(SkipCount + *_pos.column + 1);
         append("\033[M");
         append(button);
         append(column);
-        append(row);
+        append(line);
         return true;
     }
     else
@@ -652,9 +652,9 @@ bool InputGenerator::mouseTransportSGR(uint8_t _button, uint8_t _modifier, Coord
     append("\033[<");
     append(static_cast<unsigned>(_button | _modifier));
     append(';');
-    append(static_cast<unsigned>(_pos.column));
+    append(static_cast<unsigned>(*_pos.column + 1));
     append(';');
-    append(static_cast<unsigned>(_pos.row));
+    append(static_cast<unsigned>(*_pos.line + 1));
     append(_eventType != MouseEventType::Release ? 'M' : 'm');
 
     return true;
@@ -667,9 +667,9 @@ bool InputGenerator::mouseTransportURXVT(uint8_t _button, uint8_t _modifier, Coo
         append("\033[");
         append(static_cast<unsigned>(_button | _modifier));
         append(';');
-        append(static_cast<unsigned>(_pos.column));
+        append(static_cast<unsigned>(*_pos.column + 1));
         append(';');
-        append(static_cast<unsigned>(_pos.row));
+        append(static_cast<unsigned>(*_pos.line + 1));
         append('M');
     }
     return true;

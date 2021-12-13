@@ -1,5 +1,12 @@
 ### 0.3.0 (unreleased)
 
+#### Grid-PR induced changes
+
+- Improved VT backend performance (#342).
+- Improved text selection behaviour.
+- Adds new configuration option `mouse_block_selection_modifier`.
+- Adds new configuration option `profiles.*.copy_last_mark_range_offset` (default `0`) to adjust where to start looking upwards for the `CopyPreviousMarkRange` action. This is useful for multi-line prompts.
+
 ### 0.2.3 (2021-12-12)
 
 **Important: It is recommended to also use the latest `contour` termcap file if you are already using one

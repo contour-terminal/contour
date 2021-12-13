@@ -750,8 +750,8 @@ void BoxDrawingRenderer::clearCache()
     textureAtlas_ = std::make_unique<TextureAtlas>(renderTarget().monochromeAtlasAllocator());
 }
 
-bool BoxDrawingRenderer::render(LinePosition _line,
-                                ColumnPosition _column,
+bool BoxDrawingRenderer::render(LineOffset _line,
+                                ColumnOffset _column,
                                 char32_t _codepoint,
                                 RGBColor _color)
 {
@@ -759,7 +759,7 @@ bool BoxDrawingRenderer::render(LinePosition _line,
     if (!data)
         return false;
 
-    auto const pos = gridMetrics_.map(Coordinate{*_line, *_column});
+    auto const pos = gridMetrics_.map(_line, _column);
     atlas::TextureInfo const& ti = get<0>(*data);
     auto const x = pos.x;
     auto const y = pos.y;

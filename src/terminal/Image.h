@@ -13,8 +13,9 @@
  */
 #pragma once
 
+#include <crispy/LRUCache.h>
+
 #include <terminal/Color.h>
-#include <terminal/Coordinate.h>
 #include <terminal/primitives.h>
 
 #include <fmt/format.h>
@@ -40,19 +41,21 @@ enum class ImageFormat {
     PNG,
 };
 
+namespace detail { struct ImageId{}; }
+using ImageId = crispy::boxed<uint32_t, detail::ImageId>; // unique numerical image identifier
+
 /**
  * Represents an image that can be displayed in the terminal by being placed into the grid cells
  */
 class Image {
   public:
-    using Id = uint64_t; // unique numerical image identifier
     using Data = std::vector<uint8_t>; // raw RGBA data
 
     /// Constructs an RGBA image.
     ///
     /// @param _data      RGBA buffer data
     /// @param _pixelSize image dimensionss in pixels
-    Image(Id _id, ImageFormat _format, Data _data, ImageSize _pixelSize) :
+    Image(ImageId _id, ImageFormat _format, Data _data, ImageSize _pixelSize) :
         id_{ _id },
         format_{ _format },
         data_{ move(_data) },
@@ -64,7 +67,7 @@ class Image {
     Image(Image&&) = default;
     Image& operator=(Image&&) = default;
 
-    constexpr Id id() const noexcept { return id_; }
+    constexpr ImageId id() const noexcept { return id_; }
     constexpr ImageFormat format() const noexcept { return format_; }
     Data const& data() const noexcept { return data_; }
     constexpr ImageSize size() const noexcept { return size_; }
@@ -72,7 +75,7 @@ class Image {
     constexpr Height height() const noexcept { return size_.height; }
 
   private:
-    Id id_;
+    ImageId id_;
     ImageFormat format_;
     Data data_;
     ImageSize size_;
@@ -106,13 +109,13 @@ enum class ImageAlignment {
 class RasterizedImage
 {
   public:
-    RasterizedImage(std::shared_ptr<Image const> _image,
+    RasterizedImage(Image const* _image,
                     ImageAlignment _alignmentPolicy,
                     ImageResize _resizePolicy,
                     RGBAColor _defaultColor,
                     GridSize _cellSpan,
                     ImageSize _cellSize)
-      : image_{ std::move(_image) },
+      : image_{ _image },
         alignmentPolicy_{ _alignmentPolicy },
         resizePolicy_{ _resizePolicy },
         defaultColor_{ _defaultColor },
@@ -174,6 +177,9 @@ class ImageFragment {
     Coordinate offset_;
 };
 
+namespace detail { struct ImageFragmentId; }
+using ImageFragmentId = crispy::boxed<uint16_t, detail::ImageFragmentId>;
+
 inline bool operator==(ImageFragment const& a, ImageFragment const& b) noexcept
 {
     return a.rasterizedImage().image().id() == b.rasterizedImage().image().id()
@@ -198,20 +204,22 @@ class ImagePool {
   public:
     using OnImageRemove = std::function<void(Image const*)>;
 
-    ImagePool(OnImageRemove _onImageRemove, Image::Id _nextImageId) :
+    constexpr static inline std::size_t MaxCapacity = 1024;
+
+    ImagePool(OnImageRemove _onImageRemove = [](auto) {},
+              ImageId _nextImageId = ImageId(1)):
         nextImageId_{ _nextImageId },
-        images_{},
+        namedImages_{ MaxCapacity },
+        images_{ MaxCapacity },
         rasterizedImages_{},
         onImageRemove_{ std::move(_onImageRemove) }
     {}
 
-    ImagePool() : ImagePool([](auto) {}, 1) {}
-
     /// Creates an RGBA image of given size in pixels.
-    std::shared_ptr<Image const> create(ImageFormat _format, ImageSize _pixelSize, Image::Data&& _data);
+    Image const& create(ImageFormat _format, ImageSize _pixelSize, Image::Data&& _data);
 
     /// Rasterizes an Image.
-    std::shared_ptr<RasterizedImage const> rasterize(std::shared_ptr<Image const> _image,
+    std::shared_ptr<RasterizedImage const> rasterize(ImageId _imageId,
                                                      ImageAlignment _alignmentPolicy,
                                                      ImageResize _resizePolicy,
                                                      RGBAColor _defaultColor,
@@ -220,8 +228,8 @@ class ImagePool {
 
     // named image access
     //
-    void link(std::string const& _name, std::shared_ptr<Image const> _imageRef);
-    std::shared_ptr<Image const> findImageByName(std::string const& _name) const;
+    void link(std::string const& _name, Image const& _imageRef);
+    Image const* findImageByName(std::string const& _name) const noexcept;
     void unlink(std::string const& _name);
 
     size_t imageCount() const noexcept { return images_.size(); }
@@ -232,12 +240,13 @@ class ImagePool {
     void removeImage(Image* _image);                        //!< Removes given image from pool.
     void removeRasterizedImage(RasterizedImage* _image);    //!< Removes a rasterized image from pool.
 
-  private:
-    Image::Id nextImageId_;                                             //!< ID for next image to be put into the pool
-    std::list<Image> images_;                                           //!< pool of raw images
-    std::list<RasterizedImage> rasterizedImages_;                       //!< pool of rasterized images
-    std::map<std::string, std::shared_ptr<Image const>> namedImages_;   //!< keeps mapping from name to raw image
-    OnImageRemove const onImageRemove_;                                 //!< Callback to be invoked when image gets removed from pool.
+    // data members
+    //
+    ImageId nextImageId_;                                   //!< ID for next image to be put into the pool
+    crispy::LRUCache<std::string, ImageId> namedImages_;    //!< keeps mapping from name to raw image
+    crispy::LRUCache<ImageId, Image> images_;               //!< pool of raw images
+    std::list<RasterizedImage> rasterizedImages_;           //!< pool of rasterized images
+    OnImageRemove const onImageRemove_;                     //!< Callback to be invoked when image gets removed from pool.
 };
 
 } // end namespace

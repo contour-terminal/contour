@@ -1,10 +1,27 @@
+/**
+ * This file is part of the "libterminal" project
+ *   Copyright (c) 2019-2020 Christian Parpart <christian@parpart.family>
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #pragma once
+
+#include <terminal/defines.h>
 
 #include <crispy/boxed.h>
 #include <crispy/ImageSize.h>
-#include <cstdint>
-#include <type_traits>
+
 #include <cassert>
+#include <cstdint>
+#include <ostream>
+#include <type_traits>
 
 // TODO
 // - [ ] rename all History to Scrollback
@@ -16,14 +33,13 @@ namespace detail::tags // {{{
 {
     // column types
     struct ColumnCount{};
-    struct Column{};
+    struct ColumnOffset{};
+    struct ColumnPosition{};
 
     // line types
     struct LineCount{};
-    struct LinePosition{};
-    struct RelativeLinePosition{};
-    struct RelativeScrollbackPosition{};
-    struct StaticScrollbackPosition{};
+    struct LineOffset{};
+    struct ScrollOffset{};
 
     // misc.
     struct TabStopCount{};
@@ -52,7 +68,9 @@ using ColumnCount = crispy::boxed<int, detail::tags::ColumnCount>;
 /// (usually the main page unless scrolled upwards).
 ///
 /// A column position starts at 1.
-using ColumnPosition = crispy::boxed<int, detail::tags::Column>;
+using ColumnPosition = crispy::boxed<int, detail::tags::ColumnPosition>;
+
+using ColumnOffset = crispy::boxed<int, detail::tags::ColumnOffset>;
 
 // }}}
 // {{{ Line types
@@ -60,27 +78,83 @@ using ColumnPosition = crispy::boxed<int, detail::tags::Column>;
 /// LineCount represents a number of lines.
 using LineCount = crispy::boxed<int, detail::tags::LineCount>;
 
-/// LinePosition is the 1-based line coordinate of the main-page area (or viewport).
-using LinePosition = crispy::boxed<int, detail::tags::LinePosition>;
-
-/// RelativeScrollbackPosition represents scroll offset relative to the main page buffer.
+/// Represents the line offset relative to main-page top.
 ///
-/// A value of 0 means bottom most scrollback, one line above main page area.
-/// And a value equal to the number of scrollback lines minus one means
-/// the top-most scrollback line.
-using RelativeScrollbackPosition = crispy::boxed<int, detail::tags::RelativeScrollbackPosition>;
+/// *  0  is top-most line on main page
+/// *  -1 is the bottom most line in scrollback
+using LineOffset = crispy::boxed<int, detail::tags::LineOffset>;
 
-/// RelativeLinePosition combines LinePosition and RelativeScrollbackPosition
-/// into one, whereas values from 1 upwards are main page area, and
-/// values from 0 downwards represent the scrollback lines.
-using RelativeLinePosition = crispy::boxed<int, detail::tags::RelativeLinePosition>;
-
-/// StaticScrollbackPosition represents scroll offset relative to scroll top (0).
+/// Represents the number of lines the viewport has been scrolled up into
+/// the scrollback lines history.
 ///
-/// A value of 0 means scroll top, and
-/// a value equal to the number of scrollback lines
-/// is the scroll bottom (main page area).
-using StaticScrollbackPosition = crispy::boxed<int, detail::tags::StaticScrollbackPosition>;
+/// A value of 0 means that it is not scrolled at all (bottom), and
+/// a value equal to the number of scrollback lines means it is scrolled
+/// to the top.
+using ScrollOffset = crispy::boxed<int, detail::tags::ScrollOffset>;
+
+constexpr int operator*(LineCount a, ColumnCount b) noexcept { return a.as<int>() * b.as<int>(); }
+constexpr int operator*(ColumnCount a, LineCount b) noexcept { return a.as<int>() * b.as<int>(); }
+// }}}
+struct [[nodiscard]] Coordinate { // {{{
+    LineOffset line{};
+    ColumnOffset column{};
+
+    constexpr Coordinate& operator+=(Coordinate a) noexcept
+    {
+        line += a.line;
+        column += a.column;
+        return *this;
+    }
+
+    constexpr Coordinate& operator+=(ColumnOffset x) noexcept { column += x; return *this; }
+    constexpr Coordinate& operator+=(LineOffset y) noexcept { line += y; return *this; }
+};
+
+inline std::ostream& operator<<(std::ostream& os, Coordinate coord)
+{
+    return os << fmt::format("({}, {})", coord.line, coord.column);
+}
+
+constexpr bool operator==(Coordinate a, Coordinate b) noexcept { return a.line == b.line && a.column == b.column; }
+constexpr bool operator!=(Coordinate a, Coordinate b) noexcept { return !(a == b); }
+
+constexpr bool operator<(Coordinate a, Coordinate b) noexcept
+{
+    if (a.line < b.line)
+        return true;
+
+    if (a.line == b.line && a.column < b.column)
+        return true;
+
+    return false;
+}
+
+constexpr bool operator<=(Coordinate a, Coordinate b) noexcept
+{
+    return a < b || a == b;
+}
+
+constexpr bool operator>=(Coordinate a, Coordinate b) noexcept
+{
+    return !(a < b);
+}
+
+constexpr bool operator>(Coordinate a, Coordinate b) noexcept
+{
+    return !(a == b || a < b);
+}
+
+inline Coordinate operator+(Coordinate a, Coordinate b) noexcept { return {a.line + b.line, a.column + b.column}; }
+
+constexpr Coordinate operator+(Coordinate c, LineOffset y) noexcept
+{
+    return Coordinate{c.line + y, c.column};
+}
+
+constexpr Coordinate operator+(Coordinate c, ColumnOffset x) noexcept
+{
+    return Coordinate{c.line, c.column + x};
+}
 
 // }}}
 // {{{ Range
@@ -134,16 +208,25 @@ using Length = crispy::boxed<int, detail::tags::Length>;
 
 // }}}
 // {{{ PageSize
-struct PageSize { LineCount lines; ColumnCount columns; };
+struct PageSize
+{
+    LineCount lines;
+    ColumnCount columns;
+    int area() const noexcept
+    {
+        return *lines * *columns;
+    }
+};
 constexpr bool operator==(PageSize a, PageSize b) noexcept { return a.lines == b.lines && a.columns == b.columns; }
 constexpr bool operator!=(PageSize a, PageSize b) noexcept { return !(a == b); }
 // }}}
 // {{{ Coordinate types
 
-struct ScreenCoordinate // or name CursorPosition?
+// (0, 0) is home position
+struct ScreenPosition
 {
-    LinePosition line;
-    ColumnPosition column;
+    LineOffset line;
+    ColumnOffset column;
 };
 
 // }}}
@@ -155,8 +238,8 @@ struct GridSize
     ColumnCount columns;
 
     struct Offset {
-        LineCount lines;
-        ColumnCount columns;
+        LineOffset line;
+        ColumnOffset column;
     };
 
     /// This iterator can be used to iterate through each and every point between (0, 0) and (width, height).
@@ -194,8 +277,8 @@ struct GridSize
         constexpr Offset makeOffset(int offset) noexcept
         {
             return Offset{
-                LineCount(offset / *width),
-                ColumnCount(offset % *width)
+                LineOffset(offset / *width),
+                ColumnOffset(offset % *width)
             };
         }
     };
@@ -231,6 +314,24 @@ using Height = crispy::Height;
 
 using ImageSize = crispy::ImageSize;
 
+constexpr ImageSize operator*(ImageSize a, PageSize b) noexcept
+{
+    return ImageSize{
+        a.width * boxed_cast<Width>(b.columns),
+        a.height * boxed_cast<Height>(b.lines)
+    };
+}
+// }}}
+// {{{ Mixed boxed types operator overloads
+constexpr LineCount operator+(LineCount a, LineOffset b) noexcept { return a + b.value; }
+constexpr LineCount operator-(LineCount a, LineOffset b) noexcept { return a - b.value; }
+constexpr LineOffset& operator+=(LineOffset& a, LineCount b) noexcept { a.value += b.value; return a; }
+constexpr LineOffset& operator-=(LineOffset& a, LineCount b) noexcept { a.value -= b.value; return a; }
+
+constexpr ColumnCount operator+(ColumnCount a, ColumnOffset b) noexcept { return a + b.value; }
+constexpr ColumnCount operator-(ColumnCount a, ColumnOffset b) noexcept { return a - b.value; }
+constexpr ColumnOffset& operator+=(ColumnOffset& a, ColumnCount b) noexcept { a.value += b.value; return a; }
+constexpr ColumnOffset& operator-=(ColumnOffset& a, ColumnCount b) noexcept { a.value -= b.value; return a; }
 // }}}
 
 // TODO: Maybe make boxed.h into its own C++ github repo?
@@ -245,9 +346,37 @@ using ImageSize = crispy::ImageSize;
 // - PhysicalCoordinate
 // - ScrollbackCoordinate
 
+enum class CursorDisplay
+{
+    Steady,
+    Blink
+};
+
+enum class CursorShape
+{
+    Block,
+    Rectangle,
+    Underscore,
+    Bar,
+};
+
 }
 
 namespace fmt { // {{{
+    template <>
+    struct formatter<terminal::Coordinate> {
+        template <typename ParseContext>
+        constexpr auto parse(ParseContext& ctx)
+        {
+            return ctx.begin();
+        }
+        template <typename FormatContext>
+        auto format(terminal::Coordinate coord, FormatContext& ctx)
+        {
+            return format_to(ctx.out(), "({}, {})", coord.line, coord.column);
+        }
+    };
+
     template <>
     struct formatter<terminal::PageSize> {
         template <typename ParseContext>

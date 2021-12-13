@@ -111,8 +111,10 @@ namespace // {{{ helper
     // it may very well be that the memory was corrupted too.
     std::string crashLogDir;
 
-    void segvHandler(int)
+    void segvHandler(int signum)
     {
+        signal(signum, SIG_DFL);
+
         std::stringstream sstr;
         crashLogger(sstr);
         string crashLog = sstr.str();
@@ -183,6 +185,7 @@ ContourApp::ContourApp() :
     FileSystem::create_directories(crashLogDirPath);
     crashLogDir = crashLogDirPath.string();
     signal(SIGSEGV, segvHandler);
+    signal(SIGABRT, segvHandler);
 #endif
 
 #if defined(_WIN32)

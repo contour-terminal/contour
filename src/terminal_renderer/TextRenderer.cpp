@@ -20,6 +20,7 @@
 
 #include <crispy/assert.h>
 #include <crispy/algorithm.h>
+#include <crispy/indexed.h>
 #include <crispy/times.h>
 #include <crispy/range.h>
 
@@ -136,8 +137,8 @@ void TextRenderer::renderCell(RenderCell const& _cell)
     if (isBoxDrawingCharacter)
     {
         auto const success = boxDrawingRenderer_.render(
-            LinePosition::cast_from(_cell.position.row),
-            ColumnPosition::cast_from(_cell.position.column),
+            _cell.position.line,
+            _cell.position.column,
             codepoints[0],
             _cell.foregroundColor
         );
@@ -150,7 +151,7 @@ void TextRenderer::renderCell(RenderCell const& _cell)
         }
     }
 
-    if (forceCellGroupSplit_ || (_cell.flags & CellFlags::CellSequenceStart))
+    if (forceCellGroupSplit_ || _cell.groupStart)
     {
         // fmt::print("TextRenderer.sequenceStart: {}\n", textPosition_);
         forceCellGroupSplit_ = false;
@@ -159,7 +160,7 @@ void TextRenderer::renderCell(RenderCell const& _cell)
 
     appendCell(codepoints, style, _cell.foregroundColor);
 
-    if (_cell.flags & CellFlags::CellSequenceEnd)
+    if (_cell.groupEnd)
         endSequence();
 }
 
@@ -339,7 +340,7 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
         glyph.size.height += Height(yMin);
         auto& data = glyph.bitmap;
         data.erase(begin(data), next(begin(data), pixelCount)); // XXX asan hit (size = -2)
-        Ensure(glyph.valid());
+        Ensures(glyph.valid());
     }
 
     GlyphMetrics metrics{};

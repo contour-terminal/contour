@@ -131,13 +131,14 @@ struct TerminalProfile {
     bool maximized = false;
     bool fullscreen = false;
     double refreshRate = 0.0; // 0=auto
+    terminal::LineOffset copyLastMarkRangeOffset = terminal::LineOffset(0);
 
     std::string wmClass;
 
     terminal::PageSize terminalSize = {terminal::LineCount(10), terminal::ColumnCount(40)};
     terminal::VTType terminalId = terminal::VTType::VT525;
 
-    std::optional<terminal::LineCount> maxHistoryLineCount;
+    terminal::LineCount maxHistoryLineCount;
     terminal::LineCount historyScrollMultiplier;
     ScrollBarPosition scrollbarPosition = ScrollBarPosition::Right;
     bool hideScrollbarInAltScreen = true;
@@ -177,6 +178,8 @@ struct Config {
 
     // Configures the size of the PTY read buffer.
     // Changing this value may result in better or worse throughput performance.
+    //
+    // This value must be integer-devisable by 16.
     int ptyReadBufferSize = 16384;
 
     bool reflowOnResize = true;
@@ -206,6 +209,7 @@ struct Config {
     std::string wordDelimiters;
     terminal::Modifier bypassMouseProtocolModifier = terminal::Modifier::Shift;
     SelectionAction onMouseSelection = SelectionAction::CopyToSelectionClipboard;
+    terminal::Modifier mouseBlockSelectionModifier = terminal::Modifier::Control;
 
     // input mapping
     InputMappings inputMappings;

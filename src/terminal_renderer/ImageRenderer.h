@@ -29,7 +29,7 @@ namespace terminal::renderer
 {
     struct ImageFragmentKey
     {
-        Image::Id const imageId;
+        ImageId const imageId;
         Coordinate const offset;
         ImageSize const size;
 
@@ -62,9 +62,9 @@ namespace std
         {
             using FNV = crispy::FNV<uint64_t>;
             return FNV{}(FNV{}.basis(),
-                         _key.imageId,
-                         static_cast<unsigned>(_key.offset.row),
-                         static_cast<unsigned>(_key.offset.column),
+                         _key.imageId.value,
+                         _key.offset.line.as<unsigned>(),
+                         _key.offset.column.as<unsigned>(),
                          _key.size.width.as<unsigned>(),
                          _key.size.height.as<unsigned>());
         }
@@ -90,7 +90,7 @@ class ImageRenderer : public Renderable
     void renderImage(crispy::Point _pos, ImageFragment const& _fragment);
 
     /// notify underlying cache that this fragment is not going to be rendered anymore, maybe freeing up some GPU caches.
-    void discardImage(Image::Id _imageId);
+    void discardImage(ImageId _imageId);
 
     struct Metadata {}; // TODO: do we want/need anything here?
     using TextureAtlas = atlas::MetadataTextureAtlas<ImageFragmentKey, Metadata>;
@@ -102,7 +102,7 @@ class ImageRenderer : public Renderable
     // private data
     //
     ImagePool imagePool_;
-    std::unordered_map<Image::Id, std::vector<ImageFragmentKey>> imageFragmentsInUse_; // remember each fragment key per image for proper GPU texture GC.
+    std::unordered_map<ImageId, std::vector<ImageFragmentKey>> imageFragmentsInUse_; // remember each fragment key per image for proper GPU texture GC.
     ImageSize cellSize_;
     std::unique_ptr<TextureAtlas> atlas_;
 };

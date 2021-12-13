@@ -8,39 +8,31 @@ include(FilesystemResolver)
 option(LIBTERMINAL_TESTING "Enables building of unittests for libterminal [default: ON]" ON)
 option(LIBTERMINAL_LOG_RAW "Enables logging of raw VT sequences [default: ON]" ON)
 option(LIBTERMINAL_LOG_TRACE "Enables VT sequence tracing. [default: ON]" ON)
-option(LIBTERMINAL_EXECUTION_PAR "Builds with parallel execution where possible [default: OFF]" OFF)
 
 # This is an optimization feature that hopefully improves performance when enabled.
 # But it's currently disabled by default as I am not fully satisfied with it yet.
 option(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE "Updates the render buffer within the terminal thread if set to ON (otherwise the render buffer is actively refreshed in the render thread)." OFF)
-
-# Compile-time terminal features
-option(LIBTERMINAL_IMAGES "Enables image support [default: ON]" ON)
-option(LIBTERMINAL_HYPERLINKS "Enables hyperlink support [default: ON]" ON)
 
 if(MSVC)
     add_definitions(-DNOMINMAX)
 endif()
 
 set(terminal_HEADERS
-    Charset.h
     Capabilities.h
+    Cell.h
+    Charset.h
     Color.h
+    Functions.h
+    GraphicsAttributes.h
     Grid.h
     Hyperlink.h
-    Functions.h
     Image.h
     InputBinding.h
     InputGenerator.h
+    Line.h
     MatchModes.h
     Parser.h
     Process.h
-    pty/Pty.h
-    pty/MockPty.h
-    pty/MockViewPty.h
-    pty/UnixPty.h
-    pty/ConPty.h
-    pty/PtyProcess.h
     RenderBuffer.h
     Screen.h
     Selector.h
@@ -48,9 +40,15 @@ set(terminal_HEADERS
     Sequencer.h
     SixelParser.h
     Terminal.h
-    Viewport.h
     VTType.h
+    Viewport.h
     primitives.h
+    pty/ConPty.h
+    pty/MockPty.h
+    pty/MockViewPty.h
+    pty/Pty.h
+    pty/PtyProcess.h
+    pty/UnixPty.h
 )
 
 set(terminal_SOURCES
@@ -58,6 +56,7 @@ set(terminal_SOURCES
     pty/MockViewPty.cpp
     pty/PtyProcess.cpp
     Charset.cpp
+    Cell.cpp
     Capabilities.cpp
     Color.cpp
     Grid.cpp
@@ -65,6 +64,7 @@ set(terminal_SOURCES
     Image.cpp
     InputBinding.cpp
     InputGenerator.cpp
+    Line.cpp
     MatchModes.cpp
     Parser.cpp
     Process.cpp
@@ -86,10 +86,6 @@ if(UNIX)
 else()
     list(APPEND terminal_SOURCES pty/ConPty.cpp)
     #TODO: list(APPEND terminal_SOURCES pty/WinPty.cpp)
-endif()
-if(LIBTERMINAL_EXECUTION_PAR)
-    add_definitions(-DLIBTERMINAL_EXECUTION_PAR=1)
-    list(APPEND LIBTERMINAL_LIBRARIES tbb)
 endif()
 
 add_library(terminal STATIC ${terminal_SOURCES} ${terminal_HEADERS})
@@ -113,13 +109,6 @@ if(CONTOUR_PERF_STATS)
 endif()
 
 
-if(LIBTERMINAL_IMAGES)
-    target_compile_definitions(terminal PUBLIC LIBTERMINAL_IMAGES=1)
-endif()
-if(LIBTERMINAL_HYPERLINKS)
-    target_compile_definitions(terminal PUBLIC LIBTERMINAL_HYPERLINKS=1)
-endif()
-
 if(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE AND NOT(WIN32))
     target_compile_definitions(terminal PUBLIC LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE=1)
 endif()
@@ -130,6 +119,7 @@ if(LIBTERMINAL_TESTING)
     add_executable(terminal_test
         test_main.cpp
         Capabilities_test.cpp
+        Color_test.cpp
         InputGenerator_test.cpp
 		Selector_test.cpp
         Functions_test.cpp

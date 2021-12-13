@@ -16,16 +16,15 @@ class ParserExtension
     virtual ~ParserExtension() = default;
 
     virtual void start() = 0;
-    virtual void pass(char32_t _char) = 0;
+    virtual void pass(char _char) = 0;
     virtual void finalize() = 0;
 };
 
 class SimpleStringCollector : public ParserExtension
 {
   public:
-    explicit SimpleStringCollector(std::function<void(std::u32string_view const&)> _done)
-        : data_{},
-          done_{ std::move(_done) }
+    explicit SimpleStringCollector(std::function<void(std::string_view)> _done):
+        done_{ std::move(_done) }
     {}
 
     void start() override
@@ -33,7 +32,7 @@ class SimpleStringCollector : public ParserExtension
         data_.clear();
     }
 
-    void pass(char32_t _char) override
+    void pass(char _char) override
     {
         data_.push_back(_char);
     }
@@ -45,8 +44,8 @@ class SimpleStringCollector : public ParserExtension
     }
 
   private:
-    std::u32string data_;
-    std::function<void(std::u32string_view const&)> done_;
+    std::string data_;
+    std::function<void(std::string_view)> done_;
 };
 
 } // end namespace
