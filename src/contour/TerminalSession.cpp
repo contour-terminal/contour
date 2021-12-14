@@ -21,6 +21,8 @@
 
 #include <crispy/StackTrace.h>
 
+#include <range/v3/all.hpp>
+
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
 #include <QtCore/QMetaObject>
@@ -37,7 +39,6 @@
 #include <QtWidgets/QMessageBox>
 #include <algorithm>
 #include <fstream>
-#include <range/v3/all.hpp>
 
 #if defined(CONTOUR_BLUR_PLATFORM_KWIN)
     #include <KWindowEffects>

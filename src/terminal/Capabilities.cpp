@@ -20,6 +20,7 @@
 #include <range/v3/algorithm/copy.hpp>
 #include <range/v3/view/concat.hpp>
 #include <range/v3/view/transform.hpp>
+
 #include <sstream>
 
 using std::nullopt;

@@ -11,28 +11,30 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-// clang-format off
-#include <text_shaper/open_shaper.h>
 #include <text_shaper/font.h>
 #include <text_shaper/font_locator.h>
+#include <text_shaper/open_shaper.h>
 
-#include <crispy/assert.h>
 #include <crispy/algorithm.h>
-#include <crispy/times.h>
+#include <crispy/assert.h>
 #include <crispy/indexed.h>
+#include <crispy/times.h>
 
-#include <range/v3/view/iota.hpp>
 #include <range/v3/algorithm/any_of.hpp>
+#include <range/v3/view/iota.hpp>
 
+// clang-format off
 #include <ft2build.h>
 #include FT_BITMAP_H
 #include FT_ERRORS_H
 #include FT_FREETYPE_H
 #include FT_LCD_FILTER_H
+// clang-format on
 
 #include <fontconfig/fontconfig.h>
-#include <harfbuzz/hb.h>
+
 #include <harfbuzz/hb-ft.h>
+#include <harfbuzz/hb.h>
 
 #include <algorithm>
 #include <cmath>
@@ -40,7 +42,6 @@
 #include <tuple>
 #include <unordered_map>
 #include <utility>
-// clang-format on
 
 using ranges::views::iota;
 using std::get;

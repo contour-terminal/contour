@@ -19,10 +19,11 @@
 
 #include <fmt/format.h>
 
-#include <array>
 #include <range/v3/view/filter.hpp>
 #include <range/v3/view/iota.hpp>
 #include <range/v3/view/zip.hpp>
+
+#include <array>
 
 using namespace std;
 

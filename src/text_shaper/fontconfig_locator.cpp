@@ -14,8 +14,10 @@
 #include <text_shaper/font.h>
 #include <text_shaper/fontconfig_locator.h>
 
-#include <fontconfig/fontconfig.h>
 #include <range/v3/view/iota.hpp>
+
+#include <fontconfig/fontconfig.h>
+
 #include <string_view>
 
 using std::nullopt;

@@ -19,9 +19,10 @@
 
 #include <fmt/format.h>
 
+#include <range/v3/view/iota.hpp>
+
 #include <algorithm>
 #include <functional>
-#include <range/v3/view/iota.hpp>
 
 namespace terminal::renderer
 {

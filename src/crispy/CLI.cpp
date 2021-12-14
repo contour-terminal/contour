@@ -15,10 +15,11 @@
 
 #include <crispy/times.h>
 
+#include <range/v3/view/iota.hpp>
+
 #include <algorithm>
 #include <cassert>
 #include <deque>
-#include <range/v3/view/iota.hpp>
 #include <sstream>
 
 #if 0 // !defined(NDEBUG)

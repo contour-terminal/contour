@@ -13,9 +13,10 @@
  */
 #include <terminal_renderer/utils.h>
 
+#include <range/v3/view/iota.hpp>
+
 #include <algorithm> // max?
 #include <cassert>
-#include <range/v3/view/iota.hpp>
 
 namespace terminal::renderer
 {

@@ -29,11 +29,12 @@
 #include <unicode/utf8.h>
 #include <unicode/word_segmenter.h>
 
+#include <range/v3/view/iota.hpp>
+
 #include <algorithm>
 #include <cassert>
 #include <iostream>
 #include <iterator>
-#include <range/v3/view/iota.hpp>
 #include <sstream>
 #include <string_view>
 #include <tuple>

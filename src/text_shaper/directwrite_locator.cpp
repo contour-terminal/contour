@@ -16,6 +16,7 @@
 #include <text_shaper/font.h>
 
 #include <range/v3/view/iota.hpp>
+
 #include <string_view>
 
 // {{{ TODO: replace with libunicode

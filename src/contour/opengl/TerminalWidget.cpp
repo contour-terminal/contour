@@ -47,9 +47,10 @@
 #include <fmt/chrono.h>
 #include <fmt/format.h>
 
+#include <range/v3/all.hpp>
+
 #include <algorithm>
 #include <cstring>
-#include <range/v3/all.hpp>
 // #include <execution>
 #include <fstream>
 #include <stdexcept>
