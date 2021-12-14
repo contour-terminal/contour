@@ -3,6 +3,7 @@
 **Important: It is recommended to also use the latest `contour` termcap file if you are already using one
 from a previous release.**
 
+- Fixes installation from `.deb` (missing terminfo dependency)
 - Fixes Sixel image rendering when scrolling is needed and ANSI cursor is not on left margin.
 - Fixes Qt-related CLI options that that were largely ignored.
 - Fixes crash caused by VT sequence PM and SOS (#513).
