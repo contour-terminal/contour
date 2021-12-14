@@ -39,7 +39,6 @@ Homepage: https://github.com/contour-terminal/contour/
 Recommends:
   xdg-utils
 Depends: ${shlibs:Depends}, ${misc:Depends},
-  contour-terminfo,
   libc6,
   libfontconfig1,
   libfreetype6,

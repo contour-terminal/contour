@@ -1,5 +1,7 @@
 ### 0.3.0 (unreleased)
 
+- Fixes installation from `.deb` (missing terminfo dependency)
+
 #### Grid-PR induced changes
 
 - Improved VT backend performance (#342).
