@@ -32,7 +32,7 @@ using namespace std::string_view_literals;
 namespace text
 {
 
-namespace // {{{ support
+namespace
 {
 
     constexpr string_view fcSpacingStr(int _value) noexcept
