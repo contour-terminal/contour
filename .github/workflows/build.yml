@@ -153,6 +153,14 @@ jobs:
       run: ./build/src/crispy/crispy_test
     - name: "test: libterminal"
       run: ./build/src/terminal/terminal_test
+    - name: "upload unit tests"
+      uses: actions/upload-artifact@v2
+      with:
+        name: contour-ubuntu2004-tests
+        path: |
+          build/src/crispy/crispy_test
+          build/src/terminal/terminal_test
+        retention-days: 3
     - name: "CPack: Creating DEB & TGZ package"
       run: |
         set -ex
@@ -179,6 +187,37 @@ jobs:
         path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
         if-no-files-found: error
         retention-days: 7
+
+  test_ubuntu2004_valgrind:
+    name: "Run tests via valgrind"
+    runs-on: ubuntu-20.04
+    needs: [ubuntu_2004]
+    steps:
+    - name: "download artifact"
+      uses: actions/download-artifact@v2
+      with:
+        name: contour-ubuntu2004-tests
+    - name: "fix unit test permissions"
+      run: find . -name '*_test' -exec chmod 0755 {} \;
+    - name: "install dependencies"
+      run: |
+        set -ex
+        ls -hlR
+        #sudo apt -q update
+        sudo apt install -y \
+                        libfontconfig1 \
+                        libfreetype6 \
+                        libharfbuzz0b \
+                        libkf5windowsystem5 \
+                        libqt5gui5 \
+                        libqt5opengl5 \
+                        libyaml-cpp0.6 \
+                        ncurses-bin \
+                        valgrind
+    - name: "test: crispy (via valgrind)"
+      run: valgrind --error-exitcode=42 ./crispy/crispy_test
+    - name: "test: libterminal (via valgrind)"
+      run: valgrind --error-exitcode=42 ./terminal/terminal_test
 
   ubuntu_1804:
     name: "Ubuntu Linux 18.04"
@@ -374,7 +413,7 @@ jobs:
       uses: lukka/run-vcpkg@v5
       id: runvcpkg
       with:
-        vcpkgArguments: angle catch2 fmt freetype fontconfig harfbuzz ms-gsl yaml-cpp range-v3
+        vcpkgArguments: angle fmt freetype fontconfig harfbuzz yaml-cpp range-v3
         vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
         vcpkgGitCommitId: 69478c5caafcde4c490bb1fccb960296801dbb5f
         vcpkgTriplet: x64-windows
