@@ -24,14 +24,12 @@ namespace crispy
 
 // XXX Too bad gsl_assert.h is imported SOMEWHERE THAT IS NOT ME and hence
 //     I cannot *just* define Expects() nor Ensures().
-
-#if defined(Expects)
-    #undef Expects
-#endif
-
-#if defined(Ensures)
-    #undef Ensures
-#endif
+// XXX Also (rant!), Expects() and Ensures() is hard-defined (WTF!!!) in GSL.
+//     Microsoft, please fix this!
+//
+// So instead we use:
+//   Require()
+//   Guarantee()
 
 /// Function signature for custom assertion failure handlers.
 using fail_handler_t = std::function<void(std::string_view, std::string_view, std::string_view, int)>;
@@ -74,13 +72,13 @@ inline void set_fail_handler(fail_handler_t _handler)
     detail::fail_handler() = std::move(_handler);
 }
 
-#define Expects(cond)                                                                       \
+#define Require(cond)                                                                       \
     do                                                                                      \
     {                                                                                       \
         ::crispy::detail::check((cond), #cond, "Precondition failed.", __FILE__, __LINE__); \
     } while (0)
 
-#define Ensures(cond)                                                                        \
+#define Guarantee(cond)                                                                      \
     do                                                                                       \
     {                                                                                        \
         ::crispy::detail::check((cond), #cond, "Postcondition failed.", __FILE__, __LINE__); \

@@ -160,8 +160,8 @@ struct LogicalLines
                  LineOffset _bottom):
             lines { _lines }, top { _top }, next { _next }, bottom { _bottom }
         {
-            Expects(_top <= next);
-            Expects(next <= _bottom + 1);
+            Require(_top <= next);
+            Require(next <= _bottom + 1);
             ++*this;
         }
 
@@ -177,7 +177,7 @@ struct LogicalLines
                 return *this;
             }
 
-            Expects(!lines.get()[unbox<int>(next)].wrapped());
+            Require(!lines.get()[unbox<int>(next)].wrapped());
 
             current.top = LineOffset::cast_from(next);
             current.lines.clear();
@@ -257,8 +257,8 @@ struct ReverseLogicalLines
                  LineOffset _bottom):
             lines { _lines }, top { _top }, next { _next }, bottom { _bottom }
         {
-            Expects(_top - 1 <= next);
-            Expects(next <= _bottom);
+            Require(_top - 1 <= next);
+            Require(next <= _bottom);
             ++*this;
         }
 
@@ -273,7 +273,7 @@ struct ReverseLogicalLines
                 return *this;
             }
 
-            Expects(!lines.get()[unbox<int>(next)].wrapped());
+            Require(!lines.get()[unbox<int>(next)].wrapped());
 
             current.top = LineOffset::cast_from(next);
             current.lines.clear();

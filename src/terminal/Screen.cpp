@@ -509,10 +509,10 @@ template <typename T>
 void Screen<T>::verifyState() const
 {
 #if !defined(NDEBUG)
-    Expects(activeGrid_->pageSize() == pageSize_);
-    Expects(*cursor_.position.column < *pageSize_.columns);
-    Expects(*cursor_.position.line < *pageSize_.lines);
-    Expects(tabs_.empty() || tabs_.back() < pageSize_.columns.as<ColumnOffset>());
+    Require(activeGrid_->pageSize() == pageSize_);
+    Require(*cursor_.position.column < *pageSize_.columns);
+    Require(*cursor_.position.line < *pageSize_.lines);
+    Require(tabs_.empty() || tabs_.back() < pageSize_.columns.as<ColumnOffset>());
 
     if (*pageSize_.lines != static_cast<int>(grid().mainPage().size()))
         fail(fmt::format("Line count mismatch. Actual line count {} but should be {}.",

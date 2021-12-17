@@ -78,7 +78,7 @@ constexpr crispy::Point operator*(ImageSize a, Ratio b) noexcept
 
 constexpr auto linearEq(crispy::Point p1, crispy::Point p2) noexcept
 {
-    // Expects(p2.x != p1.x);
+    // Require(p2.x != p1.x);
     auto const m = double(p2.y - p1.y) / double(p2.x - p1.x);
     auto const n = double(p1.y) - m * double(p1.x);
     return [m, n](int x) -> int {

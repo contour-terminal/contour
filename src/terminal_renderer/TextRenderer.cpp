@@ -160,8 +160,8 @@ void TextRenderer::renderCell(RenderCell const& _cell)
 void TextRenderer::beginFrame()
 {
     // fmt::print("beginFrame: {} / {}\n", codepoints_.size(), clusters_.size());
-    Expects(codepoints_.empty());
-    Expects(clusters_.empty());
+    Require(codepoints_.empty());
+    Require(clusters_.empty());
 
     auto constexpr DefaultColor = RGBColor {};
     style_ = TextStyle::Invalid;
@@ -214,7 +214,7 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
         return nullopt;
 
     text::rasterized_glyph& glyph = theGlyphOpt.value();
-    Expects(glyph.bitmap.size()
+    Require(glyph.bitmap.size()
             == text::pixel_size(glyph.format) * unbox<size_t>(glyph.size.width)
                    * unbox<size_t>(glyph.size.height));
     auto const numCells = _presentation == unicode::PresentationStyle::Emoji
@@ -323,10 +323,10 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
     // then cut off at grid cell's bottom.
     if (yMin < 0)
     {
-        Expects(glyph.valid());
+        Require(glyph.valid());
         auto const rowCount = -yMin;
         auto const pixelCount = rowCount * unbox<int>(glyph.size.width) * text::pixel_size(glyph.format);
-        Expects(0 < pixelCount && pixelCount < glyph.bitmap.size());
+        Require(0 < pixelCount && pixelCount < glyph.bitmap.size());
         LOGSTORE(RasterizerLog)("Cropping {} underflowing bitmap rows.", rowCount);
         glyph.size.height += Height(yMin);
         auto& data = glyph.bitmap;
