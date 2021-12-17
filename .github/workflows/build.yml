@@ -374,7 +374,7 @@ jobs:
       uses: lukka/run-vcpkg@v5
       id: runvcpkg
       with:
-        vcpkgArguments: angle freetype fontconfig harfbuzz fmt yaml-cpp ms-gsl range-v3
+        vcpkgArguments: angle catch2 fmt freetype fontconfig harfbuzz ms-gsl yaml-cpp range-v3
         vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
         vcpkgGitCommitId: 69478c5caafcde4c490bb1fccb960296801dbb5f
         vcpkgTriplet: x64-windows

@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 #define CATCH_CONFIG_RUNNER
-#include <catch2/catch_all.hpp>
+#include <catch2/catch.hpp>
 
 int main(int argc, char const* argv[])
 {

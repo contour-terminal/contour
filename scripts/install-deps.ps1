@@ -21,11 +21,6 @@ $ThirdParties =
         Folder="termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed";
         Archive="termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed.zip";
         URI="https://github.com/contour-terminal/termbench-pro/archive/cd571e3cebb7c00de9168126b28852f32fb204ed.zip"
-    };
-    [ThirdParty]@{
-        Folder="Catch2-dcf9479c85f4fbd1aa6a296ff81fff235c48e0c1";
-        Archive="Catch2-dcf9479c85f4fbd1aa6a296ff81fff235c48e0c1.zip";
-        URI="https://github.com/catchorg/Catch2/archive/dcf9479c85f4fbd1aa6a296ff81fff235c48e0c1.zip"
     }
 )
 

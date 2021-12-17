@@ -14,7 +14,7 @@
 #include <crispy/sort.h>
 
 #include <array>
-#include <catch2/catch_all.hpp>
+#include <catch2/catch.hpp>
 
 using namespace std;
 

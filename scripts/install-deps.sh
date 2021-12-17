@@ -131,6 +131,7 @@ install_deps_ubuntu()
         libqt5gui5
         libqt5opengl5-dev
         libyaml-cpp-dev
+        catch2
         make
         ncurses-bin
         pkg-config
@@ -226,9 +227,9 @@ install_deps_darwin()
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
     # NB: Also available in brew: mimalloc
-    # catch2
     brew install $SYSDEP_ASSUME_YES \
         boost \
+        catch2 \
         cpp-gsl \
         fontconfig \
         fmt \

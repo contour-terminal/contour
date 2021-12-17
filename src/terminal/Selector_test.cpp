@@ -14,7 +14,7 @@
 #include <terminal/Screen.h>
 #include <terminal/Selector.h>
 
-#include <catch2/catch_all.hpp>
+#include <catch2/catch.hpp>
 
 using crispy::Size;
 using namespace std;

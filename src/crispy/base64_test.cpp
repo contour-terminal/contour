@@ -13,7 +13,7 @@
  */
 #include <crispy/base64.h>
 
-#include <catch2/catch_all.hpp>
+#include <catch2/catch.hpp>
 
 using namespace crispy;
 
