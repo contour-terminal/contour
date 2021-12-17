@@ -174,8 +174,6 @@ struct Config
 {
     FileSystem::path backingFilePath;
 
-    std::optional<FileSystem::path> logFilePath;
-
     // Configures the size of the PTY read buffer.
     // Changing this value may result in better or worse throughput performance.
     //
