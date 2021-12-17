@@ -1,6 +1,8 @@
 # Visual Studio Code
 .vscode
 .vscode/**
+_deps
+_deps/**
 build
 build/**
 release

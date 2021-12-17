@@ -19,7 +19,7 @@
 #include <unicode/convert.h>
 
 #include <algorithm>
-#include <catch2/catch_all.hpp>
+#include <catch2/catch.hpp>
 #include <iostream>
 #include <iterator>
 #include <string>

@@ -16,7 +16,7 @@
 #include <fmt/format.h>
 
 #include <array>
-#include <catch2/catch_all.hpp>
+#include <catch2/catch.hpp>
 #include <vector>
 
 using namespace crispy;

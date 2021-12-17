@@ -19,7 +19,7 @@
 
 #include <range/v3/view/iota.hpp>
 
-#include <catch2/catch_all.hpp>
+#include <catch2/catch.hpp>
 #include <string_view>
 
 using crispy::escape;

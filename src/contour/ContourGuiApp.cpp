@@ -224,17 +224,28 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
     vector<char const*> qtArgsPtr;
     qtArgsPtr.push_back(argv[0]);
 
-    auto const addQtArgIfSet = [&](string const& key, char const* arg) {
+    auto const addQtArgIfSet = [&](string const& key, char const* arg) -> bool {
         if (string const& s = _flags.get<string>(key); !s.empty())
         {
             qtArgsPtr.push_back(arg);
             qtArgsStore.push_back(s);
             qtArgsPtr.push_back(qtArgsStore.back().c_str());
+            return true;
         }
+        return false;
     };
 
     addQtArgIfSet("contour.terminal.session", "-session");
-    addQtArgIfSet("contour.terminal.platform", "-platform");
+    if (!addQtArgIfSet("contour.terminal.platform", "-platform"))
+    {
+        if (!config.platformPlugin.empty())
+        {
+            printf("using config key\n");
+            static constexpr auto platformArg = string_view("-platform");
+            qtArgsPtr.push_back(platformArg.data());
+            qtArgsPtr.push_back(config.platformPlugin.c_str());
+        }
+    }
 
 #if defined(__linux__)
     addQtArgIfSet("contour.terminal.display", "-display");

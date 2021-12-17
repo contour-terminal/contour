@@ -33,11 +33,16 @@ jobs:
         run: .\scripts\ci-set-vars.ps1
         env:
           REPOSITORY: ${{ github.event.repository.name }}
+      - name: "Fetch embedded dependencies"
+        shell: powershell
+        run: |
+          ./scripts/install-deps.ps1
+          type ./_deps/sources/CMakeLists.txt
       - name: "vcpkg: Install dependencies"
         uses: lukka/run-vcpkg@v5
         id: runvcpkg
         with:
-          vcpkgArguments: freetype fontconfig harfbuzz angle
+          vcpkgArguments: angle catch2 freetype fontconfig harfbuzz fmt yaml-cpp ms-gsl range-v3
           vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
           vcpkgGitCommitId: 69478c5caafcde4c490bb1fccb960296801dbb5f
           vcpkgTriplet: x64-windows
@@ -54,7 +59,7 @@ jobs:
       - name: "create build directory"
         run: mkdir build
       - name: "Generate build files"
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DYAML_BUILD_SHARED_LIBS=OFF -DCONTOUR_EXAMPLES=OFF -DLIBTERMINAL_TESTING=OFF -DLIBUNICODE_TESTING=OFF -DYAML_CPP_BUILD_CONTRIB=OFF -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF -DYAML_CPP_INSTALL=OFF -B build .
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=OFF -DLIBUNICODE_TESTING=OFF -B build .
       - name: "Build"
         run: cmake --build build/ --config Release
       - name: "Create Package(s)"
@@ -185,9 +190,6 @@ jobs:
         run: |
           cmake . \
                 -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-                -DYAML_BUILD_SHARED_LIBS=OFF -DYAML_CPP_BUILD_CONTRIB=OFF \
-                -DYAML_CPP_BUILD_TESTS=OFF -DYAML_CPP_BUILD_TOOLS=OFF \
-                -DYAML_CPP_INSTALL=OFF \
                 -DQt5_DIR="$(brew --prefix qt5)/lib/cmake/Qt5" \
                 -B build/
       - name: "Build"

@@ -11,9 +11,7 @@ RUN dnf install -y \
         git gcc rpm-build rpm-devel make coreutils diffutils patch rpmdevtools desktop-file-utils
 
 # Install contour dependencies
-RUN dnf install -y \
-        cmake extra-cmake-modules ninja-build gcc-c++ pkgconf freetype-devel harfbuzz-devel \
-        qt5-qtbase-devel qt5-qtbase-gui kf5-kwindowsystem-devel fontconfig-devel
+RUN SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
 
 RUN useradd -d /app builder
 RUN echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers

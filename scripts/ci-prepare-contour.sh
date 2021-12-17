@@ -9,11 +9,6 @@ prepare_build_ubuntu()
 {
    cmake \
       -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} \
-      -DYAML_BUILD_SHARED_LIBS=OFF \
-      -DYAML_CPP_BUILD_CONTRIB=OFF \
-      -DYAML_CPP_BUILD_TESTS=OFF \
-      -DYAML_CPP_BUILD_TOOLS=OFF \
-      -DYAML_CPP_INSTALL=OFF \
       -S . -B ${BUILD_DIR} \
       ${EXTRA_CMAKE_FLAGS}
 }
