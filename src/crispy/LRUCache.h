@@ -170,15 +170,15 @@ class LRUCache
     {
         auto const oldKey = items_.back().first;
         auto i = itemByKeyMapping_.find(oldKey);
-        auto& itemPtr = i->second;
+        auto itemIterator = i->second;
 
-        itemByKeyMapping_.erase(oldKey);
-        itemByKeyMapping_.emplace(_newKey, itemPtr);
+        itemByKeyMapping_.erase(i);
+        itemByKeyMapping_.emplace(_newKey, itemIterator);
 
-        items_.splice(items_.begin(), items_, itemPtr);
-        itemPtr->first = _newKey;
+        items_.splice(items_.begin(), items_, itemIterator);
+        itemIterator->first = _newKey;
 
-        return itemPtr;
+        return itemIterator;
     }
 
     // private data
