@@ -174,6 +174,10 @@ struct Config
 {
     FileSystem::path backingFilePath;
 
+    /// Qt platform plugin to be loaded.
+    /// This is equivalent to QT_QPA_PLATFORM.
+    std::string platformPlugin;
+
     // Configures the size of the PTY read buffer.
     // Changing this value may result in better or worse throughput performance.
     //

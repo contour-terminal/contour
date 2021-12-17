@@ -1,5 +1,17 @@
 # Default Contour Configuration File.
 
+# Overrides the auto-detected platform plugin to be loaded.
+#
+# Possible (incomplete list of) values are:
+# - auto        The platform will be auto-detected.
+# - xcb         Uses XCB plugin (for X11 environment).
+# - cocoa       Used to be run on Mac OS/X.
+# - direct2d    Windows platform plugin using Direct2D.
+# - winrt       Windows platform plugin using WinRT.
+#
+# Default: auto
+platform_plugin: auto
+
 # Word delimiters when selecting word-wise.
 word_delimiters: " /\\()\"'-.,:;<>~!@#$%^&*+=[]{}~?|│"
 

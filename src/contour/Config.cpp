@@ -1468,6 +1468,10 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         }
     }
 
+    tryLoadValue(usedKeys, doc, "platform_plugin", _config.platformPlugin);
+    if (_config.platformPlugin == "auto")
+        _config.platformPlugin = ""; // Mapping "auto" to its internally equivalent "".
+
     tryLoadValue(usedKeys, doc, "read_buffer_size", _config.ptyReadBufferSize);
     if ((_config.ptyReadBufferSize % 16) != 0)
     {
