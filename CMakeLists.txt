@@ -95,7 +95,7 @@ else()
 endif()
 
 macro(ContourConfigurationSummary)
-    message(STATUS "------------------------------------------------------------------------------")
+    message(STATUS "==============================================================================")
     message(STATUS "    Contour (${CONTOUR_VERSION_STRING})")
     message(STATUS "------------------------------------------------------------------------------")
     message(STATUS "Build with sanitizer:                               ${CONTOUR_SANITIZE}")

@@ -66,17 +66,20 @@ fetch_and_unpack()
     echo "add_subdirectory($NAME EXCLUDE_FROM_ALL)" >> $SYSDEPS_CMAKE_FILE
 }
 
+fetch_and_unpack_Catch2()
+{
+    fetch_and_unpack \
+        Catch2-2.13.7 \
+        Catch2-2.13.7.tar.gz \
+        https://github.com/catchorg/Catch2/archive/refs/tags/v2.13.7.tar.gz
+}
+
 fetch_and_unpack_embeds()
 {
     fetch_and_unpack \
         GSL-3.1.0 \
         gsl-3.1.0.tar.gz \
         https://github.com/microsoft/GSL/archive/refs/tags/v3.1.0.tar.gz
-
-    fetch_and_unpack \
-        Catch2-dcf9479c85f4fbd1aa6a296ff81fff235c48e0c1 \
-        Catch2-dcf9479c85f4fbd1aa6a296ff81fff235c48e0c1.tar.gz \
-        https://github.com/catchorg/Catch2/archive/dcf9479c85f4fbd1aa6a296ff81fff235c48e0c1.tar.gz
 
     fetch_and_unpack \
         termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed \
@@ -131,7 +134,6 @@ install_deps_ubuntu()
         libqt5gui5
         libqt5opengl5-dev
         libyaml-cpp-dev
-        catch2
         make
         ncurses-bin
         pkg-config
@@ -158,9 +160,11 @@ install_deps_ubuntu()
                 fmt-8.0.1 \
                 fmtlib-8.0.1.tar.gz \
                 https://github.com/fmtlib/fmt/archive/refs/tags/8.0.1.tar.gz
+
+            fetch_and_unpack_Catch2
             ;;
         *)
-            packages="$packages libfmt-dev librange-v3-dev"
+            packages="$packages libfmt-dev librange-v3-dev catch2"
             ;;
     esac
 
@@ -202,6 +206,7 @@ install_deps_fedora()
 
     # catch-devel
     local packages="
+        catch-devel
         cmake
         extra-cmake-modules
         fmt-devel
