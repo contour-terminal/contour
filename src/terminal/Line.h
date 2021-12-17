@@ -238,8 +238,8 @@ class Line
 
     Cell const& at(ColumnOffset _column) const noexcept
     {
-        Expects(ColumnOffset(0) <= _column);
-        Expects(_column < ColumnOffset::cast_from(buffer_.size())); // Allow off-by-one for sentinel.
+        Require(ColumnOffset(0) <= _column);
+        Require(_column < ColumnOffset::cast_from(buffer_.size())); // Allow off-by-one for sentinel.
         return buffer_[unbox<int>(_column)];
     }
 

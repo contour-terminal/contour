@@ -200,6 +200,25 @@ install_deps_FreeBSD()
         yaml-cpp
 }
 
+install_deps_arch()
+{
+    [ x$PREPARE_ONLY_EMBEDS = xON ] && return
+
+    packman -S -y \
+        catch2 \
+        cmake \
+        extra-cmake-modules \
+        fmt \
+        fontconfig \
+        git \
+        gsl \
+        harfbuzz \
+        ninja \
+        qt5-base \
+        range-v3 \
+        yaml-cpp
+}
+
 install_deps_fedora()
 {
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
@@ -260,6 +279,9 @@ main()
     prepare_fetch_and_unpack
 
     case "$ID" in
+        arch)
+            install_deps_arch
+            ;;
         fedora)
             install_deps_fedora
             ;;
@@ -269,7 +291,7 @@ main()
         Darwin)
             install_deps_darwin
             ;;
-        FreeBSD)
+        freebsd)
             install_deps_FreeBSD
             ;;
         *)

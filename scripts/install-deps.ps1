@@ -21,6 +21,16 @@ $ThirdParties =
         Folder="termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed";
         Archive="termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed.zip";
         URI="https://github.com/contour-terminal/termbench-pro/archive/cd571e3cebb7c00de9168126b28852f32fb204ed.zip"
+    };
+    [ThirdParty]@{
+        Folder="GSL-3.1.0";
+        Archive="gsl-3.1.0.zip";
+        URI="https://github.com/microsoft/GSL/archive/refs/tags/v3.1.0.zip"
+    };
+    [ThirdParty]@{
+        Folder="Catch2-2.13.7";
+        Archive="Catch2-2.13.7.zip";
+        URI="https://github.com/catchorg/Catch2/archive/refs/tags/v2.13.7.zip"
     }
 )
 

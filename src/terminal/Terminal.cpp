@@ -792,8 +792,8 @@ void Terminal::resizeScreen(PageSize _cells, optional<ImageSize> _pixels)
 
 void Terminal::verifyState()
 {
-    Expects(*currentMousePosition_.column < *screenSize().columns);
-    Expects(*currentMousePosition_.line < *screenSize().lines);
+    Require(*currentMousePosition_.column < *screenSize().columns);
+    Require(*currentMousePosition_.line < *screenSize().lines);
 }
 
 void Terminal::setCursorDisplay(CursorDisplay _display)
