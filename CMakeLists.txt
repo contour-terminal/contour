@@ -48,10 +48,15 @@ message(STATUS "addr2line: ${ADDR2LINE}")
 option(CONTOUR_TESTING "Enables building of unittests for libterminal [default: ON" ON)
 option(CONTOUR_FRONTEND_GUI "Enables GUI frontend." ON)
 option(CONTOUR_COVERAGE "Builds with codecov [default: OFF]" OFF)
-option(CONTOUR_SANITIZE "Builds with Address sanitizer enabled [default: OFF]" OFF)
+option(CONTOUR_SANITIZE "Builds with Address sanitizer enabled [default: OFF]" "OFF")
 option(CONTOUR_STACKTRACE_ADDR2LINE "Uses addr2line to pretty-print SEGV stacktrace." ${ADDR2LINE_DEFAULT})
 option(CONTOUR_BUILD_WITH_EMBEDDED_FT_HB "Builds with embedded FreeType and HarfBuzz [default: OFF]" OFF)
 option(CONTOUR_BUILD_WITH_MIMALLOC "Builds with mimalloc [default: OFF]" OFF)
+
+if(NOT WIN32 AND NOT CONTOUR_SANITIZE AND NOT CMAKE_CONFIGURATION_TYPES)
+    set(CONTOUR_SANITIZE "OFF" CACHE STRING "Choose the sanitizer mode." FORCE)
+    set_property(CACHE CONTOUR_SANITIZE PROPERTY STRINGS OFF address thread)
+endif()
 
 # ----------------------------------------------------------------------------
 # code coverage
@@ -64,14 +69,11 @@ else()
     set(CONTOUR_CODE_COVERAGE_ENABLED OFF)
 endif()
 
-if(SANITIZE)
-    string(TOLOWER "${SANITIZE}" san)
-    if (san STREQUAL "address")
-        message(STATUS "Enabling ${san} sanitizer.")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer -fsanitize=address -fsanitize-address-use-after-scope")
-    else()
-        message(STATUS "No sanitizer enabled.")
-    endif()
+if(NOT(CONTOUR_SANITIZE STREQUAL "OFF"))
+    message(STATUS "Enabling ${san} sanitizer.")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fno-omit-frame-pointer -fsanitize=address -fsanitize-address-use-after-scope")
+else()
+    message(STATUS "No sanitizer enabled.")
 endif()
 
 # ----------------------------------------------------------------------------
