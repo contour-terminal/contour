@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include <crispy/assert.h>
+
 #include <cassert>
 #include <list>
 #include <stdexcept>
@@ -59,8 +61,9 @@ class LRUCache
         if (auto i = itemByKeyMapping_.find(_key); i != itemByKeyMapping_.end())
         {
             // move it to the front, and return it
-            items_.splice(items_.begin(), items_, i->second);
-            return &i->second->value;
+            auto i2 = moveItemToFront(i->second);
+            itemByKeyMapping_.at(_key) = i2;
+            return &i2->value;
         }
 
         return nullptr;
@@ -92,6 +95,7 @@ class LRUCache
         if (items_.size() == capacity_)
             return evict_one_and_push_front(_key)->value;
 
+        // return emplaceItemToFront(_key, Value{})->value;
         items_.emplace_front(Item { _key, Value {} });
         itemByKeyMapping_.emplace(_key, items_.begin());
         return items_.front().value;
@@ -110,10 +114,7 @@ class LRUCache
         if (items_.size() == capacity_)
             evict_one_and_push_front(_key)->value = _constructValue();
         else
-        {
-            items_.emplace_front(Item { _key, _constructValue() });
-            itemByKeyMapping_.emplace(_key, items_.begin());
-        }
+            emplaceItemToFront(_key, _constructValue());
         return true;
     }
 
@@ -125,16 +126,18 @@ class LRUCache
         return emplace(_key, _constructValue());
     }
 
-    Value& emplace(Key _key, Value _value)
+    Value& emplace(Key _key, Value&& _value)
     {
-        assert(!contains(_key));
+        Require(!contains(_key));
 
         if (items_.size() == capacity_)
-            return evict_one_and_push_front(_key)->value = std::move(_value);
+        {
+            iterator i = evict_one_and_push_front(_key);
+            i->value = std::move(_value);
+            return i->value;
+        }
 
-        items_.emplace_front(Item { _key, std::move(_value) });
-        itemByKeyMapping_.emplace(_key, items_.begin());
-        return items_.front().value;
+        return emplaceItemToFront(_key, std::move(_value))->value;
     }
 
     [[nodiscard]] iterator begin() { return items_.begin(); }
@@ -164,7 +167,8 @@ class LRUCache
 
     void erase(Key const& _key)
     {
-        if (auto keyMappingIterator = itemByKeyMapping_.find(_key); keyMappingIterator != itemByKeyMapping_.end())
+        if (auto keyMappingIterator = itemByKeyMapping_.find(_key);
+            keyMappingIterator != itemByKeyMapping_.end())
             erase(keyMappingIterator->second);
     }
 
@@ -174,15 +178,27 @@ class LRUCache
     {
         auto const oldKey = items_.back().key;
         auto keyMappingIterator = itemByKeyMapping_.find(oldKey);
-        auto itemIterator = keyMappingIterator->second;
 
+        auto newItemIterator = moveItemToFront(keyMappingIterator->second);
+        newItemIterator->key = _newKey;
         itemByKeyMapping_.erase(keyMappingIterator);
-        itemByKeyMapping_.emplace(_newKey, itemIterator);
+        itemByKeyMapping_.emplace(_newKey, newItemIterator);
 
-        items_.splice(items_.begin(), items_, itemIterator);
-        itemIterator->key = _newKey;
+        return newItemIterator;
+    }
 
-        return itemIterator;
+    [[nodiscard]] iterator moveItemToFront(iterator i)
+    {
+        items_.emplace_front(std::move(*i));
+        items_.erase(i);
+        return items_.begin();
+    }
+
+    iterator emplaceItemToFront(Key _key, Value&& _value)
+    {
+        items_.emplace_front(Item { _key, std::move(_value) });
+        itemByKeyMapping_.emplace(_key, items_.begin());
+        return items_.begin();
     }
 
     // private data
