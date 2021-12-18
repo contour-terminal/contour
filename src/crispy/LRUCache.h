@@ -50,7 +50,7 @@ class LRUCache
 
     void touch(Key _key) noexcept { (void) try_get(_key); }
 
-    [[nodiscard]] bool contains(Key _key) const noexcept { return try_get(_key) != nullptr; }
+    [[nodiscard]] bool contains(Key _key) const noexcept { return itemByKeyMapping_.count(_key) != 0; }
 
     [[nodiscard]] Value* try_get(Key _key) const { return const_cast<LRUCache*>(this)->try_get(_key); }
 
