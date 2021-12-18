@@ -178,7 +178,7 @@ install_deps_FreeBSD()
 {
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
-    pkg install $SYSDEP_ASSUME_YES \
+    su root -c "pkg install $SYSDEP_ASSUME_YES \
         catch \
         cmake \
         fontconfig \
@@ -188,7 +188,6 @@ install_deps_FreeBSD()
         microsoft-gsl \
         ncurses \
         ninja \
-        pkg \
         pkgconf \
         qt5-buildtools \
         qt5-core \
@@ -197,7 +196,8 @@ install_deps_FreeBSD()
         qt5-qmake \
         qt5-widgets \
         range-v3 \
-        yaml-cpp
+        yaml-cpp \
+    "
 }
 
 install_deps_arch()
