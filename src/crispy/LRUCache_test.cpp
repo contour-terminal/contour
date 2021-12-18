@@ -30,7 +30,7 @@ using namespace std::string_view_literals;
 //     out << fmt::format("LRUCache({}/{}): {}\n", cache.size(), cache.capacity(), _header);
 //     for (typename crispy::LRUCache<A, B>::Item const& item: cache)
 //     {
-//         out << fmt::format("{}: {}\n", item.first, item.second);
+//         out << fmt::format("{}: {}\n", item.key, item.value);
 //     }
 //     out << "\n";
 // }

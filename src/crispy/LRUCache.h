@@ -27,7 +27,11 @@ template <typename Key, typename Value>
 class LRUCache
 {
   public:
-    using Item = std::pair<Key, Value>;
+    struct Item
+    {
+        Key key;
+        Value value;
+    };
     using ItemList = std::list<Item>;
 
     using iterator = typename ItemList::iterator;
@@ -56,7 +60,7 @@ class LRUCache
         {
             // move it to the front, and return it
             items_.splice(items_.begin(), items_, i->second);
-            return &items_.front().second;
+            return &i->second->value;
         }
 
         return nullptr;
@@ -86,11 +90,11 @@ class LRUCache
             return *p;
 
         if (items_.size() == capacity_)
-            return evict_one_and_push_front(_key)->second;
+            return evict_one_and_push_front(_key)->value;
 
         items_.emplace_front(Item { _key, Value {} });
         itemByKeyMapping_.emplace(_key, items_.begin());
-        return items_.front().second;
+        return items_.front().value;
     }
 
     /// Conditionally creates a new item to the LRU-Cache iff its key was not present yet.
@@ -104,7 +108,7 @@ class LRUCache
             return false;
 
         if (items_.size() == capacity_)
-            evict_one_and_push_front(_key)->second = _constructValue();
+            evict_one_and_push_front(_key)->value = _constructValue();
         else
         {
             items_.emplace_front(Item { _key, _constructValue() });
@@ -126,11 +130,11 @@ class LRUCache
         assert(!contains(_key));
 
         if (items_.size() == capacity_)
-            return evict_one_and_push_front(_key)->second = std::move(_value);
+            return evict_one_and_push_front(_key)->value = std::move(_value);
 
         items_.emplace_front(Item { _key, std::move(_value) });
         itemByKeyMapping_.emplace(_key, items_.begin());
-        return items_.front().second;
+        return items_.front().value;
     }
 
     [[nodiscard]] iterator begin() { return items_.begin(); }
@@ -148,35 +152,35 @@ class LRUCache
         result.resize(items_.size());
         size_t i = 0;
         for (Item const& item: items_)
-            result[i++] = item.first;
+            result[i++] = item.key;
         return result;
     }
 
     void erase(iterator _iter)
     {
         items_.erase(_iter);
-        itemByKeyMapping_.erase(_iter->first);
+        itemByKeyMapping_.erase(_iter->key);
     }
 
     void erase(Key const& _key)
     {
-        if (auto i = itemByKeyMapping_.find(_key); i != itemByKeyMapping_.end())
-            erase(i->second);
+        if (auto keyMappingIterator = itemByKeyMapping_.find(_key); keyMappingIterator != itemByKeyMapping_.end())
+            erase(keyMappingIterator->second);
     }
 
   private:
     /// Evicts least recently used item and prepares (/reuses) its storage for a new item.
     [[nodiscard]] iterator evict_one_and_push_front(Key _newKey)
     {
-        auto const oldKey = items_.back().first;
-        auto i = itemByKeyMapping_.find(oldKey);
-        auto itemIterator = i->second;
+        auto const oldKey = items_.back().key;
+        auto keyMappingIterator = itemByKeyMapping_.find(oldKey);
+        auto itemIterator = keyMappingIterator->second;
 
-        itemByKeyMapping_.erase(i);
+        itemByKeyMapping_.erase(keyMappingIterator);
         itemByKeyMapping_.emplace(_newKey, itemIterator);
 
         items_.splice(items_.begin(), items_, itemIterator);
-        itemIterator->first = _newKey;
+        itemIterator->key = _newKey;
 
         return itemIterator;
     }

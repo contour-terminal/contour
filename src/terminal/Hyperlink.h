@@ -110,10 +110,10 @@ struct HyperlinkStorage
     {
         for (auto& href: cache)
         {
-            if (href.second->userId == _id)
+            if (href.value->userId == _id)
             {
-                cache.touch(href.first);
-                return href.first;
+                cache.touch(href.key);
+                return href.key;
             }
         }
         return HyperlinkId {};
