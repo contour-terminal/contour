@@ -55,6 +55,7 @@ jobs:
     - name: "cmake"
       env:
         EXTRA_CMAKE_FLAGS: "-DCONTOUR_BLUR_PLATFORM_KWIN=ON -DCONTOUR_SANITIZE=address"
+        CMAKE_BUILD_TYPE: Debug
       run: ./scripts/ci-prepare-contour.sh
     - name: "build"
       run: cmake --build build/ -- -j3
