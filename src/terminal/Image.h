@@ -43,13 +43,10 @@ enum class ImageFormat
     PNG,
 };
 
-namespace detail
-{
-    struct ImageId
-    {
-    };
-} // namespace detail
+// clang-format off
+namespace detail { struct ImageId {}; }
 using ImageId = crispy::boxed<uint32_t, detail::ImageId>; // unique numerical image identifier
+// clang-format off
 
 /**
  * Represents an image that can be displayed in the terminal by being placed into the grid cells
