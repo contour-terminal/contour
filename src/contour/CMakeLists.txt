@@ -280,9 +280,20 @@ elseif(APPLE)
 else()
     # any other Unix
 
+    find_program(LSB_RELEASE_EXEC lsb_release)
+    execute_process(COMMAND ${LSB_RELEASE_EXEC} -rs
+        OUTPUT_VARIABLE LSB_RELEASE_NUMBER
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+
+    set(YAML_CPP_PKG_NAME "libyaml-cpp0.6")
+    if ("${LSB_RELEASE_NUMBER}" STREQUAL "18.04")
+        set(YAML_CPP_PKG_NAME "libyaml-cpp0.5v5")
+    endif()
+
     # Generator: Debian
     # see https://cmake.org/cmake/help/v3.6/module/CPackDeb.html#variable:CPACK_DEBIAN_PACKAGE_DEPENDS
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libfreetype6, libharfbuzz0b, libkf5windowsystem5, libqt5core5a, libqt5gui5, libqt5network5, libyaml-cpp0.6")
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libfreetype6, libharfbuzz0b, libkf5windowsystem5, libqt5core5a, libqt5gui5, libqt5network5, ${YAML_CPP_PKG_NAME}")
     set(CPACK_DEBIAN_PACKAGE_SECTION "x11")
     set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/contour-terminal/contour/")
     set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "xdg-open")

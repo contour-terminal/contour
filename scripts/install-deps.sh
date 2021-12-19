@@ -87,9 +87,9 @@ fetch_and_unpack_embeds()
         https://github.com/contour-terminal/termbench-pro/archive/cd571e3cebb7c00de9168126b28852f32fb204ed.tar.gz
 
     fetch_and_unpack \
-        libunicode-b1112e06b532b93e08b752b1c65200d69555b1ed \
-        libunicode-b1112e06b532b93e08b752b1c65200d69555b1ed.tar.gz \
-        https://github.com/contour-terminal/libunicode/archive/b1112e06b532b93e08b752b1c65200d69555b1ed.tar.gz
+        libunicode-447bc8790f1db8183e3212472fa90e3c4ce34787 \
+        libunicode-447bc8790f1db8183e3212472fa90e3c4ce34787.tar.gz \
+        https://github.com/contour-terminal/libunicode/archive/447bc8790f1db8183e3212472fa90e3c4ce34787.tar.gz
 }
 
 fetch_and_unpack_hbft()

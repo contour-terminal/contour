@@ -29,6 +29,7 @@
 #include <crispy/point.h>
 #include <crispy/size.h>
 
+#include <unicode/convert.h>
 #include <unicode/run_segmenter.h>
 
 #include <functional>
@@ -343,4 +344,20 @@ struct formatter<terminal::renderer::TextShapingEngine>
         return format_to(ctx.out(), "UNKNOWN");
     }
 };
+
+template <>
+struct formatter<terminal::renderer::TextCacheKey>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::renderer::TextCacheKey value, FormatContext& ctx)
+    {
+        return format_to(ctx.out(), "({}, \"{}\")", value.style, unicode::convert_to<char>(value.text));
+    }
+};
+
 } // namespace fmt

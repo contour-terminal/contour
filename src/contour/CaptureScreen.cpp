@@ -30,8 +30,10 @@
 #include <tuple>
 
 #if defined(_WIN32)
-    #include <Windows.h>
+    // clang-format off
     #include <Winsock2.h>
+    #include <Windows.h>
+    // clang-format on
 #else
     #include <fcntl.h>
     #include <sys/select.h>

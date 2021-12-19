@@ -21,7 +21,6 @@ fi
 BUILD_TYPE="${1:-Debug}"
 BUILD_DIR="${ROOTDIR}/target/${BUILD_TYPE}"
 
-EXTRA_CMAKE_FLAGS=""
 case "$OSTYPE" in
     linux-gnu*)
         EXTRA_CMAKE_FLAGS="${EXTRA_CMAKE_FLAGS} -DCONTOUR_BLUR_PLATFORM_KWIN=ON"
@@ -36,6 +35,8 @@ esac
 if [ "${BUILD_TYPE}" != "Debug" ]; then
     EXTRA_CMAKE_FLAGS="${EXTRA_CMAKE_FLAGS} -DCMAKE_INSTALL_PREFIX=~/usr/opt/contour"
 fi
+
+echo "EXTRA_CMAKE_FLAGS: ${EXTRA_CMAKE_FLAGS}"
 
 exec cmake "${ROOTDIR}" \
            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \

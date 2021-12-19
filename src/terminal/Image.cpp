@@ -115,7 +115,7 @@ std::shared_ptr<RasterizedImage const> ImagePool::rasterize(ImageId _imageId,
 
 void ImagePool::removeImage(Image* _image)
 {
-    if (auto i = find_if(images_.begin(), images_.end(), [&](auto const& p) { return &p.second == _image; });
+    if (auto i = find_if(images_.begin(), images_.end(), [&](auto const& p) { return &p.value == _image; });
         i != images_.end())
     {
         onImageRemove_(_image);

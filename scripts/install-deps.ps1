@@ -10,18 +10,9 @@ class ThirdParty
     [ValidateNotNullOrEmpty()] [string] $URI
 }
 
+# Take care, order matters, at least as much as dependencies are of concern.
 $ThirdParties =
 @(
-    [ThirdParty]@{
-        Folder="libunicode-b1112e06b532b93e08b752b1c65200d69555b1ed";
-        Archive="libunicode-b1112e06b532b93e08b752b1c65200d69555b1ed.zip";
-        URI="https://github.com/contour-terminal/libunicode/archive/b1112e06b532b93e08b752b1c65200d69555b1ed.zip"
-    };
-    [ThirdParty]@{
-        Folder="termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed";
-        Archive="termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed.zip";
-        URI="https://github.com/contour-terminal/termbench-pro/archive/cd571e3cebb7c00de9168126b28852f32fb204ed.zip"
-    };
     [ThirdParty]@{
         Folder="GSL-3.1.0";
         Archive="gsl-3.1.0.zip";
@@ -31,6 +22,16 @@ $ThirdParties =
         Folder="Catch2-2.13.7";
         Archive="Catch2-2.13.7.zip";
         URI="https://github.com/catchorg/Catch2/archive/refs/tags/v2.13.7.zip"
+    };
+    [ThirdParty]@{
+        Folder="libunicode-447bc8790f1db8183e3212472fa90e3c4ce34787";
+        Archive="libunicode-447bc8790f1db8183e3212472fa90e3c4ce34787.zip";
+        URI="https://github.com/contour-terminal/libunicode/archive/447bc8790f1db8183e3212472fa90e3c4ce34787.zip"
+    };
+    [ThirdParty]@{
+        Folder="termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed";
+        Archive="termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed.zip";
+        URI="https://github.com/contour-terminal/termbench-pro/archive/cd571e3cebb7c00de9168126b28852f32fb204ed.zip"
     }
 )
 
