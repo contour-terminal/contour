@@ -126,6 +126,9 @@ jobs:
           path: contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb
           if-no-files-found: error
           retention-days: 7
+      - name: "Attempt installing the created .deb"
+        run: |
+          sudo dpkg --install "contour_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb"
 
   build_ubuntu2004:
     name: Build on Ubuntu 20.04
@@ -168,6 +171,9 @@ jobs:
         with:
           path: contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.ddeb
           retention-days: 7
+      - name: "Attempt installing the created .deb"
+        run: |
+          sudo dpkg --install "contour_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.deb"
 
   build_osx:
     name: Build on OS/X
