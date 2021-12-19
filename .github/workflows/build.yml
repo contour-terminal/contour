@@ -187,6 +187,9 @@ jobs:
         path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
         if-no-files-found: error
         retention-days: 7
+    - name: "Attempt installing the created .deb"
+      run: |
+        sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
 
   test_ubuntu2004_valgrind:
     name: "Run tests via valgrind"
@@ -290,6 +293,9 @@ jobs:
         path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64"
         if-no-files-found: error
         retention-days: 7
+    - name: "Attempt installing the created .deb"
+      run: |
+        sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.deb"
 
   osx_qt5:
     name: "OS/X (Qt5)"
