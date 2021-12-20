@@ -24,442 +24,6 @@ env:
   CPM_SOURCE_CACHE: ${{ github.workspace }}/cpm_modules
 
 jobs:
-  ubuntu_2004_no_kwin:
-    name: "Ubuntu Linux 20.04 (no KWin)"
-    runs-on: ubuntu-20.04
-    steps:
-    - uses: actions/checkout@v2
-    - name: ccache
-      uses: hendrikmuhs/ccache-action@v1
-      with:
-        key: ccache-ubuntu_2004_no_kwin
-        max-size: 256M
-    - uses: actions/cache@v2
-      with:
-        path: "**/cpm_modules"
-        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
-    - name: "install dependencies"
-      run: |
-        set -ex
-        sudo apt -q update
-        sudo ./scripts/install-deps.sh
-    - name: "create build directory"
-      run: mkdir build
-    - name: "cmake"
-      run: |
-        BUILD_DIR="build" \
-          CMAKE_BUILD_TYPE="Release" \
-          CXX="g++-9" \
-          ./scripts/ci-prepare-contour.sh
-    - name: "build"
-      run: cmake --build build/ -- -j3
-    - name: "test: crispy"
-      run: ./build/src/crispy/crispy_test
-    - name: "test: libterminal"
-      run: ./build/src/terminal/terminal_test
-
-  ubuntu_2004_no_kwin_with_harfbuzz:
-    name: "Ubuntu Linux 20.04 (no KWin, builtin FreeType and HarfBuzz)"
-    runs-on: ubuntu-20.04
-    steps:
-    - uses: actions/checkout@v2
-    - name: ccache
-      uses: hendrikmuhs/ccache-action@v1
-      with:
-        key: ccache-ubuntu_2004_no_kwin_with_harfbuzz
-        max-size: 256M
-    - uses: actions/cache@v2
-      with:
-        path: "**/cpm_modules"
-        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
-    - name: "install dependencies"
-      run: |
-        set -ex
-        sudo apt -q update
-        sudo ./scripts/install-deps.sh --with-hb-ft
-    - name: "create build directory"
-      run: mkdir build
-    - name: "cmake"
-      run: |
-        BUILD_DIR="build" \
-          CMAKE_BUILD_TYPE="Release" \
-          EXTRA_CMAKE_FLAGS="-DCONTOUR_BUILD_WITH_EMBEDDED_FT_HB=ON" \
-          CXX="g++-9" \
-          ./scripts/ci-prepare-contour.sh
-    - name: "build"
-      run: cmake --build build/ -- -j3
-    - name: "test: crispy"
-      run: ./build/src/crispy/crispy_test
-    - name: "test: libterminal"
-      run: ./build/src/terminal/terminal_test
-
-  check_PR_TODOs:
-    name: "Check PR TODO's"
-    runs-on: ubuntu-20.04
-    steps:
-    - uses: actions/checkout@v2
-    - name: "Checking for open PR-related TODO's"
-      run: |
-        set -ex
-        ./scripts/check-pr-todos.sh
-
-  check_clang_format:
-    name: "Check C++ style"
-    runs-on: ubuntu-20.04
-    steps:
-    - uses: actions/checkout@v2
-    - name: Run clang-format style check for C/C++/Protobuf programs.
-      uses: jidicula/clang-format-action@v4.4.0
-      with:
-        clang-format-version: '13'
-        check-path: 'src'
-
-  ubuntu_2004:
-    name: "Ubuntu Linux 20.04"
-    runs-on: ubuntu-20.04
-    steps:
-    - uses: actions/checkout@v2
-    - name: ccache
-      uses: hendrikmuhs/ccache-action@v1
-      with:
-        key: ccache-ubuntu_2004
-        max-size: 256M
-    - uses: actions/cache@v2
-      with:
-        path: "**/cpm_modules"
-        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
-    - name: set environment variables
-      id: set_vars
-      run: ./scripts/ci-set-vars.sh
-      env:
-        REPOSITORY: ${{ github.event.repository.name }}
-    - name: "install dependencies"
-      run: |
-        set -ex
-        sudo apt -q update
-        sudo ./scripts/install-deps.sh
-    - name: "create build directory"
-      run: mkdir build
-    - name: "cmake"
-      run: |
-        BUILD_DIR="build" \
-          CMAKE_BUILD_TYPE="RelWithDebInfo" \
-          CXX="g++-9" \
-          EXTRA_CMAKE_FLAGS="-DCONTOUR_BLUR_PLATFORM_KWIN=ON" \
-          ./scripts/ci-prepare-contour.sh
-    - name: "build"
-      run: cmake --build build/ -- -j3
-    - name: "test: crispy"
-      run: ./build/src/crispy/crispy_test
-    - name: "test: libterminal"
-      run: ./build/src/terminal/terminal_test
-    - name: "upload unit tests"
-      uses: actions/upload-artifact@v2
-      with:
-        name: contour-ubuntu2004-tests
-        path: |
-          build/src/crispy/crispy_test
-          build/src/terminal/terminal_test
-        retention-days: 3
-    - name: "CPack: Creating DEB & TGZ package"
-      run: |
-        set -ex
-        cd build/
-        cpack -G DEB
-        cpack -G TGZ
-        cd ..
-        mv -v "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.deb" \
-              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
-        tar xzpf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.tar.gz"
-        mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux" \
-              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
-    - name: "Uploading artifact .deb package"
-      uses: actions/upload-artifact@v2
-      with:
-        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
-        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
-        if-no-files-found: error
-        retention-days: 7
-    - name: "Uploading artifact ZIP package"
-      uses: actions/upload-artifact@v2
-      with:
-        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
-        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
-        if-no-files-found: error
-        retention-days: 7
-    - name: "Attempt installing the created .deb"
-      run: |
-        sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
-
-  test_ubuntu2004_valgrind:
-    name: "Run tests via valgrind"
-    runs-on: ubuntu-20.04
-    needs: [ubuntu_2004]
-    steps:
-    - name: "download artifact"
-      uses: actions/download-artifact@v2
-      with:
-        name: contour-ubuntu2004-tests
-    - name: "fix unit test permissions"
-      run: find . -name '*_test' -exec chmod 0755 {} \;
-    - name: "install dependencies"
-      run: |
-        set -ex
-        ls -hlR
-        #sudo apt -q update
-        sudo apt install -y \
-                        libfontconfig1 \
-                        libfreetype6 \
-                        libharfbuzz0b \
-                        libkf5windowsystem5 \
-                        libqt5gui5 \
-                        libqt5opengl5 \
-                        libyaml-cpp0.6 \
-                        ncurses-bin \
-                        valgrind
-    - name: "test: crispy (via valgrind)"
-      run: valgrind --error-exitcode=42 ./crispy/crispy_test
-    - name: "test: libterminal (via valgrind)"
-      run: valgrind --error-exitcode=42 ./terminal/terminal_test
-
-  ubuntu_1804:
-    name: "Ubuntu Linux 18.04"
-    runs-on: ubuntu-18.04
-    steps:
-    - name: Checkout code
-      uses: actions/checkout@v2
-    - name: ccache
-      uses: hendrikmuhs/ccache-action@v1
-      with:
-        key: ccache-ubuntu_1804
-        max-size: 256M
-    - uses: actions/cache@v2
-      with:
-        path: "**/cpm_modules"
-        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
-    - name: set environment variables
-      id: set_vars
-      run: ./scripts/ci-set-vars.sh
-      env:
-        REPOSITORY: ${{ github.event.repository.name }}
-    - name: "install dependencies"
-      run: |
-        set -ex
-        sudo apt -q update
-        sudo ./scripts/install-deps.sh
-    - name: "Get specific version CMake, v3.18.3"
-      uses: lukka/get-cmake@v3.18.3
-    - name: "create build directory"
-      run: mkdir build
-    - name: "cmake"
-      run: |
-        BUILD_DIR="build" \
-          CMAKE_BUILD_TYPE="Release" \
-          CXX="g++-8" \
-          EXTRA_CMAKE_FLAGS="-DCONTOUR_BLUR_PLATFORM_KWIN=ON -DUSE_BOOST_FILESYSTEM=ON" \
-          ./scripts/ci-prepare-contour.sh
-    - name: "build"
-      run: cmake --build build/ -- -j3
-    - name: "test: crispy"
-      run: ./build/src/crispy/crispy_test
-    - name: "test: libterminal"
-      run: ./build/src/terminal/terminal_test
-    - name: "CPack: Creating TGZ package"
-      run: |
-        set -ex
-        cd build/
-        cpack -G DEB
-        cpack -G TGZ
-        cd ..
-        # CPack DEB:
-        mv -v "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.deb" \
-              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.deb"
-        # CPack TGZ:
-        tar xzpf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.tar.gz"
-        mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux" \
-              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64"
-        echo "pwd: `pwd`" && ls -hl
-    - name: "Uploading artifact .deb package"
-      uses: actions/upload-artifact@v2
-      with:
-        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.deb"
-        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.deb"
-        if-no-files-found: error
-        retention-days: 7
-    - name: "Uploading artifact ZIP package"
-      uses: actions/upload-artifact@v2
-      with:
-        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64"
-        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64"
-        if-no-files-found: error
-        retention-days: 7
-    - name: "Attempt installing the created .deb"
-      run: |
-        sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.deb"
-
-  osx_qt5:
-    name: "OS/X (Qt5)"
-    runs-on: macos-latest
-    steps:
-    - uses: actions/checkout@v2
-    - name: ccache
-      uses: hendrikmuhs/ccache-action@v1
-      with:
-        key: ccache-osx_qt5
-        max-size: 256M
-    - uses: actions/cache@v2
-      with:
-        path: "**/cpm_modules"
-        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
-    - name: set variables
-      id: set_vars
-      run: ./scripts/ci-set-vars.sh
-      env:
-        REPOSITORY: ${{ github.event.repository.name }}
-    - name: "Install dependencies"
-      run: |
-        set -ex
-        #brew update
-        ./scripts/install-deps.sh
-        brew install qt5
-    - name: "Create build directory"
-      run: mkdir build
-    - name: "Generate build files"
-      run: |
-        cmake . \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DQt5_DIR="$(brew --prefix qt5)/lib/cmake/Qt5" \
-              -B build/
-    - name: "Build"
-      run: cmake --build build/
-    - name: "test: libcrispy"
-      run: ./build/src/crispy/crispy_test
-    - name: "test: libterminal"
-      run: ./build/src/terminal/terminal_test
-    - name: "Create Package(s)"
-      run: |
-        set -ex
-        cd build
-        sudo cpack
-        BASENAME="contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx"
-        echo "pwd: `pwd`:" && ls -hl
-        mv -vf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.zip" "../${BASENAME}.zip"
-        mv -vf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "../${BASENAME}.dmg"
-    - name: Upload to artifact store (DMG)
-      uses: actions/upload-artifact@v2
-      with:
-        name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.dmg
-        path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.dmg
-        if-no-files-found: error
-        retention-days: 7
-
-  osx_qt6:
-    name: "OS/X (Qt6)"
-    runs-on: macos-latest
-    steps:
-    - uses: actions/checkout@v2
-    - name: ccache
-      uses: hendrikmuhs/ccache-action@v1
-      with:
-        key: ccache-osx_qt6
-        max-size: 256M
-    - uses: actions/cache@v2
-      with:
-        path: "**/cpm_modules"
-        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
-    - name: set variables
-      id: set_vars
-      run: ./scripts/ci-set-vars.sh
-      env:
-        REPOSITORY: ${{ github.event.repository.name }}
-    - name: "Install dependencies"
-      run: |
-        set -ex
-        #brew update
-        ./scripts/install-deps.sh
-        brew install qt6
-    - name: "Create build directory"
-      run: mkdir build
-    - name: "Generate build files"
-      run: |
-        cmake . \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DCONTOUR_BUILD_WITH_QT6=ON \
-              -B build/
-    - name: "Build"
-      run: cmake --build build/
-    - name: "test: libcrispy"
-      run: ./build/src/crispy/crispy_test
-    - name: "test: libterminal"
-      run: ./build/src/terminal/terminal_test
-
-  windows:
-    name: "Windows"
-    runs-on: windows-latest
-    steps:
-    - uses: actions/checkout@v2
-    - uses: actions/cache@v2
-      with:
-        path: "**/cpm_modules"
-        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
-    - name: setup environment
-      shell: powershell
-      id: set_vars
-      run: .\scripts\ci-set-vars.ps1
-      env:
-        REPOSITORY: ${{ github.event.repository.name }}
-    - name: "Fetch embedded dependencies"
-      shell: powershell
-      run: |
-        ./scripts/install-deps.ps1
-        type ./_deps/sources/CMakeLists.txt
-    - name: Install Qt
-      uses: jurplel/install-qt-action@v2
-    - name: "vcpkg: Install dependencies"
-      uses: lukka/run-vcpkg@v5
-      id: runvcpkg
-      with:
-        vcpkgArguments: angle fmt freetype fontconfig harfbuzz yaml-cpp range-v3
-        vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
-        vcpkgGitCommitId: 69478c5caafcde4c490bb1fccb960296801dbb5f
-        vcpkgTriplet: x64-windows
-    - name: "create build directory"
-      shell: powershell
-      run: |
-        If (!(Test-Path build))
-        {
-              New-Item -ItemType Directory -Force -Path build
-        }
-    - name: "Generate build files"
-      run: cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -B build .
-    - name: "Build"
-      run: cmake --build build/ --config Release
-    - name: "test: libcrispy"
-      run: .\build\src\crispy\Release\crispy_test.exe
-    - name: "test: libterminal"
-      run: .\build\src\terminal\Release\terminal_test.exe
-    - name: "Create Package(s)"
-      shell: powershell
-      run: |
-        cd build
-        cpack
-        type "_CPack_Packages/win64/WIX/wix.log"
-    - name: inspect
-      run: Get-ChildItem -Recurse
-    - name: "Rename packages"
-      run: |
-        mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi"
-        mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.zip"
-    - name: "Inspect again"
-      run: Get-ChildItem
-    - name: "Uploading MSI to artifact store"
-      uses: actions/upload-artifact@v2
-      with:
-        name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
-        path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
-        if-no-files-found: error
-        retention-days: 7
-
   archlinux:
     strategy:
       matrix:
@@ -629,5 +193,421 @@ jobs:
       run: |
         ls -hal
 
+  osx_qt5:
+    name: "OS/X (Qt5)"
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: ccache-osx_qt5
+        max-size: 256M
+    - uses: actions/cache@v2
+      with:
+        path: "**/cpm_modules"
+        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
+    - name: set variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - name: "Install dependencies"
+      run: |
+        set -ex
+        #brew update
+        ./scripts/install-deps.sh
+        brew install qt5
+    - name: "Create build directory"
+      run: mkdir build
+    - name: "Generate build files"
+      run: |
+        cmake . \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DQt5_DIR="$(brew --prefix qt5)/lib/cmake/Qt5" \
+              -B build/
+    - name: "Build"
+      run: cmake --build build/
+    - name: "test: libcrispy"
+      run: ./build/src/crispy/crispy_test
+    - name: "test: libterminal"
+      run: ./build/src/terminal/terminal_test
+    - name: "Create Package(s)"
+      run: |
+        set -ex
+        cd build
+        sudo cpack
+        BASENAME="contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx"
+        echo "pwd: `pwd`:" && ls -hl
+        mv -vf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.zip" "../${BASENAME}.zip"
+        mv -vf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "../${BASENAME}.dmg"
+    - name: Upload to artifact store (DMG)
+      uses: actions/upload-artifact@v2
+      with:
+        name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.dmg
+        path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.dmg
+        if-no-files-found: error
+        retention-days: 7
 
+  osx_qt6:
+    name: "OS/X (Qt6)"
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v2
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: ccache-osx_qt6
+        max-size: 256M
+    - uses: actions/cache@v2
+      with:
+        path: "**/cpm_modules"
+        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
+    - name: set variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - name: "Install dependencies"
+      run: |
+        set -ex
+        #brew update
+        ./scripts/install-deps.sh
+        brew install qt6
+    - name: "Create build directory"
+      run: mkdir build
+    - name: "Generate build files"
+      run: |
+        cmake . \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCONTOUR_BUILD_WITH_QT6=ON \
+              -B build/
+    - name: "Build"
+      run: cmake --build build/
+    - name: "test: libcrispy"
+      run: ./build/src/crispy/crispy_test
+    - name: "test: libterminal"
+      run: ./build/src/terminal/terminal_test
+
+  # {{{ Ubuntu
+  ubuntu_1804:
+    name: "Ubuntu Linux 18.04"
+    runs-on: ubuntu-18.04
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v2
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: ccache-ubuntu_1804
+        max-size: 256M
+    - uses: actions/cache@v2
+      with:
+        path: "**/cpm_modules"
+        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
+    - name: set environment variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - name: "install dependencies"
+      run: |
+        set -ex
+        sudo apt -q update
+        sudo ./scripts/install-deps.sh
+    - name: "Get specific version CMake, v3.18.3"
+      uses: lukka/get-cmake@v3.18.3
+    - name: "create build directory"
+      run: mkdir build
+    - name: "cmake"
+      run: |
+        BUILD_DIR="build" \
+          CMAKE_BUILD_TYPE="Release" \
+          CXX="g++-8" \
+          EXTRA_CMAKE_FLAGS="-DCONTOUR_BLUR_PLATFORM_KWIN=ON -DUSE_BOOST_FILESYSTEM=ON" \
+          ./scripts/ci-prepare-contour.sh
+    - name: "build"
+      run: cmake --build build/ -- -j3
+    - name: "test: crispy"
+      run: ./build/src/crispy/crispy_test
+    - name: "test: libterminal"
+      run: ./build/src/terminal/terminal_test
+    - name: "CPack: Creating TGZ package"
+      run: |
+        set -ex
+        cd build/
+        cpack -G DEB
+        cpack -G TGZ
+        cd ..
+        # CPack DEB:
+        mv -v "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.deb" \
+              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.deb"
+        # CPack TGZ:
+        tar xzpf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.tar.gz"
+        mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux" \
+              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64"
+        echo "pwd: `pwd`" && ls -hl
+    - name: "Uploading artifact .deb package"
+      uses: actions/upload-artifact@v2
+      with:
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.deb"
+        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.deb"
+        if-no-files-found: error
+        retention-days: 7
+    - name: "Uploading artifact ZIP package"
+      uses: actions/upload-artifact@v2
+      with:
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64"
+        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64"
+        if-no-files-found: error
+        retention-days: 7
+    - name: "Attempt installing the created .deb"
+      run: |
+        sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.deb"
+
+  ubuntu_2004:
+    name: "Ubuntu Linux 20.04"
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: ccache-ubuntu_2004
+        max-size: 256M
+    - uses: actions/cache@v2
+      with:
+        path: "**/cpm_modules"
+        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
+    - name: set environment variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - name: "install dependencies"
+      run: |
+        set -ex
+        sudo apt -q update
+        sudo ./scripts/install-deps.sh
+    - name: "create build directory"
+      run: mkdir build
+    - name: "cmake"
+      run: |
+        BUILD_DIR="build" \
+          CMAKE_BUILD_TYPE="RelWithDebInfo" \
+          CXX="g++-9" \
+          EXTRA_CMAKE_FLAGS="-DCONTOUR_BLUR_PLATFORM_KWIN=ON" \
+          ./scripts/ci-prepare-contour.sh
+    - name: "build"
+      run: cmake --build build/ -- -j3
+    - name: "test: crispy"
+      run: ./build/src/crispy/crispy_test
+    - name: "test: libterminal"
+      run: ./build/src/terminal/terminal_test
+    - name: "upload unit tests"
+      uses: actions/upload-artifact@v2
+      with:
+        name: contour-ubuntu2004-tests
+        path: |
+          build/src/crispy/crispy_test
+          build/src/terminal/terminal_test
+        retention-days: 3
+    - name: "CPack: Creating DEB & TGZ package"
+      run: |
+        set -ex
+        cd build/
+        cpack -G DEB
+        cpack -G TGZ
+        cd ..
+        mv -v "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.deb" \
+              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+        tar xzpf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.tar.gz"
+        mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux" \
+              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
+    - name: "Uploading artifact .deb package"
+      uses: actions/upload-artifact@v2
+      with:
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+        if-no-files-found: error
+        retention-days: 7
+    - name: "Uploading artifact ZIP package"
+      uses: actions/upload-artifact@v2
+      with:
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
+        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
+        if-no-files-found: error
+        retention-days: 7
+    - name: "Attempt installing the created .deb"
+      run: |
+        sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+
+  ubuntu_2004_no_kwin:
+    name: "Ubuntu Linux 20.04 (no KWin)"
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: ccache-ubuntu_2004_no_kwin
+        max-size: 256M
+    - uses: actions/cache@v2
+      with:
+        path: "**/cpm_modules"
+        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
+    - name: "install dependencies"
+      run: |
+        set -ex
+        sudo apt -q update
+        sudo ./scripts/install-deps.sh
+    - name: "create build directory"
+      run: mkdir build
+    - name: "cmake"
+      run: |
+        BUILD_DIR="build" \
+          CMAKE_BUILD_TYPE="Release" \
+          CXX="g++-9" \
+          ./scripts/ci-prepare-contour.sh
+    - name: "build"
+      run: cmake --build build/ -- -j3
+    - name: "test: crispy"
+      run: ./build/src/crispy/crispy_test
+    - name: "test: libterminal"
+      run: ./build/src/terminal/terminal_test
+
+  ubuntu_2004_no_kwin_with_harfbuzz:
+    name: "Ubuntu Linux 20.04 (no KWin, builtin FreeType and HarfBuzz)"
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: ccache-ubuntu_2004_no_kwin_with_harfbuzz
+        max-size: 256M
+    - uses: actions/cache@v2
+      with:
+        path: "**/cpm_modules"
+        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
+    - name: "install dependencies"
+      run: |
+        set -ex
+        sudo apt -q update
+        sudo ./scripts/install-deps.sh --with-hb-ft
+    - name: "create build directory"
+      run: mkdir build
+    - name: "cmake"
+      run: |
+        BUILD_DIR="build" \
+          CMAKE_BUILD_TYPE="Release" \
+          EXTRA_CMAKE_FLAGS="-DCONTOUR_BUILD_WITH_EMBEDDED_FT_HB=ON" \
+          CXX="g++-9" \
+          ./scripts/ci-prepare-contour.sh
+    - name: "build"
+      run: cmake --build build/ -- -j3
+    - name: "test: crispy"
+      run: ./build/src/crispy/crispy_test
+    - name: "test: libterminal"
+      run: ./build/src/terminal/terminal_test
+
+  test_ubuntu2004_valgrind:
+    name: "Run tests via valgrind"
+    runs-on: ubuntu-20.04
+    needs: [ubuntu_2004]
+    steps:
+    - name: "download artifact"
+      uses: actions/download-artifact@v2
+      with:
+        name: contour-ubuntu2004-tests
+    - name: "fix unit test permissions"
+      run: find . -name '*_test' -exec chmod 0755 {} \;
+    - name: "install dependencies"
+      run: |
+        set -ex
+        ls -hlR
+        #sudo apt -q update
+        sudo apt install -y \
+                        libfontconfig1 \
+                        libfreetype6 \
+                        libharfbuzz0b \
+                        libkf5windowsystem5 \
+                        libqt5gui5 \
+                        libqt5opengl5 \
+                        libyaml-cpp0.6 \
+                        ncurses-bin \
+                        valgrind
+    - name: "test: crispy (via valgrind)"
+      run: valgrind --error-exitcode=42 ./crispy/crispy_test
+    - name: "test: libterminal (via valgrind)"
+      run: valgrind --error-exitcode=42 ./terminal/terminal_test
+
+  # }}}
+
+  windows:
+    name: "Windows"
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions/cache@v2
+      with:
+        path: "**/cpm_modules"
+        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
+    - name: setup environment
+      shell: powershell
+      id: set_vars
+      run: .\scripts\ci-set-vars.ps1
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - name: "Fetch embedded dependencies"
+      shell: powershell
+      run: |
+        ./scripts/install-deps.ps1
+        type ./_deps/sources/CMakeLists.txt
+    - name: Install Qt
+      uses: jurplel/install-qt-action@v2
+    - name: "vcpkg: Install dependencies"
+      uses: lukka/run-vcpkg@v5
+      id: runvcpkg
+      with:
+        vcpkgArguments: angle fmt freetype fontconfig harfbuzz yaml-cpp range-v3
+        vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
+        vcpkgGitCommitId: 69478c5caafcde4c490bb1fccb960296801dbb5f
+        vcpkgTriplet: x64-windows
+    - name: "create build directory"
+      shell: powershell
+      run: |
+        If (!(Test-Path build))
+        {
+              New-Item -ItemType Directory -Force -Path build
+        }
+    - name: "Generate build files"
+      run: cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -B build .
+    - name: "Build"
+      run: cmake --build build/ --config Release
+    - name: "test: libcrispy"
+      run: .\build\src\crispy\Release\crispy_test.exe
+    - name: "test: libterminal"
+      run: .\build\src\terminal\Release\terminal_test.exe
+    - name: "Create Package(s)"
+      shell: powershell
+      run: |
+        cd build
+        cpack
+        type "_CPack_Packages/win64/WIX/wix.log"
+    - name: inspect
+      run: Get-ChildItem -Recurse
+    - name: "Rename packages"
+      run: |
+        mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi"
+        mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.zip"
+    - name: "Inspect again"
+      run: Get-ChildItem
+    - name: "Uploading MSI to artifact store"
+      uses: actions/upload-artifact@v2
+      with:
+        name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
+        path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
+        if-no-files-found: error
+        retention-days: 7
 
