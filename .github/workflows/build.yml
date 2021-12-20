@@ -597,5 +597,37 @@ jobs:
         if-no-files-found: error
         retention-days: 7
 
+  freebsd:
+    runs-on: macos-10.15
+    name: FreeBSD 13
+    env:
+      MYTOKEN: "value1"
+      MYTOKEN2: "value2"
+    steps:
+    - uses: actions/checkout@v2
+    - name: Test in FreeBSD
+      id: test
+      uses: vmactions/freebsd-vm@v0.1.5
+      with:
+        envs: 'MYTOKEN MYTOKEN2'
+        usesh: true
+        prepare: pkg install -y curl
+        run: |
+          set -ex
+          pwd
+          ls -lah
+          whoami
+          env
+          freebsd-version
+          SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
+          mkdir build
+          cmake -DCMAKE_BUILD_TYPE=Debug -S . -B build
+          cmake --build build/ -- -j2
+          ./build/src/crispy/crispy_test
+          ./build/src/terminal/terminal_test
+    - name: post-inspect
+      run: |
+        ls -hal
+
 
 
