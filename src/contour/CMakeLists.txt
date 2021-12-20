@@ -1,5 +1,9 @@
 include(FilesystemResolver)
 
+if(${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD")
+    set(FREEBSD TRUE)
+endif()
+
 option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 option(CONTOUR_VT_METRICS "Enables collecting and exit-printing some VT usage metrics." OFF)
 option(CONTOUR_SCROLLBAR "Enables scrollbar in GUI frontend." ON)
@@ -112,6 +116,10 @@ elseif(APPLE)
 endif()
 
 target_link_libraries(contour terminal yaml-cpp)
+if(FREEBSD)
+    # FreeBSD does not find yaml-cpp in /usr/local but weirdly everything else.
+    target_link_directories(contour PUBLIC "/usr/local/lib")
+endif()
 if(Boost_FILESYSTEM_FOUND)
     target_include_directories(contour PRIVATE ${Boost_INCLUDE_DIRS})
     target_link_libraries(contour ${Boost_LIBRARIES})
