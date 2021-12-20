@@ -1,0 +1,53 @@
+name: "Code scanning"
+
+on:
+  push:
+    paths-ignore:
+    - 'docs/**'
+    - '.github/ISSUE_TEMPLATE/**'
+    - '.github/*.yml'
+    - 'LICENSE.txt'
+    - '*.md'
+    - '*.sh'
+    branches:
+    - master
+  pull_request:
+    branches:
+    - master
+
+jobs:
+  CodeQL-Build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+        with:
+          # We must fetch at least the immediate parents so that if this is
+          # a pull request then we can checkout the head.
+          fetch-depth: 2
+
+      # Initializes the CodeQL tools for scanning.
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v1
+        with:
+          languages: cpp
+
+      - name: apt update
+        run: sudo apt -q update
+      - name: install dependencies
+        run: ./scripts/install-deps.sh
+      - name: "create build directory"
+        run: mkdir build
+      - name: "cmake"
+        run: cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -S . -B build
+      - name: "build"
+        run: cmake --build build/ -- -j3
+      - name: "test: libcrispy"
+        run: ./build/src/crispy/crispy_test
+      - name: "test: libterminal"
+        run: ./build/src/terminal/terminal_test
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v1
+
