@@ -1,0 +1,42 @@
+name: Checks
+
+on:
+  push:
+    paths-ignore:
+    - '.github/ISSUE_TEMPLATE/**'
+    - '.github/*.yml'
+    - 'LICENSE.txt'
+    branches:
+    - master
+  pull_request:
+    branches:
+    - master
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check_PR_TODOs:
+    name: "Check PR TODO's"
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+    - name: "Checking for open PR-related TODO's"
+      run: |
+        set -ex
+        ./scripts/check-pr-todos.sh
+
+  check_clang_format:
+    name: "Check C++ style"
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+    - name: Run clang-format style check for C/C++/Protobuf programs.
+      uses: jidicula/clang-format-action@v4.4.0
+      with:
+        clang-format-version: '13'
+        check-path: 'src'
+
+
+
