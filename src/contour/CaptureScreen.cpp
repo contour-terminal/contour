@@ -29,17 +29,17 @@
 #include <string_view>
 #include <tuple>
 
+// clang-format off
 #if defined(_WIN32)
-    // clang-format off
     #include <Winsock2.h>
     #include <Windows.h>
-    // clang-format on
 #else
     #include <fcntl.h>
     #include <sys/select.h>
     #include <termios.h>
     #include <unistd.h>
 #endif
+// clang-format on
 
 #if !defined(STDIN_FILENO)
     #define STDIN_FILENO 0
