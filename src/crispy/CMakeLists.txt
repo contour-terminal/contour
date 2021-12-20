@@ -1,5 +1,9 @@
 include("${CMAKE_CURRENT_LIST_DIR}/../../cmake/FilesystemResolver.cmake")
 
+if(${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD")
+    set(FREEBSD TRUE)
+endif()
+
 # --------------------------------------------------------------------------------------------------------
 # crispy::core
 
@@ -70,8 +74,10 @@ if(UNIX)
 
     # The following options are all important to get stacktrace dumping working
     target_link_libraries(crispy-core PUBLIC dl)
-    target_link_options(crispy-core PUBLIC -rdynamic -fno-pie)
-    if(NOT(APPLE))
+    if(NOT(FREEBSD))
+        target_link_options(crispy-core PUBLIC -rdynamic -fno-pie)
+    endif()
+    if(NOT(APPLE OR FREEBSD))
         target_link_options(crispy-core PUBLIC -no-pie)
     endif()
     target_compile_definitions(crispy-core PUBLIC BOOST_STACKTRACE_USE_ADDR2LINE=1)
