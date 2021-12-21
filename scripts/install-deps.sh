@@ -92,6 +92,14 @@ fetch_and_unpack_embeds()
         https://github.com/contour-terminal/libunicode/archive/447bc8790f1db8183e3212472fa90e3c4ce34787.tar.gz
 }
 
+fetch_and_unpack_yaml_cpp()
+{
+    fetch_and_unpack \
+        yaml-cpp-yaml-cpp-0.7.0 \
+        yaml-cpp-0.7.0.tar.gz \
+        https://github.com/jbeder/yaml-cpp/archive/refs/tags/yaml-cpp-0.7.0.tar.gz
+}
+
 fetch_and_unpack_hbft()
 {
     # optional
@@ -176,6 +184,8 @@ install_deps_ubuntu()
 
 install_deps_FreeBSD()
 {
+    fetch_and_unpack_yaml_cpp
+
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
     su root -c "pkg install $SYSDEP_ASSUME_YES \
@@ -196,8 +206,8 @@ install_deps_FreeBSD()
         qt5-qmake \
         qt5-widgets \
         range-v3 \
-        yaml-cpp \
     "
+    # yaml-cpp is available on FreeBSD too, but its .cmake file seems to be buggy.
 }
 
 install_deps_arch()
