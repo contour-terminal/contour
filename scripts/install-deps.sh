@@ -22,10 +22,6 @@ else
 fi
 
 # {{{ sysdeps fetcher and unpacker for deps that aren't available via sys pkg mgnr
-GSL_VERSION="3.1.0"
-TERMBENCH_PRO_VERSION="5a79261fbf5d26c9bf9d9a0d31f22ef4556cdd3b"
-LIBUNICODE_VERSION="46a48c25df2b57501ef97fde62b126c232f5f259"
-
 SYSDEPS_BASE_DIR="$(dirname $0)/../_deps"
 
 SYSDEPS_DIST_DIR="$SYSDEPS_BASE_DIR/distfiles"
