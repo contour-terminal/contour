@@ -195,7 +195,6 @@ install_deps_FreeBSD()
         freetype2 \
         harfbuzz \
         libfmt \
-        microsoft-gsl \
         ncurses \
         ninja \
         pkgconf \
@@ -221,7 +220,6 @@ install_deps_arch()
         fmt \
         fontconfig \
         git \
-        gsl \
         harfbuzz \
         ninja \
         qt5-base \
@@ -264,7 +262,6 @@ install_deps_darwin()
     brew install $SYSDEP_ASSUME_YES \
         boost \
         catch2 \
-        cpp-gsl \
         fontconfig \
         fmt \
         freetype \
