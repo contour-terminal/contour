@@ -141,14 +141,6 @@ if(CONTOUR_BUILD_WITH_MIMALLOC)
     target_link_libraries(contour mimalloc-static)
 endif()
 
-if(CONTOUR_SANITIZE AND NOT MSVC)
-    add_compile_options(-fsanitize=address)
-    #add_compile_options(-fsanitize=pointer-compare) # cannot be enabled with -fsanitize=thread
-    #add_compile_options(-fsanitize=thread)
-    add_compile_options(-fsanitize=undefined)
-    target_link_libraries(contour ubsan)
-endif()
-
 if(NOT(WIN32))
     set(terminfo_file "contour.terminfo")
     set(terminfo_basedir "${CMAKE_CURRENT_BINARY_DIR}/terminfo")
