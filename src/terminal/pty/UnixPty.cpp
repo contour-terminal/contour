@@ -242,7 +242,7 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
             if (rv >= 0)
             {
                 if (PtyInLog)
-                    LOGSTORE(PtyInLog)("Received: {}", crispy::escape(buffer_.data(), buffer_.data() + n));
+                    LOGSTORE(PtyInLog)("Received: {}", crispy::escape(buffer_.data(), buffer_.data() + rv));
                 return string_view{buffer_.data(), static_cast<size_t>(rv)};
             }
             else
