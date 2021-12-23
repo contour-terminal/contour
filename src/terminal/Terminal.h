@@ -123,6 +123,9 @@ class Terminal
 
     bool applicationCursorKeys() const noexcept { return inputGenerator_.applicationCursorKeys(); }
     bool applicationKeypad() const noexcept { return inputGenerator_.applicationKeypad(); }
+
+    bool hasInput() const noexcept;
+    void flushInput();
     // }}}
 
     /// Writes a given VT-sequence to screen.
@@ -335,7 +338,6 @@ class Terminal
     void verifyState();
 
   private:
-    void flushInput();
     void mainLoop();
     void refreshRenderBuffer(RenderBuffer& _output); // <- acquires the lock
     void refreshRenderBufferInternal(RenderBuffer& _output);

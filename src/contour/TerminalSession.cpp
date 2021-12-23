@@ -192,6 +192,9 @@ void TerminalSession::screenUpdated()
     if (profile_.autoScrollOnUpdate && terminal().viewport().scrolled())
         terminal().viewport().scrollToBottom();
 
+    if (terminal().hasInput())
+        display_->post([this]() { terminal().flushInput(); });
+
     scheduleRedraw();
 }
 
