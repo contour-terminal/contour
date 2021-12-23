@@ -1,5 +1,6 @@
 ### 0.3.0 (unreleased)
 
+- Fixes PTY write race condition.
 - Fixes installation from `.deb` (missing terminfo dependency)
 - Fixes VT sequence OSC 4's response.
 - Improved VT backend performance (#342).
