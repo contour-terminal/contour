@@ -113,6 +113,9 @@ class Terminal : public ScreenEvents {
 
     bool applicationCursorKeys() const noexcept { return inputGenerator_.applicationCursorKeys(); }
     bool applicationKeypad() const noexcept { return inputGenerator_.applicationKeypad(); }
+
+    bool hasInput() const noexcept;
+    void flushInput();
     // }}}
 
     // {{{ screen proxy
@@ -292,7 +295,6 @@ class Terminal : public ScreenEvents {
     uint64_t lastFrameID() const noexcept { return lastFrameID_.load(); }
 
   private:
-    void flushInput();
     void mainLoop();
     void refreshRenderBuffer(RenderBuffer& _output); // <- acquires the lock
     void refreshRenderBufferInternal(RenderBuffer& _output);

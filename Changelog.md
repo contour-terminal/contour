@@ -1,5 +1,6 @@
 ### 0.2.4 (unreleased)
 
+- Fixes PTY write race condition.
 - Fixes VT sequence OSC 4's response.
 
 ### 0.2.3 (2021-12-12)

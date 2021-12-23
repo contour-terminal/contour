@@ -669,7 +669,11 @@ void Terminal::sendPaste(string_view _text)
 void Terminal::sendRaw(string_view _text)
 {
     inputGenerator_.generateRaw(_text);
-    flushInput();
+}
+
+bool Terminal::hasInput() const noexcept
+{
+    return !inputGenerator_.peek().empty();
 }
 
 void Terminal::flushInput()
