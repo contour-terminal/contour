@@ -3,6 +3,7 @@
 - Fixes VT sequence `DECFI`.
 - Fixes VT sequence `ICH` (#559).
 - Fixes installation from `.deb` (missing terminfo dependency)
+- Fixes VT sequence `OSC 4`'s response.
 - Improved VT backend performance (#342).
 - Improved text selection behaviour.
 - Adds new configuration option `mouse_block_selection_modifier`.
