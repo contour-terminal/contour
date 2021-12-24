@@ -215,14 +215,13 @@ class ImagePool
   public:
     using OnImageRemove = std::function<void(Image const*)>;
 
-    constexpr static inline std::size_t MaxCapacity = 1024;
+    constexpr static inline std::size_t MaxCapacity = 100;
 
     ImagePool(
         OnImageRemove _onImageRemove = [](auto) {}, ImageId _nextImageId = ImageId(1)):
         nextImageId_ { _nextImageId },
-        namedImages_ { MaxCapacity },
-        images_ { MaxCapacity },
-        rasterizedImages_ {},
+        imageNameToIdCache_ { MaxCapacity },
+        imageCache_ { MaxCapacity },
         onImageRemove_ { std::move(_onImageRemove) }
     {
     }
@@ -244,21 +243,17 @@ class ImagePool
     Image const* findImageByName(std::string const& _name) const noexcept;
     void unlink(std::string const& _name);
 
-    size_t imageCount() const noexcept { return images_.size(); }
-    size_t rasterizedImageCount() const noexcept { return rasterizedImages_.size(); }
-    size_t namedImageCount() const noexcept { return namedImages_.size(); }
-
   private:
     void removeImage(Image* _image);                     //!< Removes given image from pool.
     void removeRasterizedImage(RasterizedImage* _image); //!< Removes a rasterized image from pool.
 
     // data members
     //
-    ImageId nextImageId_;                                //!< ID for next image to be put into the pool
-    crispy::LRUCache<std::string, ImageId> namedImages_; //!< keeps mapping from name to raw image
-    crispy::LRUCache<ImageId, Image> images_;            //!< pool of raw images
-    std::list<RasterizedImage> rasterizedImages_;        //!< pool of rasterized images
-    OnImageRemove const onImageRemove_; //!< Callback to be invoked when image gets removed from pool.
+    ImageId nextImageId_;                                       //!< ID for next image to be put into the pool
+    crispy::LRUCache<std::string, ImageId> imageNameToIdCache_; //!< keeps mapping from name to raw image
+    crispy::LRUCache<ImageId, Image> imageCache_;               //!< pool of raw images
+    std::list<RasterizedImage> rasterizedImages_;               //!< pool of rasterized images
+    OnImageRemove const onImageRemove_;                         //!< Callback to be invoked when image gets removed from pool.
 };
 
 } // namespace terminal

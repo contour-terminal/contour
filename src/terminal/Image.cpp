@@ -97,7 +97,7 @@ Image const& ImagePool::create(ImageFormat _format, ImageSize _size, Image::Data
     // TODO: This operation should be idempotent, i.e. if that image has been created already, return a
     // reference to that.
     auto const id = nextImageId_++;
-    return images_.emplace(id, Image { id, _format, move(_data), _size });
+    return imageCache_.emplace(id, Image { id, _format, move(_data), _size });
 }
 
 std::shared_ptr<RasterizedImage const> ImagePool::rasterize(ImageId _imageId,
@@ -107,19 +107,19 @@ std::shared_ptr<RasterizedImage const> ImagePool::rasterize(ImageId _imageId,
                                                             GridSize _cellSpan,
                                                             ImageSize _cellSize)
 {
-    rasterizedImages_.emplace_back(
-        &images_.at(_imageId), _alignmentPolicy, _resizePolicy, _defaultColor, _cellSpan, _cellSize);
-    return shared_ptr<RasterizedImage>(&rasterizedImages_.back(),
-                                       [this](RasterizedImage* _image) { removeRasterizedImage(_image); });
+    Require(_imageId != ImageId(0));
+    return std::make_shared<RasterizedImage>(
+        &imageCache_.at(_imageId), _alignmentPolicy, _resizePolicy, _defaultColor, _cellSpan, _cellSize);
 }
 
 void ImagePool::removeImage(Image* _image)
 {
-    if (auto i = find_if(images_.begin(), images_.end(), [&](auto const& p) { return &p.value == _image; });
-        i != images_.end())
+    if (auto i = find_if(
+            imageCache_.begin(), imageCache_.end(), [&](auto const& p) { return &p.value == _image; });
+        i != imageCache_.end())
     {
         onImageRemove_(_image);
-        images_.erase(i);
+        imageCache_.erase(i);
     }
 }
 
@@ -134,20 +134,20 @@ void ImagePool::removeRasterizedImage(RasterizedImage* _image)
 
 void ImagePool::link(std::string const& _name, Image const& _imageRef)
 {
-    namedImages_[_name] = _imageRef.id();
+    imageNameToIdCache_[_name] = _imageRef.id();
 }
 
 Image const* ImagePool::findImageByName(std::string const& _name) const noexcept
 {
-    if (ImageId const* id = namedImages_.try_get(_name))
-        return &images_.at(*id);
+    if (ImageId const* id = imageNameToIdCache_.try_get(_name))
+        return &imageCache_.at(*id);
 
     return {};
 }
 
 void ImagePool::unlink(std::string const& _name)
 {
-    namedImages_.erase(_name);
+    imageNameToIdCache_.erase(_name);
 }
 
 } // namespace terminal
