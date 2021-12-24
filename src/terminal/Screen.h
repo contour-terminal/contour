@@ -590,6 +590,14 @@ class Screen: public capabilities::StaticDatabase
     /// Sets the current column to given logical column number.
     void setCurrentColumn(ColumnOffset _n);
 
+    ImageFragmentId createImageFragmentId() noexcept
+    {
+        if (!nextImageFragmentId_)
+            ++nextImageFragmentId_;
+
+        return nextImageFragmentId_++;
+    }
+
     // private fields
     //
     EventListener& eventListener_;

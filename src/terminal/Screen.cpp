@@ -2233,7 +2233,7 @@ void Screen<T>::renderImage(ImageId _imageId,
             auto const cellCoord =
                 Coordinate { _topLeft.line + offset.line, _topLeft.column + offset.column };
             Cell& cell = at(cellCoord.line, cellCoord.column);
-            cell.setImage(nextImageFragmentId_++);
+            cell.setImage(createImageFragmentId());
             imageFragments_.emplace(
                 cell.imageFragment(),
                 ImageFragment { rasterizedImage, Coordinate { offset.line, offset.column } });
@@ -2255,7 +2255,7 @@ void Screen<T>::renderImage(ImageId _imageId,
                 crispy::times(columnsToBeRendered.as<ColumnOffset>()), [&](ColumnOffset columnOffset) {
                     Cell& cell =
                         at(Coordinate { pageSize_.lines.as<LineOffset>(), _topLeft.column + columnOffset });
-                    cell.setImage(nextImageFragmentId_++);
+                    cell.setImage(createImageFragmentId());
                     imageFragments_.emplace(
                         cell.imageFragment(),
                         ImageFragment { rasterizedImage,
