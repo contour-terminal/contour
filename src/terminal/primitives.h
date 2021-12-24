@@ -497,4 +497,19 @@ struct formatter<terminal::PageSize>
         return format_to(ctx.out(), "{}x{}", value.columns, value.lines);
     }
 };
+
+template <>
+struct formatter<terminal::GridSize>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::GridSize value, FormatContext& ctx)
+    {
+        return format_to(ctx.out(), "{}x{}", value.columns, value.lines);
+    }
+};
 } // namespace fmt
