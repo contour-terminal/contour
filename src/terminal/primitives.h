@@ -363,6 +363,11 @@ struct GridSize
     constexpr iterator end() noexcept { return iterator { columns, *columns * *lines }; }
 };
 
+constexpr Coordinate operator+(Coordinate a, GridSize::Offset b) noexcept
+{
+    return Coordinate { a.line + b.line, a.column + b.column };
+}
+
 constexpr GridSize::iterator begin(GridSize const& s) noexcept
 {
     return s.begin();
