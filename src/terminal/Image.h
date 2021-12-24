@@ -230,12 +230,12 @@ class ImagePool
     Image const& create(ImageFormat _format, ImageSize _pixelSize, Image::Data&& _data);
 
     /// Rasterizes an Image.
-    std::shared_ptr<RasterizedImage const> rasterize(ImageId _imageId,
-                                                     ImageAlignment _alignmentPolicy,
-                                                     ImageResize _resizePolicy,
-                                                     RGBAColor _defaultColor,
-                                                     GridSize _cellSpan,
-                                                     ImageSize _cellSize);
+    std::shared_ptr<RasterizedImage> rasterize(ImageId _imageId,
+                                               ImageAlignment _alignmentPolicy,
+                                               ImageResize _resizePolicy,
+                                               RGBAColor _defaultColor,
+                                               GridSize _cellSpan,
+                                               ImageSize _cellSize);
 
     // named image access
     //

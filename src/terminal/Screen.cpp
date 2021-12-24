@@ -2229,16 +2229,16 @@ void Screen<T>::renderImage(ImageId _imageId,
 
     if (*linesToBeRendered)
     {
-        crispy::for_each(GridSize { linesToBeRendered, columnsToBeRendered }, [&](GridSize::Offset offset) {
-            auto const cellCoord =
-                Coordinate { _topLeft.line + offset.line, _topLeft.column + offset.column };
-            Cell& cell = at(cellCoord.line, cellCoord.column);
-            cell.setImage(createImageFragmentId());
-            imageFragments_.emplace(
-                cell.imageFragment(),
-                ImageFragment { rasterizedImage, Coordinate { offset.line, offset.column } });
+        for (GridSize::Offset const offset: GridSize { linesToBeRendered, columnsToBeRendered })
+        {
+            auto const imageFragmentId = createImageFragmentId();
+            Cell& cell = at(_topLeft + offset);
             cell.setHyperlink(cursor_.hyperlink);
-        });
+            cell.setImage(imageFragmentId);
+            imageFragments_.emplace(
+                imageFragmentId,
+                ImageFragment { rasterizedImage, Coordinate { offset.line, offset.column } });
+        };
         moveCursorTo(_topLeft.line + unbox<int>(linesToBeRendered) - 1, _topLeft.column);
     }
 
@@ -2253,11 +2253,13 @@ void Screen<T>::renderImage(ImageId _imageId,
             moveCursorForward(_topLeft.column.as<ColumnCount>());
             crispy::for_each(
                 crispy::times(columnsToBeRendered.as<ColumnOffset>()), [&](ColumnOffset columnOffset) {
+                    auto const imageFragmentId = createImageFragmentId();
                     Cell& cell =
                         at(Coordinate { pageSize_.lines.as<LineOffset>(), _topLeft.column + columnOffset });
-                    cell.setImage(createImageFragmentId());
+                    // TODO(pr)                   ^^ why don't we `- 1` here in pageSize_.lines?
+                    cell.setImage(imageFragmentId);
                     imageFragments_.emplace(
-                        cell.imageFragment(),
+                        imageFragmentId,
                         ImageFragment { rasterizedImage,
                                         Coordinate { boxed_cast<LineOffset>(linesToBeRendered) + lineOffset,
                                                      columnOffset } });

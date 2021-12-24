@@ -100,12 +100,12 @@ Image const& ImagePool::create(ImageFormat _format, ImageSize _size, Image::Data
     return imageCache_.emplace(id, Image { id, _format, move(_data), _size });
 }
 
-std::shared_ptr<RasterizedImage const> ImagePool::rasterize(ImageId _imageId,
-                                                            ImageAlignment _alignmentPolicy,
-                                                            ImageResize _resizePolicy,
-                                                            RGBAColor _defaultColor,
-                                                            GridSize _cellSpan,
-                                                            ImageSize _cellSize)
+std::shared_ptr<RasterizedImage> ImagePool::rasterize(ImageId _imageId,
+                                                      ImageAlignment _alignmentPolicy,
+                                                      ImageResize _resizePolicy,
+                                                      RGBAColor _defaultColor,
+                                                      GridSize _cellSpan,
+                                                      ImageSize _cellSize)
 {
     Require(_imageId != ImageId(0));
     return std::make_shared<RasterizedImage>(
