@@ -163,8 +163,8 @@ class CONTOUR_PACKED Cell
     char32_t codepoint_ = 0; /// Primary Unicode codepoint to be displayed.
     Color foregroundColor_ = DefaultColor();
     Color backgroundColor_ = DefaultColor();
-    Owned<CellExtra>
-        extra_ = {}; // TODO(perf) ^^ use CellExtraId = boxed<int24_t> into pre-alloc'ed vector<CellExtra>.
+    Owned<CellExtra> extra_ = {};
+    // TODO(perf) ^^ use CellExtraId = boxed<int24_t> into pre-alloc'ed vector<CellExtra>.
 };
 
 // {{{ impl: ctor's
