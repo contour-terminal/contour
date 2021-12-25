@@ -2221,9 +2221,9 @@ void Screen<T>::renderImage(ImageId _imageId,
     (void) _imageOffset;
     (void) _imageSize;
 
-    auto const linesAvailable = LineCount(1) + pageSize_.lines - _topLeft.line.as<LineCount>();
+    auto const linesAvailable = pageSize_.lines - _topLeft.line.as<LineCount>();
     auto const linesToBeRendered = min(_gridSize.lines, linesAvailable);
-    auto const columnsAvailable = *pageSize_.columns - *_topLeft.column + 1;
+    auto const columnsAvailable = *pageSize_.columns - *_topLeft.column;
     auto const columnsToBeRendered = ColumnCount(min(columnsAvailable, *_gridSize.columns));
     auto const gapColor = RGBAColor {}; // TODO: cursor_.graphicsRendition.backgroundColor;
 
