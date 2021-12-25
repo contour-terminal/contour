@@ -26,6 +26,7 @@
 #include <terminal/VTType.h>
 
 #include <crispy/algorithm.h>
+#include <crispy/logstore.h>
 #include <crispy/size.h>
 #include <crispy/span.h>
 #include <crispy/utils.h>
@@ -672,14 +673,6 @@ class Screen: public capabilities::StaticDatabase
     // experimental features
     //
     bool respondToTCapQuery_ = true;
-};
-
-class MockTerm: public MockScreenEvents
-{
-  public:
-    explicit MockTerm(PageSize _size, LineCount _hist = {}): screen(_size, *this, false, false, _hist) {}
-
-    Screen<MockTerm> screen;
 };
 
 } // namespace terminal

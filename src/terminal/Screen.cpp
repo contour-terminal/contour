@@ -16,6 +16,7 @@
 #include <terminal/VTType.h>
 #include <terminal/logging.h>
 
+#include <crispy/App.h>
 #include <crispy/Comparison.h>
 #include <crispy/algorithm.h>
 #include <crispy/escape.h>
@@ -2724,8 +2725,10 @@ void Screen<T>::smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _actio
 
 } // namespace terminal
 
-template class terminal::Screen<terminal::MockTerm>;
-
 #include <terminal/Terminal.h>
 template class terminal::Screen<terminal::Terminal>;
+
+#include <terminal/MockTerm.h>
+template class terminal::Screen<terminal::MockTerm>;
+
 // template class terminal::Screen<terminal::MockScreenEvents>;

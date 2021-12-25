@@ -1644,5 +1644,5 @@ CursorShape makeCursorShape(string const& _name)
 #include <terminal/Terminal.h>
 template class terminal::Sequencer<terminal::Terminal>;
 
-#include <terminal/Screen.h>
+#include <terminal/MockTerm.h>
 template class terminal::Sequencer<terminal::MockTerm>;

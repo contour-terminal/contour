@@ -11,6 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <terminal/MockTerm.h>
 #include <terminal/Screen.h>
 #include <terminal/Viewport.h>
 #include <terminal/primitives.h>
