@@ -71,6 +71,7 @@ using std::pair;
 using std::prev;
 using std::ref;
 using std::rotate;
+using std::shared_ptr;
 using std::string;
 using std::string_view;
 using std::tuple;
@@ -2184,8 +2185,8 @@ void Screen<T>::sixelImage(ImageSize _pixelSize, Image::Data&& _data)
     auto const imageOffset = Coordinate {};
     auto const imageSize = _pixelSize;
 
-    Image const& imageRef = uploadImage(ImageFormat::RGBA, _pixelSize, move(_data));
-    renderImage(imageRef.id(),
+    shared_ptr<Image const> imageRef = uploadImage(ImageFormat::RGBA, _pixelSize, move(_data));
+    renderImage(imageRef->id(),
                 topLeft,
                 extent,
                 imageOffset,
@@ -2199,7 +2200,9 @@ void Screen<T>::sixelImage(ImageSize _pixelSize, Image::Data&& _data)
 }
 
 template <typename T>
-Image const& Screen<T>::uploadImage(ImageFormat _format, ImageSize _imageSize, Image::Data&& _pixmap)
+shared_ptr<Image const> Screen<T>::uploadImage(ImageFormat _format,
+                                               ImageSize _imageSize,
+                                               Image::Data&& _pixmap)
 {
     return imagePool_.create(_format, _imageSize, move(_pixmap));
 }

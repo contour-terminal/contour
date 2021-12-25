@@ -308,7 +308,9 @@ class Screen: public capabilities::StaticDatabase
     ImageSize maxImageSize() const noexcept { return maxImageSize_; }
     ImageSize maxImageSizeLimit() const noexcept { return maxImageSizeLimit_; }
 
-    Image const& uploadImage(ImageFormat _format, ImageSize _imageSize, Image::Data&& _pixmap);
+    std::shared_ptr<Image const> uploadImage(ImageFormat _format,
+                                             ImageSize _imageSize,
+                                             Image::Data&& _pixmap);
 
     /**
      * Renders an image onto the screen.
