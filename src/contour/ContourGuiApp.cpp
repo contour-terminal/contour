@@ -128,25 +128,7 @@ int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
 
     if (auto const filterString = _flags.get<string>("contour.terminal.debug"); !filterString.empty())
     {
-        if (filterString == "all")
-        {
-            for (auto& category: logstore::get())
-                category.get().enable();
-        }
-        else
-        {
-            auto const filters = crispy::split(filterString, ',');
-            for (auto& category: logstore::get())
-            {
-                category.get().enable(crispy::any_of(filters, [&](string_view filterPattern) -> bool {
-                    if (filterPattern.back() != '*')
-                        return category.get().name() == filterPattern;
-                    // TODO: '*' excludes hidden categories
-                    return std::equal(
-                        begin(filterPattern), prev(end(filterPattern)), begin(category.get().name()));
-                }));
-            }
-        }
+        logstore::configure(filterString);
     }
 
     auto const configPath = QString::fromStdString(_flags.get<string>("contour.terminal.config"));
