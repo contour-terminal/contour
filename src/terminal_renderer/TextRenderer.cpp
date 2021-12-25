@@ -23,15 +23,13 @@
 #include <crispy/assert.h>
 #include <crispy/indexed.h>
 #include <crispy/range.h>
-#include <crispy/times.h>
 
 #include <unicode/convert.h>
 
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 
-using crispy::copy;
-using crispy::times;
+#include <range/v3/algorithm/copy.hpp>
 
 using unicode::out;
 
@@ -467,7 +465,8 @@ text::shape_result TextRenderer::requestGlyphPositions()
     unicode::run_segmenter::range run;
     auto rs = unicode::run_segmenter(codepoints_.data(), codepoints_.size());
     while (rs.consume(out(run)))
-        crispy::copy(shapeRun(run), std::back_inserter(glyphPositions));
+        for (text::glyph_position gpos: shapeRun(run))
+            glyphPositions.emplace_back(gpos);
 
     return glyphPositions;
 }
