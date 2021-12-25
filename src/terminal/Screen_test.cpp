@@ -17,6 +17,7 @@
 #include <terminal/primitives.h>
 
 #include <crispy/escape.h>
+#include <crispy/utils.h>
 
 #include <range/v3/view/iota.hpp>
 
@@ -3200,6 +3201,44 @@ TEST_CASE("DECCRA.Left.intersecting", "[screen]")
     CHECK(resultText == expectedText);
 }
 // }}}
+
+TEST_CASE("Sixel.simple", "[screen]")
+{
+    auto const pageSize = PageSize { LineCount(10), ColumnCount(10) };
+    auto term = MockTerm { pageSize, LineCount(10) };
+    term.screen.setCellPixelSize(ImageSize { Width(10), Height(10) });
+
+    auto const sixelData = crispy::readFileAsString("./test/images/squirrel-50.sixel");
+
+    term.screen.write(sixelData);
+
+    CHECK(term.screen.cursor().position.column == ColumnOffset(8));
+    CHECK(term.screen.cursor().position.line == LineOffset(4));
+
+    for (auto line = LineOffset(0); line < boxed_cast<LineOffset>(pageSize.lines); ++line)
+    {
+        for (auto column = ColumnOffset(0); column < boxed_cast<ColumnOffset>(pageSize.columns); ++column)
+        {
+            Cell const& cell = term.screen.at(line, column);
+            if (line <= LineOffset(4) && column <= ColumnOffset(7))
+            {
+                ImageFragmentId fragmentId = cell.imageFragment();
+                ImageFragment const& fragment = term.screen.imageFragments().at(fragmentId);
+                CHECK(fragment.offset().line == line);
+                CHECK(fragment.offset().column == column);
+                CHECK(fragment.data().size() != 0);
+            }
+            else
+            {
+                CHECK(cell.empty());
+            }
+        }
+    }
+
+    // Um, we could actually test more precise here by validating the grid cell contents.
+}
+
+// TODO: Sixel: image that exceeds available lines
 
 // TODO: SetForegroundColor
 // TODO: SetBackgroundColor
