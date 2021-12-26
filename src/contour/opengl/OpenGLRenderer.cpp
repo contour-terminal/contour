@@ -436,6 +436,7 @@ void OpenGLRenderer::initializeTextureRendering()
 
 OpenGLRenderer::~OpenGLRenderer()
 {
+    LOGSTORE(DisplayLog)("~OpenGLRenderer");
     CHECKED_GL(glDeleteVertexArrays(1, &rectVAO_));
     CHECKED_GL(glDeleteBuffers(1, &rectVBO_));
 }

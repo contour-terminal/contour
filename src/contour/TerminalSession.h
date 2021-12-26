@@ -14,7 +14,6 @@
 #pragma once
 
 #include <contour/Config.h>
-#include <contour/Controller.h>
 #include <contour/FileChangeWatcher.h>
 #include <contour/TerminalDisplay.h>
 
@@ -28,6 +27,8 @@
 
 namespace contour
 {
+
+class ContourGuiApp;
 
 /**
  * Manages a single terminal session (Client, Terminal, Display)
@@ -52,7 +53,7 @@ class TerminalSession: public terminal::Terminal::Events
                     bool _liveconfig,
                     std::string _profileName,
                     std::string _programPath,
-                    Controller& _controller,
+                    ContourGuiApp& _app,
                     std::unique_ptr<TerminalDisplay> _display,
                     std::function<void()> _displayInitialized,
                     std::function<void()> _onExit);
@@ -150,7 +151,7 @@ class TerminalSession: public terminal::Terminal::Events
             display_->scheduleRedraw();
     }
 
-    Controller& controller() noexcept { return controller_; }
+    ContourGuiApp& app() noexcept { return app_; }
 
   private:
     // helpers
@@ -179,7 +180,7 @@ class TerminalSession: public terminal::Terminal::Events
     std::string profileName_;
     config::TerminalProfile profile_;
     std::string programPath_;
-    Controller& controller_;
+    ContourGuiApp& app_;
     std::function<void()> displayInitialized_;
     std::function<void()> onExit_;
 

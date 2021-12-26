@@ -13,6 +13,7 @@
  */
 #include <contour/Actions.h>
 #include <contour/BackgroundBlur.h>
+#include <contour/ContourGuiApp.h>
 #include <contour/TerminalWindow.h>
 #include <contour/helper.h>
 
@@ -72,12 +73,12 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
                                bool _liveConfig,
                                string _profileName,
                                string _programPath,
-                               Controller& _controller):
+                               ContourGuiApp& _app):
     config_ { std::move(_config) },
     liveConfig_ { _liveConfig },
     profileName_ { std::move(_profileName) },
     programPath_ { std::move(_programPath) },
-    controller_ { _controller }
+    app_ { _app }
 {
     // connect(this, SIGNAL(screenChanged(QScreen*)), this, SLOT(onScreenChanged(QScreen*)));
 
@@ -114,7 +115,7 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
         liveConfig_,
         profileName_,
         programPath_,
-        controller_,
+        app_,
         unique_ptr<TerminalDisplay> {},
         [this]() {
     // NB: This is invoked whenever the newly assigned display
@@ -125,7 +126,7 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
             (void) this;
 #endif
         },
-        [this]() { controller_.onExit(*terminalSession_); });
+        [this]() { app_.onExit(*terminalSession_); });
 
     terminalSession_->setDisplay(make_unique<opengl::TerminalWidget>(
         *profile(),
@@ -158,9 +159,14 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
     terminalSession_->start();
 }
 
+TerminalWindow::~TerminalWindow()
+{
+    LOGSTORE(DisplayLog)("~TerminalWindow");
+}
+
 void TerminalWindow::onTerminalClosed()
 {
-    LOGSTORE(DisplayLog)("title {}", terminalSession_->terminal().screen().windowTitle());
+    LOGSTORE(DisplayLog)("terminal closed: {}", terminalSession_->terminal().screen().windowTitle());
     close();
 }
 
