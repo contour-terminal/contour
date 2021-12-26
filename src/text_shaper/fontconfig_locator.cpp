@@ -122,6 +122,20 @@ namespace
 struct fontconfig_locator::Private
 {
     // currently empty, maybe later something (such as caching)?
+    FcConfig* ftConfig = nullptr;
+
+    Private()
+    {
+        FcInit();
+        ftConfig = FcInitLoadConfigAndFonts(); // Most convenient of all the alternatives
+    }
+
+    ~Private()
+    {
+        LOGSTORE(LocatorLog)("~fontconfig_locator.dtor");
+        FcConfigDestroy(ftConfig);
+        FcFini();
+    }
 };
 
 fontconfig_locator::fontconfig_locator():
@@ -129,12 +143,10 @@ fontconfig_locator::fontconfig_locator():
            delete p;
        } }
 {
-    FcInit();
 }
 
 fontconfig_locator::~fontconfig_locator()
 {
-    FcFini();
 }
 
 font_source_list fontconfig_locator::locate(font_description const& _fd)
