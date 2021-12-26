@@ -19,6 +19,8 @@ sleep 3
 DUMP_DIR="${1}"
 shift
 
+ldd `which contour`
+
 contour terminal \
         debug pty,gui.session,gui.display \
         display ${DISPLAY} \
