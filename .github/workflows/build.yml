@@ -412,6 +412,7 @@ jobs:
           build/src/crispy/crispy_test
           build/src/terminal/terminal_test
           test/images
+          valgrind.supp
         retention-days: 3
     - name: "CPack: Creating DEB & TGZ package"
       run: |
@@ -539,9 +540,9 @@ jobs:
                         ncurses-bin \
                         valgrind
     - name: "test: crispy (via valgrind)"
-      run: valgrind --error-exitcode=42 ./build/src/crispy/crispy_test
+      run: valgrind --suppressions=valgrind.supp --error-exitcode=64 ./build/src/crispy/crispy_test
     - name: "test: libterminal (via valgrind)"
-      run: valgrind --error-exitcode=42 ./build/src/terminal/terminal_test
+      run: valgrind --suppressions=valgrind.supp --error-exitcode=64 ./build/src/terminal/terminal_test
 
   # }}}
 
