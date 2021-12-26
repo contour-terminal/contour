@@ -29,6 +29,7 @@ PtyProcess::PtyProcess(ExecInfo const& _exe, PageSize _terminalSize, optional<Im
 
 PtyProcess::~PtyProcess()
 {
+    processExitWatcher_.join();
 }
 
 Process::ExitStatus PtyProcess::waitForProcessExit()
