@@ -24,8 +24,9 @@
 #include <chrono>
 #include <iostream>
 #include <signal.h>
-#include <sys/types.h>
 #include <utility>
+
+#include <sys/types.h>
 
 using crispy::Size;
 

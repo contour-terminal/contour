@@ -85,15 +85,17 @@ IncludeCategories:
     Priority:  7
   - Regex:     '^<(range)/'
     Priority:  8
-  - Regex:     '^<fontconfig/'
+  - Regex:     '^<gsl/'
     Priority:  9
-  - Regex:     '^<harfbuzz/'
+  - Regex:     '^<fontconfig/'
     Priority:  10
-  - Regex:     '^(<|"(QtCore|QtGui|QtWidgets)/)'
+  - Regex:     '^<harfbuzz/'
     Priority:  11
-  - Regex:     '^(<|"(gtest|gmock|range|gsl|json)/)'
+  - Regex:     '^<(QtCore|QtGui|QtWidgets)/'
     Priority:  12
-  - Regex:     '<[[:alnum:].]+>'
+  - Regex:     '^<catch2/'
     Priority:  13
-  - Regex:     '.*'
+  - Regex:     '<[[:alnum:]._]+>'
     Priority:  14
+  - Regex:     '.*'
+    Priority:  15

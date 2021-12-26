@@ -24,6 +24,7 @@
 #include <QtGui/QKeyEvent>
 #include <QtGui/QScreen>
 #include <QtWidgets/QWidget>
+
 #include <cctype>
 #include <map>
 #include <string>

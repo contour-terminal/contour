@@ -13,8 +13,9 @@
  */
 #include <terminal/Size.h>
 
-#include <array>
 #include <catch2/catch.hpp>
+
+#include <array>
 #include <string_view>
 
 using terminal::Coordinate;

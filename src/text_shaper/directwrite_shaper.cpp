@@ -13,6 +13,7 @@
 #include <dwrite.h>
 #include <dwrite_3.h>
 #include <iostream> // DEBUGGING ONLY
+
 #include <wrl/client.h>
 
 using Microsoft::WRL::ComPtr;

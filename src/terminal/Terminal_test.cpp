@@ -18,8 +18,9 @@
 
 #include <unicode/convert.h>
 
-#include <algorithm>
 #include <catch2/catch.hpp>
+
+#include <algorithm>
 #include <iostream>
 #include <iterator>
 #include <string>

@@ -27,10 +27,11 @@
 #include <range/v3/iterator/insert_iterators.hpp>
 #include <range/v3/view/iota.hpp>
 
-#include <algorithm>
-#include <array>
 #include <gsl/span>
 #include <gsl/span_ext>
+
+#include <algorithm>
+#include <array>
 #include <sstream>
 #include <string>
 #include <string_view>

@@ -39,11 +39,12 @@
     #include <utmp.h>
 #endif
 #include <pwd.h>
+#include <unistd.h>
+
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <unistd.h>
 
 using std::max;
 using std::min;

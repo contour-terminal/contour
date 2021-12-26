@@ -21,6 +21,7 @@
 
 #include <gsl/span>
 #include <gsl/span_ext>
+
 #include <iterator>
 #include <sstream>
 #include <string>

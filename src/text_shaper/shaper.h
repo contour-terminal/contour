@@ -25,10 +25,11 @@
 
 #include <fmt/format.h>
 
-#include <cstdint>
-#include <functional>
 #include <gsl/span>
 #include <gsl/span_ext>
+
+#include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <string_view>

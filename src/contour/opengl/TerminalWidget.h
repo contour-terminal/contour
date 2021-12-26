@@ -37,6 +37,7 @@
 #include <QtWidgets/QMainWindow>
 #include <QtWidgets/QScrollBar>
 #include <QtWidgets/QSystemTrayIcon>
+
 #include <atomic>
 #include <fstream>
 #include <memory>

@@ -32,9 +32,10 @@
 #include <unicode/convert.h>
 #include <unicode/run_segmenter.h>
 
-#include <functional>
 #include <gsl/span>
 #include <gsl/span_ext>
+
+#include <functional>
 #include <list>
 #include <memory>
 #include <unordered_map>

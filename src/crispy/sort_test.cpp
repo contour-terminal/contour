@@ -13,8 +13,9 @@
  */
 #include <crispy/sort.h>
 
-#include <array>
 #include <catch2/catch.hpp>
+
+#include <array>
 
 using namespace std;
 

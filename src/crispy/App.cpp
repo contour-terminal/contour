@@ -24,8 +24,9 @@
 
 #if !defined(_WIN32)
     #include <pwd.h>
-    #include <sys/ioctl.h>
     #include <unistd.h>
+
+    #include <sys/ioctl.h>
 #endif
 
 using namespace std::string_view_literals;
