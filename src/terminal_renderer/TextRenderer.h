@@ -118,6 +118,8 @@ enum class FontLocatorEngine
     CoreText,   //!< native font locator on OS/X
 };
 
+std::unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine);
+
 struct FontDescriptions
 {
     double dpiScale = 1.0;

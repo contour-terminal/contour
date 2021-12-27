@@ -15,16 +15,12 @@
 #include <terminal_renderer/TextRenderer.h>
 #include <terminal_renderer/utils.h>
 
+#include <text_shaper/font_locator.h>
 #include <text_shaper/open_shaper.h>
 
 #if defined(_WIN32)
-    #include <text_shaper/directwrite_locator.h>
     #include <text_shaper/directwrite_shaper.h>
-#elif defined(__APPLE__)
-    #include <text_shaper/coretext_locator.h>
 #endif
-
-#include <text_shaper/fontconfig_locator.h>
 
 #include <array>
 #include <functional>
@@ -84,33 +80,6 @@ FontKeys loadFontKeys(FontDescriptions const& _fd, text::shaper& _shaper)
     output.emoji = _shaper.load_font(_fd.emoji, _fd.size).value_or(text::font_key {});
 
     return output;
-}
-
-unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine)
-{
-    switch (_engine)
-    {
-    // TODO: GDI / DirectWrite needs to be hooked in here
-    case FontLocatorEngine::DWrite:
-#if defined(_WIN32)
-        return make_unique<text::directwrite_locator>();
-#else
-        LOGSTORE(RasterizerLog)("Font locator DirectWrite not supported on this platform.");
-#endif
-        break;
-    case FontLocatorEngine::CoreText:
-#if defined(__APPLE__)
-        return make_unique<text::coretext_locator>();
-#else
-        LOGSTORE(RasterizerLog)("Font locator CoreText not supported on this platform.");
-#endif
-        break;
-
-    case FontLocatorEngine::FontConfig: break;
-    }
-
-    LOGSTORE(RasterizerLog)("Using font locator: fontconfig.");
-    return make_unique<text::fontconfig_locator>();
 }
 
 unique_ptr<text::shaper> createTextShaper(TextShapingEngine _engine,

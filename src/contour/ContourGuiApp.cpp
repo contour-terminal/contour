@@ -18,6 +18,8 @@
 
 #include <terminal/pty/PtyProcess.h>
 
+#include <text_shaper/font_locator.h>
+
 #include <crispy/logstore.h>
 
 #include <QtCore/QProcess>
@@ -49,6 +51,7 @@ namespace contour
 ContourGuiApp::ContourGuiApp()
 {
     link("contour.terminal", bind(&ContourGuiApp::terminalGuiAction, this));
+    link("contour.font-locator", bind(&ContourGuiApp::fontConfigAction, this));
 }
 
 ContourGuiApp::~ContourGuiApp()
@@ -66,6 +69,25 @@ int ContourGuiApp::run(int argc, char const* argv[])
 crispy::cli::Command ContourGuiApp::parameterDefinition() const
 {
     auto command = ContourApp::parameterDefinition();
+
+    command.children.insert(
+        command.children.begin(),
+        CLI::Command {
+            "font-locator",
+            "Inspects font locator service.",
+            CLI::OptionList {
+                CLI::Option { "config",
+                              CLI::Value { contour::config::defaultConfigFilePath() },
+                              "Path to configuration file to load at startup.",
+                              "FILE" },
+                CLI::Option {
+                    "profile", CLI::Value { ""s }, "Terminal Profile to load (overriding config).", "NAME" },
+                CLI::Option { "debug",
+                              CLI::Value { ""s },
+                              "Enables debug logging, using a comma (,) seperated list of tags.",
+                              "TAGS" },
+            },
+        });
 
     command.children.insert(
         command.children.begin(),
@@ -157,11 +179,8 @@ void ContourGuiApp::onExit(TerminalSession& _session)
     exitStatus_ = pty->process().checkStatus();
 }
 
-int ContourGuiApp::terminalGuiAction()
+bool ContourGuiApp::loadConfig()
 {
-    // return terminalGUI(argc_, argv_, parameters());
-    // int terminalGUI(int argc, char const* argv[], CLI::FlagStore const& _flags)
-
     auto const& flags = parameters();
 
     auto configFailures = int { 0 };
@@ -212,6 +231,33 @@ int ContourGuiApp::terminalGuiAction()
     if (auto const wmClass = flags.get<string>("contour.terminal.class"); !wmClass.empty())
         config_.profile(profileName())->wmClass = wmClass;
 
+    return true;
+}
+
+int ContourGuiApp::fontConfigAction()
+{
+    if (!loadConfig())
+        return EXIT_FAILURE;
+
+    terminal::renderer::FontDescriptions const& fonts = config_.profile(config_.defaultProfileName)->fonts;
+    text::font_description const& fontDescription = fonts.regular;
+    std::unique_ptr<text::font_locator> fontLocator = createFontLocator(fonts.fontLocator);
+    text::font_source_list fontSources = fontLocator->locate(fontDescription);
+
+    fmt::print("Matching fonts using  : {}\n", fonts.fontLocator);
+    fmt::print("Font description      : {}\n", fontDescription);
+    fmt::print("Number of fonts found : {}\n", fontSources.size());
+    for (text::font_source const& fontSource: fontSources)
+        fmt::print("  {}\n", fontSource);
+
+    return EXIT_SUCCESS;
+}
+
+int ContourGuiApp::terminalGuiAction()
+{
+    if (!loadConfig())
+        return EXIT_FAILURE;
+
     auto appName = QString::fromStdString(config_.profile(profileName())->wmClass);
     QCoreApplication::setApplicationName(appName);
     QCoreApplication::setOrganizationName("contour");
@@ -230,7 +276,7 @@ int ContourGuiApp::terminalGuiAction()
     qtArgsPtr.push_back(argv_[0]);
 
     auto const addQtArgIfSet = [&](string const& key, char const* arg) -> bool {
-        if (string const& s = flags.get<string>(key); !s.empty())
+        if (string const& s = parameters().get<string>(key); !s.empty())
         {
             qtArgsPtr.push_back(arg);
             qtArgsStore.push_back(s);
