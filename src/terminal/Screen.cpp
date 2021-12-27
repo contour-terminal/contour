@@ -1357,9 +1357,9 @@ void Screen<T>::insertChars(LineOffset _lineNo, ColumnCount _n)
 {
     auto const n = min(*_n, *margin_.horizontal.to - *logicalCursorPosition().column + 1);
 
-    auto column0 = &at(_lineNo, realCursorPosition().column);
-    auto column1 = &at(_lineNo, margin_.horizontal.to - ColumnOffset::cast_from(n - 1));
-    auto column2 = &at(_lineNo, margin_.horizontal.to + ColumnOffset(1));
+    auto column0 = grid().lineAt(_lineNo).begin() + *realCursorPosition().column;
+    auto column1 = grid().lineAt(_lineNo).begin() + *margin_.horizontal.to - n + 1;
+    auto column2 = grid().lineAt(_lineNo).begin() + *margin_.horizontal.to + 1;
 
     rotate(column0, column1, column2);
 

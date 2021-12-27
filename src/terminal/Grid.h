@@ -52,7 +52,7 @@ struct Margin
         {
             return unbox<ColumnCount>(to - from) + ColumnCount(1);
         }
-        constexpr bool contains(ColumnOffset _value) const noexcept { return from <= _value && _value < to; }
+        constexpr bool contains(ColumnOffset _value) const noexcept { return from <= _value && _value <= to; }
         constexpr bool operator==(Horizontal rhs) const noexcept { return from == rhs.from && to == rhs.to; }
         constexpr bool operator!=(Horizontal rhs) const noexcept { return !(*this == rhs); }
     };
@@ -64,7 +64,7 @@ struct Margin
             to; // TODO: call it begin and end and have end point to to+1 to avoid unnecessary +1's later
 
         constexpr LineCount length() const noexcept { return unbox<LineCount>(to - from) + LineCount(1); }
-        constexpr bool contains(LineOffset _value) const noexcept { return from <= _value && _value < to; }
+        constexpr bool contains(LineOffset _value) const noexcept { return from <= _value && _value <= to; }
         constexpr bool operator==(Vertical const& rhs) const noexcept
         {
             return from == rhs.from && to == rhs.to;
