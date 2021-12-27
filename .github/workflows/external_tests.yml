@@ -33,9 +33,7 @@ jobs:
     - uses: actions/checkout@v2
     - name: "get source"
       run: |
-        cat /etc/apt/sources.list
         sudo tee -a /etc/apt/sources.list < <(echo "deb-src http://azure.archive.ubuntu.com/ubuntu/ focal main restricted")
-        cat /etc/apt/sources.list
         sudo apt update
         apt source libfontconfig1
         sudo apt install -y gperf
