@@ -235,18 +235,16 @@ class Line
 
     Cell& useCellAt(ColumnOffset _column) noexcept
     {
-        assert(ColumnOffset(0) <= _column);
-        assert(_column < ColumnOffset::cast_from(buffer_.size())); // Allow off-by-one for sentinel.
-        // if constexpr (ColumnOptimized)
-        //     usedColumns_.value.value = std::max(usedColumns_.value.value, _column.value + 1);
-        return editable().at(unbox<int>(_column));
+        Require(ColumnOffset(0) <= _column);
+        Require(_column <= ColumnOffset::cast_from(buffer_.size())); // Allow off-by-one for sentinel.
+        return editable()[unbox<size_t>(_column)];
     }
 
     Cell const& at(ColumnOffset _column) const noexcept
     {
         Require(ColumnOffset(0) <= _column);
-        Require(_column < ColumnOffset::cast_from(buffer_.size())); // Allow off-by-one for sentinel.
-        return buffer_[unbox<int>(_column)];
+        Require(_column <= ColumnOffset::cast_from(buffer_.size())); // Allow off-by-one for sentinel.
+        return buffer_[unbox<size_t>(_column)];
     }
 
     LineFlags flags() const noexcept { return static_cast<LineFlags>(flags_); }

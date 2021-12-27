@@ -878,7 +878,63 @@ TEST_CASE("InsertColumns", "[screen]")
     }
 }
 
-TEST_CASE("InsertCharacters", "[screen]")
+TEST_CASE("InsertCharacters.NoMargins", "[screen]")
+{
+    auto term = MockTerm { PageSize { LineCount(2), ColumnCount(3) } };
+    auto& screen = term.screen;
+    screen.write("123\r\n456");
+    screen.write("\033[2;2H");
+    REQUIRE("123\n456\n" == screen.renderMainPageText());
+    REQUIRE(screen.realCursorPosition().line == LineOffset(1));
+    REQUIRE(screen.realCursorPosition().column == ColumnOffset(1));
+
+    SECTION("default")
+    {
+        screen.write("\033[@");
+        REQUIRE("123\n4 5\n" == screen.renderMainPageText());
+    }
+
+    SECTION("ICH: 1 like default")
+    {
+        screen.write("\033[1@");
+        REQUIRE("123\n4 5\n" == screen.renderMainPageText());
+    }
+
+    SECTION("ICH: exact match")
+    {
+        screen.write("\033[2@");
+        REQUIRE("123\n4  \n" == screen.renderMainPageText());
+    }
+
+    SECTION("ICH: one overflow")
+    {
+        screen.write("\033[3@");
+        REQUIRE("123\n4  \n" == screen.renderMainPageText());
+    }
+
+    SECTION("ICH: full line (n-1)")
+    {
+        screen.write("\033[2;1H");
+        screen.write("\033[2@");
+        REQUIRE("123\n  4\n" == screen.renderMainPageText());
+    }
+
+    SECTION("ICH: full line (n)")
+    {
+        screen.write("\033[2;1H");
+        screen.write("\033[3@");
+        REQUIRE("123\n   \n" == screen.renderMainPageText());
+    }
+
+    SECTION("ICH: full line (n+1)")
+    {
+        screen.write("\033[2;1H");
+        screen.write("\033[4@");
+        REQUIRE("123\n   \n" == screen.renderMainPageText());
+    }
+}
+
+TEST_CASE("InsertCharacters.Margins", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(5) } };
     auto& screen = term.screen;
