@@ -2,6 +2,8 @@
 
 - Fixes VT sequence `DECFI`.
 - Fixes VT sequence `ICH` (#559).
+- Fixes VT sequence `OSC 4`'s response.
+- Fixes PTY write race condition.
 - Fixes installation from `.deb` (missing terminfo dependency)
 - Improved VT backend performance (#342).
 - Improved text selection behaviour.

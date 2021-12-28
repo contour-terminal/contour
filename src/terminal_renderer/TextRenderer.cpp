@@ -19,19 +19,27 @@
 #include <terminal_renderer/TextRenderer.h>
 #include <terminal_renderer/utils.h>
 
+#include <text_shaper/fontconfig_locator.h>
+
+#if defined(_WIN32)
+    #include <text_shaper/directwrite_locator.h>
+#endif
+
+#if defined(__APPLE__)
+    #include <text_shaper/coretext_locator.h>
+#endif
+
 #include <crispy/algorithm.h>
 #include <crispy/assert.h>
 #include <crispy/indexed.h>
 #include <crispy/range.h>
-#include <crispy/times.h>
 
 #include <unicode/convert.h>
 
 #include <fmt/format.h>
 #include <fmt/ostream.h>
 
-using crispy::copy;
-using crispy::times;
+#include <range/v3/algorithm/copy.hpp>
 
 using unicode::out;
 
@@ -52,7 +60,7 @@ using namespace std::placeholders;
 namespace terminal::renderer
 {
 
-namespace // {{{ helpers
+namespace
 {
     text::font_key getFontForStyle(FontKeys const& _fonts, TextStyle _style)
     {
@@ -67,6 +75,33 @@ namespace // {{{ helpers
         return _fonts.regular;
     }
 } // namespace
+
+std::unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine)
+{
+    switch (_engine)
+    {
+    // TODO: GDI / DirectWrite needs to be hooked in here
+    case FontLocatorEngine::DWrite:
+#if defined(_WIN32)
+        return make_unique<text::directwrite_locator>();
+#else
+        LOGSTORE(text::LocatorLog)("Font locator DirectWrite not supported on this platform.");
+#endif
+        break;
+    case FontLocatorEngine::CoreText:
+#if defined(__APPLE__)
+        return make_unique<text::coretext_locator>();
+#else
+        LOGSTORE(text::LocatorLog)("Font locator CoreText not supported on this platform.");
+#endif
+        break;
+
+    case FontLocatorEngine::FontConfig: break;
+    }
+
+    LOGSTORE(text::LocatorLog)("Using font locator: fontconfig.");
+    return make_unique<text::fontconfig_locator>();
+}
 
 // TODO: What's a good value here? Or do we want to make that configurable,
 // or even computed based on memory resources available?
@@ -467,7 +502,8 @@ text::shape_result TextRenderer::requestGlyphPositions()
     unicode::run_segmenter::range run;
     auto rs = unicode::run_segmenter(codepoints_.data(), codepoints_.size());
     while (rs.consume(out(run)))
-        crispy::copy(shapeRun(run), std::back_inserter(glyphPositions));
+        for (text::glyph_position gpos: shapeRun(run))
+            glyphPositions.emplace_back(gpos);
 
     return glyphPositions;
 }

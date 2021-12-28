@@ -16,9 +16,10 @@
 
 #if !defined(_WIN32)
     #include <fcntl.h>
+    #include <unistd.h>
+
     #include <sys/types.h>
     #include <sys/wait.h>
-    #include <unistd.h>
 #endif
 
 #if defined(HAVE_CXXABI_H)

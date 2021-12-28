@@ -22,9 +22,10 @@
 #include <fmt/format.h>
 
 #include <iostream>
-#include <libtermbench/termbench.h>
 #include <optional>
 #include <random>
+
+#include <libtermbench/termbench.h>
 
 using namespace std;
 

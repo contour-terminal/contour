@@ -18,6 +18,7 @@
 #include <fmt/format.h>
 
 #include <catch2/catch.hpp>
+
 #include <iostream>
 
 using namespace terminal;

@@ -25,6 +25,47 @@ env:
 
 jobs:
 
+  # {{{ build fontconfig
+  build_fontconfig:
+    name: "Build patched fontconfig"
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+    - name: "get source"
+      run: |
+        sudo tee -a /etc/apt/sources.list < <(echo "deb-src http://azure.archive.ubuntu.com/ubuntu/ focal main restricted")
+        sudo apt update
+        apt source libfontconfig1
+        sudo apt install -y gperf
+        ls -hl
+    - name: "patch it"
+      run: |
+        set -ex
+        cd fontconfig-2.13.1
+        patch --verbose -p1 < ../.github/fontconfig-memleak-fix.patch
+    - name: "configure"
+      run: |
+        set -ex
+        export CFLAGS="-O0 -ggdb3"
+        cd fontconfig-2.13.1
+        mkdir build
+        cd build
+        ../configure --prefix="/home/runner/opt/fontconfig"
+    - name: "build & install"
+      run: |
+        set -ex
+        cd fontconfig-2.13.1/build
+        make -j3
+        make install
+    - name: "Uploading artifact"
+      uses: actions/upload-artifact@v2
+      with:
+        name: "patched-fontconfig"
+        path: "/home/runner/opt/fontconfig"
+        if-no-files-found: error
+        retention-days: 3
+  # }}}
+
   # {{{ Build Contour
   build_contour:
     name: "Build Contour @ Ubuntu Linux 20.04"
@@ -143,7 +184,7 @@ jobs:
   test_notcurses:
     name: "notcurses-demo ${{ matrix.name }}"
     runs-on: ubuntu-20.04
-    needs: [build_contour, build_notcurses]
+    needs: [build_contour, build_notcurses, build_fontconfig]
     strategy:
       fail-fast: false
       matrix:
@@ -200,7 +241,7 @@ jobs:
           - name: 'zoo'
             id: 'z'
     env:
-      LD_LIBRARY_PATH: /home/runner/opt/notcurses/lib
+      LD_LIBRARY_PATH: /home/runner/opt/notcurses/lib:/home/runner/opt/fontconfig/lib
     steps:
     - uses: actions/checkout@v2
     - name: set environment variables
@@ -215,8 +256,15 @@ jobs:
       with:
         name: "notcurses-install"
         path: ~/opt/notcurses
-    - name: "notcurses-install: fix executable bits"
-      run: chmod 0755 ~/opt/notcurses/bin/*
+    - uses: actions/download-artifact@v2
+      with:
+        name: "patched-fontconfig"
+        path: "/home/runner/opt/fontconfig"
+    - name: "fix executable bits"
+      run: |
+        chmod 0755 ~/opt/notcurses/bin/*
+        chmod 0755 ~/opt/*/lib/*
+        ls -hlR ~/opt/
     - name: "install dependencies"
       run: ./scripts/ci/notcurses-install-deps.sh
     - name: "Run notcurses-demo -h"
@@ -233,6 +281,7 @@ jobs:
       timeout-minutes: 5
       id: Xvfb-contour-notcurses
       run: |
+        export LD_LIBRARY_PATH="/home/runner/opt/notcurses/lib:/home/runner/opt/fontconfig/lib"
         ./scripts/ci/Xvfb-contour-run.sh \
               "notcurses-demo-dumps/${{ matrix.name }}" \
               ~/opt/notcurses/bin/notcurses-demo \

@@ -48,13 +48,11 @@ if(CONTOUR_FRONTEND_GUI)
         Config.cpp Config.h
         ContourApp.cpp ContourApp.h
         ContourGuiApp.cpp ContourGuiApp.h
-        Controller.cpp Controller.h
         FileChangeWatcher.cpp FileChangeWatcher.h
         ScrollableDisplay.cpp ScrollableDisplay.h
         TerminalSession.cpp TerminalSession.h
         TerminalWindow.cpp TerminalWindow.h
         helper.cpp helper.h
-
     )
 endif()
 

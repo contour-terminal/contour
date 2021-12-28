@@ -15,8 +15,9 @@
 
 #include <crispy/times.h>
 
-#include <array>
 #include <catch2/catch.hpp>
+
+#include <array>
 #include <string_view>
 
 using namespace terminal;

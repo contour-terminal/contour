@@ -618,7 +618,7 @@ namespace impl // {{{ some command generator helpers
             _seq.intermediateCharacters(),
             [&](uint8_t index) {
                 auto const color = _screen.colorPalette().palette.at(index);
-                _screen.reply("\e]4;rgb:{:02x}/{:02x}/{:02x}\\", color.red, color.green, color.blue);
+                _screen.reply("\e]4;rgb:{:02x}/{:02x}/{:02x}\033\\", color.red, color.green, color.blue);
             },
             [&](uint8_t index, RGBColor color) { _screen.colorPalette().palette.at(index) = color; });
 
@@ -1644,5 +1644,5 @@ CursorShape makeCursorShape(string const& _name)
 #include <terminal/Terminal.h>
 template class terminal::Sequencer<terminal::Terminal>;
 
-#include <terminal/Screen.h>
+#include <terminal/MockTerm.h>
 template class terminal::Sequencer<terminal::MockTerm>;

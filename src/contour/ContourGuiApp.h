@@ -13,24 +13,61 @@
  */
 #pragma once
 
+#include <contour/Config.h>
 #include <contour/ContourApp.h>
+
+#include <terminal/Process.h>
+
+#include <list>
+#include <memory>
+#include <optional>
+#include <string_view>
 
 namespace contour
 {
+
+namespace config
+{
+    struct Config;
+}
+
+class TerminalSession;
+class TerminalWindow;
 
 /// Extends ContourApp with terminal GUI capability.
 class ContourGuiApp: public ContourApp
 {
   public:
     ContourGuiApp();
+    ~ContourGuiApp() override;
 
     int run(int argc, char const* argv[]) override;
     crispy::cli::Command parameterDefinition() const override;
 
+    TerminalWindow* newWindow();
+    TerminalWindow* newWindow(contour::config::Config const& _config);
+    void showNotification(std::string_view _title, std::string_view _content);
+
+    std::string profileName() const;
+
+    std::optional<terminal::Process::ExitStatus> exitStatus() const noexcept { return exitStatus_; }
+
+    std::optional<FileSystem::path> dumpStateAtExit() const;
+
+    void onExit(TerminalSession& _session);
+
   private:
+    bool loadConfig();
+    int terminalGuiAction();
+    int fontConfigAction();
+    std::chrono::seconds earlyExitThreshold() const;
+    config::Config config_;
+
     int argc_ = 0;
     char const** argv_ = nullptr;
-    int terminalGuiAction();
+    std::optional<terminal::Process::ExitStatus> exitStatus_;
+
+    std::list<std::unique_ptr<TerminalWindow>> terminalWindows_;
 };
 
 } // namespace contour

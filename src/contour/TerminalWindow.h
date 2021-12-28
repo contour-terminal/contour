@@ -15,7 +15,6 @@
 
 #include <contour/Actions.h>
 #include <contour/Config.h>
-#include <contour/Controller.h>
 #include <contour/FileChangeWatcher.h>
 #include <contour/TerminalDisplay.h>
 #include <contour/TerminalSession.h>
@@ -37,6 +36,7 @@
 #include <QtWidgets/QSystemTrayIcon>
 #include <QtWidgets/QTabWidget>
 #include <QtWidgets/QWidget>
+
 #include <atomic>
 #include <fstream>
 #include <memory>
@@ -44,6 +44,7 @@
 namespace contour
 {
 
+class ContourGuiApp;
 class ScrollableDisplay;
 
 // XXX Maybe just now a main window and maybe later just a TerminalWindow.
@@ -60,7 +61,8 @@ class TerminalWindow: public QMainWindow
                    bool _liveConfig,
                    std::string _profileName,
                    std::string _programPath,
-                   Controller& _controller);
+                   ContourGuiApp& _app);
+    ~TerminalWindow() override;
 
     bool event(QEvent* _event) override;
     void resizeEvent(QResizeEvent* _event) override;
@@ -82,7 +84,7 @@ class TerminalWindow: public QMainWindow
     const bool liveConfig_;
     std::string profileName_;
     std::string programPath_;
-    Controller& controller_;
+    ContourGuiApp& app_;
 
 #if defined(CONTOUR_SCROLLBAR)
     ScrollableDisplay* scrollableDisplay_ = nullptr;

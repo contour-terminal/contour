@@ -11,6 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <contour/ContourGuiApp.h>
 #include <contour/TerminalSession.h>
 #include <contour/helper.h>
 
@@ -34,11 +35,13 @@
 #include <QtGui/QKeyEvent>
 #include <QtGui/QScreen>
 #include <QtGui/QWindow>
-#include <QtNetwork/QHostInfo>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QMessageBox>
+
 #include <algorithm>
 #include <fstream>
+
+#include <QtNetwork/QHostInfo>
 
 #if defined(CONTOUR_BLUR_PLATFORM_KWIN)
     #include <KWindowEffects>
@@ -81,7 +84,7 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
                                  bool _liveConfig,
                                  string _profileName,
                                  string _programPath,
-                                 Controller& _controller,
+                                 ContourGuiApp& _app,
                                  unique_ptr<TerminalDisplay> _display,
                                  std::function<void()> _displayInitialized,
                                  std::function<void()> _onExit):
@@ -91,7 +94,7 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
     profileName_ { move(_profileName) },
     profile_ { *config_.profile(profileName_) },
     programPath_ { move(_programPath) },
-    controller_ { _controller },
+    app_ { _app },
     displayInitialized_ { move(_displayInitialized) },
     onExit_ { move(_onExit) },
     pty_ { move(_pty) },
@@ -192,6 +195,9 @@ void TerminalSession::screenUpdated()
     if (profile_.autoScrollOnUpdate && terminal().viewport().scrolled())
         terminal().viewport().scrollToBottom();
 
+    if (terminal().hasInput())
+        display_->post([this]() { terminal().flushInput(); });
+
     scheduleRedraw();
 }
 
@@ -271,7 +277,7 @@ void TerminalSession::dumpState()
         display_->dumpState();
 
     // Deferred termination? Then close display now.
-    if (terminal_.device().isClosed() && !controller_.dumpStateAtExit().has_value())
+    if (terminal_.device().isClosed() && !app_.dumpStateAtExit().has_value())
         display_->closeDisplay();
 }
 
@@ -316,7 +322,7 @@ void TerminalSession::onClosed()
         return;
     }
 
-    if (controller_.dumpStateAtExit().has_value())
+    if (app_.dumpStateAtExit().has_value())
         dumpState();
     else if (display_)
         display_->closeDisplay();
@@ -886,7 +892,7 @@ void TerminalSession::spawnNewTerminal(string const& _profileName)
     {
         auto config = config_;
         config.profile(profileName_)->shell.workingDirectory = FileSystem::path(wd);
-        controller_.newWindow(config);
+        app_.newWindow(config);
     }
 }
 

@@ -566,6 +566,7 @@ namespace // {{{ helper
 
 struct open_shaper::Private // {{{
 {
+    crispy::finally ftCleanup_;
     FT_Library ft_;
     unique_ptr<font_locator> locator_;
     crispy::Point dpi_;
@@ -640,6 +641,9 @@ struct open_shaper::Private // {{{
 
     Private(crispy::Point _dpi, unique_ptr<font_locator> _locator):
         ft_ {},
+        ftCleanup_ { [this]() {
+            FT_Done_FreeType(ft_);
+        } },
         locator_ { move(_locator) },
         dpi_ { _dpi },
         hb_buf_(hb_buffer_create(), [](auto p) { hb_buffer_destroy(p); }),
@@ -653,8 +657,6 @@ struct open_shaper::Private // {{{
             errorlog()("freetype: Failed to set LCD filter. {}", ftErrorStr(ec));
 #endif
     }
-
-    ~Private() { FT_Done_FreeType(ft_); }
 
     bool tryShapeWithFallback(font_key _font,
                               HbFontInfo& _fontInfo,

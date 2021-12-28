@@ -23,8 +23,9 @@ typedef boost::system::error_code FileSystemError;
 namespace FileSystem = std::filesystem;
 typedef std::error_code FileSystemError;
 #elif __has_include(<experimental/filesystem>) && !defined(__APPLE__)
-    #include <experimental/filesystem>
     #include <system_error>
+
+    #include <experimental/filesystem>
 namespace FileSystem = std::experimental::filesystem;
 typedef std::error_code FileSystemError;
 #elif __has_include(<boost/filesystem.hpp>)

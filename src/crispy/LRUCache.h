@@ -93,12 +93,9 @@ class LRUCache
             return *p;
 
         if (items_.size() == capacity_)
-            return evict_one_and_push_front(_key)->value;
+            return evict_one_and_push_front(_key, Value {})->value;
 
-        // return emplaceItemToFront(_key, Value{})->value;
-        items_.emplace_front(Item { _key, Value {} });
-        itemByKeyMapping_.emplace(_key, items_.begin());
-        return items_.front().value;
+        return emplaceItemToFront(_key, Value {})->value;
     }
 
     /// Conditionally creates a new item to the LRU-Cache iff its key was not present yet.
@@ -112,7 +109,7 @@ class LRUCache
             return false;
 
         if (items_.size() == capacity_)
-            evict_one_and_push_front(_key)->value = _constructValue();
+            evict_one_and_push_front(_key, _constructValue());
         else
             emplaceItemToFront(_key, _constructValue());
         return true;
@@ -131,11 +128,7 @@ class LRUCache
         Require(!contains(_key));
 
         if (items_.size() == capacity_)
-        {
-            iterator i = evict_one_and_push_front(_key);
-            i->value = std::move(_value);
-            return i->value;
-        }
+            return evict_one_and_push_front(_key, std::move(_value))->value;
 
         return emplaceItemToFront(_key, std::move(_value))->value;
     }
@@ -174,13 +167,15 @@ class LRUCache
 
   private:
     /// Evicts least recently used item and prepares (/reuses) its storage for a new item.
-    [[nodiscard]] iterator evict_one_and_push_front(Key _newKey)
+    iterator evict_one_and_push_front(Key _newKey, Value&& _newValue)
     {
         auto const oldKey = items_.back().key;
         auto keyMappingIterator = itemByKeyMapping_.find(oldKey);
+        Require(keyMappingIterator != itemByKeyMapping_.end());
 
         auto newItemIterator = moveItemToFront(keyMappingIterator->second);
         newItemIterator->key = _newKey;
+        newItemIterator->value = std::move(_newValue);
         itemByKeyMapping_.erase(keyMappingIterator);
         itemByKeyMapping_.emplace(_newKey, newItemIterator);
 

@@ -15,8 +15,9 @@
 
 #include <fmt/format.h>
 
-#include <array>
 #include <catch2/catch.hpp>
+
+#include <array>
 
 using crispy::fixed_size_ring;
 using crispy::ring;

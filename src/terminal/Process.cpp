@@ -36,9 +36,10 @@
     #endif
     #include <pwd.h>
     #include <signal.h>
+    #include <unistd.h>
+
     #include <sys/types.h>
     #include <sys/wait.h>
-    #include <unistd.h>
 #else
     #include <direct.h>
     #include <errno.h>

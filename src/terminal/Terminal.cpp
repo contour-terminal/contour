@@ -24,8 +24,9 @@
 #include <chrono>
 #include <iostream>
 #include <signal.h>
-#include <sys/types.h>
 #include <utility>
+
+#include <sys/types.h>
 
 using crispy::Size;
 
@@ -706,7 +707,11 @@ void Terminal::sendPaste(string_view _text)
 void Terminal::sendRaw(string_view _text)
 {
     inputGenerator_.generateRaw(_text);
-    flushInput();
+}
+
+bool Terminal::hasInput() const noexcept
+{
+    return !inputGenerator_.peek().empty();
 }
 
 void Terminal::flushInput()

@@ -26,6 +26,7 @@
 #include <terminal/VTType.h>
 
 #include <crispy/algorithm.h>
+#include <crispy/logstore.h>
 #include <crispy/size.h>
 #include <crispy/span.h>
 #include <crispy/utils.h>
@@ -307,7 +308,9 @@ class Screen: public capabilities::StaticDatabase
     ImageSize maxImageSize() const noexcept { return maxImageSize_; }
     ImageSize maxImageSizeLimit() const noexcept { return maxImageSizeLimit_; }
 
-    Image const& uploadImage(ImageFormat _format, ImageSize _imageSize, Image::Data&& _pixmap);
+    std::shared_ptr<Image const> uploadImage(ImageFormat _format,
+                                             ImageSize _imageSize,
+                                             Image::Data&& _pixmap);
 
     /**
      * Renders an image onto the screen.
@@ -590,6 +593,14 @@ class Screen: public capabilities::StaticDatabase
     /// Sets the current column to given logical column number.
     void setCurrentColumn(ColumnOffset _n);
 
+    ImageFragmentId createImageFragmentId() noexcept
+    {
+        if (!nextImageFragmentId_)
+            ++nextImageFragmentId_;
+
+        return nextImageFragmentId_++;
+    }
+
     // private fields
     //
     EventListener& eventListener_;
@@ -664,14 +675,6 @@ class Screen: public capabilities::StaticDatabase
     // experimental features
     //
     bool respondToTCapQuery_ = true;
-};
-
-class MockTerm: public MockScreenEvents
-{
-  public:
-    explicit MockTerm(PageSize _size, LineCount _hist = {}): screen(_size, *this, false, false, _hist) {}
-
-    Screen<MockTerm> screen;
 };
 
 } // namespace terminal

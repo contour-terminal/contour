@@ -1,8 +1,11 @@
 #pragma once
 
+#include <crispy/stdfs.h>
+
 #include <fmt/format.h>
 
 #include <algorithm>
+#include <fstream>
 #include <functional>
 #include <optional>
 #include <string>
@@ -293,6 +296,16 @@ template <typename T>
 inline std::basic_string<T> toUpper(std::basic_string<T> const& _value)
 {
     return toUpper<T>(std::basic_string_view<T>(_value));
+}
+
+inline std::string readFileAsString(FileSystem::path const& path)
+{
+    auto const fileSize = FileSystem::file_size(path);
+    auto text = std::string();
+    text.resize(fileSize);
+    std::ifstream in(path.string());
+    in.read(text.data(), static_cast<std::streamsize>(fileSize));
+    return text;
 }
 
 } // namespace crispy

@@ -13,9 +13,10 @@
  */
 #pragma once
 
-#include <algorithm>
 #include <gsl/span>
 #include <gsl/span_ext>
+
+#include <algorithm>
 #include <iterator>
 #include <vector>
 

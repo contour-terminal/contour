@@ -32,9 +32,10 @@
 #include <unicode/convert.h>
 #include <unicode/run_segmenter.h>
 
-#include <functional>
 #include <gsl/span>
 #include <gsl/span_ext>
+
+#include <functional>
 #include <list>
 #include <memory>
 #include <unordered_map>
@@ -116,6 +117,8 @@ enum class FontLocatorEngine
     DWrite,     //!< native platform support: Windows
     CoreText,   //!< native font locator on OS/X
 };
+
+std::unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine);
 
 struct FontDescriptions
 {

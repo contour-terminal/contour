@@ -16,6 +16,7 @@
 #include <terminal/VTType.h>
 #include <terminal/logging.h>
 
+#include <crispy/App.h>
 #include <crispy/Comparison.h>
 #include <crispy/algorithm.h>
 #include <crispy/escape.h>
@@ -29,7 +30,7 @@
 #include <unicode/utf8.h>
 #include <unicode/word_segmenter.h>
 
-#include <range/v3/view/iota.hpp>
+#include <range/v3/view.hpp>
 
 #include <algorithm>
 #include <cassert>
@@ -70,6 +71,7 @@ using std::pair;
 using std::prev;
 using std::ref;
 using std::rotate;
+using std::shared_ptr;
 using std::string;
 using std::string_view;
 using std::tuple;
@@ -77,6 +79,24 @@ using std::vector;
 
 namespace terminal
 {
+
+namespace
+{
+    namespace views
+    {
+        template <typename T>
+        auto as()
+        {
+            return ranges::views::transform([](auto in) { return T(in); });
+        }
+
+        template <typename T>
+        auto n_times(int n)
+        {
+            return ranges::views::ints(0, n) | as<T>();
+        }
+    } // namespace views
+} // namespace
 
 namespace // {{{ helper
 {
@@ -2183,8 +2203,8 @@ void Screen<T>::sixelImage(ImageSize _pixelSize, Image::Data&& _data)
     auto const imageOffset = Coordinate {};
     auto const imageSize = _pixelSize;
 
-    Image const& imageRef = uploadImage(ImageFormat::RGBA, _pixelSize, move(_data));
-    renderImage(imageRef.id(),
+    shared_ptr<Image const> imageRef = uploadImage(ImageFormat::RGBA, _pixelSize, move(_data));
+    renderImage(imageRef->id(),
                 topLeft,
                 extent,
                 imageOffset,
@@ -2198,7 +2218,9 @@ void Screen<T>::sixelImage(ImageSize _pixelSize, Image::Data&& _data)
 }
 
 template <typename T>
-Image const& Screen<T>::uploadImage(ImageFormat _format, ImageSize _imageSize, Image::Data&& _pixmap)
+shared_ptr<Image const> Screen<T>::uploadImage(ImageFormat _format,
+                                               ImageSize _imageSize,
+                                               Image::Data&& _pixmap)
 {
     return imagePool_.create(_format, _imageSize, move(_pixmap));
 }
@@ -2217,9 +2239,9 @@ void Screen<T>::renderImage(ImageId _imageId,
     (void) _imageOffset;
     (void) _imageSize;
 
-    auto const linesAvailable = LineCount(1) + pageSize_.lines - _topLeft.line.as<LineCount>();
+    auto const linesAvailable = pageSize_.lines - _topLeft.line.as<LineCount>();
     auto const linesToBeRendered = min(_gridSize.lines, linesAvailable);
-    auto const columnsAvailable = *pageSize_.columns - *_topLeft.column + 1;
+    auto const columnsAvailable = *pageSize_.columns - *_topLeft.column;
     auto const columnsToBeRendered = ColumnCount(min(columnsAvailable, *_gridSize.columns));
     auto const gapColor = RGBAColor {}; // TODO: cursor_.graphicsRendition.backgroundColor;
 
@@ -2229,16 +2251,16 @@ void Screen<T>::renderImage(ImageId _imageId,
 
     if (*linesToBeRendered)
     {
-        crispy::for_each(GridSize { linesToBeRendered, columnsToBeRendered }, [&](GridSize::Offset offset) {
-            auto const cellCoord =
-                Coordinate { _topLeft.line + offset.line, _topLeft.column + offset.column };
-            Cell& cell = at(cellCoord.line, cellCoord.column);
-            cell.setImage(nextImageFragmentId_++);
-            imageFragments_.emplace(
-                cell.imageFragment(),
-                ImageFragment { rasterizedImage, Coordinate { offset.line, offset.column } });
+        for (GridSize::Offset const offset: GridSize { linesToBeRendered, columnsToBeRendered })
+        {
+            auto const imageFragmentId = createImageFragmentId();
+            Cell& cell = at(_topLeft + offset);
             cell.setHyperlink(cursor_.hyperlink);
-        });
+            cell.setImage(imageFragmentId);
+            imageFragments_.emplace(
+                imageFragmentId,
+                ImageFragment { rasterizedImage, Coordinate { offset.line, offset.column } });
+        };
         moveCursorTo(_topLeft.line + unbox<int>(linesToBeRendered) - 1, _topLeft.column);
     }
 
@@ -2249,20 +2271,19 @@ void Screen<T>::renderImage(ImageId _imageId,
         auto const remainingLineCount = _gridSize.lines - linesToBeRendered;
         for (auto const lineOffset: crispy::times(*remainingLineCount))
         {
-            linefeed();
-            moveCursorForward(_topLeft.column.as<ColumnCount>());
-            crispy::for_each(
-                crispy::times(columnsToBeRendered.as<ColumnOffset>()), [&](ColumnOffset columnOffset) {
-                    Cell& cell =
-                        at(Coordinate { pageSize_.lines.as<LineOffset>(), _topLeft.column + columnOffset });
-                    cell.setImage(nextImageFragmentId_++);
-                    imageFragments_.emplace(
-                        cell.imageFragment(),
-                        ImageFragment { rasterizedImage,
-                                        Coordinate { boxed_cast<LineOffset>(linesToBeRendered) + lineOffset,
-                                                     columnOffset } });
-                    cell.setHyperlink(cursor_.hyperlink);
-                });
+            linefeed(_topLeft.column);
+            for (auto const columnOffset: views::n_times<ColumnOffset>(*columnsToBeRendered))
+            {
+                auto const imageFragmentId = createImageFragmentId();
+                Cell& cell = at(pageSize_.lines.as<LineOffset>() - 1, _topLeft.column + columnOffset);
+                cell.setImage(imageFragmentId);
+                imageFragments_.emplace(
+                    imageFragmentId,
+                    ImageFragment { rasterizedImage,
+                                    Coordinate { boxed_cast<LineOffset>(linesToBeRendered) + lineOffset,
+                                                 columnOffset } });
+                cell.setHyperlink(cursor_.hyperlink);
+            };
         }
     }
     // move ansi text cursor to position of the sixel cursor
@@ -2722,8 +2743,10 @@ void Screen<T>::smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _actio
 
 } // namespace terminal
 
-template class terminal::Screen<terminal::MockTerm>;
-
 #include <terminal/Terminal.h>
 template class terminal::Screen<terminal::Terminal>;
+
+#include <terminal/MockTerm.h>
+template class terminal::Screen<terminal::MockTerm>;
+
 // template class terminal::Screen<terminal::MockScreenEvents>;

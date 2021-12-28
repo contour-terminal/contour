@@ -26,6 +26,7 @@
 
 #include <dwrite.h>
 #include <dwrite_3.h>
+
 #include <wrl/client.h>
 
 using Microsoft::WRL::ComPtr;

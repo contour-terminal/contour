@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <contour/Actions.h>
+#include <contour/ContourGuiApp.h>
 #include <contour/helper.h>
 #include <contour/opengl/OpenGLRenderer.h>
 #include <contour/opengl/TerminalWidget.h>
@@ -36,9 +37,10 @@
 #include <QtGui/QKeyEvent>
 #include <QtGui/QScreen>
 #include <QtGui/QWindow>
-#include <QtNetwork/QHostInfo>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QMessageBox>
+
+#include <QtNetwork/QHostInfo>
 
 #if defined(CONTOUR_BLUR_PLATFORM_KWIN)
     #include <KWindowEffects>
@@ -268,8 +270,10 @@ TerminalWidget::TerminalWidget(config::TerminalProfile const& _profile, // TODO(
 
 TerminalWidget::~TerminalWidget()
 {
-    LOGSTORE(DisplayLog)("TerminalWidget.dtor!");
+    LOGSTORE(DisplayLog)("~TerminalWidget");
     makeCurrent(); // XXX must be called.
+    renderTarget_.reset();
+    doneCurrent();
 }
 
 QSurfaceFormat TerminalWidget::surfaceFormat()
@@ -657,7 +661,7 @@ void TerminalWidget::doDumpState()
 {
     makeCurrent();
 
-    auto const targetDir = session_.controller().dumpStateAtExit().value_or(
+    auto const targetDir = session_.app().dumpStateAtExit().value_or(
         crispy::App::instance()->localStateDir() / "dump"
         / fmt::format("contour-dump-{:%Y-%m-%d-%H-%M-%S}", std::chrono::system_clock::now()));
 
@@ -772,7 +776,7 @@ void TerminalWidget::doDumpState()
 
         // If this dump-state was triggered due to the PTY being closed
         // and a dump was requested at the end, then terminate this session here now.
-        if (session_.terminal().device().isClosed() && session_.controller().dumpStateAtExit().has_value())
+        if (session_.terminal().device().isClosed() && session_.app().dumpStateAtExit().has_value())
         {
             session_.terminate();
         }
@@ -974,7 +978,8 @@ void TerminalWidget::renderBufferUpdated()
 
 void TerminalWidget::closeDisplay()
 {
-    post([this]() { close(); });
+    LOGSTORE(DisplayLog)("closeDisplay");
+    emit terminated();
 }
 
 void TerminalWidget::onSelectionCompleted()

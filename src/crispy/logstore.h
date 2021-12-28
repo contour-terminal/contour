@@ -13,12 +13,16 @@
  */
 #pragma once
 
+#include <crispy/algorithm.h>
+#include <crispy/utils.h>
+
 #include <fmt/format.h>
 
 #include <algorithm>
 #include <cassert>
 #include <functional>
 #include <iostream>
+#include <iterator>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -239,6 +243,7 @@ void set_sink(Sink& _sink);
 void set_formatter(Category::Formatter const& f);
 void enable(std::string_view categoryName, bool enabled = true);
 void disable(std::string_view categoryName);
+void configure(std::string_view filterString);
 
 // {{{ implementation
 inline std::string MessageBuilder::message() const
@@ -289,6 +294,30 @@ inline void enable(std::string_view categoryName, bool enabled)
 inline void disable(std::string_view categoryName)
 {
     enable(categoryName, false);
+}
+
+inline void configure(std::string_view filterString)
+{
+    if (filterString == "all")
+    {
+        for (auto& category: logstore::get())
+            category.get().enable();
+    }
+    else
+    {
+        auto const filters = crispy::split(filterString, ',');
+        for (auto& category: logstore::get())
+        {
+            category.get().enable(crispy::any_of(filters, [&](std::string_view filterPattern) -> bool {
+                if (filterPattern.back() != '*')
+                    return category.get().name() == filterPattern;
+                // TODO: '*' excludes hidden categories
+                return std::equal(std::begin(filterPattern),
+                                  std::prev(end(filterPattern)),
+                                  std::begin(category.get().name()));
+            }));
+        }
+    }
 }
 
 inline MessageBuilder::MessageBuilder(logstore::Category const& cat, source_location loc):

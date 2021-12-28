@@ -39,11 +39,12 @@
     #include <utmp.h>
 #endif
 #include <pwd.h>
+#include <unistd.h>
+
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-#include <unistd.h>
 
 using std::max;
 using std::min;
@@ -238,7 +239,7 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
             if (rv >= 0)
             {
                 if (PtyInLog)
-                    LOGSTORE(PtyInLog)("Received: {}", crispy::escape(buffer_.data(), buffer_.data() + n));
+                    LOGSTORE(PtyInLog)("Received: {}", crispy::escape(buffer_.data(), buffer_.data() + rv));
                 return string_view { buffer_.data(), static_cast<size_t>(rv) };
             }
             else

@@ -16,6 +16,7 @@
 #include <dwrite.h>
 #include <dwrite_3.h>
 #include <string>
+
 #include <wrl/implements.h>
 
 using Microsoft::WRL::ClassicCom;

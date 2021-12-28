@@ -35,8 +35,9 @@
 #include "shell_integration_zsh.h"
 
 #if !defined(_WIN32)
-    #include <sys/ioctl.h>
     #include <unistd.h>
+
+    #include <sys/ioctl.h>
 #endif
 
 #if defined(_WIN32)

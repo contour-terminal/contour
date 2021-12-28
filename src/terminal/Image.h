@@ -115,13 +115,13 @@ enum class ImageAlignment
 class RasterizedImage
 {
   public:
-    RasterizedImage(Image const* _image,
+    RasterizedImage(std::shared_ptr<Image const> _image,
                     ImageAlignment _alignmentPolicy,
                     ImageResize _resizePolicy,
                     RGBAColor _defaultColor,
                     GridSize _cellSpan,
                     ImageSize _cellSize):
-        image_ { _image },
+        image_ { std::move(_image) },
         alignmentPolicy_ { _alignmentPolicy },
         resizePolicy_ { _resizePolicy },
         defaultColor_ { _defaultColor },
@@ -215,50 +215,47 @@ class ImagePool
   public:
     using OnImageRemove = std::function<void(Image const*)>;
 
-    constexpr static inline std::size_t MaxCapacity = 1024;
+    constexpr static inline std::size_t MaxCapacity = 100;
 
     ImagePool(
-        OnImageRemove _onImageRemove = [](auto) {}, ImageId _nextImageId = ImageId(1)):
+        OnImageRemove _onImageRemove = [](auto) {},
+        ImageId _nextImageId = ImageId(1)):
         nextImageId_ { _nextImageId },
-        namedImages_ { MaxCapacity },
-        images_ { MaxCapacity },
-        rasterizedImages_ {},
+        imageNameToIdCache_ { MaxCapacity },
+        imageCache_ { MaxCapacity },
         onImageRemove_ { std::move(_onImageRemove) }
     {
     }
 
     /// Creates an RGBA image of given size in pixels.
-    Image const& create(ImageFormat _format, ImageSize _pixelSize, Image::Data&& _data);
+    std::shared_ptr<Image const> create(ImageFormat _format, ImageSize _pixelSize, Image::Data&& _data);
 
     /// Rasterizes an Image.
-    std::shared_ptr<RasterizedImage const> rasterize(ImageId _imageId,
-                                                     ImageAlignment _alignmentPolicy,
-                                                     ImageResize _resizePolicy,
-                                                     RGBAColor _defaultColor,
-                                                     GridSize _cellSpan,
-                                                     ImageSize _cellSize);
+    std::shared_ptr<RasterizedImage> rasterize(ImageId _imageId,
+                                               ImageAlignment _alignmentPolicy,
+                                               ImageResize _resizePolicy,
+                                               RGBAColor _defaultColor,
+                                               GridSize _cellSpan,
+                                               ImageSize _cellSize);
+
+    void removeImage(ImageId _imageId);
 
     // named image access
     //
-    void link(std::string const& _name, Image const& _imageRef);
-    Image const* findImageByName(std::string const& _name) const noexcept;
+    void link(std::string const& _name, std::shared_ptr<Image const> const& _imageRef);
+    std::shared_ptr<Image const> findImageByName(std::string const& _name) const noexcept;
     void unlink(std::string const& _name);
 
-    size_t imageCount() const noexcept { return images_.size(); }
-    size_t rasterizedImageCount() const noexcept { return rasterizedImages_.size(); }
-    size_t namedImageCount() const noexcept { return namedImages_.size(); }
-
   private:
-    void removeImage(Image* _image);                     //!< Removes given image from pool.
     void removeRasterizedImage(RasterizedImage* _image); //!< Removes a rasterized image from pool.
 
     // data members
     //
-    ImageId nextImageId_;                                //!< ID for next image to be put into the pool
-    crispy::LRUCache<std::string, ImageId> namedImages_; //!< keeps mapping from name to raw image
-    crispy::LRUCache<ImageId, Image> images_;            //!< pool of raw images
-    std::list<RasterizedImage> rasterizedImages_;        //!< pool of rasterized images
-    OnImageRemove const onImageRemove_; //!< Callback to be invoked when image gets removed from pool.
+    ImageId nextImageId_;                                          //!< ID for next image to be put into the pool
+    crispy::LRUCache<std::string, ImageId> imageNameToIdCache_;    //!< keeps mapping from name to raw image
+    crispy::LRUCache<ImageId, std::shared_ptr<Image>> imageCache_; //!< pool of raw images
+    std::list<RasterizedImage> rasterizedImages_;                  //!< pool of rasterized images
+    OnImageRemove const onImageRemove_;                            //!< Callback to be invoked when image gets removed from pool.
 };
 
 } // namespace terminal

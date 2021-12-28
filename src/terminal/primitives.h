@@ -363,6 +363,11 @@ struct GridSize
     constexpr iterator end() noexcept { return iterator { columns, *columns * *lines }; }
 };
 
+constexpr Coordinate operator+(Coordinate a, GridSize::Offset b) noexcept
+{
+    return Coordinate { a.line + b.line, a.column + b.column };
+}
+
 constexpr GridSize::iterator begin(GridSize const& s) noexcept
 {
     return s.begin();
@@ -493,6 +498,21 @@ struct formatter<terminal::PageSize>
     }
     template <typename FormatContext>
     auto format(terminal::PageSize value, FormatContext& ctx)
+    {
+        return format_to(ctx.out(), "{}x{}", value.columns, value.lines);
+    }
+};
+
+template <>
+struct formatter<terminal::GridSize>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::GridSize value, FormatContext& ctx)
     {
         return format_to(ctx.out(), "{}x{}", value.columns, value.lines);
     }

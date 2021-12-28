@@ -24,8 +24,9 @@
 
 #if !defined(_WIN32)
     #include <pwd.h>
-    #include <sys/ioctl.h>
     #include <unistd.h>
+
+    #include <sys/ioctl.h>
 #endif
 
 using namespace std::string_view_literals;
@@ -45,7 +46,7 @@ using std::string_view;
 
 namespace CLI = crispy::cli;
 
-namespace // {{{ helper
+namespace
 {
 std::string operator*(std::string_view a, size_t n)
 {
@@ -83,95 +84,6 @@ int screenWidth()
 #endif
 
     return DefaultWidth;
-}
-
-void customizeDebugLog()
-{
-    // A curated list of colors.
-    static const bool colorized =
-#if !defined(_WIN32)
-        isatty(STDOUT_FILENO);
-#else
-        true;
-#endif
-    static constexpr auto colors = std::array<int, 23> {
-        2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 150, 155, 159, 165, 170, 175, 180, 185, 190, 195, 200,
-    };
-    logstore::set_formatter([](logstore::MessageBuilder const& _msg) -> std::string {
-        auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string> {
-            if (!colorized)
-                return { "", "", "" };
-            auto const tagStart = "\033[1m";
-            auto const colorIndex =
-                colors.at(std::hash<string_view> {}(_msg.category().name()) % colors.size());
-            auto const msgStart = fmt::format("\033[38;5;{}m", colorIndex);
-            auto const resetSGR = fmt::format("\033[m");
-            return { tagStart, msgStart, resetSGR };
-        }();
-
-#if 1
-        auto const fileName = FileSystem::path(_msg.location().file_name()).filename().string();
-#else
-        // fileName with path to file relative to project root
-        auto const srcIndex = string_view(_msg.location().file_name()).find("src");
-        auto const fileName = string(srcIndex != string_view::npos
-                                         ? string_view(_msg.location().file_name()).substr(srcIndex + 4)
-                                         : string(_msg.location().file_name()));
-#endif
-
-        auto result = string {};
-
-        for (auto const [i, line]: crispy::indexed(crispy::split(_msg.text(), '\n')))
-        {
-            if (i != 0)
-                result += "        ";
-            else
-            {
-                result += sgrTag;
-                result +=
-                    fmt::format("[{}:{}:{}] ", _msg.category().name(), fileName, _msg.location().line());
-                result += sgrReset;
-            }
-
-            result += sgrMessage;
-            result += line;
-            result += sgrReset;
-            result += '\n';
-        }
-
-        return result;
-    });
-
-    logstore::ErrorLog.set_formatter([](logstore::MessageBuilder const& _msg) -> std::string {
-        auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string> {
-            if (!colorized)
-                return { "", "", "" };
-            auto const tagStart = "\033[1;31m";
-            auto const msgStart = "\033[31m";
-            auto const resetSGR = "\033[m";
-            return { tagStart, msgStart, resetSGR };
-        }();
-
-        auto result = string {};
-
-        for (auto const [i, line]: crispy::indexed(crispy::split(_msg.text(), '\n')))
-        {
-            if (i != 0)
-                result += "        ";
-            else
-            {
-                result += sgrTag;
-                result += fmt::format("[{}] ", "error");
-                result += sgrReset;
-            }
-
-            result += sgrMessage;
-            result += line;
-            result += sgrReset;
-            result += '\n';
-        }
-        return result;
-    });
 }
 
 FileSystem::path xdgStateHome()
@@ -296,7 +208,7 @@ int App::run(int argc, char const* argv[])
 {
     try
     {
-        customizeDebugLog();
+        customizeLogStoreOutput();
 
         syntax_ = parameterDefinition();
 
@@ -324,6 +236,95 @@ int App::run(int argc, char const* argv[])
         std::cerr << fmt::format("Unhandled error caught. {}", e.what());
         return EXIT_FAILURE;
     }
+}
+
+void App::customizeLogStoreOutput()
+{
+    // A curated list of colors.
+    static const bool colorized =
+#if !defined(_WIN32)
+        isatty(STDOUT_FILENO);
+#else
+        true;
+#endif
+    static constexpr auto colors = std::array<int, 23> {
+        2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 150, 155, 159, 165, 170, 175, 180, 185, 190, 195, 200,
+    };
+    logstore::set_formatter([](logstore::MessageBuilder const& _msg) -> std::string {
+        auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string> {
+            if (!colorized)
+                return { "", "", "" };
+            auto const tagStart = "\033[1m";
+            auto const colorIndex =
+                colors.at(std::hash<string_view> {}(_msg.category().name()) % colors.size());
+            auto const msgStart = fmt::format("\033[38;5;{}m", colorIndex);
+            auto const resetSGR = fmt::format("\033[m");
+            return { tagStart, msgStart, resetSGR };
+        }();
+
+#if 1
+        auto const fileName = FileSystem::path(_msg.location().file_name()).filename().string();
+#else
+        // fileName with path to file relative to project root
+        auto const srcIndex = string_view(_msg.location().file_name()).find("src");
+        auto const fileName = string(srcIndex != string_view::npos
+                                         ? string_view(_msg.location().file_name()).substr(srcIndex + 4)
+                                         : string(_msg.location().file_name()));
+#endif
+
+        auto result = string {};
+
+        for (auto const [i, line]: crispy::indexed(crispy::split(_msg.text(), '\n')))
+        {
+            if (i != 0)
+                result += "        ";
+            else
+            {
+                result += sgrTag;
+                result +=
+                    fmt::format("[{}:{}:{}] ", _msg.category().name(), fileName, _msg.location().line());
+                result += sgrReset;
+            }
+
+            result += sgrMessage;
+            result += line;
+            result += sgrReset;
+            result += '\n';
+        }
+
+        return result;
+    });
+
+    logstore::ErrorLog.set_formatter([](logstore::MessageBuilder const& _msg) -> std::string {
+        auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string> {
+            if (!colorized)
+                return { "", "", "" };
+            auto const tagStart = "\033[1;31m";
+            auto const msgStart = "\033[31m";
+            auto const resetSGR = "\033[m";
+            return { tagStart, msgStart, resetSGR };
+        }();
+
+        auto result = string {};
+
+        for (auto const [i, line]: crispy::indexed(crispy::split(_msg.text(), '\n')))
+        {
+            if (i != 0)
+                result += "        ";
+            else
+            {
+                result += sgrTag;
+                result += fmt::format("[{}] ", "error");
+                result += sgrReset;
+            }
+
+            result += sgrMessage;
+            result += line;
+            result += sgrReset;
+            result += '\n';
+        }
+        return result;
+    });
 }
 
 } // namespace crispy

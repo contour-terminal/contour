@@ -122,6 +122,20 @@ namespace
 struct fontconfig_locator::Private
 {
     // currently empty, maybe later something (such as caching)?
+    FcConfig* ftConfig = nullptr;
+
+    Private()
+    {
+        FcInit();
+        ftConfig = FcInitLoadConfigAndFonts(); // Most convenient of all the alternatives
+    }
+
+    ~Private()
+    {
+        LOGSTORE(LocatorLog)("~fontconfig_locator.dtor");
+        FcConfigDestroy(ftConfig);
+        FcFini();
+    }
 };
 
 fontconfig_locator::fontconfig_locator():
@@ -129,12 +143,10 @@ fontconfig_locator::fontconfig_locator():
            delete p;
        } }
 {
-    FcInit();
 }
 
 fontconfig_locator::~fontconfig_locator()
 {
-    FcFini();
 }
 
 font_source_list fontconfig_locator::locate(font_description const& _fd)
@@ -179,12 +191,12 @@ font_source_list fontconfig_locator::locate(font_description const& _fd)
     if (_fd.slant != font_slant::normal)
         FcPatternAddInteger(pat.get(), FC_SLANT, fcSlant(_fd.slant));
 
-    FcConfigSubstitute(nullptr, pat.get(), FcMatchPattern);
+    FcConfigSubstitute(d->ftConfig, pat.get(), FcMatchPattern);
     FcDefaultSubstitute(pat.get());
 
     FcResult result = FcResultNoMatch;
     auto fs = unique_ptr<FcFontSet, void (*)(FcFontSet*)>(
-        FcFontSort(nullptr, pat.get(), /*unicode-trim*/ FcTrue, /*FcCharSet***/ nullptr, &result),
+        FcFontSort(d->ftConfig, pat.get(), /*unicode-trim*/ FcTrue, /*FcCharSet***/ nullptr, &result),
         [](auto p) { FcFontSetDestroy(p); });
 
     if (!fs || result != FcResultMatch)
@@ -292,7 +304,7 @@ font_source_list fontconfig_locator::all()
         FC_WEIGHT,
         FC_WIDTH,
         NULL);
-    FcFontSet* fs = FcFontList(nullptr, pat, os);
+    FcFontSet* fs = FcFontList(d->ftConfig, pat, os);
 
     font_source_list output;
 

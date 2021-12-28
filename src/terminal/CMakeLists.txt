@@ -31,6 +31,7 @@ set(terminal_HEADERS
     InputGenerator.h
     Line.h
     MatchModes.h
+    MockTerm.h
     Parser.h
     Process.h
     RenderBuffer.h
@@ -66,6 +67,7 @@ set(terminal_SOURCES
     InputGenerator.cpp
     Line.cpp
     MatchModes.cpp
+    MockTerm.cpp
     Parser.cpp
     Process.cpp
     RenderBuffer.cpp

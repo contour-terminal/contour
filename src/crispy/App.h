@@ -44,6 +44,8 @@ class App
     std::string const& appVersion() const noexcept { return appVersion_; }
     FileSystem::path const& localStateDir() const noexcept { return localStateDir_; }
 
+    static void customizeLogStoreOutput();
+
   protected:
     void listDebugTags();
 
