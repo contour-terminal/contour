@@ -30,7 +30,7 @@
 #include <unicode/utf8.h>
 #include <unicode/word_segmenter.h>
 
-#include <range/v3/view/iota.hpp>
+#include <range/v3/view.hpp>
 
 #include <algorithm>
 #include <cassert>
@@ -79,6 +79,24 @@ using std::vector;
 
 namespace terminal
 {
+
+namespace
+{
+    namespace views
+    {
+        template <typename T>
+        auto as()
+        {
+            return ranges::views::transform([](auto in) { return T(in); });
+        }
+
+        template <typename T>
+        auto n_times(int n)
+        {
+            return ranges::views::ints(0, n) | as<T>();
+        }
+    } // namespace views
+} // namespace
 
 namespace // {{{ helper
 {
@@ -2253,22 +2271,19 @@ void Screen<T>::renderImage(ImageId _imageId,
         auto const remainingLineCount = _gridSize.lines - linesToBeRendered;
         for (auto const lineOffset: crispy::times(*remainingLineCount))
         {
-            linefeed();
-            moveCursorForward(_topLeft.column.as<ColumnCount>());
-            crispy::for_each(
-                crispy::times(columnsToBeRendered.as<ColumnOffset>()), [&](ColumnOffset columnOffset) {
-                    auto const imageFragmentId = createImageFragmentId();
-                    Cell& cell =
-                        at(Coordinate { pageSize_.lines.as<LineOffset>(), _topLeft.column + columnOffset });
-                    // TODO(pr)                   ^^ why don't we `- 1` here in pageSize_.lines?
-                    cell.setImage(imageFragmentId);
-                    imageFragments_.emplace(
-                        imageFragmentId,
-                        ImageFragment { rasterizedImage,
-                                        Coordinate { boxed_cast<LineOffset>(linesToBeRendered) + lineOffset,
-                                                     columnOffset } });
-                    cell.setHyperlink(cursor_.hyperlink);
-                });
+            linefeed(_topLeft.column);
+            for (auto const columnOffset: views::n_times<ColumnOffset>(*columnsToBeRendered))
+            {
+                auto const imageFragmentId = createImageFragmentId();
+                Cell& cell = at(pageSize_.lines.as<LineOffset>() - 1, _topLeft.column + columnOffset);
+                cell.setImage(imageFragmentId);
+                imageFragments_.emplace(
+                    imageFragmentId,
+                    ImageFragment { rasterizedImage,
+                                    Coordinate { boxed_cast<LineOffset>(linesToBeRendered) + lineOffset,
+                                                 columnOffset } });
+                cell.setHyperlink(cursor_.hyperlink);
+            };
         }
     }
     // move ansi text cursor to position of the sixel cursor

@@ -3239,6 +3239,47 @@ TEST_CASE("Sixel.simple", "[screen]")
     // Um, we could actually test more precise here by validating the grid cell contents.
 }
 
+TEST_CASE("Sixel.AutoScroll-1", "[screen]")
+{
+    // Create a 10x3x5 grid and render a 7x5 image causing one a line-scroll by one.
+    auto const pageSize = PageSize { LineCount(4), ColumnCount(10) };
+    auto term = MockTerm { pageSize, LineCount(5) };
+    term.screen.setCellPixelSize(ImageSize { Width(10), Height(10) });
+    term.screen.setMode(DECMode::SixelScrolling, true);
+
+    auto const sixelData = crispy::readFileAsString("./test/images/squirrel-50.sixel");
+
+    term.screen.write(sixelData);
+
+    CHECK(term.screen.cursor().position.column == ColumnOffset(8));
+    CHECK(term.screen.cursor().position.line == LineOffset(3));
+
+    for (auto line = LineOffset(-1); line < boxed_cast<LineOffset>(pageSize.lines); ++line)
+    {
+        INFO(fmt::format("line {}", line));
+        for (auto column = ColumnOffset(0); column < boxed_cast<ColumnOffset>(pageSize.columns); ++column)
+        {
+            INFO(fmt::format("column {}", column));
+            Cell const& cell = term.screen.at(line, column);
+            if (line <= LineOffset(4) && column <= ColumnOffset(7))
+            {
+                ImageFragmentId fragmentId = cell.imageFragment();
+                REQUIRE(fragmentId != ImageFragmentId(0));
+                ImageFragment const& fragment = term.screen.imageFragments().at(fragmentId);
+                CHECK(fragment.offset().line == line + 1);
+                CHECK(fragment.offset().column == column);
+                CHECK(fragment.data().size() != 0);
+            }
+            else
+            {
+                CHECK(cell.empty());
+            }
+        }
+    }
+
+    // Um, we could actually test more precise here by validating the grid cell contents.
+}
+
 // TODO: Sixel: image that exceeds available lines
 
 // TODO: SetForegroundColor
