@@ -465,6 +465,9 @@ class Grid
     /// @param _defaultAttributes SGR attributes the newly created grid cells will be initialized with.
     /// @param _margin the margin coordinates to perform the scrolling action into.
     void scrollDown(LineCount _n, GraphicsAttributes const& _defaultAttributes, Margin const& _margin);
+
+    // Scrolls the data within the margins to the left filling the new space on the right with empty cells.
+    void scrollLeft(GraphicsAttributes _defaultAttributes, Margin _margin) noexcept;
     // }}}
 
     // {{{ Rendering API

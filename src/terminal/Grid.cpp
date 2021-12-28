@@ -532,6 +532,24 @@ void Grid<Cell>::scrollDown(LineCount v_n,
         }
     }
 }
+
+template <typename Cell>
+void Grid<Cell>::scrollLeft(GraphicsAttributes _defaultAttributes, Margin _margin) noexcept
+{
+    for (LineOffset lineNo = _margin.vertical.from; lineNo <= _margin.vertical.to; ++lineNo)
+    {
+        auto& line = lineAt(lineNo);
+        auto column0 = line.begin() + *_margin.horizontal.from;
+        auto column1 = line.begin() + *_margin.horizontal.from + 1;
+        auto column2 = line.begin() + *_margin.horizontal.to + 1;
+        std::rotate(column0, column1, column2);
+
+        auto const emptyCell = Cell { _defaultAttributes };
+        auto const emptyCellsBegin = line.begin() + *_margin.horizontal.to;
+        std::fill_n(emptyCellsBegin, 1, emptyCell);
+    }
+}
+
 // }}}
 // {{{ Grid impl: resize
 template <typename Cell>

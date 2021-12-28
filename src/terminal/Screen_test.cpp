@@ -803,6 +803,55 @@ TEST_CASE("ClearLine", "[screen]")
     CHECK("   " == screen.grid().lineText(LineOffset(0)));
 }
 
+TEST_CASE("DECFI", "[screen]")
+{
+    auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto& screen = term.screen;
+    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+    screen.setMode(DECMode::LeftRightMargin, true);
+    screen.setLeftRightMargin(ColumnOffset(1), ColumnOffset(3));
+    screen.setTopBottomMargin(LineOffset(1), LineOffset(3));
+    REQUIRE(screen.realCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
+
+    screen.write("\033[1;1H");
+
+    // from 0,0 to 0,1 (from outside margin to left border)
+    screen.write("\0339");
+    REQUIRE(screen.realCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1) });
+    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
+
+    // from 0,1 to 0,2
+    screen.write("\0339");
+    REQUIRE(screen.realCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(2) });
+    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
+
+    // from 0,2 to 0,3
+    screen.write("\0339");
+    REQUIRE(screen.realCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(3) });
+    REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
+
+    // from 0,3 to 0,3, scrolling 1 left
+    screen.write("\0339");
+    REQUIRE(screen.realCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(3) });
+    REQUIRE("12345\n689 0\nACD E\nFHI J\nKLMNO\n" == screen.renderMainPageText());
+
+    // from 0,3 to 0,3, scrolling 1 left
+    screen.write("\0339");
+    REQUIRE(screen.realCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(3) });
+    REQUIRE("12345\n69  0\nAD  E\nFI  J\nKLMNO\n" == screen.renderMainPageText());
+
+    // from 0,3 to 0,3, scrolling 1 left (now all empty)
+    screen.write("\0339");
+    REQUIRE(screen.realCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(3) });
+    REQUIRE("12345\n6   0\nA   E\nF   J\nKLMNO\n" == screen.renderMainPageText());
+
+    // from 0,3 to 0,3, scrolling 1 left (looks just like before)
+    screen.write("\0339");
+    REQUIRE(screen.realCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(3) });
+    REQUIRE("12345\n6   0\nA   E\nF   J\nKLMNO\n" == screen.renderMainPageText());
+}
+
 TEST_CASE("InsertColumns", "[screen]")
 {
     // "DECIC has no effect outside the scrolling margins."

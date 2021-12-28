@@ -1,5 +1,6 @@
 ### 0.3.0 (unreleased)
 
+- Fixes VT sequence `DECFI`.
 - Fixes VT sequence `ICH` (#559).
 - Fixes installation from `.deb` (missing terminfo dependency)
 - Improved VT backend performance (#342).
