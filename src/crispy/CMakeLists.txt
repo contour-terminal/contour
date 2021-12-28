@@ -31,7 +31,7 @@ set(crispy_SOURCES
 add_library(crispy-core ${crispy_SOURCES})
 add_library(crispy::core ALIAS crispy-core)
 
-set(CRISPY_CORE_LIBS range-v3::range-v3 fmt::fmt-header-only unicode::core GSL)
+set(CRISPY_CORE_LIBS range-v3::range-v3 fmt::fmt-header-only unicode::core Microsoft.GSL::GSL)
 if(${USING_BOOST_FILESYSTEM})
     target_compile_definitions(crispy-core PUBLIC USING_BOOST_FILESYSTEM=1)
     list(APPEND CRISPY_CORE_LIBS Boost::filesystem)

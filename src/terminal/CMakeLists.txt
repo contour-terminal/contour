@@ -79,7 +79,7 @@ set(terminal_SOURCES
     primitives.cpp
 )
 
-set(LIBTERMINAL_LIBRARIES crispy::core fmt::fmt-header-only range-v3::range-v3 Threads::Threads GSL)
+set(LIBTERMINAL_LIBRARIES crispy::core fmt::fmt-header-only range-v3::range-v3 Threads::Threads Microsoft.GSL::GSL)
 if(UNIX)
     list(APPEND LIBTERMINAL_LIBRARIES util)
     list(APPEND terminal_SOURCES pty/UnixPty.cpp)
