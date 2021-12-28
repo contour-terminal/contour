@@ -88,6 +88,7 @@ class Line
     using Storage = LineStorage<Cell>;
     using value_type = Cell;
     using iterator = typename InflatedBuffer::iterator;
+    using reverse_iterator = typename InflatedBuffer::reverse_iterator;
     using const_iterator = typename InflatedBuffer::const_iterator;
 
     Line(ColumnCount _width, LineFlags _flags, Cell _template = {}):
@@ -227,6 +228,9 @@ class Line
 
     const_iterator begin() const noexcept { return buffer_.begin(); }
     const_iterator end() const noexcept { return std::next(buffer_.begin(), unbox<int>(columnsUsed())); }
+
+    reverse_iterator rbegin() noexcept { return buffer_.rbegin(); }
+    reverse_iterator rend() noexcept { return buffer_.rend(); }
 
     Cell& front() noexcept { return buffer_.front(); }
     Cell const& front() const noexcept { return buffer_.front(); }
