@@ -21,12 +21,7 @@ add_library(text_shaper STATIC ${text_shaper_SRC})
 set(TEXT_SHAPER_LIBS unicode::core)
 list(APPEND TEXT_SHAPER_LIBS fmt::fmt-header-only)
 list(APPEND TEXT_SHAPER_LIBS range-v3::range-v3)
-
-if(APPLE)
-    list(APPEND TEXT_SHAPER_LIBS Microsoft.GSL::GSL)
-else()
-    list(APPEND TEXT_SHAPER_LIBS GSL)
-endif()
+list(APPEND TEXT_SHAPER_LIBS Microsoft.GSL::GSL)
 
 if(APPLE)
     enable_language(OBJCXX)

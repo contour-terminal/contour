@@ -70,13 +70,16 @@ fetch_and_unpack_Catch2()
         https://github.com/catchorg/Catch2/archive/refs/tags/v2.13.7.tar.gz
 }
 
-fetch_and_unpack_embeds()
+fetch_and_unpack_gsl()
 {
     fetch_and_unpack \
         GSL-3.1.0 \
         gsl-3.1.0.tar.gz \
         https://github.com/microsoft/GSL/archive/refs/tags/v3.1.0.tar.gz
+}
 
+fetch_and_unpack_embeds()
+{
     fetch_and_unpack \
         termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed \
         termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed.tar.gz \
@@ -166,6 +169,7 @@ install_deps_ubuntu()
                 https://github.com/fmtlib/fmt/archive/refs/tags/8.0.1.tar.gz
 
             fetch_and_unpack_Catch2
+            fetch_and_unpack_gsl
             ;;
         *)
             packages="$packages libfmt-dev librange-v3-dev catch2"
@@ -180,8 +184,6 @@ install_deps_ubuntu()
 
 install_deps_FreeBSD()
 {
-    fetch_and_unpack_yaml_cpp
-
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
     su root -c "pkg install $SYSDEP_ASSUME_YES \
@@ -191,6 +193,7 @@ install_deps_FreeBSD()
         freetype2 \
         harfbuzz \
         libfmt \
+        microsoft-gsl \
         ncurses \
         ninja \
         pkgconf \
@@ -201,8 +204,8 @@ install_deps_FreeBSD()
         qt5-qmake \
         qt5-widgets \
         range-v3 \
+        yaml-cpp
     "
-    # yaml-cpp is available on FreeBSD too, but its .cmake file seems to be buggy.
 }
 
 install_deps_arch()
@@ -216,6 +219,7 @@ install_deps_arch()
         fmt \
         fontconfig \
         git \
+        gsl \
         harfbuzz \
         ninja \
         qt5-base \
@@ -225,6 +229,7 @@ install_deps_arch()
 
 install_deps_fedora()
 {
+    fetch_and_unpack_gsl
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
     # catch-devel
@@ -258,6 +263,7 @@ install_deps_darwin()
     brew install $SYSDEP_ASSUME_YES \
         boost \
         catch2 \
+        cpp-gsl \
         fontconfig \
         fmt \
         freetype \
