@@ -1819,10 +1819,10 @@ void Screen<T>::backIndex()
 template <typename T>
 void Screen<T>::forwardIndex()
 {
-    if (*realCursorPosition().column + 1 == *margin_.horizontal.to)
-        ; // TODO: scrollLeft(1);
+    if (*realCursorPosition().column == *margin_.horizontal.to)
+        grid().scrollLeft(GraphicsAttributes {}, margin_);
     else
-        moveCursorDown(LineCount(1));
+        moveCursorForward(ColumnCount(1));
 }
 
 template <typename T>
