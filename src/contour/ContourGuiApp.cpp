@@ -291,7 +291,6 @@ int ContourGuiApp::terminalGuiAction()
     {
         if (!config_.platformPlugin.empty())
         {
-            printf("using config key\n");
             static constexpr auto platformArg = string_view("-platform");
             qtArgsPtr.push_back(platformArg.data());
             qtArgsPtr.push_back(config_.platformPlugin.c_str());
