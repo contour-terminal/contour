@@ -12,6 +12,14 @@
 # Default: auto
 platform_plugin: auto
 
+# Backend to use for rendering the terminal onto the screen
+#
+# Possible values are:
+# - default     Uses the default rendering option as decided by the terminal.
+# - software    Uses software-based rendering.
+# - OpenGL      Use (possibly) hardware accelerated OpenGL
+renderer: OpenGL
+
 # Word delimiters when selecting word-wise.
 word_delimiters: " /\\()\"'-.,:;<>~!@#$%^&*+=[]{}~?|│"
 

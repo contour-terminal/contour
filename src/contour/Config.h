@@ -169,6 +169,13 @@ struct TerminalProfile
 using opengl::ShaderClass;
 using opengl::ShaderConfig;
 
+enum class RenderingBackend
+{
+    Default,
+    Software,
+    OpenGL,
+};
+
 // NB: All strings in here must be UTF8-encoded.
 struct Config
 {
@@ -177,6 +184,8 @@ struct Config
     /// Qt platform plugin to be loaded.
     /// This is equivalent to QT_QPA_PLATFORM.
     std::string platformPlugin;
+
+    RenderingBackend renderingBackend = RenderingBackend::Default;
 
     // Configures the size of the PTY read buffer.
     // Changing this value may result in better or worse throughput performance.
