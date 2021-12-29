@@ -258,6 +258,19 @@ int ContourGuiApp::terminalGuiAction()
     if (!loadConfig())
         return EXIT_FAILURE;
 
+    switch (config_.renderingBackend)
+    {
+    case config::RenderingBackend::OpenGL:
+        QGuiApplication::setAttribute(Qt::AA_UseSoftwareOpenGL, false);
+        break;
+    case config::RenderingBackend::Software:
+        QGuiApplication::setAttribute(Qt::AA_UseSoftwareOpenGL, true);
+        break;
+    case config::RenderingBackend::Default:
+        // Don't do anything.
+        break;
+    }
+
     auto appName = QString::fromStdString(config_.profile(profileName())->wmClass);
     QCoreApplication::setApplicationName(appName);
     QCoreApplication::setOrganizationName("contour");
@@ -291,7 +304,6 @@ int ContourGuiApp::terminalGuiAction()
     {
         if (!config_.platformPlugin.empty())
         {
-            printf("using config key\n");
             static constexpr auto platformArg = string_view("-platform");
             qtArgsPtr.push_back(platformArg.data());
             qtArgsPtr.push_back(config_.platformPlugin.c_str());

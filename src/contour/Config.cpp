@@ -1473,6 +1473,18 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
     if (_config.platformPlugin == "auto")
         _config.platformPlugin = ""; // Mapping "auto" to its internally equivalent "".
 
+    string renderingBackendStr;
+    if (tryLoadValue(usedKeys, doc, "renderer", renderingBackendStr))
+    {
+        renderingBackendStr = toUpper(renderingBackendStr);
+        if (renderingBackendStr == "OPENGL")
+            _config.renderingBackend = RenderingBackend::OpenGL;
+        else if (renderingBackendStr == "SOFTWARE")
+            _config.renderingBackend = RenderingBackend::Software;
+        else if (renderingBackendStr != "" && renderingBackendStr != "DEFAULT")
+            errorlog()("Unknown renderer: {}.", renderingBackendStr);
+    }
+
     tryLoadValue(usedKeys, doc, "read_buffer_size", _config.ptyReadBufferSize);
     if ((_config.ptyReadBufferSize % 16) != 0)
     {
