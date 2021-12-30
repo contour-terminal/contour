@@ -98,8 +98,8 @@ jobs:
       run: mkdir build
     - name: "cmake"
       env:
-        EXTRA_CMAKE_FLAGS: "-DCONTOUR_BLUR_PLATFORM_KWIN=ON" # -DCONTOUR_SANITIZE=address"
-        CMAKE_BUILD_TYPE: RelWithDebInfo
+        EXTRA_CMAKE_FLAGS: "-DCONTOUR_BLUR_PLATFORM_KWIN=OFF -DCONTOUR_SANITIZE=address"
+        CMAKE_BUILD_TYPE: Debug
       run: ./scripts/ci-prepare-contour.sh
     - name: "build"
       run: cmake --build build/ -- -j3
@@ -129,8 +129,7 @@ jobs:
         retention-days: 7
   # }}}
 
-  # {{{ external test: notcurses
-
+  # {{{ Build notcurses
   build_notcurses:
     name: "Build notcurses"
     runs-on: ubuntu-20.04
@@ -183,7 +182,9 @@ jobs:
         path: ~/opt/notcurses
         if-no-files-found: error
         retention-days: 1
+  # }}}
 
+  # {{{ external test: notcurses
   test_notcurses:
     name: "notcurses-demo ${{ matrix.name }}"
     runs-on: ubuntu-20.04
@@ -280,14 +281,22 @@ jobs:
         contour version
         contour help
         ls -hl ~/opt/notcurses/
+    - name: "create and patch contour.yml config file"
+      run: |
+        set -ex
+        mkdir -p ~/.config/contour/
+        contour generate config to ~/.config/contour/contour.yml
+        sed -i -e 's/locator: native/locator: mock/' ~/.config/contour/contour.yml
+        cat .github/mock-font-locator.yml >> ~/.config/contour/contour.yml
+        cat ~/.config/contour/contour.yml
     - name: "Run Contour: notcurses-demo ${{ matrix.name }}"
       timeout-minutes: 5
       id: Xvfb-contour-notcurses
       run: |
         export LD_LIBRARY_PATH="/home/runner/opt/notcurses/lib:/home/runner/opt/fontconfig/lib"
+        # valgrind --leak-check=full --num-callers=64
         ./scripts/ci/Xvfb-contour-run.sh \
               "notcurses-demo-dumps/${{ matrix.name }}" \
-              valgrind --leak-check=full --num-callers=64 \
               ~/opt/notcurses/bin/notcurses-demo \
                   -p ~/opt/notcurses/share/notcurses ${{ matrix.id }}
     - name: "Save dump"
