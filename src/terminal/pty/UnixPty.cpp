@@ -84,6 +84,16 @@ namespace
 
         return tio;
     }
+
+    bool setFileFlags(int fd, int flags) noexcept
+    {
+        int currentFlags {};
+        if (fcntl(fd, F_GETFL, &currentFlags) < 0)
+            return false;
+        if (fcntl(fd, F_SETFL, currentFlags | O_CLOEXEC | O_NONBLOCK) < 0)
+            return false;
+        return true;
+    }
 } // namespace
 
 UnixPty::UnixPty(PageSize const& _windowSize, optional<ImageSize> _pixels):
@@ -108,6 +118,9 @@ UnixPty::UnixPty(PageSize const& _windowSize, optional<ImageSize> _pixels):
     if (openpty(&master_, &slave_, nullptr, /*&term*/ nullptr, (winsize*) wsa) < 0)
         throw runtime_error { "Failed to open PTY. "s + strerror(errno) };
 
+    if (!setFileFlags(master_, O_CLOEXEC | O_NONBLOCK))
+        throw runtime_error { "Failed to configure PTY. "s + strerror(errno) };
+
 #if defined(__linux__)
     if (pipe2(pipe_.data(), O_NONBLOCK /* | O_CLOEXEC | O_NONBLOCK*/) < 0)
         throw runtime_error { "Failed to create PTY pipe. "s + strerror(errno) };
@@ -115,16 +128,13 @@ UnixPty::UnixPty(PageSize const& _windowSize, optional<ImageSize> _pixels):
     if (pipe(pipe_.data()) < 0)
         throw runtime_error { "Failed to create PTY pipe. "s + strerror(errno) };
     for (auto const fd: pipe_)
-    {
-        int currentFlags {};
-        if (fcntl(fd, F_GETFL, &currentFlags) < 0)
+        if (!setFileFlags(fd, O_CLOEXEC | O_NONBLOCK))
             break;
-        if (fcntl(fd, F_SETFL, currentFlags | O_CLOEXEC | O_NONBLOCK) < 0)
-            break;
-    }
 #endif
-    LOGSTORE(PtyLog)
-    ("PTY opened. master={}, slave={}, pipe=({}, {})", master_, slave_, pipe_.at(0), pipe_.at(1));
+    // clang-format off
+    LOGSTORE(PtyLog)("PTY opened. master={}, slave={}, pipe=({}, {})",
+                     master_, slave_, pipe_.at(0), pipe_.at(1));
+    // clang-format on
 }
 
 UnixPty::~UnixPty()
@@ -165,8 +175,6 @@ void UnixPty::close()
 
 void UnixPty::wakeupReader()
 {
-    if (PtyLog)
-        LOGSTORE(PtyLog)("waking up via pipe {}", pipe_[1]);
     char dummy {};
     auto const rv = ::write(pipe_[1], &dummy, sizeof(dummy));
     (void) rv;
@@ -197,12 +205,7 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
         FD_SET(pipe_[0], &rfd);
         auto const nfds = 1 + max(master_, pipe_[0]);
 
-        if (PtyInLog)
-            LOGSTORE(PtyInLog)
-        ("read: select({}, {}) for {}.{:04}s.", master_, pipe_[0], tv.tv_sec, tv.tv_usec / 1000);
-
         int rv = select(nfds, &rfd, &wfd, &efd, &tv);
-
         if (rv == 0)
         {
             errno = EAGAIN;
@@ -261,7 +264,31 @@ int UnixPty::write(char const* buf, size_t size)
 {
     if (PtyOutLog)
         LOGSTORE(PtyOutLog)("Sending bytes: \"{}\"", crispy::escape(buf, buf + size));
+
+    timeval tv {};
+    tv.tv_sec = 1;
+    tv.tv_usec = 0;
+    int nwritten = 0;
+
+    fd_set rfd, wfd, efd;
+    FD_ZERO(&rfd);
+    FD_ZERO(&wfd);
+    FD_ZERO(&efd);
+    FD_SET(master_, &wfd);
+    FD_SET(pipe_[0], &rfd);
+    auto const nfds = 1 + max(master_, pipe_[0]);
+    if (select(nfds, &rfd, &wfd, &efd, &tv) < 0)
+        return -1;
+
     ssize_t rv = ::write(master_, buf, size);
+    if (PtyOutLog)
+    {
+        if (rv < 0)
+            errorlog()("Write failed: {}", strerror(errno));
+        else if (0 <= rv && rv < size)
+            LOGSTORE(PtyOutLog)("Partial write: {} of {} written.", rv, size);
+    }
+
     return static_cast<int>(rv);
 }
 

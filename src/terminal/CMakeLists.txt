@@ -6,7 +6,6 @@ find_package(Threads)
 include(FilesystemResolver)
 
 option(LIBTERMINAL_TESTING "Enables building of unittests for libterminal [default: ON]" ON)
-option(LIBTERMINAL_LOG_RAW "Enables logging of raw VT sequences [default: ON]" ON)
 option(LIBTERMINAL_LOG_TRACE "Enables VT sequence tracing. [default: ON]" ON)
 
 # This is an optimization feature that hopefully improves performance when enabled.
@@ -100,9 +99,6 @@ target_compile_definitions(terminal PRIVATE
 )
 target_include_directories(terminal PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(terminal PUBLIC ${LIBTERMINAL_LIBRARIES})
-if(LIBTERMINAL_LOG_RAW)
-    target_compile_definitions(terminal PRIVATE LIBTERMINAL_LOG_RAW=1)
-endif()
 if(LIBTERMINAL_LOG_TRACE)
     target_compile_definitions(terminal PRIVATE LIBTERMINAL_LOG_TRACE=1)
 endif()
@@ -146,5 +142,4 @@ if(LIBTERMINAL_TESTING)
 endif()
 
 message(STATUS "[libterminal] Compile unit tests: ${LIBTERMINAL_TESTING}")
-message(STATUS "[libterminal] Enable raw VT sequence logging: ${LIBTERMINAL_LOG_RAW}")
 message(STATUS "[libterminal] Enable VT sequence tracing: ${LIBTERMINAL_LOG_TRACE}")

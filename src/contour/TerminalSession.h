@@ -171,6 +171,7 @@ class TerminalSession: public terminal::Terminal::Events
     void configureTerminal();
     void configureDisplay();
     uint8_t matchModeFlags() const;
+    void flushInput();
 
     // private data
     //

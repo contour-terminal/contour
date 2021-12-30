@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <array>
 #include <iterator>
+#include <mutex>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
@@ -392,25 +393,23 @@ void InputGenerator::generatePaste(std::string_view const& _text)
         append("\033[201~"sv);
 }
 
-void InputGenerator::swap(Sequence& _other)
-{
-    std::swap(pendingSequence_, _other);
-}
-
 inline bool InputGenerator::append(std::string_view _sequence)
 {
+    auto const _l = std::lock_guard { *this };
     pendingSequence_.insert(end(pendingSequence_), begin(_sequence), end(_sequence));
     return true;
 }
 
 inline bool InputGenerator::append(char _asciiChar)
 {
+    auto const _l = std::lock_guard { *this };
     pendingSequence_.push_back(_asciiChar);
     return true;
 }
 
 inline bool InputGenerator::append(uint8_t _byte)
 {
+    auto const _l = std::lock_guard { *this };
     pendingSequence_.push_back(static_cast<char>(_byte));
     return true;
 }

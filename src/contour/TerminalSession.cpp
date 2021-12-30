@@ -187,18 +187,20 @@ void TerminalSession::bufferChanged(terminal::ScreenType _type)
 
 void TerminalSession::screenUpdated()
 {
-#if defined(CONTOUR_VT_METRICS)
-    // TODO
-    // for (auto const& command : _commands)
-    //     terminalMetrics_(command);
-#endif
     if (profile_.autoScrollOnUpdate && terminal().viewport().scrolled())
         terminal().viewport().scrollToBottom();
 
     if (terminal().hasInput())
-        display_->post([this]() { terminal().flushInput(); });
+        display_->post(bind(&TerminalSession::flushInput, this));
 
     scheduleRedraw();
+}
+
+void TerminalSession::flushInput()
+{
+    terminal().flushInput();
+    if (terminal().hasInput())
+        display_->post(bind(&TerminalSession::flushInput, this));
 }
 
 void TerminalSession::renderBufferUpdated()

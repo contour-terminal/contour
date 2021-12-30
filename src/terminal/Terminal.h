@@ -125,6 +125,7 @@ class Terminal
     bool applicationKeypad() const noexcept { return inputGenerator_.applicationKeypad(); }
 
     bool hasInput() const noexcept;
+    size_t pendingInputBytes() const noexcept;
     void flushInput();
     // }}}
 
@@ -392,7 +393,6 @@ class Terminal
     bool leftMouseButtonPressed_ = false; // tracks left-mouse button pressed state (used for cell selection).
 
     InputGenerator inputGenerator_;
-    InputGenerator::Sequence pendingInput_;
     LineOffset copyLastMarkRangeOffset_;
     Screen<Terminal> screen_;
     std::mutex mutable outerLock_;

@@ -25,11 +25,6 @@ auto const inline VTParserLog = logstore::Category("vt.parser",
                                                    logstore::Category::State::Enabled,
                                                    logstore::Category::Visibility::Hidden);
 
-#if defined(LIBTERMINAL_LOG_RAW)
-auto const inline ScreenRawOutputLog =
-    logstore::Category("vt.output", "Logs raw writes to the terminal screen.");
-#endif
-
 #if defined(LIBTERMINAL_LOG_TRACE)
 auto const inline VTParserTraceLog =
     logstore::Category("vt.trace", "Logs terminal parser instruction trace.");
