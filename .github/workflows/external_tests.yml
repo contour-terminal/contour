@@ -98,8 +98,8 @@ jobs:
       run: mkdir build
     - name: "cmake"
       env:
-        EXTRA_CMAKE_FLAGS: "-DCONTOUR_BLUR_PLATFORM_KWIN=OFF -DCONTOUR_SANITIZE=address"
-        CMAKE_BUILD_TYPE: Debug
+        EXTRA_CMAKE_FLAGS: "-DCONTOUR_BLUR_PLATFORM_KWIN=OFF" # -DCONTOUR_SANITIZE=address"
+        CMAKE_BUILD_TYPE: RelWithDebInfo
       run: ./scripts/ci-prepare-contour.sh
     - name: "build"
       run: cmake --build build/ -- -j3
@@ -271,6 +271,8 @@ jobs:
         ls -hlR ~/opt/
     - name: "install dependencies"
       run: ./scripts/ci/notcurses-install-deps.sh
+    - name: "install valgrind"
+      run: sudo apt install -y valgrind
     - name: "Run notcurses-demo -h"
       timeout-minutes: 1
       run: ~/opt/notcurses/bin/notcurses-demo -p ~/opt/notcurses/share/notcurses -h
@@ -290,11 +292,10 @@ jobs:
         cat .github/mock-font-locator.yml >> ~/.config/contour/contour.yml
         cat ~/.config/contour/contour.yml
     - name: "Run Contour: notcurses-demo ${{ matrix.name }}"
-      timeout-minutes: 5
+      timeout-minutes: 20
       id: Xvfb-contour-notcurses
       run: |
         export LD_LIBRARY_PATH="/home/runner/opt/notcurses/lib:/home/runner/opt/fontconfig/lib"
-        # valgrind --leak-check=full --num-callers=64
         ./scripts/ci/Xvfb-contour-run.sh \
               "notcurses-demo-dumps/${{ matrix.name }}" \
               ~/opt/notcurses/bin/notcurses-demo \

@@ -21,7 +21,8 @@ shift
 
 ldd `which contour`
 
-contour terminal \
+valgrind --leak-check=full --num-callers=64 --error-exitcode=112 \
+    contour terminal \
         debug pty,gui.session,gui.display \
         display ${DISPLAY} \
         early-exit-threshold 0 \
