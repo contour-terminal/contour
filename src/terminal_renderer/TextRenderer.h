@@ -113,6 +113,7 @@ enum class TextShapingEngine
 
 enum class FontLocatorEngine
 {
+    Mock,       //!< mock font locator API
     FontConfig, //!< platform independant font locator API
     DWrite,     //!< native platform support: Windows
     CoreText,   //!< native font locator on OS/X
@@ -318,6 +319,7 @@ struct formatter<terminal::renderer::FontLocatorEngine>
         using terminal::renderer::FontLocatorEngine;
         switch (value)
         {
+        case FontLocatorEngine::Mock: return format_to(ctx.out(), "Mock");
         case FontLocatorEngine::FontConfig: return format_to(ctx.out(), "FontConfig");
         case FontLocatorEngine::DWrite: return format_to(ctx.out(), "DirectWrite");
         case FontLocatorEngine::CoreText: return format_to(ctx.out(), "CoreText");
