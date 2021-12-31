@@ -433,6 +433,7 @@ Screen<EventListener>::Screen(PageSize _size,
 #else
     setMode(DECMode::AutoWrap, true);
     setMode(DECMode::TextReflow, true);
+    setMode(DECMode::SixelCursorNextToGraphic, _sixelCursorConformance);
 #endif
 }
 
@@ -1007,6 +1008,7 @@ void Screen<T>::resetHard()
     modes_ = Modes {};
     setMode(DECMode::AutoWrap, true);
     setMode(DECMode::TextReflow, allowReflowOnResize_);
+    setMode(DECMode::SixelCursorNextToGraphic, sixelCursorConformance_);
 
     clearAllTabs();
 
@@ -2203,7 +2205,7 @@ void Screen<T>::sixelImage(ImageSize _pixelSize, Image::Data&& _data)
                 resizePolicy,
                 autoScrollAtBottomMargin);
 
-    if (!sixelCursorConformance_)
+    if (!isModeEnabled(DECMode::SixelCursorNextToGraphic))
         linefeed(topLeft.column);
 }
 

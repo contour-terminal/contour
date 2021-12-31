@@ -93,7 +93,7 @@ class Modes
     // TODO: make this a vector<bool> by casting from Mode, but that requires ensured small linearity in Mode
     // enum values.
     std::bitset<32> ansi_;                            // AnsiMode
-    std::bitset<2048> dec_;                           // DECMode
+    std::bitset<8452 + 1> dec_;                       // DECMode
     std::map<DECMode, std::vector<bool>> savedModes_; //!< saved DEC modes
 };
 // }}}
