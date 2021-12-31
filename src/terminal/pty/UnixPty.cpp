@@ -208,6 +208,7 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
         int rv = select(nfds, &rfd, &wfd, &efd, &tv);
         if (rv == 0)
         {
+            LOGSTORE(PtyInLog)("PTY read() timed out.");
             errno = EAGAIN;
             return nullopt;
         }
@@ -219,7 +220,10 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
         }
 
         if (rv < 0)
+        {
+            LOGSTORE(PtyInLog)("PTY read() failed. {}", strerror(errno));
             return nullopt;
+        }
 
         bool piped = false;
         if (FD_ISSET(pipe_[0], &rfd))
@@ -262,9 +266,6 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
 
 int UnixPty::write(char const* buf, size_t size)
 {
-    if (PtyOutLog)
-        LOGSTORE(PtyOutLog)("Sending bytes: \"{}\"", crispy::escape(buf, buf + size));
-
     timeval tv {};
     tv.tv_sec = 1;
     tv.tv_usec = 0;
@@ -277,16 +278,27 @@ int UnixPty::write(char const* buf, size_t size)
     FD_SET(master_, &wfd);
     FD_SET(pipe_[0], &rfd);
     auto const nfds = 1 + max(master_, pipe_[0]);
+
     if (select(nfds, &rfd, &wfd, &efd, &tv) < 0)
         return -1;
+
+    if (!FD_ISSET(master_, &wfd))
+    {
+        LOGSTORE(PtyOutLog)("PTY write of {} bytes timed out.\n", size);
+        return 0;
+    }
 
     ssize_t rv = ::write(master_, buf, size);
     if (PtyOutLog)
     {
+        if (rv >= 0)
+            LOGSTORE(PtyOutLog)("Sending bytes: \"{}\"", crispy::escape(buf, buf + rv));
+
         if (rv < 0)
-            errorlog()("Write failed: {}", strerror(errno));
+            // errorlog()("PTY write failed: {}", strerror(errno));
+            LOGSTORE(PtyOutLog)("PTY write of {} bytes failed. {}\n", size, strerror(errno));
         else if (0 <= rv && rv < size)
-            LOGSTORE(PtyOutLog)("Partial write: {} of {} written.", rv, size);
+            LOGSTORE(PtyOutLog)("Partial write. {} bytes written and {} bytes left.", rv, size - rv);
     }
 
     return static_cast<int>(rv);
