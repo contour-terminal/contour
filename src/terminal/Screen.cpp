@@ -560,11 +560,6 @@ void Screen<T>::write(std::string_view _data)
     if (_data.empty())
         return;
 
-#if defined(LIBTERMINAL_LOG_RAW)
-    if (ScreenRawOutputLog)
-        LOGSTORE(ScreenRawOutputLog)("Received bytes: \"{}\"", escape(_data));
-#endif
-
     parser_.parseFragment(_data);
 
     if (modes_.enabled(DECMode::BatchedRendering))
@@ -576,11 +571,6 @@ void Screen<T>::write(std::string_view _data)
 template <typename T>
 void Screen<T>::write(std::u32string_view _data)
 {
-#if defined(LIBTERMINAL_LOG_RAW)
-    if (ScreenRawOutputLog)
-        LOGSTORE(ScreenRawOutputLog)("Received bytes: \"{}\"", escape(unicode::convert_to<char>(_data)));
-#endif
-
     parser_.parseFragment(_data);
 
     if (modes_.enabled(DECMode::BatchedRendering))
@@ -2433,10 +2423,7 @@ void Screen<T>::requestStatusString(RequestStatusString _value)
             // xterm adapts this by resizing its window.
             if (*pageSize_.lines >= 24)
                 return fmt::format("{}t", pageSize_.lines);
-#if defined(LIBTERMINAL_LOG_RAW)
-            LOGSTORE(ScreenRawOutputLog)
-            ("Requesting device status for {} not with line count < 24 is undefined.");
-#endif
+            errorlog()("Requesting device status for {} not with line count < 24 is undefined.");
             return nullopt;
         case RequestStatusString::DECSTBM:
             return fmt::format("{};{}r", 1 + *margin_.vertical.from, *margin_.vertical.to);
@@ -2449,9 +2436,7 @@ void Screen<T>::requestStatusString(RequestStatusString _value)
         case RequestStatusString::SGR:
             return fmt::format("0;{}m", vtSequenceParameterString(cursor_.graphicsRendition));
         case RequestStatusString::DECSCA: // TODO
-#if defined(LIBTERMINAL_LOG_RAW)
-            LOGSTORE(ScreenRawOutputLog)("Requesting device status for {} not implemented yet.", _value);
-#endif
+            errorlog()("Requesting device status for {} not implemented yet.", _value);
             break;
         }
         return nullopt;
@@ -2502,10 +2487,7 @@ void Screen<T>::requestCapability(std::string_view _name)
 {
     if (!respondToTCapQuery_)
     {
-#if defined(LIBTERMINAL_LOG_RAW)
-        LOGSTORE(ScreenRawOutputLog)
-        ("Requesting terminal capability {} ignored. Experimental tcap feature disabled.", _name);
-#endif
+        errorlog()("Requesting terminal capability {} ignored. Experimental tcap feature disabled.", _name);
         return;
     }
 
@@ -2529,18 +2511,10 @@ void Screen<T>::requestCapability(capabilities::Code _code)
 {
     if (!respondToTCapQuery_)
     {
-#if defined(LIBTERMINAL_LOG_RAW)
-        if (ScreenRawOutputLog)
-            LOGSTORE(ScreenRawOutputLog)
-        ("Requesting terminal capability {} ignored. Experimental tcap feature disabled.", _code);
-#endif
+        errorlog()("Requesting terminal capability {} ignored. Experimental tcap feature disabled.", _code);
         return;
     }
 
-#if defined(LIBTERMINAL_LOG_RAW)
-    if (ScreenRawOutputLog)
-        LOGSTORE(ScreenRawOutputLog)("Requesting terminal capability: {}", _code);
-#endif
     if (booleanCapability(_code))
         reply("\033P1+r{}\033\\", _code.hex());
     else if (auto const value = numericCapability(_code); value >= 0)

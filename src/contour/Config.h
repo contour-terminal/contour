@@ -25,6 +25,7 @@
 #include <terminal_renderer/TextRenderer.h>       // FontDescriptions
 
 #include <text_shaper/font.h>
+#include <text_shaper/mock_font_locator.h>
 
 #include <crispy/size.h>
 #include <crispy/stdfs.h>

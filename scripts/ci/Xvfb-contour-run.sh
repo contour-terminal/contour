@@ -21,7 +21,8 @@ shift
 
 ldd `which contour`
 
-contour terminal \
+$CONTOUR_PREFIX \
+    contour terminal \
         debug pty,gui.session,gui.display \
         display ${DISPLAY} \
         early-exit-threshold 0 \

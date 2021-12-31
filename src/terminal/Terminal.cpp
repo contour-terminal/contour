@@ -714,15 +714,22 @@ bool Terminal::hasInput() const noexcept
     return !inputGenerator_.peek().empty();
 }
 
+size_t Terminal::pendingInputBytes() const noexcept
+{
+    return !inputGenerator_.peek().size();
+}
+
 void Terminal::flushInput()
 {
-    inputGenerator_.swap(pendingInput_);
-    if (pendingInput_.empty())
+    auto const _l = std::lock_guard { inputGenerator_ };
+    if (inputGenerator_.peek().empty())
         return;
 
     // XXX Should be the only location that does write to the PTY's stdin to avoid race conditions.
-    pty_.write(pendingInput_.data(), pendingInput_.size());
-    pendingInput_.clear();
+    auto const input = inputGenerator_.peek();
+    auto const rv = pty_.write(input.data(), input.size());
+    if (rv > 0)
+        inputGenerator_.consume(rv);
 }
 
 void Terminal::writeToScreen(string_view _data)

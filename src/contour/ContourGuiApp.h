@@ -57,7 +57,7 @@ class ContourGuiApp: public ContourApp
     void onExit(TerminalSession& _session);
 
   private:
-    bool loadConfig();
+    bool loadConfig(std::string const& target);
     int terminalGuiAction();
     int fontConfigAction();
     std::chrono::seconds earlyExitThreshold() const;

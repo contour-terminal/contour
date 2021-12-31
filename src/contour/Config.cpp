@@ -17,6 +17,8 @@
 #include <terminal/InputGenerator.h>
 #include <terminal/Process.h>
 
+#include <text_shaper/mock_font_locator.h>
+
 #include <crispy/escape.h>
 #include <crispy/logstore.h>
 #include <crispy/overloaded.h>
@@ -920,50 +922,44 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _path,
     return colors;
 }
 
-void softLoadFont(terminal::renderer::TextShapingEngine _textShapingEngine,
-                  UsedKeys& _usedKeys,
+void softLoadFont(UsedKeys& _usedKeys,
                   string_view _basePath,
                   YAML::Node const& _node,
-                  string_view _key,
                   text::font_description& _store)
 {
-    auto node = _node[string(_key)];
-    if (!node)
-        return;
-
-    if (node.IsScalar())
+    if (_node.IsScalar())
     {
-        _store.familyName = node.as<string>();
-        _usedKeys.emplace(fmt::format("{}.{}", _basePath, _key));
+        _store.familyName = _node.as<string>();
+        _usedKeys.emplace(_basePath);
     }
-    else if (node.IsMap())
+    else if (_node.IsMap())
     {
-        _usedKeys.emplace(fmt::format("{}.{}", _basePath, _key));
+        _usedKeys.emplace(_basePath);
 
-        if (node["family"].IsScalar())
+        if (_node["family"].IsScalar())
         {
-            _usedKeys.emplace(fmt::format("{}.{}.{}", _basePath, _key, "family"));
-            _store.familyName = node["family"].as<string>();
+            _usedKeys.emplace(fmt::format("{}.{}", _basePath, "family"));
+            _store.familyName = _node["family"].as<string>();
         }
 
-        if (node["slant"].IsScalar())
+        if (_node["slant"].IsScalar())
         {
-            _usedKeys.emplace(fmt::format("{}.{}.{}", _basePath, _key, "slant"));
-            if (auto const p = text::make_font_slant(node["slant"].as<string>()))
+            _usedKeys.emplace(fmt::format("{}.{}", _basePath, "slant"));
+            if (auto const p = text::make_font_slant(_node["slant"].as<string>()))
                 _store.slant = p.value();
         }
 
-        if (node["weight"].IsScalar())
+        if (_node["weight"].IsScalar())
         {
-            _usedKeys.emplace(fmt::format("{}.{}.{}", _basePath, _key, "weight"));
-            if (auto const p = text::make_font_weight(node["weight"].as<string>()))
+            _usedKeys.emplace(fmt::format("{}.{}", _basePath, "weight"));
+            if (auto const p = text::make_font_weight(_node["weight"].as<string>()))
                 _store.weight = p.value();
         }
 
-        if (node["features"].IsSequence())
+        if (_node["features"] && _node["features"].IsSequence())
         {
-            _usedKeys.emplace(fmt::format("{}.{}.{}", _basePath, _key, "features"));
-            YAML::Node featuresNode = node["features"];
+            _usedKeys.emplace(fmt::format("{}.{}", _basePath, "features"));
+            YAML::Node featuresNode = _node["features"];
             for (int i = 0; i < featuresNode.size(); ++i)
             {
                 YAML::Node const featureNode = featuresNode[i];
@@ -975,6 +971,28 @@ void softLoadFont(terminal::renderer::TextShapingEngine _textShapingEngine,
                 auto const tag = featureNode.as<string>();
                 _store.features.emplace_back(tag[0], tag[1], tag[2], tag[3]);
             }
+        }
+    }
+}
+
+void softLoadFont(terminal::renderer::TextShapingEngine _textShapingEngine,
+                  UsedKeys& _usedKeys,
+                  string_view _basePath,
+                  YAML::Node const& _node,
+                  string const& _key,
+                  text::font_description& _store)
+{
+    auto node = _node[_key];
+    if (!node)
+        return;
+
+    softLoadFont(_usedKeys, fmt::format("{}.{}", _basePath, _key), node, _store);
+
+    if (node.IsMap())
+    {
+        _usedKeys.emplace(fmt::format("{}.{}", _basePath, _key));
+        if (node["features"].IsSequence())
+        {
             using terminal::renderer::TextShapingEngine;
             switch (_textShapingEngine)
             {
@@ -1247,6 +1265,8 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
             profile.fonts.fontLocator = terminal::renderer::FontLocatorEngine::DWrite;
         else if (lwrValue == "native")
             profile.fonts.fontLocator = NativeFontLocator;
+        else if (lwrValue == "mock")
+            profile.fonts.fontLocator = terminal::renderer::FontLocatorEngine::Mock;
         else
             LOGSTORE(ConfigLog)
         ("Invalid value for configuration key {}.font.locator: {}", basePath, strValue);
@@ -1483,6 +1503,23 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
             _config.renderingBackend = RenderingBackend::Software;
         else if (renderingBackendStr != "" && renderingBackendStr != "DEFAULT")
             errorlog()("Unknown renderer: {}.", renderingBackendStr);
+    }
+
+    if (doc["mock_font_locator"].IsSequence())
+    {
+        vector<text::font_description_and_source> registry;
+        usedKeys.emplace("mock_font_locator");
+        for (size_t i = 0; i < doc["mock_font_locator"].size(); ++i)
+        {
+            auto const node = doc["mock_font_locator"][i];
+            auto const fontBasePath = fmt::format("mock_font_locator.{}", i);
+            text::font_description_and_source fds;
+            softLoadFont(usedKeys, fontBasePath, node, fds.description);
+            fds.source = text::font_path { node["path"].as<string>() };
+            usedKeys.emplace(fmt::format("{}.path", fontBasePath));
+            registry.emplace_back(move(fds));
+        }
+        text::mock_font_locator::configure(move(registry));
     }
 
     tryLoadValue(usedKeys, doc, "read_buffer_size", _config.ptyReadBufferSize);

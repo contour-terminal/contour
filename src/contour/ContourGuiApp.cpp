@@ -179,9 +179,10 @@ void ContourGuiApp::onExit(TerminalSession& _session)
     exitStatus_ = pty->process().checkStatus();
 }
 
-bool ContourGuiApp::loadConfig()
+bool ContourGuiApp::loadConfig(string const& target)
 {
     auto const& flags = parameters();
+    auto const prefix = "contour." + target + ".";
 
     auto configFailures = int { 0 };
     auto const configLogger = [&](string const& _msg) {
@@ -189,12 +190,12 @@ bool ContourGuiApp::loadConfig()
         ++configFailures;
     };
 
-    if (auto const filterString = flags.get<string>("contour.terminal.debug"); !filterString.empty())
+    if (auto const filterString = flags.get<string>(prefix + "debug"); !filterString.empty())
     {
         logstore::configure(filterString);
     }
 
-    auto const configPath = QString::fromStdString(flags.get<string>("contour.terminal.config"));
+    auto const configPath = QString::fromStdString(flags.get<string>(prefix + "config"));
 
     config_ = configPath.isEmpty() ? contour::config::loadConfig()
                                    : contour::config::loadConfigFromFile(configPath.toStdString());
@@ -236,7 +237,7 @@ bool ContourGuiApp::loadConfig()
 
 int ContourGuiApp::fontConfigAction()
 {
-    if (!loadConfig())
+    if (!loadConfig("font-locator"))
         return EXIT_FAILURE;
 
     terminal::renderer::FontDescriptions const& fonts = config_.profile(config_.defaultProfileName)->fonts;
@@ -255,7 +256,7 @@ int ContourGuiApp::fontConfigAction()
 
 int ContourGuiApp::terminalGuiAction()
 {
-    if (!loadConfig())
+    if (!loadConfig("terminal"))
         return EXIT_FAILURE;
 
     switch (config_.renderingBackend)

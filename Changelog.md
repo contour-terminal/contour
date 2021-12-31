@@ -11,6 +11,7 @@
 - Adds new configuration option `profiles.*.copy_last_mark_range_offset` (default `0`) to adjust where to start looking upwards for the `CopyPreviousMarkRange` action. This is useful for multi-line prompts.
 - Adds new configuration option `platform_plugin`.
 - Adds new configuration option `renderer` for explicitly setting renderer to one of: `OpenGL`, `software`, `default`.
+- Adds `mock` font locator.
 
 ### 0.2.3 (2021-12-12)
 

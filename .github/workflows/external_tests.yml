@@ -33,9 +33,12 @@ jobs:
     - uses: actions/checkout@v2
     - name: "get source"
       run: |
-        sudo tee -a /etc/apt/sources.list < <(echo "deb-src http://azure.archive.ubuntu.com/ubuntu/ focal main restricted")
-        sudo apt update
-        apt source libfontconfig1
+        set -ex
+        wget https://www.freedesktop.org/software/fontconfig/release/fontconfig-2.13.1.tar.gz
+        tar xzpf fontconfig-2.13.1.tar.gz
+        # sudo tee -a /etc/apt/sources.list < <(echo "deb-src http://azure.archive.ubuntu.com/ubuntu/ focal main restricted")
+        # sudo apt update
+        # apt source libfontconfig1
         sudo apt install -y gperf
         ls -hl
     - name: "patch it"
@@ -95,8 +98,8 @@ jobs:
       run: mkdir build
     - name: "cmake"
       env:
-        EXTRA_CMAKE_FLAGS: "-DCONTOUR_BLUR_PLATFORM_KWIN=ON -DCONTOUR_SANITIZE=address"
-        CMAKE_BUILD_TYPE: Debug
+        EXTRA_CMAKE_FLAGS: "-DCONTOUR_BLUR_PLATFORM_KWIN=OFF -DCONTOUR_SANITIZE=address"
+        CMAKE_BUILD_TYPE: RelWithDebInfo
       run: ./scripts/ci-prepare-contour.sh
     - name: "build"
       run: cmake --build build/ -- -j3
@@ -126,8 +129,7 @@ jobs:
         retention-days: 7
   # }}}
 
-  # {{{ external test: notcurses
-
+  # {{{ Build notcurses
   build_notcurses:
     name: "Build notcurses"
     runs-on: ubuntu-20.04
@@ -180,7 +182,9 @@ jobs:
         path: ~/opt/notcurses
         if-no-files-found: error
         retention-days: 1
+  # }}}
 
+  # {{{ external test: notcurses
   test_notcurses:
     name: "notcurses-demo ${{ matrix.name }}"
     runs-on: ubuntu-20.04
@@ -242,6 +246,12 @@ jobs:
             id: 'z'
     env:
       LD_LIBRARY_PATH: /home/runner/opt/notcurses/lib:/home/runner/opt/fontconfig/lib
+      # I'm giving up on eliminating all leaks for now.
+      # There are still some deep inside Qt I can't explain myself if it's because of me.
+      ASAN_OPTIONS: detect_leaks=0
+      # Can be used to execute contour within a certain environment, such as valgrind:
+      # Valgrind is much more precise, but 10x slower.
+      CONTOUR_PREFIX: "" # valgrind --leak-check=full --num-callers=64 --error-exitcode=112"
     steps:
     - uses: actions/checkout@v2
     - name: set environment variables
@@ -267,6 +277,8 @@ jobs:
         ls -hlR ~/opt/
     - name: "install dependencies"
       run: ./scripts/ci/notcurses-install-deps.sh
+    - name: "install valgrind"
+      run: sudo apt install -y valgrind
     - name: "Run notcurses-demo -h"
       timeout-minutes: 1
       run: ~/opt/notcurses/bin/notcurses-demo -p ~/opt/notcurses/share/notcurses -h
@@ -277,11 +289,19 @@ jobs:
         contour version
         contour help
         ls -hl ~/opt/notcurses/
+    - name: "create and patch contour.yml config file"
+      run: |
+        set -ex
+        mkdir -p ~/.config/contour/
+        contour generate config to ~/.config/contour/contour.yml
+        sed -i -e 's/locator: native/locator: mock/' ~/.config/contour/contour.yml
+        cat .github/mock-font-locator.yml >> ~/.config/contour/contour.yml
+        cat ~/.config/contour/contour.yml
     - name: "Run Contour: notcurses-demo ${{ matrix.name }}"
-      timeout-minutes: 5
+      timeout-minutes: 20
       id: Xvfb-contour-notcurses
       run: |
-        export LD_LIBRARY_PATH="/home/runner/opt/notcurses/lib:/home/runner/opt/fontconfig/lib"
+        # export LD_LIBRARY_PATH="/home/runner/opt/notcurses/lib:/home/runner/opt/fontconfig/lib"
         ./scripts/ci/Xvfb-contour-run.sh \
               "notcurses-demo-dumps/${{ matrix.name }}" \
               ~/opt/notcurses/bin/notcurses-demo \

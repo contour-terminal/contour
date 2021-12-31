@@ -20,6 +20,7 @@
 #include <terminal_renderer/utils.h>
 
 #include <text_shaper/fontconfig_locator.h>
+#include <text_shaper/mock_font_locator.h>
 
 #if defined(_WIN32)
     #include <text_shaper/directwrite_locator.h>
@@ -80,7 +81,7 @@ std::unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine)
 {
     switch (_engine)
     {
-    // TODO: GDI / DirectWrite needs to be hooked in here
+    case FontLocatorEngine::Mock: return make_unique<text::mock_font_locator>();
     case FontLocatorEngine::DWrite:
 #if defined(_WIN32)
         return make_unique<text::directwrite_locator>();
@@ -96,7 +97,9 @@ std::unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine)
 #endif
         break;
 
-    case FontLocatorEngine::FontConfig: break;
+    case FontLocatorEngine::FontConfig:
+        // default case below
+        break;
     }
 
     LOGSTORE(text::LocatorLog)("Using font locator: fontconfig.");

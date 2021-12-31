@@ -21,6 +21,7 @@
 
 #include <unicode/convert.h>
 
+#include <mutex>
 #include <optional>
 #include <set>
 #include <string>
@@ -281,15 +282,23 @@ class InputGenerator
     /// Generates raw input, usually used for sending reply VT sequences.
     bool generateRaw(std::string_view const& _raw);
 
-    /// Swaps out the generated input control sequences.
-    void swap(Sequence& _other);
-
     /// Peeks into the generated output, returning it as string view.
     ///
     /// @return a view into the generated buffer sequence.
     std::string_view peek() const noexcept
     {
-        return std::string_view(pendingSequence_.data(), pendingSequence_.size());
+        return std::string_view(pendingSequence_.data() + consumedBytes_,
+                                pendingSequence_.size() - consumedBytes_);
+    }
+
+    void consume(int n)
+    {
+        consumedBytes_ += n;
+        if (consumedBytes_ == pendingSequence_.size())
+        {
+            consumedBytes_ = 0;
+            pendingSequence_.clear();
+        }
     }
 
     enum class MouseEventType
@@ -301,6 +310,9 @@ class InputGenerator
 
     /// Resets the input generator's state, as required by the RIS (hard reset) VT sequence.
     void reset();
+
+    void lock() noexcept { mutex_.lock(); }
+    void unlock() noexcept { mutex_.unlock(); }
 
   private:
     bool generateMouse(MouseButton _button, Modifier _modifier, Coordinate _pos, MouseEventType _eventType);
@@ -325,6 +337,8 @@ class InputGenerator
     MouseTransport mouseTransport_ = MouseTransport::Default;
     MouseWheelMode mouseWheelMode_ = MouseWheelMode::Default;
     Sequence pendingSequence_ {};
+    int consumedBytes_ {};
+    std::mutex mutex_ {};
 
     std::set<MouseButton> currentlyPressedMouseButtons_ {};
     Coordinate currentMousePosition_ {}; // current mouse position
