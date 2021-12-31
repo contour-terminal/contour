@@ -16,6 +16,8 @@
 #include <crispy/logstore.h>
 #include <crispy/utils.h>
 
+#include <fmt/chrono.h>
+
 #include <algorithm>
 #include <array>
 #include <iomanip>
@@ -29,8 +31,6 @@
     #include <sys/ioctl.h>
 #endif
 
-using namespace std::string_view_literals;
-
 using std::bind;
 using std::cout;
 using std::endl;
@@ -43,6 +43,11 @@ using std::setfill;
 using std::setw;
 using std::string;
 using std::string_view;
+using std::chrono::duration_cast;
+
+using namespace std::string_view_literals;
+
+namespace chrono = std::chrono;
 
 namespace CLI = crispy::cli;
 
@@ -280,10 +285,16 @@ void App::customizeLogStoreOutput()
                 result += "        ";
             else
             {
+                auto const now = chrono::system_clock::now();
+                auto const micros =
+                    duration_cast<chrono::microseconds>(now.time_since_epoch()).count() % 1'000'000;
                 result += sgrTag;
-                result +=
-                    fmt::format("[{}:{}:{}] ", _msg.category().name(), fileName, _msg.location().line());
+                result += fmt::format("[{:%Y-%m-%d %H:%M:%S}.{:06}] [{}]",
+                                      chrono::system_clock::now(),
+                                      micros,
+                                      _msg.category().name()); // clang-format off
                 result += sgrReset;
+                result += ' ';
             }
 
             result += sgrMessage;
