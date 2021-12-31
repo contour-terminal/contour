@@ -219,8 +219,8 @@ install_deps_arch()
         fmt \
         fontconfig \
         git \
-        gsl \
         harfbuzz \
+        microsoft-gsl \
         ninja \
         qt5-base \
         range-v3 \
