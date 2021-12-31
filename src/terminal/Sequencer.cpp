@@ -1363,7 +1363,10 @@ ApplyResult Sequencer<T>::apply(FunctionDefinition const& _function, Sequence co
     case CUU: screen_.moveCursorUp(_seq.param_or<LineCount>(0, LineCount { 1 })); break;
     case DA1: screen_.sendDeviceAttributes(); break;
     case DA2: screen_.sendTerminalId(); break;
-    case DA3: return ApplyResult::Unsupported;
+    case DA3:
+        // terminal identification, 4 hex codes
+        screen_.reply("\033P!|C0000000\033\\");
+        break;
     case DCH: screen_.deleteCharacters(_seq.param_or<ColumnCount>(0, ColumnCount { 0 })); break;
     case DECCRA: {
         // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
