@@ -184,6 +184,12 @@ enum class DECMode
     // If this mode is set, the current line and any line below is allowed to reflow.
     // Default: Enabled (if supported by terminal).
     TextReflow = 2027,
+
+    // If enabled (default, as per spec), then the cursor is left next to the graphic,
+    // that is, the text cursor is placed at the position of the sixel cursor.
+    // If disabled otherwise, the cursor is placed below the image, as if CR LF was sent,
+    // which is how xterm behaves by default (sadly).
+    SixelCursorNextToGraphic = 8452,
     // }}}
 }; // }}}
 
@@ -294,6 +300,7 @@ constexpr unsigned toDECModeNum(DECMode m)
     case DECMode::MouseAlternateScroll: return 1007;
     case DECMode::BatchedRendering: return 2026;
     case DECMode::TextReflow: return 2027;
+    case DECMode::SixelCursorNextToGraphic: return 8452;
     }
     return static_cast<unsigned>(m);
 }
@@ -334,7 +341,9 @@ constexpr bool isValidDECMode(int _mode) noexcept
     case DECMode::MouseURXVT:
     case DECMode::MouseAlternateScroll:
     case DECMode::BatchedRendering:
-    case DECMode::TextReflow: return true;
+    case DECMode::TextReflow:
+    case DECMode::SixelCursorNextToGraphic: // clang-format off
+        return true;
     }
     return false;
 }

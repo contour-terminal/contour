@@ -13,6 +13,7 @@
 - Adds new configuration option `platform_plugin`.
 - Adds new configuration option `renderer` for explicitly setting renderer to one of: `OpenGL`, `software`, `default`.
 - Adds `mock` font locator.
+- Adds VT sequence `SM ? 8452 h` and `RM ? 8452 l` for enabling/disabling sixel cursor placement conformance (xterm extension).
 
 ### 0.2.3 (2021-12-12)
 

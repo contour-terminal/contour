@@ -192,6 +192,7 @@ namespace impl // {{{ some command generator helpers
         case 2004: return DECMode::BracketedPaste;
         case 2026: return DECMode::BatchedRendering;
         case 2027: return DECMode::TextReflow;
+        case 8452: return DECMode::SixelCursorNextToGraphic;
         }
         return nullopt;
     }
@@ -1616,6 +1617,7 @@ std::string to_string(DECMode _mode)
     case DECMode::MouseAlternateScroll: return "MouseAlternateScroll";
     case DECMode::BatchedRendering: return "BatchedRendering";
     case DECMode::TextReflow: return "TextReflow";
+    case DECMode::SixelCursorNextToGraphic: return "SixelCursorNextToGraphic";
     }
     return fmt::format("({})", static_cast<unsigned>(_mode));
 };
