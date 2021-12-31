@@ -225,7 +225,10 @@ inline void Cell::write(GraphicsAttributes const& _attributes, char32_t _ch, uin
 
     codepoint_ = _ch;
     if (extra_)
+    {
         extra_->codepoints.clear();
+        extra_->imageFragment = {};
+    }
 
     foregroundColor_ = _attributes.foregroundColor;
     backgroundColor_ = _attributes.backgroundColor;
@@ -246,7 +249,10 @@ inline void Cell::write(GraphicsAttributes const& _attributes,
 
     codepoint_ = _ch;
     if (extra_)
+    {
         extra_->codepoints.clear();
+        extra_->imageFragment = {};
+    }
 
     foregroundColor_ = _attributes.foregroundColor;
     backgroundColor_ = _attributes.backgroundColor;
@@ -310,7 +316,10 @@ inline void Cell::setCharacter(char32_t _codepoint) noexcept
 {
     codepoint_ = _codepoint;
     if (extra_)
+    {
         extra_->codepoints.clear();
+        extra_->imageFragment = {};
+    }
     if (_codepoint)
         setWidth(static_cast<uint8_t>(std::max(unicode::width(_codepoint), 1)));
     else
