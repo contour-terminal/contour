@@ -7,6 +7,7 @@
 - Fixes installation from `.deb` (missing terminfo dependency)
 - Improved VT backend performance (#342).
 - Improved text selection behaviour.
+- Adds preliminary implementation of `DA3` VT sequence.
 - Adds new configuration option `mouse_block_selection_modifier`.
 - Adds new configuration option `profiles.*.copy_last_mark_range_offset` (default `0`) to adjust where to start looking upwards for the `CopyPreviousMarkRange` action. This is useful for multi-line prompts.
 - Adds new configuration option `platform_plugin`.
