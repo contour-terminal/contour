@@ -426,7 +426,7 @@ Screen<EventListener>::Screen(PageSize _size,
     cursor_ {},
     lastCursorPosition_ {},
     hyperlinks_ { HyperlinkCache { 1024 } },
-    respondToTCapQuery_ { false }
+    respondToTCapQuery_ { true }
 {
 #if 0
     resetHard();
