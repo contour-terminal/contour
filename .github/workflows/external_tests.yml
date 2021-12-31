@@ -98,7 +98,7 @@ jobs:
       run: mkdir build
     - name: "cmake"
       env:
-        EXTRA_CMAKE_FLAGS: "-DCONTOUR_BLUR_PLATFORM_KWIN=OFF" # -DCONTOUR_SANITIZE=address"
+        EXTRA_CMAKE_FLAGS: "-DCONTOUR_BLUR_PLATFORM_KWIN=OFF -DCONTOUR_SANITIZE=address"
         CMAKE_BUILD_TYPE: RelWithDebInfo
       run: ./scripts/ci-prepare-contour.sh
     - name: "build"
@@ -246,6 +246,12 @@ jobs:
             id: 'z'
     env:
       LD_LIBRARY_PATH: /home/runner/opt/notcurses/lib:/home/runner/opt/fontconfig/lib
+      # I'm giving up on eliminating all leaks for now.
+      # There are still some deep inside Qt I can't explain myself if it's because of me.
+      ASAN_OPTIONS: detect_leaks=0
+      # Can be used to execute contour within a certain environment, such as valgrind:
+      # Valgrind is much more precise, but 10x slower.
+      CONTOUR_PREFIX: "" # valgrind --leak-check=full --num-callers=64 --error-exitcode=112"
     steps:
     - uses: actions/checkout@v2
     - name: set environment variables
@@ -295,7 +301,7 @@ jobs:
       timeout-minutes: 20
       id: Xvfb-contour-notcurses
       run: |
-        export LD_LIBRARY_PATH="/home/runner/opt/notcurses/lib:/home/runner/opt/fontconfig/lib"
+        # export LD_LIBRARY_PATH="/home/runner/opt/notcurses/lib:/home/runner/opt/fontconfig/lib"
         ./scripts/ci/Xvfb-contour-run.sh \
               "notcurses-demo-dumps/${{ matrix.name }}" \
               ~/opt/notcurses/bin/notcurses-demo \
