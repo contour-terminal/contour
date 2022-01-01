@@ -1368,7 +1368,7 @@ ApplyResult Sequencer<T>::apply(FunctionDefinition const& _function, Sequence co
         // terminal identification, 4 hex codes
         screen_.reply("\033P!|C0000000\033\\");
         break;
-    case DCH: screen_.deleteCharacters(_seq.param_or<ColumnCount>(0, ColumnCount { 0 })); break;
+    case DCH: screen_.deleteCharacters(_seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
     case DECCRA: {
         // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
         // DECCRA is not affected by the page margins.
