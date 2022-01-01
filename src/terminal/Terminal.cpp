@@ -301,7 +301,6 @@ void Terminal::refreshRenderBuffer(RenderBuffer& _output)
 
 RenderCell makeRenderCell(ColorPalette const& _colorPalette,
                           HyperlinkStorage const& _hyperlinks,
-                          ImageFragmentCache const& _imageFragments,
                           Cell const& _cell,
                           RGBColor fg,
                           RGBColor bg,
@@ -322,8 +321,7 @@ RenderCell makeRenderCell(ColorPalette const& _colorPalette,
             cell.codepoints.push_back(_cell.codepoint(i));
     }
 
-    if (ImageFragment const* fragment = _imageFragments.try_get(_cell.imageFragment()))
-        cell.image = *fragment;
+    cell.image = _cell.imageFragment();
 
     if (auto href = _hyperlinks.hyperlinkById(_cell.hyperlink()))
     {
@@ -445,7 +443,6 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
                     // clang-format off
                     _output.screen.emplace_back(makeRenderCell(screen_.colorPalette(),
                                                                screen_.hyperlinks(),
-                                                               screen_.imageFragments(),
                                                                _cell,
                                                                fg,
                                                                bg,
@@ -466,7 +463,6 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
                     // clang-format off
                     _output.screen.emplace_back(makeRenderCell(screen_.colorPalette(),
                                                                screen_.hyperlinks(),
-                                                               screen_.imageFragments(),
                                                                _cell,
                                                                fg,
                                                                bg,

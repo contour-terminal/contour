@@ -317,7 +317,7 @@ void Renderer::renderCells(vector<RenderCell> const& _renderableCells)
         backgroundRenderer_.renderCell(cell);
         decorationRenderer_.renderCell(cell);
         textRenderer_.renderCell(cell);
-        if (cell.image.has_value())
+        if (cell.image)
             imageRenderer_.renderImage(gridMetrics_.map(cell.position), *cell.image);
     }
 }
@@ -348,6 +348,7 @@ optional<RenderCursor> Renderer::renderCursor(Terminal const& _terminal)
 void Renderer::dumpState(std::ostream& _textOutput) const
 {
     textRenderer_.debugCache(_textOutput);
+    imageRenderer_.debugCache(_textOutput);
 }
 
 } // namespace terminal::renderer

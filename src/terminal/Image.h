@@ -16,7 +16,8 @@
 #include <terminal/Color.h>
 #include <terminal/primitives.h>
 
-#include <crispy/LRUCache.h>
+#include <crispy/StrongHash.h>
+#include <crispy/StrongLRUCache.h>
 
 #include <fmt/format.h>
 
@@ -46,24 +47,40 @@ enum class ImageFormat
 // clang-format off
 namespace detail { struct ImageId {}; }
 using ImageId = crispy::boxed<uint32_t, detail::ImageId>; // unique numerical image identifier
-// clang-format off
+// clang-format on
+
+struct ImageStats
+{
+    uint32_t instances = 0;
+    uint32_t rasterized = 0;
+    uint32_t fragments = 0;
+
+    static ImageStats& get();
+};
 
 /**
  * Represents an image that can be displayed in the terminal by being placed into the grid cells
  */
-class Image
+class Image: public std::enable_shared_from_this<Image>
 {
   public:
     using Data = std::vector<uint8_t>; // raw RGBA data
-
+    using OnImageRemove = std::function<void(Image const*)>;
     /// Constructs an RGBA image.
     ///
     /// @param _data      RGBA buffer data
     /// @param _pixelSize image dimensionss in pixels
-    Image(ImageId _id, ImageFormat _format, Data _data, ImageSize _pixelSize):
-        id_ { _id }, format_ { _format }, data_ { move(_data) }, size_ { _pixelSize }
+    Image(ImageId _id, ImageFormat _format, Data _data, ImageSize _pixelSize, OnImageRemove remover):
+        id_ { _id },
+        format_ { _format },
+        data_ { move(_data) },
+        size_ { _pixelSize },
+        onImageRemove_ { std::move(remover) }
     {
+        ++ImageStats::get().instances;
     }
+
+    ~Image();
 
     Image(Image const&) = delete;
     Image& operator=(Image const&) = delete;
@@ -82,6 +99,7 @@ class Image
     ImageFormat format_;
     Data data_;
     ImageSize size_;
+    OnImageRemove onImageRemove_;
 };
 
 /// Image resize hints are used to properly fit/fill the area to place the image onto.
@@ -112,7 +130,7 @@ enum class ImageAlignment
  * RasterizedImage wraps an Image into a fixed-size grid with some additional graphical properties for
  * rasterization.
  */
-class RasterizedImage
+class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
 {
   public:
     RasterizedImage(std::shared_ptr<Image const> _image,
@@ -128,13 +146,19 @@ class RasterizedImage
         cellSpan_ { _cellSpan },
         cellSize_ { _cellSize }
     {
+        ++ImageStats::get().rasterized;
     }
+
+    ~RasterizedImage();
 
     RasterizedImage(RasterizedImage const&) = delete;
     RasterizedImage(RasterizedImage&&) = delete;
     RasterizedImage& operator=(RasterizedImage const&) = delete;
     RasterizedImage& operator=(RasterizedImage&&) = delete;
 
+    bool valid() const noexcept { return !!image_; }
+
+    std::shared_ptr<Image const> const& imagePointer() const noexcept { return image_; }
     Image const& image() const noexcept { return *image_; }
     ImageAlignment alignmentPolicy() const noexcept { return alignmentPolicy_; }
     ImageResize resizePolicy() const noexcept { return resizePolicy_; }
@@ -158,18 +182,23 @@ class RasterizedImage
 class ImageFragment
 {
   public:
+    ImageFragment() = delete;
+
     /// @param _image  the Image this fragment is being cut off from
     /// @param _offset 0-based grid-offset into the rasterized image
-    ImageFragment(std::shared_ptr<RasterizedImage const> const& _image, Coordinate _offset):
-        rasterizedImage_ { _image }, offset_ { _offset }
+    ImageFragment(std::shared_ptr<RasterizedImage const> _image, Coordinate _offset):
+        rasterizedImage_ { std::move(_image) }, offset_ { _offset }
     {
+        ++ImageStats::get().fragments;
     }
 
-    ImageFragment(ImageFragment const&) = default;
-    ImageFragment& operator=(ImageFragment const&) = default;
+    ImageFragment(ImageFragment const&) = delete;
+    ImageFragment& operator=(ImageFragment const&) = delete;
 
     ImageFragment(ImageFragment&&) noexcept = default;
     ImageFragment& operator=(ImageFragment&&) noexcept = default;
+
+    ~ImageFragment();
 
     RasterizedImage const& rasterizedImage() const noexcept { return *rasterizedImage_; }
 
@@ -215,53 +244,81 @@ class ImagePool
   public:
     using OnImageRemove = std::function<void(Image const*)>;
 
-    constexpr static inline std::size_t MaxCapacity = 100;
-
     ImagePool(
-        OnImageRemove _onImageRemove = [](auto) {},
-        ImageId _nextImageId = ImageId(1)):
-        nextImageId_ { _nextImageId },
-        imageNameToIdCache_ { MaxCapacity },
-        imageCache_ { MaxCapacity },
-        onImageRemove_ { std::move(_onImageRemove) }
-    {
-    }
+        OnImageRemove _onImageRemove = [](auto) {}, ImageId _nextImageId = ImageId(1));
 
     /// Creates an RGBA image of given size in pixels.
     std::shared_ptr<Image const> create(ImageFormat _format, ImageSize _pixelSize, Image::Data&& _data);
 
     /// Rasterizes an Image.
-    std::shared_ptr<RasterizedImage> rasterize(ImageId _imageId,
+    std::shared_ptr<RasterizedImage> rasterize(std::shared_ptr<Image const> _image,
                                                ImageAlignment _alignmentPolicy,
                                                ImageResize _resizePolicy,
                                                RGBAColor _defaultColor,
                                                GridSize _cellSpan,
                                                ImageSize _cellSize);
 
-    void removeImage(ImageId _imageId);
-
     // named image access
     //
-    void link(std::string const& _name, std::shared_ptr<Image const> const& _imageRef);
+    void link(std::string const& _name, std::shared_ptr<Image const> _imageRef);
     std::shared_ptr<Image const> findImageByName(std::string const& _name) const noexcept;
     void unlink(std::string const& _name);
+
+    void inspect(std::ostream& os) const;
+
+    void clear();
 
   private:
     void removeRasterizedImage(RasterizedImage* _image); //!< Removes a rasterized image from pool.
 
+    using NameToImageIdCache = crispy::StrongLRUCache<std::string, std::shared_ptr<Image const>>;
+
     // data members
     //
-    ImageId nextImageId_;                                          //!< ID for next image to be put into the pool
-    crispy::LRUCache<std::string, ImageId> imageNameToIdCache_;    //!< keeps mapping from name to raw image
-    crispy::LRUCache<ImageId, std::shared_ptr<Image>> imageCache_; //!< pool of raw images
-    std::list<RasterizedImage> rasterizedImages_;                  //!< pool of rasterized images
-    OnImageRemove const onImageRemove_;                            //!< Callback to be invoked when image gets removed from pool.
+    ImageId nextImageId_;                                //!< ID for next image to be put into the pool
+    NameToImageIdCache::CachePtr imageNameToImageCache_; //!< keeps mapping from name to raw image
+    OnImageRemove const onImageRemove_; //!< Callback to be invoked when image gets removed from pool.
 };
 
 } // namespace terminal
 
+namespace crispy
+{
+
+// Move this somewhere else?
+template <>
+struct StrongHasher<terminal::ImageId>
+{
+    inline StrongHash operator()(terminal::ImageId v) noexcept
+    {
+        return StrongHasher<unsigned int> {}(v.value);
+    }
+};
+
+} // namespace crispy
+
 namespace fmt // {{{
 {
+template <>
+struct formatter<terminal::ImageStats>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(terminal::ImageStats stats, FormatContext& ctx)
+    {
+        return format_to(ctx.out(),
+                         "{} instances, {} raster, {} fragments",
+                         stats.instances,
+                         stats.rasterized,
+                         stats.fragments);
+    }
+};
+
 template <>
 struct formatter<terminal::Image>
 {
@@ -272,9 +329,51 @@ struct formatter<terminal::Image>
     }
 
     template <typename FormatContext>
-    auto format(const terminal::Image& _image, FormatContext& ctx)
+    auto format(terminal::Image const& _image, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "Image<{}, size={}>", _image.id(), _image.size());
+        return format_to(ctx.out(),
+                         "Image<#{}, {}, size={}>",
+                         _image.weak_from_this().use_count(),
+                         _image.id(),
+                         _image.size());
+    }
+};
+
+template <>
+struct formatter<std::shared_ptr<terminal::Image>>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(std::shared_ptr<terminal::Image> const& _image, FormatContext& ctx)
+    {
+        if (_image)
+            return format_to(ctx.out(), "{}", *_image);
+        else
+            return format_to(ctx.out(), "nullptr");
+    }
+};
+
+template <>
+struct formatter<std::shared_ptr<terminal::Image const>>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(std::shared_ptr<terminal::Image const> const& _image, FormatContext& ctx)
+    {
+        if (_image)
+            return format_to(ctx.out(), "{}", *_image);
+        else
+            return format_to(ctx.out(), "nullptr");
     }
 };
 
@@ -340,7 +439,8 @@ struct formatter<terminal::RasterizedImage>
     auto format(const terminal::RasterizedImage& _image, FormatContext& ctx)
     {
         return format_to(ctx.out(),
-                         "RasterizedImage<extent={}, {}, {}, {}>",
+                         "RasterizedImage<{}, {}, {}, {}, {}>",
+                         _image.weak_from_this().use_count(),
                          _image.cellSpan(),
                          _image.resizePolicy(),
                          _image.alignmentPolicy(),

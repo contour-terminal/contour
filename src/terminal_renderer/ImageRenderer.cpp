@@ -27,7 +27,7 @@ using std::optional;
 namespace terminal::renderer
 {
 
-ImageRenderer::ImageRenderer(ImageSize _cellSize): imagePool_ {}, cellSize_ { _cellSize }
+ImageRenderer::ImageRenderer(ImageSize _cellSize): cellSize_ { _cellSize }
 {
 }
 
@@ -103,6 +103,10 @@ void ImageRenderer::clearCache()
 {
     imageFragmentsInUse_.clear();
     atlas_ = std::make_unique<TextureAtlas>(renderTarget().coloredAtlasAllocator());
+}
+
+void ImageRenderer::debugCache(std::ostream& output) const
+{
 }
 
 } // namespace terminal::renderer

@@ -26,6 +26,7 @@
 #include <unicode/convert.h>
 #include <unicode/width.h>
 
+#include <memory>
 #include <string>
 
 #define LIBTERMINAL_GRAPHEME_CLUSTERS 1
@@ -85,7 +86,7 @@ struct CellExtra
     std::u32string codepoints = {};
     Color underlineColor = DefaultColor();
     HyperlinkId hyperlink = {};
-    ImageFragmentId imageFragment = {};
+    std::shared_ptr<ImageFragment> imageFragment = nullptr;
     CellFlags flags = CellFlags::None;
     uint8_t width = 1;
 };
@@ -144,9 +145,8 @@ class CONTOUR_PACKED Cell
     std::pair<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette,
                                              bool _reverseVideo) const noexcept;
 
-    ImageFragmentId imageFragment() const noexcept;
-    void setImage(ImageFragmentId _imageFragment);
-    void setImage(ImageFragmentId _imageFragment, HyperlinkId _hyperlink);
+    std::shared_ptr<ImageFragment> imageFragment() const noexcept;
+    void setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, Coordinate offset);
 
     void setCharacter(char32_t _codepoint) noexcept;
     void setCharacter(char32_t _codepoint, uint8_t _width) noexcept;
@@ -493,7 +493,7 @@ inline std::pair<RGBColor, RGBColor> Cell::makeColors(ColorPalette const& _color
                              apply(_colorPalette, foregroundColor(), fgColorTarget, false) };
 }
 
-inline ImageFragmentId Cell::imageFragment() const noexcept
+inline std::shared_ptr<ImageFragment> Cell::imageFragment() const noexcept
 {
     if (extra_)
         return extra_->imageFragment;
@@ -501,19 +501,10 @@ inline ImageFragmentId Cell::imageFragment() const noexcept
         return {};
 }
 
-inline void Cell::setImage(ImageFragmentId _imageFragment)
+inline void Cell::setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, Coordinate offset)
 {
-    assert(!!_imageFragment);
     CellExtra& ext = extra();
-    ext.imageFragment = _imageFragment;
-}
-
-inline void Cell::setImage(ImageFragmentId _imageFragment, HyperlinkId _hyperlink)
-{
-    setImage(_imageFragment);
-    assert(extra_);
-    if (!!_hyperlink)
-        extra_->hyperlink = _hyperlink;
+    ext.imageFragment = std::make_shared<ImageFragment>(rasterizedImage, offset);
 }
 
 inline HyperlinkId Cell::hyperlink() const noexcept
