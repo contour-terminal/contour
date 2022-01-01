@@ -363,9 +363,12 @@ std::string createDefaultConfig()
 error_code createDefaultConfig(FileSystem::path const& _path)
 {
     FileSystemError ec;
-    FileSystem::create_directories(_path.parent_path(), ec);
-    if (ec)
-        return ec;
+    if (!_path.parent_path().empty())
+    {
+        FileSystem::create_directories(_path.parent_path(), ec);
+        if (ec)
+            return ec;
+    }
 
     ofstream { _path.string(), ios::binary | ios::trunc } << createDefaultConfig();
 
