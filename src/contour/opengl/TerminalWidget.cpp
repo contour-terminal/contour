@@ -661,11 +661,19 @@ void TerminalWidget::doDumpState()
 {
     makeCurrent();
 
-    auto const targetDir = session_.app().dumpStateAtExit().value_or(
-        crispy::App::instance()->localStateDir() / "dump"
-        / fmt::format("contour-dump-{:%Y-%m-%d-%H-%M-%S}", std::chrono::system_clock::now()));
+    // clang-format off
+    auto const targetBaseDir = session_.app().dumpStateAtExit().value_or(crispy::App::instance()->localStateDir() / "dump");
+    auto const workDirName = FileSystem::path(fmt::format("contour-dump-{:%Y-%m-%d-%H-%M-%S}", chrono::system_clock::now()));
+    auto const targetDir = targetBaseDir / workDirName;
+    auto const latestDirName = FileSystem::path("latest");
+    // clang-format on
 
     FileSystem::create_directories(targetDir);
+
+    if (FileSystem::exists(targetBaseDir / latestDirName))
+        FileSystem::remove(targetBaseDir / latestDirName);
+
+    FileSystem::create_symlink(workDirName, targetBaseDir / latestDirName);
 
     LOGSTORE(DisplayLog)("Dumping state into directory: {}", targetDir.generic_string());
 
