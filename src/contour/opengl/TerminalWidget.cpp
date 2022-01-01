@@ -692,8 +692,9 @@ void TerminalWidget::doDumpState()
         std::cout << screenStateDump;
 
         auto const screenStateDumpFilePath = targetDir / "screen-state-dump.vt";
-        auto fs = ofstream { screenStateDumpFilePath.string(), ios::trunc | ios::binary };
+        auto fs = ofstream { screenStateDumpFilePath.string(), ios::trunc };
         fs << screenStateDump;
+        fs.close();
     }
 
     enum class ImageBufferFormat

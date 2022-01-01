@@ -89,20 +89,25 @@ class ImageRenderer: public Renderable
     /// GPU caches.
     void discardImage(ImageId _imageId);
 
-    struct Metadata
-    {
-    }; // TODO: do we want/need anything here?
+    // clang-format off
+    struct Metadata {};
+    // clang-format on
+
     using TextureAtlas = atlas::MetadataTextureAtlas<ImageFragmentKey, Metadata>;
     using DataRef = TextureAtlas::DataRef;
+
+    void debugCache(std::ostream& output) const;
 
   private:
     std::optional<DataRef> getTextureInfo(ImageFragment const& _fragment);
 
+    using ImageIdToFragmentKeyMap = std::unordered_map<ImageId, std::vector<ImageFragmentKey>>;
+
     // private data
     //
-    ImagePool imagePool_;
-    std::unordered_map<ImageId, std::vector<ImageFragmentKey>>
-        imageFragmentsInUse_; // remember each fragment key per image for proper GPU texture GC.
+
+    // remember each fragment key per image for proper GPU texture GC.
+    ImageIdToFragmentKeyMap imageFragmentsInUse_;
     ImageSize cellSize_;
     std::unique_ptr<TextureAtlas> atlas_;
 };

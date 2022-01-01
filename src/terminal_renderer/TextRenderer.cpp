@@ -108,7 +108,7 @@ std::unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine)
 
 // TODO: What's a good value here? Or do we want to make that configurable,
 // or even computed based on memory resources available?
-constexpr size_t TextShapingCacheSize = 3000;
+constexpr size_t TextShapingCacheSize = 1000;
 
 TextRenderer::TextRenderer(GridMetrics const& _gridMetrics,
                            text::shaper& _textShaper,
@@ -117,9 +117,9 @@ TextRenderer::TextRenderer(GridMetrics const& _gridMetrics,
     gridMetrics_ { _gridMetrics },
     fontDescriptions_ { _fontDescriptions },
     fonts_ { _fonts },
+    cache_ { TextShapingCacheSize },
     textShaper_ { _textShaper },
-    boxDrawingRenderer_ { _gridMetrics },
-    cache_ { TextShapingCacheSize }
+    boxDrawingRenderer_ { _gridMetrics }
 {
 }
 
@@ -355,21 +355,22 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
         // Might have it done also, but better be save: glyph.position.y -= yOverflow;
         glyph.bitmap.resize(text::pixel_size(glyph.format) * unbox<size_t>(glyph.size.width)
                             * unbox<size_t>(glyph.size.height));
+        Guarantee(glyph.valid());
     }
 
     // If the rasterized glyph is underflowing below the grid cell's minimum (0),
     // then cut off at grid cell's bottom.
     if (yMin < 0)
     {
-        Require(glyph.valid());
         auto const rowCount = -yMin;
+        Require(rowCount <= *glyph.size.height);
         auto const pixelCount = rowCount * unbox<int>(glyph.size.width) * text::pixel_size(glyph.format);
-        Require(0 < pixelCount && pixelCount < glyph.bitmap.size());
+        Require(0 < pixelCount && pixelCount <= glyph.bitmap.size());
         LOGSTORE(RasterizerLog)("Cropping {} underflowing bitmap rows.", rowCount);
         glyph.size.height += Height(yMin);
         auto& data = glyph.bitmap;
         data.erase(begin(data), next(begin(data), pixelCount)); // XXX asan hit (size = -2)
-        Ensures(glyph.valid());
+        Guarantee(glyph.valid());
     }
 
     GlyphMetrics metrics {};
@@ -441,6 +442,9 @@ void TextRenderer::renderTexture(crispy::Point const& _pos,
 
 void TextRenderer::debugCache(std::ostream& _textOutput) const
 {
+    _textOutput << fmt::format("cache key storage items: {}\n", cacheKeyStorage_.size());
+    _textOutput << fmt::format("shaping cache items: {}\n", cache_.size());
+    _textOutput << fmt::format("glyph to texture mappings: {}\n", glyphToTextureMapping_.size());
 }
 
 void TextRenderer::appendCell(gsl::span<char32_t const> _codepoints, TextStyle _style, RGBColor _color)

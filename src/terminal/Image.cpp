@@ -22,8 +22,41 @@ using std::min;
 using std::move;
 using std::shared_ptr;
 
+using crispy::StrongCacheCapacity;
+using crispy::StrongHashCapacity;
+
 namespace terminal
 {
+
+ImageStats& ImageStats::get()
+{
+    static ImageStats stats {};
+    return stats;
+}
+
+Image::~Image()
+{
+    --ImageStats::get().instances;
+    onImageRemove_(this);
+}
+
+RasterizedImage::~RasterizedImage()
+{
+    --ImageStats::get().rasterized;
+}
+
+ImageFragment::~ImageFragment()
+{
+    --ImageStats::get().fragments;
+}
+
+ImagePool::ImagePool(OnImageRemove _onImageRemove, ImageId _nextImageId):
+    nextImageId_ { _nextImageId },
+    imageNameToImageCache_ { NameToImageIdCache::create(StrongHashCapacity { 1024 },
+                                                        StrongCacheCapacity { 100 }) },
+    onImageRemove_ { std::move(_onImageRemove) }
+{
+}
 
 Image::Data RasterizedImage::fragment(Coordinate _pos) const
 {
@@ -98,53 +131,48 @@ shared_ptr<Image const> ImagePool::create(ImageFormat _format, ImageSize _size, 
     // TODO: This operation should be idempotent, i.e. if that image has been created already, return a
     // reference to that.
     auto const id = nextImageId_++;
-    return imageCache_.emplace(id, make_shared<Image>(id, _format, move(_data), _size));
+    return make_shared<Image>(id, _format, move(_data), _size, onImageRemove_);
 }
 
-shared_ptr<RasterizedImage> ImagePool::rasterize(ImageId _imageId,
+shared_ptr<RasterizedImage> ImagePool::rasterize(shared_ptr<Image const> _image,
                                                  ImageAlignment _alignmentPolicy,
                                                  ImageResize _resizePolicy,
                                                  RGBAColor _defaultColor,
                                                  GridSize _cellSpan,
                                                  ImageSize _cellSize)
 {
-    Require(_imageId != ImageId(0));
     return make_shared<RasterizedImage>(
-        imageCache_.at(_imageId), _alignmentPolicy, _resizePolicy, _defaultColor, _cellSpan, _cellSize);
+        std::move(_image), _alignmentPolicy, _resizePolicy, _defaultColor, _cellSpan, _cellSize);
 }
 
-void ImagePool::removeImage(ImageId _imageId)
+void ImagePool::link(std::string const& _name, shared_ptr<Image const> _imageRef)
 {
-    imageCache_.erase(_imageId);
-
-    // There can still be rasterized images that are referenced in image fragments on the grid.
-}
-
-void ImagePool::removeRasterizedImage(RasterizedImage* _image)
-{
-    if (auto i = find_if(rasterizedImages_.begin(),
-                         rasterizedImages_.end(),
-                         [&](RasterizedImage const& p) { return &p == _image; });
-        i != rasterizedImages_.end())
-        rasterizedImages_.erase(i);
-}
-
-void ImagePool::link(std::string const& _name, shared_ptr<Image const> const& _imageRef)
-{
-    imageNameToIdCache_[_name] = _imageRef->id();
+    imageNameToImageCache_->emplace(_name, std::move(_imageRef));
 }
 
 shared_ptr<Image const> ImagePool::findImageByName(std::string const& _name) const noexcept
 {
-    if (ImageId const* id = imageNameToIdCache_.try_get(_name))
-        return imageCache_.at(*id);
+    if (auto imageRef = imageNameToImageCache_->try_get(_name))
+        return *imageRef;
 
     return {};
 }
 
 void ImagePool::unlink(std::string const& _name)
 {
-    imageNameToIdCache_.erase(_name);
+    imageNameToImageCache_->erase(_name);
+}
+
+void ImagePool::clear()
+{
+    imageNameToImageCache_->clear();
+}
+
+void ImagePool::inspect(std::ostream& os) const
+{
+    os << "image name links:\n";
+    imageNameToImageCache_->inspect(os);
+    os << fmt::format("global image stats: {}\n", ImageStats::get());
 }
 
 } // namespace terminal

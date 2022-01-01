@@ -3223,11 +3223,11 @@ TEST_CASE("Sixel.simple", "[screen]")
             Cell const& cell = term.screen.at(line, column);
             if (line <= LineOffset(4) && column <= ColumnOffset(7))
             {
-                ImageFragmentId fragmentId = cell.imageFragment();
-                ImageFragment const& fragment = term.screen.imageFragments().at(fragmentId);
-                CHECK(fragment.offset().line == line);
-                CHECK(fragment.offset().column == column);
-                CHECK(fragment.data().size() != 0);
+                auto fragment = cell.imageFragment();
+                REQUIRE(fragment);
+                CHECK(fragment->offset().line == line);
+                CHECK(fragment->offset().column == column);
+                CHECK(fragment->data().size() != 0);
             }
             else
             {
@@ -3263,12 +3263,11 @@ TEST_CASE("Sixel.AutoScroll-1", "[screen]")
             Cell const& cell = term.screen.at(line, column);
             if (line <= LineOffset(4) && column <= ColumnOffset(7))
             {
-                ImageFragmentId fragmentId = cell.imageFragment();
-                REQUIRE(fragmentId != ImageFragmentId(0));
-                ImageFragment const& fragment = term.screen.imageFragments().at(fragmentId);
-                CHECK(fragment.offset().line == line + 1);
-                CHECK(fragment.offset().column == column);
-                CHECK(fragment.data().size() != 0);
+                auto fragment = cell.imageFragment();
+                REQUIRE(fragment);
+                CHECK(fragment->offset().line == line + 1);
+                CHECK(fragment->offset().column == column);
+                CHECK(fragment->data().size() != 0);
             }
             else
             {

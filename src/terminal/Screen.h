@@ -25,6 +25,7 @@
 #include <terminal/Sequencer.h>
 #include <terminal/VTType.h>
 
+#include <crispy/StrongLRUCache.h>
 #include <crispy/algorithm.h>
 #include <crispy/logstore.h>
 #include <crispy/size.h>
@@ -51,6 +52,15 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+template <typename T, typename std::enable_if<crispy::is_boxed<T>, bool>::type = true>
+struct BoxedHasher
+{
+    crispy::StrongHash operator()(T value) const noexcept
+    {
+        return crispy::StrongHasher<typename T::inner_type> {}(*value);
+    }
+};
 
 namespace terminal
 {
@@ -117,7 +127,8 @@ struct Cursor
 };
 // }}}
 
-using ImageFragmentCache = crispy::LRUCache<ImageFragmentId, ImageFragment>;
+using ImageFragmentCache =
+    crispy::StrongLRUCache<ImageFragmentId, ImageFragment, BoxedHasher<ImageFragmentId>>;
 
 /**
  * Terminal Screen.
@@ -325,7 +336,7 @@ class Screen: public capabilities::StaticDatabase
      * @p _autoScroll Boolean indicating whether or not the screen should scroll if the image cannot be fully
      * displayed otherwise.
      */
-    void renderImage(ImageId _imageId,
+    void renderImage(std::shared_ptr<Image const> _image,
                      Coordinate _topLeft,
                      GridSize _gridSize,
                      Coordinate _imageOffset,
@@ -333,8 +344,6 @@ class Screen: public capabilities::StaticDatabase
                      ImageAlignment _alignmentPolicy,
                      ImageResize _resizePolicy,
                      bool _autoScroll);
-
-    ImageFragmentCache const& imageFragments() const noexcept { return imageFragments_; }
 
     void dumpState(std::string const& _message, std::ostream& _os) const;
 
@@ -625,7 +634,6 @@ class Screen: public capabilities::StaticDatabase
     ImageSize maxImageSizeLimit_;
     std::shared_ptr<SixelColorPalette> imageColorPalette_;
     ImagePool imagePool_;
-    ImageFragmentCache imageFragments_;
     ImageFragmentId nextImageFragmentId_ = ImageFragmentId(1);
 
     Sequencer<EventListener> sequencer_;

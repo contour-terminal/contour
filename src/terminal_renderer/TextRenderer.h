@@ -243,8 +243,9 @@ class TextRenderer: public Renderable
     // performance optimizations
     //
     bool pressure_ = false;
-
     std::unordered_map<text::glyph_key, text::bitmap_format> glyphToTextureMapping_;
+    std::list<std::u32string> cacheKeyStorage_;
+    crispy::LRUCache<TextCacheKey, text::shape_result> cache_;
 
     // target surface rendering
     //
@@ -267,11 +268,6 @@ class TextRenderer: public Renderable
     unsigned cellCount_ = 0;
     bool textStartFound_ = false;
     bool forceCellGroupSplit_ = false;
-
-    // text shaping cache
-    //
-    std::list<std::u32string> cacheKeyStorage_;
-    crispy::LRUCache<TextCacheKey, text::shape_result> cache_;
 
     // output fields
     //

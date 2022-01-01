@@ -36,7 +36,7 @@ struct RenderCell
     RGBColor foregroundColor;
     RGBColor backgroundColor;
     RGBColor decorationColor;
-    std::optional<ImageFragment> image;
+    std::shared_ptr<ImageFragment> image;
 
     bool groupStart = false;
     bool groupEnd = false;

@@ -411,9 +411,6 @@ Screen<EventListener>::Screen(PageSize _size,
     imagePool_ { [this](Image const* _image) {
         eventListener_.discardImage(*_image);
     } },
-    imageFragments_ {
-        80lu * 25lu * 8lu, // TODO: make this resource limit configurable
-    },
     sequencer_ { *this, _maxImageSize, colorPalette_.defaultBackground, imageColorPalette_ },
     parser_ { ref(sequencer_) },
     pageSize_ { _size },
@@ -1014,6 +1011,8 @@ void Screen<T>::resetHard()
 
     for (auto& grid: grids_)
         grid.reset();
+
+    imagePool_.clear();
 
     cursor_ = {};
 
@@ -2196,7 +2195,7 @@ void Screen<T>::sixelImage(ImageSize _pixelSize, Image::Data&& _data)
     auto const imageSize = _pixelSize;
 
     shared_ptr<Image const> imageRef = uploadImage(ImageFormat::RGBA, _pixelSize, move(_data));
-    renderImage(imageRef->id(),
+    renderImage(imageRef,
                 topLeft,
                 extent,
                 imageOffset,
@@ -2218,7 +2217,7 @@ shared_ptr<Image const> Screen<T>::uploadImage(ImageFormat _format,
 }
 
 template <typename T>
-void Screen<T>::renderImage(ImageId _imageId,
+void Screen<T>::renderImage(shared_ptr<Image const> _image,
                             Coordinate _topLeft,
                             GridSize _gridSize,
                             Coordinate _imageOffset,
@@ -2239,19 +2238,15 @@ void Screen<T>::renderImage(ImageId _imageId,
 
     // TODO: make use of _imageOffset and _imageSize
     auto const rasterizedImage =
-        imagePool_.rasterize(_imageId, _alignmentPolicy, _resizePolicy, gapColor, _gridSize, cellPixelSize_);
+        imagePool_.rasterize(_image, _alignmentPolicy, _resizePolicy, gapColor, _gridSize, cellPixelSize_);
 
     if (*linesToBeRendered)
     {
         for (GridSize::Offset const offset: GridSize { linesToBeRendered, columnsToBeRendered })
         {
-            auto const imageFragmentId = createImageFragmentId();
             Cell& cell = at(_topLeft + offset);
+            cell.setImageFragment(rasterizedImage, Coordinate { offset.line, offset.column });
             cell.setHyperlink(cursor_.hyperlink);
-            cell.setImage(imageFragmentId);
-            imageFragments_.emplace(
-                imageFragmentId,
-                ImageFragment { rasterizedImage, Coordinate { offset.line, offset.column } });
         };
         moveCursorTo(_topLeft.line + unbox<int>(linesToBeRendered) - 1, _topLeft.column);
     }
@@ -2266,14 +2261,10 @@ void Screen<T>::renderImage(ImageId _imageId,
             linefeed(_topLeft.column);
             for (auto const columnOffset: views::n_times<ColumnOffset>(*columnsToBeRendered))
             {
-                auto const imageFragmentId = createImageFragmentId();
+                auto const offset =
+                    Coordinate { boxed_cast<LineOffset>(linesToBeRendered) + lineOffset, columnOffset };
                 Cell& cell = at(pageSize_.lines.as<LineOffset>() - 1, _topLeft.column + columnOffset);
-                cell.setImage(imageFragmentId);
-                imageFragments_.emplace(
-                    imageFragmentId,
-                    ImageFragment { rasterizedImage,
-                                    Coordinate { boxed_cast<LineOffset>(linesToBeRendered) + lineOffset,
-                                                 columnOffset } });
+                cell.setImageFragment(rasterizedImage, offset);
                 cell.setHyperlink(cursor_.hyperlink);
             };
         }
@@ -2620,6 +2611,9 @@ void Screen<T>::dumpState(std::string const& _message, std::ostream& _os) const
         // auto const absoluteLine = grid().toAbsoluteLine(_lineNo);
         return fmt::format("| {:>4}: {}", _lineNo.value, grid().lineAt(_lineNo).flags());
     });
+    hline();
+    _os << "Image pool:\n";
+    imagePool_.inspect(_os);
     hline();
 
     // TODO: print more useful debug information
