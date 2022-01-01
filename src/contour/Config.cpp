@@ -1429,6 +1429,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 
     if (doc["on_mouse_select"].IsDefined())
     {
+        usedKeys.emplace("on_mouse_select");
         auto const value = toUpper(doc["on_mouse_select"].as<string>());
         auto constexpr mappings = array {
             pair { "COPYTOCLIPBOARD", SelectionAction::CopyToClipboard },
