@@ -12,6 +12,7 @@ set(crispy_SOURCES
     CLI.cpp CLI.h
     Comparison.h
     LRUCache.h
+    StrongLRUCache.h
     StackTrace.cpp StackTrace.h
     algorithm.h
     assert.h
@@ -106,6 +107,7 @@ if(CRISPY_TESTING)
     add_executable(crispy_test
         CLI_test.cpp
         LRUCache_test.cpp
+        StrongLRUCache_test.cpp
         base64_test.cpp
         indexed_test.cpp
         compose_test.cpp
