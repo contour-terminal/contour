@@ -65,6 +65,8 @@ cd build
 
 
 %check
+./build/src/crispy/crispy_test
+./build/src/terminal/terminal_test
 
 
 %files
