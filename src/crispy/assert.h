@@ -49,7 +49,7 @@ namespace detail
         else
         {
             fmt::print("[{}:{}] {} {}\n", _file, _line, _message, _text);
-            std::terminate();
+            std::abort();
         }
     }
 
