@@ -8,6 +8,7 @@
 #include <fstream>
 #include <functional>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -52,6 +53,19 @@ constexpr unsigned long strntoul(char const* _data, size_t _count, char const** 
         *_eptr = _data;
 
     return result;
+}
+
+template <typename T>
+std::string joinHumanReadable(std::vector<T> const& list, std::string_view sep = ", ")
+{
+    std::stringstream result;
+    for (size_t i = 0; i < list.size(); ++i)
+    {
+        if (i != 0)
+            result << sep;
+        result << fmt::format("{}", list[i]);
+    }
+    return result.str();
 }
 
 template <typename T, typename Callback>
