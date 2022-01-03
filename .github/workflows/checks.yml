@@ -18,11 +18,11 @@ concurrency:
 
 jobs:
   check_PR_TODOs:
-    name: "Check PR TODO's"
+    name: "Check PR-TODOs"
     runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v2
-    - name: "Checking for open PR-related TODO's"
+    - name: "Checking for open PR-related TODO items"
       run: |
         set -ex
         ./scripts/check-pr-todos.sh
