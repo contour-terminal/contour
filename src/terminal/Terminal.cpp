@@ -442,6 +442,7 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
                 if (!cellEmpty || customBackground)
                 {
                     state = State::Sequence;
+                    // clang-format off
                     _output.screen.emplace_back(makeRenderCell(screen_.colorPalette(),
                                                                screen_.hyperlinks(),
                                                                screen_.imageFragments(),
@@ -450,6 +451,7 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
                                                                bg,
                                                                _line,
                                                                _column));
+                    // clang-format on
                     _output.screen.back().groupStart = true;
                 }
                 break;
@@ -461,6 +463,7 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
                 }
                 else
                 {
+                    // clang-format off
                     _output.screen.emplace_back(makeRenderCell(screen_.colorPalette(),
                                                                screen_.hyperlinks(),
                                                                screen_.imageFragments(),
@@ -469,6 +472,7 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
                                                                bg,
                                                                _line,
                                                                _column));
+                    // clang-format on
 
                     if (isNewLine)
                         _output.screen.back().groupStart = true;

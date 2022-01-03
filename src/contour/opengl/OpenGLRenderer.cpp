@@ -61,7 +61,7 @@ namespace atlas = terminal::renderer::atlas;
         } while (0)
 #endif
 
-namespace // {{{ helper
+namespace
 {
     int glFormat(atlas::Format _format)
     {
