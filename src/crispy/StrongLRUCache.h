@@ -17,10 +17,15 @@
 
 #include <immintrin.h>
 #include <optional>
+#include <ostream>
 #include <stdexcept>
 #include <vector>
 
-// #define DEBUG_STRONG_LRU_CACHE 1
+#define DEBUG_STRONG_LRU_CACHE 1
+
+#if defined(NDEBUG) && defined(DEBUG_STRONG_LRU_CACHE)
+    #undef DEBUG_STRONG_LRU_CACHE
+#endif
 
 namespace crispy
 {
@@ -135,6 +140,9 @@ class StrongLRUCache
     /// Clears all entries from the cache.
     void clear();
 
+    // Delets the key and its associated value from the LRU cache
+    void erase(Key key);
+
     /// Touches a given key, putting it to the front of the LRU chain.
     /// Nothing is done if the key was not found.
     void touch(Key key) noexcept;
@@ -174,8 +182,9 @@ class StrongLRUCache
     template <typename ValueConstructFn>
     [[nodiscard]] Value& get_or_emplace(Key key, ValueConstructFn constructValue);
 
-  private:
-    // {{{ details
+    void inspect(std::ostream& output) const;
+
+    // {{{ public detail
     struct NextWithSameHash
     {
         explicit NextWithSameHash(uint32_t v): value { v } {}
@@ -203,7 +212,10 @@ class StrongLRUCache
         uint32_t ordering = 0;
 #endif
     };
+    // }}}
 
+  private:
+    // {{{ details
     // Maps the given hash key to a slot in the hash table.
     uint32_t* hashTableSlot(StrongHash hash);
 
@@ -400,6 +412,54 @@ void StrongLRUCache<Key, Value, Hasher>::clear()
 }
 
 template <typename Key, typename Value, typename Hasher>
+void StrongLRUCache<Key, Value, Hasher>::erase(Key key)
+{
+    auto const hash = Hasher {}(key);
+
+    uint32_t* slot = hashTableSlot(hash);
+    uint32_t entryIndex = *slot;
+    uint32_t prevWithSameHash = 0;
+    Entry* entry = nullptr;
+
+    while (entryIndex)
+    {
+        entry = _entries + entryIndex;
+        if (entry->hashValue == hash)
+            break;
+        prevWithSameHash = entryIndex;
+        entryIndex = entry->nextWithSameHash;
+    }
+
+    if (entryIndex == 0)
+        return;
+
+    Entry& prev = _entries[entry->prevInLRU];
+    Entry& next = _entries[entry->nextInLRU];
+
+    // unlink from LRU chain
+    prev.nextInLRU = entry->nextInLRU;
+    next.prevInLRU = entry->prevInLRU;
+    if (prevWithSameHash)
+    {
+        Require(_entries[prevWithSameHash].nextWithSameHash == entryIndex);
+        _entries[prevWithSameHash].nextWithSameHash = entry->nextWithSameHash;
+    }
+    else
+        *slot = entry->nextWithSameHash;
+
+    // relink into free-chain
+    Entry& sentinel = sentinelEntry();
+    entry->prevInLRU = 0;
+    entry->nextInLRU = sentinel.nextInLRU;
+    entry->nextWithSameHash = sentinel.nextWithSameHash;
+    sentinel.nextWithSameHash = entryIndex;
+
+    --_size;
+
+    validateChange(-1);
+}
+
+template <typename Key, typename Value, typename Hasher>
 void StrongLRUCache<Key, Value, Hasher>::touch(Key key) noexcept
 {
     findEntry(key, false);
@@ -476,6 +536,28 @@ std::vector<Key> StrongLRUCache<Key, Value, Hasher>::keys() const
     Guarantee(result.size() == _size);
 
     return result;
+}
+
+template <typename Key, typename Value, typename Hasher>
+void StrongLRUCache<Key, Value, Hasher>::inspect(std::ostream& output) const
+{
+    output << fmt::format("stats               : {}\n", _stats);
+    output << fmt::format("hash table mask     : 0x{:04X}\n", _hashMask);
+    output << fmt::format("hash table capacity : {}\n", _hashCount.value);
+    output << fmt::format("entry count         : {}\n", _size);
+    output << fmt::format("entry capacity      : {}\n", _capacity.value);
+
+    for (int i = 0; i <= _capacity.value; ++i)
+    {
+        Entry const& entry = _entries[i];
+        output << fmt::format("  entry[{:03}]        : LRU: {} <- -> {}, alt: {}, key:{}, value:{}\n",
+                              i,
+                              entry.prevInLRU,
+                              entry.nextInLRU,
+                              entry.nextWithSameHash,
+                              entry.key,
+                              entry.value.has_value() ? fmt::format("{}", entry.value.value()) : "nullopt");
+    }
 }
 
 // {{{ helpers
@@ -630,3 +712,22 @@ inline int StrongLRUCache<Key, Value, Hasher>::validateChange(int adj)
 // }}}
 
 } // namespace crispy
+
+namespace fmt
+{
+template <>
+struct formatter<crispy::LRUCacheStats>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(crispy::LRUCacheStats stats, FormatContext& ctx)
+    {
+        return format_to(
+            ctx.out(), "{} hits, {} misses, {} evictions", stats.hits, stats.misses, stats.recycles);
+    }
+};
+} // namespace fmt

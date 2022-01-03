@@ -16,6 +16,7 @@
 
 #include <catch2/catch.hpp>
 
+#include <iostream>
 #include <string_view>
 
 using namespace crispy;
@@ -217,4 +218,87 @@ TEST_CASE("StrongLRUCache.get_or_emplace", "[lrucache]")
     CHECK(b2 == 6);
     CHECK(cache.at(3) == 6);
     CHECK(cache.size() == 2);
+}
+
+TEST_CASE("StrongLRUCache.erase", "")
+{
+    auto cachePtr = StrongLRUCache<int, string>::create(StrongHashCapacity { 8 }, StrongCacheCapacity { 4 });
+    auto& cache = *cachePtr;
+    for (int i = 1; i <= 4; ++i)
+        cache[i] = std::to_string(i);
+    REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
+
+    // erase at head
+    cache.erase(4);
+    REQUIRE(joinHumanReadable(cache.keys()) == "3, 2, 1");
+
+    // erase in middle
+    cache.erase(2);
+    REQUIRE(joinHumanReadable(cache.keys()) == "3, 1");
+
+    // erase at tail
+    cache.erase(1);
+    REQUIRE(joinHumanReadable(cache.keys()) == "3");
+
+    // erase last
+    cache.erase(3);
+    REQUIRE(joinHumanReadable(cache.keys()) == "");
+}
+
+// clang-format off
+struct CollidingHasher
+{
+    StrongHash operator()(int v) noexcept
+    {
+        // Since the hashtable lookup only looks at the
+        // least significant 32 bit, this will always cause
+        // a hash-table entry collision.
+        return StrongHash { _mm_set_epi32(0, 0, v, 0) };
+    }
+};
+// clang-format on
+
+TEST_CASE("StrongLRUCache.insert_with_cache_collision", "")
+{
+    auto cachePtr = StrongLRUCache<int, int, CollidingHasher>::create(StrongHashCapacity { 8 },
+                                                                      StrongCacheCapacity { 4 });
+    auto& cache = *cachePtr;
+
+    cache[1] = 1;
+    REQUIRE(joinHumanReadable(cache.keys()) == "1");
+
+    cache[2] = 2;
+    REQUIRE(joinHumanReadable(cache.keys()) == "2, 1");
+
+    cache[3] = 3;
+    REQUIRE(joinHumanReadable(cache.keys()) == "3, 2, 1");
+
+    cache[4] = 4;
+    REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
+}
+
+TEST_CASE("StrongLRUCache.erase_with_hashTable_lookup_collision", "")
+{
+    auto cachePtr = StrongLRUCache<int, int, CollidingHasher>::create(StrongHashCapacity { 8 },
+                                                                      StrongCacheCapacity { 4 });
+    auto& cache = *cachePtr;
+    for (int i = 1; i <= 4; ++i)
+        cache[i] = 2 * i;
+    REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
+
+    // erase at head
+    cache.erase(4);
+    REQUIRE(joinHumanReadable(cache.keys()) == "3, 2, 1");
+
+    // erase in middle
+    cache.erase(2);
+    REQUIRE(joinHumanReadable(cache.keys()) == "3, 1");
+
+    // erase at tail
+    cache.erase(1);
+    REQUIRE(joinHumanReadable(cache.keys()) == "3");
+
+    // erase last
+    cache.erase(3);
+    REQUIRE(joinHumanReadable(cache.keys()) == "");
 }
