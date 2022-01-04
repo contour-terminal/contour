@@ -13,6 +13,7 @@
  */
 #pragma once
 
+#include <crispy/StrongHash.h>
 #include <crispy/assert.h>
 
 #include <immintrin.h>
@@ -30,21 +31,6 @@
 namespace crispy
 {
 
-struct StrongHash
-{
-    __m128i value;
-};
-
-inline bool operator==(StrongHash a, StrongHash b) noexcept
-{
-    return _mm_movemask_epi8(_mm_cmpeq_epi32(a.value, b.value)) == 0xFFFF;
-}
-
-inline bool operator!=(StrongHash a, StrongHash b) noexcept
-{
-    return !(a == b);
-}
-
 // {{{ details
 namespace detail
 {
@@ -54,32 +40,6 @@ namespace detail
         return (value & (value - 1)) == 0;
     }
 } // namespace detail
-// }}}
-
-template <typename T>
-struct StrongHasher
-{
-    StrongHash operator()(T const&) noexcept; // Specialize and implement me.
-};
-
-// {{{ some standard hash implementations
-namespace detail
-{
-    template <typename T>
-    struct StdHash32
-    {
-        inline StrongHash operator()(T v) noexcept { return StrongHash { _mm_set_epi32(0, 0, 0, v) }; }
-    };
-} // namespace detail
-
-// clang-format off
-template <> struct StrongHasher<char>: public detail::StdHash32<char> { };
-template <> struct StrongHasher<unsigned char>: public detail::StdHash32<char> { };
-template <> struct StrongHasher<short>: public detail::StdHash32<short> { };
-template <> struct StrongHasher<unsigned short>: public detail::StdHash32<unsigned short> { };
-template <> struct StrongHasher<int>: public detail::StdHash32<int> { };
-template <> struct StrongHasher<unsigned int>: public detail::StdHash32<int> { };
-// clang-format on
 // }}}
 
 struct LRUCacheStats
@@ -156,6 +116,7 @@ class StrongLRUCache
 
     /// Returns the value for the given key if found, nullptr otherwise.
     [[nodiscard]] Value* try_get(Key key);
+    [[nodiscard]] Value const* try_get(Key key) const;
 
     /// Returns the value for the given key,
     /// throwing std::out_of_range if key was not found.
@@ -460,19 +421,19 @@ void StrongLRUCache<Key, Value, Hasher>::erase(Key key)
 }
 
 template <typename Key, typename Value, typename Hasher>
-void StrongLRUCache<Key, Value, Hasher>::touch(Key key) noexcept
+inline void StrongLRUCache<Key, Value, Hasher>::touch(Key key) noexcept
 {
     findEntry(key, false);
 }
 
 template <typename Key, typename Value, typename Hasher>
-bool StrongLRUCache<Key, Value, Hasher>::contains(Key key) const noexcept
+inline bool StrongLRUCache<Key, Value, Hasher>::contains(Key key) const noexcept
 {
     return const_cast<StrongLRUCache*>(this)->findEntry(key, false) != 0;
 }
 
 template <typename Key, typename Value, typename Hasher>
-Value* StrongLRUCache<Key, Value, Hasher>::try_get(Key key)
+inline Value* StrongLRUCache<Key, Value, Hasher>::try_get(Key key)
 {
     uint32_t const entryIndex = findEntry(key, false);
     if (!entryIndex)
@@ -481,7 +442,13 @@ Value* StrongLRUCache<Key, Value, Hasher>::try_get(Key key)
 }
 
 template <typename Key, typename Value, typename Hasher>
-Value& StrongLRUCache<Key, Value, Hasher>::at(Key key)
+inline Value const* StrongLRUCache<Key, Value, Hasher>::try_get(Key key) const
+{
+    return const_cast<StrongLRUCache*>(this)->try_get(key);
+}
+
+template <typename Key, typename Value, typename Hasher>
+inline Value& StrongLRUCache<Key, Value, Hasher>::at(Key key)
 {
     uint32_t const entryIndex = findEntry(key, false);
     if (!entryIndex)
@@ -490,7 +457,7 @@ Value& StrongLRUCache<Key, Value, Hasher>::at(Key key)
 }
 
 template <typename Key, typename Value, typename Hasher>
-Value& StrongLRUCache<Key, Value, Hasher>::operator[](Key key) noexcept
+inline Value& StrongLRUCache<Key, Value, Hasher>::operator[](Key key) noexcept
 {
     uint32_t const entryIndex = findEntry(key, true);
     return *_entries[entryIndex].value;
@@ -498,7 +465,7 @@ Value& StrongLRUCache<Key, Value, Hasher>::operator[](Key key) noexcept
 
 template <typename Key, typename Value, typename Hasher>
 template <typename ValueConstructFn>
-bool StrongLRUCache<Key, Value, Hasher>::try_emplace(Key key, ValueConstructFn constructValue)
+inline bool StrongLRUCache<Key, Value, Hasher>::try_emplace(Key key, ValueConstructFn constructValue)
 {
     if (contains(key))
         return false;
@@ -509,7 +476,7 @@ bool StrongLRUCache<Key, Value, Hasher>::try_emplace(Key key, ValueConstructFn c
 
 template <typename Key, typename Value, typename Hasher>
 template <typename ValueConstructFn>
-Value& StrongLRUCache<Key, Value, Hasher>::get_or_emplace(Key key, ValueConstructFn constructValue)
+inline Value& StrongLRUCache<Key, Value, Hasher>::get_or_emplace(Key key, ValueConstructFn constructValue)
 {
     if (Value* p = try_get(key))
         return *p;
@@ -541,23 +508,32 @@ std::vector<Key> StrongLRUCache<Key, Value, Hasher>::keys() const
 template <typename Key, typename Value, typename Hasher>
 void StrongLRUCache<Key, Value, Hasher>::inspect(std::ostream& output) const
 {
-    output << fmt::format("stats               : {}\n", _stats);
-    output << fmt::format("hash table mask     : 0x{:04X}\n", _hashMask);
-    output << fmt::format("hash table capacity : {}\n", _hashCount.value);
-    output << fmt::format("entry count         : {}\n", _size);
-    output << fmt::format("entry capacity      : {}\n", _capacity.value);
-
-    for (int i = 0; i <= _capacity.value; ++i)
+    Entry const& sentinel = sentinelEntry();
+    uint32_t entryIndex = sentinel.prevInLRU;
+    uint32_t hashSlotCollisions = 0;
+    while (entryIndex != 0)
     {
-        Entry const& entry = _entries[i];
-        output << fmt::format("  entry[{:03}]        : LRU: {} <- -> {}, alt: {}, key:{}, value:{}\n",
-                              i,
+        Entry const& entry = _entries[entryIndex];
+        output << fmt::format("  entry[{:03}]   : LRU: {} <- -> {}, alt: {}, {} := {}\n",
+                              entryIndex,
                               entry.prevInLRU,
                               entry.nextInLRU,
                               entry.nextWithSameHash,
                               entry.key,
                               entry.value.has_value() ? fmt::format("{}", entry.value.value()) : "nullopt");
+        if (entry.nextWithSameHash)
+            ++hashSlotCollisions;
+        entryIndex = entry.prevInLRU;
     }
+
+    output << "------------------------\n";
+    output << fmt::format("hashslot collisions : {}\n", hashSlotCollisions);
+    output << fmt::format("stats               : {}\n", _stats);
+    output << fmt::format("hash table mask     : 0x{:04X}\n", _hashMask);
+    output << fmt::format("hash table capacity : {}\n", _hashCount.value);
+    output << fmt::format("entry count         : {}\n", _size);
+    output << fmt::format("entry capacity      : {}\n", _capacity.value);
+    output << "------------------------\n";
 }
 
 // {{{ helpers
