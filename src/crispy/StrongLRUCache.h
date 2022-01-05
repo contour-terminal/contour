@@ -14,6 +14,7 @@
 #pragma once
 
 #include <crispy/StrongHash.h>
+#include <crispy/StrongLRUHashtable.h>
 #include <crispy/assert.h>
 
 #include <immintrin.h>
@@ -34,30 +35,14 @@ namespace crispy
 // {{{ details
 namespace detail
 {
-    static constexpr bool isPowerOfTwo(uint32_t value) noexcept
+    template <typename Key, typename Value>
+    struct LRUCacheEntry
     {
-        //.
-        return (value & (value - 1)) == 0;
-    }
+        Key key {};
+        Value value {};
+    };
 } // namespace detail
 // }}}
-
-struct LRUCacheStats
-{
-    uint32_t hits;
-    uint32_t misses;
-    uint32_t recycles;
-};
-
-struct StrongHashCapacity
-{
-    uint32_t value;
-};
-
-struct StrongCacheCapacity
-{
-    uint32_t value;
-};
 
 // LRU cache implementation with the goal to minimize runtime allocations
 // and maximize speed.
@@ -70,19 +55,13 @@ struct StrongCacheCapacity
 template <typename Key, typename Value, typename Hasher = StrongHasher<Key>>
 class StrongLRUCache
 {
-  private:
-    StrongLRUCache(StrongHashCapacity hashCount, StrongCacheCapacity entryCount);
-
   public:
+    StrongLRUCache(StrongHashtableSize hashCount, LRUCapacity entryCount);
+    StrongLRUCache(StrongLRUCache&&) noexcept = default;
+    StrongLRUCache(StrongLRUCache const&) noexcept = delete;
+    StrongLRUCache& operator=(StrongLRUCache&&) noexcept = default;
+    StrongLRUCache& operator=(StrongLRUCache const&) noexcept = delete;
     ~StrongLRUCache();
-
-    using CachePtr = std::unique_ptr<StrongLRUCache, std::function<void(StrongLRUCache*)>>;
-
-    static constexpr inline size_t requiredMemorySize(StrongHashCapacity hashCount,
-                                                      StrongCacheCapacity entryCount);
-
-    template <typename Allocator = std::allocator<unsigned char>>
-    static CachePtr create(StrongHashCapacity hashCount, StrongCacheCapacity entryCount);
 
     /// Returns the actual number of entries currently hold in this cache.
     [[nodiscard]] size_t size() const noexcept;
@@ -90,12 +69,9 @@ class StrongLRUCache
     /// Returns the maximum number of entries that can be stored in this cache.
     [[nodiscard]] size_t capacity() const noexcept;
 
-    /// Returns the total storage sized used by this object.
-    [[nodiscard]] size_t storageSize() const noexcept;
-
     /// Returns gathered stats and clears the local stats state to start
     /// counting from zero again.
-    LRUCacheStats fetchAndClearStats() noexcept;
+    LRUHashtableStats fetchAndClearStats() noexcept;
 
     /// Clears all entries from the cache.
     void clear();
@@ -145,554 +121,145 @@ class StrongLRUCache
 
     void inspect(std::ostream& output) const;
 
-    // {{{ public detail
-    struct NextWithSameHash
-    {
-        explicit NextWithSameHash(uint32_t v): value { v } {}
-        uint32_t value;
-    };
-
-    struct Entry
-    {
-        Entry(Entry const&) = default;
-        Entry(Entry&&) noexcept = default;
-        Entry& operator=(Entry const&) = default;
-        Entry& operator=(Entry&&) noexcept = default;
-        Entry(NextWithSameHash initialNextWithSameHash): nextWithSameHash { initialNextWithSameHash.value } {}
-
-        StrongHash hashValue {};
-
-        uint32_t prevInLRU = 0;
-        uint32_t nextInLRU = 0;
-        uint32_t nextWithSameHash = 0;
-
-        Key key {};
-        std::optional<Value> value = std::nullopt;
-
-#if defined(DEBUG_STRONG_LRU_CACHE)
-        uint32_t ordering = 0;
-#endif
-    };
-    // }}}
-
   private:
-    // {{{ details
-    // Maps the given hash key to a slot in the hash table.
-    uint32_t* hashTableSlot(StrongHash hash);
+    using Entry = detail::LRUCacheEntry<Key, Value>;
+    using Hashtable = StrongLRUHashtable<Entry>;
+    using HashtablePtr = typename Hashtable::CachePtr;
 
-    // Returns entry index to an unused entry, possibly by evicting
-    // the least recently used entry if no free entries are available.
-    //
-    // This entry is not inserted into the LRU-chain yet.
-    uint32_t allocateEntry();
-
-    // Returns the index to the entry associated with the given key.
-    // If the key was not found and force is set to true, it'll be created,
-    // otherwise 0 is returned.
-    uint32_t findEntry(Key key, bool force);
-
-    // Evicts the least recently used entry in the LRU chain
-    // and links it to the unused-entries chain.
-    //
-    // Requires the cache to be full.
-    void recycle();
-
-    int validateChange(int adj);
-
-    Entry& sentinelEntry() noexcept { return _entries[0]; }
-    Entry const& sentinelEntry() const noexcept { return _entries[0]; }
-    // }}}
-
-    LRUCacheStats _stats;
-    uint32_t _hashMask;
-    StrongHashCapacity _hashCount;
-    uint32_t _size;
-    StrongCacheCapacity _capacity;
-
-    // The hash table maps hash codes to indices into the entry table.
-    uint32_t* _hashTable;
-    Entry* _entries;
-
-#if defined(DEBUG_STRONG_LRU_CACHE)
-    int _lastLRUCount = 0;
-#endif
+    HashtablePtr _hashtable;
 };
 
 // {{{ implementation
 
 template <typename Key, typename Value, typename Hasher>
-StrongLRUCache<Key, Value, Hasher>::StrongLRUCache(StrongHashCapacity hashCount,
-                                                   StrongCacheCapacity entryCount):
-    _stats {},
-    _hashMask { hashCount.value - 1 },
-    _hashCount { hashCount },
-    _size { 0 },
-    _capacity { entryCount },
-    _hashTable { (uint32_t*) (this + 1) },
-    _entries { [this]() {
-        constexpr uintptr_t Alignment = std::alignment_of_v<Entry>;
-        static_assert(detail::isPowerOfTwo(Alignment));
-        constexpr uintptr_t AlignMask = Alignment - 1;
-
-        uint32_t* hashTableEnd = _hashTable + _hashCount.value;
-        Entry* entryTable = (Entry*) (uintptr_t((char*) hashTableEnd + AlignMask) & ~AlignMask);
-
-        return entryTable;
-    }() }
+StrongLRUCache<Key, Value, Hasher>::StrongLRUCache(StrongHashtableSize hashCount, LRUCapacity entryCount):
+    _hashtable { Hashtable::create(hashCount, entryCount) }
 {
-    Require(detail::isPowerOfTwo(hashCount.value));
-    Require(hashCount.value >= 1);
-    Require(entryCount.value >= 2);
-
-    memset(_hashTable, 0, hashCount.value * sizeof(uint32_t));
-
-    for (auto entryIndex = 0; entryIndex < entryCount.value; ++entryIndex)
-    {
-        Entry* entry = _entries + entryIndex;
-        new (entry) Entry(NextWithSameHash(entryIndex + 1));
-    }
-    new (_entries + entryCount.value) Entry(NextWithSameHash(0));
 }
 
 template <typename Key, typename Value, typename Hasher>
 StrongLRUCache<Key, Value, Hasher>::~StrongLRUCache()
 {
-    std::destroy_n(_entries, 1 + _capacity.value);
-}
-
-template <typename Key, typename Value, typename Hasher>
-constexpr inline size_t StrongLRUCache<Key, Value, Hasher>::requiredMemorySize(StrongHashCapacity hashCount,
-                                                                               StrongCacheCapacity entryCount)
-{
-    Require(detail::isPowerOfTwo(hashCount.value)); // Hash capacity must be power of 2.
-    Require(hashCount.value >= 1);
-    Require(entryCount.value >= 2);
-
-    auto const hashSize = hashCount.value * sizeof(uint32_t);
-    auto const entrySize = (1 + entryCount.value) * sizeof(Entry) + std::alignment_of_v<Entry>;
-    auto const totalSize = sizeof(StrongLRUCache) + hashSize + entrySize;
-    return totalSize;
-}
-
-template <typename Key, typename Value, typename Hasher>
-template <typename Allocator>
-auto StrongLRUCache<Key, Value, Hasher>::create(StrongHashCapacity hashCount, StrongCacheCapacity entryCount)
-    -> CachePtr
-{
-    // payload memory layout
-    // =====================
-    //
-    // [object  attribs]
-    // uint32_t[] hash table
-    // Entry[]    entries
-
-    Allocator allocator;
-    auto const size = requiredMemorySize(hashCount, entryCount);
-    StrongLRUCache* obj = (StrongLRUCache*) allocator.allocate(size);
-
-    // clang-format off
-    if (!obj)
-        return CachePtr { nullptr, [](auto) {} };
-    // clang-format on
-
-    memset(obj, 0, size);
-    new (obj) StrongLRUCache(hashCount, entryCount);
-
-    auto deleter = [size, allocator = std::move(allocator)](auto p) mutable {
-        std::destroy_n(p, 1);
-        allocator.deallocate(reinterpret_cast<typename Allocator::pointer>(p), size);
-    };
-
-    return CachePtr(obj, std::move(deleter));
 }
 
 template <typename Key, typename Value, typename Hasher>
 inline size_t StrongLRUCache<Key, Value, Hasher>::size() const noexcept
 {
-    return _size;
+    return _hashtable->size();
 }
 
 template <typename Key, typename Value, typename Hasher>
 inline size_t StrongLRUCache<Key, Value, Hasher>::capacity() const noexcept
 {
-    return _capacity.value;
+    return _hashtable->capacity();
 }
 
 template <typename Key, typename Value, typename Hasher>
-inline size_t StrongLRUCache<Key, Value, Hasher>::storageSize() const noexcept
+LRUHashtableStats StrongLRUCache<Key, Value, Hasher>::fetchAndClearStats() noexcept
 {
-    auto const hashTableSize = _hashCount.value * sizeof(uint32_t);
-
-    // +1 for sentinel entry in the front
-    // +1 for alignment
-    auto const entryTableSize = (2 + _capacity.value) * sizeof(Entry);
-
-    return sizeof(StrongLRUCache) + hashTableSize + entryTableSize;
-}
-
-template <typename Key, typename Value, typename Hasher>
-inline uint32_t* StrongLRUCache<Key, Value, Hasher>::hashTableSlot(StrongHash hash)
-{
-    uint32_t const index = _mm_cvtsi128_si32(hash.value);
-    uint32_t const slot = index & _hashMask;
-    return _hashTable + slot;
-}
-
-template <typename Key, typename Value, typename Hasher>
-LRUCacheStats StrongLRUCache<Key, Value, Hasher>::fetchAndClearStats() noexcept
-{
-    auto st = _stats;
-    _stats = LRUCacheStats {};
-    return st;
+    return _hashtable->fetchAndClearStats();
 }
 
 template <typename Key, typename Value, typename Hasher>
 void StrongLRUCache<Key, Value, Hasher>::clear()
 {
-    Entry& sentinel = sentinelEntry();
-    uint32_t entryIndex = sentinel.nextInLRU;
-    while (entryIndex)
-    {
-        Entry& entry = _entries[entryIndex];
-        entry.value.reset();
-        entryIndex = entry.nextInLRU;
-    }
-
-    memset(_hashTable, 0, _hashCount.value * sizeof(uint32_t));
-
-    while (entryIndex < _capacity.value)
-    {
-        _entries[entryIndex] = Entry(NextWithSameHash(1 + entryIndex));
-        ++entryIndex;
-    }
-    _entries[_capacity.value] = Entry(NextWithSameHash(0));
-
-    auto const oldSize = static_cast<int>(_size);
-    _size = 0;
-    validateChange(-oldSize);
+    _hashtable->clear();
 }
 
 template <typename Key, typename Value, typename Hasher>
 void StrongLRUCache<Key, Value, Hasher>::erase(Key key)
 {
-    auto const hash = Hasher {}(key);
-
-    uint32_t* slot = hashTableSlot(hash);
-    uint32_t entryIndex = *slot;
-    uint32_t prevWithSameHash = 0;
-    Entry* entry = nullptr;
-
-    while (entryIndex)
-    {
-        entry = _entries + entryIndex;
-        if (entry->hashValue == hash)
-            break;
-        prevWithSameHash = entryIndex;
-        entryIndex = entry->nextWithSameHash;
-    }
-
-    if (entryIndex == 0)
-        return;
-
-    Entry& prev = _entries[entry->prevInLRU];
-    Entry& next = _entries[entry->nextInLRU];
-
-    // unlink from LRU chain
-    prev.nextInLRU = entry->nextInLRU;
-    next.prevInLRU = entry->prevInLRU;
-    if (prevWithSameHash)
-    {
-        Require(_entries[prevWithSameHash].nextWithSameHash == entryIndex);
-        _entries[prevWithSameHash].nextWithSameHash = entry->nextWithSameHash;
-    }
-    else
-        *slot = entry->nextWithSameHash;
-
-    // relink into free-chain
-    Entry& sentinel = sentinelEntry();
-    entry->prevInLRU = 0;
-    entry->nextInLRU = sentinel.nextInLRU;
-    entry->nextWithSameHash = sentinel.nextWithSameHash;
-    sentinel.nextWithSameHash = entryIndex;
-
-    --_size;
-
-    validateChange(-1);
+    _hashtable->erase(Hasher {}(key));
 }
 
 template <typename Key, typename Value, typename Hasher>
 inline void StrongLRUCache<Key, Value, Hasher>::touch(Key key) noexcept
 {
-    findEntry(key, false);
+    _hashtable->touch(Hasher {}(key));
 }
 
 template <typename Key, typename Value, typename Hasher>
 inline bool StrongLRUCache<Key, Value, Hasher>::contains(Key key) const noexcept
 {
-    return const_cast<StrongLRUCache*>(this)->findEntry(key, false) != 0;
+    return _hashtable->contains(Hasher {}(key));
 }
 
 template <typename Key, typename Value, typename Hasher>
 inline Value* StrongLRUCache<Key, Value, Hasher>::try_get(Key key)
 {
-    uint32_t const entryIndex = findEntry(key, false);
-    if (!entryIndex)
-        return nullptr;
-    return &_entries[entryIndex].value.value();
+    if (Entry* e = _hashtable->try_get(Hasher {}(key)))
+        return &e->value;
+    return nullptr;
 }
 
 template <typename Key, typename Value, typename Hasher>
 inline Value const* StrongLRUCache<Key, Value, Hasher>::try_get(Key key) const
 {
-    return const_cast<StrongLRUCache*>(this)->try_get(key);
+    if (Entry const* e = _hashtable->try_get(Hasher {}(key)))
+        return &e->value;
+    return nullptr;
 }
 
 template <typename Key, typename Value, typename Hasher>
 inline Value& StrongLRUCache<Key, Value, Hasher>::at(Key key)
 {
-    uint32_t const entryIndex = findEntry(key, false);
-    if (!entryIndex)
-        throw std::out_of_range("key not in cache");
-    return *_entries[entryIndex].value;
+    return _hashtable->at(Hasher {}(key)).value;
 }
 
 template <typename Key, typename Value, typename Hasher>
 inline Value& StrongLRUCache<Key, Value, Hasher>::operator[](Key key) noexcept
 {
-    uint32_t const entryIndex = findEntry(key, true);
-    return *_entries[entryIndex].value;
+    return _hashtable->get_or_emplace(Hasher {}(key), [&](auto v) { return Entry { key, Value {} }; }).value;
 }
 
 template <typename Key, typename Value, typename Hasher>
 template <typename ValueConstructFn>
 inline bool StrongLRUCache<Key, Value, Hasher>::try_emplace(Key key, ValueConstructFn constructValue)
 {
-    if (contains(key))
-        return false;
-
-    emplace(key, constructValue());
-    return true;
+    return _hashtable->try_emplace(Hasher {}(key), [&](auto v) { return Entry { key, constructValue(v) }; });
 }
 
 template <typename Key, typename Value, typename Hasher>
 template <typename ValueConstructFn>
 inline Value& StrongLRUCache<Key, Value, Hasher>::get_or_emplace(Key key, ValueConstructFn constructValue)
 {
-    if (Value* p = try_get(key))
-        return *p;
-    return emplace(key, constructValue());
+    return _hashtable->get_or_emplace(Hasher {}(key),
+                                      [&](auto v) {
+                                          return Entry { key, constructValue(v) };
+                                      })
+        .value;
 }
 
 template <typename Key, typename Value, typename Hasher>
 inline Value& StrongLRUCache<Key, Value, Hasher>::emplace(Key key, Value value) noexcept
 {
-    return (*this)[key] = std::move(value);
+    return _hashtable->emplace(Hasher {}(key), Entry { key, std::move(value) }).value;
 }
 
 template <typename Key, typename Value, typename Hasher>
 std::vector<Key> StrongLRUCache<Key, Value, Hasher>::keys() const
 {
     auto result = std::vector<Key> {};
-    Entry const& sentinel = sentinelEntry();
-    for (uint32_t entryIndex = sentinel.nextInLRU; entryIndex != 0;)
-    {
-        Entry const& entry = _entries[entryIndex];
-        result.emplace_back(entry.key);
-        entryIndex = entry.nextInLRU;
-    }
-    Guarantee(result.size() == _size);
-
+    for (StrongHash const& hash: _hashtable->hashes())
+        result.emplace_back(_hashtable->peek(hash).key);
     return result;
 }
 
 template <typename Key, typename Value, typename Hasher>
 void StrongLRUCache<Key, Value, Hasher>::inspect(std::ostream& output) const
 {
-    Entry const& sentinel = sentinelEntry();
-    uint32_t entryIndex = sentinel.prevInLRU;
-    uint32_t hashSlotCollisions = 0;
-    while (entryIndex != 0)
-    {
-        Entry const& entry = _entries[entryIndex];
-        output << fmt::format("  entry[{:03}]   : LRU: {} <- -> {}, alt: {}, {} := {}\n",
-                              entryIndex,
-                              entry.prevInLRU,
-                              entry.nextInLRU,
-                              entry.nextWithSameHash,
-                              entry.key,
-                              entry.value.has_value() ? fmt::format("{}", entry.value.value()) : "nullopt");
-        if (entry.nextWithSameHash)
-            ++hashSlotCollisions;
-        entryIndex = entry.prevInLRU;
-    }
-
-    output << "------------------------\n";
-    output << fmt::format("hashslot collisions : {}\n", hashSlotCollisions);
-    output << fmt::format("stats               : {}\n", _stats);
-    output << fmt::format("hash table mask     : 0x{:04X}\n", _hashMask);
-    output << fmt::format("hash table capacity : {}\n", _hashCount.value);
-    output << fmt::format("entry count         : {}\n", _size);
-    output << fmt::format("entry capacity      : {}\n", _capacity.value);
-    output << "------------------------\n";
+    _hashtable->inspect(output);
 }
 
-// {{{ helpers
-template <typename Key, typename Value, typename Hasher>
-uint32_t StrongLRUCache<Key, Value, Hasher>::findEntry(Key key, bool force)
-{
-    StrongHash const hash = Hasher {}(key);
-
-    uint32_t* slot = hashTableSlot(hash);
-    uint32_t entryIndex = *slot;
-    Entry* result = nullptr;
-    while (entryIndex)
-    {
-        Entry& entry = _entries[entryIndex];
-        if (entry.hashValue == hash)
-        {
-            result = &entry;
-            break;
-        }
-        entryIndex = entry.nextWithSameHash;
-    }
-
-    if (result)
-    {
-        ++_stats.hits;
-
-        Entry& prev = _entries[result->prevInLRU];
-        Entry& next = _entries[result->nextInLRU];
-
-        prev.nextInLRU = result->nextInLRU;
-        next.prevInLRU = result->prevInLRU;
-
-        validateChange(-1);
-    }
-    else if (force)
-    {
-        ++_stats.misses;
-
-        entryIndex = allocateEntry();
-        result = &_entries[entryIndex];
-        result->nextWithSameHash = *slot;
-        result->hashValue = hash;
-        result->key = key;
-        result->value.emplace(Value {});
-        *slot = entryIndex;
-    }
-    else
-    {
-        ++_stats.misses;
-        return 0;
-    }
-
-    Entry& sentinel = sentinelEntry();
-    Require(result != &sentinel);
-    result->nextInLRU = sentinel.nextInLRU;
-    result->prevInLRU = 0;
-
-    Entry& nextEntry = _entries[sentinel.nextInLRU];
-    nextEntry.prevInLRU = entryIndex;
-    sentinel.nextInLRU = entryIndex;
-
-#if defined(DEBUG_STRONG_LRU_CACHE)
-    result->ordering = sentinel.ordering++;
-#endif
-
-    Require(validateChange(1) == _size);
-
-    return entryIndex;
-}
-
-template <typename Key, typename Value, typename Hasher>
-uint32_t StrongLRUCache<Key, Value, Hasher>::allocateEntry()
-{
-    Entry& sentinel = sentinelEntry();
-
-    if (sentinel.nextWithSameHash == 0)
-        recycle();
-    else
-        ++_size;
-
-    uint32_t poppedEntryIndex = sentinel.nextWithSameHash;
-    Require(poppedEntryIndex != 0);
-
-    Entry& poppedEntry = _entries[poppedEntryIndex];
-    sentinel.nextWithSameHash = poppedEntry.nextWithSameHash;
-    poppedEntry.nextWithSameHash = 0;
-
-    poppedEntry.value.reset();
-
-    return poppedEntryIndex;
-}
-
-template <typename Key, typename Value, typename Hasher>
-void StrongLRUCache<Key, Value, Hasher>::recycle()
-{
-    Require(_size == _capacity.value);
-
-    Entry& sentinel = sentinelEntry();
-    Require(sentinel.prevInLRU != 0);
-
-    uint32_t const entryIndex = sentinel.prevInLRU;
-    Entry& entry = _entries[entryIndex];
-    Entry& prev = _entries[entry.prevInLRU];
-
-    prev.nextInLRU = 0;
-    sentinel.prevInLRU = entry.prevInLRU;
-
-    validateChange(-1);
-
-    uint32_t* nextIndex = hashTableSlot(entry.hashValue);
-    while (*nextIndex != entryIndex)
-    {
-        Require(*nextIndex != 0);
-        nextIndex = &_entries[*nextIndex].nextWithSameHash;
-    }
-
-    Guarantee(*nextIndex == entryIndex);
-    *nextIndex = entry.nextWithSameHash;
-    entry.nextWithSameHash = sentinel.nextWithSameHash;
-    sentinel.nextWithSameHash = entryIndex;
-
-    ++_stats.recycles;
-}
-
-template <typename Key, typename Value, typename Hasher>
-inline int StrongLRUCache<Key, Value, Hasher>::validateChange(int adj)
-{
-#if defined(DEBUG_STRONG_LRU_CACHE)
-    int count = 0;
-
-    Entry& sentinel = sentinelEntry();
-    size_t lastOrdering = sentinel.ordering;
-
-    for (uint32_t entryIndex = sentinel.nextInLRU; entryIndex != 0;)
-    {
-        Entry& entry = _entries[entryIndex];
-        Require(entry.ordering < lastOrdering);
-        lastOrdering = entry.ordering;
-        entryIndex = entry.nextInLRU;
-        ++count;
-    }
-    auto const newLRUCount = _lastLRUCount + adj;
-    Require(newLRUCount == count);
-    _lastLRUCount = count;
-    return newLRUCount;
-#else
-    return _size;
-#endif
-}
-
-// }}}
 // }}}
 
 } // namespace crispy
 
+// {{{ fmt
 namespace fmt
 {
-template <>
-struct formatter<crispy::LRUCacheStats>
+template <typename K, typename V>
+struct formatter<crispy::detail::LRUCacheEntry<K, V>>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -700,10 +267,10 @@ struct formatter<crispy::LRUCacheStats>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(crispy::LRUCacheStats stats, FormatContext& ctx)
+    auto format(crispy::detail::LRUCacheEntry<K, V> const& entry, FormatContext& ctx)
     {
-        return format_to(
-            ctx.out(), "{} hits, {} misses, {} evictions", stats.hits, stats.misses, stats.recycles);
+        return format_to(ctx.out(), "{}: {}", entry.key, entry.value);
     }
 };
 } // namespace fmt
+// }}}
