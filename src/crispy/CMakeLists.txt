@@ -108,6 +108,7 @@ if(CRISPY_TESTING)
         CLI_test.cpp
         LRUCache_test.cpp
         StrongLRUCache_test.cpp
+        StrongLRUHashtable_test.cpp
         base64_test.cpp
         indexed_test.cpp
         compose_test.cpp
