@@ -15,6 +15,7 @@
 
 #include <crispy/assert.h>
 
+#include <cstring>
 #include <immintrin.h>
 #include <string>
 #include <string_view>
@@ -25,8 +26,47 @@ namespace crispy
 
 struct StrongHash
 {
-    __m128i value;
+    __m128i value {};
+
+    // clang-format off
+    StrongHash(uint32_t a, uint32_t b, uint32_t c, uint32_t d) noexcept:
+        StrongHash(_mm_set_epi32(static_cast<int>(a),
+                                 static_cast<int>(b),
+                                 static_cast<int>(c),
+                                 static_cast<int>(d))) {}
+    // clang-format on
+
+    StrongHash(__m128i v) noexcept: value { v } {}
+
+    StrongHash() = default;
+    StrongHash(StrongHash const&) = default;
+    StrongHash& operator=(StrongHash const&) = default;
+    StrongHash(StrongHash&&) noexcept = default;
+    StrongHash& operator=(StrongHash&&) noexcept = default;
 };
+
+inline std::string to_string(StrongHash const& hash)
+{
+    uint32_t u32[4];
+    std::memcpy(u32, &hash, sizeof(hash));
+    return fmt::format("{:04X}{:04X}{:04X}{:04X}", u32[0], u32[1], u32[2], u32[3]);
+}
+
+inline std::string to_structured_string(StrongHash const& hash)
+{
+    uint32_t u32[4];
+    std::memcpy(u32, &hash, sizeof(hash));
+    // produce a somewhat compressed format to not be too long.
+    std::string s;
+    for (int i = 3; i >= 0; --i)
+    {
+        if (!s.empty())
+            s += '.';
+        if (u32[i] != 0)
+            s += fmt::format("{:X}", u32[i]);
+    }
+    return s;
+}
 
 inline int to_integer(StrongHash hash) noexcept
 {
@@ -88,3 +128,21 @@ struct StrongHasher<std::basic_string_view<U>>
 };
 
 } // namespace crispy
+
+namespace fmt
+{
+template <>
+struct formatter<crispy::StrongHash>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(crispy::StrongHash const& hash, FormatContext& ctx)
+    {
+        return format_to(ctx.out(), "{}", to_structured_string(hash));
+    }
+};
+} // namespace fmt
