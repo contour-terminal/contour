@@ -26,12 +26,14 @@ install_deps_ubuntu()
         qtbase5-dev
     )
 
-    if [[ "${RELEASE}" < "19.04" ]]; then
-        # Old Ubuntu's (especially 18.04 LTS) doesn't have a proper std::filesystem implementation.
-        #packages+=libboost-all-dev
-        packages=( ${packages[*]} libboost-filesystem-dev g++-8 )
+    local NAME=`grep ^NAME /etc/os-release|cut -d= -f2|cut -f1|tr -d '"'`
+    if [[ ! "${NAME}" = "Debian GNU/Linux" ]]; then 
+      if [[ "${RELEASE}" < "19.04" ]]; then
+          # Old Ubuntu's (especially 18.04 LTS) doesn't have a proper std::filesystem implementation.
+          #packages+=libboost-all-dev
+          packages=( ${packages[*]} libboost-filesystem-dev g++-8 )
+      fi
     fi
-
     apt install ${packages[*]}
     sudo snap install --classic powershell
 }
@@ -63,7 +65,7 @@ main_linux()
         fedora)
             install_deps_fedora
             ;;
-        ubuntu|neon)
+        ubuntu|neon|debian)
             install_deps_ubuntu
             ;;
         *)
