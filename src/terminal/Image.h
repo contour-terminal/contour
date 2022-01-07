@@ -275,9 +275,9 @@ class ImagePool
 
     // data members
     //
-    ImageId nextImageId_;                                //!< ID for next image to be put into the pool
-    NameToImageIdCache::CachePtr imageNameToImageCache_; //!< keeps mapping from name to raw image
-    OnImageRemove const onImageRemove_; //!< Callback to be invoked when image gets removed from pool.
+    ImageId nextImageId_;                      //!< ID for next image to be put into the pool
+    NameToImageIdCache imageNameToImageCache_; //!< keeps mapping from name to raw image
+    OnImageRemove const onImageRemove_;        //!< Callback to be invoked when image gets removed from pool.
 };
 
 } // namespace terminal
@@ -320,45 +320,6 @@ struct formatter<terminal::ImageStats>
 };
 
 template <>
-struct formatter<terminal::Image>
-{
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(terminal::Image const& _image, FormatContext& ctx)
-    {
-        return format_to(ctx.out(),
-                         "Image<#{}, {}, size={}>",
-                         _image.weak_from_this().use_count(),
-                         _image.id(),
-                         _image.size());
-    }
-};
-
-template <>
-struct formatter<std::shared_ptr<terminal::Image>>
-{
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(std::shared_ptr<terminal::Image> const& _image, FormatContext& ctx)
-    {
-        if (_image)
-            return format_to(ctx.out(), "{}", *_image);
-        else
-            return format_to(ctx.out(), "nullptr");
-    }
-};
-
-template <>
 struct formatter<std::shared_ptr<terminal::Image const>>
 {
     template <typename ParseContext>
@@ -370,10 +331,14 @@ struct formatter<std::shared_ptr<terminal::Image const>>
     template <typename FormatContext>
     auto format(std::shared_ptr<terminal::Image const> const& _image, FormatContext& ctx)
     {
-        if (_image)
-            return format_to(ctx.out(), "{}", *_image);
-        else
+        if (!_image)
             return format_to(ctx.out(), "nullptr");
+        terminal::Image const& image = *_image;
+        return format_to(ctx.out(),
+                         "Image<#{}, {}, size={}>",
+                         image.weak_from_this().use_count(),
+                         image.id(),
+                         image.size());
     }
 };
 
