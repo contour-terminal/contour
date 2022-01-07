@@ -166,23 +166,14 @@ logging:
 
 ## Installing from source
 
-### Prerequisites Linux
+It's best installed from supported package managers, but if you want
+to build from source, it is recommended to execute the `scripts/install-deps.sh` script.
 
-This is tested on Ubuntu 19.04, but *any* recent Linux with latest C++17 compiler should do:
-
-```sh
-sudo apt install \
-    "g++-9" cmake pkg-config make libfreetype6-dev qtbase5-dev libqt5gui5 extra-cmake-modules \
-    libfontconfig1-dev libharfbuzz-dev libfontconfig-dev
-```
-
-To enable blur-behind feature on transparent background, you'll need the following packages:
+### Prerequisites UNIX-like systems (Linux, FreeBSD, OS/X)
 
 ```sh
-sudo apt install libkf5windowsystem-dev
+sudo ./scripts/install-deps.sh
 ```
-
-And set pass `-DCONTOUR_BLUR_PLATFORM_KWIN=ON` to cmake when configuring the project.
 
 ### Prerequisites Windows 10
 
@@ -190,15 +181,8 @@ For Windows, you must have Windows 10, 2018 Fall Creators Update, and Visual Stu
 It will neither build nor run on any prior Windows OS, due to libterminal making use of [ConPTY API](https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/).
 
 ```psh
-vcpkg install freetype fontconfig harfbuzz qt5-base
+.\scripts\install-deps.ps1
 ```
-
-### Prerequisites Mac OS/X
-
-```psh
-brew install freetype fontconfig harfbuzz boost qt5
-```
-
 
 # References
 
