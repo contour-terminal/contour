@@ -116,8 +116,8 @@ class StrongLRUHashtable
     [[nodiscard]] bool contains(StrongHash const& hash) const noexcept;
 
     /// Returns the value for the given hash key if found, nullptr otherwise.
-    [[nodiscard]] Value* try_get(StrongHash const& hash);
-    [[nodiscard]] Value const* try_get(StrongHash const& hash) const;
+    [[nodiscard]] Value* try_get(StrongHash const& hash) noexcept;
+    [[nodiscard]] Value const* try_get(StrongHash const& hash) const noexcept;
 
     /// Returns the value for the given hash key,
     /// throwing std::out_of_range if hash key was not found.
@@ -194,7 +194,7 @@ class StrongLRUHashtable
   private:
     // {{{ details
     // Maps the given hash hash key to a slot in the hash table.
-    uint32_t* hashTableSlot(StrongHash const& hash);
+    uint32_t* hashTableSlot(StrongHash const& hash) noexcept;
 
     // Returns entry index to an unused entry, possibly by evicting
     // the least recently used entry if no free entries are available.
@@ -351,7 +351,7 @@ inline size_t StrongLRUHashtable<Value>::storageSize() const noexcept
 }
 
 template <typename Value>
-inline uint32_t* StrongLRUHashtable<Value>::hashTableSlot(StrongHash const& hash)
+inline uint32_t* StrongLRUHashtable<Value>::hashTableSlot(StrongHash const& hash) noexcept
 {
     uint32_t const index = _mm_cvtsi128_si32(hash.value);
     uint32_t const slot = index & _hashMask;
@@ -451,7 +451,7 @@ inline bool StrongLRUHashtable<Value>::contains(StrongHash const& hash) const no
 }
 
 template <typename Value>
-inline Value* StrongLRUHashtable<Value>::try_get(StrongHash const& hash)
+inline Value* StrongLRUHashtable<Value>::try_get(StrongHash const& hash) noexcept
 {
     uint32_t const entryIndex = findEntry(hash, false);
     if (!entryIndex)
@@ -460,7 +460,7 @@ inline Value* StrongLRUHashtable<Value>::try_get(StrongHash const& hash)
 }
 
 template <typename Value>
-inline Value const* StrongLRUHashtable<Value>::try_get(StrongHash const& hash) const
+inline Value const* StrongLRUHashtable<Value>::try_get(StrongHash const& hash) const noexcept
 {
     return const_cast<StrongLRUHashtable*>(this)->try_get(hash);
 }
