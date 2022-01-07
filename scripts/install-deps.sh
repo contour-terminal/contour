@@ -149,10 +149,14 @@ install_deps_ubuntu()
 
     RELEASE=`grep VERSION_ID /etc/os-release | cut -d= -f2 | tr -d '"'`
 
-    if [ "$RELEASE" = "18.04" ]; then
-        # Old Ubuntu's (especially 18.04 LTS) doesn't have a proper std::filesystem implementation.
-        #packages+=libboost-all-dev
-        packages="$packages libboost-filesystem-dev g++-8"
+    local NAME=`grep ^NAME /etc/os-release | cut -d= -f2 | cut -f1 | tr -d '"'`
+
+    if [[ ! "${NAME}" = "Debian GNU/Linux" ]]; then
+        if [ "$RELEASE" < "19.04" ]; then
+            # Old Ubuntu's (especially 18.04 LTS) doesn't have a proper std::filesystem implementation.
+            #packages+=libboost-all-dev
+            packages="$packages libboost-filesystem-dev g++-8"
+        fi
     fi
 
     case $RELEASE in
@@ -294,7 +298,7 @@ main()
         fedora)
             install_deps_fedora
             ;;
-        ubuntu|neon)
+        ubuntu|neon|debian)
             install_deps_ubuntu
             ;;
         Darwin)
