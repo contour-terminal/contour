@@ -945,21 +945,21 @@ void softLoadFont(UsedKeys& _usedKeys,
             _store.familyName = _node["family"].as<string>();
         }
 
-        if (_node["slant"].IsScalar())
+        if (_node["slant"] && _node["slant"].IsScalar())
         {
             _usedKeys.emplace(fmt::format("{}.{}", _basePath, "slant"));
             if (auto const p = text::make_font_slant(_node["slant"].as<string>()))
                 _store.slant = p.value();
         }
 
-        if (_node["weight"].IsScalar())
+        if (_node["weight"] && _node["weight"].IsScalar())
         {
             _usedKeys.emplace(fmt::format("{}.{}", _basePath, "weight"));
             if (auto const p = text::make_font_weight(_node["weight"].as<string>()))
                 _store.weight = p.value();
         }
 
-        if (_node["features"] && _node["features"].IsSequence())
+        if (_node["features"] && _node["features"] && _node["features"].IsSequence())
         {
             _usedKeys.emplace(fmt::format("{}.{}", _basePath, "features"));
             YAML::Node featuresNode = _node["features"];
@@ -1409,6 +1409,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
  */
 void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 {
+    LOGSTORE(ConfigLog)("Loading configuration from file: {}", _fileName.string());
     _config.backingFilePath = _fileName;
     createFileIfNotExists(_config.backingFilePath);
     auto usedKeys = UsedKeys {};
