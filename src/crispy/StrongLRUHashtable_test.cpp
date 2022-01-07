@@ -196,6 +196,32 @@ TEST_CASE("StrongLRUHashtable.try_get", "")
     REQUIRE(joinHumanReadable(cache.hashes()) == "1, 3, 4, 2");
 }
 
+TEST_CASE("StrongLRUHashtable.get_or_try_emplace", "[lrucache]")
+{
+    auto cachePtr = StrongLRUHashtable<int>::create(StrongHashtableSize { 4 }, LRUCapacity { 2 });
+    auto& cache = *cachePtr;
+
+    int* a = nullptr;
+
+    a = cache.get_or_try_emplace(h(1), [](auto) -> optional<int> { return nullopt; });
+    REQUIRE(!a);
+    a = cache.get_or_try_emplace(h(1), [](auto) -> optional<int> { return 2; });
+    REQUIRE(a);
+    REQUIRE(*a == 2);
+
+    a = cache.get_or_try_emplace(h(2), [](auto) -> optional<int> { return nullopt; });
+    REQUIRE(!a);
+    a = cache.get_or_try_emplace(h(2), [](auto) -> optional<int> { return 4; });
+    REQUIRE(a);
+    REQUIRE(*a == 4);
+
+    a = cache.get_or_try_emplace(h(3), [](auto) -> optional<int> { return nullopt; });
+    REQUIRE(!a);
+    a = cache.get_or_try_emplace(h(3), [](auto) -> optional<int> { return 6; });
+    REQUIRE(a);
+    REQUIRE(*a == 6);
+}
+
 TEST_CASE("StrongLRUHashtable.get_or_emplace", "[lrucache]")
 {
     auto cachePtr = StrongLRUHashtable<int>::create(StrongHashtableSize { 4 }, LRUCapacity { 2 });

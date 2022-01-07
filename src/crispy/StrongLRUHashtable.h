@@ -149,6 +149,17 @@ class StrongLRUHashtable
     template <typename ValueConstructFn>
     [[nodiscard]] Value& get_or_emplace(StrongHash const& hash, ValueConstructFn constructValue);
 
+    /**
+     * Like get_or_emplace but allows failure in @p constructValue call to cause the hash entry not
+     * to be created.
+     *
+     * Tries to get an existing entry and returns a reference to it,
+     * otherwise tries to create an entry, puts into the hashtable and returns a reference to it.
+     * If creation has failed, nullptr is returned instead.
+     */
+    template <typename ValueConstructFn>
+    [[nodiscard]] Value* get_or_try_emplace(StrongHash const& hash, ValueConstructFn constructValue);
+
     void inspect(std::ostream& output) const;
 
     // {{{ public detail
@@ -528,14 +539,63 @@ inline Value& StrongLRUHashtable<Value>::get_or_emplace(StrongHash const& hash,
     Require(!entryIndex);
 
     ++_stats.misses;
+
     entryIndex = allocateEntry();
     Entry& result = _entries[entryIndex];
     result.nextWithSameHash = *slot;
     result.hashValue = hash;
-    result.value.emplace(constructValue(entryIndex));
+    result.value.emplace(constructValue(entryIndex)); // TODO: not yet exception safe
     *slot = entryIndex;
     linkToLRUChainHead(entryIndex);
     return *result.value;
+}
+
+template <typename Value>
+template <typename ValueConstructFn>
+inline Value* StrongLRUHashtable<Value>::get_or_try_emplace(StrongHash const& hash,
+                                                            ValueConstructFn constructValue)
+{
+    uint32_t* slot = hashTableSlot(hash);
+
+    uint32_t entryIndex = *slot;
+    while (entryIndex)
+    {
+        Entry& candidateEntry = _entries[entryIndex];
+        if (candidateEntry.hashValue == hash)
+        {
+            ++_stats.hits;
+            unlinkFromLRUChain(candidateEntry);
+            linkToLRUChainHead(entryIndex);
+            return &candidateEntry.value.value();
+        }
+        entryIndex = candidateEntry.nextWithSameHash;
+    }
+
+    Require(!entryIndex);
+
+    ++_stats.misses;
+
+    entryIndex = allocateEntry();
+
+    std::optional<Value> constructedValue = constructValue(entryIndex);
+    if (!constructedValue)
+    {
+        // put entryIndex back to free-list
+        Entry& sentinel = sentinelEntry();
+        Entry& entry = _entries[entryIndex];
+        entry.nextWithSameHash = sentinel.nextWithSameHash;
+        sentinel.nextWithSameHash = entryIndex;
+        --_size;
+        return nullptr;
+    }
+
+    Entry& result = _entries[entryIndex];
+    result.nextWithSameHash = *slot;
+    result.hashValue = hash;
+    result.value = std::move(constructedValue);
+    *slot = entryIndex;
+    linkToLRUChainHead(entryIndex);
+    return &result.value.value();
 }
 
 template <typename Value>
