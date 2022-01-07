@@ -191,6 +191,12 @@ class StrongLRUHashtable
     // This entry is not inserted into the LRU-chain yet.
     uint32_t allocateEntry();
 
+    // Relinks the given entry to the front of the LRU-chain.
+    void linkToLRUChainHead(uint32_t entryIndex) noexcept;
+
+    // Unlinks given entry from LRU chain without touching the entry itself.
+    void unlinkFromLRUChain(Entry& entry) noexcept;
+
     // Returns the index to the entry associated with the given hash key.
     // If the hash key was not found and force is set to true, it'll be created,
     // otherwise 0 is returned.
@@ -503,17 +509,40 @@ template <typename ValueConstructFn>
 inline Value& StrongLRUHashtable<Value>::get_or_emplace(StrongHash const& hash,
                                                         ValueConstructFn constructValue)
 {
-    if (Value* p = try_get(hash))
-        return *p;
+    uint32_t* slot = hashTableSlot(hash);
 
-    uint32_t const entryIndex = findEntry(hash, true);
-    return *_entries[entryIndex].value = constructValue(entryIndex);
+    uint32_t entryIndex = *slot;
+    while (entryIndex)
+    {
+        Entry& candidateEntry = _entries[entryIndex];
+        if (candidateEntry.hashValue == hash)
+        {
+            ++_stats.hits;
+            unlinkFromLRUChain(candidateEntry);
+            linkToLRUChainHead(entryIndex);
+            return *candidateEntry.value;
+        }
+        entryIndex = candidateEntry.nextWithSameHash;
+    }
+
+    Require(!entryIndex);
+
+    ++_stats.misses;
+    entryIndex = allocateEntry();
+    Entry& result = _entries[entryIndex];
+    result.nextWithSameHash = *slot;
+    result.hashValue = hash;
+    result.value.emplace(constructValue(entryIndex));
+    *slot = entryIndex;
+    linkToLRUChainHead(entryIndex);
+    return *result.value;
 }
 
 template <typename Value>
 inline Value& StrongLRUHashtable<Value>::emplace(StrongHash const& hash, Value value) noexcept
 {
-    return (*this)[hash] = std::move(value);
+    uint32_t const entryIndex = findEntry(hash, true);
+    return *_entries[entryIndex].value = std::move(value);
 }
 
 template <typename Value>
@@ -583,14 +612,7 @@ uint32_t StrongLRUHashtable<Value>::findEntry(StrongHash const& hash, bool force
     if (result)
     {
         ++_stats.hits;
-
-        Entry& prev = _entries[result->prevInLRU];
-        Entry& next = _entries[result->nextInLRU];
-
-        prev.nextInLRU = result->nextInLRU;
-        next.prevInLRU = result->prevInLRU;
-
-        validateChange(-1);
+        unlinkFromLRUChain(*result);
     }
     else if (force)
     {
@@ -609,22 +631,41 @@ uint32_t StrongLRUHashtable<Value>::findEntry(StrongHash const& hash, bool force
         return 0;
     }
 
-    Entry& sentinel = sentinelEntry();
-    Require(result != &sentinel);
-    result->nextInLRU = sentinel.nextInLRU;
-    result->prevInLRU = 0;
+    linkToLRUChainHead(entryIndex);
 
-    Entry& nextEntry = _entries[sentinel.nextInLRU];
-    nextEntry.prevInLRU = entryIndex;
+    return entryIndex;
+}
+
+template <typename Value>
+inline void StrongLRUHashtable<Value>::unlinkFromLRUChain(Entry& entry) noexcept
+{
+    Entry& prev = _entries[entry.prevInLRU];
+    Entry& next = _entries[entry.nextInLRU];
+    prev.nextInLRU = entry.nextInLRU;
+    next.prevInLRU = entry.prevInLRU;
+
+    validateChange(-1);
+}
+
+template <typename Value>
+inline void StrongLRUHashtable<Value>::linkToLRUChainHead(uint32_t entryIndex) noexcept
+{
+    // The entry must be already unlinked
+
+    Entry& sentinel = sentinelEntry();
+    Entry& oldHead = _entries[sentinel.nextInLRU];
+    Entry& newHead = _entries[entryIndex];
+
+    newHead.nextInLRU = sentinel.nextInLRU;
+    newHead.prevInLRU = 0;
+    oldHead.prevInLRU = entryIndex;
     sentinel.nextInLRU = entryIndex;
 
 #if defined(DEBUG_STRONG_LRU_HASHTABLE)
-    result->ordering = sentinel.ordering++;
+    newHead.ordering = sentinel.ordering++;
 #endif
 
     Require(validateChange(1) == _size);
-
-    return entryIndex;
 }
 
 template <typename Value>
