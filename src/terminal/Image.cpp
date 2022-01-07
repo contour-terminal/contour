@@ -22,8 +22,8 @@ using std::min;
 using std::move;
 using std::shared_ptr;
 
-using crispy::StrongCacheCapacity;
-using crispy::StrongHashCapacity;
+using crispy::LRUCapacity;
+using crispy::StrongHashtableSize;
 
 namespace terminal
 {
@@ -52,8 +52,7 @@ ImageFragment::~ImageFragment()
 
 ImagePool::ImagePool(OnImageRemove _onImageRemove, ImageId _nextImageId):
     nextImageId_ { _nextImageId },
-    imageNameToImageCache_ { NameToImageIdCache::create(StrongHashCapacity { 1024 },
-                                                        StrongCacheCapacity { 100 }) },
+    imageNameToImageCache_ { StrongHashtableSize { 1024 }, LRUCapacity { 100 } },
     onImageRemove_ { std::move(_onImageRemove) }
 {
 }
@@ -147,12 +146,12 @@ shared_ptr<RasterizedImage> ImagePool::rasterize(shared_ptr<Image const> _image,
 
 void ImagePool::link(std::string const& _name, shared_ptr<Image const> _imageRef)
 {
-    imageNameToImageCache_->emplace(_name, std::move(_imageRef));
+    imageNameToImageCache_.emplace(_name, std::move(_imageRef));
 }
 
 shared_ptr<Image const> ImagePool::findImageByName(std::string const& _name) const noexcept
 {
-    if (auto imageRef = imageNameToImageCache_->try_get(_name))
+    if (auto imageRef = imageNameToImageCache_.try_get(_name))
         return *imageRef;
 
     return {};
@@ -160,18 +159,18 @@ shared_ptr<Image const> ImagePool::findImageByName(std::string const& _name) con
 
 void ImagePool::unlink(std::string const& _name)
 {
-    imageNameToImageCache_->erase(_name);
+    imageNameToImageCache_.erase(_name);
 }
 
 void ImagePool::clear()
 {
-    imageNameToImageCache_->clear();
+    imageNameToImageCache_.clear();
 }
 
 void ImagePool::inspect(std::ostream& os) const
 {
     os << "image name links:\n";
-    imageNameToImageCache_->inspect(os);
+    imageNameToImageCache_.inspect(os);
     os << fmt::format("global image stats: {}\n", ImageStats::get());
 }
 
