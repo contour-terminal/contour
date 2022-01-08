@@ -149,6 +149,8 @@ class ring: public basic_ring<T, Container<T, Allocator>>
     ring(size_t capacity, T value): ring(Container<T, Allocator>(capacity, value)) {}
     explicit ring(size_t capacity): ring(capacity, T {}) {}
 
+    size_t size() const noexcept { return this->_storage.size(); }
+
     void reserve(size_t capacity) { this->_storage.reserve(capacity); }
     void resize(size_t newSize)
     {
