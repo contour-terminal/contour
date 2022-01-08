@@ -3,6 +3,7 @@
 - Fixes PTY write race condition.
 - Fixes VT sequence OSC 4's response.
 - Fixes an assertion in text renderer.
+- Fixes wrongly advertising DEC locator mode (it is not supported).
 
 ### 0.2.3 (2021-12-12)
 

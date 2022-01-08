@@ -1014,7 +1014,7 @@ void Screen::sendDeviceAttributes()
 
     auto const attrs = to_params(
         DeviceAttributes::AnsiColor |
-        DeviceAttributes::AnsiTextLocator |
+        //TODO: (DEC Locator) DeviceAttributes::AnsiTextLocator |
         DeviceAttributes::CaptureScreenBuffer |
         DeviceAttributes::Columns132 |
         //TODO: DeviceAttributes::NationalReplacementCharacterSets |
