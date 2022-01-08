@@ -151,8 +151,9 @@ install_deps_ubuntu()
 
     local NAME=`grep ^NAME /etc/os-release | cut -d= -f2 | cut -f1 | tr -d '"'`
 
-    if [[ ! "${NAME}" = "Debian GNU/Linux" ]]; then
-        if [ "$RELEASE" < "19.04" ]; then
+    if [ ! "${NAME}" = "Debian GNU/Linux" ]; then
+        # We cannot use [[ nor < here because that's not in /bin/sh.
+        if [ "$RELEASE" = "18.04" ]; then
             # Old Ubuntu's (especially 18.04 LTS) doesn't have a proper std::filesystem implementation.
             #packages+=libboost-all-dev
             packages="$packages libboost-filesystem-dev g++-8"
