@@ -14,6 +14,9 @@
 - Adds new configuration option `renderer` for explicitly setting renderer to one of: `OpenGL`, `software`, `default`.
 - Adds `mock` font locator.
 - Adds VT sequence `SM ? 8452 h` and `RM ? 8452 l` for enabling/disabling sixel cursor placement conformance (xterm extension).
+- Fixes VT sequence OSC 4's response.
+- Fixes an assertion in text renderer.
+- Fixes wrongly advertising DEC locator mode (it is not supported).
 
 ### 0.2.3 (2021-12-12)
 

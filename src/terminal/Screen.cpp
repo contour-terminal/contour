@@ -1203,8 +1203,9 @@ void Screen<T>::sendDeviceAttributes()
         return "1"; // Should never be reached.
     }();
 
-    auto const attrs = to_params(DeviceAttributes::AnsiColor | DeviceAttributes::AnsiTextLocator
-                                 | DeviceAttributes::CaptureScreenBuffer | DeviceAttributes::Columns132 |
+    auto const attrs = to_params(DeviceAttributes::AnsiColor |
+                                 // DeviceAttributes::AnsiTextLocator |
+                                 DeviceAttributes::CaptureScreenBuffer | DeviceAttributes::Columns132 |
                                  // TODO: DeviceAttributes::NationalReplacementCharacterSets |
                                  DeviceAttributes::RectangularEditing |
                                  // TODO: DeviceAttributes::SelectiveErase |
