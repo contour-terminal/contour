@@ -489,9 +489,8 @@ void Grid<Cell>::scrollDown(LineCount v_n,
         // move all lines up by N lines
         // bottom N lines are wiped out
 
-        auto const marginHeight = LineCount(_margin.vertical.length());
-        std::rotate(
-            std::begin(mainPage()), std::next(begin(mainPage()), *marginHeight - *n), std::end(mainPage()));
+        rotateBuffersRight(n);
+
         for (Line<Cell>& line: mainPage().subspan(0, *n))
             line.reset(defaultLineFlags(), _defaultAttributes);
         return;
