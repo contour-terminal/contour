@@ -4,14 +4,22 @@ else()
    find_package(Qt5 COMPONENTS Gui Widgets REQUIRED)  # apt install qtbase5-dev libqt5gui5
 endif()
 
-CIncludeMe(shaders/background.frag "${CMAKE_CURRENT_BINARY_DIR}/background_frag.h" "background_frag" "default_shaders")
-CIncludeMe(shaders/background.vert "${CMAKE_CURRENT_BINARY_DIR}/background_vert.h" "background_vert" "default_shaders")
-CIncludeMe(shaders/text.frag "${CMAKE_CURRENT_BINARY_DIR}/text_frag.h" "text_frag" "default_shaders")
-CIncludeMe(shaders/text.vert "${CMAKE_CURRENT_BINARY_DIR}/text_vert.h" "text_vert" "default_shaders")
+CIncludeMe(shaders/background.frag "${CMAKE_CURRENT_BINARY_DIR}/background_frag.h" "background_frag" "contour::opengl::verbatim")
+CIncludeMe(shaders/background.vert "${CMAKE_CURRENT_BINARY_DIR}/background_vert.h" "background_vert" "contour::opengl::verbatim")
+CIncludeMe(shaders/text.frag "${CMAKE_CURRENT_BINARY_DIR}/text_frag.h" "text_frag" "contour::opengl::verbatim")
+CIncludeMe(shaders/text.vert "${CMAKE_CURRENT_BINARY_DIR}/text_vert.h" "text_vert" "contour::opengl::verbatim")
+
+CIncludeMe(
+    ${CMAKE_SOURCE_DIR}/src/terminal_renderer/shared_defines.h
+    "${CMAKE_CURRENT_BINARY_DIR}/shared_defines_verbatim.h"
+    "shared_defines"
+    "contour::opengl::verbatim"
+)
 
 add_library(contour_frontend_opengl
     "${CMAKE_CURRENT_BINARY_DIR}/background_frag.h"
     "${CMAKE_CURRENT_BINARY_DIR}/background_vert.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/shared_defines_verbatim.h"
     "${CMAKE_CURRENT_BINARY_DIR}/text_frag.h"
     "${CMAKE_CURRENT_BINARY_DIR}/text_vert.h"
     OpenGLRenderer.cpp OpenGLRenderer.h

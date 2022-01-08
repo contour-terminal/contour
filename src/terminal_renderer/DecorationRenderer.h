@@ -16,43 +16,14 @@
 #include <terminal/RenderBuffer.h>
 #include <terminal/Screen.h>
 
-#include <terminal_renderer/Atlas.h>
+#include <terminal_renderer/Decorator.h>
 #include <terminal_renderer/RenderTarget.h>
+#include <terminal_renderer/TextureAtlas.h>
 
 namespace terminal::renderer
 {
 
 struct GridMetrics;
-
-/// Dectorator, to decorate a grid cell, eventually containing a character
-///
-/// It should be possible to render multiple decoration onto the same coordinates.
-enum class Decorator
-{
-    /// Draws an underline
-    Underline,
-    /// Draws a doubly underline
-    DoubleUnderline,
-    /// Draws a curly underline
-    CurlyUnderline,
-    /// Draws a dotted underline
-    DottedUnderline,
-    /// Draws a dashed underline
-    DashedUnderline,
-    /// Draws an overline
-    Overline,
-    /// Draws a strike-through line
-    CrossedOut,
-    /// Draws a box around the glyph, this is literally the bounding box of a grid cell.
-    /// This could be used for debugging.
-    /// TODO: That should span the box around the whole (potentially wide) character
-    Framed,
-    /// Puts a circle-shape around into the cell (and ideally around the glyph)
-    /// TODO: How'd that look like with double-width characters?
-    Encircle,
-};
-
-std::optional<Decorator> to_decorator(std::string const& _value);
 
 /// Renders any kind of grid cell decorations, ranging from basic underline to surrounding boxes.
 class DecorationRenderer: public Renderable
@@ -67,8 +38,10 @@ class DecorationRenderer: public Renderable
                        Decorator _hyperlinkNormal,
                        Decorator _hyperlinkHover);
 
-    void setRenderTarget(RenderTarget& _renderTarget) override;
+    void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
+    void setTextureAtlas(TextureAtlas& atlas) override;
     void clearCache() override;
+    void inspect(std::ostream& output) const override;
 
     void setHyperlinkDecoration(Decorator _normal, Decorator _hover)
     {
@@ -86,25 +59,19 @@ class DecorationRenderer: public Renderable
     constexpr Decorator hyperlinkNormal() const noexcept { return hyperlinkNormal_; }
     constexpr Decorator hyperlinkHover() const noexcept { return hyperlinkHover_; }
 
-    constexpr int underlineThickness() const noexcept { return gridMetrics_.underline.thickness; }
-    constexpr int underlinePosition() const noexcept { return gridMetrics_.underline.position; }
+    constexpr int underlineThickness() const noexcept { return _gridMetrics.underline.thickness; }
+    constexpr int underlinePosition() const noexcept { return _gridMetrics.underline.position; }
 
   private:
-    using Atlas = atlas::MetadataTextureAtlas<Decorator, int>; // contains various glyph decorators
-    using DataRef = Atlas::DataRef;
-
-    void rebuild();
-
-    std::optional<DataRef> getDataRef(Decorator _decorator);
+    void initializeDirectMapping();
+    using Renderable::createTileData;
+    TextureAtlas::TileCreateData createTileData(Decorator decoration, atlas::TileLocation tileLocation);
 
     // private data members
     //
-    GridMetrics const& gridMetrics_;
-
+    DirectMapping _directMapping;
     Decorator hyperlinkNormal_ = Decorator::DottedUnderline;
     Decorator hyperlinkHover_ = Decorator::Underline;
-
-    std::unique_ptr<Atlas> atlas_;
 };
 
 } // namespace terminal::renderer

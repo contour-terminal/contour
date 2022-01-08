@@ -273,10 +273,10 @@ void TerminalSession::copyToClipboard(std::string_view _data)
     display_->post([this, data = string(_data)]() { display_->copyToClipboard(data); });
 }
 
-void TerminalSession::dumpState()
+void TerminalSession::inspect()
 {
     if (display_)
-        display_->dumpState();
+        display_->inspect();
 
     // Deferred termination? Then close display now.
     if (terminal_.device().isClosed() && !app_.dumpStateAtExit().has_value())
@@ -325,7 +325,7 @@ void TerminalSession::onClosed()
     }
 
     if (app_.dumpStateAtExit().has_value())
-        dumpState();
+        inspect();
     else if (display_)
         display_->closeDisplay();
 }
@@ -503,7 +503,6 @@ void TerminalSession::sendFocusInEvent()
     // window, so we have to re-apply our desired cursor in focusInEvent().
     setDefaultCursor();
 
-    terminal().screen().setFocus(true);
     terminal().sendFocusInEvent();
 
     display_->setBackgroundBlur(profile().backgroundBlur);
@@ -513,7 +512,6 @@ void TerminalSession::sendFocusInEvent()
 void TerminalSession::sendFocusOutEvent()
 {
     // TODO maybe paint with "faint" colors
-    terminal().screen().setFocus(false);
     terminal().sendFocusOutEvent();
 
     scheduleRedraw();

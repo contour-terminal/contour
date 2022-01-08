@@ -64,15 +64,16 @@ constexpr int pixel_size(bitmap_format _format) noexcept
 struct rasterized_glyph
 {
     glyph_index index;
-    crispy::ImageSize size; // Glyph bitmap size in pixels.
-    crispy::Point position; // top-left position of the bitmap, relative to the basline's origin.
+    crispy::ImageSize bitmapSize; // Glyph bitmap size in pixels.
+    crispy::Point position;       // top-left position of the bitmap, relative to the basline's origin.
     bitmap_format format;
     std::vector<uint8_t> bitmap;
 
     bool valid() const
     {
         return bitmap.size()
-               == text::pixel_size(format) * unbox<size_t>(size.width) * unbox<size_t>(size.height);
+               == text::pixel_size(format) * unbox<size_t>(bitmapSize.width)
+                      * unbox<size_t>(bitmapSize.height);
     }
 };
 
@@ -220,7 +221,7 @@ struct formatter<text::rasterized_glyph>
         return format_to(ctx.out(),
                          "rasterized_glyph({}, {}+{}, {})",
                          _glyph.index.value,
-                         _glyph.size,
+                         _glyph.bitmapSize,
                          _glyph.position,
                          _glyph.format);
     }

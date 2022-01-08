@@ -208,7 +208,8 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
         int rv = select(nfds, &rfd, &wfd, &efd, &tv);
         if (rv == 0)
         {
-            LOGSTORE(PtyInLog)("PTY read() timed out.");
+            // (Let's not be too verbose here.)
+            // LOGSTORE(PtyInLog)("PTY read() timed out.");
             errno = EAGAIN;
             return nullopt;
         }

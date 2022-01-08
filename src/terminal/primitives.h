@@ -20,6 +20,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <limits>
 #include <ostream>
 #include <type_traits>
 
@@ -483,8 +484,41 @@ enum class CursorShape
 
 } // namespace terminal
 
+namespace std
+{
+template <>
+struct numeric_limits<terminal::CursorShape>
+{
+    constexpr static terminal::CursorShape min() noexcept { return terminal::CursorShape::Block; }
+    constexpr static terminal::CursorShape max() noexcept { return terminal::CursorShape::Bar; }
+    constexpr static size_t count() noexcept { return 4; }
+};
+} // namespace std
+
 namespace fmt
 { // {{{
+template <>
+struct formatter<terminal::CursorShape>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::CursorShape value, FormatContext& ctx)
+    {
+        switch (value)
+        {
+        case terminal::CursorShape::Bar: return format_to(ctx.out(), "Bar");
+        case terminal::CursorShape::Block: return format_to(ctx.out(), "Block");
+        case terminal::CursorShape::Rectangle: return format_to(ctx.out(), "Rectangle");
+        case terminal::CursorShape::Underscore: return format_to(ctx.out(), "Underscore");
+        }
+        return format_to(ctx.out(), "{}", static_cast<unsigned>(value));
+    }
+};
+
 template <>
 struct formatter<terminal::CellLocation>
 {

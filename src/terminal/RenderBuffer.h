@@ -31,12 +31,13 @@ namespace terminal
 struct RenderCell
 {
     std::u32string codepoints;
+    std::shared_ptr<ImageFragment> image;
     CellLocation position;
     CellFlags flags;
+    uint8_t width = 1;
     RGBColor foregroundColor;
     RGBColor backgroundColor;
     RGBColor decorationColor;
-    std::shared_ptr<ImageFragment> image;
 
     bool groupStart = false;
     bool groupEnd = false;
@@ -46,7 +47,7 @@ struct RenderCursor
 {
     CellLocation position;
     CursorShape shape;
-    int width;
+    int width = 1;
 };
 
 struct RenderBuffer

@@ -14,9 +14,8 @@
 #pragma once
 
 #include <terminal/Color.h>
-#include <terminal/Sequencer.h> // CursorShape
+#include <terminal/primitives.h>
 
-#include <terminal_renderer/Atlas.h>
 #include <terminal_renderer/GridMetrics.h>
 #include <terminal_renderer/RenderTarget.h>
 
@@ -31,9 +30,11 @@ namespace terminal::renderer
 class CursorRenderer: public Renderable
 {
   public:
-    CursorRenderer(GridMetrics const& _gridMetrics, CursorShape _shape);
+    CursorRenderer(GridMetrics const& gridMetrics, CursorShape _shape);
 
-    void setRenderTarget(RenderTarget& _renderTarget) override;
+    void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
+    void setTextureAtlas(TextureAtlas& atlas) override;
+
     void clearCache() override;
 
     CursorShape shape() const noexcept { return shape_; }
@@ -41,21 +42,18 @@ class CursorRenderer: public Renderable
 
     void render(crispy::Point _pos, int _columnWidth, RGBColor _color);
 
-  private:
-    using TextureAtlas = atlas::MetadataTextureAtlas<CursorShape, int>;
-    using DataRef = TextureAtlas::DataRef;
-
-    void rebuild();
-    std::optional<DataRef> getDataRef(CursorShape _shape);
-
-    std::array<float, 4> color() const noexcept;
+    void inspect(std::ostream& output) const override;
 
   private:
-    std::unique_ptr<TextureAtlas> textureAtlas_;
-    GridMetrics const& gridMetrics_;
+    void initializeDirectMapping();
 
+    using Renderable::createTileData;
+    TextureAtlas::TileCreateData createTileData(CursorShape shape,
+                                                int columnWidth,
+                                                atlas::TileLocation tileLocation);
+
+    DirectMapping _directMapping {};
     CursorShape shape_;
-    uint8_t columnWidth_;
 };
 
 } // namespace terminal::renderer

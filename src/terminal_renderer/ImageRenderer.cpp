@@ -27,85 +27,79 @@ using std::optional;
 namespace terminal::renderer
 {
 
-ImageRenderer::ImageRenderer(ImageSize _cellSize): cellSize_ { _cellSize }
+ImageRenderer::ImageRenderer(GridMetrics const& gridMetrics, ImageSize cellSize):
+    Renderable { gridMetrics }, cellSize_ { cellSize }
 {
 }
 
-void ImageRenderer::setRenderTarget(RenderTarget& _renderTarget)
+void ImageRenderer::setRenderTarget(RenderTarget& renderTarget,
+                                    DirectMappingAllocator& directMappingAllocator)
 {
-    Renderable::setRenderTarget(_renderTarget);
+    Renderable::setRenderTarget(renderTarget, directMappingAllocator);
     clearCache();
 }
 
 void ImageRenderer::setCellSize(ImageSize _cellSize)
 {
     cellSize_ = _cellSize;
-    // TODO: recompute slices here?
+    // TODO: recompute rasterized images slices here?
 }
 
-void ImageRenderer::renderImage(crispy::Point _pos, ImageFragment const& _fragment)
+void ImageRenderer::renderImage(crispy::Point _pos, ImageFragment const& fragment)
 {
-    if (optional<DataRef> const dataRef = getTextureInfo(_fragment); dataRef.has_value())
-    {
-        // std::cout << fmt::format("ImageRenderer.renderImage: {}\n", _fragment);
+    // std::cout << fmt::format("ImageRenderer.renderImage: {}\n", fragment);
 
-        auto const color = array { 1.0f, 0.0f, 0.0f, 1.0f }; // not used
-        atlas::TextureInfo const& textureInfo = std::get<0>(*dataRef).get();
+    AtlasTileAttributes const* tileAttributes = getOrCreateCachedTileAttributes(fragment);
+    if (!tileAttributes)
+        return;
 
-        // TODO: actually make x/y/z all signed (for future work, i.e. smooth scrolling!)
-        auto const x = _pos.x;
-        auto const y = _pos.y;
-        auto const z = 0;
-        textureScheduler().renderTexture({ textureInfo, x, y, z, color });
-    }
+    // clang-format off
+    renderTile(atlas::RenderTile::X { _pos.x },
+               atlas::RenderTile::Y { _pos.y },
+               RGBAColor::White,
+               *tileAttributes);
+    // clang-format on
 }
 
-optional<ImageRenderer::DataRef> ImageRenderer::getTextureInfo(ImageFragment const& _fragment)
+Renderable::AtlasTileAttributes const* ImageRenderer::getOrCreateCachedTileAttributes(
+    ImageFragment const& fragment)
 {
-    auto const key = ImageFragmentKey { _fragment.rasterizedImage().image().id(),
-                                        _fragment.offset(),
-                                        _fragment.rasterizedImage().cellSize() };
+    // using crispy::StrongHash;
+    // auto const hash = StrongHash::compute(fragment.rasterizedImage().image().id().value)
+    //                   * fragment.offset().column.value * fragment.offset().line.value
+    //                   * fragment.rasterizedImage().cellSize().width.value
+    //                   * fragment.rasterizedImage().cellSize().height.value;
+    auto const key = ImageFragmentKey { fragment.rasterizedImage().image().id(),
+                                        fragment.offset(),
+                                        fragment.rasterizedImage().cellSize() };
+    auto const hash = crispy::StrongHash::compute(key);
 
-    if (optional<DataRef> const info = atlas_->get(key); info.has_value())
-        return info;
-
-    auto metadata = Metadata {}; // TODO: do we want/need to fill this?
-
-    auto constexpr colored = true;
-
-    // FIXME: remember if insertion failed already, don't repeat then? or how to deal with GPU atlas/GPU
-    // exhaustion?
-
-    auto handle = atlas_->insert(
-        key, _fragment.rasterizedImage().cellSize(), cellSize_, _fragment.data(), colored, metadata);
-
-    // remember image fragment key so we can later on release the GPU memory when not needed anymore.
-    if (handle)
-        imageFragmentsInUse_[_fragment.rasterizedImage().image().id()].emplace_back(key);
-
-    return handle;
+    return textureAtlas().get_or_try_emplace(
+        hash, [&](atlas::TileLocation tileLocation) -> optional<TextureAtlas::TileCreateData> {
+            return createTileData(_gridMetrics,
+                                  tileLocation,
+                                  fragment.data(),
+                                  atlas::Format::RGBA,
+                                  cellSize_,
+                                  RenderTileAttributes::X { 0 },
+                                  RenderTileAttributes::Y { 0 },
+                                  FRAGMENT_SELECTOR_IMAGE_BGRA);
+        });
 }
 
 void ImageRenderer::discardImage(ImageId _imageId)
 {
-    auto const fragmentsIterator = imageFragmentsInUse_.find(_imageId);
-    if (fragmentsIterator != end(imageFragmentsInUse_))
-    {
-        auto const& fragments = fragmentsIterator->second;
-        for (ImageFragmentKey const& key: fragments)
-            atlas_->release(key);
-
-        imageFragmentsInUse_.erase(fragmentsIterator);
-    }
+    // We currently don't really discard.
+    // Because the GPU texture atlas is resource-guarded by an LRU hashtable.
 }
 
 void ImageRenderer::clearCache()
 {
-    imageFragmentsInUse_.clear();
-    atlas_ = std::make_unique<TextureAtlas>(renderTarget().coloredAtlasAllocator());
+    // We currently don't really clean up anything.
+    // Because the GPU texture atlas is resource-guarded by an LRU hashtable.
 }
 
-void ImageRenderer::debugCache(std::ostream& output) const
+void ImageRenderer::inspect(std::ostream& /*output*/) const
 {
 }
 

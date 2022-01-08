@@ -346,7 +346,7 @@ void directwrite_shaper::shape(font_key _font,
                                    / designUnitsPerEm * ptToEm(fontInfo.size.pt) * d->pixelPerDip();
             glyph_position gpos {};
             gpos.presentation = _presentation;
-            gpos.glyph = glyph_key { _font, fontInfo.size, glyph_index { glyphIndices.at(i) } };
+            gpos.glyph = glyph_key { fontInfo.size, _font, glyph_index { glyphIndices.at(i) } };
             gpos.advance.x = static_cast<int>(cellWidth);
             _result.emplace_back(gpos);
         }
@@ -446,7 +446,7 @@ void directwrite_shaper::shape(font_key _font,
         for (size_t i = glyphStart; i < actualGlyphCount; i++)
         {
             glyph_position gpos {};
-            gpos.glyph = glyph_key { _font, fontInfo.size, glyph_index { glyphIndices.at(i) } };
+            gpos.glyph = glyph_key { fontInfo.size, _font, glyph_index { glyphIndices.at(i) } };
             gpos.offset.x = static_cast<int>(glyphOffsets.at(i).advanceOffset);
             // gpos.offset.y = static_cast<int>(static_cast<double>(pos[i].y_offset) / 64.0f);
 
@@ -506,12 +506,12 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, 
     RECT textureBounds {};
     glyphAnalysis->GetAlphaTextureBounds(DWRITE_TEXTURE_CLEARTYPE_3x1, &textureBounds);
 
-    output.size.width = crispy::Width(textureBounds.right - textureBounds.left);
-    output.size.height = crispy::Height(textureBounds.bottom - textureBounds.top);
+    output.bitmapSize.width = crispy::Width(textureBounds.right - textureBounds.left);
+    output.bitmapSize.height = crispy::Height(textureBounds.bottom - textureBounds.top);
     output.position.x = textureBounds.left;
     output.position.y = -textureBounds.top;
 
-    auto const [width, height] = output.size;
+    auto const [width, height] = output.bitmapSize;
 
     IDWriteFactory2* factory2;
     IDWriteColorGlyphRunEnumerator* glyphRunEnumerator;

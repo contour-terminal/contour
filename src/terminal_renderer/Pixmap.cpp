@@ -25,23 +25,12 @@ namespace terminal::renderer
 
 namespace
 {
-    struct From
-    {
-        int value;
-    };
-    struct To
-    {
-        int value;
-    };
-    struct BaseOffset
-    {
-        int value;
-    };
-    enum class Orientation
-    {
-        Horizontal,
-        Vertical
-    };
+    // clang-format off
+    struct From { int value; };
+    struct To { int value; };
+    struct BaseOffset { int value; };
+    enum class Orientation { Horizontal, Vertical };
+    // clang-format on
 
     Pixmap& segment_line(Pixmap& pixmap, Orientation orientation, BaseOffset base, From from, To to)
     {

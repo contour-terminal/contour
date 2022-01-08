@@ -23,7 +23,7 @@ ldd `which contour`
 
 $CONTOUR_PREFIX \
     contour terminal \
-        debug pty,gui.session,gui.display \
+        debug pty,gui.session,gui.display,vt.renderer \
         display ${DISPLAY} \
         early-exit-threshold 0 \
         dump-state-at-exit "${DUMP_DIR}" \

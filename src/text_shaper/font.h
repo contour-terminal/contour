@@ -13,9 +13,20 @@
  */
 #pragma once
 
+#define GLYPH_KEY_DEBUG 1
+
+#if defined(NDEBUG) && defined(GLYPH_KEY_DEBUG)
+    #undef GLYPH_KEY_DEBUG
+#endif
+
 #include <crispy/FNV.h>
 #include <crispy/logstore.h>
 #include <crispy/point.h>
+
+#if defined(GLYPH_KEY_DEBUG)
+    #include <unicode/convert.h>
+    #include <unicode/width.h>
+#endif
 
 #include <fmt/format.h>
 
@@ -204,11 +215,19 @@ struct glyph_index
     unsigned value;
 };
 
+// NB: Ensure this struct does NOT contain padding (or adapt strong hash creation).
 struct glyph_key
 {
-    font_key font;
     font_size size;
+    font_key font;
     glyph_index index;
+
+#if defined(GLYPH_KEY_DEBUG)
+    std::u32string text;
+    static constexpr inline bool Debug = true;
+#else
+    static constexpr inline bool Debug = false;
+#endif
 };
 
 constexpr bool operator==(glyph_key const& a, glyph_key const& b) noexcept
@@ -444,7 +463,16 @@ struct formatter<text::glyph_key>
     template <typename FormatContext>
     auto format(text::glyph_key const& _key, FormatContext& ctx)
     {
+#if defined(GLYPH_KEY_DEBUG)
+        return format_to(ctx.out(),
+                         "({}, {}:{}, \"{}\")",
+                         _key.size,
+                         _key.font,
+                         _key.index,
+                         unicode::convert_to<char>(std::u32string_view(_key.text.data(), _key.text.size())));
+#else
         return format_to(ctx.out(), "({}, {}, {})", _key.font, _key.size, _key.index);
+#endif
     }
 };
 

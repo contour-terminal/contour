@@ -211,27 +211,27 @@ TEST_CASE("StrongLRUCache.get_or_emplace", "[lrucache]")
     CHECK(cache.size() == 2);
 }
 
-TEST_CASE("StrongLRUCache.erase", "")
+TEST_CASE("StrongLRUCache.remove", "")
 {
     auto cache = StrongLRUCache<int, string>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = std::to_string(i);
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 
-    // erase at head
-    cache.erase(4);
+    // remove at head
+    cache.remove(4);
     REQUIRE(joinHumanReadable(cache.keys()) == "3, 2, 1");
 
-    // erase in middle
-    cache.erase(2);
+    // remove in middle
+    cache.remove(2);
     REQUIRE(joinHumanReadable(cache.keys()) == "3, 1");
 
-    // erase at tail
-    cache.erase(1);
+    // remove at tail
+    cache.remove(1);
     REQUIRE(joinHumanReadable(cache.keys()) == "3");
 
-    // erase last
-    cache.erase(3);
+    // remove last
+    cache.remove(3);
     REQUIRE(joinHumanReadable(cache.keys()) == "");
 }
 
@@ -265,26 +265,26 @@ TEST_CASE("StrongLRUCache.insert_with_cache_collision", "")
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 }
 
-TEST_CASE("StrongLRUCache.erase_with_hashTable_lookup_collision", "")
+TEST_CASE("StrongLRUCache.remove_with_hashTable_lookup_collision", "")
 {
     auto cache = StrongLRUCache<int, int, CollidingHasher>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = 2 * i;
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 
-    // erase at head
-    cache.erase(4);
+    // remove at head
+    cache.remove(4);
     REQUIRE(joinHumanReadable(cache.keys()) == "3, 2, 1");
 
-    // erase in middle
-    cache.erase(2);
+    // remove in middle
+    cache.remove(2);
     REQUIRE(joinHumanReadable(cache.keys()) == "3, 1");
 
-    // erase at tail
-    cache.erase(1);
+    // remove at tail
+    cache.remove(1);
     REQUIRE(joinHumanReadable(cache.keys()) == "3");
 
-    // erase last
-    cache.erase(3);
+    // remove last
+    cache.remove(3);
     REQUIRE(joinHumanReadable(cache.keys()) == "");
 }

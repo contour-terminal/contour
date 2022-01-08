@@ -129,7 +129,6 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
         [this]() { app_.onExit(*terminalSession_); });
 
     terminalSession_->setDisplay(make_unique<opengl::TerminalWidget>(
-        *profile(),
         *terminalSession_,
         [this]() {
             centralWidget()->updateGeometry();

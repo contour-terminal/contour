@@ -15,9 +15,9 @@
 
 #include <terminal/Color.h>
 
-#include <terminal_renderer/Atlas.h>
 #include <terminal_renderer/GridMetrics.h>
 #include <terminal_renderer/RenderTarget.h>
+#include <terminal_renderer/TextureAtlas.h>
 
 #include <crispy/point.h>
 
@@ -38,12 +38,9 @@ namespace terminal::renderer
 class BoxDrawingRenderer: public Renderable
 {
   public:
-    explicit BoxDrawingRenderer(GridMetrics const& _gridMetrics):
-        gridMetrics_ { _gridMetrics }, textureAtlas_ {}
-    {
-    }
+    explicit BoxDrawingRenderer(GridMetrics const& gridMetrics): Renderable { gridMetrics } {}
 
-    void setRenderTarget(RenderTarget& _renderTarget) override;
+    void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
     void clearCache() override;
 
     bool renderable(char32_t codepoint) const noexcept;
@@ -53,18 +50,17 @@ class BoxDrawingRenderer: public Renderable
     /// @param _char the boxdrawing character's codepoint.
     bool render(LineOffset _line, ColumnOffset _column, char32_t codepoint, RGBColor _color);
 
-  private:
-    using TextureAtlas = atlas::MetadataTextureAtlas<char32_t, int>;
-    using DataRef = TextureAtlas::DataRef;
+    void inspect(std::ostream& output) const override;
 
-    std::optional<DataRef> getDataRef(char32_t codepoint);
+  private:
+    AtlasTileAttributes const* getOrCreateCachedTileAttributes(char32_t codepoint);
+
+    using Renderable::createTileData;
+    std::optional<TextureAtlas::TileCreateData> createTileData(char32_t codepoint,
+                                                               atlas::TileLocation tileLocation);
+
     std::optional<atlas::Buffer> buildBoxElements(char32_t codepoint, ImageSize _size, int _lineThickness);
     std::optional<atlas::Buffer> buildElements(char32_t codepoint);
-
-    // private fields
-    //
-    GridMetrics const& gridMetrics_;
-    std::unique_ptr<TextureAtlas> textureAtlas_;
 };
 
 } // namespace terminal::renderer

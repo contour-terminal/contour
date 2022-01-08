@@ -54,7 +54,7 @@ class ScreenEvents
     virtual FontDef getFontDef() { return {}; }
     virtual void setFontDef(FontDef const& /*_fontDef*/) {}
     virtual void copyToClipboard(std::string_view /*_data*/) {}
-    virtual void dumpState() {}
+    virtual void inspect() {}
     virtual void notify(std::string_view /*_title*/, std::string_view /*_body*/) {}
     virtual void reply(std::string_view /*_response*/) {}
     virtual void resizeWindow(PageSize) {}

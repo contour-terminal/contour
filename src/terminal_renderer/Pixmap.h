@@ -15,7 +15,9 @@
 
 #include <terminal/primitives.h>
 
-#include <terminal_renderer/Atlas.h>
+#include <terminal_renderer/TextureAtlas.h> // Buffer
+
+#include <crispy/point.h>
 
 #include <fmt/format.h>
 
@@ -48,27 +50,13 @@ struct Ratio
     double y;
 };
 
-struct RatioBlock
-{
-    Ratio from {};
-    Ratio to {};
-};
-constexpr RatioBlock lower(double r) noexcept
-{
-    return RatioBlock { { 0, 1 - r }, { 1, 1 } };
-}
-constexpr RatioBlock upper(double r) noexcept
-{
-    return RatioBlock { { 0, 0 }, { 1, r } };
-}
-constexpr RatioBlock left(double r) noexcept
-{
-    return RatioBlock { { 0, 0 }, { r, 1 } };
-}
-constexpr RatioBlock right(double r) noexcept
-{
-    return RatioBlock { { 1.f - r, 0.f }, { 1.f, 1.f } };
-}
+// clang-format off
+struct RatioBlock { Ratio from {}; Ratio to {}; };
+constexpr RatioBlock lower(double r) noexcept { return RatioBlock { { 0, 1 - r },     { 1, 1 } }; }
+constexpr RatioBlock upper(double r) noexcept { return RatioBlock { { 0, 0 },         { 1, r } }; }
+constexpr RatioBlock left(double r) noexcept  { return RatioBlock { { 0, 0 },         { r, 1 } }; }
+constexpr RatioBlock right(double r) noexcept { return RatioBlock { { 1.f - r, 0.f }, { 1.f, 1.f } }; }
+// clang-format on
 
 constexpr crispy::Point operator*(ImageSize a, Ratio b) noexcept
 {

@@ -23,6 +23,11 @@
 namespace terminal::renderer
 {
 
+/**
+ * Uniform cell margin for the grid view.
+ *
+ * Values are usually 0 or positive but MAY also be negative.
+ */
 struct CellMargin
 {
     int top = 0;
@@ -31,6 +36,9 @@ struct CellMargin
     int right = 0;
 };
 
+/**
+ * margin for the render view, so that the text isn't glued to the edge of the window/view.
+ */
 struct PageMargin
 {
     int left;

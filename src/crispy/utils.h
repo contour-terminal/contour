@@ -322,4 +322,36 @@ inline std::string readFileAsString(FileSystem::path const& path)
     return text;
 }
 
+/// Constructs a container to conveniently iterate over all elements
+/// of the template type.
+///
+/// Any type is supported that can be iterated,
+/// and has a specialization for std::numeric_limits<T>.
+template <typename T>
+constexpr auto each_element() noexcept
+{
+    struct Container
+    {
+        struct iterator
+        {
+            T value;
+            constexpr T& operator*() noexcept { return value; }
+            constexpr T const& operator*() const noexcept { return value; }
+            constexpr iterator& operator++() noexcept
+            {
+                value = static_cast<T>(static_cast<int>(value) + 1);
+                return *this;
+            }
+            constexpr bool operator==(iterator other) noexcept { return value == other.value; }
+            constexpr bool operator!=(iterator other) noexcept { return value != other.value; }
+        };
+        constexpr iterator begin() noexcept { return iterator { std::numeric_limits<T>::min() }; }
+        constexpr iterator end() noexcept
+        {
+            return iterator { static_cast<T>(static_cast<int>(std::numeric_limits<T>::max()) + 1) };
+        }
+    };
+    return Container {};
+}
+
 } // namespace crispy

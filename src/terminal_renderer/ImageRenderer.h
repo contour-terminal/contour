@@ -15,7 +15,6 @@
 
 #include <terminal/Image.h>
 
-#include <terminal_renderer/Atlas.h>
 #include <terminal_renderer/RenderTarget.h>
 
 #include <crispy/FNV.h>
@@ -28,6 +27,8 @@
 
 namespace terminal::renderer
 {
+
+// NB: Ensure this struct does NOT contain padding (or adapt strong hash creation).
 struct ImageFragmentKey
 {
     ImageId const imageId;
@@ -46,28 +47,6 @@ struct ImageFragmentKey
         return (imageId < b.imageId) || (imageId == b.imageId && offset < b.offset);
     }
 };
-} // namespace terminal::renderer
-
-namespace std
-{
-template <>
-struct hash<terminal::renderer::ImageFragmentKey>
-{
-    constexpr size_t operator()(terminal::renderer::ImageFragmentKey const& _key) const noexcept
-    {
-        using FNV = crispy::FNV<uint64_t>;
-        return FNV {}(FNV {}.basis(),
-                      _key.imageId.value,
-                      _key.offset.line.as<unsigned>(),
-                      _key.offset.column.as<unsigned>(),
-                      _key.size.width.as<unsigned>(),
-                      _key.size.height.as<unsigned>());
-    }
-};
-} // namespace std
-
-namespace terminal::renderer
-{
 
 /// Image Rendering API.
 ///
@@ -75,41 +54,28 @@ namespace terminal::renderer
 class ImageRenderer: public Renderable
 {
   public:
-    explicit ImageRenderer(ImageSize _cellSize);
+    ImageRenderer(GridMetrics const& gridMetrics, ImageSize cellSize);
 
-    void setRenderTarget(RenderTarget& _renderTarget) override;
+    void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
     void clearCache() override;
 
     /// Reconfigures the slicing properties of existing images.
     void setCellSize(ImageSize _cellSize);
 
-    void renderImage(crispy::Point _pos, ImageFragment const& _fragment);
+    void renderImage(crispy::Point _pos, ImageFragment const& fragment);
 
     /// notify underlying cache that this fragment is not going to be rendered anymore, maybe freeing up some
     /// GPU caches.
     void discardImage(ImageId _imageId);
 
-    // clang-format off
-    struct Metadata {};
-    // clang-format on
-
-    using TextureAtlas = atlas::MetadataTextureAtlas<ImageFragmentKey, Metadata>;
-    using DataRef = TextureAtlas::DataRef;
-
-    void debugCache(std::ostream& output) const;
+    void inspect(std::ostream& output) const override;
 
   private:
-    std::optional<DataRef> getTextureInfo(ImageFragment const& _fragment);
-
-    using ImageIdToFragmentKeyMap = std::unordered_map<ImageId, std::vector<ImageFragmentKey>>;
+    AtlasTileAttributes const* getOrCreateCachedTileAttributes(ImageFragment const& fragment);
 
     // private data
     //
-
-    // remember each fragment key per image for proper GPU texture GC.
-    ImageIdToFragmentKeyMap imageFragmentsInUse_;
     ImageSize cellSize_;
-    std::unique_ptr<TextureAtlas> atlas_;
 };
 
 } // namespace terminal::renderer

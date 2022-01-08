@@ -12,11 +12,120 @@
  * limitations under the License.
  */
 
+/*
+### abstract control flow of a single frame
+
+    beginFrame
+        renderCell...
+            appendCellTextToClusterGroup
+            flushTextClusterGroup?
+                getOrCreateCachedGlyphPositions
+                getOrCreateRasterizedMetadata
+                    createRasterizedGlyph
+                        upload each glyph tile
+                renderRasterizedGlyph
+                    render each glyph tile
+    endFrame
+        &flushTextClusterGroup...
+
+### How ligatures are being rendered:
+
+    '<=' takes 2 characters (grapheme clusters) '<' and '='.
+    Text shaping yields 2 glyph positions.
+    first glyph position just moves the cursor with an empty glyph
+    second glyph renders an overlarge glyph and offsets x negatively to the left.
+
+    A ligature of 3 characters, say '==>', 3 grapheme clusters,
+    yields 3 glyph positions during text shaping.
+    All but the last glyphs will just move the pen and render an empty glyph.
+    The last glyph will render a very horizontally large glyph
+    with a negative x-offset to walk back before starting to paint.
+
+    A ligature of 4 and more characters are treated analogue.
+
+### How emoji are rendered
+
+    U+1F600 is the standard smily, a single grapheme cluster.
+    It has an east asian width of 2.
+    Text shaping yields 1 glyph position with x-advance being twice as large (2 grid cells).
+    The glyph renders with overlarge width.
+
+### Dealing with wide glyphs
+
+When calling getOrCreateRasterizedMetadata(), we will know
+whether the glyph fits the grid or if we need to start iterating over
+N (or N minus 1) following tiles to complete the draw.
+
+How to compute number of required tiles:
+
+    int requiredTileCount(TileAttributes<RenderTileAttributes> const& tile) {
+        return floor(double(tile.bitmapSize.width) / double(tileSize.width));
+    }
+
+But always doing this computation would be expensive. We can store an additional
+small integer in the tile attributes for the sake of host memory resource usage.
+
+    auto const metadata = getOrCreateRasterizedMetadata(); // <- uploads all sub-tiles
+    for (int tileIndex = 0; tileIndex < metadata.requiredTiles; ++tileIndex)
+        renderRasterizedGlyph(metadata, tileIndex) // <- render each sub-tile
+
+    // renderRasterizedGlyph:
+    hash = metadata.hash * tileIndex;
+    if (subTileMetadata = textureAtlas.try_get(hash))
+        render(*subTileMetadata);
+
+### reserved glyphs handling
+
+99% of the text is US-ASCII. We can reserve some slots in the texture
+atlas so that when they're to be rendered, there is no need for the LRU-action.
+
+But in order to not accidentally eliminate programming ligatures
+
+    such as programming ligatures <= == != >= == === !== ...)
+
+we need to add an extra indirection.
+
+Initializing  the reserved glyph slots:
+
+    constexpr auto FirstReservedChar = 0x21;
+    constexpr auto LastReservedChar = 0x7E;
+    for (char ch = FirstReservedChar; ch <= LastReservedChar; ++ch)
+    {
+        glyph_key glyphKey = get_glyph_key(ch);
+        auto reservedSlotIndex = ch - FirstChar
+        reservedGlyphKeyMapping[glyphKey.index.value] = reservedSlotIndex;
+        setDirectMapping(reservedSlotIndex, getOrCreateRasterizedMetadata(glyphKey));
+    }
+
+Making use of reserved glyph slots
+
+    auto getOrCreateRasterizedMetadata(text::glyph_key glyphKey,
+                                       unicode::PresentationStyle presentationStyle)
+    {
+        if (isReserved(glyphKey))
+            return textureAtlas().directMapped(reservedIndex(glyphKey));
+        // else: standard implementation
+    }
+
+    bool isReserved(glyph_key glyphKey) const noexcept
+    {
+        // reservedGlyphKeyMapping should therefore be a sorted vector.
+        // we could then do binary search OR we lookup O(1) on a large enough vector (space issues?).
+        return reservedGlyphKeyMapping.contains_key(glyphKey.index.value);
+    }
+
+    uint32_t reservedIndex() const noexcept
+    {
+        return reservedGlyphKeyMapping.at(glyphKey.index.value);
+    }
+*/
+
 #include <terminal/logging.h>
 
 #include <terminal_renderer/BoxDrawingRenderer.h>
 #include <terminal_renderer/GridMetrics.h>
 #include <terminal_renderer/TextRenderer.h>
+#include <terminal_renderer/shared_defines.h>
 #include <terminal_renderer/utils.h>
 
 #include <text_shaper/fontconfig_locator.h>
@@ -42,18 +151,26 @@
 
 #include <range/v3/algorithm/copy.hpp>
 
+#include <algorithm>
+
+using crispy::Point;
+using crispy::StrongHash;
+
 using unicode::out;
 
 using std::array;
 using std::get;
 using std::make_unique;
 using std::max;
+using std::min;
 using std::move;
 using std::nullopt;
 using std::optional;
+using std::ostream;
 using std::pair;
 using std::u32string;
 using std::u32string_view;
+using std::unique_ptr;
 using std::vector;
 
 using namespace std::placeholders;
@@ -63,6 +180,28 @@ namespace terminal::renderer
 
 namespace
 {
+    constexpr auto FirstReservedChar = 0x21;
+    constexpr auto LastReservedChar = 0x7E;
+    constexpr auto DirectMappedCharsCount = LastReservedChar - FirstReservedChar + 1;
+
+    StrongHash hashGlyphKeyAndPresentation(text::glyph_key const& glyphKey,
+                                           unicode::PresentationStyle presentation) noexcept
+    {
+        // return StrongHash::compute(key) * static_cast<uint32_t>(presentation);
+        // clang-format off
+        return StrongHash::compute(glyphKey.font.value)
+               * static_cast<uint32_t>(glyphKey.index.value)
+               * StrongHash::compute(glyphKey.size.pt)
+               * static_cast<uint32_t>(presentation)
+               ;
+        // clang-format on
+    }
+
+    StrongHash hashTextAndStyle(u32string_view text, TextStyle style) noexcept
+    {
+        return StrongHash::compute(text) * static_cast<uint32_t>(style);
+    }
+
     text::font_key getFontForStyle(FontKeys const& _fonts, TextStyle _style)
     {
         switch (_style)
@@ -75,9 +214,34 @@ namespace
         }
         return _fonts.regular;
     }
+
+    atlas::Format toAtlasFormat(text::bitmap_format format)
+    {
+        switch (format)
+        {
+        case text::bitmap_format::alpha_mask: return atlas::Format::Red;
+        case text::bitmap_format::rgb: return atlas::Format::RGB;
+        case text::bitmap_format::rgba: return atlas::Format::RGBA;
+        }
+
+        Require(false && "missing case");
+        return atlas::Format::Red; // unreachable();
+    }
+
+    int toFragmentShaderSelector(text::bitmap_format glyphFormat)
+    {
+        switch (glyphFormat)
+        {
+        case text::bitmap_format::alpha_mask: return FRAGMENT_SELECTOR_GLYPH_ALPHA;
+        case text::bitmap_format::rgb: return FRAGMENT_SELECTOR_GLYPH_LCD;
+        case text::bitmap_format::rgba: return FRAGMENT_SELECTOR_IMAGE_BGRA;
+        }
+        Require(false && "Glyph format not handled.");
+        return 0;
+    }
 } // namespace
 
-std::unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine)
+unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine)
 {
     switch (_engine)
     {
@@ -108,38 +272,98 @@ std::unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine)
 
 // TODO: What's a good value here? Or do we want to make that configurable,
 // or even computed based on memory resources available?
-constexpr size_t TextShapingCacheSize = 1000;
+constexpr uint32_t TextShapingCacheSize = 4000;
 
-TextRenderer::TextRenderer(GridMetrics const& _gridMetrics,
+TextRenderer::TextRenderer(GridMetrics const& gridMetrics,
                            text::shaper& _textShaper,
                            FontDescriptions& _fontDescriptions,
                            FontKeys const& _fonts):
-    gridMetrics_ { _gridMetrics },
+    Renderable { gridMetrics },
     fontDescriptions_ { _fontDescriptions },
     fonts_ { _fonts },
-    cache_ { TextShapingCacheSize },
+    textShapingCache_ { ShapingResultCache::create(crispy::StrongHashtableSize { 16384 },
+                                                   crispy::LRUCapacity { TextShapingCacheSize },
+                                                   "Text shaping cache") },
     textShaper_ { _textShaper },
     boxDrawingRenderer_ { _gridMetrics }
 {
 }
 
-void TextRenderer::setRenderTarget(RenderTarget& _renderTarget)
+void TextRenderer::inspect(ostream& _textOutput) const
 {
-    Renderable::setRenderTarget(_renderTarget);
-    boxDrawingRenderer_.setRenderTarget(_renderTarget);
+    _textOutput << "TextRenderer:\n";
+    textShapingCache_->inspect(_textOutput);
+    boxDrawingRenderer_.inspect(_textOutput);
+}
+
+void TextRenderer::setRenderTarget(
+    RenderTarget& renderTarget, atlas::DirectMappingAllocator<RenderTileAttributes>& directMappingAllocator)
+{
+    _directMapping = directMappingAllocator.allocate(DirectMappedCharsCount);
+    Renderable::setRenderTarget(renderTarget, directMappingAllocator);
+    boxDrawingRenderer_.setRenderTarget(renderTarget, directMappingAllocator);
     clearCache();
+}
+
+void TextRenderer::setTextureAtlas(TextureAtlas& atlas)
+{
+    Renderable::setTextureAtlas(atlas);
+    boxDrawingRenderer_.setTextureAtlas(atlas);
+
+    if (_directMapping)
+        initializeDirectMapping();
 }
 
 void TextRenderer::clearCache()
 {
-    monochromeAtlas_ = make_unique<TextureAtlas>(renderTarget().monochromeAtlasAllocator());
-    colorAtlas_ = make_unique<TextureAtlas>(renderTarget().coloredAtlasAllocator());
-    lcdAtlas_ = make_unique<TextureAtlas>(renderTarget().lcdAtlasAllocator());
+    if (_textureAtlas && _directMapping)
+        initializeDirectMapping();
 
-    cacheKeyStorage_.clear();
-    cache_.clear();
+    textShapingCache_->clear();
 
     boxDrawingRenderer_.clearCache();
+}
+
+void TextRenderer::initializeDirectMapping()
+{
+    Require(_textureAtlas);
+    Require(_directMapping.count == DirectMappedCharsCount);
+
+    auto constexpr presentation = unicode::PresentationStyle::Text;
+
+    _directMappedGlyphKeyToTileIndex.clear();
+    _directMappedGlyphKeyToTileIndex.resize(LastReservedChar + 1);
+
+    for (char codepoint = FirstReservedChar; codepoint <= LastReservedChar; ++codepoint)
+    {
+        optional<text::glyph_position> gposOpt = textShaper_.shape(fonts_.regular, codepoint);
+        if (!gposOpt)
+            continue;
+        text::glyph_position& gpos = *gposOpt;
+
+        if (gpos.glyph.index.value >= _directMappedGlyphKeyToTileIndex.size())
+            _directMappedGlyphKeyToTileIndex.resize(gpos.glyph.index.value
+                                                    + (LastReservedChar - codepoint + 1));
+
+        auto const tileIndex = _directMapping.toTileIndex(codepoint - FirstReservedChar);
+        auto const tileLocation = _textureAtlas->tileLocation(tileIndex);
+        auto tileCreateData = createRasterizedGlyph(tileLocation, gpos.glyph, presentation);
+        if (!tileCreateData)
+            continue;
+
+        // Require(tileCreateData->bitmapSize.width <= textureAtlas().tileSize().width);
+
+        // fmt::print("Initialize direct mapping {} ({}) for {} {}; {}; {}\n",
+        //            tileIndex,
+        //            tileLocation,
+        //            codepoint,
+        //            gpos.glyph,
+        //            tileCreateData->bitmapSize,
+        //            tileCreateData->metadata);
+
+        _textureAtlas->setDirectMapping(tileIndex, move(*tileCreateData));
+        _directMappedGlyphKeyToTileIndex[gpos.glyph.index.value] = tileIndex;
+    }
 }
 
 void TextRenderer::updateFontMetrics()
@@ -148,6 +372,17 @@ void TextRenderer::updateFontMetrics()
         return;
 
     clearCache();
+}
+
+void TextRenderer::beginFrame()
+{
+    // fmt::print("beginFrame: {} / {}\n", codepoints_.size(), clusters_.size());
+    Require(textClusterGroup_.codepoints.empty());
+    Require(textClusterGroup_.clusters.empty());
+
+    auto constexpr DefaultColor = RGBColor {};
+    textClusterGroup_.style = TextStyle::Invalid;
+    textClusterGroup_.color = DefaultColor;
 }
 
 void TextRenderer::renderCell(RenderCell const& _cell)
@@ -164,7 +399,7 @@ void TextRenderer::renderCell(RenderCell const& _cell)
     }
     (_cell.flags);
 
-    auto const codepoints = gsl::span(_cell.codepoints.data(), _cell.codepoints.size());
+    auto const& codepoints = _cell.codepoints;
 
     bool const isBoxDrawingCharacter = fontDescriptions_.builtinBoxDrawing && _cell.codepoints.size() == 1
                                        && boxDrawingRenderer_.renderable(codepoints[0]);
@@ -176,7 +411,7 @@ void TextRenderer::renderCell(RenderCell const& _cell)
         if (success)
         {
             if (!forceCellGroupSplit_)
-                endSequence();
+                flushTextClusterGroup();
             forceCellGroupSplit_ = true;
             return;
         }
@@ -186,270 +421,87 @@ void TextRenderer::renderCell(RenderCell const& _cell)
     {
         // fmt::print("TextRenderer.sequenceStart: {}\n", textPosition_);
         forceCellGroupSplit_ = false;
-        textPosition_ = gridMetrics_.map(_cell.position);
+        textClusterGroup_.initialPenPosition = _gridMetrics.map(_cell.position);
     }
 
-    appendCell(codepoints, style, _cell.foregroundColor);
+    appendCellTextToClusterGroup(codepoints, style, _cell.foregroundColor);
 
     if (_cell.groupEnd)
-        endSequence();
-}
-
-void TextRenderer::beginFrame()
-{
-    // fmt::print("beginFrame: {} / {}\n", codepoints_.size(), clusters_.size());
-    Require(codepoints_.empty());
-    Require(clusters_.empty());
-
-    auto constexpr DefaultColor = RGBColor {};
-    style_ = TextStyle::Invalid;
-    color_ = DefaultColor;
+        flushTextClusterGroup();
 }
 
 void TextRenderer::endFrame()
 {
-    endSequence();
+    flushTextClusterGroup();
 }
 
-void TextRenderer::renderRun(crispy::Point _pos,
-                             gsl::span<text::glyph_position const> _glyphPositions,
-                             RGBColor _color)
+Point TextRenderer::applyGlyphPositionToPen(Point pen,
+                                            AtlasTileAttributes const& tileAttributes,
+                                            text::glyph_position const& gpos) const noexcept
 {
-    crispy::Point pen = _pos;
-    auto const advanceX = *gridMetrics_.cellSize.width;
+    auto const& glyphMetrics = tileAttributes.metadata;
 
-    for (text::glyph_position const& gpos: _glyphPositions)
-    {
-        if (optional<DataRef> const ti = getTextureInfo(gpos.glyph, gpos.presentation); ti.has_value())
-        {
-            renderTexture(pen,
-                          _color,
-                          get<0>(*ti).get(), // TextureInfo
-                          get<1>(*ti).get(), // Metadata
-                          gpos);
-        }
-
-        if (gpos.advance.x)
-        {
-            // Only advance horizontally, as we're (guess what) a terminal. :-)
-            // Only advance in fixed-width steps.
-            // Only advance iff there harfbuzz told us to.
-            pen.x += static_cast<decltype(pen.x)>(advanceX);
-        }
-    }
-}
-
-optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key const& _id,
-                                                             unicode::PresentationStyle _presentation)
-{
-    if (auto i = glyphToTextureMapping_.find(_id); i != glyphToTextureMapping_.end())
-        if (TextureAtlas* ta = atlasForBitmapFormat(i->second); ta != nullptr)
-            if (optional<DataRef> const dataRef = ta->get(_id); dataRef.has_value())
-                return dataRef;
-
-    auto theGlyphOpt = textShaper_.rasterize(_id, fontDescriptions_.renderMode);
-    if (!theGlyphOpt.has_value())
-        return nullopt;
-
-    text::rasterized_glyph& glyph = theGlyphOpt.value();
-    Require(glyph.bitmap.size()
-            == text::pixel_size(glyph.format) * unbox<size_t>(glyph.size.width)
-                   * unbox<size_t>(glyph.size.height));
-    auto const numCells = _presentation == unicode::PresentationStyle::Emoji
-                              ? 2u
-                              : 1u; // is this the only case - with colored := Emoji presentation?
-    // FIXME: this `2` is a hack of my bad knowledge. FIXME.
-    // As I only know of emoji being colored fonts, and those take up 2 cell with units.
-
-    // {{{ scale bitmap down iff bitmap is emoji and overflowing in diemensions
-    if (glyph.format == text::bitmap_format::rgba)
-    {
-        // FIXME !
-        // We currently assume that only Emoji can be RGBA, but there are also colored glyphs!
-
-        auto const cellSize = gridMetrics_.cellSize;
-        if (numCells > 1 && // XXX for now, only if emoji glyph
-            (glyph.size.width > (cellSize.width * numCells) || glyph.size.height > cellSize.height))
-        {
-            auto const newSize = ImageSize { Width(*cellSize.width * numCells), cellSize.height };
-            auto [scaled, factor] = text::scale(glyph, newSize);
-
-            glyph.size = scaled.size; // TODO: there shall be only one with'x'height.
-
-            // center the image in the middle of the cell
-            glyph.position.y = gridMetrics_.cellSize.height.as<int>() - gridMetrics_.baseline;
-            glyph.position.x =
-                (gridMetrics_.cellSize.width.as<int>() * numCells - glyph.size.width.as<int>()) / 2;
-
-            // (old way)
-            // glyph.metrics.bearing.x /= factor;
-            // glyph.metrics.bearing.y /= factor;
-
-            glyph.bitmap = move(scaled.bitmap);
-
-            // XXX currently commented out because it's not used.
-            // TODO: But it should be used for cutting the image off the right edge with unnecessary
-            // transparent pixels.
-            //
-            // int const rightEdge = [&]() {
-            //     auto rightEdge = std::numeric_limits<int>::max();
-            //     for (int x = glyph.bitmap.width - 1; x >= 0; --x) {
-            //         for (int y = 0; y < glyph.bitmap.height; ++y)
-            //         {
-            //             auto const& pixel = &glyph.bitmap.data.at(y * glyph.bitmap.width * 4 + x * 4);
-            //             if (pixel[3] > 20)
-            //                 rightEdge = x;
-            //         }
-            //         if (rightEdge != std::numeric_limits<int>::max())
-            //             break;
-            //     }
-            //     return rightEdge;
-            // }();
-            // if (rightEdge != std::numeric_limits<int>::max())
-            //     LOGSTORE(RasterizerLog)("right edge found. {} < {}.", rightEdge+1, glyph.bitmap.width);
-        }
-    }
-    // }}}
-
-    // y-position relative to cell-bottom of glyphs top.
-    auto const yMax = gridMetrics_.baseline + glyph.position.y;
-
-    // y-position relative to cell-bottom of the glyphs bottom.
-    auto const yMin = yMax - glyph.size.height.as<int>();
-
-    // Number of pixel lines this rasterized glyph is overflowing above cell-top,
-    // or 0 if not overflowing.
-    auto const yOverflow = max(0, yMax - gridMetrics_.cellSize.height.as<int>());
-
-    // Rasterized glyph's aspect ratio. This value
-    // is needed for proper down-scaling of a pixmap (used for emoji specifically).
-    auto const ratio =
-        _presentation != unicode::PresentationStyle::Emoji
-            ? 1.0f
-            : max(float(gridMetrics_.cellSize.width.as<int>() * numCells) / float(glyph.size.width.as<int>()),
-                  float(gridMetrics_.cellSize.height.as<int>()) / float(glyph.size.height.as<int>()));
-
-    // userFormat is the identifier that can be used inside the shaders
-    // to distinguish between the various supported formats and chose
-    // the right texture atlas.
-    // targetAtlas the the atlas this texture will be uploaded to.
-    auto&& [userFormat, targetAtlas] = [this, glyphFormat = glyph.format]() -> pair<int, TextureAtlas&> {
-        switch (glyphFormat)
-        {
-        case text::bitmap_format::rgba: return { 1, *colorAtlas_ };
-        case text::bitmap_format::rgb: return { 2, *lcdAtlas_ };
-        case text::bitmap_format::alpha_mask: return { 0, *monochromeAtlas_ };
-        }
-        return { 0, *monochromeAtlas_ };
-    }();
-
-    // Mapping from glyph ID to it's texture format.
-    glyphToTextureMapping_[_id] = glyph.format;
-
-    // If the rasterized glyph is overflowing above the grid cell metrics,
-    // then cut off at the top.
-    if (yOverflow)
-    {
-        LOGSTORE(RasterizerLog)("Cropping {} overflowing bitmap rows.", yOverflow);
-        glyph.size.height -= Height(yOverflow);
-        // Might have it done also, but better be save: glyph.position.y -= yOverflow;
-        glyph.bitmap.resize(text::pixel_size(glyph.format) * unbox<size_t>(glyph.size.width)
-                            * unbox<size_t>(glyph.size.height));
-        Guarantee(glyph.valid());
-    }
-
-    // If the rasterized glyph is underflowing below the grid cell's minimum (0),
-    // then cut off at grid cell's bottom.
-    if (yMin < 0)
-    {
-        auto const rowCount = -yMin;
-        Require(rowCount <= *glyph.size.height);
-        auto const pixelCount = rowCount * unbox<int>(glyph.size.width) * text::pixel_size(glyph.format);
-        Require(0 < pixelCount && pixelCount <= glyph.bitmap.size());
-        LOGSTORE(RasterizerLog)("Cropping {} underflowing bitmap rows.", rowCount);
-        glyph.size.height += Height(yMin);
-        auto& data = glyph.bitmap;
-        data.erase(begin(data), next(begin(data), pixelCount)); // XXX asan hit (size = -2)
-        Guarantee(glyph.valid());
-    }
-
-    GlyphMetrics metrics {};
-    metrics.bitmapSize = glyph.size;
-    metrics.bearing = glyph.position;
-
-    if (RasterizerLog)
-        LOGSTORE(RasterizerLog)
-    ("Inserting {} id {} render mode {} {} ratio {} yOverflow {} yMin {}.",
-     glyph,
-     _id.index,
-     fontDescriptions_.renderMode,
-     _presentation,
-     ratio,
-     yOverflow,
-     yMin);
-
-    return targetAtlas.insert(_id, glyph.size, glyph.size * ratio, move(glyph.bitmap), userFormat, metrics);
-}
-
-void TextRenderer::renderTexture(crispy::Point const& _pos,
-                                 RGBAColor const& _color,
-                                 atlas::TextureInfo const& _textureInfo,
-                                 GlyphMetrics const& _glyphMetrics,
-                                 text::glyph_position const& _glyphPos)
-{
-    auto const x = _pos.x + _glyphMetrics.bearing.x + _glyphPos.offset.x;
+    auto const x = pen.x + glyphMetrics.x.value + gpos.offset.x;
 
     // Emoji are simple square bitmap fonts that do not need special positioning.
-    auto const y = _glyphPos.presentation == unicode::PresentationStyle::Emoji
-                       ? _pos.y
-                       : _pos.y                                          // bottom left
-                             + _glyphPos.offset.y                        // -> harfbuzz adjustment
-                             + gridMetrics_.baseline                     // -> baseline
-                             + _glyphMetrics.bearing.y                   // -> bitmap top
-                             - _glyphMetrics.bitmapSize.height.as<int>() // -> bitmap height
+    auto const y = pen.y                                        // -> base pen position
+                   + _gridMetrics.baseline                      // -> baseline
+                   + glyphMetrics.y.value                       // -> bitmap top
+                   + gpos.offset.y                              // -> harfbuzz adjustment
+                   - tileAttributes.bitmapSize.height.as<int>() // -> bitmap height
         ;
 
-    renderTexture(crispy::Point { x, y }, _color, _textureInfo);
+    // fmt::print("pen! {} <- {}, gpos {}, glyph offset {}x+{}y, glyph height {} ({})\n",
+    //            Point { x, y },
+    //            pen,
+    //            gpos,
+    //            glyphMetrics.x.value,
+    //            glyphMetrics.y.value,
+    //            tileAttributes.bitmapSize.height,
+    //            gpos.presentation);
 
-#if 0
-    if (RasterizerLog)
-        LOGSTORE(RasterizerLog)(
-                "xy={}:{} pos=({}:{}) tex={}, gpos=({}:{}), baseline={}",
-                x, y,
-                _pos,
-                _textureInfo.bitmapSize,
-                _glyphPos.offset.x, _glyphPos.offset.y,
-                gridMetrics_.baseline);
-#endif
+    return Point { x, y };
 }
 
-void TextRenderer::renderTexture(crispy::Point const& _pos,
-                                 RGBAColor const& _color,
-                                 atlas::TextureInfo const& _textureInfo)
+/**
+ * Renders a tile relative to the shape run's base position.
+ *
+ * @param _pos          offset relative to the glyph run's base position
+ * @param _color        text color
+ * @param _glyphMetrics bitmap size and glyph bearing (cachable)
+ * @param _glyphPos     glyph positioning relative to the pen's baseline pos (cachable)
+ *
+ */
+void TextRenderer::renderRasterizedGlyph(crispy::Point pen,
+                                         RGBAColor _color,
+                                         AtlasTileAttributes const& attributes)
 {
-    // TODO: actually make x/y/z all signed (for future work, i.e. smooth scrolling!)
-    auto const x = _pos.x;
-    auto const y = _pos.y;
-    auto const z = 0;
-    auto const color = array {
-        float(_color.red()) / 255.0f,
-        float(_color.green()) / 255.0f,
-        float(_color.blue()) / 255.0f,
-        float(_color.alpha()) / 255.0f,
-    };
-    textureScheduler().renderTexture({ _textureInfo, x, y, z, color });
+    // clang-format off
+    // LOGSTORE(RasterizerLog)("render glyph pos {} tile {} offset {}:{}",
+    //                         _pos,
+    //                         _glyphLocationInAtlas,
+    //                         _glyphPos.offset.x,
+    //                         _glyphPos.offset.y);
+    // clang-format on
+
+    renderTile(atlas::RenderTile::X { pen.x }, atlas::RenderTile::Y { pen.y }, _color, attributes);
+
+    // clang-format off
+    // if (RasterizerLog)
+    //     LOGSTORE(RasterizerLog)("xy={}:{} pos={} tex={}, gpos=({}:{}), baseline={}",
+    //                             x, y,
+    //                             _pos,
+    //                             _glyphBitmapSize,
+    //                             _glyphPos.offset.x, _glyphPos.offset.y,
+    //                             _gridMetrics.baseline);
+    // clang-format on
 }
 
-void TextRenderer::debugCache(std::ostream& _textOutput) const
+void TextRenderer::appendCellTextToClusterGroup(u32string const& _codepoints,
+                                                TextStyle _style,
+                                                RGBColor _color)
 {
-    _textOutput << fmt::format("cache key storage items: {}\n", cacheKeyStorage_.size());
-    _textOutput << fmt::format("shaping cache items: {}\n", cache_.size());
-    _textOutput << fmt::format("glyph to texture mappings: {}\n", glyphToTextureMapping_.size());
-}
-
-void TextRenderer::appendCell(gsl::span<char32_t const> _codepoints, TextStyle _style, RGBColor _color)
-{
-    bool const attribsChanged = _color != color_ || _style != style_;
+    bool const attribsChanged = _color != textClusterGroup_.color || _style != textClusterGroup_.style;
     bool const hasText = !_codepoints.empty() && _codepoints[0] != 0x20;
     bool const noText = !hasText;
     bool const textStartFound = !textStartFound_ && hasText;
@@ -457,114 +509,340 @@ void TextRenderer::appendCell(gsl::span<char32_t const> _codepoints, TextStyle _
         textStartFound_ = false;
     if (attribsChanged || textStartFound || noText)
     {
-        if (cellCount_)
-            endSequence(); // also increments text start position
-        color_ = _color;
-        style_ = _style;
+        if (textClusterGroup_.cellCount)
+            flushTextClusterGroup(); // also increments text start position
+        textClusterGroup_.color = _color;
+        textClusterGroup_.style = _style;
         textStartFound_ = textStartFound;
     }
 
     for (char32_t const codepoint: _codepoints)
     {
-        codepoints_.emplace_back(codepoint);
-        clusters_.emplace_back(cellCount_);
+        textClusterGroup_.codepoints.emplace_back(codepoint);
+        textClusterGroup_.clusters.emplace_back(textClusterGroup_.cellCount);
     }
-    cellCount_++;
+    textClusterGroup_.cellCount++;
 }
 
-void TextRenderer::endSequence()
+void TextRenderer::flushTextClusterGroup()
 {
     // fmt::print("TextRenderer.sequenceEnd: textPos={}, cellCount={}, width={}, count={}\n",
-    //            textPosition_.x, cellCount_,
-    //            gridMetrics_.cellSize.width,
-    //            codepoints_.size());
+    //            textClusterGroup_.initialPenPosition.x, textClusterGroup_.cellCount,
+    //            _gridMetrics.cellSize.width,
+    //            textClusterGroup_.codepoints.size());
 
-    if (!codepoints_.empty())
+    if (!textClusterGroup_.codepoints.empty())
     {
-        text::shape_result const& glyphPositions = cachedGlyphPositions();
-        renderRun(textPosition_, gsl::span(glyphPositions.data(), glyphPositions.size()), color_);
+        auto hash = hashTextAndStyle(
+            u32string_view(textClusterGroup_.codepoints.data(), textClusterGroup_.codepoints.size()),
+            textClusterGroup_.style);
+        text::shape_result const& glyphPositions = getOrCreateCachedGlyphPositions(hash);
+        crispy::Point pen = textClusterGroup_.initialPenPosition;
+        auto const advanceX = *_gridMetrics.cellSize.width;
+
+        for (text::glyph_position const& glyphPosition: glyphPositions)
+        {
+            if (isGlyphDirectMapped(glyphPosition.glyph))
+            {
+                auto const directMappingIndex =
+                    _directMappedGlyphKeyToTileIndex[glyphPosition.glyph.index.value];
+                AtlasTileAttributes const& attributes = _textureAtlas->directMapped(directMappingIndex);
+                auto const pen1 = applyGlyphPositionToPen(pen, attributes, glyphPosition);
+                renderRasterizedGlyph(pen1, textClusterGroup_.color, attributes);
+                pen.x += static_cast<decltype(pen.x)>(advanceX);
+                continue;
+            }
+
+            auto const hash = hashGlyphKeyAndPresentation(glyphPosition.glyph, glyphPosition.presentation);
+
+            AtlasTileAttributes const* attributes =
+                getOrCreateRasterizedMetadata(hash, glyphPosition.glyph, glyphPosition.presentation);
+
+            if (attributes)
+            {
+                auto const pen1 = applyGlyphPositionToPen(pen, *attributes, glyphPosition);
+                renderRasterizedGlyph(pen1, textClusterGroup_.color, *attributes);
+
+                int xOffset = unbox<int>(textureAtlas().tileSize().width);
+                while (AtlasTileAttributes const* subAttribs = textureAtlas().try_get(hash * xOffset))
+                {
+                    renderTile(atlas::RenderTile::X { pen1.x + xOffset },
+                               atlas::RenderTile::Y { pen1.y },
+                               textClusterGroup_.color,
+                               *subAttribs);
+                    xOffset += unbox<int>(textureAtlas().tileSize().width);
+                }
+            }
+
+            if (glyphPosition.advance.x)
+            {
+                // Only advance horizontally, as we're (guess what) a terminal. :-)
+                // Only advance in fixed-width steps.
+                // Only advance iff there harfbuzz told us to.
+                pen.x += static_cast<decltype(pen.x)>(advanceX);
+            }
+        }
     }
 
-    codepoints_.clear();
-    clusters_.clear();
-    textPosition_.x += static_cast<int>(*gridMetrics_.cellSize.width * cellCount_);
-    cellCount_ = 0;
+    textClusterGroup_.resetAndMovePenForward(textClusterGroup_.cellCount
+                                             * unbox<int>(_gridMetrics.cellSize.width));
     textStartFound_ = false;
 }
 
-text::shape_result const& TextRenderer::cachedGlyphPositions()
+Renderable::AtlasTileAttributes const* TextRenderer::getOrCreateRasterizedMetadata(
+    StrongHash const& hash, text::glyph_key const& glyphKey, unicode::PresentationStyle presentationStyle)
 {
-    auto const codepoints = u32string_view(codepoints_.data(), codepoints_.size());
-    if (auto p = cache_.try_get(TextCacheKey { codepoints, style_ }))
-        return *p;
-
-    cacheKeyStorage_.emplace_back(u32string { codepoints });
-    auto const cacheKeyFromStorage = TextCacheKey { cacheKeyStorage_.back(), style_ };
-    return cache_.emplace(cacheKeyFromStorage, requestGlyphPositions());
+    // clang-format off
+    return textureAtlas().get_or_try_emplace(
+        hash,
+        [&](atlas::TileLocation tileLocation)
+        -> optional<TextureAtlas::TileCreateData>
+        {
+            return createSlicedRasterizedGlyph(tileLocation, glyphKey, presentationStyle, hash);
+        }
+    );
+    // clang-format on
 }
 
-text::shape_result TextRenderer::requestGlyphPositions()
+auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
+                                               text::glyph_key const& glyphKey,
+                                               unicode::PresentationStyle presentation,
+                                               StrongHash const& hash)
+    -> optional<TextureAtlas::TileCreateData>
 {
-    text::shape_result glyphPositions;
-    unicode::run_segmenter::range run;
-    auto rs = unicode::run_segmenter(codepoints_.data(), codepoints_.size());
+    auto result = createRasterizedGlyph(tileLocation, glyphKey, presentation);
+    if (!result)
+        return result;
+
+    auto& createData = *result;
+
+    if (unbox<int>(createData.bitmapSize.width) <= unbox<int>(textureAtlas().tileSize().width))
+        // standard (narrow) rasterization
+        return result;
+
+    // Now, slice wide glyph into smaller fitting tiles,
+    // upload all but the head-tile explicitly and then return the head-tile
+    // to the caller.
+
+    auto const textureAtlasSize = textureScheduler().atlasSize();
+
+    auto const bitmapFormat = createData.bitmapFormat;
+    auto const colorComponentCount = atlas::element_count(bitmapFormat);
+    auto const pitch = unbox<uintptr_t>(createData.bitmapSize.width) * colorComponentCount;
+
+    auto const tileWidth = unbox<uintptr_t>(_gridMetrics.cellSize.width);
+    for (uintptr_t xOffset = tileWidth; xOffset < unbox<uintptr_t>(createData.bitmapSize.width); xOffset +=
+                                                                                                 tileWidth)
+    {
+        textureAtlas().emplace(
+            hash * xOffset,
+            [this, xOffset, tileWidth, &createData, colorComponentCount, bitmapFormat, pitch](
+                atlas::TileLocation tileLocation) {
+                auto const xNext = min(xOffset + tileWidth, unbox<uintptr_t>(createData.bitmapSize.width));
+                auto const subWidth = Width::cast_from(xNext - xOffset);
+                auto const subSize = ImageSize { subWidth, createData.bitmapSize.height };
+                auto const subPitch = unbox<uintptr_t>(subWidth) * colorComponentCount;
+
+                auto bitmap = vector<uint8_t>(subSize.area() * colorComponentCount);
+                for (uintptr_t rowIndex = 0; rowIndex < unbox<uintptr_t>(subSize.height); ++rowIndex)
+                {
+                    uint8_t* targetRow = bitmap.data() + rowIndex * subPitch;
+                    uint8_t const* sourceRow = createData.bitmap.data() + rowIndex * pitch
+                                               + uintptr_t(xOffset) * colorComponentCount;
+                    Require(sourceRow + subPitch <= createData.bitmap.data() + createData.bitmap.size());
+                    std::memcpy(targetRow, sourceRow, subPitch);
+                }
+
+                return createTileData(_gridMetrics,
+                                      tileLocation,
+                                      move(bitmap),
+                                      bitmapFormat,
+                                      subSize,
+                                      RenderTileAttributes::X { 0 },
+                                      createData.metadata.y,
+                                      createData.metadata.fragmentShaderSelector);
+            });
+    }
+
+    // Construct head-tile
+    // cut off bitmap to first tile
+    auto const headWidth = textureAtlas().tileSize().width;
+    auto const headSize = ImageSize { headWidth, createData.bitmapSize.height };
+    auto const headPitch = unbox<uintptr_t>(headWidth) * colorComponentCount;
+    auto headBitmap = vector<uint8_t>(headSize.area() * colorComponentCount);
+    for (uintptr_t rowIndex = 0; rowIndex < unbox<uintptr_t>(headSize.height); ++rowIndex)
+        std::memcpy(headBitmap.data() + rowIndex * headPitch,    // target
+                    createData.bitmap.data() + rowIndex * pitch, // source
+                    headPitch);                                  // sub-image line length
+
+    return { createTileData(_gridMetrics,
+                            tileLocation,
+                            move(headBitmap),
+                            bitmapFormat,
+                            headSize,
+                            createData.metadata.x,
+                            createData.metadata.y,
+                            createData.metadata.fragmentShaderSelector) };
+}
+
+auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
+                                         text::glyph_key const& glyphKey,
+                                         unicode::PresentationStyle presentation)
+    -> optional<TextureAtlas::TileCreateData>
+{
+    auto theGlyphOpt = textShaper_.rasterize(glyphKey, fontDescriptions_.renderMode);
+    if (!theGlyphOpt.has_value())
+        return nullopt;
+
+    text::rasterized_glyph& glyph = theGlyphOpt.value();
+    Require(glyph.bitmap.size()
+            == text::pixel_size(glyph.format) * unbox<size_t>(glyph.bitmapSize.width)
+                   * unbox<size_t>(glyph.bitmapSize.height));
+
+    auto const numCells = presentation == unicode::PresentationStyle::Emoji
+                              ? 2
+                              : 1; // is this the only case - with colored := Emoji presentation?
+    // TODO: Derive numCells based on grapheme cluster's EA width instead of emoji presentation.
+    // FIXME: this `2` is a hack of my bad knowledge. FIXME.
+    // As I only know of emoji being colored fonts, and those take up 2 cell with units.
+
+    // Scale bitmap down iff bitmap is emoji and overflowing in diemensions
+    if (presentation == unicode::PresentationStyle::Emoji && glyph.format == text::bitmap_format::rgba)
+    {
+        auto const emojiBoundingBox =
+            ImageSize { Width(_gridMetrics.cellSize.width.value * numCells),
+                        Height(_gridMetrics.cellSize.height.value - _gridMetrics.baseline) };
+        if (glyph.bitmapSize.height > emojiBoundingBox.height)
+        {
+            auto [scaledGlyph, scaleFactor] = text::scale(glyph, emojiBoundingBox);
+            glyph = move(scaledGlyph);
+            // glyph.position.y = unbox<int>(glyph.bitmapSize.height) - _gridMetrics.underline.position;
+        }
+    }
+
+    // y-position relative to cell-bottom of glyphs top.
+    auto const yMax = _gridMetrics.baseline + glyph.position.y;
+
+    // y-position relative to cell-bottom of the glyphs bottom.
+    auto const yMin = yMax - glyph.bitmapSize.height.as<int>();
+
+    // Number of pixel lines this rasterized glyph is overflowing above cell-top,
+    // or 0 if not overflowing.
+    auto const yOverflow = max(0, yMax - _gridMetrics.cellSize.height.as<int>());
+
+    // {{{ crop underflow if yMin < 0
+    // If the rasterized glyph is underflowing below the grid cell's minimum (0),
+    // then cut off at grid cell's bottom.
+    if (false) // (yMin < 0)
+    {
+        auto const rowCount = -yMin;
+        Require(rowCount <= *glyph.bitmapSize.height);
+        auto const pixelCount =
+            rowCount * unbox<int>(glyph.bitmapSize.width) * text::pixel_size(glyph.format);
+        Require(0 < pixelCount && pixelCount <= glyph.bitmap.size());
+        LOGSTORE(RasterizerLog)("Cropping {} underflowing bitmap rows.", rowCount);
+        glyph.bitmapSize.height += Height(yMin);
+        auto& data = glyph.bitmap;
+        data.erase(begin(data), next(begin(data), pixelCount)); // XXX asan hit (size = -2)
+        Guarantee(glyph.valid());
+    }
+    // }}}
+
+    // clang-format off
+    if (RasterizerLog)
+        LOGSTORE(RasterizerLog)(
+            "Inserting {} id {} render mode {} {} yOverflow {} yMin {}.",
+            glyph, glyphKey.index, fontDescriptions_.renderMode, presentation, yOverflow, yMin);
+    // clang-format on
+
+    return { createTileData(_gridMetrics,
+                            tileLocation,
+                            move(glyph.bitmap),
+                            toAtlasFormat(glyph.format),
+                            glyph.bitmapSize,
+                            RenderTileAttributes::X { glyph.position.x },
+                            RenderTileAttributes::Y { glyph.position.y },
+                            toFragmentShaderSelector(glyph.format)) };
+}
+
+text::shape_result const& TextRenderer::getOrCreateCachedGlyphPositions(StrongHash hash)
+{
+    return textShapingCache_->get_or_emplace(hash, [this](auto) { return createTextShapedGlyphPositions(); });
+}
+
+text::shape_result TextRenderer::createTextShapedGlyphPositions()
+{
+    auto glyphPositions = text::shape_result {};
+
+    auto run = unicode::run_segmenter::range {};
+    auto rs = unicode::run_segmenter(
+        u32string_view(textClusterGroup_.codepoints.data(), textClusterGroup_.codepoints.size()));
     while (rs.consume(out(run)))
-        for (text::glyph_position gpos: shapeRun(run))
-            glyphPositions.emplace_back(gpos);
+        for (text::glyph_position const& glyphPosition: shapeTextRun(run))
+            glyphPositions.emplace_back(glyphPosition);
 
     return glyphPositions;
 }
 
-text::shape_result TextRenderer::shapeRun(unicode::run_segmenter::range const& _run)
+/**
+ * Performs text shaping on a text run, that is, a sequence of codepoints
+ * with a uniform set of properties:
+ *  - same direction
+ *  - same script tag
+ *  - same language tag
+ *  - same SGR attributes (font style, color)
+ */
+text::shape_result TextRenderer::shapeTextRun(unicode::run_segmenter::range const& _run)
 {
     bool const isEmojiPresentation =
-        std::get<unicode::PresentationStyle>(_run.properties) == unicode::PresentationStyle::Emoji;
+        get<unicode::PresentationStyle>(_run.properties) == unicode::PresentationStyle::Emoji;
 
-    auto const font = isEmojiPresentation ? fonts_.emoji : getFontForStyle(fonts_, style_);
+    auto const font = isEmojiPresentation ? fonts_.emoji : getFontForStyle(fonts_, textClusterGroup_.style);
 
-    // TODO(where to apply cell-advances) auto const advanceX = gridMetrics_.cellSize.width;
+    // TODO(where to apply cell-advances) auto const advanceX = _gridMetrics.cellSize.width;
     auto const count = static_cast<int>(_run.end - _run.start);
-    auto const codepoints = u32string_view(codepoints_.data() + _run.start, count);
-    auto const clusters = gsl::span(clusters_.data() + _run.start, count);
+    auto const codepoints = u32string_view(textClusterGroup_.codepoints.data() + _run.start, count);
+    auto const clusters = gsl::span(textClusterGroup_.clusters.data() + _run.start, count);
 
-    text::shape_result gpos;
-    gpos.reserve(clusters.size());
+    text::shape_result glyphPosition;
+    glyphPosition.reserve(clusters.size());
     textShaper_.shape(font,
                       codepoints,
                       clusters,
-                      std::get<unicode::Script>(_run.properties),
-                      std::get<unicode::PresentationStyle>(_run.properties),
-                      gpos);
+                      get<unicode::Script>(_run.properties),
+                      get<unicode::PresentationStyle>(_run.properties),
+                      glyphPosition);
 
-    if (RasterizerLog && !gpos.empty())
+    if (RasterizerLog && !glyphPosition.empty())
     {
         auto msg = LOGSTORE(RasterizerLog);
-        msg.append("Shaped codepoints: {}", unicode::convert_to<char>(codepoints));
-        msg.append("  (presentation: {}/{})",
+        msg.append("Shaped codepoints ({}/{}): {}",
                    isEmojiPresentation ? "emoji" : "text",
-                   get<unicode::PresentationStyle>(_run.properties));
+                   get<unicode::PresentationStyle>(_run.properties),
+                   unicode::convert_to<char>(codepoints));
 
         msg.append(" (");
         for (auto const [i, codepoint]: crispy::indexed(codepoints))
         {
             if (i)
                 msg.append(" ");
-            msg.append("U+{:04X}", unsigned(codepoint));
+            auto const cluster = clusters[i];
+            msg.append("U+{:04X}/{}", unsigned(codepoint), cluster);
         }
         msg.append(")\n");
 
         // A single shape run always uses the same font,
         // so it is sufficient to just print that.
-        // auto const& font = gpos.front().glyph.font;
+        // auto const& font = glyphPosition.front().glyph.font;
         // msg.write("using font: \"{}\" \"{}\" \"{}\"\n", font.familyName(), font.styleName(),
         // font.filePath());
 
         msg.append("with metrics:");
-        for (text::glyph_position const& gp: gpos)
+        for (text::glyph_position const& gp: glyphPosition)
             msg.append(" {}", gp);
     }
 
-    return gpos;
+    return glyphPosition;
 }
 // }}}
 

@@ -15,35 +15,158 @@
 
 #include <crispy/assert.h>
 
+#include <array>
 #include <cstring>
 #include <immintrin.h>
 #include <string>
 #include <string_view>
 #include <type_traits>
 
+#if defined(__AES__)
+    #include <wmmintrin.h>
+#endif
+
 namespace crispy
 {
 
 struct StrongHash
 {
-    __m128i value {};
+    // some random seed
+    static constexpr std::array<unsigned char, 16> DefaultSeed = {
+        114, 188, 209, 2, 232, 4, 178, 176, 240, 216, 201, 127, 40, 41, 95, 143,
+    };
 
-    // clang-format off
-    StrongHash(uint32_t a, uint32_t b, uint32_t c, uint32_t d) noexcept:
-        StrongHash(_mm_set_epi32(static_cast<int>(a),
-                                 static_cast<int>(b),
-                                 static_cast<int>(c),
-                                 static_cast<int>(d))) {}
-    // clang-format on
+    StrongHash(uint32_t a, uint32_t b, uint32_t c, uint32_t d) noexcept;
 
-    StrongHash(__m128i v) noexcept: value { v } {}
+    explicit StrongHash(__m128i v) noexcept;
 
     StrongHash() = default;
     StrongHash(StrongHash const&) = default;
     StrongHash& operator=(StrongHash const&) = default;
     StrongHash(StrongHash&&) noexcept = default;
     StrongHash& operator=(StrongHash&&) noexcept = default;
+
+    template <typename T>
+    static StrongHash compute(T const& value) noexcept;
+
+    template <typename T>
+    static StrongHash compute(std::basic_string_view<T> value) noexcept;
+
+    template <typename T, typename Alloc>
+    static StrongHash compute(std::basic_string<T, Alloc> const& value) noexcept;
+
+    static StrongHash compute(void const* data, size_t n) noexcept;
+
+    __m128i value {};
 };
+
+inline StrongHash::StrongHash(uint32_t a, uint32_t b, uint32_t c, uint32_t d) noexcept:
+    StrongHash(_mm_xor_si128(
+        _mm_set_epi32(static_cast<int>(a), static_cast<int>(b), static_cast<int>(c), static_cast<int>(d)),
+        _mm_loadu_si128((__m128i const*) DefaultSeed.data())))
+{
+}
+
+inline StrongHash::StrongHash(__m128i v) noexcept: value { v }
+{
+}
+
+inline bool operator==(StrongHash a, StrongHash b) noexcept
+{
+    return _mm_movemask_epi8(_mm_cmpeq_epi32(a.value, b.value)) == 0xFFFF;
+}
+
+inline bool operator!=(StrongHash a, StrongHash b) noexcept
+{
+    return !(a == b);
+}
+
+inline StrongHash operator*(StrongHash const& a, StrongHash const& b) noexcept
+{
+    // TODO AES-NI fallback
+    __m128i hashValue = a.value;
+
+    hashValue = _mm_xor_si128(hashValue, b.value);
+    hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
+    hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
+    hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
+    hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
+
+    return StrongHash { hashValue };
+}
+
+inline StrongHash operator*(StrongHash a, uint32_t b) noexcept
+{
+    return a * StrongHash(0, 0, 0, b);
+}
+
+template <typename T>
+StrongHash StrongHash::compute(std::basic_string_view<T> text) noexcept
+{
+    // return compute(value.data(), value.size());
+    StrongHash hash;
+    hash = StrongHash(0, 0, 0, static_cast<uint32_t>(text.size()));
+    for (auto const codepoint: text)
+        hash = hash * codepoint; // StrongHash(0, 0, 0, static_cast<uint32_t>(codepoint));
+    return hash;
+}
+
+template <typename T, typename Alloc>
+StrongHash StrongHash::compute(std::basic_string<T, Alloc> const& text) noexcept
+{
+    // return compute(value.data(), value.size());
+    StrongHash hash;
+    hash = StrongHash(0, 0, 0, static_cast<uint32_t>(text.size()));
+    for (auto const codepoint: text)
+        hash = hash * codepoint;
+    return hash;
+}
+
+template <typename T>
+StrongHash StrongHash::compute(T const& value) noexcept
+{
+    return compute(&value, sizeof(value));
+}
+
+inline StrongHash StrongHash::compute(void const* data, size_t n) noexcept
+{
+    // TODO AES-NI fallback
+
+    static_assert(sizeof(__m128i) == 16);
+    auto constexpr ChunkSize = sizeof(__m128i);
+
+    __m128i hashValue = _mm_cvtsi64_si128(static_cast<long long>(n));
+    hashValue = _mm_xor_si128(hashValue, _mm_loadu_si128((__m128i const*) DefaultSeed.data()));
+
+    char const* inputPtr = (char const*) data;
+    for (int chunkIndex = 0; chunkIndex < n / ChunkSize; chunkIndex++)
+    {
+        __m128i chunk = _mm_loadu_si128((__m128i const*) inputPtr);
+
+        hashValue = _mm_xor_si128(hashValue, chunk);
+        hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
+        hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
+        hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
+        hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
+
+        inputPtr += ChunkSize;
+    }
+
+    auto const remainingByteCount = n % ChunkSize;
+    if (remainingByteCount)
+    {
+        char lastChunk[ChunkSize] { 0 };
+        std::memcpy(lastChunk + ChunkSize - remainingByteCount, inputPtr, remainingByteCount);
+        __m128i chunk = _mm_loadu_si128((__m128i*) lastChunk);
+        hashValue = _mm_xor_si128(hashValue, chunk);
+        hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
+        hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
+        hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
+        hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
+    }
+
+    return StrongHash { hashValue };
+}
 
 inline std::string to_string(StrongHash const& hash)
 {
@@ -71,16 +194,6 @@ inline std::string to_structured_string(StrongHash const& hash)
 inline int to_integer(StrongHash hash) noexcept
 {
     return _mm_cvtsi128_si32(hash.value);
-}
-
-inline bool operator==(StrongHash a, StrongHash b) noexcept
-{
-    return _mm_movemask_epi8(_mm_cmpeq_epi32(a.value, b.value)) == 0xFFFF;
-}
-
-inline bool operator!=(StrongHash a, StrongHash b) noexcept
-{
-    return !(a == b);
 }
 
 template <typename T>

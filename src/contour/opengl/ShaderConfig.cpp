@@ -15,6 +15,7 @@
 #include <contour/opengl/ShaderConfig.h>
 #include <contour/opengl/background_frag.h>
 #include <contour/opengl/background_vert.h>
+#include <contour/opengl/shared_defines_verbatim.h>
 #include <contour/opengl/text_frag.h>
 #include <contour/opengl/text_vert.h>
 
@@ -35,15 +36,20 @@ namespace
 
 ShaderConfig defaultShaderConfig(ShaderClass _shaderClass)
 {
-    using namespace default_shaders;
+    using namespace verbatim;
+
+    auto const p = [](std::string code) -> std::string {
+        return s(shared_defines) + "#line 1\n" + move(code);
+    };
 
     switch (_shaderClass)
     {
     case ShaderClass::Background:
         return {
-            s(background_vert), s(background_frag), "builtin.background.vert", "builtin.background.frag"
+            p(s(background_vert)), p(s(background_frag)), "builtin.background.vert", "builtin.background.frag"
         };
-    case ShaderClass::Text: return { s(text_vert), s(text_frag), "builtin.text.vert", "builtin.text.frag" };
+    case ShaderClass::Text:
+        return { p(s(text_vert)), p(s(text_frag)), "builtin.text.vert", "builtin.text.frag" };
     }
 
     throw std::invalid_argument(fmt::format("ShaderClass<{}>", static_cast<unsigned>(_shaderClass)));
@@ -53,6 +59,7 @@ std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderCo
 {
     auto shader = std::make_unique<QOpenGLShaderProgram>();
 
+    LOGSTORE(DisplayLog)("Loading vertex shader: {}", _shaderConfig.vertexShaderFileName);
     if (!shader->addShaderFromSourceCode(QOpenGLShader::Vertex, _shaderConfig.vertexShader.c_str()))
     {
         errorlog()("Compiling vertex shader {} failed. {}",
@@ -62,6 +69,7 @@ std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderCo
         return {};
     }
 
+    LOGSTORE(DisplayLog)("Loading fragment shader: {}", _shaderConfig.fragmentShaderFileName);
     if (!shader->addShaderFromSourceCode(QOpenGLShader::Fragment, _shaderConfig.fragmentShader.c_str()))
     {
         errorlog()("Compiling fragment shader {} failed. {}",
@@ -80,7 +88,7 @@ std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderCo
     }
 
     if (auto const logString = shader->log().toStdString(); !logString.empty())
-        errorlog()(logString);
+        errorlog()("Shader log: {}", logString);
 
     return shader;
 }

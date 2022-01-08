@@ -21,8 +21,8 @@
 #include <terminal/Process.h>
 #include <terminal/Sequencer.h> // CursorDisplay
 
-#include <terminal_renderer/DecorationRenderer.h> // Decorator
-#include <terminal_renderer/TextRenderer.h>       // FontDescriptions
+#include <terminal_renderer/Decorator.h>
+#include <terminal_renderer/FontDescriptions.h>
 
 #include <text_shaper/font.h>
 #include <text_shaper/mock_font_locator.h>
@@ -187,6 +187,23 @@ struct Config
     std::string platformPlugin;
 
     RenderingBackend renderingBackend = RenderingBackend::Default;
+
+    /// Enables/disables support for direct mapped texture atlas tiles (e.g. glyphs).
+    bool textureAtlasDirectMapping = true;
+
+    // Number of hashtable slots to map to the texture tiles.
+    // Larger values may increase performance, but too large may also decrease.
+    // This value is rounted up to a value equal to the power of two.
+    //
+    // Default: 4096
+    crispy::StrongHashtableSize textureAtlasHashtableSlots = crispy::StrongHashtableSize { 4096 };
+
+    /// Number of tiles that must fit at lest into the texture atlas,
+    /// excluding US-ASCII glyphs, cursor shapes and decorations.
+    ///
+    /// Value must be at least as large as grid cells available in the current view.
+    /// This value is automatically adjusted if too small.
+    crispy::LRUCapacity textureAtlasTileCount = crispy::LRUCapacity { 4000 };
 
     // Configures the size of the PTY read buffer.
     // Changing this value may result in better or worse throughput performance.

@@ -61,7 +61,7 @@ class TerminalDisplay
     virtual terminal::FontDef getFontDef() = 0;
     virtual void bell() = 0;
     virtual void copyToClipboard(std::string_view _data) = 0;
-    virtual void dumpState() = 0;
+    virtual void inspect() = 0;
     virtual void notify(std::string_view _title, std::string_view _body) = 0;
     virtual void resizeWindow(terminal::LineCount, terminal::ColumnCount) = 0;
     virtual void resizeWindow(terminal::Width, terminal::Height) = 0;

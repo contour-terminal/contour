@@ -306,7 +306,7 @@ class Screen: public capabilities::StaticDatabase
     void requestTabStops();
     void resetDynamicColor(DynamicColorName _name);
     void setDynamicColor(DynamicColorName _name, RGBColor _color);
-    void dumpState();
+    void inspect();
     void smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, XtSmGraphics::Value _value);
     // }}}
 
@@ -345,7 +345,7 @@ class Screen: public capabilities::StaticDatabase
                      ImageResize _resizePolicy,
                      bool _autoScroll);
 
-    void dumpState(std::string const& _message, std::ostream& _os) const;
+    void inspect(std::string const& _message, std::ostream& _os) const;
 
     // reset screen
     void resetSoft();
@@ -598,14 +598,6 @@ class Screen: public capabilities::StaticDatabase
     /// Sets the current column to given logical column number.
     void setCurrentColumn(ColumnOffset _n);
 
-    ImageFragmentId createImageFragmentId() noexcept
-    {
-        if (!nextImageFragmentId_)
-            ++nextImageFragmentId_;
-
-        return nextImageFragmentId_++;
-    }
-
     // private fields
     //
     EventListener& eventListener_;
@@ -630,7 +622,6 @@ class Screen: public capabilities::StaticDatabase
     ImageSize maxImageSizeLimit_;
     std::shared_ptr<SixelColorPalette> imageColorPalette_;
     ImagePool imagePool_;
-    ImageFragmentId nextImageFragmentId_ = ImageFragmentId(1);
 
     Sequencer<EventListener> sequencer_;
     parser::Parser<Sequencer<EventListener>> parser_;
@@ -770,7 +761,7 @@ struct formatter<terminal::RequestStatusString>
         static constexpr auto mappings = std::array { "SGR",     "DECSCL",  "DECSCUSR", "DECSCA", "DECSTBM",
                                                       "DECSLRM", "DECSLPP", "DECSCPP",  "DECSNLS" };
 
-	return format_to(ctx.out(), mappings.at(static_cast<size_t>(value)));
+        return format_to(ctx.out(), mappings.at(static_cast<size_t>(value)));
     };
 };
 } // namespace fmt

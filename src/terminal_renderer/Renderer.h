@@ -19,6 +19,7 @@
 #include <terminal_renderer/BackgroundRenderer.h>
 #include <terminal_renderer/CursorRenderer.h>
 #include <terminal_renderer/DecorationRenderer.h>
+#include <terminal_renderer/Decorator.h>
 #include <terminal_renderer/GridMetrics.h>
 #include <terminal_renderer/ImageRenderer.h>
 #include <terminal_renderer/RenderTarget.h>
@@ -46,27 +47,35 @@ struct RenderCursor
 /**
  * Renders a terminal's screen to the current OpenGL context.
  */
-class Renderer: public Renderable
+class Renderer //: public Renderable
 {
   public:
     /** Constructs a Renderer instances.
      *
-     * @p _fonts reference to the set of loaded fonts to be used for rendering text.
-     * @p _colorPalette user-configurable color profile to use to map terminal colors to.
-     * @p _projectionMatrix projection matrix to apply to the rendered scene when rendering the screen.
+     * @p fonts              Reference to the set of loaded fonts to be used for rendering text.
+     * @p colorPalette       User-configurable color profile to use to map terminal colors to.
+     * @p projectionMatrix   Projection matrix to apply to the rendered scene when rendering the screen.
+     * @p atlasDirectMapping Indicates whether or not direct mapped tiles are allowed.
+     * @p atlasTileCount     Number of tiles guaranteed to be available in LRU cache.
      */
-    Renderer(PageSize _screenSize,
-             FontDescriptions const& _fontDescriptions,
-             ColorPalette const& _colorPalette,
-             Opacity _backgroundOpacity,
-             Decorator _hyperlinkNormal,
-             Decorator _hyperlinkHover);
+    Renderer(PageSize screenSize,
+             FontDescriptions const& fontDescriptions,
+             ColorPalette const& colorPalette,
+             Opacity backgroundOpacity,
+             crispy::StrongHashtableSize atlasHashtableSlotCount,
+             crispy::LRUCapacity atlasTileCount,
+             bool atlasDirectMapping,
+             Decorator hyperlinkNormal,
+             Decorator hyperlinkHover);
 
     ImageSize cellSize() const noexcept { return gridMetrics_.cellSize; }
 
-    void setRenderTarget(RenderTarget& _renderTarget);
+    /// Initializes the render and all render subsystems with the given RenderTarget
+    /// and then informs all renderables about the newly created texture atlas.
+    void setRenderTarget(RenderTarget& renderTarget);
+    RenderTarget& renderTarget() noexcept { return *_renderTarget; }
 
-    void setBackgroundOpacity(terminal::Opacity _opacity);
+    void setBackgroundOpacity(terminal::Opacity _opacity) { backgroundOpacity_ = _opacity; }
     terminal::Opacity backgroundOpacity() const noexcept { return backgroundOpacity_; }
 
     void setRenderSize(ImageSize _size);
@@ -87,8 +96,8 @@ class Renderer: public Renderable
 
     void setMargin(PageMargin _margin) noexcept
     {
-        if (renderTarget_)
-            renderTarget_->setMargin(_margin);
+        if (_renderTarget)
+            _renderTarget->setMargin(_margin);
         gridMetrics_.pageMargin = _margin;
     }
 
@@ -99,35 +108,39 @@ class Renderer: public Renderable
      */
     uint64_t render(Terminal& _terminal, bool _pressure);
 
-    // Converts given RGBColor with its given opacity to a 4D-vector of values between 0.0 and 1.0
-    static constexpr std::array<float, 4> canonicalColor(RGBColor const& _rgb,
-                                                         Opacity _opacity = Opacity::Opaque)
-    {
-        return std::array<float, 4> { static_cast<float>(_rgb.red) / 255.0f,
-                                      static_cast<float>(_rgb.green) / 255.0f,
-                                      static_cast<float>(_rgb.blue) / 255.0f,
-                                      static_cast<float>(_opacity) / 255.0f };
-    }
-
     void discardImage(Image const& _image);
 
     void clearCache();
 
-    void dumpState(std::ostream& _textOutput) const;
+    void inspect(std::ostream& _textOutput) const;
 
     std::array<std::reference_wrapper<Renderable>, 5> renderables()
     {
         return std::array<std::reference_wrapper<Renderable>, 5> {
-            backgroundRenderer_, imageRenderer_, textRenderer_, decorationRenderer_, cursorRenderer_
+            backgroundRenderer_, cursorRenderer_, decorationRenderer_, imageRenderer_, textRenderer_
+        };
+    }
+
+    std::array<std::reference_wrapper<Renderable const>, 5> renderables() const
+    {
+        return std::array<std::reference_wrapper<Renderable const>, 5> {
+            backgroundRenderer_, cursorRenderer_, decorationRenderer_, imageRenderer_, textRenderer_
         };
     }
 
   private:
+    void configureTextureAtlas();
     void renderCells(std::vector<RenderCell> const& _renderableCells);
-
-    std::optional<RenderCursor> renderCursor(Terminal const& _terminal);
-
     void executeImageDiscards();
+
+    crispy::StrongHashtableSize _atlasHashtableSlotCount;
+    crispy::LRUCapacity _atlasTileCount;
+    bool _atlasDirectMapping;
+
+    RenderTarget* _renderTarget;
+
+    Renderable::DirectMappingAllocator directMappingAllocator_;
+    std::unique_ptr<Renderable::TextureAtlas> textureAtlas_;
 
     std::unique_ptr<text::shaper> textShaper_;
 

@@ -783,7 +783,7 @@ namespace detail
         template <typename... T>
         inline atlas::Buffer blockSextant(ImageSize size, T... positions)
         {
-            auto image = atlas::Buffer(*size.width * *size.height, 0x00);
+            auto image = atlas::Buffer(size.area(), 0x00);
             blockSextant(image, size, positions...);
             return image;
         }
@@ -792,31 +792,38 @@ namespace detail
     } // namespace
 } // namespace detail
 
-void BoxDrawingRenderer::setRenderTarget(RenderTarget& _renderTarget)
+void BoxDrawingRenderer::setRenderTarget(RenderTarget& renderTarget,
+                                         DirectMappingAllocator& directMappingAllocator)
 {
-    Renderable::setRenderTarget(_renderTarget);
+    Renderable::setRenderTarget(renderTarget, directMappingAllocator);
     clearCache();
 }
 
 void BoxDrawingRenderer::clearCache()
 {
-    textureAtlas_ = std::make_unique<TextureAtlas>(renderTarget().monochromeAtlasAllocator());
+    // As we're reusing the upper layer's texture atlas, we do not need
+    // to clear here anything. It's done for us already.
 }
 
 bool BoxDrawingRenderer::render(LineOffset _line, ColumnOffset _column, char32_t _codepoint, RGBColor _color)
 {
-    auto data = getDataRef(_codepoint);
+    Renderable::AtlasTileAttributes const* data = getOrCreateCachedTileAttributes(_codepoint);
     if (!data)
         return false;
 
-    auto const pos = gridMetrics_.map(_line, _column);
-    atlas::TextureInfo const& ti = get<0>(*data);
+    auto const pos = _gridMetrics.map(_line, _column);
     auto const x = pos.x;
     auto const y = pos.y;
-    auto const z = 0;
-    auto const color =
-        array { float(_color.red) / 255.0f, float(_color.green) / 255.0f, float(_color.blue) / 255.0f, 1.0f };
-    textureScheduler().renderTexture(atlas::RenderTexture { ti, x, y, z, color });
+
+    auto renderTile = atlas::RenderTile {};
+    renderTile.x = atlas::RenderTile::X { x };
+    renderTile.y = atlas::RenderTile::Y { y };
+    renderTile.bitmapSize = data->bitmapSize;
+    renderTile.color = atlas::normalize(_color);
+    renderTile.normalizedLocation = data->metadata.normalizedLocation;
+    renderTile.tileLocation = data->location;
+
+    textureScheduler().renderTile(renderTile);
     return true;
 }
 
@@ -828,16 +835,23 @@ constexpr inline bool containsNonCanonicalLines(char32_t codepoint)
     return box.diagonal_ != detail::NoDiagonal || box.arc_ != NoArc;
 }
 
-optional<BoxDrawingRenderer::DataRef> BoxDrawingRenderer::getDataRef(char32_t codepoint)
+auto BoxDrawingRenderer::createTileData(char32_t codepoint, atlas::TileLocation tileLocation)
+    -> optional<TextureAtlas::TileCreateData>
 {
-    if (optional<DataRef> const dataRef = textureAtlas_->get(codepoint); dataRef.has_value())
-        return dataRef;
-
     if (optional<atlas::Buffer> image = buildElements(codepoint))
-        return textureAtlas_->insert(codepoint, gridMetrics_.cellSize, gridMetrics_.cellSize, move(*image));
+    {
+        return { createTileData(_gridMetrics,
+                                tileLocation,
+                                move(*image),
+                                atlas::Format::Red,
+                                _gridMetrics.cellSize,
+                                RenderTileAttributes::X { 0 },
+                                RenderTileAttributes::Y { 0 },
+                                FRAGMENT_SELECTOR_GLYPH_ALPHA) };
+    }
 
     auto const antialiasing = containsNonCanonicalLines(codepoint);
-    atlas::Buffer buffer;
+    atlas::Buffer pixels;
     if (antialiasing)
     {
         auto const supersamplingFactor = []() {
@@ -849,24 +863,40 @@ optional<BoxDrawingRenderer::DataRef> BoxDrawingRenderer::getDataRef(char32_t co
                 return 1;
             return val;
         }();
-        auto const supersamplingSize = gridMetrics_.cellSize * supersamplingFactor;
-        auto const supersamplingLineThickness = gridMetrics_.underline.thickness * 2;
+        auto const supersamplingSize = _gridMetrics.cellSize * supersamplingFactor;
+        auto const supersamplingLineThickness = _gridMetrics.underline.thickness * 2;
         auto tmp = buildBoxElements(codepoint, supersamplingSize, supersamplingLineThickness);
         if (!tmp)
             return nullopt;
 
-        // buffer = downsample(*tmp, gridMetrics_.cellSize, supersamplingFactor);
-        buffer = downsample(*tmp, 1, supersamplingSize, gridMetrics_.cellSize);
+        // pixels = downsample(*tmp, _gridMetrics.cellSize, supersamplingFactor);
+        pixels = downsample(*tmp, 1, supersamplingSize, _gridMetrics.cellSize);
     }
     else
     {
-        auto tmp = buildBoxElements(codepoint, gridMetrics_.cellSize, gridMetrics_.underline.thickness);
+        auto tmp = buildBoxElements(codepoint, _gridMetrics.cellSize, _gridMetrics.underline.thickness);
         if (!tmp)
             return nullopt;
-        buffer = move(*tmp);
+        pixels = move(*tmp);
     }
 
-    return textureAtlas_->insert(codepoint, gridMetrics_.cellSize, gridMetrics_.cellSize, move(buffer));
+    return { createTileData(_gridMetrics,
+                            tileLocation,
+                            move(pixels),
+                            atlas::Format::Red,
+                            _gridMetrics.cellSize,
+                            RenderTileAttributes::X { 0 },
+                            RenderTileAttributes::Y { 0 },
+                            FRAGMENT_SELECTOR_GLYPH_ALPHA) };
+}
+
+Renderable::AtlasTileAttributes const* BoxDrawingRenderer::getOrCreateCachedTileAttributes(char32_t codepoint)
+{
+    return textureAtlas().get_or_try_emplace(
+        crispy::StrongHash { 31, 13, 8, static_cast<uint32_t>(codepoint) },
+        [this, codepoint](atlas::TileLocation tileLocation) -> optional<TextureAtlas::TileCreateData> {
+            return createTileData(codepoint, tileLocation);
+        });
 }
 
 bool BoxDrawingRenderer::renderable(char32_t codepoint) const noexcept
@@ -887,7 +917,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
 {
     using namespace detail;
 
-    auto const size = gridMetrics_.cellSize;
+    auto const size = _gridMetrics.cellSize;
 
     auto const ud = [=](Ratio a, Ratio b) {
         return upperDiagonalMosaic(size, a, b);
@@ -897,14 +927,14 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
     };
     auto const lineArt = [=]() {
         auto b = blockElement<2>(size);
-        b.lineThickness(gridMetrics_.underline.thickness);
+        b.lineThickness(_gridMetrics.underline.thickness);
         return b;
     };
     auto const segmentArt = [=]() {
         auto constexpr AntiAliasingSamplingFactor = 1;
         return blockElement<AntiAliasingSamplingFactor>(size)
-            .lineThickness(gridMetrics_.underline.thickness)
-            .baseline(gridMetrics_.baseline * AntiAliasingSamplingFactor);
+            .lineThickness(_gridMetrics.underline.thickness)
+            .baseline(_gridMetrics.baseline * AntiAliasingSamplingFactor);
     };
 
     // TODO: just check notcurses-info to get an idea what may be missing
@@ -1558,6 +1588,10 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint
     LOGSTORE(BoxDrawingLog)("BoxDrawing: build U+{:04X} ({})", static_cast<uint32_t>(_codepoint), _size);
 
     return image;
+}
+
+void BoxDrawingRenderer::inspect(std::ostream& /*output*/) const
+{
 }
 
 } // namespace terminal::renderer
