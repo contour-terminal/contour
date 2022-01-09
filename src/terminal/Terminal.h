@@ -111,9 +111,18 @@ class Terminal
     using Timestamp = std::chrono::steady_clock::time_point;
     bool sendKeyPressEvent(Key _key, Modifier _modifier, Timestamp _now);
     bool sendCharPressEvent(char32_t _char, Modifier _modifier, Timestamp _now);
-    bool sendMousePressEvent(MouseButton _button, Modifier _modifier, Timestamp _now);
-    bool sendMouseMoveEvent(Coordinate _pos, Modifier _modifier, Timestamp _now);
-    bool sendMouseReleaseEvent(MouseButton _button, Modifier _modifier, Timestamp _now);
+    bool sendMousePressEvent(Modifier _modifier,
+                             MouseButton _button,
+                             MousePixelPosition _pixelPosition,
+                             Timestamp _now);
+    bool sendMouseMoveEvent(Modifier _modifier,
+                            Coordinate _pos,
+                            MousePixelPosition _pixelPosition,
+                            Timestamp _now);
+    bool sendMouseReleaseEvent(Modifier _modifier,
+                               MouseButton _button,
+                               MousePixelPosition _pixelPosition,
+                               Timestamp _now);
     bool sendFocusInEvent();
     bool sendFocusOutEvent();
     void sendPaste(std::string_view _text); // Sends verbatim text in bracketed mode to application.

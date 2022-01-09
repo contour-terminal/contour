@@ -186,6 +186,7 @@ namespace impl // {{{ some command generator helpers
         case 1006: return DECMode::MouseSGR;
         case 1007: return DECMode::MouseAlternateScroll;
         case 1015: return DECMode::MouseURXVT;
+        case 1016: return DECMode::MouseSGRPixels;
         case 1047: return DECMode::UseAlternateScreen;
         case 1048: return DECMode::SaveCursor;
         case 1049: return DECMode::ExtendedAltScreen;
@@ -1614,6 +1615,7 @@ std::string to_string(DECMode _mode)
     case DECMode::MouseExtended: return "MouseExtended";
     case DECMode::MouseSGR: return "MouseSGR";
     case DECMode::MouseURXVT: return "MouseURXVT";
+    case DECMode::MouseSGRPixels: return "MouseSGRPixels";
     case DECMode::MouseAlternateScroll: return "MouseAlternateScroll";
     case DECMode::BatchedRendering: return "BatchedRendering";
     case DECMode::TextReflow: return "TextReflow";

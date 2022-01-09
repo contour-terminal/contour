@@ -171,6 +171,9 @@ enum class DECMode
     // URXVT invented extend mouse protocol
     MouseURXVT = 1015,
 
+    // SGR-Pixels, like SGR but with pixels instead of line/column positions.
+    MouseSGRPixels = 1016,
+
     /// Toggles scrolling in alternate screen buffer, encodes CUP/CUD instead of mouse wheel events.
     MouseAlternateScroll = 1007,
     // }}}
@@ -297,6 +300,7 @@ constexpr unsigned toDECModeNum(DECMode m)
     case DECMode::MouseExtended: return 1005;
     case DECMode::MouseSGR: return 1006;
     case DECMode::MouseURXVT: return 1015;
+    case DECMode::MouseSGRPixels: return 1016;
     case DECMode::MouseAlternateScroll: return 1007;
     case DECMode::BatchedRendering: return 2026;
     case DECMode::TextReflow: return 2027;
@@ -339,6 +343,7 @@ constexpr bool isValidDECMode(int _mode) noexcept
     case DECMode::MouseExtended:
     case DECMode::MouseSGR:
     case DECMode::MouseURXVT:
+    case DECMode::MouseSGRPixels:
     case DECMode::MouseAlternateScroll:
     case DECMode::BatchedRendering:
     case DECMode::TextReflow:

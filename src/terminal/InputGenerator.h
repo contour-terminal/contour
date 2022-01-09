@@ -34,7 +34,7 @@ namespace terminal
 {
 
 class Modifier
-{ // {{{
+{
   public:
     enum Key : unsigned
     {
@@ -218,6 +218,9 @@ enum class MouseTransport
     Extended,
     // `CSI Cb Cx Cy M` and `CSI Cb Cx Cy m` (button release)
     SGR,
+    // SGR-Pixels (1016), an xterm extension as of Patch #359 - 2020/08/17
+    // This is just like SGR but reports pixels isntead of ANSI cursor positions.
+    SGRPixels,
     // `CSI < Cb Cx Cy M` with Cb += 0x20
     URXVT,
 };
@@ -272,9 +275,15 @@ class InputGenerator
     bool generate(std::u32string const& _characterEvent, Modifier _modifier);
     bool generate(Key _key, Modifier _modifier);
     void generatePaste(std::string_view const& _text);
-    bool generateMousePress(MouseButton _button, Modifier _modifier, Coordinate _pos);
-    bool generateMouseMove(Coordinate _pos, Modifier _modifier);
-    bool generateMouseRelease(MouseButton _button, Modifier _modifier, Coordinate _pos);
+    bool generateMousePress(Modifier _modifier,
+                            MouseButton _button,
+                            Coordinate _pos,
+                            MousePixelPosition _pixelPosition);
+    bool generateMouseMove(Modifier _modifier, Coordinate _pos, MousePixelPosition _pixelPosition);
+    bool generateMouseRelease(Modifier _modifier,
+                              MouseButton _button,
+                              Coordinate _pos,
+                              MousePixelPosition _pixelPosition);
 
     bool generateFocusInEvent();
     bool generateFocusOutEvent();
@@ -315,12 +324,22 @@ class InputGenerator
     void unlock() noexcept { mutex_.unlock(); }
 
   private:
-    bool generateMouse(MouseButton _button, Modifier _modifier, Coordinate _pos, MouseEventType _eventType);
+    bool generateMouse(MouseEventType _eventType,
+                       Modifier _modifier,
+                       MouseButton _button,
+                       Coordinate _pos,
+                       MousePixelPosition _pixelPosition);
 
-    bool mouseTransport(uint8_t _button, uint8_t _modifier, Coordinate _pos, MouseEventType _type);
+    bool mouseTransport(MouseEventType _eventType,
+                        uint8_t _button,
+                        uint8_t _modifier,
+                        Coordinate _pos,
+                        MousePixelPosition _pixelPosition);
     bool mouseTransportX10(uint8_t _button, uint8_t _modifier, Coordinate _pos);
-    bool mouseTransportSGR(uint8_t _button, uint8_t _modifier, Coordinate _pos, MouseEventType _type);
-    bool mouseTransportURXVT(uint8_t _button, uint8_t _modifier, Coordinate _pos, MouseEventType _type);
+
+    bool mouseTransportSGR(MouseEventType _type, uint8_t _button, uint8_t _modifier, int x, int y);
+
+    bool mouseTransportURXVT(MouseEventType _type, uint8_t _button, uint8_t _modifier, Coordinate _pos);
 
     inline bool append(std::string_view _sequence);
     inline bool append(char _asciiChar);
@@ -472,6 +491,7 @@ struct formatter<terminal::MouseTransport>
         case terminal::MouseTransport::Extended: return format_to(_ctx.out(), "Extended");
         case terminal::MouseTransport::SGR: return format_to(_ctx.out(), "SGR");
         case terminal::MouseTransport::URXVT: return format_to(_ctx.out(), "URXVT");
+        case terminal::MouseTransport::SGRPixels: return format_to(_ctx.out(), "SGR-Pixels");
         }
         return format_to(_ctx.out(), "<{}>", unsigned(_value));
     }
