@@ -620,7 +620,11 @@ namespace impl // {{{ some command generator helpers
             _seq.intermediateCharacters(),
             [&](uint8_t index) {
                 auto const color = _screen.colorPalette().palette.at(index);
-                _screen.reply("\e]4;rgb:{:02x}/{:02x}/{:02x}\033\\", color.red, color.green, color.blue);
+                _screen.reply("\e]4;{};rgb:{:04x}/{:04x}/{:04x}\033\\",
+                              index,
+                              static_cast<uint16_t>(color.red) << 8 | color.red,
+                              static_cast<uint16_t>(color.green) << 8 | color.green,
+                              static_cast<uint16_t>(color.blue) << 8 | color.blue);
             },
             [&](uint8_t index, RGBColor color) { _screen.colorPalette().palette.at(index) = color; });
 
