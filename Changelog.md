@@ -5,6 +5,7 @@
 - Fixes VT sequence `OSC 4`'s response.
 - Fixes PTY write race condition.
 - Fixes installation from `.deb` (missing terminfo dependency)
+- Fixes `DECRC` with respect to `DECSTBM` enabled and `DECOM` being inverted interpreted.
 - Improved VT backend performance (#342).
 - Improved text selection behaviour.
 - Adds preliminary implementation of `DA3` VT sequence.

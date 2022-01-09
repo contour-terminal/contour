@@ -410,7 +410,7 @@ class Screen: public capabilities::StaticDatabase
     /// Clamps given coordinates, respecting DECOM (Origin Mode).
     Coordinate clampCoordinate(Coordinate coord) const noexcept
     {
-        if (!cursor_.originMode)
+        if (cursor_.originMode)
             return clampToOrigin(coord);
         else
             return clampToScreen(coord);
@@ -419,12 +419,8 @@ class Screen: public capabilities::StaticDatabase
     /// Clamps given logical coordinates to margins as used in when DECOM (origin mode) is enabled.
     Coordinate clampToOrigin(Coordinate coord) const noexcept
     {
-        return { std::clamp(coord.line,
-                            LineOffset { 0 },
-                            margin_.vertical.length().template as<LineOffset>() - LineOffset(1)),
-                 std::clamp(coord.column,
-                            ColumnOffset { 0 },
-                            margin_.horizontal.length().template as<ColumnOffset>() - ColumnOffset(1)) };
+        return { std::clamp(coord.line, LineOffset { 0 }, margin_.vertical.to),
+                 std::clamp(coord.column, ColumnOffset { 0 }, margin_.horizontal.to) };
     }
 
     LineOffset clampedLine(LineOffset _line) const noexcept
