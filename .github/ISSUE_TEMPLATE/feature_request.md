@@ -1,7 +1,7 @@
 ---
 name: Feature Request
 about: Contour terminal emulator feature request
-labels: enhancement
+labels: [feature-request, enhancement]
 ---
 
 <!--## Prerequisites
