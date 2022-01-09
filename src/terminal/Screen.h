@@ -79,6 +79,8 @@ class ScreenBase: public SequenceHandler
 
 //#define LIBTERMINAL_CURRENT_LINE_CACHE 1
 
+class DECTextLocator;
+
 /**
  * Terminal Screen.
  *

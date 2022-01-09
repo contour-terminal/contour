@@ -16,6 +16,7 @@
 #include <terminal/defines.h>
 
 #include <crispy/ImageSize.h>
+#include <crispy/assert.h>
 #include <crispy/boxed.h>
 
 #include <cassert>
@@ -115,6 +116,12 @@ struct PixelCoordinate
 
     X x {};
     Y y {};
+};
+
+enum class CoordinateUnits
+{
+    Cells,
+    Pixels,
 };
 
 struct [[nodiscard]] CellLocation
@@ -517,6 +524,35 @@ constexpr ColumnOffset& operator-=(ColumnOffset& a, ColumnCount b) noexcept
     a.value -= b.value;
     return a;
 }
+// }}}
+// {{{ Mouse
+enum class MouseButton
+{
+    None = 0x00,
+    Release = None, // Button was released and/or no button is pressed.
+    Left = 0x01,
+    Right = 0x02,
+    Middle = 0x04,
+    WheelUp = 0x08,
+    WheelDown = 0x10,
+};
+
+std::string to_string(MouseButton _button);
+
+enum class MouseTransport
+{
+    // CSI M Cb Cx Cy, with Cb, Cx, Cy incremented by 0x20
+    Default,
+    // CSI M Cb Coords, with Coords being UTF-8 encoded, Coords is a tuple, each value incremented by 0x20.
+    Extended,
+    // `CSI Cb Cx Cy M` and `CSI Cb Cx Cy m` (button release)
+    SGR,
+    // SGR-Pixels (1016), an xterm extension as of Patch #359 - 2020/08/17
+    // This is just like SGR but reports pixels isntead of ANSI cursor positions.
+    SGRPixels,
+    // `CSI < Cb Cx Cy M` with Cb += 0x20
+    URXVT,
+};
 // }}}
 
 enum class ScreenType
@@ -992,6 +1028,27 @@ struct formatter<terminal::PixelCoordinate>
     auto format(const terminal::PixelCoordinate coord, FormatContext& ctx)
     {
         return fmt::format_to(ctx.out(), "{}:{}", coord.x.value, coord.y.value);
+    }
+};
+
+template <>
+struct formatter<terminal::CoordinateUnits>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const terminal::CoordinateUnits value, FormatContext& ctx)
+    {
+        switch (value)
+        {
+            case terminal::CoordinateUnits::Cells: return fmt::format_to(ctx.out(), "Cells");
+            case terminal::CoordinateUnits::Pixels: return fmt::format_to(ctx.out(), "Pixels");
+        }
+        crispy::unreachable();
     }
 };
 

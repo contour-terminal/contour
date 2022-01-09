@@ -26,6 +26,7 @@ set(terminal_HEADERS
     Charset.h
     Color.h
     ColorPalette.h
+    DECTextLocator.h
     Functions.h
     GraphicsAttributes.h
     Grid.h
@@ -72,6 +73,8 @@ set(terminal_SOURCES
     Charset.cpp
     Color.cpp
     ColorPalette.cpp
+    DECTextLocator.cpp
+    Grid.cpp
     Functions.cpp
     Grid.cpp
     Image.cpp

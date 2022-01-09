@@ -52,6 +52,7 @@
   - `<S-H>` and `<S-L>` to move cursor to the current viewport's page top/bottom (inspired by tmux).
   - and more...
 - Adds new config option `profile.*.vi_mode_highlight_timeout` and `colorscheme.*.vi_mode_highlight` and adds cell highlighting on yank (#669).
+- Adds support for DEC text locator extension, `DECSLE`, `DECEFR`, `DECELR`, `DECRQLP`, `DECLRP` (#575).
 - Adds support for running on ARMv8 platform with crypto extensions (#611).
 - Adds back support OpenGL ES (3.1).
 - Adds E3 capability, so `clear` now defaults to clearing screen and scrollback (#693).
@@ -100,6 +101,8 @@ improved rendering architecture, and a more complete list of pixel perfect box d
 - Fixes `SU` in combination with `DECLRM` (#593).
 - Fixes an assertion in text renderer.
 - Fixes wrongly advertising DEC locator mode (it is not supported).
+- Fixes VT sequence OSC 4's response.
+- Fixes an assertion in text renderer.
 - Improved VT backend performance (#342).
 - Improved text selection behaviour.
 - Improved detection of runtime DPI changes for KDE (Plasma) desktop environment.

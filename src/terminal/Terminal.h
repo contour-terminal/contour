@@ -613,6 +613,8 @@ class Terminal
     [[nodiscard]] std::tuple<std::u32string, CellLocationRange> extractWordUnderCursor(
         CellLocation position) const noexcept;
 
+    DECTextLocator& textLocator() noexcept { return state_.inputGenerator.textLocator(); }
+
   private:
     void mainLoop();
     void refreshRenderBuffer(RenderBuffer& _output); // <- acquires the lock

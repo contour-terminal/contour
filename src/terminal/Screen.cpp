@@ -804,15 +804,18 @@ void Screen<Cell>::sendDeviceAttributes()
         return "1"; // Should never be reached.
     }();
 
+    // clang-format off
     auto const attrs = to_params(DeviceAttributes::AnsiColor |
-                                 // DeviceAttributes::AnsiTextLocator |
-                                 DeviceAttributes::CaptureScreenBuffer | DeviceAttributes::Columns132 |
+                                 DeviceAttributes::AnsiTextLocator |
+                                 DeviceAttributes::CaptureScreenBuffer |
+                                 DeviceAttributes::Columns132 |
                                  // TODO: DeviceAttributes::NationalReplacementCharacterSets |
                                  DeviceAttributes::RectangularEditing |
                                  // TODO: DeviceAttributes::SelectiveErase |
                                  DeviceAttributes::SixelGraphics |
                                  // TODO: DeviceAttributes::TechnicalCharacters |
                                  DeviceAttributes::UserDefinedKeys);
+    // clang-format on
 
     _terminal.reply("\033[?{};{}c", id, attrs);
 }
@@ -3370,6 +3373,52 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case RCOLORHIGHLIGHTBG: resetDynamicColor(DynamicColorName::HighlightBackgroundColor); break;
         case NOTIFY: return impl::NOTIFY(seq, *this);
         case DUMPSTATE: inspect(); break;
+
+        // {{{ DEC text locator
+        case DECELR: {
+            auto& textLocator = _state.inputGenerator.textLocator();
+            auto const Ps = seq.param_or<int>(0, 0);
+            auto const Pu = seq.param_or<int>(1, 0);
+            auto const units = Pu == 1 ? CoordinateUnits::Pixels : CoordinateUnits::Cells;
+            if (Ps == 2)
+                textLocator.enableLocatorReportingOnce(units);
+            else if (Ps == 1)
+                textLocator.enableLocatorReporting(units);
+            else if (Ps == 0)
+                textLocator.disableLocatorReporting();
+            else
+                return ApplyResult::Invalid;
+            return ApplyResult::Ok;
+        }
+        case DECSLE: {
+            auto& textLocator = _state.inputGenerator.textLocator();
+            auto const Pm = seq.param_or(0, 0);
+            switch (Pm)
+            {
+                case 0: textLocator.selectLocatorEvents(DECLocatorEvent::Explicit, true); break;
+                case 1: textLocator.selectLocatorEvents(DECLocatorEvent::ButtonDown, true); break;
+                case 2: textLocator.selectLocatorEvents(DECLocatorEvent::ButtonDown, false); break;
+                case 3: textLocator.selectLocatorEvents(DECLocatorEvent::ButtonUp, true); break;
+                case 4: textLocator.selectLocatorEvents(DECLocatorEvent::ButtonUp, false); break;
+                default: return ApplyResult::Invalid;
+            };
+            return ApplyResult::Ok;
+        }
+        case DECRQLP:
+            _state.inputGenerator.textLocator().requestLocatorPosition();
+            _terminal.reply(_state.inputGenerator.textLocator().fetchReplyAndClear());
+            return ApplyResult::Ok;
+        case DECEFR: {
+            auto& textLocator = _state.inputGenerator.textLocator();
+            auto rect = DECLocatorRectangle {};
+            rect.top = Top(seq.param_or(0, 0));
+            rect.left = Left(seq.param_or(1, 0));
+            rect.bottom = Bottom(seq.param_or(2, 0));
+            rect.right = Right(seq.param_or(3, 0));
+            textLocator.enableFilterRectangle(rect);
+            return ApplyResult::Ok;
+        }
+        // }}}
 
         // hooks
         case DECSIXEL: _state.sequencer.hookParser(hookSixel(seq)); break;

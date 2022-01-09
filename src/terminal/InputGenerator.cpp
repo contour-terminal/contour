@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/ControlCode.h>
+#include <terminal/DECTextLocator.h>
 #include <terminal/InputGenerator.h>
 #include <terminal/logging.h>
 
@@ -292,6 +293,8 @@ void InputGenerator::reset()
     mouseProtocol_ = std::nullopt;
     mouseTransport_ = MouseTransport::Default;
     mouseWheelMode_ = MouseWheelMode::Default;
+
+    textLocator_.reset();
 
     // pendingSequence_ = {};
     // currentlyPressedMouseButtons_ = {};
@@ -712,6 +715,8 @@ bool InputGenerator::generateMousePress(Modifier _modifier,
 
     currentMousePosition_ = _pos;
 
+    executeTextLocator([&](DECTextLocator& locator) { locator.updateMousePress(_button, true); });
+
     if (!mouseProtocol_.has_value())
         return false;
 
@@ -757,6 +762,8 @@ bool InputGenerator::generateMouseRelease(Modifier _modifier,
 
     currentMousePosition_ = _pos;
 
+    executeTextLocator([&](DECTextLocator& locator) { locator.updateMousePress(_button, false); });
+
     if (auto i = currentlyPressedMouseButtons_.find(_button); i != currentlyPressedMouseButtons_.end())
         currentlyPressedMouseButtons_.erase(i);
 
@@ -780,6 +787,8 @@ bool InputGenerator::generateMouseMove(Modifier _modifier, CellLocation _pos, Pi
     };
 
     currentMousePosition_ = _pos;
+
+    executeTextLocator([&](DECTextLocator& locator) { locator.updateMouseMove(_pos, _pixelPosition); });
 
     if (!mouseProtocol_.has_value())
         return false;

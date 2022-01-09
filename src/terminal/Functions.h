@@ -423,6 +423,12 @@ constexpr inline auto DECSSDT     = detail::CSI(std::nullopt, 0, 1, '$', '~', VT
 constexpr inline auto DECSASD     = detail::CSI(std::nullopt, 0, 1, '$', '}', VTType::VT420, "DECSASD", "Select Active Status Display");
 constexpr inline auto DECPS       = detail::CSI(std::nullopt, 3, 18, ',', '~', VTType::VT520, "DECPS", "Controls the sound frequency or notes");
 
+// DEC Text Locator extension
+constexpr inline auto DECEFR      = detail::CSI(std::nullopt, 0, 4, '\'', 'w', VTType::VT420 /*Extension*/, "DECEFR", "Enable Filter Rectangle");
+constexpr inline auto DECELR      = detail::CSI(std::nullopt, 0, 2, '\'', 'z', VTType::VT420 /*Extension*/, "DECELR", "Enable Locator Reporting");
+constexpr inline auto DECRQLP     = detail::CSI(std::nullopt, 0, 0, '\'', '|', VTType::VT420 /*Extension*/, "DECRQLP", "Request Locator Position");
+constexpr inline auto DECSLE      = detail::CSI(std::nullopt, 0, 1, '\'', '{', VTType::VT420 /*Extension*/, "DECSLE", "Select Locator Events");
+
 // DCS functions
 constexpr inline auto STP         = detail::DCS(std::nullopt, 0, 0, '$', 'p', VTExtension::Contour, "XTSETPROFILE", "Set Terminal Profile");
 constexpr inline auto DECRQSS     = detail::DCS(std::nullopt, 0, 0, '$', 'q', VTType::VT420, "DECRQSS", "Request Status String");
@@ -524,6 +530,8 @@ inline auto const& functions() noexcept
             DECCARA,
             DECCRA,
             DECDC,
+            DECEFR,
+            DECELR,
             DECERA,
             DECFRA,
             DECIC,
@@ -531,6 +539,7 @@ inline auto const& functions() noexcept
             XTSAVE,
             DECPS,
             DECRM,
+            DECRQLP,
             DECRQM,
             DECRQM_ANSI,
             DECRQPSR,
@@ -538,6 +547,7 @@ inline auto const& functions() noexcept
             DECSCL,
             DECSCPP,
             DECSCUSR,
+            DECSLE,
             DECSLRM,
             DECSM,
             DECSNLS,
@@ -568,6 +578,7 @@ inline auto const& functions() noexcept
             XTPOPCOLORS,
             XTPUSHCOLORS,
             XTREPORTCOLORS,
+            XTSMGRAPHICS,
             XTSHIFTESCAPE,
             XTSMGRAPHICS,
             XTVERSION,
