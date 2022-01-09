@@ -33,7 +33,7 @@ auto inline GridLog = logstore::Category(
     "vt.grid", "Grid related", logstore::Category::State::Disabled, logstore::Category::Visibility::Hidden);
 
 namespace detail
-{ // {{{
+{
     template <typename... Args>
     void logf([[maybe_unused]] Args&&... args)
     {
@@ -427,9 +427,13 @@ LineCount Grid<Cell>::scrollUp(LineCount _n, GraphicsAttributes _defaultAttribut
             rotate(u, v, w);
         }
 
-        std::for_each(next(begin(lines_), *_margin.vertical.to - *n + 1),
-                      next(begin(lines_), *_margin.vertical.to + 1),
-                      [&](Line<Cell>& line) { line.reset(defaultLineFlags(), _defaultAttributes); });
+        auto const topEmptyLineNr = *_margin.vertical.to - *n + 1;
+        auto const bottomLineNumber = *_margin.vertical.to;
+        for (auto lineNumber = topEmptyLineNr; lineNumber <= bottomLineNumber; ++lineNumber)
+        {
+            Line<Cell>& line = lines_[lineNumber];
+            line.reset(defaultLineFlags(), _defaultAttributes);
+        }
     }
     else
     {
