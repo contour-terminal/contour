@@ -2016,6 +2016,12 @@ void Screen<T>::setMode(DECMode _mode, bool _enable)
         break;
     case DECMode::MouseExtended: eventListener_.setMouseTransport(MouseTransport::Extended); break;
     case DECMode::MouseURXVT: eventListener_.setMouseTransport(MouseTransport::URXVT); break;
+    case DECMode::MouseSGRPixels:
+        if (_enable)
+            eventListener_.setMouseTransport(MouseTransport::SGRPixels);
+        else
+            eventListener_.setMouseTransport(MouseTransport::Default);
+        break;
     case DECMode::MouseAlternateScroll:
         if (_enable)
             eventListener_.setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);

@@ -435,12 +435,15 @@ void TerminalSession::sendCharPressEvent(char32_t _value, Modifier _modifier, Ti
         terminal().sendCharPressEvent(_value, _modifier, _now); // TODO: get rid of Event{} struct here, too!
 }
 
-void TerminalSession::sendMousePressEvent(MouseButton _button, Modifier _modifier, Timestamp _now)
+void TerminalSession::sendMousePressEvent(Modifier _modifier,
+                                          MouseButton _button,
+                                          MousePixelPosition _pixelPosition,
+                                          Timestamp _now)
 {
     // LOGSTORE(InputLog)("sendMousePressEvent: {} {} at {}", _button, _modifier, currentMousePosition_);
 
     // First try to pass the mouse event to the application, as it might have requested that.
-    if (terminal().sendMousePressEvent(_button, _modifier, _now))
+    if (terminal().sendMousePressEvent(_modifier, _button, _pixelPosition, _now))
     {
         scheduleRedraw();
         return;
@@ -460,34 +463,37 @@ void TerminalSession::sendMousePressEvent(MouseButton _button, Modifier _modifie
     scheduleRedraw();
 }
 
-void TerminalSession::sendMouseMoveEvent(terminal::Coordinate _pos,
-                                         terminal::Modifier _modifier,
+void TerminalSession::sendMouseMoveEvent(terminal::Modifier _modifier,
+                                         terminal::Coordinate _pos,
+                                         terminal::MousePixelPosition _pixelPosition,
                                          Timestamp _now)
 {
+    auto const handled = terminal().sendMouseMoveEvent(_modifier, _pos, _pixelPosition, _now);
+
     if (_pos == currentMousePosition_)
         return;
 
-    currentMousePosition_ = _pos;
-
-    auto const handled = terminal().sendMouseMoveEvent(_pos, _modifier, _now);
-
     bool const mouseHoveringHyperlink = terminal().isMouseHoveringHyperlink();
+    currentMousePosition_ = _pos;
     if (mouseHoveringHyperlink)
         display_->setMouseCursorShape(MouseCursorShape::PointingHand);
     else
         setDefaultCursor();
 
-    if (mouseHoveringHyperlink || handled
-        || terminal().isSelectionInProgress()) // && only if selection has changed!
+    // TODO: enter this if only if: `&& only if selection has changed!`
+    if (mouseHoveringHyperlink || handled || terminal().isSelectionInProgress())
     {
         terminal().breakLoopAndRefreshRenderBuffer();
         scheduleRedraw();
     }
 }
 
-void TerminalSession::sendMouseReleaseEvent(MouseButton _button, Modifier _modifier, Timestamp _now)
+void TerminalSession::sendMouseReleaseEvent(Modifier _modifier,
+                                            MouseButton _button,
+                                            MousePixelPosition _pixelPosition,
+                                            Timestamp _now)
 {
-    terminal().sendMouseReleaseEvent(_button, _modifier, _now);
+    terminal().sendMouseReleaseEvent(_modifier, _button, _pixelPosition, _now);
     scheduleRedraw();
 }
 

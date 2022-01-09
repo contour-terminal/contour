@@ -102,9 +102,20 @@ class TerminalSession: public terminal::Terminal::Events
     using Timestamp = std::chrono::steady_clock::time_point;
     void sendKeyPressEvent(terminal::Key _key, terminal::Modifier _modifier, Timestamp _now);
     void sendCharPressEvent(char32_t _value, terminal::Modifier _modifier, Timestamp _now);
-    void sendMousePressEvent(terminal::MouseButton _button, terminal::Modifier _modifier, Timestamp _now);
-    void sendMouseMoveEvent(terminal::Coordinate _pos, terminal::Modifier _modifier, Timestamp _now);
-    void sendMouseReleaseEvent(terminal::MouseButton _button, terminal::Modifier _modifier, Timestamp _now);
+
+    void sendMousePressEvent(terminal::Modifier _modifier,
+                             terminal::MouseButton _button,
+                             terminal::MousePixelPosition _pixelPosition,
+                             Timestamp _now);
+    void sendMouseMoveEvent(terminal::Modifier _modifier,
+                            terminal::Coordinate _pos,
+                            terminal::MousePixelPosition _pixelPosition,
+                            Timestamp _now);
+    void sendMouseReleaseEvent(terminal::Modifier _modifier,
+                               terminal::MouseButton _button,
+                               terminal::MousePixelPosition _pixelPosition,
+                               Timestamp _now);
+
     void sendFocusInEvent();
     void sendFocusOutEvent();
 

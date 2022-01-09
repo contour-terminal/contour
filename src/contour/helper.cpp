@@ -54,11 +54,31 @@ using crispy::Zero;
 
 using terminal::Height;
 using terminal::ImageSize;
+using terminal::MousePixelPosition;
 using terminal::PageSize;
 using terminal::Width;
 
 namespace contour
 {
+
+namespace
+{
+
+    MousePixelPosition makeMousePixelPosition(QMouseEvent* _event) noexcept
+    {
+        // TODO: apply margin once supported
+        return MousePixelPosition { MousePixelPosition::X { _event->x() },
+                                    MousePixelPosition::Y { _event->y() } };
+    }
+
+    MousePixelPosition makeMousePixelPosition(QWheelEvent* _event) noexcept
+    {
+        // TODO: apply margin once supported
+        return MousePixelPosition { MousePixelPosition::X { _event->x() },
+                                    MousePixelPosition::Y { _event->y() } };
+    }
+
+} // namespace
 
 QScreen* screenOf(QWidget const* _widget)
 {
@@ -225,21 +245,25 @@ void sendWheelEvent(QWheelEvent* _event, TerminalSession& _session)
 
         auto const modifier = makeModifier(_event->modifiers());
 
-        _session.sendMousePressEvent(button, modifier, steady_clock::now());
+        _session.sendMousePressEvent(modifier, button, makeMousePixelPosition(_event), steady_clock::now());
     }
 }
 
 void sendMousePressEvent(QMouseEvent* _event, TerminalSession& _session)
 {
-    _session.sendMousePressEvent(
-        makeMouseButton(_event->button()), makeModifier(_event->modifiers()), steady_clock::now());
+    _session.sendMousePressEvent(makeModifier(_event->modifiers()),
+                                 makeMouseButton(_event->button()),
+                                 makeMousePixelPosition(_event),
+                                 steady_clock::now());
     _event->accept();
 }
 
 void sendMouseReleaseEvent(QMouseEvent* _event, TerminalSession& _session)
 {
-    _session.sendMouseReleaseEvent(
-        makeMouseButton(_event->button()), makeModifier(_event->modifiers()), steady_clock::now());
+    _session.sendMouseReleaseEvent(makeModifier(_event->modifiers()),
+                                   makeMouseButton(_event->button()),
+                                   makeMousePixelPosition(_event),
+                                   steady_clock::now());
     _event->accept();
 }
 
@@ -258,7 +282,8 @@ void sendMouseMoveEvent(QMouseEvent* _event, TerminalSession& _session)
         clamp((_event->pos().x() - MarginLeft) / cellSize.width.as<int>(), 0, *pageSize.columns - 1));
     auto const pos = terminal::Coordinate { row, col };
 
-    _session.sendMouseMoveEvent(pos, makeModifier(_event->modifiers()), steady_clock::now());
+    _session.sendMouseMoveEvent(
+        makeModifier(_event->modifiers()), pos, makeMousePixelPosition(_event), steady_clock::now());
 }
 
 void spawnNewTerminal(string const& _programPath,

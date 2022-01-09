@@ -533,7 +533,10 @@ bool Terminal::sendCharPressEvent(char32_t _value, Modifier _modifier, Timestamp
     return success;
 }
 
-bool Terminal::sendMousePressEvent(MouseButton _button, Modifier _modifier, Timestamp _now)
+bool Terminal::sendMousePressEvent(Modifier _modifier,
+                                   MouseButton _button,
+                                   MousePixelPosition _pixelPosition,
+                                   Timestamp _now)
 {
     verifyState();
 
@@ -541,7 +544,7 @@ bool Terminal::sendMousePressEvent(MouseButton _button, Modifier _modifier, Time
         mouseProtocolBypassModifier_ == Modifier::None || !_modifier.contains(mouseProtocolBypassModifier_);
 
     if (respectMouseProtocol_
-        && inputGenerator_.generateMousePress(_button, _modifier, currentMousePosition_))
+        && inputGenerator_.generateMousePress(_modifier, _button, currentMousePosition_, _pixelPosition))
     {
         // TODO: Ctrl+(Left)Click's should still be catched by the terminal iff there's a hyperlink
         // under the current position
@@ -596,14 +599,18 @@ void Terminal::clearSelection()
     breakLoopAndRefreshRenderBuffer();
 }
 
-bool Terminal::sendMouseMoveEvent(Coordinate newPosition, Modifier _modifier, Timestamp /*_now*/)
+bool Terminal::sendMouseMoveEvent(Modifier _modifier,
+                                  Coordinate newPosition,
+                                  MousePixelPosition _pixelPosition,
+                                  Timestamp /*_now*/)
 {
     speedClicks_ = 0;
 
     if (leftMouseButtonPressed_ && isSelectionComplete())
         clearSelection();
 
-    if (newPosition == currentMousePosition_)
+
+    if (newPosition == currentMousePosition_ && !screen_.isModeEnabled(DECMode::MouseSGRPixels))
         return false;
 
     currentMousePosition_ = newPosition;
@@ -613,7 +620,8 @@ bool Terminal::sendMouseMoveEvent(Coordinate newPosition, Modifier _modifier, Ti
     bool changed = updateCursorHoveringState();
 
     // Do not handle mouse-move events in sub-cell dimensions.
-    if (respectMouseProtocol_ && inputGenerator_.generateMouseMove(currentMousePosition_, _modifier))
+    if (respectMouseProtocol_
+        && inputGenerator_.generateMouseMove(_modifier, currentMousePosition_, _pixelPosition))
     {
         flushInput();
         return true;
@@ -638,12 +646,15 @@ bool Terminal::sendMouseMoveEvent(Coordinate newPosition, Modifier _modifier, Ti
     return changed;
 }
 
-bool Terminal::sendMouseReleaseEvent(MouseButton _button, Modifier _modifier, Timestamp /*_now*/)
+bool Terminal::sendMouseReleaseEvent(Modifier _modifier,
+                                     MouseButton _button,
+                                     MousePixelPosition _pixelPosition,
+                                     Timestamp /*_now*/)
 {
     verifyState();
 
     if (respectMouseProtocol_
-        && inputGenerator_.generateMouseRelease(_button, _modifier, currentMousePosition_))
+        && inputGenerator_.generateMouseRelease(_modifier, _button, currentMousePosition_, _pixelPosition))
     {
         flushInput();
         return true;

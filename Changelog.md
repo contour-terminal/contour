@@ -14,7 +14,8 @@
 - Adds new configuration option `platform_plugin`.
 - Adds new configuration option `renderer` for explicitly setting renderer to one of: `OpenGL`, `software`, `default`.
 - Adds `mock` font locator.
-- Adds VT sequence `SM ? 8452 h` and `RM ? 8452 l` for enabling/disabling sixel cursor placement conformance (xterm extension).
+- Adds VT sequence `SM ? 8452 h` / `RM ? 8452 l` for enabling/disabling sixel cursor placement conformance (xterm extension).
+- Adds SGR-Pixels support, VT sequence `SM ? 1016 h` / `RM ? 1016 l` (#574).
 - Fixes VT sequence OSC 4's response.
 - Fixes an assertion in text renderer.
 - Fixes wrongly advertising DEC locator mode (it is not supported).

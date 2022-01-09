@@ -130,8 +130,20 @@ constexpr int operator*(ColumnCount a, LineCount b) noexcept
     return a.as<int>() * b.as<int>();
 }
 // }}}
+
+struct MousePixelPosition
+{
+    // clang-format off
+    struct X { int value; };
+    struct Y { int value; };
+    // clang-format on
+
+    X x {};
+    Y y {};
+};
+
 struct [[nodiscard]] Coordinate
-{ // {{{
+{
     LineOffset line {};
     ColumnOffset column {};
 
