@@ -74,8 +74,13 @@ namespace
     MousePixelPosition makeMousePixelPosition(QWheelEvent* _event) noexcept
     {
         // TODO: apply margin once supported
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
         return MousePixelPosition { MousePixelPosition::X { static_cast<int>(_event->position().x()) },
                                     MousePixelPosition::Y { static_cast<int>(_event->position().y()) } };
+#else
+        return MousePixelPosition { MousePixelPosition::X { static_cast<int>(_event->x()) },
+                                    MousePixelPosition::Y { static_cast<int>(_event->y()) } };
+#endif
     }
 
     int mouseWheelDelta(QWheelEvent* _event) noexcept
