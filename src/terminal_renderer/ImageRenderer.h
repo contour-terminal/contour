@@ -31,7 +31,7 @@ namespace terminal::renderer
 struct ImageFragmentKey
 {
     ImageId const imageId;
-    Coordinate const offset;
+    CellLocation const offset;
     ImageSize const size;
 
     bool operator==(ImageFragmentKey const& b) const noexcept

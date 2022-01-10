@@ -1386,7 +1386,7 @@ ApplyResult Sequencer<T>::apply(FunctionDefinition const& _function, Sequence co
 
         auto const targetTop = LineOffset(_seq.param_or(5, *origin.line + 1) - 1);
         auto const targetLeft = ColumnOffset(_seq.param_or(6, *origin.column + 1) - 1);
-        auto const targetTopLeft = Coordinate { targetTop, targetLeft };
+        auto const targetTopLeft = CellLocation { targetTop, targetLeft };
         auto const targetPage = _seq.param_or(7, 0);
 
         screen_.copyArea(Rect { top, left, bottom, right }, page, targetTopLeft, targetPage);

@@ -31,10 +31,10 @@ struct SelectionHelper
 {
     virtual ~SelectionHelper() = default;
     virtual PageSize pageSize() const noexcept = 0;
-    virtual bool wordDelimited(Coordinate _pos) const noexcept = 0;
+    virtual bool wordDelimited(CellLocation _pos) const noexcept = 0;
     virtual bool wrappedLine(LineOffset _line) const noexcept = 0;
-    virtual bool cellEmpty(Coordinate _pos) const noexcept = 0;
-    virtual int cellWidth(Coordinate _pos) const noexcept = 0;
+    virtual bool cellEmpty(CellLocation _pos) const noexcept = 0;
+    virtual int cellWidth(CellLocation _pos) const noexcept = 0;
 };
 
 /**
@@ -86,26 +86,26 @@ class Selection
         }
     };
 
-    Selection(SelectionHelper const& _helper, Coordinate _start):
+    Selection(SelectionHelper const& _helper, CellLocation _start):
         helper_ { _helper }, from_ { _start }, to_ { _start }
     {
     }
 
     virtual ~Selection() = default;
 
-    constexpr Coordinate from() const noexcept { return from_; }
-    constexpr Coordinate to() const noexcept { return to_; }
+    constexpr CellLocation from() const noexcept { return from_; }
+    constexpr CellLocation to() const noexcept { return to_; }
 
     /// @returns boolean indicating whether or not given absolute coordinate is within the range of the
     /// selection.
-    virtual bool contains(Coordinate _coord) const noexcept;
+    virtual bool contains(CellLocation _coord) const noexcept;
     virtual bool intersects(Rect _area) const noexcept;
 
     /// Tests whether the a selection is currently in progress.
     constexpr State state() const noexcept { return state_; }
 
     /// Extends the selection to the given coordinate.
-    virtual void extend(Coordinate _to);
+    virtual void extend(CellLocation _to);
 
     /// Constructs a vector of ranges for this selection.
     virtual std::vector<Range> ranges() const;
@@ -116,20 +116,20 @@ class Selection
     /// Applies any scroll action to the line offsets.
     void applyScroll(LineOffset _value, LineCount _historyLineCount);
 
-    static Coordinate stretchedColumn(SelectionHelper const& _helper, Coordinate _coord) noexcept;
+    static CellLocation stretchedColumn(SelectionHelper const& _helper, CellLocation _coord) noexcept;
 
   protected:
     State state_ = State::Waiting;
-    Coordinate from_;
-    Coordinate to_;
+    CellLocation from_;
+    CellLocation to_;
     SelectionHelper const& helper_;
 };
 
 class RectangularSelection: public Selection
 {
   public:
-    RectangularSelection(SelectionHelper const& _helper, Coordinate _start);
-    bool contains(Coordinate _coord) const noexcept override;
+    RectangularSelection(SelectionHelper const& _helper, CellLocation _start);
+    bool contains(CellLocation _coord) const noexcept override;
     bool intersects(Rect _area) const noexcept override;
     std::vector<Range> ranges() const override;
 };
@@ -137,25 +137,25 @@ class RectangularSelection: public Selection
 class LinearSelection: public Selection
 {
   public:
-    LinearSelection(SelectionHelper const& _helper, Coordinate _start);
+    LinearSelection(SelectionHelper const& _helper, CellLocation _start);
 };
 
 class WordWiseSelection: public Selection
 {
   public:
-    WordWiseSelection(SelectionHelper const& _helper, Coordinate _start);
+    WordWiseSelection(SelectionHelper const& _helper, CellLocation _start);
 
-    void extend(Coordinate _to) override;
+    void extend(CellLocation _to) override;
 
-    Coordinate extendSelectionBackward(Coordinate _pos) const noexcept;
-    Coordinate extendSelectionForward(Coordinate _pos) const noexcept;
+    CellLocation extendSelectionBackward(CellLocation _pos) const noexcept;
+    CellLocation extendSelectionForward(CellLocation _pos) const noexcept;
 };
 
 class FullLineSelection: public Selection
 {
   public:
-    explicit FullLineSelection(SelectionHelper const& _helper, Coordinate _start);
-    void extend(Coordinate _to) override;
+    explicit FullLineSelection(SelectionHelper const& _helper, CellLocation _start);
+    void extend(CellLocation _to) override;
 };
 
 template <typename Renderer>
@@ -175,7 +175,7 @@ void renderSelection(Selection const& _selection, Renderer&& _render)
 {
     for (Selection::Range const& range: _selection.ranges())
         for (auto const col: crispy::times(*range.fromColumn, *range.length()))
-            _render(Coordinate { range.line, ColumnOffset::cast_from(col) });
+            _render(CellLocation { range.line, ColumnOffset::cast_from(col) });
 }
 // }}}
 

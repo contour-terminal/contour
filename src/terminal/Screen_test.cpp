@@ -107,12 +107,12 @@ TEST_CASE("writeText.bulk.A.1", "[screen]")
     screen.write("a");
     screen.write("b");
     logScreenText(screen, "initial state");
-    REQUIRE(screen.cursor().position == Coordinate { LineOffset(0), ColumnOffset(2) });
+    REQUIRE(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(2) });
     screen.writeText("CD");
     logScreenText(screen, "final state");
     CHECK(screen.grid().lineText(LineOffset(0)) == "abCD ");
     CHECK(screen.grid().lineText(LineOffset(1)) == "     ");
-    CHECK(screen.cursor().position == Coordinate { LineOffset(0), ColumnOffset(4) });
+    CHECK(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(4) });
 }
 
 // AutoWrap disabled: text length equals available columns in line.
@@ -124,12 +124,12 @@ TEST_CASE("writeText.bulk.A.2", "[screen]")
     screen.write("a");
     screen.write("b");
     logScreenText(screen, "initial state");
-    REQUIRE(screen.cursor().position == Coordinate { LineOffset(0), ColumnOffset(2) });
+    REQUIRE(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(2) });
     screen.writeText("CDE");
     logScreenText(screen, "final state");
     CHECK(screen.grid().lineText(LineOffset(0)) == "abCDE");
     CHECK(screen.grid().lineText(LineOffset(1)) == "     ");
-    CHECK(screen.cursor().position == Coordinate { LineOffset(0), ColumnOffset(4) });
+    CHECK(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(4) });
 }
 
 // AutoWrap disabled: text length exceeds available columns in line.
@@ -141,12 +141,12 @@ TEST_CASE("writeText.bulk.A.3", "[screen]")
     screen.write("a");
     screen.write("b");
     logScreenText(screen, "initial state");
-    REQUIRE(screen.cursor().position == Coordinate { LineOffset(0), ColumnOffset(2) });
+    REQUIRE(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(2) });
     screen.writeText("CDEF");
     logScreenText(screen, "final state");
     CHECK(screen.grid().lineText(LineOffset(0)) == "abCDF");
     CHECK(screen.grid().lineText(LineOffset(1)) == "     ");
-    CHECK(screen.cursor().position == Coordinate { LineOffset(0), ColumnOffset(4) });
+    CHECK(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(4) });
 }
 
 // Text does not fully fill current line.
@@ -157,11 +157,11 @@ TEST_CASE("writeText.bulk.B", "[screen]")
     screen.write("a");
     screen.write("b");
     logScreenText(screen, "initial state");
-    REQUIRE(screen.cursor().position == Coordinate { LineOffset(0), ColumnOffset(2) });
+    REQUIRE(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(2) });
     screen.writeText("CD");
     logScreenText(screen, "final state");
     CHECK(screen.grid().lineText(LineOffset(0)) == "abCD ");
-    CHECK(screen.cursor().position == Coordinate { LineOffset(0), ColumnOffset(4) });
+    CHECK(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(4) });
 }
 
 // Text spans current line exactly.
@@ -172,18 +172,18 @@ TEST_CASE("writeText.bulk.C", "[screen]")
     screen.write("a");
     screen.write("b");
     logScreenText(screen, "initial state");
-    REQUIRE(screen.cursor().position == Coordinate { LineOffset(0), ColumnOffset(2) });
+    REQUIRE(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(2) });
     screen.writeText("CDE");
     logScreenText(screen, "final state");
     CHECK(screen.grid().lineText(LineOffset(0)) == "abCDE");
     CHECK(screen.grid().lineText(LineOffset(1)) == "     ");
-    CHECK(screen.cursor().position == Coordinate { LineOffset(0), ColumnOffset(4) });
+    CHECK(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(4) });
     // Now, verify AutoWrap works by writing one char more.
     screen.write("F");
     logScreenText(screen, "AutoWrap-around");
     CHECK(screen.grid().lineText(LineOffset(0)) == "abCDE");
     CHECK(screen.grid().lineText(LineOffset(1)) == "F    ");
-    CHECK(screen.cursor().position == Coordinate { LineOffset(1), ColumnOffset(1) });
+    CHECK(screen.cursor().position == CellLocation { LineOffset(1), ColumnOffset(1) });
 }
 
 // Text spans this line and some of the next.
@@ -194,12 +194,12 @@ TEST_CASE("writeText.bulk.D", "[screen]")
     screen.write("a");
     screen.write("b");
     logScreenText(screen, "initial state");
-    REQUIRE(screen.cursor().position == Coordinate { LineOffset(0), ColumnOffset(2) });
+    REQUIRE(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(2) });
     screen.writeText("CDEF");
     logScreenText(screen, "final state");
     CHECK(screen.grid().lineText(LineOffset(0)) == "abCDE");
     CHECK(screen.grid().lineText(LineOffset(1)) == "F    ");
-    CHECK(screen.cursor().position == Coordinate { LineOffset(1), ColumnOffset(1) });
+    CHECK(screen.cursor().position == CellLocation { LineOffset(1), ColumnOffset(1) });
 }
 
 // Text spans full main page exactly.
@@ -214,7 +214,7 @@ TEST_CASE("writeText.bulk.E", "[screen]")
     CHECK(screen.grid().lineText(LineOffset(0)) == "0123456789");
     CHECK(screen.grid().lineText(LineOffset(1)) == "abcdefghij");
     CHECK(screen.grid().lineText(LineOffset(2)) == "ABCDEFGHIJ");
-    REQUIRE(screen.cursor().position == Coordinate { LineOffset(2), ColumnOffset(9) });
+    REQUIRE(screen.cursor().position == CellLocation { LineOffset(2), ColumnOffset(9) });
 
     // now check if AutoWrap is triggered
     screen.write("X");
@@ -238,7 +238,7 @@ TEST_CASE("writeText.bulk.F", "[screen]")
     CHECK(screen.grid().lineText(LineOffset(0)) == "abCDEFGHIJ");
     CHECK(screen.grid().lineText(LineOffset(1)) == "ABcdefghij");
     CHECK(screen.grid().lineText(LineOffset(2)) == "01234     ");
-    CHECK(screen.cursor().position == Coordinate { LineOffset(2), ColumnOffset(5) });
+    CHECK(screen.cursor().position == CellLocation { LineOffset(2), ColumnOffset(5) });
 }
 
 // Text spans 4 lines with one line being scrolled up.
@@ -257,7 +257,7 @@ TEST_CASE("writeText.bulk.G", "[screen]")
     CHECK(screen.grid().lineText(LineOffset(0)) == "ABCDEFGHIJ");
     CHECK(screen.grid().lineText(LineOffset(1)) == "abcdefghij");
     CHECK(screen.grid().lineText(LineOffset(2)) == "01234     ");
-    CHECK(screen.cursor().position == Coordinate { LineOffset(2), ColumnOffset(5) });
+    CHECK(screen.cursor().position == CellLocation { LineOffset(2), ColumnOffset(5) });
 }
 
 // Text spans more lines than totally available.
@@ -275,7 +275,7 @@ TEST_CASE("writeText.bulk.H", "[screen]")
     CHECK(screen.grid().lineText(LineOffset(-1)) == "KLMNOPQRST");
     CHECK(screen.grid().lineText(LineOffset(0)) == "abcdefghij");
     CHECK(screen.grid().lineText(LineOffset(1)) == "0123456789");
-    CHECK(screen.cursor().position == Coordinate { LineOffset(1), ColumnOffset(9) });
+    CHECK(screen.cursor().position == CellLocation { LineOffset(1), ColumnOffset(9) });
 }
 
 // TODO: Test spanning writes over all history and then reusing old lines.
@@ -326,15 +326,15 @@ TEST_CASE("AppendChar_CR_LF", "[screen]")
 
     screen.write("ABC");
     REQUIRE("ABC" == screen.grid().lineText(LineOffset(0)));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(2) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
 
     screen.write("\r");
     REQUIRE("ABC\n   \n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     screen.write("\n");
     REQUIRE("ABC\n   \n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(0) });
 }
 
 TEST_CASE("AppendChar.emoji_exclamationmark", "[screen]")
@@ -545,7 +545,7 @@ TEST_CASE("AppendChar.emoji_1", "[screen]")
     auto const& c1 = screen.at(LineOffset(0), ColumnOffset(0));
     CHECK(c1.codepoints() == U"\U0001F600");
     CHECK(c1.width() == 2);
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(2) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
 
     CHECK(screen.at(LineOffset(0), ColumnOffset(1)).codepointCount() == 0);
     CHECK(screen.at(LineOffset(0), ColumnOffset(2)).codepointCount() == 0);
@@ -568,7 +568,7 @@ TEST_CASE("AppendChar_WideChar", "[screen]")
     auto& screen = term.screen;
     screen.setMode(DECMode::AutoWrap, true);
     screen.write(U"\U0001F600");
-    CHECK(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(2) });
+    CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
 }
 
 TEST_CASE("AppendChar_AutoWrap", "[screen]")
@@ -580,7 +580,7 @@ TEST_CASE("AppendChar_AutoWrap", "[screen]")
     screen.write("ABC");
     REQUIRE("ABC" == screen.grid().lineText(LineOffset(0)));
     REQUIRE("   " == screen.grid().lineText(LineOffset(1)));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(2) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
 
     screen.write("D");
     REQUIRE("ABC" == screen.grid().lineText(LineOffset(0)));
@@ -608,19 +608,19 @@ TEST_CASE("AppendChar_AutoWrap_LF", "[screen]")
     logScreenText(screen);
     REQUIRE("ABC" == screen.grid().lineText(LineOffset(0)));
     REQUIRE("   " == screen.grid().lineText(LineOffset(1)));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(2) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
 
     INFO("write CRLF");
     screen.write("\r\n");
     logScreenText(screen, "after writing LF");
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(0) });
 
     INFO("write 'D'");
     screen.write("D");
     logScreenText(screen);
     REQUIRE("ABC" == screen.grid().lineText(LineOffset(0)));
     REQUIRE("D  " == screen.grid().lineText(LineOffset(1)));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
 }
 
 TEST_CASE("Screen.isLineVisible", "[screen]")
@@ -668,23 +668,23 @@ TEST_CASE("Backspace", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(3) } };
     auto& screen = term.screen;
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     screen.write("12");
     CHECK("12 " == screen.grid().lineText(LineOffset(0)));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(2) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
 
     screen.write("\b");
     CHECK("12 " == screen.grid().lineText(LineOffset(0)));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
 
     screen.write("\b");
     CHECK("12 " == screen.grid().lineText(LineOffset(0)));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     screen.write("\b");
     CHECK("12 " == screen.grid().lineText(LineOffset(0)));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 }
 
 TEST_CASE("Linefeed", "[screen]")
@@ -726,7 +726,7 @@ TEST_CASE("ClearToEndOfScreen", "[screen]")
     REQUIRE("ABC" == screen.grid().lineText(LineOffset(0)));
     REQUIRE("DEF" == screen.grid().lineText(LineOffset(1)));
     REQUIRE("GHI" == screen.grid().lineText(LineOffset(2)));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(2), ColumnOffset(2) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(2) });
 
     logScreenText(screen);
     screen.moveCursorTo(LineOffset { 1 }, ColumnOffset { 1 });
@@ -736,7 +736,7 @@ TEST_CASE("ClearToEndOfScreen", "[screen]")
     CHECK("ABC" == screen.grid().lineText(LineOffset(0)));
     CHECK("D  " == screen.grid().lineText(LineOffset(1)));
     CHECK("   " == screen.grid().lineText(LineOffset(2)));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
 }
 
 TEST_CASE("ClearToBeginOfScreen", "[screen]")
@@ -748,7 +748,7 @@ TEST_CASE("ClearToBeginOfScreen", "[screen]")
     REQUIRE("ABC" == screen.grid().lineText(LineOffset(0)));
     REQUIRE("DEF" == screen.grid().lineText(LineOffset(1)));
     REQUIRE("GHI" == screen.grid().lineText(LineOffset(2)));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(2), ColumnOffset(2) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(2) });
 
     screen.moveCursorTo(LineOffset(1), ColumnOffset(1));
     screen.clearToBeginOfScreen();
@@ -756,7 +756,7 @@ TEST_CASE("ClearToBeginOfScreen", "[screen]")
     CHECK("   " == screen.grid().lineText(LineOffset(0)));
     CHECK("  F" == screen.grid().lineText(LineOffset(1)));
     CHECK("GHI" == screen.grid().lineText(LineOffset(2)));
-    CHECK(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(1) });
+    CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
 }
 
 TEST_CASE("ClearScreen", "[screen]")
@@ -814,44 +814,44 @@ TEST_CASE("DECFI", "[screen]")
     screen.setMode(DECMode::LeftRightMargin, true);
     screen.setLeftRightMargin(ColumnOffset(1), ColumnOffset(3));
     screen.setTopBottomMargin(LineOffset(1), LineOffset(3));
-    REQUIRE(screen.realCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
 
     screen.write("\033[1;1H");
 
     // from 0,0 to 0,1 (from outside margin to left border)
     screen.write("\0339");
-    REQUIRE(screen.realCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1) });
+    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
 
     // from 0,1 to 0,2
     screen.write("\0339");
-    REQUIRE(screen.realCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(2) });
+    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
 
     // from 0,2 to 0,3
     screen.write("\0339");
-    REQUIRE(screen.realCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(3) });
+    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
 
     // from 0,3 to 0,3, scrolling 1 left
     screen.write("\0339");
-    REQUIRE(screen.realCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(3) });
+    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
     REQUIRE("12345\n689 0\nACD E\nFHI J\nKLMNO\n" == screen.renderMainPageText());
 
     // from 0,3 to 0,3, scrolling 1 left
     screen.write("\0339");
-    REQUIRE(screen.realCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(3) });
+    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
     REQUIRE("12345\n69  0\nAD  E\nFI  J\nKLMNO\n" == screen.renderMainPageText());
 
     // from 0,3 to 0,3, scrolling 1 left (now all empty)
     screen.write("\0339");
-    REQUIRE(screen.realCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(3) });
+    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
     REQUIRE("12345\n6   0\nA   E\nF   J\nKLMNO\n" == screen.renderMainPageText());
 
     // from 0,3 to 0,3, scrolling 1 left (looks just like before)
     screen.write("\0339");
-    REQUIRE(screen.realCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(3) });
+    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(3) });
     REQUIRE("12345\n6   0\nA   E\nF   J\nKLMNO\n" == screen.renderMainPageText());
 }
 
@@ -867,7 +867,7 @@ TEST_CASE("InsertColumns", "[screen]")
     screen.setTopBottomMargin(LineOffset(1), LineOffset(3));
 
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     SECTION("outside margins: top left")
     {
@@ -886,7 +886,7 @@ TEST_CASE("InsertColumns", "[screen]")
     SECTION("inside margins")
     {
         screen.moveCursorTo(LineOffset { 1 }, ColumnOffset { 2 });
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(2) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
 
         SECTION("DECIC-0")
         {
@@ -1014,7 +1014,7 @@ TEST_CASE("InsertCharacters.Margins", "[screen]")
     SECTION("inside margins")
     {
         screen.moveCursorTo(LineOffset(0), ColumnOffset(2));
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(2) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
 
         SECTION("no-op")
         {
@@ -1087,7 +1087,7 @@ TEST_CASE("DeleteLines", "[screen]")
     REQUIRE("EF" == screen.grid().lineText(LineOffset(2)));
 
     screen.moveCursorTo(LineOffset(1), ColumnOffset(0));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(0) });
 
     SECTION("no-op")
     {
@@ -1138,7 +1138,7 @@ TEST_CASE("DeleteColumns", "[screen]")
     screen.setTopBottomMargin(LineOffset(1), LineOffset(3));
 
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     SECTION("outside margin")
     {
@@ -1149,7 +1149,7 @@ TEST_CASE("DeleteColumns", "[screen]")
     SECTION("inside margin")
     {
         screen.moveCursorTo(LineOffset(1), ColumnOffset(2));
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(2) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
 
         SECTION("DECDC-0")
         {
@@ -1180,7 +1180,7 @@ TEST_CASE("DeleteCharacters", "[screen]")
     auto& screen = term.screen;
     screen.write("12345\r\n67890\033[1;2H");
     REQUIRE("12345\n67890\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
 
     SECTION("outside margin")
     {
@@ -1224,7 +1224,7 @@ TEST_CASE("DeleteCharacters", "[screen]")
         screen.setMode(DECMode::LeftRightMargin, true);
         screen.setLeftRightMargin(ColumnOffset(0), ColumnOffset(3));
         screen.moveCursorTo(LineOffset(0), ColumnOffset(1));
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
 
         SECTION("no-op")
         {
@@ -1256,7 +1256,7 @@ TEST_CASE("ClearScrollbackBuffer", "[screen]")
     auto& screen = term.screen;
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO\r\nPQRST\033[H");
     REQUIRE("67890\nABCDE\nFGHIJ\nKLMNO\nPQRST\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
     REQUIRE(screen.historyLineCount() == LineCount(1));
     REQUIRE("12345" == screen.grid().lineText(LineOffset(-1)));
 
@@ -1271,7 +1271,7 @@ TEST_CASE("EraseCharacters", "[screen]")
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO\033[H");
     logScreenText(screen, "AFTER POPULATE");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     SECTION("ECH-0 equals ECH-1")
     {
@@ -1499,42 +1499,42 @@ TEST_CASE("MoveCursorUp", "[screen]")
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
     screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 1 });
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(2), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(1) });
 
     SECTION("no-op")
     {
         screen.moveCursorUp(LineCount(0));
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(2), ColumnOffset(1) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(1) });
     }
 
     SECTION("in-range")
     {
         screen.moveCursorUp(LineCount(1));
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(1) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
     }
 
     SECTION("overflow")
     {
         screen.moveCursorUp(LineCount(5));
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
     }
 
     SECTION("with margins")
     {
         screen.setTopBottomMargin(LineOffset { 1 }, LineOffset { 3 });
         screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 1 });
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(2), ColumnOffset(1) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(1) });
 
         SECTION("in-range")
         {
             screen.moveCursorUp(LineCount(1));
-            REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(1) });
+            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
         }
 
         SECTION("overflow")
         {
             screen.moveCursorUp(LineCount(5));
-            REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(1) });
+            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
         }
     }
 
@@ -1543,7 +1543,7 @@ TEST_CASE("MoveCursorUp", "[screen]")
         screen.setTopBottomMargin(LineOffset { 2 }, LineOffset { 3 });
         screen.moveCursorTo(LineOffset { 1 }, ColumnOffset { 2 });
         screen.moveCursorUp(LineCount(1));
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(2) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
     }
 }
 
@@ -1552,37 +1552,37 @@ TEST_CASE("MoveCursorDown", "[screen]")
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(2) } };
     auto& screen = term.screen;
     screen.write("A");
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
 
     // no-op
     screen.moveCursorDown(LineCount(0));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
 
     // in-range
     screen.moveCursorDown(LineCount(1));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
 
     // overflow
     screen.moveCursorDown(LineCount(5));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(2), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(1) });
 }
 
 TEST_CASE("MoveCursorForward", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = term.screen;
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     SECTION("no-op")
     {
         screen.moveCursorForward(ColumnCount(0));
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
     }
 
     SECTION("CUF-1")
     {
         screen.moveCursorForward(ColumnCount(1));
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
     }
 
     SECTION("CUF-3 (to right border)")
@@ -1603,58 +1603,58 @@ TEST_CASE("MoveCursorBackward", "[screen]")
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = term.screen;
     screen.write("ABC");
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(2) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
 
     // no-op
     screen.moveCursorBackward(ColumnCount(0));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(2) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
 
     // in-range
     screen.moveCursorBackward(ColumnCount(1));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
     // overflow
     screen.moveCursorBackward(ColumnCount(5));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 }
 
 TEST_CASE("HorizontalPositionAbsolute", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = term.screen;
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     // no-op
     screen.moveCursorToColumn(ColumnOffset(0));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     // in-range
     screen.moveCursorToColumn(ColumnOffset(2));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(2) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
 
     screen.moveCursorToColumn(ColumnOffset(1));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
 
     // overflow
     screen.moveCursorToColumn(ColumnOffset(4));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(2) /*clamped*/ });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) /*clamped*/ });
 }
 
 TEST_CASE("HorizontalPositionRelative", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = term.screen;
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     SECTION("no-op")
     {
         screen.moveCursorForward(ColumnCount(0));
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
     }
 
     SECTION("HPR-1")
     {
         screen.moveCursorForward(ColumnCount(1));
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
     }
 
     SECTION("HPR-3 (to right border)")
@@ -1674,22 +1674,22 @@ TEST_CASE("MoveCursorToColumn", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = term.screen;
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     // no-op
     screen.moveCursorToColumn(ColumnOffset(0));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     // in-range
     screen.moveCursorToColumn(ColumnOffset(2));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(2) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
 
     screen.moveCursorToColumn(ColumnOffset(1));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
 
     // overflow
     screen.moveCursorToColumn(ColumnOffset(3));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(2) /*clamped*/ });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) /*clamped*/ });
 
     SECTION("with wide character")
     {
@@ -1704,22 +1704,22 @@ TEST_CASE("MoveCursorToLine", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = term.screen;
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     // no-op
     screen.moveCursorToLine(LineOffset(0));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     // in-range
     screen.moveCursorToLine(LineOffset(2));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(2), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(0) });
 
     screen.moveCursorToLine(LineOffset(1));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(0) });
 
     // overflow
     screen.moveCursorToLine(LineOffset(3));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(2 /*clamped*/), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2 /*clamped*/), ColumnOffset(0) });
 }
 
 TEST_CASE("MoveCursorToBeginOfLine", "[screen]")
@@ -1728,10 +1728,10 @@ TEST_CASE("MoveCursorToBeginOfLine", "[screen]")
     auto& screen = term.screen;
 
     screen.write("\r\nAB");
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(2) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
 
     screen.moveCursorToBeginOfLine();
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(0) });
 }
 
 TEST_CASE("MoveCursorTo", "[screen]")
@@ -1746,19 +1746,19 @@ TEST_CASE("MoveCursorTo", "[screen]")
         SECTION("in range")
         {
             screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 1 });
-            REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(2), ColumnOffset(1) });
+            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(1) });
         }
 
         SECTION("origin")
         {
             screen.moveCursorTo(LineOffset { 0 }, ColumnOffset { 0 });
-            REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
         }
 
         SECTION("clamped")
         {
             screen.moveCursorTo(LineOffset { 5 }, ColumnOffset { 5 });
-            REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(4), ColumnOffset(4) });
+            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(4), ColumnOffset(4) });
         }
     }
 
@@ -1776,8 +1776,8 @@ TEST_CASE("MoveCursorTo", "[screen]")
         SECTION("move to origin")
         {
             screen.moveCursorTo({}, {});
-            CHECK(Coordinate { LineOffset(0), ColumnOffset(0) } == screen.logicalCursorPosition());
-            CHECK(Coordinate { LineOffset(1), ColumnOffset(1) } == screen.realCursorPosition());
+            CHECK(CellLocation { LineOffset(0), ColumnOffset(0) } == screen.logicalCursorPosition());
+            CHECK(CellLocation { LineOffset(1), ColumnOffset(1) } == screen.realCursorPosition());
             CHECK('7' == (char) screen.at({ TopMargin + 0, LeftMargin + 0 }).codepoint(0));
             CHECK('I' == (char) screen.at({ TopMargin + 2, LeftMargin + 2 }).codepoint(0));
         }
@@ -1790,28 +1790,28 @@ TEST_CASE("MoveCursorToNextTab", "[screen]")
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
     auto& screen = term.screen;
     screen.moveCursorToNextTab();
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1 * TabWidth + 0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1 * TabWidth + 0) });
 
     screen.moveCursorToColumn(ColumnOffset(TabWidth - 1));
     screen.moveCursorToNextTab();
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1 * TabWidth + 0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1 * TabWidth + 0) });
 
     screen.moveCursorToColumn(ColumnOffset(TabWidth - 1));
     screen.moveCursorToNextTab();
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1 * TabWidth + 0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1 * TabWidth + 0) });
 
     screen.moveCursorToNextTab();
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(2 * TabWidth + 0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2 * TabWidth + 0) });
 
     screen.moveCursorToNextTab();
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(19) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(19) });
 
     screen.setMode(DECMode::AutoWrap, true);
     screen.write("A"); // 'A' is being written at the right margin
     screen.write("B"); // force wrap to next line, writing 'B' at the beginning of the line
 
     screen.moveCursorToNextTab();
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(8) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(8) });
 }
 
 // TODO: HideCursor
@@ -1831,7 +1831,7 @@ TEST_CASE("SaveCursor and RestoreCursor", "[screen]")
 
     // restore cursor and see if the changes have been reverted
     screen.restoreCursor();
-    CHECK(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+    CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
     CHECK_FALSE(screen.isModeEnabled(DECMode::AutoWrap));
     CHECK_FALSE(screen.isModeEnabled(DECMode::Origin));
 }
@@ -1847,23 +1847,23 @@ TEST_CASE("Index_outside_margin", "[screen]")
 
     // with cursor above top margin
     screen.moveCursorTo(LineOffset { 0 }, ColumnOffset { 2 });
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(2) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
 
     screen.index();
     REQUIRE("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(2) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
 
     // with cursor below bottom margin and above bottom screen (=> only moves cursor one down)
     screen.moveCursorTo(LineOffset { 4 }, ColumnOffset { 2 });
     screen.index();
     REQUIRE("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(5), ColumnOffset(2) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(5), ColumnOffset(2) });
 
     // with cursor below bottom margin and at bottom screen (=> no-op)
     screen.moveCursorTo(LineOffset { 5 }, ColumnOffset { 2 });
     screen.index();
     REQUIRE("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(5), ColumnOffset(2) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(5), ColumnOffset(2) });
 }
 
 TEST_CASE("Index_inside_margin", "[screen]")
@@ -1878,7 +1878,7 @@ TEST_CASE("Index_inside_margin", "[screen]")
     screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 1 });
     screen.index();
     logScreenText(screen, "IND while cursor at line 3");
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(3), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(1) });
     REQUIRE("11\n22\n33\n44\n55\n66\n" == screen.renderMainPageText());
 }
 
@@ -1897,7 +1897,7 @@ TEST_CASE("Index_at_bottom_margin", "[screen]")
         screen.moveCursorTo(LineOffset { 3 }, ColumnOffset { 1 });
         screen.index();
         logScreenText(screen, "IND while cursor at bottom margin");
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(3), ColumnOffset(1) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(1) });
         REQUIRE("12345\nABCDE\nFGHIJ\n     \nKLMNO\n" == screen.renderMainPageText());
     }
 
@@ -1908,11 +1908,11 @@ TEST_CASE("Index_at_bottom_margin", "[screen]")
         screen.setLeftRightMargin(ColumnOffset { 1 }, ColumnOffset { 3 });
         screen.setTopBottomMargin(LineOffset { 1 }, LineOffset { 3 });
         screen.moveCursorTo(LineOffset { 3 }, ColumnOffset { 1 }); // cursor at bottom margin
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(3), ColumnOffset(1) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(1) });
 
         screen.index();
         CHECK("12345\n6BCD0\nAGHIE\nF   J\nKLMNO\n" == screen.renderMainPageText());
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(3), ColumnOffset(1) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(1) });
     }
 }
 
@@ -1927,26 +1927,26 @@ TEST_CASE("ReverseIndex_without_custom_margins", "[screen]")
     // at bottom screen
     screen.moveCursorTo(LineOffset { 4 }, ColumnOffset { 1 });
     screen.reverseIndex();
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(3), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(1) });
 
     screen.reverseIndex();
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(2), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(1) });
 
     screen.reverseIndex();
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
 
     screen.reverseIndex();
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
 
     screen.reverseIndex();
     logScreenText(screen, "RI at top screen");
     REQUIRE("     \n12345\n67890\nABCDE\nFGHIJ\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
 
     screen.reverseIndex();
     logScreenText(screen, "RI at top screen");
     REQUIRE("     \n     \n12345\n67890\nABCDE\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
 }
 
 TEST_CASE("ReverseIndex_with_vertical_margin", "[screen]")
@@ -1964,43 +1964,43 @@ TEST_CASE("ReverseIndex_with_vertical_margin", "[screen]")
     screen.reverseIndex();
     logScreenText(screen, "RI below bottom margin");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(3), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(1) });
 
     // at bottom margin
     screen.reverseIndex();
     logScreenText(screen, "RI at bottom margin");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(2), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(1) });
 
     screen.reverseIndex();
     logScreenText(screen, "RI middle margin");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
 
     // at top margin
     screen.reverseIndex();
     logScreenText(screen, "RI at top margin #1");
     REQUIRE("12345\n     \n67890\nABCDE\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
 
     // at top margin (again)
     screen.reverseIndex();
     logScreenText(screen, "RI at top margin #2");
     REQUIRE("12345\n     \n     \n67890\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
 
     // above top margin
     screen.moveCursorTo(LineOffset { 0 }, ColumnOffset { 1 });
     screen.reverseIndex();
     logScreenText(screen, "RI above top margin");
     REQUIRE("12345\n     \n     \n67890\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
 
     // above top margin (top screen) => no-op
     screen.reverseIndex();
     logScreenText(screen, "RI above top margin (top-screen)");
     REQUIRE("12345\n     \n     \n67890\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
 }
 
 TEST_CASE("ReverseIndex_with_vertical_and_horizontal_margin", "[screen]")
@@ -2019,35 +2019,35 @@ TEST_CASE("ReverseIndex_with_vertical_and_horizontal_margin", "[screen]")
     screen.moveCursorTo(LineOffset { 4 }, ColumnOffset { 1 });
     screen.reverseIndex();
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(3), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(1) });
 
     // at bottom margin
     screen.reverseIndex();
     logScreenText(screen, "after RI at bottom margin");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(2), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(1) });
 
     screen.reverseIndex();
     logScreenText(screen, "after RI at bottom margin (again)");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
 
     // at top margin
     screen.reverseIndex();
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
     REQUIRE("12345\n6   0\nA789E\nFBCDJ\nKLMNO\n" == screen.renderMainPageText());
 
     // at top margin (again)
     screen.reverseIndex();
     logScreenText(screen, "after RI at top margin (again)");
     REQUIRE("12345\n6   0\nA   E\nF789J\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
 
     // above top margin
     screen.moveCursorTo(LineOffset { 0 }, ColumnOffset { 1 });
     screen.reverseIndex();
     REQUIRE("12345\n6   0\nA   E\nF789J\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
 }
 
 TEST_CASE("ScreenAlignmentPattern", "[screen]")
@@ -2058,7 +2058,7 @@ TEST_CASE("ScreenAlignmentPattern", "[screen]")
     screen.setTopBottomMargin(LineOffset { 1 }, LineOffset { 3 });
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
 
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     REQUIRE(1 == *screen.margin().vertical.from);
     REQUIRE(3 == *screen.margin().vertical.to);
@@ -2068,7 +2068,7 @@ TEST_CASE("ScreenAlignmentPattern", "[screen]")
         screen.screenAlignmentPattern();
         REQUIRE("EEEEE\nEEEEE\nEEEEE\nEEEEE\nEEEEE\n" == screen.renderMainPageText());
 
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
         REQUIRE(0 == *screen.margin().horizontal.from);
         REQUIRE(4 == *screen.margin().horizontal.to);
@@ -2085,20 +2085,20 @@ TEST_CASE("CursorNextLine", "[screen]")
     screen.moveCursorTo(LineOffset { 1 }, ColumnOffset { 2 });
 
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(2) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
 
     SECTION("without margins")
     {
         SECTION("normal")
         {
             screen.moveCursorToNextLine(LineCount(1));
-            REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(2), ColumnOffset(0) });
+            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(0) });
         }
 
         SECTION("clamped")
         {
             screen.moveCursorToNextLine(LineCount(5));
-            REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(4), ColumnOffset(0) });
+            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(4), ColumnOffset(0) });
         }
     }
 
@@ -2114,25 +2114,25 @@ TEST_CASE("CursorNextLine", "[screen]")
         SECTION("normal-1")
         {
             screen.moveCursorToNextLine(LineCount(1));
-            REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(0) });
+            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(0) });
         }
 
         SECTION("normal-2")
         {
             screen.moveCursorToNextLine(LineCount(2));
-            REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(2), ColumnOffset(0) });
+            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(0) });
         }
 
         SECTION("normal-3")
         {
             screen.moveCursorToNextLine(LineCount(3));
-            REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(3), ColumnOffset(0) });
+            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(0) });
         }
 
         SECTION("clamped-1")
         {
             screen.moveCursorToNextLine(LineCount(4));
-            REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(3), ColumnOffset(0) });
+            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(0) });
         }
     }
 }
@@ -2144,20 +2144,20 @@ TEST_CASE("CursorPreviousLine", "[screen]")
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
 
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(4), ColumnOffset(4) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(4), ColumnOffset(4) });
 
     SECTION("without margins")
     {
         SECTION("normal")
         {
             screen.moveCursorToPrevLine(LineCount(1));
-            REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(3), ColumnOffset(0) });
+            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(3), ColumnOffset(0) });
         }
 
         SECTION("clamped")
         {
             screen.moveCursorToPrevLine(LineCount(5));
-            REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
         }
     }
 
@@ -2168,24 +2168,24 @@ TEST_CASE("CursorPreviousLine", "[screen]")
         screen.setTopBottomMargin(LineOffset { 1 }, LineOffset { 3 });
         screen.setMode(DECMode::Origin, true);
         screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 2 });
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(2), ColumnOffset(2) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(2) });
 
         SECTION("normal-1")
         {
             screen.moveCursorToPrevLine(LineCount(1));
-            REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(0) });
+            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(0) });
         }
 
         SECTION("normal-2")
         {
             screen.moveCursorToPrevLine(LineCount(2));
-            REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
         }
 
         SECTION("clamped")
         {
             screen.moveCursorToPrevLine(LineCount(3));
-            REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+            REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
         }
     }
 }
@@ -2199,7 +2199,7 @@ TEST_CASE("ReportCursorPosition", "[screen]")
 
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
     REQUIRE("" == term.replyData);
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(2) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
 
     SECTION("with Origin mode disabled")
     {
@@ -2229,7 +2229,7 @@ TEST_CASE("ReportExtendedCursorPosition", "[screen]")
 
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
     REQUIRE("" == term.replyData);
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(2) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
 
     SECTION("with Origin mode disabled")
     {
@@ -2327,7 +2327,7 @@ TEST_CASE("peek into history", "[screen]")
     screen.write("123\r\n456\r\nABC\r\nDEF");
 
     REQUIRE("ABC\nDEF\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(2) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
 
     // first line in history
     auto const m1 = screen.grid().lineText(LineOffset(-2));
@@ -2408,7 +2408,7 @@ TEST_CASE("render into history", "[screen]")
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
 
     REQUIRE("FGHIJ\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(4) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(4) });
     REQUIRE(screen.historyLineCount() == LineCount { 3 });
 
     string renderedText;
@@ -2554,18 +2554,18 @@ TEST_CASE("CursorBackwardTab.fixedTabWidth", "[screen]")
 
     //      "1234567890"
     REQUIRE("a   b   c " == screen.grid().lineText(LineOffset(0)));
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(9) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(9) });
 
     SECTION("no op")
     {
         screen.cursorBackwardTab(TabStopCount(0));
-        CHECK(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(9) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(9) });
     }
 
     SECTION("inside 1")
     {
         screen.cursorBackwardTab(TabStopCount(1));
-        CHECK(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(8) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(8) });
         screen.writeText('X');
         //    "1234567890"
         CHECK("a   b   X " == screen.grid().lineText(LineOffset(0)));
@@ -2574,7 +2574,7 @@ TEST_CASE("CursorBackwardTab.fixedTabWidth", "[screen]")
     SECTION("inside 2")
     {
         screen.cursorBackwardTab(TabStopCount(2));
-        CHECK(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(4) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(4) });
         screen.writeText('X');
         //    "1234567890"
         CHECK("a   X   c " == screen.grid().lineText(LineOffset(0)));
@@ -2583,7 +2583,7 @@ TEST_CASE("CursorBackwardTab.fixedTabWidth", "[screen]")
     SECTION("exact")
     {
         screen.cursorBackwardTab(TabStopCount(3));
-        CHECK(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
         screen.writeText('X');
         //    "1234567890"
         CHECK("X   b   c " == screen.grid().lineText(LineOffset(0)));
@@ -2592,7 +2592,7 @@ TEST_CASE("CursorBackwardTab.fixedTabWidth", "[screen]")
     SECTION("oveflow")
     {
         screen.cursorBackwardTab(TabStopCount(4));
-        CHECK(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
         screen.writeText('X');
         CHECK("X   b   c " == screen.grid().lineText(LineOffset(0)));
     }
@@ -2624,7 +2624,7 @@ TEST_CASE("CursorBackwardTab.manualTabs", "[screen]")
     SECTION("oveflow")
     {
         screen.cursorBackwardTab(TabStopCount(4));
-        CHECK(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
         screen.writeText('X');
         CHECK("X   b   c " == screen.grid().lineText(LineOffset(0)));
     }
@@ -2632,7 +2632,7 @@ TEST_CASE("CursorBackwardTab.manualTabs", "[screen]")
     SECTION("exact")
     {
         screen.cursorBackwardTab(TabStopCount(3));
-        CHECK(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(0) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
         screen.writeText('X');
         //    "1234567890"
         CHECK("X   b   c " == screen.grid().lineText(LineOffset(0)));
@@ -2641,7 +2641,7 @@ TEST_CASE("CursorBackwardTab.manualTabs", "[screen]")
     SECTION("inside 2")
     {
         screen.cursorBackwardTab(TabStopCount(2));
-        CHECK(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(4) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(4) });
         screen.writeText('X');
         //    "1234567890"
         CHECK("a   X   c " == screen.grid().lineText(LineOffset(0)));
@@ -2650,7 +2650,7 @@ TEST_CASE("CursorBackwardTab.manualTabs", "[screen]")
     SECTION("inside 1")
     {
         screen.cursorBackwardTab(TabStopCount(1));
-        CHECK(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(8) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(8) });
         screen.writeText('X');
         //    "1234567890"
         CHECK("a   b   X " == screen.grid().lineText(LineOffset(0)));
@@ -2659,7 +2659,7 @@ TEST_CASE("CursorBackwardTab.manualTabs", "[screen]")
     SECTION("no op")
     {
         screen.cursorBackwardTab(TabStopCount(0));
-        CHECK(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(9) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(9) });
     }
 }
 
@@ -2937,7 +2937,7 @@ TEST_CASE("setMaxHistoryLineCount", "[screen]")
     screen.grid().setReflowOnResize(false);
     screen.write("AB\r\nCD");
     REQUIRE("AB\nCD\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
 
     screen.setMaxHistoryLineCount(LineCount(1));
     REQUIRE("AB\nCD\n" == screen.renderMainPageText());
@@ -2951,7 +2951,7 @@ TEST_CASE("resize", "[screen]")
     screen.grid().setReflowOnResize(false);
     screen.write("AB\r\nCD");
     REQUIRE("AB\nCD\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(1) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
 
     screen.setMaxHistoryLineCount(LineCount(10));
 
@@ -2965,16 +2965,16 @@ TEST_CASE("resize", "[screen]")
     {
         screen.resize({ LineCount(3), ColumnCount(2) });
         REQUIRE("AB\nCD\n  \n" == screen.renderMainPageText());
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(1) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
 
         screen.write("\r\n");
         screen.write("E");
         REQUIRE("AB\nCD\nE \n" == screen.renderMainPageText());
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(2), ColumnOffset(1) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(1) });
 
         screen.write("F");
         REQUIRE("AB\nCD\nEF\n" == screen.renderMainPageText());
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(2), ColumnOffset(1) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(2), ColumnOffset(1) });
     }
 
     SECTION("shrink lines")
@@ -2982,21 +2982,21 @@ TEST_CASE("resize", "[screen]")
         screen.resize({ LineCount(1), ColumnCount(2) });
         CHECK("CD\n" == screen.renderMainPageText());
         CHECK("AB" == screen.grid().lineAt(LineOffset(-1)).toUtf8());
-        CHECK(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
     }
 
     SECTION("grow columns")
     {
         screen.resize({ LineCount(2), ColumnCount(3) });
         CHECK("AB \nCD \n" == screen.renderMainPageText());
-        CHECK(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(2) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
     }
 
     SECTION("shrink columns")
     {
         screen.resize({ LineCount(2), ColumnCount(1) });
         CHECK("A\nC\n" == screen.renderMainPageText());
-        CHECK(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(0) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(0) });
     }
 
     SECTION("regrow columns")
@@ -3004,7 +3004,7 @@ TEST_CASE("resize", "[screen]")
         // 1.) grow
         screen.resize({ LineCount(2), ColumnCount(3) });
         logScreenText(screen, "after columns grow");
-        CHECK(screen.logicalCursorPosition() == Coordinate { LineOffset(1), ColumnOffset(2) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
 
         // 2.) fill
         screen.writeText('Y');
@@ -3013,18 +3013,18 @@ TEST_CASE("resize", "[screen]")
         screen.writeText('X');
         logScreenText(screen, "after write");
         REQUIRE("ABX\nCDY\n" == screen.renderMainPageText());
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(2) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
 
         // 3.) shrink
         screen.resize({ LineCount(2), ColumnCount(2) });
         REQUIRE("AB\nCD\n" == screen.renderMainPageText());
-        REQUIRE(screen.logicalCursorPosition() == Coordinate { LineOffset(0), ColumnOffset(1) });
+        REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
 
         // 4.) regrow (and see if pre-filled data were retained)
         // NOTE: This is currently not retained. Do we want to recreate this behaviour?
         // screen.resize({LineCount(2), ColumnCount(3)});
         // REQUIRE("ABX\nCDY\n" == screen.renderMainPageText());
-        // REQUIRE(screen.logicalCursorPosition() == Coordinate{LineOffset(0), ColumnOffset(2)});
+        // REQUIRE(screen.logicalCursorPosition() == CellLocation{LineOffset(0), ColumnOffset(2)});
     }
 
     SECTION("grow rows, grow columns")
@@ -3145,9 +3145,9 @@ TEST_CASE("DECCRA.Right.intersecting", "[screen]")
                               "ghijkl\n";
 
     auto constexpr page = 0;
-    auto constexpr sTopLeft = Coordinate { LineOffset(1), ColumnOffset(1) };
-    auto constexpr sBottomRight = Coordinate { LineOffset(3), ColumnOffset(3) };
-    auto constexpr tTopLeft = Coordinate { LineOffset(1), ColumnOffset(2) };
+    auto constexpr sTopLeft = CellLocation { LineOffset(1), ColumnOffset(1) };
+    auto constexpr sBottomRight = CellLocation { LineOffset(3), ColumnOffset(3) };
+    auto constexpr tTopLeft = CellLocation { LineOffset(1), ColumnOffset(2) };
 
     auto const deccraSeq = fmt::format("\033[{};{};{};{};{};{};{};{}$v",
                                        sTopLeft.line + 1,
@@ -3183,9 +3183,9 @@ TEST_CASE("DECCRA.Left.intersecting", "[screen]")
                               "ghijkl\n";
 
     auto constexpr page = 0;
-    auto constexpr sTopLeft = Coordinate { LineOffset(1), ColumnOffset(3) };
-    auto constexpr sBottomRight = Coordinate { LineOffset(2), ColumnOffset(5) };
-    auto constexpr tTopLeft = Coordinate { LineOffset(1), ColumnOffset(2) };
+    auto constexpr sTopLeft = CellLocation { LineOffset(1), ColumnOffset(3) };
+    auto constexpr sBottomRight = CellLocation { LineOffset(2), ColumnOffset(5) };
+    auto constexpr tTopLeft = CellLocation { LineOffset(1), ColumnOffset(2) };
 
     auto const deccraSeq = fmt::format("\033[{};{};{};{};{};{};{};{}$v",
                                        sTopLeft.line + 1,

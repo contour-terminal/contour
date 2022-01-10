@@ -566,7 +566,7 @@ void Grid<Cell>::reset()
 }
 
 template <typename Cell>
-Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, bool _wrapPending)
+CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPos, bool _wrapPending)
 {
     if (pageSize_ == _newSize)
         return _currentCursorPos;
@@ -582,7 +582,7 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
     using LineBuffer = typename Line<Cell>::InflatedBuffer;
 
     // {{{ helper methods
-    auto const growLines = [this](LineCount _newHeight, Coordinate _cursor) -> Coordinate {
+    auto const growLines = [this](LineCount _newHeight, CellLocation _cursor) -> CellLocation {
         // Grow line count by splicing available lines from history back into buffer, if available,
         // or create new ones until pageSize_.lines == _newHeight.
 
@@ -590,7 +590,7 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
         // lines_.reserve(unbox<size_t>(maxHistoryLineCount_ + _newHeight));
 
         // Pull down from history if cursor is at bottom and if scrollback available.
-        Coordinate cursorMove {};
+        CellLocation cursorMove {};
         if (*_cursor.line + 1 == *pageSize_.lines)
         {
             auto const extendCount0 = _newHeight - pageSize_.lines;
@@ -622,7 +622,7 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
         return cursorMove;
     };
 
-    auto const shrinkLines = [this](LineCount _newHeight, Coordinate _cursor) -> Coordinate {
+    auto const shrinkLines = [this](LineCount _newHeight, CellLocation _cursor) -> CellLocation {
         // Shrink existing line count to _newSize.lines
         // by splicing the number of lines to be shrinked by into savedLines bottom.
 
@@ -667,14 +667,14 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
             pageSize_.lines -= numLinesToPushUp;
             clampHistory();
             verifyState();
-            return Coordinate { -boxed_cast<LineOffset>(numLinesToPushUp), {} };
+            return CellLocation { -boxed_cast<LineOffset>(numLinesToPushUp), {} };
         }
 
         verifyState();
-        return Coordinate {};
+        return CellLocation {};
     };
 
-    auto const growColumns = [this, _wrapPending](ColumnCount _newColumnCount) -> Coordinate {
+    auto const growColumns = [this, _wrapPending](ColumnCount _newColumnCount) -> CellLocation {
         using LineBuffer = typename Line<Cell>::InflatedBuffer;
 
         if (!reflowOnResize_)
@@ -684,7 +684,7 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
                     line.resize(_newColumnCount);
             pageSize_.columns = _newColumnCount;
             verifyState();
-            return Coordinate { LineOffset(0), ColumnOffset(_wrapPending ? 1 : 0) };
+            return CellLocation { LineOffset(0), ColumnOffset(_wrapPending ? 1 : 0) };
         }
         else
         {
@@ -772,12 +772,12 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
             rotateBuffersLeft(newHistoryLineCount);
 
             verifyState();
-            return Coordinate { -boxed_cast<LineOffset>(cy), ColumnOffset(_wrapPending ? 1 : 0) };
+            return CellLocation { -boxed_cast<LineOffset>(cy), ColumnOffset(_wrapPending ? 1 : 0) };
         }
     };
 
     auto const shrinkColumns =
-        [this](ColumnCount _newColumnCount, LineCount _newLineCount, Coordinate _cursor) -> Coordinate {
+        [this](ColumnCount _newColumnCount, LineCount _newLineCount, CellLocation _cursor) -> CellLocation {
         using LineBuffer = typename Line<Cell>::InflatedBuffer;
 
         if (!reflowOnResize_)
@@ -887,7 +887,7 @@ Coordinate Grid<Cell>::resize(PageSize _newSize, Coordinate _currentCursorPos, b
     };
     // }}}
 
-    Coordinate cursor = _currentCursorPos;
+    CellLocation cursor = _currentCursorPos;
 
     // grow/shrink columns
     using crispy::Comparison;

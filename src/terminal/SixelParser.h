@@ -164,7 +164,7 @@ class SixelImageBuilder: public SixelParser::Events
     int aspectRatioDenominator() const noexcept { return aspectRatio_.denominator; }
     RGBColor currentColor() const noexcept { return colors_->at(currentColor_); }
 
-    RGBAColor at(Coordinate _coord) const noexcept;
+    RGBAColor at(CellLocation _coord) const noexcept;
 
     Buffer const& data() const noexcept { return buffer_; }
     Buffer& data() noexcept { return buffer_; }
@@ -178,17 +178,17 @@ class SixelImageBuilder: public SixelParser::Events
     void setRaster(int _pan, int _pad, ImageSize _imageSize) override;
     void render(int8_t _sixel) override;
 
-    Coordinate const& sixelCursor() const noexcept { return sixelCursor_; }
+    CellLocation const& sixelCursor() const noexcept { return sixelCursor_; }
 
   private:
-    void write(Coordinate const& _coord, RGBColor const& _value) noexcept;
+    void write(CellLocation const& _coord, RGBColor const& _value) noexcept;
 
   private:
     ImageSize const maxSize_;
     std::shared_ptr<SixelColorPalette> colors_;
     ImageSize size_;
     Buffer buffer_; /// RGBA buffer
-    Coordinate sixelCursor_;
+    CellLocation sixelCursor_;
     int currentColor_;
     struct
     {

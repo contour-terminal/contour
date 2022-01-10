@@ -464,7 +464,7 @@ void TerminalSession::sendMousePressEvent(Modifier _modifier,
 }
 
 void TerminalSession::sendMouseMoveEvent(terminal::Modifier _modifier,
-                                         terminal::Coordinate _pos,
+                                         terminal::CellLocation _pos,
                                          terminal::MousePixelPosition _pixelPosition,
                                          Timestamp _now)
 {
@@ -589,9 +589,9 @@ bool TerminalSession::operator()(actions::FollowHyperlink)
     auto const _l = scoped_lock { terminal() };
     auto const currentMousePosition = terminal().currentMousePosition();
     auto const currentMousePositionRel =
-        terminal::Coordinate { currentMousePosition.line
-                                   + terminal().viewport().scrollOffset().as<LineOffset>(),
-                               currentMousePosition.column };
+        terminal::CellLocation { currentMousePosition.line
+                                     + terminal().viewport().scrollOffset().as<LineOffset>(),
+                                 currentMousePosition.column };
     if (terminal().screen().contains(currentMousePosition))
     {
         if (auto hyperlink = terminal().screen().hyperlinkAt(currentMousePositionRel))

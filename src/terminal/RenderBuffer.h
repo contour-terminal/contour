@@ -31,7 +31,7 @@ namespace terminal
 struct RenderCell
 {
     std::u32string codepoints;
-    Coordinate position;
+    CellLocation position;
     CellFlags flags;
     RGBColor foregroundColor;
     RGBColor backgroundColor;
@@ -44,7 +44,7 @@ struct RenderCell
 
 struct RenderCursor
 {
-    Coordinate position;
+    CellLocation position;
     CursorShape shape;
     int width;
 };

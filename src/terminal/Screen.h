@@ -114,7 +114,7 @@ class Modes
 /// NB: Take care what to store here, as DECSC/DECRC will save/restore this struct.
 struct Cursor
 {
-    Coordinate position { LineOffset(0), ColumnOffset(0) };
+    CellLocation position { LineOffset(0), ColumnOffset(0) };
     bool autoWrap = true; // false;
     bool originMode = false;
     bool visible = true;
@@ -234,7 +234,7 @@ class Screen: public capabilities::StaticDatabase
     void insertLines(LineCount _n);        // IL
     void insertColumns(ColumnCount _n);    // DECIC
 
-    void copyArea(Rect sourceArea, int page, Coordinate targetTopLeft, int targetPage);
+    void copyArea(Rect sourceArea, int page, CellLocation targetTopLeft, int targetPage);
 
     void eraseArea(int _top, int _left, int _bottom, int _right);
 
@@ -337,9 +337,9 @@ class Screen: public capabilities::StaticDatabase
      * displayed otherwise.
      */
     void renderImage(std::shared_ptr<Image const> _image,
-                     Coordinate _topLeft,
+                     CellLocation _topLeft,
                      GridSize _gridSize,
-                     Coordinate _imageOffset,
+                     CellLocation _imageOffset,
                      ImageSize _imageSize,
                      ImageAlignment _alignmentPolicy,
                      ImageResize _resizePolicy,
@@ -376,18 +376,18 @@ class Screen: public capabilities::StaticDatabase
         return insideVerticalMargin && insideHorizontalMargin;
     }
 
-    constexpr Coordinate realCursorPosition() const noexcept { return cursor_.position; }
+    constexpr CellLocation realCursorPosition() const noexcept { return cursor_.position; }
 
-    constexpr Coordinate logicalCursorPosition() const noexcept
+    constexpr CellLocation logicalCursorPosition() const noexcept
     {
         if (!cursor_.originMode)
             return realCursorPosition();
         else
-            return Coordinate { cursor_.position.line - margin_.vertical.from,
-                                cursor_.position.column - margin_.horizontal.from };
+            return CellLocation { cursor_.position.line - margin_.vertical.from,
+                                  cursor_.position.column - margin_.horizontal.from };
     }
 
-    constexpr Coordinate origin() const noexcept
+    constexpr CellLocation origin() const noexcept
     {
         if (!cursor_.originMode)
             return {};
@@ -399,7 +399,7 @@ class Screen: public capabilities::StaticDatabase
 
     /// Returns identity if DECOM is disabled (default), but returns translated coordinates if DECOM is
     /// enabled.
-    Coordinate toRealCoordinate(Coordinate pos) const noexcept
+    CellLocation toRealCoordinate(CellLocation pos) const noexcept
     {
         if (!cursor_.originMode)
             return pos;
@@ -408,7 +408,7 @@ class Screen: public capabilities::StaticDatabase
     }
 
     /// Clamps given coordinates, respecting DECOM (Origin Mode).
-    Coordinate clampCoordinate(Coordinate coord) const noexcept
+    CellLocation clampCoordinate(CellLocation coord) const noexcept
     {
         if (cursor_.originMode)
             return clampToOrigin(coord);
@@ -417,7 +417,7 @@ class Screen: public capabilities::StaticDatabase
     }
 
     /// Clamps given logical coordinates to margins as used in when DECOM (origin mode) is enabled.
-    Coordinate clampToOrigin(Coordinate coord) const noexcept
+    CellLocation clampToOrigin(CellLocation coord) const noexcept
     {
         return { std::clamp(coord.line, LineOffset { 0 }, margin_.vertical.to),
                  std::clamp(coord.column, ColumnOffset { 0 }, margin_.horizontal.to) };
@@ -433,13 +433,13 @@ class Screen: public capabilities::StaticDatabase
         return std::clamp(_column, ColumnOffset(0), pageSize_.columns.as<ColumnOffset>() - 1);
     }
 
-    Coordinate clampToScreen(Coordinate coord) const noexcept
+    CellLocation clampToScreen(CellLocation coord) const noexcept
     {
         return { clampedLine(coord.line), clampedColumn(coord.column) };
     }
 
     // Tests if given coordinate is within the visible screen area.
-    constexpr bool contains(Coordinate _coord) const noexcept
+    constexpr bool contains(CellLocation _coord) const noexcept
     {
         return LineOffset(0) <= _coord.line && _coord.line < pageSize_.lines.as<LineOffset>()
                && ColumnOffset(0) <= _coord.column && _coord.column <= pageSize_.columns.as<ColumnOffset>();
@@ -471,9 +471,9 @@ class Screen: public capabilities::StaticDatabase
         return grid().at(_line, _column);
     }
 
-    Cell& at(Coordinate p) noexcept { return useCellAt(p.line, p.column); }
-    Cell& useCellAt(Coordinate p) noexcept { return useCellAt(p.line, p.column); }
-    Cell const& at(Coordinate p) const noexcept { return grid().at(p.line, p.column); }
+    Cell& at(CellLocation p) noexcept { return useCellAt(p.line, p.column); }
+    Cell& useCellAt(CellLocation p) noexcept { return useCellAt(p.line, p.column); }
+    Cell const& at(CellLocation p) const noexcept { return grid().at(p.line, p.column); }
 
     bool isPrimaryScreen() const noexcept { return activeGrid_ == &grids_[0]; }
     bool isAlternateScreen() const noexcept { return activeGrid_ == &grids_[1]; }
@@ -566,7 +566,7 @@ class Screen: public capabilities::StaticDatabase
     ColorPalette& defaultColorPalette() noexcept { return defaultColorPalette_; }
     ColorPalette const& defaultColorPalette() const noexcept { return defaultColorPalette_; }
 
-    std::shared_ptr<HyperlinkInfo> hyperlinkAt(Coordinate pos) noexcept
+    std::shared_ptr<HyperlinkInfo> hyperlinkAt(CellLocation pos) noexcept
     {
         return hyperlinks_.hyperlinkById(at(pos).hyperlink());
     }
@@ -663,7 +663,7 @@ class Screen: public capabilities::StaticDatabase
     Cursor cursor_;
     Cursor savedCursor_;
     Cursor savedPrimaryCursor_; //!< saved cursor of primary-screen when switching to alt-screen.
-    Coordinate lastCursorPosition_;
+    CellLocation lastCursorPosition_;
     bool wrapPending_ = false;
 
     CursorDisplay cursorDisplay_ = CursorDisplay::Steady;

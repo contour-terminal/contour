@@ -289,7 +289,7 @@ void sendMouseMoveEvent(QMouseEvent* _event, TerminalSession& _session)
         clamp((_event->pos().y() - MarginTop) / cellSize.height.as<int>(), 0, *pageSize.lines - 1));
     auto const col = terminal::ColumnOffset(
         clamp((_event->pos().x() - MarginLeft) / cellSize.width.as<int>(), 0, *pageSize.columns - 1));
-    auto const pos = terminal::Coordinate { row, col };
+    auto const pos = terminal::CellLocation { row, col };
 
     _session.sendMouseMoveEvent(
         makeModifier(_event->modifiers()), pos, makeMousePixelPosition(_event), steady_clock::now());

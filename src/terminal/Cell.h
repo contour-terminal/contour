@@ -146,7 +146,7 @@ class CONTOUR_PACKED Cell
                                              bool _reverseVideo) const noexcept;
 
     std::shared_ptr<ImageFragment> imageFragment() const noexcept;
-    void setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, Coordinate offset);
+    void setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, CellLocation offset);
 
     void setCharacter(char32_t _codepoint) noexcept;
     void setCharacter(char32_t _codepoint, uint8_t _width) noexcept;
@@ -501,7 +501,7 @@ inline std::shared_ptr<ImageFragment> Cell::imageFragment() const noexcept
         return {};
 }
 
-inline void Cell::setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, Coordinate offset)
+inline void Cell::setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, CellLocation offset)
 {
     CellExtra& ext = extra();
     ext.imageFragment = std::make_shared<ImageFragment>(rasterizedImage, offset);

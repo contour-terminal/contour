@@ -344,7 +344,7 @@ PageSize Terminal::SelectionHelper::pageSize() const noexcept
     return terminal->screenSize();
 }
 
-bool Terminal::SelectionHelper::wordDelimited(Coordinate _pos) const noexcept
+bool Terminal::SelectionHelper::wordDelimited(CellLocation _pos) const noexcept
 {
     // Word selection may be off by one
     _pos.column = min(_pos.column, boxed_cast<ColumnOffset>(terminal->screenSize().columns - 1));
@@ -359,7 +359,7 @@ bool Terminal::SelectionHelper::wrappedLine(LineOffset _line) const noexcept
     return terminal->screen().isLineWrapped(_line);
 }
 
-bool Terminal::SelectionHelper::cellEmpty(Coordinate _pos) const noexcept
+bool Terminal::SelectionHelper::cellEmpty(CellLocation _pos) const noexcept
 {
     // Word selection may be off by one
     _pos.column = min(_pos.column, boxed_cast<ColumnOffset>(terminal->screenSize().columns - 1));
@@ -367,7 +367,7 @@ bool Terminal::SelectionHelper::cellEmpty(Coordinate _pos) const noexcept
     return terminal->screen().at(_pos).empty();
 }
 
-int Terminal::SelectionHelper::cellWidth(Coordinate _pos) const noexcept
+int Terminal::SelectionHelper::cellWidth(CellLocation _pos) const noexcept
 {
     // Word selection may be off by one
     _pos.column = min(_pos.column, boxed_cast<ColumnOffset>(terminal->screenSize().columns - 1));
@@ -412,9 +412,9 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
     screen_.render(
         [this, reverseVideo, &_output, state = State::Gap, lineNr = LineOffset(0)](
             Cell const& _cell, LineOffset _line, ColumnOffset _column) mutable {
-            auto const selected =
-                isSelected(Coordinate { _line - boxed_cast<LineOffset>(viewport_.scrollOffset()), _column });
-            auto const pos = Coordinate { _line, _column };
+            auto const selected = isSelected(
+                CellLocation { _line - boxed_cast<LineOffset>(viewport_.scrollOffset()), _column });
+            auto const pos = CellLocation { _line, _column };
             auto const hasCursor =
                 viewport_.translateScreenToGridCoordinate(pos) == screen_.realCursorPosition();
             bool const paintCursor =
@@ -493,9 +493,9 @@ optional<RenderCursor> Terminal::renderCursor()
 
     auto const shape = screen_.focused() ? cursorShape() : CursorShape::Rectangle;
 
-    return RenderCursor { Coordinate { screen_.cursor().position.line
-                                           + viewport_.scrollOffset().as<LineOffset>(),
-                                       screen_.cursor().position.column },
+    return RenderCursor { CellLocation { screen_.cursor().position.line
+                                             + viewport_.scrollOffset().as<LineOffset>(),
+                                         screen_.cursor().position.column },
                           shape,
                           cursorCell.width() };
 }
@@ -564,7 +564,7 @@ bool Terminal::handleMouseSelection(Modifier _modifier, Timestamp _now)
     speedClicks_ = diff_ms >= 0.0 && diff_ms <= 500.0 ? speedClicks_ + 1 : 1;
     leftMouseButtonPressed_ = true;
 
-    auto const startPos = Coordinate {
+    auto const startPos = CellLocation {
         currentMousePosition_.line - boxed_cast<LineOffset>(viewport_.scrollOffset()),
         currentMousePosition_.column,
     };
@@ -600,7 +600,7 @@ void Terminal::clearSelection()
 }
 
 bool Terminal::sendMouseMoveEvent(Modifier _modifier,
-                                  Coordinate newPosition,
+                                  CellLocation newPosition,
                                   MousePixelPosition _pixelPosition,
                                   Timestamp /*_now*/)
 {
@@ -608,7 +608,6 @@ bool Terminal::sendMouseMoveEvent(Modifier _modifier,
 
     if (leftMouseButtonPressed_ && isSelectionComplete())
         clearSelection();
-
 
     if (newPosition == currentMousePosition_ && !screen_.isModeEnabled(DECMode::MouseSGRPixels))
         return false;
@@ -841,7 +840,7 @@ string Terminal::extractSelectionText() const
     string text;
     string currentLine;
 
-    renderSelection([&](Coordinate const& _pos, Cell const& _cell) {
+    renderSelection([&](CellLocation const& _pos, Cell const& _cell) {
         auto const _lock = scoped_lock { *this };
         auto const isNewLine = _pos.column <= lastColumn;
         auto const isLineWrapped = screen().isLineWrapped(_pos.line);
@@ -1047,7 +1046,7 @@ void Terminal::discardImage(Image const& _image)
     eventListener_.discardImage(_image);
 }
 
-void Terminal::markCellDirty(Coordinate _position) noexcept
+void Terminal::markCellDirty(CellLocation _position) noexcept
 {
     if (!selection_)
         return;

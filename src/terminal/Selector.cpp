@@ -27,7 +27,8 @@ namespace terminal
 namespace // {{{ helper
 {
 
-    tuple<vector<Selection::Range>, Coordinate const, Coordinate const> prepare(Selection const& _selection)
+    tuple<vector<Selection::Range>, CellLocation const, CellLocation const> prepare(
+        Selection const& _selection)
     {
         vector<Selection::Range> result;
 
@@ -45,17 +46,17 @@ namespace // {{{ helper
     }
 
     // Constructs a top-left and bottom-right coordinate-pair from given input.
-    constexpr pair<Coordinate, Coordinate> orderedPoints(Coordinate a, Coordinate b) noexcept
+    constexpr pair<CellLocation, CellLocation> orderedPoints(CellLocation a, CellLocation b) noexcept
     {
-        auto const topLeft = Coordinate { min(a.line, b.line), min(a.column, b.column) };
-        auto const bottomRight = Coordinate { max(a.line, b.line), max(a.column, b.column) };
+        auto const topLeft = CellLocation { min(a.line, b.line), min(a.column, b.column) };
+        auto const bottomRight = CellLocation { max(a.line, b.line), max(a.column, b.column) };
         return pair { topLeft, bottomRight };
     }
 
 } // namespace
 
 // {{{ Selection
-void Selection::extend(Coordinate _to)
+void Selection::extend(CellLocation _to)
 {
     assert(state_ != State::Complete
            && "In order extend a selection, the selector must be active (started).");
@@ -69,9 +70,9 @@ void Selection::complete()
         state_ = State::Complete;
 }
 
-Coordinate Selection::stretchedColumn(SelectionHelper const& _grid, Coordinate _coord) noexcept
+CellLocation Selection::stretchedColumn(SelectionHelper const& _grid, CellLocation _coord) noexcept
 {
-    Coordinate stretched = _coord;
+    CellLocation stretched = _coord;
     if (auto const w = _grid.cellWidth(_coord); w > 1) // wide character
     {
         stretched.column += ColumnOffset::cast_from(w - 1);
@@ -94,7 +95,7 @@ Coordinate Selection::stretchedColumn(SelectionHelper const& _grid, Coordinate _
     return stretched;
 }
 
-bool Selection::contains(Coordinate _coord) const noexcept
+bool Selection::contains(CellLocation _coord) const noexcept
 {
     return crispy::ascending(from_, _coord, to_) || crispy::ascending(to_, _coord, from_);
 }
@@ -141,20 +142,20 @@ std::vector<Selection::Range> Selection::ranges() const
 }
 // }}}
 // {{{ LinearSelection
-LinearSelection::LinearSelection(SelectionHelper const& _helper, Coordinate _start):
+LinearSelection::LinearSelection(SelectionHelper const& _helper, CellLocation _start):
     Selection(_helper, _start)
 {
 }
 // }}}
 // {{{ WordWiseSelection
-WordWiseSelection::WordWiseSelection(SelectionHelper const& _helper, Coordinate _start):
+WordWiseSelection::WordWiseSelection(SelectionHelper const& _helper, CellLocation _start):
     Selection(_helper, _start)
 {
     from_ = extendSelectionBackward(from_);
     to_ = extendSelectionForward(to_);
 }
 
-Coordinate WordWiseSelection::extendSelectionBackward(Coordinate _pos) const noexcept
+CellLocation WordWiseSelection::extendSelectionBackward(CellLocation _pos) const noexcept
 {
     auto last = _pos;
     auto current = last;
@@ -180,7 +181,7 @@ Coordinate WordWiseSelection::extendSelectionBackward(Coordinate _pos) const noe
     return last;
 }
 
-Coordinate WordWiseSelection::extendSelectionForward(Coordinate _pos) const noexcept
+CellLocation WordWiseSelection::extendSelectionForward(CellLocation _pos) const noexcept
 {
     auto last = _pos;
     auto current = last;
@@ -214,7 +215,7 @@ Coordinate WordWiseSelection::extendSelectionForward(Coordinate _pos) const noex
     return stretchedColumn(helper_, last);
 }
 
-void WordWiseSelection::extend(Coordinate _to)
+void WordWiseSelection::extend(CellLocation _to)
 {
     if (_to >= from_) // extending to the right
     {
@@ -229,12 +230,12 @@ void WordWiseSelection::extend(Coordinate _to)
 }
 // }}}
 // {{{ RectangularSelection
-RectangularSelection::RectangularSelection(SelectionHelper const& _helper, Coordinate _start):
+RectangularSelection::RectangularSelection(SelectionHelper const& _helper, CellLocation _start):
     Selection(_helper, _start)
 {
 }
 
-bool RectangularSelection::contains(Coordinate _coord) const noexcept
+bool RectangularSelection::contains(CellLocation _coord) const noexcept
 {
     auto const [from, to] = orderedPoints(from_, to_);
 
@@ -278,7 +279,7 @@ vector<Selection::Range> RectangularSelection::ranges() const
     {
         auto const line = from.line + LineOffset::cast_from(i);
         auto const left = from.column;
-        auto const right = stretchedColumn(helper_, Coordinate { line, to.column }).column;
+        auto const right = stretchedColumn(helper_, CellLocation { line, to.column }).column;
         result[i] = Range { line, left, right };
     }
 
@@ -286,14 +287,14 @@ vector<Selection::Range> RectangularSelection::ranges() const
 }
 // }}}
 // {{{ FullLineSelection
-FullLineSelection::FullLineSelection(SelectionHelper const& _helper, Coordinate _start):
+FullLineSelection::FullLineSelection(SelectionHelper const& _helper, CellLocation _start):
     Selection(_helper, _start)
 {
     from_.column = ColumnOffset(0);
     to_.column = boxed_cast<ColumnOffset>(helper_.pageSize().columns - 1);
 }
 
-void FullLineSelection::extend(Coordinate _to)
+void FullLineSelection::extend(CellLocation _to)
 {
     if (_to >= from_)
     {

@@ -390,7 +390,7 @@ class Grid
     /// @param _wrapPending       AutoWrap is on and a wrap is pending
     ///
     /// @returns updated cursor position.
-    Coordinate resize(PageSize _pageSize, Coordinate _currentCursorPos, bool _wrapPending);
+    CellLocation resize(PageSize _pageSize, CellLocation _currentCursorPos, bool _wrapPending);
     // }}}
 
     // {{{ Line API

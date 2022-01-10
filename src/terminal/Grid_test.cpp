@@ -341,10 +341,10 @@ TEST_CASE("resize_lines_nr2_with_scrollback_moving_fully_into_page", "[grid]")
     CHECK(grid.maxHistoryLineCount() == LineCount(3));
     CHECK(grid.historyLineCount() == LineCount(2));
 
-    auto const curCursorPos = Coordinate { grid.pageSize().lines.as<LineOffset>() - 1, ColumnOffset(1) };
+    auto const curCursorPos = CellLocation { grid.pageSize().lines.as<LineOffset>() - 1, ColumnOffset(1) };
     auto const newPageSize = PageSize { LineCount(4), ColumnCount(3) };
-    auto const newCursorPos0 = Coordinate { curCursorPos.line + 2, curCursorPos.column };
-    Coordinate newCursorPos = grid.resize(newPageSize, curCursorPos, false);
+    auto const newCursorPos0 = CellLocation { curCursorPos.line + 2, curCursorPos.column };
+    CellLocation newCursorPos = grid.resize(newPageSize, curCursorPos, false);
     CHECK(newCursorPos.line == newCursorPos0.line);
     CHECK(newCursorPos.column == newCursorPos0.column);
     CHECK(grid.pageSize() == newPageSize);
@@ -367,10 +367,10 @@ TEST_CASE("resize_lines_nr3_with_scrollback_moving_into_page_overflow", "[grid]"
     REQUIRE(grid.pageSize().columns == ColumnCount(3));
     REQUIRE(grid.pageSize().lines == LineCount(2));
 
-    auto const curCursorPos = Coordinate { LineOffset(1), ColumnOffset(1) };
+    auto const curCursorPos = CellLocation { LineOffset(1), ColumnOffset(1) };
     auto const newPageSize = PageSize { LineCount(5), ColumnCount(3) };
     logGridText(grid, "BEFORE");
-    Coordinate newCursorPos = grid.resize(newPageSize, curCursorPos, false);
+    CellLocation newCursorPos = grid.resize(newPageSize, curCursorPos, false);
     logGridText(grid, "AFTER");
     CHECK(newCursorPos.line == LineOffset(3));
     CHECK(newCursorPos.column == curCursorPos.column);
@@ -389,9 +389,9 @@ TEST_CASE("resize_grow_lines_with_history_cursor_no_bottom", "[grid]")
     CHECK(grid.maxHistoryLineCount() == LineCount(3));
     CHECK(grid.historyLineCount() == LineCount(2));
 
-    auto const curCursorPos = Coordinate { LineOffset(0), ColumnOffset(1) };
+    auto const curCursorPos = CellLocation { LineOffset(0), ColumnOffset(1) };
     logGridText(grid, "before resize");
-    Coordinate newCursorPos = grid.resize(PageSize { LineCount(3), ColumnCount(3) }, curCursorPos, false);
+    CellLocation newCursorPos = grid.resize(PageSize { LineCount(3), ColumnCount(3) }, curCursorPos, false);
     logGridText(grid, "after resize");
     CHECK(newCursorPos.line == curCursorPos.line);
     CHECK(newCursorPos.column == curCursorPos.column);
@@ -417,9 +417,9 @@ TEST_CASE("resize_shrink_lines_with_history", "[grid]")
 
     // shrink by one line (=> move page one line up into scrollback)
     auto const newPageSize = PageSize { LineCount(1), ColumnCount(3) };
-    auto const curCursorPos = Coordinate { LineOffset(1), ColumnOffset(1) };
+    auto const curCursorPos = CellLocation { LineOffset(1), ColumnOffset(1) };
     logGridText(grid, "BEFORE");
-    Coordinate newCursorPos = grid.resize(newPageSize, curCursorPos, false);
+    CellLocation newCursorPos = grid.resize(newPageSize, curCursorPos, false);
     logGridText(grid, "AFTER");
     CHECK(grid.pageSize().columns == ColumnCount(3));
     CHECK(grid.pageSize().lines == LineCount(1));
@@ -448,7 +448,7 @@ TEST_CASE("resize_shrink_columns_with_reflow_and_unwrappable", "[grid]")
 
     auto grid = setupGridForResizeTests2x3xN(LineCount(5));
     auto const newPageSize = PageSize { LineCount(2), ColumnCount(2) };
-    auto const curCursorPos = Coordinate { LineOffset(1), ColumnOffset(1) };
+    auto const curCursorPos = CellLocation { LineOffset(1), ColumnOffset(1) };
     grid.lineAt(LineOffset(0)).setWrappable(false);
     logGridText(grid, "BEFORE");
     auto const newCursorPos = grid.resize(newPageSize, curCursorPos, false);
@@ -490,7 +490,7 @@ TEST_CASE("resize_shrink_columns_with_reflow_grow_lines_and_unwrappable", "[grid
     // JK
     // L
     auto grid = setupGridForResizeTests2x3xN(LineCount(5));
-    auto const curCursorPos = Coordinate { LineOffset(1), ColumnOffset(1) };
+    auto const curCursorPos = CellLocation { LineOffset(1), ColumnOffset(1) };
     grid.lineAt(LineOffset(0)).setWrappable(false);
     // logGridText(grid, "BEFORE");
     auto const newCursorPos = grid.resize(PageSize { LineCount(4), ColumnCount(2) }, curCursorPos, false);
@@ -523,7 +523,7 @@ TEST_CASE("resize_reflow_shrink", "[grid]")
     // Shrink slowly from 5x2 to 4x2 to 3x2 to 2x2.
 
     // 4x2
-    (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, Coordinate { {}, {} }, false);
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation { {}, {} }, false);
     logGridText(grid, "after resize 4x2");
 
     CHECK(*grid.historyLineCount() == 2);
@@ -546,7 +546,7 @@ TEST_CASE("resize_reflow_shrink", "[grid]")
 
     // 3x2
     fmt::print("Starting resize to 3x2\n");
-    (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, Coordinate { {}, {} }, false);
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation { {}, {} }, false);
     logGridText(grid, "after resize 3x2");
 
     CHECK(*grid.historyLineCount() == 2);
@@ -557,7 +557,7 @@ TEST_CASE("resize_reflow_shrink", "[grid]")
     CHECK(grid.lineText(LineOffset(1)) == "de ");
 
     // 2x2
-    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, Coordinate { {}, {} }, false);
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, CellLocation { {}, {} }, false);
     logGridText(grid, "after resize 2x2");
 
     CHECK(grid.pageSize() == PageSize { LineCount(2), ColumnCount(2) });
@@ -576,7 +576,7 @@ TEST_CASE("Grid.reflow", "[grid]")
 
     SECTION("resize 4x2")
     {
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, Coordinate { {}, {} }, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation { {}, {} }, false);
         logGridText(grid, "after resize");
 
         CHECK(grid.historyLineCount() == LineCount(2));
@@ -590,9 +590,9 @@ TEST_CASE("Grid.reflow", "[grid]")
 
     SECTION("resize 3x2")
     {
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, Coordinate {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation {}, false);
         logGridText(grid, "after resize 4x2");
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, Coordinate {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, false);
         logGridText(grid, "after resize 3x2");
 
         CHECK(grid.historyLineCount() == LineCount(2));
@@ -605,11 +605,11 @@ TEST_CASE("Grid.reflow", "[grid]")
 
     SECTION("resize 2x2")
     {
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, Coordinate {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation {}, false);
         logGridText(grid, "after resize 4x2");
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, Coordinate {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, false);
         logGridText(grid, "after resize 3x2");
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, Coordinate {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, CellLocation {}, false);
         logGridText(grid, "after resize 2x2");
 
         CHECK(grid.pageSize() == PageSize { LineCount(2), ColumnCount(2) });
@@ -624,7 +624,7 @@ TEST_CASE("Grid.reflow", "[grid]")
         SECTION("regrow 3x2")
         {
             logGridText(grid, "Before regrow to 3x2");
-            (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, Coordinate {}, false);
+            (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, false);
             logGridText(grid, "after regrow to 3x2");
 
             CHECK(grid.pageSize() == PageSize { LineCount(2), ColumnCount(3) });
@@ -636,7 +636,7 @@ TEST_CASE("Grid.reflow", "[grid]")
 
             SECTION("regrow 4x2")
             {
-                (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, Coordinate {}, false);
+                (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation {}, false);
                 logGridText(grid, "after regrow 4x2");
 
                 CHECK(grid.historyLineCount() == LineCount(2));
@@ -649,7 +649,7 @@ TEST_CASE("Grid.reflow", "[grid]")
 
             SECTION("regrow 5x2")
             {
-                (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, Coordinate {}, false);
+                (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, CellLocation {}, false);
                 logGridText(grid, "after regrow 5x2");
 
                 CHECK(grid.historyLineCount() == LineCount(0));
@@ -668,7 +668,7 @@ TEST_CASE("Grid.reflow.shrink_many", "[grid]")
     REQUIRE(grid.lineText(LineOffset(0)) == "ABCDE"sv);
     REQUIRE(grid.lineText(LineOffset(1)) == "abcde"sv);
 
-    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, Coordinate {}, false);
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, CellLocation {}, false);
     logGridText(grid, "after resize 2x2");
 
     CHECK(grid.historyLineCount() == LineCount(4));
@@ -685,16 +685,16 @@ TEST_CASE("Grid.reflow.shrink_many_grow_many", "[grid]")
 {
     auto grid = setupGrid5x2();
 
-    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, Coordinate {}, false);
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, CellLocation {}, false);
     logGridText(grid, "after resize 2x2");
 
     SECTION("smooth regrow 2->3->4->5")
     {
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, Coordinate {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, false);
         logGridText(grid, "after resize 3x2");
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, Coordinate {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation {}, false);
         logGridText(grid, "after resize 4x2");
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, Coordinate {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, CellLocation {}, false);
         logGridText(grid, "after resize 5x2");
 
         CHECK(grid.historyLineCount() == LineCount(0));
@@ -705,7 +705,7 @@ TEST_CASE("Grid.reflow.shrink_many_grow_many", "[grid]")
 
     SECTION("hard regrow 2->5")
     {
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, Coordinate {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, CellLocation {}, false);
         logGridText(grid, "after resize 5x2");
 
         CHECK(grid.historyLineCount() == LineCount(0));
@@ -720,7 +720,7 @@ TEST_CASE("Grid.reflow.tripple", "[grid]")
     // Tests reflowing text upon shrink/grow across more than two (e.g. three) wrapped lines.
     auto grid = setupGrid8x2();
 
-    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, Coordinate {}, false);
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, CellLocation {}, false);
     logGridText(grid, "after resize 3x2");
 
     REQUIRE(grid.historyLineCount() == LineCount(6));
@@ -737,7 +737,7 @@ TEST_CASE("Grid.reflow.tripple", "[grid]")
 
     SECTION("grow from 2x2 to 8x2")
     {
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(8) }, Coordinate {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(8) }, CellLocation {}, false);
         logGridText(grid, "after resize 3x2");
 
         CHECK(grid.historyLineCount() == LineCount(0));
@@ -753,7 +753,7 @@ TEST_CASE("Grid.reflow.tripple", "[grid]")
     SECTION("grow from 2x2 to 3x2 to ... to 8x2")
     {
         // {{{ 3x2
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, Coordinate {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, false);
         logGridText(grid, "after resize 3x2");
 
         REQUIRE(grid.historyLineCount() == LineCount(4));
@@ -775,7 +775,7 @@ TEST_CASE("Grid.reflow.tripple", "[grid]")
         // }}}
 
         // {{{ 4x2
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, Coordinate {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation {}, false);
         logGridText(grid, "after resize 4x2");
 
         REQUIRE(grid.historyLineCount() == LineCount(2));
@@ -793,7 +793,7 @@ TEST_CASE("Grid.reflow.tripple", "[grid]")
         // }}}
 
         // {{{ 5x2
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, Coordinate {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, CellLocation {}, false);
         logGridText(grid, "after resize 5x2");
 
         REQUIRE(grid.historyLineCount() == LineCount(2));
@@ -811,7 +811,7 @@ TEST_CASE("Grid.reflow.tripple", "[grid]")
         // }}}
 
         // {{{ 7x2
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(7) }, Coordinate {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(7) }, CellLocation {}, false);
         logGridText(grid, "after resize 7x2");
 
         REQUIRE(grid.historyLineCount() == LineCount(2));
@@ -829,7 +829,7 @@ TEST_CASE("Grid.reflow.tripple", "[grid]")
         // }}}
 
         // {{{ 8x2
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(8) }, Coordinate {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(8) }, CellLocation {}, false);
         logGridText(grid, "after resize 8x2");
 
         REQUIRE(*grid.historyLineCount() == 0);

@@ -57,14 +57,14 @@ ImagePool::ImagePool(OnImageRemove _onImageRemove, ImageId _nextImageId):
 {
 }
 
-Image::Data RasterizedImage::fragment(Coordinate _pos) const
+Image::Data RasterizedImage::fragment(CellLocation _pos) const
 {
     // TODO: respect alignment hint
     // TODO: respect resize hint
 
     auto const xOffset = _pos.column * unbox<int>(cellSize_.width);
     auto const yOffset = _pos.line * unbox<int>(cellSize_.height);
-    auto const pixelOffset = Coordinate { yOffset, xOffset };
+    auto const pixelOffset = CellLocation { yOffset, xOffset };
 
     Image::Data fragData;
     fragData.resize(*cellSize_.width * *cellSize_.height * 4); // RGBA

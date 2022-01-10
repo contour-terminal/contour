@@ -277,12 +277,12 @@ class InputGenerator
     void generatePaste(std::string_view const& _text);
     bool generateMousePress(Modifier _modifier,
                             MouseButton _button,
-                            Coordinate _pos,
+                            CellLocation _pos,
                             MousePixelPosition _pixelPosition);
-    bool generateMouseMove(Modifier _modifier, Coordinate _pos, MousePixelPosition _pixelPosition);
+    bool generateMouseMove(Modifier _modifier, CellLocation _pos, MousePixelPosition _pixelPosition);
     bool generateMouseRelease(Modifier _modifier,
                               MouseButton _button,
-                              Coordinate _pos,
+                              CellLocation _pos,
                               MousePixelPosition _pixelPosition);
 
     bool generateFocusInEvent();
@@ -327,19 +327,19 @@ class InputGenerator
     bool generateMouse(MouseEventType _eventType,
                        Modifier _modifier,
                        MouseButton _button,
-                       Coordinate _pos,
+                       CellLocation _pos,
                        MousePixelPosition _pixelPosition);
 
     bool mouseTransport(MouseEventType _eventType,
                         uint8_t _button,
                         uint8_t _modifier,
-                        Coordinate _pos,
+                        CellLocation _pos,
                         MousePixelPosition _pixelPosition);
-    bool mouseTransportX10(uint8_t _button, uint8_t _modifier, Coordinate _pos);
+    bool mouseTransportX10(uint8_t _button, uint8_t _modifier, CellLocation _pos);
 
     bool mouseTransportSGR(MouseEventType _type, uint8_t _button, uint8_t _modifier, int x, int y);
 
-    bool mouseTransportURXVT(MouseEventType _type, uint8_t _button, uint8_t _modifier, Coordinate _pos);
+    bool mouseTransportURXVT(MouseEventType _type, uint8_t _button, uint8_t _modifier, CellLocation _pos);
 
     inline bool append(std::string_view _sequence);
     inline bool append(char _asciiChar);
@@ -360,7 +360,7 @@ class InputGenerator
     std::mutex mutex_ {};
 
     std::set<MouseButton> currentlyPressedMouseButtons_ {};
-    Coordinate currentMousePosition_ {}; // current mouse position
+    CellLocation currentMousePosition_ {}; // current mouse position
 };
 
 inline std::string to_string(InputGenerator::MouseEventType _value)

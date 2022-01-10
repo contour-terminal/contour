@@ -524,7 +524,7 @@ namespace
 bool InputGenerator::generateMouse(MouseEventType _eventType,
                                    Modifier _modifier,
                                    MouseButton _button,
-                                   Coordinate _pos,
+                                   CellLocation _pos,
                                    MousePixelPosition _pixelPosition)
 {
     if (!mouseProtocol_.has_value())
@@ -584,7 +584,7 @@ bool InputGenerator::generateMouse(MouseEventType _eventType,
 bool InputGenerator::mouseTransport(MouseEventType _eventType,
                                     uint8_t _button,
                                     uint8_t _modifier,
-                                    Coordinate _pos,
+                                    CellLocation _pos,
                                     MousePixelPosition _pixelPosition)
 {
     switch (mouseTransport_)
@@ -607,7 +607,7 @@ bool InputGenerator::mouseTransport(MouseEventType _eventType,
     return false;
 }
 
-bool InputGenerator::mouseTransportX10(uint8_t _button, uint8_t _modifier, Coordinate _pos)
+bool InputGenerator::mouseTransportX10(uint8_t _button, uint8_t _modifier, CellLocation _pos)
 {
     constexpr int SkipCount = 0x20; // TODO std::numeric_limits<ControlCode>::max();
     constexpr int MaxCoordValue = std::numeric_limits<uint8_t>::max() - SkipCount;
@@ -644,7 +644,7 @@ bool InputGenerator::mouseTransportSGR(
 bool InputGenerator::mouseTransportURXVT(MouseEventType _eventType,
                                          uint8_t _button,
                                          uint8_t _modifier,
-                                         Coordinate _pos)
+                                         CellLocation _pos)
 {
     if (_eventType == MouseEventType::Press)
     {
@@ -661,7 +661,7 @@ bool InputGenerator::mouseTransportURXVT(MouseEventType _eventType,
 
 bool InputGenerator::generateMousePress(Modifier _modifier,
                                         MouseButton _button,
-                                        Coordinate _pos,
+                                        CellLocation _pos,
                                         MousePixelPosition _pixelPosition)
 {
     auto const logged = [=](bool success) -> bool {
@@ -706,7 +706,7 @@ bool InputGenerator::generateMousePress(Modifier _modifier,
 
 bool InputGenerator::generateMouseRelease(Modifier _modifier,
                                           MouseButton _button,
-                                          Coordinate _pos,
+                                          CellLocation _pos,
                                           MousePixelPosition _pixelPosition)
 {
     auto const logged = [=](bool success) -> bool {
@@ -724,14 +724,19 @@ bool InputGenerator::generateMouseRelease(Modifier _modifier,
         generateMouse(MouseEventType::Release, _modifier, _button, currentMousePosition_, _pixelPosition));
 }
 
-bool InputGenerator::generateMouseMove(Modifier _modifier, Coordinate _pos, MousePixelPosition _pixelPosition)
+bool InputGenerator::generateMouseMove(Modifier _modifier,
+                                       CellLocation _pos,
+                                       MousePixelPosition _pixelPosition)
 {
     auto const logged = [=](bool success) -> bool {
         if (success)
-            LOGSTORE(InputLog)("[{}:{}] Sending mouse move at {} ({}:{}).",
-                    mouseProtocol_.value(),
-                    mouseTransport_,
-                    _pos, _pixelPosition.x.value, _pixelPosition.y.value);
+            LOGSTORE(InputLog)
+            ("[{}:{}] Sending mouse move at {} ({}:{}).",
+             mouseProtocol_.value(),
+             mouseTransport_,
+             _pos,
+             _pixelPosition.x.value,
+             _pixelPosition.y.value);
         return success;
     };
 

@@ -68,7 +68,7 @@ struct GridMetrics
         return { x, y };
     }
 
-    constexpr crispy::Point map(Coordinate _pos) const noexcept { return map(_pos.line, _pos.column); }
+    constexpr crispy::Point map(CellLocation _pos) const noexcept { return map(_pos.line, _pos.column); }
 };
 
 } // namespace terminal::renderer

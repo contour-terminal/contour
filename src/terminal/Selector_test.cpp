@@ -32,10 +32,10 @@ struct TestSelectionHelper: public terminal::SelectionHelper
     explicit TestSelectionHelper(Screen<T>& self): screen { &self } {}
 
     PageSize pageSize() const noexcept { return screen->pageSize(); }
-    bool wordDelimited(Coordinate _pos) const noexcept { return true; } // TODO
+    bool wordDelimited(CellLocation _pos) const noexcept { return true; } // TODO
     bool wrappedLine(LineOffset _line) const noexcept { return screen->isLineWrapped(_line); }
-    bool cellEmpty(Coordinate _pos) const noexcept { return screen->at(_pos).empty(); }
-    int cellWidth(Coordinate _pos) const noexcept { return screen->at(_pos).width(); }
+    bool cellEmpty(CellLocation _pos) const noexcept { return screen->at(_pos).empty(); }
+    int cellWidth(CellLocation _pos) const noexcept { return screen->at(_pos).width(); }
 };
 
 template <typename T>
@@ -74,7 +74,7 @@ struct TextSelection
 
     explicit TextSelection(Screen<T> const& s): screen { &s } {}
 
-    void operator()(Coordinate const& _pos)
+    void operator()(CellLocation const& _pos)
     {
         auto const& cell = screen->at(_pos);
         text += _pos.column < lastColumn_ ? "\n" : "";
@@ -104,7 +104,7 @@ TEST_CASE("Selector.Linear", "[selector]")
 
     SECTION("single-cell")
     { // "b"
-        auto const pos = Coordinate { LineOffset(1), ColumnOffset(1) };
+        auto const pos = CellLocation { LineOffset(1), ColumnOffset(1) };
         auto selector = LinearSelection(selectionHelper, pos);
         selector.extend(pos);
         selector.complete();
@@ -124,9 +124,9 @@ TEST_CASE("Selector.Linear", "[selector]")
 
     SECTION("forward single-line")
     { // "b,c"
-        auto const pos = Coordinate { LineOffset(1), ColumnOffset(1) };
+        auto const pos = CellLocation { LineOffset(1), ColumnOffset(1) };
         auto selector = LinearSelection(selectionHelper, pos);
-        selector.extend(Coordinate { LineOffset(1), ColumnOffset(3) });
+        selector.extend(CellLocation { LineOffset(1), ColumnOffset(3) });
         selector.complete();
 
         vector<Selection::Range> const selection = selector.ranges();
@@ -144,9 +144,9 @@ TEST_CASE("Selector.Linear", "[selector]")
 
     SECTION("forward multi-line")
     { // "b,cdefg,hi\n1234"
-        auto const pos = Coordinate { LineOffset(1), ColumnOffset(1) };
+        auto const pos = CellLocation { LineOffset(1), ColumnOffset(1) };
         auto selector = LinearSelection(selectionHelper, pos);
-        selector.extend(Coordinate { LineOffset(2), ColumnOffset(3) });
+        selector.extend(CellLocation { LineOffset(2), ColumnOffset(3) });
         selector.complete();
 
         vector<Selection::Range> const selection = selector.ranges();
@@ -181,8 +181,8 @@ TEST_CASE("Selector.Linear", "[selector]")
          2 | "bar"
         */
 
-        auto selector = LinearSelection(selectionHelper, Coordinate { LineOffset(-2), ColumnOffset(6) });
-        selector.extend(Coordinate { LineOffset(-1), ColumnOffset(2) });
+        auto selector = LinearSelection(selectionHelper, CellLocation { LineOffset(-2), ColumnOffset(6) });
+        selector.extend(CellLocation { LineOffset(-1), ColumnOffset(2) });
         selector.complete();
 
         vector<Selection::Range> const selection = selector.ranges();
@@ -217,8 +217,8 @@ TEST_CASE("Selector.Linear", "[selector]")
          2 | ""
         */
 
-        auto selector = LinearSelection(selectionHelper, Coordinate { LineOffset(-2), ColumnOffset(8) });
-        selector.extend(Coordinate { LineOffset(0), ColumnOffset(1) });
+        auto selector = LinearSelection(selectionHelper, CellLocation { LineOffset(-2), ColumnOffset(8) });
+        selector.extend(CellLocation { LineOffset(0), ColumnOffset(1) });
         selector.complete();
 
         vector<Selection::Range> const selection = selector.ranges();

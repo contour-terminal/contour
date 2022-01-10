@@ -146,9 +146,9 @@ class Viewport
 
     /// Translates a screen coordinate to a Grid-coordinate by applying
     /// the scroll-offset to it.
-    constexpr Coordinate translateScreenToGridCoordinate(Coordinate p) const noexcept
+    constexpr CellLocation translateScreenToGridCoordinate(CellLocation p) const noexcept
     {
-        return Coordinate {
+        return CellLocation {
             p.line - boxed_cast<LineOffset>(scrollOffset_),
             p.column,
         };

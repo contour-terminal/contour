@@ -32,7 +32,7 @@ using terminal::LineCount;
 using terminal::LineOffset;
 using terminal::PageSize;
 
-namespace // {{{ helpers
+namespace
 {
 /// Takes a textual screenshot using the terminals render buffer.
 vector<string> textScreenshot(terminal::Terminal const& _terminal)
@@ -42,7 +42,7 @@ vector<string> textScreenshot(terminal::Terminal const& _terminal)
     vector<string> lines;
     lines.resize(_terminal.screenSize().lines.as<size_t>());
 
-    terminal::Coordinate lastPos = {};
+    terminal::CellLocation lastPos = {};
     size_t lastCount = 0;
     for (terminal::RenderCell const& cell: renderBuffer.buffer.screen)
     {

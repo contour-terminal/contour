@@ -1404,7 +1404,7 @@ void Screen<T>::insertColumns(ColumnCount _n)
 }
 
 template <typename T>
-void Screen<T>::copyArea(Rect _sourceArea, int _page, Coordinate _targetTopLeft, int _targetPage)
+void Screen<T>::copyArea(Rect _sourceArea, int _page, CellLocation _targetTopLeft, int _targetPage)
 {
     (void) _page;
     (void) _targetPage;
@@ -2193,12 +2193,12 @@ void Screen<T>::sixelImage(ImageSize _pixelSize, Image::Data&& _data)
     auto const extent = GridSize { lineCount, columnCount };
     auto const autoScrollAtBottomMargin =
         isModeEnabled(DECMode::SixelScrolling); // If DECSDM is enabled, scrolling is meant to be disabled.
-    auto const topLeft = autoScrollAtBottomMargin ? logicalCursorPosition() : Coordinate {};
+    auto const topLeft = autoScrollAtBottomMargin ? logicalCursorPosition() : CellLocation {};
 
     auto const alignmentPolicy = ImageAlignment::TopStart;
     auto const resizePolicy = ImageResize::NoResize;
 
-    auto const imageOffset = Coordinate {};
+    auto const imageOffset = CellLocation {};
     auto const imageSize = _pixelSize;
 
     shared_ptr<Image const> imageRef = uploadImage(ImageFormat::RGBA, _pixelSize, move(_data));
@@ -2225,9 +2225,9 @@ shared_ptr<Image const> Screen<T>::uploadImage(ImageFormat _format,
 
 template <typename T>
 void Screen<T>::renderImage(shared_ptr<Image const> _image,
-                            Coordinate _topLeft,
+                            CellLocation _topLeft,
                             GridSize _gridSize,
-                            Coordinate _imageOffset,
+                            CellLocation _imageOffset,
                             ImageSize _imageSize,
                             ImageAlignment _alignmentPolicy,
                             ImageResize _resizePolicy,
@@ -2252,7 +2252,7 @@ void Screen<T>::renderImage(shared_ptr<Image const> _image,
         for (GridSize::Offset const offset: GridSize { linesToBeRendered, columnsToBeRendered })
         {
             Cell& cell = at(_topLeft + offset);
-            cell.setImageFragment(rasterizedImage, Coordinate { offset.line, offset.column });
+            cell.setImageFragment(rasterizedImage, CellLocation { offset.line, offset.column });
             cell.setHyperlink(cursor_.hyperlink);
         };
         moveCursorTo(_topLeft.line + unbox<int>(linesToBeRendered) - 1, _topLeft.column);
@@ -2269,7 +2269,7 @@ void Screen<T>::renderImage(shared_ptr<Image const> _image,
             for (auto const columnOffset: views::n_times<ColumnOffset>(*columnsToBeRendered))
             {
                 auto const offset =
-                    Coordinate { boxed_cast<LineOffset>(linesToBeRendered) + lineOffset, columnOffset };
+                    CellLocation { boxed_cast<LineOffset>(linesToBeRendered) + lineOffset, columnOffset };
                 Cell& cell = at(pageSize_.lines.as<LineOffset>() - 1, _topLeft.column + columnOffset);
                 cell.setImageFragment(rasterizedImage, offset);
                 cell.setHyperlink(cursor_.hyperlink);

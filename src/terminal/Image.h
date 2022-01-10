@@ -167,7 +167,7 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
     ImageSize cellSize() const noexcept { return cellSize_; }
 
     /// @returns an RGBA buffer for a grid cell at given coordinate @p _pos of the rasterized image.
-    Image::Data fragment(Coordinate _pos) const;
+    Image::Data fragment(CellLocation _pos) const;
 
   private:
     std::shared_ptr<Image const> const image_; //!< Reference to the Image to be rasterized.
@@ -186,7 +186,7 @@ class ImageFragment
 
     /// @param _image  the Image this fragment is being cut off from
     /// @param _offset 0-based grid-offset into the rasterized image
-    ImageFragment(std::shared_ptr<RasterizedImage const> _image, Coordinate _offset):
+    ImageFragment(std::shared_ptr<RasterizedImage const> _image, CellLocation _offset):
         rasterizedImage_ { std::move(_image) }, offset_ { _offset }
     {
         ++ImageStats::get().fragments;
@@ -203,14 +203,14 @@ class ImageFragment
     RasterizedImage const& rasterizedImage() const noexcept { return *rasterizedImage_; }
 
     /// @returns offset of this image fragment in pixels into the underlying image.
-    Coordinate offset() const noexcept { return offset_; }
+    CellLocation offset() const noexcept { return offset_; }
 
     /// Extracts the data from the image that is to be rendered.
     Image::Data data() const { return rasterizedImage_->fragment(offset_); }
 
   private:
     std::shared_ptr<RasterizedImage const> rasterizedImage_;
-    Coordinate offset_;
+    CellLocation offset_;
 };
 
 namespace detail

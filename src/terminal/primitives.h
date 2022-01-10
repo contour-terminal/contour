@@ -142,45 +142,45 @@ struct MousePixelPosition
     Y y {};
 };
 
-struct [[nodiscard]] Coordinate
+struct [[nodiscard]] CellLocation
 {
     LineOffset line {};
     ColumnOffset column {};
 
-    constexpr Coordinate& operator+=(Coordinate a) noexcept
+    constexpr CellLocation& operator+=(CellLocation a) noexcept
     {
         line += a.line;
         column += a.column;
         return *this;
     }
 
-    constexpr Coordinate& operator+=(ColumnOffset x) noexcept
+    constexpr CellLocation& operator+=(ColumnOffset x) noexcept
     {
         column += x;
         return *this;
     }
-    constexpr Coordinate& operator+=(LineOffset y) noexcept
+    constexpr CellLocation& operator+=(LineOffset y) noexcept
     {
         line += y;
         return *this;
     }
 };
 
-inline std::ostream& operator<<(std::ostream& os, Coordinate coord)
+inline std::ostream& operator<<(std::ostream& os, CellLocation coord)
 {
     return os << fmt::format("({}, {})", coord.line, coord.column);
 }
 
-constexpr bool operator==(Coordinate a, Coordinate b) noexcept
+constexpr bool operator==(CellLocation a, CellLocation b) noexcept
 {
     return a.line == b.line && a.column == b.column;
 }
-constexpr bool operator!=(Coordinate a, Coordinate b) noexcept
+constexpr bool operator!=(CellLocation a, CellLocation b) noexcept
 {
     return !(a == b);
 }
 
-constexpr bool operator<(Coordinate a, Coordinate b) noexcept
+constexpr bool operator<(CellLocation a, CellLocation b) noexcept
 {
     if (a.line < b.line)
         return true;
@@ -191,34 +191,34 @@ constexpr bool operator<(Coordinate a, Coordinate b) noexcept
     return false;
 }
 
-constexpr bool operator<=(Coordinate a, Coordinate b) noexcept
+constexpr bool operator<=(CellLocation a, CellLocation b) noexcept
 {
     return a < b || a == b;
 }
 
-constexpr bool operator>=(Coordinate a, Coordinate b) noexcept
+constexpr bool operator>=(CellLocation a, CellLocation b) noexcept
 {
     return !(a < b);
 }
 
-constexpr bool operator>(Coordinate a, Coordinate b) noexcept
+constexpr bool operator>(CellLocation a, CellLocation b) noexcept
 {
     return !(a == b || a < b);
 }
 
-inline Coordinate operator+(Coordinate a, Coordinate b) noexcept
+inline CellLocation operator+(CellLocation a, CellLocation b) noexcept
 {
     return { a.line + b.line, a.column + b.column };
 }
 
-constexpr Coordinate operator+(Coordinate c, LineOffset y) noexcept
+constexpr CellLocation operator+(CellLocation c, LineOffset y) noexcept
 {
-    return Coordinate { c.line + y, c.column };
+    return CellLocation { c.line + y, c.column };
 }
 
-constexpr Coordinate operator+(Coordinate c, ColumnOffset x) noexcept
+constexpr CellLocation operator+(CellLocation c, ColumnOffset x) noexcept
 {
-    return Coordinate { c.line, c.column + x };
+    return CellLocation { c.line, c.column + x };
 }
 
 // }}}
@@ -375,9 +375,9 @@ struct GridSize
     constexpr iterator end() noexcept { return iterator { columns, *columns * *lines }; }
 };
 
-constexpr Coordinate operator+(Coordinate a, GridSize::Offset b) noexcept
+constexpr CellLocation operator+(CellLocation a, GridSize::Offset b) noexcept
 {
-    return Coordinate { a.line + b.line, a.column + b.column };
+    return CellLocation { a.line + b.line, a.column + b.column };
 }
 
 constexpr GridSize::iterator begin(GridSize const& s) noexcept
@@ -486,7 +486,7 @@ enum class CursorShape
 namespace fmt
 { // {{{
 template <>
-struct formatter<terminal::Coordinate>
+struct formatter<terminal::CellLocation>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -494,7 +494,7 @@ struct formatter<terminal::Coordinate>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::Coordinate coord, FormatContext& ctx)
+    auto format(terminal::CellLocation coord, FormatContext& ctx)
     {
         return format_to(ctx.out(), "({}, {})", coord.line, coord.column);
     }

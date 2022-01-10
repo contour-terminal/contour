@@ -70,7 +70,7 @@ class ScreenEvents
     virtual void setWindowTitle(std::string_view /*_title*/) {}
     virtual void useApplicationCursorKeys(bool /*_enabled*/) {}
     virtual void hardReset() {}
-    virtual void markCellDirty(Coordinate /*_position*/) noexcept {}
+    virtual void markCellDirty(CellLocation /*_position*/) noexcept {}
     virtual void markRegionDirty(Rect /*_region*/) noexcept {}
     virtual void synchronizedOutput(bool /*_enabled*/) {}
     virtual void onBufferScrolled(LineCount /*_n*/) noexcept {}

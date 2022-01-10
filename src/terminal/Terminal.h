@@ -116,7 +116,7 @@ class Terminal
                              MousePixelPosition _pixelPosition,
                              Timestamp _now);
     bool sendMouseMoveEvent(Modifier _modifier,
-                            Coordinate _pos,
+                            CellLocation _pos,
                             MousePixelPosition _pixelPosition,
                             Timestamp _now);
     bool sendMouseReleaseEvent(Modifier _modifier,
@@ -228,7 +228,7 @@ class Terminal
 
     bool isLineWrapped(LineOffset _lineNumber) const noexcept { return screen_.isLineWrapped(_lineNumber); }
 
-    Coordinate const& currentMousePosition() const noexcept { return currentMousePosition_; }
+    CellLocation const& currentMousePosition() const noexcept { return currentMousePosition_; }
 
     // {{{ cursor management
     CursorDisplay cursorDisplay() const noexcept { return cursorDisplay_; }
@@ -267,7 +267,7 @@ class Terminal
     {
         if (selection_)
             terminal::renderSelection(*selection_,
-                                      [&](Coordinate _pos) { _renderTarget(_pos, screen_.at(_pos)); });
+                                      [&](CellLocation _pos) { _renderTarget(_pos, screen_.at(_pos)); });
     }
 
     void clearSelection();
@@ -287,7 +287,7 @@ class Terminal
     }
 
     /// Tests whether given absolute coordinate is covered by a current selection.
-    bool isSelected(Coordinate _coord) const noexcept
+    bool isSelected(CellLocation _coord) const noexcept
     {
         return selection_ && selection_->state() != Selection::State::Waiting && selection_->contains(_coord);
     }
@@ -340,7 +340,7 @@ class Terminal
     void useApplicationCursorKeys(bool _enabled);
     void hardReset();
     void discardImage(Image const&);
-    void markCellDirty(Coordinate _position) noexcept;
+    void markCellDirty(CellLocation _position) noexcept;
     void markRegionDirty(Rect _area) noexcept;
     void synchronizedOutput(bool _enabled);
     void onBufferScrolled(LineCount _n) noexcept;
@@ -395,7 +395,7 @@ class Terminal
     std::chrono::steady_clock::time_point lastClick_ {};
     unsigned int speedClicks_ = 0;
 
-    terminal::Coordinate currentMousePosition_ {}; // current mouse position
+    terminal::CellLocation currentMousePosition_ {}; // current mouse position
     Modifier mouseProtocolBypassModifier_ = Modifier::Shift;
     Modifier mouseBlockSelectionModifier_ = Modifier::Control;
     bool respectMouseProtocol_ = true;    // shift-click can disable that, button release sets it back to true
@@ -419,10 +419,10 @@ class Terminal
         Terminal* terminal;
         explicit SelectionHelper(Terminal* self): terminal { self } {}
         PageSize pageSize() const noexcept override;
-        bool wordDelimited(Coordinate _pos) const noexcept override;
+        bool wordDelimited(CellLocation _pos) const noexcept override;
         bool wrappedLine(LineOffset _line) const noexcept override;
-        bool cellEmpty(Coordinate _pos) const noexcept override;
-        int cellWidth(Coordinate _pos) const noexcept override;
+        bool cellEmpty(CellLocation _pos) const noexcept override;
+        int cellWidth(CellLocation _pos) const noexcept override;
     };
     SelectionHelper selectionHelper_;
 };

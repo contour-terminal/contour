@@ -322,7 +322,7 @@ void SixelImageBuilder::clear(RGBAColor _fillColor)
     }
 }
 
-RGBAColor SixelImageBuilder::at(Coordinate _coord) const noexcept
+RGBAColor SixelImageBuilder::at(CellLocation _coord) const noexcept
 {
     auto const line = *_coord.line % *size_.height;
     auto const col = *_coord.column % *size_.width;
@@ -331,7 +331,7 @@ RGBAColor SixelImageBuilder::at(Coordinate _coord) const noexcept
     return RGBAColor { color[0], color[1], color[2], color[3] };
 }
 
-void SixelImageBuilder::write(Coordinate const& _coord, RGBColor const& _value) noexcept
+void SixelImageBuilder::write(CellLocation const& _coord, RGBColor const& _value) noexcept
 {
     if (*_coord.line >= 0 && *_coord.line < *size_.height && *_coord.column >= 0
         && *_coord.column < *size_.width)
@@ -386,7 +386,7 @@ void SixelImageBuilder::render(int8_t _sixel)
         for (int i = 0; i < 6; ++i)
         {
             auto const y = sixelCursor_.line + i;
-            auto const pos = Coordinate { y, x };
+            auto const pos = CellLocation { y, x };
             auto const pin = 1 << i;
             auto const pinned = (_sixel & pin) != 0;
             if (pinned)

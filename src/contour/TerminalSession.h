@@ -108,7 +108,7 @@ class TerminalSession: public terminal::Terminal::Events
                              terminal::MousePixelPosition _pixelPosition,
                              Timestamp _now);
     void sendMouseMoveEvent(terminal::Modifier _modifier,
-                            terminal::Coordinate _pos,
+                            terminal::CellLocation _pos,
                             terminal::MousePixelPosition _pixelPosition,
                             Timestamp _now);
     void sendMouseReleaseEvent(terminal::Modifier _modifier,
@@ -206,7 +206,7 @@ class TerminalSession: public terminal::Terminal::Events
     // state vars
     //
     terminal::ScreenType currentScreenType_ = terminal::ScreenType::Main;
-    terminal::Coordinate currentMousePosition_ = terminal::Coordinate {};
+    terminal::CellLocation currentMousePosition_ = terminal::CellLocation {};
     bool allowKeyMappings_ = true;
 };
 
