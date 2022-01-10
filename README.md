@@ -18,7 +18,7 @@ for power users with a modern feature mindset.
 - ✅ Available on all 3 major platforms, Linux, OS/X, Windows (Windows is alpha stage).
 - ✅ GPU-accelerated rendering.
 - ✅ Font ligatures support (such as in Fira Code).
-- ✅ Unicode: Emoji support (-: 🌈 💝 😛 👪 - including ZWJ, VS15, VS16 emojis :-)
+- ✅ Unicode: Emoji support (-: 🌈 💝 😛 👪 - including ZWJ, VS15, VS16 emoji :-)
 - ✅ Unicode: Grapheme cluster support
 - ✅ Bold and italic fonts
 - ✅ High-DPI support.

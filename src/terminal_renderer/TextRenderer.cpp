@@ -259,7 +259,7 @@ optional<TextRenderer::DataRef> TextRenderer::getTextureInfo(text::glyph_key con
                               ? 2u
                               : 1u; // is this the only case - with colored := Emoji presentation?
     // FIXME: this `2` is a hack of my bad knowledge. FIXME.
-    // As I only know of emojis being colored fonts, and those take up 2 cell with units.
+    // As I only know of emoji being colored fonts, and those take up 2 cell with units.
 
     // {{{ scale bitmap down iff bitmap is emoji and overflowing in diemensions
     if (glyph.format == text::bitmap_format::rgba)

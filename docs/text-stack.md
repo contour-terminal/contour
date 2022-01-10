@@ -128,7 +128,7 @@ the appropriate texture atlas as well as screen coordinates
 where to render those glyphs on the target surface.
 
 There is one texture atlas for monochrome glyphs (this is usually standard text)
-as well as one texture atlas for colored glyphs (usually colored emojis).
+as well as one texture atlas for colored glyphs (usually colored emoji).
 Additionally there can be a third type of texture atlas for storing
 LCD anti-aliased bitmap glyphs.
 
