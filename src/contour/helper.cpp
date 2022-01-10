@@ -74,8 +74,40 @@ namespace
     MousePixelPosition makeMousePixelPosition(QWheelEvent* _event) noexcept
     {
         // TODO: apply margin once supported
-        return MousePixelPosition { MousePixelPosition::X { _event->x() },
-                                    MousePixelPosition::Y { _event->y() } };
+        return MousePixelPosition { MousePixelPosition::X { static_cast<int>(_event->position().x()) },
+                                    MousePixelPosition::Y { static_cast<int>(_event->position().y()) } };
+    }
+
+    int mouseWheelDelta(QWheelEvent* _event) noexcept
+    {
+#if 1
+        // FIXME: Temporarily addressing a really bad Qt implementation detail
+        // as tracked here:
+        // https://github.com/contour-terminal/contour/issues/394
+        if (_event->pixelDelta().y())
+            return _event->pixelDelta().y();
+        if (_event->angleDelta().y())
+            return _event->angleDelta().y();
+
+        if (_event->pixelDelta().x())
+            return _event->pixelDelta().x();
+        if (_event->angleDelta().x())
+            return _event->angleDelta().x();
+
+        return 0;
+
+#else
+        // switch (_event->orientation())
+        // {
+        //     case Qt::Orientation::Horizontal:
+        //         return _event->pixelDelta().x() ? _event->pixelDelta().x()
+        //                                         : _event->angleDelta().x();
+        //     case Qt::Orientation::Vertical:
+        //         return _event->pixelDelta().y() ? _event->pixelDelta().y()
+        //                                         : _event->angleDelta().y();
+        // }
+        return _event->angleDelta().y();
+#endif
     }
 
 } // namespace
@@ -209,35 +241,7 @@ bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
 
 void sendWheelEvent(QWheelEvent* _event, TerminalSession& _session)
 {
-    auto const yDelta = [&]() -> int {
-#if 1 // FIXME: Temporarily addressing a really bad Qt implementation detail
-      // as tracked here:
-      // https://github.com/contour-terminal/contour/issues/394
-        if (_event->pixelDelta().y())
-            return _event->pixelDelta().y();
-        if (_event->angleDelta().y())
-            return _event->angleDelta().y();
-
-        if (_event->pixelDelta().x())
-            return _event->pixelDelta().x();
-        if (_event->angleDelta().x())
-            return _event->angleDelta().x();
-
-        return 0;
-
-#else
-        // switch (_event->orientation())
-        // {
-        //     case Qt::Orientation::Horizontal:
-        //         return _event->pixelDelta().x() ? _event->pixelDelta().x()
-        //                                         : _event->angleDelta().x();
-        //     case Qt::Orientation::Vertical:
-        //         return _event->pixelDelta().y() ? _event->pixelDelta().y()
-        //                                         : _event->angleDelta().y();
-        // }
-        return _event->angleDelta().y();
-#endif
-    }();
+    auto const yDelta = mouseWheelDelta(_event);
 
     if (yDelta)
     {
