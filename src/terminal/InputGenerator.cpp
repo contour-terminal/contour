@@ -729,14 +729,15 @@ bool InputGenerator::generateMouseMove(Modifier _modifier,
                                        MousePixelPosition _pixelPosition)
 {
     auto const logged = [=](bool success) -> bool {
+        // clang-format off
         if (success)
-            LOGSTORE(InputLog)
-            ("[{}:{}] Sending mouse move at {} ({}:{}).",
-             mouseProtocol_.value(),
-             mouseTransport_,
-             _pos,
-             _pixelPosition.x.value,
-             _pixelPosition.y.value);
+            LOGSTORE(InputLog)("[{}:{}] Sending mouse move at {} ({}:{}).",
+                               mouseProtocol_.value(),
+                               mouseTransport_,
+                               _pos,
+                               _pixelPosition.x.value,
+                               _pixelPosition.y.value);
+        // clang-format on
         return success;
     };
 
