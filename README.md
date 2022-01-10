@@ -6,7 +6,7 @@
 [![Twitch Live Stream](https://img.shields.io/badge/Twitch-Live%20Stream-blue?style=flat-square)](https://twitch.tv/christianparpart)
 <img alt="open collective badge" src="https://opencollective.com/contour-terminal-emulator/tiers/backer/badge.svg?label=backer&color=brightgreen" />
 
-![alt text](docs/contour-screenshots-0.1.0-pre2.png "Screenshot")
+![screenshot showcasing notcurses ncneofetch on KDE/Fedora](docs/contour-notcurses-ncneofetch.png "Screenshot")
 
 **IMPORTANT: THIS PROJECT IS IN BETA STAGE & ACTIVE DEVELOPMENT**
 
@@ -35,6 +35,7 @@ for power users with a modern feature mindset.
 - ✅ Clipboard setting via OSC 52
 - ✅ Sixel inline images
 - ✅ Terminal page [buffer capture VT extension](https://github.com/contour-terminal/contour/wiki/VTExtensions#buffer-capture) to quickly extract contents.
+- ✅ and much more ...
 
 ## CLI - Command Line Interface
 
