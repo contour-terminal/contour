@@ -3203,6 +3203,15 @@ TEST_CASE("DECCRA.Left.intersecting", "[screen]")
 }
 // }}}
 
+TEST_CASE("Screen.tcap.string", "[screen, tcap]")
+{
+    using namespace terminal;
+    auto term = MockTerm(PageSize { LineCount(3), ColumnCount(5) }, LineCount(2));
+    auto& screen = term.screen;
+    screen.write("\033P+q687061\033\\"); // HPA
+    REQUIRE(e(term.replyData) == e("\033P1+r687061=1B5B2569257031256447\033\\"));
+}
+
 TEST_CASE("Sixel.simple", "[screen]")
 {
     auto const pageSize = PageSize { LineCount(10), ColumnCount(10) };
