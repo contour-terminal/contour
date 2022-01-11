@@ -464,7 +464,7 @@ unsigned StaticDatabase::numericCapability(Code _cap) const
         if (cap.code.code == _cap.code)
             return cap.value;
 
-    return -1;
+    return npos;
 }
 
 string_view StaticDatabase::stringCapability(Code _cap) const
@@ -491,7 +491,7 @@ unsigned StaticDatabase::numericCapability(string_view _cap) const
         if (tcap.name == _cap || tcap.code == _cap)
             return tcap.value;
 
-    return -1;
+    return npos;
 }
 
 string_view StaticDatabase::stringCapability(string_view _cap) const

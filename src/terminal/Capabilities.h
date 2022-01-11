@@ -85,6 +85,8 @@ namespace literals
 class Database
 {
   public:
+    constexpr static inline unsigned npos = unsigned(-1);
+
     virtual ~Database() = default;
 
     virtual bool booleanCapability(Code _cap) const = 0;

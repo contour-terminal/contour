@@ -2493,7 +2493,7 @@ void Screen<T>::requestCapability(std::string_view _name)
 
     if (booleanCapability(_name))
         reply("\033P1+r{}\033\\", toHexString(_name));
-    else if (auto const value = numericCapability(_name); value >= 0)
+    else if (auto const value = numericCapability(_name); value != Database::npos)
     {
         auto hexValue = fmt::format("{:X}", value);
         if (hexValue.size() % 2)
