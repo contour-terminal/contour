@@ -192,6 +192,12 @@ struct RingIterator
     basic_ring<T, Vector>* ring {};
     difference_type current {};
 
+    RingIterator(basic_ring<T, Vector>* aRing, difference_type aCurrent): ring { aRing }, current { aCurrent }
+    {
+    }
+
+    RingIterator() = default;
+
     RingIterator(RingIterator const&) = default;
     RingIterator& operator=(RingIterator const&) = default;
 
@@ -276,6 +282,11 @@ struct RingReverseIterator
 
     basic_ring<T, Vector>* ring;
     difference_type current;
+
+    RingReverseIterator(basic_ring<T, Vector>* _ring, difference_type _current):
+        ring { _ring }, current { _current }
+    {
+    }
 
     RingReverseIterator(RingReverseIterator const&) = default;
     RingReverseIterator& operator=(RingReverseIterator const&) = default;

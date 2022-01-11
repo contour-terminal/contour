@@ -13,8 +13,6 @@
  */
 #pragma once
 
-#include <unicode/utf8.h>
-
 #include <fmt/format.h>
 
 #include <algorithm>

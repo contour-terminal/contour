@@ -25,7 +25,18 @@
 
 #include <array>
 
-using namespace std;
+using namespace std::string_view_literals;
+
+using std::clamp;
+using std::get;
+using std::max;
+using std::min;
+using std::nullopt;
+using std::optional;
+using std::pair;
+using std::sort;
+using std::string_view;
+using std::tuple;
 
 using crispy::Point;
 using ranges::views::filter;
@@ -703,7 +714,7 @@ namespace detail
                     return y;
                 if (y == 0)
                     return x;
-                return std::min(x, y);
+                return min(x, y);
             };
             a.from.x = merge(a.from.x, b.from.x);
             a.from.y = merge(a.from.y, b.from.y);
@@ -925,12 +936,12 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
     auto const ld = [=](Ratio a, Ratio b) {
         return lowerDiagonalMosaic(size, a, b);
     };
-    auto const lineArt = [=]() {
+    auto const lineArt = [=, this]() {
         auto b = blockElement<2>(size);
         b.lineThickness(_gridMetrics.underline.thickness);
         return b;
     };
-    auto const segmentArt = [=]() {
+    auto const segmentArt = [=, this]() {
         auto constexpr AntiAliasingSamplingFactor = 1;
         return blockElement<AntiAliasingSamplingFactor>(size)
             .lineThickness(_gridMetrics.underline.thickness)
@@ -1460,15 +1471,15 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint
             case detail::NoLine: break;
             case detail::Light: {
                 auto const y0 = offset - lightThickness / 2;
-                LOGSTORE(BoxDrawingLog)
-                ("{}: line:{}, x:{}..{}, y:{}..{}",
-                 isFirst ? "left" : "right",
-                 to_stringview(lm),
-                 x0,
-                 x1 - 1,
-                 y0,
-                 y0 + lightThickness - 1,
-                 offset);
+                // LOGSTORE(BoxDrawingLog)
+                // ("{}: line:{}, x:{}..{}, y:{}..{}",
+                //  isFirst ? "left" : "right",
+                //  to_stringview(lm),
+                //  x0,
+                //  x1 - 1,
+                //  y0,
+                //  y0 + lightThickness - 1,
+                //  offset);
                 for (auto const yi: iota(0, lightThickness))
                     for (auto const xi: iota(0u, x1 - x0))
                         image[(y0 + yi) * *width + x0 + xi] = 0xFF;

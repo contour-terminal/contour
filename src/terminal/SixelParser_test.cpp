@@ -22,7 +22,7 @@
 
 using namespace terminal;
 
-namespace // {{{ helper
+namespace
 {
 
 SixelImageBuilder sixelImageBuilder(ImageSize _size, RGBAColor _defaultColor)
@@ -257,10 +257,10 @@ TEST_CASE("SixelParser.setAndUseColor", "[sixel]")
     {
         auto const& expectedColor = x < 4 && y < 6 ? pinColors.at(static_cast<size_t>(x)) : defaultColor;
         auto const& actualColor = ib.at(CellLocation { LineOffset(y), ColumnOffset(x) });
-        INFO(fmt::format("at {}, expect {}, actual {}",
-                         CellLocation { LineOffset(y), ColumnOffset(x) },
-                         expectedColor,
-                         actualColor));
+        // INFO(fmt::format("at {}, expect {}, actual {}",
+        //                  CellLocation { LineOffset(y), ColumnOffset(x) },
+        //                  expectedColor,
+        //                  actualColor));
         CHECK(actualColor == expectedColor);
     }
 }

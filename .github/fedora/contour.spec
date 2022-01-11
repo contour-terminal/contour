@@ -16,7 +16,8 @@ Source0:        %{name}-%{version}.tar.gz
 
 BuildRequires:  cmake
 BuildRequires:  extra-cmake-modules
-BuildRequires:  fmt-devel
+# Don't use system-dep of fmt-devel for now as we need a newer one
+# BuildRequires:  fmt-devel
 BuildRequires:  fontconfig-devel
 BuildRequires:  freetype-devel
 BuildRequires:  gcc-c++

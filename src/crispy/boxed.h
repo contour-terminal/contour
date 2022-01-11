@@ -92,6 +92,13 @@ struct boxed
     }
 };
 
+template <typename T, typename U>
+std::ostream& operator<<(std::ostream& os, boxed<T, U> value)
+{
+    os << value.value;
+    return os;
+}
+
 // clang-format off
 template <typename T, typename U> constexpr boxed<T, U>& operator++(boxed<T, U>& a) noexcept { ++a.value; return a; }
 template <typename T, typename U> constexpr boxed<T, U>& operator--(boxed<T, U>& a) noexcept { --a.value; return a; }
@@ -195,7 +202,7 @@ struct hash<crispy::boxed<T, U>>
 namespace fmt // {{{
 {
 template <typename A, typename B>
-struct formatter<crispy::boxed<A, B>>
+struct formatter<crispy::boxed<A, B>>: formatter<A>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -203,9 +210,9 @@ struct formatter<crispy::boxed<A, B>>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(const crispy::boxed<A, B> _value, FormatContext& ctx)
+    constexpr auto format(crispy::boxed<A, B> _value, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "{}", _value.value);
+        return formatter<A>::format(_value.value, ctx);
     }
 };
 } // namespace fmt

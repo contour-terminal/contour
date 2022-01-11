@@ -31,6 +31,23 @@ using terminal::Modifier;
 using Buffer = terminal::InputGenerator::Sequence;
 using crispy::escape;
 
+TEST_CASE("InputGenerator.consume")
+{
+    auto received = string {};
+    auto input = InputGenerator {};
+    input.generateRaw("ABCDEF"sv);
+    REQUIRE(input.peek() == "ABCDEF"sv);
+    input.consume(2);
+    REQUIRE(input.peek() == "CDEF"sv);
+    input.consume(3);
+    REQUIRE(input.peek() == "F"sv);
+
+    input.generateRaw("abcdef"sv);
+    REQUIRE(input.peek() == "Fabcdef"sv);
+    input.consume(7);
+    REQUIRE(input.peek() == ""sv);
+}
+
 TEST_CASE("InputGenerator.Ctrl+Space", "[terminal,input]")
 {
     auto input = InputGenerator {};

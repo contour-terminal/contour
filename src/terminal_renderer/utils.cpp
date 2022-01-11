@@ -22,7 +22,6 @@ namespace terminal::renderer
 {
 
 using namespace std;
-using ranges::views::iota;
 
 vector<uint8_t> downsampleRGBA(vector<uint8_t> const& _bitmap, ImageSize _size, ImageSize _newSize)
 {
@@ -105,13 +104,13 @@ vector<uint8_t> downsample(vector<uint8_t> const& _bitmap,
             {
                 uint8_t const* p = _bitmap.data() + (y * *_size.width * _numComponents) + sc * _numComponents;
                 for (auto x = sc; x < min(sc + factor, _size.width.as<unsigned>()); x++, count++)
-                    for (auto const k: iota(0u, _numComponents))
+                    for (auto const k: ::ranges::views::iota(0u, _numComponents))
                         values.at(k) += *(p++);
             }
 
             if (count)
             {
-                for (auto const i: iota(0u, values.size()))
+                for (auto const i: ::ranges::views::iota(0u, values.size()))
                     d[i] = static_cast<uint8_t>(values[i] / count);
             }
         }
@@ -129,19 +128,19 @@ vector<uint8_t> downsample(vector<uint8_t> const& _sourceBitmap, ImageSize _targ
         auto sourceY = destY * _factor;
         auto sourceX = destX * _factor;
         auto total = 0u;
-        for (auto const y: iota(sourceY, sourceY + _factor))
+        for (auto const y: ::ranges::views::iota(sourceY, sourceY + _factor))
         {
             auto const offset = sourceWidth * y;
-            for (auto const x: iota(sourceX, sourceX + _factor))
+            for (auto const x: ::ranges::views::iota(sourceX, sourceX + _factor))
                 total += _sourceBitmap[offset + x];
         }
         return int(double(total) / double(_factor * _factor));
     };
 
-    for (auto const y: iota(0u, *_targetSize.height))
+    for (auto const y: ::ranges::views::iota(0u, *_targetSize.height))
     {
         auto const offset = *_targetSize.width * y;
-        for (auto const x: iota(0u, *_targetSize.width))
+        for (auto const x: ::ranges::views::iota(0u, *_targetSize.width))
             targetBitmap[offset + x] = min(255, targetBitmap[offset + x] + average_intensity_in_src(x, y));
     }
 

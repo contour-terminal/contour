@@ -356,14 +356,14 @@ bool InputGenerator::generate(Key _key, Modifier _modifier)
 {
     auto const logged = [_key, _modifier](bool success) -> bool {
         if (success)
-            LOGSTORE(InputLog)("Sending {} {}.", _key, _modifier);
+            LOGSTORE(InputLog)("Sending {} {}.", (unsigned) _key, (unsigned) _modifier);
         return success;
     };
 
     if (_modifier)
     {
         if (auto mapping = tryMap(mappings::functionKeysWithModifiers, _key); mapping)
-            return logged(append(fmt::format(*mapping, makeVirtualTerminalParam(_modifier))));
+            return logged(append(crispy::replace(*mapping, "{}"sv, makeVirtualTerminalParam(_modifier))));
     }
 
     if (applicationCursorKeys())
@@ -728,16 +728,17 @@ bool InputGenerator::generateMouseMove(Modifier _modifier,
                                        CellLocation _pos,
                                        MousePixelPosition _pixelPosition)
 {
-    auto const logged = [=](bool success) -> bool {
-        // clang-format off
+    auto const logged = [=, this](bool success) -> bool {
         if (success)
-            LOGSTORE(InputLog)("[{}:{}] Sending mouse move at {} ({}:{}).",
-                               mouseProtocol_.value(),
-                               mouseTransport_,
-                               _pos,
-                               _pixelPosition.x.value,
-                               _pixelPosition.y.value);
-        // clang-format on
+        {
+            LOGSTORE(InputLog)
+            ("[{}:{}] Sending mouse move at {} ({}:{}).",
+             mouseProtocol_.value(),
+             mouseTransport_,
+             _pos,
+             _pixelPosition.x.value,
+             _pixelPosition.y.value);
+        }
         return success;
     };
 

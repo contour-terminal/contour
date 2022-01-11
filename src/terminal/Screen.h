@@ -33,7 +33,6 @@
 #include <crispy/utils.h>
 
 #include <unicode/grapheme_segmenter.h>
-#include <unicode/utf8.h>
 #include <unicode/width.h>
 
 #include <fmt/format.h>
@@ -536,10 +535,10 @@ class Screen: public capabilities::StaticDatabase
     // interactive replies
     void reply(std::string const& message) { eventListener_.reply(message); }
 
-    template <typename... Args>
-    void reply(std::string const& fmt, Args&&... args)
+    template <typename... T>
+    void reply(fmt::format_string<T...> fmt, T&&... args)
     {
-        reply(fmt::format(fmt, std::forward<Args>(args)...));
+        reply(fmt::vformat(fmt, fmt::make_format_args(args...)));
     }
 
     /// @returns the primary screen's grid.
@@ -746,22 +745,4 @@ struct formatter<terminal::ScreenType>
     }
 };
 
-template <>
-struct formatter<terminal::RequestStatusString>
-{
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(const terminal::RequestStatusString value, FormatContext& ctx)
-    {
-        static constexpr auto mappings = std::array { "SGR",     "DECSCL",  "DECSCUSR", "DECSCA", "DECSTBM",
-                                                      "DECSLRM", "DECSLPP", "DECSCPP",  "DECSNLS" };
-
-        return format_to(ctx.out(), mappings.at(static_cast<size_t>(value)));
-    };
-};
 } // namespace fmt

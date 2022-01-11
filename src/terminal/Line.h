@@ -342,12 +342,12 @@ template <>
 struct formatter<terminal::LineFlags>
 {
     template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto parse(ParseContext& ctx)
     {
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(const terminal::LineFlags _flags, FormatContext& ctx)
+    auto format(const terminal::LineFlags _flags, FormatContext& ctx) const
     {
         static const std::array<std::pair<terminal::LineFlags, std::string_view>, 3> nameMap = {
             std::pair { terminal::LineFlags::Wrappable, std::string_view("Wrappable") },

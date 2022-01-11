@@ -27,7 +27,7 @@ using namespace std::string_view_literals;
 using std::string;
 using std::string_view;
 
-namespace // {{{ helper
+namespace
 {
 void logGridText(Grid<Cell> const& _grid, string const& _headline = "")
 {
@@ -44,7 +44,7 @@ void logGridText(Grid<Cell> const& _grid, string const& _headline = "")
             fmt::format("{:>2}: \"{}\" {}\n",
                         line,
                         _grid.lineText(LineOffset::cast_from(line - _grid.historyLineCount().as<int>())),
-                        _grid.lineAt(LineOffset::cast_from(line)).flags()));
+                        (unsigned) _grid.lineAt(LineOffset::cast_from(line)).flags()));
     }
 }
 

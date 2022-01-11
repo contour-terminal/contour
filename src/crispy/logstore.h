@@ -40,49 +40,42 @@ namespace logstore
 class Category;
 class Sink;
 
-namespace detail
+class SourceLocation
 {
-    class dummy_source_location
+  public:
+    SourceLocation(char const* _filename, int _line, char const* _functionName) noexcept:
+        fileName_ { _filename }, line_ { _line }, functionName_ { _functionName }
     {
-      public:
-        dummy_source_location(std::string_view _filename, int _line, std::string_view _functionName):
-            fileName_ { _filename }, line_ { _line }, functionName_ { _functionName }
-        {
-        }
+    }
 
-        char const* file_name() const noexcept { return fileName_.c_str(); }
-        int line() const noexcept { return line_; }
-        char const* function_name() const noexcept { return functionName_.c_str(); }
+    char const* file_name() const noexcept { return fileName_; }
+    int line() const noexcept { return line_; }
+    char const* function_name() const noexcept { return functionName_; }
 
-      private:
-        std::string fileName_;
-        int line_;
-        std::string functionName_;
-    };
-} // namespace detail
+    static SourceLocation current() noexcept
+    {
+        return SourceLocation(__builtin_FILE(), __builtin_LINE(), __builtin_FUNCTION());
+    }
 
-#if defined(__cpp_lib_source_location)
+  private:
+    char const* fileName_;
+    int line_;
+    char const* functionName_;
+};
+
+#if __has_include(<source_location>) && !defined(_WIN32)
 using source_location = std::source_location;
-#elif defined(LOGSTORE_HAS_EXPERIMENTAL_SOURCE_LOCATION)
+#elif __has_include(<experimental/source_location>)
 using source_location = std::experimental::source_location;
 #else
-using source_location = detail::dummy_source_location;
+using source_location = SourceLocation;
 #endif
 
-#if !defined(_MSC_VER)
-    #define __FUNCTION__ __func__
-#endif
-
-#if defined(__cpp_lib_source_location) || defined(LOGSTORE_HAS_EXPERIMENTAL_SOURCE_LOCATION)
+#if (__has_include(<source_location>) || __has_include(<experimental/source_location>)) && !defined(_WIN32)
     #define LOGSTORE_THIS() (::logstore::source_location::current())
-#elif defined(__GNUC__) || defined(__clang__)
-    #define LOGSTORE_THIS() (::logstore::detail::dummy_source_location(__FILE__, __LINE__, __FUNCTION__))
-#elif defined(__func__)
-    #define LOGSTORE_THIS() (::logstore::detail::dummy_source_location(__FILE__, __LINE__, __func__))
-#elif defined(__FUNCTION__)
-    #define LOGSTORE_THIS() (::logstore::detail::dummy_source_location(__FILE__, __LINE__, __FUNCTION__))
 #else
-    #error logstore: No way in finding out current function name.
+    #define LOGSTORE_THIS() \
+        (::logstore::SourceLocation(__builtin_FILE(), __builtin_LINE(), __builtin_FUNCTION()))
 #endif
 
 #define LOGSTORE(x) (x(LOGSTORE_THIS()))
@@ -95,7 +88,7 @@ class MessageBuilder
     std::string _buffer;
 
   public:
-    MessageBuilder(Category const& cat, source_location loc);
+    explicit MessageBuilder(Category const& cat, source_location loc = source_location::current());
 
     Category const& category() const noexcept { return _category; }
     source_location const& location() const noexcept { return _location; }
@@ -108,19 +101,23 @@ class MessageBuilder
         return *this;
     }
 
-    template <typename... Args>
-    MessageBuilder& append(std::string_view msg, Args... args)
+    template <typename... T>
+    MessageBuilder& append(fmt::format_string<T...> fmt, T&&... args)
     {
-        _buffer += fmt::format(msg, std::forward<Args>(args)...);
+        _buffer += fmt::vformat(fmt, fmt::make_format_args(args...));
         return *this;
     }
 
-    MessageBuilder& operator()(std::string_view msg) { return append(msg); }
-
-    template <typename... Args>
-    MessageBuilder& operator()(std::string_view msg, Args... args)
+    MessageBuilder& operator()(std::string const& msg)
     {
-        return append(msg, std::forward<Args>(args)...);
+        _buffer += msg;
+        return *this;
+    }
+    template <typename... T>
+    MessageBuilder& operator()(fmt::format_string<T...> fmt, T&&... args)
+    {
+        _buffer += fmt::vformat(fmt, fmt::make_format_args(args...));
+        return *this;
     }
 
     std::string message() const;
@@ -153,23 +150,17 @@ class Category
              Visibility visibility = Visibility::Public) noexcept;
     ~Category();
 
-    constexpr std::string_view name() const noexcept { return _name; }
-    constexpr std::string_view description() const noexcept { return _description; }
+    std::string_view name() const noexcept { return _name; }
+    std::string_view description() const noexcept { return _description; }
 
-    constexpr bool is_enabled() const noexcept { return _state == State::Enabled; }
-    constexpr void enable(bool enabled = true) noexcept
-    {
-        _state = enabled ? State::Enabled : State::Disabled;
-    }
-    constexpr void disable() noexcept { _state = State::Disabled; }
+    bool is_enabled() const noexcept { return _state == State::Enabled; }
+    void enable(bool enabled = true) noexcept { _state = enabled ? State::Enabled : State::Disabled; }
+    void disable() noexcept { _state = State::Disabled; }
 
-    constexpr bool visible() const noexcept { return _visibility == Visibility::Public; }
-    constexpr void set_visible(bool visible)
-    {
-        _visibility = visible ? Visibility::Public : Visibility::Hidden;
-    }
+    bool visible() const noexcept { return _visibility == Visibility::Public; }
+    void set_visible(bool visible) { _visibility = visible ? Visibility::Public : Visibility::Hidden; }
 
-    constexpr operator bool() const noexcept { return is_enabled(); }
+    operator bool() const noexcept { return is_enabled(); }
 
     Formatter const& formatter() const { return _formatter; }
     void set_formatter(Formatter formatter) { _formatter = std::move(formatter); }
@@ -177,14 +168,8 @@ class Category
     void set_sink(logstore::Sink& s) { _sink = s; }
     logstore::Sink& sink() const noexcept { return _sink.get(); }
 
-    MessageBuilder write(source_location location) const
-    {
-        return MessageBuilder(*this, std::move(location));
-    }
-    MessageBuilder operator()(source_location location) const
-    {
-        return MessageBuilder(*this, std::move(location));
-    }
+    MessageBuilder build(source_location location) const { return MessageBuilder(*this, location); }
+    MessageBuilder operator()(source_location location) const { return MessageBuilder(*this, location); }
 
     static std::string default_formatter(MessageBuilder const& _message);
 
@@ -320,8 +305,8 @@ inline void configure(std::string_view filterString)
     }
 }
 
-inline MessageBuilder::MessageBuilder(logstore::Category const& cat, source_location loc):
-    _category { cat }, _location { std::move(loc) }
+inline MessageBuilder::MessageBuilder(logstore::Category const& cat, source_location location):
+    _category { cat }, _location { location }
 {
 }
 

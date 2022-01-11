@@ -63,7 +63,7 @@ using namespace terminal;
 namespace contour
 {
 
-namespace // {{{ helper
+namespace
 {
     constexpr crispy::Point scale(crispy::Point p, double s)
     {
@@ -313,8 +313,8 @@ void TerminalSession::onClosed()
     if (diff < earlyExitThreshold_)
     {
         // auto const w = terminal_.screenSize().columns.as<int>();
-        auto constexpr SGR = "\e[1;38:2::255:255:255m\e[48:2::255:0:0m"sv;
-        auto constexpr EL = "\e[K"sv;
+        auto constexpr SGR = "\033[1;38:2::255:255:255m\033[48:2::255:0:0m"sv;
+        auto constexpr EL = "\033[K"sv;
         auto constexpr TextLines = array<string_view, 2> { "Shell terminated too quickly.",
                                                            "The window will not be closed automatically." };
         for (auto const text: TextLines)
@@ -815,7 +815,7 @@ void TerminalSession::sanitizeConfig(config::Config& _config)
         return;
 
     auto const dpi = display_->screenDPI();
-    for (config::TerminalProfile& profile: _config.profiles | ranges::views::values)
+    for (config::TerminalProfile& profile: _config.profiles | ::ranges::views::values)
         if (!profile.fonts.dpi.x || !profile.fonts.dpi.y)
             profile.fonts.dpi = scale(dpi, profile.fonts.dpiScale);
 }

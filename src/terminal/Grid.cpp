@@ -638,7 +638,8 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
         auto const numLinesToPushUpCapped = min(numLinesToPushUp, maxHistoryLineCount_);
 
         LOGSTORE(GridLog)
-        (" -> shrink lines: numLinesToShrink {}, linesAvailableBelowCursorBeforeShrink {}, cutoff {}, pushUp "
+        (" -> shrink lines: numLinesToShrink {}, linesAvailableBelowCursorBeforeShrink {}, "
+         "cutoff {}, pushUp "
          "{}/{}",
          numLinesToShrink,
          linesAvailableBelowCursorBeforeShrink,
@@ -959,13 +960,15 @@ std::ostream& dumpGrid(std::ostream& os, Grid<Cell> const& grid)
         grid.linesUsed(),
         grid.zero_index());
 
-    for (auto const line:
+    for (int const lineOffset:
          ranges::views::iota(-unbox<int>(grid.historyLineCount()), unbox<int>(grid.pageSize().lines)))
     {
-        terminal::Line<Cell> const& lineAttribs = grid.lineAt(LineOffset(line));
+        terminal::Line<Cell> const& lineAttribs = grid.lineAt(LineOffset(lineOffset));
 
-        os << fmt::format(
-            "[{:>2}] \"{}\" | {}\n", line, grid.lineText(LineOffset::cast_from(line)), lineAttribs.flags());
+        os << fmt::format("[{:>2}] \"{}\" | {}\n",
+                          lineOffset,
+                          grid.lineText(LineOffset::cast_from(lineOffset)),
+                          (unsigned) lineAttribs.flags());
     }
 
     return os;

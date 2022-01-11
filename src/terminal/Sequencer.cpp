@@ -66,7 +66,7 @@ using namespace std::string_view_literals;
 namespace terminal
 {
 
-namespace // {{{ helpers
+namespace
 {
     template <typename T, typename U>
     std::optional<crispy::boxed<T, U>> decr(std::optional<crispy::boxed<T, U>> v)

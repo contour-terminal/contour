@@ -354,4 +354,18 @@ constexpr auto each_element() noexcept
     return Container {};
 }
 
+template <typename T>
+inline std::string replace(std::string_view text, std::string_view pattern, T&& value)
+{
+    auto i = text.find(pattern);
+    if (i == std::string_view::npos)
+        return std::string(text);
+
+    std::ostringstream os;
+    os << text.substr(0, i);
+    os << value;
+    os << text.substr(i + pattern.size());
+    return os.str();
+}
+
 } // namespace crispy
