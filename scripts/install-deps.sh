@@ -217,7 +217,7 @@ install_deps_arch()
 {
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
-    packman -S -y \
+    pacman -S -y \
         catch2 \
         cmake \
         extra-cmake-modules \
