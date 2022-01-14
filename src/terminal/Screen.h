@@ -754,4 +754,23 @@ struct formatter<terminal::ScreenType>
         return format_to(ctx.out(), "({})", static_cast<unsigned>(value));
     }
 };
+
+template <>
+struct formatter<terminal::RequestStatusString>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const terminal::RequestStatusString value, FormatContext& ctx)
+    {
+        static constexpr auto mappings = std::array { "SGR",     "DECSCL",  "DECSCUSR", "DECSCA", "DECSTBM",
+                                                      "DECSLRM", "DECSLPP", "DECSCPP",  "DECSNLS" };
+
+	return format_to(ctx.out(), mappings.at(static_cast<size_t>(value)));
+    };
+};
 } // namespace fmt

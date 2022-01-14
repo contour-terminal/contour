@@ -299,4 +299,26 @@ struct formatter<contour::config::SelectionAction>
     }
 };
 
+template <>
+struct formatter<contour::config::ScrollBarPosition>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    using ScrollBarPosition = contour::config::ScrollBarPosition;
+    template <typename FormatContext>
+    auto format(ScrollBarPosition _value, FormatContext& ctx)
+    {
+        switch (_value)
+        {
+        case ScrollBarPosition::Hidden: return format_to(ctx.out(), "Hidden");
+        case ScrollBarPosition::Left: return format_to(ctx.out(), "Left");
+        case ScrollBarPosition::Right: return format_to(ctx.out(), "Right");
+        }
+        return format_to(ctx.out(), "{}", static_cast<unsigned>(_value));
+    }
+};
+
 } // namespace fmt

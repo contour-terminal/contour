@@ -496,4 +496,68 @@ struct formatter<terminal::MouseTransport>
         return format_to(_ctx.out(), "<{}>", unsigned(_value));
     }
 };
+
+template <>
+struct formatter<terminal::Key>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::Key _value, FormatContext& _ctx)
+    {
+        static constexpr auto mappings = std::array { "F1",
+                                                      "F2",
+                                                      "F3",
+                                                      "F4",
+                                                      "F5",
+                                                      "F6",
+                                                      "F7",
+                                                      "F8",
+                                                      "F9",
+                                                      "F10",
+                                                      "F11",
+                                                      "F12",
+                                                      "F13",
+                                                      "F14",
+                                                      "F15",
+                                                      "F16",
+                                                      "F17",
+                                                      "F18",
+                                                      "F19",
+                                                      "F20",
+                                                      "DownArrow",
+                                                      "LeftArrow",
+                                                      "RightArrow",
+                                                      "UpArrow",
+                                                      "Insert",
+                                                      "Delete",
+                                                      "Home",
+                                                      "End",
+                                                      "PageUp",
+                                                      "PageDown",
+                                                      "Numpad_NumLock",
+                                                      "Numpad_Divide",
+                                                      "Numpad_Multiply",
+                                                      "Numpad_Subtract",
+                                                      "Numpad_CapsLock",
+                                                      "Numpad_Add",
+                                                      "Numpad_Decimal",
+                                                      "Numpad_Enter",
+                                                      "Numpad_Equal",
+                                                      "Numpad_0",
+                                                      "Numpad_1",
+                                                      "Numpad_2",
+                                                      "Numpad_3",
+                                                      "Numpad_4",
+                                                      "Numpad_5",
+                                                      "Numpad_6",
+                                                      "Numpad_7",
+                                                      "Numpad_8",
+                                                      "Numpad_9" };
+        return format_to(_ctx.out(), mappings.at(static_cast<size_t>(_value)));
+    }
+};
 } // namespace fmt
