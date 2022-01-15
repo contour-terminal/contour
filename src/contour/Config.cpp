@@ -1334,7 +1334,6 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
 #endif
 
     strValue = "gray";
-    string renderModeStr;
     tryLoadChild(_usedKeys, _doc, basePath, "font.render_mode", strValue);
     auto const static renderModeMap = array {
         pair { "lcd"sv, text::render_mode::lcd },           pair { "light"sv, text::render_mode::light },
@@ -1342,11 +1341,11 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
         pair { "monochrome"sv, text::render_mode::bitmap },
     };
 
-    auto const i = crispy::find_if(renderModeMap, [&](auto m) { return m.first == renderModeStr; });
+    auto const i = crispy::find_if(renderModeMap, [&](auto m) { return m.first == strValue; });
     if (i != renderModeMap.end())
         profile.fonts.renderMode = i->second;
     else
-        errorlog()("Invalid render_mode \"{}\" in configuration.", renderModeStr);
+        errorlog()("Invalid render_mode \"{}\" in configuration.", strValue);
 
     auto intValue = profile.maxHistoryLineCount;
     tryLoadChild(_usedKeys, _doc, basePath, "history.limit", intValue);
