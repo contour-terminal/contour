@@ -37,131 +37,32 @@ for power users with a modern feature mindset.
 - ✅ Terminal page [buffer capture VT extension](https://github.com/contour-terminal/contour/wiki/VTExtensions#buffer-capture) to quickly extract contents.
 - ✅ and much more ...
 
+## Requirements
+
+- **operating system**: A *recent* operating system (OS/X 12, Windows 10+, an up-to-date Linux, or FreeBSD)
+- **GPU**: driver must support at least OpenGL 3.3 hardware accelerated or as software rasterizer.
+- **CPU**: x86-64 AMD or Intel with AES-NI instruction set.
+
 ## CLI - Command Line Interface
 
 ```txt
   Usage:
 
-    contour [terminal] [config STRING] [profile STRING] [debug STRING] [live-config]
-                       [working-directory STRING] [class STRING] [PROGRAM ARGS...]
+    contour [terminal] [config FILE] [profile NAME] [debug TAGS] [live-config]
+                       [dump-state-at-exit PATH] [early-exit-threshold UINT]
+                       [working-directory DIRECTORY] [class WM_CLASS]
+                       [platform PLATFORM[:OPTIONS]] [session SESSION_ID] [PROGRAM ARGS...]
+    contour font-locator [config FILE] [profile NAME] [debug TAGS]
     contour help
     contour version
+    contour license
     contour parser-table
     contour list-debug-tags
-    contour capture [logical] [timeout FLOAT] [lines INT] output STRING
-
-  Detailed description:
-
-    contour [terminal]
-        Spawns a new terminal application.
-
-        Options:
-
-            [config STRING]             Path to configuration file to load at startup.
-                                        [default: /home/trapni/.config/contour/contour.yml]
-            [profile STRING]            Terminal Profile to load.
-            [debug STRING]              Enables debug logging, using a comma seperated list of tags.
-            [live-config]               Enables live config reloading. [default: false]
-            [working-directory STRING]  Sets initial working directory. [default: .]
-            [class STRING]              Sets the WM_CLASS property of the window. [default: contour]
-            [PROGRAM ARGS...]           Executes given program instead of the configuration provided one.
-
-```
-
-## Example Configuration File
-
-```yaml
-word_delimiters: " /\\()\"'-.,:;<>~!@#$%^&*+=[]{}~?|│"
-default_profile: ubuntu_vm
-profiles:
-    ubuntu_vm:
-        shell: "ssh ubuntu-vm"
-        terminal_size:
-            columns: 130
-            lines: 30
-        environment:
-            TERM: xterm-256color
-            COLORTERM: truecolor
-        font:
-            size: 12
-            render_mode: lcd
-            regular: "Fira Code"
-            bold: "Fira Code:style=bold"
-            italic: "Hack:style=italic"
-            bold_italic: "Hack:style=bold italic"
-            emoji: "emoji"
-        tab_width: 8
-        history:
-            limit: 8000
-            scroll_multiplier: 3
-            auto_scroll_on_update: true
-        cursor:
-            shape: block
-            blinking: true
-        background:
-            opacity: 0.9
-            blur: false
-        colors: google_dark
-
-color_schemes:
-    google_dark:
-        cursor: '#b0b030'
-        selection: '#30c0c0'
-        default:
-            background: '#1d1f21'
-            foreground: '#c5c8c6'
-        normal:
-            black:   '#1d1f21'
-            red:     '#cc342b'
-            green:   '#198844'
-            yellow:  '#fba922'
-            blue:    '#3971ed'
-            magenta: '#a36ac7'
-            cyan:    '#3971ed'
-            white:   '#c5c8c6'
-        bright:
-            black:   '#969896'
-            red:     '#cc342b'
-            green:   '#198844'
-            yellow:  '#fba922'
-            blue:    '#3971ed'
-            magenta: '#a36ac7'
-            cyan:    '#3971ed'
-            white:   '#ffffff'
-
-input_mapping:
-    - { mods: [Alt],            key: Enter,         action: ToggleFullscreen }
-    - { mods: [Control, Alt],   key: S,             action: ScreenshotVT }
-    - { mods: [Control, Shift], key: Equal,         action: IncreaseFontSize }
-    - { mods: [Control, Shift], key: Minus,         action: DecreaseFontSize }
-    - { mods: [Control, Shift], key: N,             action: NewTerminal }
-    - { mods: [Control],        mouse: WheelUp,     action: IncreaseFontSize }
-    - { mods: [Control],        mouse: WheelDown,   action: DecreaseFontSize }
-    - { mods: [Alt],            mouse: WheelUp,     action: IncreaseOpacity }
-    - { mods: [Alt],            mouse: WheelDown,   action: DecreaseOpacity }
-    - { mods: [Control],        key: '0',           action: ResetFontSize }
-    - { mods: [Shift],          mouse: WheelUp,     action: ScrollPageUp }
-    - { mods: [Shift],          mouse: WheelDown,   action: ScrollPageDown }
-    - { mods: [],               mouse: WheelUp,     action: ScrollUp }
-    - { mods: [],               mouse: WheelDown,   action: ScrollDown }
-    - { mods: [Shift],          key: UpArrow,       action: ScrollOneUp }
-    - { mods: [Shift],          key: DownArrow,     action: ScrollOneDown }
-    - { mods: [Shift],          key: PageUp,        action: ScrollPageUp }
-    - { mods: [Shift],          key: PageDown,      action: ScrollPageDown }
-    - { mods: [Shift],          key: Home,          action: ScrollToTop }
-    - { mods: [Shift],          key: End,           action: ScrollToBottom }
-    - { mods: [Alt, Shift],     key: 'k',           action: ScrollMarkUp }
-    - { mods: [Alt, Shift],     key: 'j',           action: ScrollMarkDown }
-
-logging:
-    file: "/path/to/contour.log"
-    parse_errors: true
-    invalid_output: true
-    unsupported_output: true
-    raw_input: false
-    raw_output: false
-    trace_input: false
-    trace_output: false
+    contour generate terminfo to FILE
+    contour generate config to FILE
+    contour generate integration shell SHELL to FILE
+    contour capture [logical] [timeout SECONDS] [lines COUNT] to FILE
+    contour set profile [to NAME]
 
 ```
 
@@ -176,13 +77,24 @@ to build from source, it is recommended to execute the `scripts/install-deps.sh`
 sudo ./scripts/install-deps.sh
 ```
 
-### Prerequisites Windows 10
+### Prerequisites Windows 10 or newer
 
 For Windows, you must have Windows 10, 2018 Fall Creators Update, and Visual Studio 2019, installed.
 It will neither build nor run on any prior Windows OS, due to libterminal making use of [ConPTY API](https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/).
 
 ```psh
 .\scripts\install-deps.ps1
+```
+
+### Compile
+
+```sh
+mkdir build
+cmake -S . -B build
+cmake --build build/
+
+# Optionally, if you want to install from source
+cmake --build build/ --target install
 ```
 
 # References
