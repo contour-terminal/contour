@@ -258,7 +258,7 @@ uint64_t Renderer::render(Terminal& _terminal, bool _pressure)
     }
     textRenderer_.endFrame();
 
-    if (cursorOpt && _terminal.cursorShape() != CursorShape::Block)
+    if (cursorOpt && cursorOpt.value().shape != CursorShape::Block)
     {
         // Note. Block cursor is implicitly rendered via standard grid cell rendering.
         auto const cursor = *cursorOpt;
