@@ -23,7 +23,6 @@
 namespace terminal::renderer
 {
 
-struct GridMetrics;
 class RenderTarget;
 
 class BackgroundRenderer: public Renderable
@@ -36,9 +35,9 @@ class BackgroundRenderer: public Renderable
     /// @param _renderTarget
     BackgroundRenderer(GridMetrics const& _gridMetrics, RGBColor const& _defaultColor);
 
-    void setRenderTarget(RenderTarget& _renderTarget) override;
+    void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
 
-    constexpr void setOpacity(float _value) noexcept { opacity_ = _value; }
+    constexpr void setOpacity(float _value) noexcept { opacity_ = static_cast<uint8_t>(_value * 255.f); }
 
     // TODO: pass background color directly (instead of whole grid cell),
     // because there is no need to detect bg/fg color more than once per grid cell!
@@ -46,11 +45,12 @@ class BackgroundRenderer: public Renderable
     /// Queues up a render with given background
     void renderCell(RenderCell const& _cell);
 
+    void inspect(std::ostream& output) const override;
+
   private:
     // private data
-    GridMetrics const& gridMetrics_;
     RGBColor const& defaultColor_;
-    float opacity_ = 1.0f; // normalized opacity value between 0.0 .. 1.0
+    uint8_t opacity_ = 255;
 };
 
 } // namespace terminal::renderer

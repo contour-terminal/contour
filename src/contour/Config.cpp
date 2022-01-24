@@ -1334,7 +1334,6 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
 #endif
 
     strValue = "gray";
-    string renderModeStr;
     tryLoadChild(_usedKeys, _doc, basePath, "font.render_mode", strValue);
     auto const static renderModeMap = array {
         pair { "lcd"sv, text::render_mode::lcd },           pair { "light"sv, text::render_mode::light },
@@ -1342,11 +1341,11 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
         pair { "monochrome"sv, text::render_mode::bitmap },
     };
 
-    auto const i = crispy::find_if(renderModeMap, [&](auto m) { return m.first == renderModeStr; });
+    auto const i = crispy::find_if(renderModeMap, [&](auto m) { return m.first == strValue; });
     if (i != renderModeMap.end())
         profile.fonts.renderMode = i->second;
     else
-        errorlog()("Invalid render_mode \"{}\" in configuration.", renderModeStr);
+        errorlog()("Invalid render_mode \"{}\" in configuration.", strValue);
 
     auto intValue = profile.maxHistoryLineCount;
     tryLoadChild(_usedKeys, _doc, basePath, "history.limit", intValue);
@@ -1499,7 +1498,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         _config.platformPlugin = ""; // Mapping "auto" to its internally equivalent "".
 
     string renderingBackendStr;
-    if (tryLoadValue(usedKeys, doc, "renderer", renderingBackendStr))
+    if (tryLoadValue(usedKeys, doc, "renderer.backend", renderingBackendStr))
     {
         renderingBackendStr = toUpper(renderingBackendStr);
         if (renderingBackendStr == "OPENGL")
@@ -1509,6 +1508,10 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         else if (renderingBackendStr != "" && renderingBackendStr != "DEFAULT")
             errorlog()("Unknown renderer: {}.", renderingBackendStr);
     }
+
+    tryLoadValue(usedKeys, doc, "renderer.tile_hashtable_slots", _config.textureAtlasHashtableSlots.value);
+    tryLoadValue(usedKeys, doc, "renderer.tile_cache_count", _config.textureAtlasTileCount.value);
+    tryLoadValue(usedKeys, doc, "renderer.tile_direct_mapping", _config.textureAtlasDirectMapping);
 
     if (doc["mock_font_locator"].IsSequence())
     {

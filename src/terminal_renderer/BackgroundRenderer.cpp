@@ -23,14 +23,15 @@
 namespace terminal::renderer
 {
 
-BackgroundRenderer::BackgroundRenderer(GridMetrics const& _gridMetrics, RGBColor const& _defaultColor):
-    gridMetrics_ { _gridMetrics }, defaultColor_ { _defaultColor }
+BackgroundRenderer::BackgroundRenderer(GridMetrics const& gridMetrics, RGBColor const& defaultColor):
+    Renderable { gridMetrics }, defaultColor_ { defaultColor }
 {
 }
 
-void BackgroundRenderer::setRenderTarget(RenderTarget& _renderTarget)
+void BackgroundRenderer::setRenderTarget(RenderTarget& renderTarget,
+                                         DirectMappingAllocator& directMappingAllocator)
 {
-    Renderable::setRenderTarget(_renderTarget);
+    Renderable::setRenderTarget(renderTarget, directMappingAllocator);
 }
 
 void BackgroundRenderer::renderCell(RenderCell const& _cell)
@@ -38,16 +39,17 @@ void BackgroundRenderer::renderCell(RenderCell const& _cell)
     if (_cell.backgroundColor == defaultColor_)
         return;
 
-    auto const pos = gridMetrics_.map(_cell.position);
+    auto const pos = _gridMetrics.map(_cell.position);
 
     renderTarget().renderRectangle(pos.x,
                                    pos.y,
-                                   gridMetrics_.cellSize.width.as<int>(),
-                                   gridMetrics_.cellSize.height.as<int>(),
-                                   static_cast<float>(_cell.backgroundColor.red) / 255.0f,
-                                   static_cast<float>(_cell.backgroundColor.green) / 255.0f,
-                                   static_cast<float>(_cell.backgroundColor.blue) / 255.0f,
-                                   opacity_);
+                                   _gridMetrics.cellSize.width,
+                                   _gridMetrics.cellSize.height,
+                                   RGBAColor(_cell.backgroundColor, opacity_));
+}
+
+void BackgroundRenderer::inspect(std::ostream& output) const
+{
 }
 
 } // namespace terminal::renderer

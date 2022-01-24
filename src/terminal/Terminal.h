@@ -59,7 +59,7 @@ class Terminal
         virtual FontDef getFontDef() { return {}; }
         virtual void setFontDef(FontDef const& /*_fontSpec*/) {}
         virtual void copyToClipboard(std::string_view /*_data*/) {}
-        virtual void dumpState() {}
+        virtual void inspect() {}
         virtual void notify(std::string_view /*_title*/, std::string_view /*_body*/) {}
         virtual void onClosed() {}
         virtual void onSelectionCompleted() {}
@@ -322,7 +322,7 @@ class Terminal
     FontDef getFontDef();
     void setFontDef(FontDef const& _fontDef);
     void copyToClipboard(std::string_view _data);
-    void dumpState();
+    void inspect();
     void notify(std::string_view _title, std::string_view _body);
     void reply(std::string_view _response);
     void resizeWindow(PageSize);

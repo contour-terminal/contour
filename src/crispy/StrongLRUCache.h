@@ -56,7 +56,7 @@ template <typename Key, typename Value, typename Hasher = StrongHasher<Key>>
 class StrongLRUCache
 {
   public:
-    StrongLRUCache(StrongHashtableSize hashCount, LRUCapacity entryCount);
+    StrongLRUCache(StrongHashtableSize hashCount, LRUCapacity entryCount, std::string name = "");
     StrongLRUCache(StrongLRUCache&&) noexcept = default;
     StrongLRUCache(StrongLRUCache const&) noexcept = delete;
     StrongLRUCache& operator=(StrongLRUCache&&) noexcept = default;
@@ -77,7 +77,7 @@ class StrongLRUCache
     void clear();
 
     // Delets the key and its associated value from the LRU cache
-    void erase(Key key);
+    void remove(Key key);
 
     /// Touches a given key, putting it to the front of the LRU chain.
     /// Nothing is done if the key was not found.
@@ -124,7 +124,7 @@ class StrongLRUCache
   private:
     using Entry = detail::LRUCacheEntry<Key, Value>;
     using Hashtable = StrongLRUHashtable<Entry>;
-    using HashtablePtr = typename Hashtable::CachePtr;
+    using HashtablePtr = typename Hashtable::Ptr;
 
     HashtablePtr _hashtable;
 };
@@ -132,8 +132,10 @@ class StrongLRUCache
 // {{{ implementation
 
 template <typename Key, typename Value, typename Hasher>
-StrongLRUCache<Key, Value, Hasher>::StrongLRUCache(StrongHashtableSize hashCount, LRUCapacity entryCount):
-    _hashtable { Hashtable::create(hashCount, entryCount) }
+StrongLRUCache<Key, Value, Hasher>::StrongLRUCache(StrongHashtableSize hashCount,
+                                                   LRUCapacity entryCount,
+                                                   std::string name):
+    _hashtable { Hashtable::create(hashCount, entryCount, std::move(name)) }
 {
 }
 
@@ -167,9 +169,9 @@ void StrongLRUCache<Key, Value, Hasher>::clear()
 }
 
 template <typename Key, typename Value, typename Hasher>
-void StrongLRUCache<Key, Value, Hasher>::erase(Key key)
+void StrongLRUCache<Key, Value, Hasher>::remove(Key key)
 {
-    _hashtable->erase(Hasher {}(key));
+    _hashtable->remove(Hasher {}(key));
 }
 
 template <typename Key, typename Value, typename Hasher>

@@ -114,18 +114,20 @@ struct RGBAColor
     constexpr uint8_t blue() const noexcept { return static_cast<uint8_t>((value >> 8) & 0xFF); }
     constexpr uint8_t alpha() const noexcept { return static_cast<uint8_t>(value & 0xFF); }
 
-    constexpr RGBAColor(): value { 0 } {}
-    constexpr RGBAColor(uint32_t _value): value { _value } {}
+    constexpr RGBAColor() noexcept: value { 0 } {}
+    constexpr RGBAColor(uint32_t _value) noexcept: value { _value } {}
 
-    constexpr RGBAColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a):
+    constexpr RGBAColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a) noexcept:
         value { (static_cast<uint32_t>(r) << 24) | (static_cast<uint32_t>(g) << 16)
                 | (static_cast<uint32_t>(b) << 8) | (a) }
     {
     }
 
-    constexpr RGBAColor(RGBColor _color): RGBAColor { _color.red, _color.green, _color.blue, 0xFF } {}
+    constexpr RGBAColor(RGBColor _color) noexcept: RGBAColor { _color.red, _color.green, _color.blue, 0xFF }
+    {
+    }
 
-    constexpr RGBAColor(RGBColor _color, uint8_t _alpha):
+    constexpr RGBAColor(RGBColor _color, uint8_t _alpha) noexcept:
         RGBAColor { _color.red, _color.green, _color.blue, _alpha }
     {
     }
@@ -133,6 +135,8 @@ struct RGBAColor
     constexpr RGBColor rgb() const noexcept { return RGBColor(value >> 8); }
 
     RGBAColor& operator=(std::string const& _hexCode);
+
+    constexpr static inline auto White = uint32_t(0xFF'FF'FF'FF);
 };
 
 constexpr bool operator==(RGBAColor a, RGBAColor b) noexcept

@@ -96,7 +96,7 @@ using std::chrono::steady_clock;
 
 using actions::Action;
 
-namespace // {{{
+namespace
 {
 #if !defined(NDEBUG) && defined(GL_DEBUG_OUTPUT) && defined(CONTOUR_DEBUG_OPENGL)
     void glMessageCallback(GLenum _source,
@@ -221,19 +221,21 @@ namespace // {{{
 } // namespace
 
 // {{{ Widget creation and QOpenGLWidget overides
-TerminalWidget::TerminalWidget(config::TerminalProfile const& _profile, // TODO(PR): OH I am unused!
-                               TerminalSession& _session,
-                               function<void()> _adaptSize,
-                               function<void(bool)> _enableBackgroundBlur):
+TerminalWidget::TerminalWidget(TerminalSession& session,
+                               function<void()> adaptSize,
+                               function<void(bool)> enableBackgroundBlur):
     QOpenGLWidget(),
-    session_ { _session },
-    adaptSize_ { std::move(_adaptSize) },
-    enableBackgroundBlur_ { std::move(_enableBackgroundBlur) },
+    session_ { session },
+    adaptSize_ { std::move(adaptSize) },
+    enableBackgroundBlur_ { std::move(enableBackgroundBlur) },
     renderer_ {
         terminal().screenSize(),
         sanitizeFontDescription(profile().fonts, screenDPI()),
         terminal().screen().colorPalette(),
         profile().backgroundOpacity,
+        session_.config().textureAtlasHashtableSlots,
+        session_.config().textureAtlasTileCount,
+        session_.config().textureAtlasDirectMapping,
         profile().hyperlinkDecoration.normal,
         profile().hyperlinkDecoration.hover
         // TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
@@ -331,12 +333,15 @@ void TerminalWidget::initializeGL()
 {
     initializeOpenGLFunctions();
 
+    auto const textureTileSize = renderer_.gridMetrics().cellSize;
+    auto const viewportMargin = terminal::renderer::PageMargin {}; // TODO margin
+
     renderTarget_ =
         make_unique<OpenGLRenderer>(*config::Config::loadShaderConfig(config::ShaderClass::Text),
                                     *config::Config::loadShaderConfig(config::ShaderClass::Background),
                                     ImageSize { Width(width()), Height(height()) },
-                                    terminal::renderer::PageMargin {} // TODO margin
-        );
+                                    textureTileSize,
+                                    viewportMargin);
 
     renderer_.setRenderTarget(*renderTarget_);
 
@@ -344,18 +349,16 @@ void TerminalWidget::initializeGL()
     static bool infoPrinted = false;
     if (!infoPrinted)
     {
+        // clang-format off
         infoPrinted = true;
-        LOGSTORE(DisplayLog)
-        ("[FYI] DPI             : {} physical; {} logical",
-         crispy::Size { physicalDpiX(), physicalDpiY() },
-         crispy::Size { logicalDpiX(), logicalDpiY() });
+        LOGSTORE(DisplayLog)("[FYI] Application PID : {}", QCoreApplication::applicationPid());
+        LOGSTORE(DisplayLog)("[FYI] DPI             : {} physical; {} logical", crispy::Size { physicalDpiX(), physicalDpiY() }, crispy::Size { logicalDpiX(), logicalDpiY() });
         auto const fontSizeInPx = int(ceil(profile().fonts.size.pt / 72.0 * 96.0 * contentScale()));
         LOGSTORE(DisplayLog)("[FYI] Font size       : {} ({}px)", profile().fonts.size, fontSizeInPx);
-        LOGSTORE(DisplayLog)
-        ("[FYI] OpenGL type     : {}",
-         (QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL"));
+        LOGSTORE(DisplayLog)("[FYI] OpenGL type     : {}", (QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL"));
         LOGSTORE(DisplayLog)("[FYI] OpenGL renderer : {}", glGetString(GL_RENDERER));
         LOGSTORE(DisplayLog)("[FYI] Qt platform     : {}", QGuiApplication::platformName().toStdString());
+        // clang-format on
 
         GLint versionMajor {};
         GLint versionMinor {};
@@ -652,7 +655,7 @@ void TerminalWidget::copyToClipboard(std::string_view _data)
         clipboard->setText(QString::fromUtf8(_data.data(), static_cast<int>(_data.size())));
 }
 
-void TerminalWidget::dumpState()
+void TerminalWidget::inspect()
 {
     post([this]() { doDumpState(); });
 }
@@ -684,8 +687,8 @@ void TerminalWidget::doDumpState()
     {
         auto const screenStateDump = [&]() {
             auto os = std::stringstream {};
-            terminal().screen().dumpState("Screen state dump.", os);
-            renderer_.dumpState(os);
+            terminal().screen().inspect("Screen state dump.", os);
+            renderer_.inspect(os);
             return os.str();
         }();
 
@@ -719,30 +722,27 @@ void TerminalWidget::doDumpState()
         auto const theImageFormat = qImageFormat;
         auto const theElementCount = elementCount;
 
-        return [_filename, theImageFormat, theElementCount](vector<uint8_t> const& _buffer, ImageSize _size) {
-            auto image = make_unique<QImage>(_size.width.as<int>(), _size.height.as<int>(), theImageFormat);
-            // Vertically flip the image, because the coordinate system between OpenGL and desktop screens is
-            // inverse.
-            crispy::for_each(
-                // TODO: std::execution::seq,
-                crispy::times(_size.height.as<int>()),
-                [&_buffer, &image, theElementCount, _size](int i) {
-                    uint8_t const* sourceLine = &_buffer.data()[i * _size.width.as<int>() * theElementCount];
-                    copy(sourceLine,
-                         sourceLine + _size.width.as<int>() * theElementCount,
-                         image->scanLine(_size.height.as<int>() - i - 1));
-                });
-            image->save(QString::fromStdString(_filename.generic_string()));
-            LOGSTORE(DisplayLog)("Saving image: {}", _filename.generic_string());
+        return [_filename, theImageFormat, theElementCount, _format](vector<uint8_t> const& _buffer,
+                                                                     ImageSize _size) {
+            LOGSTORE(DisplayLog)("Saving image {} to: {}", _size, _filename.generic_string());
+            auto image = QImage(_size.width.as<int>(), _size.height.as<int>(), theImageFormat);
+            auto const pitch = unbox<int>(_size.width) * theElementCount;
+            for (int i = 0; i < unbox<int>(_size.height); ++i)
+            {
+                // Vertically flip the image, because the coordinate system
+                // between OpenGL and desktop screens is inverse.
+                uint8_t const* sourceLine = _buffer.data() + static_cast<ptrdiff_t>(i * pitch);
+                uint8_t const* sourceLineEnd = sourceLine + pitch;
+                uint8_t* targetLine = image.scanLine(unbox<int>(_size.height) - 1 - i);
+                copy(sourceLine, sourceLineEnd, targetLine);
+            }
+            image.save(QString::fromStdString(_filename.generic_string()));
         };
     };
 
-    auto const atlasScreenshotSaver = [&screenshotSaver, &targetDir](std::string const& _allocatorName,
-                                                                     unsigned _instanceId,
-                                                                     vector<uint8_t> const& _buffer,
-                                                                     ImageSize _size) {
-        return [&screenshotSaver, &targetDir, &_buffer, _size, _allocatorName, _instanceId](
-                   ImageBufferFormat _format) {
+    auto const atlasScreenshotSaver = [screenshotSaver, targetDir](vector<uint8_t> const& _buffer,
+                                                                   ImageSize _size) {
+        return [screenshotSaver, targetDir, &_buffer, _size](ImageBufferFormat _format) {
             auto const formatText = [&]() {
                 switch (_format)
                 {
@@ -752,44 +752,41 @@ void TerminalWidget::doDumpState()
                 }
                 return "unknown"sv;
             }();
-            auto const fileName =
-                targetDir / fmt::format("atlas-{}-{}-{}.png", _allocatorName, formatText, _instanceId);
+            auto const fileName = targetDir / fmt::format("texture-atlas-{}.png", formatText);
             return screenshotSaver(fileName, _format)(_buffer, _size);
         };
     };
 
     terminal::renderer::RenderTarget& renderTarget = renderer_.renderTarget();
 
-    for (auto const* allocator: renderTarget.allAtlasAllocators())
+    do
     {
-        for (auto const atlasID: allocator->activeAtlasTextures())
-        {
-            auto infoOpt = renderTarget.readAtlas(*allocator, atlasID);
-            if (!infoOpt.has_value())
-                continue;
+        auto infoOpt = renderTarget.readAtlas();
+        if (!infoOpt.has_value())
+            break;
 
-            terminal::renderer::AtlasTextureInfo& info = infoOpt.value();
-            auto const saveScreenshot =
-                atlasScreenshotSaver(allocator->name(), atlasID.value, info.buffer, info.size);
-            switch (info.format)
+        terminal::renderer::AtlasTextureScreenshot const& info = infoOpt.value();
+        auto const saveScreenshot = atlasScreenshotSaver(info.buffer, info.size);
+        switch (info.format)
+        {
+        case terminal::renderer::atlas::Format::RGBA: saveScreenshot(ImageBufferFormat::RGBA); break;
+        case terminal::renderer::atlas::Format::RGB: saveScreenshot(ImageBufferFormat::RGB); break;
+        case terminal::renderer::atlas::Format::Red: saveScreenshot(ImageBufferFormat::Alpha); break;
+        }
+    } while (0);
+
+    renderTarget.scheduleScreenshot(
+        [this, targetDir, screenshotSaver](std::vector<uint8_t> const& rgbaPixels, ImageSize imageSize) {
+            auto const take = screenshotSaver(targetDir / "screenshot.png", ImageBufferFormat::RGBA);
+            take(rgbaPixels, imageSize);
+
+            // If this dump-state was triggered due to the PTY being closed
+            // and a dump was requested at the end, then terminate this session here now.
+            if (session_.terminal().device().isClosed() && session_.app().dumpStateAtExit().has_value())
             {
-            case terminal::renderer::atlas::Format::RGBA: saveScreenshot(ImageBufferFormat::RGBA); break;
-            case terminal::renderer::atlas::Format::RGB: saveScreenshot(ImageBufferFormat::RGB); break;
-            case terminal::renderer::atlas::Format::Red: saveScreenshot(ImageBufferFormat::Alpha); break;
+                session_.terminate();
             }
-        }
-    }
-
-    renderTarget.scheduleScreenshot([this, targetDir, screenshotSaver](auto a, auto b) {
-        screenshotSaver(targetDir / "screenshot.png", ImageBufferFormat::RGBA)(a, b);
-
-        // If this dump-state was triggered due to the PTY being closed
-        // and a dump was requested at the end, then terminate this session here now.
-        if (session_.terminal().device().isClosed() && session_.app().dumpStateAtExit().has_value())
-        {
-            session_.terminate();
-        }
-    });
+        });
 
     // force an update to actually render the screenshot
     update();

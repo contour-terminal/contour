@@ -37,22 +37,18 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::Im
     // assert(_bitmap.width <= _width);
     // assert(_bitmap.height <= _height);
 
-    auto const ratioX = float(*_bitmap.size.width) / float(*_newSize.width);
-    auto const ratioY = float(*_bitmap.size.height) / float(*_newSize.height);
-    auto const ratio = max(ratioX, ratioY);
-    auto const factor = static_cast<unsigned>(ceilf(ratio));
+    auto const ratioX = unbox<double>(_bitmap.bitmapSize.width) / unbox<double>(_newSize.width);
+    auto const ratioY = unbox<double>(_bitmap.bitmapSize.height) / unbox<double>(_newSize.height);
+    auto const ratio = min(ratioX, ratioY);
+    auto const factor = static_cast<unsigned>(ceil(ratio));
 
     vector<uint8_t> dest;
-    dest.resize(*_newSize.height * *_newSize.width * 4);
+    dest.resize(_newSize.area() * 4 /* color component count, RGBA */);
 
-    LOGSTORE(RasterizerLog)
-    ("scaling from {} to {}, ratio {}x{} ({}), factor {}",
-     _bitmap.size,
-     _newSize,
-     ratioX,
-     ratioY,
-     ratio,
-     factor);
+    // clang-format off
+    LOGSTORE(RasterizerLog)("scaling from {} to {}, ratio {}x{} ({}), factor {}",
+                            _bitmap.bitmapSize, _newSize, ratioX, ratioY, ratio, factor);
+    // clang-format on
 
     uint8_t* d = dest.data();
     for (unsigned i = 0, sr = 0; i < *_newSize.height; i++, sr += factor)
@@ -61,10 +57,11 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::Im
         {
             // calculate area average
             unsigned int r = 0, g = 0, b = 0, a = 0, count = 0;
-            for (unsigned y = sr; y < min(sr + factor, _bitmap.size.height.as<unsigned>()); y++)
+            for (unsigned y = sr; y < min(sr + factor, _bitmap.bitmapSize.height.as<unsigned>()); y++)
             {
-                uint8_t const* p = _bitmap.bitmap.data() + (y * *_bitmap.size.width * 4) + sc * 4;
-                for (unsigned x = sc; x < min(sc + factor, _bitmap.size.width.as<unsigned>()); x++, count++)
+                uint8_t const* p = _bitmap.bitmap.data() + (y * *_bitmap.bitmapSize.width * 4) + sc * 4;
+                for (unsigned x = sc; x < min(sc + factor, _bitmap.bitmapSize.width.as<unsigned>());
+                     x++, count++)
                 {
                     b += *(p++);
                     g += *(p++);
@@ -85,9 +82,11 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::Im
 
     auto output = rasterized_glyph {};
     output.format = _bitmap.format;
-    output.size = _newSize;
+    output.bitmapSize = _newSize;
     output.position = _bitmap.position; // TODO Actually, left/top position should be adjusted
     output.bitmap = move(dest);
+    output.position.x /= static_cast<int>(factor);
+    output.position.y /= static_cast<int>(factor);
 
     return { output, factor };
 }

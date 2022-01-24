@@ -88,7 +88,7 @@ class TerminalSession: public terminal::Terminal::Events
     terminal::FontDef getFontDef() override;
     void setFontDef(terminal::FontDef const& _fontSpec) override;
     void copyToClipboard(std::string_view _data) override;
-    void dumpState() override;
+    void inspect() override;
     void notify(std::string_view _title, std::string_view _body) override;
     void onClosed() override;
     void onSelectionCompleted() override;

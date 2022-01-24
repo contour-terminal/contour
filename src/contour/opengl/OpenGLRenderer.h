@@ -13,8 +13,8 @@
  */
 #pragma once
 
-#include <terminal_renderer/Atlas.h>
 #include <terminal_renderer/RenderTarget.h>
+#include <terminal_renderer/TextureAtlas.h>
 
 #include <QtGui/QMatrix4x4>
 #include <QtGui/QOpenGLExtraFunctions>
@@ -26,48 +26,64 @@
 
 #include <memory>
 #include <optional>
+#include <unordered_map>
 
 namespace contour::opengl
 {
 
 struct ShaderConfig;
 
-class OpenGLRenderer final: public terminal::renderer::RenderTarget, public QOpenGLExtraFunctions
+class OpenGLRenderer final:
+    public terminal::renderer::RenderTarget,
+    public terminal::renderer::atlas::AtlasBackend,
+    public QOpenGLExtraFunctions
 {
-  private:
-    struct TextureScheduler;
+    using ImageSize = terminal::ImageSize;
+
+    using AtlasTextureScreenshot = terminal::renderer::AtlasTextureScreenshot;
+
+    using AtlasTileID = terminal::renderer::atlas::AtlasTileID;
+
+    using ConfigureAtlas = terminal::renderer::atlas::ConfigureAtlas;
+    using UploadTile = terminal::renderer::atlas::UploadTile;
+    using RenderTile = terminal::renderer::atlas::RenderTile;
 
   public:
-    OpenGLRenderer(ShaderConfig const& _textShaderConfig,
-                   ShaderConfig const& _rectShaderConfig,
-                   crispy::ImageSize _size,
-                   terminal::renderer::PageMargin _margin);
+    /**
+     * @param renderSize        Sets the render target's size in pixels.
+     *                          This is the size that can be rendered to.
+     * @param textureAtlasSize  size in pixels for the texture atlas. Must be power of two.
+     * @param tileSize          size in pixels for each tile. This should be the grid cell size.
+     */
+    OpenGLRenderer(ShaderConfig const& textShaderConfig,
+                   ShaderConfig const& rectShaderConfig,
+                   crispy::ImageSize renderSize,
+                   crispy::ImageSize textureTileSize,
+                   terminal::renderer::PageMargin margin);
 
     ~OpenGLRenderer() override;
 
+    // AtlasBackend implementation
+    ImageSize atlasSize() const noexcept override;
+    void configureAtlas(ConfigureAtlas atlas) override;
+    void uploadTile(UploadTile tile) override;
+    void renderTile(RenderTile tile) override;
+
+    // RenderTarget implementation
     void setRenderSize(crispy::ImageSize _size) override;
     void setMargin(terminal::renderer::PageMargin _margin) noexcept override;
-
-    terminal::renderer::atlas::TextureAtlasAllocator& monochromeAtlasAllocator() noexcept override;
-    terminal::renderer::atlas::TextureAtlasAllocator& coloredAtlasAllocator() noexcept override;
-    terminal::renderer::atlas::TextureAtlasAllocator& lcdAtlasAllocator() noexcept override;
-
-    terminal::renderer::atlas::AtlasBackend& textureScheduler() override;
-
+    std::optional<AtlasTextureScreenshot> readAtlas() override;
+    AtlasBackend& textureScheduler() override;
     void scheduleScreenshot(ScreenshotCallback _callback) override;
-    std::pair<crispy::ImageSize, std::vector<uint8_t>> takeScreenshot();
-
-    void renderRectangle(
-        int _x, int _y, int _width, int _height, float _r, float _g, float _b, float _a) override;
-
+    void renderRectangle(int x, int y, Width, Height, RGBAColor color) override;
     void clear(terminal::RGBAColor _fillColor) override;
     void execute() override;
 
+    std::pair<crispy::ImageSize, std::vector<uint8_t>> takeScreenshot();
+
     void clearCache() override;
 
-    std::optional<terminal::renderer::AtlasTextureInfo> readAtlas(
-        terminal::renderer::atlas::TextureAtlasAllocator const& _allocator,
-        terminal::renderer::atlas::AtlasID _instanceId) override;
+    void inspect(std::ostream& output) const override;
 
   private:
     // private helper methods
@@ -80,63 +96,95 @@ class OpenGLRenderer final: public terminal::renderer::RenderTarget, public QOpe
     int maxTextureUnits();
     crispy::ImageSize renderBufferSize();
 
-    crispy::ImageSize colorTextureSizeHint();
-    crispy::ImageSize monochromeTextureSizeHint();
+    crispy::ImageSize colorTextureSizeHint() noexcept;
 
     void executeRenderTextures();
-    void createAtlas(terminal::renderer::atlas::CreateAtlas const& _param);
-    void uploadTexture(terminal::renderer::atlas::UploadTexture const& _param);
-    void renderTexture(terminal::renderer::atlas::RenderTexture const& _param);
-    void destroyAtlas(terminal::renderer::atlas::AtlasID _atlasID);
+    void executeConfigureAtlas(ConfigureAtlas const& _param);
+    void executeUploadTile(UploadTile const& _param);
+    void executeRenderTile(RenderTile const& _param);
+    void executeDestroyAtlas();
 
-    void executeRenderRectangle(int _x, int _y, int _width, int _height, QVector4D const& _color);
+    //? void renderRectangle(int _x, int _y, int _width, int _height, QVector4D const& _color);
 
     void bindTexture(GLuint _textureId);
-    GLuint textureAtlasID(terminal::renderer::atlas::AtlasID _atlasID) const noexcept;
-    void clearTextureAtlas(GLuint _textureId,
-                           int _width,
-                           int _height,
-                           terminal::renderer::atlas::Format _format);
 
     // -------------------------------------------------------------------------------------------
     // private data members
     //
-    bool initialized_ = false;
-    crispy::ImageSize size_;
-    QMatrix4x4 projectionMatrix_;
 
-    terminal::renderer::PageMargin margin_ {};
+    // {{{ scheduling data
+    struct RenderBatch
+    {
+        std::vector<terminal::renderer::atlas::RenderTile> renderTiles;
+        std::vector<GLfloat> buffer;
+        uint32_t userdata = 0;
 
-    std::unique_ptr<QOpenGLShaderProgram> textShader_;
-    int textProjectionLocation_;
+        void clear()
+        {
+            renderTiles.clear();
+            buffer.clear();
+        }
+    };
+
+    struct Scheduler
+    {
+        std::optional<terminal::renderer::atlas::ConfigureAtlas> configureAtlas = std::nullopt;
+        std::vector<terminal::renderer::atlas::UploadTile> uploadTiles {};
+        RenderBatch renderBatch {};
+
+        void clear()
+        {
+            configureAtlas.reset();
+            uploadTiles.clear();
+            renderBatch.clear();
+        }
+    };
+
+    Scheduler _scheduledExecutions;
+    // }}}
+
+    bool _initialized = false;
+    crispy::ImageSize _renderTargetSize;
+    QMatrix4x4 _projectionMatrix;
+
+    terminal::renderer::PageMargin _margin {};
+
+    std::unique_ptr<QOpenGLShaderProgram> _textShader;
+    int _textProjectionLocation;
 
     // private data members for rendering textures
     //
-    GLuint vao_ {}; // Vertex Array Object, covering all buffer objects
-    GLuint vbo_ {}; // Buffer containing the vertex coordinates
+    GLuint _vao {}; // Vertex Array Object, covering all buffer objects
+    GLuint _vbo {}; // Buffer containing the vertex coordinates
     // TODO: GLuint ebo_{};
-    std::unordered_map<terminal::renderer::atlas::AtlasID, GLuint> atlasMap_; // maps atlas IDs to texture IDs
-    GLuint currentTextureId_ = std::numeric_limits<GLuint>::max();
-    std::unique_ptr<TextureScheduler> textureScheduler_;
-    terminal::renderer::atlas::TextureAtlasAllocator monochromeAtlasAllocator_;
-    terminal::renderer::atlas::TextureAtlasAllocator coloredAtlasAllocator_;
-    terminal::renderer::atlas::TextureAtlasAllocator lcdAtlasAllocator_;
+
+    // currently bound texture ID during execution
+    GLuint _currentTextureId = std::numeric_limits<GLuint>::max();
+
+    // index equals AtlasID
+    struct AtlasAttributes
+    {
+        GLuint textureId {};
+        ImageSize textureSize {};
+        terminal::renderer::atlas::AtlasProperties properties {};
+    };
+    AtlasAttributes _textureAtlas {};
 
     // private data members for rendering filled rectangles
     //
-    std::vector<GLfloat> rectBuffer_;
-    std::unique_ptr<QOpenGLShaderProgram> rectShader_;
-    GLint rectProjectionLocation_;
-    GLuint rectVAO_;
-    GLuint rectVBO_;
+    std::vector<GLfloat> _rectBuffer;
+    std::unique_ptr<QOpenGLShaderProgram> _rectShader;
+    GLint _rectProjectionLocation;
+    GLuint _rectVAO;
+    GLuint _rectVBO;
 
-    std::optional<ScreenshotCallback> pendingScreenshotCallback_;
+    std::optional<ScreenshotCallback> _pendingScreenshotCallback;
 
     // render state cache
     struct
     {
         terminal::RGBAColor backgroundColor {};
-    } renderStateCache_;
+    } _renderStateCache;
 };
 
 } // namespace contour::opengl

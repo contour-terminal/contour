@@ -516,7 +516,7 @@ void Screen<T>::applyPageSizeToCurrentBuffer()
 
         // TODO: find out what to do with DECOM mode. Reset it to?
 #if 0
-    dumpState("after resize", std::cout);
+    inspect("after resize", std::cout);
     fmt::print("applyPageSizeToCurrentBuffer: cursor pos before: {} after: {}\n", oldCursorPos, cursor_.position);
 #endif
 
@@ -548,7 +548,7 @@ void Screen<T>::verifyState() const
 template <typename T>
 void Screen<T>::fail(std::string const& _message) const
 {
-    dumpState(_message, std::cerr);
+    inspect(_message, std::cerr);
     abort();
 }
 
@@ -1704,7 +1704,7 @@ void Screen<T>::captureBuffer(int _lineCount, bool _logicalLines)
     auto const startLine =
         clamp(relativeStartLine, -unbox<int>(historyLineCount()), unbox<int>(pageSize_.lines));
 
-    // dumpState();
+    // inspect();
 
     auto const trimSpaceRight = [](string& value) {
         while (!value.empty() && value.back() == ' ')
@@ -2573,13 +2573,13 @@ void Screen<T>::setDynamicColor(DynamicColorName _name, RGBColor _value)
 }
 
 template <typename T>
-void Screen<T>::dumpState()
+void Screen<T>::inspect()
 {
-    eventListener_.dumpState();
+    eventListener_.inspect();
 }
 
 template <typename T>
-void Screen<T>::dumpState(std::string const& _message, std::ostream& _os) const
+void Screen<T>::inspect(std::string const& _message, std::ostream& _os) const
 {
     auto const hline = [&]() {
         for_each(crispy::times(*pageSize_.columns), [&](auto) { _os << '='; });
@@ -2619,7 +2619,6 @@ void Screen<T>::dumpState(std::string const& _message, std::ostream& _os) const
         return fmt::format("| {:>4}: {}", _lineNo.value, grid().lineAt(_lineNo).flags());
     });
     hline();
-    _os << "Image pool:\n";
     imagePool_.inspect(_os);
     hline();
 

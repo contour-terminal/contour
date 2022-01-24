@@ -1,25 +1,27 @@
 ### 0.3.0 (unreleased)
 
+- Fixes installation from `.deb` (missing terminfo dependency)
+- Fixes PTY write race condition.
 - Fixes VT sequence `DECFI`.
 - Fixes VT sequence `ICH` (#559).
 - Fixes VT sequence `OSC 4`'s response.
-- Fixes PTY write race condition.
-- Fixes installation from `.deb` (missing terminfo dependency)
 - Fixes `DECRC` with respect to `DECSTBM` enabled and `DECOM` being inverted interpreted.
 - Fixes `XTGETTCAP` (#582).
+- Fixes an assertion in text renderer.
+- Fixes wrongly advertising DEC locator mode (it is not supported).
 - Improved VT backend performance (#342).
 - Improved text selection behaviour.
 - Adds preliminary implementation of `DA3` VT sequence.
 - Adds new configuration option `mouse_block_selection_modifier`.
 - Adds new configuration option `profiles.*.copy_last_mark_range_offset` (default `0`) to adjust where to start looking upwards for the `CopyPreviousMarkRange` action. This is useful for multi-line prompts.
 - Adds new configuration option `platform_plugin`.
-- Adds new configuration option `renderer` for explicitly setting renderer to one of: `OpenGL`, `software`, `default`.
-- Adds `mock` font locator.
+- Adds new configuration option `renderer.backend` for explicitly setting renderer to one of: `OpenGL`, `software`, `default`.
+- Adds new configuration option `renderer.tile_hashtable_slots` to configure texture atlas hashtable capacity.
+- Adds new configuration option `renderer.tile_cache_count` to configure texture atlas cache capacity.
+- Adds new configuration option `renderer.tile_direct_mapping` to enable/disalbe texture atlas direct mapping.
+- Adds `mock` font locator (mostly interesting for advanced use for CI testing).
 - Adds VT sequence `SM ? 8452 h` / `RM ? 8452 l` for enabling/disabling sixel cursor placement conformance (xterm extension).
 - Adds SGR-Pixels support, VT sequence `SM ? 1016 h` / `RM ? 1016 l` (#574).
-- Fixes VT sequence OSC 4's response.
-- Fixes an assertion in text renderer.
-- Fixes wrongly advertising DEC locator mode (it is not supported).
 
 ### 0.2.3 (2021-12-12)
 

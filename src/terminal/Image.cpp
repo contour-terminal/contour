@@ -20,7 +20,9 @@ using std::copy;
 using std::make_shared;
 using std::min;
 using std::move;
+using std::ostream;
 using std::shared_ptr;
+using std::string;
 
 using crispy::LRUCapacity;
 using crispy::StrongHashtableSize;
@@ -52,8 +54,10 @@ ImageFragment::~ImageFragment()
 
 ImagePool::ImagePool(OnImageRemove _onImageRemove, ImageId _nextImageId):
     nextImageId_ { _nextImageId },
-    imageNameToImageCache_ { StrongHashtableSize { 1024 }, LRUCapacity { 100 } },
-    onImageRemove_ { std::move(_onImageRemove) }
+    imageNameToImageCache_ { StrongHashtableSize { 1024 },
+                             LRUCapacity { 100 },
+                             "ImagePool name-to-image mappings" },
+    onImageRemove_ { move(_onImageRemove) }
 {
 }
 
@@ -67,7 +71,7 @@ Image::Data RasterizedImage::fragment(CellLocation _pos) const
     auto const pixelOffset = CellLocation { yOffset, xOffset };
 
     Image::Data fragData;
-    fragData.resize(*cellSize_.width * *cellSize_.height * 4); // RGBA
+    fragData.resize(cellSize_.area() * 4); // RGBA
     auto const availableWidth =
         min(unbox<int>(image_->width()) - *pixelOffset.column, unbox<int>(cellSize_.width));
     auto const availableHeight =
@@ -141,15 +145,15 @@ shared_ptr<RasterizedImage> ImagePool::rasterize(shared_ptr<Image const> _image,
                                                  ImageSize _cellSize)
 {
     return make_shared<RasterizedImage>(
-        std::move(_image), _alignmentPolicy, _resizePolicy, _defaultColor, _cellSpan, _cellSize);
+        move(_image), _alignmentPolicy, _resizePolicy, _defaultColor, _cellSpan, _cellSize);
 }
 
-void ImagePool::link(std::string const& _name, shared_ptr<Image const> _imageRef)
+void ImagePool::link(string const& _name, shared_ptr<Image const> _imageRef)
 {
-    imageNameToImageCache_.emplace(_name, std::move(_imageRef));
+    imageNameToImageCache_.emplace(_name, move(_imageRef));
 }
 
-shared_ptr<Image const> ImagePool::findImageByName(std::string const& _name) const noexcept
+shared_ptr<Image const> ImagePool::findImageByName(string const& _name) const noexcept
 {
     if (auto imageRef = imageNameToImageCache_.try_get(_name))
         return *imageRef;
@@ -157,9 +161,9 @@ shared_ptr<Image const> ImagePool::findImageByName(std::string const& _name) con
     return {};
 }
 
-void ImagePool::unlink(std::string const& _name)
+void ImagePool::unlink(string const& _name)
 {
-    imageNameToImageCache_.erase(_name);
+    imageNameToImageCache_.remove(_name);
 }
 
 void ImagePool::clear()
@@ -167,11 +171,11 @@ void ImagePool::clear()
     imageNameToImageCache_.clear();
 }
 
-void ImagePool::inspect(std::ostream& os) const
+void ImagePool::inspect(ostream& os) const
 {
-    os << "image name links:\n";
-    imageNameToImageCache_.inspect(os);
+    os << "Image pool:\n";
     os << fmt::format("global image stats: {}\n", ImageStats::get());
+    imageNameToImageCache_.inspect(os);
 }
 
 } // namespace terminal

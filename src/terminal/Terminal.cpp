@@ -314,6 +314,7 @@ RenderCell makeRenderCell(ColorPalette const& _colorPalette,
     cell.position.line = _line;
     cell.position.column = _column;
     cell.flags = _cell.styles();
+    cell.width = _cell.width();
 
     if (_cell.codepointCount() != 0)
     {
@@ -410,17 +411,27 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
     _output.cursor = renderCursor();
     auto const reverseVideo = screen_.isModeEnabled(terminal::DECMode::ReverseVideo);
     screen_.render(
-        [this, reverseVideo, &_output, state = State::Gap, lineNr = LineOffset(0)](
-            Cell const& _cell, LineOffset _line, ColumnOffset _column) mutable {
-            auto const selected = isSelected(
-                CellLocation { _line - boxed_cast<LineOffset>(viewport_.scrollOffset()), _column });
+        [this,
+         reverseVideo,
+         &_output,
+         prevWidth = 0,
+         prevHasCursor = false,
+         state = State::Gap,
+         lineNr = LineOffset(0)](Cell const& _cell, LineOffset _line, ColumnOffset _column) mutable {
+            // clang-format off
+            auto const selected = isSelected( CellLocation { _line - boxed_cast<LineOffset>(viewport_.scrollOffset()), _column });
             auto const pos = CellLocation { _line, _column };
-            auto const hasCursor =
-                viewport_.translateScreenToGridCoordinate(pos) == screen_.realCursorPosition();
+            auto const gridPosition = viewport_.translateScreenToGridCoordinate(pos);
+            auto const hasCursor = gridPosition == screen_.realCursorPosition();
             bool const paintCursor =
-                hasCursor && _output.cursor.has_value() && _output.cursor->shape == CursorShape::Block;
-            auto const [fg, bg] =
-                makeColors(screen_.colorPalette(), _cell, reverseVideo, selected, paintCursor);
+                (hasCursor || (prevHasCursor && prevWidth == 2))
+                    && _output.cursor.has_value()
+                    && _output.cursor->shape == CursorShape::Block;
+            auto const [fg, bg] = makeColors(screen_.colorPalette(), _cell, reverseVideo, selected, paintCursor);
+            // clang-format on
+
+            prevWidth = _cell.width();
+            prevHasCursor = hasCursor;
 
             auto const cellEmpty = _cell.empty();
             auto const customBackground = bg != screen_.colorPalette().defaultBackground || !!_cell.styles();
@@ -430,6 +441,8 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
             {
                 isNewLine = true;
                 lineNr = _line;
+                prevWidth = 0;
+                prevHasCursor = false;
                 if (!_output.screen.empty())
                     _output.screen.back().groupEnd = true;
             }
@@ -491,7 +504,8 @@ optional<RenderCursor> Terminal::renderCursor()
 
     Cell const& cursorCell = screen_.at(screen_.cursor().position);
 
-    auto const shape = screen_.focused() ? cursorShape() : CursorShape::Rectangle;
+    auto constexpr InactiveCursorShape = CursorShape::Rectangle; // TODO configurable
+    auto const shape = screen_.focused() ? cursorShape() : InactiveCursorShape;
 
     return RenderCursor { CellLocation { screen_.cursor().position.line
                                              + viewport_.scrollOffset().as<LineOffset>(),
@@ -949,9 +963,9 @@ void Terminal::copyToClipboard(string_view _data)
     eventListener_.copyToClipboard(_data);
 }
 
-void Terminal::dumpState()
+void Terminal::inspect()
 {
-    eventListener_.dumpState();
+    eventListener_.inspect();
 }
 
 void Terminal::notify(string_view _title, string_view _body)

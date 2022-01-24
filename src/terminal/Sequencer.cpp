@@ -1566,7 +1566,7 @@ ApplyResult Sequencer<T>::apply(FunctionDefinition const& _function, Sequence co
     case RCOLORHIGHLIGHTFG: screen_.resetDynamicColor(DynamicColorName::HighlightForegroundColor); break;
     case RCOLORHIGHLIGHTBG: screen_.resetDynamicColor(DynamicColorName::HighlightBackgroundColor); break;
     case NOTIFY: return impl::NOTIFY(_seq, screen_);
-    case DUMPSTATE: screen_.dumpState(); break;
+    case DUMPSTATE: screen_.inspect(); break;
     default: return ApplyResult::Unsupported;
     }
     return ApplyResult::Ok;
