@@ -353,7 +353,7 @@ auto StrongLRUHashtable<Value>::create(StrongHashtableSize hashCount,
 
     auto deleter = [size, allocator = std::move(allocator)](auto p) mutable {
         std::destroy_n(p, 1);
-        allocator.deallocate(reinterpret_cast<typename Allocator::pointer>(p), size);
+        allocator.deallocate(reinterpret_cast<unsigned char*>(p), size);
     };
 
     return Ptr(obj, std::move(deleter));

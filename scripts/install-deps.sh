@@ -70,6 +70,14 @@ fetch_and_unpack_Catch2()
         https://github.com/catchorg/Catch2/archive/refs/tags/v2.13.7.tar.gz
 }
 
+fetch_and_unpack_fmtlib()
+{
+    fetch_and_unpack \
+        fmt-8.1.1 \
+        fmtlib-8.1.1.tar.gz \
+        https://github.com/fmtlib/fmt/archive/refs/tags/8.1.1.tar.gz
+}
+
 fetch_and_unpack_gsl()
 {
     fetch_and_unpack \
@@ -86,9 +94,9 @@ fetch_and_unpack_embeds()
         https://github.com/contour-terminal/termbench-pro/archive/cd571e3cebb7c00de9168126b28852f32fb204ed.tar.gz
 
     fetch_and_unpack \
-        libunicode-447bc8790f1db8183e3212472fa90e3c4ce34787 \
-        libunicode-447bc8790f1db8183e3212472fa90e3c4ce34787.tar.gz \
-        https://github.com/contour-terminal/libunicode/archive/447bc8790f1db8183e3212472fa90e3c4ce34787.tar.gz
+        libunicode-455eb3831c3bddcc476a3c6f374eb98359505ec0 \
+        libunicode-455eb3831c3bddcc476a3c6f374eb98359505ec0.tar.gz \
+        https://github.com/contour-terminal/libunicode/archive/455eb3831c3bddcc476a3c6f374eb98359505ec0.tar.gz
 }
 
 fetch_and_unpack_yaml_cpp()
@@ -168,11 +176,7 @@ install_deps_ubuntu()
                 range-v3-0.11.0.tar.gz \
                 https://github.com/ericniebler/range-v3/archive/refs/tags/0.11.0.tar.gz
 
-            fetch_and_unpack \
-                fmt-8.0.1 \
-                fmtlib-8.0.1.tar.gz \
-                https://github.com/fmtlib/fmt/archive/refs/tags/8.0.1.tar.gz
-
+            fetch_and_unpack_fmtlib
             fetch_and_unpack_Catch2
             fetch_and_unpack_gsl
             ;;
@@ -215,13 +219,13 @@ install_deps_FreeBSD()
 
 install_deps_arch()
 {
+    fetch_and_unpack_fmtlib
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
     pacman -S -y \
         catch2 \
         cmake \
         extra-cmake-modules \
-        fmt \
         fontconfig \
         git \
         harfbuzz \
@@ -235,6 +239,7 @@ install_deps_arch()
 install_deps_fedora()
 {
     fetch_and_unpack_gsl
+    fetch_and_unpack_fmtlib
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
     # catch-devel
@@ -242,7 +247,6 @@ install_deps_fedora()
         catch-devel
         cmake
         extra-cmake-modules
-        fmt-devel
         fontconfig-devel
         freetype-devel
         gcc-c++

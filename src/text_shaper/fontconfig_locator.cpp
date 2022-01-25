@@ -330,7 +330,8 @@ font_source_list fontconfig_locator::all()
         if (spacing < FC_DUAL)
             continue;
 
-        LOGSTORE(LocatorLog)("font({}, {}, {})", fcWeightStr(weight), fcSlantStr(slant), (char*) family);
+        LOGSTORE(LocatorLog)
+        ("font({}, {}, {})", fcWeightStr(weight), fcSlantStr(slant), (char*) family);
         output.emplace_back(font_path { (char const*) filename });
     }
 

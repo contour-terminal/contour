@@ -19,7 +19,6 @@
 #include <crispy/range.h>
 
 #include <unicode/convert.h>
-#include <unicode/utf8.h>
 
 #include <fmt/format.h>
 

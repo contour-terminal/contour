@@ -74,7 +74,7 @@ to build from source, it is recommended to execute the `scripts/install-deps.sh`
 ### Prerequisites UNIX-like systems (Linux, FreeBSD, OS/X)
 
 ```sh
-sudo ./scripts/install-deps.sh
+./scripts/install-deps.sh
 ```
 
 ### Prerequisites Windows 10 or newer

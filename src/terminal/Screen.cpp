@@ -27,7 +27,6 @@
 #include <unicode/convert.h>
 #include <unicode/emoji_segmenter.h>
 #include <unicode/grapheme_segmenter.h>
-#include <unicode/utf8.h>
 #include <unicode/word_segmenter.h>
 
 #include <range/v3/view.hpp>
@@ -243,10 +242,10 @@ namespace // {{{ helper
             writer_(_s.data(), _s.size());
         }
 
-        template <typename... Args>
-        void write(std::string_view const& _s, Args&&... _args)
+        template <typename... T>
+        void write(fmt::format_string<T...> fmt, T&&... args)
         {
-            write(fmt::format(_s, std::forward<Args>(_args)...));
+            write(fmt::vformat(fmt, fmt::make_format_args(args...)));
         }
 
         void flush()
@@ -2244,8 +2243,8 @@ void Screen<T>::renderImage(shared_ptr<Image const> _image,
     auto const gapColor = RGBAColor {}; // TODO: cursor_.graphicsRendition.backgroundColor;
 
     // TODO: make use of _imageOffset and _imageSize
-    auto const rasterizedImage =
-        imagePool_.rasterize(_image, _alignmentPolicy, _resizePolicy, gapColor, _gridSize, cellPixelSize_);
+    auto const rasterizedImage = imagePool_.rasterize(
+        move(_image), _alignmentPolicy, _resizePolicy, gapColor, _gridSize, cellPixelSize_);
 
     if (*linesToBeRendered)
     {
@@ -2436,7 +2435,7 @@ void Screen<T>::requestStatusString(RequestStatusString _value)
         case RequestStatusString::SGR:
             return fmt::format("0;{}m", vtSequenceParameterString(cursor_.graphicsRendition));
         case RequestStatusString::DECSCA: // TODO
-            errorlog()("Requesting device status for {} not implemented yet.", _value);
+            errorlog()(fmt::format("Requesting device status for {} not implemented yet.", _value));
             break;
         }
         return nullopt;
@@ -2616,7 +2615,7 @@ void Screen<T>::inspect(std::string const& _message, std::ostream& _os) const
     hline();
     _os << screenshot([this](LineOffset _lineNo) -> string {
         // auto const absoluteLine = grid().toAbsoluteLine(_lineNo);
-        return fmt::format("| {:>4}: {}", _lineNo.value, grid().lineAt(_lineNo).flags());
+        return fmt::format("| {:>4}: {}", _lineNo.value, (unsigned) grid().lineAt(_lineNo).flags());
     });
     hline();
     imagePool_.inspect(_os);

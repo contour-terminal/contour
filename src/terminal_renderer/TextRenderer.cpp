@@ -121,6 +121,7 @@ Making use of reserved glyph slots
 */
 
 #include <terminal/logging.h>
+#include <terminal/primitives.h>
 
 #include <terminal_renderer/BoxDrawingRenderer.h>
 #include <terminal_renderer/GridMetrics.h>
@@ -146,7 +147,7 @@ Making use of reserved glyph slots
 
 #include <unicode/convert.h>
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 #include <fmt/ostream.h>
 
 #include <range/v3/algorithm/copy.hpp>

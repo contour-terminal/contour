@@ -124,7 +124,7 @@ struct HbFontInfo
     font_description description {};
 };
 
-namespace // {{{ helper
+namespace
 {
     string identifierOf(font_source const& source)
     {
@@ -427,7 +427,9 @@ namespace // {{{ helper
             FT_Error ec = FT_New_Face(_ft, sourcePath.value.c_str(), 0, &ftFace);
             if (!ftFace)
             {
+                // clang-format off
                 errorlog()("Failed to load font from path {}. {}", sourcePath.value, ftErrorStr(ec));
+                // clang-format on
                 return nullopt;
             }
         }
@@ -701,8 +703,12 @@ struct open_shaper::Private // {{{
             }
 
             HbFontInfo& fallbackFontInfo = fonts_.at(fallbackKeyOpt.value());
+            // clang-format off
             LOGSTORE(TextShapingLog)
-            ("Try fallbacks font key:{}, source: {}", fallbackKeyOpt.value(), fallbackFontInfo.primary);
+            ("Try fallbacks font key:{}, source: {}",
+                         fallbackKeyOpt.value(),
+                         fallbackFontInfo.primary);
+            // clang-format on
             if (tryShape(fallbackKeyOpt.value(),
                          fallbackFontInfo,
                          _hbBuf,

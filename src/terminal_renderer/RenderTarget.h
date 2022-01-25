@@ -24,8 +24,6 @@
 #include <crispy/size.h>
 #include <crispy/stdfs.h>
 
-#include <unicode/utf8.h>
-
 #include <array>
 #include <memory>
 #include <optional>

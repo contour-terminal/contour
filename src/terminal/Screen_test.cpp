@@ -58,7 +58,7 @@ void logScreenText(Screen<T> const& screen, string const& headline = "")
     else
         UNSCOPED_INFO(headline + ":");
 
-    for (auto const line: ranges::views::iota(0, *screen.pageSize().lines))
+    for (auto const line: ::ranges::views::iota(0, *screen.pageSize().lines))
         UNSCOPED_INFO(fmt::format("[{}] \"{}\"", line, screen.grid().lineText(LineOffset::cast_from(line))));
 }
 
