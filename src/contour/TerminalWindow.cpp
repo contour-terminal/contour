@@ -169,7 +169,7 @@ void TerminalWindow::onTerminalClosed()
     close();
 }
 
-void TerminalWindow::setBackgroundBlur([[maybe_unused]] bool _enable)
+void TerminalWindow::setBlurBehind([[maybe_unused]] bool _enable)
 {
     BlurBehind::setEnabled(winId(), _enable);
 }

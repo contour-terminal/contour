@@ -240,7 +240,7 @@ TerminalWidget::TerminalWidget(TerminalSession& session,
     QOpenGLWidget(),
     session_ { session },
     adaptSize_ { std::move(adaptSize) },
-    enableBackgroundBlur_ { std::move(enableBackgroundBlur) },
+    enableBlurBehind_ { std::move(enableBackgroundBlur) },
     renderer_ {
         terminal().screenSize(),
         sanitizeFontDescription(profile().fonts, screenDPI()),
@@ -434,6 +434,7 @@ void TerminalWidget::initializeGL()
     renderTarget_ =
         make_unique<OpenGLRenderer>(*config::Config::loadShaderConfig(config::ShaderClass::Text),
                                     *config::Config::loadShaderConfig(config::ShaderClass::Background),
+                                    *config::Config::loadShaderConfig(config::ShaderClass::BackgroundImage),
                                     ImageSize { Width(width()), Height(height()) },
                                     textureTileSize,
                                     viewportMargin);
@@ -1038,12 +1039,17 @@ void TerminalWidget::setWindowNormal()
     maximizedState_ = false;
 }
 
-void TerminalWidget::setBackgroundBlur(bool _enable)
+void TerminalWidget::setBlurBehind(bool _enable)
 {
-    if (!enableBackgroundBlur_)
+    if (!enableBlurBehind_)
         return;
 
-    enableBackgroundBlur_(_enable);
+    enableBlurBehind_(_enable);
+}
+
+void TerminalWidget::setBackgroundImage(std::optional<terminal::BackgroundImage> const& backgroundImage)
+{
+    renderTarget_->setBackgroundImage(backgroundImage);
 }
 
 void TerminalWidget::toggleFullScreen()

@@ -28,6 +28,7 @@
 #include <yaml-cpp/ostream_wrapper.h>
 #include <yaml-cpp/yaml.h>
 
+#include <QtGui/QImage>
 #include <QtGui/QOpenGLContext>
 
 #include <algorithm>
@@ -85,6 +86,16 @@ using actions::Action;
 
 namespace // {{{ helper
 {
+    size_t sizeInBytes(QImage const& image) noexcept
+    {
+#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
+        return static_cast<size_t>(image.sizeInBytes());
+#else
+        // Ubuntu 18.04 is using a very old Qt version.
+        return static_cast<size_t>(image.byteCount());
+#endif
+    }
+
     vector<FileSystem::path> getTermInfoDirs(optional<FileSystem::path> const& _appTerminfoDir)
     {
         auto locations = vector<FileSystem::path>();
@@ -791,6 +802,36 @@ Config loadConfigFromFile(FileSystem::path const& _fileName)
     return config;
 }
 
+std::optional<terminal::BackgroundImage> loadImage(string const& fileName)
+{
+    string resolvedFileName;
+    if (!fileName.empty() && fileName[0] == '~')
+        resolvedFileName = (terminal::Process::homeDirectory() / fileName.substr(1)).string();
+    else
+        resolvedFileName = fileName;
+
+    auto backgroundImage = terminal::BackgroundImage {};
+
+    auto qImage = QImage(QString::fromStdString(resolvedFileName)).convertToFormat(QImage::Format_RGBA8888);
+
+    if (qImage.format() != QImage::Format_RGBA8888)
+    {
+        errorlog()("Unsupported image format {} for background image at {}.", qImage.format(), fileName);
+        return nullopt;
+    }
+
+    backgroundImage.format = terminal::ImageFormat::RGBA;
+    backgroundImage.rowAlignment = 4; // This is default. Can it be any different?
+    backgroundImage.size = ImageSize { Width(qImage.size().width()), Height(qImage.size().height()) };
+    backgroundImage.pixels.resize(sizeInBytes(qImage));
+
+    memcpy(backgroundImage.pixels.data(), qImage.constBits(), sizeInBytes(qImage));
+
+    backgroundImage.updateImageHash();
+
+    return backgroundImage;
+}
+
 terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _path, YAML::Node const& _node)
 {
     auto colors = terminal::ColorPalette {};
@@ -921,6 +962,20 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _path,
     loadColorMap(_node, "bright", 8);
     // TODO: color palette from 16..255
     // TODO: dim _node (maybe put them into the palette at 256..(256+8)?)
+
+    string fileName;
+    if (tryLoadValue(_usedKeys, _node, "background_image.path", fileName))
+        colors.backgroundImage = loadImage(fileName);
+
+    float floatValue = 1.0;
+    if (tryLoadValue(_usedKeys, _node, "background_image.opacity", floatValue))
+        if (colors.backgroundImage.has_value())
+            colors.backgroundImage->opacity = clamp(floatValue, 0.0f, 1.0f);
+
+    bool boolValue = false;
+    if (tryLoadValue(_usedKeys, _node, "background_image.blur", boolValue))
+        if (colors.backgroundImage.has_value())
+            colors.backgroundImage->blur = boolValue;
 
     return colors;
 }

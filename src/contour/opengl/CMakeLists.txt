@@ -4,6 +4,8 @@ else()
    find_package(Qt5 COMPONENTS Gui Widgets REQUIRED)  # apt install qtbase5-dev libqt5gui5
 endif()
 
+CIncludeMe(shaders/background_image.frag "${CMAKE_CURRENT_BINARY_DIR}/background_image_frag.h" "background_image_frag" "contour::opengl::verbatim")
+CIncludeMe(shaders/background_image.vert "${CMAKE_CURRENT_BINARY_DIR}/background_image_vert.h" "background_image_vert" "contour::opengl::verbatim")
 CIncludeMe(shaders/background.frag "${CMAKE_CURRENT_BINARY_DIR}/background_frag.h" "background_frag" "contour::opengl::verbatim")
 CIncludeMe(shaders/background.vert "${CMAKE_CURRENT_BINARY_DIR}/background_vert.h" "background_vert" "contour::opengl::verbatim")
 CIncludeMe(shaders/text.frag "${CMAKE_CURRENT_BINARY_DIR}/text_frag.h" "text_frag" "contour::opengl::verbatim")
@@ -17,6 +19,8 @@ CIncludeMe(
 )
 
 add_library(contour_frontend_opengl
+    "${CMAKE_CURRENT_BINARY_DIR}/background_image_frag.h"
+    "${CMAKE_CURRENT_BINARY_DIR}/background_image_vert.h"
     "${CMAKE_CURRENT_BINARY_DIR}/background_frag.h"
     "${CMAKE_CURRENT_BINARY_DIR}/background_vert.h"
     "${CMAKE_CURRENT_BINARY_DIR}/shared_defines_verbatim.h"

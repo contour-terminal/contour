@@ -170,6 +170,17 @@ void Renderer::setRenderTarget(RenderTarget& renderTarget)
     textRenderer_.setRenderTarget(renderTarget, directMappingAllocator_);
 
     configureTextureAtlas();
+
+    if (colorPalette_.backgroundImage.has_value())
+    {
+        LOGSTORE(RendererLog)
+        ("- Background image     : {} {}\n",
+         colorPalette_.backgroundImage->size,
+         colorPalette_.backgroundImage->format);
+        renderTarget.setBackgroundImage(*colorPalette_.backgroundImage);
+    }
+    else
+        LOGSTORE(RendererLog)("- Background image     : {}\n", "blank");
 }
 
 void Renderer::configureTextureAtlas()

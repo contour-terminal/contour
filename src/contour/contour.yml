@@ -344,6 +344,24 @@ color_schemes:
             # Default foreground text color.
             foreground: '#d5d8d6'
 
+        # Background image support.
+        background_image:
+            # Full path to the image to use as background.
+            #
+            # Default: empty string (disabled)
+            # path: '/Users/trapni/Pictures/bg.png'
+
+            # Image opacity to be applied to make the image not look to intense
+            # and not get too distracted by the background image.
+            # Default: 0.5
+            opacity: 0.5
+
+            # Optionally blurs background image to make it less distracting
+            # and keep the focus on the actual terminal contents.
+            #
+            # Default: false
+            blur: false
+
         # Mandates the color of the cursor and potentially overridden text.
         #
         # The color can be specified in RGB as usual, plus

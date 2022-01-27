@@ -17,6 +17,7 @@
 #include <contour/opengl/ShaderConfig.h>
 
 #include <terminal/Color.h>
+#include <terminal/ColorPalette.h>
 #include <terminal/InputBinding.h>
 #include <terminal/Process.h>
 #include <terminal/Sequencer.h> // CursorDisplay

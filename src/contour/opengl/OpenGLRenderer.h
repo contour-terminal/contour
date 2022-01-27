@@ -57,6 +57,7 @@ class OpenGLRenderer final:
      */
     OpenGLRenderer(ShaderConfig const& textShaderConfig,
                    ShaderConfig const& rectShaderConfig,
+                   ShaderConfig const& backgroundImageShaderConfig,
                    crispy::ImageSize renderSize,
                    crispy::ImageSize textureTileSize,
                    terminal::renderer::PageMargin margin);
@@ -75,6 +76,7 @@ class OpenGLRenderer final:
     std::optional<AtlasTextureScreenshot> readAtlas() override;
     AtlasBackend& textureScheduler() override;
     void scheduleScreenshot(ScreenshotCallback _callback) override;
+    void setBackgroundImage(std::optional<terminal::BackgroundImage> const& _backgroundImage) override;
     void renderRectangle(int x, int y, Width, Height, RGBAColor color) override;
     void clear(terminal::RGBAColor _fillColor) override;
     void execute() override;
@@ -89,6 +91,7 @@ class OpenGLRenderer final:
     // private helper methods
     //
     void initialize();
+    void initializeBackgroundRendering();
     void initializeTextureRendering();
     void initializeRectRendering();
     int maxTextureDepth();
@@ -96,8 +99,7 @@ class OpenGLRenderer final:
     int maxTextureUnits();
     crispy::ImageSize renderBufferSize();
 
-    crispy::ImageSize colorTextureSizeHint() noexcept;
-
+    void executeRenderBackground();
     void executeRenderTextures();
     void executeConfigureAtlas(ConfigureAtlas const& _param);
     void executeUploadTile(UploadTile const& _param);
@@ -131,12 +133,14 @@ class OpenGLRenderer final:
         std::optional<terminal::renderer::atlas::ConfigureAtlas> configureAtlas = std::nullopt;
         std::vector<terminal::renderer::atlas::UploadTile> uploadTiles {};
         RenderBatch renderBatch {};
+        terminal::BackgroundImage const* backgroundImage = nullptr;
 
         void clear()
         {
             configureAtlas.reset();
             uploadTiles.clear();
             renderBatch.clear();
+            backgroundImage = nullptr;
         }
     };
 
@@ -154,12 +158,26 @@ class OpenGLRenderer final:
 
     // private data members for rendering textures
     //
-    GLuint _vao {}; // Vertex Array Object, covering all buffer objects
-    GLuint _vbo {}; // Buffer containing the vertex coordinates
+    GLuint _textVAO {}; // Vertex Array Object, covering all buffer objects
+    GLuint _textVBO {}; // Buffer containing the vertex coordinates
     // TODO: GLuint ebo_{};
 
     // currently bound texture ID during execution
     GLuint _currentTextureId = std::numeric_limits<GLuint>::max();
+
+    // background / background-image related fields
+    GLuint _backgroundVAO {};
+    GLuint _backgroundVBO {};
+    GLuint _backgroundImageTexture {};
+    std::unique_ptr<QOpenGLShaderProgram> _backgroundShader;
+    struct
+    {
+        int projection;
+        int resolution;
+        int blur;
+        int opacity;
+        int time;
+    } _backgroundUniformLocations {};
 
     // index equals AtlasID
     struct AtlasAttributes
@@ -184,6 +202,9 @@ class OpenGLRenderer final:
     struct
     {
         terminal::RGBAColor backgroundColor {};
+        float backgroundImageOpacity = 1.0f;
+        terminal::BackgroundImage const* backgroundImage = nullptr;
+        crispy::StrongHash backgroundImageHash;
     } _renderStateCache;
 };
 

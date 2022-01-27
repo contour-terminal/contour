@@ -65,7 +65,8 @@ class TerminalDisplay
     virtual void notify(std::string_view _title, std::string_view _body) = 0;
     virtual void resizeWindow(terminal::LineCount, terminal::ColumnCount) = 0;
     virtual void resizeWindow(terminal::Width, terminal::Height) = 0;
-    virtual void setBackgroundBlur(bool _enabled) = 0;
+    virtual void setBlurBehind(bool _enabled) = 0;
+    virtual void setBackgroundImage(std::optional<terminal::BackgroundImage> const&) = 0;
     virtual void setFonts(terminal::renderer::FontDescriptions _fontDescriptions) = 0;
     virtual void setHyperlinkDecoration(terminal::renderer::Decorator _normal,
                                         terminal::renderer::Decorator _hover) = 0;

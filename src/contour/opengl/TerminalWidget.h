@@ -112,7 +112,8 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     void setWindowFullScreen() override;
     void setWindowMaximized() override;
     void setWindowNormal() override;
-    void setBackgroundBlur(bool _enable) override;
+    void setBlurBehind(bool _enable) override;
+    void setBackgroundImage(std::optional<terminal::BackgroundImage> const& backgroundImage) override;
     void toggleFullScreen() override;
     void setHyperlinkDecoration(terminal::renderer::Decorator _normal,
                                 terminal::renderer::Decorator _hover) override;
@@ -176,7 +177,7 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     //
     TerminalSession& session_;
     std::function<void()> adaptSize_;
-    std::function<void(bool)> enableBackgroundBlur_;
+    std::function<void(bool)> enableBlurBehind_;
     terminal::renderer::Renderer renderer_;
     std::atomic<bool> initialized_ = false;
     bool renderingPressure_ = false;

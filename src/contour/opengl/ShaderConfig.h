@@ -31,6 +31,7 @@ namespace contour::opengl
 
 enum class ShaderClass
 {
+    BackgroundImage,
     Background,
     Text
 };
@@ -47,6 +48,7 @@ inline std::string to_string(ShaderClass _shaderClass)
 {
     switch (_shaderClass)
     {
+    case ShaderClass::BackgroundImage: return "BackgroundImage";
     case ShaderClass::Background: return "background";
     case ShaderClass::Text: return "text";
     }

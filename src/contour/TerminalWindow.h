@@ -75,7 +75,7 @@ class TerminalWindow: public QMainWindow
     void terminalBufferChanged(terminal::ScreenType);
     void profileChanged();
     void onTerminalClosed();
-    void setBackgroundBlur(bool _enable);
+    void setBlurBehind(bool _enable);
 
   private:
     // data members

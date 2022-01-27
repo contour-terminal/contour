@@ -21,6 +21,7 @@ set(terminal_HEADERS
     Cell.h
     Charset.h
     Color.h
+    ColorPalette.h
     Functions.h
     GraphicsAttributes.h
     Grid.h
@@ -59,6 +60,7 @@ set(terminal_SOURCES
     Cell.cpp
     Capabilities.cpp
     Color.cpp
+    ColorPalette.cpp
     Grid.cpp
     Functions.cpp
     Image.cpp
