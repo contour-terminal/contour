@@ -1,5 +1,5 @@
 ---
-Checks: '-*,clang-diagnostic-*,clang-analyzer-*,bugprone-*,performance-*,readability-non-const-parameter,readability-redundant-*,cppcoreguidelines-slicing'
+Checks: '-*,clang-diagnostic-*,clang-analyzer-*,bugprone-*,performance-*,-performance-no-int-to-ptr,readability-non-const-parameter,readability-redundant-*,cppcoreguidelines-slicing'
 WarningsAsErrors: ''
 HeaderFilterRegex: ''
 AnalyzeTemporaryDtors: false
