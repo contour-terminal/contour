@@ -347,9 +347,9 @@ QSize TerminalWidget::sizeHint() const
 
 void TerminalWidget::onRefreshRateChanged()
 {
-    auto const refreshRate = screen()->refreshRate();
-    LOGSTORE(DisplayLog)("Refresh rate changed to {}.", refreshRate);
-    session_.terminal().setRefreshRate(refreshRate);
+    auto const rate = refreshRate();
+    LOGSTORE(DisplayLog)("Refresh rate changed to {}.", rate);
+    session_.terminal().setRefreshRate(rate);
 }
 
 void TerminalWidget::configureScreenHooks()
@@ -358,7 +358,7 @@ void TerminalWidget::configureScreenHooks()
     Require(window()->windowHandle());
 
     QWindow* window = this->window()->windowHandle();
-    QScreen* screen = this->window()->screen();
+    QScreen* screen = screenOf(this);
 
     connect(window, SIGNAL(screenChanged(QScreen*)), this, SLOT(onScreenChanged()));
     connect(screen, SIGNAL(refreshRateChanged(qreal)), this, SLOT(onRefreshRateChanged()));
@@ -392,13 +392,14 @@ void TerminalWidget::onScreenDpiChanged()
 void TerminalWidget::logDisplayInfo()
 {
     // clang-format off
+    QScreen* screen = screenOf(this);
     auto const fontSizeInPx = static_cast<int>(ceil((
-        profile().fonts.size.pt / 72.0) * screen()->physicalDotsPerInch() * contentScale()
+        profile().fonts.size.pt / 72.0) * screen->physicalDotsPerInch() * contentScale()
     ));
-    LOGSTORE(DisplayLog)("[Display Info] Refresh rate         : {} Hz", window()->screen()->refreshRate());
+    LOGSTORE(DisplayLog)("[Display Info] Refresh rate         : {} Hz", refreshRate());
     LOGSTORE(DisplayLog)("[Display Info] Logical DPI          : {}", crispy::Size { logicalDpiX(), logicalDpiY() });
     LOGSTORE(DisplayLog)("[Display Info] Physical DPI         : {}", crispy::Size { physicalDpiX(), physicalDpiY() });
-    LOGSTORE(DisplayLog)("[Display Info] Logical/physical PPI : {} / {}", window()->screen()->physicalDotsPerInch(), window()->screen()->logicalDotsPerInch());
+    LOGSTORE(DisplayLog)("[Display Info] Logical/physical PPI : {} / {}", screen->physicalDotsPerInch(), screen->logicalDotsPerInch());
     LOGSTORE(DisplayLog)("[Display Info] Device pixel ratio   : {}", devicePixelRatioF());
     LOGSTORE(DisplayLog)("[Display Info] Font size            : {} ({}px)", profile().fonts.size, fontSizeInPx);
     // clang-format on
