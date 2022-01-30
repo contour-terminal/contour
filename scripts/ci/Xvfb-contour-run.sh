@@ -21,9 +21,12 @@ shift
 
 ldd `which contour`
 
+#LOG="pty,gui.session,gui.display,vt.renderer"
+LOG="all"
+
 $CONTOUR_PREFIX \
     contour terminal \
-        debug pty,gui.session,gui.display,vt.renderer \
+        debug "$LOG" \
         display ${DISPLAY} \
         early-exit-threshold 0 \
         dump-state-at-exit "${DUMP_DIR}" \
