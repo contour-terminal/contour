@@ -258,6 +258,8 @@ struct Config
     std::set<std::string> experimentalFeatures;
 };
 
+FileSystem::path configHome(std::string const& _programName);
+
 std::optional<std::string> readConfigFile(std::string const& _filename);
 
 void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName);

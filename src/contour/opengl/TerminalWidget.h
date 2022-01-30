@@ -25,6 +25,7 @@
 
 #include <terminal_renderer/Renderer.h>
 
+#include <QtCore/QFileSystemWatcher>
 #include <QtCore/QPoint>
 #include <QtCore/QTimer>
 #include <QtGui/QOpenGLExtraFunctions>
@@ -128,6 +129,10 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
   public Q_SLOTS:
     void onFrameSwapped();
     void onScrollBarValueChanged(int _value);
+    void onRefreshRateChanged();
+    void onScreenDpiChanged();
+    void onScreenChanged();
+    void onDpiConfigChanged();
 
   signals:
     void terminalBufferChanged(terminal::ScreenType);
@@ -140,6 +145,9 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     //
     config::TerminalProfile const& profile() const noexcept { return session_.profile(); }
     terminal::Terminal& terminal() noexcept { return session_.terminal(); }
+    void configureScreenHooks();
+    void logDisplayInfo();
+    void watchKdeDpiSetting();
     terminal::PageSize screenSize() const
     {
         return screenSizeForPixels(pixelSize(), renderer_.gridMetrics());
@@ -180,6 +188,9 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     QTimer updateTimer_;
 
     RenderStateManager state_;
+
+    QFileSystemWatcher filesystemWatcher_;
+    crispy::Point lastScreenDPI_;
 
     // ======================================================================
 
