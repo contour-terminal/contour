@@ -285,6 +285,7 @@ void App::customizeLogStoreOutput()
                 result += "        ";
             else
             {
+                // clang-format off
                 auto const now = chrono::system_clock::now();
                 auto const micros =
                     duration_cast<chrono::microseconds>(now.time_since_epoch()).count() % 1'000'000;
@@ -292,9 +293,10 @@ void App::customizeLogStoreOutput()
                 result += fmt::format("[{:%Y-%m-%d %H:%M:%S}.{:06}] [{}]",
                                       chrono::system_clock::now(),
                                       micros,
-                                      _msg.category().name()); // clang-format off
+                                      _msg.category().name());
                 result += sgrReset;
                 result += ' ';
+                // clang-format on
             }
 
             result += sgrMessage;
