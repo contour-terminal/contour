@@ -7,6 +7,7 @@
 - Fixes VT sequence `OSC 4`'s response.
 - Fixes `DECRC` with respect to `DECSTBM` enabled and `DECOM` being inverted interpreted.
 - Fixes `XTGETTCAP` (#582).
+- Fixes `SU` in combination with `DECLRM` (#593).
 - Fixes an assertion in text renderer.
 - Fixes wrongly advertising DEC locator mode (it is not supported).
 - Improved VT backend performance (#342).
