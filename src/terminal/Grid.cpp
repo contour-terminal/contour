@@ -440,24 +440,28 @@ LineCount Grid<Cell>::scrollUp(LineCount _n, GraphicsAttributes _defaultAttribut
         // a full "inside" scroll-up
         auto const marginHeight = _margin.vertical.length();
         auto const n = std::min(_n, marginHeight);
+        auto const bottomLineOffsetToCopy = min(_margin.vertical.from + *n, _margin.vertical.to - 1);
+        auto const topTargetLineOffset = _margin.vertical.from;
+        auto const bottomTargetLineOffset = _margin.vertical.to - *n;
+        auto const columnsToMove = unbox<size_t>(_margin.horizontal.length());
 
-        if (n <= marginHeight)
+        for (LineOffset targetLineOffset = topTargetLineOffset; targetLineOffset <= bottomTargetLineOffset;
+             ++targetLineOffset)
         {
-            for (LineOffset line = _margin.vertical.from; line <= _margin.vertical.from + *n; ++line)
+            auto const sourceLineOffset = targetLineOffset + *n;
+            auto t = &useCellAt(targetLineOffset, _margin.horizontal.from);
+            auto s = &at(sourceLineOffset, _margin.horizontal.from);
+            std::copy_n(s, columnsToMove, t);
+        }
+
+        for (LineOffset line = _margin.vertical.to - *n + 1; line <= _margin.vertical.to; ++line)
+        {
+            auto a = &useCellAt(line, _margin.horizontal.from);
+            auto b = a + unbox<int>(_margin.horizontal.length());
+            while (a != b)
             {
-                auto t = &useCellAt(line, _margin.horizontal.from);
-                auto s = &at(line + *n, _margin.horizontal.from);
-                std::copy_n(s, unbox<size_t>(_margin.horizontal.length()), t);
-            }
-            for (LineOffset line = _margin.vertical.from + *n + 1; line <= _margin.vertical.to; ++line)
-            {
-                auto a = &useCellAt(line, _margin.horizontal.from);
-                auto b = &at(line, _margin.horizontal.to + 1);
-                while (a != b)
-                {
-                    a->reset(_defaultAttributes);
-                    a++;
-                }
+                a->reset(_defaultAttributes);
+                a++;
             }
         }
     }

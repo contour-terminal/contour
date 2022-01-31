@@ -1317,6 +1317,73 @@ TEST_CASE("EraseCharacters", "[screen]")
     }
 }
 
+TEST_CASE("ScrollUp.WithMargins")
+{
+    auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto& screen = term.screen;
+    screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
+    logScreenTextAlways(screen, "init");
+    REQUIRE("12345\n"
+            "67890\n"
+            "ABCDE\n"
+            "FGHIJ\n"
+            "KLMNO\n"
+            == screen.renderMainPageText());
+
+    // "\033[?69h\033[2;4s\033[2;4r\033[20S"
+    screen.setMode(DECMode::LeftRightMargin, true);              // DECSLRM
+    screen.setLeftRightMargin(ColumnOffset(1), ColumnOffset(3)); // DECLRMM
+    screen.setTopBottomMargin(LineOffset(1), LineOffset(3));     // DECSTBM
+
+    SECTION("SU-1")
+    {
+        screen.scrollUp(LineCount(1));
+        logScreenTextAlways(screen, "after 1");
+        REQUIRE("12345\n"
+                "6BCD0\n"
+                "AGHIE\n"
+                "F   J\n"
+                "KLMNO\n"
+                == screen.renderMainPageText());
+    }
+
+    SECTION("SU-2")
+    {
+        screen.scrollUp(LineCount(2));
+        logScreenTextAlways(screen, "after 2");
+        REQUIRE("12345\n"
+                "6GHI0\n"
+                "A   E\n"
+                "F   J\n"
+                "KLMNO\n"
+                == screen.renderMainPageText());
+    }
+
+    SECTION("SU-3")
+    {
+        screen.scrollUp(LineCount(3));
+        logScreenTextAlways(screen, "after 3");
+        REQUIRE("12345\n"
+                "6   0\n"
+                "A   E\n"
+                "F   J\n"
+                "KLMNO\n"
+                == screen.renderMainPageText());
+    }
+
+    SECTION("SU-3 (overflow)")
+    {
+        screen.scrollUp(LineCount(4));
+        logScreenTextAlways(screen, "after 4");
+        REQUIRE("12345\n"
+                "6   0\n"
+                "A   E\n"
+                "F   J\n"
+                "KLMNO\n"
+                == screen.renderMainPageText());
+    }
+}
+
 TEST_CASE("ScrollUp", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
