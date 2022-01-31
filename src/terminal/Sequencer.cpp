@@ -223,8 +223,30 @@ namespace impl // {{{ some command generator helpers
                 auto const r = crispy::to_integer<16, uint8_t>(_value.substr(4, 2));
                 auto const g = crispy::to_integer<16, uint8_t>(_value.substr(7, 2));
                 auto const b = crispy::to_integer<16, uint8_t>(_value.substr(10, 2));
-                return RGBColor { *r, *g, *b };
+                return RGBColor { r.value(), g.value(), b.value() };
             }
+
+            // "#RRGGBB"
+            if (_value.size() == 7 && _value[0] == '#')
+            {
+                auto const r = crispy::to_integer<16, uint8_t>(_value.substr(1, 2));
+                auto const g = crispy::to_integer<16, uint8_t>(_value.substr(3, 2));
+                auto const b = crispy::to_integer<16, uint8_t>(_value.substr(5, 2));
+                return RGBColor { r.value(), g.value(), b.value() };
+            }
+
+            // "#RGB"
+            if (_value.size() == 4 && _value[0] == '#')
+            {
+                auto const r = crispy::to_integer<16, uint8_t>(_value.substr(1, 1));
+                auto const g = crispy::to_integer<16, uint8_t>(_value.substr(2, 1));
+                auto const b = crispy::to_integer<16, uint8_t>(_value.substr(3, 1));
+                auto const rr = static_cast<uint8_t>(r.value() << 4);
+                auto const gg = static_cast<uint8_t>(g.value() << 4);
+                auto const bb = static_cast<uint8_t>(b.value() << 4);
+                return RGBColor { rr, gg, bb };
+            }
+
             return std::nullopt;
         }
         catch (...)
