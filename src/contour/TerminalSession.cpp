@@ -505,7 +505,7 @@ void TerminalSession::sendFocusInEvent()
 
     terminal().sendFocusInEvent();
 
-    display_->setBackgroundBlur(profile().backgroundBlur);
+    display_->setBlurBehind(profile().backgroundBlur);
     scheduleRedraw();
 }
 
@@ -956,7 +956,8 @@ void TerminalSession::configureDisplay()
         return;
 
     LOGSTORE(SessionLog)("Configuring display.");
-    display_->setBackgroundBlur(profile_.backgroundBlur);
+    display_->setBlurBehind(profile_.backgroundBlur);
+    display_->setBackgroundImage(profile_.colors.backgroundImage);
 
     if (profile_.maximized)
         display_->setWindowMaximized();

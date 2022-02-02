@@ -17,6 +17,7 @@
 #include <contour/opengl/ShaderConfig.h>
 
 #include <terminal/Color.h>
+#include <terminal/ColorPalette.h>
 #include <terminal/InputBinding.h>
 #include <terminal/Process.h>
 #include <terminal/Sequencer.h> // CursorDisplay
@@ -257,6 +258,8 @@ struct Config
 
     std::set<std::string> experimentalFeatures;
 };
+
+FileSystem::path configHome(std::string const& _programName);
 
 std::optional<std::string> readConfigFile(std::string const& _filename);
 

@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <utility>
 #include <vector>
 
@@ -42,32 +43,41 @@ using terminal::ImageSize;
 using terminal::RGBAColor;
 using terminal::Width;
 
+namespace chrono = std::chrono;
 namespace atlas = terminal::renderer::atlas;
+
+#if !defined(_WIN32)
+    #define CRISPY_PACKED __attribute__((packed))
+#else
+    #define CRISPY_PACKED /*!*/
+#endif
 
 namespace contour::opengl
 {
 
-namespace atlas = terminal::renderer::atlas;
-
-#if !defined(NDEBUG)
-    #define CHECKED_GL(code)                                                      \
-        do                                                                        \
-        {                                                                         \
-            (code);                                                               \
-            GLenum err {};                                                        \
-            while ((err = glGetError()) != GL_NO_ERROR)                           \
-                LOGSTORE(DisplayLog)("OpenGL error {} for call: {}", err, #code); \
-        } while (0)
-#else
-    #define CHECKED_GL(code) \
-        do                   \
-        {                    \
-            (code);          \
-        } while (0)
-#endif
-
 namespace
 {
+    struct CRISPY_PACKED vec2
+    {
+        float x;
+        float y;
+    };
+
+    struct CRISPY_PACKED vec3
+    {
+        float x;
+        float y;
+        float z;
+    };
+
+    struct CRISPY_PACKED vec4
+    {
+        float x;
+        float y;
+        float z;
+        float w;
+    };
+
     static constexpr bool isPowerOfTwo(uint32_t value) noexcept
     {
         //.
@@ -90,13 +100,23 @@ namespace
         _bindable.release();
     }
 
+#define CHECKED_GL(code)                                                      \
+    do                                                                        \
+    {                                                                         \
+        (code);                                                               \
+        GLenum err {};                                                        \
+        while ((err = glGetError()) != GL_NO_ERROR)                           \
+            LOGSTORE(DisplayLog)("OpenGL error {} for call: {}", err, #code); \
+    } while (0)
+
     template <typename F>
-    inline void checkedGL(F&& region) noexcept
+    inline void checkedGL(F&& region,
+                          logstore::source_location location = logstore::source_location::current()) noexcept
     {
         region();
         auto err = GLenum {};
         while ((err = glGetError()) != GL_NO_ERROR)
-            LOGSTORE(DisplayLog)("OpenGL error {} for call.", err);
+            DisplayLog(location)("OpenGL error {} for call.", err);
     }
 
     int glFormat(atlas::Format _format)
@@ -121,8 +141,6 @@ namespace
     }
 } // namespace
 
-constexpr int MaxColorTextureSize = 2048;
-
 /**
  * Text rendering input:
  *  - vec3 screenCoord    (x/y/z)
@@ -133,6 +151,7 @@ constexpr int MaxColorTextureSize = 2048;
 
 OpenGLRenderer::OpenGLRenderer(ShaderConfig const& textShaderConfig,
                                ShaderConfig const& rectShaderConfig,
+                               ShaderConfig const& backgroundImageShaderConfig,
                                ImageSize targetSurfaceSize,
                                ImageSize textureTileSize,
                                terminal::renderer::PageMargin margin):
@@ -146,6 +165,7 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& textShaderConfig,
 
     _textShader { createShader(textShaderConfig) },
     _textProjectionLocation { _textShader->uniformLocation("vs_projection") },
+    _backgroundShader { createShader(backgroundImageShaderConfig) },
     _rectShader { createShader(rectShaderConfig) },
     _rectProjectionLocation { _rectShader->uniformLocation("u_projection") }
 {
@@ -166,14 +186,9 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& textShaderConfig,
         CHECKED_GL(_textShader->setUniformValue("pixel_x", 1.0f / textureAtlasWidth));
     });
 
+    initializeBackgroundRendering();
     initializeRectRendering();
     initializeTextureRendering();
-}
-
-crispy::ImageSize OpenGLRenderer::colorTextureSizeHint() noexcept
-{
-    return ImageSize { Width(min(MaxColorTextureSize, maxTextureSize())),
-                       Height(min(MaxColorTextureSize, maxTextureSize())) };
 }
 
 void OpenGLRenderer::setRenderSize(ImageSize targetSurfaceSize)
@@ -220,16 +235,16 @@ void OpenGLRenderer::initializeRectRendering()
 
 void OpenGLRenderer::initializeTextureRendering()
 {
-    CHECKED_GL(glGenVertexArrays(1, &_vao));
-    CHECKED_GL(glBindVertexArray(_vao));
+    CHECKED_GL(glGenVertexArrays(1, &_textVAO));
+    CHECKED_GL(glBindVertexArray(_textVAO));
 
     auto constexpr BufferStride = (3 + 4 + 4) * sizeof(GLfloat);
     auto constexpr VertexOffset = (void const*) 0;
     auto const TexCoordOffset = (void const*) (3 * sizeof(GLfloat));
     auto const ColorOffset = (void const*) (7 * sizeof(GLfloat));
 
-    CHECKED_GL(glGenBuffers(1, &_vbo));
-    CHECKED_GL(glBindBuffer(GL_ARRAY_BUFFER, _vbo));
+    CHECKED_GL(glGenBuffers(1, &_textVBO));
+    CHECKED_GL(glBindBuffer(GL_ARRAY_BUFFER, _textVBO));
     CHECKED_GL(glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_STREAM_DRAW));
 
     // 0 (vec3): vertex buffer
@@ -258,6 +273,9 @@ OpenGLRenderer::~OpenGLRenderer()
     LOGSTORE(DisplayLog)("~OpenGLRenderer");
     CHECKED_GL(glDeleteVertexArrays(1, &_rectVAO));
     CHECKED_GL(glDeleteBuffers(1, &_rectVBO));
+
+    if (_backgroundImageTexture)
+        CHECKED_GL(glDeleteTextures(1, &_backgroundImageTexture));
 }
 
 void OpenGLRenderer::initialize()
@@ -398,11 +416,18 @@ ImageSize OpenGLRenderer::renderBufferSize()
 
 void OpenGLRenderer::execute()
 {
+    _currentTextureId = std::numeric_limits<int>::max();
+
     // FIXME
     // glEnable(GL_BLEND);
     // glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE);
     // glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
     // glBlendFunc(GL_SRC1_COLOR, GL_ONE_MINUS_SRC1_COLOR);
+
+    if (_backgroundImageTexture)
+    {
+        bound(*_backgroundShader, [&]() { executeRenderBackground(); });
+    }
 
     // render filled rects
     //
@@ -442,8 +467,6 @@ void OpenGLRenderer::execute()
 
 void OpenGLRenderer::executeRenderTextures()
 {
-    _currentTextureId = std::numeric_limits<int>::max();
-
     // potentially (re-)configure atlas
     if (_scheduledExecutions.configureAtlas)
         executeConfigureAtlas(*_scheduledExecutions.configureAtlas);
@@ -458,13 +481,17 @@ void OpenGLRenderer::executeRenderTextures()
     {
         glActiveTexture(static_cast<GLenum>(GL_TEXTURE0 + batch.userdata));
         bindTexture(_textureAtlas.textureId);
-        glBindVertexArray(_vao);
+        glBindVertexArray(_textVAO);
 
         // upload buffer
         // clang-format off
-        glBindBuffer(GL_ARRAY_BUFFER, _vbo);
-        glBufferData(GL_ARRAY_BUFFER, static_cast<GLsizei>(batch.buffer.size() * sizeof(GLfloat)), batch.buffer.data(), GL_STREAM_DRAW);
-        glDrawArrays(GL_TRIANGLES, 0, static_cast<GLsizei>(batch.renderTiles.size() * 6));
+        glBindBuffer(GL_ARRAY_BUFFER, _textVBO);
+        glBufferData(GL_ARRAY_BUFFER,
+                     static_cast<GLsizei>(batch.buffer.size() * sizeof(GLfloat)),
+                     batch.buffer.data(), GL_STREAM_DRAW);
+        glDrawArrays(GL_TRIANGLES,
+                     0,
+                     static_cast<GLsizei>(batch.renderTiles.size() * 6));
         // clang-format on
     }
 
@@ -562,7 +589,7 @@ void OpenGLRenderer::executeUploadTile(atlas::UploadTile const& param)
     bindTexture(textureId);
 
     // Image row alignment is 1 byte (OpenGL defaults to 4).
-    CHECKED_GL(glPixelStorei(GL_UNPACK_ALIGNMENT, 1));
+    CHECKED_GL(glPixelStorei(GL_UNPACK_ALIGNMENT, param.rowAlignment));
 
     CHECKED_GL(glTexSubImage2D(target,
                                LevelOfDetail,
@@ -683,5 +710,161 @@ void OpenGLRenderer::clear(terminal::RGBAColor fillColor)
 void OpenGLRenderer::inspect(std::ostream& output) const
 {
 }
+
+// {{{ background (image)
+struct CRISPY_PACKED BackgroundShaderParams
+{
+    vec3 vertices;
+    vec2 textureCoords;
+};
+
+void OpenGLRenderer::initializeBackgroundRendering()
+{
+    bound(*_backgroundShader, [&]() {
+        // clang-format off
+        CHECKED_GL(_backgroundShader->setUniformValue("fs_backgroundImage", 0)); // GL_TEXTURE0
+        CHECKED_GL(_backgroundUniformLocations.projection = _backgroundShader->uniformLocation("u_projection"));
+        CHECKED_GL(_backgroundUniformLocations.resolution = _backgroundShader->uniformLocation("u_resolution"));
+        CHECKED_GL(_backgroundUniformLocations.blur = _backgroundShader->uniformLocation("u_blur"));
+        CHECKED_GL(_backgroundUniformLocations.opacity = _backgroundShader->uniformLocation("u_opacity"));
+        CHECKED_GL(_backgroundUniformLocations.time = _backgroundShader->uniformLocation("u_time"));
+        // clang-format on
+    });
+
+    // Setup VAO
+    CHECKED_GL(glGenVertexArrays(1, &_backgroundVAO));
+    CHECKED_GL(glBindVertexArray(_backgroundVAO));
+
+    glGenBuffers(1, &_backgroundVBO);
+    CHECKED_GL(glBindBuffer(GL_ARRAY_BUFFER, _backgroundVBO));
+    CHECKED_GL(glBufferData(GL_ARRAY_BUFFER, 0, nullptr, GL_STREAM_DRAW));
+
+    auto constexpr BufferStride = sizeof(BackgroundShaderParams);
+    auto const VertexOffset = (void const*) offsetof(BackgroundShaderParams, vertices);
+    auto const TexCoordOffset = (void const*) offsetof(BackgroundShaderParams, textureCoords);
+
+    // 0 (vec3): vertex buffer
+    CHECKED_GL(glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, BufferStride, VertexOffset));
+    CHECKED_GL(glEnableVertexAttribArray(0));
+
+    // 1 (vec2): texture coordinates buffer
+    CHECKED_GL(glVertexAttribPointer(1, 2, GL_FLOAT, GL_TRUE, BufferStride, TexCoordOffset));
+    CHECKED_GL(glEnableVertexAttribArray(1));
+
+    // release
+    CHECKED_GL(glBindVertexArray(0));
+}
+
+void OpenGLRenderer::setBackgroundImage(optional<terminal::BackgroundImage> const& backgroundImageOpt)
+{
+    if (!backgroundImageOpt || backgroundImageOpt->hash.value() != _renderStateCache.backgroundImageHash)
+    {
+        _scheduledExecutions.backgroundImage = nullptr;
+        _renderStateCache.backgroundImage = nullptr;
+        _renderStateCache.backgroundImageOpacity = 1.0f;
+        if (_backgroundImageTexture)
+        {
+            glDeleteTextures(1, &_backgroundImageTexture);
+            _backgroundImageTexture = 0;
+        }
+    }
+
+    if (!backgroundImageOpt)
+        return;
+
+    auto const& backgroundImage = backgroundImageOpt.value();
+    _scheduledExecutions.backgroundImage = &backgroundImage;
+    _renderStateCache.backgroundImage = &backgroundImage;
+    _renderStateCache.backgroundImageOpacity = backgroundImage.opacity;
+    _renderStateCache.backgroundImageHash = backgroundImage.hash.value();
+
+    CHECKED_GL(glGenTextures(1, &_backgroundImageTexture));
+    CHECKED_GL(bindTexture(_backgroundImageTexture));
+
+    CHECKED_GL(glTexParameteri(GL_TEXTURE_2D,
+                               GL_TEXTURE_MAG_FILTER,
+                               GL_NEAREST)); // NEAREST, because LINEAR yields borders at the edges
+    CHECKED_GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
+    CHECKED_GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE));
+    CHECKED_GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
+    CHECKED_GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
+    CHECKED_GL(glPixelStorei(GL_UNPACK_ALIGNMENT, backgroundImage.rowAlignment));
+
+    auto constexpr target = GL_TEXTURE_2D;
+    auto constexpr levelOfDetail = 0;
+    auto constexpr type = GL_UNSIGNED_BYTE;
+    auto constexpr imageFormat = GL_RGBA;
+    auto constexpr UnusedParam = 0;
+    auto constexpr internalFormat = GL_RGBA;
+
+    auto const textureWidth = unbox<uint32_t>(backgroundImage.size.width);
+    auto const textureHeight = unbox<uint32_t>(backgroundImage.size.height);
+
+    CHECKED_GL(glTexImage2D(target,
+                            levelOfDetail,
+                            internalFormat,
+                            textureWidth,
+                            textureHeight,
+                            UnusedParam,
+                            imageFormat,
+                            type,
+                            backgroundImage.pixels.data()));
+    // }}}
+
+    LOGSTORE(DisplayLog)
+    ("Uploading background image {} {} ({}x{}) {}",
+     _backgroundImageTexture,
+     backgroundImage.size,
+     textureWidth,
+     textureHeight,
+     backgroundImage.format);
+}
+
+void OpenGLRenderer::executeRenderBackground()
+{
+    Require(_backgroundImageTexture != 0);
+
+    auto const w = unbox<float>(_renderTargetSize.width);
+    auto const h = unbox<float>(_renderTargetSize.height);
+
+    // {{{ setup uniforms
+    auto const opacity = float(_renderStateCache.backgroundColor.alpha()) / 255.0f
+                         * _renderStateCache.backgroundImage->opacity;
+    auto const now = chrono::steady_clock::now().time_since_epoch();
+    auto const timestamp = chrono::duration_cast<chrono::milliseconds>(now).count();
+    auto const blur = _renderStateCache.backgroundImage->blur ? 1.0f : 0.0f;
+
+    _backgroundShader->setUniformValue(_backgroundUniformLocations.projection, _projectionMatrix);
+    _backgroundShader->setUniformValue(_backgroundUniformLocations.resolution, w, h);
+    _backgroundShader->setUniformValue(_backgroundUniformLocations.blur, blur);
+    _backgroundShader->setUniformValue(_backgroundUniformLocations.opacity, float { opacity });
+    _backgroundShader->setUniformValue(_backgroundUniformLocations.time,
+                                       static_cast<float>(static_cast<double>(timestamp) / 1000.0));
+    // }}}
+
+    // clang-format off
+    auto vertices = array {
+        // triangle 1
+        BackgroundShaderParams{vec3{ 0.0f, 0.0f, 0.0f }, vec2 { 0.0f, 1.0f } }, // bottom left
+        BackgroundShaderParams{vec3{    w, 0.0f, 0.0f }, vec2 { 1.0f, 1.0f } }, // bottom right
+        BackgroundShaderParams{vec3{    w,    h, 0.0f }, vec2 { 1.0f, 0.0f } }, // top right
+        // riangle 2
+        BackgroundShaderParams{vec3{    w,    h, 0.0f }, vec2 { 1.0f, 0.0f } }, // top right
+        BackgroundShaderParams{vec3{    0,    h, 0.0f }, vec2 { 0.0f, 0.0f } }, // top left
+        BackgroundShaderParams{vec3{ 0.0f,    0, 0.0f }, vec2 { 0.0f, 1.0f } }, // bottom left
+    };
+
+    CHECKED_GL(glActiveTexture(GL_TEXTURE0));
+    CHECKED_GL(bindTexture(_backgroundImageTexture));
+    CHECKED_GL(glBindVertexArray(_backgroundVAO));
+    CHECKED_GL(glBindBuffer(GL_ARRAY_BUFFER, _backgroundVBO));
+
+    CHECKED_GL(glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(BackgroundShaderParams), vertices.data(), GL_STREAM_DRAW));
+
+    auto constexpr ElementCount = sizeof(BackgroundShaderParams) / sizeof(float);
+    CHECKED_GL(glDrawArrays(GL_TRIANGLES, 0, 6 * ElementCount));
+    // clang-format on
+}
+// }}}
 
 } // namespace contour::opengl

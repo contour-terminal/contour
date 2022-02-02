@@ -150,24 +150,4 @@ string to_string(RGBAColor c)
     return string(buf, n);
 }
 
-RGBColor apply(ColorPalette const& _profile, Color _color, ColorTarget _target, bool _bright) noexcept
-{
-    switch (_color.type())
-    {
-    case ColorType::RGB: return _color.rgb();
-    case ColorType::Indexed: {
-        auto const index = static_cast<size_t>(_color.index());
-        if (_bright && index < 8)
-            return _profile.brightColor(index);
-        else
-            return _profile.indexedColor(index);
-        break;
-    }
-    case ColorType::Bright: return _profile.brightColor(static_cast<size_t>(_color.index()));
-    case ColorType::Undefined:
-    case ColorType::Default: break;
-    }
-    return _target == ColorTarget::Foreground ? _profile.defaultForeground : _profile.defaultBackground;
-}
-
 } // namespace terminal

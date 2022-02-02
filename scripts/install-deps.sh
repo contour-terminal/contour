@@ -168,6 +168,7 @@ install_deps_ubuntu()
         fi
     fi
 
+    fetch_and_unpack_gsl
     case $RELEASE in
         "18.04" | "19.04" | "20.04" | "21.04")
             # Older Ubuntu's don't have a recent enough fmt / range-v3, so supply it.
@@ -178,7 +179,6 @@ install_deps_ubuntu()
 
             fetch_and_unpack_fmtlib
             fetch_and_unpack_Catch2
-            fetch_and_unpack_gsl
             ;;
         *)
             packages="$packages libfmt-dev librange-v3-dev catch2"

@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include <terminal/primitives.h>
+
 #include <terminal_renderer/TextureAtlas.h>
 
 #include <crispy/logstore.h>

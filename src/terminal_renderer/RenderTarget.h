@@ -29,6 +29,11 @@
 #include <optional>
 #include <vector>
 
+namespace terminal
+{
+struct BackgroundImage;
+}
+
 namespace terminal::renderer
 {
 
@@ -107,6 +112,8 @@ class RenderTarget
     virtual void setMargin(PageMargin _margin) = 0;
 
     virtual atlas::AtlasBackend& textureScheduler() = 0;
+
+    virtual void setBackgroundImage(std::optional<terminal::BackgroundImage> const& _backgroundImage) = 0;
 
     /// Fills a rectangular area with the given solid color.
     virtual void renderRectangle(int x, int y, Width, Height, RGBAColor color) = 0;

@@ -23,7 +23,7 @@
     #include <Windows.h>
 #endif
 
-namespace WindowBackgroundBlur
+namespace BlurBehind
 {
 
 void setEnabled(WId _winId, bool _enable)
@@ -91,4 +91,4 @@ void setEnabled(WId _winId, bool _enable)
 #endif
 }
 
-} // namespace WindowBackgroundBlur
+} // namespace BlurBehind

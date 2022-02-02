@@ -13,6 +13,7 @@
  */
 #pragma once
 
+#include <terminal/ColorPalette.h>
 #include <terminal/Image.h>
 #include <terminal/Terminal.h>
 
@@ -47,7 +48,7 @@ struct RenderCursor
 /**
  * Renders a terminal's screen to the current OpenGL context.
  */
-class Renderer //: public Renderable
+class Renderer
 {
   public:
     /** Constructs a Renderer instances.

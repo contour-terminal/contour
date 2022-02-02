@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal/CellFlags.h>
+#include <terminal/ColorPalette.h>
 #include <terminal/GraphicsAttributes.h>
 #include <terminal/Hyperlink.h>
 #include <terminal/Image.h>

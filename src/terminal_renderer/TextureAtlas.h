@@ -147,6 +147,7 @@ struct UploadTile
     Buffer bitmap; // texture data to be uploaded
     ImageSize bitmapSize;
     Format bitmapFormat;
+    int rowAlignment = 1; // byte-alignment per row
 };
 
 // Command structure for rendering a tile from a texture atlas.

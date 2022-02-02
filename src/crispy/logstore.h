@@ -27,12 +27,16 @@
 #include <string_view>
 #include <vector>
 
-#if __has_include(<source_location>) && !defined(_WIN32)
-    #include <source_location>
-#elif __has_include(<experimental/source_location>)
-    #include <experimental/source_location>
-    #define LOGSTORE_HAS_EXPERIMENTAL_SOURCE_LOCATION 1
-#endif
+// NB: Don't do that now. It seems to only cause problems, such as
+// __has_include reports presense and in can in fact be included, but it's
+// not giving us the expected std::...source_location, wow.
+//
+// #if __has_include(<source_location>) && !defined(_WIN32)
+//     #include <source_location>
+// #elif __has_include(<experimental/source_location>)
+//     #include <experimental/source_location>
+//     #define LOGSTORE_HAS_EXPERIMENTAL_SOURCE_LOCATION 1
+// #endif
 
 namespace logstore
 {
@@ -63,22 +67,15 @@ class SourceLocation
     char const* functionName_;
 };
 
-#if __has_include(<source_location>) && !defined(_WIN32)
-using source_location = std::source_location;
-#elif __has_include(<experimental/source_location>)
-using source_location = std::experimental::source_location;
-#else
+// #if __has_include(<source_location>) && !defined(_WIN32)
+// using source_location = std::source_location;
+// #elif __has_include(<experimental/source_location>)
+// using source_location = std::experimental::source_location;
+// #else
 using source_location = SourceLocation;
-#endif
+// #endif
 
-#if (__has_include(<source_location>) || __has_include(<experimental/source_location>)) && !defined(_WIN32)
-    #define LOGSTORE_THIS() (::logstore::source_location::current())
-#else
-    #define LOGSTORE_THIS() \
-        (::logstore::SourceLocation(__builtin_FILE(), __builtin_LINE(), __builtin_FUNCTION()))
-#endif
-
-#define LOGSTORE(x) (x(LOGSTORE_THIS()))
+#define LOGSTORE(x) (x(::logstore::source_location::current()))
 
 class MessageBuilder
 {

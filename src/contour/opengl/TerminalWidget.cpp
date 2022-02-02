@@ -27,6 +27,7 @@
 
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
+#include <QtCore/QFileSystemWatcher>
 #include <QtCore/QMetaObject>
 #include <QtCore/QProcess>
 #include <QtCore/QStandardPaths>
@@ -53,7 +54,6 @@
 
 #include <algorithm>
 #include <cstring>
-// #include <execution>
 #include <fstream>
 #include <stdexcept>
 #include <string_view>
@@ -218,6 +218,19 @@ namespace
         LOGSTORE(DisplayLog)("{}", unhandledExceptionMessage(where, e));
         cerr << unhandledExceptionMessage(where, e) << endl;
     }
+
+    // Returns the config file containing the user-configured DPI setting for KDE desktops.
+    std::optional<FileSystem::path> kcmFontsFilePath()
+    {
+#if !defined(__APPLE__) && !defined(_WIN32)
+        auto const xdgConfigHome = config::configHome("");
+        auto const kcmFontsFile = xdgConfigHome / "kcmfonts";
+        return { kcmFontsFile };
+#endif
+
+        return nullopt;
+    }
+
 } // namespace
 
 // {{{ Widget creation and QOpenGLWidget overides
@@ -227,7 +240,7 @@ TerminalWidget::TerminalWidget(TerminalSession& session,
     QOpenGLWidget(),
     session_ { session },
     adaptSize_ { std::move(adaptSize) },
-    enableBackgroundBlur_ { std::move(enableBackgroundBlur) },
+    enableBlurBehind_ { std::move(enableBackgroundBlur) },
     renderer_ {
         terminal().screenSize(),
         sanitizeFontDescription(profile().fonts, screenDPI()),
@@ -239,7 +252,8 @@ TerminalWidget::TerminalWidget(TerminalSession& session,
         profile().hyperlinkDecoration.normal,
         profile().hyperlinkDecoration.hover
         // TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
-    }
+    },
+    filesystemWatcher_(this)
 {
     LOGSTORE(DisplayLog)
     ("ctor: terminalSize={}, fontSize={}, contentScale={}, geometry={}:{}..{}:{}",
@@ -258,6 +272,8 @@ TerminalWidget::TerminalWidget(TerminalSession& session,
     setAttribute(Qt::WA_OpaquePaintEvent);
 
     setMinimumSize(gridMetrics().cellSize.width.as<int>() * 3, gridMetrics().cellSize.height.as<int>() * 2);
+
+    lastScreenDPI_ = screenDPI();
 
     // setAttribute(Qt::WA_TranslucentBackground);
     // setAttribute(Qt::WA_NoSystemBackground, false);
@@ -329,9 +345,89 @@ QSize TerminalWidget::sizeHint() const
     return QSize(viewSize.width.as<int>(), viewSize.height.as<int>());
 }
 
+void TerminalWidget::onRefreshRateChanged()
+{
+    auto const rate = refreshRate();
+    LOGSTORE(DisplayLog)("Refresh rate changed to {}.", rate);
+    session_.terminal().setRefreshRate(rate);
+}
+
+void TerminalWidget::configureScreenHooks()
+{
+    Require(window());
+    Require(window()->windowHandle());
+
+    QWindow* window = this->window()->windowHandle();
+    QScreen* screen = screenOf(this);
+
+    connect(window, SIGNAL(screenChanged(QScreen*)), this, SLOT(onScreenChanged()));
+    connect(screen, SIGNAL(refreshRateChanged(qreal)), this, SLOT(onRefreshRateChanged()));
+    connect(screen, SIGNAL(logicalDotsPerInchChanged(qreal)), this, SLOT(onScreenDpiChanged()));
+    // connect(screen, SIGNAL(physicalDotsPerInchChanged(qreal)), this, SLOT(onScreenDpiChanged()));
+}
+
+void TerminalWidget::onScreenChanged()
+{
+    LOGSTORE(DisplayLog)("Screen changed.");
+    onScreenDpiChanged();
+}
+
+void TerminalWidget::onScreenDpiChanged()
+{
+    auto const newScreenDPI = screenDPI();
+    if (newScreenDPI == lastScreenDPI_)
+        return;
+
+    LOGSTORE(DisplayLog)("Screen DPI changed to {}.", newScreenDPI);
+    lastScreenDPI_ = newScreenDPI;
+    logDisplayInfo();
+    auto fd = renderer_.fontDescriptions();
+    fd.dpi = newScreenDPI;
+    renderer_.setFonts(fd);
+
+    // Apply resize on same window metrics propagates proper recalculations and repaint.
+    applyResize(terminal::ImageSize { Width(width()), Height(height()) }, session_, renderer_);
+}
+
+void TerminalWidget::logDisplayInfo()
+{
+    // clang-format off
+    QScreen* screen = screenOf(this);
+    auto const fontSizeInPx = static_cast<int>(ceil((
+        profile().fonts.size.pt / 72.0) * screen->physicalDotsPerInch() * contentScale()
+    ));
+    LOGSTORE(DisplayLog)("[Display Info] Refresh rate         : {} Hz", refreshRate());
+    LOGSTORE(DisplayLog)("[Display Info] Logical DPI          : {}", crispy::Size { logicalDpiX(), logicalDpiY() });
+    LOGSTORE(DisplayLog)("[Display Info] Physical DPI         : {}", crispy::Size { physicalDpiX(), physicalDpiY() });
+    LOGSTORE(DisplayLog)("[Display Info] Logical/physical PPI : {} / {}", screen->physicalDotsPerInch(), screen->logicalDotsPerInch());
+    LOGSTORE(DisplayLog)("[Display Info] Device pixel ratio   : {}", devicePixelRatioF());
+    LOGSTORE(DisplayLog)("[Display Info] Font size            : {} ({}px)", profile().fonts.size, fontSizeInPx);
+    // clang-format on
+}
+
+void TerminalWidget::watchKdeDpiSetting()
+{
+#if defined(__unix__)
+    auto const kcmFontsFile = kcmFontsFilePath();
+    if (kcmFontsFile.has_value())
+    {
+        filesystemWatcher_.addPath(QString::fromStdString(kcmFontsFile->string()));
+        connect(&filesystemWatcher_, SIGNAL(fileChanged(const QString&)), this, SLOT(onDpiConfigChanged()));
+    }
+#endif
+}
+
+void TerminalWidget::onDpiConfigChanged()
+{
+    onScreenDpiChanged();
+    watchKdeDpiSetting(); // re-watch file
+}
+
 void TerminalWidget::initializeGL()
 {
     initializeOpenGLFunctions();
+    configureScreenHooks();
+    watchKdeDpiSetting();
 
     auto const textureTileSize = renderer_.gridMetrics().cellSize;
     auto const viewportMargin = terminal::renderer::PageMargin {}; // TODO margin
@@ -339,6 +435,7 @@ void TerminalWidget::initializeGL()
     renderTarget_ =
         make_unique<OpenGLRenderer>(*config::Config::loadShaderConfig(config::ShaderClass::Text),
                                     *config::Config::loadShaderConfig(config::ShaderClass::Background),
+                                    *config::Config::loadShaderConfig(config::ShaderClass::BackgroundImage),
                                     ImageSize { Width(width()), Height(height()) },
                                     textureTileSize,
                                     viewportMargin);
@@ -352,12 +449,10 @@ void TerminalWidget::initializeGL()
         // clang-format off
         infoPrinted = true;
         LOGSTORE(DisplayLog)("[FYI] Application PID : {}", QCoreApplication::applicationPid());
-        LOGSTORE(DisplayLog)("[FYI] DPI             : {} physical; {} logical", crispy::Size { physicalDpiX(), physicalDpiY() }, crispy::Size { logicalDpiX(), logicalDpiY() });
-        auto const fontSizeInPx = int(ceil(profile().fonts.size.pt / 72.0 * 96.0 * contentScale()));
-        LOGSTORE(DisplayLog)("[FYI] Font size       : {} ({}px)", profile().fonts.size, fontSizeInPx);
         LOGSTORE(DisplayLog)("[FYI] OpenGL type     : {}", (QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL"));
         LOGSTORE(DisplayLog)("[FYI] OpenGL renderer : {}", glGetString(GL_RENDERER));
         LOGSTORE(DisplayLog)("[FYI] Qt platform     : {}", QGuiApplication::platformName().toStdString());
+        logDisplayInfo();
         // clang-format on
 
         GLint versionMajor {};
@@ -578,10 +673,7 @@ void TerminalWidget::onScrollBarValueChanged(int _value)
 
 double TerminalWidget::contentScale() const
 {
-    if (!window()->windowHandle())
-        return 1.0f;
-
-    return window()->windowHandle()->screen()->devicePixelRatio();
+    return devicePixelRatioF();
 }
 
 void TerminalWidget::updateMinimumSize()
@@ -609,7 +701,35 @@ double TerminalWidget::refreshRate() const
 
 crispy::Point TerminalWidget::screenDPI() const
 {
+#if !defined(__APPLE__) && !defined(_WIN32)
+    if (auto const kcmFontsFile = kcmFontsFilePath())
+    {
+        auto const contents = crispy::readFileAsString(kcmFontsFile.value());
+        for (auto const line: crispy::split(contents, '\n'))
+        {
+            auto const fields = crispy::split(line, '=');
+            if (fields.size() == 2 && fields[0] == "forceFontDPI"sv)
+            {
+                if (auto const forcedDPI = static_cast<int>(crispy::to_integer(fields[1]).value_or(0)))
+                {
+                    return crispy::Point { forcedDPI, forcedDPI };
+                }
+                else
+                {
+                    // Do not fallback to logicalDpiX/Y because it's most likely
+                    // a stale value when a live reconfiguration has happened.
+                    return crispy::Point { physicalDpiX(), physicalDpiY() };
+                }
+            }
+        }
+    }
+#endif
+
     return crispy::Point { logicalDpiX(), logicalDpiY() };
+
+    // Okay, this is weird!
+    // On MacOS nothing changes except physical DPI on scaling settings change.
+    // return crispy::Point { physicalDpiX(), physicalDpiY() };
 }
 
 bool TerminalWidget::isFullScreen() const
@@ -920,12 +1040,17 @@ void TerminalWidget::setWindowNormal()
     maximizedState_ = false;
 }
 
-void TerminalWidget::setBackgroundBlur(bool _enable)
+void TerminalWidget::setBlurBehind(bool _enable)
 {
-    if (!enableBackgroundBlur_)
+    if (!enableBlurBehind_)
         return;
 
-    enableBackgroundBlur_(_enable);
+    enableBlurBehind_(_enable);
+}
+
+void TerminalWidget::setBackgroundImage(std::optional<terminal::BackgroundImage> const& backgroundImage)
+{
+    renderTarget_->setBackgroundImage(backgroundImage);
 }
 
 void TerminalWidget::toggleFullScreen()

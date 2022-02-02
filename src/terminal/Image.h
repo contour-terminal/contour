@@ -41,7 +41,6 @@ enum class ImageFormat
 {
     RGB,
     RGBA,
-    PNG,
 };
 
 // clang-format off
@@ -299,6 +298,28 @@ struct StrongHasher<terminal::ImageId>
 
 namespace fmt // {{{
 {
+
+template <>
+struct formatter<terminal::ImageFormat>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(terminal::ImageFormat value, FormatContext& ctx)
+    {
+        switch (value)
+        {
+        case terminal::ImageFormat::RGB: return format_to(ctx.out(), "RGB");
+        case terminal::ImageFormat::RGBA: return format_to(ctx.out(), "RGBA");
+        }
+        return format_to(ctx.out(), "{}", unsigned(value));
+    }
+};
+
 template <>
 struct formatter<terminal::ImageStats>
 {

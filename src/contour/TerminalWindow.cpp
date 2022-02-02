@@ -134,7 +134,7 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
             centralWidget()->updateGeometry();
             update();
         },
-        [this](bool _enable) { WindowBackgroundBlur::setEnabled(winId(), _enable); }));
+        [this](bool _enable) { BlurBehind::setEnabled(winId(), _enable); }));
     terminalWidget_ = static_cast<opengl::TerminalWidget*>(terminalSession_->display());
 
     connect(terminalWidget_, SIGNAL(terminated()), this, SLOT(onTerminalClosed()));
@@ -169,9 +169,9 @@ void TerminalWindow::onTerminalClosed()
     close();
 }
 
-void TerminalWindow::setBackgroundBlur([[maybe_unused]] bool _enable)
+void TerminalWindow::setBlurBehind([[maybe_unused]] bool _enable)
 {
-    WindowBackgroundBlur::setEnabled(winId(), _enable);
+    BlurBehind::setEnabled(winId(), _enable);
 }
 
 void TerminalWindow::profileChanged()

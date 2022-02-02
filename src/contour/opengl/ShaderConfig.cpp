@@ -14,6 +14,8 @@
 #include <contour/helper.h>
 #include <contour/opengl/ShaderConfig.h>
 #include <contour/opengl/background_frag.h>
+#include <contour/opengl/background_image_frag.h>
+#include <contour/opengl/background_image_vert.h>
 #include <contour/opengl/background_vert.h>
 #include <contour/opengl/shared_defines_verbatim.h>
 #include <contour/opengl/text_frag.h>
@@ -44,6 +46,11 @@ ShaderConfig defaultShaderConfig(ShaderClass _shaderClass)
 
     switch (_shaderClass)
     {
+    case ShaderClass::BackgroundImage:
+        return { p(s(background_image_vert)),
+                 p(s(background_image_frag)),
+                 "builtin.background_image.vert",
+                 "builtin.background_image.frag" };
     case ShaderClass::Background:
         return {
             p(s(background_vert)), p(s(background_frag)), "builtin.background.vert", "builtin.background.frag"

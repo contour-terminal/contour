@@ -15,7 +15,7 @@
 
 #include <QtGui/QWindow>
 
-namespace WindowBackgroundBlur
+namespace BlurBehind
 {
 
 void setEnabled(WId _winId, bool _enabled);
