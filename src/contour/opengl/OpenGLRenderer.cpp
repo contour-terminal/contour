@@ -35,6 +35,7 @@ using std::move;
 using std::nullopt;
 using std::optional;
 using std::pair;
+using std::shared_ptr;
 using std::string;
 using std::vector;
 
@@ -755,7 +756,7 @@ void OpenGLRenderer::initializeBackgroundRendering()
     CHECKED_GL(glBindVertexArray(0));
 }
 
-void OpenGLRenderer::setBackgroundImage(optional<terminal::BackgroundImage> const& backgroundImageOpt)
+void OpenGLRenderer::setBackgroundImage(shared_ptr<terminal::BackgroundImage const> const& backgroundImageOpt)
 {
     if (!backgroundImageOpt || backgroundImageOpt->hash.value() != _renderStateCache.backgroundImageHash)
     {
@@ -772,7 +773,7 @@ void OpenGLRenderer::setBackgroundImage(optional<terminal::BackgroundImage> cons
     if (!backgroundImageOpt)
         return;
 
-    auto const& backgroundImage = backgroundImageOpt.value();
+    auto const& backgroundImage = *backgroundImageOpt;
     _scheduledExecutions.backgroundImage = &backgroundImage;
     _renderStateCache.backgroundImage = &backgroundImage;
     _renderStateCache.backgroundImageOpacity = backgroundImage.opacity;

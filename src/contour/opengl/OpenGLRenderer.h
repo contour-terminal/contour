@@ -76,7 +76,7 @@ class OpenGLRenderer final:
     std::optional<AtlasTextureScreenshot> readAtlas() override;
     AtlasBackend& textureScheduler() override;
     void scheduleScreenshot(ScreenshotCallback _callback) override;
-    void setBackgroundImage(std::optional<terminal::BackgroundImage> const& _backgroundImage) override;
+    void setBackgroundImage(std::shared_ptr<terminal::BackgroundImage const> const& _backgroundImage) override;
     void renderRectangle(int x, int y, Width, Height, RGBAColor color) override;
     void clear(terminal::RGBAColor _fillColor) override;
     void execute() override;

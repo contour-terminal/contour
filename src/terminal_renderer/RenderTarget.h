@@ -113,7 +113,7 @@ class RenderTarget
 
     virtual atlas::AtlasBackend& textureScheduler() = 0;
 
-    virtual void setBackgroundImage(std::optional<terminal::BackgroundImage> const& _backgroundImage) = 0;
+    virtual void setBackgroundImage(std::shared_ptr<terminal::BackgroundImage const> const& _backgroundImage) = 0;
 
     /// Fills a rectangular area with the given solid color.
     virtual void renderRectangle(int x, int y, Width, Height, RGBAColor color) = 0;

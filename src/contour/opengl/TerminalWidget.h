@@ -113,7 +113,7 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     void setWindowMaximized() override;
     void setWindowNormal() override;
     void setBlurBehind(bool _enable) override;
-    void setBackgroundImage(std::optional<terminal::BackgroundImage> const& backgroundImage) override;
+    void setBackgroundImage(std::shared_ptr<terminal::BackgroundImage const> const& backgroundImage) override;
     void toggleFullScreen() override;
     void setHyperlinkDecoration(terminal::renderer::Decorator _normal,
                                 terminal::renderer::Decorator _hover) override;

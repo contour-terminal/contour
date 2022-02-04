@@ -138,7 +138,7 @@ struct ColorPalette
         RGBColor hover = 0xFF0000;
     } hyperlinkDecoration;
 
-    std::optional<BackgroundImage> backgroundImage;
+    std::shared_ptr<BackgroundImage const> backgroundImage;
 };
 
 enum class ColorTarget

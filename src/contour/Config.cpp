@@ -802,7 +802,7 @@ Config loadConfigFromFile(FileSystem::path const& _fileName)
     return config;
 }
 
-std::optional<terminal::BackgroundImage> loadImage(string const& fileName)
+std::shared_ptr<terminal::BackgroundImage const> loadImage(string const& fileName, float opacity, bool blur)
 {
     string resolvedFileName;
     if (!fileName.empty() && fileName[0] == '~')
@@ -817,19 +817,21 @@ std::optional<terminal::BackgroundImage> loadImage(string const& fileName)
     if (qImage.format() != QImage::Format_RGBA8888)
     {
         errorlog()("Unsupported image format {} for background image at {}.", qImage.format(), fileName);
-        return nullopt;
+        return nullptr;
     }
 
     backgroundImage.format = terminal::ImageFormat::RGBA;
     backgroundImage.rowAlignment = 4; // This is default. Can it be any different?
     backgroundImage.size = ImageSize { Width(qImage.size().width()), Height(qImage.size().height()) };
     backgroundImage.pixels.resize(sizeInBytes(qImage));
+    backgroundImage.opacity = opacity;
+    backgroundImage.blur = blur;
 
     memcpy(backgroundImage.pixels.data(), qImage.constBits(), sizeInBytes(qImage));
 
     backgroundImage.updateImageHash();
 
-    return backgroundImage;
+    return make_shared<terminal::BackgroundImage const>(move(backgroundImage));
 }
 
 terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _path, YAML::Node const& _node)
@@ -963,19 +965,15 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _path,
     // TODO: color palette from 16..255
     // TODO: dim _node (maybe put them into the palette at 256..(256+8)?)
 
+    float opacityValue = 1.0;
+    tryLoadValue(_usedKeys, _node, "background_image.opacity", opacityValue);
+
+    bool imageBlur = false;
+    tryLoadValue(_usedKeys, _node, "background_image.blur", imageBlur);
+
     string fileName;
     if (tryLoadValue(_usedKeys, _node, "background_image.path", fileName))
-        colors.backgroundImage = loadImage(fileName);
-
-    float floatValue = 1.0;
-    if (tryLoadValue(_usedKeys, _node, "background_image.opacity", floatValue))
-        if (colors.backgroundImage.has_value())
-            colors.backgroundImage->opacity = clamp(floatValue, 0.0f, 1.0f);
-
-    bool boolValue = false;
-    if (tryLoadValue(_usedKeys, _node, "background_image.blur", boolValue))
-        if (colors.backgroundImage.has_value())
-            colors.backgroundImage->blur = boolValue;
+        colors.backgroundImage = loadImage(fileName, opacityValue, imageBlur);
 
     return colors;
 }

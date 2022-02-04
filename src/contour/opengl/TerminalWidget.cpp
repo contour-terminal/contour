@@ -1048,7 +1048,7 @@ void TerminalWidget::setBlurBehind(bool _enable)
     enableBlurBehind_(_enable);
 }
 
-void TerminalWidget::setBackgroundImage(std::optional<terminal::BackgroundImage> const& backgroundImage)
+void TerminalWidget::setBackgroundImage(std::shared_ptr<terminal::BackgroundImage const> const& backgroundImage)
 {
     renderTarget_->setBackgroundImage(backgroundImage);
 }

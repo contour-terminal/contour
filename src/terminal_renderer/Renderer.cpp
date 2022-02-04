@@ -171,13 +171,13 @@ void Renderer::setRenderTarget(RenderTarget& renderTarget)
 
     configureTextureAtlas();
 
-    if (colorPalette_.backgroundImage.has_value())
+    if (colorPalette_.backgroundImage)
     {
         LOGSTORE(RendererLog)
         ("- Background image     : {} {}\n",
          colorPalette_.backgroundImage->size,
          colorPalette_.backgroundImage->format);
-        renderTarget.setBackgroundImage(*colorPalette_.backgroundImage);
+        renderTarget.setBackgroundImage(colorPalette_.backgroundImage);
     }
     else
         LOGSTORE(RendererLog)("- Background image     : {}\n", "blank");
