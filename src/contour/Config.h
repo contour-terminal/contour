@@ -42,6 +42,108 @@
 namespace contour::config
 {
 
+// {{{ Gamepad input binding
+
+enum class GamepadButton
+{
+    ButtonA,
+    ButtonB,
+    ButtonX,
+    ButtonY,
+    L1,
+    R1,
+    L2,
+    R2,
+    ButtonSelect,
+    ButtonStart,
+    L3,
+    R3,
+    Up,
+    Down,
+    Left,
+    Right,
+    Center,
+    Guide,
+};
+
+struct GamepadButtonState
+{
+    int deviceId;
+    GamepadButton button;
+    bool pressed;
+};
+
+constexpr bool operator==(GamepadButtonState lhs, GamepadButtonState rhs) noexcept
+{
+    return lhs.deviceId == rhs.deviceId && lhs.button == rhs.button && lhs.pressed == rhs.pressed;
+}
+
+constexpr bool operator!=(GamepadButtonState lhs, GamepadButtonState rhs) noexcept
+{
+    return !(lhs == rhs);
+}
+
+enum class GamepadAxis
+{
+    LeftX,  // X-axis of left stick
+    LeftY,  // Y-axis of left stick
+    RightX, // X-axis of right stick
+    RightY, // Y-axis of right stick
+    L2,
+    R2,
+};
+
+struct GamepadAxisState
+{
+    int deviceId;
+    GamepadAxis axis;
+    double value;
+};
+
+constexpr bool operator==(GamepadAxisState left, GamepadAxisState right) noexcept
+{
+    // clang-format off
+    return left.deviceId == right.deviceId
+        && left.axis == right.axis
+        && left.value == right.value;
+    // clang-format on
+}
+
+constexpr bool operator!=(GamepadAxisState left, GamepadAxisState right) noexcept
+{
+    return !(left == right);
+}
+
+struct GamepadAxisRange
+{
+    int deviceId;
+    GamepadAxis axis;
+    double begin;
+    double end;               // excluding
+    int repeatsPerSecond = 0; // 0 means disabled.
+};
+
+constexpr bool operator==(GamepadAxisRange left, GamepadAxisRange right) noexcept
+{
+    // clang-format off
+    return left.deviceId == right.deviceId
+        && left.axis == right.axis
+        && left.begin == right.begin
+        && left.end == right.end;
+    // clang-format on
+}
+
+constexpr bool operator==(GamepadAxisState const& state, GamepadAxisRange const& range) noexcept
+{
+    // clang-format off
+    return state.deviceId == range.deviceId
+        && state.axis == range.axis
+        && range.begin <= state.value
+        && state.value < range.end;
+    // clang-format on
+}
+// }}}
+
 enum class ScrollBarPosition
 {
     Hidden,
@@ -67,12 +169,16 @@ using ActionList = std::vector<actions::Action>;
 using KeyInputMapping = terminal::InputBinding<terminal::Key, ActionList>;
 using CharInputMapping = terminal::InputBinding<char32_t, ActionList>;
 using MouseInputMapping = terminal::InputBinding<terminal::MouseButton, ActionList>;
+using GamepadAxisInputMapping = terminal::InputBinding<GamepadAxisRange, ActionList>;
+using GamepadButtonInputMapping = terminal::InputBinding<GamepadButtonState, ActionList>;
 
 struct InputMappings
 {
     std::vector<KeyInputMapping> keyMappings;
     std::vector<CharInputMapping> charMappings;
     std::vector<MouseInputMapping> mouseMappings;
+    std::vector<GamepadAxisInputMapping> gamepadAxisMappings;
+    std::vector<GamepadButtonInputMapping> gamepadButtonMappings;
 };
 
 namespace helper
@@ -106,16 +212,16 @@ namespace helper
     }
 } // namespace helper
 
-template <typename Input>
+template <typename Matcher, typename Input>
 std::vector<actions::Action> const* apply(
-    std::vector<terminal::InputBinding<Input, ActionList>> const& _mappings,
+    std::vector<terminal::InputBinding<Matcher, ActionList>> const& _mappings,
     Input _input,
     terminal::Modifier _modifier,
     uint8_t _actualModeFlags)
 {
-    for (terminal::InputBinding<Input, ActionList> const& mapping: _mappings)
+    for (terminal::InputBinding<Matcher, ActionList> const& mapping: _mappings)
     {
-        if (mapping.modifier == _modifier && mapping.input == _input
+        if (mapping.modifier == _modifier && _input == mapping.input
             && helper::testMatchMode(_actualModeFlags, mapping.modes))
         {
             return &mapping.binding;
@@ -293,6 +399,119 @@ struct formatter<contour::config::Permission>
         case contour::config::Permission::Ask: return format_to(ctx.out(), "ask");
         }
         return format_to(ctx.out(), "({})", unsigned(_perm));
+    }
+};
+
+template <>
+struct formatter<contour::config::GamepadAxis>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(contour::config::GamepadAxis value, FormatContext& ctx)
+    {
+        using contour::config::GamepadAxis;
+        switch (value)
+        {
+        case GamepadAxis::LeftX: return format_to(ctx.out(), "LeftX");
+        case GamepadAxis::LeftY: return format_to(ctx.out(), "LeftY");
+        case GamepadAxis::RightX: return format_to(ctx.out(), "RightX");
+        case GamepadAxis::RightY: return format_to(ctx.out(), "RightY");
+        case GamepadAxis::L2: return format_to(ctx.out(), "L2");
+        case GamepadAxis::R2: return format_to(ctx.out(), "R2");
+        }
+        return format_to(ctx.out(), "{}", (unsigned) value);
+    }
+};
+
+template <>
+struct formatter<contour::config::GamepadAxisState>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(contour::config::GamepadAxisState value, FormatContext& ctx)
+    {
+        return format_to(ctx.out(), "Device-Id {} {} {}", value.deviceId, value.axis, value.value);
+    }
+};
+
+template <>
+struct formatter<contour::config::GamepadAxisRange>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(contour::config::GamepadAxisRange value, FormatContext& ctx)
+    {
+        return format_to(
+            ctx.out(), "Device-Id {} {} {}..{}", value.deviceId, value.axis, value.begin, value.end);
+    }
+};
+
+template <>
+struct formatter<contour::config::GamepadButton>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(contour::config::GamepadButton value, FormatContext& ctx)
+    {
+        using contour::config::GamepadButton;
+        switch (value)
+        {
+        case GamepadButton::ButtonA: return format_to(ctx.out(), "ButtonA");
+        case GamepadButton::ButtonB: return format_to(ctx.out(), "ButtonB");
+        case GamepadButton::ButtonX: return format_to(ctx.out(), "ButtonX");
+        case GamepadButton::ButtonY: return format_to(ctx.out(), "ButtonY");
+        case GamepadButton::L1: return format_to(ctx.out(), "L1");
+        case GamepadButton::R1: return format_to(ctx.out(), "R1");
+        case GamepadButton::L2: return format_to(ctx.out(), "L2");
+        case GamepadButton::R2: return format_to(ctx.out(), "R2");
+        case GamepadButton::ButtonSelect: return format_to(ctx.out(), "ButtonSelect");
+        case GamepadButton::ButtonStart: return format_to(ctx.out(), "ButtonStart");
+        case GamepadButton::L3: return format_to(ctx.out(), "L3");
+        case GamepadButton::R3: return format_to(ctx.out(), "R3");
+        case GamepadButton::Up: return format_to(ctx.out(), "Up");
+        case GamepadButton::Down: return format_to(ctx.out(), "Down");
+        case GamepadButton::Left: return format_to(ctx.out(), "Left");
+        case GamepadButton::Right: return format_to(ctx.out(), "Right");
+        case GamepadButton::Center: return format_to(ctx.out(), "Center");
+        case GamepadButton::Guide: return format_to(ctx.out(), "Guide");
+        }
+        return format_to(ctx.out(), "{}", (unsigned) value);
+    }
+};
+
+template <>
+struct formatter<contour::config::GamepadButtonState>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    using SelectionAction = contour::config::SelectionAction;
+    template <typename FormatContext>
+    auto format(contour::config::GamepadButtonState value, FormatContext& ctx)
+    {
+        return format_to(ctx.out(),
+                         "Gamepad {} button {} {}",
+                         value.deviceId,
+                         value.button,
+                         value.pressed ? "pressed" : "released");
     }
 };
 

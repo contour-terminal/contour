@@ -46,6 +46,7 @@ auto inline const DisplayLog =
 auto inline const InputLog =
     logstore::Category("gui.input", "Logs input driver details (e.g. GUI input events).");
 auto inline const SessionLog = logstore::Category("gui.session", "VT terminal session logs");
+auto inline const GamepadLog = logstore::Category("gui.gamepad", "Logs gamepad events.");
 
 namespace detail
 {

@@ -518,6 +518,80 @@ void TerminalSession::sendFocusOutEvent()
     scheduleRedraw();
 }
 
+void TerminalSession::sendGamepadConnectedEvent(int deviceId, std::string name, bool connected, Timestamp now)
+{
+    if (gamepadStates_.count(deviceId) && gamepadStates_.at(deviceId).connected == connected)
+        return;
+
+    if (GamepadLog)
+        GamepadLog()("[Device-ID {}] {} {}", deviceId, name, connected ? "(connected)" : "(disconnected)");
+
+    if (!connected)
+    {
+        gamepadStates_.erase(deviceId);
+    }
+    else
+    {
+        auto& state = gamepadStates_[deviceId];
+        state.deviceId = deviceId;
+        state.deviceName = name;
+        state.connected = connected;
+    }
+
+    // TODO: forward to TE-backend in a future-PR
+}
+
+void TerminalSession::sendGamepadButtonEvent(int deviceId,
+                                             config::GamepadButton button,
+                                             bool pressed,
+                                             Timestamp now)
+{
+    if (GamepadLog)
+    {
+        auto const pressedString = pressed ? "pressed" : "released";
+        GamepadLog()("[{} {}] Button {} {}", deviceId, gamepadName(deviceId), button, pressedString);
+    }
+
+    display_->setMouseCursorShape(MouseCursorShape::Hidden);
+
+    auto const gamepadState = config::GamepadButtonState { deviceId, button, pressed };
+    if (auto const* actions = config::apply(
+            config_.inputMappings.gamepadButtonMappings, gamepadState, Modifier(), matchModeFlags()))
+        executeAllActions(*actions);
+
+    // TODO: forward to TE-backend in a future-PR
+    // else
+    //     terminal().sendGamepadButtonEvent(_modifier, deviceId, button, pressed, now);
+}
+
+void TerminalSession::sendGamepadAxisEvent(int deviceId,
+                                           config::GamepadAxis axis,
+                                           double value,
+                                           Timestamp now)
+{
+    if (GamepadLog)
+        GamepadLog()("[{} {}] Button {} {}", deviceId, gamepadName(deviceId), axis, value);
+
+    display_->setMouseCursorShape(MouseCursorShape::Hidden);
+
+    auto gamepadState = config::GamepadAxisState { deviceId, axis, value };
+    using namespace config;
+    if (auto const* actions = config::apply(
+            config_.inputMappings.gamepadAxisMappings, gamepadState, Modifier(), matchModeFlags()))
+    {
+        // TODO(pr) repeat action N times a second if `GamepadAxisRange.repeat > 0`.
+        // -> Then create a QTimer for given tuple {deviceId, axis}.
+        // -> Make sure we don't create superfluous timers but update existing ones with fresh intervals.
+        // -> Have this tested using my gamepad as cursor with different speeds, based on axis range.
+        // -> ATTENTION: make sure these timers get killed when an app grabs that gamepad.
+        executeAllActions(*actions);
+    }
+
+    // TODO: forward to TE-backend in a future-PR
+    // else
+    //     terminal().sendGamepadAxisEvent(_modifier, deviceId, axis, value, now);
+}
+
 // }}}
 // {{{ Actions
 bool TerminalSession::operator()(actions::CancelSelection)

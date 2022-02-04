@@ -18,6 +18,7 @@
 #include <contour/TerminalDisplay.h>
 
 #include <terminal/Terminal.h>
+#include <terminal/InputGenerator.h>
 
 #include <terminal_renderer/Renderer.h>
 
@@ -29,6 +30,36 @@ namespace contour
 {
 
 class ContourGuiApp;
+
+struct GamepadState
+{
+    int deviceId = 0;
+    std::string deviceName;
+    bool connected = false;
+
+    double leftXAxis = 0.0;
+    double leftYAxis = 0.0;
+    double rightXAxis = 0.0;
+    double rightYAxis = 0.0;
+    bool buttonA = false;
+    bool buttonB = false;
+    bool buttonX = false;
+    bool buttonY = false;
+    bool L1 = false;
+    bool R1 = false;
+    double L2 = 0.0;
+    double R2 = 0.0;
+    bool buttonSelect = false;
+    bool buttonStart = false;
+    bool L3 = false;
+    bool R3 = false;
+    bool Up = false;
+    bool Down = false;
+    bool Left = false;
+    bool Right = false;
+    bool Center = false;
+    bool Guide = false;
+};
 
 /**
  * Manages a single terminal session (Client, Terminal, Display)
@@ -122,6 +153,10 @@ class TerminalSession: public terminal::Terminal::Events
     void sendFocusInEvent();
     void sendFocusOutEvent();
 
+    void sendGamepadConnectedEvent(int deviceId, std::string name, bool connected, Timestamp now);
+    void sendGamepadButtonEvent(int deviceId, config::GamepadButton button, bool pressed, Timestamp _now);
+    void sendGamepadAxisEvent(int deviceId, config::GamepadAxis axis, double value, Timestamp _now);
+
     // Actions
     bool operator()(actions::CancelSelection);
     bool operator()(actions::ChangeProfile const&);
@@ -166,6 +201,15 @@ class TerminalSession: public terminal::Terminal::Events
     }
 
     ContourGuiApp& app() noexcept { return app_; }
+
+    std::string const& gamepadName(int deviceId) const
+    {
+        std::string const static unknownName = "Unknown";
+        if (auto const i = gamepadStates_.find(deviceId); i != gamepadStates_.end())
+            return i->second.deviceName;
+
+        return unknownName;
+    }
 
   private:
     // helpers
@@ -212,6 +256,8 @@ class TerminalSession: public terminal::Terminal::Events
     terminal::ScreenType currentScreenType_ = terminal::ScreenType::Main;
     terminal::CellLocation currentMousePosition_ = terminal::CellLocation {};
     bool allowKeyMappings_ = true;
+
+    std::unordered_map<int, GamepadState> gamepadStates_;
 };
 
 } // namespace contour

@@ -39,6 +39,8 @@
 #include <QtWidgets/QScrollBar>
 #include <QtWidgets/QSystemTrayIcon>
 
+#include <QtGamepad/QGamepadManager>
+
 #include <atomic>
 #include <fstream>
 #include <memory>
@@ -134,6 +136,7 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     void onScreenDpiChanged();
     void onScreenChanged();
     void onDpiConfigChanged();
+    void connectedGamepadsChanged();
 
   signals:
     void terminalBufferChanged(terminal::ScreenType);
@@ -154,7 +157,7 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     void assertInitialized();
     double contentScale() const;
     void updateMinimumSize();
-
+    void detectAvailableGamepads();
     void statsSummary();
     void doResize(crispy::Size _size);
     terminal::renderer::GridMetrics const& gridMetrics() const noexcept { return renderer_.gridMetrics(); }
@@ -190,6 +193,9 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
 
     QFileSystemWatcher filesystemWatcher_;
     crispy::Point lastScreenDPI_;
+
+    QGamepadManager* gamepadManager_;
+    std::unordered_map<int, QGamepad*> gamepads_;
 
     // ======================================================================
 

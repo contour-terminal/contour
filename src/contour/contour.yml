@@ -416,7 +416,7 @@ color_schemes:
 # In this section you can customize key bindings.
 # Each array element in `input_mapping` represents one key binding,
 # whereas `mods` represents an array of keyboard modifiers that must be pressed - as well as
-# the `key` or `mouse` -  in order to activate the corresponding action,
+# the `key` or `mouse` or `gamepad` -  in order to activate the corresponding action,
 #
 # Additionally one can filter input mappings based on special terminal modes using the `modes` option:
 # - Alt       : The terminal is currently in alternate screen buffer, otherwise it is in primary screen buffer.
@@ -452,6 +452,34 @@ color_schemes:
 #
 # Mouse buttons can be one of the following self-explanary ones:
 #   Left, Middle, Right, WheelUp, WheelDown
+#
+# Gamepad input buttons:
+#
+#    Gamepad_<DeviceId>_<ButtonName>
+#    Gamepad_<DeviceId>_<ButtonName>_Pressed
+#    Gamepad_<DeviceId>_<ButtonName>_Released
+#    Gamepad_<DeviceId>_<ButtonName>_<MinValue>_<MaxValue> (min/max between 0..100)
+#    Gamepad_<DeviceId>_<ButtonName>_Increment<%Step>
+#
+# Gamepad input button names that can be pressed/released:
+#
+#    - ButtonA
+#    - ButtonB
+#    - ButtonX
+#    - ButtonY
+#    - L1, R1
+#    - L3, R3
+#    - Up, Down, Left, Right
+#    - Center
+#    - Guide,
+#
+# Gamepad input button names (that represent axis/sliders):
+#
+#    - L2, R2
+#    - AxisLeftX
+#    - AxisLeftY
+#    - AxisRightX
+#    - AxisRightY
 #
 # Actions:
 # - CancelSelection   Cancels currently active selection, if any.
@@ -524,3 +552,18 @@ input_mapping:
     - { mods: [Shift],          mouse: WheelDown,   action: ScrollPageDown }
     - { mods: [Shift],          mouse: WheelUp,     action: ScrollPageUp }
     - { mods: [Control],        key: O,             action: OpenFileManager }
+
+    # Gamepad examples
+    # - { gamepad: 37888, button: 'R1',        action: IncreaseFontSize }
+    # - { gamepad: 37888, button: 'L1',        action: DecreaseFontSize }
+    # - { gamepad: 37888, button: 'Up',        action: SendChars, chars: '\033OA' }
+    # - { gamepad: 37888, button: 'Down',      action: SendChars, chars: '\033OB' }
+    # - { gamepad: 37888, button: 'Right',     action: SendChars, chars: '\033OC' }
+    # - { gamepad: 37888, button: 'Left',      action: SendChars, chars: '\033OD' }
+    # - { gamepad: 37888, button: 'A',         action: SendChars, chars: '\r' }
+    # - { gamepad: 37888, button: 'B',         action: SendChars, chars: '\033' } # Escape key
+    # - { gamepad: 37888, axis: 'LeftY', value: 0.1, threshold: 1.0, action: SendChars, chars: '\033OB' } # Up
+    # - { gamepad: 37888, axis: 'LeftY', value: -1.0, threshold: 1.0, action: SendChars, chars: '\033OA' } # Down
+    # - { gamepad: 37888, axis: 'LeftX', value: 0.1, threshold: 1.0, action: SendChars, chars: '\033OC' } # Left
+    # - { gamepad: 37888, axis: 'LeftX', value: -1.0, threshold: 1.0, action: SendChars, chars: '\033OD' } # Right
+

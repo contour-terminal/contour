@@ -36,6 +36,35 @@ namespace terminal
 
 namespace mappings
 {
+    struct GamepadState // TODO(pr) use me
+    {
+        int deviceId;
+        std::string name;
+
+        double leftXAxis = 0.0;
+        double leftYAxis = 0.0;
+        double rightXAxis = 0.0;
+        double rightYAxis = 0.0;
+        bool buttonA = false;
+        bool buttonB = false;
+        bool buttonX = false;
+        bool buttonY = false;
+        bool L1 = false;
+        bool R1 = false;
+        double L2 = 0.0;
+        double R2 = 0.0;
+        bool buttonSelect = false;
+        bool buttonStart = false;
+        bool L3 = false;
+        bool R3 = false;
+        bool Up = false;
+        bool Down = false;
+        bool Left = false;
+        bool Right = false;
+        bool Center = false;
+        bool Guide = false;
+    };
+
     struct KeyMapping
     {
         Key const key;

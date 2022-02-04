@@ -60,6 +60,8 @@ class ContourGuiApp: public ContourApp
     bool loadConfig(std::string const& target);
     int terminalGuiAction();
     int fontConfigAction();
+    int listAvailableGamepads();
+    int traceAvailableGamepads();
     std::chrono::seconds earlyExitThreshold() const;
     config::Config config_;
 

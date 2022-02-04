@@ -23,6 +23,8 @@
 #include <crispy/logstore.h>
 
 #include <QtCore/QProcess>
+#include <QtCore/QThread>
+#include <QtGamepad/QGamepadManager>
 #include <QtGui/QSurfaceFormat>
 #include <QtWidgets/QApplication>
 
@@ -34,6 +36,7 @@ using std::cerr;
 using std::get;
 using std::holds_alternative;
 using std::make_unique;
+using std::max;
 using std::prev;
 using std::string;
 using std::string_view;
@@ -52,6 +55,8 @@ ContourGuiApp::ContourGuiApp()
 {
     link("contour.terminal", bind(&ContourGuiApp::terminalGuiAction, this));
     link("contour.font-locator", bind(&ContourGuiApp::fontConfigAction, this));
+    link("contour.gamepad.list", bind(&ContourGuiApp::listAvailableGamepads, this));
+    // link("contour.gamepad.trace", bind(&ContourGuiApp::traceAvailableGamepads, this));
 }
 
 ContourGuiApp::~ContourGuiApp()
@@ -69,6 +74,23 @@ int ContourGuiApp::run(int argc, char const* argv[])
 crispy::cli::Command ContourGuiApp::parameterDefinition() const
 {
     auto command = ContourApp::parameterDefinition();
+
+    command.children.insert(command.children.begin(),
+                            CLI::Command {
+                                "gamepad",
+                                "Gamepad related commands",
+                                CLI::OptionList {},
+                                CLI::CommandList {
+                                    CLI::Command {
+                                        "list",
+                                        "Lists all available gamepads.",
+                                    },
+                                    // CLI::Command {
+                                    //     "trace",
+                                    //     "Trace gamepad events.",
+                                    // },
+                                },
+                            });
 
     command.children.insert(
         command.children.begin(),
@@ -233,6 +255,41 @@ bool ContourGuiApp::loadConfig(string const& target)
         config_.profile(profileName())->wmClass = wmClass;
 
     return true;
+}
+
+int ContourGuiApp::listAvailableGamepads()
+{
+    // Do the job from within a thread in order to avoid an
+    // irrelevant error message printed to the terminal.
+
+    QThread* threaded = QThread::create([]() {
+        auto const* gamepadManager = QGamepadManager::instance();
+        QList<int> connectedGamepadIds = gamepadManager->connectedGamepads();
+
+        if (connectedGamepadIds.size() == 0)
+        {
+            fmt::print("No gamepad devices found.\n");
+            return;
+        }
+
+        int maxNameLength = 4;
+        for (auto const deviceId: connectedGamepadIds)
+            maxNameLength = max(maxNameLength, gamepadManager->gamepadName(deviceId).size());
+
+        fmt::print("{:>11} | {}\n", "Device-Id", "Name");
+        fmt::print("------------+{}\n", string(maxNameLength + 2, '-'));
+        for (auto const deviceId: connectedGamepadIds)
+            fmt::print("{:>11} | {}\n", deviceId, gamepadManager->gamepadName(deviceId).toStdString());
+    });
+    threaded->start();
+    threaded->wait();
+
+    return EXIT_SUCCESS;
+}
+
+int ContourGuiApp::traceAvailableGamepads() // TODO(pr)
+{
+    return EXIT_FAILURE;
 }
 
 int ContourGuiApp::fontConfigAction()

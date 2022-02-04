@@ -91,7 +91,7 @@ IncludeCategories:
     Priority:  10
   - Regex:     '^<harfbuzz/'
     Priority:  11
-  - Regex:     '^<(QtCore|QtGui|QtWidgets)/'
+  - Regex:     '^<(QtCore|QtGamepad|QtGui|QtWidgets)/'
     Priority:  12
   - Regex:     '^<catch2/'
     Priority:  13

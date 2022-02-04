@@ -32,6 +32,8 @@
 #include <QtCore/QProcess>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
+#include <QtGamepad/QGamepad>
+#include <QtGamepad/QGamepadManager>
 #include <QtGui/QClipboard>
 #include <QtGui/QDesktopServices>
 #include <QtGui/QGuiApplication>
@@ -53,6 +55,7 @@
 #include <range/v3/all.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
@@ -253,7 +256,8 @@ TerminalWidget::TerminalWidget(TerminalSession& session,
         profile().hyperlinkDecoration.hover
         // TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
     },
-    filesystemWatcher_(this)
+    filesystemWatcher_(this),
+    gamepadManager_(QGamepadManager::instance())
 {
     setMouseTracking(true);
     setFormat(surfaceFormat());
@@ -274,6 +278,95 @@ TerminalWidget::TerminalWidget(TerminalSession& session,
     connect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
 
     QOpenGLWidget::updateGeometry();
+
+    connect(gamepadManager_,
+            &QGamepadManager::connectedGamepadsChanged,
+            this,
+            &TerminalWidget::connectedGamepadsChanged);
+
+    detectAvailableGamepads();
+}
+
+void TerminalWidget::detectAvailableGamepads()
+{
+    QList<int> connectedGamepadIds = gamepadManager_->connectedGamepads();
+
+    int n = 1;
+    for (int const deviceId: connectedGamepadIds)
+    {
+        QGamepad* gamepad = [&]() -> QGamepad* {
+            if (auto iter = gamepads_.find(deviceId); iter != gamepads_.end())
+                return iter->second;
+
+            QGamepad* pad = new QGamepad(deviceId, this);
+            gamepads_[deviceId] = pad;
+            return pad;
+        }();
+
+        auto padName = gamepad->name().toStdString();
+
+        session_.sendGamepadConnectedEvent(deviceId, padName, true, chrono::steady_clock::now());
+        connect(gamepad, &QGamepad::connectedChanged, [this, deviceId, padName](bool connected) {
+            session_.sendGamepadConnectedEvent(deviceId, padName, connected, chrono::steady_clock::now());
+        });
+
+        connect(gamepad, &QGamepad::nameChanged, [n, gamepad, deviceId, padName](QString const&) {
+            GamepadLog()("[{} {}] name changed", deviceId, padName);
+            // Do we want to handle this?
+        });
+
+        connect(gamepad, &QGamepad::deviceIdChanged, [n, gamepad, deviceId, padName](int) {
+            GamepadLog()("[{} {}] device Id changed", deviceId, padName);
+            // Do we want to handle this?
+        });
+
+        auto const buttonMappings = array {
+            std::tuple { &QGamepad::buttonAChanged, config::GamepadButton::ButtonA },
+            std::tuple { &QGamepad::buttonBChanged, config::GamepadButton::ButtonB },
+            std::tuple { &QGamepad::buttonXChanged, config::GamepadButton::ButtonX },
+            std::tuple { &QGamepad::buttonYChanged, config::GamepadButton::ButtonY },
+            std::tuple { &QGamepad::buttonL1Changed, config::GamepadButton::L1 },
+            std::tuple { &QGamepad::buttonL3Changed, config::GamepadButton::L3 },
+            std::tuple { &QGamepad::buttonR1Changed, config::GamepadButton::R1 },
+            std::tuple { &QGamepad::buttonR3Changed, config::GamepadButton::R3 },
+            std::tuple { &QGamepad::buttonSelectChanged, config::GamepadButton::ButtonSelect },
+            std::tuple { &QGamepad::buttonStartChanged, config::GamepadButton::ButtonStart },
+            std::tuple { &QGamepad::buttonLeftChanged, config::GamepadButton::Left },
+            std::tuple { &QGamepad::buttonUpChanged, config::GamepadButton::Up },
+            std::tuple { &QGamepad::buttonRightChanged, config::GamepadButton::Right },
+            std::tuple { &QGamepad::buttonDownChanged, config::GamepadButton::Down },
+            std::tuple { &QGamepad::buttonCenterChanged, config::GamepadButton::Center },
+            std::tuple { &QGamepad::buttonGuideChanged, config::GamepadButton::Guide },
+        };
+
+        for (auto [fn, button]: buttonMappings)
+        {
+            connect(gamepad, fn, [this, gamepad, deviceId, padName, button = button](bool pressed) {
+                session_.sendGamepadButtonEvent(deviceId, button, pressed, chrono::steady_clock::now());
+            });
+        }
+
+        auto const sliderMappings = array {
+            std::tuple { &QGamepad::axisLeftXChanged, config::GamepadAxis::LeftX },
+            std::tuple { &QGamepad::axisLeftYChanged, config::GamepadAxis::LeftY },
+            std::tuple { &QGamepad::axisRightXChanged, config::GamepadAxis::RightX },
+            std::tuple { &QGamepad::axisRightYChanged, config::GamepadAxis::RightX },
+            std::tuple { &QGamepad::buttonL2Changed, config::GamepadAxis::L2 },
+            std::tuple { &QGamepad::buttonR2Changed, config::GamepadAxis::R2 },
+        };
+
+        for (auto [fn, axis]: sliderMappings)
+        {
+            connect(gamepad, fn, [this, n, gamepad, deviceId, padName, axis = axis](double value) {
+                session_.sendGamepadAxisEvent(deviceId, axis, value, chrono::steady_clock::now());
+            });
+        }
+    }
+}
+
+void TerminalWidget::connectedGamepadsChanged()
+{
+    detectAvailableGamepads();
 }
 
 TerminalWidget::~TerminalWidget()

@@ -34,6 +34,7 @@
 #include <array>
 #include <fstream>
 #include <iostream>
+#include <regex>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -550,16 +551,15 @@ optional<terminal::Modifier> parseModifier(UsedKeys& _usedKeys,
                                            string const& _prefix,
                                            YAML::Node const& _node)
 {
-    using terminal::Modifier;
+    terminal::Modifier mods;
     if (!_node)
-        return nullopt;
+        return mods;
     _usedKeys.emplace(_prefix);
     if (_node.IsScalar())
         return parseModifierKey(_node.as<string>());
     if (!_node.IsSequence())
         return nullopt;
 
-    terminal::Modifier mods;
     for (size_t i = 0; i < _node.size(); ++i)
     {
         if (!_node[i].IsScalar())
@@ -649,6 +649,153 @@ namespace // {{{ helper
             if (name == mapping.first)
                 return mapping.second;
         return nullopt;
+    }
+
+    optional<GamepadAxisRange> parseGamepadAxis(UsedKeys& usedKeys,
+                                                string const& prefix,
+                                                int deviceId,
+                                                YAML::Node const& node)
+    {
+        // clang-format off
+        auto constexpr static mappings = array {
+            pair { "LEFTX"sv, GamepadAxis::LeftX },
+            pair { "LEFTY"sv, GamepadAxis::LeftY },
+            pair { "RIGHTX"sv, GamepadAxis::RightX },
+            pair { "RIGHTY"sv, GamepadAxis::RightY },
+            pair { "L2"sv, GamepadAxis::L2 },
+            pair { "R2"sv, GamepadAxis::R2 },
+        };
+        // clang-format on
+
+        if (!node)
+            return nullopt;
+
+        if (!node["axis"] || !node["axis"].IsScalar())
+            return nullopt;
+
+        auto axisRange = GamepadAxisRange {};
+        axisRange.deviceId = deviceId;
+
+        // Possible formats:
+        //     { axis: NAME, value: VALUE, threshold: VALUE = 0.01 }
+        //     { axis: NAME, increment: VALUE }
+        //     { axis: NAME, decrement: VALUE }
+        //
+        // TODO: Maybe add optional flag: `repeat` defaulting to 0,
+        //       to auto-repeat event the given number of times per second
+        //       if input matched.
+
+        auto const name = toUpper(node["axis"].as<string>());
+        bool found = false;
+        for (auto const& mapping: mappings)
+            if (name == mapping.first)
+            {
+                axisRange.axis = mapping.second;
+                usedKeys.emplace(prefix + ".axis");
+                found = true;
+                break;
+            }
+        if (!found)
+            return nullopt;
+
+        if (node["repeat"] && node["repeat"].IsScalar())
+        {
+            axisRange.repeatsPerSecond = node["repeat"].as<int>();
+            usedKeys.emplace(prefix + ".repeat");
+        }
+
+        if (node["value"] && node["value"].IsScalar())
+        {
+            axisRange.begin = node["value"].as<double>();
+            usedKeys.emplace(prefix + ".value");
+            if (node["threshold"] && node["threshold"].IsScalar())
+            {
+                axisRange.end = axisRange.begin + node["threshold"].as<double>();
+                usedKeys.emplace(prefix + ".threshold");
+            }
+        }
+
+        return { axisRange };
+    };
+
+    optional<GamepadButtonState> parseGamepadButton(UsedKeys& usedKeys,
+                                                    string const& prefix,
+                                                    int deviceId,
+                                                    YAML::Node const& node)
+    {
+        if (!node)
+            return nullopt;
+
+        if (!node.IsScalar())
+            return nullopt;
+
+        auto constexpr static mappings = array {
+            pair { "A"sv, GamepadButton::ButtonA },
+            pair { "B"sv, GamepadButton::ButtonB },
+            pair { "X"sv, GamepadButton::ButtonX },
+            pair { "Y"sv, GamepadButton::ButtonY },
+            pair { "L1"sv, GamepadButton::L1 },
+            pair { "R1"sv, GamepadButton::R1 },
+            pair { "L2"sv, GamepadButton::L2 },
+            pair { "R2"sv, GamepadButton::R2 },
+            pair { "SELECT"sv, GamepadButton::ButtonSelect },
+            pair { "START"sv, GamepadButton::ButtonStart },
+            pair { "L3"sv, GamepadButton::L3 },
+            pair { "R3"sv, GamepadButton::R3 },
+            pair { "UP"sv, GamepadButton::Up },
+            pair { "DOWN"sv, GamepadButton::Down },
+            pair { "LEFT"sv, GamepadButton::Left },
+            pair { "RIGHT"sv, GamepadButton::Right },
+            pair { "CENTER"sv, GamepadButton::Center },
+            pair { "GUIDE"sv, GamepadButton::Guide },
+        };
+
+        auto const name = toUpper(node.as<string>());
+        for (auto const& mapping: mappings)
+        {
+            if (name == mapping.first || name == string(mapping.first) + "PRESSED")
+                return GamepadButtonState { deviceId, mapping.second, true };
+            else if (name == string(mapping.first) + "RELEASED")
+                return GamepadButtonState { deviceId, mapping.second, false };
+        }
+
+        usedKeys.emplace(prefix + ".button");
+
+        return nullopt;
+    }
+
+    bool tryAddGamepad(UsedKeys& usedKeys,
+                       string const& prefix,
+                       vector<GamepadButtonInputMapping>& buttonBindings,
+                       vector<GamepadAxisInputMapping>& axisBindings,
+                       terminal::MatchModes modes,
+                       terminal::Modifier modifier,
+                       YAML::Node const& node,
+                       Action action)
+    {
+        if (!node["gamepad"] || !node["gamepad"].IsScalar())
+            return false;
+
+        usedKeys.emplace(prefix + ".gamepad");
+        int const deviceId = node["gamepad"].as<int>();
+
+        auto buttonInput = parseGamepadButton(usedKeys, prefix, deviceId, node["button"]);
+        if (buttonInput)
+        {
+            fmt::print("Create binding for {}\n", *buttonInput);
+            appendOrCreateBinding(buttonBindings, modes, modifier, *buttonInput, move(action));
+            return true;
+        }
+
+        auto axisRange = parseGamepadAxis(usedKeys, prefix, deviceId, node);
+        if (axisRange)
+        {
+            fmt::print("Create binding for {}\n", *axisRange);
+            appendOrCreateBinding(axisBindings, modes, modifier, *axisRange, move(action));
+            return true;
+        }
+
+        return false;
     }
 
     bool tryAddMouse(vector<MouseInputMapping>& _bindings,
@@ -752,23 +899,33 @@ namespace // {{{ helper
         auto const action = parseAction(_usedKeys, _prefix, _config, _mapping);
         auto const mods = parseModifier(_usedKeys, _prefix + ".mods", _mapping["mods"]);
         auto const mode = parseMatchModes(_usedKeys, _prefix + ".mode", _mapping["mode"]);
-        if (action && mods && mode)
+        if (!action || !mods || !mode)
+            return;
+
+        if (tryAddKey(_config.inputMappings, *mode, *mods, _mapping["key"], *action))
         {
-            if (tryAddKey(_config.inputMappings, *mode, *mods, _mapping["key"], *action))
-            {
-                _usedKeys.emplace(_prefix + ".key");
-            }
-            else if (tryAddMouse(
-                         _config.inputMappings.mouseMappings, *mode, *mods, _mapping["mouse"], *action))
-            {
-                _usedKeys.emplace(_prefix + ".mouse");
-            }
-            else
-            {
-                // TODO: log error: invalid key mapping at: _mapping.sourceLocation()
-                LOGSTORE(ConfigLog)("Could not add some input mapping.");
-            }
+            _usedKeys.emplace(_prefix + ".key");
+            return;
         }
+
+        if (tryAddMouse(_config.inputMappings.mouseMappings, *mode, *mods, _mapping["mouse"], *action))
+        {
+            _usedKeys.emplace(_prefix + ".mouse");
+            return;
+        }
+
+        if (tryAddGamepad(_usedKeys,
+                          _prefix,
+                          _config.inputMappings.gamepadButtonMappings,
+                          _config.inputMappings.gamepadAxisMappings,
+                          *mode,
+                          *mods,
+                          _mapping,
+                          *action))
+            return;
+
+        // TODO: log error: invalid key mapping at: _mapping.sourceLocation()
+        LOGSTORE(ConfigLog)("Could not add some input mapping.");
     }
 
 } // namespace

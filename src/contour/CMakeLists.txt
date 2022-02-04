@@ -11,10 +11,10 @@ option(CONTOUR_BLUR_PLATFORM_KWIN "Enables support for blurring transparent back
 option(CONTOUR_BUILD_WITH_QT6 "Use Qt 6" OFF)
 
 if(CONTOUR_BUILD_WITH_QT6)
-   find_package(Qt6 COMPONENTS Core Gui Network OpenGL OpenGLWidgets Widgets REQUIRED)
+   find_package(Qt6 COMPONENTS Core Gui Network OpenGL OpenGLWidgets Widgets Gamepad REQUIRED)
    set(CONTOUR_BLUR_PLATFORM_KWIN OFF)
 else()
-   find_package(Qt5 COMPONENTS Gui Network Widgets REQUIRED)  # apt install qtbase5-dev libqt5gui5
+   find_package(Qt5 COMPONENTS Gui Network Widgets Gamepad REQUIRED)  # apt install qtbase5-dev libqt5gui5
 endif()
 
 # OpenGL accelerated TerminalDisplay
@@ -125,9 +125,13 @@ endif()
 
 if(CONTOUR_FRONTEND_GUI)
     if(CONTOUR_BUILD_WITH_QT6)
-        target_link_libraries(contour contour_frontend_opengl terminal_renderer Qt6::Core Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Widgets)
+        target_link_libraries(contour
+            contour_frontend_opengl terminal_renderer
+            Qt6::Core Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Widgets Qt6::Gamepad)
     else()
-        target_link_libraries(contour contour_frontend_opengl terminal_renderer Qt5::Gui Qt5::Network Qt5::Widgets)
+        target_link_libraries(contour
+            contour_frontend_opengl terminal_renderer
+            Qt5::Gui Qt5::Network Qt5::Widgets Qt5::Gamepad)
     endif()
     if(CONTOUR_BLUR_PLATFORM_KWIN) # TODO: auto-enable on Linux, if KDE dev libs were found.
         target_compile_definitions(contour PRIVATE CONTOUR_BLUR_PLATFORM_KWIN)
