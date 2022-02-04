@@ -90,26 +90,58 @@ inline std::string unescape(std::string_view _value)
                 out.push_back(_value[i]);
             break;
         case State::Escape:
-            if (_value[i] == '0')
-                state = State::Octal1;
-            else if (_value[i] == 'x')
-                state = State::Hex1;
-            else if (_value[i] == 'e')
+            switch (_value[i])
             {
+            case '0':
+                //.
+                state = State::Octal1;
+                break;
+            case 'x':
+                //.
+                state = State::Hex1;
+                break;
+            case 'e':
                 state = State::Text;
                 out.push_back('\033');
-            }
-            else if (_value[i] == '\\')
-            {
+                break;
+            case 'a':
+                out.push_back(0x07);
+                state = State::Text;
+                break;
+            case 'b':
+                out.push_back(0x08);
+                state = State::Text;
+                break;
+            case 't':
+                out.push_back(0x09);
+                state = State::Text;
+                break;
+            case 'n':
+                out.push_back(0x0A);
+                state = State::Text;
+                break;
+            case 'v':
+                out.push_back(0x0B);
+                state = State::Text;
+                break;
+            case 'f':
+                out.push_back(0x0C);
+                state = State::Text;
+                break;
+            case 'r':
+                out.push_back(0x0D);
+                state = State::Text;
+                break;
+            case '\\':
                 out.push_back('\\');
                 state = State::Text;
-            }
-            else
-            {
+                break;
+            default:
                 // Unknown escape sequence, so just continue as text.
                 out.push_back('\\');
                 out.push_back(_value[i]);
                 state = State::Text;
+                break;
             }
             break;
         case State::Octal1:
