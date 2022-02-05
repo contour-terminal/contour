@@ -31,9 +31,12 @@ constexpr inline T Zero {};
 template <>
 constexpr inline Point Zero<Point> = Point { 0, 0 };
 
-constexpr Point operator*(Point a, double s) noexcept
+constexpr Point operator*(Point p, double s) noexcept
 {
-    return Point { static_cast<int>(a.x * s), static_cast<int>(a.y * s) };
+    return Point {
+        static_cast<int>(static_cast<double>(p.x) * s),
+        static_cast<int>(static_cast<double>(p.y) * s),
+    };
 }
 
 constexpr Point operator+(Point a, Point b) noexcept
@@ -46,6 +49,11 @@ constexpr Point& operator+=(Point& a, Point b) noexcept
     a.x += b.x;
     a.y += b.y;
     return a;
+}
+
+constexpr double average(Point p) noexcept
+{
+    return 0.5 * static_cast<double>(p.x + p.y);
 }
 
 constexpr void swap(Point& a, Point& b) noexcept
