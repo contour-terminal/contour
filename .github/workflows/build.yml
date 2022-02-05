@@ -543,6 +543,10 @@ jobs:
       run: valgrind --suppressions=valgrind.supp --error-exitcode=64 ./build/src/crispy/crispy_test
     - name: "test: libterminal (via valgrind)"
       run: valgrind --suppressions=valgrind.supp --error-exitcode=64 ./build/src/terminal/terminal_test
+    - name: "Delete artifact: contour-ubuntu2004-tests"
+      uses: geekyeggo/delete-artifact@v1
+      with:
+        name: contour-ubuntu2004-tests
 
   # }}}
 

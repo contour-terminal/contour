@@ -165,8 +165,15 @@ class Category
     void set_sink(logstore::Sink& s) { _sink = s; }
     logstore::Sink& sink() const noexcept { return _sink.get(); }
 
-    MessageBuilder build(source_location location = source_location::current()) const { return MessageBuilder(*this, location); }
-    MessageBuilder operator()(source_location location = source_location::current()) const { return MessageBuilder(*this, location); }
+    MessageBuilder build(source_location location = source_location::current()) const
+    {
+        return MessageBuilder(*this, location);
+    }
+
+    MessageBuilder operator()(source_location location = source_location::current()) const
+    {
+        return MessageBuilder(*this, location);
+    }
 
     static std::string default_formatter(MessageBuilder const& _message);
 
