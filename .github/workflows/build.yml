@@ -612,4 +612,12 @@ jobs:
         path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
         if-no-files-found: error
         retention-days: 7
+    - name: "Uploading MSI to artifact store"
+      uses: actions/upload-artifact@v2
+      with:
+        name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.zip
+        path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.zip
+        if-no-files-found: error
+        retention-days: 7
+
 
