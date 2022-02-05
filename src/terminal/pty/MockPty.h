@@ -30,7 +30,7 @@ class MockPty: public Pty
     std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
     void wakeupReader() override;
     int write(char const* buf, size_t size) override;
-    PageSize screenSize() const noexcept override;
+    PageSize pageSize() const noexcept override;
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;
 
     void prepareChildProcess() override;
@@ -54,7 +54,7 @@ class MockPty: public Pty
     }
 
   private:
-    PageSize screenSize_;
+    PageSize pageSize_;
     std::optional<ImageSize> pixelSize_;
     std::string inputBuffer_;
     std::string outputBuffer_;

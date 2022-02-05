@@ -75,9 +75,9 @@ int PtyProcess::write(char const* _buf, size_t _size)
     return pty_->write(_buf, _size);
 }
 
-PageSize PtyProcess::screenSize() const noexcept
+PageSize PtyProcess::pageSize() const noexcept
 {
-    return pty_->screenSize();
+    return pty_->pageSize();
 }
 
 void PtyProcess::resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels)

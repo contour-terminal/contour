@@ -242,7 +242,7 @@ TerminalWidget::TerminalWidget(TerminalSession& session,
     adaptSize_ { std::move(adaptSize) },
     enableBlurBehind_ { std::move(enableBackgroundBlur) },
     renderer_ {
-        terminal().screenSize(),
+        terminal().pageSize(),
         sanitizeFontDescription(profile().fonts, screenDPI()),
         terminal().screen().colorPalette(),
         profile().backgroundOpacity,
@@ -320,12 +320,12 @@ QSurfaceFormat TerminalWidget::surfaceFormat()
 
 QSize TerminalWidget::minimumSizeHint() const
 {
-    auto constexpr MinimumScreenSize = PageSize { LineCount(2), ColumnCount(3) };
+    auto constexpr MinimumPageSize = PageSize { LineCount(2), ColumnCount(3) };
 
     auto const cellSize = gridMetrics().cellSize;
 
-    return QSize(cellSize.width.as<int>() * MinimumScreenSize.columns.as<int>(),
-                 cellSize.height.as<int>() * MinimumScreenSize.lines.as<int>());
+    return QSize(cellSize.width.as<int>() * MinimumPageSize.columns.as<int>(),
+                 cellSize.height.as<int>() * MinimumPageSize.lines.as<int>());
 }
 
 QSize TerminalWidget::sizeHint() const
@@ -925,19 +925,19 @@ void TerminalWidget::resizeWindow(terminal::Width _width, terminal::Height _heig
         return;
     }
 
-    auto requestedScreenSize = terminal().screenSize();
+    auto requestedPageSize = terminal().pageSize();
     auto const pixelSize = terminal::ImageSize { terminal::Width(*_width ? *_width : width()),
                                                  terminal::Height(*_height ? *_height : height()) };
-    requestedScreenSize.columns = terminal::ColumnCount(*pixelSize.width / *gridMetrics().cellSize.width);
-    requestedScreenSize.lines = terminal::LineCount(*pixelSize.height / *gridMetrics().cellSize.height);
+    requestedPageSize.columns = terminal::ColumnCount(*pixelSize.width / *gridMetrics().cellSize.width);
+    requestedPageSize.lines = terminal::LineCount(*pixelSize.height / *gridMetrics().cellSize.height);
 
     // setSizePolicy(QSizePolicy::Policy::Fixed, QSizePolicy::Policy::Fixed);
-    const_cast<config::TerminalProfile&>(profile()).terminalSize = requestedScreenSize;
-    renderer_.setScreenSize(requestedScreenSize);
+    const_cast<config::TerminalProfile&>(profile()).terminalSize = requestedPageSize;
+    renderer_.setPageSize(requestedPageSize);
     auto const pixels =
-        terminal::ImageSize { terminal::Width(*requestedScreenSize.columns * *gridMetrics().cellSize.width),
-                              terminal::Height(*requestedScreenSize.lines * *gridMetrics().cellSize.height) };
-    terminal().resizeScreen(requestedScreenSize, pixels);
+        terminal::ImageSize { terminal::Width(*requestedPageSize.columns * *gridMetrics().cellSize.width),
+                              terminal::Height(*requestedPageSize.lines * *gridMetrics().cellSize.height) };
+    terminal().resizeScreen(requestedPageSize, pixels);
     updateGeometry();
     adaptSize_();
 }
@@ -950,19 +950,19 @@ void TerminalWidget::resizeWindow(terminal::LineCount _lines, terminal::ColumnCo
         return;
     }
 
-    auto requestedScreenSize = terminal().screenSize();
+    auto requestedPageSize = terminal().pageSize();
     if (*_columns)
-        requestedScreenSize.columns = _columns;
+        requestedPageSize.columns = _columns;
     if (*_lines)
-        requestedScreenSize.lines = _lines;
+        requestedPageSize.lines = _lines;
 
     // setSizePolicy(QSizePolicy::Policy::Fixed, QSizePolicy::Policy::Fixed);
-    const_cast<config::TerminalProfile&>(profile()).terminalSize = requestedScreenSize;
-    renderer_.setScreenSize(requestedScreenSize);
+    const_cast<config::TerminalProfile&>(profile()).terminalSize = requestedPageSize;
+    renderer_.setPageSize(requestedPageSize);
     auto const pixels =
-        terminal::ImageSize { terminal::Width(*requestedScreenSize.columns * *gridMetrics().cellSize.width),
-                              terminal::Height(*requestedScreenSize.lines * *gridMetrics().cellSize.height) };
-    terminal().resizeScreen(requestedScreenSize, pixels);
+        terminal::ImageSize { terminal::Width(*requestedPageSize.columns * *gridMetrics().cellSize.width),
+                              terminal::Height(*requestedPageSize.lines * *gridMetrics().cellSize.height) };
+    terminal().resizeScreen(requestedPageSize, pixels);
     updateGeometry();
     adaptSize_();
 }
@@ -970,7 +970,7 @@ void TerminalWidget::resizeWindow(terminal::LineCount _lines, terminal::ColumnCo
 void TerminalWidget::setFonts(terminal::renderer::FontDescriptions _fontDescriptions)
 {
     if (applyFontDescription(
-            gridMetrics().cellSize, screenSize(), pixelSize(), screenDPI(), renderer_, _fontDescriptions))
+            gridMetrics().cellSize, pageSize(), pixelSize(), screenDPI(), renderer_, _fontDescriptions))
         // resize widget (same pixels, but adjusted terminal rows/columns and margin)
         applyResize(pixelSize(), session_, renderer_);
 }
@@ -982,24 +982,25 @@ bool TerminalWidget::setFontSize(text::font_size _size)
     if (!renderer_.setFontSize(_size))
         return false;
 
-    auto currentWidgetPixelSize = ImageSize { terminal::Width(width()), terminal::Height(height()) };
-    renderer_.setMargin(computeMargin(gridMetrics().cellSize, screenSize(), currentWidgetPixelSize));
+    auto currentWidgetPixelSize =
+        ImageSize { terminal::Width(width()), terminal::Height(height()) } * contentScale();
+    renderer_.setMargin(computeMargin(gridMetrics().cellSize, pageSize(), currentWidgetPixelSize));
     // resize widget (same pixels, but adjusted terminal rows/columns and margin)
     applyResize(currentWidgetPixelSize, session_, renderer_);
     updateMinimumSize();
     return true;
 }
 
-bool TerminalWidget::setScreenSize(PageSize _newScreenSize)
+bool TerminalWidget::setPageSize(PageSize _newPageSize)
 {
-    if (_newScreenSize == terminal().screenSize())
+    if (_newPageSize == terminal().pageSize())
         return false;
 
     auto const viewSize =
         ImageSize { Width(*gridMetrics().cellSize.width * *profile().terminalSize.columns),
                     Height(*gridMetrics().cellSize.width * *profile().terminalSize.columns) };
-    renderer_.setScreenSize(_newScreenSize);
-    terminal().resizeScreen(_newScreenSize, viewSize);
+    renderer_.setPageSize(_newPageSize);
+    terminal().resizeScreen(_newPageSize, viewSize);
     return true;
 }
 

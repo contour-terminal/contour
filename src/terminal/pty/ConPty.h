@@ -38,7 +38,7 @@ class ConPty: public Pty
     std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
     void wakeupReader() override;
     int write(char const* buf, size_t size) override;
-    PageSize screenSize() const noexcept override;
+    PageSize pageSize() const noexcept override;
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;
 
     HPCON master() const noexcept { return master_; }

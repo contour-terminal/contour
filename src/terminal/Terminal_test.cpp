@@ -40,7 +40,7 @@ vector<string> textScreenshot(terminal::Terminal const& _terminal)
     terminal::RenderBufferRef renderBuffer = _terminal.renderBuffer();
 
     vector<string> lines;
-    lines.resize(_terminal.screenSize().lines.as<size_t>());
+    lines.resize(_terminal.pageSize().lines.as<size_t>());
 
     terminal::CellLocation lastPos = {};
     size_t lastCount = 0;

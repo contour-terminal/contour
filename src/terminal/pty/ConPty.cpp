@@ -155,7 +155,7 @@ int ConPty::write(char const* buf, size_t size)
         return -1;
 }
 
-PageSize ConPty::screenSize() const noexcept
+PageSize ConPty::pageSize() const noexcept
 {
     return size_;
 }

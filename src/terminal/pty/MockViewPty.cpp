@@ -46,14 +46,14 @@ int MockViewPty::write(char const* buf, size_t size)
     return static_cast<int>(size);
 }
 
-terminal::PageSize MockViewPty::screenSize() const noexcept
+terminal::PageSize MockViewPty::pageSize() const noexcept
 {
-    return screenSize_;
+    return pageSize_;
 }
 
 void MockViewPty::resizeScreen(terminal::PageSize _cells, std::optional<terminal::ImageSize> _pixels)
 {
-    screenSize_ = _cells;
+    pageSize_ = _cells;
     pixelSize_ = _pixels;
 }
 

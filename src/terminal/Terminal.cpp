@@ -129,7 +129,7 @@ Terminal::Terminal(Pty& _pty,
     mouseProtocolBypassModifier_ { _mouseProtocolBypassModifier },
     inputGenerator_ {},
     copyLastMarkRangeOffset_ { _copyLastMarkRangeOffset },
-    screen_ { pty_.screenSize(),
+    screen_ { pty_.pageSize(),
               *this,
               true, // logs raw output by default?
               true, // logs trace output by default?
@@ -342,13 +342,13 @@ RenderCell makeRenderCell(ColorPalette const& _colorPalette,
 
 PageSize Terminal::SelectionHelper::pageSize() const noexcept
 {
-    return terminal->screenSize();
+    return terminal->pageSize();
 }
 
 bool Terminal::SelectionHelper::wordDelimited(CellLocation _pos) const noexcept
 {
     // Word selection may be off by one
-    _pos.column = min(_pos.column, boxed_cast<ColumnOffset>(terminal->screenSize().columns - 1));
+    _pos.column = min(_pos.column, boxed_cast<ColumnOffset>(terminal->pageSize().columns - 1));
 
     Cell const& cell = terminal->screen().at(_pos);
     return cell.empty()
@@ -363,7 +363,7 @@ bool Terminal::SelectionHelper::wrappedLine(LineOffset _line) const noexcept
 bool Terminal::SelectionHelper::cellEmpty(CellLocation _pos) const noexcept
 {
     // Word selection may be off by one
-    _pos.column = min(_pos.column, boxed_cast<ColumnOffset>(terminal->screenSize().columns - 1));
+    _pos.column = min(_pos.column, boxed_cast<ColumnOffset>(terminal->pageSize().columns - 1));
 
     return terminal->screen().at(_pos).empty();
 }
@@ -371,7 +371,7 @@ bool Terminal::SelectionHelper::cellEmpty(CellLocation _pos) const noexcept
 int Terminal::SelectionHelper::cellWidth(CellLocation _pos) const noexcept
 {
     // Word selection may be off by one
-    _pos.column = min(_pos.column, boxed_cast<ColumnOffset>(terminal->screenSize().columns - 1));
+    _pos.column = min(_pos.column, boxed_cast<ColumnOffset>(terminal->pageSize().columns - 1));
 
     return terminal->screen().at(_pos).width();
 }
@@ -828,8 +828,8 @@ void Terminal::resizeScreen(PageSize _cells, optional<ImageSize> _pixels)
 
 void Terminal::verifyState()
 {
-    Require(*currentMousePosition_.column < *screenSize().columns);
-    Require(*currentMousePosition_.line < *screenSize().lines);
+    Require(*currentMousePosition_.column < *pageSize().columns);
+    Require(*currentMousePosition_.line < *pageSize().lines);
 }
 
 void Terminal::setCursorDisplay(CursorDisplay _display)

@@ -93,7 +93,7 @@ class Renderer
         decorationRenderer_.setHyperlinkDecoration(_normal, _hover);
     }
 
-    void setScreenSize(PageSize _screenSize) noexcept { gridMetrics_.pageSize = _screenSize; }
+    void setPageSize(PageSize _screenSize) noexcept { gridMetrics_.pageSize = _screenSize; }
 
     void setMargin(PageMargin _margin) noexcept
     {

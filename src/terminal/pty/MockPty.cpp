@@ -7,7 +7,7 @@ using std::string_view;
 namespace terminal
 {
 
-MockPty::MockPty(PageSize _size): screenSize_ { _size }
+MockPty::MockPty(PageSize _size): pageSize_ { _size }
 {
 }
 
@@ -35,14 +35,14 @@ int MockPty::write(char const* buf, size_t size)
     return static_cast<int>(size);
 }
 
-PageSize MockPty::screenSize() const noexcept
+PageSize MockPty::pageSize() const noexcept
 {
-    return screenSize_;
+    return pageSize_;
 }
 
 void MockPty::resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels)
 {
-    screenSize_ = _cells;
+    pageSize_ = _cells;
     pixelSize_ = _pixels;
 }
 

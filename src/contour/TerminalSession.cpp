@@ -145,9 +145,9 @@ void TerminalSession::setDisplay(unique_ptr<TerminalDisplay> _display)
 
     // NB: Inform connected TTY and local Screen instance about initial cell pixel size.
     auto const pixels =
-        ImageSize { display_->cellSize().width * boxed_cast<Width>(terminal_.screenSize().columns),
-                    display_->cellSize().height * boxed_cast<Height>(terminal_.screenSize().lines) };
-    terminal_.resizeScreen(terminal_.screenSize(), pixels);
+        ImageSize { display_->cellSize().width * boxed_cast<Width>(terminal_.pageSize().columns),
+                    display_->cellSize().height * boxed_cast<Height>(terminal_.pageSize().lines) };
+    terminal_.resizeScreen(terminal_.pageSize(), pixels);
 }
 
 void TerminalSession::displayInitialized()
@@ -312,7 +312,7 @@ void TerminalSession::onClosed()
 
     if (diff < earlyExitThreshold_)
     {
-        // auto const w = terminal_.screenSize().columns.as<int>();
+        // auto const w = terminal_.pageSize().columns.as<int>();
         auto constexpr SGR = "\033[1;38:2::255:255:255m\033[48:2::255:0:0m"sv;
         auto constexpr EL = "\033[K"sv;
         auto constexpr TextLines = array<string_view, 2> { "Shell terminated too quickly.",
@@ -539,14 +539,14 @@ bool TerminalSession::operator()(actions::ClearHistoryAndReset)
 {
     LOGSTORE(SessionLog)("Clearing history and perform terminal hard reset");
 
-    auto const screenSize = terminal_.screenSize();
+    auto const pageSize = terminal_.pageSize();
     auto const pixelSize = display_->pixelSize();
 
     terminal_.resetHard();
-    auto const tmpScreenSize = PageSize { screenSize.lines, screenSize.columns + ColumnCount(1) };
-    terminal_.resizeScreen(tmpScreenSize, pixelSize);
+    auto const tmpPageSize = PageSize { pageSize.lines, pageSize.columns + ColumnCount(1) };
+    terminal_.resizeScreen(tmpPageSize, pixelSize);
     this_thread::yield();
-    terminal_.resizeScreen(screenSize, pixelSize);
+    terminal_.resizeScreen(pageSize, pixelSize);
     return true;
 }
 
@@ -737,14 +737,14 @@ bool TerminalSession::operator()(actions::ScrollOneUp)
 
 bool TerminalSession::operator()(actions::ScrollPageDown)
 {
-    auto const stepSize = terminal().screenSize().lines / LineCount(2);
+    auto const stepSize = terminal().pageSize().lines / LineCount(2);
     terminal().viewport().scrollDown(stepSize);
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollPageUp)
 {
-    auto const stepSize = terminal().screenSize().lines / LineCount(2);
+    auto const stepSize = terminal().pageSize().lines / LineCount(2);
     terminal().viewport().scrollUp(stepSize);
     return true;
 }
@@ -972,7 +972,7 @@ void TerminalSession::configureDisplay()
         LineCount(*display_->pixelSize().height / *display_->cellSize().height),
         ColumnCount(*display_->pixelSize().width / *display_->cellSize().width),
     };
-    display_->setScreenSize(pageSize);
+    display_->setPageSize(pageSize);
     display_->setFonts(profile_.fonts);
     // TODO: maybe update margin after this call?
 

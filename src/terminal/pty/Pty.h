@@ -72,7 +72,7 @@ class Pty
     virtual int write(char const* buf, size_t size) = 0;
 
     /// @returns current underlying window size in characters width and height.
-    virtual PageSize screenSize() const noexcept = 0;
+    virtual PageSize pageSize() const noexcept = 0;
 
     /// Resizes underlying window buffer by given character width and height.
     virtual void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) = 0;

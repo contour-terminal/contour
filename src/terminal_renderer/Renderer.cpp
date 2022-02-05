@@ -115,7 +115,7 @@ unique_ptr<text::shaper> createTextShaper(TextShapingEngine _engine,
     return make_unique<text::open_shaper>(_dpi, std::move(_locator));
 }
 
-Renderer::Renderer(PageSize screenSize,
+Renderer::Renderer(PageSize pageSize,
                    FontDescriptions const& fontDescriptions,
                    terminal::ColorPalette const& colorPalette,
                    terminal::Opacity backgroundOpacity,
@@ -125,7 +125,7 @@ Renderer::Renderer(PageSize screenSize,
                    Decorator hyperlinkNormal,
                    Decorator hyperlinkHover):
     _atlasHashtableSlotCount { crispy::detail::nextPowerOfTwo(atlasHashtableSlotCount.value) },
-    _atlasTileCount { std::max(atlasTileCount.value, static_cast<uint32_t>(screenSize.area())) },
+    _atlasTileCount { std::max(atlasTileCount.value, static_cast<uint32_t>(pageSize.area())) },
     _atlasDirectMapping { atlasDirectMapping },
     _renderTarget { nullptr },
     textShaper_ { createTextShaper(fontDescriptions.textShapingEngine,
@@ -133,7 +133,7 @@ Renderer::Renderer(PageSize screenSize,
                                    createFontLocator(fontDescriptions.fontLocator)) },
     fontDescriptions_ { fontDescriptions },
     fonts_ { loadFontKeys(fontDescriptions_, *textShaper_) },
-    gridMetrics_ { loadGridMetrics(fonts_.regular, screenSize, *textShaper_) },
+    gridMetrics_ { loadGridMetrics(fonts_.regular, pageSize, *textShaper_) },
     colorPalette_ { colorPalette },
     backgroundOpacity_ { backgroundOpacity },
     backgroundRenderer_ { gridMetrics_, colorPalette.defaultBackground },
@@ -299,7 +299,7 @@ void Renderer::setRenderSize(ImageSize _size)
 
 uint64_t Renderer::render(Terminal& _terminal, bool _pressure)
 {
-    gridMetrics_.pageSize = _terminal.screenSize();
+    gridMetrics_.pageSize = _terminal.pageSize();
 
     auto const changes = _terminal.tick(steady_clock::now());
 

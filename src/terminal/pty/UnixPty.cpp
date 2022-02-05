@@ -305,7 +305,7 @@ int UnixPty::write(char const* buf, size_t size)
     return static_cast<int>(rv);
 }
 
-PageSize UnixPty::screenSize() const noexcept
+PageSize UnixPty::pageSize() const noexcept
 {
     return size_;
 }

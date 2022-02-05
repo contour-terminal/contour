@@ -106,7 +106,7 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     void resizeWindow(terminal::Width, terminal::Height) override;
     void setFonts(terminal::renderer::FontDescriptions _fontDescriptions) override;
     bool setFontSize(text::font_size _size) override;
-    bool setScreenSize(terminal::PageSize _newScreenSize) override;
+    bool setPageSize(terminal::PageSize _newPageSize) override;
     void setMouseCursorShape(MouseCursorShape _shape) override;
     void setWindowTitle(std::string_view /*_title*/) override;
     void setWindowFullScreen() override;
@@ -149,10 +149,7 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     void configureScreenHooks();
     void logDisplayInfo();
     void watchKdeDpiSetting();
-    terminal::PageSize screenSize() const
-    {
-        return screenSizeForPixels(pixelSize(), renderer_.gridMetrics());
-    }
+    terminal::PageSize pageSize() const { return pageSizeForPixels(pixelSize(), renderer_.gridMetrics()); }
     void assertInitialized();
     double contentScale() const;
     void updateMinimumSize();

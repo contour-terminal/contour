@@ -57,7 +57,7 @@ class TerminalDisplay
     // (user requested) actions
     virtual bool requestPermission(config::Permission _allowedByConfig, std::string_view _topicText) = 0;
     virtual bool setFontSize(text::font_size _size) = 0;
-    virtual bool setScreenSize(terminal::PageSize _size) = 0;
+    virtual bool setPageSize(terminal::PageSize _size) = 0;
     virtual terminal::FontDef getFontDef() = 0;
     virtual void bell() = 0;
     virtual void copyToClipboard(std::string_view _data) = 0;

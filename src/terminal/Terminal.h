@@ -101,7 +101,7 @@ class Terminal
     /// Retrieves reference to the underlying PTY device.
     Pty& device() noexcept { return pty_; }
 
-    PageSize screenSize() const noexcept { return pty_.screenSize(); }
+    PageSize pageSize() const noexcept { return pty_.pageSize(); }
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels);
 
     void setMouseProtocolBypassModifier(Modifier _value) { mouseProtocolBypassModifier_ = _value; }

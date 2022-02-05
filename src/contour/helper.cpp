@@ -426,7 +426,7 @@ terminal::renderer::FontDescriptions sanitizeFontDescription(terminal::renderer:
 }
 
 bool applyFontDescription(ImageSize _cellSize,
-                          PageSize _screenSize,
+                          PageSize _pageSize,
                           ImageSize _pixelSize,
                           Point _screenDPI,
                           terminal::renderer::Renderer& _renderer,
@@ -435,7 +435,7 @@ bool applyFontDescription(ImageSize _cellSize,
     if (_renderer.fontDescriptions() == _fontDescriptions)
         return false;
 
-    auto const windowMargin = computeMargin(_cellSize, _screenSize, _pixelSize);
+    auto const windowMargin = computeMargin(_cellSize, _pageSize, _pixelSize);
 
     _renderer.setFonts(sanitizeFontDescription(std::move(_fontDescriptions), _screenDPI));
     _renderer.setMargin(windowMargin);
@@ -444,8 +444,8 @@ bool applyFontDescription(ImageSize _cellSize,
     return true;
 }
 
-terminal::PageSize screenSizeForPixels(ImageSize _pixelSize,
-                                       terminal::renderer::GridMetrics const& _gridMetrics)
+terminal::PageSize pageSizeForPixels(ImageSize _pixelSize,
+                                     terminal::renderer::GridMetrics const& _gridMetrics)
 {
     auto tmp = _pixelSize / _gridMetrics.cellSize;
     return terminal::PageSize { boxed_cast<terminal::LineCount>(tmp.height),
@@ -460,21 +460,21 @@ void applyResize(terminal::ImageSize _newPixelSize,
     if (*_newPixelSize.width == 0 || *_newPixelSize.height == 0)
         return;
 
-    auto const newScreenSize = screenSizeForPixels(_newPixelSize, _renderer.gridMetrics());
+    auto const newPageSize = pageSizeForPixels(_newPixelSize, _renderer.gridMetrics());
     terminal::Terminal& terminal = _session.terminal();
     terminal::ImageSize cellSize = _renderer.gridMetrics().cellSize;
 
     _renderer.setRenderSize(_newPixelSize);
-    _renderer.setScreenSize(newScreenSize);
-    _renderer.setMargin(computeMargin(_renderer.gridMetrics().cellSize, newScreenSize, _newPixelSize));
+    _renderer.setPageSize(newPageSize);
+    _renderer.setMargin(computeMargin(_renderer.gridMetrics().cellSize, newPageSize, _newPixelSize));
     //_renderer.clearCache();
 
-    if (newScreenSize == terminal.screenSize())
+    if (newPageSize == terminal.pageSize())
         return;
 
-    auto const viewSize = terminal::ImageSize { cellSize.width * newScreenSize.columns.as<Width>(),
-                                                cellSize.height * newScreenSize.lines.as<Height>() };
-    terminal.resizeScreen(newScreenSize, viewSize);
+    auto const viewSize = terminal::ImageSize { cellSize.width * newPageSize.columns.as<Width>(),
+                                                cellSize.height * newPageSize.lines.as<Height>() };
+    terminal.resizeScreen(newPageSize, viewSize);
     terminal.clearSelection();
 }
 
