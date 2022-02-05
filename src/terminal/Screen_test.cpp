@@ -2978,11 +2978,34 @@ TEST_CASE("OSC.4")
 
     SECTION("query")
     {
-        screen.write("\033]4;1;?");
+        screen.write("\033]4;7;?\033\\");
         INFO(term.replyData);
+        REQUIRE(e(term.replyData) == e("\033]4;7;rgb:c0c0/c0c0/c0c0\033\\"));
     }
 
-    SECTION("set") { screen.write("\033]4;1;rgb:ab/cd/ef"); }
+    SECTION("set color via format rgb:RR/GG/BB")
+    {
+        screen.write("\033]4;7;rgb:ab/cd/ef\033\\");
+        screen.write("\033]4;7;?\033\\");
+        INFO(term.replyData);
+        REQUIRE(e(term.replyData) == e("\033]4;7;rgb:abab/cdcd/efef\033\\"));
+    }
+
+    SECTION("set color via format #RRGGBB")
+    {
+        screen.write("\033]4;7;#abcdef\033\\");
+        screen.write("\033]4;7;?\033\\");
+        INFO(e(term.replyData));
+        REQUIRE(e(term.replyData) == e("\033]4;7;rgb:abab/cdcd/efef\033\\"));
+    }
+
+    SECTION("set color via format #RGB")
+    {
+        screen.write("\033]4;7;#abc\033\\");
+        screen.write("\033]4;7;?\033\\");
+        INFO(term.replyData);
+        REQUIRE(e(term.replyData) == e("\033]4;7;rgb:a0a0/b0b0/c0c0\033\\"));
+    }
 }
 
 TEST_CASE("XTGETTCAP")
