@@ -144,6 +144,7 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
   private:
     // helper methods
     //
+    crispy::Point systemScreenDPI() const;
     config::TerminalProfile const& profile() const noexcept { return session_.profile(); }
     terminal::Terminal& terminal() noexcept { return session_.terminal(); }
     void configureScreenHooks();

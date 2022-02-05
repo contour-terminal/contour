@@ -255,16 +255,6 @@ TerminalWidget::TerminalWidget(TerminalSession& session,
     },
     filesystemWatcher_(this)
 {
-    LOGSTORE(DisplayLog)
-    ("ctor: terminalSize={}, fontSize={}, contentScale={}, geometry={}:{}..{}:{}",
-     profile().terminalSize,
-     profile().fonts.size,
-     contentScale(),
-     geometry().top(),
-     geometry().left(),
-     geometry().bottom(),
-     geometry().right());
-
     setMouseTracking(true);
     setFormat(surfaceFormat());
 
@@ -335,13 +325,6 @@ QSize TerminalWidget::sizeHint() const
         ImageSize { Width(*gridMetrics().cellSize.width * *profile().terminalSize.columns),
                     Height(*gridMetrics().cellSize.height * *profile().terminalSize.lines) };
 
-    LOGSTORE(DisplayLog)
-    ("sizeHint: {}, cellSize: {}, terminalSize: {}, dpi: {}",
-     viewSize,
-     cellSize,
-     profile().terminalSize,
-     renderer_.fontDescriptions().dpi);
-
     return QSize(viewSize.width.as<int>(), viewSize.height.as<int>());
 }
 
@@ -392,16 +375,20 @@ void TerminalWidget::onScreenDpiChanged()
 void TerminalWidget::logDisplayInfo()
 {
     // clang-format off
-    QScreen* screen = screenOf(this);
     auto const fontSizeInPx = static_cast<int>(ceil((
-        profile().fonts.size.pt / 72.0) * screen->physicalDotsPerInch() * contentScale()
+        profile().fonts.size.pt / 72.0) * average(screenDPI())
     ));
-    LOGSTORE(DisplayLog)("[Display Info] Refresh rate         : {} Hz", refreshRate());
-    LOGSTORE(DisplayLog)("[Display Info] Logical DPI          : {}", crispy::Size { logicalDpiX(), logicalDpiY() });
-    LOGSTORE(DisplayLog)("[Display Info] Physical DPI         : {}", crispy::Size { physicalDpiX(), physicalDpiY() });
-    LOGSTORE(DisplayLog)("[Display Info] Logical/physical PPI : {} / {}", screen->physicalDotsPerInch(), screen->logicalDotsPerInch());
-    LOGSTORE(DisplayLog)("[Display Info] Device pixel ratio   : {}", devicePixelRatioF());
-    LOGSTORE(DisplayLog)("[Display Info] Font size            : {} ({}px)", profile().fonts.size, fontSizeInPx);
+    LOGSTORE(DisplayLog)("[Display Info] Refresh rate        : {} Hz", refreshRate());
+    LOGSTORE(DisplayLog)("[Display Info] Logical DPI         : {}", crispy::Size { logicalDpiX(), logicalDpiY() });
+    LOGSTORE(DisplayLog)("[Display Info] Physical DPI        : {}", crispy::Size { physicalDpiX(), physicalDpiY() });
+    LOGSTORE(DisplayLog)("[Display Info] Device pixel ratio  : {}", devicePixelRatioF());
+    LOGSTORE(DisplayLog)("[Grid Metrics] Font DPI            : {}", crispy::Size{ renderer_.fontDescriptions().dpi.x, renderer_.fontDescriptions().dpi.y });
+    LOGSTORE(DisplayLog)("[Grid Metrics] Font size           : {} ({} px)", profile().fonts.size, fontSizeInPx);
+    LOGSTORE(DisplayLog)("[Grid Metrics] Cell size           : {} px", gridMetrics().cellSize);
+    LOGSTORE(DisplayLog)("[Grid Metrics] Page size           : {} px", gridMetrics().pageSize);
+    LOGSTORE(DisplayLog)("[Grid Metrics] Font baseline       : {} px", gridMetrics().baseline);
+    LOGSTORE(DisplayLog)("[Grid Metrics] Underline position  : {} px", gridMetrics().underline.position);
+    LOGSTORE(DisplayLog)("[Grid Metrics] Underline thickness : {} px", gridMetrics().underline.thickness);
     // clang-format on
 }
 
@@ -452,7 +439,6 @@ void TerminalWidget::initializeGL()
         LOGSTORE(DisplayLog)("[FYI] OpenGL type     : {}", (QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL"));
         LOGSTORE(DisplayLog)("[FYI] OpenGL renderer : {}", glGetString(GL_RENDERER));
         LOGSTORE(DisplayLog)("[FYI] Qt platform     : {}", QGuiApplication::platformName().toStdString());
-        logDisplayInfo();
         // clang-format on
 
         GLint versionMajor {};
@@ -485,6 +471,7 @@ void TerminalWidget::initializeGL()
         }
 #endif
         LOGSTORE(DisplayLog)(glslVersionMsg);
+        logDisplayInfo();
     }
     // }}}
 
@@ -500,7 +487,9 @@ void TerminalWidget::initializeGL()
 void TerminalWidget::resizeGL(int _width, int _height)
 {
     QOpenGLWidget::resizeGL(_width, _height);
-    applyResize(terminal::ImageSize { Width(_width), Height(_height) }, session_, renderer_);
+    auto const newPixelSize = terminal::ImageSize { Width(_width), Height(_height) } * contentScale();
+    LOGSTORE(DisplayLog)("resizing to {}", newPixelSize);
+    applyResize(newPixelSize, session_, renderer_);
 }
 
 void TerminalWidget::paintGL()
@@ -673,7 +662,7 @@ void TerminalWidget::onScrollBarValueChanged(int _value)
 
 double TerminalWidget::contentScale() const
 {
-    return devicePixelRatioF();
+    return average(screenDPI()) / 96.0;
 }
 
 void TerminalWidget::updateMinimumSize()
@@ -700,6 +689,11 @@ double TerminalWidget::refreshRate() const
 }
 
 crispy::Point TerminalWidget::screenDPI() const
+{
+    return systemScreenDPI() * profile().fonts.dpiScale;
+}
+
+crispy::Point TerminalWidget::systemScreenDPI() const
 {
 #if !defined(__APPLE__) && !defined(_WIN32)
     if (auto const kcmFontsFile = kcmFontsFilePath())

@@ -65,12 +65,6 @@ namespace contour
 
 namespace
 {
-    constexpr crispy::Point scale(crispy::Point p, double s)
-    {
-        return crispy::Point { static_cast<int>(static_cast<double>(p.x) * s),
-                               static_cast<int>(static_cast<double>(p.y) * s) };
-    }
-
     string unhandledExceptionMessage(string_view const& where, exception const& e)
     {
         return fmt::format("{}: Unhandled exception caught ({}). {}", where, typeid(e).name(), e.what());
@@ -814,10 +808,10 @@ void TerminalSession::sanitizeConfig(config::Config& _config)
     if (!display_)
         return;
 
-    auto const dpi = display_->screenDPI();
+    crispy::Point const screenDPI = display_->screenDPI(); // profile.fonts.dpiScale is applied already
     for (config::TerminalProfile& profile: _config.profiles | ::ranges::views::values)
         if (!profile.fonts.dpi.x || !profile.fonts.dpi.y)
-            profile.fonts.dpi = scale(dpi, profile.fonts.dpiScale);
+            profile.fonts.dpi = screenDPI;
 }
 
 bool TerminalSession::reloadConfig(config::Config _newConfig, string const& _profileName)
