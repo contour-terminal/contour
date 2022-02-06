@@ -35,16 +35,15 @@ namespace text
 namespace
 {
 
-    constexpr string_view fcSpacingStr(int _value) noexcept
+    string fcSpacingStr(int _value)
     {
-        using namespace std::string_view_literals;
         switch (_value)
         {
-        case FC_PROPORTIONAL: return "proportional"sv;
-        case FC_DUAL: return "dual"sv;
-        case FC_MONO: return "mono"sv;
-        case FC_CHARCELL: return "charcell"sv;
-        default: return "INVALID"sv;
+        case FC_PROPORTIONAL: return "proportional";
+        case FC_DUAL: return "dual";
+        case FC_MONO: return "mono";
+        case FC_CHARCELL: return "charcell";
+        default: return fmt::format("({})", _value);
         }
     }
 
@@ -226,12 +225,15 @@ font_source_list fontconfig_locator::locate(font_description const& _fd)
 // }
 #endif
 
-        int spacing = -1; // ignore font if we cannot retrieve spacing information
+        int spacing = -1;
         FcPatternGetInteger(font, FC_SPACING, 0, &spacing);
         if (_fd.strict_spacing)
         {
-            if ((_fd.spacing == font_spacing::proportional && spacing < FC_PROPORTIONAL)
-                || (_fd.spacing == font_spacing::mono && spacing < FC_MONO))
+            // Some fonts don't seem to tell us their spacing attribute. ;-(
+            // But instead of ignoring them all together, try to be more friendly.
+            if (spacing != -1
+                && ((_fd.spacing == font_spacing::proportional && spacing < FC_PROPORTIONAL)
+                    || (_fd.spacing == font_spacing::mono && spacing < FC_MONO)))
             {
                 LocatorLog()("Skipping font: {} ({} < {}).",
                              (char const*) (file),
@@ -242,7 +244,7 @@ font_source_list fontconfig_locator::locate(font_description const& _fd)
         }
 
         output.emplace_back(font_path { string { (char const*) (file) } });
-        LocatorLog()("Font {} in chain: {}", output.size(), (char const*) file);
+        LocatorLog()("Font {} (spacing {}) in chain: {}", output.size(), spacing, (char const*) file);
     }
 
 #if defined(_WIN32)
