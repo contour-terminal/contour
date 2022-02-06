@@ -23,13 +23,19 @@
 
 #include <range/v3/all.hpp>
 
+#include <QtGui/QImage>
+
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <memory>
 #include <utility>
 #include <vector>
 
 using std::array;
+using std::get;
+using std::holds_alternative;
+using std::make_shared;
 using std::min;
 using std::move;
 using std::nullopt;
@@ -200,6 +206,11 @@ void OpenGLRenderer::setRenderSize(ImageSize targetSurfaceSize)
                               0.0f,
                               float(*_renderTargetSize.height) // bottom, top
     );
+}
+
+void OpenGLRenderer::setContentScale(double scale)
+{
+    _contentScale = scale;
 }
 
 void OpenGLRenderer::setMargin(terminal::renderer::PageMargin margin) noexcept
@@ -758,10 +769,8 @@ void OpenGLRenderer::initializeBackgroundRendering()
 
 void OpenGLRenderer::setBackgroundImage(shared_ptr<terminal::BackgroundImage const> const& backgroundImageOpt)
 {
-    if (!backgroundImageOpt || backgroundImageOpt->hash.value() != _renderStateCache.backgroundImageHash)
+    if (!backgroundImageOpt || backgroundImageOpt->hash != _renderStateCache.backgroundImageHash)
     {
-        _scheduledExecutions.backgroundImage = nullptr;
-        _renderStateCache.backgroundImage = nullptr;
         _renderStateCache.backgroundImageOpacity = 1.0f;
         if (_backgroundImageTexture)
         {
@@ -773,14 +782,48 @@ void OpenGLRenderer::setBackgroundImage(shared_ptr<terminal::BackgroundImage con
     if (!backgroundImageOpt)
         return;
 
-    auto const& backgroundImage = *backgroundImageOpt;
-    _scheduledExecutions.backgroundImage = &backgroundImage;
-    _renderStateCache.backgroundImage = &backgroundImage;
+    auto& backgroundImage = *backgroundImageOpt;
     _renderStateCache.backgroundImageOpacity = backgroundImage.opacity;
-    _renderStateCache.backgroundImageHash = backgroundImage.hash.value();
+    _renderStateCache.backgroundImageBlur = backgroundImage.blur;
 
-    CHECKED_GL(glGenTextures(1, &_backgroundImageTexture));
-    CHECKED_GL(bindTexture(_backgroundImageTexture));
+    if (holds_alternative<FileSystem::path>(backgroundImage.location))
+    {
+        auto const filePath = get<FileSystem::path>(backgroundImage.location);
+        auto const qFilePath = QString::fromStdString(filePath.string());
+        auto qImage = QImage(qFilePath).convertToFormat(QImage::Format_RGBA8888);
+        if (qImage.format() != QImage::Format_RGBA8888)
+        {
+            errorlog()("Unsupported image format {} for background image at {}.",
+                       qImage.format(),
+                       filePath.string());
+            return;
+        }
+        auto const imageSize = ImageSize { Width(qImage.size().width()), Height(qImage.size().height()) };
+        auto const imageFormat = terminal::ImageFormat::RGBA;
+        auto const rowAlignment = 4; // This is default. Can it be any different?
+        DisplayLog()("Background image from disk: {} {}", imageSize, imageFormat);
+        _renderStateCache.backgroundImageHash = crispy::StrongHash::compute(filePath.string());
+        _backgroundImageTexture =
+            createAndUploadImage(imageSize, imageFormat, rowAlignment, qImage.constBits());
+    }
+    else if (holds_alternative<terminal::ImageDataPtr>(backgroundImage.location))
+    {
+        auto const& imageData = *get<terminal::ImageDataPtr>(backgroundImage.location);
+        DisplayLog()("Background inline image: {} {}", imageData.size, imageData.format);
+        _renderStateCache.backgroundImageHash = imageData.hash;
+        _backgroundImageTexture = createAndUploadImage(
+            imageData.size, imageData.format, imageData.rowAlignment, imageData.pixels.data());
+    }
+}
+
+GLuint OpenGLRenderer::createAndUploadImage(ImageSize imageSize,
+                                            terminal::ImageFormat format,
+                                            int rowAlignment,
+                                            uint8_t const* pixels)
+{
+    auto textureId = GLuint {};
+    CHECKED_GL(glGenTextures(1, &textureId));
+    CHECKED_GL(bindTexture(textureId));
 
     CHECKED_GL(glTexParameteri(GL_TEXTURE_2D,
                                GL_TEXTURE_MAG_FILTER,
@@ -789,7 +832,7 @@ void OpenGLRenderer::setBackgroundImage(shared_ptr<terminal::BackgroundImage con
     CHECKED_GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE));
     CHECKED_GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE));
     CHECKED_GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
-    CHECKED_GL(glPixelStorei(GL_UNPACK_ALIGNMENT, backgroundImage.rowAlignment));
+    CHECKED_GL(glPixelStorei(GL_UNPACK_ALIGNMENT, rowAlignment));
 
     auto constexpr target = GL_TEXTURE_2D;
     auto constexpr levelOfDetail = 0;
@@ -798,8 +841,8 @@ void OpenGLRenderer::setBackgroundImage(shared_ptr<terminal::BackgroundImage con
     auto constexpr UnusedParam = 0;
     auto constexpr internalFormat = GL_RGBA;
 
-    auto const textureWidth = unbox<uint32_t>(backgroundImage.size.width);
-    auto const textureHeight = unbox<uint32_t>(backgroundImage.size.height);
+    auto const textureWidth = unbox<uint32_t>(imageSize.width);
+    auto const textureHeight = unbox<uint32_t>(imageSize.height);
 
     CHECKED_GL(glTexImage2D(target,
                             levelOfDetail,
@@ -809,16 +852,8 @@ void OpenGLRenderer::setBackgroundImage(shared_ptr<terminal::BackgroundImage con
                             UnusedParam,
                             imageFormat,
                             type,
-                            backgroundImage.pixels.data()));
-    // }}}
-
-    LOGSTORE(DisplayLog)
-    ("Uploading background image {} {} ({}x{}) {}",
-     _backgroundImageTexture,
-     backgroundImage.size,
-     textureWidth,
-     textureHeight,
-     backgroundImage.format);
+                            pixels));
+    return textureId;
 }
 
 void OpenGLRenderer::executeRenderBackground()
@@ -829,11 +864,11 @@ void OpenGLRenderer::executeRenderBackground()
     auto const h = unbox<float>(_renderTargetSize.height);
 
     // {{{ setup uniforms
-    auto const opacity = float(_renderStateCache.backgroundColor.alpha()) / 255.0f
-                         * _renderStateCache.backgroundImage->opacity;
+    auto const opacity =
+        float(_renderStateCache.backgroundColor.alpha()) / 255.0f * _renderStateCache.backgroundImageOpacity;
     auto const now = chrono::steady_clock::now().time_since_epoch();
     auto const timestamp = chrono::duration_cast<chrono::milliseconds>(now).count();
-    auto const blur = _renderStateCache.backgroundImage->blur ? 1.0f : 0.0f;
+    auto const blur = _renderStateCache.backgroundImageBlur ? 1.0f : 0.0f;
 
     _backgroundShader->setUniformValue(_backgroundUniformLocations.projection, _projectionMatrix);
     _backgroundShader->setUniformValue(_backgroundUniformLocations.resolution, w, h);

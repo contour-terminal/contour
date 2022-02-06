@@ -172,15 +172,7 @@ void Renderer::setRenderTarget(RenderTarget& renderTarget)
     configureTextureAtlas();
 
     if (colorPalette_.backgroundImage)
-    {
-        LOGSTORE(RendererLog)
-        ("- Background image     : {} {}\n",
-         colorPalette_.backgroundImage->size,
-         colorPalette_.backgroundImage->format);
         renderTarget.setBackgroundImage(colorPalette_.backgroundImage);
-    }
-    else
-        LOGSTORE(RendererLog)("- Background image     : {}\n", "blank");
 }
 
 void Renderer::configureTextureAtlas()
@@ -199,12 +191,12 @@ void Renderer::configureTextureAtlas()
     textureAtlas_ = make_unique<Renderable::TextureAtlas>(_renderTarget->textureScheduler(), atlasProperties);
 
     // clang-format off
-    LOGSTORE(RendererLog)("Configuring texture atlas.\n", atlasProperties);
-    LOGSTORE(RendererLog)("- Atlas properties     : {}\n", atlasProperties);
-    LOGSTORE(RendererLog)("- Atlas texture size   : {} pixels\n", textureAtlas_->atlasSize());
-    LOGSTORE(RendererLog)("- Atlas hashtable      : {} slots\n", _atlasHashtableSlotCount.value);
-    LOGSTORE(RendererLog)("- Atlas tile count     : {} = {}x * {}y\n", textureAtlas_->capacity(), textureAtlas_->tilesInX(), textureAtlas_->tilesInY());
-    LOGSTORE(RendererLog)("- Atlas direct mapping : {} (for text rendering)", _atlasDirectMapping ? "enabled" : "disabled");
+    RendererLog()("Configuring texture atlas.\n", atlasProperties);
+    RendererLog()("- Atlas properties     : {}\n", atlasProperties);
+    RendererLog()("- Atlas texture size   : {} pixels\n", textureAtlas_->atlasSize());
+    RendererLog()("- Atlas hashtable      : {} slots\n", _atlasHashtableSlotCount.value);
+    RendererLog()("- Atlas tile count     : {} = {}x * {}y\n", textureAtlas_->capacity(), textureAtlas_->tilesInX(), textureAtlas_->tilesInY());
+    RendererLog()("- Atlas direct mapping : {} (for text rendering)", _atlasDirectMapping ? "enabled" : "disabled");
     // clang-format on
 
     for (reference_wrapper<Renderable>& renderable: renderables())

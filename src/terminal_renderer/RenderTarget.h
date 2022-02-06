@@ -109,6 +109,8 @@ class RenderTarget
     /// This is the size that can be rendered to.
     virtual void setRenderSize(ImageSize _size) = 0;
 
+    virtual void setContentScale(double scale) = 0;
+
     virtual void setMargin(PageMargin _margin) = 0;
 
     virtual atlas::AtlasBackend& textureScheduler() = 0;

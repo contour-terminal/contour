@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include <terminal/Image.h>
+
 #include <terminal_renderer/RenderTarget.h>
 #include <terminal_renderer/TextureAtlas.h>
 
@@ -72,6 +74,7 @@ class OpenGLRenderer final:
 
     // RenderTarget implementation
     void setRenderSize(crispy::ImageSize _size) override;
+    void setContentScale(double scale) override;
     void setMargin(terminal::renderer::PageMargin _margin) noexcept override;
     std::optional<AtlasTextureScreenshot> readAtlas() override;
     AtlasBackend& textureScheduler() override;
@@ -99,6 +102,11 @@ class OpenGLRenderer final:
     int maxTextureSize();
     int maxTextureUnits();
     crispy::ImageSize renderBufferSize();
+
+    GLuint createAndUploadImage(ImageSize imageSize,
+                                terminal::ImageFormat format,
+                                int rowAlignment,
+                                uint8_t const* pixels);
 
     void executeRenderBackground();
     void executeRenderTextures();
@@ -134,14 +142,12 @@ class OpenGLRenderer final:
         std::optional<terminal::renderer::atlas::ConfigureAtlas> configureAtlas = std::nullopt;
         std::vector<terminal::renderer::atlas::UploadTile> uploadTiles {};
         RenderBatch renderBatch {};
-        terminal::BackgroundImage const* backgroundImage = nullptr;
 
         void clear()
         {
             configureAtlas.reset();
             uploadTiles.clear();
             renderBatch.clear();
-            backgroundImage = nullptr;
         }
     };
 
@@ -151,6 +157,8 @@ class OpenGLRenderer final:
     bool _initialized = false;
     crispy::ImageSize _renderTargetSize;
     QMatrix4x4 _projectionMatrix;
+
+    double _contentScale = 1.0;
 
     terminal::renderer::PageMargin _margin {};
 
@@ -204,7 +212,7 @@ class OpenGLRenderer final:
     {
         terminal::RGBAColor backgroundColor {};
         float backgroundImageOpacity = 1.0f;
-        terminal::BackgroundImage const* backgroundImage = nullptr;
+        bool backgroundImageBlur = false;
         crispy::StrongHash backgroundImageHash;
     } _renderStateCache;
 };
