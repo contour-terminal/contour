@@ -18,6 +18,7 @@
 #include <terminal/defines.h>
 
 #include <crispy/StrongHash.h>
+#include <crispy/stdfs.h>
 
 #include <fmt/format.h>
 
@@ -35,17 +36,26 @@
 namespace terminal
 {
 
-struct BackgroundImage
+struct ImageData
 {
-    // image data
     terminal::ImageFormat format;
     int rowAlignment = 1;
     ImageSize size;
     std::vector<uint8_t> pixels;
 
-    std::optional<crispy::StrongHash> hash;
+    crispy::StrongHash hash;
 
-    void updateImageHash() noexcept;
+    void updateHash() noexcept;
+};
+
+using ImageDataPtr = std::shared_ptr<ImageData const>;
+
+struct BackgroundImage
+{
+    using Location = std::variant<FileSystem::path, ImageDataPtr>;
+
+    Location location;
+    crispy::StrongHash hash;
 
     // image configuration
     float opacity = 1.0; // normalized value

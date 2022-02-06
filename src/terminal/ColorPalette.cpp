@@ -39,7 +39,7 @@ namespace
     }
 } // namespace
 
-void BackgroundImage::updateImageHash() noexcept
+void ImageData::updateHash() noexcept
 {
     // clang-format off
     using crispy::StrongHash;

@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include <terminal/Image.h>
+
 #include <terminal_renderer/RenderTarget.h>
 #include <terminal_renderer/TextureAtlas.h>
 
@@ -101,6 +103,11 @@ class OpenGLRenderer final:
     int maxTextureUnits();
     crispy::ImageSize renderBufferSize();
 
+    GLuint createAndUploadImage(ImageSize imageSize,
+                                terminal::ImageFormat format,
+                                int rowAlignment,
+                                uint8_t const* pixels);
+
     void executeRenderBackground();
     void executeRenderTextures();
     void executeConfigureAtlas(ConfigureAtlas const& _param);
@@ -135,14 +142,12 @@ class OpenGLRenderer final:
         std::optional<terminal::renderer::atlas::ConfigureAtlas> configureAtlas = std::nullopt;
         std::vector<terminal::renderer::atlas::UploadTile> uploadTiles {};
         RenderBatch renderBatch {};
-        terminal::BackgroundImage const* backgroundImage = nullptr;
 
         void clear()
         {
             configureAtlas.reset();
             uploadTiles.clear();
             renderBatch.clear();
-            backgroundImage = nullptr;
         }
     };
 
@@ -207,7 +212,7 @@ class OpenGLRenderer final:
     {
         terminal::RGBAColor backgroundColor {};
         float backgroundImageOpacity = 1.0f;
-        terminal::BackgroundImage const* backgroundImage = nullptr;
+        bool backgroundImageBlur = false;
         crispy::StrongHash backgroundImageHash;
     } _renderStateCache;
 };

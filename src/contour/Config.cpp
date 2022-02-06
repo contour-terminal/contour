@@ -28,7 +28,6 @@
 #include <yaml-cpp/ostream_wrapper.h>
 #include <yaml-cpp/yaml.h>
 
-#include <QtGui/QImage>
 #include <QtGui/QOpenGLContext>
 
 #include <algorithm>
@@ -86,16 +85,6 @@ using actions::Action;
 
 namespace // {{{ helper
 {
-    size_t sizeInBytes(QImage const& image) noexcept
-    {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
-        return static_cast<size_t>(image.sizeInBytes());
-#else
-        // Ubuntu 18.04 is using a very old Qt version.
-        return static_cast<size_t>(image.byteCount());
-#endif
-    }
-
     vector<FileSystem::path> getTermInfoDirs(optional<FileSystem::path> const& _appTerminfoDir)
     {
         auto locations = vector<FileSystem::path>();
@@ -804,32 +793,17 @@ Config loadConfigFromFile(FileSystem::path const& _fileName)
 
 std::shared_ptr<terminal::BackgroundImage const> loadImage(string const& fileName, float opacity, bool blur)
 {
-    string resolvedFileName;
+    FileSystem::path resolvedFileName;
     if (!fileName.empty() && fileName[0] == '~')
-        resolvedFileName = (terminal::Process::homeDirectory() / fileName.substr(1)).string();
+        resolvedFileName = terminal::Process::homeDirectory() / fileName.substr(1);
     else
         resolvedFileName = fileName;
 
     auto backgroundImage = terminal::BackgroundImage {};
-
-    auto qImage = QImage(QString::fromStdString(resolvedFileName)).convertToFormat(QImage::Format_RGBA8888);
-
-    if (qImage.format() != QImage::Format_RGBA8888)
-    {
-        errorlog()("Unsupported image format {} for background image at {}.", qImage.format(), fileName);
-        return nullptr;
-    }
-
-    backgroundImage.format = terminal::ImageFormat::RGBA;
-    backgroundImage.rowAlignment = 4; // This is default. Can it be any different?
-    backgroundImage.size = ImageSize { Width(qImage.size().width()), Height(qImage.size().height()) };
-    backgroundImage.pixels.resize(sizeInBytes(qImage));
+    backgroundImage.location = fileName;
+    backgroundImage.hash = crispy::StrongHash::compute(resolvedFileName.string());
     backgroundImage.opacity = opacity;
     backgroundImage.blur = blur;
-
-    memcpy(backgroundImage.pixels.data(), qImage.constBits(), sizeInBytes(qImage));
-
-    backgroundImage.updateImageHash();
 
     return make_shared<terminal::BackgroundImage const>(move(backgroundImage));
 }

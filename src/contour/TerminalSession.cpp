@@ -951,6 +951,7 @@ void TerminalSession::configureDisplay()
 
     LOGSTORE(SessionLog)("Configuring display.");
     display_->setBlurBehind(profile_.backgroundBlur);
+
     display_->setBackgroundImage(profile_.colors.backgroundImage);
 
     if (profile_.maximized)
