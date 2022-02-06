@@ -474,8 +474,20 @@ TextureAtlas<Metadata>::TextureAtlas(AtlasBackend& backend, AtlasProperties atla
     _backend { backend },
     _atlasProperties { atlasProperties },
     _atlasSize { computeAtlasSize(_atlasProperties) },
-    _tilesInX { unbox<uint32_t>(_atlasSize.width) / unbox<uint32_t>(_atlasProperties.tileSize.width) },
-    _tilesInY { unbox<uint32_t>(_atlasSize.height) / unbox<uint32_t>(_atlasProperties.tileSize.height) },
+    _tilesInX { [&]() {
+        Require(unbox<uint32_t>(_atlasProperties.tileSize.width) != 0);
+        auto const tilesInX =
+            unbox<uint32_t>(_atlasSize.width) / unbox<uint32_t>(_atlasProperties.tileSize.width);
+        Require(tilesInX != 0);
+        return tilesInX;
+    }() },
+    _tilesInY { [&]() {
+        Require(unbox<uint32_t>(_atlasProperties.tileSize.height) != 0);
+        auto const tilesInY =
+            unbox<uint32_t>(_atlasSize.height) / unbox<uint32_t>(_atlasProperties.tileSize.height);
+        Require(tilesInY != 0);
+        return tilesInY;
+    }() },
     _tileCache { TileCache::create(
         atlasProperties.hashCount,
         crispy::LRUCapacity { // The LRU entry capacity is the number of total tiles availabe,

@@ -121,6 +121,7 @@ struct HbFontInfo
     font_size size;
     FtFacePtr ftFace;
     HbFontPtr hbFont;
+    std::optional<font_metrics> metrics {};
     font_description description {};
 };
 
@@ -388,13 +389,21 @@ namespace
     int computeAverageAdvance(FT_Face _face) noexcept
     {
         FT_Pos maxAdvance = 0;
-        for (FT_ULong i = 32; i < 128; i++)
+        auto logger = LocatorLog();
+        logger.append("Computing average glyph advance: ");
+        for (FT_ULong i = 33; i < 128; i++)
         {
             if (auto ci = FT_Get_Char_Index(_face, i); ci != 0)
                 if (FT_Load_Glyph(_face, ci, FT_LOAD_DEFAULT) == FT_Err_Ok)
+                {
+                    if (i > 33)
+                        logger.append(", ");
+                    logger.append("{} {}", char(i), (double(_face->glyph->metrics.horiAdvance) / 64.0));
                     maxAdvance = max(maxAdvance, _face->glyph->metrics.horiAdvance);
+                }
         }
-        return int(ceilf(float(maxAdvance) / 64.0f));
+        logger.append(" = {}", int(ceilf(float(maxAdvance) / 64.0)));
+        return int(ceil(double(maxAdvance) / 64.0));
     }
 
     int ftBestStrikeIndex(FT_Face _face, int _fontWidth) noexcept
@@ -640,7 +649,7 @@ struct open_shaper::Private // {{{
         font_metrics output {};
 
         output.line_height = scaleVertical(ftFace, ftFace->height);
-        output.advance = computeAverageAdvance(ftFace);
+        output.advance = max(computeAverageAdvance(ftFace), int(double(output.line_height) * 2.0 / 3.0));
         output.ascender = scaleVertical(ftFace, ftFace->ascender);
         output.descender = scaleVertical(ftFace, ftFace->descender);
         output.underline_position = scaleVertical(ftFace, ftFace->underline_position);
@@ -770,7 +779,13 @@ optional<font_key> open_shaper::load_font(font_description const& _description, 
 
 font_metrics open_shaper::metrics(font_key _key) const
 {
-    return d->metrics(_key);
+    HbFontInfo& fontInfo = d->fonts_.at(_key);
+    if (fontInfo.metrics.has_value())
+        return fontInfo.metrics.value();
+
+    fontInfo.metrics = d->metrics(_key);
+    LocatorLog()("Calculating font metrics for {}: {}", fontInfo.description, *fontInfo.metrics);
+    return fontInfo.metrics.value();
 }
 
 optional<glyph_position> open_shaper::shape(font_key _font, char32_t _codepoint)
