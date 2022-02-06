@@ -202,6 +202,11 @@ void OpenGLRenderer::setRenderSize(ImageSize targetSurfaceSize)
     );
 }
 
+void OpenGLRenderer::setContentScale(double scale)
+{
+    _contentScale = scale;
+}
+
 void OpenGLRenderer::setMargin(terminal::renderer::PageMargin margin) noexcept
 {
     _margin = margin;

@@ -368,8 +368,12 @@ void TerminalWidget::onScreenDpiChanged()
     fd.dpi = newScreenDPI;
     renderer_.setFonts(fd);
 
+    renderTarget_->setContentScale(contentScale());
+
+    auto const newPixelSize = terminal::ImageSize { Width(width()), Height(height()) } * contentScale();
+
     // Apply resize on same window metrics propagates proper recalculations and repaint.
-    applyResize(terminal::ImageSize { Width(width()), Height(height()) }, session_, renderer_);
+    applyResize(newPixelSize, session_, renderer_);
 }
 
 void TerminalWidget::logDisplayInfo()
