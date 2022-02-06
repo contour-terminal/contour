@@ -649,7 +649,9 @@ struct open_shaper::Private // {{{
         font_metrics output {};
 
         output.line_height = scaleVertical(ftFace, ftFace->height);
-        output.advance = max(computeAverageAdvance(ftFace), int(double(output.line_height) * 2.0 / 3.0));
+        output.advance = computeAverageAdvance(ftFace);
+        if (!output.advance)
+            output.advance = int(double(output.line_height) * 2.0 / 3.0);
         output.ascender = scaleVertical(ftFace, ftFace->ascender);
         output.descender = scaleVertical(ftFace, ftFace->descender);
         output.underline_position = scaleVertical(ftFace, ftFace->underline_position);
