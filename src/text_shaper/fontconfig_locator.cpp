@@ -233,17 +233,16 @@ font_source_list fontconfig_locator::locate(font_description const& _fd)
             if ((_fd.spacing == font_spacing::proportional && spacing < FC_PROPORTIONAL)
                 || (_fd.spacing == font_spacing::mono && spacing < FC_MONO))
             {
-                LOGSTORE(LocatorLog)
-                ("Skipping font: {} ({} < {}).",
-                 (char const*) (file),
-                 fcSpacingStr(spacing),
-                 fcSpacingStr(FC_DUAL));
+                LocatorLog()("Skipping font: {} ({} < {}).",
+                             (char const*) (file),
+                             fcSpacingStr(spacing),
+                             fcSpacingStr(FC_DUAL));
                 continue;
             }
         }
 
         output.emplace_back(font_path { string { (char const*) (file) } });
-        // LOGSTORE(LocatorLog)("Found font: {}", (char const*) file);
+        LocatorLog()("Font {} in chain: {}", output.size(), (char const*) file);
     }
 
 #if defined(_WIN32)
