@@ -273,7 +273,9 @@ void Renderer::updateFontMetrics()
     LOGSTORE(RendererLog)("Updating grid metrics: {}", gridMetrics_);
 
     gridMetrics_ = loadGridMetrics(fonts_.regular, gridMetrics_.pageSize, *textShaper_);
-    configureTextureAtlas();
+
+    if (_renderTarget)
+        configureTextureAtlas();
 
     textRenderer_.updateFontMetrics();
     imageRenderer_.setCellSize(cellSize());

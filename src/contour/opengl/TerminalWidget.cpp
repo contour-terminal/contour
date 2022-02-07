@@ -320,7 +320,7 @@ QSize TerminalWidget::minimumSizeHint() const
 {
     auto constexpr MinimumPageSize = PageSize { LineCount(2), ColumnCount(3) };
 
-    auto const cellSize = gridMetrics().cellSize;
+    auto const cellSize = gridMetrics().cellSize / contentScale();
 
     return QSize(cellSize.width.as<int>() * MinimumPageSize.columns.as<int>(),
                  cellSize.height.as<int>() * MinimumPageSize.lines.as<int>());
@@ -328,10 +328,9 @@ QSize TerminalWidget::minimumSizeHint() const
 
 QSize TerminalWidget::sizeHint() const
 {
-    auto const cellSize = renderer_.gridMetrics().cellSize;
-    auto const viewSize =
-        ImageSize { Width(*gridMetrics().cellSize.width * *profile().terminalSize.columns),
-                    Height(*gridMetrics().cellSize.height * *profile().terminalSize.lines) };
+    auto const cellSize = renderer_.gridMetrics().cellSize / contentScale();
+    auto const viewSize = ImageSize { Width(*cellSize.width * *profile().terminalSize.columns),
+                                      Height(*cellSize.height * *profile().terminalSize.lines) };
 
     return QSize(viewSize.width.as<int>(), viewSize.height.as<int>());
 }
@@ -398,7 +397,7 @@ void TerminalWidget::logDisplayInfo()
     LOGSTORE(DisplayLog)("[Grid Metrics] Font DPI            : {}", crispy::Size{ renderer_.fontDescriptions().dpi.x, renderer_.fontDescriptions().dpi.y });
     LOGSTORE(DisplayLog)("[Grid Metrics] Font size           : {} ({} px)", profile().fonts.size, fontSizeInPx);
     LOGSTORE(DisplayLog)("[Grid Metrics] Cell size           : {} px", gridMetrics().cellSize);
-    LOGSTORE(DisplayLog)("[Grid Metrics] Page size           : {} px", gridMetrics().pageSize);
+    LOGSTORE(DisplayLog)("[Grid Metrics] Page size           : {}", gridMetrics().pageSize);
     LOGSTORE(DisplayLog)("[Grid Metrics] Font baseline       : {} px", gridMetrics().baseline);
     LOGSTORE(DisplayLog)("[Grid Metrics] Underline position  : {} px", gridMetrics().underline.position);
     LOGSTORE(DisplayLog)("[Grid Metrics] Underline thickness : {} px", gridMetrics().underline.thickness);
@@ -430,6 +429,11 @@ void TerminalWidget::initializeGL()
     initializeOpenGLFunctions();
     configureScreenHooks();
     watchKdeDpiSetting();
+
+    // Only now, and not early, we know the actual DPI / DPR / content scaling.
+    auto fd = renderer_.fontDescriptions();
+    fd.dpi = screenDPI();
+    renderer_.setFonts(fd);
 
     auto const textureTileSize = renderer_.gridMetrics().cellSize;
     auto const viewportMargin = terminal::renderer::PageMargin {}; // TODO margin
@@ -734,11 +738,15 @@ crispy::Point TerminalWidget::systemScreenDPI() const
     }
 #endif
 
-    return crispy::Point { logicalDpiX(), logicalDpiY() };
-
+#if defined(__APPLE__)
     // Okay, this is weird!
     // On MacOS nothing changes except physical DPI on scaling settings change.
-    // return crispy::Point { physicalDpiX(), physicalDpiY() };
+    auto const contentScale = devicePixelRatioF();
+    return crispy::Point { int(qreal(physicalDpiX()) * contentScale),
+                           int(qreal(physicalDpiY()) * contentScale) };
+#else
+    return crispy::Point { logicalDpiX(), logicalDpiY() };
+#endif
 }
 
 bool TerminalWidget::isFullScreen() const
