@@ -28,6 +28,7 @@
 #include <yaml-cpp/ostream_wrapper.h>
 #include <yaml-cpp/yaml.h>
 
+#include <QtCore/QFile>
 #include <QtGui/QOpenGLContext>
 
 #include <algorithm>
@@ -39,8 +40,6 @@
 #include <stdexcept>
 #include <utility>
 #include <vector>
-
-#include "contour_yaml.h"
 
 #if defined(_WIN32)
     #include <Windows.h>
@@ -354,10 +353,9 @@ FileSystem::path configHome()
 
 std::string createDefaultConfig()
 {
-    ostringstream out;
-    out.write((char const*) contour::default_config_yaml.data(), contour::default_config_yaml.size());
-
-    return out.str();
+    QFile file(":/contour/contour.yml");
+    file.open(QFile::ReadOnly);
+    return file.readAll().toStdString();
 }
 
 error_code createDefaultConfig(FileSystem::path const& _path)
@@ -1606,46 +1604,6 @@ optional<std::string> readConfigFile(std::string const& _filename)
             return text;
 
     return nullopt;
-}
-
-std::optional<ShaderConfig> Config::loadShaderConfig(ShaderClass _shaderClass)
-{
-    auto const& defaultConfig = opengl::defaultShaderConfig(_shaderClass);
-    auto const basename = to_string(_shaderClass);
-
-    auto const vertText = [&]() -> pair<string, string> {
-        auto const fileName = basename + ".vert";
-        if (auto content = readConfigFile(fileName); content.has_value())
-            return { *content, fileName };
-        else
-            return { defaultConfig.vertexShader, defaultConfig.vertexShaderFileName };
-    }();
-
-    auto const fragText = [&]() -> pair<string, string> {
-        auto const fileName = basename + ".frag";
-        if (auto content = readConfigFile(fileName); content.has_value())
-            return { *content, fileName };
-        else
-            return { defaultConfig.fragmentShader, defaultConfig.fragmentShaderFileName };
-    }();
-
-    auto const prependVersionPragma = [&](string const& _code) {
-        if (QOpenGLContext::currentContext()->isOpenGLES())
-            return R"(#version 300 es
-precision mediump int;
-precision mediump float;
-precision mediump sampler2DArray;
-#line 1
-)" + _code;
-        // return "#version 300 es\n#line 1\n" + _code;
-        else
-            return "#version 330\n#line 1\n" + _code;
-    };
-
-    return { ShaderConfig { prependVersionPragma(vertText.first),
-                            prependVersionPragma(fragText.first),
-                            vertText.second,
-                            fragText.second } };
 }
 
 } // namespace contour::config

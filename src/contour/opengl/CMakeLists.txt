@@ -4,13 +4,6 @@ else()
    find_package(Qt5 COMPONENTS Gui Widgets REQUIRED)  # apt install qtbase5-dev libqt5gui5
 endif()
 
-CIncludeMe(shaders/background_image.frag "${CMAKE_CURRENT_BINARY_DIR}/background_image_frag.h" "background_image_frag" "contour::opengl::verbatim")
-CIncludeMe(shaders/background_image.vert "${CMAKE_CURRENT_BINARY_DIR}/background_image_vert.h" "background_image_vert" "contour::opengl::verbatim")
-CIncludeMe(shaders/background.frag "${CMAKE_CURRENT_BINARY_DIR}/background_frag.h" "background_frag" "contour::opengl::verbatim")
-CIncludeMe(shaders/background.vert "${CMAKE_CURRENT_BINARY_DIR}/background_vert.h" "background_vert" "contour::opengl::verbatim")
-CIncludeMe(shaders/text.frag "${CMAKE_CURRENT_BINARY_DIR}/text_frag.h" "text_frag" "contour::opengl::verbatim")
-CIncludeMe(shaders/text.vert "${CMAKE_CURRENT_BINARY_DIR}/text_vert.h" "text_vert" "contour::opengl::verbatim")
-
 CIncludeMe(
     ${CMAKE_SOURCE_DIR}/src/terminal_renderer/shared_defines.h
     "${CMAKE_CURRENT_BINARY_DIR}/shared_defines_verbatim.h"
@@ -18,18 +11,16 @@ CIncludeMe(
     "contour::opengl::verbatim"
 )
 
+qt5_add_resources(QT_RESOURCES contour_frontend_opengl.qrc)
 add_library(contour_frontend_opengl
-    "${CMAKE_CURRENT_BINARY_DIR}/background_image_frag.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/background_image_vert.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/background_frag.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/background_vert.h"
     "${CMAKE_CURRENT_BINARY_DIR}/shared_defines_verbatim.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/text_frag.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/text_vert.h"
     OpenGLRenderer.cpp OpenGLRenderer.h
     ShaderConfig.cpp ShaderConfig.h
     TerminalWidget.cpp TerminalWidget.h
+    ${QT_RESOURCES}
 )
+set_target_properties(contour_frontend_opengl PROPERTIES AUTOMOC ON)
+set_target_properties(contour_frontend_opengl PROPERTIES AUTORCC ON)
 
 if(CONTOUR_PERF_STATS)
     target_compile_definitions(contour_frontend_opengl PRIVATE CONTOUR_PERF_STATS=1)

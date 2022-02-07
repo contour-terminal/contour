@@ -31,14 +31,9 @@ if(CONTOUR_FRONTEND_GUI AND CONTOUR_BLUR_PLATFORM_KWIN)
 endif()
 # }}}
 
-CIncludeMe(contour.yml "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h" "default_config_yaml" "contour")
-CIncludeMe(shell-integration.zsh "${CMAKE_CURRENT_BINARY_DIR}/shell_integration_zsh.h" "shell_integration_zsh" "contour")
-
 set(contour_SRCS
     CaptureScreen.cpp CaptureScreen.h
     main.cpp
-    "${CMAKE_CURRENT_BINARY_DIR}/contour_yaml.h"
-    "${CMAKE_CURRENT_BINARY_DIR}/shell_integration_zsh.h"
 )
 
 if(CONTOUR_FRONTEND_GUI)
@@ -60,7 +55,9 @@ if(WIN32)
     list(APPEND contour_SRCS contour.rc)
 endif()
 
-add_executable(contour ${contour_SRCS})
+qt5_add_resources(QT_RESOURCES resources.qrc)
+
+add_executable(contour ${contour_SRCS} ${QT_RESOURCES})
 target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_compile_definitions(contour PRIVATE
     CONTOUR_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
@@ -70,6 +67,7 @@ target_compile_definitions(contour PRIVATE
     CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
 )
 set_target_properties(contour PROPERTIES AUTOMOC ON)
+set_target_properties(contour PROPERTIES AUTORCC ON)
 
 if(CONTOUR_PERF_STATS)
     target_compile_definitions(contour PRIVATE CONTOUR_PERF_STATS)

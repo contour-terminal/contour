@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/contour">
+        <file>contour.yml</file>
+        <file>shell-integration.zsh</file>
+    </qresource>
+</RCC>

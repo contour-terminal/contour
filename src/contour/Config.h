@@ -124,6 +124,8 @@ std::vector<actions::Action> const* apply(
     return nullptr;
 }
 
+using opengl::ShaderConfig;
+
 struct TerminalProfile
 {
     terminal::Process::ExecInfo shell;
@@ -161,15 +163,16 @@ struct TerminalProfile
     terminal::Opacity backgroundOpacity; // value between 0 (fully transparent) and 0xFF (fully visible).
     bool backgroundBlur;                 // On Windows 10, this will enable Acrylic Backdrop.
 
+    std::optional<ShaderConfig> backgroundShader;
+    std::optional<ShaderConfig> backgroundImageShader;
+    std::optional<ShaderConfig> textShader;
+
     struct
     {
         terminal::renderer::Decorator normal = terminal::renderer::Decorator::DottedUnderline;
         terminal::renderer::Decorator hover = terminal::renderer::Decorator::Underline;
     } hyperlinkDecoration;
 };
-
-using opengl::ShaderClass;
-using opengl::ShaderConfig;
 
 enum class RenderingBackend
 {
@@ -243,11 +246,6 @@ struct Config
 
     // input mapping
     InputMappings inputMappings;
-
-    static std::optional<ShaderConfig> loadShaderConfig(ShaderClass _shaderClass);
-
-    ShaderConfig backgroundShader = opengl::defaultShaderConfig(ShaderClass::Background);
-    ShaderConfig textShader = opengl::defaultShaderConfig(ShaderClass::Text);
 
     bool spawnNewProcess = false;
 

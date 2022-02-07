@@ -13,9 +13,12 @@
  */
 #pragma once
 
+#include <crispy/assert.h>
+
 #include <fmt/format.h>
 
 #include <QtCore/QtGlobal>
+
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     #include <QtOpenGL/QOpenGLShaderProgram>
 #else
@@ -36,27 +39,31 @@ enum class ShaderClass
     Text
 };
 
+struct ShaderSource
+{
+    QString location;
+    QString contents;
+};
+
 struct ShaderConfig
 {
-    std::string vertexShader;
-    std::string fragmentShader;
-    std::string vertexShaderFileName;
-    std::string fragmentShaderFileName;
+    ShaderSource vertexShader;
+    ShaderSource fragmentShader;
 };
 
 inline std::string to_string(ShaderClass _shaderClass)
 {
     switch (_shaderClass)
     {
-    case ShaderClass::BackgroundImage: return "BackgroundImage";
+    case ShaderClass::BackgroundImage: return "background_image";
     case ShaderClass::Background: return "background";
     case ShaderClass::Text: return "text";
     }
 
-    throw std::invalid_argument(fmt::format("ShaderClass<{}>", static_cast<unsigned>(_shaderClass)));
+    crispy::unreachable();
 }
 
-ShaderConfig defaultShaderConfig(ShaderClass _shaderClass);
+ShaderConfig builtinShaderConfig(ShaderClass shaderClass);
 
 std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderConfig);
 

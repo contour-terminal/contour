@@ -25,14 +25,14 @@
 #include <fmt/chrono.h>
 #include <fmt/format.h>
 
+#include <QtCore/QFile>
+
 #include <chrono>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <signal.h>
-
-#include "shell_integration_zsh.h"
 
 #if !defined(_WIN32)
     #include <unistd.h>
@@ -219,7 +219,10 @@ int ContourApp::integrationAction()
         auto const shell = parameters().get<string>("contour.generate.integration.shell");
         if (shell == "zsh")
         {
-            _stream.write((char const*) shell_integration_zsh.data(), shell_integration_zsh.size());
+            QFile file(":/contour/shell-integration.zsh");
+            file.open(QFile::ReadOnly);
+            auto const contents = file.readAll();
+            _stream.write(contents.constData(), contents.size());
             return EXIT_SUCCESS;
         }
         else

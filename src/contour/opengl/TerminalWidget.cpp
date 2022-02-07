@@ -76,6 +76,12 @@
     #define __PRETTY_FUNCTION__ __FUNCDNAME__
 #endif
 
+// Must be in global namespace
+void initializeResourcesForContourFrontendOpenGL()
+{
+    Q_INIT_RESOURCE(contour_frontend_opengl);
+}
+
 namespace contour::opengl
 {
 
@@ -255,6 +261,8 @@ TerminalWidget::TerminalWidget(TerminalSession& session,
     },
     filesystemWatcher_(this)
 {
+    initializeResourcesForContourFrontendOpenGL();
+
     setMouseTracking(true);
     setFormat(surfaceFormat());
 
@@ -415,6 +423,8 @@ void TerminalWidget::onDpiConfigChanged()
     watchKdeDpiSetting(); // re-watch file
 }
 
+using opengl::ShaderClass;
+
 void TerminalWidget::initializeGL()
 {
     initializeOpenGLFunctions();
@@ -424,13 +434,13 @@ void TerminalWidget::initializeGL()
     auto const textureTileSize = renderer_.gridMetrics().cellSize;
     auto const viewportMargin = terminal::renderer::PageMargin {}; // TODO margin
 
-    renderTarget_ =
-        make_unique<OpenGLRenderer>(*config::Config::loadShaderConfig(config::ShaderClass::Text),
-                                    *config::Config::loadShaderConfig(config::ShaderClass::Background),
-                                    *config::Config::loadShaderConfig(config::ShaderClass::BackgroundImage),
-                                    ImageSize { Width(width()), Height(height()) },
-                                    textureTileSize,
-                                    viewportMargin);
+    renderTarget_ = make_unique<OpenGLRenderer>(
+        profile().textShader.value_or(builtinShaderConfig(ShaderClass::Text)),
+        profile().backgroundShader.value_or(builtinShaderConfig(ShaderClass::Background)),
+        profile().backgroundImageShader.value_or(builtinShaderConfig(ShaderClass::BackgroundImage)),
+        ImageSize { Width(width()), Height(height()) },
+        textureTileSize,
+        viewportMargin);
 
     renderer_.setRenderTarget(*renderTarget_);
 

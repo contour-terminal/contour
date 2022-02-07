@@ -21,8 +21,16 @@
 #include <contour/opengl/text_frag.h>
 #include <contour/opengl/text_vert.h>
 
+#include <QtCore/QFile>
+
 #include <iostream>
 #include <string>
+#include <tuple>
+
+using std::get;
+using std::holds_alternative;
+using std::string;
+using std::tuple;
 
 namespace contour::opengl
 {
@@ -36,60 +44,57 @@ namespace
     }
 } // namespace
 
-ShaderConfig defaultShaderConfig(ShaderClass _shaderClass)
+ShaderConfig builtinShaderConfig(ShaderClass shaderClass)
 {
-    using namespace verbatim;
-
-    auto const p = [](std::string code) -> std::string {
-        return s(shared_defines) + "#line 1\n" + move(code);
-    };
-
-    switch (_shaderClass)
-    {
-    case ShaderClass::BackgroundImage:
-        return { p(s(background_image_vert)),
-                 p(s(background_image_frag)),
-                 "builtin.background_image.vert",
-                 "builtin.background_image.frag" };
-    case ShaderClass::Background:
-        return {
-            p(s(background_vert)), p(s(background_frag)), "builtin.background.vert", "builtin.background.frag"
+    auto const makeConfig = [](ShaderClass shaderClass) -> ShaderConfig {
+        auto const makeSource = [](QString const& filename) -> ShaderSource {
+            auto const versionHeader = "#version 330\n";
+            auto const sharedDefines = QString::fromStdString(s(verbatim::shared_defines) + "\n#line 1\n");
+            auto const fileHeader = versionHeader + sharedDefines;
+            auto const filePath = ":/contour/opengl/shaders/" + filename;
+            QFile file(filePath);
+            file.open(QFile::ReadOnly);
+            Require(file.isOpen());
+            auto const fileContents = file.readAll();
+            return ShaderSource { filePath, fileHeader + fileContents };
         };
-    case ShaderClass::Text:
-        return { p(s(text_vert)), p(s(text_frag)), "builtin.text.vert", "builtin.text.frag" };
-    }
-
-    throw std::invalid_argument(fmt::format("ShaderClass<{}>", static_cast<unsigned>(_shaderClass)));
+        QString basename = QString::fromStdString(to_string(shaderClass));
+        return ShaderConfig { makeSource(basename + ".vert"), makeSource(basename + ".frag") };
+    };
+    return makeConfig(shaderClass);
 }
 
 std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderConfig)
 {
     auto shader = std::make_unique<QOpenGLShaderProgram>();
 
-    LOGSTORE(DisplayLog)("Loading vertex shader: {}", _shaderConfig.vertexShaderFileName);
-    if (!shader->addShaderFromSourceCode(QOpenGLShader::Vertex, _shaderConfig.vertexShader.c_str()))
+    auto extractShaderSource = [](ShaderSource const& source) -> tuple<string, string> {
+        return { source.location.toStdString(), source.contents.toStdString() };
+    };
+
+    auto [vertexLocation, vertexSource] = extractShaderSource(_shaderConfig.vertexShader);
+    LOGSTORE(DisplayLog)("Loading vertex shader: {}", vertexLocation);
+    if (!shader->addShaderFromSourceCode(QOpenGLShader::Vertex, vertexSource.c_str()))
     {
-        errorlog()("Compiling vertex shader {} failed. {}",
-                   _shaderConfig.vertexShaderFileName,
-                   shader->log().toStdString());
+        errorlog()("Compiling vertex shader {} failed. {}", vertexLocation, shader->log().toStdString());
         qDebug() << shader->log();
         return {};
     }
 
-    LOGSTORE(DisplayLog)("Loading fragment shader: {}", _shaderConfig.fragmentShaderFileName);
-    if (!shader->addShaderFromSourceCode(QOpenGLShader::Fragment, _shaderConfig.fragmentShader.c_str()))
+    auto [fragmentLocation, fragmentSource] = extractShaderSource(_shaderConfig.fragmentShader);
+    LOGSTORE(DisplayLog)("Loading fragment shader: {}", fragmentLocation);
+    if (!shader->addShaderFromSourceCode(QOpenGLShader::Fragment, fragmentSource.c_str()))
     {
-        errorlog()("Compiling fragment shader {} failed. {}",
-                   _shaderConfig.fragmentShaderFileName,
-                   shader->log().toStdString());
+        errorlog()("Compiling fragment shader {} failed. {}", fragmentLocation, shader->log().toStdString());
+        qDebug() << shader->log();
         return {};
     }
 
     if (!shader->link())
     {
         errorlog()("Linking shaders {} & {} failed. {}",
-                   _shaderConfig.vertexShaderFileName,
-                   _shaderConfig.fragmentShaderFileName,
+                   vertexLocation,
+                   fragmentLocation,
                    shader->log().toStdString());
         return {};
     }

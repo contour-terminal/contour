@@ -1,0 +1,10 @@
+<RCC>
+    <qresource prefix="/contour/opengl">
+        <file>shaders/background.frag</file>
+        <file>shaders/background.vert</file>
+        <file>shaders/background_image.frag</file>
+        <file>shaders/background_image.vert</file>
+        <file>shaders/text.frag</file>
+        <file>shaders/text.vert</file>
+    </qresource>
+</RCC>
