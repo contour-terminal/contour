@@ -369,6 +369,7 @@ void TerminalWidget::onScreenDpiChanged()
     renderer_.setFonts(fd);
 
     renderTarget_->setContentScale(contentScale());
+    session_.setContentScale(contentScale());
 
     auto const newPixelSize = terminal::ImageSize { Width(width()), Height(height()) } * contentScale();
 

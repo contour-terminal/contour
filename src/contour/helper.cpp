@@ -63,23 +63,44 @@ namespace contour
 
 namespace
 {
-
-    MousePixelPosition makeMousePixelPosition(QMouseEvent* _event) noexcept
+    terminal::CellLocation makeMouseCellLocation(QMouseEvent* event, TerminalSession const& session) noexcept
     {
-        // TODO: apply margin once supported
-        return MousePixelPosition { MousePixelPosition::X { _event->x() },
-                                    MousePixelPosition::Y { _event->y() } };
+        auto constexpr MarginTop = 0;
+        auto constexpr MarginLeft = 0;
+
+        auto const pageSize = session.terminal().screen().pageSize();
+        auto const cellSize = session.display()->cellSize();
+
+        auto const sx = int(double(event->pos().x()) * session.contentScale());
+        auto const sy = int(double(event->pos().y()) * session.contentScale());
+
+        auto const row =
+            terminal::LineOffset(clamp((sy - MarginTop) / cellSize.height.as<int>(), 0, *pageSize.lines - 1));
+
+        auto const col = terminal::ColumnOffset(
+            clamp((sx - MarginLeft) / cellSize.width.as<int>(), 0, *pageSize.columns - 1));
+
+        return { row, col };
     }
 
-    MousePixelPosition makeMousePixelPosition(QWheelEvent* _event) noexcept
+    MousePixelPosition makeMousePixelPosition(QMouseEvent* _event, double scale) noexcept
+    {
+        // TODO: apply margin once supported
+        return MousePixelPosition { MousePixelPosition::X { int(double(_event->x()) * scale) },
+                                    MousePixelPosition::Y { int(double(_event->y()) * scale) } };
+    }
+
+    MousePixelPosition makeMousePixelPosition(QWheelEvent* _event, double scale) noexcept
     {
         // TODO: apply margin once supported
 #if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-        return MousePixelPosition { MousePixelPosition::X { static_cast<int>(_event->position().x()) },
-                                    MousePixelPosition::Y { static_cast<int>(_event->position().y()) } };
+        return MousePixelPosition {
+            MousePixelPosition::X { static_cast<int>(_event->position().x() * scale) },
+            MousePixelPosition::Y { static_cast<int>(_event->position().y() * scale) }
+        };
 #else
-        return MousePixelPosition { MousePixelPosition::X { static_cast<int>(_event->x()) },
-                                    MousePixelPosition::Y { static_cast<int>(_event->y()) } };
+        return MousePixelPosition { MousePixelPosition::X { static_cast<int>(_event->x() * scale) },
+                                    MousePixelPosition::Y { static_cast<int>(_event->y() * scale) } };
 #endif
     }
 
@@ -254,7 +275,8 @@ void sendWheelEvent(QWheelEvent* _event, TerminalSession& _session)
 
         auto const modifier = makeModifier(_event->modifiers());
 
-        _session.sendMousePressEvent(modifier, button, makeMousePixelPosition(_event), steady_clock::now());
+        _session.sendMousePressEvent(
+            modifier, button, makeMousePixelPosition(_event, _session.contentScale()), steady_clock::now());
     }
 }
 
@@ -262,7 +284,7 @@ void sendMousePressEvent(QMouseEvent* _event, TerminalSession& _session)
 {
     _session.sendMousePressEvent(makeModifier(_event->modifiers()),
                                  makeMouseButton(_event->button()),
-                                 makeMousePixelPosition(_event),
+                                 makeMousePixelPosition(_event, _session.contentScale()),
                                  steady_clock::now());
     _event->accept();
 }
@@ -271,7 +293,7 @@ void sendMouseReleaseEvent(QMouseEvent* _event, TerminalSession& _session)
 {
     _session.sendMouseReleaseEvent(makeModifier(_event->modifiers()),
                                    makeMouseButton(_event->button()),
-                                   makeMousePixelPosition(_event),
+                                   makeMousePixelPosition(_event, _session.contentScale()),
                                    steady_clock::now());
     _event->accept();
 }
@@ -285,14 +307,11 @@ void sendMouseMoveEvent(QMouseEvent* _event, TerminalSession& _session)
     auto const pageSize = _session.terminal().screen().pageSize();
     auto const cellSize = _session.display()->cellSize();
     auto const viewSize = cellSize * pageSize;
-    auto const row = terminal::LineOffset(
-        clamp((_event->pos().y() - MarginTop) / cellSize.height.as<int>(), 0, *pageSize.lines - 1));
-    auto const col = terminal::ColumnOffset(
-        clamp((_event->pos().x() - MarginLeft) / cellSize.width.as<int>(), 0, *pageSize.columns - 1));
-    auto const pos = terminal::CellLocation { row, col };
 
-    _session.sendMouseMoveEvent(
-        makeModifier(_event->modifiers()), pos, makeMousePixelPosition(_event), steady_clock::now());
+    _session.sendMouseMoveEvent(makeModifier(_event->modifiers()),
+                                makeMouseCellLocation(_event, _session),
+                                makeMousePixelPosition(_event, _session.contentScale()),
+                                steady_clock::now());
 }
 
 void spawnNewTerminal(string const& _programPath,

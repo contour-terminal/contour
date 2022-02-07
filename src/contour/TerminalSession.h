@@ -68,6 +68,9 @@ class TerminalSession: public terminal::Terminal::Events
     config::Config const& config() const noexcept { return config_; }
     config::TerminalProfile const& profile() const noexcept { return profile_; }
 
+    double contentScale() const noexcept { return contentScale_; }
+    void setContentScale(double value) noexcept;
+
     terminal::Pty& pty() noexcept { return *pty_; }
     terminal::Terminal& terminal() noexcept { return terminal_; }
     terminal::Terminal const& terminal() const noexcept { return terminal_; }
@@ -191,6 +194,7 @@ class TerminalSession: public terminal::Terminal::Events
     config::Config config_;
     std::string profileName_;
     config::TerminalProfile profile_;
+    double contentScale_ = 1.0;
     std::string programPath_;
     ContourGuiApp& app_;
     std::function<void()> displayInitialized_;

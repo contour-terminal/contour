@@ -142,6 +142,13 @@ void TerminalSession::setDisplay(unique_ptr<TerminalDisplay> _display)
         ImageSize { display_->cellSize().width * boxed_cast<Width>(terminal_.pageSize().columns),
                     display_->cellSize().height * boxed_cast<Height>(terminal_.pageSize().lines) };
     terminal_.resizeScreen(terminal_.pageSize(), pixels);
+
+    setContentScale(average(display_->screenDPI()) / 96.0);
+}
+
+void TerminalSession::setContentScale(double value) noexcept
+{
+    contentScale_ = value;
 }
 
 void TerminalSession::displayInitialized()
