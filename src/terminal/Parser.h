@@ -33,7 +33,7 @@
 #include <vector>
 
 namespace terminal::parser
-{ // {{{ enum class types
+{
 
 enum class State : uint8_t
 {

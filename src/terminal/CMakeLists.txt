@@ -53,16 +53,13 @@ set(terminal_HEADERS
 )
 
 set(terminal_SOURCES
-    pty/MockPty.cpp
-    pty/MockViewPty.cpp
-    pty/PtyProcess.cpp
-    Charset.cpp
-    Cell.cpp
     Capabilities.cpp
+    Cell.cpp
+    Charset.cpp
     Color.cpp
     ColorPalette.cpp
-    Grid.cpp
     Functions.cpp
+    Grid.cpp
     Image.cpp
     InputBinding.cpp
     InputGenerator.cpp
@@ -73,13 +70,16 @@ set(terminal_SOURCES
     Process.cpp
     RenderBuffer.cpp
     Screen.cpp
+    Selector.cpp
     Sequence.cpp
     Sequencer.cpp
-    Selector.cpp
     SixelParser.cpp
     Terminal.cpp
     VTType.cpp
     primitives.cpp
+    pty/MockPty.cpp
+    pty/MockViewPty.cpp
+    pty/PtyProcess.cpp
 )
 
 set(LIBTERMINAL_LIBRARIES crispy::core fmt::fmt-header-only range-v3::range-v3 Threads::Threads Microsoft.GSL::GSL)

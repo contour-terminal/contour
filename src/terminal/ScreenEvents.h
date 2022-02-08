@@ -14,7 +14,7 @@
 #pragma once
 
 #include <terminal/InputGenerator.h>
-#include <terminal/Sequencer.h>
+#include <terminal/primitives.h>
 
 #include <optional>
 #include <string_view>
@@ -24,12 +24,6 @@ namespace terminal
 {
 
 class Image;
-
-enum class ScreenType
-{
-    Main = 0,
-    Alternate = 1
-};
 
 struct FontDef
 {
@@ -86,6 +80,13 @@ class MockScreenEvents: public ScreenEvents
 {
   public:
     void reply(std::string_view _response) override { replyData += _response; }
+
+    template <typename... T>
+    void reply(fmt::format_string<T...> fmt, T&&... args)
+    {
+        reply(fmt::vformat(fmt, fmt::make_format_args(args...)));
+    }
+
     void setWindowTitle(std::string_view _title) override { windowTitle = _title; }
 
     std::string replyData;

@@ -13,8 +13,6 @@
  */
 #pragma once
 
-#include <terminal/Sequencer.h>
-
 #include <fmt/format.h>
 
 #include <array>
@@ -23,6 +21,31 @@ namespace terminal
 {
 
 using CharsetMap = std::array<char32_t, 127>;
+
+enum class CharsetId
+{
+    Special, // Special Character and Line Drawing Set
+
+    British,
+    Dutch,
+    Finnish,
+    French,
+    FrenchCanadian,
+    German,
+    NorwegianDanish,
+    Spanish,
+    Swedish,
+    Swiss,
+    USASCII
+};
+
+enum class CharsetTable
+{
+    G0 = 0,
+    G1 = 1,
+    G2 = 2,
+    G3 = 3
+};
 
 /// @returns the charset
 CharsetMap const* charsetMap(CharsetId _id) noexcept;

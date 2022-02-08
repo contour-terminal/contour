@@ -90,7 +90,7 @@ TEST_CASE("Selector.Linear", "[selector]")
 {
     auto screenEvents = ScreenEvents {};
     auto term = MockTerm(PageSize { LineCount(3), ColumnCount(11) }, LineCount(5));
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     auto selectionHelper = TestSelectionHelper(screen);
     screen.write(
         //       0123456789A

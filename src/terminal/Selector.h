@@ -16,6 +16,7 @@
 #include <terminal/InputGenerator.h>
 
 #include <crispy/size.h>
+#include <crispy/times.h>
 #include <crispy/utils.h>
 
 #include <fmt/format.h>

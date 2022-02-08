@@ -17,6 +17,7 @@
 #include <terminal/RenderBuffer.h>
 #include <terminal/ScreenEvents.h>
 #include <terminal/Selector.h>
+#include <terminal/TerminalState.h>
 #include <terminal/Viewport.h>
 #include <terminal/pty/Pty.h>
 
@@ -80,7 +81,7 @@ class Terminal
              std::string const& _wordDelimiters = "",
              Modifier _mouseProtocolBypassModifier = Modifier::Shift,
              ImageSize _maxImageSize = ImageSize { Width(800), Height(600) },
-             int _maxImageColorRegisters = 256,
+             unsigned _maxImageColorRegisters = 256,
              bool _sixelCursorConformance = true,
              ColorPalette _colorPalette = {},
              double _refreshRate = 30.0,
@@ -325,6 +326,13 @@ class Terminal
     void inspect();
     void notify(std::string_view _title, std::string_view _body);
     void reply(std::string_view _response);
+
+    template <typename... T>
+    void reply(fmt::format_string<T...> fmt, T&&... args)
+    {
+        reply(fmt::vformat(fmt, fmt::make_format_args(args...)));
+    }
+
     void resizeWindow(PageSize);
     void resizeWindow(ImageSize);
     void setApplicationkeypadMode(bool _enabled);
@@ -345,7 +353,12 @@ class Terminal
     void synchronizedOutput(bool _enabled);
     void onBufferScrolled(LineCount _n) noexcept;
 
+    void setMaxImageColorRegisters(unsigned value) noexcept { state_.maxImageColorRegisters = value; }
+
     void verifyState();
+
+    TerminalState<Terminal>& state() noexcept { return state_; }
+    TerminalState<Terminal> const& state() const noexcept { return state_; }
 
   private:
     void mainLoop();
@@ -403,7 +416,10 @@ class Terminal
 
     InputGenerator inputGenerator_;
     LineOffset copyLastMarkRangeOffset_;
+
+    TerminalState<Terminal> state_;
     Screen<Terminal> screen_;
+
     std::mutex mutable outerLock_;
     std::mutex mutable innerLock_;
     std::unique_ptr<std::thread> screenUpdateThread_;

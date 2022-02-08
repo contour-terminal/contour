@@ -456,6 +456,12 @@ constexpr ColumnOffset& operator-=(ColumnOffset& a, ColumnCount b) noexcept
 }
 // }}}
 
+enum class ScreenType
+{
+    Main = 0,
+    Alternate = 1
+};
+
 // TODO: Maybe make boxed.h into its own C++ github repo?
 // TODO: Differenciate Line/Column types for DECOM enabled/disabled coordinates?
 //
@@ -482,6 +488,8 @@ enum class CursorShape
     Bar,
 };
 
+CursorShape makeCursorShape(std::string const& _name);
+
 } // namespace terminal
 
 namespace std
@@ -495,8 +503,10 @@ struct numeric_limits<terminal::CursorShape>
 };
 } // namespace std
 
+// {{{ fmt formatter
 namespace fmt
-{ // {{{
+{
+
 template <>
 struct formatter<terminal::CursorShape>
 {
@@ -563,4 +573,27 @@ struct formatter<terminal::GridSize>
         return format_to(ctx.out(), "{}x{}", value.columns, value.lines);
     }
 };
+
+template <>
+struct formatter<terminal::ScreenType>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const terminal::ScreenType value, FormatContext& ctx)
+    {
+        switch (value)
+        {
+        case terminal::ScreenType::Main: return format_to(ctx.out(), "main");
+        case terminal::ScreenType::Alternate: return format_to(ctx.out(), "alternate");
+        }
+        return format_to(ctx.out(), "({})", static_cast<unsigned>(value));
+    }
+};
+
 } // namespace fmt
+// }}}

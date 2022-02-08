@@ -936,7 +936,7 @@ void TerminalSession::configureTerminal()
     LOGSTORE(SessionLog)("Setting terminal ID to {}.", profile_.terminalId);
     screen.setTerminalId(profile_.terminalId);
     screen.setSixelCursorConformance(config_.sixelCursorConformance);
-    screen.setMaxImageColorRegisters(config_.maxImageColorRegisters);
+    terminal_.setMaxImageColorRegisters(config_.maxImageColorRegisters);
     screen.setMaxImageSize(config_.maxImageSize);
     LOGSTORE(SessionLog)
     ("maxImageSize={}, sixelScrolling={}", config_.maxImageSize, config_.sixelScrolling ? "yes" : "no");

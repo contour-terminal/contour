@@ -22,7 +22,18 @@
 namespace terminal
 {
 
-MockTerm::MockTerm(PageSize _size, LineCount _hist): screen(_size, *this, false, false, _hist)
+MockTerm::MockTerm(PageSize pageSize, LineCount maxHistoryLineCount):
+    state_ {
+        *this,                                 // back-ref to the terminal
+        pageSize,                              //
+        maxHistoryLineCount,                   //
+        ImageSize { Width(256), Height(256) }, // _maxImageSize,
+        256,                                   // _maxImageColorRegisters,
+        true,                                  // _sixelCursorConformance,
+        {},                                    // _colorPalette,
+        false                                  // _allowReflowOnResize
+    },
+    primaryScreen_ { state_, ScreenType::Main }
 {
     char const* logFilterString = getenv("LOG");
     if (logFilterString)
@@ -30,6 +41,11 @@ MockTerm::MockTerm(PageSize _size, LineCount _hist): screen(_size, *this, false,
         logstore::configure(logFilterString);
         crispy::App::customizeLogStoreOutput();
     }
+
+    // TODO(pr) same as in Terminal's ctor
+    screen().setMode(DECMode::AutoWrap, true);
+    screen().setMode(DECMode::TextReflow, true);
+    screen().setMode(DECMode::SixelCursorNextToGraphic, state_.sixelCursorConformance);
 }
 
 } // namespace terminal

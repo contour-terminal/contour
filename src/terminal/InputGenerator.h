@@ -13,7 +13,6 @@
  */
 #pragma once
 
-#include <terminal/Sequencer.h> // MouseProtocol
 #include <terminal/primitives.h>
 
 #include <crispy/escape.h>
@@ -32,6 +31,21 @@
 
 namespace terminal
 {
+
+/// Mutualy exclusive mouse protocls.
+enum class MouseProtocol
+{
+    /// Old X10 mouse protocol
+    X10 = 9,
+    /// Normal tracking mode, that's X10 with mouse release events and modifiers
+    NormalTracking = 1000,
+    /// Highlight mouse tracking
+    HighlightTracking = 1001,
+    /// Button-event tracking protocol.
+    ButtonTracking = 1002,
+    /// Like ButtonTracking plus motion events.
+    AnyEventTracking = 1003,
+};
 
 class Modifier
 {
@@ -378,6 +392,31 @@ inline std::string to_string(InputGenerator::MouseEventType _value)
 
 namespace fmt // {{{
 {
+
+template <>
+struct formatter<terminal::MouseProtocol>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(terminal::MouseProtocol _value, FormatContext& ctx)
+    {
+        switch (_value)
+        {
+        case terminal::MouseProtocol::X10: return format_to(ctx.out(), "X10");
+        case terminal::MouseProtocol::HighlightTracking: return format_to(ctx.out(), "HighlightTracking");
+        case terminal::MouseProtocol::ButtonTracking: return format_to(ctx.out(), "ButtonTracking");
+        case terminal::MouseProtocol::NormalTracking: return format_to(ctx.out(), "NormalTracking");
+        case terminal::MouseProtocol::AnyEventTracking: return format_to(ctx.out(), "AnyEventTracking");
+        }
+        return format_to(ctx.out(), "{}", unsigned(_value));
+    }
+};
+
 template <>
 struct formatter<terminal::Modifier>
 {

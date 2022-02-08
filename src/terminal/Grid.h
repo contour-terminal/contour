@@ -595,3 +595,40 @@ void Grid<Cell>::render(RendererT&& _render, ScrollOffset _scrollOffset) const
 // }}}
 
 } // namespace terminal
+
+// {{{ fmt formatter
+namespace fmt
+{
+
+template <>
+struct formatter<terminal::Margin::Horizontal>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(const terminal::Margin::Horizontal range, FormatContext& ctx)
+    {
+        return format_to(ctx.out(), "{}..{}", range.from, range.to);
+    }
+};
+
+template <>
+struct formatter<terminal::Margin::Vertical>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(const terminal::Margin::Vertical range, FormatContext& ctx)
+    {
+        return format_to(ctx.out(), "{}..{}", range.from, range.to);
+    }
+};
+
+}
+// }}}

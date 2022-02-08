@@ -731,13 +731,12 @@ bool InputGenerator::generateMouseMove(Modifier _modifier,
     auto const logged = [=, this](bool success) -> bool {
         if (success)
         {
-            LOGSTORE(InputLog)
-            ("[{}:{}] Sending mouse move at {} ({}:{}).",
-             mouseProtocol_.value(),
-             mouseTransport_,
-             _pos,
-             _pixelPosition.x.value,
-             _pixelPosition.y.value);
+            InputLog()("[{}:{}] Sending mouse move at {} ({}:{}).",
+                       mouseProtocol_.value(),
+                       mouseTransport_,
+                       _pos,
+                       _pixelPosition.x.value,
+                       _pixelPosition.y.value);
         }
         return success;
     };

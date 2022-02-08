@@ -107,7 +107,7 @@ Terminal::Terminal(Pty& _pty,
                    string const& _wordDelimiters,
                    Modifier _mouseProtocolBypassModifier,
                    ImageSize _maxImageSize,
-                   int _maxImageColorRegisters,
+                   unsigned _maxImageColorRegisters,
                    bool _sixelCursorConformance,
                    ColorPalette _colorPalette,
                    double _refreshRate,
@@ -129,22 +129,30 @@ Terminal::Terminal(Pty& _pty,
     mouseProtocolBypassModifier_ { _mouseProtocolBypassModifier },
     inputGenerator_ {},
     copyLastMarkRangeOffset_ { _copyLastMarkRangeOffset },
-    screen_ { pty_.pageSize(),
-              *this,
-              true, // logs raw output by default?
-              true, // logs trace output by default?
-              _maxHistoryLineCount,
-              _maxImageSize,
-              _maxImageColorRegisters,
-              _sixelCursorConformance,
-              _colorPalette,
-              _allowReflowOnResize },
+    // clang-format off
+    state_ { *this,
+             pty_.pageSize(),
+             _maxHistoryLineCount,
+             _maxImageSize,
+             _maxImageColorRegisters,
+             _sixelCursorConformance,
+             _colorPalette,
+             _allowReflowOnResize },
+    screen_ { state_, ScreenType::Main }, // TODO(pr) Rename to: primaryScreen_
+    // clang-format on
     viewport_ { screen_,
                 [this]() {
                     breakLoopAndRefreshRenderBuffer();
                 } },
     selectionHelper_ { this }
 {
+#if 0
+    resetHard();
+#else
+    screen().setMode(DECMode::AutoWrap, true);
+    screen().setMode(DECMode::TextReflow, true);
+    screen().setMode(DECMode::SixelCursorNextToGraphic, state_.sixelCursorConformance);
+#endif
 }
 
 Terminal::~Terminal()

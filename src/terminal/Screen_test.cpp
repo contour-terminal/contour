@@ -102,7 +102,7 @@ decltype(auto) e(string const& s)
 TEST_CASE("writeText.bulk.A.1", "[screen]")
 {
     auto term = MockTerm(PageSize { LineCount(3), ColumnCount(5) }, LineCount(2));
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.setMode(DECMode::AutoWrap, false);
     screen.write("a");
     screen.write("b");
@@ -119,7 +119,7 @@ TEST_CASE("writeText.bulk.A.1", "[screen]")
 TEST_CASE("writeText.bulk.A.2", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(5) }, LineCount(2) };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.setMode(DECMode::AutoWrap, false);
     screen.write("a");
     screen.write("b");
@@ -136,7 +136,7 @@ TEST_CASE("writeText.bulk.A.2", "[screen]")
 TEST_CASE("writeText.bulk.A.3", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(5) }, LineCount(2) };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.setMode(DECMode::AutoWrap, false);
     screen.write("a");
     screen.write("b");
@@ -153,7 +153,7 @@ TEST_CASE("writeText.bulk.A.3", "[screen]")
 TEST_CASE("writeText.bulk.B", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(5) }, LineCount(2) };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("a");
     screen.write("b");
     logScreenText(screen, "initial state");
@@ -168,7 +168,7 @@ TEST_CASE("writeText.bulk.B", "[screen]")
 TEST_CASE("writeText.bulk.C", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(5) }, LineCount(2) };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("a");
     screen.write("b");
     logScreenText(screen, "initial state");
@@ -190,7 +190,7 @@ TEST_CASE("writeText.bulk.C", "[screen]")
 TEST_CASE("writeText.bulk.D", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(5) }, LineCount(2) };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("a");
     screen.write("b");
     logScreenText(screen, "initial state");
@@ -206,7 +206,7 @@ TEST_CASE("writeText.bulk.D", "[screen]")
 TEST_CASE("writeText.bulk.E", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(2) };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("0123456789"
                  "abcdefghij"
                  "ABCDEFGHIJ");
@@ -228,7 +228,7 @@ TEST_CASE("writeText.bulk.E", "[screen]")
 TEST_CASE("writeText.bulk.F", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(1) };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("a");
     screen.write("b");
     screen.write("CDEFGHIJ"
@@ -245,7 +245,7 @@ TEST_CASE("writeText.bulk.F", "[screen]")
 TEST_CASE("writeText.bulk.G", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(1) };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("a");
     screen.write("b");
     screen.write("CDEFGHIJ"
@@ -264,7 +264,7 @@ TEST_CASE("writeText.bulk.G", "[screen]")
 TEST_CASE("writeText.bulk.H", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(10) }, LineCount(1) };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
 
     screen.write("ABCDEFGHIJ"
                  "KLMNOPQRST"
@@ -286,7 +286,7 @@ TEST_CASE("writeText.bulk.H", "[screen]")
 TEST_CASE("AppendChar", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(1), ColumnCount(3) }, LineCount(1) };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     REQUIRE(screen.historyLineCount() == LineCount(0));
     REQUIRE(screen.pageSize().lines == LineCount(1));
     REQUIRE("   " == screen.grid().lineText(LineOffset(0)));
@@ -319,7 +319,7 @@ TEST_CASE("AppendChar", "[screen]")
 TEST_CASE("AppendChar_CR_LF", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(3) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     REQUIRE("   " == screen.grid().lineText(LineOffset(0)));
 
     screen.setMode(DECMode::AutoWrap, false);
@@ -340,7 +340,7 @@ TEST_CASE("AppendChar_CR_LF", "[screen]")
 TEST_CASE("AppendChar.emoji_exclamationmark", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(1), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
 
     screen.setBackgroundColor(IndexedColor::Blue);
 
@@ -358,7 +358,7 @@ TEST_CASE("AppendChar.emoji_exclamationmark", "[screen]")
 TEST_CASE("AppendChar.emoji_VS15_smiley", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
 
     // print letter-like symbol copyright sign with forced emoji presentation style.
     REQUIRE(*screen.logicalCursorPosition().column == 0);
@@ -394,7 +394,7 @@ TEST_CASE("AppendChar.emoji_VS15_smiley", "[screen]")
 TEST_CASE("AppendChar.emoji_VS16_copyright_sign", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     auto const& c0 = screen.at(LineOffset(0), ColumnOffset(0));
     auto const& c1 = screen.at(LineOffset(0), ColumnOffset(1));
     auto const& c2 = screen.at(LineOffset(0), ColumnOffset(2));
@@ -430,7 +430,7 @@ TEST_CASE("AppendChar.emoji_VS16_copyright_sign", "[screen]")
 TEST_CASE("AppendChar.emoji_VS16_i", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(1), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     auto const& c0 = screen.at(LineOffset(0), ColumnOffset(0));
 
     // print letter-like symbol `i` with forced emoji presentation style.
@@ -468,7 +468,7 @@ TEST_CASE("AppendChar.emoji_VS16_i", "[screen]")
 TEST_CASE("AppendChar.emoji_family", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(1), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     auto const& c0 = screen.at(LineOffset(0), ColumnOffset(0));
 
     REQUIRE(screen.logicalCursorPosition().column.value == 0);
@@ -511,7 +511,7 @@ TEST_CASE("AppendChar.emoji_family", "[screen]")
 TEST_CASE("AppendChar.emoji_zwj_1", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(1), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
 
     screen.setMode(DECMode::AutoWrap, false);
 
@@ -538,7 +538,7 @@ TEST_CASE("AppendChar.emoji_zwj_1", "[screen]")
 TEST_CASE("AppendChar.emoji_1", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
 
     screen.write(U"\U0001F600");
 
@@ -565,7 +565,7 @@ TEST_CASE("AppendChar.emoji_1", "[screen]")
 TEST_CASE("AppendChar_WideChar", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(3) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.setMode(DECMode::AutoWrap, true);
     screen.write(U"\U0001F600");
     CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
@@ -574,7 +574,7 @@ TEST_CASE("AppendChar_WideChar", "[screen]")
 TEST_CASE("AppendChar_AutoWrap", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(3) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.setMode(DECMode::AutoWrap, true);
 
     screen.write("ABC");
@@ -600,7 +600,7 @@ TEST_CASE("AppendChar_AutoWrap", "[screen]")
 TEST_CASE("AppendChar_AutoWrap_LF", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(3) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.setMode(DECMode::AutoWrap, true);
 
     INFO("write ABC");
@@ -626,7 +626,7 @@ TEST_CASE("AppendChar_AutoWrap_LF", "[screen]")
 TEST_CASE("Screen.isLineVisible", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(1), ColumnCount(2) }, LineCount(5) };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     auto viewport = terminal::Viewport { screen };
 
     screen.write("10203040");
@@ -667,7 +667,7 @@ TEST_CASE("Screen.isLineVisible", "[screen]")
 TEST_CASE("Backspace", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(3) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     screen.write("12");
@@ -690,7 +690,7 @@ TEST_CASE("Backspace", "[screen]")
 TEST_CASE("Linefeed", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(2) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     SECTION("with scroll-up")
     {
         INFO("init:");
@@ -720,7 +720,7 @@ TEST_CASE("Linefeed", "[screen]")
 TEST_CASE("ClearToEndOfScreen", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("ABC\r\nDEF\r\nGHI");
 
     REQUIRE("ABC" == screen.grid().lineText(LineOffset(0)));
@@ -742,7 +742,7 @@ TEST_CASE("ClearToEndOfScreen", "[screen]")
 TEST_CASE("ClearToBeginOfScreen", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("ABC\r\nDEF\r\nGHI");
 
     REQUIRE("ABC" == screen.grid().lineText(LineOffset(0)));
@@ -762,7 +762,7 @@ TEST_CASE("ClearToBeginOfScreen", "[screen]")
 TEST_CASE("ClearScreen", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(2) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("AB\r\nC");
     screen.clearScreen();
     CHECK("  " == screen.grid().lineText(LineOffset(0)));
@@ -772,7 +772,7 @@ TEST_CASE("ClearScreen", "[screen]")
 TEST_CASE("ClearToEndOfLine", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("ABC");
     REQUIRE("ABC" == screen.grid().lineText(LineOffset(0)));
 
@@ -784,7 +784,7 @@ TEST_CASE("ClearToEndOfLine", "[screen]")
 TEST_CASE("ClearToBeginOfLine", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.setMode(DECMode::AutoWrap, false);
     screen.write("ABC");
     REQUIRE("ABC" == screen.grid().lineText(LineOffset(0)));
@@ -797,7 +797,7 @@ TEST_CASE("ClearToBeginOfLine", "[screen]")
 TEST_CASE("ClearLine", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.setMode(DECMode::AutoWrap, false);
     screen.write("ABC");
     REQUIRE("ABC" == screen.grid().lineText(LineOffset(0)));
@@ -809,7 +809,7 @@ TEST_CASE("ClearLine", "[screen]")
 TEST_CASE("DECFI", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     screen.setMode(DECMode::LeftRightMargin, true);
     screen.setLeftRightMargin(ColumnOffset(1), ColumnOffset(3));
@@ -859,7 +859,7 @@ TEST_CASE("InsertColumns", "[screen]")
 {
     // "DECIC has no effect outside the scrolling margins."
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
 
     screen.setMode(DECMode::LeftRightMargin, true);
@@ -933,7 +933,7 @@ TEST_CASE("InsertColumns", "[screen]")
 TEST_CASE("InsertCharacters.NoMargins", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(3) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("123\r\n456");
     screen.write("\033[2;2H");
     REQUIRE("123\n456\n" == screen.renderMainPageText());
@@ -989,7 +989,7 @@ TEST_CASE("InsertCharacters.NoMargins", "[screen]")
 TEST_CASE("InsertCharacters.Margins", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n678");
     screen.write("90");
 
@@ -1045,14 +1045,14 @@ TEST_CASE("InsertCharacters.Margins", "[screen]")
 TEST_CASE("InsertLines", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(6), ColumnCount(4) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("1234\r\n5678\r\nABCD\r\nEFGH\r\nIJKL\r\nMNOP");
     REQUIRE("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP\n" == screen.renderMainPageText());
 
     SECTION("old")
     {
         auto term = MockTerm { PageSize { LineCount(3), ColumnCount(2) } };
-        auto& screen = term.screen;
+        auto& screen = term.screen();
 
         screen.write("AB\r\nCD");
         REQUIRE("AB" == screen.grid().lineText(LineOffset(0)));
@@ -1078,7 +1078,7 @@ TEST_CASE("InsertLines", "[screen]")
 TEST_CASE("DeleteLines", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(2) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
 
     screen.write("AB\r\nCD\r\nEF");
     logScreenText(screen, "initial");
@@ -1121,7 +1121,7 @@ TEST_CASE("DeleteLines", "[screen]")
 TEST_CASE("FillArea", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
 
     screen.fillArea(L'.', 1, 1, 3, 3);
@@ -1131,7 +1131,7 @@ TEST_CASE("FillArea", "[screen]")
 TEST_CASE("DeleteColumns", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     screen.setMode(DECMode::LeftRightMargin, true);
     screen.setLeftRightMargin(ColumnOffset(1), ColumnOffset(3));
@@ -1177,7 +1177,7 @@ TEST_CASE("DeleteColumns", "[screen]")
 TEST_CASE("DeleteCharacters", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n67890\033[1;2H");
     REQUIRE("12345\n67890\n" == screen.renderMainPageText());
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
@@ -1253,7 +1253,7 @@ TEST_CASE("DeleteCharacters", "[screen]")
 TEST_CASE("ClearScrollbackBuffer", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) }, LineCount(1) };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO\r\nPQRST\033[H");
     REQUIRE("67890\nABCDE\nFGHIJ\nKLMNO\nPQRST\n" == screen.renderMainPageText());
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
@@ -1267,7 +1267,7 @@ TEST_CASE("ClearScrollbackBuffer", "[screen]")
 TEST_CASE("EraseCharacters", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO\033[H");
     logScreenText(screen, "AFTER POPULATE");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
@@ -1320,7 +1320,7 @@ TEST_CASE("EraseCharacters", "[screen]")
 TEST_CASE("ScrollUp.WithMargins")
 {
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     logScreenText(screen, "init");
     REQUIRE("12345\n"
@@ -1387,7 +1387,7 @@ TEST_CASE("ScrollUp.WithMargins")
 TEST_CASE("ScrollUp", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("ABC\r\n");
     screen.write("DEF\r\n");
     screen.write("GHI");
@@ -1429,7 +1429,7 @@ TEST_CASE("ScrollUp", "[screen]")
 TEST_CASE("ScrollDown", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
 
@@ -1562,7 +1562,7 @@ TEST_CASE("ScrollDown", "[screen]")
 TEST_CASE("MoveCursorUp", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
     screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 1 });
@@ -1617,7 +1617,7 @@ TEST_CASE("MoveCursorUp", "[screen]")
 TEST_CASE("MoveCursorDown", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(2) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("A");
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
 
@@ -1637,7 +1637,7 @@ TEST_CASE("MoveCursorDown", "[screen]")
 TEST_CASE("MoveCursorForward", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     SECTION("no-op")
@@ -1668,7 +1668,7 @@ TEST_CASE("MoveCursorForward", "[screen]")
 TEST_CASE("MoveCursorBackward", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("ABC");
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
 
@@ -1687,7 +1687,7 @@ TEST_CASE("MoveCursorBackward", "[screen]")
 TEST_CASE("HorizontalPositionAbsolute", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     // no-op
@@ -1709,7 +1709,7 @@ TEST_CASE("HorizontalPositionAbsolute", "[screen]")
 TEST_CASE("HorizontalPositionRelative", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     SECTION("no-op")
@@ -1740,7 +1740,7 @@ TEST_CASE("HorizontalPositionRelative", "[screen]")
 TEST_CASE("MoveCursorToColumn", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     // no-op
@@ -1770,7 +1770,7 @@ TEST_CASE("MoveCursorToColumn", "[screen]")
 TEST_CASE("MoveCursorToLine", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
     // no-op
@@ -1792,7 +1792,7 @@ TEST_CASE("MoveCursorToLine", "[screen]")
 TEST_CASE("MoveCursorToBeginOfLine", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
 
     screen.write("\r\nAB");
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
@@ -1804,7 +1804,7 @@ TEST_CASE("MoveCursorToBeginOfLine", "[screen]")
 TEST_CASE("MoveCursorTo", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
 
@@ -1855,7 +1855,7 @@ TEST_CASE("MoveCursorToNextTab", "[screen]")
 {
     auto constexpr TabWidth = 8;
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.moveCursorToNextTab();
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1 * TabWidth + 0) });
 
@@ -1887,7 +1887,7 @@ TEST_CASE("MoveCursorToNextTab", "[screen]")
 TEST_CASE("SaveCursor and RestoreCursor", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.setMode(DECMode::AutoWrap, false);
     screen.saveCursor();
 
@@ -1906,7 +1906,7 @@ TEST_CASE("SaveCursor and RestoreCursor", "[screen]")
 TEST_CASE("Index_outside_margin", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(6), ColumnCount(4) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("1234\r\n5678\r\nABCD\r\nEFGH\r\nIJKL\r\nMNOP");
     logScreenText(screen, "initial");
     REQUIRE("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP\n" == screen.renderMainPageText());
@@ -1936,7 +1936,7 @@ TEST_CASE("Index_outside_margin", "[screen]")
 TEST_CASE("Index_inside_margin", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(6), ColumnCount(2) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("11\r\n22\r\n33\r\n44\r\n55\r\n66");
     logScreenText(screen, "initial setup");
 
@@ -1952,7 +1952,7 @@ TEST_CASE("Index_inside_margin", "[screen]")
 TEST_CASE("Index_at_bottom_margin", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     logScreenText(screen, "initial setup");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
@@ -1986,7 +1986,7 @@ TEST_CASE("Index_at_bottom_margin", "[screen]")
 TEST_CASE("ReverseIndex_without_custom_margins", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     logScreenText(screen, "initial");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
@@ -2019,7 +2019,7 @@ TEST_CASE("ReverseIndex_without_custom_margins", "[screen]")
 TEST_CASE("ReverseIndex_with_vertical_margin", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     logScreenText(screen, "initial");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
@@ -2073,7 +2073,7 @@ TEST_CASE("ReverseIndex_with_vertical_margin", "[screen]")
 TEST_CASE("ReverseIndex_with_vertical_and_horizontal_margin", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     logScreenText(screen, "initial");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
@@ -2120,7 +2120,7 @@ TEST_CASE("ReverseIndex_with_vertical_and_horizontal_margin", "[screen]")
 TEST_CASE("ScreenAlignmentPattern", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     screen.setTopBottomMargin(LineOffset { 1 }, LineOffset { 3 });
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
@@ -2147,7 +2147,7 @@ TEST_CASE("ScreenAlignmentPattern", "[screen]")
 TEST_CASE("CursorNextLine", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     screen.moveCursorTo(LineOffset { 1 }, ColumnOffset { 2 });
 
@@ -2207,7 +2207,7 @@ TEST_CASE("CursorNextLine", "[screen]")
 TEST_CASE("CursorPreviousLine", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
 
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
@@ -2260,7 +2260,7 @@ TEST_CASE("CursorPreviousLine", "[screen]")
 TEST_CASE("ReportCursorPosition", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     screen.moveCursorTo(LineOffset { 1 }, ColumnOffset { 2 });
 
@@ -2290,7 +2290,7 @@ TEST_CASE("ReportCursorPosition", "[screen]")
 TEST_CASE("ReportExtendedCursorPosition", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     screen.moveCursorTo(LineOffset { 1 }, ColumnOffset { 2 });
 
@@ -2322,7 +2322,7 @@ TEST_CASE("SetMode", "[screen]")
     SECTION("Auto NewLine Mode: Enabled")
     {
         auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-        auto& screen = term.screen;
+        auto& screen = term.screen();
         screen.setMode(AnsiMode::AutomaticNewLine, true);
         screen.write("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
         REQUIRE(screen.renderMainPageText() == "12345\n67890\nABCDE\nFGHIJ\nKLMNO\n");
@@ -2331,7 +2331,7 @@ TEST_CASE("SetMode", "[screen]")
     SECTION("Auto NewLine Mode: Disabled")
     {
         auto term = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
-        auto& screen = term.screen;
+        auto& screen = term.screen();
         screen.write("A\nB\nC");
         REQUIRE(screen.renderMainPageText() == "A  \n B \n  C\n");
     }
@@ -2340,7 +2340,7 @@ TEST_CASE("SetMode", "[screen]")
 TEST_CASE("RequestMode", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
 
     SECTION("ANSI modes: enabled")
     {
@@ -2390,7 +2390,7 @@ TEST_CASE("RequestMode", "[screen]")
 TEST_CASE("peek into history", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(3) }, LineCount { 5 } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("123\r\n456\r\nABC\r\nDEF");
 
     REQUIRE("ABC\nDEF\n" == screen.renderMainPageText());
@@ -2419,7 +2419,7 @@ TEST_CASE("peek into history", "[screen]")
 TEST_CASE("captureBuffer", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(5) }, LineCount { 5 } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
 
     //           [...      history ...  ...][main page area]
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
@@ -2471,7 +2471,7 @@ TEST_CASE("captureBuffer", "[screen]")
 TEST_CASE("render into history", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(5) }, LineCount { 5 } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
 
     REQUIRE("FGHIJ\nKLMNO\n" == screen.renderMainPageText());
@@ -2513,7 +2513,7 @@ TEST_CASE("render into history", "[screen]")
 TEST_CASE("HorizontalTabClear.AllTabs", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.horizontalTabClear(HorizontalTabClear::AllTabs);
 
     screen.writeText('X');
@@ -2535,7 +2535,7 @@ TEST_CASE("HorizontalTabClear.AllTabs", "[screen]")
 TEST_CASE("HorizontalTabClear.UnderCursor", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.setTabWidth(ColumnCount(4));
 
     // clear tab at column 4
@@ -2560,7 +2560,7 @@ TEST_CASE("HorizontalTabClear.UnderCursor", "[screen]")
 TEST_CASE("HorizontalTabSet", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.horizontalTabClear(HorizontalTabClear::AllTabs);
 
     screen.moveCursorToColumn(ColumnOffset(2));
@@ -2608,7 +2608,7 @@ TEST_CASE("HorizontalTabSet", "[screen]")
 TEST_CASE("CursorBackwardTab.fixedTabWidth", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.setTabWidth(ColumnCount(4)); // 5, 9
 
     screen.writeText('a');
@@ -2668,7 +2668,7 @@ TEST_CASE("CursorBackwardTab.fixedTabWidth", "[screen]")
 TEST_CASE("CursorBackwardTab.manualTabs", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
 
     screen.moveCursorToColumn(ColumnOffset(4));
     screen.horizontalTabSet();
@@ -2733,7 +2733,7 @@ TEST_CASE("CursorBackwardTab.manualTabs", "[screen]")
 TEST_CASE("findMarkerDownwards", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(4) }, LineCount(10) };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     REQUIRE_FALSE(screen.findMarkerDownwards(LineOffset(0)).has_value());
     REQUIRE_FALSE(screen.findMarkerDownwards(LineOffset(1)).has_value()); // history bottom
     REQUIRE_FALSE(screen.findMarkerDownwards(LineOffset(2)).has_value());
@@ -2819,7 +2819,7 @@ TEST_CASE("findMarkerDownwards", "[screen]")
 TEST_CASE("findMarkerUpwards", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(3), ColumnCount(4) }, LineCount(10) };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     REQUIRE_FALSE(screen.findMarkerUpwards(LineOffset(-1)).has_value()); // peak into history
     REQUIRE_FALSE(screen.findMarkerUpwards(LineOffset(0)).has_value());
     REQUIRE_FALSE(screen.findMarkerUpwards(LineOffset(1)).has_value());
@@ -2907,7 +2907,7 @@ TEST_CASE("findMarkerUpwards", "[screen]")
 TEST_CASE("DECTABSR", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(35) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
 
     SECTION("default tabstops")
     {
@@ -2946,7 +2946,7 @@ TEST_CASE("DECTABSR", "[screen]")
 TEST_CASE("save_restore_DEC_modes", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(2) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
 
     screen.setMode(DECMode::MouseProtocolHighlightTracking, false);
     screen.saveModes(vector { DECMode::MouseProtocolHighlightTracking });
@@ -2961,7 +2961,7 @@ TEST_CASE("save_restore_DEC_modes", "[screen]")
 TEST_CASE("OSC.2.Unicode")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(2) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
 
     auto const u32title = u32string_view(U"\U0001F600");
     auto const title = unicode::convert_to<char>(u32title);
@@ -2974,7 +2974,7 @@ TEST_CASE("OSC.2.Unicode")
 TEST_CASE("OSC.4")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(2) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
 
     SECTION("query")
     {
@@ -3011,7 +3011,7 @@ TEST_CASE("OSC.4")
 TEST_CASE("XTGETTCAP")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(2) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     auto const queryStr = fmt::format("\033P+q{:02X}{:02X}{:02X}\033\\", 'R', 'G', 'B');
     screen.write(queryStr);
     INFO(fmt::format("Reply data: {}", term.replyData));
@@ -3023,7 +3023,7 @@ TEST_CASE("setMaxHistoryLineCount", "[screen]")
 {
     // from zero to something
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(2) }, LineCount(0) };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.grid().setReflowOnResize(false);
     screen.write("AB\r\nCD");
     REQUIRE("AB\nCD\n" == screen.renderMainPageText());
@@ -3037,7 +3037,7 @@ TEST_CASE("setMaxHistoryLineCount", "[screen]")
 TEST_CASE("resize", "[screen]")
 {
     auto term = MockTerm { PageSize { LineCount(2), ColumnCount(2) }, LineCount(10) };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.grid().setReflowOnResize(false);
     screen.write("AB\r\nCD");
     REQUIRE("AB\nCD\n" == screen.renderMainPageText());
@@ -3156,7 +3156,7 @@ TEST_CASE("resize", "[screen]")
 MockTerm screenForDECRA()
 {
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(6) } };
-    auto& screen = term.screen;
+    auto& screen = term.screen();
 
     screen.write("ABCDEF\r\n"
                  "abcdef\r\n"
@@ -3180,7 +3180,7 @@ MockTerm screenForDECRA()
 TEST_CASE("DECCRA.DownLeft.intersecting", "[screen]")
 {
     auto term = screenForDECRA();
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     auto const initialText = "ABCDEF\n"
                              "abcdef\n"
                              "123456\n"
@@ -3220,7 +3220,7 @@ TEST_CASE("DECCRA.Right.intersecting", "[screen]")
 {
     // Moves a rectangular area by one column to the right.
     auto term = screenForDECRA();
-    auto& screen = term.screen;
+    auto& screen = term.screen();
 
     auto const initialText = "ABCDEF\n"
                              "abcdef\n"
@@ -3258,7 +3258,7 @@ TEST_CASE("DECCRA.Left.intersecting", "[screen]")
 {
     // Moves a rectangular area by one column to the left.
     auto term = screenForDECRA();
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     auto const initialText = "ABCDEF\n"
                              "abcdef\n"
                              "123456\n"
@@ -3297,7 +3297,7 @@ TEST_CASE("Screen.tcap.string", "[screen, tcap]")
 {
     using namespace terminal;
     auto term = MockTerm(PageSize { LineCount(3), ColumnCount(5) }, LineCount(2));
-    auto& screen = term.screen;
+    auto& screen = term.screen();
     screen.write("\033P+q687061\033\\"); // HPA
     REQUIRE(e(term.replyData) == e("\033P1+r687061=1B5B2569257031256447\033\\"));
 }
@@ -3306,20 +3306,20 @@ TEST_CASE("Sixel.simple", "[screen]")
 {
     auto const pageSize = PageSize { LineCount(10), ColumnCount(10) };
     auto term = MockTerm { pageSize, LineCount(10) };
-    term.screen.setCellPixelSize(ImageSize { Width(10), Height(10) });
+    term.screen().setCellPixelSize(ImageSize { Width(10), Height(10) });
 
     auto const sixelData = crispy::readFileAsString("./test/images/squirrel-50.sixel");
 
-    term.screen.write(sixelData);
+    term.screen().write(sixelData);
 
-    CHECK(term.screen.cursor().position.column == ColumnOffset(8));
-    CHECK(term.screen.cursor().position.line == LineOffset(4));
+    CHECK(term.screen().cursor().position.column == ColumnOffset(8));
+    CHECK(term.screen().cursor().position.line == LineOffset(4));
 
     for (auto line = LineOffset(0); line < boxed_cast<LineOffset>(pageSize.lines); ++line)
     {
         for (auto column = ColumnOffset(0); column < boxed_cast<ColumnOffset>(pageSize.columns); ++column)
         {
-            Cell const& cell = term.screen.at(line, column);
+            Cell const& cell = term.screen().at(line, column);
             if (line <= LineOffset(4) && column <= ColumnOffset(7))
             {
                 auto fragment = cell.imageFragment();
@@ -3343,15 +3343,15 @@ TEST_CASE("Sixel.AutoScroll-1", "[screen]")
     // Create a 10x3x5 grid and render a 7x5 image causing one a line-scroll by one.
     auto const pageSize = PageSize { LineCount(4), ColumnCount(10) };
     auto term = MockTerm { pageSize, LineCount(5) };
-    term.screen.setCellPixelSize(ImageSize { Width(10), Height(10) });
-    term.screen.setMode(DECMode::SixelScrolling, true);
+    term.screen().setCellPixelSize(ImageSize { Width(10), Height(10) });
+    term.screen().setMode(DECMode::SixelScrolling, true);
 
     auto const sixelData = crispy::readFileAsString("./test/images/squirrel-50.sixel");
 
-    term.screen.write(sixelData);
+    term.screen().write(sixelData);
 
-    CHECK(term.screen.cursor().position.column == ColumnOffset(8));
-    CHECK(term.screen.cursor().position.line == LineOffset(3));
+    CHECK(term.screen().cursor().position.column == ColumnOffset(8));
+    CHECK(term.screen().cursor().position.line == LineOffset(3));
 
     for (auto line = LineOffset(-1); line < boxed_cast<LineOffset>(pageSize.lines); ++line)
     {
@@ -3359,7 +3359,7 @@ TEST_CASE("Sixel.AutoScroll-1", "[screen]")
         for (auto column = ColumnOffset(0); column < boxed_cast<ColumnOffset>(pageSize.columns); ++column)
         {
             INFO(fmt::format("column {}", column));
-            Cell const& cell = term.screen.at(line, column);
+            Cell const& cell = term.screen().at(line, column);
             if (line <= LineOffset(4) && column <= ColumnOffset(7))
             {
                 auto fragment = cell.imageFragment();

@@ -24,7 +24,14 @@ class MockTerm: public MockScreenEvents
   public:
     explicit MockTerm(PageSize _size, LineCount _hist = {});
 
-    Screen<MockTerm> screen;
+    PageSize pageSize() const noexcept { return state_.pageSize; }
+
+    Screen<MockTerm>& screen() noexcept { return primaryScreen_; }
+    TerminalState<MockTerm>& state() noexcept { return state_; }
+    TerminalState<MockTerm> const& state() const noexcept { return state_; }
+
+    TerminalState<MockTerm> state_;
+    Screen<MockTerm> primaryScreen_;
 };
 
 } // namespace terminal

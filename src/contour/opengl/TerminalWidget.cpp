@@ -102,6 +102,7 @@ using std::chrono::steady_clock;
 
 using actions::Action;
 
+// {{{ helper
 namespace
 {
 #if !defined(NDEBUG) && defined(GL_DEBUG_OUTPUT) && defined(CONTOUR_DEBUG_OPENGL)
@@ -238,12 +239,12 @@ namespace
     }
 
 } // namespace
+// }}}
 
 // {{{ Widget creation and QOpenGLWidget overides
 TerminalWidget::TerminalWidget(TerminalSession& session,
                                function<void()> adaptSize,
                                function<void(bool)> enableBackgroundBlur):
-    QOpenGLWidget(),
     session_ { session },
     adaptSize_ { std::move(adaptSize) },
     enableBlurBehind_ { std::move(enableBackgroundBlur) },
