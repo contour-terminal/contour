@@ -11,9 +11,11 @@ on:
     - '*.sh'
     branches:
     - master
+    - edge
   pull_request:
     branches:
     - master
+    - edge
 
 concurrency:
   group: ${{ github.ref }}
