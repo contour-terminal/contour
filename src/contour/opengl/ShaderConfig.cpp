@@ -13,13 +13,7 @@
  */
 #include <contour/helper.h>
 #include <contour/opengl/ShaderConfig.h>
-#include <contour/opengl/background_frag.h>
-#include <contour/opengl/background_image_frag.h>
-#include <contour/opengl/background_image_vert.h>
-#include <contour/opengl/background_vert.h>
 #include <contour/opengl/shared_defines_verbatim.h>
-#include <contour/opengl/text_frag.h>
-#include <contour/opengl/text_vert.h>
 
 #include <QtCore/QFile>
 
