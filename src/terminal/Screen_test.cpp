@@ -1322,7 +1322,7 @@ TEST_CASE("ScrollUp.WithMargins")
     auto term = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = term.screen;
     screen.write("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
-    logScreenTextAlways(screen, "init");
+    logScreenText(screen, "init");
     REQUIRE("12345\n"
             "67890\n"
             "ABCDE\n"
@@ -1338,7 +1338,7 @@ TEST_CASE("ScrollUp.WithMargins")
     SECTION("SU-1")
     {
         screen.scrollUp(LineCount(1));
-        logScreenTextAlways(screen, "after 1");
+        logScreenText(screen, "after 1");
         REQUIRE("12345\n"
                 "6BCD0\n"
                 "AGHIE\n"
@@ -1350,7 +1350,7 @@ TEST_CASE("ScrollUp.WithMargins")
     SECTION("SU-2")
     {
         screen.scrollUp(LineCount(2));
-        logScreenTextAlways(screen, "after 2");
+        logScreenText(screen, "after 2");
         REQUIRE("12345\n"
                 "6GHI0\n"
                 "A   E\n"
@@ -1362,7 +1362,7 @@ TEST_CASE("ScrollUp.WithMargins")
     SECTION("SU-3")
     {
         screen.scrollUp(LineCount(3));
-        logScreenTextAlways(screen, "after 3");
+        logScreenText(screen, "after 3");
         REQUIRE("12345\n"
                 "6   0\n"
                 "A   E\n"
@@ -1374,7 +1374,7 @@ TEST_CASE("ScrollUp.WithMargins")
     SECTION("SU-3 (overflow)")
     {
         screen.scrollUp(LineCount(4));
-        logScreenTextAlways(screen, "after 4");
+        logScreenText(screen, "after 4");
         REQUIRE("12345\n"
                 "6   0\n"
                 "A   E\n"
