@@ -2979,7 +2979,7 @@ TEST_CASE("OSC.4")
     SECTION("query")
     {
         screen.write("\033]4;7;?\033\\");
-        INFO(term.replyData);
+        INFO(e(term.replyData));
         REQUIRE(e(term.replyData) == e("\033]4;7;rgb:c0c0/c0c0/c0c0\033\\"));
     }
 
