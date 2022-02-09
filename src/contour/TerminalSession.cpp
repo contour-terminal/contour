@@ -392,6 +392,9 @@ void TerminalSession::setTerminalProfile(string const& _configProfileName)
 
 void TerminalSession::discardImage(terminal::Image const& _image)
 {
+    if (!display_)
+        return;
+
     display_->discardImage(_image);
 }
 
