@@ -275,7 +275,7 @@ jobs:
         set -ex
         #brew update
         ./scripts/install-deps.sh
-        brew install qt6
+        brew install qt6 openssl
     - name: "Create build directory"
       run: mkdir build
     - name: "Generate build files"
