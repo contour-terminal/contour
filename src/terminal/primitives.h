@@ -415,6 +415,11 @@ constexpr ImageSize operator*(ImageSize a, PageSize b) noexcept
 {
     return ImageSize { a.width * boxed_cast<Width>(b.columns), a.height * boxed_cast<Height>(b.lines) };
 }
+
+constexpr ImageSize operator/(ImageSize a, double s) noexcept
+{
+    return { Width::cast_from(unbox<double>(a.width) / s), Height::cast_from(unbox<double>(a.height) / s) };
+}
 // }}}
 // {{{ Mixed boxed types operator overloads
 constexpr LineCount operator+(LineCount a, LineOffset b) noexcept

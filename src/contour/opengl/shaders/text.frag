@@ -43,10 +43,7 @@ void renderLcdGlyphSimple()
     // float a = min(v.r, min(v.g, v.b));
     float a = (v.r + v.g + v.b) / 3.0;
 
-    v = v * fs_textColor;
-    v.a = a;
-
-    fragColor = v;
+    fragColor = vec4(v.rgb * fs_textColor.rgb, a);
 }
 
 // Calcualtes subpixel shifting.

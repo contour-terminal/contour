@@ -22,10 +22,12 @@ enum class FontLocatorEngine
     CoreText,   //!< native font locator on OS/X
 };
 
+using DPI = text::DPI;
+
 struct FontDescriptions
 {
     double dpiScale = 1.0;
-    crispy::Point dpi = { 0, 0 }; // 0 => auto-fill with defaults
+    DPI dpi = { 0, 0 }; // 0 => auto-fill with defaults
     text::font_size size;
     text::font_description regular;
     text::font_description bold;
@@ -70,8 +72,10 @@ constexpr bool operator<(TextStyle a, TextStyle b) noexcept
 
 } // namespace terminal::renderer
 
+// {{{ fmt formatter
 namespace fmt
 {
+
 template <>
 struct formatter<terminal::renderer::FontLocatorEngine>
 {
@@ -139,3 +143,4 @@ struct formatter<terminal::renderer::FontDescriptions>
 };
 
 } // namespace fmt
+// }}}

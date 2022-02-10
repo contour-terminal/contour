@@ -200,12 +200,11 @@ void TerminalWindow::terminalBufferChanged(terminal::ScreenType _type)
 
 void TerminalWindow::resizeEvent(QResizeEvent* _event)
 {
-    LOGSTORE(DisplayLog)
-    ("TerminalWindow.resizeEvent: size {}x{} ({}x{})",
-     width(),
-     height(),
-     _event->size().width(),
-     _event->size().height());
+    DisplayLog()("TerminalWindow.resizeEvent: size {}x{} ({}x{})",
+                 width(),
+                 height(),
+                 _event->size().width(),
+                 _event->size().height());
 
     QMainWindow::resizeEvent(_event);
     // centralWidget()->resize(_event->size());

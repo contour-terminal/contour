@@ -69,7 +69,7 @@ class TerminalSession: public terminal::Terminal::Events
     config::TerminalProfile const& profile() const noexcept { return profile_; }
 
     double contentScale() const noexcept { return contentScale_; }
-    void setContentScale(double value) noexcept;
+    void setContentScale(double value) noexcept { contentScale_ = value; }
 
     terminal::Pty& pty() noexcept { return *pty_; }
     terminal::Terminal& terminal() noexcept { return terminal_; }

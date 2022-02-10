@@ -176,7 +176,7 @@ terminal::renderer::PageMargin computeMargin(terminal::ImageSize _cellSize,
                                              terminal::ImageSize _pixels) noexcept;
 
 terminal::renderer::FontDescriptions sanitizeFontDescription(terminal::renderer::FontDescriptions _fonts,
-                                                             crispy::Point _screenDPI);
+                                                             text::DPI _screenDPI);
 
 terminal::PageSize pageSizeForPixels(terminal::ImageSize _pixelSize,
                                      terminal::renderer::GridMetrics const& _gridMetrics);
@@ -188,7 +188,7 @@ void applyResize(terminal::ImageSize _newPixelSize,
 bool applyFontDescription(terminal::ImageSize _cellSize,
                           terminal::PageSize _pageSize,
                           terminal::ImageSize _pixelSize,
-                          crispy::Point _screenDPI,
+                          text::DPI _dpi,
                           terminal::renderer::Renderer& _renderer,
                           terminal::renderer::FontDescriptions _fontDescriptions);
 

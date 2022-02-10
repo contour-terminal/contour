@@ -136,23 +136,17 @@ void TerminalSession::setDisplay(unique_ptr<TerminalDisplay> _display)
     // XXX find better way (dpi)
     sanitizeConfig(config_);
     profile_ = *config_.profile(profileName_); // XXX do it again. but we've to be more efficient here
-
-    // NB: Inform connected TTY and local Screen instance about initial cell pixel size.
-    auto const pixels =
-        ImageSize { display_->cellSize().width * boxed_cast<Width>(terminal_.pageSize().columns),
-                    display_->cellSize().height * boxed_cast<Height>(terminal_.pageSize().lines) };
-    terminal_.resizeScreen(terminal_.pageSize(), pixels);
-
-    setContentScale(average(display_->screenDPI()) / 96.0);
-}
-
-void TerminalSession::setContentScale(double value) noexcept
-{
-    contentScale_ = value;
 }
 
 void TerminalSession::displayInitialized()
 {
+    // NB: Inform connected TTY and local Screen instance about initial cell pixel size.
+    auto const pixels = display_->cellSize() * terminal_.pageSize();
+    // auto const pixels =
+    //     ImageSize { display_->cellSize().width * boxed_cast<Width>(terminal_.pageSize().columns),
+    //                 display_->cellSize().height * boxed_cast<Height>(terminal_.pageSize().lines) };
+    terminal_.resizeScreen(terminal_.pageSize(), pixels);
+
     configureDisplay();
 
     if (displayInitialized_)
@@ -472,6 +466,9 @@ void TerminalSession::sendMouseMoveEvent(terminal::Modifier _modifier,
                                          terminal::MousePixelPosition _pixelPosition,
                                          Timestamp _now)
 {
+    // NB: This translation depends on the display's margin, so maybe
+    //     the display should provide the translation?
+
     auto const handled = terminal().sendMouseMoveEvent(_modifier, _pos, _pixelPosition, _now);
 
     if (_pos == currentMousePosition_)
@@ -818,10 +815,10 @@ void TerminalSession::sanitizeConfig(config::Config& _config)
     if (!display_)
         return;
 
-    crispy::Point const screenDPI = display_->screenDPI(); // profile.fonts.dpiScale is applied already
+    auto const fontDPI = display_->fontDPI(); // profile.fonts.dpiScale is applied already
     for (config::TerminalProfile& profile: _config.profiles | ::ranges::views::values)
         if (!profile.fonts.dpi.x || !profile.fonts.dpi.y)
-            profile.fonts.dpi = screenDPI;
+            profile.fonts.dpi = fontDPI;
 }
 
 bool TerminalSession::reloadConfig(config::Config _newConfig, string const& _profileName)

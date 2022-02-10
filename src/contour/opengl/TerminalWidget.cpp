@@ -94,6 +94,8 @@ using terminal::LineCount;
 using terminal::PageSize;
 using terminal::RGBAColor;
 
+using text::DPI;
+
 using namespace std::string_literals;
 using namespace std::string_view_literals;
 using namespace std;
@@ -249,19 +251,8 @@ TerminalWidget::TerminalWidget(TerminalSession& session,
     session_ { session },
     adaptSize_ { std::move(adaptSize) },
     enableBlurBehind_ { std::move(enableBackgroundBlur) },
-    lastScreenDPI_ { screenDPI() },
-    renderer_ {
-        terminal().pageSize(),
-        sanitizeFontDescription(profile().fonts, lastScreenDPI_),
-        terminal().screen().colorPalette(),
-        profile().backgroundOpacity,
-        session_.config().textureAtlasHashtableSlots,
-        session_.config().textureAtlasTileCount,
-        session_.config().textureAtlasDirectMapping,
-        profile().hyperlinkDecoration.normal,
-        profile().hyperlinkDecoration.hover
-        // TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
-    },
+    lastFontDPI_ { fontDPI() },
+    renderer_ {},
     filesystemWatcher_(this)
 {
     initializeResourcesForContourFrontendOpenGL();
@@ -272,8 +263,6 @@ TerminalWidget::TerminalWidget(TerminalSession& session,
     setAttribute(Qt::WA_InputMethodEnabled, true);
     setAttribute(Qt::WA_OpaquePaintEvent);
 
-    setMinimumSize(gridMetrics().cellSize.width.as<int>() * 3, gridMetrics().cellSize.height.as<int>() * 2);
-
     // setAttribute(Qt::WA_TranslucentBackground);
     // setAttribute(Qt::WA_NoSystemBackground, false);
 
@@ -281,8 +270,6 @@ TerminalWidget::TerminalWidget(TerminalSession& session,
     connect(&updateTimer_, &QTimer::timeout, [this]() { scheduleRedraw(); });
 
     connect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
-
-    QOpenGLWidget::updateGeometry();
 }
 
 TerminalWidget::~TerminalWidget()
@@ -319,21 +306,30 @@ QSurfaceFormat TerminalWidget::surfaceFormat()
 
 QSize TerminalWidget::minimumSizeHint() const
 {
-    auto constexpr MinimumPageSize = PageSize { LineCount(2), ColumnCount(3) };
+    auto const hint = [this]() {
+        if (!renderer_.is_initialized())
+            return QOpenGLWidget::minimumSizeHint();
 
-    auto const cellSize = gridMetrics().cellSize;// / contentScale();
-
-    return QSize(cellSize.width.as<int>() * MinimumPageSize.columns.as<int>(),
-                 cellSize.height.as<int>() * MinimumPageSize.lines.as<int>());
+        auto constexpr MinimumPageSize = PageSize { LineCount(2), ColumnCount(3) };
+        auto const cellSize = gridMetrics().cellSize;
+        auto const hint = cellSize * MinimumPageSize / contentScale();
+        return QSize(unbox<int>(hint.width), unbox<int>(hint.height));
+    }();
+    DisplayLog()("sizeHint: {}x{}", hint.width(), hint.height());
+    return hint;
 }
 
 QSize TerminalWidget::sizeHint() const
 {
-    auto const cellSize = renderer_.gridMetrics().cellSize;// / contentScale();
-    auto const viewSize = ImageSize { Width(*cellSize.width * *profile().terminalSize.columns),
-                                      Height(*cellSize.height * *profile().terminalSize.lines) };
-
-    return QSize(viewSize.width.as<int>(), viewSize.height.as<int>());
+    auto const hint = [this]() {
+        if (!renderer_.is_initialized())
+            return QOpenGLWidget::sizeHint();
+        auto const cellSize = gridMetrics().cellSize;
+        auto const hint = cellSize * profile().terminalSize / contentScale();
+        return QSize(unbox<int>(hint.width), unbox<int>(hint.height));
+    }();
+    DisplayLog()("sizeHint: {}x{}", hint.width(), hint.height());
+    return hint;
 }
 
 void TerminalWidget::onRefreshRateChanged()
@@ -365,43 +361,96 @@ void TerminalWidget::onScreenChanged()
 
 void TerminalWidget::onScreenDpiChanged()
 {
-    auto const newScreenDPI = screenDPI();
-    if (newScreenDPI == lastScreenDPI_)
+    auto const newFontDPI = fontDPI();
+    if (newFontDPI == lastFontDPI_)
         return;
 
-    LOGSTORE(DisplayLog)("Screen DPI changed to {}.", newScreenDPI);
-    lastScreenDPI_ = newScreenDPI;
+    LOGSTORE(DisplayLog)("Screen DPI changed to {}.", newFontDPI);
+    lastFontDPI_ = newFontDPI;
     logDisplayInfo();
-    auto fd = renderer_.fontDescriptions();
-    fd.dpi = newScreenDPI;
-    renderer_.setFonts(fd);
+    auto fd = renderer_->fontDescriptions();
+    fd.dpi = newFontDPI;
+    renderer_->setFonts(fd);
 
-    renderTarget_->setContentScale(contentScale());
     session_.setContentScale(contentScale());
 
     auto const newPixelSize = terminal::ImageSize { Width(width()), Height(height()) };
 
     // Apply resize on same window metrics propagates proper recalculations and repaint.
-    applyResize(newPixelSize, session_, renderer_);
+    applyResize(newPixelSize, session_, *renderer_);
+}
+
+void TerminalWidget::logDisplayTopInfo()
+{
+    static bool loggedOnce = false;
+    if (loggedOnce)
+        return;
+    loggedOnce = true;
+
+    auto const openGLTypeString = QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL";
+#if defined(CONTOUR_BUILD_TYPE)
+    DisplayLog()("[FYI] Build type          : {}", CONTOUR_BUILD_TYPE);
+#endif
+    DisplayLog()("[FYI] Application PID     : {}", QCoreApplication::applicationPid());
+    DisplayLog()("[FYI] OpenGL type         : {}", openGLTypeString);
+    DisplayLog()("[FYI] OpenGL renderer     : {}", glGetString(GL_RENDERER));
+    DisplayLog()("[FYI] Qt platform         : {}", QGuiApplication::platformName().toStdString());
+
+    GLint versionMajor {};
+    GLint versionMinor {};
+    QOpenGLContext::currentContext()->functions()->glGetIntegerv(GL_MAJOR_VERSION, &versionMajor);
+    QOpenGLContext::currentContext()->functions()->glGetIntegerv(GL_MINOR_VERSION, &versionMinor);
+    DisplayLog()("[FYI] OpenGL version      : {}.{}", versionMajor, versionMinor);
+
+    string glslVersions = (char const*) glGetString(GL_SHADING_LANGUAGE_VERSION);
+
+    // TODO: pass phys()/logical?) dpi to font manager, so font size can be applied right
+    // TODO: also take window monitor switches into account
+
+    GLint glslNumShaderVersions {};
+#if defined(GL_NUM_SHADING_LANGUAGE_VERSIONS)
+    glGetIntegerv(GL_NUM_SHADING_LANGUAGE_VERSIONS, &glslNumShaderVersions);
+    glGetError(); // consume possible OpenGL error.
+    if (glslNumShaderVersions > 0)
+    {
+        glslVersions += " (";
+        for (GLint k = 0, l = 0; k < glslNumShaderVersions; ++k)
+            if (auto const str = glGetStringi(GL_SHADING_LANGUAGE_VERSION, k); str && *str)
+            {
+                glslVersions += (l ? ", " : "");
+                glslVersions += (char const*) str;
+                l++;
+            }
+        glslVersions += ')';
+    }
+#endif
+    DisplayLog()("[FYI] GLSL version        : {}", glslVersions);
+
+    logDisplayInfo();
 }
 
 void TerminalWidget::logDisplayInfo()
 {
     // clang-format off
     auto const fontSizeInPx = static_cast<int>(ceil((
-        profile().fonts.size.pt / 72.0) * average(screenDPI())
+        profile().fonts.size.pt / 72.0) * average(fontDPI())
     ));
-    LOGSTORE(DisplayLog)("[Display Info] Refresh rate        : {} Hz", refreshRate());
-    LOGSTORE(DisplayLog)("[Display Info] Logical DPI         : {}", crispy::Size { logicalDpiX(), logicalDpiY() });
-    LOGSTORE(DisplayLog)("[Display Info] Physical DPI        : {}", crispy::Size { physicalDpiX(), physicalDpiY() });
-    LOGSTORE(DisplayLog)("[Display Info] Device pixel ratio  : {}", devicePixelRatioF());
-    LOGSTORE(DisplayLog)("[Grid Metrics] Font DPI            : {}", crispy::Size{ renderer_.fontDescriptions().dpi.x, renderer_.fontDescriptions().dpi.y });
-    LOGSTORE(DisplayLog)("[Grid Metrics] Font size           : {} ({} px)", profile().fonts.size, fontSizeInPx);
-    LOGSTORE(DisplayLog)("[Grid Metrics] Cell size           : {} px", gridMetrics().cellSize);
-    LOGSTORE(DisplayLog)("[Grid Metrics] Page size           : {}", gridMetrics().pageSize);
-    LOGSTORE(DisplayLog)("[Grid Metrics] Font baseline       : {} px", gridMetrics().baseline);
-    LOGSTORE(DisplayLog)("[Grid Metrics] Underline position  : {} px", gridMetrics().underline.position);
-    LOGSTORE(DisplayLog)("[Grid Metrics] Underline thickness : {} px", gridMetrics().underline.thickness);
+    DisplayLog()("[FYI] Refresh rate        : {} Hz", refreshRate());
+    DisplayLog()("[FYI] Screen size         : {}x{}", screenOf(this)->size().width(), screenOf(this)->size().height());
+    DisplayLog()("[FYI] Logical DPI         : {}", logicalDPI());
+    DisplayLog()("[FYI] Physical DPI        : {}", physicalDPI());
+    if (devicePixelRatioF() != trunc(devicePixelRatioF()))
+        DisplayLog()("[FYI] Device pixel ratio  : {} ({})", devicePixelRatio(), devicePixelRatioF());
+    else
+        DisplayLog()("[FYI] Device pixel ratio  : {}", devicePixelRatioF());
+    DisplayLog()("[FYI] Content scale       : {}", contentScale());
+    DisplayLog()("[FYI] Font DPI            : {} ({})", fontDPI(), renderer_->fontDescriptions().dpi);
+    DisplayLog()("[FYI] Font size           : {} ({} px)", profile().fonts.size, fontSizeInPx);
+    DisplayLog()("[FYI] Cell size           : {} px", gridMetrics().cellSize);
+    DisplayLog()("[FYI] Page size           : {}", gridMetrics().pageSize);
+    DisplayLog()("[FYI] Font baseline       : {} px", gridMetrics().baseline);
+    DisplayLog()("[FYI] Underline position  : {} px", gridMetrics().underline.position);
+    DisplayLog()("[FYI] Underline thickness : {} px", gridMetrics().underline.thickness);
     // clang-format on
 }
 
@@ -427,89 +476,69 @@ using opengl::ShaderClass;
 
 void TerminalWidget::initializeGL()
 {
+    DisplayLog()("initializeGL: size={}x{}, scale={}", size().width(), size().height(), contentScale());
     initializeOpenGLFunctions();
     configureScreenHooks();
     watchKdeDpiSetting();
 
-    // Only now, and not early, we know the actual DPI / DPR / content scaling.
-    auto fd = renderer_.fontDescriptions();
-    fd.dpi = screenDPI();
-    renderer_.setFonts(fd);
+    renderer_.initialize(terminal().pageSize(),
+                         sanitizeFontDescription(profile().fonts, lastFontDPI_),
+                         terminal().screen().colorPalette(),
+                         profile().backgroundOpacity,
+                         session_.config().textureAtlasHashtableSlots,
+                         session_.config().textureAtlasTileCount,
+                         session_.config().textureAtlasDirectMapping,
+                         profile().hyperlinkDecoration.normal,
+                         profile().hyperlinkDecoration.hover
+                         // TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
+    );
+    // Only now, and not earlier, we know the actual DPI / DPR / content scaling.
+    auto fd = renderer_->fontDescriptions();
+    fd.dpi = fontDPI();
+    renderer_->setFonts(fd);
 
-    auto const textureTileSize = renderer_.gridMetrics().cellSize;
+    auto const textureTileSize = gridMetrics().cellSize;
     auto const viewportMargin = terminal::renderer::PageMargin {}; // TODO margin
+
+    auto const precalculatedVieewSize = [this]() -> ImageSize {
+        auto const hint = sizeHint();
+        auto const uiSize = ImageSize { Width::cast_from(hint.width()), Height::cast_from(hint.height()) };
+        // auto const uiSize = ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
+        return uiSize * contentScale();
+    }();
 
     renderTarget_ = make_unique<OpenGLRenderer>(
         profile().textShader.value_or(builtinShaderConfig(ShaderClass::Text)),
         profile().backgroundShader.value_or(builtinShaderConfig(ShaderClass::Background)),
         profile().backgroundImageShader.value_or(builtinShaderConfig(ShaderClass::BackgroundImage)),
-        ImageSize { Width(width()), Height(height()) },
+        precalculatedVieewSize,
         textureTileSize,
         viewportMargin);
 
-    renderer_.setRenderTarget(*renderTarget_);
+    renderer_->setRenderTarget(*renderTarget_);
 
-    // {{{ some info
-    static bool infoPrinted = false;
-    if (!infoPrinted)
-    {
-        // clang-format off
-        infoPrinted = true;
-        LOGSTORE(DisplayLog)("[FYI] Application PID : {}", QCoreApplication::applicationPid());
-        LOGSTORE(DisplayLog)("[FYI] OpenGL type     : {}", (QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL"));
-        LOGSTORE(DisplayLog)("[FYI] OpenGL renderer : {}", glGetString(GL_RENDERER));
-        LOGSTORE(DisplayLog)("[FYI] Qt platform     : {}", QGuiApplication::platformName().toStdString());
-        // clang-format on
+    session_.setContentScale(contentScale());
 
-        GLint versionMajor {};
-        GLint versionMinor {};
-        QOpenGLContext::currentContext()->functions()->glGetIntegerv(GL_MAJOR_VERSION, &versionMajor);
-        QOpenGLContext::currentContext()->functions()->glGetIntegerv(GL_MINOR_VERSION, &versionMinor);
-        LOGSTORE(DisplayLog)("[FYI] OpenGL version  : {}.{}", versionMajor, versionMinor);
+    updateMinimumSize();
+    updateGeometry();
 
-        auto glslVersionMsg =
-            fmt::format("[FYI] GLSL version    : {}", glGetString(GL_SHADING_LANGUAGE_VERSION));
-
-        // TODO: pass phys()/logical?) dpi to font manager, so font size can be applied right
-        // TODO: also take window monitor switches into account
-
-        GLint glslNumShaderVersions {};
-#if defined(GL_NUM_SHADING_LANGUAGE_VERSIONS)
-        glGetIntegerv(GL_NUM_SHADING_LANGUAGE_VERSIONS, &glslNumShaderVersions);
-        glGetError(); // consume possible OpenGL error.
-        if (glslNumShaderVersions > 0)
-        {
-            glslVersionMsg += " (";
-            for (GLint k = 0, l = 0; k < glslNumShaderVersions; ++k)
-                if (auto const str = glGetStringi(GL_SHADING_LANGUAGE_VERSION, k); str && *str)
-                {
-                    glslVersionMsg += (l ? ", " : "");
-                    glslVersionMsg += (char const*) str;
-                    l++;
-                }
-            glslVersionMsg += ')';
-        }
-#endif
-        LOGSTORE(DisplayLog)(glslVersionMsg);
-        logDisplayInfo();
-    }
-    // }}}
+    logDisplayTopInfo();
 
 #if !defined(NDEBUG) && defined(GL_DEBUG_OUTPUT) && defined(CONTOUR_DEBUG_OPENGL)
     CHECKED_GL(glEnable(GL_DEBUG_OUTPUT));
     CHECKED_GL(glDebugMessageCallback(&glMessageCallback, this));
 #endif
 
-    initialized_ = true;
     session_.displayInitialized();
 }
 
 void TerminalWidget::resizeGL(int _width, int _height)
 {
     QOpenGLWidget::resizeGL(_width, _height);
-    auto const newPixelSize = terminal::ImageSize { Width(_width), Height(_height) };
-    LOGSTORE(DisplayLog)("resizing to {}", newPixelSize);
-    applyResize(newPixelSize, session_, renderer_);
+    auto const qtBaseWidgetSize = terminal::ImageSize { Width(_width), Height(_height) };
+    auto const newPixelSize = qtBaseWidgetSize * contentScale();
+    LOGSTORE(DisplayLog)("resizeGL: {}x{} ({})", _width, _height, newPixelSize);
+    applyResize(newPixelSize, session_, *renderer_);
 }
 
 void TerminalWidget::paintGL()
@@ -536,9 +565,9 @@ void TerminalWidget::paintGL()
 
         renderTarget_->clear(
             terminal().screen().isModeEnabled(terminal::DECMode::ReverseVideo)
-                ? RGBAColor(profile().colors.defaultForeground, uint8_t(renderer_.backgroundOpacity()))
-                : RGBAColor(profile().colors.defaultBackground, uint8_t(renderer_.backgroundOpacity())));
-        renderer_.render(terminal(), renderingPressure_);
+                ? RGBAColor(profile().colors.defaultForeground, uint8_t(renderer_->backgroundOpacity()))
+                : RGBAColor(profile().colors.defaultBackground, uint8_t(renderer_->backgroundOpacity())));
+        renderer_->render(terminal(), renderingPressure_);
     }
     catch (exception const& e)
     {
@@ -667,7 +696,7 @@ bool TerminalWidget::event(QEvent* _event)
 // {{{ helpers
 void TerminalWidget::assertInitialized()
 {
-    if (initialized_)
+    if (renderer_.is_initialized())
         return;
 
     throw std::runtime_error("Internal error. "
@@ -682,6 +711,8 @@ void TerminalWidget::onScrollBarValueChanged(int _value)
 
 double TerminalWidget::contentScale() const
 {
+    auto const dpiScale = profile().fonts.dpiScale;
+
 #if !defined(__APPLE__) && !defined(_WIN32)
     if (auto const kcmFontsFile = kcmFontsFilePath())
     {
@@ -692,16 +723,17 @@ double TerminalWidget::contentScale() const
             if (fields.size() == 2 && fields[0] == "forceFontDPI"sv)
             {
                 auto const forcedDPI = static_cast<double>(crispy::to_integer(fields[1]).value_or(0.0));
-                // fmt::print("contentScale: forcedDPI={}\n", forcedDPI);
                 if (forcedDPI >= 96.0)
-                    return forcedDPI / 96.0;
+                {
+                    auto const dpr = (forcedDPI * dpiScale) / 96.0;
+                    return dpr;
+                }
             }
         }
     }
 #endif
 
-    // fmt::print("contentScale: DPI={}\n", devicePixelRatioF());
-    return devicePixelRatioF();
+    return devicePixelRatio() * dpiScale;
 }
 
 void TerminalWidget::updateMinimumSize()
@@ -727,14 +759,21 @@ double TerminalWidget::refreshRate() const
         return systemRefreshRate;
 }
 
-crispy::Point TerminalWidget::screenDPI() const
+DPI TerminalWidget::fontDPI() const noexcept
 {
-    return systemScreenDPI() * profile().fonts.dpiScale;
+    return logicalDPI() * contentScale();
+    // return physicalDPI() * contentScale();
+    // return DPI{96, 96} * contentScale();
 }
 
-crispy::Point TerminalWidget::systemScreenDPI() const
+DPI TerminalWidget::logicalDPI() const noexcept
 {
-    return crispy::Point { logicalDpiX(), logicalDpiY() } * contentScale();
+    return DPI { logicalDpiX(), logicalDpiY() };
+}
+
+DPI TerminalWidget::physicalDPI() const noexcept
+{
+    return DPI { physicalDpiX(), physicalDpiY() };
 }
 
 bool TerminalWidget::isFullScreen() const
@@ -766,7 +805,7 @@ bool TerminalWidget::requestPermission(config::Permission _allowedByConfig, stri
 
 terminal::FontDef TerminalWidget::getFontDef()
 {
-    return getFontDefinition(renderer_);
+    return getFontDefinition(*renderer_);
 }
 
 void TerminalWidget::bell()
@@ -813,7 +852,7 @@ void TerminalWidget::doDumpState()
         auto const screenStateDump = [&]() {
             auto os = std::stringstream {};
             terminal().screen().inspect("Screen state dump.", os);
-            renderer_.inspect(os);
+            renderer_->inspect(os);
             return os.str();
         }();
 
@@ -882,7 +921,7 @@ void TerminalWidget::doDumpState()
         };
     };
 
-    terminal::renderer::RenderTarget& renderTarget = renderer_.renderTarget();
+    terminal::renderer::RenderTarget& renderTarget = renderer_->renderTarget();
 
     do
     {
@@ -938,7 +977,7 @@ void TerminalWidget::resizeWindow(terminal::Width _width, terminal::Height _heig
 
     // setSizePolicy(QSizePolicy::Policy::Fixed, QSizePolicy::Policy::Fixed);
     const_cast<config::TerminalProfile&>(profile()).terminalSize = requestedPageSize;
-    renderer_.setPageSize(requestedPageSize);
+    renderer_->setPageSize(requestedPageSize);
     auto const pixels =
         terminal::ImageSize { terminal::Width(*requestedPageSize.columns * *gridMetrics().cellSize.width),
                               terminal::Height(*requestedPageSize.lines * *gridMetrics().cellSize.height) };
@@ -963,7 +1002,7 @@ void TerminalWidget::resizeWindow(terminal::LineCount _lines, terminal::ColumnCo
 
     // setSizePolicy(QSizePolicy::Policy::Fixed, QSizePolicy::Policy::Fixed);
     const_cast<config::TerminalProfile&>(profile()).terminalSize = requestedPageSize;
-    renderer_.setPageSize(requestedPageSize);
+    renderer_->setPageSize(requestedPageSize);
     auto const pixels =
         terminal::ImageSize { terminal::Width(*requestedPageSize.columns * *gridMetrics().cellSize.width),
                               terminal::Height(*requestedPageSize.lines * *gridMetrics().cellSize.height) };
@@ -975,24 +1014,27 @@ void TerminalWidget::resizeWindow(terminal::LineCount _lines, terminal::ColumnCo
 void TerminalWidget::setFonts(terminal::renderer::FontDescriptions _fontDescriptions)
 {
     if (applyFontDescription(
-            gridMetrics().cellSize, pageSize(), pixelSize(), screenDPI(), renderer_, _fontDescriptions))
+            gridMetrics().cellSize, pageSize(), pixelSize(), fontDPI(), *renderer_, _fontDescriptions))
+    {
         // resize widget (same pixels, but adjusted terminal rows/columns and margin)
-        applyResize(pixelSize(), session_, renderer_);
+        applyResize(pixelSize(), session_, *renderer_);
+        logDisplayInfo();
+    }
 }
 
 bool TerminalWidget::setFontSize(text::font_size _size)
 {
     LOGSTORE(DisplayLog)("Setting display font size and recompute metrics: {}pt", _size.pt);
 
-    if (!renderer_.setFontSize(_size))
+    if (!renderer_->setFontSize(_size))
         return false;
 
-    auto currentWidgetPixelSize =
-        ImageSize { terminal::Width(width()), terminal::Height(height()) };
-    renderer_.setMargin(computeMargin(gridMetrics().cellSize, pageSize(), currentWidgetPixelSize));
+    auto currentWidgetPixelSize = ImageSize { terminal::Width(width()), terminal::Height(height()) };
+    renderer_->setMargin(computeMargin(gridMetrics().cellSize, pageSize(), currentWidgetPixelSize));
     // resize widget (same pixels, but adjusted terminal rows/columns and margin)
-    applyResize(currentWidgetPixelSize, session_, renderer_);
+    applyResize(currentWidgetPixelSize, session_, *renderer_);
     updateMinimumSize();
+    logDisplayInfo();
     return true;
 }
 
@@ -1004,7 +1046,7 @@ bool TerminalWidget::setPageSize(PageSize _newPageSize)
     auto const viewSize =
         ImageSize { Width(*gridMetrics().cellSize.width * *profile().terminalSize.columns),
                     Height(*gridMetrics().cellSize.width * *profile().terminalSize.columns) };
-    renderer_.setPageSize(_newPageSize);
+    renderer_->setPageSize(_newPageSize);
     terminal().resizeScreen(_newPageSize, viewSize);
     return true;
 }
@@ -1085,12 +1127,12 @@ void TerminalWidget::toggleFullScreen()
 void TerminalWidget::setHyperlinkDecoration(terminal::renderer::Decorator _normal,
                                             terminal::renderer::Decorator _hover)
 {
-    renderer_.setHyperlinkDecoration(_normal, _hover);
+    renderer_->setHyperlinkDecoration(_normal, _hover);
 }
 
 void TerminalWidget::setBackgroundOpacity(terminal::Opacity _opacity)
 {
-    renderer_.setBackgroundOpacity(_opacity);
+    renderer_->setBackgroundOpacity(_opacity);
     session_.terminal().breakLoopAndRefreshRenderBuffer();
 }
 // }}}
@@ -1098,7 +1140,7 @@ void TerminalWidget::setBackgroundOpacity(terminal::Opacity _opacity)
 // {{{ TerminalDisplay: terminal events
 void TerminalWidget::scheduleRedraw()
 {
-    if (!initialized_.load())
+    if (!renderer_.is_initialized())
         return;
 
     if (setScreenDirty())
@@ -1144,7 +1186,7 @@ void TerminalWidget::bufferChanged(terminal::ScreenType _type)
 
 void TerminalWidget::discardImage(terminal::Image const& _image)
 {
-    renderer_.discardImage(_image);
+    renderer_->discardImage(_image);
 }
 // }}}
 

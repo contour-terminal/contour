@@ -84,7 +84,7 @@ FontKeys loadFontKeys(FontDescriptions const& _fd, text::shaper& _shaper)
 }
 
 unique_ptr<text::shaper> createTextShaper(TextShapingEngine _engine,
-                                          crispy::Point _dpi,
+                                          DPI _dpi,
                                           unique_ptr<text::font_locator> _locator)
 {
     switch (_engine)
@@ -281,14 +281,6 @@ void Renderer::updateFontMetrics()
     imageRenderer_.setCellSize(cellSize());
 
     clearCache();
-}
-
-void Renderer::setRenderSize(ImageSize _size)
-{
-    if (!_renderTarget)
-        return;
-
-    _renderTarget->setRenderSize(_size);
 }
 
 uint64_t Renderer::render(Terminal& _terminal, bool _pressure)

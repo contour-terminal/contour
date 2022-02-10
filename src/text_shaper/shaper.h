@@ -103,7 +103,7 @@ class shaper
     /**
      * Sets or updates DPI to the given value.
      */
-    virtual void set_dpi(crispy::Point _dpi) = 0;
+    virtual void set_dpi(DPI _dpi) = 0;
 
     /**
      * Configures the font location API to be used.

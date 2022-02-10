@@ -113,15 +113,14 @@ struct directwrite_shaper::Private
     ComPtr<IDWriteTextAnalyzer1> textAnalyzer;
     std::unique_ptr<font_locator> locator_;
 
-    crispy::Point dpi_;
+    DPI dpi_;
     std::wstring userLocale;
     std::unordered_map<font_key, DxFontInfo> fonts;
     std::unordered_map<font_key, bool> fontsHasColor;
 
     font_key nextFontKey;
 
-    Private(crispy::Point _dpi, std::unique_ptr<font_locator> _locator):
-        dpi_ { _dpi }, locator_ { move(_locator) }
+    Private(DPI dpi, std::unique_ptr<font_locator> _locator): dpi_ { dpi }, locator_ { move(_locator) }
     {
         auto hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
                                       __uuidof(IDWriteFactory7),
@@ -268,7 +267,7 @@ struct directwrite_shaper::Private
     float pixelPerDip() { return dpi_.x / 96.0; }
 };
 
-directwrite_shaper::directwrite_shaper(crispy::Point _dpi, std::unique_ptr<font_locator> _locator):
+directwrite_shaper::directwrite_shaper(DPI _dpi, std::unique_ptr<font_locator> _locator):
     d(new Private(_dpi, move(_locator)), [](Private* p) { delete p; })
 {
 }
@@ -580,9 +579,9 @@ std::optional<rasterized_glyph> directwrite_shaper::rasterize(glyph_key _glyph, 
     return nullopt;
 }
 
-void directwrite_shaper::set_dpi(crispy::Point _dpi)
+void directwrite_shaper::set_dpi(DPI dpi)
 {
-    d->dpi_ = _dpi;
+    d->dpi_ = dpi;
     clear_cache();
 }
 

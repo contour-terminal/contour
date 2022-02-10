@@ -423,10 +423,7 @@ namespace
         return best;
     }
 
-    optional<FtFacePtr> loadFace(font_source const& _source,
-                                 font_size _fontSize,
-                                 crispy::Point _dpi,
-                                 FT_Library _ft)
+    optional<FtFacePtr> loadFace(font_source const& _source, font_size _fontSize, DPI _dpi, FT_Library _ft)
     {
         FT_Face ftFace = nullptr;
 
@@ -479,8 +476,10 @@ namespace
         {
             auto const size = static_cast<FT_F26Dot6>(ceil(_fontSize.pt * 64.0));
 
+            LocatorLog()("FT_Set_Char_Size(size {}, dpi {}, source {})\n", _fontSize, _dpi, _source);
+            // TODO(pr) alternativelly use FT_Set_Pixel_Sizes again
             if (FT_Error const ec = FT_Set_Char_Size(
-                    ftFace, size, size, static_cast<FT_UInt>(_dpi.x), static_cast<FT_UInt>(_dpi.y));
+                    ftFace, 0, size, static_cast<FT_UInt>(_dpi.x), static_cast<FT_UInt>(_dpi.y));
                 ec != FT_Err_Ok)
             {
                 errorlog()("Failed to FT_Set_Char_Size(size={}, dpi {}, source {}): {}\n",
@@ -588,7 +587,7 @@ struct open_shaper::Private // {{{
     crispy::finally ftCleanup_;
     FT_Library ft_;
     unique_ptr<font_locator> locator_;
-    crispy::Point dpi_;
+    DPI dpi_;
     unordered_map<font_key, HbFontInfo> fonts_; // from font_key to FontInfo struct
     unordered_map<FontPathAndSize, font_key> fontPathSizeToKeys;
 
@@ -636,8 +635,12 @@ struct open_shaper::Private // {{{
 
         auto key = create_font_key();
         fonts_.emplace(pair { key, move(fontInfo) });
-        LOGSTORE(LocatorLog)
-        ("Loading font: key={}, id=\"{}\" size={} dpi {} {}", key, sourceId, _fontSize, dpi_, metrics(key));
+        LocatorLog()("Loading font: key={}, id=\"{}\" size={} dpi {} {}",
+                     key,
+                     sourceId,
+                     _fontSize,
+                     dpi_,
+                     metrics(key));
         fontPathSizeToKeys.emplace(pair { FontPathAndSize { sourceId, _fontSize }, key });
         return key;
     }
@@ -660,7 +663,7 @@ struct open_shaper::Private // {{{
         return output;
     }
 
-    Private(crispy::Point _dpi, unique_ptr<font_locator> _locator):
+    Private(DPI _dpi, unique_ptr<font_locator> _locator):
         ft_ {},
         ftCleanup_ { [this]() {
             FT_Done_FreeType(ft_);
@@ -736,14 +739,14 @@ struct open_shaper::Private // {{{
     }
 }; // }}}
 
-open_shaper::open_shaper(crispy::Point _dpi, unique_ptr<font_locator> _locator):
+open_shaper::open_shaper(DPI _dpi, unique_ptr<font_locator> _locator):
     d(new Private(_dpi, move(_locator)), [](Private* p) { delete p; })
 {
 }
 
-void open_shaper::set_dpi(crispy::Point _dpi)
+void open_shaper::set_dpi(DPI _dpi)
 {
-    if (_dpi == crispy::Point {})
+    if (!_dpi)
         return;
 
     d->dpi_ = _dpi;

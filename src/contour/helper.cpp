@@ -70,9 +70,10 @@ namespace
 
         auto const pageSize = session.terminal().screen().pageSize();
         auto const cellSize = session.display()->cellSize();
+        auto const dpr = session.contentScale();
 
-        auto const sx = event->pos().x();
-        auto const sy = event->pos().y();
+        auto const sx = int(double(event->pos().x()) * dpr);
+        auto const sy = int(double(event->pos().y()) * dpr);
 
         auto const row =
             terminal::LineOffset(clamp((sy - MarginTop) / cellSize.height.as<int>(), 0, *pageSize.lines - 1));
@@ -83,24 +84,22 @@ namespace
         return { row, col };
     }
 
-    MousePixelPosition makeMousePixelPosition(QMouseEvent* _event) noexcept
+    MousePixelPosition makeMousePixelPosition(QMouseEvent* _event, double dpr) noexcept
     {
         // TODO: apply margin once supported
-        return MousePixelPosition { MousePixelPosition::X { _event->x() },
-                                    MousePixelPosition::Y { _event->y() } };
+        return MousePixelPosition { MousePixelPosition::X { int(double(_event->x()) * dpr) },
+                                    MousePixelPosition::Y { int(double(_event->y()) * dpr) } };
     }
 
-    MousePixelPosition makeMousePixelPosition(QWheelEvent* _event) noexcept
+    MousePixelPosition makeMousePixelPosition(QWheelEvent* _event, double dpr) noexcept
     {
         // TODO: apply margin once supported
 #if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-        return MousePixelPosition {
-            MousePixelPosition::X { static_cast<int>(_event->position().x()) },
-            MousePixelPosition::Y { static_cast<int>(_event->position().y()) }
-        };
+        return MousePixelPosition { MousePixelPosition::X { int(double(_event->position().x()) * dpr) },
+                                    MousePixelPosition::Y { int(double(_event->position().y()) * dpr) } };
 #else
-        return MousePixelPosition { MousePixelPosition::X { static_cast<int>(_event->x() * scale) },
-                                    MousePixelPosition::Y { static_cast<int>(_event->y() * scale) } };
+        return MousePixelPosition { MousePixelPosition::X { int(double(_event->x()) * dpr) },
+                                    MousePixelPosition::Y { int(double(_event->y()) * dpr) } };
 #endif
     }
 
@@ -271,12 +270,11 @@ void sendWheelEvent(QWheelEvent* _event, TerminalSession& _session)
 
     if (yDelta)
     {
-        auto const button = yDelta > 0 ? terminal::MouseButton::WheelUp : terminal::MouseButton::WheelDown;
-
         auto const modifier = makeModifier(_event->modifiers());
+        auto const button = yDelta > 0 ? terminal::MouseButton::WheelUp : terminal::MouseButton::WheelDown;
+        auto const pixelPosition = makeMousePixelPosition(_event, _session.contentScale());
 
-        _session.sendMousePressEvent(
-            modifier, button, makeMousePixelPosition(_event), steady_clock::now());
+        _session.sendMousePressEvent(modifier, button, pixelPosition, steady_clock::now());
     }
 }
 
@@ -284,7 +282,7 @@ void sendMousePressEvent(QMouseEvent* _event, TerminalSession& _session)
 {
     _session.sendMousePressEvent(makeModifier(_event->modifiers()),
                                  makeMouseButton(_event->button()),
-                                 makeMousePixelPosition(_event),
+                                 makeMousePixelPosition(_event, _session.contentScale()),
                                  steady_clock::now());
     _event->accept();
 }
@@ -293,24 +291,16 @@ void sendMouseReleaseEvent(QMouseEvent* _event, TerminalSession& _session)
 {
     _session.sendMouseReleaseEvent(makeModifier(_event->modifiers()),
                                    makeMouseButton(_event->button()),
-                                   makeMousePixelPosition(_event),
+                                   makeMousePixelPosition(_event, _session.contentScale()),
                                    steady_clock::now());
     _event->accept();
 }
 
 void sendMouseMoveEvent(QMouseEvent* _event, TerminalSession& _session)
 {
-    // NB: This translation depends on the display's margin, so maybe
-    //     the display should provide the translation?
-    auto constexpr MarginTop = 0;
-    auto constexpr MarginLeft = 0;
-    auto const pageSize = _session.terminal().screen().pageSize();
-    auto const cellSize = _session.display()->cellSize();
-    auto const viewSize = cellSize * pageSize;
-
     _session.sendMouseMoveEvent(makeModifier(_event->modifiers()),
                                 makeMouseCellLocation(_event, _session),
-                                makeMousePixelPosition(_event),
+                                makeMousePixelPosition(_event, _session.contentScale()),
                                 steady_clock::now());
 }
 
@@ -435,10 +425,10 @@ terminal::renderer::PageMargin computeMargin(ImageSize _cellSize,
 }
 
 terminal::renderer::FontDescriptions sanitizeFontDescription(terminal::renderer::FontDescriptions _fonts,
-                                                             crispy::Point _screenDPI)
+                                                             text::DPI _dpi)
 {
     if (_fonts.dpi.x <= 0 || _fonts.dpi.y <= 0)
-        _fonts.dpi = _screenDPI;
+        _fonts.dpi = _dpi;
     if (std::fabs(_fonts.size.pt) <= std::numeric_limits<double>::epsilon())
         _fonts.size.pt = 12;
     return _fonts;
@@ -447,7 +437,7 @@ terminal::renderer::FontDescriptions sanitizeFontDescription(terminal::renderer:
 bool applyFontDescription(ImageSize _cellSize,
                           PageSize _pageSize,
                           ImageSize _pixelSize,
-                          Point _screenDPI,
+                          text::DPI _dpi,
                           terminal::renderer::Renderer& _renderer,
                           terminal::renderer::FontDescriptions _fontDescriptions)
 {
@@ -456,7 +446,7 @@ bool applyFontDescription(ImageSize _cellSize,
 
     auto const windowMargin = computeMargin(_cellSize, _pageSize, _pixelSize);
 
-    _renderer.setFonts(sanitizeFontDescription(std::move(_fontDescriptions), _screenDPI));
+    _renderer.setFonts(sanitizeFontDescription(std::move(_fontDescriptions), _dpi));
     _renderer.setMargin(windowMargin);
     _renderer.updateFontMetrics();
 
@@ -482,7 +472,7 @@ void applyResize(terminal::ImageSize _newPixelSize,
     terminal::Terminal& terminal = _session.terminal();
     terminal::ImageSize cellSize = _renderer.gridMetrics().cellSize;
 
-    _renderer.setRenderSize(_newPixelSize);
+    _renderer.renderTarget().setRenderSize(_newPixelSize);
     _renderer.setPageSize(newPageSize);
     _renderer.setMargin(computeMargin(_renderer.gridMetrics().cellSize, newPageSize, _newPixelSize));
     //_renderer.clearCache();
@@ -490,8 +480,7 @@ void applyResize(terminal::ImageSize _newPixelSize,
     if (newPageSize == terminal.pageSize())
         return;
 
-    auto const viewSize = terminal::ImageSize { cellSize.width * newPageSize.columns.as<Width>(),
-                                                cellSize.height * newPageSize.lines.as<Height>() };
+    auto const viewSize = cellSize * newPageSize;
     terminal.resizeScreen(newPageSize, viewSize);
     terminal.clearSelection();
 }

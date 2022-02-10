@@ -630,5 +630,5 @@ struct formatter<terminal::Margin::Vertical>
     }
 };
 
-}
+} // namespace fmt
 // }}}

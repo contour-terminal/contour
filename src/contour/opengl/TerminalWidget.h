@@ -25,6 +25,8 @@
 
 #include <terminal_renderer/Renderer.h>
 
+#include <crispy/deferred.h>
+
 #include <QtCore/QFileSystemWatcher>
 #include <QtCore/QPoint>
 #include <QtCore/QTimer>
@@ -89,7 +91,9 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
 
     // Attributes
     double refreshRate() const override;
-    crispy::Point screenDPI() const override;
+    text::DPI fontDPI() const noexcept override;
+    text::DPI logicalDPI() const noexcept;
+    text::DPI physicalDPI() const noexcept;
     bool isFullScreen() const override;
     terminal::ImageSize pixelSize() const override;
     terminal::ImageSize cellSize() const override;
@@ -144,20 +148,25 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
   private:
     // helper methods
     //
-    crispy::Point systemScreenDPI() const;
     config::TerminalProfile const& profile() const noexcept { return session_.profile(); }
     terminal::Terminal& terminal() noexcept { return session_.terminal(); }
     void configureScreenHooks();
+    void logDisplayTopInfo();
     void logDisplayInfo();
     void watchKdeDpiSetting();
-    terminal::PageSize pageSize() const { return pageSizeForPixels(pixelSize(), renderer_.gridMetrics()); }
+    terminal::PageSize pageSize() const { return pageSizeForPixels(pixelSize(), renderer_->gridMetrics()); }
     void assertInitialized();
     double contentScale() const;
     void updateMinimumSize();
 
     void statsSummary();
     void doResize(crispy::Size _size);
-    terminal::renderer::GridMetrics const& gridMetrics() const noexcept { return renderer_.gridMetrics(); }
+
+    terminal::renderer::GridMetrics const& gridMetrics() const noexcept
+    {
+        Require(renderer_.is_initialized());
+        return renderer_->gridMetrics();
+    }
 
     /// Flags the screen as dirty.
     ///
@@ -176,9 +185,8 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     TerminalSession& session_;
     std::function<void()> adaptSize_;
     std::function<void(bool)> enableBlurBehind_;
-    crispy::Point lastScreenDPI_;
-    terminal::renderer::Renderer renderer_;
-    std::atomic<bool> initialized_ = false;
+    text::DPI lastFontDPI_;
+    crispy::deferred<terminal::renderer::Renderer> renderer_;
     bool renderingPressure_ = false;
     std::unique_ptr<terminal::renderer::RenderTarget> renderTarget_;
     PermissionCache rememberedPermissions_ {};

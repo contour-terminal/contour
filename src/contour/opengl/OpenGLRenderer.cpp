@@ -164,12 +164,11 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& textShaderConfig,
                                terminal::renderer::PageMargin margin):
     _renderTargetSize { targetSurfaceSize },
     _projectionMatrix { ortho(0.0f,
-                              float(*targetSurfaceSize.width), // left, right
+                              unbox<float>(targetSurfaceSize.width), // left, right
                               0.0f,
-                              float(*targetSurfaceSize.height) // bottom, top
+                              unbox<float>(targetSurfaceSize.height) // bottom, top
                               ) },
     _margin { margin },
-
     _textShader { createShader(textShaderConfig) },
     _textProjectionLocation { _textShader->uniformLocation("vs_projection") },
     _backgroundShader { createShader(backgroundImageShaderConfig) },
@@ -200,18 +199,14 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& textShaderConfig,
 
 void OpenGLRenderer::setRenderSize(ImageSize targetSurfaceSize)
 {
-    DisplayLog()("setRenderSize: {}", _renderTargetSize);
+    // glOrtho
     _renderTargetSize = targetSurfaceSize;
+    DisplayLog()("setRenderSize: {}", _renderTargetSize);
     _projectionMatrix = ortho(0.0f,
-                              float(*_renderTargetSize.width), // left, right
+                              unbox<float>(_renderTargetSize.width), // left, right
                               0.0f,
-                              float(*_renderTargetSize.height) // bottom, top
+                              unbox<float>(_renderTargetSize.height) // bottom, top
     );
-}
-
-void OpenGLRenderer::setContentScale(double scale)
-{
-    _contentScale = scale;
 }
 
 void OpenGLRenderer::setMargin(terminal::renderer::PageMargin margin) noexcept
@@ -429,9 +424,13 @@ ImageSize OpenGLRenderer::renderBufferSize()
 
 void OpenGLRenderer::execute()
 {
-    DisplayLog()("execute: {}", _renderTargetSize);
-    glViewport(0, 0, unbox<GLsizei>(_renderTargetSize.width), unbox<GLsizei>(_renderTargetSize.height));
-    _currentTextureId = std::numeric_limits<int>::max();
+    static auto lastSize = crispy::ImageSize {};
+    if (lastSize != _renderTargetSize)
+    {
+        DisplayLog()("execute: {}", _renderTargetSize);
+        lastSize = _renderTargetSize;
+    }
+    _currentTextureId = std::numeric_limits<GLuint>::max();
 
     // FIXME
     // glEnable(GL_BLEND);

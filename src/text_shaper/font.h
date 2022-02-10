@@ -55,6 +55,38 @@ namespace detail
     }
 } // namespace detail
 
+struct [[nodiscard]] DPI
+{
+    int x;
+    int y;
+
+    // constexpr DPI(DPI const&) = default;
+    // DPI& operator=(DPI const&) = default;
+    constexpr bool operator!() noexcept { return !x && !y; }
+};
+
+constexpr bool operator==(DPI a, DPI b) noexcept
+{
+    return a.x == b.x && a.y == b.y;
+}
+
+constexpr bool operator!=(DPI a, DPI b) noexcept
+{
+    return !(a == b);
+}
+
+constexpr DPI operator*(DPI dpi, double scale) noexcept
+{
+    auto const dpiX = static_cast<int>(static_cast<double>(dpi.x) * scale);
+    auto const dpiY = static_cast<int>(static_cast<double>(dpi.y) * scale);
+    return DPI { dpiX, dpiY };
+}
+
+constexpr double average(DPI dpi) noexcept
+{
+    return 0.5 * static_cast<double>(dpi.x + dpi.y);
+}
+
 enum class font_weight
 {
     thin,
@@ -252,8 +284,9 @@ enum class render_mode
 
 } // namespace text
 
+// {{{ std::hash<>
 namespace std
-{ // {{{
+{
 template <>
 struct hash<text::font_key>
 {
@@ -290,9 +323,27 @@ struct hash<text::font_description>
     }
 };
 } // namespace std
+// }}}
 
+// {{{ fmt formatter
 namespace fmt
-{ // {{{
+{
+
+template <>
+struct formatter<text::DPI>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(text::DPI dpi, FormatContext& ctx)
+    {
+        return format_to(ctx.out(), "{}x{}", dpi.x, dpi.y);
+    }
+};
+
 template <>
 struct formatter<text::font_weight>
 {
@@ -515,3 +566,4 @@ struct formatter<text::render_mode>
     }
 };
 } // namespace fmt
+// }}}

@@ -22,6 +22,8 @@ add_library(contour_frontend_opengl
 set_target_properties(contour_frontend_opengl PROPERTIES AUTOMOC ON)
 set_target_properties(contour_frontend_opengl PROPERTIES AUTORCC ON)
 
+target_compile_definitions(contour_frontend_opengl PRIVATE CONTOUR_BUILD_TYPE="${CMAKE_BUILD_TYPE}")
+
 if(CONTOUR_PERF_STATS)
     target_compile_definitions(contour_frontend_opengl PRIVATE CONTOUR_PERF_STATS=1)
 endif()

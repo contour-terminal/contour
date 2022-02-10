@@ -231,10 +231,12 @@ namespace
 
     int toFragmentShaderSelector(text::bitmap_format glyphFormat)
     {
+        auto const lcdShaderId = FRAGMENT_SELECTOR_GLYPH_LCD;
+        // TODO ^^^ configurable vs FRAGMENT_SELECTOR_GLYPH_LCD_SIMPLE
         switch (glyphFormat)
         {
         case text::bitmap_format::alpha_mask: return FRAGMENT_SELECTOR_GLYPH_ALPHA;
-        case text::bitmap_format::rgb: return FRAGMENT_SELECTOR_GLYPH_LCD;
+        case text::bitmap_format::rgb: return lcdShaderId;
         case text::bitmap_format::rgba: return FRAGMENT_SELECTOR_IMAGE_BGRA;
         }
         Require(false && "Glyph format not handled.");

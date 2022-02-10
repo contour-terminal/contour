@@ -51,11 +51,6 @@ constexpr Point& operator+=(Point& a, Point b) noexcept
     return a;
 }
 
-constexpr double average(Point p) noexcept
-{
-    return 0.5 * static_cast<double>(p.x + p.y);
-}
-
 constexpr void swap(Point& a, Point& b) noexcept
 {
     Point const c = a;

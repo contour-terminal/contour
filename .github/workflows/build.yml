@@ -530,7 +530,7 @@ jobs:
       run: |
         set -ex
         ls -hlR
-        #sudo apt -q update
+        sudo apt -q update
         sudo apt install -y \
                         libfontconfig1 \
                         libfreetype6 \

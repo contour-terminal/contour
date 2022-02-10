@@ -74,7 +74,6 @@ class OpenGLRenderer final:
 
     // RenderTarget implementation
     void setRenderSize(crispy::ImageSize _size) override;
-    void setContentScale(double scale) override;
     void setMargin(terminal::renderer::PageMargin _margin) noexcept override;
     std::optional<AtlasTextureScreenshot> readAtlas() override;
     AtlasBackend& textureScheduler() override;
@@ -157,8 +156,6 @@ class OpenGLRenderer final:
     bool _initialized = false;
     crispy::ImageSize _renderTargetSize;
     QMatrix4x4 _projectionMatrix;
-
-    double _contentScale = 1.0;
 
     terminal::renderer::PageMargin _margin {};
 

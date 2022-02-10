@@ -49,7 +49,7 @@ class TerminalDisplay
 
     // Attributes
     virtual double refreshRate() const = 0;
-    virtual crispy::Point screenDPI() const = 0;
+    virtual text::DPI fontDPI() const = 0;
     virtual bool isFullScreen() const = 0;
     virtual crispy::ImageSize pixelSize() const = 0;
     virtual crispy::ImageSize cellSize() const = 0;
