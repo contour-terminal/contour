@@ -200,6 +200,7 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& textShaderConfig,
 
 void OpenGLRenderer::setRenderSize(ImageSize targetSurfaceSize)
 {
+    DisplayLog()("setRenderSize: {}", _renderTargetSize);
     _renderTargetSize = targetSurfaceSize;
     _projectionMatrix = ortho(0.0f,
                               float(*_renderTargetSize.width), // left, right
@@ -428,6 +429,8 @@ ImageSize OpenGLRenderer::renderBufferSize()
 
 void OpenGLRenderer::execute()
 {
+    DisplayLog()("execute: {}", _renderTargetSize);
+    glViewport(0, 0, unbox<GLsizei>(_renderTargetSize.width), unbox<GLsizei>(_renderTargetSize.height));
     _currentTextureId = std::numeric_limits<int>::max();
 
     // FIXME

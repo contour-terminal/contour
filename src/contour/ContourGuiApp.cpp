@@ -280,10 +280,10 @@ int ContourGuiApp::terminalGuiAction()
     // NB: High DPI scaling should be enabled, but that sadly also applies to QOpenGLWidget
     // which makes the text look pixelated on HighDPI screens. We want to apply HighDPI
     // manually in QOpenGLWidget.
-    // QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling, false);
-    // #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
-    //     QCoreApplication::setAttribute(Qt::AA_DisableHighDpiScaling);
-    // #endif
+    QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
+    #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
+        QCoreApplication::setAttribute(Qt::AA_DisableHighDpiScaling, false);
+    #endif
 
     vector<string> qtArgsStore;
     vector<char const*> qtArgsPtr;

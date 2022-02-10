@@ -248,9 +248,10 @@ TerminalWidget::TerminalWidget(TerminalSession& session,
     session_ { session },
     adaptSize_ { std::move(adaptSize) },
     enableBlurBehind_ { std::move(enableBackgroundBlur) },
+    lastScreenDPI_ { screenDPI() },
     renderer_ {
         terminal().pageSize(),
-        sanitizeFontDescription(profile().fonts, screenDPI()),
+        sanitizeFontDescription(profile().fonts, lastScreenDPI_),
         terminal().screen().colorPalette(),
         profile().backgroundOpacity,
         session_.config().textureAtlasHashtableSlots,
@@ -271,8 +272,6 @@ TerminalWidget::TerminalWidget(TerminalSession& session,
     setAttribute(Qt::WA_OpaquePaintEvent);
 
     setMinimumSize(gridMetrics().cellSize.width.as<int>() * 3, gridMetrics().cellSize.height.as<int>() * 2);
-
-    lastScreenDPI_ = screenDPI();
 
     // setAttribute(Qt::WA_TranslucentBackground);
     // setAttribute(Qt::WA_NoSystemBackground, false);
@@ -321,7 +320,7 @@ QSize TerminalWidget::minimumSizeHint() const
 {
     auto constexpr MinimumPageSize = PageSize { LineCount(2), ColumnCount(3) };
 
-    auto const cellSize = gridMetrics().cellSize / contentScale();
+    auto const cellSize = gridMetrics().cellSize;// / contentScale();
 
     return QSize(cellSize.width.as<int>() * MinimumPageSize.columns.as<int>(),
                  cellSize.height.as<int>() * MinimumPageSize.lines.as<int>());
@@ -329,7 +328,7 @@ QSize TerminalWidget::minimumSizeHint() const
 
 QSize TerminalWidget::sizeHint() const
 {
-    auto const cellSize = renderer_.gridMetrics().cellSize / contentScale();
+    auto const cellSize = renderer_.gridMetrics().cellSize;// / contentScale();
     auto const viewSize = ImageSize { Width(*cellSize.width * *profile().terminalSize.columns),
                                       Height(*cellSize.height * *profile().terminalSize.lines) };
 
@@ -379,7 +378,7 @@ void TerminalWidget::onScreenDpiChanged()
     renderTarget_->setContentScale(contentScale());
     session_.setContentScale(contentScale());
 
-    auto const newPixelSize = terminal::ImageSize { Width(width()), Height(height()) } * contentScale();
+    auto const newPixelSize = terminal::ImageSize { Width(width()), Height(height()) };
 
     // Apply resize on same window metrics propagates proper recalculations and repaint.
     applyResize(newPixelSize, session_, renderer_);
@@ -507,7 +506,7 @@ void TerminalWidget::initializeGL()
 void TerminalWidget::resizeGL(int _width, int _height)
 {
     QOpenGLWidget::resizeGL(_width, _height);
-    auto const newPixelSize = terminal::ImageSize { Width(_width), Height(_height) } * contentScale();
+    auto const newPixelSize = terminal::ImageSize { Width(_width), Height(_height) };
     LOGSTORE(DisplayLog)("resizing to {}", newPixelSize);
     applyResize(newPixelSize, session_, renderer_);
 }
@@ -682,7 +681,26 @@ void TerminalWidget::onScrollBarValueChanged(int _value)
 
 double TerminalWidget::contentScale() const
 {
-    return average(screenDPI()) / 96.0;
+#if !defined(__APPLE__) && !defined(_WIN32)
+    if (auto const kcmFontsFile = kcmFontsFilePath())
+    {
+        auto const contents = crispy::readFileAsString(kcmFontsFile.value());
+        for (auto const line: crispy::split(contents, '\n'))
+        {
+            auto const fields = crispy::split(line, '=');
+            if (fields.size() == 2 && fields[0] == "forceFontDPI"sv)
+            {
+                auto const forcedDPI = static_cast<double>(crispy::to_integer(fields[1]).value_or(0.0));
+                // fmt::print("contentScale: forcedDPI={}\n", forcedDPI);
+                if (forcedDPI >= 96.0)
+                    return forcedDPI / 96.0;
+            }
+        }
+    }
+#endif
+
+    // fmt::print("contentScale: DPI={}\n", devicePixelRatioF());
+    return devicePixelRatioF();
 }
 
 void TerminalWidget::updateMinimumSize()
@@ -715,39 +733,7 @@ crispy::Point TerminalWidget::screenDPI() const
 
 crispy::Point TerminalWidget::systemScreenDPI() const
 {
-#if !defined(__APPLE__) && !defined(_WIN32)
-    if (auto const kcmFontsFile = kcmFontsFilePath())
-    {
-        auto const contents = crispy::readFileAsString(kcmFontsFile.value());
-        for (auto const line: crispy::split(contents, '\n'))
-        {
-            auto const fields = crispy::split(line, '=');
-            if (fields.size() == 2 && fields[0] == "forceFontDPI"sv)
-            {
-                if (auto const forcedDPI = static_cast<int>(crispy::to_integer(fields[1]).value_or(0)))
-                {
-                    return crispy::Point { forcedDPI, forcedDPI };
-                }
-                else
-                {
-                    // Do not fallback to logicalDpiX/Y because it's most likely
-                    // a stale value when a live reconfiguration has happened.
-                    return crispy::Point { physicalDpiX(), physicalDpiY() };
-                }
-            }
-        }
-    }
-#endif
-
-#if defined(__APPLE__)
-    // Okay, this is weird!
-    // On MacOS nothing changes except physical DPI on scaling settings change.
-    auto const contentScale = devicePixelRatioF();
-    return crispy::Point { int(qreal(physicalDpiX()) * contentScale),
-                           int(qreal(physicalDpiY()) * contentScale) };
-#else
-    return crispy::Point { logicalDpiX(), logicalDpiY() };
-#endif
+    return crispy::Point { logicalDpiX(), logicalDpiY() } * contentScale();
 }
 
 bool TerminalWidget::isFullScreen() const
@@ -1001,7 +987,7 @@ bool TerminalWidget::setFontSize(text::font_size _size)
         return false;
 
     auto currentWidgetPixelSize =
-        ImageSize { terminal::Width(width()), terminal::Height(height()) } * contentScale();
+        ImageSize { terminal::Width(width()), terminal::Height(height()) };
     renderer_.setMargin(computeMargin(gridMetrics().cellSize, pageSize(), currentWidgetPixelSize));
     // resize widget (same pixels, but adjusted terminal rows/columns and margin)
     applyResize(currentWidgetPixelSize, session_, renderer_);

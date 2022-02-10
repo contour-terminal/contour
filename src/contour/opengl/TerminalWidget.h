@@ -176,6 +176,7 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     TerminalSession& session_;
     std::function<void()> adaptSize_;
     std::function<void(bool)> enableBlurBehind_;
+    crispy::Point lastScreenDPI_;
     terminal::renderer::Renderer renderer_;
     std::atomic<bool> initialized_ = false;
     bool renderingPressure_ = false;
@@ -189,7 +190,6 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     RenderStateManager state_;
 
     QFileSystemWatcher filesystemWatcher_;
-    crispy::Point lastScreenDPI_;
 
     // ======================================================================
 

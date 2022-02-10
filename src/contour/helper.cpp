@@ -71,8 +71,8 @@ namespace
         auto const pageSize = session.terminal().screen().pageSize();
         auto const cellSize = session.display()->cellSize();
 
-        auto const sx = int(double(event->pos().x()) * session.contentScale());
-        auto const sy = int(double(event->pos().y()) * session.contentScale());
+        auto const sx = event->pos().x();
+        auto const sy = event->pos().y();
 
         auto const row =
             terminal::LineOffset(clamp((sy - MarginTop) / cellSize.height.as<int>(), 0, *pageSize.lines - 1));
@@ -83,20 +83,20 @@ namespace
         return { row, col };
     }
 
-    MousePixelPosition makeMousePixelPosition(QMouseEvent* _event, double scale) noexcept
+    MousePixelPosition makeMousePixelPosition(QMouseEvent* _event) noexcept
     {
         // TODO: apply margin once supported
-        return MousePixelPosition { MousePixelPosition::X { int(double(_event->x()) * scale) },
-                                    MousePixelPosition::Y { int(double(_event->y()) * scale) } };
+        return MousePixelPosition { MousePixelPosition::X { _event->x() },
+                                    MousePixelPosition::Y { _event->y() } };
     }
 
-    MousePixelPosition makeMousePixelPosition(QWheelEvent* _event, double scale) noexcept
+    MousePixelPosition makeMousePixelPosition(QWheelEvent* _event) noexcept
     {
         // TODO: apply margin once supported
 #if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
         return MousePixelPosition {
-            MousePixelPosition::X { static_cast<int>(_event->position().x() * scale) },
-            MousePixelPosition::Y { static_cast<int>(_event->position().y() * scale) }
+            MousePixelPosition::X { static_cast<int>(_event->position().x()) },
+            MousePixelPosition::Y { static_cast<int>(_event->position().y()) }
         };
 #else
         return MousePixelPosition { MousePixelPosition::X { static_cast<int>(_event->x() * scale) },
@@ -276,7 +276,7 @@ void sendWheelEvent(QWheelEvent* _event, TerminalSession& _session)
         auto const modifier = makeModifier(_event->modifiers());
 
         _session.sendMousePressEvent(
-            modifier, button, makeMousePixelPosition(_event, _session.contentScale()), steady_clock::now());
+            modifier, button, makeMousePixelPosition(_event), steady_clock::now());
     }
 }
 
@@ -284,7 +284,7 @@ void sendMousePressEvent(QMouseEvent* _event, TerminalSession& _session)
 {
     _session.sendMousePressEvent(makeModifier(_event->modifiers()),
                                  makeMouseButton(_event->button()),
-                                 makeMousePixelPosition(_event, _session.contentScale()),
+                                 makeMousePixelPosition(_event),
                                  steady_clock::now());
     _event->accept();
 }
@@ -293,7 +293,7 @@ void sendMouseReleaseEvent(QMouseEvent* _event, TerminalSession& _session)
 {
     _session.sendMouseReleaseEvent(makeModifier(_event->modifiers()),
                                    makeMouseButton(_event->button()),
-                                   makeMousePixelPosition(_event, _session.contentScale()),
+                                   makeMousePixelPosition(_event),
                                    steady_clock::now());
     _event->accept();
 }
@@ -310,7 +310,7 @@ void sendMouseMoveEvent(QMouseEvent* _event, TerminalSession& _session)
 
     _session.sendMouseMoveEvent(makeModifier(_event->modifiers()),
                                 makeMouseCellLocation(_event, _session),
-                                makeMousePixelPosition(_event, _session.contentScale()),
+                                makeMousePixelPosition(_event),
                                 steady_clock::now());
 }
 
@@ -475,7 +475,6 @@ void applyResize(terminal::ImageSize _newPixelSize,
                  TerminalSession& _session,
                  terminal::renderer::Renderer& _renderer)
 {
-    LOGSTORE(SessionLog)("resizing to {}", _newPixelSize);
     if (*_newPixelSize.width == 0 || *_newPixelSize.height == 0)
         return;
 
