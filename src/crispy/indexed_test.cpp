@@ -25,6 +25,18 @@ using namespace crispy;
 using std::array;
 using std::vector;
 
+namespace
+{
+vector<char> getVec()
+{
+    vector<char> v;
+    v.push_back('a');
+    v.push_back('b');
+    v.push_back('c');
+    return v;
+}
+} // namespace
+
 TEST_CASE("indexed.basic", "[indexed]")
 {
     auto const rng = crispy::indexed(array { 'a', 'b', 'c' });
@@ -77,15 +89,6 @@ TEST_CASE("indexed.for_loop_basic_rvalue", "[indexed]")
         }
         ++k;
     }
-}
-
-vector<char> getVec()
-{
-    vector<char> v;
-    v.push_back('a');
-    v.push_back('b');
-    v.push_back('c');
-    return v;
 }
 
 TEST_CASE("indexed.for_loop_basic_rvalue_via_call", "[indexed]")

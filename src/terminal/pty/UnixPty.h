@@ -44,7 +44,7 @@ class UnixPty: public Pty
     void prepareChildProcess() override;
     void close() override;
     bool isClosed() const override;
-    [[nodiscard]] constexpr int masterFd() const noexcept { return master_; };
+    [[nodiscard]] constexpr int masterFd() const noexcept { return master_; }
 
   private:
     PageSize size_;

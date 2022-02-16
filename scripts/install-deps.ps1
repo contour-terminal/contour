@@ -24,9 +24,9 @@ $ThirdParties =
         URI="https://github.com/catchorg/Catch2/archive/refs/tags/v2.13.7.zip"
     };
     [ThirdParty]@{
-        Folder="libunicode-455eb3831c3bddcc476a3c6f374eb98359505ec0";
-        Archive="libunicode-455eb3831c3bddcc476a3c6f374eb98359505ec0.zip";
-        URI="https://github.com/contour-terminal/libunicode/archive/455eb3831c3bddcc476a3c6f374eb98359505ec0.zip"
+        Folder="libunicode-fcdcee4bb59a542c591d572ff69fc1c96b18cbbe";
+        Archive="libunicode-fcdcee4bb59a542c591d572ff69fc1c96b18cbbe.zip";
+        URI="https://github.com/contour-terminal/libunicode/archive/fcdcee4bb59a542c591d572ff69fc1c96b18cbbe.zip"
     };
     [ThirdParty]@{
         Folder="termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed";

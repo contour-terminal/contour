@@ -393,7 +393,7 @@ void TerminalWidget::logDisplayTopInfo()
 #endif
     DisplayLog()("[FYI] Application PID     : {}", QCoreApplication::applicationPid());
     DisplayLog()("[FYI] OpenGL type         : {}", openGLTypeString);
-    DisplayLog()("[FYI] OpenGL renderer     : {}", glGetString(GL_RENDERER));
+    DisplayLog()("[FYI] OpenGL renderer     : {}", (char const*) glGetString(GL_RENDERER));
     DisplayLog()("[FYI] Qt platform         : {}", QGuiApplication::platformName().toStdString());
 
     GLint versionMajor {};

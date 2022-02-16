@@ -158,18 +158,19 @@ namespace
         return hr;
     }
 #endif
-} // anonymous namespace
 
-char** createArgv(string const& _arg0, std::vector<string> const& _args, size_t i = 0)
-{
-    auto const argCount = _args.size(); // factor out in order to avoid false-positive by static analysers.
-    char** argv = new char*[argCount + 2 - i];
-    argv[0] = const_cast<char*>(_arg0.c_str());
-    for (size_t i = 0; i < argCount; ++i)
-        argv[i + 1] = const_cast<char*>(_args[i].c_str());
-    argv[argCount + 1] = nullptr;
-    return argv;
-}
+    char** createArgv(string const& _arg0, std::vector<string> const& _args, size_t i = 0)
+    {
+        auto const argCount =
+            _args.size(); // factor out in order to avoid false-positive by static analysers.
+        char** argv = new char*[argCount + 2 - i];
+        argv[0] = const_cast<char*>(_arg0.c_str());
+        for (size_t i = 0; i < argCount; ++i)
+            argv[i + 1] = const_cast<char*>(_args[i].c_str());
+        argv[argCount + 1] = nullptr;
+        return argv;
+    }
+} // anonymous namespace
 
 Process::Process(string const& _path,
                  vector<string> const& _args,
