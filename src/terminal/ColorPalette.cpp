@@ -50,7 +50,7 @@ void ImageData::updateHash() noexcept
     uint8_t const* scanLine = pixels.data();
     auto const scanLineLength = unbox<size_t>(size.width);
     auto const pitch = roundUp(scanLineLength, static_cast<size_t>(rowAlignment));
-    for (int row = 0; row < size.height.value; ++row)
+    for (unsigned row = 0; row < size.height.value; ++row)
     {
         hashValue = hashValue * StrongHash::compute(scanLine, scanLineLength);
         scanLine += pitch;

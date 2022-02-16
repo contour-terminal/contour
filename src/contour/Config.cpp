@@ -988,7 +988,7 @@ void softLoadFont(UsedKeys& _usedKeys,
         {
             _usedKeys.emplace(fmt::format("{}.{}", _basePath, "features"));
             YAML::Node featuresNode = _node["features"];
-            for (int i = 0; i < featuresNode.size(); ++i)
+            for (auto i = 0u; i < featuresNode.size(); ++i)
             {
                 YAML::Node const featureNode = featuresNode[i];
                 if (!featureNode.IsScalar() || featureNode.as<string>().size() != 4)

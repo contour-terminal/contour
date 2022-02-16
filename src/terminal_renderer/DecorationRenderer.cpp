@@ -144,13 +144,12 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
         return create(imageSize, [&]() -> atlas::Buffer {
             auto image = atlas::Buffer(imageSize.area(), 0);
             for (int y = 1; y <= thickness; ++y)
-                for (int x = 0; x < *width; ++x)
+                for (int x = 0; x < unbox<int>(width); ++x)
                     image[(*height - y0 - y) * *width + x] = 0xFF;
             return image;
         });
     }
     case Decorator::DoubleUnderline: {
-        auto const thickness_half = max(1, int(ceil(underlineThickness() / 3.0)));
         auto const thickness = max(1, int(ceil(double(underlineThickness()) * 2.0) / 3.0));
         auto const y1 = max(0, underlinePosition() + thickness);
         auto const y0 = max(0, y1 - 3 * thickness);
@@ -160,7 +159,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             auto image = atlas::Buffer(imageSize.area(), 0);
             for (int y = 1; y <= thickness; ++y)
             {
-                for (int x = 0; x < *width; ++x)
+                for (int x = 0; x < unbox<int>(width); ++x)
                 {
                     image[(*height - y1 - y) * *width + x] = 0xFF; // top line
                     image[(*height - y0 - y) * *width + x] = 0xFF; // bottom line
@@ -178,7 +177,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
         auto const imageSize = ImageSize { width, height };
         auto block = blockElement(imageSize);
         return create(block.downsampledSize(), [&]() -> atlas::Buffer {
-            for (int x = 0; x < *width; ++x)
+            for (int x = 0; x < unbox<int>(width); ++x)
             {
                 // Using Wu's antialiasing algorithm to paint the curved line.
                 // See: https://www-users.mat.umk.pl//~gruby/teaching/lgim/1_wu.pdf
@@ -223,7 +222,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
         return create(imageSize, [&]() -> atlas::Buffer {
             auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
             for (int y = 1; y <= thickness; ++y)
-                for (int x = 0; x < *width; ++x)
+                for (int x = 0; x < unbox<int>(width); ++x)
                     if (fabsf(float(x) / float(*width) - 0.5f) >= 0.25f)
                         image[(*height - y0 - y) * *width + x] = 0xFF;
             return image;
@@ -238,14 +237,14 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             auto const gap = 0; // thickness;
             // Draws the top and bottom horizontal lines
             for (int y = gap; y < thickness + gap; ++y)
-                for (int x = gap; x < *width - gap; ++x)
+                for (int x = gap; x < unbox<int>(width) - gap; ++x)
                 {
                     image[y * *width + x] = 0xFF;
                     image[(*cellHeight - 1 - y) * *width + x] = 0xFF;
                 }
 
             // Draws the left and right vertical lines
-            for (int y = gap; y < *cellHeight - gap; y++)
+            for (int y = gap; y < unbox<int>(cellHeight) - gap; y++)
                 for (int x = gap; x < thickness + gap; ++x)
                 {
                     image[y * *width + x] = 0xFF;
@@ -261,7 +260,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
         return create(imageSize, [&]() -> atlas::Buffer {
             auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(cellHeight), 0);
             for (int y = 0; y < thickness; ++y)
-                for (int x = 0; x < *width; ++x)
+                for (int x = 0; x < unbox<int>(width); ++x)
                     image[(*cellHeight - y - 1) * *width + x] = 0xFF;
             return image;
         });
@@ -273,7 +272,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
         return create(imageSize, [&]() -> atlas::Buffer {
             auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
             for (int y = 1; y <= thickness; ++y)
-                for (int x = 0; x < *width; ++x)
+                for (int x = 0; x < unbox<int>(width); ++x)
                     image[(*height - y) * *width + x] = 0xFF;
             return image;
         });

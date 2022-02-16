@@ -203,9 +203,11 @@ font_source_list fontconfig_locator::locate(font_description const& _fd)
 
     font_source_list output;
 
+#if defined(_WIN32)
     auto const addFontFile = [&](std::string_view path) {
         output.emplace_back(font_path { string { path } });
     };
+#endif
 
     for (int i = 0; i < fs->nfont; ++i)
     {

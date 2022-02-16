@@ -48,10 +48,6 @@ font_source_list mock_font_locator::locate(font_description const& _fd)
 
     font_source_list output;
 
-    auto const addFontFile = [&](std::string_view path) {
-        output.emplace_back(font_path { string { path } });
-    };
-
     for (auto const& item: mock_detail::registry)
     {
         if (item.description != _fd)

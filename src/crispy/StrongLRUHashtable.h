@@ -295,7 +295,7 @@ StrongLRUHashtable<Value>::StrongLRUHashtable(StrongHashtableSize hashCount,
 
     memset(_hashTable, 0, hashCount.value * sizeof(uint32_t));
 
-    for (auto entryIndex = 0; entryIndex <= entryCount.value; ++entryIndex)
+    for (uint32_t entryIndex = 0; entryIndex <= entryCount.value; ++entryIndex)
     {
         Entry* entry = _entries + entryIndex;
         new (entry) Entry(NextWithSameHash(entryIndex + 1));
@@ -781,7 +781,7 @@ inline void StrongLRUHashtable<Value>::linkToLRUChainHead(uint32_t entryIndex) n
     newHead.ordering = sentinel.ordering++;
 #endif
 
-    Require(validateChange(1) == _size);
+    Require(validateChange(1) == static_cast<int>(_size));
 }
 
 template <typename Value>

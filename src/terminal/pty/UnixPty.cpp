@@ -270,7 +270,6 @@ int UnixPty::write(char const* buf, size_t size)
     timeval tv {};
     tv.tv_sec = 1;
     tv.tv_usec = 0;
-    int nwritten = 0;
 
     fd_set rfd, wfd, efd;
     FD_ZERO(&rfd);
@@ -298,7 +297,7 @@ int UnixPty::write(char const* buf, size_t size)
         if (rv < 0)
             // errorlog()("PTY write failed: {}", strerror(errno));
             LOGSTORE(PtyOutLog)("PTY write of {} bytes failed. {}\n", size, strerror(errno));
-        else if (0 <= rv && rv < size)
+        else if (0 <= rv && static_cast<size_t>(rv) < size)
             LOGSTORE(PtyOutLog)("Partial write. {} bytes written and {} bytes left.", rv, size - rv);
     }
 

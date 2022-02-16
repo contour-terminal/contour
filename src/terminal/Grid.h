@@ -558,13 +558,6 @@ void Grid<Cell>::render(RendererT&& _render, ScrollOffset _scrollOffset) const
 {
     assert(!_scrollOffset || unbox<LineCount>(_scrollOffset) <= historyLineCount());
 
-    auto const topLineOffset = -unbox<long>(_scrollOffset);
-    auto const topLeftOffset = topLineOffset * unbox<long>(pageSize_.columns);
-    auto const pageCellCount = pageSize_.lines * pageSize_.columns;
-    auto const bottomRightOffset = topLeftOffset + pageCellCount;
-
-    // assert(bottomRightOffset >= pageCellCount);
-
     auto const static emptyCell = Cell {};
 
     auto y = LineOffset(0);

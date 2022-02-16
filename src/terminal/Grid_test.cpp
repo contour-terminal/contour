@@ -452,6 +452,7 @@ TEST_CASE("resize_shrink_columns_with_reflow_and_unwrappable", "[grid]")
     grid.lineAt(LineOffset(0)).setWrappable(false);
     logGridText(grid, "BEFORE");
     auto const newCursorPos = grid.resize(newPageSize, curCursorPos, false);
+    (void) newCursorPos;
     logGridText(grid, "AFTER");
 
     CHECK(grid.historyLineCount() == LineCount(5));
@@ -494,6 +495,7 @@ TEST_CASE("resize_shrink_columns_with_reflow_grow_lines_and_unwrappable", "[grid
     grid.lineAt(LineOffset(0)).setWrappable(false);
     // logGridText(grid, "BEFORE");
     auto const newCursorPos = grid.resize(PageSize { LineCount(4), ColumnCount(2) }, curCursorPos, false);
+    (void) newCursorPos;
     // logGridText(grid, "AFTER");
 
     CHECK(grid.lineText(LineOffset(-3)) == "AB");

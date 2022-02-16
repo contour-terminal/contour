@@ -627,8 +627,6 @@ auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
     // upload all but the head-tile explicitly and then return the head-tile
     // to the caller.
 
-    auto const textureAtlasSize = textureScheduler().atlasSize();
-
     auto const bitmapFormat = createData.bitmapFormat;
     auto const colorComponentCount = atlas::element_count(bitmapFormat);
     auto const pitch = unbox<uintptr_t>(createData.bitmapSize.width) * colorComponentCount;
@@ -739,10 +737,10 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     if (false) // (yMin < 0)
     {
         auto const rowCount = -yMin;
-        Require(rowCount <= *glyph.bitmapSize.height);
+        Require(rowCount <= unbox<int>(glyph.bitmapSize.height));
         auto const pixelCount =
             rowCount * unbox<int>(glyph.bitmapSize.width) * text::pixel_size(glyph.format);
-        Require(0 < pixelCount && pixelCount <= glyph.bitmap.size());
+        Require(0 < pixelCount && static_cast<size_t>(pixelCount) <= glyph.bitmap.size());
         LOGSTORE(RasterizerLog)("Cropping {} underflowing bitmap rows.", rowCount);
         glyph.bitmapSize.height += Height(yMin);
         auto& data = glyph.bitmap;

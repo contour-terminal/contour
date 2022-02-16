@@ -121,9 +121,9 @@ class Selection
 
   protected:
     State state_ = State::Waiting;
+    SelectionHelper const& helper_;
     CellLocation from_;
     CellLocation to_;
-    SelectionHelper const& helper_;
 };
 
 class RectangularSelection: public Selection

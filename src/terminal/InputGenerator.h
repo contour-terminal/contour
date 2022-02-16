@@ -317,7 +317,7 @@ class InputGenerator
     void consume(int n)
     {
         consumedBytes_ += n;
-        if (consumedBytes_ == pendingSequence_.size())
+        if (consumedBytes_ == static_cast<int>(pendingSequence_.size()))
         {
             consumedBytes_ = 0;
             pendingSequence_.clear();

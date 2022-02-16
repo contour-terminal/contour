@@ -87,11 +87,6 @@ bool operator==(FontPathAndSize const& a, FontPathAndSize const& b) noexcept
 
 } // namespace
 
-bool operator!=(FontPathAndSize const& a, FontPathAndSize const& b) noexcept
-{
-    return !(a == b);
-}
-
 namespace std
 {
 template <>
@@ -239,138 +234,6 @@ namespace
             // TODO: make this list complete
             return HB_SCRIPT_INVALID; // hb_buffer_guess_segment_properties() will fill it
         }
-    }
-
-    static optional<tuple<string, vector<string>>> getFontFallbackPaths(font_description const& _fd)
-    {
-        LOGSTORE(LocatorLog)("Loading font chain for: {}", _fd);
-        auto pat = unique_ptr<FcPattern, void (*)(FcPattern*)>(FcPatternCreate(),
-                                                               [](auto p) { FcPatternDestroy(p); });
-
-        FcPatternAddBool(pat.get(), FC_OUTLINE, true);
-        FcPatternAddBool(pat.get(), FC_SCALABLE, true);
-        // FcPatternAddBool(pat.get(), FC_EMBEDDED_BITMAP, false);
-
-        // XXX It should be recommended to turn that on if you are looking for colored fonts,
-        //     such as for emoji, but it seems like fontconfig doesn't care, it works either way.
-        //
-        // bool const _color = true;
-        // FcPatternAddBool(pat.get(), FC_COLOR, _color);
-
-        if (!_fd.familyName.empty())
-            FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) _fd.familyName.c_str());
-
-        if (_fd.spacing != font_spacing::proportional)
-        {
-#ifdef _WIN32
-            // On Windows FontConfig can't find "monospace". We need to use "Consolas" instead.
-            if (_fd.familyName == "monospace")
-                FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) "Consolas");
-#elif __APPLE__
-            // Same for macOS, we use "Menlo" for "monospace".
-            if (_fd.familyName == "monospace")
-                FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) "Menlo");
-#else
-            if (_fd.familyName != "monospace")
-                FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) "monospace");
-#endif
-            FcPatternAddInteger(pat.get(), FC_SPACING, FC_MONO);
-            FcPatternAddInteger(pat.get(), FC_SPACING, FC_DUAL);
-        }
-
-        if (_fd.weight != font_weight::normal)
-            FcPatternAddInteger(pat.get(), FC_WEIGHT, fcWeight(_fd.weight));
-        if (_fd.slant != font_slant::normal)
-            FcPatternAddInteger(pat.get(), FC_SLANT, fcSlant(_fd.slant));
-
-        FcConfigSubstitute(nullptr, pat.get(), FcMatchPattern);
-        FcDefaultSubstitute(pat.get());
-
-        FcResult result = FcResultNoMatch;
-        auto fs = unique_ptr<FcFontSet, void (*)(FcFontSet*)>(
-            FcFontSort(nullptr, pat.get(), /*unicode-trim*/ FcTrue, /*FcCharSet***/ nullptr, &result),
-            [](auto p) { FcFontSetDestroy(p); });
-
-        if (!fs || result != FcResultMatch)
-            return {};
-
-        vector<string> fallbackFonts;
-        for (int i = 0; i < fs->nfont; ++i)
-        {
-            FcPattern* font = fs->fonts[i];
-
-            FcChar8* file;
-            if (FcPatternGetString(font, FC_FILE, 0, &file) != FcResultMatch)
-                continue;
-
-#if defined(FC_COLOR) // Not available on OS/X?
-// FcBool color = FcFalse;
-// FcPatternGetInteger(font, FC_COLOR, 0, &color);
-// if (color && !_color)
-// {
-//     LOGSTORE(LocatorLog)("Skipping font (contains color). {}", (char const*) file);
-//     continue;
-// }
-#endif
-
-            int spacing = -1; // ignore font if we cannot retrieve spacing information
-            FcPatternGetInteger(font, FC_SPACING, 0, &spacing);
-            if (_fd.strict_spacing)
-            {
-                if ((_fd.spacing == font_spacing::proportional && spacing < FC_PROPORTIONAL)
-                    || (_fd.spacing == font_spacing::mono && spacing < FC_MONO))
-                {
-                    LOGSTORE(LocatorLog)
-                    ("Skipping font: {} ({} < {}).",
-                     (char const*) (file),
-                     fcSpacingStr(spacing),
-                     fcSpacingStr(FC_DUAL));
-                    continue;
-                }
-            }
-
-            fallbackFonts.emplace_back((char const*) (file));
-            // LOGSTORE(LocatorLog)("Found font: {}", fallbackFonts.back());
-        }
-
-#if defined(_WIN32)
-    #define FONTDIR "C:\\Windows\\Fonts\\"
-        if (_fd.familyName == "emoji")
-        {
-            fallbackFonts.emplace_back(FONTDIR "seguiemj.ttf");
-            fallbackFonts.emplace_back(FONTDIR "seguisym.ttf");
-        }
-        else if (_fd.weight != font_weight::normal && _fd.slant != font_slant::normal)
-        {
-            fallbackFonts.emplace_back(FONTDIR "consolaz.ttf");
-            fallbackFonts.emplace_back(FONTDIR "seguisbi.ttf");
-        }
-        else if (_fd.weight != font_weight::normal)
-        {
-            fallbackFonts.emplace_back(FONTDIR "consolab.ttf");
-            fallbackFonts.emplace_back(FONTDIR "seguisb.ttf");
-        }
-        else if (_fd.slant != font_slant::normal)
-        {
-            fallbackFonts.emplace_back(FONTDIR "consolai.ttf");
-            fallbackFonts.emplace_back(FONTDIR "seguisli.ttf");
-        }
-        else
-        {
-            fallbackFonts.emplace_back(FONTDIR "consola.ttf");
-            fallbackFonts.emplace_back(FONTDIR "seguisym.ttf");
-        }
-
-    #undef FONTDIR
-#endif
-
-        if (fallbackFonts.empty())
-            return nullopt;
-
-        string primary = fallbackFonts.front();
-        fallbackFonts.erase(fallbackFonts.begin());
-
-        return tuple { primary, fallbackFonts };
     }
 
     // XXX currently not needed
@@ -664,10 +527,10 @@ struct open_shaper::Private // {{{
     }
 
     Private(DPI _dpi, unique_ptr<font_locator> _locator):
-        ft_ {},
         ftCleanup_ { [this]() {
             FT_Done_FreeType(ft_);
         } },
+        ft_ {},
         locator_ { move(_locator) },
         dpi_ { _dpi },
         hb_buf_(hb_buffer_create(), [](auto p) { hb_buffer_destroy(p); }),
@@ -858,7 +721,7 @@ void open_shaper::shape(font_key _font,
     _result.clear();
     auto cluster = _clusters[0];
     int start = 0;
-    for (int i = 1; i < _clusters.size(); ++i)
+    for (int i = 1; i < static_cast<int>(_clusters.size()); ++i)
     {
         if (cluster != _clusters[i])
         {

@@ -181,11 +181,11 @@ struct CONTOUR_PACKED Color
     constexpr Color& operator=(Color&&) noexcept = default;
 
     constexpr Color(BrightColor _value) noexcept:
-        content { unsigned(_value) & 0xFF | (unsigned(ColorType::Bright) << 24) }
+        content { (unsigned(_value) & 0xFF) | (unsigned(ColorType::Bright) << 24) }
     {
     }
     constexpr Color(IndexedColor _value) noexcept:
-        content { unsigned(_value) & 0xFF | (unsigned(ColorType::Indexed) << 24) }
+        content { (unsigned(_value) & 0xFF) | (unsigned(ColorType::Indexed) << 24) }
     {
     }
     constexpr Color(RGBColor _rgb) noexcept: content { _rgb.value() | (unsigned(ColorType::RGB) << 24) } {}

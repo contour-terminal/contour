@@ -551,11 +551,11 @@ void OpenGLRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)
     switch (param.properties.format)
     {
     case atlas::Format::Red:
-        for (auto i = 0; i < param.size.area(); ++i)
+        for (auto i = 0u; i < param.size.area(); ++i)
             *t++ = 0x40;
         break;
     case atlas::Format::RGB:
-        for (auto i = 0; i < param.size.area(); ++i)
+        for (auto i = 0u; i < param.size.area(); ++i)
         {
             *t++ = 0x00;
             *t++ = 0x00;
@@ -563,7 +563,7 @@ void OpenGLRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)
         }
         break;
     case atlas::Format::RGBA:
-        for (auto i = 0; i < param.size.area(); ++i)
+        for (auto i = 0u; i < param.size.area(); ++i)
         {
             *t++ = 0x00;
             *t++ = 0xA0;

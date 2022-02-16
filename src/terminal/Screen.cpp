@@ -377,12 +377,6 @@ namespace // {{{ helper
         Color currentUnderlineColor_ = DefaultColor();
         Color currentBackgroundColor_ = DefaultColor();
     };
-
-    array<Grid<Cell>, 2> emptyGrids(PageSize _size, bool _reflowOnResize, LineCount _maxHistoryLineCount)
-    {
-        return array<Grid<Cell>, 2> { Grid<Cell>(_size, _reflowOnResize, _maxHistoryLineCount),
-                                      Grid<Cell>(_size, false, LineCount(0)) };
-    }
 } // namespace
 // }}}
 

@@ -80,7 +80,7 @@ namespace detail
             Heavy4, // 4-dashed heavy line
         };
 
-        string_view to_stringview(Line lm)
+        [[maybe_unused]] string_view to_stringview(Line lm)
         {
             switch (lm)
             {
@@ -570,7 +570,6 @@ namespace detail
         {
             auto const c = Point { unbox<int>(size.width) / 2, unbox<int>(size.height) / 2 };
             auto const w = unbox<int>(size.width) - 1;
-            auto const h = unbox<int>(size.height) - 1;
 
             auto const f = linearEq({ 0, 0 }, c);
             auto const g = linearEq(c, { w, 0 });
@@ -597,7 +596,6 @@ namespace detail
 
             auto const c = Point { unbox<int>(size.width) / 2, unbox<int>(size.height) / 2 };
             auto const w = unbox<int>(size.width) - 1;
-            auto const h = unbox<int>(size.height) - 1;
 
             auto const f = linearEq({ 0, 0 }, c);
             auto const g = linearEq(c, { w, 0 });
@@ -704,7 +702,7 @@ namespace detail
         inline MosaicBlock operator+(MosaicBlock a, RatioBlock b)
         {
             a.blocks.push_back(b);
-            return std::move(a);
+            return a;
         }
 
         inline RatioBlock operator*(RatioBlock a, RatioBlock b) noexcept
@@ -912,7 +910,7 @@ Renderable::AtlasTileAttributes const* BoxDrawingRenderer::getOrCreateCachedTile
 
 bool BoxDrawingRenderer::renderable(char32_t codepoint) const noexcept
 {
-    auto const ascending = [codepoint](auto a, auto b) noexcept -> bool {
+    auto const ascending = [codepoint](char32_t a, char32_t b) noexcept -> bool {
         return a <= codepoint && codepoint <= b;
     };
 
@@ -959,17 +957,17 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
         // TODO: case 0x23A0: // ⎠ RIGHT PARENTHESIS LOWER HOOK
 
     case 0x23A1: // ⎡ LEFT SQUARE BRACKET UPPER CORNER
-        return blockElement(size) | left(1 / 8_th) + upper(1 / 8_th) * left(1 / 2_th);
+        return blockElement(size) | (left(1 / 8_th) + upper(1 / 8_th) * left(1 / 2_th));
     case 0x23A2: // ⎢ LEFT SQUARE BRACKET EXTENSION
         return blockElement(size) | left(1 / 8_th);
     case 0x23A3: // ⎣ LEFT SQUARE BRACKET LOWER CORNER
-        return blockElement(size) | left(1 / 8_th) + lower(1 / 8_th) * left(1 / 2_th);
+        return blockElement(size) | (left(1 / 8_th) + lower(1 / 8_th) * left(1 / 2_th));
     case 0x23A4: // ⎤ RIGHT SQUARE BRACKET UPPER CORNER
-        return blockElement(size) | right(1 / 8_th) + upper(1 / 8_th) * right(1 / 2_th);
+        return blockElement(size) | (right(1 / 8_th) + upper(1 / 8_th) * right(1 / 2_th));
     case 0x23A5: // ⎥ RIGHT SQUARE BRACKET EXTENSION
         return blockElement(size) | right(1 / 8_th);
     case 0x23A6: // ⎦ RIGHT SQUARE BRACKET LOWER CORNER
-        return blockElement(size) | right(1 / 8_th) + lower(1 / 8_th) * right(1 / 2_th);
+        return blockElement(size) | (right(1 / 8_th) + lower(1 / 8_th) * right(1 / 2_th));
 
     // TODO: case 0x23A7: // ⎧ LEFT CURLY BRACKET UPPER HOOK
     // TODO: case 0x23A8: // ⎨ LEFT CURLY BRACKET MIDDLE PIECE
@@ -1016,19 +1014,19 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
     case 0x2598: // ▘  QUADRANT UPPER LEFT
         return blockElement(size) | left(1 / 2_th) * upper(1 / 2_th);
     case 0x2599: // ▙  QUADRANT UPPER LEFT AND LOWER LEFT AND LOWER RIGHT
-        return blockElement(size) | left(1 / 2_th) * upper(1 / 2_th) + lower(1 / 2_th);
+        return blockElement(size) | (left(1 / 2_th) * upper(1 / 2_th) + lower(1 / 2_th));
     case 0x259A: // ▚  QUADRANT UPPER LEFT AND LOWER RIGHT
-        return blockElement(size) | upper(1 / 2_th) * left(1 / 2_th) + lower(1 / 2_th) * right(1 / 2_th);
+        return blockElement(size) | (upper(1 / 2_th) * left(1 / 2_th) + lower(1 / 2_th) * right(1 / 2_th));
     case 0x259B: // ▛  QUADRANT UPPER LEFT AND UPPER RIGHT AND LOWER LEFT
-        return blockElement(size) | upper(1 / 2_th) + lower(1 / 2_th) * left(1 / 2_th);
+        return blockElement(size) | (upper(1 / 2_th) + lower(1 / 2_th) * left(1 / 2_th));
     case 0x259C: // ▜  QUADRANT UPPER LEFT AND UPPER RIGHT AND LOWER RIGHT
-        return blockElement(size) | upper(1 / 2_th) + lower(1 / 2_th) * right(1 / 2_th);
+        return blockElement(size) | (upper(1 / 2_th) + lower(1 / 2_th) * right(1 / 2_th));
     case 0x259D: // ▝  QUADRANT UPPER RIGHT
-        return blockElement(size) | upper(1 / 2_th) * right(1 / 2_th);
+        return blockElement(size) | (upper(1 / 2_th) * right(1 / 2_th));
     case 0x259E: // ▞  QUADRANT UPPER RIGHT AND LOWER LEFT
-        return blockElement(size) | upper(1 / 2_th) * right(1 / 2_th) + lower(1 / 2_th) * left(1 / 2_th);
+        return blockElement(size) | (upper(1 / 2_th) * right(1 / 2_th) + lower(1 / 2_th) * left(1 / 2_th));
     case 0x259F: // ▟  QUADRANT UPPER RIGHT AND LOWER LEFT AND LOWER RIGHT
-        return blockElement(size) | upper(1 / 2_th) * right(1 / 2_th) + lower(1 / 2_th);
+        return blockElement(size) | (upper(1 / 2_th) * right(1 / 2_th) + lower(1 / 2_th));
     // TODO: ■  U+25A0  BLACK SQUARE
     // TODO: □  U+25A1  WHITE SQUARE
     // TODO: ▢  U+25A2  WHITE SQUARE WITH ROUNDED CORNERS
@@ -1255,22 +1253,24 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
     case 0x1FB7A: return blockElement(size) | horiz_nth(1 / 8_th, 6); // 🭺  HORIZONTAL ONE EIGHTH BLOCK-6
     case 0x1FB7B: return blockElement(size) | horiz_nth(1 / 8_th, 7); // 🭻  HORIZONTAL ONE EIGHTH BLOCK-7
     case 0x1FB7C:
-        return blockElement(size) | left(1 / 8_th) + lower(1 / 8_th); // 🭼  LEFT AND LOWER ONE EIGHTH BLOCK
+        return blockElement(size)
+               | (left(1 / 8_th) + lower(1 / 8_th)); // 🭼  LEFT AND LOWER ONE EIGHTH BLOCK
     case 0x1FB7D:
-        return blockElement(size) | left(1 / 8_th) + upper(1 / 8_th); // 🭽  LEFT AND UPPER ONE EIGHTH BLOCK
+        return blockElement(size)
+               | (left(1 / 8_th) + upper(1 / 8_th)); // 🭽  LEFT AND UPPER ONE EIGHTH BLOCK
     case 0x1FB7E:
         return blockElement(size)
-               | right(1 / 8_th) + upper(1 / 8_th); // 🭾  RIGHT AND UPPER ONE EIGHTH BLOCK
+               | (right(1 / 8_th) + upper(1 / 8_th)); // 🭾  RIGHT AND UPPER ONE EIGHTH BLOCK
     case 0x1FB7F:
         return blockElement(size)
-               | right(1 / 8_th) + lower(1 / 8_th); // 🭿  RIGHT AND LOWER ONE EIGHTH BLOCK
+               | (right(1 / 8_th) + lower(1 / 8_th)); // 🭿  RIGHT AND LOWER ONE EIGHTH BLOCK
     case 0x1FB80:
         return blockElement(size)
-               | upper(1 / 8_th) + lower(1 / 8_th); // 🮀  UPPER AND LOWER ONE EIGHTH BLOCK
+               | (upper(1 / 8_th) + lower(1 / 8_th)); // 🮀  UPPER AND LOWER ONE EIGHTH BLOCK
     case 0x1FB81:
         return blockElement(size)
-               | horiz_nth(1 / 8_th, 1) // 🮁  HORIZONTAL ONE EIGHTH BLOCK-1358
-                     + horiz_nth(1 / 8_th, 3) + horiz_nth(1 / 8_th, 5) + horiz_nth(1 / 8_th, 7);
+               | (horiz_nth(1 / 8_th, 1) // 🮁  HORIZONTAL ONE EIGHTH BLOCK-1358
+                  + horiz_nth(1 / 8_th, 3) + horiz_nth(1 / 8_th, 5) + horiz_nth(1 / 8_th, 7));
     case 0x1FB82: return blockElement(size) | upper(1 / 4_th); // 🮂  UPPER ONE QUARTER BLOCK
     case 0x1FB83: return blockElement(size) | upper(3 / 8_th); // 🮃  UPPER THREE EIGHTHS BLOCK
     case 0x1FB84: return blockElement(size) | upper(5 / 8_th); // 🮄  UPPER FIVE EIGHTHS BLOCK
@@ -1288,16 +1288,16 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
     case 0x1FB90: return blockElement<1>(size, checker<4, Inverted::No>(size)).fill();
     case 0x1FB91:
         return blockElement<1>(size).fill([size](int x, int y) {
-            return y <= *size.height / 2 ? 0xFF : checker<4, Inverted::No>(size)(x, y);
+            return y <= unbox<int>(size.height) / 2 ? 0xFF : checker<4, Inverted::No>(size)(x, y);
         });
     case 0x1FB92:
         return blockElement<1>(size).fill([size](int x, int y) {
-            return y >= *size.height / 2 ? 0xFF : checker<4, Inverted::No>(size)(x, y);
+            return y >= unbox<int>(size.height) / 2 ? 0xFF : checker<4, Inverted::No>(size)(x, y);
         });
     case 0x1FB93: break; // not assigned
     case 0x1FB94:
         return blockElement<1>(size).fill([size](int x, int y) {
-            return x >= *size.width / 2 ? 0xFF : checker<4, Inverted::No>(size)(x, y);
+            return x >= unbox<int>(size.width) / 2 ? 0xFF : checker<4, Inverted::No>(size)(x, y);
         });
     case 0x1FB95: return blockElement<1>(size).fill(checker<8, Inverted::No>(size));
     case 0x1FB96: return blockElement<1>(size).fill(checker<8, Inverted::Yes>(size));
@@ -1421,7 +1421,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint
         auto const p = unbox<double>(width) / static_cast<double>(dashCount * 2.0);
 
         auto x0 = round(p / 2.0);
-        for (auto const i: iota(0u, dashCount))
+        for ([[maybe_unused]] auto const _: iota(0u, dashCount))
         {
             auto const x0_ = static_cast<int>(round(x0));
             for (auto const y: iota(y0, y0 + w))
@@ -1443,7 +1443,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint
         auto const p = unbox<double>(height) / static_cast<double>(dashCount * 2.0);
 
         auto y0 = round(p / 2.0);
-        for (auto const i: iota(0u, dashCount))
+        for ([[maybe_unused]] auto const i: iota(0u, dashCount))
         {
             auto const y0_ = static_cast<int>(round(y0));
             for (auto const y: iota(y0_, y0_ + static_cast<int>(p)))
@@ -1460,12 +1460,11 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint
         auto const left = tuple { box.left_, 0u, *width / 2, true };
         auto const right = tuple { box.right_, *width / 2, *width, false };
         auto const offset = horizontalOffset;
-        for (auto const pq: { left, right })
+        for (auto const& pq: { left, right })
         {
             auto const lm = get<0>(pq);
             auto const x0 = get<1>(pq);
             auto const x1 = get<2>(pq);
-            auto const isFirst = get<3>(pq);
             switch (lm)
             {
             case detail::NoLine: break;
@@ -1523,12 +1522,12 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint
         auto const up = tuple { box.down_, 0u, *height / 2, true };
         auto const down = tuple { box.up_, *height / 2, *height, false };
         auto const offset = verticalOffset;
-        for (auto const pq: { up, down })
+        for (auto const& pq: { up, down })
         {
             auto const lm = get<0>(pq);
             auto const y0 = get<1>(pq);
             auto const y1 = get<2>(pq);
-            auto const isFirst = get<3>(pq);
+            // auto const isFirst = get<3>(pq);
             switch (lm)
             {
             case detail::NoLine: break;

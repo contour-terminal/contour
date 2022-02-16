@@ -300,7 +300,7 @@ SixelImageBuilder::SixelImageBuilder(ImageSize _maxSize,
     maxSize_ { _maxSize },
     colors_ { std::move(_colorPalette) },
     size_ { _maxSize },
-    buffer_(*size_.width * *size_.height * 4),
+    buffer_(size_.area() * 4),
     sixelCursor_ {},
     currentColor_ { 0 },
     aspectRatio_ { _aspectVertical, _aspectHorizontal }
@@ -313,7 +313,8 @@ void SixelImageBuilder::clear(RGBAColor _fillColor)
     sixelCursor_ = {};
 
     auto p = &buffer_[0];
-    for (int i = 0; i < *size_.width * *size_.height; ++i)
+    auto const e = p + size_.area() * 4;
+    while (p != e)
     {
         *p++ = _fillColor.red();
         *p++ = _fillColor.green();
@@ -333,8 +334,8 @@ RGBAColor SixelImageBuilder::at(CellLocation _coord) const noexcept
 
 void SixelImageBuilder::write(CellLocation const& _coord, RGBColor const& _value) noexcept
 {
-    if (*_coord.line >= 0 && *_coord.line < *size_.height && *_coord.column >= 0
-        && *_coord.column < *size_.width)
+    if (unbox<int>(_coord.line) >= 0 && unbox<int>(_coord.line) < unbox<int>(size_.height)
+        && unbox<int>(_coord.column) >= 0 && unbox<int>(_coord.column) < unbox<int>(size_.width))
     {
         auto const base = *_coord.line * *size_.width * 4 + *_coord.column * 4;
         buffer_[base + 0] = _value.red;
@@ -363,7 +364,7 @@ void SixelImageBuilder::newline()
 {
     sixelCursor_.column = {};
 
-    if (*sixelCursor_.line + 6 < *size_.height)
+    if (unbox<int>(sixelCursor_.line) + 6 < unbox<int>(size_.height))
         sixelCursor_.line.value += 6;
 }
 
@@ -381,7 +382,7 @@ void SixelImageBuilder::render(int8_t _sixel)
 {
     // TODO: respect aspect ratio!
     auto const x = sixelCursor_.column;
-    if (*x < *size_.width)
+    if (unbox<int>(x) < unbox<int>(size_.width))
     {
         for (int i = 0; i < 6; ++i)
         {

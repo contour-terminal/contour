@@ -60,38 +60,9 @@ namespace CLI = crispy::cli;
 namespace contour
 {
 
-namespace // {{{ helper
+// {{{ helper
+namespace
 {
-    CLI::HelpStyle helpStyle()
-    {
-        auto style = CLI::HelpStyle {};
-
-        style.optionStyle = CLI::OptionStyle::Natural;
-
-#if !defined(_WIN32)
-        if (!isatty(STDOUT_FILENO))
-        {
-            style.colors.reset();
-            style.hyperlink = false;
-        }
-#endif
-
-        return style;
-    }
-
-    int screenWidth()
-    {
-        constexpr auto DefaultWidth = 80;
-
-#if !defined(_WIN32)
-        auto ws = winsize {};
-        if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != -1)
-            return ws.ws_col;
-#endif
-
-        return DefaultWidth;
-    }
-
 #if defined(__linux__)
     void crashLogger(std::ostream& out)
     {
@@ -150,6 +121,7 @@ namespace // {{{ helper
     }
 #endif
 } // namespace
+// }}}
 
 ContourApp::ContourApp(): App("contour", "Contour Terminal Emulator", CONTOUR_VERSION_STRING, "Apache-2.0")
 {

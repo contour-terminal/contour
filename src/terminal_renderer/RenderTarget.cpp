@@ -67,7 +67,6 @@ auto Renderable::sliceTileData(Renderable::TextureAtlas::TileCreateData const& c
     auto const colorComponentCount = element_count(bitmapFormat);
     auto const pitch = unbox<uintptr_t>(createData.bitmapSize.width) * colorComponentCount;
 
-    auto const xNext = sliceIndex.endX;
     auto const subWidth = Width(sliceIndex.endX - sliceIndex.beginX);
     auto const subSize = ImageSize { subWidth, createData.bitmapSize.height };
     auto const subPitch = unbox<uintptr_t>(subWidth) * colorComponentCount;

@@ -6,7 +6,7 @@ AnalyzeTemporaryDtors: false
 FormatStyle:     none
 CheckOptions:
   - key:             bugprone-easily-swappable-parameters.MinimumLength
-    value:           '2'
+    value:           '3'
   - key:             cert-dcl16-c.NewSuffixes
     value:           'L;LL;LU;LLU'
   - key:             cert-oop54-cpp.WarnOnlyIfThisHasSuspiciousField

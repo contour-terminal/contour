@@ -240,24 +240,10 @@ TEST_CASE("StrongLRUHashtable.try_get", "")
     REQUIRE(joinHumanReadable(cache.hashes()) == sh(1, 3, 4, 2));
 }
 
-static optional<int> createTwo(uint32_t entryIndex)
-{
-    return { -2 };
-}
-
-static optional<int> createOne(StrongLRUHashtable<int>& cache, uint32_t entryIndex, int** b)
-{
-    auto hash = h(2);
-    *b = cache.get_or_try_emplace(hash, createTwo);
-    return { -1 };
-}
-
 TEST_CASE("StrongLRUHashtable.get_or_try_emplace.recursive", "[lrucache]")
 {
     auto cachePtr = StrongLRUHashtable<int>::create(StrongHashtableSize { 4 }, LRUCapacity { 2 });
     auto& cache = *cachePtr;
-
-    auto hash1 = h(1);
 
     int* b = nullptr;
     int* a = cache.get_or_try_emplace(h(1), [&b, &cache](auto i) -> optional<int> {

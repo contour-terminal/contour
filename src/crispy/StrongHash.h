@@ -133,13 +133,13 @@ inline StrongHash StrongHash::compute(void const* data, size_t n) noexcept
     // TODO AES-NI fallback
 
     static_assert(sizeof(__m128i) == 16);
-    auto constexpr ChunkSize = sizeof(__m128i);
+    auto constexpr ChunkSize = static_cast<int>(sizeof(__m128i));
 
     __m128i hashValue = _mm_cvtsi64_si128(static_cast<long long>(n));
     hashValue = _mm_xor_si128(hashValue, _mm_loadu_si128((__m128i const*) DefaultSeed.data()));
 
     char const* inputPtr = (char const*) data;
-    for (int chunkIndex = 0; chunkIndex < n / ChunkSize; chunkIndex++)
+    for (int chunkIndex = 0; chunkIndex < static_cast<int>(n) / ChunkSize; chunkIndex++)
     {
         __m128i chunk = _mm_loadu_si128((__m128i const*) inputPtr);
 

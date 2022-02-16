@@ -84,6 +84,7 @@ namespace // {{{ helpers
         return tuple { cursorFg, cursorBg };
     }
 
+#if defined(CONTOUR_PERF_STATS)
     void logRenderBufferSwap(bool _success, uint64_t _frameID)
     {
         if (!RenderBufferLog)
@@ -94,6 +95,7 @@ namespace // {{{ helpers
         else
             LOGSTORE(RenderBufferLog)("Render buffer {} swapping failed.", _frameID);
     }
+#endif
 } // namespace
 // }}}
 
@@ -404,7 +406,6 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
         Gap,
         Sequence
     };
-    State state = State::Gap;
 
 #if defined(CONTOUR_PERF_STATS)
     if (TerminalLog)

@@ -148,7 +148,7 @@ auto CursorRenderer::createTileData(CursorShape cursorShape,
             auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
 
             for (int x = 0; x < thickness; ++x)
-                for (int y = 0; y < *height; ++y)
+                for (int y = 0; y < unbox<int>(height); ++y)
                     image[y * *width + x] = 0xFF;
             return image;
         });

@@ -60,12 +60,11 @@ namespace detail
     {
         auto const defaultLineFlags = _reflowOnResize ? LineFlags::Wrappable : LineFlags::None;
         auto const totalLineCount = unbox<size_t>(_pageSize.lines + _maxHistoryLineCount);
-        size_t const pitch = unbox<size_t>(_pageSize.columns);
 
         Lines<Cell> lines;
         lines.reserve(totalLineCount);
 
-        for (auto const _: ranges::views::iota(0u, totalLineCount))
+        for ([[maybe_unused]] auto const _: ranges::views::iota(0u, totalLineCount))
             lines.emplace_back(_pageSize.columns, defaultLineFlags, Cell {});
 
         return lines;
@@ -92,12 +91,11 @@ namespace detail
     )
     {
         using LineBuffer = typename Line<Cell>::InflatedBuffer;
-        auto const wrappedFlag = _initialNoWrap ? LineFlags::None : LineFlags::Wrapped;
 
         // TODO: avoid unnecessary copies via erase() by incrementally updating (from, to)
         int i = 0;
 
-        while (_logicalLineBuffer.size() >= *_newColumnCount)
+        while (_logicalLineBuffer.size() >= unbox<size_t>(_newColumnCount))
         {
             auto from = _logicalLineBuffer.begin();
             auto to = from + _newColumnCount.as<std::ptrdiff_t>();
@@ -440,7 +438,7 @@ LineCount Grid<Cell>::scrollUp(LineCount _n, GraphicsAttributes _defaultAttribut
         // a full "inside" scroll-up
         auto const marginHeight = _margin.vertical.length();
         auto const n = std::min(_n, marginHeight);
-        auto const bottomLineOffsetToCopy = min(_margin.vertical.from + *n, _margin.vertical.to - 1);
+        //auto const bottomLineOffsetToCopy = min(_margin.vertical.from + *n, _margin.vertical.to - 1);
         auto const topTargetLineOffset = _margin.vertical.from;
         auto const bottomTargetLineOffset = _margin.vertical.to - *n;
         auto const columnsToMove = unbox<size_t>(_margin.horizontal.length());
@@ -583,8 +581,6 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
     // Shrinking in line count with the cursor at the bottom margin will move
     // the top lines into the scrollback area.
 
-    using LineBuffer = typename Line<Cell>::InflatedBuffer;
-
     // {{{ helper methods
     auto const growLines = [this](LineCount _newHeight, CellLocation _cursor) -> CellLocation {
         // Grow line count by splicing available lines from history back into buffer, if available,
@@ -614,7 +610,7 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
 
         auto const linesFill =
             max(0, unbox<int>(maxHistoryLineCount_ + _newHeight) - static_cast<int>(lines_.size()));
-        for (auto const _: ranges::views::iota(0, linesFill))
+        for ([[maybe_unused]] auto const _: ranges::views::iota(0, linesFill))
             lines_.emplace_back(pageSize_.columns, wrappableFlag, Cell {});
         pageSize_.lines += extendCount;
         linesUsed_ += extendCount;

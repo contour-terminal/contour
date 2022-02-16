@@ -101,7 +101,7 @@ Image::Data RasterizedImage::fragment(CellLocation _pos) const
     auto target = &fragData[0];
 
     // fill horizontal gap at the bottom
-    for (int y = availableHeight * unbox<int>(cellSize_.width); y < *cellSize_.height * *cellSize_.width; ++y)
+    for (auto y = availableHeight * unbox<int>(cellSize_.width); y < int(cellSize_.area()); ++y)
     {
         *target++ = defaultColor_.red();
         *target++ = defaultColor_.green();
@@ -117,7 +117,7 @@ Image::Data RasterizedImage::fragment(CellLocation _pos) const
         target = copy(source, source + availableWidth * 4, target);
 
         // fill vertical gap on right
-        for (int x = availableWidth; x < *cellSize_.width; ++x)
+        for (int x = availableWidth; x < unbox<int>(cellSize_.width); ++x)
         {
             *target++ = defaultColor_.red();
             *target++ = defaultColor_.green();
