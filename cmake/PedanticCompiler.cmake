@@ -30,7 +30,7 @@ if(${PEDANTIC_COMPILER})
         # TODO: check https://github.com/lefticus/cppbestpractices/blob/master/02-Use_the_Tools_Available.md#compilers
         try_add_compile_options(-Wall)
         try_add_compile_options(-Wextra)
-        # try_add_compile_options(-pedantic)
+        try_add_compile_options(-pedantic)
         # try_add_compile_options(-Wno-sign-compare) # TODO(pr) remove me again
         # try_add_compile_options(-Wduplicate-enum)
         # try_add_compile_options(-Wduplicated-cond)

@@ -215,7 +215,7 @@ Process::Process(string const& _path,
         ::execvp(argv[0], argv);
 
         // Fallback: Try login shell.
-        fprintf(stdout, "\r\n\e[31;1mFailed to spawn %s. %s\e[m\r\n\n", argv[0], strerror(errno));
+        fprintf(stdout, "\r\n\033[31;1mFailed to spawn %s. %s\033[m\r\n\n", argv[0], strerror(errno));
         fflush(stdout);
         auto theLoginShell = loginShell();
         if (!theLoginShell.empty())

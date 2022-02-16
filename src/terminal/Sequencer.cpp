@@ -646,7 +646,7 @@ namespace impl
             _seq.intermediateCharacters(),
             [&](uint8_t index) {
                 auto const color = _screen.colorPalette().palette.at(index);
-                _screen.reply("\e]4;{};rgb:{:04x}/{:04x}/{:04x}\033\\",
+                _screen.reply("\033]4;{};rgb:{:04x}/{:04x}/{:04x}\033\\",
                               index,
                               static_cast<uint16_t>(color.red) << 8 | color.red,
                               static_cast<uint16_t>(color.green) << 8 | color.green,
