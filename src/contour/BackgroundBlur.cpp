@@ -18,6 +18,7 @@
 #endif
 
 #include <QtCore/QDebug>
+#include <QtGui/QWindow>
 
 #if defined(_WIN32)
     #include <Windows.h>
@@ -25,12 +26,11 @@
 
 namespace BlurBehind
 {
-
-void setEnabled(WId _winId, bool _enable)
+void setEnabled(QWindow* window, bool enable)
 {
 #if defined(CONTOUR_BLUR_PLATFORM_KWIN)
-    KWindowEffects::enableBlurBehind(_winId, _enable);
-    KWindowEffects::enableBackgroundContrast(_winId, _enable);
+    KWindowEffects::enableBlurBehind(window, enable);
+    KWindowEffects::enableBackgroundContrast(window, enable);
 #elif defined(_WIN32)
     // Awesome hack with the noteworty links:
     // * https://gist.github.com/ethanhs/0e157e4003812e99bf5bc7cb6f73459f (used as code template)
@@ -38,7 +38,7 @@ void setEnabled(WId _winId, bool _enable)
     // * https://stackoverflow.com/questions/44000217/mimicking-acrylic-in-a-win32-app
     // p.s.: if you find a more official way to do it, please PR me. :)
 
-    if (HWND hwnd = (HWND) _winId; hwnd != nullptr)
+    if (HWND hwnd = (HWND) window->winId(); hwnd != nullptr)
     {
         const HINSTANCE hModule = LoadLibrary(TEXT("user32.dll"));
         if (hModule)
@@ -76,8 +76,8 @@ void setEnabled(WId _winId, bool _enable)
                 (pSetWindowCompositionAttribute) GetProcAddress(hModule, "SetWindowCompositionAttribute");
             if (SetWindowCompositionAttribute)
             {
-                auto const policy = _enable ? ACCENTPOLICY { ACCENT_ENABLE_BLURBEHIND, 0, 0, 0 }
-                                            : ACCENTPOLICY { ACCENT_DISABLED, 0, 0, 0 };
+                auto const policy = enable ? ACCENTPOLICY { ACCENT_ENABLE_BLURBEHIND, 0, 0, 0 }
+                                           : ACCENTPOLICY { ACCENT_DISABLED, 0, 0, 0 };
                 auto const data = WINCOMPATTRDATA { WCA_ACCENT_POLICY, &policy, sizeof(ACCENTPOLICY) };
                 BOOL rs = SetWindowCompositionAttribute(hwnd, &data);
                 if (!rs)

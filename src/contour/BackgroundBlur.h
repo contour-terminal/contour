@@ -18,6 +18,6 @@
 namespace BlurBehind
 {
 
-void setEnabled(WId _winId, bool _enabled);
+void setEnabled(QWindow* window, bool enabled);
 
 }
