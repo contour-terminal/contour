@@ -232,7 +232,8 @@ namespace
 #if !defined(__APPLE__) && !defined(_WIN32)
         auto const xdgConfigHome = config::configHome("");
         auto const kcmFontsFile = xdgConfigHome / "kcmfonts";
-        return { kcmFontsFile };
+        if (FileSystem::exists(kcmFontsFile))
+            return { kcmFontsFile };
 #endif
 
         return nullopt;
