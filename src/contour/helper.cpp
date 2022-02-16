@@ -453,14 +453,6 @@ bool applyFontDescription(ImageSize _cellSize,
     return true;
 }
 
-terminal::PageSize pageSizeForPixels(ImageSize _pixelSize,
-                                     terminal::renderer::GridMetrics const& _gridMetrics)
-{
-    auto tmp = _pixelSize / _gridMetrics.cellSize;
-    return terminal::PageSize { boxed_cast<terminal::LineCount>(tmp.height),
-                                boxed_cast<terminal::ColumnCount>(tmp.width) };
-}
-
 void applyResize(terminal::ImageSize _newPixelSize,
                  TerminalSession& _session,
                  terminal::renderer::Renderer& _renderer)
@@ -468,14 +460,13 @@ void applyResize(terminal::ImageSize _newPixelSize,
     if (*_newPixelSize.width == 0 || *_newPixelSize.height == 0)
         return;
 
-    auto const newPageSize = pageSizeForPixels(_newPixelSize, _renderer.gridMetrics());
+    auto const newPageSize = pageSizeForPixels(_newPixelSize, _renderer.gridMetrics().cellSize);
     terminal::Terminal& terminal = _session.terminal();
     terminal::ImageSize cellSize = _renderer.gridMetrics().cellSize;
 
     _renderer.renderTarget().setRenderSize(_newPixelSize);
     _renderer.setPageSize(newPageSize);
     _renderer.setMargin(computeMargin(_renderer.gridMetrics().cellSize, newPageSize, _newPixelSize));
-    //_renderer.clearCache();
 
     if (newPageSize == terminal.pageSize())
         return;

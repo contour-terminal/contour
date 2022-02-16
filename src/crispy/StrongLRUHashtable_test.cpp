@@ -26,12 +26,14 @@ using namespace std::string_view_literals;
 namespace
 {
 // simple 32-bit hash
-inline StrongHash h(uint32_t v)
+template<typename T>
+inline StrongHash h(T v)
 {
-    return StrongHash(0, 0, 0, v);
+    return StrongHash(0, 0, 0, static_cast<uint32_t>(v));
 }
 
-inline string sh(uint32_t value)
+template<typename T>
+inline string sh(T value)
 {
     return to_structured_string(h(value));
 }
@@ -44,12 +46,14 @@ inline string sh(Value value, Value next, Values... more)
     return left + ", " + right;
 }
 
-StrongHash collidingHash(uint32_t v) noexcept
+template <typename T>
+StrongHash collidingHash(T v) noexcept
 {
-    return StrongHash(0, 0, v, 0);
+    return StrongHash(0, 0, static_cast<uint32_t>(v), 0);
 }
 
-inline string ch(uint32_t value)
+template <typename T>
+inline string ch(T value)
 {
     return to_structured_string(collidingHash(value));
 }

@@ -154,7 +154,12 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     void logDisplayTopInfo();
     void logDisplayInfo();
     void watchKdeDpiSetting();
-    terminal::PageSize pageSize() const { return pageSizeForPixels(pixelSize(), renderer_->gridMetrics()); }
+
+    terminal::PageSize pageSize() const
+    {
+        return pageSizeForPixels(pixelSize(), renderer_->gridMetrics().cellSize);
+    }
+
     void assertInitialized();
     double contentScale() const;
     void updateMinimumSize();

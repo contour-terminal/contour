@@ -213,7 +213,7 @@ constexpr unsigned toAnsiModeNum(AnsiMode m)
     return static_cast<unsigned>(m);
 }
 
-constexpr bool isValidAnsiMode(int _mode) noexcept
+constexpr bool isValidAnsiMode(unsigned int _mode) noexcept
 {
     switch (static_cast<AnsiMode>(_mode))
     {
@@ -271,7 +271,7 @@ constexpr unsigned toDECModeNum(DECMode m)
     return static_cast<unsigned>(m);
 }
 
-constexpr bool isValidDECMode(int _mode) noexcept
+constexpr bool isValidDECMode(unsigned int _mode) noexcept
 {
     switch (static_cast<DECMode>(_mode))
     {
@@ -521,7 +521,7 @@ struct TerminalState
 
     Sequencer<TheTerminal> sequencer;
     parser::Parser<Sequencer<TheTerminal>> parser;
-    int64_t instructionCounter = 0;
+    uint64_t instructionCounter = 0;
 
     char32_t precedingGraphicCharacter = {};
     unicode::utf8_decoder_state utf8DecoderState = {};

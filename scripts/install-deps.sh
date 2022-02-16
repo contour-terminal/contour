@@ -94,9 +94,9 @@ fetch_and_unpack_embeds()
         https://github.com/contour-terminal/termbench-pro/archive/cd571e3cebb7c00de9168126b28852f32fb204ed.tar.gz
 
     fetch_and_unpack \
-        libunicode-fcdcee4bb59a542c591d572ff69fc1c96b18cbbe \
-        libunicode-fcdcee4bb59a542c591d572ff69fc1c96b18cbbe.tar.gz \
-        https://github.com/contour-terminal/libunicode/archive/fcdcee4bb59a542c591d572ff69fc1c96b18cbbe.tar.gz
+        libunicode-3962196443e9be76479826fd3e968514b88216e3 \
+        libunicode-3962196443e9be76479826fd3e968514b88216e3.tar.gz \
+        https://github.com/contour-terminal/libunicode/archive/3962196443e9be76479826fd3e968514b88216e3.tar.gz
 }
 
 fetch_and_unpack_yaml_cpp()

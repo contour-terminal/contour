@@ -386,7 +386,7 @@ inline size_t StrongLRUHashtable<Value>::storageSize() const noexcept
 template <typename Value>
 inline uint32_t* StrongLRUHashtable<Value>::hashTableSlot(StrongHash const& hash) noexcept
 {
-    uint32_t const index = _mm_cvtsi128_si32(hash.value);
+    uint32_t const index = static_cast<uint32_t>(_mm_cvtsi128_si32(hash.value));
     uint32_t const slot = index & _hashMask;
     return _hashTable + slot;
 }

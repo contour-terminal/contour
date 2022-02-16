@@ -75,7 +75,7 @@ constexpr bool operator!=(Cap<T> const& a, Cap<T> const& b) noexcept
 }
 
 using Boolean = Cap<bool>;
-using Numeric = Cap<int>;
+using Numeric = Cap<unsigned>;
 using String = Cap<std::string_view>;
 
 namespace

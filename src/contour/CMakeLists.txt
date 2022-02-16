@@ -55,7 +55,11 @@ if(WIN32)
     list(APPEND contour_SRCS contour.rc)
 endif()
 
-qt5_add_resources(QT_RESOURCES resources.qrc)
+
+set(QT_RESOURCES resources.qrc)
+if(NOT(CONTOUR_BUILD_WITH_QT6))
+    qt5_add_resources(QT_RESOURCES ${QT_RESOURCES})
+endif()
 
 add_executable(contour ${contour_SRCS} ${QT_RESOURCES})
 target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")

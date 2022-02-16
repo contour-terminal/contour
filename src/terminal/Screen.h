@@ -275,8 +275,8 @@ class Screen: public capabilities::StaticDatabase // TODO(pr) rename to ScreenBu
     void restoreCursor(Cursor const& _savedCursor);
     void saveModes(std::vector<DECMode> const& _modes);
     void restoreModes(std::vector<DECMode> const& _modes);
-    void requestAnsiMode(int _mode);
-    void requestDECMode(int _mode);
+    void requestAnsiMode(unsigned int _mode);
+    void requestDECMode(unsigned int _mode);
 
     PageSize pageSize() const noexcept { return _state.pageSize; }
     void resize(PageSize _newSize);

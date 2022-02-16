@@ -17,7 +17,9 @@
 #include <gsl/span_ext>
 
 #include <algorithm>
+#include <cassert>
 #include <iterator>
+#include <stdexcept>
 #include <vector>
 
 namespace crispy
@@ -55,7 +57,7 @@ class basic_ring
 
     value_type const& operator[](offset_type i) const noexcept
     {
-        return _storage[size_t(_zero + size() + i) % size()];
+        return _storage[size_t(offset_type(_zero + size()) + i) % size()];
     }
     value_type& operator[](offset_type i) noexcept
     {
@@ -90,8 +92,21 @@ class basic_ring
     value_type& front() noexcept { return at(0); }
     value_type const& front() const noexcept { return at(0); }
 
-    value_type& back() noexcept { return at(size() - 1); }
-    value_type const& back() const noexcept { return at(size() - 1); }
+    value_type& back()
+    {
+        if (size() == 0)
+            throw std::length_error("empty");
+
+        return at(static_cast<offset_type>(size()) - 1);
+    }
+
+    value_type const& back() const
+    {
+        if (size() == 0)
+            throw std::length_error("empty");
+
+        return at(static_cast<offset_type>(size()) - 1);
+    }
 
     iterator begin() noexcept { return iterator { this, 0 }; }
     iterator end() noexcept { return iterator { this, static_cast<difference_type>(size()) }; }
@@ -349,8 +364,12 @@ struct RingReverseIterator
     T& operator*() noexcept { return (*ring)[ring->size() - current - 1]; }
     T const& operator*() const noexcept { return (*ring)[ring->size() - current - 1]; }
 
-    T* operator->() noexcept { return &(*ring)[ring->size() - current - 1]; }
-    T* operator->() const noexcept { return &(*ring)[ring->size() - current - 1]; }
+    T* operator->() noexcept { return &(*ring)[static_cast<difference_type>(ring->size()) - current - 1]; }
+
+    T* operator->() const noexcept
+    {
+        return &(*ring)[static_cast<difference_type>(ring->size()) - current - 1];
+    }
 };
 // }}}
 

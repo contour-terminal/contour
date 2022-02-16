@@ -15,6 +15,8 @@
 
 #if defined(CONTOUR_BLUR_PLATFORM_KWIN)
     #include <KWindowEffects>
+    #include <kwindowsystem_version.h>
+    #define KDE_MAKE_VERSION(a, b, c) (((a) << 16) | ((b) << 8) | (c))
 #endif
 
 #include <QtCore/QDebug>
@@ -29,8 +31,13 @@ namespace BlurBehind
 void setEnabled(QWindow* window, bool enable)
 {
 #if defined(CONTOUR_BLUR_PLATFORM_KWIN)
+    #if KWINDOWSYSTEM_VERSION >= KDE_MAKE_VERSION(5, 82, 0)
     KWindowEffects::enableBlurBehind(window, enable);
     KWindowEffects::enableBackgroundContrast(window, enable);
+    #else
+    KWindowEffects::enableBlurBehind(window->winId(), enable);
+    KWindowEffects::enableBackgroundContrast(window->winId(), enable);
+    #endif
 #elif defined(_WIN32)
     // Awesome hack with the noteworty links:
     // * https://gist.github.com/ethanhs/0e157e4003812e99bf5bc7cb6f73459f (used as code template)

@@ -216,13 +216,13 @@ namespace // {{{ helper
 
         explicit VTWriter(Writer writer): writer_ { std::move(writer) } {}
         explicit VTWriter(std::ostream& output):
-            VTWriter { [&](auto d, auto n) {
-                output.write(d, n);
+            VTWriter { [&](char const* d, size_t n) {
+                output.write(d, static_cast<std::streamsize>(n));
             } }
         {
         }
         explicit VTWriter(std::vector<char>& output):
-            VTWriter { [&](auto d, auto n) {
+            VTWriter { [&](char const* d, size_t n) {
                 output.insert(output.end(), d, d + n);
             } }
         {
@@ -234,7 +234,7 @@ namespace // {{{ helper
             char buf[4];
             auto enc = unicode::encoder<char> {};
             auto count = distance(buf, enc(v, buf));
-            write(string_view(buf, count));
+            write(string_view(buf, static_cast<size_t>(count)));
         }
 
         void write(std::string_view const& _s)
@@ -316,7 +316,10 @@ namespace // {{{ helper
             currentForegroundColor_ = _color;
             switch (_color.type())
             {
-            case ColorType::Default: sgr_add(39); break;
+            case ColorType::Default:
+                //.
+                sgr_add(39);
+                break;
             case ColorType::Indexed:
                 if (static_cast<unsigned>(_color.index()) < 8)
                     sgr_add(30 + static_cast<unsigned>(_color.index()));
@@ -327,13 +330,17 @@ namespace // {{{ helper
                     sgr_add(static_cast<unsigned>(_color.index()));
                 }
                 break;
-            case ColorType::Bright: sgr_add(90 + static_cast<unsigned>(getBrightColor(_color))); break;
+            case ColorType::Bright:
+                //.
+                sgr_add(90 + static_cast<unsigned>(getBrightColor(_color)));
+                break;
             case ColorType::RGB:
                 sgr_add(38);
                 sgr_add(2);
                 sgr_add(static_cast<unsigned>(_color.rgb().red));
                 sgr_add(static_cast<unsigned>(_color.rgb().green));
                 sgr_add(static_cast<unsigned>(_color.rgb().blue));
+                break;
             case ColorType::Undefined: break;
             }
         }
@@ -357,14 +364,20 @@ namespace // {{{ helper
                     sgr_add(static_cast<unsigned>(_color.index()));
                 }
                 break;
-            case ColorType::Bright: sgr_add(100 + static_cast<unsigned>(getBrightColor(_color))); break;
+            case ColorType::Bright:
+                //.
+                sgr_add(100 + static_cast<unsigned>(getBrightColor(_color)));
+                break;
             case ColorType::RGB:
                 sgr_add(48);
                 sgr_add(2);
                 sgr_add(static_cast<unsigned>(_color.rgb().red));
                 sgr_add(static_cast<unsigned>(_color.rgb().green));
                 sgr_add(static_cast<unsigned>(_color.rgb().blue));
-            case ColorType::Undefined: break;
+                break;
+            case ColorType::Undefined:
+                //.
+                break;
             }
         }
 
@@ -724,8 +737,10 @@ void Screen<T>::writeCharToCurrentAndAdvance(char32_t _character) noexcept
         cell.reset();
 #endif
 
-    cell.write(
-        _state.cursor.graphicsRendition, _character, unicode::width(_character), _state.cursor.hyperlink);
+    cell.write(_state.cursor.graphicsRendition,
+               _character,
+               (uint8_t) unicode::width(_character),
+               _state.cursor.hyperlink);
 
     _state.lastCursorPosition = _state.cursor.position;
 
@@ -1436,7 +1451,7 @@ void Screen<T>::fillArea(char32_t _ch, int _top, int _left, int _bottom, int _ri
     if (!(32 <= _ch && _ch <= 126) && !(160 <= _ch && _ch <= 255))
         return;
 
-    auto const w = unicode::width(_ch);
+    auto const w = static_cast<uint8_t>(unicode::width(_ch));
     for (int y = _top; y <= _bottom; ++y)
     {
         for (Cell& cell:
@@ -1906,7 +1921,7 @@ void Screen<T>::restoreModes(std::vector<DECMode> const& _modes)
 template <typename T>
 void Screen<T>::setMode(AnsiMode _mode, bool _enable)
 {
-    if (!isValidAnsiMode(static_cast<int>(_mode)))
+    if (!isValidAnsiMode(static_cast<unsigned int>(_mode)))
         return;
 
     _state.modes.set(_mode, _enable);
@@ -1915,7 +1930,7 @@ void Screen<T>::setMode(AnsiMode _mode, bool _enable)
 template <typename T>
 void Screen<T>::setMode(DECMode _mode, bool _enable)
 {
-    if (!isValidDECMode(static_cast<int>(_mode)))
+    if (!isValidDECMode(static_cast<unsigned int>(_mode)))
         return;
 
     switch (_mode)
@@ -2049,7 +2064,7 @@ enum class ModeResponse
 };
 
 template <typename T>
-void Screen<T>::requestAnsiMode(int _mode)
+void Screen<T>::requestAnsiMode(unsigned int _mode)
 {
     ModeResponse const modeResponse =
         isValidAnsiMode(_mode)
@@ -2062,7 +2077,7 @@ void Screen<T>::requestAnsiMode(int _mode)
 }
 
 template <typename T>
-void Screen<T>::requestDECMode(int _mode)
+void Screen<T>::requestDECMode(unsigned int _mode)
 {
     ModeResponse const modeResponse =
         isValidDECMode(_mode)
@@ -2324,8 +2339,8 @@ void Screen<T>::requestPixelSize(RequestPixelSize _area)
     case RequestPixelSize::TextArea:
         // Result is CSI  4 ;  height ;  width t
         reply("\033[4;{};{}t",
-              *_state.cellPixelSize.height * *_state.pageSize.lines,
-              *_state.cellPixelSize.width * *_state.pageSize.columns);
+              unbox<unsigned>(_state.cellPixelSize.height) * unbox<unsigned>(_state.pageSize.lines),
+              unbox<unsigned>(_state.cellPixelSize.width) * unbox<unsigned>(_state.pageSize.columns));
         break;
     case RequestPixelSize::CellArea:
         // Result is CSI  6 ;  height ;  width t
@@ -2346,8 +2361,9 @@ void Screen<T>::requestCharacterSize(RequestPixelSize _area) // TODO: rename Req
         reply("\033[9;{};{}t", _state.pageSize.lines, _state.pageSize.columns);
         break;
     case RequestPixelSize::CellArea:
-        assert(
-            !"Screen.requestCharacterSize: Doesn't make sense, and cannot be called, therefore, fortytwo.");
+        Guarantee(
+            false
+            && "Screen.requestCharacterSize: Doesn't make sense, and cannot be called, therefore, fortytwo.");
         break;
     }
 }
@@ -2645,10 +2661,10 @@ void Screen<T>::smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _actio
             reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Success, value);
             break;
         }
-        case Action::SetToValue: {
+        case Action::SetToValue:
             visit(overloaded {
                       [&](int _number) {
-                          _state.imageColorPalette->setSize(_number);
+                          _state.imageColorPalette->setSize(static_cast<unsigned>(_number));
                           reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Success, _number);
                       },
                       [&](ImageSize) { reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Failure, 0); },
@@ -2656,7 +2672,6 @@ void Screen<T>::smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _actio
                   },
                   _value);
             break;
-        }
         }
         break;
 

@@ -372,7 +372,7 @@ LineCount Grid<Cell>::scrollUp(LineCount _n, GraphicsAttributes _defaultAttribut
         auto const n = std::min(unbox<size_t>(_n), linesAvailable);
         if (n != 0)
         {
-            linesUsed_.value += n;
+            linesUsed_ += LineCount::cast_from(n);
             fill_n(next(lines_.begin(), *pageSize_.lines),
                    n,
                    Line { pageSize_.columns, defaultLineFlags(), Cell { _defaultAttributes } });
@@ -497,7 +497,7 @@ void Grid<Cell>::scrollDown(LineCount v_n,
 
         rotateBuffersRight(n);
 
-        for (Line<Cell>& line: mainPage().subspan(0, *n))
+        for (Line<Cell>& line: mainPage().subspan(0, unbox<size_t>(n)))
             line.reset(defaultLineFlags(), _defaultAttributes);
         return;
     }
@@ -604,7 +604,6 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
 
         auto const wrappableFlag = lines_.back().wrappableFlag();
         auto const extendCount = _newHeight - pageSize_.lines;
-        auto const rowsToTakeFromSavedLines = std::min(extendCount, historyLineCount());
         Require(*extendCount >= 0);
         // ? Require(rowsToTakeFromSavedLines == LineCount(0));
 
@@ -869,8 +868,7 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
             while (shrinkedLines.size() < totalLineCount)
                 shrinkedLines.emplace_back(_newColumnCount, LineFlags::None); // defaultLineFlags());
 
-            shrinkedLines.rotate_left(
-                unbox<int>(numLinesWritten - pageSize_.lines)); // maybe to be done outisde?
+            shrinkedLines.rotate_left(unbox<size_t>(numLinesWritten - pageSize_.lines)); // maybe to be done outisde?
             linesUsed_ = LineCount::cast_from(numLinesWritten);
 
             // if (LineCount::cast_from(shrinkedLines.size()) > pageSize_.lines)

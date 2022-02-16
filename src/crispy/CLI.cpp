@@ -13,12 +13,14 @@
  */
 #include "CLI.h"
 
+#include <crispy/assert.h>
 #include <crispy/times.h>
 
 #include <range/v3/view/iota.hpp>
 
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <deque>
 #include <sstream>
 
@@ -511,12 +513,12 @@ namespace // {{{ helpers
 
     string indent(unsigned _level, unsigned* _cursor = nullptr)
     {
-        auto constexpr TabWidth = 4;
+        auto constexpr TabWidth = 4u;
 
         if (_cursor)
             *_cursor += _level * TabWidth;
 
-        return spaces(_level * TabWidth);
+        return spaces(static_cast<size_t>(_level) * TabWidth);
     }
 
     // TODO: this and OSC-8 (hyperlinks)
@@ -578,7 +580,10 @@ namespace // {{{ helpers
         return stylizer(style);
     }
 
-    string_view wordWrapped(string_view _text, int _margin, int _cursor, bool* _trimLeadingWhitespaces)
+    string_view wordWrapped(string_view _text,
+                            unsigned _margin,
+                            unsigned _cursor,
+                            bool* _trimLeadingWhitespaces)
     {
         auto const linefeed = _text.find('\n');
         if (linefeed != string_view::npos)
@@ -592,12 +597,15 @@ namespace // {{{ helpers
 
         *_trimLeadingWhitespaces = true;
 
-        auto const unwrappedLength = _cursor + int(_text.size());
+        auto const unwrappedLength = _cursor + _text.size();
         if (unwrappedLength <= _margin)
             return _text;
 
         // Cut string at right margin, then shift left until we've hit a whitespace character.
         auto const rightMargin = _margin - _cursor + 1;
+        if (rightMargin <= 0)
+            return _text;
+
         auto i = rightMargin - 1;
         while (i > 0 && (_text[i] != ' ' && _text[i] != '\n'))
             --i;

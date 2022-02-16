@@ -281,21 +281,6 @@ class ImagePool
 
 } // namespace terminal
 
-namespace crispy
-{
-
-// Move this somewhere else?
-template <>
-struct StrongHasher<terminal::ImageId>
-{
-    inline StrongHash operator()(terminal::ImageId v) noexcept
-    {
-        return StrongHasher<unsigned int> {}(v.value);
-    }
-};
-
-} // namespace crispy
-
 namespace fmt // {{{
 {
 

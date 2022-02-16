@@ -146,7 +146,7 @@ class Line
     void reset(LineFlags _flags,
                GraphicsAttributes const& _attributes,
                char32_t _codepoint,
-               int _width) noexcept
+               uint8_t _width) noexcept
     {
         flags_ = static_cast<unsigned>(_flags);
         markUsedFirst(size());
@@ -173,10 +173,10 @@ class Line
         auto constexpr ASCII_Width = 1;
         auto const* s = _ascii.data();
 
-        Cell* i = &buffer_[unbox<int>(_start)];
+        Cell* i = &buffer_[unbox<size_t>(_start)];
         Cell* e = i + _ascii.size();
         while (i != e)
-            (i++)->write(_sgr, *s++, ASCII_Width);
+            (i++)->write(_sgr, static_cast<char32_t>(*s++), ASCII_Width);
 
         // if constexpr (ColumnOptimized)
         // {

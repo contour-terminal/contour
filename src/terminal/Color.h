@@ -74,7 +74,10 @@ struct RGBColor
     {
     }
 
-    constexpr uint32_t value() const noexcept { return (red << 16) | (green << 8) | blue; }
+    constexpr uint32_t value() const noexcept
+    {
+        return static_cast<uint32_t>((red << 16) | (green << 8) | blue);
+    }
 
     explicit RGBColor(std::string const& _hexCode);
 
@@ -244,11 +247,11 @@ constexpr bool isRGBColor(Color _color) noexcept
     return _color.type() == ColorType::RGB;
 }
 
-constexpr int getIndexedColor(Color _color) noexcept
+constexpr uint8_t getIndexedColor(Color _color) noexcept
 {
     return _color.index();
 }
-constexpr int getBrightColor(Color _color) noexcept
+constexpr uint8_t getBrightColor(Color _color) noexcept
 {
     return _color.index();
 }

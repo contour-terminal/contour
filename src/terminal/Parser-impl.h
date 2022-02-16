@@ -37,7 +37,7 @@ namespace detail
 #endif
     }
 
-    inline size_t countAsciiTextChars(uint8_t const* _begin, uint8_t const* _end) noexcept
+    inline size_t countAsciiTextChars(char const* _begin, char const* _end) noexcept
     {
         // TODO: Do move this functionality into libunicode?
 
@@ -58,7 +58,7 @@ namespace detail
             __m128i testPack = _mm_or_si128(isControl, isComplex);
             if (int const check = _mm_movemask_epi8(testPack); check != 0)
             {
-                int advance = countTrailingZeroBits(check);
+                int advance = countTrailingZeroBits(static_cast<unsigned>(check));
                 input += advance;
                 break;
             }
@@ -283,8 +283,8 @@ namespace detail
 template <typename EventListener>
 void Parser<EventListener>::parseFragment(std::string_view _data)
 {
-    auto input = reinterpret_cast<uint8_t const*>(_data.data());
-    auto end = reinterpret_cast<uint8_t const*>(_data.data() + _data.size());
+    auto input = _data.data();              // reinterpret_cast<uint8_t const*>(_data.data());
+    auto end = _data.data() + _data.size(); // reinterpret_cast<uint8_t const*>(_data.data() + _data.size());
 
     do
     {
@@ -292,7 +292,7 @@ void Parser<EventListener>::parseFragment(std::string_view _data)
         {
             if (auto count = detail::countAsciiTextChars(input, end); count > 0)
             {
-                eventListener_.print(std::string_view { reinterpret_cast<char const*>(input), count });
+                eventListener_.print(std::string_view { input, count });
                 input += count;
 
                 // This optimization is for the `cat`-people.
@@ -302,33 +302,33 @@ void Parser<EventListener>::parseFragment(std::string_view _data)
                 // As of bench-headless, the performance incrrease is about 50x.
                 if (input != end && *input == '\n')
                 {
-                    eventListener_.execute(static_cast<char>(*input++));
+                    eventListener_.execute(*input++);
                 }
                 continue;
             }
         }
 
-        auto const _ch = *input++;
+        auto const ch = static_cast<uint8_t>(*input++);
         auto const s = static_cast<size_t>(state_);
         ParserTable static constexpr table = ParserTable::get();
 
-        if (auto const t = table.transitions[s][static_cast<uint8_t>(_ch)]; t != State::Undefined)
+        if (auto const t = table.transitions[s][static_cast<uint8_t>(ch)]; t != State::Undefined)
         {
             // fmt::print("VTParser: Transitioning from {} to {}", state_, t);
             // handle(_actionClass, _action, currentChar());
-            handle(ActionClass::Leave, table.exitEvents[s], _ch);
-            handle(ActionClass::Transition, table.events[s][_ch], _ch);
+            handle(ActionClass::Leave, table.exitEvents[s], ch);
+            handle(ActionClass::Transition, table.events[s][static_cast<size_t>(ch)], ch);
             state_ = t;
-            handle(ActionClass::Enter, table.entryEvents[static_cast<size_t>(t)], _ch);
+            handle(ActionClass::Enter, table.entryEvents[static_cast<size_t>(t)], ch);
         }
-        else if (Action const a = table.events[s][static_cast<uint8_t>(_ch)]; a != Action::Undefined)
-            handle(ActionClass::Event, a, _ch);
+        else if (Action const a = table.events[s][ch]; a != Action::Undefined)
+            handle(ActionClass::Event, a, ch);
         else
             eventListener_.error(
                 fmt::format("Parser Error: Unknown action for state/input pair ({}, '{}' 0x{:02X})",
                             state_,
-                            _ch,
-                            static_cast<unsigned>(_ch)));
+                            ch,
+                            static_cast<unsigned>(ch)));
     } while (input != end);
 }
 

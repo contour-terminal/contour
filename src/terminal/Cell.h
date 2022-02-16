@@ -126,7 +126,7 @@ class CONTOUR_PACKED Cell
 
     bool empty() const noexcept;
 
-    constexpr int width() const noexcept;
+    constexpr uint8_t width() const noexcept;
     void setWidth(uint8_t _width) noexcept;
 
     /*TODO(perf) [[deprecated]]*/ GraphicsAttributes attributes() const noexcept;
@@ -284,7 +284,7 @@ inline void Cell::reset(GraphicsAttributes const& _attributes, HyperlinkId _hype
 }
 // }}}
 // {{{ impl: character
-inline constexpr int Cell::width() const noexcept
+inline constexpr uint8_t Cell::width() const noexcept
 {
     return !extra_ ? 1 : extra_->width;
     // return static_cast<int>((codepoint_ >> 21) & 0x03); //return width_;

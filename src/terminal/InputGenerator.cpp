@@ -418,7 +418,7 @@ inline bool InputGenerator::append(unsigned int _number)
 {
     char buf[16];
     int n = snprintf(buf, sizeof(buf), "%u", _number);
-    return append(string_view(buf, n));
+    return append(string_view(buf, static_cast<size_t>(n)));
 }
 
 bool InputGenerator::generateFocusInEvent()
@@ -516,8 +516,8 @@ namespace
 
     constexpr uint8_t buttonButton(MouseButton _button, InputGenerator::MouseEventType _eventType) noexcept
     {
-        return buttonNormal(_button, _eventType)
-               + (_eventType == InputGenerator::MouseEventType::Drag ? 0x20 : 0);
+        auto const normal = buttonNormal(_button, _eventType);
+        return static_cast<uint8_t>(normal + (_eventType == InputGenerator::MouseEventType::Drag ? 0x20 : 0));
     }
 } // namespace
 

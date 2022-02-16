@@ -61,7 +61,7 @@ constexpr inline std::array<RGBColor, 16> defaultColors = {
 };
 
 // {{{ SixelColorPalette
-SixelColorPalette::SixelColorPalette(int _size, int _maxSize): palette_ {}, maxSize_ { _maxSize }
+SixelColorPalette::SixelColorPalette(unsigned int _size, unsigned int _maxSize): maxSize_ { _maxSize }
 {
     if (_size > 0)
         palette_.resize(_size);
@@ -75,17 +75,17 @@ void SixelColorPalette::reset()
         palette_[i] = defaultColors[i];
 }
 
-void SixelColorPalette::setSize(int _newSize)
+void SixelColorPalette::setSize(unsigned int _newSize)
 {
-    palette_.resize(static_cast<size_t>(max(0, min(_newSize, maxSize_))));
+    palette_.resize(static_cast<size_t>(max(0u, min(_newSize, maxSize_))));
 }
 
-void SixelColorPalette::setMaxSize(int _value)
+void SixelColorPalette::setMaxSize(unsigned int _value)
 {
     maxSize_ = _value;
 }
 
-void SixelColorPalette::setColor(int _index, RGBColor const& _color)
+void SixelColorPalette::setColor(unsigned int _index, RGBColor const& _color)
 {
     if (_index < maxSize_)
     {
@@ -97,7 +97,7 @@ void SixelColorPalette::setColor(int _index, RGBColor const& _color)
     }
 }
 
-RGBColor SixelColorPalette::at(int _index) const noexcept
+RGBColor SixelColorPalette::at(unsigned int _index) const noexcept
 {
     return palette_[_index % palette_.size()];
 }

@@ -81,7 +81,7 @@ gsl::span<Cell const> Line<Cell, Optimize>::trim_blank_right() const noexcept
     while (i != e && (e - 1)->empty())
         --e;
 
-    return gsl::make_span(i, e - i);
+    return gsl::make_span(i, e);
 }
 
 template <typename Cell, bool Optimize>

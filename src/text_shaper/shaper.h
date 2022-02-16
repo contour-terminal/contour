@@ -50,7 +50,7 @@ enum class bitmap_format
     rgba
 };
 
-constexpr int pixel_size(bitmap_format _format) noexcept
+constexpr size_t pixel_size(bitmap_format _format) noexcept
 {
     switch (_format)
     {

@@ -265,7 +265,7 @@ namespace
                     maxAdvance = max(maxAdvance, _face->glyph->metrics.horiAdvance);
                 }
         }
-        logger.append(" = {}", int(ceilf(float(maxAdvance) / 64.0)));
+        logger.append(" = {}", int(ceil(double(maxAdvance) / 64.0)));
         return int(ceil(double(maxAdvance) / 64.0));
     }
 
@@ -414,7 +414,7 @@ namespace
             hbFeatures.emplace_back(hbFeature);
         }
 
-        hb_shape(_hbFont, _hbBuf, hbFeatures.data(), hbFeatures.size());
+        hb_shape(_hbFont, _hbBuf, hbFeatures.data(), static_cast<unsigned int>(hbFeatures.size()));
         hb_buffer_normalize_glyphs(_hbBuf); // TODO: lookup again what this one does
 
         auto const glyphCount = hb_buffer_get_length(_hbBuf);
@@ -720,12 +720,12 @@ void open_shaper::shape(font_key _font,
     // Reshape each cluster individually.
     _result.clear();
     auto cluster = _clusters[0];
-    int start = 0;
-    for (int i = 1; i < static_cast<int>(_clusters.size()); ++i)
+    size_t start = 0;
+    for (size_t i = 1; i < _clusters.size(); ++i)
     {
         if (cluster != _clusters[i])
         {
-            int const count = i - start;
+            size_t const count = i - start;
             d->tryShapeWithFallback(_font,
                                     fontInfo,
                                     hbBuf,

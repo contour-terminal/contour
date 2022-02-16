@@ -78,9 +78,9 @@ CLI::HelpStyle helpStyle()
     return style;
 }
 
-int screenWidth()
+unsigned screenWidth()
 {
-    constexpr auto DefaultWidth = 80;
+    constexpr auto DefaultWidth = 80u;
 
 #if !defined(_WIN32)
     auto ws = winsize {};
@@ -170,14 +170,13 @@ int App::helpAction()
 int App::licenseAction()
 {
     auto const& store = crispy::cli::about::store();
-    auto const titleWidth = std::accumulate(store.begin(), store.end(), 0, [](int a, auto const& b) {
-        return std::max(a, (int) b.title.size());
-    });
-    auto const licenseWidth = std::accumulate(store.begin(), store.end(), 0, [](int a, auto const& b) {
-        return std::max(a, (int) b.license.size());
+    auto const titleWidth = std::accumulate(
+        store.begin(), store.end(), 0u, [](size_t a, auto const& b) { return std::max(a, b.title.size()); });
+    auto const licenseWidth = std::accumulate(store.begin(), store.end(), 0u, [](size_t a, auto const& b) {
+        return std::max(a, b.license.size());
     });
     auto const urlWidth = std::accumulate(
-        store.begin(), store.end(), 0, [](int a, auto const& b) { return std::max(a, (int) b.url.size()); });
+        store.begin(), store.end(), 0u, [](size_t a, auto const& b) { return std::max(a, b.url.size()); });
 
     auto const Horiz = "\u2550"sv;
     auto const Vert = "\u2502"sv;
@@ -189,14 +188,14 @@ int App::licenseAction()
          << "\u2550"sv * (appTitle_.size() + appVersion_.size() + 1) << endl
          << endl;
 
-    cout << setw(titleWidth) << "Project" << ' ' << Vert << ' ' << setw(licenseWidth) << "License" << ' '
-         << Vert << ' ' << "Project URL" << endl;
+    cout << setw((int) titleWidth) << "Project" << ' ' << Vert << ' ' << setw((int) licenseWidth) << "License"
+         << ' ' << Vert << ' ' << "Project URL" << endl;
 
     cout << Horiz * titleWidth << Horiz << Cross << Horiz << Horiz * licenseWidth << Horiz << Cross << Horiz
          << Horiz * urlWidth << endl;
 
     for (auto const& project: crispy::cli::about::store())
-        cout << setw(titleWidth) << project.title << ' ' << Vert << ' ' << setw(licenseWidth)
+        cout << setw((int) titleWidth) << project.title << ' ' << Vert << ' ' << setw((int) licenseWidth)
              << project.license << ' ' << Vert << ' ' << project.url << endl;
 
     return EXIT_SUCCESS;

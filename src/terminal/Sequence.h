@@ -134,7 +134,7 @@ class Sequence
     {
         assert(_index < parameters_.size());
         assert(0 < parameters_[_index].size());
-        return T(parameters_[_index][0]);
+        return static_cast<T>(parameters_[_index][0]);
     }
 
     template <typename T = unsigned>
@@ -142,7 +142,7 @@ class Sequence
     {
         assert(_index < parameters_.size());
         assert(_subIndex + 1 < parameters_[_index].size());
-        return T(parameters_[_index][_subIndex + 1]);
+        return static_cast<T>(parameters_[_index][_subIndex + 1]);
     }
 
     template <typename T = unsigned>

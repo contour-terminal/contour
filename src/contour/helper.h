@@ -178,8 +178,12 @@ terminal::renderer::PageMargin computeMargin(terminal::ImageSize _cellSize,
 terminal::renderer::FontDescriptions sanitizeFontDescription(terminal::renderer::FontDescriptions _fonts,
                                                              text::DPI _screenDPI);
 
-terminal::PageSize pageSizeForPixels(terminal::ImageSize _pixelSize,
-                                     terminal::renderer::GridMetrics const& _gridMetrics);
+constexpr terminal::PageSize pageSizeForPixels(crispy::ImageSize viewSize,
+                                               crispy::ImageSize cellSize) noexcept
+{
+    return terminal::PageSize { boxed_cast<terminal::LineCount>((viewSize / cellSize).height),
+                                boxed_cast<terminal::ColumnCount>((viewSize / cellSize).width) };
+}
 
 void applyResize(terminal::ImageSize _newPixelSize,
                  TerminalSession& _session,

@@ -78,13 +78,13 @@ namespace
     }
 
     /// @returns parsed tuple with OSC code and offset to first data parameter byte.
-    pair<int, int> parseOSC(string const& _data)
+    pair<int, size_t> parseOSC(string const& _data)
     {
         int code = 0;
         size_t i = 0;
 
         while (i < _data.size() && isdigit(_data[i]))
-            code = code * 10 + _data[i++] - '0';
+            code = code * 10 + (int) (_data[i++] - '0');
 
         if (i == 0 && !_data.empty() && _data[0] != ';')
         {
@@ -600,18 +600,18 @@ namespace impl
         return crispy::split(_text, ';', [&](string_view value) {
             if (index < 0)
             {
-                index = crispy::to_integer<10>(value).value_or(-1);
+                index = crispy::to_integer<10, int>(value).value_or(-1);
                 if (!(0 <= index && index <= 0xFF))
                     return false;
             }
             else if (value == "?"sv)
             {
-                _queryColor(index);
+                _queryColor((uint8_t) index);
                 index = -1;
             }
             else if (auto const color = parseColor(value))
             {
-                _setColor(index, color.value());
+                _setColor((uint8_t) index, color.value());
                 index = -1;
             }
             else
@@ -688,11 +688,11 @@ namespace impl
         // [write] OSC 60 ; size ; regular ; bold ; italic ; bold italic ST
         auto const& params = _seq.intermediateCharacters();
         auto const splits = crispy::split(params, ';');
-        auto const param = [&](int _index) -> string_view {
-            if (_index < int(splits.size()))
+        auto const param = [&](unsigned _index) -> string_view {
+            if (_index < splits.size())
                 return splits.at(_index);
             else
-                return string_view {};
+                return {};
         };
         auto const emptyParams = [&]() -> bool {
             for (auto const& x: splits)
@@ -867,7 +867,8 @@ namespace impl
                 terminal.resizeWindow(ImageSize { Width(_seq.param(2)), Height(_seq.param(1)) });
                 break;
             case 8: // resize in cell units
-                terminal.resizeWindow(PageSize { LineCount(_seq.param(1)), ColumnCount(_seq.param(2)) });
+                terminal.resizeWindow(
+                    PageSize { LineCount::cast_from(_seq.param(1)), ColumnCount::cast_from(_seq.param(2)) });
                 break;
             case 22: terminal.screen().saveWindowTitle(); break;
             case 23: terminal.screen().restoreWindowTitle(); break;
@@ -979,7 +980,7 @@ void Sequencer<TheTerminal>::error(std::string_view _errorString)
 template <typename TheTerminal>
 void Sequencer<TheTerminal>::print(char _char)
 {
-    unicode::ConvertResult const r = unicode::from_utf8(state().utf8DecoderState, _char);
+    unicode::ConvertResult const r = unicode::from_utf8(state().utf8DecoderState, (uint8_t) _char);
     if (holds_alternative<unicode::Incomplete>(r))
         return;
 
@@ -1001,7 +1002,7 @@ void Sequencer<TheTerminal>::print(string_view _chars)
     {
         state().instructionCounter += _chars.size();
         screen().writeText(_chars);
-        state().precedingGraphicCharacter = _chars.back();
+        state().precedingGraphicCharacter = static_cast<char32_t>(_chars.back());
     }
     else
         for (char const ch: _chars)
@@ -1060,7 +1061,8 @@ void Sequencer<TheTerminal>::param(char _char)
     case '7':
     case '8':
     case '9':
-        sequence_.parameters().back().back() = sequence_.parameters().back().back() * 10 + (_char - '0');
+        sequence_.parameters().back().back() =
+            sequence_.parameters().back().back() * 10 + (Sequence::Parameter)(_char - '0');
         break;
     }
 }
@@ -1295,7 +1297,7 @@ void Sequencer<TheTerminal>::executeControlFunction(char _c0)
     case 0x38: screen().restoreCursor(); break;
     default:
         if (VTParserLog)
-            LOGSTORE(VTParserLog)("Unsupported C0 sequence: {}", crispy::escape(_c0));
+            VTParserLog()("Unsupported C0 sequence: {}", crispy::escape((uint8_t) _c0));
         break;
     }
 }
@@ -1371,11 +1373,11 @@ ApplyResult Sequencer<TheTerminal>::apply(FunctionDefinition const& _function, S
 
     // CSI
     case ANSISYSSC: screen().restoreCursor(); break;
-    case CBT: screen().cursorBackwardTab(TabStopCount(_seq.param_or(0, Sequence::Parameter { 1 }))); break;
+    case CBT: screen().cursorBackwardTab(TabStopCount::cast_from(_seq.param_or(0, Sequence::Parameter { 1 }))); break;
     case CHA: screen().moveCursorToColumn(_seq.param_or<ColumnOffset>(0, ColumnOffset { 1 }) - 1); break;
-    case CHT: screen().cursorForwardTab(TabStopCount(_seq.param_or(0, Sequence::Parameter { 1 }))); break;
-    case CNL: screen().moveCursorToNextLine(LineCount(_seq.param_or(0, Sequence::Parameter { 1 }))); break;
-    case CPL: screen().moveCursorToPrevLine(LineCount(_seq.param_or(0, Sequence::Parameter { 1 }))); break;
+    case CHT: screen().cursorForwardTab(TabStopCount::cast_from(_seq.param_or(0, Sequence::Parameter { 1 }))); break;
+    case CNL: screen().moveCursorToNextLine(LineCount::cast_from(_seq.param_or(0, Sequence::Parameter { 1 }))); break;
+    case CPL: screen().moveCursorToPrevLine(LineCount::cast_from(_seq.param_or(0, Sequence::Parameter { 1 }))); break;
     case CPR: return impl::CPR(_seq, screen());
     case CUB: screen().moveCursorBackward(_seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
     case CUD: screen().moveCursorDown(_seq.param_or<LineCount>(0, LineCount { 1 })); break;

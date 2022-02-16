@@ -11,7 +11,11 @@ CIncludeMe(
     "contour::opengl::verbatim"
 )
 
-qt5_add_resources(QT_RESOURCES contour_frontend_opengl.qrc)
+set(QT_RESOURCES contour_frontend_opengl.qrc)
+if(NOT(CONTOUR_BUILD_WITH_QT6))
+    qt5_add_resources(QT_RESOURCES ${QT_RESOURCES})
+endif()
+
 add_library(contour_frontend_opengl
     "${CMAKE_CURRENT_BINARY_DIR}/shared_defines_verbatim.h"
     OpenGLRenderer.cpp OpenGLRenderer.h

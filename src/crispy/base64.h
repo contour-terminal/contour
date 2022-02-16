@@ -139,7 +139,7 @@ inline size_t decodeLength(const std::string_view& value)
 template <typename Iterator, typename IndexTable, typename Output>
 size_t decode(Iterator begin, Iterator end, const IndexTable& indexmap, Output output)
 {
-    auto const index = [indexmap](Iterator i) {
+    auto const index = [indexmap](Iterator i) -> unsigned char {
         return indexmap[static_cast<uint8_t>(*i)];
     };
 
@@ -158,9 +158,9 @@ size_t decode(Iterator begin, Iterator end, const IndexTable& indexmap, Output o
 
     while (nprbytes > 4)
     {
-        *out++ = index(input + 0) << 2 | index(input + 1) >> 4;
-        *out++ = index(input + 1) << 4 | index(input + 2) >> 2;
-        *out++ = index(input + 2) << 6 | index(input + 3);
+        *out++ = (char) (index(input + 0) << 2 | index(input + 1) >> 4);
+        *out++ = (char) (index(input + 1) << 4 | index(input + 2) >> 2);
+        *out++ = (char) (index(input + 2) << 6 | index(input + 3));
 
         input += 4;
         nprbytes -= 4;
@@ -168,15 +168,15 @@ size_t decode(Iterator begin, Iterator end, const IndexTable& indexmap, Output o
 
     if (nprbytes > 1)
     {
-        *(out++) = index(input + 0) << 2 | index(input + 1) >> 4;
+        *(out++) = (char) (index(input + 0) << 2 | index(input + 1) >> 4);
 
         if (nprbytes > 2)
         {
-            *(out++) = index(input + 1) << 4 | index(input + 2) >> 2;
+            *(out++) = (char) (index(input + 1) << 4 | index(input + 2) >> 2);
 
             if (nprbytes > 3)
             {
-                *(out++) = index(input + 2) << 6 | index(input + 3);
+                *(out++) = (char) (index(input + 2) << 6 | index(input + 3));
             }
         }
     }

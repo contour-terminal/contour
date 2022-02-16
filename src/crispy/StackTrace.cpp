@@ -87,8 +87,8 @@ vector<void*> StackTrace::getFrames(size_t _skip, size_t _max)
 
 #if defined(HAVE_BACKTRACE)
     frames.resize(_skip + _max);
-    frames.resize(::backtrace(&frames[0], static_cast<int>(_skip + _max)));
-    std::copy(std::next(frames.begin(), _skip), frames.end(), frames.begin());
+    frames.resize((size_t) ::backtrace(&frames[0], static_cast<int>(_skip + _max)));
+    std::copy(std::next(frames.begin(), (int) _skip), frames.end(), frames.begin());
     frames.resize(frames.size() > _skip ? frames.size() - _skip : std::min(frames.size(), _skip));
 #endif
 
@@ -112,8 +112,7 @@ optional<DebugInfo> StackTrace::getDebugInfoForFrame(void* p)
     {
         std::string addr2lineExe = "/usr/bin/addr2line";
         char exe[512] {};
-        int rv = readlink("/proc/self/exe", exe, sizeof(exe));
-        if (rv < 0)
+        if (ssize_t rv = readlink("/proc/self/exe", exe, sizeof(exe)); rv < 0)
             _exit(EXIT_FAILURE);
         char addr[32];
         snprintf(addr, sizeof(addr), "%p", p);
@@ -126,7 +125,7 @@ optional<DebugInfo> StackTrace::getDebugInfoForFrame(void* p)
         }
         close(pipe.reader());
         close(STDERR_FILENO);
-        rv = execv(argv[0], (char**) argv);
+        auto const rv = execv(argv[0], (char**) argv);
         perror("execvp");
         _exit(rv);
     }
@@ -157,7 +156,7 @@ optional<DebugInfo> StackTrace::getDebugInfoForFrame(void* p)
             try { info.text = stoi(cm[2].str()); } catch (...) {}
     #else
         if (len > 0)
-            info.text = string(buf, len);
+            info.text = string(buf, (size_t) len);
     #endif
 
         if (info.text == "??:0")
@@ -184,7 +183,7 @@ StackTrace::StackTrace():
 #endif
 {
 #if defined(HAVE_BACKTRACE)
-    frames_.resize(::backtrace(&frames_[0], SKIP_FRAMES + MAX_FRAMES));
+    frames_.resize((size_t) ::backtrace(&frames_[0], SKIP_FRAMES + MAX_FRAMES));
 #endif
 }
 
