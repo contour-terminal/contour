@@ -294,7 +294,7 @@ class Terminal
     }
 
     /// Sets or resets to a new selection.
-    void setSelector(std::unique_ptr<Selection> _selector) { selection_ = std::move(selection_); }
+    void setSelector(std::unique_ptr<Selection> _selector) { selection_ = std::move(_selector); }
 
     /// Tests whether or not some grid cells are selected.
     bool selectionAvailable() const noexcept { return !!selection_; }

@@ -279,6 +279,8 @@ inline void Cell::reset(GraphicsAttributes const& _attributes, HyperlinkId _hype
         extra().underlineColor = _attributes.underlineColor;
     if (_attributes.styles != CellFlags::None)
         extra().flags = _attributes.styles;
+    if (_hyperlink != HyperlinkId())
+        extra().hyperlink = _hyperlink;
 }
 // }}}
 // {{{ impl: character
