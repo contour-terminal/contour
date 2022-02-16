@@ -194,7 +194,7 @@ class Sink
   public:
     using Writer = std::function<void(std::string_view const&)>;
 
-    Sink(bool _enabled, Writer _writer): writer_ { std::move(_writer) } {}
+    Sink(bool _enabled, Writer _writer): enabled_ { _enabled }, writer_ { std::move(_writer) } {}
 
     Sink(bool _enabled, std::ostream& _output):
         Sink(_enabled, [out = &_output](std::string_view text) {
@@ -208,6 +208,11 @@ class Sink
 
     /// Writes given built message to this sink.
     void write(MessageBuilder const& _message);
+
+    void set_enabled(bool enabled)
+    {
+        enabled_ = enabled;
+    }
 
     /// Retrieves reference to standard debug-logging sink.
     static inline Sink& console()
@@ -223,6 +228,7 @@ class Sink
     }
 
   private:
+    bool enabled_;
     Writer writer_;
 };
 
@@ -356,7 +362,7 @@ inline std::string Category::default_formatter(MessageBuilder const& _message)
 
 inline void Sink::write(MessageBuilder const& _message)
 {
-    if (_message.category().is_enabled())
+    if (enabled_ && _message.category().is_enabled())
         writer_(_message.message());
 }
 

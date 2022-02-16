@@ -84,7 +84,7 @@ font_source_list mock_font_locator::all()
     return output;
 }
 
-font_source_list mock_font_locator::resolve(gsl::span<const char32_t> codepoints)
+font_source_list mock_font_locator::resolve(gsl::span<const char32_t> /*codepoints*/)
 {
     return {};
 }

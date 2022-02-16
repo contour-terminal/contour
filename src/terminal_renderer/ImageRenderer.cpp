@@ -76,8 +76,7 @@ Renderable::AtlasTileAttributes const* ImageRenderer::getOrCreateCachedTileAttri
 
     return textureAtlas().get_or_try_emplace(
         hash, [&](atlas::TileLocation tileLocation) -> optional<TextureAtlas::TileCreateData> {
-            return createTileData(_gridMetrics,
-                                  tileLocation,
+            return createTileData(tileLocation,
                                   fragment.data(),
                                   atlas::Format::RGBA,
                                   cellSize_,
@@ -87,7 +86,7 @@ Renderable::AtlasTileAttributes const* ImageRenderer::getOrCreateCachedTileAttri
         });
 }
 
-void ImageRenderer::discardImage(ImageId _imageId)
+void ImageRenderer::discardImage(ImageId /*_imageId*/)
 {
     // We currently don't really discard.
     // Because the GPU texture atlas is resource-guarded by an LRU hashtable.

@@ -654,8 +654,7 @@ auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
                     std::memcpy(targetRow, sourceRow, subPitch);
                 }
 
-                return createTileData(_gridMetrics,
-                                      tileLocation,
+                return createTileData(tileLocation,
                                       move(bitmap),
                                       bitmapFormat,
                                       subSize,
@@ -676,8 +675,7 @@ auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
                     createData.bitmap.data() + rowIndex * pitch, // source
                     headPitch);                                  // sub-image line length
 
-    return { createTileData(_gridMetrics,
-                            tileLocation,
+    return { createTileData(tileLocation,
                             move(headBitmap),
                             bitmapFormat,
                             headSize,
@@ -756,8 +754,7 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
             glyph, glyphKey.index, fontDescriptions_.renderMode, presentation, yOverflow, yMin);
     // clang-format on
 
-    return { createTileData(_gridMetrics,
-                            tileLocation,
+    return { createTileData(tileLocation,
                             move(glyph.bitmap),
                             toAtlasFormat(glyph.format),
                             glyph.bitmapSize,

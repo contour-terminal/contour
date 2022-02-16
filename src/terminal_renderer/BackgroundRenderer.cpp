@@ -48,7 +48,7 @@ void BackgroundRenderer::renderCell(RenderCell const& _cell)
                                    RGBAColor(_cell.backgroundColor, opacity_));
 }
 
-void BackgroundRenderer::inspect(std::ostream& output) const
+void BackgroundRenderer::inspect(std::ostream& /*output*/) const
 {
 }
 

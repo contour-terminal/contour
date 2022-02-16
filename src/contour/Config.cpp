@@ -665,7 +665,6 @@ namespace // {{{ helper
 
     optional<Action> parseAction(UsedKeys& _usedKeys,
                                  string const& _prefix,
-                                 Config& _config,
                                  YAML::Node const& _parent)
     {
         _usedKeys.emplace(_prefix + ".action");
@@ -747,7 +746,7 @@ namespace // {{{ helper
     {
         using namespace terminal;
 
-        auto const action = parseAction(_usedKeys, _prefix, _config, _mapping);
+        auto const action = parseAction(_usedKeys, _prefix, _mapping);
         auto const mods = parseModifier(_usedKeys, _prefix + ".mods", _mapping["mods"]);
         auto const mode = parseMatchModes(_usedKeys, _prefix + ".mode", _mapping["mode"]);
         if (action && mods && mode)

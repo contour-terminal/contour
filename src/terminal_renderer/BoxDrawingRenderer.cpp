@@ -439,7 +439,7 @@ namespace detail
         auto hbar(ImageSize size)
         {
             auto const s = *size.height / N;
-            return [s](int x, int y) {
+            return [s](int /*x*/, int y) {
                 return (y / s) % 2 ? 255 : 0;
             };
         }
@@ -757,6 +757,7 @@ namespace detail
                     case 5:
                     case 0: return 2;
                     }
+                    break;
                 case 1:
                     switch (position % 6)
                     {
@@ -767,7 +768,10 @@ namespace detail
                     case 5:
                     case 0: return 0;
                     }
+                    break;
                 }
+                Guarantee(false);
+                crispy::unreachable();
                 return 0;
             }();
 
@@ -849,8 +853,7 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint, atlas::TileLocation 
 {
     if (optional<atlas::Buffer> image = buildElements(codepoint))
     {
-        return { createTileData(_gridMetrics,
-                                tileLocation,
+        return { createTileData(tileLocation,
                                 move(*image),
                                 atlas::Format::Red,
                                 _gridMetrics.cellSize,
@@ -889,8 +892,7 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint, atlas::TileLocation 
         pixels = move(*tmp);
     }
 
-    return { createTileData(_gridMetrics,
-                            tileLocation,
+    return { createTileData(tileLocation,
                             move(pixels),
                             atlas::Format::Red,
                             _gridMetrics.cellSize,

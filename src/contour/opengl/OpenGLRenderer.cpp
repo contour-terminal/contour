@@ -146,6 +146,18 @@ namespace
         mat.ortho(left, right, bottom, top, nearPlane, farPlane);
         return mat;
     }
+
+    GLenum glFormat(terminal::ImageFormat format)
+    {
+        switch (format)
+        {
+        case terminal::ImageFormat::RGB: return GL_RGB;
+        case terminal::ImageFormat::RGBA: return GL_RGBA;
+        }
+        Guarantee(false);
+        crispy::unreachable();
+    }
+
 } // namespace
 
 /**
@@ -160,7 +172,7 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& textShaderConfig,
                                ShaderConfig const& rectShaderConfig,
                                ShaderConfig const& backgroundImageShaderConfig,
                                ImageSize targetSurfaceSize,
-                               ImageSize textureTileSize,
+                               ImageSize /*textureTileSize*/,
                                terminal::renderer::PageMargin margin):
     _renderTargetSize { targetSurfaceSize },
     _projectionMatrix { ortho(0.0f,
@@ -721,7 +733,7 @@ void OpenGLRenderer::clear(terminal::RGBAColor fillColor)
 
 // }}}
 
-void OpenGLRenderer::inspect(std::ostream& output) const
+void OpenGLRenderer::inspect(std::ostream& /*output*/) const
 {
 }
 
@@ -839,10 +851,10 @@ GLuint OpenGLRenderer::createAndUploadImage(ImageSize imageSize,
     auto constexpr target = GL_TEXTURE_2D;
     auto constexpr levelOfDetail = 0;
     auto constexpr type = GL_UNSIGNED_BYTE;
-    auto constexpr imageFormat = GL_RGBA;
     auto constexpr UnusedParam = 0;
     auto constexpr internalFormat = GL_RGBA;
 
+    auto const imageFormat = glFormat(format);
     auto const textureWidth = unbox<uint32_t>(imageSize.width);
     auto const textureHeight = unbox<uint32_t>(imageSize.height);
 

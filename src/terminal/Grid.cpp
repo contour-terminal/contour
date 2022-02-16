@@ -65,7 +65,7 @@ namespace detail
         lines.reserve(totalLineCount);
 
         for ([[maybe_unused]] auto const _: ranges::views::iota(0u, totalLineCount))
-            lines.emplace_back(_pageSize.columns, defaultLineFlags, Cell {});
+            lines.emplace_back(_pageSize.columns, defaultLineFlags, Cell { _initialSGR });
 
         return lines;
     }
@@ -438,7 +438,7 @@ LineCount Grid<Cell>::scrollUp(LineCount _n, GraphicsAttributes _defaultAttribut
         // a full "inside" scroll-up
         auto const marginHeight = _margin.vertical.length();
         auto const n = std::min(_n, marginHeight);
-        //auto const bottomLineOffsetToCopy = min(_margin.vertical.from + *n, _margin.vertical.to - 1);
+        // auto const bottomLineOffsetToCopy = min(_margin.vertical.from + *n, _margin.vertical.to - 1);
         auto const topTargetLineOffset = _margin.vertical.from;
         auto const bottomTargetLineOffset = _margin.vertical.to - *n;
         auto const columnsToMove = unbox<size_t>(_margin.horizontal.length());
@@ -777,8 +777,9 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
         }
     };
 
-    auto const shrinkColumns =
-        [this](ColumnCount _newColumnCount, LineCount _newLineCount, CellLocation _cursor) -> CellLocation {
+    auto const shrinkColumns = [this](ColumnCount _newColumnCount,
+                                      LineCount /*_newLineCount*/,
+                                      CellLocation _cursor) -> CellLocation {
         using LineBuffer = typename Line<Cell>::InflatedBuffer;
 
         if (!reflowOnResize_)

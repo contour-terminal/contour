@@ -162,8 +162,7 @@ class Renderable
     virtual void initializeDirectMapping(DirectMappingAllocator& /*directMappingAllocator*/) {}
     virtual void setTextureAtlas(TextureAtlas& atlas) { _textureAtlas = &atlas; }
 
-    TextureAtlas::TileCreateData createTileData(GridMetrics const& gridMetrics,
-                                                atlas::TileLocation tileLocation,
+    TextureAtlas::TileCreateData createTileData(atlas::TileLocation tileLocation,
                                                 std::vector<uint8_t> bitmap,
                                                 atlas::Format bitmapFormat,
                                                 ImageSize bitmapSize,

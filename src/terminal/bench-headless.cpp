@@ -32,21 +32,21 @@ using namespace std;
 class NullParserEvents
 {
   public:
-    void error(std::string_view const& _errorString) {}
-    void print(char _text) {}
-    void print(std::string_view _chars) {}
-    void execute(char _controlCode) {}
+    void error(std::string_view /*_errorString*/) {}
+    void print(char /*_text*/) {}
+    void print(std::string_view /*_chars*/) {}
+    void execute(char /*_controlCode*/) {}
     void clear() {}
-    void collect(char _char) {}
-    void collectLeader(char _leader) {}
-    void param(char _char) {}
-    void dispatchESC(char _function) {}
-    void dispatchCSI(char _function) {}
+    void collect(char /*_char*/) {}
+    void collectLeader(char /*_leader*/) {}
+    void param(char /*_char*/) {}
+    void dispatchESC(char /*_function*/) {}
+    void dispatchCSI(char /*_function*/) {}
     void startOSC() {}
-    void putOSC(char _char) {}
+    void putOSC(char /*_char*/) {}
     void dispatchOSC() {}
-    void hook(char _function) {}
-    void put(char _char) {}
+    void hook(char /*_function*/) {}
+    void put(char /*_char*/) {}
     void unhook() {}
     void startAPC() {}
     void putAPC(char) {}

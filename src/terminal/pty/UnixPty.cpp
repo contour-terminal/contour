@@ -90,7 +90,7 @@ namespace
         int currentFlags {};
         if (fcntl(fd, F_GETFL, &currentFlags) < 0)
             return false;
-        if (fcntl(fd, F_SETFL, currentFlags | O_CLOEXEC | O_NONBLOCK) < 0)
+        if (fcntl(fd, F_SETFL, currentFlags | flags) < 0)
             return false;
         return true;
     }

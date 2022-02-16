@@ -461,9 +461,11 @@ FileSystem::path Process::homeDirectory()
         return FileSystem::path("/");
 #endif
 }
+
 string Process::workingDirectory(Pty const* _pty) const
 {
 #if defined(__linux__)
+    (void) _pty; // Unused.
     try
     {
         auto const path = FileSystem::path { fmt::format("/proc/{}/cwd", pid_) };
@@ -494,6 +496,7 @@ string Process::workingDirectory(Pty const* _pty) const
     }
 #else
     // TODO: Windows
+    (void) _pty; // Unused.
     return "."s;
 #endif
 }

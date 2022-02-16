@@ -255,7 +255,7 @@ struct glyph_key
     glyph_index index;
 
 #if defined(GLYPH_KEY_DEBUG)
-    std::u32string text;
+    std::u32string text = {};
     static constexpr inline bool Debug = true;
 #else
     static constexpr inline bool Debug = false;

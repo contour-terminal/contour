@@ -84,7 +84,7 @@ void DecorationRenderer::initializeDirectMapping()
     }
 }
 
-void DecorationRenderer::inspect(std::ostream& output) const
+void DecorationRenderer::inspect(std::ostream& /*output*/) const
 {
 }
 
@@ -120,8 +120,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
 
     auto const create = [this, tileLocation](ImageSize bitmapSize,
                                              auto createBitmap) -> TextureAtlas::TileCreateData {
-        return createTileData(_gridMetrics,
-                              tileLocation,
+        return createTileData(tileLocation,
                               createBitmap(),
                               atlas::Format::Red,
                               bitmapSize,

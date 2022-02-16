@@ -114,8 +114,7 @@ auto CursorRenderer::createTileData(CursorShape cursorShape,
 
     auto const create = [this, tileLocation](ImageSize bitmapSize,
                                              auto createBitmap) -> TextureAtlas::TileCreateData {
-        return createTileData(_gridMetrics,
-                              tileLocation,
+        return createTileData(tileLocation,
                               createBitmap(),
                               atlas::Format::Red,
                               bitmapSize,
@@ -184,7 +183,7 @@ void CursorRenderer::render(crispy::Point _pos, int _columnWidth, RGBColor _colo
     }
 }
 
-void CursorRenderer::inspect(std::ostream& output) const
+void CursorRenderer::inspect(std::ostream& /*output*/) const
 {
 }
 

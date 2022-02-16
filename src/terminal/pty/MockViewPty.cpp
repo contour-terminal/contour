@@ -26,7 +26,7 @@ void MockViewPty::setReadData(std::string_view _data)
     outputBuffer_ = _data;
 }
 
-optional<string_view> MockViewPty::read(size_t _maxSize, std::chrono::milliseconds _timeout)
+optional<string_view> MockViewPty::read(size_t _maxSize, std::chrono::milliseconds /*_timeout*/)
 {
     auto const n = std::min(outputBuffer_.size(), _maxSize);
     auto const result = outputBuffer_.substr(0, n);

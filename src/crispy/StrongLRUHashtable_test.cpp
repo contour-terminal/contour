@@ -246,8 +246,8 @@ TEST_CASE("StrongLRUHashtable.get_or_try_emplace.recursive", "[lrucache]")
     auto& cache = *cachePtr;
 
     int* b = nullptr;
-    int* a = cache.get_or_try_emplace(h(1), [&b, &cache](auto i) -> optional<int> {
-        b = cache.get_or_try_emplace(h(2), [&](auto k) -> optional<int> { return { -2 }; });
+    int* a = cache.get_or_try_emplace(h(1), [&b, &cache](auto) -> optional<int> {
+        b = cache.get_or_try_emplace(h(2), [&](auto) -> optional<int> { return { -2 }; });
         return { -1 };
     });
 

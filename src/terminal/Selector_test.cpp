@@ -32,7 +32,7 @@ struct TestSelectionHelper: public terminal::SelectionHelper
     explicit TestSelectionHelper(Screen<T>& self): screen { &self } {}
 
     PageSize pageSize() const noexcept { return screen->pageSize(); }
-    bool wordDelimited(CellLocation _pos) const noexcept { return true; } // TODO
+    bool wordDelimited(CellLocation /*_pos*/) const noexcept { return true; } // TODO
     bool wrappedLine(LineOffset _line) const noexcept { return screen->isLineWrapped(_line); }
     bool cellEmpty(CellLocation _pos) const noexcept { return screen->at(_pos).empty(); }
     int cellWidth(CellLocation _pos) const noexcept { return screen->at(_pos).width(); }

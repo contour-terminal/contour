@@ -30,8 +30,7 @@ void Renderable::setRenderTarget(RenderTarget& renderTarget, DirectMappingAlloca
     _directMappingAllocator = &directMappingAllocator;
 }
 
-auto Renderable::createTileData(GridMetrics const& gridMetrics,
-                                atlas::TileLocation tileLocation,
+auto Renderable::createTileData(atlas::TileLocation tileLocation,
                                 std::vector<uint8_t> bitmap,
                                 atlas::Format bitmapFormat,
                                 ImageSize bitmapSize,
@@ -81,8 +80,7 @@ auto Renderable::sliceTileData(Renderable::TextureAtlas::TileCreateData const& c
         std::memcpy(targetRow, sourceRow, subPitch);
     }
 
-    return createTileData(_gridMetrics,
-                          tileLocation,
+    return createTileData(tileLocation,
                           move(bitmap),
                           bitmapFormat,
                           subSize,

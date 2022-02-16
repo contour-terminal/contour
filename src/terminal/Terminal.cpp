@@ -559,7 +559,7 @@ bool Terminal::sendCharPressEvent(char32_t _value, Modifier _modifier, Timestamp
 bool Terminal::sendMousePressEvent(Modifier _modifier,
                                    MouseButton _button,
                                    MousePixelPosition _pixelPosition,
-                                   Timestamp _now)
+                                   Timestamp /*_now*/)
 {
     verifyState();
 

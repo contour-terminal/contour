@@ -211,14 +211,14 @@ inline Value& StrongLRUCache<Key, Value, Hasher>::at(Key key)
 template <typename Key, typename Value, typename Hasher>
 inline Value& StrongLRUCache<Key, Value, Hasher>::operator[](Key key) noexcept
 {
-    return _hashtable->get_or_emplace(Hasher {}(key), [&](auto v) { return Entry { key, Value {} }; }).value;
+    return _hashtable->get_or_emplace(Hasher {}(key), [&](auto) { return Entry { key, Value {} }; }).value;
 }
 
 template <typename Key, typename Value, typename Hasher>
 template <typename ValueConstructFn>
 inline bool StrongLRUCache<Key, Value, Hasher>::try_emplace(Key key, ValueConstructFn constructValue)
 {
-    return _hashtable->try_emplace(Hasher {}(key), [&](auto v) { return Entry { key, constructValue(v) }; });
+    return _hashtable->try_emplace(Hasher {}(key), [&](auto v) { return Entry { key, constructValue(std::move(v)) }; });
 }
 
 template <typename Key, typename Value, typename Hasher>
