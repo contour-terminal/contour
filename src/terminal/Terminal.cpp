@@ -140,7 +140,7 @@ Terminal::Terminal(Pty& _pty,
              _sixelCursorConformance,
              _colorPalette,
              _allowReflowOnResize },
-    screen_ { state_, ScreenType::Main }, // TODO(pr) Rename to: primaryScreen_
+    screen_ { state_, ScreenType::Main },
     // clang-format on
     viewport_ { screen_,
                 [this]() {
@@ -367,7 +367,7 @@ bool Terminal::SelectionHelper::wordDelimited(CellLocation _pos) const noexcept
 
 bool Terminal::SelectionHelper::wrappedLine(LineOffset _line) const noexcept
 {
-    return terminal->screen().isLineWrapped(_line);
+    return terminal->isLineWrapped(_line);
 }
 
 bool Terminal::SelectionHelper::cellEmpty(CellLocation _pos) const noexcept
@@ -866,11 +866,10 @@ string Terminal::extractSelectionText() const
     renderSelection([&](CellLocation const& _pos, Cell const& _cell) {
         auto const _lock = scoped_lock { *this };
         auto const isNewLine = _pos.column <= lastColumn;
-        auto const isLineWrapped = screen().isLineWrapped(_pos.line);
         bool const touchesRightPage =
             _pos.line.value > 0
             && isSelected({ _pos.line - 1, screen_.pageSize().columns.as<ColumnOffset>() - 1 });
-        if (isNewLine && (!isLineWrapped || !touchesRightPage))
+        if (isNewLine && (!isLineWrapped(_pos.line) || !touchesRightPage))
         {
             // TODO: handle logical line in word-selection (don't include LF in wrapped lines)
             trimSpaceRight(currentLine);

@@ -227,7 +227,10 @@ class Terminal
     /// Only access this when having the terminal object locked.
     Screen<Terminal>& screen() noexcept { return screen_; }
 
-    bool isLineWrapped(LineOffset _lineNumber) const noexcept { return screen_.isLineWrapped(_lineNumber); }
+    bool isLineWrapped(LineOffset _lineNumber) const noexcept
+    {
+        return state_.activeGrid->isLineWrapped(_lineNumber);
+    }
 
     CellLocation const& currentMousePosition() const noexcept { return currentMousePosition_; }
 
@@ -242,7 +245,7 @@ class Terminal
 
     bool cursorCurrentlyVisible() const noexcept
     {
-        return screen_.cursor().visible && (cursorDisplay_ == CursorDisplay::Steady || cursorBlinkState_);
+        return state_.cursor.visible && (cursorDisplay_ == CursorDisplay::Steady || cursorBlinkState_);
     }
 
     std::chrono::steady_clock::time_point lastCursorBlink() const noexcept { return lastCursorBlink_; }

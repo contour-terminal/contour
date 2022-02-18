@@ -339,8 +339,6 @@ namespace
         {
             auto const size = static_cast<FT_F26Dot6>(ceil(_fontSize.pt * 64.0));
 
-            LocatorLog()("FT_Set_Char_Size(size {}, dpi {}, source {})\n", _fontSize, _dpi, _source);
-            // TODO(pr) alternativelly use FT_Set_Pixel_Sizes again
             if (FT_Error const ec = FT_Set_Char_Size(
                     ftFace, 0, size, static_cast<FT_UInt>(_dpi.x), static_cast<FT_UInt>(_dpi.y));
                 ec != FT_Err_Ok)

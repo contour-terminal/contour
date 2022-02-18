@@ -42,7 +42,7 @@ MockTerm::MockTerm(PageSize pageSize, LineCount maxHistoryLineCount):
         crispy::App::customizeLogStoreOutput();
     }
 
-    // TODO(pr) same as in Terminal's ctor
+    // TODO: same as in Terminal's ctor
     screen().setMode(DECMode::AutoWrap, true);
     screen().setMode(DECMode::TextReflow, true);
     screen().setMode(DECMode::SixelCursorNextToGraphic, state_.sixelCursorConformance);

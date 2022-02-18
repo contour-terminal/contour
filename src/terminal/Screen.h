@@ -52,15 +52,6 @@
 #include <string_view>
 #include <vector>
 
-template <typename T, typename std::enable_if<crispy::is_boxed<T>, bool>::type = true>
-struct BoxedHasher // TODO(pr) rm
-{
-    crispy::StrongHash operator()(T value) const noexcept
-    {
-        return crispy::StrongHasher<typename T::inner_type> {}(*value);
-    }
-};
-
 namespace terminal
 {
 
@@ -73,7 +64,7 @@ namespace terminal
  * to be viewn.
  */
 template <typename TheTerminal>
-class Screen: public capabilities::StaticDatabase // TODO(pr) rename to ScreenBuffer
+class Screen: public capabilities::StaticDatabase
 {
   public:
     Screen(TerminalState<TheTerminal>& terminalState, ScreenType screenType);

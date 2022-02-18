@@ -415,7 +415,7 @@ struct Cursor
  * out with the goal to move all shared state up to Terminal later
  * and have Screen API maintain only *one* screen.
  *
- * TODO(pr) let's move all shared data into one place,
+ * TODO: Let's move all shared data into one place,
  * ultimatively ending up in Terminal (or keep TerminalState).
  */
 template <typename TheTerminal>
