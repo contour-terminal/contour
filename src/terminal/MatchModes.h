@@ -72,7 +72,7 @@ class MatchModes
 
     constexpr void clear(Flag _flag) noexcept
     {
-        enabled_  = (uint8_t) (enabled_  & ~static_cast<uint8_t>(_flag));
+        enabled_ = (uint8_t) (enabled_ & ~static_cast<uint8_t>(_flag));
         disabled_ = (uint8_t) (disabled_ & ~static_cast<uint8_t>(_flag));
     }
 
@@ -84,10 +84,7 @@ class MatchModes
 
     constexpr bool any() const noexcept { return enabled_ || disabled_; }
 
-    constexpr uint16_t hashcode() const noexcept
-    {
-        return static_cast<uint16_t>(enabled_ << 8 | disabled_);
-    }
+    constexpr uint16_t hashcode() const noexcept { return static_cast<uint16_t>(enabled_ << 8 | disabled_); }
 
   private:
     uint8_t enabled_ = 0;

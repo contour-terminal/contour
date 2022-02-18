@@ -868,7 +868,8 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
             while (shrinkedLines.size() < totalLineCount)
                 shrinkedLines.emplace_back(_newColumnCount, LineFlags::None); // defaultLineFlags());
 
-            shrinkedLines.rotate_left(unbox<size_t>(numLinesWritten - pageSize_.lines)); // maybe to be done outisde?
+            shrinkedLines.rotate_left(
+                unbox<size_t>(numLinesWritten - pageSize_.lines)); // maybe to be done outisde?
             linesUsed_ = LineCount::cast_from(numLinesWritten);
 
             // if (LineCount::cast_from(shrinkedLines.size()) > pageSize_.lines)

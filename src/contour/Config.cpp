@@ -663,9 +663,7 @@ namespace // {{{ helper
         return true;
     }
 
-    optional<Action> parseAction(UsedKeys& _usedKeys,
-                                 string const& _prefix,
-                                 YAML::Node const& _parent)
+    optional<Action> parseAction(UsedKeys& _usedKeys, string const& _prefix, YAML::Node const& _parent)
     {
         _usedKeys.emplace(_prefix + ".action");
 

@@ -209,10 +209,7 @@ class Sink
     /// Writes given built message to this sink.
     void write(MessageBuilder const& _message);
 
-    void set_enabled(bool enabled)
-    {
-        enabled_ = enabled;
-    }
+    void set_enabled(bool enabled) { enabled_ = enabled; }
 
     /// Retrieves reference to standard debug-logging sink.
     static inline Sink& console()

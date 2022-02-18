@@ -26,13 +26,13 @@ using namespace std::string_view_literals;
 namespace
 {
 // simple 32-bit hash
-template<typename T>
+template <typename T>
 inline StrongHash h(T v)
 {
     return StrongHash(0, 0, 0, static_cast<uint32_t>(v));
 }
 
-template<typename T>
+template <typename T>
 inline string sh(T value)
 {
     return to_structured_string(h(value));

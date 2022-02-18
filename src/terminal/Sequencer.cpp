@@ -1373,11 +1373,19 @@ ApplyResult Sequencer<TheTerminal>::apply(FunctionDefinition const& _function, S
 
     // CSI
     case ANSISYSSC: screen().restoreCursor(); break;
-    case CBT: screen().cursorBackwardTab(TabStopCount::cast_from(_seq.param_or(0, Sequence::Parameter { 1 }))); break;
+    case CBT:
+        screen().cursorBackwardTab(TabStopCount::cast_from(_seq.param_or(0, Sequence::Parameter { 1 })));
+        break;
     case CHA: screen().moveCursorToColumn(_seq.param_or<ColumnOffset>(0, ColumnOffset { 1 }) - 1); break;
-    case CHT: screen().cursorForwardTab(TabStopCount::cast_from(_seq.param_or(0, Sequence::Parameter { 1 }))); break;
-    case CNL: screen().moveCursorToNextLine(LineCount::cast_from(_seq.param_or(0, Sequence::Parameter { 1 }))); break;
-    case CPL: screen().moveCursorToPrevLine(LineCount::cast_from(_seq.param_or(0, Sequence::Parameter { 1 }))); break;
+    case CHT:
+        screen().cursorForwardTab(TabStopCount::cast_from(_seq.param_or(0, Sequence::Parameter { 1 })));
+        break;
+    case CNL:
+        screen().moveCursorToNextLine(LineCount::cast_from(_seq.param_or(0, Sequence::Parameter { 1 })));
+        break;
+    case CPL:
+        screen().moveCursorToPrevLine(LineCount::cast_from(_seq.param_or(0, Sequence::Parameter { 1 })));
+        break;
     case CPR: return impl::CPR(_seq, screen());
     case CUB: screen().moveCursorBackward(_seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
     case CUD: screen().moveCursorDown(_seq.param_or<LineCount>(0, LineCount { 1 })); break;

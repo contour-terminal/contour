@@ -218,7 +218,9 @@ template <typename Key, typename Value, typename Hasher>
 template <typename ValueConstructFn>
 inline bool StrongLRUCache<Key, Value, Hasher>::try_emplace(Key key, ValueConstructFn constructValue)
 {
-    return _hashtable->try_emplace(Hasher {}(key), [&](auto v) { return Entry { key, constructValue(std::move(v)) }; });
+    return _hashtable->try_emplace(Hasher {}(key), [&](auto v) {
+        return Entry { key, constructValue(std::move(v)) };
+    });
 }
 
 template <typename Key, typename Value, typename Hasher>

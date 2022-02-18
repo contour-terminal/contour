@@ -87,7 +87,7 @@ vector<void*> StackTrace::getFrames(size_t _skip, size_t _max)
 
 #if defined(HAVE_BACKTRACE)
     frames.resize(_skip + _max);
-    frames.resize((size_t) ::backtrace(&frames[0], static_cast<int>(_skip + _max)));
+    frames.resize((size_t)::backtrace(&frames[0], static_cast<int>(_skip + _max)));
     std::copy(std::next(frames.begin(), (int) _skip), frames.end(), frames.begin());
     frames.resize(frames.size() > _skip ? frames.size() - _skip : std::min(frames.size(), _skip));
 #endif
@@ -183,7 +183,7 @@ StackTrace::StackTrace():
 #endif
 {
 #if defined(HAVE_BACKTRACE)
-    frames_.resize((size_t) ::backtrace(&frames_[0], SKIP_FRAMES + MAX_FRAMES));
+    frames_.resize((size_t)::backtrace(&frames_[0], SKIP_FRAMES + MAX_FRAMES));
 #endif
 }
 
