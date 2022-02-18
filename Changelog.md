@@ -1,7 +1,8 @@
 ### 0.3.1 (unreleased)
 
-* Fixes assertion on font resize when a (Sixel) image is currently being rendered (#642).
+- Fixes assertion on font resize when a (Sixel) image is currently being rendered (#642).
 - Fixes assertion on too quick shell terminations (#647).
+- Adds new command `contour image PATH_TO_IMAGE` to send an image file to the terminal for displaying for platforms that do provide libsixel.
 
 ### 0.3.0 (2022-04-18)
 

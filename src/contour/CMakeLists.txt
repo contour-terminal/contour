@@ -9,6 +9,7 @@ option(CONTOUR_VT_METRICS "Enables collecting and exit-printing some VT usage me
 option(CONTOUR_SCROLLBAR "Enables scrollbar in GUI frontend." ON)
 option(CONTOUR_BLUR_PLATFORM_KWIN "Enables support for blurring transparent background when using KWin (KDE window manager)." OFF)
 option(CONTOUR_BUILD_WITH_QT6 "Use Qt 6" OFF)
+option(CONTOUR_COMMAND_IMAGE "Enables CLI command: contour image PATH_TO_IMAGE" OFF)
 
 if(CONTOUR_BUILD_WITH_QT6)
    find_package(Qt6 COMPONENTS Core Gui Network OpenGL OpenGLWidgets Widgets REQUIRED)
@@ -72,6 +73,12 @@ target_compile_definitions(contour PRIVATE
 set_target_properties(contour PROPERTIES AUTOMOC ON)
 set_target_properties(contour PROPERTIES AUTORCC ON)
 
+if(CONTOUR_COMMAND_IMAGE)
+    # This is (for now) by default disabled.
+    target_compile_definitions(contour PRIVATE CONTOUR_COMMAND_IMAGE)
+    find_package(libsixel REQUIRED)
+endif()
+
 if(CONTOUR_PERF_STATS)
     target_compile_definitions(contour PRIVATE CONTOUR_PERF_STATS)
 endif()
@@ -115,6 +122,11 @@ elseif(APPLE)
 endif()
 
 target_link_libraries(contour terminal yaml-cpp)
+
+if(CONTOUR_COMMAND_IMAGE)
+target_link_libraries(contour terminal Libsixel::Libsixel)
+endif()
+
 if(FREEBSD)
     # FreeBSD does not find yaml-cpp in /usr/local but weirdly everything else.
     target_link_directories(contour PUBLIC "/usr/local/lib")

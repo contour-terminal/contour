@@ -26,6 +26,8 @@
 #include <fmt/format.h>
 
 #include <QtCore/QFile>
+#include <QtCore/QMetaEnum>
+#include <QtGui/QImage>
 
 #include <chrono>
 #include <cstdio>
@@ -33,6 +35,16 @@
 #include <iostream>
 #include <memory>
 #include <signal.h>
+
+#if defined(CONTOUR_COMMAND_IMAGE)
+    #if __has_include(<sixel/sixel.h>)
+        #include <sixel/sixel.h>
+        #define HAVE_SIXEL 1
+    #elif __has_include(<sixel.h>)
+        #include <sixel.h>
+        #define HAVE_SIXEL 1
+    #endif
+#endif
 
 #if !defined(_WIN32)
     #include <unistd.h>
@@ -167,6 +179,9 @@ ContourApp::ContourApp(): App("contour", "Contour Terminal Emulator", CONTOUR_VE
     link("contour.generate.terminfo", bind(&ContourApp::terminfoAction, this));
     link("contour.generate.config", bind(&ContourApp::configAction, this));
     link("contour.generate.integration", bind(&ContourApp::integrationAction, this));
+#if defined(CONTOUR_COMMAND_IMAGE)
+    link("contour.image", bind(&ContourApp::imageAction, this));
+#endif
 }
 
 template <typename Callback>
@@ -204,6 +219,93 @@ int ContourApp::integrationAction()
             return EXIT_FAILURE;
         }
     });
+}
+
+#if defined(CONTOUR_COMMAND_IMAGE)
+int sixelWriter(char* data, int size, void* priv)
+{
+    cout.write(data, size);
+    return size;
+};
+#endif
+
+terminal::ImageSize terminalCellSize()
+{
+    using namespace terminal;
+#if !defined(_WIN32)
+    auto ws = winsize {};
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == -1)
+        return {};
+
+    auto const viewSize = ImageSize { Width(ws.ws_xpixel), Height(ws.ws_ypixel) };
+    auto const pageSize = PageSize { LineCount(ws.ws_row), ColumnCount(ws.ws_col) };
+    auto const cellSize = viewSize / pageSize;
+    // fmt::print("cell size: {} / {} = {}\n", viewSize, pageSize, cellSize);
+    return cellSize;
+#else
+    return {};
+#endif
+}
+
+int ContourApp::imageAction()
+{
+#if defined(CONTOUR_COMMAND_IMAGE)
+    // Possible advanced options:
+    // - grid cell dimensions
+    // - image resize policy
+    // - image alignment policy
+    // - auto-scroll?
+    // - top-left position (or current cursor position)
+
+    auto const cellSize = terminalCellSize();
+    if (cellSize.area() == 0)
+    {
+        errorlog()("Could not detect terminal's grid cell size in pixels.");
+        return EXIT_FAILURE;
+    }
+
+    auto const filePath =
+        QString::fromUtf8(parameters().verbatim.front().data(), (int) parameters().verbatim.front().size());
+    auto qImage = QImage(filePath).convertToFormat(QImage::Format_RGB888);
+    if (qImage.format() != QImage::Format_RGB888)
+    {
+        errorlog()("Unsupported image format {} in file {}.",
+                   QMetaEnum::fromType<QImage::Format>().valueToKey(qImage.format()),
+                   filePath.toStdString());
+        return EXIT_FAILURE;
+    }
+
+    auto const requestedNumLines = parameters().uint("contour.image.lines");
+    auto const requestedNumColumns = parameters().uint("contour.image.columns");
+    if (requestedNumLines && requestedNumColumns)
+    {
+        auto const w = (int) (requestedNumColumns * cellSize.width.value);
+        auto const h = (int) (requestedNumLines * cellSize.height.value);
+        qImage = qImage.scaled(QSize(w, h));
+    }
+    else if (requestedNumLines)
+    {
+        auto const h = (int) (requestedNumLines * cellSize.height.value);
+        qImage = qImage.scaledToHeight(h);
+    }
+    else if (requestedNumColumns)
+    {
+        auto const w = (int) (requestedNumColumns * cellSize.width.value);
+        qImage = qImage.scaledToWidth(w);
+    }
+
+    auto const pixels = const_cast<unsigned char*>(qImage.constBits());
+    sixel_output_t* output = nullptr;
+    sixel_output_new(&output, &sixelWriter, nullptr, nullptr);
+    sixel_dither_t* dither = sixel_dither_get(SIXEL_BUILTIN_XTERM256);
+    sixel_encode(pixels, qImage.width(), qImage.height(), 3, dither, output);
+    sixel_dither_unref(dither);
+    sixel_output_destroy(output);
+    return EXIT_SUCCESS;
+#else
+    errorlog()("Feature was disabled at compile-time.");
+    return EXIT_FAILURE;
+#endif
 }
 
 int ContourApp::configAction()
@@ -273,6 +375,24 @@ crispy::cli::Command ContourApp::parameterDefinition() const
                            "Shows the license, and project URL of the used projects and Contour." },
             CLI::Command { "parser-table", "Dumps parser table" },
             CLI::Command { "list-debug-tags", "Lists all available debug tags and exits." },
+#if defined(CONTOUR_COMMAND_IMAGE)
+            CLI::Command {
+                "image",
+                "Sends an image to the terminal to render it at the current cursor position.",
+                CLI::OptionList {
+                    // might make sense to allow options in the future,
+                    // such as:
+                    // - grid cell dimensions
+                    // - image alignment policy
+                    // - image resize policy
+                    CLI::Option { "lines", CLI::Value { 0u }, "Number of grid lines this image shall span." },
+                    CLI::Option {
+                        "columns", CLI::Value { 0u }, "Number of grid columns this image shall span." },
+                },
+                CLI::CommandList {},
+                CLI::CommandSelect::Explicit,
+                CLI::Verbatim { "PATH", "Path to image to be sent." } },
+#endif
             CLI::Command {
                 "generate",
                 "Generation utilities.",

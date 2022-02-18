@@ -816,13 +816,12 @@ namespace // {{{ helpers
                 auto const& verbatim = _command.verbatim.value();
                 auto const leftSize =
                     static_cast<unsigned>(leftPadding.size() + 2 + verbatim.placeholder.size());
-                assert(columnWidth > leftSize);
-                auto const actualRightPaddingSize = columnWidth - leftSize;
+                auto const actualRightPaddingSize = columnWidth > leftSize ? columnWidth - leftSize : 2;
                 auto const left = leftPadding + stylize("[", HelpElement::Braces)
                                   + stylize(verbatim.placeholder, HelpElement::Verbatim)
                                   + stylize("]", HelpElement::Braces) + spaces(actualRightPaddingSize);
-
                 _os << left;
+
                 auto cursor = columnWidth + 1;
                 _os << stylize(wordWrapped(verbatim.helpText, columnWidth, _margin, &cursor),
                                HelpElement::HelpText);

@@ -85,7 +85,8 @@ unsigned screenWidth()
 #if !defined(_WIN32)
     auto ws = winsize {};
     if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != -1)
-        return ws.ws_col;
+        if (ws.ws_col != 0)
+            return ws.ws_col;
 #endif
 
     return DefaultWidth;

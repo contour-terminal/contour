@@ -465,6 +465,13 @@ constexpr ColumnOffset& operator-=(ColumnOffset& a, ColumnCount b) noexcept
     a.value -= b.value;
     return a;
 }
+
+constexpr ImageSize operator/(ImageSize viewSize, PageSize pageSize) noexcept
+{
+    return ImageSize { Width::cast_from(unbox<int>(viewSize.width) / unbox<int>(pageSize.columns)),
+                       Height::cast_from(unbox<int>(viewSize.height) / unbox<int>(pageSize.lines)) };
+}
+
 // }}}
 
 enum class ScreenType
