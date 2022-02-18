@@ -6,7 +6,7 @@ Add the following block to your Visual Studio Code's `settings.json`:
 
 ```json
     "yaml.schemas": {
-        "docs/contour.schema.json": ["contour.yaml"]
+        "docs/contour.schema.json": ["contour.yml"]
     },
 ```
 
@@ -14,17 +14,19 @@ Add the following block to your Visual Studio Code's `settings.json`:
 
 * **docs/** - Project related documentation
 * **cmake/** - CMake helper modules
-* **3rdparty/** - Thirdparty dependencies, provided as git submodules
+* **scripts/** - general development assisting and CI helper scripts
 * **src/** - project specific source code
-  * **ground/** - fundamentals library
+  * **crispy/** - fundamentals library
   * **terminal/** - core terminal library
-  * **terminal_view/** - library covering the OpenGL view parts
-  * **contour/** - terminal emulator application (business logic)
+  * **terminal_renderer/** - frontend independant Terminal rendering library
+  * **contour/** - GUI terminal emulator application (business logic)
+* **test/** - Contains a set of test scripts.
 
 ## Process Threading Model
 
 Contour Terminal Emulator is multithreaded.
-The main thread is solely for receiving user input events and displaying screen updates plus some necessary administrative tasks.
+The main thread is solely for receiving user input events and
+displaying screen updates plus some necessary administrative tasks.
 
 The slave application will be spawned as a process and a
 thread is being associated with it to exclusively read the
