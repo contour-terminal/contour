@@ -734,6 +734,7 @@ double TerminalWidget::contentScale() const
                 if (forcedDPI >= 96.0)
                 {
                     auto const dpr = (forcedDPI * dpiScale) / 96.0;
+                    DisplayLog()("contentScale(kcmfonts): {}", dpr);
                     return dpr;
                 }
             }
@@ -741,6 +742,8 @@ double TerminalWidget::contentScale() const
     }
 #endif
 
+    auto const dpr = devicePixelRatio() * dpiScale;
+    DisplayLog()("contentScale: {}", dpr);
     return devicePixelRatio() * dpiScale;
 }
 
