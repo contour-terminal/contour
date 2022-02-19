@@ -902,7 +902,9 @@ namespace impl
                 case 0: screen.saveWindowTitle(); break; // CSI 22 ; 0 t | save icon & window title
                 case 1: return ApplyResult::Unsupported; // CSI 22 ; 1 t | save icon title
                 case 2: screen.saveWindowTitle(); break; // CSI 22 ; 2 t | save window title
+                default: return ApplyResult::Unsupported;
                 }
+                return ApplyResult::Ok;
             }
             case 23: {
                 auto& screen = terminal.screen();
@@ -911,9 +913,10 @@ namespace impl
                 case 0: screen.restoreWindowTitle(); break; // CSI 22 ; 0 t | save icon & window title
                 case 1: return ApplyResult::Unsupported;    // CSI 22 ; 1 t | save icon title
                 case 2: screen.restoreWindowTitle(); break; // CSI 22 ; 2 t | save window title
+                default: return ApplyResult::Unsupported;
                 }
+                return ApplyResult::Ok;
             }
-            default: return ApplyResult::Unsupported;
             }
             return ApplyResult::Ok;
         }
