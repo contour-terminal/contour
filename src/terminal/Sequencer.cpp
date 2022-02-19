@@ -895,6 +895,24 @@ namespace impl
             case 16: terminal.screen().requestPixelSize(RequestPixelSize::CellArea); break;
             case 18: terminal.screen().requestCharacterSize(RequestPixelSize::TextArea); break;
             case 19: terminal.screen().requestCharacterSize(RequestPixelSize::WindowArea); break;
+            case 22: {
+                auto& screen = terminal.screen();
+                switch (_seq.param(1))
+                {
+                case 0: screen.saveWindowTitle(); break; // CSI 22 ; 0 t | save icon & window title
+                case 1: return ApplyResult::Unsupported; // CSI 22 ; 1 t | save icon title
+                case 2: screen.saveWindowTitle(); break; // CSI 22 ; 2 t | save window title
+                }
+            }
+            case 23: {
+                auto& screen = terminal.screen();
+                switch (_seq.param(1))
+                {
+                case 0: screen.restoreWindowTitle(); break; // CSI 22 ; 0 t | save icon & window title
+                case 1: return ApplyResult::Unsupported;    // CSI 22 ; 1 t | save icon title
+                case 2: screen.restoreWindowTitle(); break; // CSI 22 ; 2 t | save window title
+                }
+            }
             default: return ApplyResult::Unsupported;
             }
             return ApplyResult::Ok;
