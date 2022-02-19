@@ -298,6 +298,8 @@ else()
     set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/contour-terminal/contour/")
     set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "xdg-open")
     set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ON)
+    # set(CPACK_STRIP_FILES OFF)
+    # set(CPACK_DEB_COMPONENT_INSTALL ON)
 
     include(GNUInstallDirs)
     install(TARGETS contour DESTINATION bin)
