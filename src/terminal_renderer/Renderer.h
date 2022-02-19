@@ -142,9 +142,8 @@ class Renderer
     Renderable::DirectMappingAllocator directMappingAllocator_;
     std::unique_ptr<Renderable::TextureAtlas> textureAtlas_;
 
-    std::unique_ptr<text::shaper> textShaper_;
-
     FontDescriptions fontDescriptions_;
+    std::unique_ptr<text::shaper> textShaper_;
     FontKeys fonts_;
 
     GridMetrics gridMetrics_;

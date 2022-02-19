@@ -169,7 +169,6 @@ class TerminalSession: public terminal::Terminal::Events
 
   private:
     // helpers
-    void sanitizeConfig(config::Config& _config);
     bool reloadConfig(config::Config _newConfig, std::string const& _profileName);
     int executeAllActions(std::vector<actions::Action> const& _actions);
     bool executeAction(actions::Action const& _action);

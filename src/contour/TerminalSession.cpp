@@ -117,7 +117,6 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
                                          [this](FileChangeWatcher::Event event) { onConfigReload(event); });
     }
 
-    sanitizeConfig(_config);
     profile_ = *config_.profile(profileName_); // XXX do it again. but we've to be more efficient here
     configureTerminal();
 }
@@ -133,8 +132,6 @@ void TerminalSession::setDisplay(unique_ptr<TerminalDisplay> _display)
     LOGSTORE(SessionLog)("Assigning display.");
     display_ = move(_display);
 
-    // XXX find better way (dpi)
-    sanitizeConfig(config_);
     profile_ = *config_.profile(profileName_); // XXX do it again. but we've to be more efficient here
 }
 
@@ -810,23 +807,12 @@ void TerminalSession::setDefaultCursor()
     }
 }
 
-void TerminalSession::sanitizeConfig(config::Config& _config)
-{
-    if (!display_)
-        return;
-
-    auto const fontDPI = display_->fontDPI(); // profile.fonts.dpiScale is applied already
-    for (config::TerminalProfile& profile: _config.profiles | ::ranges::views::values)
-        if (!profile.fonts.dpi.x || !profile.fonts.dpi.y)
-            profile.fonts.dpi = fontDPI;
-}
-
 bool TerminalSession::reloadConfig(config::Config _newConfig, string const& _profileName)
 {
-    LOGSTORE(SessionLog)
-    ("Reloading configuration from {} with profile {}", _newConfig.backingFilePath.string(), _profileName);
-
-    sanitizeConfig(_newConfig);
+    // clang-format off
+    SessionLog()("Reloading configuration from {} with profile {}",
+                 _newConfig.backingFilePath.string(), _profileName);
+    // clang-format on
 
     config_ = move(_newConfig);
     activateProfile(_profileName);

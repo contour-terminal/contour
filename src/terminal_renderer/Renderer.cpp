@@ -128,12 +128,14 @@ Renderer::Renderer(PageSize pageSize,
     _atlasTileCount { std::max(atlasTileCount.value, static_cast<uint32_t>(pageSize.area())) },
     _atlasDirectMapping { atlasDirectMapping },
     _renderTarget { nullptr },
-    textShaper_ { createTextShaper(fontDescriptions.textShapingEngine,
-                                   fontDescriptions.dpi,
-                                   createFontLocator(fontDescriptions.fontLocator)) },
+    //.
     fontDescriptions_ { fontDescriptions },
+    textShaper_ { createTextShaper(fontDescriptions_.textShapingEngine,
+                                   fontDescriptions_.dpi,
+                                   createFontLocator(fontDescriptions_.fontLocator)) },
     fonts_ { loadFontKeys(fontDescriptions_, *textShaper_) },
     gridMetrics_ { loadGridMetrics(fonts_.regular, pageSize, *textShaper_) },
+    //.
     colorPalette_ { colorPalette },
     backgroundOpacity_ { backgroundOpacity },
     backgroundRenderer_ { gridMetrics_, colorPalette.defaultBackground },
@@ -142,6 +144,9 @@ Renderer::Renderer(PageSize pageSize,
     decorationRenderer_ { gridMetrics_, hyperlinkNormal, hyperlinkHover },
     cursorRenderer_ { gridMetrics_, CursorShape::Block }
 {
+    textRenderer_.updateFontMetrics();
+    imageRenderer_.setCellSize(cellSize());
+
     // clang-format off
     if (_atlasTileCount.value > atlasTileCount.value)
         LOGSTORE(RendererLog)("Increasing atlas tile count configuration to {} to satisfy worst-case rendering scenario.",

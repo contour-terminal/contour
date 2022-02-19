@@ -328,7 +328,11 @@ QSize TerminalWidget::sizeHint() const
         auto const hint = cellSize * profile().terminalSize / contentScale();
         return QSize(unbox<int>(hint.width), unbox<int>(hint.height));
     }();
-    DisplayLog()("sizeHint: {}x{}", hint.width(), hint.height());
+    DisplayLog()("sizeHint: {}x{} ({}x{})",
+                 hint.width(),
+                 hint.height(),
+                 hint.width() * devicePixelRatioF(),
+                 hint.height() * devicePixelRatioF());
     return hint;
 }
 
@@ -435,8 +439,13 @@ void TerminalWidget::logDisplayInfo()
     auto const fontSizeInPx = static_cast<int>(ceil((
         profile().fonts.size.pt / 72.0) * average(fontDPI())
     ));
+    auto const normalScreenSize = crispy::ImageSize {
+        Width::cast_from(screenOf(this)->size().width()),
+        Height::cast_from(screenOf(this)->size().height())
+    };
+    auto const actualScreenSize = normalScreenSize * devicePixelRatioF();
     DisplayLog()("[FYI] Refresh rate        : {} Hz", refreshRate());
-    DisplayLog()("[FYI] Screen size         : {}x{}", screenOf(this)->size().width(), screenOf(this)->size().height());
+    DisplayLog()("[FYI] Screen size         : {}", actualScreenSize);
     DisplayLog()("[FYI] Logical DPI         : {}", logicalDPI());
     DisplayLog()("[FYI] Physical DPI        : {}", physicalDPI());
     if (devicePixelRatioF() != trunc(devicePixelRatioF()))
@@ -482,7 +491,7 @@ void TerminalWidget::initializeGL()
     watchKdeDpiSetting();
 
     renderer_.initialize(terminal().pageSize(),
-                         sanitizeFontDescription(profile().fonts, lastFontDPI_),
+                         sanitizeFontDescription(profile().fonts, fontDPI()),
                          terminal().screen().colorPalette(),
                          profile().backgroundOpacity,
                          session_.config().textureAtlasHashtableSlots,
@@ -492,10 +501,6 @@ void TerminalWidget::initializeGL()
                          profile().hyperlinkDecoration.hover
                          // TODO: , WindowMargin(windowMargin_.left, windowMargin_.bottom);
     );
-    // Only now, and not earlier, we know the actual DPI / DPR / content scaling.
-    auto fd = renderer_->fontDescriptions();
-    fd.dpi = fontDPI();
-    renderer_->setFonts(fd);
 
     auto const textureTileSize = gridMetrics().cellSize;
     auto const viewportMargin = terminal::renderer::PageMargin {}; // TODO margin
@@ -761,9 +766,11 @@ double TerminalWidget::refreshRate() const
 
 DPI TerminalWidget::fontDPI() const noexcept
 {
+#if 0 // defined(__APPLE__)
+    return physicalDPI() * contentScale();
+#else
     return logicalDPI() * contentScale();
-    // return physicalDPI() * contentScale();
-    // return DPI{96, 96} * contentScale();
+#endif
 }
 
 DPI TerminalWidget::logicalDPI() const noexcept

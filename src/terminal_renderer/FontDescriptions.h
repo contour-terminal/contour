@@ -131,8 +131,10 @@ struct formatter<terminal::renderer::FontDescriptions>
     auto format(terminal::renderer::FontDescriptions const& fd, FormatContext& ctx)
     {
         return format_to(ctx.out(),
-                         "({}, {}, {}, {}, {}, {})",
+                         "({}, {}, {}, {}, {}, {}, {}, {})",
                          fd.size,
+                         fd.dpi,
+                         fd.dpiScale,
                          fd.regular,
                          fd.bold,
                          fd.italic,
