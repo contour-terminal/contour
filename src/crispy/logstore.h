@@ -220,7 +220,7 @@ class Sink
 
     static inline Sink& error_console()
     {
-        static auto instance = Sink(false, std::cerr);
+        static auto instance = Sink(true, std::cerr);
         return instance;
     }
 

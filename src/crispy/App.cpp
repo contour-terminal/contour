@@ -244,6 +244,8 @@ int App::run(int argc, char const* argv[])
 
 void App::customizeLogStoreOutput()
 {
+    logstore::Sink::console().set_enabled(true);
+
     // A curated list of colors.
     static const bool colorized =
 #if !defined(_WIN32)
