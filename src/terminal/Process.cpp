@@ -366,10 +366,11 @@ optional<Process::ExitStatus> Process::checkStatus() const
 
 optional<Process::ExitStatus> Process::checkStatus(bool _waitForExit) const
 {
-    auto const _ = lock_guard { lock_ };
-
-    if (exitStatus_.has_value())
-        return exitStatus_;
+    {
+        auto const _ = lock_guard { lock_ };
+        if (exitStatus_.has_value())
+            return exitStatus_;
+    }
 
 #if defined(__unix__) || defined(__APPLE__)
     assert(pid_ != -1);
@@ -382,6 +383,7 @@ optional<Process::ExitStatus> Process::checkStatus(bool _waitForExit) const
         return nullopt;
     else
     {
+        auto const _ = lock_guard { lock_ };
         pid_ = -1;
 
         if (WIFEXITED(status))

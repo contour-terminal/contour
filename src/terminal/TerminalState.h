@@ -525,6 +525,7 @@ struct TerminalState
 
     char32_t precedingGraphicCharacter = {};
     unicode::utf8_decoder_state utf8DecoderState = {};
+    bool terminating = false;
 };
 
 } // namespace terminal

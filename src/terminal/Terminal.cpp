@@ -159,6 +159,7 @@ Terminal::Terminal(Pty& _pty,
 
 Terminal::~Terminal()
 {
+    state_.terminating = true;
     pty_.wakeupReader();
 
     if (screenUpdateThread_)
@@ -195,7 +196,7 @@ void Terminal::mainLoop()
         return sstr.str();
     }());
 
-    for (;;)
+    while (!state_.terminating)
     {
         if (!processInputOnce())
             break;
