@@ -1035,10 +1035,11 @@ bool TerminalWidget::setFontSize(text::font_size _size)
     if (!renderer_->setFontSize(_size))
         return false;
 
-    auto currentWidgetPixelSize = ImageSize { terminal::Width(width()), terminal::Height(height()) };
-    renderer_->setMargin(computeMargin(gridMetrics().cellSize, pageSize(), currentWidgetPixelSize));
+    auto const qtBaseWidgetSize = ImageSize { terminal::Width(width()), terminal::Height(height()) };
+    renderer_->setMargin(computeMargin(gridMetrics().cellSize, pageSize(), qtBaseWidgetSize));
     // resize widget (same pixels, but adjusted terminal rows/columns and margin)
-    applyResize(currentWidgetPixelSize, session_, *renderer_);
+    auto const actualWidgetSize = qtBaseWidgetSize * contentScale();
+    applyResize(actualWidgetSize, session_, *renderer_);
     updateMinimumSize();
     logDisplayInfo();
     return true;
