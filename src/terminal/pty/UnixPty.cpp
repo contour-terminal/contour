@@ -131,15 +131,12 @@ UnixPty::UnixPty(PageSize const& _windowSize, optional<ImageSize> _pixels):
         if (!setFileFlags(fd, O_CLOEXEC | O_NONBLOCK))
             break;
 #endif
-    // clang-format off
-    LOGSTORE(PtyLog)("PTY opened. master={}, slave={}, pipe=({}, {})",
-                     master_, slave_, pipe_.at(0), pipe_.at(1));
-    // clang-format on
+    PtyLog()("PTY opened. master={}, slave={}, pipe=({}, {})", master_, slave_, pipe_.at(0), pipe_.at(1));
 }
 
 UnixPty::~UnixPty()
 {
-    LOGSTORE(PtyLog)("Destructing.");
+    PtyLog()("Destructing.");
 
     for (auto* fd: { &pipe_.at(0), &pipe_.at(1), &master_, &slave_ })
     {
@@ -158,8 +155,7 @@ bool UnixPty::isClosed() const
 
 void UnixPty::close()
 {
-    LOGSTORE(PtyLog)
-    ("PTY closing. master={}, slave={}, pipe=({}, {})", master_, slave_, pipe_.at(0), pipe_.at(1));
+    PtyLog()("PTY closing. master={}, slave={}, pipe=({}, {})", master_, slave_, pipe_.at(0), pipe_.at(1));
 
     for (auto* fd: { &master_, &slave_ })
     {
@@ -185,7 +181,7 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
     if (master_ < 0)
     {
         if (PtyInLog)
-            LOGSTORE(PtyInLog)("read() called with closed PTY master.");
+            PtyInLog()("read() called with closed PTY master.");
         errno = ENODEV;
         return nullopt;
     }
@@ -209,7 +205,7 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
         if (rv == 0)
         {
             // (Let's not be too verbose here.)
-            // LOGSTORE(PtyInLog)("PTY read() timed out.");
+            // PtyInLog()("PTY read() timed out.");
             errno = EAGAIN;
             return nullopt;
         }
@@ -222,7 +218,7 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
 
         if (rv < 0)
         {
-            LOGSTORE(PtyInLog)("PTY read() failed. {}", strerror(errno));
+            PtyInLog()("PTY read() failed. {}", strerror(errno));
             return nullopt;
         }
 
@@ -247,12 +243,12 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
             if (rv >= 0)
             {
                 if (PtyInLog)
-                    LOGSTORE(PtyInLog)("Received: {}", crispy::escape(buffer_.data(), buffer_.data() + rv));
+                    PtyInLog()("Received: {}", crispy::escape(buffer_.data(), buffer_.data() + rv));
                 return string_view { buffer_.data(), static_cast<size_t>(rv) };
             }
             else
             {
-                LOGSTORE(PtyLog)("PTY read: endpoint closed.");
+                PtyLog()("PTY read: endpoint closed.");
                 return string_view {};
             }
         }
@@ -284,7 +280,7 @@ int UnixPty::write(char const* buf, size_t size)
 
     if (!FD_ISSET(master_, &wfd))
     {
-        LOGSTORE(PtyOutLog)("PTY write of {} bytes timed out.\n", size);
+        PtyOutLog()("PTY write of {} bytes timed out.\n", size);
         return 0;
     }
 
@@ -292,13 +288,13 @@ int UnixPty::write(char const* buf, size_t size)
     if (PtyOutLog)
     {
         if (rv >= 0)
-            LOGSTORE(PtyOutLog)("Sending bytes: \"{}\"", crispy::escape(buf, buf + rv));
+            PtyOutLog()("Sending bytes: \"{}\"", crispy::escape(buf, buf + rv));
 
         if (rv < 0)
             // errorlog()("PTY write failed: {}", strerror(errno));
-            LOGSTORE(PtyOutLog)("PTY write of {} bytes failed. {}\n", size, strerror(errno));
+            PtyOutLog()("PTY write of {} bytes failed. {}\n", size, strerror(errno));
         else if (0 <= rv && static_cast<size_t>(rv) < size)
-            LOGSTORE(PtyOutLog)("Partial write. {} bytes written and {} bytes left.", rv, size - rv);
+            PtyOutLog()("Partial write. {} bytes written and {} bytes left.", rv, size - rv);
     }
 
     return static_cast<int>(rv);

@@ -393,7 +393,7 @@ void TerminalSession::discardImage(terminal::Image const& _image)
 // {{{ Input Events
 void TerminalSession::sendKeyPressEvent(Key _key, Modifier _modifier, Timestamp _now)
 {
-    LOGSTORE(InputLog)("{} {}", _modifier, _key);
+    InputLog()("key press: {} {}", _modifier, _key);
 
     if (terminatedAndWaitingForKeyPress_)
     {
@@ -858,7 +858,7 @@ int TerminalSession::executeAllActions(std::vector<actions::Action> const& _acti
 // scrolling position.
 bool TerminalSession::executeAction(actions::Action const& _action)
 {
-    LOGSTORE(SessionLog)("executeAction: {}", _action);
+    SessionLog()("executeAction: {}", _action);
     return visit(*this, _action);
 }
 

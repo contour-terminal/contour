@@ -189,8 +189,7 @@ void Terminal::mainLoop()
 {
     mainLoopThreadID_ = this_thread::get_id();
 
-    LOGSTORE(TerminalLog)
-    ("Starting main loop with thread id {}", [&]() {
+    TerminalLog()("Starting main loop with thread id {}", [&]() {
         stringstream sstr;
         sstr << mainLoopThreadID_;
         return sstr.str();
@@ -218,7 +217,7 @@ bool Terminal::processInputOnce()
     {
         if (errno != EINTR && errno != EAGAIN)
         {
-            LOGSTORE(TerminalLog)("PTY read failed (timeout: {}). {}", timeout, strerror(errno));
+            TerminalLog()("PTY read failed (timeout: {}). {}", timeout, strerror(errno));
             pty_.close();
         }
         return errno == EINTR || errno == EAGAIN;
@@ -227,7 +226,7 @@ bool Terminal::processInputOnce()
 
     if (buf.empty())
     {
-        LOGSTORE(TerminalLog)("PTY read returned with zero bytes. Closing PTY.");
+        TerminalLog()("PTY read returned with zero bytes. Closing PTY.");
         pty_.close();
         return true;
     }

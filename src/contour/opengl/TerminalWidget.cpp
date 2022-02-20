@@ -371,10 +371,10 @@ void TerminalWidget::onScreenDpiChanged()
 
     LOGSTORE(DisplayLog)("Screen DPI changed to {}.", newFontDPI);
     lastFontDPI_ = newFontDPI;
-    logDisplayInfo();
     auto fd = renderer_->fontDescriptions();
     fd.dpi = newFontDPI;
     renderer_->setFonts(fd);
+    logDisplayInfo();
 
     session_.setContentScale(contentScale());
 
@@ -454,7 +454,7 @@ void TerminalWidget::logDisplayInfo()
         DisplayLog()("[FYI] Device pixel ratio  : {}", devicePixelRatioF());
     DisplayLog()("[FYI] Content scale       : {}", contentScale());
     DisplayLog()("[FYI] Font DPI            : {} ({})", fontDPI(), renderer_->fontDescriptions().dpi);
-    DisplayLog()("[FYI] Font size           : {} ({} px)", profile().fonts.size, fontSizeInPx);
+    DisplayLog()("[FYI] Font size           : {} ({} px)", renderer_->fontDescriptions().size, fontSizeInPx);
     DisplayLog()("[FYI] Cell size           : {} px", gridMetrics().cellSize);
     DisplayLog()("[FYI] Page size           : {}", gridMetrics().pageSize);
     DisplayLog()("[FYI] Font baseline       : {} px", gridMetrics().baseline);
@@ -1018,10 +1018,9 @@ void TerminalWidget::resizeWindow(terminal::LineCount _lines, terminal::ColumnCo
     adaptSize_();
 }
 
-void TerminalWidget::setFonts(terminal::renderer::FontDescriptions _fontDescriptions)
+void TerminalWidget::setFonts(terminal::renderer::FontDescriptions fonts)
 {
-    if (applyFontDescription(
-            gridMetrics().cellSize, pageSize(), pixelSize(), fontDPI(), *renderer_, _fontDescriptions))
+    if (applyFontDescription(gridMetrics().cellSize, pageSize(), pixelSize(), fontDPI(), *renderer_, fonts))
     {
         // resize widget (same pixels, but adjusted terminal rows/columns and margin)
         applyResize(pixelSize(), session_, *renderer_);
