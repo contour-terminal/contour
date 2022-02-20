@@ -11,19 +11,26 @@ using namespace std;
 namespace terminal
 {
 
-PtyProcess::PtyProcess(ExecInfo const& _exe, PageSize _terminalSize, optional<ImageSize> _pixels): pty_
+namespace
 {
+    unique_ptr<Pty> createPty(PageSize pageSize, optional<ImageSize> viewSize)
+    {
 #if defined(_MSC_VER)
-    make_unique<terminal::ConPty>(_terminalSize /*TODO: , _pixels*/),
+        return make_unique<terminal::ConPty>(pageSize /*TODO: , viewSize*/);
 #else
-    make_unique<terminal::UnixPty>(_terminalSize, _pixels),
+        return make_unique<terminal::UnixPty>(pageSize, viewSize);
 #endif
-}
-, process_ { std::make_unique<Process>(_exe, *pty_) }, processExitWatcher_ { [this]() {
-    auto const exitStatus = process_->wait();
-    LOGSTORE(PtyLog)("Process terminated with exit code {}.", exitStatus);
-    pty_->close();
-} }
+    }
+} // namespace
+
+PtyProcess::PtyProcess(ExecInfo const& _exe, PageSize _terminalSize, optional<ImageSize> _pixels):
+    pty_ { createPty(_terminalSize, _pixels) },
+    process_ { std::make_unique<Process>(_exe, *pty_) },
+    processExitWatcher_ { [this]() {
+        auto const exitStatus = process_->wait();
+        PtyLog()("Process terminated with exit code {}.", exitStatus);
+        pty_->close();
+    } }
 {
 }
 

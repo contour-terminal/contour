@@ -378,7 +378,12 @@ optional<Process::ExitStatus> Process::checkStatus(bool _waitForExit) const
     int const rv = waitpid(pid_, &status, _waitForExit ? 0 : WNOHANG);
 
     if (rv < 0)
+    {
+        auto const _ = lock_guard { lock_ };
+        if (exitStatus_.has_value())
+            return exitStatus_;
         throw runtime_error { "waitpid: "s + getLastErrorAsString() };
+    }
     else if (rv == 0 && !_waitForExit)
         return nullopt;
     else
