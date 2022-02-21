@@ -333,38 +333,40 @@ void Parser<EventListener>::parseFragment(std::string_view _data)
 }
 
 template <typename EventListener>
-void Parser<EventListener>::handle(ActionClass _actionClass, Action _action, char _char)
+void Parser<EventListener>::handle(ActionClass _actionClass, Action _action, uint8_t codepoint)
 {
     (void) _actionClass;
+    auto const ch = static_cast<char>(codepoint);
+
     // if (_action != Action::Ignore && _action != Action::Undefined)
     //     fmt::print("Parser.handle: {} {} {} {}\n",
     //         state_,
     //         _actionClass,
     //         _action,
-    //         crispy::escape(unicode::convert_to<char>(_char))
+    //         crispy::escape(unicode::convert_to<char>(ch))
     //     );
 
     switch (_action)
     {
     case Action::Clear: eventListener_.clear(); break;
-    case Action::CollectLeader: eventListener_.collectLeader(static_cast<char>(_char)); break;
-    case Action::Collect: eventListener_.collect(static_cast<char>(_char)); break;
-    case Action::Param: eventListener_.param(static_cast<char>(_char)); break;
-    case Action::Execute: eventListener_.execute(static_cast<char>(_char)); break;
-    case Action::ESC_Dispatch: eventListener_.dispatchESC(static_cast<char>(_char)); break;
-    case Action::CSI_Dispatch: eventListener_.dispatchCSI(static_cast<char>(_char)); break;
-    case Action::Print: eventListener_.print(_char); break;
+    case Action::CollectLeader: eventListener_.collectLeader(ch); break;
+    case Action::Collect: eventListener_.collect(ch); break;
+    case Action::Param: eventListener_.param(ch); break;
+    case Action::Execute: eventListener_.execute(ch); break;
+    case Action::ESC_Dispatch: eventListener_.dispatchESC(ch); break;
+    case Action::CSI_Dispatch: eventListener_.dispatchCSI(ch); break;
+    case Action::Print: eventListener_.print(ch); break;
     case Action::OSC_Start: eventListener_.startOSC(); break;
-    case Action::OSC_Put: eventListener_.putOSC(_char); break;
+    case Action::OSC_Put: eventListener_.putOSC(ch); break;
     case Action::OSC_End: eventListener_.dispatchOSC(); break;
-    case Action::Hook: eventListener_.hook(static_cast<char>(_char)); break;
-    case Action::Put: eventListener_.put(_char); break;
+    case Action::Hook: eventListener_.hook(ch); break;
+    case Action::Put: eventListener_.put(ch); break;
     case Action::Unhook: eventListener_.unhook(); break;
     case Action::APC_Start: eventListener_.startAPC(); break;
-    case Action::APC_Put: eventListener_.putAPC(_char); break;
+    case Action::APC_Put: eventListener_.putAPC(ch); break;
     case Action::APC_End: eventListener_.dispatchAPC(); break;
     case Action::PM_Start: eventListener_.startPM(); break;
-    case Action::PM_Put: eventListener_.putPM(_char); break;
+    case Action::PM_Put: eventListener_.putPM(ch); break;
     case Action::PM_End: eventListener_.dispatchPM(); break;
     case Action::Ignore:
     case Action::Undefined: break;

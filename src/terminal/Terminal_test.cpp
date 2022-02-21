@@ -47,9 +47,9 @@ vector<string> textScreenshot(terminal::Terminal const& _terminal)
     for (terminal::RenderCell const& cell: renderBuffer.buffer.screen)
     {
         auto const gap = (cell.position.column + static_cast<int>(lastCount) - 1) - lastPos.column;
-        auto& currentLine = lines.at(*cell.position.line);
+        auto& currentLine = lines.at(unbox<size_t>(cell.position.line));
         if (*gap > 0) // Did we jump?
-            currentLine.insert(currentLine.end(), *gap - 1, ' ');
+            currentLine.insert(currentLine.end(), unbox<size_t>(gap) - 1, ' ');
 
         currentLine += unicode::convert_to<char>(u32string_view(cell.codepoints));
         lastPos = cell.position;

@@ -28,7 +28,7 @@ namespace
 {
     constexpr bool isDigit(char _value) noexcept { return _value >= '0' && _value <= '9'; }
 
-    constexpr int toDigit(char _value) noexcept { return static_cast<int>(_value) - '0'; }
+    constexpr uint8_t toDigit(char _value) noexcept { return static_cast<uint8_t>(_value) - '0'; }
 
     constexpr bool isSixel(char _value) noexcept { return _value >= 63 && _value <= 126; }
 
@@ -92,7 +92,7 @@ void SixelColorPalette::setColor(unsigned int _index, RGBColor const& _color)
         if (_index >= size())
             setSize(_index + 1);
 
-        if (_index >= 0 && static_cast<size_t>(_index) < palette_.size())
+        if (static_cast<size_t>(_index) < palette_.size())
             palette_.at(_index) = _color;
     }
 }
@@ -121,7 +121,7 @@ void SixelParser::parse(char _value)
         else if (isSixel(_value))
         {
             auto const sixel = toSixel(_value);
-            for (int i = 0; i < params_[0]; ++i)
+            for (unsigned i = 0; i < params_[0]; ++i)
                 events_.render(sixel);
             transitionTo(State::Ground);
         }
@@ -197,9 +197,9 @@ void SixelParser::done()
         finalizer_();
 }
 
-void SixelParser::paramShiftAndAddDigit(int _value)
+void SixelParser::paramShiftAndAddDigit(unsigned _value)
 {
-    int& number = params_.back();
+    unsigned& number = params_.back();
     number = number * 10 + _value;
 }
 
@@ -241,7 +241,7 @@ void SixelParser::leaveState()
             auto const pad = params_[1];
             auto const xPixels = Width(params_[2]);
             auto const yPixels = Height(params_[3]);
-            events_.setRaster(pan, pad, ImageSize { xPixels, yPixels });
+            events_.setRaster((int) pan, (int) pad, ImageSize { xPixels, yPixels });
             state_ = State::Ground;
         }
         break;
@@ -255,7 +255,7 @@ void SixelParser::leaveState()
         }
         else if (params_.size() == 5)
         {
-            auto constexpr convertValue = [](int _value) {
+            auto constexpr convertValue = [](unsigned _value) {
                 // converts a color from range 0..100 to 0..255
                 return static_cast<uint8_t>(static_cast<int>((static_cast<float>(_value) * 255.0f) / 100.0f)
                                             % 256);
@@ -325,9 +325,9 @@ void SixelImageBuilder::clear(RGBAColor _fillColor)
 
 RGBAColor SixelImageBuilder::at(CellLocation _coord) const noexcept
 {
-    auto const line = *_coord.line % *size_.height;
-    auto const col = *_coord.column % *size_.width;
-    auto const base = line * *size_.width * 4 + col * 4;
+    auto const line = unbox<unsigned>(_coord.line) % unbox<unsigned>(size_.height);
+    auto const col = unbox<unsigned>(_coord.column) % unbox<unsigned>(size_.width);
+    auto const base = line * unbox<unsigned>(size_.width) * 4 + col * 4;
     auto const color = &buffer_[base];
     return RGBAColor { color[0], color[1], color[2], color[3] };
 }
@@ -337,7 +337,8 @@ void SixelImageBuilder::write(CellLocation const& _coord, RGBColor const& _value
     if (unbox<int>(_coord.line) >= 0 && unbox<int>(_coord.line) < unbox<int>(size_.height)
         && unbox<int>(_coord.column) >= 0 && unbox<int>(_coord.column) < unbox<int>(size_.width))
     {
-        auto const base = *_coord.line * *size_.width * 4 + *_coord.column * 4;
+        auto const base = unbox<unsigned>(_coord.line) * unbox<unsigned>(size_.width) * 4
+                          + unbox<unsigned>(_coord.column) * 4;
         buffer_[base + 0] = _value.red;
         buffer_[base + 1] = _value.green;
         buffer_[base + 2] = _value.blue;
@@ -345,12 +346,12 @@ void SixelImageBuilder::write(CellLocation const& _coord, RGBColor const& _value
     }
 }
 
-void SixelImageBuilder::setColor(int _index, RGBColor const& _color)
+void SixelImageBuilder::setColor(unsigned _index, RGBColor const& _color)
 {
     colors_->setColor(_index, _color);
 }
 
-void SixelImageBuilder::useColor(int _index)
+void SixelImageBuilder::useColor(unsigned _index)
 {
     currentColor_ = _index % colors_->size();
 }
@@ -375,7 +376,7 @@ void SixelImageBuilder::setRaster(int _pan, int _pad, ImageSize _imageSize)
     size_.width = clamp(_imageSize.width, Width(0), maxSize_.width);
     size_.height = clamp(_imageSize.height, Height(0), maxSize_.height);
 
-    buffer_.resize(*size_.width * *size_.height * 4);
+    buffer_.resize(size_.area() * 4);
 }
 
 void SixelImageBuilder::render(int8_t _sixel)

@@ -16,10 +16,13 @@
 #include <terminal/Functions.h>
 // #include <terminal/primitives.h>
 
+#include <crispy/boxed.h>
+
 #include <cassert>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace terminal
@@ -118,7 +121,12 @@ class Sequence
     std::optional<T> param_opt(size_t _index) const noexcept
     {
         if (_index < parameters_.size() && parameters_[_index][0])
-            return { static_cast<T>(parameters_[_index][0]) };
+        {
+            if constexpr (crispy::is_boxed<T>)
+                return { T::cast_from(parameters_[_index][0]) };
+            else
+                return { static_cast<T>(parameters_[_index][0]) };
+        }
         else
             return std::nullopt;
     }
@@ -134,7 +142,10 @@ class Sequence
     {
         assert(_index < parameters_.size());
         assert(0 < parameters_[_index].size());
-        return static_cast<T>(parameters_[_index][0]);
+        if constexpr (crispy::is_boxed<T>)
+            return T::cast_from(parameters_[_index][0]);
+        else
+            return static_cast<T>(parameters_[_index][0]);
     }
 
     template <typename T = unsigned>
@@ -142,15 +153,26 @@ class Sequence
     {
         assert(_index < parameters_.size());
         assert(_subIndex + 1 < parameters_[_index].size());
-        return static_cast<T>(parameters_[_index][_subIndex + 1]);
+        if constexpr (crispy::is_boxed<T>)
+            return T::cast_from(parameters_[_index][_subIndex + 1]);
+        else
+            return static_cast<T>(parameters_[_index][_subIndex + 1]);
     }
 
     template <typename T = unsigned>
     bool containsParameter(T _value) const noexcept
     {
         for (size_t i = 0; i < parameterCount(); ++i)
-            if (T(parameters_[i][0]) == _value)
-                return true;
+            if constexpr (crispy::is_boxed<T>)
+            {
+                if (T::cast_from(parameters_[i][0]) == _value)
+                    return true;
+            }
+            else
+            {
+                if (T(parameters_[i][0]) == _value)
+                    return true;
+            }
         return false;
     }
 };

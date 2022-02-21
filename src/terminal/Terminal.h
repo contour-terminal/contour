@@ -72,7 +72,7 @@ class Terminal
     };
 
     Terminal(Pty& _pty,
-             int _ptyReadBufferSize,
+             size_t _ptyReadBufferSize,
              Events& _eventListener,
              LineCount _maxHistoryLineCount = LineCount(0),
              LineOffset _copyLastMarkRangeOffset = LineOffset(0),
@@ -387,7 +387,7 @@ class Terminal
     mutable std::atomic<uint64_t> changes_;
 
     std::thread::id mainLoopThreadID_ {};
-    int ptyReadBufferSize_;
+    size_t ptyReadBufferSize_;
     Events& eventListener_;
 
     std::chrono::milliseconds refreshInterval_;

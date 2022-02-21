@@ -855,8 +855,8 @@ GLuint OpenGLRenderer::createAndUploadImage(ImageSize imageSize,
     auto constexpr internalFormat = GL_RGBA;
 
     auto const imageFormat = glFormat(format);
-    auto const textureWidth = unbox<uint32_t>(imageSize.width);
-    auto const textureHeight = unbox<uint32_t>(imageSize.height);
+    auto const textureWidth = unbox<GLsizei>(imageSize.width);
+    auto const textureHeight = unbox<GLsizei>(imageSize.height);
 
     CHECKED_GL(glTexImage2D(target,
                             levelOfDetail,

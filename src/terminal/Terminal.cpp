@@ -100,7 +100,7 @@ namespace // {{{ helpers
 // }}}
 
 Terminal::Terminal(Pty& _pty,
-                   int _ptyReadBufferSize,
+                   size_t _ptyReadBufferSize,
                    Terminal::Events& _eventListener,
                    LineCount _maxHistoryLineCount,
                    LineOffset _copyLastMarkRangeOffset,
@@ -138,7 +138,7 @@ Terminal::Terminal(Pty& _pty,
              _maxImageSize,
              _maxImageColorRegisters,
              _sixelCursorConformance,
-             _colorPalette,
+             move(_colorPalette),
              _allowReflowOnResize },
     screen_ { state_, ScreenType::Main },
     // clang-format on

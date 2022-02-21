@@ -612,7 +612,7 @@ class Parser
     State state() const noexcept { return state_; }
 
   private:
-    void handle(ActionClass _actionClass, Action _action, char _char);
+    void handle(ActionClass _actionClass, Action _action, uint8_t _char);
 
     // private properties
     //

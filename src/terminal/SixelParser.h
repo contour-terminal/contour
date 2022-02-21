@@ -58,10 +58,10 @@ class SixelParser: public ParserExtension
         virtual ~Events() = default;
 
         /// Defines a new color at given register index.
-        virtual void setColor(int _index, RGBColor const& _color) = 0;
+        virtual void setColor(unsigned _index, RGBColor const& _color) = 0;
 
         /// Uses the given color for future paints
-        virtual void useColor(int _index) = 0;
+        virtual void useColor(unsigned _index) = 0;
 
         /// moves sixel-cursor to the left border
         virtual void rewind() = 0;
@@ -109,7 +109,7 @@ class SixelParser: public ParserExtension
     void finalize() override;
 
   private:
-    void paramShiftAndAddDigit(int _value);
+    void paramShiftAndAddDigit(unsigned _value);
     void transitionTo(State _newState);
     void enterState();
     void leaveState();
@@ -117,7 +117,7 @@ class SixelParser: public ParserExtension
 
   private:
     State state_ = State::Ground;
-    std::vector<int> params_;
+    std::vector<unsigned> params_;
 
     Events& events_;
     OnFinalize finalizer_;
@@ -171,8 +171,8 @@ class SixelImageBuilder: public SixelParser::Events
 
     void clear(RGBAColor _fillColor);
 
-    void setColor(int _index, RGBColor const& _color) override;
-    void useColor(int _index) override;
+    void setColor(unsigned _index, RGBColor const& _color) override;
+    void useColor(unsigned _index) override;
     void rewind() override;
     void newline() override;
     void setRaster(int _pan, int _pad, ImageSize _imageSize) override;
@@ -189,7 +189,7 @@ class SixelImageBuilder: public SixelParser::Events
     ImageSize size_;
     Buffer buffer_; /// RGBA buffer
     CellLocation sixelCursor_;
-    int currentColor_;
+    unsigned currentColor_;
     struct
     {
         int nominator;

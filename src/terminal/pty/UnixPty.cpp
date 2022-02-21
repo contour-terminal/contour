@@ -294,7 +294,11 @@ int UnixPty::write(char const* buf, size_t size)
             // errorlog()("PTY write failed: {}", strerror(errno));
             PtyOutLog()("PTY write of {} bytes failed. {}\n", size, strerror(errno));
         else if (0 <= rv && static_cast<size_t>(rv) < size)
-            PtyOutLog()("Partial write. {} bytes written and {} bytes left.", rv, size - rv);
+            // clang-format off
+            PtyOutLog()("Partial write. {} bytes written and {} bytes left.",
+                        rv,
+                        size - static_cast<size_t>(rv));
+        // clang-format on
     }
 
     return static_cast<int>(rv);

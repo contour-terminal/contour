@@ -213,7 +213,7 @@ struct Config
     // Changing this value may result in better or worse throughput performance.
     //
     // This value must be integer-devisable by 16.
-    int ptyReadBufferSize = 16384;
+    size_t ptyReadBufferSize = 16384;
 
     bool reflowOnResize = true;
 

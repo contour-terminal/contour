@@ -427,7 +427,7 @@ struct TerminalState
                   ImageSize _maxImageSize,
                   unsigned _maxImageColorRegisters,
                   bool _sixelCursorConformance,
-                  ColorPalette const& _colorPalette,
+                  ColorPalette _colorPalette,
                   bool _allowReflowOnResize):
         terminal { _terminal },
         pageSize { _pageSize },
@@ -435,7 +435,7 @@ struct TerminalState
         margin { Margin::Vertical { {}, pageSize.lines.as<LineOffset>() - LineOffset(1) },
                  Margin::Horizontal { {}, pageSize.columns.as<ColumnOffset>() - ColumnOffset(1) } },
         defaultColorPalette { _colorPalette },
-        colorPalette { _colorPalette },
+        colorPalette { std::move(_colorPalette) },
         maxImageColorRegisters { _maxImageColorRegisters },
         maxImageSize { _maxImageSize },
         maxImageSizeLimit { _maxImageSize },
