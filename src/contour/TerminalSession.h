@@ -167,6 +167,17 @@ class TerminalSession: public terminal::Terminal::Events
 
     ContourGuiApp& app() noexcept { return app_; }
 
+    std::chrono::steady_clock::time_point startTime() const noexcept { return startTime_; }
+
+    float uptime() const noexcept
+    {
+        using namespace std::chrono;
+        auto const now = steady_clock::now();
+        auto const uptimeMsecs = duration_cast<milliseconds>(now - startTime_).count();
+        auto const uptimeSecs = static_cast<float>(uptimeMsecs) / 1000.0f;
+        return uptimeSecs;
+    }
+
   private:
     // helpers
     bool reloadConfig(config::Config _newConfig, std::string const& _profileName);

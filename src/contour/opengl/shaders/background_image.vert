@@ -6,7 +6,7 @@ uniform float     u_opacity;
 uniform float     u_time;
 
 layout (location = 0) in vec3 vs_vertex;    // target vertex coordinates
-layout (location = 1) in vec2 vs_texCoords; // 2D-atlas texture coordinates
+layout (location = 1) in vec2 vs_texCoords; // normalized texture coordinates
 
 out vec2 fs_TexCoord;
 out vec2 fs_FragCoord;

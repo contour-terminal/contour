@@ -4,6 +4,10 @@
         <file>shaders/background.vert</file>
         <file>shaders/background_image.frag</file>
         <file>shaders/background_image.vert</file>
+        <file>shaders/blur_gaussian.frag</file>
+        <file>shaders/dual_kawase_down.frag</file>
+        <file>shaders/dual_kawase_up.frag</file>
+        <file>shaders/simple.vert</file>
         <file>shaders/text.frag</file>
         <file>shaders/text.vert</file>
     </qresource>

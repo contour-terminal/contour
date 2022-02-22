@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <contour/helper.h>
+#include <contour/opengl/Blur.h>
 #include <contour/opengl/OpenGLRenderer.h>
 #include <contour/opengl/ShaderConfig.h>
 
@@ -158,6 +159,24 @@ namespace
         crispy::unreachable();
     }
 
+    struct OpenGLContextGuard
+    {
+        QOpenGLContext* _context;
+        QSurface* _surface;
+
+        OpenGLContextGuard()
+        {
+            _context = QOpenGLContext::currentContext();
+            _surface = _context ? _context->surface() : nullptr;
+        }
+
+        ~OpenGLContextGuard()
+        {
+            if (_context)
+                _context->makeCurrent(_surface);
+        }
+    };
+
 } // namespace
 
 /**
@@ -174,6 +193,8 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& textShaderConfig,
                                ImageSize targetSurfaceSize,
                                ImageSize /*textureTileSize*/,
                                terminal::renderer::PageMargin margin):
+    _startTime { chrono::steady_clock::now().time_since_epoch() },
+    _now { _startTime },
     _renderTargetSize { targetSurfaceSize },
     _projectionMatrix { ortho(0.0f,
                               unbox<float>(targetSurfaceSize.width), // left, right
@@ -183,9 +204,11 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& textShaderConfig,
     _margin { margin },
     _textShader { createShader(textShaderConfig) },
     _textProjectionLocation { _textShader->uniformLocation("vs_projection") },
+    _textTimeLocation { _textShader->uniformLocation("u_time") },
     _backgroundShader { createShader(backgroundImageShaderConfig) },
     _rectShader { createShader(rectShaderConfig) },
-    _rectProjectionLocation { _rectShader->uniformLocation("u_projection") }
+    _rectProjectionLocation { _rectShader->uniformLocation("u_projection") },
+    _rectTimeLocation { _rectShader->uniformLocation("u_time") }
 {
     initialize();
 
@@ -450,9 +473,11 @@ void OpenGLRenderer::execute()
     // glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
     // glBlendFunc(GL_SRC1_COLOR, GL_ONE_MINUS_SRC1_COLOR);
 
+    auto const timeValue = uptime();
+
     if (_backgroundImageTexture)
     {
-        bound(*_backgroundShader, [&]() { executeRenderBackground(); });
+        bound(*_backgroundShader, [&]() { executeRenderBackground(timeValue); });
     }
 
     // render filled rects
@@ -461,6 +486,7 @@ void OpenGLRenderer::execute()
     {
         bound(*_rectShader, [&]() {
             _rectShader->setUniformValue(_rectProjectionLocation, _projectionMatrix);
+            _rectShader->setUniformValue(_rectTimeLocation, timeValue);
 
             glBindVertexArray(_rectVAO);
             glBindBuffer(GL_ARRAY_BUFFER, _rectVBO);
@@ -480,6 +506,7 @@ void OpenGLRenderer::execute()
     bound(*_textShader, [&]() {
         // TODO: only upload when it actually DOES change
         _textShader->setUniformValue(_textProjectionLocation, _projectionMatrix);
+        _textShader->setUniformValue(_textTimeLocation, timeValue);
         executeRenderTextures();
     });
 
@@ -750,7 +777,8 @@ void OpenGLRenderer::initializeBackgroundRendering()
         // clang-format off
         CHECKED_GL(_backgroundShader->setUniformValue("fs_backgroundImage", 0)); // GL_TEXTURE0
         CHECKED_GL(_backgroundUniformLocations.projection = _backgroundShader->uniformLocation("u_projection"));
-        CHECKED_GL(_backgroundUniformLocations.resolution = _backgroundShader->uniformLocation("u_resolution"));
+        CHECKED_GL(_backgroundUniformLocations.viewportResolution = _backgroundShader->uniformLocation("u_viewportResolution"));
+        CHECKED_GL(_backgroundUniformLocations.backgroundResolution = _backgroundShader->uniformLocation("u_backgroundResolution"));
         CHECKED_GL(_backgroundUniformLocations.blur = _backgroundShader->uniformLocation("u_blur"));
         CHECKED_GL(_backgroundUniformLocations.opacity = _backgroundShader->uniformLocation("u_opacity"));
         CHECKED_GL(_backgroundUniformLocations.time = _backgroundShader->uniformLocation("u_time"));
@@ -804,7 +832,24 @@ void OpenGLRenderer::setBackgroundImage(shared_ptr<terminal::BackgroundImage con
     {
         auto const filePath = get<FileSystem::path>(backgroundImage.location);
         auto const qFilePath = QString::fromStdString(filePath.string());
-        auto qImage = QImage(qFilePath).convertToFormat(QImage::Format_RGBA8888);
+        auto qImage = QImage(qFilePath);
+
+        if (backgroundImage.blur)
+        {
+            auto const offsetStr = qEnvironmentVariable("CONTOUR_BLUR_OFFSET");
+            auto const iterStr = qEnvironmentVariable("CONTOUR_BLUR_ITERATIONS");
+            auto const offset = offsetStr.isEmpty() ? 5 : offsetStr.toInt();
+            auto const iterations = iterStr.isEmpty() ? 5 : iterStr.toInt();
+            auto const contextGuard = OpenGLContextGuard {};
+
+            auto blur = Blur {};
+            // qImage = blur.blurDualKawase(move(qImage), offset, iterations);
+            qImage = blur.blurGaussian(move(qImage));
+
+            DisplayLog()("blur performance: {:.3}s CPU, {:.3}s GPU", blur.getCPUTime(), blur.getGPUTime());
+        }
+
+        qImage = qImage.convertToFormat(QImage::Format_RGBA8888);
         if (qImage.format() != QImage::Format_RGBA8888)
         {
             errorlog()("Unsupported image format {} for background image at {}.",
@@ -812,25 +857,28 @@ void OpenGLRenderer::setBackgroundImage(shared_ptr<terminal::BackgroundImage con
                        filePath.string());
             return;
         }
-        auto const imageSize = ImageSize { Width(qImage.size().width()), Height(qImage.size().height()) };
         auto const imageFormat = terminal::ImageFormat::RGBA;
         auto const rowAlignment = 4; // This is default. Can it be any different?
-        DisplayLog()("Background image from disk: {} {}", imageSize, imageFormat);
+        DisplayLog()("Background image from disk: {}x{} {}", qImage.width(), qImage.height(), imageFormat);
         _renderStateCache.backgroundImageHash = crispy::StrongHash::compute(filePath.string());
+        _renderStateCache.backgroundResolution = qImage.size();
         _backgroundImageTexture =
-            createAndUploadImage(imageSize, imageFormat, rowAlignment, qImage.constBits());
+            createAndUploadImage(qImage.size(), imageFormat, rowAlignment, qImage.constBits());
     }
     else if (holds_alternative<terminal::ImageDataPtr>(backgroundImage.location))
     {
         auto const& imageData = *get<terminal::ImageDataPtr>(backgroundImage.location);
         DisplayLog()("Background inline image: {} {}", imageData.size, imageData.format);
         _renderStateCache.backgroundImageHash = imageData.hash;
-        _backgroundImageTexture = createAndUploadImage(
-            imageData.size, imageData.format, imageData.rowAlignment, imageData.pixels.data());
+        _backgroundImageTexture =
+            createAndUploadImage(QSize(unbox<int>(imageData.size.width), unbox<int>(imageData.size.height)),
+                                 imageData.format,
+                                 imageData.rowAlignment,
+                                 imageData.pixels.data());
     }
 }
 
-GLuint OpenGLRenderer::createAndUploadImage(ImageSize imageSize,
+GLuint OpenGLRenderer::createAndUploadImage(QSize imageSize,
                                             terminal::ImageFormat format,
                                             int rowAlignment,
                                             uint8_t const* pixels)
@@ -855,8 +903,8 @@ GLuint OpenGLRenderer::createAndUploadImage(ImageSize imageSize,
     auto constexpr internalFormat = GL_RGBA;
 
     auto const imageFormat = glFormat(format);
-    auto const textureWidth = unbox<GLsizei>(imageSize.width);
-    auto const textureHeight = unbox<GLsizei>(imageSize.height);
+    auto const textureWidth = static_cast<GLsizei>(imageSize.width());
+    auto const textureHeight = static_cast<GLsizei>(imageSize.height());
 
     CHECKED_GL(glTexImage2D(target,
                             levelOfDetail,
@@ -870,7 +918,7 @@ GLuint OpenGLRenderer::createAndUploadImage(ImageSize imageSize,
     return textureId;
 }
 
-void OpenGLRenderer::executeRenderBackground()
+void OpenGLRenderer::executeRenderBackground(float timeValue)
 {
     Require(_backgroundImageTexture != 0);
 
@@ -878,18 +926,23 @@ void OpenGLRenderer::executeRenderBackground()
     auto const h = unbox<float>(_renderTargetSize.height);
 
     // {{{ setup uniforms
-    auto const opacity =
-        float(_renderStateCache.backgroundColor.alpha()) / 255.0f * _renderStateCache.backgroundImageOpacity;
-    auto const now = chrono::steady_clock::now().time_since_epoch();
-    auto const timestamp = chrono::duration_cast<chrono::milliseconds>(now).count();
-    auto const blur = _renderStateCache.backgroundImageBlur ? 1.0f : 0.0f;
+    // clang-format off
+    auto const opacity = float(_renderStateCache.backgroundColor.alpha()) / 255.0f * _renderStateCache.backgroundImageOpacity;
+    auto const qViewportSize = QSize(unbox<int>(_renderTargetSize.width), unbox<int>(_renderTargetSize.height));
+    auto const blur = 0.0f; // _renderStateCache.backgroundImageBlur ? 1.0f : 0.0f;
+    // NOTE: We currently hard disable the live shader ability, as most people
+    // won't have a top-end graphics card to still deliver great performance
+    // when wanting an awesome blurred image at the same time.
+    // Blur is now implemented offscreen via Blur::blurDualKawase().
+    // clang-format on
 
     _backgroundShader->setUniformValue(_backgroundUniformLocations.projection, _projectionMatrix);
-    _backgroundShader->setUniformValue(_backgroundUniformLocations.resolution, w, h);
+    _backgroundShader->setUniformValue(_backgroundUniformLocations.backgroundResolution,
+                                       _renderStateCache.backgroundResolution);
+    _backgroundShader->setUniformValue(_backgroundUniformLocations.viewportResolution, qViewportSize);
     _backgroundShader->setUniformValue(_backgroundUniformLocations.blur, blur);
     _backgroundShader->setUniformValue(_backgroundUniformLocations.opacity, float { opacity });
-    _backgroundShader->setUniformValue(_backgroundUniformLocations.time,
-                                       static_cast<float>(static_cast<double>(timestamp) / 1000.0));
+    _backgroundShader->setUniformValue(_backgroundUniformLocations.time, timeValue);
     // }}}
 
     // clang-format off

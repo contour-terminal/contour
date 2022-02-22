@@ -18,6 +18,7 @@ endif()
 
 add_library(contour_frontend_opengl
     "${CMAKE_CURRENT_BINARY_DIR}/shared_defines_verbatim.h"
+    Blur.cpp Blur.h
     OpenGLRenderer.cpp OpenGLRenderer.h
     ShaderConfig.cpp ShaderConfig.h
     TerminalWidget.cpp TerminalWidget.h

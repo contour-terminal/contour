@@ -1,5 +1,6 @@
 uniform float pixel_x;                  // 1.0 / lcdAtlas.width
 uniform sampler2D fs_textureAtlas;      // RGBA
+uniform float u_time;
 
 in vec4 fs_TexCoord;
 in vec4 fs_textColor;
@@ -153,4 +154,8 @@ void main()
             renderGrayscaleGlyph();
             break;
     }
+
+    const float FadeTime = 3.0;
+    if (u_time <= FadeTime)
+        fragColor *= u_time / FadeTime;
 }

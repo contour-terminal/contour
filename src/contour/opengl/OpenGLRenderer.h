@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include <contour/opengl/Blur.h>
+
 #include <terminal/Image.h>
 
 #include <terminal_renderer/RenderTarget.h>
@@ -26,6 +28,7 @@
     #include <QtGui/QOpenGLShaderProgram>
 #endif
 
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -90,6 +93,17 @@ class OpenGLRenderer final:
 
     void inspect(std::ostream& output) const override;
 
+    void setTime(std::chrono::steady_clock::time_point value) { _now = value; }
+
+    float uptime() noexcept
+    {
+        using namespace std::chrono;
+        auto const now = _now.time_since_epoch();
+        auto const uptimeMsecs = duration_cast<milliseconds>(_now - _startTime).count();
+        auto const uptimeSecs = static_cast<float>(uptimeMsecs) / 1000.0f;
+        return uptimeSecs;
+    }
+
   private:
     // private helper methods
     //
@@ -102,12 +116,12 @@ class OpenGLRenderer final:
     int maxTextureUnits();
     crispy::ImageSize renderBufferSize();
 
-    GLuint createAndUploadImage(ImageSize imageSize,
+    GLuint createAndUploadImage(QSize imageSize,
                                 terminal::ImageFormat format,
                                 int rowAlignment,
                                 uint8_t const* pixels);
 
-    void executeRenderBackground();
+    void executeRenderBackground(float timeValue);
     void executeRenderTextures();
     void executeConfigureAtlas(ConfigureAtlas const& _param);
     void executeUploadTile(UploadTile const& _param);
@@ -154,6 +168,8 @@ class OpenGLRenderer final:
     // }}}
 
     bool _initialized = false;
+    std::chrono::steady_clock::time_point _startTime;
+    std::chrono::steady_clock::time_point _now;
     crispy::ImageSize _renderTargetSize;
     QMatrix4x4 _projectionMatrix;
 
@@ -161,6 +177,7 @@ class OpenGLRenderer final:
 
     std::unique_ptr<QOpenGLShaderProgram> _textShader;
     int _textProjectionLocation;
+    int _textTimeLocation;
 
     // private data members for rendering textures
     //
@@ -179,7 +196,8 @@ class OpenGLRenderer final:
     struct
     {
         int projection;
-        int resolution;
+        int backgroundResolution;
+        int viewportResolution;
         int blur;
         int opacity;
         int time;
@@ -198,7 +216,8 @@ class OpenGLRenderer final:
     //
     std::vector<GLfloat> _rectBuffer;
     std::unique_ptr<QOpenGLShaderProgram> _rectShader;
-    GLint _rectProjectionLocation;
+    int _rectProjectionLocation;
+    int _rectTimeLocation;
     GLuint _rectVAO;
     GLuint _rectVBO;
 
@@ -210,6 +229,7 @@ class OpenGLRenderer final:
         terminal::RGBAColor backgroundColor {};
         float backgroundImageOpacity = 1.0f;
         bool backgroundImageBlur = false;
+        QSize backgroundResolution;
         crispy::StrongHash backgroundImageHash;
     } _renderStateCache;
 };

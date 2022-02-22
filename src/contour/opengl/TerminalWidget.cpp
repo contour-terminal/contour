@@ -561,6 +561,8 @@ void TerminalWidget::paintGL()
         }
 #endif
 
+        static_cast<OpenGLRenderer*>(renderTarget_.get())->setTime(chrono::steady_clock::now());
+
         renderTarget_->clear(
             terminal().screen().isModeEnabled(terminal::DECMode::ReverseVideo)
                 ? RGBAColor(profile().colors.defaultForeground, uint8_t(renderer_.backgroundOpacity()))
@@ -575,7 +577,7 @@ void TerminalWidget::paintGL()
 
 void TerminalWidget::onFrameSwapped()
 {
-    if (!state_.finish())
+    if (!state_.finish() || session_.uptime() <= 3.1)
         update();
     else if (auto timeout = terminal().nextRender(); timeout.has_value())
         updateTimer_.start(timeout.value());

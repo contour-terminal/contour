@@ -1,48 +1,53 @@
 uniform mat4      u_projection;
 uniform sampler2D u_backgroundImage;
-uniform vec2      u_resolution;
+uniform vec2      u_viewportResolution;
+uniform vec2      u_backgroundResolution;
 uniform float     u_blur;
 uniform float     u_opacity;
 uniform float     u_time;
 
 in vec2 fs_TexCoord;
-in vec2 fs_FragCoord;
 
 out vec4 fragColor;
 
-vec4 blur()
+// {{{ Gaussian blur
+#define BlurSamples 128
+
+float gaussian(vec2 i)
 {
-    float BlurSize = 16.0;       // radius (16 is a good value)
-    float BlurQuality = 4.0;     // default 4.0 - more is better but slower
-    float BlurDirections = 16.0; // default 16.0 - more is better but slower
+    const float TwoPi = 6.28318530718;
+    const float Sigma = 0.25 * float(BlurSamples);
+    const float SigmaSquared = Sigma * Sigma;
+    vec2 iOverSigma = i / Sigma;
+    return exp(-0.5 * dot(iOverSigma, iOverSigma)) / (TwoPi * SigmaSquared);
+}
 
-    vec2 radius = BlurSize / u_resolution.xy;
-    vec2 uv = fs_TexCoord;
-    vec4 colorContribution = texture(u_backgroundImage, uv);
+vec4 blur(sampler2D sp, vec2 uv, vec2 scale)
+{
+    vec4 outputColor = vec4(0);
+    int s = BlurSamples;
 
-    float TwoPi = 6.28318530718; // 2 * Pi
-    float CircleStepIncrement = TwoPi / BlurDirections;
-    float NeighborStepIncrement = 1.0 / BlurQuality;
-
-    for (float d = 0.0; d < TwoPi; d += CircleStepIncrement)
-    {
-        for (float i = NeighborStepIncrement; i <= 1.0; i += NeighborStepIncrement)
-        {
-            vec2 uvOffset = vec2(cos(d), sin(d)) * radius * i;
-            colorContribution += texture(u_backgroundImage, uv + uvOffset);
-        }
+    for ( int i = 0; i < s*s; i++ ) {
+        vec2 d = vec2(i%s, i/s) - float(BlurSamples)/2.;
+        outputColor += gaussian(d) * texture( sp, uv + scale * d);
     }
 
-    // Output to screen
-    return colorContribution / (BlurQuality * BlurDirections - 15.0);
+    return outputColor / outputColor.a;
 }
+// }}}
 
 void main()
 {
-    if (u_blur != 0.0)
-        fragColor = blur();
+    if (u_blur >= 1.0)
+        fragColor = blur(u_backgroundImage,
+                         fs_TexCoord,
+                         1.0 / u_backgroundResolution.xy);
     else
         fragColor = texture(u_backgroundImage, fs_TexCoord.xy);
 
-    fragColor *= u_opacity;// * (cos(u_time) + 1.0) / 2.0;
+    fragColor *= u_opacity;
+
+    const float FadeTime = 3.0;
+    if (u_time <= FadeTime)
+        fragColor.a *= u_time / FadeTime;
 }
