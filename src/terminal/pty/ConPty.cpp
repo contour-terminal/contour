@@ -90,7 +90,7 @@ ConPty::~ConPty()
     close();
 }
 
-bool ConPty::isClosed() const
+bool ConPty::isClosed() const noexcept
 {
     return master_ == INVALID_HANDLE_VALUE;
 }
@@ -116,14 +116,6 @@ void ConPty::close()
         CloseHandle(output_);
         output_ = INVALID_HANDLE_VALUE;
     }
-}
-
-void ConPty::prepareParentProcess()
-{
-}
-
-void ConPty::prepareChildProcess()
-{
 }
 
 optional<string_view> ConPty::read(size_t _size, std::chrono::milliseconds _timeout)
@@ -173,6 +165,12 @@ void ConPty::resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels)
         throw runtime_error { GetLastErrorAsString() };
 
     size_ = _cells;
+}
+
+PtySlave& ConPty::slave() noexcept
+{
+    static PtySlaveDummy dummy {};
+    return dummy;
 }
 
 } // namespace terminal

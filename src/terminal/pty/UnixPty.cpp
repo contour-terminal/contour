@@ -13,6 +13,7 @@
  */
 #include <terminal/pty/UnixPty.h>
 
+#include <crispy/deferred.h>
 #include <crispy/escape.h>
 #include <crispy/logstore.h>
 
@@ -94,91 +95,147 @@ namespace
             return false;
         return true;
     }
-} // namespace
 
-UnixPty::UnixPty(PageSize const& _windowSize, optional<ImageSize> _pixels):
-    size_ { _windowSize }, buffer_(4 * 1024 * 1024, {})
-{
-    // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
-    assert(*_windowSize.lines <= numeric_limits<unsigned short>::max());
-    assert(*_windowSize.columns <= numeric_limits<unsigned short>::max());
+    void saveClose(int* fd)
+    {
+        if (fd && *fd != -1)
+        {
+            ::close(*fd);
+            *fd = -1;
+        }
+    }
 
-    winsize const ws { unbox<unsigned short>(_windowSize.lines),
-                       unbox<unsigned short>(_windowSize.columns),
-                       unbox<unsigned short>(_pixels.value_or(ImageSize {}).width),
-                       unbox<unsigned short>(_pixels.value_or(ImageSize {}).height) };
+    UnixPty::PtyHandles createUnixPty(PageSize const& _windowSize, optional<ImageSize> _pixels)
+    {
+        // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
+        assert(*_windowSize.lines <= numeric_limits<unsigned short>::max());
+        assert(*_windowSize.columns <= numeric_limits<unsigned short>::max());
+
+        winsize const ws { unbox<unsigned short>(_windowSize.lines),
+                           unbox<unsigned short>(_windowSize.columns),
+                           unbox<unsigned short>(_pixels.value_or(ImageSize {}).width),
+                           unbox<unsigned short>(_pixels.value_or(ImageSize {}).height) };
 
 #if defined(__APPLE__)
-    winsize* wsa = const_cast<winsize*>(&ws);
+        winsize* wsa = const_cast<winsize*>(&ws);
 #else
-    winsize const* wsa = &ws;
+        winsize const* wsa = &ws;
 #endif
 
-    // TODO: termios term{};
-    if (openpty(&master_, &slave_, nullptr, /*&term*/ nullptr, (winsize*) wsa) < 0)
-        throw runtime_error { "Failed to open PTY. "s + strerror(errno) };
+        // TODO: termios term{};
+        int masterFd {};
+        int slaveFd {};
+        if (openpty(&masterFd, &slaveFd, nullptr, /*&term*/ nullptr, (winsize*) wsa) < 0)
+            throw runtime_error { "Failed to open PTY. "s + strerror(errno) };
 
-    if (!setFileFlags(master_, O_CLOEXEC | O_NONBLOCK))
+        PtyLog()("PTY opened. master={}, slave={}", masterFd, slaveFd);
+
+        return { PtyMasterHandle::cast_from(masterFd), PtySlaveHandle::cast_from(slaveFd) };
+    }
+
+} // namespace
+
+// {{{ UnixPty::Slave
+UnixPty::Slave::~Slave()
+{
+    close();
+}
+
+PtySlaveHandle UnixPty::Slave::handle() const noexcept
+{
+    return PtySlaveHandle::cast_from(_slaveFd);
+}
+
+void UnixPty::Slave::close()
+{
+    saveClose(&_slaveFd);
+}
+
+bool UnixPty::Slave::isClosed() const noexcept
+{
+    return _slaveFd == -1;
+}
+
+bool UnixPty::Slave::login()
+{
+    if (_slaveFd < 0)
+        return false;
+
+    auto const tio = constructTerminalSettings(_slaveFd);
+    if (tcsetattr(_slaveFd, TCSANOW, &tio) == 0)
+        tcflush(_slaveFd, TCIOFLUSH);
+
+    return login_tty(_slaveFd) == 0;
+}
+// }}}
+
+UnixPty::UnixPty(PageSize const& _windowSize, optional<ImageSize> _pixels):
+    UnixPty(createUnixPty(_windowSize, _pixels), _windowSize)
+{
+}
+
+UnixPty::UnixPty(PtyHandles handles, PageSize pageSize):
+    _masterFd { unbox<int>(handles.master) },
+    _buffer(4 * 1024 * 1024, {}),
+    _pageSize { pageSize },
+    _slave { handles.slave }
+{
+    if (!setFileFlags(_masterFd, O_CLOEXEC | O_NONBLOCK))
         throw runtime_error { "Failed to configure PTY. "s + strerror(errno) };
 
 #if defined(__linux__)
-    if (pipe2(pipe_.data(), O_NONBLOCK /* | O_CLOEXEC | O_NONBLOCK*/) < 0)
+    if (pipe2(_pipe.data(), O_NONBLOCK /* | O_CLOEXEC | O_NONBLOCK*/) < 0)
         throw runtime_error { "Failed to create PTY pipe. "s + strerror(errno) };
 #else
-    if (pipe(pipe_.data()) < 0)
+    if (pipe(_pipe.data()) < 0)
         throw runtime_error { "Failed to create PTY pipe. "s + strerror(errno) };
-    for (auto const fd: pipe_)
+    for (auto const fd: _pipe)
         if (!setFileFlags(fd, O_CLOEXEC | O_NONBLOCK))
             break;
 #endif
-    PtyLog()("PTY opened. master={}, slave={}, pipe=({}, {})", master_, slave_, pipe_.at(0), pipe_.at(1));
 }
 
 UnixPty::~UnixPty()
 {
-    PtyLog()("Destructing.");
-
-    for (auto* fd: { &pipe_.at(0), &pipe_.at(1), &master_, &slave_ })
-    {
-        if (*fd < 0)
-            continue;
-
-        ::close(*fd);
-        *fd = -1;
-    }
+    PtyLog()("PTY destroying master (file descriptor {}).", _masterFd);
+    saveClose(&_pipe.at(0));
+    saveClose(&_pipe.at(1));
+    saveClose(&_masterFd);
 }
 
-bool UnixPty::isClosed() const
+PtySlave& UnixPty::slave() noexcept
 {
-    return master_ < 0;
+    return _slave;
+}
+
+PtyMasterHandle UnixPty::handle() const noexcept
+{
+    return PtyMasterHandle::cast_from(_masterFd);
 }
 
 void UnixPty::close()
 {
-    PtyLog()("PTY closing. master={}, slave={}, pipe=({}, {})", master_, slave_, pipe_.at(0), pipe_.at(1));
-
-    for (auto* fd: { &master_, &slave_ })
-    {
-        if (*fd < 0)
-            continue;
-
-        ::close(*fd);
-        *fd = -1;
-    }
-
+    PtyLog()("PTY closing master (file descriptor {}).", _masterFd);
+    saveClose(&_masterFd);
     wakeupReader();
 }
 
-void UnixPty::wakeupReader()
+bool UnixPty::isClosed() const noexcept
 {
+    return _masterFd == -1;
+}
+
+void UnixPty::wakeupReader() noexcept
+{
+    // TODO(Linux): Using eventfd() instead could lower potential abuse.
     char dummy {};
-    auto const rv = ::write(pipe_[1], &dummy, sizeof(dummy));
+    auto const rv = ::write(_pipe[1], &dummy, sizeof(dummy));
     (void) rv;
 }
 
-optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _timeout)
+std::optional<std::string_view> UnixPty::read(size_t size, std::chrono::milliseconds timeout)
 {
-    if (master_ < 0)
+    if (_masterFd < 0)
     {
         if (PtyInLog)
             PtyInLog()("read() called with closed PTY master.");
@@ -186,9 +243,9 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
         return nullopt;
     }
 
-    timeval tv {};
-    tv.tv_sec = _timeout.count() / 1000;
-    tv.tv_usec = (_timeout.count() % 1000) * 1000;
+    auto tv = timeval {};
+    tv.tv_sec = timeout.count() / 1000;
+    tv.tv_usec = static_cast<decltype(tv.tv_usec)>((timeout.count() % 1000) * 1000);
 
     for (;;)
     {
@@ -196,10 +253,10 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
         FD_ZERO(&rfd);
         FD_ZERO(&wfd);
         FD_ZERO(&efd);
-        if (master_ != -1)
-            FD_SET(master_, &rfd);
-        FD_SET(pipe_[0], &rfd);
-        auto const nfds = 1 + max(master_, pipe_[0]);
+        if (_masterFd != -1)
+            FD_SET(_masterFd, &rfd);
+        FD_SET(_pipe[0], &rfd);
+        auto const nfds = 1 + max(_masterFd, _pipe[0]);
 
         int rv = select(nfds, &rfd, &wfd, &efd, &tv);
         if (rv == 0)
@@ -210,7 +267,7 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
             return nullopt;
         }
 
-        if (master_ < 0)
+        if (_masterFd < 0)
         {
             errno = ENODEV;
             return nullopt;
@@ -223,28 +280,28 @@ optional<string_view> UnixPty::read(size_t _size, std::chrono::milliseconds _tim
         }
 
         bool piped = false;
-        if (FD_ISSET(pipe_[0], &rfd))
+        if (FD_ISSET(_pipe[0], &rfd))
         {
             piped = true;
             int n = 0;
             for (bool done = false; !done;)
             {
                 char dummy[256];
-                rv = static_cast<int>(::read(pipe_[0], dummy, sizeof(dummy)));
+                rv = static_cast<int>(::read(_pipe[0], dummy, sizeof(dummy)));
                 done = rv > 0;
                 n += max(rv, 0);
             }
         }
 
-        if (FD_ISSET(master_, &rfd))
+        if (FD_ISSET(_masterFd, &rfd))
         {
-            auto const n = min(_size, buffer_.size());
-            auto const rv = static_cast<int>(::read(master_, buffer_.data(), n));
+            auto const n = min(size, _buffer.size());
+            auto const rv = static_cast<int>(::read(_masterFd, _buffer.data(), n));
             if (rv >= 0)
             {
                 if (PtyInLog)
-                    PtyInLog()("Received: {}", crispy::escape(buffer_.data(), buffer_.data() + rv));
-                return string_view { buffer_.data(), static_cast<size_t>(rv) };
+                    PtyInLog()("Received: {}", crispy::escape(_buffer.data(), _buffer.data() + rv));
+                return string_view { _buffer.data(), static_cast<size_t>(rv) };
             }
             else
             {
@@ -271,20 +328,20 @@ int UnixPty::write(char const* buf, size_t size)
     FD_ZERO(&rfd);
     FD_ZERO(&wfd);
     FD_ZERO(&efd);
-    FD_SET(master_, &wfd);
-    FD_SET(pipe_[0], &rfd);
-    auto const nfds = 1 + max(master_, pipe_[0]);
+    FD_SET(_masterFd, &wfd);
+    FD_SET(_pipe[0], &rfd);
+    auto const nfds = 1 + max(_masterFd, _pipe[0]);
 
     if (select(nfds, &rfd, &wfd, &efd, &tv) < 0)
         return -1;
 
-    if (!FD_ISSET(master_, &wfd))
+    if (!FD_ISSET(_masterFd, &wfd))
     {
         PtyOutLog()("PTY write of {} bytes timed out.\n", size);
         return 0;
     }
 
-    ssize_t rv = ::write(master_, buf, size);
+    ssize_t rv = ::write(_masterFd, buf, size);
     if (PtyOutLog)
     {
         if (rv >= 0)
@@ -306,53 +363,28 @@ int UnixPty::write(char const* buf, size_t size)
 
 PageSize UnixPty::pageSize() const noexcept
 {
-    return size_;
+    return _pageSize;
 }
 
-void UnixPty::resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels)
+void UnixPty::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
 {
-    if (master_ < 0)
+    if (_masterFd < 0)
         return;
 
     auto w = winsize {};
-    w.ws_col = unbox<unsigned short>(_cells.columns);
-    w.ws_row = unbox<unsigned short>(_cells.lines);
+    w.ws_col = unbox<unsigned short>(cells.columns);
+    w.ws_row = unbox<unsigned short>(cells.lines);
 
-    if (_pixels.has_value())
+    if (pixels.has_value())
     {
-        w.ws_xpixel = unbox<unsigned short>(_pixels.value().width);
-        w.ws_ypixel = unbox<unsigned short>(_pixels.value().height);
+        w.ws_xpixel = unbox<unsigned short>(pixels.value().width);
+        w.ws_ypixel = unbox<unsigned short>(pixels.value().height);
     }
 
-    if (ioctl(master_, TIOCSWINSZ, &w) == -1)
+    if (ioctl(_masterFd, TIOCSWINSZ, &w) == -1)
         throw runtime_error { strerror(errno) };
 
-    size_ = _cells;
-}
-
-void UnixPty::prepareParentProcess()
-{
-    if (slave_ < 0)
-        return;
-
-    ::close(slave_);
-    slave_ = -1;
-}
-
-void UnixPty::prepareChildProcess()
-{
-    if (master_ < 0)
-        return;
-
-    ::close(master_);
-    master_ = -1;
-
-    auto const tio = constructTerminalSettings(slave_);
-    if (tcsetattr(slave_, TCSANOW, &tio) == 0)
-        tcflush(slave_, TCIOFLUSH);
-
-    if (login_tty(slave_) < 0)
-        _exit(EXIT_FAILURE);
+    _pageSize = cells;
 }
 
 } // namespace terminal

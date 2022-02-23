@@ -30,10 +30,7 @@ class ConPty: public Pty
     ~ConPty() override;
 
     void close() override;
-    bool isClosed() const override;
-
-    void prepareParentProcess() override;
-    void prepareChildProcess() override;
+    bool isClosed() const noexcept override;
 
     std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
     void wakeupReader() override;
@@ -41,6 +38,8 @@ class ConPty: public Pty
     PageSize pageSize() const noexcept override;
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;
 
+    PtySlave& slave() noexcept override;
+    PtyMasterHandle handle() const noexcept override { return PtyMasterHandle::cast_from(master_); }
     HPCON master() const noexcept { return master_; }
 
   private:

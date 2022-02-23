@@ -1,27 +1,9 @@
 #include <terminal/pty/PtyProcess.h>
 
-#if defined(_MSC_VER)
-    #include <terminal/pty/ConPty.h>
-#else
-    #include <terminal/pty/UnixPty.h>
-#endif
-
 using namespace std;
 
 namespace terminal
 {
-
-namespace
-{
-    unique_ptr<Pty> createPty(PageSize pageSize, optional<ImageSize> viewSize)
-    {
-#if defined(_MSC_VER)
-        return make_unique<terminal::ConPty>(pageSize /*TODO: , viewSize*/);
-#else
-        return make_unique<terminal::UnixPty>(pageSize, viewSize);
-#endif
-    }
-} // namespace
 
 PtyProcess::PtyProcess(ExecInfo const& _exe, PageSize _terminalSize, optional<ImageSize> _pixels):
     pty_ { createPty(_terminalSize, _pixels) },
@@ -52,19 +34,9 @@ void PtyProcess::close()
     // process_->terminate(Process::TerminationHint::Hangup);
 }
 
-bool PtyProcess::isClosed() const
+bool PtyProcess::isClosed() const noexcept
 {
     return pty_->isClosed();
-}
-
-void PtyProcess::prepareParentProcess()
-{
-    assert(false && "Don't!");
-}
-
-void PtyProcess::prepareChildProcess()
-{
-    assert(false && "Don't!");
 }
 
 optional<string_view> PtyProcess::read(size_t _size, std::chrono::milliseconds _timeout)

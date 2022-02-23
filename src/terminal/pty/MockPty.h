@@ -27,16 +27,16 @@ class MockPty: public Pty
     explicit MockPty(PageSize windowSize);
     ~MockPty() override;
 
+    PtyMasterHandle handle() const noexcept override;
+    PtySlave& slave() noexcept override;
     std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
     void wakeupReader() override;
     int write(char const* buf, size_t size) override;
     PageSize pageSize() const noexcept override;
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;
 
-    void prepareChildProcess() override;
-    void prepareParentProcess() override;
     void close() override;
-    bool isClosed() const override;
+    bool isClosed() const noexcept override;
 
     std::string& stdinBuffer() noexcept { return inputBuffer_; }
 
@@ -60,6 +60,7 @@ class MockPty: public Pty
     std::string outputBuffer_;
     std::size_t outputReadOffset_ = 0;
     bool closed_ = false;
+    PtySlaveDummy slave_;
 };
 
 } // namespace terminal

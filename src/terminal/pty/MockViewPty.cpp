@@ -26,6 +26,16 @@ void MockViewPty::setReadData(std::string_view _data)
     outputBuffer_ = _data;
 }
 
+PtyMasterHandle MockViewPty::handle() const noexcept
+{
+    return {};
+}
+
+PtySlave& MockViewPty::slave() noexcept
+{
+    return slave_;
+}
+
 optional<string_view> MockViewPty::read(size_t _maxSize, std::chrono::milliseconds /*_timeout*/)
 {
     auto const n = std::min(outputBuffer_.size(), _maxSize);
@@ -57,20 +67,12 @@ void MockViewPty::resizeScreen(terminal::PageSize _cells, std::optional<terminal
     pixelSize_ = _pixels;
 }
 
-void MockViewPty::prepareChildProcess()
-{
-}
-
-void MockViewPty::prepareParentProcess()
-{
-}
-
 void MockViewPty::close()
 {
     closed_ = true;
 }
 
-bool MockViewPty::isClosed() const
+bool MockViewPty::isClosed() const noexcept
 {
     return closed_;
 }

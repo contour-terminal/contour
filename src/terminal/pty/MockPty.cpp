@@ -15,6 +15,16 @@ MockPty::~MockPty()
 {
 }
 
+PtyMasterHandle MockPty::handle() const noexcept
+{
+    return {};
+}
+
+PtySlave& MockPty::slave() noexcept
+{
+    return slave_;
+}
+
 optional<string_view> MockPty::read(size_t _size, std::chrono::milliseconds)
 {
     auto const n = std::min(outputBuffer_.size() - outputReadOffset_, _size);
@@ -46,20 +56,12 @@ void MockPty::resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels)
     pixelSize_ = _pixels;
 }
 
-void MockPty::prepareChildProcess()
-{
-}
-
-void MockPty::prepareParentProcess()
-{
-}
-
 void MockPty::close()
 {
     closed_ = true;
 }
 
-bool MockPty::isClosed() const
+bool MockPty::isClosed() const noexcept
 {
     return closed_;
 }

@@ -15,6 +15,7 @@
 
 #include <terminal/primitives.h>
 
+#include <crispy/boxed.h>
 #include <crispy/logstore.h>
 
 #include <chrono>
@@ -24,10 +25,43 @@
 namespace terminal
 {
 
+namespace detail
+{
+    // clang-format off
+    struct PtyMasterHandle {};
+    struct PtySlaveHandle {};
+    // clang-format on
+} // namespace detail
+
+using PtyMasterHandle = crispy::boxed<std::uintptr_t, detail::PtyMasterHandle>;
+using PtySlaveHandle = crispy::boxed<std::uintptr_t, detail::PtySlaveHandle>;
+using PtyHandle = std::uintptr_t;
+
+class PtySlave
+{
+  public:
+    virtual ~PtySlave() = default;
+    virtual PtySlaveHandle handle() const noexcept = 0;
+    virtual void close() = 0;
+    virtual bool isClosed() const noexcept = 0;
+    virtual bool login() = 0;
+};
+
+class PtySlaveDummy: public PtySlave
+{
+  public:
+    PtySlaveHandle handle() const noexcept override { return {}; }
+    void close() override {}
+    bool isClosed() const noexcept override { return false; }
+    bool login() override { return false; }
+};
+
 class Pty
 {
   public:
     virtual ~Pty() = default;
+
+    virtual PtySlave& slave() noexcept = 0;
 
     /// Releases this PTY early.
     ///
@@ -35,18 +69,9 @@ class Pty
     virtual void close() = 0;
 
     /// Returns true if the underlying PTY is closed, otherwise false.
-    virtual bool isClosed() const = 0;
+    virtual bool isClosed() const noexcept = 0;
 
-    /// Prepares PTY for use with a child process, therefore, closing the master end and
-    /// doing some more prep work.
-    ///
-    /// Invoke this function after the respective child process has been fork()'ed.'
-    virtual void prepareParentProcess() = 0;
-
-    /// Prepares PTY for use inside a child process.
-    ///
-    /// That is, the current process must be already the child, i.e. via fork().
-    virtual void prepareChildProcess() = 0;
+    virtual PtyMasterHandle handle() const noexcept = 0;
 
     /// Reads from the terminal whatever has been written to from the other side of the terminal.
     ///
@@ -77,6 +102,8 @@ class Pty
     /// Resizes underlying window buffer by given character width and height.
     virtual void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) = 0;
 };
+
+std::unique_ptr<Pty> createPty(PageSize pageSize, std::optional<ImageSize> viewSize);
 
 auto const inline PtyLog = logstore::Category("pty", "Logs general PTY informations.");
 auto const inline PtyInLog = logstore::Category("pty.input", "Logs PTY raw input.");

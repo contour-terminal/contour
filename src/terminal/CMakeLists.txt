@@ -79,6 +79,7 @@ set(terminal_SOURCES
     primitives.cpp
     pty/MockPty.cpp
     pty/MockViewPty.cpp
+    pty/Pty.cpp
     pty/PtyProcess.cpp
 )
 

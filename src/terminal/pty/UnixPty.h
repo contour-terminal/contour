@@ -30,28 +30,47 @@ namespace terminal
 
 class UnixPty: public Pty
 {
+  private:
+    class Slave: public PtySlave
+    {
+      public:
+        int _slaveFd;
+        explicit Slave(PtySlaveHandle fd): _slaveFd { unbox<int>(fd) } {}
+        ~Slave() override;
+        PtySlaveHandle handle() const noexcept override;
+        void close() override;
+        bool isClosed() const noexcept override;
+        bool login() override;
+    };
+
   public:
-    explicit UnixPty(PageSize const& windowSize, std::optional<ImageSize> _pixels = std::nullopt);
+    struct PtyHandles
+    {
+        PtyMasterHandle master;
+        PtySlaveHandle slave;
+    };
+
+    UnixPty(PageSize const& _windowSize, std::optional<ImageSize> _pixels);
+    UnixPty(PtyHandles handles, PageSize size);
     ~UnixPty() override;
 
+    PtySlave& slave() noexcept override;
+
+    PtyMasterHandle handle() const noexcept override;
+    void close() override;
+    bool isClosed() const noexcept override;
+    void wakeupReader() noexcept override;
     std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
-    void wakeupReader() override;
     int write(char const* buf, size_t size) override;
     PageSize pageSize() const noexcept override;
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;
 
-    void prepareParentProcess() override;
-    void prepareChildProcess() override;
-    void close() override;
-    bool isClosed() const override;
-    [[nodiscard]] constexpr int masterFd() const noexcept { return master_; }
-
   private:
-    PageSize size_;
-    int master_;
-    int slave_;
-    std::array<int, 2> pipe_;
-    std::vector<char> buffer_;
+    int _masterFd;
+    std::array<int, 2> _pipe;
+    std::vector<char> _buffer;
+    PageSize _pageSize;
+    Slave _slave;
 };
 
 } // namespace terminal

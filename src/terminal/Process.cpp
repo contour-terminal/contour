@@ -183,15 +183,13 @@ Process::Process(string const& _path,
     switch (pid_)
     {
     default: // in parent
-        _pty.prepareParentProcess();
+        _pty.slave().close();
         break;
     case -1: // fork error
         throw runtime_error { getLastErrorAsString() };
     case 0: // in child
     {
-        _pty.prepareChildProcess();
-
-        setsid();
+        _pty.slave().login();
 
         auto const& cwd = _cwd.generic_string();
         if (!_cwd.empty() && chdir(cwd.c_str()) != 0)
@@ -489,7 +487,7 @@ string Process::workingDirectory(Pty const* _pty) const
     try
     {
         auto vpi = proc_vnodepathinfo {};
-        auto const pid = tcgetpgrp(static_cast<UnixPty const*>(_pty)->masterFd());
+        auto const pid = tcgetpgrp(unbox<int>(static_cast<UnixPty const*>(_pty)->handle()));
 
         if (proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &vpi, sizeof(vpi)) <= 0)
         {
