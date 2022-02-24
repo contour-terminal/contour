@@ -19,11 +19,11 @@
 #include <QtCore/QElapsedTimer>
 #include <QtCore/QtMath>
 #include <QtGui/QOffscreenSurface>
+#include <QtGui/QOpenGLContext>
 #include <QtGui/QVector2D>
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     #include <QtOpenGL/QOpenGLBuffer>
-    #include <QtOpenGL/QOpenGLContext>
     #include <QtOpenGL/QOpenGLFramebufferObject>
     #include <QtOpenGL/QOpenGLFunctions_3_3_Core>
     #include <QtOpenGL/QOpenGLShaderProgram>
@@ -31,7 +31,6 @@
     #include <QtOpenGL/QOpenGLVertexArrayObject>
 #else
     #include <QtGui/QOpenGLBuffer>
-    #include <QtGui/QOpenGLContext>
     #include <QtGui/QOpenGLFramebufferObject>
     #include <QtGui/QOpenGLFunctions_3_3_Core>
     #include <QtGui/QOpenGLShaderProgram>
