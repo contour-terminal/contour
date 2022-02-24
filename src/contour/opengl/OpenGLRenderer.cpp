@@ -24,6 +24,7 @@
 
 #include <range/v3/all.hpp>
 
+#include <QtCore/QtGlobal>
 #include <QtGui/QImage>
 
 #include <algorithm>
