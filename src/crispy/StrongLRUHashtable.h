@@ -63,7 +63,38 @@ struct LRUHashtableStats
     uint32_t misses;
     uint32_t recycles;
 };
+} // namespace crispy
 
+// {{{ fmt
+namespace fmt
+{
+template <>
+struct formatter<crispy::LRUHashtableStats>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(crispy::LRUHashtableStats stats, FormatContext& ctx)
+    {
+        return format_to(
+            ctx.out(),
+            "{} hits, {} misses, {} evictions, {:.3}% hit rate",
+            stats.hits,
+            stats.misses,
+            stats.recycles,
+            stats.hits + stats.misses != 0
+                ? 100.0 * (static_cast<double>(stats.hits) / static_cast<double>(stats.hits + stats.misses))
+                : 0.0);
+    }
+};
+} // namespace fmt
+// }}}
+
+namespace crispy
+{
 // Defines the number of hashes the hashtable can store.
 struct StrongHashtableSize
 {
@@ -873,31 +904,3 @@ inline int StrongLRUHashtable<Value>::validateChange(int adj)
 // }}}
 
 } // namespace crispy
-
-// {{{ fmt
-namespace fmt
-{
-template <>
-struct formatter<crispy::LRUHashtableStats>
-{
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(crispy::LRUHashtableStats stats, FormatContext& ctx)
-    {
-        return format_to(
-            ctx.out(),
-            "{} hits, {} misses, {} evictions, {:.3}% hit rate",
-            stats.hits,
-            stats.misses,
-            stats.recycles,
-            stats.hits + stats.misses != 0
-                ? 100.0 * (static_cast<double>(stats.hits) / static_cast<double>(stats.hits + stats.misses))
-                : 0.0);
-    }
-};
-} // namespace fmt
-// }}}
