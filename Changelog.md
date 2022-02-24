@@ -6,6 +6,7 @@
 - Fixes VT sequence `ICH` (#559).
 - Fixes VT sequence `OSC 4`'s response.
 - Fixes VT sequence `OESC 4` to also support setting color via `#RRGGBB`.
+- Fixes VT sequence extension: capture buffer (#493).
 - Fixes `DECRC` with respect to `DECSTBM` enabled and `DECOM` being inverted interpreted.
 - Fixes `XTGETTCAP` (#582).
 - Fixes `SU` in combination with `DECLRM` (#593).

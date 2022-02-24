@@ -37,7 +37,7 @@ class MockParserEvents: public terminal::BasicParserEvents
     void dispatchAPC() override { apc += "}"; }
 
     void startPM() override { pm += "{"; }
-    void putPM(char32_t ch) override { pm += unicode::convert_to<char>(ch); }
+    void putPM(char ch) override { pm += ch; }
     void dispatchPM() override { pm += "}"; }
 };
 

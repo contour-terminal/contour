@@ -599,6 +599,29 @@ class Parser
     EventListener& eventListener_;
 };
 
+/// @returns parsed tuple with OSC code and offset to first data parameter byte.
+template <typename T>
+inline std::pair<int, size_t> extractCodePrefix(T const& data) noexcept
+{
+    int code = 0;
+    size_t i = 0;
+
+    while (i < data.size() && isdigit(data[i]))
+        code = code * 10 + (int) (data[i++] - '0');
+
+    if (i == 0 && !data.empty() && data[0] != ';')
+    {
+        // such as 'L' is encoded as -'L'
+        code = -data[0];
+        ++i;
+    }
+
+    if (i < data.size() && data[i] == ';')
+        ++i;
+
+    return std::pair { code, i };
+}
+
 void dot(std::ostream& _os, ParserTable const& _table);
 
 } // end namespace terminal::parser

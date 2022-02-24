@@ -2428,43 +2428,43 @@ TEST_CASE("captureBuffer", "[screen]")
     {
         screen.captureBuffer(0, false);
         INFO(e(term.replyData));
-        CHECK(e(term.replyData) == e("\033]314;\033\\"));
+        CHECK(e(term.replyData) == e("\033^314;\033\\"));
     }
     SECTION("lines: 1")
     {
         screen.captureBuffer(1, false);
         INFO(e(term.replyData));
-        CHECK(e(term.replyData) == e("\033]314;KLMNO\n\033\\\033]314;\033\\"));
+        CHECK(e(term.replyData) == e("\033^314;KLMNO\n\033\\\033^314;\033\\"));
     }
     SECTION("lines: 2")
     {
         screen.captureBuffer(2, false);
         INFO(e(term.replyData));
-        CHECK(e(term.replyData) == e("\033]314;FGHIJ\nKLMNO\n\033\\\033]314;\033\\"));
+        CHECK(e(term.replyData) == e("\033^314;FGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
     }
     SECTION("lines: 3")
     {
         screen.captureBuffer(3, false);
         INFO(e(term.replyData));
-        CHECK(e(term.replyData) == e("\033]314;ABCDE\nFGHIJ\nKLMNO\n\033\\\033]314;\033\\"));
+        CHECK(e(term.replyData) == e("\033^314;ABCDE\nFGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
     }
     SECTION("lines: 4")
     {
         screen.captureBuffer(4, false);
         INFO(e(term.replyData));
-        CHECK(e(term.replyData) == e("\033]314;67890\nABCDE\nFGHIJ\nKLMNO\n\033\\\033]314;\033\\"));
+        CHECK(e(term.replyData) == e("\033^314;67890\nABCDE\nFGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
     }
     SECTION("lines: 5")
     {
         screen.captureBuffer(5, false);
         INFO(e(term.replyData));
-        CHECK(e(term.replyData) == e("\033]314;12345\n67890\nABCDE\nFGHIJ\nKLMNO\n\033\\\033]314;\033\\"));
+        CHECK(e(term.replyData) == e("\033^314;12345\n67890\nABCDE\nFGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
     }
     SECTION("lines: 5 (+1 overflow)")
     {
         screen.captureBuffer(5, false);
         INFO(e(term.replyData));
-        CHECK(e(term.replyData) == e("\033]314;12345\n67890\nABCDE\nFGHIJ\nKLMNO\n\033\\\033]314;\033\\"));
+        CHECK(e(term.replyData) == e("\033^314;12345\n67890\nABCDE\nFGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
     }
 }
 

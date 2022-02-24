@@ -77,28 +77,6 @@ namespace
         return v;
     }
 
-    /// @returns parsed tuple with OSC code and offset to first data parameter byte.
-    pair<int, size_t> parseOSC(string const& _data)
-    {
-        int code = 0;
-        size_t i = 0;
-
-        while (i < _data.size() && isdigit(_data[i]))
-            code = code * 10 + (int) (_data[i++] - '0');
-
-        if (i == 0 && !_data.empty() && _data[0] != ';')
-        {
-            // such as 'L' is encoded as -'L'
-            code = -_data[0];
-            ++i;
-        }
-
-        if (i < _data.size() && _data[i] == ';')
-            ++i;
-
-        return pair { code, i };
-    }
-
     // optional<CharsetTable> getCharsetTableForCode(std::string const& _intermediate)
     // {
     //     if (_intermediate.size() != 1)
@@ -1120,7 +1098,7 @@ void Sequencer<TheTerminal>::putOSC(char _char)
 template <typename TheTerminal>
 void Sequencer<TheTerminal>::dispatchOSC()
 {
-    auto const [code, skipCount] = parseOSC(sequence_.intermediateCharacters());
+    auto const [code, skipCount] = parser::extractCodePrefix(sequence_.intermediateCharacters());
     sequence_.parameters().push_back({ static_cast<Sequence::Parameter>(code) });
     sequence_.intermediateCharacters().erase(0, skipCount);
     handleSequence();
@@ -1340,7 +1318,7 @@ void Sequencer<TheTerminal>::handleSequence()
         screen().verifyState();
     }
     else if (VTParserLog)
-        LOGSTORE(VTParserLog)("Unknown VT sequence: {}", sequence_);
+        VTParserLog()("Unknown VT sequence: {}", sequence_);
 }
 
 template <typename TheTerminal>

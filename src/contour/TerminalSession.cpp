@@ -209,6 +209,8 @@ void TerminalSession::requestCaptureBuffer(int _absoluteStartLine, int _lineCoun
         if (display_->requestPermission(profile_.permissions.captureBuffer, "capture screen buffer"))
         {
             terminal_.screen().captureBuffer(_absoluteStartLine, _lineCount);
+            DisplayLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
+            flushInput();
         }
     });
 }

@@ -80,6 +80,11 @@ using std::vector;
 namespace terminal
 {
 
+auto const inline VTCaptureBufferLog = logstore::Category("vt.ext_capturebuffer",
+                                                          "Capture Buffer debug logging.",
+                                                          logstore::Category::State::Disabled,
+                                                          logstore::Category::Visibility::Hidden);
+
 namespace
 {
     namespace views
@@ -1680,55 +1685,62 @@ void Screen<T>::captureBuffer(int _lineCount, bool _logicalLines)
     auto const relativeStartLine =
         _logicalLines ? grid().computeLogicalLineNumberFromBottom(LineCount::cast_from(_lineCount))
                       : unbox<int>(_state.pageSize.lines) - _lineCount;
-    auto const startLine =
-        clamp(relativeStartLine, -unbox<int>(historyLineCount()), unbox<int>(_state.pageSize.lines));
+    auto const startLine = LineOffset::cast_from(
+        clamp(relativeStartLine, -unbox<int>(historyLineCount()), unbox<int>(_state.pageSize.lines)));
 
-    // inspect();
-
-    auto const trimSpaceRight = [](string& value) {
-        while (!value.empty() && value.back() == ' ')
-            value.pop_back();
+    size_t constexpr MaxChunkSize = 4096;
+    size_t currentChunkSize = 0;
+    string currentLine;
+    auto const pushContent = [&](auto const data) -> void {
+        if (data.empty())
+            return;
+        if (currentChunkSize == 0) // initiate chunk
+            reply("\033^{};", CaptureBufferCode);
+        else if (currentChunkSize + data.size() >= MaxChunkSize)
+        {
+            VTCaptureBufferLog()("Transferred chunk of {} bytes.", currentChunkSize);
+            reply("\033\\"); // ST
+            reply("\033^{};", CaptureBufferCode);
+            currentChunkSize = 0;
+        }
+        reply("{}", data);
+        currentChunkSize += data.size();
     };
+    LineOffset const bottomLine = boxed_cast<LineOffset>(_state.pageSize.lines - 1);
+    VTCaptureBufferLog()("Capturing buffer. top: {}, bottom: {}",
+                         relativeStartLine,
+                         bottomLine);
 
-    for (LineOffset line = LineOffset(startLine); line < boxed_cast<LineOffset>(_state.pageSize.lines);
-         ++line)
+    for (LineOffset line = startLine; line <= bottomLine; ++line)
     {
         if (_logicalLines && grid().lineAt(line).wrapped() && !capturedBuffer.empty())
             capturedBuffer.pop_back();
 
-        if (grid().isLineBlank(line))
-            continue;
-
-        for (ColumnOffset col = ColumnOffset { 0 }; col < boxed_cast<ColumnOffset>(_state.pageSize.columns);
-             ++col)
+        auto const& lineBuffer = grid().lineAt(line);
+        auto lineCellsTrimmed = lineBuffer.trim_blank_right();
+        if (lineCellsTrimmed.empty())
         {
-            Cell const& cell = at({ line, col });
-            if (!cell.codepointCount())
-                writer.write(U' ');
-            else
-            {
-                writer.write(cell.codepoint(0));
-                for (size_t i = 1; i < cell.codepointCount(); ++i)
-                    writer.write(cell.codepoint(i));
-            }
+            VTCaptureBufferLog()("Skipping blank line {}", line);
+            continue;
         }
-        trimSpaceRight(capturedBuffer);
-
-        writer.write('\n');
+        auto const tl = lineCellsTrimmed.size();
+        while (!lineCellsTrimmed.empty())
+        {
+            auto const available = MaxChunkSize - currentChunkSize;
+            auto const n = min(available, lineCellsTrimmed.size());
+            for (auto const& cell: lineCellsTrimmed.subspan(0, n))
+                pushContent(cell.toUtf8());
+            lineCellsTrimmed = lineCellsTrimmed.subspan(n);
+        }
+        VTCaptureBufferLog()("NL ({} len)", tl);
+        pushContent("\n"sv);
     }
 
-    while (crispy::endsWith(string_view(capturedBuffer), "\n\n"sv)) // TODO: unit test
-        capturedBuffer.pop_back();
+    if (currentChunkSize != 0)
+        reply("\033\\"); // ST
 
-    auto constexpr PageSize = size_t { 4096 };
-    for (size_t i = 0; i < capturedBuffer.size(); i += PageSize)
-    {
-        auto const start = capturedBuffer.data() + i;
-        auto const count = min(PageSize, capturedBuffer.size() - i);
-        reply("\033]314;{}\033\\", string_view(start, count));
-    }
-
-    reply("\033]314;\033\\"); // mark the end
+    VTCaptureBufferLog()("Capturing buffer finished.");
+    reply("\033^{};\033\\", CaptureBufferCode); // mark the end
 }
 
 template <typename T>
