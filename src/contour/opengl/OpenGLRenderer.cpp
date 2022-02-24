@@ -837,13 +837,12 @@ void OpenGLRenderer::setBackgroundImage(shared_ptr<terminal::BackgroundImage con
 
         if (backgroundImage.blur)
         {
-            auto const offsetStr = qEnvironmentVariable("CONTOUR_BLUR_OFFSET");
-            auto const iterStr = qEnvironmentVariable("CONTOUR_BLUR_ITERATIONS");
-            auto const offset = offsetStr.isEmpty() ? 5 : offsetStr.toInt();
-            auto const iterations = iterStr.isEmpty() ? 5 : iterStr.toInt();
             auto const contextGuard = OpenGLContextGuard {};
-
             auto blur = Blur {};
+            // auto const offsetStr = qgetenv("CONTOUR_BLUR_OFFSET").toStdString();
+            // auto const iterStr = qgetenv("CONTOUR_BLUR_ITERATIONS").toStdString();
+            // auto const offset = offsetStr.empty() ? 5 : std::stoi(offsetStr);
+            // auto const iterations = iterStr.empty() ? 5 : std::stoi(iterStr);
             // qImage = blur.blurDualKawase(move(qImage), offset, iterations);
             qImage = blur.blurGaussian(move(qImage));
 
