@@ -9,9 +9,11 @@ PtyProcess::PtyProcess(ExecInfo const& _exe, PageSize _terminalSize, optional<Im
     pty_ { createPty(_terminalSize, _pixels) },
     process_ { std::make_unique<Process>(_exe, *pty_) },
     processExitWatcher_ { [this]() {
-        auto const exitStatus = process_->wait();
-        PtyLog()("Process terminated with exit code {}.", exitStatus);
-        pty_->close();
+        // TODO(pr) Can it be that we only needed that because of ConPTY?
+        //          If so, adjust PTY API so it can be used for watching for PTY close event.
+        // auto const exitStatus = process_->wait();
+        // PtyLog()("Process terminated with exit code {}.", exitStatus);
+        // pty_->close();
     } }
 {
 }
