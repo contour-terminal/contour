@@ -795,7 +795,7 @@ std::shared_ptr<terminal::BackgroundImage const> loadImage(string const& fileNam
         resolvedFileName = fileName;
 
     auto backgroundImage = terminal::BackgroundImage {};
-    backgroundImage.location = fileName;
+    backgroundImage.location = resolvedFileName;
     backgroundImage.hash = crispy::StrongHash::compute(resolvedFileName.string());
     backgroundImage.opacity = opacity;
     backgroundImage.blur = blur;
