@@ -148,6 +148,9 @@ profiles:
         # Default value is the user's home directory.
         initial_working_directory: "~"
 
+        # When this profile is *activated*, this flag decides
+        # whether or not the title bar will be shown
+        show_title_bar: true
         # When this profile is being *activated*, this flag decides
         # whether or not to put the terminal's screen into fullscreen mode.
         #

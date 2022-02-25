@@ -90,6 +90,7 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
 
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_NoSystemBackground, false);
+    setWindowFlag(Qt::FramelessWindowHint, !profile()->show_title_bar);
 
     // {{{ fill config's maxImageSize if not yet set.
     auto const defaultMaxImageSize = [&]() -> ImageSize {
