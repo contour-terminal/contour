@@ -13,6 +13,10 @@
  */
 #include <contour/CaptureScreen.h>
 
+#include <terminal/Functions.h>
+#include <terminal/Parser.h>
+#include <terminal/ParserEvents.h>
+
 #include <crispy/utils.h>
 
 #include <fmt/format.h>
@@ -53,8 +57,10 @@ using std::nullopt;
 using std::ofstream;
 using std::optional;
 using std::ostream;
+using std::pair;
 using std::reference_wrapper;
 using std::stoi;
+using std::streamsize;
 using std::string;
 using std::string_view;
 using std::tuple;
@@ -64,6 +70,43 @@ using namespace std::string_view_literals;
 
 namespace contour
 {
+
+class CaptureBufferCollector: public terminal::BasicParserEvents
+{
+  public:
+    std::ostream& output;
+    bool splitByWord;
+    std::string capturedBuffer;
+    bool done = false;
+
+    CaptureBufferCollector(ostream& out, bool words): output { out }, splitByWord { words } {}
+
+    void startPM() override { capturedBuffer.clear(); }
+
+    void putPM(char t) override { capturedBuffer += t; }
+    void execute(char ch) override { putPM(ch); }
+
+    void dispatchPM() override
+    {
+        auto const [code, offset] = terminal::parser::extractCodePrefix(capturedBuffer);
+        if (code == terminal::CaptureBufferCode)
+        {
+            auto const payload = string_view(capturedBuffer.data() + offset, capturedBuffer.size() - offset);
+            if (splitByWord)
+            {
+                crispy::split(payload, ' ', [&](auto word) -> bool {
+                    output.write(word.data(), static_cast<streamsize>(word.size()));
+                    output << '\n';
+                    return true;
+                });
+            }
+            else
+                output.write(payload.data(), static_cast<streamsize>(payload.size()));
+            if (payload.size() == 0)
+                done = true;
+        }
+    }
+};
 
 namespace
 {
@@ -93,7 +136,7 @@ namespace
             fd = open("/dev/tty", O_RDWR);
             if (fd < 0)
             {
-                cerr << "Could not open current terminal.\n";
+                cerr << "Could not open current terminal.\r\n";
                 return;
             }
 
@@ -140,11 +183,11 @@ namespace
 #endif
         }
 
-        int wait(timeval* _timeout)
+        int wait(timeval* timeout)
         {
 #if defined(_WIN32)
             auto const fd0 = GetStdHandle(STD_INPUT_HANDLE);
-            DWORD const timeoutMillis = _timeout->tv_sec * 1000 + _timeout->tv_usec / 1000;
+            DWORD const timeoutMillis = timeout->tv_sec * 1000 + timeout->tv_usec / 1000;
             DWORD const result = WaitForSingleObject(fd0, timeoutMillis);
             switch (result)
             {
@@ -161,7 +204,7 @@ namespace
             FD_ZERO(&serr);
             FD_SET(fd, &sin);
             auto const watermark = fd + 1;
-            return select(watermark, &sin, &sout, &serr, _timeout);
+            return select(watermark, &sin, &sout, &serr, timeout);
 #endif
         }
 
@@ -194,7 +237,7 @@ namespace
 #endif
         }
 
-        optional<tuple<int, int>> screenSize(timeval* _timeout)
+        optional<tuple<int, int>> screenSize(timeval* timeout)
         {
             // Naive implementation. TODO: use select() to poll and time out properly.
             write("\033[18t");
@@ -203,7 +246,7 @@ namespace
             string reply;
             for (;;)
             {
-                if (wait(_timeout) <= 0)
+                if (wait(timeout) <= 0)
                     return nullopt;
 
                 char ch {};
@@ -226,18 +269,16 @@ namespace
         }
     };
 
-    auto constexpr ReplyPrefix = "\033]314;"sv; // DCS 314 ;
-    auto constexpr ReplySuffix = "\033\\"sv;    // ST
-
-    // Reads a *single* response chunk.
-    bool readCaptureChunk(TTY& _input, timeval* _timeout, string& _reply)
+    // Reads a response chunk.
+    bool readCaptureReply(TTY& _input, timeval* timeout, bool words, ostream& output)
     {
-        timeval timeout = *_timeout;
-        // Response is of format: OSC 314 ; <screen capture> ST`
-        long long int n = 0;
+        auto captureBufferCollector = CaptureBufferCollector { output, words };
+        auto parser = terminal::parser::Parser<CaptureBufferCollector> { captureBufferCollector };
+
+        // Response is of format: PM 314 ; <screen capture> ST`
         while (true)
         {
-            int rv = _input.wait(&timeout);
+            int rv = _input.wait(timeout);
             if (rv < 0)
             {
                 perror("select");
@@ -245,7 +286,7 @@ namespace
             }
             else if (rv == 0)
             {
-                cerr << "VTE did not respond to CAPTURE `CSI > Ps ; Ps t`.\n";
+                cerr << "Time out. VTE did not respond to CAPTURE `CSI > Ps ; Ps t`.\r\n";
                 return false;
             }
 
@@ -257,20 +298,11 @@ namespace
                 return false;
             }
 
-            copy_n(buf, rv, back_inserter(_reply));
+            auto const inputView = string_view(buf, static_cast<size_t>(rv));
+            parser.parseFragment(inputView);
 
-            if (n == 0 && !crispy::startsWith(string_view(_reply), ReplyPrefix))
-            {
-                cerr << fmt::format(
-                    "Invalid response from terminal received. Does not start with expected reply prefix.\n");
-                return false;
-            }
-            n++;
-
-            if (!crispy::endsWith(string_view(_reply), ReplySuffix))
-                continue;
-
-            return true;
+            if (captureBufferCollector.done)
+                return true;
         }
     }
 } // namespace
@@ -290,47 +322,32 @@ bool captureScreen(CaptureSettings const& _settings)
     auto const screenSizeOpt = tty.screenSize(&timeout);
     if (!screenSizeOpt.has_value())
     {
-        cerr << "Could not get current screen size.\n";
+        cerr << "Could not get current screen size.\r\n";
         return false;
     }
     auto const [numColumns, numLines] = screenSizeOpt.value();
 
     if (_settings.verbosityLevel > 0)
-        cerr << fmt::format("Screen size: {}x{}. Capturing lines {} to file {}.\n",
+        cerr << fmt::format("Screen size: {}x{}. Capturing lines {} ({}) to file {}.\r\n",
                             numColumns,
                             numLines,
                             _settings.logicalLines ? "logical" : "physical",
                             _settings.lineCount,
+                            _settings.words ? "words" : "lines",
                             _settings.outputFile.data());
 
     // request screen capture
-    string reply;
-    reply.reserve(numColumns * std::max(_settings.lineCount, numLines));
-
     reference_wrapper<ostream> output(cout);
     unique_ptr<ostream> customOutput;
     if (_settings.outputFile != "-"sv)
     {
-        // cerr << "Opening output stream: '" << _settings.outputFile << "'\n";
         customOutput = make_unique<ofstream>(_settings.outputFile.data(), std::ios::trunc);
         output = *customOutput;
     }
 
     tty.write(fmt::format("\033[>{};{}t", _settings.logicalLines ? '1' : '0', _settings.lineCount));
 
-    while (true)
-    {
-        if (!readCaptureChunk(tty, &timeout, reply))
-            return false;
-
-        auto const payload = string_view(reply.data() + ReplyPrefix.size(),
-                                         reply.size() - ReplyPrefix.size() - ReplySuffix.size());
-        if (payload.empty())
-            return true;
-
-        output.get().write(payload.data(), payload.size());
-        reply.clear();
-    }
+    return readCaptureReply(tty, &timeout, _settings.words, output);
 }
 
 } // namespace contour
