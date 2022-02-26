@@ -28,6 +28,7 @@
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
 #include <QtCore/QFileSystemWatcher>
+#include <QtCore/QMetaEnum>
 #include <QtCore/QMetaObject>
 #include <QtCore/QProcess>
 #include <QtCore/QStandardPaths>
@@ -681,7 +682,6 @@ bool TerminalWidget::event(QEvent* _event)
 {
     try
     {
-        // qDebug() << "TerminalWidget.event():" << _event;
         if (_event->type() == QEvent::Close)
         {
             session_.pty().close();
@@ -692,6 +692,9 @@ bool TerminalWidget::event(QEvent* _event)
     }
     catch (std::exception const& e)
     {
+        fmt::print("Unhandled exception for event {}: {}\n",
+                   (unsigned) _event->type(),
+                   QMetaEnum::fromType<QEvent::Type>().valueToKey(_event->type()));
         reportUnhandledException(__PRETTY_FUNCTION__, e);
         return false;
     }
@@ -731,6 +734,7 @@ double TerminalWidget::contentScale() const
                 if (forcedDPI >= 96.0)
                 {
                     auto const dpr = (forcedDPI * dpiScale) / 96.0;
+                    DisplayLog()("contentScale(kcmfonts): {}", dpr);
                     return dpr;
                 }
             }
@@ -738,6 +742,8 @@ double TerminalWidget::contentScale() const
     }
 #endif
 
+    auto const dpr = devicePixelRatio() * dpiScale;
+    DisplayLog()("contentScale: {}", dpr);
     return devicePixelRatio() * dpiScale;
 }
 

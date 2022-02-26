@@ -385,6 +385,8 @@ constexpr inline auto RCOLORHIGHLIGHTBG = detail::OSC(117, "RCOLORHIGHLIGHTBG", 
 constexpr inline auto NOTIFY        = detail::OSC(777, "NOTIFY", "Send Notification.");
 constexpr inline auto DUMPSTATE     = detail::OSC(888, "DUMPSTATE", "Dumps internal state to debug stream.");
 
+constexpr inline auto CaptureBufferCode = 314;
+
 // clang-format on
 
 inline auto const& functions() noexcept

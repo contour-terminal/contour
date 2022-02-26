@@ -224,11 +224,14 @@ int ContourApp::terminfoAction()
 
 int ContourApp::captureAction()
 {
+    // clang-format off
     auto captureSettings = contour::CaptureSettings {};
     captureSettings.logicalLines = parameters().get<bool>("contour.capture.logical");
+    captureSettings.words = parameters().get<bool>("contour.capture.words");
     captureSettings.timeout = parameters().get<double>("contour.capture.timeout");
-    captureSettings.lineCount = parameters().get<unsigned>("contour.capture.lines");
+    captureSettings.lineCount = terminal::LineCount::cast_from(parameters().get<unsigned>("contour.capture.lines"));
     captureSettings.outputFile = parameters().get<string>("contour.capture.to");
+    // clang-format on
 
     if (contour::captureScreen(captureSettings))
         return EXIT_SUCCESS;
@@ -322,6 +325,9 @@ crispy::cli::Command ContourApp::parameterDefinition() const
                     CLI::Option { "logical",
                                   CLI::Value { false },
                                   "Tells the terminal to use logical lines for counting and capturing." },
+                    CLI::Option { "words",
+                                  CLI::Value { false },
+                                  "Splits each line into words and outputs only one word per line." },
                     CLI::Option { "timeout",
                                   CLI::Value { 1.0 },
                                   "Sets timeout seconds to wait for terminal to respond.",
