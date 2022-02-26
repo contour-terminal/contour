@@ -4,6 +4,9 @@
 
 #include <fmt/format.h>
 
+#include <range/v3/view/iota.hpp>
+#include <range/v3/view/transform.hpp>
+
 #include <algorithm>
 #include <fstream>
 #include <functional>
@@ -16,6 +19,21 @@
 
 namespace crispy
 {
+
+namespace views
+{
+    template <typename T>
+    auto as()
+    {
+        return ranges::views::transform([](auto in) { return T(in); });
+    }
+
+    template <typename T>
+    auto iota_as(int n)
+    {
+        return ranges::views::ints(0, n) | as<T>();
+    }
+} // namespace views
 
 template <typename T>
 constexpr bool ascending(T low, T val, T high) noexcept

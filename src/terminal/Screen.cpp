@@ -85,24 +85,6 @@ auto const inline VTCaptureBufferLog = logstore::Category("vt.ext_capturebuffer"
                                                           logstore::Category::State::Disabled,
                                                           logstore::Category::Visibility::Hidden);
 
-namespace
-{
-    namespace views
-    {
-        template <typename T>
-        auto as()
-        {
-            return ranges::views::transform([](auto in) { return T(in); });
-        }
-
-        template <typename T>
-        auto n_times(int n)
-        {
-            return ranges::views::ints(0, n) | as<T>();
-        }
-    } // namespace views
-} // namespace
-
 namespace // {{{ helper
 {
     std::string vtSequenceParameterString(GraphicsAttributes const& _sgr)
@@ -1707,9 +1689,7 @@ void Screen<T>::captureBuffer(int _lineCount, bool _logicalLines)
         currentChunkSize += data.size();
     };
     LineOffset const bottomLine = boxed_cast<LineOffset>(_state.pageSize.lines - 1);
-    VTCaptureBufferLog()("Capturing buffer. top: {}, bottom: {}",
-                         relativeStartLine,
-                         bottomLine);
+    VTCaptureBufferLog()("Capturing buffer. top: {}, bottom: {}", relativeStartLine, bottomLine);
 
     for (LineOffset line = startLine; line <= bottomLine; ++line)
     {
@@ -2266,7 +2246,7 @@ void Screen<T>::renderImage(shared_ptr<Image const> _image,
         for (auto const lineOffset: crispy::times(*remainingLineCount))
         {
             linefeed(_topLeft.column);
-            for (auto const columnOffset: views::n_times<ColumnOffset>(*columnsToBeRendered))
+            for (auto const columnOffset: crispy::views::iota_as<ColumnOffset>(*columnsToBeRendered))
             {
                 auto const offset =
                     CellLocation { boxed_cast<LineOffset>(linesToBeRendered) + lineOffset, columnOffset };
