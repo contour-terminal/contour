@@ -21,8 +21,8 @@ shift
 
 ldd `which contour`
 
-#LOG="pty,gui.session,gui.display,vt.renderer"
-LOG="all"
+LOG="pty,gui.session,gui.display,vt.renderer"
+#LOG="all"
 
 $CONTOUR_PREFIX \
     contour terminal \
