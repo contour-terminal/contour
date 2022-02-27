@@ -8,7 +8,7 @@ file(WRITE "${CMAKE_BINARY_DIR}/version.txt" "${CONTOUR_VERSION_STRING}")
 project(contour VERSION "${CONTOUR_VERSION}" LANGUAGES CXX)
 
 # setting defaults
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -82,7 +82,7 @@ endif()
 
 # ----------------------------------------------------------------------------
 
-include(ThirdParties)
+include(ContourThirdParties)
 add_subdirectory(src)
 
 # ----------------------------------------------------------------------------
@@ -118,5 +118,5 @@ macro(ContourConfigurationSummary)
     message(STATUS "------------------------------------------------------------------------------")
 endmacro()
 
-ThirdPartiesSummary2()
+ContourThirdPartiesSummary2()
 ContourConfigurationSummary()

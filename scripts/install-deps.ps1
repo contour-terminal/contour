@@ -8,6 +8,7 @@ class ThirdParty
     [ValidateNotNullOrEmpty()] [string] $Folder
     [ValidateNotNullOrEmpty()] [string] $Archive
     [ValidateNotNullOrEmpty()] [string] $URI
+    [string] $Macro
 }
 
 # Take care, order matters, at least as much as dependencies are of concern.
@@ -16,22 +17,26 @@ $ThirdParties =
     [ThirdParty]@{
         Folder="GSL-3.1.0";
         Archive="gsl-3.1.0.zip";
-        URI="https://github.com/microsoft/GSL/archive/refs/tags/v3.1.0.zip"
+        URI="https://github.com/microsoft/GSL/archive/refs/tags/v3.1.0.zip";
+        Macro=""
     };
     [ThirdParty]@{
         Folder="Catch2-2.13.7";
         Archive="Catch2-2.13.7.zip";
-        URI="https://github.com/catchorg/Catch2/archive/refs/tags/v2.13.7.zip"
+        URI="https://github.com/catchorg/Catch2/archive/refs/tags/v2.13.7.zip";
+        Macro=""
     };
     [ThirdParty]@{
-        Folder="libunicode-3962196443e9be76479826fd3e968514b88216e3";
-        Archive="libunicode-3962196443e9be76479826fd3e968514b88216e3.zip";
-        URI="https://github.com/contour-terminal/libunicode/archive/3962196443e9be76479826fd3e968514b88216e3.zip"
+        Folder="libunicode-94e0eeadadf61a957b1184ea276e7d94e0d40cf9";
+        Archive="libunicode-94e0eeadadf61a957b1184ea276e7d94e0d40cf9.zip";
+        URI="https://github.com/contour-terminal/libunicode/archive/94e0eeadadf61a957b1184ea276e7d94e0d40cf9.zip";
+        Macro="libunicode"
     };
     [ThirdParty]@{
         Folder="termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed";
         Archive="termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed.zip";
-        URI="https://github.com/contour-terminal/termbench-pro/archive/cd571e3cebb7c00de9168126b28852f32fb204ed.zip"
+        URI="https://github.com/contour-terminal/termbench-pro/archive/cd571e3cebb7c00de9168126b28852f32fb204ed.zip";
+        Macro="termbench_pro"
     }
 )
 
@@ -42,6 +47,7 @@ function Fetch-And-Add
         [Parameter(Mandatory)] [string] $Folder,
         [Parameter(Mandatory)] [string] $Archive,
         [Parameter(Mandatory)] [string] $URI,
+        [string] $Macro,
         [Parameter(Mandatory)] [string] $CMakeListsFile
     )
 
@@ -72,7 +78,16 @@ function Fetch-And-Add
         Write-Host "Already there ${Folder}"
     }
 
-    Add-Content $CMakeListsFile "add_subdirectory(${Folder} EXCLUDE_FROM_ALL)"
+    if ($Macro -ne "")
+    {
+        Add-Content $CMakeListsFile "macro(ContourThirdParties_Embed_${Macro})"
+        Add-Content $CMakeListsFile "    add_subdirectory(`${ContourThirdParties_SRCDIR}/${Folder} EXCLUDE_FROM_ALL)"
+        Add-Content $CMakeListsFile "endmacro()"
+    }
+    else
+    {
+        Add-Content $CMakeListsFile "add_subdirectory(${Folder} EXCLUDE_FROM_ALL)"
+    }
 }
 
 function Run
@@ -100,7 +115,13 @@ function Run
 
     foreach($TP in $ThirdParties)
     {
-        Fetch-And-Add -Folder $TP.Folder -Archive $TP.Archive -URI $TP.URI -Target $ThirsPartiesDir -CMakeListsFile $CMakeListsFile
+        Fetch-And-Add `
+            -Folder $TP.Folder `
+            -Archive $TP.Archive `
+            -URI $TP.URI `
+            -Macro $TP.Macro `
+            -Target $ThirsPartiesDir `
+            -CMakeListsFile $CMakeListsFile
     }
 }
 
