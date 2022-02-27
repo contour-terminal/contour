@@ -728,7 +728,7 @@ bool InputGenerator::generateMouseMove(Modifier _modifier,
                                        CellLocation _pos,
                                        MousePixelPosition _pixelPosition)
 {
-    auto const logged = [=, this](bool success) -> bool {
+    auto const logged = [&](bool success) -> bool {
         if (success)
         {
             InputLog()("[{}:{}] Sending mouse move at {} ({}:{}).",

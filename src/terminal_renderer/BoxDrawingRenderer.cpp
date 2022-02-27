@@ -936,17 +936,29 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
     auto const ld = [=](Ratio a, Ratio b) {
         return lowerDiagonalMosaic(size, a, b);
     };
-    auto const lineArt = [=, this]() {
-        auto b = blockElement<2>(size);
-        b.lineThickness(_gridMetrics.underline.thickness);
-        return b;
-    };
-    auto const segmentArt = [=, this]() {
-        auto constexpr AntiAliasingSamplingFactor = 1;
-        return blockElement<AntiAliasingSamplingFactor>(size)
-            .lineThickness(_gridMetrics.underline.thickness)
-            .baseline(_gridMetrics.baseline * AntiAliasingSamplingFactor);
-    };
+    auto const lineArt =
+#if __cplusplus > 201703L
+        [=, this]
+#else
+        [=]
+#endif
+        () {
+            auto b = blockElement<2>(size);
+            b.lineThickness(_gridMetrics.underline.thickness);
+            return b;
+        };
+    auto const segmentArt =
+#if __cplusplus > 201703L
+        [=, this]
+#else
+        [=]
+#endif
+        () {
+            auto constexpr AntiAliasingSamplingFactor = 1;
+            return blockElement<AntiAliasingSamplingFactor>(size)
+                .lineThickness(_gridMetrics.underline.thickness)
+                .baseline(_gridMetrics.baseline * AntiAliasingSamplingFactor);
+        };
 
     // TODO: just check notcurses-info to get an idea what may be missing
     switch (codepoint)
