@@ -135,7 +135,7 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     void onFrameSwapped();
     void onScrollBarValueChanged(int _value);
     void onRefreshRateChanged();
-    void onScreenDpiChanged();
+    void applyFontDPI();
     void onScreenChanged();
     void onDpiConfigChanged();
 
@@ -154,24 +154,20 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     void logDisplayTopInfo();
     void logDisplayInfo();
     void watchKdeDpiSetting();
+    void initializeRenderer();
 
     terminal::PageSize pageSize() const
     {
-        return pageSizeForPixels(pixelSize(), renderer_->gridMetrics().cellSize);
+        return pageSizeForPixels(pixelSize(), renderer_.gridMetrics().cellSize);
     }
 
-    void assertInitialized();
     double contentScale() const;
     void updateMinimumSize();
 
     void statsSummary();
     void doResize(crispy::Size _size);
 
-    terminal::renderer::GridMetrics const& gridMetrics() const noexcept
-    {
-        Require(renderer_.is_initialized());
-        return renderer_->gridMetrics();
-    }
+    terminal::renderer::GridMetrics const& gridMetrics() const noexcept { return renderer_.gridMetrics(); }
 
     /// Flags the screen as dirty.
     ///
@@ -191,7 +187,7 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     std::function<void()> adaptSize_;
     std::function<void(bool)> enableBlurBehind_;
     text::DPI lastFontDPI_;
-    crispy::deferred<terminal::renderer::Renderer> renderer_;
+    terminal::renderer::Renderer renderer_;
     bool renderingPressure_ = false;
     std::unique_ptr<terminal::renderer::RenderTarget> renderTarget_;
     PermissionCache rememberedPermissions_ {};
