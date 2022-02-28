@@ -214,11 +214,11 @@ class Line
     gsl::span<Cell> useRange(ColumnOffset _start, ColumnCount _count) noexcept
     {
         markUsedFirst(std::max(columnsUsed(), boxed_cast<ColumnCount>(_start) + _count));
-#if defined(__FreeBSD__)
+#if defined(__clang__) && __clang_major__ <= 11
         auto const bufferSpan = gsl::span(buffer_);
         return bufferSpan.subspan(unbox<size_t>(_start), unbox<size_t>(_count));
 #else
-        // NOTE: On FreeBSD the line below does not compile.
+        // Clang <= 11 cannot deal with this (e.g. FreeBSD 13 defaults to Clang 11).
         return gsl::span(buffer_).subspan(unbox<size_t>(_start), unbox<size_t>(_count));
 #endif
     }

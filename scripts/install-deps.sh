@@ -33,6 +33,7 @@ fetch_and_unpack()
     NAME=$1
     DISTFILE=$2
     URL=$3
+    MACRO=$4
 
     FULL_DISTFILE="$SYSDEPS_DIST_DIR/$DISTFILE"
 
@@ -59,7 +60,13 @@ fetch_and_unpack()
         echo "Already extracted $DISTFILE. Skipping."
     fi
 
-    echo "add_subdirectory($NAME EXCLUDE_FROM_ALL)" >> $SYSDEPS_CMAKE_FILE
+    if test x$MACRO = x; then
+        echo "add_subdirectory($NAME EXCLUDE_FROM_ALL)" >> $SYSDEPS_CMAKE_FILE
+    else
+        echo "macro(ContourThirdParties_Embed_$MACRO)" >> $SYSDEPS_CMAKE_FILE
+        echo "    add_subdirectory(\${ContourThirdParties_SRCDIR}/$NAME EXCLUDE_FROM_ALL)" >> $SYSDEPS_CMAKE_FILE
+        echo "endmacro()" >> $SYSDEPS_CMAKE_FILE
+    fi
 }
 
 fetch_and_unpack_Catch2()
@@ -88,15 +95,20 @@ fetch_and_unpack_gsl()
 
 fetch_and_unpack_embeds()
 {
+    set -x
+    local termbench_pro_git_sha="cd571e3cebb7c00de9168126b28852f32fb204ed"
     fetch_and_unpack \
-        termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed \
-        termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed.tar.gz \
-        https://github.com/contour-terminal/termbench-pro/archive/cd571e3cebb7c00de9168126b28852f32fb204ed.tar.gz
+        termbench-pro-$termbench_pro_git_sha \
+        termbench-pro-$termbench_pro_git_sha.tar.gz \
+        https://github.com/contour-terminal/termbench-pro/archive/$termbench_pro_git_sha.tar.gz \
+        termbench_pro
 
+    local libunicode_git_sha="94e0eeadadf61a957b1184ea276e7d94e0d40cf9"
     fetch_and_unpack \
-        libunicode-3962196443e9be76479826fd3e968514b88216e3 \
-        libunicode-3962196443e9be76479826fd3e968514b88216e3.tar.gz \
-        https://github.com/contour-terminal/libunicode/archive/3962196443e9be76479826fd3e968514b88216e3.tar.gz
+        libunicode-$libunicode_git_sha \
+        libunicode-$libunicode_git_sha.tar.gz \
+        https://github.com/contour-terminal/libunicode/archive/$libunicode_git_sha.tar.gz \
+        libunicode
 }
 
 fetch_and_unpack_yaml_cpp()
