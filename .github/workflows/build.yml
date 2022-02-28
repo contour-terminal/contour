@@ -465,6 +465,43 @@ jobs:
     - name: "test: libterminal"
       run: ./build/src/terminal/terminal_test
 
+  ubuntu_2004_clang11:
+    name: "Ubuntu Linux 20.04 (Clang 11)"
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: ccache-ubuntu_2004-clang11
+        max-size: 256M
+    - name: set environment variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - name: "install dependencies"
+      run: |
+        set -ex
+        sudo apt -q update
+        sudo ./scripts/install-deps.sh
+        sudo apt install -y clang-11
+    - name: "create build directory"
+      run: mkdir build
+    - name: "cmake"
+      run: |
+        BUILD_DIR="build" \
+          CMAKE_BUILD_TYPE="RelWithDebInfo" \
+          CXX="clang++-11" \
+          EXTRA_CMAKE_FLAGS="-DCONTOUR_BLUR_PLATFORM_KWIN=ON" \
+          ./scripts/ci-prepare-contour.sh
+    - name: "build"
+      run: cmake --build build/ -- -j3
+    - name: "test: crispy"
+      run: ./build/src/crispy/crispy_test
+    - name: "test: libterminal"
+      run: ./build/src/terminal/terminal_test
+
   ubuntu_2004_no_kwin:
     name: "Ubuntu Linux 20.04 (no KWin)"
     runs-on: ubuntu-20.04
