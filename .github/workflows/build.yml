@@ -3,19 +3,19 @@ name: Build
 on:
   push:
     paths-ignore:
-    - 'docs/**'
-    - '.github/ISSUE_TEMPLATE/**'
-    - '.github/*.yml'
-    - 'LICENSE.txt'
-    - '*.md'
-    - '*.sh'
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/*.yml'
+      - 'LICENSE.txt'
+      - '*.md'
+      - '*.sh'
     branches:
-    - master
-    - edge
+      - master
+      - edge
   pull_request:
     branches:
-    - master
-    - edge
+      - master
+      - edge
 
 concurrency:
   group: ${{ github.ref }}
@@ -35,46 +35,46 @@ jobs:
     name: "Archlinux ${{ matrix.arch }}"
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up QEMU
-      uses: docker/setup-qemu-action@v1
-      with:
-        platforms: all
-    - name: Set up Docker Buildx
-      id: buildx
-      uses: docker/setup-buildx-action@v1
-      with:
-        version: latest
-    - name: Read info
-      id: tags
-      shell: bash
-      run: |
-        arch="${{ matrix.arch }}"
-        echo ::set-output name=PLATFORM::${arch%% *}
-        echo ::set-output name=ARCH::${arch##* }
-    - name: set environment variables
-      id: set_vars
-      run: ./scripts/ci-set-vars.sh
-      env:
-        REPOSITORY: ${{ github.event.repository.name }}
-    - name: Build ${{ matrix.arch }} release
-      shell: bash
-      run: |
-        docker buildx build --platform ${{ steps.tags.outputs.PLATFORM }} \
-        --tag contour:${{ steps.tags.outputs.ARCH }} \
-        -f .github/archlinux/Dockerfile \
-        --load \
-        .
-        docker create --name contour-${{ steps.tags.outputs.ARCH }} contour:${{ steps.tags.outputs.ARCH }}
-        docker cp contour-${{ steps.tags.outputs.ARCH }}:/app/contour.pkg.tar.zst contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst
-        docker container rm contour-${{ steps.tags.outputs.ARCH }}
-    - name: "Uploading Archlinux .pkg.tar.zst package"
-      uses: actions/upload-artifact@v2
-      with:
-        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-archlinux_${{ steps.tags.outputs.ARCH }}"
-        path: "contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst"
-        if-no-files-found: error
-        retention-days: 7
+      - uses: actions/checkout@v2
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v1
+        with:
+          platforms: all
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v1
+        with:
+          version: latest
+      - name: Read info
+        id: tags
+        shell: bash
+        run: |
+          arch="${{ matrix.arch }}"
+          echo ::set-output name=PLATFORM::${arch%% *}
+          echo ::set-output name=ARCH::${arch##* }
+      - name: set environment variables
+        id: set_vars
+        run: ./scripts/ci-set-vars.sh
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: Build ${{ matrix.arch }} release
+        shell: bash
+        run: |
+          docker buildx build --platform ${{ steps.tags.outputs.PLATFORM }} \
+          --tag contour:${{ steps.tags.outputs.ARCH }} \
+          -f .github/archlinux/Dockerfile \
+          --load \
+          .
+          docker create --name contour-${{ steps.tags.outputs.ARCH }} contour:${{ steps.tags.outputs.ARCH }}
+          docker cp contour-${{ steps.tags.outputs.ARCH }}:/app/contour.pkg.tar.zst contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst
+          docker container rm contour-${{ steps.tags.outputs.ARCH }}
+      - name: "Uploading Archlinux .pkg.tar.zst package"
+        uses: actions/upload-artifact@v2
+        with:
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-archlinux_${{ steps.tags.outputs.ARCH }}"
+          path: "contour-${{ steps.tags.outputs.ARCH }}.pkg.tar.zst"
+          if-no-files-found: error
+          retention-days: 7
 
   fedora:
     strategy:
@@ -86,81 +86,81 @@ jobs:
     name: "Fedora ${{ matrix.arch }}"
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v2
-    - name: Set up Docker Buildx
-      id: buildx
-      uses: docker/setup-buildx-action@v1
-      with:
-        version: latest
-    - name: Read matrix info
-      id: tags
-      shell: bash
-      run: |
-        arch="${{ matrix.arch }}"
-        echo ::set-output name=PLATFORM::${arch%% *}
-        echo ::set-output name=ARCH::${arch##* }
-    - name: set environment variables
-      id: set_vars
-      run: ./scripts/ci-set-vars.sh
-      env:
-        REPOSITORY: ${{ github.event.repository.name }}
-    - name: Fetch and unpack embeds
-      run: ./scripts/install-deps.sh
-      env:
-        PREPARE_ONLY_EMBEDS: ON
-        SYSDEP_ASSUME_YES: ON
-        OS_OVERRIDE: fedora
-    - name: prepare distfile
-      run: |
-        set -x
-        PKGNAME="contour-${{ steps.set_vars.outputs.VERSION }}"
-        DISTDIR="/tmp/dist/${PKGNAME}"
-        mkdir -p ${DISTDIR}
-        cp -rvp . ${DISTDIR}
-        tar czpf ${PKGNAME}.tar.gz -C "/tmp/dist" .
-    - name: Build ${{ matrix.arch }} release
-      shell: bash
-      run: |
-        set -x
-        ARCH="${{ steps.tags.outputs.ARCH }}"
-        VERSION="${{ steps.set_vars.outputs.VERSION }}"
-        docker buildx build --platform ${{ steps.tags.outputs.PLATFORM }} \
-                --tag contour:${ARCH} \
-                --build-arg VERSION=${VERSION} \
-                --build-arg VERSION_STRING=${VERSION} \
-                -f .github/fedora/Dockerfile \
-                --load \
-                .
-        docker create --name contour-${ARCH} contour:${ARCH}
-        docker cp contour-${ARCH}:/app/rpmbuild/RPMS/${ARCH}/contour-${VERSION}-1.fc35.${ARCH}.rpm \
-                  contour-${VERSION}-1.fc35.${ARCH}.rpm
-        docker cp contour-${ARCH}:/app/rpmbuild/RPMS/${ARCH}/contour-debuginfo-${VERSION}-1.fc35.${ARCH}.rpm \
-                  contour-debuginfo-${VERSION}-1.fc35.${ARCH}.rpm
-        docker cp contour-${ARCH}:/app/rpmbuild/RPMS/${ARCH}/contour-debugsource-${VERSION}-1.fc35.${ARCH}.rpm \
-                  contour-debugsource-${VERSION}-1.fc35.${ARCH}.rpm
-        docker container rm contour-${{ steps.tags.outputs.ARCH }}
-        echo "pwd: `pwd`" && ls -hla
-    - name: "Uploading Fedora RPM package"
-      uses: actions/upload-artifact@v2
-      with:
-        name: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
-        path: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
-        if-no-files-found: error
-        retention-days: 7
-    - name: "Uploading Fedora RPM package (debuginfo)"
-      uses: actions/upload-artifact@v2
-      with:
-        name: "contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
-        path: "contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
-        if-no-files-found: error
-        retention-days: 7
-    - name: "Uploading Fedora RPM package (debugsource)"
-      uses: actions/upload-artifact@v2
-      with:
-        name: "contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
-        path: "contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
-        if-no-files-found: error
-        retention-days: 7
+      - uses: actions/checkout@v2
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v1
+        with:
+          version: latest
+      - name: Read matrix info
+        id: tags
+        shell: bash
+        run: |
+          arch="${{ matrix.arch }}"
+          echo ::set-output name=PLATFORM::${arch%% *}
+          echo ::set-output name=ARCH::${arch##* }
+      - name: set environment variables
+        id: set_vars
+        run: ./scripts/ci-set-vars.sh
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: Fetch and unpack embeds
+        run: ./scripts/install-deps.sh
+        env:
+          PREPARE_ONLY_EMBEDS: 'ON'
+          SYSDEP_ASSUME_YES: 'ON'
+          OS_OVERRIDE: 'fedora'
+      - name: prepare distfile
+        run: |
+          set -x
+          PKGNAME="contour-${{ steps.set_vars.outputs.VERSION }}"
+          DISTDIR="/tmp/dist/${PKGNAME}"
+          mkdir -p ${DISTDIR}
+          cp -rvp . ${DISTDIR}
+          tar czpf ${PKGNAME}.tar.gz -C "/tmp/dist" .
+      - name: Build ${{ matrix.arch }} release
+        shell: bash
+        run: |
+          set -x
+          ARCH="${{ steps.tags.outputs.ARCH }}"
+          VERSION="${{ steps.set_vars.outputs.VERSION }}"
+          docker buildx build --platform ${{ steps.tags.outputs.PLATFORM }} \
+                  --tag contour:${ARCH} \
+                  --build-arg VERSION=${VERSION} \
+                  --build-arg VERSION_STRING=${VERSION} \
+                  -f .github/fedora/Dockerfile \
+                  --load \
+                  .
+          docker create --name contour-${ARCH} contour:${ARCH}
+          docker cp contour-${ARCH}:/app/rpmbuild/RPMS/${ARCH}/contour-${VERSION}-1.fc35.${ARCH}.rpm \
+                    contour-${VERSION}-1.fc35.${ARCH}.rpm
+          docker cp contour-${ARCH}:/app/rpmbuild/RPMS/${ARCH}/contour-debuginfo-${VERSION}-1.fc35.${ARCH}.rpm \
+                    contour-debuginfo-${VERSION}-1.fc35.${ARCH}.rpm
+          docker cp contour-${ARCH}:/app/rpmbuild/RPMS/${ARCH}/contour-debugsource-${VERSION}-1.fc35.${ARCH}.rpm \
+                    contour-debugsource-${VERSION}-1.fc35.${ARCH}.rpm
+          docker container rm contour-${{ steps.tags.outputs.ARCH }}
+          echo "pwd: `pwd`" && ls -hla
+      - name: "Uploading Fedora RPM package"
+        uses: actions/upload-artifact@v2
+        with:
+          name: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
+          path: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
+          if-no-files-found: error
+          retention-days: 7
+      - name: "Uploading Fedora RPM package (debuginfo)"
+        uses: actions/upload-artifact@v2
+        with:
+          name: "contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
+          path: "contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
+          if-no-files-found: error
+          retention-days: 7
+      - name: "Uploading Fedora RPM package (debugsource)"
+        uses: actions/upload-artifact@v2
+        with:
+          name: "contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
+          path: "contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
+          if-no-files-found: error
+          retention-days: 7
 
   freebsd:
     runs-on: macos-10.15
@@ -169,118 +169,118 @@ jobs:
       MYTOKEN: "value1"
       MYTOKEN2: "value2"
     steps:
-    - uses: actions/checkout@v2
-    - name: Test in FreeBSD
-      id: test
-      uses: vmactions/freebsd-vm@v0.1.5
-      with:
-        envs: 'MYTOKEN MYTOKEN2'
-        usesh: true
-        prepare: pkg install -y curl
+      - uses: actions/checkout@v2
+      - name: Test in FreeBSD
+        id: test
+        uses: vmactions/freebsd-vm@v0.1.5
+        with:
+          envs: 'MYTOKEN MYTOKEN2'
+          usesh: true
+          prepare: pkg install -y curl
+          run: |
+            set -ex
+            pwd
+            ls -lah
+            whoami
+            env
+            freebsd-version
+            SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
+            mkdir build
+            cmake -DCMAKE_BUILD_TYPE=Debug -S . -B build
+            cmake --build build/ -- -j2
+            ./build/src/crispy/crispy_test
+            ./build/src/terminal/terminal_test
+      - name: post-inspect
         run: |
-          set -ex
-          pwd
-          ls -lah
-          whoami
-          env
-          freebsd-version
-          SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
-          mkdir build
-          cmake -DCMAKE_BUILD_TYPE=Debug -S . -B build
-          cmake --build build/ -- -j2
-          ./build/src/crispy/crispy_test
-          ./build/src/terminal/terminal_test
-    - name: post-inspect
-      run: |
-        ls -hal
+          ls -hal
 
   osx_qt5:
     name: "OS/X (Qt5)"
     runs-on: macos-latest
     steps:
-    - uses: actions/checkout@v2
-    - name: ccache
-      uses: hendrikmuhs/ccache-action@v1
-      with:
-        key: ccache-osx_qt5
-        max-size: 256M
-    - name: set variables
-      id: set_vars
-      run: ./scripts/ci-set-vars.sh
-      env:
-        REPOSITORY: ${{ github.event.repository.name }}
-    - name: "Install dependencies"
-      run: |
-        set -ex
-        #brew update
-        ./scripts/install-deps.sh
-        brew install qt5
-    - name: "Create build directory"
-      run: mkdir build
-    - name: "Generate build files"
-      run: |
-        cmake . \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DQt5_DIR="$(brew --prefix qt5)/lib/cmake/Qt5" \
-              -B build/
-    - name: "Build"
-      run: cmake --build build/
-    - name: "test: libcrispy"
-      run: ./build/src/crispy/crispy_test
-    - name: "test: libterminal"
-      run: ./build/src/terminal/terminal_test
-    - name: "Create Package(s)"
-      run: |
-        set -ex
-        cd build
-        sudo cpack
-        BASENAME="contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx"
-        echo "pwd: `pwd`:" && ls -hl
-        mv -vf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.zip" "../${BASENAME}.zip"
-        mv -vf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "../${BASENAME}.dmg"
-    - name: Upload to artifact store (DMG)
-      uses: actions/upload-artifact@v2
-      with:
-        name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.dmg
-        path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.dmg
-        if-no-files-found: error
-        retention-days: 7
+      - uses: actions/checkout@v2
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: ccache-osx_qt5
+          max-size: 256M
+      - name: set variables
+        id: set_vars
+        run: ./scripts/ci-set-vars.sh
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: "Install dependencies"
+        run: |
+          set -ex
+          #brew update
+          ./scripts/install-deps.sh
+          brew install qt5
+      - name: "Create build directory"
+        run: mkdir build
+      - name: "Generate build files"
+        run: |
+          cmake . \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DQt5_DIR="$(brew --prefix qt5)/lib/cmake/Qt5" \
+                -B build/
+      - name: "Build"
+        run: cmake --build build/
+      - name: "test: libcrispy"
+        run: ./build/src/crispy/crispy_test
+      - name: "test: libterminal"
+        run: ./build/src/terminal/terminal_test
+      - name: "Create Package(s)"
+        run: |
+          set -ex
+          cd build
+          sudo cpack
+          BASENAME="contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx"
+          echo "pwd: `pwd`:" && ls -hl
+          mv -vf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.zip" "../${BASENAME}.zip"
+          mv -vf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "../${BASENAME}.dmg"
+      - name: Upload to artifact store (DMG)
+        uses: actions/upload-artifact@v2
+        with:
+          name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.dmg
+          path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.dmg
+          if-no-files-found: error
+          retention-days: 7
 
   osx_qt6:
     name: "OS/X (Qt6)"
     runs-on: macos-latest
     steps:
-    - uses: actions/checkout@v2
-    - name: ccache
-      uses: hendrikmuhs/ccache-action@v1
-      with:
-        key: ccache-osx_qt6
-        max-size: 256M
-    - name: set variables
-      id: set_vars
-      run: ./scripts/ci-set-vars.sh
-      env:
-        REPOSITORY: ${{ github.event.repository.name }}
-    - name: "Install dependencies"
-      run: |
-        set -ex
-        #brew update
-        ./scripts/install-deps.sh
-        brew install qt6 openssl
-    - name: "Create build directory"
-      run: mkdir build
-    - name: "Generate build files"
-      run: |
-        cmake . \
-              -DCMAKE_BUILD_TYPE=Release \
-              -DCONTOUR_BUILD_WITH_QT6=ON \
-              -B build/
-    - name: "Build"
-      run: cmake --build build/
-    - name: "test: libcrispy"
-      run: ./build/src/crispy/crispy_test
-    - name: "test: libterminal"
-      run: ./build/src/terminal/terminal_test
+      - uses: actions/checkout@v2
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: ccache-osx_qt6
+          max-size: 256M
+      - name: set variables
+        id: set_vars
+        run: ./scripts/ci-set-vars.sh
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: "Install dependencies"
+        run: |
+          set -ex
+          #brew update
+          ./scripts/install-deps.sh
+          brew install qt6 openssl
+      - name: "Create build directory"
+        run: mkdir build
+      - name: "Generate build files"
+        run: |
+          cmake . \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCONTOUR_BUILD_WITH_QT6=ON \
+                -B build/
+      - name: "Build"
+        run: cmake --build build/
+      - name: "test: libcrispy"
+        run: ./build/src/crispy/crispy_test
+      - name: "test: libterminal"
+        run: ./build/src/terminal/terminal_test
 
   # {{{ Ubuntu
   ubuntu_1804:
@@ -429,174 +429,156 @@ jobs:
       run: |
         sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
 
-  ubuntu_2004_cxx20:
-    name: "Ubuntu Linux 20.04 (C++20)"
+  ubuntu_2004_matrix:
+    strategy:
+      fail-fast: false
+      matrix:
+        cxx: [17, 20]
+        build_type: ["Debug"]
+        compiler:
+          [
+            "GCC 8",
+            "GCC 10",
+            "Clang 9",
+            "Clang 12",
+            "Clang 14",
+          ]
+    name: "Ubuntu Linux 20.04 (${{ matrix.compiler }}, C++${{ matrix.cxx }})"
     runs-on: ubuntu-20.04
     steps:
-    - uses: actions/checkout@v2
-    - name: ccache
-      uses: hendrikmuhs/ccache-action@v1
-      with:
-        key: ccache-ubuntu_2004
-        max-size: 256M
-    - name: set environment variables
-      id: set_vars
-      run: ./scripts/ci-set-vars.sh
-      env:
-        REPOSITORY: ${{ github.event.repository.name }}
-    - name: "install dependencies"
-      run: |
-        set -ex
-        sudo apt -q update
-        sudo ./scripts/install-deps.sh
-    - name: "create build directory"
-      run: mkdir build
-    - name: "cmake"
-      run: |
-        BUILD_DIR="build" \
-          CMAKE_BUILD_TYPE="RelWithDebInfo" \
-          CXX="g++-9" \
-          EXTRA_CMAKE_FLAGS="-DCONTOUR_BLUR_PLATFORM_KWIN=ON -DCMAKE_CXX_STANDARD=20" \
-          ./scripts/ci-prepare-contour.sh
-    - name: "build"
-      run: cmake --build build/ -- -j3
-    - name: "test: crispy"
-      run: ./build/src/crispy/crispy_test
-    - name: "test: libterminal"
-      run: ./build/src/terminal/terminal_test
+      - uses: actions/checkout@v2
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: "ccache-ubuntu_2004-${{ matrix.compiler }}-${{ matrix.cxx }}"
+          max-size: 256M
+      - name: set environment variables
+        id: set_vars
+        run: ./scripts/ci-set-vars.sh
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: "Set up output var: CC_VERSION"
+        id: extract_matrix
+        run: |
+          CC_VERSION=$( echo "${{ matrix.compiler }}" | awk '{ print $2; }')
+          echo "::set-output name=CC_VERSION::${CC_VERSION}"
+      - name: "install dependencies"
+        run: |
+          set -ex
+          sudo apt -q update
+          sudo ./scripts/install-deps.sh
+      - name: Set up GCC
+        if: ${{ startsWith(matrix.compiler, 'GCC') }}
+        run: |
+          sudo apt install -y g++-${{ steps.extract_matrix.outputs.CC_VERSION }}
+      - name: Set up Clang
+        if: ${{ startsWith(matrix.compiler, 'Clang') }}
+        run: |
+          if [[ ${{ steps.extract_matrix.outputs.CC_VERSION }} -ge 13 ]]; then
+            wget https://apt.llvm.org/llvm.sh
+            chmod +x llvm.sh
+            sudo ./llvm.sh ${{ steps.extract_matrix.outputs.CC_VERSION}}
+          else
+            sudo apt install -y clang-${{ steps.extract_matrix.outputs.CC_VERSION }}
+          fi
+      - name: "create build directory"
+        run: mkdir build
+      - name: "cmake"
+        run: |
+          CC_NAME=$(echo "${{ matrix.compiler }}" | awk '{ print tolower($1); }')
+          CC_VER=$( echo "${{ matrix.compiler }}" | awk '{ print $2; }')
+          test "${CC_NAME}" = "clang" && CC_EXE="clang++"
+          test "${CC_NAME}" = "gcc"   && CC_EXE="g++"
+          BUILD_DIR="build" \
+            CMAKE_BUILD_TYPE="${{ matrix.build_type }}" \
+            CXX="${CC_EXE}-${CC_VER}" \
+            EXTRA_CMAKE_FLAGS="-DCONTOUR_BLUR_PLATFORM_KWIN=ON -DCMAKE_CXX_STANDARD=${{ matrix.cxx }}" \
+            ./scripts/ci-prepare-contour.sh
+      - name: "build"
+        run: cmake --build build/ -- -j3
+      - name: "test: crispy"
+        run: ./build/src/crispy/crispy_test
+      - name: "test: libterminal"
+        run: ./build/src/terminal/terminal_test
 
-  ubuntu_2004_clang11:
-    name: "Ubuntu Linux 20.04 (Clang 11)"
-    runs-on: ubuntu-20.04
+  check_ubuntu2004_matrix_test_matrix:
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    name: tests matrix
+    needs: ubuntu_2004_matrix
     steps:
-    - uses: actions/checkout@v2
-    - name: ccache
-      uses: hendrikmuhs/ccache-action@v1
-      with:
-        key: ccache-ubuntu_2004-clang11
-        max-size: 256M
-    - name: set environment variables
-      id: set_vars
-      run: ./scripts/ci-set-vars.sh
-      env:
-        REPOSITORY: ${{ github.event.repository.name }}
-    - name: "install dependencies"
-      run: |
-        set -ex
-        sudo apt -q update
-        sudo ./scripts/install-deps.sh
-        sudo apt install -y clang-11
-    - name: "create build directory"
-      run: mkdir build
-    - name: "cmake"
-      run: |
-        BUILD_DIR="build" \
-          CMAKE_BUILD_TYPE="RelWithDebInfo" \
-          CXX="clang++-11" \
-          EXTRA_CMAKE_FLAGS="-DCONTOUR_BLUR_PLATFORM_KWIN=ON" \
-          ./scripts/ci-prepare-contour.sh
-    - name: "build"
-      run: cmake --build build/ -- -j3
-    - name: "test: crispy"
-      run: ./build/src/crispy/crispy_test
-    - name: "test: libterminal"
-      run: ./build/src/terminal/terminal_test
+      - name: Print matrix status
+        run: |
+          echo "Result: ${{ needs.ubuntu_2004_matrix.result }}"
+      - name: Check build matrix status
+        if: ${{ needs.ubuntu_2004_matrix.result != 'success' && needs.ubuntu_2004_matrix.result != 'skipped' }}
+        run: exit 1
 
-  ubuntu_2004_no_kwin:
-    name: "Ubuntu Linux 20.04 (no KWin)"
+  ubuntu_2004_with_embedded_hbft:
+    name: "Ubuntu Linux 20.04 (embedded FreeType and HarfBuzz)"
     runs-on: ubuntu-20.04
     steps:
-    - uses: actions/checkout@v2
-    - name: ccache
-      uses: hendrikmuhs/ccache-action@v1
-      with:
-        key: ccache-ubuntu_2004_no_kwin
-        max-size: 256M
-    - name: "install dependencies"
-      run: |
-        set -ex
-        sudo apt -q update
-        sudo ./scripts/install-deps.sh
-    - name: "create build directory"
-      run: mkdir build
-    - name: "cmake"
-      run: |
-        BUILD_DIR="build" \
-          CMAKE_BUILD_TYPE="Release" \
-          CXX="g++-9" \
-          ./scripts/ci-prepare-contour.sh
-    - name: "build"
-      run: cmake --build build/ -- -j3
-    - name: "test: crispy"
-      run: ./build/src/crispy/crispy_test
-    - name: "test: libterminal"
-      run: ./build/src/terminal/terminal_test
-
-  ubuntu_2004_no_kwin_with_harfbuzz:
-    name: "Ubuntu Linux 20.04 (no KWin, builtin FreeType and HarfBuzz)"
-    runs-on: ubuntu-20.04
-    steps:
-    - uses: actions/checkout@v2
-    - name: ccache
-      uses: hendrikmuhs/ccache-action@v1
-      with:
-        key: ccache-ubuntu_2004_no_kwin_with_harfbuzz
-        max-size: 256M
-    - name: "install dependencies"
-      run: |
-        set -ex
-        sudo apt -q update
-        sudo ./scripts/install-deps.sh --with-hb-ft
-    - name: "create build directory"
-      run: mkdir build
-    - name: "cmake"
-      run: |
-        BUILD_DIR="build" \
-          CMAKE_BUILD_TYPE="Release" \
-          EXTRA_CMAKE_FLAGS="-DCONTOUR_BUILD_WITH_EMBEDDED_FT_HB=ON" \
-          CXX="g++-9" \
-          ./scripts/ci-prepare-contour.sh
-    - name: "build"
-      run: cmake --build build/ -- -j3
-    - name: "test: crispy"
-      run: ./build/src/crispy/crispy_test
-    - name: "test: libterminal"
-      run: ./build/src/terminal/terminal_test
+      - uses: actions/checkout@v2
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: ccache-ubuntu_2004_with_embedded_hbft
+          max-size: 256M
+      - name: "install dependencies"
+        run: |
+          set -ex
+          sudo apt -q update
+          sudo ./scripts/install-deps.sh --with-hb-ft
+      - name: "create build directory"
+        run: mkdir build
+      - name: "cmake"
+        run: |
+          BUILD_DIR="build" \
+            CMAKE_BUILD_TYPE="Release" \
+            EXTRA_CMAKE_FLAGS="-DCONTOUR_BLUR_PLATFORM_KWIN=ON -DCONTOUR_BUILD_WITH_EMBEDDED_FT_HB=ON" \
+            CXX="g++-9" \
+            ./scripts/ci-prepare-contour.sh
+      - name: "build"
+        run: cmake --build build/ -- -j3
+      - name: "test: crispy"
+        run: ./build/src/crispy/crispy_test
+      - name: "test: libterminal"
+        run: ./build/src/terminal/terminal_test
 
   test_ubuntu2004_valgrind:
     name: "Run tests via valgrind"
     runs-on: ubuntu-20.04
     needs: [ubuntu_2004]
     steps:
-    - name: "download artifact"
-      uses: actions/download-artifact@v2
-      with:
-        name: contour-ubuntu2004-tests
-    - name: "fix unit test permissions"
-      run: find . -name '*_test' -exec chmod 0755 {} \;
-    - name: "install dependencies"
-      run: |
-        set -ex
-        ls -hlR
-        sudo apt -q update
-        sudo apt install -y \
-                        libfontconfig1 \
-                        libfreetype6 \
-                        libharfbuzz0b \
-                        libkf5windowsystem5 \
-                        libqt5gui5 \
-                        libqt5opengl5 \
-                        libyaml-cpp0.6 \
-                        ncurses-bin \
-                        valgrind
-    - name: "test: crispy (via valgrind)"
-      run: valgrind --suppressions=valgrind.supp --error-exitcode=64 ./build/src/crispy/crispy_test
-    - name: "test: libterminal (via valgrind)"
-      run: valgrind --suppressions=valgrind.supp --error-exitcode=64 ./build/src/terminal/terminal_test
-    - name: "Delete artifact: contour-ubuntu2004-tests"
-      uses: geekyeggo/delete-artifact@v1
-      with:
-        name: contour-ubuntu2004-tests
+      - name: "download artifact"
+        uses: actions/download-artifact@v2
+        with:
+          name: contour-ubuntu2004-tests
+      - name: "fix unit test permissions"
+        run: find . -name '*_test' -exec chmod 0755 {} \;
+      - name: "install dependencies"
+        run: |
+          set -ex
+          ls -hlR
+          sudo apt -q update
+          sudo apt install -y \
+                          libfontconfig1 \
+                          libfreetype6 \
+                          libharfbuzz0b \
+                          libkf5windowsystem5 \
+                          libqt5gui5 \
+                          libqt5opengl5 \
+                          libyaml-cpp0.6 \
+                          ncurses-bin \
+                          valgrind
+      - name: "test: crispy (via valgrind)"
+        run: valgrind --suppressions=valgrind.supp --error-exitcode=64 ./build/src/crispy/crispy_test
+      - name: "test: libterminal (via valgrind)"
+        run: valgrind --suppressions=valgrind.supp --error-exitcode=64 ./build/src/terminal/terminal_test
+      - name: "Delete artifact: contour-ubuntu2004-tests"
+        uses: geekyeggo/delete-artifact@v1
+        with:
+          name: contour-ubuntu2004-tests
 
   # }}}
 
@@ -604,70 +586,68 @@ jobs:
     name: "Windows"
     runs-on: windows-latest
     steps:
-    - uses: actions/checkout@v2
-    - name: setup environment
-      shell: powershell
-      id: set_vars
-      run: .\scripts\ci-set-vars.ps1
-      env:
-        REPOSITORY: ${{ github.event.repository.name }}
-    - name: "Fetch embedded dependencies"
-      shell: powershell
-      run: |
-        ./scripts/install-deps.ps1
-        type ./_deps/sources/CMakeLists.txt
-    - name: Install Qt
-      uses: jurplel/install-qt-action@v2
-    - name: "vcpkg: Install dependencies"
-      uses: lukka/run-vcpkg@v5
-      id: runvcpkg
-      with:
-        vcpkgArguments: angle fmt freetype fontconfig harfbuzz yaml-cpp range-v3
-        vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
-        vcpkgGitCommitId: b18b17865cfb6bd24620a00f30691be6775abb96
-        vcpkgTriplet: x64-windows
-    - name: "create build directory"
-      shell: powershell
-      run: |
-        If (!(Test-Path build))
-        {
-              New-Item -ItemType Directory -Force -Path build
-        }
-    - name: "Generate build files"
-      run: cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=20 -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -B build .
-    - name: "Build"
-      run: cmake --build build/ --config Release
-    - name: "test: libcrispy"
-      run: .\build\src\crispy\Release\crispy_test.exe
-    - name: "test: libterminal"
-      run: .\build\src\terminal\Release\terminal_test.exe
-    - name: "Create Package(s)"
-      shell: powershell
-      run: |
-        cd build
-        cpack
-        type "_CPack_Packages/win64/WIX/wix.log"
-    - name: inspect
-      run: Get-ChildItem -Recurse
-    - name: "Rename packages"
-      run: |
-        mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi"
-        mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.zip"
-    - name: "Inspect again"
-      run: Get-ChildItem
-    - name: "Uploading MSI to artifact store"
-      uses: actions/upload-artifact@v2
-      with:
-        name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
-        path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
-        if-no-files-found: error
-        retention-days: 7
-    - name: "Uploading MSI to artifact store"
-      uses: actions/upload-artifact@v2
-      with:
-        name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.zip
-        path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.zip
-        if-no-files-found: error
-        retention-days: 7
-
-
+      - uses: actions/checkout@v2
+      - name: setup environment
+        shell: powershell
+        id: set_vars
+        run: .\scripts\ci-set-vars.ps1
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: "Fetch embedded dependencies"
+        shell: powershell
+        run: |
+          ./scripts/install-deps.ps1
+          type ./_deps/sources/CMakeLists.txt
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v2
+      - name: "vcpkg: Install dependencies"
+        uses: lukka/run-vcpkg@v5
+        id: runvcpkg
+        with:
+          vcpkgArguments: angle fmt freetype fontconfig harfbuzz yaml-cpp range-v3
+          vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
+          vcpkgGitCommitId: b18b17865cfb6bd24620a00f30691be6775abb96
+          vcpkgTriplet: x64-windows
+      - name: "create build directory"
+        shell: powershell
+        run: |
+          If (!(Test-Path build))
+          {
+                New-Item -ItemType Directory -Force -Path build
+          }
+      - name: "Generate build files"
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=20 -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -B build .
+      - name: "Build"
+        run: cmake --build build/ --config Release
+      - name: "test: libcrispy"
+        run: .\build\src\crispy\Release\crispy_test.exe
+      - name: "test: libterminal"
+        run: .\build\src\terminal\Release\terminal_test.exe
+      - name: "Create Package(s)"
+        shell: powershell
+        run: |
+          cd build
+          cpack
+          type "_CPack_Packages/win64/WIX/wix.log"
+      - name: inspect
+        run: Get-ChildItem -Recurse
+      - name: "Rename packages"
+        run: |
+          mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi"
+          mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.zip"
+      - name: "Inspect again"
+        run: Get-ChildItem
+      - name: "Uploading MSI to artifact store"
+        uses: actions/upload-artifact@v2
+        with:
+          name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
+          path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
+          if-no-files-found: error
+          retention-days: 7
+      - name: "Uploading MSI to artifact store"
+        uses: actions/upload-artifact@v2
+        with:
+          name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.zip
+          path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.zip
+          if-no-files-found: error
+          retention-days: 7
