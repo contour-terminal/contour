@@ -23,7 +23,6 @@ concurrency:
 
 env:
   CTEST_OUTPUT_ON_FAILURE: 1
-  CPM_SOURCE_CACHE: ${{ github.workspace }}/cpm_modules
 
 jobs:
   archlinux:
@@ -205,10 +204,6 @@ jobs:
       with:
         key: ccache-osx_qt5
         max-size: 256M
-    - uses: actions/cache@v2
-      with:
-        path: "**/cpm_modules"
-        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
     - name: set variables
       id: set_vars
       run: ./scripts/ci-set-vars.sh
@@ -261,10 +256,6 @@ jobs:
       with:
         key: ccache-osx_qt6
         max-size: 256M
-    - uses: actions/cache@v2
-      with:
-        path: "**/cpm_modules"
-        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
     - name: set variables
       id: set_vars
       run: ./scripts/ci-set-vars.sh
@@ -303,10 +294,6 @@ jobs:
       with:
         key: ccache-ubuntu_1804
         max-size: 256M
-    - uses: actions/cache@v2
-      with:
-        path: "**/cpm_modules"
-        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
     - name: set environment variables
       id: set_vars
       run: ./scripts/ci-set-vars.sh
@@ -377,10 +364,6 @@ jobs:
       with:
         key: ccache-ubuntu_2004
         max-size: 256M
-    - uses: actions/cache@v2
-      with:
-        path: "**/cpm_modules"
-        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
     - name: set environment variables
       id: set_vars
       run: ./scripts/ci-set-vars.sh
@@ -456,10 +439,6 @@ jobs:
       with:
         key: ccache-ubuntu_2004_no_kwin
         max-size: 256M
-    - uses: actions/cache@v2
-      with:
-        path: "**/cpm_modules"
-        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
     - name: "install dependencies"
       run: |
         set -ex
@@ -490,10 +469,6 @@ jobs:
       with:
         key: ccache-ubuntu_2004_no_kwin_with_harfbuzz
         max-size: 256M
-    - uses: actions/cache@v2
-      with:
-        path: "**/cpm_modules"
-        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
     - name: "install dependencies"
       run: |
         set -ex
@@ -557,10 +532,6 @@ jobs:
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v2
-    - uses: actions/cache@v2
-      with:
-        path: "**/cpm_modules"
-        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
     - name: setup environment
       shell: powershell
       id: set_vars
