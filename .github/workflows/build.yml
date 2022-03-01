@@ -23,7 +23,6 @@ concurrency:
 
 env:
   CTEST_OUTPUT_ON_FAILURE: 1
-  CPM_SOURCE_CACHE: ${{ github.workspace }}/cpm_modules
 
 jobs:
   archlinux:
@@ -205,10 +204,6 @@ jobs:
       with:
         key: ccache-osx_qt5
         max-size: 256M
-    - uses: actions/cache@v2
-      with:
-        path: "**/cpm_modules"
-        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
     - name: set variables
       id: set_vars
       run: ./scripts/ci-set-vars.sh
@@ -261,10 +256,6 @@ jobs:
       with:
         key: ccache-osx_qt6
         max-size: 256M
-    - uses: actions/cache@v2
-      with:
-        path: "**/cpm_modules"
-        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
     - name: set variables
       id: set_vars
       run: ./scripts/ci-set-vars.sh
@@ -303,10 +294,6 @@ jobs:
       with:
         key: ccache-ubuntu_1804
         max-size: 256M
-    - uses: actions/cache@v2
-      with:
-        path: "**/cpm_modules"
-        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
     - name: set environment variables
       id: set_vars
       run: ./scripts/ci-set-vars.sh
@@ -377,10 +364,6 @@ jobs:
       with:
         key: ccache-ubuntu_2004
         max-size: 256M
-    - uses: actions/cache@v2
-      with:
-        path: "**/cpm_modules"
-        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
     - name: set environment variables
       id: set_vars
       run: ./scripts/ci-set-vars.sh
@@ -446,6 +429,79 @@ jobs:
       run: |
         sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
 
+  ubuntu_2004_cxx20:
+    name: "Ubuntu Linux 20.04 (C++20)"
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: ccache-ubuntu_2004
+        max-size: 256M
+    - name: set environment variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - name: "install dependencies"
+      run: |
+        set -ex
+        sudo apt -q update
+        sudo ./scripts/install-deps.sh
+    - name: "create build directory"
+      run: mkdir build
+    - name: "cmake"
+      run: |
+        BUILD_DIR="build" \
+          CMAKE_BUILD_TYPE="RelWithDebInfo" \
+          CXX="g++-9" \
+          EXTRA_CMAKE_FLAGS="-DCONTOUR_BLUR_PLATFORM_KWIN=ON -DCMAKE_CXX_STANDARD=20" \
+          ./scripts/ci-prepare-contour.sh
+    - name: "build"
+      run: cmake --build build/ -- -j3
+    - name: "test: crispy"
+      run: ./build/src/crispy/crispy_test
+    - name: "test: libterminal"
+      run: ./build/src/terminal/terminal_test
+
+  ubuntu_2004_clang11:
+    name: "Ubuntu Linux 20.04 (Clang 11)"
+    runs-on: ubuntu-20.04
+    steps:
+    - uses: actions/checkout@v2
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1
+      with:
+        key: ccache-ubuntu_2004-clang11
+        max-size: 256M
+    - name: set environment variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - name: "install dependencies"
+      run: |
+        set -ex
+        sudo apt -q update
+        sudo ./scripts/install-deps.sh
+        sudo apt install -y clang-11
+    - name: "create build directory"
+      run: mkdir build
+    - name: "cmake"
+      run: |
+        BUILD_DIR="build" \
+          CMAKE_BUILD_TYPE="RelWithDebInfo" \
+          CXX="clang++-11" \
+          EXTRA_CMAKE_FLAGS="-DCONTOUR_BLUR_PLATFORM_KWIN=ON" \
+          ./scripts/ci-prepare-contour.sh
+    - name: "build"
+      run: cmake --build build/ -- -j3
+    - name: "test: crispy"
+      run: ./build/src/crispy/crispy_test
+    - name: "test: libterminal"
+      run: ./build/src/terminal/terminal_test
+
   ubuntu_2004_no_kwin:
     name: "Ubuntu Linux 20.04 (no KWin)"
     runs-on: ubuntu-20.04
@@ -456,10 +512,6 @@ jobs:
       with:
         key: ccache-ubuntu_2004_no_kwin
         max-size: 256M
-    - uses: actions/cache@v2
-      with:
-        path: "**/cpm_modules"
-        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
     - name: "install dependencies"
       run: |
         set -ex
@@ -490,10 +542,6 @@ jobs:
       with:
         key: ccache-ubuntu_2004_no_kwin_with_harfbuzz
         max-size: 256M
-    - uses: actions/cache@v2
-      with:
-        path: "**/cpm_modules"
-        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
     - name: "install dependencies"
       run: |
         set -ex
@@ -557,10 +605,6 @@ jobs:
     runs-on: windows-latest
     steps:
     - uses: actions/checkout@v2
-    - uses: actions/cache@v2
-      with:
-        path: "**/cpm_modules"
-        key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
     - name: setup environment
       shell: powershell
       id: set_vars
@@ -590,7 +634,7 @@ jobs:
               New-Item -ItemType Directory -Force -Path build
         }
     - name: "Generate build files"
-      run: cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -B build .
+      run: cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=20 -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -B build .
     - name: "Build"
       run: cmake --build build/ --config Release
     - name: "test: libcrispy"
