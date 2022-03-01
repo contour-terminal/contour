@@ -76,6 +76,7 @@ class TerminalDisplay
     virtual void setWindowNormal() = 0;
     virtual void setWindowTitle(std::string_view _title) = 0;
     virtual void toggleFullScreen() = 0;
+    virtual void toggleTitleBar() = 0;
     virtual void setBackgroundOpacity(terminal::Opacity _opacity) = 0;
 
     // terminal events

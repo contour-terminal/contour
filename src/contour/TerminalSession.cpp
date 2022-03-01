@@ -792,6 +792,13 @@ bool TerminalSession::operator()(actions::ToggleFullscreen)
     return true;
 }
 
+bool TerminalSession::operator()(actions::ToggleTitleBar)
+{
+    if (display_)
+        display_->toggleTitleBar();
+    return true;
+}
+
 bool TerminalSession::operator()(actions::WriteScreen const& _event)
 {
     terminal().writeToScreen(_event.chars);

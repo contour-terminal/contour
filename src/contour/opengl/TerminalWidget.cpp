@@ -1137,6 +1137,23 @@ void TerminalWidget::toggleFullScreen()
     //     window_.setVisibility(QWindow::FullScreen);
 }
 
+void TerminalWidget::toggleTitleBar()
+{
+    assertInitialized();
+    bool fullscreenState = window()->isFullScreen();
+    maximizedState_ = window()->isMaximized();
+    auto pos = window()->pos();
+    window()->setWindowFlag(Qt::FramelessWindowHint, !titleBarState_);
+    titleBarState_ = !titleBarState_;
+    window()->showNormal();
+    terminal().sendFocusInEvent();
+    if (fullscreenState)
+        toggleFullScreen();
+    if (maximizedState_)
+        window()->showMaximized();
+    window()->move(pos);
+}
+
 void TerminalWidget::setHyperlinkDecoration(terminal::renderer::Decorator _normal,
                                             terminal::renderer::Decorator _hover)
 {
