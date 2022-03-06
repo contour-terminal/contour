@@ -4,20 +4,12 @@ else()
    find_package(Qt5 COMPONENTS Gui Widgets REQUIRED)  # apt install qtbase5-dev libqt5gui5
 endif()
 
-CIncludeMe(
-    ${CMAKE_SOURCE_DIR}/src/terminal_renderer/shared_defines.h
-    "${CMAKE_CURRENT_BINARY_DIR}/shared_defines_verbatim.h"
-    "shared_defines"
-    "contour::opengl::verbatim"
-)
-
 set(QT_RESOURCES contour_frontend_opengl.qrc)
 if(NOT(CONTOUR_BUILD_WITH_QT6))
     qt5_add_resources(QT_RESOURCES ${QT_RESOURCES})
 endif()
 
 add_library(contour_frontend_opengl
-    "${CMAKE_CURRENT_BINARY_DIR}/shared_defines_verbatim.h"
     Blur.cpp Blur.h
     OpenGLRenderer.cpp OpenGLRenderer.h
     ShaderConfig.cpp ShaderConfig.h

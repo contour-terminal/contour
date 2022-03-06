@@ -47,7 +47,6 @@ void main()
 
     fragColor *= u_opacity;
 
-    const float FadeTime = 3.0;
-    if (u_time <= FadeTime)
-        fragColor.a *= u_time / FadeTime;
+    if (u_time <= FADE_TIME)
+        fragColor.a *= u_time / FADE_TIME;
 }

@@ -7,7 +7,6 @@ void main()
 {
     outColor = fs_textColor;
 
-    const float FadeTime = 3.0;
-    if (u_time <= FadeTime)
-        outColor *= u_time / FadeTime;
+    if (u_time <= FADE_TIME)
+        outColor *= u_time / FADE_TIME;
 }

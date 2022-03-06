@@ -155,7 +155,6 @@ void main()
             break;
     }
 
-    const float FadeTime = 3.0;
-    if (u_time <= FadeTime)
-        fragColor *= u_time / FadeTime;
+    if (u_time <= FADE_TIME)
+        fragColor *= u_time / FADE_TIME;
 }

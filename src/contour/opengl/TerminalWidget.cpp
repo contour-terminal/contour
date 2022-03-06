@@ -577,7 +577,7 @@ void TerminalWidget::paintGL()
 
 void TerminalWidget::onFrameSwapped()
 {
-    if (!state_.finish() || session_.uptime() <= 3.1)
+    if (!state_.finish() || session_.uptime() <= CONTOUR_STARTUP_FADE_IN_TIME)
         update();
     else if (auto timeout = terminal().nextRender(); timeout.has_value())
         updateTimer_.start(timeout.value());
