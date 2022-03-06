@@ -1327,9 +1327,17 @@ void Sequencer<TheTerminal>::applyAndLog(FunctionDefinition const& _function, Se
     auto const result = apply(_function, _seq);
     switch (result)
     {
-    case ApplyResult::Invalid: LOGSTORE(VTParserLog)("Invalid VT sequence: {}", _seq); break;
-    case ApplyResult::Unsupported: LOGSTORE(VTParserLog)("Unsupported VT sequence: {}", _seq); break;
-    case ApplyResult::Ok: break;
+    case ApplyResult::Invalid: {
+        VTParserLog()("Invalid VT sequence: {}", _seq);
+        break;
+    }
+    case ApplyResult::Unsupported: {
+        VTParserLog()("Unsupported VT sequence: {}", _seq);
+        break;
+    }
+    case ApplyResult::Ok: {
+        break;
+    }
     }
 }
 
