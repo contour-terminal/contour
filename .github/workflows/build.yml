@@ -424,81 +424,6 @@ jobs:
       run: |
         sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.deb"
 
-  ubuntu_2004:
-    name: "Ubuntu Linux 20.04"
-    runs-on: ubuntu-20.04
-    steps:
-    - uses: actions/checkout@v2
-    - name: ccache
-      uses: hendrikmuhs/ccache-action@v1
-      with:
-        key: ccache-ubuntu_2004
-        max-size: 256M
-    - name: set environment variables
-      id: set_vars
-      run: ./scripts/ci-set-vars.sh
-      env:
-        REPOSITORY: ${{ github.event.repository.name }}
-    - name: "install dependencies"
-      run: |
-        set -ex
-        sudo apt -q update
-        sudo ./scripts/install-deps.sh
-    - name: "create build directory"
-      run: mkdir build
-    - name: "cmake"
-      run: |
-        BUILD_DIR="build" \
-          CMAKE_BUILD_TYPE="RelWithDebInfo" \
-          CXX="g++-9" \
-          EXTRA_CMAKE_FLAGS="-DCONTOUR_BLUR_PLATFORM_KWIN=ON" \
-          ./scripts/ci-prepare-contour.sh
-    - name: "build"
-      run: cmake --build build/ -- -j3
-    - name: "test: crispy"
-      run: ./build/src/crispy/crispy_test
-    - name: "test: libterminal"
-      run: ./build/src/terminal/terminal_test
-    - name: "upload unit tests"
-      uses: actions/upload-artifact@v2
-      with:
-        name: contour-ubuntu2004-tests
-        path: |
-          build/src/crispy/crispy_test
-          build/src/terminal/terminal_test
-          test/images
-          valgrind.supp
-        retention-days: 3
-    - name: "CPack: Creating DEB & TGZ package"
-      run: |
-        set -ex
-        cd build/
-        cpack -G DEB
-        cpack -G TGZ
-        cd ..
-        mv -v "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.deb" \
-              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
-        tar xzpf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.tar.gz"
-        mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux" \
-              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
-    - name: "Uploading artifact .deb package"
-      uses: actions/upload-artifact@v2
-      with:
-        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
-        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
-        if-no-files-found: error
-        retention-days: 7
-    - name: "Uploading artifact ZIP package"
-      uses: actions/upload-artifact@v2
-      with:
-        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
-        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
-        if-no-files-found: error
-        retention-days: 7
-    - name: "Attempt installing the created .deb"
-      run: |
-        sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
-
   ubuntu_2004_matrix:
     strategy:
       fail-fast: false
@@ -515,12 +440,14 @@ jobs:
           ]
     name: "Ubuntu Linux 20.04 (${{ matrix.compiler }}, C++${{ matrix.cxx }})"
     runs-on: ubuntu-20.04
+    outputs:
+      id: "${{ matrix.compiler }} (C++${{ matrix.cxx }}, ${{ matrix.build_type }})"
     steps:
       - uses: actions/checkout@v2
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1
         with:
-          key: "ccache-ubuntu_2004-${{ matrix.compiler }}-${{ matrix.cxx }}"
+          key: "ccache-ubuntu2004-${{ matrix.compiler }}-${{ matrix.cxx }}-${{ matrix.build_type }}"
           max-size: 256M
       - name: set environment variables
         id: set_vars
@@ -570,12 +497,75 @@ jobs:
         run: ./build/src/crispy/crispy_test
       - name: "test: libterminal"
         run: ./build/src/terminal/terminal_test
+      - name: "Upload build dir"
+        if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
+        uses: actions/upload-artifact@v2
+        with:
+          name: contour-ubuntu2004-builddir
+          path: |
+            build
+          retention-days: 1
+      - name: "Upload unit tests"
+        if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
+        uses: actions/upload-artifact@v2
+        with:
+          name: contour-ubuntu2004-tests
+          path: |
+            build/src/crispy/crispy_test
+            build/src/terminal/terminal_test
+            test/images
+          retention-days: 1
+
+  # Create ZIP/DEB package (and test DEB installation).
+  ubuntu_2004_packaging:
+    name: "Ubuntu 20.04: Create package"
+    needs: ubuntu_2004_matrix
+    if: ${{ needs.ubuntu_2004_matrix.outputs.id == 'GCC 10 (C++20, RelWithDebInfo)' }}
+    runs-on: ubuntu-20.04
+    steps:
+    - name: "download artifact"
+      uses: actions/download-artifact@v2
+      with:
+        name: contour-ubuntu2004-builddir
+    - name: "CPack: Creating DEB & TGZ package"
+      if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
+      run: |
+        set -ex
+        cd build/
+        cpack -G DEB
+        cpack -G TGZ
+        cd ..
+        mv -v "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.deb" \
+              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+        tar xzpf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.tar.gz"
+        mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux" \
+              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
+    - name: "Uploading artifact .deb package"
+      if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
+      uses: actions/upload-artifact@v2
+      with:
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+        if-no-files-found: error
+        retention-days: 7
+    - name: "Uploading artifact ZIP package"
+      if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
+      uses: actions/upload-artifact@v2
+      with:
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
+        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
+        if-no-files-found: error
+        retention-days: 7
+    - name: "Attempt installing the created .deb"
+      if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
+      run: |
+        sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
 
   check_ubuntu2004_matrix_test_matrix:
     if: ${{ always() }}
     runs-on: ubuntu-latest
     name: tests matrix
-    needs: ubuntu_2004_matrix
+    needs: [ubuntu_2004_matrix, ubuntu_2004_packaging]
     steps:
       - name: Print matrix status
         run: |
@@ -618,7 +608,8 @@ jobs:
   test_ubuntu2004_valgrind:
     name: "Run tests via valgrind"
     runs-on: ubuntu-20.04
-    needs: [ubuntu_2004]
+    needs: [ubuntu_2004_matrix]
+    if: ${{ needs.ubuntu_2004_matrix.outputs.id == 'GCC 10 (C++20, RelWithDebInfo)' }}
     steps:
       - name: "download artifact"
         uses: actions/download-artifact@v2
