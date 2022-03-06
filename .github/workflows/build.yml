@@ -165,9 +165,9 @@ jobs:
   freebsd:
     runs-on: macos-10.15
     name: FreeBSD 13
-    env:
-      MYTOKEN: "value1"
-      MYTOKEN2: "value2"
+    # env:
+    #   MYTOKEN: "value1"
+    #   MYTOKEN2: "value2"
     steps:
       - uses: actions/checkout@v2
       - name: Test in FreeBSD
@@ -281,6 +281,76 @@ jobs:
         run: ./build/src/crispy/crispy_test
       - name: "test: libterminal"
         run: ./build/src/terminal/terminal_test
+
+  windows:
+    name: "Windows"
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: setup environment
+        shell: powershell
+        id: set_vars
+        run: .\scripts\ci-set-vars.ps1
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: "Fetch embedded dependencies"
+        shell: powershell
+        run: |
+          ./scripts/install-deps.ps1
+          type ./_deps/sources/CMakeLists.txt
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v2
+      - name: "vcpkg: Install dependencies"
+        uses: lukka/run-vcpkg@v5
+        id: runvcpkg
+        with:
+          vcpkgArguments: angle fmt freetype fontconfig harfbuzz yaml-cpp range-v3
+          vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
+          vcpkgGitCommitId: b18b17865cfb6bd24620a00f30691be6775abb96
+          vcpkgTriplet: x64-windows
+      - name: "create build directory"
+        shell: powershell
+        run: |
+          If (!(Test-Path build))
+          {
+                New-Item -ItemType Directory -Force -Path build
+          }
+      - name: "Generate build files"
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=20 -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -B build .
+      - name: "Build"
+        run: cmake --build build/ --config Release
+      - name: "test: libcrispy"
+        run: .\build\src\crispy\Release\crispy_test.exe
+      - name: "test: libterminal"
+        run: .\build\src\terminal\Release\terminal_test.exe
+      - name: "Create Package(s)"
+        shell: powershell
+        run: |
+          cd build
+          cpack
+          type "_CPack_Packages/win64/WIX/wix.log"
+      - name: inspect
+        run: Get-ChildItem -Recurse
+      - name: "Rename packages"
+        run: |
+          mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi"
+          mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.zip"
+      - name: "Inspect again"
+        run: Get-ChildItem
+      - name: "Uploading MSI to artifact store"
+        uses: actions/upload-artifact@v2
+        with:
+          name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
+          path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
+          if-no-files-found: error
+          retention-days: 7
+      - name: "Uploading MSI to artifact store"
+        uses: actions/upload-artifact@v2
+        with:
+          name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.zip
+          path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.zip
+          if-no-files-found: error
+          retention-days: 7
 
   # {{{ Ubuntu
   ubuntu_1804:
@@ -434,7 +504,7 @@ jobs:
       fail-fast: false
       matrix:
         cxx: [17, 20]
-        build_type: ["Debug"]
+        build_type: ["RelWithDebInfo"]
         compiler:
           [
             "GCC 8",
@@ -581,73 +651,3 @@ jobs:
           name: contour-ubuntu2004-tests
 
   # }}}
-
-  windows:
-    name: "Windows"
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v2
-      - name: setup environment
-        shell: powershell
-        id: set_vars
-        run: .\scripts\ci-set-vars.ps1
-        env:
-          REPOSITORY: ${{ github.event.repository.name }}
-      - name: "Fetch embedded dependencies"
-        shell: powershell
-        run: |
-          ./scripts/install-deps.ps1
-          type ./_deps/sources/CMakeLists.txt
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v2
-      - name: "vcpkg: Install dependencies"
-        uses: lukka/run-vcpkg@v5
-        id: runvcpkg
-        with:
-          vcpkgArguments: angle fmt freetype fontconfig harfbuzz yaml-cpp range-v3
-          vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
-          vcpkgGitCommitId: b18b17865cfb6bd24620a00f30691be6775abb96
-          vcpkgTriplet: x64-windows
-      - name: "create build directory"
-        shell: powershell
-        run: |
-          If (!(Test-Path build))
-          {
-                New-Item -ItemType Directory -Force -Path build
-          }
-      - name: "Generate build files"
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=20 -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -B build .
-      - name: "Build"
-        run: cmake --build build/ --config Release
-      - name: "test: libcrispy"
-        run: .\build\src\crispy\Release\crispy_test.exe
-      - name: "test: libterminal"
-        run: .\build\src\terminal\Release\terminal_test.exe
-      - name: "Create Package(s)"
-        shell: powershell
-        run: |
-          cd build
-          cpack
-          type "_CPack_Packages/win64/WIX/wix.log"
-      - name: inspect
-        run: Get-ChildItem -Recurse
-      - name: "Rename packages"
-        run: |
-          mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.msi" "contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi"
-          mv "build\Contour-${{ steps.set_vars.outputs.version }}-win64.zip" "contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.zip"
-      - name: "Inspect again"
-        run: Get-ChildItem
-      - name: "Uploading MSI to artifact store"
-        uses: actions/upload-artifact@v2
-        with:
-          name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
-          path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.msi
-          if-no-files-found: error
-          retention-days: 7
-      - name: "Uploading MSI to artifact store"
-        uses: actions/upload-artifact@v2
-        with:
-          name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.zip
-          path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-win64.zip
-          if-no-files-found: error
-          retention-days: 7
