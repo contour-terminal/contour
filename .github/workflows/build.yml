@@ -523,43 +523,47 @@ jobs:
     if: ${{ needs.ubuntu_2004_matrix.outputs.id == 'GCC 10 (C++20, RelWithDebInfo)' }}
     runs-on: ubuntu-20.04
     steps:
-    - name: "download artifact"
-      uses: actions/download-artifact@v2
-      with:
-        name: contour-ubuntu2004-builddir
-    - name: "CPack: Creating DEB & TGZ package"
-      if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
-      run: |
-        set -ex
-        cd build/
-        cpack -G DEB
-        cpack -G TGZ
-        cd ..
-        mv -v "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.deb" \
-              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
-        tar xzpf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.tar.gz"
-        mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux" \
-              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
-    - name: "Uploading artifact .deb package"
-      if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
-      uses: actions/upload-artifact@v2
-      with:
-        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
-        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
-        if-no-files-found: error
-        retention-days: 7
-    - name: "Uploading artifact ZIP package"
-      if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
-      uses: actions/upload-artifact@v2
-      with:
-        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
-        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
-        if-no-files-found: error
-        retention-days: 7
-    - name: "Attempt installing the created .deb"
-      if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
-      run: |
-        sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+      - name: "Download artifact: contour-ubuntu2004-builddir"
+        uses: actions/download-artifact@v2
+        with:
+          name: contour-ubuntu2004-builddir
+      - name: "Delete artifact: contour-ubuntu2004-builddir"
+        uses: geekyeggo/delete-artifact@v1
+        with:
+          name: contour-ubuntu2004-builddir
+      - name: "CPack: Creating DEB & TGZ package"
+        if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
+        run: |
+          set -ex
+          cd build/
+          cpack -G DEB
+          cpack -G TGZ
+          cd ..
+          mv -v "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.deb" \
+                "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+          tar xzpf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.tar.gz"
+          mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux" \
+                "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
+      - name: "Uploading artifact .deb package"
+        if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
+        uses: actions/upload-artifact@v2
+        with:
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+          path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+          if-no-files-found: error
+          retention-days: 7
+      - name: "Uploading artifact ZIP package"
+        if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
+        uses: actions/upload-artifact@v2
+        with:
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
+          path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
+          if-no-files-found: error
+          retention-days: 7
+      - name: "Attempt installing the created .deb"
+        if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
+        run: |
+          sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
 
   check_ubuntu2004_matrix_test_matrix:
     if: ${{ always() }}
@@ -633,9 +637,9 @@ jobs:
                           ncurses-bin \
                           valgrind
       - name: "test: crispy (via valgrind)"
-        run: valgrind --suppressions=valgrind.supp --error-exitcode=64 ./build/src/crispy/crispy_test
+        run: valgrind --error-exitcode=64 ./build/src/crispy/crispy_test
       - name: "test: libterminal (via valgrind)"
-        run: valgrind --suppressions=valgrind.supp --error-exitcode=64 ./build/src/terminal/terminal_test
+        run: valgrind --error-exitcode=64 ./build/src/terminal/terminal_test
       - name: "Delete artifact: contour-ubuntu2004-tests"
         uses: geekyeggo/delete-artifact@v1
         with:
