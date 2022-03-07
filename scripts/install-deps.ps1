@@ -3,8 +3,7 @@
 # Let's assume for now, that this script is only invoked from within Windows
 # But in the future, I'd like it to support all the others, too.
 
-class ThirdParty
-{
+class ThirdParty {
     [ValidateNotNullOrEmpty()] [string] $Folder
     [ValidateNotNullOrEmpty()] [string] $Archive
     [ValidateNotNullOrEmpty()] [string] $URI
@@ -15,33 +14,32 @@ class ThirdParty
 $ThirdParties =
 @(
     [ThirdParty]@{
-        Folder="GSL-3.1.0";
-        Archive="gsl-3.1.0.zip";
-        URI="https://github.com/microsoft/GSL/archive/refs/tags/v3.1.0.zip";
-        Macro=""
+        Folder  = "GSL-3.1.0";
+        Archive = "gsl-3.1.0.zip";
+        URI     = "https://github.com/microsoft/GSL/archive/refs/tags/v3.1.0.zip";
+        Macro   = ""
     };
     [ThirdParty]@{
-        Folder="Catch2-2.13.7";
-        Archive="Catch2-2.13.7.zip";
-        URI="https://github.com/catchorg/Catch2/archive/refs/tags/v2.13.7.zip";
-        Macro=""
+        Folder  = "Catch2-2.13.7";
+        Archive = "Catch2-2.13.7.zip";
+        URI     = "https://github.com/catchorg/Catch2/archive/refs/tags/v2.13.7.zip";
+        Macro   = ""
     };
     [ThirdParty]@{
-        Folder="libunicode-94e0eeadadf61a957b1184ea276e7d94e0d40cf9";
-        Archive="libunicode-94e0eeadadf61a957b1184ea276e7d94e0d40cf9.zip";
-        URI="https://github.com/contour-terminal/libunicode/archive/94e0eeadadf61a957b1184ea276e7d94e0d40cf9.zip";
-        Macro="libunicode"
+        Folder  = "libunicode-94e0eeadadf61a957b1184ea276e7d94e0d40cf9";
+        Archive = "libunicode-94e0eeadadf61a957b1184ea276e7d94e0d40cf9.zip";
+        URI     = "https://github.com/contour-terminal/libunicode/archive/94e0eeadadf61a957b1184ea276e7d94e0d40cf9.zip";
+        Macro   = "libunicode"
     };
     [ThirdParty]@{
-        Folder="termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed";
-        Archive="termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed.zip";
-        URI="https://github.com/contour-terminal/termbench-pro/archive/cd571e3cebb7c00de9168126b28852f32fb204ed.zip";
-        Macro="termbench_pro"
+        Folder  = "termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed";
+        Archive = "termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed.zip";
+        URI     = "https://github.com/contour-terminal/termbench-pro/archive/cd571e3cebb7c00de9168126b28852f32fb204ed.zip";
+        Macro   = "termbench_pro"
     }
 )
 
-function Fetch-And-Add
-{
+function Fetch-And-Add {
     param (
         [Parameter(Mandatory)] [string] $Target,
         [Parameter(Mandatory)] [string] $Folder,
@@ -52,69 +50,57 @@ function Fetch-And-Add
     )
 
     $DistfilesDir = "${Target}/distfiles"
-    if (! [System.IO.Directory]::Exists($DistfilesDir))
-    {
+    if (! [System.IO.Directory]::Exists($DistfilesDir)) {
         New-Item -ItemType Directory -Force -Path $DistfilesDir
     }
 
     $ArchivePath = "${DistfilesDir}/${Archive}"
-    if (! [System.IO.File]::Exists($ArchivePath))
-    {
+    if (! [System.IO.File]::Exists($ArchivePath)) {
         Write-Host "Downloading $Archive to $ArchivePath"
         Invoke-WebRequest -Uri $URI -OutFile $ArchivePath
     }
-    else
-    {
+    else {
         Write-Host "Already there: $ArchivePath"
     }
 
-    if (! [System.IO.Directory]::Exists("$Target/sources/$Folder"))
-    {
+    if (! [System.IO.Directory]::Exists("$Target/sources/$Folder")) {
         Write-Host "Populating ${Folder}"
         Expand-Archive $ArchivePath -DestinationPath "${Target}/sources/"
     }
-    else
-    {
+    else {
         Write-Host "Already there ${Folder}"
     }
 
-    if ($Macro -ne "")
-    {
+    if ($Macro -ne "") {
         Add-Content $CMakeListsFile "macro(ContourThirdParties_Embed_${Macro})"
         Add-Content $CMakeListsFile "    add_subdirectory(`${ContourThirdParties_SRCDIR}/${Folder} EXCLUDE_FROM_ALL)"
         Add-Content $CMakeListsFile "endmacro()"
     }
-    else
-    {
+    else {
         Add-Content $CMakeListsFile "add_subdirectory(${Folder} EXCLUDE_FROM_ALL)"
     }
 }
 
-function Run
-{
+function Run {
     $ProjectRoot = "${PSScriptRoot}/.."
     $ThirsPartiesDir = "${ProjectRoot}/_deps"
     $DistfilesDir = "${ThirsPartiesDir}/distfiles"
     $SourcesDir = "${ThirsPartiesDir}/sources"
     $CMakeListsFile = "${SourcesDir}/CMakeLists.txt"
 
-    if (! [System.IO.Directory]::Exists($DistfilesDir))
-    {
+    if (! [System.IO.Directory]::Exists($DistfilesDir)) {
         New-Item -ItemType Directory -Force -Path $DistfilesDir
     }
 
-    if (! [System.IO.Directory]::Exists($SourcesDir))
-    {
+    if (! [System.IO.Directory]::Exists($SourcesDir)) {
         New-Item -ItemType Directory -Force -Path $SourcesDir
     }
 
-    if ([System.IO.File]::Exists($CMakeListsFile))
-    {
+    if ([System.IO.File]::Exists($CMakeListsFile)) {
         Clear-Content $CMakeListsFile
     }
 
-    foreach($TP in $ThirdParties)
-    {
+    foreach ($TP in $ThirdParties) {
         Fetch-And-Add `
             -Folder $TP.Folder `
             -Archive $TP.Archive `
@@ -123,6 +109,8 @@ function Run
             -Target $ThirsPartiesDir `
             -CMakeListsFile $CMakeListsFile
     }
+
+    vcpkg install freetype fontconfig harfbuzz fmt --triplet x64-windows # qt5-base
 }
 
 Run
