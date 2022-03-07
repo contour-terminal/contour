@@ -454,6 +454,27 @@ struct numeric_limits<terminal::parser::Action>
 };
 } // namespace std
 
+namespace fmt
+{
+
+template <>
+struct formatter<terminal::parser::State>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(terminal::parser::State _state, FormatContext& _ctx)
+    {
+        return format_to(_ctx.out(), "{}", terminal::parser::to_string(_state));
+    }
+};
+
+} // namespace fmt
+
 namespace terminal::parser
 {
 
@@ -661,19 +682,4 @@ struct formatter<terminal::parser::Action>
     }
 };
 
-template <>
-struct formatter<terminal::parser::State>
-{
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(terminal::parser::State _state, FormatContext& _ctx)
-    {
-        return format_to(_ctx.out(), "{}", terminal::parser::to_string(_state));
-    }
-};
 } // namespace fmt
