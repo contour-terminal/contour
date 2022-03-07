@@ -106,7 +106,7 @@ mouse_block_selection_modifier: Control
 #                               This is not supported on all platforms.
 #
 # Default: CopyToSelectionClipboard
-on_mouse_select: SelectClipboard
+on_mouse_select: CopyToSelectionClipboard
 
 # Inline image related default configuration and limits
 # -----------------------------------------------------
