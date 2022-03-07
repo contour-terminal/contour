@@ -250,6 +250,7 @@ TerminalWidget::TerminalWidget(TerminalSession& session,
                                function<void()> adaptSize,
                                function<void(bool)> enableBackgroundBlur):
     session_ { session },
+    startTime_ { steady_clock::time_point::min() },
     adaptSize_ { std::move(adaptSize) },
     enableBlurBehind_ { std::move(enableBackgroundBlur) },
     lastFontDPI_ { fontDPI() },
@@ -541,6 +542,12 @@ void TerminalWidget::resizeGL(int _width, int _height)
 
 void TerminalWidget::paintGL()
 {
+    // We consider *this* the true initial start-time.
+    // That shouldn't be significantly different from the object construction
+    // time, but just to be sure, we'll update it here.
+    if (startTime_ == steady_clock::time_point::min())
+        startTime_ = steady_clock::now();
+
     try
     {
         [[maybe_unused]] auto const lastState = state_.fetchAndClear();
@@ -561,7 +568,7 @@ void TerminalWidget::paintGL()
         }
 #endif
 
-        static_cast<OpenGLRenderer*>(renderTarget_.get())->setTime(chrono::steady_clock::now());
+        static_cast<OpenGLRenderer*>(renderTarget_.get())->setTime(steady_clock::now());
 
         renderTarget_->clear(
             terminal().screen().isModeEnabled(terminal::DECMode::ReverseVideo)
@@ -575,9 +582,18 @@ void TerminalWidget::paintGL()
     }
 }
 
+float TerminalWidget::uptime() const noexcept
+{
+    using namespace std::chrono;
+    auto const now = steady_clock::now();
+    auto const uptimeMsecs = duration_cast<milliseconds>(now - startTime_).count();
+    auto const uptimeSecs = static_cast<float>(uptimeMsecs) / 1000.0f;
+    return uptimeSecs;
+}
+
 void TerminalWidget::onFrameSwapped()
 {
-    if (!state_.finish() || session_.uptime() <= CONTOUR_STARTUP_FADE_IN_TIME)
+    if (!state_.finish())
         update();
     else if (auto timeout = terminal().nextRender(); timeout.has_value())
         updateTimer_.start(timeout.value());

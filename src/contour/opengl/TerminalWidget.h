@@ -155,6 +155,7 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     void logDisplayInfo();
     void watchKdeDpiSetting();
     void initializeRenderer();
+    float uptime() const noexcept;
 
     terminal::PageSize pageSize() const
     {
@@ -184,6 +185,7 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     // private data fields
     //
     TerminalSession& session_;
+    std::chrono::steady_clock::time_point startTime_;
     std::function<void()> adaptSize_;
     std::function<void(bool)> enableBlurBehind_;
     text::DPI lastFontDPI_;

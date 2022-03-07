@@ -46,7 +46,6 @@ ShaderConfig builtinShaderConfig(ShaderClass shaderClass)
             sharedDefinesFile.open(QFile::ReadOnly);
             Require(sharedDefinesFile.isOpen());
             auto const sharedDefines = sharedDefinesFile.readAll().toStdString()
-                                       + fmt::format("\n#define FADE_TIME {}\n", CONTOUR_STARTUP_FADE_IN_TIME)
                                        + "\n#line 1\n";
 
             auto const versionHeader = "#version 330\n";

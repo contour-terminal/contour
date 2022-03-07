@@ -154,7 +154,4 @@ void main()
             renderGrayscaleGlyph();
             break;
     }
-
-    if (u_time <= FADE_TIME)
-        fragColor *= u_time / FADE_TIME;
 }

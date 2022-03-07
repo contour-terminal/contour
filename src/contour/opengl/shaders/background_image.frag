@@ -46,7 +46,4 @@ void main()
         fragColor = texture(u_backgroundImage, fs_TexCoord.xy);
 
     fragColor *= u_opacity;
-
-    if (u_time <= FADE_TIME)
-        fragColor.a *= u_time / FADE_TIME;
 }

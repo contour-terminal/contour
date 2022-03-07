@@ -6,7 +6,4 @@ uniform float u_time;
 void main()
 {
     outColor = fs_textColor;
-
-    if (u_time <= FADE_TIME)
-        outColor *= u_time / FADE_TIME;
 }

@@ -32,8 +32,6 @@
 namespace contour::opengl
 {
 
-auto constexpr inline CONTOUR_STARTUP_FADE_IN_TIME = 1.5;
-
 enum class ShaderClass
 {
     BackgroundImage,
