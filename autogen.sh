@@ -18,8 +18,12 @@ else
     ROOTDIR="$(dirname $0)"
 fi
 
+if [[ "${CXX}" == "" ]]; then
+    CXX="g++"
+fi
+
 BUILD_TYPE="${1:-Debug}"
-BUILD_DIR="${ROOTDIR}/target/${BUILD_TYPE}"
+BUILD_DIR="${ROOTDIR}/target/$(uname -m)-$(uname -s)-${CXX}-${BUILD_TYPE}"
 
 case "$OSTYPE" in
     linux-gnu*)
@@ -40,6 +44,7 @@ echo "EXTRA_CMAKE_FLAGS: ${EXTRA_CMAKE_FLAGS}"
 
 exec cmake "${ROOTDIR}" \
            -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+           -DCMAKE_CXX_COMPILER="${CXX}" \
            ${EXTRA_CMAKE_FLAGS} \
            -B "${BUILD_DIR}" \
            -GNinja
