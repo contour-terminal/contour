@@ -490,6 +490,7 @@ color_schemes:
 # - SendChars         Writes given characters in `chars` member to the applications input.
 # - ToggleAllKeyMaps  Disables/enables responding to all keybinds (this keybind will be preserved when disabling all others).
 # - ToggleFullScreen  Enables/disables full screen mode.
+# - ToggleTitleBar    Shows/Hides titlebar
 # - WriteScreen       Writes VT sequence in `chars` member to the screen (bypassing the application).
 
 input_mapping:
