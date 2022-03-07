@@ -28,7 +28,6 @@ class MockViewPty: public Pty
 
     void setReadData(std::string_view _data);
 
-    PtyMasterHandle handle() const noexcept override;
     PtySlave& slave() noexcept override;
     std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
     void wakeupReader() override;

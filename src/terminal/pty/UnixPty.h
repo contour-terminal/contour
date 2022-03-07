@@ -37,7 +37,7 @@ class UnixPty: public Pty
         int _slaveFd;
         explicit Slave(PtySlaveHandle fd): _slaveFd { unbox<int>(fd) } {}
         ~Slave() override;
-        PtySlaveHandle handle() const noexcept override;
+        PtySlaveHandle handle() const noexcept;
         void close() override;
         bool isClosed() const noexcept override;
         bool login() override;
@@ -56,7 +56,7 @@ class UnixPty: public Pty
 
     PtySlave& slave() noexcept override;
 
-    PtyMasterHandle handle() const noexcept override;
+    PtyMasterHandle handle() const noexcept;
     void close() override;
     bool isClosed() const noexcept override;
     void wakeupReader() noexcept override;

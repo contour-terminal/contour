@@ -15,11 +15,6 @@ MockPty::~MockPty()
 {
 }
 
-PtyMasterHandle MockPty::handle() const noexcept
-{
-    return {};
-}
-
 PtySlave& MockPty::slave() noexcept
 {
     return slave_;

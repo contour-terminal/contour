@@ -45,7 +45,6 @@ class PtyProcess: public Pty
     // Pty interface
     //
     PtySlave& slave() noexcept override { return pty_->slave(); }
-    PtyMasterHandle handle() const noexcept override { return pty_->handle(); }
     void close() override;
     bool isClosed() const noexcept override;
     std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;

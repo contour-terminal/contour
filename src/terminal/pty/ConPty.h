@@ -39,7 +39,6 @@ class ConPty: public Pty
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;
 
     PtySlave& slave() noexcept override;
-    PtyMasterHandle handle() const noexcept override { return PtyMasterHandle::cast_from(&master_); }
     HPCON master() const noexcept { return master_; }
 
   private:

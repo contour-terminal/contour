@@ -41,7 +41,6 @@ class PtySlave
 {
   public:
     virtual ~PtySlave() = default;
-    virtual PtySlaveHandle handle() const noexcept = 0;
     virtual void close() = 0;
     virtual bool isClosed() const noexcept = 0;
     virtual bool login() = 0;
@@ -50,7 +49,6 @@ class PtySlave
 class PtySlaveDummy: public PtySlave
 {
   public:
-    PtySlaveHandle handle() const noexcept override { return {}; }
     void close() override {}
     bool isClosed() const noexcept override { return false; }
     bool login() override { return false; }
@@ -70,8 +68,6 @@ class Pty
 
     /// Returns true if the underlying PTY is closed, otherwise false.
     virtual bool isClosed() const noexcept = 0;
-
-    virtual PtyMasterHandle handle() const noexcept = 0;
 
     /// Reads from the terminal whatever has been written to from the other side of the terminal.
     ///

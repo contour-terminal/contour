@@ -26,11 +26,6 @@ void MockViewPty::setReadData(std::string_view _data)
     outputBuffer_ = _data;
 }
 
-PtyMasterHandle MockViewPty::handle() const noexcept
-{
-    return {};
-}
-
 PtySlave& MockViewPty::slave() noexcept
 {
     return slave_;

@@ -27,7 +27,6 @@ class MockPty: public Pty
     explicit MockPty(PageSize windowSize);
     ~MockPty() override;
 
-    PtyMasterHandle handle() const noexcept override;
     PtySlave& slave() noexcept override;
     std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
     void wakeupReader() override;
