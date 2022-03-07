@@ -87,6 +87,7 @@ ConPty::ConPty(PageSize const& _windowSize): size_ { _windowSize }
 
 ConPty::~ConPty()
 {
+    PtyLog()("~ConPty()");
     close();
 }
 
@@ -97,6 +98,7 @@ bool ConPty::isClosed() const noexcept
 
 void ConPty::close()
 {
+    PtyLog()("ConPty.close()");
     auto const _ = std::lock_guard { mutex_ };
 
     if (master_ != INVALID_HANDLE_VALUE)
