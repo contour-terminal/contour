@@ -6,27 +6,8 @@ namespace terminal
 {
 
 PtyProcess::PtyProcess(ExecInfo const& _exe, PageSize _terminalSize, optional<ImageSize> _pixels):
-    pty_ { createPty(_terminalSize, _pixels) },
-    process_ { std::make_unique<Process>(_exe, *pty_) },
-    processExitWatcher_ { [this]() {
-        // TODO(pr) Can it be that we only needed that because of ConPTY?
-        //          If so, adjust PTY API so it can be used for watching for PTY close event.
-        // auto const exitStatus = process_->wait();
-        // PtyLog()("Process terminated with exit code {}.", exitStatus);
-        // pty_->close();
-    } }
+    pty_ { createPty(_terminalSize, _pixels) }, process_ { std::make_unique<Process>(_exe, *pty_) }
 {
-}
-
-PtyProcess::~PtyProcess()
-{
-    processExitWatcher_.join();
-}
-
-Process::ExitStatus PtyProcess::waitForProcessExit()
-{
-    processExitWatcher_.join();
-    return process_->checkStatus().value();
 }
 
 // {{{ Pty interface

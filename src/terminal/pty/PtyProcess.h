@@ -19,7 +19,6 @@
 #include <crispy/point.h>
 
 #include <memory>
-#include <thread>
 
 namespace terminal
 {
@@ -36,15 +35,12 @@ class PtyProcess: public Pty
     using ExitStatus = Process::ExitStatus;
 
     PtyProcess(ExecInfo const& _exe, PageSize terminalSize, std::optional<ImageSize> _pixels = std::nullopt);
-    ~PtyProcess();
 
     Pty& pty() noexcept { return *pty_; }
     Pty const& pty() const noexcept { return *pty_; }
 
     Process& process() noexcept { return *process_; }
     Process const& process() const noexcept { return *process_; }
-
-    Process::ExitStatus waitForProcessExit();
 
     // Pty interface
     //
@@ -61,7 +57,6 @@ class PtyProcess: public Pty
   private:
     std::unique_ptr<Pty> pty_;
     std::unique_ptr<Process> process_;
-    std::thread processExitWatcher_;
 };
 
 } // namespace terminal
