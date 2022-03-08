@@ -172,11 +172,38 @@ namespace
     }
 } // anonymous namespace
 
+#if defined(_MSC_VER)
+
+struct Process::Private
+{
+    mutable NativeHandle pid_ {};
+    bool detached_ = false;
+    mutable std::mutex lock_;
+
+    PROCESS_INFORMATION processInfo_ {};
+    STARTUPINFOEX startupInfo_ {};
+
+    mutable std::optional<Process::ExitStatus> exitStatus_ {};
+};
+
+#else
+
+struct Process::Private
+{
+    mutable NativeHandle pid_ {};
+    bool detached_ = false;
+    mutable std::mutex lock_;
+    mutable std::optional<Process::ExitStatus> exitStatus_ {};
+};
+
+#endif
+
 Process::Process(string const& _path,
                  vector<string> const& _args,
                  FileSystem::path const& _cwd,
                  Environment const& _env,
-                 Pty& _pty)
+                 Pty& _pty):
+    d(new Private {}, [](Private* p) { delete p; })
 {
 #if defined(__unix__) || defined(__APPLE__)
     pid_ = fork();
@@ -265,10 +292,10 @@ Process::Process(string const& _path,
 Process::Process(string const& _path,
                  vector<string> const& _args,
                  FileSystem::path const& _cwd,
-                 Environment const& _env,
-                 bool _detached)
+                 Environment const& _env):
+    d(new Private {}, [](Private* p) { delete p; })
 {
-    detached_ = _detached;
+    detached_ = false;
 
 #if defined(__unix__) || defined(__APPLE__)
     pid_ = fork();
@@ -280,7 +307,7 @@ Process::Process(string const& _path,
         throw runtime_error { getLastErrorAsString() };
     case 0: // in child
     {
-        if (_detached)
+        if (detached_)
             setsid();
 
         auto const cwd = _cwd.generic_string();

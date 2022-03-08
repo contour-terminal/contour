@@ -54,14 +54,10 @@ class [[nodiscard]] Process
     using NativeHandle = HANDLE;
 #endif
 
-    struct NormalExit
-    {
-        int exitCode;
-    };
-    struct SignalExit
-    {
-        int signum;
-    };
+    // clang-format off
+    struct NormalExit { int exitCode; };
+    struct SignalExit { int signum; };
+    // clang-format on
 
     using ExitStatus = std::variant<NormalExit, SignalExit>;
     using Environment = std::map<std::string, std::string>;
@@ -93,8 +89,7 @@ class [[nodiscard]] Process
     Process(const std::string& _path,
             std::vector<std::string> const& _args,
             FileSystem::path const& _cwd,
-            Environment const& _env,
-            bool _detached);
+            Environment const& _env);
 
     ~Process();
 
@@ -114,7 +109,11 @@ class [[nodiscard]] Process
     void terminate(TerminationHint _terminationHint);
 
   private:
+    struct Private;
+    std::unique_ptr<Private, void (*)(Private*)> d;
+
     [[nodiscard]] std::optional<ExitStatus> checkStatus(bool _waitForExit) const;
+
     mutable NativeHandle pid_ {};
     bool detached_ = false;
     mutable std::mutex lock_;
