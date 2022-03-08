@@ -265,7 +265,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName);
 Config loadConfigFromFile(FileSystem::path const& _fileName);
 Config loadConfig();
 
-std::string createDefaultConfig();
+std::string defaultConfigString();
 std::error_code createDefaultConfig(FileSystem::path const& _path);
 std::string defaultConfigFilePath();
 

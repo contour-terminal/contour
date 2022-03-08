@@ -351,7 +351,7 @@ FileSystem::path configHome()
     return configHome("contour");
 }
 
-std::string createDefaultConfig()
+std::string defaultConfigString()
 {
     QFile file(":/contour/contour.yml");
     file.open(QFile::ReadOnly);
@@ -368,7 +368,7 @@ error_code createDefaultConfig(FileSystem::path const& _path)
             return ec;
     }
 
-    ofstream { _path.string(), ios::binary | ios::trunc } << createDefaultConfig();
+    ofstream { _path.string(), ios::binary | ios::trunc } << defaultConfigString();
 
     return error_code {};
 }

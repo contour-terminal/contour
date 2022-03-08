@@ -209,7 +209,7 @@ int ContourApp::integrationAction()
 int ContourApp::configAction()
 {
     withOutput(parameters(), "contour.generate.config.to", [](auto& _stream) {
-        _stream << config::createDefaultConfig();
+        _stream << config::defaultConfigString();
     });
     return EXIT_SUCCESS;
 }
