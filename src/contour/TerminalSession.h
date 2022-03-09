@@ -76,8 +76,8 @@ class TerminalSession: public terminal::Terminal::Events
     terminal::Terminal const& terminal() const noexcept { return terminal_; }
     terminal::ScreenType currentScreenType() const noexcept { return currentScreenType_; }
 
-    TerminalDisplay* display() noexcept { return display_.get(); }
-    TerminalDisplay const* display() const noexcept { return display_.get(); }
+    TerminalDisplay* display() noexcept { return display_; }
+    TerminalDisplay const* display() const noexcept { return display_; }
     void setDisplay(std::unique_ptr<TerminalDisplay> _display);
     void displayInitialized();
 
@@ -213,7 +213,7 @@ class TerminalSession: public terminal::Terminal::Events
     std::unique_ptr<terminal::Pty> pty_;
     terminal::Terminal terminal_;
     bool terminatedAndWaitingForKeyPress_ = false;
-    std::unique_ptr<TerminalDisplay> display_;
+    TerminalDisplay* display_ = nullptr;
 
     std::optional<FileChangeWatcher> configFileChangeWatcher_;
 

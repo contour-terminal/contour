@@ -107,7 +107,7 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
                 profile_.colors,
                 _display ? _display->refreshRate() : 50.0,
                 config_.reflowOnResize },
-    display_ { move(_display) }
+    display_ { _display.release() }
 {
     if (_liveConfig)
     {
@@ -123,14 +123,12 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
 
 TerminalSession::~TerminalSession()
 {
-    (void)
-        display_.release(); // TODO: due to Qt, this is currently not owned by us. That's sad, or is it not?
 }
 
 void TerminalSession::setDisplay(unique_ptr<TerminalDisplay> _display)
 {
     LOGSTORE(SessionLog)("Assigning display.");
-    display_ = move(_display);
+    display_ = _display.release();
 
     profile_ = *config_.profile(profileName_); // XXX do it again. but we've to be more efficient here
 }
