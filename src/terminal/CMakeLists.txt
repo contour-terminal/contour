@@ -52,6 +52,13 @@ set(terminal_HEADERS
     pty/UnixPty.h
 )
 
+# Platform suffix can be either _win32 or _unix.
+if(WIN32)
+    set(PLATFORM_SUFFIX "_win32")
+else()
+    set(PLATFORM_SUFFIX "_unix")
+endif()
+
 set(terminal_SOURCES
     Capabilities.cpp
     Cell.cpp
@@ -67,7 +74,7 @@ set(terminal_SOURCES
     MatchModes.cpp
     MockTerm.cpp
     Parser.cpp
-    Process.cpp
+    Process${PLATFORM_SUFFIX}.cpp
     RenderBuffer.cpp
     Screen.cpp
     Selector.cpp

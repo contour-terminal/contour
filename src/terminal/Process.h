@@ -18,24 +18,11 @@
 
 #include <fmt/format.h>
 
-#include <cstring>
 #include <map>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <variant>
 #include <vector>
-
-#if defined(_MSC_VER)
-    #include <Windows.h>
-#elif defined(__APPLE__)
-    #include <terminal/pty/UnixPty.h>
-
-    #include <libproc.h>
-    #include <util.h>
-#elif defined(__linux__)
-    #include <pty.h>
-#endif
 
 namespace terminal
 {
@@ -48,12 +35,6 @@ class Pty;
 class [[nodiscard]] Process
 {
   public:
-#if defined(__unix__) || defined(__APPLE__)
-    using NativeHandle = pid_t;
-#else
-    using NativeHandle = HANDLE;
-#endif
-
     // clang-format off
     struct NormalExit { int exitCode; };
     struct SignalExit { int signum; };
@@ -93,13 +74,18 @@ class [[nodiscard]] Process
 
     ~Process();
 
-    [[nodiscard]] NativeHandle nativeHandle() const noexcept { return pid_; }
-    [[nodiscard]] bool alive() const noexcept;
+    [[nodiscard]] bool alive() const noexcept
+    {
+        auto const status = checkStatus();
+        return !status.has_value()
+               || !(std::holds_alternative<NormalExit>(*status)
+                    || std::holds_alternative<SignalExit>(*status));
+    }
 
     [[nodiscard]] std::optional<ExitStatus> checkStatus() const;
     [[nodiscard]] ExitStatus wait();
 
-    [[nodiscard]] std::string workingDirectory(Pty const* _pty = nullptr) const;
+    [[nodiscard]] std::string workingDirectory() const;
 
     enum class TerminationHint
     {
@@ -111,19 +97,6 @@ class [[nodiscard]] Process
   private:
     struct Private;
     std::unique_ptr<Private, void (*)(Private*)> d;
-
-    [[nodiscard]] std::optional<ExitStatus> checkStatus(bool _waitForExit) const;
-
-    mutable NativeHandle pid_ {};
-    bool detached_ = false;
-    mutable std::mutex lock_;
-
-#if defined(_MSC_VER)
-    PROCESS_INFORMATION processInfo_ {};
-    STARTUPINFOEX startupInfo_ {};
-#endif
-
-    mutable std::optional<Process::ExitStatus> exitStatus_ {};
 };
 
 } // namespace terminal

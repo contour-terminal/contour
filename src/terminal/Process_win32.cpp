@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/Process.h>
+#include <terminal/pty/ConPty.h>
 #include <terminal/pty/Pty.h>
 
 #include <crispy/overloaded.h>
@@ -19,35 +20,20 @@
 
 #include <fmt/format.h>
 
+#include <Windows.h>
 #include <cassert>
 #include <cerrno>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <direct.h>
+#include <errno.h>
 #include <fstream>
+#include <mutex>
 #include <numeric>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
-
-#if !defined(_WIN32)
-    #if !defined(__FreeBSD__)
-        #include <utmp.h>
-    #endif
-    #include <pwd.h>
-    #include <signal.h>
-    #include <unistd.h>
-
-    #include <sys/types.h>
-    #include <sys/wait.h>
-#else
-    #include <direct.h>
-    #include <errno.h>
-#endif
-
-#if defined(_MSC_VER)
-    #include <terminal/pty/ConPty.h>
-#endif
 
 using namespace std;
 
@@ -58,9 +44,6 @@ namespace
 {
     string getLastErrorAsString()
     {
-#if defined(__unix__) || defined(__APPLE__)
-        return strerror(errno);
-#else
         DWORD errorMessageID = GetLastError();
         if (errorMessageID == 0)
             return "";
@@ -80,10 +63,8 @@ namespace
         LocalFree(messageBuffer);
 
         return message;
-#endif
     }
 
-#if defined(_WIN32)
     class InheritingEnvBlock
     {
       public:
@@ -116,9 +97,7 @@ namespace
       private:
         Environment oldValues_;
     };
-#endif
 
-#if defined(_WIN32)
     HRESULT initializeStartupInfoAttachedToPTY(STARTUPINFOEX& _startupInfoEx, ConPty& _pty)
     {
         // Initializes the specified startup info struct with the required properties and
@@ -157,7 +136,6 @@ namespace
         }
         return hr;
     }
-#endif
 
     char** createArgv(string const& _arg0, std::vector<string> const& _args, size_t i = 0)
     {
@@ -172,31 +150,17 @@ namespace
     }
 } // anonymous namespace
 
-#if defined(_MSC_VER)
-
 struct Process::Private
 {
-    mutable NativeHandle pid_ {};
-    bool detached_ = false;
-    mutable std::mutex lock_;
+    mutable HANDLE pid {};
+    mutable std::mutex exitStatusMutex {};
+    mutable std::optional<Process::ExitStatus> exitStatus {};
 
-    PROCESS_INFORMATION processInfo_ {};
-    STARTUPINFOEX startupInfo_ {};
+    PROCESS_INFORMATION processInfo {};
+    STARTUPINFOEX startupInfo {};
 
-    mutable std::optional<Process::ExitStatus> exitStatus_ {};
+    [[nodiscard]] optional<Process::ExitStatus> checkStatus(bool _waitForExit) const;
 };
-
-#else
-
-struct Process::Private
-{
-    mutable NativeHandle pid_ {};
-    bool detached_ = false;
-    mutable std::mutex lock_;
-    mutable std::optional<Process::ExitStatus> exitStatus_ {};
-};
-
-#endif
 
 Process::Process(string const& _path,
                  vector<string> const& _args,
@@ -205,59 +169,7 @@ Process::Process(string const& _path,
                  Pty& _pty):
     d(new Private {}, [](Private* p) { delete p; })
 {
-#if defined(__unix__) || defined(__APPLE__)
-    pid_ = fork();
-    switch (pid_)
-    {
-    default: // in parent
-        _pty.slave().close();
-        break;
-    case -1: // fork error
-        throw runtime_error { getLastErrorAsString() };
-    case 0: // in child
-    {
-        _pty.slave().login();
-
-        auto const& cwd = _cwd.generic_string();
-        if (!_cwd.empty() && chdir(cwd.c_str()) != 0)
-        {
-            printf("Failed to chdir to \"%s\". %s\n", cwd.c_str(), strerror(errno));
-            exit(EXIT_FAILURE);
-        }
-
-        char** argv = createArgv(_path, _args, 0);
-
-        for (auto&& [name, value]: _env)
-            setenv(name.c_str(), value.c_str(), true);
-
-        // maybe close any leaked/inherited file descriptors from parent process
-        // TODO: But be a little bit more clever in iterating only over those that are actually still open.
-        for (int i = 3; i < 256; ++i)
-            ::close(i);
-
-        // reset signal(s) to default that may have been changed in the parent process.
-        signal(SIGPIPE, SIG_DFL);
-
-        ::execvp(argv[0], argv);
-
-        // Fallback: Try login shell.
-        fprintf(stdout, "\r\n\033[31;1mFailed to spawn %s. %s\033[m\r\n\n", argv[0], strerror(errno));
-        fflush(stdout);
-        auto theLoginShell = loginShell();
-        if (!theLoginShell.empty())
-        {
-            delete[] argv;
-            argv = createArgv(_args[0], _args, 1);
-            ::execvp(argv[0], argv);
-        }
-
-        // Bad luck.
-        ::_exit(EXIT_FAILURE);
-        break;
-    }
-    }
-#else
-    initializeStartupInfoAttachedToPTY(startupInfo_, static_cast<ConPty&>(_pty));
+    initializeStartupInfoAttachedToPTY(d->startupInfo, static_cast<ConPty&>(_pty));
 
     string cmd = _path;
     for (size_t i = 0; i < _args.size(); ++i)
@@ -282,11 +194,10 @@ Process::Process(string const& _path,
                                  EXTENDED_STARTUPINFO_PRESENT,   // Creation flags
                                  nullptr,                        // Use parent's environment block
                                  const_cast<LPSTR>(cwdPtr),      // Use parent's starting directory
-                                 &startupInfo_.StartupInfo,      // Pointer to STARTUPINFO
-                                 &processInfo_);                 // Pointer to PROCESS_INFORMATION
+                                 &d->startupInfo.StartupInfo,    // Pointer to STARTUPINFO
+                                 &d->processInfo);               // Pointer to PROCESS_INFORMATION
     if (!success)
         throw runtime_error { getLastErrorAsString() };
-#endif
 }
 
 Process::Process(string const& _path,
@@ -295,42 +206,6 @@ Process::Process(string const& _path,
                  Environment const& _env):
     d(new Private {}, [](Private* p) { delete p; })
 {
-    detached_ = false;
-
-#if defined(__unix__) || defined(__APPLE__)
-    pid_ = fork();
-    switch (pid_)
-    {
-    default: // in parent
-        break;
-    case -1: // fork error
-        throw runtime_error { getLastErrorAsString() };
-    case 0: // in child
-    {
-        if (detached_)
-            setsid();
-
-        auto const cwd = _cwd.generic_string();
-        if (!_cwd.empty() && chdir(cwd.c_str()) < 0)
-        {
-            printf("Failed to chdir to \"%s\". %s\n", cwd.c_str(), strerror(errno));
-            exit(EXIT_FAILURE);
-        }
-
-        char** argv = new char*[_args.size() + 1];
-        for (size_t i = 0; i < _args.size(); ++i)
-            argv[i] = const_cast<char*>(_args[i].c_str());
-        argv[_args.size()] = nullptr;
-
-        for (auto&& [name, value]: _env)
-            setenv(name.c_str(), value.c_str(), true);
-
-        ::execvp(_path.c_str(), argv);
-        ::_exit(EXIT_FAILURE);
-        break;
-    }
-    }
-#else
     // TODO: anything to handle wrt. detached spawn?
 
     string cmd = _path;
@@ -356,102 +231,53 @@ Process::Process(string const& _path,
                                  EXTENDED_STARTUPINFO_PRESENT,   // Creation flags
                                  nullptr,                        // Use parent's environment block
                                  const_cast<LPSTR>(cwdPtr),      // Use parent's starting directory
-                                 &startupInfo_.StartupInfo,      // Pointer to STARTUPINFO
-                                 &processInfo_);                 // Pointer to PROCESS_INFORMATION
+                                 &d->startupInfo.StartupInfo,    // Pointer to STARTUPINFO
+                                 &d->processInfo);               // Pointer to PROCESS_INFORMATION
     if (!success)
         throw runtime_error { getLastErrorAsString() };
-#endif
 }
 
 Process::~Process()
 {
-#if defined(__unix__) || defined(__APPLE__)
-    if (pid_ != -1 && !detached_)
-        (void) wait();
-#else
-    CloseHandle(processInfo_.hThread);
-    CloseHandle(processInfo_.hProcess);
+    CloseHandle(d->processInfo.hThread);
+    CloseHandle(d->processInfo.hProcess);
 
-    DeleteProcThreadAttributeList(startupInfo_.lpAttributeList);
-    free(startupInfo_.lpAttributeList);
-#endif
-}
-
-bool Process::alive() const noexcept
-{
-    (void) checkStatus();
-    return !exitStatus_.has_value()
-           || !(holds_alternative<NormalExit>(*exitStatus_) || holds_alternative<SignalExit>(*exitStatus_));
+    DeleteProcThreadAttributeList(d->startupInfo.lpAttributeList);
+    free(d->startupInfo.lpAttributeList);
 }
 
 optional<Process::ExitStatus> Process::checkStatus() const
 {
-    return checkStatus(false);
+    return d->checkStatus(false);
 }
 
-optional<Process::ExitStatus> Process::checkStatus(bool _waitForExit) const
+optional<Process::ExitStatus> Process::Private::checkStatus(bool _waitForExit) const
 {
     {
-        auto const _ = lock_guard { lock_ };
-        if (exitStatus_.has_value())
-            return exitStatus_;
+        auto const _ = lock_guard { d->exitStatusMutex };
+        if (exitStatus.has_value())
+            return exitStatus;
     }
 
-#if defined(__unix__) || defined(__APPLE__)
-    assert(pid_ != -1);
-    int status = 0;
-    int const rv = waitpid(pid_, &status, _waitForExit ? 0 : WNOHANG);
-
-    if (rv < 0)
-    {
-        auto const _ = lock_guard { lock_ };
-        if (exitStatus_.has_value())
-            return exitStatus_;
-        throw runtime_error { "waitpid: "s + getLastErrorAsString() };
-    }
-    else if (rv == 0 && !_waitForExit)
-        return nullopt;
-    else
-    {
-        auto const _ = lock_guard { lock_ };
-        pid_ = -1;
-
-        if (WIFEXITED(status))
-            return exitStatus_ = ExitStatus { NormalExit { WEXITSTATUS(status) } };
-        else if (WIFSIGNALED(status))
-            return exitStatus_ = ExitStatus { SignalExit { WTERMSIG(status) } };
-        else if (WIFSTOPPED(status))
-            return exitStatus_ = ExitStatus { SignalExit { SIGSTOP } };
-        else
-            // TODO: handle the other WIF....(status) cases.
-            throw runtime_error { "Unknown waitpid() return value." };
-    }
-#else
     if (_waitForExit)
-    {
-        if (WaitForSingleObject(processInfo_.hThread, INFINITE /*10 * 1000*/) != S_OK)
+        if (WaitForSingleObject(d->processInfo.hThread, INFINITE /*10 * 1000*/) != S_OK)
             printf("WaitForSingleObject(thr): %s\n", getLastErrorAsString().c_str());
-    }
+
     DWORD exitCode;
-    if (!GetExitCodeProcess(processInfo_.hProcess, &exitCode))
+    if (!GetExitCodeProcess(d->processInfo.hProcess, &exitCode))
         throw runtime_error { getLastErrorAsString() };
     else if (exitCode == STILL_ACTIVE)
-        return exitStatus_;
+        return exitStatus;
     else
-        return exitStatus_ = ExitStatus { NormalExit { static_cast<int>(exitCode) } };
-#endif
+        return exitStatus = ExitStatus { NormalExit { static_cast<int>(exitCode) } };
 }
 
 void Process::terminate(TerminationHint _terminationHint)
 {
-    if (alive())
-    {
-#if defined(_WIN32)
-        TerminateProcess(nativeHandle(), 1);
-#else
-        ::kill(nativeHandle(), _terminationHint == TerminationHint::Hangup ? SIGHUP : SIGTERM);
-#endif
-    }
+    if (!alive())
+        return;
+
+    TerminateProcess(nativeHandle(), 1);
 }
 
 Process::ExitStatus Process::wait()
@@ -461,77 +287,21 @@ Process::ExitStatus Process::wait()
 
 vector<string> Process::loginShell()
 {
-#if defined(_WIN32)
-    return { "powershell.exe"s };
-#else
-    if (passwd const* pw = getpwuid(getuid()); pw != nullptr)
-    {
-    #if defined(__APPLE__)
-        auto shell = string(pw->pw_shell);
-        auto index = shell.rfind('/');
-        return { "/bin/bash", "-c", fmt::format("exec -a -{} {}", shell.substr(index + 1, 5), pw->pw_shell) };
-    #else
-        return { pw->pw_shell };
-    #endif
-    }
-    else
-        return { "/bin/sh"s };
-#endif
+    return { "powershell.exe"s }; // TODO: Find out what the user's default shell is.
 }
 
 FileSystem::path Process::homeDirectory()
 {
-#if defined(_WIN32)
-
     if (char const* p = getenv("USERPROFILE"); p && *p)
         return FileSystem::path(p);
 
     return FileSystem::path("/");
-#else
-    if (passwd const* pw = getpwuid(getuid()); pw != nullptr)
-        return FileSystem::path(pw->pw_dir);
-    else
-        return FileSystem::path("/");
-#endif
 }
 
-string Process::workingDirectory(Pty const* _pty) const
+string Process::workingDirectory() const
 {
-#if defined(__linux__)
-    (void) _pty; // Unused.
-    try
-    {
-        auto const path = FileSystem::path { fmt::format("/proc/{}/cwd", pid_) };
-        auto const cwd = FileSystem::read_symlink(path);
-        return cwd.string();
-    }
-    catch (...)
-    {
-        // ignore failure, and use default instead.
-        return "."s;
-    }
-#elif defined(__APPLE__)
-    try
-    {
-        auto vpi = proc_vnodepathinfo {};
-        auto const pid = tcgetpgrp(unbox<int>(static_cast<UnixPty const*>(_pty)->handle()));
-
-        if (proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &vpi, sizeof(vpi)) <= 0)
-        {
-            return "."s;
-        }
-
-        return string(vpi.pvi_cdir.vip_path);
-    }
-    catch (...)
-    {
-        return "."s;
-    }
-#else
     // TODO: Windows
-    (void) _pty; // Unused.
     return "."s;
-#endif
 }
 
 } // namespace terminal
