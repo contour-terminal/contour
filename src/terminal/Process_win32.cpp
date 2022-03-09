@@ -155,6 +155,7 @@ struct Process::Private
     mutable HANDLE pid {};
     mutable std::mutex exitStatusMutex {};
     mutable std::optional<Process::ExitStatus> exitStatus {};
+    std::optional<std::thread> exitWatcher;
 
     PROCESS_INFORMATION processInfo {};
     STARTUPINFOEX startupInfo {};
@@ -198,6 +199,12 @@ Process::Process(string const& _path,
                                  &d->processInfo);               // Pointer to PROCESS_INFORMATION
     if (!success)
         throw runtime_error { getLastErrorAsString() };
+
+    d->exitWatcher = std::thread([this, pty = &_pty]() {
+        wait();
+        PtyLog()("Process terminated with exit code {}.", checkStatus().value());
+        pty->close();
+    });
 }
 
 Process::Process(string const& _path,
@@ -239,6 +246,8 @@ Process::Process(string const& _path,
 
 Process::~Process()
 {
+    if (d->exitWatcher)
+        d->exitWatcher.value().join();
     CloseHandle(d->processInfo.hThread);
     CloseHandle(d->processInfo.hProcess);
 
