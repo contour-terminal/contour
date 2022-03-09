@@ -254,17 +254,17 @@ optional<Process::ExitStatus> Process::checkStatus() const
 optional<Process::ExitStatus> Process::Private::checkStatus(bool _waitForExit) const
 {
     {
-        auto const _ = lock_guard { d->exitStatusMutex };
+        auto const _ = lock_guard { exitStatusMutex };
         if (exitStatus.has_value())
             return exitStatus;
     }
 
     if (_waitForExit)
-        if (WaitForSingleObject(d->processInfo.hThread, INFINITE /*10 * 1000*/) != S_OK)
+        if (WaitForSingleObject(processInfo.hThread, INFINITE /*10 * 1000*/) != S_OK)
             printf("WaitForSingleObject(thr): %s\n", getLastErrorAsString().c_str());
 
     DWORD exitCode;
-    if (!GetExitCodeProcess(d->processInfo.hProcess, &exitCode))
+    if (!GetExitCodeProcess(processInfo.hProcess, &exitCode))
         throw runtime_error { getLastErrorAsString() };
     else if (exitCode == STILL_ACTIVE)
         return exitStatus;
@@ -277,12 +277,12 @@ void Process::terminate(TerminationHint _terminationHint)
     if (!alive())
         return;
 
-    TerminateProcess(nativeHandle(), 1);
+    TerminateProcess(d->pid, 1);
 }
 
 Process::ExitStatus Process::wait()
 {
-    return *checkStatus(true);
+    return *d->checkStatus(true);
 }
 
 vector<string> Process::loginShell()
