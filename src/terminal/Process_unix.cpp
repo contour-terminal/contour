@@ -144,49 +144,20 @@ Process::Process(string const& _path,
     }
 }
 
-Process::Process(string const& _path,
-                 vector<string> const& _args,
-                 FileSystem::path const& _cwd,
-                 Environment const& _env):
-    d(new Private {}, [](Private* p) { delete p; })
-{
-    d->pid = fork();
-    switch (d->pid)
-    {
-    default: // in parent
-        break;
-    case -1: // fork error
-        throw runtime_error { getLastErrorAsString() };
-    case 0: // in child
-    {
-        setsid();
-
-        auto const& cwd = _cwd.generic_string();
-        if (!_cwd.empty() && chdir(cwd.c_str()) < 0)
-        {
-            printf("Failed to chdir to \"%s\". %s\n", cwd.c_str(), strerror(errno));
-            exit(EXIT_FAILURE);
-        }
-
-        char** argv = new char*[_args.size() + 1];
-        for (size_t i = 0; i < _args.size(); ++i)
-            argv[i] = const_cast<char*>(_args[i].c_str());
-        argv[_args.size()] = nullptr;
-
-        for (auto&& [name, value]: _env)
-            setenv(name.c_str(), value.c_str(), true);
-
-        ::execvp(_path.c_str(), argv);
-        ::_exit(EXIT_FAILURE);
-        break;
-    }
-    }
-}
-
 Process::~Process()
 {
     if (d->pid != -1)
         (void) wait();
+}
+
+Pty& Process::pty() noexcept
+{
+    return *d->pty;
+}
+
+Pty const& Process::pty() const noexcept
+{
+    return *d->pty;
 }
 
 optional<Process::ExitStatus> Process::checkStatus() const

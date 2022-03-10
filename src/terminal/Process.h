@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include <terminal/pty/Pty.h>
+
 #include <crispy/overloaded.h>
 #include <crispy/stdfs.h>
 
@@ -32,7 +34,7 @@ class Pty;
 /**
  * Spawns and manages a child process with a pseudo terminal attached to it.
  */
-class [[nodiscard]] Process
+class [[nodiscard]] Process: public Pty
 {
   public:
     // clang-format off
@@ -67,11 +69,6 @@ class [[nodiscard]] Process
             Environment const& env,
             Pty& pty);
 
-    Process(const std::string& _path,
-            std::vector<std::string> const& _args,
-            FileSystem::path const& _cwd,
-            Environment const& _env);
-
     ~Process();
 
     [[nodiscard]] bool alive() const noexcept
@@ -93,6 +90,21 @@ class [[nodiscard]] Process
         Hangup
     };
     void terminate(TerminationHint _terminationHint);
+
+    Pty& pty() noexcept;
+    Pty const& pty() const noexcept;
+
+    // Pty overrides
+    // clang-format off
+    PtySlave& slave() noexcept override { return pty().slave(); }
+    void close() override { pty().close(); }
+    bool isClosed() const noexcept override { return pty().isClosed(); }
+    std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override { return pty().read(_size, _timeout); }
+    void wakeupReader() override { return pty().wakeupReader(); }
+    int write(char const* buf, size_t size) override { return pty().write(buf, size); }
+    PageSize pageSize() const noexcept override { return pty().pageSize(); }
+    void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override { pty().resizeScreen(_cells, _pixels); }
+    // clang-format on
 
   private:
     struct Private;

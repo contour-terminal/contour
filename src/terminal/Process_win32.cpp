@@ -157,6 +157,8 @@ struct Process::Private
     mutable std::optional<Process::ExitStatus> exitStatus {};
     std::optional<std::thread> exitWatcher;
 
+    Pty* pty = nullptr;
+
     PROCESS_INFORMATION processInfo {};
     STARTUPINFOEX startupInfo {};
 
@@ -170,6 +172,8 @@ Process::Process(string const& _path,
                  Pty& _pty):
     d(new Private {}, [](Private* p) { delete p; })
 {
+    d->pty = &_pty;
+
     initializeStartupInfoAttachedToPTY(d->startupInfo, static_cast<ConPty&>(_pty));
 
     string cmd = _path;
@@ -200,54 +204,28 @@ Process::Process(string const& _path,
     if (!success)
         throw runtime_error { getLastErrorAsString() };
 
-    d->exitWatcher = std::thread([this, pty = &_pty]() {
+    d->exitWatcher = std::thread([this]() {
         wait();
         PtyLog()("Process terminated with exit code {}.", checkStatus().value());
-        pty->close();
+        d->pty->close();
     });
 }
 
-Process::Process(string const& _path,
-                 vector<string> const& _args,
-                 FileSystem::path const& _cwd,
-                 Environment const& _env):
-    d(new Private {}, [](Private* p) { delete p; })
+Pty& Process::pty() noexcept
 {
-    // TODO: anything to handle wrt. detached spawn?
+    return *d->pty;
+}
 
-    string cmd = _path;
-    for (size_t i = 1; i < _args.size(); ++i)
-    {
-        cmd += ' ';
-        if (_args[i].find(' ') != std::string::npos)
-            cmd += '\"' + _args[i] + '\"';
-        else
-            cmd += _args[i];
-    }
-
-    auto const envScope = InheritingEnvBlock { _env };
-
-    auto const cwd = _cwd.generic_string();
-    auto const cwdPtr = !cwd.empty() ? cwd.c_str() : nullptr;
-
-    BOOL success = CreateProcess(nullptr,                        // No module name - use Command Line
-                                 const_cast<LPSTR>(cmd.c_str()), // Command Line
-                                 nullptr,                        // Process handle not inheritable
-                                 nullptr,                        // Thread handle not inheritable
-                                 FALSE,                          // Inherit handles
-                                 EXTENDED_STARTUPINFO_PRESENT,   // Creation flags
-                                 nullptr,                        // Use parent's environment block
-                                 const_cast<LPSTR>(cwdPtr),      // Use parent's starting directory
-                                 &d->startupInfo.StartupInfo,    // Pointer to STARTUPINFO
-                                 &d->processInfo);               // Pointer to PROCESS_INFORMATION
-    if (!success)
-        throw runtime_error { getLastErrorAsString() };
+Pty const& Process::pty() const noexcept
+{
+    return *d->pty;
 }
 
 Process::~Process()
 {
     if (d->exitWatcher)
         d->exitWatcher.value().join();
+
     CloseHandle(d->processInfo.hThread);
     CloseHandle(d->processInfo.hProcess);
 
