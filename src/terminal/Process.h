@@ -21,6 +21,7 @@
 #include <fmt/format.h>
 
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <variant>
@@ -28,8 +29,6 @@
 
 namespace terminal
 {
-
-class Pty;
 
 /**
  * Spawns and manages a child process with a pseudo terminal attached to it.
@@ -58,8 +57,8 @@ class [[nodiscard]] Process: public Pty
 
     static FileSystem::path homeDirectory();
 
-    Process(ExecInfo const& _exe, Pty& _pty):
-        Process(_exe.program, _exe.arguments, _exe.workingDirectory, _exe.env, _pty)
+    Process(ExecInfo const& _exe, std::unique_ptr<Pty> _pty):
+        Process(_exe.program, _exe.arguments, _exe.workingDirectory, _exe.env, std::move(_pty))
     {
     }
 
@@ -67,7 +66,7 @@ class [[nodiscard]] Process: public Pty
             std::vector<std::string> const& args,
             FileSystem::path const& _cwd,
             Environment const& env,
-            Pty& pty);
+            std::unique_ptr<Pty> pty);
 
     ~Process();
 

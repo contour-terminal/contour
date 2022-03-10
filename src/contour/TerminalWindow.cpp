@@ -25,7 +25,6 @@
 
 #include <terminal/Metrics.h>
 #include <terminal/pty/Pty.h>
-#include <terminal/pty/PtyProcess.h>
 
 #include <qnamespace.h>
 
@@ -109,7 +108,8 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
     // }}}
 
     terminalSession_ = make_unique<TerminalSession>(
-        make_unique<terminal::PtyProcess>(profile()->shell, profile()->terminalSize),
+        make_unique<terminal::Process>(profile()->shell,
+                                       terminal::createPty(profile()->terminalSize, nullopt)),
         _earlyExitThreshold,
         config_,
         liveConfig_,

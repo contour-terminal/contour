@@ -48,7 +48,6 @@ set(terminal_HEADERS
     pty/MockPty.h
     pty/MockViewPty.h
     pty/Pty.h
-    pty/PtyProcess.h
     pty/UnixPty.h
 )
 
@@ -87,7 +86,6 @@ set(terminal_SOURCES
     pty/MockPty.cpp
     pty/MockViewPty.cpp
     pty/Pty.cpp
-    pty/PtyProcess.cpp
 )
 
 set(LIBTERMINAL_LIBRARIES crispy::core fmt::fmt-header-only range-v3::range-v3 Threads::Threads Microsoft.GSL::GSL)

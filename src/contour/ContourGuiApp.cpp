@@ -16,7 +16,7 @@
 #include <contour/TerminalWindow.h>
 #include <contour/opengl/TerminalWidget.h>
 
-#include <terminal/pty/PtyProcess.h>
+#include <terminal/Process.h>
 
 #include <text_shaper/font_locator.h>
 
@@ -172,11 +172,11 @@ std::optional<FileSystem::path> ContourGuiApp::dumpStateAtExit() const
 
 void ContourGuiApp::onExit(TerminalSession& _session)
 {
-    auto const* pty = dynamic_cast<terminal::PtyProcess const*>(&_session.terminal().device());
-    if (!pty)
+    auto const* localProcess = dynamic_cast<terminal::Process const*>(&_session.terminal().device());
+    if (!localProcess)
         return;
 
-    exitStatus_ = pty->process().checkStatus();
+    exitStatus_ = localProcess->checkStatus();
 }
 
 bool ContourGuiApp::loadConfig(string const& target)

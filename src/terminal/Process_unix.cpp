@@ -77,7 +77,7 @@ namespace
 struct Process::Private
 {
     mutable pid_t pid {};
-    Pty* pty = nullptr;
+    unique_ptr<Pty> pty {};
     mutable std::mutex exitStatusMutex {};
     mutable std::optional<Process::ExitStatus> exitStatus {};
 
@@ -88,11 +88,12 @@ Process::Process(string const& _path,
                  vector<string> const& _args,
                  FileSystem::path const& _cwd,
                  Environment const& _env,
-                 Pty& _pty):
+                 unique_ptr<Pty> _pty):
     d(new Private {}, [](Private* p) { delete p; })
 {
     d->pid = fork();
-    d->pty = &_pty;
+    d->pty = move(_pty);
+
     switch (d->pid)
     {
     default: // in parent
@@ -258,7 +259,7 @@ string Process::workingDirectory() const
     try
     {
         auto vpi = proc_vnodepathinfo {};
-        auto const pid = tcgetpgrp(unbox<int>(static_cast<UnixPty const*>(d->pty)->handle()));
+        auto const pid = tcgetpgrp(unbox<int>(static_cast<UnixPty const*>(d->pty.get())->handle()));
 
         if (proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &vpi, sizeof(vpi)) <= 0)
             return "."s;

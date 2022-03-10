@@ -16,9 +16,9 @@
 #include <contour/helper.h>
 
 #include <terminal/MatchModes.h>
+#include <terminal/Process.h>
 #include <terminal/Terminal.h>
 #include <terminal/pty/Pty.h>
-#include <terminal/pty/PtyProcess.h>
 
 #include <crispy/StackTrace.h>
 
@@ -288,9 +288,9 @@ void TerminalSession::onClosed()
     auto const now = steady_clock::now();
     auto const diff = std::chrono::duration_cast<std::chrono::seconds>(now - startTime_);
 
-    if (auto const* pty = dynamic_cast<terminal::PtyProcess const*>(&terminal_.device()))
+    if (auto const* localProcess = dynamic_cast<terminal::Process const*>(&terminal_.device()))
     {
-        auto const exitStatus = pty->process().checkStatus();
+        auto const exitStatus = localProcess->checkStatus();
         if (exitStatus)
             LOGSTORE(SessionLog)
         ("Process terminated after {} seconds with exit status {}.", diff.count(), *exitStatus);
@@ -866,8 +866,8 @@ void TerminalSession::spawnNewTerminal(string const& _profileName)
 {
     auto const wd = [this]() -> string {
 #if defined(__APPLE__)
-        if (auto const* ptyProcess = dynamic_cast<PtyProcess const*>(pty_.get()))
-            return ptyProcess->process().workingDirectory();
+        if (auto const* ptyProcess = dynamic_cast<Process const*>(pty_.get()))
+            return ptyProcess->workingDirectory();
 #else
         auto const _l = scoped_lock { terminal_ };
         return terminal_.screen().currentWorkingDirectory();

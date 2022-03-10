@@ -15,6 +15,7 @@
 #include <terminal/pty/ConPty.h>
 #include <terminal/pty/Pty.h>
 
+#include <crispy/assert.h>
 #include <crispy/overloaded.h>
 #include <crispy/stdfs.h>
 
@@ -169,12 +170,13 @@ Process::Process(string const& _path,
                  vector<string> const& _args,
                  FileSystem::path const& _cwd,
                  Environment const& _env,
-                 Pty& _pty):
+                 std::unique_ptr<Pty> _pty):
     d(new Private {}, [](Private* p) { delete p; })
 {
-    d->pty = &_pty;
+    d->pty = move(_pty);
+    Require(static_cast<ConPty const*>(*d->pty));
 
-    initializeStartupInfoAttachedToPTY(d->startupInfo, static_cast<ConPty&>(_pty));
+    initializeStartupInfoAttachedToPTY(d->startupInfo, static_cast<ConPty&>(*d->pty));
 
     string cmd = _path;
     for (size_t i = 0; i < _args.size(); ++i)
