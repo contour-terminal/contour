@@ -532,7 +532,6 @@ jobs:
         with:
           name: contour-ubuntu2004-builddir
       - name: "CPack: Creating DEB & TGZ package"
-        if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
         run: |
           set -ex
           cd build/
@@ -545,7 +544,6 @@ jobs:
           mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux" \
                 "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
       - name: "Uploading artifact .deb package"
-        if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
         uses: actions/upload-artifact@v2
         with:
           name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
@@ -553,7 +551,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading artifact ZIP package"
-        if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
         uses: actions/upload-artifact@v2
         with:
           name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
@@ -561,7 +558,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: "Attempt installing the created .deb"
-        if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
         run: |
           sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
 
