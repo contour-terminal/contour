@@ -45,8 +45,7 @@ ShaderConfig builtinShaderConfig(ShaderClass shaderClass)
             QFile sharedDefinesFile(":/contour/terminal_renderer/shared_defines.h");
             sharedDefinesFile.open(QFile::ReadOnly);
             Require(sharedDefinesFile.isOpen());
-            auto const sharedDefines = sharedDefinesFile.readAll().toStdString()
-                                       + "\n#line 1\n";
+            auto const sharedDefines = sharedDefinesFile.readAll().toStdString() + "\n#line 1\n";
 
             auto const versionHeader = "#version 330\n";
 
