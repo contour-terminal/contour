@@ -81,6 +81,9 @@ function Fetch-And-Add {
     }
 }
 
+$option = $args[0]
+Write-Host "a) arg0: $option"
+
 function Run {
     $ProjectRoot = "${PSScriptRoot}/.."
     $ThirsPartiesDir = "${ProjectRoot}/_deps"
@@ -110,7 +113,10 @@ function Run {
             -CMakeListsFile $CMakeListsFile
     }
 
-    vcpkg install freetype fontconfig harfbuzz fmt --triplet x64-windows # qt5-base
+    if ($option -ne "--skip-vcpkg") {
+        vcpkg install freetype fontconfig harfbuzz fmt --triplet x64-windows
+        # qt5-base
+    }
 }
 
 Run

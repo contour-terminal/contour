@@ -296,7 +296,7 @@ jobs:
       - name: "Fetch embedded dependencies"
         shell: powershell
         run: |
-          ./scripts/install-deps.ps1
+          ./scripts/install-deps.ps1 --skip-vcpkg
           type ./_deps/sources/CMakeLists.txt
       - name: Install Qt
         uses: jurplel/install-qt-action@v2
@@ -520,29 +520,47 @@ jobs:
   ubuntu_2004_packaging:
     name: "Ubuntu 20.04: Create package"
     needs: ubuntu_2004_matrix
-    if: ${{ needs.ubuntu_2004_matrix.outputs.id == 'GCC 10 (C++20, RelWithDebInfo)' }}
     runs-on: ubuntu-20.04
     steps:
+      - uses: actions/checkout@v2
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: "ccache-ubuntu2004-${{ matrix.compiler }}-${{ matrix.cxx }}-${{ matrix.build_type }}"
+          max-size: 256M
+      - name: "set environment variables"
+        id: set_vars
+        run: ./scripts/ci-set-vars.sh
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: "some var dumps"
+        run: |
+          echo "ID: ${{ needs.ubuntu_2004_matrix.outputs.id }}"
+      - name: "install dependencies"
+        run: |
+          set -ex
+          sudo apt -q update
+          sudo ./scripts/install-deps.sh
       - name: "Download artifact: contour-ubuntu2004-builddir"
         uses: actions/download-artifact@v2
         with:
           name: contour-ubuntu2004-builddir
-      - name: "Delete artifact: contour-ubuntu2004-builddir"
-        uses: geekyeggo/delete-artifact@v1
-        with:
-          name: contour-ubuntu2004-builddir
-      - name: "CPack: Creating DEB & TGZ package"
+          path: build/
+      - name: "CPack: Creating DEB package"
         run: |
           set -ex
-          cd build/
+          cd build
           cpack -G DEB
+          mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.deb" \
+                "../contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+      - name: "CPack: Creating TGZ package"
+        run: |
+          set -ex
+          cd build
           cpack -G TGZ
-          cd ..
-          mv -v "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.deb" \
-                "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
-          tar xzpf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.tar.gz"
+          tar xzpf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.tar.gz"
           mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux" \
-                "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
+                "../contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
       - name: "Uploading artifact .deb package"
         uses: actions/upload-artifact@v2
         with:
@@ -560,12 +578,54 @@ jobs:
       - name: "Attempt installing the created .deb"
         run: |
           sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+      - name: "Delete artifact: contour-ubuntu2004-builddir"
+        uses: geekyeggo/delete-artifact@v1
+        with:
+          name: contour-ubuntu2004-builddir
+
+  test_ubuntu2004_valgrind:
+    name: "Run tests via valgrind"
+    runs-on: ubuntu-20.04
+    needs: [ubuntu_2004_matrix]
+    steps:
+      - name: "download artifact"
+        uses: actions/download-artifact@v2
+        with:
+          name: contour-ubuntu2004-tests
+      - name: "fix unit test permissions"
+        run: find . -name '*_test' -exec chmod 0755 {} \;
+      - name: "install dependencies"
+        run: |
+          set -ex
+          ls -hlR
+          sudo apt -q update
+          sudo apt install -y \
+                          libfontconfig1 \
+                          libfreetype6 \
+                          libharfbuzz0b \
+                          libkf5windowsystem5 \
+                          libqt5gui5 \
+                          libqt5opengl5 \
+                          libyaml-cpp0.6 \
+                          ncurses-bin \
+                          valgrind
+      - name: "test: crispy (via valgrind)"
+        run: valgrind --error-exitcode=64 ./build/src/crispy/crispy_test
+      - name: "test: libterminal (via valgrind)"
+        run: valgrind --error-exitcode=64 ./build/src/terminal/terminal_test
+      - name: "Delete artifact: contour-ubuntu2004-tests"
+        uses: geekyeggo/delete-artifact@v1
+        with:
+          name: contour-ubuntu2004-tests
 
   check_ubuntu2004_matrix_test_matrix:
     if: ${{ always() }}
     runs-on: ubuntu-latest
-    name: tests matrix
-    needs: [ubuntu_2004_matrix, ubuntu_2004_packaging]
+    name: "Ubuntu Linux 20.04 post-check"
+    needs:
+      - ubuntu_2004_matrix
+      - ubuntu_2004_packaging
+      - test_ubuntu2004_valgrind
     steps:
       - name: Print matrix status
         run: |
@@ -604,41 +664,5 @@ jobs:
         run: ./build/src/crispy/crispy_test
       - name: "test: libterminal"
         run: ./build/src/terminal/terminal_test
-
-  test_ubuntu2004_valgrind:
-    name: "Run tests via valgrind"
-    runs-on: ubuntu-20.04
-    needs: [ubuntu_2004_matrix]
-    if: ${{ needs.ubuntu_2004_matrix.outputs.id == 'GCC 10 (C++20, RelWithDebInfo)' }}
-    steps:
-      - name: "download artifact"
-        uses: actions/download-artifact@v2
-        with:
-          name: contour-ubuntu2004-tests
-      - name: "fix unit test permissions"
-        run: find . -name '*_test' -exec chmod 0755 {} \;
-      - name: "install dependencies"
-        run: |
-          set -ex
-          ls -hlR
-          sudo apt -q update
-          sudo apt install -y \
-                          libfontconfig1 \
-                          libfreetype6 \
-                          libharfbuzz0b \
-                          libkf5windowsystem5 \
-                          libqt5gui5 \
-                          libqt5opengl5 \
-                          libyaml-cpp0.6 \
-                          ncurses-bin \
-                          valgrind
-      - name: "test: crispy (via valgrind)"
-        run: valgrind --error-exitcode=64 ./build/src/crispy/crispy_test
-      - name: "test: libterminal (via valgrind)"
-        run: valgrind --error-exitcode=64 ./build/src/terminal/terminal_test
-      - name: "Delete artifact: contour-ubuntu2004-tests"
-        uses: geekyeggo/delete-artifact@v1
-        with:
-          name: contour-ubuntu2004-tests
 
   # }}}
