@@ -129,7 +129,6 @@ Terminal::Terminal(Pty& _pty,
     cursorBlinkState_ { 1 },
     wordDelimiters_ { unicode::from_utf8(_wordDelimiters) },
     mouseProtocolBypassModifier_ { _mouseProtocolBypassModifier },
-    inputGenerator_ {},
     copyLastMarkRangeOffset_ { _copyLastMarkRangeOffset },
     // clang-format off
     state_ { *this,
@@ -534,7 +533,7 @@ bool Terminal::sendKeyPressEvent(Key _key, Modifier _modifier, Timestamp _now)
         return true;
 
     viewport_.scrollToBottom();
-    bool const success = inputGenerator_.generate(_key, _modifier);
+    bool const success = state_.inputGenerator.generate(_key, _modifier);
     flushInput();
     viewport_.scrollToBottom();
     return success;
@@ -549,7 +548,7 @@ bool Terminal::sendCharPressEvent(char32_t _value, Modifier _modifier, Timestamp
     if (screen_.isModeEnabled(AnsiMode::KeyboardAction))
         return true;
 
-    auto const success = inputGenerator_.generate(_value, _modifier);
+    auto const success = state_.inputGenerator.generate(_value, _modifier);
 
     flushInput();
     viewport_.scrollToBottom();
@@ -567,7 +566,8 @@ bool Terminal::sendMousePressEvent(Modifier _modifier,
         mouseProtocolBypassModifier_ == Modifier::None || !_modifier.contains(mouseProtocolBypassModifier_);
 
     if (respectMouseProtocol_
-        && inputGenerator_.generateMousePress(_modifier, _button, currentMousePosition_, _pixelPosition))
+        && state_.inputGenerator.generateMousePress(
+            _modifier, _button, currentMousePosition_, _pixelPosition))
     {
         // TODO: Ctrl+(Left)Click's should still be catched by the terminal iff there's a hyperlink
         // under the current position
@@ -643,7 +643,7 @@ bool Terminal::sendMouseMoveEvent(Modifier _modifier,
 
     // Do not handle mouse-move events in sub-cell dimensions.
     if (respectMouseProtocol_
-        && inputGenerator_.generateMouseMove(_modifier, currentMousePosition_, _pixelPosition))
+        && state_.inputGenerator.generateMouseMove(_modifier, currentMousePosition_, _pixelPosition))
     {
         flushInput();
         return true;
@@ -676,7 +676,8 @@ bool Terminal::sendMouseReleaseEvent(Modifier _modifier,
     verifyState();
 
     if (respectMouseProtocol_
-        && inputGenerator_.generateMouseRelease(_modifier, _button, currentMousePosition_, _pixelPosition))
+        && state_.inputGenerator.generateMouseRelease(
+            _modifier, _button, currentMousePosition_, _pixelPosition))
     {
         flushInput();
         return true;
@@ -708,7 +709,7 @@ bool Terminal::sendFocusInEvent()
     screen_.setFocus(true);
     breakLoopAndRefreshRenderBuffer();
 
-    if (inputGenerator_.generateFocusInEvent())
+    if (state_.inputGenerator.generateFocusInEvent())
     {
         flushInput();
         return true;
@@ -722,7 +723,7 @@ bool Terminal::sendFocusOutEvent()
     screen_.setFocus(false);
     breakLoopAndRefreshRenderBuffer();
 
-    if (inputGenerator_.generateFocusOutEvent())
+    if (state_.inputGenerator.generateFocusOutEvent())
     {
         flushInput();
         return true;
@@ -733,35 +734,35 @@ bool Terminal::sendFocusOutEvent()
 
 void Terminal::sendPaste(string_view _text)
 {
-    inputGenerator_.generatePaste(_text);
+    state_.inputGenerator.generatePaste(_text);
     flushInput();
 }
 
 void Terminal::sendRaw(string_view _text)
 {
-    inputGenerator_.generateRaw(_text);
+    state_.inputGenerator.generateRaw(_text);
 }
 
 bool Terminal::hasInput() const noexcept
 {
-    return !inputGenerator_.peek().empty();
+    return !state_.inputGenerator.peek().empty();
 }
 
 size_t Terminal::pendingInputBytes() const noexcept
 {
-    return !inputGenerator_.peek().size();
+    return !state_.inputGenerator.peek().size();
 }
 
 void Terminal::flushInput()
 {
-    if (inputGenerator_.peek().empty())
+    if (state_.inputGenerator.peek().empty())
         return;
 
     // XXX Should be the only location that does write to the PTY's stdin to avoid race conditions.
-    auto const input = inputGenerator_.peek();
+    auto const input = state_.inputGenerator.peek();
     auto const rv = pty_.write(input.data(), input.size());
     if (rv > 0)
-        inputGenerator_.consume(rv);
+        state_.inputGenerator.consume(rv);
 }
 
 void Terminal::writeToScreen(string_view _data)
@@ -1001,12 +1002,12 @@ void Terminal::resizeWindow(ImageSize _size)
 
 void Terminal::setApplicationkeypadMode(bool _enabled)
 {
-    inputGenerator_.setApplicationKeypadMode(_enabled);
+    state_.inputGenerator.setApplicationKeypadMode(_enabled);
 }
 
 void Terminal::setBracketedPaste(bool _enabled)
 {
-    inputGenerator_.setBracketedPaste(_enabled);
+    state_.inputGenerator.setBracketedPaste(_enabled);
 }
 
 void Terminal::setCursorStyle(CursorDisplay _display, CursorShape _shape)
@@ -1022,22 +1023,22 @@ void Terminal::setCursorVisibility(bool /*_visible*/)
 
 void Terminal::setGenerateFocusEvents(bool _enabled)
 {
-    inputGenerator_.setGenerateFocusEvents(_enabled);
+    state_.inputGenerator.setGenerateFocusEvents(_enabled);
 }
 
 void Terminal::setMouseProtocol(MouseProtocol _protocol, bool _enabled)
 {
-    inputGenerator_.setMouseProtocol(_protocol, _enabled);
+    state_.inputGenerator.setMouseProtocol(_protocol, _enabled);
 }
 
 void Terminal::setMouseTransport(MouseTransport _transport)
 {
-    inputGenerator_.setMouseTransport(_transport);
+    state_.inputGenerator.setMouseTransport(_transport);
 }
 
 void Terminal::setMouseWheelMode(InputGenerator::MouseWheelMode _mode)
 {
-    inputGenerator_.setMouseWheelMode(_mode);
+    state_.inputGenerator.setMouseWheelMode(_mode);
 }
 
 void Terminal::setWindowTitle(string_view _title)
@@ -1053,13 +1054,13 @@ void Terminal::setTerminalProfile(string const& _configProfileName)
 void Terminal::useApplicationCursorKeys(bool _enable)
 {
     auto const keyMode = _enable ? KeyMode::Application : KeyMode::Normal;
-    inputGenerator_.setCursorKeysMode(keyMode);
+    state_.inputGenerator.setCursorKeysMode(keyMode);
 }
 
 void Terminal::hardReset()
 {
     // NB: Screen was already reset.
-    inputGenerator_.reset();
+    state_.inputGenerator.reset();
 }
 
 void Terminal::discardImage(Image const& _image)

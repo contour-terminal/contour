@@ -131,8 +131,8 @@ class Terminal
 
     bool handleMouseSelection(Modifier _modifier, Timestamp _now);
 
-    bool applicationCursorKeys() const noexcept { return inputGenerator_.applicationCursorKeys(); }
-    bool applicationKeypad() const noexcept { return inputGenerator_.applicationKeypad(); }
+    bool applicationCursorKeys() const noexcept { return state_.inputGenerator.applicationCursorKeys(); }
+    bool applicationKeypad() const noexcept { return state_.inputGenerator.applicationKeypad(); }
 
     bool hasInput() const noexcept;
     size_t pendingInputBytes() const noexcept;
@@ -417,7 +417,6 @@ class Terminal
     bool respectMouseProtocol_ = true;    // shift-click can disable that, button release sets it back to true
     bool leftMouseButtonPressed_ = false; // tracks left-mouse button pressed state (used for cell selection).
 
-    InputGenerator inputGenerator_;
     LineOffset copyLastMarkRangeOffset_;
 
     TerminalState<Terminal> state_;

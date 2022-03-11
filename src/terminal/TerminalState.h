@@ -19,6 +19,7 @@
 #include <terminal/GraphicsAttributes.h>
 #include <terminal/Grid.h>
 #include <terminal/Hyperlink.h>
+#include <terminal/InputGenerator.h>
 #include <terminal/Parser.h>
 #include <terminal/ScreenEvents.h> // ScreenType
 #include <terminal/Sequencer.h>
@@ -522,6 +523,8 @@ struct TerminalState
     Sequencer<TheTerminal> sequencer;
     parser::Parser<Sequencer<TheTerminal>> parser;
     uint64_t instructionCounter = 0;
+
+    InputGenerator inputGenerator {};
 
     char32_t precedingGraphicCharacter = {};
     unicode::utf8_decoder_state utf8DecoderState = {};
