@@ -165,7 +165,12 @@ namespace detail
 
         struct ProgressBar
         {
-            enum class Part { Left, Middle, Right };
+            enum class Part
+            {
+                Left,
+                Middle,
+                Right
+            };
 
             ImageSize const size {};
             int const underlinePosition = 1;
@@ -199,15 +204,15 @@ namespace detail
                     `-----------` <- cell bottom
                 */
 
+                // clang-format off
                 auto constexpr Gap = 1 / 12_th;
-                auto constexpr BlockLeft =  3 / 12_th;
+                auto constexpr BlockLeft = 3 / 12_th;
                 auto constexpr BlockRight = 9 / 12_th;
                 auto constexpr BlockTop = 3 / 12_th;
-                auto const BlockBottom = 1.0 - (double(underlinePosition) / unbox<double>(size.height)) - 2*Gap;
+                auto const BlockBottom = 1.0 - (double(underlinePosition) / unbox<double>(size.height)) - 2 * Gap;
 
                 auto b = blockElement<1>(size);
 
-                // clang-format off
                 switch (part_)
                 {
                 case Part::Left:
@@ -1492,7 +1497,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
     case 0xEE02: return progressBar().right();
     case 0xEE03: return progressBar().left().filled();
     case 0xEE04: return progressBar().middle().filled();
-    case 0xEE05: return progressBar().right().filled(); break;
+    case 0xEE05: return progressBar().right().filled();
     }
 
     return nullopt;
