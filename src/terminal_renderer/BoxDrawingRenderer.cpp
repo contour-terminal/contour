@@ -995,7 +995,7 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) const noexcept
            || ascending(0x2594, 0x259F)   // Terminal graphic characters
            || ascending(0x1FB00, 0x1FBAF) // more block sextants
            || ascending(0x1FBF0, 0x1FBF9) // digits
-           || ascending(0xEE00, 0xEE05)   // progress bar (Fira Code)
+           || ascending(0xEE00, 0xEE0B)   // progress bar & progress circle (Fira Code)
            || codepoint == 0xE0B4 || codepoint == 0xE0B6 || codepoint == 0xE0BC || codepoint == 0xE0BE;
 }
 
