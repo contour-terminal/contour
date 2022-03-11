@@ -334,9 +334,6 @@ class InputGenerator
     /// Resets the input generator's state, as required by the RIS (hard reset) VT sequence.
     void reset();
 
-    void lock() noexcept { mutex_.lock(); }
-    void unlock() noexcept { mutex_.unlock(); }
-
   private:
     bool generateMouse(MouseEventType _eventType,
                        Modifier _modifier,
@@ -371,7 +368,6 @@ class InputGenerator
     MouseWheelMode mouseWheelMode_ = MouseWheelMode::Default;
     Sequence pendingSequence_ {};
     int consumedBytes_ {};
-    std::mutex mutex_ {};
 
     std::set<MouseButton> currentlyPressedMouseButtons_ {};
     CellLocation currentMousePosition_ {}; // current mouse position

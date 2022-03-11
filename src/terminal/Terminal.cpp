@@ -754,7 +754,6 @@ size_t Terminal::pendingInputBytes() const noexcept
 
 void Terminal::flushInput()
 {
-    auto const _l = std::lock_guard { inputGenerator_ };
     if (inputGenerator_.peek().empty())
         return;
 
