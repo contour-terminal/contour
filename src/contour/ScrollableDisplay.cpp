@@ -123,8 +123,7 @@ void ScrollableDisplay::updatePosition()
             break;
         case config::ScrollBarPosition::Hidden: {
             scrollBar_->hide();
-            auto const cr = contentsRect();
-            mainWidget_->resize(cr.right(), cr.bottom());
+            mainWidget_->resize(width(), height());
             mainWidget_->move(0, 0);
             break;
         }
