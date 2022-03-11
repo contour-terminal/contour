@@ -7,7 +7,7 @@ on:
     - '.github/ISSUE_TEMPLATE/**'
     - '.github/*.yml'
     - 'LICENSE.txt'
-    - '*.md'
+    - 'README.md'
     - '*.sh'
     branches:
     - master
