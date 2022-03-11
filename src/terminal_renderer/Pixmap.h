@@ -208,6 +208,20 @@ struct Pixmap
     }
     Pixmap& line(Ratio _from, Ratio _to);
 
+    Pixmap& rect(Ratio topLeft, Ratio bottomRight) noexcept
+    {
+        auto const top = int(topLeft.y * unbox<double>(_size.height));
+        auto const left = int(topLeft.x * unbox<double>(_size.width));
+        auto const bottom = int(bottomRight.y * unbox<double>(_size.height));
+        auto const right = int(bottomRight.x * unbox<double>(_size.width));
+
+        for (int y = top; y < bottom; ++y)
+            for (int x = left; x < right; ++x)
+                paint(x, y, 0xFF);
+
+        return *this;
+    }
+
     Pixmap& segment_bar(int which);
     template <typename... More>
     Pixmap& segment_bar(int which, More... more);

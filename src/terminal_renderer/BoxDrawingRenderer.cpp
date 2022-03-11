@@ -163,6 +163,80 @@ namespace detail
             }
         }
 
+        struct ProgressBar
+        {
+            enum class Part { Left, Middle, Right };
+
+            ImageSize const size {};
+            int const underlinePosition = 1;
+
+            Part part_ = Part::Middle;
+            bool filled_ = false;
+
+            // clang-format off
+            constexpr ProgressBar& left() noexcept { part_ = Part::Left; return *this; }
+            constexpr ProgressBar& middle() noexcept { part_ = Part::Middle; return *this; }
+            constexpr ProgressBar& right() noexcept { part_ = Part::Right; return *this; }
+            constexpr ProgressBar& filled() noexcept { filled_ = true; return *this; }
+            // clang-format on
+
+            operator atlas::Buffer() const
+            {
+                /*
+                    .___________. <- cell top
+                    |           |
+                    | XXXXXXXXX |
+                    | X       X |
+                    | X XXXXX X |
+                    | X XXXXX X |
+                    | X XXXXX X |
+                    | X XXXXX X |
+                    | X XXXXX X |
+                    | X XXXXX X |
+                    | X       X |
+                    | XXXXXXXXX |
+                    |           |
+                    `-----------` <- cell bottom
+                */
+
+                auto constexpr Gap = 1 / 12_th;
+                auto constexpr BlockLeft =  3 / 12_th;
+                auto constexpr BlockRight = 9 / 12_th;
+                auto constexpr BlockTop = 3 / 12_th;
+                auto const BlockBottom = 1.0 - (double(underlinePosition) / unbox<double>(size.height)) - 2*Gap;
+
+                auto b = blockElement<1>(size);
+
+                // clang-format off
+                switch (part_)
+                {
+                case Part::Left:
+                    b.rect({ BlockLeft-2*Gap, BlockTop-2*Gap },  { 1,             BlockTop-Gap });      // top line
+                    b.rect({ BlockLeft-2*Gap, BlockBottom+Gap }, { 1,             BlockBottom+2*Gap }); // bottom line
+                    b.rect({ BlockLeft-2*Gap, BlockTop-2*Gap },  { BlockLeft-Gap, BlockBottom+Gap });   // left bar
+                    if (filled_)
+                        b.rect({ BlockLeft,   BlockTop },        { 1,             BlockBottom });
+                    break;
+                case Part::Middle:
+                    b.rect({ 0, BlockTop-2*Gap },  { 1, BlockTop-Gap });      // top line
+                    b.rect({ 0, BlockBottom+Gap }, { 1, BlockBottom+2*Gap }); // bottom line
+                    if (filled_)
+                        b.rect({ 0,   BlockTop },  { 1, BlockBottom });
+                    break;
+                case Part::Right:
+                    b.rect({ 0,              BlockTop-2*Gap },  { BlockRight+2*Gap, BlockTop-Gap });      // top line
+                    b.rect({ 0,              BlockBottom+Gap }, { BlockRight+2*Gap, BlockBottom+2*Gap }); // bottom line
+                    b.rect({ BlockRight+Gap, BlockTop-2*Gap },  { BlockRight+2*Gap, BlockBottom+Gap });   // left bar
+                    if (filled_)
+                        b.rect({ 0,          BlockTop },        { BlockRight,       BlockBottom });
+                    break;
+                }
+                // clang-format on
+
+                return b;
+            }
+        };
+
         struct Box
         {
             Line up_ = NoLine;
@@ -921,6 +995,7 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) const noexcept
            || ascending(0x2594, 0x259F)   // Terminal graphic characters
            || ascending(0x1FB00, 0x1FBAF) // more block sextants
            || ascending(0x1FBF0, 0x1FBF9) // digits
+           || ascending(0xEE00, 0xEE05)   // progress bar (Fira Code)
            || codepoint == 0xE0B4 || codepoint == 0xE0B6 || codepoint == 0xE0BC || codepoint == 0xE0BE;
 }
 
@@ -946,6 +1021,16 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
             auto b = blockElement<2>(size);
             b.lineThickness(_gridMetrics.underline.thickness);
             return b;
+        };
+    auto const progressBar =
+#if __cplusplus > 201703L
+        [=, this]
+#else
+        [=]
+#endif
+        () {
+            auto constexpr AntiAliasingSamplingFactor = 1;
+            return ProgressBar { size, _gridMetrics.underline.position };
         };
     auto const segmentArt =
 #if __cplusplus > 201703L
@@ -1400,6 +1485,14 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
     case 0xE0B6: return /*  */ blockElement<2>(size).halfFilledCircleLeft();
     case 0xE0BC: return /*  */ ud({ 0, 1 }, { 1, 0 });
     case 0xE0BE: return /*  */ ud({ 0, 0 }, { 1, 1 });
+
+    // PUA defines as introduced by FiraCode: https://github.com/tonsky/FiraCode/issues/1324
+    case 0xEE00: return progressBar().left();
+    case 0xEE01: return progressBar().middle();
+    case 0xEE02: return progressBar().right();
+    case 0xEE03: return progressBar().left().filled();
+    case 0xEE04: return progressBar().middle().filled();
+    case 0xEE05: return progressBar().right().filled(); break;
     }
 
     return nullopt;
