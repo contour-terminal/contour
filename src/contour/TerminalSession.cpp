@@ -111,10 +111,14 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
 {
     if (_liveConfig)
     {
-        LOGSTORE(SessionLog)
-        ("Enable live configuration reloading of file {}.", config_.backingFilePath.generic_string());
-        configFileChangeWatcher_.emplace(config_.backingFilePath,
-                                         [this](FileChangeWatcher::Event event) { onConfigReload(event); });
+        SessionLog()("Enable live configuration reloading of file {}.",
+                     config_.backingFilePath.generic_string());
+        configFileChangeWatcher_ = make_unique<QFileSystemWatcher>();
+        configFileChangeWatcher_->addPath(QString::fromStdString(config_.backingFilePath.generic_string()));
+        connect(configFileChangeWatcher_.get(),
+                SIGNAL(fileChanged(const QString&)),
+                this,
+                SLOT(onConfigReload()));
     }
 
     profile_ = *config_.profile(profileName_); // XXX do it again. but we've to be more efficient here
@@ -1092,13 +1096,19 @@ bool TerminalSession::requestPermission(config::Permission _allowedByConfig, str
     return display_->requestPermission(_allowedByConfig, _topicText);
 }
 
-void TerminalSession::onConfigReload(FileChangeWatcher::Event /*_event*/)
+void TerminalSession::onConfigReload()
 {
     display_->post([this]() { reloadConfigWithProfile(profileName_); });
 
     // TODO: needed still?
     // if (setScreenDirty())
     //     update();
+
+    if (configFileChangeWatcher_)
+        connect(configFileChangeWatcher_.get(),
+                SIGNAL(fileChanged(const QString&)),
+                this,
+                SLOT(onConfigReload()));
 }
 
 // }}}

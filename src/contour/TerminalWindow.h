@@ -15,7 +15,6 @@
 
 #include <contour/Actions.h>
 #include <contour/Config.h>
-#include <contour/FileChangeWatcher.h>
 #include <contour/TerminalDisplay.h>
 #include <contour/TerminalSession.h>
 #include <contour/opengl/TerminalWidget.h>
