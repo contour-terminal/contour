@@ -148,6 +148,9 @@ profiles:
         # Default value is the user's home directory.
         initial_working_directory: "~"
 
+        # When this profile is *activated*, this flag decides
+        # whether or not the title bar will be shown
+        show_title_bar: true
         # When this profile is being *activated*, this flag decides
         # whether or not to put the terminal's screen into fullscreen mode.
         #
@@ -487,6 +490,7 @@ color_schemes:
 # - SendChars         Writes given characters in `chars` member to the applications input.
 # - ToggleAllKeyMaps  Disables/enables responding to all keybinds (this keybind will be preserved when disabling all others).
 # - ToggleFullScreen  Enables/disables full screen mode.
+# - ToggleTitleBar    Shows/Hides titlebar
 # - WriteScreen       Writes VT sequence in `chars` member to the screen (bypassing the application).
 
 input_mapping:

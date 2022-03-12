@@ -119,6 +119,7 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     void setBlurBehind(bool _enable) override;
     void setBackgroundImage(std::shared_ptr<terminal::BackgroundImage const> const& backgroundImage) override;
     void toggleFullScreen() override;
+    void toggleTitleBar() override;
     void setHyperlinkDecoration(terminal::renderer::Decorator _normal,
                                 terminal::renderer::Decorator _hover) override;
     void setBackgroundOpacity(terminal::Opacity _opacity) override;
@@ -194,6 +195,7 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     std::unique_ptr<terminal::renderer::RenderTarget> renderTarget_;
     PermissionCache rememberedPermissions_ {};
     bool maximizedState_ = false;
+    bool titleBarState_ = !profile().show_title_bar;
 
     // update() timer used to animate the blinking cursor.
     QTimer updateTimer_;

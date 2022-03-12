@@ -1117,6 +1117,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     tryLoadChild(_usedKeys, _doc, basePath, "fullscreen", profile.fullscreen);
     tryLoadChild(_usedKeys, _doc, basePath, "refresh_rate", profile.refreshRate);
     tryLoadChild(_usedKeys, _doc, basePath, "copy_last_mark_range_offset", profile.copyLastMarkRangeOffset);
+    tryLoadChild(_usedKeys, _doc, basePath, "show_title_bar", profile.show_title_bar);
 
     tryLoadChild(_usedKeys, _doc, basePath, "wm_class", profile.wmClass);
 

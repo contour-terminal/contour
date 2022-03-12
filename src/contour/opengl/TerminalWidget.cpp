@@ -41,6 +41,7 @@
 #include <QtGui/QWindow>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QMessageBox>
+#include <QtWidgets/QStyle>
 
 #include <QtNetwork/QHostInfo>
 
@@ -1131,6 +1132,27 @@ void TerminalWidget::toggleFullScreen()
     //     window_.setVisibility(QWindow::Windowed);
     // else
     //     window_.setVisibility(QWindow::FullScreen);
+}
+
+void TerminalWidget::toggleTitleBar()
+{
+    bool fullscreenState = window()->isFullScreen();
+    maximizedState_ = window()->isMaximized();
+    auto pos = window()->pos();
+    auto windowYCoordinate = pos.y();
+    if (titleBarState_)
+        windowYCoordinate += window()->style()->pixelMetric(QStyle::PM_TitleBarHeight)
+                             + window()->style()->pixelMetric(QStyle::PM_SizeGripSize);
+    pos.setY(windowYCoordinate);
+    window()->setWindowFlag(Qt::FramelessWindowHint, !titleBarState_);
+    titleBarState_ = !titleBarState_;
+    window()->showNormal();
+    terminal().sendFocusInEvent();
+    if (fullscreenState)
+        toggleFullScreen();
+    if (maximizedState_)
+        window()->showMaximized();
+    window()->move(pos);
 }
 
 void TerminalWidget::setHyperlinkDecoration(terminal::renderer::Decorator _normal,

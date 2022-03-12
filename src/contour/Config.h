@@ -131,6 +131,7 @@ struct TerminalProfile
     terminal::Process::ExecInfo shell;
     bool maximized = false;
     bool fullscreen = false;
+    bool show_title_bar = true;
     double refreshRate = 0.0; // 0=auto
     terminal::LineOffset copyLastMarkRangeOffset = terminal::LineOffset(0);
 
