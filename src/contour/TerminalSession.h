@@ -14,7 +14,6 @@
 #pragma once
 
 #include <contour/Config.h>
-#include <contour/FileChangeWatcher.h>
 #include <contour/TerminalDisplay.h>
 
 #include <terminal/Terminal.h>
@@ -22,6 +21,8 @@
 #include <terminal_renderer/Renderer.h>
 
 #include <crispy/point.h>
+
+#include <QtCore/QFileSystemWatcher>
 
 #include <functional>
 
@@ -38,8 +39,10 @@ class ContourGuiApp;
  * - text based displays (think of TMUX client)
  * - headless-mode (think of TMUX server)
  */
-class TerminalSession: public terminal::Terminal::Events
+class TerminalSession: public QObject, public terminal::Terminal::Events
 {
+    Q_OBJECT
+
   public:
     /**
      * Constructs a single terminal session.
@@ -179,6 +182,9 @@ class TerminalSession: public terminal::Terminal::Events
         return uptimeSecs;
     }
 
+  public Q_SLOTS:
+    void onConfigReload();
+
   private:
     // helpers
     bool reloadConfig(config::Config _newConfig, std::string const& _profileName);
@@ -191,7 +197,6 @@ class TerminalSession: public terminal::Terminal::Events
     void followHyperlink(terminal::HyperlinkInfo const& _hyperlink);
     bool requestPermission(config::Permission _allowedByConfig, std::string_view _topicText);
     void setFontSize(text::font_size _size);
-    void onConfigReload(FileChangeWatcher::Event _event);
     void setDefaultCursor();
     void configureTerminal();
     void configureDisplay();
@@ -216,7 +221,7 @@ class TerminalSession: public terminal::Terminal::Events
     bool terminatedAndWaitingForKeyPress_ = false;
     TerminalDisplay* display_ = nullptr;
 
-    std::optional<FileChangeWatcher> configFileChangeWatcher_;
+    std::unique_ptr<QFileSystemWatcher> configFileChangeWatcher_;
 
     // state vars
     //
