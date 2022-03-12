@@ -158,7 +158,7 @@ struct Process::Private
     mutable std::optional<Process::ExitStatus> exitStatus {};
     std::optional<std::thread> exitWatcher;
 
-    Pty* pty = nullptr;
+    std::unique_ptr<Pty> pty {};
 
     PROCESS_INFORMATION processInfo {};
     STARTUPINFOEX startupInfo {};
@@ -174,7 +174,7 @@ Process::Process(string const& _path,
     d(new Private {}, [](Private* p) { delete p; })
 {
     d->pty = move(_pty);
-    Require(static_cast<ConPty const*>(*d->pty));
+    Require(static_cast<ConPty const*>(d->pty.get()));
 
     initializeStartupInfoAttachedToPTY(d->startupInfo, static_cast<ConPty&>(*d->pty));
 
