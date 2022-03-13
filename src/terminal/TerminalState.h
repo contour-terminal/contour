@@ -38,8 +38,7 @@
 namespace terminal
 {
 
-template <typename EventListener>
-class Screen;
+class Terminal;
 
 // {{{ enums
 enum class ControlTransmissionMode
@@ -226,8 +225,8 @@ constexpr bool isValidAnsiMode(unsigned int _mode) noexcept
     return false;
 }
 
-std::string to_string(DECMode _mode);
 std::string to_string(AnsiMode _mode);
+std::string to_string(DECMode _mode);
 
 constexpr unsigned toDECModeNum(DECMode m)
 {
@@ -419,47 +418,18 @@ struct Cursor
  * TODO: Let's move all shared data into one place,
  * ultimatively ending up in Terminal (or keep TerminalState).
  */
-template <typename TheTerminal>
 struct TerminalState
 {
-    TerminalState(TheTerminal& _terminal,
+    TerminalState(Terminal& _terminal,
                   PageSize _pageSize,
                   LineCount _maxHistoryLineCount,
                   ImageSize _maxImageSize,
                   unsigned _maxImageColorRegisters,
                   bool _sixelCursorConformance,
                   ColorPalette _colorPalette,
-                  bool _allowReflowOnResize):
-        terminal { _terminal },
-        pageSize { _pageSize },
-        cellPixelSize {},
-        margin { Margin::Vertical { {}, pageSize.lines.as<LineOffset>() - LineOffset(1) },
-                 Margin::Horizontal { {}, pageSize.columns.as<ColumnOffset>() - ColumnOffset(1) } },
-        defaultColorPalette { _colorPalette },
-        colorPalette { std::move(_colorPalette) },
-        maxImageColorRegisters { _maxImageColorRegisters },
-        maxImageSize { _maxImageSize },
-        maxImageSizeLimit { _maxImageSize },
-        imageColorPalette { std::make_shared<SixelColorPalette>(maxImageColorRegisters,
-                                                                maxImageColorRegisters) },
-        imagePool { [this](Image const* _image) {
-            terminal.discardImage(*_image);
-        } },
-        sixelCursorConformance { _sixelCursorConformance },
-        allowReflowOnResize { _allowReflowOnResize },
-        grids { Grid<Cell>(_pageSize, _allowReflowOnResize, _maxHistoryLineCount),
-                Grid<Cell>(_pageSize, false, LineCount(0)) },
-        activeGrid { &grids[0] },
-        cursor {},
-        lastCursorPosition {},
-        hyperlinks { HyperlinkCache { 1024 } },
-        respondToTCapQuery { true },
-        sequencer { _terminal, imageColorPalette },
-        parser { std::ref(sequencer) }
-    {
-    }
+                  bool _allowReflowOnResize);
 
-    TheTerminal& terminal;
+    Terminal& terminal;
 
     PageSize pageSize;
     ImageSize cellPixelSize; ///< contains the pixel size of a single cell, or area(cellPixelSize_) == 0 if
@@ -490,7 +460,8 @@ struct TerminalState
     bool allowReflowOnResize;
 
     ScreenType screenType = ScreenType::Main;
-    std::array<Grid<Cell>, 2> grids;
+    Grid<Cell> primaryBuffer;
+    Grid<Cell> alternateBuffer;
     Grid<Cell>* activeGrid;
 
     // cursor related
@@ -520,8 +491,8 @@ struct TerminalState
     std::string windowTitle {};
     std::stack<std::string> savedWindowTitles {};
 
-    Sequencer<TheTerminal> sequencer;
-    parser::Parser<Sequencer<TheTerminal>> parser;
+    Sequencer sequencer;
+    parser::Parser<Sequencer> parser;
     uint64_t instructionCounter = 0;
 
     InputGenerator inputGenerator {};

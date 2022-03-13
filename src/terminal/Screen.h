@@ -14,7 +14,6 @@
 #pragma once
 
 #include <terminal/Capabilities.h>
-#include <terminal/Cell.h>
 #include <terminal/Charset.h>
 #include <terminal/Color.h>
 #include <terminal/Grid.h>
@@ -63,11 +62,11 @@ namespace terminal
  * allowing the object owner to control which part of the screen (or history)
  * to be viewn.
  */
-template <typename TheTerminal>
+template <typename Cell>
 class Screen: public capabilities::StaticDatabase
 {
   public:
-    Screen(TerminalState<TheTerminal>& terminalState, ScreenType screenType);
+    Screen(TerminalState& terminalState, ScreenType screenType);
 
     Screen(Screen const&) = delete;
     Screen& operator=(Screen const&) = delete;
@@ -216,6 +215,8 @@ class Screen: public capabilities::StaticDatabase
     void inspect();
     void smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, XtSmGraphics::Value _value);
     // }}}
+
+    void setMaxImageSize(ImageSize size) noexcept { _state.maxImageSize = size; }
 
     void setMaxImageSize(ImageSize _effective, ImageSize _limit)
     {
@@ -384,8 +385,8 @@ class Screen: public capabilities::StaticDatabase
     Cell& useCellAt(CellLocation p) noexcept { return useCellAt(p.line, p.column); }
     Cell const& at(CellLocation p) const noexcept { return grid().at(p.line, p.column); }
 
-    bool isPrimaryScreen() const noexcept { return _state.activeGrid == &_state.grids[0]; }
-    bool isAlternateScreen() const noexcept { return _state.activeGrid == &_state.grids[1]; }
+    bool isPrimaryScreen() const noexcept { return _state.activeGrid == &_state.primaryBuffer; }
+    bool isAlternateScreen() const noexcept { return _state.activeGrid == &_state.alternateBuffer; }
 
     bool isModeEnabled(AnsiMode m) const noexcept { return _state.modes.enabled(m); }
     bool isModeEnabled(DECMode m) const noexcept { return _state.modes.enabled(m); }
@@ -432,27 +433,16 @@ class Screen: public capabilities::StaticDatabase
     void saveWindowTitle();
     void restoreWindowTitle();
 
-    void setMaxImageSize(ImageSize _size) noexcept { _state.sequencer.setMaxImageSize(_size); }
-
     void scrollUp(LineCount n) { scrollUp(n, _state.margin); }
     void scrollDown(LineCount n) { scrollDown(n, _state.margin); }
 
     void verifyState() const;
 
-    // interactive replies
-    void reply(std::string const& message) { _state.terminal.reply(message); }
-
-    template <typename... T>
-    void reply(fmt::format_string<T...> fmt, T&&... args)
-    {
-        reply(fmt::vformat(fmt, fmt::make_format_args(args...)));
-    }
-
     /// @returns the primary screen's grid.
-    Grid<Cell>& primaryGrid() noexcept { return _state.grids[0]; }
+    Grid<Cell>& primaryGrid() noexcept { return _state.primaryBuffer; }
 
     /// @returns the alternate  screen's grid.
-    Grid<Cell>& alternateGrid() noexcept { return _state.grids[1]; }
+    Grid<Cell>& alternateGrid() noexcept { return _state.alternateBuffer; }
 
     /// @returns the primary screen's grid if primary screen is active.
     Grid<Cell> const& grid() const noexcept { return *_state.activeGrid; }
@@ -479,6 +469,10 @@ class Screen: public capabilities::StaticDatabase
 
     HyperlinkStorage const& hyperlinks() const noexcept { return _state.hyperlinks; }
 
+    uint64_t instructionCounter() const noexcept { return _state.instructionCounter; }
+    void resetInstructionCounter() noexcept { _state.instructionCounter = 0; }
+    char32_t precedingGraphicCharacter() const noexcept { return _state.precedingGraphicCharacter; }
+
   private:
     void setBuffer(ScreenType _type);
     void applyPageSizeToCurrentBuffer();
@@ -504,8 +498,8 @@ class Screen: public capabilities::StaticDatabase
     /// Sets the current column to given logical column number.
     void setCurrentColumn(ColumnOffset _n);
 
-    TheTerminal& _terminal;
-    TerminalState<TheTerminal>& _state;
+    Terminal& _terminal;
+    TerminalState& _state;
     ScreenType const _screenType;
 };
 

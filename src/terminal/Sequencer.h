@@ -32,9 +32,6 @@
 namespace terminal
 {
 
-template <typename EventListener>
-class Screen;
-
 // {{{ TODO: refactor me
 // XTSMGRAPHICS (xterm extension)
 // CSI ? Pi ; Pa ; Pv S
@@ -123,26 +120,17 @@ enum class ApplyResult
 };
 // }}}
 
+class Terminal;
+
 /// Sequencer - The semantic VT analyzer layer.
 ///
 /// Sequencer implements the translation from VT parser events, forming a higher level Sequence,
 /// that can be matched against actions to perform on the target Screen.
-template <typename TheTerminal>
 class Sequencer
 {
-    decltype(auto) state() noexcept { return terminal_.state(); }
-    decltype(auto) state() const noexcept { return terminal_.state(); }
-
   public:
     /// Constructs the sequencer stage.
-    Sequencer(TheTerminal& _terminal, std::shared_ptr<SixelColorPalette> _imageColorPalette);
-
-    void setMaxImageSize(ImageSize value) { state().maxImageSize = value; }
-    void setUsePrivateColorRegisters(bool _value) { state().usePrivateColorRegisters = _value; }
-
-    uint64_t instructionCounter() const noexcept { return state().instructionCounter; }
-    void resetInstructionCounter() noexcept { state().instructionCounter = 0; }
-    char32_t precedingGraphicCharacter() const noexcept { return state().precedingGraphicCharacter; }
+    explicit Sequencer(Terminal& _terminal);
 
     // ParserEvents
     //
@@ -181,17 +169,13 @@ class Sequencer
     void applyAndLog(FunctionDefinition const& _function, Sequence const& _context);
     ApplyResult apply(FunctionDefinition const& _function, Sequence const& _context);
 
-    decltype(auto) screen() noexcept { return terminal_.screen(); }
-    decltype(auto) screen() const noexcept { return terminal_.screen(); }
-
     // private data
     //
-    TheTerminal& terminal_;
+    Terminal& terminal_;
     Sequence sequence_ {};
 
     std::unique_ptr<ParserExtension> hookedParser_;
     std::unique_ptr<SixelImageBuilder> sixelImageBuilder_;
-    std::shared_ptr<SixelColorPalette> imageColorPalette_;
 };
 
 } // namespace terminal

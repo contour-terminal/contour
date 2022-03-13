@@ -137,14 +137,16 @@ class Terminal
     bool hasInput() const noexcept;
     size_t pendingInputBytes() const noexcept;
     void flushInput();
+
+    std::string_view peekInput() const noexcept { return state_.inputGenerator.peek(); }
     // }}}
 
     /// Writes a given VT-sequence to screen.
     void writeToScreen(std::string_view _text);
 
     // viewport management
-    Viewport<Terminal>& viewport() noexcept { return viewport_; }
-    Viewport<Terminal> const& viewport() const noexcept { return viewport_; }
+    Viewport<Cell>& viewport() noexcept { return viewport_; }
+    Viewport<Cell> const& viewport() const noexcept { return viewport_; }
 
     // {{{ Screen Render Proxy
     std::optional<std::chrono::milliseconds> nextRender() const;
@@ -222,10 +224,10 @@ class Terminal
     }
 
     /// Only access this when having the terminal object locked.
-    Screen<Terminal> const& screen() const noexcept { return screen_; }
+    Screen<Cell> const& screen() const noexcept { return screen_; }
 
     /// Only access this when having the terminal object locked.
-    Screen<Terminal>& screen() noexcept { return screen_; }
+    Screen<Cell>& screen() noexcept { return screen_; }
 
     bool isLineWrapped(LineOffset _lineNumber) const noexcept
     {
@@ -360,8 +362,8 @@ class Terminal
 
     void verifyState();
 
-    TerminalState<Terminal>& state() noexcept { return state_; }
-    TerminalState<Terminal> const& state() const noexcept { return state_; }
+    TerminalState& state() noexcept { return state_; }
+    TerminalState const& state() const noexcept { return state_; }
 
   private:
     void mainLoop();
@@ -419,13 +421,13 @@ class Terminal
 
     LineOffset copyLastMarkRangeOffset_;
 
-    TerminalState<Terminal> state_;
-    Screen<Terminal> screen_;
+    TerminalState state_;
+    Screen<Cell> screen_;
 
     std::mutex mutable outerLock_;
     std::mutex mutable innerLock_;
     std::unique_ptr<std::thread> screenUpdateThread_;
-    Viewport<Terminal> viewport_;
+    Viewport<Cell> viewport_;
     std::unique_ptr<Selection> selection_;
     std::atomic<bool> hoveringHyperlink_ = false;
     std::atomic<bool> renderBufferUpdateEnabled_ = true;

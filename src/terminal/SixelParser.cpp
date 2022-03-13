@@ -275,11 +275,6 @@ void SixelParser::leaveState()
     }
 }
 
-void SixelParser::start()
-{
-    // no-op (for now)
-}
-
 void SixelParser::pass(char _char)
 {
     parse(_char);

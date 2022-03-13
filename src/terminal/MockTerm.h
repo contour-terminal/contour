@@ -13,25 +13,33 @@
  */
 #pragma once
 
-#include <terminal/Screen.h>
-#include <terminal/primitives.h>
+#include <terminal/Terminal.h>
 
 namespace terminal
 {
 
-class MockTerm: public MockScreenEvents
+class MockTerm: public Terminal::Events
 {
   public:
     explicit MockTerm(PageSize _size, LineCount _hist = {});
 
-    PageSize pageSize() const noexcept { return state_.pageSize; }
+    template <typename Init>
+    MockTerm(PageSize _size, LineCount _hist = {}, Init init = [](MockTerm&) {}):
+        MockTerm{_size, _hist}
+    {
+        init(*this);
+    }
 
-    Screen<MockTerm>& screen() noexcept { return primaryScreen_; }
-    TerminalState<MockTerm>& state() noexcept { return state_; }
-    TerminalState<MockTerm> const& state() const noexcept { return state_; }
+    decltype(auto) pageSize() const noexcept { return terminal.pageSize(); }
+    decltype(auto) screen() noexcept { return terminal.screen(); }
+    decltype(auto) state() noexcept { return terminal.state(); }
+    decltype(auto) state() const noexcept { return terminal.state(); }
 
-    TerminalState<MockTerm> state_;
-    Screen<MockTerm> primaryScreen_;
+    std::string windowTitle;
+    Terminal terminal;
+
+    // Events overrides
+    void setWindowTitle(std::string_view title) override { windowTitle = title; }
 };
 
 } // namespace terminal

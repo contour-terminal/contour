@@ -104,7 +104,6 @@ class SixelParser: public ParserExtension
     }
 
     // ParserExtension overrides
-    void start() override;
     void pass(char _char) override;
     void finalize() override;
 

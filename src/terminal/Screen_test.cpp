@@ -90,7 +90,8 @@ void logScreenText(Screen<T> const& screen, string const& headline = "")
 //     }
 // };
 
-decltype(auto) e(string const& s)
+template <typename S>
+decltype(auto) e(S const& s)
 {
     return crispy::escape(s);
 }
@@ -2265,13 +2266,13 @@ TEST_CASE("ReportCursorPosition", "[screen]")
     screen.moveCursorTo(LineOffset { 1 }, ColumnOffset { 2 });
 
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE("" == term.replyData);
+    REQUIRE("" == term.terminal.peekInput());
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
 
     SECTION("with Origin mode disabled")
     {
         screen.reportCursorPosition();
-        CHECK("\033[2;3R" == term.replyData);
+        CHECK("\033[2;3R" == term.terminal.peekInput());
     }
 
     SECTION("with margins and origin mode enabled")
@@ -2283,7 +2284,7 @@ TEST_CASE("ReportCursorPosition", "[screen]")
         screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 1 });
 
         screen.reportCursorPosition();
-        CHECK("\033[3;2R" == term.replyData);
+        CHECK("\033[3;2R" == term.terminal.peekInput());
     }
 }
 
@@ -2295,13 +2296,13 @@ TEST_CASE("ReportExtendedCursorPosition", "[screen]")
     screen.moveCursorTo(LineOffset { 1 }, ColumnOffset { 2 });
 
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE("" == term.replyData);
+    REQUIRE("" == term.terminal.peekInput());
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
 
     SECTION("with Origin mode disabled")
     {
         screen.reportExtendedCursorPosition();
-        CHECK("\033[2;3;1R" == term.replyData);
+        CHECK("\033[2;3;1R" == term.terminal.peekInput());
     }
 
     SECTION("with margins and origin mode enabled")
@@ -2313,7 +2314,7 @@ TEST_CASE("ReportExtendedCursorPosition", "[screen]")
         screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 1 });
 
         screen.reportExtendedCursorPosition();
-        CHECK("\033[3;2;1R" == term.replyData);
+        CHECK("\033[3;2;1R" == term.terminal.peekInput());
     }
 }
 
@@ -2346,14 +2347,16 @@ TEST_CASE("RequestMode", "[screen]")
     {
         screen.setMode(AnsiMode::Insert, true); // IRM
         screen.requestAnsiMode((unsigned) AnsiMode::Insert);
-        REQUIRE(e(term.replyData) == e(fmt::format("\033[{};1$y", toAnsiModeNum(AnsiMode::Insert))));
+        REQUIRE(e(term.terminal.peekInput())
+                == e(fmt::format("\033[{};1$y", toAnsiModeNum(AnsiMode::Insert))));
     }
 
     SECTION("ANSI modes: disabled")
     {
         screen.setMode(AnsiMode::Insert, false); // IRM
         screen.requestAnsiMode((unsigned) AnsiMode::Insert);
-        REQUIRE(e(term.replyData) == e(fmt::format("\033[{};2$y", toAnsiModeNum(AnsiMode::Insert))));
+        REQUIRE(e(term.terminal.peekInput())
+                == e(fmt::format("\033[{};2$y", toAnsiModeNum(AnsiMode::Insert))));
     }
 
     SECTION("ANSI modes: unknown")
@@ -2361,21 +2364,23 @@ TEST_CASE("RequestMode", "[screen]")
         AnsiMode m = static_cast<AnsiMode>(1234);
         screen.setMode(m, true); // DECOM
         screen.requestAnsiMode((unsigned) m);
-        REQUIRE(e(term.replyData) == e(fmt::format("\033[{};0$y", toAnsiModeNum(m))));
+        REQUIRE(e(term.terminal.peekInput()) == e(fmt::format("\033[{};0$y", toAnsiModeNum(m))));
     }
 
     SECTION("DEC modes: enabled")
     {
         screen.setMode(DECMode::Origin, true); // DECOM
         screen.requestDECMode((int) DECMode::Origin);
-        REQUIRE(e(term.replyData) == e(fmt::format("\033[?{};1$y", toDECModeNum(DECMode::Origin))));
+        REQUIRE(e(term.terminal.peekInput())
+                == e(fmt::format("\033[?{};1$y", toDECModeNum(DECMode::Origin))));
     }
 
     SECTION("DEC modes: disabled")
     {
         screen.setMode(DECMode::Origin, false); // DECOM
         screen.requestDECMode((int) DECMode::Origin);
-        REQUIRE(e(term.replyData) == e(fmt::format("\033[?{};2$y", toDECModeNum(DECMode::Origin))));
+        REQUIRE(e(term.terminal.peekInput())
+                == e(fmt::format("\033[?{};2$y", toDECModeNum(DECMode::Origin))));
     }
 
     SECTION("DEC modes: unknown")
@@ -2383,7 +2388,7 @@ TEST_CASE("RequestMode", "[screen]")
         DECMode m = static_cast<DECMode>(1234);
         screen.setMode(m, true); // DECOM
         screen.requestDECMode(static_cast<unsigned>(m));
-        REQUIRE(e(term.replyData) == e(fmt::format("\033[?{};0$y", toDECModeNum(m))));
+        REQUIRE(e(term.terminal.peekInput()) == e(fmt::format("\033[?{};0$y", toDECModeNum(m))));
     }
 }
 
@@ -2427,44 +2432,47 @@ TEST_CASE("captureBuffer", "[screen]")
     SECTION("lines: 0")
     {
         screen.captureBuffer(0, false);
-        INFO(e(term.replyData));
-        CHECK(e(term.replyData) == e("\033^314;\033\\"));
+        INFO(e(term.terminal.peekInput()));
+        CHECK(e(term.terminal.peekInput()) == e("\033^314;\033\\"));
     }
     SECTION("lines: 1")
     {
         screen.captureBuffer(1, false);
-        INFO(e(term.replyData));
-        CHECK(e(term.replyData) == e("\033^314;KLMNO\n\033\\\033^314;\033\\"));
+        INFO(e(term.terminal.peekInput()));
+        CHECK(e(term.terminal.peekInput()) == e("\033^314;KLMNO\n\033\\\033^314;\033\\"));
     }
     SECTION("lines: 2")
     {
         screen.captureBuffer(2, false);
-        INFO(e(term.replyData));
-        CHECK(e(term.replyData) == e("\033^314;FGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
+        INFO(e(term.terminal.peekInput()));
+        CHECK(e(term.terminal.peekInput()) == e("\033^314;FGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
     }
     SECTION("lines: 3")
     {
         screen.captureBuffer(3, false);
-        INFO(e(term.replyData));
-        CHECK(e(term.replyData) == e("\033^314;ABCDE\nFGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
+        INFO(e(term.terminal.peekInput()));
+        CHECK(e(term.terminal.peekInput()) == e("\033^314;ABCDE\nFGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
     }
     SECTION("lines: 4")
     {
         screen.captureBuffer(4, false);
-        INFO(e(term.replyData));
-        CHECK(e(term.replyData) == e("\033^314;67890\nABCDE\nFGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
+        INFO(e(term.terminal.peekInput()));
+        CHECK(e(term.terminal.peekInput())
+              == e("\033^314;67890\nABCDE\nFGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
     }
     SECTION("lines: 5")
     {
         screen.captureBuffer(5, false);
-        INFO(e(term.replyData));
-        CHECK(e(term.replyData) == e("\033^314;12345\n67890\nABCDE\nFGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
+        INFO(e(term.terminal.peekInput()));
+        CHECK(e(term.terminal.peekInput())
+              == e("\033^314;12345\n67890\nABCDE\nFGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
     }
     SECTION("lines: 5 (+1 overflow)")
     {
         screen.captureBuffer(5, false);
-        INFO(e(term.replyData));
-        CHECK(e(term.replyData) == e("\033^314;12345\n67890\nABCDE\nFGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
+        INFO(e(term.terminal.peekInput()));
+        CHECK(e(term.terminal.peekInput())
+              == e("\033^314;12345\n67890\nABCDE\nFGHIJ\nKLMNO\n\033\\\033^314;\033\\"));
     }
 }
 
@@ -2912,14 +2920,14 @@ TEST_CASE("DECTABSR", "[screen]")
     SECTION("default tabstops")
     {
         screen.requestTabStops();
-        CHECK(e(term.replyData) == e("\033P2$u1/9/17/25/33\033\\"));
+        CHECK(e(term.terminal.peekInput()) == e("\033P2$u1/9/17/25/33\033\\"));
     }
 
     SECTION("cleared tabs")
     {
         screen.horizontalTabClear(HorizontalTabClear::AllTabs);
         screen.requestTabStops();
-        CHECK(e(term.replyData) == e("\033P2$u1/9/17/25/33\033\\"));
+        CHECK(e(term.terminal.peekInput()) == e("\033P2$u1/9/17/25/33\033\\"));
     }
 
     SECTION("custom tabstops")
@@ -2939,7 +2947,7 @@ TEST_CASE("DECTABSR", "[screen]")
         screen.horizontalTabSet();
 
         screen.requestTabStops();
-        CHECK(e(term.replyData) == e("\033P2$u2/4/8/16\033\\"));
+        CHECK(e(term.terminal.peekInput()) == e("\033P2$u2/4/8/16\033\\"));
     }
 }
 
@@ -2967,7 +2975,7 @@ TEST_CASE("OSC.2.Unicode")
     auto const title = unicode::convert_to<char>(u32title);
 
     screen.write(U"\033]2;\U0001F600\033\\");
-    INFO(term.replyData);
+    INFO(term.terminal.peekInput());
     CHECK(e(term.windowTitle) == e(title));
 }
 
@@ -2979,32 +2987,32 @@ TEST_CASE("OSC.4")
     SECTION("query")
     {
         screen.write("\033]4;7;?\033\\");
-        INFO(e(term.replyData));
-        REQUIRE(e(term.replyData) == e("\033]4;7;rgb:c0c0/c0c0/c0c0\033\\"));
+        INFO(e(term.terminal.peekInput()));
+        REQUIRE(e(term.terminal.peekInput()) == e("\033]4;7;rgb:c0c0/c0c0/c0c0\033\\"));
     }
 
     SECTION("set color via format rgb:RR/GG/BB")
     {
         screen.write("\033]4;7;rgb:ab/cd/ef\033\\");
         screen.write("\033]4;7;?\033\\");
-        INFO(term.replyData);
-        REQUIRE(e(term.replyData) == e("\033]4;7;rgb:abab/cdcd/efef\033\\"));
+        INFO(term.terminal.peekInput());
+        REQUIRE(e(term.terminal.peekInput()) == e("\033]4;7;rgb:abab/cdcd/efef\033\\"));
     }
 
     SECTION("set color via format #RRGGBB")
     {
         screen.write("\033]4;7;#abcdef\033\\");
         screen.write("\033]4;7;?\033\\");
-        INFO(e(term.replyData));
-        REQUIRE(e(term.replyData) == e("\033]4;7;rgb:abab/cdcd/efef\033\\"));
+        INFO(e(term.terminal.peekInput()));
+        REQUIRE(e(term.terminal.peekInput()) == e("\033]4;7;rgb:abab/cdcd/efef\033\\"));
     }
 
     SECTION("set color via format #RGB")
     {
         screen.write("\033]4;7;#abc\033\\");
         screen.write("\033]4;7;?\033\\");
-        INFO(term.replyData);
-        REQUIRE(e(term.replyData) == e("\033]4;7;rgb:a0a0/b0b0/c0c0\033\\"));
+        INFO(term.terminal.peekInput());
+        REQUIRE(e(term.terminal.peekInput()) == e("\033]4;7;rgb:a0a0/b0b0/c0c0\033\\"));
     }
 }
 
@@ -3014,7 +3022,7 @@ TEST_CASE("XTGETTCAP")
     auto& screen = term.screen();
     auto const queryStr = fmt::format("\033P+q{:02X}{:02X}{:02X}\033\\", 'R', 'G', 'B');
     screen.write(queryStr);
-    INFO(fmt::format("Reply data: {}", term.replyData));
+    INFO(fmt::format("Reply data: {}", term.terminal.peekInput()));
     // "\033P1+r8/8/8\033\\"
     // TODO: CHECK(...)
 }
@@ -3155,26 +3163,23 @@ TEST_CASE("resize", "[screen]")
 
 MockTerm screenForDECRA()
 {
-    auto term = MockTerm { PageSize { LineCount(5), ColumnCount(6) } };
-    auto& screen = term.screen();
+    return MockTerm { PageSize { LineCount(5), ColumnCount(6) }, {}, [](MockTerm& mock) {
+                         mock.terminal.writeToScreen("ABCDEF\r\n"
+                                                     "abcdef\r\n"
+                                                     "123456\r\n");
+                         mock.terminal.writeToScreen("\033[43m");
+                         mock.terminal.writeToScreen("GHIJKL\r\n"
+                                                     "ghijkl");
+                         mock.terminal.writeToScreen("\033[0m");
 
-    screen.write("ABCDEF\r\n"
-                 "abcdef\r\n"
-                 "123456\r\n");
-    screen.write("\033[43m");
-    screen.write("GHIJKL\r\n"
-                 "ghijkl");
-    screen.write("\033[0m");
+                         auto const initialText = "ABCDEF\n"
+                                                  "abcdef\n"
+                                                  "123456\n"
+                                                  "GHIJKL\n"
+                                                  "ghijkl\n";
 
-    auto const initialText = "ABCDEF\n"
-                             "abcdef\n"
-                             "123456\n"
-                             "GHIJKL\n"
-                             "ghijkl\n";
-
-    CHECK(screen.renderMainPageText() == initialText);
-
-    return term;
+                         CHECK(mock.terminal.screen().renderMainPageText() == initialText);
+                     } };
 }
 
 TEST_CASE("DECCRA.DownLeft.intersecting", "[screen]")
@@ -3299,7 +3304,7 @@ TEST_CASE("Screen.tcap.string", "[screen, tcap]")
     auto term = MockTerm(PageSize { LineCount(3), ColumnCount(5) }, LineCount(2));
     auto& screen = term.screen();
     screen.write("\033P+q687061\033\\"); // HPA
-    REQUIRE(e(term.replyData) == e("\033P1+r687061=1B5B2569257031256447\033\\"));
+    REQUIRE(e(term.terminal.peekInput()) == e("\033P1+r687061=1B5B2569257031256447\033\\"));
 }
 
 TEST_CASE("Sixel.simple", "[screen]")

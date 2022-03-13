@@ -13,6 +13,7 @@
  */
 
 #include <terminal/MockTerm.h>
+#include <terminal/pty/MockPty.h>
 #include <terminal/Screen.h>
 
 #include <crispy/App.h>
@@ -23,17 +24,12 @@ namespace terminal
 {
 
 MockTerm::MockTerm(PageSize pageSize, LineCount maxHistoryLineCount):
-    state_ {
-        *this,                                 // back-ref to the terminal
-        pageSize,                              //
-        maxHistoryLineCount,                   //
-        ImageSize { Width(256), Height(256) }, // _maxImageSize,
-        256,                                   // _maxImageColorRegisters,
-        true,                                  // _sixelCursorConformance,
-        {},                                    // _colorPalette,
-        false                                  // _allowReflowOnResize
-    },
-    primaryScreen_ { state_, ScreenType::Main }
+    terminal{
+        std::make_unique<MockPty>(pageSize),
+        1024, // pty read buffer size
+        *this,
+        maxHistoryLineCount
+    }
 {
     char const* logFilterString = getenv("LOG");
     if (logFilterString)
@@ -45,7 +41,7 @@ MockTerm::MockTerm(PageSize pageSize, LineCount maxHistoryLineCount):
     // TODO: same as in Terminal's ctor
     screen().setMode(DECMode::AutoWrap, true);
     screen().setMode(DECMode::TextReflow, true);
-    screen().setMode(DECMode::SixelCursorNextToGraphic, state_.sixelCursorConformance);
+    screen().setMode(DECMode::SixelCursorNextToGraphic, terminal.state().sixelCursorConformance);
 }
 
 } // namespace terminal

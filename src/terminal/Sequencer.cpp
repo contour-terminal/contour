@@ -69,8 +69,8 @@ namespace terminal
 
 namespace
 {
-    template <typename TheTerminal, typename U>
-    std::optional<crispy::boxed<TheTerminal, U>> decr(std::optional<crispy::boxed<TheTerminal, U>> v)
+    template <typename T, typename U>
+    std::optional<crispy::boxed<T, U>> decr(std::optional<crispy::boxed<T, U>> v)
     {
         if (v.has_value())
             --*v;
@@ -105,11 +105,8 @@ namespace
 // {{{ some command generator helpers
 namespace impl
 {
-    template <typename TheTerminal>
-    ApplyResult setAnsiMode(Sequence const& _seq,
-                            size_t _modeIndex,
-                            bool _enable,
-                            Screen<TheTerminal>& _screen)
+    template <typename Cell>
+    ApplyResult setAnsiMode(Sequence const& _seq, size_t _modeIndex, bool _enable, Screen<Cell>& _screen)
     {
         switch (_seq.param(_modeIndex))
         {
@@ -178,11 +175,8 @@ namespace impl
         return nullopt;
     }
 
-    template <typename TheTerminal>
-    ApplyResult setModeDEC(Sequence const& _seq,
-                           size_t _modeIndex,
-                           bool _enable,
-                           Screen<TheTerminal>& _screen)
+    template <typename Cell>
+    ApplyResult setModeDEC(Sequence const& _seq, size_t _modeIndex, bool _enable, Screen<Cell>& _screen)
     {
         if (auto const modeOpt = toDECMode(_seq.param(_modeIndex)); modeOpt.has_value())
         {
@@ -343,8 +337,8 @@ namespace impl
         return Color {};
     }
 
-    template <typename TheTerminal>
-    ApplyResult dispatchSGR(Sequence const& _seq, Screen<TheTerminal>& _screen)
+    template <typename Cell>
+    ApplyResult dispatchSGR(Sequence const& _seq, Screen<Cell>& _screen)
     {
         if (_seq.parameterCount() == 0)
         {
@@ -438,8 +432,8 @@ namespace impl
         return ApplyResult::Ok;
     }
 
-    template <typename TheTerminal>
-    ApplyResult CPR(Sequence const& _seq, Screen<TheTerminal>& _screen)
+    template <typename Cell>
+    ApplyResult CPR(Sequence const& _seq, Screen<Cell>& _screen)
     {
         switch (_seq.param(0))
         {
@@ -449,8 +443,8 @@ namespace impl
         }
     }
 
-    template <typename TheTerminal>
-    ApplyResult DECRQPSR(Sequence const& _seq, Screen<TheTerminal>& _screen)
+    template <typename Cell>
+    ApplyResult DECRQPSR(Sequence const& _seq, Screen<Cell>& _screen)
     {
         if (_seq.parameterCount() != 1)
             return ApplyResult::Invalid; // -> error
@@ -467,8 +461,8 @@ namespace impl
             return ApplyResult::Invalid;
     }
 
-    template <typename TheTerminal>
-    ApplyResult DECSCUSR(Sequence const& _seq, Screen<TheTerminal>& _screen)
+    template <typename Cell>
+    ApplyResult DECSCUSR(Sequence const& _seq, Screen<Cell>& _screen)
     {
         if (_seq.parameterCount() <= 1)
         {
@@ -489,8 +483,8 @@ namespace impl
             return ApplyResult::Invalid;
     }
 
-    template <typename TheTerminal>
-    ApplyResult ED(Sequence const& _seq, Screen<TheTerminal>& _screen)
+    template <typename Cell>
+    ApplyResult ED(Sequence const& _seq, Screen<Cell>& _screen)
     {
         if (_seq.parameterCount() == 0)
             _screen.clearToEndOfScreen();
@@ -510,8 +504,8 @@ namespace impl
         return ApplyResult::Ok;
     }
 
-    template <typename TheTerminal>
-    ApplyResult EL(Sequence const& _seq, Screen<TheTerminal>& _screen)
+    template <typename Cell>
+    ApplyResult EL(Sequence const& _seq, Screen<Cell>& _screen)
     {
         switch (_seq.param_or(0, Sequence::Parameter { 0 }))
         {
@@ -523,8 +517,8 @@ namespace impl
         return ApplyResult::Ok;
     }
 
-    template <typename TheTerminal>
-    ApplyResult TBC(Sequence const& _seq, Screen<TheTerminal>& _screen)
+    template <typename Cell>
+    ApplyResult TBC(Sequence const& _seq, Screen<Cell>& _screen)
     {
         if (_seq.parameterCount() != 1)
         {
@@ -547,10 +541,8 @@ namespace impl
         return crispy::splitKeyValuePairs(s, ':');
     }
 
-    template <typename TheTerminal>
-    ApplyResult setOrRequestDynamicColor(Sequence const& _seq,
-                                         Screen<TheTerminal>& _screen,
-                                         DynamicColorName _name)
+    template <typename Cell>
+    ApplyResult setOrRequestDynamicColor(Sequence const& _seq, Screen<Cell>& _screen, DynamicColorName _name)
     {
         auto const& value = _seq.intermediateCharacters();
         if (value == "?")
@@ -599,8 +591,8 @@ namespace impl
         });
     }
 
-    template <typename TheTerminal>
-    ApplyResult RCOLPAL(Sequence const& _seq, Screen<TheTerminal>& _screen)
+    template <typename Cell>
+    ApplyResult RCOLPAL(Sequence const& _seq, Screen<Cell>& _screen)
     {
         if (_seq.intermediateCharacters().empty())
         {
@@ -617,20 +609,21 @@ namespace impl
         return ApplyResult::Ok;
     }
 
-    template <typename TheTerminal>
-    ApplyResult SETCOLPAL(Sequence const& _seq, Screen<TheTerminal>& _screen)
+    ApplyResult SETCOLPAL(Sequence const& _seq, Terminal& _terminal)
     {
         bool const ok = queryOrSetColorPalette(
             _seq.intermediateCharacters(),
             [&](uint8_t index) {
-                auto const color = _screen.colorPalette().palette.at(index);
-                _screen.reply("\033]4;{};rgb:{:04x}/{:04x}/{:04x}\033\\",
-                              index,
-                              static_cast<uint16_t>(color.red) << 8 | color.red,
-                              static_cast<uint16_t>(color.green) << 8 | color.green,
-                              static_cast<uint16_t>(color.blue) << 8 | color.blue);
+                auto const color = _terminal.screen().colorPalette().palette.at(index);
+                _terminal.reply("\033]4;{};rgb:{:04x}/{:04x}/{:04x}\033\\",
+                                index,
+                                static_cast<uint16_t>(color.red) << 8 | color.red,
+                                static_cast<uint16_t>(color.green) << 8 | color.green,
+                                static_cast<uint16_t>(color.blue) << 8 | color.blue);
             },
-            [&](uint8_t index, RGBColor color) { _screen.colorPalette().palette.at(index) = color; });
+            [&](uint8_t index, RGBColor color) {
+                _terminal.screen().colorPalette().palette.at(index) = color;
+            });
 
         return ok ? ApplyResult::Ok : ApplyResult::Invalid;
     }
@@ -659,8 +652,8 @@ namespace impl
         //     return fmt::format("{}:style={}", _regular, _style);
     }
 
-    template <typename TheTerminal>
-    ApplyResult setAllFont(Sequence const& _seq, TheTerminal& terminal)
+    template <typename Cell>
+    ApplyResult setAllFont(Sequence const& _seq, Cell& terminal)
     {
         // [read]  OSC 60 ST
         // [write] OSC 60 ; size ; regular ; bold ; italic ; bold italic ST
@@ -702,8 +695,8 @@ namespace impl
         return ApplyResult::Ok;
     }
 
-    template <typename TheTerminal>
-    ApplyResult setFont(Sequence const& _seq, TheTerminal& terminal)
+    template <typename Cell>
+    ApplyResult setFont(Sequence const& _seq, Cell& terminal)
     {
         auto const& params = _seq.intermediateCharacters();
         auto const splits = crispy::split(params, ';');
@@ -726,8 +719,8 @@ namespace impl
         return ApplyResult::Ok;
     }
 
-    template <typename TheTerminal>
-    ApplyResult clipboard(Sequence const& _seq, TheTerminal& terminal)
+    template <typename Cell>
+    ApplyResult clipboard(Sequence const& _seq, Cell& terminal)
     {
         // Only setting clipboard contents is supported, not reading.
         auto const& params = _seq.intermediateCharacters();
@@ -740,8 +733,8 @@ namespace impl
             return ApplyResult::Invalid;
     }
 
-    template <typename TheTerminal>
-    ApplyResult NOTIFY(Sequence const& _seq, Screen<TheTerminal>& _screen)
+    template <typename Cell>
+    ApplyResult NOTIFY(Sequence const& _seq, Screen<Cell>& _screen)
     {
         auto const& value = _seq.intermediateCharacters();
         if (auto const splits = crispy::split(value, ';'); splits.size() == 3 && splits[0] == "notify")
@@ -753,16 +746,16 @@ namespace impl
             return ApplyResult::Unsupported;
     }
 
-    template <typename TheTerminal>
-    ApplyResult SETCWD(Sequence const& _seq, Screen<TheTerminal>& _screen)
+    template <typename Cell>
+    ApplyResult SETCWD(Sequence const& _seq, Screen<Cell>& _screen)
     {
         string const& url = _seq.intermediateCharacters();
         _screen.setCurrentWorkingDirectory(url);
         return ApplyResult::Ok;
     }
 
-    template <typename TheTerminal>
-    ApplyResult CAPTURE(Sequence const& _seq, TheTerminal& terminal)
+    template <typename Cell>
+    ApplyResult CAPTURE(Sequence const& _seq, Cell& terminal)
     {
         // CSI Mode ; [; Count] t
         //
@@ -783,8 +776,8 @@ namespace impl
         return ApplyResult::Ok;
     }
 
-    template <typename TheTerminal>
-    ApplyResult HYPERLINK(Sequence const& _seq, Screen<TheTerminal>& _screen)
+    template <typename Cell>
+    ApplyResult HYPERLINK(Sequence const& _seq, Screen<Cell>& _screen)
     {
         auto const& value = _seq.intermediateCharacters();
         // hyperlink_OSC ::= OSC '8' ';' params ';' URI
@@ -812,8 +805,8 @@ namespace impl
         return ApplyResult::Ok;
     }
 
-    template <typename TheTerminal>
-    ApplyResult saveDECModes(Sequence const& _seq, Screen<TheTerminal>& _screen)
+    template <typename Cell>
+    ApplyResult saveDECModes(Sequence const& _seq, Screen<Cell>& _screen)
     {
         vector<DECMode> modes;
         for (size_t i = 0; i < _seq.parameterCount(); ++i)
@@ -823,8 +816,8 @@ namespace impl
         return ApplyResult::Ok;
     }
 
-    template <typename TheTerminal>
-    ApplyResult restoreDECModes(Sequence const& _seq, Screen<TheTerminal>& _screen)
+    template <typename Cell>
+    ApplyResult restoreDECModes(Sequence const& _seq, Screen<Cell>& _screen)
     {
         vector<DECMode> modes;
         for (size_t i = 0; i < _seq.parameterCount(); ++i)
@@ -834,8 +827,8 @@ namespace impl
         return ApplyResult::Ok;
     }
 
-    template <typename TheTerminal>
-    ApplyResult WINDOWMANIP(Sequence const& _seq, TheTerminal& terminal)
+    template <typename Cell>
+    ApplyResult WINDOWMANIP(Sequence const& _seq, Cell& terminal)
     {
         if (_seq.parameterCount() == 3)
         {
@@ -902,8 +895,8 @@ namespace impl
             return ApplyResult::Unsupported;
     }
 
-    template <typename TheTerminal>
-    ApplyResult XTSMGRAPHICS(Sequence const& _seq, Screen<TheTerminal>& _screen)
+    template <typename Cell>
+    ApplyResult XTSMGRAPHICS(Sequence const& _seq, Screen<Cell>& _screen)
     {
         auto const Pi = _seq.param<unsigned>(0);
         auto const Pa = _seq.param<unsigned>(1);
@@ -961,14 +954,12 @@ namespace impl
 } // namespace impl
 // }}}
 
-template <typename TheTerminal>
-Sequencer<TheTerminal>::Sequencer(TheTerminal& _terminal, shared_ptr<SixelColorPalette> _imageColorPalette):
-    terminal_ { _terminal }, imageColorPalette_ { std::move(_imageColorPalette) }
+Sequencer::Sequencer(Terminal& _terminal):
+    terminal_ { _terminal }
 {
 }
 
-template <typename TheTerminal>
-void Sequencer<TheTerminal>::error(std::string_view _errorString)
+void Sequencer::error(std::string_view _errorString)
 {
     if (!VTParserLog)
         return;
@@ -976,66 +967,59 @@ void Sequencer<TheTerminal>::error(std::string_view _errorString)
     LOGSTORE(VTParserLog)("Parser error: {}", _errorString);
 }
 
-template <typename TheTerminal>
-void Sequencer<TheTerminal>::print(char _char)
+void Sequencer::print(char _char)
 {
-    unicode::ConvertResult const r = unicode::from_utf8(state().utf8DecoderState, (uint8_t) _char);
+    unicode::ConvertResult const r = unicode::from_utf8(terminal_.state().utf8DecoderState, (uint8_t) _char);
     if (holds_alternative<unicode::Incomplete>(r))
         return;
 
     static constexpr char32_t ReplacementCharacter { 0xFFFD };
 
-    state().instructionCounter++;
+    terminal_.state().instructionCounter++;
     auto const codepoint =
         holds_alternative<unicode::Success>(r) ? get<unicode::Success>(r).value : ReplacementCharacter;
-    screen().writeText(codepoint);
-    state().precedingGraphicCharacter = codepoint;
+    terminal_.screen().writeText(codepoint);
+    terminal_.state().precedingGraphicCharacter = codepoint;
 }
 
-template <typename TheTerminal>
-void Sequencer<TheTerminal>::print(string_view _chars)
+void Sequencer::print(string_view _chars)
 {
     assert(_chars.size() != 0);
 
-    if (state().utf8DecoderState.expectedLength == 0)
+    if (terminal_.state().utf8DecoderState.expectedLength == 0)
     {
-        state().instructionCounter += _chars.size();
-        screen().writeText(_chars);
-        state().precedingGraphicCharacter = static_cast<char32_t>(_chars.back());
+        terminal_.state().instructionCounter += _chars.size();
+        terminal_.screen().writeText(_chars);
+        terminal_.state().precedingGraphicCharacter = static_cast<char32_t>(_chars.back());
     }
     else
         for (char const ch: _chars)
             print(ch);
 }
 
-template <typename TheTerminal>
-void Sequencer<TheTerminal>::execute(char _controlCode)
+void Sequencer::execute(char _controlCode)
 {
     executeControlFunction(_controlCode);
-    state().utf8DecoderState = {};
+    terminal_.state().utf8DecoderState = {};
 }
 
-template <typename TheTerminal>
-void Sequencer<TheTerminal>::clear()
+void Sequencer::clear()
 {
     sequence_.clear();
-    state().utf8DecoderState = {};
+    terminal_.state().utf8DecoderState = {};
 }
 
-template <typename TheTerminal>
-void Sequencer<TheTerminal>::collect(char _char)
+void Sequencer::collect(char _char)
 {
     sequence_.intermediateCharacters().push_back(_char);
 }
 
-template <typename TheTerminal>
-void Sequencer<TheTerminal>::collectLeader(char _leader)
+void Sequencer::collectLeader(char _leader)
 {
     sequence_.setLeader(_leader);
 }
 
-template <typename TheTerminal>
-void Sequencer<TheTerminal>::param(char _char)
+void Sequencer::param(char _char)
 {
     if (sequence_.parameters().empty())
         sequence_.parameters().push_back({ 0 });
@@ -1066,37 +1050,32 @@ void Sequencer<TheTerminal>::param(char _char)
     }
 }
 
-template <typename TheTerminal>
-void Sequencer<TheTerminal>::dispatchESC(char _finalChar)
+void Sequencer::dispatchESC(char _finalChar)
 {
     sequence_.setCategory(FunctionCategory::ESC);
     sequence_.setFinalChar(_finalChar);
     handleSequence();
 }
 
-template <typename TheTerminal>
-void Sequencer<TheTerminal>::dispatchCSI(char _finalChar)
+void Sequencer::dispatchCSI(char _finalChar)
 {
     sequence_.setCategory(FunctionCategory::CSI);
     sequence_.setFinalChar(_finalChar);
     handleSequence();
 }
 
-template <typename TheTerminal>
-void Sequencer<TheTerminal>::startOSC()
+void Sequencer::startOSC()
 {
     sequence_.setCategory(FunctionCategory::OSC);
 }
 
-template <typename TheTerminal>
-void Sequencer<TheTerminal>::putOSC(char _char)
+void Sequencer::putOSC(char _char)
 {
     if (sequence_.intermediateCharacters().size() + 1 < Sequence::MaxOscLength)
         sequence_.intermediateCharacters().push_back(_char);
 }
 
-template <typename TheTerminal>
-void Sequencer<TheTerminal>::dispatchOSC()
+void Sequencer::dispatchOSC()
 {
     auto const [code, skipCount] = parser::extractCodePrefix(sequence_.intermediateCharacters());
     sequence_.parameters().push_back({ static_cast<Sequence::Parameter>(code) });
@@ -1105,10 +1084,9 @@ void Sequencer<TheTerminal>::dispatchOSC()
     clear();
 }
 
-template <typename TheTerminal>
-void Sequencer<TheTerminal>::hook(char _finalChar)
+void Sequencer::hook(char _finalChar)
 {
-    state().instructionCounter++;
+    terminal_.state().instructionCounter++;
     sequence_.setCategory(FunctionCategory::DCS);
     sequence_.setFinalChar(_finalChar);
 
@@ -1126,21 +1104,16 @@ void Sequencer<TheTerminal>::hook(char _finalChar)
         case DECRQSS: hookedParser_ = hookDECRQSS(sequence_); break;
         case XTGETTCAP: hookedParser_ = hookXTGETTCAP(sequence_); break;
         }
-
-        if (hookedParser_)
-            hookedParser_->start();
     }
 }
 
-template <typename TheTerminal>
-void Sequencer<TheTerminal>::put(char _char)
+void Sequencer::put(char _char)
 {
     if (hookedParser_)
         hookedParser_->pass(_char);
 }
 
-template <typename TheTerminal>
-void Sequencer<TheTerminal>::unhook()
+void Sequencer::unhook()
 {
     if (hookedParser_)
     {
@@ -1149,8 +1122,7 @@ void Sequencer<TheTerminal>::unhook()
     }
 }
 
-template <typename TheTerminal>
-unique_ptr<ParserExtension> Sequencer<TheTerminal>::hookSixel(Sequence const& _seq)
+unique_ptr<ParserExtension> Sequencer::hookSixel(Sequence const& _seq)
 {
     auto const Pa = _seq.param_or(0, 1);
     auto const Pb = _seq.param_or(1, 2);
@@ -1179,27 +1151,26 @@ unique_ptr<ParserExtension> Sequencer<TheTerminal>::hookSixel(Sequence const& _s
         terminal_.state().maxImageSize,
         aspectVertical,
         aspectHorizontal,
-        transparentBackground ? RGBAColor { 0, 0, 0, 0 } : state().colorPalette.defaultBackground,
-        state().usePrivateColorRegisters ? make_shared<SixelColorPalette>(
-            state().maxImageRegisterCount, clamp(state().maxImageRegisterCount, 0u, 16384u))
-                                         : imageColorPalette_);
+        transparentBackground ? RGBAColor { 0, 0, 0, 0 } : terminal_.state().colorPalette.defaultBackground,
+        terminal_.state().usePrivateColorRegisters
+            ? make_shared<SixelColorPalette>(terminal_.state().maxImageRegisterCount,
+                                             clamp(terminal_.state().maxImageRegisterCount, 0u, 16384u))
+            : terminal_.state().imageColorPalette);
 
     return make_unique<SixelParser>(*sixelImageBuilder_, [this]() {
         {
-            screen().sixelImage(sixelImageBuilder_->size(), move(sixelImageBuilder_->data()));
+            terminal_.screen().sixelImage(sixelImageBuilder_->size(), move(sixelImageBuilder_->data()));
         }
     });
 }
 
-template <typename TheTerminal>
-unique_ptr<ParserExtension> Sequencer<TheTerminal>::hookSTP(Sequence const& /*_seq*/)
+unique_ptr<ParserExtension> Sequencer::hookSTP(Sequence const& /*_seq*/)
 {
     return make_unique<SimpleStringCollector>(
         [this](string_view const& _data) { terminal_.setTerminalProfile(unicode::convert_to<char>(_data)); });
 }
 
-template <typename TheTerminal>
-unique_ptr<ParserExtension> Sequencer<TheTerminal>::hookXTGETTCAP(Sequence const& /*_seq*/)
+unique_ptr<ParserExtension> Sequencer::hookXTGETTCAP(Sequence const& /*_seq*/)
 {
     // DCS + q Pt ST
     //           Request Termcap/Terminfo String (XTGETTCAP), xterm.  The
@@ -1231,13 +1202,12 @@ unique_ptr<ParserExtension> Sequencer<TheTerminal>::hookXTGETTCAP(Sequence const
         {
             string const hexCap8 = unicode::convert_to<char>(hexCap);
             if (auto const capOpt = crispy::fromHexString(string_view(hexCap8.data(), hexCap8.size())))
-                screen().requestCapability(capOpt.value());
+                terminal_.screen().requestCapability(capOpt.value());
         }
     });
 }
 
-template <typename TheTerminal>
-unique_ptr<ParserExtension> Sequencer<TheTerminal>::hookDECRQSS(Sequence const& /*_seq*/)
+unique_ptr<ParserExtension> Sequencer::hookDECRQSS(Sequence const& /*_seq*/)
 {
     return make_unique<SimpleStringCollector>([this](string_view const& _data) {
         auto const s = [](string_view _dataString) -> optional<RequestStatusString> {
@@ -1255,45 +1225,44 @@ unique_ptr<ParserExtension> Sequencer<TheTerminal>::hookDECRQSS(Sequence const& 
         }(_data);
 
         if (s.has_value())
-            screen().requestStatusString(s.value());
+            terminal_.screen().requestStatusString(s.value());
 
         // TODO: handle batching
     });
 }
 
-template <typename TheTerminal>
-void Sequencer<TheTerminal>::executeControlFunction(char _c0)
+void Sequencer::executeControlFunction(char _c0)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
     if (VTParserTraceLog)
         LOGSTORE(VTParserTraceLog)("C0 0x{:02X}", _c0);
 #endif
 
-    state().instructionCounter++;
+    terminal_.state().instructionCounter++;
     switch (_c0)
     {
     case 0x07: // BEL
         terminal_.bell();
         break;
     case 0x08: // BS
-        screen().backspace();
+        terminal_.screen().backspace();
         break;
     case 0x09: // TAB
-        screen().moveCursorToNextTab();
+        terminal_.screen().moveCursorToNextTab();
         break;
     case 0x0A: // LF
-        screen().linefeed();
+        terminal_.screen().linefeed();
         break;
     case 0x0B: // VT
         // Even though VT means Vertical Tab, it seems that xterm is doing an IND instead.
         [[fallthrough]];
     case 0x0C: // FF
         // Even though FF means Form Feed, it seems that xterm is doing an IND instead.
-        screen().index();
+        terminal_.screen().index();
         break;
-    case 0x0D: screen().moveCursorToBeginOfLine(); break;
-    case 0x37: screen().saveCursor(); break;
-    case 0x38: screen().restoreCursor(); break;
+    case 0x0D: terminal_.screen().moveCursorToBeginOfLine(); break;
+    case 0x37: terminal_.screen().saveCursor(); break;
+    case 0x38: terminal_.screen().restoreCursor(); break;
     default:
         if (VTParserLog)
             VTParserLog()("Unsupported C0 sequence: {}", crispy::escape((uint8_t) _c0));
@@ -1301,8 +1270,7 @@ void Sequencer<TheTerminal>::executeControlFunction(char _c0)
     }
 }
 
-template <typename TheTerminal>
-void Sequencer<TheTerminal>::handleSequence()
+void Sequencer::handleSequence()
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
     if (VTParserTraceLog)
@@ -1311,18 +1279,17 @@ void Sequencer<TheTerminal>::handleSequence()
     // std::cerr << fmt::format("\t{} \t; {}\n", sequence_,
     //         sequence_.functionDefinition() ? sequence_.functionDefinition()->comment : ""sv);
 
-    state().instructionCounter++;
+    terminal_.state().instructionCounter++;
     if (FunctionDefinition const* funcSpec = sequence_.functionDefinition(); funcSpec != nullptr)
     {
         applyAndLog(*funcSpec, sequence_);
-        screen().verifyState();
+        terminal_.screen().verifyState();
     }
     else if (VTParserLog)
         VTParserLog()("Unknown VT sequence: {}", sequence_);
 }
 
-template <typename TheTerminal>
-void Sequencer<TheTerminal>::applyAndLog(FunctionDefinition const& _function, Sequence const& _seq)
+void Sequencer::applyAndLog(FunctionDefinition const& _function, Sequence const& _seq)
 {
     auto const result = apply(_function, _seq);
     switch (result)
@@ -1342,8 +1309,7 @@ void Sequencer<TheTerminal>::applyAndLog(FunctionDefinition const& _function, Se
 }
 
 /// Applies a FunctionDefinition to a given context, emitting the respective command.
-template <typename TheTerminal>
-ApplyResult Sequencer<TheTerminal>::apply(FunctionDefinition const& _function, Sequence const& _seq)
+ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const& _seq)
 {
     // This function assumed that the incoming instruction has been already resolved to a given
     // FunctionDefinition
@@ -1351,72 +1317,78 @@ ApplyResult Sequencer<TheTerminal>::apply(FunctionDefinition const& _function, S
     {
     // C0
     case BEL: terminal_.bell(); break;
-    case BS: screen().backspace(); break;
-    case TAB: screen().moveCursorToNextTab(); break;
-    case LF: screen().linefeed(); break;
+    case BS: terminal_.screen().backspace(); break;
+    case TAB: terminal_.screen().moveCursorToNextTab(); break;
+    case LF: terminal_.screen().linefeed(); break;
     case VT: [[fallthrough]];
-    case FF: screen().index(); break;
-    case CR: screen().moveCursorToBeginOfLine(); break;
+    case FF: terminal_.screen().index(); break;
+    case CR: terminal_.screen().moveCursorToBeginOfLine(); break;
 
     // ESC
-    case SCS_G0_SPECIAL: screen().designateCharset(CharsetTable::G0, CharsetId::Special); break;
-    case SCS_G0_USASCII: screen().designateCharset(CharsetTable::G0, CharsetId::USASCII); break;
-    case SCS_G1_SPECIAL: screen().designateCharset(CharsetTable::G1, CharsetId::Special); break;
-    case SCS_G1_USASCII: screen().designateCharset(CharsetTable::G1, CharsetId::USASCII); break;
-    case DECALN: screen().screenAlignmentPattern(); break;
-    case DECBI: screen().backIndex(); break;
-    case DECFI: screen().forwardIndex(); break;
-    case DECKPAM: screen().applicationKeypadMode(true); break;
-    case DECKPNM: screen().applicationKeypadMode(false); break;
-    case DECRS: screen().restoreCursor(); break;
-    case DECSC: screen().saveCursor(); break;
-    case HTS: screen().horizontalTabSet(); break;
-    case IND: screen().index(); break;
-    case NEL: screen().moveCursorToNextLine(LineCount(1)); break;
-    case RI: screen().reverseIndex(); break;
-    case RIS: screen().resetHard(); break;
-    case SS2: screen().singleShiftSelect(CharsetTable::G2); break;
-    case SS3: screen().singleShiftSelect(CharsetTable::G3); break;
+    case SCS_G0_SPECIAL: terminal_.screen().designateCharset(CharsetTable::G0, CharsetId::Special); break;
+    case SCS_G0_USASCII: terminal_.screen().designateCharset(CharsetTable::G0, CharsetId::USASCII); break;
+    case SCS_G1_SPECIAL: terminal_.screen().designateCharset(CharsetTable::G1, CharsetId::Special); break;
+    case SCS_G1_USASCII: terminal_.screen().designateCharset(CharsetTable::G1, CharsetId::USASCII); break;
+    case DECALN: terminal_.screen().screenAlignmentPattern(); break;
+    case DECBI: terminal_.screen().backIndex(); break;
+    case DECFI: terminal_.screen().forwardIndex(); break;
+    case DECKPAM: terminal_.screen().applicationKeypadMode(true); break;
+    case DECKPNM: terminal_.screen().applicationKeypadMode(false); break;
+    case DECRS: terminal_.screen().restoreCursor(); break;
+    case DECSC: terminal_.screen().saveCursor(); break;
+    case HTS: terminal_.screen().horizontalTabSet(); break;
+    case IND: terminal_.screen().index(); break;
+    case NEL: terminal_.screen().moveCursorToNextLine(LineCount(1)); break;
+    case RI: terminal_.screen().reverseIndex(); break;
+    case RIS: terminal_.screen().resetHard(); break;
+    case SS2: terminal_.screen().singleShiftSelect(CharsetTable::G2); break;
+    case SS3: terminal_.screen().singleShiftSelect(CharsetTable::G3); break;
 
     // CSI
-    case ANSISYSSC: screen().restoreCursor(); break;
+    case ANSISYSSC: terminal_.screen().restoreCursor(); break;
     case CBT:
-        screen().cursorBackwardTab(TabStopCount::cast_from(_seq.param_or(0, Sequence::Parameter { 1 })));
+        terminal_.screen().cursorBackwardTab(
+            TabStopCount::cast_from(_seq.param_or(0, Sequence::Parameter { 1 })));
         break;
-    case CHA: screen().moveCursorToColumn(_seq.param_or<ColumnOffset>(0, ColumnOffset { 1 }) - 1); break;
+    case CHA:
+        terminal_.screen().moveCursorToColumn(_seq.param_or<ColumnOffset>(0, ColumnOffset { 1 }) - 1);
+        break;
     case CHT:
-        screen().cursorForwardTab(TabStopCount::cast_from(_seq.param_or(0, Sequence::Parameter { 1 })));
+        terminal_.screen().cursorForwardTab(
+            TabStopCount::cast_from(_seq.param_or(0, Sequence::Parameter { 1 })));
         break;
     case CNL:
-        screen().moveCursorToNextLine(LineCount::cast_from(_seq.param_or(0, Sequence::Parameter { 1 })));
+        terminal_.screen().moveCursorToNextLine(
+            LineCount::cast_from(_seq.param_or(0, Sequence::Parameter { 1 })));
         break;
     case CPL:
-        screen().moveCursorToPrevLine(LineCount::cast_from(_seq.param_or(0, Sequence::Parameter { 1 })));
+        terminal_.screen().moveCursorToPrevLine(
+            LineCount::cast_from(_seq.param_or(0, Sequence::Parameter { 1 })));
         break;
-    case CPR: return impl::CPR(_seq, screen());
-    case CUB: screen().moveCursorBackward(_seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
-    case CUD: screen().moveCursorDown(_seq.param_or<LineCount>(0, LineCount { 1 })); break;
-    case CUF: screen().moveCursorForward(_seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
+    case CPR: return impl::CPR(_seq, terminal_.screen());
+    case CUB: terminal_.screen().moveCursorBackward(_seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
+    case CUD: terminal_.screen().moveCursorDown(_seq.param_or<LineCount>(0, LineCount { 1 })); break;
+    case CUF: terminal_.screen().moveCursorForward(_seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
     case CUP:
-        screen().moveCursorTo(LineOffset::cast_from(_seq.param_or<int>(0, 1) - 1),
-                              ColumnOffset::cast_from(_seq.param_or<int>(1, 1) - 1));
+        terminal_.screen().moveCursorTo(LineOffset::cast_from(_seq.param_or<int>(0, 1) - 1),
+                                        ColumnOffset::cast_from(_seq.param_or<int>(1, 1) - 1));
         break;
-    case CUU: screen().moveCursorUp(_seq.param_or<LineCount>(0, LineCount { 1 })); break;
-    case DA1: screen().sendDeviceAttributes(); break;
-    case DA2: screen().sendTerminalId(); break;
+    case CUU: terminal_.screen().moveCursorUp(_seq.param_or<LineCount>(0, LineCount { 1 })); break;
+    case DA1: terminal_.screen().sendDeviceAttributes(); break;
+    case DA2: terminal_.screen().sendTerminalId(); break;
     case DA3:
         // terminal identification, 4 hex codes
-        screen().reply("\033P!|C0000000\033\\");
+        terminal_.reply("\033P!|C0000000\033\\");
         break;
-    case DCH: screen().deleteCharacters(_seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
+    case DCH: terminal_.screen().deleteCharacters(_seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
     case DECCRA: {
         // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
         // DECCRA is not affected by the page margins.
-        auto const origin = screen().origin();
+        auto const origin = terminal_.screen().origin();
         auto const top = Top(_seq.param_or(0, *origin.line + 1) - 1);
         auto const left = Left(_seq.param_or(1, *origin.column + 1) - 1);
-        auto const bottom = Bottom(_seq.param_or(2, *screen().pageSize().lines) - 1);
-        auto const right = Right(_seq.param_or(3, *screen().pageSize().columns) - 1);
+        auto const bottom = Bottom(_seq.param_or(2, *terminal_.screen().pageSize().lines) - 1);
+        auto const right = Right(_seq.param_or(3, *terminal_.screen().pageSize().columns) - 1);
         auto const page = _seq.param_or(4, 0);
 
         auto const targetTop = LineOffset(_seq.param_or(5, *origin.line + 1) - 1);
@@ -1424,46 +1396,46 @@ ApplyResult Sequencer<TheTerminal>::apply(FunctionDefinition const& _function, S
         auto const targetTopLeft = CellLocation { targetTop, targetLeft };
         auto const targetPage = _seq.param_or(7, 0);
 
-        screen().copyArea(Rect { top, left, bottom, right }, page, targetTopLeft, targetPage);
+        terminal_.screen().copyArea(Rect { top, left, bottom, right }, page, targetTopLeft, targetPage);
     }
     break;
     case DECERA: {
         // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
-        auto const origin = screen().origin();
+        auto const origin = terminal_.screen().origin();
         auto const top = _seq.param_or(0, *origin.line + 1) - 1;
         auto const left = _seq.param_or(1, *origin.column + 1) - 1;
 
         // If the value of Pt, Pl, Pb, or Pr exceeds the width or height of the active page, then the value is
         // treated as the width or height of that page.
-        auto const size = screen().pageSize();
+        auto const size = terminal_.screen().pageSize();
         auto const bottom = min(_seq.param_or(2, unbox<int>(size.lines)), unbox<int>(size.lines)) - 1;
         auto const right = min(_seq.param_or(3, unbox<int>(size.columns)), unbox<int>(size.columns)) - 1;
 
-        screen().eraseArea(top, left, bottom, right);
+        terminal_.screen().eraseArea(top, left, bottom, right);
     }
     break;
     case DECFRA: {
         auto const ch = _seq.param_or(0, Sequence::Parameter { 0 });
         // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
-        auto const origin = screen().origin();
+        auto const origin = terminal_.screen().origin();
         auto const top = _seq.param_or(0, origin.line);
         auto const left = _seq.param_or(1, origin.column);
 
         // If the value of Pt, Pl, Pb, or Pr exceeds the width or height of the active page, then the value is
         // treated as the width or height of that page.
-        auto const size = screen().pageSize();
+        auto const size = terminal_.screen().pageSize();
         auto const bottom = min(_seq.param_or(2, *size.lines), *size.lines);
         auto const right = min(_seq.param_or(3, *size.columns), *size.columns);
 
-        screen().fillArea(ch, *top, *left, bottom, right);
+        terminal_.screen().fillArea(ch, *top, *left, bottom, right);
     }
     break;
-    case DECDC: screen().deleteColumns(_seq.param_or(0, ColumnCount(1))); break;
-    case DECIC: screen().insertColumns(_seq.param_or(0, ColumnCount(1))); break;
+    case DECDC: terminal_.screen().deleteColumns(_seq.param_or(0, ColumnCount(1))); break;
+    case DECIC: terminal_.screen().insertColumns(_seq.param_or(0, ColumnCount(1))); break;
     case DECRM: {
         ApplyResult r = ApplyResult::Ok;
         crispy::for_each(crispy::times(_seq.parameterCount()), [&](size_t i) {
-            auto const t = impl::setModeDEC(_seq, i, false, screen());
+            auto const t = impl::setModeDEC(_seq, i, false, terminal_.screen());
             r = max(r, t);
         });
         return r;
@@ -1472,202 +1444,152 @@ ApplyResult Sequencer<TheTerminal>::apply(FunctionDefinition const& _function, S
     case DECRQM:
         if (_seq.parameterCount() != 1)
             return ApplyResult::Invalid;
-        screen().requestDECMode(_seq.param(0));
+        terminal_.screen().requestDECMode(_seq.param(0));
         return ApplyResult::Ok;
     case DECRQM_ANSI:
         if (_seq.parameterCount() != 1)
             return ApplyResult::Invalid;
-        screen().requestAnsiMode(_seq.param(0));
+        terminal_.screen().requestAnsiMode(_seq.param(0));
         return ApplyResult::Ok;
-    case DECRQPSR: return impl::DECRQPSR(_seq, screen());
-    case DECSCUSR: return impl::DECSCUSR(_seq, screen());
+    case DECRQPSR: return impl::DECRQPSR(_seq, terminal_.screen());
+    case DECSCUSR: return impl::DECSCUSR(_seq, terminal_.screen());
     case DECSCPP:
         if (auto const columnCount = _seq.param_or(0, 80); columnCount == 80 || columnCount == 132)
         {
             // EXTENSION: only 80 and 132 are specced, but we allow any.
-            screen().resizeColumns(ColumnCount(columnCount), false);
+            terminal_.screen().resizeColumns(ColumnCount(columnCount), false);
             return ApplyResult::Ok;
         }
         else
             return ApplyResult::Invalid;
     case DECSNLS:
-        screen().resize(PageSize { screen().pageSize().lines, _seq.param<ColumnCount>(0) });
+        terminal_.screen().resize(
+            PageSize { terminal_.screen().pageSize().lines, _seq.param<ColumnCount>(0) });
         return ApplyResult::Ok;
     case DECSLRM: {
         auto l = decr(_seq.param_opt<ColumnOffset>(0));
         auto r = decr(_seq.param_opt<ColumnOffset>(1));
-        screen().setLeftRightMargin(l, r);
+        terminal_.screen().setLeftRightMargin(l, r);
     }
     break;
     case DECSM: {
         ApplyResult r = ApplyResult::Ok;
         crispy::for_each(crispy::times(_seq.parameterCount()), [&](size_t i) {
-            auto const t = impl::setModeDEC(_seq, i, true, screen());
+            auto const t = impl::setModeDEC(_seq, i, true, terminal_.screen());
             r = max(r, t);
         });
         return r;
     }
     case DECSTBM:
-        screen().setTopBottomMargin(decr(_seq.param_opt<LineOffset>(0)), decr(_seq.param_opt<LineOffset>(1)));
+        terminal_.screen().setTopBottomMargin(decr(_seq.param_opt<LineOffset>(0)),
+                                              decr(_seq.param_opt<LineOffset>(1)));
         break;
-    case DECSTR: screen().resetSoft(); break;
-    case DECXCPR: screen().reportExtendedCursorPosition(); break;
-    case DL: screen().deleteLines(_seq.param_or(0, LineCount(1))); break;
-    case ECH: screen().eraseCharacters(_seq.param_or(0, ColumnCount(1))); break;
-    case ED: return impl::ED(_seq, screen());
-    case EL: return impl::EL(_seq, screen());
-    case HPA: screen().moveCursorToColumn(_seq.param<ColumnOffset>(0) - 1); break;
-    case HPR: screen().moveCursorForward(_seq.param<ColumnCount>(0)); break;
+    case DECSTR: terminal_.screen().resetSoft(); break;
+    case DECXCPR: terminal_.screen().reportExtendedCursorPosition(); break;
+    case DL: terminal_.screen().deleteLines(_seq.param_or(0, LineCount(1))); break;
+    case ECH: terminal_.screen().eraseCharacters(_seq.param_or(0, ColumnCount(1))); break;
+    case ED: return impl::ED(_seq, terminal_.screen());
+    case EL: return impl::EL(_seq, terminal_.screen());
+    case HPA: terminal_.screen().moveCursorToColumn(_seq.param<ColumnOffset>(0) - 1); break;
+    case HPR: terminal_.screen().moveCursorForward(_seq.param<ColumnCount>(0)); break;
     case HVP:
-        screen().moveCursorTo(_seq.param_or(0, LineOffset(1)) - 1, _seq.param_or(1, ColumnOffset(1)) - 1);
+        terminal_.screen().moveCursorTo(_seq.param_or(0, LineOffset(1)) - 1,
+                                        _seq.param_or(1, ColumnOffset(1)) - 1);
         break; // YES, it's like a CUP!
-    case ICH: screen().insertCharacters(_seq.param_or(0, ColumnCount { 1 })); break;
-    case IL: screen().insertLines(_seq.param_or(0, LineCount { 1 })); break;
+    case ICH: terminal_.screen().insertCharacters(_seq.param_or(0, ColumnCount { 1 })); break;
+    case IL: terminal_.screen().insertLines(_seq.param_or(0, LineCount { 1 })); break;
     case REP:
-        if (state().precedingGraphicCharacter)
+        if (terminal_.state().precedingGraphicCharacter)
         {
             auto const requestedCount = _seq.param<size_t>(0);
             auto const availableColumns =
-                (screen().margin().horizontal.to - screen().cursor().position.column).template as<size_t>();
+                (terminal_.screen().margin().horizontal.to - terminal_.screen().cursor().position.column)
+                    .template as<size_t>();
             auto const effectiveCount = min(requestedCount, availableColumns);
             for (size_t i = 0; i < effectiveCount; i++)
-                screen().writeText(state().precedingGraphicCharacter);
+                terminal_.screen().writeText(terminal_.state().precedingGraphicCharacter);
         }
         break;
     case RM: {
         ApplyResult r = ApplyResult::Ok;
         crispy::for_each(crispy::times(_seq.parameterCount()), [&](size_t i) {
-            auto const t = impl::setAnsiMode(_seq, i, false, screen());
+            auto const t = impl::setAnsiMode(_seq, i, false, terminal_.screen());
             r = max(r, t);
         });
         return r;
     }
     break;
-    case SCOSC: screen().saveCursor(); break;
-    case SD: screen().scrollDown(_seq.param_or<LineCount>(0, LineCount { 1 })); break;
-    case SETMARK: screen().setMark(); break;
-    case SGR: return impl::dispatchSGR(_seq, screen());
+    case SCOSC: terminal_.screen().saveCursor(); break;
+    case SD: terminal_.screen().scrollDown(_seq.param_or<LineCount>(0, LineCount { 1 })); break;
+    case SETMARK: terminal_.screen().setMark(); break;
+    case SGR: return impl::dispatchSGR(_seq, terminal_.screen());
     case SM: {
         ApplyResult r = ApplyResult::Ok;
         crispy::for_each(crispy::times(_seq.parameterCount()), [&](size_t i) {
-            auto const t = impl::setAnsiMode(_seq, i, true, screen());
+            auto const t = impl::setAnsiMode(_seq, i, true, terminal_.screen());
             r = max(r, t);
         });
         return r;
     }
-    case SU: screen().scrollUp(_seq.param_or<LineCount>(0, LineCount(1))); break;
-    case TBC: return impl::TBC(_seq, screen());
-    case VPA: screen().moveCursorToLine(_seq.param_or<LineOffset>(0, LineOffset { 1 }) - 1); break;
+    case SU: terminal_.screen().scrollUp(_seq.param_or<LineCount>(0, LineCount(1))); break;
+    case TBC: return impl::TBC(_seq, terminal_.screen());
+    case VPA: terminal_.screen().moveCursorToLine(_seq.param_or<LineOffset>(0, LineOffset { 1 }) - 1); break;
     case WINMANIP: return impl::WINDOWMANIP(_seq, terminal_);
-    case DECMODERESTORE: return impl::restoreDECModes(_seq, screen());
-    case DECMODESAVE: return impl::saveDECModes(_seq, screen());
-    case XTSMGRAPHICS: return impl::XTSMGRAPHICS(_seq, screen());
+    case DECMODERESTORE: return impl::restoreDECModes(_seq, terminal_.screen());
+    case DECMODESAVE: return impl::saveDECModes(_seq, terminal_.screen());
+    case XTSMGRAPHICS: return impl::XTSMGRAPHICS(_seq, terminal_.screen());
     case XTVERSION:
-        screen().reply(fmt::format("\033P>|{} {}\033\\", LIBTERMINAL_NAME, LIBTERMINAL_VERSION_STRING));
+        terminal_.reply(fmt::format("\033P>|{} {}\033\\", LIBTERMINAL_NAME, LIBTERMINAL_VERSION_STRING));
         return ApplyResult::Ok;
 
     // OSC
     case SETTITLE:
         //(not supported) ChangeIconTitle(_seq.intermediateCharacters());
-        screen().setWindowTitle(_seq.intermediateCharacters());
+        terminal_.screen().setWindowTitle(_seq.intermediateCharacters());
         return ApplyResult::Ok;
     case SETICON: return ApplyResult::Ok; // NB: Silently ignore!
-    case SETWINTITLE: screen().setWindowTitle(_seq.intermediateCharacters()); break;
+    case SETWINTITLE: terminal_.screen().setWindowTitle(_seq.intermediateCharacters()); break;
     case SETXPROP: return ApplyResult::Unsupported;
-    case SETCOLPAL: return impl::SETCOLPAL(_seq, screen());
-    case RCOLPAL: return impl::RCOLPAL(_seq, screen());
-    case SETCWD: return impl::SETCWD(_seq, screen());
-    case HYPERLINK: return impl::HYPERLINK(_seq, screen());
+    case SETCOLPAL: return impl::SETCOLPAL(_seq, terminal_);
+    case RCOLPAL: return impl::RCOLPAL(_seq, terminal_.screen());
+    case SETCWD: return impl::SETCWD(_seq, terminal_.screen());
+    case HYPERLINK: return impl::HYPERLINK(_seq, terminal_.screen());
     case CAPTURE: return impl::CAPTURE(_seq, terminal_);
     case COLORFG:
-        return impl::setOrRequestDynamicColor(_seq, screen(), DynamicColorName::DefaultForegroundColor);
+        return impl::setOrRequestDynamicColor(
+            _seq, terminal_.screen(), DynamicColorName::DefaultForegroundColor);
     case COLORBG:
-        return impl::setOrRequestDynamicColor(_seq, screen(), DynamicColorName::DefaultBackgroundColor);
+        return impl::setOrRequestDynamicColor(
+            _seq, terminal_.screen(), DynamicColorName::DefaultBackgroundColor);
     case COLORCURSOR:
-        return impl::setOrRequestDynamicColor(_seq, screen(), DynamicColorName::TextCursorColor);
+        return impl::setOrRequestDynamicColor(_seq, terminal_.screen(), DynamicColorName::TextCursorColor);
     case COLORMOUSEFG:
-        return impl::setOrRequestDynamicColor(_seq, screen(), DynamicColorName::MouseForegroundColor);
+        return impl::setOrRequestDynamicColor(
+            _seq, terminal_.screen(), DynamicColorName::MouseForegroundColor);
     case COLORMOUSEBG:
-        return impl::setOrRequestDynamicColor(_seq, screen(), DynamicColorName::MouseBackgroundColor);
+        return impl::setOrRequestDynamicColor(
+            _seq, terminal_.screen(), DynamicColorName::MouseBackgroundColor);
     case SETFONT: return impl::setFont(_seq, terminal_);
     case SETFONTALL: return impl::setAllFont(_seq, terminal_);
     case CLIPBOARD: return impl::clipboard(_seq, terminal_);
     // TODO: case COLORSPECIAL: return impl::setOrRequestDynamicColor(_seq, _output,
     // DynamicColorName::HighlightForegroundColor);
-    case RCOLORFG: screen().resetDynamicColor(DynamicColorName::DefaultForegroundColor); break;
-    case RCOLORBG: screen().resetDynamicColor(DynamicColorName::DefaultBackgroundColor); break;
-    case RCOLORCURSOR: screen().resetDynamicColor(DynamicColorName::TextCursorColor); break;
-    case RCOLORMOUSEFG: screen().resetDynamicColor(DynamicColorName::MouseForegroundColor); break;
-    case RCOLORMOUSEBG: screen().resetDynamicColor(DynamicColorName::MouseBackgroundColor); break;
-    case RCOLORHIGHLIGHTFG: screen().resetDynamicColor(DynamicColorName::HighlightForegroundColor); break;
-    case RCOLORHIGHLIGHTBG: screen().resetDynamicColor(DynamicColorName::HighlightBackgroundColor); break;
-    case NOTIFY: return impl::NOTIFY(_seq, screen());
-    case DUMPSTATE: screen().inspect(); break;
+    case RCOLORFG: terminal_.screen().resetDynamicColor(DynamicColorName::DefaultForegroundColor); break;
+    case RCOLORBG: terminal_.screen().resetDynamicColor(DynamicColorName::DefaultBackgroundColor); break;
+    case RCOLORCURSOR: terminal_.screen().resetDynamicColor(DynamicColorName::TextCursorColor); break;
+    case RCOLORMOUSEFG: terminal_.screen().resetDynamicColor(DynamicColorName::MouseForegroundColor); break;
+    case RCOLORMOUSEBG: terminal_.screen().resetDynamicColor(DynamicColorName::MouseBackgroundColor); break;
+    case RCOLORHIGHLIGHTFG:
+        terminal_.screen().resetDynamicColor(DynamicColorName::HighlightForegroundColor);
+        break;
+    case RCOLORHIGHLIGHTBG:
+        terminal_.screen().resetDynamicColor(DynamicColorName::HighlightBackgroundColor);
+        break;
+    case NOTIFY: return impl::NOTIFY(_seq, terminal_.screen());
+    case DUMPSTATE: terminal_.screen().inspect(); break;
     default: return ApplyResult::Unsupported;
     }
     return ApplyResult::Ok;
 }
 
-std::string to_string(AnsiMode _mode)
-{
-    switch (_mode)
-    {
-    case AnsiMode::KeyboardAction: return "KeyboardAction";
-    case AnsiMode::Insert: return "Insert";
-    case AnsiMode::SendReceive: return "SendReceive";
-    case AnsiMode::AutomaticNewLine: return "AutomaticNewLine";
-    }
-
-    return fmt::format("({})", static_cast<unsigned>(_mode));
-}
-
-std::string to_string(DECMode _mode)
-{
-    switch (_mode)
-    {
-    case DECMode::UseApplicationCursorKeys: return "UseApplicationCursorKeys";
-    case DECMode::DesignateCharsetUSASCII: return "DesignateCharsetUSASCII";
-    case DECMode::Columns132: return "Columns132";
-    case DECMode::SmoothScroll: return "SmoothScroll";
-    case DECMode::ReverseVideo: return "ReverseVideo";
-    case DECMode::MouseProtocolX10: return "MouseProtocolX10";
-    case DECMode::MouseProtocolNormalTracking: return "MouseProtocolNormalTracking";
-    case DECMode::MouseProtocolHighlightTracking: return "MouseProtocolHighlightTracking";
-    case DECMode::MouseProtocolButtonTracking: return "MouseProtocolButtonTracking";
-    case DECMode::MouseProtocolAnyEventTracking: return "MouseProtocolAnyEventTracking";
-    case DECMode::SaveCursor: return "SaveCursor";
-    case DECMode::ExtendedAltScreen: return "ExtendedAltScreen";
-    case DECMode::Origin: return "Origin";
-    case DECMode::AutoWrap: return "AutoWrap";
-    case DECMode::PrinterExtend: return "PrinterExtend";
-    case DECMode::LeftRightMargin: return "LeftRightMargin";
-    case DECMode::ShowToolbar: return "ShowToolbar";
-    case DECMode::BlinkingCursor: return "BlinkingCursor";
-    case DECMode::VisibleCursor: return "VisibleCursor";
-    case DECMode::ShowScrollbar: return "ShowScrollbar";
-    case DECMode::AllowColumns80to132: return "AllowColumns80to132";
-    case DECMode::DebugLogging: return "DebugLogging";
-    case DECMode::UseAlternateScreen: return "UseAlternateScreen";
-    case DECMode::BracketedPaste: return "BracketedPaste";
-    case DECMode::FocusTracking: return "FocusTracking";
-    case DECMode::SixelScrolling: return "SixelScrolling";
-    case DECMode::UsePrivateColorRegisters: return "UsePrivateColorRegisters";
-    case DECMode::MouseExtended: return "MouseExtended";
-    case DECMode::MouseSGR: return "MouseSGR";
-    case DECMode::MouseURXVT: return "MouseURXVT";
-    case DECMode::MouseSGRPixels: return "MouseSGRPixels";
-    case DECMode::MouseAlternateScroll: return "MouseAlternateScroll";
-    case DECMode::BatchedRendering: return "BatchedRendering";
-    case DECMode::TextReflow: return "TextReflow";
-    case DECMode::SixelCursorNextToGraphic: return "SixelCursorNextToGraphic";
-    }
-    return fmt::format("({})", static_cast<unsigned>(_mode));
-};
-
 } // namespace terminal
-
-#include <terminal/Terminal.h>
-template class terminal::Sequencer<terminal::Terminal>;
-
-#include <terminal/MockTerm.h>
-template class terminal::Sequencer<terminal::MockTerm>;

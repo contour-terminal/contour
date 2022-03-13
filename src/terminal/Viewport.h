@@ -29,7 +29,7 @@ namespace terminal
 template <typename EventListener>
 class Screen;
 
-template <typename T>
+template <typename Cell>
 class Viewport
 {
   public:
@@ -39,7 +39,7 @@ class Viewport
 
     using ModifyEvent = std::function<void()>;
 
-    explicit Viewport(Screen<T>& _screen, ModifyEvent _onModify = {}):
+    explicit Viewport(Screen<Cell>& _screen, ModifyEvent _onModify = {}):
         screen_ { _screen }, modified_ { _onModify ? std::move(_onModify) : []() {
         } }
     {
@@ -166,10 +166,10 @@ class Viewport
 
     // private fields
     //
-    Screen<T>& screen_;
+    Screen<Cell>& screen_;
     ModifyEvent modified_;
-    ScrollOffset
-        scrollOffset_; //!< scroll offset relative to scroll top (0) or nullopt if not scrolled into history
+    //!< scroll offset relative to scroll top (0) or nullopt if not scrolled into history
+    ScrollOffset scrollOffset_;
 };
 
 } // namespace terminal

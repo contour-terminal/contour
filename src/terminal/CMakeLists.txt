@@ -81,6 +81,7 @@ set(terminal_SOURCES
     Sequencer.cpp
     SixelParser.cpp
     Terminal.cpp
+    TerminalState.cpp
     VTType.cpp
     primitives.cpp
     pty/MockPty.cpp
@@ -113,7 +114,6 @@ endif()
 if(CONTOUR_PERF_STATS)
     target_compile_definitions(terminal PUBLIC CONTOUR_PERF_STATS=1)
 endif()
-
 
 if(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE AND NOT(WIN32))
     target_compile_definitions(terminal PUBLIC LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE=1)
