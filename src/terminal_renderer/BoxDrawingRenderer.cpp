@@ -596,10 +596,10 @@ namespace detail
             double b;
         };
 
-        template <Dir Direction>
+        template <Dir Direction, int DivisorX>
         auto getTriangleProps(ImageSize size)
         {
-            auto const c = Point { unbox<int>(size.width) / 2, unbox<int>(size.height) / 2 };
+            auto const c = Point { unbox<int>(size.width) / DivisorX, unbox<int>(size.height) / 2 };
             auto const w = unbox<int>(size.width) - 1;
             auto const h = unbox<int>(size.height) - 1;
 
@@ -688,10 +688,10 @@ namespace detail
             };
         }
 
-        template <Dir Direction, Inverted inverted>
+        template <Dir Direction, Inverted inverted, int DivisorX>
         void fillTriangle(Pixmap& pixmap)
         {
-            auto const p = getTriangleProps<Direction>(pixmap._size);
+            auto const p = getTriangleProps<Direction, DivisorX>(pixmap._size);
             auto const [set, unset] = []() {
                 return inverted == Inverted::No ? pair { 0xFF, 0 } : pair { 0, 0xFF };
             }();
@@ -709,11 +709,11 @@ namespace detail
             }
         }
 
-        template <Dir Direction, Inverted Inv = Inverted::No>
+        template <Dir Direction, Inverted Inv = Inverted::No, int DivisorX = 2>
         atlas::Buffer triangle(ImageSize size)
         {
             auto pixmap = blockElement<2>(size);
-            fillTriangle<Direction, Inv>(pixmap);
+            fillTriangle<Direction, Inv, DivisorX>(pixmap);
             return pixmap.take();
         };
 
@@ -1001,7 +1001,13 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) const noexcept
            || ascending(0x1FB00, 0x1FBAF) // more block sextants
            || ascending(0x1FBF0, 0x1FBF9) // digits
            || ascending(0xEE00, 0xEE05)   // progress bar (Fira Code)
-           || codepoint == 0xE0B4 || codepoint == 0xE0B6 || codepoint == 0xE0BC || codepoint == 0xE0BE;
+           || codepoint == 0xE0B0         // 
+           || codepoint == 0xE0B2         // 
+           || codepoint == 0xE0B4         // 
+           || codepoint == 0xE0B6         // 
+           || codepoint == 0xE0BC         // 
+           || codepoint == 0xE0BE         // 
+        ;
 }
 
 optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
@@ -1486,6 +1492,8 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
         return segmentArt().segment_bar(1, 2, 3, 4, 5, 6);
         // }}}
 
+    case 0xE0B0: return /*  */ triangle<Dir::Left, Inverted::No, 1>(size);
+    case 0xE0B2: return /*  */ triangle<Dir::Right, Inverted::No, 1>(size);
     case 0xE0B4: return /*  */ blockElement<2>(size).halfFilledCircleRight();
     case 0xE0B6: return /*  */ blockElement<2>(size).halfFilledCircleLeft();
     case 0xE0BC: return /*  */ ud({ 0, 1 }, { 1, 0 });
