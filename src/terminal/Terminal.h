@@ -71,7 +71,7 @@ class Terminal
         virtual void discardImage(Image const&) {}
     };
 
-    Terminal(Pty& _pty,
+    Terminal(std::unique_ptr<Pty> _pty,
              size_t _ptyReadBufferSize,
              Events& _eventListener,
              LineCount _maxHistoryLineCount = LineCount(0),
@@ -100,9 +100,9 @@ class Terminal
     std::chrono::steady_clock::time_point currentTime() const noexcept { return currentTime_; }
 
     /// Retrieves reference to the underlying PTY device.
-    Pty& device() noexcept { return pty_; }
+    Pty& device() noexcept { return *pty_; }
 
-    PageSize pageSize() const noexcept { return pty_.pageSize(); }
+    PageSize pageSize() const noexcept { return pty_->pageSize(); }
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels);
 
     void setMouseProtocolBypassModifier(Modifier _value) { mouseProtocolBypassModifier_ = _value; }
@@ -394,7 +394,7 @@ class Terminal
     bool screenDirty_ = false;
     RenderDoubleBuffer renderBuffer_ {};
 
-    Pty& pty_;
+    std::unique_ptr<Pty> pty_;
 
     std::chrono::steady_clock::time_point startTime_;
     std::chrono::steady_clock::time_point currentTime_;

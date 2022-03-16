@@ -91,8 +91,7 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
     app_ { _app },
     displayInitialized_ { move(_displayInitialized) },
     onExit_ { move(_onExit) },
-    pty_ { move(_pty) },
-    terminal_ { *pty_,
+    terminal_ { move(_pty),
                 config_.ptyReadBufferSize,
                 *this,
                 config_.profile(profileName_)->maxHistoryLineCount,
@@ -877,7 +876,7 @@ void TerminalSession::spawnNewTerminal(string const& _profileName)
 {
     auto const wd = [this]() -> string {
 #if defined(__APPLE__)
-        if (auto const* ptyProcess = dynamic_cast<Process const*>(pty_.get()))
+        if (auto const* ptyProcess = dynamic_cast<Process const*>(&terminal_.device()))
             return ptyProcess->workingDirectory();
 #else
         auto const _l = scoped_lock { terminal_ };

@@ -196,8 +196,10 @@ class ContourHeadlessBench: public crispy::App
         auto const ptyReadBufferSize = 10000;
         auto maxHistoryLineCount = terminal::LineCount(4096);
         auto eh = terminal::Terminal::Events {};
-        auto pty = std::make_unique<terminal::MockViewPty>(pageSize);
-        auto vt = terminal::Terminal { *pty, ptyReadBufferSize, eh, maxHistoryLineCount };
+        auto vt = terminal::Terminal {
+            make_unique<terminal::MockViewPty>(pageSize), ptyReadBufferSize, eh, maxHistoryLineCount
+        };
+        auto* pty = static_cast<terminal::MockViewPty*>(&vt.device());
         vt.screen().setMode(terminal::DECMode::AutoWrap, true);
 
         auto const rv = baseBenchmark(

@@ -74,7 +74,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     double contentScale() const noexcept { return contentScale_; }
     void setContentScale(double value) noexcept { contentScale_ = value; }
 
-    terminal::Pty& pty() noexcept { return *pty_; }
+    terminal::Pty& pty() noexcept { return terminal_.device(); }
     terminal::Terminal& terminal() noexcept { return terminal_; }
     terminal::Terminal const& terminal() const noexcept { return terminal_; }
     terminal::ScreenType currentScreenType() const noexcept { return currentScreenType_; }
@@ -216,7 +216,6 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     std::function<void()> displayInitialized_;
     std::function<void()> onExit_;
 
-    std::unique_ptr<terminal::Pty> pty_;
     terminal::Terminal terminal_;
     bool terminatedAndWaitingForKeyPress_ = false;
     TerminalDisplay* display_ = nullptr;

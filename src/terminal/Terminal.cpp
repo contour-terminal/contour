@@ -99,7 +99,7 @@ namespace // {{{ helpers
 } // namespace
 // }}}
 
-Terminal::Terminal(Pty& _pty,
+Terminal::Terminal(unique_ptr<Pty> _pty,
                    size_t _ptyReadBufferSize,
                    Terminal::Events& _eventListener,
                    LineCount _maxHistoryLineCount,
@@ -119,7 +119,7 @@ Terminal::Terminal(Pty& _pty,
     eventListener_ { _eventListener },
     refreshInterval_ { static_cast<long long>(1000.0 / _refreshRate) },
     renderBuffer_ {},
-    pty_ { _pty },
+    pty_ { move(_pty) },
     startTime_ { _now },
     currentTime_ { _now },
     lastCursorBlink_ { _now },
@@ -132,7 +132,7 @@ Terminal::Terminal(Pty& _pty,
     copyLastMarkRangeOffset_ { _copyLastMarkRangeOffset },
     // clang-format off
     state_ { *this,
-             pty_.pageSize(),
+             pty_->pageSize(),
              _maxHistoryLineCount,
              _maxImageSize,
              _maxImageColorRegisters,
@@ -159,7 +159,7 @@ Terminal::Terminal(Pty& _pty,
 Terminal::~Terminal()
 {
     state_.terminating = true;
-    pty_.wakeupReader();
+    pty_->wakeupReader();
 
     if (screenUpdateThread_)
         screenUpdateThread_->join();
@@ -201,7 +201,7 @@ void Terminal::mainLoop()
             break;
     }
 
-    LOGSTORE(TerminalLog)("Event loop terminating (PTY {}).", pty_.isClosed() ? "closed" : "open");
+    LOGSTORE(TerminalLog)("Event loop terminating (PTY {}).", pty_->isClosed() ? "closed" : "open");
     eventListener_.onClosed();
 }
 
@@ -212,13 +212,13 @@ bool Terminal::processInputOnce()
                              //: refreshInterval_ : std::chrono::seconds(0)
                              : std::chrono::seconds(30);
 
-    auto const bufOpt = pty_.read(ptyReadBufferSize_, timeout);
+    auto const bufOpt = pty_->read(ptyReadBufferSize_, timeout);
     if (!bufOpt)
     {
         if (errno != EINTR && errno != EAGAIN)
         {
             TerminalLog()("PTY read failed (timeout: {}). {}", timeout, strerror(errno));
-            pty_.close();
+            pty_->close();
         }
         return errno == EINTR || errno == EAGAIN;
     }
@@ -227,7 +227,7 @@ bool Terminal::processInputOnce()
     if (buf.empty())
     {
         TerminalLog()("PTY read returned with zero bytes. Closing PTY.");
-        pty_.close();
+        pty_->close();
         return true;
     }
 
@@ -249,7 +249,7 @@ void Terminal::breakLoopAndRefreshRenderBuffer()
     if (this_thread::get_id() == mainLoopThreadID_)
         return;
 
-    pty_.wakeupReader();
+    pty_->wakeupReader();
 }
 
 bool Terminal::refreshRenderBuffer(bool _locked)
@@ -760,7 +760,7 @@ void Terminal::flushInput()
 
     // XXX Should be the only location that does write to the PTY's stdin to avoid race conditions.
     auto const input = state_.inputGenerator.peek();
-    auto const rv = pty_.write(input.data(), input.size());
+    auto const rv = pty_->write(input.data(), input.size());
     if (rv > 0)
         state_.inputGenerator.consume(rv);
 }
@@ -830,7 +830,7 @@ void Terminal::resizeScreen(PageSize _cells, optional<ImageSize> _pixels)
         min(currentMousePosition_.column, boxed_cast<ColumnOffset>(_cells.columns - 1));
     currentMousePosition_.line = min(currentMousePosition_.line, boxed_cast<LineOffset>(_cells.lines - 1));
 
-    pty_.resizeScreen(_cells, _pixels);
+    pty_->resizeScreen(_cells, _pixels);
 
     verifyState();
 }

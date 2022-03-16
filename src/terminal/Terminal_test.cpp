@@ -84,16 +84,16 @@ class MockTerm: public terminal::Terminal::Events
     MockTerm(ColumnCount _columns, LineCount _lines): MockTerm { PageSize { _lines, _columns } } {}
 
     explicit MockTerm(PageSize _size):
-        pty_ { _size },
         terminal_ {
-            pty_,
+            make_unique<terminal::MockPty>(_size),
             1024,
             *this,
             LineCount(1024), // max history line count
             LineOffset(0),
             chrono::milliseconds(500),          // cursor blink interval
             chrono::steady_clock::time_point(), // initial time point
-        }
+        },
+        pty_ { static_cast<terminal::MockPty&>(terminal_.device()) }
     {
     }
 
@@ -122,8 +122,8 @@ class MockTerm: public terminal::Terminal::Events
     }
 
   private:
-    terminal::MockPty pty_;
     terminal::Terminal terminal_;
+    terminal::MockPty& pty_;
 };
 
 std::string trimmedTextScreenshot(MockTerm const& _mt)
