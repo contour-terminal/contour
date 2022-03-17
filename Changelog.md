@@ -17,7 +17,7 @@
 - Improved detection of runtime DPI changes for KDE (Plasma) desktop environment.
 - Improves Window manipulation VT sequence for saving/restoring window title (`CSI 22 ; Ps t`, `CSI 23 ; Ps t`)
 - Adds pixel-perfect box-drawing for U+EE00 .. U+EE05 for progress bar glyphs as first introduced by Fira Code (#521).
-- Adds pixel-perfect box-drawing for U+E0B0, U+E0B2 (Triangle Powerline glyphs).
+- Adds pixel-perfect box-drawing for U+E0B0, U+E0B2, U+E0BA (Triangle Powerline glyphs).
 - Adds preliminary implementation of `DA3` VT sequence.
 - Adds new configuration option `mouse_block_selection_modifier`.
 - Adds new configuration option `profiles.*.copy_last_mark_range_offset` (default `0`) to adjust where to start looking upwards for the `CopyPreviousMarkRange` action. This is useful for multi-line prompts.

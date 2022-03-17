@@ -1005,6 +1005,7 @@ bool BoxDrawingRenderer::renderable(char32_t codepoint) const noexcept
            || codepoint == 0xE0B2         // 
            || codepoint == 0xE0B4         // 
            || codepoint == 0xE0B6         // 
+           || codepoint == 0xE0BA         // 
            || codepoint == 0xE0BC         // 
            || codepoint == 0xE0BE         // 
         ;
@@ -1496,6 +1497,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
     case 0xE0B2: return /*  */ triangle<Dir::Right, Inverted::No, 1>(size);
     case 0xE0B4: return /*  */ blockElement<2>(size).halfFilledCircleRight();
     case 0xE0B6: return /*  */ blockElement<2>(size).halfFilledCircleLeft();
+    case 0xE0BA: return /*  */ ld({ 0, 1 }, { 1, 0 });
     case 0xE0BC: return /*  */ ud({ 0, 1 }, { 1, 0 });
     case 0xE0BE: return /*  */ ud({ 0, 0 }, { 1, 1 });
 
