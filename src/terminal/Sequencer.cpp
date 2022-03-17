@@ -337,96 +337,96 @@ namespace impl
         return Color {};
     }
 
-    template <typename Cell>
-    ApplyResult dispatchSGR(Sequence const& _seq, Screen<Cell>& _screen)
+    template <typename Target>
+    ApplyResult applySGR(Target& target, Sequence const& seq, size_t parameterStart, size_t parameterEnd)
     {
-        if (_seq.parameterCount() == 0)
+        if (parameterStart == parameterEnd)
         {
-            _screen.setGraphicsRendition(GraphicsRendition::Reset);
+            target.setGraphicsRendition(GraphicsRendition::Reset);
             return ApplyResult::Ok;
         }
 
-        for (size_t i = 0; i < _seq.parameterCount(); ++i)
+        for (size_t i = parameterStart; i < parameterEnd; ++i)
         {
-            switch (_seq.param(i))
+            switch (seq.param(i))
             {
-            case 0: _screen.setGraphicsRendition(GraphicsRendition::Reset); break;
-            case 1: _screen.setGraphicsRendition(GraphicsRendition::Bold); break;
-            case 2: _screen.setGraphicsRendition(GraphicsRendition::Faint); break;
-            case 3: _screen.setGraphicsRendition(GraphicsRendition::Italic); break;
+            case 0: target.setGraphicsRendition(GraphicsRendition::Reset); break;
+            case 1: target.setGraphicsRendition(GraphicsRendition::Bold); break;
+            case 2: target.setGraphicsRendition(GraphicsRendition::Faint); break;
+            case 3: target.setGraphicsRendition(GraphicsRendition::Italic); break;
             case 4:
-                if (_seq.subParameterCount(i) == 1)
+                if (seq.subParameterCount(i) == 1)
                 {
-                    switch (_seq.subparam(i, 0))
+                    switch (seq.subparam(i, 0))
                     {
-                    case 0: _screen.setGraphicsRendition(GraphicsRendition::NoUnderline); break;      // 4:0
-                    case 1: _screen.setGraphicsRendition(GraphicsRendition::Underline); break;        // 4:1
-                    case 2: _screen.setGraphicsRendition(GraphicsRendition::DoublyUnderlined); break; // 4:2
-                    case 3: _screen.setGraphicsRendition(GraphicsRendition::CurlyUnderlined); break;  // 4:3
-                    case 4: _screen.setGraphicsRendition(GraphicsRendition::DottedUnderline); break;  // 4:4
-                    case 5: _screen.setGraphicsRendition(GraphicsRendition::DashedUnderline); break;  // 4:5
-                    default: _screen.setGraphicsRendition(GraphicsRendition::Underline); break;
+                    case 0: target.setGraphicsRendition(GraphicsRendition::NoUnderline); break;      // 4:0
+                    case 1: target.setGraphicsRendition(GraphicsRendition::Underline); break;        // 4:1
+                    case 2: target.setGraphicsRendition(GraphicsRendition::DoublyUnderlined); break; // 4:2
+                    case 3: target.setGraphicsRendition(GraphicsRendition::CurlyUnderlined); break;  // 4:3
+                    case 4: target.setGraphicsRendition(GraphicsRendition::DottedUnderline); break;  // 4:4
+                    case 5: target.setGraphicsRendition(GraphicsRendition::DashedUnderline); break;  // 4:5
+                    default: target.setGraphicsRendition(GraphicsRendition::Underline); break;
                     }
                 }
                 else
-                    _screen.setGraphicsRendition(GraphicsRendition::Underline);
+                    target.setGraphicsRendition(GraphicsRendition::Underline);
                 break;
-            case 5: _screen.setGraphicsRendition(GraphicsRendition::Blinking); break;
-            case 7: _screen.setGraphicsRendition(GraphicsRendition::Inverse); break;
-            case 8: _screen.setGraphicsRendition(GraphicsRendition::Hidden); break;
-            case 9: _screen.setGraphicsRendition(GraphicsRendition::CrossedOut); break;
-            case 21: _screen.setGraphicsRendition(GraphicsRendition::DoublyUnderlined); break;
-            case 22: _screen.setGraphicsRendition(GraphicsRendition::Normal); break;
-            case 23: _screen.setGraphicsRendition(GraphicsRendition::NoItalic); break;
-            case 24: _screen.setGraphicsRendition(GraphicsRendition::NoUnderline); break;
-            case 25: _screen.setGraphicsRendition(GraphicsRendition::NoBlinking); break;
-            case 27: _screen.setGraphicsRendition(GraphicsRendition::NoInverse); break;
-            case 28: _screen.setGraphicsRendition(GraphicsRendition::NoHidden); break;
-            case 29: _screen.setGraphicsRendition(GraphicsRendition::NoCrossedOut); break;
-            case 30: _screen.setForegroundColor(IndexedColor::Black); break;
-            case 31: _screen.setForegroundColor(IndexedColor::Red); break;
-            case 32: _screen.setForegroundColor(IndexedColor::Green); break;
-            case 33: _screen.setForegroundColor(IndexedColor::Yellow); break;
-            case 34: _screen.setForegroundColor(IndexedColor::Blue); break;
-            case 35: _screen.setForegroundColor(IndexedColor::Magenta); break;
-            case 36: _screen.setForegroundColor(IndexedColor::Cyan); break;
-            case 37: _screen.setForegroundColor(IndexedColor::White); break;
-            case 38: _screen.setForegroundColor(parseColor(_seq, &i)); break;
-            case 39: _screen.setForegroundColor(DefaultColor()); break;
-            case 40: _screen.setBackgroundColor(IndexedColor::Black); break;
-            case 41: _screen.setBackgroundColor(IndexedColor::Red); break;
-            case 42: _screen.setBackgroundColor(IndexedColor::Green); break;
-            case 43: _screen.setBackgroundColor(IndexedColor::Yellow); break;
-            case 44: _screen.setBackgroundColor(IndexedColor::Blue); break;
-            case 45: _screen.setBackgroundColor(IndexedColor::Magenta); break;
-            case 46: _screen.setBackgroundColor(IndexedColor::Cyan); break;
-            case 47: _screen.setBackgroundColor(IndexedColor::White); break;
-            case 48: _screen.setBackgroundColor(parseColor(_seq, &i)); break;
-            case 49: _screen.setBackgroundColor(DefaultColor()); break;
-            case 51: _screen.setGraphicsRendition(GraphicsRendition::Framed); break;
-            case 53: _screen.setGraphicsRendition(GraphicsRendition::Overline); break;
-            case 54: _screen.setGraphicsRendition(GraphicsRendition::NoFramed); break;
-            case 55: _screen.setGraphicsRendition(GraphicsRendition::NoOverline); break;
+            case 5: target.setGraphicsRendition(GraphicsRendition::Blinking); break;
+            case 7: target.setGraphicsRendition(GraphicsRendition::Inverse); break;
+            case 8: target.setGraphicsRendition(GraphicsRendition::Hidden); break;
+            case 9: target.setGraphicsRendition(GraphicsRendition::CrossedOut); break;
+            case 21: target.setGraphicsRendition(GraphicsRendition::DoublyUnderlined); break;
+            case 22: target.setGraphicsRendition(GraphicsRendition::Normal); break;
+            case 23: target.setGraphicsRendition(GraphicsRendition::NoItalic); break;
+            case 24: target.setGraphicsRendition(GraphicsRendition::NoUnderline); break;
+            case 25: target.setGraphicsRendition(GraphicsRendition::NoBlinking); break;
+            case 27: target.setGraphicsRendition(GraphicsRendition::NoInverse); break;
+            case 28: target.setGraphicsRendition(GraphicsRendition::NoHidden); break;
+            case 29: target.setGraphicsRendition(GraphicsRendition::NoCrossedOut); break;
+            case 30: target.setForegroundColor(IndexedColor::Black); break;
+            case 31: target.setForegroundColor(IndexedColor::Red); break;
+            case 32: target.setForegroundColor(IndexedColor::Green); break;
+            case 33: target.setForegroundColor(IndexedColor::Yellow); break;
+            case 34: target.setForegroundColor(IndexedColor::Blue); break;
+            case 35: target.setForegroundColor(IndexedColor::Magenta); break;
+            case 36: target.setForegroundColor(IndexedColor::Cyan); break;
+            case 37: target.setForegroundColor(IndexedColor::White); break;
+            case 38: target.setForegroundColor(parseColor(seq, &i)); break;
+            case 39: target.setForegroundColor(DefaultColor()); break;
+            case 40: target.setBackgroundColor(IndexedColor::Black); break;
+            case 41: target.setBackgroundColor(IndexedColor::Red); break;
+            case 42: target.setBackgroundColor(IndexedColor::Green); break;
+            case 43: target.setBackgroundColor(IndexedColor::Yellow); break;
+            case 44: target.setBackgroundColor(IndexedColor::Blue); break;
+            case 45: target.setBackgroundColor(IndexedColor::Magenta); break;
+            case 46: target.setBackgroundColor(IndexedColor::Cyan); break;
+            case 47: target.setBackgroundColor(IndexedColor::White); break;
+            case 48: target.setBackgroundColor(parseColor(seq, &i)); break;
+            case 49: target.setBackgroundColor(DefaultColor()); break;
+            case 51: target.setGraphicsRendition(GraphicsRendition::Framed); break;
+            case 53: target.setGraphicsRendition(GraphicsRendition::Overline); break;
+            case 54: target.setGraphicsRendition(GraphicsRendition::NoFramed); break;
+            case 55: target.setGraphicsRendition(GraphicsRendition::NoOverline); break;
             // 58 is reserved, but used for setting underline/decoration colors by some other VTEs (such as
             // mintty, kitty, libvte)
-            case 58: _screen.setUnderlineColor(parseColor(_seq, &i)); break;
-            case 90: _screen.setForegroundColor(BrightColor::Black); break;
-            case 91: _screen.setForegroundColor(BrightColor::Red); break;
-            case 92: _screen.setForegroundColor(BrightColor::Green); break;
-            case 93: _screen.setForegroundColor(BrightColor::Yellow); break;
-            case 94: _screen.setForegroundColor(BrightColor::Blue); break;
-            case 95: _screen.setForegroundColor(BrightColor::Magenta); break;
-            case 96: _screen.setForegroundColor(BrightColor::Cyan); break;
-            case 97: _screen.setForegroundColor(BrightColor::White); break;
-            case 100: _screen.setBackgroundColor(BrightColor::Black); break;
-            case 101: _screen.setBackgroundColor(BrightColor::Red); break;
-            case 102: _screen.setBackgroundColor(BrightColor::Green); break;
-            case 103: _screen.setBackgroundColor(BrightColor::Yellow); break;
-            case 104: _screen.setBackgroundColor(BrightColor::Blue); break;
-            case 105: _screen.setBackgroundColor(BrightColor::Magenta); break;
-            case 106: _screen.setBackgroundColor(BrightColor::Cyan); break;
-            case 107: _screen.setBackgroundColor(BrightColor::White); break;
-            default: break; // TODO: logInvalidCSI("Invalid SGR number: {}", _seq.param(i));
+            case 58: target.setUnderlineColor(parseColor(seq, &i)); break;
+            case 90: target.setForegroundColor(BrightColor::Black); break;
+            case 91: target.setForegroundColor(BrightColor::Red); break;
+            case 92: target.setForegroundColor(BrightColor::Green); break;
+            case 93: target.setForegroundColor(BrightColor::Yellow); break;
+            case 94: target.setForegroundColor(BrightColor::Blue); break;
+            case 95: target.setForegroundColor(BrightColor::Magenta); break;
+            case 96: target.setForegroundColor(BrightColor::Cyan); break;
+            case 97: target.setForegroundColor(BrightColor::White); break;
+            case 100: target.setBackgroundColor(BrightColor::Black); break;
+            case 101: target.setBackgroundColor(BrightColor::Red); break;
+            case 102: target.setBackgroundColor(BrightColor::Green); break;
+            case 103: target.setBackgroundColor(BrightColor::Yellow); break;
+            case 104: target.setBackgroundColor(BrightColor::Blue); break;
+            case 105: target.setBackgroundColor(BrightColor::Magenta); break;
+            case 106: target.setBackgroundColor(BrightColor::Cyan); break;
+            case 107: target.setBackgroundColor(BrightColor::White); break;
+            default: break; // TODO: logInvalidCSI("Invalid SGR number: {}", seq.param(i));
             }
         }
         return ApplyResult::Ok;
@@ -954,8 +954,7 @@ namespace impl
 } // namespace impl
 // }}}
 
-Sequencer::Sequencer(Terminal& _terminal):
-    terminal_ { _terminal }
+Sequencer::Sequencer(Terminal& _terminal): terminal_ { _terminal }
 {
 }
 
@@ -1381,6 +1380,23 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
         terminal_.reply("\033P!|C0000000\033\\");
         break;
     case DCH: terminal_.screen().deleteCharacters(_seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
+    case DECCARA: {
+        auto const origin = terminal_.screen().origin();
+        auto const top = LineOffset(_seq.param_or(0, *origin.line + 1) - 1);
+        auto const left = ColumnOffset(_seq.param_or(1, *origin.column + 1) - 1);
+        auto const bottom = LineOffset(_seq.param_or(2, *terminal_.screen().pageSize().lines) - 1);
+        auto const right = ColumnOffset(_seq.param_or(3, *terminal_.screen().pageSize().columns) - 1);
+        for (auto row = top; row <= bottom; ++row)
+        {
+            for (auto column = left; column <= right; ++column)
+            {
+                auto& cell = terminal_.screen().at(row, column);
+                impl::applySGR(cell, _seq, 4, _seq.parameterCount());
+                // Maybe move setGraphicsRendition to Screen::cursor() ?
+            }
+        }
+    }
+    break;
     case DECCRA: {
         // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
         // DECCRA is not affected by the page margins.
@@ -1522,7 +1538,7 @@ ApplyResult Sequencer::apply(FunctionDefinition const& _function, Sequence const
     case SCOSC: terminal_.screen().saveCursor(); break;
     case SD: terminal_.screen().scrollDown(_seq.param_or<LineCount>(0, LineCount { 1 })); break;
     case SETMARK: terminal_.screen().setMark(); break;
-    case SGR: return impl::dispatchSGR(_seq, terminal_.screen());
+    case SGR: return impl::applySGR(terminal_.screen(), _seq, 0, _seq.parameterCount());
     case SM: {
         ApplyResult r = ApplyResult::Ok;
         crispy::for_each(crispy::times(_seq.parameterCount()), [&](size_t i) {

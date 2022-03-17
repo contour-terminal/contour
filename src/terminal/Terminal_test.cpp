@@ -30,6 +30,7 @@ using namespace std;
 using terminal::ColumnCount;
 using terminal::LineCount;
 using terminal::LineOffset;
+using terminal::ColumnOffset;
 using terminal::PageSize;
 
 namespace
@@ -187,6 +188,50 @@ TEST_CASE("Terminal.BlinkingCursor", "[terminal]")
         terminal.ensureFreshRenderBuffer();
         CHECK(terminal.cursorCurrentlyVisible());
     }
+}
+
+TEST_CASE("Terminal.DECCARA", "[terminal]")
+{
+    auto mock = MockTerm { ColumnCount(5), LineCount(5) };
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    mock.terminal().tick(ClockBase);
+    mock.terminal().ensureFreshRenderBuffer();
+    CHECK("" == trimmedTextScreenshot(mock));
+
+    mock.writeToStdout("12345\r\n"
+                       "67890\r\n"
+                       "ABCDE\r\n"
+                       "abcde\r\n"
+                       "fghij");
+
+    mock.terminal().tick(ClockBase + chrono::seconds(1));
+    mock.terminal().ensureFreshRenderBuffer();
+    CHECK("12345\n67890\nABCDE\nabcde\nfghij" == trimmedTextScreenshot(mock));
+
+    auto const top = 2;
+    auto const left = 3;
+    auto const bottom = 4;
+    auto const right = 5;
+    mock.writeToStdout(fmt::format("\033[{top};{left};{bottom};{right};{sgr}$r",
+                                   fmt::arg("top", top),
+                                   fmt::arg("left", left),
+                                   fmt::arg("bottom", bottom),
+                                   fmt::arg("right", right),
+                                   fmt::arg("sgr", 4)));
+
+    mock.terminal().tick(ClockBase + chrono::seconds(2));
+    mock.terminal().ensureFreshRenderBuffer();
+    CHECK("12345\n67890\nABCDE\nabcde\nfghij" == trimmedTextScreenshot(mock));
+
+    // Just peak into it and test. That's not really 100% precise, tbh., but
+    // i'd like to keep on going and have fun doing the project and not die
+    // early due to a overdose of TDD. :-)
+    for (auto line = top; line <= bottom; ++line)
+        for (auto column = left; column <= right; ++column)
+        {
+            auto const& someCell = mock.terminal().screen().at(LineOffset(line - 1), ColumnOffset(column - 1));
+            CHECK(someCell.styles() & terminal::CellFlags::Underline);
+        }
 }
 
 TEST_CASE("Terminal.SynchronizedOutput", "[terminal]")

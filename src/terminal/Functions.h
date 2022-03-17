@@ -44,7 +44,7 @@ struct FunctionDefinition // TODO: rename Function
     char intermediate;          // (4 bits) 0x20..0x2F (intermediates, usually just one, or 0x00 if none)
     char finalSymbol;           // (7 bits) 0x30..0x7E (final character)
     uint8_t minimumParameters;  // (4 bits) 0..7
-    uint16_t maximumParameters; // (10 bits) 0..i024 for integer value (OSC function parameter)
+    uint16_t maximumParameters; // (10 bits) 0..1024 for integer value (OSC function parameter)
 
     VTType conformanceLevel;
     std::string_view mnemonic;
@@ -301,6 +301,7 @@ constexpr inline auto DA1         = detail::CSI(std::nullopt, 0, 1, std::nullopt
 constexpr inline auto DA2         = detail::CSI('>', 0, 1, std::nullopt, 'c', VTType::VT100, "DA2", "Send secondary device attributes");
 constexpr inline auto DA3         = detail::CSI('=', 0, 1, std::nullopt, 'c', VTType::VT100, "DA3", "Send tertiary device attributes");
 constexpr inline auto DCH         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'P', VTType::VT100, "DCH", "Delete characters");
+constexpr inline auto DECCARA     = detail::CSI(std::nullopt, 5, 99, '$', 'r', VTType::VT420, "DECCARA", "Change Attributes in Rectangular Area");
 constexpr inline auto DECCRA      = detail::CSI(std::nullopt, 0, 8, '$', 'v', VTType::VT420, "DECCRA", "Copy rectangular area");
 constexpr inline auto DECERA      = detail::CSI(std::nullopt, 0, 4, '$', 'z', VTType::VT420, "DECERA", "Erase rectangular area");
 constexpr inline auto DECFRA      = detail::CSI(std::nullopt, 0, 4, '$', 'x', VTType::VT420, "DECFRA", "Fill rectangular area");
@@ -444,6 +445,7 @@ inline auto const& functions() noexcept
             DA2,
             DA3,
             DCH,
+            DECCARA,
             DECCRA,
             DECERA,
             DECFRA,

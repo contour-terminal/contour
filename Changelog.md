@@ -30,6 +30,7 @@
 - Adds `mock` font locator (mostly interesting for advanced use for CI testing).
 - Adds VT sequence `SM ? 8452 h` / `RM ? 8452 l` for enabling/disabling sixel cursor placement conformance (xterm extension).
 - Adds SGR-Pixels support, VT sequence `SM ? 1016 h` / `RM ? 1016 l` (#574).
+- Adds VT sequence DECCARA, Change Attributes in Rectangular Area, with the extension that it applies to *all* SGR attributes. (#15).
 
 ### 0.2.3 (2021-12-12)
 
