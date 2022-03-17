@@ -270,6 +270,7 @@ TerminalWidget::TerminalWidget(TerminalSession& session,
     filesystemWatcher_(this)
 {
     initializeResourcesForContourFrontendOpenGL();
+    session_.setContentScale(contentScale());
 
     setMouseTracking(true);
     setFormat(surfaceFormat());
