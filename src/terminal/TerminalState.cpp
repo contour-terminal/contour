@@ -50,7 +50,6 @@ TerminalState::TerminalState(Terminal& _terminal,
     cursor {},
     lastCursorPosition {},
     hyperlinks { HyperlinkCache { 1024 } },
-    respondToTCapQuery { true },
     sequencer { _terminal },
     parser { std::ref(sequencer) }
 {

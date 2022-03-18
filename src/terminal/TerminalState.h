@@ -147,7 +147,6 @@ struct TerminalState
 
     bool sixelCursorConformance = true;
 
-    ColumnCount tabWidth { 8 };
     std::vector<ColumnOffset> tabs;
 
     bool allowReflowOnResize;
@@ -176,10 +175,6 @@ struct TerminalState
     // Hyperlink related
     //
     HyperlinkStorage hyperlinks {};
-
-    // experimental features
-    //
-    bool respondToTCapQuery = true;
 
     std::string windowTitle {};
     std::stack<std::string> savedWindowTitles {};

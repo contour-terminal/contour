@@ -79,8 +79,6 @@ class Screen: public capabilities::StaticDatabase
 
     void setSixelCursorConformance(bool _value) noexcept { _state.sixelCursorConformance = _value; }
 
-    void setRespondToTCapQuery(bool _enable) { _state.respondToTCapQuery = _enable; }
-
     constexpr ImageSize cellPixelSize() const noexcept { return _state.cellPixelSize; }
 
     constexpr void setCellPixelSize(ImageSize _cellPixelSize) { _state.cellPixelSize = _cellPixelSize; }
@@ -403,8 +401,6 @@ class Screen: public capabilities::StaticDatabase
     bool horizontalMarginsEnabled() const noexcept { return isModeEnabled(DECMode::LeftRightMargin); }
 
     Margin margin() const noexcept { return _state.margin; }
-
-    void setTabWidth(ColumnCount _value) { _state.tabWidth = _value; }
 
     std::string const& windowTitle() const noexcept { return _state.windowTitle; }
 

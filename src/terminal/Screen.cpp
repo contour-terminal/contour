@@ -82,6 +82,8 @@ using std::vector;
 namespace terminal
 {
 
+auto constexpr inline TabWidth = ColumnCount(8);
+
 auto const inline VTCaptureBufferLog = logstore::Category("vt.ext_capturebuffer",
                                                           "Capture Buffer debug logging.",
                                                           logstore::Category::State::Disabled,
@@ -429,7 +431,7 @@ unsigned Screen<Cell>::numericCapability(capabilities::Code _cap) const
     {
     case "li"_tcap: return unbox<unsigned>(_state.pageSize.lines);
     case "co"_tcap: return unbox<unsigned>(_state.pageSize.columns);
-    case "it"_tcap: return unbox<unsigned>(_state.tabWidth);
+    case "it"_tcap: return unbox<unsigned>(TabWidth);
     default: return StaticDatabase::numericCapability(_cap);
     }
 }
@@ -910,11 +912,11 @@ void Screen<Cell>::clearAllTabs()
 template <typename Cell>
 void Screen<Cell>::clearTabUnderCursor()
 {
-    // populate tabs vector in case of default tabWidth is used (until now).
-    if (_state.tabs.empty() && *_state.tabWidth != 0)
-        for (auto column = boxed_cast<ColumnOffset>(_state.tabWidth);
+    // populate tabs vector in case of default tab width is used (until now).
+    if (_state.tabs.empty() && *TabWidth != 0)
+        for (auto column = boxed_cast<ColumnOffset>(TabWidth);
              column < boxed_cast<ColumnOffset>(_state.pageSize.columns);
-             column += boxed_cast<ColumnOffset>(_state.tabWidth))
+             column += boxed_cast<ColumnOffset>(TabWidth))
             _state.tabs.emplace_back(column - 1);
 
     // erase the specific tab underneath
@@ -1658,14 +1660,14 @@ void Screen<Cell>::moveCursorToNextTab()
         else
             moveCursorToNextLine(LineCount(1));
     }
-    else if (_state.tabWidth.value)
+    else if (TabWidth.value)
     {
         // default tab settings
         if (realCursorPosition().column < _state.margin.horizontal.to)
         {
-            auto const n = min(
-                (_state.tabWidth - boxed_cast<ColumnCount>(_state.cursor.position.column) % _state.tabWidth),
-                _state.pageSize.columns - boxed_cast<ColumnCount>(logicalCursorPosition().column));
+            auto const n =
+                min((TabWidth - boxed_cast<ColumnCount>(_state.cursor.position.column) % TabWidth),
+                    _state.pageSize.columns - boxed_cast<ColumnCount>(logicalCursorPosition().column));
             moveCursorForward(n);
         }
         else
@@ -1791,15 +1793,15 @@ void Screen<Cell>::cursorBackwardTab(TabStopCount _count)
             }
         }
     }
-    else if (_state.tabWidth.value)
+    else if (TabWidth.value)
     {
         // default tab settings
-        if (*_state.cursor.position.column < *_state.tabWidth)
+        if (*_state.cursor.position.column < *TabWidth)
             moveCursorToBeginOfLine();
         else
         {
-            auto const m = (*_state.cursor.position.column + 1) % *_state.tabWidth;
-            auto const n = m ? (*_count - 1) * *_state.tabWidth + m : *_count * *_state.tabWidth + m;
+            auto const m = (*_state.cursor.position.column + 1) % *TabWidth;
+            auto const n = m ? (*_count - 1) * *TabWidth + m : *_count * *TabWidth + m;
             moveCursorBackward(ColumnCount(n - 1));
         }
     }
@@ -2484,11 +2486,10 @@ void Screen<Cell>::requestTabStops()
             dcs << *_state.tabs[i] + 1;
         }
     }
-    else if (*_state.tabWidth != 0)
+    else if (*TabWidth != 0)
     {
         dcs << 1;
-        for (auto column = *_state.tabWidth + 1; column <= *_state.pageSize.columns; column +=
-                                                                                     *_state.tabWidth)
+        for (auto column = *TabWidth + 1; column <= *_state.pageSize.columns; column += *TabWidth)
             dcs << '/' << column;
     }
     dcs << "\033\\"sv; // ST
@@ -2510,12 +2511,6 @@ namespace
 template <typename Cell>
 void Screen<Cell>::requestCapability(std::string_view _name)
 {
-    if (!_state.respondToTCapQuery)
-    {
-        errorlog()("Requesting terminal capability {} ignored. Experimental tcap feature disabled.", _name);
-        return;
-    }
-
     if (booleanCapability(_name))
         _terminal.reply("\033P1+r{}\033\\", toHexString(_name));
     else if (auto const value = numericCapability(_name); value != Database::npos)
@@ -2534,12 +2529,6 @@ void Screen<Cell>::requestCapability(std::string_view _name)
 template <typename Cell>
 void Screen<Cell>::requestCapability(capabilities::Code _code)
 {
-    if (!_state.respondToTCapQuery)
-    {
-        errorlog()("Requesting terminal capability {} ignored. Experimental tcap feature disabled.", _code);
-        return;
-    }
-
     if (booleanCapability(_code))
         _terminal.reply("\033P1+r{}\033\\", _code.hex());
     else if (auto const value = numericCapability(_code); value >= 0)

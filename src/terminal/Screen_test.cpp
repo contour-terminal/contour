@@ -2542,12 +2542,11 @@ TEST_CASE("HorizontalTabClear.AllTabs", "[screen]")
 
 TEST_CASE("HorizontalTabClear.UnderCursor", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
     auto& screen = mock.screen();
-    screen.setTabWidth(ColumnCount(4));
 
     // clear tab at column 4
-    screen.moveCursorTo(LineOffset { 0 }, ColumnOffset { 3 });
+    screen.moveCursorTo(LineOffset { 0 }, ColumnOffset { 7 });
     screen.horizontalTabClear(HorizontalTabClear::UnderCursor);
 
     screen.moveCursorTo({}, {});
@@ -2555,14 +2554,15 @@ TEST_CASE("HorizontalTabClear.UnderCursor", "[screen]")
     screen.moveCursorToNextTab();
     screen.writeText('B');
 
-    //       1234567890
-    REQUIRE("A      B  " == screen.grid().lineText(LineOffset(0)));
-    REQUIRE("          " == screen.grid().lineText(LineOffset(1)));
+    //      "12345678901234567890"
+    REQUIRE("A              B    " == screen.grid().lineText(LineOffset(0)));
+    REQUIRE("                    " == screen.grid().lineText(LineOffset(1)));
 
     screen.moveCursorToNextTab();
     screen.writeText('C');
-    CHECK("A      B C" == screen.grid().lineText(LineOffset(0)));
-    CHECK("          " == screen.grid().lineText(LineOffset(1)));
+    //    "12345678901234567890"
+    CHECK("A              B   C" == screen.grid().lineText(LineOffset(0)));
+    CHECK("                    " == screen.grid().lineText(LineOffset(1)));
 }
 
 TEST_CASE("HorizontalTabSet", "[screen]")
@@ -2615,44 +2615,43 @@ TEST_CASE("HorizontalTabSet", "[screen]")
 
 TEST_CASE("CursorBackwardTab.fixedTabWidth", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
     auto& screen = mock.screen();
-    screen.setTabWidth(ColumnCount(4)); // 5, 9
 
     screen.writeText('a');
 
-    screen.moveCursorToNextTab(); // -> 5
+    screen.moveCursorToNextTab(); // -> 9
     screen.writeText('b');
 
     screen.moveCursorToNextTab();
-    screen.writeText('c'); // -> 9
+    screen.writeText('c'); // -> 17
 
-    //      "1234567890"
-    REQUIRE("a   b   c " == screen.grid().lineText(LineOffset(0)));
-    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(9) });
+    //      "12345678901234567890"
+    REQUIRE("a       b       c   " == screen.grid().lineText(LineOffset(0)));
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(17) });
 
     SECTION("no op")
     {
         screen.cursorBackwardTab(TabStopCount(0));
-        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(9) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(17) });
     }
 
     SECTION("inside 1")
     {
         screen.cursorBackwardTab(TabStopCount(1));
-        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(8) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(16) });
         screen.writeText('X');
-        //    "1234567890"
-        CHECK("a   b   X " == screen.grid().lineText(LineOffset(0)));
+        //    "12345678901234567890"
+        CHECK("a       b       X   " == screen.grid().lineText(LineOffset(0)));
     }
 
     SECTION("inside 2")
     {
         screen.cursorBackwardTab(TabStopCount(2));
-        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(4) });
+        CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(8) });
         screen.writeText('X');
-        //    "1234567890"
-        CHECK("a   X   c " == screen.grid().lineText(LineOffset(0)));
+        //    "12345678901234567890"
+        CHECK("a       X       c   " == screen.grid().lineText(LineOffset(0)));
     }
 
     SECTION("exact")
@@ -2660,8 +2659,8 @@ TEST_CASE("CursorBackwardTab.fixedTabWidth", "[screen]")
         screen.cursorBackwardTab(TabStopCount(3));
         CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
         screen.writeText('X');
-        //    "1234567890"
-        CHECK("X   b   c " == screen.grid().lineText(LineOffset(0)));
+        //    "12345678901234567890"
+        CHECK("X       b       c   " == screen.grid().lineText(LineOffset(0)));
     }
 
     SECTION("oveflow")
@@ -2669,7 +2668,8 @@ TEST_CASE("CursorBackwardTab.fixedTabWidth", "[screen]")
         screen.cursorBackwardTab(TabStopCount(4));
         CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
         screen.writeText('X');
-        CHECK("X   b   c " == screen.grid().lineText(LineOffset(0)));
+        //    "12345678901234567890"
+        CHECK("X       b       c   " == screen.grid().lineText(LineOffset(0)));
     }
 }
 
