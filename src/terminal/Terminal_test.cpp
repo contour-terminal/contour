@@ -28,9 +28,9 @@
 
 using namespace std;
 using terminal::ColumnCount;
+using terminal::ColumnOffset;
 using terminal::LineCount;
 using terminal::LineOffset;
-using terminal::ColumnOffset;
 using terminal::PageSize;
 
 namespace
@@ -229,7 +229,8 @@ TEST_CASE("Terminal.DECCARA", "[terminal]")
     for (auto line = top; line <= bottom; ++line)
         for (auto column = left; column <= right; ++column)
         {
-            auto const& someCell = mock.terminal().screen().at(LineOffset(line - 1), ColumnOffset(column - 1));
+            auto const& someCell =
+                mock.terminal().screen().at(LineOffset(line - 1), ColumnOffset(column - 1));
             CHECK(someCell.styles() & terminal::CellFlags::Underline);
         }
 }

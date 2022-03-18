@@ -13,8 +13,8 @@
  */
 
 #include <terminal/MockTerm.h>
-#include <terminal/pty/MockPty.h>
 #include <terminal/Screen.h>
+#include <terminal/pty/MockPty.h>
 
 #include <crispy/App.h>
 
@@ -24,12 +24,10 @@ namespace terminal
 {
 
 MockTerm::MockTerm(PageSize pageSize, LineCount maxHistoryLineCount):
-    terminal{
-        std::make_unique<MockPty>(pageSize),
-        1024, // pty read buffer size
-        *this,
-        maxHistoryLineCount
-    }
+    terminal { std::make_unique<MockPty>(pageSize),
+               1024, // pty read buffer size
+               *this,
+               maxHistoryLineCount }
 {
     char const* logFilterString = getenv("LOG");
     if (logFilterString)

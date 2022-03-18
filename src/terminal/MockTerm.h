@@ -24,8 +24,9 @@ class MockTerm: public Terminal::Events
     explicit MockTerm(PageSize _size, LineCount _hist = {});
 
     template <typename Init>
-    MockTerm(PageSize _size, LineCount _hist = {}, Init init = [](MockTerm&) {}):
-        MockTerm{_size, _hist}
+    MockTerm(
+        PageSize _size, LineCount _hist = {}, Init init = [](MockTerm&) {}):
+        MockTerm { _size, _hist }
     {
         init(*this);
     }
