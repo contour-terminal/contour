@@ -158,16 +158,12 @@ class Sequencer
     void dispatchPM() {}
 
   private:
-    void executeControlFunction(char _c0);
     void handleSequence();
 
     [[nodiscard]] std::unique_ptr<ParserExtension> hookSTP(Sequence const& _ctx);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookSixel(Sequence const& _ctx);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRQSS(Sequence const& _ctx);
     [[nodiscard]] std::unique_ptr<ParserExtension> hookXTGETTCAP(Sequence const& /*_seq*/);
-
-    void applyAndLog(FunctionDefinition const& _function, Sequence const& _context);
-    ApplyResult apply(FunctionDefinition const& _function, Sequence const& _context);
 
     // private data
     //

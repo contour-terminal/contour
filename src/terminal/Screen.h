@@ -473,6 +473,11 @@ class Screen: public capabilities::StaticDatabase
     void resetInstructionCounter() noexcept { _state.instructionCounter = 0; }
     char32_t precedingGraphicCharacter() const noexcept { return _state.precedingGraphicCharacter; }
 
+    void executeControlCode(char controlCode);
+    void process(Sequence const& seq);
+    void applyAndLog(FunctionDefinition const& function, Sequence const& seq);
+    ApplyResult apply(FunctionDefinition const& function, Sequence const& seq);
+
   private:
     void setBuffer(ScreenType _type);
     void applyPageSizeToCurrentBuffer();
