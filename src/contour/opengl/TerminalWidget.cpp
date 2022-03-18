@@ -752,10 +752,12 @@ double TerminalWidget::contentScale() const
 
 void TerminalWidget::updateMinimumSize()
 {
-    auto const MinimumGridSize = PageSize { LineCount(2), ColumnCount(3) };
+    auto const MinimumGridSize = PageSize { LineCount(5), ColumnCount(10) };
     auto const minSize = ImageSize { Width(*gridMetrics().cellSize.width * *MinimumGridSize.columns),
                                      Height(*gridMetrics().cellSize.width * *MinimumGridSize.columns) };
-    setMinimumSize(minSize.width.as<int>(), minSize.height.as<int>());
+    auto const scaledMinSize = minSize / contentScale();
+    setMinimumSize(scaledMinSize.width.as<int>(), scaledMinSize.height.as<int>());
+    parentWidget()->setMinimumSize(scaledMinSize.width.as<int>(), scaledMinSize.height.as<int>());
 }
 // }}}
 
