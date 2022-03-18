@@ -35,6 +35,7 @@ for power users with a modern feature mindset.
 - ✅ Clipboard setting via OSC 52
 - ✅ Sixel inline images
 - ✅ Terminal page [buffer capture VT extension](https://github.com/contour-terminal/contour/wiki/VTExtensions#buffer-capture) to quickly extract contents.
+- ✅ Builtin [Fira Code inspired progress bar](https://github.com/contour-terminal/contour/issues/521) support.
 - ✅ and much more ...
 
 ## Requirements
