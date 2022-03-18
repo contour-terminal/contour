@@ -91,6 +91,7 @@ namespace helper
         case MatchModes::Status::Disabled:
             if ((_actualModeFlags & _testFlag))
                 return false;
+            break;
         case MatchModes::Status::Any: break;
         }
         return true;
