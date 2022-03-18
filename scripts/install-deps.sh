@@ -119,20 +119,6 @@ fetch_and_unpack_yaml_cpp()
         https://github.com/jbeder/yaml-cpp/archive/refs/tags/yaml-cpp-0.7.0.tar.gz
 }
 
-fetch_and_unpack_hbft()
-{
-    # optional
-    fetch_and_unpack \
-        freetype-cff026d41599945498044d2f4dcc0e610ffb6929 \
-        freetype-cff026d41599945498044d2f4dcc0e610ffb6929.tar.gz \
-        https://github.com/freetype/freetype/archive/cff026d41599945498044d2f4dcc0e610ffb6929.tar.gz
-
-    fetch_and_unpack \
-        harfbuzz-720ab0883b4bd7daa32a3c46031a9d8adb5c8a5f \
-        harfbuzz-720ab0883b4bd7daa32a3c46031a9d8adb5c8a5f.tar.gz \
-        https://github.com/harfbuzz/harfbuzz/archive/720ab0883b4bd7daa32a3c46031a9d8adb5c8a5f.tar.gz
-}
-
 prepare_fetch_and_unpack()
 {
     mkdir -p "${SYSDEPS_BASE_DIR}"
@@ -330,10 +316,6 @@ main()
     esac
 
     fetch_and_unpack_embeds
-
-    if [ x$1 = x--with-hb-ft ]; then
-        fetch_and_unpack_hbft
-    fi
 }
 
 main $*

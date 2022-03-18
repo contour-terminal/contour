@@ -634,35 +634,4 @@ jobs:
         if: ${{ needs.ubuntu_2004_matrix.result != 'success' && needs.ubuntu_2004_matrix.result != 'skipped' }}
         run: exit 1
 
-  ubuntu_2004_with_embedded_hbft:
-    name: "Ubuntu Linux 20.04 (embedded FreeType and HarfBuzz)"
-    runs-on: ubuntu-20.04
-    steps:
-      - uses: actions/checkout@v2
-      - name: ccache
-        uses: hendrikmuhs/ccache-action@v1
-        with:
-          key: ccache-ubuntu_2004_with_embedded_hbft
-          max-size: 256M
-      - name: "install dependencies"
-        run: |
-          set -ex
-          sudo apt -q update
-          sudo ./scripts/install-deps.sh --with-hb-ft
-      - name: "create build directory"
-        run: mkdir build
-      - name: "cmake"
-        run: |
-          BUILD_DIR="build" \
-            CMAKE_BUILD_TYPE="Release" \
-            EXTRA_CMAKE_FLAGS="-DCONTOUR_BLUR_PLATFORM_KWIN=ON -DCONTOUR_BUILD_WITH_EMBEDDED_FT_HB=ON" \
-            CXX="g++-9" \
-            ./scripts/ci-prepare-contour.sh
-      - name: "build"
-        run: cmake --build build/ -- -j3
-      - name: "test: crispy"
-        run: ./build/src/crispy/crispy_test
-      - name: "test: libterminal"
-        run: ./build/src/terminal/terminal_test
-
   # }}}
