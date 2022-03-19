@@ -11,6 +11,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <crispy/utils.h>
+
 #include <text_shaper/coretext_locator.h>
 #include <text_shaper/font.h>
 #include <text_shaper/font_locator.h>
@@ -87,9 +89,14 @@ namespace text
 
         font_source_list output;
 
+        // "Emoji"
+        auto const familyName = crispy::toLower(_fd.familyName) != "emoji"
+                              ? _fd.familyName.c_str()
+                              : "Apple Color Emoji";
+
         NSArray<NSArray *>* fonts = [d->fm
             availableMembersOfFontFamily: [NSString
-                stringWithCString: _fd.familyName.c_str()
+                stringWithCString: familyName
                 encoding: [NSString defaultCStringEncoding]
             ]
         ];
