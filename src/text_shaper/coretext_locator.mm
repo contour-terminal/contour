@@ -83,7 +83,7 @@ namespace text
 
     font_source_list coretext_locator::locate(font_description const& _fd)
     {
-        LOGSTORE(LocatorLog)("Locating font chain for: {}", _fd);
+        LocatorLog()("Locating font chain for: {}", _fd);
 
         font_source_list output;
 
@@ -95,21 +95,35 @@ namespace text
         ];
 
         if (fonts == nil)
-            fonts = [d->fm availableMembersOfFontFamily:@"Menlo"];
-
-        for (NSArray* object in fonts)
         {
-            auto const weight = ctFontWeight([[object objectAtIndex: 2] intValue]);
+            LocatorLog()("No fonts found. Falling back to font family: Menlo.");
+            fonts = [d->fm availableMembersOfFontFamily:@"Menlo"];
+        }
 
-            if (weight != _fd.weight)
-                continue;
+        for (bool const forceWeight: {true, false})
+        {
+            for (bool const forceSlant: {true, false})
+            {
+                for (NSArray* object in fonts)
+                {
+                    auto path = ctFontPath([object objectAtIndex: 0]);
+                    auto const weight = ctFontWeight([[object objectAtIndex: 2] intValue]);
 
-            auto const slant = ctFontSlant([[object objectAtIndex: 3] intValue]);
+                    if (forceWeight && weight != _fd.weight)
+                        continue;
 
-            if (slant != _fd.slant)
-                continue;
+                    auto const slant = ctFontSlant([[object objectAtIndex: 3] intValue]);
 
-            output.emplace_back(ctFontPath([object objectAtIndex: 0]));
+                    if (slant != _fd.slant)
+                        continue;
+
+                    output.emplace_back(ctFontPath([object objectAtIndex: 0]));
+                }
+                if (!output.empty())
+                    break;
+            }
+            if (!output.empty())
+                break;
         }
 
         return output;
