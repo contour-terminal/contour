@@ -14,6 +14,7 @@
 #include <terminal/Terminal.h>
 #include <terminal/pty/MockPty.h>
 
+#include <crispy/App.h>
 #include <crispy/times.h>
 
 #include <unicode/convert.h>
@@ -35,6 +36,13 @@ using terminal::PageSize;
 
 namespace
 {
+
+template <typename S>
+decltype(auto) e(S const& s)
+{
+    return crispy::escape(s);
+}
+
 /// Takes a textual screenshot using the terminals render buffer.
 vector<string> textScreenshot(terminal::Terminal const& _terminal)
 {
@@ -96,6 +104,12 @@ class MockTerm: public terminal::Terminal::Events
         },
         pty_ { static_cast<terminal::MockPty&>(terminal_.device()) }
     {
+        char const* logFilterString = getenv("LOG");
+        if (logFilterString)
+        {
+            logstore::configure(logFilterString);
+            crispy::App::customizeLogStoreOutput();
+        }
     }
 
     terminal::MockPty& pty() noexcept { return pty_; }
@@ -108,6 +122,13 @@ class MockTerm: public terminal::Terminal::Events
     {
         pty_.appendStdOutBuffer(_text);
         terminal_.processInputOnce();
+    }
+
+    string const& replyData() const noexcept { return pty_.stdinBuffer(); }
+
+    void requestCaptureBuffer(LineCount lines, bool logical) override
+    {
+        terminal_.screen().captureBuffer(lines, logical);
     }
 
     void logScreenText(std::string const& headline = "")
@@ -233,6 +254,40 @@ TEST_CASE("Terminal.DECCARA", "[terminal]")
                 mock.terminal().screen().at(LineOffset(line - 1), ColumnOffset(column - 1));
             CHECK(someCell.styles() & terminal::CellFlags::Underline);
         }
+}
+
+TEST_CASE("Terminal.CaptureScreenBuffer")
+{
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    auto constexpr NoLogicalLines = 0; // 0=false
+    auto constexpr NumberOfLinesToCapture = 7;
+
+    auto mock = MockTerm { ColumnCount(5), LineCount(5) };
+
+    mock.terminal().tick(ClockBase);
+    mock.terminal().ensureFreshRenderBuffer();
+
+    // fill screen buffer (5 lines into history + full 5 lines page buffer)
+    for (int i = 1; i <= 10; ++i)
+        mock.writeToStdout(fmt::format("\r\n{}", i));
+
+    mock.terminal().tick(ClockBase + chrono::seconds(1));
+    mock.terminal().ensureFreshRenderBuffer();
+    auto const actualScreen1 = trimmedTextScreenshot(mock);
+    REQUIRE("6\n7\n8\n9\n10" == actualScreen1);
+
+    mock.writeToStdout(fmt::format("\033[>{};{}t", NoLogicalLines, NumberOfLinesToCapture));
+    mock.terminal().flushInput();
+
+    mock.terminal().tick(ClockBase + chrono::seconds(1));
+    mock.terminal().ensureFreshRenderBuffer();
+    auto const actualScreen2 = trimmedTextScreenshot(mock);
+    CHECK(actualScreen1 == actualScreen2);
+
+    CHECK(e(mock.replyData()) == e("\033^314;4\n5\n6\n7\n8\n9\n10\n\033\\\033^314;\033\\"));
+
+    // I just realized we have a test as Screen.captureBuffer already.
+    // But here we test the full cycle.
 }
 
 TEST_CASE("Terminal.SynchronizedOutput", "[terminal]")
