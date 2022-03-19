@@ -252,20 +252,10 @@ namespace
     int computeAverageAdvance(FT_Face _face) noexcept
     {
         FT_Pos maxAdvance = 0;
-        auto logger = LocatorLog();
-        logger.append("Computing average glyph advance: ");
         for (FT_ULong i = 33; i < 128; i++)
-        {
             if (auto ci = FT_Get_Char_Index(_face, i); ci != 0)
                 if (FT_Load_Glyph(_face, ci, FT_LOAD_DEFAULT) == FT_Err_Ok)
-                {
-                    if (i > 33)
-                        logger.append(", ");
-                    logger.append("{} {}", char(i), (double(_face->glyph->metrics.horiAdvance) / 64.0));
                     maxAdvance = max(maxAdvance, _face->glyph->metrics.horiAdvance);
-                }
-        }
-        logger.append(" = {}", int(ceil(double(maxAdvance) / 64.0)));
         return int(ceil(double(maxAdvance) / 64.0));
     }
 
@@ -449,8 +439,8 @@ struct open_shaper::Private // {{{
     FT_Library ft_;
     unique_ptr<font_locator> locator_;
     DPI dpi_;
-    unordered_map<font_key, HbFontInfo> fonts_; // from font_key to FontInfo struct
-    unordered_map<FontPathAndSize, font_key> fontPathSizeToKeys;
+    unordered_map<FontPathAndSize, font_key> fontPathAndSizeToKeyMapping;
+    unordered_map<font_key, HbFontInfo> fontKeyToHbFontInfoMapping; // from font_key to FontInfo struct
 
     // Blacklisted font files as we tried them already and failed.
     std::vector<std::string> blacklistedSources;
@@ -469,13 +459,16 @@ struct open_shaper::Private // {{{
         return result;
     }
 
-    bool has_color(font_key _font) const noexcept { return FT_HAS_COLOR(fonts_.at(_font).ftFace.get()); }
+    bool has_color(font_key _font) const noexcept
+    {
+        return FT_HAS_COLOR(fontKeyToHbFontInfoMapping.at(_font).ftFace.get());
+    }
 
-    optional<font_key> get_font_key_for(font_source const& source, font_size _fontSize)
+    optional<font_key> getOrCreateKeyForFont(font_source const& source, font_size _fontSize)
     {
         auto const sourceId = identifierOf(source);
-        if (auto i = fontPathSizeToKeys.find(FontPathAndSize { sourceId, _fontSize });
-            i != fontPathSizeToKeys.end())
+        if (auto i = fontPathAndSizeToKeyMapping.find(FontPathAndSize { sourceId, _fontSize });
+            i != fontPathAndSizeToKeyMapping.end())
             return i->second;
 
         if (ranges::any_of(blacklistedSources, [&](auto const& a) { return a == sourceId; }))
@@ -495,20 +488,21 @@ struct open_shaper::Private // {{{
         auto fontInfo = HbFontInfo { source, {}, _fontSize, move(ftFacePtr), move(hbFontPtr) };
 
         auto key = create_font_key();
-        fonts_.emplace(pair { key, move(fontInfo) });
+        fontPathAndSizeToKeyMapping.emplace(pair { FontPathAndSize { sourceId, _fontSize }, key });
+        fontKeyToHbFontInfoMapping.emplace(pair { key, move(fontInfo) });
         LocatorLog()("Loading font: key={}, id=\"{}\" size={} dpi {} {}",
                      key,
                      sourceId,
                      _fontSize,
                      dpi_,
                      metrics(key));
-        fontPathSizeToKeys.emplace(pair { FontPathAndSize { sourceId, _fontSize }, key });
         return key;
     }
 
     font_metrics metrics(font_key _key)
     {
-        auto ftFace = fonts_.at(_key).ftFace.get();
+        Require(fontKeyToHbFontInfoMapping.count(_key) == 1);
+        auto ftFace = fontKeyToHbFontInfoMapping.at(_key).ftFace.get();
 
         font_metrics output {};
 
@@ -563,7 +557,7 @@ struct open_shaper::Private // {{{
         {
             _result.resize(initialResultOffset); // rollback to initial size
 
-            optional<font_key> fallbackKeyOpt = get_font_key_for(fallbackFont, _fontInfo.size);
+            optional<font_key> fallbackKeyOpt = getOrCreateKeyForFont(fallbackFont, _fontInfo.size);
             if (!fallbackKeyOpt.has_value())
                 continue;
 
@@ -571,13 +565,15 @@ struct open_shaper::Private // {{{
             if (_fontInfo.description.strict_spacing
                 && _fontInfo.description.spacing != font_spacing::proportional)
             {
-                HbFontInfo const& fallbackFontInfo = fonts_.at(fallbackKeyOpt.value());
+                Require(fontKeyToHbFontInfoMapping.count(fallbackKeyOpt.value()) == 1);
+                HbFontInfo const& fallbackFontInfo = fontKeyToHbFontInfoMapping.at(fallbackKeyOpt.value());
                 bool const fontIsMonospace = fallbackFontInfo.ftFace->face_flags & FT_FACE_FLAG_FIXED_WIDTH;
                 if (!fontIsMonospace)
                     continue;
             }
 
-            HbFontInfo& fallbackFontInfo = fonts_.at(fallbackKeyOpt.value());
+            Require(fontKeyToHbFontInfoMapping.count(fallbackKeyOpt.value()) == 1);
+            HbFontInfo& fallbackFontInfo = fontKeyToHbFontInfoMapping.at(fallbackKeyOpt.value());
             // clang-format off
             LOGSTORE(TextShapingLog)
             ("Try fallbacks font key:{}, source: {}",
@@ -620,8 +616,11 @@ void open_shaper::set_locator(unique_ptr<font_locator> _locator)
 
 void open_shaper::clear_cache()
 {
-    d->fonts_.clear();
-    d->fontPathSizeToKeys.clear();
+    LocatorLog()("Clearing cache ({} keys, {} font infos).",
+                 d->fontPathAndSizeToKeyMapping.size(),
+                 d->fontKeyToHbFontInfoMapping.size());
+    d->fontPathAndSizeToKeyMapping.clear();
+    d->fontKeyToHbFontInfoMapping.clear();
 }
 
 optional<font_key> open_shaper::load_font(font_description const& _description, font_size _size)
@@ -630,13 +629,13 @@ optional<font_key> open_shaper::load_font(font_description const& _description, 
     if (sources.empty())
         return nullopt;
 
-    optional<font_key> fontKeyOpt = d->get_font_key_for(sources[0], _size);
+    optional<font_key> fontKeyOpt = d->getOrCreateKeyForFont(sources[0], _size);
     if (!fontKeyOpt.has_value())
         return nullopt;
 
     sources.erase(sources.begin()); // remove primary font from list
 
-    HbFontInfo& fontInfo = d->fonts_.at(fontKeyOpt.value());
+    HbFontInfo& fontInfo = d->fontKeyToHbFontInfoMapping.at(*fontKeyOpt);
     fontInfo.fallbacks = move(sources);
     fontInfo.description = _description;
 
@@ -645,7 +644,8 @@ optional<font_key> open_shaper::load_font(font_description const& _description, 
 
 font_metrics open_shaper::metrics(font_key _key) const
 {
-    HbFontInfo& fontInfo = d->fonts_.at(_key);
+    Require(d->fontKeyToHbFontInfoMapping.count(_key) == 1);
+    HbFontInfo& fontInfo = d->fontKeyToHbFontInfoMapping.at(_key);
     if (fontInfo.metrics.has_value())
         return fontInfo.metrics.value();
 
@@ -656,17 +656,19 @@ font_metrics open_shaper::metrics(font_key _key) const
 
 optional<glyph_position> open_shaper::shape(font_key _font, char32_t _codepoint)
 {
-    HbFontInfo& fontInfo = d->fonts_.at(_font);
+    Require(d->fontKeyToHbFontInfoMapping.count(_font) == 1);
+    HbFontInfo& fontInfo = d->fontKeyToHbFontInfoMapping.at(_font);
 
     glyph_index glyphIndex { FT_Get_Char_Index(fontInfo.ftFace.get(), _codepoint) };
     if (!glyphIndex.value)
     {
         for (font_source const& fallbackFont: fontInfo.fallbacks)
         {
-            optional<font_key> fallbackKeyOpt = d->get_font_key_for(fallbackFont, fontInfo.size);
+            optional<font_key> fallbackKeyOpt = d->getOrCreateKeyForFont(fallbackFont, fontInfo.size);
             if (!fallbackKeyOpt.has_value())
                 continue;
-            HbFontInfo const& fallbackFontInfo = d->fonts_.at(fallbackKeyOpt.value());
+            Require(d->fontKeyToHbFontInfoMapping.count(fallbackKeyOpt.value()) == 1);
+            HbFontInfo const& fallbackFontInfo = d->fontKeyToHbFontInfoMapping.at(fallbackKeyOpt.value());
             glyphIndex = glyph_index { FT_Get_Char_Index(fallbackFontInfo.ftFace.get(), _codepoint) };
             if (glyphIndex.value)
                 break;
@@ -694,8 +696,13 @@ void open_shaper::shape(font_key _font,
                         shape_result& _result)
 {
     assert(_clusters.size() == _codepoints.size());
+    TextShapingLog()(
+        "Shaping using font key: {}, text: \"{}\"", _font, unicode::convert_to<char>(_codepoints));
+    if (!d->fontKeyToHbFontInfoMapping.count(_font))
+        TextShapingLog()("Font not found? {}", _font);
 
-    HbFontInfo& fontInfo = d->fonts_.at(_font);
+    Require(d->fontKeyToHbFontInfoMapping.count(_font) == 1);
+    HbFontInfo& fontInfo = d->fontKeyToHbFontInfoMapping.at(_font);
     hb_font_t* hbFont = fontInfo.hbFont.get();
     hb_buffer_t* hbBuf = d->hb_buf_.get();
 
@@ -757,7 +764,7 @@ void open_shaper::shape(font_key _font,
 optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode _mode)
 {
     auto const font = _glyph.font;
-    auto ftFace = d->fonts_.at(font).ftFace.get();
+    auto ftFace = d->fontKeyToHbFontInfoMapping.at(font).ftFace.get();
     auto const glyphIndex = _glyph.index;
     auto const flags =
         static_cast<FT_Int32>(ftRenderFlag(_mode) | (FT_HAS_COLOR(ftFace) ? FT_LOAD_COLOR : 0));
@@ -773,14 +780,11 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
         if (ec != FT_Err_Ok)
         {
             if (LocatorLog)
-            {
-                LOGSTORE(LocatorLog)
-                ("Error loading glyph index {} for font {} {}. {}",
-                 glyphIndex.value,
-                 ftFace->family_name,
-                 ftFace->style_name,
-                 ftErrorStr(ec));
-            }
+                LocatorLog()("Error loading glyph index {} for font {} {}. {}",
+                             glyphIndex.value,
+                             ftFace->family_name,
+                             ftFace->style_name,
+                             ftErrorStr(ec));
             return nullopt;
         }
     }
