@@ -73,12 +73,13 @@ GridMetrics loadGridMetrics(text::font_key _font, PageSize _pageSize, text::shap
 FontKeys loadFontKeys(FontDescriptions const& _fd, text::shaper& _shaper)
 {
     FontKeys output {};
-
-    output.regular = _shaper.load_font(_fd.regular, _fd.size).value_or(text::font_key {});
-    output.bold = _shaper.load_font(_fd.bold, _fd.size).value_or(text::font_key {});
-    output.italic = _shaper.load_font(_fd.italic, _fd.size).value_or(text::font_key {});
-    output.boldItalic = _shaper.load_font(_fd.boldItalic, _fd.size).value_or(text::font_key {});
-    output.emoji = _shaper.load_font(_fd.emoji, _fd.size).value_or(text::font_key {});
+    auto const regularOpt = _shaper.load_font(_fd.regular, _fd.size);
+    Require(regularOpt.has_value());
+    output.regular = regularOpt.value();
+    output.bold = _shaper.load_font(_fd.bold, _fd.size).value_or(output.regular);
+    output.italic = _shaper.load_font(_fd.italic, _fd.size).value_or(output.regular);
+    output.boldItalic = _shaper.load_font(_fd.boldItalic, _fd.size).value_or(output.regular);
+    output.emoji = _shaper.load_font(_fd.emoji, _fd.size).value_or(output.regular);
 
     return output;
 }
