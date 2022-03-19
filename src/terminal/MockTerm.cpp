@@ -35,11 +35,6 @@ MockTerm::MockTerm(PageSize pageSize, LineCount maxHistoryLineCount):
         logstore::configure(logFilterString);
         crispy::App::customizeLogStoreOutput();
     }
-
-    // TODO: same as in Terminal's ctor
-    screen().setMode(DECMode::AutoWrap, true);
-    screen().setMode(DECMode::TextReflow, true);
-    screen().setMode(DECMode::SixelCursorNextToGraphic, terminal.state().sixelCursorConformance);
 }
 
 } // namespace terminal
