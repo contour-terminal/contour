@@ -1693,7 +1693,7 @@ void Screen<Cell>::notify(string const& _title, string const& _content)
 }
 
 template <typename Cell>
-void Screen<Cell>::captureBuffer(int _lineCount, bool _logicalLines)
+void Screen<Cell>::captureBuffer(LineCount _lineCount, bool _logicalLines)
 {
     // TODO: Unit test case! (for ensuring line numbering and limits are working as expected)
 
@@ -1703,7 +1703,7 @@ void Screen<Cell>::captureBuffer(int _lineCount, bool _logicalLines)
     // TODO: when capturing _lineCount < screenSize.lines, start at the lowest non-empty line.
     auto const relativeStartLine =
         _logicalLines ? grid().computeLogicalLineNumberFromBottom(LineCount::cast_from(_lineCount))
-                      : unbox<int>(_state.pageSize.lines) - _lineCount;
+                      : unbox<int>(_state.pageSize.lines - _lineCount);
     auto const startLine = LineOffset::cast_from(
         clamp(relativeStartLine, -unbox<int>(historyLineCount()), unbox<int>(_state.pageSize.lines)));
 
@@ -3409,7 +3409,7 @@ namespace impl
         if (logicalLines != 0 && logicalLines != 1)
             return ApplyResult::Invalid;
 
-        auto const lineCount = _seq.param_or(1, *terminal.pageSize().lines);
+        auto const lineCount = LineCount(_seq.param_or(1, *terminal.pageSize().lines));
 
         terminal.requestCaptureBuffer(lineCount, logicalLines);
 

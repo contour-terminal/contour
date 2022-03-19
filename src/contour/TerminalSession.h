@@ -86,7 +86,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
 
     // Terminal::Events
     //
-    void requestCaptureBuffer(int _absoluteStartLine, int _lineCount) override;
+    void requestCaptureBuffer(terminal::LineCount lineCount, bool logical) override;
     void bell() override;
     void bufferChanged(terminal::ScreenType) override;
     void renderBufferUpdated() override;

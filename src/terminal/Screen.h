@@ -189,7 +189,7 @@ class Screen: public capabilities::StaticDatabase
     void hyperlink(std::string _id, std::string _uri);                   // OSC 8
     void notify(std::string const& _title, std::string const& _content); // OSC 777
 
-    void captureBuffer(int _numLines, bool _logicalLines);
+    void captureBuffer(LineCount _lineCount, bool _logicalLines);
 
     void setForegroundColor(Color _color);
     void setBackgroundColor(Color _color);

@@ -52,7 +52,7 @@ class Terminal
       public:
         virtual ~Events() = default;
 
-        virtual void requestCaptureBuffer(int /*_absoluteStartLine*/, int /*_lineCount*/) {}
+        virtual void requestCaptureBuffer(LineCount lines, bool logical) {}
         virtual void bell() {}
         virtual void bufferChanged(ScreenType) {}
         virtual void renderBufferUpdated() {}
@@ -320,7 +320,7 @@ class Terminal
 
     // Screen's EventListener implementation
     //
-    void requestCaptureBuffer(int _absoluteStartLine, int _lineCount);
+    void requestCaptureBuffer(LineCount lines, bool logical);
     void bell();
     void bufferChanged(ScreenType);
     void scrollbackBufferCleared();

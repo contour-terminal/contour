@@ -918,9 +918,9 @@ string Terminal::extractLastMarkRange() const
 }
 
 // {{{ ScreenEvents overrides
-void Terminal::requestCaptureBuffer(int _absoluteStartLine, int _lineCount)
+void Terminal::requestCaptureBuffer(LineCount lines, bool logical)
 {
-    return eventListener_.requestCaptureBuffer(_absoluteStartLine, _lineCount);
+    return eventListener_.requestCaptureBuffer(lines, logical);
 }
 
 void Terminal::bell()

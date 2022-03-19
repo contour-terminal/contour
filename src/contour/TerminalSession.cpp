@@ -204,12 +204,12 @@ void TerminalSession::renderBufferUpdated()
     display_->renderBufferUpdated();
 }
 
-void TerminalSession::requestCaptureBuffer(int _absoluteStartLine, int _lineCount)
+void TerminalSession::requestCaptureBuffer(LineCount lines, bool logical)
 {
-    display_->post([this, _absoluteStartLine, _lineCount]() {
+    display_->post([this, lines, logical]() {
         if (display_->requestPermission(profile_.permissions.captureBuffer, "capture screen buffer"))
         {
-            terminal_.screen().captureBuffer(_absoluteStartLine, _lineCount);
+            terminal_.screen().captureBuffer(lines, logical);
             DisplayLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
             flushInput();
         }
