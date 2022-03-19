@@ -131,7 +131,7 @@ struct fontconfig_locator::Private
 
     ~Private()
     {
-        LOGSTORE(LocatorLog)("~fontconfig_locator.dtor");
+        LocatorLog()("~fontconfig_locator.dtor");
         FcConfigDestroy(ftConfig);
         FcFini();
     }
@@ -150,7 +150,7 @@ fontconfig_locator::~fontconfig_locator()
 
 font_source_list fontconfig_locator::locate(font_description const& _fd)
 {
-    LOGSTORE(LocatorLog)("Locating font chain for: {}", _fd);
+    LocatorLog()("Locating font chain for: {}", _fd);
     auto pat =
         unique_ptr<FcPattern, void (*)(FcPattern*)>(FcPatternCreate(), [](auto p) { FcPatternDestroy(p); });
 
@@ -222,7 +222,7 @@ font_source_list fontconfig_locator::locate(font_description const& _fd)
 // FcPatternGetInteger(font, FC_COLOR, 0, &color);
 // if (color && !_color)
 // {
-//     LOGSTORE(LocatorLog)("Skipping font (contains color). {}", (char const*) file);
+//     LocatorLog()("Skipping font (contains color). {}", (char const*) file);
 //     continue;
 // }
 #endif
@@ -333,8 +333,7 @@ font_source_list fontconfig_locator::all()
         if (spacing < FC_DUAL)
             continue;
 
-        LOGSTORE(LocatorLog)
-        ("font({}, {}, {})", fcWeightStr(weight), fcSlantStr(slant), (char*) family);
+        LocatorLog()("font({}, {}, {})", fcWeightStr(weight), fcSlantStr(slant), (char*) family);
         output.emplace_back(font_path { (char const*) filename });
     }
 
