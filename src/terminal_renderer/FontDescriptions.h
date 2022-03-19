@@ -42,8 +42,15 @@ struct FontDescriptions
 
 inline bool operator==(FontDescriptions const& a, FontDescriptions const& b) noexcept
 {
-    return a.size.pt == b.size.pt && a.regular == b.regular && a.bold == b.bold && a.italic == b.italic
-           && a.boldItalic == b.boldItalic && a.emoji == b.emoji && a.renderMode == b.renderMode;
+    // clang-format off
+    return a.size.pt == b.size.pt
+        && a.regular == b.regular
+        && a.bold == b.bold
+        && a.italic == b.italic
+        && a.boldItalic == b.boldItalic
+        && a.emoji == b.emoji
+        && a.renderMode == b.renderMode;
+    // clang-format on
 }
 
 inline bool operator!=(FontDescriptions const& a, FontDescriptions const& b) noexcept
