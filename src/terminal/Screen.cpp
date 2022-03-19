@@ -84,7 +84,7 @@ namespace terminal
 
 auto constexpr inline TabWidth = ColumnCount(8);
 
-auto const inline VTCaptureBufferLog = logstore::Category("vt.ext_capturebuffer",
+auto const inline VTCaptureBufferLog = logstore::Category("vt.ext.capturebuffer",
                                                           "Capture Buffer debug logging.",
                                                           logstore::Category::State::Disabled,
                                                           logstore::Category::Visibility::Hidden);
@@ -1698,7 +1698,6 @@ void Screen<Cell>::captureBuffer(LineCount _lineCount, bool _logicalLines)
     // TODO: Unit test case! (for ensuring line numbering and limits are working as expected)
 
     auto capturedBuffer = std::string();
-    auto writer = VTWriter([&](auto buf, auto len) { capturedBuffer += string_view(buf, len); });
 
     // TODO: when capturing _lineCount < screenSize.lines, start at the lowest non-empty line.
     auto const relativeStartLine =
@@ -1706,6 +1705,8 @@ void Screen<Cell>::captureBuffer(LineCount _lineCount, bool _logicalLines)
                       : unbox<int>(_state.pageSize.lines - _lineCount);
     auto const startLine = LineOffset::cast_from(
         clamp(relativeStartLine, -unbox<int>(historyLineCount()), unbox<int>(_state.pageSize.lines)));
+
+    VTCaptureBufferLog()("Capture buffer: {} lines {}", _lineCount, _logicalLines ? "logical" : "actual");
 
     size_t constexpr MaxChunkSize = 4096;
     size_t currentChunkSize = 0;
@@ -3394,8 +3395,7 @@ namespace impl
         return ApplyResult::Ok;
     }
 
-    template <typename Cell>
-    ApplyResult CAPTURE(Sequence const& _seq, Cell& terminal)
+    ApplyResult CAPTURE(Sequence const& _seq, Terminal& terminal)
     {
         // CSI Mode ; [; Count] t
         //
