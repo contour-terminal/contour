@@ -20,6 +20,8 @@
 #include <crispy/indexed.h>
 #include <crispy/times.h>
 
+#include <unicode/convert.h>
+
 #include <range/v3/algorithm/any_of.hpp>
 #include <range/v3/view/iota.hpp>
 
