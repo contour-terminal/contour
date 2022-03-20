@@ -56,9 +56,10 @@ TEST_CASE("Parser.PM")
     MockParserEvents listener;
     auto p = parser::Parser(listener);
     REQUIRE(p.state() == parser::State::Ground);
-    p.parseFragment("ABC\033^hello\033\\DEF"sv);
+    // Also include ✅ in the payload to ensure such codepoints work, too.
+    p.parseFragment("ABC\033^hello ✅ world\033\\DEF"sv);
     CHECK(p.state() == parser::State::Ground);
-    CHECK(listener.pm == "{hello}");
+    CHECK(listener.pm == "{hello ✅ world}");
     CHECK(listener.text == "ABCDEF");
 }
 

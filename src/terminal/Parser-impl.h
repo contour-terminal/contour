@@ -123,7 +123,7 @@ constexpr ParserTable ParserTable::get() // {{{
 
     // IgnoreUntilST
     t.event(State::IgnoreUntilST, Action::Ignore, Range { 0x00_b, 0x17_b }, 0x19_b, Range { 0x1C_b, 0x1F_b });
-    t.transition(State::IgnoreUntilST, State::Ground, 0x9C_b);
+    // t.transition(State::IgnoreUntilST, State::Ground, 0x9C_b);
 
     // DCS_Entry
     t.entry(State::DCS_Entry, Action::Clear);
@@ -145,7 +145,7 @@ constexpr ParserTable ParserTable::get() // {{{
             Range { 0x20_b, 0x7F_b });
     t.event(State::DCS_Ignore, Action::Print, Range { 0xA0_b, 0xFF_b });
     t.event(State::DCS_Ignore, Action::Print, UnicodeRange);
-    t.transition(State::DCS_Ignore, State::Ground, 0x9C_b);
+    // t.transition(State::DCS_Ignore, State::Ground, 0x9C_b);
 
     // DCS_Intermediate
     t.event(
@@ -164,7 +164,7 @@ constexpr ParserTable ParserTable::get() // {{{
             Range { 0x20_b, 0x7E_b });
     t.event(State::DCS_PassThrough, Action::Ignore, 0x7F_b);
     t.exit(State::DCS_PassThrough, Action::Unhook);
-    t.transition(State::DCS_PassThrough, State::Ground, 0x9C_b);
+    // t.transition(State::DCS_PassThrough, State::Ground, 0x9C_b);
 
     // DCS_Param
     t.event(State::DCS_Param, Action::Execute, Range { 0x00_b, 0x17_b }, 0x19_b, Range { 0x1C_b, 0x1F_b });
@@ -188,7 +188,7 @@ constexpr ParserTable ParserTable::get() // {{{
     t.event(State::OSC_String, Action::OSC_Put, Range { 0xA0_b, 0xFF_b });
     t.event(State::OSC_String, Action::OSC_Put, UnicodeRange);
     t.exit(State::OSC_String, Action::OSC_End);
-    t.transition(State::OSC_String, State::Ground, 0x9C_b);
+    // t.transition(State::OSC_String, State::Ground, 0x9C_b);
     t.transition(State::OSC_String, State::Ground, 0x07_b);
 
     // APC_String
@@ -198,7 +198,7 @@ constexpr ParserTable ParserTable::get() // {{{
     t.event(State::APC_String, Action::APC_Put, Range { 0xA0_b, 0xFF_b });
     t.event(State::APC_String, Action::APC_Put, UnicodeRange);
     t.exit(State::APC_String, Action::APC_End);
-    t.transition(State::APC_String, State::Ground, 0x9C_b); // ST
+    // t.transition(State::APC_String, State::Ground, 0x9C_b); // ST
     t.transition(State::APC_String, State::Ground, 0x07_b); // BEL
 
     // PM_String
@@ -213,7 +213,7 @@ constexpr ParserTable ParserTable::get() // {{{
             Range { 0xA0_b, 0xFF_b });
     t.event(State::PM_String, Action::PM_Put, UnicodeRange);
     t.exit(State::PM_String, Action::PM_End);
-    t.transition(State::PM_String, State::Ground, 0x9C_b); // ST
+    // t.transition(State::PM_String, State::Ground, 0x9C_b); // ST
     t.transition(State::PM_String, State::Ground, 0x07_b); // BEL
 
     // CSI_Entry
