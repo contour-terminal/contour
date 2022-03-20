@@ -224,7 +224,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
 
     // state vars
     //
-    terminal::ScreenType currentScreenType_ = terminal::ScreenType::Main;
+    terminal::ScreenType currentScreenType_ = terminal::ScreenType::Primary;
     terminal::CellLocation currentMousePosition_ = terminal::CellLocation {};
     bool allowKeyMappings_ = true;
 };

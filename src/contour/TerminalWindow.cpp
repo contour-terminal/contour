@@ -191,7 +191,7 @@ void TerminalWindow::terminalBufferChanged(terminal::ScreenType _type)
 {
 #if defined(CONTOUR_SCROLLBAR)
     LOGSTORE(DisplayLog)("Screen buffer type has changed to {}.", _type);
-    scrollableDisplay_->showScrollBar(_type == terminal::ScreenType::Main
+    scrollableDisplay_->showScrollBar(_type == terminal::ScreenType::Primary
                                       || !profile()->hideScrollbarInAltScreen);
 
     scrollableDisplay_->updatePosition();

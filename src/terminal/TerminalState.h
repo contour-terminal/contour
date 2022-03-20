@@ -151,7 +151,7 @@ struct TerminalState
 
     bool allowReflowOnResize;
 
-    ScreenType screenType = ScreenType::Main;
+    ScreenType screenType = ScreenType::Primary;
     Grid<Cell> primaryBuffer;
     Grid<Cell> alternateBuffer;
     Grid<Cell>* activeGrid;

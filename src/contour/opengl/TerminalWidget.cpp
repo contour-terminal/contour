@@ -1208,7 +1208,7 @@ void TerminalWidget::bufferChanged(terminal::ScreenType _type)
     using Type = terminal::ScreenType;
     switch (_type)
     {
-    case Type::Main: setCursor(Qt::IBeamCursor); break;
+    case Type::Primary: setCursor(Qt::IBeamCursor); break;
     case Type::Alternate: setCursor(Qt::ArrowCursor); break;
     }
     emit terminalBufferChanged(_type);

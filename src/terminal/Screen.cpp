@@ -998,7 +998,7 @@ void Screen<Cell>::resetSoft()
 template <typename Cell>
 void Screen<Cell>::resetHard()
 {
-    setBuffer(ScreenType::Main);
+    setBuffer(ScreenType::Primary);
 
     _state.modes = Modes {};
     setMode(DECMode::AutoWrap, true);
@@ -1050,7 +1050,7 @@ void Screen<Cell>::setBuffer(ScreenType _type)
 
     switch (_type)
     {
-    case ScreenType::Main:
+    case ScreenType::Primary:
         _terminal.setMouseWheelMode(InputGenerator::MouseWheelMode::Default);
         _state.activeGrid = &primaryGrid();
         break;
@@ -2011,7 +2011,7 @@ void Screen<Cell>::setMode(DECMode _mode, bool _enable)
         if (_enable)
             setBuffer(ScreenType::Alternate);
         else
-            setBuffer(ScreenType::Main);
+            setBuffer(ScreenType::Primary);
         break;
     case DECMode::UseApplicationCursorKeys:
         _terminal.useApplicationCursorKeys(_enable);

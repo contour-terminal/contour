@@ -463,7 +463,7 @@ constexpr ColumnOffset& operator-=(ColumnOffset& a, ColumnCount b) noexcept
 
 enum class ScreenType
 {
-    Main = 0,
+    Primary = 0,
     Alternate = 1
 };
 
@@ -896,8 +896,8 @@ struct formatter<terminal::ScreenType>
     {
         switch (value)
         {
-        case terminal::ScreenType::Main: return format_to(ctx.out(), "main");
-        case terminal::ScreenType::Alternate: return format_to(ctx.out(), "alternate");
+        case terminal::ScreenType::Primary: return format_to(ctx.out(), "Primary");
+        case terminal::ScreenType::Alternate: return format_to(ctx.out(), "Alternate");
         }
         return format_to(ctx.out(), "({})", static_cast<unsigned>(value));
     }

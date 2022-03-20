@@ -812,7 +812,7 @@ void TerminalSession::setDefaultCursor()
     using Type = terminal::ScreenType;
     switch (terminal().screen().bufferType())
     {
-    case Type::Main: display_->setMouseCursorShape(MouseCursorShape::IBeam); break;
+    case Type::Primary: display_->setMouseCursorShape(MouseCursorShape::IBeam); break;
     case Type::Alternate: display_->setMouseCursorShape(MouseCursorShape::Arrow); break;
     }
 }

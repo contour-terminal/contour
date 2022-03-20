@@ -140,7 +140,7 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
              _sixelCursorConformance,
              move(_colorPalette),
              _allowReflowOnResize },
-    screen_ { state_, ScreenType::Main },
+    screen_ { state_, ScreenType::Primary },
     // clang-format on
     viewport_ { screen_,
                 [this]() {
