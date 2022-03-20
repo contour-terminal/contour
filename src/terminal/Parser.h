@@ -434,7 +434,7 @@ constexpr std::string_view to_string(Action action)
 } // namespace terminal::parser
 
 namespace std
-{ // {{{
+{
 template <>
 struct numeric_limits<terminal::parser::State>
 {
