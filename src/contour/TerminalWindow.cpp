@@ -161,12 +161,12 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
 
 TerminalWindow::~TerminalWindow()
 {
-    LOGSTORE(DisplayLog)("~TerminalWindow");
+    DisplayLog()("~");
 }
 
 void TerminalWindow::onTerminalClosed()
 {
-    LOGSTORE(DisplayLog)("terminal closed: {}", terminalSession_->terminal().screen().windowTitle());
+    DisplayLog()("terminal closed: {}", terminalSession_->terminal().screen().windowTitle());
     close();
 }
 
@@ -190,7 +190,7 @@ void TerminalWindow::profileChanged()
 void TerminalWindow::terminalBufferChanged(terminal::ScreenType _type)
 {
 #if defined(CONTOUR_SCROLLBAR)
-    LOGSTORE(DisplayLog)("Screen buffer type has changed to {}.", _type);
+    DisplayLog()("Screen buffer type has changed to {}.", _type);
     scrollableDisplay_->showScrollBar(_type == terminal::ScreenType::Primary
                                       || !profile()->hideScrollbarInAltScreen);
 

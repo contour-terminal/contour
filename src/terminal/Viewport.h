@@ -90,7 +90,7 @@ class Viewport
             return false;
 
 #if defined(CONTOUR_LOG_VIEWPORT)
-        LOGSTORE(Log)("forcing scroll to bottom from {}", scrollOffset_);
+        Log()("forcing scroll to bottom from {}", scrollOffset_);
 #endif
         scrollOffset_ = ScrollOffset(0);
         modified_();
@@ -108,7 +108,7 @@ class Viewport
         if (0 <= *_offset && _offset <= boxed_cast<ScrollOffset>(historyLineCount()))
         {
 #if defined(CONTOUR_LOG_VIEWPORT)
-            LOGSTORE(Log)("Scroll to offset {}", _offset);
+            Log()("Scroll to offset {}", _offset);
 #endif
             scrollOffset_ = _offset;
             modified_();

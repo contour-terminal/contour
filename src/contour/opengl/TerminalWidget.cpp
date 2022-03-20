@@ -65,13 +65,13 @@
 // Temporarily disabled (I think it was OS/X that didn't like glDebugMessageCallback).
 // #define CONTOUR_DEBUG_OPENGL 1
 
-#define CHECKED_GL(code)                                                      \
-    do                                                                        \
-    {                                                                         \
-        (code);                                                               \
-        GLenum err {};                                                        \
-        while ((err = glGetError()) != GL_NO_ERROR)                           \
-            LOGSTORE(DisplayLog)("OpenGL error {} for call: {}", err, #code); \
+#define CHECKED_GL(code)                                              \
+    do                                                                \
+    {                                                                 \
+        (code);                                                       \
+        GLenum err {};                                                \
+        while ((err = glGetError()) != GL_NO_ERROR)                   \
+            DisplayLog()("OpenGL error {} for call: {}", err, #code); \
     } while (0)
 
 #if defined(_MSC_VER)
@@ -209,13 +209,12 @@ namespace
             }
         }(_type);
 
-        LOGSTORE(DisplayLog)
-        ("[OpenGL/{}]: type:{}, source:{}, severity:{}; {}",
-         tag,
-         typeName,
-         sourceName,
-         debugSeverity,
-         _message);
+        DisplayLog()("[OpenGL/{}]: type:{}, source:{}, severity:{}; {}",
+                     tag,
+                     typeName,
+                     sourceName,
+                     debugSeverity,
+                     _message);
     }
 #endif
 
@@ -226,7 +225,7 @@ namespace
 
     void reportUnhandledException(std::string_view const& where, exception const& e)
     {
-        LOGSTORE(DisplayLog)("{}", unhandledExceptionMessage(where, e));
+        DisplayLog()("{}", unhandledExceptionMessage(where, e));
         cerr << unhandledExceptionMessage(where, e) << endl;
     }
 
@@ -289,7 +288,7 @@ TerminalWidget::TerminalWidget(TerminalSession& session,
 
 TerminalWidget::~TerminalWidget()
 {
-    LOGSTORE(DisplayLog)("~TerminalWidget");
+    DisplayLog()("~TerminalWidget");
     makeCurrent(); // XXX must be called.
     renderTarget_.reset();
     doneCurrent();
@@ -347,7 +346,7 @@ QSize TerminalWidget::sizeHint() const
 void TerminalWidget::onRefreshRateChanged()
 {
     auto const rate = refreshRate();
-    LOGSTORE(DisplayLog)("Refresh rate changed to {}.", rate);
+    DisplayLog()("Refresh rate changed to {}.", rate);
     session_.terminal().setRefreshRate(rate);
 }
 
@@ -367,7 +366,7 @@ void TerminalWidget::configureScreenHooks()
 
 void TerminalWidget::onScreenChanged()
 {
-    LOGSTORE(DisplayLog)("Screen changed.");
+    DisplayLog()("Screen changed.");
     applyFontDPI();
 }
 
@@ -538,7 +537,7 @@ void TerminalWidget::resizeGL(int _width, int _height)
     QOpenGLWidget::resizeGL(_width, _height);
     auto const qtBaseWidgetSize = terminal::ImageSize { Width(_width), Height(_height) };
     auto const newPixelSize = qtBaseWidgetSize * contentScale();
-    LOGSTORE(DisplayLog)("resizeGL: {}x{} ({})", _width, _height, newPixelSize);
+    DisplayLog()("resizeGL: {}x{} ({})", _width, _height, newPixelSize);
     applyResize(newPixelSize, session_, renderer_);
 }
 
@@ -560,13 +559,12 @@ void TerminalWidget::paintGL()
             auto const updateCount = stats_.updatesSinceRendering.exchange(0);
             auto const renderCount = stats_.consecutiveRenderCount.exchange(0);
             if (DisplayLog)
-                LOGSTORE(DisplayLog)
-            ("paintGL/{}: {} renders, {} updates since last paint ({}/{}).",
-             renderCount_.load(),
-             renderCount,
-             updateCount,
-             lastState,
-             to_string(session_.terminal().renderBufferState()));
+                DisplayLog()("paintGL/{}: {} renders, {} updates since last paint ({}/{}).",
+                             renderCount_.load(),
+                             renderCount,
+                             updateCount,
+                             lastState,
+                             to_string(session_.terminal().renderBufferState()));
         }
 #endif
 
@@ -860,7 +858,7 @@ void TerminalWidget::doDumpState()
 
     FileSystem::create_symlink(workDirName, targetBaseDir / latestDirName);
 
-    LOGSTORE(DisplayLog)("Dumping state into directory: {}", targetDir.generic_string());
+    DisplayLog()("Dumping state into directory: {}", targetDir.generic_string());
 
     // TODO: The above should be done from the outside and the targetDir being passed into this call.
     // TODO: maybe zip this dir in the end.
@@ -906,7 +904,7 @@ void TerminalWidget::doDumpState()
 
         return [_filename, theImageFormat, theElementCount, _format](vector<uint8_t> const& _buffer,
                                                                      ImageSize _size) {
-            LOGSTORE(DisplayLog)("Saving image {} to: {}", _size, _filename.generic_string());
+            DisplayLog()("Saving image {} to: {}", _size, _filename.generic_string());
             auto image = QImage(_size.width.as<int>(), _size.height.as<int>(), theImageFormat);
             auto const pitch = unbox<int>(_size.width) * theElementCount;
             for (int i = 0; i < unbox<int>(_size.height); ++i)
@@ -983,7 +981,7 @@ void TerminalWidget::resizeWindow(terminal::Width _width, terminal::Height _heig
 {
     if (isFullScreen())
     {
-        LOGSTORE(DisplayLog)("Application request to resize window in full screen mode denied.");
+        DisplayLog()("Application request to resize window in full screen mode denied.");
         return;
     }
 
@@ -1008,7 +1006,7 @@ void TerminalWidget::resizeWindow(terminal::LineCount _lines, terminal::ColumnCo
 {
     if (isFullScreen())
     {
-        LOGSTORE(DisplayLog)("Application request to resize window in full screen mode denied.");
+        DisplayLog()("Application request to resize window in full screen mode denied.");
         return;
     }
 
@@ -1041,7 +1039,7 @@ void TerminalWidget::setFonts(terminal::renderer::FontDescriptions fonts)
 
 bool TerminalWidget::setFontSize(text::font_size _size)
 {
-    LOGSTORE(DisplayLog)("Setting display font size and recompute metrics: {}pt", _size.pt);
+    DisplayLog()("Setting display font size and recompute metrics: {}pt", _size.pt);
 
     if (!renderer_.setFontSize(_size))
         return false;
@@ -1189,7 +1187,7 @@ void TerminalWidget::renderBufferUpdated()
 
 void TerminalWidget::closeDisplay()
 {
-    LOGSTORE(DisplayLog)("closeDisplay");
+    DisplayLog()("closeDisplay");
     emit terminated();
 }
 

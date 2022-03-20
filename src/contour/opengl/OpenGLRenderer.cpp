@@ -109,13 +109,13 @@ namespace
         _bindable.release();
     }
 
-#define CHECKED_GL(code)                                                      \
-    do                                                                        \
-    {                                                                         \
-        (code);                                                               \
-        GLenum err {};                                                        \
-        while ((err = glGetError()) != GL_NO_ERROR)                           \
-            LOGSTORE(DisplayLog)("OpenGL error {} for call: {}", err, #code); \
+#define CHECKED_GL(code)                                              \
+    do                                                                \
+    {                                                                 \
+        (code);                                                       \
+        GLenum err {};                                                \
+        while ((err = glGetError()) != GL_NO_ERROR)                   \
+            DisplayLog()("OpenGL error {} for call: {}", err, #code); \
     } while (0)
 
     template <typename F>
@@ -314,7 +314,7 @@ void OpenGLRenderer::initializeTextureRendering()
 
 OpenGLRenderer::~OpenGLRenderer()
 {
-    LOGSTORE(DisplayLog)("~OpenGLRenderer");
+    DisplayLog()("~OpenGLRenderer");
     CHECKED_GL(glDeleteVertexArrays(1, &_rectVAO));
     CHECKED_GL(glDeleteBuffers(1, &_rectVBO));
 
@@ -367,17 +367,17 @@ void OpenGLRenderer::configureAtlas(atlas::ConfigureAtlas atlas)
     _textureAtlas.properties = atlas.properties;
 
     // clang-format off
-    LOGSTORE(DisplayLog)("configureAtlas: {} {}", atlas.size, atlas.properties.format);
+    DisplayLog()("configureAtlas: {} {}", atlas.size, atlas.properties.format);
     // clang-format on
 }
 
 void OpenGLRenderer::uploadTile(atlas::UploadTile tile)
 {
     // clang-format off
-    // LOGSTORE(DisplayLog)("uploadTile: atlas {} @ {}:{}",
-    //                      tile.location.atlasID.value,
-    //                      tile.location.x.value,
-    //                      tile.location.y.value);
+    // DisplayLog()("uploadTile: atlas {} @ {}:{}",
+    //              tile.location.atlasID.value,
+    //              tile.location.x.value,
+    //              tile.location.y.value);
     // clang-format on
 
     _scheduledExecutions.uploadTiles.emplace_back(move(tile));
@@ -576,8 +576,8 @@ void OpenGLRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)
     CHECKED_GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE));
 
     // clang-format off
-    LOGSTORE(DisplayLog)("GL configure atlas: {} {} GL texture Id {}",
-                         param.size, param.properties.format, _textureAtlas.textureId);
+    DisplayLog()("GL configure atlas: {} {} GL texture Id {}",
+                 param.size, param.properties.format, _textureAtlas.textureId);
     // clang-format on
 
     auto constexpr target = GL_TEXTURE_2D;
@@ -636,8 +636,8 @@ void OpenGLRenderer::executeUploadTile(atlas::UploadTile const& param)
     auto constexpr BitmapType = GL_UNSIGNED_BYTE;
 
     // clang-format off
-    // LOGSTORE(DisplayLog)("-> uploadTile: tex {} location {} format {} size {}",
-    //                      textureId, param.location, param.bitmapFormat, param.bitmapSize);
+    // DisplayLog()("-> uploadTile: tex {} location {} format {} size {}",
+    //              textureId, param.location, param.bitmapFormat, param.bitmapSize);
     // clang-format on
 
     bindTexture(textureId);
@@ -739,7 +739,7 @@ pair<ImageSize, vector<uint8_t>> OpenGLRenderer::takeScreenshot()
     vector<uint8_t> buffer;
     buffer.resize(imageSize.area() * 4 /* 4 because RGBA */);
 
-    LOGSTORE(DisplayLog)("Capture screenshot ({}/{}).", imageSize, _renderTargetSize);
+    DisplayLog()("Capture screenshot ({}/{}).", imageSize, _renderTargetSize);
 
     CHECKED_GL(
         glReadPixels(0, 0, *imageSize.width, *imageSize.height, GL_RGBA, GL_UNSIGNED_BYTE, buffer.data()));

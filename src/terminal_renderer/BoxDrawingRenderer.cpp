@@ -1592,15 +1592,14 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint
             case detail::NoLine: break;
             case detail::Light: {
                 auto const y0 = offset - lightThickness / 2;
-                // LOGSTORE(BoxDrawingLog)
-                // ("{}: line:{}, x:{}..{}, y:{}..{}",
-                //  isFirst ? "left" : "right",
-                //  to_stringview(lm),
-                //  x0,
-                //  x1 - 1,
-                //  y0,
-                //  y0 + lightThickness - 1,
-                //  offset);
+                // BoxDrawingLog()("{}: line:{}, x:{}..{}, y:{}..{}",
+                //                 isFirst ? "left" : "right",
+                //                 to_stringview(lm),
+                //                 x0,
+                //                 x1 - 1,
+                //                 y0,
+                //                 y0 + lightThickness - 1,
+                //                 offset);
                 for (auto const yi: iota(0, lightThickness))
                     for (auto const xi: iota(0u, x1 - x0))
                         image[(y0 + yi) * *width + x0 + xi] = 0xFF;
@@ -1717,7 +1716,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint
     if (box.arc_ != NoArc)
         detail::drawArc(image, _size, lightThickness, box.arc_);
 
-    LOGSTORE(BoxDrawingLog)("BoxDrawing: build U+{:04X} ({})", static_cast<uint32_t>(_codepoint), _size);
+    BoxDrawingLog()("BoxDrawing: build U+{:04X} ({})", static_cast<uint32_t>(_codepoint), _size);
 
     return image;
 }

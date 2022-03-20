@@ -344,10 +344,10 @@ bool requestPermission(PermissionCache& _cache,
     switch (_allowedByConfig)
     {
     case config::Permission::Allow:
-        LOGSTORE(SessionLog)("Permission for {} allowed by configuration.", _topicText);
+        SessionLog()("Permission for {} allowed by configuration.", _topicText);
         return true;
     case config::Permission::Deny:
-        LOGSTORE(SessionLog)("Permission for {} denied by configuration.", _topicText);
+        SessionLog()("Permission for {} denied by configuration.", _topicText);
         return false;
     case config::Permission::Ask: break;
     }
@@ -356,7 +356,7 @@ bool requestPermission(PermissionCache& _cache,
     if (auto const i = _cache.find(string(_topicText)); i != _cache.end())
         return i->second;
 
-    LOGSTORE(SessionLog)("Permission for {} requires asking user.", _topicText);
+    SessionLog()("Permission for {} requires asking user.", _topicText);
 
     auto const reply =
         QMessageBox::question(_parent,

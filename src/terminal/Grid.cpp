@@ -573,7 +573,7 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
     if (pageSize_ == _newSize)
         return _currentCursorPos;
 
-    LOGSTORE(GridLog)("resize {} -> {} (cursor {})", pageSize_, _newSize, _currentCursorPos);
+    GridLog()("resize {} -> {} (cursor {})", pageSize_, _newSize, _currentCursorPos);
 
     // Growing in line count with scrollback lines present will move
     // the scrollback lines into the visible area.
@@ -636,15 +636,14 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
         auto const numLinesToPushUp = numLinesToShrink - cutoffCount;
         auto const numLinesToPushUpCapped = min(numLinesToPushUp, maxHistoryLineCount_);
 
-        LOGSTORE(GridLog)
-        (" -> shrink lines: numLinesToShrink {}, linesAvailableBelowCursorBeforeShrink {}, "
-         "cutoff {}, pushUp "
-         "{}/{}",
-         numLinesToShrink,
-         linesAvailableBelowCursorBeforeShrink,
-         cutoffCount,
-         numLinesToPushUp,
-         numLinesToPushUpCapped);
+        GridLog()(" -> shrink lines: numLinesToShrink {}, linesAvailableBelowCursorBeforeShrink {}, "
+                  "cutoff {}, pushUp "
+                  "{}/{}",
+                  numLinesToShrink,
+                  linesAvailableBelowCursorBeforeShrink,
+                  cutoffCount,
+                  numLinesToPushUp,
+                  numLinesToPushUpCapped);
 
         Ensures(numLinesToShrink == cutoffCount + numLinesToPushUp);
 
@@ -661,7 +660,7 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
         Require(_newHeight <= pageSize_.lines);
         if (*numLinesToPushUp)
         {
-            LOGSTORE(GridLog)(" -> numLinesToPushUp {}", numLinesToPushUp);
+            GridLog()(" -> numLinesToPushUp {}", numLinesToPushUp);
             Require(*_cursor.line + 1 == *pageSize_.lines);
             rotateBuffersLeft(numLinesToPushUp);
             pageSize_.lines -= numLinesToPushUp;
@@ -714,12 +713,11 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
                     }
                 };
 
-            [[maybe_unused]] auto const logLogicalLine =
-                [&logicalLineBuffer]([[maybe_unused]] LineFlags lineFlags,
-                                     [[maybe_unused]] std::string_view msg) {
-                    LOGSTORE(GridLog)
-                    ("{} |> \"{}\"", msg, Line<Cell>(LineBuffer(logicalLineBuffer), lineFlags).toUtf8());
-                };
+            [[maybe_unused]] auto const logLogicalLine = [&logicalLineBuffer](
+                                                             [[maybe_unused]] LineFlags lineFlags,
+                                                             [[maybe_unused]] std::string_view msg) {
+                GridLog()("{} |> \"{}\"", msg, Line<Cell>(LineBuffer(logicalLineBuffer), lineFlags).toUtf8());
+            };
 
             for (int i = -*historyLineCount(); i < *pageSize_.lines; ++i)
             {

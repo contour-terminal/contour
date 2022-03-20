@@ -44,7 +44,7 @@ mock_font_locator::mock_font_locator()
 
 font_source_list mock_font_locator::locate(font_description const& _fd)
 {
-    LOGSTORE(LocatorLog)("Locating font chain for: {}", _fd);
+    LocatorLog()("Locating font chain for: {}", _fd);
 
     font_source_list output;
 

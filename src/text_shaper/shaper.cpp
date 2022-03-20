@@ -45,14 +45,13 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::Im
     vector<uint8_t> dest;
     dest.resize(_newSize.area() * 4 /* color component count, RGBA */);
 
-    LOGSTORE(RasterizerLog)
-    ("scaling from {} to {}, ratio {}x{} ({}), factor {}",
-     _bitmap.bitmapSize,
-     _newSize,
-     ratioX,
-     ratioY,
-     ratio,
-     factor);
+    RasterizerLog()("scaling from {} to {}, ratio {}x{} ({}), factor {}",
+                    _bitmap.bitmapSize,
+                    _newSize,
+                    ratioX,
+                    ratioY,
+                    ratio,
+                    factor);
 
     uint8_t* d = dest.data();
     for (unsigned i = 0, sr = 0; i < *_newSize.height; i++, sr += factor)

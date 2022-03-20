@@ -179,6 +179,8 @@ using namespace std::placeholders;
 namespace terminal::renderer
 {
 
+using text::LocatorLog;
+
 namespace
 {
     constexpr auto FirstReservedChar = 0x21;
@@ -253,14 +255,14 @@ unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine)
 #if defined(_WIN32)
         return make_unique<text::directwrite_locator>();
 #else
-        LOGSTORE(text::LocatorLog)("Font locator DirectWrite not supported on this platform.");
+        LocatorLog()("Font locator DirectWrite not supported on this platform.");
 #endif
         break;
     case FontLocatorEngine::CoreText:
 #if defined(__APPLE__)
         return make_unique<text::coretext_locator>();
 #else
-        LOGSTORE(text::LocatorLog)("Font locator CoreText not supported on this platform.");
+        LocatorLog()("Font locator CoreText not supported on this platform.");
 #endif
         break;
 
@@ -269,7 +271,7 @@ unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine)
         break;
     }
 
-    LOGSTORE(text::LocatorLog)("Using font locator: fontconfig.");
+    LocatorLog()("Using font locator: fontconfig.");
     return make_unique<text::fontconfig_locator>();
 }
 
@@ -480,23 +482,23 @@ void TextRenderer::renderRasterizedGlyph(crispy::Point pen,
                                          AtlasTileAttributes const& attributes)
 {
     // clang-format off
-    // LOGSTORE(RasterizerLog)("render glyph pos {} tile {} offset {}:{}",
-    //                         _pos,
-    //                         _glyphLocationInAtlas,
-    //                         _glyphPos.offset.x,
-    //                         _glyphPos.offset.y);
+    // RasterizerLog()("render glyph pos {} tile {} offset {}:{}",
+    //                 _pos,
+    //                 _glyphLocationInAtlas,
+    //                 _glyphPos.offset.x,
+    //                 _glyphPos.offset.y);
     // clang-format on
 
     renderTile(atlas::RenderTile::X { pen.x }, atlas::RenderTile::Y { pen.y }, _color, attributes);
 
     // clang-format off
     // if (RasterizerLog)
-    //     LOGSTORE(RasterizerLog)("xy={}:{} pos={} tex={}, gpos=({}:{}), baseline={}",
-    //                             x, y,
-    //                             _pos,
-    //                             _glyphBitmapSize,
-    //                             _glyphPos.offset.x, _glyphPos.offset.y,
-    //                             _gridMetrics.baseline);
+    //     RasterizerLog()("xy={}:{} pos={} tex={}, gpos=({}:{}), baseline={}",
+    //                     x, y,
+    //                     _pos,
+    //                     _glyphBitmapSize,
+    //                     _glyphPos.offset.x, _glyphPos.offset.y,
+    //                     _gridMetrics.baseline);
     // clang-format on
 }
 
@@ -739,7 +741,7 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
         auto const pixelCount =
             rowCount * unbox<int>(glyph.bitmapSize.width) * text::pixel_size(glyph.format);
         Require(0 < pixelCount && static_cast<size_t>(pixelCount) <= glyph.bitmap.size());
-        LOGSTORE(RasterizerLog)("Cropping {} underflowing bitmap rows.", rowCount);
+        RasterizerLog()("Cropping {} underflowing bitmap rows.", rowCount);
         glyph.bitmapSize.height += Height(yMin);
         auto& data = glyph.bitmap;
         data.erase(begin(data), next(begin(data), pixelCount)); // XXX asan hit (size = -2)
@@ -747,12 +749,14 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     }
     // }}}
 
-    // clang-format off
     if (RasterizerLog)
-        LOGSTORE(RasterizerLog)(
-            "Inserting {} id {} render mode {} {} yOverflow {} yMin {}.",
-            glyph, glyphKey.index, fontDescriptions_.renderMode, presentation, yOverflow, yMin);
-    // clang-format on
+        RasterizerLog()("Inserting {} id {} render mode {} {} yOverflow {} yMin {}.",
+                        glyph,
+                        glyphKey.index,
+                        fontDescriptions_.renderMode,
+                        presentation,
+                        yOverflow,
+                        yMin);
 
     return { createTileData(tileLocation,
                             move(glyph.bitmap),
@@ -813,7 +817,7 @@ text::shape_result TextRenderer::shapeTextRun(unicode::run_segmenter::range cons
 
     if (RasterizerLog && !glyphPosition.empty())
     {
-        auto msg = LOGSTORE(RasterizerLog);
+        auto msg = RasterizerLog();
         msg.append("Shaped codepoints ({}/{}): {}",
                    isEmojiPresentation ? "emoji" : "text",
                    get<unicode::PresentationStyle>(_run.properties),

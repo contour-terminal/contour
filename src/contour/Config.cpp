@@ -183,8 +183,8 @@ namespace // {{{ helper
                 parentKey += '.';
                 parentKey += _keys[i];
             }
-            LOGSTORE(ConfigLog)
-            ("Missing key {}. Using default: {}.", parentKey, !defaultStr.empty() ? defaultStr : "\"\""s);
+            ConfigLog()(
+                "Missing key {}. Using default: {}.", parentKey, !defaultStr.empty() ? defaultStr : "\"\""s);
             return false;
         }
 
@@ -761,7 +761,7 @@ namespace // {{{ helper
             else
             {
                 // TODO: log error: invalid key mapping at: _mapping.sourceLocation()
-                LOGSTORE(ConfigLog)("Could not add some input mapping.");
+                ConfigLog()("Could not add some input mapping.");
             }
         }
     }
@@ -1088,7 +1088,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
                 UsedKeys usedColorKeys;
                 profile.colors = loadColorScheme(usedColorKeys, "", subDocument);
                 // TODO: Check usedColorKeys for validity.
-                LOGSTORE(ConfigLog)("Loaded colors from {}.", filePath.string());
+                ConfigLog()("Loaded colors from {}.", filePath.string());
                 found = true;
                 break;
             }
@@ -1180,7 +1180,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     if (profile.shell.env.find("TERM") == profile.shell.env.end())
     {
         profile.shell.env["TERM"] = getDefaultTERM(appTerminfoDir);
-        LOGSTORE(ConfigLog)("Defaulting TERM to {}.", profile.shell.env["TERM"]);
+        ConfigLog()("Defaulting TERM to {}.", profile.shell.env["TERM"]);
     }
 
     if (profile.shell.env.find("COLORTERM") == profile.shell.env.end())
@@ -1274,8 +1274,8 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
         else if (lwrValue == "native")
             profile.fonts.textShapingEngine = NativeTextShapingEngine;
         else
-            LOGSTORE(ConfigLog)
-        ("Invalid value for configuration key {}.font.text_shaping.engine: {}", basePath, strValue);
+            ConfigLog()(
+                "Invalid value for configuration key {}.font.text_shaping.engine: {}", basePath, strValue);
     }
 
     profile.fonts.fontLocator = NativeFontLocator;
@@ -1294,8 +1294,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
         else if (lwrValue == "mock")
             profile.fonts.fontLocator = terminal::renderer::FontLocatorEngine::Mock;
         else
-            LOGSTORE(ConfigLog)
-        ("Invalid value for configuration key {}.font.locator: {}", basePath, strValue);
+            ConfigLog()("Invalid value for configuration key {}.font.locator: {}", basePath, strValue);
     }
 
     bool strictSpacing = false;
@@ -1431,7 +1430,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
  */
 void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 {
-    LOGSTORE(ConfigLog)("Loading configuration from file: {}", _fileName.string());
+    ConfigLog()("Loading configuration from file: {}", _fileName.string());
     _config.backingFilePath = _fileName;
     createFileIfNotExists(_config.backingFilePath);
     auto usedKeys = UsedKeys {};
@@ -1557,7 +1556,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
     if ((_config.ptyReadBufferSize % 16) != 0)
     {
         // For improved performance ...
-        LOGSTORE(ConfigLog)("read_buffer_size must be a multiple of 16.");
+        ConfigLog()("read_buffer_size must be a multiple of 16.");
     }
 
     tryLoadValue(usedKeys, doc, "reflow_on_resize", _config.reflowOnResize);

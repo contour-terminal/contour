@@ -75,8 +75,6 @@ class SourceLocation
 using source_location = SourceLocation;
 // #endif
 
-#define LOGSTORE(x) (x(::logstore::source_location::current()))
-
 class MessageBuilder
 {
   private:
@@ -371,6 +369,6 @@ inline void Sink::set_writer(Writer _writer)
 
 auto inline ErrorLog = logstore::Category("error", "Error Logger", Category::State::Enabled);
 
-#define errorlog() (LOGSTORE(::logstore::ErrorLog))
+#define errorlog() (::logstore::ErrorLog())
 
 } // namespace logstore

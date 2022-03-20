@@ -576,7 +576,7 @@ void Screen<Cell>::writeText(string_view _chars)
     {
     #if defined(LIBTERMINAL_LOG_TRACE)
         if (VTParserTraceLog)
-            LOGSTORE(VTParserTraceLog)("text: \"{}\"", _chars);
+            VTParserTraceLog()("text: \"{}\"", _chars);
     #endif
 
         // XXX
@@ -714,7 +714,7 @@ void Screen<Cell>::writeText(char32_t _char)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
     if (VTParserTraceLog)
-        LOGSTORE(VTParserTraceLog)("text: \"{}\"", unicode::convert_to<char>(_char));
+        VTParserTraceLog()("text: \"{}\"", unicode::convert_to<char>(_char));
 #endif
 
     if (_state.wrapPending && _state.cursor.autoWrap) // && !isModeEnabled(DECMode::TextReflow))

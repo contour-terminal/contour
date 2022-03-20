@@ -89,7 +89,7 @@ void ScrollableDisplay::updateValues()
 void ScrollableDisplay::updatePosition()
 {
     // terminalWidget_->setGeometry(calculateWidgetGeometry());
-    LOGSTORE(DisplayLog)("called with {}x{} in {}", width(), height(), session_.currentScreenType());
+    DisplayLog()("called with {}x{} in {}", width(), height(), session_.currentScreenType());
 
     auto const resizeMainAndScrollArea = [&]() {
         QSize ms = mainWidget_->sizeHint();
@@ -106,7 +106,7 @@ void ScrollableDisplay::updatePosition()
     {
         auto const sbWidth = scrollBar_->width();
         auto const mainWidth = width() - sbWidth;
-        LOGSTORE(DisplayLog)("Scrollbar Pos: {}", session_.profile().scrollbarPosition);
+        DisplayLog()("Scrollbar Pos: {}", session_.profile().scrollbarPosition);
         switch (session_.profile().scrollbarPosition)
         {
         case config::ScrollBarPosition::Right:
@@ -128,23 +128,22 @@ void ScrollableDisplay::updatePosition()
             break;
         }
         }
-        LOGSTORE(DisplayLog)
-        ("TW {}x{}+{}x{}, SB {}, {}x{}+{}x{}, value: {}/{}",
-         mainWidget_->pos().x(),
-         mainWidget_->pos().y(),
-         mainWidget_->width(),
-         mainWidget_->height(),
-         scrollBar_->isVisible() ? "visible" : "invisible",
-         scrollBar_->pos().x(),
-         scrollBar_->pos().y(),
-         scrollBar_->width(),
-         scrollBar_->height(),
-         scrollBar_->value(),
-         scrollBar_->maximum());
+        DisplayLog()("TW {}x{}+{}x{}, SB {}, {}x{}+{}x{}, value: {}/{}",
+                     mainWidget_->pos().x(),
+                     mainWidget_->pos().y(),
+                     mainWidget_->width(),
+                     mainWidget_->height(),
+                     scrollBar_->isVisible() ? "visible" : "invisible",
+                     scrollBar_->pos().x(),
+                     scrollBar_->pos().y(),
+                     scrollBar_->width(),
+                     scrollBar_->height(),
+                     scrollBar_->value(),
+                     scrollBar_->maximum());
     }
     else
     {
-        LOGSTORE(DisplayLog)("Resize terminal widget over full contents.");
+        DisplayLog()("Resize terminal widget over full contents.");
         scrollBar_->hide();
     }
 }

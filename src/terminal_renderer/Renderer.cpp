@@ -54,7 +54,7 @@ void loadGridMetricsFromFont(text::font_key _font, GridMetrics& _gm, text::shape
     _gm.underline.position = _gm.baseline + m.underline_position;
     _gm.underline.thickness = m.underline_thickness;
 
-    LOGSTORE(RendererLog)("Loading grid metrics {}", _gm);
+    RendererLog()("Loading grid metrics {}", _gm);
 }
 
 GridMetrics loadGridMetrics(text::font_key _font, PageSize _pageSize, text::shaper& _textShaper)
@@ -92,27 +92,27 @@ unique_ptr<text::shaper> createTextShaper(TextShapingEngine _engine,
     {
     case TextShapingEngine::DWrite:
 #if defined(_WIN32)
-        LOGSTORE(RendererLog)("Using DirectWrite text shaping engine.");
+        RendererLog()("Using DirectWrite text shaping engine.");
         // TODO: do we want to use custom font locator here?
         return make_unique<text::directwrite_shaper>(_dpi, move(_locator));
 #else
-        LOGSTORE(RendererLog)("DirectWrite not available on this platform.");
+        RendererLog()("DirectWrite not available on this platform.");
         break;
 #endif
 
     case TextShapingEngine::CoreText:
 #if defined(__APPLE__)
-        LOGSTORE(RendererLog)("CoreText not yet implemented.");
+        RendererLog()("CoreText not yet implemented.");
         break;
 #else
-        LOGSTORE(RendererLog)("CoreText not available on this platform.");
+        RendererLog()("CoreText not available on this platform.");
         break;
 #endif
 
     case TextShapingEngine::OpenShaper: break;
     }
 
-    LOGSTORE(RendererLog)("Using OpenShaper text shaping engine.");
+    RendererLog()("Using OpenShaper text shaping engine.");
     return make_unique<text::open_shaper>(_dpi, std::move(_locator));
 }
 
@@ -150,11 +150,11 @@ Renderer::Renderer(PageSize pageSize,
 
     // clang-format off
     if (_atlasTileCount.value > atlasTileCount.value)
-        LOGSTORE(RendererLog)("Increasing atlas tile count configuration to {} to satisfy worst-case rendering scenario.",
+        RendererLog()("Increasing atlas tile count configuration to {} to satisfy worst-case rendering scenario.",
                               _atlasTileCount.value);
 
     if (_atlasHashtableSlotCount.value > atlasHashtableSlotCount.value)
-        LOGSTORE(RendererLog)("Increasing atlas hashtable slot count configuration to the next power of two: {}.",
+        RendererLog()("Increasing atlas hashtable slot count configuration to the next power of two: {}.",
                               _atlasHashtableSlotCount.value);
     // clang-format on
 }
@@ -276,7 +276,7 @@ bool Renderer::setFontSize(text::font_size _fontSize)
 
 void Renderer::updateFontMetrics()
 {
-    LOGSTORE(RendererLog)("Updating grid metrics: {}", gridMetrics_);
+    RendererLog()("Updating grid metrics: {}", gridMetrics_);
 
     gridMetrics_ = loadGridMetrics(fonts_.regular, gridMetrics_.pageSize, *textShaper_);
 

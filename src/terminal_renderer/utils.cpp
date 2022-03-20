@@ -36,8 +36,8 @@ vector<uint8_t> downsampleRGBA(vector<uint8_t> const& _bitmap, ImageSize _size, 
     std::vector<uint8_t> dest;
     dest.resize(*_newSize.height * *_newSize.width * 4);
 
-    // LOGSTORE(RasterizerLog)("scaling from {} to {}, ratio {}x{} ({}), factor {}",
-    //                         _size, _newSize, ratioX, ratioY, ratio, factor);
+    // RasterizerLog()("scaling from {} to {}, ratio {}x{} ({}), factor {}",
+    //                 _size, _newSize, ratioX, ratioY, ratio, factor);
 
     uint8_t* d = dest.data();
     // TODO: use iota
@@ -87,8 +87,13 @@ vector<uint8_t> downsample(vector<uint8_t> const& _bitmap,
 
     std::vector<uint8_t> dest(*_newSize.width * *_newSize.height * _numComponents, 0);
 
-    LOGSTORE(RasterizerLog)
-    ("downsample from {} to {}, ratio {}x{} ({}), factor {}", _size, _newSize, ratioX, ratioY, ratio, factor);
+    RasterizerLog()("downsample from {} to {}, ratio {}x{} ({}), factor {}",
+                    _size,
+                    _newSize,
+                    ratioX,
+                    ratioY,
+                    ratio,
+                    factor);
 
     uint8_t* d = dest.data();
     // TODO: use iota

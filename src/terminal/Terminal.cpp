@@ -92,9 +92,9 @@ namespace // {{{ helpers
             return;
 
         if (_success)
-            LOGSTORE(RenderBufferLog)("Render buffer {} swapped.", _frameID);
+            RenderBufferLog()("Render buffer {} swapped.", _frameID);
         else
-            LOGSTORE(RenderBufferLog)("Render buffer {} swapping failed.", _frameID);
+            RenderBufferLog()("Render buffer {} swapping failed.", _frameID);
     }
 #endif
 } // namespace
@@ -202,7 +202,7 @@ void Terminal::mainLoop()
             break;
     }
 
-    LOGSTORE(TerminalLog)("Event loop terminating (PTY {}).", pty_->isClosed() ? "closed" : "open");
+    TerminalLog()("Event loop terminating (PTY {}).", pty_->isClosed() ? "closed" : "open");
     eventListener_.onClosed();
 }
 
@@ -409,7 +409,7 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
 
 #if defined(CONTOUR_PERF_STATS)
     if (TerminalLog)
-        LOGSTORE(TerminalLog)("{}: Refreshing render buffer.\n", lastFrameID_.load());
+        TerminalLog()("{}: Refreshing render buffer.\n", lastFrameID_.load());
 #endif
 
     shared_ptr<HyperlinkInfo> href =

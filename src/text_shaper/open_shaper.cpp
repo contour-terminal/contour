@@ -577,10 +577,9 @@ struct open_shaper::Private // {{{
             Require(fontKeyToHbFontInfoMapping.count(fallbackKeyOpt.value()) == 1);
             HbFontInfo& fallbackFontInfo = fontKeyToHbFontInfoMapping.at(fallbackKeyOpt.value());
             // clang-format off
-            LOGSTORE(TextShapingLog)
-            ("Try fallbacks font key:{}, source: {}",
-                         fallbackKeyOpt.value(),
-                         fallbackFontInfo.primary);
+            TextShapingLog()("Try fallbacks font key:{}, source: {}",
+                             fallbackKeyOpt.value(),
+                             fallbackFontInfo.primary);
             // clang-format on
             if (tryShape(fallbackKeyOpt.value(),
                          fallbackFontInfo,
@@ -710,7 +709,7 @@ void open_shaper::shape(font_key _font,
 
     if (TextShapingLog)
     {
-        auto logMessage = LOGSTORE(TextShapingLog);
+        auto logMessage = TextShapingLog();
         logMessage.append("Shaping codepoints:");
         for (auto [i, codepoint]: crispy::indexed(_codepoints))
             logMessage.append(" {}:U+{:x}", _clusters[i], static_cast<unsigned>(codepoint));
@@ -722,7 +721,7 @@ void open_shaper::shape(font_key _font,
             _font, fontInfo, hbBuf, hbFont, _script, _presentation, _codepoints, _clusters, _result))
         return;
 
-    LOGSTORE(TextShapingLog)("Shaping failed.");
+    TextShapingLog()("Shaping failed.");
 
     // Reshape each cluster individually.
     _result.clear();
@@ -888,15 +887,15 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
         break;
     }
     default:
-        LOGSTORE(RasterizerLog)
-        ("Glyph requested that has an unsupported pixel_mode:{}", ftFace->glyph->bitmap.pixel_mode);
+        RasterizerLog()("Glyph requested that has an unsupported pixel_mode:{}",
+                        ftFace->glyph->bitmap.pixel_mode);
         return nullopt;
     }
 
     Ensures(output.valid());
 
     if (RasterizerLog)
-        LOGSTORE(RasterizerLog)("rasterize {} to {}", _glyph, output);
+        RasterizerLog()("rasterize {} to {}", _glyph, output);
 
     return output;
 }
