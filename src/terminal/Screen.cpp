@@ -1710,7 +1710,6 @@ void Screen<Cell>::captureBuffer(LineCount _lineCount, bool _logicalLines)
 
     size_t constexpr MaxChunkSize = 4096;
     size_t currentChunkSize = 0;
-    string currentLine;
     auto const pushContent = [&](auto const data) -> void {
         if (data.empty())
             return;
@@ -1723,7 +1722,7 @@ void Screen<Cell>::captureBuffer(LineCount _lineCount, bool _logicalLines)
             _terminal.reply("\033^{};", CaptureBufferCode);
             currentChunkSize = 0;
         }
-        _terminal.reply("{}", data);
+        _terminal.reply(data);
         currentChunkSize += data.size();
     };
     LineOffset const bottomLine = boxed_cast<LineOffset>(_state.pageSize.lines - 1);
