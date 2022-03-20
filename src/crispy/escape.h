@@ -36,10 +36,12 @@ inline std::string escape(uint8_t ch)
     case '\n': return "\\n";
     case '"': return "\\\"";
     default:
-        if (ch < 0x80 && std::isprint(static_cast<char>(ch)))
+        if (ch < 0x20)
+            return fmt::format("\\{:03o}", static_cast<uint8_t>(ch) & 0xFF);
+        else if (ch < 0x80)
             return fmt::format("{}", static_cast<char>(ch));
         else
-            return fmt::format("\\{:03o}", static_cast<uint8_t>(ch) & 0xFF);
+            return fmt::format("\\x{:02x}", static_cast<uint8_t>(ch) & 0xFF);
     }
 }
 
