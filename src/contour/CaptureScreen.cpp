@@ -145,24 +145,10 @@ namespace
 
             // disable buffered input
             termios tio = savedModes;
-            tio.c_lflag &= ~(ICANON | ECHO);
-
-            // {{{ in case I want to do more with this
-            // input flags
-            tio.c_iflag &= ~IXON;    // Disable CTRL-S / CTRL-Q on output.
-            tio.c_iflag &= ~IXOFF;   // Disable CTRL-S / CTRL-Q on input.
-            tio.c_iflag &= ~ICRNL;   // Ensure CR isn't translated to NL.
-            tio.c_iflag &= ~INLCR;   // Ensure NL isn't translated to CR.
-            tio.c_iflag &= ~IGNCR;   // Ensure CR isn't ignored.
-            tio.c_iflag &= ~IMAXBEL; // Ensure beeping on full input buffer isn't enabled.
-            tio.c_iflag &= ~ISTRIP;  // Ensure stripping of 8th bit on input isn't enabled.
-
-            // output flags
-            tio.c_oflag &= ~OPOST;  // Don't enable implementation defined output processing.
-            tio.c_oflag &= ~ONLCR;  // Don't map NL to CR-NL.
-            tio.c_oflag &= ~OCRNL;  // Don't map CR to NL.
-            tio.c_oflag &= ~ONLRET; // Don't output CR.
-            // }}}
+            tio.c_lflag &= ~ICANON;  // disable canonical input
+            tio.c_lflag &= ~ECHO;    // disable echoing
+            tio.c_iflag &= ~IMAXBEL; // disable bell on full input buffer
+            tio.c_iflag &= ~ISTRIP;  // disable stripping of 8th bit on input
 
             if (tcsetattr(fd, TCSANOW, &tio) < 0)
                 return;
