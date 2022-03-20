@@ -26,6 +26,7 @@ enum class ImageFormat : uint8_t
 {
     RGB,
     RGBA,
+    PNG,
 };
 
 // clang-format off
@@ -246,7 +247,7 @@ class ImagePool
 
     // named image access
     //
-    void link(std::string const& name, std::shared_ptr<Image const> imageRef);
+    void link(std::string name, std::shared_ptr<Image const> imageRef);
     [[nodiscard]] std::shared_ptr<Image const> findImageByName(std::string const& name) const noexcept;
     void unlink(std::string const& name);
 
@@ -279,6 +280,7 @@ struct std::formatter<vtbackend::ImageFormat>: formatter<std::string_view>
         {
             case vtbackend::ImageFormat::RGB: name = "RGB"; break;
             case vtbackend::ImageFormat::RGBA: name = "RGBA"; break;
+            case vtbackend::ImageFormat::PNG: name = "PNG"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

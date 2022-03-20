@@ -343,9 +343,9 @@ shared_ptr<RasterizedImage> rasterize(shared_ptr<Image const> image,
         std::move(image), alignmentPolicy, resizePolicy, defaultColor, cellSpan, cellSize);
 }
 
-void ImagePool::link(string const& name, shared_ptr<Image const> imageRef)
+void ImagePool::link(string name, shared_ptr<Image const> imageRef)
 {
-    _imageNameToImageCache.emplace(name, std::move(imageRef));
+    _imageNameToImageCache.emplace(std::move(name), std::move(imageRef));
 }
 
 shared_ptr<Image const> ImagePool::findImageByName(string const& name) const noexcept

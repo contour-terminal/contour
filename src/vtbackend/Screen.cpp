@@ -2,6 +2,7 @@
 #include <vtbackend/ControlCode.h>
 #include <vtbackend/DesktopNotification.h>
 #include <vtbackend/InputGenerator.h>
+#include <vtbackend/MessageParser.h>
 #include <vtbackend/Screen.h>
 #include <vtbackend/SixelParser.h>
 #include <vtbackend/Terminal.h>
@@ -267,7 +268,93 @@ namespace // {{{ helper
     //             return nullopt;
     //     }
     // }
+
+#if defined(GOOD_IMAGE_PROTOCOL)
+    int toNumber(string const* _value, int _default)
+    {
+        if (!_value)
+            return _default;
+
+        int result = 0;
+        for (char const ch: *_value)
+        {
+            if (ch >= '0' && ch <= '9')
+                result = result * 10 + (ch - '0');
+            else
+                return _default;
+        }
+
+        return result;
+    }
+
+    optional<ImageAlignment> toImageAlignmentPolicy(string const* _value, ImageAlignment _default)
+    {
+        if (!_value)
+            return _default;
+
+        if (_value->size() != 1)
+            return nullopt;
+
+        switch (_value->at(0))
+        {
+            case '1': return ImageAlignment::TopStart;
+            case '2': return ImageAlignment::TopCenter;
+            case '3': return ImageAlignment::TopEnd;
+            case '4': return ImageAlignment::MiddleStart;
+            case '5': return ImageAlignment::MiddleCenter;
+            case '6': return ImageAlignment::MiddleEnd;
+            case '7': return ImageAlignment::BottomStart;
+            case '8': return ImageAlignment::BottomCenter;
+            case '9': return ImageAlignment::BottomEnd;
+        }
+
+        return nullopt;
+    }
+
+    optional<ImageResize> toImageResizePolicy(string const* _value, ImageResize _default)
+    {
+        if (!_value)
+            return _default;
+
+        if (_value->size() != 1)
+            return nullopt;
+
+        switch (_value->at(0))
+        {
+            case '0': return ImageResize::NoResize;
+            case '1': return ImageResize::ResizeToFit;
+            case '2': return ImageResize::ResizeToFill;
+            case '3': return ImageResize::StretchToFill;
+        }
+
+        return nullopt; // TODO
+    }
+
+    optional<ImageFormat> toImageFormat(string const* _value)
+    {
+        auto constexpr DefaultFormat = ImageFormat::RGB;
+
+        if (_value)
+        {
+            if (_value->size() == 1)
+            {
+                switch (_value->at(0))
+                {
+                    case '1': return ImageFormat::RGB;
+                    case '2': return ImageFormat::RGBA;
+                    case '3': return ImageFormat::PNG;
+                    default: return nullopt;
+                }
+            }
+            else
+                return nullopt;
+        }
+        else
+            return DefaultFormat;
+    }
+#endif
 } // namespace
+
 // }}}
 
 template <CellConcept Cell>
@@ -4099,6 +4186,12 @@ ApplyResult Screen<Cell>::apply(Function const& function, Sequence const& seq)
         case STP: _terminal->hookParser(hookSTP(seq)); break;
         case DECRQSS: _terminal->hookParser(hookDECRQSS(seq)); break;
         case XTGETTCAP: _terminal->hookParser(hookXTGETTCAP(seq)); break;
+#if defined(GOOD_IMAGE_PROTOCOL)
+        case GIUPLOAD: _terminal->hookParser(hookGoodImageUpload(seq)); break;
+        case GIRENDER: _terminal->hookParser(hookGoodImageRender(seq)); break;
+        case GIDELETE: _terminal->hookParser(hookGoodImageRelease(seq)); break;
+        case GIONESHOT: _terminal->hookParser(hookGoodImageOneshot(seq)); break;
+#endif
 
         default: return ApplyResult::Unsupported;
     }
@@ -4316,6 +4409,161 @@ bool Screen<Cell>::isCursorInsideMargins() const noexcept
                                         || margin().horizontal.contains(_cursor.position.column);
     return insideVerticalMargin && insideHorizontalMargin;
 }
+
+#if defined(GOOD_IMAGE_PROTOCOL)
+template <CellConcept Cell>
+unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageUpload(Sequence const&)
+{
+    return make_unique<MessageParser>([this](Message&& message) {
+        auto const name = message.header("n");
+        auto const imageFormat = toImageFormat(message.header("f"));
+        auto const width = Width::cast_from(toNumber(message.header("w"), 0));
+        auto const height = Height::cast_from(toNumber(message.header("h"), 0));
+        auto const size = ImageSize { width, height };
+
+        bool const validImage = imageFormat.has_value()
+                                && ((*imageFormat == ImageFormat::PNG && !*size.width && !*size.height)
+                                    || (*imageFormat != ImageFormat::PNG && *size.width && *size.height));
+
+        if (name && validImage)
+        {
+            uploadImage(*name, imageFormat.value(), size, message.takeBody());
+        }
+    });
+}
+
+template <CellConcept Cell>
+unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageRender(Sequence const&)
+{
+    return make_unique<MessageParser>([this](Message&& message) {
+        auto const name = message.header("n");
+        auto const x = PixelCoordinate::X { toNumber(message.header("x"), 0) }; // XXX grid x offset
+        auto const y = PixelCoordinate::Y { toNumber(message.header("y"), 0) }; // XXX grid y offset
+        auto const screenRows = LineCount::cast_from(toNumber(message.header("r"), 0));
+        auto const screenCols = ColumnCount::cast_from(toNumber(message.header("c"), 0));
+        auto const imageWidth = Width::cast_from(toNumber(message.header("w"), 0));   // XXX in grid coords
+        auto const imageHeight = Height::cast_from(toNumber(message.header("h"), 0)); // XXX in grid coords
+        auto const alignmentPolicy =
+            toImageAlignmentPolicy(message.header("a"), ImageAlignment::MiddleCenter);
+        auto const resizePolicy = toImageResizePolicy(message.header("z"), ImageResize::NoResize);
+        auto const requestStatus = message.header("s") != nullptr;
+        auto const autoScroll = message.header("l") != nullptr;
+
+        auto const imageOffset = PixelCoordinate { x, y };
+        auto const imageSize = ImageSize { imageWidth, imageHeight };
+        auto const screenExtent = GridSize { screenRows, screenCols };
+
+        renderImageByName(name ? *name : "",
+                          screenExtent,
+                          imageOffset,
+                          imageSize,
+                          *alignmentPolicy,
+                          *resizePolicy,
+                          autoScroll,
+                          requestStatus);
+    });
+}
+
+template <CellConcept Cell>
+unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageRelease(Sequence const&)
+{
+    return make_unique<MessageParser>([this](Message&& message) {
+        if (auto const name = message.header("n"); name)
+            releaseImage(*name);
+    });
+}
+
+template <CellConcept Cell>
+unique_ptr<ParserExtension> Screen<Cell>::hookGoodImageOneshot(Sequence const&)
+{
+    return make_unique<MessageParser>([this](Message&& message) {
+        auto const screenRows = LineCount::cast_from(toNumber(message.header("r"), 0));
+        auto const screenCols = ColumnCount::cast_from(toNumber(message.header("c"), 0));
+        auto const autoScroll = message.header("l") != nullptr;
+        auto const alignmentPolicy =
+            toImageAlignmentPolicy(message.header("a"), ImageAlignment::MiddleCenter);
+        auto const resizePolicy = toImageResizePolicy(message.header("z"), ImageResize::NoResize);
+        auto const imageWidth = Width::cast_from(toNumber(message.header("w"), 0));
+        auto const imageHeight = Height::cast_from(toNumber(message.header("h"), 0));
+        auto const imageFormat = toImageFormat(message.header("f"));
+
+        auto const imageSize = ImageSize { imageWidth, imageHeight };
+        auto const screenExtent = GridSize { screenRows, screenCols };
+
+        renderImage(*imageFormat,
+                    imageSize,
+                    message.takeBody(),
+                    screenExtent,
+                    *alignmentPolicy,
+                    *resizePolicy,
+                    autoScroll);
+    });
+}
+
+template <CellConcept Cell>
+void Screen<Cell>::uploadImage(string name, ImageFormat format, ImageSize imageSize, Image::Data&& pixmap)
+{
+    _terminal->imagePool().link(std::move(name), uploadImage(format, imageSize, std::move(pixmap)));
+}
+
+template <CellConcept Cell>
+void Screen<Cell>::renderImageByName(std::string const& name,
+                                     GridSize gridSize,
+                                     PixelCoordinate imageOffset,
+                                     ImageSize imageSize,
+                                     ImageAlignment alignmentPolicy,
+                                     ImageResize resizePolicy,
+                                     bool autoScroll,
+                                     bool requestStatus)
+{
+    auto const imageRef = _terminal->imagePool().findImageByName(name);
+    auto const topLeft = _cursor.position;
+
+    if (imageRef)
+        renderImage(imageRef,
+                    topLeft,
+                    gridSize,
+                    imageOffset,
+                    imageSize,
+                    alignmentPolicy,
+                    resizePolicy,
+                    autoScroll);
+
+    if (requestStatus)
+        _terminal->reply("\033P{}r\033\\", imageRef != nullptr ? 1 : 0);
+}
+
+template <CellConcept Cell>
+void Screen<Cell>::renderImage(ImageFormat format,
+                               ImageSize imageSize,
+                               Image::Data&& pixmap,
+                               GridSize gridSize,
+                               ImageAlignment alignmentPolicy,
+                               ImageResize resizePolicy,
+                               bool autoScroll)
+{
+    auto constexpr pixelOffset = PixelCoordinate {};
+    auto constexpr pixelSize = ImageSize {};
+
+    auto const topLeft = _cursor.position;
+    auto const imageRef = uploadImage(format, imageSize, std::move(pixmap));
+
+    renderImage(imageRef,
+                topLeft,
+                gridSize,
+                pixelOffset,
+                pixelSize,
+                alignmentPolicy,
+                resizePolicy,
+                autoScroll);
+}
+
+template <CellConcept Cell>
+void Screen<Cell>::releaseImage(std::string const& name)
+{
+    _terminal->imagePool().unlink(name);
+}
+#endif
 
 } // namespace vtbackend
 

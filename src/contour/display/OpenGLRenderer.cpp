@@ -118,6 +118,7 @@ namespace
         {
             case vtbackend::ImageFormat::RGB: return GL_RGB;
             case vtbackend::ImageFormat::RGBA: return GL_RGBA;
+            case vtbackend::ImageFormat::PNG: Require(false);
         }
         Guarantee(false);
         crispy::unreachable();

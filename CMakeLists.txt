@@ -101,6 +101,7 @@ option(CONTOUR_WITH_UTEMPTER "Build with utempter support [default: ON]" ON)
 option(CONTOUR_USE_CPM "Use CPM to fetch dependencies [default: ON]" ON)
 option(CONTOUR_BUILD_STATIC "Link to static libraries [default: OFF]" OFF)
 option(CONTOUR_BUILD_NATIVE "Build for native architecture [default: OFF]" OFF)
+option(CONTOUR_GOOD_IMAGE_PROTOCOL "Enables *EXPERIMENTAL* Good Image Protocol support [default: ON]" ON)
 
 
 if(CONTOUR_BUILD_STATIC)
@@ -108,6 +109,10 @@ if(CONTOUR_BUILD_STATIC)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
     set(CMAKE_LINK_SEARCH_END_STATIC ON)
     set(CMAKE_EXE_LINKER_FLAGS "-static-libgcc -static-libstdc++")
+endif()
+
+if(CONTOUR_GOOD_IMAGE_PROTOCOL)
+    add_definitions(-DGOOD_IMAGE_PROTOCOL=1)
 endif()
 
 if(NOT WIN32 AND NOT CONTOUR_SANITIZE AND NOT CMAKE_CONFIGURATION_TYPES)

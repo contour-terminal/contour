@@ -135,6 +135,14 @@ constexpr inline auto DECSIXEL = FunctionDocumentation { .mnemonic = "DECSIXEL",
 constexpr inline auto STP = FunctionDocumentation { .mnemonic = "STP", .comment = "Set Terminal Profile" };
 constexpr inline auto XTGETTCAP = FunctionDocumentation { .mnemonic = "XTGETTCAP", .comment = "Request Termcap/Terminfo String" };
 
+#if defined(GOOD_IMAGE_PROTOCOL)
+// GIP (Good Image Protocol)
+constexpr inline auto GIUPLOAD = FunctionDocumentation { .mnemonic = "GIUPLOAD", .comment = "Uploads an image." };
+constexpr inline auto GIRENDER = FunctionDocumentation { .mnemonic = "GIRENDER", .comment = "Renders an image." };
+constexpr inline auto GIDELETE = FunctionDocumentation { .mnemonic = "GIDELETE", .comment = "Deletes an image." };
+constexpr inline auto GIONESHOT = FunctionDocumentation { .mnemonic = "GIONESHOT", .comment = "Uploads and renders an unnamed image." };
+#endif
+
 // OSC
 constexpr inline auto CLIPBOARD = FunctionDocumentation { .mnemonic = "CLIPBOARD", .comment = "Clipboard management." };
 constexpr inline auto COLORBG = FunctionDocumentation { .mnemonic = "COLORBG", .comment = "Change or request text background color." };
@@ -659,6 +667,15 @@ constexpr inline auto DESKTOPNOTIFY    = detail::OSC(99, VTExtension::Unknown, d
 // NOLINTEND(readability-identifier-naming)
 // clang-format on
 
+// DCS: Good Image Protocol
+#if defined(GOOD_IMAGE_PROTOCOL)
+// TODO: use OSC instead of DCS?
+constexpr inline auto GIUPLOAD    = detail::DCS(std::nullopt, 0, 0, std::nullopt, 'u', VTType::VT525, documentation::GIUPLOAD);
+constexpr inline auto GIRENDER    = detail::DCS(std::nullopt, 0, 0, std::nullopt, 'r', VTType::VT525, documentation::GIRENDER);
+constexpr inline auto GIDELETE    = detail::DCS(std::nullopt, 0, 0, std::nullopt, 'd', VTType::VT525, documentation::GIDELETE);
+constexpr inline auto GIONESHOT   = detail::DCS(std::nullopt, 0, 0, std::nullopt, 's', VTType::VT525, documentation::GIONESHOT);
+#endif
+
 constexpr inline auto CaptureBufferCode = 314;
 
 // HACK to get older compiler work (GCC 9.4)
@@ -791,6 +808,12 @@ constexpr static auto allFunctionsArray() noexcept
         MODIFYOTHERKEYS,
 
         // DCS
+#if defined(GOOD_IMAGE_PROTOCOL)
+        GIUPLOAD,
+        GIRENDER,
+        GIDELETE,
+        GIONESHOT,
+#endif
         STP,
         DECRQSS,
         DECSIXEL,

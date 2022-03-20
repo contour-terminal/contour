@@ -29,6 +29,9 @@ class ContourApp: public crispy::app
     int documentationKeyMapping();
     int documentationGlobalConfig();
     int documentationProfileConfig();
+#if defined(GOOD_IMAGE_PROTOCOL)
+    int imageAction();
+#endif
 };
 
 } // namespace contour

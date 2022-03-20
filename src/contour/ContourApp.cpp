@@ -11,6 +11,7 @@
 #include <crispy/App.h>
 #include <crispy/CLI.h>
 #include <crispy/StackTrace.h>
+#include <crispy/base64.h>
 #include <crispy/utils.h>
 
 #include <QtCore/QFile>
@@ -43,6 +44,7 @@ using std::string_view;
 using std::unique_ptr;
 
 using namespace std::string_literals;
+using namespace std::string_view_literals;
 
 namespace CLI = crispy::cli;
 
@@ -466,6 +468,106 @@ int ContourApp::captureAction()
         return EXIT_FAILURE;
 }
 
+#if defined(GOOD_IMAGE_PROTOCOL)
+namespace
+{
+    crispy::size parseSize(string_view _text)
+    {
+        (void) _text;
+        return crispy::size {}; // TODO
+    }
+
+    vtbackend::ImageAlignment parseImageAlignment(string_view _text)
+    {
+        (void) _text;
+        return vtbackend::ImageAlignment::TopStart; // TODO
+    }
+
+    vtbackend::ImageResize parseImageResize(string_view _text)
+    {
+        (void) _text;
+        return vtbackend::ImageResize::NoResize; // TODO
+    }
+
+    // vtbackend::CellLocation parsePosition(string_view _text)
+    // {
+    //     (void) _text;
+    //     return {}; // TODO
+    // }
+
+    // TODO: chunkedFileReader(path) to return iterator over spans of data chunks.
+    std::vector<uint8_t> readFile(std::filesystem::path const& _path)
+    {
+        auto ifs = std::ifstream(_path.string());
+        if (!ifs.good())
+            return {};
+
+        auto const size = std::filesystem::file_size(_path);
+        auto text = std::vector<uint8_t>();
+        text.resize(size);
+        ifs.read((char*) &text[0], static_cast<std::streamsize>(size));
+        return text;
+    }
+
+    void displayImage(vtbackend::ImageResize _resizePolicy,
+                      vtbackend::ImageAlignment _alignmentPolicy,
+                      crispy::size _screenSize,
+                      string_view _fileName)
+    {
+        auto constexpr ST = "\033\\"sv;
+
+        cout << std::format("{}f={},c={},l={},a={},z={};",
+                            "\033Ps"sv, // GIONESHOT
+                            '0',        // image format: 0 = auto detect
+                            _screenSize.width,
+                            _screenSize.height,
+                            int(_alignmentPolicy),
+                            int(_resizePolicy));
+
+    #if 1
+        auto const data = readFile(std::filesystem::path(string(_fileName))); // TODO: incremental buffered read
+        auto encoderState = crispy::base64::encoder_state {};
+
+        std::vector<char> buf;
+        auto const writer = [&](char a, char b, char c, char d) {
+            buf.push_back(a);
+            buf.push_back(b);
+            buf.push_back(c);
+            buf.push_back(d);
+        };
+        auto const flush = [&]() {
+            cout.write(buf.data(), static_cast<std::streamsize>(buf.size()));
+            buf.clear();
+        };
+
+        for (uint8_t const byte: data)
+        {
+            crispy::base64::encode(byte, encoderState, writer);
+            if (buf.size() >= 4096)
+                flush();
+        }
+        flush();
+    #endif
+
+        cout << ST;
+    }
+} // namespace
+
+int ContourApp::imageAction()
+{
+    auto const resizePolicy = parseImageResize(parameters().get<string>("contour.image.resize"));
+    auto const alignmentPolicy = parseImageAlignment(parameters().get<string>("contour.image.align"));
+    auto const size = parseSize(parameters().get<string>("contour.image.size"));
+    auto const fileName = parameters().verbatim.front();
+    // TODO: how do we wanna handle more than one verbatim arg (image)?
+    // => report error and EXIT_FAILURE as only one verbatim arg is allowed.
+    // FIXME: What if parameter `size` is given as `_size` instead, it should cause an
+    //        invalid-argument error above already!
+    displayImage(resizePolicy, alignmentPolicy, size, fileName);
+    return EXIT_SUCCESS;
+}
+#endif
+
 int ContourApp::parserTableAction()
 {
     vtparser::parserTableDot(std::cout);
@@ -575,6 +677,35 @@ crispy::cli::command ContourApp::parameterDefinition() const
                                           "FILE",
                                           CLI::presence::Required },
                         } } } },
+#if defined(GOOD_IMAGE_PROTOCOL)
+            CLI::command {
+                "image",
+                "Sends an image to the terminal emulator for display.",
+                CLI::option_list {
+                    CLI::option { "resize",
+                                  CLI::value { "fit"s },
+                                  "Sets the image resize policy.\n"
+                                  "Policies available are:\n"
+                                  " - no (no resize),\n"
+                                  " - fit (resize to fit),\n"
+                                  " - fill (resize to fill),\n"
+                                  " - stretch (stretch to fill)." },
+                    CLI::option { "align",
+                                  CLI::value { "center"s },
+                                  "Sets the image alignment policy.\n"
+                                  "Possible policies are: TopLeft, TopCenter, TopRight, MiddleLeft, "
+                                  "MiddleCenter, MiddleRight, BottomLeft, BottomCenter, BottomRight." },
+                    CLI::option { "size",
+                                  CLI::value { ""s },
+                                  "Sets the amount of columns and rows to place the image onto. "
+                                  "The top-left of the this area is the current cursor position, "
+                                  "and it will be scrolled automatically if not enough rows are present." } },
+                CLI::command_list {},
+                CLI::command_select::Explicit,
+                CLI::verbatim {
+                    "IMAGE_FILE",
+                    "Path to image to be displayed. Image formats supported are at least PNG, JPG." } },
+#endif
             CLI::command {
                 "capture",
                 "Captures the screen buffer of the currently running terminal.",
