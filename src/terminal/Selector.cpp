@@ -54,6 +54,7 @@ namespace // {{{ helper
     }
 
 } // namespace
+// }}}
 
 // {{{ Selection
 void Selection::extend(CellLocation _to)
@@ -77,19 +78,6 @@ CellLocation Selection::stretchedColumn(SelectionHelper const& _grid, CellLocati
     {
         stretched.column += ColumnOffset::cast_from(w - 1);
         return stretched;
-    }
-
-    auto const pageWidth = _grid.pageSize().columns;
-    while (*stretched.column + 1 < *pageWidth)
-    {
-        if (_grid.cellEmpty(stretched))
-            stretched.column++;
-        else
-        {
-            if (auto const w = _grid.cellWidth(stretched); w > 1)
-                stretched.column += ColumnOffset::cast_from(w - 1);
-            break;
-        }
     }
 
     return stretched;
