@@ -21,7 +21,7 @@ jobs:
     name: "Check PR-TODOs"
     runs-on: ubuntu-20.04
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: "Checking for open PR-related TODO items"
       run: |
         set -ex
@@ -31,7 +31,7 @@ jobs:
     name: "Check C++ style"
     runs-on: ubuntu-20.04
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: Run clang-format style check for C/C++/Protobuf programs.
       uses: jidicula/clang-format-action@v4.4.0
       with:

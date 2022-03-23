@@ -27,7 +27,7 @@ jobs:
       CODECHECKER_CONFIG: .github/codechecker/config.json
     steps:
       - name: "Check out repository"
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: "Set Contour CI variables"
         id: set_vars
         run: ./scripts/ci-set-vars.sh
@@ -40,7 +40,7 @@ jobs:
           sudo apt-get -qy update
           sudo ./scripts/install-deps.sh
       - name: "Check out repository Ericsson/CodeChecker"
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           repository: Ericsson/CodeChecker
           path: CodeChecker
