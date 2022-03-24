@@ -25,6 +25,7 @@ namespace detail
     auto constexpr inline Base64Alphabet = std::string_view { "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
                                                               "abcdefghijklmnopqrstuvwxyz"
                                                               "0123456789+/" };
+
     // clang-format off
     char constexpr inline indexmap[256] = {
         /* ASCII table */
@@ -49,9 +50,11 @@ namespace detail
     // clang-format on
 
     template <typename T, size_t N>
-    constexpr std::basic_string_view<T> toStringView(std::array<T, N> const& range) noexcept
+    std::string& operator+=(std::string& s, std::array<T, N> v)
     {
-        return std::basic_string_view<T>(range.data(), range.size());
+        for (T const c: v)
+            s += c;
+        return s;
     }
 } // namespace detail
 
@@ -70,11 +73,10 @@ constexpr void encode(uint8_t _byte, Alphabet const& alphabet, EncoderState& _st
 
     _state.modulo = 0;
     auto const* input = _state.pending;
-    auto const out = std::array { alphabet[(input[0] >> 2) & 0x3F],
-                                  alphabet[((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4)],
-                                  alphabet[((input[1] & 0x0F) << 2) | ((uint8_t) (input[2] & 0xC0) >> 6)],
-                                  alphabet[input[2] & 0x3F] };
-    _sink(detail::toStringView(out));
+    _sink(alphabet[(input[0] >> 2) & 0x3F],
+          alphabet[((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4)],
+          alphabet[((input[1] & 0x0F) << 2) | ((uint8_t) (input[2] & 0xC0) >> 6)],
+          alphabet[input[2] & 0x3F]);
 }
 
 template <typename Alphabet, typename Sink>
@@ -88,22 +90,20 @@ constexpr void finish(Alphabet const& alphabet, EncoderState& _state, Sink&& _si
     switch (_state.modulo)
     {
     case 2: {
-        auto const out = std::array { alphabet[(input[0] >> 2) & 0x3F],
-                                      alphabet[((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4)],
-                                      alphabet[((input[1] & 0x0F) << 2)],
-                                      '=' };
-        _sink(detail::toStringView(out));
+        _sink(alphabet[(input[0] >> 2) & 0x3F],
+              alphabet[((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4)],
+              alphabet[((input[1] & 0x0F) << 2)],
+              '=');
         _state.modulo = 0;
     }
     break;
     case 1: {
         // clang-format off
-        auto const out = std::array { alphabet[(input[0] >> 2) & 0x3F],
-                                      alphabet[((input[0] & 0x03) << 4)],
-                                      '=',
-                                      '=' };
+        _sink(alphabet[(input[0] >> 2) & 0x3F],
+              alphabet[((input[0] & 0x03) << 4)],
+              '=',
+              '=');
         // clang-format on
-        _sink(detail::toStringView(out));
         _state.modulo = 0;
     }
     break;
@@ -129,10 +129,17 @@ std::string encode(Iterator begin, Iterator end, Alphabet alphabet)
     std::string output;
     output.reserve(((std::distance(begin, end) + 2) / 3 * 4) + 1);
 
-    EncoderState state {};
+    auto const flusher = [&output](char a, char b, char c, char d) {
+        output += a;
+        output += b;
+        output += c;
+        output += d;
+    };
+
+    auto state = EncoderState {};
     for (auto i = begin; i != end; ++i)
-        encode(*i, alphabet, state, [&](auto _data) { output += _data; });
-    finish(alphabet, state, [&](auto _data) { output += _data; });
+        encode(*i, alphabet, state, flusher);
+    finish(alphabet, state, flusher);
 
     return output;
 }
