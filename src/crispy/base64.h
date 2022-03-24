@@ -22,8 +22,11 @@ namespace crispy::base64
 
 namespace detail
 {
+    auto constexpr inline Base64Alphabet = std::string_view { "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                                                              "abcdefghijklmnopqrstuvwxyz"
+                                                              "0123456789+/" };
     // clang-format off
-    constexpr inline char indexmap[256] = {
+    char constexpr inline indexmap[256] = {
         /* ASCII table */
         64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, //   0..15
         64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, //  16..31
@@ -66,7 +69,7 @@ constexpr void encode(uint8_t _byte, Alphabet const& alphabet, EncoderState& _st
         return;
 
     _state.modulo = 0;
-    uint8_t const* input = _state.pending;
+    auto const* input = _state.pending;
     auto const out = std::array { alphabet[(input[0] >> 2) & 0x3F],
                                   alphabet[((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4)],
                                   alphabet[((input[1] & 0x0F) << 2) | ((uint8_t) (input[2] & 0xC0) >> 6)],
@@ -111,11 +114,7 @@ constexpr void finish(Alphabet const& alphabet, EncoderState& _state, Sink&& _si
 template <typename Sink>
 constexpr void encode(uint8_t _byte, EncoderState& _state, Sink&& _sink)
 {
-    constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                                "abcdefghijklmnopqrstuvwxyz"
-                                "0123456789+/";
-    return encode(_byte, alphabet, _state, std::forward<Sink>(_sink));
-    // return encode(_byte, detail::indexmap, _state, std::forward<Sink>(_sink));
+    return encode(_byte, detail::Base64Alphabet, _state, std::forward<Sink>(_sink));
 }
 
 template <typename Sink>
@@ -141,10 +140,7 @@ std::string encode(Iterator begin, Iterator end, Alphabet alphabet)
 template <typename Iterator>
 std::string encode(Iterator begin, Iterator end)
 {
-    static constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                                       "abcdefghijklmnopqrstuvwxyz"
-                                       "0123456789+/";
-    return encode(begin, end, alphabet);
+    return encode(begin, end, detail::Base64Alphabet);
 }
 
 inline std::string encode(std::string_view _value)
