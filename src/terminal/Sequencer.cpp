@@ -55,7 +55,7 @@ void Sequencer::error(std::string_view _errorString)
 
 void Sequencer::print(char _char)
 {
-    unicode::ConvertResult const r = unicode::from_utf8(terminal_.state().utf8DecoderState, (uint8_t) _char);
+    unicode::ConvertResult const r = unicode::from_utf8(utf8DecoderState_, (uint8_t) _char);
     if (holds_alternative<unicode::Incomplete>(r))
         return;
 
@@ -72,7 +72,7 @@ void Sequencer::print(string_view _chars)
 {
     assert(_chars.size() != 0);
 
-    if (terminal_.state().utf8DecoderState.expectedLength == 0)
+    if (utf8DecoderState_.expectedLength == 0)
     {
         terminal_.state().instructionCounter += _chars.size();
         terminal_.screen().writeText(_chars);
@@ -86,12 +86,7 @@ void Sequencer::print(string_view _chars)
 void Sequencer::execute(char controlCode)
 {
     terminal_.screen().executeControlCode(controlCode);
-}
-
-void Sequencer::clear()
-{
-    sequence_.clear();
-    terminal_.state().utf8DecoderState = {};
+    resetUtf8DecoderState();
 }
 
 void Sequencer::collect(char _char)
@@ -99,26 +94,20 @@ void Sequencer::collect(char _char)
     sequence_.intermediateCharacters().push_back(_char);
 }
 
-void Sequencer::collectLeader(char _leader)
+void Sequencer::collectLeader(char _leader) noexcept
 {
     sequence_.setLeader(_leader);
 }
 
-void Sequencer::param(char _char)
+void Sequencer::param(char _char) noexcept
 {
     if (sequence_.parameters().empty())
-        sequence_.parameters().push_back({ 0 });
+        sequence_.parameters().appendParameter(0);
 
     switch (_char)
     {
-        case ';':
-            if (sequence_.parameters().size() < Sequence::MaxParameters)
-                sequence_.parameters().push_back({ 0 });
-            break;
-        case ':':
-            if (sequence_.parameters().back().size() < Sequence::MaxParameters)
-                sequence_.parameters().back().push_back({ 0 });
-            break;
+        case ';': paramSeparator(); break;
+        case ':': paramSubSeparator(); break;
         case '0':
         case '1':
         case '2':
@@ -128,10 +117,7 @@ void Sequencer::param(char _char)
         case '6':
         case '7':
         case '8':
-        case '9':
-            sequence_.parameters().back().back() =
-                sequence_.parameters().back().back() * 10 + (Sequence::Parameter)(_char - '0');
-            break;
+        case '9': paramDigit(_char); break;
     }
 }
 
@@ -163,7 +149,7 @@ void Sequencer::putOSC(char _char)
 void Sequencer::dispatchOSC()
 {
     auto const [code, skipCount] = parser::extractCodePrefix(sequence_.intermediateCharacters());
-    sequence_.parameters().push_back({ static_cast<Sequence::Parameter>(code) });
+    sequence_.parameters().appendParameter(static_cast<Sequence::Parameter>(code));
     sequence_.intermediateCharacters().erase(0, skipCount);
     handleSequence();
     clear();

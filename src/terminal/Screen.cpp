@@ -3663,7 +3663,6 @@ void Screen<Cell>::executeControlCode(char controlCode)
                 VTParserLog()("Unsupported C0 sequence: {}", crispy::escape((uint8_t) controlCode));
             break;
     }
-    _terminal.state().utf8DecoderState = {};
 }
 
 template <typename Cell>

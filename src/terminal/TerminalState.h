@@ -186,7 +186,6 @@ struct TerminalState
     InputGenerator inputGenerator {};
 
     char32_t precedingGraphicCharacter = {};
-    unicode::utf8_decoder_state utf8DecoderState = {};
     bool terminating = false;
 };
 

@@ -283,6 +283,9 @@ enum class Action : uint8_t
      * arrive, all the extra parameters are silently ignored.
      */
     Param,
+    ParamDigit,        // [0-9]
+    ParamSeparator,    // ';'
+    ParamSubSeparator, // ':'
 
     /**
      * The final character of an escape sequence has arrived, so determined the control function
@@ -413,6 +416,9 @@ constexpr std::string_view to_string(Action action)
         case Action::Collect: return "Collect";
         case Action::CollectLeader: return "CollectLeader";
         case Action::Param: return "Param";
+        case Action::ParamDigit: return "ParamDigit";
+        case Action::ParamSeparator: return "ParamSeparator";
+        case Action::ParamSubSeparator: return "ParamSubSeparator";
         case Action::ESC_Dispatch: return "Escape Dispatch";
         case Action::CSI_Dispatch: return "CSI Dispatch";
         case Action::Hook: return "Hook";

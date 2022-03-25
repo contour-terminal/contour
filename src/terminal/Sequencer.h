@@ -22,6 +22,7 @@
 #include <terminal/primitives.h>
 
 #include <unicode/convert.h>
+#include <unicode/utf8.h>
 
 #include <cassert>
 #include <memory>
@@ -138,10 +139,13 @@ class Sequencer
     void print(char _text);
     void print(std::string_view _chars);
     void execute(char _controlCode);
-    void clear();
+    void clear() noexcept;
     void collect(char _char);
-    void collectLeader(char _leader);
-    void param(char _char);
+    void collectLeader(char _leader) noexcept;
+    void param(char _char) noexcept;
+    void paramDigit(char _char) noexcept;
+    void paramSeparator() noexcept;
+    void paramSubSeparator() noexcept;
     void dispatchESC(char _function);
     void dispatchCSI(char _function);
     void startOSC();
@@ -158,6 +162,7 @@ class Sequencer
     void dispatchPM() {}
 
   private:
+    void resetUtf8DecoderState() noexcept;
     void handleSequence();
 
     [[nodiscard]] std::unique_ptr<ParserExtension> hookSTP(Sequence const& _ctx);
@@ -168,11 +173,52 @@ class Sequencer
     // private data
     //
     Terminal& terminal_;
+    unicode::utf8_decoder_state utf8DecoderState_ = {};
     Sequence sequence_ {};
+
+    size_t currentParameterIndex_ = 0;
+    size_t currentSubParameterIndex_ = 0;
 
     std::unique_ptr<ParserExtension> hookedParser_;
     std::unique_ptr<SixelImageBuilder> sixelImageBuilder_;
 };
+
+// {{{ inlines
+inline void Sequencer::resetUtf8DecoderState() noexcept
+{
+    utf8DecoderState_ = {};
+}
+
+inline void Sequencer::clear() noexcept
+{
+    sequence_.clear();
+    currentParameterIndex_ = 0;
+    currentSubParameterIndex_ = 0;
+    resetUtf8DecoderState();
+}
+
+inline void Sequencer::paramDigit(char _char) noexcept
+{
+    if (sequence_.parameters().empty())
+        sequence_.parameters().appendParameter(0);
+
+    sequence_.parameters().multiplyBy10AndAdd(
+        currentParameterIndex_, currentSubParameterIndex_, static_cast<Sequence::Parameter>(_char - '0'));
+}
+
+inline void Sequencer::paramSeparator() noexcept
+{
+    ++currentParameterIndex_;
+    currentSubParameterIndex_ = 0;
+    sequence_.parameters().appendParameter(0);
+}
+
+inline void Sequencer::paramSubSeparator() noexcept
+{
+    ++currentSubParameterIndex_;
+    sequence_.parameters().appendSubParameter(0);
+}
+// }}}
 
 } // namespace terminal
 

@@ -40,6 +40,9 @@ class NullParserEvents
     void collect(char /*_char*/) {}
     void collectLeader(char /*_leader*/) {}
     void param(char /*_char*/) {}
+    void paramDigit(char /*_char*/) {}
+    void paramSeparator() {}
+    void paramSubSeparator() {}
     void dispatchESC(char /*_function*/) {}
     void dispatchCSI(char /*_function*/) {}
     void startOSC() {}
