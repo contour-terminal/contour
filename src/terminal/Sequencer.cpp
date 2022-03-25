@@ -111,27 +111,27 @@ void Sequencer::param(char _char)
 
     switch (_char)
     {
-    case ';':
-        if (sequence_.parameters().size() < Sequence::MaxParameters)
-            sequence_.parameters().push_back({ 0 });
-        break;
-    case ':':
-        if (sequence_.parameters().back().size() < Sequence::MaxParameters)
-            sequence_.parameters().back().push_back({ 0 });
-        break;
-    case '0':
-    case '1':
-    case '2':
-    case '3':
-    case '4':
-    case '5':
-    case '6':
-    case '7':
-    case '8':
-    case '9':
-        sequence_.parameters().back().back() =
-            sequence_.parameters().back().back() * 10 + (Sequence::Parameter)(_char - '0');
-        break;
+        case ';':
+            if (sequence_.parameters().size() < Sequence::MaxParameters)
+                sequence_.parameters().push_back({ 0 });
+            break;
+        case ':':
+            if (sequence_.parameters().back().size() < Sequence::MaxParameters)
+                sequence_.parameters().back().push_back({ 0 });
+            break;
+        case '0':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+        case '8':
+        case '9':
+            sequence_.parameters().back().back() =
+                sequence_.parameters().back().back() * 10 + (Sequence::Parameter)(_char - '0');
+            break;
     }
 }
 
@@ -184,10 +184,10 @@ void Sequencer::hook(char _finalChar)
     {
         switch (funcSpec->id())
         {
-        case DECSIXEL: hookedParser_ = hookSixel(sequence_); break;
-        case STP: hookedParser_ = hookSTP(sequence_); break;
-        case DECRQSS: hookedParser_ = hookDECRQSS(sequence_); break;
-        case XTGETTCAP: hookedParser_ = hookXTGETTCAP(sequence_); break;
+            case DECSIXEL: hookedParser_ = hookSixel(sequence_); break;
+            case STP: hookedParser_ = hookSTP(sequence_); break;
+            case DECRQSS: hookedParser_ = hookDECRQSS(sequence_); break;
+            case XTGETTCAP: hookedParser_ = hookXTGETTCAP(sequence_); break;
         }
     }
 }
@@ -215,17 +215,17 @@ unique_ptr<ParserExtension> Sequencer::hookSixel(Sequence const& _seq)
     auto const aspectVertical = [](int Pa) {
         switch (Pa)
         {
-        case 9:
-        case 8:
-        case 7: return 1;
-        case 6:
-        case 5: return 2;
-        case 4:
-        case 3: return 3;
-        case 2: return 5;
-        case 1:
-        case 0:
-        default: return 2;
+            case 9:
+            case 8:
+            case 7: return 1;
+            case 6:
+            case 5: return 2;
+            case 4:
+            case 3: return 3;
+            case 2: return 5;
+            case 1:
+            case 0:
+            default: return 2;
         }
     }(Pa);
 

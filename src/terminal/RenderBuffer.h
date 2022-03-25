@@ -94,9 +94,9 @@ constexpr std::string_view to_string(RenderBufferState _state) noexcept
 {
     switch (_state)
     {
-    case RenderBufferState::WaitingForRefresh: return "WaitingForRefresh";
-    case RenderBufferState::RefreshBuffersAndTrySwap: return "RefreshBuffersAndTrySwap";
-    case RenderBufferState::TrySwapBuffers: return "TrySwapBuffers";
+        case RenderBufferState::WaitingForRefresh: return "WaitingForRefresh";
+        case RenderBufferState::RefreshBuffersAndTrySwap: return "RefreshBuffersAndTrySwap";
+        case RenderBufferState::TrySwapBuffers: return "TrySwapBuffers";
     }
     return "INVALID";
 }

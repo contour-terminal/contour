@@ -104,11 +104,11 @@ auto makeDraw4WaySymmetric(Arc arc, ImageSize size, F putpixel)
         auto const h = unbox<int>(size.height);
         switch (arc)
         {
-        case Arc::TopLeft: putpixel(w - x, y); break;
-        case Arc::TopRight: putpixel(x, y); break;
-        case Arc::BottomLeft: putpixel(w - x, h - y); break;
-        case Arc::BottomRight: putpixel(x, h - y); break;
-        case Arc::NoArc: break;
+            case Arc::TopLeft: putpixel(w - x, y); break;
+            case Arc::TopRight: putpixel(x, y); break;
+            case Arc::BottomLeft: putpixel(w - x, h - y); break;
+            case Arc::BottomRight: putpixel(x, h - y); break;
+            case Arc::NoArc: break;
         }
     };
 }
@@ -315,11 +315,11 @@ struct formatter<terminal::renderer::Arc>
         using terminal::renderer::Arc;
         switch (value)
         {
-        case Arc::NoArc: return format_to(ctx.out(), "NoArc");
-        case Arc::TopLeft: return format_to(ctx.out(), "TopLeft");
-        case Arc::TopRight: return format_to(ctx.out(), "TopRight");
-        case Arc::BottomLeft: return format_to(ctx.out(), "BottomLeft");
-        case Arc::BottomRight: return format_to(ctx.out(), "BottomRight");
+            case Arc::NoArc: return format_to(ctx.out(), "NoArc");
+            case Arc::TopLeft: return format_to(ctx.out(), "TopLeft");
+            case Arc::TopRight: return format_to(ctx.out(), "TopRight");
+            case Arc::BottomLeft: return format_to(ctx.out(), "BottomLeft");
+            case Arc::BottomRight: return format_to(ctx.out(), "BottomRight");
         }
         return format_to(ctx.out(), "?");
     }

@@ -107,45 +107,45 @@ optional<DebugInfo> StackTrace::getDebugInfoForFrame(void* p)
     pid_t childPid = fork();
     switch (childPid)
     {
-    case -1: perror("vfork"); return nullopt;
-    case 0: // in child
-    {
-        std::string addr2lineExe = "/usr/bin/addr2line";
-        char exe[512] {};
-        if (ssize_t rv = readlink("/proc/self/exe", exe, sizeof(exe)); rv < 0)
-            _exit(EXIT_FAILURE);
-        char addr[32];
-        snprintf(addr, sizeof(addr), "%p", p);
-        char const* const argv[] = { addr2lineExe.c_str(), "-pe", exe, addr, nullptr };
-        close(STDIN_FILENO);
-        if (pipe.writer() != STDOUT_FILENO)
+        case -1: perror("vfork"); return nullopt;
+        case 0: // in child
         {
-            dup2(pipe.writer(), STDOUT_FILENO);
-            close(pipe.writer());
+            std::string addr2lineExe = "/usr/bin/addr2line";
+            char exe[512] {};
+            if (ssize_t rv = readlink("/proc/self/exe", exe, sizeof(exe)); rv < 0)
+                _exit(EXIT_FAILURE);
+            char addr[32];
+            snprintf(addr, sizeof(addr), "%p", p);
+            char const* const argv[] = { addr2lineExe.c_str(), "-pe", exe, addr, nullptr };
+            close(STDIN_FILENO);
+            if (pipe.writer() != STDOUT_FILENO)
+            {
+                dup2(pipe.writer(), STDOUT_FILENO);
+                close(pipe.writer());
+            }
+            close(pipe.reader());
+            close(STDERR_FILENO);
+            auto const rv = execv(argv[0], (char**) argv);
+            perror("execvp");
+            _exit(rv);
         }
-        close(pipe.reader());
-        close(STDERR_FILENO);
-        auto const rv = execv(argv[0], (char**) argv);
-        perror("execvp");
-        _exit(rv);
-    }
-    default: // in parent
-    {
-        int status = 0;
-        waitpid(childPid, &status, 0);
-        // if (!WIFEXITED(status))
-        //     return nullopt;
-        // if (WEXITSTATUS(status) != EXIT_SUCCESS)
-        //     return nullopt;
+        default: // in parent
+        {
+            int status = 0;
+            waitpid(childPid, &status, 0);
+            // if (!WIFEXITED(status))
+            //     return nullopt;
+            // if (WEXITSTATUS(status) != EXIT_SUCCESS)
+            //     return nullopt;
 
-        char buf[4096];
-        ssize_t len = 0;
-        len = ::read(pipe.reader(), buf, sizeof(buf));
-        while (len > 0 && std::isspace(buf[len - 1]))
-            --len;
+            char buf[4096];
+            ssize_t len = 0;
+            len = ::read(pipe.reader(), buf, sizeof(buf));
+            while (len > 0 && std::isspace(buf[len - 1]))
+                --len;
 
-        // result on success:
-        DebugInfo info;
+            // result on success:
+            DebugInfo info;
     #if 0
             auto static const re = regex(R"(^(.*):\d+$)");
             std::cmatch cm;
@@ -155,15 +155,15 @@ optional<DebugInfo> StackTrace::getDebugInfoForFrame(void* p)
             info.text = cm[1].str();
             try { info.text = stoi(cm[2].str()); } catch (...) {}
     #else
-        if (len > 0)
-            info.text = string(buf, (size_t) len);
+            if (len > 0)
+                info.text = string(buf, (size_t) len);
     #endif
 
-        if (info.text == "??:0")
-            return nullopt;
+            if (info.text == "??:0")
+                return nullopt;
 
-        return { std::move(info) };
-    }
+            return { std::move(info) };
+        }
     }
 #else
     return nullopt;

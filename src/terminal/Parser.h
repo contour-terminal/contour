@@ -368,23 +368,23 @@ constexpr std::string_view to_string(State state)
 {
     switch (state)
     {
-    case State::Undefined: return "Undefined";
-    case State::Ground: return "Ground";
-    case State::Escape: return "Escape";
-    case State::EscapeIntermediate: return "EscapeIntermediate";
-    case State::CSI_Entry: return "CSI Entry";
-    case State::CSI_Param: return "CSI Param";
-    case State::CSI_Intermediate: return "CSI Intermediate";
-    case State::CSI_Ignore: return "CSI Ignore";
-    case State::DCS_Entry: return "DCS Entry";
-    case State::DCS_Param: return "DCS Param";
-    case State::DCS_Intermediate: return "DCS Intermediate";
-    case State::DCS_PassThrough: return "DCS PassThrough";
-    case State::DCS_Ignore: return "DCS Ignore";
-    case State::OSC_String: return "OSC String";
-    case State::APC_String: return "APC String";
-    case State::PM_String: return "PM String";
-    case State::IgnoreUntilST: return "Ignore Until ST (SOS)";
+        case State::Undefined: return "Undefined";
+        case State::Ground: return "Ground";
+        case State::Escape: return "Escape";
+        case State::EscapeIntermediate: return "EscapeIntermediate";
+        case State::CSI_Entry: return "CSI Entry";
+        case State::CSI_Param: return "CSI Param";
+        case State::CSI_Intermediate: return "CSI Intermediate";
+        case State::CSI_Ignore: return "CSI Ignore";
+        case State::DCS_Entry: return "DCS Entry";
+        case State::DCS_Param: return "DCS Param";
+        case State::DCS_Intermediate: return "DCS Intermediate";
+        case State::DCS_PassThrough: return "DCS PassThrough";
+        case State::DCS_Ignore: return "DCS Ignore";
+        case State::OSC_String: return "OSC String";
+        case State::APC_String: return "APC String";
+        case State::PM_String: return "PM String";
+        case State::IgnoreUntilST: return "Ignore Until ST (SOS)";
     }
     return "?";
 }
@@ -393,10 +393,10 @@ constexpr std::string_view to_string(ActionClass actionClass)
 {
     switch (actionClass)
     {
-    case ActionClass::Enter: return "Enter";
-    case ActionClass::Event: return "Event";
-    case ActionClass::Leave: return "Leave";
-    case ActionClass::Transition: return "Transition";
+        case ActionClass::Enter: return "Enter";
+        case ActionClass::Event: return "Event";
+        case ActionClass::Leave: return "Leave";
+        case ActionClass::Transition: return "Transition";
     }
     return "?";
 }
@@ -405,28 +405,28 @@ constexpr std::string_view to_string(Action action)
 {
     switch (action)
     {
-    case Action::Undefined: return "Undefined";
-    case Action::Ignore: return "Ignore";
-    case Action::Execute: return "Execute";
-    case Action::Print: return "Print";
-    case Action::Clear: return "Clear";
-    case Action::Collect: return "Collect";
-    case Action::CollectLeader: return "CollectLeader";
-    case Action::Param: return "Param";
-    case Action::ESC_Dispatch: return "Escape Dispatch";
-    case Action::CSI_Dispatch: return "CSI Dispatch";
-    case Action::Hook: return "Hook";
-    case Action::Put: return "Put";
-    case Action::Unhook: return "Unhook";
-    case Action::OSC_Start: return "OSC Start";
-    case Action::OSC_Put: return "OSC Put";
-    case Action::OSC_End: return "OSC End";
-    case Action::APC_Start: return "APC Start";
-    case Action::APC_Put: return "APC Put";
-    case Action::APC_End: return "APC End";
-    case Action::PM_Start: return "PM Start";
-    case Action::PM_Put: return "PM Put";
-    case Action::PM_End: return "PM End";
+        case Action::Undefined: return "Undefined";
+        case Action::Ignore: return "Ignore";
+        case Action::Execute: return "Execute";
+        case Action::Print: return "Print";
+        case Action::Clear: return "Clear";
+        case Action::Collect: return "Collect";
+        case Action::CollectLeader: return "CollectLeader";
+        case Action::Param: return "Param";
+        case Action::ESC_Dispatch: return "Escape Dispatch";
+        case Action::CSI_Dispatch: return "CSI Dispatch";
+        case Action::Hook: return "Hook";
+        case Action::Put: return "Put";
+        case Action::Unhook: return "Unhook";
+        case Action::OSC_Start: return "OSC Start";
+        case Action::OSC_Put: return "OSC Put";
+        case Action::OSC_End: return "OSC End";
+        case Action::APC_Start: return "APC Start";
+        case Action::APC_Put: return "APC Put";
+        case Action::APC_End: return "APC End";
+        case Action::PM_Start: return "PM Start";
+        case Action::PM_Put: return "PM Put";
+        case Action::PM_End: return "PM End";
     }
     return "?";
 }

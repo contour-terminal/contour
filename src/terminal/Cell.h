@@ -359,9 +359,9 @@ inline int Cell::appendCharacter(char32_t _codepoint) noexcept
         auto const w = [&]() {
             switch (_codepoint)
             {
-            case 0xFE0E: return 1;
-            case 0xFE0F: return 2;
-            default: return unicode::width(_codepoint);
+                case 0xFE0E: return 1;
+                case 0xFE0F: return 2;
+                default: return unicode::width(_codepoint);
             }
         }();
 
@@ -550,33 +550,33 @@ inline void Cell::setGraphicsRendition(GraphicsRendition _rendition) noexcept
     // 3.) clear some bits &= ~
     switch (_rendition)
     {
-    case GraphicsRendition::Reset: extra().flags = {}; break;
-    case GraphicsRendition::Bold: extra().flags |= CellFlags::Bold; break;
-    case GraphicsRendition::Faint: extra().flags |= CellFlags::Faint; break;
-    case GraphicsRendition::Italic: extra().flags |= CellFlags::Italic; break;
-    case GraphicsRendition::Underline: extra().flags |= CellFlags::Underline; break;
-    case GraphicsRendition::Blinking: extra().flags |= CellFlags::Blinking; break;
-    case GraphicsRendition::Inverse: extra().flags |= CellFlags::Inverse; break;
-    case GraphicsRendition::Hidden: extra().flags |= CellFlags::Hidden; break;
-    case GraphicsRendition::CrossedOut: extra().flags |= CellFlags::CrossedOut; break;
-    case GraphicsRendition::DoublyUnderlined: extra().flags |= CellFlags::DoublyUnderlined; break;
-    case GraphicsRendition::CurlyUnderlined: extra().flags |= CellFlags::CurlyUnderlined; break;
-    case GraphicsRendition::DottedUnderline: extra().flags |= CellFlags::DottedUnderline; break;
-    case GraphicsRendition::DashedUnderline: extra().flags |= CellFlags::DashedUnderline; break;
-    case GraphicsRendition::Framed: extra().flags |= CellFlags::Framed; break;
-    case GraphicsRendition::Overline: extra().flags |= CellFlags::Overline; break;
-    case GraphicsRendition::Normal: extra().flags &= ~(CellFlags::Bold | CellFlags::Faint); break;
-    case GraphicsRendition::NoItalic: extra().flags &= ~CellFlags::Italic; break;
-    case GraphicsRendition::NoUnderline:
-        extra().flags &= ~(CellFlags::Underline | CellFlags::DoublyUnderlined | CellFlags::CurlyUnderlined
-                           | CellFlags::DottedUnderline | CellFlags::DashedUnderline);
-        break;
-    case GraphicsRendition::NoBlinking: extra().flags &= ~CellFlags::Blinking; break;
-    case GraphicsRendition::NoInverse: extra().flags &= ~CellFlags::Inverse; break;
-    case GraphicsRendition::NoHidden: extra().flags &= ~CellFlags::Hidden; break;
-    case GraphicsRendition::NoCrossedOut: extra().flags &= ~CellFlags::CrossedOut; break;
-    case GraphicsRendition::NoFramed: extra().flags &= ~CellFlags::Framed; break;
-    case GraphicsRendition::NoOverline: extra().flags &= ~CellFlags::Overline; break;
+        case GraphicsRendition::Reset: extra().flags = {}; break;
+        case GraphicsRendition::Bold: extra().flags |= CellFlags::Bold; break;
+        case GraphicsRendition::Faint: extra().flags |= CellFlags::Faint; break;
+        case GraphicsRendition::Italic: extra().flags |= CellFlags::Italic; break;
+        case GraphicsRendition::Underline: extra().flags |= CellFlags::Underline; break;
+        case GraphicsRendition::Blinking: extra().flags |= CellFlags::Blinking; break;
+        case GraphicsRendition::Inverse: extra().flags |= CellFlags::Inverse; break;
+        case GraphicsRendition::Hidden: extra().flags |= CellFlags::Hidden; break;
+        case GraphicsRendition::CrossedOut: extra().flags |= CellFlags::CrossedOut; break;
+        case GraphicsRendition::DoublyUnderlined: extra().flags |= CellFlags::DoublyUnderlined; break;
+        case GraphicsRendition::CurlyUnderlined: extra().flags |= CellFlags::CurlyUnderlined; break;
+        case GraphicsRendition::DottedUnderline: extra().flags |= CellFlags::DottedUnderline; break;
+        case GraphicsRendition::DashedUnderline: extra().flags |= CellFlags::DashedUnderline; break;
+        case GraphicsRendition::Framed: extra().flags |= CellFlags::Framed; break;
+        case GraphicsRendition::Overline: extra().flags |= CellFlags::Overline; break;
+        case GraphicsRendition::Normal: extra().flags &= ~(CellFlags::Bold | CellFlags::Faint); break;
+        case GraphicsRendition::NoItalic: extra().flags &= ~CellFlags::Italic; break;
+        case GraphicsRendition::NoUnderline:
+            extra().flags &= ~(CellFlags::Underline | CellFlags::DoublyUnderlined | CellFlags::CurlyUnderlined
+                               | CellFlags::DottedUnderline | CellFlags::DashedUnderline);
+            break;
+        case GraphicsRendition::NoBlinking: extra().flags &= ~CellFlags::Blinking; break;
+        case GraphicsRendition::NoInverse: extra().flags &= ~CellFlags::Inverse; break;
+        case GraphicsRendition::NoHidden: extra().flags &= ~CellFlags::Hidden; break;
+        case GraphicsRendition::NoCrossedOut: extra().flags &= ~CellFlags::CrossedOut; break;
+        case GraphicsRendition::NoFramed: extra().flags &= ~CellFlags::Framed; break;
+        case GraphicsRendition::NoOverline: extra().flags &= ~CellFlags::Overline; break;
     }
 }
 

@@ -19,11 +19,11 @@ std::string Sequence::raw() const
 
     switch (category_)
     {
-    case FunctionCategory::C0: break;
-    case FunctionCategory::ESC: sstr << "\033"; break;
-    case FunctionCategory::CSI: sstr << "\033["; break;
-    case FunctionCategory::DCS: sstr << "\033P"; break;
-    case FunctionCategory::OSC: sstr << "\033]"; break;
+        case FunctionCategory::C0: break;
+        case FunctionCategory::ESC: sstr << "\033"; break;
+        case FunctionCategory::CSI: sstr << "\033["; break;
+        case FunctionCategory::DCS: sstr << "\033P"; break;
+        case FunctionCategory::OSC: sstr << "\033]"; break;
     }
 
     if (parameterCount() > 1 || (parameterCount() == 1 && parameters_[0][0] != 0))

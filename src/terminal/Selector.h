@@ -198,9 +198,9 @@ struct formatter<terminal::Selection::State>
     {
         switch (_state)
         {
-        case State::Waiting: return format_to(ctx.out(), "Waiting");
-        case State::InProgress: return format_to(ctx.out(), "InProgress");
-        case State::Complete: return format_to(ctx.out(), "Complete");
+            case State::Waiting: return format_to(ctx.out(), "Waiting");
+            case State::InProgress: return format_to(ctx.out(), "InProgress");
+            case State::Complete: return format_to(ctx.out(), "Complete");
         }
         return format_to(ctx.out(), "{}", static_cast<unsigned>(_state));
     }

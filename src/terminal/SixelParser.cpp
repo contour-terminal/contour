@@ -112,50 +112,50 @@ void SixelParser::parse(char _value)
 {
     switch (state_)
     {
-    case State::Ground: fallback(_value); break;
+        case State::Ground: fallback(_value); break;
 
-    case State::RepeatIntroducer:
-        // '!' NUMBER BYTE
-        if (isDigit(_value))
-            paramShiftAndAddDigit(toDigit(_value));
-        else if (isSixel(_value))
-        {
-            auto const sixel = toSixel(_value);
-            for (unsigned i = 0; i < params_[0]; ++i)
-                events_.render(sixel);
-            transitionTo(State::Ground);
-        }
-        else
-            fallback(_value);
-        break;
+        case State::RepeatIntroducer:
+            // '!' NUMBER BYTE
+            if (isDigit(_value))
+                paramShiftAndAddDigit(toDigit(_value));
+            else if (isSixel(_value))
+            {
+                auto const sixel = toSixel(_value);
+                for (unsigned i = 0; i < params_[0]; ++i)
+                    events_.render(sixel);
+                transitionTo(State::Ground);
+            }
+            else
+                fallback(_value);
+            break;
 
-    case State::ColorIntroducer:
-        if (isDigit(_value))
-        {
-            paramShiftAndAddDigit(toDigit(_value));
-            transitionTo(State::ColorParam);
-        }
-        else
-            fallback(_value);
-        break;
+        case State::ColorIntroducer:
+            if (isDigit(_value))
+            {
+                paramShiftAndAddDigit(toDigit(_value));
+                transitionTo(State::ColorParam);
+            }
+            else
+                fallback(_value);
+            break;
 
-    case State::ColorParam:
-        if (isDigit(_value))
-            paramShiftAndAddDigit(toDigit(_value));
-        else if (_value == ';')
-            params_.push_back(0);
-        else
-            fallback(_value);
-        break;
+        case State::ColorParam:
+            if (isDigit(_value))
+                paramShiftAndAddDigit(toDigit(_value));
+            else if (_value == ';')
+                params_.push_back(0);
+            else
+                fallback(_value);
+            break;
 
-    case State::RasterSettings:
-        if (isDigit(_value))
-            paramShiftAndAddDigit(toDigit(_value));
-        else if (_value == ';')
-            params_.push_back(0);
-        else
-            fallback(_value);
-        break;
+        case State::RasterSettings:
+            if (isDigit(_value))
+                paramShiftAndAddDigit(toDigit(_value));
+            else if (_value == ';')
+                params_.push_back(0);
+            else
+                fallback(_value);
+            break;
     }
 }
 
@@ -214,15 +214,15 @@ void SixelParser::enterState()
 {
     switch (state_)
     {
-    case State::ColorIntroducer:
-    case State::RepeatIntroducer:
-    case State::RasterSettings:
-        params_.clear();
-        params_.push_back(0);
-        break;
+        case State::ColorIntroducer:
+        case State::RepeatIntroducer:
+        case State::RasterSettings:
+            params_.clear();
+            params_.push_back(0);
+            break;
 
-    case State::Ground:
-    case State::ColorParam: break;
+        case State::Ground:
+        case State::ColorParam: break;
     }
 }
 
@@ -230,48 +230,48 @@ void SixelParser::leaveState()
 {
     switch (state_)
     {
-    case State::Ground:
-    case State::ColorIntroducer:
-    case State::RepeatIntroducer: break;
+        case State::Ground:
+        case State::ColorIntroducer:
+        case State::RepeatIntroducer: break;
 
-    case State::RasterSettings:
-        if (params_.size() == 4)
-        {
-            auto const pan = params_[0];
-            auto const pad = params_[1];
-            auto const xPixels = Width(params_[2]);
-            auto const yPixels = Height(params_[3]);
-            events_.setRaster((int) pan, (int) pad, ImageSize { xPixels, yPixels });
-            state_ = State::Ground;
-        }
-        break;
-
-    case State::ColorParam:
-        if (params_.size() == 1)
-        {
-            auto const index = params_[0];
-            events_.useColor(
-                index); // TODO: move color palette into image builder (to have access to it during clear!)
-        }
-        else if (params_.size() == 5)
-        {
-            auto constexpr convertValue = [](unsigned _value) {
-                // converts a color from range 0..100 to 0..255
-                return static_cast<uint8_t>(static_cast<int>((static_cast<float>(_value) * 255.0f) / 100.0f)
-                                            % 256);
-            };
-            auto const index = params_[0];
-            auto const colorSpace = params_[1] == 2 ? Colorspace::RGB : Colorspace::HSL;
-            if (colorSpace == Colorspace::RGB)
+        case State::RasterSettings:
+            if (params_.size() == 4)
             {
-                auto const p1 = convertValue(params_[2]);
-                auto const p2 = convertValue(params_[3]);
-                auto const p3 = convertValue(params_[4]);
-                auto const color = RGBColor { p1, p2, p3 }; // TODO: convert HSL if requested
-                events_.setColor(index, color);
+                auto const pan = params_[0];
+                auto const pad = params_[1];
+                auto const xPixels = Width(params_[2]);
+                auto const yPixels = Height(params_[3]);
+                events_.setRaster((int) pan, (int) pad, ImageSize { xPixels, yPixels });
+                state_ = State::Ground;
             }
-        }
-        break;
+            break;
+
+        case State::ColorParam:
+            if (params_.size() == 1)
+            {
+                auto const index = params_[0];
+                events_.useColor(index); // TODO: move color palette into image builder (to have access to it
+                                         // during clear!)
+            }
+            else if (params_.size() == 5)
+            {
+                auto constexpr convertValue = [](unsigned _value) {
+                    // converts a color from range 0..100 to 0..255
+                    return static_cast<uint8_t>(
+                        static_cast<int>((static_cast<float>(_value) * 255.0f) / 100.0f) % 256);
+                };
+                auto const index = params_[0];
+                auto const colorSpace = params_[1] == 2 ? Colorspace::RGB : Colorspace::HSL;
+                if (colorSpace == Colorspace::RGB)
+                {
+                    auto const p1 = convertValue(params_[2]);
+                    auto const p2 = convertValue(params_[3]);
+                    auto const p3 = convertValue(params_[4]);
+                    auto const color = RGBColor { p1, p2, p3 }; // TODO: convert HSL if requested
+                    events_.setColor(index, color);
+                }
+            }
+            break;
     }
 }
 

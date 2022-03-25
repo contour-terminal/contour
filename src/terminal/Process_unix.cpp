@@ -96,52 +96,53 @@ Process::Process(string const& _path,
 
     switch (d->pid)
     {
-    default: // in parent
-        d->pty->slave().close();
-        break;
-    case -1: // fork error
-        throw runtime_error { getLastErrorAsString() };
-    case 0: // in child
-    {
-        d->pty->slave().login();
-
-        auto const& cwd = _cwd.generic_string();
-        if (!_cwd.empty() && chdir(cwd.c_str()) != 0)
+        default: // in parent
+            d->pty->slave().close();
+            break;
+        case -1: // fork error
+            throw runtime_error { getLastErrorAsString() };
+        case 0: // in child
         {
-            printf("Failed to chdir to \"%s\". %s\n", cwd.c_str(), strerror(errno));
-            exit(EXIT_FAILURE);
-        }
+            d->pty->slave().login();
 
-        char** argv = createArgv(_path, _args, 0);
+            auto const& cwd = _cwd.generic_string();
+            if (!_cwd.empty() && chdir(cwd.c_str()) != 0)
+            {
+                printf("Failed to chdir to \"%s\". %s\n", cwd.c_str(), strerror(errno));
+                exit(EXIT_FAILURE);
+            }
 
-        for (auto&& [name, value]: _env)
-            setenv(name.c_str(), value.c_str(), true);
+            char** argv = createArgv(_path, _args, 0);
 
-        // maybe close any leaked/inherited file descriptors from parent process
-        // TODO: But be a little bit more clever in iterating only over those that are actually still open.
-        for (int i = 3; i < 256; ++i)
-            ::close(i);
+            for (auto&& [name, value]: _env)
+                setenv(name.c_str(), value.c_str(), true);
 
-        // reset signal(s) to default that may have been changed in the parent process.
-        signal(SIGPIPE, SIG_DFL);
+            // maybe close any leaked/inherited file descriptors from parent process
+            // TODO: But be a little bit more clever in iterating only over those that are actually still
+            // open.
+            for (int i = 3; i < 256; ++i)
+                ::close(i);
 
-        ::execvp(argv[0], argv);
+            // reset signal(s) to default that may have been changed in the parent process.
+            signal(SIGPIPE, SIG_DFL);
 
-        // Fallback: Try login shell.
-        fprintf(stdout, "\r\n\033[31;1mFailed to spawn %s. %s\033[m\r\n\n", argv[0], strerror(errno));
-        fflush(stdout);
-        auto theLoginShell = loginShell();
-        if (!theLoginShell.empty())
-        {
-            delete[] argv;
-            argv = createArgv(_args[0], _args, 1);
             ::execvp(argv[0], argv);
-        }
 
-        // Bad luck.
-        ::_exit(EXIT_FAILURE);
-        break;
-    }
+            // Fallback: Try login shell.
+            fprintf(stdout, "\r\n\033[31;1mFailed to spawn %s. %s\033[m\r\n\n", argv[0], strerror(errno));
+            fflush(stdout);
+            auto theLoginShell = loginShell();
+            if (!theLoginShell.empty())
+            {
+                delete[] argv;
+                argv = createArgv(_args[0], _args, 1);
+                ::execvp(argv[0], argv);
+            }
+
+            // Bad luck.
+            ::_exit(EXIT_FAILURE);
+            break;
+        }
     }
 }
 

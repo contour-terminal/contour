@@ -892,17 +892,17 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
     using crispy::Comparison;
     switch (crispy::strongCompare(_newSize.columns, pageSize_.columns))
     {
-    case Comparison::Greater: cursor += growColumns(_newSize.columns); break;
-    case Comparison::Less: cursor = shrinkColumns(_newSize.columns, _newSize.lines, cursor); break;
-    case Comparison::Equal: break;
+        case Comparison::Greater: cursor += growColumns(_newSize.columns); break;
+        case Comparison::Less: cursor = shrinkColumns(_newSize.columns, _newSize.lines, cursor); break;
+        case Comparison::Equal: break;
     }
 
     // grow/shrink lines
     switch (crispy::strongCompare(_newSize.lines, pageSize_.lines))
     {
-    case Comparison::Greater: cursor += growLines(_newSize.lines, cursor); break;
-    case Comparison::Less: cursor += shrinkLines(_newSize.lines, cursor); break;
-    case Comparison::Equal: break;
+        case Comparison::Greater: cursor += growLines(_newSize.lines, cursor); break;
+        case Comparison::Less: cursor += shrinkLines(_newSize.lines, cursor); break;
+        case Comparison::Equal: break;
     }
 
     Ensures(pageSize_ == _newSize);

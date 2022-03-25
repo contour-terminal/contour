@@ -273,32 +273,32 @@ bool Terminal::ensureFreshRenderBuffer(bool _locked)
 
     switch (renderBuffer_.state)
     {
-    case RenderBufferState::WaitingForRefresh:
-        if (avoidRefresh)
-            break;
-        renderBuffer_.state = RenderBufferState::RefreshBuffersAndTrySwap;
-        [[fallthrough]];
-    case RenderBufferState::RefreshBuffersAndTrySwap:
-        if (!_locked)
-            refreshRenderBuffer(renderBuffer_.backBuffer());
-        else
-            refreshRenderBufferInternal(renderBuffer_.backBuffer());
-        renderBuffer_.state = RenderBufferState::TrySwapBuffers;
-        [[fallthrough]];
-    case RenderBufferState::TrySwapBuffers: {
-        [[maybe_unused]] auto const success = renderBuffer_.swapBuffers(currentTime_);
+        case RenderBufferState::WaitingForRefresh:
+            if (avoidRefresh)
+                break;
+            renderBuffer_.state = RenderBufferState::RefreshBuffersAndTrySwap;
+            [[fallthrough]];
+        case RenderBufferState::RefreshBuffersAndTrySwap:
+            if (!_locked)
+                refreshRenderBuffer(renderBuffer_.backBuffer());
+            else
+                refreshRenderBufferInternal(renderBuffer_.backBuffer());
+            renderBuffer_.state = RenderBufferState::TrySwapBuffers;
+            [[fallthrough]];
+        case RenderBufferState::TrySwapBuffers: {
+            [[maybe_unused]] auto const success = renderBuffer_.swapBuffers(currentTime_);
 
 #if defined(CONTOUR_PERF_STATS)
-        logRenderBufferSwap(success, lastFrameID_);
+            logRenderBufferSwap(success, lastFrameID_);
 #endif
 
 #if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
-        // Passively invoked by the terminal thread -> do inform render thread about updates.
-        if (success)
-            eventListener_.renderBufferUpdated();
+            // Passively invoked by the terminal thread -> do inform render thread about updates.
+            if (success)
+                eventListener_.renderBufferUpdated();
 #endif
-    }
-    break;
+        }
+        break;
     }
     return true;
 }
@@ -458,11 +458,11 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
 
             switch (state)
             {
-            case State::Gap:
-                if (!cellEmpty || customBackground)
-                {
-                    state = State::Sequence;
-                    // clang-format off
+                case State::Gap:
+                    if (!cellEmpty || customBackground)
+                    {
+                        state = State::Sequence;
+                        // clang-format off
                     _output.screen.emplace_back(makeRenderCell(screen_.colorPalette(),
                                                                screen_.hyperlinks(),
                                                                _cell,
@@ -470,32 +470,32 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
                                                                bg,
                                                                _line,
                                                                _column));
-                    // clang-format on
-                    _output.screen.back().groupStart = true;
-                }
-                break;
-            case State::Sequence:
-                if (cellEmpty && !customBackground)
-                {
-                    _output.screen.back().groupEnd = true;
-                    state = State::Gap;
-                }
-                else
-                {
-                    // clang-format off
-                    _output.screen.emplace_back(makeRenderCell(screen_.colorPalette(),
-                                                               screen_.hyperlinks(),
-                                                               _cell,
-                                                               fg,
-                                                               bg,
-                                                               _line,
-                                                               _column));
-                    // clang-format on
-
-                    if (isNewLine)
+                        // clang-format on
                         _output.screen.back().groupStart = true;
-                }
-                break;
+                    }
+                    break;
+                case State::Sequence:
+                    if (cellEmpty && !customBackground)
+                    {
+                        _output.screen.back().groupEnd = true;
+                        state = State::Gap;
+                    }
+                    else
+                    {
+                        // clang-format off
+                    _output.screen.emplace_back(makeRenderCell(screen_.colorPalette(),
+                                                               screen_.hyperlinks(),
+                                                               _cell,
+                                                               fg,
+                                                               bg,
+                                                               _line,
+                                                               _column));
+                        // clang-format on
+
+                        if (isNewLine)
+                            _output.screen.back().groupStart = true;
+                    }
+                    break;
             }
         },
         viewport_.scrollOffset());
@@ -595,21 +595,21 @@ bool Terminal::handleMouseSelection(Modifier _modifier, Timestamp _now)
 
     switch (speedClicks_)
     {
-    case 1:
-        if (_modifier == mouseBlockSelectionModifier_)
-            selection_ = make_unique<RectangularSelection>(selectionHelper_, startPos);
-        else
-            selection_ = make_unique<LinearSelection>(selectionHelper_, startPos);
-        break;
-    case 2:
-        selection_ = make_unique<WordWiseSelection>(selectionHelper_, startPos);
-        selection_->extend(startPos);
-        break;
-    case 3:
-        selection_ = make_unique<FullLineSelection>(selectionHelper_, startPos);
-        selection_->extend(startPos);
-        break;
-    default: clearSelection(); break;
+        case 1:
+            if (_modifier == mouseBlockSelectionModifier_)
+                selection_ = make_unique<RectangularSelection>(selectionHelper_, startPos);
+            else
+                selection_ = make_unique<LinearSelection>(selectionHelper_, startPos);
+            break;
+        case 2:
+            selection_ = make_unique<WordWiseSelection>(selectionHelper_, startPos);
+            selection_->extend(startPos);
+            break;
+        case 3:
+            selection_ = make_unique<FullLineSelection>(selectionHelper_, startPos);
+            selection_->extend(startPos);
+            break;
+        default: clearSelection(); break;
     }
 
     breakLoopAndRefreshRenderBuffer();
@@ -692,12 +692,12 @@ bool Terminal::sendMouseReleaseEvent(Modifier _modifier,
         {
             switch (selector()->state())
             {
-            case Selection::State::InProgress:
-                selector()->complete();
-                eventListener_.onSelectionCompleted();
-                break;
-            case Selection::State::Waiting: selection_.reset(); break;
-            case Selection::State::Complete: break;
+                case Selection::State::InProgress:
+                    selector()->complete();
+                    eventListener_.onSelectionCompleted();
+                    break;
+                case Selection::State::Waiting: selection_.reset(); break;
+                case Selection::State::Complete: break;
             }
         }
     }

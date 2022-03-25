@@ -48,21 +48,21 @@ namespace // {{{ support
     {
         switch (_weight)
         {
-        case DWRITE_FONT_WEIGHT_THIN: return font_weight::thin;
-        case DWRITE_FONT_WEIGHT_EXTRA_LIGHT: return font_weight::extra_light;
-        case DWRITE_FONT_WEIGHT_LIGHT: return font_weight::light;
-        case DWRITE_FONT_WEIGHT_SEMI_LIGHT: return font_weight::demilight;
-        case DWRITE_FONT_WEIGHT_REGULAR:
-            return font_weight::normal;
-            // XXX What about font_weight::book (which does exist via fontconfig)?
-        case DWRITE_FONT_WEIGHT_MEDIUM: return font_weight::medium;
-        case DWRITE_FONT_WEIGHT_DEMI_BOLD: return font_weight::demibold;
-        case DWRITE_FONT_WEIGHT_BOLD: return font_weight::bold;
-        case DWRITE_FONT_WEIGHT_EXTRA_BOLD: return font_weight::extra_bold;
-        case DWRITE_FONT_WEIGHT_BLACK: return font_weight::black;
-        case DWRITE_FONT_WEIGHT_EXTRA_BLACK: return font_weight::extra_black;
-        default: // TODO: the others
-            break;
+            case DWRITE_FONT_WEIGHT_THIN: return font_weight::thin;
+            case DWRITE_FONT_WEIGHT_EXTRA_LIGHT: return font_weight::extra_light;
+            case DWRITE_FONT_WEIGHT_LIGHT: return font_weight::light;
+            case DWRITE_FONT_WEIGHT_SEMI_LIGHT: return font_weight::demilight;
+            case DWRITE_FONT_WEIGHT_REGULAR:
+                return font_weight::normal;
+                // XXX What about font_weight::book (which does exist via fontconfig)?
+            case DWRITE_FONT_WEIGHT_MEDIUM: return font_weight::medium;
+            case DWRITE_FONT_WEIGHT_DEMI_BOLD: return font_weight::demibold;
+            case DWRITE_FONT_WEIGHT_BOLD: return font_weight::bold;
+            case DWRITE_FONT_WEIGHT_EXTRA_BOLD: return font_weight::extra_bold;
+            case DWRITE_FONT_WEIGHT_BLACK: return font_weight::black;
+            case DWRITE_FONT_WEIGHT_EXTRA_BLACK: return font_weight::extra_black;
+            default: // TODO: the others
+                break;
         }
         return font_weight::normal; // TODO: rename normal to regular
     }
@@ -71,9 +71,9 @@ namespace // {{{ support
     {
         switch (_style)
         {
-        case DWRITE_FONT_STYLE_NORMAL: return font_slant::normal;
-        case DWRITE_FONT_STYLE_ITALIC: return font_slant::italic;
-        case DWRITE_FONT_STYLE_OBLIQUE: return font_slant::oblique;
+            case DWRITE_FONT_STYLE_NORMAL: return font_slant::normal;
+            case DWRITE_FONT_STYLE_ITALIC: return font_slant::italic;
+            case DWRITE_FONT_STYLE_OBLIQUE: return font_slant::oblique;
         }
         return font_slant::normal;
     }

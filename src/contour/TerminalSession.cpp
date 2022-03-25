@@ -330,24 +330,24 @@ void TerminalSession::onSelectionCompleted()
 {
     switch (config_.onMouseSelection)
     {
-    case config::SelectionAction::CopyToSelectionClipboard:
-        if (QClipboard* clipboard = QGuiApplication::clipboard();
-            clipboard != nullptr && clipboard->supportsSelection())
-        {
-            string const text = terminal().extractSelectionText();
-            clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())),
-                               QClipboard::Selection);
-        }
-        break;
-    case config::SelectionAction::CopyToClipboard:
-        if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
-        {
-            string const text = terminal().extractSelectionText();
-            clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())),
-                               QClipboard::Clipboard);
-        }
-        break;
-    case config::SelectionAction::Nothing: break;
+        case config::SelectionAction::CopyToSelectionClipboard:
+            if (QClipboard* clipboard = QGuiApplication::clipboard();
+                clipboard != nullptr && clipboard->supportsSelection())
+            {
+                string const text = terminal().extractSelectionText();
+                clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())),
+                                   QClipboard::Selection);
+            }
+            break;
+        case config::SelectionAction::CopyToClipboard:
+            if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
+            {
+                string const text = terminal().extractSelectionText();
+                clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())),
+                                   QClipboard::Clipboard);
+            }
+            break;
+        case config::SelectionAction::Nothing: break;
     }
 }
 
@@ -813,8 +813,8 @@ void TerminalSession::setDefaultCursor()
     using Type = terminal::ScreenType;
     switch (terminal().screen().bufferType())
     {
-    case Type::Primary: display_->setMouseCursorShape(MouseCursorShape::IBeam); break;
-    case Type::Alternate: display_->setMouseCursorShape(MouseCursorShape::Arrow); break;
+        case Type::Primary: display_->setMouseCursorShape(MouseCursorShape::IBeam); break;
+        case Type::Alternate: display_->setMouseCursorShape(MouseCursorShape::Arrow); break;
     }
 }
 

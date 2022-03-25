@@ -256,9 +256,9 @@ bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
 
     switch (key)
     {
-    case Qt::Key_BraceLeft: _session.sendCharPressEvent(L'[', modifiers, now); return true;
-    case Qt::Key_Equal: _session.sendCharPressEvent(L'=', modifiers, now); return true;
-    case Qt::Key_BraceRight: _session.sendCharPressEvent(L']', modifiers, now); return true;
+        case Qt::Key_BraceLeft: _session.sendCharPressEvent(L'[', modifiers, now); return true;
+        case Qt::Key_Equal: _session.sendCharPressEvent(L'=', modifiers, now); return true;
+        case Qt::Key_BraceRight: _session.sendCharPressEvent(L']', modifiers, now); return true;
     }
 
     return false;
@@ -343,13 +343,13 @@ bool requestPermission(PermissionCache& _cache,
 {
     switch (_allowedByConfig)
     {
-    case config::Permission::Allow:
-        SessionLog()("Permission for {} allowed by configuration.", _topicText);
-        return true;
-    case config::Permission::Deny:
-        SessionLog()("Permission for {} denied by configuration.", _topicText);
-        return false;
-    case config::Permission::Ask: break;
+        case config::Permission::Allow:
+            SessionLog()("Permission for {} allowed by configuration.", _topicText);
+            return true;
+        case config::Permission::Deny:
+            SessionLog()("Permission for {} denied by configuration.", _topicText);
+            return false;
+        case config::Permission::Ask: break;
     }
 
     // Did we remember a last interactive question?
@@ -369,10 +369,10 @@ bool requestPermission(PermissionCache& _cache,
 
     switch (reply)
     {
-    case QMessageBox::StandardButton::NoToAll: _cache[string(_topicText)] = false; break;
-    case QMessageBox::StandardButton::YesToAll: _cache[string(_topicText)] = true; [[fallthrough]];
-    case QMessageBox::StandardButton::Yes: return true;
-    default: break;
+        case QMessageBox::StandardButton::NoToAll: _cache[string(_topicText)] = false; break;
+        case QMessageBox::StandardButton::YesToAll: _cache[string(_topicText)] = true; [[fallthrough]];
+        case QMessageBox::StandardButton::Yes: return true;
+        default: break;
     }
 
     return false;

@@ -122,90 +122,90 @@ namespace
             switch (_source)
             {
     #if defined(GL_DEBUG_SOURCE_API_ARB)
-            case GL_DEBUG_SOURCE_API_ARB: return "API"s;
+                case GL_DEBUG_SOURCE_API_ARB: return "API"s;
     #endif
     #if defined(GL_DEBUG_SOURCE_WINDOW_SYSTEM_ARB)
-            case GL_DEBUG_SOURCE_WINDOW_SYSTEM_ARB: return "window system"s;
+                case GL_DEBUG_SOURCE_WINDOW_SYSTEM_ARB: return "window system"s;
     #endif
     #if defined(GL_DEBUG_SOURCE_SHADER_COMPILER_ARB)
-            case GL_DEBUG_SOURCE_SHADER_COMPILER_ARB: return "shader compiler"s;
+                case GL_DEBUG_SOURCE_SHADER_COMPILER_ARB: return "shader compiler"s;
     #endif
     #if defined(GL_DEBUG_SOURCE_THIRD_PARTY_ARB)
-            case GL_DEBUG_SOURCE_THIRD_PARTY_ARB: return "third party"s;
+                case GL_DEBUG_SOURCE_THIRD_PARTY_ARB: return "third party"s;
     #endif
     #if defined(GL_DEBUG_SOURCE_APPLICATION_ARB)
-            case GL_DEBUG_SOURCE_APPLICATION_ARB: return "application"s;
+                case GL_DEBUG_SOURCE_APPLICATION_ARB: return "application"s;
     #endif
     #if defined(GL_DEBUG_SOURCE_OTHER_ARB)
-            case GL_DEBUG_SOURCE_OTHER_ARB: return "other"s;
+                case GL_DEBUG_SOURCE_OTHER_ARB: return "other"s;
     #endif
-            default: return fmt::format("{}", _severity);
+                default: return fmt::format("{}", _severity);
             }
         }();
         string const typeName = [&]() {
             switch (_type)
             {
     #if defined(GL_DEBUG_TYPE_ERROR)
-            case GL_DEBUG_TYPE_ERROR: return "error"s;
+                case GL_DEBUG_TYPE_ERROR: return "error"s;
     #endif
     #if defined(GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR)
-            case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR: return "deprecated"s;
+                case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR: return "deprecated"s;
     #endif
     #if defined(GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR)
-            case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR: return "undefined"s;
+                case GL_DEBUG_TYPE_UNDEFINED_BEHAVIOR: return "undefined"s;
     #endif
     #if defined(GL_DEBUG_TYPE_PORTABILITY)
-            case GL_DEBUG_TYPE_PORTABILITY: return "portability"s;
+                case GL_DEBUG_TYPE_PORTABILITY: return "portability"s;
     #endif
     #if defined(GL_DEBUG_TYPE_PERFORMANCE)
-            case GL_DEBUG_TYPE_PERFORMANCE: return "performance"s;
+                case GL_DEBUG_TYPE_PERFORMANCE: return "performance"s;
     #endif
     #if defined(GL_DEBUG_TYPE_OTHER)
-            case GL_DEBUG_TYPE_OTHER: return "other"s;
+                case GL_DEBUG_TYPE_OTHER: return "other"s;
     #endif
-            default: return fmt::format("{}", _severity);
+                default: return fmt::format("{}", _severity);
             }
         }();
         string const debugSeverity = [&]() {
             switch (_severity)
             {
     #if defined(GL_DEBUG_SEVERITY_LOW)
-            case GL_DEBUG_SEVERITY_LOW: return "low"s;
+                case GL_DEBUG_SEVERITY_LOW: return "low"s;
     #endif
     #if defined(GL_DEBUG_SEVERITY_MEDIUM)
-            case GL_DEBUG_SEVERITY_MEDIUM: return "medium"s;
+                case GL_DEBUG_SEVERITY_MEDIUM: return "medium"s;
     #endif
     #if defined(GL_DEBUG_SEVERITY_HIGH)
-            case GL_DEBUG_SEVERITY_HIGH: return "high"s;
+                case GL_DEBUG_SEVERITY_HIGH: return "high"s;
     #endif
     #if defined(GL_DEBUG_SEVERITY_NOTIFICATION)
-            case GL_DEBUG_SEVERITY_NOTIFICATION: return "notification"s;
+                case GL_DEBUG_SEVERITY_NOTIFICATION: return "notification"s;
     #endif
-            default: return fmt::format("{}", _severity);
+                default: return fmt::format("{}", _severity);
             }
         }();
         auto const tag = []([[maybe_unused]] GLint _type) {
             switch (_type)
             {
     #ifdef GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR
-            case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR: return "DEPRECATED";
+                case GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR: return "DEPRECATED";
     #endif
     #ifdef GL_DEBUG_TYPE_MARKER
-            case GL_DEBUG_TYPE_MARKER: return "MARKER";
+                case GL_DEBUG_TYPE_MARKER: return "MARKER";
     #endif
     #ifdef GL_DEBUG_TYPE_OTHER
-            case GL_DEBUG_TYPE_OTHER: return "OTHER";
+                case GL_DEBUG_TYPE_OTHER: return "OTHER";
     #endif
     #ifdef GL_DEBUG_TYPE_PORTABILITY
-            case GL_DEBUG_TYPE_PORTABILITY: return "PORTABILITY";
+                case GL_DEBUG_TYPE_PORTABILITY: return "PORTABILITY";
     #endif
     #ifdef GL_DEBUG_TYPE_PERFORMANCE
-            case GL_DEBUG_TYPE_PERFORMANCE: return "PERFORMANCE";
+                case GL_DEBUG_TYPE_PERFORMANCE: return "PERFORMANCE";
     #endif
     #ifdef GL_DEBUG_TYPE_ERROR
-            case GL_DEBUG_TYPE_ERROR: return "ERROR";
+                case GL_DEBUG_TYPE_ERROR: return "ERROR";
     #endif
-            default: return "UNKNOWN";
+                default: return "UNKNOWN";
             }
         }(_type);
 
@@ -661,28 +661,28 @@ QVariant TerminalWidget::inputMethodQuery(Qt::InputMethodQuery _query) const
     const QPoint cursorPos = QPoint(); // TODO: realCursorPosition();
     switch (_query)
     {
-    // TODO?: case Qt::ImCursorRectangle:
-    // case Qt::ImMicroFocus:
-    //     return imageToWidget(QRect(cursorPos.x(), cursorPos.y(), 1, 1));
-    case Qt::ImFont: return font();
-    case Qt::ImCursorPosition:
-        // return the cursor position within the current line
-        return cursorPos.x();
-    // case Qt::ImSurroundingText:
-    // {
-    //     // return the text from the current line
-    //     QString lineText;
-    //     QTextStream stream(&lineText);
-    //     PlainTextDecoder decoder;
-    //     decoder.begin(&stream);
-    //     if (isCursorOnDisplay()) {
-    //         decoder.decodeLine(&_image[loc(0, cursorPos.y())], _usedColumns, LINE_DEFAULT);
-    //     }
-    //     decoder.end();
-    //     return lineText;
-    // }
-    case Qt::ImCurrentSelection: return QString();
-    default: break;
+        // TODO?: case Qt::ImCursorRectangle:
+        // case Qt::ImMicroFocus:
+        //     return imageToWidget(QRect(cursorPos.x(), cursorPos.y(), 1, 1));
+        case Qt::ImFont: return font();
+        case Qt::ImCursorPosition:
+            // return the cursor position within the current line
+            return cursorPos.x();
+        // case Qt::ImSurroundingText:
+        // {
+        //     // return the text from the current line
+        //     QString lineText;
+        //     QTextStream stream(&lineText);
+        //     PlainTextDecoder decoder;
+        //     decoder.begin(&stream);
+        //     if (isCursorOnDisplay()) {
+        //         decoder.decodeLine(&_image[loc(0, cursorPos.y())], _usedColumns, LINE_DEFAULT);
+        //     }
+        //     decoder.end();
+        //     return lineText;
+        // }
+        case Qt::ImCurrentSelection: return QString();
+        default: break;
     }
 
     return QVariant();
@@ -891,9 +891,9 @@ void TerminalWidget::doDumpState()
         auto const [qImageFormat, elementCount] = [&]() -> tuple<QImage::Format, int> {
             switch (_format)
             {
-            case ImageBufferFormat::RGBA: return tuple { QImage::Format_RGBA8888, 4 };
-            case ImageBufferFormat::RGB: return tuple { QImage::Format_RGB888, 3 };
-            case ImageBufferFormat::Alpha: return tuple { QImage::Format_Grayscale8, 1 };
+                case ImageBufferFormat::RGBA: return tuple { QImage::Format_RGBA8888, 4 };
+                case ImageBufferFormat::RGB: return tuple { QImage::Format_RGB888, 3 };
+                case ImageBufferFormat::Alpha: return tuple { QImage::Format_Grayscale8, 1 };
             }
             return tuple { QImage::Format_Grayscale8, 1 };
         }();
@@ -926,9 +926,9 @@ void TerminalWidget::doDumpState()
             auto const formatText = [&]() {
                 switch (_format)
                 {
-                case ImageBufferFormat::RGBA: return "rgba"sv;
-                case ImageBufferFormat::RGB: return "rgb"sv;
-                case ImageBufferFormat::Alpha: return "alpha"sv;
+                    case ImageBufferFormat::RGBA: return "rgba"sv;
+                    case ImageBufferFormat::RGB: return "rgb"sv;
+                    case ImageBufferFormat::Alpha: return "alpha"sv;
                 }
                 return "unknown"sv;
             }();
@@ -949,9 +949,9 @@ void TerminalWidget::doDumpState()
         auto const saveScreenshot = atlasScreenshotSaver(info.buffer, info.size);
         switch (info.format)
         {
-        case terminal::renderer::atlas::Format::RGBA: saveScreenshot(ImageBufferFormat::RGBA); break;
-        case terminal::renderer::atlas::Format::RGB: saveScreenshot(ImageBufferFormat::RGB); break;
-        case terminal::renderer::atlas::Format::Red: saveScreenshot(ImageBufferFormat::Alpha); break;
+            case terminal::renderer::atlas::Format::RGBA: saveScreenshot(ImageBufferFormat::RGBA); break;
+            case terminal::renderer::atlas::Format::RGB: saveScreenshot(ImageBufferFormat::RGB); break;
+            case terminal::renderer::atlas::Format::Red: saveScreenshot(ImageBufferFormat::Alpha); break;
         }
     } while (0);
 
@@ -1206,8 +1206,8 @@ void TerminalWidget::bufferChanged(terminal::ScreenType _type)
     using Type = terminal::ScreenType;
     switch (_type)
     {
-    case Type::Primary: setCursor(Qt::IBeamCursor); break;
-    case Type::Alternate: setCursor(Qt::ArrowCursor); break;
+        case Type::Primary: setCursor(Qt::IBeamCursor); break;
+        case Type::Alternate: setCursor(Qt::ArrowCursor); break;
     }
     emit terminalBufferChanged(_type);
     // scheduleRedraw();

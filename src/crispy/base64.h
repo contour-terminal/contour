@@ -89,25 +89,25 @@ constexpr void finish(Alphabet const& alphabet, EncoderState& _state, Sink&& _si
 
     switch (_state.modulo)
     {
-    case 2: {
-        _sink(alphabet[(input[0] >> 2) & 0x3F],
-              alphabet[((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4)],
-              alphabet[((input[1] & 0x0F) << 2)],
-              '=');
-        _state.modulo = 0;
-    }
-    break;
-    case 1: {
-        // clang-format off
+        case 2: {
+            _sink(alphabet[(input[0] >> 2) & 0x3F],
+                  alphabet[((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4)],
+                  alphabet[((input[1] & 0x0F) << 2)],
+                  '=');
+            _state.modulo = 0;
+        }
+        break;
+        case 1: {
+            // clang-format off
         _sink(alphabet[(input[0] >> 2) & 0x3F],
               alphabet[((input[0] & 0x03) << 4)],
               '=',
               '=');
-        // clang-format on
-        _state.modulo = 0;
-    }
-    break;
-    case 0: break;
+            // clang-format on
+            _state.modulo = 0;
+        }
+        break;
+        case 0: break;
     }
 }
 

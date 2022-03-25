@@ -17,30 +17,30 @@ typename Line<Cell, Optimize>::InflatedBuffer Line<Cell, Optimize>::reflow(Colum
     using crispy::Comparison;
     switch (crispy::strongCompare(_newColumnCount, columnsUsed()))
     {
-    case Comparison::Equal: break;
-    case Comparison::Greater: buffer_.resize(unbox<size_t>(_newColumnCount)); break;
-    case Comparison::Less: {
-        // TODO: properly handle wide character cells
-        // - when cutting in the middle of a wide char, the wide char gets wrapped and an empty
-        //   cell needs to be injected to match the expected column width.
+        case Comparison::Equal: break;
+        case Comparison::Greater: buffer_.resize(unbox<size_t>(_newColumnCount)); break;
+        case Comparison::Less: {
+            // TODO: properly handle wide character cells
+            // - when cutting in the middle of a wide char, the wide char gets wrapped and an empty
+            //   cell needs to be injected to match the expected column width.
 
-        if (wrappable())
-        {
-            auto const [reflowStart, reflowEnd] = [this, _newColumnCount]() {
-                auto const reflowStart =
-                    next(buffer_.begin(), *_newColumnCount /* - buffer_[_newColumnCount].width()*/);
+            if (wrappable())
+            {
+                auto const [reflowStart, reflowEnd] = [this, _newColumnCount]() {
+                    auto const reflowStart =
+                        next(buffer_.begin(), *_newColumnCount /* - buffer_[_newColumnCount].width()*/);
 
-                auto reflowEnd = buffer_.end();
+                    auto reflowEnd = buffer_.end();
 
-                while (reflowEnd != reflowStart && prev(reflowEnd)->empty())
-                    reflowEnd = prev(reflowEnd);
+                    while (reflowEnd != reflowStart && prev(reflowEnd)->empty())
+                        reflowEnd = prev(reflowEnd);
 
-                return std::tuple { reflowStart, reflowEnd };
-            }();
+                    return std::tuple { reflowStart, reflowEnd };
+                }();
 
-            auto removedColumns = InflatedBuffer(reflowStart, reflowEnd);
-            buffer_.erase(reflowStart, buffer_.end());
-            assert(columnsUsed() == _newColumnCount);
+                auto removedColumns = InflatedBuffer(reflowStart, reflowEnd);
+                buffer_.erase(reflowStart, buffer_.end());
+                assert(columnsUsed() == _newColumnCount);
 #if 0
                 if (removedColumns.size() > 0 &&
                         std::any_of(removedColumns.begin(), removedColumns.end(),
@@ -52,15 +52,15 @@ typename Line<Cell, Optimize>::InflatedBuffer Line<Cell, Optimize>::reflow(Colum
                             }))
                     printf("Wrapping around\n");
 #endif
-            return removedColumns;
+                return removedColumns;
+            }
+            else
+            {
+                buffer_.resize(unbox<size_t>(_newColumnCount));
+                assert(columnsUsed() == _newColumnCount);
+                return {};
+            }
         }
-        else
-        {
-            buffer_.resize(unbox<size_t>(_newColumnCount));
-            assert(columnsUsed() == _newColumnCount);
-            return {};
-        }
-    }
     }
     return {};
 }

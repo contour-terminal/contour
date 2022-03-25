@@ -89,11 +89,11 @@ constexpr inline bool isModifier(Qt::Key _key)
 {
     switch (_key)
     {
-    case Qt::Key_Alt:
-    case Qt::Key_Control:
-    case Qt::Key_Shift:
-    case Qt::Key_Meta: return true;
-    default: return false;
+        case Qt::Key_Alt:
+        case Qt::Key_Control:
+        case Qt::Key_Shift:
+        case Qt::Key_Meta: return true;
+        default: return false;
     }
 }
 
@@ -142,11 +142,11 @@ constexpr inline terminal::MouseButton makeMouseButton(Qt::MouseButton _button)
 {
     switch (_button)
     {
-    case Qt::MouseButton::RightButton: return terminal::MouseButton::Right;
-    case Qt::MiddleButton: return terminal::MouseButton::Middle;
-    case Qt::LeftButton: [[fallthrough]];
-    default: // d'oh
-        return terminal::MouseButton::Left;
+        case Qt::MouseButton::RightButton: return terminal::MouseButton::Right;
+        case Qt::MiddleButton: return terminal::MouseButton::Middle;
+        case Qt::LeftButton: [[fallthrough]];
+        default: // d'oh
+            return terminal::MouseButton::Left;
     }
 }
 
@@ -200,10 +200,10 @@ constexpr Qt::CursorShape toQtMouseShape(MouseCursorShape _shape)
 {
     switch (_shape)
     {
-    case contour::MouseCursorShape::Hidden: return Qt::CursorShape::BlankCursor;
-    case contour::MouseCursorShape::Arrow: return Qt::CursorShape::ArrowCursor;
-    case contour::MouseCursorShape::IBeam: return Qt::CursorShape::IBeamCursor;
-    case contour::MouseCursorShape::PointingHand: return Qt::CursorShape::PointingHandCursor;
+        case contour::MouseCursorShape::Hidden: return Qt::CursorShape::BlankCursor;
+        case contour::MouseCursorShape::Arrow: return Qt::CursorShape::ArrowCursor;
+        case contour::MouseCursorShape::IBeam: return Qt::CursorShape::IBeamCursor;
+        case contour::MouseCursorShape::PointingHand: return Qt::CursorShape::PointingHandCursor;
     }
 
     // should never be reached
@@ -244,16 +244,16 @@ struct RenderStateManager
             auto state = state_.load();
             switch (state)
             {
-            case RenderState::CleanIdle:
-                if (state_.compare_exchange_strong(state, RenderState::DirtyIdle))
-                    return true;
-                break;
-            case RenderState::CleanPainting:
-                if (state_.compare_exchange_strong(state, RenderState::DirtyPainting))
-                    return false;
-                break;
-            case RenderState::DirtyIdle:
-            case RenderState::DirtyPainting: return false;
+                case RenderState::CleanIdle:
+                    if (state_.compare_exchange_strong(state, RenderState::DirtyIdle))
+                        return true;
+                    break;
+                case RenderState::CleanPainting:
+                    if (state_.compare_exchange_strong(state, RenderState::DirtyPainting))
+                        return false;
+                    break;
+                case RenderState::DirtyIdle:
+                case RenderState::DirtyPainting: return false;
             }
         }
     }
@@ -267,16 +267,17 @@ struct RenderStateManager
             auto state = state_.load();
             switch (state)
             {
-            case RenderState::DirtyIdle:
-                // assert(!"The impossible happened, painting but painting. Shakesbeer.");
-                // qDebug() << "The impossible happened, onFrameSwapped() called in wrong state DirtyIdle.";
-                [[fallthrough]];
-            case RenderState::DirtyPainting: return false;
-            case RenderState::CleanPainting:
-                if (!state_.compare_exchange_strong(state, RenderState::CleanIdle))
-                    break;
-                [[fallthrough]];
-            case RenderState::CleanIdle: renderingPressure_ = false; return true;
+                case RenderState::DirtyIdle:
+                    // assert(!"The impossible happened, painting but painting. Shakesbeer.");
+                    // qDebug() << "The impossible happened, onFrameSwapped() called in wrong state
+                    // DirtyIdle.";
+                    [[fallthrough]];
+                case RenderState::DirtyPainting: return false;
+                case RenderState::CleanPainting:
+                    if (!state_.compare_exchange_strong(state, RenderState::CleanIdle))
+                        break;
+                    [[fallthrough]];
+                case RenderState::CleanIdle: renderingPressure_ = false; return true;
             }
         }
     }
@@ -300,10 +301,10 @@ struct formatter<contour::RenderState>
     {
         switch (state)
         {
-        case State::CleanIdle: return format_to(ctx.out(), "clean-idle");
-        case State::CleanPainting: return format_to(ctx.out(), "clean-painting");
-        case State::DirtyIdle: return format_to(ctx.out(), "dirty-idle");
-        case State::DirtyPainting: return format_to(ctx.out(), "dirty-painting");
+            case State::CleanIdle: return format_to(ctx.out(), "clean-idle");
+            case State::CleanPainting: return format_to(ctx.out(), "clean-painting");
+            case State::DirtyIdle: return format_to(ctx.out(), "dirty-idle");
+            case State::DirtyPainting: return format_to(ctx.out(), "dirty-painting");
         }
         return format_to(ctx.out(), "Invalid");
     }

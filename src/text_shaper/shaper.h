@@ -54,9 +54,9 @@ constexpr size_t pixel_size(bitmap_format _format) noexcept
 {
     switch (_format)
     {
-    case bitmap_format::rgba: return 4;
-    case bitmap_format::rgb: return 3;
-    case bitmap_format::alpha_mask: return 1;
+        case bitmap_format::rgba: return 4;
+        case bitmap_format::rgb: return 3;
+        case bitmap_format::alpha_mask: return 1;
     }
     return 1;
 }
@@ -178,10 +178,10 @@ struct formatter<text::bitmap_format>
     {
         switch (value)
         {
-        case text::bitmap_format::alpha_mask: return format_to(ctx.out(), "alpha_mask");
-        case text::bitmap_format::rgb: return format_to(ctx.out(), "rgb");
-        case text::bitmap_format::rgba: return format_to(ctx.out(), "rgba");
-        default: return format_to(ctx.out(), "{}", static_cast<unsigned>(value));
+            case text::bitmap_format::alpha_mask: return format_to(ctx.out(), "alpha_mask");
+            case text::bitmap_format::rgb: return format_to(ctx.out(), "rgb");
+            case text::bitmap_format::rgba: return format_to(ctx.out(), "rgba");
+            default: return format_to(ctx.out(), "{}", static_cast<unsigned>(value));
         }
     }
 };

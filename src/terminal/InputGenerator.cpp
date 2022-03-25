@@ -192,55 +192,55 @@ string to_string(Key _key)
 {
     switch (_key)
     {
-    case Key::F1: return "F1";
-    case Key::F2: return "F2";
-    case Key::F3: return "F3";
-    case Key::F4: return "F4";
-    case Key::F5: return "F5";
-    case Key::F6: return "F6";
-    case Key::F7: return "F7";
-    case Key::F8: return "F8";
-    case Key::F9: return "F9";
-    case Key::F10: return "F10";
-    case Key::F11: return "F11";
-    case Key::F12: return "F12";
-    case Key::F13: return "F13";
-    case Key::F14: return "F14";
-    case Key::F15: return "F15";
-    case Key::F16: return "F16";
-    case Key::F17: return "F17";
-    case Key::F18: return "F18";
-    case Key::F19: return "F19";
-    case Key::F20: return "F20";
-    case Key::DownArrow: return "DownArrow";
-    case Key::LeftArrow: return "LeftArrow";
-    case Key::RightArrow: return "RightArrow";
-    case Key::UpArrow: return "UpArrow";
-    case Key::Insert: return "Insert";
-    case Key::Delete: return "Delete";
-    case Key::Home: return "Home";
-    case Key::End: return "End";
-    case Key::PageUp: return "PageUp";
-    case Key::PageDown: return "PageDown";
-    case Key::Numpad_NumLock: return "Numpad_NumLock";
-    case Key::Numpad_Divide: return "Numpad_Divide";
-    case Key::Numpad_Multiply: return "Numpad_Multiply";
-    case Key::Numpad_Subtract: return "Numpad_Subtract";
-    case Key::Numpad_CapsLock: return "Numpad_CapsLock";
-    case Key::Numpad_Add: return "Numpad_Add";
-    case Key::Numpad_Decimal: return "Numpad_Decimal";
-    case Key::Numpad_Enter: return "Numpad_Enter";
-    case Key::Numpad_Equal: return "Numpad_Equal";
-    case Key::Numpad_0: return "Numpad_0";
-    case Key::Numpad_1: return "Numpad_1";
-    case Key::Numpad_2: return "Numpad_2";
-    case Key::Numpad_3: return "Numpad_3";
-    case Key::Numpad_4: return "Numpad_4";
-    case Key::Numpad_5: return "Numpad_5";
-    case Key::Numpad_6: return "Numpad_6";
-    case Key::Numpad_7: return "Numpad_7";
-    case Key::Numpad_8: return "Numpad_8";
-    case Key::Numpad_9: return "Numpad_9";
+        case Key::F1: return "F1";
+        case Key::F2: return "F2";
+        case Key::F3: return "F3";
+        case Key::F4: return "F4";
+        case Key::F5: return "F5";
+        case Key::F6: return "F6";
+        case Key::F7: return "F7";
+        case Key::F8: return "F8";
+        case Key::F9: return "F9";
+        case Key::F10: return "F10";
+        case Key::F11: return "F11";
+        case Key::F12: return "F12";
+        case Key::F13: return "F13";
+        case Key::F14: return "F14";
+        case Key::F15: return "F15";
+        case Key::F16: return "F16";
+        case Key::F17: return "F17";
+        case Key::F18: return "F18";
+        case Key::F19: return "F19";
+        case Key::F20: return "F20";
+        case Key::DownArrow: return "DownArrow";
+        case Key::LeftArrow: return "LeftArrow";
+        case Key::RightArrow: return "RightArrow";
+        case Key::UpArrow: return "UpArrow";
+        case Key::Insert: return "Insert";
+        case Key::Delete: return "Delete";
+        case Key::Home: return "Home";
+        case Key::End: return "End";
+        case Key::PageUp: return "PageUp";
+        case Key::PageDown: return "PageDown";
+        case Key::Numpad_NumLock: return "Numpad_NumLock";
+        case Key::Numpad_Divide: return "Numpad_Divide";
+        case Key::Numpad_Multiply: return "Numpad_Multiply";
+        case Key::Numpad_Subtract: return "Numpad_Subtract";
+        case Key::Numpad_CapsLock: return "Numpad_CapsLock";
+        case Key::Numpad_Add: return "Numpad_Add";
+        case Key::Numpad_Decimal: return "Numpad_Decimal";
+        case Key::Numpad_Enter: return "Numpad_Enter";
+        case Key::Numpad_Equal: return "Numpad_Equal";
+        case Key::Numpad_0: return "Numpad_0";
+        case Key::Numpad_1: return "Numpad_1";
+        case Key::Numpad_2: return "Numpad_2";
+        case Key::Numpad_3: return "Numpad_3";
+        case Key::Numpad_4: return "Numpad_4";
+        case Key::Numpad_5: return "Numpad_5";
+        case Key::Numpad_6: return "Numpad_6";
+        case Key::Numpad_7: return "Numpad_7";
+        case Key::Numpad_8: return "Numpad_8";
+        case Key::Numpad_9: return "Numpad_9";
     }
     return "(unknown)";
 }
@@ -249,12 +249,12 @@ string to_string(MouseButton _button)
 {
     switch (_button)
     {
-    case MouseButton::Left: return "Left"s;
-    case MouseButton::Right: return "Right"s;
-    case MouseButton::Middle: return "Middle"s;
-    case MouseButton::Release: return "Release"s;
-    case MouseButton::WheelUp: return "WheelUp"s;
-    case MouseButton::WheelDown: return "WheelDown"s;
+        case MouseButton::Left: return "Left"s;
+        case MouseButton::Right: return "Right"s;
+        case MouseButton::Middle: return "Middle"s;
+        case MouseButton::Release: return "Release"s;
+        case MouseButton::WheelUp: return "WheelUp"s;
+        case MouseButton::WheelDown: return "WheelDown"s;
     }
     return ""; // should never be reached
 }
@@ -485,12 +485,12 @@ namespace
     {
         switch (_button)
         {
-        case MouseButton::Left: return 0;
-        case MouseButton::Middle: return 1;
-        case MouseButton::Right: return 2;
-        case MouseButton::Release: return 3;
-        case MouseButton::WheelUp: return 4;
-        case MouseButton::WheelDown: return 5;
+            case MouseButton::Left: return 0;
+            case MouseButton::Middle: return 1;
+            case MouseButton::Right: return 2;
+            case MouseButton::Release: return 3;
+            case MouseButton::WheelUp: return 4;
+            case MouseButton::WheelDown: return 5;
         }
         return 0; // should never happen
     }
@@ -532,46 +532,46 @@ bool InputGenerator::generateMouse(MouseEventType _eventType,
 
     switch (*mouseProtocol_)
     {
-    case MouseProtocol::X10: // Old X10 mouse protocol
-        if (_eventType == MouseEventType::Press)
-            mouseTransport(_eventType, buttonX10(_button), modifierBits(_modifier), _pos, _pixelPosition);
-        return true;
-    case MouseProtocol::NormalTracking: // Normal tracking mode, that's X10 with mouse release events and
-                                        // modifiers
-        if (_eventType == MouseEventType::Press || _eventType == MouseEventType::Release)
-        {
-            auto const button = mouseTransport_ != MouseTransport::SGR ? buttonNormal(_button, _eventType)
-                                                                       : buttonX10(_button);
-            mouseTransport(_eventType, button, modifierBits(_modifier), _pos, _pixelPosition);
-        }
-        return true;
-    case MouseProtocol::ButtonTracking: // Button-event tracking protocol.
-        // like normal event tracking, but with drag events
-        if (_eventType == MouseEventType::Press || _eventType == MouseEventType::Drag
-            || _eventType == MouseEventType::Release)
-        {
-            auto const button = mouseTransport_ != MouseTransport::SGR ? buttonNormal(_button, _eventType)
-                                                                       : buttonX10(_button);
-
-            uint8_t const draggableButton = _eventType == MouseEventType::Drag ? button + 0x20 : button;
-
-            mouseTransport(_eventType, draggableButton, modifierBits(_modifier), _pos, _pixelPosition);
+        case MouseProtocol::X10: // Old X10 mouse protocol
+            if (_eventType == MouseEventType::Press)
+                mouseTransport(_eventType, buttonX10(_button), modifierBits(_modifier), _pos, _pixelPosition);
             return true;
-        }
-        return false;
-    case MouseProtocol::AnyEventTracking: // Like ButtonTracking but any motion events (not just dragging)
-        // TODO: make sure we can receive mouse-move events even without mouse pressed.
-        {
-            auto const button = mouseTransport_ != MouseTransport::SGR ? buttonNormal(_button, _eventType)
-                                                                       : buttonX10(_button);
+        case MouseProtocol::NormalTracking: // Normal tracking mode, that's X10 with mouse release events and
+                                            // modifiers
+            if (_eventType == MouseEventType::Press || _eventType == MouseEventType::Release)
+            {
+                auto const button = mouseTransport_ != MouseTransport::SGR ? buttonNormal(_button, _eventType)
+                                                                           : buttonX10(_button);
+                mouseTransport(_eventType, button, modifierBits(_modifier), _pos, _pixelPosition);
+            }
+            return true;
+        case MouseProtocol::ButtonTracking: // Button-event tracking protocol.
+            // like normal event tracking, but with drag events
+            if (_eventType == MouseEventType::Press || _eventType == MouseEventType::Drag
+                || _eventType == MouseEventType::Release)
+            {
+                auto const button = mouseTransport_ != MouseTransport::SGR ? buttonNormal(_button, _eventType)
+                                                                           : buttonX10(_button);
 
-            uint8_t const draggableButton = _eventType == MouseEventType::Drag ? button + 0x20 : button;
+                uint8_t const draggableButton = _eventType == MouseEventType::Drag ? button + 0x20 : button;
 
-            mouseTransport(_eventType, draggableButton, modifierBits(_modifier), _pos, _pixelPosition);
-        }
-        return true;
-    case MouseProtocol::HighlightTracking: // Highlight mouse tracking
-        return false;                      // TODO: do we want to implement this?
+                mouseTransport(_eventType, draggableButton, modifierBits(_modifier), _pos, _pixelPosition);
+                return true;
+            }
+            return false;
+        case MouseProtocol::AnyEventTracking: // Like ButtonTracking but any motion events (not just dragging)
+            // TODO: make sure we can receive mouse-move events even without mouse pressed.
+            {
+                auto const button = mouseTransport_ != MouseTransport::SGR ? buttonNormal(_button, _eventType)
+                                                                           : buttonX10(_button);
+
+                uint8_t const draggableButton = _eventType == MouseEventType::Drag ? button + 0x20 : button;
+
+                mouseTransport(_eventType, draggableButton, modifierBits(_modifier), _pos, _pixelPosition);
+            }
+            return true;
+        case MouseProtocol::HighlightTracking: // Highlight mouse tracking
+            return false;                      // TODO: do we want to implement this?
     }
 
     return false;
@@ -585,19 +585,19 @@ bool InputGenerator::mouseTransport(MouseEventType _eventType,
 {
     switch (mouseTransport_)
     {
-    case MouseTransport::Default: // mode: 9
-        mouseTransportX10(_button, _modifier, _pos);
-        return true;
-    case MouseTransport::Extended: // mode: 1005
-        // TODO (like Default but with UTF-8 encoded coords)
-        return false;
-    case MouseTransport::SGR: // mode: 1006
-        return mouseTransportSGR(_eventType, _button, _modifier, *_pos.column + 1, *_pos.line + 1);
-    case MouseTransport::URXVT: // mode: 1015
-        return mouseTransportURXVT(_eventType, _button, _modifier, _pos);
-    case MouseTransport::SGRPixels: // mode: 1016
-        return mouseTransportSGR(
-            _eventType, _button, _modifier, _pixelPosition.x.value, _pixelPosition.y.value);
+        case MouseTransport::Default: // mode: 9
+            mouseTransportX10(_button, _modifier, _pos);
+            return true;
+        case MouseTransport::Extended: // mode: 1005
+            // TODO (like Default but with UTF-8 encoded coords)
+            return false;
+        case MouseTransport::SGR: // mode: 1006
+            return mouseTransportSGR(_eventType, _button, _modifier, *_pos.column + 1, *_pos.line + 1);
+        case MouseTransport::URXVT: // mode: 1015
+            return mouseTransportURXVT(_eventType, _button, _modifier, _pos);
+        case MouseTransport::SGRPixels: // mode: 1016
+            return mouseTransportSGR(
+                _eventType, _button, _modifier, _pixelPosition.x.value, _pixelPosition.y.value);
     }
 
     return false;
@@ -673,23 +673,23 @@ bool InputGenerator::generateMousePress(Modifier _modifier,
 
     switch (mouseWheelMode())
     {
-    case MouseWheelMode::NormalCursorKeys:
-        switch (_button)
-        {
-        case MouseButton::WheelUp: return logged(append("\033[A"));
-        case MouseButton::WheelDown: return logged(append("\033[B"));
-        default: break;
-        }
-        break;
-    case MouseWheelMode::ApplicationCursorKeys:
-        switch (_button)
-        {
-        case MouseButton::WheelUp: return logged(append("\033OA"));
-        case MouseButton::WheelDown: return logged(append("\033OB"));
-        default: break;
-        }
-        break;
-    case MouseWheelMode::Default: break;
+        case MouseWheelMode::NormalCursorKeys:
+            switch (_button)
+            {
+                case MouseButton::WheelUp: return logged(append("\033[A"));
+                case MouseButton::WheelDown: return logged(append("\033[B"));
+                default: break;
+            }
+            break;
+        case MouseWheelMode::ApplicationCursorKeys:
+            switch (_button)
+            {
+                case MouseButton::WheelUp: return logged(append("\033OA"));
+                case MouseButton::WheelDown: return logged(append("\033OB"));
+                default: break;
+            }
+            break;
+        case MouseWheelMode::Default: break;
     }
 
     if (!isMouseWheel(_button))

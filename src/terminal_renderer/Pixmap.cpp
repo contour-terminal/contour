@@ -40,16 +40,16 @@ namespace
 
         switch (orientation)
         {
-        case Orientation::Horizontal:
-            for (auto const y: ranges::views::iota(base.value - 1, base.value + 1))
-                for (auto const x: ranges::views::iota(from.value, to.value))
-                    pixmap.paint(x, y);
-            break;
-        case Orientation::Vertical:
-            for (auto const y: ranges::views::iota(from.value, to.value))
-                for (auto const x: ranges::views::iota(base.value - 1, base.value + 1))
-                    pixmap.paint(x, y);
-            break;
+            case Orientation::Horizontal:
+                for (auto const y: ranges::views::iota(base.value - 1, base.value + 1))
+                    for (auto const x: ranges::views::iota(from.value, to.value))
+                        pixmap.paint(x, y);
+                break;
+            case Orientation::Vertical:
+                for (auto const y: ranges::views::iota(from.value, to.value))
+                    for (auto const x: ranges::views::iota(base.value - 1, base.value + 1))
+                        pixmap.paint(x, y);
+                break;
         }
         return pixmap;
     }
@@ -151,13 +151,17 @@ Pixmap& Pixmap::segment_bar(int which)
 
     switch (which)
     {
-    case 1: return segment_line(*this, Orientation::Horizontal, BaseOffset { T }, From { L }, To { R });
-    case 2: return segment_line(*this, Orientation::Vertical, BaseOffset { R }, From { T + Z }, To { M - Z });
-    case 3: return segment_line(*this, Orientation::Horizontal, BaseOffset { M }, From { L }, To { R });
-    case 4: return segment_line(*this, Orientation::Vertical, BaseOffset { L }, From { T + Z }, To { M - Z });
-    case 5: return segment_line(*this, Orientation::Vertical, BaseOffset { R }, From { M + Z }, To { B - Z });
-    case 6: return segment_line(*this, Orientation::Horizontal, BaseOffset { B }, From { L }, To { R });
-    case 7: return segment_line(*this, Orientation::Vertical, BaseOffset { L }, From { M + Z }, To { B - Z });
+        case 1: return segment_line(*this, Orientation::Horizontal, BaseOffset { T }, From { L }, To { R });
+        case 2:
+            return segment_line(*this, Orientation::Vertical, BaseOffset { R }, From { T + Z }, To { M - Z });
+        case 3: return segment_line(*this, Orientation::Horizontal, BaseOffset { M }, From { L }, To { R });
+        case 4:
+            return segment_line(*this, Orientation::Vertical, BaseOffset { L }, From { T + Z }, To { M - Z });
+        case 5:
+            return segment_line(*this, Orientation::Vertical, BaseOffset { R }, From { M + Z }, To { B - Z });
+        case 6: return segment_line(*this, Orientation::Horizontal, BaseOffset { B }, From { L }, To { R });
+        case 7:
+            return segment_line(*this, Orientation::Vertical, BaseOffset { L }, From { M + Z }, To { B - Z });
     }
 
     assert(false);

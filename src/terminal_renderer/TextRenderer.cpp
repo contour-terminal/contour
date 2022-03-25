@@ -209,11 +209,11 @@ namespace
     {
         switch (_style)
         {
-        case TextStyle::Invalid: break;
-        case TextStyle::Regular: return _fonts.regular;
-        case TextStyle::Bold: return _fonts.bold;
-        case TextStyle::Italic: return _fonts.italic;
-        case TextStyle::BoldItalic: return _fonts.boldItalic;
+            case TextStyle::Invalid: break;
+            case TextStyle::Regular: return _fonts.regular;
+            case TextStyle::Bold: return _fonts.bold;
+            case TextStyle::Italic: return _fonts.italic;
+            case TextStyle::BoldItalic: return _fonts.boldItalic;
         }
         return _fonts.regular;
     }
@@ -222,9 +222,9 @@ namespace
     {
         switch (format)
         {
-        case text::bitmap_format::alpha_mask: return atlas::Format::Red;
-        case text::bitmap_format::rgb: return atlas::Format::RGB;
-        case text::bitmap_format::rgba: return atlas::Format::RGBA;
+            case text::bitmap_format::alpha_mask: return atlas::Format::Red;
+            case text::bitmap_format::rgb: return atlas::Format::RGB;
+            case text::bitmap_format::rgba: return atlas::Format::RGBA;
         }
 
         Require(false && "missing case");
@@ -237,9 +237,9 @@ namespace
         // TODO ^^^ configurable vs FRAGMENT_SELECTOR_GLYPH_LCD_SIMPLE
         switch (glyphFormat)
         {
-        case text::bitmap_format::alpha_mask: return FRAGMENT_SELECTOR_GLYPH_ALPHA;
-        case text::bitmap_format::rgb: return lcdShaderId;
-        case text::bitmap_format::rgba: return FRAGMENT_SELECTOR_IMAGE_BGRA;
+            case text::bitmap_format::alpha_mask: return FRAGMENT_SELECTOR_GLYPH_ALPHA;
+            case text::bitmap_format::rgb: return lcdShaderId;
+            case text::bitmap_format::rgba: return FRAGMENT_SELECTOR_IMAGE_BGRA;
         }
         Require(false && "Glyph format not handled.");
         return 0;
@@ -250,25 +250,25 @@ unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine)
 {
     switch (_engine)
     {
-    case FontLocatorEngine::Mock: return make_unique<text::mock_font_locator>();
-    case FontLocatorEngine::DWrite:
+        case FontLocatorEngine::Mock: return make_unique<text::mock_font_locator>();
+        case FontLocatorEngine::DWrite:
 #if defined(_WIN32)
-        return make_unique<text::directwrite_locator>();
+            return make_unique<text::directwrite_locator>();
 #else
-        LocatorLog()("Font locator DirectWrite not supported on this platform.");
+            LocatorLog()("Font locator DirectWrite not supported on this platform.");
 #endif
-        break;
-    case FontLocatorEngine::CoreText:
+            break;
+        case FontLocatorEngine::CoreText:
 #if defined(__APPLE__)
-        return make_unique<text::coretext_locator>();
+            return make_unique<text::coretext_locator>();
 #else
-        LocatorLog()("Font locator CoreText not supported on this platform.");
+            LocatorLog()("Font locator CoreText not supported on this platform.");
 #endif
-        break;
+            break;
 
-    case FontLocatorEngine::FontConfig:
-        // default case below
-        break;
+        case FontLocatorEngine::FontConfig:
+            // default case below
+            break;
     }
 
     LocatorLog()("Using font locator: fontconfig.");

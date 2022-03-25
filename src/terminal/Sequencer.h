@@ -194,15 +194,15 @@ struct formatter<terminal::RequestStatusString>
     {
         switch (value)
         {
-        case terminal::RequestStatusString::SGR: return format_to(ctx.out(), "SGR");
-        case terminal::RequestStatusString::DECSCL: return format_to(ctx.out(), "DECSCL");
-        case terminal::RequestStatusString::DECSCUSR: return format_to(ctx.out(), "DECSCUSR");
-        case terminal::RequestStatusString::DECSCA: return format_to(ctx.out(), "DECSCA");
-        case terminal::RequestStatusString::DECSTBM: return format_to(ctx.out(), "DECSTBM");
-        case terminal::RequestStatusString::DECSLRM: return format_to(ctx.out(), "DECSLRM");
-        case terminal::RequestStatusString::DECSLPP: return format_to(ctx.out(), "DECSLPP");
-        case terminal::RequestStatusString::DECSCPP: return format_to(ctx.out(), "DECSCPP");
-        case terminal::RequestStatusString::DECSNLS: return format_to(ctx.out(), "DECSNLS");
+            case terminal::RequestStatusString::SGR: return format_to(ctx.out(), "SGR");
+            case terminal::RequestStatusString::DECSCL: return format_to(ctx.out(), "DECSCL");
+            case terminal::RequestStatusString::DECSCUSR: return format_to(ctx.out(), "DECSCUSR");
+            case terminal::RequestStatusString::DECSCA: return format_to(ctx.out(), "DECSCA");
+            case terminal::RequestStatusString::DECSTBM: return format_to(ctx.out(), "DECSTBM");
+            case terminal::RequestStatusString::DECSLRM: return format_to(ctx.out(), "DECSLRM");
+            case terminal::RequestStatusString::DECSLPP: return format_to(ctx.out(), "DECSLPP");
+            case terminal::RequestStatusString::DECSCPP: return format_to(ctx.out(), "DECSCPP");
+            case terminal::RequestStatusString::DECSNLS: return format_to(ctx.out(), "DECSNLS");
         }
         return format_to(ctx.out(), "{}", unsigned(value));
     }

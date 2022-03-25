@@ -1021,13 +1021,13 @@ void softLoadFont(terminal::renderer::TextShapingEngine _textShapingEngine,
             using terminal::renderer::TextShapingEngine;
             switch (_textShapingEngine)
             {
-            case TextShapingEngine::OpenShaper: break;
-            case TextShapingEngine::CoreText:
-            case TextShapingEngine::DWrite:
-                // TODO: Implement font feature settings handling for these engines.
-                errorlog()("The configured text shaping engine {} does not yet support font feature "
-                           "settings. Ignoring.",
-                           _textShapingEngine);
+                case TextShapingEngine::OpenShaper: break;
+                case TextShapingEngine::CoreText:
+                case TextShapingEngine::DWrite:
+                    // TODO: Implement font feature settings handling for these engines.
+                    errorlog()("The configured text shaping engine {} does not yet support font feature "
+                               "settings. Ignoring.",
+                               _textShapingEngine);
             }
         }
     }
