@@ -151,7 +151,6 @@ void Grid<Cell>::verifyState() const
 {
 #if !defined(NDEBUG)
     Require(LineCount::cast_from(lines_.size()) >= totalLineCount());
-    Require(totalLineCount() >= linesUsed_);
     Require(LineCount::cast_from(lines_.size()) >= linesUsed_);
     Require(linesUsed_ >= pageSize_.lines);
 #endif
@@ -352,47 +351,54 @@ int Grid<Cell>::computeLogicalLineNumberFromBottom(LineCount _n) const noexcept
 // }}}
 // {{{ Grid impl: scrolling
 template <typename Cell>
-LineCount Grid<Cell>::scrollUp(LineCount _n, GraphicsAttributes _defaultAttributes) noexcept
+LineCount Grid<Cell>::scrollUp(LineCount linesCountToScrollUp, GraphicsAttributes _defaultAttributes) noexcept
 {
     verifyState();
-    if (linesUsed_ == totalLineCount()) // with all grid lines in-use
+    if (unbox<size_t>(linesUsed_) == lines_.size()) // with all grid lines in-use
     {
         // TODO: ensure explicit test for this case
-        rotateBuffersLeft(_n);
+        rotateBuffersLeft(linesCountToScrollUp);
 
         // Initialize (/reset) new lines.
-        for (auto y = boxed_cast<LineOffset>(pageSize_.lines - _n);
+        for (auto y = boxed_cast<LineOffset>(pageSize_.lines - linesCountToScrollUp);
              y < boxed_cast<LineOffset>(pageSize_.lines);
              ++y)
             lineAt(y).reset(defaultLineFlags(), _defaultAttributes);
 
-        return _n;
+        return linesCountToScrollUp;
     }
     else
     {
-        // TODO: ensure explicit test for this case
-        auto const linesAvailable = lines_.size() - unbox<size_t>(linesUsed_);
-        auto const n = std::min(unbox<size_t>(_n), linesAvailable);
-        if (n != 0)
+        Require(unbox<size_t>(linesUsed_) < lines_.size());
+
+        // Number of lines in the ring buffer that are not yet
+        // used by the grid system.
+        auto const linesAvailable = LineCount::cast_from(lines_.size() - unbox<size_t>(linesUsed_));
+
+        // Number of lines in the ring buffer that we can allocate at the head.
+        auto const linesAppendCount = std::min(linesCountToScrollUp, linesAvailable);
+
+        if (*linesAppendCount != 0)
         {
-            linesUsed_ += LineCount::cast_from(n);
+            linesUsed_ += linesAppendCount;
+            Require(unbox<size_t>(linesUsed_) <= lines_.size());
             fill_n(next(lines_.begin(), *pageSize_.lines),
-                   n,
+                   unbox<size_t>(linesAppendCount),
                    Line { pageSize_.columns, defaultLineFlags(), Cell { _defaultAttributes } });
-            rotateBuffersLeft(LineCount::cast_from(n));
+            rotateBuffersLeft(linesAppendCount);
         }
-        if (n < unbox<size_t>(_n))
+        if (linesAppendCount < linesCountToScrollUp)
         {
-            auto const incrementCount = unbox<size_t>(_n) - n;
-            linesUsed_ += LineCount::cast_from(incrementCount);
+            auto const incrementCount = linesCountToScrollUp - linesAppendCount;
+            rotateBuffersLeft(incrementCount);
 
             // Initialize (/reset) new lines.
-            for (auto y = boxed_cast<LineOffset>(pageSize_.lines - _n);
+            for (auto y = boxed_cast<LineOffset>(pageSize_.lines - linesCountToScrollUp);
                  y < boxed_cast<LineOffset>(pageSize_.lines);
                  ++y)
                 lineAt(y).reset(defaultLineFlags(), _defaultAttributes);
         }
-        return LineCount::cast_from(n);
+        return LineCount::cast_from(linesAppendCount);
     }
 }
 
