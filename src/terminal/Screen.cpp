@@ -832,7 +832,8 @@ std::string Screen<Cell>::screenshot(function<string(LineOffset)> const& _postLi
     auto result = std::stringstream {};
     auto writer = VTWriter(result);
 
-    for (int const line: ranges::views::iota(-unbox<int>(historyLineCount()), *_state.pageSize.lines))
+    // for (int const line: ranges::views::iota(-unbox<int>(historyLineCount()), *_state.pageSize.lines))
+    for (int const line: ranges::views::iota(0, *_state.pageSize.lines))
     {
         for (int const col: ranges::views::iota(0, *_state.pageSize.columns))
         {
