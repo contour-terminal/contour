@@ -208,7 +208,6 @@ class Sequence
     T param(size_t parameterIndex) const noexcept
     {
         assert(parameterIndex < parameters_.size());
-        // TODO(pr)? assert(0 < parameters_[parameterIndex].size());
         if constexpr (crispy::is_boxed<T>)
             return T::cast_from(parameters_.at(parameterIndex));
         else
