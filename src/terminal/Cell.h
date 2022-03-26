@@ -134,10 +134,7 @@ class CONTOUR_PACKED Cell
 
     CellFlags styles() const noexcept;
 
-    bool isFlagEnabled(CellFlags testFlags) const noexcept
-    {
-        return styles() & testFlags;
-    }
+    bool isFlagEnabled(CellFlags testFlags) const noexcept { return styles() & testFlags; }
 
     void resetFlags() noexcept
     {
