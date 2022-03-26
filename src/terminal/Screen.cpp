@@ -2920,7 +2920,7 @@ namespace impl
                         auto const b = _seq.subparam(i, len - 1);
                         if (r <= 255 && g <= 255 && b <= 255)
                         {
-                            *pi = i + 1;
+                            *pi += len + 1;
                             return Color { RGBColor {
                                 static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b) } };
                         }
@@ -2929,11 +2929,15 @@ namespace impl
                 }
                 case 3: // ":3:F:C:M:Y" (TODO)
                 case 4: // ":4:F:C:M:Y:K" (TODO)
+                {
+                    auto const len = _seq.subParameterCount(i);
+                    *pi += len + 1;
                     break;
+                }
                 case 5: // ":5:P"
                     if (auto const P = _seq.subparam(i, 1); P <= 255)
                     {
-                        *pi = i + 1;
+                        *pi += 3;
                         return static_cast<IndexedColor>(P);
                     }
                     break;

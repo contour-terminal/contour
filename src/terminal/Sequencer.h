@@ -175,6 +175,7 @@ class Sequencer
     Terminal& terminal_;
     unicode::utf8_decoder_state utf8DecoderState_ = {};
     Sequence sequence_ {};
+    SequenceParameterBuilder parameterBuilder_;
 
     size_t currentParameterIndex_ = 0;
     size_t currentSubParameterIndex_ = 0;
@@ -191,32 +192,24 @@ inline void Sequencer::resetUtf8DecoderState() noexcept
 
 inline void Sequencer::clear() noexcept
 {
-    sequence_.clear();
-    currentParameterIndex_ = 0;
-    currentSubParameterIndex_ = 0;
+    sequence_.clearExceptParameters();
+    parameterBuilder_.reset();
     resetUtf8DecoderState();
 }
 
 inline void Sequencer::paramDigit(char _char) noexcept
 {
-    if (sequence_.parameters().empty())
-        sequence_.parameters().appendParameter(0);
-
-    sequence_.parameters().multiplyBy10AndAdd(
-        currentParameterIndex_, currentSubParameterIndex_, static_cast<Sequence::Parameter>(_char - '0'));
+    parameterBuilder_.multiplyBy10AndAdd(static_cast<Sequence::Parameter>(_char - '0'));
 }
 
 inline void Sequencer::paramSeparator() noexcept
 {
-    ++currentParameterIndex_;
-    currentSubParameterIndex_ = 0;
-    sequence_.parameters().appendParameter(0);
+    parameterBuilder_.nextParameter();
 }
 
 inline void Sequencer::paramSubSeparator() noexcept
 {
-    ++currentSubParameterIndex_;
-    sequence_.parameters().appendSubParameter(0);
+    parameterBuilder_.nextSubParameter();
 }
 // }}}
 

@@ -41,7 +41,7 @@ using namespace std::string_view_literals;
 namespace terminal
 {
 
-Sequencer::Sequencer(Terminal& _terminal): terminal_ { _terminal }
+Sequencer::Sequencer(Terminal& _terminal): terminal_ { _terminal }, parameterBuilder_(sequence_.parameters())
 {
 }
 
@@ -101,9 +101,6 @@ void Sequencer::collectLeader(char _leader) noexcept
 
 void Sequencer::param(char _char) noexcept
 {
-    if (sequence_.parameters().empty())
-        sequence_.parameters().appendParameter(0);
-
     switch (_char)
     {
         case ';': paramSeparator(); break;
@@ -149,7 +146,7 @@ void Sequencer::putOSC(char _char)
 void Sequencer::dispatchOSC()
 {
     auto const [code, skipCount] = parser::extractCodePrefix(sequence_.intermediateCharacters());
-    sequence_.parameters().appendParameter(static_cast<Sequence::Parameter>(code));
+    parameterBuilder_.set(static_cast<Sequence::Parameter>(code));
     sequence_.intermediateCharacters().erase(0, skipCount);
     handleSequence();
     clear();
@@ -304,6 +301,7 @@ unique_ptr<ParserExtension> Sequencer::hookDECRQSS(Sequence const& /*_seq*/)
 
 void Sequencer::handleSequence()
 {
+    parameterBuilder_.fixiate();
     terminal_.screen().process(sequence_);
 }
 

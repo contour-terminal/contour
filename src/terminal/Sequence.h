@@ -17,7 +17,9 @@
 
 #include <crispy/boxed.h>
 
+#include <algorithm>
 #include <cassert>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -27,89 +29,160 @@
 namespace terminal
 {
 
-template <typename T, size_t MaxParameters, size_t MaxSubParameters>
+class SequenceParameterBuilder;
+
 class SequenceParameters
 {
   public:
-    static_assert(MaxParameters >= 1);
-    static_assert(MaxSubParameters >= 1);
+    using Storage = std::array<uint16_t, 16>;
 
-    constexpr T& at(size_t i, size_t j = 0) { return _values.at(i * MaxSubParameters + j); }
-    constexpr T const& at(size_t i, size_t j = 0) const { return _values.at(i * MaxSubParameters + j); }
+    constexpr uint16_t at(size_t index) const noexcept { return _values[index]; }
 
-    constexpr void clear()
+    constexpr bool isSubParameter(size_t index) const noexcept
     {
-        _size = 0;
-        for (auto i = _subParameterCounts.begin(), e = _subParameterCounts.end(); i != e; ++i)
-            *i = 0;
+        return (_subParameterTest & (1 << index)) != 0;
     }
 
-    constexpr bool empty() const noexcept { return _size == 0; }
-    constexpr size_t size() const noexcept { return _size; }
-    size_t subParameterCount(size_t i) const noexcept { return _subParameterCounts[i]; }
-
-    constexpr void appendParameter(T value) noexcept { set(_size++, 0, value); }
-    constexpr void appendSubParameter(T value) noexcept
+    /// Returns the number of sub-params for a given non-sub param.
+    constexpr size_t subParameterCount(size_t index) const noexcept
     {
-        set(_size - 1, ++_subParameterCounts[_size], value);
-    }
-
-    constexpr void set(size_t i, size_t j, unsigned value) noexcept
-    {
-        if (i < MaxParameters && j < MaxSubParameters)
-            _values[i * MaxSubParameters + j] = value;
-    }
-
-    /// Shifts the parameter at (i, j) by one decimal position to the left (multiply by 10)
-    /// and then add @p value to it.
-    constexpr void multiplyBy10AndAdd(size_t i, size_t j, unsigned value) noexcept
-    {
-        if (i < MaxParameters && j < MaxSubParameters)
+        if (!isSubParameter(index))
         {
-            auto const offset = i * MaxSubParameters + j;
-            _values[offset] = _values[offset] * 10 + value;
+            index++;
+            auto const start = index;
+            while (index < 16 && isSubParameter(index))
+                index++;
+            return index - start;
         }
+        return 0;
     }
+
+    constexpr void clear() noexcept
+    {
+        _values[0] = 0;
+        _subParameterTest = 0;
+        _count = 0;
+    }
+
+    constexpr bool empty() const noexcept { return _count == 0; }
+    constexpr size_t count() const noexcept { return _count; }
+
+    std::string subParameterBitString() const { return fmt::format("{:016b}: ", _subParameterTest); }
 
     std::string str() const
     {
         std::string s;
 
-        for (size_t i = 0; i < size(); ++i)
+        auto const e = count();
+        for (size_t i = 0; i != e; ++i)
         {
-            if (i)
-                s += ';';
+            if (!s.empty())
+                s += isSubParameter(i) ? ':' : ';';
 
-            s += std::to_string(at(i));
-            for (size_t j = 1; j < subParameterCount(i); ++j)
-            {
-                if (j)
-                    s += ':';
-                s += std::to_string(at(i, j));
-            }
+            if (isSubParameter(i) && !_values[i])
+                continue;
+
+            s += std::to_string(_values[i]);
         }
 
         return s;
     }
 
   private:
-    std::array<T, MaxParameters * MaxSubParameters> _values {};
-    std::array<size_t, MaxParameters> _subParameterCounts {};
-    size_t _size = 0;
+    friend class SequenceParameterBuilder;
+    Storage _values {};
+    uint16_t _subParameterTest = 0;
+    size_t _count = 0;
+};
+
+class SequenceParameterBuilder
+{
+  public:
+    using Storage = SequenceParameters::Storage;
+
+    explicit SequenceParameterBuilder(SequenceParameters& p):
+        _parameters { p }, _currentParameter { p._values.begin() }
+    {
+    }
+
+    void reset()
+    {
+        _parameters.clear();
+        _currentParameter = _parameters._values.begin();
+    }
+
+    void nextParameter()
+    {
+        if (_currentParameter != _parameters._values.end())
+        {
+            ++_currentParameter;
+            *_currentParameter = 0;
+            _parameters._subParameterTest >>= 1;
+        }
+    }
+
+    void nextSubParameter()
+    {
+        if (_currentParameter != _parameters._values.end())
+        {
+            ++_currentParameter;
+            *_currentParameter = 0;
+            _parameters._subParameterTest = (_parameters._subParameterTest >> 1) | (1 << 15);
+        }
+    }
+
+    constexpr void multiplyBy10AndAdd(uint8_t value) noexcept
+    {
+        *_currentParameter = *_currentParameter * 10 + value;
+    }
+
+    constexpr void apply(uint16_t value) noexcept
+    {
+        if (value >= 10)
+            multiplyBy10AndAdd(value / 10);
+        multiplyBy10AndAdd(value % 10);
+    }
+
+    constexpr void set(uint16_t value) noexcept { *_currentParameter = value; }
+
+    constexpr bool isSubParameter(size_t index) const noexcept
+    {
+        return (_parameters._subParameterTest & (1 << (count() - 1 - index))) != 0;
+    }
+
+    constexpr size_t count() const noexcept
+    {
+        auto const result =
+            std::distance(const_cast<SequenceParameterBuilder*>(this)->_parameters._values.begin(),
+                          _currentParameter)
+            + 1;
+        if (!(result == 1 && _parameters._values[0] == 0))
+            return result;
+        else
+            return 0;
+    }
+
+    constexpr void fixiate() noexcept
+    {
+        _parameters._count = count();
+        _parameters._subParameterTest >>= 16 - _parameters._count;
+    }
+
+  private:
+    SequenceParameters& _parameters;
+    Storage::iterator _currentParameter;
 };
 
 /// Helps constructing VT functions as they're being parsed by the VT parser.
 class Sequence
 {
   public:
-    size_t constexpr static MaxParameters = 8;
-    size_t constexpr static MaxSubParameters = 6;
     size_t constexpr static MaxOscLength = 512;
 
-    using Parameter = uint32_t;
+    using Parameter = uint16_t;
     using Intermediaries = std::string;
     using DataString = std::string;
-    using Parameters = SequenceParameters<Parameter, MaxParameters, MaxSubParameters>;
+    using Parameters = SequenceParameters;
 
   private:
     FunctionCategory category_;
@@ -126,17 +199,22 @@ class Sequence
     Parameters& parameters() noexcept { return parameters_; }
     Parameters const& parameters() const noexcept { return parameters_; }
 
-    size_t parameterCount() const noexcept { return parameters_.size(); }
+    size_t parameterCount() const noexcept { return parameters_.count(); }
     size_t subParameterCount(size_t i) const noexcept { return parameters_.subParameterCount(i); }
 
     // mutators
     //
     void clear()
     {
+        clearExceptParameters();
+        parameters_.clear();
+    }
+
+    void clearExceptParameters()
+    {
         category_ = FunctionCategory::C0;
         leaderSymbol_ = 0;
         intermediateCharacters_.clear();
-        parameters_.clear();
         finalChar_ = 0;
         dataString_.clear();
     }
@@ -187,7 +265,7 @@ class Sequence
     template <typename T = unsigned>
     std::optional<T> param_opt(size_t parameterIndex) const noexcept
     {
-        if (parameterIndex < parameters_.size())
+        if (parameterIndex < parameters_.count())
         {
             if constexpr (crispy::is_boxed<T>)
                 return { T::cast_from(parameters_.at(parameterIndex)) };
@@ -207,7 +285,7 @@ class Sequence
     template <typename T = unsigned>
     T param(size_t parameterIndex) const noexcept
     {
-        assert(parameterIndex < parameters_.size());
+        assert(parameterIndex < parameters_.count());
         if constexpr (crispy::is_boxed<T>)
             return T::cast_from(parameters_.at(parameterIndex));
         else
@@ -217,12 +295,12 @@ class Sequence
     template <typename T = unsigned>
     T subparam(size_t parameterIndex, size_t subIndex) const noexcept
     {
-        assert(parameterIndex < parameters_.size());
-        assert(subIndex < subParameterCount(parameterIndex));
-        if constexpr (crispy::is_boxed<T>)
-            return T::cast_from(parameters_.at(parameterIndex, subIndex));
-        else
-            return static_cast<T>(parameters_.at(parameterIndex, subIndex));
+        return param<T>(parameterIndex + subIndex);
+    }
+
+    bool isSubParameter(size_t parameterIndex) const noexcept
+    {
+        return parameters_.isSubParameter(parameterIndex);
     }
 
     template <typename T = unsigned>

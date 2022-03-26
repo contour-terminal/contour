@@ -238,7 +238,7 @@ TEST_CASE("Terminal.DECCARA", "[terminal]")
                                    fmt::arg("left", left),
                                    fmt::arg("bottom", bottom),
                                    fmt::arg("right", right),
-                                   fmt::arg("sgr", 4)));
+                                   fmt::arg("sgr", "1;38:2::171:178:191;4")));
 
     mock.terminal().tick(ClockBase + chrono::seconds(2));
     mock.terminal().ensureFreshRenderBuffer();
@@ -252,7 +252,12 @@ TEST_CASE("Terminal.DECCARA", "[terminal]")
         {
             auto const& someCell =
                 mock.terminal().screen().at(LineOffset(line - 1), ColumnOffset(column - 1));
+            CHECK(someCell.styles() & terminal::CellFlags::Bold);
             CHECK(someCell.styles() & terminal::CellFlags::Underline);
+            auto const rgb = someCell.foregroundColor().rgb();
+            CHECK(unsigned(rgb.red) == 171);
+            CHECK(unsigned(rgb.green) == 178);
+            CHECK(unsigned(rgb.blue) == 179);
         }
 }
 
