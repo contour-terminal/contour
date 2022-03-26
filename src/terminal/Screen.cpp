@@ -2905,22 +2905,22 @@ namespace impl
         // - ":5:P"
         // Sub-parameters can also be delimited with ';' and thus are no sub-parameters per-se.
         size_t i = *pi;
+        auto const len = _seq.subParameterCount(i);
         if (_seq.subParameterCount(i) >= 1)
         {
-            switch (_seq.subparam(i, 0))
+            switch (_seq.param(i + 1))
             {
                 case 2: // ":2::R:G:B" and ":2:R:G:B"
                 {
-                    auto const len = _seq.subParameterCount(i);
                     if (len == 4 || len == 5)
                     {
                         // NB: subparam(i, 1) may be ignored
-                        auto const r = _seq.subparam(i, len - 3);
-                        auto const g = _seq.subparam(i, len - 2);
-                        auto const b = _seq.subparam(i, len - 1);
+                        auto const r = _seq.subparam(i, len - 2);
+                        auto const g = _seq.subparam(i, len - 1);
+                        auto const b = _seq.subparam(i, len - 0);
                         if (r <= 255 && g <= 255 && b <= 255)
                         {
-                            *pi += len + 1;
+                            *pi += len;
                             return Color { RGBColor {
                                 static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b) } };
                         }
@@ -2930,16 +2930,13 @@ namespace impl
                 case 3: // ":3:F:C:M:Y" (TODO)
                 case 4: // ":4:F:C:M:Y:K" (TODO)
                 {
-                    auto const len = _seq.subParameterCount(i);
-                    *pi += len + 1;
+                    *pi += len;
                     break;
                 }
                 case 5: // ":5:P"
+                    *pi += len;
                     if (auto const P = _seq.subparam(i, 1); P <= 255)
-                    {
-                        *pi += 3;
                         return static_cast<IndexedColor>(P);
-                    }
                     break;
                 default: break; // XXX invalid sub parameter
             }

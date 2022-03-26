@@ -250,14 +250,15 @@ TEST_CASE("Terminal.DECCARA", "[terminal]")
     for (auto line = top; line <= bottom; ++line)
         for (auto column = left; column <= right; ++column)
         {
-            auto const& someCell =
-                mock.terminal().screen().at(LineOffset(line - 1), ColumnOffset(column - 1));
-            CHECK(someCell.styles() & terminal::CellFlags::Bold);
-            CHECK(someCell.styles() & terminal::CellFlags::Underline);
+            // clang-format off
+            auto const& someCell = mock.terminal().screen().at(LineOffset(line - 1), ColumnOffset(column - 1));
             auto const rgb = someCell.foregroundColor().rgb();
-            CHECK(unsigned(rgb.red) == 171);
-            CHECK(unsigned(rgb.green) == 178);
-            CHECK(unsigned(rgb.blue) == 179);
+            auto const colorDec = fmt::format("{}/{}/{}", unsigned(rgb.red), unsigned(rgb.green), unsigned(rgb.blue));
+            INFO(fmt::format("at line {} column {}", line, column));
+            CHECK(colorDec == "171/178/191");
+            CHECK(someCell.isFlagEnabled(terminal::CellFlags::Bold));
+            CHECK(someCell.isFlagEnabled(terminal::CellFlags::Underline));
+            // clang-format on
         }
 }
 
