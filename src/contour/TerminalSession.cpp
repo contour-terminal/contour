@@ -74,6 +74,14 @@ namespace
         return fmt::format("{}: Unhandled exception caught ({}). {}", where, typeid(e).name(), e.what());
     }
 
+    void setThreadName(char const* name)
+    {
+#if defined(__APPLE__)
+        pthread_setname_np(name);
+#elif !defined(_WIN32)
+        pthread_setname_np(pthread_self(), name);
+#endif
+    }
 } // namespace
 
 TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
@@ -166,13 +174,9 @@ void TerminalSession::start()
 
 void TerminalSession::mainLoop()
 {
-    mainLoopThreadID_ = this_thread::get_id();
+    setThreadName("Terminal.Loop");
 
-#if defined(__APPLE__)
-    pthread_setname_np("Terminal.Loop");
-#elif !defined(_WIN32)
-    pthread_setname_np(pthread_self(), "Terminal.Loop");
-#endif
+    mainLoopThreadID_ = this_thread::get_id();
 
     SessionLog()("Starting main loop with thread id {}", [&]() {
         stringstream sstr;
