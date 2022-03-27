@@ -31,6 +31,13 @@ namespace terminal
 
 class SequenceParameterBuilder;
 
+/**
+ * CSI parameter API.
+ *
+ * This object holds the numeric parameters as used in a CSI sequence.
+ *
+ * @note Use SequenceParameterBuilder for filling a SequenceParameters object.
+ */
 class SequenceParameters
 {
   public:
@@ -95,6 +102,13 @@ class SequenceParameters
     size_t _count = 0;
 };
 
+/**
+ * SequenceParameters builder API.
+ *
+ * Used to progressively fill a SequenceParameters object.
+ *
+ * @see SequenceParameters
+ */
 class SequenceParameterBuilder
 {
   public:
@@ -173,7 +187,9 @@ class SequenceParameterBuilder
     Storage::iterator _currentParameter;
 };
 
-/// Helps constructing VT functions as they're being parsed by the VT parser.
+/**
+ * Helps constructing VT functions as they're being parsed by the VT parser.
+ */
 class Sequence
 {
   public:
