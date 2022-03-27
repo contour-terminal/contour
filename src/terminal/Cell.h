@@ -104,7 +104,7 @@ class CONTOUR_PACKED Cell
     Cell() noexcept;
     Cell(Cell const& v) noexcept;
     Cell& operator=(Cell const& v) noexcept;
-    explicit Cell(GraphicsAttributes _attrib) noexcept;
+    explicit Cell(GraphicsAttributes const& _attributes) noexcept;
 
     Cell(Cell&&) noexcept = default;
     Cell& operator=(Cell&&) noexcept = default;
@@ -128,9 +128,6 @@ class CONTOUR_PACKED Cell
 
     constexpr uint8_t width() const noexcept;
     void setWidth(uint8_t _width) noexcept;
-
-    /*TODO(perf) [[deprecated]]*/ GraphicsAttributes attributes() const noexcept;
-    void setAttributes(GraphicsAttributes const& _attributes) noexcept;
 
     CellFlags styles() const noexcept;
 
@@ -178,6 +175,9 @@ class CONTOUR_PACKED Cell
     CellExtra& extra() noexcept;
 
   private:
+    template <typename ... Args>
+    void createExtra(Args ... args) noexcept;
+
     // Cell data
     char32_t codepoint_ = 0; /// Primary Unicode codepoint to be displayed.
     Color foregroundColor_ = DefaultColor();
@@ -187,15 +187,36 @@ class CONTOUR_PACKED Cell
 };
 
 // {{{ impl: ctor's
+template <typename ... Args>
+inline void Cell::createExtra(Args ... args) noexcept
+{
+    try
+    {
+        extra_.reset(new CellExtra(std::forward<Args>(args)...));
+    }
+    catch (std::bad_alloc)
+    {
+        Require(extra_.ptr_ != nullptr);
+    }
+}
+
 inline Cell::Cell() noexcept
 {
     setWidth(1);
 }
 
-inline Cell::Cell(GraphicsAttributes _attrib) noexcept
+inline Cell::Cell(GraphicsAttributes const& _attributes) noexcept
 {
     setWidth(1);
-    setAttributes(_attrib);
+
+    foregroundColor_ = _attributes.foregroundColor;
+    backgroundColor_ = _attributes.backgroundColor;
+
+    if (_attributes.underlineColor != DefaultColor() || extra_)
+        extra().underlineColor = _attributes.underlineColor;
+
+    if (_attributes.styles != CellFlags::None || extra_)
+        extra().flags = _attributes.styles;
 }
 
 inline Cell::Cell(Cell const& v) noexcept:
@@ -204,7 +225,7 @@ inline Cell::Cell(Cell const& v) noexcept:
     backgroundColor_ { v.backgroundColor_ }
 {
     if (v.extra_)
-        extra_.reset(new CellExtra(*v.extra_));
+        createExtra(*v.extra_);
 }
 
 inline Cell& Cell::operator=(Cell const& v) noexcept
@@ -213,7 +234,7 @@ inline Cell& Cell::operator=(Cell const& v) noexcept
     foregroundColor_ = v.foregroundColor_;
     backgroundColor_ = v.backgroundColor_;
     if (v.extra_)
-        extra_.reset(new CellExtra(*v.extra_));
+        createExtra(*v.extra_);
     return *this;
 }
 // }}}
@@ -414,20 +435,8 @@ inline CellExtra& Cell::extra() noexcept
 {
     if (extra_)
         return *extra_;
-    extra_.reset(new CellExtra());
+    createExtra();
     return *extra_;
-}
-
-inline void Cell::setAttributes(GraphicsAttributes const& _attributes) noexcept
-{
-    foregroundColor_ = _attributes.foregroundColor;
-    backgroundColor_ = _attributes.backgroundColor;
-
-    if (_attributes.underlineColor != DefaultColor() || extra_)
-        extra().underlineColor = _attributes.underlineColor;
-
-    if (_attributes.styles != CellFlags::None || extra_)
-        extra().flags = _attributes.styles;
 }
 
 inline CellFlags Cell::styles() const noexcept
@@ -481,13 +490,13 @@ inline RGBColor Cell::getUnderlineColor(ColorPalette const& _colorPalette,
         return _defaultColor;
 
     float const opacity = [this]() {
-        if (styles() & CellFlags::Faint)
+        if (isFlagEnabled(CellFlags::Faint))
             return 0.5f;
         else
             return 1.0f;
     }();
 
-    bool const bright = (styles() & CellFlags::Bold) != 0;
+    bool const bright = isFlagEnabled(CellFlags::Bold) != 0;
     return apply(_colorPalette, underlineColor(), ColorTarget::Foreground, bright) * opacity;
 }
 
@@ -495,19 +504,19 @@ inline std::pair<RGBColor, RGBColor> Cell::makeColors(ColorPalette const& _color
                                                       bool _reverseVideo) const noexcept
 {
     float const opacity = [this]() { // TODO: don't make opacity dependant on Faint-attribute.
-        if (styles() & CellFlags::Faint)
+        if (isFlagEnabled(CellFlags::Faint))
             return 0.5f;
         else
             return 1.0f;
     }();
 
-    bool const bright = (styles() & CellFlags::Bold);
+    bool const bright = isFlagEnabled(CellFlags::Bold);
 
     auto const [fgColorTarget, bgColorTarget] =
         _reverseVideo ? std::pair { ColorTarget::Background, ColorTarget::Foreground }
                       : std::pair { ColorTarget::Foreground, ColorTarget::Background };
 
-    return (styles() & CellFlags::Inverse) == 0
+    return isFlagEnabled(CellFlags::Inverse) == 0
                ? std::pair { apply(_colorPalette, foregroundColor(), fgColorTarget, bright) * opacity,
                              apply(_colorPalette, backgroundColor(), bgColorTarget, false) }
                : std::pair { apply(_colorPalette, backgroundColor(), bgColorTarget, bright) * opacity,
