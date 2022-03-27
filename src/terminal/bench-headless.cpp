@@ -215,7 +215,7 @@ class ContourHeadlessBench: public crispy::App
             benchOptionsFor("grid"),
             "terminal with screen buffer");
         if (rv == EXIT_SUCCESS)
-            cout << fmt::format("{:>12}: {}\n\n", "history size", *vt.screen().maxHistoryLineCount());
+            cout << fmt::format("{:>12}: {}\n\n", "history size", *vt.maxHistoryLineCount());
         return rv;
     }
 

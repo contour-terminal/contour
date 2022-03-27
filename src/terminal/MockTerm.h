@@ -32,7 +32,6 @@ class MockTerm: public Terminal::Events
     }
 
     decltype(auto) pageSize() const noexcept { return terminal.pageSize(); }
-    decltype(auto) screen() noexcept { return terminal.screen(); }
     decltype(auto) state() noexcept { return terminal.state(); }
     decltype(auto) state() const noexcept { return terminal.state(); }
 

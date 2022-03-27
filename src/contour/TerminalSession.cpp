@@ -247,7 +247,7 @@ void TerminalSession::requestCaptureBuffer(LineCount lines, bool logical)
     display_->post([this, lines, logical]() {
         if (display_->requestPermission(profile_.permissions.captureBuffer, "capture screen buffer"))
         {
-            terminal_.screen().captureBuffer(lines, logical);
+            terminal_.primaryScreen().captureBuffer(lines, logical);
             DisplayLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
             flushInput();
         }
@@ -630,9 +630,14 @@ bool TerminalSession::operator()(actions::FollowHyperlink)
         terminal::CellLocation { currentMousePosition.line
                                      + terminal().viewport().scrollOffset().as<LineOffset>(),
                                  currentMousePosition.column };
-    if (terminal().screen().contains(currentMousePosition))
+    if (terminal().contains(currentMousePosition))
     {
-        if (auto hyperlink = terminal().screen().hyperlinkAt(currentMousePositionRel))
+        std::shared_ptr<HyperlinkInfo> hyperlink;
+        if (terminal().isPrimaryScreen())
+            hyperlink = terminal().primaryScreen().hyperlinkAt(currentMousePositionRel);
+        else
+            hyperlink = terminal().alternateScreen().hyperlinkAt(currentMousePositionRel);
+        if (hyperlink)
         {
             followHyperlink(*hyperlink);
             return true;
@@ -678,7 +683,7 @@ bool TerminalSession::operator()(actions::OpenConfiguration)
 bool TerminalSession::operator()(actions::OpenFileManager)
 {
     auto const _l = scoped_lock { terminal() };
-    auto const& cwd = terminal().screen().currentWorkingDirectory();
+    auto const& cwd = terminal().currentWorkingDirectory();
     if (!QDesktopServices::openUrl(QUrl(QString::fromUtf8(cwd.c_str()))))
         errorlog()("Could not open file \"{}\".", cwd);
 
@@ -739,7 +744,8 @@ bool TerminalSession::operator()(actions::ResetFontSize)
 bool TerminalSession::operator()(actions::ScreenshotVT)
 {
     auto _l = lock_guard { terminal() };
-    auto const screenshot = terminal().screen().screenshot();
+    auto const screenshot = terminal().isPrimaryScreen() ? terminal().primaryScreen().screenshot()
+                                                         : terminal().alternateScreen().screenshot();
     ofstream ofs { "screenshot.vt", ios::trunc | ios::binary };
     ofs << screenshot;
     return true;
@@ -849,7 +855,7 @@ bool TerminalSession::operator()(actions::WriteScreen const& _event)
 void TerminalSession::setDefaultCursor()
 {
     using Type = terminal::ScreenType;
-    switch (terminal().screen().bufferType())
+    switch (terminal().screenType())
     {
         case Type::Primary: display_->setMouseCursorShape(MouseCursorShape::IBeam); break;
         case Type::Alternate: display_->setMouseCursorShape(MouseCursorShape::Arrow); break;
@@ -919,7 +925,7 @@ void TerminalSession::spawnNewTerminal(string const& _profileName)
             return ptyProcess->workingDirectory();
 #else
         auto const _l = scoped_lock { terminal_ };
-        return terminal_.screen().currentWorkingDirectory();
+        return terminal_.currentWorkingDirectory();
 #endif
         return "."s;
     }();
@@ -956,7 +962,7 @@ void TerminalSession::configureTerminal()
 {
     auto const _l = scoped_lock { terminal_ };
     SessionLog()("Configuring terminal.");
-    auto& screen = terminal_.screen();
+    auto& screen = terminal_.primaryScreen();
 
     terminal_.setWordDelimiters(config_.wordDelimiters);
     terminal_.setMouseProtocolBypassModifier(config_.bypassMouseProtocolModifier);
@@ -976,12 +982,12 @@ void TerminalSession::configureTerminal()
     // if (!_terminalView.renderer().renderTargetAvailable())
     //     return;
 
-    screen.setMaxHistoryLineCount(profile_.maxHistoryLineCount);
+    terminal_.setMaxHistoryLineCount(profile_.maxHistoryLineCount);
     terminal_.setCursorBlinkingInterval(profile_.cursorBlinkInterval);
     terminal_.setCursorDisplay(profile_.cursorDisplay);
     terminal_.setCursorShape(profile_.cursorShape);
-    terminal_.screen().colorPalette() = profile_.colors;
-    terminal_.screen().defaultColorPalette() = profile_.colors;
+    terminal_.colorPalette() = profile_.colors;
+    terminal_.defaultColorPalette() = profile_.colors;
 }
 
 void TerminalSession::configureDisplay()
@@ -1013,7 +1019,7 @@ void TerminalSession::configureDisplay()
 
     display_->setHyperlinkDecoration(profile_.hyperlinkDecoration.normal, profile_.hyperlinkDecoration.hover);
 
-    display_->setWindowTitle(terminal_.screen().windowTitle());
+    display_->setWindowTitle(terminal_.windowTitle());
 }
 
 uint8_t TerminalSession::matchModeFlags() const

@@ -161,14 +161,14 @@ class Sequencer
     void putPM(char) {}
     void dispatchPM() {}
 
+    void hookParser(std::unique_ptr<ParserExtension> parserExtension) noexcept
+    {
+        hookedParser_ = std::move(parserExtension);
+    }
+
   private:
     void resetUtf8DecoderState() noexcept;
     void handleSequence();
-
-    [[nodiscard]] std::unique_ptr<ParserExtension> hookSTP(Sequence const& _ctx);
-    [[nodiscard]] std::unique_ptr<ParserExtension> hookSixel(Sequence const& _ctx);
-    [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRQSS(Sequence const& _ctx);
-    [[nodiscard]] std::unique_ptr<ParserExtension> hookXTGETTCAP(Sequence const& /*_seq*/);
 
     // private data
     //
@@ -176,9 +176,6 @@ class Sequencer
     unicode::utf8_decoder_state utf8DecoderState_ = {};
     Sequence sequence_ {};
     SequenceParameterBuilder parameterBuilder_;
-
-    size_t currentParameterIndex_ = 0;
-    size_t currentSubParameterIndex_ = 0;
 
     std::unique_ptr<ParserExtension> hookedParser_;
     std::unique_ptr<SixelImageBuilder> sixelImageBuilder_;

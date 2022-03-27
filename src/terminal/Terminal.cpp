@@ -140,10 +140,11 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
              _sixelCursorConformance,
              move(_colorPalette),
              _allowReflowOnResize },
-    primaryScreen_ { state_, ScreenType::Primary },
-    alternateScreen_ { state_, ScreenType::Alternate },
     // clang-format on
-    viewport_ { primaryScreen_,
+    primaryScreen_ { state_, ScreenType::Primary, state_.primaryBuffer },
+    alternateScreen_ { state_, ScreenType::Alternate, state_.alternateBuffer },
+    sequenceHandler_ { primaryScreen_ },
+    viewport_ { *this,
                 [this]() {
                     breakLoopAndRefreshRenderBuffer();
                 } },
@@ -326,9 +327,18 @@ bool Terminal::SelectionHelper::wordDelimited(CellLocation _pos) const noexcept
     // Word selection may be off by one
     _pos.column = min(_pos.column, boxed_cast<ColumnOffset>(terminal->pageSize().columns - 1));
 
-    Cell const& cell = terminal->screen().at(_pos);
-    return cell.empty()
-           || terminal->wordDelimiters_.find(cell.codepoint(0)) != terminal->wordDelimiters_.npos;
+    if (terminal->isPrimaryScreen())
+    {
+        auto const& cell = terminal->primaryScreen().at(_pos);
+        return cell.empty()
+               || terminal->wordDelimiters_.find(cell.codepoint(0)) != terminal->wordDelimiters_.npos;
+    }
+    else
+    {
+        auto const& cell = terminal->alternateScreen().at(_pos);
+        return cell.empty()
+               || terminal->wordDelimiters_.find(cell.codepoint(0)) != terminal->wordDelimiters_.npos;
+    }
 }
 
 bool Terminal::SelectionHelper::wrappedLine(LineOffset _line) const noexcept
@@ -341,7 +351,10 @@ bool Terminal::SelectionHelper::cellEmpty(CellLocation _pos) const noexcept
     // Word selection may be off by one
     _pos.column = min(_pos.column, boxed_cast<ColumnOffset>(terminal->pageSize().columns - 1));
 
-    return terminal->screen().at(_pos).empty();
+    if (terminal->isPrimaryScreen())
+        return terminal->primaryScreen().at(_pos).empty();
+    else
+        return terminal->alternateScreen().at(_pos).empty();
 }
 
 int Terminal::SelectionHelper::cellWidth(CellLocation _pos) const noexcept
@@ -349,7 +362,10 @@ int Terminal::SelectionHelper::cellWidth(CellLocation _pos) const noexcept
     // Word selection may be off by one
     _pos.column = min(_pos.column, boxed_cast<ColumnOffset>(terminal->pageSize().columns - 1));
 
-    return terminal->screen().at(_pos).width();
+    if (terminal->isPrimaryScreen())
+        return terminal->primaryScreen().at(_pos).width();
+    else
+        return terminal->alternateScreen().at(_pos).width();
 }
 
 void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
@@ -386,87 +402,92 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
 
     _output.cursor = renderCursor();
     auto const reverseVideo = isModeEnabled(terminal::DECMode::ReverseVideo);
-    screen_.render(
-        [this,
-         reverseVideo,
-         &_output,
-         prevWidth = 0,
-         prevHasCursor = false,
-         state = State::Gap,
-         lineNr = LineOffset(0)](Cell const& _cell, LineOffset _line, ColumnOffset _column) mutable {
-            // clang-format off
+
+    auto renderCell = [this,
+                       reverseVideo,
+                       &_output,
+                       prevWidth = 0,
+                       prevHasCursor = false,
+                       state = State::Gap,
+                       lineNr =
+                           LineOffset(0)](Cell const& _cell, LineOffset _line, ColumnOffset _column) mutable {
+        // clang-format off
             auto& screen_ = primaryScreen_; // TODO(pr)
             auto const selected = isSelected( CellLocation { _line - boxed_cast<LineOffset>(viewport_.scrollOffset()), _column });
             auto const pos = CellLocation { _line, _column };
             auto const gridPosition = viewport_.translateScreenToGridCoordinate(pos);
-            auto const hasCursor = gridPosition == screen_.realCursorPosition();
+            auto const hasCursor = gridPosition == realCursorPosition();
             bool const paintCursor =
                 (hasCursor || (prevHasCursor && prevWidth == 2))
                     && _output.cursor.has_value()
                     && _output.cursor->shape == CursorShape::Block;
-            auto const [fg, bg] = makeColors(screen_.colorPalette(), _cell, reverseVideo, selected, paintCursor);
-            // clang-format on
+            auto const [fg, bg] = makeColors(colorPalette(), _cell, reverseVideo, selected, paintCursor);
+        // clang-format on
 
-            prevWidth = _cell.width();
-            prevHasCursor = hasCursor;
+        prevWidth = _cell.width();
+        prevHasCursor = hasCursor;
 
-            auto const cellEmpty = _cell.empty();
-            auto const customBackground = bg != screen_.colorPalette().defaultBackground || !!_cell.styles();
+        auto const cellEmpty = _cell.empty();
+        auto const customBackground = bg != colorPalette().defaultBackground || !!_cell.styles();
 
-            bool isNewLine = false;
-            if (lineNr != _line)
-            {
-                isNewLine = true;
-                lineNr = _line;
-                prevWidth = 0;
-                prevHasCursor = false;
-                if (!_output.screen.empty())
+        bool isNewLine = false;
+        if (lineNr != _line)
+        {
+            isNewLine = true;
+            lineNr = _line;
+            prevWidth = 0;
+            prevHasCursor = false;
+            if (!_output.screen.empty())
+                _output.screen.back().groupEnd = true;
+        }
+
+        switch (state)
+        {
+            case State::Gap:
+                if (!cellEmpty || customBackground)
+                {
+                    state = State::Sequence;
+                    // clang-format off
+                    _output.screen.emplace_back(makeRenderCell(colorPalette(),
+                                                               state_.hyperlinks,
+                                                               _cell,
+                                                               fg,
+                                                               bg,
+                                                               _line,
+                                                               _column));
+                    // clang-format on
+                    _output.screen.back().groupStart = true;
+                }
+                break;
+            case State::Sequence:
+                if (cellEmpty && !customBackground)
+                {
                     _output.screen.back().groupEnd = true;
-            }
-
-            switch (state)
-            {
-                case State::Gap:
-                    if (!cellEmpty || customBackground)
-                    {
-                        state = State::Sequence;
-                        // clang-format off
-                    _output.screen.emplace_back(makeRenderCell(screen_.colorPalette(),
-                                                               screen_.hyperlinks(),
+                    state = State::Gap;
+                }
+                else
+                {
+                    // clang-format off
+                    _output.screen.emplace_back(makeRenderCell(colorPalette(),
+                                                               state_.hyperlinks,
                                                                _cell,
                                                                fg,
                                                                bg,
                                                                _line,
                                                                _column));
-                        // clang-format on
+                    // clang-format on
+
+                    if (isNewLine)
                         _output.screen.back().groupStart = true;
-                    }
-                    break;
-                case State::Sequence:
-                    if (cellEmpty && !customBackground)
-                    {
-                        _output.screen.back().groupEnd = true;
-                        state = State::Gap;
-                    }
-                    else
-                    {
-                        // clang-format off
-                    _output.screen.emplace_back(makeRenderCell(screen_.colorPalette(),
-                                                               screen_.hyperlinks(),
-                                                               _cell,
-                                                               fg,
-                                                               bg,
-                                                               _line,
-                                                               _column));
-                        // clang-format on
+                }
+                break;
+        }
+    };
 
-                        if (isNewLine)
-                            _output.screen.back().groupStart = true;
-                    }
-                    break;
-            }
-        },
-        viewport_.scrollOffset());
+    if (isPrimaryScreen())
+        primaryScreen_.render(move(renderCell), viewport_.scrollOffset());
+    else
+        alternateScreen_.render(move(renderCell), viewport_.scrollOffset());
 
     if (href)
         href->state = HyperlinkState::Inactive;
@@ -858,9 +879,14 @@ void Terminal::verifyState()
     Require(*currentMousePosition_.column < *pageSize().columns);
     Require(*currentMousePosition_.line < *pageSize().lines);
 
-    Require(state_.activeGrid->pageSize() == state_.pageSize);
+    if (isPrimaryScreen())
+        Require(state_.primaryBuffer.pageSize() == state_.pageSize);
+    else
+        Require(state_.alternateBuffer.pageSize() == state_.pageSize);
+
     Require(*state_.cursor.position.column < *state_.pageSize.columns);
     Require(*state_.cursor.position.line < *state_.pageSize.lines);
+
     Require(state_.tabs.empty() || state_.tabs.back() < unbox<ColumnOffset>(state_.pageSize.columns));
 
     // verify cursor positions
@@ -1084,7 +1110,28 @@ void Terminal::setMouseWheelMode(InputGenerator::MouseWheelMode _mode)
 
 void Terminal::setWindowTitle(string_view _title)
 {
+    state_.windowTitle = _title;
     eventListener_.setWindowTitle(_title);
+}
+
+std::string const& Terminal::windowTitle() const noexcept
+{
+    return state_.windowTitle;
+}
+
+void Terminal::saveWindowTitle()
+{
+    state_.savedWindowTitles.push(state_.windowTitle);
+}
+
+void Terminal::restoreWindowTitle()
+{
+    if (!state_.savedWindowTitles.empty())
+    {
+        state_.windowTitle = state_.savedWindowTitles.top();
+        state_.savedWindowTitles.pop();
+        setWindowTitle(state_.windowTitle);
+    }
 }
 
 void Terminal::setTerminalProfile(string const& _configProfileName)
@@ -1463,17 +1510,18 @@ void Terminal::setScreen(ScreenType _type)
     switch (_type)
     {
         case ScreenType::Primary:
+            setSequenceHandler(primaryScreen_);
             setMouseWheelMode(InputGenerator::MouseWheelMode::Default);
-            state_.activeGrid = &state_.primaryBuffer;
             break;
         case ScreenType::Alternate:
+            setSequenceHandler(alternateScreen_);
             if (isModeEnabled(DECMode::MouseAlternateScroll))
                 setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
             else
                 setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
-            state_.activeGrid = &state_.alternateBuffer;
             break;
     }
+
     state_.screenType = _type;
 
     // Reset wrapPending-flag when switching buffer.
@@ -1570,5 +1618,15 @@ void Terminal::onBufferScrolled(LineCount _n) noexcept
         selection_.reset();
 }
 // }}}
+
+void Terminal::setMaxHistoryLineCount(LineCount _maxHistoryLineCount)
+{
+    primaryScreen_.grid().setMaxHistoryLineCount(_maxHistoryLineCount);
+}
+
+LineCount Terminal::maxHistoryLineCount() const noexcept
+{
+    return primaryScreen_.grid().maxHistoryLineCount();
+}
 
 } // namespace terminal

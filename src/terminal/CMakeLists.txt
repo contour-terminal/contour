@@ -83,6 +83,7 @@ set(terminal_SOURCES
     Terminal.cpp
     TerminalState.cpp
     VTType.cpp
+    Viewport.cpp
     primitives.cpp
     pty/MockPty.cpp
     pty/MockViewPty.cpp

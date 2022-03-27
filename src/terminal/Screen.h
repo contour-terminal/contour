@@ -63,10 +63,10 @@ namespace terminal
  * to be viewn.
  */
 template <typename Cell>
-class Screen: public capabilities::StaticDatabase
+class Screen: public SequenceHandler, public capabilities::StaticDatabase
 {
   public:
-    Screen(TerminalState& terminalState, ScreenType screenType);
+    Screen(TerminalState& terminalState, ScreenType screenType, Grid<Cell>& grid);
 
     Screen(Screen const&) = delete;
     Screen& operator=(Screen const&) = delete;
@@ -81,19 +81,20 @@ class Screen: public capabilities::StaticDatabase
 
     void setTerminalId(VTType _id) noexcept { _state.terminalId = _id; }
 
-    void setMaxHistoryLineCount(LineCount _maxHistoryLineCount);
-    LineCount maxHistoryLineCount() const noexcept { return grid().maxHistoryLineCount(); }
-
     LineCount historyLineCount() const noexcept { return grid().historyLineCount(); }
 
-    void writeText(char32_t _char);
-    void writeText(std::string_view _chars);
+    // {{{ SequenceHandler overrides
+    void writeText(char32_t _char) override;
+    void writeText(std::string_view _chars) override;
+    void executeControlCode(char controlCode) override;
+    void processSequence(Sequence const& seq) override;
+    // }}}
 
     /// Renders the full screen by passing every grid cell to the callback.
     template <typename Renderer>
     void render(Renderer&& _render, ScrollOffset _scrollOffset = {}) const
     {
-        _state.activeGrid->render(std::forward<Renderer>(_render), _scrollOffset);
+        _grid.render(std::forward<Renderer>(_render), _scrollOffset);
     }
 
     /// Renders the full screen as text into the given string. Each line will be terminated by LF.
@@ -171,9 +172,6 @@ class Screen: public capabilities::StaticDatabase
 
     /// Sets the current working directory as file:// URL.
     void setCurrentWorkingDirectory(std::string const& _url); // OSC 7
-
-    /// @returns either an empty string or a file:// URL of the last set working directory.
-    std::string const& currentWorkingDirectory() const noexcept { return _state.currentWorkingDirectory; }
 
     void hyperlink(std::string _id, std::string _uri);                   // OSC 8
     void notify(std::string const& _title, std::string const& _content); // OSC 777
@@ -404,10 +402,6 @@ class Screen: public capabilities::StaticDatabase
 
     bool synchronizeOutput() const noexcept { return false; } // TODO
 
-    void setWindowTitle(std::string const& _title);
-    void saveWindowTitle();
-    void restoreWindowTitle();
-
     void scrollUp(LineCount n) { scrollUp(n, _state.margin); }
     void scrollDown(LineCount n) { scrollDown(n, _state.margin); }
 
@@ -416,17 +410,11 @@ class Screen: public capabilities::StaticDatabase
     /// @returns the primary screen's grid.
     Grid<Cell>& primaryGrid() noexcept { return _state.primaryBuffer; }
 
-    /// @returns the primary screen's grid if primary screen is active.
-    Grid<Cell> const& grid() const noexcept { return *_state.activeGrid; }
-
-    /// @returns the primary screen's grid if primary screen is active.
-    Grid<Cell>& grid() noexcept { return *_state.activeGrid; }
+    Grid<Cell> const& grid() const noexcept { return _grid; }
+    Grid<Cell>& grid() noexcept { return _grid; }
 
     /// @returns true iff given absolute line number is wrapped, false otherwise.
-    bool isLineWrapped(LineOffset _lineNumber) const noexcept
-    {
-        return _state.activeGrid->isLineWrapped(_lineNumber);
-    }
+    bool isLineWrapped(LineOffset _lineNumber) const noexcept { return _grid.isLineWrapped(_lineNumber); }
 
     ColorPalette& colorPalette() noexcept { return _state.colorPalette; }
     ColorPalette const& colorPalette() const noexcept { return _state.colorPalette; }
@@ -445,8 +433,6 @@ class Screen: public capabilities::StaticDatabase
     void resetInstructionCounter() noexcept { _state.instructionCounter = 0; }
     char32_t precedingGraphicCharacter() const noexcept { return _state.precedingGraphicCharacter; }
 
-    void executeControlCode(char controlCode);
-    void process(Sequence const& seq);
     void applyAndLog(FunctionDefinition const& function, Sequence const& seq);
     ApplyResult apply(FunctionDefinition const& function, Sequence const& seq);
 
@@ -472,9 +458,16 @@ class Screen: public capabilities::StaticDatabase
     /// Sets the current column to given logical column number.
     void setCurrentColumn(ColumnOffset _n);
 
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookSTP(Sequence const& seq);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookSixel(Sequence const& seq);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRQSS(Sequence const& seq);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookXTGETTCAP(Sequence const& seq);
+
     Terminal& _terminal;
     TerminalState& _state;
     ScreenType const _screenType;
+    Grid<Cell>& _grid;
+    std::unique_ptr<SixelImageBuilder> sixelImageBuilder_;
 };
 
 } // namespace terminal

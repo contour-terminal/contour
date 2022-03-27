@@ -166,7 +166,7 @@ TerminalWindow::~TerminalWindow()
 
 void TerminalWindow::onTerminalClosed()
 {
-    DisplayLog()("terminal closed: {}", terminalSession_->terminal().screen().windowTitle());
+    DisplayLog()("terminal closed: {}", terminalSession_->terminal().windowTitle());
     close();
 }
 

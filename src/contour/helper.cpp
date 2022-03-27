@@ -68,7 +68,7 @@ namespace
         auto constexpr MarginTop = 0;
         auto constexpr MarginLeft = 0;
 
-        auto const pageSize = session.terminal().screen().pageSize();
+        auto const pageSize = session.terminal().pageSize();
         auto const cellSize = session.display()->cellSize();
         auto const dpr = session.contentScale();
 

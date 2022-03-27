@@ -129,7 +129,7 @@ class MockTerm: public terminal::Terminal::Events
 
     void requestCaptureBuffer(LineCount lines, bool logical) override
     {
-        terminal_.screen().captureBuffer(lines, logical);
+        terminal_.primaryScreen().captureBuffer(lines, logical);
     }
 
     void logScreenText(std::string const& headline = "")
@@ -139,9 +139,9 @@ class MockTerm: public terminal::Terminal::Events
         else
             UNSCOPED_INFO(headline + ":");
 
-        for (int line = 1; line <= unbox<int>(terminal().screen().pageSize().lines); ++line)
+        for (int line = 1; line <= unbox<int>(terminal().pageSize().lines); ++line)
             UNSCOPED_INFO(fmt::format(
-                "[{}] \"{}\"", line, terminal().screen().grid().lineText(terminal::LineOffset(line))));
+                "[{}] \"{}\"", line, terminal().primaryScreen().grid().lineText(terminal::LineOffset(line))));
     }
 
   private:
@@ -252,7 +252,7 @@ TEST_CASE("Terminal.DECCARA", "[terminal]")
         for (auto column = left; column <= right; ++column)
         {
             // clang-format off
-            auto const& someCell = mock.terminal().screen().at(LineOffset(line - 1), ColumnOffset(column - 1));
+            auto const& someCell = mock.terminal().primaryScreen().at(LineOffset(line - 1), ColumnOffset(column - 1));
             auto const rgb = someCell.foregroundColor().rgb();
             auto const colorDec = fmt::format("{}/{}/{}", unsigned(rgb.red), unsigned(rgb.green), unsigned(rgb.blue));
             INFO(fmt::format("at line {} column {}, flags {}", line, column, someCell.styles()));

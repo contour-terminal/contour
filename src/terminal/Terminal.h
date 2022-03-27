@@ -17,6 +17,7 @@
 #include <terminal/RenderBuffer.h>
 #include <terminal/ScreenEvents.h>
 #include <terminal/Selector.h>
+#include <terminal/Sequence.h>
 #include <terminal/TerminalState.h>
 #include <terminal/Viewport.h>
 #include <terminal/primitives.h>
@@ -36,7 +37,7 @@
 namespace terminal
 {
 
-template <typename EventListener>
+template <typename Cell>
 class Screen;
 
 /// Terminal API to manage input and output devices of a pseudo terminal, such as keyboard, mouse, and screen.
@@ -93,6 +94,9 @@ class Terminal
 
     void setRefreshRate(double _refreshRate);
     void setLastMarkRangeOffset(LineOffset _value) noexcept;
+
+    void setMaxHistoryLineCount(LineCount _maxHistoryLineCount);
+    LineCount maxHistoryLineCount() const noexcept;
 
     bool isModeEnabled(AnsiMode m) const noexcept { return state_.modes.enabled(m); }
     bool isModeEnabled(DECMode m) const noexcept { return state_.modes.enabled(m); }
@@ -224,8 +228,8 @@ class Terminal
     void writeToScreen(std::string_view _text);
 
     // viewport management
-    Viewport<Cell>& viewport() noexcept { return viewport_; }
-    Viewport<Cell> const& viewport() const noexcept { return viewport_; }
+    Viewport& viewport() noexcept { return viewport_; }
+    Viewport const& viewport() const noexcept { return viewport_; }
 
     // {{{ Screen Render Proxy
     std::optional<std::chrono::milliseconds> nextRender() const;
@@ -302,13 +306,16 @@ class Terminal
         innerLock_.unlock();
     }
 
+    ColorPalette& colorPalette() noexcept { return state_.colorPalette; }
+    ColorPalette& defaultColorPalette() noexcept { return state_.defaultColorPalette; }
+
+    SequenceHandler& sequenceHandler() noexcept { return sequenceHandler_.get(); }
+    void setSequenceHandler(SequenceHandler& handler) noexcept { sequenceHandler_ = handler; }
+
     bool isPrimaryScreen() const noexcept { return state_.screenType == ScreenType::Primary; }
     bool isAlternateScreen() const noexcept { return state_.screenType == ScreenType::Alternate; }
-
+    ScreenType screenType() const noexcept { return state_.screenType; }
     void setScreen(ScreenType screenType);
-
-    Screen<Cell> const& screen() const noexcept { return primaryScreen_; }
-    Screen<Cell>& screen() noexcept { return primaryScreen_; }
 
     Screen<Cell> const& primaryScreen() const noexcept { return primaryScreen_; }
     Screen<Cell>& primaryScreen() noexcept { return primaryScreen_; }
@@ -318,7 +325,7 @@ class Terminal
 
     bool isLineWrapped(LineOffset _lineNumber) const noexcept
     {
-        return state_.activeGrid->isLineWrapped(_lineNumber);
+        return isPrimaryScreen() && primaryScreen_.isLineWrapped(_lineNumber);
     }
 
     CellLocation const& currentMousePosition() const noexcept { return currentMousePosition_; }
@@ -362,11 +369,11 @@ class Terminal
             return;
 
         if (isPrimaryScreen())
-            terminal::renderSelection(*selection_,
-                                      [&](CellLocation _pos) { _renderTarget(_pos, primaryScreen_.at(_pos)); });
+            terminal::renderSelection(
+                *selection_, [&](CellLocation _pos) { _renderTarget(_pos, primaryScreen_.at(_pos)); });
         else
-            terminal::renderSelection(*selection_,
-                                      [&](CellLocation _pos) { _renderTarget(_pos, alternateScreen_.at(_pos)); });
+            terminal::renderSelection(
+                *selection_, [&](CellLocation _pos) { _renderTarget(_pos, alternateScreen_.at(_pos)); });
     }
 
     void clearSelection();
@@ -442,6 +449,9 @@ class Terminal
     void setMouseTransport(MouseTransport _transport);
     void setMouseWheelMode(InputGenerator::MouseWheelMode _mode);
     void setWindowTitle(std::string_view _title);
+    std::string const& windowTitle() const noexcept;
+    void saveWindowTitle();
+    void restoreWindowTitle();
     void setTerminalProfile(std::string const& _configProfileName);
     void useApplicationCursorKeys(bool _enabled);
     void softReset();
@@ -453,6 +463,9 @@ class Terminal
     void onBufferScrolled(LineCount _n) noexcept;
 
     void setMaxImageColorRegisters(unsigned value) noexcept { state_.maxImageColorRegisters = value; }
+
+    /// @returns either an empty string or a file:// URL of the last set working directory.
+    std::string const& currentWorkingDirectory() const noexcept { return state_.currentWorkingDirectory; }
 
     void verifyState();
 
@@ -510,10 +523,11 @@ class Terminal
     TerminalState state_;
     Screen<Cell> primaryScreen_;
     Screen<Cell> alternateScreen_;
+    std::reference_wrapper<SequenceHandler> sequenceHandler_;
 
     std::mutex mutable outerLock_;
     std::mutex mutable innerLock_;
-    Viewport<Cell> viewport_;
+    Viewport viewport_;
     std::unique_ptr<Selection> selection_;
     std::atomic<bool> hoveringHyperlink_ = false;
     std::atomic<bool> renderBufferUpdateEnabled_ = true;

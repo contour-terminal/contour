@@ -154,7 +154,6 @@ struct TerminalState
     ScreenType screenType = ScreenType::Primary;
     Grid<Cell> primaryBuffer;
     Grid<Cell> alternateBuffer;
-    Grid<Cell>* activeGrid;
 
     // cursor related
     //

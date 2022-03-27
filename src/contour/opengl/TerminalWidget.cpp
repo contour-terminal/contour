@@ -257,7 +257,7 @@ TerminalWidget::TerminalWidget(TerminalSession& session,
     renderer_ {
         terminal().pageSize(),
         sanitizeFontDescription(profile().fonts, fontDPI()),
-        terminal().screen().colorPalette(),
+        terminal().colorPalette(),
         profile().backgroundOpacity,
         session_.config().textureAtlasHashtableSlots,
         session_.config().textureAtlasTileCount,
@@ -571,7 +571,7 @@ void TerminalWidget::paintGL()
         static_cast<OpenGLRenderer*>(renderTarget_.get())->setTime(steady_clock::now());
 
         renderTarget_->clear(
-            terminal().screen().isModeEnabled(terminal::DECMode::ReverseVideo)
+            terminal().isModeEnabled(terminal::DECMode::ReverseVideo)
                 ? RGBAColor(profile().colors.defaultForeground, uint8_t(renderer_.backgroundOpacity()))
                 : RGBAColor(profile().colors.defaultBackground, uint8_t(renderer_.backgroundOpacity())));
         renderer_.render(terminal(), renderingPressure_);
@@ -799,7 +799,7 @@ bool TerminalWidget::isFullScreen() const
 
 terminal::ImageSize TerminalWidget::pixelSize() const
 {
-    return gridMetrics().cellSize * session_.terminal().screen().pageSize();
+    return gridMetrics().cellSize * session_.terminal().pageSize();
 }
 
 terminal::ImageSize TerminalWidget::cellSize() const
@@ -867,7 +867,7 @@ void TerminalWidget::doDumpState()
     {
         auto const screenStateDump = [&]() {
             auto os = std::stringstream {};
-            terminal().screen().inspect("Screen state dump.", os);
+            terminal().primaryScreen().inspect("Screen state dump.", os);
             renderer_.inspect(os);
             return os.str();
         }();

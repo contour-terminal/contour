@@ -81,9 +81,12 @@ void ScrollableDisplay::updateValues()
     if (!scrollBar_->isVisible())
         return;
 
-    scrollBar_->setMaximum(session_.terminal().screen().historyLineCount().as<int>());
-    auto const s = session_.terminal().viewport().scrollOffset();
-    scrollBar_->setValue(scrollBar_->maximum() - s.value);
+    if (session_.terminal().isPrimaryScreen())
+    {
+        scrollBar_->setMaximum(session_.terminal().primaryScreen().historyLineCount().as<int>());
+        auto const s = session_.terminal().viewport().scrollOffset();
+        scrollBar_->setValue(scrollBar_->maximum() - s.value);
+    }
 }
 
 void ScrollableDisplay::updatePosition()
