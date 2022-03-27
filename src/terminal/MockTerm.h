@@ -36,6 +36,8 @@ class MockTerm: public Terminal::Events
     decltype(auto) state() noexcept { return terminal.state(); }
     decltype(auto) state() const noexcept { return terminal.state(); }
 
+    void writeToScreen(std::string_view text) { terminal.writeToScreen(text); }
+
     std::string windowTitle;
     Terminal terminal;
 

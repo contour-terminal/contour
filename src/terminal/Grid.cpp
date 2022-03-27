@@ -147,12 +147,14 @@ void Grid<Cell>::clearHistory()
 }
 
 template <typename Cell>
-void Grid<Cell>::verifyState()
+void Grid<Cell>::verifyState() const
 {
+#if !defined(NDEBUG)
     Require(LineCount::cast_from(lines_.size()) >= totalLineCount());
     Require(totalLineCount() >= linesUsed_);
     Require(LineCount::cast_from(lines_.size()) >= linesUsed_);
     Require(linesUsed_ >= pageSize_.lines);
+#endif
 }
 
 template <typename Cell>

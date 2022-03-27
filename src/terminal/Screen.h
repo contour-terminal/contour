@@ -79,20 +79,12 @@ class Screen: public capabilities::StaticDatabase
 
     void setSixelCursorConformance(bool _value) noexcept { _state.sixelCursorConformance = _value; }
 
-    constexpr ImageSize cellPixelSize() const noexcept { return _state.cellPixelSize; }
-
-    constexpr void setCellPixelSize(ImageSize _cellPixelSize) { _state.cellPixelSize = _cellPixelSize; }
-
     void setTerminalId(VTType _id) noexcept { _state.terminalId = _id; }
 
     void setMaxHistoryLineCount(LineCount _maxHistoryLineCount);
     LineCount maxHistoryLineCount() const noexcept { return grid().maxHistoryLineCount(); }
 
     LineCount historyLineCount() const noexcept { return grid().historyLineCount(); }
-
-    /// Writes given data into the screen.
-    void write(std::string_view _data);
-    void write(std::u32string_view _data);
 
     void writeText(char32_t _char);
     void writeText(std::string_view _chars);
@@ -114,9 +106,6 @@ class Screen: public capabilities::StaticDatabase
     /// @returns necessary commands needed to draw the current screen state,
     ///          including initial clear screen, and initial cursor hide.
     std::string screenshot(std::function<std::string(LineOffset)> const& _postLine = {}) const;
-
-    void setFocus(bool focused) { _state.focused = focused; }
-    bool focused() const noexcept { return _state.focused; }
 
     // {{{ VT API
     void linefeed(); // LF
@@ -196,10 +185,7 @@ class Screen: public capabilities::StaticDatabase
     void setUnderlineColor(Color _color);
     void setCursorStyle(CursorDisplay _display, CursorShape _shape);
     void setGraphicsRendition(GraphicsRendition _rendition);
-    void setTopBottomMargin(std::optional<LineOffset> _top, std::optional<LineOffset> _bottom);
-    void setLeftRightMargin(std::optional<ColumnOffset> _left, std::optional<ColumnOffset> _right);
     void screenAlignmentPattern();
-    void sendMouseEvents(MouseProtocol _protocol, bool _enable);
     void applicationKeypadMode(bool _enable);
     void designateCharset(CharsetTable _table, CharsetId _charset);
     void singleShiftSelect(CharsetTable _table);
@@ -253,13 +239,7 @@ class Screen: public capabilities::StaticDatabase
 
     void inspect(std::string const& _message, std::ostream& _os) const;
 
-    // reset screen
-    void resetSoft();
-    void resetHard();
-
     // for DECSC and DECRC
-    void setMode(AnsiMode _mode, bool _enabled);
-    void setMode(DECMode _mode, bool _enabled);
     void saveCursor();
     void restoreCursor();
     void restoreCursor(Cursor const& _savedCursor);
@@ -270,9 +250,6 @@ class Screen: public capabilities::StaticDatabase
 
     PageSize pageSize() const noexcept { return _state.pageSize; }
     void resize(PageSize _newSize);
-
-    /// Implements semantics for  DECCOLM / DECSCPP.
-    void resizeColumns(ColumnCount _newColumnCount, bool _clear);
 
     bool isCursorInsideMargins() const noexcept
     {
@@ -364,7 +341,7 @@ class Screen: public capabilities::StaticDatabase
     Cell& useCurrentCell() noexcept { return useCellAt(_state.cursor.position); }
     Cell const& currentCell() const noexcept { return at(_state.cursor.position); }
 
-    void moveCursorTo(LineOffset _line, ColumnOffset _column);
+    void moveCursorTo(LineOffset line, ColumnOffset column);
 
     /// Gets a reference to the cell relative to screen origin (top left, 1:1).
     Cell& at(LineOffset _line, ColumnOffset _column) noexcept { return grid().useCellAt(_line, _column); }
@@ -383,11 +360,13 @@ class Screen: public capabilities::StaticDatabase
     Cell& useCellAt(CellLocation p) noexcept { return useCellAt(p.line, p.column); }
     Cell const& at(CellLocation p) const noexcept { return grid().at(p.line, p.column); }
 
-    bool isPrimaryScreen() const noexcept { return _state.activeGrid == &_state.primaryBuffer; }
-    bool isAlternateScreen() const noexcept { return _state.activeGrid == &_state.alternateBuffer; }
-
-    bool isModeEnabled(AnsiMode m) const noexcept { return _state.modes.enabled(m); }
-    bool isModeEnabled(DECMode m) const noexcept { return _state.modes.enabled(m); }
+    // TODO(pr) remove these 2 functions.
+    [[deprecated]] bool isPrimaryScreen() const noexcept { return _state.screenType == ScreenType::Primary; }
+    [[deprecated]] bool isAlternateScreen() const noexcept
+    {
+        return _state.screenType == ScreenType::Alternate;
+    }
+    [[deprecated]] bool isModeEnabled(DECMode m) const noexcept { return _state.modes.enabled(m); }
 
     bool isModeEnabled(std::variant<AnsiMode, DECMode> m) const
     {
@@ -437,9 +416,6 @@ class Screen: public capabilities::StaticDatabase
     /// @returns the primary screen's grid.
     Grid<Cell>& primaryGrid() noexcept { return _state.primaryBuffer; }
 
-    /// @returns the alternate  screen's grid.
-    Grid<Cell>& alternateGrid() noexcept { return _state.alternateBuffer; }
-
     /// @returns the primary screen's grid if primary screen is active.
     Grid<Cell> const& grid() const noexcept { return *_state.activeGrid; }
 
@@ -474,10 +450,9 @@ class Screen: public capabilities::StaticDatabase
     void applyAndLog(FunctionDefinition const& function, Sequence const& seq);
     ApplyResult apply(FunctionDefinition const& function, Sequence const& seq);
 
-  private:
-    void setBuffer(ScreenType _type);
-    void applyPageSizeToCurrentBuffer();
+    void fail(std::string const& _message) const;
 
+  private:
     void clearAllTabs();
     void clearTabUnderCursor();
     void setTabUnderCursor();
@@ -487,8 +462,6 @@ class Screen: public capabilities::StaticDatabase
 
     void writeCharToCurrentAndAdvance(char32_t _codepoint) noexcept;
     void clearAndAdvance(int _offset) noexcept;
-
-    void fail(std::string const& _message) const;
 
     void scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin);
     void scrollUp(LineCount n, Margin margin);

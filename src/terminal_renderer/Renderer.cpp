@@ -306,7 +306,7 @@ uint64_t Renderer::render(Terminal& _terminal, bool _pressure)
 
     optional<terminal::RenderCursor> cursorOpt;
     textRenderer_.beginFrame();
-    textRenderer_.setPressure(_pressure && _terminal.screen().isPrimaryScreen());
+    textRenderer_.setPressure(_pressure && _terminal.isPrimaryScreen());
     {
         RenderBufferRef const renderBuffer = _terminal.renderBuffer();
         cursorOpt = renderBuffer.get().cursor;

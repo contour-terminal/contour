@@ -568,7 +568,7 @@ bool TerminalSession::operator()(actions::ClearHistoryAndReset)
     auto const pageSize = terminal_.pageSize();
     auto const pixelSize = display_->pixelSize();
 
-    terminal_.resetHard();
+    terminal_.hardReset();
     auto const tmpPageSize = PageSize { pageSize.lines, pageSize.columns + ColumnCount(1) };
     terminal_.resizeScreen(tmpPageSize, pixelSize);
     this_thread::yield();
@@ -956,7 +956,7 @@ void TerminalSession::configureTerminal()
     screen.setMaxImageSize(config_.maxImageSize);
     SessionLog()(
         "maxImageSize={}, sixelScrolling={}", config_.maxImageSize, config_.sixelScrolling ? "yes" : "no");
-    screen.setMode(terminal::DECMode::SixelScrolling, config_.sixelScrolling);
+    terminal_.setMode(terminal::DECMode::SixelScrolling, config_.sixelScrolling);
 
     // XXX
     // if (!_terminalView.renderer().renderTargetAvailable())
@@ -1006,7 +1006,7 @@ uint8_t TerminalSession::matchModeFlags() const
 {
     uint8_t flags = 0;
 
-    if (terminal_.screen().isAlternateScreen())
+    if (terminal_.isAlternateScreen())
         flags |= static_cast<uint8_t>(MatchModes::Flag::AlternateScreen);
 
     if (terminal_.applicationCursorKeys())

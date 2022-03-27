@@ -9,11 +9,11 @@ bool testMatch(Terminal const& _terminal, MatchModes _mode)
     switch (_mode.status(MatchModes::AlternateScreen))
     {
         case MatchModes::Status::Enabled:
-            if (!_terminal.screen().isAlternateScreen())
+            if (!_terminal.isAlternateScreen())
                 return false;
             break;
         case MatchModes::Status::Disabled:
-            if (_terminal.screen().isAlternateScreen())
+            if (_terminal.isAlternateScreen())
                 return false;
             break;
         case MatchModes::Status::Any: break;

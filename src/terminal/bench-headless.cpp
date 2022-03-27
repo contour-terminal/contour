@@ -203,7 +203,7 @@ class ContourHeadlessBench: public crispy::App
             make_unique<terminal::MockViewPty>(pageSize), ptyReadBufferSize, eh, maxHistoryLineCount
         };
         auto* pty = static_cast<terminal::MockViewPty*>(&vt.device());
-        vt.screen().setMode(terminal::DECMode::AutoWrap, true);
+        vt.setMode(terminal::DECMode::AutoWrap, true);
 
         auto const rv = baseBenchmark(
             [&](char const* a, size_t b) {

@@ -443,95 +443,15 @@ void Screen<Cell>::setMaxHistoryLineCount(LineCount _maxHistoryLineCount)
 }
 
 template <typename Cell>
-void Screen<Cell>::resizeColumns(ColumnCount _newColumnCount, bool _clear)
+void Screen<Cell>::resize(PageSize newPageSize)
 {
-    // DECCOLM / DECSCPP
-    if (_clear)
-    {
-        // Sets the left, right, top and bottom scrolling margins to their default positions.
-        setTopBottomMargin({}, unbox<LineOffset>(_state.pageSize.lines) - LineOffset(1));       // DECSTBM
-        setLeftRightMargin({}, unbox<ColumnOffset>(_state.pageSize.columns) - ColumnOffset(1)); // DECRLM
-
-        // Erases all data in page memory
-        clearScreen();
-    }
-
-    // resets vertical split screen mode (DECLRMM) to unavailable
-    setMode(DECMode::LeftRightMargin, false); // DECSLRM
-
-    // Pre-resize in case the event callback right after is not actually resizing the window
-    // (e.g. either by choice or because the window manager does not allow that, such as tiling WMs).
-    auto const newSize = PageSize { _state.pageSize.lines, _newColumnCount };
-    resize(newSize);
-
-    _terminal.resizeWindow(newSize);
-}
-
-template <typename Cell>
-void Screen<Cell>::resize(PageSize _newSize)
-{
-    // NOTE: This will only resize the currently active buffer.
-    // Any other buffer will be resized when it is switched to.
-
-    auto const oldCursorPos = _state.cursor.position;
-
-    _state.cursor.position = _state.activeGrid->resize(_newSize, oldCursorPos, _state.wrapPending);
-    if (_newSize.columns > _state.pageSize.columns)
-        _state.wrapPending = false;
-    _state.pageSize = _newSize;
-
-    // Reset margin to their default.
-    _state.margin = Margin { Margin::Vertical { {}, _newSize.lines.as<LineOffset>() - 1 },
-                             Margin::Horizontal { {}, _newSize.columns.as<ColumnOffset>() - 1 } };
-
-    applyPageSizeToCurrentBuffer();
-}
-
-template <typename Cell>
-void Screen<Cell>::applyPageSizeToCurrentBuffer()
-{
-    // Ensure correct screen buffer size for the buffer we've just switched to.
-    _state.cursor.position =
-        _state.activeGrid->resize(_state.pageSize, _state.cursor.position, _state.wrapPending);
-    _state.cursor.position = clampCoordinate(_state.cursor.position);
-
-    // update last-cursor position & iterators
-    _state.lastCursorPosition = _state.cursor.position;
-    _state.lastCursorPosition = clampCoordinate(_state.lastCursorPosition);
-
-    // truncating tabs
-    while (!_state.tabs.empty() && _state.tabs.back() >= unbox<ColumnOffset>(_state.pageSize.columns))
-        _state.tabs.pop_back();
-
-        // TODO: find out what to do with DECOM mode. Reset it to?
-#if 0
-    inspect("after resize", std::cout);
-    fmt::print("applyPageSizeToCurrentBuffer: cursor pos before: {} after: {}\n", oldCursorPos, _state.cursor.position);
-#endif
-
-    verifyState();
+    _terminal.resizeScreen(newPageSize, nullopt);
 }
 
 template <typename Cell>
 void Screen<Cell>::verifyState() const
 {
-#if !defined(NDEBUG)
-    Require(_state.activeGrid->pageSize() == _state.pageSize);
-    Require(*_state.cursor.position.column < *_state.pageSize.columns);
-    Require(*_state.cursor.position.line < *_state.pageSize.lines);
-    Require(_state.tabs.empty() || _state.tabs.back() < unbox<ColumnOffset>(_state.pageSize.columns));
-
-    if (*_state.pageSize.lines != static_cast<int>(grid().mainPage().size()))
-        fail(fmt::format("Line count mismatch. Actual line count {} but should be {}.",
-                         grid().mainPage().size(),
-                         _state.pageSize.lines));
-
-    // verify cursor positions
-    [[maybe_unused]] auto const clampedCursorPos = clampToScreen(_state.cursor.position);
-    if (_state.cursor.position != clampedCursorPos)
-        fail(fmt::format("Cursor {} does not match clamp to screen {}.", _state.cursor, clampedCursorPos));
-        // FIXME: the above triggers on tmux vertical screen split (cursor.column off-by-one)
-#endif
+    grid().verifyState();
 }
 
 template <typename Cell>
@@ -539,31 +459,6 @@ void Screen<Cell>::fail(std::string const& _message) const
 {
     inspect(_message, std::cerr);
     abort();
-}
-
-template <typename Cell>
-void Screen<Cell>::write(std::string_view _data)
-{
-    if (_data.empty())
-        return;
-
-    _state.parser.parseFragment(_data);
-
-    if (_state.modes.enabled(DECMode::BatchedRendering))
-        return;
-
-    _terminal.screenUpdated();
-}
-
-template <typename Cell>
-void Screen<Cell>::write(std::u32string_view _data)
-{
-    _state.parser.parseFragment(_data);
-
-    if (_state.modes.enabled(DECMode::BatchedRendering))
-        return;
-
-    _terminal.screenUpdated();
 }
 
 template <typename Cell>
@@ -805,7 +700,7 @@ void Screen<Cell>::clearAndAdvance(int _offset) noexcept
     if (_offset == 0)
         return;
 
-    bool const cursorInsideMargin = isModeEnabled(DECMode::LeftRightMargin) && isCursorInsideMargins();
+    bool const cursorInsideMargin = _terminal.isModeEnabled(DECMode::LeftRightMargin) && isCursorInsideMargins();
     auto const cellsAvailable = cursorInsideMargin
                                     ? *(_state.margin.horizontal.to - _state.cursor.position.column) - 1
                                     : *_state.pageSize.columns - *_state.cursor.position.column - 1;
@@ -870,7 +765,7 @@ template <typename Cell>
 optional<LineOffset> Screen<Cell>::findMarkerUpwards(LineOffset _startLine) const
 {
     // XXX _startLine is an absolute history line coordinate
-    if (isAlternateScreen())
+    if (_state.screenType != ScreenType::Primary)
         return nullopt;
     if (*_startLine <= -*historyLineCount())
         return nullopt;
@@ -887,7 +782,7 @@ optional<LineOffset> Screen<Cell>::findMarkerUpwards(LineOffset _startLine) cons
 template <typename Cell>
 optional<LineOffset> Screen<Cell>::findMarkerDownwards(LineOffset _lineOffset) const
 {
-    if (!isPrimaryScreen())
+    if (_state.screenType != ScreenType::Primary)
         return nullopt;
 
     auto const top = std::clamp(_lineOffset,
@@ -941,94 +836,6 @@ void Screen<Cell>::setTabUnderCursor()
 
 // {{{ others
 template <typename Cell>
-void Screen<Cell>::saveCursor()
-{
-    // https://vt100.net/docs/vt510-rm/DECSC.html
-    _state.savedCursor = _state.cursor;
-}
-
-template <typename Cell>
-void Screen<Cell>::restoreCursor()
-{
-    // https://vt100.net/docs/vt510-rm/DECRC.html
-    restoreCursor(_state.savedCursor);
-
-    setMode(DECMode::AutoWrap, _state.savedCursor.autoWrap);
-    setMode(DECMode::Origin, _state.savedCursor.originMode);
-}
-
-template <typename Cell>
-void Screen<Cell>::restoreCursor(Cursor const& _savedCursor)
-{
-    _state.wrapPending = false;
-    _state.cursor = _savedCursor;
-    _state.cursor.position = clampCoordinate(_savedCursor.position);
-    verifyState();
-}
-
-template <typename Cell>
-void Screen<Cell>::resetSoft()
-{
-    // https://vt100.net/docs/vt510-rm/DECSTR.html
-    setMode(DECMode::BatchedRendering, false);
-    setMode(DECMode::TextReflow, _state.allowReflowOnResize);
-    setGraphicsRendition(GraphicsRendition::Reset);    // SGR
-    _state.savedCursor.position = {};                  // DECSC (Save cursor state)
-    setMode(DECMode::VisibleCursor, true);             // DECTCEM (Text cursor enable)
-    setMode(DECMode::Origin, false);                   // DECOM
-    setMode(AnsiMode::KeyboardAction, false);          // KAM
-    setMode(DECMode::AutoWrap, false);                 // DECAWM
-    setMode(AnsiMode::Insert, false);                  // IRM
-    setMode(DECMode::UseApplicationCursorKeys, false); // DECCKM (Cursor keys)
-    setTopBottomMargin({}, boxed_cast<LineOffset>(_state.pageSize.lines) - LineOffset(1));       // DECSTBM
-    setLeftRightMargin({}, boxed_cast<ColumnOffset>(_state.pageSize.columns) - ColumnOffset(1)); // DECRLM
-
-    _state.cursor.hyperlink = {};
-    _state.colorPalette = _state.defaultColorPalette;
-
-    // TODO: DECNKM (Numeric keypad)
-    // TODO: DECSCA (Select character attribute)
-    // TODO: DECNRCM (National replacement character set)
-    // TODO: GL, GR (G0, G1, G2, G3)
-    // TODO: DECAUPSS (Assign user preference supplemental set)
-    // TODO: DECSASD (Select active status display)
-    // TODO: DECKPM (Keyboard position mode)
-    // TODO: DECPCTERM (PCTerm mode)
-}
-
-template <typename Cell>
-void Screen<Cell>::resetHard()
-{
-    setBuffer(ScreenType::Primary);
-
-    _state.modes = Modes {};
-    setMode(DECMode::AutoWrap, true);
-    setMode(DECMode::TextReflow, _state.allowReflowOnResize);
-    setMode(DECMode::SixelCursorNextToGraphic, _state.sixelCursorConformance);
-
-    clearAllTabs();
-
-    _state.primaryBuffer.reset();
-    _state.alternateBuffer.reset();
-
-    _state.imagePool.clear();
-
-    _state.cursor = {};
-
-    _state.lastCursorPosition = _state.cursor.position;
-
-    _state.margin =
-        Margin { Margin::Vertical { {}, boxed_cast<LineOffset>(_state.pageSize.lines) - 1 },
-                 Margin::Horizontal { {}, boxed_cast<ColumnOffset>(_state.pageSize.columns) - 1 } };
-
-    _state.colorPalette = _state.defaultColorPalette;
-
-    verifyState();
-
-    _terminal.hardReset();
-}
-
-template <typename Cell>
 void Screen<Cell>::moveCursorTo(LineOffset _line, ColumnOffset _column)
 {
     auto const [line, column] = [&]() {
@@ -1041,40 +848,6 @@ void Screen<Cell>::moveCursorTo(LineOffset _line, ColumnOffset _column)
     _state.wrapPending = false;
     _state.cursor.position.line = clampedLine(line);
     _state.cursor.position.column = clampedColumn(column);
-}
-
-template <typename Cell>
-void Screen<Cell>::setBuffer(ScreenType _type)
-{
-    if (bufferType() == _type)
-        return;
-
-    switch (_type)
-    {
-        case ScreenType::Primary:
-            _terminal.setMouseWheelMode(InputGenerator::MouseWheelMode::Default);
-            _state.activeGrid = &primaryGrid();
-            break;
-        case ScreenType::Alternate:
-            if (isModeEnabled(DECMode::MouseAlternateScroll))
-                _terminal.setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
-            else
-                _terminal.setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
-            _state.activeGrid = &alternateGrid();
-            break;
-    }
-    _state.screenType = _type;
-
-    // Reset wrapPending-flag when switching buffer.
-    _state.wrapPending = false;
-
-    // Reset last-cursor position.
-    _state.lastCursorPosition = _state.cursor.position;
-
-    // Ensure correct screen buffer size for the buffer we've just switched to.
-    applyPageSizeToCurrentBuffer();
-
-    _terminal.bufferChanged(_type);
 }
 
 template <typename Cell>
@@ -1269,14 +1042,6 @@ void Screen<Cell>::clearScreen()
     // we scroll up by RowCount number of lines, so move it all into history, so the user can scroll
     // up in case the content is still needed.
     scrollUp(_state.pageSize.lines);
-}
-
-template <typename Cell>
-void Screen<Cell>::clearScrollbackBuffer()
-{
-    primaryGrid().clearHistory();
-    alternateGrid().clearHistory();
-    _terminal.scrollbackBufferCleared();
 }
 
 template <typename Cell>
@@ -1879,67 +1644,7 @@ void Screen<Cell>::setCursorStyle(CursorDisplay _display, CursorShape _shape)
 template <typename Cell>
 void Screen<Cell>::setGraphicsRendition(GraphicsRendition _rendition)
 {
-    // TODO: optimize this as there are only 3 cases
-    // 1.) reset
-    // 2.) set some bits |=
-    // 3.) clear some bits &= ~
-    switch (_rendition)
-    {
-        case GraphicsRendition::Reset: _state.cursor.graphicsRendition = {}; break;
-        case GraphicsRendition::Bold: _state.cursor.graphicsRendition.styles |= CellFlags::Bold; break;
-        case GraphicsRendition::Faint: _state.cursor.graphicsRendition.styles |= CellFlags::Faint; break;
-        case GraphicsRendition::Italic: _state.cursor.graphicsRendition.styles |= CellFlags::Italic; break;
-        case GraphicsRendition::Underline:
-            _state.cursor.graphicsRendition.styles |= CellFlags::Underline;
-            break;
-        case GraphicsRendition::Blinking:
-            _state.cursor.graphicsRendition.styles |= CellFlags::Blinking;
-            break;
-        case GraphicsRendition::Inverse: _state.cursor.graphicsRendition.styles |= CellFlags::Inverse; break;
-        case GraphicsRendition::Hidden: _state.cursor.graphicsRendition.styles |= CellFlags::Hidden; break;
-        case GraphicsRendition::CrossedOut:
-            _state.cursor.graphicsRendition.styles |= CellFlags::CrossedOut;
-            break;
-        case GraphicsRendition::DoublyUnderlined:
-            _state.cursor.graphicsRendition.styles |= CellFlags::DoublyUnderlined;
-            break;
-        case GraphicsRendition::CurlyUnderlined:
-            _state.cursor.graphicsRendition.styles |= CellFlags::CurlyUnderlined;
-            break;
-        case GraphicsRendition::DottedUnderline:
-            _state.cursor.graphicsRendition.styles |= CellFlags::DottedUnderline;
-            break;
-        case GraphicsRendition::DashedUnderline:
-            _state.cursor.graphicsRendition.styles |= CellFlags::DashedUnderline;
-            break;
-        case GraphicsRendition::Framed: _state.cursor.graphicsRendition.styles |= CellFlags::Framed; break;
-        case GraphicsRendition::Overline:
-            _state.cursor.graphicsRendition.styles |= CellFlags::Overline;
-            break;
-        case GraphicsRendition::Normal:
-            _state.cursor.graphicsRendition.styles &= ~(CellFlags::Bold | CellFlags::Faint);
-            break;
-        case GraphicsRendition::NoItalic: _state.cursor.graphicsRendition.styles &= ~CellFlags::Italic; break;
-        case GraphicsRendition::NoUnderline:
-            _state.cursor.graphicsRendition.styles &=
-                ~(CellFlags::Underline | CellFlags::DoublyUnderlined | CellFlags::CurlyUnderlined
-                  | CellFlags::DottedUnderline | CellFlags::DashedUnderline);
-            break;
-        case GraphicsRendition::NoBlinking:
-            _state.cursor.graphicsRendition.styles &= ~CellFlags::Blinking;
-            break;
-        case GraphicsRendition::NoInverse:
-            _state.cursor.graphicsRendition.styles &= ~CellFlags::Inverse;
-            break;
-        case GraphicsRendition::NoHidden: _state.cursor.graphicsRendition.styles &= ~CellFlags::Hidden; break;
-        case GraphicsRendition::NoCrossedOut:
-            _state.cursor.graphicsRendition.styles &= ~CellFlags::CrossedOut;
-            break;
-        case GraphicsRendition::NoFramed: _state.cursor.graphicsRendition.styles &= ~CellFlags::Framed; break;
-        case GraphicsRendition::NoOverline:
-            _state.cursor.graphicsRendition.styles &= ~CellFlags::Overline;
-            break;
-    }
+    _terminal.setGraphicsRendition(_rendition);
 }
 
 template <typename Cell>
@@ -1958,147 +1663,6 @@ template <typename Cell>
 void Screen<Cell>::restoreModes(std::vector<DECMode> const& _modes)
 {
     _state.modes.restore(_modes);
-}
-
-template <typename Cell>
-void Screen<Cell>::setMode(AnsiMode _mode, bool _enable)
-{
-    if (!isValidAnsiMode(static_cast<unsigned int>(_mode)))
-        return;
-
-    _state.modes.set(_mode, _enable);
-}
-
-template <typename Cell>
-void Screen<Cell>::setMode(DECMode _mode, bool _enable)
-{
-    if (!isValidDECMode(static_cast<unsigned int>(_mode)))
-        return;
-
-    switch (_mode)
-    {
-        case DECMode::AutoWrap: _state.cursor.autoWrap = _enable; break;
-        case DECMode::LeftRightMargin:
-            // Resetting DECLRMM also resets the horizontal margins back to screen size.
-            if (!_enable)
-                _state.margin.horizontal =
-                    Margin::Horizontal { ColumnOffset(0),
-                                         boxed_cast<ColumnOffset>(_state.pageSize.columns - 1) };
-            break;
-        case DECMode::Origin: _state.cursor.originMode = _enable; break;
-        case DECMode::Columns132:
-            if (!isModeEnabled(DECMode::AllowColumns80to132))
-                break;
-            if (_enable != isModeEnabled(DECMode::Columns132))
-            {
-                auto const clear = _enable != isModeEnabled(_mode);
-
-                // sets the number of columns on the page to 80 or 132 and selects the
-                // corresponding 80- or 132-column font
-                auto const columns = ColumnCount(_enable ? 132 : 80);
-
-                resizeColumns(columns, clear);
-            }
-            break;
-        case DECMode::BatchedRendering:
-            if (_state.modes.enabled(DECMode::BatchedRendering) != _enable)
-                _terminal.synchronizedOutput(_enable);
-            break;
-        case DECMode::TextReflow:
-            if (_state.allowReflowOnResize && isPrimaryScreen())
-            {
-                // Enabling reflow enables every line in the main page area.
-                // Disabling reflow only affects currently line and below.
-                auto const startLine = _enable ? LineOffset(0) : realCursorPosition().line;
-                for (auto line = startLine; line < boxed_cast<LineOffset>(_state.pageSize.lines); ++line)
-                    grid().lineAt(line).setWrappable(_enable);
-            }
-            break;
-        case DECMode::DebugLogging:
-            // Since this mode (Xterm extension) does not support finer graind control,
-            // we'll be just globally enable/disable all debug logging.
-            for (auto& category: logstore::get())
-                category.get().enable(_enable);
-            break;
-        case DECMode::UseAlternateScreen:
-            if (_enable)
-                setBuffer(ScreenType::Alternate);
-            else
-                setBuffer(ScreenType::Primary);
-            break;
-        case DECMode::UseApplicationCursorKeys:
-            _terminal.useApplicationCursorKeys(_enable);
-            if (isAlternateScreen())
-            {
-                if (_enable)
-                    _terminal.setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
-                else
-                    _terminal.setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
-            }
-            break;
-        case DECMode::BracketedPaste: _terminal.setBracketedPaste(_enable); break;
-        case DECMode::MouseSGR:
-            if (_enable)
-                _terminal.setMouseTransport(MouseTransport::SGR);
-            else
-                _terminal.setMouseTransport(MouseTransport::Default);
-            break;
-        case DECMode::MouseExtended: _terminal.setMouseTransport(MouseTransport::Extended); break;
-        case DECMode::MouseURXVT: _terminal.setMouseTransport(MouseTransport::URXVT); break;
-        case DECMode::MouseSGRPixels:
-            if (_enable)
-                _terminal.setMouseTransport(MouseTransport::SGRPixels);
-            else
-                _terminal.setMouseTransport(MouseTransport::Default);
-            break;
-        case DECMode::MouseAlternateScroll:
-            if (_enable)
-                _terminal.setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
-            else
-                _terminal.setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
-            break;
-        case DECMode::FocusTracking: _terminal.setGenerateFocusEvents(_enable); break;
-        case DECMode::UsePrivateColorRegisters: _state.usePrivateColorRegisters = _enable; break;
-        case DECMode::VisibleCursor:
-            _state.cursor.visible = _enable;
-            _terminal.setCursorVisibility(_enable);
-            break;
-        case DECMode::MouseProtocolX10: sendMouseEvents(MouseProtocol::X10, _enable); break;
-        case DECMode::MouseProtocolNormalTracking:
-            sendMouseEvents(MouseProtocol::NormalTracking, _enable);
-            break;
-        case DECMode::MouseProtocolHighlightTracking:
-            sendMouseEvents(MouseProtocol::HighlightTracking, _enable);
-            break;
-        case DECMode::MouseProtocolButtonTracking:
-            sendMouseEvents(MouseProtocol::ButtonTracking, _enable);
-            break;
-        case DECMode::MouseProtocolAnyEventTracking:
-            sendMouseEvents(MouseProtocol::AnyEventTracking, _enable);
-            break;
-        case DECMode::SaveCursor:
-            if (_enable)
-                saveCursor();
-            else
-                restoreCursor();
-            break;
-        case DECMode::ExtendedAltScreen:
-            if (_enable)
-            {
-                _state.savedPrimaryCursor = cursor();
-                setMode(DECMode::UseAlternateScreen, true);
-                clearScreen();
-            }
-            else
-            {
-                setMode(DECMode::UseAlternateScreen, false);
-                restoreCursor(_state.savedPrimaryCursor);
-            }
-            break;
-        default: break;
-    }
-
-    _state.modes.set(_mode, _enable);
 }
 
 enum class ModeResponse
@@ -2128,48 +1692,12 @@ void Screen<Cell>::requestDECMode(unsigned int _mode)
 {
     ModeResponse const modeResponse =
         isValidDECMode(_mode)
-            ? isModeEnabled(static_cast<DECMode>(_mode)) ? ModeResponse::Set : ModeResponse::Reset
+            ? _terminal.isModeEnabled(static_cast<DECMode>(_mode)) ? ModeResponse::Set : ModeResponse::Reset
             : ModeResponse::NotRecognized;
 
     auto const code = toDECModeNum(static_cast<DECMode>(_mode));
 
     _terminal.reply("\033[?{};{}$y", code, static_cast<unsigned>(modeResponse));
-}
-
-template <typename Cell>
-void Screen<Cell>::setTopBottomMargin(optional<LineOffset> _top, optional<LineOffset> _bottom)
-{
-    auto const bottom = _bottom.has_value()
-                            ? min(_bottom.value(), boxed_cast<LineOffset>(_state.pageSize.lines) - 1)
-                            : boxed_cast<LineOffset>(_state.pageSize.lines) - 1;
-
-    auto const top = _top.value_or(LineOffset(0));
-
-    if (top < bottom)
-    {
-        _state.margin.vertical.from = top;
-        _state.margin.vertical.to = bottom;
-        moveCursorTo({}, {});
-    }
-}
-
-template <typename Cell>
-void Screen<Cell>::setLeftRightMargin(optional<ColumnOffset> _left, optional<ColumnOffset> _right)
-{
-    if (isModeEnabled(DECMode::LeftRightMargin))
-    {
-        auto const right =
-            _right.has_value()
-                ? min(_right.value(), boxed_cast<ColumnOffset>(_state.pageSize.columns) - ColumnOffset(1))
-                : boxed_cast<ColumnOffset>(_state.pageSize.columns) - ColumnOffset(1);
-        auto const left = _left.value_or(ColumnOffset(0));
-        if (left < right)
-        {
-            _state.margin.horizontal.from = left;
-            _state.margin.horizontal.to = right;
-            moveCursorTo({}, {});
-        }
-    }
 }
 
 template <typename Cell>
@@ -2189,12 +1717,6 @@ void Screen<Cell>::screenAlignmentPattern()
     {
         line.reset(grid().defaultLineFlags(), GraphicsAttributes {}, U'E', 1);
     }
-}
-
-template <typename Cell>
-void Screen<Cell>::sendMouseEvents(MouseProtocol _protocol, bool _enable)
-{
-    _terminal.setMouseProtocol(_protocol, _enable);
 }
 
 template <typename Cell>
@@ -2227,7 +1749,7 @@ void Screen<Cell>::sixelImage(ImageSize _pixelSize, Image::Data&& _data)
         LineCount::cast_from(ceilf(float(*_pixelSize.height) / float(*_state.cellPixelSize.height)));
     auto const extent = GridSize { lineCount, columnCount };
     auto const autoScrollAtBottomMargin =
-        isModeEnabled(DECMode::SixelScrolling); // If DECSDM is enabled, scrolling is meant to be disabled.
+        _terminal.isModeEnabled(DECMode::SixelScrolling); // If DECSDM is enabled, scrolling is meant to be disabled.
     auto const topLeft = autoScrollAtBottomMargin ? logicalCursorPosition() : CellLocation {};
 
     auto const alignmentPolicy = ImageAlignment::TopStart;
@@ -2246,7 +1768,7 @@ void Screen<Cell>::sixelImage(ImageSize _pixelSize, Image::Data&& _data)
                 resizePolicy,
                 autoScrollAtBottomMargin);
 
-    if (!isModeEnabled(DECMode::SixelCursorNextToGraphic))
+    if (!_terminal.isModeEnabled(DECMode::SixelCursorNextToGraphic))
         linefeed(topLeft.column);
 }
 
@@ -2769,15 +2291,14 @@ void Screen<Cell>::smGraphics(XtSmGraphics::Item _item,
 // {{{ impl namespace (some command generator helpers)
 namespace impl
 {
-    template <typename Cell>
-    ApplyResult setAnsiMode(Sequence const& _seq, size_t _modeIndex, bool _enable, Screen<Cell>& _screen)
+    ApplyResult setAnsiMode(Sequence const& _seq, size_t _modeIndex, bool _enable, Terminal& term)
     {
         switch (_seq.param(_modeIndex))
         {
             case 2: // (AM) Keyboard Action Mode
                 return ApplyResult::Unsupported;
             case 4: // (IRM) Insert Mode
-                _screen.setMode(AnsiMode::Insert, _enable);
+                term.setMode(AnsiMode::Insert, _enable);
                 return ApplyResult::Ok;
             case 12: // (SRM) Send/Receive Mode
             case 20: // (LNM) Automatic Newline
@@ -2839,12 +2360,11 @@ namespace impl
         return nullopt;
     }
 
-    template <typename Cell>
-    ApplyResult setModeDEC(Sequence const& _seq, size_t _modeIndex, bool _enable, Screen<Cell>& _screen)
+    ApplyResult setModeDEC(Sequence const& _seq, size_t _modeIndex, bool _enable, Terminal& term)
     {
         if (auto const modeOpt = toDECMode(_seq.param(_modeIndex)); modeOpt.has_value())
         {
-            _screen.setMode(modeOpt.value(), _enable);
+            term.setMode(modeOpt.value(), _enable);
             return ApplyResult::Ok;
         }
         return ApplyResult::Invalid;
@@ -3149,27 +2669,6 @@ namespace impl
         }
         else
             return ApplyResult::Invalid;
-    }
-
-    template <typename Cell>
-    ApplyResult ED(Sequence const& _seq, Screen<Cell>& _screen)
-    {
-        if (_seq.parameterCount() == 0)
-            _screen.clearToEndOfScreen();
-        else
-        {
-            for (size_t i = 0; i < _seq.parameterCount(); ++i)
-            {
-                switch (_seq.param(i))
-                {
-                    case 0: _screen.clearToEndOfScreen(); break;
-                    case 1: _screen.clearToBeginOfScreen(); break;
-                    case 2: _screen.clearScreen(); break;
-                    case 3: _screen.clearScrollbackBuffer(); break;
-                }
-            }
-        }
-        return ApplyResult::Ok;
     }
 
     template <typename Cell>
@@ -3652,8 +3151,8 @@ void Screen<Cell>::executeControlCode(char controlCode)
             index();
             break;
         case 0x0D: moveCursorToBeginOfLine(); break;
-        case 0x37: saveCursor(); break;
-        case 0x38: restoreCursor(); break;
+        case 0x37: _terminal.saveCursor(); break;
+        case 0x38: _terminal.restoreCursor(); break;
         default:
             if (VTParserLog)
                 VTParserLog()("Unsupported C0 sequence: {}", crispy::escape((uint8_t) controlCode));
@@ -3694,7 +3193,7 @@ void Screen<Cell>::applyAndLog(FunctionDefinition const& _function, Sequence con
             break;
         }
         case ApplyResult::Ok: {
-            verifyState();
+            _terminal.verifyState();
             break;
         }
     }
@@ -3726,18 +3225,18 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case DECFI: forwardIndex(); break;
         case DECKPAM: applicationKeypadMode(true); break;
         case DECKPNM: applicationKeypadMode(false); break;
-        case DECRS: restoreCursor(); break;
-        case DECSC: saveCursor(); break;
+        case DECRS: _terminal.restoreCursor(); break;
+        case DECSC: _terminal.saveCursor(); break;
         case HTS: horizontalTabSet(); break;
         case IND: index(); break;
         case NEL: moveCursorToNextLine(LineCount(1)); break;
         case RI: reverseIndex(); break;
-        case RIS: resetHard(); break;
+        case RIS: _terminal.hardReset(); break;
         case SS2: singleShiftSelect(CharsetTable::G2); break;
         case SS3: singleShiftSelect(CharsetTable::G3); break;
 
         // CSI
-        case ANSISYSSC: restoreCursor(); break;
+        case ANSISYSSC: _terminal.restoreCursor(); break;
         case CBT:
             cursorBackwardTab(TabStopCount::cast_from(seq.param_or(0, Sequence::Parameter { 1 })));
             break;
@@ -3838,7 +3337,7 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case DECRM: {
             ApplyResult r = ApplyResult::Ok;
             crispy::for_each(crispy::times(seq.parameterCount()), [&](size_t i) {
-                auto const t = impl::setModeDEC(seq, i, false, _terminal.screen());
+                auto const t = impl::setModeDEC(seq, i, false, _terminal);
                 r = max(r, t);
             });
             return r;
@@ -3860,7 +3359,7 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             if (auto const columnCount = seq.param_or(0, 80); columnCount == 80 || columnCount == 132)
             {
                 // EXTENSION: only 80 and 132 are specced, but we allow any.
-                resizeColumns(ColumnCount(columnCount), false);
+                _terminal.resizeColumns(ColumnCount(columnCount), false);
                 return ApplyResult::Ok;
             }
             else
@@ -3871,25 +3370,44 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case DECSLRM: {
             auto l = decr(seq.param_opt<ColumnOffset>(0));
             auto r = decr(seq.param_opt<ColumnOffset>(1));
-            setLeftRightMargin(l, r);
+            _terminal.setLeftRightMargin(l, r);
         }
         break;
         case DECSM: {
             ApplyResult r = ApplyResult::Ok;
             crispy::for_each(crispy::times(seq.parameterCount()), [&](size_t i) {
-                auto const t = impl::setModeDEC(seq, i, true, _terminal.screen());
+                auto const t = impl::setModeDEC(seq, i, true, _terminal);
                 r = max(r, t);
             });
             return r;
         }
         case DECSTBM:
-            setTopBottomMargin(decr(seq.param_opt<LineOffset>(0)), decr(seq.param_opt<LineOffset>(1)));
+            _terminal.setTopBottomMargin(decr(seq.param_opt<LineOffset>(0)), decr(seq.param_opt<LineOffset>(1)));
             break;
-        case DECSTR: resetSoft(); break;
+        case DECSTR: _terminal.softReset(); break;
         case DECXCPR: reportExtendedCursorPosition(); break;
         case DL: deleteLines(seq.param_or(0, LineCount(1))); break;
         case ECH: eraseCharacters(seq.param_or(0, ColumnCount(1))); break;
-        case ED: return impl::ED(seq, _terminal.screen());
+        case ED:
+            if (seq.parameterCount() == 0)
+                clearToEndOfScreen();
+            else
+            {
+                for (size_t i = 0; i < seq.parameterCount(); ++i)
+                {
+                    switch (seq.param(i))
+                    {
+                        case 0: clearToEndOfScreen(); break;
+                        case 1: clearToBeginOfScreen(); break;
+                        case 2: clearScreen(); break;
+                        case 3:
+                            grid().clearHistory();
+                            _terminal.scrollbackBufferCleared();
+                            break;
+                    }
+                }
+            }
+            break;
         case EL: return impl::EL(seq, _terminal.screen());
         case HPA: moveCursorToColumn(seq.param<ColumnOffset>(0) - 1); break;
         case HPR: moveCursorForward(seq.param<ColumnCount>(0)); break;
@@ -3912,20 +3430,20 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case RM: {
             ApplyResult r = ApplyResult::Ok;
             crispy::for_each(crispy::times(seq.parameterCount()), [&](size_t i) {
-                auto const t = impl::setAnsiMode(seq, i, false, _terminal.screen());
+                auto const t = impl::setAnsiMode(seq, i, false, _terminal);
                 r = max(r, t);
             });
             return r;
         }
         break;
-        case SCOSC: saveCursor(); break;
+        case SCOSC: _terminal.saveCursor(); break;
         case SD: scrollDown(seq.param_or<LineCount>(0, LineCount { 1 })); break;
         case SETMARK: setMark(); break;
-        case SGR: return impl::applySGR(_terminal.screen(), seq, 0, seq.parameterCount());
+        case SGR: return impl::applySGR(_terminal, seq, 0, seq.parameterCount());
         case SM: {
             ApplyResult r = ApplyResult::Ok;
             crispy::for_each(crispy::times(seq.parameterCount()), [&](size_t i) {
-                auto const t = impl::setAnsiMode(seq, i, true, _terminal.screen());
+                auto const t = impl::setAnsiMode(seq, i, true, _terminal);
                 r = max(r, t);
             });
             return r;

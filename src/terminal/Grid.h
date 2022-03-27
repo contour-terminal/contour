@@ -489,8 +489,9 @@ class Grid
 
     constexpr LineCount linesUsed() const noexcept;
 
+    void verifyState() const;
+
   private:
-    void verifyState();
     void appendNewLines(LineCount _count, GraphicsAttributes _attr);
     void clampHistory();
 

@@ -19,6 +19,7 @@
 #include <terminal/Selector.h>
 #include <terminal/TerminalState.h>
 #include <terminal/Viewport.h>
+#include <terminal/primitives.h>
 #include <terminal/pty/Pty.h>
 
 #include <fmt/format.h>
@@ -29,6 +30,7 @@
 #include <memory>
 #include <mutex>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace terminal
@@ -89,10 +91,83 @@ class Terminal
 
     void start();
 
-    void resetHard();
-
     void setRefreshRate(double _refreshRate);
     void setLastMarkRangeOffset(LineOffset _value) noexcept;
+
+    bool isModeEnabled(AnsiMode m) const noexcept { return state_.modes.enabled(m); }
+    bool isModeEnabled(DECMode m) const noexcept { return state_.modes.enabled(m); }
+    void setMode(AnsiMode _mode, bool _enable);
+    void setMode(DECMode _mode, bool _enable);
+
+    void setTopBottomMargin(std::optional<LineOffset> _top, std::optional<LineOffset> _bottom);
+    void setLeftRightMargin(std::optional<ColumnOffset> _left, std::optional<ColumnOffset> _right);
+
+    void moveCursorTo(LineOffset _line, ColumnOffset _column);
+    void saveCursor();
+    void restoreCursor();
+    void restoreCursor(Cursor const& _savedCursor);
+
+    void setGraphicsRendition(GraphicsRendition _rendition);
+    void setForegroundColor(Color _color);
+    void setBackgroundColor(Color _color);
+    void setUnderlineColor(Color _color);
+
+    // {{{ cursor
+    Cursor const& cursor() const noexcept { return state_.cursor; }
+    constexpr CellLocation realCursorPosition() const noexcept { return state_.cursor.position; }
+
+    /// Returns identity if DECOM is disabled (default), but returns translated coordinates if DECOM is
+    /// enabled.
+    CellLocation toRealCoordinate(CellLocation pos) const noexcept
+    {
+        if (!state_.cursor.originMode)
+            return pos;
+        else
+            return { pos.line + state_.margin.vertical.from, pos.column + state_.margin.horizontal.from };
+    }
+
+    /// Clamps given coordinates, respecting DECOM (Origin Mode).
+    CellLocation clampCoordinate(CellLocation coord) const noexcept
+    {
+        if (state_.cursor.originMode)
+            return clampToOrigin(coord);
+        else
+            return clampToScreen(coord);
+    }
+
+    /// Clamps given logical coordinates to margins as used in when DECOM (origin mode) is enabled.
+    CellLocation clampToOrigin(CellLocation coord) const noexcept
+    {
+        return { std::clamp(coord.line, LineOffset { 0 }, state_.margin.vertical.to),
+                 std::clamp(coord.column, ColumnOffset { 0 }, state_.margin.horizontal.to) };
+    }
+
+    LineOffset clampedLine(LineOffset _line) const noexcept
+    {
+        return std::clamp(_line, LineOffset(0), boxed_cast<LineOffset>(state_.pageSize.lines) - 1);
+    }
+
+    ColumnOffset clampedColumn(ColumnOffset _column) const noexcept
+    {
+        return std::clamp(_column, ColumnOffset(0), boxed_cast<ColumnOffset>(state_.pageSize.columns) - 1);
+    }
+
+    CellLocation clampToScreen(CellLocation coord) const noexcept
+    {
+        return { clampedLine(coord.line), clampedColumn(coord.column) };
+    }
+
+    // Tests if given coordinate is within the visible screen area.
+    constexpr bool contains(CellLocation _coord) const noexcept
+    {
+        return LineOffset(0) <= _coord.line && _coord.line < boxed_cast<LineOffset>(state_.pageSize.lines)
+               && ColumnOffset(0) <= _coord.column
+               && _coord.column <= boxed_cast<ColumnOffset>(state_.pageSize.columns);
+    }
+    // }}}
+
+    constexpr ImageSize cellPixelSize() const noexcept { return state_.cellPixelSize; }
+    constexpr void setCellPixelSize(ImageSize _cellPixelSize) { state_.cellPixelSize = _cellPixelSize; }
 
     /// Retrieves the time point this terminal instance has been spawned.
     std::chrono::steady_clock::time_point startTime() const noexcept { return startTime_; }
@@ -103,6 +178,11 @@ class Terminal
 
     PageSize pageSize() const noexcept { return pty_->pageSize(); }
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels);
+
+    /// Implements semantics for  DECCOLM / DECSCPP.
+    void resizeColumns(ColumnCount _newColumnCount, bool _clear);
+
+    void clearScreen();
 
     void setMouseProtocolBypassModifier(Modifier _value) { mouseProtocolBypassModifier_ = _value; }
     void setMouseBlockSelectionModifier(Modifier _value) { mouseBlockSelectionModifier_ = _value; }
@@ -222,11 +302,19 @@ class Terminal
         innerLock_.unlock();
     }
 
-    /// Only access this when having the terminal object locked.
-    Screen<Cell> const& screen() const noexcept { return screen_; }
+    bool isPrimaryScreen() const noexcept { return state_.screenType == ScreenType::Primary; }
+    bool isAlternateScreen() const noexcept { return state_.screenType == ScreenType::Alternate; }
 
-    /// Only access this when having the terminal object locked.
-    Screen<Cell>& screen() noexcept { return screen_; }
+    void setScreen(ScreenType screenType);
+
+    Screen<Cell> const& screen() const noexcept { return primaryScreen_; }
+    Screen<Cell>& screen() noexcept { return primaryScreen_; }
+
+    Screen<Cell> const& primaryScreen() const noexcept { return primaryScreen_; }
+    Screen<Cell>& primaryScreen() noexcept { return primaryScreen_; }
+
+    Screen<Cell> const& alternateScreen() const noexcept { return alternateScreen_; }
+    Screen<Cell>& alternateScreen() noexcept { return alternateScreen_; }
 
     bool isLineWrapped(LineOffset _lineNumber) const noexcept
     {
@@ -270,9 +358,15 @@ class Terminal
     template <typename RenderTarget>
     void renderSelection(RenderTarget _renderTarget) const
     {
-        if (selection_)
+        if (!selection_)
+            return;
+
+        if (isPrimaryScreen())
             terminal::renderSelection(*selection_,
-                                      [&](CellLocation _pos) { _renderTarget(_pos, screen_.at(_pos)); });
+                                      [&](CellLocation _pos) { _renderTarget(_pos, primaryScreen_.at(_pos)); });
+        else
+            terminal::renderSelection(*selection_,
+                                      [&](CellLocation _pos) { _renderTarget(_pos, alternateScreen_.at(_pos)); });
     }
 
     void clearSelection();
@@ -350,6 +444,7 @@ class Terminal
     void setWindowTitle(std::string_view _title);
     void setTerminalProfile(std::string const& _configProfileName);
     void useApplicationCursorKeys(bool _enabled);
+    void softReset();
     void hardReset();
     void discardImage(Image const&);
     void markCellDirty(CellLocation _position) noexcept;
@@ -364,6 +459,8 @@ class Terminal
     TerminalState& state() noexcept { return state_; }
     TerminalState const& state() const noexcept { return state_; }
 
+    void applyPageSizeToCurrentBuffer();
+
   private:
     void mainLoop();
     void refreshRenderBuffer(RenderBuffer& _output); // <- acquires the lock
@@ -371,15 +468,6 @@ class Terminal
     std::optional<RenderCursor> renderCursor();
     void updateCursorVisibilityState() const;
     bool updateCursorHoveringState();
-
-    template <typename Renderer, typename... RemainingPasses>
-    void renderPass(Renderer&& pass, RemainingPasses... remainingPasses) const
-    {
-        screen_.render(std::forward<Renderer>(pass), viewport_.scrollOffset());
-
-        if constexpr (sizeof...(RemainingPasses) != 0)
-            renderPass(std::forward<RemainingPasses>(remainingPasses)...);
-    }
 
     // private data
     //
@@ -420,7 +508,8 @@ class Terminal
     LineOffset copyLastMarkRangeOffset_;
 
     TerminalState state_;
-    Screen<Cell> screen_;
+    Screen<Cell> primaryScreen_;
+    Screen<Cell> alternateScreen_;
 
     std::mutex mutable outerLock_;
     std::mutex mutable innerLock_;
