@@ -59,8 +59,6 @@ string Sequence::text() const
     if (leaderSymbol_)
         sstr << ' ' << leaderSymbol_;
 
-    sstr << fmt::format("({})", parameterCount());
-
     if (parameterCount() > 1 || (parameterCount() == 1 && parameters_.at(0) != 0))
         sstr << ' ' << parameters_.str();
 
