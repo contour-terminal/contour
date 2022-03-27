@@ -175,8 +175,8 @@ class CONTOUR_PACKED Cell
     CellExtra& extra() noexcept;
 
   private:
-    template <typename ... Args>
-    void createExtra(Args ... args) noexcept;
+    template <typename... Args>
+    void createExtra(Args... args) noexcept;
 
     // Cell data
     char32_t codepoint_ = 0; /// Primary Unicode codepoint to be displayed.
@@ -187,8 +187,8 @@ class CONTOUR_PACKED Cell
 };
 
 // {{{ impl: ctor's
-template <typename ... Args>
-inline void Cell::createExtra(Args ... args) noexcept
+template <typename... Args>
+inline void Cell::createExtra(Args... args) noexcept
 {
     try
     {
