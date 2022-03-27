@@ -126,6 +126,10 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
 
 TerminalSession::~TerminalSession()
 {
+    terminating_ = true;
+    terminal_.device().wakeupReader();
+    if (screenUpdateThread_)
+        screenUpdateThread_->join();
 }
 
 void TerminalSession::setDisplay(unique_ptr<TerminalDisplay> _display)
@@ -153,7 +157,27 @@ void TerminalSession::displayInitialized()
 
 void TerminalSession::start()
 {
-    terminal().start();
+    screenUpdateThread_ = make_unique<std::thread>(bind(&TerminalSession::mainLoop, this));
+}
+
+void TerminalSession::mainLoop()
+{
+    mainLoopThreadID_ = this_thread::get_id();
+
+    SessionLog()("Starting main loop with thread id {}", [&]() {
+        stringstream sstr;
+        sstr << mainLoopThreadID_;
+        return sstr.str();
+    }());
+
+    while (!terminating_)
+    {
+        if (!terminal_.processInputOnce())
+            break;
+    }
+
+    SessionLog()("Event loop terminating (PTY {}).", terminal_.device().isClosed() ? "closed" : "open");
+    onClosed();
 }
 
 void TerminalSession::terminate()

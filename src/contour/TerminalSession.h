@@ -25,6 +25,7 @@
 #include <QtCore/QFileSystemWatcher>
 
 #include <functional>
+#include <thread>
 
 namespace contour
 {
@@ -202,6 +203,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     void configureDisplay();
     uint8_t matchModeFlags() const;
     void flushInput();
+    void mainLoop();
 
     // private data
     //
@@ -221,6 +223,10 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     TerminalDisplay* display_ = nullptr;
 
     std::unique_ptr<QFileSystemWatcher> configFileChangeWatcher_;
+
+    bool terminating_ = false;
+    std::thread::id mainLoopThreadID_ {};
+    std::unique_ptr<std::thread> screenUpdateThread_;
 
     // state vars
     //

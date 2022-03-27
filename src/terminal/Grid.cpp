@@ -187,13 +187,14 @@ std::string Grid<Cell>::renderMainPageText() const
 template <typename Cell>
 Line<Cell>& Grid<Cell>::lineAt(LineOffset _line) noexcept
 {
-    Require(*_line < *pageSize_.lines);
+    // Require(*_line < *pageSize_.lines);
     return lines_[unbox<long>(_line)];
 }
 
 template <typename Cell>
 Line<Cell> const& Grid<Cell>::lineAt(LineOffset _line) const noexcept
 {
+    // Require(*_line < *pageSize_.lines);
     return const_cast<Grid&>(*this).lineAt(_line);
 }
 

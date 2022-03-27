@@ -29,7 +29,6 @@
 #include <memory>
 #include <mutex>
 #include <string_view>
-#include <thread>
 #include <vector>
 
 namespace terminal
@@ -388,7 +387,6 @@ class Terminal
     /// Boolean, indicating whether the terminal's screen buffer contains updates to be rendered.
     mutable std::atomic<uint64_t> changes_;
 
-    std::thread::id mainLoopThreadID_ {};
     size_t ptyReadBufferSize_;
     Events& eventListener_;
 
@@ -426,7 +424,6 @@ class Terminal
 
     std::mutex mutable outerLock_;
     std::mutex mutable innerLock_;
-    std::unique_ptr<std::thread> screenUpdateThread_;
     Viewport<Cell> viewport_;
     std::unique_ptr<Selection> selection_;
     std::atomic<bool> hoveringHyperlink_ = false;

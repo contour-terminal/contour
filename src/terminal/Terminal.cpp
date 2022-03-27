@@ -159,16 +159,6 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
 
 Terminal::~Terminal()
 {
-    state_.terminating = true;
-    pty_->wakeupReader();
-
-    if (screenUpdateThread_)
-        screenUpdateThread_->join();
-}
-
-void Terminal::start()
-{
-    screenUpdateThread_ = make_unique<std::thread>(bind(&Terminal::mainLoop, this));
 }
 
 void Terminal::resetHard()
@@ -184,26 +174,6 @@ void Terminal::setRefreshRate(double _refreshRate)
 void Terminal::setLastMarkRangeOffset(LineOffset _value) noexcept
 {
     copyLastMarkRangeOffset_ = _value;
-}
-
-void Terminal::mainLoop()
-{
-    mainLoopThreadID_ = this_thread::get_id();
-
-    TerminalLog()("Starting main loop with thread id {}", [&]() {
-        stringstream sstr;
-        sstr << mainLoopThreadID_;
-        return sstr.str();
-    }());
-
-    while (!state_.terminating)
-    {
-        if (!processInputOnce())
-            break;
-    }
-
-    TerminalLog()("Event loop terminating (PTY {}).", pty_->isClosed() ? "closed" : "open");
-    eventListener_.onClosed();
 }
 
 bool Terminal::processInputOnce()
@@ -247,8 +217,8 @@ void Terminal::breakLoopAndRefreshRenderBuffer()
     changes_++;
     renderBuffer_.state = RenderBufferState::RefreshBuffersAndTrySwap;
 
-    if (this_thread::get_id() == mainLoopThreadID_)
-        return;
+    // if (this_thread::get_id() == mainLoopThreadID_)
+    //     return;
 
     pty_->wakeupReader();
 }
