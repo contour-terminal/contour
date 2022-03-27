@@ -43,6 +43,10 @@
 
 #include <QtNetwork/QHostInfo>
 
+#if !defined(_WIN32)
+    #include <pthread.h>
+#endif
+
 #if defined(CONTOUR_BLUR_PLATFORM_KWIN)
     #include <KWindowEffects>
 #endif
@@ -163,6 +167,12 @@ void TerminalSession::start()
 void TerminalSession::mainLoop()
 {
     mainLoopThreadID_ = this_thread::get_id();
+
+#if defined(__APPLE__)
+    pthread_setname_np("Terminal.Loop");
+#elif !defined(_WIN32)
+    pthread_setname_np(pthread_self(), "Terminal.Loop");
+#endif
 
     SessionLog()("Starting main loop with thread id {}", [&]() {
         stringstream sstr;
