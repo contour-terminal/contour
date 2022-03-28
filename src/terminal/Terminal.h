@@ -168,6 +168,16 @@ class Terminal
                && ColumnOffset(0) <= _coord.column
                && _coord.column <= boxed_cast<ColumnOffset>(state_.pageSize.columns);
     }
+
+    bool isCursorInsideMargins() const noexcept
+    {
+        bool const insideVerticalMargin = state_.margin.vertical.contains(state_.cursor.position.line);
+        bool const insideHorizontalMargin =
+            !isModeEnabled(DECMode::LeftRightMargin)
+            || state_.margin.horizontal.contains(state_.cursor.position.column);
+        return insideVerticalMargin && insideHorizontalMargin;
+    }
+
     // }}}
 
     constexpr ImageSize cellPixelSize() const noexcept { return state_.cellPixelSize; }

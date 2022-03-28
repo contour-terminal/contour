@@ -486,7 +486,7 @@ void Screen<Cell>::writeText(string_view _chars)
         // optimization for US-ASCII text versus grapheme cluster segmentation.
 
         auto constexpr ASCII_Width = 1;
-        if (isModeEnabled(DECMode::AutoWrap))
+        if (_terminal.isModeEnabled(DECMode::AutoWrap))
         {
             // Case A)
             if (_state.wrapPending)
@@ -608,7 +608,7 @@ void Screen<Cell>::writeText(char32_t _char)
         VTParserTraceLog()("text: \"{}\"", unicode::convert_to<char>(_char));
 #endif
 
-    if (_state.wrapPending && _state.cursor.autoWrap) // && !isModeEnabled(DECMode::TextReflow))
+    if (_state.wrapPending && _state.cursor.autoWrap) // && !_terminal.isModeEnabled(DECMode::TextReflow))
     {
         bool const lineWrappable = currentLine().wrappable();
         linefeed(_state.margin.horizontal.from);
@@ -659,7 +659,8 @@ void Screen<Cell>::writeCharToCurrentAndAdvance(char32_t _character) noexcept
 #if 1
     clearAndAdvance(cell.width());
 #else
-    bool const cursorInsideMargin = isModeEnabled(DECMode::LeftRightMargin) && isCursorInsideMargins();
+    bool const cursorInsideMargin =
+        _terminal.isModeEnabled(DECMode::LeftRightMargin) && _terminal.isCursorInsideMargins();
     auto const cellsAvailable = cursorInsideMargin
                                     ? *(_state.margin.horizontal.to - _state.cursor.position.column) - 1
                                     : *_state.pageSize.columns - *_state.cursor.position.column - 1;
@@ -695,7 +696,7 @@ void Screen<Cell>::clearAndAdvance(int _offset) noexcept
         return;
 
     bool const cursorInsideMargin =
-        _terminal.isModeEnabled(DECMode::LeftRightMargin) && isCursorInsideMargins();
+        _terminal.isModeEnabled(DECMode::LeftRightMargin) && _terminal.isCursorInsideMargins();
     auto const cellsAvailable = cursorInsideMargin
                                     ? *(_state.margin.horizontal.to - _state.cursor.position.column) - 1
                                     : *_state.pageSize.columns - *_state.cursor.position.column - 1;
@@ -910,7 +911,7 @@ string Screen<Cell>::renderMainPageText() const
 template <typename Cell>
 void Screen<Cell>::linefeed()
 {
-    if (isModeEnabled(AnsiMode::AutomaticNewLine))
+    if (_terminal.isModeEnabled(AnsiMode::AutomaticNewLine))
         linefeed(_state.margin.horizontal.from);
     else
         linefeed(realCursorPosition().column);
@@ -1121,7 +1122,7 @@ void Screen<Cell>::moveCursorToPrevLine(LineCount _n)
 template <typename Cell>
 void Screen<Cell>::insertCharacters(ColumnCount _n)
 {
-    if (isCursorInsideMargins())
+    if (_terminal.isCursorInsideMargins())
         insertChars(realCursorPosition().line, _n);
 }
 
@@ -1149,7 +1150,7 @@ void Screen<Cell>::insertChars(LineOffset _lineNo, ColumnCount _n)
 template <typename Cell>
 void Screen<Cell>::insertLines(LineCount _n)
 {
-    if (isCursorInsideMargins())
+    if (_terminal.isCursorInsideMargins())
     {
         scrollDown(_n,
                    Margin { Margin::Vertical { _state.cursor.position.line, _state.margin.vertical.to },
@@ -1160,7 +1161,7 @@ void Screen<Cell>::insertLines(LineCount _n)
 template <typename Cell>
 void Screen<Cell>::insertColumns(ColumnCount _n)
 {
-    if (isCursorInsideMargins())
+    if (_terminal.isCursorInsideMargins())
         for (auto lineNo = _state.margin.vertical.from; lineNo <= _state.margin.vertical.to; ++lineNo)
             insertChars(lineNo, _n);
 }
@@ -1252,7 +1253,7 @@ void Screen<Cell>::fillArea(char32_t _ch, int _top, int _left, int _bottom, int 
 template <typename Cell>
 void Screen<Cell>::deleteLines(LineCount _n)
 {
-    if (isCursorInsideMargins())
+    if (_terminal.isCursorInsideMargins())
     {
         scrollUp(_n,
                  Margin { Margin::Vertical { _state.cursor.position.line, _state.margin.vertical.to },
@@ -1263,7 +1264,7 @@ void Screen<Cell>::deleteLines(LineCount _n)
 template <typename Cell>
 void Screen<Cell>::deleteCharacters(ColumnCount _n)
 {
-    if (isCursorInsideMargins() && *_n != 0)
+    if (_terminal.isCursorInsideMargins() && *_n != 0)
         deleteChars(realCursorPosition().line, realCursorPosition().column, _n);
 }
 
@@ -1291,7 +1292,7 @@ void Screen<Cell>::deleteChars(LineOffset _line, ColumnOffset _column, ColumnCou
 template <typename Cell>
 void Screen<Cell>::deleteColumns(ColumnCount _n)
 {
-    if (isCursorInsideMargins())
+    if (_terminal.isCursorInsideMargins())
         for (auto lineNo = _state.margin.vertical.from; lineNo <= _state.margin.vertical.to; ++lineNo)
             deleteChars(lineNo, realCursorPosition().column, _n);
 }
@@ -1674,7 +1675,7 @@ void Screen<Cell>::requestAnsiMode(unsigned int _mode)
 {
     ModeResponse const modeResponse =
         isValidAnsiMode(_mode)
-            ? isModeEnabled(static_cast<AnsiMode>(_mode)) ? ModeResponse::Set : ModeResponse::Reset
+            ? _terminal.isModeEnabled(static_cast<AnsiMode>(_mode)) ? ModeResponse::Set : ModeResponse::Reset
             : ModeResponse::NotRecognized;
 
     auto const code = toAnsiModeNum(static_cast<AnsiMode>(_mode));

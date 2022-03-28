@@ -249,15 +249,6 @@ class Screen: public SequenceHandler, public capabilities::StaticDatabase
     PageSize pageSize() const noexcept { return _state.pageSize; }
     void resize(PageSize _newSize);
 
-    bool isCursorInsideMargins() const noexcept
-    {
-        bool const insideVerticalMargin = _state.margin.vertical.contains(_state.cursor.position.line);
-        bool const insideHorizontalMargin =
-            !isModeEnabled(DECMode::LeftRightMargin)
-            || _state.margin.horizontal.contains(_state.cursor.position.column);
-        return insideVerticalMargin && insideHorizontalMargin;
-    }
-
     constexpr CellLocation realCursorPosition() const noexcept { return _state.cursor.position; }
 
     constexpr CellLocation logicalCursorPosition() const noexcept
@@ -364,18 +355,6 @@ class Screen: public SequenceHandler, public capabilities::StaticDatabase
     {
         return _state.screenType == ScreenType::Alternate;
     }
-    [[deprecated]] bool isModeEnabled(DECMode m) const noexcept { return _state.modes.enabled(m); }
-
-    bool isModeEnabled(std::variant<AnsiMode, DECMode> m) const
-    {
-        if (std::holds_alternative<AnsiMode>(m))
-            return _state.modes.enabled(std::get<AnsiMode>(m));
-        else
-            return _state.modes.enabled(std::get<DECMode>(m));
-    }
-
-    bool verticalMarginsEnabled() const noexcept { return isModeEnabled(DECMode::Origin); }
-    bool horizontalMarginsEnabled() const noexcept { return isModeEnabled(DECMode::LeftRightMargin); }
 
     Margin margin() const noexcept { return _state.margin; }
 
