@@ -28,6 +28,7 @@
 #include <vector>
 
 using namespace std;
+using terminal::CellFlags;
 using terminal::ColumnCount;
 using terminal::ColumnOffset;
 using terminal::LineCount;
@@ -319,4 +320,22 @@ TEST_CASE("Terminal.SynchronizedOutput", "[terminal]")
     mc.terminal().tick(now);
     mc.terminal().ensureFreshRenderBuffer();
     CHECK("Hello  World" == trimmedTextScreenshot(mc));
+}
+
+TEST_CASE("Terminal.CurlyUnderline", "[terminal]")
+{
+    auto const now = chrono::steady_clock::now();
+    auto mc = MockTerm { ColumnCount(20), LineCount(1) };
+
+    mc.writeToStdout("\033[4:3mAB\033[mCD");
+    mc.terminal().tick(now);
+    mc.terminal().ensureFreshRenderBuffer();
+    CHECK("ABCD" == trimmedTextScreenshot(mc));
+
+    auto& screen = mc.terminal().primaryScreen();
+
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).isFlagEnabled(CellFlags::CurlyUnderlined));
+    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlags::CurlyUnderlined));
+    CHECK(!screen.at(LineOffset(0), ColumnOffset(2)).isFlagEnabled(CellFlags::CurlyUnderlined));
+    CHECK(!screen.at(LineOffset(0), ColumnOffset(3)).isFlagEnabled(CellFlags::CurlyUnderlined));
 }

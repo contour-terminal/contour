@@ -3022,7 +3022,7 @@ namespace impl
                 case 4:
                     if (seq.subParameterCount(i) == 1)
                     {
-                        switch (seq.subparam(i, 0))
+                        switch (seq.subparam(i, 1))
                         {
                             case 0: target.setGraphicsRendition(GraphicsRendition::NoUnderline); break; // 4:0
                             case 1: target.setGraphicsRendition(GraphicsRendition::Underline); break;   // 4:1
