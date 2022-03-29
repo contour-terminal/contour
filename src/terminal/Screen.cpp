@@ -2929,16 +2929,18 @@ namespace impl
                 }
                 case 3: // ":3:F:C:M:Y" (TODO)
                 case 4: // ":4:F:C:M:Y:K" (TODO)
-                {
                     *pi += len;
                     break;
-                }
                 case 5: // ":5:P"
-                    *pi += len;
                     if (auto const P = _seq.subparam(i, 1); P <= 255)
+                    {
+                        *pi += len;
                         return static_cast<IndexedColor>(P);
+                    }
                     break;
-                default: break; // XXX invalid sub parameter
+                default:
+                    // XXX invalid sub parameter
+                    break;
             }
         }
 
@@ -3024,22 +3026,15 @@ namespace impl
                     {
                         switch (seq.subparam(i, 1))
                         {
-                            case 0: target.setGraphicsRendition(GraphicsRendition::NoUnderline); break; // 4:0
-                            case 1: target.setGraphicsRendition(GraphicsRendition::Underline); break;   // 4:1
-                            case 2:
-                                target.setGraphicsRendition(GraphicsRendition::DoublyUnderlined);
-                                break; // 4:2
-                            case 3:
-                                target.setGraphicsRendition(GraphicsRendition::CurlyUnderlined);
-                                break; // 4:3
-                            case 4:
-                                target.setGraphicsRendition(GraphicsRendition::DottedUnderline);
-                                break; // 4:4
-                            case 5:
-                                target.setGraphicsRendition(GraphicsRendition::DashedUnderline);
-                                break; // 4:5
+                            case 0: target.setGraphicsRendition(GraphicsRendition::NoUnderline); break;
+                            case 1: target.setGraphicsRendition(GraphicsRendition::Underline); break;
+                            case 2: target.setGraphicsRendition(GraphicsRendition::DoublyUnderlined); break;
+                            case 3: target.setGraphicsRendition(GraphicsRendition::CurlyUnderlined); break;
+                            case 4: target.setGraphicsRendition(GraphicsRendition::DottedUnderline); break;
+                            case 5: target.setGraphicsRendition(GraphicsRendition::DashedUnderline); break;
                             default: target.setGraphicsRendition(GraphicsRendition::Underline); break;
                         }
+                        ++i;
                     }
                     else
                         target.setGraphicsRendition(GraphicsRendition::Underline);

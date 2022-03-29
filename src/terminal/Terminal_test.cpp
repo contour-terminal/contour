@@ -255,7 +255,7 @@ TEST_CASE("Terminal.DECCARA", "[terminal]")
             auto const& someCell = mock.terminal().screen().at(LineOffset(line - 1), ColumnOffset(column - 1));
             auto const rgb = someCell.foregroundColor().rgb();
             auto const colorDec = fmt::format("{}/{}/{}", unsigned(rgb.red), unsigned(rgb.green), unsigned(rgb.blue));
-            INFO(fmt::format("at line {} column {}", line, column));
+            INFO(fmt::format("at line {} column {}, flags {}", line, column, someCell.styles()));
             CHECK(colorDec == "171/178/191");
             CHECK(someCell.isFlagEnabled(terminal::CellFlags::Bold));
             CHECK(someCell.isFlagEnabled(terminal::CellFlags::Underline));
@@ -338,4 +338,9 @@ TEST_CASE("Terminal.CurlyUnderline", "[terminal]")
     CHECK(screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlags::CurlyUnderlined));
     CHECK(!screen.at(LineOffset(0), ColumnOffset(2)).isFlagEnabled(CellFlags::CurlyUnderlined));
     CHECK(!screen.at(LineOffset(0), ColumnOffset(3)).isFlagEnabled(CellFlags::CurlyUnderlined));
+
+    CHECK(!screen.at(LineOffset(0), ColumnOffset(0)).isFlagEnabled(CellFlags::Italic));
+    CHECK(!screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlags::Italic));
+    CHECK(!screen.at(LineOffset(0), ColumnOffset(2)).isFlagEnabled(CellFlags::Italic));
+    CHECK(!screen.at(LineOffset(0), ColumnOffset(3)).isFlagEnabled(CellFlags::Italic));
 }
