@@ -232,6 +232,7 @@ struct Pixmap
 
     void paint(int x, int y, uint8_t value = 0xFF);
     void paintOver(int x, int y, uint8_t intensity);
+    void paintOverThick(int x, int y, uint8_t intensity, int sx, int sy);
 
     atlas::Buffer take();
 
@@ -277,6 +278,13 @@ inline void Pixmap::paintOver(int x, int y, uint8_t intensity)
         return;
     auto& target = _buffer.at((h - y) * w + x);
     target = static_cast<uint8_t>(std::min(static_cast<int>(target) + static_cast<int>(intensity), 255));
+}
+
+inline void Pixmap::paintOverThick(int x, int y, uint8_t intensity, int sx, int sy)
+{
+    for (int i = x - sx; i <= x + sx; ++i)
+        for (int j = y - sy; j <= y + sy; ++j)
+            paintOver(i, j, intensity);
 }
 
 template <typename F>

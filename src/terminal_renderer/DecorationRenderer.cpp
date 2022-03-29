@@ -176,6 +176,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             auto const imageSize = ImageSize { width, height };
             auto block = blockElement(imageSize);
             return create(block.downsampledSize(), [&]() -> atlas::Buffer {
+                auto const thickness_half = max(1, int(ceil(underlineThickness() / 2.0)));
                 for (int x = 0; x < unbox<int>(width); ++x)
                 {
                     // Using Wu's antialiasing algorithm to paint the curved line.
@@ -184,8 +185,10 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
                     auto const y1 = static_cast<int>(floor(y));
                     auto const y2 = static_cast<int>(ceil(y));
                     auto const intensity = static_cast<int>(255 * fabs(y - y1));
-                    block.paintOver(x, yBase + y1, 255 - intensity);
-                    block.paintOver(x, yBase + y2, intensity);
+                    // block.paintOver(x, yBase + y1, 255 - intensity);
+                    // block.paintOver(x, yBase + y2, intensity);
+                    block.paintOverThick(x, yBase + y1, 255 - intensity, thickness_half, 0);
+                    block.paintOverThick(x, yBase + y2, intensity, thickness_half, 0);
                 }
                 return block.take();
             });
