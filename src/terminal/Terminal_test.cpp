@@ -332,7 +332,7 @@ TEST_CASE("Terminal.CurlyUnderline", "[terminal]")
     mc.terminal().ensureFreshRenderBuffer();
     CHECK("ABCD" == trimmedTextScreenshot(mc));
 
-    auto& screen = mc.terminal().screen();
+    auto& screen = mc.terminal().primaryScreen();
 
     CHECK(screen.at(LineOffset(0), ColumnOffset(0)).isFlagEnabled(CellFlags::CurlyUnderlined));
     CHECK(screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlags::CurlyUnderlined));
