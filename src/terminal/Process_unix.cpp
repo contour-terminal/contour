@@ -17,6 +17,7 @@
 
 #include <crispy/overloaded.h>
 #include <crispy/stdfs.h>
+#include <crispy/utils.h>
 
 #include <fmt/format.h>
 
@@ -53,22 +54,29 @@
 #include <sys/wait.h>
 
 using namespace std;
+using crispy::trimRight;
 
 namespace terminal
 {
 
 namespace
 {
+    bool isFlatpak()
+    {
+        static bool check = FileSystem::exists("/.flatpak-info");
+        return check;
+    }
+
     string getLastErrorAsString() { return strerror(errno); }
 
-    char** createArgv(string const& _arg0, std::vector<string> const& _args, size_t i = 0)
+    [[nodiscard]] char** createArgv(string const& _arg0, std::vector<string> const& _args, size_t i = 0)
     {
         auto const argCount =
             _args.size(); // factor out in order to avoid false-positive by static analysers.
         char** argv = new char*[argCount + 2 - i];
-        argv[0] = const_cast<char*>(_arg0.c_str());
+        argv[0] = strdup(_arg0.c_str());
         for (size_t i = 0; i < argCount; ++i)
-            argv[i + 1] = const_cast<char*>(_args[i].c_str());
+            argv[i + 1] = strdup(_args[i].c_str());
         argv[argCount + 1] = nullptr;
         return argv;
     }
@@ -106,16 +114,39 @@ Process::Process(string const& _path,
             d->pty->slave().login();
 
             auto const& cwd = _cwd.generic_string();
-            if (!_cwd.empty() && chdir(cwd.c_str()) != 0)
+            if (!isFlatpak())
             {
-                printf("Failed to chdir to \"%s\". %s\n", cwd.c_str(), strerror(errno));
-                exit(EXIT_FAILURE);
+                if (!_cwd.empty() && chdir(cwd.c_str()) != 0)
+                {
+                    printf("Failed to chdir to \"%s\". %s\n", cwd.c_str(), strerror(errno));
+                    exit(EXIT_FAILURE);
+                }
+
+                for (auto&& [name, value]: _env)
+                    setenv(name.c_str(), value.c_str(), true);
             }
 
-            char** argv = createArgv(_path, _args, 0);
+            char** argv = [=]() -> char** {
+                if (!isFlatpak())
+                    return createArgv(_path, _args, 0);
 
-            for (auto&& [name, value]: _env)
-                setenv(name.c_str(), value.c_str(), true);
+                // Prepend flatpak to jump out of sandbox:
+                // flatpak-spawn --host --watch-bus --env=TERM=$TERM /bin/zsh
+                auto realArgs = std::vector<string> {};
+                realArgs.emplace_back("--host");
+                realArgs.emplace_back("--watch-bus");
+                if (!_cwd.empty())
+                    realArgs.emplace_back(fmt::format("--directory={}", cwd));
+                if (auto const value = getenv("TERM"))
+                    realArgs.emplace_back(fmt::format("--env=TERM={}", value));
+                for (auto&& [name, value]: _env)
+                    realArgs.emplace_back(fmt::format("--env={}={}", name, value));
+                realArgs.push_back(_path);
+                for (auto const& arg: _args)
+                    realArgs.push_back(arg);
+
+                return createArgv("/usr/bin/flatpak-spawn", realArgs, 0);
+            }();
 
             // maybe close any leaked/inherited file descriptors from parent process
             // TODO: But be a little bit more clever in iterating only over those that are actually still
@@ -129,7 +160,7 @@ Process::Process(string const& _path,
             ::execvp(argv[0], argv);
 
             // Fallback: Try login shell.
-            fprintf(stdout, "\r\n\033[31;1mFailed to spawn %s. %s\033[m\r\n\n", argv[0], strerror(errno));
+            fprintf(stdout, "\r\n\033[31;1mFailed to spawn \"%s\". %s\033[m\r\n\n", argv[0], strerror(errno));
             fflush(stdout);
             auto theLoginShell = loginShell();
             if (!theLoginShell.empty())
@@ -227,6 +258,24 @@ vector<string> Process::loginShell()
         auto index = shell.rfind('/');
         return { "/bin/bash", "-c", fmt::format("exec -a -{} {}", shell.substr(index + 1, 5), pw->pw_shell) };
 #else
+        if (isFlatpak())
+        {
+            char buf[1024];
+            auto const cmd = fmt::format("flatpak-spawn --host getent passwd {}", pw->pw_name);
+            FILE* fp = popen(cmd.c_str(), "r");
+            auto fpCloser = crispy::finally { [fp]() {
+                pclose(fp);
+            } };
+            size_t const nread = fread(buf, sizeof(char), sizeof(buf) / sizeof(char), fp);
+            auto const output = trimRight(string_view(buf, nread));
+            auto const colonIndex = output.rfind(':');
+            if (colonIndex != string_view::npos)
+            {
+                auto const shell = output.substr(colonIndex + 1);
+                return { string(shell.data(), shell.size()) };
+            }
+        }
+
         return { pw->pw_shell };
 #endif
     }
