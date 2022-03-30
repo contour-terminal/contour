@@ -108,7 +108,7 @@ std::string Line<Cell, Optimize>::toUtf8Trimmed() const
 }
 
 template <typename Cell>
-InflatedLineBuffer<Cell> inflate(SimpleLineBuffer const& input)
+InflatedLineBuffer<Cell> inflate(MonoStyledLineBuffer const& input)
 {
     static constexpr char32_t ReplacementCharacter { 0xFFFD };
 
