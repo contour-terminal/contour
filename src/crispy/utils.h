@@ -35,6 +35,25 @@ namespace views
     }
 } // namespace views
 
+constexpr std::string_view trimRight(std::string_view value) noexcept
+{
+    while (!value.empty())
+    {
+        switch (value.back())
+        {
+            case ' ':
+            case '\t':
+            case '\r':
+            case '\n':
+                break;
+            default:
+                return value;
+        }
+        value.remove_suffix(1);
+    }
+    return value;
+}
+
 template <typename T>
 constexpr bool ascending(T low, T val, T high) noexcept
 {
