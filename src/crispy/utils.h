@@ -39,14 +39,8 @@ constexpr std::string_view trimRight(std::string_view value) noexcept
 {
     while (!value.empty())
     {
-        switch (value.back())
-        {
-            case ' ':
-            case '\t':
-            case '\r':
-            case '\n': break;
-            default: return value;
-        }
+        if (std::string_view(" \t\r\n").find(value.back()) == std::string_view::npos)
+            return value;
         value.remove_suffix(1);
     }
     return value;
