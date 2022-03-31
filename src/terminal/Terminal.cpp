@@ -100,6 +100,134 @@ namespace // {{{ helpers
 } // namespace
 // }}}
 
+template <typename Cell>
+RenderCell makeRenderCell(ColorPalette const& _colorPalette,
+                          HyperlinkStorage const& _hyperlinks,
+                          Cell const& _cell,
+                          RGBColor fg,
+                          RGBColor bg,
+                          LineOffset _line,
+                          ColumnOffset _column)
+{
+    RenderCell cell;
+    cell.backgroundColor = bg;
+    cell.foregroundColor = fg;
+    cell.decorationColor = _cell.getUnderlineColor(_colorPalette, fg);
+    cell.position.line = _line;
+    cell.position.column = _column;
+    cell.flags = _cell.styles();
+    cell.width = _cell.width();
+
+    if (_cell.codepointCount() != 0)
+    {
+        for (size_t i = 0; i < _cell.codepointCount(); ++i)
+            cell.codepoints.push_back(_cell.codepoint(i));
+    }
+
+    cell.image = _cell.imageFragment();
+
+    if (auto href = _hyperlinks.hyperlinkById(_cell.hyperlink()))
+    {
+        auto const& color = href->state == HyperlinkState::Hover ? _colorPalette.hyperlinkDecoration.hover
+                                                                 : _colorPalette.hyperlinkDecoration.normal;
+        // TODO(decoration): Move property into Terminal.
+        auto const decoration =
+            href->state == HyperlinkState::Hover
+                ? CellFlags::Underline        // TODO: decorationRenderer_.hyperlinkHover()
+                : CellFlags::DottedUnderline; // TODO: decorationRenderer_.hyperlinkNormal();
+        cell.flags |= decoration;             // toCellStyle(decoration);
+        cell.decorationColor = color;
+    }
+
+    return cell;
+}
+
+struct RenderBufferBuilder
+{
+    // clang-format off
+    enum class State { Gap, Sequence };
+    // clang-format on
+
+    RenderBuffer& output;
+    Terminal const& terminal;
+    bool reverseVideo = terminal.isModeEnabled(terminal::DECMode::ReverseVideo);
+    int prevWidth = 0;
+    bool prevHasCursor = false;
+    State state = State::Gap;
+    LineOffset lineNr = LineOffset(0);
+
+    RenderBufferBuilder(Terminal const& terminal, RenderBuffer& output);
+
+    void operator()(Cell const& _cell, LineOffset _line, ColumnOffset _column);
+};
+
+RenderBufferBuilder::RenderBufferBuilder(Terminal const& _terminal, RenderBuffer& _output):
+    output { _output },
+    terminal { _terminal },
+    reverseVideo { terminal.isModeEnabled(terminal::DECMode::ReverseVideo) }
+{
+}
+
+void RenderBufferBuilder::operator()(Cell const& _cell, LineOffset _line, ColumnOffset _column)
+{
+    // clang-format off
+    auto const selected = terminal.isSelected( CellLocation { _line - boxed_cast<LineOffset>(terminal.viewport().scrollOffset()), _column });
+    auto const pos = CellLocation { _line, _column };
+    auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(pos);
+    auto const hasCursor = gridPosition == terminal.realCursorPosition();
+    bool const paintCursor =
+        (hasCursor || (prevHasCursor && prevWidth == 2))
+            && output.cursor.has_value()
+            && output.cursor->shape == CursorShape::Block;
+    auto const [fg, bg] = makeColors(terminal.colorPalette(), _cell, reverseVideo, selected, paintCursor);
+    // clang-format on
+
+    prevWidth = _cell.width();
+    prevHasCursor = hasCursor;
+
+    auto const cellEmpty = _cell.empty();
+    auto const customBackground = bg != terminal.colorPalette().defaultBackground || !!_cell.styles();
+
+    bool isNewLine = false;
+    if (lineNr != _line)
+    {
+        isNewLine = true;
+        lineNr = _line;
+        prevWidth = 0;
+        prevHasCursor = false;
+        if (!output.screen.empty())
+            output.screen.back().groupEnd = true;
+    }
+
+    switch (state)
+    {
+        case State::Gap:
+            if (!cellEmpty || customBackground)
+            {
+                state = State::Sequence;
+                output.screen.emplace_back(makeRenderCell(
+                    terminal.colorPalette(), terminal.state().hyperlinks, _cell, fg, bg, _line, _column));
+                output.screen.back().groupStart = true;
+            }
+            break;
+        case State::Sequence:
+            if (cellEmpty && !customBackground)
+            {
+                output.screen.back().groupEnd = true;
+                state = State::Gap;
+            }
+            else
+            {
+                output.screen.emplace_back(makeRenderCell(
+                    terminal.colorPalette(), terminal.state().hyperlinks, _cell, fg, bg, _line, _column));
+
+                if (isNewLine)
+                    output.screen.back().groupStart = true;
+            }
+            break;
+    }
+}
+
 Terminal::Terminal(unique_ptr<Pty> _pty,
                    size_t _ptyReadBufferSize,
                    Terminal::Events& _eventListener,
@@ -276,47 +404,6 @@ void Terminal::refreshRenderBuffer(RenderBuffer& _output)
     refreshRenderBufferInternal(_output);
 }
 
-RenderCell makeRenderCell(ColorPalette const& _colorPalette,
-                          HyperlinkStorage const& _hyperlinks,
-                          Cell const& _cell,
-                          RGBColor fg,
-                          RGBColor bg,
-                          LineOffset _line,
-                          ColumnOffset _column)
-{
-    RenderCell cell;
-    cell.backgroundColor = bg;
-    cell.foregroundColor = fg;
-    cell.decorationColor = _cell.getUnderlineColor(_colorPalette, fg);
-    cell.position.line = _line;
-    cell.position.column = _column;
-    cell.flags = _cell.styles();
-    cell.width = _cell.width();
-
-    if (_cell.codepointCount() != 0)
-    {
-        for (size_t i = 0; i < _cell.codepointCount(); ++i)
-            cell.codepoints.push_back(_cell.codepoint(i));
-    }
-
-    cell.image = _cell.imageFragment();
-
-    if (auto href = _hyperlinks.hyperlinkById(_cell.hyperlink()))
-    {
-        auto const& color = href->state == HyperlinkState::Hover ? _colorPalette.hyperlinkDecoration.hover
-                                                                 : _colorPalette.hyperlinkDecoration.normal;
-        // TODO(decoration): Move property into Terminal.
-        auto const decoration =
-            href->state == HyperlinkState::Hover
-                ? CellFlags::Underline        // TODO: decorationRenderer_.hyperlinkHover()
-                : CellFlags::DottedUnderline; // TODO: decorationRenderer_.hyperlinkNormal();
-        cell.flags |= decoration;             // toCellStyle(decoration);
-        cell.decorationColor = color;
-    }
-
-    return cell;
-}
-
 PageSize Terminal::SelectionHelper::pageSize() const noexcept
 {
     return terminal->pageSize();
@@ -372,8 +459,8 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
 {
     verifyState();
 
-    auto& screen_ = primaryScreen_; // TODO(pr)
-    auto const renderHyperlinks = screen_.contains(currentMousePosition_);
+    auto const renderHyperlinks = isPrimaryScreen() ? primaryScreen_.contains(currentMousePosition_)
+                                                    : alternateScreen_.contains(currentMousePosition_);
 
     auto const currentMousePositionRel = viewport_.translateScreenToGridCoordinate(currentMousePosition_);
 
@@ -384,110 +471,29 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
     _output.clear();
     _output.frameID = lastFrameID_;
 
-    enum class State
-    {
-        Gap,
-        Sequence
-    };
-
 #if defined(CONTOUR_PERF_STATS)
     if (TerminalLog)
         TerminalLog()("{}: Refreshing render buffer.\n", lastFrameID_.load());
 #endif
 
-    shared_ptr<HyperlinkInfo> href =
-        renderHyperlinks ? screen_.hyperlinkAt(currentMousePositionRel) : shared_ptr<HyperlinkInfo> {};
+    shared_ptr<HyperlinkInfo> href;
+    if (renderHyperlinks)
+    {
+        if (isPrimaryScreen())
+            href = primaryScreen_.hyperlinkAt(currentMousePositionRel);
+        else
+            href = alternateScreen_.hyperlinkAt(currentMousePositionRel);
+    }
+
     if (href)
         href->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?
 
     _output.cursor = renderCursor();
-    auto const reverseVideo = isModeEnabled(terminal::DECMode::ReverseVideo);
-
-    auto renderCell = [this,
-                       reverseVideo,
-                       &_output,
-                       prevWidth = 0,
-                       prevHasCursor = false,
-                       state = State::Gap,
-                       lineNr =
-                           LineOffset(0)](Cell const& _cell, LineOffset _line, ColumnOffset _column) mutable {
-        // clang-format off
-            auto& screen_ = primaryScreen_; // TODO(pr)
-            auto const selected = isSelected( CellLocation { _line - boxed_cast<LineOffset>(viewport_.scrollOffset()), _column });
-            auto const pos = CellLocation { _line, _column };
-            auto const gridPosition = viewport_.translateScreenToGridCoordinate(pos);
-            auto const hasCursor = gridPosition == realCursorPosition();
-            bool const paintCursor =
-                (hasCursor || (prevHasCursor && prevWidth == 2))
-                    && _output.cursor.has_value()
-                    && _output.cursor->shape == CursorShape::Block;
-            auto const [fg, bg] = makeColors(colorPalette(), _cell, reverseVideo, selected, paintCursor);
-        // clang-format on
-
-        prevWidth = _cell.width();
-        prevHasCursor = hasCursor;
-
-        auto const cellEmpty = _cell.empty();
-        auto const customBackground = bg != colorPalette().defaultBackground || !!_cell.styles();
-
-        bool isNewLine = false;
-        if (lineNr != _line)
-        {
-            isNewLine = true;
-            lineNr = _line;
-            prevWidth = 0;
-            prevHasCursor = false;
-            if (!_output.screen.empty())
-                _output.screen.back().groupEnd = true;
-        }
-
-        switch (state)
-        {
-            case State::Gap:
-                if (!cellEmpty || customBackground)
-                {
-                    state = State::Sequence;
-                    // clang-format off
-                    _output.screen.emplace_back(makeRenderCell(colorPalette(),
-                                                               state_.hyperlinks,
-                                                               _cell,
-                                                               fg,
-                                                               bg,
-                                                               _line,
-                                                               _column));
-                    // clang-format on
-                    _output.screen.back().groupStart = true;
-                }
-                break;
-            case State::Sequence:
-                if (cellEmpty && !customBackground)
-                {
-                    _output.screen.back().groupEnd = true;
-                    state = State::Gap;
-                }
-                else
-                {
-                    // clang-format off
-                    _output.screen.emplace_back(makeRenderCell(colorPalette(),
-                                                               state_.hyperlinks,
-                                                               _cell,
-                                                               fg,
-                                                               bg,
-                                                               _line,
-                                                               _column));
-                    // clang-format on
-
-                    if (isNewLine)
-                        _output.screen.back().groupStart = true;
-                }
-                break;
-        }
-    };
 
     if (isPrimaryScreen())
-        primaryScreen_.render(move(renderCell), viewport_.scrollOffset());
+        primaryScreen_.render(RenderBufferBuilder { *this, _output }, viewport_.scrollOffset());
     else
-        alternateScreen_.render(move(renderCell), viewport_.scrollOffset());
+        alternateScreen_.render(RenderBufferBuilder { *this, _output }, viewport_.scrollOffset());
 
     if (href)
         href->state = HyperlinkState::Inactive;
@@ -500,9 +506,8 @@ optional<RenderCursor> Terminal::renderCursor()
 
     // TODO: check if CursorStyle has changed, and update render context accordingly.
 
-    auto& screen_ = primaryScreen_; // TODO(pr)
-
-    Cell const& cursorCell = screen_.at(state_.cursor.position);
+    Cell const& cursorCell = isPrimaryScreen() ? primaryScreen_.at(state_.cursor.position)
+                                               : alternateScreen_.at(state_.cursor.position);
 
     auto constexpr InactiveCursorShape = CursorShape::Rectangle; // TODO configurable
     auto const shape = state_.focused ? cursorShape() : InactiveCursorShape;
@@ -787,14 +792,16 @@ bool Terminal::updateCursorHoveringState()
 {
     verifyState();
 
-    auto& screen_ = primaryScreen_; // TODO(pr)
-
-    if (!screen_.contains(currentMousePosition_))
+    auto const mouseInView = isPrimaryScreen() ? primaryScreen_.contains(currentMousePosition_)
+                                               : alternateScreen_.contains(currentMousePosition_);
+    if (!mouseInView)
         return false;
 
     auto const relCursorPos = viewport_.translateScreenToGridCoordinate(currentMousePosition_);
 
-    auto const newState = screen_.contains(currentMousePosition_) && !!screen_.at(relCursorPos).hyperlink();
+    auto const mouseInView2 = isPrimaryScreen() ? primaryScreen_.contains(currentMousePosition_)
+                                                : alternateScreen_.contains(currentMousePosition_);
+    auto const newState = mouseInView2 && !!primaryScreen_.at(relCursorPos).hyperlink(); // TODO(pr)
 
     auto const oldState = hoveringHyperlink_.exchange(newState);
     return newState != oldState;

@@ -316,6 +316,7 @@ class Terminal
         innerLock_.unlock();
     }
 
+    ColorPalette const& colorPalette() const noexcept { return state_.colorPalette; }
     ColorPalette& colorPalette() noexcept { return state_.colorPalette; }
     ColorPalette& defaultColorPalette() noexcept { return state_.defaultColorPalette; }
 
