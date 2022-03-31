@@ -3057,13 +3057,13 @@ TEST_CASE("resize", "[screen]")
 
     SECTION("no-op")
     {
-        screen.resize({ LineCount(2), ColumnCount(2) });
+        mock.terminal.resizeScreen({ LineCount(2), ColumnCount(2) });
         CHECK("AB\nCD\n" == screen.renderMainPageText());
     }
 
     SECTION("grow lines")
     {
-        screen.resize({ LineCount(3), ColumnCount(2) });
+        mock.terminal.resizeScreen({ LineCount(3), ColumnCount(2) });
         REQUIRE("AB\nCD\n  \n" == screen.renderMainPageText());
         REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(1) });
 
@@ -3079,7 +3079,7 @@ TEST_CASE("resize", "[screen]")
 
     SECTION("shrink lines")
     {
-        screen.resize({ LineCount(1), ColumnCount(2) });
+        mock.terminal.resizeScreen({ LineCount(1), ColumnCount(2) });
         CHECK("CD\n" == screen.renderMainPageText());
         CHECK("AB" == screen.grid().lineAt(LineOffset(-1)).toUtf8());
         CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
@@ -3087,14 +3087,14 @@ TEST_CASE("resize", "[screen]")
 
     SECTION("grow columns")
     {
-        screen.resize({ LineCount(2), ColumnCount(3) });
+        mock.terminal.resizeScreen({ LineCount(2), ColumnCount(3) });
         CHECK("AB \nCD \n" == screen.renderMainPageText());
         CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
     }
 
     SECTION("shrink columns")
     {
-        screen.resize({ LineCount(2), ColumnCount(1) });
+        mock.terminal.resizeScreen({ LineCount(2), ColumnCount(1) });
         CHECK("A\nC\n" == screen.renderMainPageText());
         CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(0) });
     }
@@ -3102,7 +3102,7 @@ TEST_CASE("resize", "[screen]")
     SECTION("regrow columns")
     {
         // 1.) grow
-        screen.resize({ LineCount(2), ColumnCount(3) });
+        mock.terminal.resizeScreen({ LineCount(2), ColumnCount(3) });
         logScreenText(screen, "after columns grow");
         CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
 
@@ -3116,20 +3116,20 @@ TEST_CASE("resize", "[screen]")
         REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
 
         // 3.) shrink
-        screen.resize({ LineCount(2), ColumnCount(2) });
+        mock.terminal.resizeScreen({ LineCount(2), ColumnCount(2) });
         REQUIRE("AB\nCD\n" == screen.renderMainPageText());
         REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(1) });
 
         // 4.) regrow (and see if pre-filled data were retained)
         // NOTE: This is currently not retained. Do we want to recreate this behaviour?
-        // screen.resize({LineCount(2), ColumnCount(3)});
+        // mock.terminal.resizeScreen({LineCount(2), ColumnCount(3)});
         // REQUIRE("ABX\nCDY\n" == screen.renderMainPageText());
         // REQUIRE(screen.logicalCursorPosition() == CellLocation{LineOffset(0), ColumnOffset(2)});
     }
 
     SECTION("grow rows, grow columns")
     {
-        screen.resize({ LineCount(3), ColumnCount(3) });
+        mock.terminal.resizeScreen({ LineCount(3), ColumnCount(3) });
         REQUIRE("AB \nCD \n   \n" == screen.renderMainPageText());
         mock.writeToScreen("1\r\n234");
         REQUIRE("AB \nCD1\n234\n" == screen.renderMainPageText());
@@ -3137,19 +3137,19 @@ TEST_CASE("resize", "[screen]")
 
     SECTION("grow rows, shrink columns")
     {
-        screen.resize({ LineCount(3), ColumnCount(1) });
+        mock.terminal.resizeScreen({ LineCount(3), ColumnCount(1) });
         REQUIRE("A\nC\n \n" == screen.renderMainPageText());
     }
 
     SECTION("shrink rows, grow columns")
     {
-        screen.resize({ LineCount(1), ColumnCount(3) });
+        mock.terminal.resizeScreen({ LineCount(1), ColumnCount(3) });
         REQUIRE("CD \n" == screen.renderMainPageText());
     }
 
     SECTION("shrink rows, shrink columns")
     {
-        screen.resize({ LineCount(1), ColumnCount(1) });
+        mock.terminal.resizeScreen({ LineCount(1), ColumnCount(1) });
         REQUIRE("C\n" == screen.renderMainPageText());
     }
 

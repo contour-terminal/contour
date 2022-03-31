@@ -54,6 +54,19 @@
 namespace terminal
 {
 
+class ScreenBase: public SequenceHandler
+{
+  public:
+    virtual void verifyState() const = 0;
+    virtual void fail(std::string const& _message) const = 0;
+    virtual bool contains(CellLocation _coord) const noexcept = 0;
+    virtual bool isCellEmpty(CellLocation position) const noexcept = 0;
+    virtual uint8_t cellWithAt(CellLocation position) const noexcept = 0;
+    virtual HyperlinkId hyperlinkIdAt(CellLocation position) const noexcept = 0;
+    virtual std::shared_ptr<HyperlinkInfo const> hyperlinkAt(CellLocation pos) const noexcept = 0;
+    virtual void inspect(std::string const& _message, std::ostream& _os) const = 0;
+};
+
 /**
  * Terminal Screen.
  *
@@ -63,7 +76,7 @@ namespace terminal
  * to be viewn.
  */
 template <typename Cell>
-class Screen: public SequenceHandler, public capabilities::StaticDatabase
+class Screen: public ScreenBase, public capabilities::StaticDatabase
 {
   public:
     Screen(TerminalState& terminalState, ScreenType screenType, Grid<Cell>& grid);
@@ -76,10 +89,6 @@ class Screen: public SequenceHandler, public capabilities::StaticDatabase
 
     using StaticDatabase::numericCapability;
     unsigned numericCapability(capabilities::Code _cap) const override;
-
-    void setSixelCursorConformance(bool _value) noexcept { _state.sixelCursorConformance = _value; }
-
-    void setTerminalId(VTType _id) noexcept { _state.terminalId = _id; }
 
     LineCount historyLineCount() const noexcept { return grid().historyLineCount(); }
 
@@ -198,14 +207,6 @@ class Screen: public SequenceHandler, public capabilities::StaticDatabase
     void smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, XtSmGraphics::Value _value);
     // }}}
 
-    void setMaxImageSize(ImageSize size) noexcept { _state.maxImageSize = size; }
-
-    void setMaxImageSize(ImageSize _effective, ImageSize _limit)
-    {
-        _state.maxImageSize = _effective;
-        _state.maxImageSizeLimit = _limit;
-    }
-
     ImageSize maxImageSize() const noexcept { return _state.maxImageSize; }
     ImageSize maxImageSizeLimit() const noexcept { return _state.maxImageSizeLimit; }
 
@@ -235,7 +236,7 @@ class Screen: public SequenceHandler, public capabilities::StaticDatabase
                      ImageResize _resizePolicy,
                      bool _autoScroll);
 
-    void inspect(std::string const& _message, std::ostream& _os) const;
+    void inspect(std::string const& _message, std::ostream& _os) const override;
 
     // for DECSC and DECRC
     void saveCursor();
@@ -247,7 +248,6 @@ class Screen: public SequenceHandler, public capabilities::StaticDatabase
     void requestDECMode(unsigned int _mode);
 
     PageSize pageSize() const noexcept { return _state.pageSize; }
-    void resize(PageSize _newSize);
 
     constexpr CellLocation realCursorPosition() const noexcept { return _state.cursor.position; }
 
@@ -312,7 +312,7 @@ class Screen: public SequenceHandler, public capabilities::StaticDatabase
     }
 
     // Tests if given coordinate is within the visible screen area.
-    constexpr bool contains(CellLocation _coord) const noexcept
+    bool contains(CellLocation _coord) const noexcept override
     {
         return LineOffset(0) <= _coord.line && _coord.line < boxed_cast<LineOffset>(_state.pageSize.lines)
                && ColumnOffset(0) <= _coord.column
@@ -349,13 +349,6 @@ class Screen: public SequenceHandler, public capabilities::StaticDatabase
     Cell& useCellAt(CellLocation p) noexcept { return useCellAt(p.line, p.column); }
     Cell const& at(CellLocation p) const noexcept { return grid().at(p.line, p.column); }
 
-    // TODO(pr) remove these 2 functions.
-    [[deprecated]] bool isPrimaryScreen() const noexcept { return _state.screenType == ScreenType::Primary; }
-    [[deprecated]] bool isAlternateScreen() const noexcept
-    {
-        return _state.screenType == ScreenType::Alternate;
-    }
-
     Margin margin() const noexcept { return _state.margin; }
 
     std::string const& windowTitle() const noexcept { return _state.windowTitle; }
@@ -384,7 +377,7 @@ class Screen: public SequenceHandler, public capabilities::StaticDatabase
     void scrollUp(LineCount n) { scrollUp(n, _state.margin); }
     void scrollDown(LineCount n) { scrollDown(n, _state.margin); }
 
-    void verifyState() const;
+    void verifyState() const override;
 
     /// @returns the primary screen's grid.
     Grid<Cell>& primaryGrid() noexcept { return _state.primaryBuffer; }
@@ -401,7 +394,16 @@ class Screen: public SequenceHandler, public capabilities::StaticDatabase
     ColorPalette& defaultColorPalette() noexcept { return _state.defaultColorPalette; }
     ColorPalette const& defaultColorPalette() const noexcept { return _state.defaultColorPalette; }
 
-    std::shared_ptr<HyperlinkInfo> hyperlinkAt(CellLocation pos) noexcept
+    bool isCellEmpty(CellLocation position) const noexcept override { return at(position).empty(); }
+
+    uint8_t cellWithAt(CellLocation position) const noexcept override { return at(position).width(); }
+
+    HyperlinkId hyperlinkIdAt(CellLocation position) const noexcept override
+    {
+        return at(position).hyperlink();
+    }
+
+    std::shared_ptr<HyperlinkInfo const> hyperlinkAt(CellLocation pos) const noexcept override
     {
         return _state.hyperlinks.hyperlinkById(at(pos).hyperlink());
     }
@@ -415,7 +417,7 @@ class Screen: public SequenceHandler, public capabilities::StaticDatabase
     void applyAndLog(FunctionDefinition const& function, Sequence const& seq);
     ApplyResult apply(FunctionDefinition const& function, Sequence const& seq);
 
-    void fail(std::string const& _message) const;
+    void fail(std::string const& _message) const override;
 
   private:
     void clearAllTabs();

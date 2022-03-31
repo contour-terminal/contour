@@ -42,7 +42,7 @@ struct HyperlinkInfo
 {                       // TODO: rename to Hyperlink
     std::string userId; //!< application provied ID
     URI uri;
-    HyperlinkState state = HyperlinkState::Inactive;
+    mutable HyperlinkState state = HyperlinkState::Inactive;
 
     bool isLocal() const noexcept { return uri.size() >= 7 && uri.substr(0, 7) == "file://"; }
 

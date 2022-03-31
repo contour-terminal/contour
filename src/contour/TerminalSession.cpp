@@ -625,23 +625,10 @@ bool TerminalSession::operator()(actions::DecreaseOpacity)
 bool TerminalSession::operator()(actions::FollowHyperlink)
 {
     auto const _l = scoped_lock { terminal() };
-    auto const currentMousePosition = terminal().currentMousePosition();
-    auto const currentMousePositionRel =
-        terminal::CellLocation { currentMousePosition.line
-                                     + terminal().viewport().scrollOffset().as<LineOffset>(),
-                                 currentMousePosition.column };
-    if (terminal().contains(currentMousePosition))
+    if (auto const hyperlink = terminal().tryGetHoveringHyperlink())
     {
-        std::shared_ptr<HyperlinkInfo> hyperlink;
-        if (terminal().isPrimaryScreen())
-            hyperlink = terminal().primaryScreen().hyperlinkAt(currentMousePositionRel);
-        else
-            hyperlink = terminal().alternateScreen().hyperlinkAt(currentMousePositionRel);
-        if (hyperlink)
-        {
-            followHyperlink(*hyperlink);
-            return true;
-        }
+        followHyperlink(*hyperlink);
+        return true;
     }
     return false;
 }
@@ -970,13 +957,12 @@ void TerminalSession::configureTerminal()
     terminal_.setLastMarkRangeOffset(profile_.copyLastMarkRangeOffset);
 
     SessionLog()("Setting terminal ID to {}.", profile_.terminalId);
-    screen.setTerminalId(profile_.terminalId);
-    screen.setSixelCursorConformance(config_.sixelCursorConformance);
+    terminal_.setTerminalId(profile_.terminalId);
+    terminal_.setSixelCursorConformance(config_.sixelCursorConformance);
     terminal_.setMaxImageColorRegisters(config_.maxImageColorRegisters);
-    screen.setMaxImageSize(config_.maxImageSize);
-    SessionLog()(
-        "maxImageSize={}, sixelScrolling={}", config_.maxImageSize, config_.sixelScrolling ? "yes" : "no");
+    terminal_.setMaxImageSize(config_.maxImageSize);
     terminal_.setMode(terminal::DECMode::SixelScrolling, config_.sixelScrolling);
+    SessionLog()("maxImageSize={}, sixelScrolling={}", config_.maxImageSize, config_.sixelScrolling);
 
     // XXX
     // if (!_terminalView.renderer().renderTargetAvailable())

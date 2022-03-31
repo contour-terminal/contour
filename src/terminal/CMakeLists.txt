@@ -35,6 +35,7 @@ set(terminal_HEADERS
     Parser.h
     Process.h
     RenderBuffer.h
+    RenderBufferBuilder.h
     Screen.h
     Selector.h
     Sequence.h
@@ -75,6 +76,7 @@ set(terminal_SOURCES
     Parser.cpp
     Process${PLATFORM_SUFFIX}.cpp
     RenderBuffer.cpp
+    RenderBufferBuilder.cpp
     Screen.cpp
     Selector.cpp
     Sequence.cpp

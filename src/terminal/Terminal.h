@@ -98,6 +98,17 @@ class Terminal
     void setMaxHistoryLineCount(LineCount _maxHistoryLineCount);
     LineCount maxHistoryLineCount() const noexcept;
 
+    void setTerminalId(VTType _id) noexcept { state_.terminalId = _id; }
+    void setSixelCursorConformance(bool _value) noexcept { state_.sixelCursorConformance = _value; }
+
+    void setMaxImageSize(ImageSize size) noexcept { state_.maxImageSize = size; }
+
+    void setMaxImageSize(ImageSize _effective, ImageSize _limit)
+    {
+        state_.maxImageSize = _effective;
+        state_.maxImageSizeLimit = _limit;
+    }
+
     bool isModeEnabled(AnsiMode m) const noexcept { return state_.modes.enabled(m); }
     bool isModeEnabled(DECMode m) const noexcept { return state_.modes.enabled(m); }
     void setMode(AnsiMode _mode, bool _enable);
@@ -191,7 +202,7 @@ class Terminal
     Pty& device() noexcept { return *pty_; }
 
     PageSize pageSize() const noexcept { return pty_->pageSize(); }
-    void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels);
+    void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt);
 
     /// Implements semantics for  DECCOLM / DECSCPP.
     void resizeColumns(ColumnCount _newColumnCount, bool _clear);
@@ -320,8 +331,8 @@ class Terminal
     ColorPalette& colorPalette() noexcept { return state_.colorPalette; }
     ColorPalette& defaultColorPalette() noexcept { return state_.defaultColorPalette; }
 
-    SequenceHandler& sequenceHandler() noexcept { return sequenceHandler_.get(); }
-    void setSequenceHandler(SequenceHandler& handler) noexcept { sequenceHandler_ = handler; }
+    ScreenBase& currentScreen() noexcept { return currentScreen_.get(); }
+    ScreenBase const& currentScreen() const noexcept { return currentScreen_.get(); }
 
     bool isPrimaryScreen() const noexcept { return state_.screenType == ScreenType::Primary; }
     bool isAlternateScreen() const noexcept { return state_.screenType == ScreenType::Alternate; }
@@ -339,7 +350,14 @@ class Terminal
         return isPrimaryScreen() && primaryScreen_.isLineWrapped(_lineNumber);
     }
 
-    CellLocation const& currentMousePosition() const noexcept { return currentMousePosition_; }
+    CellLocation currentMousePosition() const noexcept { return currentMousePosition_; }
+
+    std::optional<CellLocation> currentMouseGridPosition() const noexcept
+    {
+        if (currentScreen_.get().contains(currentMousePosition_))
+            return viewport_.translateScreenToGridCoordinate(currentMousePosition_);
+        return std::nullopt;
+    }
 
     // {{{ cursor management
     CursorDisplay cursorDisplay() const noexcept { return cursorDisplay_; }
@@ -422,6 +440,15 @@ class Terminal
     /// Tests whether or not the mouse is currently hovering a hyperlink.
     bool isMouseHoveringHyperlink() const noexcept { return hoveringHyperlink_.load(); }
 
+    /// Retrieves the HyperlinkInfo that is currently behing hovered by the mouse, if so,
+    /// or a nothing otherwise.
+    std::shared_ptr<HyperlinkInfo const> tryGetHoveringHyperlink() const noexcept
+    {
+        if (auto const gridPosition = currentMouseGridPosition())
+            return currentScreen_.get().hyperlinkAt(*gridPosition);
+        return {};
+    }
+
     bool processInputOnce();
 
     void markScreenDirty() { screenDirty_ = true; }
@@ -489,7 +516,6 @@ class Terminal
     void mainLoop();
     void refreshRenderBuffer(RenderBuffer& _output); // <- acquires the lock
     void refreshRenderBufferInternal(RenderBuffer& _output);
-    std::optional<RenderCursor> renderCursor();
     void updateCursorVisibilityState() const;
     bool updateCursorHoveringState();
 
@@ -534,7 +560,7 @@ class Terminal
     TerminalState state_;
     Screen<Cell> primaryScreen_;
     Screen<Cell> alternateScreen_;
-    std::reference_wrapper<SequenceHandler> sequenceHandler_;
+    std::reference_wrapper<ScreenBase> currentScreen_;
 
     std::mutex mutable outerLock_;
     std::mutex mutable innerLock_;

@@ -439,12 +439,6 @@ unsigned Screen<Cell>::numericCapability(capabilities::Code _cap) const
 }
 
 template <typename Cell>
-void Screen<Cell>::resize(PageSize newPageSize)
-{
-    _terminal.resizeScreen(newPageSize, nullopt);
-}
-
-template <typename Cell>
 void Screen<Cell>::verifyState() const
 {
     grid().verifyState();
@@ -3338,7 +3332,7 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             else
                 return ApplyResult::Invalid;
         case DECSNLS:
-            resize(PageSize { pageSize().lines, seq.param<ColumnCount>(0) });
+            _terminal.resizeScreen(PageSize { pageSize().lines, seq.param<ColumnCount>(0) });
             return ApplyResult::Ok;
         case DECSLRM: {
             auto l = decr(seq.param_opt<ColumnOffset>(0));
