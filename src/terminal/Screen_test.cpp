@@ -347,8 +347,8 @@ TEST_CASE("AppendChar.emoji_exclamationmark", "[screen]")
 
     screen.setBackgroundColor(IndexedColor::Blue);
 
-    mock.writeToScreen("\u2757"); // ❗
-    // mock.writeToScreen("\uFE0F");
+    mock.writeToScreen(U"\u2757"); // ❗
+    // mock.writeToScreen(U"\uFE0F");
     CHECK(screen.at(LineOffset(0), ColumnOffset(0)).backgroundColor() == Color::Indexed(IndexedColor::Blue));
     CHECK(screen.at(LineOffset(0), ColumnOffset(0)).width() == 2);
     CHECK(screen.at(LineOffset(0), ColumnOffset(1)).backgroundColor() == Color::Indexed(IndexedColor::Blue));
@@ -365,9 +365,9 @@ TEST_CASE("AppendChar.emoji_VS15_smiley", "[screen]")
 
     // print letter-like symbol copyright sign with forced emoji presentation style.
     REQUIRE(*screen.logicalCursorPosition().column == 0);
-    mock.writeToScreen("\U0001F600");
+    mock.writeToScreen(U"\U0001F600");
     REQUIRE(*screen.logicalCursorPosition().column == 2);
-    mock.writeToScreen("\uFE0E");
+    mock.writeToScreen(U"\uFE0E");
     REQUIRE(*screen.logicalCursorPosition().column
             == 2); // U+FE0E does *NOT* lower width to 1 (easier to implement)
     mock.writeToScreen("X");
@@ -405,11 +405,11 @@ TEST_CASE("AppendChar.emoji_VS16_copyright_sign", "[screen]")
 
     // print letter-like symbol copyright sign with forced emoji presentation style.
     REQUIRE(screen.cursor().position.column.value == 0);
-    mock.writeToScreen("\u00A9");
+    mock.writeToScreen(U"\u00A9");
     REQUIRE(screen.cursor().position.column.value == 1);
     CHECK(c0.codepointCount() == 1);
     CHECK(c0.width() == 1);
-    mock.writeToScreen("\uFE0F");
+    mock.writeToScreen(U"\uFE0F");
     CHECK(c0.codepointCount() == 2);
     REQUIRE(screen.cursor().position.column.value == 1);
     mock.writeToScreen("X");
@@ -437,13 +437,13 @@ TEST_CASE("AppendChar.emoji_VS16_i", "[screen]")
     auto const& c0 = screen.at(LineOffset(0), ColumnOffset(0));
 
     // print letter-like symbol `i` with forced emoji presentation style.
-    mock.writeToScreen("\u2139");
+    mock.writeToScreen(U"\u2139");
     REQUIRE(screen.cursor().position.column.value == 1);
     CHECK(c0.codepoints() == U"\u2139");
     CHECK(c0.width() == 1);
 
     // append into last cell
-    mock.writeToScreen("\uFE0F");
+    mock.writeToScreen(U"\uFE0F");
     // XXX ^^^ later on U+FE0F *will* ensure width 2 if respective mode is enabled.
     REQUIRE(screen.cursor().position.column.value == 1);
     CHECK(c0.codepoints() == U"\u2139\uFE0F");
@@ -477,19 +477,19 @@ TEST_CASE("AppendChar.emoji_family", "[screen]")
     REQUIRE(screen.logicalCursorPosition().column.value == 0);
 
     // print letter-like symbol `i` with forced emoji presentation style.
-    mock.writeToScreen("\U0001F468");
+    mock.writeToScreen(U"\U0001F468");
     CHECK(c0.codepoints() == U"\U0001F468");
     REQUIRE(screen.logicalCursorPosition().column.value == 2);
-    mock.writeToScreen("\u200D");
+    mock.writeToScreen(U"\u200D");
     CHECK(c0.codepoints() == U"\U0001F468\u200D");
     REQUIRE(screen.logicalCursorPosition().column.value == 2);
-    mock.writeToScreen("\U0001F468");
+    mock.writeToScreen(U"\U0001F468");
     CHECK(c0.codepoints() == U"\U0001F468\u200D\U0001F468");
     REQUIRE(screen.logicalCursorPosition().column.value == 2);
-    mock.writeToScreen("\u200D");
+    mock.writeToScreen(U"\u200D");
     CHECK(c0.codepoints() == U"\U0001F468\u200D\U0001F468\u200D");
     REQUIRE(screen.logicalCursorPosition().column.value == 2);
-    mock.writeToScreen("\U0001F467");
+    mock.writeToScreen(U"\U0001F467");
     CHECK(c0.codepoints() == U"\U0001F468\u200D\U0001F468\u200D\U0001F467");
     REQUIRE(screen.logicalCursorPosition().column.value == 2);
     mock.writeToScreen("X");
@@ -543,7 +543,7 @@ TEST_CASE("AppendChar.emoji_1", "[screen]")
     auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
 
-    mock.writeToScreen("\U0001F600");
+    mock.writeToScreen(U"\U0001F600");
 
     auto const& c1 = screen.at(LineOffset(0), ColumnOffset(0));
     CHECK(c1.codepoints() == U"\U0001F600");
@@ -570,7 +570,7 @@ TEST_CASE("AppendChar_WideChar", "[screen]")
     auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.terminal.setMode(DECMode::AutoWrap, true);
-    mock.writeToScreen("\U0001F600");
+    mock.writeToScreen(U"\U0001F600");
     CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(2) });
 }
 
@@ -1765,7 +1765,7 @@ TEST_CASE("MoveCursorToColumn", "[screen]")
     {
         screen.moveCursorTo({}, {});
         REQUIRE(screen.logicalCursorPosition().column.value == 0);
-        mock.writeToScreen("\u26A1"); // ⚡ :flash: (double width)
+        mock.writeToScreen(U"\u26A1"); // ⚡ :flash: (double width)
         REQUIRE(screen.logicalCursorPosition().column.value == 2);
     }
 }
@@ -2976,7 +2976,7 @@ TEST_CASE("OSC.2.Unicode")
     auto const u32title = u32string_view(U"\U0001F600");
     auto const title = unicode::convert_to<char>(u32title);
 
-    mock.writeToScreen("\033]2;\U0001F600\033\\");
+    mock.writeToScreen(U"\033]2;\U0001F600\033\\");
     INFO(mock.terminal.peekInput());
     CHECK(e(mock.windowTitle) == e(title));
 }
