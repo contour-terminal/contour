@@ -44,10 +44,8 @@ constexpr std::string_view trimRight(std::string_view value) noexcept
             case ' ':
             case '\t':
             case '\r':
-            case '\n':
-                break;
-            default:
-                return value;
+            case '\n': break;
+            default: return value;
         }
         value.remove_suffix(1);
     }

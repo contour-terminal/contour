@@ -242,7 +242,9 @@ class Sequence
         switch (category_)
         {
             case FunctionCategory::OSC:
-                return FunctionSelector { category_, 0, static_cast<int>(parameterCount() ? param(0) : 0), 0, 0 };
+                return FunctionSelector {
+                    category_, 0, static_cast<int>(parameterCount() ? param(0) : 0), 0, 0
+                };
             default: {
                 // Only support CSI sequences with 0 or 1 intermediate characters.
                 char const intermediate = intermediateCharacters_.size() == 1

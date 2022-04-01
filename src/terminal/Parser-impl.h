@@ -334,7 +334,9 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view _d
 }
 
 template <typename EventListener, bool TraceStateChanges>
-void Parser<EventListener, TraceStateChanges>::handle(ActionClass _actionClass, Action _action, uint8_t codepoint)
+void Parser<EventListener, TraceStateChanges>::handle(ActionClass _actionClass,
+                                                      Action _action,
+                                                      uint8_t codepoint)
 {
     (void) _actionClass;
     auto const ch = static_cast<char>(codepoint);
