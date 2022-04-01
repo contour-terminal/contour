@@ -479,7 +479,39 @@ struct formatter<terminal::parser::State>
     }
 };
 
+template <>
+struct formatter<terminal::parser::ActionClass>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::parser::ActionClass _value, FormatContext& _ctx)
+    {
+        auto constexpr mappings = std::array<std::string_view, 4> { "Enter", "Event", "Leave", "Transition" };
+        return format_to(_ctx.out(), "{}", mappings.at(static_cast<unsigned>(_value)));
+    }
+};
+
+template <>
+struct formatter<terminal::parser::Action>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::parser::Action _value, FormatContext& _ctx)
+    {
+        return format_to(_ctx.out(), "{}", terminal::parser::to_string(_value));
+    }
+};
+
 } // namespace fmt
+// }}}
 
 namespace terminal::parser
 {
@@ -654,38 +686,3 @@ void dot(std::ostream& _os, ParserTable const& _table);
 } // end namespace terminal::parser
 
 #include <terminal/Parser-impl.h>
-
-namespace fmt
-{ // {{{
-template <>
-struct formatter<terminal::parser::ActionClass>
-{
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::parser::ActionClass _value, FormatContext& _ctx)
-    {
-        auto constexpr mappings = std::array<std::string_view, 4> { "Enter", "Event", "Leave", "Transition" };
-        return format_to(_ctx.out(), "{}", mappings.at(static_cast<unsigned>(_value)));
-    }
-};
-
-template <>
-struct formatter<terminal::parser::Action>
-{
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::parser::Action _value, FormatContext& _ctx)
-    {
-        return format_to(_ctx.out(), "{}", terminal::parser::to_string(_value));
-    }
-};
-
-} // namespace fmt
