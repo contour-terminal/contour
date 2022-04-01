@@ -593,7 +593,7 @@ struct ParserTable
  * The code comments for enum values have been mostly copied into this source for better
  * understanding when working with this parser.
  */
-template <typename EventListener>
+template <typename EventListener, bool TraceStateChanges = false>
 // TODO: C++20 concepts: EventListener must satisfy the original ParserEvents interface
 class Parser
 {

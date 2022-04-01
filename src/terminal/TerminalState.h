@@ -180,7 +180,7 @@ struct TerminalState
     std::stack<std::string> savedWindowTitles {};
 
     Sequencer sequencer;
-    parser::Parser<Sequencer> parser;
+    parser::Parser<Sequencer, false> parser;
     uint64_t instructionCounter = 0;
 
     InputGenerator inputGenerator {};

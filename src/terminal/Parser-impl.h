@@ -281,8 +281,8 @@ namespace detail
 
 } // end namespace detail
 
-template <typename EventListener>
-void Parser<EventListener>::parseFragment(std::string_view _data)
+template <typename EventListener, bool TraceStateChanges>
+void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view _data)
 {
     auto input = _data.data();              // reinterpret_cast<uint8_t const*>(_data.data());
     auto end = _data.data() + _data.size(); // reinterpret_cast<uint8_t const*>(_data.data() + _data.size());
@@ -333,18 +333,19 @@ void Parser<EventListener>::parseFragment(std::string_view _data)
     } while (input != end);
 }
 
-template <typename EventListener>
-void Parser<EventListener>::handle(ActionClass _actionClass, Action _action, uint8_t codepoint)
+template <typename EventListener, bool TraceStateChanges>
+void Parser<EventListener, TraceStateChanges>::handle(ActionClass _actionClass, Action _action, uint8_t codepoint)
 {
     (void) _actionClass;
     auto const ch = static_cast<char>(codepoint);
 
-    // if (_action != Action::Ignore && _action != Action::Undefined)
-    //     fmt::print("Parser.handle: {} {} {} {}\n",
-    //                state_,
-    //                _actionClass,
-    //                _action,
-    //                crispy::escape(unicode::convert_to<char>(ch)));
+    if constexpr (TraceStateChanges)
+        if (_action != Action::Ignore && _action != Action::Undefined)
+            fmt::print("Parser.handle: {} {} {} {}\n",
+                       state_,
+                       _actionClass,
+                       _action,
+                       crispy::escape(unicode::convert_to<char>(ch)));
 
     switch (_action)
     {
