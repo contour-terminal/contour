@@ -699,9 +699,9 @@ struct formatter<terminal::renderer::atlas::Format>
     {
         switch (value)
         {
-        case terminal::renderer::atlas::Format::Red: return format_to(ctx.out(), "R");
-        case terminal::renderer::atlas::Format::RGB: return format_to(ctx.out(), "RGB");
-        case terminal::renderer::atlas::Format::RGBA: return format_to(ctx.out(), "RGBA");
+            case terminal::renderer::atlas::Format::Red: return format_to(ctx.out(), "R");
+            case terminal::renderer::atlas::Format::RGB: return format_to(ctx.out(), "RGB");
+            case terminal::renderer::atlas::Format::RGBA: return format_to(ctx.out(), "RGBA");
         }
         return format_to(ctx.out(), "{}", static_cast<unsigned>(value));
     }

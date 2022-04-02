@@ -283,6 +283,9 @@ enum class Action : uint8_t
      * arrive, all the extra parameters are silently ignored.
      */
     Param,
+    ParamDigit,        // [0-9]
+    ParamSeparator,    // ';'
+    ParamSubSeparator, // ':'
 
     /**
      * The final character of an escape sequence has arrived, so determined the control function
@@ -368,23 +371,23 @@ constexpr std::string_view to_string(State state)
 {
     switch (state)
     {
-    case State::Undefined: return "Undefined";
-    case State::Ground: return "Ground";
-    case State::Escape: return "Escape";
-    case State::EscapeIntermediate: return "EscapeIntermediate";
-    case State::CSI_Entry: return "CSI Entry";
-    case State::CSI_Param: return "CSI Param";
-    case State::CSI_Intermediate: return "CSI Intermediate";
-    case State::CSI_Ignore: return "CSI Ignore";
-    case State::DCS_Entry: return "DCS Entry";
-    case State::DCS_Param: return "DCS Param";
-    case State::DCS_Intermediate: return "DCS Intermediate";
-    case State::DCS_PassThrough: return "DCS PassThrough";
-    case State::DCS_Ignore: return "DCS Ignore";
-    case State::OSC_String: return "OSC String";
-    case State::APC_String: return "APC String";
-    case State::PM_String: return "PM String";
-    case State::IgnoreUntilST: return "Ignore Until ST (SOS)";
+        case State::Undefined: return "Undefined";
+        case State::Ground: return "Ground";
+        case State::Escape: return "Escape";
+        case State::EscapeIntermediate: return "EscapeIntermediate";
+        case State::CSI_Entry: return "CSI Entry";
+        case State::CSI_Param: return "CSI Param";
+        case State::CSI_Intermediate: return "CSI Intermediate";
+        case State::CSI_Ignore: return "CSI Ignore";
+        case State::DCS_Entry: return "DCS Entry";
+        case State::DCS_Param: return "DCS Param";
+        case State::DCS_Intermediate: return "DCS Intermediate";
+        case State::DCS_PassThrough: return "DCS PassThrough";
+        case State::DCS_Ignore: return "DCS Ignore";
+        case State::OSC_String: return "OSC String";
+        case State::APC_String: return "APC String";
+        case State::PM_String: return "PM String";
+        case State::IgnoreUntilST: return "Ignore Until ST (SOS)";
     }
     return "?";
 }
@@ -393,10 +396,10 @@ constexpr std::string_view to_string(ActionClass actionClass)
 {
     switch (actionClass)
     {
-    case ActionClass::Enter: return "Enter";
-    case ActionClass::Event: return "Event";
-    case ActionClass::Leave: return "Leave";
-    case ActionClass::Transition: return "Transition";
+        case ActionClass::Enter: return "Enter";
+        case ActionClass::Event: return "Event";
+        case ActionClass::Leave: return "Leave";
+        case ActionClass::Transition: return "Transition";
     }
     return "?";
 }
@@ -405,28 +408,31 @@ constexpr std::string_view to_string(Action action)
 {
     switch (action)
     {
-    case Action::Undefined: return "Undefined";
-    case Action::Ignore: return "Ignore";
-    case Action::Execute: return "Execute";
-    case Action::Print: return "Print";
-    case Action::Clear: return "Clear";
-    case Action::Collect: return "Collect";
-    case Action::CollectLeader: return "CollectLeader";
-    case Action::Param: return "Param";
-    case Action::ESC_Dispatch: return "Escape Dispatch";
-    case Action::CSI_Dispatch: return "CSI Dispatch";
-    case Action::Hook: return "Hook";
-    case Action::Put: return "Put";
-    case Action::Unhook: return "Unhook";
-    case Action::OSC_Start: return "OSC Start";
-    case Action::OSC_Put: return "OSC Put";
-    case Action::OSC_End: return "OSC End";
-    case Action::APC_Start: return "APC Start";
-    case Action::APC_Put: return "APC Put";
-    case Action::APC_End: return "APC End";
-    case Action::PM_Start: return "PM Start";
-    case Action::PM_Put: return "PM Put";
-    case Action::PM_End: return "PM End";
+        case Action::Undefined: return "Undefined";
+        case Action::Ignore: return "Ignore";
+        case Action::Execute: return "Execute";
+        case Action::Print: return "Print";
+        case Action::Clear: return "Clear";
+        case Action::Collect: return "Collect";
+        case Action::CollectLeader: return "CollectLeader";
+        case Action::Param: return "Param";
+        case Action::ParamDigit: return "ParamDigit";
+        case Action::ParamSeparator: return "ParamSeparator";
+        case Action::ParamSubSeparator: return "ParamSubSeparator";
+        case Action::ESC_Dispatch: return "Escape Dispatch";
+        case Action::CSI_Dispatch: return "CSI Dispatch";
+        case Action::Hook: return "Hook";
+        case Action::Put: return "Put";
+        case Action::Unhook: return "Unhook";
+        case Action::OSC_Start: return "OSC Start";
+        case Action::OSC_Put: return "OSC Put";
+        case Action::OSC_End: return "OSC End";
+        case Action::APC_Start: return "APC Start";
+        case Action::APC_Put: return "APC Put";
+        case Action::APC_End: return "APC End";
+        case Action::PM_Start: return "PM Start";
+        case Action::PM_Put: return "PM Put";
+        case Action::PM_End: return "PM End";
     }
     return "?";
 }
@@ -473,7 +479,39 @@ struct formatter<terminal::parser::State>
     }
 };
 
+template <>
+struct formatter<terminal::parser::ActionClass>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::parser::ActionClass _value, FormatContext& _ctx)
+    {
+        auto constexpr mappings = std::array<std::string_view, 4> { "Enter", "Event", "Leave", "Transition" };
+        return format_to(_ctx.out(), "{}", mappings.at(static_cast<unsigned>(_value)));
+    }
+};
+
+template <>
+struct formatter<terminal::parser::Action>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::parser::Action _value, FormatContext& _ctx)
+    {
+        return format_to(_ctx.out(), "{}", terminal::parser::to_string(_value));
+    }
+};
+
 } // namespace fmt
+// }}}
 
 namespace terminal::parser
 {
@@ -587,7 +625,7 @@ struct ParserTable
  * The code comments for enum values have been mostly copied into this source for better
  * understanding when working with this parser.
  */
-template <typename EventListener>
+template <typename EventListener, bool TraceStateChanges = false>
 // TODO: C++20 concepts: EventListener must satisfy the original ParserEvents interface
 class Parser
 {
@@ -648,38 +686,3 @@ void dot(std::ostream& _os, ParserTable const& _table);
 } // end namespace terminal::parser
 
 #include <terminal/Parser-impl.h>
-
-namespace fmt
-{ // {{{
-template <>
-struct formatter<terminal::parser::ActionClass>
-{
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::parser::ActionClass _value, FormatContext& _ctx)
-    {
-        auto constexpr mappings = std::array<std::string_view, 4> { "Enter", "Event", "Leave", "Transition" };
-        return format_to(_ctx.out(), "{}", mappings.at(static_cast<unsigned>(_value)));
-    }
-};
-
-template <>
-struct formatter<terminal::parser::Action>
-{
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::parser::Action _value, FormatContext& _ctx)
-    {
-        return format_to(_ctx.out(), "{}", terminal::parser::to_string(_value));
-    }
-};
-
-} // namespace fmt

@@ -17,8 +17,10 @@
 #include <terminal/RenderBuffer.h>
 #include <terminal/ScreenEvents.h>
 #include <terminal/Selector.h>
+#include <terminal/Sequence.h>
 #include <terminal/TerminalState.h>
 #include <terminal/Viewport.h>
+#include <terminal/primitives.h>
 #include <terminal/pty/Pty.h>
 
 #include <fmt/format.h>
@@ -29,13 +31,13 @@
 #include <memory>
 #include <mutex>
 #include <string_view>
-#include <thread>
+#include <type_traits>
 #include <vector>
 
 namespace terminal
 {
 
-template <typename EventListener>
+template <typename Cell>
 class Screen;
 
 /// Terminal API to manage input and output devices of a pseudo terminal, such as keyboard, mouse, and screen.
@@ -90,10 +92,107 @@ class Terminal
 
     void start();
 
-    void resetHard();
-
     void setRefreshRate(double _refreshRate);
     void setLastMarkRangeOffset(LineOffset _value) noexcept;
+
+    void setMaxHistoryLineCount(LineCount _maxHistoryLineCount);
+    LineCount maxHistoryLineCount() const noexcept;
+
+    void setTerminalId(VTType _id) noexcept { state_.terminalId = _id; }
+    void setSixelCursorConformance(bool _value) noexcept { state_.sixelCursorConformance = _value; }
+
+    void setMaxImageSize(ImageSize size) noexcept { state_.maxImageSize = size; }
+
+    void setMaxImageSize(ImageSize _effective, ImageSize _limit)
+    {
+        state_.maxImageSize = _effective;
+        state_.maxImageSizeLimit = _limit;
+    }
+
+    bool isModeEnabled(AnsiMode m) const noexcept { return state_.modes.enabled(m); }
+    bool isModeEnabled(DECMode m) const noexcept { return state_.modes.enabled(m); }
+    void setMode(AnsiMode _mode, bool _enable);
+    void setMode(DECMode _mode, bool _enable);
+
+    void setTopBottomMargin(std::optional<LineOffset> _top, std::optional<LineOffset> _bottom);
+    void setLeftRightMargin(std::optional<ColumnOffset> _left, std::optional<ColumnOffset> _right);
+
+    void moveCursorTo(LineOffset _line, ColumnOffset _column);
+    void saveCursor();
+    void restoreCursor();
+    void restoreCursor(Cursor const& _savedCursor);
+
+    void setGraphicsRendition(GraphicsRendition _rendition);
+    void setForegroundColor(Color _color);
+    void setBackgroundColor(Color _color);
+    void setUnderlineColor(Color _color);
+
+    // {{{ cursor
+    Cursor const& cursor() const noexcept { return state_.cursor; }
+    constexpr CellLocation realCursorPosition() const noexcept { return state_.cursor.position; }
+
+    /// Returns identity if DECOM is disabled (default), but returns translated coordinates if DECOM is
+    /// enabled.
+    CellLocation toRealCoordinate(CellLocation pos) const noexcept
+    {
+        if (!state_.cursor.originMode)
+            return pos;
+        else
+            return { pos.line + state_.margin.vertical.from, pos.column + state_.margin.horizontal.from };
+    }
+
+    /// Clamps given coordinates, respecting DECOM (Origin Mode).
+    CellLocation clampCoordinate(CellLocation coord) const noexcept
+    {
+        if (state_.cursor.originMode)
+            return clampToOrigin(coord);
+        else
+            return clampToScreen(coord);
+    }
+
+    /// Clamps given logical coordinates to margins as used in when DECOM (origin mode) is enabled.
+    CellLocation clampToOrigin(CellLocation coord) const noexcept
+    {
+        return { std::clamp(coord.line, LineOffset { 0 }, state_.margin.vertical.to),
+                 std::clamp(coord.column, ColumnOffset { 0 }, state_.margin.horizontal.to) };
+    }
+
+    LineOffset clampedLine(LineOffset _line) const noexcept
+    {
+        return std::clamp(_line, LineOffset(0), boxed_cast<LineOffset>(state_.pageSize.lines) - 1);
+    }
+
+    ColumnOffset clampedColumn(ColumnOffset _column) const noexcept
+    {
+        return std::clamp(_column, ColumnOffset(0), boxed_cast<ColumnOffset>(state_.pageSize.columns) - 1);
+    }
+
+    CellLocation clampToScreen(CellLocation coord) const noexcept
+    {
+        return { clampedLine(coord.line), clampedColumn(coord.column) };
+    }
+
+    // Tests if given coordinate is within the visible screen area.
+    constexpr bool contains(CellLocation _coord) const noexcept
+    {
+        return LineOffset(0) <= _coord.line && _coord.line < boxed_cast<LineOffset>(state_.pageSize.lines)
+               && ColumnOffset(0) <= _coord.column
+               && _coord.column <= boxed_cast<ColumnOffset>(state_.pageSize.columns);
+    }
+
+    bool isCursorInsideMargins() const noexcept
+    {
+        bool const insideVerticalMargin = state_.margin.vertical.contains(state_.cursor.position.line);
+        bool const insideHorizontalMargin =
+            !isModeEnabled(DECMode::LeftRightMargin)
+            || state_.margin.horizontal.contains(state_.cursor.position.column);
+        return insideVerticalMargin && insideHorizontalMargin;
+    }
+
+    // }}}
+
+    constexpr ImageSize cellPixelSize() const noexcept { return state_.cellPixelSize; }
+    constexpr void setCellPixelSize(ImageSize _cellPixelSize) { state_.cellPixelSize = _cellPixelSize; }
 
     /// Retrieves the time point this terminal instance has been spawned.
     std::chrono::steady_clock::time_point startTime() const noexcept { return startTime_; }
@@ -103,7 +202,12 @@ class Terminal
     Pty& device() noexcept { return *pty_; }
 
     PageSize pageSize() const noexcept { return pty_->pageSize(); }
-    void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels);
+    void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt);
+
+    /// Implements semantics for  DECCOLM / DECSCPP.
+    void resizeColumns(ColumnCount _newColumnCount, bool _clear);
+
+    void clearScreen();
 
     void setMouseProtocolBypassModifier(Modifier _value) { mouseProtocolBypassModifier_ = _value; }
     void setMouseBlockSelectionModifier(Modifier _value) { mouseBlockSelectionModifier_ = _value; }
@@ -145,8 +249,8 @@ class Terminal
     void writeToScreen(std::string_view _text);
 
     // viewport management
-    Viewport<Cell>& viewport() noexcept { return viewport_; }
-    Viewport<Cell> const& viewport() const noexcept { return viewport_; }
+    Viewport& viewport() noexcept { return viewport_; }
+    Viewport const& viewport() const noexcept { return viewport_; }
 
     // {{{ Screen Render Proxy
     std::optional<std::chrono::milliseconds> nextRender() const;
@@ -223,18 +327,37 @@ class Terminal
         innerLock_.unlock();
     }
 
-    /// Only access this when having the terminal object locked.
-    Screen<Cell> const& screen() const noexcept { return screen_; }
+    ColorPalette const& colorPalette() const noexcept { return state_.colorPalette; }
+    ColorPalette& colorPalette() noexcept { return state_.colorPalette; }
+    ColorPalette& defaultColorPalette() noexcept { return state_.defaultColorPalette; }
 
-    /// Only access this when having the terminal object locked.
-    Screen<Cell>& screen() noexcept { return screen_; }
+    ScreenBase& currentScreen() noexcept { return currentScreen_.get(); }
+    ScreenBase const& currentScreen() const noexcept { return currentScreen_.get(); }
+
+    bool isPrimaryScreen() const noexcept { return state_.screenType == ScreenType::Primary; }
+    bool isAlternateScreen() const noexcept { return state_.screenType == ScreenType::Alternate; }
+    ScreenType screenType() const noexcept { return state_.screenType; }
+    void setScreen(ScreenType screenType);
+
+    Screen<Cell> const& primaryScreen() const noexcept { return primaryScreen_; }
+    Screen<Cell>& primaryScreen() noexcept { return primaryScreen_; }
+
+    Screen<Cell> const& alternateScreen() const noexcept { return alternateScreen_; }
+    Screen<Cell>& alternateScreen() noexcept { return alternateScreen_; }
 
     bool isLineWrapped(LineOffset _lineNumber) const noexcept
     {
-        return state_.activeGrid->isLineWrapped(_lineNumber);
+        return isPrimaryScreen() && primaryScreen_.isLineWrapped(_lineNumber);
     }
 
-    CellLocation const& currentMousePosition() const noexcept { return currentMousePosition_; }
+    CellLocation currentMousePosition() const noexcept { return currentMousePosition_; }
+
+    std::optional<CellLocation> currentMouseGridPosition() const noexcept
+    {
+        if (currentScreen_.get().contains(currentMousePosition_))
+            return viewport_.translateScreenToGridCoordinate(currentMousePosition_);
+        return std::nullopt;
+    }
 
     // {{{ cursor management
     CursorDisplay cursorDisplay() const noexcept { return cursorDisplay_; }
@@ -271,9 +394,15 @@ class Terminal
     template <typename RenderTarget>
     void renderSelection(RenderTarget _renderTarget) const
     {
-        if (selection_)
-            terminal::renderSelection(*selection_,
-                                      [&](CellLocation _pos) { _renderTarget(_pos, screen_.at(_pos)); });
+        if (!selection_)
+            return;
+
+        if (isPrimaryScreen())
+            terminal::renderSelection(
+                *selection_, [&](CellLocation _pos) { _renderTarget(_pos, primaryScreen_.at(_pos)); });
+        else
+            terminal::renderSelection(
+                *selection_, [&](CellLocation _pos) { _renderTarget(_pos, alternateScreen_.at(_pos)); });
     }
 
     void clearSelection();
@@ -310,6 +439,15 @@ class Terminal
 
     /// Tests whether or not the mouse is currently hovering a hyperlink.
     bool isMouseHoveringHyperlink() const noexcept { return hoveringHyperlink_.load(); }
+
+    /// Retrieves the HyperlinkInfo that is currently behing hovered by the mouse, if so,
+    /// or a nothing otherwise.
+    std::shared_ptr<HyperlinkInfo const> tryGetHoveringHyperlink() const noexcept
+    {
+        if (auto const gridPosition = currentMouseGridPosition())
+            return currentScreen_.get().hyperlinkAt(*gridPosition);
+        return {};
+    }
 
     bool processInputOnce();
 
@@ -349,8 +487,12 @@ class Terminal
     void setMouseTransport(MouseTransport _transport);
     void setMouseWheelMode(InputGenerator::MouseWheelMode _mode);
     void setWindowTitle(std::string_view _title);
+    std::string const& windowTitle() const noexcept;
+    void saveWindowTitle();
+    void restoreWindowTitle();
     void setTerminalProfile(std::string const& _configProfileName);
     void useApplicationCursorKeys(bool _enabled);
+    void softReset();
     void hardReset();
     void discardImage(Image const&);
     void markCellDirty(CellLocation _position) noexcept;
@@ -360,27 +502,22 @@ class Terminal
 
     void setMaxImageColorRegisters(unsigned value) noexcept { state_.maxImageColorRegisters = value; }
 
+    /// @returns either an empty string or a file:// URL of the last set working directory.
+    std::string const& currentWorkingDirectory() const noexcept { return state_.currentWorkingDirectory; }
+
     void verifyState();
 
     TerminalState& state() noexcept { return state_; }
     TerminalState const& state() const noexcept { return state_; }
 
+    void applyPageSizeToCurrentBuffer();
+
   private:
     void mainLoop();
     void refreshRenderBuffer(RenderBuffer& _output); // <- acquires the lock
     void refreshRenderBufferInternal(RenderBuffer& _output);
-    std::optional<RenderCursor> renderCursor();
     void updateCursorVisibilityState() const;
     bool updateCursorHoveringState();
-
-    template <typename Renderer, typename... RemainingPasses>
-    void renderPass(Renderer&& pass, RemainingPasses... remainingPasses) const
-    {
-        screen_.render(std::forward<Renderer>(pass), viewport_.scrollOffset());
-
-        if constexpr (sizeof...(RemainingPasses) != 0)
-            renderPass(std::forward<RemainingPasses>(remainingPasses)...);
-    }
 
     // private data
     //
@@ -388,7 +525,6 @@ class Terminal
     /// Boolean, indicating whether the terminal's screen buffer contains updates to be rendered.
     mutable std::atomic<uint64_t> changes_;
 
-    std::thread::id mainLoopThreadID_ {};
     size_t ptyReadBufferSize_;
     Events& eventListener_;
 
@@ -422,12 +558,13 @@ class Terminal
     LineOffset copyLastMarkRangeOffset_;
 
     TerminalState state_;
-    Screen<Cell> screen_;
+    Screen<Cell> primaryScreen_;
+    Screen<Cell> alternateScreen_;
+    std::reference_wrapper<ScreenBase> currentScreen_;
 
     std::mutex mutable outerLock_;
     std::mutex mutable innerLock_;
-    std::unique_ptr<std::thread> screenUpdateThread_;
-    Viewport<Cell> viewport_;
+    Viewport viewport_;
     std::unique_ptr<Selection> selection_;
     std::atomic<bool> hoveringHyperlink_ = false;
     std::atomic<bool> renderBufferUpdateEnabled_ = true;

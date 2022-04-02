@@ -84,6 +84,10 @@ class ParserEvents
      */
     virtual void param(char _char) = 0;
 
+    virtual void paramDigit(char /*_char*/) = 0;
+    virtual void paramSeparator() = 0;
+    virtual void paramSubSeparator() = 0;
+
     /**
      * The final character of an escape sequence has arrived, so determined the control function
      * to be executed from the intermediate character(s) and final character, and execute it.
@@ -165,6 +169,9 @@ class BasicParserEvents: public ParserEvents
     void collect(char) override {}
     void collectLeader(char) override {}
     void param(char) override {}
+    void paramDigit(char /*_char*/) override {}
+    void paramSeparator() override {}
+    void paramSubSeparator() override {}
     void dispatchESC(char) override {}
     void dispatchCSI(char) override {}
     void startOSC() override {}

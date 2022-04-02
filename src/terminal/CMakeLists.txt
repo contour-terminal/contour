@@ -35,6 +35,7 @@ set(terminal_HEADERS
     Parser.h
     Process.h
     RenderBuffer.h
+    RenderBufferBuilder.h
     Screen.h
     Selector.h
     Sequence.h
@@ -75,6 +76,7 @@ set(terminal_SOURCES
     Parser.cpp
     Process${PLATFORM_SUFFIX}.cpp
     RenderBuffer.cpp
+    RenderBufferBuilder.cpp
     Screen.cpp
     Selector.cpp
     Sequence.cpp
@@ -83,6 +85,7 @@ set(terminal_SOURCES
     Terminal.cpp
     TerminalState.cpp
     VTType.cpp
+    Viewport.cpp
     primitives.cpp
     pty/MockPty.cpp
     pty/MockViewPty.cpp
@@ -132,6 +135,7 @@ if(LIBTERMINAL_TESTING)
         Grid_test.cpp
         Parser_test.cpp
         Screen_test.cpp
+        Sequence_test.cpp
         Terminal_test.cpp
         SixelParser_test.cpp
     )

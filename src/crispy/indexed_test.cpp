@@ -65,10 +65,10 @@ TEST_CASE("indexed.for_loop_basic_lvalue", "[indexed]")
         REQUIRE(i == k);
         switch (k)
         {
-        case 0: REQUIRE(c == 'a'); break;
-        case 1: REQUIRE(c == 'b'); break;
-        case 2: REQUIRE(c == 'c'); break;
-        default: REQUIRE(false);
+            case 0: REQUIRE(c == 'a'); break;
+            case 1: REQUIRE(c == 'b'); break;
+            case 2: REQUIRE(c == 'c'); break;
+            default: REQUIRE(false);
         }
         ++k;
     }
@@ -82,10 +82,10 @@ TEST_CASE("indexed.for_loop_basic_rvalue", "[indexed]")
         REQUIRE(i == k);
         switch (k)
         {
-        case 0: REQUIRE(c == 'a'); break;
-        case 1: REQUIRE(c == 'b'); break;
-        case 2: REQUIRE(c == 'c'); break;
-        default: REQUIRE(false);
+            case 0: REQUIRE(c == 'a'); break;
+            case 1: REQUIRE(c == 'b'); break;
+            case 2: REQUIRE(c == 'c'); break;
+            default: REQUIRE(false);
         }
         ++k;
     }
@@ -99,10 +99,10 @@ TEST_CASE("indexed.for_loop_basic_rvalue_via_call", "[indexed]")
         REQUIRE(i == k);
         switch (k)
         {
-        case 0: REQUIRE(c == 'a'); break;
-        case 1: REQUIRE(c == 'b'); break;
-        case 2: REQUIRE(c == 'c'); break;
-        default: REQUIRE(false);
+            case 0: REQUIRE(c == 'a'); break;
+            case 1: REQUIRE(c == 'b'); break;
+            case 2: REQUIRE(c == 'c'); break;
+            default: REQUIRE(false);
         }
         ++k;
     }

@@ -15,6 +15,8 @@
 
 #include <terminal/Terminal.h>
 
+#include <unicode/convert.h>
+
 namespace terminal
 {
 
@@ -32,9 +34,11 @@ class MockTerm: public Terminal::Events
     }
 
     decltype(auto) pageSize() const noexcept { return terminal.pageSize(); }
-    decltype(auto) screen() noexcept { return terminal.screen(); }
     decltype(auto) state() noexcept { return terminal.state(); }
     decltype(auto) state() const noexcept { return terminal.state(); }
+
+    void writeToScreen(std::string_view text) { terminal.writeToScreen(text); }
+    void writeToScreen(std::u32string_view text) { terminal.writeToScreen(unicode::convert_to<char>(text)); }
 
     std::string windowTitle;
     Terminal terminal;

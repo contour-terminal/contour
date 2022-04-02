@@ -35,6 +35,17 @@ namespace views
     }
 } // namespace views
 
+constexpr std::string_view trimRight(std::string_view value) noexcept
+{
+    while (!value.empty())
+    {
+        if (std::string_view(" \t\r\n").find(value.back()) == std::string_view::npos)
+            return value;
+        value.remove_suffix(1);
+    }
+    return value;
+}
+
 template <typename T>
 constexpr bool ascending(T low, T val, T high) noexcept
 {
@@ -206,34 +217,34 @@ constexpr std::optional<T> to_integer(std::basic_string_view<C> _text) noexcept
         value = value * static_cast<T>(Base);
         switch (Base)
         {
-        case 2:
-            if ('0' <= ch && ch <= '1')
-                value += (T) (ch - '0');
-            else
-                return std::nullopt;
-            break;
-        case 8:
-            if ('0' <= ch && ch <= '7')
-                value += (T) (ch - '0');
-            else
-                return std::nullopt;
-            break;
-        case 10:
-            if ('0' <= ch && ch <= '9')
-                value += (T) (ch - '0');
-            else
-                return std::nullopt;
-            break;
-        case 16:
-            if ('0' <= ch && ch <= '9')
-                value += (T) (ch - '0');
-            else if ('a' <= ch && ch <= 'f')
-                value += (T) (10 + ch - 'a');
-            else if (ch >= 'A' && ch <= 'F')
-                value += (T) (10 + ch - 'A');
-            else
-                return std::nullopt;
-            break;
+            case 2:
+                if ('0' <= ch && ch <= '1')
+                    value += (T) (ch - '0');
+                else
+                    return std::nullopt;
+                break;
+            case 8:
+                if ('0' <= ch && ch <= '7')
+                    value += (T) (ch - '0');
+                else
+                    return std::nullopt;
+                break;
+            case 10:
+                if ('0' <= ch && ch <= '9')
+                    value += (T) (ch - '0');
+                else
+                    return std::nullopt;
+                break;
+            case 16:
+                if ('0' <= ch && ch <= '9')
+                    value += (T) (ch - '0');
+                else if ('a' <= ch && ch <= 'f')
+                    value += (T) (10 + ch - 'a');
+                else if (ch >= 'A' && ch <= 'F')
+                    value += (T) (10 + ch - 'A');
+                else
+                    return std::nullopt;
+                break;
         }
     }
 

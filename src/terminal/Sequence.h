@@ -14,11 +14,13 @@
 #pragma once
 
 #include <terminal/Functions.h>
-// #include <terminal/primitives.h>
+#include <terminal/ParserExtension.h>
 
 #include <crispy/boxed.h>
 
+#include <algorithm>
 #include <cassert>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -28,51 +30,214 @@
 namespace terminal
 {
 
-/// Helps constructing VT functions as they're being parsed by the VT parser.
+class SequenceParameterBuilder;
+
+/**
+ * CSI parameter API.
+ *
+ * This object holds the numeric parameters as used in a CSI sequence.
+ *
+ * @note Use SequenceParameterBuilder for filling a SequenceParameters object.
+ */
+class SequenceParameters
+{
+  public:
+    using Storage = std::array<uint16_t, 16>;
+
+    constexpr uint16_t at(size_t index) const noexcept { return _values[index]; }
+
+    constexpr bool isSubParameter(size_t index) const noexcept
+    {
+        return (_subParameterTest & (1 << index)) != 0;
+    }
+
+    /// Returns the number of sub-params for a given non-sub param.
+    constexpr size_t subParameterCount(size_t index) const noexcept
+    {
+        if (!isSubParameter(index))
+        {
+            index++;
+            auto const start = index;
+            while (index < 16 && isSubParameter(index))
+                index++;
+            return index - start;
+        }
+        return 0;
+    }
+
+    constexpr void clear() noexcept
+    {
+        _values[0] = 0;
+        _subParameterTest = 0;
+        _count = 0;
+    }
+
+    constexpr bool empty() const noexcept { return _count == 0; }
+    constexpr size_t count() const noexcept { return _count; }
+
+    std::string subParameterBitString() const { return fmt::format("{:016b}: ", _subParameterTest); }
+
+    std::string str() const
+    {
+        std::string s;
+
+        auto const e = count();
+        for (size_t i = 0; i != e; ++i)
+        {
+            if (!s.empty())
+                s += isSubParameter(i) ? ':' : ';';
+
+            if (isSubParameter(i) && !_values[i])
+                continue;
+
+            s += std::to_string(_values[i]);
+        }
+
+        return s;
+    }
+
+  private:
+    friend class SequenceParameterBuilder;
+    Storage _values {};
+    uint16_t _subParameterTest = 0;
+    size_t _count = 0;
+};
+
+/**
+ * SequenceParameters builder API.
+ *
+ * Used to progressively fill a SequenceParameters object.
+ *
+ * @see SequenceParameters
+ */
+class SequenceParameterBuilder
+{
+  public:
+    using Storage = SequenceParameters::Storage;
+
+    explicit SequenceParameterBuilder(SequenceParameters& p):
+        _parameters { p }, _currentParameter { p._values.begin() }
+    {
+    }
+
+    void reset()
+    {
+        _parameters.clear();
+        _currentParameter = _parameters._values.begin();
+    }
+
+    void nextParameter()
+    {
+        if (_currentParameter != _parameters._values.end())
+        {
+            ++_currentParameter;
+            *_currentParameter = 0;
+            _parameters._subParameterTest >>= 1;
+        }
+    }
+
+    void nextSubParameter()
+    {
+        if (_currentParameter != _parameters._values.end())
+        {
+            ++_currentParameter;
+            *_currentParameter = 0;
+            _parameters._subParameterTest = (_parameters._subParameterTest >> 1) | (1 << 15);
+        }
+    }
+
+    constexpr void multiplyBy10AndAdd(uint8_t value) noexcept
+    {
+        *_currentParameter = *_currentParameter * 10 + value;
+    }
+
+    constexpr void apply(uint16_t value) noexcept
+    {
+        if (value >= 10)
+            multiplyBy10AndAdd(value / 10);
+        multiplyBy10AndAdd(value % 10);
+    }
+
+    constexpr void set(uint16_t value) noexcept { *_currentParameter = value; }
+
+    constexpr bool isSubParameter(size_t index) const noexcept
+    {
+        return (_parameters._subParameterTest & (1 << (count() - 1 - index))) != 0;
+    }
+
+    constexpr size_t count() const noexcept
+    {
+        auto const result =
+            std::distance(const_cast<SequenceParameterBuilder*>(this)->_parameters._values.begin(),
+                          _currentParameter)
+            + 1;
+        if (!(result == 1 && _parameters._values[0] == 0))
+            return result;
+        else
+            return 0;
+    }
+
+    constexpr void fixiate() noexcept
+    {
+        _parameters._count = count();
+        _parameters._subParameterTest >>= 16 - _parameters._count;
+    }
+
+  private:
+    SequenceParameters& _parameters;
+    Storage::iterator _currentParameter;
+};
+
+/**
+ * Helps constructing VT functions as they're being parsed by the VT parser.
+ */
 class Sequence
 {
   public:
-    using Parameter = unsigned;
-    using ParameterList = std::vector<std::vector<Parameter>>;
+    size_t constexpr static MaxOscLength = 512;
+
+    using Parameter = uint16_t;
     using Intermediaries = std::string;
     using DataString = std::string;
+    using Parameters = SequenceParameters;
 
   private:
     FunctionCategory category_;
     char leaderSymbol_ = 0;
-    ParameterList parameters_;
+    Parameters parameters_;
     Intermediaries intermediateCharacters_;
     char finalChar_ = 0;
     DataString dataString_;
 
   public:
-    size_t constexpr static MaxParameters = 16;
-    size_t constexpr static MaxSubParameters = 8;
-    size_t constexpr static MaxOscLength = 512;
+    // parameter accessors
+    //
 
-    Sequence()
-    {
-        parameters_.resize(MaxParameters);
-        for (auto& param: parameters_)
-            param.reserve(MaxSubParameters);
-        parameters_.clear();
-    }
+    Parameters& parameters() noexcept { return parameters_; }
+    Parameters const& parameters() const noexcept { return parameters_; }
+
+    size_t parameterCount() const noexcept { return parameters_.count(); }
+    size_t subParameterCount(size_t i) const noexcept { return parameters_.subParameterCount(i); }
 
     // mutators
     //
     void clear()
     {
+        clearExceptParameters();
+        parameters_.clear();
+    }
+
+    void clearExceptParameters()
+    {
         category_ = FunctionCategory::C0;
         leaderSymbol_ = 0;
         intermediateCharacters_.clear();
-        parameters_.clear();
         finalChar_ = 0;
         dataString_.clear();
     }
 
     void setCategory(FunctionCategory _cat) noexcept { category_ = _cat; }
     void setLeader(char _ch) noexcept { leaderSymbol_ = _ch; }
-    ParameterList& parameters() noexcept { return parameters_; }
     Intermediaries& intermediateCharacters() noexcept { return intermediateCharacters_; }
     void setFinalChar(char _ch) noexcept { finalChar_ = _ch; }
 
@@ -93,17 +258,20 @@ class Sequence
     {
         switch (category_)
         {
-        case FunctionCategory::OSC:
-            return FunctionSelector { category_, 0, static_cast<int>(parameters_[0][0]), 0, 0 };
-        default: {
-            // Only support CSI sequences with 0 or 1 intermediate characters.
-            char const intermediate =
-                intermediateCharacters_.size() == 1 ? static_cast<char>(intermediateCharacters_[0]) : char {};
+            case FunctionCategory::OSC:
+                return FunctionSelector {
+                    category_, 0, static_cast<int>(parameterCount() ? param(0) : 0), 0, 0
+                };
+            default: {
+                // Only support CSI sequences with 0 or 1 intermediate characters.
+                char const intermediate = intermediateCharacters_.size() == 1
+                                              ? static_cast<char>(intermediateCharacters_[0])
+                                              : char {};
 
-            return FunctionSelector {
-                category_, leaderSymbol_, static_cast<int>(parameters_.size()), intermediate, finalChar_
-            };
-        }
+                return FunctionSelector {
+                    category_, leaderSymbol_, static_cast<int>(parameterCount()), intermediate, finalChar_
+                };
+            }
         }
     }
 
@@ -113,50 +281,45 @@ class Sequence
     Intermediaries const& intermediateCharacters() const noexcept { return intermediateCharacters_; }
     char finalChar() const noexcept { return finalChar_; }
 
-    ParameterList const& parameters() const noexcept { return parameters_; }
-    size_t parameterCount() const noexcept { return parameters_.size(); }
-    size_t subParameterCount(size_t _index) const noexcept { return parameters_[_index].size() - 1; }
-
     template <typename T = unsigned>
-    std::optional<T> param_opt(size_t _index) const noexcept
+    std::optional<T> param_opt(size_t parameterIndex) const noexcept
     {
-        if (_index < parameters_.size() && parameters_[_index][0])
+        if (parameterIndex < parameters_.count())
         {
             if constexpr (crispy::is_boxed<T>)
-                return { T::cast_from(parameters_[_index][0]) };
+                return { T::cast_from(parameters_.at(parameterIndex)) };
             else
-                return { static_cast<T>(parameters_[_index][0]) };
+                return { static_cast<T>(parameters_.at(parameterIndex)) };
         }
         else
             return std::nullopt;
     }
 
     template <typename T = unsigned>
-    T param_or(size_t _index, T _defaultValue) const noexcept
+    T param_or(size_t parameterIndex, T _defaultValue) const noexcept
     {
-        return param_opt<T>(_index).value_or(_defaultValue);
+        return param_opt<T>(parameterIndex).value_or(_defaultValue);
     }
 
     template <typename T = unsigned>
-    T param(size_t _index) const noexcept
+    T param(size_t parameterIndex) const noexcept
     {
-        assert(_index < parameters_.size());
-        assert(0 < parameters_[_index].size());
+        assert(parameterIndex < parameters_.count());
         if constexpr (crispy::is_boxed<T>)
-            return T::cast_from(parameters_[_index][0]);
+            return T::cast_from(parameters_.at(parameterIndex));
         else
-            return static_cast<T>(parameters_[_index][0]);
+            return static_cast<T>(parameters_.at(parameterIndex));
     }
 
     template <typename T = unsigned>
-    T subparam(size_t _index, size_t _subIndex) const noexcept
+    T subparam(size_t parameterIndex, size_t subIndex) const noexcept
     {
-        assert(_index < parameters_.size());
-        assert(_subIndex + 1 < parameters_[_index].size());
-        if constexpr (crispy::is_boxed<T>)
-            return T::cast_from(parameters_[_index][_subIndex + 1]);
-        else
-            return static_cast<T>(parameters_[_index][_subIndex + 1]);
+        return param<T>(parameterIndex + subIndex);
+    }
+
+    bool isSubParameter(size_t parameterIndex) const noexcept
+    {
+        return parameters_.isSubParameter(parameterIndex);
     }
 
     template <typename T = unsigned>
@@ -165,16 +328,27 @@ class Sequence
         for (size_t i = 0; i < parameterCount(); ++i)
             if constexpr (crispy::is_boxed<T>)
             {
-                if (T::cast_from(parameters_[i][0]) == _value)
+                if (T::cast_from(parameters_.at(i)) == _value)
                     return true;
             }
             else
             {
-                if (T(parameters_[i][0]) == _value)
+                if (T(parameters_.at(i)) == _value)
                     return true;
             }
         return false;
     }
+};
+
+class SequenceHandler
+{
+  public:
+    virtual ~SequenceHandler() = default;
+
+    virtual void executeControlCode(char controlCode) {}      // = 0;
+    virtual void processSequence(Sequence const& sequence) {} // = 0;
+    virtual void writeText(char32_t codepoint) {}             // = 0;
+    virtual void writeText(std::string_view codepoints) {}    // = 0;
 };
 
 } // namespace terminal

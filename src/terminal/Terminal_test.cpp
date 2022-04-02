@@ -28,6 +28,7 @@
 #include <vector>
 
 using namespace std;
+using terminal::CellFlags;
 using terminal::ColumnCount;
 using terminal::ColumnOffset;
 using terminal::LineCount;
@@ -128,7 +129,7 @@ class MockTerm: public terminal::Terminal::Events
 
     void requestCaptureBuffer(LineCount lines, bool logical) override
     {
-        terminal_.screen().captureBuffer(lines, logical);
+        terminal_.primaryScreen().captureBuffer(lines, logical);
     }
 
     void logScreenText(std::string const& headline = "")
@@ -138,9 +139,9 @@ class MockTerm: public terminal::Terminal::Events
         else
             UNSCOPED_INFO(headline + ":");
 
-        for (int line = 1; line <= unbox<int>(terminal().screen().pageSize().lines); ++line)
+        for (int line = 1; line <= unbox<int>(terminal().pageSize().lines); ++line)
             UNSCOPED_INFO(fmt::format(
-                "[{}] \"{}\"", line, terminal().screen().grid().lineText(terminal::LineOffset(line))));
+                "[{}] \"{}\"", line, terminal().primaryScreen().grid().lineText(terminal::LineOffset(line))));
     }
 
   private:
@@ -238,7 +239,7 @@ TEST_CASE("Terminal.DECCARA", "[terminal]")
                                    fmt::arg("left", left),
                                    fmt::arg("bottom", bottom),
                                    fmt::arg("right", right),
-                                   fmt::arg("sgr", 4)));
+                                   fmt::arg("sgr", "1;38:2::171:178:191;4")));
 
     mock.terminal().tick(ClockBase + chrono::seconds(2));
     mock.terminal().ensureFreshRenderBuffer();
@@ -250,9 +251,15 @@ TEST_CASE("Terminal.DECCARA", "[terminal]")
     for (auto line = top; line <= bottom; ++line)
         for (auto column = left; column <= right; ++column)
         {
-            auto const& someCell =
-                mock.terminal().screen().at(LineOffset(line - 1), ColumnOffset(column - 1));
-            CHECK(someCell.styles() & terminal::CellFlags::Underline);
+            // clang-format off
+            auto const& someCell = mock.terminal().primaryScreen().at(LineOffset(line - 1), ColumnOffset(column - 1));
+            auto const rgb = someCell.foregroundColor().rgb();
+            auto const colorDec = fmt::format("{}/{}/{}", unsigned(rgb.red), unsigned(rgb.green), unsigned(rgb.blue));
+            INFO(fmt::format("at line {} column {}, flags {}", line, column, someCell.styles()));
+            CHECK(colorDec == "171/178/191");
+            CHECK(someCell.isFlagEnabled(terminal::CellFlags::Bold));
+            CHECK(someCell.isFlagEnabled(terminal::CellFlags::Underline));
+            // clang-format on
         }
 }
 
@@ -313,4 +320,27 @@ TEST_CASE("Terminal.SynchronizedOutput", "[terminal]")
     mc.terminal().tick(now);
     mc.terminal().ensureFreshRenderBuffer();
     CHECK("Hello  World" == trimmedTextScreenshot(mc));
+}
+
+TEST_CASE("Terminal.CurlyUnderline", "[terminal]")
+{
+    auto const now = chrono::steady_clock::now();
+    auto mc = MockTerm { ColumnCount(20), LineCount(1) };
+
+    mc.writeToStdout("\033[4:3mAB\033[mCD");
+    mc.terminal().tick(now);
+    mc.terminal().ensureFreshRenderBuffer();
+    CHECK("ABCD" == trimmedTextScreenshot(mc));
+
+    auto& screen = mc.terminal().primaryScreen();
+
+    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).isFlagEnabled(CellFlags::CurlyUnderlined));
+    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlags::CurlyUnderlined));
+    CHECK(!screen.at(LineOffset(0), ColumnOffset(2)).isFlagEnabled(CellFlags::CurlyUnderlined));
+    CHECK(!screen.at(LineOffset(0), ColumnOffset(3)).isFlagEnabled(CellFlags::CurlyUnderlined));
+
+    CHECK(!screen.at(LineOffset(0), ColumnOffset(0)).isFlagEnabled(CellFlags::Italic));
+    CHECK(!screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlags::Italic));
+    CHECK(!screen.at(LineOffset(0), ColumnOffset(2)).isFlagEnabled(CellFlags::Italic));
+    CHECK(!screen.at(LineOffset(0), ColumnOffset(3)).isFlagEnabled(CellFlags::Italic));
 }

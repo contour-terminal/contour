@@ -357,18 +357,18 @@ struct formatter<text::font_weight>
     {
         switch (_value)
         {
-        case text::font_weight::thin: return format_to(ctx.out(), "Thin");
-        case text::font_weight::extra_light: return format_to(ctx.out(), "ExtraLight");
-        case text::font_weight::light: return format_to(ctx.out(), "Light");
-        case text::font_weight::demilight: return format_to(ctx.out(), "DemiLight");
-        case text::font_weight::book: return format_to(ctx.out(), "Book");
-        case text::font_weight::normal: return format_to(ctx.out(), "Regular");
-        case text::font_weight::medium: return format_to(ctx.out(), "Medium");
-        case text::font_weight::demibold: return format_to(ctx.out(), "DemiBold");
-        case text::font_weight::bold: return format_to(ctx.out(), "Bold");
-        case text::font_weight::extra_bold: return format_to(ctx.out(), "ExtraBold");
-        case text::font_weight::black: return format_to(ctx.out(), "Black");
-        case text::font_weight::extra_black: return format_to(ctx.out(), "ExtraBlack");
+            case text::font_weight::thin: return format_to(ctx.out(), "Thin");
+            case text::font_weight::extra_light: return format_to(ctx.out(), "ExtraLight");
+            case text::font_weight::light: return format_to(ctx.out(), "Light");
+            case text::font_weight::demilight: return format_to(ctx.out(), "DemiLight");
+            case text::font_weight::book: return format_to(ctx.out(), "Book");
+            case text::font_weight::normal: return format_to(ctx.out(), "Regular");
+            case text::font_weight::medium: return format_to(ctx.out(), "Medium");
+            case text::font_weight::demibold: return format_to(ctx.out(), "DemiBold");
+            case text::font_weight::bold: return format_to(ctx.out(), "Bold");
+            case text::font_weight::extra_bold: return format_to(ctx.out(), "ExtraBold");
+            case text::font_weight::black: return format_to(ctx.out(), "Black");
+            case text::font_weight::extra_black: return format_to(ctx.out(), "ExtraBlack");
         }
         return format_to(ctx.out(), "({})", unsigned(_value));
     }
@@ -387,9 +387,9 @@ struct formatter<text::font_slant>
     {
         switch (_value)
         {
-        case text::font_slant::normal: return format_to(ctx.out(), "Roman");
-        case text::font_slant::italic: return format_to(ctx.out(), "Italic");
-        case text::font_slant::oblique: return format_to(ctx.out(), "Oblique");
+            case text::font_slant::normal: return format_to(ctx.out(), "Roman");
+            case text::font_slant::italic: return format_to(ctx.out(), "Italic");
+            case text::font_slant::oblique: return format_to(ctx.out(), "Oblique");
         }
         return format_to(ctx.out(), "({})", unsigned(_value));
     }
@@ -408,8 +408,8 @@ struct formatter<text::font_spacing>
     {
         switch (_value)
         {
-        case text::font_spacing::proportional: return format_to(ctx.out(), "Proportional");
-        case text::font_spacing::mono: return format_to(ctx.out(), "Monospace");
+            case text::font_spacing::proportional: return format_to(ctx.out(), "Proportional");
+            case text::font_spacing::mono: return format_to(ctx.out(), "Monospace");
         }
         return format_to(ctx.out(), "({})", unsigned(_value));
     }
@@ -556,11 +556,11 @@ struct formatter<text::render_mode>
     {
         switch (_value)
         {
-        case text::render_mode::bitmap: return format_to(ctx.out(), "Bitmap");
-        case text::render_mode::gray: return format_to(ctx.out(), "Gray");
-        case text::render_mode::light: return format_to(ctx.out(), "Light");
-        case text::render_mode::lcd: return format_to(ctx.out(), "LCD");
-        case text::render_mode::color: return format_to(ctx.out(), "Color");
+            case text::render_mode::bitmap: return format_to(ctx.out(), "Bitmap");
+            case text::render_mode::gray: return format_to(ctx.out(), "Gray");
+            case text::render_mode::light: return format_to(ctx.out(), "Light");
+            case text::render_mode::lcd: return format_to(ctx.out(), "LCD");
+            case text::render_mode::color: return format_to(ctx.out(), "Color");
         }
         return format_to(ctx.out(), "({})", unsigned(_value));
     }

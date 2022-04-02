@@ -137,11 +137,11 @@ namespace
     {
         switch (_value)
         {
-        case FC_PROPORTIONAL: return "proportional"sv;
-        case FC_DUAL: return "dual"sv;
-        case FC_MONO: return "mono"sv;
-        case FC_CHARCELL: return "charcell"sv;
-        default: return "INVALID"sv;
+            case FC_PROPORTIONAL: return "proportional"sv;
+            case FC_DUAL: return "dual"sv;
+            case FC_MONO: return "mono"sv;
+            case FC_CHARCELL: return "charcell"sv;
+            default: return "INVALID"sv;
         }
     }
 
@@ -166,23 +166,23 @@ namespace
     {
         switch (_weight)
         {
-        case font_weight::thin: return FC_WEIGHT_THIN;
-        case font_weight::extra_light: return FC_WEIGHT_EXTRALIGHT;
-        case font_weight::light: return FC_WEIGHT_LIGHT;
-        case font_weight::demilight:
+            case font_weight::thin: return FC_WEIGHT_THIN;
+            case font_weight::extra_light: return FC_WEIGHT_EXTRALIGHT;
+            case font_weight::light: return FC_WEIGHT_LIGHT;
+            case font_weight::demilight:
 #if defined(FC_WEIGHT_DEMILIGHT)
-            return FC_WEIGHT_DEMILIGHT;
+                return FC_WEIGHT_DEMILIGHT;
 #else
-            return FC_WEIGHT_LIGHT; // Is this a good fallback? Maybe.
+                return FC_WEIGHT_LIGHT; // Is this a good fallback? Maybe.
 #endif
-        case font_weight::book: return FC_WEIGHT_BOOK;
-        case font_weight::normal: return FC_WEIGHT_NORMAL;
-        case font_weight::medium: return FC_WEIGHT_MEDIUM;
-        case font_weight::demibold: return FC_WEIGHT_DEMIBOLD;
-        case font_weight::bold: return FC_WEIGHT_BOLD;
-        case font_weight::extra_bold: return FC_WEIGHT_EXTRABOLD;
-        case font_weight::black: return FC_WEIGHT_BLACK;
-        case font_weight::extra_black: return FC_WEIGHT_EXTRABLACK;
+            case font_weight::book: return FC_WEIGHT_BOOK;
+            case font_weight::normal: return FC_WEIGHT_NORMAL;
+            case font_weight::medium: return FC_WEIGHT_MEDIUM;
+            case font_weight::demibold: return FC_WEIGHT_DEMIBOLD;
+            case font_weight::bold: return FC_WEIGHT_BOLD;
+            case font_weight::extra_bold: return FC_WEIGHT_EXTRABOLD;
+            case font_weight::black: return FC_WEIGHT_BLACK;
+            case font_weight::extra_black: return FC_WEIGHT_EXTRABLACK;
         }
         return FC_WEIGHT_NORMAL;
     }
@@ -191,9 +191,9 @@ namespace
     {
         switch (_slant)
         {
-        case font_slant::italic: return FC_SLANT_ITALIC;
-        case font_slant::oblique: return FC_SLANT_OBLIQUE;
-        case font_slant::normal: return FC_SLANT_ROMAN;
+            case font_slant::italic: return FC_SLANT_ITALIC;
+            case font_slant::oblique: return FC_SLANT_OBLIQUE;
+            case font_slant::normal: return FC_SLANT_ROMAN;
         }
         return FC_SLANT_ROMAN;
     }
@@ -202,11 +202,11 @@ namespace
     {
         switch (_mode)
         {
-        case render_mode::bitmap: return FT_LOAD_MONOCHROME;
-        case render_mode::light: return FT_LOAD_TARGET_LIGHT;
-        case render_mode::lcd: return FT_LOAD_TARGET_LCD;
-        case render_mode::color: return FT_LOAD_COLOR;
-        case render_mode::gray: return FT_LOAD_DEFAULT;
+            case render_mode::bitmap: return FT_LOAD_MONOCHROME;
+            case render_mode::light: return FT_LOAD_TARGET_LIGHT;
+            case render_mode::lcd: return FT_LOAD_TARGET_LCD;
+            case render_mode::color: return FT_LOAD_COLOR;
+            case render_mode::gray: return FT_LOAD_DEFAULT;
         }
         return FT_LOAD_DEFAULT;
     }
@@ -215,11 +215,11 @@ namespace
     {
         switch (_mode)
         {
-        case render_mode::bitmap: return FT_RENDER_MODE_MONO;
-        case render_mode::gray: return FT_RENDER_MODE_NORMAL;
-        case render_mode::light: return FT_RENDER_MODE_LIGHT;
-        case render_mode::lcd: return FT_RENDER_MODE_LCD;
-        case render_mode::color: return FT_RENDER_MODE_NORMAL; break;
+            case render_mode::bitmap: return FT_RENDER_MODE_MONO;
+            case render_mode::gray: return FT_RENDER_MODE_NORMAL;
+            case render_mode::light: return FT_RENDER_MODE_LIGHT;
+            case render_mode::lcd: return FT_RENDER_MODE_LCD;
+            case render_mode::color: return FT_RENDER_MODE_NORMAL; break;
         }
         return FT_RENDER_MODE_NORMAL;
     }
@@ -229,12 +229,12 @@ namespace
         using unicode::Script;
         switch (_script)
         {
-        case Script::Latin: return HB_SCRIPT_LATIN;
-        case Script::Greek: return HB_SCRIPT_GREEK;
-        case Script::Common: return HB_SCRIPT_COMMON;
-        default:
-            // TODO: make this list complete
-            return HB_SCRIPT_INVALID; // hb_buffer_guess_segment_properties() will fill it
+            case Script::Latin: return HB_SCRIPT_LATIN;
+            case Script::Greek: return HB_SCRIPT_GREEK;
+            case Script::Common: return HB_SCRIPT_COMMON;
+            default:
+                // TODO: make this list complete
+                return HB_SCRIPT_INVALID; // hb_buffer_guess_segment_properties() will fill it
         }
     }
 
@@ -805,91 +805,91 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
 
     switch (ftFace->glyph->bitmap.pixel_mode)
     {
-    case FT_PIXEL_MODE_MONO: {
-        auto const width = output.bitmapSize.width;
-        auto const height = output.bitmapSize.height;
+        case FT_PIXEL_MODE_MONO: {
+            auto const width = output.bitmapSize.width;
+            auto const height = output.bitmapSize.height;
 
-        // convert mono to gray
-        FT_Bitmap ftBitmap;
-        FT_Bitmap_Init(&ftBitmap);
+            // convert mono to gray
+            FT_Bitmap ftBitmap;
+            FT_Bitmap_Init(&ftBitmap);
 
-        auto const ec = FT_Bitmap_Convert(d->ft_, &ftFace->glyph->bitmap, &ftBitmap, 1);
-        if (ec != FT_Err_Ok)
-            return nullopt;
+            auto const ec = FT_Bitmap_Convert(d->ft_, &ftFace->glyph->bitmap, &ftBitmap, 1);
+            if (ec != FT_Err_Ok)
+                return nullopt;
 
-        ftBitmap.num_grays = 256;
+            ftBitmap.num_grays = 256;
 
-        output.format = bitmap_format::alpha_mask;
-        output.bitmap.resize(height.as<size_t>()
-                             * width.as<size_t>()); // 8-bit channel (with values 0 or 255)
+            output.format = bitmap_format::alpha_mask;
+            output.bitmap.resize(height.as<size_t>()
+                                 * width.as<size_t>()); // 8-bit channel (with values 0 or 255)
 
-        auto const pitch = static_cast<unsigned>(ftBitmap.pitch);
-        for (auto const i: iota(0u, ftBitmap.rows))
-            for (auto const j: iota(0u, ftBitmap.width))
-                output.bitmap[i * width.as<size_t>() + j] =
-                    ftBitmap.buffer[(height.as<size_t>() - 1 - i) * pitch + j] * 255;
+            auto const pitch = static_cast<unsigned>(ftBitmap.pitch);
+            for (auto const i: iota(0u, ftBitmap.rows))
+                for (auto const j: iota(0u, ftBitmap.width))
+                    output.bitmap[i * width.as<size_t>() + j] =
+                        ftBitmap.buffer[(height.as<size_t>() - 1 - i) * pitch + j] * 255;
 
-        FT_Bitmap_Done(d->ft_, &ftBitmap);
-        break;
-    }
-    case FT_PIXEL_MODE_GRAY: {
-        output.format = bitmap_format::alpha_mask;
-        output.bitmap.resize(unbox<size_t>(output.bitmapSize.height)
-                             * unbox<size_t>(output.bitmapSize.width));
-
-        auto const pitch = static_cast<unsigned>(ftFace->glyph->bitmap.pitch);
-        auto const s = ftFace->glyph->bitmap.buffer;
-        for (auto const i: iota(0u, *output.bitmapSize.height))
-            for (auto const j: iota(0u, *output.bitmapSize.width))
-                output.bitmap[i * *output.bitmapSize.width + j] =
-                    s[(*output.bitmapSize.height - 1 - i) * pitch + j];
-        break;
-    }
-    case FT_PIXEL_MODE_LCD: {
-        auto const width = static_cast<size_t>(ftFace->glyph->bitmap.width);
-        auto const height = static_cast<size_t>(ftFace->glyph->bitmap.rows);
-
-        output.format = bitmap_format::rgb; // LCD
-        output.bitmap.resize(width * height);
-        output.bitmapSize.width /= crispy::Width(3);
-
-        auto const pitch = static_cast<unsigned>(ftFace->glyph->bitmap.pitch);
-        auto const s = ftFace->glyph->bitmap.buffer;
-        for (auto const i: iota(0u, ftFace->glyph->bitmap.rows))
-            for (auto const j: iota(0u, ftFace->glyph->bitmap.width))
-                output.bitmap[i * width + j] = s[(height - 1 - i) * pitch + j];
-        break;
-    }
-    case FT_PIXEL_MODE_BGRA: {
-        auto const width = output.bitmapSize.width;
-        auto const height = output.bitmapSize.height;
-
-        output.format = bitmap_format::rgba;
-        output.bitmap.resize(height.as<size_t>() * width.as<size_t>() * 4);
-        auto t = output.bitmap.begin();
-
-        auto const pitch = static_cast<unsigned>(ftFace->glyph->bitmap.pitch);
-        for (auto const i: iota(0u, height.as<size_t>()))
-        {
-            for (auto const j: iota(0u, width.as<size_t>()))
-            {
-                auto const s =
-                    &ftFace->glyph->bitmap.buffer[static_cast<size_t>(height.as<size_t>() - i - 1u) * pitch
-                                                  + static_cast<size_t>(j) * 4u];
-
-                // BGRA -> RGBA
-                *t++ = s[2];
-                *t++ = s[1];
-                *t++ = s[0];
-                *t++ = s[3];
-            }
+            FT_Bitmap_Done(d->ft_, &ftBitmap);
+            break;
         }
-        break;
-    }
-    default:
-        RasterizerLog()("Glyph requested that has an unsupported pixel_mode:{}",
-                        ftFace->glyph->bitmap.pixel_mode);
-        return nullopt;
+        case FT_PIXEL_MODE_GRAY: {
+            output.format = bitmap_format::alpha_mask;
+            output.bitmap.resize(unbox<size_t>(output.bitmapSize.height)
+                                 * unbox<size_t>(output.bitmapSize.width));
+
+            auto const pitch = static_cast<unsigned>(ftFace->glyph->bitmap.pitch);
+            auto const s = ftFace->glyph->bitmap.buffer;
+            for (auto const i: iota(0u, *output.bitmapSize.height))
+                for (auto const j: iota(0u, *output.bitmapSize.width))
+                    output.bitmap[i * *output.bitmapSize.width + j] =
+                        s[(*output.bitmapSize.height - 1 - i) * pitch + j];
+            break;
+        }
+        case FT_PIXEL_MODE_LCD: {
+            auto const width = static_cast<size_t>(ftFace->glyph->bitmap.width);
+            auto const height = static_cast<size_t>(ftFace->glyph->bitmap.rows);
+
+            output.format = bitmap_format::rgb; // LCD
+            output.bitmap.resize(width * height);
+            output.bitmapSize.width /= crispy::Width(3);
+
+            auto const pitch = static_cast<unsigned>(ftFace->glyph->bitmap.pitch);
+            auto const s = ftFace->glyph->bitmap.buffer;
+            for (auto const i: iota(0u, ftFace->glyph->bitmap.rows))
+                for (auto const j: iota(0u, ftFace->glyph->bitmap.width))
+                    output.bitmap[i * width + j] = s[(height - 1 - i) * pitch + j];
+            break;
+        }
+        case FT_PIXEL_MODE_BGRA: {
+            auto const width = output.bitmapSize.width;
+            auto const height = output.bitmapSize.height;
+
+            output.format = bitmap_format::rgba;
+            output.bitmap.resize(height.as<size_t>() * width.as<size_t>() * 4);
+            auto t = output.bitmap.begin();
+
+            auto const pitch = static_cast<unsigned>(ftFace->glyph->bitmap.pitch);
+            for (auto const i: iota(0u, height.as<size_t>()))
+            {
+                for (auto const j: iota(0u, width.as<size_t>()))
+                {
+                    auto const s = &ftFace->glyph->bitmap
+                                        .buffer[static_cast<size_t>(height.as<size_t>() - i - 1u) * pitch
+                                                + static_cast<size_t>(j) * 4u];
+
+                    // BGRA -> RGBA
+                    *t++ = s[2];
+                    *t++ = s[1];
+                    *t++ = s[0];
+                    *t++ = s[3];
+                }
+            }
+            break;
+        }
+        default:
+            RasterizerLog()("Glyph requested that has an unsupported pixel_mode:{}",
+                            ftFace->glyph->bitmap.pixel_mode);
+            return nullopt;
     }
 
     Ensures(output.valid());

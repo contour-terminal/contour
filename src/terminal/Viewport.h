@@ -26,10 +26,6 @@ namespace terminal
 
 // #define CONTOUR_LOG_VIEWPORT 1
 
-template <typename EventListener>
-class Screen;
-
-template <typename Cell>
 class Viewport
 {
   public:
@@ -39,8 +35,8 @@ class Viewport
 
     using ModifyEvent = std::function<void()>;
 
-    explicit Viewport(Screen<Cell>& _screen, ModifyEvent _onModify = {}):
-        screen_ { _screen }, modified_ { _onModify ? std::move(_onModify) : []() {
+    explicit Viewport(Terminal& term, ModifyEvent _onModify = {}):
+        terminal_ { term }, modified_ { _onModify ? std::move(_onModify) : []() {
         } }
     {
     }
@@ -61,88 +57,14 @@ class Viewport
         return a <= b && b < c;
     }
 
-    bool scrollUp(LineCount _numLines)
-    {
-        scrollOffset_ = std::min(scrollOffset_ + _numLines.as<ScrollOffset>(),
-                                 boxed_cast<ScrollOffset>(historyLineCount()));
-        return scrollTo(scrollOffset_);
-    }
-
-    bool scrollDown(LineCount _numLines)
-    {
-        scrollOffset_ = std::max(scrollOffset_ - _numLines.as<ScrollOffset>(), ScrollOffset(0));
-        return scrollTo(scrollOffset_);
-    }
-
-    bool scrollToTop() { return scrollTo(boxed_cast<ScrollOffset>(historyLineCount())); }
-
-    bool scrollToBottom()
-    {
-        if (scrollingDisabled())
-            return false;
-
-        return forceScrollToBottom();
-    }
-
-    bool forceScrollToBottom()
-    {
-        if (!scrollOffset_)
-            return false;
-
-#if defined(CONTOUR_LOG_VIEWPORT)
-        Log()("forcing scroll to bottom from {}", scrollOffset_);
-#endif
-        scrollOffset_ = ScrollOffset(0);
-        modified_();
-        return true;
-    }
-
-    bool scrollTo(ScrollOffset _offset)
-    {
-        if (scrollingDisabled())
-            return false;
-
-        if (_offset == scrollOffset_)
-            return false;
-
-        if (0 <= *_offset && _offset <= boxed_cast<ScrollOffset>(historyLineCount()))
-        {
-#if defined(CONTOUR_LOG_VIEWPORT)
-            Log()("Scroll to offset {}", _offset);
-#endif
-            scrollOffset_ = _offset;
-            modified_();
-            return true;
-        }
-
-        return false;
-    }
-
-    bool scrollMarkUp()
-    {
-        if (scrollingDisabled())
-            return false;
-
-        auto const newScrollOffset = screen_.findMarkerUpwards(-boxed_cast<LineOffset>(scrollOffset_));
-        if (newScrollOffset.has_value())
-            return scrollTo(boxed_cast<ScrollOffset>(-*newScrollOffset));
-
-        return false;
-    }
-
-    bool scrollMarkDown()
-    {
-        if (scrollingDisabled())
-            return false;
-
-        auto const newScrollOffset = screen_.findMarkerDownwards(-boxed_cast<LineOffset>(scrollOffset_));
-        if (newScrollOffset)
-            return scrollTo(boxed_cast<ScrollOffset>(-*newScrollOffset));
-        else
-            return forceScrollToBottom();
-
-        return true;
-    }
+    bool scrollUp(LineCount _numLines);
+    bool scrollDown(LineCount _numLines);
+    bool scrollToTop();
+    bool scrollToBottom();
+    bool forceScrollToBottom();
+    bool scrollTo(ScrollOffset _offset);
+    bool scrollMarkUp();
+    bool scrollMarkDown();
 
     /// Translates a screen coordinate to a Grid-coordinate by applying
     /// the scroll-offset to it.
@@ -155,18 +77,13 @@ class Viewport
     }
 
   private:
-    LineCount historyLineCount() const noexcept { return screen_.historyLineCount(); }
-    LineCount screenLineCount() const noexcept { return screen_.pageSize().lines; }
-
-    bool scrollingDisabled() const noexcept
-    {
-        // TODO: make configurable
-        return screen_.isAlternateScreen();
-    }
+    LineCount historyLineCount() const noexcept;
+    LineCount screenLineCount() const noexcept;
+    bool scrollingDisabled() const noexcept;
 
     // private fields
     //
-    Screen<Cell>& screen_;
+    Terminal& terminal_;
     ModifyEvent modified_;
     //!< scroll offset relative to scroll top (0) or nullopt if not scrolled into history
     ScrollOffset scrollOffset_;

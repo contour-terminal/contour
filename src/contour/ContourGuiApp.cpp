@@ -261,15 +261,15 @@ int ContourGuiApp::terminalGuiAction()
 
     switch (config_.renderingBackend)
     {
-    case config::RenderingBackend::OpenGL:
-        QGuiApplication::setAttribute(Qt::AA_UseSoftwareOpenGL, false);
-        break;
-    case config::RenderingBackend::Software:
-        QGuiApplication::setAttribute(Qt::AA_UseSoftwareOpenGL, true);
-        break;
-    case config::RenderingBackend::Default:
-        // Don't do anything.
-        break;
+        case config::RenderingBackend::OpenGL:
+            QGuiApplication::setAttribute(Qt::AA_UseSoftwareOpenGL, false);
+            break;
+        case config::RenderingBackend::Software:
+            QGuiApplication::setAttribute(Qt::AA_UseSoftwareOpenGL, true);
+            break;
+        case config::RenderingBackend::Default:
+            // Don't do anything.
+            break;
     }
 
     auto appName = QString::fromStdString(config_.profile(profileName())->wmClass);

@@ -154,7 +154,6 @@ struct TerminalState
     ScreenType screenType = ScreenType::Primary;
     Grid<Cell> primaryBuffer;
     Grid<Cell> alternateBuffer;
-    Grid<Cell>* activeGrid;
 
     // cursor related
     //
@@ -180,13 +179,12 @@ struct TerminalState
     std::stack<std::string> savedWindowTitles {};
 
     Sequencer sequencer;
-    parser::Parser<Sequencer> parser;
+    parser::Parser<Sequencer, false> parser;
     uint64_t instructionCounter = 0;
 
     InputGenerator inputGenerator {};
 
     char32_t precedingGraphicCharacter = {};
-    unicode::utf8_decoder_state utf8DecoderState = {};
     bool terminating = false;
 };
 

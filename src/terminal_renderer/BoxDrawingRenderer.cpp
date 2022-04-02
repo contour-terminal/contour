@@ -84,16 +84,16 @@ namespace detail
         {
             switch (lm)
             {
-            case NoLine: return "NoLine"sv;
-            case Light: return "Light"sv;
-            case Light2: return "Light2"sv;
-            case Light3: return "Light3"sv;
-            case Light4: return "Light4"sv;
-            case Double: return "Double"sv;
-            case Heavy: return "Heavy"sv;
-            case Heavy2: return "Heavy2"sv;
-            case Heavy3: return "Heavy3"sv;
-            case Heavy4: return "Heavy4"sv;
+                case NoLine: return "NoLine"sv;
+                case Light: return "Light"sv;
+                case Light2: return "Light2"sv;
+                case Light3: return "Light3"sv;
+                case Light4: return "Light4"sv;
+                case Double: return "Double"sv;
+                case Heavy: return "Heavy"sv;
+                case Heavy2: return "Heavy2"sv;
+                case Heavy3: return "Heavy3"sv;
+                case Heavy4: return "Heavy4"sv;
             }
             return "?"sv;
         }
@@ -323,13 +323,13 @@ namespace detail
 
                 switch (_a)
                 {
-                case detail::Light2: return pair { 2, Thickness::Light };
-                case detail::Light3: return pair { 3, Thickness::Light };
-                case detail::Light4: return pair { 4, Thickness::Light };
-                case detail::Heavy2: return pair { 2, Thickness::Heavy };
-                case detail::Heavy3: return pair { 3, Thickness::Heavy };
-                case detail::Heavy4: return pair { 4, Thickness::Heavy };
-                default: return nullopt;
+                    case detail::Light2: return pair { 2, Thickness::Light };
+                    case detail::Light3: return pair { 3, Thickness::Light };
+                    case detail::Light4: return pair { 4, Thickness::Light };
+                    case detail::Heavy2: return pair { 2, Thickness::Heavy };
+                    case detail::Heavy3: return pair { 3, Thickness::Heavy };
+                    case detail::Heavy4: return pair { 4, Thickness::Heavy };
+                    default: return nullopt;
                 }
             }
         };
@@ -826,28 +826,28 @@ namespace detail
             auto const y0 = [position]() {
                 switch (position / 32)
                 {
-                case 0:
-                    switch (position % 6)
-                    {
+                    case 0:
+                        switch (position % 6)
+                        {
+                            case 1:
+                            case 2: return 0;
+                            case 3:
+                            case 4: return 1;
+                            case 5:
+                            case 0: return 2;
+                        }
+                        break;
                     case 1:
-                    case 2: return 0;
-                    case 3:
-                    case 4: return 1;
-                    case 5:
-                    case 0: return 2;
-                    }
-                    break;
-                case 1:
-                    switch (position % 6)
-                    {
-                    case 1:
-                    case 2: return 2;
-                    case 3:
-                    case 4: return 1;
-                    case 5:
-                    case 0: return 0;
-                    }
-                    break;
+                        switch (position % 6)
+                        {
+                            case 1:
+                            case 2: return 2;
+                            case 3:
+                            case 4: return 1;
+                            case 5:
+                            case 0: return 0;
+                        }
+                        break;
                 }
                 Guarantee(false);
                 crispy::unreachable();
@@ -1060,454 +1060,462 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
     // TODO: just check notcurses-info to get an idea what may be missing
     switch (codepoint)
     {
-        // TODO: case 0x239B: // ⎛ LEFT PARENTHESIS UPPER HOOK
-        // TODO: case 0x239C: // ⎜ LEFT PARENTHESIS EXTENSION
-        // TODO: case 0x239D: // ⎝ LEFT PARENTHESIS LOWER HOOK
-        // TODO: case 0x239E: // ⎞ RIGHT PARENTHESIS UPPER HOOK
-        // TODO: case 0x239F: // ⎟ RIGHT PARENTHESIS EXTENSION
-        // TODO: case 0x23A0: // ⎠ RIGHT PARENTHESIS LOWER HOOK
+            // TODO: case 0x239B: // ⎛ LEFT PARENTHESIS UPPER HOOK
+            // TODO: case 0x239C: // ⎜ LEFT PARENTHESIS EXTENSION
+            // TODO: case 0x239D: // ⎝ LEFT PARENTHESIS LOWER HOOK
+            // TODO: case 0x239E: // ⎞ RIGHT PARENTHESIS UPPER HOOK
+            // TODO: case 0x239F: // ⎟ RIGHT PARENTHESIS EXTENSION
+            // TODO: case 0x23A0: // ⎠ RIGHT PARENTHESIS LOWER HOOK
 
-    case 0x23A1: // ⎡ LEFT SQUARE BRACKET UPPER CORNER
-        return blockElement(size) | (left(1 / 8_th) + upper(1 / 8_th) * left(1 / 2_th));
-    case 0x23A2: // ⎢ LEFT SQUARE BRACKET EXTENSION
-        return blockElement(size) | left(1 / 8_th);
-    case 0x23A3: // ⎣ LEFT SQUARE BRACKET LOWER CORNER
-        return blockElement(size) | (left(1 / 8_th) + lower(1 / 8_th) * left(1 / 2_th));
-    case 0x23A4: // ⎤ RIGHT SQUARE BRACKET UPPER CORNER
-        return blockElement(size) | (right(1 / 8_th) + upper(1 / 8_th) * right(1 / 2_th));
-    case 0x23A5: // ⎥ RIGHT SQUARE BRACKET EXTENSION
-        return blockElement(size) | right(1 / 8_th);
-    case 0x23A6: // ⎦ RIGHT SQUARE BRACKET LOWER CORNER
-        return blockElement(size) | (right(1 / 8_th) + lower(1 / 8_th) * right(1 / 2_th));
+        case 0x23A1: // ⎡ LEFT SQUARE BRACKET UPPER CORNER
+            return blockElement(size) | (left(1 / 8_th) + upper(1 / 8_th) * left(1 / 2_th));
+        case 0x23A2: // ⎢ LEFT SQUARE BRACKET EXTENSION
+            return blockElement(size) | left(1 / 8_th);
+        case 0x23A3: // ⎣ LEFT SQUARE BRACKET LOWER CORNER
+            return blockElement(size) | (left(1 / 8_th) + lower(1 / 8_th) * left(1 / 2_th));
+        case 0x23A4: // ⎤ RIGHT SQUARE BRACKET UPPER CORNER
+            return blockElement(size) | (right(1 / 8_th) + upper(1 / 8_th) * right(1 / 2_th));
+        case 0x23A5: // ⎥ RIGHT SQUARE BRACKET EXTENSION
+            return blockElement(size) | right(1 / 8_th);
+        case 0x23A6: // ⎦ RIGHT SQUARE BRACKET LOWER CORNER
+            return blockElement(size) | (right(1 / 8_th) + lower(1 / 8_th) * right(1 / 2_th));
 
-    // TODO: case 0x23A7: // ⎧ LEFT CURLY BRACKET UPPER HOOK
-    // TODO: case 0x23A8: // ⎨ LEFT CURLY BRACKET MIDDLE PIECE
-    // TODO: case 0x23A9: // ⎩ LEFT CURLY BRACKET LOWER HOOK
-    // TODO: case 0x23AA: // ⎪ CURLY BRACKET EXTENSION
-    // TODO: case 0x23AB: // ⎫ RIGHT CURLY BRACKET UPPER HOOK
-    // TODO: case 0x23AC: // ⎬ RIGHT CURLY BRACKET MIDDLE PIECE
-    // TODO: case 0x23AD: // ⎭ RIGHT CURLY BRACKET LOWER HOOK
-    // TODO: case 0x23AE: // ⎮ INTEGRAL EXTENSION
-    // TODO: case 0x23AF: // ⎯ HORIZONTAL LINE EXTENSION
-    // TODO: case 0x23B0: // ⎰ UPPER LEFT OR LOWER RIGHT CURLY BRACKET SECTION
-    // TODO: case 0x23B1: // ⎱ UPPER RIGHT OR LOWER LEFT CURLY BRACKET SECTION
-    // TODO: case 0x23B2: // ⎲ SUMMATION TOP
-    // TODO: case 0x23B3: // ⎳ SUMMATION BOTTOM
+        // TODO: case 0x23A7: // ⎧ LEFT CURLY BRACKET UPPER HOOK
+        // TODO: case 0x23A8: // ⎨ LEFT CURLY BRACKET MIDDLE PIECE
+        // TODO: case 0x23A9: // ⎩ LEFT CURLY BRACKET LOWER HOOK
+        // TODO: case 0x23AA: // ⎪ CURLY BRACKET EXTENSION
+        // TODO: case 0x23AB: // ⎫ RIGHT CURLY BRACKET UPPER HOOK
+        // TODO: case 0x23AC: // ⎬ RIGHT CURLY BRACKET MIDDLE PIECE
+        // TODO: case 0x23AD: // ⎭ RIGHT CURLY BRACKET LOWER HOOK
+        // TODO: case 0x23AE: // ⎮ INTEGRAL EXTENSION
+        // TODO: case 0x23AF: // ⎯ HORIZONTAL LINE EXTENSION
+        // TODO: case 0x23B0: // ⎰ UPPER LEFT OR LOWER RIGHT CURLY BRACKET SECTION
+        // TODO: case 0x23B1: // ⎱ UPPER RIGHT OR LOWER LEFT CURLY BRACKET SECTION
+        // TODO: case 0x23B2: // ⎲ SUMMATION TOP
+        // TODO: case 0x23B3: // ⎳ SUMMATION BOTTOM
 
-    // {{{ 2580..259F block elements
-    case 0x2580: return blockElement(size) | upper(1 / 2_th); // ▀ UPPER HALF BLOCK
-    case 0x2581: return blockElement(size) | lower(1 / 8_th); // ▁ LOWER ONE EIGHTH BLOCK
-    case 0x2582: return blockElement(size) | lower(1 / 4_th); // ▂ LOWER ONE QUARTER BLOCK
-    case 0x2583: return blockElement(size) | lower(3 / 8_th); // ▃ LOWER THREE EIGHTHS BLOCK
-    case 0x2584: return blockElement(size) | lower(1 / 2_th); // ▄ LOWER HALF BLOCK
-    case 0x2585: return blockElement(size) | lower(5 / 8_th); // ▅ LOWER FIVE EIGHTHS BLOCK
-    case 0x2586: return blockElement(size) | lower(3 / 4_th); // ▆ LOWER THREE QUARTERS BLOCK
-    case 0x2587: return blockElement(size) | lower(7 / 8_th); // ▇ LOWER SEVEN EIGHTHS BLOCK
-    case 0x2588: return blockElement(size) | lower(1 / 1_th); // █ FULL BLOCK
-    case 0x2589: return blockElement(size) | left(7 / 8_th);  // ▉ LEFT SEVEN EIGHTHS BLOCK
-    case 0x258A: return blockElement(size) | left(3 / 4_th);  // ▊ LEFT THREE QUARTERS BLOCK
-    case 0x258B: return blockElement(size) | left(5 / 8_th);  // ▋ LEFT FIVE EIGHTHS BLOCK
-    case 0x258C: return blockElement(size) | left(1 / 2_th);  // ▌ LEFT HALF BLOCK
-    case 0x258D: return blockElement(size) | left(3 / 8_th);  // ▍ LEFT THREE EIGHTHS BLOCK
-    case 0x258E: return blockElement(size) | left(1 / 4_th);  // ▎ LEFT ONE QUARTER BLOCK
-    case 0x258F: return blockElement(size) | left(1 / 8_th);  // ▏ LEFT ONE EIGHTH BLOCK
-    case 0x2590:
-        return blockElement(size) | right(1 / 2_th); // ▐ RIGHT HALF BLOCK
-    // ░ TODO case 0x2591:
-    // ▒ TODO case 0x2592:
-    // ▓ TODO case 0x2593:
-    case 0x2594: return blockElement(size) | upper(1 / 8_th); // ▔  UPPER ONE EIGHTH BLOCK
-    case 0x2595: return blockElement(size) | right(1 / 8_th); // ▕  RIGHT ONE EIGHTH BLOCK
-    case 0x2596:                                              // ▖  QUADRANT LOWER LEFT
-        return blockElement(size) | (lower(1 / 2_th) * left(1 / 2_th));
-    case 0x2597: // ▗  QUADRANT LOWER RIGHT
-        return blockElement(size) | (lower(1 / 2_th) * right(1 / 2_th));
-    case 0x2598: // ▘  QUADRANT UPPER LEFT
-        return blockElement(size) | left(1 / 2_th) * upper(1 / 2_th);
-    case 0x2599: // ▙  QUADRANT UPPER LEFT AND LOWER LEFT AND LOWER RIGHT
-        return blockElement(size) | (left(1 / 2_th) * upper(1 / 2_th) + lower(1 / 2_th));
-    case 0x259A: // ▚  QUADRANT UPPER LEFT AND LOWER RIGHT
-        return blockElement(size) | (upper(1 / 2_th) * left(1 / 2_th) + lower(1 / 2_th) * right(1 / 2_th));
-    case 0x259B: // ▛  QUADRANT UPPER LEFT AND UPPER RIGHT AND LOWER LEFT
-        return blockElement(size) | (upper(1 / 2_th) + lower(1 / 2_th) * left(1 / 2_th));
-    case 0x259C: // ▜  QUADRANT UPPER LEFT AND UPPER RIGHT AND LOWER RIGHT
-        return blockElement(size) | (upper(1 / 2_th) + lower(1 / 2_th) * right(1 / 2_th));
-    case 0x259D: // ▝  QUADRANT UPPER RIGHT
-        return blockElement(size) | (upper(1 / 2_th) * right(1 / 2_th));
-    case 0x259E: // ▞  QUADRANT UPPER RIGHT AND LOWER LEFT
-        return blockElement(size) | (upper(1 / 2_th) * right(1 / 2_th) + lower(1 / 2_th) * left(1 / 2_th));
-    case 0x259F: // ▟  QUADRANT UPPER RIGHT AND LOWER LEFT AND LOWER RIGHT
-        return blockElement(size) | (upper(1 / 2_th) * right(1 / 2_th) + lower(1 / 2_th));
-    // TODO: ■  U+25A0  BLACK SQUARE
-    // TODO: □  U+25A1  WHITE SQUARE
-    // TODO: ▢  U+25A2  WHITE SQUARE WITH ROUNDED CORNERS
-    // TODO: ▣  U+25A3  WHITE SQUARE CONTAINING BLACK SMALL SQUARE
-    // TODO: ▤  U+25A4  SQUARE WITH HORIZONTAL FILL
-    // TODO: ▥  U+25A5  SQUARE WITH VERTICAL FILL
-    // TODO: ▦  U+25A6  SQUARE WITH ORTHOGONAL CROSSHATCH FILL
-    // TODO: ▧  U+25A7  SQUARE WITH UPPER LEFT TO LOWER RIGHT FILL
-    // TODO: ▨  U+25A8  SQUARE WITH UPPER RIGHT TO LOWER LEFT FILL
-    // TODO: ▩  U+25A9  SQUARE WITH DIAGONAL CROSSHATCH FILL
-    // TODO: ▪  U+25AA  BLACK SMALL SQUARE
-    // TODO: ▫  U+25AB  WHITE SMALL SQUARE
-    // TODO: ▬  U+25AC  BLACK RECTANGLE
-    // TODO: ▭  U+25AD  WHITE RECTANGLE
-    // TODO: ▮  U+25AE  BLACK VERTICAL RECTANGLE
-    // TODO: ▯  U+25AF  WHITE VERTICAL RECTANGLE
-    // TODO: ▰  U+25B0  BLACK PARALLELOGRAM
-    // TODO: ▱  U+25B1  WHITE PARALLELOGRAM
-    // TODO: ▲  U+25B2  BLACK UP-POINTING TRIANGLE
-    // TODO: △  U+25B3  WHITE UP-POINTING TRIANGLE
-    // TODO: ▴  U+25B4  BLACK UP-POINTING SMALL TRIANGLE
-    // TODO: ▵  U+25B5  WHITE UP-POINTING SMALL TRIANGLE
-    // TODO: ▶  U+25B6  BLACK RIGHT-POINTING TRIANGLE
-    // TODO: ▷  U+25B7  WHITE RIGHT-POINTING TRIANGLE
-    // TODO: ▸  U+25B8  BLACK RIGHT-POINTING SMALL TRIANGLE
-    // TODO: ▹  U+25B9  WHITE RIGHT-POINTING SMALL TRIANGLE
-    // TODO: ►  U+25BA  BLACK RIGHT-POINTING POINTER
-    // TODO: ▻  U+25BB  WHITE RIGHT-POINTING POINTER
-    // TODO: ▼  U+25BC  BLACK DOWN-POINTING TRIANGLE
-    // TODO: ▽  U+25BD  WHITE DOWN-POINTING TRIANGLE
-    // TODO: ▾  U+25BE  BLACK DOWN-POINTING SMALL TRIANGLE
-    // TODO: ▿  U+25BF  WHITE DOWN-POINTING SMALL TRIANGLE
-    // TODO: ◀  U+25C0  BLACK LEFT-POINTING TRIANGLE
-    // TODO: ◁  U+25C1  WHITE LEFT-POINTING TRIANGLE
-    // TODO: ◂  U+25C2  BLACK LEFT-POINTING SMALL TRIANGLE
-    // TODO: ◃  U+25C3  WHITE LEFT-POINTING SMALL TRIANGLE
-    // TODO: ◄  U+25C4  BLACK LEFT-POINTING POINTER
-    // TODO: ◅  U+25C5  WHITE LEFT-POINTING POINTER
-    // TODO: ◆  U+25C6  BLACK DIAMOND
-    // TODO: ◇  U+25C7  WHITE DIAMOND
-    // TODO: ◈  U+25C8  WHITE DIAMOND CONTAINING BLACK SMALL DIAMOND
-    // TODO: ◉  U+25C9  FISHEYE
-    // TODO: ◊  U+25CA  LOZENGE
-    // TODO: ○  U+25CB  WHITE CIRCLE
-    // TODO: ◌  U+25CC  DOTTED CIRCLE
-    // TODO: ◍  U+25CD  CIRCLE WITH VERTICAL FILL
-    // TODO: ◎  U+25CE  BULLSEYE
-    // TODO: ●  U+25CF  BLACK CIRCLE
-    // TODO: ◐  U+25D0  CIRCLE WITH LEFT HALF BLACK
-    // TODO: ◑  U+25D1  CIRCLE WITH RIGHT HALF BLACK
-    // TODO: ◒  U+25D2  CIRCLE WITH LOWER HALF BLACK
-    // TODO: ◓  U+25D3  CIRCLE WITH UPPER HALF BLACK
-    // TODO: ◔  U+25D4  CIRCLE WITH UPPER RIGHT QUADRANT BLACK
-    // TODO: ◕  U+25D5  CIRCLE WITH ALL BUT UPPER LEFT QUADRANT BLACK
-    // TODO: ◖  U+25D6  LEFT HALF BLACK CIRCLE
-    // TODO: ◗  U+25D7  RIGHT HALF BLACK CIRCLE
-    // TODO: ◘  U+25D8  INVERSE BULLET
-    // TODO: ◙  U+25D9  INVERSE WHITE CIRCLE
-    // TODO: ◚  U+25DA  UPPER HALF INVERSE WHITE CIRCLE
-    // TODO: ◛  U+25DB  LOWER HALF INVERSE WHITE CIRCLE
-    // TODO: ◜  U+25DC  UPPER LEFT QUADRANT CIRCULAR ARC
-    // TODO: ◝  U+25DD  UPPER RIGHT QUADRANT CIRCULAR ARC
-    // TODO: ◞  U+25DE  LOWER RIGHT QUADRANT CIRCULAR ARC
-    // TODO: ◟  U+25DF  LOWER LEFT QUADRANT CIRCULAR ARC
-    // TODO: ◠  U+25E0  UPPER HALF CIRCLE
-    // TODO: ◡  U+25E1  LOWER HALF CIRCLE
-    // TODO: ◢  U+25E2  BLACK LOWER RIGHT TRIANGLE
-    // TODO: ◣  U+25E3  BLACK LOWER LEFT TRIANGLE
-    // TODO: ◤  U+25E4  BLACK UPPER LEFT TRIANGLE
-    // TODO: ◥  U+25E5  BLACK UPPER RIGHT TRIANGLE
-    // TODO: ◦  U+25E6  WHITE BULLET
-    // TODO: ◧  U+25E7  SQUARE WITH LEFT HALF BLACK
-    // TODO: ◨  U+25E8  SQUARE WITH RIGHT HALF BLACK
-    // TODO: ◩  U+25E9  SQUARE WITH UPPER LEFT DIAGONAL HALF BLACK
-    // TODO: ◪  U+25EA  SQUARE WITH LOWER RIGHT DIAGONAL HALF BLACK
-    // TODO: ◫  U+25EB  WHITE SQUARE WITH VERTICAL BISECTING LINE
-    // TODO: ◬  U+25EC  WHITE UP-POINTING TRIANGLE WITH DOT
-    // TODO: ◭  U+25ED  UP-POINTING TRIANGLE WITH LEFT HALF BLACK
-    // TODO: ◮  U+25EE  UP-POINTING TRIANGLE WITH RIGHT HALF BLACK
-    // TODO: ◯  U+25EF  LARGE CIRCLE
-    // TODO: ◰  U+25F0  WHITE SQUARE WITH UPPER LEFT QUADRANT
-    // TODO: ◱  U+25F1  WHITE SQUARE WITH LOWER LEFT QUADRANT
-    // TODO: ◲  U+25F2  WHITE SQUARE WITH LOWER RIGHT QUADRANT
-    // TODO: ◳  U+25F3  WHITE SQUARE WITH UPPER RIGHT QUADRANT
-    // TODO: ◴  U+25F4  WHITE CIRCLE WITH UPPER LEFT QUADRANT
-    // TODO: ◵  U+25F5  WHITE CIRCLE WITH LOWER LEFT QUADRANT
-    // TODO: ◶  U+25F6  WHITE CIRCLE WITH LOWER RIGHT QUADRANT
-    // TODO: ◷  U+25F7  WHITE CIRCLE WITH UPPER RIGHT QUADRANT
-    // TODO: ◸  U+25F8  UPPER LEFT TRIANGLE
-    // TODO: ◹  U+25F9  UPPER RIGHT TRIANGLE
-    // TODO: ◺  U+25FA  LOWER LEFT TRIANGLE
-    // TODO: ◻  U+25FB  WHITE MEDIUM SQUARE
-    // TODO: ◼  U+25FC  BLACK MEDIUM SQUARE
-    // TODO: ◽ U+25FD  WHITE MEDIUM SMALL SQUARE
-    // TODO: ◾ U+25FE  BLACK MEDIUM SMALL SQUARE
-    // TODO: ◿  U+25FF  LOWER RIGHT TRIANGLE
-    // }}}
-    // {{{ 1FB00..1FB3B sextant blocks
-    case 0x1FB00: return blockSextant(size, 1);             // 🬀  BLOCK SEXTANT-1
-    case 0x1FB01: return blockSextant(size, 2);             // 🬁  BLOCK SEXTANT-2
-    case 0x1FB02: return blockSextant(size, 1, 2);          // 🬂  BLOCK SEXTANT-12
-    case 0x1FB03: return blockSextant(size, 3);             // 🬃  BLOCK SEXTANT-3
-    case 0x1FB04: return blockSextant(size, 1, 3);          // 🬄  BLOCK SEXTANT-13
-    case 0x1FB05: return blockSextant(size, 2, 3);          // 🬅  BLOCK SEXTANT-23
-    case 0x1FB06: return blockSextant(size, 1, 2, 3);       // 🬆  BLOCK SEXTANT-123
-    case 0x1FB07: return blockSextant(size, 4);             // 🬇  BLOCK SEXTANT-4
-    case 0x1FB08: return blockSextant(size, 1, 4);          // 🬈  BLOCK SEXTANT-14
-    case 0x1FB09: return blockSextant(size, 2, 4);          // 🬉  BLOCK SEXTANT-24
-    case 0x1FB0A: return blockSextant(size, 1, 2, 4);       // 🬊  BLOCK SEXTANT-124
-    case 0x1FB0B: return blockSextant(size, 3, 4);          // 🬋  BLOCK SEXTANT-34
-    case 0x1FB0C: return blockSextant(size, 1, 3, 4);       // 🬌  BLOCK SEXTANT-134
-    case 0x1FB0D: return blockSextant(size, 2, 3, 4);       // 🬍  BLOCK SEXTANT-234
-    case 0x1FB0E: return blockSextant(size, 1, 2, 3, 4);    // 🬎  BLOCK SEXTANT-1234
-    case 0x1FB0F: return blockSextant(size, 5);             // 🬏  BLOCK SEXTANT-5
-    case 0x1FB10: return blockSextant(size, 1, 5);          // 🬐  BLOCK SEXTANT-15
-    case 0x1FB11: return blockSextant(size, 2, 5);          // 🬑  BLOCK SEXTANT-25
-    case 0x1FB12: return blockSextant(size, 1, 2, 5);       // 🬒  BLOCK SEXTANT-125
-    case 0x1FB13: return blockSextant(size, 3, 5);          // 🬓  BLOCK SEXTANT-35
-    case 0x1FB14: return blockSextant(size, 2, 3, 5);       // 🬔  BLOCK SEXTANT-235
-    case 0x1FB15: return blockSextant(size, 1, 2, 3, 5);    // 🬕  BLOCK SEXTANT-1235
-    case 0x1FB16: return blockSextant(size, 4, 5);          // 🬖  BLOCK SEXTANT-45
-    case 0x1FB17: return blockSextant(size, 1, 4, 5);       // 🬗  BLOCK SEXTANT-145
-    case 0x1FB18: return blockSextant(size, 2, 4, 5);       // 🬘  BLOCK SEXTANT-245
-    case 0x1FB19: return blockSextant(size, 1, 2, 4, 5);    // 🬙  BLOCK SEXTANT-1245
-    case 0x1FB1A: return blockSextant(size, 3, 4, 5);       // 🬚  BLOCK SEXTANT-345
-    case 0x1FB1B: return blockSextant(size, 1, 3, 4, 5);    // 🬛  BLOCK SEXTANT-1345
-    case 0x1FB1C: return blockSextant(size, 2, 3, 4, 5);    // 🬜  BLOCK SEXTANT-2345
-    case 0x1FB1D: return blockSextant(size, 1, 2, 3, 4, 5); // 🬝  BLOCK SEXTANT-12345
-    case 0x1FB1E: return blockSextant(size, 6);             // 🬞  BLOCK SEXTANT-6
-    case 0x1FB1F: return blockSextant(size, 1, 6);          // 🬟  BLOCK SEXTANT-16
-    case 0x1FB20: return blockSextant(size, 2, 6);          // 🬠  BLOCK SEXTANT-26
-    case 0x1FB21: return blockSextant(size, 1, 2, 6);       // 🬡  BLOCK SEXTANT-126
-    case 0x1FB22: return blockSextant(size, 3, 6);          // 🬢  BLOCK SEXTANT-36
-    case 0x1FB23: return blockSextant(size, 1, 3, 6);       // 🬣  BLOCK SEXTANT-136
-    case 0x1FB24: return blockSextant(size, 2, 3, 6);       // 🬤  BLOCK SEXTANT-236
-    case 0x1FB25: return blockSextant(size, 1, 2, 3, 6);    // 🬥  BLOCK SEXTANT-1236
-    case 0x1FB26: return blockSextant(size, 4, 6);          // 🬦  BLOCK SEXTANT-46
-    case 0x1FB27: return blockSextant(size, 1, 4, 6);       // 🬧  BLOCK SEXTANT-146
-    case 0x1FB28: return blockSextant(size, 1, 2, 4, 6);    // 🬨  BLOCK SEXTANT-1246
-    case 0x1FB29: return blockSextant(size, 3, 4, 6);       // 🬩  BLOCK SEXTANT-346
-    case 0x1FB2A: return blockSextant(size, 1, 3, 4, 6);    // 🬪  BLOCK SEXTANT-1346
-    case 0x1FB2B: return blockSextant(size, 2, 3, 4, 6);    // 🬫  BLOCK SEXTANT-2346
-    case 0x1FB2C: return blockSextant(size, 1, 2, 3, 4, 6); // 🬬  BLOCK SEXTANT-12346
-    case 0x1FB2D: return blockSextant(size, 5, 6);          // 🬭  BLOCK SEXTANT-56
-    case 0x1FB2E: return blockSextant(size, 1, 5, 6);       // 🬮  BLOCK SEXTANT-156
-    case 0x1FB2F: return blockSextant(size, 2, 5, 6);       // 🬯  BLOCK SEXTANT-256
-    case 0x1FB30: return blockSextant(size, 1, 2, 5, 6);    // 🬰  BLOCK SEXTANT-1256
-    case 0x1FB31: return blockSextant(size, 3, 5, 6);       // 🬱  BLOCK SEXTANT-356
-    case 0x1FB32: return blockSextant(size, 1, 3, 5, 6);    // 🬲  BLOCK SEXTANT-1356
-    case 0x1FB33: return blockSextant(size, 2, 3, 5, 6);    // 🬳  BLOCK SEXTANT-2356
-    case 0x1FB34: return blockSextant(size, 1, 2, 3, 5, 6); // 🬴  BLOCK SEXTANT-12356
-    case 0x1FB35: return blockSextant(size, 4, 5, 6);       // 🬵  BLOCK SEXTANT-456
-    case 0x1FB36: return blockSextant(size, 1, 4, 5, 6);    // 🬶  BLOCK SEXTANT-1456
-    case 0x1FB37: return blockSextant(size, 2, 4, 5, 6);    // 🬷  BLOCK SEXTANT-2456
-    case 0x1FB38: return blockSextant(size, 1, 2, 4, 5, 6); // 🬸  BLOCK SEXTANT-12456
-    case 0x1FB39: return blockSextant(size, 3, 4, 5, 6);    // 🬹  BLOCK SEXTANT-3456
-    case 0x1FB3A: return blockSextant(size, 1, 3, 4, 5, 6); // 🬺  BLOCK SEXTANT-13456
-    case 0x1FB3B:
-        return blockSextant(size, 2, 3, 4, 5, 6); // 🬻  BLOCK SEXTANT-23456
-    // }}}
-    // {{{ 1FB3C..1FBAF diagonals, nth, block elements
-    case 0x1FB3C: return /* 🬼  */ ld({ 0, 3 / 4_th }, { 1 / 4_th, 1 });
-    case 0x1FB3D: return /* 🬽  */ ld({ 0, 3 / 4_th }, { 1, 1 });
-    case 0x1FB3E: return /* 🬾  */ ld({ 0, 1 / 4_th }, { 1 / 2_th, 1 });
-    case 0x1FB3F: return /* 🬿  */ ld({ 0, 1 / 4_th }, { 1, 1 });
-    case 0x1FB40: return /* 🭀  */ ld({ 0, 0 }, { 1 / 2_th, 1 });
-    case 0x1FB41: return /* 🭁  */ ld({ 0, 1 / 4_th }, { 1 / 2_th, 0 });
-    case 0x1FB42: return /* 🭂  */ ld({ 0, 1 / 4_th }, { 1, 0 });
-    case 0x1FB43: return /* 🭃  */ ld({ 0, 3 / 4_th }, { 1 / 2_th, 0 });
-    case 0x1FB44: return /* 🭄  */ ld({ 0, 3 / 4_th }, { 1, 0 });
-    case 0x1FB45: return /* 🭅  */ ld({ 0, 1 }, { 1 / 2_th, 0 });
-    case 0x1FB46: return /* 🭆  */ ld({ 0, 3 / 4_th }, { 1, 1 / 4_th });
-    case 0x1FB47: return /* 🭇  */ ld({ 3 / 4_th, 1 }, { 1, 3 / 4_th });
-    case 0x1FB48: return /* 🭈  */ ld({ 0, 1 }, { 1, 3 / 4_th });
-    case 0x1FB49: return /* 🭉  */ ld({ 1 / 2_th, 1 }, { 1, 1 / 4_th });
-    case 0x1FB4A: return /* 🭊  */ ld({ 0, 1 }, { 1, 1 / 4_th });
-    case 0x1FB4B: return /* 🭋  */ ld({ 1 / 2_th, 1 }, { 1, 0 });
-    case 0x1FB4C: return /* 🭌  */ ld({ 1 / 2_th, 0 }, { 1, 1 / 4_th });
-    case 0x1FB4D: return /* 🭍  */ ld({ 0, 0 }, { 1, 1 / 4_th });
-    case 0x1FB4E: return /* 🭎  */ ld({ 1 / 2_th, 0 }, { 1, 3 / 4_th });
-    case 0x1FB4F: return /* 🭏  */ ld({ 0, 0 }, { 1, 3 / 4_th });
-    case 0x1FB50: return /* 🭐  */ ld({ 1 / 2_th, 0 }, { 1, 1 });
-    case 0x1FB51: return /* 🭑  */ ld({ 0, 1 / 4_th }, { 1, 3 / 4_th });
-    case 0x1FB52: return /* 🭒  */ ud({ 0, 3 / 4_th }, { 1 / 2_th, 1 });
-    case 0x1FB53: return /* 🭓  */ ud({ 0, 3 / 4_th }, { 1, 1 });
-    case 0x1FB54: return /* 🭔  */ ud({ 0, 1 / 4_th }, { 1 / 2_th, 1 });
-    case 0x1FB55: return /* 🭕  */ ud({ 0, 1 / 4_th }, { 1, 1 }); // XXX
-    case 0x1FB56: return /* 🭖  */ ud({ 0, 0 }, { 1 / 2_th, 1 });
-    case 0x1FB57: return /* 🭗  */ ud({ 0, 1 / 4_th }, { 1 / 4_th, 0 });
-    case 0x1FB58: return /* 🭘  */ ud({ 0, 1 / 4_th }, { 1, 0 });
-    case 0x1FB59: return /* 🭙  */ ud({ 0, 3 / 4_th }, { 1 / 2_th, 0 });
-    case 0x1FB5A: return /* 🭚  */ ud({ 0, 3 / 4_th }, { 1, 0 });
-    case 0x1FB5B: return /* 🭛  */ ud({ 0, 1 }, { 1 / 2_th, 0 });
-    case 0x1FB5C: return /* 🭜  */ ud({ 0, 3 / 4_th }, { 1, 1 / 4_th });
-    case 0x1FB5D: return /* 🭝  */ ud({ 1 / 2_th, 1 }, { 1, 3 / 4_th });
-    case 0x1FB5E: return /* 🭞  */ ud({ 0, 1 }, { 1, 3 / 4_th });
-    case 0x1FB5F: return /* 🭟  */ ud({ 1 / 2_th, 1 }, { 1, 1 / 4_th });
-    case 0x1FB60: return /* 🭠  */ ud({ 0, 1 }, { 1, .25 });
-    case 0x1FB61: return /* 🭡  */ ud({ 1 / 2_th, 1 }, { 1, 0 });
-    case 0x1FB62: return /* 🭢  */ ud({ 3 / 4_th, 0 }, { 1, 1 / 4_th });
-    case 0x1FB63: return /* 🭣  */ ud({ 0, 0 }, { 1, 1 / 4_th });
-    case 0x1FB64: return /* 🭤  */ ud({ 1 / 2_th, 0 }, { 1, 3 / 4_th });
-    case 0x1FB65: return /* 🭥  */ ud({ 0, 0 }, { 1, 3 / 4_th });
-    case 0x1FB66: return /* 🭦  */ ud({ 1 / 2_th, 0 }, { 1, 1 });
-    case 0x1FB67: return /* 🭧  */ ud({ 0, 1 / 4_th }, { 1, 3 / 4_th });
-    case 0x1FB68: return /* 🭨  */ triangle<Dir::Left, Inverted::Yes>(size);
-    case 0x1FB69: return /* 🭩  */ triangle<Dir::Top, Inverted::Yes>(size);
-    case 0x1FB6A: return /* 🭪  */ triangle<Dir::Right, Inverted::Yes>(size);
-    case 0x1FB6B: return /* 🭫  */ triangle<Dir::Bottom, Inverted::Yes>(size);
-    case 0x1FB6C: return /* 🭬  */ triangle<Dir::Left, Inverted::No>(size);
-    case 0x1FB6D: return /* 🭭  */ triangle<Dir::Top, Inverted::No>(size);
-    case 0x1FB6E: return /* 🭮  */ triangle<Dir::Right, Inverted::No>(size);
-    case 0x1FB6F: return /* 🭯  */ triangle<Dir::Bottom, Inverted::No>(size);
-    case 0x1FB70: return blockElement(size) | vert_nth(1 / 8_th, 2);  // 🭰  VERTICAL ONE EIGHTH BLOCK-2
-    case 0x1FB71: return blockElement(size) | vert_nth(1 / 8_th, 3);  // 🭱  VERTICAL ONE EIGHTH BLOCK-3
-    case 0x1FB72: return blockElement(size) | vert_nth(1 / 8_th, 4);  // 🭲  VERTICAL ONE EIGHTH BLOCK-4
-    case 0x1FB73: return blockElement(size) | vert_nth(1 / 8_th, 5);  // 🭳  VERTICAL ONE EIGHTH BLOCK-5
-    case 0x1FB74: return blockElement(size) | vert_nth(1 / 8_th, 6);  // 🭴  VERTICAL ONE EIGHTH BLOCK-6
-    case 0x1FB75: return blockElement(size) | vert_nth(1 / 8_th, 7);  // 🭵  VERTICAL ONE EIGHTH BLOCK-7
-    case 0x1FB76: return blockElement(size) | horiz_nth(1 / 8_th, 2); // 🭶  HORIZONTAL ONE EIGHTH BLOCK-2
-    case 0x1FB77: return blockElement(size) | horiz_nth(1 / 8_th, 3); // 🭷  HORIZONTAL ONE EIGHTH BLOCK-3
-    case 0x1FB78: return blockElement(size) | horiz_nth(1 / 8_th, 4); // 🭸  HORIZONTAL ONE EIGHTH BLOCK-4
-    case 0x1FB79: return blockElement(size) | horiz_nth(1 / 8_th, 5); // 🭹  HORIZONTAL ONE EIGHTH BLOCK-5
-    case 0x1FB7A: return blockElement(size) | horiz_nth(1 / 8_th, 6); // 🭺  HORIZONTAL ONE EIGHTH BLOCK-6
-    case 0x1FB7B: return blockElement(size) | horiz_nth(1 / 8_th, 7); // 🭻  HORIZONTAL ONE EIGHTH BLOCK-7
-    case 0x1FB7C:
-        return blockElement(size)
-               | (left(1 / 8_th) + lower(1 / 8_th)); // 🭼  LEFT AND LOWER ONE EIGHTH BLOCK
-    case 0x1FB7D:
-        return blockElement(size)
-               | (left(1 / 8_th) + upper(1 / 8_th)); // 🭽  LEFT AND UPPER ONE EIGHTH BLOCK
-    case 0x1FB7E:
-        return blockElement(size)
-               | (right(1 / 8_th) + upper(1 / 8_th)); // 🭾  RIGHT AND UPPER ONE EIGHTH BLOCK
-    case 0x1FB7F:
-        return blockElement(size)
-               | (right(1 / 8_th) + lower(1 / 8_th)); // 🭿  RIGHT AND LOWER ONE EIGHTH BLOCK
-    case 0x1FB80:
-        return blockElement(size)
-               | (upper(1 / 8_th) + lower(1 / 8_th)); // 🮀  UPPER AND LOWER ONE EIGHTH BLOCK
-    case 0x1FB81:
-        return blockElement(size)
-               | (horiz_nth(1 / 8_th, 1) // 🮁  HORIZONTAL ONE EIGHTH BLOCK-1358
-                  + horiz_nth(1 / 8_th, 3) + horiz_nth(1 / 8_th, 5) + horiz_nth(1 / 8_th, 7));
-    case 0x1FB82: return blockElement(size) | upper(1 / 4_th); // 🮂  UPPER ONE QUARTER BLOCK
-    case 0x1FB83: return blockElement(size) | upper(3 / 8_th); // 🮃  UPPER THREE EIGHTHS BLOCK
-    case 0x1FB84: return blockElement(size) | upper(5 / 8_th); // 🮄  UPPER FIVE EIGHTHS BLOCK
-    case 0x1FB85: return blockElement(size) | upper(3 / 4_th); // 🮅  UPPER THREE QUARTERS BLOCK
-    case 0x1FB86: return blockElement(size) | upper(7 / 8_th); // 🮆  UPPER SEVEN EIGHTHS BLOCK
-    case 0x1FB87: return blockElement(size) | right(1 / 4_th); // 🮇  RIGHT ONE QUARTER BLOCK
-    case 0x1FB88: return blockElement(size) | right(3 / 8_th); // 🮈  RIGHT THREE EIGHTHS BLOCK
-    case 0x1FB89: return blockElement(size) | right(5 / 8_th); // 🮉  RIGHT FIVE EIGHTHS BLOCK
-    case 0x1FB8A: return blockElement(size) | right(3 / 4_th); // 🮊  RIGHT THREE QUARTERS BLOCK
-    case 0x1FB8B: return blockElement(size) | right(7 / 8_th); // 🮋  RIGHT SEVEN EIGHTHS BLOCK
-    case 0x1FB8C: return blockElement<1>(size, checker<4, Inverted::No>(size)) | left(1 / 2_th);
-    case 0x1FB8D: return blockElement<1>(size, checker<4, Inverted::No>(size)) | right(1 / 2_th);
-    case 0x1FB8E: return blockElement<1>(size, checker<4, Inverted::No>(size)) | upper(1 / 2_th);
-    case 0x1FB8F: return blockElement<1>(size, checker<4, Inverted::No>(size)) | lower(1 / 2_th);
-    case 0x1FB90: return blockElement<1>(size, checker<4, Inverted::No>(size)).fill();
-    case 0x1FB91:
-        return blockElement<1>(size).fill([size](int x, int y) {
-            return y <= unbox<int>(size.height) / 2 ? 0xFF : checker<4, Inverted::No>(size)(x, y);
-        });
-    case 0x1FB92:
-        return blockElement<1>(size).fill([size](int x, int y) {
-            return y >= unbox<int>(size.height) / 2 ? 0xFF : checker<4, Inverted::No>(size)(x, y);
-        });
-    case 0x1FB93: break; // not assigned
-    case 0x1FB94:
-        return blockElement<1>(size).fill([size](int x, int y) {
-            return x >= unbox<int>(size.width) / 2 ? 0xFF : checker<4, Inverted::No>(size)(x, y);
-        });
-    case 0x1FB95: return blockElement<1>(size).fill(checker<8, Inverted::No>(size));
-    case 0x1FB96: return blockElement<1>(size).fill(checker<8, Inverted::Yes>(size));
-    case 0x1FB97: return blockElement<1>(size).fill(hbar<4>(size));
-    case 0x1FB98: return blockElement<2>(size).fill(dbar<8, +1>(size * 4));
-    case 0x1FB99: return blockElement<2>(size).fill(dbar<8, -1>(size * 4));
-    case 0x1FB9A: return blockElement<1>(size).fill(dchecker<Inverted::Yes>(size));
-    case 0x1FB9B: return blockElement<1>(size).fill(dchecker<Inverted::No>(size));
-    case 0x1FB9C: return blockElement<1>(size).fill(triChecker<1>(size));
-    case 0x1FB9D: return blockElement<1>(size).fill(triChecker<2>(size));
-    case 0x1FB9E: return blockElement<1>(size).fill(triChecker<3>(size));
-    case 0x1FB9F: return blockElement<1>(size).fill(triChecker<4>(size));
-    case 0x1FBA0: return lineArt().line({ 0, 1 / 2_th }, { 1 / 2_th, 0 });
-    case 0x1FBA1: return lineArt().line({ 1 / 2_th, 0 }, { 1, 1 / 2_th });
-    case 0x1FBA2: return lineArt().line({ 0, 1 / 2_th }, { 1 / 2_th, 1 });
-    case 0x1FBA3: return lineArt().line({ 1 / 2_th, 1 }, { 1, 1 / 2_th });
-    case 0x1FBA4:
-        return lineArt().line({ 0, 1 / 2_th }, { 1 / 2_th, 0 }).line({ 0, 1 / 2_th }, { 1 / 2_th, 1 });
-    case 0x1FBA5:
-        return lineArt().line({ 1 / 2_th, 0 }, { 1, 1 / 2_th }).line({ 1 / 2_th, 1 }, { 1, 1 / 2_th });
-    case 0x1FBA6:
-        return lineArt().line({ 0, 1 / 2_th }, { 1 / 2_th, 1 }).line({ 1 / 2_th, 1 }, { 1, 1 / 2_th });
-    case 0x1FBA7:
-        return lineArt().line({ 0, 1 / 2_th }, { 1 / 2_th, 0 }).line({ 1 / 2_th, 0 }, { 1, 1 / 2_th });
-    case 0x1FBA8:
-        return lineArt().line({ 0, 1 / 2_th }, { 1 / 2_th, 0 }).line({ 1 / 2_th, 1 }, { 1, 1 / 2_th });
-    case 0x1FBA9:
-        return lineArt().line({ 1 / 2_th, 0 }, { 1, 1 / 2_th }).line({ 0, 1 / 2_th }, { 1 / 2_th, 1 });
-    case 0x1FBAA:
-        return lineArt()
-            . // line({0, 1/2_th}, {1/2_th, 0}).
-            line({ 1 / 2_th, 0 }, { 1, 1 / 2_th })
-            .line({ 0, 1 / 2_th }, { 1 / 2_th, 1 })
-            .line({ 1 / 2_th, 1 }, { 1, 1 / 2_th })
-            .take();
-    case 0x1FBAB:
-        return lineArt()
-            .line({ 0, 1 / 2_th }, { 1 / 2_th, 0 })
-            .
-            // line({1/2_th, 0}, {1, 1/2_th}).
-            line({ 0, 1 / 2_th }, { 1 / 2_th, 1 })
-            .line({ 1 / 2_th, 1 }, { 1, 1 / 2_th })
-            .take();
-    case 0x1FBAC:
-        return lineArt()
-            .line({ 0, 1 / 2_th }, { 1 / 2_th, 0 })
-            .line({ 1 / 2_th, 0 }, { 1, 1 / 2_th })
-            .
-            // line({0, 1/2_th}, {1/2_th, 1}).
-            line({ 1 / 2_th, 1 }, { 1, 1 / 2_th })
-            .take();
-    case 0x1FBAD:
-        return lineArt()
-            .line({ 0, 1 / 2_th }, { 1 / 2_th, 0 })
-            .line({ 1 / 2_th, 0 }, { 1, 1 / 2_th })
-            .line({ 0, 1 / 2_th }, { 1 / 2_th, 1 })
-            .
-            // line({1/2_th, 1}, {1, 1/2_th}).
-            take();
-    case 0x1FBAE:
-        return lineArt()
-            .line({ 0, 1 / 2_th }, { 1 / 2_th, 0 })
-            .line({ 1 / 2_th, 0 }, { 1, 1 / 2_th })
-            .line({ 0, 1 / 2_th }, { 1 / 2_th, 1 })
-            .line({ 1 / 2_th, 1 }, { 1, 1 / 2_th })
-            .take();
-    case 0x1FBAF:
-        return lineArt()
-            .line({ 0, 1 / 2_th }, { 1, 1 / 2_th })
-            .line({ 1 / 2_th, 3 / 8_th }, { 1 / 2_th, 5 / 8_th })
-            .take();
-    case 0x1FBF0: return segmentArt().segment_bar(1, 2, 4, 5, 6, 7);
-    case 0x1FBF1: return segmentArt().segment_bar(2, 5);
-    case 0x1FBF2: return segmentArt().segment_bar(1, 2, 3, 6, 7);
-    case 0x1FBF3: return segmentArt().segment_bar(1, 2, 3, 5, 6);
-    case 0x1FBF4: return segmentArt().segment_bar(2, 3, 4, 5);
-    case 0x1FBF5: return segmentArt().segment_bar(1, 3, 4, 5, 6);
-    case 0x1FBF6: return segmentArt().segment_bar(1, 3, 4, 5, 6, 7);
-    case 0x1FBF7: return segmentArt().segment_bar(1, 2, 5);
-    case 0x1FBF8: return segmentArt().segment_bar(1, 2, 3, 4, 5, 6, 7);
-    case 0x1FBF9:
-        return segmentArt().segment_bar(1, 2, 3, 4, 5, 6);
+        // {{{ 2580..259F block elements
+        case 0x2580: return blockElement(size) | upper(1 / 2_th); // ▀ UPPER HALF BLOCK
+        case 0x2581: return blockElement(size) | lower(1 / 8_th); // ▁ LOWER ONE EIGHTH BLOCK
+        case 0x2582: return blockElement(size) | lower(1 / 4_th); // ▂ LOWER ONE QUARTER BLOCK
+        case 0x2583: return blockElement(size) | lower(3 / 8_th); // ▃ LOWER THREE EIGHTHS BLOCK
+        case 0x2584: return blockElement(size) | lower(1 / 2_th); // ▄ LOWER HALF BLOCK
+        case 0x2585: return blockElement(size) | lower(5 / 8_th); // ▅ LOWER FIVE EIGHTHS BLOCK
+        case 0x2586: return blockElement(size) | lower(3 / 4_th); // ▆ LOWER THREE QUARTERS BLOCK
+        case 0x2587: return blockElement(size) | lower(7 / 8_th); // ▇ LOWER SEVEN EIGHTHS BLOCK
+        case 0x2588: return blockElement(size) | lower(1 / 1_th); // █ FULL BLOCK
+        case 0x2589: return blockElement(size) | left(7 / 8_th);  // ▉ LEFT SEVEN EIGHTHS BLOCK
+        case 0x258A: return blockElement(size) | left(3 / 4_th);  // ▊ LEFT THREE QUARTERS BLOCK
+        case 0x258B: return blockElement(size) | left(5 / 8_th);  // ▋ LEFT FIVE EIGHTHS BLOCK
+        case 0x258C: return blockElement(size) | left(1 / 2_th);  // ▌ LEFT HALF BLOCK
+        case 0x258D: return blockElement(size) | left(3 / 8_th);  // ▍ LEFT THREE EIGHTHS BLOCK
+        case 0x258E: return blockElement(size) | left(1 / 4_th);  // ▎ LEFT ONE QUARTER BLOCK
+        case 0x258F: return blockElement(size) | left(1 / 8_th);  // ▏ LEFT ONE EIGHTH BLOCK
+        case 0x2590:
+            return blockElement(size) | right(1 / 2_th); // ▐ RIGHT HALF BLOCK
+        // ░ TODO case 0x2591:
+        // ▒ TODO case 0x2592:
+        // ▓ TODO case 0x2593:
+        case 0x2594: return blockElement(size) | upper(1 / 8_th); // ▔  UPPER ONE EIGHTH BLOCK
+        case 0x2595: return blockElement(size) | right(1 / 8_th); // ▕  RIGHT ONE EIGHTH BLOCK
+        case 0x2596:                                              // ▖  QUADRANT LOWER LEFT
+            return blockElement(size) | (lower(1 / 2_th) * left(1 / 2_th));
+        case 0x2597: // ▗  QUADRANT LOWER RIGHT
+            return blockElement(size) | (lower(1 / 2_th) * right(1 / 2_th));
+        case 0x2598: // ▘  QUADRANT UPPER LEFT
+            return blockElement(size) | left(1 / 2_th) * upper(1 / 2_th);
+        case 0x2599: // ▙  QUADRANT UPPER LEFT AND LOWER LEFT AND LOWER RIGHT
+            return blockElement(size) | (left(1 / 2_th) * upper(1 / 2_th) + lower(1 / 2_th));
+        case 0x259A: // ▚  QUADRANT UPPER LEFT AND LOWER RIGHT
+            return blockElement(size)
+                   | (upper(1 / 2_th) * left(1 / 2_th) + lower(1 / 2_th) * right(1 / 2_th));
+        case 0x259B: // ▛  QUADRANT UPPER LEFT AND UPPER RIGHT AND LOWER LEFT
+            return blockElement(size) | (upper(1 / 2_th) + lower(1 / 2_th) * left(1 / 2_th));
+        case 0x259C: // ▜  QUADRANT UPPER LEFT AND UPPER RIGHT AND LOWER RIGHT
+            return blockElement(size) | (upper(1 / 2_th) + lower(1 / 2_th) * right(1 / 2_th));
+        case 0x259D: // ▝  QUADRANT UPPER RIGHT
+            return blockElement(size) | (upper(1 / 2_th) * right(1 / 2_th));
+        case 0x259E: // ▞  QUADRANT UPPER RIGHT AND LOWER LEFT
+            return blockElement(size)
+                   | (upper(1 / 2_th) * right(1 / 2_th) + lower(1 / 2_th) * left(1 / 2_th));
+        case 0x259F: // ▟  QUADRANT UPPER RIGHT AND LOWER LEFT AND LOWER RIGHT
+            return blockElement(size) | (upper(1 / 2_th) * right(1 / 2_th) + lower(1 / 2_th));
+        // TODO: ■  U+25A0  BLACK SQUARE
+        // TODO: □  U+25A1  WHITE SQUARE
+        // TODO: ▢  U+25A2  WHITE SQUARE WITH ROUNDED CORNERS
+        // TODO: ▣  U+25A3  WHITE SQUARE CONTAINING BLACK SMALL SQUARE
+        // TODO: ▤  U+25A4  SQUARE WITH HORIZONTAL FILL
+        // TODO: ▥  U+25A5  SQUARE WITH VERTICAL FILL
+        // TODO: ▦  U+25A6  SQUARE WITH ORTHOGONAL CROSSHATCH FILL
+        // TODO: ▧  U+25A7  SQUARE WITH UPPER LEFT TO LOWER RIGHT FILL
+        // TODO: ▨  U+25A8  SQUARE WITH UPPER RIGHT TO LOWER LEFT FILL
+        // TODO: ▩  U+25A9  SQUARE WITH DIAGONAL CROSSHATCH FILL
+        // TODO: ▪  U+25AA  BLACK SMALL SQUARE
+        // TODO: ▫  U+25AB  WHITE SMALL SQUARE
+        // TODO: ▬  U+25AC  BLACK RECTANGLE
+        // TODO: ▭  U+25AD  WHITE RECTANGLE
+        // TODO: ▮  U+25AE  BLACK VERTICAL RECTANGLE
+        // TODO: ▯  U+25AF  WHITE VERTICAL RECTANGLE
+        // TODO: ▰  U+25B0  BLACK PARALLELOGRAM
+        // TODO: ▱  U+25B1  WHITE PARALLELOGRAM
+        // TODO: ▲  U+25B2  BLACK UP-POINTING TRIANGLE
+        // TODO: △  U+25B3  WHITE UP-POINTING TRIANGLE
+        // TODO: ▴  U+25B4  BLACK UP-POINTING SMALL TRIANGLE
+        // TODO: ▵  U+25B5  WHITE UP-POINTING SMALL TRIANGLE
+        // TODO: ▶  U+25B6  BLACK RIGHT-POINTING TRIANGLE
+        // TODO: ▷  U+25B7  WHITE RIGHT-POINTING TRIANGLE
+        // TODO: ▸  U+25B8  BLACK RIGHT-POINTING SMALL TRIANGLE
+        // TODO: ▹  U+25B9  WHITE RIGHT-POINTING SMALL TRIANGLE
+        // TODO: ►  U+25BA  BLACK RIGHT-POINTING POINTER
+        // TODO: ▻  U+25BB  WHITE RIGHT-POINTING POINTER
+        // TODO: ▼  U+25BC  BLACK DOWN-POINTING TRIANGLE
+        // TODO: ▽  U+25BD  WHITE DOWN-POINTING TRIANGLE
+        // TODO: ▾  U+25BE  BLACK DOWN-POINTING SMALL TRIANGLE
+        // TODO: ▿  U+25BF  WHITE DOWN-POINTING SMALL TRIANGLE
+        // TODO: ◀  U+25C0  BLACK LEFT-POINTING TRIANGLE
+        // TODO: ◁  U+25C1  WHITE LEFT-POINTING TRIANGLE
+        // TODO: ◂  U+25C2  BLACK LEFT-POINTING SMALL TRIANGLE
+        // TODO: ◃  U+25C3  WHITE LEFT-POINTING SMALL TRIANGLE
+        // TODO: ◄  U+25C4  BLACK LEFT-POINTING POINTER
+        // TODO: ◅  U+25C5  WHITE LEFT-POINTING POINTER
+        // TODO: ◆  U+25C6  BLACK DIAMOND
+        // TODO: ◇  U+25C7  WHITE DIAMOND
+        // TODO: ◈  U+25C8  WHITE DIAMOND CONTAINING BLACK SMALL DIAMOND
+        // TODO: ◉  U+25C9  FISHEYE
+        // TODO: ◊  U+25CA  LOZENGE
+        // TODO: ○  U+25CB  WHITE CIRCLE
+        // TODO: ◌  U+25CC  DOTTED CIRCLE
+        // TODO: ◍  U+25CD  CIRCLE WITH VERTICAL FILL
+        // TODO: ◎  U+25CE  BULLSEYE
+        // TODO: ●  U+25CF  BLACK CIRCLE
+        // TODO: ◐  U+25D0  CIRCLE WITH LEFT HALF BLACK
+        // TODO: ◑  U+25D1  CIRCLE WITH RIGHT HALF BLACK
+        // TODO: ◒  U+25D2  CIRCLE WITH LOWER HALF BLACK
+        // TODO: ◓  U+25D3  CIRCLE WITH UPPER HALF BLACK
+        // TODO: ◔  U+25D4  CIRCLE WITH UPPER RIGHT QUADRANT BLACK
+        // TODO: ◕  U+25D5  CIRCLE WITH ALL BUT UPPER LEFT QUADRANT BLACK
+        // TODO: ◖  U+25D6  LEFT HALF BLACK CIRCLE
+        // TODO: ◗  U+25D7  RIGHT HALF BLACK CIRCLE
+        // TODO: ◘  U+25D8  INVERSE BULLET
+        // TODO: ◙  U+25D9  INVERSE WHITE CIRCLE
+        // TODO: ◚  U+25DA  UPPER HALF INVERSE WHITE CIRCLE
+        // TODO: ◛  U+25DB  LOWER HALF INVERSE WHITE CIRCLE
+        // TODO: ◜  U+25DC  UPPER LEFT QUADRANT CIRCULAR ARC
+        // TODO: ◝  U+25DD  UPPER RIGHT QUADRANT CIRCULAR ARC
+        // TODO: ◞  U+25DE  LOWER RIGHT QUADRANT CIRCULAR ARC
+        // TODO: ◟  U+25DF  LOWER LEFT QUADRANT CIRCULAR ARC
+        // TODO: ◠  U+25E0  UPPER HALF CIRCLE
+        // TODO: ◡  U+25E1  LOWER HALF CIRCLE
+        // TODO: ◢  U+25E2  BLACK LOWER RIGHT TRIANGLE
+        // TODO: ◣  U+25E3  BLACK LOWER LEFT TRIANGLE
+        // TODO: ◤  U+25E4  BLACK UPPER LEFT TRIANGLE
+        // TODO: ◥  U+25E5  BLACK UPPER RIGHT TRIANGLE
+        // TODO: ◦  U+25E6  WHITE BULLET
+        // TODO: ◧  U+25E7  SQUARE WITH LEFT HALF BLACK
+        // TODO: ◨  U+25E8  SQUARE WITH RIGHT HALF BLACK
+        // TODO: ◩  U+25E9  SQUARE WITH UPPER LEFT DIAGONAL HALF BLACK
+        // TODO: ◪  U+25EA  SQUARE WITH LOWER RIGHT DIAGONAL HALF BLACK
+        // TODO: ◫  U+25EB  WHITE SQUARE WITH VERTICAL BISECTING LINE
+        // TODO: ◬  U+25EC  WHITE UP-POINTING TRIANGLE WITH DOT
+        // TODO: ◭  U+25ED  UP-POINTING TRIANGLE WITH LEFT HALF BLACK
+        // TODO: ◮  U+25EE  UP-POINTING TRIANGLE WITH RIGHT HALF BLACK
+        // TODO: ◯  U+25EF  LARGE CIRCLE
+        // TODO: ◰  U+25F0  WHITE SQUARE WITH UPPER LEFT QUADRANT
+        // TODO: ◱  U+25F1  WHITE SQUARE WITH LOWER LEFT QUADRANT
+        // TODO: ◲  U+25F2  WHITE SQUARE WITH LOWER RIGHT QUADRANT
+        // TODO: ◳  U+25F3  WHITE SQUARE WITH UPPER RIGHT QUADRANT
+        // TODO: ◴  U+25F4  WHITE CIRCLE WITH UPPER LEFT QUADRANT
+        // TODO: ◵  U+25F5  WHITE CIRCLE WITH LOWER LEFT QUADRANT
+        // TODO: ◶  U+25F6  WHITE CIRCLE WITH LOWER RIGHT QUADRANT
+        // TODO: ◷  U+25F7  WHITE CIRCLE WITH UPPER RIGHT QUADRANT
+        // TODO: ◸  U+25F8  UPPER LEFT TRIANGLE
+        // TODO: ◹  U+25F9  UPPER RIGHT TRIANGLE
+        // TODO: ◺  U+25FA  LOWER LEFT TRIANGLE
+        // TODO: ◻  U+25FB  WHITE MEDIUM SQUARE
+        // TODO: ◼  U+25FC  BLACK MEDIUM SQUARE
+        // TODO: ◽ U+25FD  WHITE MEDIUM SMALL SQUARE
+        // TODO: ◾ U+25FE  BLACK MEDIUM SMALL SQUARE
+        // TODO: ◿  U+25FF  LOWER RIGHT TRIANGLE
         // }}}
+        // {{{ 1FB00..1FB3B sextant blocks
+        case 0x1FB00: return blockSextant(size, 1);             // 🬀  BLOCK SEXTANT-1
+        case 0x1FB01: return blockSextant(size, 2);             // 🬁  BLOCK SEXTANT-2
+        case 0x1FB02: return blockSextant(size, 1, 2);          // 🬂  BLOCK SEXTANT-12
+        case 0x1FB03: return blockSextant(size, 3);             // 🬃  BLOCK SEXTANT-3
+        case 0x1FB04: return blockSextant(size, 1, 3);          // 🬄  BLOCK SEXTANT-13
+        case 0x1FB05: return blockSextant(size, 2, 3);          // 🬅  BLOCK SEXTANT-23
+        case 0x1FB06: return blockSextant(size, 1, 2, 3);       // 🬆  BLOCK SEXTANT-123
+        case 0x1FB07: return blockSextant(size, 4);             // 🬇  BLOCK SEXTANT-4
+        case 0x1FB08: return blockSextant(size, 1, 4);          // 🬈  BLOCK SEXTANT-14
+        case 0x1FB09: return blockSextant(size, 2, 4);          // 🬉  BLOCK SEXTANT-24
+        case 0x1FB0A: return blockSextant(size, 1, 2, 4);       // 🬊  BLOCK SEXTANT-124
+        case 0x1FB0B: return blockSextant(size, 3, 4);          // 🬋  BLOCK SEXTANT-34
+        case 0x1FB0C: return blockSextant(size, 1, 3, 4);       // 🬌  BLOCK SEXTANT-134
+        case 0x1FB0D: return blockSextant(size, 2, 3, 4);       // 🬍  BLOCK SEXTANT-234
+        case 0x1FB0E: return blockSextant(size, 1, 2, 3, 4);    // 🬎  BLOCK SEXTANT-1234
+        case 0x1FB0F: return blockSextant(size, 5);             // 🬏  BLOCK SEXTANT-5
+        case 0x1FB10: return blockSextant(size, 1, 5);          // 🬐  BLOCK SEXTANT-15
+        case 0x1FB11: return blockSextant(size, 2, 5);          // 🬑  BLOCK SEXTANT-25
+        case 0x1FB12: return blockSextant(size, 1, 2, 5);       // 🬒  BLOCK SEXTANT-125
+        case 0x1FB13: return blockSextant(size, 3, 5);          // 🬓  BLOCK SEXTANT-35
+        case 0x1FB14: return blockSextant(size, 2, 3, 5);       // 🬔  BLOCK SEXTANT-235
+        case 0x1FB15: return blockSextant(size, 1, 2, 3, 5);    // 🬕  BLOCK SEXTANT-1235
+        case 0x1FB16: return blockSextant(size, 4, 5);          // 🬖  BLOCK SEXTANT-45
+        case 0x1FB17: return blockSextant(size, 1, 4, 5);       // 🬗  BLOCK SEXTANT-145
+        case 0x1FB18: return blockSextant(size, 2, 4, 5);       // 🬘  BLOCK SEXTANT-245
+        case 0x1FB19: return blockSextant(size, 1, 2, 4, 5);    // 🬙  BLOCK SEXTANT-1245
+        case 0x1FB1A: return blockSextant(size, 3, 4, 5);       // 🬚  BLOCK SEXTANT-345
+        case 0x1FB1B: return blockSextant(size, 1, 3, 4, 5);    // 🬛  BLOCK SEXTANT-1345
+        case 0x1FB1C: return blockSextant(size, 2, 3, 4, 5);    // 🬜  BLOCK SEXTANT-2345
+        case 0x1FB1D: return blockSextant(size, 1, 2, 3, 4, 5); // 🬝  BLOCK SEXTANT-12345
+        case 0x1FB1E: return blockSextant(size, 6);             // 🬞  BLOCK SEXTANT-6
+        case 0x1FB1F: return blockSextant(size, 1, 6);          // 🬟  BLOCK SEXTANT-16
+        case 0x1FB20: return blockSextant(size, 2, 6);          // 🬠  BLOCK SEXTANT-26
+        case 0x1FB21: return blockSextant(size, 1, 2, 6);       // 🬡  BLOCK SEXTANT-126
+        case 0x1FB22: return blockSextant(size, 3, 6);          // 🬢  BLOCK SEXTANT-36
+        case 0x1FB23: return blockSextant(size, 1, 3, 6);       // 🬣  BLOCK SEXTANT-136
+        case 0x1FB24: return blockSextant(size, 2, 3, 6);       // 🬤  BLOCK SEXTANT-236
+        case 0x1FB25: return blockSextant(size, 1, 2, 3, 6);    // 🬥  BLOCK SEXTANT-1236
+        case 0x1FB26: return blockSextant(size, 4, 6);          // 🬦  BLOCK SEXTANT-46
+        case 0x1FB27: return blockSextant(size, 1, 4, 6);       // 🬧  BLOCK SEXTANT-146
+        case 0x1FB28: return blockSextant(size, 1, 2, 4, 6);    // 🬨  BLOCK SEXTANT-1246
+        case 0x1FB29: return blockSextant(size, 3, 4, 6);       // 🬩  BLOCK SEXTANT-346
+        case 0x1FB2A: return blockSextant(size, 1, 3, 4, 6);    // 🬪  BLOCK SEXTANT-1346
+        case 0x1FB2B: return blockSextant(size, 2, 3, 4, 6);    // 🬫  BLOCK SEXTANT-2346
+        case 0x1FB2C: return blockSextant(size, 1, 2, 3, 4, 6); // 🬬  BLOCK SEXTANT-12346
+        case 0x1FB2D: return blockSextant(size, 5, 6);          // 🬭  BLOCK SEXTANT-56
+        case 0x1FB2E: return blockSextant(size, 1, 5, 6);       // 🬮  BLOCK SEXTANT-156
+        case 0x1FB2F: return blockSextant(size, 2, 5, 6);       // 🬯  BLOCK SEXTANT-256
+        case 0x1FB30: return blockSextant(size, 1, 2, 5, 6);    // 🬰  BLOCK SEXTANT-1256
+        case 0x1FB31: return blockSextant(size, 3, 5, 6);       // 🬱  BLOCK SEXTANT-356
+        case 0x1FB32: return blockSextant(size, 1, 3, 5, 6);    // 🬲  BLOCK SEXTANT-1356
+        case 0x1FB33: return blockSextant(size, 2, 3, 5, 6);    // 🬳  BLOCK SEXTANT-2356
+        case 0x1FB34: return blockSextant(size, 1, 2, 3, 5, 6); // 🬴  BLOCK SEXTANT-12356
+        case 0x1FB35: return blockSextant(size, 4, 5, 6);       // 🬵  BLOCK SEXTANT-456
+        case 0x1FB36: return blockSextant(size, 1, 4, 5, 6);    // 🬶  BLOCK SEXTANT-1456
+        case 0x1FB37: return blockSextant(size, 2, 4, 5, 6);    // 🬷  BLOCK SEXTANT-2456
+        case 0x1FB38: return blockSextant(size, 1, 2, 4, 5, 6); // 🬸  BLOCK SEXTANT-12456
+        case 0x1FB39: return blockSextant(size, 3, 4, 5, 6);    // 🬹  BLOCK SEXTANT-3456
+        case 0x1FB3A: return blockSextant(size, 1, 3, 4, 5, 6); // 🬺  BLOCK SEXTANT-13456
+        case 0x1FB3B:
+            return blockSextant(size, 2, 3, 4, 5, 6); // 🬻  BLOCK SEXTANT-23456
+        // }}}
+        // {{{ 1FB3C..1FBAF diagonals, nth, block elements
+        case 0x1FB3C: return /* 🬼  */ ld({ 0, 3 / 4_th }, { 1 / 4_th, 1 });
+        case 0x1FB3D: return /* 🬽  */ ld({ 0, 3 / 4_th }, { 1, 1 });
+        case 0x1FB3E: return /* 🬾  */ ld({ 0, 1 / 4_th }, { 1 / 2_th, 1 });
+        case 0x1FB3F: return /* 🬿  */ ld({ 0, 1 / 4_th }, { 1, 1 });
+        case 0x1FB40: return /* 🭀  */ ld({ 0, 0 }, { 1 / 2_th, 1 });
+        case 0x1FB41: return /* 🭁  */ ld({ 0, 1 / 4_th }, { 1 / 2_th, 0 });
+        case 0x1FB42: return /* 🭂  */ ld({ 0, 1 / 4_th }, { 1, 0 });
+        case 0x1FB43: return /* 🭃  */ ld({ 0, 3 / 4_th }, { 1 / 2_th, 0 });
+        case 0x1FB44: return /* 🭄  */ ld({ 0, 3 / 4_th }, { 1, 0 });
+        case 0x1FB45: return /* 🭅  */ ld({ 0, 1 }, { 1 / 2_th, 0 });
+        case 0x1FB46: return /* 🭆  */ ld({ 0, 3 / 4_th }, { 1, 1 / 4_th });
+        case 0x1FB47: return /* 🭇  */ ld({ 3 / 4_th, 1 }, { 1, 3 / 4_th });
+        case 0x1FB48: return /* 🭈  */ ld({ 0, 1 }, { 1, 3 / 4_th });
+        case 0x1FB49: return /* 🭉  */ ld({ 1 / 2_th, 1 }, { 1, 1 / 4_th });
+        case 0x1FB4A: return /* 🭊  */ ld({ 0, 1 }, { 1, 1 / 4_th });
+        case 0x1FB4B: return /* 🭋  */ ld({ 1 / 2_th, 1 }, { 1, 0 });
+        case 0x1FB4C: return /* 🭌  */ ld({ 1 / 2_th, 0 }, { 1, 1 / 4_th });
+        case 0x1FB4D: return /* 🭍  */ ld({ 0, 0 }, { 1, 1 / 4_th });
+        case 0x1FB4E: return /* 🭎  */ ld({ 1 / 2_th, 0 }, { 1, 3 / 4_th });
+        case 0x1FB4F: return /* 🭏  */ ld({ 0, 0 }, { 1, 3 / 4_th });
+        case 0x1FB50: return /* 🭐  */ ld({ 1 / 2_th, 0 }, { 1, 1 });
+        case 0x1FB51: return /* 🭑  */ ld({ 0, 1 / 4_th }, { 1, 3 / 4_th });
+        case 0x1FB52: return /* 🭒  */ ud({ 0, 3 / 4_th }, { 1 / 2_th, 1 });
+        case 0x1FB53: return /* 🭓  */ ud({ 0, 3 / 4_th }, { 1, 1 });
+        case 0x1FB54: return /* 🭔  */ ud({ 0, 1 / 4_th }, { 1 / 2_th, 1 });
+        case 0x1FB55: return /* 🭕  */ ud({ 0, 1 / 4_th }, { 1, 1 }); // XXX
+        case 0x1FB56: return /* 🭖  */ ud({ 0, 0 }, { 1 / 2_th, 1 });
+        case 0x1FB57: return /* 🭗  */ ud({ 0, 1 / 4_th }, { 1 / 4_th, 0 });
+        case 0x1FB58: return /* 🭘  */ ud({ 0, 1 / 4_th }, { 1, 0 });
+        case 0x1FB59: return /* 🭙  */ ud({ 0, 3 / 4_th }, { 1 / 2_th, 0 });
+        case 0x1FB5A: return /* 🭚  */ ud({ 0, 3 / 4_th }, { 1, 0 });
+        case 0x1FB5B: return /* 🭛  */ ud({ 0, 1 }, { 1 / 2_th, 0 });
+        case 0x1FB5C: return /* 🭜  */ ud({ 0, 3 / 4_th }, { 1, 1 / 4_th });
+        case 0x1FB5D: return /* 🭝  */ ud({ 1 / 2_th, 1 }, { 1, 3 / 4_th });
+        case 0x1FB5E: return /* 🭞  */ ud({ 0, 1 }, { 1, 3 / 4_th });
+        case 0x1FB5F: return /* 🭟  */ ud({ 1 / 2_th, 1 }, { 1, 1 / 4_th });
+        case 0x1FB60: return /* 🭠  */ ud({ 0, 1 }, { 1, .25 });
+        case 0x1FB61: return /* 🭡  */ ud({ 1 / 2_th, 1 }, { 1, 0 });
+        case 0x1FB62: return /* 🭢  */ ud({ 3 / 4_th, 0 }, { 1, 1 / 4_th });
+        case 0x1FB63: return /* 🭣  */ ud({ 0, 0 }, { 1, 1 / 4_th });
+        case 0x1FB64: return /* 🭤  */ ud({ 1 / 2_th, 0 }, { 1, 3 / 4_th });
+        case 0x1FB65: return /* 🭥  */ ud({ 0, 0 }, { 1, 3 / 4_th });
+        case 0x1FB66: return /* 🭦  */ ud({ 1 / 2_th, 0 }, { 1, 1 });
+        case 0x1FB67: return /* 🭧  */ ud({ 0, 1 / 4_th }, { 1, 3 / 4_th });
+        case 0x1FB68: return /* 🭨  */ triangle<Dir::Left, Inverted::Yes>(size);
+        case 0x1FB69: return /* 🭩  */ triangle<Dir::Top, Inverted::Yes>(size);
+        case 0x1FB6A: return /* 🭪  */ triangle<Dir::Right, Inverted::Yes>(size);
+        case 0x1FB6B: return /* 🭫  */ triangle<Dir::Bottom, Inverted::Yes>(size);
+        case 0x1FB6C: return /* 🭬  */ triangle<Dir::Left, Inverted::No>(size);
+        case 0x1FB6D: return /* 🭭  */ triangle<Dir::Top, Inverted::No>(size);
+        case 0x1FB6E: return /* 🭮  */ triangle<Dir::Right, Inverted::No>(size);
+        case 0x1FB6F: return /* 🭯  */ triangle<Dir::Bottom, Inverted::No>(size);
+        case 0x1FB70: return blockElement(size) | vert_nth(1 / 8_th, 2); // 🭰  VERTICAL ONE EIGHTH BLOCK-2
+        case 0x1FB71: return blockElement(size) | vert_nth(1 / 8_th, 3); // 🭱  VERTICAL ONE EIGHTH BLOCK-3
+        case 0x1FB72: return blockElement(size) | vert_nth(1 / 8_th, 4); // 🭲  VERTICAL ONE EIGHTH BLOCK-4
+        case 0x1FB73: return blockElement(size) | vert_nth(1 / 8_th, 5); // 🭳  VERTICAL ONE EIGHTH BLOCK-5
+        case 0x1FB74: return blockElement(size) | vert_nth(1 / 8_th, 6); // 🭴  VERTICAL ONE EIGHTH BLOCK-6
+        case 0x1FB75: return blockElement(size) | vert_nth(1 / 8_th, 7); // 🭵  VERTICAL ONE EIGHTH BLOCK-7
+        case 0x1FB76:
+            return blockElement(size) | horiz_nth(1 / 8_th, 2); // 🭶  HORIZONTAL ONE EIGHTH BLOCK-2
+        case 0x1FB77:
+            return blockElement(size) | horiz_nth(1 / 8_th, 3); // 🭷  HORIZONTAL ONE EIGHTH BLOCK-3
+        case 0x1FB78:
+            return blockElement(size) | horiz_nth(1 / 8_th, 4); // 🭸  HORIZONTAL ONE EIGHTH BLOCK-4
+        case 0x1FB79:
+            return blockElement(size) | horiz_nth(1 / 8_th, 5); // 🭹  HORIZONTAL ONE EIGHTH BLOCK-5
+        case 0x1FB7A:
+            return blockElement(size) | horiz_nth(1 / 8_th, 6); // 🭺  HORIZONTAL ONE EIGHTH BLOCK-6
+        case 0x1FB7B:
+            return blockElement(size) | horiz_nth(1 / 8_th, 7); // 🭻  HORIZONTAL ONE EIGHTH BLOCK-7
+        case 0x1FB7C:
+            return blockElement(size)
+                   | (left(1 / 8_th) + lower(1 / 8_th)); // 🭼  LEFT AND LOWER ONE EIGHTH BLOCK
+        case 0x1FB7D:
+            return blockElement(size)
+                   | (left(1 / 8_th) + upper(1 / 8_th)); // 🭽  LEFT AND UPPER ONE EIGHTH BLOCK
+        case 0x1FB7E:
+            return blockElement(size)
+                   | (right(1 / 8_th) + upper(1 / 8_th)); // 🭾  RIGHT AND UPPER ONE EIGHTH BLOCK
+        case 0x1FB7F:
+            return blockElement(size)
+                   | (right(1 / 8_th) + lower(1 / 8_th)); // 🭿  RIGHT AND LOWER ONE EIGHTH BLOCK
+        case 0x1FB80:
+            return blockElement(size)
+                   | (upper(1 / 8_th) + lower(1 / 8_th)); // 🮀  UPPER AND LOWER ONE EIGHTH BLOCK
+        case 0x1FB81:
+            return blockElement(size)
+                   | (horiz_nth(1 / 8_th, 1) // 🮁  HORIZONTAL ONE EIGHTH BLOCK-1358
+                      + horiz_nth(1 / 8_th, 3) + horiz_nth(1 / 8_th, 5) + horiz_nth(1 / 8_th, 7));
+        case 0x1FB82: return blockElement(size) | upper(1 / 4_th); // 🮂  UPPER ONE QUARTER BLOCK
+        case 0x1FB83: return blockElement(size) | upper(3 / 8_th); // 🮃  UPPER THREE EIGHTHS BLOCK
+        case 0x1FB84: return blockElement(size) | upper(5 / 8_th); // 🮄  UPPER FIVE EIGHTHS BLOCK
+        case 0x1FB85: return blockElement(size) | upper(3 / 4_th); // 🮅  UPPER THREE QUARTERS BLOCK
+        case 0x1FB86: return blockElement(size) | upper(7 / 8_th); // 🮆  UPPER SEVEN EIGHTHS BLOCK
+        case 0x1FB87: return blockElement(size) | right(1 / 4_th); // 🮇  RIGHT ONE QUARTER BLOCK
+        case 0x1FB88: return blockElement(size) | right(3 / 8_th); // 🮈  RIGHT THREE EIGHTHS BLOCK
+        case 0x1FB89: return blockElement(size) | right(5 / 8_th); // 🮉  RIGHT FIVE EIGHTHS BLOCK
+        case 0x1FB8A: return blockElement(size) | right(3 / 4_th); // 🮊  RIGHT THREE QUARTERS BLOCK
+        case 0x1FB8B: return blockElement(size) | right(7 / 8_th); // 🮋  RIGHT SEVEN EIGHTHS BLOCK
+        case 0x1FB8C: return blockElement<1>(size, checker<4, Inverted::No>(size)) | left(1 / 2_th);
+        case 0x1FB8D: return blockElement<1>(size, checker<4, Inverted::No>(size)) | right(1 / 2_th);
+        case 0x1FB8E: return blockElement<1>(size, checker<4, Inverted::No>(size)) | upper(1 / 2_th);
+        case 0x1FB8F: return blockElement<1>(size, checker<4, Inverted::No>(size)) | lower(1 / 2_th);
+        case 0x1FB90: return blockElement<1>(size, checker<4, Inverted::No>(size)).fill();
+        case 0x1FB91:
+            return blockElement<1>(size).fill([size](int x, int y) {
+                return y <= unbox<int>(size.height) / 2 ? 0xFF : checker<4, Inverted::No>(size)(x, y);
+            });
+        case 0x1FB92:
+            return blockElement<1>(size).fill([size](int x, int y) {
+                return y >= unbox<int>(size.height) / 2 ? 0xFF : checker<4, Inverted::No>(size)(x, y);
+            });
+        case 0x1FB93: break; // not assigned
+        case 0x1FB94:
+            return blockElement<1>(size).fill([size](int x, int y) {
+                return x >= unbox<int>(size.width) / 2 ? 0xFF : checker<4, Inverted::No>(size)(x, y);
+            });
+        case 0x1FB95: return blockElement<1>(size).fill(checker<8, Inverted::No>(size));
+        case 0x1FB96: return blockElement<1>(size).fill(checker<8, Inverted::Yes>(size));
+        case 0x1FB97: return blockElement<1>(size).fill(hbar<4>(size));
+        case 0x1FB98: return blockElement<2>(size).fill(dbar<8, +1>(size * 4));
+        case 0x1FB99: return blockElement<2>(size).fill(dbar<8, -1>(size * 4));
+        case 0x1FB9A: return blockElement<1>(size).fill(dchecker<Inverted::Yes>(size));
+        case 0x1FB9B: return blockElement<1>(size).fill(dchecker<Inverted::No>(size));
+        case 0x1FB9C: return blockElement<1>(size).fill(triChecker<1>(size));
+        case 0x1FB9D: return blockElement<1>(size).fill(triChecker<2>(size));
+        case 0x1FB9E: return blockElement<1>(size).fill(triChecker<3>(size));
+        case 0x1FB9F: return blockElement<1>(size).fill(triChecker<4>(size));
+        case 0x1FBA0: return lineArt().line({ 0, 1 / 2_th }, { 1 / 2_th, 0 });
+        case 0x1FBA1: return lineArt().line({ 1 / 2_th, 0 }, { 1, 1 / 2_th });
+        case 0x1FBA2: return lineArt().line({ 0, 1 / 2_th }, { 1 / 2_th, 1 });
+        case 0x1FBA3: return lineArt().line({ 1 / 2_th, 1 }, { 1, 1 / 2_th });
+        case 0x1FBA4:
+            return lineArt().line({ 0, 1 / 2_th }, { 1 / 2_th, 0 }).line({ 0, 1 / 2_th }, { 1 / 2_th, 1 });
+        case 0x1FBA5:
+            return lineArt().line({ 1 / 2_th, 0 }, { 1, 1 / 2_th }).line({ 1 / 2_th, 1 }, { 1, 1 / 2_th });
+        case 0x1FBA6:
+            return lineArt().line({ 0, 1 / 2_th }, { 1 / 2_th, 1 }).line({ 1 / 2_th, 1 }, { 1, 1 / 2_th });
+        case 0x1FBA7:
+            return lineArt().line({ 0, 1 / 2_th }, { 1 / 2_th, 0 }).line({ 1 / 2_th, 0 }, { 1, 1 / 2_th });
+        case 0x1FBA8:
+            return lineArt().line({ 0, 1 / 2_th }, { 1 / 2_th, 0 }).line({ 1 / 2_th, 1 }, { 1, 1 / 2_th });
+        case 0x1FBA9:
+            return lineArt().line({ 1 / 2_th, 0 }, { 1, 1 / 2_th }).line({ 0, 1 / 2_th }, { 1 / 2_th, 1 });
+        case 0x1FBAA:
+            return lineArt()
+                . // line({0, 1/2_th}, {1/2_th, 0}).
+                line({ 1 / 2_th, 0 }, { 1, 1 / 2_th })
+                .line({ 0, 1 / 2_th }, { 1 / 2_th, 1 })
+                .line({ 1 / 2_th, 1 }, { 1, 1 / 2_th })
+                .take();
+        case 0x1FBAB:
+            return lineArt()
+                .line({ 0, 1 / 2_th }, { 1 / 2_th, 0 })
+                .
+                // line({1/2_th, 0}, {1, 1/2_th}).
+                line({ 0, 1 / 2_th }, { 1 / 2_th, 1 })
+                .line({ 1 / 2_th, 1 }, { 1, 1 / 2_th })
+                .take();
+        case 0x1FBAC:
+            return lineArt()
+                .line({ 0, 1 / 2_th }, { 1 / 2_th, 0 })
+                .line({ 1 / 2_th, 0 }, { 1, 1 / 2_th })
+                .
+                // line({0, 1/2_th}, {1/2_th, 1}).
+                line({ 1 / 2_th, 1 }, { 1, 1 / 2_th })
+                .take();
+        case 0x1FBAD:
+            return lineArt()
+                .line({ 0, 1 / 2_th }, { 1 / 2_th, 0 })
+                .line({ 1 / 2_th, 0 }, { 1, 1 / 2_th })
+                .line({ 0, 1 / 2_th }, { 1 / 2_th, 1 })
+                .
+                // line({1/2_th, 1}, {1, 1/2_th}).
+                take();
+        case 0x1FBAE:
+            return lineArt()
+                .line({ 0, 1 / 2_th }, { 1 / 2_th, 0 })
+                .line({ 1 / 2_th, 0 }, { 1, 1 / 2_th })
+                .line({ 0, 1 / 2_th }, { 1 / 2_th, 1 })
+                .line({ 1 / 2_th, 1 }, { 1, 1 / 2_th })
+                .take();
+        case 0x1FBAF:
+            return lineArt()
+                .line({ 0, 1 / 2_th }, { 1, 1 / 2_th })
+                .line({ 1 / 2_th, 3 / 8_th }, { 1 / 2_th, 5 / 8_th })
+                .take();
+        case 0x1FBF0: return segmentArt().segment_bar(1, 2, 4, 5, 6, 7);
+        case 0x1FBF1: return segmentArt().segment_bar(2, 5);
+        case 0x1FBF2: return segmentArt().segment_bar(1, 2, 3, 6, 7);
+        case 0x1FBF3: return segmentArt().segment_bar(1, 2, 3, 5, 6);
+        case 0x1FBF4: return segmentArt().segment_bar(2, 3, 4, 5);
+        case 0x1FBF5: return segmentArt().segment_bar(1, 3, 4, 5, 6);
+        case 0x1FBF6: return segmentArt().segment_bar(1, 3, 4, 5, 6, 7);
+        case 0x1FBF7: return segmentArt().segment_bar(1, 2, 5);
+        case 0x1FBF8: return segmentArt().segment_bar(1, 2, 3, 4, 5, 6, 7);
+        case 0x1FBF9:
+            return segmentArt().segment_bar(1, 2, 3, 4, 5, 6);
+            // }}}
 
-    case 0xE0B0: return /*  */ triangle<Dir::Left, Inverted::No, 1>(size);
-    case 0xE0B2: return /*  */ triangle<Dir::Right, Inverted::No, 1>(size);
-    case 0xE0B4: return /*  */ blockElement<2>(size).halfFilledCircleRight();
-    case 0xE0B6: return /*  */ blockElement<2>(size).halfFilledCircleLeft();
-    case 0xE0BA: return /*  */ ld({ 0, 1 }, { 1, 0 });
-    case 0xE0BC: return /*  */ ud({ 0, 1 }, { 1, 0 });
-    case 0xE0BE: return /*  */ ud({ 0, 0 }, { 1, 1 });
+        case 0xE0B0: return /*  */ triangle<Dir::Left, Inverted::No, 1>(size);
+        case 0xE0B2: return /*  */ triangle<Dir::Right, Inverted::No, 1>(size);
+        case 0xE0B4: return /*  */ blockElement<2>(size).halfFilledCircleRight();
+        case 0xE0B6: return /*  */ blockElement<2>(size).halfFilledCircleLeft();
+        case 0xE0BA: return /*  */ ld({ 0, 1 }, { 1, 0 });
+        case 0xE0BC: return /*  */ ud({ 0, 1 }, { 1, 0 });
+        case 0xE0BE: return /*  */ ud({ 0, 0 }, { 1, 1 });
 
-    // PUA defines as introduced by FiraCode: https://github.com/tonsky/FiraCode/issues/1324
-    case 0xEE00: return progressBar().left();
-    case 0xEE01: return progressBar().middle();
-    case 0xEE02: return progressBar().right();
-    case 0xEE03: return progressBar().left().filled();
-    case 0xEE04: return progressBar().middle().filled();
-    case 0xEE05: return progressBar().right().filled();
+        // PUA defines as introduced by FiraCode: https://github.com/tonsky/FiraCode/issues/1324
+        case 0xEE00: return progressBar().left();
+        case 0xEE01: return progressBar().middle();
+        case 0xEE02: return progressBar().right();
+        case 0xEE03: return progressBar().left().filled();
+        case 0xEE04: return progressBar().middle().filled();
+        case 0xEE05: return progressBar().right().filled();
     }
 
     return nullopt;
@@ -1589,50 +1597,50 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint
             auto const x1 = get<2>(pq);
             switch (lm)
             {
-            case detail::NoLine: break;
-            case detail::Light: {
-                auto const y0 = offset - lightThickness / 2;
-                // BoxDrawingLog()("{}: line:{}, x:{}..{}, y:{}..{}",
-                //                 isFirst ? "left" : "right",
-                //                 to_stringview(lm),
-                //                 x0,
-                //                 x1 - 1,
-                //                 y0,
-                //                 y0 + lightThickness - 1,
-                //                 offset);
-                for (auto const yi: iota(0, lightThickness))
-                    for (auto const xi: iota(0u, x1 - x0))
-                        image[(y0 + yi) * *width + x0 + xi] = 0xFF;
-                break;
-            }
-            case detail::Double: {
-                auto y0 = offset - lightThickness / 2 - lightThickness;
-                for (auto const yi: iota(0, lightThickness))
-                    for (auto const xi: iota(0u, x1 - x0))
-                        image[(y0 + yi) * *width + x0 + xi] = 0xFF;
+                case detail::NoLine: break;
+                case detail::Light: {
+                    auto const y0 = offset - lightThickness / 2;
+                    // BoxDrawingLog()("{}: line:{}, x:{}..{}, y:{}..{}",
+                    //                 isFirst ? "left" : "right",
+                    //                 to_stringview(lm),
+                    //                 x0,
+                    //                 x1 - 1,
+                    //                 y0,
+                    //                 y0 + lightThickness - 1,
+                    //                 offset);
+                    for (auto const yi: iota(0, lightThickness))
+                        for (auto const xi: iota(0u, x1 - x0))
+                            image[(y0 + yi) * *width + x0 + xi] = 0xFF;
+                    break;
+                }
+                case detail::Double: {
+                    auto y0 = offset - lightThickness / 2 - lightThickness;
+                    for (auto const yi: iota(0, lightThickness))
+                        for (auto const xi: iota(0u, x1 - x0))
+                            image[(y0 + yi) * *width + x0 + xi] = 0xFF;
 
-                y0 = offset + lightThickness / 2;
-                for (auto const yi: iota(0, lightThickness))
-                    for (auto const xi: iota(0u, x1 - x0))
-                        image[(y0 + yi) * *width + x0 + xi] = 0xFF;
-                break;
-            }
-            case detail::Heavy: {
-                auto const y0 = offset - heavyThickness / 2;
-                for (auto const yi: iota(0, heavyThickness))
-                    for (auto const xi: iota(0u, x1 - x0))
-                        image[(y0 + yi) * *width + x0 + xi] = 0xFF;
-                break;
-            }
-            case detail::Light2:
-            case detail::Light3:
-            case detail::Light4:
-            case detail::Heavy2:
-            case detail::Heavy3:
-            case detail::Heavy4:
-                // handled above
-                assert(false);
-                return nullopt;
+                    y0 = offset + lightThickness / 2;
+                    for (auto const yi: iota(0, lightThickness))
+                        for (auto const xi: iota(0u, x1 - x0))
+                            image[(y0 + yi) * *width + x0 + xi] = 0xFF;
+                    break;
+                }
+                case detail::Heavy: {
+                    auto const y0 = offset - heavyThickness / 2;
+                    for (auto const yi: iota(0, heavyThickness))
+                        for (auto const xi: iota(0u, x1 - x0))
+                            image[(y0 + yi) * *width + x0 + xi] = 0xFF;
+                    break;
+                }
+                case detail::Light2:
+                case detail::Light3:
+                case detail::Light4:
+                case detail::Heavy2:
+                case detail::Heavy3:
+                case detail::Heavy4:
+                    // handled above
+                    assert(false);
+                    return nullopt;
             }
         }
     }
@@ -1651,39 +1659,39 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint
             // auto const isFirst = get<3>(pq);
             switch (lm)
             {
-            case detail::NoLine: break;
-            case detail::Light: {
-                auto const x0 = offset - lightThickness / 2;
-                for (auto const yi: iota(0u, y1 - y0))
-                    for (auto const xi: iota(0, lightThickness))
-                        image[(y0 + yi) * *width + x0 + xi] = 0xFF;
-                break;
-            }
-            case detail::Double: {
-                auto x0 = offset - lightThickness / 2 - lightThickness;
-                for (auto const yi: iota(0u, y1 - y0))
-                    for (auto const xi: iota(0, lightThickness))
-                        image[(y0 + yi) * *width + x0 + xi] = 0xFF;
+                case detail::NoLine: break;
+                case detail::Light: {
+                    auto const x0 = offset - lightThickness / 2;
+                    for (auto const yi: iota(0u, y1 - y0))
+                        for (auto const xi: iota(0, lightThickness))
+                            image[(y0 + yi) * *width + x0 + xi] = 0xFF;
+                    break;
+                }
+                case detail::Double: {
+                    auto x0 = offset - lightThickness / 2 - lightThickness;
+                    for (auto const yi: iota(0u, y1 - y0))
+                        for (auto const xi: iota(0, lightThickness))
+                            image[(y0 + yi) * *width + x0 + xi] = 0xFF;
 
-                x0 = offset - lightThickness / 2 + lightThickness;
-                for (auto const yi: iota(0u, y1 - y0))
-                    for (auto const xi: iota(0, lightThickness))
-                        image[(y0 + yi) * *width + x0 + xi] = 0xFF;
-                break;
-            }
-            case detail::Heavy: {
-                auto const x0 = offset - (lightThickness * 3) / 2;
-                for (auto const yi: iota(0u, y1 - y0))
-                    for (auto const xi: iota(0, lightThickness * 3))
-                        image[(y0 + yi) * *width + x0 + xi] = 0xFF;
-                break;
-            }
-            case detail::Light2:
-            case detail::Light3:
-            case detail::Light4:
-            case detail::Heavy2:
-            case detail::Heavy3:
-            case detail::Heavy4: assert(false && "Cases handled above already."); return nullopt;
+                    x0 = offset - lightThickness / 2 + lightThickness;
+                    for (auto const yi: iota(0u, y1 - y0))
+                        for (auto const xi: iota(0, lightThickness))
+                            image[(y0 + yi) * *width + x0 + xi] = 0xFF;
+                    break;
+                }
+                case detail::Heavy: {
+                    auto const x0 = offset - (lightThickness * 3) / 2;
+                    for (auto const yi: iota(0u, y1 - y0))
+                        for (auto const xi: iota(0, lightThickness * 3))
+                            image[(y0 + yi) * *width + x0 + xi] = 0xFF;
+                    break;
+                }
+                case detail::Light2:
+                case detail::Light3:
+                case detail::Light4:
+                case detail::Heavy2:
+                case detail::Heavy3:
+                case detail::Heavy4: assert(false && "Cases handled above already."); return nullopt;
             }
         }
     }

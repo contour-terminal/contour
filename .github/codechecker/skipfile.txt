@@ -1,7 +1,9 @@
 -/usr/include/*
 -/usr/lib/llvm*/lib/clang/*/include/*
-+*/Build/_deps/libunicode-src/*
-+*/Build/_deps/termbenchpro-src/*
--*/Build/_deps/*
+-*/Build/*
 -*/Build/src/contour/contour_autogen/*
 -*/Build/src/contour/opengl/contour_frontend_opengl_autogen/*
++_deps/sources/libunicode-*/*
++_deps/sources/termbench-pro-*/*
+-_deps/sources/*
+-_deps/*

@@ -106,24 +106,24 @@ std::vector<Selection::Range> Selection::ranges() const
 
     switch (result.size())
     {
-    case 1: result[0] = Range { from.line, from.column, min(to.column, rightMargin) }; break;
-    case 2:
-        // Render first line partial from selected column to end.
-        result[0] = Range { from.line, from.column, rightMargin };
-        // Render last (second) line partial from beginning to last selected column.
-        result[1] = Range { to.line, ColumnOffset(0), min(to.column, rightMargin) };
-        break;
-    default:
-        // Render first line partial from selected column to end.
-        result[0] = Range { from.line, from.column, rightMargin };
+        case 1: result[0] = Range { from.line, from.column, min(to.column, rightMargin) }; break;
+        case 2:
+            // Render first line partial from selected column to end.
+            result[0] = Range { from.line, from.column, rightMargin };
+            // Render last (second) line partial from beginning to last selected column.
+            result[1] = Range { to.line, ColumnOffset(0), min(to.column, rightMargin) };
+            break;
+        default:
+            // Render first line partial from selected column to end.
+            result[0] = Range { from.line, from.column, rightMargin };
 
-        // Render inner full.
-        for (size_t n = 1; n < result.size(); ++n)
-            result[n] = Range { from.line + LineOffset::cast_from(n), ColumnOffset(0), rightMargin };
+            // Render inner full.
+            for (size_t n = 1; n < result.size(); ++n)
+                result[n] = Range { from.line + LineOffset::cast_from(n), ColumnOffset(0), rightMargin };
 
-        // Render last (second) line partial from beginning to last selected column.
-        result[result.size() - 1] = Range { to.line, ColumnOffset(0), min(to.column, rightMargin) };
-        break;
+            // Render last (second) line partial from beginning to last selected column.
+            result[result.size() - 1] = Range { to.line, ColumnOffset(0), min(to.column, rightMargin) };
+            break;
     }
 
     return result;

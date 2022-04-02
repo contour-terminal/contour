@@ -125,47 +125,48 @@ auto CursorRenderer::createTileData(CursorShape cursorShape,
 
     switch (cursorShape)
     {
-    case CursorShape::Block:
-        return create(defaultBitmapSize,
-                      [&]() { return atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0xFFu); });
-    case CursorShape::Underscore:
-        return create(ImageSize { width, Height(baseline) }, [&]() {
-            auto const height = Height(baseline);
-            auto const thickness = max(LineThickness * baseline / 3, 1);
-            auto const base_y = max((*height - thickness) / 2, 0u);
-            auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
+        case CursorShape::Block:
+            return create(defaultBitmapSize, [&]() {
+                return atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0xFFu);
+            });
+        case CursorShape::Underscore:
+            return create(ImageSize { width, Height(baseline) }, [&]() {
+                auto const height = Height(baseline);
+                auto const thickness = max(LineThickness * baseline / 3, 1);
+                auto const base_y = max((*height - thickness) / 2, 0u);
+                auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
 
-            for (int y = 1; y <= thickness; ++y)
-                for (int x = 0; x < width.as<int>(); ++x)
-                    image[(base_y + y) * width.as<int>() + x] = 0xFF;
-            return image;
-        });
-    case CursorShape::Bar:
-        return create(defaultBitmapSize, [&]() {
-            auto const thickness = max(LineThickness * baseline / 3, 1);
-            // auto const base_y = max((height - thickness) / 2, 0);
-            auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
+                for (int y = 1; y <= thickness; ++y)
+                    for (int x = 0; x < width.as<int>(); ++x)
+                        image[(base_y + y) * width.as<int>() + x] = 0xFF;
+                return image;
+            });
+        case CursorShape::Bar:
+            return create(defaultBitmapSize, [&]() {
+                auto const thickness = max(LineThickness * baseline / 3, 1);
+                // auto const base_y = max((height - thickness) / 2, 0);
+                auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
 
-            for (int x = 0; x < thickness; ++x)
-                for (int y = 0; y < unbox<int>(height); ++y)
-                    image[y * *width + x] = 0xFF;
-            return image;
-        });
-    case CursorShape::Rectangle:
-        return create(defaultBitmapSize, [&]() {
-            auto const height = _gridMetrics.cellSize.height;
-            auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0xFFu);
-            auto const thickness = max(unbox<int>(width) / 12, 1);
+                for (int x = 0; x < thickness; ++x)
+                    for (int y = 0; y < unbox<int>(height); ++y)
+                        image[y * *width + x] = 0xFF;
+                return image;
+            });
+        case CursorShape::Rectangle:
+            return create(defaultBitmapSize, [&]() {
+                auto const height = _gridMetrics.cellSize.height;
+                auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0xFFu);
+                auto const thickness = max(unbox<int>(width) / 12, 1);
 
-            auto const innerWidth = unbox<int>(width) - 2 * thickness;
-            auto const innerHeight = unbox<int>(height) - 2 * thickness;
+                auto const innerWidth = unbox<int>(width) - 2 * thickness;
+                auto const innerHeight = unbox<int>(height) - 2 * thickness;
 
-            for (int y = thickness; y <= innerHeight; ++y)
-                for (int x = thickness; x <= innerWidth; ++x)
-                    image[y * *width + x] = 0;
+                for (int y = thickness; y <= innerHeight; ++y)
+                    for (int x = thickness; x <= innerWidth; ++x)
+                        image[y * *width + x] = 0;
 
-            return image;
-        });
+                return image;
+            });
     }
     Require(false && "Unhandled case.");
     return {};

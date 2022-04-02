@@ -104,11 +104,11 @@ auto makeDraw4WaySymmetric(Arc arc, ImageSize size, F putpixel)
         auto const h = unbox<int>(size.height);
         switch (arc)
         {
-        case Arc::TopLeft: putpixel(w - x, y); break;
-        case Arc::TopRight: putpixel(x, y); break;
-        case Arc::BottomLeft: putpixel(w - x, h - y); break;
-        case Arc::BottomRight: putpixel(x, h - y); break;
-        case Arc::NoArc: break;
+            case Arc::TopLeft: putpixel(w - x, y); break;
+            case Arc::TopRight: putpixel(x, y); break;
+            case Arc::BottomLeft: putpixel(w - x, h - y); break;
+            case Arc::BottomRight: putpixel(x, h - y); break;
+            case Arc::NoArc: break;
         }
     };
 }
@@ -232,6 +232,7 @@ struct Pixmap
 
     void paint(int x, int y, uint8_t value = 0xFF);
     void paintOver(int x, int y, uint8_t intensity);
+    void paintOverThick(int x, int y, uint8_t intensity, int sx, int sy);
 
     atlas::Buffer take();
 
@@ -279,6 +280,13 @@ inline void Pixmap::paintOver(int x, int y, uint8_t intensity)
     target = static_cast<uint8_t>(std::min(static_cast<int>(target) + static_cast<int>(intensity), 255));
 }
 
+inline void Pixmap::paintOverThick(int x, int y, uint8_t intensity, int sx, int sy)
+{
+    for (int i = x - sx; i <= x + sx; ++i)
+        for (int j = y - sy; j <= y + sy; ++j)
+            paintOver(i, j, intensity);
+}
+
 template <typename F>
 Pixmap& Pixmap::fill(F const& filler)
 {
@@ -315,11 +323,11 @@ struct formatter<terminal::renderer::Arc>
         using terminal::renderer::Arc;
         switch (value)
         {
-        case Arc::NoArc: return format_to(ctx.out(), "NoArc");
-        case Arc::TopLeft: return format_to(ctx.out(), "TopLeft");
-        case Arc::TopRight: return format_to(ctx.out(), "TopRight");
-        case Arc::BottomLeft: return format_to(ctx.out(), "BottomLeft");
-        case Arc::BottomRight: return format_to(ctx.out(), "BottomRight");
+            case Arc::NoArc: return format_to(ctx.out(), "NoArc");
+            case Arc::TopLeft: return format_to(ctx.out(), "TopLeft");
+            case Arc::TopRight: return format_to(ctx.out(), "TopRight");
+            case Arc::BottomLeft: return format_to(ctx.out(), "BottomLeft");
+            case Arc::BottomRight: return format_to(ctx.out(), "BottomRight");
         }
         return format_to(ctx.out(), "?");
     }

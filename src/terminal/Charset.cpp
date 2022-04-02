@@ -274,18 +274,18 @@ CharsetMap const* charsetMap(CharsetId _id) noexcept
 
     switch (_id)
     {
-    case CharsetId::British: return &british;
-    case CharsetId::Dutch: return &dutch;
-    case CharsetId::Finnish: return &finish;
-    case CharsetId::French: return &french;
-    case CharsetId::FrenchCanadian: return &frenchCanadian;
-    case CharsetId::German: return &german;
-    case CharsetId::NorwegianDanish: return &norweigianDanish;
-    case CharsetId::Spanish: return &spanish;
-    case CharsetId::Special: return &special;
-    case CharsetId::Swedish: return &swedish;
-    case CharsetId::Swiss: return &swiss;
-    case CharsetId::USASCII: return &usascii;
+        case CharsetId::British: return &british;
+        case CharsetId::Dutch: return &dutch;
+        case CharsetId::Finnish: return &finish;
+        case CharsetId::French: return &french;
+        case CharsetId::FrenchCanadian: return &frenchCanadian;
+        case CharsetId::German: return &german;
+        case CharsetId::NorwegianDanish: return &norweigianDanish;
+        case CharsetId::Spanish: return &spanish;
+        case CharsetId::Special: return &special;
+        case CharsetId::Swedish: return &swedish;
+        case CharsetId::Swiss: return &swiss;
+        case CharsetId::USASCII: return &usascii;
     }
 
     return nullptr;

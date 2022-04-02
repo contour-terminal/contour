@@ -13,6 +13,8 @@
  */
 #include <terminal/ControlCode.h>
 #include <terminal/InputGenerator.h>
+#include <terminal/RenderBuffer.h>
+#include <terminal/RenderBufferBuilder.h>
 #include <terminal/Terminal.h>
 #include <terminal/logging.h>
 #include <terminal/pty/MockPty.h>
@@ -46,43 +48,6 @@ namespace // {{{ helpers
     {
         while (!value.empty() && value.back() == ' ')
             value.pop_back();
-    }
-
-    constexpr RGBColor makeRGBColor(RGBColor fg, RGBColor bg, CellRGBColor cellColor) noexcept
-    {
-        if (holds_alternative<CellForegroundColor>(cellColor))
-            return fg;
-        if (holds_alternative<CellBackgroundColor>(cellColor))
-            return bg;
-        return get<RGBColor>(cellColor);
-    }
-
-    tuple<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette,
-                                         Cell const& _cell,
-                                         bool _reverseVideo,
-                                         bool _selected,
-                                         bool _isCursor)
-    {
-        auto const [fg, bg] = _cell.makeColors(_colorPalette, _reverseVideo);
-        if (!_selected && !_isCursor)
-            return tuple { fg, bg };
-
-        auto const [selectionFg, selectionBg] =
-            [](auto fg, auto bg, bool selected, ColorPalette const& colors) -> tuple<RGBColor, RGBColor> {
-            auto const a = colors.selectionForeground.value_or(bg);
-            auto const b = colors.selectionBackground.value_or(fg);
-            if (selected)
-                return tuple { a, b };
-            else
-                return tuple { b, a };
-        }(fg, bg, _selected, _colorPalette);
-        if (!_isCursor)
-            return tuple { selectionFg, selectionBg };
-
-        auto const cursorFg = makeRGBColor(selectionFg, selectionBg, _colorPalette.cursor.textOverrideColor);
-        auto const cursorBg = makeRGBColor(selectionFg, selectionBg, _colorPalette.cursor.color);
-
-        return tuple { cursorFg, cursorBg };
     }
 
 #if defined(CONTOUR_PERF_STATS)
@@ -140,40 +105,27 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
              _sixelCursorConformance,
              move(_colorPalette),
              _allowReflowOnResize },
-    screen_ { state_, ScreenType::Primary },
     // clang-format on
-    viewport_ { screen_,
+    primaryScreen_ { state_, ScreenType::Primary, state_.primaryBuffer },
+    alternateScreen_ { state_, ScreenType::Alternate, state_.alternateBuffer },
+    currentScreen_ { primaryScreen_ },
+    viewport_ { *this,
                 [this]() {
                     breakLoopAndRefreshRenderBuffer();
                 } },
     selectionHelper_ { this }
 {
 #if 0
-    resetHard();
+    hardReset();
 #else
-    screen().setMode(DECMode::AutoWrap, true);
-    screen().setMode(DECMode::TextReflow, true);
-    screen().setMode(DECMode::SixelCursorNextToGraphic, state_.sixelCursorConformance);
+    setMode(DECMode::AutoWrap, true);
+    setMode(DECMode::TextReflow, true);
+    setMode(DECMode::SixelCursorNextToGraphic, state_.sixelCursorConformance);
 #endif
 }
 
 Terminal::~Terminal()
 {
-    state_.terminating = true;
-    pty_->wakeupReader();
-
-    if (screenUpdateThread_)
-        screenUpdateThread_->join();
-}
-
-void Terminal::start()
-{
-    screenUpdateThread_ = make_unique<std::thread>(bind(&Terminal::mainLoop, this));
-}
-
-void Terminal::resetHard()
-{
-    screen_.resetHard();
 }
 
 void Terminal::setRefreshRate(double _refreshRate)
@@ -186,26 +138,6 @@ void Terminal::setLastMarkRangeOffset(LineOffset _value) noexcept
     copyLastMarkRangeOffset_ = _value;
 }
 
-void Terminal::mainLoop()
-{
-    mainLoopThreadID_ = this_thread::get_id();
-
-    TerminalLog()("Starting main loop with thread id {}", [&]() {
-        stringstream sstr;
-        sstr << mainLoopThreadID_;
-        return sstr.str();
-    }());
-
-    while (!state_.terminating)
-    {
-        if (!processInputOnce())
-            break;
-    }
-
-    TerminalLog()("Event loop terminating (PTY {}).", pty_->isClosed() ? "closed" : "open");
-    eventListener_.onClosed();
-}
-
 bool Terminal::processInputOnce()
 {
     auto const timeout = renderBuffer_.state == RenderBufferState::WaitingForRefresh && !screenDirty_
@@ -213,7 +145,7 @@ bool Terminal::processInputOnce()
                              //: refreshInterval_ : std::chrono::seconds(0)
                              : std::chrono::seconds(30);
 
-    auto const bufOpt = pty_->read(ptyReadBufferSize_, timeout);
+    optional<string_view> const bufOpt = pty_->read(ptyReadBufferSize_, timeout);
     if (!bufOpt)
     {
         if (errno != EINTR && errno != EAGAIN)
@@ -223,7 +155,7 @@ bool Terminal::processInputOnce()
         }
         return errno == EINTR || errno == EAGAIN;
     }
-    auto const buf = *bufOpt;
+    string_view const buf = *bufOpt;
 
     if (buf.empty())
     {
@@ -247,8 +179,8 @@ void Terminal::breakLoopAndRefreshRenderBuffer()
     changes_++;
     renderBuffer_.state = RenderBufferState::RefreshBuffersAndTrySwap;
 
-    if (this_thread::get_id() == mainLoopThreadID_)
-        return;
+    // if (this_thread::get_id() == mainLoopThreadID_)
+    //     return;
 
     pty_->wakeupReader();
 }
@@ -273,32 +205,32 @@ bool Terminal::ensureFreshRenderBuffer(bool _locked)
 
     switch (renderBuffer_.state)
     {
-    case RenderBufferState::WaitingForRefresh:
-        if (avoidRefresh)
-            break;
-        renderBuffer_.state = RenderBufferState::RefreshBuffersAndTrySwap;
-        [[fallthrough]];
-    case RenderBufferState::RefreshBuffersAndTrySwap:
-        if (!_locked)
-            refreshRenderBuffer(renderBuffer_.backBuffer());
-        else
-            refreshRenderBufferInternal(renderBuffer_.backBuffer());
-        renderBuffer_.state = RenderBufferState::TrySwapBuffers;
-        [[fallthrough]];
-    case RenderBufferState::TrySwapBuffers: {
-        [[maybe_unused]] auto const success = renderBuffer_.swapBuffers(currentTime_);
+        case RenderBufferState::WaitingForRefresh:
+            if (avoidRefresh)
+                break;
+            renderBuffer_.state = RenderBufferState::RefreshBuffersAndTrySwap;
+            [[fallthrough]];
+        case RenderBufferState::RefreshBuffersAndTrySwap:
+            if (!_locked)
+                refreshRenderBuffer(renderBuffer_.backBuffer());
+            else
+                refreshRenderBufferInternal(renderBuffer_.backBuffer());
+            renderBuffer_.state = RenderBufferState::TrySwapBuffers;
+            [[fallthrough]];
+        case RenderBufferState::TrySwapBuffers: {
+            [[maybe_unused]] auto const success = renderBuffer_.swapBuffers(currentTime_);
 
 #if defined(CONTOUR_PERF_STATS)
-        logRenderBufferSwap(success, lastFrameID_);
+            logRenderBufferSwap(success, lastFrameID_);
 #endif
 
 #if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
-        // Passively invoked by the terminal thread -> do inform render thread about updates.
-        if (success)
-            eventListener_.renderBufferUpdated();
+            // Passively invoked by the terminal thread -> do inform render thread about updates.
+            if (success)
+                eventListener_.renderBufferUpdated();
 #endif
-    }
-    break;
+        }
+        break;
     }
     return true;
 }
@@ -307,47 +239,6 @@ void Terminal::refreshRenderBuffer(RenderBuffer& _output)
 {
     auto const _l = lock_guard { *this };
     refreshRenderBufferInternal(_output);
-}
-
-RenderCell makeRenderCell(ColorPalette const& _colorPalette,
-                          HyperlinkStorage const& _hyperlinks,
-                          Cell const& _cell,
-                          RGBColor fg,
-                          RGBColor bg,
-                          LineOffset _line,
-                          ColumnOffset _column)
-{
-    RenderCell cell;
-    cell.backgroundColor = bg;
-    cell.foregroundColor = fg;
-    cell.decorationColor = _cell.getUnderlineColor(_colorPalette, fg);
-    cell.position.line = _line;
-    cell.position.column = _column;
-    cell.flags = _cell.styles();
-    cell.width = _cell.width();
-
-    if (_cell.codepointCount() != 0)
-    {
-        for (size_t i = 0; i < _cell.codepointCount(); ++i)
-            cell.codepoints.push_back(_cell.codepoint(i));
-    }
-
-    cell.image = _cell.imageFragment();
-
-    if (auto href = _hyperlinks.hyperlinkById(_cell.hyperlink()))
-    {
-        auto const& color = href->state == HyperlinkState::Hover ? _colorPalette.hyperlinkDecoration.hover
-                                                                 : _colorPalette.hyperlinkDecoration.normal;
-        // TODO(decoration): Move property into Terminal.
-        auto const decoration =
-            href->state == HyperlinkState::Hover
-                ? CellFlags::Underline        // TODO: decorationRenderer_.hyperlinkHover()
-                : CellFlags::DottedUnderline; // TODO: decorationRenderer_.hyperlinkNormal();
-        cell.flags |= decoration;             // toCellStyle(decoration);
-        cell.decorationColor = color;
-    }
-
-    return cell;
 }
 
 PageSize Terminal::SelectionHelper::pageSize() const noexcept
@@ -360,9 +251,18 @@ bool Terminal::SelectionHelper::wordDelimited(CellLocation _pos) const noexcept
     // Word selection may be off by one
     _pos.column = min(_pos.column, boxed_cast<ColumnOffset>(terminal->pageSize().columns - 1));
 
-    Cell const& cell = terminal->screen().at(_pos);
-    return cell.empty()
-           || terminal->wordDelimiters_.find(cell.codepoint(0)) != terminal->wordDelimiters_.npos;
+    if (terminal->isPrimaryScreen())
+    {
+        auto const& cell = terminal->primaryScreen().at(_pos);
+        return cell.empty()
+               || terminal->wordDelimiters_.find(cell.codepoint(0)) != terminal->wordDelimiters_.npos;
+    }
+    else
+    {
+        auto const& cell = terminal->alternateScreen().at(_pos);
+        return cell.empty()
+               || terminal->wordDelimiters_.find(cell.codepoint(0)) != terminal->wordDelimiters_.npos;
+    }
 }
 
 bool Terminal::SelectionHelper::wrappedLine(LineOffset _line) const noexcept
@@ -375,7 +275,7 @@ bool Terminal::SelectionHelper::cellEmpty(CellLocation _pos) const noexcept
     // Word selection may be off by one
     _pos.column = min(_pos.column, boxed_cast<ColumnOffset>(terminal->pageSize().columns - 1));
 
-    return terminal->screen().at(_pos).empty();
+    return terminal->currentScreen().isCellEmpty(_pos);
 }
 
 int Terminal::SelectionHelper::cellWidth(CellLocation _pos) const noexcept
@@ -383,144 +283,52 @@ int Terminal::SelectionHelper::cellWidth(CellLocation _pos) const noexcept
     // Word selection may be off by one
     _pos.column = min(_pos.column, boxed_cast<ColumnOffset>(terminal->pageSize().columns - 1));
 
-    return terminal->screen().at(_pos).width();
+    return terminal->currentScreen().cellWithAt(_pos);
 }
+
+/**
+ * Sets the hyperlink into hovering state if mouse is currently hovering it
+ * and unsets the state when the object is being destroyed.
+ */
+struct ScopedHyperlinkHover
+{
+    shared_ptr<HyperlinkInfo const> const href;
+
+    ScopedHyperlinkHover(Terminal const& terminal, ScreenBase const& screen):
+        href { terminal.tryGetHoveringHyperlink() }
+    {
+        if (href)
+            href->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?
+    }
+
+    ~ScopedHyperlinkHover()
+    {
+        if (href)
+            href->state = HyperlinkState::Inactive;
+    }
+};
 
 void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
 {
     verifyState();
 
-    auto const renderHyperlinks = screen_.contains(currentMousePosition_);
-
-    auto const currentMousePositionRel = viewport_.translateScreenToGridCoordinate(currentMousePosition_);
+    auto const renderHyperlinks = currentScreen_.get().contains(currentMousePosition_);
 
     changes_.store(0);
     screenDirty_ = false;
     ++lastFrameID_;
-
-    _output.clear();
-    _output.frameID = lastFrameID_;
-
-    enum class State
-    {
-        Gap,
-        Sequence
-    };
 
 #if defined(CONTOUR_PERF_STATS)
     if (TerminalLog)
         TerminalLog()("{}: Refreshing render buffer.\n", lastFrameID_.load());
 #endif
 
-    shared_ptr<HyperlinkInfo> href =
-        renderHyperlinks ? screen_.hyperlinkAt(currentMousePositionRel) : shared_ptr<HyperlinkInfo> {};
-    if (href)
-        href->state = HyperlinkState::Hover; // TODO: Left-Ctrl pressed?
+    auto const hoveringHyperlinkGuard = ScopedHyperlinkHover { *this, currentScreen_ };
 
-    _output.cursor = renderCursor();
-    auto const reverseVideo = screen_.isModeEnabled(terminal::DECMode::ReverseVideo);
-    screen_.render(
-        [this,
-         reverseVideo,
-         &_output,
-         prevWidth = 0,
-         prevHasCursor = false,
-         state = State::Gap,
-         lineNr = LineOffset(0)](Cell const& _cell, LineOffset _line, ColumnOffset _column) mutable {
-            // clang-format off
-            auto const selected = isSelected( CellLocation { _line - boxed_cast<LineOffset>(viewport_.scrollOffset()), _column });
-            auto const pos = CellLocation { _line, _column };
-            auto const gridPosition = viewport_.translateScreenToGridCoordinate(pos);
-            auto const hasCursor = gridPosition == screen_.realCursorPosition();
-            bool const paintCursor =
-                (hasCursor || (prevHasCursor && prevWidth == 2))
-                    && _output.cursor.has_value()
-                    && _output.cursor->shape == CursorShape::Block;
-            auto const [fg, bg] = makeColors(screen_.colorPalette(), _cell, reverseVideo, selected, paintCursor);
-            // clang-format on
-
-            prevWidth = _cell.width();
-            prevHasCursor = hasCursor;
-
-            auto const cellEmpty = _cell.empty();
-            auto const customBackground = bg != screen_.colorPalette().defaultBackground || !!_cell.styles();
-
-            bool isNewLine = false;
-            if (lineNr != _line)
-            {
-                isNewLine = true;
-                lineNr = _line;
-                prevWidth = 0;
-                prevHasCursor = false;
-                if (!_output.screen.empty())
-                    _output.screen.back().groupEnd = true;
-            }
-
-            switch (state)
-            {
-            case State::Gap:
-                if (!cellEmpty || customBackground)
-                {
-                    state = State::Sequence;
-                    // clang-format off
-                    _output.screen.emplace_back(makeRenderCell(screen_.colorPalette(),
-                                                               screen_.hyperlinks(),
-                                                               _cell,
-                                                               fg,
-                                                               bg,
-                                                               _line,
-                                                               _column));
-                    // clang-format on
-                    _output.screen.back().groupStart = true;
-                }
-                break;
-            case State::Sequence:
-                if (cellEmpty && !customBackground)
-                {
-                    _output.screen.back().groupEnd = true;
-                    state = State::Gap;
-                }
-                else
-                {
-                    // clang-format off
-                    _output.screen.emplace_back(makeRenderCell(screen_.colorPalette(),
-                                                               screen_.hyperlinks(),
-                                                               _cell,
-                                                               fg,
-                                                               bg,
-                                                               _line,
-                                                               _column));
-                    // clang-format on
-
-                    if (isNewLine)
-                        _output.screen.back().groupStart = true;
-                }
-                break;
-            }
-        },
-        viewport_.scrollOffset());
-
-    if (href)
-        href->state = HyperlinkState::Inactive;
-}
-
-optional<RenderCursor> Terminal::renderCursor()
-{
-    if (!cursorCurrentlyVisible() || !viewport().isLineVisible(screen_.cursor().position.line))
-        return nullopt;
-
-    // TODO: check if CursorStyle has changed, and update render context accordingly.
-
-    Cell const& cursorCell = screen_.at(screen_.cursor().position);
-
-    auto constexpr InactiveCursorShape = CursorShape::Rectangle; // TODO configurable
-    auto const shape = screen_.focused() ? cursorShape() : InactiveCursorShape;
-
-    return RenderCursor { CellLocation { screen_.cursor().position.line
-                                             + viewport_.scrollOffset().as<LineOffset>(),
-                                         screen_.cursor().position.column },
-                          shape,
-                          cursorCell.width() };
+    if (isPrimaryScreen())
+        primaryScreen_.render(RenderBufferBuilder<Cell> { *this, _output }, viewport_.scrollOffset());
+    else
+        alternateScreen_.render(RenderBufferBuilder<Cell> { *this, _output }, viewport_.scrollOffset());
 }
 // }}}
 
@@ -530,7 +338,7 @@ bool Terminal::sendKeyPressEvent(Key _key, Modifier _modifier, Timestamp _now)
     lastCursorBlink_ = _now;
 
     // Early exit if KAM is enabled.
-    if (screen_.isModeEnabled(AnsiMode::KeyboardAction))
+    if (isModeEnabled(AnsiMode::KeyboardAction))
         return true;
 
     viewport_.scrollToBottom();
@@ -546,7 +354,7 @@ bool Terminal::sendCharPressEvent(char32_t _value, Modifier _modifier, Timestamp
     lastCursorBlink_ = _now;
 
     // Early exit if KAM is enabled.
-    if (screen_.isModeEnabled(AnsiMode::KeyboardAction))
+    if (isModeEnabled(AnsiMode::KeyboardAction))
         return true;
 
     auto const success = state_.inputGenerator.generate(_value, _modifier);
@@ -595,21 +403,21 @@ bool Terminal::handleMouseSelection(Modifier _modifier, Timestamp _now)
 
     switch (speedClicks_)
     {
-    case 1:
-        if (_modifier == mouseBlockSelectionModifier_)
-            selection_ = make_unique<RectangularSelection>(selectionHelper_, startPos);
-        else
-            selection_ = make_unique<LinearSelection>(selectionHelper_, startPos);
-        break;
-    case 2:
-        selection_ = make_unique<WordWiseSelection>(selectionHelper_, startPos);
-        selection_->extend(startPos);
-        break;
-    case 3:
-        selection_ = make_unique<FullLineSelection>(selectionHelper_, startPos);
-        selection_->extend(startPos);
-        break;
-    default: clearSelection(); break;
+        case 1:
+            if (_modifier == mouseBlockSelectionModifier_)
+                selection_ = make_unique<RectangularSelection>(selectionHelper_, startPos);
+            else
+                selection_ = make_unique<LinearSelection>(selectionHelper_, startPos);
+            break;
+        case 2:
+            selection_ = make_unique<WordWiseSelection>(selectionHelper_, startPos);
+            selection_->extend(startPos);
+            break;
+        case 3:
+            selection_ = make_unique<FullLineSelection>(selectionHelper_, startPos);
+            selection_->extend(startPos);
+            break;
+        default: clearSelection(); break;
     }
 
     breakLoopAndRefreshRenderBuffer();
@@ -633,7 +441,7 @@ bool Terminal::sendMouseMoveEvent(Modifier _modifier,
     if (leftMouseButtonPressed_ && isSelectionComplete())
         clearSelection();
 
-    if (newPosition == currentMousePosition_ && !screen_.isModeEnabled(DECMode::MouseSGRPixels))
+    if (newPosition == currentMousePosition_ && !isModeEnabled(DECMode::MouseSGRPixels))
         return false;
 
     currentMousePosition_ = newPosition;
@@ -692,12 +500,12 @@ bool Terminal::sendMouseReleaseEvent(Modifier _modifier,
         {
             switch (selector()->state())
             {
-            case Selection::State::InProgress:
-                selector()->complete();
-                eventListener_.onSelectionCompleted();
-                break;
-            case Selection::State::Waiting: selection_.reset(); break;
-            case Selection::State::Complete: break;
+                case Selection::State::InProgress:
+                    selector()->complete();
+                    eventListener_.onSelectionCompleted();
+                    break;
+                case Selection::State::Waiting: selection_.reset(); break;
+                case Selection::State::Complete: break;
             }
         }
     }
@@ -707,7 +515,7 @@ bool Terminal::sendMouseReleaseEvent(Modifier _modifier,
 
 bool Terminal::sendFocusInEvent()
 {
-    screen_.setFocus(true);
+    state_.focused = true;
     breakLoopAndRefreshRenderBuffer();
 
     if (state_.inputGenerator.generateFocusInEvent())
@@ -721,7 +529,7 @@ bool Terminal::sendFocusInEvent()
 
 bool Terminal::sendFocusOutEvent()
 {
-    screen_.setFocus(false);
+    state_.focused = false;
     breakLoopAndRefreshRenderBuffer();
 
     if (state_.inputGenerator.generateFocusOutEvent())
@@ -768,8 +576,15 @@ void Terminal::flushInput()
 
 void Terminal::writeToScreen(string_view _data)
 {
-    auto const _l = lock_guard { *this };
-    screen_.write(_data);
+    {
+        auto const _l = std::lock_guard { *this };
+        state_.parser.parseFragment(_data);
+    }
+
+    if (!state_.modes.enabled(DECMode::BatchedRendering))
+    {
+        screenUpdated();
+    }
 }
 
 void Terminal::updateCursorVisibilityState() const
@@ -789,12 +604,14 @@ bool Terminal::updateCursorHoveringState()
 {
     verifyState();
 
-    if (!screen_.contains(currentMousePosition_))
+    auto const mouseInView = isPrimaryScreen() ? primaryScreen_.contains(currentMousePosition_)
+                                               : alternateScreen_.contains(currentMousePosition_);
+    if (!mouseInView)
         return false;
 
     auto const relCursorPos = viewport_.translateScreenToGridCoordinate(currentMousePosition_);
-
-    auto const newState = screen_.contains(currentMousePosition_) && !!screen_.at(relCursorPos).hyperlink();
+    auto const mouseInView2 = currentScreen_.get().contains(currentMousePosition_);
+    auto const newState = mouseInView2 && !!currentScreen_.get().hyperlinkIdAt(relCursorPos);
 
     auto const oldState = hoveringHyperlink_.exchange(newState);
     return newState != oldState;
@@ -802,7 +619,7 @@ bool Terminal::updateCursorHoveringState()
 
 optional<chrono::milliseconds> Terminal::nextRender() const
 {
-    if (!screen_.cursor().visible)
+    if (!state_.cursor.visible)
         return nullopt;
 
     if (cursorDisplay_ != CursorDisplay::Blink)
@@ -819,12 +636,24 @@ void Terminal::resizeScreen(PageSize _cells, optional<ImageSize> _pixels)
 {
     auto const _l = lock_guard { *this };
 
-    screen_.resize(_cells);
+    // NOTE: This will only resize the currently active buffer.
+    // Any other buffer will be resized when it is switched to.
+
+    auto const oldCursorPos = state_.cursor.position;
+
+    state_.pageSize = _cells;
+
+    // Reset margin to their default.
+    state_.margin = Margin { Margin::Vertical { {}, _cells.lines.as<LineOffset>() - 1 },
+                             Margin::Horizontal { {}, _cells.columns.as<ColumnOffset>() - 1 } };
+
+    applyPageSizeToCurrentBuffer();
+
     if (_pixels)
     {
         auto width = Width(*_pixels->width / _cells.columns.as<unsigned>());
         auto height = Height(*_pixels->height / _cells.lines.as<unsigned>());
-        screen_.setCellPixelSize(ImageSize { width, height });
+        setCellPixelSize(ImageSize { width, height });
     }
 
     currentMousePosition_.column =
@@ -836,10 +665,59 @@ void Terminal::resizeScreen(PageSize _cells, optional<ImageSize> _pixels)
     verifyState();
 }
 
+void Terminal::resizeColumns(ColumnCount _newColumnCount, bool _clear)
+{
+    // DECCOLM / DECSCPP
+    if (_clear)
+    {
+        // Sets the left, right, top and bottom scrolling margins to their default positions.
+        setTopBottomMargin({}, unbox<LineOffset>(state_.pageSize.lines) - LineOffset(1));       // DECSTBM
+        setLeftRightMargin({}, unbox<ColumnOffset>(state_.pageSize.columns) - ColumnOffset(1)); // DECRLM
+
+        // Erases all data in page memory
+        clearScreen();
+    }
+
+    // resets vertical split screen mode (DECLRMM) to unavailable
+    setMode(DECMode::LeftRightMargin, false); // DECSLRM
+
+    // Pre-resize in case the event callback right after is not actually resizing the window
+    // (e.g. either by choice or because the window manager does not allow that, such as tiling WMs).
+    auto const newSize = PageSize { state_.pageSize.lines, _newColumnCount };
+    auto const pixels = cellPixelSize() * newSize;
+    resizeScreen(newSize, pixels);
+
+    resizeWindow(newSize);
+}
+
 void Terminal::verifyState()
 {
+#if !defined(NDEBUG)
     Require(*currentMousePosition_.column < *pageSize().columns);
     Require(*currentMousePosition_.line < *pageSize().lines);
+
+    if (isPrimaryScreen())
+        Require(state_.primaryBuffer.pageSize() == state_.pageSize);
+    else
+        Require(state_.alternateBuffer.pageSize() == state_.pageSize);
+
+    Require(*state_.cursor.position.column < *state_.pageSize.columns);
+    Require(*state_.cursor.position.line < *state_.pageSize.lines);
+
+    Require(state_.tabs.empty() || state_.tabs.back() < unbox<ColumnOffset>(state_.pageSize.columns));
+
+    // verify cursor positions
+    [[maybe_unused]] auto const clampedCursorPos = clampToScreen(state_.cursor.position);
+    if (state_.cursor.position != clampedCursorPos)
+    {
+        auto const errorMessage =
+            fmt::format("Cursor {} does not match clamp to screen {}.", state_.cursor, clampedCursorPos);
+        currentScreen_.get().fail(errorMessage);
+        // FIXME: the above triggers on tmux vertical screen split (cursor.column off-by-one)
+    }
+
+    currentScreen_.get().verifyState();
+#endif
 }
 
 void Terminal::setCursorDisplay(CursorDisplay _display)
@@ -868,8 +746,7 @@ string Terminal::extractSelectionText() const
         auto const _lock = scoped_lock { *this };
         auto const isNewLine = _pos.column <= lastColumn;
         bool const touchesRightPage =
-            _pos.line.value > 0
-            && isSelected({ _pos.line - 1, screen_.pageSize().columns.as<ColumnOffset>() - 1 });
+            _pos.line.value > 0 && isSelected({ _pos.line - 1, pageSize().columns.as<ColumnOffset>() - 1 });
         if (isNewLine && (!isLineWrapped(_pos.line) || !touchesRightPage))
         {
             // TODO: handle logical line in word-selection (don't include LF in wrapped lines)
@@ -893,11 +770,11 @@ string Terminal::extractLastMarkRange() const
     auto const _l = std::lock_guard { *this };
 
     // -1 because we always want to start extracting one line above the cursor by default.
-    auto const bottomLine = screen_.cursor().position.line + LineOffset(-1) + copyLastMarkRangeOffset_;
+    auto const bottomLine = state_.cursor.position.line + LineOffset(-1) + copyLastMarkRangeOffset_;
 
     auto const marker1 = optional { bottomLine };
 
-    auto const marker0 = screen_.findMarkerUpwards(marker1.value());
+    auto const marker0 = primaryScreen_.findMarkerUpwards(marker1.value());
     if (!marker0.has_value())
         return {};
 
@@ -909,8 +786,8 @@ string Terminal::extractLastMarkRange() const
 
     for (auto lineNum = firstLine; lineNum <= lastLine; ++lineNum)
     {
-        auto const lineText = screen_.grid().lineAt(lineNum).toUtf8Trimmed();
-        text += screen_.grid().lineAt(lineNum).toUtf8Trimmed();
+        auto const lineText = primaryScreen_.grid().lineAt(lineNum).toUtf8Trimmed();
+        text += primaryScreen_.grid().lineAt(lineNum).toUtf8Trimmed();
         text += '\n';
     }
 
@@ -1044,7 +921,28 @@ void Terminal::setMouseWheelMode(InputGenerator::MouseWheelMode _mode)
 
 void Terminal::setWindowTitle(string_view _title)
 {
+    state_.windowTitle = _title;
     eventListener_.setWindowTitle(_title);
+}
+
+std::string const& Terminal::windowTitle() const noexcept
+{
+    return state_.windowTitle;
+}
+
+void Terminal::saveWindowTitle()
+{
+    state_.savedWindowTitles.push(state_.windowTitle);
+}
+
+void Terminal::restoreWindowTitle()
+{
+    if (!state_.savedWindowTitles.empty())
+    {
+        state_.windowTitle = state_.savedWindowTitles.top();
+        state_.savedWindowTitles.pop();
+        setWindowTitle(state_.windowTitle);
+    }
 }
 
 void Terminal::setTerminalProfile(string const& _configProfileName)
@@ -1058,10 +956,425 @@ void Terminal::useApplicationCursorKeys(bool _enable)
     state_.inputGenerator.setCursorKeysMode(keyMode);
 }
 
+void Terminal::setMode(AnsiMode _mode, bool _enable)
+{
+    if (!isValidAnsiMode(static_cast<unsigned int>(_mode)))
+        return;
+
+    state_.modes.set(_mode, _enable);
+}
+
+void Terminal::setMode(DECMode _mode, bool _enable)
+{
+    if (!isValidDECMode(static_cast<unsigned int>(_mode)))
+        return;
+
+    switch (_mode)
+    {
+        case DECMode::AutoWrap: state_.cursor.autoWrap = _enable; break;
+        case DECMode::LeftRightMargin:
+            // Resetting DECLRMM also resets the horizontal margins back to screen size.
+            if (!_enable)
+                state_.margin.horizontal =
+                    Margin::Horizontal { ColumnOffset(0),
+                                         boxed_cast<ColumnOffset>(state_.pageSize.columns - 1) };
+            break;
+        case DECMode::Origin: state_.cursor.originMode = _enable; break;
+        case DECMode::Columns132:
+            if (!isModeEnabled(DECMode::AllowColumns80to132))
+                break;
+            if (_enable != isModeEnabled(DECMode::Columns132))
+            {
+                auto const clear = _enable != isModeEnabled(_mode);
+
+                // sets the number of columns on the page to 80 or 132 and selects the
+                // corresponding 80- or 132-column font
+                auto const columns = ColumnCount(_enable ? 132 : 80);
+
+                resizeColumns(columns, clear);
+            }
+            break;
+        case DECMode::BatchedRendering:
+            if (state_.modes.enabled(DECMode::BatchedRendering) != _enable)
+                synchronizedOutput(_enable);
+            break;
+        case DECMode::TextReflow:
+            if (state_.allowReflowOnResize && isPrimaryScreen())
+            {
+                // Enabling reflow enables every line in the main page area.
+                // Disabling reflow only affects currently line and below.
+                auto const startLine = _enable ? LineOffset(0) : realCursorPosition().line;
+                for (auto line = startLine; line < boxed_cast<LineOffset>(state_.pageSize.lines); ++line)
+                    primaryScreen_.grid().lineAt(line).setWrappable(_enable);
+            }
+            break;
+        case DECMode::DebugLogging:
+            // Since this mode (Xterm extension) does not support finer graind control,
+            // we'll be just globally enable/disable all debug logging.
+            for (auto& category: logstore::get())
+                category.get().enable(_enable);
+            break;
+        case DECMode::UseAlternateScreen:
+            if (_enable)
+                setScreen(ScreenType::Alternate);
+            else
+                setScreen(ScreenType::Primary);
+            break;
+        case DECMode::UseApplicationCursorKeys:
+            useApplicationCursorKeys(_enable);
+            if (isAlternateScreen())
+            {
+                if (_enable)
+                    setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
+                else
+                    setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
+            }
+            break;
+        case DECMode::BracketedPaste: setBracketedPaste(_enable); break;
+        case DECMode::MouseSGR:
+            if (_enable)
+                setMouseTransport(MouseTransport::SGR);
+            else
+                setMouseTransport(MouseTransport::Default);
+            break;
+        case DECMode::MouseExtended: setMouseTransport(MouseTransport::Extended); break;
+        case DECMode::MouseURXVT: setMouseTransport(MouseTransport::URXVT); break;
+        case DECMode::MouseSGRPixels:
+            if (_enable)
+                setMouseTransport(MouseTransport::SGRPixels);
+            else
+                setMouseTransport(MouseTransport::Default);
+            break;
+        case DECMode::MouseAlternateScroll:
+            if (_enable)
+                setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
+            else
+                setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
+            break;
+        case DECMode::FocusTracking: setGenerateFocusEvents(_enable); break;
+        case DECMode::UsePrivateColorRegisters: state_.usePrivateColorRegisters = _enable; break;
+        case DECMode::VisibleCursor:
+            state_.cursor.visible = _enable;
+            setCursorVisibility(_enable);
+            break;
+        case DECMode::MouseProtocolX10: setMouseProtocol(MouseProtocol::X10, _enable); break;
+        case DECMode::MouseProtocolNormalTracking:
+            setMouseProtocol(MouseProtocol::NormalTracking, _enable);
+            break;
+        case DECMode::MouseProtocolHighlightTracking:
+            setMouseProtocol(MouseProtocol::HighlightTracking, _enable);
+            break;
+        case DECMode::MouseProtocolButtonTracking:
+            setMouseProtocol(MouseProtocol::ButtonTracking, _enable);
+            break;
+        case DECMode::MouseProtocolAnyEventTracking:
+            setMouseProtocol(MouseProtocol::AnyEventTracking, _enable);
+            break;
+        case DECMode::SaveCursor:
+            if (_enable)
+                saveCursor();
+            else
+                restoreCursor();
+            break;
+        case DECMode::ExtendedAltScreen:
+            if (_enable)
+            {
+                state_.savedPrimaryCursor = cursor();
+                setMode(DECMode::UseAlternateScreen, true);
+                clearScreen();
+            }
+            else
+            {
+                setMode(DECMode::UseAlternateScreen, false);
+                restoreCursor(state_.savedPrimaryCursor);
+            }
+            break;
+        default: break;
+    }
+
+    state_.modes.set(_mode, _enable);
+}
+
+void Terminal::setTopBottomMargin(optional<LineOffset> _top, optional<LineOffset> _bottom)
+{
+    auto const bottom = _bottom.has_value()
+                            ? min(_bottom.value(), boxed_cast<LineOffset>(state_.pageSize.lines) - 1)
+                            : boxed_cast<LineOffset>(state_.pageSize.lines) - 1;
+
+    auto const top = _top.value_or(LineOffset(0));
+
+    if (top < bottom)
+    {
+        state_.margin.vertical.from = top;
+        state_.margin.vertical.to = bottom;
+        moveCursorTo({}, {});
+    }
+}
+
+void Terminal::setLeftRightMargin(optional<ColumnOffset> _left, optional<ColumnOffset> _right)
+{
+    if (isModeEnabled(DECMode::LeftRightMargin))
+    {
+        auto const right =
+            _right.has_value()
+                ? min(_right.value(), boxed_cast<ColumnOffset>(state_.pageSize.columns) - ColumnOffset(1))
+                : boxed_cast<ColumnOffset>(state_.pageSize.columns) - ColumnOffset(1);
+        auto const left = _left.value_or(ColumnOffset(0));
+        if (left < right)
+        {
+            state_.margin.horizontal.from = left;
+            state_.margin.horizontal.to = right;
+            moveCursorTo({}, {});
+        }
+    }
+}
+
+void Terminal::clearScreen()
+{
+    if (isPrimaryScreen())
+        primaryScreen_.clearScreen();
+    else
+        alternateScreen_.clearScreen();
+}
+
+void Terminal::moveCursorTo(LineOffset _line, ColumnOffset _column)
+{
+    auto const [line, column] = [&]() {
+        if (!state_.cursor.originMode)
+            return pair { _line, _column };
+        else
+            return pair { _line + state_.margin.vertical.from, _column + state_.margin.horizontal.from };
+    }();
+
+    state_.wrapPending = false;
+    state_.cursor.position.line = clampedLine(line);
+    state_.cursor.position.column = clampedColumn(column);
+}
+
+void Terminal::saveCursor()
+{
+    // https://vt100.net/docs/vt510-rm/DECSC.html
+    state_.savedCursor = state_.cursor;
+}
+
+void Terminal::restoreCursor()
+{
+    // https://vt100.net/docs/vt510-rm/DECRC.html
+    restoreCursor(state_.savedCursor);
+
+    setMode(DECMode::AutoWrap, state_.savedCursor.autoWrap);
+    setMode(DECMode::Origin, state_.savedCursor.originMode);
+}
+
+void Terminal::restoreCursor(Cursor const& _savedCursor)
+{
+    state_.wrapPending = false;
+    state_.cursor = _savedCursor;
+    state_.cursor.position = clampCoordinate(_savedCursor.position);
+    verifyState();
+}
+
+void Terminal::softReset()
+{
+    // https://vt100.net/docs/vt510-rm/DECSTR.html
+    setMode(DECMode::BatchedRendering, false);
+    setMode(DECMode::TextReflow, state_.allowReflowOnResize);
+    setGraphicsRendition(GraphicsRendition::Reset);    // SGR
+    state_.savedCursor.position = {};                  // DECSC (Save cursor state)
+    setMode(DECMode::VisibleCursor, true);             // DECTCEM (Text cursor enable)
+    setMode(DECMode::Origin, false);                   // DECOM
+    setMode(AnsiMode::KeyboardAction, false);          // KAM
+    setMode(DECMode::AutoWrap, false);                 // DECAWM
+    setMode(AnsiMode::Insert, false);                  // IRM
+    setMode(DECMode::UseApplicationCursorKeys, false); // DECCKM (Cursor keys)
+    setTopBottomMargin({}, boxed_cast<LineOffset>(state_.pageSize.lines) - LineOffset(1));       // DECSTBM
+    setLeftRightMargin({}, boxed_cast<ColumnOffset>(state_.pageSize.columns) - ColumnOffset(1)); // DECRLM
+
+    state_.cursor.hyperlink = {};
+    state_.colorPalette = state_.defaultColorPalette;
+
+    // TODO: DECNKM (Numeric keypad)
+    // TODO: DECSCA (Select character attribute)
+    // TODO: DECNRCM (National replacement character set)
+    // TODO: GL, GR (G0, G1, G2, G3)
+    // TODO: DECAUPSS (Assign user preference supplemental set)
+    // TODO: DECSASD (Select active status display)
+    // TODO: DECKPM (Keyboard position mode)
+    // TODO: DECPCTERM (PCTerm mode)
+}
+
+void Terminal::setGraphicsRendition(GraphicsRendition _rendition)
+{
+    // TODO: optimize this as there are only 3 cases
+    // 1.) reset
+    // 2.) set some bits |=
+    // 3.) clear some bits &= ~
+    switch (_rendition)
+    {
+        case GraphicsRendition::Reset: state_.cursor.graphicsRendition = {}; break;
+        case GraphicsRendition::Bold: state_.cursor.graphicsRendition.styles |= CellFlags::Bold; break;
+        case GraphicsRendition::Faint: state_.cursor.graphicsRendition.styles |= CellFlags::Faint; break;
+        case GraphicsRendition::Italic: state_.cursor.graphicsRendition.styles |= CellFlags::Italic; break;
+        case GraphicsRendition::Underline:
+            state_.cursor.graphicsRendition.styles |= CellFlags::Underline;
+            break;
+        case GraphicsRendition::Blinking:
+            state_.cursor.graphicsRendition.styles |= CellFlags::Blinking;
+            break;
+        case GraphicsRendition::Inverse: state_.cursor.graphicsRendition.styles |= CellFlags::Inverse; break;
+        case GraphicsRendition::Hidden: state_.cursor.graphicsRendition.styles |= CellFlags::Hidden; break;
+        case GraphicsRendition::CrossedOut:
+            state_.cursor.graphicsRendition.styles |= CellFlags::CrossedOut;
+            break;
+        case GraphicsRendition::DoublyUnderlined:
+            state_.cursor.graphicsRendition.styles |= CellFlags::DoublyUnderlined;
+            break;
+        case GraphicsRendition::CurlyUnderlined:
+            state_.cursor.graphicsRendition.styles |= CellFlags::CurlyUnderlined;
+            break;
+        case GraphicsRendition::DottedUnderline:
+            state_.cursor.graphicsRendition.styles |= CellFlags::DottedUnderline;
+            break;
+        case GraphicsRendition::DashedUnderline:
+            state_.cursor.graphicsRendition.styles |= CellFlags::DashedUnderline;
+            break;
+        case GraphicsRendition::Framed: state_.cursor.graphicsRendition.styles |= CellFlags::Framed; break;
+        case GraphicsRendition::Overline:
+            state_.cursor.graphicsRendition.styles |= CellFlags::Overline;
+            break;
+        case GraphicsRendition::Normal:
+            state_.cursor.graphicsRendition.styles &= ~(CellFlags::Bold | CellFlags::Faint);
+            break;
+        case GraphicsRendition::NoItalic: state_.cursor.graphicsRendition.styles &= ~CellFlags::Italic; break;
+        case GraphicsRendition::NoUnderline:
+            state_.cursor.graphicsRendition.styles &=
+                ~(CellFlags::Underline | CellFlags::DoublyUnderlined | CellFlags::CurlyUnderlined
+                  | CellFlags::DottedUnderline | CellFlags::DashedUnderline);
+            break;
+        case GraphicsRendition::NoBlinking:
+            state_.cursor.graphicsRendition.styles &= ~CellFlags::Blinking;
+            break;
+        case GraphicsRendition::NoInverse:
+            state_.cursor.graphicsRendition.styles &= ~CellFlags::Inverse;
+            break;
+        case GraphicsRendition::NoHidden: state_.cursor.graphicsRendition.styles &= ~CellFlags::Hidden; break;
+        case GraphicsRendition::NoCrossedOut:
+            state_.cursor.graphicsRendition.styles &= ~CellFlags::CrossedOut;
+            break;
+        case GraphicsRendition::NoFramed: state_.cursor.graphicsRendition.styles &= ~CellFlags::Framed; break;
+        case GraphicsRendition::NoOverline:
+            state_.cursor.graphicsRendition.styles &= ~CellFlags::Overline;
+            break;
+    }
+}
+
+void Terminal::setForegroundColor(Color _color)
+{
+    state_.cursor.graphicsRendition.foregroundColor = _color;
+}
+
+void Terminal::setBackgroundColor(Color _color)
+{
+    state_.cursor.graphicsRendition.backgroundColor = _color;
+}
+
+void Terminal::setUnderlineColor(Color _color)
+{
+    state_.cursor.graphicsRendition.underlineColor = _color;
+}
+
 void Terminal::hardReset()
 {
-    // NB: Screen was already reset.
+    setScreen(ScreenType::Primary);
+
+    state_.modes = Modes {};
+    setMode(DECMode::AutoWrap, true);
+    setMode(DECMode::TextReflow, state_.allowReflowOnResize);
+    setMode(DECMode::SixelCursorNextToGraphic, state_.sixelCursorConformance);
+
+    state_.primaryBuffer.reset();
+    state_.alternateBuffer.reset();
+
+    state_.imagePool.clear();
+
+    state_.cursor = {};
+    state_.tabs.clear();
+
+    state_.lastCursorPosition = state_.cursor.position;
+
+    state_.margin =
+        Margin { Margin::Vertical { {}, boxed_cast<LineOffset>(state_.pageSize.lines) - 1 },
+                 Margin::Horizontal { {}, boxed_cast<ColumnOffset>(state_.pageSize.columns) - 1 } };
+
+    state_.colorPalette = state_.defaultColorPalette;
+
+    primaryScreen_.verifyState();
+
     state_.inputGenerator.reset();
+}
+
+void Terminal::setScreen(ScreenType _type)
+{
+    if (_type == state_.screenType)
+        return;
+
+    switch (_type)
+    {
+        case ScreenType::Primary:
+            currentScreen_ = primaryScreen_;
+            setMouseWheelMode(InputGenerator::MouseWheelMode::Default);
+            break;
+        case ScreenType::Alternate:
+            currentScreen_ = alternateScreen_;
+            if (isModeEnabled(DECMode::MouseAlternateScroll))
+                setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
+            else
+                setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
+            break;
+    }
+
+    state_.screenType = _type;
+
+    // Reset wrapPending-flag when switching buffer.
+    state_.wrapPending = false;
+
+    // Reset last-cursor position.
+    state_.lastCursorPosition = state_.cursor.position;
+
+    // Ensure correct screen buffer size for the buffer we've just switched to.
+    applyPageSizeToCurrentBuffer();
+
+    bufferChanged(_type);
+}
+
+void Terminal::applyPageSizeToCurrentBuffer()
+{
+    auto cursorPosition = state_.cursor.position;
+
+    // Ensure correct screen buffer size for the buffer we've just switched to.
+    cursorPosition = isPrimaryScreen()
+                         ? state_.primaryBuffer.resize(state_.pageSize, cursorPosition, state_.wrapPending)
+                         : state_.alternateBuffer.resize(state_.pageSize, cursorPosition, state_.wrapPending);
+    cursorPosition = clampCoordinate(cursorPosition);
+
+    if (state_.cursor.position.column < boxed_cast<ColumnOffset>(state_.pageSize.columns))
+        state_.wrapPending = false;
+
+    // update (last-)cursor position
+    state_.cursor.position = cursorPosition;
+    state_.lastCursorPosition = cursorPosition;
+
+    // truncating tabs
+    while (!state_.tabs.empty() && state_.tabs.back() >= unbox<ColumnOffset>(state_.pageSize.columns))
+        state_.tabs.pop_back();
+
+        // TODO: find out what to do with DECOM mode. Reset it to?
+#if 0
+    inspect("after resize", std::cout);
+    fmt::print("applyPageSizeToCurrentBuffer: cursor pos before: {} after: {}\n", oldCursorPos, state_.cursor.position);
+#endif
+
+    verifyState();
 }
 
 void Terminal::discardImage(Image const& _image)
@@ -1109,12 +1422,22 @@ void Terminal::onBufferScrolled(LineCount _n) noexcept
     if (!selection_)
         return;
 
-    auto const top = -boxed_cast<LineOffset>(screen_.historyLineCount());
+    auto const top = -boxed_cast<LineOffset>(primaryScreen_.historyLineCount());
     if (selection_->from().line > top && selection_->to().line > top)
-        selection_->applyScroll(boxed_cast<LineOffset>(_n), screen_.historyLineCount());
+        selection_->applyScroll(boxed_cast<LineOffset>(_n), primaryScreen_.historyLineCount());
     else
         selection_.reset();
 }
 // }}}
+
+void Terminal::setMaxHistoryLineCount(LineCount _maxHistoryLineCount)
+{
+    primaryScreen_.grid().setMaxHistoryLineCount(_maxHistoryLineCount);
+}
+
+LineCount Terminal::maxHistoryLineCount() const noexcept
+{
+    return primaryScreen_.grid().maxHistoryLineCount();
+}
 
 } // namespace terminal

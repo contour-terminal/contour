@@ -177,11 +177,11 @@ namespace
             DWORD const result = WaitForSingleObject(fd0, timeoutMillis);
             switch (result)
             {
-            case WSA_WAIT_EVENT_0: return 1;
-            case WSA_WAIT_TIMEOUT: return 0;
-            case WAIT_FAILED:
-            case WAIT_ABANDONED:
-            default: return -1;
+                case WSA_WAIT_EVENT_0: return 1;
+                case WSA_WAIT_TIMEOUT: return 0;
+                case WAIT_FAILED:
+                case WAIT_ABANDONED:
+                default: return -1;
             }
 #else
             fd_set sin, sout, serr;

@@ -13,6 +13,7 @@
  */
 #pragma once
 
+#include <array>
 #include <string>
 #include <string_view>
 
@@ -21,8 +22,12 @@ namespace crispy::base64
 
 namespace detail
 {
+    auto constexpr inline Base64Alphabet = std::string_view { "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                                                              "abcdefghijklmnopqrstuvwxyz"
+                                                              "0123456789+/" };
+
     // clang-format off
-    constexpr inline unsigned char indexmap[256] = {
+    char constexpr inline indexmap[256] = {
         /* ASCII table */
         64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, //   0..15
         64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, //  16..31
@@ -43,6 +48,14 @@ namespace detail
         64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64  // 240..255
     };
     // clang-format on
+
+    template <typename T, size_t N>
+    std::string& operator+=(std::string& s, std::array<T, N> v)
+    {
+        for (T const c: v)
+            s += c;
+        return s;
+    }
 } // namespace detail
 
 struct EncoderState
@@ -59,12 +72,11 @@ constexpr void encode(uint8_t _byte, Alphabet const& alphabet, EncoderState& _st
         return;
 
     _state.modulo = 0;
-    uint8_t const* input = _state.pending;
-    char const out[4] = { alphabet[(input[0] >> 2) & 0x3F],
-                          alphabet[((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4)],
-                          alphabet[((input[1] & 0x0F) << 2) | ((uint8_t) (input[2] & 0xC0) >> 6)],
-                          alphabet[input[2] & 0x3F] };
-    _sink(std::string_view(out, 4));
+    auto const* input = _state.pending;
+    _sink(alphabet[(input[0] >> 2) & 0x3F],
+          alphabet[((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4)],
+          alphabet[((input[1] & 0x0F) << 2) | ((uint8_t) (input[2] & 0xC0) >> 6)],
+          alphabet[input[2] & 0x3F]);
 }
 
 template <typename Alphabet, typename Sink>
@@ -77,33 +89,32 @@ constexpr void finish(Alphabet const& alphabet, EncoderState& _state, Sink&& _si
 
     switch (_state.modulo)
     {
-    case 2: {
-        char const out[4] = { alphabet[(input[0] >> 2) & 0x3F],
-                              alphabet[((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4)],
-                              alphabet[((input[1] & 0x0F) << 2)],
-                              '=' };
-        _sink(std::string_view { out });
-    }
-    break;
-    case 1: {
-        char const out[4] = {
-            alphabet[(input[0] >> 2) & 0x3F], alphabet[((input[0] & 0x03) << 4)], '=', '='
-        };
-        _sink(std::string_view { out });
-    }
-    break;
-    case 0: break;
+        case 2: {
+            _sink(alphabet[(input[0] >> 2) & 0x3F],
+                  alphabet[((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4)],
+                  alphabet[((input[1] & 0x0F) << 2)],
+                  '=');
+            _state.modulo = 0;
+        }
+        break;
+        case 1: {
+            // clang-format off
+        _sink(alphabet[(input[0] >> 2) & 0x3F],
+              alphabet[((input[0] & 0x03) << 4)],
+              '=',
+              '=');
+            // clang-format on
+            _state.modulo = 0;
+        }
+        break;
+        case 0: break;
     }
 }
 
 template <typename Sink>
 constexpr void encode(uint8_t _byte, EncoderState& _state, Sink&& _sink)
 {
-    constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                                "abcdefghijklmnopqrstuvwxyz"
-                                "0123456789+/";
-    return encode(_byte, alphabet, _state, std::forward<Sink>(_sink));
-    // return encode(_byte, detail::indexmap, _state, std::forward<Sink>(_sink));
+    return encode(_byte, detail::Base64Alphabet, _state, std::forward<Sink>(_sink));
 }
 
 template <typename Sink>
@@ -118,10 +129,17 @@ std::string encode(Iterator begin, Iterator end, Alphabet alphabet)
     std::string output;
     output.reserve(((std::distance(begin, end) + 2) / 3 * 4) + 1);
 
-    EncoderState state {};
+    auto const flusher = [&output](char a, char b, char c, char d) {
+        output += a;
+        output += b;
+        output += c;
+        output += d;
+    };
+
+    auto state = EncoderState {};
     for (auto i = begin; i != end; ++i)
-        encode(*i, alphabet, state, [&](std::string_view _data) { output += _data; });
-    finish(alphabet, state, [&](std::string_view _data) { output += _data; });
+        encode(*i, alphabet, state, flusher);
+    finish(alphabet, state, flusher);
 
     return output;
 }
@@ -129,10 +147,7 @@ std::string encode(Iterator begin, Iterator end, Alphabet alphabet)
 template <typename Iterator>
 std::string encode(Iterator begin, Iterator end)
 {
-    static constexpr char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                                       "abcdefghijklmnopqrstuvwxyz"
-                                       "0123456789+/";
-    return encode(begin, end, alphabet);
+    return encode(begin, end, detail::Base64Alphabet);
 }
 
 inline std::string encode(std::string_view _value)
@@ -224,12 +239,12 @@ size_t decode(Iterator begin, Iterator end, Output output)
 }
 
 template <typename Output>
-size_t decode(std::string_view const& input, Output output)
+size_t decode(std::string_view input, Output output)
 {
     return decode(input.begin(), input.end(), output);
 }
 
-inline std::string decode(const std::string_view& input)
+inline std::string decode(std::string_view input)
 {
     std::string output;
     output.resize(decodeLength(input));

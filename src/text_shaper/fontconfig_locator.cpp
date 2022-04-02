@@ -39,11 +39,11 @@ namespace
     {
         switch (_value)
         {
-        case FC_PROPORTIONAL: return "proportional";
-        case FC_DUAL: return "dual";
-        case FC_MONO: return "mono";
-        case FC_CHARCELL: return "charcell";
-        default: return fmt::format("({})", _value);
+            case FC_PROPORTIONAL: return "proportional";
+            case FC_DUAL: return "dual";
+            case FC_MONO: return "mono";
+            case FC_CHARCELL: return "charcell";
+            default: return fmt::format("({})", _value);
         }
     }
 
@@ -51,23 +51,23 @@ namespace
     {
         switch (_weight)
         {
-        case font_weight::thin: return FC_WEIGHT_THIN;
-        case font_weight::extra_light: return FC_WEIGHT_EXTRALIGHT;
-        case font_weight::light: return FC_WEIGHT_LIGHT;
-        case font_weight::demilight:
+            case font_weight::thin: return FC_WEIGHT_THIN;
+            case font_weight::extra_light: return FC_WEIGHT_EXTRALIGHT;
+            case font_weight::light: return FC_WEIGHT_LIGHT;
+            case font_weight::demilight:
 #if defined(FC_WEIGHT_DEMILIGHT)
-            return FC_WEIGHT_DEMILIGHT;
+                return FC_WEIGHT_DEMILIGHT;
 #else
-            return FC_WEIGHT_LIGHT; // Is this a good fallback? Maybe.
+                return FC_WEIGHT_LIGHT; // Is this a good fallback? Maybe.
 #endif
-        case font_weight::book: return FC_WEIGHT_BOOK;
-        case font_weight::normal: return FC_WEIGHT_NORMAL;
-        case font_weight::medium: return FC_WEIGHT_MEDIUM;
-        case font_weight::demibold: return FC_WEIGHT_DEMIBOLD;
-        case font_weight::bold: return FC_WEIGHT_BOLD;
-        case font_weight::extra_bold: return FC_WEIGHT_EXTRABOLD;
-        case font_weight::black: return FC_WEIGHT_BLACK;
-        case font_weight::extra_black: return FC_WEIGHT_EXTRABLACK;
+            case font_weight::book: return FC_WEIGHT_BOOK;
+            case font_weight::normal: return FC_WEIGHT_NORMAL;
+            case font_weight::medium: return FC_WEIGHT_MEDIUM;
+            case font_weight::demibold: return FC_WEIGHT_DEMIBOLD;
+            case font_weight::bold: return FC_WEIGHT_BOLD;
+            case font_weight::extra_bold: return FC_WEIGHT_EXTRABOLD;
+            case font_weight::black: return FC_WEIGHT_BLACK;
+            case font_weight::extra_black: return FC_WEIGHT_EXTRABLACK;
         }
         return FC_WEIGHT_NORMAL;
     }
@@ -76,9 +76,9 @@ namespace
     {
         switch (_slant)
         {
-        case font_slant::italic: return FC_SLANT_ITALIC;
-        case font_slant::oblique: return FC_SLANT_OBLIQUE;
-        case font_slant::normal: return FC_SLANT_ROMAN;
+            case font_slant::italic: return FC_SLANT_ITALIC;
+            case font_slant::oblique: return FC_SLANT_OBLIQUE;
+            case font_slant::normal: return FC_SLANT_ROMAN;
         }
         return FC_SLANT_ROMAN;
     }
@@ -87,21 +87,21 @@ namespace
     {
         switch (_value)
         {
-        case FC_WEIGHT_THIN: return "Thin";
-        case FC_WEIGHT_EXTRALIGHT: return "ExtraLight";
-        case FC_WEIGHT_LIGHT: return "Light";
+            case FC_WEIGHT_THIN: return "Thin";
+            case FC_WEIGHT_EXTRALIGHT: return "ExtraLight";
+            case FC_WEIGHT_LIGHT: return "Light";
 #if defined(FC_WEIGHT_DEMILIGHT)
-        case FC_WEIGHT_DEMILIGHT: return "DemiLight";
+            case FC_WEIGHT_DEMILIGHT: return "DemiLight";
 #endif
-        case FC_WEIGHT_BOOK: return "Book";
-        case FC_WEIGHT_REGULAR: return "Regular";
-        case FC_WEIGHT_MEDIUM: return "Medium";
-        case FC_WEIGHT_DEMIBOLD: return "DemiBold";
-        case FC_WEIGHT_BOLD: return "Bold";
-        case FC_WEIGHT_EXTRABOLD: return "ExtraBold";
-        case FC_WEIGHT_BLACK: return "Black";
-        case FC_WEIGHT_EXTRABLACK: return "ExtraBlack";
-        default: return "?";
+            case FC_WEIGHT_BOOK: return "Book";
+            case FC_WEIGHT_REGULAR: return "Regular";
+            case FC_WEIGHT_MEDIUM: return "Medium";
+            case FC_WEIGHT_DEMIBOLD: return "DemiBold";
+            case FC_WEIGHT_BOLD: return "Bold";
+            case FC_WEIGHT_EXTRABOLD: return "ExtraBold";
+            case FC_WEIGHT_BLACK: return "Black";
+            case FC_WEIGHT_EXTRABLACK: return "ExtraBlack";
+            default: return "?";
         }
     }
 
@@ -109,10 +109,10 @@ namespace
     {
         switch (_value)
         {
-        case FC_SLANT_ROMAN: return "Roman";
-        case FC_SLANT_ITALIC: return "Italic";
-        case FC_SLANT_OBLIQUE: return "Oblique";
-        default: return "?";
+            case FC_SLANT_ROMAN: return "Roman";
+            case FC_SLANT_ITALIC: return "Italic";
+            case FC_SLANT_OBLIQUE: return "Oblique";
+            default: return "?";
         }
     }
 

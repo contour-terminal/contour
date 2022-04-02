@@ -40,19 +40,16 @@ enum class LineFlags : uint8_t
     // TODO: DoubleHeight = 0x0020,
 };
 
-template <typename, bool>
-struct OptionalProperty;
-template <typename T>
-struct OptionalProperty<T, false>
-{
-};
-template <typename T>
-struct OptionalProperty<T, true>
-{
-    T value;
-};
+// clang-format off
+template <typename, bool> struct OptionalProperty;
+template <typename T> struct OptionalProperty<T, false> {};
+template <typename T> struct OptionalProperty<T, true> { T value; };
+// clang-format on
 
-struct SimpleLineBuffer
+/**
+ * Line storage with call columns sharing the same SGR attributes.
+ */
+struct MonoStyledLineBuffer
 {
     GraphicsAttributes attributes;
     std::string text;  // TODO: Try std::string_view later to avoid scattered copies.
@@ -62,11 +59,12 @@ struct SimpleLineBuffer
 template <typename Cell>
 using InflatedLineBuffer = std::vector<Cell>;
 
+/// Unpacks a MonoStyledLineBuffer into an InflatedLineBuffer<Cell>.
 template <typename Cell>
-InflatedLineBuffer<Cell> inflate(SimpleLineBuffer const& input);
+InflatedLineBuffer<Cell> inflate(MonoStyledLineBuffer const& input);
 
 template <typename Cell>
-using LineStorage = std::variant<SimpleLineBuffer, InflatedLineBuffer<Cell>>;
+using LineStorage = std::variant<MonoStyledLineBuffer, InflatedLineBuffer<Cell>>;
 
 /**
  * Line<Cell> API.
@@ -325,8 +323,8 @@ inline typename Line<Cell, Optimize>::InflatedBuffer& Line<Cell, Optimize>::edit
     // then this is the place where we want to *promote* a possibly
     // optimized text buffer to a full grid line buffer.
 #if 0
-    if (std::holds_alternative<SimpleLineBuffer>(storage_))
-        storage_ = inflate<Cell>(std::get<SimpleLineBuffer>(storage_));
+    if (std::holds_alternative<MonoStyledLineBuffer>(storage_))
+        storage_ = inflate<Cell>(std::get<MonoStyledLineBuffer>(storage_));
 
     return std::get<InflatedBuffer>(storage_);
 #else

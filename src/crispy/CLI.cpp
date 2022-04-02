@@ -654,17 +654,17 @@ namespace // {{{ helpers
             os << colorize("[", HelpElement::Braces);
         switch (_optionStyle)
         {
-        case OptionStyle::Natural:
-            os << colorize(_name, HelpElement::OptionName);
-            if (!_placeholder.empty())
-                os << ' ' << colorize(_placeholder, HelpElement::OptionValue);
-            break;
-        case OptionStyle::Posix:
-            os << colorize("--", HelpElement::OptionDash) << colorize(_name, HelpElement::OptionName);
-            if (!_placeholder.empty())
-                os << colorize("=", HelpElement::OptionEqual)
-                   << colorize(_placeholder, HelpElement::OptionValue);
-            break;
+            case OptionStyle::Natural:
+                os << colorize(_name, HelpElement::OptionName);
+                if (!_placeholder.empty())
+                    os << ' ' << colorize(_placeholder, HelpElement::OptionValue);
+                break;
+            case OptionStyle::Posix:
+                os << colorize("--", HelpElement::OptionDash) << colorize(_name, HelpElement::OptionName);
+                if (!_placeholder.empty())
+                    os << colorize("=", HelpElement::OptionEqual)
+                       << colorize(_placeholder, HelpElement::OptionValue);
+                break;
         }
         if (_presense == Presence::Optional)
             os << colorize("]", HelpElement::Braces);

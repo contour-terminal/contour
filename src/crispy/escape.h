@@ -29,19 +29,19 @@ inline std::string escape(uint8_t ch)
 {
     switch (ch)
     {
-    case '\\': return "\\\\";
-    case 0x1B: return "\\e";
-    case '\t': return "\\t";
-    case '\r': return "\\r";
-    case '\n': return "\\n";
-    case '"': return "\\\"";
-    default:
-        if (ch < 0x20)
-            return fmt::format("\\{:03o}", static_cast<uint8_t>(ch) & 0xFF);
-        else if (ch < 0x80)
-            return fmt::format("{}", static_cast<char>(ch));
-        else
-            return fmt::format("\\x{:02x}", static_cast<uint8_t>(ch) & 0xFF);
+        case '\\': return "\\\\";
+        case 0x1B: return "\\e";
+        case '\t': return "\\t";
+        case '\r': return "\\r";
+        case '\n': return "\\n";
+        case '"': return "\\\"";
+        default:
+            if (ch < 0x20)
+                return fmt::format("\\{:03o}", static_cast<uint8_t>(ch) & 0xFF);
+            else if (ch < 0x80)
+                return fmt::format("{}", static_cast<char>(ch));
+            else
+                return fmt::format("\\x{:02x}", static_cast<uint8_t>(ch) & 0xFF);
     }
 }
 
@@ -85,85 +85,85 @@ inline std::string unescape(std::string_view _value)
     {
         switch (state)
         {
-        case State::Text:
-            if (_value[i] == '\\')
-                state = State::Escape;
-            else
-                out.push_back(_value[i]);
-            break;
-        case State::Escape:
-            switch (_value[i])
-            {
-            case '0':
-                //.
-                state = State::Octal1;
+            case State::Text:
+                if (_value[i] == '\\')
+                    state = State::Escape;
+                else
+                    out.push_back(_value[i]);
                 break;
-            case 'x':
-                //.
-                state = State::Hex1;
+            case State::Escape:
+                switch (_value[i])
+                {
+                    case '0':
+                        //.
+                        state = State::Octal1;
+                        break;
+                    case 'x':
+                        //.
+                        state = State::Hex1;
+                        break;
+                    case 'e':
+                        state = State::Text;
+                        out.push_back('\033');
+                        break;
+                    case 'a':
+                        out.push_back(0x07);
+                        state = State::Text;
+                        break;
+                    case 'b':
+                        out.push_back(0x08);
+                        state = State::Text;
+                        break;
+                    case 't':
+                        out.push_back(0x09);
+                        state = State::Text;
+                        break;
+                    case 'n':
+                        out.push_back(0x0A);
+                        state = State::Text;
+                        break;
+                    case 'v':
+                        out.push_back(0x0B);
+                        state = State::Text;
+                        break;
+                    case 'f':
+                        out.push_back(0x0C);
+                        state = State::Text;
+                        break;
+                    case 'r':
+                        out.push_back(0x0D);
+                        state = State::Text;
+                        break;
+                    case '\\':
+                        out.push_back('\\');
+                        state = State::Text;
+                        break;
+                    default:
+                        // Unknown escape sequence, so just continue as text.
+                        out.push_back('\\');
+                        out.push_back(_value[i]);
+                        state = State::Text;
+                        break;
+                }
                 break;
-            case 'e':
+            case State::Octal1:
+                buf[0] = _value[i];
+                state = State::Octal2;
+                break;
+            case State::Octal2:
+                buf[1] = _value[i];
+                out.push_back(static_cast<char>(strtoul(buf, nullptr, 8)));
                 state = State::Text;
-                out.push_back('\033');
                 break;
-            case 'a':
-                out.push_back(0x07);
+            case State::Hex1:
+                buf[0] = _value[i];
+                state = State::Hex2;
+                break;
+            case State::Hex2:
+                buf[1] = _value[i];
+                out.push_back(static_cast<char>(strtoul(buf, nullptr, 16)));
                 state = State::Text;
                 break;
-            case 'b':
-                out.push_back(0x08);
-                state = State::Text;
-                break;
-            case 't':
-                out.push_back(0x09);
-                state = State::Text;
-                break;
-            case 'n':
-                out.push_back(0x0A);
-                state = State::Text;
-                break;
-            case 'v':
-                out.push_back(0x0B);
-                state = State::Text;
-                break;
-            case 'f':
-                out.push_back(0x0C);
-                state = State::Text;
-                break;
-            case 'r':
-                out.push_back(0x0D);
-                state = State::Text;
-                break;
-            case '\\':
-                out.push_back('\\');
-                state = State::Text;
-                break;
-            default:
-                // Unknown escape sequence, so just continue as text.
-                out.push_back('\\');
-                out.push_back(_value[i]);
-                state = State::Text;
-                break;
-            }
-            break;
-        case State::Octal1:
-            buf[0] = _value[i];
-            state = State::Octal2;
-            break;
-        case State::Octal2:
-            buf[1] = _value[i];
-            out.push_back(static_cast<char>(strtoul(buf, nullptr, 8)));
-            state = State::Text;
-            break;
-        case State::Hex1:
-            buf[0] = _value[i];
-            state = State::Hex2;
-            break;
-        case State::Hex2:
-            buf[1] = _value[i];
-            out.push_back(static_cast<char>(strtoul(buf, nullptr, 16)));
-            state = State::Text;
-            break;
         }
     }
 

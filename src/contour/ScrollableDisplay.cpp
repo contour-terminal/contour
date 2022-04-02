@@ -81,9 +81,12 @@ void ScrollableDisplay::updateValues()
     if (!scrollBar_->isVisible())
         return;
 
-    scrollBar_->setMaximum(session_.terminal().screen().historyLineCount().as<int>());
-    auto const s = session_.terminal().viewport().scrollOffset();
-    scrollBar_->setValue(scrollBar_->maximum() - s.value);
+    if (session_.terminal().isPrimaryScreen())
+    {
+        scrollBar_->setMaximum(session_.terminal().primaryScreen().historyLineCount().as<int>());
+        auto const s = session_.terminal().viewport().scrollOffset();
+        scrollBar_->setValue(scrollBar_->maximum() - s.value);
+    }
 }
 
 void ScrollableDisplay::updatePosition()
@@ -109,24 +112,24 @@ void ScrollableDisplay::updatePosition()
         DisplayLog()("Scrollbar Pos: {}", session_.profile().scrollbarPosition);
         switch (session_.profile().scrollbarPosition)
         {
-        case config::ScrollBarPosition::Right:
-            resizeMainAndScrollArea();
-            scrollBar_->show();
-            mainWidget_->move(0, 0);
-            scrollBar_->move(mainWidth, 0);
-            break;
-        case config::ScrollBarPosition::Left:
-            resizeMainAndScrollArea();
-            scrollBar_->show();
-            mainWidget_->move(sbWidth, 0);
-            scrollBar_->move(0, 0);
-            break;
-        case config::ScrollBarPosition::Hidden: {
-            scrollBar_->hide();
-            mainWidget_->resize(width(), height());
-            mainWidget_->move(0, 0);
-            break;
-        }
+            case config::ScrollBarPosition::Right:
+                resizeMainAndScrollArea();
+                scrollBar_->show();
+                mainWidget_->move(0, 0);
+                scrollBar_->move(mainWidth, 0);
+                break;
+            case config::ScrollBarPosition::Left:
+                resizeMainAndScrollArea();
+                scrollBar_->show();
+                mainWidget_->move(sbWidth, 0);
+                scrollBar_->move(0, 0);
+                break;
+            case config::ScrollBarPosition::Hidden: {
+                scrollBar_->hide();
+                mainWidget_->resize(width(), height());
+                mainWidget_->move(0, 0);
+                break;
+            }
         }
         DisplayLog()("TW {}x{}+{}x{}, SB {}, {}x{}+{}x{}, value: {}/{}",
                      mainWidget_->pos().x(),

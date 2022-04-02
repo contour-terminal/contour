@@ -22,6 +22,7 @@
 #include <terminal/primitives.h>
 
 #include <unicode/convert.h>
+#include <unicode/utf8.h>
 
 #include <cassert>
 #include <memory>
@@ -138,10 +139,13 @@ class Sequencer
     void print(char _text);
     void print(std::string_view _chars);
     void execute(char _controlCode);
-    void clear();
+    void clear() noexcept;
     void collect(char _char);
-    void collectLeader(char _leader);
-    void param(char _char);
+    void collectLeader(char _leader) noexcept;
+    void param(char _char) noexcept;
+    void paramDigit(char _char) noexcept;
+    void paramSeparator() noexcept;
+    void paramSubSeparator() noexcept;
     void dispatchESC(char _function);
     void dispatchCSI(char _function);
     void startOSC();
@@ -157,22 +161,54 @@ class Sequencer
     void putPM(char) {}
     void dispatchPM() {}
 
-  private:
-    void handleSequence();
+    void hookParser(std::unique_ptr<ParserExtension> parserExtension) noexcept
+    {
+        hookedParser_ = std::move(parserExtension);
+    }
 
-    [[nodiscard]] std::unique_ptr<ParserExtension> hookSTP(Sequence const& _ctx);
-    [[nodiscard]] std::unique_ptr<ParserExtension> hookSixel(Sequence const& _ctx);
-    [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRQSS(Sequence const& _ctx);
-    [[nodiscard]] std::unique_ptr<ParserExtension> hookXTGETTCAP(Sequence const& /*_seq*/);
+  private:
+    void resetUtf8DecoderState() noexcept;
+    void handleSequence();
 
     // private data
     //
     Terminal& terminal_;
+    unicode::utf8_decoder_state utf8DecoderState_ = {};
     Sequence sequence_ {};
+    SequenceParameterBuilder parameterBuilder_;
 
     std::unique_ptr<ParserExtension> hookedParser_;
     std::unique_ptr<SixelImageBuilder> sixelImageBuilder_;
 };
+
+// {{{ inlines
+inline void Sequencer::resetUtf8DecoderState() noexcept
+{
+    utf8DecoderState_ = {};
+}
+
+inline void Sequencer::clear() noexcept
+{
+    sequence_.clearExceptParameters();
+    parameterBuilder_.reset();
+    resetUtf8DecoderState();
+}
+
+inline void Sequencer::paramDigit(char _char) noexcept
+{
+    parameterBuilder_.multiplyBy10AndAdd(static_cast<Sequence::Parameter>(_char - '0'));
+}
+
+inline void Sequencer::paramSeparator() noexcept
+{
+    parameterBuilder_.nextParameter();
+}
+
+inline void Sequencer::paramSubSeparator() noexcept
+{
+    parameterBuilder_.nextSubParameter();
+}
+// }}}
 
 } // namespace terminal
 
@@ -194,15 +230,15 @@ struct formatter<terminal::RequestStatusString>
     {
         switch (value)
         {
-        case terminal::RequestStatusString::SGR: return format_to(ctx.out(), "SGR");
-        case terminal::RequestStatusString::DECSCL: return format_to(ctx.out(), "DECSCL");
-        case terminal::RequestStatusString::DECSCUSR: return format_to(ctx.out(), "DECSCUSR");
-        case terminal::RequestStatusString::DECSCA: return format_to(ctx.out(), "DECSCA");
-        case terminal::RequestStatusString::DECSTBM: return format_to(ctx.out(), "DECSTBM");
-        case terminal::RequestStatusString::DECSLRM: return format_to(ctx.out(), "DECSLRM");
-        case terminal::RequestStatusString::DECSLPP: return format_to(ctx.out(), "DECSLPP");
-        case terminal::RequestStatusString::DECSCPP: return format_to(ctx.out(), "DECSCPP");
-        case terminal::RequestStatusString::DECSNLS: return format_to(ctx.out(), "DECSNLS");
+            case terminal::RequestStatusString::SGR: return format_to(ctx.out(), "SGR");
+            case terminal::RequestStatusString::DECSCL: return format_to(ctx.out(), "DECSCL");
+            case terminal::RequestStatusString::DECSCUSR: return format_to(ctx.out(), "DECSCUSR");
+            case terminal::RequestStatusString::DECSCA: return format_to(ctx.out(), "DECSCA");
+            case terminal::RequestStatusString::DECSTBM: return format_to(ctx.out(), "DECSTBM");
+            case terminal::RequestStatusString::DECSLRM: return format_to(ctx.out(), "DECSLRM");
+            case terminal::RequestStatusString::DECSLPP: return format_to(ctx.out(), "DECSLPP");
+            case terminal::RequestStatusString::DECSCPP: return format_to(ctx.out(), "DECSCPP");
+            case terminal::RequestStatusString::DECSNLS: return format_to(ctx.out(), "DECSNLS");
         }
         return format_to(ctx.out(), "{}", unsigned(value));
     }

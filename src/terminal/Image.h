@@ -298,8 +298,8 @@ struct formatter<terminal::ImageFormat>
     {
         switch (value)
         {
-        case terminal::ImageFormat::RGB: return format_to(ctx.out(), "RGB");
-        case terminal::ImageFormat::RGBA: return format_to(ctx.out(), "RGBA");
+            case terminal::ImageFormat::RGB: return format_to(ctx.out(), "RGB");
+            case terminal::ImageFormat::RGBA: return format_to(ctx.out(), "RGBA");
         }
         return format_to(ctx.out(), "{}", unsigned(value));
     }
@@ -361,10 +361,10 @@ struct formatter<terminal::ImageResize>
     {
         switch (_value)
         {
-        case terminal::ImageResize::NoResize: return format_to(ctx.out(), "NoResize");
-        case terminal::ImageResize::ResizeToFit: return format_to(ctx.out(), "ResizeToFit");
-        case terminal::ImageResize::ResizeToFill: return format_to(ctx.out(), "ResizeToFill");
-        case terminal::ImageResize::StretchToFill: return format_to(ctx.out(), "StretchToFill");
+            case terminal::ImageResize::NoResize: return format_to(ctx.out(), "NoResize");
+            case terminal::ImageResize::ResizeToFit: return format_to(ctx.out(), "ResizeToFit");
+            case terminal::ImageResize::ResizeToFill: return format_to(ctx.out(), "ResizeToFill");
+            case terminal::ImageResize::StretchToFill: return format_to(ctx.out(), "StretchToFill");
         }
         return format_to(ctx.out(), "ResizePolicy({})", int(_value));
     }
@@ -383,15 +383,15 @@ struct formatter<terminal::ImageAlignment>
     {
         switch (_value)
         {
-        case terminal::ImageAlignment::TopStart: return format_to(ctx.out(), "TopStart");
-        case terminal::ImageAlignment::TopCenter: return format_to(ctx.out(), "TopCenter");
-        case terminal::ImageAlignment::TopEnd: return format_to(ctx.out(), "TopEnd");
-        case terminal::ImageAlignment::MiddleStart: return format_to(ctx.out(), "MiddleStart");
-        case terminal::ImageAlignment::MiddleCenter: return format_to(ctx.out(), "MiddleCenter");
-        case terminal::ImageAlignment::MiddleEnd: return format_to(ctx.out(), "MiddleEnd");
-        case terminal::ImageAlignment::BottomStart: return format_to(ctx.out(), "BottomStart");
-        case terminal::ImageAlignment::BottomCenter: return format_to(ctx.out(), "BottomCenter");
-        case terminal::ImageAlignment::BottomEnd: return format_to(ctx.out(), "BottomEnd");
+            case terminal::ImageAlignment::TopStart: return format_to(ctx.out(), "TopStart");
+            case terminal::ImageAlignment::TopCenter: return format_to(ctx.out(), "TopCenter");
+            case terminal::ImageAlignment::TopEnd: return format_to(ctx.out(), "TopEnd");
+            case terminal::ImageAlignment::MiddleStart: return format_to(ctx.out(), "MiddleStart");
+            case terminal::ImageAlignment::MiddleCenter: return format_to(ctx.out(), "MiddleCenter");
+            case terminal::ImageAlignment::MiddleEnd: return format_to(ctx.out(), "MiddleEnd");
+            case terminal::ImageAlignment::BottomStart: return format_to(ctx.out(), "BottomStart");
+            case terminal::ImageAlignment::BottomCenter: return format_to(ctx.out(), "BottomCenter");
+            case terminal::ImageAlignment::BottomEnd: return format_to(ctx.out(), "BottomEnd");
         }
         return format_to(ctx.out(), "ImageAlignment({})", int(_value));
     }

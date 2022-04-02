@@ -90,9 +90,9 @@ TEST_CASE("Selector.Linear", "[selector]")
 {
     auto screenEvents = ScreenEvents {};
     auto term = MockTerm(PageSize { LineCount(3), ColumnCount(11) }, LineCount(5));
-    auto& screen = term.screen();
+    auto& screen = term.terminal.primaryScreen();
     auto selectionHelper = TestSelectionHelper(screen);
-    screen.write(
+    term.writeToScreen(
         //       0123456789A
         /* 0 */ "12345,67890"s +
         /* 1 */ "ab,cdefg,hi"s +
@@ -171,7 +171,7 @@ TEST_CASE("Selector.Linear", "[selector]")
 
     SECTION("multiple lines fully in history")
     {
-        screen.write("foo\r\nbar\r\n"); // move first two lines into history.
+        term.writeToScreen("foo\r\nbar\r\n"); // move first two lines into history.
         /*
          * |  0123456789A
         -2 | "12345,67890"
@@ -207,7 +207,7 @@ TEST_CASE("Selector.Linear", "[selector]")
 
     SECTION("multiple lines from history into main buffer")
     {
-        screen.write("foo\r\nbar\r\n"); // move first two lines into history.
+        term.writeToScreen("foo\r\nbar\r\n"); // move first two lines into history.
         /*
         -3 | "12345,67890"
         -2 | "ab,cdefg,hi"         (--

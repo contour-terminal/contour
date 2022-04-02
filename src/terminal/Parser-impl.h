@@ -16,6 +16,7 @@
 #include <terminal/Parser.h>
 
 #include <crispy/assert.h>
+#include <crispy/escape.h>
 
 #if defined(__SSE2__)
     #include <immintrin.h>
@@ -223,15 +224,15 @@ constexpr ParserTable ParserTable::get() // {{{
     t.transition(State::CSI_Entry, State::Ground, Action::CSI_Dispatch, Range { 0x40_b, 0x7E_b });
     t.transition(State::CSI_Entry, State::CSI_Intermediate, Action::Collect, Range { 0x20_b, 0x2F_b });
     t.transition(State::CSI_Entry, State::CSI_Ignore, 0x3A_b);
-    t.transition(State::CSI_Entry, State::CSI_Param, Action::Param, Range { 0x30_b, 0x39_b });
-    t.transition(State::CSI_Entry, State::CSI_Param, Action::Param, 0x3B_b);
+    t.transition(State::CSI_Entry, State::CSI_Param, Action::ParamDigit, Range { 0x30_b, 0x39_b });
+    t.transition(State::CSI_Entry, State::CSI_Param, Action::ParamSeparator, 0x3B_b);
     t.transition(State::CSI_Entry, State::CSI_Param, Action::CollectLeader, Range { 0x3C_b, 0x3F_b });
 
     // CSI_Param
     t.event(State::CSI_Param, Action::Execute, Range { 0x00_b, 0x17_b }, 0x19_b, Range { 0x1C_b, 0x1F_b });
-    t.event(State::CSI_Param, Action::Param, Range { 0x30_b, 0x39_b });
-    t.event(State::CSI_Param, Action::Param, 0x3A_b);
-    t.event(State::CSI_Param, Action::Param, 0x3B_b);
+    t.event(State::CSI_Param, Action::ParamDigit, Range { 0x30_b, 0x39_b });
+    t.event(State::CSI_Param, Action::ParamSubSeparator, 0x3A_b);
+    t.event(State::CSI_Param, Action::ParamSeparator, 0x3B_b);
     t.event(State::CSI_Param, Action::Ignore, 0x7F_b);
     t.transition(State::CSI_Param, State::CSI_Ignore, Range { 0x3C_b, 0x3F_b });
     t.transition(State::CSI_Param, State::CSI_Intermediate, Action::Collect, Range { 0x20_b, 0x2F_b });
@@ -280,8 +281,8 @@ namespace detail
 
 } // end namespace detail
 
-template <typename EventListener>
-void Parser<EventListener>::parseFragment(std::string_view _data)
+template <typename EventListener, bool TraceStateChanges>
+void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view _data)
 {
     auto input = _data.data();              // reinterpret_cast<uint8_t const*>(_data.data());
     auto end = _data.data() + _data.size(); // reinterpret_cast<uint8_t const*>(_data.data() + _data.size());
@@ -332,44 +333,49 @@ void Parser<EventListener>::parseFragment(std::string_view _data)
     } while (input != end);
 }
 
-template <typename EventListener>
-void Parser<EventListener>::handle(ActionClass _actionClass, Action _action, uint8_t codepoint)
+template <typename EventListener, bool TraceStateChanges>
+void Parser<EventListener, TraceStateChanges>::handle(ActionClass _actionClass,
+                                                      Action _action,
+                                                      uint8_t codepoint)
 {
     (void) _actionClass;
     auto const ch = static_cast<char>(codepoint);
 
-    // if (_action != Action::Ignore && _action != Action::Undefined)
-    //     fmt::print("Parser.handle: {} {} {} {}\n",
-    //         state_,
-    //         _actionClass,
-    //         _action,
-    //         crispy::escape(unicode::convert_to<char>(ch))
-    //     );
+    if constexpr (TraceStateChanges)
+        if (_action != Action::Ignore && _action != Action::Undefined)
+            fmt::print("Parser.handle: {} {} {} {}\n",
+                       state_,
+                       _actionClass,
+                       _action,
+                       crispy::escape(unicode::convert_to<char>(ch)));
 
     switch (_action)
     {
-    case Action::Clear: eventListener_.clear(); break;
-    case Action::CollectLeader: eventListener_.collectLeader(ch); break;
-    case Action::Collect: eventListener_.collect(ch); break;
-    case Action::Param: eventListener_.param(ch); break;
-    case Action::Execute: eventListener_.execute(ch); break;
-    case Action::ESC_Dispatch: eventListener_.dispatchESC(ch); break;
-    case Action::CSI_Dispatch: eventListener_.dispatchCSI(ch); break;
-    case Action::Print: eventListener_.print(ch); break;
-    case Action::OSC_Start: eventListener_.startOSC(); break;
-    case Action::OSC_Put: eventListener_.putOSC(ch); break;
-    case Action::OSC_End: eventListener_.dispatchOSC(); break;
-    case Action::Hook: eventListener_.hook(ch); break;
-    case Action::Put: eventListener_.put(ch); break;
-    case Action::Unhook: eventListener_.unhook(); break;
-    case Action::APC_Start: eventListener_.startAPC(); break;
-    case Action::APC_Put: eventListener_.putAPC(ch); break;
-    case Action::APC_End: eventListener_.dispatchAPC(); break;
-    case Action::PM_Start: eventListener_.startPM(); break;
-    case Action::PM_Put: eventListener_.putPM(ch); break;
-    case Action::PM_End: eventListener_.dispatchPM(); break;
-    case Action::Ignore:
-    case Action::Undefined: break;
+        case Action::Clear: eventListener_.clear(); break;
+        case Action::CollectLeader: eventListener_.collectLeader(ch); break;
+        case Action::Collect: eventListener_.collect(ch); break;
+        case Action::Param: eventListener_.param(ch); break;
+        case Action::ParamDigit: eventListener_.paramDigit(ch); break;
+        case Action::ParamSeparator: eventListener_.paramSeparator(); break;
+        case Action::ParamSubSeparator: eventListener_.paramSubSeparator(); break;
+        case Action::Execute: eventListener_.execute(ch); break;
+        case Action::ESC_Dispatch: eventListener_.dispatchESC(ch); break;
+        case Action::CSI_Dispatch: eventListener_.dispatchCSI(ch); break;
+        case Action::Print: eventListener_.print(ch); break;
+        case Action::OSC_Start: eventListener_.startOSC(); break;
+        case Action::OSC_Put: eventListener_.putOSC(ch); break;
+        case Action::OSC_End: eventListener_.dispatchOSC(); break;
+        case Action::Hook: eventListener_.hook(ch); break;
+        case Action::Put: eventListener_.put(ch); break;
+        case Action::Unhook: eventListener_.unhook(); break;
+        case Action::APC_Start: eventListener_.startAPC(); break;
+        case Action::APC_Put: eventListener_.putAPC(ch); break;
+        case Action::APC_End: eventListener_.dispatchAPC(); break;
+        case Action::PM_Start: eventListener_.startPM(); break;
+        case Action::PM_Put: eventListener_.putPM(ch); break;
+        case Action::PM_End: eventListener_.dispatchPM(); break;
+        case Action::Ignore:
+        case Action::Undefined: break;
     }
 }
 

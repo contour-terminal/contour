@@ -166,7 +166,7 @@ TerminalWindow::~TerminalWindow()
 
 void TerminalWindow::onTerminalClosed()
 {
-    DisplayLog()("terminal closed: {}", terminalSession_->terminal().screen().windowTitle());
+    DisplayLog()("terminal closed: {}", terminalSession_->terminal().windowTitle());
     close();
 }
 
@@ -180,7 +180,7 @@ void TerminalWindow::profileChanged()
 #if defined(CONTOUR_SCROLLBAR)
     scrollableDisplay_->updatePosition();
 
-    if (terminalSession_->terminal().screen().isPrimaryScreen())
+    if (terminalSession_->terminal().isPrimaryScreen())
         scrollableDisplay_->showScrollBar(profile()->scrollbarPosition != config::ScrollBarPosition::Hidden);
     else
         scrollableDisplay_->showScrollBar(!profile()->hideScrollbarInAltScreen);

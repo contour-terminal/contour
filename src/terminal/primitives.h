@@ -657,10 +657,10 @@ constexpr unsigned toAnsiModeNum(AnsiMode m)
 {
     switch (m)
     {
-    case AnsiMode::KeyboardAction: return 2;
-    case AnsiMode::Insert: return 4;
-    case AnsiMode::SendReceive: return 12;
-    case AnsiMode::AutomaticNewLine: return 20;
+        case AnsiMode::KeyboardAction: return 2;
+        case AnsiMode::Insert: return 4;
+        case AnsiMode::SendReceive: return 12;
+        case AnsiMode::AutomaticNewLine: return 20;
     }
     return static_cast<unsigned>(m);
 }
@@ -669,10 +669,10 @@ constexpr bool isValidAnsiMode(unsigned int _mode) noexcept
 {
     switch (static_cast<AnsiMode>(_mode))
     {
-    case AnsiMode::KeyboardAction:
-    case AnsiMode::Insert:
-    case AnsiMode::SendReceive:
-    case AnsiMode::AutomaticNewLine: return true;
+        case AnsiMode::KeyboardAction:
+        case AnsiMode::Insert:
+        case AnsiMode::SendReceive:
+        case AnsiMode::AutomaticNewLine: return true;
     }
     return false;
 }
@@ -684,41 +684,41 @@ constexpr unsigned toDECModeNum(DECMode m)
 {
     switch (m)
     {
-    case DECMode::UseApplicationCursorKeys: return 1;
-    case DECMode::DesignateCharsetUSASCII: return 2;
-    case DECMode::Columns132: return 3;
-    case DECMode::SmoothScroll: return 4;
-    case DECMode::ReverseVideo: return 5;
-    case DECMode::Origin: return 6;
-    case DECMode::AutoWrap: return 7;
-    case DECMode::MouseProtocolX10: return 9;
-    case DECMode::ShowToolbar: return 10;
-    case DECMode::BlinkingCursor: return 12;
-    case DECMode::PrinterExtend: return 19;
-    case DECMode::VisibleCursor: return 25;
-    case DECMode::ShowScrollbar: return 30;
-    case DECMode::AllowColumns80to132: return 40;
-    case DECMode::DebugLogging: return 46;
-    case DECMode::UseAlternateScreen: return 47;
-    case DECMode::LeftRightMargin: return 69;
-    case DECMode::MouseProtocolNormalTracking: return 1000;
-    case DECMode::MouseProtocolHighlightTracking: return 1001;
-    case DECMode::MouseProtocolButtonTracking: return 1002;
-    case DECMode::MouseProtocolAnyEventTracking: return 1003;
-    case DECMode::SaveCursor: return 1048;
-    case DECMode::ExtendedAltScreen: return 1049;
-    case DECMode::BracketedPaste: return 2004;
-    case DECMode::FocusTracking: return 1004;
-    case DECMode::SixelScrolling: return 80;
-    case DECMode::UsePrivateColorRegisters: return 1070;
-    case DECMode::MouseExtended: return 1005;
-    case DECMode::MouseSGR: return 1006;
-    case DECMode::MouseURXVT: return 1015;
-    case DECMode::MouseSGRPixels: return 1016;
-    case DECMode::MouseAlternateScroll: return 1007;
-    case DECMode::BatchedRendering: return 2026;
-    case DECMode::TextReflow: return 2027;
-    case DECMode::SixelCursorNextToGraphic: return 8452;
+        case DECMode::UseApplicationCursorKeys: return 1;
+        case DECMode::DesignateCharsetUSASCII: return 2;
+        case DECMode::Columns132: return 3;
+        case DECMode::SmoothScroll: return 4;
+        case DECMode::ReverseVideo: return 5;
+        case DECMode::Origin: return 6;
+        case DECMode::AutoWrap: return 7;
+        case DECMode::MouseProtocolX10: return 9;
+        case DECMode::ShowToolbar: return 10;
+        case DECMode::BlinkingCursor: return 12;
+        case DECMode::PrinterExtend: return 19;
+        case DECMode::VisibleCursor: return 25;
+        case DECMode::ShowScrollbar: return 30;
+        case DECMode::AllowColumns80to132: return 40;
+        case DECMode::DebugLogging: return 46;
+        case DECMode::UseAlternateScreen: return 47;
+        case DECMode::LeftRightMargin: return 69;
+        case DECMode::MouseProtocolNormalTracking: return 1000;
+        case DECMode::MouseProtocolHighlightTracking: return 1001;
+        case DECMode::MouseProtocolButtonTracking: return 1002;
+        case DECMode::MouseProtocolAnyEventTracking: return 1003;
+        case DECMode::SaveCursor: return 1048;
+        case DECMode::ExtendedAltScreen: return 1049;
+        case DECMode::BracketedPaste: return 2004;
+        case DECMode::FocusTracking: return 1004;
+        case DECMode::SixelScrolling: return 80;
+        case DECMode::UsePrivateColorRegisters: return 1070;
+        case DECMode::MouseExtended: return 1005;
+        case DECMode::MouseSGR: return 1006;
+        case DECMode::MouseURXVT: return 1015;
+        case DECMode::MouseSGRPixels: return 1016;
+        case DECMode::MouseAlternateScroll: return 1007;
+        case DECMode::BatchedRendering: return 2026;
+        case DECMode::TextReflow: return 2027;
+        case DECMode::SixelCursorNextToGraphic: return 8452;
     }
     return static_cast<unsigned>(m);
 }
@@ -727,43 +727,43 @@ constexpr bool isValidDECMode(unsigned int _mode) noexcept
 {
     switch (static_cast<DECMode>(_mode))
     {
-    case DECMode::UseApplicationCursorKeys:
-    case DECMode::DesignateCharsetUSASCII:
-    case DECMode::Columns132:
-    case DECMode::SmoothScroll:
-    case DECMode::ReverseVideo:
-    case DECMode::MouseProtocolX10:
-    case DECMode::MouseProtocolNormalTracking:
-    case DECMode::MouseProtocolHighlightTracking:
-    case DECMode::MouseProtocolButtonTracking:
-    case DECMode::MouseProtocolAnyEventTracking:
-    case DECMode::SaveCursor:
-    case DECMode::ExtendedAltScreen:
-    case DECMode::Origin:
-    case DECMode::AutoWrap:
-    case DECMode::PrinterExtend:
-    case DECMode::LeftRightMargin:
-    case DECMode::ShowToolbar:
-    case DECMode::BlinkingCursor:
-    case DECMode::VisibleCursor:
-    case DECMode::ShowScrollbar:
-    case DECMode::AllowColumns80to132:
-    case DECMode::DebugLogging:
-    case DECMode::UseAlternateScreen:
-    case DECMode::BracketedPaste:
-    case DECMode::FocusTracking:
-    case DECMode::SixelScrolling:
-    case DECMode::UsePrivateColorRegisters:
-    case DECMode::MouseExtended:
-    case DECMode::MouseSGR:
-    case DECMode::MouseURXVT:
-    case DECMode::MouseSGRPixels:
-    case DECMode::MouseAlternateScroll:
-    case DECMode::BatchedRendering:
-    case DECMode::TextReflow:
-    case DECMode::SixelCursorNextToGraphic:
-        //.
-        return true;
+        case DECMode::UseApplicationCursorKeys:
+        case DECMode::DesignateCharsetUSASCII:
+        case DECMode::Columns132:
+        case DECMode::SmoothScroll:
+        case DECMode::ReverseVideo:
+        case DECMode::MouseProtocolX10:
+        case DECMode::MouseProtocolNormalTracking:
+        case DECMode::MouseProtocolHighlightTracking:
+        case DECMode::MouseProtocolButtonTracking:
+        case DECMode::MouseProtocolAnyEventTracking:
+        case DECMode::SaveCursor:
+        case DECMode::ExtendedAltScreen:
+        case DECMode::Origin:
+        case DECMode::AutoWrap:
+        case DECMode::PrinterExtend:
+        case DECMode::LeftRightMargin:
+        case DECMode::ShowToolbar:
+        case DECMode::BlinkingCursor:
+        case DECMode::VisibleCursor:
+        case DECMode::ShowScrollbar:
+        case DECMode::AllowColumns80to132:
+        case DECMode::DebugLogging:
+        case DECMode::UseAlternateScreen:
+        case DECMode::BracketedPaste:
+        case DECMode::FocusTracking:
+        case DECMode::SixelScrolling:
+        case DECMode::UsePrivateColorRegisters:
+        case DECMode::MouseExtended:
+        case DECMode::MouseSGR:
+        case DECMode::MouseURXVT:
+        case DECMode::MouseSGRPixels:
+        case DECMode::MouseAlternateScroll:
+        case DECMode::BatchedRendering:
+        case DECMode::TextReflow:
+        case DECMode::SixelCursorNextToGraphic:
+            //.
+            return true;
     }
     return false;
 }
@@ -772,14 +772,14 @@ constexpr DynamicColorName getChangeDynamicColorCommand(unsigned value)
 {
     switch (value)
     {
-    case 10: return DynamicColorName::DefaultForegroundColor;
-    case 11: return DynamicColorName::DefaultBackgroundColor;
-    case 12: return DynamicColorName::TextCursorColor;
-    case 13: return DynamicColorName::MouseForegroundColor;
-    case 14: return DynamicColorName::MouseBackgroundColor;
-    case 19: return DynamicColorName::HighlightForegroundColor;
-    case 17: return DynamicColorName::HighlightBackgroundColor;
-    default: return DynamicColorName::DefaultForegroundColor;
+        case 10: return DynamicColorName::DefaultForegroundColor;
+        case 11: return DynamicColorName::DefaultBackgroundColor;
+        case 12: return DynamicColorName::TextCursorColor;
+        case 13: return DynamicColorName::MouseForegroundColor;
+        case 14: return DynamicColorName::MouseBackgroundColor;
+        case 19: return DynamicColorName::HighlightForegroundColor;
+        case 17: return DynamicColorName::HighlightBackgroundColor;
+        default: return DynamicColorName::DefaultForegroundColor;
     }
 }
 
@@ -787,14 +787,14 @@ constexpr unsigned setDynamicColorCommand(DynamicColorName name)
 {
     switch (name)
     {
-    case DynamicColorName::DefaultForegroundColor: return 10;
-    case DynamicColorName::DefaultBackgroundColor: return 11;
-    case DynamicColorName::TextCursorColor: return 12;
-    case DynamicColorName::MouseForegroundColor: return 13;
-    case DynamicColorName::MouseBackgroundColor: return 14;
-    case DynamicColorName::HighlightForegroundColor: return 19;
-    case DynamicColorName::HighlightBackgroundColor: return 17;
-    default: return 0;
+        case DynamicColorName::DefaultForegroundColor: return 10;
+        case DynamicColorName::DefaultBackgroundColor: return 11;
+        case DynamicColorName::TextCursorColor: return 12;
+        case DynamicColorName::MouseForegroundColor: return 13;
+        case DynamicColorName::MouseBackgroundColor: return 14;
+        case DynamicColorName::HighlightForegroundColor: return 19;
+        case DynamicColorName::HighlightBackgroundColor: return 17;
+        default: return 0;
     }
 }
 
@@ -828,10 +828,10 @@ struct formatter<terminal::CursorShape>
     {
         switch (value)
         {
-        case terminal::CursorShape::Bar: return format_to(ctx.out(), "Bar");
-        case terminal::CursorShape::Block: return format_to(ctx.out(), "Block");
-        case terminal::CursorShape::Rectangle: return format_to(ctx.out(), "Rectangle");
-        case terminal::CursorShape::Underscore: return format_to(ctx.out(), "Underscore");
+            case terminal::CursorShape::Bar: return format_to(ctx.out(), "Bar");
+            case terminal::CursorShape::Block: return format_to(ctx.out(), "Block");
+            case terminal::CursorShape::Rectangle: return format_to(ctx.out(), "Rectangle");
+            case terminal::CursorShape::Underscore: return format_to(ctx.out(), "Underscore");
         }
         return format_to(ctx.out(), "{}", static_cast<unsigned>(value));
     }
@@ -896,8 +896,8 @@ struct formatter<terminal::ScreenType>
     {
         switch (value)
         {
-        case terminal::ScreenType::Primary: return format_to(ctx.out(), "Primary");
-        case terminal::ScreenType::Alternate: return format_to(ctx.out(), "Alternate");
+            case terminal::ScreenType::Primary: return format_to(ctx.out(), "Primary");
+            case terminal::ScreenType::Alternate: return format_to(ctx.out(), "Alternate");
         }
         return format_to(ctx.out(), "({})", static_cast<unsigned>(value));
     }

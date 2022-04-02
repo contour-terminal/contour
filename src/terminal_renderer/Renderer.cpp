@@ -90,26 +90,26 @@ unique_ptr<text::shaper> createTextShaper(TextShapingEngine _engine,
 {
     switch (_engine)
     {
-    case TextShapingEngine::DWrite:
+        case TextShapingEngine::DWrite:
 #if defined(_WIN32)
-        RendererLog()("Using DirectWrite text shaping engine.");
-        // TODO: do we want to use custom font locator here?
-        return make_unique<text::directwrite_shaper>(_dpi, move(_locator));
+            RendererLog()("Using DirectWrite text shaping engine.");
+            // TODO: do we want to use custom font locator here?
+            return make_unique<text::directwrite_shaper>(_dpi, move(_locator));
 #else
-        RendererLog()("DirectWrite not available on this platform.");
-        break;
+            RendererLog()("DirectWrite not available on this platform.");
+            break;
 #endif
 
-    case TextShapingEngine::CoreText:
+        case TextShapingEngine::CoreText:
 #if defined(__APPLE__)
-        RendererLog()("CoreText not yet implemented.");
-        break;
+            RendererLog()("CoreText not yet implemented.");
+            break;
 #else
-        RendererLog()("CoreText not available on this platform.");
-        break;
+            RendererLog()("CoreText not available on this platform.");
+            break;
 #endif
 
-    case TextShapingEngine::OpenShaper: break;
+        case TextShapingEngine::OpenShaper: break;
     }
 
     RendererLog()("Using OpenShaper text shaping engine.");
@@ -306,7 +306,7 @@ uint64_t Renderer::render(Terminal& _terminal, bool _pressure)
 
     optional<terminal::RenderCursor> cursorOpt;
     textRenderer_.beginFrame();
-    textRenderer_.setPressure(_pressure && _terminal.screen().isPrimaryScreen());
+    textRenderer_.setPressure(_pressure && _terminal.isPrimaryScreen());
     {
         RenderBufferRef const renderBuffer = _terminal.renderBuffer();
         cursorOpt = renderBuffer.get().cursor;
@@ -353,15 +353,15 @@ constexpr CellFlags toCellStyle(Decorator _decorator)
 {
     switch (_decorator)
     {
-    case Decorator::Underline: return CellFlags::Underline;
-    case Decorator::DoubleUnderline: return CellFlags::DoublyUnderlined;
-    case Decorator::CurlyUnderline: return CellFlags::CurlyUnderlined;
-    case Decorator::DottedUnderline: return CellFlags::DottedUnderline;
-    case Decorator::DashedUnderline: return CellFlags::DashedUnderline;
-    case Decorator::Overline: return CellFlags::Overline;
-    case Decorator::CrossedOut: return CellFlags::CrossedOut;
-    case Decorator::Framed: return CellFlags::Framed;
-    case Decorator::Encircle: return CellFlags::Encircled;
+        case Decorator::Underline: return CellFlags::Underline;
+        case Decorator::DoubleUnderline: return CellFlags::DoublyUnderlined;
+        case Decorator::CurlyUnderline: return CellFlags::CurlyUnderlined;
+        case Decorator::DottedUnderline: return CellFlags::DottedUnderline;
+        case Decorator::DashedUnderline: return CellFlags::DashedUnderline;
+        case Decorator::Overline: return CellFlags::Overline;
+        case Decorator::CrossedOut: return CellFlags::CrossedOut;
+        case Decorator::Framed: return CellFlags::Framed;
+        case Decorator::Encircle: return CellFlags::Encircled;
     }
     return CellFlags {};
 }

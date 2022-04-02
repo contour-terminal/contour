@@ -132,9 +132,9 @@ namespace
     {
         switch (_format)
         {
-        case atlas::Format::RGBA: return GL_RGBA;
-        case atlas::Format::RGB: return GL_RGB;
-        case atlas::Format::Red: return GL_RED;
+            case atlas::Format::RGBA: return GL_RGBA;
+            case atlas::Format::RGB: return GL_RGB;
+            case atlas::Format::Red: return GL_RED;
         }
         return GL_RED;
     }
@@ -153,8 +153,8 @@ namespace
     {
         switch (format)
         {
-        case terminal::ImageFormat::RGB: return GL_RGB;
-        case terminal::ImageFormat::RGBA: return GL_RGBA;
+            case terminal::ImageFormat::RGB: return GL_RGB;
+            case terminal::ImageFormat::RGBA: return GL_RGBA;
         }
         Guarantee(false);
         crispy::unreachable();
@@ -590,27 +590,27 @@ void OpenGLRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)
     auto t = stub.begin();
     switch (param.properties.format)
     {
-    case atlas::Format::Red:
-        for (auto i = 0u; i < param.size.area(); ++i)
-            *t++ = 0x40;
-        break;
-    case atlas::Format::RGB:
-        for (auto i = 0u; i < param.size.area(); ++i)
-        {
-            *t++ = 0x00;
-            *t++ = 0x00;
-            *t++ = 0x80;
-        }
-        break;
-    case atlas::Format::RGBA:
-        for (auto i = 0u; i < param.size.area(); ++i)
-        {
-            *t++ = 0x00;
-            *t++ = 0xA0;
-            *t++ = 0x00;
-            *t++ = 0xC0;
-        }
-        break;
+        case atlas::Format::Red:
+            for (auto i = 0u; i < param.size.area(); ++i)
+                *t++ = 0x40;
+            break;
+        case atlas::Format::RGB:
+            for (auto i = 0u; i < param.size.area(); ++i)
+            {
+                *t++ = 0x00;
+                *t++ = 0x00;
+                *t++ = 0x80;
+            }
+            break;
+        case atlas::Format::RGBA:
+            for (auto i = 0u; i < param.size.area(); ++i)
+            {
+                *t++ = 0x00;
+                *t++ = 0xA0;
+                *t++ = 0x00;
+                *t++ = 0xC0;
+            }
+            break;
     }
     // }}}
 

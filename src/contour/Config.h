@@ -84,15 +84,15 @@ namespace helper
         using MatchModes = terminal::MatchModes;
         switch (_expected.status(_testFlag))
         {
-        case MatchModes::Status::Enabled:
-            if (!(_actualModeFlags & _testFlag))
-                return false;
-            break;
-        case MatchModes::Status::Disabled:
-            if ((_actualModeFlags & _testFlag))
-                return false;
-            break;
-        case MatchModes::Status::Any: break;
+            case MatchModes::Status::Enabled:
+                if (!(_actualModeFlags & _testFlag))
+                    return false;
+                break;
+            case MatchModes::Status::Disabled:
+                if ((_actualModeFlags & _testFlag))
+                    return false;
+                break;
+            case MatchModes::Status::Any: break;
         }
         return true;
     }
@@ -288,9 +288,9 @@ struct formatter<contour::config::Permission>
     {
         switch (_perm)
         {
-        case contour::config::Permission::Allow: return format_to(ctx.out(), "allow");
-        case contour::config::Permission::Deny: return format_to(ctx.out(), "deny");
-        case contour::config::Permission::Ask: return format_to(ctx.out(), "ask");
+            case contour::config::Permission::Allow: return format_to(ctx.out(), "allow");
+            case contour::config::Permission::Deny: return format_to(ctx.out(), "deny");
+            case contour::config::Permission::Ask: return format_to(ctx.out(), "ask");
         }
         return format_to(ctx.out(), "({})", unsigned(_perm));
     }
@@ -310,10 +310,10 @@ struct formatter<contour::config::SelectionAction>
     {
         switch (_value)
         {
-        case SelectionAction::CopyToClipboard: return format_to(ctx.out(), "CopyToClipboard");
-        case SelectionAction::CopyToSelectionClipboard:
-            return format_to(ctx.out(), "CopyToSelectionClipboard");
-        case SelectionAction::Nothing: return format_to(ctx.out(), "Waiting");
+            case SelectionAction::CopyToClipboard: return format_to(ctx.out(), "CopyToClipboard");
+            case SelectionAction::CopyToSelectionClipboard:
+                return format_to(ctx.out(), "CopyToSelectionClipboard");
+            case SelectionAction::Nothing: return format_to(ctx.out(), "Waiting");
         }
         return format_to(ctx.out(), "{}", static_cast<unsigned>(_value));
     }
@@ -333,9 +333,9 @@ struct formatter<contour::config::ScrollBarPosition>
     {
         switch (_value)
         {
-        case ScrollBarPosition::Hidden: return format_to(ctx.out(), "Hidden");
-        case ScrollBarPosition::Left: return format_to(ctx.out(), "Left");
-        case ScrollBarPosition::Right: return format_to(ctx.out(), "Right");
+            case ScrollBarPosition::Hidden: return format_to(ctx.out(), "Hidden");
+            case ScrollBarPosition::Left: return format_to(ctx.out(), "Left");
+            case ScrollBarPosition::Right: return format_to(ctx.out(), "Right");
         }
         return format_to(ctx.out(), "{}", static_cast<unsigned>(_value));
     }

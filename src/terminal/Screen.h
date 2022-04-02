@@ -54,6 +54,19 @@
 namespace terminal
 {
 
+class ScreenBase: public SequenceHandler
+{
+  public:
+    virtual void verifyState() const = 0;
+    virtual void fail(std::string const& _message) const = 0;
+    virtual bool contains(CellLocation _coord) const noexcept = 0;
+    virtual bool isCellEmpty(CellLocation position) const noexcept = 0;
+    virtual uint8_t cellWithAt(CellLocation position) const noexcept = 0;
+    virtual HyperlinkId hyperlinkIdAt(CellLocation position) const noexcept = 0;
+    virtual std::shared_ptr<HyperlinkInfo const> hyperlinkAt(CellLocation pos) const noexcept = 0;
+    virtual void inspect(std::string const& _message, std::ostream& _os) const = 0;
+};
+
 /**
  * Terminal Screen.
  *
@@ -63,10 +76,10 @@ namespace terminal
  * to be viewn.
  */
 template <typename Cell>
-class Screen: public capabilities::StaticDatabase
+class Screen: public ScreenBase, public capabilities::StaticDatabase
 {
   public:
-    Screen(TerminalState& terminalState, ScreenType screenType);
+    Screen(TerminalState& terminalState, ScreenType screenType, Grid<Cell>& grid);
 
     Screen(Screen const&) = delete;
     Screen& operator=(Screen const&) = delete;
@@ -77,31 +90,20 @@ class Screen: public capabilities::StaticDatabase
     using StaticDatabase::numericCapability;
     unsigned numericCapability(capabilities::Code _cap) const override;
 
-    void setSixelCursorConformance(bool _value) noexcept { _state.sixelCursorConformance = _value; }
-
-    constexpr ImageSize cellPixelSize() const noexcept { return _state.cellPixelSize; }
-
-    constexpr void setCellPixelSize(ImageSize _cellPixelSize) { _state.cellPixelSize = _cellPixelSize; }
-
-    void setTerminalId(VTType _id) noexcept { _state.terminalId = _id; }
-
-    void setMaxHistoryLineCount(LineCount _maxHistoryLineCount);
-    LineCount maxHistoryLineCount() const noexcept { return grid().maxHistoryLineCount(); }
-
     LineCount historyLineCount() const noexcept { return grid().historyLineCount(); }
 
-    /// Writes given data into the screen.
-    void write(std::string_view _data);
-    void write(std::u32string_view _data);
-
-    void writeText(char32_t _char);
-    void writeText(std::string_view _chars);
+    // {{{ SequenceHandler overrides
+    void writeText(char32_t _char) override;
+    void writeText(std::string_view _chars) override;
+    void executeControlCode(char controlCode) override;
+    void processSequence(Sequence const& seq) override;
+    // }}}
 
     /// Renders the full screen by passing every grid cell to the callback.
     template <typename Renderer>
     void render(Renderer&& _render, ScrollOffset _scrollOffset = {}) const
     {
-        _state.activeGrid->render(std::forward<Renderer>(_render), _scrollOffset);
+        _grid.render(std::forward<Renderer>(_render), _scrollOffset);
     }
 
     /// Renders the full screen as text into the given string. Each line will be terminated by LF.
@@ -114,9 +116,6 @@ class Screen: public capabilities::StaticDatabase
     /// @returns necessary commands needed to draw the current screen state,
     ///          including initial clear screen, and initial cursor hide.
     std::string screenshot(std::function<std::string(LineOffset)> const& _postLine = {}) const;
-
-    void setFocus(bool focused) { _state.focused = focused; }
-    bool focused() const noexcept { return _state.focused; }
 
     // {{{ VT API
     void linefeed(); // LF
@@ -183,9 +182,6 @@ class Screen: public capabilities::StaticDatabase
     /// Sets the current working directory as file:// URL.
     void setCurrentWorkingDirectory(std::string const& _url); // OSC 7
 
-    /// @returns either an empty string or a file:// URL of the last set working directory.
-    std::string const& currentWorkingDirectory() const noexcept { return _state.currentWorkingDirectory; }
-
     void hyperlink(std::string _id, std::string _uri);                   // OSC 8
     void notify(std::string const& _title, std::string const& _content); // OSC 777
 
@@ -196,10 +192,7 @@ class Screen: public capabilities::StaticDatabase
     void setUnderlineColor(Color _color);
     void setCursorStyle(CursorDisplay _display, CursorShape _shape);
     void setGraphicsRendition(GraphicsRendition _rendition);
-    void setTopBottomMargin(std::optional<LineOffset> _top, std::optional<LineOffset> _bottom);
-    void setLeftRightMargin(std::optional<ColumnOffset> _left, std::optional<ColumnOffset> _right);
     void screenAlignmentPattern();
-    void sendMouseEvents(MouseProtocol _protocol, bool _enable);
     void applicationKeypadMode(bool _enable);
     void designateCharset(CharsetTable _table, CharsetId _charset);
     void singleShiftSelect(CharsetTable _table);
@@ -213,14 +206,6 @@ class Screen: public capabilities::StaticDatabase
     void inspect();
     void smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, XtSmGraphics::Value _value);
     // }}}
-
-    void setMaxImageSize(ImageSize size) noexcept { _state.maxImageSize = size; }
-
-    void setMaxImageSize(ImageSize _effective, ImageSize _limit)
-    {
-        _state.maxImageSize = _effective;
-        _state.maxImageSizeLimit = _limit;
-    }
 
     ImageSize maxImageSize() const noexcept { return _state.maxImageSize; }
     ImageSize maxImageSizeLimit() const noexcept { return _state.maxImageSizeLimit; }
@@ -251,15 +236,9 @@ class Screen: public capabilities::StaticDatabase
                      ImageResize _resizePolicy,
                      bool _autoScroll);
 
-    void inspect(std::string const& _message, std::ostream& _os) const;
-
-    // reset screen
-    void resetSoft();
-    void resetHard();
+    void inspect(std::string const& _message, std::ostream& _os) const override;
 
     // for DECSC and DECRC
-    void setMode(AnsiMode _mode, bool _enabled);
-    void setMode(DECMode _mode, bool _enabled);
     void saveCursor();
     void restoreCursor();
     void restoreCursor(Cursor const& _savedCursor);
@@ -269,19 +248,6 @@ class Screen: public capabilities::StaticDatabase
     void requestDECMode(unsigned int _mode);
 
     PageSize pageSize() const noexcept { return _state.pageSize; }
-    void resize(PageSize _newSize);
-
-    /// Implements semantics for  DECCOLM / DECSCPP.
-    void resizeColumns(ColumnCount _newColumnCount, bool _clear);
-
-    bool isCursorInsideMargins() const noexcept
-    {
-        bool const insideVerticalMargin = _state.margin.vertical.contains(_state.cursor.position.line);
-        bool const insideHorizontalMargin =
-            !isModeEnabled(DECMode::LeftRightMargin)
-            || _state.margin.horizontal.contains(_state.cursor.position.column);
-        return insideVerticalMargin && insideHorizontalMargin;
-    }
 
     constexpr CellLocation realCursorPosition() const noexcept { return _state.cursor.position; }
 
@@ -346,7 +312,7 @@ class Screen: public capabilities::StaticDatabase
     }
 
     // Tests if given coordinate is within the visible screen area.
-    constexpr bool contains(CellLocation _coord) const noexcept
+    bool contains(CellLocation _coord) const noexcept override
     {
         return LineOffset(0) <= _coord.line && _coord.line < boxed_cast<LineOffset>(_state.pageSize.lines)
                && ColumnOffset(0) <= _coord.column
@@ -364,7 +330,7 @@ class Screen: public capabilities::StaticDatabase
     Cell& useCurrentCell() noexcept { return useCellAt(_state.cursor.position); }
     Cell const& currentCell() const noexcept { return at(_state.cursor.position); }
 
-    void moveCursorTo(LineOffset _line, ColumnOffset _column);
+    void moveCursorTo(LineOffset line, ColumnOffset column);
 
     /// Gets a reference to the cell relative to screen origin (top left, 1:1).
     Cell& at(LineOffset _line, ColumnOffset _column) noexcept { return grid().useCellAt(_line, _column); }
@@ -382,23 +348,6 @@ class Screen: public capabilities::StaticDatabase
     Cell& at(CellLocation p) noexcept { return useCellAt(p.line, p.column); }
     Cell& useCellAt(CellLocation p) noexcept { return useCellAt(p.line, p.column); }
     Cell const& at(CellLocation p) const noexcept { return grid().at(p.line, p.column); }
-
-    bool isPrimaryScreen() const noexcept { return _state.activeGrid == &_state.primaryBuffer; }
-    bool isAlternateScreen() const noexcept { return _state.activeGrid == &_state.alternateBuffer; }
-
-    bool isModeEnabled(AnsiMode m) const noexcept { return _state.modes.enabled(m); }
-    bool isModeEnabled(DECMode m) const noexcept { return _state.modes.enabled(m); }
-
-    bool isModeEnabled(std::variant<AnsiMode, DECMode> m) const
-    {
-        if (std::holds_alternative<AnsiMode>(m))
-            return _state.modes.enabled(std::get<AnsiMode>(m));
-        else
-            return _state.modes.enabled(std::get<DECMode>(m));
-    }
-
-    bool verticalMarginsEnabled() const noexcept { return isModeEnabled(DECMode::Origin); }
-    bool horizontalMarginsEnabled() const noexcept { return isModeEnabled(DECMode::LeftRightMargin); }
 
     Margin margin() const noexcept { return _state.margin; }
 
@@ -425,32 +374,19 @@ class Screen: public capabilities::StaticDatabase
 
     bool synchronizeOutput() const noexcept { return false; } // TODO
 
-    void setWindowTitle(std::string const& _title);
-    void saveWindowTitle();
-    void restoreWindowTitle();
-
     void scrollUp(LineCount n) { scrollUp(n, _state.margin); }
     void scrollDown(LineCount n) { scrollDown(n, _state.margin); }
 
-    void verifyState() const;
+    void verifyState() const override;
 
     /// @returns the primary screen's grid.
     Grid<Cell>& primaryGrid() noexcept { return _state.primaryBuffer; }
 
-    /// @returns the alternate  screen's grid.
-    Grid<Cell>& alternateGrid() noexcept { return _state.alternateBuffer; }
-
-    /// @returns the primary screen's grid if primary screen is active.
-    Grid<Cell> const& grid() const noexcept { return *_state.activeGrid; }
-
-    /// @returns the primary screen's grid if primary screen is active.
-    Grid<Cell>& grid() noexcept { return *_state.activeGrid; }
+    Grid<Cell> const& grid() const noexcept { return _grid; }
+    Grid<Cell>& grid() noexcept { return _grid; }
 
     /// @returns true iff given absolute line number is wrapped, false otherwise.
-    bool isLineWrapped(LineOffset _lineNumber) const noexcept
-    {
-        return _state.activeGrid->isLineWrapped(_lineNumber);
-    }
+    bool isLineWrapped(LineOffset _lineNumber) const noexcept { return _grid.isLineWrapped(_lineNumber); }
 
     ColorPalette& colorPalette() noexcept { return _state.colorPalette; }
     ColorPalette const& colorPalette() const noexcept { return _state.colorPalette; }
@@ -458,7 +394,16 @@ class Screen: public capabilities::StaticDatabase
     ColorPalette& defaultColorPalette() noexcept { return _state.defaultColorPalette; }
     ColorPalette const& defaultColorPalette() const noexcept { return _state.defaultColorPalette; }
 
-    std::shared_ptr<HyperlinkInfo> hyperlinkAt(CellLocation pos) noexcept
+    bool isCellEmpty(CellLocation position) const noexcept override { return at(position).empty(); }
+
+    uint8_t cellWithAt(CellLocation position) const noexcept override { return at(position).width(); }
+
+    HyperlinkId hyperlinkIdAt(CellLocation position) const noexcept override
+    {
+        return at(position).hyperlink();
+    }
+
+    std::shared_ptr<HyperlinkInfo const> hyperlinkAt(CellLocation pos) const noexcept override
     {
         return _state.hyperlinks.hyperlinkById(at(pos).hyperlink());
     }
@@ -469,15 +414,12 @@ class Screen: public capabilities::StaticDatabase
     void resetInstructionCounter() noexcept { _state.instructionCounter = 0; }
     char32_t precedingGraphicCharacter() const noexcept { return _state.precedingGraphicCharacter; }
 
-    void executeControlCode(char controlCode);
-    void process(Sequence const& seq);
     void applyAndLog(FunctionDefinition const& function, Sequence const& seq);
     ApplyResult apply(FunctionDefinition const& function, Sequence const& seq);
 
-  private:
-    void setBuffer(ScreenType _type);
-    void applyPageSizeToCurrentBuffer();
+    void fail(std::string const& _message) const override;
 
+  private:
     void clearAllTabs();
     void clearTabUnderCursor();
     void setTabUnderCursor();
@@ -488,8 +430,6 @@ class Screen: public capabilities::StaticDatabase
     void writeCharToCurrentAndAdvance(char32_t _codepoint) noexcept;
     void clearAndAdvance(int _offset) noexcept;
 
-    void fail(std::string const& _message) const;
-
     void scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin);
     void scrollUp(LineCount n, Margin margin);
     void scrollDown(LineCount n, Margin margin);
@@ -499,9 +439,16 @@ class Screen: public capabilities::StaticDatabase
     /// Sets the current column to given logical column number.
     void setCurrentColumn(ColumnOffset _n);
 
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookSTP(Sequence const& seq);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookSixel(Sequence const& seq);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookDECRQSS(Sequence const& seq);
+    [[nodiscard]] std::unique_ptr<ParserExtension> hookXTGETTCAP(Sequence const& seq);
+
     Terminal& _terminal;
     TerminalState& _state;
     ScreenType const _screenType;
+    Grid<Cell>& _grid;
+    std::unique_ptr<SixelImageBuilder> sixelImageBuilder_;
 };
 
 } // namespace terminal

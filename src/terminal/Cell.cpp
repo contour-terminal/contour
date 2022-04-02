@@ -19,9 +19,9 @@ namespace terminal
 std::u32string Cell::codepoints() const
 {
     std::u32string s;
-    if (auto const base = codepoint(0); base)
+    if (codepoint_)
     {
-        s += base;
+        s += codepoint_;
         if (extra_)
         {
             for (char32_t const cp: extra_->codepoints)
@@ -44,16 +44,6 @@ std::string Cell::toUtf8() const
         for (char32_t const cp: extra_->codepoints)
             text += unicode::convert_to<char>(cp);
     return text;
-}
-
-GraphicsAttributes Cell::attributes() const noexcept
-{
-    GraphicsAttributes sgr {};
-    sgr.foregroundColor = foregroundColor();
-    sgr.backgroundColor = backgroundColor();
-    sgr.underlineColor = underlineColor();
-    sgr.styles = styles();
-    return sgr;
 }
 
 } // namespace terminal

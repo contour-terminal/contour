@@ -40,6 +40,9 @@ class NullParserEvents
     void collect(char /*_char*/) {}
     void collectLeader(char /*_leader*/) {}
     void param(char /*_char*/) {}
+    void paramDigit(char /*_char*/) {}
+    void paramSeparator() {}
+    void paramSubSeparator() {}
     void dispatchESC(char /*_function*/) {}
     void dispatchCSI(char /*_function*/) {}
     void startOSC() {}
@@ -200,7 +203,7 @@ class ContourHeadlessBench: public crispy::App
             make_unique<terminal::MockViewPty>(pageSize), ptyReadBufferSize, eh, maxHistoryLineCount
         };
         auto* pty = static_cast<terminal::MockViewPty*>(&vt.device());
-        vt.screen().setMode(terminal::DECMode::AutoWrap, true);
+        vt.setMode(terminal::DECMode::AutoWrap, true);
 
         auto const rv = baseBenchmark(
             [&](char const* a, size_t b) {
@@ -212,7 +215,7 @@ class ContourHeadlessBench: public crispy::App
             benchOptionsFor("grid"),
             "terminal with screen buffer");
         if (rv == EXIT_SUCCESS)
-            cout << fmt::format("{:>12}: {}\n\n", "history size", *vt.screen().maxHistoryLineCount());
+            cout << fmt::format("{:>12}: {}\n\n", "history size", *vt.maxHistoryLineCount());
         return rv;
     }
 

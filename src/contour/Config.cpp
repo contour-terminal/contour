@@ -152,6 +152,50 @@ namespace // {{{ helper
     using UsedKeys = set<string>;
 
     template <typename T>
+    bool tryLoadValueRelative(UsedKeys& _usedKeys,
+                              YAML::Node const& _currentNode,
+                              string const& _basePath,
+                              vector<string_view> const& _keys,
+                              size_t _offset,
+                              T& _store)
+    {
+        string parentKey = _basePath;
+        for (size_t i = 0; i < _offset; ++i)
+        {
+            if (!parentKey.empty())
+                parentKey += '.';
+            parentKey += _keys.at(i);
+        }
+
+        if (_offset == _keys.size())
+        {
+            _store = _currentNode.as<T>();
+            return true;
+        }
+
+        auto const currentKey = string(_keys.at(_offset));
+
+        auto const child = _currentNode[currentKey];
+        if (!child)
+        {
+            auto const defaultStr = crispy::escape(fmt::format("{}", _store));
+            auto const defaultStrQuoted = !defaultStr.empty() ? defaultStr : "\"\""s;
+            for (size_t i = _offset; i < _keys.size(); ++i)
+            {
+                if (!parentKey.empty())
+                    parentKey += '.';
+                parentKey += _keys[i];
+            }
+            ConfigLog()("Missing key {}. Using default: {}.", parentKey, defaultStrQuoted);
+            return false;
+        }
+
+        _usedKeys.emplace(parentKey);
+
+        return tryLoadValueRelative(_usedKeys, child, _keys, _offset + 1, _store);
+    }
+
+    template <typename T>
     bool tryLoadValue(UsedKeys& _usedKeys,
                       YAML::Node const& _root,
                       vector<string_view> const& _keys,
@@ -226,6 +270,24 @@ namespace // {{{ helper
     {
         auto const path = fmt::format("{}.{}", _parentPath, _key);
         return tryLoadValue(_usedKeys, _doc, path, _store);
+    }
+
+    template <typename T>
+    bool tryLoadChildRelative(UsedKeys& _usedKeys,
+                              YAML::Node const& _node,
+                              string const& _parentPath,
+                              string const& _childKeyPath,
+                              T& _store)
+    {
+        // return tryLoadValue(_usedKeys, _node, _childKeyPath, _store); // XXX _parentPath
+        auto const keys = crispy::split(_childKeyPath, '.');
+        string s = _parentPath;
+        for (size_t i = 0; i < keys.size(); ++i)
+        {
+            s += fmt::format(".{}", keys[i]);
+            _usedKeys.emplace(s);
+        }
+        return tryLoadValue(_usedKeys, _node, keys, 0, _store);
     }
 
     template <typename T, typename U>
@@ -442,7 +504,7 @@ optional<variant<terminal::Key, char32_t>> parseKeyOrChar(string const& _name)
 
     auto const text = QString::fromUtf8(_name.c_str()).toUcs4();
     if (text.size() == 1)
-        return static_cast<char32_t>(toupper(text[0]));
+        return static_cast<char32_t>(toupper(static_cast<int>(text[0])));
 
     auto constexpr namedChars = array { pair { "ENTER"sv, (char) C0::CR },
                                         pair { "BACKSPACE"sv, (char) C0::BS },
@@ -803,35 +865,35 @@ std::shared_ptr<terminal::BackgroundImage const> loadImage(string const& fileNam
     return make_shared<terminal::BackgroundImage const>(move(backgroundImage));
 }
 
-terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _path, YAML::Node const& _node)
+terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _basePath, YAML::Node const& _node)
 {
     auto colors = terminal::ColorPalette {};
     if (!_node)
         return colors;
 
-    _usedKeys.emplace(_path);
+    _usedKeys.emplace(_basePath);
     using terminal::RGBColor;
     if (auto def = _node["default"]; def)
     {
-        _usedKeys.emplace(_path + ".default");
+        _usedKeys.emplace(_basePath + ".default");
         if (auto fg = def["foreground"]; fg)
         {
-            _usedKeys.emplace(_path + ".default.foreground");
+            _usedKeys.emplace(_basePath + ".default.foreground");
             colors.defaultForeground = fg.as<string>();
         }
         if (auto bg = def["background"]; bg)
         {
-            _usedKeys.emplace(_path + ".default.background");
+            _usedKeys.emplace(_basePath + ".default.background");
             colors.defaultBackground = bg.as<string>();
         }
     }
 
     if (auto def = _node["selection"]; def && def.IsMap())
     {
-        _usedKeys.emplace(_path + ".selection");
+        _usedKeys.emplace(_basePath + ".selection");
         if (auto fg = def["foreground"]; fg && fg.IsScalar())
         {
-            _usedKeys.emplace(_path + ".selection.foreground");
+            _usedKeys.emplace(_basePath + ".selection.foreground");
             colors.selectionForeground.emplace(fg.as<string>());
         }
         else
@@ -839,7 +901,7 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _path,
 
         if (auto bg = def["background"]; bg && bg.IsScalar())
         {
-            _usedKeys.emplace(_path + ".selection.background");
+            _usedKeys.emplace(_basePath + ".selection.background");
             colors.selectionBackground.emplace(bg.as<string>());
         }
         else
@@ -848,17 +910,17 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _path,
 
     if (auto cursor = _node["cursor"]; cursor)
     {
-        _usedKeys.emplace(_path + ".cursor");
+        _usedKeys.emplace(_basePath + ".cursor");
         if (cursor.IsMap())
         {
             if (auto color = cursor["default"]; color.IsScalar())
             {
-                _usedKeys.emplace(_path + ".cursor.default");
+                _usedKeys.emplace(_basePath + ".cursor.default");
                 colors.cursor.color = parseCellColor(color.as<string>());
             }
             if (auto color = cursor["text"]; color.IsScalar())
             {
-                _usedKeys.emplace(_path + ".cursor.text");
+                _usedKeys.emplace(_basePath + ".cursor.text");
                 colors.cursor.textOverrideColor = parseCellColor(color.as<string>());
             }
         }
@@ -874,16 +936,16 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _path,
 
     if (auto hyperlink = _node["hyperlink_decoration"]; hyperlink)
     {
-        _usedKeys.emplace(_path + ".hyperlink_decoration");
+        _usedKeys.emplace(_basePath + ".hyperlink_decoration");
         if (auto color = hyperlink["normal"]; color && color.IsScalar() && !color.as<string>().empty())
         {
-            _usedKeys.emplace(_path + ".hyperlink_decoration.normal");
+            _usedKeys.emplace(_basePath + ".hyperlink_decoration.normal");
             colors.hyperlinkDecoration.normal = color.as<string>();
         }
 
         if (auto color = hyperlink["hover"]; color && color.IsScalar() && !color.as<string>().empty())
         {
-            _usedKeys.emplace(_path + ".hyperlink_decoration.hover");
+            _usedKeys.emplace(_basePath + ".hyperlink_decoration.hover");
             colors.hyperlinkDecoration.hover = color.as<string>();
         }
     }
@@ -893,7 +955,7 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _path,
         if (!node)
             return;
 
-        auto const colorKeyPath = fmt::format("{}.{}", _path, _key);
+        auto const colorKeyPath = fmt::format("{}.{}", _basePath, _key);
         _usedKeys.emplace(colorKeyPath);
         if (node.IsMap())
         {
@@ -935,13 +997,13 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _path,
     // TODO: dim _node (maybe put them into the palette at 256..(256+8)?)
 
     float opacityValue = 1.0;
-    tryLoadValue(_usedKeys, _node, "background_image.opacity", opacityValue);
+    tryLoadChildRelative(_usedKeys, _node, _basePath, "background_image.opacity", opacityValue);
 
     bool imageBlur = false;
-    tryLoadValue(_usedKeys, _node, "background_image.blur", imageBlur);
+    tryLoadChildRelative(_usedKeys, _node, _basePath, "background_image.blur", imageBlur);
 
     string fileName;
-    if (tryLoadValue(_usedKeys, _node, "background_image.path", fileName))
+    if (tryLoadChildRelative(_usedKeys, _node, _basePath, "background_image.path", fileName))
         colors.backgroundImage = loadImage(fileName, opacityValue, imageBlur);
 
     return colors;
@@ -1021,13 +1083,13 @@ void softLoadFont(terminal::renderer::TextShapingEngine _textShapingEngine,
             using terminal::renderer::TextShapingEngine;
             switch (_textShapingEngine)
             {
-            case TextShapingEngine::OpenShaper: break;
-            case TextShapingEngine::CoreText:
-            case TextShapingEngine::DWrite:
-                // TODO: Implement font feature settings handling for these engines.
-                errorlog()("The configured text shaping engine {} does not yet support font feature "
-                           "settings. Ignoring.",
-                           _textShapingEngine);
+                case TextShapingEngine::OpenShaper: break;
+                case TextShapingEngine::CoreText:
+                case TextShapingEngine::DWrite:
+                    // TODO: Implement font feature settings handling for these engines.
+                    errorlog()("The configured text shaping engine {} does not yet support font feature "
+                               "settings. Ignoring.",
+                               _textShapingEngine);
             }
         }
     }
@@ -1059,15 +1121,16 @@ optional<terminal::VTType> stringToVTType(std::string const& _value)
 }
 
 TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
-                                    YAML::Node const& _doc,
-                                    std::string const& _name,
+                                    YAML::Node const& _profile,
+                                    std::string const& _parentPath,
+                                    std::string const& _profileName,
                                     unordered_map<string, terminal::ColorPalette> const& _colorschemes)
 {
     auto profile = TerminalProfile {};
 
-    if (auto colors = _doc["profiles"][_name]["colors"]; colors)
+    if (auto colors = _profile["colors"]; colors) // {{{
     {
-        auto const path = fmt::format("{}.{}.{}", "profiles", _name, "colors");
+        auto const path = fmt::format("{}.{}.{}", _parentPath, _profileName, "colors");
         if (colors.IsMap())
             profile.colors = loadColorScheme(_usedKeys, path, colors);
         else if (auto i = _colorschemes.find(colors.as<string>()); i != _colorschemes.end())
@@ -1099,10 +1162,11 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
             errorlog()("scheme '{}' not found.", colors.as<string>());
     }
     else
-        errorlog()("No colors section in profile {} found.", _name);
+        errorlog()("No colors section in profile {} found.", _profileName);
+    // }}}
 
-    string const basePath = fmt::format("profiles.{}", _name);
-    tryLoadChild(_usedKeys, _doc, basePath, "shell", profile.shell.program);
+    string const basePath = fmt::format("{}.{}", _parentPath, _profileName);
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "shell", profile.shell.program);
     if (profile.shell.program.empty())
     {
         if (!profile.shell.arguments.empty())
@@ -1113,15 +1177,16 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
         loginShell.erase(loginShell.begin());
         profile.shell.arguments = loginShell;
     }
-    tryLoadChild(_usedKeys, _doc, basePath, "maximized", profile.maximized);
-    tryLoadChild(_usedKeys, _doc, basePath, "fullscreen", profile.fullscreen);
-    tryLoadChild(_usedKeys, _doc, basePath, "refresh_rate", profile.refreshRate);
-    tryLoadChild(_usedKeys, _doc, basePath, "copy_last_mark_range_offset", profile.copyLastMarkRangeOffset);
-    tryLoadChild(_usedKeys, _doc, basePath, "show_title_bar", profile.show_title_bar);
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "maximized", profile.maximized);
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "fullscreen", profile.fullscreen);
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "refresh_rate", profile.refreshRate);
+    tryLoadChildRelative(
+        _usedKeys, _profile, basePath, "copy_last_mark_range_offset", profile.copyLastMarkRangeOffset);
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "show_title_bar", profile.show_title_bar);
 
-    tryLoadChild(_usedKeys, _doc, basePath, "wm_class", profile.wmClass);
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "wm_class", profile.wmClass);
 
-    if (auto args = _doc["profiles"][_name]["arguments"]; args && args.IsSequence())
+    if (auto args = _profile["arguments"]; args && args.IsSequence())
     {
         _usedKeys.emplace(fmt::format("{}.arguments", basePath));
         for (auto const& argNode: args)
@@ -1129,7 +1194,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     }
 
     string strValue = FileSystem::current_path().generic_string();
-    tryLoadChild(_usedKeys, _doc, basePath, "initial_working_directory", strValue);
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "initial_working_directory", strValue);
     if (strValue.empty())
         profile.shell.workingDirectory = FileSystem::current_path();
     else if (strValue[0] == '~')
@@ -1163,7 +1228,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     }
 #endif
 
-    if (auto env = _doc["profiles"][_name]["environment"]; env)
+    if (auto env = _profile["environment"]; env)
     {
         auto const envpath = basePath + ".environment";
         _usedKeys.emplace(envpath);
@@ -1187,14 +1252,15 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
         profile.shell.env["COLORTERM"] = "truecolor";
 
     strValue = fmt::format("{}", profile.terminalId);
-    tryLoadChild(_usedKeys, _doc, basePath, "terminal_id", strValue);
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "terminal_id", strValue);
     if (auto const idOpt = stringToVTType(strValue))
         profile.terminalId = idOpt.value();
     else
         errorlog()("Invalid Terminal ID \"{}\", specified", strValue);
 
-    tryLoadChild(_usedKeys, _doc, basePath, "terminal_size.columns", profile.terminalSize.columns);
-    tryLoadChild(_usedKeys, _doc, basePath, "terminal_size.lines", profile.terminalSize.lines);
+    tryLoadChildRelative(
+        _usedKeys, _profile, basePath, "terminal_size.columns", profile.terminalSize.columns);
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "terminal_size.lines", profile.terminalSize.lines);
     {
         auto constexpr MinimalTerminalSize = PageSize { LineCount(3), ColumnCount(3) };
         auto constexpr MaximumTerminalSize = PageSize { LineCount(200), ColumnCount(300) };
@@ -1216,20 +1282,20 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     }
 
     strValue = "ask";
-    if (tryLoadChild(_usedKeys, _doc, basePath, "permissions.capture_buffer", strValue))
+    if (tryLoadChildRelative(_usedKeys, _profile, basePath, "permissions.capture_buffer", strValue))
     {
         if (auto x = toPermission(strValue))
             profile.permissions.captureBuffer = x.value();
     }
 
     strValue = "ask";
-    if (tryLoadChild(_usedKeys, _doc, basePath, "permissions.change_font", strValue))
+    if (tryLoadChildRelative(_usedKeys, _profile, basePath, "permissions.change_font", strValue))
     {
         if (auto x = toPermission(strValue))
             profile.permissions.changeFont = x.value();
     }
 
-    if (tryLoadChild(_usedKeys, _doc, basePath, "font.size", profile.fonts.size.pt))
+    if (tryLoadChildRelative(_usedKeys, _profile, basePath, "font.size", profile.fonts.size.pt))
     {
         if (profile.fonts.size < MinimumFontSize)
         {
@@ -1240,8 +1306,9 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
         }
     }
 
-    tryLoadChild(_usedKeys, _doc, basePath, "font.builtin_box_drawing", profile.fonts.builtinBoxDrawing);
-    tryLoadChild(_usedKeys, _doc, basePath, "font.dpi_scale", profile.fonts.dpiScale);
+    tryLoadChildRelative(
+        _usedKeys, _profile, basePath, "font.builtin_box_drawing", profile.fonts.builtinBoxDrawing);
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "font.dpi_scale", profile.fonts.dpiScale);
 
     auto constexpr NativeTextShapingEngine =
 #if defined(_WIN32)
@@ -1262,7 +1329,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
 #endif
 
     strValue = fmt::format("{}", profile.fonts.textShapingEngine);
-    if (tryLoadChild(_usedKeys, _doc, basePath, "font.text_shaping.engine", strValue))
+    if (tryLoadChildRelative(_usedKeys, _profile, basePath, "font.text_shaping.engine", strValue))
     {
         auto const lwrValue = toLower(strValue);
         if (lwrValue == "dwrite" || lwrValue == "directwrite")
@@ -1280,7 +1347,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
 
     profile.fonts.fontLocator = NativeFontLocator;
     strValue = fmt::format("{}", profile.fonts.fontLocator);
-    if (tryLoadChild(_usedKeys, _doc, basePath, "font.locator", strValue))
+    if (tryLoadChildRelative(_usedKeys, _profile, basePath, "font.locator", strValue))
     {
         auto const lwrValue = toLower(strValue);
         if (lwrValue == "fontconfig")
@@ -1298,9 +1365,9 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     }
 
     bool strictSpacing = false;
-    tryLoadChild(_usedKeys, _doc, basePath, "font.strict_spacing", strictSpacing);
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "font.strict_spacing", strictSpacing);
 
-    auto const fontBasePath = fmt::format("profiles.{}.font", _name);
+    auto const fontBasePath = fmt::format("{}.{}.font", _parentPath, _profileName);
 
     profile.fonts.regular.familyName = "regular";
     profile.fonts.regular.spacing = text::font_spacing::mono;
@@ -1308,7 +1375,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     softLoadFont(profile.fonts.textShapingEngine,
                  _usedKeys,
                  fontBasePath,
-                 _doc["profiles"][_name]["font"],
+                 _profile["font"],
                  "regular",
                  profile.fonts.regular);
 
@@ -1317,7 +1384,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     softLoadFont(profile.fonts.textShapingEngine,
                  _usedKeys,
                  fontBasePath,
-                 _doc["profiles"][_name]["font"],
+                 _profile["font"],
                  "bold",
                  profile.fonts.bold);
 
@@ -1326,7 +1393,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     softLoadFont(profile.fonts.textShapingEngine,
                  _usedKeys,
                  fontBasePath,
-                 _doc["profiles"][_name]["font"],
+                 _profile["font"],
                  "italic",
                  profile.fonts.italic);
 
@@ -1336,7 +1403,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     softLoadFont(profile.fonts.textShapingEngine,
                  _usedKeys,
                  fontBasePath,
-                 _doc["profiles"][_name]["font"],
+                 _profile["font"],
                  "bold_italic",
                  profile.fonts.boldItalic);
 
@@ -1345,7 +1412,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     softLoadFont(profile.fonts.textShapingEngine,
                  _usedKeys,
                  fontBasePath,
-                 _doc["profiles"][_name]["font"],
+                 _profile["font"],
                  "emoji",
                  profile.fonts.emoji);
 
@@ -1356,7 +1423,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
 #endif
 
     strValue = "gray";
-    tryLoadChild(_usedKeys, _doc, basePath, "font.render_mode", strValue);
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "font.render_mode", strValue);
     auto const static renderModeMap = array {
         pair { "lcd"sv, text::render_mode::lcd },           pair { "light"sv, text::render_mode::light },
         pair { "gray"sv, text::render_mode::gray },         pair { ""sv, text::render_mode::gray },
@@ -1370,14 +1437,14 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
         errorlog()("Invalid render_mode \"{}\" in configuration.", strValue);
 
     auto intValue = profile.maxHistoryLineCount;
-    tryLoadChild(_usedKeys, _doc, basePath, "history.limit", intValue);
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "history.limit", intValue);
     if (unbox<int>(intValue) < 0)
         profile.maxHistoryLineCount = LineCount(0);
     else
         profile.maxHistoryLineCount = intValue;
 
     strValue = fmt::format("{}", ScrollBarPosition::Right);
-    if (tryLoadChild(_usedKeys, _doc, basePath, "scrollbar.position", strValue))
+    if (tryLoadChildRelative(_usedKeys, _profile, basePath, "scrollbar.position", strValue))
     {
         auto const literal = toLower(strValue);
         if (literal == "left")
@@ -1389,37 +1456,40 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
         else
             errorlog()("Invalid value for config entry {}: {}", "scrollbar.position", strValue);
     }
-    tryLoadChild(_usedKeys, _doc, basePath, "scrollbar.hide_in_alt_screen", profile.hideScrollbarInAltScreen);
+    tryLoadChildRelative(
+        _usedKeys, _profile, basePath, "scrollbar.hide_in_alt_screen", profile.hideScrollbarInAltScreen);
 
-    tryLoadChild(_usedKeys, _doc, basePath, "history.auto_scroll_on_update", profile.autoScrollOnUpdate);
-    tryLoadChild(_usedKeys, _doc, basePath, "history.scroll_multiplier", profile.historyScrollMultiplier);
+    tryLoadChildRelative(
+        _usedKeys, _profile, basePath, "history.auto_scroll_on_update", profile.autoScrollOnUpdate);
+    tryLoadChildRelative(
+        _usedKeys, _profile, basePath, "history.scroll_multiplier", profile.historyScrollMultiplier);
 
     float floatValue = 1.0;
-    tryLoadChild(_usedKeys, _doc, basePath, "background.opacity", floatValue);
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "background.opacity", floatValue);
     profile.backgroundOpacity =
         (terminal::Opacity)(static_cast<unsigned>(255 * clamp(floatValue, 0.0f, 1.0f)));
-    tryLoadChild(_usedKeys, _doc, basePath, "background.blur", profile.backgroundBlur);
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "background.blur", profile.backgroundBlur);
 
     strValue = "dotted-underline"; // TODO: fmt::format("{}", profile.hyperlinkDecoration.normal);
-    tryLoadChild(_usedKeys, _doc, basePath, "hyperlink_decoration.normal", strValue);
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "hyperlink_decoration.normal", strValue);
     if (auto const pdeco = terminal::renderer::to_decorator(strValue); pdeco.has_value())
         profile.hyperlinkDecoration.normal = *pdeco;
 
     strValue = "underline"; // TODO: fmt::format("{}", profile.hyperlinkDecoration.hover);
-    tryLoadChild(_usedKeys, _doc, basePath, "hyperlink_decoration.hover", strValue);
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "hyperlink_decoration.hover", strValue);
     if (auto const pdeco = terminal::renderer::to_decorator(strValue); pdeco.has_value())
         profile.hyperlinkDecoration.hover = *pdeco;
 
     strValue = "block";
-    tryLoadChild(_usedKeys, _doc, basePath, "cursor.shape", strValue);
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "cursor.shape", strValue);
     profile.cursorShape = terminal::makeCursorShape(strValue);
 
     bool boolValue = profile.cursorDisplay == terminal::CursorDisplay::Blink;
-    tryLoadChild(_usedKeys, _doc, basePath, "cursor.blinking", boolValue);
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "cursor.blinking", boolValue);
     profile.cursorDisplay = boolValue ? terminal::CursorDisplay::Blink : terminal::CursorDisplay::Steady;
 
     unsigned uintValue = profile.cursorBlinkInterval.count();
-    tryLoadChild(_usedKeys, _doc, basePath, "cursor.blinking_interval", uintValue);
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "cursor.blinking_interval", uintValue);
     profile.cursorBlinkInterval = chrono::milliseconds(uintValue);
 
     return profile;
@@ -1566,9 +1636,12 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         usedKeys.emplace("profiles");
         for (auto i = profiles.begin(); i != profiles.end(); ++i)
         {
-            auto const name = i->first.as<string>();
-            usedKeys.emplace("profiles." + name);
-            _config.profiles[name] = loadTerminalProfile(usedKeys, doc, name, _config.colorschemes);
+            auto const& name = i->first.as<string>();
+            auto const& profile = i->second;
+            auto const parentPath = "profiles"s;
+            usedKeys.emplace(fmt::format("{}.{}", parentPath, name));
+            _config.profiles[name] =
+                loadTerminalProfile(usedKeys, profile, parentPath, name, _config.colorschemes);
         }
     }
 

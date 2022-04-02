@@ -43,6 +43,10 @@
 
 #include <QtNetwork/QHostInfo>
 
+#if !defined(_WIN32)
+    #include <pthread.h>
+#endif
+
 #if defined(CONTOUR_BLUR_PLATFORM_KWIN)
     #include <KWindowEffects>
 #endif
@@ -70,6 +74,14 @@ namespace
         return fmt::format("{}: Unhandled exception caught ({}). {}", where, typeid(e).name(), e.what());
     }
 
+    void setThreadName(char const* name)
+    {
+#if defined(__APPLE__)
+        pthread_setname_np(name);
+#elif !defined(_WIN32)
+        pthread_setname_np(pthread_self(), name);
+#endif
+    }
 } // namespace
 
 TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
@@ -126,6 +138,10 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
 
 TerminalSession::~TerminalSession()
 {
+    terminating_ = true;
+    terminal_.device().wakeupReader();
+    if (screenUpdateThread_)
+        screenUpdateThread_->join();
 }
 
 void TerminalSession::setDisplay(unique_ptr<TerminalDisplay> _display)
@@ -153,7 +169,29 @@ void TerminalSession::displayInitialized()
 
 void TerminalSession::start()
 {
-    terminal().start();
+    screenUpdateThread_ = make_unique<std::thread>(bind(&TerminalSession::mainLoop, this));
+}
+
+void TerminalSession::mainLoop()
+{
+    setThreadName("Terminal.Loop");
+
+    mainLoopThreadID_ = this_thread::get_id();
+
+    SessionLog()("Starting main loop with thread id {}", [&]() {
+        stringstream sstr;
+        sstr << mainLoopThreadID_;
+        return sstr.str();
+    }());
+
+    while (!terminating_)
+    {
+        if (!terminal_.processInputOnce())
+            break;
+    }
+
+    SessionLog()("Event loop terminating (PTY {}).", terminal_.device().isClosed() ? "closed" : "open");
+    onClosed();
 }
 
 void TerminalSession::terminate()
@@ -209,7 +247,7 @@ void TerminalSession::requestCaptureBuffer(LineCount lines, bool logical)
     display_->post([this, lines, logical]() {
         if (display_->requestPermission(profile_.permissions.captureBuffer, "capture screen buffer"))
         {
-            terminal_.screen().captureBuffer(lines, logical);
+            terminal_.primaryScreen().captureBuffer(lines, logical);
             DisplayLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
             flushInput();
         }
@@ -330,24 +368,24 @@ void TerminalSession::onSelectionCompleted()
 {
     switch (config_.onMouseSelection)
     {
-    case config::SelectionAction::CopyToSelectionClipboard:
-        if (QClipboard* clipboard = QGuiApplication::clipboard();
-            clipboard != nullptr && clipboard->supportsSelection())
-        {
-            string const text = terminal().extractSelectionText();
-            clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())),
-                               QClipboard::Selection);
-        }
-        break;
-    case config::SelectionAction::CopyToClipboard:
-        if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
-        {
-            string const text = terminal().extractSelectionText();
-            clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())),
-                               QClipboard::Clipboard);
-        }
-        break;
-    case config::SelectionAction::Nothing: break;
+        case config::SelectionAction::CopyToSelectionClipboard:
+            if (QClipboard* clipboard = QGuiApplication::clipboard();
+                clipboard != nullptr && clipboard->supportsSelection())
+            {
+                string const text = terminal().extractSelectionText();
+                clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())),
+                                   QClipboard::Selection);
+            }
+            break;
+        case config::SelectionAction::CopyToClipboard:
+            if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
+            {
+                string const text = terminal().extractSelectionText();
+                clipboard->setText(QString::fromUtf8(text.c_str(), static_cast<int>(text.size())),
+                                   QClipboard::Clipboard);
+            }
+            break;
+        case config::SelectionAction::Nothing: break;
     }
 }
 
@@ -544,7 +582,7 @@ bool TerminalSession::operator()(actions::ClearHistoryAndReset)
     auto const pageSize = terminal_.pageSize();
     auto const pixelSize = display_->pixelSize();
 
-    terminal_.resetHard();
+    terminal_.hardReset();
     auto const tmpPageSize = PageSize { pageSize.lines, pageSize.columns + ColumnCount(1) };
     terminal_.resizeScreen(tmpPageSize, pixelSize);
     this_thread::yield();
@@ -587,18 +625,10 @@ bool TerminalSession::operator()(actions::DecreaseOpacity)
 bool TerminalSession::operator()(actions::FollowHyperlink)
 {
     auto const _l = scoped_lock { terminal() };
-    auto const currentMousePosition = terminal().currentMousePosition();
-    auto const currentMousePositionRel =
-        terminal::CellLocation { currentMousePosition.line
-                                     + terminal().viewport().scrollOffset().as<LineOffset>(),
-                                 currentMousePosition.column };
-    if (terminal().screen().contains(currentMousePosition))
+    if (auto const hyperlink = terminal().tryGetHoveringHyperlink())
     {
-        if (auto hyperlink = terminal().screen().hyperlinkAt(currentMousePositionRel))
-        {
-            followHyperlink(*hyperlink);
-            return true;
-        }
+        followHyperlink(*hyperlink);
+        return true;
     }
     return false;
 }
@@ -640,7 +670,7 @@ bool TerminalSession::operator()(actions::OpenConfiguration)
 bool TerminalSession::operator()(actions::OpenFileManager)
 {
     auto const _l = scoped_lock { terminal() };
-    auto const& cwd = terminal().screen().currentWorkingDirectory();
+    auto const& cwd = terminal().currentWorkingDirectory();
     if (!QDesktopServices::openUrl(QUrl(QString::fromUtf8(cwd.c_str()))))
         errorlog()("Could not open file \"{}\".", cwd);
 
@@ -701,7 +731,8 @@ bool TerminalSession::operator()(actions::ResetFontSize)
 bool TerminalSession::operator()(actions::ScreenshotVT)
 {
     auto _l = lock_guard { terminal() };
-    auto const screenshot = terminal().screen().screenshot();
+    auto const screenshot = terminal().isPrimaryScreen() ? terminal().primaryScreen().screenshot()
+                                                         : terminal().alternateScreen().screenshot();
     ofstream ofs { "screenshot.vt", ios::trunc | ios::binary };
     ofs << screenshot;
     return true;
@@ -811,10 +842,10 @@ bool TerminalSession::operator()(actions::WriteScreen const& _event)
 void TerminalSession::setDefaultCursor()
 {
     using Type = terminal::ScreenType;
-    switch (terminal().screen().bufferType())
+    switch (terminal().screenType())
     {
-    case Type::Primary: display_->setMouseCursorShape(MouseCursorShape::IBeam); break;
-    case Type::Alternate: display_->setMouseCursorShape(MouseCursorShape::Arrow); break;
+        case Type::Primary: display_->setMouseCursorShape(MouseCursorShape::IBeam); break;
+        case Type::Alternate: display_->setMouseCursorShape(MouseCursorShape::Arrow); break;
     }
 }
 
@@ -881,7 +912,7 @@ void TerminalSession::spawnNewTerminal(string const& _profileName)
             return ptyProcess->workingDirectory();
 #else
         auto const _l = scoped_lock { terminal_ };
-        return terminal_.screen().currentWorkingDirectory();
+        return terminal_.currentWorkingDirectory();
 #endif
         return "."s;
     }();
@@ -918,7 +949,7 @@ void TerminalSession::configureTerminal()
 {
     auto const _l = scoped_lock { terminal_ };
     SessionLog()("Configuring terminal.");
-    auto& screen = terminal_.screen();
+    auto& screen = terminal_.primaryScreen();
 
     terminal_.setWordDelimiters(config_.wordDelimiters);
     terminal_.setMouseProtocolBypassModifier(config_.bypassMouseProtocolModifier);
@@ -926,24 +957,23 @@ void TerminalSession::configureTerminal()
     terminal_.setLastMarkRangeOffset(profile_.copyLastMarkRangeOffset);
 
     SessionLog()("Setting terminal ID to {}.", profile_.terminalId);
-    screen.setTerminalId(profile_.terminalId);
-    screen.setSixelCursorConformance(config_.sixelCursorConformance);
+    terminal_.setTerminalId(profile_.terminalId);
+    terminal_.setSixelCursorConformance(config_.sixelCursorConformance);
     terminal_.setMaxImageColorRegisters(config_.maxImageColorRegisters);
-    screen.setMaxImageSize(config_.maxImageSize);
-    SessionLog()(
-        "maxImageSize={}, sixelScrolling={}", config_.maxImageSize, config_.sixelScrolling ? "yes" : "no");
-    screen.setMode(terminal::DECMode::SixelScrolling, config_.sixelScrolling);
+    terminal_.setMaxImageSize(config_.maxImageSize);
+    terminal_.setMode(terminal::DECMode::SixelScrolling, config_.sixelScrolling);
+    SessionLog()("maxImageSize={}, sixelScrolling={}", config_.maxImageSize, config_.sixelScrolling);
 
     // XXX
     // if (!_terminalView.renderer().renderTargetAvailable())
     //     return;
 
-    screen.setMaxHistoryLineCount(profile_.maxHistoryLineCount);
+    terminal_.setMaxHistoryLineCount(profile_.maxHistoryLineCount);
     terminal_.setCursorBlinkingInterval(profile_.cursorBlinkInterval);
     terminal_.setCursorDisplay(profile_.cursorDisplay);
     terminal_.setCursorShape(profile_.cursorShape);
-    terminal_.screen().colorPalette() = profile_.colors;
-    terminal_.screen().defaultColorPalette() = profile_.colors;
+    terminal_.colorPalette() = profile_.colors;
+    terminal_.defaultColorPalette() = profile_.colors;
 }
 
 void TerminalSession::configureDisplay()
@@ -975,14 +1005,14 @@ void TerminalSession::configureDisplay()
 
     display_->setHyperlinkDecoration(profile_.hyperlinkDecoration.normal, profile_.hyperlinkDecoration.hover);
 
-    display_->setWindowTitle(terminal_.screen().windowTitle());
+    display_->setWindowTitle(terminal_.windowTitle());
 }
 
 uint8_t TerminalSession::matchModeFlags() const
 {
     uint8_t flags = 0;
 
-    if (terminal_.screen().isAlternateScreen())
+    if (terminal_.isAlternateScreen())
         flags |= static_cast<uint8_t>(MatchModes::Flag::AlternateScreen);
 
     if (terminal_.applicationCursorKeys())
