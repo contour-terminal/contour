@@ -173,6 +173,8 @@ if(NOT(CPACK_GENERATOR))
     endif()
 endif()
 
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "contour")
+
 set(CPACK_PACKAGE_NAME "Contour")
 set(CPACK_PACKAGE_VENDOR "https://github.com/contour-terminal/contour/")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "`contour` is a modern terminal emulator, for everyday use.")
@@ -297,8 +299,11 @@ else()
     set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/contour-terminal/contour/")
     set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "xdg-open")
     set(CPACK_DEBIAN_DEBUGINFO_PACKAGE ON)
-    # set(CPACK_STRIP_FILES OFF)
-    # set(CPACK_DEB_COMPONENT_INSTALL ON)
+    set(CPACK_DEB_COMPONENT_INSTALL ON)
+    # Override because component-based install would create "contour-contour".
+    set(CPACK_DEBIAN_CONTOUR_PACKAGE_NAME "contour")
+
+    set(CPACK_COMPONENTS_ALL "contour")
 
     include(GNUInstallDirs)
     install(TARGETS contour DESTINATION bin)
@@ -314,3 +319,11 @@ else()
 endif()
 
 include(CPack)
+
+if(UNIX)
+    # CPackDeb is broken. If no components are used, it does not create a ddeb...
+    cpack_add_component(contour
+        DISPLAY_NAME "${CPACK_PACKAGE_NAME}"
+        REQUIRED
+        )
+endif()

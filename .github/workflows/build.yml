@@ -233,7 +233,7 @@ jobs:
         run: |
           set -ex
           cd build
-          sudo cpack
+          sudo cpack -V
           BASENAME="contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx"
           echo "pwd: `pwd`:" && ls -hl
           mv -vf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.zip" "../${BASENAME}.zip"
@@ -327,7 +327,7 @@ jobs:
         shell: powershell
         run: |
           cd build
-          cpack
+          cpack -V
           type "_CPack_Packages/win64/WIX/wix.log"
       - name: inspect
         run: Get-ChildItem -Recurse
@@ -381,7 +381,7 @@ jobs:
     - name: "cmake"
       run: |
         BUILD_DIR="build" \
-          CMAKE_BUILD_TYPE="Release" \
+          CMAKE_BUILD_TYPE="RelWithDebInfo" \
           CXX="g++-8" \
           EXTRA_CMAKE_FLAGS="-DCONTOUR_BLUR_PLATFORM_KWIN=ON -DUSE_BOOST_FILESYSTEM=ON" \
           ./scripts/ci-prepare-contour.sh
@@ -395,12 +395,14 @@ jobs:
       run: |
         set -ex
         cd build/
-        cpack -G DEB
-        cpack -G TGZ
+        cpack -G DEB -V
+        cpack -G TGZ -V
         cd ..
         # CPack DEB:
-        mv -v "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.deb" \
+        mv -v "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour.deb" \
               "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.deb"
+        mv -v "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour-dbgsym.ddeb" \
+              "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.ddeb"
         # CPack TGZ:
         tar xzpf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.tar.gz"
         mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux" \
@@ -413,6 +415,13 @@ jobs:
         path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.deb"
         if-no-files-found: error
         retention-days: 7
+    - name: "Uploading artifact .ddeb package (debugging symbols)"
+      uses: actions/upload-artifact@v2
+      with:
+        name: "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.ddeb"
+        path: "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.ddeb"
+        if-no-files-found: error
+        retention-days: 7
     - name: "Uploading artifact ZIP package"
       uses: actions/upload-artifact@v2
       with:
@@ -423,6 +432,7 @@ jobs:
     - name: "Attempt installing the created .deb"
       run: |
         sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.deb"
+        sudo dpkg --install "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.ddeb"
 
   ubuntu_2004_matrix:
     strategy:
@@ -550,14 +560,16 @@ jobs:
         run: |
           set -ex
           cd build
-          cpack -G DEB
-          mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.deb" \
+          cpack -G DEB -V
+          mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour.deb" \
                 "../contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+          mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour-dbgsym.ddeb" \
+                "../contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.ddeb"
       - name: "CPack: Creating TGZ package"
         run: |
           set -ex
           cd build
-          cpack -G TGZ
+          cpack -G TGZ -V
           tar xzpf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.tar.gz"
           mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux" \
                 "../contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
@@ -566,6 +578,13 @@ jobs:
         with:
           name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
           path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+          if-no-files-found: error
+          retention-days: 7
+      - name: "Uploading artifact .ddeb package (debugging symbols)"
+        uses: actions/upload-artifact@v2
+        with:
+          name: "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.ddeb"
+          path: "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.ddeb"
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading artifact ZIP package"
@@ -578,6 +597,7 @@ jobs:
       - name: "Attempt installing the created .deb"
         run: |
           sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+          sudo dpkg --install "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.ddeb"
       - name: "Delete artifact: contour-ubuntu2004-builddir"
         uses: geekyeggo/delete-artifact@v1
         with:
