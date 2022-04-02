@@ -642,23 +642,15 @@ void Terminal::resizeScreen(PageSize _cells, optional<ImageSize> _pixels)
     auto const oldCursorPos = state_.cursor.position;
 
     state_.pageSize = _cells;
+    currentMousePosition_ = clampToScreen(currentMousePosition_);
+    if (_pixels)
+        setCellPixelSize(_pixels.value() / _cells);
 
     // Reset margin to their default.
     state_.margin = Margin { Margin::Vertical { {}, _cells.lines.as<LineOffset>() - 1 },
                              Margin::Horizontal { {}, _cells.columns.as<ColumnOffset>() - 1 } };
 
     applyPageSizeToCurrentBuffer();
-
-    if (_pixels)
-    {
-        auto width = Width(*_pixels->width / _cells.columns.as<unsigned>());
-        auto height = Height(*_pixels->height / _cells.lines.as<unsigned>());
-        setCellPixelSize(ImageSize { width, height });
-    }
-
-    currentMousePosition_.column =
-        min(currentMousePosition_.column, boxed_cast<ColumnOffset>(_cells.columns - 1));
-    currentMousePosition_.line = min(currentMousePosition_.line, boxed_cast<LineOffset>(_cells.lines - 1));
 
     pty_->resizeScreen(_cells, _pixels);
 
