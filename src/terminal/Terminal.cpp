@@ -1109,11 +1109,10 @@ void Terminal::setLeftRightMargin(optional<ColumnOffset> _left, optional<ColumnO
 {
     if (isModeEnabled(DECMode::LeftRightMargin))
     {
-        auto const right =
-            _right.has_value()
-                ? min(_right.value(), boxed_cast<ColumnOffset>(state_.pageSize.columns) - ColumnOffset(1))
-                : boxed_cast<ColumnOffset>(state_.pageSize.columns) - ColumnOffset(1);
-        auto const left = _left.value_or(ColumnOffset(0));
+        auto const defaultLeft = ColumnOffset(0);
+        auto const defaultRight = boxed_cast<ColumnOffset>(state_.pageSize.columns) - 1;
+        auto const right = min(_right.value_or(defaultRight), defaultRight);
+        auto const left = max(_left.value_or(defaultLeft), defaultLeft);
         if (left < right)
         {
             state_.margin.horizontal.from = left;
