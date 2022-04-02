@@ -642,23 +642,15 @@ void Terminal::resizeScreen(PageSize _cells, optional<ImageSize> _pixels)
     auto const oldCursorPos = state_.cursor.position;
 
     state_.pageSize = _cells;
+    currentMousePosition_ = clampToScreen(currentMousePosition_);
+    if (_pixels)
+        setCellPixelSize(_pixels.value() / _cells);
 
     // Reset margin to their default.
     state_.margin = Margin { Margin::Vertical { {}, _cells.lines.as<LineOffset>() - 1 },
                              Margin::Horizontal { {}, _cells.columns.as<ColumnOffset>() - 1 } };
 
     applyPageSizeToCurrentBuffer();
-
-    if (_pixels)
-    {
-        auto width = Width(*_pixels->width / _cells.columns.as<unsigned>());
-        auto height = Height(*_pixels->height / _cells.lines.as<unsigned>());
-        setCellPixelSize(ImageSize { width, height });
-    }
-
-    currentMousePosition_.column =
-        min(currentMousePosition_.column, boxed_cast<ColumnOffset>(_cells.columns - 1));
-    currentMousePosition_.line = min(currentMousePosition_.line, boxed_cast<LineOffset>(_cells.lines - 1));
 
     pty_->resizeScreen(_cells, _pixels);
 
@@ -693,8 +685,11 @@ void Terminal::resizeColumns(ColumnCount _newColumnCount, bool _clear)
 void Terminal::verifyState()
 {
 #if !defined(NDEBUG)
-    Require(*currentMousePosition_.column < *pageSize().columns);
-    Require(*currentMousePosition_.line < *pageSize().lines);
+    auto const thePageSize = state_.pageSize;
+    Require(*currentMousePosition_.column < *thePageSize.columns);
+    Require(*currentMousePosition_.line < *thePageSize.lines);
+    Require(0 <= *state_.margin.horizontal.from && *state_.margin.horizontal.to < *thePageSize.columns);
+    Require(0 <= *state_.margin.vertical.from && *state_.margin.vertical.to < *thePageSize.lines);
 
     if (isPrimaryScreen())
         Require(state_.primaryBuffer.pageSize() == state_.pageSize);
@@ -1097,11 +1092,10 @@ void Terminal::setMode(DECMode _mode, bool _enable)
 
 void Terminal::setTopBottomMargin(optional<LineOffset> _top, optional<LineOffset> _bottom)
 {
-    auto const bottom = _bottom.has_value()
-                            ? min(_bottom.value(), boxed_cast<LineOffset>(state_.pageSize.lines) - 1)
-                            : boxed_cast<LineOffset>(state_.pageSize.lines) - 1;
-
-    auto const top = _top.value_or(LineOffset(0));
+    auto const defaultTop = LineOffset(0);
+    auto const defaultBottom = boxed_cast<LineOffset>(state_.pageSize.lines) - 1;
+    auto const top = max(defaultTop, _top.value_or(defaultTop));
+    auto const bottom = min(defaultBottom, _bottom.value_or(defaultBottom));
 
     if (top < bottom)
     {
@@ -1115,11 +1109,10 @@ void Terminal::setLeftRightMargin(optional<ColumnOffset> _left, optional<ColumnO
 {
     if (isModeEnabled(DECMode::LeftRightMargin))
     {
-        auto const right =
-            _right.has_value()
-                ? min(_right.value(), boxed_cast<ColumnOffset>(state_.pageSize.columns) - ColumnOffset(1))
-                : boxed_cast<ColumnOffset>(state_.pageSize.columns) - ColumnOffset(1);
-        auto const left = _left.value_or(ColumnOffset(0));
+        auto const defaultLeft = ColumnOffset(0);
+        auto const defaultRight = boxed_cast<ColumnOffset>(state_.pageSize.columns) - 1;
+        auto const right = min(_right.value_or(defaultRight), defaultRight);
+        auto const left = max(_left.value_or(defaultLeft), defaultLeft);
         if (left < right)
         {
             state_.margin.horizontal.from = left;
