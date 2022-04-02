@@ -30,7 +30,7 @@ jobs:
     name: "Build patched fontconfig"
     runs-on: ubuntu-20.04
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: "get source"
       run: |
         set -ex
@@ -74,7 +74,7 @@ jobs:
     name: "Build Contour @ Ubuntu Linux 20.04"
     runs-on: ubuntu-20.04
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: ccache
       uses: hendrikmuhs/ccache-action@v1
       with:
@@ -253,7 +253,7 @@ jobs:
       # Valgrind is much more precise, but 10x slower.
       CONTOUR_PREFIX: "" # valgrind --leak-check=full --num-callers=64 --error-exitcode=112"
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v3
     - name: set environment variables
       id: set_vars
       run: ./scripts/ci-set-vars.sh

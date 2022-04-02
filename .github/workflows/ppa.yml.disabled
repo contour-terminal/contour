@@ -29,7 +29,7 @@ jobs:
           gpg --list-secret-keys
           gpg --list-keys
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
       - name: set variables
         id: set_vars
         run: ./scripts/ci-set-vars.sh
