@@ -1320,7 +1320,7 @@ TEST_CASE("EraseCharacters", "[screen]")
     }
 }
 
-TEST_CASE("ScrollUp.WithMargins")
+TEST_CASE("ScrollUp.WithMargins", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
