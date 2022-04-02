@@ -693,8 +693,11 @@ void Terminal::resizeColumns(ColumnCount _newColumnCount, bool _clear)
 void Terminal::verifyState()
 {
 #if !defined(NDEBUG)
-    Require(*currentMousePosition_.column < *pageSize().columns);
-    Require(*currentMousePosition_.line < *pageSize().lines);
+    auto const thePageSize = state_.pageSize;
+    Require(*currentMousePosition_.column < *thePageSize.columns);
+    Require(*currentMousePosition_.line < *thePageSize.lines);
+    Require(0 <= *state_.margin.horizontal.from && *state_.margin.horizontal.to < *thePageSize.columns);
+    Require(0 <= *state_.margin.vertical.from && *state_.margin.vertical.to < *thePageSize.lines);
 
     if (isPrimaryScreen())
         Require(state_.primaryBuffer.pageSize() == state_.pageSize);
