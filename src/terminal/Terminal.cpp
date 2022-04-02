@@ -1097,11 +1097,10 @@ void Terminal::setMode(DECMode _mode, bool _enable)
 
 void Terminal::setTopBottomMargin(optional<LineOffset> _top, optional<LineOffset> _bottom)
 {
-    auto const bottom = _bottom.has_value()
-                            ? min(_bottom.value(), boxed_cast<LineOffset>(state_.pageSize.lines) - 1)
-                            : boxed_cast<LineOffset>(state_.pageSize.lines) - 1;
-
-    auto const top = _top.value_or(LineOffset(0));
+    auto const defaultTop = LineOffset(0);
+    auto const defaultBottom = boxed_cast<LineOffset>(state_.pageSize.lines) - 1;
+    auto const top = max(defaultTop, _top.value_or(defaultTop));
+    auto const bottom = min(defaultBottom, _bottom.value_or(defaultBottom));
 
     if (top < bottom)
     {
