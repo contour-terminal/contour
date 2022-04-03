@@ -152,14 +152,6 @@ void Grid<Cell>::verifyState() const
 #if !defined(NDEBUG)
     auto const ringBufferLinesCount = lines_.size();
     // maxHistoryLineCount_ + pageSize_.lines
-    if (!(LineCount::cast_from(lines_.size()) >= totalLineCount())
-        || !(LineCount::cast_from(lines_.size()) >= linesUsed_) || !(linesUsed_ >= pageSize_.lines))
-    {
-        fmt::print("ringBufferLinesCount {}, LU {}, pageSize lines {}\n",
-                   ringBufferLinesCount,
-                   linesUsed_,
-                   pageSize_.lines);
-    }
     Require(LineCount::cast_from(lines_.size()) >= totalLineCount());
     Require(LineCount::cast_from(lines_.size()) >= linesUsed_);
     Require(linesUsed_ >= pageSize_.lines);
@@ -595,19 +587,12 @@ CellLocation Grid<Cell>::growLines(LineCount _newHeight, CellLocation _cursor)
     Require(_newHeight > pageSize_.lines);
     // lines_.reserve(unbox<size_t>(maxHistoryLineCount_ + _newHeight));
 
-    fmt::print("growLines: ringBufferLinesCount {}, LU {}, pageSize lines {}\n",
-               lines_.size(),
-               linesUsed_,
-               pageSize_.lines);
-
     // Pull down from history if cursor is at bottom and if scrollback available.
     CellLocation cursorMove {};
     if (*_cursor.line + 1 == *pageSize_.lines)
     {
         auto const totalLinesToExtend = _newHeight - pageSize_.lines;
         auto const linesToTakeFromSavedLines = std::min(totalLinesToExtend, historyLineCount());
-        fmt::print(
-            "growLines: growing by pulling {} of {} lines\n", linesToTakeFromSavedLines, totalLinesToExtend);
         Require(totalLinesToExtend >= linesToTakeFromSavedLines);
         Require(*linesToTakeFromSavedLines >= 0);
         rotateBuffersRight(linesToTakeFromSavedLines);
@@ -622,14 +607,12 @@ CellLocation Grid<Cell>::growLines(LineCount _newHeight, CellLocation _cursor)
 
     auto const linesToFill =
         max(0, unbox<int>(maxHistoryLineCount_ + _newHeight) - static_cast<int>(lines_.size()));
-    fmt::print("growLines: totalLinesToExtend {}, linesToFill {}\n", totalLinesToExtend, linesToFill);
     for ([[maybe_unused]] auto const _: ranges::views::iota(0, linesToFill))
         lines_.emplace_back(pageSize_.columns, wrappableFlag, GraphicsAttributes {});
 
     pageSize_.lines += totalLinesToExtend;
     linesUsed_ += totalLinesToExtend;
 
-    fmt::print("growLines: new pageSize lines {}, new linesUsed {}\n", pageSize_.lines, linesUsed_);
     Ensures(pageSize_.lines == _newHeight);
     Ensures(lines_.size() >= unbox<size_t>(maxHistoryLineCount_ + pageSize_.lines));
     verifyState();
