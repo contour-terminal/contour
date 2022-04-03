@@ -408,8 +408,8 @@ class Grid
 
     void setLineText(LineOffset _line, std::string_view _text);
 
-    // void resetLine(LineOffset _line, GraphicsAttributes _attribs) noexcept { lineAt(_line).reset(_attribs);
-    // }
+    // void resetLine(LineOffset _line, GraphicsAttributes _attribs) noexcept
+    // { lineAt(_line).reset(_attribs); }
 
     ColumnCount lineLength(LineOffset _line) const noexcept { return lineAt(_line).size(); }
     bool isLineBlank(LineOffset _line) const noexcept;
