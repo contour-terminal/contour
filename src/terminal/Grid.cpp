@@ -613,7 +613,7 @@ CellLocation Grid<Cell>::growLines(LineCount _newHeight, CellLocation _cursor)
         lines_.emplace_back(pageSize_.columns, wrappableFlag, GraphicsAttributes {});
 
     pageSize_.lines += totalLinesToExtend;
-    linesUsed_ += totalLinesToExtend;
+    linesUsed_ = min(linesUsed_ + totalLinesToExtend, LineCount::cast_from(lines_.size()));
 
     Ensures(pageSize_.lines == _newHeight);
     Ensures(lines_.size() >= unbox<size_t>(maxHistoryLineCount_ + pageSize_.lines));
