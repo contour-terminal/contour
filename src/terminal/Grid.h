@@ -492,6 +492,7 @@ class Grid
     void verifyState() const;
 
   private:
+    CellLocation growLines(LineCount _newHeight, CellLocation _cursor);
     void appendNewLines(LineCount _count, GraphicsAttributes _attr);
     void clampHistory();
 

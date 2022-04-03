@@ -150,6 +150,16 @@ template <typename Cell>
 void Grid<Cell>::verifyState() const
 {
 #if !defined(NDEBUG)
+    auto const ringBufferLinesCount = lines_.size();
+    // maxHistoryLineCount_ + pageSize_.lines
+    if (!(LineCount::cast_from(lines_.size()) >= totalLineCount())
+        || !(LineCount::cast_from(lines_.size()) >= linesUsed_) || !(linesUsed_ >= pageSize_.lines))
+    {
+        fmt::print("ringBufferLinesCount {}, LU {}, pageSize lines {}\n",
+                   ringBufferLinesCount,
+                   linesUsed_,
+                   pageSize_.lines);
+    }
     Require(LineCount::cast_from(lines_.size()) >= totalLineCount());
     Require(LineCount::cast_from(lines_.size()) >= linesUsed_);
     Require(linesUsed_ >= pageSize_.lines);
@@ -577,6 +587,57 @@ void Grid<Cell>::reset()
 }
 
 template <typename Cell>
+CellLocation Grid<Cell>::growLines(LineCount _newHeight, CellLocation _cursor)
+{
+    // Grow line count by splicing available lines from history back into buffer, if available,
+    // or create new ones until pageSize_.lines == _newHeight.
+
+    Require(_newHeight > pageSize_.lines);
+    // lines_.reserve(unbox<size_t>(maxHistoryLineCount_ + _newHeight));
+
+    fmt::print("growLines: ringBufferLinesCount {}, LU {}, pageSize lines {}\n",
+               lines_.size(),
+               linesUsed_,
+               pageSize_.lines);
+
+    // Pull down from history if cursor is at bottom and if scrollback available.
+    CellLocation cursorMove {};
+    if (*_cursor.line + 1 == *pageSize_.lines)
+    {
+        auto const totalLinesToExtend = _newHeight - pageSize_.lines;
+        auto const linesToTakeFromSavedLines = std::min(totalLinesToExtend, historyLineCount());
+        fmt::print(
+            "growLines: growing by pulling {} of {} lines\n", linesToTakeFromSavedLines, totalLinesToExtend);
+        Require(totalLinesToExtend >= linesToTakeFromSavedLines);
+        Require(*linesToTakeFromSavedLines >= 0);
+        rotateBuffersRight(linesToTakeFromSavedLines);
+        pageSize_.lines += linesToTakeFromSavedLines;
+        cursorMove.line += boxed_cast<LineOffset>(linesToTakeFromSavedLines);
+    }
+
+    auto const wrappableFlag = lines_.back().wrappableFlag();
+    auto const totalLinesToExtend = _newHeight - pageSize_.lines;
+    Require(*totalLinesToExtend >= 0);
+    // ? Require(linesToTakeFromSavedLines == LineCount(0));
+
+    auto const linesToFill =
+        max(0, unbox<int>(maxHistoryLineCount_ + _newHeight) - static_cast<int>(lines_.size()));
+    fmt::print("growLines: totalLinesToExtend {}, linesToFill {}\n", totalLinesToExtend, linesToFill);
+    for ([[maybe_unused]] auto const _: ranges::views::iota(0, linesToFill))
+        lines_.emplace_back(pageSize_.columns, wrappableFlag, Cell {});
+
+    pageSize_.lines += totalLinesToExtend;
+    linesUsed_ += totalLinesToExtend;
+
+    fmt::print("growLines: new pageSize lines {}, new linesUsed {}\n", pageSize_.lines, linesUsed_);
+    Ensures(pageSize_.lines == _newHeight);
+    Ensures(lines_.size() >= unbox<size_t>(maxHistoryLineCount_ + pageSize_.lines));
+    verifyState();
+
+    return cursorMove;
+};
+
+template <typename Cell>
 CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPos, bool _wrapPending)
 {
     if (pageSize_ == _newSize)
@@ -591,45 +652,6 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
     // the top lines into the scrollback area.
 
     // {{{ helper methods
-    auto const growLines = [this](LineCount _newHeight, CellLocation _cursor) -> CellLocation {
-        // Grow line count by splicing available lines from history back into buffer, if available,
-        // or create new ones until pageSize_.lines == _newHeight.
-
-        Require(_newHeight > pageSize_.lines);
-        // lines_.reserve(unbox<size_t>(maxHistoryLineCount_ + _newHeight));
-
-        // Pull down from history if cursor is at bottom and if scrollback available.
-        CellLocation cursorMove {};
-        if (*_cursor.line + 1 == *pageSize_.lines)
-        {
-            auto const extendCount0 = _newHeight - pageSize_.lines;
-            auto const rowsToTakeFromSavedLines = std::min(extendCount0, historyLineCount());
-            Require(extendCount0 >= rowsToTakeFromSavedLines);
-            Require(*rowsToTakeFromSavedLines >= 0);
-            rotateBuffersRight(rowsToTakeFromSavedLines);
-            pageSize_.lines += rowsToTakeFromSavedLines;
-            cursorMove.line += boxed_cast<LineOffset>(rowsToTakeFromSavedLines);
-        }
-
-        auto const wrappableFlag = lines_.back().wrappableFlag();
-        auto const extendCount = _newHeight - pageSize_.lines;
-        Require(*extendCount >= 0);
-        // ? Require(rowsToTakeFromSavedLines == LineCount(0));
-
-        auto const linesFill =
-            max(0, unbox<int>(maxHistoryLineCount_ + _newHeight) - static_cast<int>(lines_.size()));
-        for ([[maybe_unused]] auto const _: ranges::views::iota(0, linesFill))
-            lines_.emplace_back(pageSize_.columns, wrappableFlag, Cell {});
-        pageSize_.lines += extendCount;
-        linesUsed_ += extendCount;
-
-        Ensures(pageSize_.lines == _newHeight);
-        Ensures(lines_.size() >= unbox<size_t>(maxHistoryLineCount_ + pageSize_.lines));
-        verifyState();
-
-        return cursorMove;
-    };
-
     auto const shrinkLines = [this](LineCount _newHeight, CellLocation _cursor) -> CellLocation {
         // Shrink existing line count to _newSize.lines
         // by splicing the number of lines to be shrinked by into savedLines bottom.
