@@ -89,8 +89,9 @@ class Line
     using reverse_iterator = typename InflatedBuffer::reverse_iterator;
     using const_iterator = typename InflatedBuffer::const_iterator;
 
-    Line(ColumnCount _width, LineFlags _flags, Cell _template = {}):
-        buffer_(_width.as<size_t>(), _template /*, _allocator*/), flags_ { static_cast<unsigned>(_flags) }
+    Line(ColumnCount _width, LineFlags _flags, GraphicsAttributes _templateSGR):
+        buffer_(_width.as<size_t>(), Cell { _templateSGR } /*, _allocator*/),
+        flags_ { static_cast<unsigned>(_flags) }
     {
     }
 
