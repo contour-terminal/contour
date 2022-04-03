@@ -605,8 +605,10 @@ CellLocation Grid<Cell>::growLines(LineCount _newHeight, CellLocation _cursor)
     Require(*totalLinesToExtend >= 0);
     // ? Require(linesToTakeFromSavedLines == LineCount(0));
 
-    auto const linesToFill =
-        max(0, unbox<int>(maxHistoryLineCount_ + _newHeight) - static_cast<int>(lines_.size()));
+    auto const newTotalLineCount = maxHistoryLineCount_ + _newHeight;
+    auto const currentTotalLineCount = LineCount(lines_.size());
+    auto const linesToFill = max(0, *newTotalLineCount - *currentTotalLineCount);
+
     for ([[maybe_unused]] auto const _: ranges::views::iota(0, linesToFill))
         lines_.emplace_back(pageSize_.columns, wrappableFlag, GraphicsAttributes {});
 
