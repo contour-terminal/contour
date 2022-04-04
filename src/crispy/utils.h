@@ -260,7 +260,22 @@ constexpr std::optional<T> to_integer(std::basic_string<C> _text) noexcept
 struct finally
 {
     std::function<void()> hook {};
-    ~finally() { hook(); }
+
+    void perform()
+    {
+        if (hook)
+        {
+            auto hooked = std::move(hook);
+            hook = {};
+            hooked();
+        }
+    }
+
+    ~finally()
+    {
+        if (hook)
+            hook();
+    }
 };
 
 inline std::optional<unsigned> fromHexDigit(char _value)
