@@ -47,11 +47,28 @@ string GetLastErrorAsString()
 namespace terminal
 {
 
+struct ConPtySlave: public PtySlaveDummy
+{
+    HANDLE output_;
+
+    explicit ConPtySlave(HANDLE output): output_ { output } {}
+
+    int write(std::string_view text) noexcept override
+    {
+        DWORD nwritten {};
+        if (WriteFile(output_, text.data(), static_cast<DWORD>(text.size()), &nwritten, nullptr))
+            return static_cast<int>(nwritten);
+        else
+            return -1;
+    }
+};
+
 ConPty::ConPty(PageSize const& _windowSize): size_ { _windowSize }
 {
     master_ = INVALID_HANDLE_VALUE;
     input_ = INVALID_HANDLE_VALUE;
     output_ = INVALID_HANDLE_VALUE;
+    slave_ = make_unique<ConPtySlave>(output_);
 
     HANDLE hPipePTYIn { INVALID_HANDLE_VALUE };
     HANDLE hPipePTYOut { INVALID_HANDLE_VALUE };
@@ -171,8 +188,7 @@ void ConPty::resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels)
 
 PtySlave& ConPty::slave() noexcept
 {
-    static PtySlaveDummy dummy {};
-    return dummy;
+    return *slave_;
 }
 
 } // namespace terminal

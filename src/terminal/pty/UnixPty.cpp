@@ -156,16 +156,35 @@ bool UnixPty::Slave::isClosed() const noexcept
     return _slaveFd == -1;
 }
 
+bool UnixPty::Slave::configure() noexcept
+{
+    auto const tio = constructTerminalSettings(_slaveFd);
+    if (tcsetattr(_slaveFd, TCSANOW, &tio) == 0)
+        tcflush(_slaveFd, TCIOFLUSH);
+    return true;
+}
+
 bool UnixPty::Slave::login()
 {
     if (_slaveFd < 0)
         return false;
 
-    auto const tio = constructTerminalSettings(_slaveFd);
-    if (tcsetattr(_slaveFd, TCSANOW, &tio) == 0)
-        tcflush(_slaveFd, TCIOFLUSH);
+    if (!configure())
+        return false;
 
     return login_tty(_slaveFd) == 0;
+}
+
+int UnixPty::Slave::write(std::string_view text) noexcept
+{
+    if (_slaveFd < 0)
+    {
+        errno = ENODEV;
+        return -1;
+    }
+
+    auto const rv = ::write(_slaveFd, text.data(), text.size());
+    return static_cast<int>(rv);
 }
 // }}}
 

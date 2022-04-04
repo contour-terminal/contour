@@ -40,7 +40,9 @@ class UnixPty: public Pty
         PtySlaveHandle handle() const noexcept;
         void close() override;
         bool isClosed() const noexcept override;
+        bool configure() noexcept override;
         bool login() override;
+        int write(std::string_view) noexcept override;
     };
 
   public:

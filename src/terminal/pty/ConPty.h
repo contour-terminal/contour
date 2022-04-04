@@ -16,6 +16,7 @@
 #include <terminal/pty/Pty.h>
 
 #include <Windows.h>
+#include <memory>
 #include <mutex>
 #include <vector>
 
@@ -48,6 +49,7 @@ class ConPty: public Pty
     HANDLE input_;
     HANDLE output_;
     std::vector<char> buffer_;
+    std::unique_ptr<PtySlave> slave_;
 };
 
 } // namespace terminal
