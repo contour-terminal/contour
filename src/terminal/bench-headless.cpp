@@ -18,16 +18,52 @@
 
 #include <crispy/App.h>
 #include <crispy/CLI.h>
+#include <crispy/utils.h>
 
 #include <fmt/format.h>
 
 #include <iostream>
 #include <optional>
 #include <random>
+#include <thread>
 
 #include <libtermbench/termbench.h>
 
 using namespace std;
+
+namespace
+{
+
+std::string createText(size_t bytes)
+{
+    std::string text;
+    while (text.size() < bytes)
+    {
+        text += char('A' + (rand() % 26));
+        if ((text.size() % 65) == 0)
+            text += '\n';
+    }
+    return text;
+}
+
+std::string humanReadableBytes(long double bytes)
+{
+    if (bytes <= 1024.0)
+        return fmt::format("{} bytes", unsigned(bytes));
+
+    auto const kb = bytes / 1024.0;
+    if (kb <= 1024.0)
+        return fmt::format("{:.03} KB", kb);
+
+    auto const mb = kb / 1024.0;
+    if (mb <= 1024.0)
+        return fmt::format("{:.03} MB", mb);
+
+    auto const gb = mb / 1024.0;
+    return fmt::format("{:.03} GB", gb);
+}
+
+} // namespace
 
 class NullParserEvents
 {
@@ -137,6 +173,7 @@ class ContourHeadlessBench: public crispy::App
             Project { "fmt", "MIT", "https://github.com/fmtlib/fmt" });
         link("bench-headless.parser", bind(&ContourHeadlessBench::benchParserOnly, this));
         link("bench-headless.grid", bind(&ContourHeadlessBench::benchGrid, this));
+        link("bench-headless.pty", bind(&ContourHeadlessBench::benchPTY, this));
         link("bench-headless.meta", bind(&ContourHeadlessBench::showMetaInfo, this));
     }
 
@@ -162,11 +199,13 @@ class ContourHeadlessBench: public crispy::App
                 CLI::Command { "license",
                                "Shows the license, and project URL of the used projects and Contour." },
                 CLI::Command { "grid",
-                               "Shows the license, and project URL of the used projects and Contour.",
+                               "Performs performance tests utilizing the full grid including VT parser.",
                                perfOptions },
-                CLI::Command { "parser",
-                               "Shows the license, and project URL of the used projects and Contour.",
-                               perfOptions },
+                CLI::Command {
+                    "parser", "Performs performance tests utilizing the VT parser only.", perfOptions },
+                CLI::Command {
+                    "pty",
+                    "Performs performance tests utilizing the underlying operating system's PTY only." },
             }
         };
     }
@@ -219,6 +258,83 @@ class ContourHeadlessBench: public crispy::App
         return rv;
     }
 
+    int benchPTY()
+    {
+        using std::chrono::steady_clock;
+        using terminal::ColumnCount;
+        using terminal::createPty;
+        using terminal::LineCount;
+        using terminal::PageSize;
+        using terminal::Pty;
+
+        // Benchmark configuration
+        // TODO(pr) make these values CLI configurable.
+        auto constexpr WritesPerLoop = 1;
+        auto constexpr PtyWriteSize = 4096;
+        auto constexpr PtyReadSize = 4096;
+        auto const BenchTime = chrono::seconds(10);
+
+        // Setup benchmark
+        std::string const text = createText(PtyWriteSize);
+        unique_ptr<Pty> ptyObject = createPty(PageSize { LineCount(25), ColumnCount(80) }, std::nullopt);
+        auto& pty = *ptyObject;
+        auto& ptySlave = pty.slave();
+        ptySlave.configure();
+
+        auto bytesTransferred = uint64_t { 0 };
+        auto loopIterations = uint64_t { 0 };
+        auto ptyStdoutReaderThread = std::thread { [&]() {
+            while (!pty.isClosed())
+            {
+                optional<string_view> dataChunk = pty.read(PtyReadSize, std::chrono::seconds(2));
+                if (!dataChunk || dataChunk->empty())
+                    break;
+                bytesTransferred += dataChunk->size();
+                loopIterations++;
+            }
+        } };
+        auto cleanupReader = crispy::finally { [&]() {
+            pty.close();
+            ptyStdoutReaderThread.join();
+        } };
+
+        // Perform benchmark
+        fmt::print("Running PTY benchmark ...\n");
+        auto const startTime = steady_clock::now();
+        auto stopTime = startTime;
+        while (stopTime - startTime < BenchTime)
+        {
+            for (int i = 0; i < WritesPerLoop; ++i)
+                ptySlave.write(text);
+            stopTime = steady_clock::now();
+        }
+
+        cleanupReader.perform();
+
+        // Create summary
+        auto const elapsedTime = stopTime - startTime;
+        auto const msecs = std::chrono::duration_cast<std::chrono::milliseconds>(elapsedTime);
+        auto const secs = std::chrono::duration_cast<std::chrono::seconds>(elapsedTime);
+        auto const mbPerSecs =
+            static_cast<long double>(bytesTransferred) / static_cast<long double>(secs.count());
+
+        fmt::print("\n");
+        fmt::print("PTY stdout throughput bandwidth test\n");
+        fmt::print("====================================\n\n");
+        fmt::print("Writes per loop        : {}\n", WritesPerLoop);
+        fmt::print("PTY write size         : {}\n", PtyWriteSize);
+        fmt::print("PTY read size          : {}\n", PtyReadSize);
+        fmt::print("Test time              : {}.{:03} seconds\n", msecs.count() / 1000, msecs.count() % 1000);
+        fmt::print("Data transferred       : {}\n", humanReadableBytes(bytesTransferred));
+        fmt::print("Reader loop iterations : {}\n", loopIterations);
+        fmt::print("Average size per read  : {}\n",
+                   humanReadableBytes(static_cast<long double>(bytesTransferred)
+                                      / static_cast<long double>(loopIterations)));
+        fmt::print("Transfer speed         : {} per second\n", humanReadableBytes(mbPerSecs));
+
+        return EXIT_SUCCESS;
+    }
+
     int benchParserOnly()
     {
         auto po = NullParserEvents {};
@@ -231,6 +347,8 @@ class ContourHeadlessBench: public crispy::App
 
 int main(int argc, char const* argv[])
 {
+    srand(time(nullptr)); // initialize rand(). No strong seed required.
+
     ContourHeadlessBench app;
     return app.run(argc, argv);
 }
