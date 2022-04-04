@@ -151,6 +151,20 @@ if(LIBTERMINAL_TESTING)
         CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
     )
     target_link_libraries(bench-headless fmt::fmt-header-only terminal termbench)
+
+    if(CONTOUR_INSTALL_TOOLS)
+        if(WIN32)
+            install(TARGETS bench-headless DESTINATION bin)
+        elseif(APPLE)
+            set(INSTALL_RUNTIME_DIR "${App_Contents}/MacOS")
+            install(TARGETS bench-headless
+                BUNDLE DESTINATION . COMPONENT Runtime
+                RUNTIME DESTINATION "${INSTALL_RUNTIME_DIR}" COMPONENT Runtime
+            )
+        else()
+            install(TARGETS bench-headless DESTINATION bin)
+        endif()
+    endif()
 endif()
 
 message(STATUS "[libterminal] Compile unit tests: ${LIBTERMINAL_TESTING}")
