@@ -252,14 +252,26 @@ void UnixPty::wakeupReader() noexcept
     (void) rv;
 }
 
-std::optional<std::string_view> UnixPty::read(size_t size, std::chrono::milliseconds timeout)
+optional<string_view> UnixPty::readSome(char* target, size_t n) noexcept
+{
+    auto const rv = static_cast<int>(::read(_masterFd, target, n));
+    if (rv < 0)
+        return nullopt;
+
+    if (PtyInLog)
+        PtyInLog()("Received: {}", crispy::escape(target, target + rv));
+
+    return string_view { target, static_cast<size_t>(rv) };
+}
+
+bool waitForReadable(int _masterFd, int* _pipe, std::chrono::milliseconds timeout) noexcept
 {
     if (_masterFd < 0)
     {
         if (PtyInLog)
             PtyInLog()("read() called with closed PTY master.");
         errno = ENODEV;
-        return nullopt;
+        return false;
     }
 
     auto tv = timeval {};
@@ -283,19 +295,19 @@ std::optional<std::string_view> UnixPty::read(size_t size, std::chrono::millisec
             // (Let's not be too verbose here.)
             // PtyInLog()("PTY read() timed out.");
             errno = EAGAIN;
-            return nullopt;
+            return false;
         }
 
         if (_masterFd < 0)
         {
             errno = ENODEV;
-            return nullopt;
+            return false;
         }
 
         if (rv < 0)
         {
             PtyInLog()("PTY read() failed. {}", strerror(errno));
-            return nullopt;
+            return false;
         }
 
         bool piped = false;
@@ -313,28 +325,21 @@ std::optional<std::string_view> UnixPty::read(size_t size, std::chrono::millisec
         }
 
         if (FD_ISSET(_masterFd, &rfd))
-        {
-            auto const n = min(size, _buffer.size());
-            auto const rv = static_cast<int>(::read(_masterFd, _buffer.data(), n));
-            if (rv >= 0)
-            {
-                if (PtyInLog)
-                    PtyInLog()("Received: {}", crispy::escape(_buffer.data(), _buffer.data() + rv));
-                return string_view { _buffer.data(), static_cast<size_t>(rv) };
-            }
-            else
-            {
-                PtyLog()("PTY read: endpoint closed.");
-                return string_view {};
-            }
-        }
+            return true;
 
         if (piped)
         {
             errno = EINTR;
-            return nullopt;
+            return false;
         }
     }
+}
+
+optional<std::string_view> UnixPty::read(size_t size, std::chrono::milliseconds timeout)
+{
+    if (waitForReadable(_masterFd, _pipe.data(), timeout))
+        return readSome(_buffer.data(), min(size, _buffer.size()));
+    return nullopt;
 }
 
 int UnixPty::write(char const* buf, size_t size)
