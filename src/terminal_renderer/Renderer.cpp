@@ -125,7 +125,7 @@ Renderer::Renderer(PageSize pageSize,
                    bool atlasDirectMapping,
                    Decorator hyperlinkNormal,
                    Decorator hyperlinkHover):
-    _atlasHashtableSlotCount { crispy::detail::nextPowerOfTwo(atlasHashtableSlotCount.value) },
+    _atlasHashtableSlotCount { crispy::nextPowerOfTwo(atlasHashtableSlotCount.value) },
     _atlasTileCount { std::max(atlasTileCount.value, static_cast<uint32_t>(pageSize.area())) },
     _atlasDirectMapping { atlasDirectMapping },
     _renderTarget { nullptr },

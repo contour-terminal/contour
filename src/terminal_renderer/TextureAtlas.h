@@ -449,12 +449,12 @@ inline ImageSize computeAtlasSize(AtlasProperties const& atlasProperties) noexce
     using std::sqrt;
 
     // clang-format off
-    auto const totalTileCount = crispy::detail::nextPowerOfTwo(1 + atlasProperties.tileCount.value + atlasProperties.directMappingCount);
+    auto const totalTileCount = crispy::nextPowerOfTwo(1 + atlasProperties.tileCount.value + atlasProperties.directMappingCount);
     //auto const totalTileCount = atlasProperties.tileCount.value + atlasProperties.directMappingCount;
     auto const squareEdgeCount = static_cast<uint32_t>(ceil(sqrt(totalTileCount)));
-    auto const width = Width::cast_from(crispy::detail::nextPowerOfTwo(static_cast<uint32_t>(
+    auto const width = Width::cast_from(crispy::nextPowerOfTwo(static_cast<uint32_t>(
         squareEdgeCount * unbox<uint32_t>(atlasProperties.tileSize.width))));
-    auto const height = Height::cast_from(crispy::detail::nextPowerOfTwo(static_cast<uint32_t>(
+    auto const height = Height::cast_from(crispy::nextPowerOfTwo(static_cast<uint32_t>(
         squareEdgeCount * unbox<uint32_t>(atlasProperties.tileSize.height))));
     // clang-format on
 
