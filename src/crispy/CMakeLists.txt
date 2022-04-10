@@ -9,6 +9,7 @@ endif()
 
 set(crispy_SOURCES
     App.cpp App.h
+    BufferObject.cpp BufferObject.h
     CLI.cpp CLI.h
     Comparison.h
     LRUCache.h
@@ -106,6 +107,7 @@ option(CRISPY_TESTING "Enables building of unittests for crispy library [default
 if(CRISPY_TESTING)
     enable_testing()
     add_executable(crispy_test
+        BufferObject_test.cpp
         CLI_test.cpp
         LRUCache_test.cpp
         StrongLRUCache_test.cpp
