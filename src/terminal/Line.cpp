@@ -15,10 +15,12 @@ template <typename Cell, bool Optimize>
 typename Line<Cell, Optimize>::InflatedBuffer Line<Cell, Optimize>::reflow(ColumnCount _newColumnCount)
 {
     using crispy::Comparison;
-    switch (crispy::strongCompare(_newColumnCount, columnsUsed()))
+    auto& buffer = editable();
+    // TODO(pr): Efficiently handle TrivialBuffer-case.
+    switch (crispy::strongCompare(_newColumnCount, size()))
     {
         case Comparison::Equal: break;
-        case Comparison::Greater: buffer_.resize(unbox<size_t>(_newColumnCount)); break;
+        case Comparison::Greater: buffer.resize(unbox<size_t>(_newColumnCount)); break;
         case Comparison::Less: {
             // TODO: properly handle wide character cells
             // - when cutting in the middle of a wide char, the wide char gets wrapped and an empty
@@ -26,11 +28,11 @@ typename Line<Cell, Optimize>::InflatedBuffer Line<Cell, Optimize>::reflow(Colum
 
             if (wrappable())
             {
-                auto const [reflowStart, reflowEnd] = [this, _newColumnCount]() {
+                auto const [reflowStart, reflowEnd] = [this, _newColumnCount, &buffer]() {
                     auto const reflowStart =
-                        next(buffer_.begin(), *_newColumnCount /* - buffer_[_newColumnCount].width()*/);
+                        next(buffer.begin(), *_newColumnCount /* - buffer[_newColumnCount].width()*/);
 
-                    auto reflowEnd = buffer_.end();
+                    auto reflowEnd = buffer.end();
 
                     while (reflowEnd != reflowStart && prev(reflowEnd)->empty())
                         reflowEnd = prev(reflowEnd);
@@ -39,8 +41,8 @@ typename Line<Cell, Optimize>::InflatedBuffer Line<Cell, Optimize>::reflow(Colum
                 }();
 
                 auto removedColumns = InflatedBuffer(reflowStart, reflowEnd);
-                buffer_.erase(reflowStart, buffer_.end());
-                assert(columnsUsed() == _newColumnCount);
+                buffer.erase(reflowStart, buffer.end());
+                assert(size() == _newColumnCount);
 #if 0
                 if (removedColumns.size() > 0 &&
                         std::any_of(removedColumns.begin(), removedColumns.end(),
@@ -56,8 +58,8 @@ typename Line<Cell, Optimize>::InflatedBuffer Line<Cell, Optimize>::reflow(Colum
             }
             else
             {
-                buffer_.resize(unbox<size_t>(_newColumnCount));
-                assert(columnsUsed() == _newColumnCount);
+                buffer.resize(unbox<size_t>(_newColumnCount));
+                assert(size() == _newColumnCount);
                 return {};
             }
         }
@@ -69,14 +71,23 @@ template <typename Cell, bool Optimize>
 inline void Line<Cell, Optimize>::resize(ColumnCount _count)
 {
     assert(*_count >= 0);
-    buffer_.resize(unbox<size_t>(_count));
+    if (1) // constexpr (Optimized)
+    {
+        if (isTrivialBuffer())
+        {
+            TrivialBuffer& buffer = trivialBuffer();
+            buffer.displayWidth = _count;
+            return;
+        }
+    }
+    editable().resize(unbox<size_t>(_count));
 }
 
 template <typename Cell, bool Optimize>
 gsl::span<Cell const> Line<Cell, Optimize>::trim_blank_right() const noexcept
 {
-    auto i = buffer_.data();
-    auto e = buffer_.data() + buffer_.size();
+    auto i = editable().data();
+    auto e = editable().data() + editable().size();
 
     while (i != e && (e - 1)->empty())
         --e;
@@ -87,8 +98,11 @@ gsl::span<Cell const> Line<Cell, Optimize>::trim_blank_right() const noexcept
 template <typename Cell, bool Optimize>
 std::string Line<Cell, Optimize>::toUtf8() const
 {
+    if (isTrivialBuffer())
+        return std::string(trivialBuffer().text.data(), trivialBuffer().text.size());
+
     std::string str;
-    for (Cell const& cell: buffer_)
+    for (Cell const& cell: inflatedBuffer())
     {
         if (cell.codepointCount() == 0)
             str += ' ';
@@ -108,12 +122,13 @@ std::string Line<Cell, Optimize>::toUtf8Trimmed() const
 }
 
 template <typename Cell>
-InflatedLineBuffer<Cell> inflate(MonoStyledLineBuffer const& input)
+InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input)
 {
     static constexpr char32_t ReplacementCharacter { 0xFFFD };
 
     auto columns = InflatedLineBuffer<Cell> {};
-    columns.reserve(unbox<size_t>(input.width));
+    columns.reserve(unbox<size_t>(input.displayWidth));
+    // fmt::print("Inflating {}/{}\n", input.text.size(), input.displayWidth);
 
     auto lastChar = char32_t { 0 };
     auto utf8DecoderState = unicode::utf8_decoder_state {};
@@ -142,7 +157,7 @@ InflatedLineBuffer<Cell> inflate(MonoStyledLineBuffer const& input)
             auto const extendedWidth = prevCell.appendCharacter(nextChar);
             if (extendedWidth > 0)
             {
-                auto const cellsAvailable = *input.width - static_cast<int>(columns.size()) + 1;
+                auto const cellsAvailable = *input.displayWidth - static_cast<int>(columns.size()) + 1;
                 auto const n = min(extendedWidth, cellsAvailable);
                 for (int i = 1; i < n; ++i)
                     columns.emplace_back(Cell { input.attributes });
@@ -150,7 +165,7 @@ InflatedLineBuffer<Cell> inflate(MonoStyledLineBuffer const& input)
         }
     }
 
-    while (columns.size() < unbox<size_t>(input.width))
+    while (columns.size() < unbox<size_t>(input.displayWidth))
         columns.emplace_back(Cell { input.attributes });
 
     return columns;

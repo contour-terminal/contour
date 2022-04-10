@@ -484,44 +484,61 @@ inline void Cell::setUnderlineColor(Color color) noexcept
         extra().underlineColor = color;
 }
 
+inline RGBColor getUnderlineColor(ColorPalette const& colorPalette,
+                                  CellFlags cellFlags,
+                                  RGBColor defaultColor,
+                                  Color underlineColor) noexcept
+{
+    if (isDefaultColor(underlineColor))
+        return defaultColor;
+
+    float const opacity = [cellFlags]() {
+        if (cellFlags & CellFlags::Faint)
+            return 0.5f;
+        else
+            return 1.0f;
+    }();
+
+    bool const isBright = (cellFlags & CellFlags::Bold) != 0;
+    return apply(colorPalette, underlineColor, ColorTarget::Foreground, isBright) * opacity;
+}
+
 inline RGBColor Cell::getUnderlineColor(ColorPalette const& _colorPalette,
                                         RGBColor _defaultColor) const noexcept
 {
-    if (isDefaultColor(underlineColor()))
-        return _defaultColor;
-
-    float const opacity = [this]() {
-        if (isFlagEnabled(CellFlags::Faint))
-            return 0.5f;
-        else
-            return 1.0f;
-    }();
-
-    bool const bright = isFlagEnabled(CellFlags::Bold) != 0;
-    return apply(_colorPalette, underlineColor(), ColorTarget::Foreground, bright) * opacity;
+    return terminal::getUnderlineColor(_colorPalette, styles(), _defaultColor, underlineColor());
 }
 
-inline std::pair<RGBColor, RGBColor> Cell::makeColors(ColorPalette const& _colorPalette,
-                                                      bool _reverseVideo) const noexcept
+inline std::pair<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette,
+                                                CellFlags cellFlags,
+                                                bool _reverseVideo,
+                                                Color foregroundColor,
+                                                Color backgroundColor) noexcept
 {
-    float const opacity = [this]() { // TODO: don't make opacity dependant on Faint-attribute.
-        if (isFlagEnabled(CellFlags::Faint))
+    float const opacity = [cellFlags]() { // TODO: don't make opacity dependant on Faint-attribute.
+        if (cellFlags & CellFlags::Faint)
             return 0.5f;
         else
             return 1.0f;
     }();
 
-    bool const bright = isFlagEnabled(CellFlags::Bold);
+    bool const bright = cellFlags & CellFlags::Bold;
 
     auto const [fgColorTarget, bgColorTarget] =
         _reverseVideo ? std::pair { ColorTarget::Background, ColorTarget::Foreground }
                       : std::pair { ColorTarget::Foreground, ColorTarget::Background };
 
-    return isFlagEnabled(CellFlags::Inverse) == 0
-               ? std::pair { apply(_colorPalette, foregroundColor(), fgColorTarget, bright) * opacity,
-                             apply(_colorPalette, backgroundColor(), bgColorTarget, false) }
-               : std::pair { apply(_colorPalette, backgroundColor(), bgColorTarget, bright) * opacity,
-                             apply(_colorPalette, foregroundColor(), fgColorTarget, false) };
+    return (cellFlags & CellFlags::Inverse) == 0
+               ? std::pair { apply(_colorPalette, foregroundColor, fgColorTarget, bright) * opacity,
+                             apply(_colorPalette, backgroundColor, bgColorTarget, false) }
+               : std::pair { apply(_colorPalette, backgroundColor, bgColorTarget, bright) * opacity,
+                             apply(_colorPalette, foregroundColor, fgColorTarget, false) };
+}
+
+inline std::pair<RGBColor, RGBColor> Cell::makeColors(ColorPalette const& _colorPalette,
+                                                      bool _reverseVideo) const noexcept
+{
+    return terminal::makeColors(_colorPalette, styles(), _reverseVideo, foregroundColor(), backgroundColor());
 }
 
 inline std::shared_ptr<ImageFragment> Cell::imageFragment() const noexcept

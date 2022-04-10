@@ -117,6 +117,11 @@ class Terminal
     void setTopBottomMargin(std::optional<LineOffset> _top, std::optional<LineOffset> _bottom);
     void setLeftRightMargin(std::optional<ColumnOffset> _left, std::optional<ColumnOffset> _right);
 
+    bool isFullHorizontalMargins() const noexcept
+    {
+        return state_.margin.horizontal.to.value + 1 == state_.pageSize.columns.value;
+    }
+
     void moveCursorTo(LineOffset _line, ColumnOffset _column);
     void saveCursor();
     void restoreCursor();

@@ -399,7 +399,6 @@ class Grid
     Line<Cell> const& lineAt(LineOffset _line) const noexcept;
 
     gsl::span<Cell const> lineBuffer(LineOffset _line) const noexcept { return lineAt(_line).cells(); }
-    gsl::span<Cell const> lineBuffer(Line<Cell> const& _line) const noexcept { return _line.cells(); }
     gsl::span<Cell const> lineBufferRightTrimmed(LineOffset _line) const noexcept;
 
     std::string lineText(LineOffset _line) const;
@@ -560,32 +559,25 @@ void Grid<Cell>::render(RendererT&& _render, ScrollOffset _scrollOffset) const
 {
     assert(!_scrollOffset || unbox<LineCount>(_scrollOffset) <= historyLineCount());
 
-    auto const static emptyCell = Cell {};
-
     auto y = LineOffset(0);
     for (int i = -*_scrollOffset, e = i + *pageSize_.lines; i != e; ++i, ++y)
     {
         auto x = ColumnOffset(0);
         Line<Cell> const& line = lines_[i];
-        if constexpr (Line<Cell>::ColumnOptimized)
+        if (1) // constexpr (Line<Cell>::Optimized)
         {
-            Cell const* cell = &*line.begin();
-            Cell const* cellUsedEnd = cell + *line.columnsUsed();
-            Cell const* cellEnd = cell + *line.size();
-            while (cell != cellUsedEnd)
-                _render(*cell++, y, x++);
-            while (cell != cellEnd)
+            if (line.isTrivialBuffer())
             {
-                _render(emptyCell, y, x++);
-                ++cell;
+                _render.renderTrivialLine(line.trivialBuffer(), y);
+                continue;
             }
         }
-        else
-        {
-            for (Cell const& cell: line.cells())
-                _render(cell, y, x++);
-        }
+        _render.startLine(y);
+        for (Cell const& cell: line.cells())
+            _render.renderCell(cell, y, x++);
+        _render.endLine();
     }
+    _render.finish();
 }
 // }}}
 

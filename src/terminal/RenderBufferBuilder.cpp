@@ -22,6 +22,37 @@ namespace
     }
 
     tuple<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette,
+                                         CellFlags _cellFlags,
+                                         bool _reverseVideo,
+                                         Color foregroundColor,
+                                         Color backgroundColor,
+                                         bool _selected,
+                                         bool _isCursor)
+    {
+        auto const [fg, bg] =
+            makeColors(_colorPalette, _cellFlags, _reverseVideo, foregroundColor, backgroundColor);
+        if (!_selected && !_isCursor)
+            return tuple { fg, bg };
+
+        auto const [selectionFg, selectionBg] =
+            [](auto fg, auto bg, bool selected, ColorPalette const& colors) -> tuple<RGBColor, RGBColor> {
+            auto const a = colors.selectionForeground.value_or(bg);
+            auto const b = colors.selectionBackground.value_or(fg);
+            if (selected)
+                return tuple { a, b };
+            else
+                return tuple { b, a };
+        }(fg, bg, _selected, _colorPalette);
+        if (!_isCursor)
+            return tuple { selectionFg, selectionBg };
+
+        auto const cursorFg = makeRGBColor(selectionFg, selectionBg, _colorPalette.cursor.textOverrideColor);
+        auto const cursorBg = makeRGBColor(selectionFg, selectionBg, _colorPalette.cursor.color);
+
+        return tuple { cursorFg, cursorBg };
+    }
+
+    tuple<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette,
                                          Cell const& screenCell,
                                          bool _reverseVideo,
                                          bool _selected,
@@ -83,6 +114,28 @@ optional<RenderCursor> RenderBufferBuilder<Cell>::renderCursor() const
 
 template <typename Cell>
 RenderCell RenderBufferBuilder<Cell>::makeRenderCell(ColorPalette const& _colorPalette,
+                                                     char32_t codepoint,
+                                                     CellFlags flags,
+                                                     RGBColor fg,
+                                                     RGBColor bg,
+                                                     Color ul,
+                                                     LineOffset _line,
+                                                     ColumnOffset _column)
+{
+    RenderCell renderCell;
+    renderCell.backgroundColor = bg;
+    renderCell.foregroundColor = fg;
+    renderCell.decorationColor = getUnderlineColor(_colorPalette, flags, fg, ul);
+    renderCell.position.line = _line;
+    renderCell.position.column = _column;
+    renderCell.flags = flags;
+    renderCell.width = 1;
+    renderCell.codepoints.push_back(codepoint);
+    return renderCell;
+}
+
+template <typename Cell>
+RenderCell RenderBufferBuilder<Cell>::makeRenderCell(ColorPalette const& _colorPalette,
                                                      HyperlinkStorage const& _hyperlinks,
                                                      Cell const& screenCell,
                                                      RGBColor fg,
@@ -124,36 +177,130 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCell(ColorPalette const& _colorP
 }
 
 template <typename Cell>
-void RenderBufferBuilder<Cell>::operator()(Cell const& screenCell, LineOffset _line, ColumnOffset _column)
+std::tuple<RGBColor, RGBColor> RenderBufferBuilder<Cell>::makeColorsForCell(CellLocation gridPosition,
+                                                                            CellFlags cellFlags,
+                                                                            Color foregroundColor,
+                                                                            Color backgroundColor)
 {
-    // clang-format off
-    auto const selected = terminal.isSelected( CellLocation { _line - boxed_cast<LineOffset>(terminal.viewport().scrollOffset()), _column });
-    auto const pos = CellLocation { _line, _column };
-    auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(pos);
     auto const hasCursor = gridPosition == terminal.realCursorPosition();
+
+    // clang-format off
     bool const paintCursor =
         (hasCursor || (prevHasCursor && prevWidth == 2))
             && output.cursor.has_value()
             && output.cursor->shape == CursorShape::Block;
-    auto const [fg, bg] = makeColors(terminal.colorPalette(), screenCell, reverseVideo, selected, paintCursor);
     // clang-format on
 
+    auto const selected = terminal.isSelected(
+        CellLocation { gridPosition.line - boxed_cast<LineOffset>(terminal.viewport().scrollOffset()),
+                       gridPosition.column });
+
+    return makeColors(terminal.colorPalette(),
+                      cellFlags,
+                      reverseVideo,
+                      foregroundColor,
+                      backgroundColor,
+                      selected,
+                      paintCursor);
+}
+
+template <typename Cell>
+void RenderBufferBuilder<Cell>::renderTrivialLine(TriviallyStyledLineBuffer const& lineBuffer,
+                                                  LineOffset lineOffset)
+{
+    // fmt::print("Rendering trivial line {:2} 0..{}/{}: \"{}\"\n",
+    //            lineOffset.value,
+    //            lineBuffer.text.size(),
+    //            lineBuffer.width,
+    //            lineBuffer.text.view());
+
+    auto const textMargin = min(boxed_cast<ColumnOffset>(terminal.pageSize().columns),
+                                ColumnOffset::cast_from(lineBuffer.text.size()));
+    for (ColumnOffset columnOffset = ColumnOffset(0); columnOffset < textMargin; ++columnOffset)
+    {
+        auto const pos = CellLocation { lineOffset, columnOffset };
+        auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(pos);
+        auto const [fg, bg] = makeColorsForCell(gridPosition,
+                                                lineBuffer.attributes.styles,
+                                                lineBuffer.attributes.foregroundColor,
+                                                lineBuffer.attributes.backgroundColor);
+        auto const customBackground =
+            bg != terminal.colorPalette().defaultBackground || !!lineBuffer.attributes.styles;
+
+        lineNr = lineOffset;
+        prevWidth = 0;
+        prevHasCursor = false;
+
+        output.screen.emplace_back(makeRenderCell(terminal.colorPalette(),
+                                                  lineBuffer.text[unbox<size_t>(columnOffset)],
+                                                  lineBuffer.attributes.styles,
+                                                  fg,
+                                                  bg,
+                                                  lineBuffer.attributes.underlineColor,
+                                                  lineOffset,
+                                                  columnOffset));
+        if (columnOffset.value == 0)
+            output.screen.back().groupStart = true;
+    }
+
+    if (!output.screen.empty())
+    {
+        output.screen.back().groupEnd = true;
+    }
+
+    // for (auto columnOffset = ColumnOffset::cast_from(lineBuffer.text.size());
+    //      columnOffset < boxed_cast<ColumnOffset>(terminal.pageSize().columns);
+    //      ++columnOffset)
+    // {
+    //     auto const pos = CellLocation { lineOffset, columnOffset };
+    //     auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(pos);
+    //     auto const [fg, bg] = makeColorsForCell(gridPosition,
+    //                                             lineBuffer.attributes.styles,
+    //                                             lineBuffer.attributes.foregroundColor,
+    //                                             lineBuffer.attributes.backgroundColor);
+    //
+    //     output.screen.emplace_back(makeRenderCell(terminal.colorPalette(),
+    //                                               char32_t { 0 },
+    //                                               lineBuffer.attributes.styles,
+    //                                               fg,
+    //                                               bg,
+    //                                               lineBuffer.attributes.underlineColor,
+    //                                               lineOffset,
+    //                                               columnOffset));
+    // }
+}
+
+template <typename Cell>
+void RenderBufferBuilder<Cell>::startLine(LineOffset _line) noexcept
+{
+    isNewLine = true;
+    lineNr = _line;
+    prevWidth = 0;
+    prevHasCursor = false;
+}
+
+template <typename Cell>
+void RenderBufferBuilder<Cell>::endLine() noexcept
+{
+    if (!output.screen.empty())
+    {
+        output.screen.back().groupEnd = true;
+    }
+}
+
+template <typename Cell>
+void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset _line, ColumnOffset _column)
+{
+    auto const pos = CellLocation { _line, _column };
+    auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(pos);
+    auto const [fg, bg] = makeColorsForCell(
+        gridPosition, screenCell.styles(), screenCell.foregroundColor(), screenCell.backgroundColor());
+
     prevWidth = screenCell.width();
-    prevHasCursor = hasCursor;
+    prevHasCursor = gridPosition == terminal.realCursorPosition();
 
     auto const cellEmpty = screenCell.empty();
     auto const customBackground = bg != terminal.colorPalette().defaultBackground || !!screenCell.styles();
-
-    bool isNewLine = false;
-    if (lineNr != _line)
-    {
-        isNewLine = true;
-        lineNr = _line;
-        prevWidth = 0;
-        prevHasCursor = false;
-        if (!output.screen.empty())
-            output.screen.back().groupEnd = true;
-    }
 
     switch (state)
     {
@@ -192,6 +339,7 @@ void RenderBufferBuilder<Cell>::operator()(Cell const& screenCell, LineOffset _l
             }
             break;
     }
+    isNewLine = false;
 }
 
 } // namespace terminal

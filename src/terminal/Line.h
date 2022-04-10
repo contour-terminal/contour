@@ -14,8 +14,10 @@
 #pragma once
 
 #include <terminal/GraphicsAttributes.h>
+#include <terminal/Hyperlink.h>
 #include <terminal/primitives.h>
 
+#include <crispy/BufferObject.h>
 #include <crispy/Comparison.h>
 #include <crispy/assert.h>
 
@@ -49,22 +51,23 @@ template <typename T> struct OptionalProperty<T, true> { T value; };
 /**
  * Line storage with call columns sharing the same SGR attributes.
  */
-struct MonoStyledLineBuffer
+struct TriviallyStyledLineBuffer
 {
+    ColumnCount displayWidth;
     GraphicsAttributes attributes;
-    std::string text;  // TODO: Try std::string_view later to avoid scattered copies.
-    ColumnCount width; // page display width
+    crispy::BufferFragment text {};
+    HyperlinkId hyperlink {};
 };
 
 template <typename Cell>
 using InflatedLineBuffer = std::vector<Cell>;
 
-/// Unpacks a MonoStyledLineBuffer into an InflatedLineBuffer<Cell>.
+/// Unpacks a TriviallyStyledLineBuffer into an InflatedLineBuffer<Cell>.
 template <typename Cell>
-InflatedLineBuffer<Cell> inflate(MonoStyledLineBuffer const& input);
+InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input);
 
 template <typename Cell>
-using LineStorage = std::variant<MonoStyledLineBuffer, InflatedLineBuffer<Cell>>;
+using LineStorage = std::variant<TriviallyStyledLineBuffer, InflatedLineBuffer<Cell>>;
 
 /**
  * Line<Cell> API.
@@ -82,6 +85,9 @@ class Line
     Line& operator=(Line const&) = default;
     Line& operator=(Line&&) noexcept = default;
 
+    static constexpr inline bool Optimized = Optimize;
+
+    using TrivialBuffer = TriviallyStyledLineBuffer;
     using InflatedBuffer = InflatedLineBuffer<Cell>;
     using Storage = LineStorage<Cell>;
     using value_type = Cell;
@@ -90,56 +96,26 @@ class Line
     using const_iterator = typename InflatedBuffer::const_iterator;
 
     Line(ColumnCount _width, LineFlags _flags, GraphicsAttributes _templateSGR):
-        buffer_(_width.as<size_t>(), Cell { _templateSGR } /*, _allocator*/),
+        storage_ { InflatedBuffer { _width.as<size_t>(), Cell { _templateSGR } /*, _allocator*/ } },
         flags_ { static_cast<unsigned>(_flags) }
     {
     }
 
     Line(ColumnCount _width, InflatedBuffer _buffer, LineFlags _flags):
-        buffer_ { std::move(_buffer) }, flags_ { static_cast<unsigned>(_flags) }
+        storage_ { InflatedBuffer { std::move(_buffer) } }, flags_ { static_cast<unsigned>(_flags) }
     {
-        buffer_.resize(unbox<size_t>(_width));
+        inflatedBuffer().resize(unbox<size_t>(_width));
     }
 
     Line(InflatedBuffer _buffer, LineFlags _flags):
-        buffer_ { std::move(_buffer) }, flags_ { static_cast<unsigned>(_flags) }
+        storage_ { InflatedBuffer { std::move(_buffer) } }, flags_ { static_cast<unsigned>(_flags) }
     {
     }
 
-    constexpr static inline bool ColumnOptimized = Optimize;
-
-    // This is experimental (aka. buggy) and going to be replaced with another optimization idea soon.
-    //#define LINE_AVOID_CELL_RESET 1
-
-    void reset(LineFlags _flags,
-               GraphicsAttributes _attributes) noexcept // TODO: optimize by having no need to O(n) iterate
-                                                        // through all buffer cells.
+    void reset(LineFlags _flags, GraphicsAttributes _attributes) noexcept
     {
         flags_ = static_cast<unsigned>(_flags);
-
-        // if constexpr (ColumnOptimized)
-        // {
-        //     #if !defined(LINE_AVOID_CELL_RESET)
-        //     if (buffer_.back().backgroundColor() != _attributes.backgroundColor)
-        //         // TODO: also styles and UL color
-        //         markUsedFirst(ColumnCount::cast_from(buffer_.size()));
-        //
-        //     for (auto i = 0; i < *columnsUsed(); ++i)
-        //         buffer_[i].reset(_attributes);
-        //     #endif
-        //     markUsedFirst(ColumnCount(0));
-        // }
-        // else
-        {
-            for (Cell& cell: buffer_)
-                cell.reset(_attributes);
-        }
-    }
-
-    void markUsedFirst(ColumnCount /*_n*/) noexcept
-    {
-        // if constexpr (ColumnOptimized)
-        //     usedColumns_.value = _n;
+        setBuffer(TrivialBuffer { size(), _attributes });
     }
 
     void fill(LineFlags _flags,
@@ -152,13 +128,24 @@ class Line
         else
         {
             flags_ = static_cast<unsigned>(_flags);
-            markUsedFirst(size());
             for (Cell& cell: editable())
             {
                 cell.reset();
                 cell.write(_attributes, _codepoint, _width);
             }
         }
+    }
+
+    /// Tests if all cells are empty.
+    bool empty() const noexcept
+    {
+        if (isTrivialBuffer())
+            return trivialBuffer().text.empty();
+
+        for (auto const& cell: inflatedBuffer())
+            if (!cell.empty())
+                return false;
+        return true;
     }
 
     /**
@@ -177,83 +164,68 @@ class Line
         auto constexpr ASCII_Width = 1;
         auto const* s = _ascii.data();
 
-        Cell* i = &buffer_[unbox<size_t>(_start)];
+        Cell* i = &buffer[unbox<size_t>(_start)];
         Cell* e = i + _ascii.size();
         while (i != e)
             (i++)->write(_sgr, static_cast<char32_t>(*s++), ASCII_Width);
 
-        // if constexpr (ColumnOptimized)
-        // {
-        //     #if !defined(LINE_AVOID_CELL_RESET)
-        //     auto const e2 = buffer.data() + unbox<long>(columnsUsed());
-        //     while (i != e2)
-        //         (i++)->reset();
-        //     #endif
-        //     usedColumns_.value = boxed_cast<ColumnCount>(_start) + ColumnCount::cast_from(_ascii.size());
-        // }
-        // else
-        {
-            auto const e2 = buffer.data() + buffer.size();
-            while (i != e2)
-                (i++)->reset();
-        }
+        auto const e2 = buffer.data() + buffer.size();
+        while (i != e2)
+            (i++)->reset();
     }
 
-    ColumnCount size() const noexcept { return ColumnCount::cast_from(buffer_.size()); }
-
-    ColumnCount columnsUsed() const noexcept
+    ColumnCount size() const noexcept
     {
-        // if constexpr (ColumnOptimized)
-        //     return usedColumns_.value;
-        // else
-        return size();
+        if (isTrivialBuffer())
+            return trivialBuffer().displayWidth;
+        else
+            return ColumnCount::cast_from(inflatedBuffer().size());
     }
 
     void resize(ColumnCount _count);
 
     gsl::span<Cell const> trim_blank_right() const noexcept;
 
-    gsl::span<Cell const> cells() const noexcept { return buffer_; }
+    gsl::span<Cell const> cells() const noexcept { return editable(); }
 
     gsl::span<Cell> useRange(ColumnOffset _start, ColumnCount _count) noexcept
     {
-        markUsedFirst(std::max(columnsUsed(), boxed_cast<ColumnCount>(_start) + _count));
 #if defined(__clang__) && __clang_major__ <= 11
-        auto const bufferSpan = gsl::span(buffer_);
+        auto const bufferSpan = gsl::span(editable());
         return bufferSpan.subspan(unbox<size_t>(_start), unbox<size_t>(_count));
 #else
         // Clang <= 11 cannot deal with this (e.g. FreeBSD 13 defaults to Clang 11).
-        return gsl::span(buffer_).subspan(unbox<size_t>(_start), unbox<size_t>(_count));
+        return gsl::span(editable()).subspan(unbox<size_t>(_start), unbox<size_t>(_count));
 #endif
     }
-
-    iterator begin() noexcept { return buffer_.begin(); }
-    iterator end() noexcept { return std::next(std::begin(buffer_), unbox<int>(columnsUsed())); }
-
-    const_iterator begin() const noexcept { return buffer_.begin(); }
-    const_iterator end() const noexcept { return std::next(buffer_.begin(), unbox<int>(columnsUsed())); }
-
-    reverse_iterator rbegin() noexcept { return buffer_.rbegin(); }
-    reverse_iterator rend() noexcept { return buffer_.rend(); }
-
-    Cell& front() noexcept { return buffer_.front(); }
-    Cell const& front() const noexcept { return buffer_.front(); }
-
-    Cell& back() noexcept { return *std::next(buffer_.begin(), unbox<int>(columnsUsed() - 1)); }
-    Cell const& back() const noexcept { return *std::next(buffer_.begin(), unbox<int>(columnsUsed() - 1)); }
 
     Cell& useCellAt(ColumnOffset _column) noexcept
     {
         Require(ColumnOffset(0) <= _column);
-        Require(_column <= ColumnOffset::cast_from(buffer_.size())); // Allow off-by-one for sentinel.
+        Require(_column <= ColumnOffset::cast_from(size())); // Allow off-by-one for sentinel.
         return editable()[unbox<size_t>(_column)];
     }
 
-    Cell const& at(ColumnOffset _column) const noexcept
+    uint8_t cellEmptyAt(ColumnOffset column) const noexcept
     {
-        Require(ColumnOffset(0) <= _column);
-        Require(_column <= ColumnOffset::cast_from(buffer_.size())); // Allow off-by-one for sentinel.
-        return buffer_[unbox<size_t>(_column)];
+        if (isTrivialBuffer())
+        {
+            Require(ColumnOffset(0) <= column);
+            Require(column < ColumnOffset::cast_from(size()));
+            return unbox<size_t>(column) >= trivialBuffer().text.size();
+        }
+        return editable().at(unbox<size_t>(column)).empty();
+    }
+
+    uint8_t cellWithAt(ColumnOffset column) const noexcept
+    {
+        if (isTrivialBuffer())
+        {
+            Require(ColumnOffset(0) <= column);
+            Require(column < ColumnOffset::cast_from(size()));
+            return 1; // TODO: When trivial line is to support Unicode, this should be adapted here.
+        }
+        return editable().at(unbox<size_t>(column)).width();
     }
 
     LineFlags flags() const noexcept { return static_cast<LineFlags>(flags_); }
@@ -299,12 +271,28 @@ class Line
     // If this line has been stored in an optimized state, then
     // the line will be first unpacked into a vector of grid cells.
     InflatedBuffer& editable();
+    InflatedBuffer const& editable() const;
+
+    TrivialBuffer& trivialBuffer() noexcept { return std::get<TrivialBuffer>(storage_); }
+    TrivialBuffer const& trivialBuffer() const noexcept { return std::get<TrivialBuffer>(storage_); }
+
+    InflatedBuffer const& inflatedBuffer() const noexcept { return std::get<InflatedBuffer>(storage_); }
+    InflatedBuffer& inflatedBuffer() noexcept { return std::get<InflatedBuffer>(storage_); }
+
+    bool isTrivialBuffer() const noexcept { return std::holds_alternative<TrivialBuffer>(storage_); }
+    bool isInflatedBuffer() const noexcept { return std::holds_alternative<TrivialBuffer>(storage_); }
+
+    void setBuffer(TrivialBuffer const& buffer) { storage_ = buffer; }
+    void setBuffer(InflatedBuffer buffer) { storage_ = std::move(buffer); }
+
+    void reset(GraphicsAttributes attributes, HyperlinkId hyperlink, crispy::BufferFragment text)
+    {
+        storage_ = TrivialBuffer { size(), attributes, std::move(text), hyperlink };
+    }
 
   private:
-    InflatedBuffer buffer_;
     Storage storage_;
     unsigned flags_ = 0;
-    // OptionalProperty<ColumnCount, ColumnOptimized> usedColumns_;
 };
 
 constexpr LineFlags operator|(LineFlags a, LineFlags b) noexcept
@@ -325,17 +313,16 @@ constexpr LineFlags operator&(LineFlags a, LineFlags b) noexcept
 template <typename Cell, bool Optimize>
 inline typename Line<Cell, Optimize>::InflatedBuffer& Line<Cell, Optimize>::editable()
 {
-    // TODO: when we impement the line text buffer optimization,
-    // then this is the place where we want to *promote* a possibly
-    // optimized text buffer to a full grid line buffer.
-#if 0
-    if (std::holds_alternative<MonoStyledLineBuffer>(storage_))
-        storage_ = inflate<Cell>(std::get<MonoStyledLineBuffer>(storage_));
-
+    if (1) // constexpr (Optimized)
+        if (std::holds_alternative<TrivialBuffer>(storage_))
+            storage_ = inflate<Cell>(std::get<TrivialBuffer>(storage_));
     return std::get<InflatedBuffer>(storage_);
-#else
-    return buffer_;
-#endif
+}
+
+template <typename Cell, bool Optimize>
+inline typename Line<Cell, Optimize>::InflatedBuffer const& Line<Cell, Optimize>::editable() const
+{
+    return const_cast<Line<Cell, Optimize>*>(this)->editable();
 }
 
 } // namespace terminal

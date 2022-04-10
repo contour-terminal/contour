@@ -151,8 +151,9 @@ bool Terminal::processInputOnce()
     // store a single text line.
     if (currentPtyBuffer_->bytesAvailable() < unbox<size_t>(state_.pageSize.columns))
     {
-        PtyInLog()("Only {} bytes left in TBO. Allocating new buffer from pool.",
-                   currentPtyBuffer_->bytesAvailable());
+        if (PtyInLog)
+            PtyInLog()("Only {} bytes left in TBO. Allocating new buffer from pool.",
+                       currentPtyBuffer_->bytesAvailable());
         currentPtyBuffer_ = ptyBufferPool_.allocateBufferObject();
     }
     optional<string_view> const bufOpt = pty_->read(*currentPtyBuffer_, timeout);

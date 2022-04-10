@@ -97,6 +97,47 @@ decltype(auto) e(S const& s)
 {
     return crispy::escape(s);
 }
+
+struct TextRenderBuilder
+{
+    std::string text;
+
+    void startLine(LineOffset lineOffset);
+    void renderCell(Cell const& cell, LineOffset lineOffset, ColumnOffset columnOffset);
+    void endLine();
+    void renderTrivialLine(TriviallyStyledLineBuffer const& lineBuffer, LineOffset lineOffset);
+    void finish();
+};
+
+void TextRenderBuilder::startLine(LineOffset lineOffset)
+{
+    if (!*lineOffset)
+        text.clear();
+}
+
+void TextRenderBuilder::renderCell(Cell const& cell, LineOffset, ColumnOffset)
+{
+    text += cell.toUtf8();
+}
+
+void TextRenderBuilder::endLine()
+{
+    text += '\n';
+}
+
+void TextRenderBuilder::renderTrivialLine(TriviallyStyledLineBuffer const& lineBuffer, LineOffset lineOffset)
+{
+    if (!*lineOffset)
+        text.clear();
+
+    text.append(lineBuffer.text.data(), lineBuffer.text.size());
+    text += '\n';
+}
+
+void TextRenderBuilder::finish()
+{
+}
+
 } // namespace
 // }}}
 
@@ -2320,26 +2361,6 @@ TEST_CASE("ReportExtendedCursorPosition", "[screen]")
     }
 }
 
-TEST_CASE("SetMode", "[screen]")
-{
-    SECTION("Auto NewLine Mode: Enabled")
-    {
-        auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
-        auto& screen = mock.terminal.primaryScreen();
-        mock.terminal.setMode(AnsiMode::AutomaticNewLine, true);
-        mock.writeToScreen("12345\n67890\nABCDE\nFGHIJ\nKLMNO");
-        REQUIRE(screen.renderMainPageText() == "12345\n67890\nABCDE\nFGHIJ\nKLMNO\n");
-    }
-
-    SECTION("Auto NewLine Mode: Disabled")
-    {
-        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
-        auto& screen = mock.terminal.primaryScreen();
-        mock.writeToScreen("A\nB\nC");
-        REQUIRE(screen.renderMainPageText() == "A  \n B \n  C\n");
-    }
-}
-
 TEST_CASE("RequestMode", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
@@ -2488,16 +2509,8 @@ TEST_CASE("render into history", "[screen]")
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(4) });
     REQUIRE(screen.historyLineCount() == LineCount { 3 });
 
-    string renderedText;
-    renderedText.resize((screen.pageSize().columns + 1).as<size_t>() * screen.pageSize().lines.as<size_t>());
-
-    auto const renderer = [&](Cell const& cell, LineOffset _row, ColumnOffset _column) {
-        auto const offset =
-            _row.as<size_t>() * (screen.pageSize().columns + 1).as<size_t>() + _column.as<size_t>();
-        renderedText.at(offset) = cell.codepointCount() ? static_cast<char>(cell.codepoint(0)) : ' ';
-        if (_column == (screen.pageSize().columns - 1).as<ColumnOffset>())
-            renderedText.at(offset + 1) = '\n';
-    };
+    auto renderer = TextRenderBuilder {};
+    string& renderedText = renderer.text;
 
     // main area
     logScreenText(screen, "render into history");
@@ -3163,25 +3176,25 @@ TEST_CASE("resize", "[screen]")
 // TODO: also test with: overflowing source bottom/right dimensions
 // TODO: also test with: out-of-bounds target or source top/left positions
 
-MockTerm screenForDECRA()
+MockTerm<MockPty> screenForDECRA()
 {
-    return MockTerm { PageSize { LineCount(5), ColumnCount(6) }, {}, [](MockTerm& mock) {
-                         mock.writeToScreen("ABCDEF\r\n"
-                                            "abcdef\r\n"
-                                            "123456\r\n");
-                         mock.writeToScreen("\033[43m");
-                         mock.writeToScreen("GHIJKL\r\n"
-                                            "ghijkl");
-                         mock.writeToScreen("\033[0m");
+    return MockTerm<MockPty> { PageSize { LineCount(5), ColumnCount(6) }, {}, 1024, [](auto& mock) {
+                                  mock.writeToScreen("ABCDEF\r\n"
+                                                     "abcdef\r\n"
+                                                     "123456\r\n");
+                                  mock.writeToScreen("\033[43m");
+                                  mock.writeToScreen("GHIJKL\r\n"
+                                                     "ghijkl");
+                                  mock.writeToScreen("\033[0m");
 
-                         auto const initialText = "ABCDEF\n"
-                                                  "abcdef\n"
-                                                  "123456\n"
-                                                  "GHIJKL\n"
-                                                  "ghijkl\n";
+                                  auto const initialText = "ABCDEF\n"
+                                                           "abcdef\n"
+                                                           "123456\n"
+                                                           "GHIJKL\n"
+                                                           "ghijkl\n";
 
-                         CHECK(mock.terminal.primaryScreen().renderMainPageText() == initialText);
-                     } };
+                                  CHECK(mock.terminal.primaryScreen().renderMainPageText() == initialText);
+                              } };
 }
 
 TEST_CASE("DECCRA.DownLeft.intersecting", "[screen]")

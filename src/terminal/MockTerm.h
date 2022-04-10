@@ -21,14 +21,15 @@
 namespace terminal
 {
 
+template <typename PtyDevice = MockPty>
 class MockTerm: public Terminal::Events
 {
   public:
-    explicit MockTerm(PageSize _size, LineCount _hist = {});
+    explicit MockTerm(PageSize _size, LineCount _hist = {}, size_t ptyReadBufferSize = 1024);
 
     template <typename Init>
     MockTerm(
-        PageSize _size, LineCount _hist = {}, Init init = [](MockTerm&) {}):
+        PageSize _size, LineCount _hist = {}, size_t ptyReadBufferSize = 1024, Init init = [](MockTerm&) {}):
         MockTerm { _size, _hist }
     {
         init(*this);
@@ -38,7 +39,7 @@ class MockTerm: public Terminal::Events
     decltype(auto) state() noexcept { return terminal.state(); }
     decltype(auto) state() const noexcept { return terminal.state(); }
 
-    MockPty& mockPty() noexcept { return static_cast<MockPty&>(terminal.device()); }
+    PtyDevice& mockPty() noexcept { return static_cast<PtyDevice&>(terminal.device()); }
 
     void writeToScreen(std::string_view text)
     {
@@ -55,5 +56,13 @@ class MockTerm: public Terminal::Events
     // Events overrides
     void setWindowTitle(std::string_view title) override { windowTitle = title; }
 };
+
+template <typename PtyDevice>
+inline MockTerm<PtyDevice>::MockTerm(PageSize pageSize,
+                                     LineCount maxHistoryLineCount,
+                                     size_t ptyReadBufferSize):
+    terminal { std::make_unique<PtyDevice>(pageSize), ptyReadBufferSize, *this, maxHistoryLineCount }
+{
+}
 
 } // namespace terminal

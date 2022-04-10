@@ -23,18 +23,4 @@
 namespace terminal
 {
 
-MockTerm::MockTerm(PageSize pageSize, LineCount maxHistoryLineCount):
-    terminal { std::make_unique<MockPty>(pageSize),
-               1024, // pty read buffer size
-               *this,
-               maxHistoryLineCount }
-{
-    char const* logFilterString = getenv("LOG");
-    if (logFilterString)
-    {
-        logstore::configure(logFilterString);
-        crispy::App::customizeLogStoreOutput();
-    }
-}
-
 } // namespace terminal

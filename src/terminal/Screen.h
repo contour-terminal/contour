@@ -99,6 +99,10 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
     void processSequence(Sequence const& seq) override;
     // }}}
 
+    std::string_view tryEmplaceChars(std::string_view chars) noexcept;
+    std::string_view tryEmplaceContinuousChars(std::string_view chars) noexcept;
+    void advanceCursorAfterWrite(ColumnCount n) noexcept;
+
     /// Renders the full screen by passing every grid cell to the callback.
     template <typename Renderer>
     void render(Renderer&& _render, ScrollOffset _scrollOffset = {}) const
@@ -116,6 +120,8 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
     /// @returns necessary commands needed to draw the current screen state,
     ///          including initial clear screen, and initial cursor hide.
     std::string screenshot(std::function<std::string(LineOffset)> const& _postLine = {}) const;
+
+    void linefeedIfWrapPending();
 
     // {{{ VT API
     void linefeed(); // LF
@@ -394,18 +400,33 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
     ColorPalette& defaultColorPalette() noexcept { return _state.defaultColorPalette; }
     ColorPalette const& defaultColorPalette() const noexcept { return _state.defaultColorPalette; }
 
-    bool isCellEmpty(CellLocation position) const noexcept override { return at(position).empty(); }
+    bool isCellEmpty(CellLocation position) const noexcept override
+    {
+        return grid().lineAt(position.line).cellEmptyAt(position.column);
+    }
 
-    uint8_t cellWithAt(CellLocation position) const noexcept override { return at(position).width(); }
+    uint8_t cellWithAt(CellLocation position) const noexcept override
+    {
+        return grid().lineAt(position.line).cellWithAt(position.column);
+    }
 
     HyperlinkId hyperlinkIdAt(CellLocation position) const noexcept override
     {
+        if (1) // constexpr (Line<Cell>::Optimized)
+        {
+            auto const& line = grid().lineAt(position.line);
+            if (line.isTrivialBuffer())
+            {
+                TriviallyStyledLineBuffer const& lineBuffer = line.trivialBuffer();
+                return lineBuffer.hyperlink;
+            }
+        }
         return at(position).hyperlink();
     }
 
     std::shared_ptr<HyperlinkInfo const> hyperlinkAt(CellLocation pos) const noexcept override
     {
-        return _state.hyperlinks.hyperlinkById(at(pos).hyperlink());
+        return _state.hyperlinks.hyperlinkById(hyperlinkIdAt(pos));
     }
 
     HyperlinkStorage const& hyperlinks() const noexcept { return _state.hyperlinks; }

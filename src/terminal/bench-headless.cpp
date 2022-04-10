@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 
+#include <terminal/MockTerm.h>
 #include <terminal/Terminal.h>
 #include <terminal/logging.h>
 #include <terminal/pty/MockViewPty.h>
@@ -44,23 +45,6 @@ std::string createText(size_t bytes)
             text += '\n';
     }
     return text;
-}
-
-std::string humanReadableBytes(long double bytes)
-{
-    if (bytes <= 1024.0)
-        return fmt::format("{} bytes", unsigned(bytes));
-
-    auto const kb = bytes / 1024.0;
-    if (kb <= 1024.0)
-        return fmt::format("{:.03} KB", kb);
-
-    auto const mb = kb / 1024.0;
-    if (mb <= 1024.0)
-        return fmt::format("{:.03} MB", mb);
-
-    auto const gb = mb / 1024.0;
-    return fmt::format("{:.03} GB", gb);
 }
 
 } // namespace
@@ -175,6 +159,13 @@ class ContourHeadlessBench: public crispy::App
         link("bench-headless.grid", bind(&ContourHeadlessBench::benchGrid, this));
         link("bench-headless.pty", bind(&ContourHeadlessBench::benchPTY, this));
         link("bench-headless.meta", bind(&ContourHeadlessBench::showMetaInfo, this));
+
+        char const* logFilterString = getenv("LOG");
+        if (logFilterString)
+        {
+            logstore::configure(logFilterString);
+            crispy::App::customizeLogStoreOutput();
+        }
     }
 
     crispy::cli::Command parameterDefinition() const override
@@ -235,26 +226,28 @@ class ContourHeadlessBench: public crispy::App
     int benchGrid()
     {
         auto pageSize = terminal::PageSize { terminal::LineCount(25), terminal::ColumnCount(80) };
-        auto const ptyReadBufferSize = 10000;
-        auto maxHistoryLineCount = terminal::LineCount(4096);
-        auto eh = terminal::Terminal::Events {};
-        auto vt = terminal::Terminal {
-            make_unique<terminal::MockViewPty>(pageSize), ptyReadBufferSize, eh, maxHistoryLineCount
-        };
-        auto* pty = static_cast<terminal::MockViewPty*>(&vt.device());
-        vt.setMode(terminal::DECMode::AutoWrap, true);
+        size_t const ptyReadBufferSize = 1'000'000;
+        auto maxHistoryLineCount = terminal::LineCount(4000);
+        auto vt = terminal::MockTerm<terminal::MockViewPty>(pageSize, maxHistoryLineCount, ptyReadBufferSize);
+        auto* pty = static_cast<terminal::MockViewPty*>(&vt.terminal.device());
+        vt.terminal.setMode(terminal::DECMode::AutoWrap, true);
 
         auto const rv = baseBenchmark(
-            [&](char const* a, size_t b) {
+            [&](char const* a, size_t b) -> bool {
+                if (pty->isClosed())
+                    return false;
+                // clang-format off
+                // vt.writeToScreen(string_view(a, b));
                 pty->setReadData({ a, b });
-                do
-                    vt.processInputOnce();
-                while (!pty->stdoutBuffer().empty());
+                do vt.terminal.processInputOnce();
+                while (!pty->isClosed() && !pty->stdoutBuffer().empty());
+                // clang-format on
+                return true;
             },
             benchOptionsFor("grid"),
             "terminal with screen buffer");
         if (rv == EXIT_SUCCESS)
-            cout << fmt::format("{:>12}: {}\n\n", "history size", *vt.maxHistoryLineCount());
+            cout << fmt::format("{:>12}: {}\n\n", "history size", *vt.terminal.maxHistoryLineCount());
         return rv;
     }
 
@@ -325,12 +318,12 @@ class ContourHeadlessBench: public crispy::App
         fmt::print("PTY write size         : {}\n", PtyWriteSize);
         fmt::print("PTY read size          : {}\n", PtyReadSize);
         fmt::print("Test time              : {}.{:03} seconds\n", msecs.count() / 1000, msecs.count() % 1000);
-        fmt::print("Data transferred       : {}\n", humanReadableBytes(bytesTransferred));
+        fmt::print("Data transferred       : {}\n", crispy::humanReadableBytes(bytesTransferred));
         fmt::print("Reader loop iterations : {}\n", loopIterations);
         fmt::print("Average size per read  : {}\n",
-                   humanReadableBytes(static_cast<long double>(bytesTransferred)
-                                      / static_cast<long double>(loopIterations)));
-        fmt::print("Transfer speed         : {} per second\n", humanReadableBytes(mbPerSecs));
+                   crispy::humanReadableBytes(static_cast<long double>(bytesTransferred)
+                                              / static_cast<long double>(loopIterations)));
+        fmt::print("Transfer speed         : {} per second\n", crispy::humanReadableBytes(mbPerSecs));
 
         return EXIT_SUCCESS;
     }
@@ -339,9 +332,13 @@ class ContourHeadlessBench: public crispy::App
     {
         auto po = NullParserEvents {};
         auto parser = terminal::parser::Parser { po };
-        return baseBenchmark([&](char const* a, size_t b) { parser.parseFragment(string_view(a, b)); },
-                             benchOptionsFor("parser"),
-                             "Parser only");
+        return baseBenchmark(
+            [&](char const* a, size_t b) -> bool {
+                parser.parseFragment(string_view(a, b));
+                return true;
+            },
+            benchOptionsFor("parser"),
+            "Parser only");
     }
 };
 

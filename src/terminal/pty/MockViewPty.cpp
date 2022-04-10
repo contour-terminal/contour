@@ -41,10 +41,9 @@ optional<string_view> MockViewPty::read(size_t _maxSize, std::chrono::millisecon
 
 optional<string_view> MockViewPty::read(crispy::BufferObject& storage, std::chrono::milliseconds timeout)
 {
-    auto const n = storage.bytesAvailable();
-    auto const result = outputBuffer_.substr(0, n);
+    auto const n = std::min(std::min(outputBuffer_.size(), storage.bytesAvailable()), size_t { 4096 });
+    auto result = storage.writeAtEnd(outputBuffer_.substr(0, n));
     outputBuffer_.remove_prefix(n);
-    storage.writeAtEnd(result);
     return result;
 }
 
