@@ -1711,7 +1711,7 @@ void Screen<Cell>::screenAlignmentPattern()
     // fills the complete screen area with a test pattern
     for (auto& line: grid().mainPage())
     {
-        line.reset(grid().defaultLineFlags(), GraphicsAttributes {}, U'E', 1);
+        line.fill(grid().defaultLineFlags(), GraphicsAttributes {}, U'E', 1);
     }
 }
 

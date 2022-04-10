@@ -142,17 +142,22 @@ class Line
         //     usedColumns_.value = _n;
     }
 
-    void reset(LineFlags _flags,
-               GraphicsAttributes const& _attributes,
-               char32_t _codepoint,
-               uint8_t _width) noexcept
+    void fill(LineFlags _flags,
+              GraphicsAttributes const& _attributes,
+              char32_t _codepoint,
+              uint8_t _width) noexcept
     {
-        flags_ = static_cast<unsigned>(_flags);
-        markUsedFirst(size());
-        for (Cell& cell: buffer_)
+        if (_codepoint == 0)
+            reset(_flags, _attributes);
+        else
         {
-            cell.reset();
-            cell.write(_attributes, _codepoint, _width);
+            flags_ = static_cast<unsigned>(_flags);
+            markUsedFirst(size());
+            for (Cell& cell: editable())
+            {
+                cell.reset();
+                cell.write(_attributes, _codepoint, _width);
+            }
         }
     }
 
