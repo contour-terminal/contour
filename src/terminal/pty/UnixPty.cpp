@@ -47,6 +47,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
+using crispy::BufferObject;
 using std::max;
 using std::min;
 using std::nullopt;
@@ -338,6 +339,14 @@ bool waitForReadable(int _masterFd, int* _pipe, std::chrono::milliseconds timeou
             return false;
         }
     }
+}
+
+optional<std::string_view> UnixPty::read(BufferObject& sink, std::chrono::milliseconds timeout)
+{
+    if (waitForReadable(_masterFd, _pipe.data(), timeout))
+        return readSome(sink.hotEnd(), sink.bytesAvailable());
+
+    return nullopt;
 }
 
 optional<std::string_view> UnixPty::read(size_t size, std::chrono::milliseconds timeout)

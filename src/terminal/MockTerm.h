@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal/Terminal.h>
+#include <terminal/pty/MockPty.h>
 
 #include <unicode/convert.h>
 
@@ -37,8 +38,16 @@ class MockTerm: public Terminal::Events
     decltype(auto) state() noexcept { return terminal.state(); }
     decltype(auto) state() const noexcept { return terminal.state(); }
 
-    void writeToScreen(std::string_view text) { terminal.writeToScreen(text); }
-    void writeToScreen(std::u32string_view text) { terminal.writeToScreen(unicode::convert_to<char>(text)); }
+    MockPty& mockPty() noexcept { return static_cast<MockPty&>(terminal.device()); }
+
+    void writeToScreen(std::string_view text)
+    {
+        mockPty().appendStdOutBuffer(text);
+        while (mockPty().isStdoutDataAvailable())
+            terminal.processInputOnce();
+    }
+
+    void writeToScreen(std::u32string_view text) { writeToScreen(unicode::convert_to<char>(text)); }
 
     std::string windowTitle;
     Terminal terminal;

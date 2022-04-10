@@ -21,6 +21,7 @@
 
 #include <crispy/escape.h>
 #include <crispy/stdfs.h>
+#include <crispy/utils.h>
 
 #include <fmt/chrono.h>
 
@@ -81,7 +82,6 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
                    double _refreshRate,
                    bool _allowReflowOnResize):
     changes_ { 0 },
-    ptyReadBufferSize_ { _ptyReadBufferSize },
     eventListener_ { _eventListener },
     refreshInterval_ { static_cast<long long>(1000.0 / _refreshRate) },
     renderBuffer_ {},
@@ -106,6 +106,8 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
              move(_colorPalette),
              _allowReflowOnResize },
     // clang-format on
+    ptyBufferPool_ { crispy::nextPowerOfTwo(_ptyReadBufferSize) },
+    currentPtyBuffer_ { ptyBufferPool_.allocateBufferObject() },
     primaryScreen_ { state_, ScreenType::Primary, state_.primaryBuffer },
     alternateScreen_ { state_, ScreenType::Alternate, state_.alternateBuffer },
     currentScreen_ { primaryScreen_ },
@@ -145,7 +147,15 @@ bool Terminal::processInputOnce()
                              //: refreshInterval_ : std::chrono::seconds(0)
                              : std::chrono::seconds(30);
 
-    optional<string_view> const bufOpt = pty_->read(ptyReadBufferSize_, timeout);
+    // Request a new Buffer Object if the current one cannot sufficiently
+    // store a single text line.
+    if (currentPtyBuffer_->bytesAvailable() < unbox<size_t>(state_.pageSize.columns))
+    {
+        PtyInLog()("Only {} bytes left in TBO. Allocating new buffer from pool.",
+                   currentPtyBuffer_->bytesAvailable());
+        currentPtyBuffer_ = ptyBufferPool_.allocateBufferObject();
+    }
+    optional<string_view> const bufOpt = pty_->read(*currentPtyBuffer_, timeout);
     if (!bufOpt)
     {
         if (errno != EINTR && errno != EAGAIN)

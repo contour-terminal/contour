@@ -99,6 +99,7 @@ class [[nodiscard]] Process: public Pty
     void close() override { pty().close(); }
     bool isClosed() const noexcept override { return pty().isClosed(); }
     std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override { return pty().read(_size, _timeout); }
+    std::optional<std::string_view> read(crispy::BufferObject& storage, std::chrono::milliseconds timeout) override { return pty().read(storage, timeout); }
     void wakeupReader() override { return pty().wakeupReader(); }
     int write(char const* buf, size_t size) override { return pty().write(buf, size); }
     PageSize pageSize() const noexcept override { return pty().pageSize(); }

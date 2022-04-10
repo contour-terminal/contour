@@ -1,6 +1,7 @@
 #include <terminal/pty/MockPty.h>
 
 using namespace std::chrono;
+using std::nullopt;
 using std::optional;
 using std::string_view;
 
@@ -26,6 +27,14 @@ optional<string_view> MockPty::read(size_t _size, std::chrono::milliseconds)
     auto const result = string_view { outputBuffer_.data() + outputReadOffset_, n };
     outputReadOffset_ += n;
     return result;
+}
+
+optional<string_view> MockPty::read(crispy::BufferObject& storage, std::chrono::milliseconds _timeout)
+{
+    auto const n = std::min(outputBuffer_.size() - outputReadOffset_, storage.bytesAvailable());
+    auto const chunk = string_view { outputBuffer_.data() + outputReadOffset_, n };
+    outputReadOffset_ += n;
+    return storage.writeAtEnd(chunk);
 }
 
 void MockPty::wakeupReader()

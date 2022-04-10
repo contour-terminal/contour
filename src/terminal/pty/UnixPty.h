@@ -63,6 +63,8 @@ class UnixPty: public Pty
     bool isClosed() const noexcept override;
     void wakeupReader() noexcept override;
     std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
+    std::optional<std::string_view> read(crispy::BufferObject& sink,
+                                         std::chrono::milliseconds timeout) override;
     int write(char const* buf, size_t size) override;
     PageSize pageSize() const noexcept override;
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;

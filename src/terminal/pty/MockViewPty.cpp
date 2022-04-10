@@ -39,6 +39,15 @@ optional<string_view> MockViewPty::read(size_t _maxSize, std::chrono::millisecon
     return result;
 }
 
+optional<string_view> MockViewPty::read(crispy::BufferObject& storage, std::chrono::milliseconds timeout)
+{
+    auto const n = storage.bytesAvailable();
+    auto const result = outputBuffer_.substr(0, n);
+    outputBuffer_.remove_prefix(n);
+    storage.writeAtEnd(result);
+    return result;
+}
+
 void MockViewPty::wakeupReader()
 {
     // No-op. as we're a mock-pty.

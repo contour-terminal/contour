@@ -512,6 +512,8 @@ class Terminal
 
     void applyPageSizeToCurrentBuffer();
 
+    crispy::BufferObjectPtr currentPtyBuffer() const noexcept { return currentPtyBuffer_; }
+
   private:
     void mainLoop();
     void refreshRenderBuffer(RenderBuffer& _output); // <- acquires the lock
@@ -525,7 +527,6 @@ class Terminal
     /// Boolean, indicating whether the terminal's screen buffer contains updates to be rendered.
     mutable std::atomic<uint64_t> changes_;
 
-    size_t ptyReadBufferSize_;
     Events& eventListener_;
 
     std::chrono::milliseconds refreshInterval_;
@@ -558,6 +559,8 @@ class Terminal
     LineOffset copyLastMarkRangeOffset_;
 
     TerminalState state_;
+    crispy::BufferObjectPool ptyBufferPool_;
+    crispy::BufferObjectPtr currentPtyBuffer_;
     Screen<Cell> primaryScreen_;
     Screen<Cell> alternateScreen_;
     std::reference_wrapper<ScreenBase> currentScreen_;

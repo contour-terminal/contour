@@ -30,6 +30,8 @@ class MockViewPty: public Pty
 
     PtySlave& slave() noexcept override;
     std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
+    std::optional<std::string_view> read(crispy::BufferObject& storage,
+                                         std::chrono::milliseconds timeout) override;
     void wakeupReader() override;
     int write(char const* buf, size_t size) override;
     PageSize pageSize() const noexcept override;

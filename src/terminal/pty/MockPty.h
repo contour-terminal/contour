@@ -29,6 +29,8 @@ class MockPty: public Pty
 
     PtySlave& slave() noexcept override;
     std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
+    std::optional<std::string_view> read(crispy::BufferObject& storage,
+                                         std::chrono::milliseconds timeout) override;
     void wakeupReader() override;
     int write(char const* buf, size_t size) override;
     PageSize pageSize() const noexcept override;
@@ -38,6 +40,8 @@ class MockPty: public Pty
     bool isClosed() const noexcept override;
 
     std::string& stdinBuffer() noexcept { return inputBuffer_; }
+
+    bool isStdoutDataAvailable() const noexcept { return outputReadOffset_ < outputBuffer_.size(); }
 
     void appendStdOutBuffer(std::string_view _that)
     {
