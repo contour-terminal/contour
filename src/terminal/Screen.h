@@ -67,6 +67,8 @@ class ScreenBase: public SequenceHandler
     virtual void inspect(std::string const& _message, std::ostream& _os) const = 0;
 };
 
+#define LIBTERMINAL_CURRENT_LINE_CACHE 1
+
 /**
  * Terminal Screen.
  *
@@ -331,11 +333,32 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
         return useCellAt(_state.lastCursorPosition.line, _state.lastCursorPosition.column);
     }
 
-    Line<Cell>& currentLine() { return grid().lineAt(_state.cursor.position.line); }
-    Line<Cell> const& currentLine() const { return grid().lineAt(_state.cursor.position.line); }
+    void updateCursorIterator() noexcept
+    {
+#if defined(LIBTERMINAL_CURRENT_LINE_CACHE)
+        _currentLine = &grid().lineAt(_state.cursor.position.line);
+#endif
+    }
 
-    Cell& useCurrentCell() noexcept { return useCellAt(_state.cursor.position); }
-    Cell const& currentCell() const noexcept { return at(_state.cursor.position); }
+    Line<Cell>& currentLine() noexcept
+    {
+#if defined(LIBTERMINAL_CURRENT_LINE_CACHE)
+        return *_currentLine;
+#else
+        return grid().lineAt(_state.cursor.position.line);
+#endif
+    }
+
+    Line<Cell> const& currentLine() const noexcept
+    {
+#if defined(LIBTERMINAL_CURRENT_LINE_CACHE)
+        return *_currentLine;
+#else
+        return grid().lineAt(_state.cursor.position.line);
+#endif
+    }
+
+    Cell& useCurrentCell() noexcept { return currentLine().useCellAt(_state.cursor.position.column); }
 
     /// Gets a reference to the cell relative to screen origin (top left, 1:1).
     Cell& at(LineOffset _line, ColumnOffset _column) noexcept { return grid().useCellAt(_line, _column); }
@@ -468,6 +491,9 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
     TerminalState& _state;
     ScreenType const _screenType;
     Grid<Cell>& _grid;
+#if defined(LIBTERMINAL_CURRENT_LINE_CACHE)
+    Line<Cell>* _currentLine = nullptr;
+#endif
     std::unique_ptr<SixelImageBuilder> sixelImageBuilder_;
 };
 

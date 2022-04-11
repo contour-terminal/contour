@@ -1143,16 +1143,10 @@ void Terminal::clearScreen()
 
 void Terminal::moveCursorTo(LineOffset _line, ColumnOffset _column)
 {
-    auto const [line, column] = [&]() {
-        if (!state_.cursor.originMode)
-            return pair { _line, _column };
-        else
-            return pair { _line + state_.margin.vertical.from, _column + state_.margin.horizontal.from };
-    }();
-
-    state_.wrapPending = false;
-    state_.cursor.position.line = clampedLine(line);
-    state_.cursor.position.column = clampedColumn(column);
+    if (isPrimaryScreen())
+        primaryScreen_.moveCursorTo(_line, _column);
+    else
+        alternateScreen_.moveCursorTo(_line, _column);
 }
 
 void Terminal::saveCursor()
@@ -1175,6 +1169,10 @@ void Terminal::restoreCursor(Cursor const& _savedCursor)
     state_.wrapPending = false;
     state_.cursor = _savedCursor;
     state_.cursor.position = clampCoordinate(_savedCursor.position);
+    if (isPrimaryScreen())
+        primaryScreen_.updateCursorIterator();
+    else
+        alternateScreen_.updateCursorIterator();
     verifyState();
 }
 
@@ -1312,6 +1310,11 @@ void Terminal::hardReset()
 
     state_.colorPalette = state_.defaultColorPalette;
 
+    if (isPrimaryScreen())
+        primaryScreen_.updateCursorIterator();
+    else
+        alternateScreen_.updateCursorIterator();
+
     primaryScreen_.verifyState();
 
     state_.inputGenerator.reset();
@@ -1367,6 +1370,10 @@ void Terminal::applyPageSizeToCurrentBuffer()
     // update (last-)cursor position
     state_.cursor.position = cursorPosition;
     state_.lastCursorPosition = cursorPosition;
+    if (isPrimaryScreen())
+        primaryScreen_.updateCursorIterator();
+    else
+        alternateScreen_.updateCursorIterator();
 
     // truncating tabs
     while (!state_.tabs.empty() && state_.tabs.back() >= unbox<ColumnOffset>(state_.pageSize.columns))

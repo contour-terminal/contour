@@ -422,6 +422,7 @@ template <typename Cell>
 Screen<Cell>::Screen(TerminalState& terminalState, ScreenType screenType, Grid<Cell>& grid):
     _terminal { terminalState.terminal }, _state { terminalState }, _screenType { screenType }, _grid { grid }
 {
+    updateCursorIterator();
 }
 
 template <typename Cell>
@@ -654,9 +655,9 @@ void Screen<Cell>::writeCharToCurrentAndAdvance(char32_t _character) noexcept
 }
 
 template <typename Cell>
-void Screen<Cell>::clearAndAdvance(int _offset) noexcept
+void Screen<Cell>::clearAndAdvance(int _graphemeClusterWidth) noexcept
 {
-    if (_offset == 0)
+    if (_graphemeClusterWidth == 0)
         return;
 
     bool const cursorInsideMargin =
@@ -664,14 +665,16 @@ void Screen<Cell>::clearAndAdvance(int _offset) noexcept
     auto const cellsAvailable = cursorInsideMargin
                                     ? *(_state.margin.horizontal.to - _state.cursor.position.column) - 1
                                     : *_state.pageSize.columns - *_state.cursor.position.column - 1;
-    auto const n = min(_offset, cellsAvailable);
+    auto const n = min(_graphemeClusterWidth, cellsAvailable);
 
-    if (n == _offset)
+    if (n == _graphemeClusterWidth)
     {
         _state.cursor.position.column++;
-        for (int i = 1; i < n; ++i)
+        auto& line = currentLine();
+        for (int i = 1; i < n; ++i) // XXX It's not even clear if other TEs are doing that, too.
         {
-            useCurrentCell().reset(_state.cursor.graphicsRendition, _state.cursor.hyperlink);
+            line.useCellAt(_state.cursor.position.column)
+                .reset(_state.cursor.graphicsRendition, _state.cursor.hyperlink);
             _state.cursor.position.column++;
         }
     }
@@ -806,8 +809,8 @@ void Screen<Cell>::moveCursorTo(LineOffset _line, ColumnOffset _column)
     }();
 
     _state.wrapPending = false;
-    _state.cursor.position.line = clampedLine(line);
-    _state.cursor.position.column = clampedColumn(column);
+    _state.cursor.position = clampToScreen({ line, column });
+    updateCursorIterator();
 }
 
 template <typename Cell>
@@ -834,6 +837,7 @@ void Screen<Cell>::linefeed(ColumnOffset _newColumn)
         // moveCursorTo({logicalCursorPosition().line + 1, _state.margin.horizontal.from});
         _state.cursor.position.line++;
     }
+    updateCursorIterator();
 }
 
 template <typename Cell>
@@ -1126,6 +1130,7 @@ void Screen<Cell>::insertLines(LineCount _n)
         scrollDown(_n,
                    Margin { Margin::Vertical { _state.cursor.position.line, _state.margin.vertical.to },
                             _state.margin.horizontal });
+        updateCursorIterator();
     }
 }
 
@@ -1229,6 +1234,7 @@ void Screen<Cell>::deleteLines(LineCount _n)
         scrollUp(_n,
                  Margin { Margin::Vertical { _state.cursor.position.line, _state.margin.vertical.to },
                           _state.margin.horizontal });
+        updateCursorIterator();
     }
 }
 
@@ -1317,6 +1323,7 @@ void Screen<Cell>::moveCursorUp(LineCount _n)
                            : logicalCursorPosition().line);
 
     _state.cursor.position.line -= n;
+    updateCursorIterator();
 }
 
 template <typename Cell>
@@ -1330,6 +1337,7 @@ void Screen<Cell>::moveCursorDown(LineCount _n)
                            : (boxed_cast<LineOffset>(_state.pageSize.lines) - 1) - currentLineNumber);
 
     _state.cursor.position.line += n;
+    updateCursorIterator();
 }
 
 template <typename Cell>

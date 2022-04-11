@@ -2220,7 +2220,7 @@ TEST_CASE("CursorNextLine", "[screen]")
         mock.terminal.setTopBottomMargin(LineOffset { 1 }, LineOffset { 3 });
         mock.terminal.setMode(DECMode::Origin, true);
         screen.moveCursorTo(LineOffset { 0 }, ColumnOffset { 1 });
-        REQUIRE(screen.currentCell().toUtf8() == "8");
+        REQUIRE(screen.useCurrentCell().toUtf8() == "8");
 
         SECTION("normal-1")
         {
