@@ -427,4 +427,21 @@ constexpr uint32_t nextPowerOfTwo(uint32_t v) noexcept
     return v;
 }
 
+inline std::string humanReadableBytes(long double bytes)
+{
+    if (bytes <= 1024.0)
+        return fmt::format("{} bytes", unsigned(bytes));
+
+    auto const kb = bytes / 1024.0;
+    if (kb <= 1024.0)
+        return fmt::format("{:.03} KB", kb);
+
+    auto const mb = kb / 1024.0;
+    if (mb <= 1024.0)
+        return fmt::format("{:.03} MB", mb);
+
+    auto const gb = mb / 1024.0;
+    return fmt::format("{:.03} GB", gb);
+}
+
 } // namespace crispy
