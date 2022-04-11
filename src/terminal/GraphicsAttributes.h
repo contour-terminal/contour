@@ -15,6 +15,7 @@
 
 #include <terminal/CellFlags.h>
 #include <terminal/Color.h>
+#include <type_traits>
 
 #include <utility>
 
@@ -29,6 +30,8 @@ struct GraphicsAttributes
     Color underlineColor { DefaultColor() };
     CellFlags styles {};
 };
+
+static_assert(std::is_trivially_copy_assignable_v<GraphicsAttributes>);
 
 constexpr bool operator==(GraphicsAttributes const& a, GraphicsAttributes const& b) noexcept
 {
