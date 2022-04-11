@@ -57,6 +57,12 @@ struct TriviallyStyledLineBuffer
     GraphicsAttributes attributes;
     crispy::BufferFragment text {};
     HyperlinkId hyperlink {};
+
+    void reset(GraphicsAttributes _attributes) noexcept
+    {
+        attributes = _attributes;
+        text.reset();
+    }
 };
 
 template <typename Cell>
@@ -115,7 +121,10 @@ class Line
     void reset(LineFlags _flags, GraphicsAttributes _attributes) noexcept
     {
         flags_ = static_cast<unsigned>(_flags);
-        setBuffer(TrivialBuffer { size(), _attributes });
+        if (isTrivialBuffer())
+            trivialBuffer().reset(_attributes);
+        else
+            setBuffer(TrivialBuffer { size(), _attributes });
     }
 
     void fill(LineFlags _flags,
@@ -282,7 +291,7 @@ class Line
     bool isTrivialBuffer() const noexcept { return std::holds_alternative<TrivialBuffer>(storage_); }
     bool isInflatedBuffer() const noexcept { return std::holds_alternative<TrivialBuffer>(storage_); }
 
-    void setBuffer(TrivialBuffer const& buffer) { storage_ = buffer; }
+    void setBuffer(TrivialBuffer const& buffer) noexcept { storage_ = buffer; }
     void setBuffer(InflatedBuffer buffer) { storage_ = std::move(buffer); }
 
     void reset(GraphicsAttributes attributes, HyperlinkId hyperlink, crispy::BufferFragment text)
