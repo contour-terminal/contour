@@ -452,20 +452,28 @@ void Screen<Cell>::fail(std::string const& _message) const
 }
 
 template <typename Cell>
-string_view Screen<Cell>::tryEmplaceContinuousChars(string_view chars) noexcept
+string_view Screen<Cell>::tryEmplaceContinuousChars(string_view _chars) noexcept
 {
-    //     // while (chars.size())
-    //     // {
-    //     //     Line<Cell>& line = currentLine();
-    //     //     if (!line.isTrivialBuffer())
-    //     //         break;
-    //     //     auto columnsAvailable = pageSize().columns.value - _state.cursor.position.column.value;
-    //     //
-    //     //     chars.remove_prefix(columnsAvailable);
-    //     //     linefeed();
-    //     // }
-    //
-    return chars;
+    while (!_chars.empty())
+    {
+        linefeed();
+        if (!currentLine().empty())
+            break;
+
+        auto columnsAvailable = pageSize().columns.value - _state.cursor.position.column.value;
+        auto const charsToWrite = min(columnsAvailable, static_cast<int>(_chars.size()));
+
+        currentLine().reset(_state.cursor.graphicsRendition,
+                            _state.cursor.hyperlink,
+                            crispy::BufferFragment {
+                                _terminal.currentPtyBuffer(),
+                                _chars.substr(0, charsToWrite),
+                            });
+        advanceCursorAfterWrite(ColumnCount(charsToWrite));
+        _chars.remove_prefix(charsToWrite);
+    }
+
+    return _chars;
 }
 
 template <typename Cell>
@@ -486,27 +494,13 @@ void Screen<Cell>::advanceCursorAfterWrite(ColumnCount n) noexcept
 template <typename Cell>
 string_view Screen<Cell>::tryEmplaceChars(string_view _chars) noexcept
 {
-    // XXX
-    // Case B) AutoWrap disabled
-    //   1. write (charsLeft - 1) chars, then last char of range
-    // Case A) AutoWrap enabled
-    //   n. get number of cells from cursor to the right.
-    //   1. write charsCount chars
-    //   2. reset remaining columns in last line with cursor.SGR
-    //   3. scroll up accordingly
-    //   4. udpate cursor position
-    //   5. if line is wrappable, then update consecutive line flags with Wrapped
-
-    // - at line-beginning -> force trivial line buffer
-    //   - more lines to write?
-    // - is trivial line buffer -> append to existing
-    //   - more lines to write?
-
     // if constexpr (!Line<Cell>::Optimized) // TODO(pr) enable me
     //     return false;
 
     if (!_terminal.isFullHorizontalMargins())
         return _chars;
+
+    linefeedIfWrapPending();
 
     if (!_terminal.isModeEnabled(DECMode::AutoWrap))
         return _chars; // TODO(pr): An actually effecient implementation.
@@ -525,8 +519,8 @@ string_view Screen<Cell>::tryEmplaceChars(string_view _chars) noexcept
                                 });
             advanceCursorAfterWrite(ColumnCount(charsToWrite));
             _chars.remove_prefix(charsToWrite);
-            // TODO(pr): efficiently write remaining `_chars`.
-            _terminal.currentPtyBuffer()->advanceHotEndUntil(_chars.end());
+            _chars = tryEmplaceContinuousChars(_chars);
+            _terminal.currentPtyBuffer()->advanceHotEndUntil(_chars.begin());
             return _chars;
         }
         return _chars;
@@ -542,198 +536,18 @@ string_view Screen<Cell>::tryEmplaceChars(string_view _chars) noexcept
         currentLine().trivialBuffer().text.growBy(charsToWrite);
         advanceCursorAfterWrite(ColumnCount(charsToWrite));
         _chars.remove_prefix(charsToWrite);
+        _chars = tryEmplaceContinuousChars(_chars);
         _terminal.currentPtyBuffer()->advanceHotEndUntil(_chars.begin());
-
-        while (!_chars.empty())
-        {
-            linefeed();
-            assert(_state.cursor.position.column.value == 0);
-            if (!currentLine().empty())
-                break;
-
-            auto columnsAvailable = pageSize().columns.value - _state.cursor.position.column.value;
-            auto const charsToWrite = min(columnsAvailable, static_cast<int>(_chars.size()));
-
-            currentLine().reset(_state.cursor.graphicsRendition,
-                                _state.cursor.hyperlink,
-                                crispy::BufferFragment {
-                                    _terminal.currentPtyBuffer(),
-                                    _chars.substr(0, charsToWrite),
-                                });
-            advanceCursorAfterWrite(ColumnCount(charsToWrite));
-            _chars.remove_prefix(charsToWrite);
-        }
-
-        _terminal.currentPtyBuffer()->advanceHotEndUntil(_chars.end());
         return _chars;
     }
 
     return _chars;
-
-#if 0
-    auto charsLeft = _chars.size();
-    while (!_chars.empty())
-    {
-    }
-
-    Line<Cell>& line = currentLine();
-    if (line.isTrivialBuffer())
-    {
-        auto const columnsAvailable = pageSize().columns.value - _state.cursor.position.column.value;
-        auto const charsToWrite = min(columnsAvailable, static_cast<int>(_chars.size()));
-        line.trivialBuffer().text.growBy(charsToWrite);
-        auto charsLeft = static_cast<int>(_chars.size()) - charsToWrite;
-        bool const lineWrappable = line.wrappable();
-        crispy::BufferObjectPtr ptyBufferObject = _terminal.currentPtyBuffer();
-        _chars.remove_prefix(charsToWrite);
-        while (charsLeft > 0)
-        {
-            auto const charsToWrite = min(_state.pageSize.columns.value, charsLeft);
-            linefeed();
-            Line<Cell>& continuationLine = currentLine();
-            continuationLine.reset(
-                _state.cursor.graphicsRendition,
-                _state.cursor.hyperlink,
-                crispy::BufferFragment { ptyBufferObject, _chars.substr(0, charsToWrite) });
-            _terminal.currentPtyBuffer()->advanceHotEndUntil(_chars.data() + charsToWrite);
-            _chars.remove_prefix(charsToWrite);
-            charsLeft -= charsToWrite;
-            if (lineWrappable)
-                continuationLine.setFlag(LineFlags::Wrappable | LineFlags::Wrapped, true);
-        }
-    }
-#endif
-
-#if defined(LIBTERMINAL_BULK_TEXT_OPTIMIZATION)
-    if (_state.margin == _state.pageSize)
-    {
-    #if defined(LIBTERMINAL_LOG_TRACE)
-        if (VTParserTraceLog)
-            VTParserTraceLog()("text: \"{}\"", _chars);
-    #endif
-
-        // TODO: make sure handle the grapheme cluster case?
-        // auto const lastChar = _state.sequencer.precedingGraphicCharacter();
-        // auto const isAsciiBreakable = lastChar < 128 && _chars.front() < 128; // NB: This is an
-        // optimization for US-ASCII text versus grapheme cluster segmentation.
-
-        auto constexpr ASCII_Width = 1;
-        if (_terminal.isModeEnabled(DECMode::AutoWrap))
-        {
-            // Case A)
-            if (_state.wrapPending)
-                linefeed();
-
-            auto const marginColumnCount = _state.margin.horizontal.length();
-            auto const writeCharsToLine =
-                [this, ASCII_Width, marginColumnCount](
-                    string_view text, LineOffset lineOffset, ColumnOffset columnOffset) noexcept -> size_t {
-                // fmt::print("writeCharsToLine({}:{}): \"{}\"\n", lineOffset, columnOffset, text);
-                auto const columnsAvailable = marginColumnCount - *columnOffset;
-                auto const cutoff = std::min(columnsAvailable.as<size_t>(), text.size());
-                auto const charsToWrite = text.substr(0, cutoff);
-                Line<Cell>& line = grid().lineAt(lineOffset);
-                line.fill(columnOffset, _state.cursor.graphicsRendition, charsToWrite);
-                return cutoff;
-            };
-
-            if (*_state.cursor.position.column + static_cast<int>(_chars.size()) < *marginColumnCount)
-            {
-                // fill line partially
-                writeCharsToLine(_chars, _state.cursor.position.line, _state.cursor.position.column);
-                _state.cursor.position.column += ColumnOffset::cast_from(_chars.size());
-            }
-            else if ((_state.cursor.position.column + static_cast<int>(_chars.size())).as<ColumnCount>()
-                     == marginColumnCount)
-            {
-                // fill line up to the right margin
-                writeCharsToLine(_chars, _state.cursor.position.line, _state.cursor.position.column);
-                _state.cursor.position.column = boxed_cast<ColumnOffset>(marginColumnCount - 1);
-                _state.wrapPending = true;
-            }
-            else
-            {
-                // fill more than one line
-
-                // TODO: Ensure Wrappable|Wrapped line flag is set accordingly.
-                auto const n =
-                    writeCharsToLine(_chars, _state.cursor.position.line, _state.cursor.position.column);
-                _chars.remove_prefix(n);
-
-                bool const lineWrappable = currentLine().wrappable();
-                linefeed(_state.margin.horizontal.from);
-                currentLine().setFlag(LineFlags::Wrappable | LineFlags::Wrapped, lineWrappable);
-
-                if (!_chars.empty())
-                {
-                    // middle lines
-                    while (_chars.size() > marginColumnCount.as<size_t>())
-                    {
-                        writeCharsToLine(_chars, _state.cursor.position.line, ColumnOffset(0));
-                        _chars.remove_prefix(marginColumnCount.as<size_t>());
-                        linefeed(_state.margin.horizontal.from);
-                        currentLine().setFlag(LineFlags::Wrappable | LineFlags::Wrapped, lineWrappable);
-                    }
-
-                    // tail line
-                    writeCharsToLine(_chars, _state.cursor.position.line, ColumnOffset(0));
-                }
-
-                if (_chars.size() == marginColumnCount.as<size_t>())
-                {
-                    _state.wrapPending = true;
-                    _state.cursor.position.column = marginColumnCount.as<ColumnOffset>() - 1;
-                }
-                else
-                {
-                    _state.cursor.position.column = ColumnOffset::cast_from(_chars.size());
-                    // reset remaining columns in last line with cursor.SGR
-                    Line<Cell>& line = grid().lineAt(_state.cursor.position.line);
-                    line.fill(_state.cursor.position.column, _state.cursor.graphicsRendition, {});
-                }
-            }
-        }
-        else
-        {
-            // Case B - AutoWrap disabled
-            auto const topLineColumnsAvailable =
-                _state.pageSize.columns - _state.cursor.position.column.as<ColumnCount>();
-            char const* s = _chars.data();
-            auto const n = min(_chars.size(), topLineColumnsAvailable.as<size_t>());
-            auto const* e = s + n;
-            auto t = &useCurrentCell();
-            for (; s != e; s++, t++)
-                t->write(_state.cursor.graphicsRendition,
-                         static_cast<char32_t>(*s),
-                         ASCII_Width,
-                         _state.cursor.hyperlink);
-            if (s + 1 != e)
-                (t - 1)->setCharacter(_chars.back(), 1);
-            _state.cursor.position.column = min(_state.cursor.position.column + ColumnOffset::cast_from(n),
-                                                _state.pageSize.columns.as<ColumnOffset>() - 1);
-        }
-
-        // TODO: Call this but with range range of point.
-        // markCellDirty(oldCursorPos, newCursorPos);
-        // XXX: But even if we keep it but enable the setReportDamage(bool),
-        //      then this should still be cheap as it's only invoked when something
-        //      is actually selected.
-        // _terminal.markRegionDirty(
-        //     _state.cursor.position.line,
-        //     _state.cursor.position.column
-        // );
-
-        _state.sequencer.resetInstructionCounter();
-        return;
-    }
-#endif
 }
 
 template <typename Cell>
 void Screen<Cell>::writeText(string_view _chars)
 {
 #if defined(LIBTERMINAL_PTY_BUFFER_OBJECTS)
-    linefeedIfWrapPending();
     _chars = tryEmplaceChars(_chars);
     if (_chars.empty())
         return;
