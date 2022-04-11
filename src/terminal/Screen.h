@@ -154,16 +154,17 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
     void backIndex();    // DECBI
     void forwardIndex(); // DECFI
 
-    void moveCursorBackward(ColumnCount _n);  // CUB
-    void moveCursorDown(LineCount _n);        // CUD
-    void moveCursorForward(ColumnCount _n);   // CUF
-    void moveCursorToBeginOfLine();           // CR
-    void moveCursorToColumn(ColumnOffset _n); // CHA
-    void moveCursorToLine(LineOffset _n);     // VPA
-    void moveCursorToNextLine(LineCount _n);  // CNL
-    void moveCursorToNextTab();               // HT
-    void moveCursorToPrevLine(LineCount _n);  // CPL
-    void moveCursorUp(LineCount _n);          // CUU
+    void moveCursorTo(LineOffset line, ColumnOffset column); // CUP
+    void moveCursorBackward(ColumnCount _n);                 // CUB
+    void moveCursorDown(LineCount _n);                       // CUD
+    void moveCursorForward(ColumnCount _n);                  // CUF
+    void moveCursorToBeginOfLine();                          // CR
+    void moveCursorToColumn(ColumnOffset _n);                // CHA
+    void moveCursorToLine(LineOffset _n);                    // VPA
+    void moveCursorToNextLine(LineCount _n);                 // CNL
+    void moveCursorToNextTab();                              // HT
+    void moveCursorToPrevLine(LineCount _n);                 // CPL
+    void moveCursorUp(LineCount _n);                         // CUU
 
     void cursorBackwardTab(TabStopCount _n);            // CBT
     void cursorForwardTab(TabStopCount _n);             // CHT
@@ -335,8 +336,6 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
 
     Cell& useCurrentCell() noexcept { return useCellAt(_state.cursor.position); }
     Cell const& currentCell() const noexcept { return at(_state.cursor.position); }
-
-    void moveCursorTo(LineOffset line, ColumnOffset column);
 
     /// Gets a reference to the cell relative to screen origin (top left, 1:1).
     Cell& at(LineOffset _line, ColumnOffset _column) noexcept { return grid().useCellAt(_line, _column); }

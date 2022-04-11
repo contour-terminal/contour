@@ -603,7 +603,8 @@ void Screen<Cell>::writeText(char32_t _char)
 template <typename Cell>
 void Screen<Cell>::writeCharToCurrentAndAdvance(char32_t _character) noexcept
 {
-    Line<Cell>& line = grid().lineAt(_state.cursor.position.line);
+    Line<Cell>& line = currentLine();
+
     Cell& cell = line.useCellAt(_state.cursor.position.column);
 
 #if defined(LINE_AVOID_CELL_RESET)
@@ -1013,7 +1014,7 @@ void Screen<Cell>::eraseCharacters(ColumnCount _n)
         _state.pageSize.columns - boxed_cast<ColumnCount>(realCursorPosition().column);
     auto const n = unbox<long>(clamp(_n, ColumnCount(1), columnsAvailable));
 
-    auto& line = grid().lineAt(_state.cursor.position.line);
+    auto& line = currentLine();
     for (int i = 0; i < n; ++i)
         line.useCellAt(_state.cursor.position.column + i).reset(_state.cursor.graphicsRendition);
 }
@@ -1021,6 +1022,12 @@ void Screen<Cell>::eraseCharacters(ColumnCount _n)
 template <typename Cell>
 void Screen<Cell>::clearToEndOfLine()
 {
+    if (_terminal.isFullHorizontalMargins() && _state.cursor.position.column.value == 0)
+    {
+        currentLine().reset(grid().defaultLineFlags(), _state.cursor.graphicsRendition);
+        return;
+    }
+
     Cell* i = &at(_state.cursor.position);
     Cell* e = i + unbox<int>(_state.pageSize.columns) - unbox<int>(_state.cursor.position.column);
     while (i != e)
