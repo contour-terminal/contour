@@ -133,9 +133,8 @@ InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input)
     auto lastChar = char32_t { 0 };
     auto utf8DecoderState = unicode::utf8_decoder_state {};
 
-    for (size_t i = 0; i < input.text.size(); ++i)
+    for (char const ch: input.text.view())
     {
-        char ch = input.text[i];
         unicode::ConvertResult const r = unicode::from_utf8(utf8DecoderState, ch);
         if (holds_alternative<unicode::Incomplete>(r))
             continue;
