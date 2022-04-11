@@ -82,6 +82,11 @@ namespace
         // special characters
         tio.c_cc[VMIN] = 1;  // Report as soon as 1 character is available.
         tio.c_cc[VTIME] = 0; // Disable timeout (no need).
+        tio.c_iflag &= ~ISTRIP; // Disable stripping 8th bit off the bytes.
+        // tio.c_iflag &= ~INLCR;  // Disable NL-to-CR mapping
+        // tio.c_iflag &= ~ICRNL;  // Disable CR-to-NL mapping
+        // tio.c_iflag &= ~IXON;   // Disable control flow
+        // tio.c_iflag &= ~BRKINT; // disable signal-break handling
 
         return tio;
     }
