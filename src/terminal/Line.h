@@ -101,20 +101,13 @@ class Line
     using reverse_iterator = typename InflatedBuffer::reverse_iterator;
     using const_iterator = typename InflatedBuffer::const_iterator;
 
-    Line(ColumnCount _width, LineFlags _flags, GraphicsAttributes _templateSGR):
-        storage_ { InflatedBuffer { _width.as<size_t>(), Cell { _templateSGR } /*, _allocator*/ } },
-        flags_ { static_cast<unsigned>(_flags) }
+    Line(LineFlags _flags, ColumnCount _width, GraphicsAttributes _templateSGR):
+        storage_ { TrivialBuffer { _width, _templateSGR } }, flags_ { static_cast<unsigned>(_flags) }
     {
     }
 
-    Line(ColumnCount _width, InflatedBuffer _buffer, LineFlags _flags):
-        storage_ { InflatedBuffer { std::move(_buffer) } }, flags_ { static_cast<unsigned>(_flags) }
-    {
-        inflatedBuffer().resize(unbox<size_t>(_width));
-    }
-
-    Line(InflatedBuffer _buffer, LineFlags _flags):
-        storage_ { InflatedBuffer { std::move(_buffer) } }, flags_ { static_cast<unsigned>(_flags) }
+    Line(LineFlags _flags, InflatedBuffer _buffer):
+        storage_ { std::move(_buffer) }, flags_ { static_cast<unsigned>(_flags) }
     {
     }
 
