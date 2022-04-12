@@ -81,8 +81,8 @@ namespace
 #endif
 
         // special characters
-        tio.c_cc[VMIN] = 1;  // Report as soon as 1 character is available.
-        tio.c_cc[VTIME] = 0; // Disable timeout (no need).
+        tio.c_cc[VMIN] = 1;     // Report as soon as 1 character is available.
+        tio.c_cc[VTIME] = 0;    // Disable timeout (no need).
         tio.c_iflag &= ~ISTRIP; // Disable stripping 8th bit off the bytes.
         // tio.c_iflag &= ~INLCR;  // Disable NL-to-CR mapping
         // tio.c_iflag &= ~ICRNL;  // Disable CR-to-NL mapping
@@ -109,6 +109,12 @@ namespace
             ::close(*fd);
             *fd = -1;
         }
+    }
+
+    void saveDup2(int a, int b)
+    {
+        while (dup2(a, b) == -1 && (errno == EBUSY || errno == EINTR))
+            ;
     }
 
     UnixPty::PtyHandles createUnixPty(PageSize const& _windowSize, optional<ImageSize> _pixels)
@@ -178,7 +184,28 @@ bool UnixPty::Slave::login()
     if (!configure())
         return false;
 
-    return login_tty(_slaveFd) == 0;
+    // This is doing what login_tty() is doing, too.
+    // But doing it ourselfs allows for a little more flexibility.
+    // return login_tty(_slaveFd) == 0;
+
+    setsid();
+
+#if defined(TIOCSCTTY)
+    if (ioctl(_slaveFd, TIOCSCTTY, nullptr) == -1)
+        return false;
+#endif
+
+    for (int const fd: { 0, 1, 2 })
+    {
+        if (_slaveFd != fd)
+            ::close(fd);
+        saveDup2(_slaveFd, fd);
+    }
+
+    if (_slaveFd > 2)
+        saveClose(&_slaveFd);
+
+    return true;
 }
 
 int UnixPty::Slave::write(std::string_view text) noexcept
@@ -258,9 +285,9 @@ void UnixPty::wakeupReader() noexcept
     (void) rv;
 }
 
-optional<string_view> UnixPty::readSome(char* target, size_t n) noexcept
+optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
 {
-    auto const rv = static_cast<int>(::read(_masterFd, target, n));
+    auto const rv = static_cast<int>(::read(fd, target, n));
     if (rv < 0)
         return nullopt;
 
@@ -270,14 +297,14 @@ optional<string_view> UnixPty::readSome(char* target, size_t n) noexcept
     return string_view { target, static_cast<size_t>(rv) };
 }
 
-bool waitForReadable(int _masterFd, int* _pipe, std::chrono::milliseconds timeout) noexcept
+int waitForReadable(int ptyMaster, int wakeupPipe, std::chrono::milliseconds timeout) noexcept
 {
-    if (_masterFd < 0)
+    if (ptyMaster < 0)
     {
         if (PtyInLog)
             PtyInLog()("read() called with closed PTY master.");
         errno = ENODEV;
-        return false;
+        return -1;
     }
 
     auto tv = timeval {};
@@ -290,10 +317,10 @@ bool waitForReadable(int _masterFd, int* _pipe, std::chrono::milliseconds timeou
         FD_ZERO(&rfd);
         FD_ZERO(&wfd);
         FD_ZERO(&efd);
-        if (_masterFd != -1)
-            FD_SET(_masterFd, &rfd);
-        FD_SET(_pipe[0], &rfd);
-        auto const nfds = 1 + max(_masterFd, _pipe[0]);
+        if (ptyMaster != -1)
+            FD_SET(ptyMaster, &rfd);
+        FD_SET(wakeupPipe, &rfd);
+        auto const nfds = 1 + max(ptyMaster, wakeupPipe);
 
         int rv = select(nfds, &rfd, &wfd, &efd, &tv);
         if (rv == 0)
@@ -301,58 +328,58 @@ bool waitForReadable(int _masterFd, int* _pipe, std::chrono::milliseconds timeou
             // (Let's not be too verbose here.)
             // PtyInLog()("PTY read() timed out.");
             errno = EAGAIN;
-            return false;
+            return -1;
         }
 
-        if (_masterFd < 0)
+        if (ptyMaster < 0)
         {
             errno = ENODEV;
-            return false;
+            return -1;
         }
 
         if (rv < 0)
         {
             PtyInLog()("PTY read() failed. {}", strerror(errno));
-            return false;
+            return -1;
         }
 
         bool piped = false;
-        if (FD_ISSET(_pipe[0], &rfd))
+        if (FD_ISSET(wakeupPipe, &rfd))
         {
             piped = true;
             int n = 0;
             for (bool done = false; !done;)
             {
                 char dummy[256];
-                rv = static_cast<int>(::read(_pipe[0], dummy, sizeof(dummy)));
+                rv = static_cast<int>(::read(wakeupPipe, dummy, sizeof(dummy)));
                 done = rv > 0;
                 n += max(rv, 0);
             }
         }
 
-        if (FD_ISSET(_masterFd, &rfd))
-            return true;
+        if (FD_ISSET(ptyMaster, &rfd))
+            return ptyMaster;
 
         if (piped)
         {
             errno = EINTR;
-            return false;
+            return -1;
         }
     }
 }
 
 optional<std::string_view> UnixPty::read(BufferObject& sink, std::chrono::milliseconds timeout)
 {
-    if (waitForReadable(_masterFd, _pipe.data(), timeout))
-        return readSome(sink.hotEnd(), sink.bytesAvailable());
+    if (int fd = waitForReadable(_masterFd, _pipe[0], timeout); fd != -1)
+        return readSome(fd, sink.hotEnd(), min(size_t { 8192 }, sink.bytesAvailable()));
 
     return nullopt;
 }
 
 optional<std::string_view> UnixPty::read(size_t size, std::chrono::milliseconds timeout)
 {
-    if (waitForReadable(_masterFd, _pipe.data(), timeout))
-        return readSome(_buffer.data(), min(size, _buffer.size()));
+    if (int fd = waitForReadable(_masterFd, _pipe[0], timeout); fd != -1)
+        return readSome(fd, _buffer.data(), min(size, _buffer.size()));
     return nullopt;
 }
 

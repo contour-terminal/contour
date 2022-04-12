@@ -70,7 +70,7 @@ class UnixPty: public Pty
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;
 
   private:
-    std::optional<std::string_view> readSome(char* target, size_t n) noexcept;
+    std::optional<std::string_view> readSome(int fd, char* target, size_t n) noexcept;
 
     int _masterFd;
     std::array<int, 2> _pipe;
