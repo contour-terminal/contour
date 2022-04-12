@@ -99,7 +99,13 @@ template <typename Cell, bool Optimize>
 std::string Line<Cell, Optimize>::toUtf8() const
 {
     if (isTrivialBuffer())
-        return std::string(trivialBuffer().text.data(), trivialBuffer().text.size());
+    {
+        auto const& lineBuffer = trivialBuffer();
+        auto str = std::string(lineBuffer.text.data(), lineBuffer.text.size());
+        for (size_t i = str.size(); i < unbox<size_t>(lineBuffer.displayWidth); ++i)
+            str += ' ';
+        return str;
+    }
 
     std::string str;
     for (Cell const& cell: inflatedBuffer())
@@ -148,6 +154,7 @@ InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input)
         if (!lastChar || isAsciiBreakable || unicode::grapheme_segmenter::breakable(lastChar, nextChar))
         {
             columns.emplace_back(Cell {});
+            columns.back().setHyperlink(input.hyperlink);
             columns.back().write(input.attributes, nextChar, static_cast<uint8_t>(unicode::width(nextChar)));
         }
         else
@@ -159,7 +166,10 @@ InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input)
                 auto const cellsAvailable = *input.displayWidth - static_cast<int>(columns.size()) + 1;
                 auto const n = min(extendedWidth, cellsAvailable);
                 for (int i = 1; i < n; ++i)
+                {
                     columns.emplace_back(Cell { input.attributes });
+                    columns.back().setHyperlink(input.hyperlink);
+                }
             }
         }
     }

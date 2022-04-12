@@ -230,7 +230,7 @@ namespace // {{{ helper
             write(string_view(buf, static_cast<size_t>(count)));
         }
 
-        void write(std::string_view const& _s)
+        void write(std::string_view _s)
         {
             flush();
             writer_(_s.data(), _s.size());
@@ -693,25 +693,37 @@ std::string Screen<Cell>::screenshot(function<string(LineOffset)> const& _postLi
     // for (int const line: ranges::views::iota(-unbox<int>(historyLineCount()), *_state.pageSize.lines))
     for (int const line: ranges::views::iota(0, *_state.pageSize.lines))
     {
-        for (int const col: ranges::views::iota(0, *_state.pageSize.columns))
+        Line<Cell> const& lineRef = grid().lineAt(LineOffset(line));
+        if (lineRef.isTrivialBuffer())
         {
-            Cell const& cell = at(LineOffset(line), ColumnOffset(col));
-
-            if (cell.styles() & CellFlags::Bold)
-                writer.sgr_add(GraphicsRendition::Bold);
-            else
-                writer.sgr_add(GraphicsRendition::Normal);
-
-            // TODO: other styles (such as underline, ...)?
-
-            writer.setForegroundColor(cell.foregroundColor());
-            writer.setBackgroundColor(cell.backgroundColor());
-
-            if (!cell.codepointCount())
-                writer.write(U' ');
-            else
-                writer.write(cell.toUtf8());
+            TriviallyStyledLineBuffer const& lineBuffer = lineRef.trivialBuffer();
+            writer.setForegroundColor(lineBuffer.attributes.foregroundColor);
+            writer.setBackgroundColor(lineBuffer.attributes.backgroundColor);
+            writer.write(lineRef.toUtf8());
         }
+        else
+        {
+            for (int const col: ranges::views::iota(0, *_state.pageSize.columns))
+            {
+                Cell const& cell = at(LineOffset(line), ColumnOffset(col));
+
+                if (cell.styles() & CellFlags::Bold)
+                    writer.sgr_add(GraphicsRendition::Bold);
+                else
+                    writer.sgr_add(GraphicsRendition::Normal);
+
+                // TODO: other styles (such as underline, ...)?
+
+                writer.setForegroundColor(cell.foregroundColor());
+                writer.setBackgroundColor(cell.backgroundColor());
+
+                if (!cell.codepointCount())
+                    writer.write(' ');
+                else
+                    writer.write(cell.toUtf8());
+            }
+        }
+
         writer.sgr_add(GraphicsRendition::Reset);
 
         if (_postLine)
@@ -1068,13 +1080,7 @@ void Screen<Cell>::clearToBeginOfLine()
 template <typename Cell>
 void Screen<Cell>::clearLine()
 {
-    Cell* i = &at(_state.cursor.position.line, ColumnOffset(0));
-    Cell* e = i + unbox<int>(_state.pageSize.columns);
-    while (i != e)
-    {
-        i->reset(_state.cursor.graphicsRendition);
-        ++i;
-    }
+    currentLine().reset(grid().defaultLineFlags(), _state.cursor.graphicsRendition);
 
     auto const line = _state.cursor.position.line;
     auto const left = ColumnOffset(0);
@@ -2128,7 +2134,10 @@ void Screen<Cell>::inspect(std::string const& _message, std::ostream& _os) const
     hline();
     _os << screenshot([this](LineOffset _lineNo) -> string {
         // auto const absoluteLine = grid().toAbsoluteLine(_lineNo);
-        return fmt::format("| {:>4}: {}", _lineNo.value, (unsigned) grid().lineAt(_lineNo).flags());
+        return fmt::format("{} {:>4}: {}",
+                           grid().lineAt(_lineNo).isTrivialBuffer() ? "!" : "|",
+                           _lineNo.value,
+                           (unsigned) grid().lineAt(_lineNo).flags());
     });
     hline();
     _state.imagePool.inspect(_os);
