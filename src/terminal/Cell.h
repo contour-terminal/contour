@@ -104,7 +104,7 @@ class CONTOUR_PACKED Cell
     Cell() noexcept;
     Cell(Cell const& v) noexcept;
     Cell& operator=(Cell const& v) noexcept;
-    explicit Cell(GraphicsAttributes const& _attributes) noexcept;
+    explicit Cell(GraphicsAttributes const& _attributes, HyperlinkId hyperlink = {}) noexcept;
 
     Cell(Cell&&) noexcept = default;
     Cell& operator=(Cell&&) noexcept = default;
@@ -205,9 +205,10 @@ inline Cell::Cell() noexcept
     setWidth(1);
 }
 
-inline Cell::Cell(GraphicsAttributes const& _attributes) noexcept
+inline Cell::Cell(GraphicsAttributes const& _attributes, HyperlinkId hyperlink) noexcept
 {
     setWidth(1);
+    setHyperlink(hyperlink);
 
     foregroundColor_ = _attributes.foregroundColor;
     backgroundColor_ = _attributes.backgroundColor;
