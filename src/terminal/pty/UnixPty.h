@@ -28,6 +28,28 @@
 namespace terminal
 {
 
+struct UnixPipe
+{
+    int pfd[2];
+
+    UnixPipe();
+    UnixPipe(UnixPipe&&) noexcept;
+    UnixPipe& operator=(UnixPipe&&) noexcept;
+    UnixPipe(UnixPipe const&) = delete;
+    UnixPipe& operator=(UnixPipe const&) = delete;
+    ~UnixPipe();
+
+    bool good() const noexcept { return pfd[0] != -1 && pfd[1] != -1; }
+
+    int reader() noexcept { return pfd[0]; }
+    int writer() noexcept { return pfd[1]; }
+
+    void closeReader() noexcept;
+    void closeWriter() noexcept;
+
+    void close();
+};
+
 class UnixPty: public Pty
 {
   private:
@@ -69,11 +91,14 @@ class UnixPty: public Pty
     PageSize pageSize() const noexcept override;
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;
 
+    UnixPipe& stdoutFastPipe() noexcept { return _stdoutFastPipe; }
+
   private:
     std::optional<std::string_view> readSome(int fd, char* target, size_t n) noexcept;
 
     int _masterFd;
     std::array<int, 2> _pipe;
+    UnixPipe _stdoutFastPipe;
     std::vector<char> _buffer;
     PageSize _pageSize;
     Slave _slave;

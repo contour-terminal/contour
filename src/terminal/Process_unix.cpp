@@ -54,6 +54,7 @@
 #include <sys/wait.h>
 
 using namespace std;
+using namespace std::string_view_literals;
 using crispy::trimRight;
 
 namespace terminal
@@ -61,6 +62,9 @@ namespace terminal
 
 namespace
 {
+    constexpr auto StdoutFastPipeFd = 3;
+    constexpr auto StdoutFastPipeEnvironmentName = "STDOUT_FASTPIPE"sv;
+
     bool isFlatpak()
     {
         static bool check = FileSystem::exists("/.flatpak-info");
@@ -79,6 +83,12 @@ namespace
             argv[i + 1] = strdup(_args[i].c_str());
         argv[argCount + 1] = nullptr;
         return argv;
+    }
+
+    void saveDup2(int a, int b)
+    {
+        while (dup2(a, b) == -1 && (errno == EBUSY || errno == EINTR))
+            ;
     }
 } // anonymous namespace
 
@@ -102,10 +112,18 @@ Process::Process(string const& _path,
     d->pid = fork();
     d->pty = move(_pty);
 
+    UnixPipe* stdoutFastPipe = [this]() -> UnixPipe* {
+        if (UnixPty* p = dynamic_cast<UnixPty*>(d->pty.get()))
+            return &p->stdoutFastPipe();
+        return nullptr;
+    }();
+
     switch (d->pid)
     {
         default: // in parent
             d->pty->slave().close();
+            if (stdoutFastPipe)
+                stdoutFastPipe->closeWriter();
             break;
         case -1: // fork error
             throw runtime_error { getLastErrorAsString() };
@@ -124,6 +142,10 @@ Process::Process(string const& _path,
 
                 for (auto&& [name, value]: _env)
                     setenv(name.c_str(), value.c_str(), true);
+
+                if (stdoutFastPipe)
+                    setenv(
+                        StdoutFastPipeEnvironmentName.data(), std::to_string(StdoutFastPipeFd).c_str(), true);
             }
 
             char** argv = [=]() -> char** {
@@ -141,6 +163,9 @@ Process::Process(string const& _path,
                     realArgs.emplace_back(fmt::format("--env=TERM={}", value));
                 for (auto&& [name, value]: _env)
                     realArgs.emplace_back(fmt::format("--env={}={}", name, value));
+                if (stdoutFastPipe)
+                    realArgs.emplace_back(
+                        fmt::format("--env={}={}", StdoutFastPipeEnvironmentName, StdoutFastPipeFd));
                 realArgs.push_back(_path);
                 for (auto const& arg: _args)
                     realArgs.push_back(arg);
@@ -148,10 +173,19 @@ Process::Process(string const& _path,
                 return createArgv("/usr/bin/flatpak-spawn", realArgs, 0);
             }();
 
+            if (auto pty = dynamic_cast<UnixPty*>(d->pty.get()))
+            {
+                if (pty->stdoutFastPipe().writer() != -1)
+                {
+                    saveDup2(pty->stdoutFastPipe().writer(), StdoutFastPipeFd);
+                    pty->stdoutFastPipe().close();
+                }
+            }
+
             // maybe close any leaked/inherited file descriptors from parent process
             // TODO: But be a little bit more clever in iterating only over those that are actually still
             // open.
-            for (int i = 3; i < 256; ++i)
+            for (int i = StdoutFastPipeFd + 1; i < 256; ++i)
                 ::close(i);
 
             // reset signal(s) to default that may have been changed in the parent process.
