@@ -1080,6 +1080,12 @@ void Screen<Cell>::clearToBeginOfLine()
         i->reset(_state.cursor.graphicsRendition);
         ++i;
     }
+
+    auto const line = _state.cursor.position.line;
+    auto const left = ColumnOffset(0);
+    auto const right = _state.cursor.position.column;
+    auto const area = Rect { Top(*line), Left(*left), Bottom(*line), Right(*right) };
+    _terminal.markRegionDirty(area);
 }
 
 template <typename Cell>
