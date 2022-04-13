@@ -521,7 +521,7 @@ string_view Screen<Cell>::tryEmplaceChars(string_view _chars) noexcept
             advanceCursorAfterWrite(ColumnCount(charsToWrite));
             _chars.remove_prefix(charsToWrite);
             _chars = tryEmplaceContinuousChars(_chars);
-            _terminal.currentPtyBuffer()->advanceHotEndUntil(_chars.begin());
+            _terminal.currentPtyBuffer()->advanceHotEndUntil(_chars.data());
             return _chars;
         }
         return _chars;
@@ -538,7 +538,7 @@ string_view Screen<Cell>::tryEmplaceChars(string_view _chars) noexcept
         advanceCursorAfterWrite(ColumnCount(charsToWrite));
         _chars.remove_prefix(charsToWrite);
         _chars = tryEmplaceContinuousChars(_chars);
-        _terminal.currentPtyBuffer()->advanceHotEndUntil(_chars.begin());
+        _terminal.currentPtyBuffer()->advanceHotEndUntil(_chars.data());
         return _chars;
     }
 

@@ -136,8 +136,6 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
     void clearToEndOfScreen();
     void clearScreen();
 
-    void clearScrollbackBuffer();
-
     void eraseCharacters(ColumnCount _n);  // ECH
     void insertCharacters(ColumnCount _n); // ICH
     void deleteCharacters(ColumnCount _n); // DCH
@@ -248,9 +246,6 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
     void inspect(std::string const& _message, std::ostream& _os) const override;
 
     // for DECSC and DECRC
-    void saveCursor();
-    void restoreCursor();
-    void restoreCursor(Cursor const& _savedCursor);
     void saveModes(std::vector<DECMode> const& _modes);
     void restoreModes(std::vector<DECMode> const& _modes);
     void requestAnsiMode(unsigned int _mode);
