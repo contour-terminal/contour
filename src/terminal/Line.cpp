@@ -1,8 +1,21 @@
-#include <terminal/Cell.h>
+/**
+ * This file is part of the "libterminal" project
+ *   Copyright (c) 2019-2020 Christian Parpart <christian@parpart.family>
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 #include <terminal/Line.h>
 
 #include <unicode/grapheme_segmenter.h>
 #include <unicode/utf8.h>
+#include <unicode/width.h>
 
 using std::get;
 using std::holds_alternative;
@@ -11,8 +24,8 @@ using std::min;
 namespace terminal
 {
 
-template <typename Cell, bool Optimize>
-typename Line<Cell, Optimize>::InflatedBuffer Line<Cell, Optimize>::reflow(ColumnCount _newColumnCount)
+template <typename Cell>
+typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount _newColumnCount)
 {
     using crispy::Comparison;
     auto& buffer = editable();
@@ -67,8 +80,8 @@ typename Line<Cell, Optimize>::InflatedBuffer Line<Cell, Optimize>::reflow(Colum
     return {};
 }
 
-template <typename Cell, bool Optimize>
-inline void Line<Cell, Optimize>::resize(ColumnCount _count)
+template <typename Cell>
+inline void Line<Cell>::resize(ColumnCount _count)
 {
     assert(*_count >= 0);
     if (1) // constexpr (Optimized)
@@ -83,8 +96,8 @@ inline void Line<Cell, Optimize>::resize(ColumnCount _count)
     editable().resize(unbox<size_t>(_count));
 }
 
-template <typename Cell, bool Optimize>
-gsl::span<Cell const> Line<Cell, Optimize>::trim_blank_right() const noexcept
+template <typename Cell>
+gsl::span<Cell const> Line<Cell>::trim_blank_right() const noexcept
 {
     auto i = editable().data();
     auto e = editable().data() + editable().size();
@@ -95,8 +108,8 @@ gsl::span<Cell const> Line<Cell, Optimize>::trim_blank_right() const noexcept
     return gsl::make_span(i, e);
 }
 
-template <typename Cell, bool Optimize>
-std::string Line<Cell, Optimize>::toUtf8() const
+template <typename Cell>
+std::string Line<Cell>::toUtf8() const
 {
     if (isTrivialBuffer())
     {
@@ -118,8 +131,8 @@ std::string Line<Cell, Optimize>::toUtf8() const
     return str;
 }
 
-template <typename Cell, bool Optimize>
-std::string Line<Cell, Optimize>::toUtf8Trimmed() const
+template <typename Cell>
+std::string Line<Cell>::toUtf8Trimmed() const
 {
     std::string output = toUtf8();
     while (!output.empty() && isspace(output.back()))
@@ -180,7 +193,8 @@ InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input)
     return columns;
 }
 
-template class Line<Cell, true>;
-template class Line<Cell, false>;
-
 } // end namespace terminal
+
+#include <terminal/Cell.h>
+
+template class terminal::Line<terminal::Cell>;

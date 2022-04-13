@@ -82,7 +82,7 @@ using LineStorage = std::variant<TriviallyStyledLineBuffer, InflatedLineBuffer<C
  * TODO: Use custom allocator for ensuring cache locality of Cells to sibling lines.
  * TODO: Make the line optimization work.
  */
-template <typename Cell, bool Optimize = false>
+template <typename Cell>
 class Line
 {
   public:
@@ -91,8 +91,6 @@ class Line
     Line(Line&&) noexcept = default;
     Line& operator=(Line const&) = default;
     Line& operator=(Line&&) noexcept = default;
-
-    static constexpr inline bool Optimized = Optimize;
 
     using TrivialBuffer = TriviallyStyledLineBuffer;
     using InflatedBuffer = InflatedLineBuffer<Cell>;
@@ -313,19 +311,18 @@ constexpr LineFlags operator&(LineFlags a, LineFlags b) noexcept
     return LineFlags(unsigned(a) & unsigned(b));
 }
 
-template <typename Cell, bool Optimize>
-inline typename Line<Cell, Optimize>::InflatedBuffer& Line<Cell, Optimize>::editable()
+template <typename Cell>
+inline typename Line<Cell>::InflatedBuffer& Line<Cell>::editable()
 {
-    if (1) // constexpr (Optimized)
-        if (std::holds_alternative<TrivialBuffer>(storage_))
-            storage_ = inflate<Cell>(std::get<TrivialBuffer>(storage_));
+    if (std::holds_alternative<TrivialBuffer>(storage_))
+        storage_ = inflate<Cell>(std::get<TrivialBuffer>(storage_));
     return std::get<InflatedBuffer>(storage_);
 }
 
-template <typename Cell, bool Optimize>
-inline typename Line<Cell, Optimize>::InflatedBuffer const& Line<Cell, Optimize>::editable() const
+template <typename Cell>
+inline typename Line<Cell>::InflatedBuffer const& Line<Cell>::editable() const
 {
-    return const_cast<Line<Cell, Optimize>*>(this)->editable();
+    return const_cast<Line<Cell>*>(this)->editable();
 }
 
 } // namespace terminal

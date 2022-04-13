@@ -77,10 +77,13 @@ class ScreenBase: public SequenceHandler
  * allowing the object owner to control which part of the screen (or history)
  * to be viewn.
  */
-template <typename Cell>
+template <typename Cell, ScreenType TheScreenType = ScreenType::Primary>
 class Screen: public ScreenBase, public capabilities::StaticDatabase
 {
   public:
+    constexpr static bool IsPrimaryScreen = TheScreenType == ScreenType::Primary;
+    constexpr static bool IsAlternateScreen = TheScreenType == ScreenType::Alternate;
+
     Screen(TerminalState& terminalState, ScreenType screenType, Grid<Cell>& grid);
 
     Screen(Screen const&) = delete;
@@ -425,14 +428,11 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
 
     HyperlinkId hyperlinkIdAt(CellLocation position) const noexcept override
     {
-        if (1) // constexpr (Line<Cell>::Optimized)
+        auto const& line = grid().lineAt(position.line);
+        if (line.isTrivialBuffer())
         {
-            auto const& line = grid().lineAt(position.line);
-            if (line.isTrivialBuffer())
-            {
-                TriviallyStyledLineBuffer const& lineBuffer = line.trivialBuffer();
-                return lineBuffer.hyperlink;
-            }
+            TriviallyStyledLineBuffer const& lineBuffer = line.trivialBuffer();
+            return lineBuffer.hyperlink;
         }
         return at(position).hyperlink();
     }
