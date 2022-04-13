@@ -1,7 +1,22 @@
 ---
-Checks: '-*,clang-diagnostic-*,clang-analyzer-*,bugprone-*,performance-*,-performance-no-int-to-ptr,readability-non-const-parameter,readability-redundant-*,cppcoreguidelines-slicing'
-WarningsAsErrors: ''
-HeaderFilterRegex: ''
+Checks: >-
+  -*,
+  bugprone-*,
+  clang-analyzer-*,
+  clang-diagnostic-*,
+  cppcoreguidelines-*,
+  -cppcoreguidelines-avoid-magic-numbers,
+  modernize-*,
+  -modernize-avoid-c-arrays,
+  -modernize-use-trailing-return-type,
+  performance-*,
+  -performance-no-int-to-ptr,
+  readability-identifier-naming,
+  readability-non-const-parameter,
+  readability-redundant-*
+UseColor: true
+WarningsAsErrors: 'true'
+HeaderFilterRegex: 'src/.*\.(h|cpp)$'
 AnalyzeTemporaryDtors: false
 FormatStyle:     none
 CheckOptions:
@@ -35,5 +50,19 @@ CheckOptions:
     value:           llvm
   - key:             modernize-use-nullptr.NullMacros
     value:           'NULL'
-...
-
+  - key:             modernize-use-default-member-init.UseAssignment
+    value:           '1'
+  - key:   readability-identifier-naming.EnumCase
+    value: CamelCase
+  - key:   readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key:   readability-identifier-naming.ClassMemberCase
+    value: camelBack
+  - key:   readability-identifier-naming.ClassMethodCase
+    value: camelBack
+  - key:   readability-identifier-naming.ParameterCase
+    value: camelBack
+  - key:   readability-identifier-naming.ParameterPrefix
+    value: ''
+  - key:   readability-identifier-naming.ScopedEnumConstantCase
+    value: CamelCase
