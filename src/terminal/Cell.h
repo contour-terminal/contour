@@ -370,7 +370,7 @@ inline void Cell::setCharacter(char32_t _codepoint) noexcept
 
 inline int Cell::appendCharacter(char32_t _codepoint) noexcept
 {
-    assert(codepoint_ != 0);
+    assert(_codepoint != 0);
 
     CellExtra& ext = extra();
     if (ext.codepoints.size() < MaxCodepoints - 1)
