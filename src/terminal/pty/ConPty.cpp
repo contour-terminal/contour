@@ -137,6 +137,20 @@ void ConPty::close()
     }
 }
 
+optional<string_view> ConPty::read(crispy::BufferObject& buffer, std::chrono::milliseconds timeout)
+{
+    // TODO: wait for timeout time at most AND got woken up upon wakeupReader() invokcation.
+    (void) timeout;
+
+    auto const n = static_cast<DWORD>(buffer.bytesAvailable());
+
+    DWORD nread {};
+    if (!ReadFile(input_, buffer.hotEnd(), n, &nread, nullptr))
+        return nullopt;
+
+    return string_view { buffer.hotEnd(), nread };
+}
+
 optional<string_view> ConPty::read(size_t _size, std::chrono::milliseconds _timeout)
 {
     // TODO: wait for _timeout time at most AND got woken up upon wakeupReader() invokcation.
