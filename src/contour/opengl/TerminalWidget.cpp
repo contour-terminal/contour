@@ -230,7 +230,7 @@ namespace
     }
 
     // Returns the config file containing the user-configured DPI setting for KDE desktops.
-    std::optional<FileSystem::path> kcmFontsFilePath()
+    [[maybe_unused]] std::optional<FileSystem::path> kcmFontsFilePath()
     {
 #if !defined(__APPLE__) && !defined(_WIN32)
         auto const xdgConfigHome = config::configHome("");
@@ -385,7 +385,7 @@ void TerminalWidget::applyFontDPI()
 
     session_.setContentScale(contentScale());
 
-    auto const newPixelSize = terminal::ImageSize { Width(width()), Height(height()) };
+    auto const newPixelSize = terminal::ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
 
     // Apply resize on same window metrics propagates proper recalculations and repaint.
     applyResize(newPixelSize, session_, renderer_);
@@ -418,8 +418,8 @@ void TerminalWidget::logDisplayTopInfo()
     // TODO: pass phys()/logical?) dpi to font manager, so font size can be applied right
     // TODO: also take window monitor switches into account
 
-    GLint glslNumShaderVersions {};
 #if defined(GL_NUM_SHADING_LANGUAGE_VERSIONS)
+    GLint glslNumShaderVersions {};
     glGetIntegerv(GL_NUM_SHADING_LANGUAGE_VERSIONS, &glslNumShaderVersions);
     glGetError(); // consume possible OpenGL error.
     if (glslNumShaderVersions > 0)
@@ -535,7 +535,8 @@ void TerminalWidget::initializeGL()
 void TerminalWidget::resizeGL(int _width, int _height)
 {
     QOpenGLWidget::resizeGL(_width, _height);
-    auto const qtBaseWidgetSize = terminal::ImageSize { Width(_width), Height(_height) };
+    auto const qtBaseWidgetSize =
+        terminal::ImageSize { Width::cast_from(_width), Height::cast_from(_height) };
     auto const newPixelSize = qtBaseWidgetSize * contentScale();
     DisplayLog()("resizeGL: {}x{} ({})", _width, _height, newPixelSize);
     applyResize(newPixelSize, session_, renderer_);
@@ -902,8 +903,7 @@ void TerminalWidget::doDumpState()
         auto const theImageFormat = qImageFormat;
         auto const theElementCount = elementCount;
 
-        return [_filename, theImageFormat, theElementCount, _format](vector<uint8_t> const& _buffer,
-                                                                     ImageSize _size) {
+        return [_filename, theImageFormat, theElementCount](vector<uint8_t> const& _buffer, ImageSize _size) {
             DisplayLog()("Saving image {} to: {}", _size, _filename.generic_string());
             auto image = QImage(_size.width.as<int>(), _size.height.as<int>(), theImageFormat);
             auto const pitch = unbox<int>(_size.width) * theElementCount;
@@ -986,17 +986,22 @@ void TerminalWidget::resizeWindow(terminal::Width _width, terminal::Height _heig
     }
 
     auto requestedPageSize = terminal().pageSize();
-    auto const pixelSize = terminal::ImageSize { terminal::Width(*_width ? *_width : width()),
-                                                 terminal::Height(*_height ? *_height : height()) };
-    requestedPageSize.columns = terminal::ColumnCount(*pixelSize.width / *gridMetrics().cellSize.width);
-    requestedPageSize.lines = terminal::LineCount(*pixelSize.height / *gridMetrics().cellSize.height);
+    auto const pixelSize =
+        terminal::ImageSize { terminal::Width(*_width ? *_width : (unsigned) width()),
+                              terminal::Height(*_height ? *_height : (unsigned) height()) };
+    requestedPageSize.columns =
+        terminal::ColumnCount(unbox<int>(pixelSize.width) / unbox<int>(gridMetrics().cellSize.width));
+    requestedPageSize.lines =
+        terminal::LineCount(unbox<int>(pixelSize.height) / unbox<int>(gridMetrics().cellSize.height));
 
     // setSizePolicy(QSizePolicy::Policy::Fixed, QSizePolicy::Policy::Fixed);
     const_cast<config::TerminalProfile&>(profile()).terminalSize = requestedPageSize;
     renderer_.setPageSize(requestedPageSize);
     auto const pixels =
-        terminal::ImageSize { terminal::Width(*requestedPageSize.columns * *gridMetrics().cellSize.width),
-                              terminal::Height(*requestedPageSize.lines * *gridMetrics().cellSize.height) };
+        terminal::ImageSize { terminal::Width::cast_from(unbox<int>(requestedPageSize.columns)
+                                                         * unbox<int>(gridMetrics().cellSize.width)),
+                              terminal::Height::cast_from(unbox<int>(requestedPageSize.lines)
+                                                          * unbox<int>(gridMetrics().cellSize.height)) };
     terminal().resizeScreen(requestedPageSize, pixels);
     updateGeometry();
     adaptSize_();
@@ -1019,9 +1024,10 @@ void TerminalWidget::resizeWindow(terminal::LineCount _lines, terminal::ColumnCo
     // setSizePolicy(QSizePolicy::Policy::Fixed, QSizePolicy::Policy::Fixed);
     const_cast<config::TerminalProfile&>(profile()).terminalSize = requestedPageSize;
     renderer_.setPageSize(requestedPageSize);
-    auto const pixels =
-        terminal::ImageSize { terminal::Width(*requestedPageSize.columns * *gridMetrics().cellSize.width),
-                              terminal::Height(*requestedPageSize.lines * *gridMetrics().cellSize.height) };
+    auto const pixels = terminal::ImageSize {
+        terminal::Width(unbox<unsigned>(requestedPageSize.columns) * *gridMetrics().cellSize.width),
+        terminal::Height(unbox<unsigned>(requestedPageSize.lines) * *gridMetrics().cellSize.height)
+    };
     terminal().resizeScreen(requestedPageSize, pixels);
     updateGeometry();
     adaptSize_();
@@ -1044,7 +1050,8 @@ bool TerminalWidget::setFontSize(text::font_size _size)
     if (!renderer_.setFontSize(_size))
         return false;
 
-    auto const qtBaseWidgetSize = ImageSize { terminal::Width(width()), terminal::Height(height()) };
+    auto const qtBaseWidgetSize =
+        ImageSize { terminal::Width::cast_from(width()), terminal::Height::cast_from(height()) };
     renderer_.setMargin(computeMargin(gridMetrics().cellSize, pageSize(), qtBaseWidgetSize));
     // resize widget (same pixels, but adjusted terminal rows/columns and margin)
     auto const actualWidgetSize = qtBaseWidgetSize * contentScale();
@@ -1060,8 +1067,8 @@ bool TerminalWidget::setPageSize(PageSize _newPageSize)
         return false;
 
     auto const viewSize =
-        ImageSize { Width(*gridMetrics().cellSize.width * *profile().terminalSize.columns),
-                    Height(*gridMetrics().cellSize.width * *profile().terminalSize.columns) };
+        ImageSize { Width(*gridMetrics().cellSize.width * unbox<unsigned>(profile().terminalSize.columns)),
+                    Height(*gridMetrics().cellSize.width * unbox<unsigned>(profile().terminalSize.columns)) };
     renderer_.setPageSize(_newPageSize);
     terminal().resizeScreen(_newPageSize, viewSize);
     return true;

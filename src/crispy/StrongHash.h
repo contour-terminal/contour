@@ -117,7 +117,7 @@ StrongHash StrongHash::compute(std::basic_string<T, Alloc> const& text) noexcept
     // return compute(value.data(), value.size());
     StrongHash hash;
     hash = StrongHash(0, 0, 0, static_cast<uint32_t>(text.size()));
-    for (char32_t const codepoint: text)
+    for (T const codepoint: text)
         hash = hash * static_cast<uint32_t>(codepoint);
     return hash;
 }

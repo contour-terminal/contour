@@ -26,8 +26,8 @@
 #include <fmt/chrono.h>
 
 #include <chrono>
+#include <csignal>
 #include <iostream>
-#include <signal.h>
 #include <utility>
 
 #include <sys/types.h>
@@ -67,6 +67,7 @@ namespace // {{{ helpers
 // }}}
 
 Terminal::Terminal(unique_ptr<Pty> _pty,
+                   size_t ptyBufferObjectSize,
                    size_t _ptyReadBufferSize,
                    Terminal::Events& _eventListener,
                    LineCount _maxHistoryLineCount,
@@ -106,8 +107,9 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
              move(_colorPalette),
              _allowReflowOnResize },
     // clang-format on
-    ptyBufferPool_ { crispy::nextPowerOfTwo(_ptyReadBufferSize) },
+    ptyBufferPool_ { crispy::nextPowerOfTwo(ptyBufferObjectSize) },
     currentPtyBuffer_ { ptyBufferPool_.allocateBufferObject() },
+    ptyReadBufferSize_ { crispy::nextPowerOfTwo(_ptyReadBufferSize) },
     primaryScreen_ { state_, ScreenType::Primary, state_.primaryBuffer },
     alternateScreen_ { state_, ScreenType::Alternate, state_.alternateBuffer },
     currentScreen_ { primaryScreen_ },
@@ -124,10 +126,6 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
     setMode(DECMode::TextReflow, true);
     setMode(DECMode::SixelCursorNextToGraphic, state_.sixelCursorConformance);
 #endif
-}
-
-Terminal::~Terminal()
-{
 }
 
 void Terminal::setRefreshRate(double _refreshRate)
@@ -156,7 +154,8 @@ bool Terminal::processInputOnce()
                        currentPtyBuffer_->bytesAvailable());
         currentPtyBuffer_ = ptyBufferPool_.allocateBufferObject();
     }
-    optional<tuple<string_view, bool>> const readResult = pty_->read(*currentPtyBuffer_, timeout);
+    optional<tuple<string_view, bool>> const readResult =
+        pty_->read(*currentPtyBuffer_, timeout, ptyReadBufferSize_);
     if (!readResult)
     {
         if (errno != EINTR && errno != EAGAIN)
@@ -306,7 +305,7 @@ struct ScopedHyperlinkHover
 {
     shared_ptr<HyperlinkInfo const> const href;
 
-    ScopedHyperlinkHover(Terminal const& terminal, ScreenBase const& screen):
+    ScopedHyperlinkHover(Terminal const& terminal, ScreenBase const& /*screen*/):
         href { terminal.tryGetHoveringHyperlink() }
     {
         if (href)
@@ -323,8 +322,6 @@ struct ScopedHyperlinkHover
 void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
 {
     verifyState();
-
-    auto const renderHyperlinks = currentScreen_.get().contains(currentMousePosition_);
 
     changes_.store(0);
     screenDirty_ = false;
@@ -650,8 +647,6 @@ void Terminal::resizeScreen(PageSize _cells, optional<ImageSize> _pixels)
 
     // NOTE: This will only resize the currently active buffer.
     // Any other buffer will be resized when it is switched to.
-
-    auto const oldCursorPos = state_.cursor.position;
 
     state_.pageSize = _cells;
     currentMousePosition_ = clampToScreen(currentMousePosition_);

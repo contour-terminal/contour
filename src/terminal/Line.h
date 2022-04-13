@@ -138,7 +138,7 @@ class Line
     }
 
     /// Tests if all cells are empty.
-    bool empty() const noexcept
+    [[nodiscard]] bool empty() const noexcept
     {
         if (isTrivialBuffer())
             return trivialBuffer().text.empty();
@@ -175,7 +175,7 @@ class Line
             (i++)->reset();
     }
 
-    ColumnCount size() const noexcept
+    [[nodiscard]] ColumnCount size() const noexcept
     {
         if (isTrivialBuffer())
             return trivialBuffer().displayWidth;
@@ -207,7 +207,7 @@ class Line
         return inflatedBuffer()[unbox<size_t>(_column)];
     }
 
-    uint8_t cellEmptyAt(ColumnOffset column) const noexcept
+    [[nodiscard]] uint8_t cellEmptyAt(ColumnOffset column) const noexcept
     {
         if (isTrivialBuffer())
         {
@@ -218,7 +218,7 @@ class Line
         return inflatedBuffer().at(unbox<size_t>(column)).empty();
     }
 
-    uint8_t cellWithAt(ColumnOffset column) const noexcept
+    [[nodiscard]] uint8_t cellWithAt(ColumnOffset column) const noexcept
     {
         if (isTrivialBuffer())
         {
@@ -229,22 +229,31 @@ class Line
         return inflatedBuffer().at(unbox<size_t>(column)).width();
     }
 
-    LineFlags flags() const noexcept { return static_cast<LineFlags>(flags_); }
+    [[nodiscard]] LineFlags flags() const noexcept { return static_cast<LineFlags>(flags_); }
 
-    bool marked() const noexcept { return isFlagEnabled(LineFlags::Marked); }
+    [[nodiscard]] bool marked() const noexcept { return isFlagEnabled(LineFlags::Marked); }
     void setMarked(bool _enable) { setFlag(LineFlags::Marked, _enable); }
 
-    bool wrapped() const noexcept { return isFlagEnabled(LineFlags::Wrapped); }
+    [[nodiscard]] bool wrapped() const noexcept { return isFlagEnabled(LineFlags::Wrapped); }
     void setWrapped(bool _enable) { setFlag(LineFlags::Wrapped, _enable); }
 
-    bool wrappable() const noexcept { return isFlagEnabled(LineFlags::Wrappable); }
+    [[nodiscard]] bool wrappable() const noexcept { return isFlagEnabled(LineFlags::Wrappable); }
     void setWrappable(bool _enable) { setFlag(LineFlags::Wrappable, _enable); }
 
-    LineFlags wrappableFlag() const noexcept { return wrappable() ? LineFlags::Wrappable : LineFlags::None; }
-    LineFlags wrappedFlag() const noexcept { return marked() ? LineFlags::Wrapped : LineFlags::None; }
-    LineFlags markedFlag() const noexcept { return marked() ? LineFlags::Marked : LineFlags::None; }
+    [[nodiscard]] LineFlags wrappableFlag() const noexcept
+    {
+        return wrappable() ? LineFlags::Wrappable : LineFlags::None;
+    }
+    [[nodiscard]] LineFlags wrappedFlag() const noexcept
+    {
+        return marked() ? LineFlags::Wrapped : LineFlags::None;
+    }
+    [[nodiscard]] LineFlags markedFlag() const noexcept
+    {
+        return marked() ? LineFlags::Marked : LineFlags::None;
+    }
 
-    LineFlags inheritableFlags() const noexcept
+    [[nodiscard]] LineFlags inheritableFlags() const noexcept
     {
         auto constexpr Inheritables = unsigned(LineFlags::Wrappable) | unsigned(LineFlags::Marked);
         return static_cast<LineFlags>(flags_ & Inheritables);
@@ -258,14 +267,14 @@ class Line
             flags_ &= ~static_cast<unsigned>(_flag);
     }
 
-    bool isFlagEnabled(LineFlags _flag) const noexcept
+    [[nodiscard]] bool isFlagEnabled(LineFlags _flag) const noexcept
     {
         return (flags_ & static_cast<unsigned>(_flag)) != 0;
     }
 
-    InflatedBuffer reflow(ColumnCount _newColumnCount);
-    std::string toUtf8() const;
-    std::string toUtf8Trimmed() const;
+    [[nodiscard]] InflatedBuffer reflow(ColumnCount _newColumnCount);
+    [[nodiscard]] std::string toUtf8() const;
+    [[nodiscard]] std::string toUtf8Trimmed() const;
 
     // Returns a reference to this mutable grid-line buffer.
     //
@@ -274,11 +283,20 @@ class Line
     InflatedBuffer& inflatedBuffer();
     InflatedBuffer const& inflatedBuffer() const;
 
-    TrivialBuffer& trivialBuffer() noexcept { return std::get<TrivialBuffer>(storage_); }
-    TrivialBuffer const& trivialBuffer() const noexcept { return std::get<TrivialBuffer>(storage_); }
+    [[nodiscard]] TrivialBuffer& trivialBuffer() noexcept { return std::get<TrivialBuffer>(storage_); }
+    [[nodiscard]] TrivialBuffer const& trivialBuffer() const noexcept
+    {
+        return std::get<TrivialBuffer>(storage_);
+    }
 
-    bool isTrivialBuffer() const noexcept { return std::holds_alternative<TrivialBuffer>(storage_); }
-    bool isInflatedBuffer() const noexcept { return std::holds_alternative<TrivialBuffer>(storage_); }
+    [[nodiscard]] bool isTrivialBuffer() const noexcept
+    {
+        return std::holds_alternative<TrivialBuffer>(storage_);
+    }
+    [[nodiscard]] bool isInflatedBuffer() const noexcept
+    {
+        return std::holds_alternative<TrivialBuffer>(storage_);
+    }
 
     void setBuffer(TrivialBuffer const& buffer) noexcept { storage_ = buffer; }
     void setBuffer(InflatedBuffer buffer) { storage_ = std::move(buffer); }

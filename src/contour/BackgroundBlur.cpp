@@ -95,6 +95,8 @@ void setEnabled(QWindow* window, bool enable)
     }
 #else
     // Get me working on other platforms/compositors (such as OSX, Gnome, ...), please.
+    (void) window;
+    (void) enable;
 #endif
 }
 

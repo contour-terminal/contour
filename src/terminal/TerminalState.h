@@ -51,9 +51,12 @@ class Modes
 
     void set(DECMode _mode, bool _enabled) { dec_.set(static_cast<size_t>(_mode), _enabled); }
 
-    bool enabled(AnsiMode _mode) const noexcept { return ansi_.test(static_cast<size_t>(_mode)); }
+    [[nodiscard]] bool enabled(AnsiMode _mode) const noexcept
+    {
+        return ansi_.test(static_cast<size_t>(_mode));
+    }
 
-    bool enabled(DECMode _mode) const noexcept { return dec_.test(static_cast<size_t>(_mode)); }
+    [[nodiscard]] bool enabled(DECMode _mode) const noexcept { return dec_.test(static_cast<size_t>(_mode)); }
 
     void save(std::vector<DECMode> const& _modes)
     {

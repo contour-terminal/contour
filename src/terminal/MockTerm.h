@@ -29,8 +29,8 @@ class MockTerm: public Terminal::Events
 
     template <typename Init>
     MockTerm(
-        PageSize _size, LineCount _hist = {}, size_t ptyReadBufferSize = 1024, Init init = [](MockTerm&) {}):
-        MockTerm { _size, _hist }
+        PageSize size, LineCount hist, size_t ptyReadBufferSize, Init init = [](MockTerm&) {}):
+        MockTerm { size, hist, ptyReadBufferSize }
     {
         init(*this);
     }
@@ -61,7 +61,9 @@ template <typename PtyDevice>
 inline MockTerm<PtyDevice>::MockTerm(PageSize pageSize,
                                      LineCount maxHistoryLineCount,
                                      size_t ptyReadBufferSize):
-    terminal { std::make_unique<PtyDevice>(pageSize), ptyReadBufferSize, *this, maxHistoryLineCount }
+    terminal {
+        std::make_unique<PtyDevice>(pageSize), 1024 * 1024, ptyReadBufferSize, *this, maxHistoryLineCount
+    }
 {
 }
 

@@ -61,7 +61,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
                     std::unique_ptr<TerminalDisplay> _display,
                     std::function<void()> _displayInitialized,
                     std::function<void()> _onExit);
-    ~TerminalSession();
+    ~TerminalSession() override;
 
     /// Starts the VT background thread.
     void start();

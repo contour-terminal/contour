@@ -2384,7 +2384,7 @@ TEST_CASE("RequestMode", "[screen]")
 
     SECTION("ANSI modes: unknown")
     {
-        AnsiMode m = static_cast<AnsiMode>(1234);
+        auto const m = static_cast<AnsiMode>(1234);
         mock.terminal.setMode(m, true); // DECOM
         screen.requestAnsiMode((unsigned) m);
         REQUIRE(e(mock.terminal.peekInput()) == e(fmt::format("\033[{};0$y", toAnsiModeNum(m))));
@@ -2408,7 +2408,7 @@ TEST_CASE("RequestMode", "[screen]")
 
     SECTION("DEC modes: unknown")
     {
-        DECMode m = static_cast<DECMode>(1234);
+        auto const m = static_cast<DECMode>(1234);
         mock.terminal.setMode(m, true); // DECOM
         screen.requestDECMode(static_cast<unsigned>(m));
         REQUIRE(e(mock.terminal.peekInput()) == e(fmt::format("\033[?{};0$y", toDECModeNum(m))));
@@ -2984,7 +2984,6 @@ TEST_CASE("save_restore_DEC_modes", "[screen]")
 TEST_CASE("OSC.2.Unicode")
 {
     auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(2) } };
-    auto& screen = mock.terminal.primaryScreen();
 
     auto const u32title = u32string_view(U"\U0001F600");
     auto const title = unicode::convert_to<char>(u32title);
@@ -2997,7 +2996,6 @@ TEST_CASE("OSC.2.Unicode")
 TEST_CASE("OSC.4")
 {
     auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(2) } };
-    auto& screen = mock.terminal.primaryScreen();
 
     SECTION("query")
     {
@@ -3034,7 +3032,6 @@ TEST_CASE("OSC.4")
 TEST_CASE("XTGETTCAP")
 {
     auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(2) } };
-    auto& screen = mock.terminal.primaryScreen();
     auto const queryStr = fmt::format("\033P+q{:02X}{:02X}{:02X}\033\\", 'R', 'G', 'B');
     mock.writeToScreen(queryStr);
     INFO(fmt::format("Reply data: {}", mock.terminal.peekInput()));
@@ -3317,7 +3314,6 @@ TEST_CASE("Screen.tcap.string", "[screen, tcap]")
 {
     using namespace terminal;
     auto mock = MockTerm(PageSize { LineCount(3), ColumnCount(5) }, LineCount(2));
-    auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("\033P+q687061\033\\"); // HPA
     REQUIRE(e(mock.terminal.peekInput()) == e("\033P1+r687061=1B5B2569257031256447\033\\"));
 }

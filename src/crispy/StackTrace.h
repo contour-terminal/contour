@@ -28,7 +28,7 @@ class StackTrace
 
     static std::string demangleSymbol(const char* symbol);
     static std::vector<void*> getFrames(size_t _skip = 2, size_t _max = 64);
-    static std::optional<DebugInfo> getDebugInfoForFrame(void* _frameAddress);
+    static std::optional<DebugInfo> getDebugInfoForFrame(void const* _frameAddress);
 
   private:
     std::vector<void*> frames_;

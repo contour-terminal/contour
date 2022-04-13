@@ -39,10 +39,10 @@ struct UnixPipe
     UnixPipe& operator=(UnixPipe const&) = delete;
     ~UnixPipe();
 
-    bool good() const noexcept { return pfd[0] != -1 && pfd[1] != -1; }
+    [[nodiscard]] bool good() const noexcept { return pfd[0] != -1 && pfd[1] != -1; }
 
-    int reader() noexcept { return pfd[0]; }
-    int writer() noexcept { return pfd[1]; }
+    [[nodiscard]] int reader() noexcept { return pfd[0]; }
+    [[nodiscard]] int writer() noexcept { return pfd[1]; }
 
     void closeReader() noexcept;
     void closeWriter() noexcept;
@@ -85,8 +85,9 @@ class UnixPty: public Pty
     bool isClosed() const noexcept override;
     void wakeupReader() noexcept override;
     std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
-    [[nodiscard]] std::optional<std::tuple<std::string_view, bool>> read(
-        crispy::BufferObject& storage, std::chrono::milliseconds timeout) override;
+    [[nodiscard]] std::optional<std::tuple<std::string_view, bool>> read(crispy::BufferObject& storage,
+                                                                         std::chrono::milliseconds timeout,
+                                                                         size_t size) override;
     int write(char const* buf, size_t size) override;
     PageSize pageSize() const noexcept override;
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;

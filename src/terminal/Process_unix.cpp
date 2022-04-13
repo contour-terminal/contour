@@ -46,8 +46,8 @@
     #include <pty.h>
 #endif
 
+#include <csignal>
 #include <pwd.h>
-#include <signal.h>
 #include <unistd.h>
 
 #include <sys/types.h>
@@ -113,7 +113,7 @@ Process::Process(string const& _path,
     d->pty = move(_pty);
 
     UnixPipe* stdoutFastPipe = [this]() -> UnixPipe* {
-        if (UnixPty* p = dynamic_cast<UnixPty*>(d->pty.get()))
+        if (auto* p = dynamic_cast<UnixPty*>(d->pty.get()))
             return &p->stdoutFastPipe();
         return nullptr;
     }();
@@ -129,7 +129,7 @@ Process::Process(string const& _path,
             throw runtime_error { getLastErrorAsString() };
         case 0: // in child
         {
-            d->pty->slave().login();
+            (void) d->pty->slave().login();
 
             auto const& cwd = _cwd.generic_string();
             if (!isFlatpak())

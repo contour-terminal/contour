@@ -196,7 +196,7 @@ inline void Sequencer::clear() noexcept
 
 inline void Sequencer::paramDigit(char _char) noexcept
 {
-    parameterBuilder_.multiplyBy10AndAdd(static_cast<Sequence::Parameter>(_char - '0'));
+    parameterBuilder_.multiplyBy10AndAdd(static_cast<uint8_t>(_char - '0'));
 }
 
 inline void Sequencer::paramSeparator() noexcept

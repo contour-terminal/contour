@@ -129,7 +129,7 @@ vector<uint8_t> downsample(vector<uint8_t> const& _sourceBitmap, ImageSize _targ
     vector<uint8_t> targetBitmap(*_targetSize.width * *_targetSize.height, 0);
 
     auto const sourceWidth = _factor * *_targetSize.width;
-    auto const average_intensity_in_src = [&](int destX, int destY) -> int {
+    auto const average_intensity_in_src = [&](unsigned destX, unsigned destY) -> unsigned {
         auto sourceY = destY * _factor;
         auto sourceX = destX * _factor;
         auto total = 0u;
@@ -139,14 +139,15 @@ vector<uint8_t> downsample(vector<uint8_t> const& _sourceBitmap, ImageSize _targ
             for (auto const x: ::ranges::views::iota(sourceX, sourceX + _factor))
                 total += _sourceBitmap[offset + x];
         }
-        return int(double(total) / double(_factor * _factor));
+        return unsigned(double(total) / double(_factor * _factor));
     };
 
     for (auto const y: ::ranges::views::iota(0u, *_targetSize.height))
     {
         auto const offset = *_targetSize.width * y;
         for (auto const x: ::ranges::views::iota(0u, *_targetSize.width))
-            targetBitmap[offset + x] = min(255, targetBitmap[offset + x] + average_intensity_in_src(x, y));
+            targetBitmap[offset + x] =
+                (uint8_t) min(255u, unsigned(targetBitmap[offset + x]) + average_intensity_in_src(x, y));
     }
 
     return targetBitmap;

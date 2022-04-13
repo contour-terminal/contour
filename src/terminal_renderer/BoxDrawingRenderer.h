@@ -43,12 +43,12 @@ class BoxDrawingRenderer: public Renderable
     void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
     void clearCache() override;
 
-    bool renderable(char32_t codepoint) const noexcept;
+    [[nodiscard]] bool renderable(char32_t codepoint) const noexcept;
 
     /// Renders boxdrawing character.
     ///
     /// @param _char the boxdrawing character's codepoint.
-    bool render(LineOffset _line, ColumnOffset _column, char32_t codepoint, RGBColor _color);
+    [[nodiscard]] bool render(LineOffset _line, ColumnOffset _column, char32_t codepoint, RGBColor _color);
 
     void inspect(std::ostream& output) const override;
 
@@ -56,11 +56,13 @@ class BoxDrawingRenderer: public Renderable
     AtlasTileAttributes const* getOrCreateCachedTileAttributes(char32_t codepoint);
 
     using Renderable::createTileData;
-    std::optional<TextureAtlas::TileCreateData> createTileData(char32_t codepoint,
-                                                               atlas::TileLocation tileLocation);
+    [[nodiscard]] std::optional<TextureAtlas::TileCreateData> createTileData(
+        char32_t codepoint, atlas::TileLocation tileLocation);
 
-    std::optional<atlas::Buffer> buildBoxElements(char32_t codepoint, ImageSize _size, int _lineThickness);
-    std::optional<atlas::Buffer> buildElements(char32_t codepoint);
+    [[nodiscard]] std::optional<atlas::Buffer> buildBoxElements(char32_t codepoint,
+                                                                ImageSize _size,
+                                                                int _lineThickness);
+    [[nodiscard]] std::optional<atlas::Buffer> buildElements(char32_t codepoint);
 };
 
 } // namespace terminal::renderer

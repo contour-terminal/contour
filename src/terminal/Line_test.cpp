@@ -44,8 +44,6 @@ TEST_CASE("Line.inflate", "[Line]")
     bufferObject->writeAtEnd(testText);
     auto const bufferFragment = bufferObject->ref(0, 10);
 
-    auto const externalView = string_view(bufferObject->data(), 10);
-
     auto sgr = GraphicsAttributes {};
     sgr.foregroundColor = RGBColor(0x123456);
     sgr.backgroundColor = Color::Indexed(IndexedColor::Yellow);

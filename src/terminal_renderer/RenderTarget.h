@@ -159,7 +159,6 @@ class Renderable
     virtual void clearCache() {}
 
     virtual void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator);
-    virtual void initializeDirectMapping(DirectMappingAllocator& /*directMappingAllocator*/) {}
     virtual void setTextureAtlas(TextureAtlas& atlas) { _textureAtlas = &atlas; }
 
     TextureAtlas::TileCreateData createTileData(atlas::TileLocation tileLocation,

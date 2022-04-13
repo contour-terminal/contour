@@ -523,14 +523,15 @@ string_view Screen<Cell, TheScreenType>::tryEmplaceChars(string_view _chars) noe
     {
         if (currentLine().empty())
         {
-            auto const charsToWrite = min(columnsAvailable, static_cast<int>(_chars.size()));
+            auto const charsToWrite =
+                static_cast<size_t>(min(columnsAvailable, static_cast<int>(_chars.size())));
             currentLine().reset(_state.cursor.graphicsRendition,
                                 _state.cursor.hyperlink,
                                 crispy::BufferFragment {
                                     _terminal.currentPtyBuffer(),
                                     _chars.substr(0, charsToWrite),
                                 });
-            advanceCursorAfterWrite(ColumnCount(charsToWrite));
+            advanceCursorAfterWrite(ColumnCount::cast_from(charsToWrite));
             _chars.remove_prefix(charsToWrite);
             _chars = tryEmplaceContinuousChars(_chars);
             _terminal.currentPtyBuffer()->advanceHotEndUntil(_chars.data());
@@ -541,9 +542,9 @@ string_view Screen<Cell, TheScreenType>::tryEmplaceChars(string_view _chars) noe
 
     if (canResumeEmplace(_chars))
     {
-        auto const charsToWrite = min(columnsAvailable, static_cast<int>(_chars.size()));
+        auto const charsToWrite = static_cast<size_t>(min(columnsAvailable, static_cast<int>(_chars.size())));
         currentLine().trivialBuffer().text.growBy(charsToWrite);
-        advanceCursorAfterWrite(ColumnCount(charsToWrite));
+        advanceCursorAfterWrite(ColumnCount::cast_from(charsToWrite));
         _chars.remove_prefix(charsToWrite);
         _chars = tryEmplaceContinuousChars(_chars);
         _terminal.currentPtyBuffer()->advanceHotEndUntil(_chars.data());

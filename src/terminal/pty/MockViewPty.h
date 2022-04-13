@@ -24,24 +24,23 @@ class MockViewPty: public Pty
   public:
     explicit MockViewPty(PageSize _windowSize): pageSize_ { _windowSize } {}
 
-    ~MockViewPty() {}
-
     void setReadData(std::string_view _data);
 
     PtySlave& slave() noexcept override;
     std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
-    [[nodiscard]] std::optional<std::tuple<std::string_view, bool>> read(
-        crispy::BufferObject& storage, std::chrono::milliseconds timeout) override;
+    [[nodiscard]] std::optional<std::tuple<std::string_view, bool>> read(crispy::BufferObject& storage,
+                                                                         std::chrono::milliseconds timeout,
+                                                                         size_t size) override;
     void wakeupReader() override;
     int write(char const* buf, size_t size) override;
-    PageSize pageSize() const noexcept override;
+    [[nodiscard]] PageSize pageSize() const noexcept override;
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;
 
     void close() override;
-    bool isClosed() const noexcept override;
+    [[nodiscard]] bool isClosed() const noexcept override;
 
-    std::string& stdinBuffer() noexcept { return inputBuffer_; }
-    std::string_view& stdoutBuffer() noexcept { return outputBuffer_; }
+    [[nodiscard]] std::string& stdinBuffer() noexcept { return inputBuffer_; }
+    [[nodiscard]] std::string_view& stdoutBuffer() noexcept { return outputBuffer_; }
 
   private:
     PageSize pageSize_;

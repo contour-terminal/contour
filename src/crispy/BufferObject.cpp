@@ -50,6 +50,9 @@ BufferObject::BufferObject(size_t capacity) noexcept:
     hotEnd_ { data() },
     end_ { data() + capacity }
 {
+#if defined(BUFFER_OBJECT_INLINE)
+    new (data()) char[capacity];
+#endif
     if (BufferObjectLog)
         BufferObjectLog()("Creating BufferObject @{}.", (void*) this);
 }
@@ -66,7 +69,7 @@ BufferObject::~BufferObject()
 BufferObjectPtr BufferObject::create(size_t capacity, BufferObjectRelease release)
 {
 #if defined(BUFFER_OBJECT_INLINE)
-    auto const totalCapacity = nextPowerOfTwo(sizeof(BufferObject) + capacity);
+    auto const totalCapacity = nextPowerOfTwo(static_cast<uint32_t>(sizeof(BufferObject) + capacity));
     auto const nettoCapacity = totalCapacity - sizeof(BufferObject);
     auto ptr = (BufferObject*) malloc(totalCapacity);
     new (ptr) BufferObject(nettoCapacity);

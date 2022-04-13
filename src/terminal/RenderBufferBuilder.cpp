@@ -52,34 +52,6 @@ namespace
         return tuple { cursorFg, cursorBg };
     }
 
-    tuple<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette,
-                                         Cell const& screenCell,
-                                         bool _reverseVideo,
-                                         bool _selected,
-                                         bool _isCursor)
-    {
-        auto const [fg, bg] = screenCell.makeColors(_colorPalette, _reverseVideo);
-        if (!_selected && !_isCursor)
-            return tuple { fg, bg };
-
-        auto const [selectionFg, selectionBg] =
-            [](auto fg, auto bg, bool selected, ColorPalette const& colors) -> tuple<RGBColor, RGBColor> {
-            auto const a = colors.selectionForeground.value_or(bg);
-            auto const b = colors.selectionBackground.value_or(fg);
-            if (selected)
-                return tuple { a, b };
-            else
-                return tuple { b, a };
-        }(fg, bg, _selected, _colorPalette);
-        if (!_isCursor)
-            return tuple { selectionFg, selectionBg };
-
-        auto const cursorFg = makeRGBColor(selectionFg, selectionBg, _colorPalette.cursor.textOverrideColor);
-        auto const cursorBg = makeRGBColor(selectionFg, selectionBg, _colorPalette.cursor.color);
-
-        return tuple { cursorFg, cursorBg };
-    }
-
 } // namespace
 
 template <typename Cell>
@@ -216,7 +188,7 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TriviallyStyledLineBuffer cons
 
     auto const textMargin = min(boxed_cast<ColumnOffset>(terminal.pageSize().columns),
                                 ColumnOffset::cast_from(lineBuffer.text.size()));
-    for (ColumnOffset columnOffset = ColumnOffset(0); columnOffset < textMargin; ++columnOffset)
+    for (auto columnOffset = ColumnOffset(0); columnOffset < textMargin; ++columnOffset)
     {
         auto const pos = CellLocation { lineOffset, columnOffset };
         auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(pos);
@@ -224,21 +196,20 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TriviallyStyledLineBuffer cons
                                                 lineBuffer.attributes.styles,
                                                 lineBuffer.attributes.foregroundColor,
                                                 lineBuffer.attributes.backgroundColor);
-        auto const customBackground =
-            bg != terminal.colorPalette().defaultBackground || !!lineBuffer.attributes.styles;
 
         lineNr = lineOffset;
         prevWidth = 0;
         prevHasCursor = false;
 
-        output.screen.emplace_back(makeRenderCell(terminal.colorPalette(),
-                                                  lineBuffer.text[unbox<size_t>(columnOffset)],
-                                                  lineBuffer.attributes.styles,
-                                                  fg,
-                                                  bg,
-                                                  lineBuffer.attributes.underlineColor,
-                                                  lineOffset,
-                                                  columnOffset));
+        output.screen.emplace_back(
+            makeRenderCell(terminal.colorPalette(),
+                           static_cast<char32_t>(lineBuffer.text[unbox<size_t>(columnOffset)]),
+                           lineBuffer.attributes.styles,
+                           fg,
+                           bg,
+                           lineBuffer.attributes.underlineColor,
+                           lineOffset,
+                           columnOffset));
         if (columnOffset.value == 0)
             output.screen.back().groupStart = true;
     }

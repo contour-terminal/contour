@@ -29,7 +29,7 @@ typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount _newColumnCou
 {
     using crispy::Comparison;
     auto& buffer = inflatedBuffer();
-    // TODO(pr): Efficiently handle TrivialBuffer-case.
+    // TODO: Efficiently handle TrivialBuffer-case.
     switch (crispy::strongCompare(_newColumnCount, size()))
     {
         case Comparison::Equal: break;
@@ -41,7 +41,7 @@ typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount _newColumnCou
 
             if (wrappable())
             {
-                auto const [reflowStart, reflowEnd] = [this, _newColumnCount, &buffer]() {
+                auto const [reflowStart, reflowEnd] = [_newColumnCount, &buffer]() {
                     auto const reflowStart =
                         next(buffer.begin(), *_newColumnCount /* - buffer[_newColumnCount].width()*/);
 
@@ -154,7 +154,7 @@ InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input)
 
     for (char const ch: input.text.view())
     {
-        unicode::ConvertResult const r = unicode::from_utf8(utf8DecoderState, ch);
+        unicode::ConvertResult const r = unicode::from_utf8(utf8DecoderState, static_cast<uint8_t>(ch));
         if (holds_alternative<unicode::Incomplete>(r))
             continue;
 

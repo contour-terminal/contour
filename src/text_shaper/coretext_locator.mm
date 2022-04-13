@@ -54,10 +54,10 @@ namespace text
 
         constexpr font_slant ctFontSlant(int _slant) noexcept
         {
-            if (_slant & NSItalicFontMask)
+            if (unsigned(_slant) & NSItalicFontMask)
                 return font_slant::italic;
 
-            if (_slant & (NSUnitalicFontMask | NSUnboldFontMask))
+            if (unsigned(_slant) & (NSUnitalicFontMask | NSUnboldFontMask))
                 return font_slant::normal;
 
             // Figure out how to get Oblique font, even though according to some docs.
@@ -109,7 +109,7 @@ namespace text
 
         for (bool const forceWeight: {true, false})
         {
-            for (bool const forceSlant: {true, false})
+            for ([[maybe_unused]] bool const forceSlant: {true, false})
             {
                 for (NSArray* object in fonts)
                 {
@@ -149,7 +149,7 @@ namespace text
         return output;
     }
 
-    font_source_list coretext_locator::resolve(gsl::span<const char32_t> codepoints)
+    font_source_list coretext_locator::resolve(gsl::span<const char32_t> /*codepoints*/)
     {
         return {};
     }

@@ -107,14 +107,14 @@ RGBColor& RGBColor::operator=(string const& _hexCode)
     if (_hexCode.size() == 7 && _hexCode[0] == '#')
     {
         char* eptr = nullptr;
-        uint32_t const value = static_cast<uint32_t>(strtoul(_hexCode.c_str() + 1, &eptr, 16));
+        auto const value = static_cast<uint32_t>(strtoul(_hexCode.c_str() + 1, &eptr, 16));
         if (eptr && *eptr == '\0')
             *this = RGBColor { value };
     }
     if (_hexCode.size() >= 3 && _hexCode[0] == '0' && _hexCode[1] == 'x')
     {
         char* eptr = nullptr;
-        uint32_t const value = static_cast<uint32_t>(strtoul(_hexCode.c_str() + 2, &eptr, 16));
+        auto const value = static_cast<uint32_t>(strtoul(_hexCode.c_str() + 2, &eptr, 16));
         if (eptr && *eptr == '\0')
             *this = RGBColor { value };
     }
@@ -126,7 +126,7 @@ RGBAColor& RGBAColor::operator=(string const& _hexCode)
     if (_hexCode.size() == 9 && _hexCode[0] == '#')
     {
         char* eptr = nullptr;
-        uint32_t const value = static_cast<uint32_t>(strtoul(_hexCode.c_str() + 1, &eptr, 16));
+        auto const value = static_cast<uint32_t>(strtoul(_hexCode.c_str() + 1, &eptr, 16));
         if (eptr && *eptr == '\0')
             *this = RGBAColor { value };
     }

@@ -52,7 +52,7 @@ struct FunctionDefinition // TODO: rename Function
 
     using id_type = uint32_t;
 
-    constexpr id_type id() const noexcept
+    [[nodiscard]] constexpr id_type id() const noexcept
     {
         // clang-format off
         unsigned constexpr CategoryShift     = 0;

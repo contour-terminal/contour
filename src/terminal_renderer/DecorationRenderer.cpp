@@ -135,30 +135,30 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             // TODO (default to Underline for now)
             [[fallthrough]];
         case Decorator::Underline: {
-            auto const thickness_half = max(1, int(ceil(underlineThickness() / 2.0)));
+            auto const thickness_half = max(1u, unsigned(ceil(underlineThickness() / 2.0)));
             auto const thickness = thickness_half * 2;
-            auto const y0 = max(0, underlinePosition() - thickness_half);
+            auto const y0 = max(0u, unsigned(underlinePosition()) - thickness_half);
             auto const height = Height(y0 + thickness);
             auto const imageSize = ImageSize { width, height };
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(imageSize.area(), 0);
-                for (int y = 1; y <= thickness; ++y)
-                    for (int x = 0; x < unbox<int>(width); ++x)
+                for (unsigned y = 1; y <= thickness; ++y)
+                    for (unsigned x = 0; x < unbox<unsigned>(width); ++x)
                         image[(*height - y0 - y) * *width + x] = 0xFF;
                 return image;
             });
         }
         case Decorator::DoubleUnderline: {
-            auto const thickness = max(1, int(ceil(double(underlineThickness()) * 2.0) / 3.0));
-            auto const y1 = max(0, underlinePosition() + thickness);
-            auto const y0 = max(0, y1 - 3 * thickness);
+            auto const thickness = max(1u, unsigned(ceil(double(underlineThickness()) * 2.0) / 3.0));
+            auto const y1 = max(0u, unsigned(underlinePosition()) + thickness);
+            auto const y0 = max(0u, y1 - 3 * thickness);
             auto const height = Height(y1 + thickness);
             auto const imageSize = ImageSize { width, height };
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(imageSize.area(), 0);
-                for (int y = 1; y <= thickness; ++y)
+                for (unsigned y = 1; y <= thickness; ++y)
                 {
-                    for (int x = 0; x < unbox<int>(width); ++x)
+                    for (unsigned x = 0; x < unbox<unsigned>(width); ++x)
                     {
                         image[(*height - y1 - y) * *width + x] = 0xFF; // top line
                         image[(*height - y0 - y) * *width + x] = 0xFF; // bottom line
@@ -184,30 +184,30 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
                     auto const y = yScalar * cos(xScalar * x);
                     auto const y1 = static_cast<int>(floor(y));
                     auto const y2 = static_cast<int>(ceil(y));
-                    auto const intensity = static_cast<int>(255 * fabs(y - y1));
+                    auto const intensity = static_cast<uint8_t>(255 * fabs(y - y1));
                     // block.paintOver(x, yBase + y1, 255 - intensity);
                     // block.paintOver(x, yBase + y2, intensity);
-                    block.paintOverThick(x, yBase + y1, 255 - intensity, thickness_half, 0);
+                    block.paintOverThick(x, yBase + y1, uint8_t(255 - intensity), thickness_half, 0);
                     block.paintOverThick(x, yBase + y2, intensity, thickness_half, 0);
                 }
                 return block.take();
             });
         }
         case Decorator::DottedUnderline: {
-            auto const dotHeight = _gridMetrics.underline.thickness;
+            auto const dotHeight = (unsigned) _gridMetrics.underline.thickness;
             auto const dotWidth = dotHeight;
-            auto const height = Height(_gridMetrics.underline.position + dotHeight);
-            auto const y0 = _gridMetrics.underline.position - dotHeight;
-            auto const x0 = 0;
-            auto const x1 = unbox<int>(width) / 2;
+            auto const height = Height::cast_from((unsigned) _gridMetrics.underline.position + dotHeight);
+            auto const y0 = (unsigned) _gridMetrics.underline.position - dotHeight;
+            auto const x0 = 0u;
+            auto const x1 = unbox<unsigned>(width) / 2;
             auto block = blockElement(ImageSize { width, height });
             return create(block.downsampledSize(), [&]() -> atlas::Buffer {
-                for (int y = 0; y < dotHeight; ++y)
+                for (unsigned y = 0; y < dotHeight; ++y)
                 {
-                    for (int x = 0; x < dotWidth; ++x)
+                    for (unsigned x = 0; x < dotWidth; ++x)
                     {
-                        block.paint(x + x0, y + y0);
-                        block.paint(x + x1, y + y0);
+                        block.paint(int(x + x0), int(y + y0));
+                        block.paint(int(x + x1), int(y + y0));
                     }
                 }
                 return block.take();
@@ -216,15 +216,15 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
         case Decorator::DashedUnderline: {
             // Devides a grid cell's underline in three sub-ranges and only renders first and third one,
             // whereas the middle one is being skipped.
-            auto const thickness_half = max(1, int(ceil(underlineThickness() / 2.0)));
-            auto const thickness = max(1, thickness_half * 2);
-            auto const y0 = max(0, underlinePosition() - thickness_half);
+            auto const thickness_half = max(1u, unsigned(ceil(underlineThickness() / 2.0)));
+            auto const thickness = max(1u, thickness_half * 2);
+            auto const y0 = max(0u, unsigned(underlinePosition()) - thickness_half);
             auto const height = Height(y0 + thickness);
             auto const imageSize = ImageSize { width, height };
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
-                for (int y = 1; y <= thickness; ++y)
-                    for (int x = 0; x < unbox<int>(width); ++x)
+                for (unsigned y = 1; y <= thickness; ++y)
+                    for (unsigned x = 0; x < unbox<unsigned>(width); ++x)
                         if (fabsf(float(x) / float(*width) - 0.5f) >= 0.25f)
                             image[(*height - y0 - y) * *width + x] = 0xFF;
                 return image;
@@ -232,22 +232,22 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
         }
         case Decorator::Framed: {
             auto const cellHeight = _gridMetrics.cellSize.height;
-            auto const thickness = max(1, underlineThickness() / 2);
+            auto const thickness = max(1u, unsigned(underlineThickness()) / 2);
             auto const imageSize = ImageSize { width, cellHeight };
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(cellHeight), 0);
                 auto const gap = 0; // thickness;
                 // Draws the top and bottom horizontal lines
-                for (int y = gap; y < thickness + gap; ++y)
-                    for (int x = gap; x < unbox<int>(width) - gap; ++x)
+                for (unsigned y = gap; y < thickness + gap; ++y)
+                    for (unsigned x = gap; x < unbox<unsigned>(width) - gap; ++x)
                     {
                         image[y * *width + x] = 0xFF;
                         image[(*cellHeight - 1 - y) * *width + x] = 0xFF;
                     }
 
                 // Draws the left and right vertical lines
-                for (int y = gap; y < unbox<int>(cellHeight) - gap; y++)
-                    for (int x = gap; x < thickness + gap; ++x)
+                for (unsigned y = gap; y < unbox<unsigned>(cellHeight) - gap; y++)
+                    for (unsigned x = gap; x < thickness + gap; ++x)
                     {
                         image[y * *width + x] = 0xFF;
                         image[y * *width + (*width - 1 - x)] = 0xFF;
@@ -257,24 +257,24 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
         }
         case Decorator::Overline: {
             auto const cellHeight = _gridMetrics.cellSize.height;
-            auto const thickness = underlineThickness();
+            auto const thickness = (unsigned) underlineThickness();
             auto const imageSize = ImageSize { width, cellHeight };
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(cellHeight), 0);
-                for (int y = 0; y < thickness; ++y)
-                    for (int x = 0; x < unbox<int>(width); ++x)
+                for (unsigned y = 0; y < thickness; ++y)
+                    for (unsigned x = 0; x < unbox<unsigned>(width); ++x)
                         image[(*cellHeight - y - 1) * *width + x] = 0xFF;
                 return image;
             });
         }
         case Decorator::CrossedOut: {
             auto const height = Height(*_gridMetrics.cellSize.height / 2);
-            auto const thickness = underlineThickness();
+            auto const thickness = (unsigned) underlineThickness();
             auto const imageSize = ImageSize { width, height };
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
-                for (int y = 1; y <= thickness; ++y)
-                    for (int x = 0; x < unbox<int>(width); ++x)
+                for (unsigned y = 1; y <= thickness; ++y)
+                    for (unsigned x = 0; x < unbox<unsigned>(width); ++x)
                         image[(*height - y) * *width + x] = 0xFF;
                 return image;
             });

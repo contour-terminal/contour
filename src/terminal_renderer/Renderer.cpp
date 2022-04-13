@@ -48,8 +48,8 @@ void loadGridMetricsFromFont(text::font_key _font, GridMetrics& _gm, text::shape
 {
     auto const m = _textShaper.metrics(_font);
 
-    _gm.cellSize.width = Width(m.advance);
-    _gm.cellSize.height = Height(m.line_height);
+    _gm.cellSize.width = Width::cast_from(m.advance);
+    _gm.cellSize.height = Height::cast_from(m.line_height);
     _gm.baseline = m.line_height - m.ascender;
     _gm.underline.position = _gm.baseline + m.underline_position;
     _gm.underline.thickness = m.underline_thickness;
@@ -117,7 +117,7 @@ unique_ptr<text::shaper> createTextShaper(TextShapingEngine _engine,
 }
 
 Renderer::Renderer(PageSize pageSize,
-                   FontDescriptions const& fontDescriptions,
+                   FontDescriptions fontDescriptions,
                    terminal::ColorPalette const& colorPalette,
                    terminal::Opacity backgroundOpacity,
                    crispy::StrongHashtableSize atlasHashtableSlotCount,
@@ -130,7 +130,7 @@ Renderer::Renderer(PageSize pageSize,
     _atlasDirectMapping { atlasDirectMapping },
     _renderTarget { nullptr },
     //.
-    fontDescriptions_ { fontDescriptions },
+    fontDescriptions_ { move(fontDescriptions) },
     textShaper_ { createTextShaper(fontDescriptions_.textShapingEngine,
                                    fontDescriptions_.dpi,
                                    createFontLocator(fontDescriptions_.fontLocator)) },

@@ -168,7 +168,7 @@ class ContourHeadlessBench: public crispy::App
         }
     }
 
-    crispy::cli::Command parameterDefinition() const override
+    [[nodiscard]] crispy::cli::Command parameterDefinition() const override
     {
         auto const perfOptions = CLI::OptionList {
             CLI::Option { "size", CLI::Value { 32u }, "Number of megabyte to process per test.", "MB" },
@@ -229,7 +229,7 @@ class ContourHeadlessBench: public crispy::App
         size_t const ptyReadBufferSize = 1'000'000;
         auto maxHistoryLineCount = terminal::LineCount(4000);
         auto vt = terminal::MockTerm<terminal::MockViewPty>(pageSize, maxHistoryLineCount, ptyReadBufferSize);
-        auto* pty = static_cast<terminal::MockViewPty*>(&vt.terminal.device());
+        auto* pty = dynamic_cast<terminal::MockViewPty*>(&vt.terminal.device());
         vt.terminal.setMode(terminal::DECMode::AutoWrap, true);
 
         auto const rv = baseBenchmark(
@@ -261,7 +261,7 @@ class ContourHeadlessBench: public crispy::App
         using terminal::Pty;
 
         // Benchmark configuration
-        // TODO(pr) make these values CLI configurable.
+        // TODO make these values CLI configurable.
         auto constexpr WritesPerLoop = 1;
         auto constexpr PtyWriteSize = 4096;
         auto constexpr PtyReadSize = 4096;
@@ -272,7 +272,7 @@ class ContourHeadlessBench: public crispy::App
         unique_ptr<Pty> ptyObject = createPty(PageSize { LineCount(25), ColumnCount(80) }, std::nullopt);
         auto& pty = *ptyObject;
         auto& ptySlave = pty.slave();
-        ptySlave.configure();
+        (void) ptySlave.configure();
 
         auto bytesTransferred = uint64_t { 0 };
         auto loopIterations = uint64_t { 0 };
@@ -298,7 +298,7 @@ class ContourHeadlessBench: public crispy::App
         while (stopTime - startTime < BenchTime)
         {
             for (int i = 0; i < WritesPerLoop; ++i)
-                ptySlave.write(text);
+                (void) ptySlave.write(text);
             stopTime = steady_clock::now();
         }
 
@@ -344,7 +344,7 @@ class ContourHeadlessBench: public crispy::App
 
 int main(int argc, char const* argv[])
 {
-    srand(time(nullptr)); // initialize rand(). No strong seed required.
+    srand(static_cast<unsigned int>(time(nullptr))); // initialize rand(). No strong seed required.
 
     ContourHeadlessBench app;
     return app.run(argc, argv);

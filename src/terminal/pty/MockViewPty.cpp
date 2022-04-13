@@ -14,6 +14,7 @@
 
 #include <terminal/pty/MockViewPty.h>
 
+using std::min;
 using std::optional;
 using std::string_view;
 using std::tuple;
@@ -34,16 +35,17 @@ PtySlave& MockViewPty::slave() noexcept
 
 optional<string_view> MockViewPty::read(size_t _maxSize, std::chrono::milliseconds /*_timeout*/)
 {
-    auto const n = std::min(outputBuffer_.size(), _maxSize);
+    auto const n = min(outputBuffer_.size(), _maxSize);
     auto const result = outputBuffer_.substr(0, n);
     outputBuffer_.remove_prefix(n);
     return result;
 }
 
 optional<tuple<string_view, bool>> MockViewPty::read(crispy::BufferObject& storage,
-                                                     std::chrono::milliseconds /*timeout*/)
+                                                     std::chrono::milliseconds /*timeout*/,
+                                                     size_t size)
 {
-    auto const n = std::min(std::min(outputBuffer_.size(), storage.bytesAvailable()), size_t { 4096 });
+    auto const n = min(min(outputBuffer_.size(), storage.bytesAvailable()), size);
     auto result = storage.writeAtEnd(outputBuffer_.substr(0, n));
     outputBuffer_.remove_prefix(n);
     return { tuple { result, false } };

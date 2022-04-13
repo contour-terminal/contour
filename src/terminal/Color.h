@@ -61,11 +61,11 @@ enum class BrightColor
 // {{{ RGBColor
 struct RGBColor
 {
-    uint8_t red;
-    uint8_t green;
-    uint8_t blue;
+    uint8_t red { 0 };
+    uint8_t green { 0 };
+    uint8_t blue { 0 };
 
-    constexpr RGBColor(): red { 0 }, green { 0 }, blue { 0 } {}
+    constexpr RGBColor() = default;
     constexpr RGBColor(uint8_t r, uint8_t g, uint8_t b): red { r }, green { g }, blue { b } {}
     constexpr RGBColor(uint32_t rgb):
         red { static_cast<uint8_t>((rgb >> 16) & 0xFF) },
@@ -74,7 +74,7 @@ struct RGBColor
     {
     }
 
-    constexpr uint32_t value() const noexcept
+    [[nodiscard]] constexpr uint32_t value() const noexcept
     {
         return static_cast<uint32_t>((red << 16) | (green << 8) | blue);
     }
@@ -110,14 +110,23 @@ constexpr bool operator!=(RGBColor a, RGBColor b) noexcept
 // {{{ RGBAColor
 struct RGBAColor
 {
-    uint32_t value;
+    uint32_t value { 0 };
 
-    constexpr uint8_t red() const noexcept { return static_cast<uint8_t>((value >> 24) & 0xFF); }
-    constexpr uint8_t green() const noexcept { return static_cast<uint8_t>((value >> 16) & 0xFF); }
-    constexpr uint8_t blue() const noexcept { return static_cast<uint8_t>((value >> 8) & 0xFF); }
-    constexpr uint8_t alpha() const noexcept { return static_cast<uint8_t>(value & 0xFF); }
+    [[nodiscard]] constexpr uint8_t red() const noexcept
+    {
+        return static_cast<uint8_t>((value >> 24) & 0xFF);
+    }
+    [[nodiscard]] constexpr uint8_t green() const noexcept
+    {
+        return static_cast<uint8_t>((value >> 16) & 0xFF);
+    }
+    [[nodiscard]] constexpr uint8_t blue() const noexcept
+    {
+        return static_cast<uint8_t>((value >> 8) & 0xFF);
+    }
+    [[nodiscard]] constexpr uint8_t alpha() const noexcept { return static_cast<uint8_t>(value & 0xFF); }
 
-    constexpr RGBAColor() noexcept: value { 0 } {}
+    constexpr RGBAColor() noexcept = default;
     constexpr RGBAColor(uint32_t _value) noexcept: value { _value } {}
 
     constexpr RGBAColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a) noexcept:
@@ -135,9 +144,9 @@ struct RGBAColor
     {
     }
 
-    constexpr RGBColor rgb() const noexcept { return RGBColor(value >> 8); }
+    [[nodiscard]] constexpr RGBColor rgb() const noexcept { return RGBColor(value >> 8); }
 
-    RGBAColor& operator=(std::string const& _hexCode);
+    [[nodiscard]] RGBAColor& operator=(std::string const& _hexCode);
 
     constexpr static inline auto White = uint32_t(0xFF'FF'FF'FF);
 };
@@ -193,15 +202,24 @@ struct CONTOUR_PACKED Color
     }
     constexpr Color(RGBColor _rgb) noexcept: content { _rgb.value() | (unsigned(ColorType::RGB) << 24) } {}
 
-    constexpr ColorType type() const noexcept { return static_cast<ColorType>((content >> 24) & 0xFF); }
-    constexpr uint8_t index() const noexcept { return content & 0xFF; }
-    constexpr RGBColor rgb() const noexcept { return RGBColor(content & 0xFFFFFF); }
+    [[nodiscard]] constexpr ColorType type() const noexcept
+    {
+        return static_cast<ColorType>((content >> 24) & 0xFF);
+    }
+    [[nodiscard]] constexpr uint8_t index() const noexcept { return content & 0xFF; }
+    [[nodiscard]] constexpr RGBColor rgb() const noexcept { return RGBColor(content & 0xFFFFFF); }
 
-    constexpr static Color Undefined() noexcept { return Color { ColorType::Undefined, 0 }; }
-    constexpr static Color Default() noexcept { return Color { ColorType::Default, 0 }; }
-    constexpr static Color Bright(uint8_t _index) noexcept { return Color { ColorType::Bright, _index }; }
-    constexpr static Color Indexed(uint8_t _index) noexcept { return Color { ColorType::Indexed, _index }; }
-    constexpr static Color Indexed(IndexedColor _index) noexcept
+    [[nodiscard]] constexpr static Color Undefined() noexcept { return Color { ColorType::Undefined, 0 }; }
+    [[nodiscard]] constexpr static Color Default() noexcept { return Color { ColorType::Default, 0 }; }
+    [[nodiscard]] constexpr static Color Bright(uint8_t _index) noexcept
+    {
+        return Color { ColorType::Bright, _index };
+    }
+    [[nodiscard]] constexpr static Color Indexed(uint8_t _index) noexcept
+    {
+        return Color { ColorType::Indexed, _index };
+    }
+    [[nodiscard]] constexpr static Color Indexed(IndexedColor _index) noexcept
     {
         return Color { ColorType::Indexed, (uint8_t) _index };
     }

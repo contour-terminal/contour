@@ -46,7 +46,6 @@ class CursorRenderer: public Renderable
 
   private:
     void initializeDirectMapping();
-
     using Renderable::createTileData;
     TextureAtlas::TileCreateData createTileData(CursorShape shape,
                                                 int columnWidth,

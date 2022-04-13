@@ -54,7 +54,7 @@ class Terminal
       public:
         virtual ~Events() = default;
 
-        virtual void requestCaptureBuffer(LineCount lines, bool logical) {}
+        virtual void requestCaptureBuffer(LineCount /*lines*/, bool /*logical*/) {}
         virtual void bell() {}
         virtual void bufferChanged(ScreenType) {}
         virtual void renderBufferUpdated() {}
@@ -74,6 +74,7 @@ class Terminal
     };
 
     Terminal(std::unique_ptr<Pty> _pty,
+             size_t ptyBufferObjectSize,
              size_t _ptyReadBufferSize,
              Events& _eventListener,
              LineCount _maxHistoryLineCount = LineCount(0),
@@ -88,7 +89,7 @@ class Terminal
              ColorPalette _colorPalette = {},
              double _refreshRate = 30.0,
              bool _allowReflowOnResize = true);
-    ~Terminal();
+    ~Terminal() = default;
 
     void start();
 
@@ -566,6 +567,7 @@ class Terminal
     TerminalState state_;
     crispy::BufferObjectPool ptyBufferPool_;
     crispy::BufferObjectPtr currentPtyBuffer_;
+    size_t ptyReadBufferSize_;
     Screen<Cell, ScreenType::Primary> primaryScreen_;
     Screen<Cell, ScreenType::Alternate> alternateScreen_;
     std::reference_wrapper<ScreenBase> currentScreen_;
@@ -583,11 +585,11 @@ class Terminal
     {
         Terminal* terminal;
         explicit SelectionHelper(Terminal* self): terminal { self } {}
-        PageSize pageSize() const noexcept override;
-        bool wordDelimited(CellLocation _pos) const noexcept override;
-        bool wrappedLine(LineOffset _line) const noexcept override;
-        bool cellEmpty(CellLocation _pos) const noexcept override;
-        int cellWidth(CellLocation _pos) const noexcept override;
+        [[nodiscard]] PageSize pageSize() const noexcept override;
+        [[nodiscard]] bool wordDelimited(CellLocation _pos) const noexcept override;
+        [[nodiscard]] bool wrappedLine(LineOffset _line) const noexcept override;
+        [[nodiscard]] bool cellEmpty(CellLocation _pos) const noexcept override;
+        [[nodiscard]] int cellWidth(CellLocation _pos) const noexcept override;
     };
     SelectionHelper selectionHelper_;
 };

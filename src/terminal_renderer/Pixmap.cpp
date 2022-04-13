@@ -145,7 +145,7 @@ Pixmap& Pixmap::segment_bar(int which)
     auto const L = 2 * Z;
     auto const R = unbox<int>(_size.width) - Z;
 
-    auto const T = static_cast<int>(ceil(unbox<double>(_size.height) * 1 / 8_th)); // Z;
+    auto const T = static_cast<int>(ceil(unbox<double>(_size.height) * (1 / 8_th))); // Z;
     auto const B = unbox<int>(_size.height) - _baseLine - Z / 2;
     auto const M = T + (B - T) / 2;
 

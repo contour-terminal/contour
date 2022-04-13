@@ -98,7 +98,6 @@ class OpenGLRenderer final:
     float uptime() noexcept
     {
         using namespace std::chrono;
-        auto const now = _now.time_since_epoch();
         auto const uptimeMsecs = duration_cast<milliseconds>(_now - _startTime).count();
         auto const uptimeSecs = static_cast<float>(uptimeMsecs) / 1000.0f;
         return uptimeSecs;
@@ -218,8 +217,8 @@ class OpenGLRenderer final:
     std::unique_ptr<QOpenGLShaderProgram> _rectShader;
     int _rectProjectionLocation;
     int _rectTimeLocation;
-    GLuint _rectVAO;
-    GLuint _rectVBO;
+    GLuint _rectVAO {};
+    GLuint _rectVBO {};
 
     std::optional<ScreenshotCallback> _pendingScreenshotCallback;
 

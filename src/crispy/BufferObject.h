@@ -61,9 +61,15 @@ class BufferObject: public std::enable_shared_from_this<BufferObject>
 
     void reset() noexcept;
 
-    std::size_t capacity() const noexcept { return std::distance(data(), end()); }
-    std::size_t bytesUsed() const noexcept { return std::distance(data(), hotEnd()); }
-    std::size_t bytesAvailable() const noexcept { return std::distance(hotEnd(), end()); }
+    std::size_t capacity() const noexcept { return static_cast<std::size_t>(std::distance(data(), end())); }
+    std::size_t bytesUsed() const noexcept
+    {
+        return static_cast<std::size_t>(std::distance(data(), hotEnd()));
+    }
+    std::size_t bytesAvailable() const noexcept
+    {
+        return static_cast<std::size_t>(std::distance(hotEnd(), end()));
+    }
     float loadFactor() const noexcept { return float(bytesUsed()) / float(capacity()); }
 
     char* data() noexcept;
@@ -118,8 +124,8 @@ class BufferObjectPool
     ~BufferObjectPool();
 
     void releaseUnusedBuffers();
-    size_t unusedBuffers() const noexcept;
-    BufferObjectPtr allocateBufferObject();
+    [[nodiscard]] size_t unusedBuffers() const noexcept;
+    [[nodiscard]] BufferObjectPtr allocateBufferObject();
 
   private:
     void release(BufferObject* ptr);
@@ -151,19 +157,19 @@ class BufferFragment
         region_ = std::string_view(region_.data(), region_.size() + byteCount);
     }
 
-    std::string_view view() const noexcept { return region_; }
-    BufferObjectPtr const& owner() const noexcept { return buffer_; }
+    [[nodiscard]] std::string_view view() const noexcept { return region_; }
+    [[nodiscard]] BufferObjectPtr const& owner() const noexcept { return buffer_; }
 
-    bool empty() const noexcept { return region_.empty(); }
-    std::size_t size() const noexcept { return region_.size(); }
-    char const* data() const noexcept { return region_.data(); }
-    char operator[](size_t i) const noexcept { return region_[i]; }
+    [[nodiscard]] bool empty() const noexcept { return region_.empty(); }
+    [[nodiscard]] std::size_t size() const noexcept { return region_.size(); }
+    [[nodiscard]] char const* data() const noexcept { return region_.data(); }
+    [[nodiscard]] char operator[](size_t i) const noexcept { return region_[i]; }
 
-    decltype(auto) begin() noexcept { return region_.begin(); }
-    decltype(auto) end() noexcept { return region_.end(); }
+    [[nodiscard]] decltype(auto) begin() noexcept { return region_.begin(); }
+    [[nodiscard]] decltype(auto) end() noexcept { return region_.end(); }
 
-    std::size_t startOffset() const noexcept;
-    std::size_t endOffset() const noexcept;
+    [[nodiscard]] std::size_t startOffset() const noexcept;
+    [[nodiscard]] std::size_t endOffset() const noexcept;
 
   private:
     BufferObjectPtr buffer_;
@@ -215,7 +221,7 @@ inline BufferFragment BufferObject::ref(std::size_t offset, std::size_t size) no
 // {{{ BufferFragment inlines
 inline std::size_t BufferFragment::startOffset() const noexcept
 {
-    return std::distance((char*) buffer_->data(), (char*) data());
+    return static_cast<std::size_t>(std::distance((char*) buffer_->data(), (char*) data()));
 }
 
 inline std::size_t BufferFragment::endOffset() const noexcept

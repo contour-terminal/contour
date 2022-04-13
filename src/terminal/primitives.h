@@ -242,8 +242,8 @@ struct Range
     {
     };
     using iterator = crispy::boxed<int, ValueTag>;
-    iterator begin() const { return iterator { from.value }; }
-    auto end() const { return iterator { to.value + 1 }; }
+    [[nodiscard]] iterator begin() const { return iterator { from.value }; }
+    [[nodiscard]] auto end() const { return iterator { to.value + 1 }; }
     // iterator end() const { return crispy::boxed_cast<iterator>(to) + iterator{1}; }
 };
 
@@ -298,7 +298,7 @@ struct PageSize
 {
     LineCount lines;
     ColumnCount columns;
-    int area() const noexcept { return *lines * *columns; }
+    [[nodiscard]] int area() const noexcept { return *lines * *columns; }
 };
 constexpr bool operator==(PageSize a, PageSize b) noexcept
 {
@@ -369,11 +369,11 @@ struct GridSize
         }
     };
 
-    constexpr iterator begin() const noexcept { return iterator { columns, 0 }; }
-    constexpr iterator end() const noexcept { return iterator { columns, *columns * *lines }; }
+    [[nodiscard]] constexpr iterator begin() const noexcept { return iterator { columns, 0 }; }
+    [[nodiscard]] constexpr iterator end() const noexcept { return iterator { columns, *columns * *lines }; }
 
-    constexpr iterator begin() noexcept { return iterator { columns, 0 }; }
-    constexpr iterator end() noexcept { return iterator { columns, *columns * *lines }; }
+    [[nodiscard]] constexpr iterator begin() noexcept { return iterator { columns, 0 }; }
+    [[nodiscard]] constexpr iterator end() noexcept { return iterator { columns, *columns * *lines }; }
 };
 
 constexpr CellLocation operator+(CellLocation a, GridSize::Offset b) noexcept

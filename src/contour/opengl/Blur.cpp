@@ -25,13 +25,16 @@ static const Vertex sg_vertexes[] = { Vertex(QVector3D(1.0f, 1.0f, 1.0f)),
                                       Vertex(QVector3D(-1.0f, -1.0f, 1.0f)),
                                       Vertex(QVector3D(1.0f, -1.0f, 1.0f)) };
 
-Blur::Blur()
+Blur::Blur():
+    m_context { new QOpenGLContext() },
+    m_surface { new QOffscreenSurface() },
+    m_gaussianBlur { new QOpenGLShaderProgram() },
+    m_shaderKawaseUp { new QOpenGLShaderProgram() },
+    m_shaderKawaseDown { new QOpenGLShaderProgram() }
 {
-    m_context = new QOpenGLContext();
     m_context->setFormat(QSurfaceFormat::defaultFormat());
     m_context->create();
 
-    m_surface = new QOffscreenSurface();
     m_surface->create();
 
     QSurfaceFormat format;
@@ -46,19 +49,16 @@ Blur::Blur()
     // clang-format off
 
     // {{{ gaussian
-    m_gaussianBlur = new QOpenGLShaderProgram();
     m_gaussianBlur->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/contour/opengl/shaders/simple.vert");
     m_gaussianBlur->addShaderFromSourceFile(QOpenGLShader::Fragment, ":/contour/opengl/shaders/blur_gaussian.frag");
     m_gaussianBlur->link();
     // }}}
 
     // {{{ dual kawase
-    m_shaderKawaseUp = new QOpenGLShaderProgram();
     m_shaderKawaseUp->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/contour/opengl/shaders/simple.vert");
     m_shaderKawaseUp->addShaderFromSourceFile(QOpenGLShader::Fragment, ":/contour/opengl/shaders/dual_kawase_up.frag");
     m_shaderKawaseUp->link();
 
-    m_shaderKawaseDown = new QOpenGLShaderProgram();
     m_shaderKawaseDown->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/contour/opengl/shaders/simple.vert");
     m_shaderKawaseDown->addShaderFromSourceFile(QOpenGLShader::Fragment, ":/contour/opengl/shaders/dual_kawase_down.frag");
     m_shaderKawaseDown->link();
@@ -86,7 +86,6 @@ Blur::Blur()
     m_textureToBlur->setWrapMode(QOpenGLTexture::ClampToEdge);
     m_textureToBlur->setMinMagFilters(QOpenGLTexture::Linear, QOpenGLTexture::Linear);
 
-    m_iterations = -1;
     m_imageToBlur = QImage();
 }
 
@@ -98,8 +97,8 @@ Blur::~Blur()
     delete m_shaderKawaseDown;
     delete m_gaussianBlur;
 
-    for (int i = 0; i < m_FBO_vector.size(); i++)
-        delete m_FBO_vector[i];
+    for (auto& i: m_FBO_vector)
+        delete i;
 
     delete m_textureToBlur;
 }
@@ -127,7 +126,7 @@ QImage Blur::blurGaussian(QImage imageToBlur)
 
     CPUTimer.start();
     renderToFBO(m_FBO_vector[0], m_textureToBlur->textureId(), m_gaussianBlur);
-    CPUTimerElapsedTime = CPUTimer.nsecsElapsed();
+    CPUTimerElapsedTime = (quint64) CPUTimer.nsecsElapsed();
     glEndQuery(GL_TIME_ELAPSED);
     GLint GPUTimerAvailable = 0;
     while (!GPUTimerAvailable)
@@ -181,7 +180,7 @@ QImage Blur::blurDualKawase(QImage imageToBlur, int offset, int iterations)
     // --------------- blur end ---------------
 
     // Get the CPU timer result
-    CPUTimerElapsedTime = CPUTimer.nsecsElapsed();
+    CPUTimerElapsedTime = (quint64) CPUTimer.nsecsElapsed();
 
     // Get the GPU timer result
     glEndQuery(GL_TIME_ELAPSED);
@@ -218,8 +217,8 @@ void Blur::renderToFBO(QOpenGLFramebufferObject* targetFBO,
 
 void Blur::initFBOTextures()
 {
-    for (int i = 0; i < m_FBO_vector.size(); i++)
-        delete m_FBO_vector[i];
+    for (auto& i: m_FBO_vector)
+        delete i;
 
     m_FBO_vector.clear();
     m_FBO_vector.append(new QOpenGLFramebufferObject(

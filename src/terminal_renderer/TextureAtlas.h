@@ -198,7 +198,7 @@ class AtlasBackend
   public:
     virtual ~AtlasBackend() = default;
 
-    virtual ImageSize atlasSize() const noexcept = 0;
+    [[nodiscard]] virtual ImageSize atlasSize() const noexcept = 0;
 
     /// Creates a new texture atlas, effectively destroying any prior existing one
     /// as there  can be only one atlas.
@@ -243,17 +243,15 @@ class TextureAtlas
     /// This will create at least one atlas in the backend.
     TextureAtlas(AtlasBackend& backend, AtlasProperties atlasProperties);
 
-    ~TextureAtlas();
-
     void reset(AtlasProperties atlasProperties);
 
     AtlasBackend& backend() noexcept { return _backend; }
 
-    ImageSize atlasSize() const noexcept { return _atlasSize; }
-    ImageSize tileSize() const noexcept { return _atlasProperties.tileSize; }
+    [[nodiscard]] ImageSize atlasSize() const noexcept { return _atlasSize; }
+    [[nodiscard]] ImageSize tileSize() const noexcept { return _atlasProperties.tileSize; }
 
     // Tests in LRU-cache if the tile
-    constexpr bool contains(crispy::StrongHash const& _id) const noexcept;
+    [[nodiscard]] constexpr bool contains(crispy::StrongHash const& _id) const noexcept;
 
     // Return type for in-place tile-construction callback.
     struct TileCreateData
@@ -293,17 +291,17 @@ class TextureAtlas
     // The index must be between 0 and number of direct-mapped tiles minus 1.
     TileAttributes<Metadata> const& directMapped(uint32_t index) const;
 
-    bool isDirectMappingEnabled() const noexcept { return !_directMapping.empty(); }
+    [[nodiscard]] bool isDirectMappingEnabled() const noexcept { return !_directMapping.empty(); }
 
-    TileLocation tileLocation(uint32_t tileIndex) const { return _tileLocations[tileIndex]; }
+    [[nodiscard]] TileLocation tileLocation(uint32_t tileIndex) const { return _tileLocations[tileIndex]; }
 
     // Retrieves the number of total tiles that can be stored.
-    size_t capacity() const noexcept { return _tileLocations.size(); }
+    [[nodiscard]] size_t capacity() const noexcept { return _tileLocations.size(); }
 
     void inspect(std::ostream& output) const;
 
-    uint32_t tilesInX() const noexcept { return _tilesInX; }
-    uint32_t tilesInY() const noexcept { return _tilesInY; }
+    [[nodiscard]] uint32_t tilesInX() const noexcept { return _tilesInX; }
+    [[nodiscard]] uint32_t tilesInY() const noexcept { return _tilesInY; }
 
   private:
     using TileCache = crispy::StrongLRUHashtable<TileAttributes<Metadata>>;
@@ -345,7 +343,7 @@ struct DirectMapping
     constexpr operator bool() const noexcept { return count != 0; }
     constexpr bool operator!() const noexcept { return count == 0; }
 
-    uint32_t toTileIndex(uint32_t directMappingIndex) const noexcept
+    [[nodiscard]] uint32_t toTileIndex(uint32_t directMappingIndex) const noexcept
     {
         Require(directMappingIndex < count);
         return baseIndex + directMappingIndex;
@@ -413,7 +411,7 @@ constexpr auto sliced(Width tileWidth, uint32_t offsetX, ImageSize bitmapSize)
             }
         };
 
-        constexpr uint32_t offsetForEndX() const noexcept
+        [[nodiscard]] constexpr uint32_t offsetForEndX() const noexcept
         {
             auto const c = unbox<uint32_t>(bitmapSize.width) % unbox<uint32_t>(tileWidth);
             return unbox<uint32_t>(bitmapSize.width) + c;
@@ -530,11 +528,6 @@ TextureAtlas<Metadata>::TextureAtlas(AtlasBackend& backend, AtlasProperties atla
     }
 
     _directMapping.resize(_atlasProperties.directMappingCount);
-}
-
-template <typename Metadata>
-TextureAtlas<Metadata>::~TextureAtlas()
-{
 }
 
 template <typename Metadata>

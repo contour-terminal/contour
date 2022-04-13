@@ -18,5 +18,5 @@
 
 TEST_CASE("BufferObject", "[BufferObject]")
 {
-    // TODO(pr)
+    // TODO
 }

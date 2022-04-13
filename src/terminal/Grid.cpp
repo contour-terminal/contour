@@ -29,7 +29,7 @@ using std::vector;
 namespace terminal
 {
 
-auto inline GridLog = logstore::Category(
+auto const inline GridLog = logstore::Category(
     "vt.grid", "Grid related", logstore::Category::State::Disabled, logstore::Category::Visibility::Hidden);
 
 namespace detail
@@ -151,7 +151,6 @@ template <typename Cell>
 void Grid<Cell>::verifyState() const
 {
 #if !defined(NDEBUG)
-    auto const ringBufferLinesCount = lines_.size();
     // maxHistoryLineCount_ + pageSize_.lines
     Require(LineCount::cast_from(lines_.size()) >= totalLineCount());
     Require(LineCount::cast_from(lines_.size()) >= linesUsed_);
@@ -607,7 +606,7 @@ CellLocation Grid<Cell>::growLines(LineCount _newHeight, CellLocation _cursor)
     // ? Require(linesToTakeFromSavedLines == LineCount(0));
 
     auto const newTotalLineCount = maxHistoryLineCount_ + _newHeight;
-    auto const currentTotalLineCount = LineCount(lines_.size());
+    auto const currentTotalLineCount = LineCount::cast_from(lines_.size());
     auto const linesToFill = max(0, *newTotalLineCount - *currentTotalLineCount);
 
     for ([[maybe_unused]] auto const _: ranges::views::iota(0, linesToFill))
@@ -621,7 +620,7 @@ CellLocation Grid<Cell>::growLines(LineCount _newHeight, CellLocation _cursor)
     verifyState();
 
     return cursorMove;
-};
+}
 
 template <typename Cell>
 CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPos, bool _wrapPending)
@@ -841,7 +840,7 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
             shrinkedLines.reserve(totalLineCount);
             Require(totalLineCount == unbox<size_t>(this->totalLineCount()));
 
-            LineCount numLinesWritten = LineCount(0);
+            auto numLinesWritten = LineCount(0);
             for (auto i = -*historyLineCount(); i < *pageSize_.lines; ++i)
             {
                 auto& line = lines_[i];

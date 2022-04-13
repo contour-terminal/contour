@@ -95,7 +95,7 @@ namespace // {{{ helper
 
         if (auto const value = getenv("TERMINFO_DIRS"); value && *value)
             for (auto const dir: crispy::split(string_view(value), ':'))
-                locations.push_back(FileSystem::path(string(dir)));
+                locations.emplace_back(string(dir));
 
         locations.emplace_back("/usr/share/terminfo");
 
@@ -179,7 +179,7 @@ namespace // {{{ helper
         if (!child)
         {
             auto const defaultStr = crispy::escape(fmt::format("{}", _store));
-            auto const defaultStrQuoted = !defaultStr.empty() ? defaultStr : "\"\""s;
+            auto const defaultStrQuoted = !defaultStr.empty() ? defaultStr : R"("")";
             for (size_t i = _offset; i < _keys.size(); ++i)
             {
                 if (!parentKey.empty())
@@ -228,7 +228,7 @@ namespace // {{{ helper
                 parentKey += _keys[i];
             }
             ConfigLog()(
-                "Missing key {}. Using default: {}.", parentKey, !defaultStr.empty() ? defaultStr : "\"\""s);
+                "Missing key {}. Using default: {}.", parentKey, !defaultStr.empty() ? defaultStr : R"("")");
             return false;
         }
 
@@ -282,9 +282,9 @@ namespace // {{{ helper
         // return tryLoadValue(_usedKeys, _node, _childKeyPath, _store); // XXX _parentPath
         auto const keys = crispy::split(_childKeyPath, '.');
         string s = _parentPath;
-        for (size_t i = 0; i < keys.size(); ++i)
+        for (auto const key: keys)
         {
-            s += fmt::format(".{}", keys[i]);
+            s += fmt::format(".{}", key);
             _usedKeys.emplace(s);
         }
         return tryLoadValue(_usedKeys, _node, keys, 0, _store);
@@ -620,12 +620,12 @@ optional<terminal::Modifier> parseModifier(UsedKeys& _usedKeys,
         return nullopt;
 
     terminal::Modifier mods;
-    for (size_t i = 0; i < _node.size(); ++i)
+    for (const auto& i: _node)
     {
-        if (!_node[i].IsScalar())
+        if (!i.IsScalar())
             return nullopt;
 
-        auto const mod = parseModifierKey(_node[i].as<string>());
+        auto const mod = parseModifierKey(i.as<string>());
         if (!mod)
             return nullopt;
 
@@ -968,7 +968,7 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _baseP
                         if (value[0] == '#')
                             colors.palette[_offset + _index] = value;
                         else if (value.size() > 2 && value[0] == '0' && value[1] == 'x')
-                            colors.palette[_offset + _index] = nodeValue.as<unsigned long>();
+                            colors.palette[_offset + _index] = nodeValue.as<uint32_t>();
                     }
                 }
             };
@@ -985,7 +985,7 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _baseP
         {
             for (size_t i = 0; i < node.size() && i < 8; ++i)
                 if (node[i].IsScalar())
-                    colors.palette[i] = node[i].as<long>();
+                    colors.palette[i] = node[i].as<uint32_t>();
                 else
                     colors.palette[i] = node[i].as<string>();
         }
@@ -1047,9 +1047,9 @@ void softLoadFont(UsedKeys& _usedKeys,
         {
             _usedKeys.emplace(fmt::format("{}.{}", _basePath, "features"));
             YAML::Node featuresNode = _node["features"];
-            for (auto i = 0u; i < featuresNode.size(); ++i)
+            for (auto&& i: featuresNode)
             {
-                YAML::Node const featureNode = featuresNode[i];
+                auto const featureNode = i;
                 if (!featureNode.IsScalar() || featureNode.as<string>().size() != 4)
                 {
                     errorlog()("Invalid font feature \"{}\".", featureNode.as<string>());
@@ -1488,7 +1488,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     tryLoadChildRelative(_usedKeys, _profile, basePath, "cursor.blinking", boolValue);
     profile.cursorDisplay = boolValue ? terminal::CursorDisplay::Blink : terminal::CursorDisplay::Steady;
 
-    unsigned uintValue = profile.cursorBlinkInterval.count();
+    auto uintValue = profile.cursorBlinkInterval.count();
     tryLoadChildRelative(_usedKeys, _profile, basePath, "cursor.blinking_interval", uintValue);
     profile.cursorBlinkInterval = chrono::milliseconds(uintValue);
 
@@ -1627,6 +1627,15 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
     {
         // For improved performance ...
         ConfigLog()("read_buffer_size must be a multiple of 16.");
+    }
+
+    tryLoadValue(usedKeys, doc, "pty_buffer_size", _config.ptyBufferObjectSize);
+    if (_config.ptyBufferObjectSize < 1024 * 256)
+    {
+        // For improved performance ...
+        ConfigLog()("pty_buffer_size too small. This cann severily degrade performance. Forcing 256 KB as "
+                    "minimum acceptable setting.");
+        _config.ptyBufferObjectSize = 1024 * 256;
     }
 
     tryLoadValue(usedKeys, doc, "reflow_on_resize", _config.reflowOnResize);
