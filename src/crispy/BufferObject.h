@@ -152,7 +152,7 @@ class BufferFragment
     }
 
     std::string_view view() const noexcept { return region_; }
-    BufferObjectPtr const& owner() noexcept { return buffer_; }
+    BufferObjectPtr const& owner() const noexcept { return buffer_; }
 
     bool empty() const noexcept { return region_.empty(); }
     std::size_t size() const noexcept { return region_.size(); }
