@@ -15,8 +15,8 @@
 
 #include <terminal/CellFlags.h>
 #include <terminal/Color.h>
-#include <type_traits>
 
+#include <type_traits>
 #include <utility>
 
 namespace terminal

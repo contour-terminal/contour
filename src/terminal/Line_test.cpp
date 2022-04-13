@@ -51,7 +51,7 @@ TEST_CASE("Line.inflate", "[Line]")
     sgr.backgroundColor = Color::Indexed(IndexedColor::Yellow);
     sgr.underlineColor = Color::Indexed(IndexedColor::Red);
     sgr.styles |= CellFlags::CurlyUnderlined;
-    auto const trivial = TriviallyStyledLineBuffer { ColumnCount(10), sgr, HyperlinkId{}, bufferFragment };
+    auto const trivial = TriviallyStyledLineBuffer { ColumnCount(10), sgr, HyperlinkId {}, bufferFragment };
 
     auto const inflated = inflate<Cell>(trivial);
 
