@@ -493,6 +493,19 @@ void Screen<Cell>::advanceCursorAfterWrite(ColumnCount n) noexcept
 }
 
 template <typename Cell>
+bool Screen<Cell>::canResumeEmplace(std::string_view continuationChars) const noexcept
+{
+    auto& line = currentLine();
+    if (!line.isTrivialBuffer())
+        return false;
+    TriviallyStyledLineBuffer const& buffer = line.trivialBuffer();
+    return buffer.text.view().end() == continuationChars.begin()
+           && buffer.attributes == _state.cursor.graphicsRendition
+           && buffer.hyperlink == _state.cursor.hyperlink
+           && buffer.text.owner() == _terminal.currentPtyBuffer();
+}
+
+template <typename Cell>
 string_view Screen<Cell>::tryEmplaceChars(string_view _chars) noexcept
 {
     // if constexpr (!Line<Cell>::Optimized) // TODO(pr) enable me
@@ -503,14 +516,16 @@ string_view Screen<Cell>::tryEmplaceChars(string_view _chars) noexcept
 
     linefeedIfWrapPending();
 
-    if (!_terminal.isModeEnabled(DECMode::AutoWrap))
-        return _chars; // TODO(pr): An actually effecient implementation.
+    auto const columnsAvailable = pageSize().columns.value - _state.cursor.position.column.value;
+
+    if (!_terminal.isModeEnabled(DECMode::AutoWrap) && _chars.size() > static_cast<size_t>(columnsAvailable))
+        // With AutoWrap on, we can only emplace if it fits the line.
+        return _chars;
 
     if (_state.cursor.position.column.value == 0)
     {
         if (currentLine().empty())
         {
-            auto columnsAvailable = pageSize().columns.value - _state.cursor.position.column.value;
             auto const charsToWrite = min(columnsAvailable, static_cast<int>(_chars.size()));
             currentLine().reset(_state.cursor.graphicsRendition,
                                 _state.cursor.hyperlink,
@@ -527,12 +542,8 @@ string_view Screen<Cell>::tryEmplaceChars(string_view _chars) noexcept
         return _chars;
     }
 
-    if (_state.cursor.position.column.value > 0 && currentLine().isTrivialBuffer()
-        && currentLine().trivialBuffer().attributes == _state.cursor.graphicsRendition
-        && currentLine().trivialBuffer().hyperlink == _state.cursor.hyperlink
-        && currentLine().trivialBuffer().text.owner() == _terminal.currentPtyBuffer())
+    if (canResumeEmplace(_chars))
     {
-        auto columnsAvailable = pageSize().columns.value - _state.cursor.position.column.value;
         auto const charsToWrite = min(columnsAvailable, static_cast<int>(_chars.size()));
         currentLine().trivialBuffer().text.growBy(charsToWrite);
         advanceCursorAfterWrite(ColumnCount(charsToWrite));

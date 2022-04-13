@@ -101,10 +101,6 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
     void processSequence(Sequence const& seq) override;
     // }}}
 
-    std::string_view tryEmplaceChars(std::string_view chars) noexcept;
-    std::string_view tryEmplaceContinuousChars(std::string_view chars) noexcept;
-    void advanceCursorAfterWrite(ColumnCount n) noexcept;
-
     /// Renders the full screen by passing every grid cell to the callback.
     template <typename Renderer>
     void render(Renderer&& _render, ScrollOffset _scrollOffset = {}) const
@@ -458,6 +454,11 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
     void fail(std::string const& _message) const override;
 
   private:
+    std::string_view tryEmplaceChars(std::string_view chars) noexcept;
+    std::string_view tryEmplaceContinuousChars(std::string_view chars) noexcept;
+    bool canResumeEmplace(std::string_view continuationChars) const noexcept;
+    void advanceCursorAfterWrite(ColumnCount n) noexcept;
+
     void clearAllTabs();
     void clearTabUnderCursor();
     void setTabUnderCursor();
