@@ -116,7 +116,7 @@ Image::Data RasterizedImage::fragment(CellLocation _pos) const
                                  + *pixelOffset.column)
                                 * 4);
         auto const source = &image_->data()[startOffset];
-        target = copy(source, source + availableWidth * 4, target);
+        target = copy(source, source + static_cast<ptrdiff_t>(availableWidth) * 4, target);
 
         // fill vertical gap on right
         for (int x = availableWidth; x < unbox<int>(cellSize_.width); ++x)
