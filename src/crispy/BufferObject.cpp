@@ -16,6 +16,8 @@
 
 #include <fmt/format.h>
 
+#include <cassert>
+
 using std::destroy_n;
 using std::move;
 using std::size_t;
@@ -32,13 +34,13 @@ auto const inline BufferObjectLog = logstore::Category("BufferObject",
 BufferFragment::BufferFragment(BufferObjectPtr buffer, size_t offset, size_t size) noexcept:
     buffer_ { move(buffer) }, region_ { buffer_->data() + offset, size }
 {
-    assert(buffer_->begin() <= region_.begin() && region_.end() <= buffer_->end());
+    assert(buffer_->begin() <= &*region_.begin() && &*region_.end() <= buffer_->end());
 }
 
 BufferFragment::BufferFragment(BufferObjectPtr buffer, string_view region) noexcept:
     buffer_ { move(buffer) }, region_ { region }
 {
-    assert(buffer_->begin() <= region_.begin() && region_.end() <= buffer_->end());
+    assert(buffer_->begin() <= &*region_.begin() && &*region_.end() <= buffer_->end());
 }
 
 BufferObject::BufferObject(size_t capacity) noexcept:
