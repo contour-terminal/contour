@@ -129,7 +129,7 @@ class Line
         else
         {
             flags_ = static_cast<unsigned>(_flags);
-            for (Cell& cell: editable())
+            for (Cell& cell: inflatedBuffer())
             {
                 cell.reset();
                 cell.write(_attributes, _codepoint, _width);
@@ -158,7 +158,7 @@ class Line
      */
     void fill(ColumnOffset _start, GraphicsAttributes const& _sgr, std::string_view _ascii)
     {
-        auto& buffer = editable();
+        auto& buffer = inflatedBuffer();
 
         assert(unbox<size_t>(_start) + _ascii.size() <= buffer.size());
 
@@ -187,16 +187,16 @@ class Line
 
     gsl::span<Cell const> trim_blank_right() const noexcept;
 
-    gsl::span<Cell const> cells() const noexcept { return editable(); }
+    gsl::span<Cell const> cells() const noexcept { return inflatedBuffer(); }
 
     gsl::span<Cell> useRange(ColumnOffset _start, ColumnCount _count) noexcept
     {
 #if defined(__clang__) && __clang_major__ <= 11
-        auto const bufferSpan = gsl::span(editable());
+        auto const bufferSpan = gsl::span(inflatedBuffer());
         return bufferSpan.subspan(unbox<size_t>(_start), unbox<size_t>(_count));
 #else
         // Clang <= 11 cannot deal with this (e.g. FreeBSD 13 defaults to Clang 11).
-        return gsl::span(editable()).subspan(unbox<size_t>(_start), unbox<size_t>(_count));
+        return gsl::span(inflatedBuffer()).subspan(unbox<size_t>(_start), unbox<size_t>(_count));
 #endif
     }
 
@@ -204,7 +204,7 @@ class Line
     {
         Require(ColumnOffset(0) <= _column);
         Require(_column <= ColumnOffset::cast_from(size())); // Allow off-by-one for sentinel.
-        return editable()[unbox<size_t>(_column)];
+        return inflatedBuffer()[unbox<size_t>(_column)];
     }
 
     uint8_t cellEmptyAt(ColumnOffset column) const noexcept
@@ -215,7 +215,7 @@ class Line
             Require(column < ColumnOffset::cast_from(size()));
             return unbox<size_t>(column) >= trivialBuffer().text.size();
         }
-        return editable().at(unbox<size_t>(column)).empty();
+        return inflatedBuffer().at(unbox<size_t>(column)).empty();
     }
 
     uint8_t cellWithAt(ColumnOffset column) const noexcept
@@ -226,7 +226,7 @@ class Line
             Require(column < ColumnOffset::cast_from(size()));
             return 1; // TODO: When trivial line is to support Unicode, this should be adapted here.
         }
-        return editable().at(unbox<size_t>(column)).width();
+        return inflatedBuffer().at(unbox<size_t>(column)).width();
     }
 
     LineFlags flags() const noexcept { return static_cast<LineFlags>(flags_); }
@@ -271,14 +271,11 @@ class Line
     //
     // If this line has been stored in an optimized state, then
     // the line will be first unpacked into a vector of grid cells.
-    InflatedBuffer& editable();
-    InflatedBuffer const& editable() const;
+    InflatedBuffer& inflatedBuffer();
+    InflatedBuffer const& inflatedBuffer() const;
 
     TrivialBuffer& trivialBuffer() noexcept { return std::get<TrivialBuffer>(storage_); }
     TrivialBuffer const& trivialBuffer() const noexcept { return std::get<TrivialBuffer>(storage_); }
-
-    InflatedBuffer const& inflatedBuffer() const noexcept { return std::get<InflatedBuffer>(storage_); }
-    InflatedBuffer& inflatedBuffer() noexcept { return std::get<InflatedBuffer>(storage_); }
 
     bool isTrivialBuffer() const noexcept { return std::holds_alternative<TrivialBuffer>(storage_); }
     bool isInflatedBuffer() const noexcept { return std::holds_alternative<TrivialBuffer>(storage_); }
@@ -312,7 +309,7 @@ constexpr LineFlags operator&(LineFlags a, LineFlags b) noexcept
 }
 
 template <typename Cell>
-inline typename Line<Cell>::InflatedBuffer& Line<Cell>::editable()
+inline typename Line<Cell>::InflatedBuffer& Line<Cell>::inflatedBuffer()
 {
     if (std::holds_alternative<TrivialBuffer>(storage_))
         storage_ = inflate<Cell>(std::get<TrivialBuffer>(storage_));
@@ -320,9 +317,9 @@ inline typename Line<Cell>::InflatedBuffer& Line<Cell>::editable()
 }
 
 template <typename Cell>
-inline typename Line<Cell>::InflatedBuffer const& Line<Cell>::editable() const
+inline typename Line<Cell>::InflatedBuffer const& Line<Cell>::inflatedBuffer() const
 {
-    return const_cast<Line<Cell>*>(this)->editable();
+    return const_cast<Line<Cell>*>(this)->inflatedBuffer();
 }
 
 } // namespace terminal

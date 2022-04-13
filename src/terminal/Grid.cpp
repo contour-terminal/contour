@@ -291,7 +291,7 @@ template <typename Cell>
 std::string Grid<Cell>::lineText(Line<Cell> const& _line) const
 {
     std::stringstream sstr;
-    for (Cell const& cell: _line.editable())
+    for (Cell const& cell: _line.inflatedBuffer())
     {
         if (cell.codepointCount() == 0)
             sstr << ' ';
@@ -556,13 +556,13 @@ void Grid<Cell>::scrollLeft(GraphicsAttributes _defaultAttributes, Margin _margi
     for (LineOffset lineNo = _margin.vertical.from; lineNo <= _margin.vertical.to; ++lineNo)
     {
         auto& line = lineAt(lineNo);
-        auto column0 = line.editable().begin() + *_margin.horizontal.from;
-        auto column1 = line.editable().begin() + *_margin.horizontal.from + 1;
-        auto column2 = line.editable().begin() + *_margin.horizontal.to + 1;
+        auto column0 = line.inflatedBuffer().begin() + *_margin.horizontal.from;
+        auto column1 = line.inflatedBuffer().begin() + *_margin.horizontal.from + 1;
+        auto column2 = line.inflatedBuffer().begin() + *_margin.horizontal.to + 1;
         std::rotate(column0, column1, column2);
 
         auto const emptyCell = Cell { _defaultAttributes };
-        auto const emptyCellsBegin = line.editable().begin() + *_margin.horizontal.to;
+        auto const emptyCellsBegin = line.inflatedBuffer().begin() + *_margin.horizontal.to;
         std::fill_n(emptyCellsBegin, 1, emptyCell);
     }
 }
@@ -852,7 +852,7 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
                     if (line.wrapped() && line.inheritableFlags() == previousFlags)
                     {
                         // Prepend previously wrapped columns into current line.
-                        auto& editable = line.editable();
+                        auto& editable = line.inflatedBuffer();
                         editable.insert(editable.begin(), wrappedColumns.begin(), wrappedColumns.end());
                     }
                     else

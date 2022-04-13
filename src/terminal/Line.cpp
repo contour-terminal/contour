@@ -28,7 +28,7 @@ template <typename Cell>
 typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount _newColumnCount)
 {
     using crispy::Comparison;
-    auto& buffer = editable();
+    auto& buffer = inflatedBuffer();
     // TODO(pr): Efficiently handle TrivialBuffer-case.
     switch (crispy::strongCompare(_newColumnCount, size()))
     {
@@ -93,14 +93,14 @@ inline void Line<Cell>::resize(ColumnCount _count)
             return;
         }
     }
-    editable().resize(unbox<size_t>(_count));
+    inflatedBuffer().resize(unbox<size_t>(_count));
 }
 
 template <typename Cell>
 gsl::span<Cell const> Line<Cell>::trim_blank_right() const noexcept
 {
-    auto i = editable().data();
-    auto e = editable().data() + editable().size();
+    auto i = inflatedBuffer().data();
+    auto e = inflatedBuffer().data() + inflatedBuffer().size();
 
     while (i != e && (e - 1)->empty())
         --e;

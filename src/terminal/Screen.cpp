@@ -1124,9 +1124,9 @@ void Screen<Cell, TheScreenType>::insertChars(LineOffset _lineNo, ColumnCount _n
 {
     auto const n = min(*_n, *_state.margin.horizontal.to - *logicalCursorPosition().column + 1);
 
-    auto column0 = grid().lineAt(_lineNo).editable().begin() + *realCursorPosition().column;
-    auto column1 = grid().lineAt(_lineNo).editable().begin() + *_state.margin.horizontal.to - n + 1;
-    auto column2 = grid().lineAt(_lineNo).editable().begin() + *_state.margin.horizontal.to + 1;
+    auto column0 = grid().lineAt(_lineNo).inflatedBuffer().begin() + *realCursorPosition().column;
+    auto column1 = grid().lineAt(_lineNo).inflatedBuffer().begin() + *_state.margin.horizontal.to - n + 1;
+    auto column2 = grid().lineAt(_lineNo).inflatedBuffer().begin() + *_state.margin.horizontal.to + 1;
 
     rotate(column0, column1, column2);
 
