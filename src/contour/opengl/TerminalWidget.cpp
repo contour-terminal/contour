@@ -867,7 +867,7 @@ void TerminalWidget::doDumpState()
     {
         auto const screenStateDump = [&]() {
             auto os = std::stringstream {};
-            terminal().primaryScreen().inspect("Screen state dump.", os);
+            terminal().currentScreen().inspect("Screen state dump.", os);
             renderer_.inspect(os);
             return os.str();
         }();
