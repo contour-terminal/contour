@@ -194,7 +194,7 @@ inline void Cell::createExtra(Args... args) noexcept
     {
         extra_.reset(new CellExtra(std::forward<Args>(args)...));
     }
-    catch (std::bad_alloc)
+    catch (std::bad_alloc const&)
     {
         Require(extra_.ptr_ != nullptr);
     }
