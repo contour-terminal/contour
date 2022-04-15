@@ -171,6 +171,8 @@ struct TerminalState
     unsigned maxImageRegisterCount = 256;
     bool usePrivateColorRegisters = false;
 
+    bool usingStdoutFastPipe = false;
+
     // Hyperlink related
     //
     HyperlinkStorage hyperlinks {};

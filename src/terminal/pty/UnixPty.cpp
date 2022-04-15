@@ -55,6 +55,7 @@ using std::numeric_limits;
 using std::optional;
 using std::runtime_error;
 using std::string_view;
+using std::tuple;
 
 using namespace std::string_literals;
 
@@ -76,8 +77,8 @@ namespace
 
         // input flags
 #if defined(IUTF8)
-        tio.c_iflag |=
-            IUTF8; // Input is UTF-8; this allows character-erase to be properly applied in cooked mode.
+        // Input is UTF-8; this allows character-erase to be properly applied in cooked mode.
+        tio.c_iflag |= IUTF8;
 #endif
 
         // special characters
@@ -426,11 +427,13 @@ int waitForReadable(int ptyMaster,
     }
 }
 
-optional<std::string_view> UnixPty::read(BufferObject& sink, std::chrono::milliseconds timeout)
+optional<tuple<string_view, bool>> UnixPty::read(crispy::BufferObject& sink,
+                                                 std::chrono::milliseconds timeout)
 {
     // TODO: We might want to make the read size limit configurable. Especially for the stdout-fastpipe.
     if (int fd = waitForReadable(_masterFd, _stdoutFastPipe.reader(), _pipe[0], timeout); fd != -1)
-        return readSome(fd, sink.hotEnd(), min(size_t { 16384 }, sink.bytesAvailable()));
+        if (auto x = readSome(fd, sink.hotEnd(), min(size_t { 4096 }, sink.bytesAvailable())))
+            return { tuple { x.value(), fd == _stdoutFastPipe.reader() } };
 
     return nullopt;
 }

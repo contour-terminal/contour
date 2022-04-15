@@ -4,6 +4,7 @@ using namespace std::chrono;
 using std::nullopt;
 using std::optional;
 using std::string_view;
+using std::tuple;
 
 namespace terminal
 {
@@ -29,12 +30,13 @@ optional<string_view> MockPty::read(size_t _size, std::chrono::milliseconds)
     return result;
 }
 
-optional<string_view> MockPty::read(crispy::BufferObject& storage, std::chrono::milliseconds _timeout)
+optional<tuple<string_view, bool>> MockPty::read(crispy::BufferObject& storage,
+                                                 std::chrono::milliseconds /*timeout*/)
 {
     auto const n = std::min(outputBuffer_.size() - outputReadOffset_, storage.bytesAvailable());
     auto const chunk = string_view { outputBuffer_.data() + outputReadOffset_, n };
     outputReadOffset_ += n;
-    return storage.writeAtEnd(chunk);
+    return { tuple { storage.writeAtEnd(chunk), false } };
 }
 
 void MockPty::wakeupReader()

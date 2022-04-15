@@ -864,19 +864,16 @@ template <typename Cell, ScreenType TheScreenType>
 void Screen<Cell, TheScreenType>::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
 {
     auto const scrollCount = grid().scrollUp(n, sgr, margin);
+    updateCursorIterator();
+    // TODO only call onBufferScrolled if full page margin
     _terminal.onBufferScrolled(scrollCount);
-}
-
-template <typename Cell, ScreenType TheScreenType>
-void Screen<Cell, TheScreenType>::scrollUp(LineCount _n, Margin _margin)
-{
-    scrollUp(_n, cursor().graphicsRendition, _margin);
 }
 
 template <typename Cell, ScreenType TheScreenType>
 void Screen<Cell, TheScreenType>::scrollDown(LineCount _n, Margin _margin)
 {
     grid().scrollDown(_n, cursor().graphicsRendition, _margin);
+    updateCursorIterator();
 }
 
 template <typename Cell, ScreenType TheScreenType>
@@ -899,7 +896,11 @@ string Screen<Cell, TheScreenType>::renderMainPageText() const
 template <typename Cell, ScreenType TheScreenType>
 void Screen<Cell, TheScreenType>::linefeed()
 {
-    linefeed(_state.margin.horizontal.from);
+    // If coming through stdout-fastpipe, the LF acts like CRLF.
+    if (_state.usingStdoutFastPipe)
+        linefeed(_state.margin.horizontal.from);
+    else
+        linefeed(_state.cursor.position.column);
 }
 
 template <typename Cell, ScreenType TheScreenType>
@@ -1251,7 +1252,6 @@ void Screen<Cell, TheScreenType>::deleteLines(LineCount _n)
         scrollUp(_n,
                  Margin { Margin::Vertical { _state.cursor.position.line, _state.margin.vertical.to },
                           _state.margin.horizontal });
-        updateCursorIterator();
     }
 }
 

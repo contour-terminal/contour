@@ -156,8 +156,8 @@ bool Terminal::processInputOnce()
                        currentPtyBuffer_->bytesAvailable());
         currentPtyBuffer_ = ptyBufferPool_.allocateBufferObject();
     }
-    optional<string_view> const bufOpt = pty_->read(*currentPtyBuffer_, timeout);
-    if (!bufOpt)
+    optional<tuple<string_view, bool>> const readResult = pty_->read(*currentPtyBuffer_, timeout);
+    if (!readResult)
     {
         if (errno != EINTR && errno != EAGAIN)
         {
@@ -166,7 +166,8 @@ bool Terminal::processInputOnce()
         }
         return errno == EINTR || errno == EAGAIN;
     }
-    string_view const buf = *bufOpt;
+    string_view const buf = get<0>(*readResult);
+    state_.usingStdoutFastPipe = get<1>(*readResult);
 
     if (buf.empty())
     {

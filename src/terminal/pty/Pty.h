@@ -81,8 +81,8 @@ class Pty
     /// @returns view to the consumed buffer.
     virtual std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) = 0;
 
-    virtual std::optional<std::string_view> read(crispy::BufferObject& storage,
-                                                 std::chrono::milliseconds _timeout) = 0;
+    [[nodiscard]] virtual std::optional<std::tuple<std::string_view, bool>> read(
+        crispy::BufferObject& storage, std::chrono::milliseconds timeout) = 0;
 
     /// Inerrupts the read() operation on this PTY if a read() is currently in progress.
     ///

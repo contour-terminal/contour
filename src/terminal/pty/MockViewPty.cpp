@@ -16,6 +16,7 @@
 
 using std::optional;
 using std::string_view;
+using std::tuple;
 
 namespace terminal
 {
@@ -39,12 +40,13 @@ optional<string_view> MockViewPty::read(size_t _maxSize, std::chrono::millisecon
     return result;
 }
 
-optional<string_view> MockViewPty::read(crispy::BufferObject& storage, std::chrono::milliseconds timeout)
+optional<tuple<string_view, bool>> MockViewPty::read(crispy::BufferObject& storage,
+                                                     std::chrono::milliseconds /*timeout*/)
 {
     auto const n = std::min(std::min(outputBuffer_.size(), storage.bytesAvailable()), size_t { 4096 });
     auto result = storage.writeAtEnd(outputBuffer_.substr(0, n));
     outputBuffer_.remove_prefix(n);
-    return result;
+    return { tuple { result, false } };
 }
 
 void MockViewPty::wakeupReader()

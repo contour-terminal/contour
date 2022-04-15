@@ -67,7 +67,7 @@ class ScreenBase: public SequenceHandler
     virtual void inspect(std::string const& _message, std::ostream& _os) const = 0;
 };
 
-#define LIBTERMINAL_CURRENT_LINE_CACHE 1
+//#define LIBTERMINAL_CURRENT_LINE_CACHE 1
 
 /**
  * Terminal Screen.
@@ -492,5 +492,11 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
 #endif
     std::unique_ptr<SixelImageBuilder> sixelImageBuilder_;
 };
+
+template <typename Cell, ScreenType TheScreenType>
+inline void Screen<Cell, TheScreenType>::scrollUp(LineCount _n, Margin _margin)
+{
+    scrollUp(_n, cursor().graphicsRendition, _margin);
+}
 
 } // namespace terminal

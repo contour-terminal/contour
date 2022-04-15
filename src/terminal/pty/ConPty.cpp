@@ -137,7 +137,7 @@ void ConPty::close()
     }
 }
 
-optional<string_view> ConPty::read(crispy::BufferObject& buffer, std::chrono::milliseconds timeout)
+optional<tuple<string_view, bool>> read(crispy::BufferObject& storage, std::chrono::milliseconds timeout)
 {
     // TODO: wait for timeout time at most AND got woken up upon wakeupReader() invokcation.
     (void) timeout;
@@ -148,7 +148,7 @@ optional<string_view> ConPty::read(crispy::BufferObject& buffer, std::chrono::mi
     if (!ReadFile(input_, buffer.hotEnd(), n, &nread, nullptr))
         return nullopt;
 
-    return string_view { buffer.hotEnd(), nread };
+    return { tuple { string_view { buffer.hotEnd(), nread }, false } };
 }
 
 optional<string_view> ConPty::read(size_t _size, std::chrono::milliseconds _timeout)
