@@ -457,12 +457,12 @@ string_view Screen<Cell, TheScreenType>::tryEmplaceContinuousChars(string_view _
 {
     while (!_chars.empty())
     {
-        linefeed();
+        crlf();
         if (!currentLine().empty())
             break;
 
-        auto columnsAvailable = pageSize().columns.value - _state.cursor.position.column.value;
-        auto const charsToWrite = min(columnsAvailable, static_cast<int>(_chars.size()));
+        auto columnsAvailable = (_state.margin.horizontal.to.value + 1) - _state.cursor.position.column.value;
+        auto const charsToWrite = static_cast<size_t>(min(columnsAvailable, static_cast<int>(_chars.size())));
 
         currentLine().reset(_state.cursor.graphicsRendition,
                             _state.cursor.hyperlink,
@@ -470,7 +470,7 @@ string_view Screen<Cell, TheScreenType>::tryEmplaceContinuousChars(string_view _
                                 _terminal.currentPtyBuffer(),
                                 _chars.substr(0, charsToWrite),
                             });
-        advanceCursorAfterWrite(ColumnCount(charsToWrite));
+        advanceCursorAfterWrite(ColumnCount::cast_from(charsToWrite));
         _chars.remove_prefix(charsToWrite);
     }
 
@@ -511,7 +511,7 @@ string_view Screen<Cell, TheScreenType>::tryEmplaceChars(string_view _chars) noe
     if (!_terminal.isFullHorizontalMargins())
         return _chars;
 
-    linefeedIfWrapPending();
+    crlfIfWrapPending();
 
     auto const columnsAvailable = pageSize().columns.value - _state.cursor.position.column.value;
 
@@ -567,12 +567,12 @@ void Screen<Cell, TheScreenType>::writeText(string_view _chars)
 }
 
 template <typename Cell, ScreenType TheScreenType>
-void Screen<Cell, TheScreenType>::linefeedIfWrapPending()
+void Screen<Cell, TheScreenType>::crlfIfWrapPending()
 {
     if (_state.wrapPending && _state.cursor.autoWrap) // && !_terminal.isModeEnabled(DECMode::TextReflow))
     {
         bool const lineWrappable = currentLine().wrappable();
-        linefeed(_state.margin.horizontal.from);
+        crlf();
         if (lineWrappable)
             currentLine().setFlag(LineFlags::Wrappable | LineFlags::Wrapped, true);
     }
@@ -586,7 +586,7 @@ void Screen<Cell, TheScreenType>::writeText(char32_t _char)
         VTParserTraceLog()("text: \"{}\"", unicode::convert_to<char>(_char));
 #endif
 
-    linefeedIfWrapPending();
+    crlfIfWrapPending();
 
     char32_t const codepoint = _state.cursor.charsets.map(_char);
 
@@ -856,8 +856,8 @@ void Screen<Cell, TheScreenType>::linefeed(ColumnOffset _newColumn)
         // it may be faster to just incrementally update them.
         // moveCursorTo({logicalCursorPosition().line + 1, _state.margin.horizontal.from});
         _state.cursor.position.line++;
+        updateCursorIterator();
     }
-    updateCursorIterator();
 }
 
 template <typename Cell, ScreenType TheScreenType>

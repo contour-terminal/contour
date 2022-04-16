@@ -122,7 +122,8 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
     ///          including initial clear screen, and initial cursor hide.
     std::string screenshot(std::function<std::string(LineOffset)> const& _postLine = {}) const;
 
-    void linefeedIfWrapPending();
+    void crlf() { linefeed(_state.margin.horizontal.from); }
+    void crlfIfWrapPending();
 
     // {{{ VT API
     void linefeed(); // LF
