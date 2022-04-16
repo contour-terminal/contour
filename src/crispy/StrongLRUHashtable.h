@@ -882,7 +882,8 @@ inline int StrongLRUHashtable<Value>::validateChange(int adj)
     _lastLRUCount = count;
     return newLRUCount;
 #else
-    return _size;
+    (void) adj;
+    return int(_size);
 #endif
 }
 
