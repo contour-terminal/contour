@@ -60,7 +60,7 @@ class Renderer
      * @p atlasTileCount     Number of tiles guaranteed to be available in LRU cache.
      */
     Renderer(PageSize screenSize,
-             FontDescriptions const& fontDescriptions,
+             FontDescriptions fontDescriptions,
              ColorPalette const& colorPalette,
              Opacity backgroundOpacity,
              crispy::StrongHashtableSize atlasHashtableSlotCount,

@@ -15,6 +15,7 @@
 
 #include <terminal/primitives.h>
 
+#include <crispy/BufferObject.h>
 #include <crispy/boxed.h>
 #include <crispy/logstore.h>
 
@@ -42,16 +43,20 @@ class PtySlave
   public:
     virtual ~PtySlave() = default;
     virtual void close() = 0;
-    virtual bool isClosed() const noexcept = 0;
-    virtual bool login() = 0;
+    [[nodiscard]] virtual bool isClosed() const noexcept = 0;
+    [[nodiscard]] virtual bool configure() noexcept = 0;
+    [[nodiscard]] virtual bool login() = 0;
+    [[nodiscard]] virtual int write(std::string_view text) noexcept = 0;
 };
 
 class PtySlaveDummy: public PtySlave
 {
   public:
     void close() override {}
-    bool isClosed() const noexcept override { return false; }
-    bool login() override { return false; }
+    [[nodiscard]] bool isClosed() const noexcept override { return false; }
+    bool configure() noexcept override { return true; }
+    bool login() override { return true; }
+    int write(std::string_view) noexcept override { return 0; }
 };
 
 class Pty
@@ -67,14 +72,18 @@ class Pty
     virtual void close() = 0;
 
     /// Returns true if the underlying PTY is closed, otherwise false.
-    virtual bool isClosed() const noexcept = 0;
+    [[nodiscard]] virtual bool isClosed() const noexcept = 0;
 
     /// Reads from the terminal whatever has been written to from the other side of the terminal.
     ///
     /// @param _size   Capacity of parameter @p buf. At most @p size bytes will be stored into it.
     ///
     /// @returns view to the consumed buffer.
-    virtual std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) = 0;
+    [[nodiscard]] virtual std::optional<std::string_view> read(size_t _size,
+                                                               std::chrono::milliseconds _timeout) = 0;
+
+    [[nodiscard]] virtual std::optional<std::tuple<std::string_view, bool>> read(
+        crispy::BufferObject& storage, std::chrono::milliseconds timeout, size_t size) = 0;
 
     /// Inerrupts the read() operation on this PTY if a read() is currently in progress.
     ///
@@ -90,16 +99,16 @@ class Pty
     /// @param size   Number of bytes in @p buf to write.
     ///
     /// @returns Number of bytes written or -1 on error.
-    virtual int write(char const* buf, size_t size) = 0;
+    [[nodiscard]] virtual int write(char const* buf, size_t size) = 0;
 
     /// @returns current underlying window size in characters width and height.
-    virtual PageSize pageSize() const noexcept = 0;
+    [[nodiscard]] virtual PageSize pageSize() const noexcept = 0;
 
     /// Resizes underlying window buffer by given character width and height.
     virtual void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) = 0;
 };
 
-std::unique_ptr<Pty> createPty(PageSize pageSize, std::optional<ImageSize> viewSize);
+[[nodiscard]] std::unique_ptr<Pty> createPty(PageSize pageSize, std::optional<ImageSize> viewSize);
 
 auto const inline PtyLog = logstore::Category("pty", "Logs general PTY informations.");
 auto const inline PtyInLog = logstore::Category("pty.input", "Logs PTY raw input.");

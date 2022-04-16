@@ -71,7 +71,7 @@ struct RenderBufferRef
     RenderBuffer const& buffer;
     std::mutex& guard;
 
-    RenderBuffer const& get() const noexcept { return buffer; }
+    [[nodiscard]] RenderBuffer const& get() const noexcept { return buffer; }
 
     RenderBufferRef(RenderBuffer const& _buf, std::mutex& _lock): buffer { _buf }, guard { _lock }
     {

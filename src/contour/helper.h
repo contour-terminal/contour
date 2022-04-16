@@ -59,7 +59,7 @@ namespace detail
       public:
         FunctionCallEvent(Fun&& fun): QEvent(QEvent::None), fun(std::move(fun)) {}
         FunctionCallEvent(Fun const& fun): QEvent(QEvent::None), fun(fun) {}
-        ~FunctionCallEvent() { fun(); }
+        ~FunctionCallEvent() override { fun(); }
     };
 } // namespace detail
 

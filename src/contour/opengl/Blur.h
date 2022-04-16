@@ -50,7 +50,7 @@ class Blur: protected QOpenGLFunctions_3_3_Core
 {
   public:
     Blur();
-    ~Blur();
+    ~Blur() override;
 
     QImage blurDualKawase(QImage imageToBlur, int offset, int iterations);
     QImage blurGaussian(QImage imageToBlur);
@@ -62,9 +62,13 @@ class Blur: protected QOpenGLFunctions_3_3_Core
     void renderToFBO(QOpenGLFramebufferObject* targetFBO, GLuint sourceTexture, QOpenGLShaderProgram* shader);
     void initFBOTextures();
 
+    //.
+    QOpenGLContext* m_context;
+    QOffscreenSurface* m_surface;
+    QOpenGLShaderProgram* m_gaussianBlur = nullptr;
     QOpenGLShaderProgram* m_shaderKawaseUp = nullptr;
     QOpenGLShaderProgram* m_shaderKawaseDown = nullptr;
-    QOpenGLShaderProgram* m_gaussianBlur = nullptr;
+    //.
 
     QVector<QOpenGLFramebufferObject*> m_FBO_vector;
     QOpenGLTexture* m_textureToBlur;
@@ -72,18 +76,15 @@ class Blur: protected QOpenGLFunctions_3_3_Core
     QOpenGLVertexArrayObject m_VertexArrayObject;
     QOpenGLBuffer m_vertexBuffer;
 
-    QOffscreenSurface* m_surface;
-    QOpenGLContext* m_context;
-
-    int m_iterations;
+    int m_iterations = -1;
     QImage m_imageToBlur;
 
     // GPU timer
-    GLuint64 GPUtimerElapsedTime;
+    GLuint64 GPUtimerElapsedTime {};
 
     // CPU timer
     QElapsedTimer CPUTimer;
-    quint64 CPUTimerElapsedTime;
+    quint64 CPUTimerElapsedTime {};
 };
 
 } // namespace contour::opengl

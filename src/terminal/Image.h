@@ -199,13 +199,13 @@ class ImageFragment
 
     ~ImageFragment();
 
-    RasterizedImage const& rasterizedImage() const noexcept { return *rasterizedImage_; }
+    [[nodiscard]] RasterizedImage const& rasterizedImage() const noexcept { return *rasterizedImage_; }
 
     /// @returns offset of this image fragment in pixels into the underlying image.
     CellLocation offset() const noexcept { return offset_; }
 
     /// Extracts the data from the image that is to be rendered.
-    Image::Data data() const { return rasterizedImage_->fragment(offset_); }
+    [[nodiscard]] Image::Data data() const { return rasterizedImage_->fragment(offset_); }
 
   private:
     std::shared_ptr<RasterizedImage const> rasterizedImage_;
@@ -260,7 +260,7 @@ class ImagePool
     // named image access
     //
     void link(std::string const& _name, std::shared_ptr<Image const> _imageRef);
-    std::shared_ptr<Image const> findImageByName(std::string const& _name) const noexcept;
+    [[nodiscard]] std::shared_ptr<Image const> findImageByName(std::string const& _name) const noexcept;
     void unlink(std::string const& _name);
 
     void inspect(std::ostream& os) const;

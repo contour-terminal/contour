@@ -108,25 +108,25 @@ struct ColorPalette
     }
     ();
 
-    RGBColor normalColor(size_t _index) const noexcept
+    [[nodiscard]] RGBColor normalColor(size_t _index) const noexcept
     {
         assert(_index < 8);
         return palette.at(_index);
     }
 
-    RGBColor brightColor(size_t _index) const noexcept
+    [[nodiscard]] RGBColor brightColor(size_t _index) const noexcept
     {
         assert(_index < 8);
         return palette.at(_index + 8);
     }
 
-    RGBColor dimColor(size_t _index) const
+    [[nodiscard]] RGBColor dimColor(size_t _index) const
     {
         assert(_index < 8);
         return palette.at(_index); // TODO
     }
 
-    RGBColor indexedColor(size_t _index) const noexcept
+    [[nodiscard]] RGBColor indexedColor(size_t _index) const noexcept
     {
         assert(_index < 256);
         return palette.at(_index);

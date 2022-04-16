@@ -41,15 +41,15 @@ class Viewport
     {
     }
 
-    ScrollOffset scrollOffset() const noexcept { return scrollOffset_; }
+    [[nodiscard]] ScrollOffset scrollOffset() const noexcept { return scrollOffset_; }
 
     /// Tests if the viewport has been moved(/scrolled) off its main view position.
     ///
     /// @retval true viewport has been moved/scrolled off its main view position.
     /// @retval false viewport has NOT been moved/scrolled and is still located at its main view position.
-    bool scrolled() const noexcept { return scrollOffset_.value != 0; }
+    [[nodiscard]] bool scrolled() const noexcept { return scrollOffset_.value != 0; }
 
-    bool isLineVisible(LineOffset _line) const noexcept
+    [[nodiscard]] bool isLineVisible(LineOffset _line) const noexcept
     {
         auto const a = -scrollOffset_.as<int>();
         auto const b = _line.as<int>();
@@ -77,9 +77,9 @@ class Viewport
     }
 
   private:
-    LineCount historyLineCount() const noexcept;
-    LineCount screenLineCount() const noexcept;
-    bool scrollingDisabled() const noexcept;
+    [[nodiscard]] LineCount historyLineCount() const noexcept;
+    [[nodiscard]] LineCount screenLineCount() const noexcept;
+    [[nodiscard]] bool scrollingDisabled() const noexcept;
 
     // private fields
     //

@@ -12,22 +12,42 @@
  * limitations under the License.
  */
 
+#include <terminal/MockTerm.h>
 #include <terminal/Terminal.h>
 #include <terminal/logging.h>
 #include <terminal/pty/MockViewPty.h>
 
 #include <crispy/App.h>
 #include <crispy/CLI.h>
+#include <crispy/utils.h>
 
 #include <fmt/format.h>
 
 #include <iostream>
 #include <optional>
 #include <random>
+#include <thread>
 
 #include <libtermbench/termbench.h>
 
 using namespace std;
+
+namespace
+{
+
+std::string createText(size_t bytes)
+{
+    std::string text;
+    while (text.size() < bytes)
+    {
+        text += char('A' + (rand() % 26));
+        if ((text.size() % 65) == 0)
+            text += '\n';
+    }
+    return text;
+}
+
+} // namespace
 
 class NullParserEvents
 {
@@ -137,10 +157,18 @@ class ContourHeadlessBench: public crispy::App
             Project { "fmt", "MIT", "https://github.com/fmtlib/fmt" });
         link("bench-headless.parser", bind(&ContourHeadlessBench::benchParserOnly, this));
         link("bench-headless.grid", bind(&ContourHeadlessBench::benchGrid, this));
+        link("bench-headless.pty", bind(&ContourHeadlessBench::benchPTY, this));
         link("bench-headless.meta", bind(&ContourHeadlessBench::showMetaInfo, this));
+
+        char const* logFilterString = getenv("LOG");
+        if (logFilterString)
+        {
+            logstore::configure(logFilterString);
+            crispy::App::customizeLogStoreOutput();
+        }
     }
 
-    crispy::cli::Command parameterDefinition() const override
+    [[nodiscard]] crispy::cli::Command parameterDefinition() const override
     {
         auto const perfOptions = CLI::OptionList {
             CLI::Option { "size", CLI::Value { 32u }, "Number of megabyte to process per test.", "MB" },
@@ -162,11 +190,13 @@ class ContourHeadlessBench: public crispy::App
                 CLI::Command { "license",
                                "Shows the license, and project URL of the used projects and Contour." },
                 CLI::Command { "grid",
-                               "Shows the license, and project URL of the used projects and Contour.",
+                               "Performs performance tests utilizing the full grid including VT parser.",
                                perfOptions },
-                CLI::Command { "parser",
-                               "Shows the license, and project URL of the used projects and Contour.",
-                               perfOptions },
+                CLI::Command {
+                    "parser", "Performs performance tests utilizing the VT parser only.", perfOptions },
+                CLI::Command {
+                    "pty",
+                    "Performs performance tests utilizing the underlying operating system's PTY only." },
             }
         };
     }
@@ -196,41 +226,126 @@ class ContourHeadlessBench: public crispy::App
     int benchGrid()
     {
         auto pageSize = terminal::PageSize { terminal::LineCount(25), terminal::ColumnCount(80) };
-        auto const ptyReadBufferSize = 10000;
-        auto maxHistoryLineCount = terminal::LineCount(4096);
-        auto eh = terminal::Terminal::Events {};
-        auto vt = terminal::Terminal {
-            make_unique<terminal::MockViewPty>(pageSize), ptyReadBufferSize, eh, maxHistoryLineCount
-        };
-        auto* pty = static_cast<terminal::MockViewPty*>(&vt.device());
-        vt.setMode(terminal::DECMode::AutoWrap, true);
+        size_t const ptyReadBufferSize = 1'000'000;
+        auto maxHistoryLineCount = terminal::LineCount(4000);
+        auto vt = terminal::MockTerm<terminal::MockViewPty>(pageSize, maxHistoryLineCount, ptyReadBufferSize);
+        auto* pty = dynamic_cast<terminal::MockViewPty*>(&vt.terminal.device());
+        vt.terminal.setMode(terminal::DECMode::AutoWrap, true);
 
         auto const rv = baseBenchmark(
-            [&](char const* a, size_t b) {
+            [&](char const* a, size_t b) -> bool {
+                if (pty->isClosed())
+                    return false;
+                // clang-format off
+                // vt.writeToScreen(string_view(a, b));
                 pty->setReadData({ a, b });
-                do
-                    vt.processInputOnce();
-                while (!pty->stdoutBuffer().empty());
+                do vt.terminal.processInputOnce();
+                while (!pty->isClosed() && !pty->stdoutBuffer().empty());
+                // clang-format on
+                return true;
             },
             benchOptionsFor("grid"),
             "terminal with screen buffer");
         if (rv == EXIT_SUCCESS)
-            cout << fmt::format("{:>12}: {}\n\n", "history size", *vt.maxHistoryLineCount());
+            cout << fmt::format("{:>12}: {}\n\n", "history size", *vt.terminal.maxHistoryLineCount());
         return rv;
+    }
+
+    int benchPTY()
+    {
+        using std::chrono::steady_clock;
+        using terminal::ColumnCount;
+        using terminal::createPty;
+        using terminal::LineCount;
+        using terminal::PageSize;
+        using terminal::Pty;
+
+        // Benchmark configuration
+        // TODO make these values CLI configurable.
+        auto constexpr WritesPerLoop = 1;
+        auto constexpr PtyWriteSize = 4096;
+        auto constexpr PtyReadSize = 4096;
+        auto const BenchTime = chrono::seconds(10);
+
+        // Setup benchmark
+        std::string const text = createText(PtyWriteSize);
+        unique_ptr<Pty> ptyObject = createPty(PageSize { LineCount(25), ColumnCount(80) }, std::nullopt);
+        auto& pty = *ptyObject;
+        auto& ptySlave = pty.slave();
+        (void) ptySlave.configure();
+
+        auto bytesTransferred = uint64_t { 0 };
+        auto loopIterations = uint64_t { 0 };
+        auto ptyStdoutReaderThread = std::thread { [&]() {
+            while (!pty.isClosed())
+            {
+                optional<string_view> dataChunk = pty.read(PtyReadSize, std::chrono::seconds(2));
+                if (!dataChunk || dataChunk->empty())
+                    break;
+                bytesTransferred += dataChunk->size();
+                loopIterations++;
+            }
+        } };
+        auto cleanupReader = crispy::finally { [&]() {
+            pty.close();
+            ptyStdoutReaderThread.join();
+        } };
+
+        // Perform benchmark
+        fmt::print("Running PTY benchmark ...\n");
+        auto const startTime = steady_clock::now();
+        auto stopTime = startTime;
+        while (stopTime - startTime < BenchTime)
+        {
+            for (int i = 0; i < WritesPerLoop; ++i)
+                (void) ptySlave.write(text);
+            stopTime = steady_clock::now();
+        }
+
+        cleanupReader.perform();
+
+        // Create summary
+        auto const elapsedTime = stopTime - startTime;
+        auto const msecs = std::chrono::duration_cast<std::chrono::milliseconds>(elapsedTime);
+        auto const secs = std::chrono::duration_cast<std::chrono::seconds>(elapsedTime);
+        auto const mbPerSecs =
+            static_cast<long double>(bytesTransferred) / static_cast<long double>(secs.count());
+
+        fmt::print("\n");
+        fmt::print("PTY stdout throughput bandwidth test\n");
+        fmt::print("====================================\n\n");
+        fmt::print("Writes per loop        : {}\n", WritesPerLoop);
+        fmt::print("PTY write size         : {}\n", PtyWriteSize);
+        fmt::print("PTY read size          : {}\n", PtyReadSize);
+        fmt::print("Test time              : {}.{:03} seconds\n", msecs.count() / 1000, msecs.count() % 1000);
+        fmt::print("Data transferred       : {}\n", crispy::humanReadableBytes(bytesTransferred));
+        fmt::print("Reader loop iterations : {}\n", loopIterations);
+        fmt::print("Average size per read  : {}\n",
+                   crispy::humanReadableBytes(static_cast<long double>(bytesTransferred)
+                                              / static_cast<long double>(loopIterations)));
+        fmt::print("Transfer speed         : {} per second\n", crispy::humanReadableBytes(mbPerSecs));
+
+        return EXIT_SUCCESS;
     }
 
     int benchParserOnly()
     {
         auto po = NullParserEvents {};
         auto parser = terminal::parser::Parser { po };
-        return baseBenchmark([&](char const* a, size_t b) { parser.parseFragment(string_view(a, b)); },
-                             benchOptionsFor("parser"),
-                             "Parser only");
+        return baseBenchmark(
+            [&](char const* a, size_t b) -> bool {
+                parser.parseFragment(string_view(a, b));
+                return true;
+            },
+            benchOptionsFor("parser"),
+            "Parser only");
     }
 };
 
 int main(int argc, char const* argv[])
 {
+    srand(static_cast<unsigned int>(time(nullptr))); // initialize rand(). No strong seed required.
+
     ContourHeadlessBench app;
     return app.run(argc, argv);
 }

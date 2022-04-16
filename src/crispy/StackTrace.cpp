@@ -95,7 +95,7 @@ vector<void*> StackTrace::getFrames(size_t _skip, size_t _max)
     return frames;
 }
 
-optional<DebugInfo> StackTrace::getDebugInfoForFrame(void* p)
+optional<DebugInfo> StackTrace::getDebugInfoForFrame(void const* p)
 {
     if (!p)
         return nullopt;
@@ -215,16 +215,16 @@ vector<string> StackTrace::symbols() const
 
     auto const frames = getFrames(SKIP_FRAMES, MAX_FRAMES);
     vector<string> output;
-    for (size_t i = 0; i < frames.size(); ++i)
+    for (auto const* frame: frames)
     {
 #if defined(CONTOUR_STACKTRACE_ADDR2LINE)
-        auto debugInfo = getDebugInfoForFrame(frames[i]);
+        auto debugInfo = getDebugInfoForFrame(frame);
         if (!debugInfo)
-            output.emplace_back(fmt::format("{}", frames[i]));
+            output.emplace_back(fmt::format("{}", frame));
         else
             output.emplace_back(debugInfo->text);
 #else
-        output.emplace_back(fmt::format("{}", frames[i]));
+        output.emplace_back(fmt::format("{}", frame));
 #endif
     }
     return output;

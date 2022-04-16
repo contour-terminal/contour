@@ -388,8 +388,12 @@ void ContourGuiApp::showNotification(std::string_view _title, std::string_view _
     QProcess::execute(QString::fromLatin1("notify-send"), args);
 #elif defined(__APPLE__)
     // TODO: use Growl?
+    (void) _title;
+    (void) _content;
 #elif defined(_WIN32)
     // TODO: use Toast
+    (void) _title;
+    (void) _content;
 #endif
 }
 

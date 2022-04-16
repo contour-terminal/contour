@@ -183,8 +183,8 @@ using text::LocatorLog;
 
 namespace
 {
-    constexpr auto FirstReservedChar = 0x21;
-    constexpr auto LastReservedChar = 0x7E;
+    constexpr auto FirstReservedChar = char32_t { 0x21 };
+    constexpr auto LastReservedChar = char32_t { 0x7E };
     constexpr auto DirectMappedCharsCount = LastReservedChar - FirstReservedChar + 1;
 
     StrongHash hashGlyphKeyAndPresentation(text::glyph_key const& glyphKey,
@@ -231,7 +231,7 @@ namespace
         return atlas::Format::Red; // unreachable();
     }
 
-    int toFragmentShaderSelector(text::bitmap_format glyphFormat)
+    uint32_t toFragmentShaderSelector(text::bitmap_format glyphFormat)
     {
         auto const lcdShaderId = FRAGMENT_SELECTOR_GLYPH_LCD;
         // TODO ^^^ configurable vs FRAGMENT_SELECTOR_GLYPH_LCD_SIMPLE
@@ -339,7 +339,7 @@ void TextRenderer::initializeDirectMapping()
     _directMappedGlyphKeyToTileIndex.clear();
     _directMappedGlyphKeyToTileIndex.resize(LastReservedChar + 1);
 
-    for (char codepoint = FirstReservedChar; codepoint <= LastReservedChar; ++codepoint)
+    for (char32_t codepoint = FirstReservedChar; codepoint <= LastReservedChar; ++codepoint)
     {
         optional<text::glyph_position> gposOpt = textShaper_.shape(fonts_.regular, codepoint);
         if (!gposOpt)
@@ -568,14 +568,14 @@ void TextRenderer::flushTextClusterGroup()
                 auto const pen1 = applyGlyphPositionToPen(pen, *attributes, glyphPosition);
                 renderRasterizedGlyph(pen1, textClusterGroup_.color, *attributes);
 
-                int xOffset = unbox<int>(textureAtlas().tileSize().width);
+                auto xOffset = unbox<uint32_t>(textureAtlas().tileSize().width);
                 while (AtlasTileAttributes const* subAttribs = textureAtlas().try_get(hash * xOffset))
                 {
-                    renderTile(atlas::RenderTile::X { pen1.x + xOffset },
+                    renderTile(atlas::RenderTile::X { pen1.x + int(xOffset) },
                                atlas::RenderTile::Y { pen1.y },
                                textClusterGroup_.color,
                                *subAttribs);
-                    xOffset += unbox<int>(textureAtlas().tileSize().width);
+                    xOffset += unbox<uint32_t>(textureAtlas().tileSize().width);
                 }
             }
 
@@ -638,7 +638,7 @@ auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
                                                                                                  tileWidth)
     {
         textureAtlas().emplace(
-            hash * xOffset,
+            hash * uint32_t(xOffset),
             [this, xOffset, tileWidth, &createData, colorComponentCount, bitmapFormat, pitch](
                 atlas::TileLocation tileLocation) {
                 auto const xNext = min(xOffset + tileWidth, unbox<uintptr_t>(createData.bitmapSize.width));
@@ -700,9 +700,9 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
             == text::pixel_size(glyph.format) * unbox<size_t>(glyph.bitmapSize.width)
                    * unbox<size_t>(glyph.bitmapSize.height));
 
-    auto const numCells = presentation == unicode::PresentationStyle::Emoji
-                              ? 2
-                              : 1; // is this the only case - with colored := Emoji presentation?
+    uint32_t const numCells = presentation == unicode::PresentationStyle::Emoji
+                                  ? 2
+                                  : 1; // is this the only case - with colored := Emoji presentation?
     // TODO: Derive numCells based on grapheme cluster's EA width instead of emoji presentation.
     // FIXME: this `2` is a hack of my bad knowledge. FIXME.
     // As I only know of emoji being colored fonts, and those take up 2 cell with units.
@@ -712,7 +712,7 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     {
         auto const emojiBoundingBox =
             ImageSize { Width(_gridMetrics.cellSize.width.value * numCells),
-                        Height(_gridMetrics.cellSize.height.value - _gridMetrics.baseline) };
+                        Height::cast_from(unbox<int>(_gridMetrics.cellSize.height) - _gridMetrics.baseline) };
         if (glyph.bitmapSize.height > emojiBoundingBox.height)
         {
             auto [scaledGlyph, scaleFactor] = text::scale(glyph, emojiBoundingBox);
@@ -736,15 +736,15 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     // then cut off at grid cell's bottom.
     if (false) // (yMin < 0)
     {
-        auto const rowCount = -yMin;
-        Require(rowCount <= unbox<int>(glyph.bitmapSize.height));
+        auto const rowCount = (unsigned) -yMin;
+        Require(rowCount <= unbox<unsigned>(glyph.bitmapSize.height));
         auto const pixelCount =
-            rowCount * unbox<int>(glyph.bitmapSize.width) * text::pixel_size(glyph.format);
+            rowCount * unbox<unsigned>(glyph.bitmapSize.width) * text::pixel_size(glyph.format);
         Require(0 < pixelCount && static_cast<size_t>(pixelCount) <= glyph.bitmap.size());
         RasterizerLog()("Cropping {} underflowing bitmap rows.", rowCount);
-        glyph.bitmapSize.height += Height(yMin);
+        glyph.bitmapSize.height += Height::cast_from(yMin);
         auto& data = glyph.bitmap;
-        data.erase(begin(data), next(begin(data), pixelCount)); // XXX asan hit (size = -2)
+        data.erase(begin(data), next(begin(data), (int) pixelCount)); // XXX asan hit (size = -2)
         Guarantee(glyph.valid());
     }
     // }}}
@@ -802,7 +802,7 @@ text::shape_result TextRenderer::shapeTextRun(unicode::run_segmenter::range cons
     auto const font = isEmojiPresentation ? fonts_.emoji : getFontForStyle(fonts_, textClusterGroup_.style);
 
     // TODO(where to apply cell-advances) auto const advanceX = _gridMetrics.cellSize.width;
-    auto const count = static_cast<int>(_run.end - _run.start);
+    auto const count = static_cast<size_t>(_run.end - _run.start);
     auto const codepoints = u32string_view(textClusterGroup_.codepoints.data() + _run.start, count);
     auto const clusters = gsl::span(textClusterGroup_.clusters.data() + _run.start, count);
 

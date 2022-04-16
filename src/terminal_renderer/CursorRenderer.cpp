@@ -43,8 +43,8 @@ namespace
 
     constexpr uint32_t toDirectMappingIndex(CursorShape shape, int width, uint32_t sliceIndex) noexcept
     {
-        return static_cast<unsigned>(shape) + sliceIndex
-               + (width - 1)
+        return static_cast<uint32_t>(shape) + sliceIndex
+               + uint32_t(width - 1)
                      * (static_cast<uint32_t>(std::numeric_limits<CursorShape>::count())
                         + static_cast<uint32_t>(shape));
     }
@@ -106,7 +106,7 @@ auto CursorRenderer::createTileData(CursorShape cursorShape,
                                     int columnWidth,
                                     atlas::TileLocation tileLocation) -> TextureAtlas::TileCreateData
 {
-    auto const width = Width(*_gridMetrics.cellSize.width * columnWidth);
+    auto const width = Width::cast_from(unbox<int>(_gridMetrics.cellSize.width) * columnWidth);
     auto const height = _gridMetrics.cellSize.height;
     auto const defaultBitmapSize = ImageSize { width, height };
     auto const baseline = _gridMetrics.baseline;
@@ -130,25 +130,25 @@ auto CursorRenderer::createTileData(CursorShape cursorShape,
                 return atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0xFFu);
             });
         case CursorShape::Underscore:
-            return create(ImageSize { width, Height(baseline) }, [&]() {
-                auto const height = Height(baseline);
-                auto const thickness = max(LineThickness * baseline / 3, 1);
+            return create(ImageSize { width, Height::cast_from(baseline) }, [&]() {
+                auto const height = Height::cast_from(baseline);
+                auto const thickness = (unsigned) max(LineThickness * baseline / 3, 1);
                 auto const base_y = max((*height - thickness) / 2, 0u);
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
 
-                for (int y = 1; y <= thickness; ++y)
-                    for (int x = 0; x < width.as<int>(); ++x)
-                        image[(base_y + y) * width.as<int>() + x] = 0xFF;
+                for (size_t y = 1; y <= thickness; ++y)
+                    for (size_t x = 0; x < *width; ++x)
+                        image[(base_y + unsigned(y)) * *width + x] = 0xFF;
                 return image;
             });
         case CursorShape::Bar:
             return create(defaultBitmapSize, [&]() {
-                auto const thickness = max(LineThickness * baseline / 3, 1);
+                auto const thickness = (size_t) max(LineThickness * baseline / 3, 1);
                 // auto const base_y = max((height - thickness) / 2, 0);
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
 
-                for (int x = 0; x < thickness; ++x)
-                    for (int y = 0; y < unbox<int>(height); ++y)
+                for (size_t x = 0; x < thickness; ++x)
+                    for (size_t y = 0; y < unbox<size_t>(height); ++y)
                         image[y * *width + x] = 0xFF;
                 return image;
             });
@@ -156,13 +156,13 @@ auto CursorRenderer::createTileData(CursorShape cursorShape,
             return create(defaultBitmapSize, [&]() {
                 auto const height = _gridMetrics.cellSize.height;
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0xFFu);
-                auto const thickness = max(unbox<int>(width) / 12, 1);
+                auto const thickness = max(unbox<size_t>(width) / 12, size_t { 1 });
 
-                auto const innerWidth = unbox<int>(width) - 2 * thickness;
-                auto const innerHeight = unbox<int>(height) - 2 * thickness;
+                auto const innerWidth = unbox<size_t>(width) - 2 * thickness;
+                auto const innerHeight = unbox<size_t>(height) - 2 * thickness;
 
-                for (int y = thickness; y <= innerHeight; ++y)
-                    for (int x = thickness; x <= innerWidth; ++x)
+                for (size_t y = thickness; y <= innerHeight; ++y)
+                    for (size_t x = thickness; x <= innerWidth; ++x)
                         image[y * *width + x] = 0;
 
                 return image;
@@ -174,13 +174,13 @@ auto CursorRenderer::createTileData(CursorShape cursorShape,
 
 void CursorRenderer::render(crispy::Point _pos, int _columnWidth, RGBColor _color)
 {
-    for (int i = 0; i < _columnWidth; ++i)
+    for (uint32_t i = 0; i < uint32_t(_columnWidth); ++i)
     {
         auto const directMappingIndex = toDirectMappingIndex(shape_, _columnWidth, i);
         auto const tileIndex = _directMapping.toTileIndex(directMappingIndex);
-        auto const x = _pos.x + i * unbox<int>(_gridMetrics.cellSize.width);
+        auto const x = _pos.x + int(i) * unbox<int>(_gridMetrics.cellSize.width);
         AtlasTileAttributes const& tileAttributes = _textureAtlas->directMapped(tileIndex);
-        renderTile({ x }, { _pos.y }, _color, tileAttributes);
+        renderTile({ int(x) }, { _pos.y }, _color, tileAttributes);
     }
 }
 

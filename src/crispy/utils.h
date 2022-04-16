@@ -260,7 +260,22 @@ constexpr std::optional<T> to_integer(std::basic_string<C> _text) noexcept
 struct finally
 {
     std::function<void()> hook {};
-    ~finally() { hook(); }
+
+    void perform()
+    {
+        if (hook)
+        {
+            auto hooked = std::move(hook);
+            hook = {};
+            hooked();
+        }
+    }
+
+    ~finally()
+    {
+        if (hook)
+            hook();
+    }
 };
 
 inline std::optional<unsigned> fromHexDigit(char _value)
@@ -395,6 +410,46 @@ inline std::string replace(std::string_view text, std::string_view pattern, T&& 
     os << value;
     os << text.substr(i + pattern.size());
     return os.str();
+}
+
+// https://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
+// 1U << (lg(v - 1) + 1)
+template <typename T>
+constexpr T nextPowerOfTwo(T v) noexcept
+{
+    static_assert(std::is_integral_v<T>);
+    static_assert(std::is_unsigned_v<T>);
+
+    // return 1U << (std::log(v - 1) + 1);
+    v--;
+    v |= v >> 1;
+    v |= v >> 2;
+    v |= v >> 4;
+    if constexpr (sizeof(T) >= 16)
+        v |= v >> 8;
+    if constexpr (sizeof(T) >= 32)
+        v |= v >> 16;
+    if constexpr (sizeof(T) >= 64)
+        v |= v >> 32;
+    v++;
+    return v;
+}
+
+inline std::string humanReadableBytes(long double bytes)
+{
+    if (bytes <= 1024.0)
+        return fmt::format("{} bytes", unsigned(bytes));
+
+    auto const kb = bytes / 1024.0;
+    if (kb <= 1024.0)
+        return fmt::format("{:.03} KB", kb);
+
+    auto const mb = kb / 1024.0;
+    if (mb <= 1024.0)
+        return fmt::format("{:.03} MB", mb);
+
+    auto const gb = mb / 1024.0;
+    return fmt::format("{:.03} GB", gb);
 }
 
 } // namespace crispy

@@ -52,7 +52,8 @@ namespace mappings
 #define SS3 "\x1BO"
 
     // the modifier parameter is going to be replaced via fmt::format()
-    array<KeyMapping, 30> functionKeysWithModifiers {
+    array<KeyMapping, 30> const functionKeysWithModifiers {
+        // clang-format off
         // Note, that F1..F4 is using CSI too instead of ESC when used with modifier keys.
         // XXX: Maybe I am blind when reading ctlseqs.txt, but F1..F4 with "1;{}P".. seems not to
         // match what other terminal emulators send out with modifiers and I don't see how to match
@@ -91,9 +92,11 @@ namespace mappings
         KeyMapping { Key::End, CSI "1;{}F" },
         KeyMapping { Key::PageUp, CSI "5;{}~" },
         KeyMapping { Key::PageDown, CSI "6;{}~" },
+        // clang-format on
     };
 
-    array<KeyMapping, 22> standard {
+    array<KeyMapping, 22> const standard {
+        // clang-format off
         // cursor keys
         KeyMapping { Key::UpArrow, CSI "A" },
         KeyMapping { Key::DownArrow, CSI "B" },
@@ -121,33 +124,51 @@ namespace mappings
         KeyMapping { Key::F10, CSI "21~" },
         KeyMapping { Key::F11, CSI "23~" },
         KeyMapping { Key::F12, CSI "24~" },
+        // clang-format on
     };
 
     /// (DECCKM) Cursor key mode: mappings in when cursor key application mode is set.
-    array<KeyMapping, 6> applicationCursorKeys {
-        KeyMapping { Key::UpArrow, SS3 "A" },    KeyMapping { Key::DownArrow, SS3 "B" },
-        KeyMapping { Key::RightArrow, SS3 "C" }, KeyMapping { Key::LeftArrow, SS3 "D" },
-        KeyMapping { Key::Home, SS3 "H" },       KeyMapping { Key::End, SS3 "F" },
+    array<KeyMapping, 6> const applicationCursorKeys {
+        // clang-format off
+        KeyMapping { Key::UpArrow, SS3 "A" },
+        KeyMapping { Key::DownArrow, SS3 "B" },
+        KeyMapping { Key::RightArrow, SS3 "C" },
+        KeyMapping { Key::LeftArrow, SS3 "D" },
+        KeyMapping { Key::Home, SS3 "H" },
+        KeyMapping { Key::End, SS3 "F" },
+        // clang-format on
     };
 
-    array<KeyMapping, 21> applicationKeypad
+    array<KeyMapping, 21> const applicationKeypad
     {
-        KeyMapping { Key::Numpad_NumLock, SS3 "P" }, KeyMapping { Key::Numpad_Divide, SS3 "Q" },
-            KeyMapping { Key::Numpad_Multiply, SS3 "Q" }, KeyMapping { Key::Numpad_Subtract, SS3 "Q" },
-            KeyMapping { Key::Numpad_CapsLock, SS3 "m" }, KeyMapping { Key::Numpad_Add, SS3 "l" },
-            KeyMapping { Key::Numpad_Decimal, SS3 "n" }, KeyMapping { Key::Numpad_Enter, SS3 "M" },
-            KeyMapping { Key::Numpad_Equal, SS3 "X" }, KeyMapping { Key::Numpad_0, SS3 "p" },
-            KeyMapping { Key::Numpad_1, SS3 "q" }, KeyMapping { Key::Numpad_2, SS3 "r" },
-            KeyMapping { Key::Numpad_3, SS3 "s" }, KeyMapping { Key::Numpad_4, SS3 "t" },
-            KeyMapping { Key::Numpad_5, SS3 "u" }, KeyMapping { Key::Numpad_6, SS3 "v" },
-            KeyMapping { Key::Numpad_7, SS3 "w" }, KeyMapping { Key::Numpad_8, SS3 "x" },
-            KeyMapping { Key::Numpad_9, SS3 "y" }, KeyMapping { Key::PageUp, CSI "5~" },
-            KeyMapping { Key::PageDown, CSI "6~" },
+        // clang-format off
+        KeyMapping { Key::Numpad_NumLock, SS3 "P" },
+        KeyMapping { Key::Numpad_Divide, SS3 "Q" },
+        KeyMapping { Key::Numpad_Multiply, SS3 "Q" },
+        KeyMapping { Key::Numpad_Subtract, SS3 "Q" },
+        KeyMapping { Key::Numpad_CapsLock, SS3 "m" },
+        KeyMapping { Key::Numpad_Add, SS3 "l" },
+        KeyMapping { Key::Numpad_Decimal, SS3 "n" },
+        KeyMapping { Key::Numpad_Enter, SS3 "M" },
+        KeyMapping { Key::Numpad_Equal, SS3 "X" },
+        KeyMapping { Key::Numpad_0, SS3 "p" },
+        KeyMapping { Key::Numpad_1, SS3 "q" },
+        KeyMapping { Key::Numpad_2, SS3 "r" },
+        KeyMapping { Key::Numpad_3, SS3 "s" },
+        KeyMapping { Key::Numpad_4, SS3 "t" },
+        KeyMapping { Key::Numpad_5, SS3 "u" },
+        KeyMapping { Key::Numpad_6, SS3 "v" },
+        KeyMapping { Key::Numpad_7, SS3 "w" },
+        KeyMapping { Key::Numpad_8, SS3 "x" },
+        KeyMapping { Key::Numpad_9, SS3 "y" },
+        KeyMapping { Key::PageUp, CSI "5~" },
+        KeyMapping { Key::PageDown, CSI "6~" },
 #if 0 // TODO
         KeyMapping{Key::Space,    SS3 " "}, // TODO
         KeyMapping{Key::Tab,      SS3 "I"},
         KeyMapping{Key::Enter,    SS3 "M"},
 #endif
+        // clang-format on
     };
 
 #undef ESC
@@ -509,12 +530,6 @@ namespace
     {
         return _eventType == InputGenerator::MouseEventType::Release ? 3 : buttonX10(_button);
     }
-
-    constexpr uint8_t buttonButton(MouseButton _button, InputGenerator::MouseEventType _eventType) noexcept
-    {
-        auto const normal = buttonNormal(_button, _eventType);
-        return static_cast<uint8_t>(normal + (_eventType == InputGenerator::MouseEventType::Drag ? 0x20 : 0));
-    }
 } // namespace
 
 bool InputGenerator::generateMouse(MouseEventType _eventType,
@@ -611,8 +626,8 @@ bool InputGenerator::mouseTransportX10(uint8_t _button, uint8_t _modifier, CellL
     if (*_pos.line < MaxCoordValue && *_pos.column < MaxCoordValue)
     {
         uint8_t const button = SkipCount + static_cast<uint8_t>(_button | _modifier);
-        uint8_t const line = static_cast<uint8_t>(SkipCount + *_pos.line + 1);
-        uint8_t const column = static_cast<uint8_t>(SkipCount + *_pos.column + 1);
+        auto const line = static_cast<uint8_t>(SkipCount + *_pos.line + 1);
+        auto const column = static_cast<uint8_t>(SkipCount + *_pos.column + 1);
         append("\033[M");
         append(button);
         append(column);

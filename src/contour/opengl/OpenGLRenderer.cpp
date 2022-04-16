@@ -128,7 +128,7 @@ namespace
             DisplayLog(location)("OpenGL error {} for call.", err);
     }
 
-    int glFormat(atlas::Format _format)
+    GLenum glFormat(atlas::Format _format)
     {
         switch (_format)
         {
@@ -165,10 +165,10 @@ namespace
         QOpenGLContext* _context;
         QSurface* _surface;
 
-        OpenGLContextGuard()
+        OpenGLContextGuard():
+            _context { QOpenGLContext::currentContext() },
+            _surface { _context ? _context->surface() : nullptr }
         {
-            _context = QOpenGLContext::currentContext();
-            _surface = _context ? _context->surface() : nullptr;
         }
 
         ~OpenGLContextGuard()
@@ -411,7 +411,7 @@ void OpenGLRenderer::renderTile(atlas::RenderTile tile)
     // This is current the fragment shader's selector that
     // determines how to operate on this tile (images vs gray-scale anti-aliased
     // glyphs vs LCD subpixel antialiased glyphs)
-    GLfloat const u = static_cast<GLfloat>(tile.fragmentShaderSelector);
+    auto const u = static_cast<GLfloat>(tile.fragmentShaderSelector);
 
     // color
     GLfloat const cr = tile.color[0];
@@ -454,7 +454,7 @@ ImageSize OpenGLRenderer::renderBufferSize()
     auto height = unbox<GLint>(_renderTargetSize.height);
     CHECKED_GL(glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_WIDTH, &width));
     CHECKED_GL(glGetRenderbufferParameteriv(GL_RENDERBUFFER, GL_RENDERBUFFER_HEIGHT, &height));
-    return ImageSize { Width(width), Height(height) };
+    return ImageSize { Width::cast_from(width), Height::cast_from(height) };
 #endif
 }
 
@@ -618,7 +618,7 @@ void OpenGLRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)
     GLint constexpr UnusedParam = 0;
     CHECKED_GL(glTexImage2D(target,
                             levelOfDetail,
-                            glFmt,
+                            (int) glFmt,
                             unbox<int>(param.size.width),
                             unbox<int>(param.size.height),
                             UnusedParam,
@@ -649,8 +649,8 @@ void OpenGLRenderer::executeUploadTile(atlas::UploadTile const& param)
                                LevelOfDetail,
                                param.location.x.value,
                                param.location.y.value,
-                               param.bitmapSize.width.value,
-                               param.bitmapSize.height.value,
+                               unbox<GLsizei>(param.bitmapSize.width),
+                               unbox<GLsizei>(param.bitmapSize.height),
                                glFormat(param.bitmapFormat),
                                BitmapType,
                                param.bitmap.data()));
@@ -741,8 +741,13 @@ pair<ImageSize, vector<uint8_t>> OpenGLRenderer::takeScreenshot()
 
     DisplayLog()("Capture screenshot ({}/{}).", imageSize, _renderTargetSize);
 
-    CHECKED_GL(
-        glReadPixels(0, 0, *imageSize.width, *imageSize.height, GL_RGBA, GL_UNSIGNED_BYTE, buffer.data()));
+    CHECKED_GL(glReadPixels(0,
+                            0,
+                            unbox<GLsizei>(imageSize.width),
+                            unbox<GLsizei>(imageSize.height),
+                            GL_RGBA,
+                            GL_UNSIGNED_BYTE,
+                            buffer.data()));
 
     return { imageSize, buffer };
 }

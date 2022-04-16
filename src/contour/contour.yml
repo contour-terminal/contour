@@ -57,6 +57,10 @@ word_delimiters: " /\\()\"'-.,:;<>~!@#$%^&*+=[]{}~?|│"
 # Default: 16384
 read_buffer_size: 16384
 
+# Size in bytes per PTY Buffer Object.
+#
+pty_buffer_size: 1000000
+
 default_profile: main
 
 # Flag to determine whether to spawn new process or not when creating new terminal

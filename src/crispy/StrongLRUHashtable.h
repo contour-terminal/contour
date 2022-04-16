@@ -15,6 +15,7 @@
 
 #include <crispy/StrongHash.h>
 #include <crispy/assert.h>
+#include <crispy/utils.h>
 
 #include <immintrin.h>
 #include <optional>
@@ -38,21 +39,6 @@ namespace detail
     {
         //.
         return (value & (value - 1)) == 0;
-    }
-
-    // https://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
-    // 1U << (lg(v - 1) + 1)
-    constexpr uint32_t nextPowerOfTwo(uint32_t v) noexcept
-    {
-        // return 1U << (std::log(v - 1) + 1);
-        v--;
-        v |= v >> 1;
-        v |= v >> 2;
-        v |= v >> 4;
-        v |= v >> 8;
-        v |= v >> 16;
-        v++;
-        return v;
     }
 } // namespace detail
 // }}}
@@ -368,7 +354,7 @@ auto StrongLRUHashtable<Value>::create(StrongHashtableSize hashCount,
     // Entry[]    entries
 
     if (!detail::isPowerOfTwo(hashCount.value))
-        hashCount.value = detail::nextPowerOfTwo(hashCount.value);
+        hashCount.value = nextPowerOfTwo(hashCount.value);
 
     Allocator allocator;
     auto const size = requiredMemorySize(hashCount, entryCount);

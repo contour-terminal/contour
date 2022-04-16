@@ -29,15 +29,23 @@ class MockPty: public Pty
 
     PtySlave& slave() noexcept override;
     std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
+    [[nodiscard]] std::optional<std::tuple<std::string_view, bool>> read(crispy::BufferObject& storage,
+                                                                         std::chrono::milliseconds timeout,
+                                                                         size_t size) override;
     void wakeupReader() override;
     int write(char const* buf, size_t size) override;
-    PageSize pageSize() const noexcept override;
+    [[nodiscard]] PageSize pageSize() const noexcept override;
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;
 
     void close() override;
-    bool isClosed() const noexcept override;
+    [[nodiscard]] bool isClosed() const noexcept override;
 
     std::string& stdinBuffer() noexcept { return inputBuffer_; }
+
+    [[nodiscard]] bool isStdoutDataAvailable() const noexcept
+    {
+        return outputReadOffset_ < outputBuffer_.size();
+    }
 
     void appendStdOutBuffer(std::string_view _that)
     {

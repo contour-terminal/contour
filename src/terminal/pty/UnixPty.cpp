@@ -47,6 +47,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 
+using crispy::BufferObject;
 using std::max;
 using std::min;
 using std::nullopt;
@@ -54,6 +55,7 @@ using std::numeric_limits;
 using std::optional;
 using std::runtime_error;
 using std::string_view;
+using std::tuple;
 
 using namespace std::string_literals;
 
@@ -75,13 +77,18 @@ namespace
 
         // input flags
 #if defined(IUTF8)
-        tio.c_iflag |=
-            IUTF8; // Input is UTF-8; this allows character-erase to be properly applied in cooked mode.
+        // Input is UTF-8; this allows character-erase to be properly applied in cooked mode.
+        tio.c_iflag |= IUTF8;
 #endif
 
         // special characters
         tio.c_cc[VMIN] = 1;  // Report as soon as 1 character is available.
         tio.c_cc[VTIME] = 0; // Disable timeout (no need).
+        // tio.c_iflag &= ~ISTRIP; // Disable stripping 8th bit off the bytes.
+        // tio.c_iflag &= ~INLCR;  // Disable NL-to-CR mapping
+        // tio.c_iflag &= ~ICRNL;  // Disable CR-to-NL mapping
+        // tio.c_iflag &= ~IXON;   // Disable control flow
+        // tio.c_iflag &= ~BRKINT; // disable signal-break handling
 
         return tio;
     }
@@ -103,6 +110,12 @@ namespace
             ::close(*fd);
             *fd = -1;
         }
+    }
+
+    void saveDup2(int a, int b)
+    {
+        while (dup2(a, b) == -1 && (errno == EBUSY || errno == EINTR))
+            ;
     }
 
     UnixPty::PtyHandles createUnixPty(PageSize const& _windowSize, optional<ImageSize> _pixels)
@@ -135,6 +148,51 @@ namespace
 
 } // namespace
 
+// {{{ UnixPipe
+UnixPipe::UnixPipe(): pfd { -1, -1 }
+{
+    if (pipe(pfd))
+        perror("pipe");
+}
+
+UnixPipe::UnixPipe(UnixPipe&& v) noexcept: pfd { v.pfd[0], v.pfd[1] }
+{
+    v.pfd[0] = -1;
+    v.pfd[1] = -1;
+}
+
+UnixPipe& UnixPipe::operator=(UnixPipe&& v) noexcept
+{
+    close();
+    pfd[0] = v.pfd[0];
+    pfd[1] = v.pfd[1];
+    v.pfd[0] = -1;
+    v.pfd[1] = -1;
+    return *this;
+}
+
+UnixPipe::~UnixPipe()
+{
+    close();
+}
+
+void UnixPipe::close()
+{
+    closeReader();
+    closeWriter();
+}
+
+void UnixPipe::closeReader() noexcept
+{
+    saveClose(&pfd[0]);
+}
+
+void UnixPipe::closeWriter() noexcept
+{
+    saveClose(&pfd[1]);
+}
+// }}}
+
 // {{{ UnixPty::Slave
 UnixPty::Slave::~Slave()
 {
@@ -156,16 +214,56 @@ bool UnixPty::Slave::isClosed() const noexcept
     return _slaveFd == -1;
 }
 
+bool UnixPty::Slave::configure() noexcept
+{
+    auto const tio = constructTerminalSettings(_slaveFd);
+    if (tcsetattr(_slaveFd, TCSANOW, &tio) == 0)
+        tcflush(_slaveFd, TCIOFLUSH);
+    return true;
+}
+
 bool UnixPty::Slave::login()
 {
     if (_slaveFd < 0)
         return false;
 
-    auto const tio = constructTerminalSettings(_slaveFd);
-    if (tcsetattr(_slaveFd, TCSANOW, &tio) == 0)
-        tcflush(_slaveFd, TCIOFLUSH);
+    if (!configure())
+        return false;
 
-    return login_tty(_slaveFd) == 0;
+    // This is doing what login_tty() is doing, too.
+    // But doing it ourselfs allows for a little more flexibility.
+    // return login_tty(_slaveFd) == 0;
+
+    setsid();
+
+#if defined(TIOCSCTTY)
+    if (ioctl(_slaveFd, TIOCSCTTY, nullptr) == -1)
+        return false;
+#endif
+
+    for (int const fd: { 0, 1, 2 })
+    {
+        if (_slaveFd != fd)
+            ::close(fd);
+        saveDup2(_slaveFd, fd);
+    }
+
+    if (_slaveFd > 2)
+        saveClose(&_slaveFd);
+
+    return true;
+}
+
+int UnixPty::Slave::write(std::string_view text) noexcept
+{
+    if (_slaveFd < 0)
+    {
+        errno = ENODEV;
+        return -1;
+    }
+
+    auto const rv = ::write(_slaveFd, text.data(), text.size());
+    return static_cast<int>(rv);
 }
 // }}}
 
@@ -182,6 +280,9 @@ UnixPty::UnixPty(PtyHandles handles, PageSize pageSize):
 {
     if (!setFileFlags(_masterFd, O_CLOEXEC | O_NONBLOCK))
         throw runtime_error { "Failed to configure PTY. "s + strerror(errno) };
+
+    setFileFlags(_stdoutFastPipe.reader(), O_NONBLOCK);
+    PtyLog()("stdout fastpipe: reader {}, writer {}", _stdoutFastPipe.reader(), _stdoutFastPipe.writer());
 
 #if defined(__linux__)
     if (pipe2(_pipe.data(), O_NONBLOCK /* | O_CLOEXEC | O_NONBLOCK*/) < 0)
@@ -233,14 +334,31 @@ void UnixPty::wakeupReader() noexcept
     (void) rv;
 }
 
-std::optional<std::string_view> UnixPty::read(size_t size, std::chrono::milliseconds timeout)
+optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
 {
-    if (_masterFd < 0)
+    auto const rv = static_cast<int>(::read(fd, target, n));
+    if (rv < 0)
+        return nullopt;
+
+    if (PtyInLog)
+        PtyInLog()("{} received: {}",
+                   fd == _masterFd ? "master" : "stdout-fastpipe",
+                   crispy::escape(target, target + rv));
+
+    return string_view { target, static_cast<size_t>(rv) };
+}
+
+int waitForReadable(int ptyMaster,
+                    int stdoutFastPipe,
+                    int wakeupPipe,
+                    std::chrono::milliseconds timeout) noexcept
+{
+    if (ptyMaster < 0)
     {
         if (PtyInLog)
             PtyInLog()("read() called with closed PTY master.");
         errno = ENODEV;
-        return nullopt;
+        return -1;
     }
 
     auto tv = timeval {};
@@ -253,10 +371,12 @@ std::optional<std::string_view> UnixPty::read(size_t size, std::chrono::millisec
         FD_ZERO(&rfd);
         FD_ZERO(&wfd);
         FD_ZERO(&efd);
-        if (_masterFd != -1)
-            FD_SET(_masterFd, &rfd);
-        FD_SET(_pipe[0], &rfd);
-        auto const nfds = 1 + max(_masterFd, _pipe[0]);
+        if (ptyMaster != -1)
+            FD_SET(ptyMaster, &rfd);
+        if (stdoutFastPipe != -1)
+            FD_SET(stdoutFastPipe, &rfd);
+        FD_SET(wakeupPipe, &rfd);
+        auto const nfds = 1 + max(max(ptyMaster, stdoutFastPipe), wakeupPipe);
 
         int rv = select(nfds, &rfd, &wfd, &efd, &tv);
         if (rv == 0)
@@ -264,58 +384,66 @@ std::optional<std::string_view> UnixPty::read(size_t size, std::chrono::millisec
             // (Let's not be too verbose here.)
             // PtyInLog()("PTY read() timed out.");
             errno = EAGAIN;
-            return nullopt;
+            return -1;
         }
 
-        if (_masterFd < 0)
+        if (ptyMaster < 0)
         {
             errno = ENODEV;
-            return nullopt;
+            return -1;
         }
 
         if (rv < 0)
         {
             PtyInLog()("PTY read() failed. {}", strerror(errno));
-            return nullopt;
+            return -1;
         }
 
         bool piped = false;
-        if (FD_ISSET(_pipe[0], &rfd))
+        if (FD_ISSET(wakeupPipe, &rfd))
         {
             piped = true;
             int n = 0;
             for (bool done = false; !done;)
             {
                 char dummy[256];
-                rv = static_cast<int>(::read(_pipe[0], dummy, sizeof(dummy)));
+                rv = static_cast<int>(::read(wakeupPipe, dummy, sizeof(dummy)));
                 done = rv > 0;
                 n += max(rv, 0);
             }
         }
 
-        if (FD_ISSET(_masterFd, &rfd))
-        {
-            auto const n = min(size, _buffer.size());
-            auto const rv = static_cast<int>(::read(_masterFd, _buffer.data(), n));
-            if (rv >= 0)
-            {
-                if (PtyInLog)
-                    PtyInLog()("Received: {}", crispy::escape(_buffer.data(), _buffer.data() + rv));
-                return string_view { _buffer.data(), static_cast<size_t>(rv) };
-            }
-            else
-            {
-                PtyLog()("PTY read: endpoint closed.");
-                return string_view {};
-            }
-        }
+        if (stdoutFastPipe != -1 && FD_ISSET(stdoutFastPipe, &rfd))
+            return stdoutFastPipe;
+
+        if (FD_ISSET(ptyMaster, &rfd))
+            return ptyMaster;
 
         if (piped)
         {
             errno = EINTR;
-            return nullopt;
+            return -1;
         }
     }
+}
+
+optional<tuple<string_view, bool>> UnixPty::read(crispy::BufferObject& sink,
+                                                 std::chrono::milliseconds timeout,
+                                                 size_t size)
+{
+    // TODO: We might want to make the read size limit configurable. Especially for the stdout-fastpipe.
+    if (int fd = waitForReadable(_masterFd, _stdoutFastPipe.reader(), _pipe[0], timeout); fd != -1)
+        if (auto x = readSome(fd, sink.hotEnd(), min(size, sink.bytesAvailable())))
+            return { tuple { x.value(), fd == _stdoutFastPipe.reader() } };
+
+    return nullopt;
+}
+
+optional<std::string_view> UnixPty::read(size_t size, std::chrono::milliseconds timeout)
+{
+    if (int fd = waitForReadable(_masterFd, _stdoutFastPipe.reader(), _pipe[0], timeout); fd != -1)
+        return readSome(fd, _buffer.data(), min(size, _buffer.size()));
+    return nullopt;
 }
 
 int UnixPty::write(char const* buf, size_t size)

@@ -130,7 +130,7 @@ constexpr void drawEllipse(F doDraw4WaySymmetric, crispy::Point radius)
 
     while (dx < dy)
     {
-        doDraw4WaySymmetric(x, y);
+        doDraw4WaySymmetric(int(x), int(y));
 
         // Checking and updating value of decision parameter based on algorithm
         if (d1 < 0)
@@ -154,7 +154,7 @@ constexpr void drawEllipse(F doDraw4WaySymmetric, crispy::Point radius)
 
     while (y >= 0)
     {
-        doDraw4WaySymmetric(x, y);
+        doDraw4WaySymmetric(int(x), int(y));
 
         // Checking and updating parameter value based on algorithm
         if (d2 > 0)
@@ -192,7 +192,7 @@ struct Pixmap
     int _lineThickness = 1;
     int _baseLine = 0; // baseline position relative to cell bottom.
 
-    constexpr ImageSize downsampledSize() const noexcept { return _downsampledSize; }
+    [[nodiscard]] constexpr ImageSize downsampledSize() const noexcept { return _downsampledSize; }
 
     Pixmap& halfFilledCircleLeft();
     Pixmap& halfFilledCircleRight();
@@ -265,7 +265,7 @@ inline void Pixmap::paint(int x, int y, uint8_t _value)
         return;
     if (!(0 <= x && x < w))
         return;
-    _buffer.at((h - y) * w + x) = _value;
+    _buffer.at(static_cast<unsigned>((h - y) * w + x)) = _value;
 }
 
 inline void Pixmap::paintOver(int x, int y, uint8_t intensity)
@@ -276,7 +276,7 @@ inline void Pixmap::paintOver(int x, int y, uint8_t intensity)
         return;
     if (!(0 <= x && x < w))
         return;
-    auto& target = _buffer.at((h - y) * w + x);
+    auto& target = _buffer.at(static_cast<unsigned>((h - y) * w + x));
     target = static_cast<uint8_t>(std::min(static_cast<int>(target) + static_cast<int>(intensity), 255));
 }
 
@@ -290,10 +290,9 @@ inline void Pixmap::paintOverThick(int x, int y, uint8_t intensity, int sx, int 
 template <typename F>
 Pixmap& Pixmap::fill(F const& filler)
 {
-    auto const h = unbox<int>(_size.height) - 1;
     for (auto const y: ranges::views::iota(0, unbox<int>(_size.height)))
         for (auto const x: ranges::views::iota(0, unbox<int>(_size.width)))
-            _buffer[(h - y) * *_size.width + x] = filler(x, y);
+            paint(x, y, static_cast<uint8_t>(filler(x, y)));
     return *this;
 }
 

@@ -31,11 +31,11 @@ namespace terminal
 struct SelectionHelper
 {
     virtual ~SelectionHelper() = default;
-    virtual PageSize pageSize() const noexcept = 0;
-    virtual bool wordDelimited(CellLocation _pos) const noexcept = 0;
-    virtual bool wrappedLine(LineOffset _line) const noexcept = 0;
-    virtual bool cellEmpty(CellLocation _pos) const noexcept = 0;
-    virtual int cellWidth(CellLocation _pos) const noexcept = 0;
+    [[nodiscard]] virtual PageSize pageSize() const noexcept = 0;
+    [[nodiscard]] virtual bool wordDelimited(CellLocation _pos) const noexcept = 0;
+    [[nodiscard]] virtual bool wrappedLine(LineOffset _line) const noexcept = 0;
+    [[nodiscard]] virtual bool cellEmpty(CellLocation _pos) const noexcept = 0;
+    [[nodiscard]] virtual int cellWidth(CellLocation _pos) const noexcept = 0;
 };
 
 /**
@@ -81,7 +81,7 @@ class Selection
         ColumnOffset fromColumn;
         ColumnOffset toColumn;
 
-        constexpr ColumnCount length() const noexcept
+        [[nodiscard]] constexpr ColumnCount length() const noexcept
         {
             return boxed_cast<ColumnCount>(toColumn - fromColumn + 1);
         }
@@ -99,17 +99,17 @@ class Selection
 
     /// @returns boolean indicating whether or not given absolute coordinate is within the range of the
     /// selection.
-    virtual bool contains(CellLocation _coord) const noexcept;
-    virtual bool intersects(Rect _area) const noexcept;
+    [[nodiscard]] virtual bool contains(CellLocation _coord) const noexcept;
+    [[nodiscard]] virtual bool intersects(Rect _area) const noexcept;
 
     /// Tests whether the a selection is currently in progress.
-    constexpr State state() const noexcept { return state_; }
+    [[nodiscard]] constexpr State state() const noexcept { return state_; }
 
     /// Extends the selection to the given coordinate.
     virtual void extend(CellLocation _to);
 
     /// Constructs a vector of ranges for this selection.
-    virtual std::vector<Range> ranges() const;
+    [[nodiscard]] virtual std::vector<Range> ranges() const;
 
     /// Marks the selection as completed.
     void complete();

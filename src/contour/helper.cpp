@@ -413,8 +413,8 @@ terminal::renderer::PageMargin computeMargin(ImageSize _cellSize,
                                              PageSize _charCells,
                                              ImageSize _pixels) noexcept
 {
-    auto const usedHeight = static_cast<int>(*_charCells.lines * *_cellSize.height);
-    auto const freeHeight = static_cast<int>(*_pixels.height - usedHeight);
+    auto const usedHeight = unbox<int>(_charCells.lines) * unbox<int>(_cellSize.height);
+    auto const freeHeight = unbox<int>(_pixels.height) - usedHeight;
     auto const bottomMargin = freeHeight;
 
     // auto const usedWidth = _charCells.columns * regularFont_.maxAdvance();

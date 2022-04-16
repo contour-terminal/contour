@@ -49,28 +49,43 @@ struct Margin
         ColumnOffset
             to; // TODO: call it begin and end and have end point to to+1 to avoid unnecessary +1's later
 
-        constexpr ColumnCount length() const noexcept
+        [[nodiscard]] constexpr ColumnCount length() const noexcept
         {
             return unbox<ColumnCount>(to - from) + ColumnCount(1);
         }
-        constexpr bool contains(ColumnOffset _value) const noexcept { return from <= _value && _value <= to; }
-        constexpr bool operator==(Horizontal rhs) const noexcept { return from == rhs.from && to == rhs.to; }
-        constexpr bool operator!=(Horizontal rhs) const noexcept { return !(*this == rhs); }
+        [[nodiscard]] constexpr bool contains(ColumnOffset _value) const noexcept
+        {
+            return from <= _value && _value <= to;
+        }
+        [[nodiscard]] constexpr bool operator==(Horizontal rhs) const noexcept
+        {
+            return from == rhs.from && to == rhs.to;
+        }
+        [[nodiscard]] constexpr bool operator!=(Horizontal rhs) const noexcept { return !(*this == rhs); }
     };
 
     struct Vertical
     {
         LineOffset from;
-        LineOffset
-            to; // TODO: call it begin and end and have end point to to+1 to avoid unnecessary +1's later
+        // TODO: call it begin and end and have end point to to+1 to avoid unnecessary +1's later
+        LineOffset to;
 
-        constexpr LineCount length() const noexcept { return unbox<LineCount>(to - from) + LineCount(1); }
-        constexpr bool contains(LineOffset _value) const noexcept { return from <= _value && _value <= to; }
-        constexpr bool operator==(Vertical const& rhs) const noexcept
+        [[nodiscard]] constexpr LineCount length() const noexcept
+        {
+            return unbox<LineCount>(to - from) + LineCount(1);
+        }
+        [[nodiscard]] constexpr bool contains(LineOffset _value) const noexcept
+        {
+            return from <= _value && _value <= to;
+        }
+        [[nodiscard]] constexpr bool operator==(Vertical const& rhs) const noexcept
         {
             return from == rhs.from && to == rhs.to;
         }
-        constexpr bool operator!=(Vertical const& rhs) const noexcept { return !(*this == rhs); }
+        [[nodiscard]] constexpr bool operator!=(Vertical const& rhs) const noexcept
+        {
+            return !(*this == rhs);
+        }
     };
 
     Vertical vertical {};     // top-bottom
@@ -103,11 +118,10 @@ struct LogicalLine
     LineOffset bottom {};
     std::vector<std::reference_wrapper<Line<Cell>>> lines {};
 
-    Line<Cell> joinWithRightTrimmed() const
+    [[nodiscard]] Line<Cell> joinWithRightTrimmed() const
     {
         // TODO: determine final line's column count and pass it to ctor.
         typename Line<Cell>::Buffer output;
-        int i = 0;
         auto lineFlags = lines.front().get().flags();
         for (Line<Cell> const& line: lines)
             for (Cell const& cell: line.cells())
@@ -119,7 +133,7 @@ struct LogicalLine
         return Line<Cell>(output, lineFlags);
     }
 
-    std::string text() const
+    [[nodiscard]] std::string text() const
     {
         std::string output;
         for (auto const& line: lines)
@@ -371,17 +385,17 @@ class Grid
     void reset();
 
     // {{{ grid global properties
-    LineCount maxHistoryLineCount() const noexcept { return maxHistoryLineCount_; }
+    [[nodiscard]] LineCount maxHistoryLineCount() const noexcept { return maxHistoryLineCount_; }
     void setMaxHistoryLineCount(LineCount _maxHistoryLineCount);
 
-    LineCount totalLineCount() const noexcept { return maxHistoryLineCount_ + pageSize_.lines; }
+    [[nodiscard]] LineCount totalLineCount() const noexcept { return maxHistoryLineCount_ + pageSize_.lines; }
 
-    LineCount historyLineCount() const noexcept { return linesUsed_ - pageSize_.lines; }
+    [[nodiscard]] LineCount historyLineCount() const noexcept { return linesUsed_ - pageSize_.lines; }
 
-    bool reflowOnResize() const noexcept { return reflowOnResize_; }
+    [[nodiscard]] bool reflowOnResize() const noexcept { return reflowOnResize_; }
     void setReflowOnResize(bool _enabled) { reflowOnResize_ = _enabled; }
 
-    PageSize pageSize() const noexcept { return pageSize_; }
+    [[nodiscard]] PageSize pageSize() const noexcept { return pageSize_; }
 
     /// Resizes the main page area of the grid and adapts the scrollback area's width accordingly.
     ///
@@ -390,7 +404,7 @@ class Grid
     /// @param _wrapPending       AutoWrap is on and a wrap is pending
     ///
     /// @returns updated cursor position.
-    CellLocation resize(PageSize _pageSize, CellLocation _currentCursorPos, bool _wrapPending);
+    [[nodiscard]] CellLocation resize(PageSize _pageSize, CellLocation _currentCursorPos, bool _wrapPending);
     // }}}
 
     // {{{ Line API
@@ -399,31 +413,30 @@ class Grid
     Line<Cell> const& lineAt(LineOffset _line) const noexcept;
 
     gsl::span<Cell const> lineBuffer(LineOffset _line) const noexcept { return lineAt(_line).cells(); }
-    gsl::span<Cell const> lineBuffer(Line<Cell> const& _line) const noexcept { return _line.cells(); }
     gsl::span<Cell const> lineBufferRightTrimmed(LineOffset _line) const noexcept;
 
-    std::string lineText(LineOffset _line) const;
-    std::string lineTextTrimmed(LineOffset _line) const;
-    std::string lineText(Line<Cell> const& _line) const;
+    [[nodiscard]] std::string lineText(LineOffset _line) const;
+    [[nodiscard]] std::string lineTextTrimmed(LineOffset _line) const;
+    [[nodiscard]] std::string lineText(Line<Cell> const& _line) const;
 
     void setLineText(LineOffset _line, std::string_view _text);
 
     // void resetLine(LineOffset _line, GraphicsAttributes _attribs) noexcept
     // { lineAt(_line).reset(_attribs); }
 
-    ColumnCount lineLength(LineOffset _line) const noexcept { return lineAt(_line).size(); }
-    bool isLineBlank(LineOffset _line) const noexcept;
-    bool isLineWrapped(LineOffset _line) const noexcept;
+    [[nodiscard]] ColumnCount lineLength(LineOffset _line) const noexcept { return lineAt(_line).size(); }
+    [[nodiscard]] bool isLineBlank(LineOffset _line) const noexcept;
+    [[nodiscard]] bool isLineWrapped(LineOffset _line) const noexcept;
 
-    int computeLogicalLineNumberFromBottom(LineCount _n) const noexcept;
+    [[nodiscard]] int computeLogicalLineNumberFromBottom(LineCount _n) const noexcept;
 
-    size_t zero_index() const noexcept { return lines_.zero_index(); }
+    [[nodiscard]] size_t zero_index() const noexcept { return lines_.zero_index(); }
     // }}}
 
     /// Gets a reference to the cell relative to screen origin (top left, 0:0).
-    Cell& useCellAt(LineOffset _line, ColumnOffset _column) noexcept;
-    Cell& at(LineOffset _line, ColumnOffset _column) noexcept;
-    Cell const& at(LineOffset _line, ColumnOffset _column) const noexcept;
+    [[nodiscard]] Cell& useCellAt(LineOffset _line, ColumnOffset _column) noexcept;
+    [[nodiscard]] Cell& at(LineOffset _line, ColumnOffset _column) noexcept;
+    [[nodiscard]] Cell const& at(LineOffset _line, ColumnOffset _column) const noexcept;
 
     // page view API
     gsl::span<Line<Cell>> pageAtScrollOffset(ScrollOffset _scrollOffset);
@@ -477,17 +490,17 @@ class Grid
     void render(RendererT&& _render, ScrollOffset _scrollOffset = {}) const;
 
     /// Takes text-screenshot of the main page.
-    std::string renderMainPageText() const;
+    [[nodiscard]] std::string renderMainPageText() const;
 
     /// Renders the full grid's text characters.
     ///
     /// Empty cells are represented as strings and lines split by LF.
-    std::string renderAllText() const;
+    [[nodiscard]] std::string renderAllText() const;
     // }}}
 
-    constexpr LineFlags defaultLineFlags() const noexcept;
+    [[nodiscard]] constexpr LineFlags defaultLineFlags() const noexcept;
 
-    constexpr LineCount linesUsed() const noexcept;
+    [[nodiscard]] constexpr LineCount linesUsed() const noexcept;
 
     void verifyState() const;
 
@@ -516,7 +529,7 @@ class Grid
     // private fields
     //
     PageSize pageSize_;
-    bool reflowOnResize_;
+    bool reflowOnResize_ = false;
     LineCount maxHistoryLineCount_;
 
     // Number of lines is at least the sum of maxHistoryLineCount_ + pageSize_.lines,
@@ -560,32 +573,25 @@ void Grid<Cell>::render(RendererT&& _render, ScrollOffset _scrollOffset) const
 {
     assert(!_scrollOffset || unbox<LineCount>(_scrollOffset) <= historyLineCount());
 
-    auto const static emptyCell = Cell {};
-
     auto y = LineOffset(0);
     for (int i = -*_scrollOffset, e = i + *pageSize_.lines; i != e; ++i, ++y)
     {
         auto x = ColumnOffset(0);
         Line<Cell> const& line = lines_[i];
-        if constexpr (Line<Cell>::ColumnOptimized)
+        if (1) // constexpr (Line<Cell>::Optimized)
         {
-            Cell const* cell = &*line.begin();
-            Cell const* cellUsedEnd = cell + *line.columnsUsed();
-            Cell const* cellEnd = cell + *line.size();
-            while (cell != cellUsedEnd)
-                _render(*cell++, y, x++);
-            while (cell != cellEnd)
+            if (line.isTrivialBuffer())
             {
-                _render(emptyCell, y, x++);
-                ++cell;
+                _render.renderTrivialLine(line.trivialBuffer(), y);
+                continue;
             }
         }
-        else
-        {
-            for (Cell const& cell: line.cells())
-                _render(cell, y, x++);
-        }
+        _render.startLine(y);
+        for (Cell const& cell: line.cells())
+            _render.renderCell(cell, y, x++);
+        _render.endLine();
     }
+    _render.finish();
 }
 // }}}
 

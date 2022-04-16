@@ -47,11 +47,28 @@ string GetLastErrorAsString()
 namespace terminal
 {
 
+struct ConPtySlave: public PtySlaveDummy
+{
+    HANDLE output_;
+
+    explicit ConPtySlave(HANDLE output): output_ { output } {}
+
+    int write(std::string_view text) noexcept override
+    {
+        DWORD nwritten {};
+        if (WriteFile(output_, text.data(), static_cast<DWORD>(text.size()), &nwritten, nullptr))
+            return static_cast<int>(nwritten);
+        else
+            return -1;
+    }
+};
+
 ConPty::ConPty(PageSize const& _windowSize): size_ { _windowSize }
 {
     master_ = INVALID_HANDLE_VALUE;
     input_ = INVALID_HANDLE_VALUE;
     output_ = INVALID_HANDLE_VALUE;
+    slave_ = make_unique<ConPtySlave>(output_);
 
     HANDLE hPipePTYIn { INVALID_HANDLE_VALUE };
     HANDLE hPipePTYOut { INVALID_HANDLE_VALUE };
@@ -120,6 +137,22 @@ void ConPty::close()
     }
 }
 
+optional<tuple<string_view, bool>> ConPty::read(crispy::BufferObject& buffer,
+                                                std::chrono::milliseconds timeout,
+                                                size_t size)
+{
+    // TODO: wait for timeout time at most AND got woken up upon wakeupReader() invokcation.
+    (void) timeout;
+
+    auto const n = static_cast<DWORD>(min(size, buffer.bytesAvailable()));
+
+    DWORD nread {};
+    if (!ReadFile(input_, buffer.hotEnd(), n, &nread, nullptr))
+        return nullopt;
+
+    return { tuple { string_view { buffer.hotEnd(), nread }, false } };
+}
+
 optional<string_view> ConPty::read(size_t _size, std::chrono::milliseconds _timeout)
 {
     // TODO: wait for _timeout time at most AND got woken up upon wakeupReader() invokcation.
@@ -171,8 +204,7 @@ void ConPty::resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels)
 
 PtySlave& ConPty::slave() noexcept
 {
-    static PtySlaveDummy dummy {};
-    return dummy;
+    return *slave_;
 }
 
 } // namespace terminal

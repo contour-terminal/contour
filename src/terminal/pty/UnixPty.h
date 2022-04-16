@@ -28,6 +28,28 @@
 namespace terminal
 {
 
+struct UnixPipe
+{
+    int pfd[2];
+
+    UnixPipe();
+    UnixPipe(UnixPipe&&) noexcept;
+    UnixPipe& operator=(UnixPipe&&) noexcept;
+    UnixPipe(UnixPipe const&) = delete;
+    UnixPipe& operator=(UnixPipe const&) = delete;
+    ~UnixPipe();
+
+    [[nodiscard]] bool good() const noexcept { return pfd[0] != -1 && pfd[1] != -1; }
+
+    [[nodiscard]] int reader() noexcept { return pfd[0]; }
+    [[nodiscard]] int writer() noexcept { return pfd[1]; }
+
+    void closeReader() noexcept;
+    void closeWriter() noexcept;
+
+    void close();
+};
+
 class UnixPty: public Pty
 {
   private:
@@ -40,7 +62,9 @@ class UnixPty: public Pty
         PtySlaveHandle handle() const noexcept;
         void close() override;
         bool isClosed() const noexcept override;
+        bool configure() noexcept override;
         bool login() override;
+        int write(std::string_view) noexcept override;
     };
 
   public:
@@ -61,13 +85,21 @@ class UnixPty: public Pty
     bool isClosed() const noexcept override;
     void wakeupReader() noexcept override;
     std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
+    [[nodiscard]] std::optional<std::tuple<std::string_view, bool>> read(crispy::BufferObject& storage,
+                                                                         std::chrono::milliseconds timeout,
+                                                                         size_t size) override;
     int write(char const* buf, size_t size) override;
     PageSize pageSize() const noexcept override;
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;
 
+    UnixPipe& stdoutFastPipe() noexcept { return _stdoutFastPipe; }
+
   private:
+    std::optional<std::string_view> readSome(int fd, char* target, size_t n) noexcept;
+
     int _masterFd;
     std::array<int, 2> _pipe;
+    UnixPipe _stdoutFastPipe;
     std::vector<char> _buffer;
     PageSize _pageSize;
     Slave _slave;

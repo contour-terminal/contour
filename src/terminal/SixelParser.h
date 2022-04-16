@@ -129,14 +129,14 @@ class SixelColorPalette
 
     void reset();
 
-    unsigned int size() const noexcept { return static_cast<unsigned int>(palette_.size()); }
+    [[nodiscard]] unsigned int size() const noexcept { return static_cast<unsigned int>(palette_.size()); }
     void setSize(unsigned int _newSize);
 
-    unsigned int maxSize() const noexcept { return maxSize_; }
+    [[nodiscard]] unsigned int maxSize() const noexcept { return maxSize_; }
     void setMaxSize(unsigned int _newSize);
 
     void setColor(unsigned int _index, RGBColor const& _color);
-    RGBColor at(unsigned int _index) const noexcept;
+    [[nodiscard]] RGBColor at(unsigned int _index) const noexcept;
 
   private:
     std::vector<RGBColor> palette_;
@@ -157,16 +157,16 @@ class SixelImageBuilder: public SixelParser::Events
                       RGBAColor _backgroundColor,
                       std::shared_ptr<SixelColorPalette> _colorPalette);
 
-    ImageSize maxSize() const noexcept { return maxSize_; }
-    ImageSize size() const noexcept { return size_; }
-    int aspectRatioNominator() const noexcept { return aspectRatio_.nominator; }
-    int aspectRatioDenominator() const noexcept { return aspectRatio_.denominator; }
-    RGBColor currentColor() const noexcept { return colors_->at(currentColor_); }
+    [[nodiscard]] ImageSize maxSize() const noexcept { return maxSize_; }
+    [[nodiscard]] ImageSize size() const noexcept { return size_; }
+    [[nodiscard]] int aspectRatioNominator() const noexcept { return aspectRatio_.nominator; }
+    [[nodiscard]] int aspectRatioDenominator() const noexcept { return aspectRatio_.denominator; }
+    [[nodiscard]] RGBColor currentColor() const noexcept { return colors_->at(currentColor_); }
 
-    RGBAColor at(CellLocation _coord) const noexcept;
+    [[nodiscard]] RGBAColor at(CellLocation _coord) const noexcept;
 
-    Buffer const& data() const noexcept { return buffer_; }
-    Buffer& data() noexcept { return buffer_; }
+    [[nodiscard]] Buffer const& data() const noexcept { return buffer_; }
+    [[nodiscard]] Buffer& data() noexcept { return buffer_; }
 
     void clear(RGBAColor _fillColor);
 
@@ -177,7 +177,7 @@ class SixelImageBuilder: public SixelParser::Events
     void setRaster(int _pan, int _pad, ImageSize _imageSize) override;
     void render(int8_t _sixel) override;
 
-    CellLocation const& sixelCursor() const noexcept { return sixelCursor_; }
+    [[nodiscard]] CellLocation const& sixelCursor() const noexcept { return sixelCursor_; }
 
   private:
     void write(CellLocation const& _coord, RGBColor const& _value) noexcept;

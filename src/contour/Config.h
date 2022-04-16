@@ -217,6 +217,11 @@ struct Config
     // This value must be integer-devisable by 16.
     size_t ptyReadBufferSize = 16384;
 
+    // Size in bytes per PTY Buffer Object.
+    //
+    // Defaults to 1 MB, that's roughly 10k lines when column count is 100.
+    size_t ptyBufferObjectSize = 1024u * 1024u;
+
     bool reflowOnResize = true;
 
     std::unordered_map<std::string, terminal::ColorPalette> colorschemes;

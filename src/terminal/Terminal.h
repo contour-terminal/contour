@@ -37,7 +37,7 @@
 namespace terminal
 {
 
-template <typename Cell>
+template <typename Cell, ScreenType TheScreenType>
 class Screen;
 
 /// Terminal API to manage input and output devices of a pseudo terminal, such as keyboard, mouse, and screen.
@@ -54,7 +54,7 @@ class Terminal
       public:
         virtual ~Events() = default;
 
-        virtual void requestCaptureBuffer(LineCount lines, bool logical) {}
+        virtual void requestCaptureBuffer(LineCount /*lines*/, bool /*logical*/) {}
         virtual void bell() {}
         virtual void bufferChanged(ScreenType) {}
         virtual void renderBufferUpdated() {}
@@ -74,6 +74,7 @@ class Terminal
     };
 
     Terminal(std::unique_ptr<Pty> _pty,
+             size_t ptyBufferObjectSize,
              size_t _ptyReadBufferSize,
              Events& _eventListener,
              LineCount _maxHistoryLineCount = LineCount(0),
@@ -88,7 +89,7 @@ class Terminal
              ColorPalette _colorPalette = {},
              double _refreshRate = 30.0,
              bool _allowReflowOnResize = true);
-    ~Terminal();
+    ~Terminal() = default;
 
     void start();
 
@@ -116,6 +117,11 @@ class Terminal
 
     void setTopBottomMargin(std::optional<LineOffset> _top, std::optional<LineOffset> _bottom);
     void setLeftRightMargin(std::optional<ColumnOffset> _left, std::optional<ColumnOffset> _right);
+
+    bool isFullHorizontalMargins() const noexcept
+    {
+        return state_.margin.horizontal.to.value + 1 == state_.pageSize.columns.value;
+    }
 
     void moveCursorTo(LineOffset _line, ColumnOffset _column);
     void saveCursor();
@@ -339,11 +345,11 @@ class Terminal
     ScreenType screenType() const noexcept { return state_.screenType; }
     void setScreen(ScreenType screenType);
 
-    Screen<Cell> const& primaryScreen() const noexcept { return primaryScreen_; }
-    Screen<Cell>& primaryScreen() noexcept { return primaryScreen_; }
+    Screen<Cell, ScreenType::Primary> const& primaryScreen() const noexcept { return primaryScreen_; }
+    Screen<Cell, ScreenType::Primary>& primaryScreen() noexcept { return primaryScreen_; }
 
-    Screen<Cell> const& alternateScreen() const noexcept { return alternateScreen_; }
-    Screen<Cell>& alternateScreen() noexcept { return alternateScreen_; }
+    Screen<Cell, ScreenType::Alternate> const& alternateScreen() const noexcept { return alternateScreen_; }
+    Screen<Cell, ScreenType::Alternate>& alternateScreen() noexcept { return alternateScreen_; }
 
     bool isLineWrapped(LineOffset _lineNumber) const noexcept
     {
@@ -512,6 +518,8 @@ class Terminal
 
     void applyPageSizeToCurrentBuffer();
 
+    crispy::BufferObjectPtr currentPtyBuffer() const noexcept { return currentPtyBuffer_; }
+
   private:
     void mainLoop();
     void refreshRenderBuffer(RenderBuffer& _output); // <- acquires the lock
@@ -525,7 +533,6 @@ class Terminal
     /// Boolean, indicating whether the terminal's screen buffer contains updates to be rendered.
     mutable std::atomic<uint64_t> changes_;
 
-    size_t ptyReadBufferSize_;
     Events& eventListener_;
 
     std::chrono::milliseconds refreshInterval_;
@@ -558,8 +565,11 @@ class Terminal
     LineOffset copyLastMarkRangeOffset_;
 
     TerminalState state_;
-    Screen<Cell> primaryScreen_;
-    Screen<Cell> alternateScreen_;
+    crispy::BufferObjectPool ptyBufferPool_;
+    crispy::BufferObjectPtr currentPtyBuffer_;
+    size_t ptyReadBufferSize_;
+    Screen<Cell, ScreenType::Primary> primaryScreen_;
+    Screen<Cell, ScreenType::Alternate> alternateScreen_;
     std::reference_wrapper<ScreenBase> currentScreen_;
 
     std::mutex mutable outerLock_;
@@ -575,11 +585,11 @@ class Terminal
     {
         Terminal* terminal;
         explicit SelectionHelper(Terminal* self): terminal { self } {}
-        PageSize pageSize() const noexcept override;
-        bool wordDelimited(CellLocation _pos) const noexcept override;
-        bool wrappedLine(LineOffset _line) const noexcept override;
-        bool cellEmpty(CellLocation _pos) const noexcept override;
-        int cellWidth(CellLocation _pos) const noexcept override;
+        [[nodiscard]] PageSize pageSize() const noexcept override;
+        [[nodiscard]] bool wordDelimited(CellLocation _pos) const noexcept override;
+        [[nodiscard]] bool wrappedLine(LineOffset _line) const noexcept override;
+        [[nodiscard]] bool cellEmpty(CellLocation _pos) const noexcept override;
+        [[nodiscard]] int cellWidth(CellLocation _pos) const noexcept override;
     };
     SelectionHelper selectionHelper_;
 };

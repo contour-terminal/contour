@@ -96,6 +96,7 @@ class MockTerm: public terminal::Terminal::Events
     explicit MockTerm(PageSize _size):
         terminal_ {
             make_unique<terminal::MockPty>(_size),
+            1024 * 1024,
             1024,
             *this,
             LineCount(1024), // max history line count

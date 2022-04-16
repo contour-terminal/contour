@@ -63,14 +63,14 @@ namespace detail
                 input += advance;
                 break;
             }
-            input += 16;
+            input += sizeof(__m128i);
         }
 
         // NOTE: It seems like it is natural to have the following two lines
         // in order to improve speed, but it's in fact slower.
         //
-        // while (input != _end && *input >= 0x20 && (*input & 0x80) == 0)
-        //     ++input;
+        while (input != _end && *input >= 0x20 && (*input & 0x80) == 0)
+            ++input;
 
         return static_cast<size_t>(std::distance(_begin, input));
 #else

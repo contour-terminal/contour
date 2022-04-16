@@ -60,8 +60,8 @@ namespace detail
 
 struct EncoderState
 {
-    int modulo = 0;
-    uint8_t pending[3];
+    uint8_t modulo = 0;
+    uint8_t pending[3] {};
 };
 
 template <typename Alphabet, typename Sink>
@@ -74,8 +74,8 @@ constexpr void encode(uint8_t _byte, Alphabet const& alphabet, EncoderState& _st
     _state.modulo = 0;
     auto const* input = _state.pending;
     _sink(alphabet[(input[0] >> 2) & 0x3F],
-          alphabet[((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4)],
-          alphabet[((input[1] & 0x0F) << 2) | ((uint8_t) (input[2] & 0xC0) >> 6)],
+          alphabet[static_cast<uint8_t>(((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4))],
+          alphabet[static_cast<uint8_t>(((input[1] & 0x0F) << 2) | ((uint8_t) (input[2] & 0xC0) >> 6))],
           alphabet[input[2] & 0x3F]);
 }
 
@@ -90,17 +90,18 @@ constexpr void finish(Alphabet const& alphabet, EncoderState& _state, Sink&& _si
     switch (_state.modulo)
     {
         case 2: {
-            _sink(alphabet[(input[0] >> 2) & 0x3F],
-                  alphabet[((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4)],
-                  alphabet[((input[1] & 0x0F) << 2)],
-                  '=');
+            _sink(
+                alphabet[(input[0] >> 2) & 0x3F],
+                alphabet[static_cast<uint8_t>(((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4))],
+                alphabet[static_cast<uint8_t>(((input[1] & 0x0F) << 2))],
+                '=');
             _state.modulo = 0;
         }
         break;
         case 1: {
             // clang-format off
         _sink(alphabet[(input[0] >> 2) & 0x3F],
-              alphabet[((input[0] & 0x03) << 4)],
+              alphabet[static_cast<size_t>(input[0] & 0x03) << 4],
               '=',
               '=');
             // clang-format on
@@ -127,7 +128,7 @@ template <typename Iterator, typename Alphabet>
 std::string encode(Iterator begin, Iterator end, Alphabet alphabet)
 {
     std::string output;
-    output.reserve(((std::distance(begin, end) + 2) / 3 * 4) + 1);
+    output.reserve(((static_cast<size_t>(std::distance(begin, end)) + 2) / 3 * 4) + 1);
 
     auto const flusher = [&output](char a, char b, char c, char d) {
         output += a;
@@ -138,7 +139,7 @@ std::string encode(Iterator begin, Iterator end, Alphabet alphabet)
 
     auto state = EncoderState {};
     for (auto i = begin; i != end; ++i)
-        encode(*i, alphabet, state, flusher);
+        encode(static_cast<uint8_t>(*i), alphabet, state, flusher);
     finish(alphabet, state, flusher);
 
     return output;
@@ -162,7 +163,8 @@ size_t decodeLength(Iterator begin, Iterator end, IndexTable const& index)
 
     auto const indexSize = std::size(index);
 
-    while (pos != end && index[static_cast<uint8_t>(*pos)] < indexSize)
+    while (pos != end
+           && static_cast<size_t>(index[static_cast<uint8_t>(*pos)]) < static_cast<size_t>(indexSize))
         pos++;
 
     auto const nprbytes = std::distance(begin, pos) - 1;
@@ -186,7 +188,7 @@ template <typename Iterator, typename IndexTable, typename Output>
 size_t decode(Iterator begin, Iterator end, const IndexTable& indexmap, Output output)
 {
     auto const index = [indexmap](Iterator i) -> unsigned char {
-        return indexmap[static_cast<uint8_t>(*i)];
+        return static_cast<unsigned char>(indexmap[static_cast<uint8_t>(*i)]);
     };
 
     if (begin == end)

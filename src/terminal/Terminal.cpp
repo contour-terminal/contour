@@ -21,12 +21,13 @@
 
 #include <crispy/escape.h>
 #include <crispy/stdfs.h>
+#include <crispy/utils.h>
 
 #include <fmt/chrono.h>
 
 #include <chrono>
+#include <csignal>
 #include <iostream>
-#include <signal.h>
 #include <utility>
 
 #include <sys/types.h>
@@ -66,6 +67,7 @@ namespace // {{{ helpers
 // }}}
 
 Terminal::Terminal(unique_ptr<Pty> _pty,
+                   size_t ptyBufferObjectSize,
                    size_t _ptyReadBufferSize,
                    Terminal::Events& _eventListener,
                    LineCount _maxHistoryLineCount,
@@ -81,7 +83,6 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
                    double _refreshRate,
                    bool _allowReflowOnResize):
     changes_ { 0 },
-    ptyReadBufferSize_ { _ptyReadBufferSize },
     eventListener_ { _eventListener },
     refreshInterval_ { static_cast<long long>(1000.0 / _refreshRate) },
     renderBuffer_ {},
@@ -106,6 +107,9 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
              move(_colorPalette),
              _allowReflowOnResize },
     // clang-format on
+    ptyBufferPool_ { crispy::nextPowerOfTwo(ptyBufferObjectSize) },
+    currentPtyBuffer_ { ptyBufferPool_.allocateBufferObject() },
+    ptyReadBufferSize_ { crispy::nextPowerOfTwo(_ptyReadBufferSize) },
     primaryScreen_ { state_, ScreenType::Primary, state_.primaryBuffer },
     alternateScreen_ { state_, ScreenType::Alternate, state_.alternateBuffer },
     currentScreen_ { primaryScreen_ },
@@ -122,10 +126,6 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
     setMode(DECMode::TextReflow, true);
     setMode(DECMode::SixelCursorNextToGraphic, state_.sixelCursorConformance);
 #endif
-}
-
-Terminal::~Terminal()
-{
 }
 
 void Terminal::setRefreshRate(double _refreshRate)
@@ -145,8 +145,18 @@ bool Terminal::processInputOnce()
                              //: refreshInterval_ : std::chrono::seconds(0)
                              : std::chrono::seconds(30);
 
-    optional<string_view> const bufOpt = pty_->read(ptyReadBufferSize_, timeout);
-    if (!bufOpt)
+    // Request a new Buffer Object if the current one cannot sufficiently
+    // store a single text line.
+    if (currentPtyBuffer_->bytesAvailable() < unbox<size_t>(state_.pageSize.columns))
+    {
+        if (PtyInLog)
+            PtyInLog()("Only {} bytes left in TBO. Allocating new buffer from pool.",
+                       currentPtyBuffer_->bytesAvailable());
+        currentPtyBuffer_ = ptyBufferPool_.allocateBufferObject();
+    }
+    optional<tuple<string_view, bool>> const readResult =
+        pty_->read(*currentPtyBuffer_, timeout, ptyReadBufferSize_);
+    if (!readResult)
     {
         if (errno != EINTR && errno != EAGAIN)
         {
@@ -155,7 +165,8 @@ bool Terminal::processInputOnce()
         }
         return errno == EINTR || errno == EAGAIN;
     }
-    string_view const buf = *bufOpt;
+    string_view const buf = get<0>(*readResult);
+    state_.usingStdoutFastPipe = get<1>(*readResult);
 
     if (buf.empty())
     {
@@ -294,7 +305,7 @@ struct ScopedHyperlinkHover
 {
     shared_ptr<HyperlinkInfo const> const href;
 
-    ScopedHyperlinkHover(Terminal const& terminal, ScreenBase const& screen):
+    ScopedHyperlinkHover(Terminal const& terminal, ScreenBase const& /*screen*/):
         href { terminal.tryGetHoveringHyperlink() }
     {
         if (href)
@@ -311,8 +322,6 @@ struct ScopedHyperlinkHover
 void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
 {
     verifyState();
-
-    auto const renderHyperlinks = currentScreen_.get().contains(currentMousePosition_);
 
     changes_.store(0);
     screenDirty_ = false;
@@ -638,8 +647,6 @@ void Terminal::resizeScreen(PageSize _cells, optional<ImageSize> _pixels)
 
     // NOTE: This will only resize the currently active buffer.
     // Any other buffer will be resized when it is switched to.
-
-    auto const oldCursorPos = state_.cursor.position;
 
     state_.pageSize = _cells;
     currentMousePosition_ = clampToScreen(currentMousePosition_);
@@ -1132,16 +1139,10 @@ void Terminal::clearScreen()
 
 void Terminal::moveCursorTo(LineOffset _line, ColumnOffset _column)
 {
-    auto const [line, column] = [&]() {
-        if (!state_.cursor.originMode)
-            return pair { _line, _column };
-        else
-            return pair { _line + state_.margin.vertical.from, _column + state_.margin.horizontal.from };
-    }();
-
-    state_.wrapPending = false;
-    state_.cursor.position.line = clampedLine(line);
-    state_.cursor.position.column = clampedColumn(column);
+    if (isPrimaryScreen())
+        primaryScreen_.moveCursorTo(_line, _column);
+    else
+        alternateScreen_.moveCursorTo(_line, _column);
 }
 
 void Terminal::saveCursor()
@@ -1164,6 +1165,10 @@ void Terminal::restoreCursor(Cursor const& _savedCursor)
     state_.wrapPending = false;
     state_.cursor = _savedCursor;
     state_.cursor.position = clampCoordinate(_savedCursor.position);
+    if (isPrimaryScreen())
+        primaryScreen_.updateCursorIterator();
+    else
+        alternateScreen_.updateCursorIterator();
     verifyState();
 }
 
@@ -1301,6 +1306,11 @@ void Terminal::hardReset()
 
     state_.colorPalette = state_.defaultColorPalette;
 
+    if (isPrimaryScreen())
+        primaryScreen_.updateCursorIterator();
+    else
+        alternateScreen_.updateCursorIterator();
+
     primaryScreen_.verifyState();
 
     state_.inputGenerator.reset();
@@ -1356,6 +1366,10 @@ void Terminal::applyPageSizeToCurrentBuffer()
     // update (last-)cursor position
     state_.cursor.position = cursorPosition;
     state_.lastCursorPosition = cursorPosition;
+    if (isPrimaryScreen())
+        primaryScreen_.updateCursorIterator();
+    else
+        alternateScreen_.updateCursorIterator();
 
     // truncating tabs
     while (!state_.tabs.empty() && state_.tabs.back() >= unbox<ColumnOffset>(state_.pageSize.columns))

@@ -82,7 +82,7 @@ struct FontPathAndSize
     text::font_size size;
 };
 
-bool operator==(FontPathAndSize const& a, FontPathAndSize const& b) noexcept
+[[maybe_unused]] bool operator==(FontPathAndSize const& a, FontPathAndSize const& b) noexcept
 {
     return a.path == b.path && a.size.pt == b.size.pt;
 }
@@ -133,18 +133,6 @@ namespace
         throw invalid_argument("source");
     }
 
-    constexpr string_view fcSpacingStr(int _value) noexcept
-    {
-        switch (_value)
-        {
-            case FC_PROPORTIONAL: return "proportional"sv;
-            case FC_DUAL: return "dual"sv;
-            case FC_MONO: return "mono"sv;
-            case FC_CHARCELL: return "charcell"sv;
-            default: return "INVALID"sv;
-        }
-    }
-
     // clang-format off
     static string ftErrorStr(FT_Error _errorCode)
     {
@@ -160,42 +148,6 @@ namespace
     constexpr bool glyphMissing(text::glyph_position const& _gp) noexcept
     {
         return _gp.glyph.index.value == 0;
-    }
-
-    constexpr int fcWeight(font_weight _weight) noexcept
-    {
-        switch (_weight)
-        {
-            case font_weight::thin: return FC_WEIGHT_THIN;
-            case font_weight::extra_light: return FC_WEIGHT_EXTRALIGHT;
-            case font_weight::light: return FC_WEIGHT_LIGHT;
-            case font_weight::demilight:
-#if defined(FC_WEIGHT_DEMILIGHT)
-                return FC_WEIGHT_DEMILIGHT;
-#else
-                return FC_WEIGHT_LIGHT; // Is this a good fallback? Maybe.
-#endif
-            case font_weight::book: return FC_WEIGHT_BOOK;
-            case font_weight::normal: return FC_WEIGHT_NORMAL;
-            case font_weight::medium: return FC_WEIGHT_MEDIUM;
-            case font_weight::demibold: return FC_WEIGHT_DEMIBOLD;
-            case font_weight::bold: return FC_WEIGHT_BOLD;
-            case font_weight::extra_bold: return FC_WEIGHT_EXTRABOLD;
-            case font_weight::black: return FC_WEIGHT_BLACK;
-            case font_weight::extra_black: return FC_WEIGHT_EXTRABLACK;
-        }
-        return FC_WEIGHT_NORMAL;
-    }
-
-    constexpr int fcSlant(font_slant _slant) noexcept
-    {
-        switch (_slant)
-        {
-            case font_slant::italic: return FC_SLANT_ITALIC;
-            case font_slant::oblique: return FC_SLANT_OBLIQUE;
-            case font_slant::normal: return FC_SLANT_ROMAN;
-        }
-        return FC_SLANT_ROMAN;
     }
 
     constexpr int ftRenderFlag(render_mode _mode) noexcept
@@ -461,7 +413,7 @@ struct open_shaper::Private // {{{
         return result;
     }
 
-    bool has_color(font_key _font) const noexcept
+    [[nodiscard]] bool has_color(font_key _font) const noexcept
     {
         return FT_HAS_COLOR(fontKeyToHbFontInfoMapping.at(_font).ftFace.get());
     }

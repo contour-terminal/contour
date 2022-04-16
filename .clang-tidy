@@ -1,7 +1,41 @@
 ---
-Checks: '-*,clang-diagnostic-*,clang-analyzer-*,bugprone-*,performance-*,-performance-no-int-to-ptr,readability-non-const-parameter,readability-redundant-*,cppcoreguidelines-slicing'
-WarningsAsErrors: ''
-HeaderFilterRegex: ''
+Checks: >-
+  -*,
+  bugprone-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-suspicious-include,
+  cppcoreguidelines-*,
+  -cppcoreguidelines-avoid-c-arrays,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-macro-usage,
+  -cppcoreguidelines-no-malloc,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-bounds-pointer-arithmetic,
+  -cppcoreguidelines-pro-type-const-cast,
+  -cppcoreguidelines-pro-type-cstyle-cast,
+  -cppcoreguidelines-pro-type-static-cast-downcast,
+  -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-special-member-functions,
+  modernize-*,
+  -modernize-avoid-bind,
+  -modernize-avoid-c-arrays,
+  -modernize-return-braced-init-list,
+  -modernize-use-bool-literals,
+  -modernize-use-nullptr,
+  -modernize-use-trailing-return-type,
+  readability-non-const-parameter,
+  readability-redundant-*
+  -readability-redundant-access-specifiers,
+WarningsAsErrors: >-
+  clang-analyzer-*,
+  clang-diagnostic-*,
+  performance-*,
+  -performance-no-int-to-ptr,
+  readability-identifier-naming
+UseColor: true
+HeaderFilterRegex: '^src/(terminal.*)/.*\.(h|cpp)$'
 AnalyzeTemporaryDtors: false
 FormatStyle:     none
 CheckOptions:
@@ -35,5 +69,19 @@ CheckOptions:
     value:           llvm
   - key:             modernize-use-nullptr.NullMacros
     value:           'NULL'
-...
-
+  - key:             modernize-use-default-member-init.UseAssignment
+    value:           '1'
+  # - key:   readability-identifier-naming.EnumCase
+  #   value: CamelCase
+  # - key:   readability-identifier-naming.ClassCase
+  #   value: CamelCase
+  # - key:   readability-identifier-naming.ClassMemberCase
+  #   value: camelBack
+  # - key:   readability-identifier-naming.ClassMethodCase
+  #   value: camelBack
+  # - key:   readability-identifier-naming.ParameterCase
+  #   value: camelBack
+  # - key:   readability-identifier-naming.ParameterPrefix
+  #   value: ''
+  # - key:   readability-identifier-naming.ScopedEnumConstantCase
+  #   value: CamelCase

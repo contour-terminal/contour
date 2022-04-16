@@ -52,7 +52,7 @@
 #endif
 
 #if !defined(_MSC_VER)
-    #include <signal.h>
+    #include <csignal>
     #include <unistd.h>
 #endif
 
@@ -104,6 +104,7 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
     displayInitialized_ { move(_displayInitialized) },
     onExit_ { move(_onExit) },
     terminal_ { move(_pty),
+                config_.ptyBufferObjectSize,
                 config_.ptyReadBufferSize,
                 *this,
                 config_.profile(profileName_)->maxHistoryLineCount,
@@ -949,7 +950,6 @@ void TerminalSession::configureTerminal()
 {
     auto const _l = scoped_lock { terminal_ };
     SessionLog()("Configuring terminal.");
-    auto& screen = terminal_.primaryScreen();
 
     terminal_.setWordDelimiters(config_.wordDelimiters);
     terminal_.setMouseProtocolBypassModifier(config_.bypassMouseProtocolModifier);
@@ -996,8 +996,8 @@ void TerminalSession::configureDisplay()
 
     terminal_.setRefreshRate(display_->refreshRate());
     auto const pageSize = PageSize {
-        LineCount(*display_->pixelSize().height / *display_->cellSize().height),
-        ColumnCount(*display_->pixelSize().width / *display_->cellSize().width),
+        LineCount(unbox<int>(display_->pixelSize().height) / unbox<int>(display_->cellSize().height)),
+        ColumnCount(unbox<int>(display_->pixelSize().width) / unbox<int>(display_->cellSize().width)),
     };
     display_->setPageSize(pageSize);
     display_->setFonts(profile_.fonts);

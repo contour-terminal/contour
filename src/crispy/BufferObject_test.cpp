@@ -10,17 +10,13 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
+ *
  */
+#include <crispy/BufferObject.h>
 
-#include <terminal/MockTerm.h>
-#include <terminal/Screen.h>
-#include <terminal/pty/MockPty.h>
+#include <catch2/catch.hpp>
 
-#include <crispy/App.h>
-
-#include <cstdlib>
-
-namespace terminal
+TEST_CASE("BufferObject", "[BufferObject]")
 {
-
-} // namespace terminal
+    // TODO
+}

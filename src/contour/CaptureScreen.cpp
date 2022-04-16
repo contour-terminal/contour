@@ -145,10 +145,10 @@ namespace
 
             // disable buffered input
             termios tio = savedModes;
-            tio.c_lflag &= ~ICANON;  // disable canonical input
-            tio.c_lflag &= ~ECHO;    // disable echoing
-            tio.c_iflag &= ~IMAXBEL; // disable bell on full input buffer
-            tio.c_iflag &= ~ISTRIP;  // disable stripping of 8th bit on input
+            tio.c_lflag &= (tcflag_t) ~ICANON;  // disable canonical input
+            tio.c_lflag &= (tcflag_t) ~ECHO;    // disable echoing
+            tio.c_iflag &= (tcflag_t) ~IMAXBEL; // disable bell on full input buffer
+            tio.c_iflag &= (tcflag_t) ~ISTRIP;  // disable stripping of 8th bit on input
 
             if (tcsetattr(fd, TCSANOW, &tio) < 0)
                 return;
@@ -204,7 +204,7 @@ namespace
             else
                 return -1;
 #else
-            return ::write(fd, _buf, _size);
+            return static_cast<int>(::write(fd, _buf, _size));
 #endif
         }
 
@@ -219,7 +219,7 @@ namespace
             else
                 return -1;
 #else
-            return ::read(fd, _buf, _size);
+            return static_cast<int>(::read(fd, _buf, _size));
 #endif
         }
 
