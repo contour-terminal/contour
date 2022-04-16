@@ -746,7 +746,7 @@ string Terminal::extractSelectionText() const
 
     renderSelection([&](CellLocation const& _pos, Cell const& _cell) {
         auto const _lock = scoped_lock { *this };
-        auto const isNewLine = _pos.column <= lastColumn;
+        auto const isNewLine = !text.empty() && _pos.column <= lastColumn;
         bool const touchesRightPage =
             _pos.line.value > 0 && isSelected({ _pos.line - 1, pageSize().columns.as<ColumnOffset>() - 1 });
         if (isNewLine && (!isLineWrapped(_pos.line) || !touchesRightPage))
