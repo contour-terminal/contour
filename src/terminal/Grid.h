@@ -578,18 +578,15 @@ void Grid<Cell>::render(RendererT&& _render, ScrollOffset _scrollOffset) const
     {
         auto x = ColumnOffset(0);
         Line<Cell> const& line = lines_[i];
-        if (1) // constexpr (Line<Cell>::Optimized)
+        if (line.isTrivialBuffer())
+            _render.renderTrivialLine(line.trivialBuffer(), y);
+        else
         {
-            if (line.isTrivialBuffer())
-            {
-                _render.renderTrivialLine(line.trivialBuffer(), y);
-                continue;
-            }
+            _render.startLine(y);
+            for (Cell const& cell: line.cells())
+                _render.renderCell(cell, y, x++);
+            _render.endLine();
         }
-        _render.startLine(y);
-        for (Cell const& cell: line.cells())
-            _render.renderCell(cell, y, x++);
-        _render.endLine();
     }
     _render.finish();
 }
