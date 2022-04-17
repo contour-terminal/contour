@@ -310,6 +310,12 @@ jobs:
       run: ./scripts/ci-set-vars.sh
       env:
         REPOSITORY: ${{ github.event.repository.name }}
+    - name: Fetch and unpack embeds
+      run: ./scripts/install-deps.sh
+      env:
+        PREPARE_ONLY_EMBEDS: 'ON'
+        SYSDEP_ASSUME_YES: 'ON'
+        OS_OVERRIDE: 'fedora'
     - name: prepare distfile
       run: |
         set -x
