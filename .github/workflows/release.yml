@@ -189,7 +189,8 @@ jobs:
         run: |
           set -ex
           #brew update
-          brew install freetype fontconfig qt5 harfbuzz boost pkg-config
+          ./scripts/install-deps.sh
+          brew install qt5
       - name: "Create build directory"
         run: mkdir build
       - name: "Generate build files"
