@@ -391,7 +391,7 @@ jobs:
       run: ./build/src/crispy/crispy_test
     - name: "test: libterminal"
       run: ./build/src/terminal/terminal_test
-    - name: "CPack: Creating TGZ package"
+    - name: "CPack: Creating DEB/TGZ package"
       run: |
         set -ex
         cd build/

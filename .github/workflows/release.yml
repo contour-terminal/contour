@@ -100,35 +100,51 @@ jobs:
           cat /etc/apt/sources.list
           sudo apt -q update
           sudo ./scripts/install-deps.sh
-      - name: "create debian package"
+      - name: "Get specific version CMake, v3.18.3"
+        uses: lukka/get-cmake@v3.18.3
+      - name: "create build directory"
+        run: mkdir build
+      - name: "cmake"
+        run: |
+          BUILD_DIR="build" \
+            CMAKE_BUILD_TYPE="RelWithDebInfo" \
+            CXX="g++-8" \
+            EXTRA_CMAKE_FLAGS="-DCONTOUR_BLUR_PLATFORM_KWIN=ON -DUSE_BOOST_FILESYSTEM=ON -DCONTOUR_INSTALL_TOOLS=ON" \
+            ./scripts/ci-prepare-contour.sh
+      - name: "build"
+        run: cmake --build build/ -- -j3
+      - name: "test: crispy"
+        run: ./build/src/crispy/crispy_test
+      - name: "test: libterminal"
+        run: ./build/src/terminal/terminal_test
+      - name: "CPack: Creating DEB package"
         run: |
           set -ex
-          INCR=1
-          ./scripts/mkdebchangelog.sh "${{ steps.set_vars.outputs.version }}" ${INCR}
-          VERSION="${{ steps.set_vars.outputs.version }}"
-          sed -i -e "s/0.0.0-1/${VERSION}-${INCR}/g" debian/changelog
-          dpkg-buildpackage -uc -us
-          mkdir target
-          mv ../contour*.* target/
-      - name: "Rename files"
-        run: |
-          mv -v "target/contour_${{ steps.set_vars.outputs.version }}-1_amd64.deb" "contour_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb"
-          mv -v "target/contour-dbgsym_${{ steps.set_vars.outputs.version }}-1_amd64.ddeb" "contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb"
+          cd build/
+          cpack -G DEB -V
+          cd ..
+          mv -v "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour.deb" \
+                "contour_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb"
+          mv -v "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour-dbgsym.ddeb" \
+                "contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb"
+          echo "pwd: `pwd`" && ls -hl
       - name: "Uploading artifact .deb package"
         uses: actions/upload-artifact@v2
         with:
-          path: contour_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb
+          path: "contour-${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb"
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading artifact .ddeb package (debugging symbols)"
         uses: actions/upload-artifact@v2
         with:
-          path: contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb
+          name: "contour-dbgsym-${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb"
+          path: "contour-dbgsym-${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb"
           if-no-files-found: error
           retention-days: 7
       - name: "Attempt installing the created .deb"
         run: |
-          sudo dpkg --install "contour_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb"
+          sudo dpkg --install "contour-${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb"
+          sudo dpkg --install "contour-dbgsym-${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb"
 
   build_ubuntu2004:
     name: Build on Ubuntu 20.04
