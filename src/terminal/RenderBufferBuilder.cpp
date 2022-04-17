@@ -183,11 +183,12 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TriviallyStyledLineBuffer cons
     // fmt::print("Rendering trivial line {:2} 0..{}/{}: \"{}\"\n",
     //            lineOffset.value,
     //            lineBuffer.text.size(),
-    //            lineBuffer.width,
+    //            lineBuffer.displayWidth,
     //            lineBuffer.text.view());
 
     auto const textMargin = min(boxed_cast<ColumnOffset>(terminal.pageSize().columns),
                                 ColumnOffset::cast_from(lineBuffer.text.size()));
+    auto const pageColumnsEnd = boxed_cast<ColumnOffset>(terminal.pageSize().columns);
     for (auto columnOffset = ColumnOffset(0); columnOffset < textMargin; ++columnOffset)
     {
         auto const pos = CellLocation { lineOffset, columnOffset };
@@ -219,26 +220,24 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TriviallyStyledLineBuffer cons
         output.screen.back().groupEnd = true;
     }
 
-    // for (auto columnOffset = ColumnOffset::cast_from(lineBuffer.text.size());
-    //      columnOffset < boxed_cast<ColumnOffset>(terminal.pageSize().columns);
-    //      ++columnOffset)
-    // {
-    //     auto const pos = CellLocation { lineOffset, columnOffset };
-    //     auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(pos);
-    //     auto const [fg, bg] = makeColorsForCell(gridPosition,
-    //                                             lineBuffer.attributes.styles,
-    //                                             lineBuffer.attributes.foregroundColor,
-    //                                             lineBuffer.attributes.backgroundColor);
-    //
-    //     output.screen.emplace_back(makeRenderCell(terminal.colorPalette(),
-    //                                               char32_t { 0 },
-    //                                               lineBuffer.attributes.styles,
-    //                                               fg,
-    //                                               bg,
-    //                                               lineBuffer.attributes.underlineColor,
-    //                                               lineOffset,
-    //                                               columnOffset));
-    // }
+    for (auto columnOffset = textMargin; columnOffset < pageColumnsEnd; ++columnOffset)
+    {
+        auto const pos = CellLocation { lineOffset, columnOffset };
+        auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(pos);
+        auto const [fg, bg] = makeColorsForCell(gridPosition,
+                                                lineBuffer.attributes.styles,
+                                                lineBuffer.attributes.foregroundColor,
+                                                lineBuffer.attributes.backgroundColor);
+
+        output.screen.emplace_back(makeRenderCell(terminal.colorPalette(),
+                                                  char32_t { 0 },
+                                                  lineBuffer.attributes.styles,
+                                                  fg,
+                                                  bg,
+                                                  lineBuffer.attributes.underlineColor,
+                                                  lineOffset,
+                                                  columnOffset));
+    }
 }
 
 template <typename Cell>
