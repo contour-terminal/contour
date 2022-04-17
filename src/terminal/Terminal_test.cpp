@@ -69,23 +69,23 @@ vector<string> textScreenshot(terminal::Terminal const& _terminal)
     return lines;
 }
 
-string join(vector<string> const& _lines)
-{
-    string output;
-    for (string const& line: _lines)
-    {
-        output += line;
-        output += '\n';
-    }
-    return output;
-}
-
 string trimRight(string _text)
 {
     constexpr auto Whitespaces = "\x20\t\r\n"sv;
     while (!_text.empty() && Whitespaces.find(_text.back()) != Whitespaces.npos)
         _text.resize(_text.size() - 1);
     return _text;
+}
+
+string join(vector<string> const& _lines)
+{
+    string output;
+    for (string const& line: _lines)
+    {
+        output += trimRight(line);
+        output += '\n';
+    }
+    return output;
 }
 
 class MockTerm: public terminal::Terminal::Events

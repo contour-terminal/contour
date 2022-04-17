@@ -102,7 +102,8 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCell(ColorPalette const& _colorP
     renderCell.position.column = _column;
     renderCell.flags = flags;
     renderCell.width = 1;
-    renderCell.codepoints.push_back(codepoint);
+    if (codepoint)
+        renderCell.codepoints.push_back(codepoint);
     return renderCell;
 }
 
