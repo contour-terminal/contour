@@ -1,4 +1,4 @@
-# Contour - A modern C++ Terminal Emulator
+# Contour - a modern & actually fast Terminal Emulator
 [![CI Build](https://github.com/contour-terminal/contour/workflows/Build/badge.svg)](https://github.com/contour-terminal/contour/actions?query=workflow%3ABuild)
 [![codecov](https://codecov.io/gh/contour-terminal/contour/branch/master/graph/badge.svg)](https://codecov.io/gh/contour-terminal/contour)
 [![C++17](https://img.shields.io/badge/standard-C%2B%2B%2017-blue.svg?logo=C%2B%2B)](https://isocpp.org/)
@@ -10,12 +10,12 @@
 
 **IMPORTANT: THIS PROJECT IS IN BETA STAGE & ACTIVE DEVELOPMENT**
 
-`contour` is a modern terminal emulator, for everyday use. It is aiming
-for power users with a modern feature mindset.
+`contour` is a modern and actually fast virtual terminal emulator,
+for everyday use. It is aiming for power users with a modern feature mindset.
 
 ## Features
 
-- ✅ Available on all 3 major platforms, Linux, OS/X, Windows (Windows is alpha stage).
+- ✅ Available on all 4 major platforms, Linux, OS/X, FreeBSD, Windows.
 - ✅ GPU-accelerated rendering.
 - ✅ Font ligatures support (such as in Fira Code).
 - ✅ Unicode: Emoji support (-: 🌈 💝 😛 👪 - including ZWJ, VS15, VS16 emoji :-)
@@ -24,6 +24,7 @@ for power users with a modern feature mindset.
 - ✅ High-DPI support.
 - ✅ Vertical Line Markers (quickly jump to markers in your history!)
 - ✅ Blurred behind transparent background when using Windows 10 or KDE window manager on Linux.
+- ✅ Blurrable Background image support.
 - ✅ Runtime configuration reload
 - ✅ 256-color and Truecolor support
 - ✅ Key binding customization
@@ -49,9 +50,8 @@ for power users with a modern feature mindset.
 ```txt
   Usage:
 
-    contour [terminal] [config FILE] [profile NAME] [debug TAGS] [live-config]
-                       [dump-state-at-exit PATH] [early-exit-threshold UINT]
-                       [working-directory DIRECTORY] [class WM_CLASS]
+    contour [terminal] [config FILE] [profile NAME] [debug TAGS] [live-config] [dump-state-at-exit PATH]
+                       [early-exit-threshold UINT] [working-directory DIRECTORY] [class WM_CLASS]
                        [platform PLATFORM[:OPTIONS]] [session SESSION_ID] [PROGRAM ARGS...]
     contour font-locator [config FILE] [profile NAME] [debug TAGS]
     contour help
@@ -62,7 +62,7 @@ for power users with a modern feature mindset.
     contour generate terminfo to FILE
     contour generate config to FILE
     contour generate integration shell SHELL to FILE
-    contour capture [logical] [timeout SECONDS] [lines COUNT] to FILE
+    contour capture [logical] [words] [timeout SECONDS] [lines COUNT] to FILE
     contour set profile [to NAME]
 
 ```
@@ -77,6 +77,9 @@ to build from source, it is recommended to execute the `scripts/install-deps.sh`
 ```sh
 ./scripts/install-deps.sh
 ```
+
+This script *might* ask you for the administrator password if a package dependency
+can be insalled via the system package manager.
 
 ### Prerequisites Windows 10 or newer
 
