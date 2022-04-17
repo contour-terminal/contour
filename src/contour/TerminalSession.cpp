@@ -22,6 +22,7 @@
 #include <terminal/pty/Pty.h>
 
 #include <crispy/StackTrace.h>
+#include <crispy/stdfs.h>
 
 #include <range/v3/all.hpp>
 
@@ -43,6 +44,8 @@
 #include <algorithm>
 #include <fstream>
 
+#include "fmt/core.h"
+#include "terminal/Grid.h"
 #include <QtNetwork/QHostInfo>
 
 #if !defined(_WIN32)
@@ -361,6 +364,26 @@ void TerminalSession::onClosed()
         terminal_.writeToScreen("\r\n");
         terminatedAndWaitingForKeyPress_ = true;
         return;
+    }
+    if (config().profile().sessionResume)
+    {
+        // Write to file
+        FileSystem::path sessionFileDir { "/home/utkarsh/.cache/contour" };
+        if (!FileSystem::exists(sessionFileDir))
+            FileSystem::create_directory(sessionFileDir);
+        std::ofstream file(sessionFileDir.string() + "/session.bin");
+        if (!file.is_open())
+            fmt::print("Why\n");
+        auto configPath = FileSystem::absolute(config().backingFilePath).string() + "\n";
+        auto activeProfileName = profileName_ + "\n";
+        file.write(configPath.data(), configPath.size());
+        file.write(activeProfileName.data(), activeProfileName.size());
+        auto& grid = terminal().primaryScreen().grid();
+        for (int const lineOffset:
+             ranges::views::iota(-unbox<int>(grid.historyLineCount()), unbox<int>(grid.pageSize().lines)))
+        {
+            file << fmt::format("{}\n", grid.lineText(LineOffset::cast_from(lineOffset)));
+        }
     }
 
     if (app_.dumpStateAtExit().has_value())

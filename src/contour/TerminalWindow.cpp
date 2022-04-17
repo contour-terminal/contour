@@ -67,6 +67,22 @@ namespace contour
 
 using actions::Action;
 
+static auto loadSession(std::string const& sessionFilePath)
+{
+    std::ifstream sessionFile(sessionFilePath);
+    sessionFile.unsetf(std::ios::skipws);
+    std::string line;
+    std::tuple<std::string, std::string, std::vector<std::string>> ret;
+    std::getline(sessionFile, std::get<0>(ret));
+    std::getline(sessionFile, std::get<1>(ret));
+    while (std::getline(sessionFile, line))
+        std::get<2>(ret).push_back(line);
+    // std::copy(std::istream_iterator<char>(sessionFile),
+    //           std::istream_iterator<char>(),
+    //           std::back_inserter(std::get<2>(ret)));
+    return ret;
+}
+
 TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
                                config::Config _config,
                                bool _liveConfig,
@@ -139,6 +155,21 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
 #endif
         },
         [this]() { app_.onExit(*terminalSession_); });
+
+    if (config_.profile().sessionResume)
+    {
+        auto [configPath, profile, gridBuffer] = loadSession("/home/utkarsh/.cache/contour/session.bin");
+        config_ = contour::config::loadConfigFromFile(configPath);
+        // Update profile to be from seesion file
+        auto& grid = terminalSession_->terminal().state().primaryBuffer;
+        grid.setMaxHistoryLineCount(terminal::LineCount(gridBuffer.size()));
+        auto count = 0;
+        for (auto& i: gridBuffer)
+        {
+            grid.setLineText(terminal::LineOffset(count), i);
+            ++count;
+        }
+    }
 
     terminalSession_->setDisplay(make_unique<opengl::TerminalWidget>(
         *terminalSession_,
