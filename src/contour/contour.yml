@@ -199,6 +199,7 @@ profiles:
             # Boolean indicating whether or not to scroll down to the bottom on screen updates.
             auto_scroll_on_update: true
             # Number of lines to scroll on ScrollUp & ScrollDown events.
+            # Default: 3
             scroll_multiplier: 3
 
         # visual scrollbar support

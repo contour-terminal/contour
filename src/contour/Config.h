@@ -142,7 +142,7 @@ struct TerminalProfile
     terminal::VTType terminalId = terminal::VTType::VT525;
 
     terminal::LineCount maxHistoryLineCount;
-    terminal::LineCount historyScrollMultiplier;
+    terminal::LineCount historyScrollMultiplier = terminal::LineCount(3);
     ScrollBarPosition scrollbarPosition = ScrollBarPosition::Right;
     bool hideScrollbarInAltScreen = true;
 
