@@ -131,20 +131,19 @@ jobs:
       - name: "Uploading artifact .deb package"
         uses: actions/upload-artifact@v2
         with:
-          path: "contour-${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb"
+          path: "contour_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb"
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading artifact .ddeb package (debugging symbols)"
         uses: actions/upload-artifact@v2
         with:
-          name: "contour-dbgsym-${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb"
-          path: "contour-dbgsym-${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb"
+          path: "contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb"
           if-no-files-found: error
           retention-days: 7
       - name: "Attempt installing the created .deb"
         run: |
-          sudo dpkg --install "contour-${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb"
-          sudo dpkg --install "contour-dbgsym-${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb"
+          sudo dpkg --install "contour_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb"
+          sudo dpkg --install "contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb"
 
   build_ubuntu2004:
     name: Build on Ubuntu 20.04
