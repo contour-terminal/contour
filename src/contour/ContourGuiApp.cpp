@@ -29,6 +29,9 @@
 #include <iostream>
 #include <vector>
 
+#include "fmt/core.h"
+#include "fmt/ranges.h"
+
 using std::bind;
 using std::cerr;
 using std::get;

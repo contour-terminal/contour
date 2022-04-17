@@ -34,6 +34,8 @@
 #include <type_traits>
 #include <vector>
 
+#include "fmt/core.h"
+
 namespace terminal
 {
 

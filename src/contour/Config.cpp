@@ -41,6 +41,8 @@
 #include <utility>
 #include <vector>
 
+#include "fmt/core.h"
+
 #if defined(_WIN32)
     #include <Windows.h>
 #elif defined(__APPLE__)
@@ -1492,6 +1494,8 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     tryLoadChildRelative(_usedKeys, _profile, basePath, "cursor.blinking_interval", uintValue);
     profile.cursorBlinkInterval = chrono::milliseconds(uintValue);
 
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "session_resume", profile.sessionResume);
+    // fmt::print("{}\n", profile.sessionResume);
     return profile;
 }
 

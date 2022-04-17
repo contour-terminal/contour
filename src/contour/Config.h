@@ -149,7 +149,6 @@ struct TerminalProfile
     bool autoScrollOnUpdate;
 
     terminal::renderer::FontDescriptions fonts;
-
     struct
     {
         Permission captureBuffer = Permission::Ask;
@@ -174,6 +173,8 @@ struct TerminalProfile
         terminal::renderer::Decorator normal = terminal::renderer::Decorator::DottedUnderline;
         terminal::renderer::Decorator hover = terminal::renderer::Decorator::Underline;
     } hyperlinkDecoration;
+
+    bool sessionResume = false;
 };
 
 enum class RenderingBackend
