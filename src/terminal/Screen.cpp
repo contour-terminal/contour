@@ -15,6 +15,7 @@
 #include <terminal/Screen.h>
 #include <terminal/Terminal.h>
 #include <terminal/VTType.h>
+#include <terminal/VTWriter.h>
 #include <terminal/logging.h>
 
 #include <crispy/App.h>
@@ -200,189 +201,6 @@ namespace // {{{ helper
 
         return output;
     }
-
-    class VTWriter
-    {
-      public:
-        // TODO: compare with old sgr value set instead to be more generic in reusing stuff
-        using Writer = std::function<void(char const*, size_t)>;
-
-        explicit VTWriter(Writer writer): writer_ { std::move(writer) } {}
-        explicit VTWriter(std::ostream& output):
-            VTWriter { [&](char const* d, size_t n) {
-                output.write(d, static_cast<std::streamsize>(n));
-            } }
-        {
-        }
-        explicit VTWriter(std::vector<char>& output):
-            VTWriter { [&](char const* d, size_t n) {
-                output.insert(output.end(), d, d + n);
-            } }
-        {
-        }
-
-        void write(char32_t v)
-        {
-            flush();
-            char buf[4];
-            auto enc = unicode::encoder<char> {};
-            auto count = distance(buf, enc(v, buf));
-            write(string_view(buf, static_cast<size_t>(count)));
-        }
-
-        void write(std::string_view _s)
-        {
-            flush();
-            writer_(_s.data(), _s.size());
-        }
-
-        template <typename... T>
-        void write(fmt::format_string<T...> fmt, T&&... args)
-        {
-            write(fmt::vformat(fmt, fmt::make_format_args(args...)));
-        }
-
-        void flush()
-        {
-            if (sgr_.empty())
-                return;
-
-            auto const f = flush(sgr_);
-            if (sgr_ != lastSGR_)
-                writer_(f.data(), f.size());
-            sgr_rewind();
-        }
-
-        string flush(vector<unsigned> const& _sgr)
-        {
-            if (_sgr.empty())
-                return "";
-
-            auto const params =
-                _sgr.size() != 1 || _sgr[0] != 0
-                    ? accumulate(begin(_sgr),
-                                 end(_sgr),
-                                 string {},
-                                 [](auto a, auto b) {
-                                     return a.empty() ? fmt::format("{}", b) : fmt::format("{};{}", a, b);
-                                 })
-                    : string();
-
-            return fmt::format("\033[{}m", params);
-        }
-
-        void sgr_add(unsigned n)
-        {
-            if (n == 0)
-            {
-                sgr_.clear();
-                sgr_.push_back(n);
-                currentForegroundColor_ = DefaultColor();
-                currentBackgroundColor_ = DefaultColor();
-                currentUnderlineColor_ = DefaultColor();
-            }
-            else
-            {
-                if (sgr_.empty() || sgr_.back() != n)
-                    sgr_.push_back(n);
-
-                if (sgr_.size() == 16)
-                {
-                    flush();
-                }
-            }
-        }
-
-        void sgr_rewind()
-        {
-            swap(lastSGR_, sgr_);
-            sgr_.clear();
-        }
-
-        void sgr_add(GraphicsRendition m) { sgr_add(static_cast<unsigned>(m)); }
-
-        void setForegroundColor(Color _color)
-        {
-            // if (_color == currentForegroundColor_)
-            //     return;
-
-            currentForegroundColor_ = _color;
-            switch (_color.type())
-            {
-                case ColorType::Default:
-                    //.
-                    sgr_add(39);
-                    break;
-                case ColorType::Indexed:
-                    if (static_cast<unsigned>(_color.index()) < 8)
-                        sgr_add(30 + static_cast<unsigned>(_color.index()));
-                    else
-                    {
-                        sgr_add(38);
-                        sgr_add(5);
-                        sgr_add(static_cast<unsigned>(_color.index()));
-                    }
-                    break;
-                case ColorType::Bright:
-                    //.
-                    sgr_add(90 + static_cast<unsigned>(getBrightColor(_color)));
-                    break;
-                case ColorType::RGB:
-                    sgr_add(38);
-                    sgr_add(2);
-                    sgr_add(static_cast<unsigned>(_color.rgb().red));
-                    sgr_add(static_cast<unsigned>(_color.rgb().green));
-                    sgr_add(static_cast<unsigned>(_color.rgb().blue));
-                    break;
-                case ColorType::Undefined: break;
-            }
-        }
-
-        void setBackgroundColor(Color _color)
-        {
-            // if (_color == currentBackgroundColor_)
-            //     return;
-
-            currentBackgroundColor_ = _color;
-            switch (_color.type())
-            {
-                case ColorType::Default: sgr_add(49); break;
-                case ColorType::Indexed:
-                    if (static_cast<unsigned>(_color.index()) < 8)
-                        sgr_add(40 + static_cast<unsigned>(_color.index()));
-                    else
-                    {
-                        sgr_add(48);
-                        sgr_add(5);
-                        sgr_add(static_cast<unsigned>(_color.index()));
-                    }
-                    break;
-                case ColorType::Bright:
-                    //.
-                    sgr_add(100 + static_cast<unsigned>(getBrightColor(_color)));
-                    break;
-                case ColorType::RGB:
-                    sgr_add(48);
-                    sgr_add(2);
-                    sgr_add(static_cast<unsigned>(_color.rgb().red));
-                    sgr_add(static_cast<unsigned>(_color.rgb().green));
-                    sgr_add(static_cast<unsigned>(_color.rgb().blue));
-                    break;
-                case ColorType::Undefined:
-                    //.
-                    break;
-            }
-        }
-
-      private:
-        Writer writer_;
-        std::vector<unsigned> sgr_;
-        std::stringstream sstr;
-        std::vector<unsigned> lastSGR_;
-        Color currentForegroundColor_ = DefaultColor();
-        Color currentUnderlineColor_ = DefaultColor();
-        Color currentBackgroundColor_ = DefaultColor();
-    };
 
     template <typename T, typename U>
     std::optional<crispy::boxed<T, U>> decr(std::optional<crispy::boxed<T, U>> v)
@@ -699,47 +517,12 @@ std::string Screen<Cell, TheScreenType>::screenshot(function<string(LineOffset)>
     auto result = std::stringstream {};
     auto writer = VTWriter(result);
 
-    // for (int const line: ranges::views::iota(-unbox<int>(historyLineCount()), *_state.pageSize.lines))
     for (int const line: ranges::views::iota(0, *_state.pageSize.lines))
     {
-        Line<Cell> const& lineRef = grid().lineAt(LineOffset(line));
-        if (lineRef.isTrivialBuffer())
-        {
-            TriviallyStyledLineBuffer const& lineBuffer = lineRef.trivialBuffer();
-            writer.setForegroundColor(lineBuffer.attributes.foregroundColor);
-            writer.setBackgroundColor(lineBuffer.attributes.backgroundColor);
-            writer.write(lineRef.toUtf8());
-        }
-        else
-        {
-            for (int const col: ranges::views::iota(0, *_state.pageSize.columns))
-            {
-                Cell const& cell = at(LineOffset(line), ColumnOffset(col));
-
-                if (cell.styles() & CellFlags::Bold)
-                    writer.sgr_add(GraphicsRendition::Bold);
-                else
-                    writer.sgr_add(GraphicsRendition::Normal);
-
-                // TODO: other styles (such as underline, ...)?
-
-                writer.setForegroundColor(cell.foregroundColor());
-                writer.setBackgroundColor(cell.backgroundColor());
-
-                if (!cell.codepointCount())
-                    writer.write(' ');
-                else
-                    writer.write(cell.toUtf8());
-            }
-        }
-
-        writer.sgr_add(GraphicsRendition::Reset);
-
+        writer.write(grid().lineAt(LineOffset(line)));
         if (_postLine)
             writer.write(_postLine(LineOffset(line)));
-
-        writer.write('\r');
-        writer.write('\n');
+        writer.crlf();
     }
 
     return result.str();

@@ -47,6 +47,7 @@ set(terminal_HEADERS
     SixelParser.h
     Terminal.h
     VTType.h
+    VTWriter.h
     Viewport.h
     primitives.h
     pty/ConPty.h
@@ -89,6 +90,7 @@ set(terminal_SOURCES
     Terminal.cpp
     TerminalState.cpp
     VTType.cpp
+    VTWriter.cpp
     Viewport.cpp
     primitives.cpp
     pty/MockPty.cpp

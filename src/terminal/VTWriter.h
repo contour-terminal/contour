@@ -1,0 +1,84 @@
+/**
+ * This file is part of the "libterminal" project
+ *   Copyright (c) 2019-2020 Christian Parpart <christian@parpart.family>
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+#pragma once
+
+#include <terminal/Color.h>
+#include <terminal/Line.h>
+#include <terminal/primitives.h>
+
+#include <unicode/convert.h>
+
+#include <fmt/format.h>
+
+#include <range/v3/view/iota.hpp>
+
+#include <functional>
+#include <ostream>
+#include <sstream>
+#include <vector>
+
+namespace terminal
+{
+
+// Serializes text and SGR attributes into a valid VT stream.
+class VTWriter
+{
+  public:
+    using Writer = std::function<void(char const*, size_t)>;
+
+    explicit VTWriter(Writer writer);
+    explicit VTWriter(std::ostream& output);
+    explicit VTWriter(std::vector<char>& output);
+
+    void crlf();
+
+    // Writes the given Line<> to the output stream without the trailing newline.
+    template <typename Cell>
+    void write(Line<Cell> const& line);
+
+    template <typename... T>
+    void write(fmt::format_string<T...> fmt, T&&... args);
+    void write(std::string_view s);
+    void write(char32_t v);
+
+    void sgrFlush();
+    std::string sgrFlush(std::vector<unsigned> const& sgr);
+    void sgrAdd(unsigned n);
+    void sgrRewind();
+    void sgrAdd(GraphicsRendition m);
+    void setForegroundColor(Color color);
+    void setBackgroundColor(Color color);
+
+  private:
+    Writer writer_;
+    std::vector<unsigned> sgr_;
+    std::stringstream sstr;
+    std::vector<unsigned> lastSGR_;
+    Color currentForegroundColor_ = DefaultColor();
+    Color currentUnderlineColor_ = DefaultColor();
+    Color currentBackgroundColor_ = DefaultColor();
+};
+
+template <typename... T>
+inline void VTWriter::write(fmt::format_string<T...> fmt, T&&... args)
+{
+    write(fmt::vformat(fmt, fmt::make_format_args(args...)));
+}
+
+inline void VTWriter::crlf()
+{
+    write("\r\n");
+}
+
+} // namespace terminal
