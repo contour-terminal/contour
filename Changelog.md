@@ -1,3 +1,7 @@
+### 0.3.1 (unreleased)
+
+* Fixes assertion on font resize when a (Sixel) image is currently being rendered (#642).
+
 ### 0.3.0 (2022-04-18)
 
 **TL;DR** Many thanks to all for the great support and feedback. This release

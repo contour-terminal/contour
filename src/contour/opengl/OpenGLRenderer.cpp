@@ -178,6 +178,21 @@ namespace
         }
     };
 
+    // Returns first non-zero argument.
+    template <typename T, typename... More>
+    constexpr T firstNonZero(T a, More... more) noexcept
+    {
+        if constexpr (sizeof...(More) == 0)
+            return a;
+        else
+        {
+            if (a != T(0))
+                return a;
+            else
+                return firstNonZero<More...>(std::forward<More>(more)...);
+        }
+    }
+
 } // namespace
 
 /**
@@ -393,8 +408,8 @@ void OpenGLRenderer::renderTile(atlas::RenderTile tile)
     auto const z = static_cast<GLfloat>(0);
 
     // tile bitmap size on target render surface
-    GLfloat const r = unbox<GLfloat>(tile.bitmapSize.width); // r/s: target size
-    GLfloat const s = unbox<GLfloat>(tile.bitmapSize.height);
+    GLfloat const r = unbox<GLfloat>(firstNonZero(tile.targetSize.width, tile.bitmapSize.width));
+    GLfloat const s = unbox<GLfloat>(firstNonZero(tile.targetSize.height, tile.bitmapSize.height));
 
     // normalized TexCoords
     GLfloat const nx = tile.normalizedLocation.x;

@@ -34,6 +34,7 @@ auto Renderable::createTileData(atlas::TileLocation tileLocation,
                                 std::vector<uint8_t> bitmap,
                                 atlas::Format bitmapFormat,
                                 ImageSize bitmapSize,
+                                ImageSize renderBitmapSize,
                                 RenderTileAttributes::X x,
                                 RenderTileAttributes::Y y,
                                 uint32_t fragmentShaderSelector) -> TextureAtlas::TileCreateData
@@ -54,6 +55,7 @@ auto Renderable::createTileData(atlas::TileLocation tileLocation,
     tileData.metadata.normalizedLocation.y = static_cast<float>(tileLocation.y.value) / unbox<float>(atlasSize.height);
     tileData.metadata.normalizedLocation.width = unbox<float>(tileData.bitmapSize.width) / unbox<float>(atlasSize.width);
     tileData.metadata.normalizedLocation.height = unbox<float>(tileData.bitmapSize.height) / unbox<float>(atlasSize.height);
+    tileData.metadata.targetSize = renderBitmapSize;
     return tileData;
     // clang-format on
 }
@@ -101,6 +103,7 @@ void Renderable::renderTile(atlas::RenderTile::X x,
     renderTile.fragmentShaderSelector = attributes.metadata.fragmentShaderSelector;
     renderTile.color = atlas::normalize(color);
     renderTile.normalizedLocation = attributes.metadata.normalizedLocation;
+    renderTile.targetSize = attributes.metadata.targetSize;
     renderTile.tileLocation = attributes.location;
     textureScheduler().renderTile(renderTile);
 }
