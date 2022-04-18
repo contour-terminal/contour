@@ -36,7 +36,7 @@ jobs:
       - name: "Fetch embedded dependencies"
         shell: powershell
         run: |
-          ./scripts/install-deps.ps1
+          ./scripts/install-deps.ps1 --skip-vcpkg
           type ./_deps/sources/CMakeLists.txt
       - name: "vcpkg: Install dependencies"
         uses: lukka/run-vcpkg@v5
