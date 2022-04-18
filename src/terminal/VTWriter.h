@@ -21,8 +21,6 @@
 
 #include <fmt/format.h>
 
-#include <range/v3/view/iota.hpp>
-
 #include <functional>
 #include <ostream>
 #include <sstream>

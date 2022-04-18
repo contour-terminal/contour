@@ -15,7 +15,9 @@
 
 #include <numeric>
 
-using namespace std;
+using std::string;
+using std::string_view;
+using std::vector;
 
 namespace terminal
 {
@@ -46,10 +48,10 @@ void VTWriter::write(char32_t v)
     char buf[4];
     auto enc = unicode::encoder<char> {};
     auto count = std::distance(buf, enc(v, buf));
-    write(std::string_view(buf, static_cast<size_t>(count)));
+    write(string_view(buf, static_cast<size_t>(count)));
 }
 
-void VTWriter::write(std::string_view s)
+void VTWriter::write(string_view s)
 {
     sgrFlush();
     writer_(s.data(), s.size());
