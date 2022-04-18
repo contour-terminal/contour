@@ -89,7 +89,7 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
 
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_NoSystemBackground, false);
-    setWindowFlag(Qt::FramelessWindowHint, !profile()->show_title_bar);
+    setWindowFlag(Qt::FramelessWindowHint, !profile().show_title_bar);
 
     // {{{ fill config's maxImageSize if not yet set.
     auto const defaultMaxImageSize = [&]() -> ImageSize {
@@ -109,8 +109,7 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
     // }}}
 
     terminalSession_ = make_unique<TerminalSession>(
-        make_unique<terminal::Process>(profile()->shell,
-                                       terminal::createPty(profile()->terminalSize, nullopt)),
+        make_unique<terminal::Process>(profile().shell, terminal::createPty(profile().terminalSize, nullopt)),
         _earlyExitThreshold,
         config_,
         liveConfig_,
@@ -181,9 +180,9 @@ void TerminalWindow::profileChanged()
     scrollableDisplay_->updatePosition();
 
     if (terminalSession_->terminal().isPrimaryScreen())
-        scrollableDisplay_->showScrollBar(profile()->scrollbarPosition != config::ScrollBarPosition::Hidden);
+        scrollableDisplay_->showScrollBar(profile().scrollbarPosition != config::ScrollBarPosition::Hidden);
     else
-        scrollableDisplay_->showScrollBar(!profile()->hideScrollbarInAltScreen);
+        scrollableDisplay_->showScrollBar(!profile().hideScrollbarInAltScreen);
 #endif
 }
 
@@ -192,7 +191,7 @@ void TerminalWindow::terminalBufferChanged(terminal::ScreenType _type)
 #if defined(CONTOUR_SCROLLBAR)
     DisplayLog()("Screen buffer type has changed to {}.", _type);
     scrollableDisplay_->showScrollBar(_type == terminal::ScreenType::Primary
-                                      || !profile()->hideScrollbarInAltScreen);
+                                      || !profile().hideScrollbarInAltScreen);
 
     scrollableDisplay_->updatePosition();
     scrollableDisplay_->updateValues();

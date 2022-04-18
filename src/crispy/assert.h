@@ -34,6 +34,28 @@ namespace crispy
 /// Function signature for custom assertion failure handlers.
 using fail_handler_t = std::function<void(std::string_view, std::string_view, std::string_view, int)>;
 
+#if defined(__GNUC__)
+// GCC 4.8+, Clang, Intel and other compilers compatible with GCC (-std=c++0x or above)
+[[noreturn]] inline __attribute__((always_inline)) void unreachable()
+{
+    __builtin_unreachable();
+}
+
+#elif defined(_MSC_VER) // MSVC
+
+[[noreturn]] __forceinline void unreachable()
+{
+    __assume(false);
+}
+
+#else
+
+[[noreturn]] inline void unreachable()
+{
+}
+
+#endif
+
 namespace detail
 {
     inline fail_handler_t& fail_handler()
@@ -42,15 +64,16 @@ namespace detail
         return storage;
     }
 
-    inline void fail(std::string_view _text, std::string_view _message, std::string_view _file, int _line)
+    [[noreturn]] inline void fail(std::string_view _text,
+                                  std::string_view _message,
+                                  std::string_view _file,
+                                  int _line)
     {
         if (fail_handler())
             fail_handler()(_text, _message, _file, _line);
         else
-        {
             fmt::print("[{}:{}] {} {}\n", _file, _line, _message, _text);
-            std::abort();
-        }
+        std::abort();
     }
 
     inline void check(
@@ -82,28 +105,7 @@ inline void set_fail_handler(fail_handler_t _handler)
     do                                                                                       \
     {                                                                                        \
         ::crispy::detail::check((cond), #cond, "Postcondition failed.", __FILE__, __LINE__); \
+        assert(cond);                                                                        \
     } while (0)
-
-#if defined(__GNUC__)
-// GCC 4.8+, Clang, Intel and other compilers compatible with GCC (-std=c++0x or above)
-[[noreturn]] inline __attribute__((always_inline)) void unreachable()
-{
-    __builtin_unreachable();
-}
-
-#elif defined(_MSC_VER) // MSVC
-
-[[noreturn]] __forceinline void unreachable()
-{
-    __assume(false);
-}
-
-#else
-
-[[noreturn]] inline void unreachable()
-{
-}
-
-#endif
 
 } // namespace crispy

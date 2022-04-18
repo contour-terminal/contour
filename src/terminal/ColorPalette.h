@@ -102,7 +102,7 @@ struct ColorPalette
         // colors 232-255 are a grayscale ramp, intentionally leaving out black and white
         for (uint8_t gray = 0, level = uint8_t(gray * 10 + 8); gray < 24;
              ++gray, level = uint8_t(gray * 10 + 8))
-            colors[232 + gray] = RGBColor { level, level, level };
+            colors[size_t(232 + gray)] = RGBColor { level, level, level };
 
         return colors;
     }

@@ -426,7 +426,7 @@ void TerminalWidget::logDisplayTopInfo()
     {
         glslVersions += " (";
         for (GLint k = 0, l = 0; k < glslNumShaderVersions; ++k)
-            if (auto const str = glGetStringi(GL_SHADING_LANGUAGE_VERSION, k); str && *str)
+            if (auto const str = glGetStringi(GL_SHADING_LANGUAGE_VERSION, GLuint(k)); str && *str)
             {
                 glslVersions += (l ? ", " : "");
                 glslVersions += (char const*) str;
@@ -752,8 +752,9 @@ double TerminalWidget::contentScale() const
 void TerminalWidget::updateMinimumSize()
 {
     auto const MinimumGridSize = PageSize { LineCount(5), ColumnCount(10) };
-    auto const minSize = ImageSize { Width(*gridMetrics().cellSize.width * *MinimumGridSize.columns),
-                                     Height(*gridMetrics().cellSize.width * *MinimumGridSize.columns) };
+    auto const minSize =
+        ImageSize { Width::cast_from(unbox<int>(gridMetrics().cellSize.width) * *MinimumGridSize.columns),
+                    Height::cast_from(unbox<int>(gridMetrics().cellSize.width) * *MinimumGridSize.columns) };
     auto const scaledMinSize = minSize / contentScale();
     setMinimumSize(scaledMinSize.width.as<int>(), scaledMinSize.height.as<int>());
     parentWidget()->setMinimumSize(scaledMinSize.width.as<int>(), scaledMinSize.height.as<int>());
