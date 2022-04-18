@@ -1,4 +1,4 @@
-### 0.3.0 (unreleased)
+### 0.3.0 (2022-04-18)
 
 **TL;DR** Many thanks to all for the great support and feedback. This release
 marks a huge milestone for me especially with regards to VT backend performance(!),
