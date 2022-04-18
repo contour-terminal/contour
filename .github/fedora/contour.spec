@@ -50,6 +50,8 @@ cmake . \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DCONTOUR_BLUR_PLATFORM_KWIN=ON \
     -DCMAKE_INSTALL_PREFIX=/usr \
+    -DPEDANTIC_COMPILER=ON \
+    -DPEDANTIC_COMPILER_WERROR=ON \
     -B build \
     -GNinja
 cd build

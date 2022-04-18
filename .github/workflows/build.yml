@@ -496,14 +496,15 @@ jobs:
           CC_VER=$( echo "${{ matrix.compiler }}" | awk '{ print $2; }')
           test "${CC_NAME}" = "clang" && CC_EXE="clang++"
           test "${CC_NAME}" = "gcc"   && CC_EXE="g++"
+          [[ "${{ matrix.compiler }}" = "GCC 8" ]] || EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DPEDANTIC_COMPILER_WERROR=ON"
           BUILD_DIR="build" \
             CMAKE_BUILD_TYPE="${{ matrix.build_type }}" \
             CXX="${CC_EXE}-${CC_VER}" \
-            EXTRA_CMAKE_FLAGS="-DCONTOUR_BLUR_PLATFORM_KWIN=ON \
+            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS \
+                               -DCONTOUR_BLUR_PLATFORM_KWIN=ON \
                                -DCMAKE_CXX_STANDARD=${{ matrix.cxx }} \
                                -DCONTOUR_INSTALL_TOOLS=ON \
                                -DPEDANTIC_COMPILER=ON \
-                               -DPEDANTIC_COMPILER_WERROR=OFF \
                                " \
             ./scripts/ci-prepare-contour.sh
       - name: "build"
