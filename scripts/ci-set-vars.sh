@@ -27,7 +27,7 @@ esac
 # TODO: pass "/path/to/version.txt" target filename via CLI param "${1}", and only write that if given.
 echo "${VERSION_STRING}" >version.txt
 
-RELEASEBODY=$(awk -v RS='^### ' '/^'$VERSION_TRIPLE'/ {print $0}' Changelog.md | tail -n+3)
+RELEASEBODY=$(awk 'BEGIN { RS="### "; FS="\n"; } /^'$VERSION_TRIPLE'/ {print $0}' Changelog.md | tail -n+3)
 RELEASEBODY="${RELEASEBODY//'%'/'%25'}"
 RELEASEBODY="${RELEASEBODY//$'\n'/'%0A'}"
 RELEASEBODY="${RELEASEBODY//$'\r'/'%0D'}"
