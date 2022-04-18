@@ -27,6 +27,10 @@
 - Adds new configuration option `renderer.tile_cache_count` to configure texture atlas cache capacity.
 - Adds new configuration option `renderer.tile_direct_mapping` to enable/disalbe texture atlas direct mapping.
 - Adds new colorscheme setting `background_image.path` and `background_image.opacity` to optionally render a terminal background image.
+- Adds stdout-fastpipe support on new shell file descriptor `3` and exposing availability via
+- Adds new configuration option `pty_buffer_size` for tweaking the new size in bytes for the PTY buffer objects.
+environment variable `STDOUT_FASTPIPE` (with value `3`). When writing to this file descriptor rather
+than to stdout (file descriptor `1`), the full performance of Contour can be explored.
 - Adds `mock` font locator (mostly interesting for advanced use for CI testing).
 - Adds VT sequence `SM ? 8452 h` / `RM ? 8452 l` for enabling/disabling sixel cursor placement conformance (xterm extension).
 - Adds SGR-Pixels support, VT sequence `SM ? 1016 h` / `RM ? 1016 l` (#574).
