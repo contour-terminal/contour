@@ -1,5 +1,9 @@
 ### 0.3.0 (unreleased)
 
+**TL;DR** Many thanks to all for the great support and feedback. This release
+marks a huge milestone for me especially with regards to VT backend performance(!),
+improved rendering architecture, and a more complete list of pixel perfect box drawings.
+
 - Fixes installation from `.deb` (missing terminfo dependency)
 - Fixes PTY write race condition.
 - Fixes VT sequence `DECFI`.
