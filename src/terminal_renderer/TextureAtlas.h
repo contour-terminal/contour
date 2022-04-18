@@ -161,6 +161,7 @@ struct RenderTile
     X x {};                       // target X coordinate to start rendering to
     Y y {};                       // target Y coordinate to start rendering to
     ImageSize bitmapSize {};      // bitmap size inside the tile (must not exceed the grid's tile size)
+    ImageSize targetSize {};      // dimensions of the bitmap on the render target surface
     std::array<float, 4> color;   // optional; a color being associated with this texture
     TileLocation tileLocation {}; // what tile to render from which texture atlas
 

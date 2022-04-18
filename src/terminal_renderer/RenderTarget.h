@@ -88,6 +88,8 @@ struct RenderTileAttributes
     uint32_t fragmentShaderSelector = FRAGMENT_SELECTOR_IMAGE_BGRA;
 
     atlas::NormalizedTileLocation normalizedLocation {};
+
+    ImageSize targetSize {};
 };
 
 /**
@@ -169,6 +171,15 @@ class Renderable
                                                 RenderTileAttributes::Y y,
                                                 uint32_t fragmentShaderSelector);
 
+    TextureAtlas::TileCreateData createTileData(atlas::TileLocation tileLocation,
+                                                std::vector<uint8_t> bitmap,
+                                                atlas::Format bitmapFormat,
+                                                ImageSize bitmapSize,
+                                                ImageSize renderBitmapSize,
+                                                RenderTileAttributes::X x,
+                                                RenderTileAttributes::Y y,
+                                                uint32_t fragmentShaderSelector);
+
     Renderable::TextureAtlas::TileCreateData sliceTileData(
         Renderable::TextureAtlas::TileCreateData const& createData,
         TileSliceIndex sliceIndex,
@@ -204,6 +215,18 @@ class Renderable
     atlas::DirectMappingAllocator<RenderTileAttributes>* _directMappingAllocator = nullptr;
     atlas::AtlasBackend* _textureScheduler = nullptr;
 };
+
+inline Renderable::TextureAtlas::TileCreateData Renderable::createTileData(atlas::TileLocation tileLocation,
+                                                                           std::vector<uint8_t> bitmap,
+                                                                           atlas::Format bitmapFormat,
+                                                                           ImageSize bitmapSize,
+                                                                           RenderTileAttributes::X x,
+                                                                           RenderTileAttributes::Y y,
+                                                                           uint32_t fragmentShaderSelector)
+{
+    return createTileData(
+        tileLocation, bitmap, bitmapFormat, bitmapSize, bitmapSize, x, y, fragmentShaderSelector);
+}
 
 } // namespace terminal::renderer
 

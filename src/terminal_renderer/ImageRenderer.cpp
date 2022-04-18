@@ -79,6 +79,7 @@ Renderable::AtlasTileAttributes const* ImageRenderer::getOrCreateCachedTileAttri
             return createTileData(tileLocation,
                                   fragment.data(),
                                   atlas::Format::RGBA,
+                                  fragment.rasterizedImage().cellSize(),
                                   cellSize_,
                                   RenderTileAttributes::X { 0 },
                                   RenderTileAttributes::Y { 0 },
