@@ -17,6 +17,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "crispy/escape.h"
+
 namespace crispy
 {
 
@@ -93,6 +95,19 @@ std::string joinHumanReadable(std::vector<T> const& list, std::string_view sep =
         if (i != 0)
             result << sep;
         result << fmt::format("{}", list[i]);
+    }
+    return result.str();
+}
+
+template <typename T, typename U>
+std::string joinHumanReadableQuoted(std::vector<T> const& list, U sep = ", ")
+{
+    std::stringstream result;
+    for (size_t i = 0; i < list.size(); ++i)
+    {
+        if (i != 0)
+            result << sep;
+        result << '"' << crispy::escape(fmt::format("{}", list[i])) << '"';
     }
     return result.str();
 }
