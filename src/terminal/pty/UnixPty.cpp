@@ -341,7 +341,7 @@ optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
         return nullopt;
 
     if (PtyInLog)
-        PtyInLog()("{} received: {}",
+        PtyInLog()("{} received: \"{}\"",
                    fd == _masterFd ? "master" : "stdout-fastpipe",
                    crispy::escape(target, target + rv));
 
