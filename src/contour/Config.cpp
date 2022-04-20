@@ -1646,7 +1646,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         for (auto i = profiles.begin(); i != profiles.end(); ++i)
         {
             auto const& name = i->first.as<string>();
-            auto const& profile = i->second;
+            auto const profile = i->second;
             auto const parentPath = "profiles"s;
             usedKeys.emplace(fmt::format("{}.{}", parentPath, name));
             _config.profiles[name] =
