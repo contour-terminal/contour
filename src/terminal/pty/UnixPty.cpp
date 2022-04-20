@@ -345,6 +345,14 @@ optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
                    fd == _masterFd ? "master" : "stdout-fastpipe",
                    crispy::escape(target, target + rv));
 
+    if (rv == 0 && fd == _stdoutFastPipe.reader())
+    {
+        PtyInLog()("Closing stdout-fastpipe.");
+        _stdoutFastPipe.closeReader();
+        errno = EAGAIN;
+        return nullopt;
+    }
+
     return string_view { target, static_cast<size_t>(rv) };
 }
 
@@ -427,7 +435,6 @@ int waitForReadable(int ptyMaster,
 
 Pty::ReadResult UnixPty::read(crispy::BufferObject& sink, std::chrono::milliseconds timeout, size_t size)
 {
-    // TODO: We might want to make the read size limit configurable. Especially for the stdout-fastpipe.
     if (int fd = waitForReadable(_masterFd, _stdoutFastPipe.reader(), _pipe[0], timeout); fd != -1)
         if (auto x = readSome(fd, sink.hotEnd(), min(size, sink.bytesAvailable())))
             return { tuple { x.value(), fd == _stdoutFastPipe.reader() } };
