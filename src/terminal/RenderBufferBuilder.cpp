@@ -239,8 +239,12 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TriviallyStyledLineBuffer cons
                                                   lineOffset,
                                                   columnOffset));
     }
-    output.screen[unbox<size_t>(textMargin)].groupStart = true;
-    output.screen.back().groupEnd = true;
+
+    if (textMargin != pageColumnsEnd)
+    {
+        output.screen[unbox<size_t>(textMargin)].groupStart = true;
+        output.screen.back().groupEnd = true;
+    }
 }
 
 template <typename Cell>
