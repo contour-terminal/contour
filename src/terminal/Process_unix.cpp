@@ -63,6 +63,7 @@ namespace terminal
 namespace
 {
     constexpr auto StdoutFastPipeFd = 3;
+    constexpr auto StdoutFastPipeFdStr = "3"sv;
     constexpr auto StdoutFastPipeEnvironmentName = "STDOUT_FASTPIPE"sv;
 
     bool isFlatpak()
@@ -144,8 +145,7 @@ Process::Process(string const& _path,
                     setenv(name.c_str(), value.c_str(), true);
 
                 if (stdoutFastPipe)
-                    setenv(
-                        StdoutFastPipeEnvironmentName.data(), std::to_string(StdoutFastPipeFd).c_str(), true);
+                    setenv(StdoutFastPipeEnvironmentName.data(), StdoutFastPipeFdStr.data(), true);
             }
 
             char** argv = [=]() -> char** {
@@ -194,9 +194,13 @@ Process::Process(string const& _path,
             ::execvp(argv[0], argv);
 
             // Fallback: Try login shell.
-            fprintf(stdout, "\r\n\033[31;1mFailed to spawn \"%s\". %s\033[m\r\n\n", argv[0], strerror(errno));
-            fflush(stdout);
             auto theLoginShell = loginShell();
+            fprintf(stdout,
+                    "\r\n\033[31;1mFailed to spawn \"%s\". %s\033[m\r\nTrying login shell: %s\n",
+                    argv[0],
+                    strerror(errno),
+                    crispy::joinHumanReadableQuoted(theLoginShell, ' ').c_str());
+            fflush(stdout);
             if (!theLoginShell.empty())
             {
                 delete[] argv;
@@ -205,6 +209,8 @@ Process::Process(string const& _path,
             }
 
             // Bad luck.
+            fprintf(stdout, "\r\nOut of luck. %s\r\n\n", strerror(errno));
+            fflush(stdout);
             ::_exit(EXIT_FAILURE);
             break;
         }
