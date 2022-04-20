@@ -54,13 +54,13 @@ BufferObject::BufferObject(size_t capacity) noexcept:
     new (data()) char[capacity];
 #endif
     if (BufferObjectLog)
-        BufferObjectLog()("Creating BufferObject @{}.", (void*) this);
+        BufferObjectLog()("Creating BufferObject: {}..{}.", (void*) data(), (void*) end());
 }
 
 BufferObject::~BufferObject()
 {
     if (BufferObjectLog)
-        BufferObjectLog()("Destroying BufferObject @{}.", (void*) this);
+        BufferObjectLog()("Destroying BufferObject: {}..{}.", (void*) data(), (void*) end());
 #if !defined(BUFFER_OBJECT_INLINE)
     delete[] data_;
 #endif

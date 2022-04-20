@@ -154,8 +154,8 @@ bool Terminal::processInputOnce()
                        currentPtyBuffer_->bytesAvailable());
         currentPtyBuffer_ = ptyBufferPool_.allocateBufferObject();
     }
-    optional<tuple<string_view, bool>> const readResult =
-        pty_->read(*currentPtyBuffer_, timeout, ptyReadBufferSize_);
+
+    auto const readResult = pty_->read(*currentPtyBuffer_, timeout, ptyReadBufferSize_);
     if (!readResult)
     {
         if (errno != EINTR && errno != EAGAIN)
@@ -175,7 +175,13 @@ bool Terminal::processInputOnce()
         return true;
     }
 
-    writeToScreen(buf);
+    {
+        auto const _l = std::lock_guard { *this };
+        state_.parser.parseFragment(buf);
+    }
+
+    if (!state_.modes.enabled(DECMode::BatchedRendering))
+        screenUpdated();
 
 #if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
     ensureFreshRenderBuffer();
@@ -587,7 +593,15 @@ void Terminal::writeToScreen(string_view _data)
 {
     {
         auto const _l = std::lock_guard { *this };
-        state_.parser.parseFragment(_data);
+        while (!_data.empty())
+        {
+            if (currentPtyBuffer_->bytesAvailable() < 64
+                && currentPtyBuffer_->bytesAvailable() < _data.size())
+                currentPtyBuffer_ = ptyBufferPool_.allocateBufferObject();
+            auto const chunk = _data.substr(0, std::min(_data.size(), currentPtyBuffer_->bytesAvailable()));
+            _data.remove_prefix(chunk.size());
+            state_.parser.parseFragment(currentPtyBuffer_->writeAtEnd(chunk));
+        }
     }
 
     if (!state_.modes.enabled(DECMode::BatchedRendering))

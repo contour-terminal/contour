@@ -62,6 +62,8 @@ class PtySlaveDummy: public PtySlave
 class Pty
 {
   public:
+    using ReadResult = std::optional<std::tuple<std::string_view, bool>>;
+
     virtual ~Pty() = default;
 
     virtual PtySlave& slave() noexcept = 0;
@@ -82,8 +84,9 @@ class Pty
     [[nodiscard]] virtual std::optional<std::string_view> read(size_t _size,
                                                                std::chrono::milliseconds _timeout) = 0;
 
-    [[nodiscard]] virtual std::optional<std::tuple<std::string_view, bool>> read(
-        crispy::BufferObject& storage, std::chrono::milliseconds timeout, size_t size) = 0;
+    [[nodiscard]] virtual ReadResult read(crispy::BufferObject& storage,
+                                          std::chrono::milliseconds timeout,
+                                          size_t size) = 0;
 
     /// Inerrupts the read() operation on this PTY if a read() is currently in progress.
     ///

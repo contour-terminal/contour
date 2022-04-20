@@ -120,6 +120,12 @@ App::App(std::string _appName, std::string _appTitle, std::string _appVersion, s
     appLicense_ { std::move(_appLicense) },
     localStateDir_ { xdgStateHome() / appName_ }
 {
+    if (char const* logFilterString = getenv("LOG"))
+    {
+        logstore::configure(logFilterString);
+        customizeLogStoreOutput();
+    }
+
     instance_ = this;
 
     link(appName_ + ".help", bind(&App::helpAction, this));
