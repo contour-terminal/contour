@@ -59,7 +59,8 @@ read_buffer_size: 16384
 
 # Size in bytes per PTY Buffer Object.
 #
-pty_buffer_size: 1000000
+# This is an advanced option of an internal storage. Only change with care!
+pty_buffer_size: 1048576
 
 default_profile: main
 
