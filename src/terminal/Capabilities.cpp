@@ -505,12 +505,24 @@ string_view StaticDatabase::stringCapability(string_view _cap) const
 
 optional<Code> StaticDatabase::codeFromName(string_view _name) const
 {
-    using ranges::views::concat;
-    using ranges::views::transform;
-    auto const tr = transform([](auto cap) { return std::pair { cap.name, cap.code }; });
-    for (auto const cap: concat(numericalCaps | tr, booleanCaps | tr, stringCaps | tr))
-        if (cap.first == _name)
-            return cap.second;
+    for (auto const& cap: numericalCaps)
+        if (cap.name == _name)
+            return cap.code;
+
+    for (auto const& cap: booleanCaps)
+        if (cap.name == _name)
+            return cap.code;
+
+    for (auto const& cap: stringCaps)
+        if (cap.name == _name)
+            return cap.code;
+
+    // using ranges::views::concat;
+    // using ranges::views::transform;
+    // auto const tr = transform([](auto cap) { return std::pair { cap.name, cap.code }; });
+    // for (auto const cap: concat(numericalCaps | tr, booleanCaps | tr, stringCaps | tr))
+    //     if (cap.first == _name)
+    //         return cap.second;
 
     return nullopt;
 }

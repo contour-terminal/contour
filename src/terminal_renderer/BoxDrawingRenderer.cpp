@@ -154,12 +154,14 @@ namespace detail
             //     gaps.at(unbox<size_t>(_imageSize.height) / 2 - _thickness/2 + i).push_back(xCorner);
 
             // fill gap
-            for (auto&& [y, gap]:
-                 zip(ranges::views::ints, gaps) | filter([](auto const& x) { return !get<1>(x).empty(); }))
+            for (size_t y = 0; y < gaps.size(); ++y)
             {
-                sort(begin(gap), end(gap));
-                for (auto const xi: iota(gap.front(), gap.back()))
-                    _buffer.at(size_t(y) * unbox<size_t>(_imageSize.width) + xi) = 0xFF;
+                if (auto& gap = gaps[y]; !gap.empty())
+                {
+                    sort(begin(gap), end(gap));
+                    for (auto const xi: iota(gap.front(), gap.back()))
+                        _buffer.at(y * unbox<size_t>(_imageSize.width) + xi) = 0xFF;
+                }
             }
         }
 

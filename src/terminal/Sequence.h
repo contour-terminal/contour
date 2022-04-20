@@ -151,14 +151,14 @@ class SequenceParameterBuilder
 
     constexpr void multiplyBy10AndAdd(uint8_t value) noexcept
     {
-        *_currentParameter = *_currentParameter * 10 + value;
+        *_currentParameter = static_cast<uint16_t>(*_currentParameter * 10 + value);
     }
 
     constexpr void apply(uint16_t value) noexcept
     {
         if (value >= 10)
             multiplyBy10AndAdd(static_cast<uint8_t>(value / 10));
-        multiplyBy10AndAdd(value % 10);
+        multiplyBy10AndAdd(static_cast<uint8_t>(value % 10));
     }
 
     constexpr void set(uint16_t value) noexcept { *_currentParameter = value; }

@@ -107,9 +107,9 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
                 config_.ptyBufferObjectSize,
                 config_.ptyReadBufferSize,
                 *this,
-                config_.profile(profileName_)->maxHistoryLineCount,
-                config_.profile(profileName_)->copyLastMarkRangeOffset,
-                config_.profile(profileName_)->cursorBlinkInterval,
+                profile_.maxHistoryLineCount,
+                profile_.copyLastMarkRangeOffset,
+                profile_.cursorBlinkInterval,
                 steady_clock::now(),
                 config_.wordDelimiters,              // TODO: move to profile!
                 config_.bypassMouseProtocolModifier, // TODO: you too
@@ -725,7 +725,8 @@ bool TerminalSession::operator()(actions::ResetConfig)
 
 bool TerminalSession::operator()(actions::ResetFontSize)
 {
-    setFontSize(config_.profile(profileName_)->fonts.size);
+    if (config::TerminalProfile const* profile = config_.profile(profileName_))
+        setFontSize(profile->fonts.size);
     return true;
 }
 

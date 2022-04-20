@@ -403,13 +403,11 @@ int waitForReadable(int ptyMaster,
         if (FD_ISSET(wakeupPipe, &rfd))
         {
             piped = true;
-            int n = 0;
             for (bool done = false; !done;)
             {
                 char dummy[256];
                 rv = static_cast<int>(::read(wakeupPipe, dummy, sizeof(dummy)));
                 done = rv > 0;
-                n += max(rv, 0);
             }
         }
 

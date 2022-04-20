@@ -523,7 +523,7 @@ namespace
 
     constexpr uint8_t buttonX10(MouseButton _button) noexcept
     {
-        return isMouseWheel(_button) ? buttonNumber(_button) + 0x3c : buttonNumber(_button);
+        return isMouseWheel(_button) ? uint8_t(buttonNumber(_button) + 0x3c) : buttonNumber(_button);
     }
 
     constexpr uint8_t buttonNormal(MouseButton _button, InputGenerator::MouseEventType _eventType) noexcept
@@ -568,7 +568,8 @@ bool InputGenerator::generateMouse(MouseEventType _eventType,
                 auto const button = mouseTransport_ != MouseTransport::SGR ? buttonNormal(_button, _eventType)
                                                                            : buttonX10(_button);
 
-                uint8_t const draggableButton = _eventType == MouseEventType::Drag ? button + 0x20 : button;
+                uint8_t const draggableButton =
+                    _eventType == MouseEventType::Drag ? uint8_t(button + 0x20) : button;
 
                 mouseTransport(_eventType, draggableButton, modifierBits(_modifier), _pos, _pixelPosition);
                 return true;
@@ -580,7 +581,8 @@ bool InputGenerator::generateMouse(MouseEventType _eventType,
                 auto const button = mouseTransport_ != MouseTransport::SGR ? buttonNormal(_button, _eventType)
                                                                            : buttonX10(_button);
 
-                uint8_t const draggableButton = _eventType == MouseEventType::Drag ? button + 0x20 : button;
+                uint8_t const draggableButton =
+                    _eventType == MouseEventType::Drag ? uint8_t(button + 0x20) : button;
 
                 mouseTransport(_eventType, draggableButton, modifierBits(_modifier), _pos, _pixelPosition);
             }
@@ -620,12 +622,12 @@ bool InputGenerator::mouseTransport(MouseEventType _eventType,
 
 bool InputGenerator::mouseTransportX10(uint8_t _button, uint8_t _modifier, CellLocation _pos)
 {
-    constexpr int SkipCount = 0x20; // TODO std::numeric_limits<ControlCode>::max();
-    constexpr int MaxCoordValue = std::numeric_limits<uint8_t>::max() - SkipCount;
+    constexpr uint8_t SkipCount = 0x20; // TODO std::numeric_limits<ControlCode>::max();
+    constexpr uint8_t MaxCoordValue = std::numeric_limits<uint8_t>::max() - SkipCount;
 
     if (*_pos.line < MaxCoordValue && *_pos.column < MaxCoordValue)
     {
-        uint8_t const button = SkipCount + static_cast<uint8_t>(_button | _modifier);
+        auto const button = static_cast<uint8_t>(SkipCount + static_cast<uint8_t>(_button | _modifier));
         auto const line = static_cast<uint8_t>(SkipCount + *_pos.line + 1);
         auto const column = static_cast<uint8_t>(SkipCount + *_pos.column + 1);
         append("\033[M");

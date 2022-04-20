@@ -21,6 +21,8 @@
 
 #include <terminal/Metrics.h>
 
+#include <crispy/assert.h>
+
 #include <QtCore/QPoint>
 #include <QtCore/QTimer>
 #include <QtGui/QOpenGLExtraFunctions>
@@ -68,7 +70,12 @@ class TerminalWindow: public QMainWindow
 
     // QSize sizeHint() const override;
 
-    config::TerminalProfile const* profile() const { return config_.profile(profileName_); }
+    config::TerminalProfile const& profile() const
+    {
+        config::TerminalProfile const* theProfile = config_.profile(profileName_);
+        Require(theProfile);
+        return *theProfile;
+    }
 
   public Q_SLOTS:
     void terminalBufferChanged(terminal::ScreenType);

@@ -133,11 +133,14 @@ struct formatter<terminal::Process::ExitStatus>
                                            char buf[256];
 #if defined(_WIN32)
                                            strerror_s(buf, sizeof(buf), errno);
-#else
-                                           strerror_r(errno, buf, sizeof(buf));
-#endif
                                            return format_to(
                                                _ctx.out(), "{} (signal number {})", buf, _exit.signum);
+#else
+                                           return format_to(_ctx.out(),
+                                                            "{} (signal number {})",
+                                                            strerror_r(errno, buf, sizeof(buf)),
+                                                            _exit.signum);
+#endif
                                        } },
                           _status);
     }

@@ -50,6 +50,7 @@ using std::get;
 using std::holds_alternative;
 using std::invalid_argument;
 using std::max;
+using std::min;
 using std::move;
 using std::nullopt;
 using std::numeric_limits;
@@ -775,11 +776,13 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
             output.bitmap.resize(height.as<size_t>()
                                  * width.as<size_t>()); // 8-bit channel (with values 0 or 255)
 
-            auto const pitch = static_cast<unsigned>(ftBitmap.pitch);
-            for (auto const i: iota(0u, ftBitmap.rows))
-                for (auto const j: iota(0u, ftBitmap.width))
+            auto const pitch = static_cast<size_t>(ftBitmap.pitch);
+            for (auto const i: iota(size_t { 0 }, static_cast<size_t>(ftBitmap.rows)))
+                for (auto const j: iota(size_t { 0 }, static_cast<size_t>(ftBitmap.width)))
                     output.bitmap[i * width.as<size_t>() + j] =
-                        ftBitmap.buffer[(height.as<size_t>() - 1 - i) * pitch + j] * 255;
+                        min(static_cast<uint8_t>(
+                                uint8_t(ftBitmap.buffer[(height.as<size_t>() - 1 - i) * pitch + j]) * 255),
+                            uint8_t { 255 });
 
             FT_Bitmap_Done(d->ft_, &ftBitmap);
             break;
