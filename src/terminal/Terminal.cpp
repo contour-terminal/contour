@@ -154,8 +154,8 @@ bool Terminal::processInputOnce()
                        currentPtyBuffer_->bytesAvailable());
         currentPtyBuffer_ = ptyBufferPool_.allocateBufferObject();
     }
-    optional<tuple<string_view, bool>> const readResult =
-        pty_->read(*currentPtyBuffer_, timeout, ptyReadBufferSize_);
+
+    auto const readResult = pty_->read(*currentPtyBuffer_, timeout, ptyReadBufferSize_);
     if (!readResult)
     {
         if (errno != EINTR && errno != EAGAIN)

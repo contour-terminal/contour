@@ -425,9 +425,7 @@ int waitForReadable(int ptyMaster,
     }
 }
 
-optional<tuple<string_view, bool>> UnixPty::read(crispy::BufferObject& sink,
-                                                 std::chrono::milliseconds timeout,
-                                                 size_t size)
+Pty::ReadResult UnixPty::read(crispy::BufferObject& sink, std::chrono::milliseconds timeout, size_t size)
 {
     // TODO: We might want to make the read size limit configurable. Especially for the stdout-fastpipe.
     if (int fd = waitForReadable(_masterFd, _stdoutFastPipe.reader(), _pipe[0], timeout); fd != -1)

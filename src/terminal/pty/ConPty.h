@@ -34,9 +34,9 @@ class ConPty: public Pty
     bool isClosed() const noexcept override;
 
     std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
-    [[nodiscard]] std::optional<std::tuple<std::string_view, bool>> read(crispy::BufferObject& storage,
-                                                                         std::chrono::milliseconds timeout,
-                                                                         size_t size) override;
+    [[nodiscard]] ReadResult read(crispy::BufferObject& storage,
+                                  std::chrono::milliseconds timeout,
+                                  size_t size) override;
     void wakeupReader() override;
     int write(char const* buf, size_t size) override;
     PageSize pageSize() const noexcept override;

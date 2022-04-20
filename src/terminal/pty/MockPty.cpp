@@ -31,9 +31,9 @@ optional<string_view> MockPty::read(size_t _size, std::chrono::milliseconds)
     return result;
 }
 
-optional<tuple<string_view, bool>> MockPty::read(crispy::BufferObject& storage,
-                                                 std::chrono::milliseconds /*timeout*/,
-                                                 size_t size)
+Pty::ReadResult MockPty::read(crispy::BufferObject& storage,
+                              std::chrono::milliseconds /*timeout*/,
+                              size_t size)
 {
     auto const n = min(size, min(outputBuffer_.size() - outputReadOffset_, storage.bytesAvailable()));
     auto const chunk = string_view { outputBuffer_.data() + outputReadOffset_, n };
