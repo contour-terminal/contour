@@ -27,7 +27,7 @@ namespace detail
                                                               "0123456789+/" };
 
     // clang-format off
-    char constexpr inline indexmap[256] = {
+    char unsigned constexpr inline indexmap[256] = {
         /* ASCII table */
         64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, //   0..15
         64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, //  16..31
@@ -187,8 +187,8 @@ inline size_t decodeLength(const std::string_view& value)
 template <typename Iterator, typename IndexTable, typename Output>
 size_t decode(Iterator begin, Iterator end, const IndexTable& indexmap, Output output)
 {
-    auto const index = [indexmap](Iterator i) -> unsigned char {
-        return static_cast<unsigned char>(indexmap[static_cast<uint8_t>(*i)]);
+    auto const index = [indexmap](Iterator i) {
+        return indexmap[static_cast<uint8_t>(*i)];
     };
 
     if (begin == end)
