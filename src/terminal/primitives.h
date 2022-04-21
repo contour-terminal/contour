@@ -33,59 +33,33 @@ namespace terminal
 
 namespace detail::tags // {{{
 {
+    // clang-format off
     // column types
-    struct ColumnCount
-    {
-    };
-    struct ColumnOffset
-    {
-    };
-    struct ColumnPosition
-    {
-    };
+    struct ColumnCount {};
+    struct ColumnOffset {};
+    struct ColumnPosition {};
 
     // line types
-    struct LineCount
-    {
-    };
-    struct LineOffset
-    {
-    };
-    struct ScrollOffset
-    {
-    };
+    struct LineCount {};
+    struct LineOffset {};
+    struct ScrollOffset {};
 
     // misc.
-    struct TabStopCount
-    {
-    };
+    struct TabStopCount {};
 
     // generic length
-    struct Length
-    {
-    };
+    struct Length {};
 
     // range
-    struct From
-    {
-    };
-    struct To
-    {
-    };
+    struct From {};
+    struct To {};
 
     // margin
-    struct Top
-    {
-    };
-    struct Left
-    {
-    };
-    struct Bottom
-    {
-    };
-    struct Right
-    {
-    };
+    struct Top {};
+    struct Left {};
+    struct Bottom {};
+    struct Right {};
+    // clang-format on
 } // namespace detail::tags
 // }}}
 
