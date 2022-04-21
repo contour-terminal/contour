@@ -238,7 +238,7 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
     void renderImage(std::shared_ptr<Image const> _image,
                      CellLocation _topLeft,
                      GridSize _gridSize,
-                     CellLocation _imageOffset,
+                     PixelCoordinate _imageOffset,
                      ImageSize _imageSize,
                      ImageAlignment _alignmentPolicy,
                      ImageResize _resizePolicy,

@@ -1529,7 +1529,7 @@ void Screen<Cell, TheScreenType>::sixelImage(ImageSize _pixelSize, Image::Data&&
     auto const alignmentPolicy = ImageAlignment::TopStart;
     auto const resizePolicy = ImageResize::NoResize;
 
-    auto const imageOffset = CellLocation {};
+    auto const imageOffset = PixelCoordinate {};
     auto const imageSize = _pixelSize;
 
     shared_ptr<Image const> imageRef = uploadImage(ImageFormat::RGBA, _pixelSize, move(_data));
@@ -1558,7 +1558,7 @@ template <typename Cell, ScreenType TheScreenType>
 void Screen<Cell, TheScreenType>::renderImage(shared_ptr<Image const> _image,
                                               CellLocation _topLeft,
                                               GridSize _gridSize,
-                                              CellLocation _imageOffset,
+                                              PixelCoordinate _imageOffset,
                                               ImageSize _imageSize,
                                               ImageAlignment _alignmentPolicy,
                                               ImageResize _resizePolicy,
