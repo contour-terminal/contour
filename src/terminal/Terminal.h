@@ -224,15 +224,15 @@ class Terminal
     bool sendCharPressEvent(char32_t _char, Modifier _modifier, Timestamp _now);
     bool sendMousePressEvent(Modifier _modifier,
                              MouseButton _button,
-                             MousePixelPosition _pixelPosition,
+                             PixelCoordinate _pixelPosition,
                              Timestamp _now);
     bool sendMouseMoveEvent(Modifier _modifier,
                             CellLocation _pos,
-                            MousePixelPosition _pixelPosition,
+                            PixelCoordinate _pixelPosition,
                             Timestamp _now);
     bool sendMouseReleaseEvent(Modifier _modifier,
                                MouseButton _button,
-                               MousePixelPosition _pixelPosition,
+                               PixelCoordinate _pixelPosition,
                                Timestamp _now);
     bool sendFocusInEvent();
     bool sendFocusOutEvent();

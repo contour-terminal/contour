@@ -381,7 +381,7 @@ bool Terminal::sendCharPressEvent(char32_t _value, Modifier _modifier, Timestamp
 
 bool Terminal::sendMousePressEvent(Modifier _modifier,
                                    MouseButton _button,
-                                   MousePixelPosition _pixelPosition,
+                                   PixelCoordinate _pixelPosition,
                                    Timestamp /*_now*/)
 {
     verifyState();
@@ -448,7 +448,7 @@ void Terminal::clearSelection()
 
 bool Terminal::sendMouseMoveEvent(Modifier _modifier,
                                   CellLocation newPosition,
-                                  MousePixelPosition _pixelPosition,
+                                  PixelCoordinate _pixelPosition,
                                   Timestamp /*_now*/)
 {
     speedClicks_ = 0;
@@ -494,7 +494,7 @@ bool Terminal::sendMouseMoveEvent(Modifier _modifier,
 
 bool Terminal::sendMouseReleaseEvent(Modifier _modifier,
                                      MouseButton _button,
-                                     MousePixelPosition _pixelPosition,
+                                     PixelCoordinate _pixelPosition,
                                      Timestamp /*_now*/)
 {
     verifyState();

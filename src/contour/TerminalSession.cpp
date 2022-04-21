@@ -475,7 +475,7 @@ void TerminalSession::sendCharPressEvent(char32_t _value, Modifier _modifier, Ti
 
 void TerminalSession::sendMousePressEvent(Modifier _modifier,
                                           MouseButton _button,
-                                          MousePixelPosition _pixelPosition,
+                                          PixelCoordinate _pixelPosition,
                                           Timestamp _now)
 {
     // InputLog()("sendMousePressEvent: {} {} at {}", _button, _modifier, currentMousePosition_);
@@ -503,7 +503,7 @@ void TerminalSession::sendMousePressEvent(Modifier _modifier,
 
 void TerminalSession::sendMouseMoveEvent(terminal::Modifier _modifier,
                                          terminal::CellLocation _pos,
-                                         terminal::MousePixelPosition _pixelPosition,
+                                         terminal::PixelCoordinate _pixelPosition,
                                          Timestamp _now)
 {
     // NB: This translation depends on the display's margin, so maybe
@@ -531,7 +531,7 @@ void TerminalSession::sendMouseMoveEvent(terminal::Modifier _modifier,
 
 void TerminalSession::sendMouseReleaseEvent(Modifier _modifier,
                                             MouseButton _button,
-                                            MousePixelPosition _pixelPosition,
+                                            PixelCoordinate _pixelPosition,
                                             Timestamp _now)
 {
     terminal().sendMouseReleaseEvent(_modifier, _button, _pixelPosition, _now);

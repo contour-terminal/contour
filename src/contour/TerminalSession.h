@@ -112,15 +112,15 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
 
     void sendMousePressEvent(terminal::Modifier _modifier,
                              terminal::MouseButton _button,
-                             terminal::MousePixelPosition _pixelPosition,
+                             terminal::PixelCoordinate _pixelPosition,
                              Timestamp _now);
     void sendMouseMoveEvent(terminal::Modifier _modifier,
                             terminal::CellLocation _pos,
-                            terminal::MousePixelPosition _pixelPosition,
+                            terminal::PixelCoordinate _pixelPosition,
                             Timestamp _now);
     void sendMouseReleaseEvent(terminal::Modifier _modifier,
                                terminal::MouseButton _button,
-                               terminal::MousePixelPosition _pixelPosition,
+                               terminal::PixelCoordinate _pixelPosition,
                                Timestamp _now);
 
     void sendFocusInEvent();

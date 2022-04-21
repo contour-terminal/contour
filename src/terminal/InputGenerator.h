@@ -295,12 +295,12 @@ class InputGenerator
     bool generateMousePress(Modifier _modifier,
                             MouseButton _button,
                             CellLocation _pos,
-                            MousePixelPosition _pixelPosition);
-    bool generateMouseMove(Modifier _modifier, CellLocation _pos, MousePixelPosition _pixelPosition);
+                            PixelCoordinate _pixelPosition);
+    bool generateMouseMove(Modifier _modifier, CellLocation _pos, PixelCoordinate _pixelPosition);
     bool generateMouseRelease(Modifier _modifier,
                               MouseButton _button,
                               CellLocation _pos,
-                              MousePixelPosition _pixelPosition);
+                              PixelCoordinate _pixelPosition);
 
     bool generateFocusInEvent();
     bool generateFocusOutEvent();
@@ -342,13 +342,13 @@ class InputGenerator
                        Modifier _modifier,
                        MouseButton _button,
                        CellLocation _pos,
-                       MousePixelPosition _pixelPosition);
+                       PixelCoordinate _pixelPosition);
 
     bool mouseTransport(MouseEventType _eventType,
                         uint8_t _button,
                         uint8_t _modifier,
                         CellLocation _pos,
-                        MousePixelPosition _pixelPosition);
+                        PixelCoordinate _pixelPosition);
     bool mouseTransportX10(uint8_t _button, uint8_t _modifier, CellLocation _pos);
 
     bool mouseTransportSGR(MouseEventType _type, uint8_t _button, uint8_t _modifier, int x, int y);

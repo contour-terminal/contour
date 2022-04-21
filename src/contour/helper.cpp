@@ -54,8 +54,8 @@ using crispy::Zero;
 
 using terminal::Height;
 using terminal::ImageSize;
-using terminal::MousePixelPosition;
 using terminal::PageSize;
+using terminal::PixelCoordinate;
 using terminal::Width;
 
 namespace contour
@@ -84,22 +84,22 @@ namespace
         return { row, col };
     }
 
-    MousePixelPosition makeMousePixelPosition(QMouseEvent* _event, double dpr) noexcept
+    PixelCoordinate makeMousePixelPosition(QMouseEvent* _event, double dpr) noexcept
     {
         // TODO: apply margin once supported
-        return MousePixelPosition { MousePixelPosition::X { int(double(_event->x()) * dpr) },
-                                    MousePixelPosition::Y { int(double(_event->y()) * dpr) } };
+        return PixelCoordinate { PixelCoordinate::X { int(double(_event->x()) * dpr) },
+                                 PixelCoordinate::Y { int(double(_event->y()) * dpr) } };
     }
 
-    MousePixelPosition makeMousePixelPosition(QWheelEvent* _event, double dpr) noexcept
+    PixelCoordinate makeMousePixelPosition(QWheelEvent* _event, double dpr) noexcept
     {
         // TODO: apply margin once supported
 #if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-        return MousePixelPosition { MousePixelPosition::X { int(double(_event->position().x()) * dpr) },
-                                    MousePixelPosition::Y { int(double(_event->position().y()) * dpr) } };
+        return PixelCoordinate { PixelCoordinate::X { int(double(_event->position().x()) * dpr) },
+                                 PixelCoordinate::Y { int(double(_event->position().y()) * dpr) } };
 #else
-        return MousePixelPosition { MousePixelPosition::X { int(double(_event->x()) * dpr) },
-                                    MousePixelPosition::Y { int(double(_event->y()) * dpr) } };
+        return PixelCoordinate { PixelCoordinate::X { int(double(_event->x()) * dpr) },
+                                 PixelCoordinate::Y { int(double(_event->y()) * dpr) } };
 #endif
     }
 

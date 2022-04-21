@@ -132,7 +132,7 @@ constexpr int operator*(ColumnCount a, LineCount b) noexcept
 }
 // }}}
 
-struct MousePixelPosition
+struct PixelCoordinate
 {
     // clang-format off
     struct X { int value; };
