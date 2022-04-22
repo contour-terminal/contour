@@ -467,6 +467,7 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
   private:
     std::string_view tryEmplaceChars(std::string_view chars) noexcept;
     std::string_view tryEmplaceContinuousChars(std::string_view chars) noexcept;
+    size_t emplaceCharsIntoCurrentLine(std::string_view chars) noexcept;
     [[nodiscard]] bool canResumeEmplace(std::string_view continuationChars) const noexcept;
     void advanceCursorAfterWrite(ColumnCount n) noexcept;
 

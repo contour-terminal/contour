@@ -271,6 +271,46 @@ void Screen<Cell, TheScreenType>::fail(std::string const& _message) const
 }
 
 template <typename Cell, ScreenType TheScreenType>
+string_view Screen<Cell, TheScreenType>::tryEmplaceChars(string_view _chars) noexcept
+{
+    if (!_terminal.isFullHorizontalMargins())
+        return _chars;
+
+    crlfIfWrapPending();
+
+    auto const columnsAvailable = pageSize().columns.value - _state.cursor.position.column.value;
+
+    if (!_terminal.isModeEnabled(DECMode::AutoWrap) && _chars.size() > static_cast<size_t>(columnsAvailable))
+        // With AutoWrap on, we can only emplace if it fits the line.
+        return _chars;
+
+    if (_state.cursor.position.column.value == 0)
+    {
+        if (currentLine().empty())
+        {
+            _chars.remove_prefix(emplaceCharsIntoCurrentLine(_chars));
+            _chars = tryEmplaceContinuousChars(_chars);
+            _terminal.currentPtyBuffer()->advanceHotEndUntil(_chars.data());
+            return _chars;
+        }
+        return _chars;
+    }
+
+    if (canResumeEmplace(_chars))
+    {
+        auto const charsToWrite = static_cast<size_t>(min(columnsAvailable, static_cast<int>(_chars.size())));
+        currentLine().trivialBuffer().text.growBy(charsToWrite);
+        advanceCursorAfterWrite(ColumnCount::cast_from(charsToWrite));
+        _chars.remove_prefix(charsToWrite);
+        _chars = tryEmplaceContinuousChars(_chars);
+        _terminal.currentPtyBuffer()->advanceHotEndUntil(_chars.data());
+        return _chars;
+    }
+
+    return _chars;
+}
+
+template <typename Cell, ScreenType TheScreenType>
 string_view Screen<Cell, TheScreenType>::tryEmplaceContinuousChars(string_view _chars) noexcept
 {
     while (!_chars.empty())
@@ -279,20 +319,26 @@ string_view Screen<Cell, TheScreenType>::tryEmplaceContinuousChars(string_view _
         if (!currentLine().empty())
             break;
 
-        auto columnsAvailable = (_state.margin.horizontal.to.value + 1) - _state.cursor.position.column.value;
-        auto const charsToWrite = static_cast<size_t>(min(columnsAvailable, static_cast<int>(_chars.size())));
-
-        currentLine().reset(_state.cursor.graphicsRendition,
-                            _state.cursor.hyperlink,
-                            crispy::BufferFragment {
-                                _terminal.currentPtyBuffer(),
-                                _chars.substr(0, charsToWrite),
-                            });
-        advanceCursorAfterWrite(ColumnCount::cast_from(charsToWrite));
-        _chars.remove_prefix(charsToWrite);
+        _chars.remove_prefix(emplaceCharsIntoCurrentLine(_chars));
     }
 
     return _chars;
+}
+
+template <typename Cell, ScreenType TheScreenType>
+size_t Screen<Cell, TheScreenType>::emplaceCharsIntoCurrentLine(string_view _chars) noexcept
+{
+    auto columnsAvailable = (_state.margin.horizontal.to.value + 1) - _state.cursor.position.column.value;
+    auto const charsToWrite = static_cast<size_t>(min(columnsAvailable, static_cast<int>(_chars.size())));
+
+    currentLine().reset(_state.cursor.graphicsRendition,
+                        _state.cursor.hyperlink,
+                        crispy::BufferFragment {
+                            _terminal.currentPtyBuffer(),
+                            _chars.substr(0, charsToWrite),
+                        });
+    advanceCursorAfterWrite(ColumnCount::cast_from(charsToWrite));
+    return charsToWrite;
 }
 
 template <typename Cell, ScreenType TheScreenType>
@@ -321,55 +367,6 @@ bool Screen<Cell, TheScreenType>::canResumeEmplace(std::string_view continuation
            && buffer.attributes == _state.cursor.graphicsRendition
            && buffer.hyperlink == _state.cursor.hyperlink
            && buffer.text.owner() == _terminal.currentPtyBuffer();
-}
-
-template <typename Cell, ScreenType TheScreenType>
-string_view Screen<Cell, TheScreenType>::tryEmplaceChars(string_view _chars) noexcept
-{
-    if (!_terminal.isFullHorizontalMargins())
-        return _chars;
-
-    crlfIfWrapPending();
-
-    auto const columnsAvailable = pageSize().columns.value - _state.cursor.position.column.value;
-
-    if (!_terminal.isModeEnabled(DECMode::AutoWrap) && _chars.size() > static_cast<size_t>(columnsAvailable))
-        // With AutoWrap on, we can only emplace if it fits the line.
-        return _chars;
-
-    if (_state.cursor.position.column.value == 0)
-    {
-        if (currentLine().empty())
-        {
-            auto const charsToWrite =
-                static_cast<size_t>(min(columnsAvailable, static_cast<int>(_chars.size())));
-            currentLine().reset(_state.cursor.graphicsRendition,
-                                _state.cursor.hyperlink,
-                                crispy::BufferFragment {
-                                    _terminal.currentPtyBuffer(),
-                                    _chars.substr(0, charsToWrite),
-                                });
-            advanceCursorAfterWrite(ColumnCount::cast_from(charsToWrite));
-            _chars.remove_prefix(charsToWrite);
-            _chars = tryEmplaceContinuousChars(_chars);
-            _terminal.currentPtyBuffer()->advanceHotEndUntil(_chars.data());
-            return _chars;
-        }
-        return _chars;
-    }
-
-    if (canResumeEmplace(_chars))
-    {
-        auto const charsToWrite = static_cast<size_t>(min(columnsAvailable, static_cast<int>(_chars.size())));
-        currentLine().trivialBuffer().text.growBy(charsToWrite);
-        advanceCursorAfterWrite(ColumnCount::cast_from(charsToWrite));
-        _chars.remove_prefix(charsToWrite);
-        _chars = tryEmplaceContinuousChars(_chars);
-        _terminal.currentPtyBuffer()->advanceHotEndUntil(_chars.data());
-        return _chars;
-    }
-
-    return _chars;
 }
 
 template <typename Cell, ScreenType TheScreenType>
