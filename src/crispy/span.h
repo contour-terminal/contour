@@ -1,5 +1,7 @@
 #pragma once
+
 #include <iterator>
+#include <stdexcept>
 #include <type_traits>
 
 namespace crispy
