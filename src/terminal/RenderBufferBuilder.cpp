@@ -85,14 +85,14 @@ optional<RenderCursor> RenderBufferBuilder<Cell>::renderCursor() const
 }
 
 template <typename Cell>
-RenderCell RenderBufferBuilder<Cell>::makeRenderCell(ColorPalette const& _colorPalette,
-                                                     char32_t codepoint,
-                                                     CellFlags flags,
-                                                     RGBColor fg,
-                                                     RGBColor bg,
-                                                     Color ul,
-                                                     LineOffset _line,
-                                                     ColumnOffset _column)
+RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(ColorPalette const& _colorPalette,
+                                                             char32_t codepoint,
+                                                             CellFlags flags,
+                                                             RGBColor fg,
+                                                             RGBColor bg,
+                                                             Color ul,
+                                                             LineOffset _line,
+                                                             ColumnOffset _column)
 {
     RenderCell renderCell;
     renderCell.backgroundColor = bg;
@@ -198,27 +198,20 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TriviallyStyledLineBuffer cons
                                                 lineBuffer.attributes.styles,
                                                 lineBuffer.attributes.foregroundColor,
                                                 lineBuffer.attributes.backgroundColor);
+        auto const codepoint = static_cast<char32_t>(lineBuffer.text[unbox<size_t>(columnOffset)]);
 
         lineNr = lineOffset;
         prevWidth = 0;
         prevHasCursor = false;
 
-        output.screen.emplace_back(
-            makeRenderCell(terminal.colorPalette(),
-                           static_cast<char32_t>(lineBuffer.text[unbox<size_t>(columnOffset)]),
-                           lineBuffer.attributes.styles,
-                           fg,
-                           bg,
-                           lineBuffer.attributes.underlineColor,
-                           lineOffset,
-                           columnOffset));
-        if (columnOffset.value == 0)
-            output.screen.back().groupStart = true;
-    }
-
-    if (!output.screen.empty())
-    {
-        output.screen.back().groupEnd = true;
+        output.screen.emplace_back(makeRenderCellExplicit(terminal.colorPalette(),
+                                                          codepoint,
+                                                          lineBuffer.attributes.styles,
+                                                          fg,
+                                                          bg,
+                                                          lineBuffer.attributes.underlineColor,
+                                                          lineOffset,
+                                                          columnOffset));
     }
 
     for (auto columnOffset = textMargin; columnOffset < pageColumnsEnd; ++columnOffset)
@@ -230,14 +223,14 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TriviallyStyledLineBuffer cons
                                                 lineBuffer.attributes.foregroundColor,
                                                 lineBuffer.attributes.backgroundColor);
 
-        output.screen.emplace_back(makeRenderCell(terminal.colorPalette(),
-                                                  char32_t { 0 },
-                                                  lineBuffer.attributes.styles,
-                                                  fg,
-                                                  bg,
-                                                  lineBuffer.attributes.underlineColor,
-                                                  lineOffset,
-                                                  columnOffset));
+        output.screen.emplace_back(makeRenderCellExplicit(terminal.colorPalette(),
+                                                          char32_t { 0 },
+                                                          lineBuffer.attributes.styles,
+                                                          fg,
+                                                          bg,
+                                                          lineBuffer.attributes.underlineColor,
+                                                          lineOffset,
+                                                          columnOffset));
     }
 
     if (textMargin != pageColumnsEnd)

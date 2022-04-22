@@ -44,14 +44,14 @@ class RenderBufferBuilder
   private:
     std::optional<RenderCursor> renderCursor() const;
 
-    static RenderCell makeRenderCell(ColorPalette const& _colorPalette,
-                                     char32_t codepoint,
-                                     CellFlags flags,
-                                     RGBColor fg,
-                                     RGBColor bg,
-                                     Color ul,
-                                     LineOffset _line,
-                                     ColumnOffset _column);
+    static RenderCell makeRenderCellExplicit(ColorPalette const& _colorPalette,
+                                             char32_t codepoint,
+                                             CellFlags flags,
+                                             RGBColor fg,
+                                             RGBColor bg,
+                                             Color ul,
+                                             LineOffset _line,
+                                             ColumnOffset _column);
 
     /// Constructs a RenderCell for the given screen Cell.
     static RenderCell makeRenderCell(ColorPalette const& _colorPalette,
