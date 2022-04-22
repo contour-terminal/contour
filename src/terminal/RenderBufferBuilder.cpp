@@ -187,6 +187,8 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TriviallyStyledLineBuffer cons
     //            lineBuffer.displayWidth,
     //            lineBuffer.text.view());
 
+    auto const frontIndex = output.screen.size();
+
     auto const textMargin = min(boxed_cast<ColumnOffset>(terminal.pageSize().columns),
                                 ColumnOffset::cast_from(lineBuffer.text.size()));
     auto const pageColumnsEnd = boxed_cast<ColumnOffset>(terminal.pageSize().columns);
@@ -233,11 +235,10 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TriviallyStyledLineBuffer cons
                                                           columnOffset));
     }
 
-    if (textMargin != pageColumnsEnd)
-    {
-        output.screen[unbox<size_t>(textMargin)].groupStart = true;
-        output.screen.back().groupEnd = true;
-    }
+    auto const backIndex = output.screen.size() - 1;
+
+    output.screen[frontIndex].groupStart = true;
+    output.screen[backIndex].groupEnd = true;
 }
 
 template <typename Cell>

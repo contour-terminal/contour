@@ -1,6 +1,7 @@
 ### 0.3.1 (unreleased)
 
-* Fixes assertion on font resize when a (Sixel) image is currently being rendered (#642).
+- Fixes wrong-spacing rendering bug on some lines.
+- Fixes assertion on font resize when a (Sixel) image is currently being rendered (#642).
 - Fixes assertion on too quick shell terminations (#647).
 
 ### 0.3.0 (2022-04-18)
