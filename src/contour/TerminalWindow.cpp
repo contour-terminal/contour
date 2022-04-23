@@ -17,6 +17,7 @@
 #include <contour/TerminalWindow.h>
 #include <contour/helper.h>
 
+#include "crispy/utils.h"
 #if defined(CONTOUR_SCROLLBAR)
     #include <contour/ScrollableDisplay.h>
 #endif
@@ -45,6 +46,8 @@
     #include <KWindowEffects>
 #endif
 
+#include <terminal/logging.h>
+
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
@@ -67,19 +70,23 @@ namespace contour
 
 using actions::Action;
 
-static auto loadSession(std::string const& sessionFilePath)
+static auto loadSessionFile(FileSystem::path sessionFilePath)
 {
     std::ifstream sessionFile(sessionFilePath);
+    std::tuple<std::string, std::string, std::string> ret;
+    if (!sessionFile.is_open())
+    {
+        terminal::TerminalLog()("Failed to read session file: {}", sessionFilePath.string());
+        return ret;
+    }
     sessionFile.unsetf(std::ios::skipws);
-    std::string line;
-    std::tuple<std::string, std::string, std::vector<std::string>> ret;
     std::getline(sessionFile, std::get<0>(ret));
     std::getline(sessionFile, std::get<1>(ret));
-    while (std::getline(sessionFile, line))
-        std::get<2>(ret).push_back(line);
-    // std::copy(std::istream_iterator<char>(sessionFile),
-    //           std::istream_iterator<char>(),
-    //           std::back_inserter(std::get<2>(ret)));
+    // while (std::getline(sessionFile, line))
+    //     std::get<2>(ret).push_back(line);
+    std::copy(std::istream_iterator<char>(sessionFile),
+              std::istream_iterator<char>(),
+              std::back_inserter(std::get<2>(ret)));
     return ret;
 }
 
@@ -123,6 +130,15 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
     if (config_.maxImageSize.height <= Height(0))
         config_.maxImageSize.height = defaultMaxImageSize.height;
     // }}}
+    if (config_.profile().sessionResume)
+    {
+        auto [configPath, profile, gridBuffer] = loadSessionFile(crispy::xdgStateHome() / "contour/session");
+        if (!configPath.empty() && !profile.empty())
+        {
+            config_ = contour::config::loadConfigFromFile(configPath);
+            profileName_ = profile;
+        }
+    }
 
     terminalSession_ = make_unique<TerminalSession>(
         make_unique<terminal::Process>(profile().shell, terminal::createPty(profile().terminalSize, nullopt)),
@@ -143,21 +159,6 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
 #endif
         },
         [this]() { app_.onExit(*terminalSession_); });
-
-    if (config_.profile().sessionResume)
-    {
-        auto [configPath, profile, gridBuffer] = loadSession("/home/utkarsh/.cache/contour/session.bin");
-        config_ = contour::config::loadConfigFromFile(configPath);
-        // Update profile to be from seesion file
-        auto& grid = terminalSession_->terminal().state().primaryBuffer;
-        grid.setMaxHistoryLineCount(terminal::LineCount(gridBuffer.size()));
-        auto count = 0;
-        for (auto& i: gridBuffer)
-        {
-            grid.setLineText(terminal::LineOffset(count), i);
-            ++count;
-        }
-    }
 
     terminalSession_->setDisplay(make_unique<opengl::TerminalWidget>(
         *terminalSession_,

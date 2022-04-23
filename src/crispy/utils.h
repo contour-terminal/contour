@@ -11,9 +11,11 @@
 #include <fstream>
 #include <functional>
 #include <optional>
+#include <pwd.h>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <unistd.h>
 #include <unordered_map>
 #include <vector>
 
@@ -465,6 +467,22 @@ inline std::string humanReadableBytes(long double bytes)
 
     auto const gb = mb / 1024.0;
     return fmt::format("{:.03} GB", gb);
+}
+
+inline FileSystem::path xdgStateHome()
+{
+    if (auto const* p = getenv("XDG_STATE_HOME"); p && *p)
+        return FileSystem::path(p);
+
+#if defined(_WIN32)
+    if (auto const* p = getenv("LOCALAPPDATA"); p && *p)
+        return FileSystem::path(p);
+#else
+    if (passwd const* pw = getpwuid(getuid()); pw && pw->pw_dir)
+        return FileSystem::path(pw->pw_dir) / ".local" / "state";
+#endif
+
+    return FileSystem::temp_directory_path();
 }
 
 } // namespace crispy

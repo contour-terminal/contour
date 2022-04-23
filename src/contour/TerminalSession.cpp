@@ -15,13 +15,17 @@
 #include <contour/TerminalSession.h>
 #include <contour/helper.h>
 
+#include <terminal/Grid.h>
 #include <terminal/MatchModes.h>
 #include <terminal/Process.h>
 #include <terminal/Terminal.h>
+#include <terminal/VTWriter.h>
+#include <terminal/logging.h>
 #include <terminal/pty/Pty.h>
 
 #include <crispy/StackTrace.h>
 #include <crispy/stdfs.h>
+#include <crispy/utils.h>
 
 #include <range/v3/all.hpp>
 
@@ -42,8 +46,6 @@
 #include <algorithm>
 #include <fstream>
 
-#include "fmt/core.h"
-#include "terminal/Grid.h"
 #include <QtNetwork/QHostInfo>
 
 #if !defined(_WIN32)
@@ -363,23 +365,25 @@ void TerminalSession::onClosed()
     }
     if (config().profile().sessionResume)
     {
-        // Write to file
-        FileSystem::path sessionFileDir { "/home/utkarsh/.cache/contour" };
-        if (!FileSystem::exists(sessionFileDir))
-            FileSystem::create_directory(sessionFileDir);
-        std::ofstream file(sessionFileDir.string() + "/session.bin");
+        auto sessionFile = crispy::xdgStateHome() / "contour/session";
+        std::ofstream file(sessionFile);
         if (!file.is_open())
-            fmt::print("Why\n");
+            TerminalLog()("Failed to open session file: {}", sessionFile.string());
         auto configPath = FileSystem::absolute(config().backingFilePath).string() + "\n";
         auto activeProfileName = profileName_ + "\n";
         file.write(configPath.data(), configPath.size());
         file.write(activeProfileName.data(), activeProfileName.size());
         auto& grid = terminal().primaryScreen().grid();
-        for (int const lineOffset:
-             ranges::views::iota(-unbox<int>(grid.historyLineCount()), unbox<int>(grid.pageSize().lines)))
+        auto result = std::stringstream {};
+        auto writer = VTWriter(result);
+        auto lines = *terminal_.state().pageSize.lines;
+        for (int const line: ranges::views::iota(0, lines))
         {
-            file << fmt::format("{}\n", grid.lineText(LineOffset::cast_from(lineOffset)));
+            writer.write(grid.lineAt(LineOffset(line)));
+            writer.crlf();
         }
+        auto vtData = result.str();
+        file.write(vtData.data(), vtData.size());
     }
 
     if (app_.dumpStateAtExit().has_value())
