@@ -41,8 +41,6 @@
 #include <utility>
 #include <vector>
 
-#include "fmt/core.h"
-
 #if defined(_WIN32)
     #include <Windows.h>
 #elif defined(__APPLE__)
