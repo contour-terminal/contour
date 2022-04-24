@@ -74,14 +74,18 @@ namespace
 
     string getLastErrorAsString() { return strerror(errno); }
 
-    [[nodiscard]] char** createArgv(string const& _arg0, std::vector<string> const& _args, size_t i = 0)
+    [[nodiscard]] char** createArgv(string const& _arg0,
+                                    std::vector<string> const& _args,
+                                    size_t startIndex = 0)
     {
-        auto const argCount =
-            _args.size(); // factor out in order to avoid false-positive by static analysers.
-        char** argv = new char*[argCount + 2 - i];
+        // Factor out in order to avoid false-positive by static analysers.
+        auto const argCount = _args.size() - startIndex;
+        assert(startIndex <= _args.size());
+
+        char** argv = new char*[argCount + 2];
         argv[0] = strdup(_arg0.c_str());
         for (size_t i = 0; i < argCount; ++i)
-            argv[i + 1] = strdup(_args[i].c_str());
+            argv[i + 1] = strdup(_args[i + startIndex].c_str());
         argv[argCount + 1] = nullptr;
         return argv;
     }
@@ -204,7 +208,7 @@ Process::Process(string const& _path,
             if (!theLoginShell.empty())
             {
                 delete[] argv;
-                argv = createArgv(_args[0], _args, 1);
+                argv = createArgv(theLoginShell[0], theLoginShell, 1);
                 ::execvp(argv[0], argv);
             }
 
