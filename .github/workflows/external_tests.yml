@@ -291,6 +291,7 @@ jobs:
         mkdir -p ~/.config/contour/
         contour generate config to ~/.config/contour/contour.yml
         sed -i -e 's/locator: native/locator: mock/' ~/.config/contour/contour.yml
+        sed -i -e 's/strict_spacing: true/strict_spacing: false/' ~/.config/contour/contour.yml
         cat .github/mock-font-locator.yml >> ~/.config/contour/contour.yml
         cat ~/.config/contour/contour.yml
     - name: "Run Contour: notcurses-demo ${{ matrix.name }}"
