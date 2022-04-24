@@ -370,17 +370,20 @@ void TerminalSession::onClosed()
 
     if (profile().sessionResume)
     {
-        auto sessionFile = crispy::xdgStateHome() / "contour/session";
-        std::ofstream file(sessionFile);
+        auto const sessionFile = crispy::App::instance()->localStateDir() / "session";
+        std::ofstream file(sessionFile.string(), std::ios::trunc);
         if (!file.is_open())
             TerminalLog()("Failed to open session file: {}", sessionFile.string());
-        auto configPath = FileSystem::absolute(config().backingFilePath).string() + "\n";
-        auto activeProfileName = profileName_ + "\n";
-        file.write(configPath.data(), configPath.size());
-        file.write(activeProfileName.data(), activeProfileName.size());
-        auto gridData = serializeGridBuffer();
-        file.write(gridData.data(), gridData.size());
+        else
+        {
+            auto const configPath = FileSystem::absolute(config().backingFilePath).string();
+            auto const gridData = serializeGridBuffer();
+            file << configPath << "\n";
+            file << profileName_ << "\n";
+            file << gridData;
+        }
     }
+
     if (app_.dumpStateAtExit().has_value())
         inspect();
     else if (display_)
