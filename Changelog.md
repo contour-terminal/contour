@@ -3,6 +3,7 @@
 - Fixes wrong-spacing rendering bug on some lines.
 - Fixes assertion on font resize when a (Sixel) image is currently being rendered (#642).
 - Fixes assertion on too quick shell terminations (#647).
+- Fixes fallback shell execution on UNIX-like systems when the reuqested shell cannot be spawned (#647).
 
 ### 0.3.0 (2022-04-18)
 
