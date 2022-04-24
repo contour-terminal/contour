@@ -11,11 +11,13 @@
 #include <fstream>
 #include <functional>
 #include <optional>
-#include <pwd.h>
+#if defined(__linux__) || defined(__APPLE__)
+    #include <pwd.h>
+    #include <unistd.h>
+#endif
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <unistd.h>
 #include <unordered_map>
 #include <vector>
 
