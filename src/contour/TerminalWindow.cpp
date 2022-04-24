@@ -17,7 +17,7 @@
 #include <contour/TerminalWindow.h>
 #include <contour/helper.h>
 
-#include "crispy/utils.h"
+#include <crispy/utils.h>
 #if defined(CONTOUR_SCROLLBAR)
     #include <contour/ScrollableDisplay.h>
 #endif
@@ -70,24 +70,29 @@ namespace contour
 
 using actions::Action;
 
-static auto loadSessionFile(FileSystem::path sessionFilePath)
+struct SessionState
+{
+    std::string configPath;
+    std::string profileName;
+    std::string gridBuffer;
+};
+
+static SessionState loadSessionFile(FileSystem::path sessionFilePath)
 {
     std::ifstream sessionFile(sessionFilePath);
-    std::tuple<std::string, std::string, std::string> ret;
+    SessionState state;
     if (!sessionFile.is_open())
     {
         terminal::TerminalLog()("Failed to read session file: {}", sessionFilePath.string());
-        return ret;
+        return state;
     }
     sessionFile.unsetf(std::ios::skipws);
-    std::getline(sessionFile, std::get<0>(ret));
-    std::getline(sessionFile, std::get<1>(ret));
-    // while (std::getline(sessionFile, line))
-    //     std::get<2>(ret).push_back(line);
+    std::getline(sessionFile, state.configPath);
+    std::getline(sessionFile, state.profileName);
     std::copy(std::istream_iterator<char>(sessionFile),
               std::istream_iterator<char>(),
-              std::back_inserter(std::get<2>(ret)));
-    return ret;
+              std::back_inserter(state.gridBuffer));
+    return state;
 }
 
 TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,

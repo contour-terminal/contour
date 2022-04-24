@@ -170,6 +170,8 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
             display_->scheduleRedraw();
     }
 
+    std::string serializeGridBuffer();
+
     ContourGuiApp& app() noexcept { return app_; }
 
     std::chrono::steady_clock::time_point startTime() const noexcept { return startTime_; }

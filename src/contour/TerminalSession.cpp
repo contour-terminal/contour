@@ -373,23 +373,27 @@ void TerminalSession::onClosed()
         auto activeProfileName = profileName_ + "\n";
         file.write(configPath.data(), configPath.size());
         file.write(activeProfileName.data(), activeProfileName.size());
-        const auto& grid = terminal().primaryScreen().grid();
-        auto result = std::stringstream {};
-        auto writer = VTWriter(result);
-        for (int const line:
-             ranges::views::iota(-unbox<int>(grid.historyLineCount()), unbox<int>(grid.pageSize().lines)))
-        {
-            writer.write(grid.lineAt(LineOffset(line)));
-            writer.crlf();
-        }
-        auto vtData = result.str();
-        file.write(vtData.data(), vtData.size());
+        auto gridData = serializeGridBuffer();
+        file.write(gridData.data(), gridData.size());
     }
-
     if (app_.dumpStateAtExit().has_value())
         inspect();
     else if (display_)
         display_->closeDisplay();
+}
+
+std::string TerminalSession::serializeGridBuffer()
+{
+    const auto& grid = terminal().primaryScreen().grid();
+    auto result = std::stringstream {};
+    auto writer = VTWriter(result);
+    for (int const line:
+         ranges::views::iota(-unbox<int>(grid.historyLineCount()), unbox<int>(grid.pageSize().lines)))
+    {
+        writer.write(grid.lineAt(LineOffset(line)));
+        writer.crlf();
+    }
+    return result.str();
 }
 
 void TerminalSession::onSelectionCompleted()
