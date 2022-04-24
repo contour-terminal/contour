@@ -377,11 +377,11 @@ void TerminalSession::onClosed()
         auto activeProfileName = profileName_ + "\n";
         file.write(configPath.data(), configPath.size());
         file.write(activeProfileName.data(), activeProfileName.size());
-        auto& grid = terminal().primaryScreen().grid();
+        const auto& grid = terminal().primaryScreen().grid();
         auto result = std::stringstream {};
         auto writer = VTWriter(result);
-        auto lines = *terminal_.state().pageSize.lines;
-        for (int const line: ranges::views::iota(0, lines))
+        for (int const line:
+             ranges::views::iota(-unbox<int>(grid.historyLineCount()), unbox<int>(grid.pageSize().lines)))
         {
             writer.write(grid.lineAt(LineOffset(line)));
             writer.crlf();
