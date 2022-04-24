@@ -363,7 +363,8 @@ void TerminalSession::onClosed()
         terminatedAndWaitingForKeyPress_ = true;
         return;
     }
-    if (config().profile().sessionResume)
+
+    if (profile().sessionResume)
     {
         auto sessionFile = crispy::xdgStateHome() / "contour/session";
         std::ofstream file(sessionFile);

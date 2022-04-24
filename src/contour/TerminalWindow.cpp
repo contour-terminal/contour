@@ -135,7 +135,8 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
     if (config_.maxImageSize.height <= Height(0))
         config_.maxImageSize.height = defaultMaxImageSize.height;
     // }}}
-    if (config_.profile().sessionResume)
+
+    if (profile().sessionResume)
     {
         auto [configPath, profile, gridBuffer] = loadSessionFile(crispy::xdgStateHome() / "contour/session");
         if (!configPath.empty() && !profile.empty())
