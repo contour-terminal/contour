@@ -91,21 +91,6 @@ unsigned screenWidth()
     return DefaultWidth;
 }
 
-FileSystem::path xdgStateHome()
-{
-    if (auto const* p = getenv("XDG_STATE_HOME"); p && *p)
-        return FileSystem::path(p);
-
-#if defined(_WIN32)
-    if (auto const* p = getenv("LOCALAPPDATA"); p && *p)
-        return FileSystem::path(p);
-#else
-    if (passwd const* pw = getpwuid(getuid()); pw && pw->pw_dir)
-        return FileSystem::path(pw->pw_dir) / ".local" / "state";
-#endif
-
-    return FileSystem::temp_directory_path();
-}
 } // namespace
 
 namespace crispy
