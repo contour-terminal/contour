@@ -77,23 +77,26 @@ struct SessionState
     std::string gridBuffer;
 };
 
-static SessionState loadSessionFile(FileSystem::path sessionFilePath)
+namespace
 {
-    std::ifstream sessionFile(sessionFilePath);
-    SessionState state;
-    if (!sessionFile.is_open())
+    SessionState loadSessionFile(FileSystem::path sessionFilePath)
     {
-        terminal::TerminalLog()("Failed to read session file: {}", sessionFilePath.string());
+        auto sessionFile = std::ifstream(sessionFilePath.string());
+        auto state = SessionState {};
+        if (!sessionFile.is_open())
+        {
+            terminal::TerminalLog()("Failed to read session file: {}", sessionFilePath.string());
+            return state;
+        }
+        sessionFile.unsetf(std::ios::skipws);
+        std::getline(sessionFile, state.configPath);
+        std::getline(sessionFile, state.profileName);
+        std::copy(std::istream_iterator<char>(sessionFile),
+                  std::istream_iterator<char>(),
+                  std::back_inserter(state.gridBuffer));
         return state;
     }
-    sessionFile.unsetf(std::ios::skipws);
-    std::getline(sessionFile, state.configPath);
-    std::getline(sessionFile, state.profileName);
-    std::copy(std::istream_iterator<char>(sessionFile),
-              std::istream_iterator<char>(),
-              std::back_inserter(state.gridBuffer));
-    return state;
-}
+} // namespace
 
 TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
                                config::Config _config,
@@ -138,7 +141,8 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
 
     if (profile().sessionResume)
     {
-        auto [configPath, profile, gridBuffer] = loadSessionFile(crispy::xdgStateHome() / "contour/session");
+        auto const [configPath, profile, gridBuffer] =
+            loadSessionFile(crispy::App::instance()->localStateDir() / "session");
         if (!configPath.empty() && !profile.empty())
         {
             config_ = contour::config::loadConfigFromFile(configPath);
