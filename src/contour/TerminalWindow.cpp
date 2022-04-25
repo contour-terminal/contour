@@ -138,11 +138,11 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
     if (config_.maxImageSize.height <= Height(0))
         config_.maxImageSize.height = defaultMaxImageSize.height;
     // }}}
-
-    if (profile().sessionResume)
+    if (profile().sessionResume && qApp->isSessionRestored())
     {
+        auto const sessionFileName = app_.parameters().get<std::string>("contour.terminal.session");
         auto const [configPath, profile, gridBuffer] =
-            loadSessionFile(crispy::App::instance()->localStateDir() / "session");
+            loadSessionFile(crispy::App::instance()->localStateDir() / sessionFileName);
         if (!configPath.empty() && !profile.empty())
         {
             config_ = contour::config::loadConfigFromFile(configPath);

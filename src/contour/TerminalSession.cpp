@@ -90,6 +90,16 @@ namespace
         pthread_setname_np(pthread_self(), name);
 #endif
     }
+
+    QStringList createCorrectRestartCommands(const QStringList& defaultCommands, const QString& sessionId)
+    {
+        QStringList newCommands;
+        auto contourBinaryPath = defaultCommands[0].toStdString();
+        newCommands.append(FileSystem::absolute(contourBinaryPath).string().c_str());
+        newCommands.append("session");
+        newCommands.append(sessionId);
+        return newCommands;
+    }
 } // namespace
 
 TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
@@ -142,6 +152,20 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
     }
 
     profile_ = *config_.profile(profileName_); // XXX do it again. but we've to be more efficient here
+    QGuiApplication::setFallbackSessionManagementEnabled(false);
+    if (profile().sessionResume)
+    {
+        connect(qApp,
+                &QGuiApplication::commitDataRequest,
+                this,
+                &TerminalSession::commitSession,
+                Qt::DirectConnection);
+        connect(qApp,
+                &QGuiApplication::saveStateRequest,
+                this,
+                &TerminalSession::saveState,
+                Qt::DirectConnection);
+    }
     configureTerminal();
 }
 
@@ -366,22 +390,6 @@ void TerminalSession::onClosed()
         terminal_.writeToScreen("\r\n");
         terminatedAndWaitingForKeyPress_ = true;
         return;
-    }
-
-    if (profile().sessionResume)
-    {
-        auto const sessionFile = crispy::App::instance()->localStateDir() / "session";
-        std::ofstream file(sessionFile.string(), std::ios::trunc);
-        if (!file.is_open())
-            TerminalLog()("Failed to open session file: {}", sessionFile.string());
-        else
-        {
-            auto const configPath = FileSystem::absolute(config().backingFilePath).string();
-            auto const gridData = serializeGridBuffer();
-            file << configPath << "\n";
-            file << profileName_ << "\n";
-            file << gridData;
-        }
     }
 
     if (app_.dumpStateAtExit().has_value())
@@ -1228,7 +1236,28 @@ void TerminalSession::onConfigReload()
                 this,
                 SLOT(onConfigReload()));
 }
+void TerminalSession::commitSession(QSessionManager& manager)
+{
+    auto const sessionFile = crispy::App::instance()->localStateDir() / qApp->sessionId().toStdString();
+    std::ofstream file(sessionFile.string(), std::ios::trunc);
 
+    if (!file.is_open())
+        TerminalLog()("Failed to open session file: {}", sessionFile.string());
+    else
+    {
+        auto const configPath = FileSystem::absolute(config().backingFilePath).string();
+        auto const gridData = serializeGridBuffer();
+        file << configPath << "\n";
+        file << profileName_ << "\n";
+        file << gridData;
+    }
+}
+
+void TerminalSession::saveState(QSessionManager& manager)
+{
+    auto newCommands = createCorrectRestartCommands(manager.restartCommand(), manager.sessionId());
+    manager.setRestartCommand(newCommands);
+}
 // }}}
 
 } // namespace contour

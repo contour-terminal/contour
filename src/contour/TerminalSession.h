@@ -24,6 +24,7 @@
 
 #include <QtCore/QFileSystemWatcher>
 
+#include <QSessionManager>
 #include <functional>
 #include <thread>
 
@@ -210,6 +211,8 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     uint8_t matchModeFlags() const;
     void flushInput();
     void mainLoop();
+    void commitSession(QSessionManager& manager);
+    void saveState(QSessionManager& manager);
 
     // private data
     //
