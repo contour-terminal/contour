@@ -103,7 +103,8 @@ namespace helper
         return testMatchMode(_actualModeFlags, _expected, Flag::AlternateScreen)
                && testMatchMode(_actualModeFlags, _expected, Flag::AppCursor)
                && testMatchMode(_actualModeFlags, _expected, Flag::AppKeypad)
-               && testMatchMode(_actualModeFlags, _expected, Flag::Select);
+               && testMatchMode(_actualModeFlags, _expected, Flag::Select)
+               && testMatchMode(_actualModeFlags, _expected, Flag::Insert);
     }
 } // namespace helper
 
@@ -126,6 +127,18 @@ std::vector<actions::Action> const* apply(
 }
 
 using opengl::ShaderConfig;
+
+struct CursorConfig
+{
+    terminal::CursorShape cursorShape;
+    terminal::CursorDisplay cursorDisplay;
+    std::chrono::milliseconds cursorBlinkInterval;
+};
+
+struct InputModeConfig
+{
+    CursorConfig cursor;
+};
 
 struct TerminalProfile
 {
@@ -158,9 +171,12 @@ struct TerminalProfile
 
     terminal::ColorPalette colors {};
 
-    terminal::CursorShape cursorShape;
-    terminal::CursorDisplay cursorDisplay;
-    std::chrono::milliseconds cursorBlinkInterval;
+    struct
+    {
+        InputModeConfig insert;
+        InputModeConfig normal;
+        InputModeConfig visual;
+    } inputModes;
 
     terminal::Opacity backgroundOpacity; // value between 0 (fully transparent) and 0xFF (fully visible).
     bool backgroundBlur;                 // On Windows 10, this will enable Acrylic Backdrop.

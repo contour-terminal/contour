@@ -124,6 +124,8 @@ class CONTOUR_PACKED Cell
     char32_t codepoint(size_t i) const noexcept;
     std::size_t codepointCount() const noexcept;
 
+    [[nodiscard]] bool compareText(char codepoint) const noexcept;
+
     bool empty() const noexcept;
 
     constexpr uint8_t width() const noexcept;
@@ -409,6 +411,14 @@ inline std::size_t Cell::codepointCount() const noexcept
         return 1 + extra_->codepoints.size();
     }
     return 0;
+}
+
+inline bool Cell::compareText(char codepoint) const noexcept
+{
+    if (codepointCount() != 1)
+        return false;
+
+    return codepoint_ == static_cast<char32_t>(codepoint);
 }
 
 inline char32_t Cell::codepoint(size_t i) const noexcept

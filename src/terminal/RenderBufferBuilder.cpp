@@ -56,7 +56,11 @@ namespace
 
 template <typename Cell>
 RenderBufferBuilder<Cell>::RenderBufferBuilder(Terminal const& _terminal, RenderBuffer& _output):
-    output { _output }, terminal { _terminal }
+    output { _output },
+    terminal { _terminal },
+    cursorPosition { _terminal.inputHandler().mode() == ViMode::Insert
+                         ? _terminal.realCursorPosition()
+                         : _terminal.state().viCommands.cursorPosition }
 {
     output.clear();
     output.frameID = _terminal.lastFrameID();
@@ -66,7 +70,6 @@ RenderBufferBuilder<Cell>::RenderBufferBuilder(Terminal const& _terminal, Render
 template <typename Cell>
 optional<RenderCursor> RenderBufferBuilder<Cell>::renderCursor() const
 {
-    auto const cursorPosition = terminal.realCursorPosition();
     if (!terminal.cursorCurrentlyVisible() || !terminal.viewport().isLineVisible(cursorPosition.line))
         return nullopt;
 
@@ -155,7 +158,7 @@ std::tuple<RGBColor, RGBColor> RenderBufferBuilder<Cell>::makeColorsForCell(Cell
                                                                             Color foregroundColor,
                                                                             Color backgroundColor)
 {
-    auto const hasCursor = gridPosition == terminal.realCursorPosition();
+    auto const hasCursor = gridPosition == cursorPosition;
 
     // clang-format off
     bool const paintCursor =
@@ -266,7 +269,7 @@ void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset _l
         gridPosition, screenCell.styles(), screenCell.foregroundColor(), screenCell.backgroundColor());
 
     prevWidth = screenCell.width();
-    prevHasCursor = gridPosition == terminal.realCursorPosition();
+    prevHasCursor = gridPosition == cursorPosition;
 
     auto const cellEmpty = screenCell.empty();
     auto const customBackground = bg != terminal.colorPalette().defaultBackground || !!screenCell.styles();

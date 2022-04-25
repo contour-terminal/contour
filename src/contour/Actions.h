@@ -57,6 +57,7 @@ struct SendChars{ std::string chars; };
 struct ToggleAllKeyMaps{};
 struct ToggleFullscreen{};
 struct ToggleTitleBar{};
+struct ViNormalMode{};
 struct WriteScreen{ std::string chars; }; // "\033[2J\033[3J"
 // CloseTab
 // FocusNextTab
@@ -98,6 +99,7 @@ using Action = std::variant<CancelSelection,
                             ToggleAllKeyMaps,
                             ToggleFullscreen,
                             ToggleTitleBar,
+                            ViNormalMode,
                             WriteScreen>;
 
 std::optional<Action> fromString(std::string const& _name);
@@ -158,6 +160,7 @@ DECLARE_ACTION_FMT(SendChars)
 DECLARE_ACTION_FMT(ToggleAllKeyMaps)
 DECLARE_ACTION_FMT(ToggleFullscreen)
 DECLARE_ACTION_FMT(ToggleTitleBar)
+DECLARE_ACTION_FMT(ViNormalMode)
 DECLARE_ACTION_FMT(WriteScreen)
 // }}}
 #undef DECLARE_ACTION_FMT
@@ -216,6 +219,7 @@ struct formatter<contour::actions::Action>
         HANDLE_ACTION(ToggleAllKeyMaps);
         HANDLE_ACTION(ToggleFullscreen);
         HANDLE_ACTION(ToggleTitleBar);
+        HANDLE_ACTION(ViNormalMode);
         HANDLE_ACTION(WriteScreen);
         // }}}
         return format_to(ctx.out(), "UNKNOWN ACTION");

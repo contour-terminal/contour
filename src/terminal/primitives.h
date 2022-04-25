@@ -191,9 +191,19 @@ constexpr CellLocation operator+(CellLocation c, LineOffset y) noexcept
     return CellLocation { c.line + y, c.column };
 }
 
+constexpr CellLocation operator-(CellLocation c, LineOffset y) noexcept
+{
+    return CellLocation { c.line - y, c.column };
+}
+
 constexpr CellLocation operator+(CellLocation c, ColumnOffset x) noexcept
 {
     return CellLocation { c.line, c.column + x };
+}
+
+constexpr CellLocation operator-(CellLocation c, ColumnOffset x) noexcept
+{
+    return CellLocation { c.line, c.column - x };
 }
 
 // }}}

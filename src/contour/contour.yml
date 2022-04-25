@@ -317,11 +317,25 @@ profiles:
             # - rectangle     just the outline of a block
             # - underscore    a line under the text
             # - bar:          the well known i-Beam
-            shape: "block"
+            shape: "bar"
             # Determins whether or not the cursor will be blinking over time.
             blinking: false
             # Blinking interval (in milliseconds) to use when cursor is blinking.
             blinking_interval: 500
+        # vi-like normal-mode specific settings.
+        # Note, currently only the cursor can be customized.
+        normal_mode:
+            cursor:
+                shape: block
+                blinking: false
+                blinking_interval: 500
+        # vi-like visual/visual-line/visual-block mode specific settings.
+        # Note, currently only the cursor can be customized.
+        visual_mode:
+            cursor:
+                shape: block
+                blinking: false
+                blinking_interval: 500
         # Background configuration
         background:
             # Background opacity to use. A value of 1.0 means fully opaque whereas 0.0 means fully
@@ -432,11 +446,13 @@ color_schemes:
 # - AppCursor : The application key cursor mode is enabled (otherwise it's normal cursor mode).
 # - AppKeypad : The application keypad mode is enabled (otherwise it's the numeric keypad mode).
 # - Select    : The terminal has currently an active grid cell selection (such as selected text).
+# - Insert    : The Insert input mode is active, that is the default and one way to test
+#               that the input mode is not in normal mode or any of the visual select modes.
 #
 # You can combine these modes by concatenating them via | and negate a single one
 # by prefixing with ~.
 #
-# The `modes` option defaults to no filter at all (the input mappings always
+# The `modes` option defaults to not filter at all (the input mappings always
 # match based on modifier and key press / mouse event).
 #
 # `key` represents keys on your keyboard, and `mouse` represents buttons
@@ -497,6 +513,7 @@ color_schemes:
 # - ToggleAllKeyMaps  Disables/enables responding to all keybinds (this keybind will be preserved when disabling all others).
 # - ToggleFullScreen  Enables/disables full screen mode.
 # - ToggleTitleBar    Shows/Hides titlebar
+# - ViNormalMode      Enters Vi-like normal mode. The cursor can then be moved via h/j/k/l movements and text can be selected via v, yanked via y, and clipboard pasted via p.
 # - WriteScreen       Writes VT sequence in `chars` member to the screen (bypassing the application).
 
 input_mapping:
@@ -515,10 +532,11 @@ input_mapping:
     - { mods: [Control, Shift], key: N,             action: NewTerminal }
     - { mods: [Control, Shift], key: C,             action: CopySelection }
     - { mods: [Control, Shift], key: V,             action: PasteClipboard }
-    - { mods: [Control],        key: C,             action: CopySelection, mode: 'Select' }
-    - { mods: [Control],        key: V,             action: PasteClipboard, mode: 'Select' }
-    - { mods: [Control],        key: V,             action: CancelSelection, mode: 'Select' }
-    - { mods: [],               key: Escape,        action: CancelSelection, mode: 'Select' }
+    - { mods: [Control],        key: C,             action: CopySelection, mode: 'Select|Insert' }
+    - { mods: [Control],        key: V,             action: PasteClipboard, mode: 'Select|Insert' }
+    - { mods: [Control],        key: V,             action: CancelSelection, mode: 'Select|Insert' }
+    - { mods: [],               key: Escape,        action: CancelSelection, mode: 'Select|Insert' }
+    - { mods: [Control, Shift], key: Space,         action: ViNormalMode, mode: 'Insert' }
     - { mods: [Control, Shift], key: Comma,         action: OpenConfiguration }
     - { mods: [Control, Shift], key: Q,             action: Quit }
     - { mods: [Control],        mouse: WheelDown,   action: DecreaseFontSize }

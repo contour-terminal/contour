@@ -1,5 +1,6 @@
 ### 0.3.1 (unreleased)
 
+- Adds Vi-like input modes for improved selection and copy'n'paste experience.
 - Fixes wrong-spacing rendering bug on some lines.
 - Fixes assertion on font resize when a (Sixel) image is currently being rendered (#642).
 - Fixes assertion on too quick shell terminations (#647).

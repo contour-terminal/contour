@@ -76,6 +76,7 @@ class RenderBufferBuilder
 
     RenderBuffer& output;
     Terminal const& terminal;
+    CellLocation cursorPosition;
 
     bool reverseVideo = terminal.isModeEnabled(terminal::DECMode::ReverseVideo);
     int prevWidth = 0;

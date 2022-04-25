@@ -29,7 +29,8 @@ class MatchModes
         AlternateScreen = 0x01,
         AppCursor = 0x02,
         AppKeypad = 0x04,
-        Select = 0x08,
+        Insert = 0x08, // vi-like insert mode
+        Select = 0x10,
         // future modes
         // ViSearch            = 0x10, // TODO: This mode we want.
     };
@@ -134,6 +135,7 @@ struct formatter<terminal::MatchModes>
         advance(terminal::MatchModes::AppCursor, "AppCursor");
         advance(terminal::MatchModes::AppKeypad, "AppKeypad");
         advance(terminal::MatchModes::AlternateScreen, "AltScreen");
+        advance(terminal::MatchModes::Insert, "Insert");
         advance(terminal::MatchModes::Select, "Select");
         if (s.empty())
             s = "Any";

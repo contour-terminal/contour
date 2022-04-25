@@ -61,7 +61,10 @@ class ScreenBase: public SequenceHandler
     virtual void fail(std::string const& _message) const = 0;
     [[nodiscard]] virtual bool contains(CellLocation _coord) const noexcept = 0;
     [[nodiscard]] virtual bool isCellEmpty(CellLocation position) const noexcept = 0;
+    [[nodiscard]] virtual bool compareCellTextAt(CellLocation position, char codepoint) const noexcept = 0;
+    [[nodiscard]] virtual bool isLineEmpty(LineOffset line) const noexcept = 0;
     [[nodiscard]] virtual uint8_t cellWithAt(CellLocation position) const noexcept = 0;
+    [[nodiscard]] virtual LineCount historyLineCount() const noexcept = 0;
     [[nodiscard]] virtual HyperlinkId hyperlinkIdAt(CellLocation position) const noexcept = 0;
     [[nodiscard]] virtual std::shared_ptr<HyperlinkInfo const> hyperlinkAt(
         CellLocation pos) const noexcept = 0;
@@ -95,8 +98,6 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
 
     using StaticDatabase::numericCapability;
     [[nodiscard]] unsigned numericCapability(capabilities::Code _cap) const override;
-
-    [[nodiscard]] LineCount historyLineCount() const noexcept { return grid().historyLineCount(); }
 
     // {{{ SequenceHandler overrides
     void writeText(char32_t _char) override;
@@ -429,10 +430,26 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
         return grid().lineAt(position.line).cellEmptyAt(position.column);
     }
 
+    [[nodiscard]] bool compareCellTextAt(CellLocation position, char codepoint) const noexcept override
+    {
+        return grid()
+            .lineAt(position.line)
+            .inflatedBuffer()
+            .at(position.column.as<size_t>())
+            .compareText(codepoint);
+    }
+
+    [[nodiscard]] bool isLineEmpty(LineOffset line) const noexcept override
+    {
+        return grid().lineAt(line).empty();
+    }
+
     [[nodiscard]] uint8_t cellWithAt(CellLocation position) const noexcept override
     {
         return grid().lineAt(position.line).cellWithAt(position.column);
     }
+
+    [[nodiscard]] LineCount historyLineCount() const noexcept override { return grid().historyLineCount(); }
 
     [[nodiscard]] HyperlinkId hyperlinkIdAt(CellLocation position) const noexcept override
     {

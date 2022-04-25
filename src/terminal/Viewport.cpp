@@ -62,6 +62,22 @@ bool Viewport::forceScrollToBottom()
     return true;
 }
 
+bool Viewport::makeVisible(LineOffset lineOffset)
+{
+    auto const viewportTop = -scrollOffset_.as<LineOffset>();
+    auto const viewportBottom = boxed_cast<LineOffset>(screenLineCount() - 1) - scrollOffset_.as<int>();
+
+    // Is the line above the viewport?
+    if (!(viewportTop < lineOffset))
+        return scrollUp(LineCount::cast_from(viewportTop.as<int>() - lineOffset.as<int>()));
+
+    // Is the line below the viewport?
+    if (!(lineOffset < viewportBottom))
+        return scrollDown(LineCount::cast_from(lineOffset.as<int>() - viewportBottom.as<int>()));
+
+    return false;
+}
+
 bool Viewport::scrollTo(ScrollOffset _offset)
 {
     if (scrollingDisabled())

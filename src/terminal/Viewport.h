@@ -66,6 +66,12 @@ class Viewport
     bool scrollMarkUp();
     bool scrollMarkDown();
 
+    /// Ensures given line is visible by optionally scrolling the
+    /// screen's viewport up or down in order to make that line visible.
+    ///
+    /// If the line is already visible, no scrolling is applied.
+    bool makeVisible(LineOffset line);
+
     /// Translates a screen coordinate to a Grid-coordinate by applying
     /// the scroll-offset to it.
     constexpr CellLocation translateScreenToGridCoordinate(CellLocation p) const noexcept
