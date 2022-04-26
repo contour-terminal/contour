@@ -118,6 +118,20 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
     // p.setColor(QPalette::Window, backgroundColor);
     // setPalette(p);
 
+    std::string _gridBuffer;
+    if (profile().sessionResume && qApp->isSessionRestored())
+    {
+        auto const sessionFileName = app_.parameters().get<std::string>("contour.terminal.session");
+        auto const [configPath, profile, gridBuffer] =
+            loadSessionFile(crispy::App::instance()->localStateDir() / sessionFileName);
+        if (!configPath.empty() && !profile.empty())
+        {
+            config_ = contour::config::loadConfigFromFile(configPath);
+            profileName_ = profile;
+            _gridBuffer = gridBuffer;
+        }
+    }
+
     setAttribute(Qt::WA_TranslucentBackground);
     setAttribute(Qt::WA_NoSystemBackground, false);
     setWindowFlag(Qt::FramelessWindowHint, !profile().show_title_bar);
@@ -138,17 +152,6 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
     if (config_.maxImageSize.height <= Height(0))
         config_.maxImageSize.height = defaultMaxImageSize.height;
     // }}}
-    if (profile().sessionResume && qApp->isSessionRestored())
-    {
-        auto const sessionFileName = app_.parameters().get<std::string>("contour.terminal.session");
-        auto const [configPath, profile, gridBuffer] =
-            loadSessionFile(crispy::App::instance()->localStateDir() / sessionFileName);
-        if (!configPath.empty() && !profile.empty())
-        {
-            config_ = contour::config::loadConfigFromFile(configPath);
-            profileName_ = profile;
-        }
-    }
 
     auto shell = profile().shell;
 #if defined(__APPLE__) || defined(_WIN32)
@@ -180,7 +183,8 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
             (void) this;
 #endif
         },
-        [this]() { app_.onExit(*terminalSession_); });
+        [this]() { app_.onExit(*terminalSession_); },
+        _gridBuffer);
 
     terminalSession_->setDisplay(make_unique<opengl::TerminalWidget>(
         *terminalSession_,
