@@ -111,7 +111,8 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
                                  ContourGuiApp& _app,
                                  unique_ptr<TerminalDisplay> _display,
                                  std::function<void()> _displayInitialized,
-                                 std::function<void()> _onExit):
+                                 std::function<void()> _onExit,
+                                 std::string_view _gridBuffer):
     startTime_ { steady_clock::now() },
     earlyExitThreshold_ { _earlyExitThreshold },
     config_ { move(_config) },
@@ -152,9 +153,9 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
     }
 
     profile_ = *config_.profile(profileName_); // XXX do it again. but we've to be more efficient here
-    QGuiApplication::setFallbackSessionManagementEnabled(false);
     if (profile().sessionResume)
     {
+        QGuiApplication::setFallbackSessionManagementEnabled(false);
         connect(qApp,
                 &QGuiApplication::commitDataRequest,
                 this,
@@ -165,6 +166,8 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
                 this,
                 &TerminalSession::saveState,
                 Qt::DirectConnection);
+        if (qApp->isSessionRestored())
+            terminal().writeToScreen(_gridBuffer);
     }
     configureTerminal();
 }
@@ -1238,6 +1241,7 @@ void TerminalSession::onConfigReload()
 }
 void TerminalSession::commitSession(QSessionManager& manager)
 {
+    (void) manager;
     auto const sessionFile = crispy::App::instance()->localStateDir() / qApp->sessionId().toStdString();
     std::ofstream file(sessionFile.string(), std::ios::trunc);
 
