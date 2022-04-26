@@ -467,4 +467,9 @@ inline std::string humanReadableBytes(long double bytes)
     return fmt::format("{:.03} GB", gb);
 }
 
+template <typename... Ts>
+constexpr void ignore_unused(Ts&&... /*values*/) noexcept
+{
+}
+
 } // namespace crispy
