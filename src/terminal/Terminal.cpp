@@ -758,11 +758,11 @@ string Terminal::extractSelectionText() const
     string text;
     string currentLine;
 
+    auto const _lock = scoped_lock { *this };
+    auto const rightPage = pageSize().columns.as<ColumnOffset>() - 1;
     renderSelection([&](CellLocation const& _pos, Cell const& _cell) {
-        auto const _lock = scoped_lock { *this };
-        auto const isNewLine = !text.empty() && _pos.column <= lastColumn;
-        bool const touchesRightPage =
-            _pos.line.value > 0 && isSelected({ _pos.line - 1, pageSize().columns.as<ColumnOffset>() - 1 });
+        auto const isNewLine = _pos.column < lastColumn || (_pos.column == lastColumn && !text.empty());
+        bool const touchesRightPage = isSelected({ _pos.line, rightPage });
         if (isNewLine && (!isLineWrapped(_pos.line) || !touchesRightPage))
         {
             // TODO: handle logical line in word-selection (don't include LF in wrapped lines)

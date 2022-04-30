@@ -5,6 +5,7 @@
 - Fixes assertion on too quick shell terminations (#647).
 - Fixes fallback shell execution on UNIX-like systems when the reuqested shell cannot be spawned (#647).
 - Fixes selection being wrongly rendered when viewport is scrolled (#641).
+- Fixes full-line selection not properly injecting linefeeds between the lines.
 - Changes behaviour of full-line selection to include a trailing linefeed for the last line (#641).
 
 ### 0.3.0 (2022-04-18)
