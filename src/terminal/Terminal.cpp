@@ -778,6 +778,8 @@ string Terminal::extractSelectionText() const
     trimSpaceRight(currentLine);
     text += currentLine;
 
+    if (dynamic_cast<FullLineSelection const*>(selector()))
+        text += '\n';
     return text;
 }
 
