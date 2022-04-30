@@ -164,9 +164,7 @@ std::tuple<RGBColor, RGBColor> RenderBufferBuilder<Cell>::makeColorsForCell(Cell
             && output.cursor->shape == CursorShape::Block;
     // clang-format on
 
-    auto const selected = terminal.isSelected(
-        CellLocation { gridPosition.line - boxed_cast<LineOffset>(terminal.viewport().scrollOffset()),
-                       gridPosition.column });
+    auto const selected = terminal.isSelected(CellLocation { gridPosition.line, gridPosition.column });
 
     return makeColors(terminal.colorPalette(),
                       cellFlags,
