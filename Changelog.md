@@ -1,4 +1,4 @@
-### 0.3.1 (unreleased)
+### 0.3.1 (2022-05-01)
 
 - Adds Vi-like input modes for improved selection and copy'n'paste experience.
 - Adds contour executable to search path for spawned shell process on OS/X and Windows.
