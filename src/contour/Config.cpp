@@ -974,10 +974,10 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _baseP
         }
     }
 
-    auto const loadColorMap = [&](YAML::Node const& _parent, string const& _key, size_t _offset) {
+    auto const loadColorMap = [&](YAML::Node const& _parent, string const& _key, size_t _offset) -> bool {
         auto node = _parent[_key];
         if (!node)
-            return;
+            return false;
 
         auto const colorKeyPath = fmt::format("{}.{}", _basePath, _key);
         _usedKeys.emplace(colorKeyPath);
@@ -1004,6 +1004,7 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _baseP
             assignColor(5, "magenta");
             assignColor(6, "cyan");
             assignColor(7, "white");
+            return true;
         }
         else if (node.IsSequence())
         {
@@ -1012,13 +1013,21 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _baseP
                     colors.palette[i] = node[i].as<uint32_t>();
                 else
                     colors.palette[i] = node[i].as<string>();
+            return true;
         }
+        return false;
     };
 
     loadColorMap(_node, "normal", 0);
     loadColorMap(_node, "bright", 8);
+    if (!loadColorMap(_node, "dim", 256))
+    {
+        // calculate dim colors based on normal colors
+        for (unsigned i = 0; i < 8; ++i)
+            colors.palette[256 + i] = colors.palette[i] * 0.5f;
+    }
+
     // TODO: color palette from 16..255
-    // TODO: dim _node (maybe put them into the palette at 256..(256+8)?)
 
     float opacityValue = 1.0;
     tryLoadChildRelative(_usedKeys, _node, _basePath, "background_image.opacity", opacityValue);
@@ -1207,7 +1216,8 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     tryLoadChildRelative(
         _usedKeys, _profile, basePath, "copy_last_mark_range_offset", profile.copyLastMarkRangeOffset);
     tryLoadChildRelative(_usedKeys, _profile, basePath, "show_title_bar", profile.show_title_bar);
-
+    tryLoadChildRelative(
+        _usedKeys, _profile, basePath, "draw_bold_text_with_bright_colors", profile.colors.useBrightColors);
     tryLoadChildRelative(_usedKeys, _profile, basePath, "wm_class", profile.wmClass);
 
     if (auto args = _profile["arguments"]; args && args.IsSequence())

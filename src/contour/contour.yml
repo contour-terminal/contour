@@ -309,6 +309,8 @@ profiles:
             # Defaults to "emoji".
             emoji: "emoji"
 
+        bold_is_bright: false
+
         # Terminal cursor display configuration
         cursor:
             # Supported shapes are:
@@ -322,6 +324,7 @@ profiles:
             blinking: false
             # Blinking interval (in milliseconds) to use when cursor is blinking.
             blinking_interval: 500
+
         # vi-like normal-mode specific settings.
         # Note, currently only the cursor can be customized.
         normal_mode:
@@ -329,6 +332,7 @@ profiles:
                 shape: block
                 blinking: false
                 blinking_interval: 500
+
         # vi-like visual/visual-line/visual-block mode specific settings.
         # Note, currently only the cursor can be customized.
         visual_mode:
@@ -336,6 +340,7 @@ profiles:
                 shape: block
                 blinking: false
                 blinking_interval: 500
+
         # Background configuration
         background:
             # Background opacity to use. A value of 1.0 means fully opaque whereas 0.0 means fully
@@ -343,8 +348,14 @@ profiles:
             opacity: 1.0
             # Some platforms can blur the transparent background (currently only Windows 10 is supported).
             blur: false
+
         # Specifies a colorscheme to use (alternatively the colors can be inlined).
         colors: "default"
+
+        # If true, bold text is also using bright colors as well.
+        #
+        # Default: false
+        draw_bold_text_with_bright_colors: false
 
         # Hyperlinks (via OSC-8) can be stylized and colorized on hover.
         hyperlink_decoration:
@@ -414,6 +425,16 @@ color_schemes:
 
         # Normal colors
         normal:
+            black:   '#1d1f21'
+            red:     '#cc342b'
+            green:   '#198844'
+            yellow:  '#fba922'
+            blue:    '#3971ed'
+            magenta: '#a36ac7'
+            cyan:    '#3971ed'
+            white:   '#c5c8c6'
+        # Dim (faint) colors, if not set, they're automatically computed based on normal colors.
+        dim:
             black:   '#1d1f21'
             red:     '#cc342b'
             green:   '#198844'

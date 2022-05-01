@@ -371,7 +371,7 @@ struct formatter<terminal::LineFlags>
                 s += mapping.second;
             }
         }
-        return format_to(ctx.out(), s);
+        return format_to(ctx.out(), "{}", s);
     }
 };
 } // namespace fmt

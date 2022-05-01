@@ -64,7 +64,15 @@ struct BackgroundImage
 
 struct ColorPalette
 {
-    using Palette = std::array<RGBColor, 256>;
+    using Palette = std::array<RGBColor, 256 + 8>;
+
+    /// Indicates whether or not bright colors are being allowed
+    /// for indexed colors between 0..7 and mode set to ColorMode::Bright.
+    ///
+    /// This value is used by draw_bold_text_with_bright_colors in profile configuration.
+    ///
+    /// If disabled, normal color will be used instead.
+    bool useBrightColors = false;
 
     Palette palette = []() constexpr
     {
@@ -104,6 +112,16 @@ struct ColorPalette
              ++gray, level = uint8_t(gray * 10 + 8))
             colors[size_t(232 + gray)] = RGBColor { level, level, level };
 
+        // dim colors
+        colors[256 + 0] = 0x000000_rgb; // black
+        colors[256 + 1] = 0xa00000_rgb; // red
+        colors[256 + 2] = 0x008000_rgb; // green
+        colors[256 + 3] = 0x808000_rgb; // yellow
+        colors[256 + 4] = 0x000080_rgb; // blue
+        colors[256 + 5] = 0x800080_rgb; // magenta
+        colors[256 + 6] = 0x008080_rgb; // cy8n
+        colors[256 + 7] = 0xc0c0c0_rgb; // white
+
         return colors;
     }
     ();
@@ -120,10 +138,10 @@ struct ColorPalette
         return palette.at(_index + 8);
     }
 
-    [[nodiscard]] RGBColor dimColor(size_t _index) const
+    [[nodiscard]] RGBColor dimColor(size_t _index) const noexcept
     {
         assert(_index < 8);
-        return palette.at(_index); // TODO
+        return palette[256 + _index];
     }
 
     [[nodiscard]] RGBColor indexedColor(size_t _index) const noexcept
@@ -157,6 +175,21 @@ enum class ColorTarget
     Background,
 };
 
-RGBColor apply(ColorPalette const& _profile, Color _color, ColorTarget _target, bool _bright) noexcept;
+enum class ColorMode
+{
+    Dimmed,
+    Normal,
+    Bright
+};
+
+RGBColor apply(ColorPalette const& profile, Color color, ColorTarget target, ColorMode mode) noexcept;
+
+[[deprecated]] inline RGBColor apply(ColorPalette const& profile,
+                                     Color color,
+                                     ColorTarget target,
+                                     bool bright) noexcept
+{
+    return apply(profile, color, target, bright ? ColorMode::Bright : ColorMode::Normal);
+}
 
 } // namespace terminal

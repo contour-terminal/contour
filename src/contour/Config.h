@@ -169,6 +169,7 @@ struct TerminalProfile
         Permission changeFont = Permission::Ask;
     } permissions;
 
+    bool drawBoldTextWithBrightColors = false;
     terminal::ColorPalette colors {};
 
     struct
