@@ -108,8 +108,20 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
         config_.maxImageSize.height = defaultMaxImageSize.height;
     // }}}
 
+    auto shell = profile().shell;
+#if defined(__APPLE__) || defined(_WIN32)
+    {
+        auto const path = FileSystem::path(programPath_).parent_path();
+
+        if (shell.env.count("PATH"))
+            shell.env["PATH"] += ":"s + path.string();
+        else
+            shell.env["PATH"] = path.string();
+    }
+#endif
+
     terminalSession_ = make_unique<TerminalSession>(
-        make_unique<terminal::Process>(profile().shell, terminal::createPty(profile().terminalSize, nullopt)),
+        make_unique<terminal::Process>(shell, terminal::createPty(profile().terminalSize, nullopt)),
         _earlyExitThreshold,
         config_,
         liveConfig_,
