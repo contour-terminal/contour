@@ -85,6 +85,18 @@ string VTWriter::sgrFlush(vector<unsigned> const& sgr)
     return fmt::format("\033[{}m", params);
 }
 
+void VTWriter::sgrAddExplicit(unsigned n)
+{
+    if (n == 0)
+    {
+        currentForegroundColor_ = DefaultColor();
+        currentBackgroundColor_ = DefaultColor();
+        currentUnderlineColor_ = DefaultColor();
+    }
+
+    sgr_.push_back(n);
+}
+
 void VTWriter::sgrAdd(unsigned n)
 {
     if (n == 0)
@@ -100,7 +112,7 @@ void VTWriter::sgrAdd(unsigned n)
         if (sgr_.empty() || sgr_.back() != n)
             sgr_.push_back(n);
 
-        if (sgr_.size() == 16)
+        if (sgr_.size() == MaxParameterCount)
         {
             sgrFlush();
         }
@@ -134,22 +146,18 @@ void VTWriter::setForegroundColor(Color _color)
             if (static_cast<unsigned>(_color.index()) < 8)
                 sgrAdd(30 + static_cast<unsigned>(_color.index()));
             else
-            {
-                sgrAdd(38);
-                sgrAdd(5);
-                sgrAdd(static_cast<unsigned>(_color.index()));
-            }
+                sgrAdd(38, 5, static_cast<unsigned>(_color.index()));
             break;
         case ColorType::Bright:
             //.
             sgrAdd(90 + static_cast<unsigned>(getBrightColor(_color)));
             break;
         case ColorType::RGB:
-            sgrAdd(38);
-            sgrAdd(2);
-            sgrAdd(static_cast<unsigned>(_color.rgb().red));
-            sgrAdd(static_cast<unsigned>(_color.rgb().green));
-            sgrAdd(static_cast<unsigned>(_color.rgb().blue));
+            // clang-format off
+            sgrAdd(38, 2, static_cast<unsigned>(_color.rgb().red),
+                          static_cast<unsigned>(_color.rgb().green),
+                          static_cast<unsigned>(_color.rgb().blue));
+            // clang-format on
             break;
         case ColorType::Undefined: break;
     }

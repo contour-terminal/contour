@@ -35,6 +35,8 @@ class VTWriter
   public:
     using Writer = std::function<void(char const*, size_t)>;
 
+    static constexpr inline auto MaxParameterCount = 16;
+
     explicit VTWriter(Writer writer);
     explicit VTWriter(std::ostream& output);
     explicit VTWriter(std::vector<char>& output);
@@ -57,6 +59,18 @@ class VTWriter
     void sgrAdd(GraphicsRendition m);
     void setForegroundColor(Color color);
     void setBackgroundColor(Color color);
+
+    void sgrAddExplicit(unsigned n);
+
+    template <typename... Args>
+    void sgrAdd(unsigned n, Args... values)
+    {
+        if (sgr_.size() + sizeof...(values) > MaxParameterCount)
+            sgrFlush();
+
+        sgrAddExplicit(n);
+        (sgrAddExplicit(static_cast<unsigned>(values)), ...);
+    }
 
   private:
     Writer writer_;
