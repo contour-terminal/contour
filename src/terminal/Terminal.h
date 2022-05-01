@@ -14,11 +14,13 @@
 #pragma once
 
 #include <terminal/InputGenerator.h>
+#include <terminal/InputHandler.h>
 #include <terminal/RenderBuffer.h>
 #include <terminal/ScreenEvents.h>
 #include <terminal/Selector.h>
 #include <terminal/Sequence.h>
 #include <terminal/TerminalState.h>
+#include <terminal/ViInputHandler.h>
 #include <terminal/Viewport.h>
 #include <terminal/primitives.h>
 #include <terminal/pty/Pty.h>
@@ -65,12 +67,14 @@ class Terminal
         virtual void inspect() {}
         virtual void notify(std::string_view /*_title*/, std::string_view /*_body*/) {}
         virtual void onClosed() {}
+        virtual void pasteFromClipboard(unsigned /*count*/) {}
         virtual void onSelectionCompleted() {}
         virtual void resizeWindow(LineCount, ColumnCount) {}
         virtual void resizeWindow(Width, Height) {}
         virtual void setWindowTitle(std::string_view /*_title*/) {}
         virtual void setTerminalProfile(std::string const& /*_configProfileName*/) {}
         virtual void discardImage(Image const&) {}
+        virtual void inputModeChanged(ViMode /*mode*/) {}
     };
 
     Terminal(std::unique_ptr<Pty> _pty,
@@ -237,9 +241,13 @@ class Terminal
     bool sendFocusInEvent();
     bool sendFocusOutEvent();
     void sendPaste(std::string_view _text); // Sends verbatim text in bracketed mode to application.
-    void sendRaw(std::string_view _text);   // Sends raw string to the application.
+    void sendPasteFromClipboard(unsigned count = 1) { eventListener_.pasteFromClipboard(count); }
+
+    void sendRaw(std::string_view _text); // Sends raw string to the application.
 
     bool handleMouseSelection(Modifier _modifier, Timestamp _now);
+
+    void inputModeChanged(ViMode mode) { eventListener_.inputModeChanged(mode); }
 
     bool applicationCursorKeys() const noexcept { return state_.inputGenerator.applicationCursorKeys(); }
     bool applicationKeypad() const noexcept { return state_.inputGenerator.applicationKeypad(); }
@@ -519,6 +527,11 @@ class Terminal
     void applyPageSizeToCurrentBuffer();
 
     crispy::BufferObjectPtr currentPtyBuffer() const noexcept { return currentPtyBuffer_; }
+
+    terminal::SelectionHelper& selectionHelper() noexcept { return selectionHelper_; }
+
+    ViInputHandler& inputHandler() noexcept { return state_.inputHandler; }
+    ViInputHandler const& inputHandler() const noexcept { return state_.inputHandler; }
 
   private:
     void mainLoop();

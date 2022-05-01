@@ -72,12 +72,12 @@ struct ColorPalette
 
         // normal colors
         colors[0] = 0x000000_rgb; // black
-        colors[1] = 0x800000_rgb; // red
-        colors[2] = 0x008000_rgb; // green
-        colors[3] = 0x808000_rgb; // yellow
-        colors[4] = 0x000080_rgb; // blue
-        colors[5] = 0x800080_rgb; // magenta
-        colors[6] = 0x008080_rgb; // cyan
+        colors[1] = 0xa00000_rgb; // red
+        colors[2] = 0x00a000_rgb; // green
+        colors[3] = 0xa0a000_rgb; // yellow
+        colors[4] = 0x0000a0_rgb; // blue
+        colors[5] = 0xa000a0_rgb; // magenta
+        colors[6] = 0x00a0a0_rgb; // cyan
         colors[7] = 0xc0c0c0_rgb; // white
 
         // bright colors

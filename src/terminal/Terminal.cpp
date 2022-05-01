@@ -368,6 +368,9 @@ bool Terminal::sendCharPressEvent(char32_t _value, Modifier _modifier, Timestamp
     cursorBlinkState_ = 1;
     lastCursorBlink_ = _now;
 
+    if (state_.inputHandler.sendCharPressEvent(_value, _modifier))
+        return true;
+
     // Early exit if KAM is enabled.
     if (isModeEnabled(AnsiMode::KeyboardAction))
         return true;
@@ -441,6 +444,7 @@ bool Terminal::handleMouseSelection(Modifier _modifier, Timestamp _now)
 
 void Terminal::clearSelection()
 {
+    InputLog()("Clearing selection.");
     selection_.reset();
     speedClicks_ = 0;
     breakLoopAndRefreshRenderBuffer();
@@ -479,7 +483,8 @@ bool Terminal::sendMouseMoveEvent(Modifier _modifier,
         setSelector(make_unique<LinearSelection>(selectionHelper_, relativePos));
     }
 
-    if (selectionAvailable() && selector()->state() != Selection::State::Complete)
+    if (selectionAvailable() && selector()->state() != Selection::State::Complete
+        && inputHandler().mode() == ViMode::Insert)
     {
         changed = true;
         selector()->extend(relativePos);

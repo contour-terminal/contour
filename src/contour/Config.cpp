@@ -540,6 +540,28 @@ optional<variant<terminal::Key, char32_t>> parseKeyOrChar(string const& _name)
     return nullopt;
 }
 
+optional<config::CursorConfig> parseCursorConfig(YAML::Node rootNode,
+                                                 UsedKeys& usedKeys,
+                                                 std::string basePath)
+{
+    if (!rootNode)
+        return nullopt;
+
+    auto cursorConfig = config::CursorConfig {};
+    auto strValue = "block"s;
+    tryLoadChildRelative(usedKeys, rootNode, basePath, "shape", strValue);
+    cursorConfig.cursorShape = terminal::makeCursorShape(strValue);
+
+    bool boolValue = cursorConfig.cursorDisplay == terminal::CursorDisplay::Blink;
+    tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking", boolValue);
+    cursorConfig.cursorDisplay = boolValue ? terminal::CursorDisplay::Blink : terminal::CursorDisplay::Steady;
+
+    auto uintValue = cursorConfig.cursorBlinkInterval.count();
+    tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking_interval", uintValue);
+    cursorConfig.cursorBlinkInterval = chrono::milliseconds(uintValue);
+    return cursorConfig;
+}
+
 optional<terminal::Modifier::Key> parseModifierKey(string const& _key)
 {
     using terminal::Modifier;
@@ -589,6 +611,8 @@ optional<terminal::MatchModes> parseMatchModes(UsedKeys& _usedKeys,
             flag = MatchModes::AppCursor;
         else if (upperArg == "APPKEYPAD")
             flag = MatchModes::AppKeypad;
+        else if (upperArg == "INSERT")
+            flag = MatchModes::Insert;
         else if (upperArg == "SELECT")
             flag = MatchModes::Select;
         else
@@ -1480,17 +1504,23 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     if (auto const pdeco = terminal::renderer::to_decorator(strValue); pdeco.has_value())
         profile.hyperlinkDecoration.hover = *pdeco;
 
-    strValue = "block";
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "cursor.shape", strValue);
-    profile.cursorShape = terminal::makeCursorShape(strValue);
+    if (optional<config::CursorConfig> cursorOpt =
+            parseCursorConfig(_profile["cursor"], _usedKeys, basePath + ".cursor"))
+        profile.inputModes.insert.cursor = cursorOpt.value();
 
-    bool boolValue = profile.cursorDisplay == terminal::CursorDisplay::Blink;
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "cursor.blinking", boolValue);
-    profile.cursorDisplay = boolValue ? terminal::CursorDisplay::Blink : terminal::CursorDisplay::Steady;
+    if (auto normalModeNode = _profile["normal_mode"])
+    {
+        if (optional<config::CursorConfig> cursorOpt =
+                parseCursorConfig(normalModeNode["cursor"], _usedKeys, basePath + ".normal_mode.cursor"))
+            profile.inputModes.normal.cursor = cursorOpt.value();
+    }
 
-    auto uintValue = profile.cursorBlinkInterval.count();
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "cursor.blinking_interval", uintValue);
-    profile.cursorBlinkInterval = chrono::milliseconds(uintValue);
+    if (auto visualModeNode = _profile["visual_mode"])
+    {
+        if (optional<config::CursorConfig> cursorOpt =
+                parseCursorConfig(visualModeNode["cursor"], _usedKeys, basePath + ".visual_mode.cursor"))
+            profile.inputModes.normal.cursor = cursorOpt.value();
+    }
 
     return profile;
 }

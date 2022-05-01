@@ -98,12 +98,14 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     void inspect() override;
     void notify(std::string_view _title, std::string_view _body) override;
     void onClosed() override;
+    void pasteFromClipboard(unsigned count) override;
     void onSelectionCompleted() override;
     void resizeWindow(terminal::LineCount, terminal::ColumnCount) override;
     void resizeWindow(terminal::Width, terminal::Height) override;
     void setWindowTitle(std::string_view _title) override;
     void setTerminalProfile(std::string const& _configProfileName) override;
     void discardImage(terminal::Image const&) override;
+    void inputModeChanged(terminal::ViMode mode) override;
 
     // Input Events
     using Timestamp = std::chrono::steady_clock::time_point;
@@ -161,6 +163,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     bool operator()(actions::ToggleAllKeyMaps);
     bool operator()(actions::ToggleFullscreen);
     bool operator()(actions::ToggleTitleBar);
+    bool operator()(actions::ViNormalMode);
     bool operator()(actions::WriteScreen const& _event);
 
     void scheduleRedraw()
@@ -200,6 +203,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     void setFontSize(text::font_size _size);
     void setDefaultCursor();
     void configureTerminal();
+    void configureCursor(config::CursorConfig const& cursorConfig);
     void configureDisplay();
     uint8_t matchModeFlags() const;
     void flushInput();

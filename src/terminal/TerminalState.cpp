@@ -50,7 +50,9 @@ TerminalState::TerminalState(Terminal& _terminal,
     lastCursorPosition {},
     hyperlinks { HyperlinkCache { 1024 } },
     sequencer { _terminal },
-    parser { std::ref(sequencer) }
+    parser { std::ref(sequencer) },
+    viCommands { terminal },
+    inputHandler { viCommands, ViMode::Insert }
 {
 }
 

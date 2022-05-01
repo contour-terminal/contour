@@ -20,9 +20,12 @@
 #include <terminal/Grid.h>
 #include <terminal/Hyperlink.h>
 #include <terminal/InputGenerator.h>
+#include <terminal/InputHandler.h>
 #include <terminal/Parser.h>
 #include <terminal/ScreenEvents.h> // ScreenType
 #include <terminal/Sequencer.h>
+#include <terminal/ViCommands.h>
+#include <terminal/ViInputHandler.h>
 #include <terminal/primitives.h>
 
 #include <unicode/utf8.h>
@@ -188,6 +191,9 @@ struct TerminalState
     uint64_t instructionCounter = 0;
 
     InputGenerator inputGenerator {};
+
+    ViCommands viCommands;
+    ViInputHandler inputHandler;
 
     char32_t precedingGraphicCharacter = {};
     bool terminating = false;

@@ -18,6 +18,7 @@
 #include <terminal/MatchModes.h>
 #include <terminal/Process.h>
 #include <terminal/Terminal.h>
+#include <terminal/ViCommands.h>
 #include <terminal/pty/Pty.h>
 
 #include <crispy/StackTrace.h>
@@ -109,7 +110,7 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
                 *this,
                 profile_.maxHistoryLineCount,
                 profile_.copyLastMarkRangeOffset,
-                profile_.cursorBlinkInterval,
+                profile_.inputModes.insert.cursor.cursorBlinkInterval,
                 steady_clock::now(),
                 config_.wordDelimiters,              // TODO: move to profile!
                 config_.bypassMouseProtocolModifier, // TODO: you too
@@ -365,6 +366,23 @@ void TerminalSession::onClosed()
         display_->closeDisplay();
 }
 
+void TerminalSession::pasteFromClipboard(unsigned count)
+{
+    if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
+    {
+        string const text = clipboard->text(QClipboard::Clipboard).toUtf8().toStdString();
+        if (count == 1)
+            terminal().sendPaste(string_view { text });
+        else
+        {
+            string fullPaste;
+            for (unsigned i = 0; i < count; ++i)
+                fullPaste += text;
+            terminal().sendPaste(string_view { fullPaste });
+        }
+    }
+}
+
 void TerminalSession::onSelectionCompleted()
 {
     switch (config_.onMouseSelection)
@@ -432,6 +450,20 @@ void TerminalSession::discardImage(terminal::Image const& _image)
     display_->discardImage(_image);
 }
 
+void TerminalSession::inputModeChanged(terminal::ViMode mode)
+{
+    using terminal::ViMode;
+    switch (mode)
+    {
+        case ViMode::Insert: configureCursor(profile_.inputModes.insert.cursor); break;
+        case ViMode::Normal:
+        case ViMode::NormalMotionVisual: configureCursor(profile_.inputModes.normal.cursor); break;
+        case ViMode::Visual:
+        case ViMode::VisualLine:
+        case ViMode::VisualBlock: configureCursor(profile_.inputModes.visual.cursor); break;
+    }
+}
+
 // }}}
 // {{{ Input Events
 void TerminalSession::sendKeyPressEvent(Key _key, Modifier _modifier, Timestamp _now)
@@ -455,7 +487,7 @@ void TerminalSession::sendKeyPressEvent(Key _key, Modifier _modifier, Timestamp 
 
 void TerminalSession::sendCharPressEvent(char32_t _value, Modifier _modifier, Timestamp _now)
 {
-    InputLog()("{} {}", _modifier, static_cast<uint32_t>(_value));
+    InputLog()("char press: {} {}", _modifier, static_cast<uint32_t>(_value));
     assert(display_ != nullptr);
 
     if (terminatedAndWaitingForKeyPress_)
@@ -834,6 +866,12 @@ bool TerminalSession::operator()(actions::ToggleTitleBar)
     return true;
 }
 
+bool TerminalSession::operator()(actions::ViNormalMode)
+{
+    terminal().inputHandler().setMode(ViMode::Normal);
+    return true;
+}
+
 bool TerminalSession::operator()(actions::WriteScreen const& _event)
 {
     terminal().writeToScreen(_event.chars);
@@ -969,12 +1007,17 @@ void TerminalSession::configureTerminal()
     // if (!_terminalView.renderer().renderTargetAvailable())
     //     return;
 
-    terminal_.setMaxHistoryLineCount(profile_.maxHistoryLineCount);
-    terminal_.setCursorBlinkingInterval(profile_.cursorBlinkInterval);
-    terminal_.setCursorDisplay(profile_.cursorDisplay);
-    terminal_.setCursorShape(profile_.cursorShape);
+    configureCursor(profile_.inputModes.insert.cursor);
     terminal_.colorPalette() = profile_.colors;
     terminal_.defaultColorPalette() = profile_.colors;
+    terminal_.setMaxHistoryLineCount(profile_.maxHistoryLineCount);
+}
+
+void TerminalSession::configureCursor(config::CursorConfig const& cursorConfig)
+{
+    terminal_.setCursorBlinkingInterval(cursorConfig.cursorBlinkInterval);
+    terminal_.setCursorDisplay(cursorConfig.cursorDisplay);
+    terminal_.setCursorShape(cursorConfig.cursorShape);
 }
 
 void TerminalSession::configureDisplay()
@@ -1024,6 +1067,9 @@ uint8_t TerminalSession::matchModeFlags() const
 
     if (terminal_.selectionAvailable())
         flags |= static_cast<uint8_t>(MatchModes::Flag::Select);
+
+    if (terminal_.inputHandler().mode() == ViMode::Insert)
+        flags |= static_cast<uint8_t>(MatchModes::Flag::Insert);
 
     return flags;
 }

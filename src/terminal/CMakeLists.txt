@@ -49,6 +49,8 @@ set(terminal_HEADERS
     VTType.h
     VTWriter.h
     Viewport.h
+    ViInputHandler.h
+    ViCommands.h
     primitives.h
     pty/ConPty.h
     pty/MockPty.h
@@ -92,6 +94,8 @@ set(terminal_SOURCES
     VTType.cpp
     VTWriter.cpp
     Viewport.cpp
+    ViInputHandler.cpp
+    ViCommands.cpp
     primitives.cpp
     pty/MockPty.cpp
     pty/MockViewPty.cpp
