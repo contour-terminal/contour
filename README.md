@@ -23,6 +23,7 @@ for everyday use. It is aiming for power users with a modern feature mindset.
 - ✅ Bold and italic fonts
 - ✅ High-DPI support.
 - ✅ Vertical Line Markers (quickly jump to markers in your history!)
+- ✅ Vi-like input modes for improved selection and copy'n'paste experience.
 - ✅ Blurred behind transparent background when using Windows 10 or KDE window manager on Linux.
 - ✅ Blurrable Background image support.
 - ✅ Runtime configuration reload
