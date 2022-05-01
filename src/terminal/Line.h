@@ -213,7 +213,8 @@ class Line
         {
             Require(ColumnOffset(0) <= column);
             Require(column < ColumnOffset::cast_from(size()));
-            return unbox<size_t>(column) >= trivialBuffer().text.size();
+            return unbox<size_t>(column) >= trivialBuffer().text.size()
+                   || trivialBuffer().text[column.as<size_t>()] == 0x20;
         }
         return inflatedBuffer().at(unbox<size_t>(column)).empty();
     }
