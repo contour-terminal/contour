@@ -404,6 +404,9 @@ void InputGenerator::generatePaste(std::string_view const& _text)
 {
     InputLog()("Sending paste of {} bytes.", _text.size());
 
+    if (_text.empty())
+        return;
+
     if (bracketedPaste_)
         append("\033[200~"sv);
 
