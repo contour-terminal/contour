@@ -2,6 +2,8 @@
 
 - Adds Vi-like input modes for improved selection and copy'n'paste experience.
 - Adds contour executable to search path for spawned shell process on OS/X and Windows.
+- Adds customizability to dim colors (#664).
+- Adds the profile configuration option: `draw_bold_text_with_bright_colors`.
 - Fixes `CSI K` accidentally removing line flags, e.g. line marks (#658).
 - Fixes wrong-spacing rendering bug on some lines.
 - Fixes assertion on font resize when a (Sixel) image is currently being rendered (#642).
@@ -10,6 +12,7 @@
 - Fixes selection being wrongly rendered when viewport is scrolled (#641).
 - Fixes full-line selection not properly injecting linefeeds between the lines.
 - Changes behaviour of full-line selection to include a trailing linefeed for the last line (#641).
+- Changes behaviour of bold text to by rendered using normal colors by default (was forced to bright before, and is now configurable via `draw_bold_text_with_bright_colors`).
 
 ### 0.3.0 (2022-04-18)
 
