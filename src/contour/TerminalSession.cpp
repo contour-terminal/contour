@@ -28,6 +28,7 @@
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
 #include <QtCore/QMetaObject>
+#include <QtCore/QMimeData>
 #include <QtCore/QProcess>
 #include <QtCore/QStandardPaths>
 #include <QtCore/QTimer>
@@ -370,8 +371,14 @@ void TerminalSession::pasteFromClipboard(unsigned count)
 {
     if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
     {
+        QMimeData const* md = clipboard->mimeData();
+        SessionLog()("pasteFromClipboard: mime data contains {} formats.", md->formats().size());
+        for (int i = 0; i < md->formats().size(); ++i)
+            SessionLog()("pasteFromClipboard[{}]: {}\n", i, md->formats().at(i).toStdString());
         string const text = clipboard->text(QClipboard::Clipboard).toUtf8().toStdString();
-        if (count == 1)
+        if (text.empty())
+            SessionLog()("Clipboard does not contain text.");
+        else if (count == 1)
             terminal().sendPaste(string_view { text });
         else
         {
@@ -381,6 +388,8 @@ void TerminalSession::pasteFromClipboard(unsigned count)
             terminal().sendPaste(string_view { fullPaste });
         }
     }
+    else
+        SessionLog()("Could not access clipboard.");
 }
 
 void TerminalSession::onSelectionCompleted()
@@ -712,12 +721,7 @@ bool TerminalSession::operator()(actions::OpenFileManager)
 
 bool TerminalSession::operator()(actions::PasteClipboard)
 {
-    if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
-    {
-        string const text = clipboard->text(QClipboard::Clipboard).toUtf8().toStdString();
-        terminal().sendPaste(string_view { text });
-    }
-
+    pasteFromClipboard(1);
     return true;
 }
 
