@@ -1587,7 +1587,8 @@ void Screen<Cell, TheScreenType>::renderImage(shared_ptr<Image const> _image,
     }
 
     // If there're lines to be rendered missing (because it didn't fit onto the screen just yet)
-    // AND iff sixel !sixelScrolling  is enabled, then scroll as much as needed to render the remaining lines.
+    // AND iff sixel !sixelScrolling  is enabled, then scroll as much as needed to render the remaining
+    // lines.
     if (linesToBeRendered != _gridSize.lines && _autoScroll)
     {
         auto const remainingLineCount = _gridSize.lines - linesToBeRendered;
@@ -1895,13 +1896,13 @@ void Screen<Cell, TheScreenType>::inspect(std::string const& _message, std::ostr
     };
 
     auto const gridInfoLine = [&](Grid<Cell> const& grid) {
-        return fmt::format(
-            "main page lines: scrollback cur {} max {}, main page lines {}, used lines {}, zero index {}\n",
-            grid.historyLineCount(),
-            grid.maxHistoryLineCount(),
-            grid.pageSize().lines,
-            grid.linesUsed(),
-            grid.zero_index());
+        return fmt::format("main page lines: scrollback cur {} max {}, main page lines {}, used lines "
+                           "{}, zero index {}\n",
+                           grid.historyLineCount(),
+                           grid.maxHistoryLineCount(),
+                           grid.pageSize().lines,
+                           grid.linesUsed(),
+                           grid.zero_index());
     };
 
     if (!_message.empty())
@@ -1927,9 +1928,9 @@ void Screen<Cell, TheScreenType>::inspect(std::string const& _message, std::ostr
     _os << screenshot([this](LineOffset _lineNo) -> string {
         // auto const absoluteLine = grid().toAbsoluteLine(_lineNo);
         return fmt::format("{} {:>4}: {}",
-                           grid().lineAt(_lineNo).isTrivialBuffer() ? "!" : "|",
+                           grid().lineAt(_lineNo).isTrivialBuffer() ? "|" : ":",
                            _lineNo.value,
-                           (unsigned) grid().lineAt(_lineNo).flags());
+                           grid().lineAt(_lineNo).flags());
     });
     hline();
     _state.imagePool.inspect(_os);
@@ -2347,8 +2348,8 @@ namespace impl
                 case 53: target.setGraphicsRendition(GraphicsRendition::Overline); break;
                 case 54: target.setGraphicsRendition(GraphicsRendition::NoFramed); break;
                 case 55: target.setGraphicsRendition(GraphicsRendition::NoOverline); break;
-                // 58 is reserved, but used for setting underline/decoration colors by some other VTEs (such
-                // as mintty, kitty, libvte)
+                // 58 is reserved, but used for setting underline/decoration colors by some other VTEs
+                // (such as mintty, kitty, libvte)
                 case 58: target.setUnderlineColor(parseColor(seq, &i)); break;
                 case 90: target.setForegroundColor(BrightColor::Black); break;
                 case 91: target.setForegroundColor(BrightColor::Red); break;
