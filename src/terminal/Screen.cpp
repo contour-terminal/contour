@@ -830,7 +830,7 @@ void Screen<Cell, TheScreenType>::clearToEndOfLine()
 {
     if (_terminal.isFullHorizontalMargins() && _state.cursor.position.column.value == 0)
     {
-        currentLine().reset(grid().defaultLineFlags(), _state.cursor.graphicsRendition);
+        currentLine().reset(currentLine().flags(), _state.cursor.graphicsRendition);
         return;
     }
 

@@ -2,6 +2,7 @@
 
 - Adds Vi-like input modes for improved selection and copy'n'paste experience.
 - Adds contour executable to search path for spawned shell process on OS/X and Windows.
+- Fixes `CSI K` accidentally removing line flags, e.g. line marks (#658).
 - Fixes wrong-spacing rendering bug on some lines.
 - Fixes assertion on font resize when a (Sixel) image is currently being rendered (#642).
 - Fixes assertion on too quick shell terminations (#647).
