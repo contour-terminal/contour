@@ -206,7 +206,6 @@ int App::run(int argc, char const* argv[])
         customizeLogStoreOutput();
 
         syntax_ = parameterDefinition();
-
         optional<CLI::FlagStore> flagsOpt = CLI::parse(syntax_.value(), argc, argv);
         if (!flagsOpt.has_value())
         {
@@ -214,7 +213,6 @@ int App::run(int argc, char const* argv[])
             return EXIT_FAILURE;
         }
         flags_ = std::move(flagsOpt.value());
-
         // std::cout << fmt::format("Flags: {}\n", parameters().values.size());
         // for (auto const & [k, v] : parameters().values)
         //     std::cout << fmt::format(" - {}: {}\n", k, v);

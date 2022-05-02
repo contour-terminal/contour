@@ -121,15 +121,19 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
     std::string _gridBuffer;
     if (profile().sessionResume && qApp->isSessionRestored())
     {
-        auto const sessionFileName = app_.parameters().get<std::string>("contour.terminal.session");
-        auto const [configPath, profile, gridBuffer] =
-            loadSessionFile(crispy::App::instance()->localStateDir() / sessionFileName);
+        auto const sessionFilePath =
+            crispy::App::instance()->localStateDir()
+            / (app_.parameters().get<std::string>("contour.terminal.session") + ".session");
+        auto const [configPath, profile, gridBuffer] = loadSessionFile(sessionFilePath);
         if (!configPath.empty() && !profile.empty())
         {
             config_ = contour::config::loadConfigFromFile(configPath);
             profileName_ = profile;
             _gridBuffer = gridBuffer;
         }
+        if (!FileSystem::remove(sessionFilePath))
+            terminal::TerminalLog()("Failed to delete session file {}, file does not exist",
+                                    sessionFilePath.string());
     }
 
     setAttribute(Qt::WA_TranslucentBackground);
@@ -183,8 +187,9 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
             (void) this;
 #endif
         },
-        [this]() { app_.onExit(*terminalSession_); },
-        _gridBuffer);
+        [this]() { app_.onExit(*terminalSession_); });
+    if (qApp->isSessionRestored())
+        terminalSession_->terminal().writeToScreen(_gridBuffer);
 
     terminalSession_->setDisplay(make_unique<opengl::TerminalWidget>(
         *terminalSession_,

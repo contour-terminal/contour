@@ -61,8 +61,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
                     ContourGuiApp& _app,
                     std::unique_ptr<TerminalDisplay> _display,
                     std::function<void()> _displayInitialized,
-                    std::function<void()> _onExit,
-                    std::string_view _gridBuffer);
+                    std::function<void()> _onExit);
     ~TerminalSession() override;
 
     /// Starts the VT background thread.
@@ -213,7 +212,6 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     void flushInput();
     void mainLoop();
     void commitSession(QSessionManager& manager);
-    void saveState(QSessionManager& manager);
 
     // private data
     //
