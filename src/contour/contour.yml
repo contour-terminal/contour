@@ -361,6 +361,7 @@ profiles:
         hyperlink_decoration:
             normal: dotted
             hover: underline
+        session_resume: false
 
 # Color Profiles
 # --------------
