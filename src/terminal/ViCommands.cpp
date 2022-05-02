@@ -37,7 +37,6 @@ void ViCommands::modeChanged(ViMode mode)
     InputLog()("mode changed to {}\n", mode);
 
     auto const selectFrom = terminal.selector() ? terminal.selector()->from() : cursorPosition;
-    auto const selectTo = terminal.selector() ? terminal.selector()->to() : cursorPosition;
 
     switch (mode)
     {
@@ -58,17 +57,17 @@ void ViCommands::modeChanged(ViMode mode)
             break;
         case ViMode::Visual:
             terminal.setSelector(make_unique<LinearSelection>(terminal.selectionHelper(), selectFrom));
-            terminal.selector()->extend(selectTo);
+            terminal.selector()->extend(cursorPosition);
             terminal.screenUpdated();
             break;
         case ViMode::VisualLine:
             terminal.setSelector(make_unique<FullLineSelection>(terminal.selectionHelper(), selectFrom));
-            terminal.selector()->extend(selectTo);
+            terminal.selector()->extend(cursorPosition);
             terminal.screenUpdated();
             break;
         case ViMode::VisualBlock:
             terminal.setSelector(make_unique<RectangularSelection>(terminal.selectionHelper(), selectFrom));
-            terminal.selector()->extend(selectTo);
+            terminal.selector()->extend(cursorPosition);
             terminal.screenUpdated();
             break;
     }
@@ -166,6 +165,11 @@ void ViCommands::yank(TextObjectScope scope, TextObject textObject)
     terminal.screenUpdated();
 }
 
+void ViCommands::paste(unsigned count)
+{
+    terminal.sendPasteFromClipboard(count);
+}
+
 CellLocationRange ViCommands::expandMatchingPair(TextObjectScope scope, char left, char right) const noexcept
 {
     auto a = cursorPosition;
@@ -253,9 +257,17 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
             return { LineOffset::cast_from(-terminal.currentScreen().historyLineCount().as<int>()),
                      ColumnOffset(0) };
         case ViMotion::FileEnd: // G
-            return { terminal.pageSize().lines.as<LineOffset>() - 1, cursorPosition.column };
+            return { terminal.pageSize().lines.as<LineOffset>() - 1, ColumnOffset(0) };
         case ViMotion::LineBegin: // 0
             return { cursorPosition.line, ColumnOffset(0) };
+        case ViMotion::LineTextBegin: // ^
+        {
+            auto result = CellLocation { cursorPosition.line, ColumnOffset(0) };
+            while (result.column < terminal.pageSize().columns.as<ColumnOffset>() - 1
+                   && terminal.currentScreen().isCellEmpty(result))
+                ++result.column;
+            return result;
+        }
         case ViMotion::LineDown: // j
             return { min(cursorPosition.line + LineOffset::cast_from(count),
                          terminal.pageSize().lines.as<LineOffset>() - 1),
@@ -387,6 +399,8 @@ void ViCommands::moveCursor(ViMotion motion, unsigned count)
                 terminal.selector()->extend(cursorPosition);
             break;
     }
+
+    terminal.screenUpdated();
 }
 
 } // namespace terminal

@@ -21,6 +21,13 @@ namespace
         return get<RGBColor>(cellColor);
     }
 
+    constexpr RGBColor average(RGBColor a, RGBColor b) noexcept
+    {
+        return RGBColor(static_cast<uint8_t>((a.red + b.red) / 2),
+                        static_cast<uint8_t>((a.green + b.green) / 2),
+                        static_cast<uint8_t>((a.blue + b.blue) / 2));
+    }
+
     tuple<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette,
                                          CellFlags _cellFlags,
                                          bool _reverseVideo,
@@ -48,6 +55,9 @@ namespace
 
         auto const cursorFg = makeRGBColor(selectionFg, selectionBg, _colorPalette.cursor.textOverrideColor);
         auto const cursorBg = makeRGBColor(selectionFg, selectionBg, _colorPalette.cursor.color);
+
+        if (_selected)
+            return tuple { average(selectionFg, cursorFg), average(selectionFg, cursorFg) };
 
         return tuple { cursorFg, cursorBg };
     }

@@ -3,6 +3,13 @@
 - Fixes scrolling in alt-screen.
 - Fixes VT sequence for setting indexed color from palette.
 - Implements UTF-8 encoded mouse transport (`CSI ? 1005 h`)
+- Improved vi-like input modes.
+  - Fixed the text cursor not being visible during selection.
+  - Don't leak but actually support cursor keys up/down/left/right/page-up/page-down.
+  - Added `vip`, `vap` (and `yip` / `yap`) motions.
+  - Adds ^ motion.
+  - When being in normal mode, pressing `a` also puts you back to insert mode.
+  - and more...
 
 ### 0.3.1 (2022-05-01)
 

@@ -33,8 +33,10 @@ class ViCommands: public ViInputHandler::Executor
     void modeChanged(ViMode mode) override;
     void reverseSearchCurrentWord() override;
     void execute(ViOperator op, ViMotion motion, unsigned count) override;
-    void yank(TextObjectScope scope, TextObject textObject) override;
+    void moveCursor(ViMotion motion, unsigned count) override;
     void select(TextObjectScope scope, TextObject textObject) override;
+    void yank(TextObjectScope scope, TextObject textObject) override;
+    void paste(unsigned count) override;
 
     [[nodiscard]] CellLocation translateToCellLocation(ViMotion motion, unsigned count) const noexcept;
     [[nodiscard]] CellLocationRange translateToCellRange(ViMotion motion, unsigned count) const noexcept;
@@ -53,7 +55,6 @@ class ViCommands: public ViInputHandler::Executor
 
   private:
     ViMode lastMode = ViMode::Insert;
-    void moveCursor(ViMotion motion, unsigned count);
 };
 
 } // namespace terminal
