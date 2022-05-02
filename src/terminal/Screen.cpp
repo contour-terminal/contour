@@ -2205,7 +2205,7 @@ namespace impl
                     *pi += len;
                     break;
                 case 5: // ":5:P"
-                    if (auto const P = _seq.subparam(i, 1); P <= 255)
+                    if (auto const P = _seq.subparam(i, 2); P <= 255)
                     {
                         *pi += len;
                         return static_cast<IndexedColor>(P);

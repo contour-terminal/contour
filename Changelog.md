@@ -1,5 +1,7 @@
 ### 0.3.2 (unreleased)
 
+- Fixes VT sequence for setting indexed color from palette.
+
 ### 0.3.1 (2022-05-01)
 
 - Adds Vi-like input modes for improved selection and copy'n'paste experience.
