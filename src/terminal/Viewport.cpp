@@ -129,7 +129,7 @@ bool Viewport::scrollMarkDown()
 
 LineCount Viewport::historyLineCount() const noexcept
 {
-    return terminal_.primaryScreen().historyLineCount();
+    return terminal_.currentScreen().historyLineCount();
 }
 
 LineCount Viewport::screenLineCount() const noexcept

@@ -390,7 +390,10 @@ class Grid
 
     [[nodiscard]] LineCount totalLineCount() const noexcept { return maxHistoryLineCount_ + pageSize_.lines; }
 
-    [[nodiscard]] LineCount historyLineCount() const noexcept { return linesUsed_ - pageSize_.lines; }
+    [[nodiscard]] LineCount historyLineCount() const noexcept
+    {
+        return std::min(maxHistoryLineCount_, linesUsed_ - pageSize_.lines);
+    }
 
     [[nodiscard]] bool reflowOnResize() const noexcept { return reflowOnResize_; }
     void setReflowOnResize(bool _enabled) { reflowOnResize_ = _enabled; }
