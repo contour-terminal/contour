@@ -1,5 +1,6 @@
 ### 0.3.2 (unreleased)
 
+- Implements UTF-8 encoded mouse transport (`CSI ? 1005 h`)
 - Fixes VT sequence for setting indexed color from palette.
 
 ### 0.3.1 (2022-05-01)

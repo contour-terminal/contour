@@ -350,6 +350,7 @@ class InputGenerator
                         CellLocation _pos,
                         PixelCoordinate _pixelPosition);
     bool mouseTransportX10(uint8_t _button, uint8_t _modifier, CellLocation _pos);
+    bool mouseTransportExtended(uint8_t _button, uint8_t _modifier, CellLocation _pos);
 
     bool mouseTransportSGR(MouseEventType _type, uint8_t _button, uint8_t _modifier, int x, int y);
 

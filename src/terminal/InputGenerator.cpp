@@ -610,6 +610,7 @@ bool InputGenerator::mouseTransport(MouseEventType _eventType,
             return true;
         case MouseTransport::Extended: // mode: 1005
             // TODO (like Default but with UTF-8 encoded coords)
+            mouseTransportExtended(_button, _modifier, _pos);
             return false;
         case MouseTransport::SGR: // mode: 1006
             return mouseTransportSGR(_eventType, _button, _modifier, *_pos.column + 1, *_pos.line + 1);
@@ -621,6 +622,26 @@ bool InputGenerator::mouseTransport(MouseEventType _eventType,
     }
 
     return false;
+}
+
+bool InputGenerator::mouseTransportExtended(uint8_t _button, uint8_t _modifier, CellLocation _pos)
+{
+    constexpr auto SkipCount = uint8_t { 0x20 }; // TODO std::numeric_limits<ControlCode>::max();
+    constexpr auto MaxCoordValue = 2015;
+
+    if (*_pos.line < MaxCoordValue && *_pos.column < MaxCoordValue)
+    {
+        auto const button = static_cast<uint8_t>(SkipCount + static_cast<uint8_t>(_button | _modifier));
+        auto const line = static_cast<char32_t>(SkipCount + *_pos.line + 1);
+        auto const column = static_cast<char32_t>(SkipCount + *_pos.column + 1);
+        append("\033[M");
+        append(button);
+        append(unicode::convert_to<char>(column));
+        append(unicode::convert_to<char>(line));
+        return true;
+    }
+    else
+        return false;
 }
 
 bool InputGenerator::mouseTransportX10(uint8_t _button, uint8_t _modifier, CellLocation _pos)
