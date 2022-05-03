@@ -352,6 +352,9 @@ bool Terminal::sendKeyPressEvent(Key _key, Modifier _modifier, Timestamp _now)
     cursorBlinkState_ = 1;
     lastCursorBlink_ = _now;
 
+    if (state_.inputHandler.sendKeyPressEvent(_key, _modifier))
+        return true;
+
     // Early exit if KAM is enabled.
     if (isModeEnabled(AnsiMode::KeyboardAction))
         return true;

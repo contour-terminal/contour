@@ -75,6 +75,7 @@ enum class ViMotion
     FileBegin,            // gg
     FileEnd,              // G
     LineBegin,            // 0
+    LineTextBegin,        // ^
     LineDown,             // j
     LineEnd,              // $
     LineUp,               // k
@@ -152,8 +153,10 @@ class ViInputHandler: public InputHandler
         virtual ~Executor() = default;
 
         virtual void execute(ViOperator op, ViMotion motion, unsigned count) = 0;
-        virtual void yank(TextObjectScope scope, TextObject textObject) = 0;
+        virtual void moveCursor(ViMotion motion, unsigned count) = 0;
         virtual void select(TextObjectScope scope, TextObject textObject) = 0;
+        virtual void yank(TextObjectScope scope, TextObject textObject) = 0;
+        virtual void paste(unsigned count) = 0;
 
         virtual void modeChanged(ViMode mode) = 0;
 
@@ -171,6 +174,7 @@ class ViInputHandler: public InputHandler
     bool sendCharPressEvent(char32_t ch, Modifier modifier) override;
 
     void setMode(ViMode mode);
+    void toggleMode(ViMode mode);
     [[nodiscard]] ViMode mode() const noexcept { return viMode; }
 
     [[nodiscard]] CellLocationRange translateToCellRange(TextObjectScope scope,
@@ -178,10 +182,13 @@ class ViInputHandler: public InputHandler
 
   private:
     bool parseCount(char32_t ch, Modifier modifier);
+    bool parseModeSwitch(char32_t ch, Modifier modifier);
     bool parseTextObject(char32_t ch, Modifier modifier);
-    bool handleNormalMode(char32_t ch, Modifier modifier);
-    bool handleVisualMode(char32_t ch, Modifier modifier);
+    void handleNormalMode(char32_t ch, Modifier modifier);
+    void handleVisualMode(char32_t ch, Modifier modifier);
+    bool handleModeSwitches(char32_t ch, Modifier modifier);
     void execute(ViOperator op, ViMotion motion);
+    bool executePendingOrMoveCursor(ViMotion motion);
     void yank(TextObjectScope scope, TextObject textObject);
     void select(TextObjectScope scope, TextObject textObject);
 
@@ -189,6 +196,7 @@ class ViInputHandler: public InputHandler
     unsigned count = 0;
     std::optional<ViOperator> pendingOperator = std::nullopt;
     std::optional<TextObjectScope> pendingTextObjectScope = std::nullopt;
+    // std::optional<TextObject> pendingTextObject;
     Executor& executor;
 };
 
@@ -316,6 +324,7 @@ struct formatter<terminal::ViMotion>
             case ViMotion::FileBegin: return format_to(ctx.out(), "FileBegin");
             case ViMotion::FileEnd: return format_to(ctx.out(), "FileEnd");
             case ViMotion::LineBegin: return format_to(ctx.out(), "LineBegin");
+            case ViMotion::LineTextBegin: return format_to(ctx.out(), "LineTextBegin");
             case ViMotion::LineDown: return format_to(ctx.out(), "LineDown");
             case ViMotion::LineEnd: return format_to(ctx.out(), "LineEnd");
             case ViMotion::LineUp: return format_to(ctx.out(), "LineUp");
