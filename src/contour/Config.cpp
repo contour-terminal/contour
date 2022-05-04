@@ -1520,16 +1520,24 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
 
     if (auto normalModeNode = _profile["normal_mode"])
     {
+        _usedKeys.emplace(basePath + ".normal_mode");
         if (optional<config::CursorConfig> cursorOpt =
                 parseCursorConfig(normalModeNode["cursor"], _usedKeys, basePath + ".normal_mode.cursor"))
+        {
+            _usedKeys.emplace(basePath + ".normal_mode.cursor");
             profile.inputModes.normal.cursor = cursorOpt.value();
+        }
     }
 
     if (auto visualModeNode = _profile["visual_mode"])
     {
+        _usedKeys.emplace(basePath + ".visual_mode");
         if (optional<config::CursorConfig> cursorOpt =
                 parseCursorConfig(visualModeNode["cursor"], _usedKeys, basePath + ".visual_mode.cursor"))
+        {
+            _usedKeys.emplace(basePath + ".visual_mode.cursor");
             profile.inputModes.normal.cursor = cursorOpt.value();
+        }
     }
 
     return profile;

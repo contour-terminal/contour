@@ -3,6 +3,7 @@
 - Fixes SEGV when closing the terminal via GUI close button.
 - Fixes scrolling in alt-screen.
 - Fixes VT sequence for setting indexed color from palette.
+- Fixes some config false positives error messages.
 - Changes `XTSMGRAPHICS` to match implementation of xterm *exactly* when querying sixel image limits, to be capped at terminal viewport dimensions (#656).
 - Win32: Attaches to parent console if present, so typing `contour help` in a terminal actually shows something.
 - Implements UTF-8 encoded mouse transport (`CSI ? 1005 h`)
