@@ -2,6 +2,7 @@
 
 - Fixes scrolling in alt-screen.
 - Fixes VT sequence for setting indexed color from palette.
+- Fixes `XTSMGRAPHICS` when querying sixel image limits, to be capped at terminal viewport dimensions (#656).
 - Implements UTF-8 encoded mouse transport (`CSI ? 1005 h`)
 - Improved vi-like input modes.
   - Fixed the text cursor not being visible during selection.
