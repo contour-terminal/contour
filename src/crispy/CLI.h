@@ -39,13 +39,36 @@ enum class Presence
     Required,
 };
 
+struct OptionName
+{
+    char shortName {};
+    std::string_view longName {};
+
+    OptionName(char shortName, std::string_view longName): shortName { shortName }, longName { longName } {}
+
+    OptionName(std::string_view longName): longName { longName } {}
+    OptionName(char const* longName): longName { longName } {}
+
+    OptionName(OptionName const&) = default;
+    OptionName(OptionName&&) = default;
+    OptionName& operator=(OptionName const&) = default;
+    OptionName& operator=(OptionName&&) = default;
+    ~OptionName() = default;
+};
+
+struct Deprecated
+{
+    std::string_view message;
+};
+
 struct Option
 {
-    std::string_view name;
+    OptionName name;
     Value value;
     std::string_view helpText = {};
     std::string_view placeholder = {}; // TODO: move right below `Value value{};`
     Presence presence = Presence::Optional;
+    std::optional<Deprecated> deprecated = std::nullopt;
 };
 
 using OptionList = std::vector<Option>;

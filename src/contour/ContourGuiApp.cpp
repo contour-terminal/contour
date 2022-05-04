@@ -134,6 +134,13 @@ crispy::cli::Command ContourGuiApp::parameterDefinition() const
                 CLI::Option {
                     "display", CLI::Value { ""s }, "Sets the X11 display to connect to.", "DISPLAY_ID" },
 #endif
+                CLI::Option {
+                    CLI::OptionName { 'e', "execute" },
+                    CLI::Value { "" },
+                    "DEPRECATED: Program to execute instead of running the shell as configured.",
+                    "PROGRAM",
+                    CLI::Presence::Optional,
+                    CLI::Deprecated { "Only supported for compatibility with very old KDE desktops." } },
             },
             CLI::CommandList {},
             CLI::CommandSelect::Implicit,
@@ -220,13 +227,23 @@ bool ContourGuiApp::loadConfig(string const& target)
         return EXIT_FAILURE;
 
     // Possibly override shell to be executed
-    if (!flags.verbatim.empty())
+    auto exe = flags.get<string>("contour.terminal.execute");
+    if (!flags.verbatim.empty() || !exe.empty())
     {
         auto& shell = config_.profile(profileName())->shell;
-        shell.program = flags.verbatim.front();
         shell.arguments.clear();
-        for (size_t i = 1; i < flags.verbatim.size(); ++i)
-            shell.arguments.push_back(string(flags.verbatim.at(i)));
+        if (!exe.empty())
+        {
+            shell.program = move(exe);
+            for (auto i: flags.verbatim)
+                shell.arguments.emplace_back(string(i));
+        }
+        else
+        {
+            shell.program = flags.verbatim.front();
+            for (size_t i = 1; i < flags.verbatim.size(); ++i)
+                shell.arguments.emplace_back(string(flags.verbatim.at(i)));
+        }
     }
 
     if (auto const wmClass = flags.get<string>("contour.terminal.class"); !wmClass.empty())

@@ -14,6 +14,7 @@
 #include "CLI.h"
 
 #include <crispy/assert.h>
+#include <crispy/logstore.h>
 #include <crispy/times.h>
 
 #include <range/v3/view/iota.hpp>
@@ -90,7 +91,7 @@ using std::vector;
 using namespace std::string_view_literals;
 using namespace std::string_literals;
 
-namespace crispy::cli // {{{ Parser
+namespace crispy::cli
 {
 
 namespace // {{{ helper
@@ -120,6 +121,8 @@ namespace // {{{ helper
         return output;
     } //  }}}
 
+    bool hasTokensAvailable(ParseContext const& context) { return context.pos < context.args.size(); }
+
     auto currentToken(ParseContext const& _context) -> string_view
     {
         if (_context.pos >= _context.args.size())
@@ -145,8 +148,14 @@ namespace // {{{ helper
     Option const* findOption(ParseContext const& _context, string_view _name)
     {
         for (auto const& option: _context.currentCommand.back()->options)
-            if (option.name == _name)
+            if (_name == option.name.longName || (_name.size() == 1 && _name[0] == option.name.shortName))
+            {
+                if (option.deprecated)
+                    logstore::ErrorLog()("Deprecated option \"{}\" used. {}",
+                                         option.name.longName,
+                                         option.deprecated.value().message);
                 return &option;
+            }
         return nullptr;
     }
 
@@ -339,7 +348,7 @@ namespace // {{{ helper
                 break;
 
             auto& [option, value] = optionOptPair.value();
-            auto const fqdn = optionPrefix + "." + Name(option->name);
+            auto const fqdn = optionPrefix + "." + Name(option->name.longName);
             setOption(_context, fqdn, move(value));
         }
     }
@@ -380,7 +389,7 @@ namespace // {{{ helper
             if (option.presence == Presence::Required)
                 continue; // Do not prefill options that are required anyways.
 
-            auto const fqdn = prefix + Name(option.name);
+            auto const fqdn = prefix + Name(option.name.longName);
             _context.output.values[fqdn] = option.value;
             setOption(_context, fqdn, option.value);
         }
@@ -452,7 +461,7 @@ namespace // {{{ helper
         // Ensure all required fields are provided for those commands that have been provided.
         for (Option const& option: _command.options)
         {
-            auto const optionKey = fmt::format("{}.{}", key, option.name);
+            auto const optionKey = fmt::format("{}.{}", key, option.name.longName);
             if (option.presence == Presence::Required && !_context.output.values.count(optionKey))
                 throw invalid_argument(fmt::format("Missing option: {}", optionKey));
         }
@@ -466,6 +475,7 @@ namespace // {{{ helper
     }
 
 } // namespace
+// }}}
 
 void validate(Command const& _command)
 {
@@ -647,7 +657,7 @@ namespace // {{{ helpers
 
     string printParam(optional<HelpStyle::ColorMap> const& _colors,
                       OptionStyle _optionStyle,
-                      string_view _name,
+                      OptionName const& _name,
                       string_view _placeholder,
                       Presence _presense)
     {
@@ -660,12 +670,24 @@ namespace // {{{ helpers
         switch (_optionStyle)
         {
             case OptionStyle::Natural:
-                os << colorize(_name, HelpElement::OptionName);
+                // if (_name.shortName)
+                // {
+                //     os << colorize(string(1, _name.shortName), HelpElement::OptionName);
+                //     os << ", ";
+                // }
+                os << colorize(_name.longName, HelpElement::OptionName);
                 if (!_placeholder.empty())
                     os << ' ' << colorize(_placeholder, HelpElement::OptionValue);
                 break;
             case OptionStyle::Posix:
-                os << colorize("--", HelpElement::OptionDash) << colorize(_name, HelpElement::OptionName);
+                if (_name.shortName)
+                {
+                    os << colorize("-", HelpElement::OptionDash);
+                    os << colorize(string(1, _name.shortName), HelpElement::OptionName);
+                    os << ", ";
+                }
+                os << colorize("--", HelpElement::OptionDash)
+                   << colorize(_name.longName, HelpElement::OptionName);
                 if (!_placeholder.empty())
                     os << colorize("=", HelpElement::OptionEqual)
                        << colorize(_placeholder, HelpElement::OptionValue);
@@ -783,6 +805,9 @@ namespace // {{{ helpers
 
             for (Option const& option: _command.options)
             {
+                // if (option.deprecated)
+                //     continue;
+
                 auto const leftSize =
                     leftPadding.size() + printOption(option, nullopt, _style.optionStyle).size();
                 assert(columnWidth >= leftSize);
@@ -878,7 +903,12 @@ string usageText(Command const& _command, HelpStyle const& _style, unsigned _mar
     auto const printOptionList = [&](ostream& _os, OptionList const& _options, unsigned* _cursor) {
         auto const indent = *_cursor;
         for (Option const& option: _options)
+        {
+            // if (option.deprecated)
+            //     continue;
+
             _os << ' ' << printOption(option, _style.colors, _style.optionStyle, indent, _margin, _cursor);
+        }
     };
 
     auto cursor = indentationWidth + 1;
