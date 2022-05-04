@@ -568,8 +568,8 @@ input_mapping:
     - { mods: [Shift],          key: PageDown,      action: ScrollPageDown }
     - { mods: [Shift],          key: PageUp,        action: ScrollPageUp }
     - { mods: [Shift],          key: UpArrow,       action: ScrollOneUp }
-    - { mods: [Shift],          key: '{',           action: ScrollMarkUp,   mode: "~Alt"}
-    - { mods: [Shift],          key: '}',           action: ScrollMarkDown, mode: "~Alt"}
+    - { mods: [Control, Alt],   key: K,             action: ScrollMarkUp,   mode: "~Alt"}
+    - { mods: [Control, Alt],   key: J,             action: ScrollMarkDown, mode: "~Alt"}
     - { mods: [Shift],          mouse: WheelDown,   action: ScrollPageDown }
     - { mods: [Shift],          mouse: WheelUp,     action: ScrollPageUp }
-    - { mods: [Control],        key: O,             action: OpenFileManager }
+    - { mods: [Control, Alt],   key: O,             action: OpenFileManager }
