@@ -172,7 +172,7 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
 
 TerminalWindow::~TerminalWindow()
 {
-    DisplayLog()("~");
+    DisplayLog()("~TerminalWindow");
 }
 
 void TerminalWindow::onTerminalClosed()
