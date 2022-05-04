@@ -188,10 +188,24 @@ Process::Process(string const& _path,
             cmd += _args[i];
     }
 
-    auto const envScope = InheritingEnvBlock { _env };
+    // In case of PATH environment variable, extend it rather then overwriting it.
+    auto env = _env;
+    for (auto [name, value]: _env)
+    {
+        if (crispy::toUpper(name) == "PATH")
+        {
+            char buf[1024];
+            size_t len = 0;
+            if (getenv_s(&len, buf, sizeof(buf), "PATH") == 0)
+                env[name] = fmt::format("{};{}", value, buf);
+        }
+    }
+    auto const envScope = InheritingEnvBlock { env };
 
     auto const cwd = _cwd.generic_string();
     auto const cwdPtr = !cwd.empty() ? cwd.c_str() : nullptr;
+
+    PtyLog()("Creating process for command line: {}", cmd);
 
     BOOL success = CreateProcess(nullptr,                        // No module name - use Command Line
                                  const_cast<LPSTR>(cmd.c_str()), // Command Line
@@ -204,7 +218,7 @@ Process::Process(string const& _path,
                                  &d->startupInfo.StartupInfo,    // Pointer to STARTUPINFO
                                  &d->processInfo);               // Pointer to PROCESS_INFORMATION
     if (!success)
-        throw runtime_error { getLastErrorAsString() };
+        throw runtime_error { "Could not create process. "s + getLastErrorAsString() };
 
     d->exitWatcher = std::thread([this]() {
         wait();
