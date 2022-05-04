@@ -114,7 +114,7 @@ function Run {
     }
 
     if ($option -ne "--skip-vcpkg") {
-        vcpkg install freetype fontconfig harfbuzz fmt --triplet x64-windows
+        vcpkg install freetype fontconfig harfbuzz fmt range-v3 yaml-cpp --triplet x64-windows
         # qt5-base
     }
 }
