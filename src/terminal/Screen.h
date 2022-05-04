@@ -254,6 +254,7 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
     void requestDECMode(unsigned int _mode);
 
     [[nodiscard]] PageSize pageSize() const noexcept { return _state.pageSize; }
+    [[nodiscard]] ImageSize pixelSize() const noexcept { return _state.cellPixelSize * _state.pageSize; }
 
     constexpr CellLocation realCursorPosition() const noexcept { return _state.cursor.position; }
 

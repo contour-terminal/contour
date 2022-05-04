@@ -1654,13 +1654,11 @@ void Screen<Cell, TheScreenType>::requestPixelSize(RequestPixelSize _area)
     switch (_area)
     {
         case RequestPixelSize::WindowArea: [[fallthrough]]; // TODO
-        case RequestPixelSize::TextArea:
+        case RequestPixelSize::TextArea: {
             // Result is CSI  4 ;  height ;  width t
-            _terminal.reply(
-                "\033[4;{};{}t",
-                unbox<unsigned>(_state.cellPixelSize.height) * unbox<unsigned>(_state.pageSize.lines),
-                unbox<unsigned>(_state.cellPixelSize.width) * unbox<unsigned>(_state.pageSize.columns));
+            _terminal.reply("\033[4;{};{}t", pixelSize().height, pixelSize().width);
             break;
+        }
         case RequestPixelSize::CellArea:
             // Result is CSI  6 ;  height ;  width t
             _terminal.reply("\033[6;{};{}t", _state.cellPixelSize.height, _state.cellPixelSize.width);
@@ -2002,13 +2000,15 @@ void Screen<Cell, TheScreenType>::smGraphics(XtSmGraphics::Item _item,
         case Item::SixelGraphicsGeometry:
             switch (_action)
             {
-                case Action::Read:
+                case Action::Read: {
+                    auto const viewportSize = pixelSize();
                     _terminal.reply("\033[?{};{};{};{}S",
                                     SixelItem,
                                     Success,
-                                    _state.maxImageSize.width,
-                                    _state.maxImageSize.height);
-                    break;
+                                    min(viewportSize.width, _state.maxImageSize.width),
+                                    min(viewportSize.height, _state.maxImageSize.height));
+                }
+                break;
                 case Action::ReadLimit:
                     _terminal.reply("\033[?{};{};{};{}S",
                                     SixelItem,
