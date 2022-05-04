@@ -35,7 +35,7 @@ namespace
 {
     struct InputMatch
     {
-        // ViMode mode; // TODO(pr): ideally we also would like to match on input Mode
+        // ViMode mode; // TODO: ideally we also would like to match on input Mode
         Modifier modifier;
         char32_t ch;
 
