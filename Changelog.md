@@ -1,5 +1,6 @@
 ### 0.3.2 (unreleased)
 
+- Fixes SEGV when closing the terminal via GUI close button.
 - Fixes scrolling in alt-screen.
 - Fixes VT sequence for setting indexed color from palette.
 - Fixes `XTSMGRAPHICS` when querying sixel image limits, to be capped at terminal viewport dimensions (#656).

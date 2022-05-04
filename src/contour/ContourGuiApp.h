@@ -67,7 +67,7 @@ class ContourGuiApp: public ContourApp
     char const** argv_ = nullptr;
     std::optional<terminal::Process::ExitStatus> exitStatus_;
 
-    std::list<std::unique_ptr<TerminalWindow>> terminalWindows_;
+    std::list<TerminalWindow*> terminalWindows_;
 };
 
 } // namespace contour

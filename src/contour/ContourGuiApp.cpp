@@ -338,34 +338,33 @@ int ContourGuiApp::terminalGuiAction()
 TerminalWindow* ContourGuiApp::newWindow(contour::config::Config const& _config)
 {
     auto const liveConfig = parameters().get<bool>("contour.terminal.live-config");
-    auto mainWindow =
-        make_unique<TerminalWindow>(earlyExitThreshold(),
-                                    _config,
-                                    liveConfig,
-                                    profileName(),
-                                    config_.profile(profileName())->shell.workingDirectory.string(),
-                                    *this);
+    auto mainWindow = new TerminalWindow(earlyExitThreshold(),
+                                         _config,
+                                         liveConfig,
+                                         profileName(),
+                                         config_.profile(profileName())->shell.workingDirectory.string(),
+                                         *this);
 
     mainWindow->show();
 
-    terminalWindows_.emplace_back(move(mainWindow));
+    terminalWindows_.emplace_back(mainWindow);
     // TODO: Remove window from list when destroyed.
 
     // QObject::connect(mainWindow, &TerminalWindow::showNotification,
     //                  this, &ContourGuiApp::showNotification);
 
-    return terminalWindows_.back().get();
+    return terminalWindows_.back();
 }
 
 TerminalWindow* ContourGuiApp::newWindow()
 {
     auto const liveConfig = parameters().get<bool>("contour.terminal.live-config");
-    auto mainWindow = make_unique<TerminalWindow>(
-        earlyExitThreshold(), config_, liveConfig, profileName(), argv_[0], *this);
+    auto mainWindow =
+        new TerminalWindow(earlyExitThreshold(), config_, liveConfig, profileName(), argv_[0], *this);
     mainWindow->show();
 
-    terminalWindows_.emplace_back(move(mainWindow));
-    return terminalWindows_.back().get();
+    terminalWindows_.emplace_back(mainWindow);
+    return terminalWindows_.back();
 }
 
 void ContourGuiApp::showNotification(std::string_view _title, std::string_view _content)
