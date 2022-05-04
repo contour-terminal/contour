@@ -417,9 +417,13 @@ namespace // {{{ helper
         else if (_command.verbatim.has_value())
         {
             CLI_DEBUG(fmt::format("parseCommand: going verbatim."));
-            (void) consumeToken(_context); // consume "--"
-            while (_context.pos < _context.args.size())
-                _context.output.verbatim.emplace_back(consumeToken(_context));
+            if (hasTokensAvailable(_context))
+            {
+                if (currentToken(_context) == "--")
+                    (void) consumeToken(_context); // consume "--"
+                while (_context.pos < _context.args.size())
+                    _context.output.verbatim.emplace_back(consumeToken(_context));
+            }
         }
 
         if (_context.pos == _context.args.size())
