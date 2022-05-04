@@ -105,7 +105,6 @@ inline void set_fail_handler(fail_handler_t _handler)
     do                                                                                       \
     {                                                                                        \
         ::crispy::detail::check((cond), #cond, "Postcondition failed.", __FILE__, __LINE__); \
-        assert(cond);                                                                        \
     } while (0)
 
 } // namespace crispy
