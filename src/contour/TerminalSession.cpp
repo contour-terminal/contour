@@ -221,7 +221,7 @@ void TerminalSession::bufferChanged(terminal::ScreenType _type)
 
 void TerminalSession::screenUpdated()
 {
-    if (profile_.autoScrollOnUpdate && terminal().viewport().scrolled())
+    if (profile_.autoScrollOnUpdate && terminal().viewport().scrolled() && terminal().inputHandler().mode() == ViMode::Insert)
         terminal().viewport().scrollToBottom();
 
     if (terminal().hasInput())
