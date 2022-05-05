@@ -276,6 +276,13 @@ string_view Screen<Cell, TheScreenType>::tryEmplaceChars(string_view _chars) noe
     if (!_terminal.isFullHorizontalMargins())
         return _chars;
 
+    // In case the charset has been altered, no
+    // optimization can be applied.
+    // Unless we're storing the charset in the TriviallyStyledLineBuffer, too.
+    // But for now that's too rare to be beneficial.
+    if (!_state.cursor.charsets.isSelected(CharsetId::USASCII))
+        return _chars;
+
     crlfIfWrapPending();
 
     auto const columnsAvailable = pageSize().columns.value - _state.cursor.position.column.value;

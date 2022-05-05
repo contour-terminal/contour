@@ -98,6 +98,13 @@ class CharsetMapping
         shift_ = _table;
     }
 
+    [[nodiscard]] bool isSelected(CharsetTable _table, CharsetId _id) const noexcept
+    {
+        return tables_[static_cast<size_t>(_table)] == charsetMap(_id);
+    }
+
+    [[nodiscard]] bool isSelected(CharsetId _id) const noexcept { return isSelected(currentTable(), _id); }
+
     void select(CharsetTable _table, CharsetId _id) noexcept
     {
         tables_[static_cast<size_t>(_table)] = charsetMap(_id);

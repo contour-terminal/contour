@@ -1,5 +1,6 @@
 ### 0.3.2 (unreleased)
 
+- Fixes SGR and text breakage when altering charsets via `ESC ( 0` VT sequence (#661).
 - Fixes SEGV when closing the terminal via GUI close button.
 - Fixes scrolling in alt-screen.
 - Fixes VT sequence for setting indexed color from palette.
