@@ -1163,6 +1163,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
 
     if (auto colors = _profile["colors"]; colors) // {{{
     {
+        _usedKeys.emplace(fmt::format("{}.{}.colors", _parentPath, _profileName));
         auto const path = fmt::format("{}.{}.{}", _parentPath, _profileName, "colors");
         if (colors.IsMap())
             profile.colors = loadColorScheme(_usedKeys, path, colors);
@@ -1516,7 +1517,10 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
 
     if (optional<config::CursorConfig> cursorOpt =
             parseCursorConfig(_profile["cursor"], _usedKeys, basePath + ".cursor"))
+    {
+        _usedKeys.emplace(basePath + ".cursor");
         profile.inputModes.insert.cursor = cursorOpt.value();
+    }
 
     if (auto normalModeNode = _profile["normal_mode"])
     {

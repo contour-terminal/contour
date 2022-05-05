@@ -30,6 +30,8 @@ namespace terminal
 // [ ] motion %
 // [ ] motion to jump marks up/down
 // [ ] add timer to disable selection (needs timer API inside of libterminal)
+// [ ] show cursor if it was hidden and restore it when going back to insert mode
+// [ ] remember initial cursor shae and restore it when going back to insert mode
 
 namespace
 {

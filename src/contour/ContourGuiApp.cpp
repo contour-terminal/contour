@@ -136,7 +136,7 @@ crispy::cli::Command ContourGuiApp::parameterDefinition() const
 #endif
                 CLI::Option {
                     CLI::OptionName { 'e', "execute" },
-                    CLI::Value { "" },
+                    CLI::Value { ""s },
                     "DEPRECATED: Program to execute instead of running the shell as configured.",
                     "PROGRAM",
                     CLI::Presence::Optional,

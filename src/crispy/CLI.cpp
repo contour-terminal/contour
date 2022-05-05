@@ -519,7 +519,8 @@ optional<FlagStore> parse(Command const& _command, int _argc, char const* const*
 }
 
 } // namespace crispy::cli
-namespace crispy::cli // {{{ Help output
+
+namespace crispy::cli
 {
 
 namespace // {{{ helpers
@@ -876,6 +877,7 @@ namespace // {{{ helpers
         detailedDescription(_os, _command, _style, _margin, parents);
     }
 } // namespace
+// }}}
 
 HelpStyle::ColorMap HelpStyle::defaultColors()
 {
