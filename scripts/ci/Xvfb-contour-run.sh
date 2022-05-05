@@ -24,6 +24,8 @@ ldd `which contour`
 LOG="config,pty,gui.session,gui.display,vt.renderer,font.locator"
 #LOG="all"
 
+CONTOUR_PREFIX=gdb --batch --command=./scripts/test.gdb --args
+
 $CONTOUR_PREFIX \
     contour terminal \
         debug "$LOG" \
