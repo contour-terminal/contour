@@ -245,7 +245,8 @@ bool ViInputHandler::executePendingOrMoveCursor(ViMotion motion)
     {
         case ViOperator::MoveCursor: executor.moveCursor(motion, count ? count : 1); break;
         case ViOperator::Yank:
-            // TODO(pr) executor.yank(pendingTextObjectScope.value(), pending)
+            // XXX executor.yank(pendingTextObjectScope.value(), pending)
+            logstore::ErrorLog()("Yank: Implementation coming: {}", motion);
             break;
         case ViOperator::Paste: executor.paste(count ? count : 1); break;
         case ViOperator::ReverseSearchCurrentWord: executor.reverseSearchCurrentWord(); break;
