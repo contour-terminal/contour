@@ -52,7 +52,10 @@ std::vector<std::string> getSessions()
     std::vector<std::string> sessionFiles;
     for (auto dirContents: FileSystem::directory_iterator(crispy::App::instance()->localStateDir()))
     {
-        if (dirContents.is_regular_file() && dirContents.path().extension() == ".session")
+        // NB: Cannot use  dirContents.is_regular_file() here,
+        // because on OS/X, boost::filesystem is used, and that doesn't have that yet.
+        bool const isRegularFile = dirContents.status().type() == FileSystem::regular_file;
+        if (isRegularFile && dirContents.path().extension() == ".session")
         {
             sessionFiles.emplace_back(dirContents.path().string());
         }

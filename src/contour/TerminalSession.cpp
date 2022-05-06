@@ -91,7 +91,8 @@ namespace
 #endif
     }
 
-    QStringList createCorrectRestartCommands(const QStringList& defaultCommands, const QString& sessionId)
+    [[maybe_unused]] QStringList createCorrectRestartCommands(QStringList const& defaultCommands,
+                                                              QString const& sessionId)
     {
         QStringList newCommands;
         auto contourBinaryPath = defaultCommands[0].toStdString();
@@ -1231,10 +1232,11 @@ void TerminalSession::onConfigReload()
                 this,
                 SLOT(onConfigReload()));
 }
+
 void TerminalSession::commitSession(QSessionManager& manager)
 {
     auto const sessionFile =
-        crispy::App::instance()->localStateDir() / (qApp->sessionId().toStdString() + ".session");
+        crispy::App::instance()->localStateDir() / (manager.sessionId().toStdString() + ".session");
     std::ofstream file(sessionFile.string(), std::ios::trunc);
 
     if (!file.is_open())
