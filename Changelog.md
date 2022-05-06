@@ -16,6 +16,7 @@
   - Adds ^ motion.
   - When being in normal mode, pressing `a` also puts you back to insert mode.
   - and more...
+- Adds specialized PTY implementation for Linux operating system utilizing OS-specific kernel APIs.
 
 ### 0.3.1 (2022-05-01)
 

@@ -13,7 +13,9 @@
  */
 #include <terminal/pty/Pty.h>
 
-#if defined(_MSC_VER)
+#if defined(__linux__)
+    #include <terminal/pty/LinuxPty.h>
+#elif defined(_MSC_VER)
     #include <terminal/pty/ConPty.h>
 #else
     #include <terminal/pty/UnixPty.h>
@@ -28,7 +30,9 @@ namespace terminal
 
 unique_ptr<Pty> createPty(PageSize pageSize, optional<ImageSize> viewSize)
 {
-#if defined(_MSC_VER)
+#if defined(__linux__)
+    return make_unique<terminal::LinuxPty>(pageSize, viewSize);
+#elif defined(_MSC_VER)
     return make_unique<terminal::ConPty>(pageSize /*TODO: , viewSize*/);
 #else
     return make_unique<terminal::UnixPty>(pageSize, viewSize);

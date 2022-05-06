@@ -102,6 +102,15 @@ set(terminal_SOURCES
     pty/Pty.cpp
 )
 
+if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+    set(LINUX TRUE)
+endif()
+
+if(LINUX)
+    set(terminal_HEADERS ${terminal_HEADERS} pty/LinuxPty.h)
+    set(terminal_SOURCES ${terminal_SOURCES} pty/LinuxPty.cpp)
+endif()
+
 set(LIBTERMINAL_LIBRARIES crispy::core fmt::fmt-header-only range-v3::range-v3 Threads::Threads Microsoft.GSL::GSL)
 if(UNIX)
     list(APPEND LIBTERMINAL_LIBRARIES util)

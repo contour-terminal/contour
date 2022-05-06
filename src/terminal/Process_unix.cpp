@@ -15,6 +15,10 @@
 #include <terminal/pty/Pty.h>
 #include <terminal/pty/UnixPty.h>
 
+#if defined(__linux__)
+    #include <terminal/pty/LinuxPty.h>
+#endif
+
 #include <crispy/overloaded.h>
 #include <crispy/stdfs.h>
 #include <crispy/utils.h>
@@ -47,6 +51,7 @@
 #endif
 
 #include <csignal>
+
 #include <pwd.h>
 #include <unistd.h>
 
@@ -59,6 +64,12 @@ using crispy::trimRight;
 
 namespace terminal
 {
+
+#if defined(__linux__)
+using SystemPty = LinuxPty;
+#else
+using SystemPty = UnixPty;
+#endif
 
 namespace
 {
@@ -118,7 +129,7 @@ Process::Process(string const& _path,
     d->pty = move(_pty);
 
     UnixPipe* stdoutFastPipe = [this]() -> UnixPipe* {
-        if (auto* p = dynamic_cast<UnixPty*>(d->pty.get()))
+        if (auto* p = dynamic_cast<SystemPty*>(d->pty.get()))
             return &p->stdoutFastPipe();
         return nullptr;
     }();
@@ -177,7 +188,7 @@ Process::Process(string const& _path,
                 return createArgv("/usr/bin/flatpak-spawn", realArgs, 0);
             }();
 
-            if (auto pty = dynamic_cast<UnixPty*>(d->pty.get()))
+            if (auto pty = dynamic_cast<SystemPty*>(d->pty.get()))
             {
                 if (pty->stdoutFastPipe().writer() != -1)
                 {
@@ -353,7 +364,7 @@ string Process::workingDirectory() const
     try
     {
         auto vpi = proc_vnodepathinfo {};
-        auto const pid = tcgetpgrp(unbox<int>(static_cast<UnixPty const*>(d->pty.get())->handle()));
+        auto const pid = tcgetpgrp(unbox<int>(static_cast<SystemPty const*>(d->pty.get())->handle()));
 
         if (proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &vpi, sizeof(vpi)) <= 0)
             return "."s;
