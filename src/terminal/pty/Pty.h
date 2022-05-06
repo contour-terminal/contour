@@ -76,14 +76,16 @@ class Pty
     /// Returns true if the underlying PTY is closed, otherwise false.
     [[nodiscard]] virtual bool isClosed() const noexcept = 0;
 
-    /// Reads from the terminal whatever has been written to from the other side of the terminal.
+    /// Reads from the terminal whatever has been written to from the other side
+    /// of the terminal.
     ///
-    /// @param _size   Capacity of parameter @p buf. At most @p size bytes will be stored into it.
+    /// @param storage Target buffer to store the read data to.
+    /// @param timeout Wait only for up to given timeout before giving up the blocking read attempt.
+    /// @param size    The number of bytes to read at most, even if the storage has more bytes available.
     ///
-    /// @returns view to the consumed buffer.
-    [[nodiscard]] virtual std::optional<std::string_view> read(size_t _size,
-                                                               std::chrono::milliseconds _timeout) = 0;
-
+    /// @returns A view to the consumed buffer. The boolean in the ReadResult
+    ///          indicates whether or not this data was coming through
+    ///          the stdout-fastpipe.
     [[nodiscard]] virtual ReadResult read(crispy::BufferObject& storage,
                                           std::chrono::milliseconds timeout,
                                           size_t size) = 0;

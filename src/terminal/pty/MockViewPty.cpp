@@ -33,14 +33,6 @@ PtySlave& MockViewPty::slave() noexcept
     return slave_;
 }
 
-optional<string_view> MockViewPty::read(size_t _maxSize, std::chrono::milliseconds /*_timeout*/)
-{
-    auto const n = min(outputBuffer_.size(), _maxSize);
-    auto const result = outputBuffer_.substr(0, n);
-    outputBuffer_.remove_prefix(n);
-    return result;
-}
-
 optional<tuple<string_view, bool>> MockViewPty::read(crispy::BufferObject& storage,
                                                      std::chrono::milliseconds /*timeout*/,
                                                      size_t size)

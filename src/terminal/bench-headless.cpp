@@ -274,15 +274,21 @@ class ContourHeadlessBench: public crispy::App
         auto& ptySlave = pty.slave();
         (void) ptySlave.configure();
 
+        auto bufferObjectPool = crispy::BufferObjectPool(4 * 1024 * 1024);
+        auto bufferObject = bufferObjectPool.allocateBufferObject();
+
         auto bytesTransferred = uint64_t { 0 };
         auto loopIterations = uint64_t { 0 };
         auto ptyStdoutReaderThread = std::thread { [&]() {
             while (!pty.isClosed())
             {
-                optional<string_view> dataChunk = pty.read(PtyReadSize, std::chrono::seconds(2));
-                if (!dataChunk || dataChunk->empty())
+                auto const readResult = pty.read(*bufferObject, std::chrono::seconds(2), PtyReadSize);
+                if (!readResult)
                     break;
-                bytesTransferred += dataChunk->size();
+                auto const dataChunk = get<string_view>(readResult.value());
+                if (dataChunk.empty())
+                    break;
+                bytesTransferred += dataChunk.size();
                 loopIterations++;
             }
         } };

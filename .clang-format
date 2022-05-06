@@ -94,8 +94,10 @@ IncludeCategories:
   - Regex:     '^<(QtCore|QtGui|QtWidgets)/'
     Priority:  12
   - Regex:     '^<catch2/'
-    Priority:  13
-  - Regex:     '<[[:alnum:]._]+>'
-    Priority:  14
+    Priority:  20
+  - Regex:     '^<[[:alnum:]_]+>'
+    Priority:  21
+  - Regex:     '<[[:alnum:]_]+\.h>'
+    Priority:  22
   - Regex:     '.*'
-    Priority:  15
+    Priority:  23

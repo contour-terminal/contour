@@ -14,11 +14,12 @@
 #include <contour/ContourGuiApp.h>
 
 #if defined(_WIN32)
-    #include <Windows.h>
     #include <cstdio>
+    #include <iostream>
+
+    #include <Windows.h>
     #include <fcntl.h>
     #include <io.h>
-    #include <iostream>
 #endif
 
 using namespace std;

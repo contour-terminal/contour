@@ -15,10 +15,11 @@
 
 #include <terminal/pty/Pty.h>
 
-#include <Windows.h>
 #include <memory>
 #include <mutex>
 #include <vector>
+
+#include <Windows.h>
 
 namespace terminal
 {
@@ -33,7 +34,6 @@ class ConPty: public Pty
     void close() override;
     bool isClosed() const noexcept override;
 
-    std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
     [[nodiscard]] ReadResult read(crispy::BufferObject& storage,
                                   std::chrono::milliseconds timeout,
                                   size_t size) override;

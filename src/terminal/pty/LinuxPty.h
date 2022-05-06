@@ -14,43 +14,18 @@
 #pragma once
 
 #include <terminal/pty/Pty.h>
+#include <terminal/pty/UnixPty.h> // UnixPipe (TODO: move somewhere else)
 
 #include <array>
 #include <optional>
 #include <vector>
 
-#if defined(__APPLE__)
-    #include <util.h>
-#elif defined(__linux__)
-    #include <pty.h>
-#endif
+#include <pty.h>
 
 namespace terminal
 {
 
-struct UnixPipe
-{
-    int pfd[2];
-
-    UnixPipe();
-    UnixPipe(UnixPipe&&) noexcept;
-    UnixPipe& operator=(UnixPipe&&) noexcept;
-    UnixPipe(UnixPipe const&) = delete;
-    UnixPipe& operator=(UnixPipe const&) = delete;
-    ~UnixPipe();
-
-    [[nodiscard]] bool good() const noexcept { return pfd[0] != -1 && pfd[1] != -1; }
-
-    [[nodiscard]] int reader() noexcept { return pfd[0]; }
-    [[nodiscard]] int writer() noexcept { return pfd[1]; }
-
-    void closeReader() noexcept;
-    void closeWriter() noexcept;
-
-    void close();
-};
-
-class UnixPty: public Pty
+class LinuxPty: public Pty
 {
   private:
     class Slave: public PtySlave
@@ -59,12 +34,12 @@ class UnixPty: public Pty
         int _slaveFd;
         explicit Slave(PtySlaveHandle fd): _slaveFd { unbox<int>(fd) } {}
         ~Slave() override;
-        PtySlaveHandle handle() const noexcept;
+        [[nodiscard]] PtySlaveHandle handle() const noexcept;
         void close() override;
-        bool isClosed() const noexcept override;
-        bool configure() noexcept override;
-        bool login() override;
-        int write(std::string_view) noexcept override;
+        [[nodiscard]] bool isClosed() const noexcept override;
+        [[nodiscard]] bool configure() noexcept override;
+        [[nodiscard]] bool login() override;
+        [[nodiscard]] int write(std::string_view) noexcept override;
     };
 
   public:
@@ -74,30 +49,32 @@ class UnixPty: public Pty
         PtySlaveHandle slave;
     };
 
-    UnixPty(PageSize const& _windowSize, std::optional<ImageSize> _pixels);
-    UnixPty(PtyHandles handles, PageSize size);
-    ~UnixPty() override;
+    LinuxPty(PageSize const& _windowSize, std::optional<ImageSize> _pixels);
+    LinuxPty(PtyHandles handles, PageSize size);
+    ~LinuxPty() override;
 
     PtySlave& slave() noexcept override;
 
-    PtyMasterHandle handle() const noexcept;
+    [[nodiscard]] PtyMasterHandle handle() const noexcept;
     void close() override;
-    bool isClosed() const noexcept override;
+    [[nodiscard]] bool isClosed() const noexcept override;
     void wakeupReader() noexcept override;
     [[nodiscard]] ReadResult read(crispy::BufferObject& storage,
                                   std::chrono::milliseconds timeout,
                                   size_t size) override;
     int write(char const* buf, size_t size) override;
-    PageSize pageSize() const noexcept override;
+    [[nodiscard]] PageSize pageSize() const noexcept override;
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;
 
     UnixPipe& stdoutFastPipe() noexcept { return _stdoutFastPipe; }
 
   private:
     std::optional<std::string_view> readSome(int fd, char* target, size_t n) noexcept;
+    int waitForReadable(std::chrono::milliseconds timeout) noexcept;
 
     int _masterFd;
-    std::array<int, 2> _pipe;
+    int _epollFd;
+    int _eventFd;
     UnixPipe _stdoutFastPipe;
     PageSize _pageSize;
     Slave _slave;

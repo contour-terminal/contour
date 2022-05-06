@@ -15,6 +15,7 @@
 
 #if defined(CONTOUR_BLUR_PLATFORM_KWIN)
     #include <KWindowEffects>
+
     #include <kwindowsystem_version.h>
     #define KDE_MAKE_VERSION(a, b, c) (((a) << 16) | ((b) << 8) | (c))
 #endif
