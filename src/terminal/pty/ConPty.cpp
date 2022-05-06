@@ -13,8 +13,9 @@
  */
 #include <terminal/pty/ConPty.h>
 
-#include <Windows.h>
 #include <utility>
+
+#include <Windows.h>
 
 using namespace std;
 

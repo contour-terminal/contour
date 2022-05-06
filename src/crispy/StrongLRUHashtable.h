@@ -17,11 +17,12 @@
 #include <crispy/assert.h>
 #include <crispy/utils.h>
 
-#include <immintrin.h>
 #include <optional>
 #include <ostream>
 #include <stdexcept>
 #include <vector>
+
+#include <immintrin.h>
 
 #define DEBUG_STRONG_LRU_HASHTABLE 1
 

@@ -10,9 +10,10 @@
 #include <locale>
 // }}}
 
+#include <iostream> // DEBUGGING ONLY
+
 #include <dwrite.h>
 #include <dwrite_3.h>
-#include <iostream> // DEBUGGING ONLY
 
 #include <wrl/client.h>
 

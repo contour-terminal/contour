@@ -15,10 +15,11 @@
 
 #include <terminal/pty/Pty.h>
 
-#include <Windows.h>
 #include <memory>
 #include <mutex>
 #include <vector>
+
+#include <Windows.h>
 
 namespace terminal
 {

@@ -17,10 +17,11 @@
 
 #include <array>
 #include <cstring>
-#include <immintrin.h>
 #include <string>
 #include <string_view>
 #include <type_traits>
+
+#include <immintrin.h>
 
 #if defined(__AES__)
     #include <wmmintrin.h>

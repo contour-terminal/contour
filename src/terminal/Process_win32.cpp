@@ -21,20 +21,21 @@
 
 #include <fmt/format.h>
 
-#include <Windows.h>
 #include <cassert>
 #include <cerrno>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
-#include <direct.h>
-#include <errno.h>
 #include <fstream>
 #include <mutex>
 #include <numeric>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+
+#include <Windows.h>
+#include <direct.h>
+#include <errno.h>
 
 using namespace std;
 

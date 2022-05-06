@@ -13,9 +13,10 @@
  */
 #pragma once
 
+#include <string>
+
 #include <dwrite.h>
 #include <dwrite_3.h>
-#include <string>
 
 #include <wrl/implements.h>
 
