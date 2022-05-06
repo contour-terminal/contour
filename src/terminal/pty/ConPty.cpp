@@ -152,20 +152,6 @@ Pty::ReadResult ConPty::read(crispy::BufferObject& buffer, std::chrono::millisec
     return { tuple { string_view { buffer.hotEnd(), nread }, false } };
 }
 
-optional<string_view> ConPty::read(size_t _size, std::chrono::milliseconds _timeout)
-{
-    // TODO: wait for _timeout time at most AND got woken up upon wakeupReader() invokcation.
-    (void) _timeout;
-
-    auto const n = static_cast<DWORD>(min(_size, buffer_.size()));
-
-    DWORD nread {};
-    if (!ReadFile(input_, buffer_.data(), n, &nread, nullptr))
-        return nullopt;
-
-    return string_view { buffer_.data(), nread };
-}
-
 void ConPty::wakeupReader()
 {
     // TODO: Windows ConPTY does *NOT* support non-blocking / overlapped I/O.

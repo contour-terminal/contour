@@ -220,12 +220,13 @@ UnixPty::UnixPty(PageSize const& _windowSize, optional<ImageSize> _pixels):
 }
 
 UnixPty::UnixPty(PtyHandles handles, PageSize pageSize):
+    // clang-format off
     _masterFd { unbox<int>(handles.master) },
     _pipe {},
-    _buffer(4 * 1024 * 1024, {}),
     _pageSize { pageSize },
     _slave { handles.slave }
 {
+    // clang-format on
     if (!detail::setFileFlags(_masterFd, O_CLOEXEC | O_NONBLOCK))
         throw runtime_error { "Failed to configure PTY. "s + strerror(errno) };
 
@@ -387,13 +388,6 @@ Pty::ReadResult UnixPty::read(crispy::BufferObject& sink, std::chrono::milliseco
         if (auto x = readSome(fd, sink.hotEnd(), min(size, sink.bytesAvailable())))
             return { tuple { x.value(), fd == _stdoutFastPipe.reader() } };
 
-    return nullopt;
-}
-
-optional<std::string_view> UnixPty::read(size_t size, std::chrono::milliseconds timeout)
-{
-    if (int fd = waitForReadable(_masterFd, _stdoutFastPipe.reader(), _pipe[0], timeout); fd != -1)
-        return readSome(fd, _buffer.data(), min(size, _buffer.size()));
     return nullopt;
 }
 

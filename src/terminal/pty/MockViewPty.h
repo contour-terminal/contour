@@ -27,7 +27,6 @@ class MockViewPty: public Pty
     void setReadData(std::string_view _data);
 
     PtySlave& slave() noexcept override;
-    std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
     [[nodiscard]] std::optional<std::tuple<std::string_view, bool>> read(crispy::BufferObject& storage,
                                                                          std::chrono::milliseconds timeout,
                                                                          size_t size) override;

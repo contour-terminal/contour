@@ -320,11 +320,6 @@ Pty::ReadResult LinuxPty::read(crispy::BufferObject& sink, std::chrono::millisec
     return nullopt;
 }
 
-optional<std::string_view> LinuxPty::read(size_t, std::chrono::milliseconds)
-{
-    throw std::runtime_error("NOT SUPPORTED");
-}
-
 int LinuxPty::write(char const* buf, size_t size)
 {
     timeval tv {};

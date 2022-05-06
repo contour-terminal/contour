@@ -84,7 +84,6 @@ class UnixPty: public Pty
     void close() override;
     bool isClosed() const noexcept override;
     void wakeupReader() noexcept override;
-    std::optional<std::string_view> read(size_t _size, std::chrono::milliseconds _timeout) override;
     [[nodiscard]] ReadResult read(crispy::BufferObject& storage,
                                   std::chrono::milliseconds timeout,
                                   size_t size) override;
@@ -100,7 +99,6 @@ class UnixPty: public Pty
     int _masterFd;
     std::array<int, 2> _pipe;
     UnixPipe _stdoutFastPipe;
-    std::vector<char> _buffer;
     PageSize _pageSize;
     Slave _slave;
 };
