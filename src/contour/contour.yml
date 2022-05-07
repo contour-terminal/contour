@@ -554,6 +554,7 @@ input_mapping:
     - { mods: [Control, Shift], key: C,             action: CopySelection }
     - { mods: [Control, Shift], key: V,             action: PasteClipboard }
     - { mods: [Control],        key: C,             action: CopySelection, mode: 'Select|Insert' }
+    - { mods: [Control],        key: C,             action: CancelSelection, mode: 'Select|Insert' }
     - { mods: [Control],        key: V,             action: PasteClipboard, mode: 'Select|Insert' }
     - { mods: [Control],        key: V,             action: CancelSelection, mode: 'Select|Insert' }
     - { mods: [],               key: Escape,        action: CancelSelection, mode: 'Select|Insert' }
