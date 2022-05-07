@@ -54,7 +54,7 @@ std::vector<std::string> getSessions()
     {
         // NB: Cannot use  dirContents.is_regular_file() here,
         // because on OS/X, boost::filesystem is used, and that doesn't have that yet.
-        bool const isRegularFile = dirContents.status().type() == FileSystem::regular_file;
+        bool const isRegularFile = dirContents.status().type() == FileSystem::file_type::regular;
         if (isRegularFile && dirContents.path().extension() == ".session")
         {
             sessionFiles.emplace_back(dirContents.path().string());
