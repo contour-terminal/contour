@@ -1437,6 +1437,8 @@ void Terminal::synchronizedOutput(bool _enabled)
     if (_enabled)
         return;
 
+    tick(steady_clock::now());
+
     auto const diff = currentTime_ - renderBuffer_.lastUpdate;
     if (diff < refreshInterval_)
         return;
