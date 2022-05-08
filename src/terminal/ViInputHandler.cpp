@@ -274,6 +274,25 @@ bool ViInputHandler::parseTextObject(char32_t ch, Modifier modifier)
         }
     }
 
+    if (pendingTextObjectScope && pendingOperator)
+    {
+        if (optional<TextObject> const textObject = charToTextObject(ch))
+        {
+            switch (*pendingOperator)
+            {
+                case ViOperator::Yank:
+                    yank(*pendingTextObjectScope, *textObject);
+                    break;
+                default:
+                    logstore::ErrorLog()(
+                        "ViInputHandler: trying to operate on text object with unsupported operator {}.",
+                        pendingOperator.value());
+                    break;
+            }
+            return true;
+        }
+    }
+
     switch (InputMatch { modifier.without(Modifier::Shift), ch })
     {
         case 'D' | Modifier::Control: return executePendingOrMoveCursor(ViMotion::PageDown);
