@@ -55,6 +55,8 @@ class ViCommands: public ViInputHandler::Executor
 
   private:
     ViMode lastMode = ViMode::Insert;
+    CursorShape lastCursorShape = CursorShape::Block;
+    bool lastCursorVisible = true;
 };
 
 } // namespace terminal

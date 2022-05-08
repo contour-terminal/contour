@@ -14,8 +14,9 @@
   - Fixed the text cursor not being visible during selection.
   - Don't leak but actually support cursor keys up/down/left/right/page-up/page-down.
   - Added `vip`, `vap` (and `yip` / `yap`) motions.
-  - Adds ^ motion.
+  - Adds `^` motion.
   - When being in normal mode, pressing `a` also puts you back to insert mode.
+  - Properly show cursor if it was hidden in insert mode and restore visibility & shape when going back to insert mode.
   - and more...
 - Adds specialized PTY implementation for Linux operating system utilizing OS-specific kernel APIs.
 

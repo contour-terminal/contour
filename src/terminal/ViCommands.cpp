@@ -42,13 +42,19 @@ void ViCommands::modeChanged(ViMode mode)
     {
         case ViMode::Insert:
             // Force re-render as viewport & cursor might have changed.
-            terminal.screenUpdated();
+            terminal.state().cursor.visible = lastCursorVisible;
+            terminal.setCursorShape(lastCursorShape);
             terminal.viewport().forceScrollToBottom();
+            terminal.screenUpdated();
             break;
         case ViMode::NormalMotionVisual:
             //.
             break;
         case ViMode::Normal:
+            lastCursorShape = terminal.cursorShape();
+            lastCursorVisible = terminal.state().cursor.visible;
+            terminal.state().cursor.visible = true;
+
             if (lastMode == ViMode::Insert)
                 cursorPosition = terminal.realCursorPosition();
             if (terminal.selectionAvailable())
