@@ -18,7 +18,7 @@
 #if defined(__APPLE__)
     #include <util.h>
 #else
-    #include <pty.h>
+    #include <termios.h>
 #endif
 
 #include <fcntl.h>
