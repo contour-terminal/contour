@@ -52,9 +52,9 @@ class SourceLocation
     {
     }
 
-    char const* file_name() const noexcept { return fileName_; }
-    int line() const noexcept { return line_; }
-    char const* function_name() const noexcept { return functionName_; }
+    [[nodiscard]] char const* file_name() const noexcept { return fileName_; }
+    [[nodiscard]] int line() const noexcept { return line_; }
+    [[nodiscard]] char const* function_name() const noexcept { return functionName_; }
 
     static SourceLocation current() noexcept
     {
@@ -85,10 +85,10 @@ class MessageBuilder
   public:
     explicit MessageBuilder(Category const& cat, source_location loc = source_location::current());
 
-    Category const& category() const noexcept { return _category; }
-    source_location const& location() const noexcept { return _location; }
+    [[nodiscard]] Category const& category() const noexcept { return _category; }
+    [[nodiscard]] source_location const& location() const noexcept { return _location; }
 
-    std::string const& text() const noexcept { return _buffer; }
+    [[nodiscard]] std::string const& text() const noexcept { return _buffer; }
 
     MessageBuilder& append(std::string_view msg)
     {
@@ -115,7 +115,7 @@ class MessageBuilder
         return *this;
     }
 
-    std::string message() const;
+    [[nodiscard]] std::string message() const;
 
     ~MessageBuilder();
 };
@@ -145,30 +145,30 @@ class Category
              Visibility visibility = Visibility::Public) noexcept;
     ~Category();
 
-    std::string_view name() const noexcept { return _name; }
-    std::string_view description() const noexcept { return _description; }
+    [[nodiscard]] std::string_view name() const noexcept { return _name; }
+    [[nodiscard]] std::string_view description() const noexcept { return _description; }
 
-    bool is_enabled() const noexcept { return _state == State::Enabled; }
+    [[nodiscard]] bool is_enabled() const noexcept { return _state == State::Enabled; }
     void enable(bool enabled = true) noexcept { _state = enabled ? State::Enabled : State::Disabled; }
     void disable() noexcept { _state = State::Disabled; }
 
-    bool visible() const noexcept { return _visibility == Visibility::Public; }
+    [[nodiscard]] bool visible() const noexcept { return _visibility == Visibility::Public; }
     void set_visible(bool visible) { _visibility = visible ? Visibility::Public : Visibility::Hidden; }
 
     operator bool() const noexcept { return is_enabled(); }
 
-    Formatter const& formatter() const { return _formatter; }
+    [[nodiscard]] Formatter const& formatter() const { return _formatter; }
     void set_formatter(Formatter formatter) { _formatter = std::move(formatter); }
 
     void set_sink(logstore::Sink& s) { _sink = s; }
-    logstore::Sink& sink() const noexcept { return _sink.get(); }
+    [[nodiscard]] logstore::Sink& sink() const noexcept { return _sink.get(); }
 
-    MessageBuilder build(source_location location = source_location::current()) const
+    [[nodiscard]] MessageBuilder build(source_location location = source_location::current()) const
     {
         return MessageBuilder(*this, location);
     }
 
-    MessageBuilder operator()(source_location location = source_location::current()) const
+    [[nodiscard]] MessageBuilder operator()(source_location location = source_location::current()) const
     {
         return MessageBuilder(*this, location);
     }
