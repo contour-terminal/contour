@@ -1628,6 +1628,33 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 
     tryLoadValue(usedKeys, doc, "spawn_new_process", _config.spawnNewProcess);
 
+    bool logEnabled = false;
+    tryLoadValue(usedKeys, doc, "logging.enabled", logEnabled);
+
+    if (logEnabled) {
+        std::string logFilePath{};
+        tryLoadValue(usedKeys, doc, "logging.file", logFilePath);
+
+        std::cout << logFilePath.substr(1) << "\r\n";
+        if (logFilePath[0] == '~') {
+            logFilePath = terminal::Process::homeDirectory() / logFilePath.substr(2);
+        }
+
+        _config.logFile.emplace();
+
+
+        std::cout << terminal::Process::homeDirectory() << "\r\n";
+
+        _config.logFile.value().open(logFilePath);
+
+        if (!_config.logFile.value().is_open()) {
+            std::cout << "wont open\r\n";
+            // FATAL?
+        }
+
+        logstore::configure_sink(logstore::Sink::file(_config.logFile.value()));
+    }
+
     tryLoadValue(usedKeys, doc, "images.sixel_scrolling", _config.sixelScrolling);
     tryLoadValue(usedKeys, doc, "images.sixel_cursor_conformance", _config.sixelCursorConformance);
     tryLoadValue(usedKeys, doc, "images.sixel_register_count", _config.maxImageColorRegisters);

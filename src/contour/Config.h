@@ -274,6 +274,7 @@ struct Config
     InputMappings inputMappings;
 
     bool spawnNewProcess = false;
+    std::optional<std::ofstream> logFile;
 
     bool sixelScrolling = true;
     bool sixelCursorConformance = true;
