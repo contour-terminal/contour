@@ -4,6 +4,7 @@ Checks: >-
   bugprone-*,
   -bugprone-easily-swappable-parameters,
   -bugprone-suspicious-include,
+  -bugprone-unchecked-optional-access,
   cppcoreguidelines-*,
   -cppcoreguidelines-avoid-c-arrays,
   -cppcoreguidelines-avoid-magic-numbers,
