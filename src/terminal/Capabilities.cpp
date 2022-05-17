@@ -163,6 +163,7 @@ namespace
         String { "ec"_tcap, "ech"sv, "\033[%p1%dX"sv },
         // Clear to end of screen
         String { "cd"_tcap, "ed"sv, "\033[J"sv },
+        String { "E3"_tcap, "E3"sv, "\033[3J"sv },                    // Defines the E3 capability
         String { "ce"_tcap, "el"sv, "\033[K"sv },                     // Clear to end of line
         String { "cb"_tcap, "el1"sv, "\033[1K"sv },                   // Clear to start of line
         String { "vb"_tcap, "flash"sv, "\033[?5h$<100/>\033[?5l"sv }, // visible bell

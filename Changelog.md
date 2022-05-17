@@ -1,5 +1,6 @@
 ### 0.3.2 (unreleased)
 
+- Adds E3 capability, so `clear` now defaults to clearing screen and scrollback (#693).
 - Fixes Synchronized Updates (`SM/RM ? 2026`) sometimes lagging behind in rendering.
 - Fixes SGR and text breakage when altering charsets via `ESC ( 0` VT sequence (#661).
 - Fixes SEGV when closing the terminal via GUI close button.
