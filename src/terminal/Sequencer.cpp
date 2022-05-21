@@ -69,6 +69,9 @@ void Sequencer::print(string_view _chars)
     else
         for (char const ch: _chars)
             print(ch);
+
+    terminal_.state().parser.maxCharCount = terminal_.state().pageSize.columns.as<size_t>()
+                                            - terminal_.state().cursor.position.column.as<size_t>();
 }
 
 void Sequencer::execute(char controlCode)

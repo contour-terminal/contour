@@ -649,6 +649,8 @@ class Parser
 
     State state() const noexcept { return state_; }
 
+    size_t maxCharCount = 0;
+
   private:
     void handle(ActionClass _actionClass, Action _action, uint8_t _char);
 

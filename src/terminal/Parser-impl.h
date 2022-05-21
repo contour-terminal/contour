@@ -14,13 +14,13 @@
 #pragma once
 
 #include <terminal/Parser.h>
+#include <terminal/logging.h>
 
 #include <crispy/assert.h>
 #include <crispy/escape.h>
+#include <crispy/utils.h>
 
-#if defined(__SSE2__)
-    #include <immintrin.h>
-#endif
+#include <unicode/scan.h>
 
 namespace terminal::parser
 {
@@ -28,56 +28,6 @@ namespace terminal::parser
 namespace detail
 {
     constexpr uint8_t operator"" _b(unsigned long long _value) { return static_cast<uint8_t>(_value); }
-
-    inline int countTrailingZeroBits(unsigned int _value)
-    {
-#if defined(_WIN32)
-        return _tzcnt_u32(_value);
-#else
-        return __builtin_ctz(_value);
-#endif
-    }
-
-    inline size_t countAsciiTextChars(char const* _begin, char const* _end) noexcept
-    {
-        // TODO: Do move this functionality into libunicode?
-
-        auto input = _begin;
-
-#if 0 // TODO: defined(__AVX2__)
-      // AVX2 to be implemented directly in NASM file.
-
-#elif defined(__SSE2__)
-        __m128i const ControlCodeMax = _mm_set1_epi8(0x20); // 0..0x1F
-        __m128i const Complex = _mm_set1_epi8(static_cast<char>(0x80));
-
-        while (input < _end - sizeof(__m128i))
-        {
-            __m128i batch = _mm_loadu_si128((__m128i*) input);
-            __m128i isControl = _mm_cmplt_epi8(batch, ControlCodeMax);
-            __m128i isComplex = _mm_and_si128(batch, Complex);
-            __m128i testPack = _mm_or_si128(isControl, isComplex);
-            if (int const check = _mm_movemask_epi8(testPack); check != 0)
-            {
-                int advance = countTrailingZeroBits(static_cast<unsigned>(check));
-                input += advance;
-                break;
-            }
-            input += sizeof(__m128i);
-        }
-
-        // NOTE: It seems like it is natural to have the following two lines
-        // in order to improve speed, but it's in fact slower.
-        //
-        while (input != _end && *input >= 0x20 && (*input & 0x80) == 0)
-            ++input;
-
-        return static_cast<size_t>(std::distance(_begin, input));
-#else
-        return 0;
-#endif
-    }
-
 } // namespace detail
 
 constexpr ParserTable ParserTable::get() // {{{
@@ -276,25 +226,37 @@ constexpr ParserTable ParserTable::get() // {{{
     return t;
 } // }}}
 
-namespace detail
-{
-
-} // end namespace detail
-
 template <typename EventListener, bool TraceStateChanges>
-void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view _data)
+void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view const _data)
 {
-    auto input = _data.data();              // reinterpret_cast<uint8_t const*>(_data.data());
-    auto end = _data.data() + _data.size(); // reinterpret_cast<uint8_t const*>(_data.data() + _data.size());
+    auto input = _data.data();
+    auto const end = _data.data() + _data.size();
 
     do
     {
         if (state_ == State::Ground)
         {
-            if (auto count = detail::countAsciiTextChars(input, end); count > 0)
+            auto const chunk = std::string_view(input, static_cast<size_t>(std::distance(input, end)));
+#if defined(LIBTERMINAL_LOG_TRACE)
+            if (VTTraceParserLog)
+                VTTraceParserLog()("scan_for_text(max={}, data=\"{}\")", maxCharCount, crispy::escape(chunk));
+#endif
+            if (auto const cellCount = unicode::scan_for_text_ascii(chunk, maxCharCount); cellCount > 0)
             {
-                eventListener_.print(std::string_view { input, count });
-                input += count;
+                auto const next = input + cellCount;
+                auto const byteCount = static_cast<size_t>(std::distance(input, next));
+                assert(byteCount <= chunk.size());
+#if defined(LIBTERMINAL_LOG_TRACE)
+                if (VTTraceParserLog)
+                    VTTraceParserLog()("Scanned text: cap {}; available cells {}; chars {}; bytes {}; \"{}\"",
+                                       chunk.size(),
+                                       maxCharCount,
+                                       cellCount,
+                                       byteCount,
+                                       crispy::escape(std::string_view { input, byteCount }));
+#endif
+                eventListener_.print(std::string_view { input, byteCount });
+                input = next;
 
                 // This optimization is for the `cat`-people.
                 // It further optimizes the throughput performance by bypassing
@@ -341,13 +303,15 @@ void Parser<EventListener, TraceStateChanges>::handle(ActionClass _actionClass,
     (void) _actionClass;
     auto const ch = static_cast<char>(codepoint);
 
+#if defined(LIBTERMINAL_LOG_TRACE)
     if constexpr (TraceStateChanges)
-        if (_action != Action::Ignore && _action != Action::Undefined)
-            fmt::print("Parser.handle: {} {} {} {}\n",
-                       state_,
-                       _actionClass,
-                       _action,
-                       crispy::escape(unicode::convert_to<char>(ch)));
+        if (VTTraceParserLog && _action != Action::Ignore && _action != Action::Undefined)
+            VTTraceParserLog()("handle: {} {} {} {}",
+                               state_,
+                               _actionClass,
+                               _action,
+                               crispy::escape(static_cast<uint8_t>(ch)));
+#endif
 
     switch (_action)
     {

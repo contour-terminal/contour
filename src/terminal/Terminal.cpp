@@ -177,6 +177,8 @@ bool Terminal::processInputOnce()
 
     {
         auto const _l = std::lock_guard { *this };
+        state_.parser.maxCharCount =
+            static_cast<size_t>(state_.pageSize.columns.value - state_.cursor.position.column.value);
         state_.parser.parseFragment(buf);
     }
 
