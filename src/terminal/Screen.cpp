@@ -11,6 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <terminal/ControlCode.h>
 #include <terminal/InputGenerator.h>
 #include <terminal/Screen.h>
 #include <terminal/Terminal.h>
@@ -379,6 +380,11 @@ bool Screen<Cell, TheScreenType>::canResumeEmplace(std::string_view continuation
 template <typename Cell, ScreenType TheScreenType>
 void Screen<Cell, TheScreenType>::writeText(string_view _chars)
 {
+#if defined(LIBTERMINAL_LOG_TRACE)
+    if (VTTraceSequenceLog)
+        VTTraceSequenceLog()("text({} bytes): \"{}\"", _chars.size(), _chars);
+#endif
+
 #if defined(LIBTERMINAL_PTY_BUFFER_OBJECTS)
     _chars = tryEmplaceChars(_chars);
     if (_chars.empty())
@@ -405,8 +411,8 @@ template <typename Cell, ScreenType TheScreenType>
 void Screen<Cell, TheScreenType>::writeText(char32_t _char)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
-    if (VTParserTraceLog)
-        VTParserTraceLog()("text: \"{}\"", unicode::convert_to<char>(_char));
+    if (VTTraceSequenceLog)
+        VTTraceSequenceLog()("text: \"{}\"", unicode::convert_to<char>(_char));
 #endif
 
     crlfIfWrapPending();
@@ -2881,8 +2887,9 @@ template <typename Cell, ScreenType TheScreenType>
 void Screen<Cell, TheScreenType>::executeControlCode(char controlCode)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
-    if (VTParserTraceLog)
-        VTParserTraceLog()("C0 0x{:02X}", controlCode);
+    if (VTTraceSequenceLog)
+        VTTraceSequenceLog()(
+            "control U+{:02X} ({})", controlCode, to_string(static_cast<ControlCode::C0>(controlCode)));
 #endif
 
     _terminal.state().instructionCounter++;
@@ -2923,8 +2930,8 @@ template <typename Cell, ScreenType TheScreenType>
 void Screen<Cell, TheScreenType>::processSequence(Sequence const& seq)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
-    if (VTParserTraceLog)
-        VTParserTraceLog()("Handle VT sequence: {}", seq);
+    if (VTTraceSequenceLog)
+        VTTraceSequenceLog()("Handle VT sequence: {}", seq);
 #endif
 
     // std::cerr << fmt::format("\t{} \t; {}\n", sequence_,

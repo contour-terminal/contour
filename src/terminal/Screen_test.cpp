@@ -152,7 +152,7 @@ TEST_CASE("writeText.bulk.A.1", "[screen]")
     mock.writeToScreen("b");
     logScreenText(screen, "initial state");
     REQUIRE(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(2) });
-    screen.writeText("CD");
+    mock.writeToScreen("CD");
     logScreenText(screen, "final state");
     CHECK(screen.grid().lineText(LineOffset(0)) == "abCD ");
     CHECK(screen.grid().lineText(LineOffset(1)) == "     ");
@@ -169,7 +169,7 @@ TEST_CASE("writeText.bulk.A.2", "[screen]")
     mock.writeToScreen("b");
     logScreenText(screen, "initial state");
     REQUIRE(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(2) });
-    screen.writeText("CDE");
+    mock.writeToScreen("CDE");
     logScreenText(screen, "final state");
     CHECK(screen.grid().lineText(LineOffset(0)) == "abCDE");
     CHECK(screen.grid().lineText(LineOffset(1)) == "     ");
@@ -186,7 +186,7 @@ TEST_CASE("writeText.bulk.A.3", "[screen]")
     mock.writeToScreen("b");
     logScreenText(screen, "initial state");
     REQUIRE(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(2) });
-    screen.writeText("CDEF");
+    mock.writeToScreen("CDEF");
     logScreenText(screen, "final state");
     CHECK(screen.grid().lineText(LineOffset(0)) == "abCDF");
     CHECK(screen.grid().lineText(LineOffset(1)) == "     ");
@@ -202,7 +202,7 @@ TEST_CASE("writeText.bulk.B", "[screen]")
     mock.writeToScreen("b");
     logScreenText(screen, "initial state");
     REQUIRE(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(2) });
-    screen.writeText("CD");
+    mock.writeToScreen("CD");
     logScreenText(screen, "final state");
     CHECK(screen.grid().lineText(LineOffset(0)) == "abCD ");
     CHECK(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(4) });
@@ -217,7 +217,7 @@ TEST_CASE("writeText.bulk.C", "[screen]")
     mock.writeToScreen("b");
     logScreenText(screen, "initial state");
     REQUIRE(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(2) });
-    screen.writeText("CDE");
+    mock.writeToScreen("CDE");
     logScreenText(screen, "final state");
     CHECK(screen.grid().lineText(LineOffset(0)) == "abCDE");
     CHECK(screen.grid().lineText(LineOffset(1)) == "     ");
@@ -239,7 +239,7 @@ TEST_CASE("writeText.bulk.D", "[screen]")
     mock.writeToScreen("b");
     logScreenText(screen, "initial state");
     REQUIRE(screen.cursor().position == CellLocation { LineOffset(0), ColumnOffset(2) });
-    screen.writeText("CDEF");
+    mock.writeToScreen("CDEF");
     logScreenText(screen, "final state");
     CHECK(screen.grid().lineText(LineOffset(0)) == "abCDE");
     CHECK(screen.grid().lineText(LineOffset(1)) == "F    ");
