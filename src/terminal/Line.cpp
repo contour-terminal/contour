@@ -11,6 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <terminal/GraphicsAttributes.h>
 #include <terminal/Line.h>
 
 #include <unicode/grapheme_segmenter.h>
@@ -188,7 +189,7 @@ InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input)
     }
 
     while (columns.size() < unbox<size_t>(input.displayWidth))
-        columns.emplace_back(Cell { input.attributes });
+        columns.emplace_back(Cell { GraphicsAttributes {} });
 
     return columns;
 }
