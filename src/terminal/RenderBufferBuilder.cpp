@@ -36,12 +36,13 @@ namespace
                                          bool _selected,
                                          bool _isCursor)
     {
+        bool const isCellHidden = _cellFlags == CellFlags::Hidden;
         auto const [fg, bg] =
             makeColors(_colorPalette, _cellFlags, _reverseVideo, foregroundColor, backgroundColor);
-        if (!_selected && !_isCursor)
-            return tuple { fg, bg };
+        if (!_selected && !_isCursor && isCellHidden)
+            return tuple { bg, bg };
 
-        auto const [selectionFg, selectionBg] =
+        auto getSelectionColor =
             [](auto fg, auto bg, bool selected, ColorPalette const& colors) -> tuple<RGBColor, RGBColor> {
             auto const a = colors.selectionForeground.value_or(bg);
             auto const b = colors.selectionBackground.value_or(fg);
@@ -49,7 +50,10 @@ namespace
                 return tuple { a, b };
             else
                 return tuple { b, a };
-        }(fg, bg, _selected, _colorPalette);
+        };
+        auto const [selectionFg, selectionBg] = isCellHidden
+                                                    ? getSelectionColor(fg, fg, _selected, _colorPalette)
+                                                    : getSelectionColor(fg, bg, _selected, _colorPalette);
         if (!_isCursor)
             return tuple { selectionFg, selectionBg };
 
