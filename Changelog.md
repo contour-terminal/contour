@@ -22,6 +22,7 @@
   - and more...
 - Adds specialized PTY implementation for Linux operating system utilizing OS-specific kernel APIs.
 - Changes CLI syntax for `contour parser-table` to `contour generate parser-table`.
+- Fixes underline decoration for wide character cells.
 
 ### 0.3.1 (2022-05-01)
 

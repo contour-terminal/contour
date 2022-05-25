@@ -44,6 +44,21 @@ using std::string;
 namespace terminal::renderer
 {
 
+namespace
+{
+    auto constexpr CellFlagDecorationMappings = array {
+        pair { CellFlags::Underline, Decorator::Underline },
+        pair { CellFlags::DoublyUnderlined, Decorator::DoubleUnderline },
+        pair { CellFlags::CurlyUnderlined, Decorator::CurlyUnderline },
+        pair { CellFlags::DottedUnderline, Decorator::DottedUnderline },
+        pair { CellFlags::DashedUnderline, Decorator::DashedUnderline },
+        pair { CellFlags::Overline, Decorator::Overline },
+        pair { CellFlags::CrossedOut, Decorator::CrossedOut },
+        pair { CellFlags::Framed, Decorator::Framed },
+        pair { CellFlags::Encircled, Decorator::Encircle },
+    };
+}
+
 DecorationRenderer::DecorationRenderer(GridMetrics const& _gridMetrics,
                                        Decorator _hyperlinkNormal,
                                        Decorator _hyperlinkHover):
@@ -90,21 +105,10 @@ void DecorationRenderer::inspect(std::ostream& /*output*/) const
 
 void DecorationRenderer::renderCell(RenderCell const& _cell)
 {
-    auto constexpr mappings = array {
-        pair { CellFlags::Underline, Decorator::Underline },
-        pair { CellFlags::DoublyUnderlined, Decorator::DoubleUnderline },
-        pair { CellFlags::CurlyUnderlined, Decorator::CurlyUnderline },
-        pair { CellFlags::DottedUnderline, Decorator::DottedUnderline },
-        pair { CellFlags::DashedUnderline, Decorator::DashedUnderline },
-        pair { CellFlags::Overline, Decorator::Overline },
-        pair { CellFlags::CrossedOut, Decorator::CrossedOut },
-        pair { CellFlags::Framed, Decorator::Framed },
-        pair { CellFlags::Encircled, Decorator::Encircle },
-    };
-
-    for (auto const& mapping: mappings)
+    for (auto const& mapping: CellFlagDecorationMappings)
         if (_cell.flags & mapping.first)
-            renderDecoration(mapping.second, _gridMetrics.map(_cell.position), 1, _cell.decorationColor);
+            renderDecoration(
+                mapping.second, _gridMetrics.map(_cell.position), ColumnCount(1), _cell.decorationColor);
 }
 
 auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocation tileLocation)
@@ -286,16 +290,19 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
 
 void DecorationRenderer::renderDecoration(Decorator decoration,
                                           crispy::Point pos,
-                                          int columnCount,
+                                          ColumnCount columnCount,
                                           RGBColor const& color)
 {
-    for (int i = 0; i < columnCount; ++i)
+    for (auto i = ColumnCount(0); i < columnCount; ++i)
     {
         auto const tileIndex = _directMapping.toTileIndex(static_cast<uint32_t>(decoration));
         auto const tileLocation = _textureAtlas->tileLocation(tileIndex);
         TextureAtlas::TileCreateData tileData = createTileData(decoration, tileLocation);
         AtlasTileAttributes const& tileAttributes = _textureAtlas->directMapped(tileIndex);
-        renderTile({ pos.x }, { pos.y }, color, tileAttributes);
+        renderTile({ pos.x + unbox<int>(i) * unbox<int>(_gridMetrics.cellSize.width) },
+                   { pos.y },
+                   color,
+                   tileAttributes);
     }
 }
 

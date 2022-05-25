@@ -53,7 +53,7 @@ class DecorationRenderer: public Renderable
 
     void renderDecoration(Decorator _decoration,
                           crispy::Point _pos,
-                          int _columnCount,
+                          ColumnCount columnCount,
                           RGBColor const& _color);
 
     constexpr Decorator hyperlinkNormal() const noexcept { return hyperlinkNormal_; }
