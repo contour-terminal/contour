@@ -20,6 +20,7 @@
   - Properly show cursor if it was hidden in insert mode and restore visibility & shape when going back to insert mode.
   - and more...
 - Adds specialized PTY implementation for Linux operating system utilizing OS-specific kernel APIs.
+- Changes CLI syntax for `contour parser-table` to `contour generate parser-table`.
 
 ### 0.3.1 (2022-05-01)
 

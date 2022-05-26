@@ -164,7 +164,7 @@ ContourApp::ContourApp(): App("contour", "Contour Terminal Emulator", CONTOUR_VE
     link("contour.capture", bind(&ContourApp::captureAction, this));
     link("contour.list-debug-tags", bind(&ContourApp::listDebugTagsAction, this));
     link("contour.set.profile", bind(&ContourApp::profileAction, this));
-    link("contour.parser-table", bind(&ContourApp::parserTableAction, this));
+    link("contour.generate.parser-table", bind(&ContourApp::parserTableAction, this));
     link("contour.generate.terminfo", bind(&ContourApp::terminfoAction, this));
     link("contour.generate.config", bind(&ContourApp::configAction, this));
     link("contour.generate.integration", bind(&ContourApp::integrationAction, this));
@@ -272,13 +272,16 @@ crispy::cli::Command ContourApp::parameterDefinition() const
             CLI::Command { "version", "Shows the version and exits." },
             CLI::Command { "license",
                            "Shows the license, and project URL of the used projects and Contour." },
-            CLI::Command { "parser-table", "Dumps parser table" },
             CLI::Command { "list-debug-tags", "Lists all available debug tags and exits." },
             CLI::Command {
                 "generate",
                 "Generation utilities.",
                 CLI::OptionList {},
                 CLI::CommandList {
+                    CLI::Command {
+                        "parser-table",
+                        "Dumps VT parser's state machine in dot-file format to stdout."
+                    },
                     CLI::Command {
                         "terminfo",
                         "Generates the terminfo source file that will reflect the features of this version "
