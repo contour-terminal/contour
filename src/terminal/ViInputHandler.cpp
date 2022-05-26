@@ -280,9 +280,7 @@ bool ViInputHandler::parseTextObject(char32_t ch, Modifier modifier)
         {
             switch (*pendingOperator)
             {
-                case ViOperator::Yank:
-                    yank(*pendingTextObjectScope, *textObject);
-                    break;
+                case ViOperator::Yank: yank(*pendingTextObjectScope, *textObject); break;
                 default:
                     logstore::ErrorLog()(
                         "ViInputHandler: trying to operate on text object with unsupported operator {}.",

@@ -278,10 +278,8 @@ crispy::cli::Command ContourApp::parameterDefinition() const
                 "Generation utilities.",
                 CLI::OptionList {},
                 CLI::CommandList {
-                    CLI::Command {
-                        "parser-table",
-                        "Dumps VT parser's state machine in dot-file format to stdout."
-                    },
+                    CLI::Command { "parser-table",
+                                   "Dumps VT parser's state machine in dot-file format to stdout." },
                     CLI::Command {
                         "terminfo",
                         "Generates the terminfo source file that will reflect the features of this version "
