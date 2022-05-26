@@ -423,7 +423,7 @@ void Screen<Cell, TheScreenType>::writeText(string_view _chars, size_t cellCount
 #endif
 
     for (char const ch: _chars)
-        writeText(static_cast<char32_t>(ch));
+        writeTextInternal(static_cast<char32_t>(ch));
 }
 
 template <typename Cell, ScreenType TheScreenType>
@@ -446,6 +446,12 @@ void Screen<Cell, TheScreenType>::writeText(char32_t _char)
         VTTraceSequenceLog()("char: \'{}\'", unicode::convert_to<char>(_char));
 #endif
 
+    return writeTextInternal(_char);
+}
+
+template <typename Cell, ScreenType TheScreenType>
+void Screen<Cell, TheScreenType>::writeTextInternal(char32_t _char)
+{
     crlfIfWrapPending();
 
     char32_t const codepoint = _state.cursor.charsets.map(_char);

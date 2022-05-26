@@ -483,7 +483,7 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
     void fail(std::string const& _message) const override;
 
   private:
-    std::string_view tryEmplaceChars(std::string_view chars) noexcept;
+    void writeTextInternal(char32_t _char);
     std::string_view tryEmplaceChars(std::string_view chars, size_t cellCount) noexcept;
     std::string_view tryEmplaceContinuousChars(std::string_view chars, size_t cellCount) noexcept;
     size_t emplaceCharsIntoCurrentLine(std::string_view chars, size_t cellCount) noexcept;
