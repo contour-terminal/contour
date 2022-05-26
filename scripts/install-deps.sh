@@ -103,7 +103,7 @@ fetch_and_unpack_embeds()
         https://github.com/contour-terminal/termbench-pro/archive/$termbench_pro_git_sha.tar.gz \
         termbench_pro
 
-    local libunicode_git_sha="c2369b6380df1197476b08d3e2d0e96b6446f776"
+    local libunicode_git_sha="a511f3995cdf708f2e199276c90e21408db00a50"
     fetch_and_unpack \
         libunicode-$libunicode_git_sha \
         libunicode-$libunicode_git_sha.tar.gz \
