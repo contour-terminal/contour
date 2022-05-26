@@ -54,7 +54,7 @@ class NullParserEvents
   public:
     void error(std::string_view /*_errorString*/) {}
     void print(char /*_text*/) {}
-    void print(std::string_view /*_chars*/) {}
+    void print(std::string_view /*chars*/, size_t /*cellCount*/) {}
     void execute(char /*_controlCode*/) {}
     void clear() {}
     void collect(char /*_char*/) {}

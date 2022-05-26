@@ -56,14 +56,14 @@ void Sequencer::print(char _char)
     terminal_.state().precedingGraphicCharacter = codepoint;
 }
 
-void Sequencer::print(string_view _chars)
+void Sequencer::print(string_view _chars, size_t cellCount)
 {
     assert(_chars.size() != 0);
 
     if (utf8DecoderState_.expectedLength == 0)
     {
         terminal_.state().instructionCounter += _chars.size();
-        terminal_.currentScreen().writeText(_chars);
+        terminal_.currentScreen().writeText(_chars, cellCount);
         terminal_.state().precedingGraphicCharacter = static_cast<char32_t>(_chars.back());
     }
     else

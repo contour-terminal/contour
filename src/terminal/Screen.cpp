@@ -272,7 +272,7 @@ void Screen<Cell, TheScreenType>::fail(std::string const& _message) const
 }
 
 template <typename Cell, ScreenType TheScreenType>
-string_view Screen<Cell, TheScreenType>::tryEmplaceChars(string_view _chars) noexcept
+string_view Screen<Cell, TheScreenType>::tryEmplaceChars(string_view _chars, size_t cellCount) noexcept
 {
     if (!_terminal.isFullHorizontalMargins())
         return _chars;
@@ -288,7 +288,11 @@ string_view Screen<Cell, TheScreenType>::tryEmplaceChars(string_view _chars) noe
 
     auto const columnsAvailable = pageSize().columns.value - _state.cursor.position.column.value;
 
-    if (!_terminal.isModeEnabled(DECMode::AutoWrap) && _chars.size() > static_cast<size_t>(columnsAvailable))
+#if defined(LIBTERMINAL_SCAN_UNICODE)
+    assert(cellCount <= static_cast<size_t>(columnsAvailable));
+#endif
+
+    if (!_terminal.isModeEnabled(DECMode::AutoWrap) && cellCount > static_cast<size_t>(columnsAvailable))
         // With AutoWrap on, we can only emplace if it fits the line.
         return _chars;
 
@@ -296,8 +300,8 @@ string_view Screen<Cell, TheScreenType>::tryEmplaceChars(string_view _chars) noe
     {
         if (currentLine().empty())
         {
-            _chars.remove_prefix(emplaceCharsIntoCurrentLine(_chars));
-            _chars = tryEmplaceContinuousChars(_chars);
+            _chars.remove_prefix(emplaceCharsIntoCurrentLine(_chars, cellCount));
+            _chars = tryEmplaceContinuousChars(_chars, cellCount);
             _terminal.currentPtyBuffer()->advanceHotEndUntil(_chars.data());
             return _chars;
         }
@@ -307,10 +311,12 @@ string_view Screen<Cell, TheScreenType>::tryEmplaceChars(string_view _chars) noe
     if (canResumeEmplace(_chars))
     {
         auto const charsToWrite = static_cast<size_t>(min(columnsAvailable, static_cast<int>(_chars.size())));
-        currentLine().trivialBuffer().text.growBy(charsToWrite);
+        auto& lineBuffer = currentLine().trivialBuffer();
+        lineBuffer.text.growBy(charsToWrite);
+        lineBuffer.usedColumns += ColumnCount::cast_from(cellCount);
         advanceCursorAfterWrite(ColumnCount::cast_from(charsToWrite));
         _chars.remove_prefix(charsToWrite);
-        _chars = tryEmplaceContinuousChars(_chars);
+        _chars = tryEmplaceContinuousChars(_chars, cellCount);
         _terminal.currentPtyBuffer()->advanceHotEndUntil(_chars.data());
         return _chars;
     }
@@ -319,7 +325,8 @@ string_view Screen<Cell, TheScreenType>::tryEmplaceChars(string_view _chars) noe
 }
 
 template <typename Cell, ScreenType TheScreenType>
-string_view Screen<Cell, TheScreenType>::tryEmplaceContinuousChars(string_view _chars) noexcept
+string_view Screen<Cell, TheScreenType>::tryEmplaceContinuousChars(string_view _chars,
+                                                                   size_t cellCount) noexcept
 {
     while (!_chars.empty())
     {
@@ -327,16 +334,17 @@ string_view Screen<Cell, TheScreenType>::tryEmplaceContinuousChars(string_view _
         if (!currentLine().empty())
             break;
 
-        _chars.remove_prefix(emplaceCharsIntoCurrentLine(_chars));
+        _chars.remove_prefix(emplaceCharsIntoCurrentLine(_chars, cellCount));
     }
 
     return _chars;
 }
 
 template <typename Cell, ScreenType TheScreenType>
-size_t Screen<Cell, TheScreenType>::emplaceCharsIntoCurrentLine(string_view _chars) noexcept
+size_t Screen<Cell, TheScreenType>::emplaceCharsIntoCurrentLine(string_view _chars, size_t cellCount) noexcept
 {
     auto columnsAvailable = (_state.margin.horizontal.to.value + 1) - _state.cursor.position.column.value;
+    assert(cellCount <= static_cast<size_t>(columnsAvailable));
     auto const charsToWrite = static_cast<size_t>(min(columnsAvailable, static_cast<int>(_chars.size())));
 
     Line<Cell>& line = currentLine();
@@ -349,8 +357,9 @@ size_t Screen<Cell, TheScreenType>::emplaceCharsIntoCurrentLine(string_view _cha
                    crispy::BufferFragment {
                        _terminal.currentPtyBuffer(),
                        _chars.substr(0, charsToWrite),
-                   });
-        advanceCursorAfterWrite(ColumnCount::cast_from(charsToWrite));
+                   },
+                   ColumnCount::cast_from(cellCount));
+        advanceCursorAfterWrite(ColumnCount::cast_from(cellCount));
     }
     else
     {
@@ -400,7 +409,7 @@ bool Screen<Cell, TheScreenType>::canResumeEmplace(std::string_view continuation
 }
 
 template <typename Cell, ScreenType TheScreenType>
-void Screen<Cell, TheScreenType>::writeText(string_view _chars)
+void Screen<Cell, TheScreenType>::writeText(string_view _chars, size_t cellCount)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
     if (VTTraceSequenceLog)
@@ -408,7 +417,7 @@ void Screen<Cell, TheScreenType>::writeText(string_view _chars)
 #endif
 
 #if defined(LIBTERMINAL_PTY_BUFFER_OBJECTS)
-    _chars = tryEmplaceChars(_chars);
+    _chars = tryEmplaceChars(_chars, cellCount);
     if (_chars.empty())
         return;
 #endif
@@ -434,7 +443,7 @@ void Screen<Cell, TheScreenType>::writeText(char32_t _char)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
     if (VTTraceSequenceLog)
-        VTTraceSequenceLog()("text: \"{}\"", unicode::convert_to<char>(_char));
+        VTTraceSequenceLog()("char: \'{}\'", unicode::convert_to<char>(_char));
 #endif
 
     crlfIfWrapPending();

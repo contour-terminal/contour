@@ -246,16 +246,22 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view co
                 auto const next = input + cellCount;
                 auto const byteCount = static_cast<size_t>(std::distance(input, next));
                 assert(byteCount <= chunk.size());
+                assert(cellCount <= maxCharCount);
+                assert(next <= chunk.data() + chunk.size());
+
 #if defined(LIBTERMINAL_LOG_TRACE)
                 if (VTTraceParserLog)
-                    VTTraceParserLog()("Scanned text: cap {}; available cells {}; chars {}; bytes {}; \"{}\"",
-                                       chunk.size(),
-                                       maxCharCount,
-                                       cellCount,
-                                       byteCount,
-                                       crispy::escape(std::string_view { input, byteCount }));
+                    VTTraceParserLog()(
+                        "[{}] Scanned text: cap {}; available cells {}; chars {}; bytes {}; \"{}\"",
+                        "US-ASCII",
+                        chunk.size(),
+                        maxCharCount,
+                        cellCount,
+                        byteCount,
+                        crispy::escape(std::string_view { input, byteCount }));
 #endif
-                eventListener_.print(std::string_view { input, byteCount });
+
+                eventListener_.print(std::string_view { input, byteCount }, cellCount);
                 input = next;
 
                 // This optimization is for the `cat`-people.

@@ -116,7 +116,7 @@ std::string Line<Cell>::toUtf8() const
     {
         auto const& lineBuffer = trivialBuffer();
         auto str = std::string(lineBuffer.text.data(), lineBuffer.text.size());
-        for (size_t i = str.size(); i < unbox<size_t>(lineBuffer.displayWidth); ++i)
+        for (auto i = lineBuffer.usedColumns; i < lineBuffer.displayWidth; ++i)
             str += ' ';
         return str;
     }
@@ -187,6 +187,7 @@ InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input)
             }
         }
     }
+    assert(columns.size() == unbox<size_t>(input.usedColumns));
 
     auto const attributes = input.text.empty() ? input.attributes : GraphicsAttributes {};
     while (columns.size() < unbox<size_t>(input.displayWidth))
