@@ -244,6 +244,17 @@ namespace
         Require(false && "Glyph format not handled.");
         return 0;
     }
+
+    constexpr TextStyle makeTextStyle(CellFlags mask)
+    {
+        if (contains_all(mask, CellFlags::Bold | CellFlags::Italic))
+            return TextStyle::BoldItalic;
+        if (mask & CellFlags::Bold)
+            return TextStyle::Bold;
+        if (mask & CellFlags::Italic)
+            return TextStyle::Italic;
+        return TextStyle::Regular;
+    }
 } // namespace
 
 unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine)
@@ -390,49 +401,45 @@ void TextRenderer::beginFrame()
     textClusterGroup_.color = DefaultColor;
 }
 
-void TextRenderer::renderCell(RenderCell const& _cell)
+void TextRenderer::renderCell(RenderCell const& cell)
 {
-    auto const style = [](auto mask) constexpr->TextStyle
+    if (cell.groupStart)
+        updateInitialPenPosition_ = true;
+
+    renderCell(cell.position, cell.codepoints, makeTextStyle(cell.flags), cell.foregroundColor);
+
+    if (cell.groupEnd)
+        flushTextClusterGroup();
+}
+
+void TextRenderer::renderCell(CellLocation position,
+                              std::u32string_view codepoints,
+                              TextStyle textStyle,
+                              RGBColor foregroundColor)
+{
+    if (updateInitialPenPosition_)
     {
-        if (contains_all(mask, CellFlags::Bold | CellFlags::Italic))
-            return TextStyle::BoldItalic;
-        if (mask & CellFlags::Bold)
-            return TextStyle::Bold;
-        if (mask & CellFlags::Italic)
-            return TextStyle::Italic;
-        return TextStyle::Regular;
+        updateInitialPenPosition_ = false;
+        textClusterGroup_.initialPenPosition = _gridMetrics.map(position);
     }
-    (_cell.flags);
 
-    auto const& codepoints = _cell.codepoints;
-
-    bool const isBoxDrawingCharacter = fontDescriptions_.builtinBoxDrawing && _cell.codepoints.size() == 1
+    bool const isBoxDrawingCharacter = fontDescriptions_.builtinBoxDrawing && codepoints.size() == 1
                                        && boxDrawingRenderer_.renderable(codepoints[0]);
 
     if (isBoxDrawingCharacter)
     {
-        auto const success = boxDrawingRenderer_.render(
-            _cell.position.line, _cell.position.column, codepoints[0], _cell.foregroundColor);
+        auto const success =
+            boxDrawingRenderer_.render(position.line, position.column, codepoints[0], foregroundColor);
         if (success)
         {
-            if (!forceCellGroupSplit_)
+            if (!updateInitialPenPosition_)
                 flushTextClusterGroup();
-            forceCellGroupSplit_ = true;
+            updateInitialPenPosition_ = true;
             return;
         }
     }
 
-    if (forceCellGroupSplit_ || _cell.groupStart)
-    {
-        // fmt::print("TextRenderer.sequenceStart: {}\n", textPosition_);
-        forceCellGroupSplit_ = false;
-        textClusterGroup_.initialPenPosition = _gridMetrics.map(_cell.position);
-    }
-
-    appendCellTextToClusterGroup(codepoints, style, _cell.foregroundColor);
-
-    if (_cell.groupEnd)
-        flushTextClusterGroup();
+    appendCellTextToClusterGroup(codepoints, textStyle, foregroundColor);
 }
 
 void TextRenderer::endFrame()
@@ -502,9 +509,7 @@ void TextRenderer::renderRasterizedGlyph(crispy::Point pen,
     // clang-format on
 }
 
-void TextRenderer::appendCellTextToClusterGroup(u32string const& _codepoints,
-                                                TextStyle _style,
-                                                RGBColor _color)
+void TextRenderer::appendCellTextToClusterGroup(u32string_view _codepoints, TextStyle _style, RGBColor _color)
 {
     bool const attribsChanged = _color != textClusterGroup_.color || _style != textClusterGroup_.style;
     bool const hasText = !_codepoints.empty() && _codepoints[0] != 0x20;
@@ -531,13 +536,13 @@ void TextRenderer::appendCellTextToClusterGroup(u32string const& _codepoints,
 
 void TextRenderer::flushTextClusterGroup()
 {
-    // fmt::print("TextRenderer.sequenceEnd: textPos={}, cellCount={}, width={}, count={}\n",
-    //            textClusterGroup_.initialPenPosition.x, textClusterGroup_.cellCount,
-    //            _gridMetrics.cellSize.width,
-    //            textClusterGroup_.codepoints.size());
-
     if (!textClusterGroup_.codepoints.empty())
     {
+        // fmt::print("TextRenderer.flushTextClusterGroup: textPos={}, cellCount={}, width={}, count={}\n",
+        //            textClusterGroup_.initialPenPosition.x, textClusterGroup_.cellCount,
+        //            _gridMetrics.cellSize.width,
+        //            textClusterGroup_.codepoints.size());
+
         auto hash = hashTextAndStyle(
             u32string_view(textClusterGroup_.codepoints.data(), textClusterGroup_.codepoints.size()),
             textClusterGroup_.style);

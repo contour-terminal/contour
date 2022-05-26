@@ -83,6 +83,11 @@ class TextRenderer: public Renderable
     /// transformed into a RenderCell.
     void renderCell(RenderCell const& _cell);
 
+    void renderCell(CellLocation position,
+                    std::u32string_view graphemeCluster,
+                    TextStyle textStyle,
+                    RGBColor foregroundColor);
+
     /// Must be invoked when rendering the terminal's text has finished for this frame.
     void endFrame();
 
@@ -91,7 +96,7 @@ class TextRenderer: public Renderable
 
     /// Puts a sequence of codepoints that belong to the same grid cell at @p _pos
     /// at the end of the currently filled line.
-    void appendCellTextToClusterGroup(std::u32string const& _codepoints, TextStyle _style, RGBColor _color);
+    void appendCellTextToClusterGroup(std::u32string_view _codepoints, TextStyle _style, RGBColor _color);
 
     /// Gets the text shaping result of the current text cluster group
     text::shape_result const& getOrCreateCachedGlyphPositions(crispy::StrongHash hash);
@@ -190,7 +195,7 @@ class TextRenderer: public Renderable
     TextClusterGroup textClusterGroup_ {};
 
     bool textStartFound_ = false;
-    bool forceCellGroupSplit_ = false;
+    bool updateInitialPenPosition_ = false;
 };
 
 } // namespace terminal::renderer
