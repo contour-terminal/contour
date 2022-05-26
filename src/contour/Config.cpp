@@ -44,6 +44,8 @@
 #if defined(_WIN32)
     #include <Windows.h>
 #elif defined(__APPLE__)
+    #include <unistd.h>
+
     #include <mach-o/dyld.h>
 #else
     #include <unistd.h>
@@ -71,7 +73,19 @@ namespace contour::config
 namespace
 {
     auto const ConfigLog = logstore::Category("config", "Logs configuration file loading.");
-}
+
+    string processIdAsString()
+    {
+        // There's sadly no better way to platfrom-independantly get the PID.
+        auto stringStream = std::stringstream();
+#if defined(_WIN32)
+        stringStream << static_cast<unsigned>(GetCurrentProcessId());
+#else
+        stringStream << getpid();
+#endif
+        return stringStream.str();
+    }
+} // namespace
 
 using actions::Action;
 
@@ -1628,31 +1642,22 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 
     tryLoadValue(usedKeys, doc, "spawn_new_process", _config.spawnNewProcess);
 
-    bool logEnabled = false;
+    auto logEnabled = false;
     tryLoadValue(usedKeys, doc, "logging.enabled", logEnabled);
 
-    if (logEnabled) {
-        std::string logFilePath{};
-        tryLoadValue(usedKeys, doc, "logging.file", logFilePath);
+    auto logFilePath = ""s;
+    tryLoadValue(usedKeys, doc, "logging.file", logFilePath);
 
-        std::cout << logFilePath.substr(1) << "\r\n";
-        if (logFilePath[0] == '~') {
-            logFilePath = terminal::Process::homeDirectory() / logFilePath.substr(2);
-        }
+    logFilePath = crispy::replace(logFilePath, "${pid}", processIdAsString());
 
-        _config.logFile.emplace();
+    if (!logFilePath.empty() && logFilePath[0] == '~')
+        logFilePath =
+            (terminal::Process::homeDirectory() / FileSystem::path(logFilePath.substr(2))).generic_string();
 
-
-        std::cout << terminal::Process::homeDirectory() << "\r\n";
-
-        _config.logFile.value().open(logFilePath);
-
-        if (!_config.logFile.value().is_open()) {
-            std::cout << "wont open\r\n";
-            // FATAL?
-        }
-
-        logstore::configure_sink(logstore::Sink::file(_config.logFile.value()));
+    if (!logFilePath.empty())
+    {
+        _config.loggingSink = make_shared<logstore::Sink>(logEnabled, make_shared<ofstream>(logFilePath));
+        logstore::set_sink(*_config.loggingSink);
     }
 
     tryLoadValue(usedKeys, doc, "images.sixel_scrolling", _config.sixelScrolling);

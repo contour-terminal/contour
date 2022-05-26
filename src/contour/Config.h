@@ -274,7 +274,7 @@ struct Config
     InputMappings inputMappings;
 
     bool spawnNewProcess = false;
-    std::optional<std::ofstream> logFile;
+    std::shared_ptr<logstore::Sink> loggingSink;
 
     bool sixelScrolling = true;
     bool sixelCursorConformance = true;

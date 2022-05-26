@@ -23,6 +23,7 @@
 #include <functional>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -202,6 +203,14 @@ class Sink
     {
     }
 
+    Sink(bool enabled, std::shared_ptr<std::ostream> f):
+        Sink(enabled, [f = move(f)](std::string_view text) {
+            *f << text;
+            f->flush();
+        })
+    {
+    }
+
     void set_writer(Writer _writer);
 
     /// Writes given built message to this sink.
@@ -222,18 +231,6 @@ class Sink
         return instance;
     }
 
-    static inline Sink& file(std::ostream& f)
-    {
-        static auto instance = Sink(false, f);
-        return instance;
-    }
-
-    static inline Sink& error_file(std::ostream& f)
-    {
-        static auto instance = Sink(true, f);
-        return instance;
-    }
-
   private:
     bool enabled_;
     Writer writer_;
@@ -246,7 +243,6 @@ void set_formatter(Category::Formatter const& f);
 void enable(std::string_view categoryName, bool enabled = true);
 void disable(std::string_view categoryName);
 void configure(std::string_view filterString);
-void configure_sink(logstore::Sink sink);
 
 // {{{ implementation
 inline std::string MessageBuilder::message() const
@@ -320,15 +316,6 @@ inline void configure(std::string_view filterString)
                                   std::begin(category.get().name()));
             }));
         }
-    }
-}
-
-inline void configure_sink(logstore::Sink sink)
-{
-    for (auto& category: logstore::get())
-    {
-        category.get().set_sink(sink);
-        category.get().enable();
     }
 }
 
