@@ -36,11 +36,16 @@ namespace
                                          bool _selected,
                                          bool _isCursor)
     {
-        bool const isCellHidden = _cellFlags == CellFlags::Hidden;
+        bool const isCellHidden = _cellFlags & CellFlags::Hidden;
         auto const [fg, bg] =
             makeColors(_colorPalette, _cellFlags, _reverseVideo, foregroundColor, backgroundColor);
-        if (!_selected && !_isCursor && isCellHidden)
-            return tuple { bg, bg };
+        if (!_selected && !_isCursor)
+        {
+            if (isCellHidden)
+                return tuple { bg, bg };
+            else
+                return tuple { fg, bg };
+        }
 
         auto getSelectionColor =
             [](auto fg, auto bg, bool selected, ColorPalette const& colors) -> tuple<RGBColor, RGBColor> {
