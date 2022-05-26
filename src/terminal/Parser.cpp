@@ -91,10 +91,10 @@ void dot(std::ostream& _os, ParserTable const& _table)
         //     sourceStateName);
 
         if (targetState == State::Ground && sourceState != State::Ground)
-            _os << fmt::format("  {} [style=\"dashed, filled\", fillcolor=gray, label=\"ground\"];\n",
+            _os << fmt::format("  \"{}\" [style=\"dashed, filled\", fillcolor=gray, label=\"ground\"];\n",
                                targetStateName);
 
-        _os << fmt::format("  {} -> {} ", sourceState, targetStateName);
+        _os << fmt::format(R"(  "{}" -> "{}" )", sourceState, targetStateName);
         _os << "[";
         _os << "label=\"";
         for (auto const&& [rangeCount, u]: crispy::indexed(t.second))
@@ -118,12 +118,12 @@ void dot(std::ostream& _os, ParserTable const& _table)
     // equal ranks
     _os << "  { rank=same; ";
     for (auto const state: { State::CSI_Entry, State::DCS_Entry, State::OSC_String })
-        _os << fmt::format("{}; ", state);
+        _os << fmt::format(R"("{}"; )", state);
     _os << "};\n";
 
     _os << "  { rank=same; ";
     for (auto const state: { State::CSI_Param, State::DCS_Param, State::OSC_String })
-        _os << fmt::format("{}; ", state);
+        _os << fmt::format(R"("{}"; )", state);
     _os << "};\n";
 
     _os << "}\n";
