@@ -289,7 +289,13 @@ int ContourGuiApp::terminalGuiAction()
             break;
     }
 
-    auto appName = QString::fromStdString(config_.profile(profileName())->wmClass);
+    auto const* profile = config_.profile(profileName());
+    if (!profile)
+    {
+        errorlog()("Could not access configuration profile.");
+        return EXIT_FAILURE;
+    }
+    auto appName = QString::fromStdString(profile->wmClass);
     QCoreApplication::setApplicationName(appName);
     QCoreApplication::setOrganizationName("contour");
     QCoreApplication::setApplicationVersion(CONTOUR_VERSION_STRING);
@@ -334,7 +340,11 @@ int ContourGuiApp::terminalGuiAction()
     // printf("\r%s        %s                        %s\r", TBC, HTS, HTS);
 
     // Spawn initial window.
-    newWindow();
+    if (!newWindow())
+    {
+        errorlog()("Could not spawn terminal window.");
+        return EXIT_FAILURE;
+    }
 
     auto rv = app.exec();
 
@@ -354,12 +364,15 @@ int ContourGuiApp::terminalGuiAction()
 
 TerminalWindow* ContourGuiApp::newWindow(contour::config::Config const& _config)
 {
+    auto const* profile = config_.profile(profileName());
+    if (!profile)
+        return nullptr;
     auto const liveConfig = parameters().get<bool>("contour.terminal.live-config");
     auto mainWindow = new TerminalWindow(earlyExitThreshold(),
                                          _config,
                                          liveConfig,
                                          profileName(),
-                                         config_.profile(profileName())->shell.workingDirectory.string(),
+                                         profile->shell.workingDirectory.string(),
                                          *this);
 
     mainWindow->show();
