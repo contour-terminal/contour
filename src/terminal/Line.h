@@ -296,7 +296,7 @@ class Line
     }
     [[nodiscard]] bool isInflatedBuffer() const noexcept
     {
-        return std::holds_alternative<TrivialBuffer>(storage_);
+        return !std::holds_alternative<TrivialBuffer>(storage_);
     }
 
     void setBuffer(TrivialBuffer const& buffer) noexcept { storage_ = buffer; }

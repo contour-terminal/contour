@@ -1,6 +1,8 @@
 ### 0.3.2 (unreleased)
 
 - Adds E3 capability, so `clear` now defaults to clearing screen and scrollback (#693).
+- Fixes writing to a non-empty line sometimes destroying the contents of that line (#702).
+- Fixes underline decoration for wide character cells.
 - Fixes SGR 8 (Conceal/Hidden) attribute doesn't work as expected (#699).
 - Fixes Synchronized Updates (`SM/RM ? 2026`) sometimes lagging behind in rendering.
 - Fixes SGR and text breakage when altering charsets via `ESC ( 0` VT sequence (#661).
@@ -22,7 +24,6 @@
   - and more...
 - Adds specialized PTY implementation for Linux operating system utilizing OS-specific kernel APIs.
 - Changes CLI syntax for `contour parser-table` to `contour generate parser-table`.
-- Fixes underline decoration for wide character cells.
 
 ### 0.3.1 (2022-05-01)
 

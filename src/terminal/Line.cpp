@@ -188,8 +188,9 @@ InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input)
         }
     }
 
+    auto const attributes = input.text.empty() ? input.attributes : GraphicsAttributes {};
     while (columns.size() < unbox<size_t>(input.displayWidth))
-        columns.emplace_back(Cell { GraphicsAttributes {} });
+        columns.emplace_back(Cell { attributes });
 
     return columns;
 }

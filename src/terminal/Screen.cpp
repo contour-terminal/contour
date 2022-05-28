@@ -339,13 +339,35 @@ size_t Screen<Cell, TheScreenType>::emplaceCharsIntoCurrentLine(string_view _cha
     auto columnsAvailable = (_state.margin.horizontal.to.value + 1) - _state.cursor.position.column.value;
     auto const charsToWrite = static_cast<size_t>(min(columnsAvailable, static_cast<int>(_chars.size())));
 
-    currentLine().reset(_state.cursor.graphicsRendition,
-                        _state.cursor.hyperlink,
-                        crispy::BufferFragment {
-                            _terminal.currentPtyBuffer(),
-                            _chars.substr(0, charsToWrite),
-                        });
-    advanceCursorAfterWrite(ColumnCount::cast_from(charsToWrite));
+    Line<Cell>& line = currentLine();
+    if (!line.isInflatedBuffer() && line.empty())
+    {
+        // Only use fastpath if the currently line hasn't been inflated already.
+        // Because we might lose prior-written textual/SGR information otherwise.
+        line.reset(_state.cursor.graphicsRendition,
+                   _state.cursor.hyperlink,
+                   crispy::BufferFragment {
+                       _terminal.currentPtyBuffer(),
+                       _chars.substr(0, charsToWrite),
+                   });
+        advanceCursorAfterWrite(ColumnCount::cast_from(charsToWrite));
+    }
+    else
+    {
+        // Transforming _chars input from UTF-8 to UTF-32 even though right now it should only
+        // be containing US-ASCII, but soon it'll be any arbitrary textual Unicode codepoints.
+        auto utf8DecoderState = unicode::utf8_decoder_state {};
+        for (char const ch: _chars)
+        {
+            auto const result = unicode::from_utf8(utf8DecoderState, static_cast<uint8_t>(ch));
+            if (holds_alternative<unicode::Success>(result))
+                writeText(get<unicode::Success>(result).value);
+            else if (holds_alternative<unicode::Invalid>(result))
+                writeText(U'\uFFFE'); // U+FFFE (Not a Character)
+        }
+    }
+    // fmt::print("emplaceCharsIntoCurrentLine ({} cols, {} bytes): \"{}\"\n", cellCount, _chars.size(),
+    // _chars);
     return charsToWrite;
 }
 
