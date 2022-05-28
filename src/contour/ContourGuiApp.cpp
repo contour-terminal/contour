@@ -223,6 +223,10 @@ bool ContourGuiApp::loadConfig(string const& target)
     if (auto const wd = flags.get<string>("contour.terminal.working-directory"); !wd.empty())
         config_.profile(profileName())->shell.workingDirectory = FileSystem::path(wd);
 
+    config::TerminalProfile* profile = config_.profile(profileName());
+    if (!profile)
+        configLogger("Could not resolve configuration profile.");
+
     if (configFailures)
         return EXIT_FAILURE;
 
@@ -230,7 +234,7 @@ bool ContourGuiApp::loadConfig(string const& target)
     auto exe = flags.get<string>("contour.terminal.execute");
     if (!flags.verbatim.empty() || !exe.empty())
     {
-        auto& shell = config_.profile(profileName())->shell;
+        auto& shell = profile->shell;
         shell.arguments.clear();
         if (!exe.empty())
         {
