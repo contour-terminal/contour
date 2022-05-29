@@ -41,7 +41,7 @@ else()
     list(APPEND CRISPY_CORE_LIBS ${FILESYSTEM_LIBS})
 endif()
 
-target_compile_options(crispy-core PUBLIC -maes)
+target_compile_options(crispy-core PUBLIC -march=armv8-a+fp+simd+crypto+crc)
 target_compile_features(crispy-core PUBLIC cxx_std_17)
 target_link_libraries(crispy-core PUBLIC ${CRISPY_CORE_LIBS})
 target_include_directories(crispy-core PUBLIC

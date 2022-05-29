@@ -22,7 +22,11 @@
 #include <stdexcept>
 #include <vector>
 
+#ifdef __x86_64__
 #include <immintrin.h>
+#elif __aarch64__
+#include "sse2neon.h"
+#endif
 
 #define DEBUG_STRONG_LRU_CACHE 1
 
