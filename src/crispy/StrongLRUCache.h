@@ -22,7 +22,11 @@
 #include <stdexcept>
 #include <vector>
 
-#include <immintrin.h>
+#if defined(__x86_64__)
+    #include <immintrin.h>
+#elif defined(__aarch64__)
+    #include <crispy/sse2neon.h>
+#endif
 
 #define DEBUG_STRONG_LRU_CACHE 1
 
