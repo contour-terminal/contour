@@ -54,7 +54,7 @@ vector<string> textScreenshot(terminal::Terminal const& _terminal)
 
     terminal::CellLocation lastPos = {};
     size_t lastCount = 0;
-    for (terminal::RenderCell const& cell: renderBuffer.buffer.screen)
+    for (terminal::RenderCell const& cell: renderBuffer.buffer.cells)
     {
         auto const gap = (cell.position.column + static_cast<int>(lastCount) - 1) - lastPos.column;
         auto& currentLine = lines.at(unbox<size_t>(cell.position.line));

@@ -101,7 +101,7 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
 
     // {{{ SequenceHandler overrides
     void writeText(char32_t _char) override;
-    void writeText(std::string_view _chars) override;
+    void writeText(std::string_view _chars, size_t cellCount) override;
     void executeControlCode(char controlCode) override;
     void processSequence(Sequence const& seq) override;
     // }}}
@@ -483,9 +483,10 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
     void fail(std::string const& _message) const override;
 
   private:
-    std::string_view tryEmplaceChars(std::string_view chars) noexcept;
-    std::string_view tryEmplaceContinuousChars(std::string_view chars) noexcept;
-    size_t emplaceCharsIntoCurrentLine(std::string_view chars) noexcept;
+    void writeTextInternal(char32_t _char);
+    std::string_view tryEmplaceChars(std::string_view chars, size_t cellCount) noexcept;
+    std::string_view tryEmplaceContinuousChars(std::string_view chars, size_t cellCount) noexcept;
+    size_t emplaceCharsIntoCurrentLine(std::string_view chars, size_t cellCount) noexcept;
     [[nodiscard]] bool canResumeEmplace(std::string_view continuationChars) const noexcept;
     void advanceCursorAfterWrite(ColumnCount n) noexcept;
 

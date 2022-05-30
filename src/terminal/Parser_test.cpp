@@ -30,7 +30,7 @@ class MockParserEvents: public terminal::BasicParserEvents
 
     void error(string_view const& _msg) override { INFO(fmt::format("Parser error received. {}", _msg)); }
     void print(char ch) override { text += ch; }
-    void print(std::string_view s) override { text += s; }
+    void print(std::string_view s, size_t /*cellCount*/) override { text += s; }
 
     void startAPC() override { apc += "{"; }
     void putAPC(char ch) override { apc += ch; }

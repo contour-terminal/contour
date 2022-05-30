@@ -52,13 +52,13 @@ struct RenderCursor
 
 struct RenderBuffer
 {
-    std::vector<RenderCell> screen {};
+    std::vector<RenderCell> cells {};
     std::optional<RenderCursor> cursor {};
     uint64_t frameID {};
 
     void clear()
     {
-        screen.clear();
+        cells.clear();
         cursor.reset();
     }
 };

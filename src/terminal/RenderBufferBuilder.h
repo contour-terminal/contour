@@ -45,6 +45,16 @@ class RenderBufferBuilder
     std::optional<RenderCursor> renderCursor() const;
 
     static RenderCell makeRenderCellExplicit(ColorPalette const& _colorPalette,
+                                             std::u32string graphemeCluster,
+                                             ColumnCount width,
+                                             CellFlags flags,
+                                             RGBColor fg,
+                                             RGBColor bg,
+                                             Color ul,
+                                             LineOffset _line,
+                                             ColumnOffset _column);
+
+    static RenderCell makeRenderCellExplicit(ColorPalette const& _colorPalette,
                                              char32_t codepoint,
                                              CellFlags flags,
                                              RGBColor fg,

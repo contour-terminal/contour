@@ -357,7 +357,7 @@ class SequenceHandler
     virtual void executeControlCode(char controlCode) = 0;
     virtual void processSequence(Sequence const& sequence) = 0;
     virtual void writeText(char32_t codepoint) = 0;
-    virtual void writeText(std::string_view codepoints) = 0;
+    virtual void writeText(std::string_view codepoints, size_t cellCount) = 0;
 };
 
 } // namespace terminal

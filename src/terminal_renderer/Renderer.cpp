@@ -310,7 +310,7 @@ uint64_t Renderer::render(Terminal& _terminal, bool _pressure)
     {
         RenderBufferRef const renderBuffer = _terminal.renderBuffer();
         cursorOpt = renderBuffer.get().cursor;
-        renderCells(renderBuffer.get().screen);
+        renderCells(renderBuffer.get().cells);
     }
     textRenderer_.endFrame();
 

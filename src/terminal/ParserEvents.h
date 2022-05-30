@@ -41,8 +41,12 @@ class ParserEvents
      */
     virtual void print(char _text) = 0;
 
-    /// Optimization that passes in ASCII chars between [0x20 .. 0x7F].
-    virtual void print(std::string_view _chars) = 0;
+    /**
+     * Optimization that passes in ASCII chars between [0x20 .. 0x7F].
+     *
+     * @param cellCount reflects the sum of the East Asian Width attribute for all passed codepoints.
+     */
+    virtual void print(std::string_view _chars, size_t cellCount) = 0;
 
     /**
      * The C0 or C1 control function should be executed, which may have any one of a variety of
@@ -163,7 +167,7 @@ class BasicParserEvents: public ParserEvents
   public:
     void error(std::string_view const&) override {}
     void print(char) override {}
-    void print(std::string_view) override {}
+    void print(std::string_view, size_t) override {}
     void execute(char) override {}
     void clear() override {}
     void collect(char) override {}

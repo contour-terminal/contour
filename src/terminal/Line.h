@@ -56,12 +56,15 @@ struct TriviallyStyledLineBuffer
     ColumnCount displayWidth;
     GraphicsAttributes attributes;
     HyperlinkId hyperlink {};
+
+    ColumnCount usedColumns {};
     crispy::BufferFragment text {};
 
     void reset(GraphicsAttributes _attributes) noexcept
     {
         attributes = _attributes;
         hyperlink = {};
+        usedColumns = {};
         text.reset();
     }
 };
@@ -302,9 +305,12 @@ class Line
     void setBuffer(TrivialBuffer const& buffer) noexcept { storage_ = buffer; }
     void setBuffer(InflatedBuffer buffer) { storage_ = std::move(buffer); }
 
-    void reset(GraphicsAttributes attributes, HyperlinkId hyperlink, crispy::BufferFragment text)
+    void reset(GraphicsAttributes attributes,
+               HyperlinkId hyperlink,
+               crispy::BufferFragment text,
+               ColumnCount columnsUsed)
     {
-        storage_ = TrivialBuffer { size(), attributes, hyperlink, std::move(text) };
+        storage_ = TrivialBuffer { size(), attributes, hyperlink, columnsUsed, std::move(text) };
     }
 
   private:
