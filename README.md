@@ -44,7 +44,7 @@ for everyday use. It is aiming for power users with a modern feature mindset.
 
 - **operating system**: A *recent* operating system (OS/X 12, Windows 10+, an up-to-date Linux, or FreeBSD)
 - **GPU**: driver must support at least OpenGL 3.3 hardware accelerated or as software rasterizer.
-- **CPU**: x86-64 AMD or Intel with AES-NI instruction set.
+- **CPU**: x86-64 AMD or Intel with AES-NI instruction set or ARMv8 with crypto extensions.
 
 ## CLI - Command Line Interface
 

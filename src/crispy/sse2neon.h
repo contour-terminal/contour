@@ -1,3 +1,5 @@
+// This file was taken from: https://github.com/JishinMaster/simd_utils/blob/master/sse2neon.h
+
 #ifndef SSE2NEON_H
 #define SSE2NEON_H
 
