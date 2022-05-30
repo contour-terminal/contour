@@ -1,5 +1,6 @@
 ### 0.3.2 (unreleased)
 
+- Adds support for running on ARMv8 platform with crypto extensions (#611).
 - Adds E3 capability, so `clear` now defaults to clearing screen and scrollback (#693).
 - Fixes writing to a non-empty line sometimes destroying the contents of that line (#702).
 - Fixes underline decoration for wide character cells.
