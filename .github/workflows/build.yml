@@ -352,6 +352,75 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  cross_build:
+    name: "Cross build ${{ matrix.arch }} for ${{ matrix.distro }}"
+    runs-on: ubuntu-18.04
+    strategy:
+      matrix:
+        include:
+          - arch: aarch64
+            distro: fedora_latest
+    steps:
+      - uses: actions/checkout@v2.1.0
+      - uses: uraimo/run-on-arch-action@v2
+        name: Build artifact
+        id: build
+        with:
+          arch: ${{ matrix.arch }}
+          distro: ${{ matrix.distro }}
+          githubToken: ${{ github.token }}
+          setup: |
+            mkdir -p "${PWD}/artifacts"
+          # Mount the artifacts directory as /artifacts in the container
+          dockerRunArgs: |
+            --volume "${PWD}/artifacts:/artifacts"
+          # Pass some environment variables to the container
+          env: | # YAML, but pipe character is necessary
+            artifact_name: git-fedora_aarch64
+          # The shell to run commands with in the container
+          shell: /bin/sh
+          # Install some dependencies in the container. This speeds up builds if
+          # you are also using githubToken. Any dependencies installed here will
+          # be part of the container image that gets cached, so subsequent
+          # builds don't have to re-install them. The image layer is cached
+          # publicly in your project's package repository, so it is vital that
+          # no secrets are present in the container state or logs.
+          install: |
+            case "${{ matrix.distro }}" in
+              ubuntu*|jessie|stretch|buster|bullseye)
+                apt-get update -q -y
+                apt-get install -q -y git
+                ;;
+              fedora*)
+                dnf -y update
+                dnf -y install git which
+                ;;
+              alpine*)
+                apk update
+                apk add git
+                ;;
+            esac
+            ./scripts/install-deps.sh
+          # Produce a binary artifact and place it in the mounted volume
+          run: |
+            set -ex
+            # cp $(which git) "/artifacts/${artifact_name}"
+            echo "Produced artifact at /artifacts/${artifact_name}"
+            cmake \
+               -DCMAKE_BUILD_TYPE="RelWithDebInfo" \
+               -DPEDANTIC_COMPILER="ON" \
+               -DPEDANTIC_COMPILER_WERROR="OFF" \
+               -S . \
+               -B build
+            cmake --build build/ -- -j3
+            ./build/src/crispy/crispy_test
+            ./build/terminal/terminal_test
+      - name: Show the artifact
+        # Items placed in /artifacts in the container will be in
+        # ${PWD}/artifacts on the host.
+        run: |
+          ls -al "${PWD}/artifacts"
+
   # {{{ Ubuntu
   ubuntu_1804:
     name: "Ubuntu Linux 18.04"
