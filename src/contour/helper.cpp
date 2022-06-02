@@ -261,7 +261,7 @@ bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
         case Qt::Key_BraceRight: _session.sendCharPressEvent(L']', modifiers, now); return true;
     }
 
-    errorlog()("Input not handled for mods {} key {}", modifiers, key);
+    InputLog()("Input not handled for mods {} key 0x{:X}", modifiers, key);
     return false;
 }
 
