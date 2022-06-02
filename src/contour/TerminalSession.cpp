@@ -498,7 +498,9 @@ void TerminalSession::sendKeyPressEvent(Key _key, Modifier _modifier, Timestamp 
 
 void TerminalSession::sendCharPressEvent(char32_t _value, Modifier _modifier, Timestamp _now)
 {
-    InputLog()("char press: {} {}", _modifier, static_cast<uint32_t>(_value));
+    InputLog()("Character press event received: {} {}",
+               _modifier,
+               crispy::escape(unicode::convert_to<char>(_value)));
     assert(display_ != nullptr);
 
     if (terminatedAndWaitingForKeyPress_)
