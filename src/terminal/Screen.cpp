@@ -56,7 +56,6 @@ using gsl::span;
 using std::accumulate;
 using std::array;
 using std::clamp;
-using std::distance;
 using std::endl;
 using std::fill;
 using std::function;
@@ -1101,7 +1100,7 @@ void Screen<Cell, TheScreenType>::deleteChars(LineOffset _line, ColumnOffset _co
 
     Cell* left = const_cast<Cell*>(lineBuffer.data() + _column.as<size_t>());
     Cell* right = const_cast<Cell*>(lineBuffer.data() + *_state.margin.horizontal.to + 1);
-    long const n = min(_n.as<long>(), static_cast<long>(distance(left, right)));
+    long const n = min(_n.as<long>(), static_cast<long>(std::distance(left, right)));
     Cell* mid = left + n;
 
     rotate(left, mid, right);

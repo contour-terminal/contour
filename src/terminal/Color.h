@@ -20,6 +20,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <initializer_list>
 #include <optional>
@@ -67,7 +68,7 @@ struct RGBColor
 
     constexpr RGBColor() = default;
     constexpr RGBColor(uint8_t r, uint8_t g, uint8_t b): red { r }, green { g }, blue { b } {}
-    constexpr RGBColor(uint32_t rgb):
+    constexpr explicit RGBColor(uint32_t rgb):
         red { static_cast<uint8_t>((rgb >> 16) & 0xFF) },
         green { static_cast<uint8_t>((rgb >> 8) & 0xFF) },
         blue { static_cast<uint8_t>(rgb & 0xFF) }
@@ -89,6 +90,15 @@ constexpr RGBColor operator*(RGBColor c, float s) noexcept
     return RGBColor { static_cast<uint8_t>(std::clamp(static_cast<float>(c.red) * s, 0.0f, 255.0f)),
                       static_cast<uint8_t>(std::clamp(static_cast<float>(c.green) * s, 0.0f, 255.0f)),
                       static_cast<uint8_t>(std::clamp(static_cast<float>(c.blue) * s, 0.0f, 255.0f)) };
+}
+
+constexpr double distance(RGBColor e1, RGBColor e2) noexcept
+{
+    auto const rmean = (uint32_t(e1.red) + uint32_t(e2.red)) / 2;
+    auto const r = uint32_t(e1.red) - uint32_t(e2.red);
+    auto const g = uint32_t(e1.green) - uint32_t(e2.green);
+    auto const b = uint32_t(e1.blue) - uint32_t(e2.blue);
+    return sqrt((((512 + rmean) * r * r) >> 8) + 4 * g * g + (((767 - rmean) * b * b) >> 8));
 }
 
 constexpr RGBColor operator"" _rgb(unsigned long long _value)
