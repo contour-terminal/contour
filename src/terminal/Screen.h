@@ -62,6 +62,7 @@ class ScreenBase: public SequenceHandler
     [[nodiscard]] virtual bool contains(CellLocation _coord) const noexcept = 0;
     [[nodiscard]] virtual bool isCellEmpty(CellLocation position) const noexcept = 0;
     [[nodiscard]] virtual bool compareCellTextAt(CellLocation position, char codepoint) const noexcept = 0;
+    [[nodiscard]] virtual std::string cellTextAt(CellLocation position) const noexcept = 0;
     [[nodiscard]] virtual bool isLineEmpty(LineOffset line) const noexcept = 0;
     [[nodiscard]] virtual uint8_t cellWithAt(CellLocation position) const noexcept = 0;
     [[nodiscard]] virtual LineCount historyLineCount() const noexcept = 0;
@@ -69,6 +70,8 @@ class ScreenBase: public SequenceHandler
     [[nodiscard]] virtual std::shared_ptr<HyperlinkInfo const> hyperlinkAt(
         CellLocation pos) const noexcept = 0;
     virtual void inspect(std::string const& _message, std::ostream& _os) const = 0;
+    virtual void moveCursorTo(LineOffset line, ColumnOffset column) = 0; // CUP
+    virtual void updateCursorIterator() noexcept = 0;
 };
 
 //#define LIBTERMINAL_CURRENT_LINE_CACHE 1
@@ -102,6 +105,8 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void executeControlCode(char controlCode) override;
     void processSequence(Sequence const& seq) override;
     // }}}
+
+    void writeTextFromExternal(std::string_view _chars);
 
     /// Renders the full screen by passing every grid cell to the callback.
     template <typename Renderer>
@@ -153,17 +158,17 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void backIndex();    // DECBI
     void forwardIndex(); // DECFI
 
-    void moveCursorTo(LineOffset line, ColumnOffset column); // CUP
-    void moveCursorBackward(ColumnCount _n);                 // CUB
-    void moveCursorDown(LineCount _n);                       // CUD
-    void moveCursorForward(ColumnCount _n);                  // CUF
-    void moveCursorToBeginOfLine();                          // CR
-    void moveCursorToColumn(ColumnOffset _n);                // CHA
-    void moveCursorToLine(LineOffset _n);                    // VPA
-    void moveCursorToNextLine(LineCount _n);                 // CNL
-    void moveCursorToNextTab();                              // HT
-    void moveCursorToPrevLine(LineCount _n);                 // CPL
-    void moveCursorUp(LineCount _n);                         // CUU
+    void moveCursorTo(LineOffset line, ColumnOffset column) override; // CUP
+    void moveCursorBackward(ColumnCount _n);                          // CUB
+    void moveCursorDown(LineCount _n);                                // CUD
+    void moveCursorForward(ColumnCount _n);                           // CUF
+    void moveCursorToBeginOfLine();                                   // CR
+    void moveCursorToColumn(ColumnOffset _n);                         // CHA
+    void moveCursorToLine(LineOffset _n);                             // VPA
+    void moveCursorToNextLine(LineCount _n);                          // CNL
+    void moveCursorToNextTab();                                       // HT
+    void moveCursorToPrevLine(LineCount _n);                          // CPL
+    void moveCursorUp(LineCount _n);                                  // CUU
 
     void cursorBackwardTab(TabStopCount _n);            // CBT
     void cursorForwardTab(TabStopCount _n);             // CHT
@@ -250,7 +255,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void requestAnsiMode(unsigned int _mode);
     void requestDECMode(unsigned int _mode);
 
-    [[nodiscard]] PageSize pageSize() const noexcept { return _state.pageSize; }
+    [[nodiscard]] PageSize pageSize() const noexcept { return _grid.pageSize(); }
     [[nodiscard]] ImageSize pixelSize() const noexcept { return _state.cellPixelSize * _state.pageSize; }
 
     constexpr CellLocation realCursorPosition() const noexcept { return _state.cursor.position; }
@@ -302,12 +307,12 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     [[nodiscard]] LineOffset clampedLine(LineOffset _line) const noexcept
     {
-        return std::clamp(_line, LineOffset(0), boxed_cast<LineOffset>(_state.pageSize.lines) - 1);
+        return std::clamp(_line, LineOffset(0), boxed_cast<LineOffset>(_grid.pageSize().lines) - 1);
     }
 
     [[nodiscard]] ColumnOffset clampedColumn(ColumnOffset _column) const noexcept
     {
-        return std::clamp(_column, ColumnOffset(0), boxed_cast<ColumnOffset>(_state.pageSize.columns) - 1);
+        return std::clamp(_column, ColumnOffset(0), boxed_cast<ColumnOffset>(_grid.pageSize().columns) - 1);
     }
 
     CellLocation clampToScreen(CellLocation coord) const noexcept
@@ -328,7 +333,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         return useCellAt(_state.lastCursorPosition.line, _state.lastCursorPosition.column);
     }
 
-    void updateCursorIterator() noexcept
+    void updateCursorIterator() noexcept override
     {
 #if defined(LIBTERMINAL_CURRENT_LINE_CACHE)
         _currentLine = &grid().lineAt(_state.cursor.position.line);
@@ -435,6 +440,12 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
             .inflatedBuffer()
             .at(position.column.as<size_t>())
             .compareText(codepoint);
+    }
+
+    // IMPORTANT: Invokig inflatedBuffer() is expensive. This function should be invoked with caution.
+    [[nodiscard]] std::string cellTextAt(CellLocation position) const noexcept override
+    {
+        return grid().lineAt(position.line).inflatedBuffer().at(position.column.as<size_t>()).toUtf8();
     }
 
     [[nodiscard]] bool isLineEmpty(LineOffset line) const noexcept override

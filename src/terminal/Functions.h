@@ -347,6 +347,9 @@ constexpr inline auto XTSHIFTESCAPE=detail::CSI('>', 0, 1, std::nullopt, 's', VT
 constexpr inline auto XTVERSION   = detail::CSI('>', 0, 1, std::nullopt, 'q', VTType::VT525 /*Xterm*/, "XTVERSION", "Query terminal name and version");
 constexpr inline auto CAPTURE     = detail::CSI('>', 0, 2, std::nullopt, 't', VTType::VT525 /*Extension*/, "CAPTURE", "Report screen buffer capture.");
 
+constexpr inline auto DECSSDT     = detail::CSI(std::nullopt, 0, 1, '$', '~', VTType::VT320, "DECSSDT", "Select Status Display (Line) Type");
+constexpr inline auto DECSASD     = detail::CSI(std::nullopt, 0, 1, '$', '}', VTType::VT420, "DECSASD", "Select Active Status Display");
+
 // DCS functions
 constexpr inline auto STP         = detail::DCS(std::nullopt, 0, 0, '$', 'p', VTType::VT525, "STP", "Set Terminal Profile");
 constexpr inline auto DECRQSS     = detail::DCS(std::nullopt, 0, 0, '$', 'q', VTType::VT420, "DECRQSS", "Request Status String");
@@ -447,9 +450,9 @@ inline auto const& functions() noexcept
             DCH,
             DECCARA,
             DECCRA,
+            DECDC,
             DECERA,
             DECFRA,
-            DECDC,
             DECIC,
             DECMODERESTORE,
             DECMODESAVE,
@@ -457,12 +460,14 @@ inline auto const& functions() noexcept
             DECRQM,
             DECRQM_ANSI,
             DECRQPSR,
+            DECSASD,
             DECSCL,
             DECSCPP,
             DECSCUSR,
             DECSLRM,
             DECSM,
             DECSNLS,
+            DECSSDT,
             DECSTBM,
             DECSTR,
             DECXCPR,
@@ -486,8 +491,8 @@ inline auto const& functions() noexcept
             TBC,
             VPA,
             WINMANIP,
-            XTSMGRAPHICS,
             XTSHIFTESCAPE,
+            XTSMGRAPHICS,
             XTVERSION,
 
             // DCS

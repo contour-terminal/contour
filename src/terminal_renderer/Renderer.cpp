@@ -291,7 +291,10 @@ void Renderer::updateFontMetrics()
 
 uint64_t Renderer::render(Terminal& _terminal, bool _pressure)
 {
-    gridMetrics_.pageSize = _terminal.pageSize();
+    auto const statusLineHeight = _terminal.state().statusDisplayType == StatusDisplayType::None
+                                      ? LineCount(0)
+                                      : _terminal.state().hostWritableStatusBuffer.pageSize().lines;
+    gridMetrics_.pageSize = _terminal.pageSize() + statusLineHeight;
 
     auto const changes = _terminal.tick(steady_clock::now());
 

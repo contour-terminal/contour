@@ -23,6 +23,7 @@
 #include <iterator>
 #include <list>
 #include <memory>
+#include <mutex>
 #include <string_view>
 
 #define BUFFER_OBJECT_INLINE 1
@@ -100,6 +101,9 @@ class BufferObject: public std::enable_shared_from_this<BufferObject>
 
     void clear() noexcept;
 
+    void lock() { mutex_.lock(); }
+    void unlock() { mutex_.unlock(); }
+
   private:
 #if !defined(BUFFER_OBJECT_INLINE)
     char* data_;
@@ -108,6 +112,8 @@ class BufferObject: public std::enable_shared_from_this<BufferObject>
     char* end_;
 
     friend class BufferFragment;
+
+    std::mutex mutex_;
 };
 
 /**

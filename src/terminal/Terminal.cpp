@@ -110,8 +110,10 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
     ptyBufferPool_ { crispy::nextPowerOfTwo(ptyBufferObjectSize) },
     currentPtyBuffer_ { ptyBufferPool_.allocateBufferObject() },
     ptyReadBufferSize_ { crispy::nextPowerOfTwo(_ptyReadBufferSize) },
-    primaryScreen_ { state_, ScreenType::Primary, state_.primaryBuffer },
-    alternateScreen_ { state_, ScreenType::Alternate, state_.alternateBuffer },
+    primaryScreen_ { state_, state_.primaryBuffer },
+    alternateScreen_ { state_, state_.alternateBuffer },
+    hostWritableStatusLineScreen_ { state_, state_.hostWritableStatusBuffer },
+    indicatorStatusScreen_ { state_, state_.indicatorStatusBuffer },
     currentScreen_ { primaryScreen_ },
     viewport_ { *this,
                 [this]() {
@@ -138,7 +140,7 @@ void Terminal::setLastMarkRangeOffset(LineOffset _value) noexcept
     copyLastMarkRangeOffset_ = _value;
 }
 
-bool Terminal::processInputOnce()
+Pty::ReadResult Terminal::readFromPty()
 {
     auto const timeout = renderBuffer_.state == RenderBufferState::WaitingForRefresh && !screenDirty_
                              ? std::chrono::seconds(4)
@@ -155,12 +157,18 @@ bool Terminal::processInputOnce()
         currentPtyBuffer_ = ptyBufferPool_.allocateBufferObject();
     }
 
-    auto const readResult = pty_->read(*currentPtyBuffer_, timeout, ptyReadBufferSize_);
+    return pty_->read(*currentPtyBuffer_, timeout, ptyReadBufferSize_);
+}
+
+bool Terminal::processInputOnce()
+{
+    auto const readResult = readFromPty();
+
     if (!readResult)
     {
         if (errno != EINTR && errno != EAGAIN)
         {
-            TerminalLog()("PTY read failed (timeout: {}). {}", timeout, strerror(errno));
+            TerminalLog()("PTY read failed. {}", strerror(errno));
             pty_->close();
         }
         return errno == EINTR || errno == EAGAIN;
@@ -331,6 +339,8 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
 {
     verifyState();
 
+    _output.clear();
+
     changes_.store(0);
     screenDirty_ = false;
     ++lastFrameID_;
@@ -341,13 +351,92 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
 #endif
 
     auto const hoveringHyperlinkGuard = ScopedHyperlinkHover { *this, currentScreen_ };
+    auto const mainDisplayReverseVideo = isModeEnabled(terminal::DECMode::ReverseVideo);
 
     if (isPrimaryScreen())
-        primaryScreen_.render(RenderBufferBuilder<Cell> { *this, _output }, viewport_.scrollOffset());
+        primaryScreen_.render(
+            RenderBufferBuilder<Cell> { *this, _output, LineOffset(0), mainDisplayReverseVideo },
+            viewport_.scrollOffset());
     else
-        alternateScreen_.render(RenderBufferBuilder<Cell> { *this, _output }, viewport_.scrollOffset());
+        alternateScreen_.render(
+            RenderBufferBuilder<Cell> { *this, _output, LineOffset(0), mainDisplayReverseVideo },
+            viewport_.scrollOffset());
+
+    switch (state_.statusDisplayType)
+    {
+        case StatusDisplayType::None:
+            //.
+            break;
+        case StatusDisplayType::Indicator:
+            updateIndicatorStatusLine();
+            indicatorStatusScreen_.render(
+                RenderBufferBuilder<Cell> {
+                    *this, _output, state_.pageSize.lines.as<LineOffset>(), !mainDisplayReverseVideo },
+                ScrollOffset(0));
+            break;
+        case StatusDisplayType::HostWritable:
+            hostWritableStatusLineScreen_.render(
+                RenderBufferBuilder<Cell> {
+                    *this, _output, state_.pageSize.lines.as<LineOffset>(), !mainDisplayReverseVideo },
+                ScrollOffset(0));
+            break;
+    }
 }
 // }}}
+
+void Terminal::updateIndicatorStatusLine()
+{
+    auto& savedActiveDisplay = currentScreen_.get();
+    assert(&savedActiveDisplay != &indicatorStatusScreen_);
+
+    auto savedCursor = state_.cursor;
+    auto const savedWrapPending = state_.wrapPending;
+
+    currentScreen_ = indicatorStatusScreen_;
+
+    // Prepare old status line's cursor position and some other flags.
+    state_.cursor = {};
+    state_.wrapPending = false;
+    indicatorStatusScreen_.updateCursorIterator();
+
+    auto const inputModeStr = [](auto mode) noexcept -> string_view {
+        switch (mode)
+        {
+            case ViMode::Normal: return "NORMAL"sv;
+            case ViMode::Insert: return "INSERT"sv;
+            case ViMode::Visual: return "VISUAL"sv;
+            case ViMode::VisualLine: return "VISUAL LINE"sv;
+            case ViMode::VisualBlock: return "VISUAL BLOCK"sv;
+            case ViMode::NormalMotionVisual: return "NORMAL (VISUAL MOTION)"sv;
+        }
+        crispy::unreachable();
+    }(inputHandler().mode());
+
+    // Run status-line update.
+    // We cannot use VT writing here, because we shall not interfere with the application's VT state.
+    // TODO: Future improvement would be to allow full VT sequence support for the Indicator-status-line,
+    // such that we can pass display-control partially over to some user/thirdparty configuration.
+    indicatorStatusScreen_.clearLine();
+    state_.cursor.graphicsRendition.styles |= CellFlags::Bold;
+    indicatorStatusScreen_.writeTextFromExternal(
+        fmt::format("{} | {} | Screen: {} | Cursor: {}:{} | Mouse: {}:{}",
+                    state_.terminalId,
+                    inputModeStr,
+                    state_.screenType,
+                    savedCursor.position.line + 1,
+                    savedCursor.position.column + 1,
+                    currentMousePosition_.line + 1,
+                    currentMousePosition_.column + 1));
+
+    // Cleaning up.
+    currentScreen_ = savedActiveDisplay;
+    // restoreCursor(savedCursor, savedWrapPending);
+    state_.wrapPending = savedWrapPending;
+    state_.cursor = savedCursor;
+    state_.cursor.position = clampCoordinate(savedCursor.position);
+    currentScreen_.get().updateCursorIterator();
+    verifyState();
+}
 
 bool Terminal::sendKeyPressEvent(Key _key, Modifier _modifier, Timestamp _now)
 {
@@ -465,6 +554,18 @@ bool Terminal::sendMouseMoveEvent(Modifier _modifier,
     if (leftMouseButtonPressed_ && isSelectionComplete())
         clearSelection();
 
+    // Force refresh on mouse position grid-cell change to get the Indicator status line updated.
+    auto changed = false;
+    auto const cursorPositionHasChanged = newPosition != currentMousePosition_;
+    auto const uiMaybeDisplayingMousePosition = state_.statusDisplayType == StatusDisplayType::Indicator;
+    if (cursorPositionHasChanged && uiMaybeDisplayingMousePosition)
+    {
+        currentMousePosition_ = newPosition;
+        markScreenDirty();
+        eventListener_.renderBufferUpdated();
+        changed = true;
+    }
+
     if (newPosition == currentMousePosition_ && !isModeEnabled(DECMode::MouseSGRPixels))
         return false;
 
@@ -472,7 +573,7 @@ bool Terminal::sendMouseMoveEvent(Modifier _modifier,
 
     auto const relativePos = viewport_.translateScreenToGridCoordinate(currentMousePosition_);
 
-    bool changed = updateCursorHoveringState();
+    changed = changed || updateCursorHoveringState();
 
     // Do not handle mouse-move events in sub-cell dimensions.
     if (respectMouseProtocol_
@@ -620,6 +721,26 @@ void Terminal::writeToScreen(string_view _data)
     }
 }
 
+string_view Terminal::lockedWriteToPtyBuffer(string_view data)
+{
+    if (currentPtyBuffer_->bytesAvailable() < 64 && currentPtyBuffer_->bytesAvailable() < data.size())
+        currentPtyBuffer_ = ptyBufferPool_.allocateBufferObject();
+
+    auto const chunk = data.substr(0, std::min(data.size(), currentPtyBuffer_->bytesAvailable()));
+    auto const _l = scoped_lock { *currentPtyBuffer_ };
+    return currentPtyBuffer_->writeAtEnd(chunk);
+}
+
+void Terminal::writeToScreenInternal(std::string_view data)
+{
+    while (!data.empty())
+    {
+        auto const chunk = lockedWriteToPtyBuffer(data);
+        data.remove_prefix(chunk.size());
+        state_.parser.parseFragment(chunk);
+    }
+}
+
 void Terminal::updateCursorVisibilityState() const
 {
     if (cursorDisplay_ == CursorDisplay::Steady)
@@ -665,25 +786,35 @@ optional<chrono::milliseconds> Terminal::nextRender() const
         return chrono::milliseconds::min();
 }
 
-void Terminal::resizeScreen(PageSize _cells, optional<ImageSize> _pixels)
+void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> _pixels)
 {
     auto const _l = lock_guard { *this };
+    resizeScreenInternal(totalPageSize, _pixels);
+}
+
+void Terminal::resizeScreenInternal(PageSize totalPageSize, std::optional<ImageSize> _pixels)
+{
+    Require(hostWritableStatusLineScreen_.pageSize() == indicatorStatusScreen_.pageSize());
 
     // NOTE: This will only resize the currently active buffer.
     // Any other buffer will be resized when it is switched to.
+    auto const statusLineHeight = hostWritableStatusLineScreen_.pageSize().lines;
+    auto const mainDisplayPageSize = state_.statusDisplayType == StatusDisplayType::None
+                                         ? totalPageSize
+                                         : totalPageSize - statusLineHeight;
 
-    state_.pageSize = _cells;
+    state_.pageSize = mainDisplayPageSize;
     currentMousePosition_ = clampToScreen(currentMousePosition_);
     if (_pixels)
-        setCellPixelSize(_pixels.value() / _cells);
+        setCellPixelSize(_pixels.value() / totalPageSize);
 
     // Reset margin to their default.
-    state_.margin = Margin { Margin::Vertical { {}, _cells.lines.as<LineOffset>() - 1 },
-                             Margin::Horizontal { {}, _cells.columns.as<ColumnOffset>() - 1 } };
+    state_.margin = Margin { Margin::Vertical { {}, mainDisplayPageSize.lines.as<LineOffset>() - 1 },
+                             Margin::Horizontal { {}, mainDisplayPageSize.columns.as<ColumnOffset>() - 1 } };
 
     applyPageSizeToCurrentBuffer();
 
-    pty_->resizeScreen(_cells, _pixels);
+    pty_->resizeScreen(mainDisplayPageSize, _pixels);
 
     verifyState();
 }
@@ -710,7 +841,7 @@ void Terminal::resizeColumns(ColumnCount _newColumnCount, bool _clear)
     auto const pixels = cellPixelSize() * newSize;
     resizeScreen(newSize, pixels);
 
-    resizeWindow(newSize);
+    requestWindowResize(newSize);
 }
 
 void Terminal::verifyState()
@@ -726,6 +857,9 @@ void Terminal::verifyState()
         Require(state_.primaryBuffer.pageSize() == state_.pageSize);
     else
         Require(state_.alternateBuffer.pageSize() == state_.pageSize);
+
+    Require(state_.hostWritableStatusBuffer.pageSize().columns == state_.pageSize.columns);
+    Require(state_.indicatorStatusBuffer.pageSize().columns == state_.pageSize.columns);
 
     Require(*state_.cursor.position.column < *state_.pageSize.columns);
     Require(*state_.cursor.position.line < *state_.pageSize.lines);
@@ -896,14 +1030,14 @@ void Terminal::reply(string_view _reply)
     sendRaw(_reply);
 }
 
-void Terminal::resizeWindow(PageSize _size)
+void Terminal::requestWindowResize(PageSize _size)
 {
-    eventListener_.resizeWindow(_size.lines, _size.columns);
+    eventListener_.requestWindowResize(_size.lines, _size.columns);
 }
 
-void Terminal::resizeWindow(ImageSize _size)
+void Terminal::requestWindowResize(ImageSize _size)
 {
-    eventListener_.resizeWindow(_size.width, _size.height);
+    eventListener_.requestWindowResize(_size.width, _size.height);
 }
 
 void Terminal::setApplicationkeypadMode(bool _enabled)
@@ -1165,10 +1299,7 @@ void Terminal::clearScreen()
 
 void Terminal::moveCursorTo(LineOffset _line, ColumnOffset _column)
 {
-    if (isPrimaryScreen())
-        primaryScreen_.moveCursorTo(_line, _column);
-    else
-        alternateScreen_.moveCursorTo(_line, _column);
+    currentScreen_.get().moveCursorTo(_line, _column);
 }
 
 void Terminal::saveCursor()
@@ -1191,10 +1322,7 @@ void Terminal::restoreCursor(Cursor const& _savedCursor)
     state_.wrapPending = false;
     state_.cursor = _savedCursor;
     state_.cursor.position = clampCoordinate(_savedCursor.position);
-    if (isPrimaryScreen())
-        primaryScreen_.updateCursorIterator();
-    else
-        alternateScreen_.updateCursorIterator();
+    currentScreen().updateCursorIterator();
     verifyState();
 }
 
@@ -1216,6 +1344,9 @@ void Terminal::softReset()
 
     state_.cursor.hyperlink = {};
     state_.colorPalette = state_.defaultColorPalette;
+
+    setActiveStatusDisplay(ActiveStatusDisplay::Main);
+    setStatusDisplay(StatusDisplayType::None);
 
     // TODO: DECNKM (Numeric keypad)
     // TODO: DECSCA (Select character attribute)
@@ -1322,6 +1453,8 @@ void Terminal::hardReset()
 
     state_.primaryBuffer.reset();
     state_.alternateBuffer.reset();
+    state_.hostWritableStatusBuffer.reset();
+    state_.indicatorStatusBuffer.reset();
 
     state_.imagePool.clear();
 
@@ -1340,6 +1473,11 @@ void Terminal::hardReset()
         primaryScreen_.updateCursorIterator();
     else
         alternateScreen_.updateCursorIterator();
+
+    setActiveStatusDisplay(ActiveStatusDisplay::Main);
+    setStatusDisplay(StatusDisplayType::None);
+    hostWritableStatusLineScreen_.clearScreen();
+    hostWritableStatusLineScreen_.updateCursorIterator();
 
     primaryScreen_.verifyState();
 
@@ -1389,6 +1527,11 @@ void Terminal::applyPageSizeToCurrentBuffer()
                          ? state_.primaryBuffer.resize(state_.pageSize, cursorPosition, state_.wrapPending)
                          : state_.alternateBuffer.resize(state_.pageSize, cursorPosition, state_.wrapPending);
     cursorPosition = clampCoordinate(cursorPosition);
+
+    (void) state_.hostWritableStatusBuffer.resize(
+        PageSize { LineCount(1), state_.pageSize.columns }, CellLocation {}, false);
+    (void) state_.indicatorStatusBuffer.resize(
+        PageSize { LineCount(1), state_.pageSize.columns }, CellLocation {}, false);
 
     if (state_.cursor.position.column < boxed_cast<ColumnOffset>(state_.pageSize.columns))
         state_.wrapPending = false;
@@ -1477,6 +1620,61 @@ void Terminal::setMaxHistoryLineCount(LineCount _maxHistoryLineCount)
 LineCount Terminal::maxHistoryLineCount() const noexcept
 {
     return primaryScreen_.grid().maxHistoryLineCount();
+}
+
+void Terminal::setStatusDisplay(StatusDisplayType statusDisplayType)
+{
+    assert(&currentScreen_.get() != &indicatorStatusScreen_);
+
+    if (state_.statusDisplayType == statusDisplayType)
+        return;
+
+    markScreenDirty();
+
+    auto const statusLineVisibleBefore = state_.statusDisplayType != StatusDisplayType::None;
+    auto const statusLineVisibleAfter = statusDisplayType != StatusDisplayType::None;
+    auto const theTotalPageSize = totalPageSize();
+    state_.statusDisplayType = statusDisplayType;
+
+    if (statusLineVisibleBefore != statusLineVisibleAfter)
+        resizeScreenInternal(theTotalPageSize, nullopt);
+}
+
+void Terminal::setActiveStatusDisplay(ActiveStatusDisplay activeDisplay)
+{
+    if (state_.activeStatusDisplay == activeDisplay)
+        return;
+
+    assert(&currentScreen_.get() != &indicatorStatusScreen_);
+
+    state_.activeStatusDisplay = activeDisplay;
+
+    switch (activeDisplay)
+    {
+        case ActiveStatusDisplay::Main:
+            switch (state_.screenType)
+            {
+                case ScreenType::Primary: currentScreen_ = primaryScreen_; break;
+                case ScreenType::Alternate: currentScreen_ = alternateScreen_; break;
+            }
+            restoreCursor(state_.savedCursorStatusLine);
+            break;
+        case ActiveStatusDisplay::StatusLine: {
+            currentScreen_ = hostWritableStatusLineScreen_;
+            // Prepare old status line's cursor position and some other flags.
+            auto cursor = state_.cursor;
+            cursor.position = state_.savedCursorStatusLine.position;
+            cursor.originMode = false;
+            cursor.visible = false;
+
+            // Backup current cursor state.
+            state_.savedCursorStatusLine = state_.cursor;
+
+            // Activate cursor.
+            restoreCursor(cursor);
+            break;
+        }
+    }
 }
 
 } // namespace terminal

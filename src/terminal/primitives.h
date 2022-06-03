@@ -284,13 +284,32 @@ struct PageSize
     ColumnCount columns;
     [[nodiscard]] int area() const noexcept { return *lines * *columns; }
 };
+
+constexpr PageSize operator+(PageSize pageSize, LineCount lines) noexcept
+{
+    return PageSize { pageSize.lines + lines, pageSize.columns };
+}
+
+constexpr PageSize operator-(PageSize pageSize, LineCount lines) noexcept
+{
+    return PageSize { pageSize.lines - lines, pageSize.columns };
+}
+
 constexpr bool operator==(PageSize a, PageSize b) noexcept
 {
     return a.lines == b.lines && a.columns == b.columns;
 }
+
 constexpr bool operator!=(PageSize a, PageSize b) noexcept
 {
     return !(a == b);
+}
+
+/// Tests whether given CellLocation is within the right hand side's PageSize.
+constexpr bool operator<(CellLocation location, PageSize pageSize) noexcept
+{
+    return location.line < boxed_cast<LineOffset>(pageSize.lines)
+           && location.column < boxed_cast<ColumnOffset>(pageSize.columns);
 }
 // }}}
 // {{{ Coordinate types
@@ -520,6 +539,23 @@ enum class GraphicsRendition
     Overline = 53,        //!< Overlined glyph
     NoFramed = 54,        //!< Reverses Framed
     NoOverline = 55,      //!< Reverses Overline.
+};
+
+enum class StatusDisplayType
+{
+    None,
+    Indicator,
+    HostWritable,
+};
+
+// Selects whether the terminal sends data to the main display or the status line.
+enum class ActiveStatusDisplay
+{
+    // Selects the main display. The terminal sends data to the main display only.
+    Main,
+
+    // Selects the host-writable status line. The terminal sends data to the status line only.
+    StatusLine,
 };
 
 enum class AnsiMode

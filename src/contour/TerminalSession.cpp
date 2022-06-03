@@ -419,7 +419,7 @@ void TerminalSession::onSelectionCompleted()
     }
 }
 
-void TerminalSession::resizeWindow(LineCount _lines, ColumnCount _columns)
+void TerminalSession::requestWindowResize(LineCount _lines, ColumnCount _columns)
 {
     if (!display_)
         return;
@@ -428,7 +428,7 @@ void TerminalSession::resizeWindow(LineCount _lines, ColumnCount _columns)
     display_->post([this, _lines, _columns]() { display_->resizeWindow(_lines, _columns); });
 }
 
-void TerminalSession::resizeWindow(Width _width, Height _height)
+void TerminalSession::requestWindowResize(Width _width, Height _height)
 {
     if (!display_)
         return;
@@ -553,6 +553,9 @@ void TerminalSession::sendMouseMoveEvent(terminal::Modifier _modifier,
 {
     // NB: This translation depends on the display's margin, so maybe
     //     the display should provide the translation?
+
+    if (!(_pos < terminal().pageSize()))
+        return;
 
     auto const handled = terminal().sendMouseMoveEvent(_modifier, _pos, _pixelPosition, _now);
 
@@ -867,6 +870,16 @@ bool TerminalSession::operator()(actions::ToggleFullscreen)
     return true;
 }
 
+bool TerminalSession::operator()(actions::ToggleStatusLine)
+{
+    auto const _l = scoped_lock { terminal_ };
+    if (terminal().state().statusDisplayType != StatusDisplayType::Indicator)
+        terminal().setStatusDisplay(StatusDisplayType::Indicator);
+    else
+        terminal().setStatusDisplay(StatusDisplayType::None);
+    return true;
+}
+
 bool TerminalSession::operator()(actions::ToggleTitleBar)
 {
     if (display_)
@@ -1009,6 +1022,7 @@ void TerminalSession::configureTerminal()
     terminal_.setMaxImageColorRegisters(config_.maxImageColorRegisters);
     terminal_.setMaxImageSize(config_.maxImageSize);
     terminal_.setMode(terminal::DECMode::SixelScrolling, config_.sixelScrolling);
+    terminal_.setStatusDisplay(profile_.initialStatusDisplayType);
     SessionLog()("maxImageSize={}, sixelScrolling={}", config_.maxImageSize, config_.sixelScrolling);
 
     // XXX

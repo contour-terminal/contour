@@ -15,7 +15,7 @@ template <typename Cell>
 class RenderBufferBuilder
 {
   public:
-    RenderBufferBuilder(Terminal const& terminal, RenderBuffer& output);
+    RenderBufferBuilder(Terminal const& terminal, RenderBuffer& output, LineOffset base, bool reverseVideo);
 
     /// Renders a single grid cell.
     /// This call is guaranteed to be invoked sequencially, from top line
@@ -87,8 +87,9 @@ class RenderBufferBuilder
     RenderBuffer& output;
     Terminal const& terminal;
     CellLocation cursorPosition;
+    LineOffset baseLine;
+    bool reverseVideo;
 
-    bool reverseVideo = terminal.isModeEnabled(terminal::DECMode::ReverseVideo);
     int prevWidth = 0;
     bool prevHasCursor = false;
     State state = State::Gap;

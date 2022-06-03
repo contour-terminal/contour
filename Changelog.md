@@ -27,6 +27,8 @@
   - `<S-K>` and `<S-J>` don't just move the cursor up/down but also move the terminal's viewport respectively.
   - and more...
 - Adds specialized PTY implementation for Linux operating system utilizing OS-specific kernel APIs.
+- Adds basic support for Indicator status line and their VT sequences `DECSASD` and `DECSSDT`, and `DECRQSS` has been adapted (#687).
+- Adds configuration option `profiles.*.status_line.display` to be either `none` or `indicator` to reflect the initial state of the status line (more customizability of the Indicator status-line will come in future releases).
 - Changes CLI syntax for `contour parser-table` to `contour generate parser-table`.
 
 ### 0.3.1 (2022-05-01)

@@ -46,6 +46,12 @@ TerminalState::TerminalState(Terminal& _terminal,
     allowReflowOnResize { _allowReflowOnResize },
     primaryBuffer { Grid<Cell>(_pageSize, _allowReflowOnResize, _maxHistoryLineCount) },
     alternateBuffer { Grid<Cell>(_pageSize, false, LineCount(0)) },
+    hostWritableStatusBuffer { Grid<Cell>(
+        PageSize { LineCount(1), _pageSize.columns }, false, LineCount(0)) },
+    indicatorStatusBuffer { Grid<Cell> {
+        PageSize { LineCount(1), _pageSize.columns }, false, LineCount(0) } },
+    statusDisplayType { StatusDisplayType::None },
+    activeStatusDisplay { ActiveStatusDisplay::Main },
     cursor {},
     lastCursorPosition {},
     hyperlinks { HyperlinkCache { 1024 } },

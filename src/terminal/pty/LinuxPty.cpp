@@ -48,6 +48,7 @@ using std::nullopt;
 using std::numeric_limits;
 using std::optional;
 using std::runtime_error;
+using std::scoped_lock;
 using std::string_view;
 using std::tuple;
 
@@ -314,8 +315,11 @@ int LinuxPty::waitForReadable(std::chrono::milliseconds timeout) noexcept
 Pty::ReadResult LinuxPty::read(crispy::BufferObject& sink, std::chrono::milliseconds timeout, size_t size)
 {
     if (int fd = waitForReadable(timeout); fd != -1)
+    {
+        auto const _l = scoped_lock { sink };
         if (auto x = readSome(fd, sink.hotEnd(), min(size, sink.bytesAvailable())))
             return { tuple { x.value(), fd == _stdoutFastPipe.reader() } };
+    }
 
     return nullopt;
 }

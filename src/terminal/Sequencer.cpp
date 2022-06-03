@@ -52,7 +52,7 @@ void Sequencer::print(char _char)
     terminal_.state().instructionCounter++;
     auto const codepoint =
         holds_alternative<unicode::Success>(r) ? get<unicode::Success>(r).value : ReplacementCharacter;
-    terminal_.currentScreen().writeText(codepoint);
+    terminal_.activeDisplay().writeText(codepoint);
     terminal_.state().precedingGraphicCharacter = codepoint;
 }
 
@@ -63,7 +63,7 @@ void Sequencer::print(string_view _chars, size_t cellCount)
     if (utf8DecoderState_.expectedLength == 0)
     {
         terminal_.state().instructionCounter += _chars.size();
-        terminal_.currentScreen().writeText(_chars, cellCount);
+        terminal_.activeDisplay().writeText(_chars, cellCount);
         terminal_.state().precedingGraphicCharacter = static_cast<char32_t>(_chars.back());
     }
     else
@@ -76,7 +76,7 @@ void Sequencer::print(string_view _chars, size_t cellCount)
 
 void Sequencer::execute(char controlCode)
 {
-    terminal_.currentScreen().executeControlCode(controlCode);
+    terminal_.activeDisplay().executeControlCode(controlCode);
     resetUtf8DecoderState();
 }
 
@@ -170,7 +170,7 @@ void Sequencer::unhook()
 void Sequencer::handleSequence()
 {
     parameterBuilder_.fixiate();
-    terminal_.currentScreen().processSequence(sequence_);
+    terminal_.activeDisplay().processSequence(sequence_);
 }
 
 } // namespace terminal

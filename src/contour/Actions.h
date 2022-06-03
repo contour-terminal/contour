@@ -56,6 +56,7 @@ struct ScrollUp{};
 struct SendChars{ std::string chars; };
 struct ToggleAllKeyMaps{};
 struct ToggleFullscreen{};
+struct ToggleStatusLine{};
 struct ToggleTitleBar{};
 struct ViNormalMode{};
 struct WriteScreen{ std::string chars; }; // "\033[2J\033[3J"
@@ -98,6 +99,7 @@ using Action = std::variant<CancelSelection,
                             SendChars,
                             ToggleAllKeyMaps,
                             ToggleFullscreen,
+                            ToggleStatusLine,
                             ToggleTitleBar,
                             ViNormalMode,
                             WriteScreen>;
@@ -159,6 +161,7 @@ DECLARE_ACTION_FMT(ScrollUp)
 DECLARE_ACTION_FMT(SendChars)
 DECLARE_ACTION_FMT(ToggleAllKeyMaps)
 DECLARE_ACTION_FMT(ToggleFullscreen)
+DECLARE_ACTION_FMT(ToggleStatusLine)
 DECLARE_ACTION_FMT(ToggleTitleBar)
 DECLARE_ACTION_FMT(ViNormalMode)
 DECLARE_ACTION_FMT(WriteScreen)

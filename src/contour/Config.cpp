@@ -1544,6 +1544,14 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
         }
     }
 
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "status_line.display", strValue);
+    if (strValue == "indicator")
+        profile.initialStatusDisplayType = terminal::StatusDisplayType::Indicator;
+    else if (strValue == "none")
+        profile.initialStatusDisplayType = terminal::StatusDisplayType::None;
+    else
+        errorlog()("Invalid value for config entry {}: {}", "status_line.display", strValue);
+
     return profile;
 }
 
