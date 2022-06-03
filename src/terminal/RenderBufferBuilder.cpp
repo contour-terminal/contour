@@ -59,6 +59,12 @@ namespace
             else
                 return tuple { fg, bg };
         }
+        else if (_isCursor && distance(fg, bg) < 0.1)
+        {
+            auto const fgInv =
+                RGBColor { uint8_t(255 - fg.red), uint8_t(255 - fg.green), uint8_t(255 - fg.blue) };
+            return { fgInv, fg };
+        }
 
         auto getSelectionColor =
             [](auto fg, auto bg, bool selected, ColorPalette const& colors) -> tuple<RGBColor, RGBColor> {

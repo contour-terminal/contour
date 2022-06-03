@@ -992,7 +992,7 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _baseP
                         if (value[0] == '#')
                             colors.palette[_offset + _index] = value;
                         else if (value.size() > 2 && value[0] == '0' && value[1] == 'x')
-                            colors.palette[_offset + _index] = nodeValue.as<uint32_t>();
+                            colors.palette[_offset + _index] = RGBColor { nodeValue.as<uint32_t>() };
                     }
                 }
             };
@@ -1010,9 +1010,9 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _baseP
         {
             for (size_t i = 0; i < node.size() && i < 8; ++i)
                 if (node[i].IsScalar())
-                    colors.palette[i] = node[i].as<uint32_t>();
+                    colors.palette[i] = RGBColor { node[i].as<uint32_t>() };
                 else
-                    colors.palette[i] = node[i].as<string>();
+                    colors.palette[i] = RGBColor { node[i].as<string>() };
             return true;
         }
         return false;

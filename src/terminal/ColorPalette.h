@@ -150,20 +150,20 @@ struct ColorPalette
         return palette.at(_index);
     }
 
-    RGBColor defaultForeground = 0xD0D0D0;
-    RGBColor defaultBackground = 0x000000;
+    RGBColor defaultForeground = 0xD0D0D0_rgb;
+    RGBColor defaultBackground = 0x000000_rgb;
     std::optional<RGBColor> selectionForeground = std::nullopt;
     std::optional<RGBColor> selectionBackground = std::nullopt;
 
     CursorColor cursor;
 
-    RGBColor mouseForeground = 0x800000;
-    RGBColor mouseBackground = 0x808000;
+    RGBColor mouseForeground = 0x800000_rgb;
+    RGBColor mouseBackground = 0x808000_rgb;
 
     struct
     {
-        RGBColor normal = 0x0070F0;
-        RGBColor hover = 0xFF0000;
+        RGBColor normal = 0x0070F0_rgb;
+        RGBColor hover = 0xFF0000_rgb;
     } hyperlinkDecoration;
 
     std::shared_ptr<BackgroundImage const> backgroundImage;
