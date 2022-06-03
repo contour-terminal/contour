@@ -602,7 +602,10 @@ namespace detail
         template <Dir Direction, int DivisorX>
         auto getTriangleProps(ImageSize size)
         {
-            auto const c = Point { unbox<int>(size.width) / DivisorX, unbox<int>(size.height) / 2 };
+            auto const c =
+                Point { Direction == Dir::Left ? unbox<int>(size.width) / DivisorX
+                                               : unbox<int>(size.width) - unbox<int>(size.width) / DivisorX,
+                        unbox<int>(size.height) / 2 };
             auto const w = unbox<int>(size.width) - 1;
             auto const h = unbox<int>(size.height) - 1;
 
