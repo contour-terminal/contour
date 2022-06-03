@@ -39,7 +39,7 @@
 namespace terminal
 {
 
-template <typename Cell, ScreenType TheScreenType>
+template <typename Cell>
 class Screen;
 
 /// Terminal API to manage input and output devices of a pseudo terminal, such as keyboard, mouse, and screen.
@@ -353,11 +353,11 @@ class Terminal
     ScreenType screenType() const noexcept { return state_.screenType; }
     void setScreen(ScreenType screenType);
 
-    Screen<Cell, ScreenType::Primary> const& primaryScreen() const noexcept { return primaryScreen_; }
-    Screen<Cell, ScreenType::Primary>& primaryScreen() noexcept { return primaryScreen_; }
+    Screen<Cell> const& primaryScreen() const noexcept { return primaryScreen_; }
+    Screen<Cell>& primaryScreen() noexcept { return primaryScreen_; }
 
-    Screen<Cell, ScreenType::Alternate> const& alternateScreen() const noexcept { return alternateScreen_; }
-    Screen<Cell, ScreenType::Alternate>& alternateScreen() noexcept { return alternateScreen_; }
+    Screen<Cell> const& alternateScreen() const noexcept { return alternateScreen_; }
+    Screen<Cell>& alternateScreen() noexcept { return alternateScreen_; }
 
     bool isLineWrapped(LineOffset _lineNumber) const noexcept
     {
@@ -581,8 +581,8 @@ class Terminal
     crispy::BufferObjectPool ptyBufferPool_;
     crispy::BufferObjectPtr currentPtyBuffer_;
     size_t ptyReadBufferSize_;
-    Screen<Cell, ScreenType::Primary> primaryScreen_;
-    Screen<Cell, ScreenType::Alternate> alternateScreen_;
+    Screen<Cell> primaryScreen_;
+    Screen<Cell> alternateScreen_;
     std::reference_wrapper<ScreenBase> currentScreen_;
 
     std::mutex mutable outerLock_;

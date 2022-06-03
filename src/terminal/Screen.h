@@ -81,14 +81,11 @@ class ScreenBase: public SequenceHandler
  * allowing the object owner to control which part of the screen (or history)
  * to be viewn.
  */
-template <typename Cell, ScreenType TheScreenType = ScreenType::Primary>
-class Screen: public ScreenBase, public capabilities::StaticDatabase
+template <typename Cell>
+class Screen final: public ScreenBase, public capabilities::StaticDatabase
 {
   public:
-    constexpr static bool IsPrimaryScreen = TheScreenType == ScreenType::Primary;
-    constexpr static bool IsAlternateScreen = TheScreenType == ScreenType::Alternate;
-
-    Screen(TerminalState& terminalState, ScreenType screenType, Grid<Cell>& grid);
+    Screen(TerminalState& terminalState, Grid<Cell>& grid);
 
     Screen(Screen const&) = delete;
     Screen& operator=(Screen const&) = delete;
@@ -516,7 +513,6 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
 
     Terminal& _terminal;
     TerminalState& _state;
-    ScreenType const _screenType;
     Grid<Cell>& _grid;
 #if defined(LIBTERMINAL_CURRENT_LINE_CACHE)
     Line<Cell>* _currentLine = nullptr;
@@ -524,8 +520,8 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
     std::unique_ptr<SixelImageBuilder> sixelImageBuilder_;
 };
 
-template <typename Cell, ScreenType TheScreenType>
-inline void Screen<Cell, TheScreenType>::scrollUp(LineCount _n, Margin _margin)
+template <typename Cell>
+inline void Screen<Cell>::scrollUp(LineCount _n, Margin _margin)
 {
     scrollUp(_n, cursor().graphicsRendition, _margin);
 }
