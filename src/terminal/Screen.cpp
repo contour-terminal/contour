@@ -237,8 +237,8 @@ namespace // {{{ helper
 // }}}
 
 template <typename Cell, ScreenType TheScreenType>
-Screen<Cell, TheScreenType>::Screen(TerminalState& terminalState, ScreenType screenType, Grid<Cell>& grid):
-    _terminal { terminalState.terminal }, _state { terminalState }, _screenType { screenType }, _grid { grid }
+Screen<Cell, TheScreenType>::Screen(TerminalState& terminalState, Grid<Cell>& grid):
+    _terminal { terminalState.terminal }, _state { terminalState }, _grid { grid }
 {
     updateCursorIterator();
 }

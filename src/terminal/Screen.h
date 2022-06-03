@@ -82,13 +82,10 @@ class ScreenBase: public SequenceHandler
  * to be viewn.
  */
 template <typename Cell, ScreenType TheScreenType = ScreenType::Primary>
-class Screen: public ScreenBase, public capabilities::StaticDatabase
+class Screen final: public ScreenBase, public capabilities::StaticDatabase
 {
   public:
-    constexpr static bool IsPrimaryScreen = TheScreenType == ScreenType::Primary;
-    constexpr static bool IsAlternateScreen = TheScreenType == ScreenType::Alternate;
-
-    Screen(TerminalState& terminalState, ScreenType screenType, Grid<Cell>& grid);
+    Screen(TerminalState& terminalState, Grid<Cell>& grid);
 
     Screen(Screen const&) = delete;
     Screen& operator=(Screen const&) = delete;
@@ -516,7 +513,6 @@ class Screen: public ScreenBase, public capabilities::StaticDatabase
 
     Terminal& _terminal;
     TerminalState& _state;
-    ScreenType const _screenType;
     Grid<Cell>& _grid;
 #if defined(LIBTERMINAL_CURRENT_LINE_CACHE)
     Line<Cell>* _currentLine = nullptr;
