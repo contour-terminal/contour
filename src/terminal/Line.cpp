@@ -189,11 +189,20 @@ InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input)
     }
     assert(columns.size() == unbox<size_t>(input.usedColumns));
 
-    auto const attributes = input.text.empty() ? input.attributes : GraphicsAttributes {};
     while (columns.size() < unbox<size_t>(input.displayWidth))
-        columns.emplace_back(Cell { attributes });
+        columns.emplace_back(Cell { input.attributes });
 
     return columns;
+}
+
+template <typename Cell>
+void Line<Cell>::fillRemainingCells(GraphicsAttributes const& _sgr, HyperlinkId hyperlink)
+{
+    auto& buffer = inflatedBuffer();
+    for (auto start = buffer.rbegin();
+         start != buffer.rend() && (start->empty() && (start->codepoint(0) != 0x20));
+         ++start)
+        start->reset(_sgr, hyperlink);
 }
 
 } // end namespace terminal
