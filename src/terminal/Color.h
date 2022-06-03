@@ -92,7 +92,7 @@ constexpr RGBColor operator*(RGBColor c, float s) noexcept
                       static_cast<uint8_t>(std::clamp(static_cast<float>(c.blue) * s, 0.0f, 255.0f)) };
 }
 
-constexpr double distance(RGBColor e1, RGBColor e2) noexcept
+inline double distance(RGBColor e1, RGBColor e2) noexcept
 {
     auto const rmean = (uint32_t(e1.red) + uint32_t(e2.red)) / 2;
     auto const r = uint32_t(e1.red) - uint32_t(e2.red);
