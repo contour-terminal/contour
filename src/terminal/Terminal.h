@@ -69,8 +69,8 @@ class Terminal
         virtual void onClosed() {}
         virtual void pasteFromClipboard(unsigned /*count*/) {}
         virtual void onSelectionCompleted() {}
-        virtual void resizeWindow(LineCount, ColumnCount) {}
-        virtual void resizeWindow(Width, Height) {}
+        virtual void requestWindowResize(LineCount, ColumnCount) {}
+        virtual void requestWindowResize(Width, Height) {}
         virtual void setWindowTitle(std::string_view /*_title*/) {}
         virtual void setTerminalProfile(std::string const& /*_configProfileName*/) {}
         virtual void discardImage(Image const&) {}
@@ -212,7 +212,26 @@ class Terminal
     Pty& device() noexcept { return *pty_; }
 
     PageSize pageSize() const noexcept { return pty_->pageSize(); }
+
+    PageSize totalPageSize() const noexcept
+    {
+        switch (state_.statusDisplayType)
+        {
+            case StatusDisplayType::None:
+                //.
+                return pageSize();
+            case StatusDisplayType::Indicator:
+            case StatusDisplayType::HostWritable:
+                return pageSize() + hostWritableStatusLineScreen_.pageSize().lines;
+        }
+        crispy::unreachable();
+    }
+
+    /// Resizes the terminal screen to the given amount of grid cells with their pixel dimensions.
+    /// Important! In case a status line is currently visible, the status line count is being
+    /// accumulated into the screen size, too.
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt);
+    void resizeScreenInternal(PageSize _cells, std::optional<ImageSize> _pixels);
 
     /// Implements semantics for  DECCOLM / DECSCPP.
     void resizeColumns(ColumnCount _newColumnCount, bool _clear);
@@ -261,6 +280,9 @@ class Terminal
 
     /// Writes a given VT-sequence to screen.
     void writeToScreen(std::string_view _text);
+
+    /// Writes a given VT-sequence to screen - but without acquiring the lock (must be already acquired).
+    void writeToScreenInternal(std::string_view _text);
 
     // viewport management
     Viewport& viewport() noexcept { return viewport_; }
@@ -347,6 +369,16 @@ class Terminal
 
     ScreenBase& currentScreen() noexcept { return currentScreen_.get(); }
     ScreenBase const& currentScreen() const noexcept { return currentScreen_.get(); }
+
+    ScreenBase& activeDisplay() noexcept
+    {
+        switch (state_.activeStatusDisplay)
+        {
+            case ActiveStatusDisplay::Main: return currentScreen_.get();
+            case ActiveStatusDisplay::StatusLine: return hostWritableStatusLineScreen_;
+        }
+        crispy::unreachable();
+    }
 
     bool isPrimaryScreen() const noexcept { return state_.screenType == ScreenType::Primary; }
     bool isAlternateScreen() const noexcept { return state_.screenType == ScreenType::Alternate; }
@@ -490,8 +522,8 @@ class Terminal
         reply(fmt::vformat(fmt, fmt::make_format_args(args...)));
     }
 
-    void resizeWindow(PageSize);
-    void resizeWindow(ImageSize);
+    void requestWindowResize(PageSize);
+    void requestWindowResize(ImageSize);
     void setApplicationkeypadMode(bool _enabled);
     void setBracketedPaste(bool _enabled);
     void setCursorStyle(CursorDisplay _display, CursorShape _shape);
@@ -533,12 +565,22 @@ class Terminal
     ViInputHandler& inputHandler() noexcept { return state_.inputHandler; }
     ViInputHandler const& inputHandler() const noexcept { return state_.inputHandler; }
 
+    void setStatusDisplay(StatusDisplayType statusDisplayType);
+    void setActiveStatusDisplay(ActiveStatusDisplay activeDisplay);
+
   private:
     void mainLoop();
     void refreshRenderBuffer(RenderBuffer& _output); // <- acquires the lock
     void refreshRenderBufferInternal(RenderBuffer& _output);
+    void updateIndicatorStatusLine();
     void updateCursorVisibilityState() const;
     bool updateCursorHoveringState();
+
+    // Reads from PTY.
+    Pty::ReadResult readFromPty();
+
+    // Writes partially or all input data to the PTY buffer object and returns a string view to it.
+    std::string_view lockedWriteToPtyBuffer(std::string_view data);
 
     // private data
     //
@@ -583,6 +625,8 @@ class Terminal
     size_t ptyReadBufferSize_;
     Screen<Cell> primaryScreen_;
     Screen<Cell> alternateScreen_;
+    Screen<Cell> hostWritableStatusLineScreen_;
+    Screen<Cell> indicatorStatusScreen_;
     std::reference_wrapper<ScreenBase> currentScreen_;
 
     std::mutex mutable outerLock_;

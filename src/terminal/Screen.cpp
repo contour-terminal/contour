@@ -425,6 +425,18 @@ void Screen<Cell>::writeText(string_view _chars, size_t cellCount)
 }
 
 template <typename Cell>
+void Screen<Cell>::writeTextFromExternal(std::string_view _chars)
+{
+#if defined(LIBTERMINAL_LOG_TRACE)
+    if (VTTraceSequenceLog)
+        VTTraceSequenceLog()("external text: \"{}\"", _chars);
+#endif
+
+    for (char const ch: _chars)
+        writeTextInternal(static_cast<char32_t>(ch));
+}
+
+template <typename Cell>
 void Screen<Cell>::crlfIfWrapPending()
 {
     if (_state.wrapPending && _state.cursor.autoWrap) // && !_terminal.isModeEnabled(DECMode::TextReflow))
@@ -1796,6 +1808,21 @@ void Screen<Cell>::requestStatusString(RequestStatusString _value)
             case RequestStatusString::DECSCA: // TODO
                 errorlog()(fmt::format("Requesting device status for {} not implemented yet.", _value));
                 break;
+            case RequestStatusString::DECSASD:
+                switch (_state.activeStatusDisplay)
+                {
+                    case ActiveStatusDisplay::Main: return "0$}";
+                    case ActiveStatusDisplay::StatusLine: return "1$}";
+                }
+                break;
+            case RequestStatusString::DECSSDT:
+                switch (_state.statusDisplayType)
+                {
+                    case StatusDisplayType::None: return "0$~";
+                    case StatusDisplayType::Indicator: return "1$~";
+                    case StatusDisplayType::HostWritable: return "2$~";
+                }
+                break;
         }
         return nullopt;
     }(_value);
@@ -2793,11 +2820,11 @@ namespace impl
             switch (_seq.param(0))
             {
                 case 4: // resize in pixel units
-                    terminal.resizeWindow(ImageSize { Width(_seq.param(2)), Height(_seq.param(1)) });
+                    terminal.requestWindowResize(ImageSize { Width(_seq.param(2)), Height(_seq.param(1)) });
                     break;
                 case 8: // resize in cell units
-                    terminal.resizeWindow(PageSize { LineCount::cast_from(_seq.param(1)),
-                                                     ColumnCount::cast_from(_seq.param(2)) });
+                    terminal.requestWindowResize(PageSize { LineCount::cast_from(_seq.param(1)),
+                                                            ColumnCount::cast_from(_seq.param(2)) });
                     break;
                 case 22: terminal.saveWindowTitle(); break;
                 case 23: terminal.restoreWindowTitle(); break;
@@ -2813,7 +2840,7 @@ namespace impl
                 case 8:
                     // this means, resize to full display size
                     // TODO: just create a dedicated callback for fulscreen resize!
-                    terminal.resizeWindow(ImageSize {});
+                    terminal.requestWindowResize(ImageSize {});
                     break;
                 case 14:
                     if (_seq.parameterCount() == 2 && _seq.param(1) == 2)
@@ -3255,6 +3282,26 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case XTVERSION:
             _terminal.reply(fmt::format("\033P>|{} {}\033\\", LIBTERMINAL_NAME, LIBTERMINAL_VERSION_STRING));
             return ApplyResult::Ok;
+        case DECSSDT: {
+            // Changes the status line display type.
+            switch (seq.param_or(0, 0))
+            {
+                case 0: _terminal.setStatusDisplay(StatusDisplayType::None); break;
+                case 1: _terminal.setStatusDisplay(StatusDisplayType::Indicator); break;
+                case 2: _terminal.setStatusDisplay(StatusDisplayType::HostWritable); break;
+                default: return ApplyResult::Invalid;
+            }
+            break;
+        }
+        case DECSASD:
+            // Selects whether the terminal sends data to the main display or the status line.
+            switch (seq.param_or(0, 0))
+            {
+                case 0: _terminal.setActiveStatusDisplay(ActiveStatusDisplay::Main); break;
+                case 1: _terminal.setActiveStatusDisplay(ActiveStatusDisplay::StatusLine); break;
+                default: return ApplyResult::Invalid;
+            }
+            break;
 
         // OSC
         case SETTITLE:
@@ -3398,11 +3445,12 @@ unique_ptr<ParserExtension> Screen<Cell>::hookDECRQSS(Sequence const& /*_seq*/)
 {
     return make_unique<SimpleStringCollector>([this](string_view const& _data) {
         auto const s = [](string_view _dataString) -> optional<RequestStatusString> {
-            auto const mappings = array<pair<string_view, RequestStatusString>, 9> {
+            auto const mappings = array<pair<string_view, RequestStatusString>, 11> {
                 pair { "m", RequestStatusString::SGR },       pair { "\"p", RequestStatusString::DECSCL },
                 pair { " q", RequestStatusString::DECSCUSR }, pair { "\"q", RequestStatusString::DECSCA },
                 pair { "r", RequestStatusString::DECSTBM },   pair { "s", RequestStatusString::DECSLRM },
                 pair { "t", RequestStatusString::DECSLPP },   pair { "$|", RequestStatusString::DECSCPP },
+                pair { "$}", RequestStatusString::DECSASD },  pair { "$~", RequestStatusString::DECSSDT },
                 pair { "*|", RequestStatusString::DECSNLS }
             };
             for (auto const& mapping: mappings)

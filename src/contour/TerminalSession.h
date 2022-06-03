@@ -100,8 +100,8 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     void onClosed() override;
     void pasteFromClipboard(unsigned count) override;
     void onSelectionCompleted() override;
-    void resizeWindow(terminal::LineCount, terminal::ColumnCount) override;
-    void resizeWindow(terminal::Width, terminal::Height) override;
+    void requestWindowResize(terminal::LineCount, terminal::ColumnCount) override;
+    void requestWindowResize(terminal::Width, terminal::Height) override;
     void setWindowTitle(std::string_view _title) override;
     void setTerminalProfile(std::string const& _configProfileName) override;
     void discardImage(terminal::Image const&) override;
@@ -162,6 +162,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     bool operator()(actions::SendChars const& _event);
     bool operator()(actions::ToggleAllKeyMaps);
     bool operator()(actions::ToggleFullscreen);
+    bool operator()(actions::ToggleStatusLine);
     bool operator()(actions::ToggleTitleBar);
     bool operator()(actions::ViNormalMode);
     bool operator()(actions::WriteScreen const& _event);

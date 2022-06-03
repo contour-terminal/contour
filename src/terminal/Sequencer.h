@@ -91,7 +91,9 @@ enum class RequestStatusString
     DECSLRM,
     DECSLPP,
     DECSCPP,
-    DECSNLS
+    DECSNLS,
+    DECSASD,
+    DECSSDT,
 };
 
 /// DECSIXEL - Sixel Graphics Image.
@@ -239,6 +241,8 @@ struct formatter<terminal::RequestStatusString>
             case terminal::RequestStatusString::DECSLPP: return format_to(ctx.out(), "DECSLPP");
             case terminal::RequestStatusString::DECSCPP: return format_to(ctx.out(), "DECSCPP");
             case terminal::RequestStatusString::DECSNLS: return format_to(ctx.out(), "DECSNLS");
+            case terminal::RequestStatusString::DECSASD: return format_to(ctx.out(), "DECSASD");
+            case terminal::RequestStatusString::DECSSDT: return format_to(ctx.out(), "DECSSDT");
         }
         return format_to(ctx.out(), "{}", unsigned(value));
     }

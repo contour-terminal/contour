@@ -93,14 +93,18 @@ namespace
 } // namespace
 
 template <typename Cell>
-RenderBufferBuilder<Cell>::RenderBufferBuilder(Terminal const& _terminal, RenderBuffer& _output):
+RenderBufferBuilder<Cell>::RenderBufferBuilder(Terminal const& _terminal,
+                                               RenderBuffer& _output,
+                                               LineOffset base,
+                                               bool theReverseVideo):
     output { _output },
     terminal { _terminal },
     cursorPosition { _terminal.inputHandler().mode() == ViMode::Insert
                          ? _terminal.realCursorPosition()
-                         : _terminal.state().viCommands.cursorPosition }
+                         : _terminal.state().viCommands.cursorPosition },
+    baseLine { base },
+    reverseVideo { theReverseVideo }
 {
-    output.clear();
     output.frameID = _terminal.lastFrameID();
     output.cursor = renderCursor();
 }
@@ -275,7 +279,7 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TriviallyStyledLineBuffer cons
                                                          fg,
                                                          bg,
                                                          lineBuffer.attributes.underlineColor,
-                                                         lineOffset,
+                                                         baseLine + lineOffset,
                                                          columnOffset));
 
         columnOffset += ColumnOffset::cast_from(width);
@@ -301,7 +305,7 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TriviallyStyledLineBuffer cons
                                                          fg,
                                                          bg,
                                                          lineBuffer.attributes.underlineColor,
-                                                         lineOffset,
+                                                         baseLine + lineOffset,
                                                          columnOffset));
     }
     // }}}
@@ -355,7 +359,7 @@ void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset _l
                                                          screenCell,
                                                          fg,
                                                          bg,
-                                                         _line,
+                                                         baseLine + _line,
                                                          _column));
                 output.cells.back().groupStart = true;
             }
@@ -373,7 +377,7 @@ void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset _l
                                                          screenCell,
                                                          fg,
                                                          bg,
-                                                         _line,
+                                                         baseLine + _line,
                                                          _column));
 
                 if (isNewLine)

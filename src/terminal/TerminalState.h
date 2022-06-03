@@ -160,12 +160,17 @@ struct TerminalState
     ScreenType screenType = ScreenType::Primary;
     Grid<Cell> primaryBuffer;
     Grid<Cell> alternateBuffer;
+    Grid<Cell> hostWritableStatusBuffer; // writable status-display, see DECSASD and DECSSDT.
+    Grid<Cell> indicatorStatusBuffer;    // status buffer as used for indicator status line AND error lines.
+    StatusDisplayType statusDisplayType;
+    ActiveStatusDisplay activeStatusDisplay;
 
     // cursor related
     //
     Cursor cursor;
     Cursor savedCursor;
-    Cursor savedPrimaryCursor; //!< saved cursor of primary-screen when switching to alt-screen.
+    Cursor savedPrimaryCursor;    //!< Saved cursor of primary-screen when switching to alt-screen.
+    Cursor savedCursorStatusLine; //!< Saved cursor of the status line if not active, the other way around.
     CellLocation lastCursorPosition;
     bool wrapPending = false;
 
