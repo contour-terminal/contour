@@ -195,6 +195,16 @@ InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input)
     return columns;
 }
 
+template <typename Cell>
+void Line<Cell>::fillRemainingCells(GraphicsAttributes const& _sgr, HyperlinkId hyperlink)
+{
+    auto& buffer = inflatedBuffer();
+    for (auto start = buffer.rbegin();
+         start != buffer.rend() && (start->empty() && (start->codepoint(0) != 0x20));
+         ++start)
+        start->reset(_sgr, hyperlink);
+}
+
 } // end namespace terminal
 
 #include <terminal/Cell.h>
