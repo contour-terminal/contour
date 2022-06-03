@@ -241,6 +241,11 @@ void ViInputHandler::handleVisualMode(char32_t ch, Modifier modifier)
         return;
 }
 
+void ViInputHandler::scrollViewport(ScrollOffset delta)
+{
+    executor.scrollViewport(delta);
+}
+
 bool ViInputHandler::executePendingOrMoveCursor(ViMotion motion)
 {
     switch (pendingOperator.value_or(ViOperator::MoveCursor))
@@ -307,6 +312,8 @@ bool ViInputHandler::parseTextObject(char32_t ch, Modifier modifier)
         case 'h'_key: return executePendingOrMoveCursor(ViMotion::CharLeft);
         case 'j'_key: return executePendingOrMoveCursor(ViMotion::LineDown);
         case 'k'_key: return executePendingOrMoveCursor(ViMotion::LineUp);
+        case 'J'_key: scrollViewport(ScrollOffset(-1)); return executePendingOrMoveCursor(ViMotion::LineDown);
+        case 'K'_key: scrollViewport(ScrollOffset(+1)); return executePendingOrMoveCursor(ViMotion::LineUp);
         case 'l'_key: return executePendingOrMoveCursor(ViMotion::CharRight);
         case 'n'_key: return executePendingOrMoveCursor(ViMotion::SearchResultForward);
         case 'w'_key: return executePendingOrMoveCursor(ViMotion::WordForward);

@@ -30,6 +30,7 @@ class ViCommands: public ViInputHandler::Executor
   public:
     explicit ViCommands(Terminal& theTerminal);
 
+    void scrollViewport(ScrollOffset delta) override;
     void modeChanged(ViMode mode) override;
     void reverseSearchCurrentWord() override;
     void execute(ViOperator op, ViMotion motion, unsigned count) override;

@@ -24,6 +24,7 @@
   - Adds `^` motion.
   - When being in normal mode, pressing `a` also puts you back to insert mode.
   - Properly show cursor if it was hidden in insert mode and restore visibility & shape when going back to insert mode.
+  - `<S-K>` and `<S-J>` don't just move the cursor up/down but also move the terminal's viewport respectively.
   - and more...
 - Adds specialized PTY implementation for Linux operating system utilizing OS-specific kernel APIs.
 - Changes CLI syntax for `contour parser-table` to `contour generate parser-table`.

@@ -28,6 +28,14 @@ ViCommands::ViCommands(Terminal& theTerminal): terminal { theTerminal }
 {
 }
 
+void ViCommands::scrollViewport(ScrollOffset delta)
+{
+    if (delta.value < 0)
+        terminal.viewport().scrollDown(boxed_cast<LineCount>(-delta));
+    else
+        terminal.viewport().scrollUp(boxed_cast<LineCount>(delta));
+}
+
 void ViCommands::modeChanged(ViMode mode)
 {
     auto _ = crispy::finally { [this, mode]() {

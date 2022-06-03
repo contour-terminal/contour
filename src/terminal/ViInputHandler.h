@@ -160,6 +160,8 @@ class ViInputHandler: public InputHandler
 
         virtual void modeChanged(ViMode mode) = 0;
 
+        virtual void scrollViewport(ScrollOffset delta) = 0;
+
         // Starts searching for the word under the cursor position in reverse order.
         // This is like pressing # in Vi.
         virtual void reverseSearchCurrentWord() = 0;
@@ -189,6 +191,7 @@ class ViInputHandler: public InputHandler
     bool handleModeSwitches(char32_t ch, Modifier modifier);
     void execute(ViOperator op, ViMotion motion);
     bool executePendingOrMoveCursor(ViMotion motion);
+    void scrollViewport(ScrollOffset delta);
     void yank(TextObjectScope scope, TextObject textObject);
     void select(TextObjectScope scope, TextObject textObject);
 
