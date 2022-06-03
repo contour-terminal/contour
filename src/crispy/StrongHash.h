@@ -29,21 +29,23 @@
     #endif
 #elif defined(__aarch64__)
     #include <crispy/sse2neon.h>
-    // The following inline functions were borrowed from:
-    // https://github.com/f1ed/emp/blob/master/emp-tool/utils/block.h
-    inline __m128i _mm_aesimc_si128(__m128i a) noexcept
-    {
-        return vreinterpretq_m128i_u8(vaesimcq_u8(vreinterpretq_u8_m128i(a)));
-    }
-    inline __m128i _mm_aesdec_si128 (__m128i a, __m128i RoundKey) noexcept
-    {
-        return vreinterpretq_m128i_u8(vaesimcq_u8(vaesdq_u8(vreinterpretq_u8_m128i(a), vdupq_n_u8(0)) ^ vreinterpretq_u8_m128i(RoundKey)));
-    }
+// The following inline functions were borrowed from:
+// https://github.com/f1ed/emp/blob/master/emp-tool/utils/block.h
+inline __m128i _mm_aesimc_si128(__m128i a) noexcept
+{
+    return vreinterpretq_m128i_u8(vaesimcq_u8(vreinterpretq_u8_m128i(a)));
+}
+inline __m128i _mm_aesdec_si128(__m128i a, __m128i RoundKey) noexcept
+{
+    return vreinterpretq_m128i_u8(
+        vaesimcq_u8(vaesdq_u8(vreinterpretq_u8_m128i(a), vdupq_n_u8(0)) ^ vreinterpretq_u8_m128i(RoundKey)));
+}
 
-    inline __m128i _mm_aesdeclast_si128 (__m128i a, __m128i RoundKey) noexcept
-    {
-        return vreinterpretq_m128i_u8(vaesdq_u8(vreinterpretq_u8_m128i(a), vdupq_n_u8(0)) ^ vreinterpretq_u8_m128i(RoundKey));
-    }
+inline __m128i _mm_aesdeclast_si128(__m128i a, __m128i RoundKey) noexcept
+{
+    return vreinterpretq_m128i_u8(vaesdq_u8(vreinterpretq_u8_m128i(a), vdupq_n_u8(0))
+                                  ^ vreinterpretq_u8_m128i(RoundKey));
+}
 #endif
 
 namespace crispy
