@@ -264,12 +264,15 @@ install_deps_fedora()
 
 install_deps_darwin()
 {
+    # NB: catch2 is available on brew but version 3, and we are still using version 2
+    # due to all the other supported platforms.
+    fetch_and_unpack_Catch2
+
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
     # NB: Also available in brew: mimalloc
     brew install $SYSDEP_ASSUME_YES \
         boost \
-        catch2 \
         cpp-gsl \
         fontconfig \
         fmt \
