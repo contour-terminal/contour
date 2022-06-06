@@ -28,7 +28,6 @@
     #include <crispy/sse2neon.h>
 #endif
 
-
 #define DEBUG_STRONG_LRU_HASHTABLE 1
 
 #if defined(NDEBUG) && defined(DEBUG_STRONG_LRU_HASHTABLE)
