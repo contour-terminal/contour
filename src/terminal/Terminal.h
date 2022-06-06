@@ -568,6 +568,9 @@ class Terminal
     void setStatusDisplay(StatusDisplayType statusDisplayType);
     void setActiveStatusDisplay(ActiveStatusDisplay activeDisplay);
 
+    bool allowInput() const noexcept { return !isModeEnabled(AnsiMode::KeyboardAction); }
+    void setAllowInput(bool enabled) noexcept { setMode(AnsiMode::KeyboardAction, !enabled); }
+
   private:
     void mainLoop();
     void refreshRenderBuffer(RenderBuffer& _output); // <- acquires the lock

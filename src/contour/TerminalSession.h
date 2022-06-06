@@ -162,6 +162,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     bool operator()(actions::SendChars const& _event);
     bool operator()(actions::ToggleAllKeyMaps);
     bool operator()(actions::ToggleFullscreen);
+    bool operator()(actions::ToggleInputProtection);
     bool operator()(actions::ToggleStatusLine);
     bool operator()(actions::ToggleTitleBar);
     bool operator()(actions::ViNormalMode);
