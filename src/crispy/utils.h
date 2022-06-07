@@ -1,5 +1,6 @@
 #pragma once
 
+#include <crispy/escape.h>
 #include <crispy/stdfs.h>
 
 #include <fmt/format.h>
@@ -16,8 +17,6 @@
 #include <string_view>
 #include <unordered_map>
 #include <vector>
-
-#include "crispy/escape.h"
 
 namespace crispy
 {
@@ -425,6 +424,54 @@ inline std::string replace(std::string_view text, std::string_view pattern, T&& 
     os << value;
     os << text.substr(i + pattern.size());
     return os.str();
+}
+
+inline FileSystem::path homeResolvedPath(std::string input, FileSystem::path homeDirectory)
+{
+    if (!input.empty())
+    {
+        bool const pathSepFound = input.size() >= 2 && (input[1] == '/' || input[1] == '\\');
+        auto subPath = input.substr(pathSepFound ? 2 : 1);
+        return std::move(homeDirectory) / FileSystem::path(subPath);
+    }
+
+    return FileSystem::path(input);
+}
+
+template <typename VariableReplacer>
+inline std::string replaceVariables(std::string_view text, VariableReplacer replace)
+{
+    using namespace std::string_view_literals;
+
+    auto output = std::string {};
+    auto constexpr npos = std::string_view::npos;
+    auto i = std::string_view::size_type { 0 };
+
+    auto constexpr markerStart = "${"sv;
+    auto constexpr markerEnd = "}"sv;
+
+    while (i != npos)
+    {
+        auto const markerStartOffset = text.find(markerStart, i);
+        if (markerStartOffset == npos)
+            break;
+
+        auto const gapText = text.substr(i, markerStartOffset - i);
+        output += gapText;
+
+        auto const markerEndOffset = text.find(markerEnd, markerStartOffset + markerStart.size());
+        if (markerEndOffset == npos)
+            break; // Invalid variable format. Closing variable marker not found.
+
+        auto const nameLength = markerEndOffset - (markerStartOffset + markerStart.size());
+        auto const name = text.substr(markerStartOffset + markerStart.size(), nameLength);
+        output += replace(name);
+
+        i = markerEndOffset + markerEnd.size();
+    }
+    output += text.substr(i);
+
+    return output;
 }
 
 // https://graphics.stanford.edu/~seander/bithacks.html#RoundUpPowerOf2
