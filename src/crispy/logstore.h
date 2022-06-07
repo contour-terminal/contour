@@ -23,6 +23,7 @@
 #include <functional>
 #include <iostream>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -198,6 +199,14 @@ class Sink
         Sink(_enabled, [out = &_output](std::string_view text) {
             *out << text;
             out->flush();
+        })
+    {
+    }
+
+    Sink(bool enabled, std::shared_ptr<std::ostream> f):
+        Sink(enabled, [f = move(f)](std::string_view text) {
+            *f << text;
+            f->flush();
         })
     {
     }
