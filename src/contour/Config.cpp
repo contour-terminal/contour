@@ -38,6 +38,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -55,12 +56,15 @@ auto constexpr MinimumFontSize = text::font_size { 8.0 };
 
 using namespace std;
 using crispy::escape;
+using crispy::homeResolvedPath;
+using crispy::replaceVariables;
 using crispy::toLower;
 using crispy::toUpper;
 using crispy::unescape;
 
 using terminal::Height;
 using terminal::ImageSize;
+using terminal::Process;
 using terminal::Width;
 
 using terminal::ColumnCount;
@@ -85,6 +89,16 @@ namespace
 #endif
         return stringStream.str();
     }
+
+    struct VariableReplacer
+    {
+        auto operator()(string_view name) -> string
+        {
+            if (name == "pid")
+                return processIdAsString();
+            return ""s;
+        }
+    };
 } // namespace
 
 using actions::Action;
@@ -888,11 +902,7 @@ Config loadConfigFromFile(FileSystem::path const& _fileName)
 
 std::shared_ptr<terminal::BackgroundImage const> loadImage(string const& fileName, float opacity, bool blur)
 {
-    FileSystem::path resolvedFileName;
-    if (!fileName.empty() && fileName[0] == '~')
-        resolvedFileName = terminal::Process::homeDirectory() / fileName.substr(1);
-    else
-        resolvedFileName = fileName;
+    auto const resolvedFileName = homeResolvedPath(fileName, Process::homeDirectory());
 
     auto backgroundImage = terminal::BackgroundImage {};
     backgroundImage.location = resolvedFileName;
@@ -1220,7 +1230,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
         if (!profile.shell.arguments.empty())
             errorlog()("No shell defined but arguments. Ignoring arguments.");
 
-        auto loginShell = terminal::Process::loginShell();
+        auto loginShell = Process::loginShell();
         profile.shell.program = loginShell.front();
         loginShell.erase(loginShell.begin());
         profile.shell.arguments = loginShell;
@@ -1246,14 +1256,9 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     tryLoadChildRelative(_usedKeys, _profile, basePath, "initial_working_directory", strValue);
     if (strValue.empty())
         profile.shell.workingDirectory = FileSystem::current_path();
-    else if (strValue[0] == '~')
-    {
-        bool const delim = strValue.size() >= 2 && (strValue[1] == '/' || strValue[1] == '\\');
-        auto const subPath = FileSystem::path(strValue.substr(delim ? 2 : 1));
-        profile.shell.workingDirectory = terminal::Process::homeDirectory() / subPath;
-    }
-    else
-        profile.shell.workingDirectory = FileSystem::path(strValue);
+
+    profile.shell.workingDirectory =
+        homeResolvedPath(profile.shell.workingDirectory.generic_string(), Process::homeDirectory());
 
     profile.shell.env["TERMINAL_NAME"] = "contour";
     profile.shell.env["TERMINAL_VERSION_TRIPLE"] =
@@ -1648,11 +1653,9 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
     auto logFilePath = ""s;
     tryLoadValue(usedKeys, doc, "logging.file", logFilePath);
 
-    logFilePath = crispy::replace(logFilePath, "${pid}", processIdAsString());
-
-    if (!logFilePath.empty() && logFilePath[0] == '~')
-        logFilePath =
-            (terminal::Process::homeDirectory() / FileSystem::path(logFilePath.substr(2))).generic_string();
+    logFilePath =
+        homeResolvedPath(replaceVariables(logFilePath, VariableReplacer()), Process::homeDirectory())
+            .generic_string();
 
     if (!logFilePath.empty())
     {
