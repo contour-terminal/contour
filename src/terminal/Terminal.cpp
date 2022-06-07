@@ -81,7 +81,8 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
                    bool _sixelCursorConformance,
                    ColorPalette _colorPalette,
                    double _refreshRate,
-                   bool _allowReflowOnResize):
+                   bool _allowReflowOnResize,
+                   chrono::milliseconds _highlightTimeout):
     changes_ { 0 },
     eventListener_ { _eventListener },
     refreshInterval_ { static_cast<long long>(1000.0 / _refreshRate) },
@@ -119,7 +120,8 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
                 [this]() {
                     breakLoopAndRefreshRenderBuffer();
                 } },
-    selectionHelper_ { this }
+    selectionHelper_ { this },
+    highlightTimeout_(_highlightTimeout)
 {
 #if 0
     hardReset();
@@ -407,7 +409,6 @@ void Terminal::updateIndicatorStatusLine()
             case ViMode::Visual: return "VISUAL"sv;
             case ViMode::VisualLine: return "VISUAL LINE"sv;
             case ViMode::VisualBlock: return "VISUAL BLOCK"sv;
-            case ViMode::NormalMotionVisual: return "NORMAL (VISUAL MOTION)"sv;
         }
         crispy::unreachable();
     }(inputHandler().mode());
@@ -1690,4 +1691,42 @@ void Terminal::setActiveStatusDisplay(ActiveStatusDisplay activeDisplay)
     }
 }
 
+bool Terminal::isHighlighted(CellLocation _cell) const noexcept
+{
+    return highlightRange_.has_value()
+           && std::visit(
+               [_cell](auto&& highlightRange) {
+                   using T = std::decay_t<decltype(highlightRange)>;
+                   if constexpr (std::is_same_v<T, LinearHighlight>)
+                   {
+                       return crispy::ascending(highlightRange.from, _cell, highlightRange.to)
+                              || crispy::ascending(highlightRange.to, _cell, highlightRange.from);
+                   }
+                   else
+                   {
+                       return crispy::ascending(highlightRange.from.line, _cell.line, highlightRange.to.line)
+                              && crispy::ascending(
+                                  highlightRange.from.column, _cell.column, highlightRange.to.column);
+                   }
+               },
+               highlightRange_.value());
+}
+
+void Terminal::resetHighlight()
+{
+    highlightRange_ = std::nullopt;
+    eventListener_.screenUpdated();
+}
+
+void Terminal::setHighlightRange(HighlightRange _range)
+{
+    if (std::holds_alternative<RectangularHighlight>(_range))
+    {
+        auto range = std::get<RectangularHighlight>(_range);
+        auto points = orderedPoints(range.from, range.to);
+        _range = RectangularHighlight { { points.first, points.second } };
+    }
+    highlightRange_ = _range;
+    eventListener_.updateHighlights();
+}
 } // namespace terminal

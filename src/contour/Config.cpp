@@ -998,6 +998,22 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _baseP
         }
     }
 
+    if (auto highlight = _node["vi_mode_highlight"]; highlight)
+    {
+        _usedKeys.emplace(_basePath + ".vi_mode_highlight");
+        if (auto color = highlight["foreground"]; color && color.IsScalar() && !color.as<string>().empty())
+        {
+            _usedKeys.emplace(_basePath + ".vi_mode_highlight.foreground");
+            colors.highlightForeground = color.as<string>();
+        }
+
+        if (auto color = highlight["background"]; color && color.IsScalar() && !color.as<string>().empty())
+        {
+            _usedKeys.emplace(_basePath + ".vi_mode_highlight.background");
+            colors.highlightBackground = color.as<string>();
+        }
+    }
+
     auto const loadColorMap = [&](YAML::Node const& _parent, string const& _key, size_t _offset) -> bool {
         auto node = _parent[_key];
         if (!node)
@@ -1531,6 +1547,10 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
 
     strValue = "underline"; // TODO: fmt::format("{}", profile.hyperlinkDecoration.hover);
     tryLoadChildRelative(_usedKeys, _profile, basePath, "hyperlink_decoration.hover", strValue);
+
+    auto uintValue = profile.highlightTimeout.count();
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "vi_mode_highlight_timeout", uintValue);
+    profile.highlightTimeout = chrono::milliseconds(uintValue);
     if (auto const pdeco = terminal::renderer::to_decorator(strValue); pdeco.has_value())
         profile.hyperlinkDecoration.hover = *pdeco;
 

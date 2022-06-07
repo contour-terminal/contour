@@ -47,12 +47,13 @@ namespace
                                          Color foregroundColor,
                                          Color backgroundColor,
                                          bool _selected,
-                                         bool _isCursor)
+                                         bool _isCursor,
+                                         bool _isHighlighted)
     {
         bool const isCellHidden = _cellFlags & CellFlags::Hidden;
         auto const [fg, bg] =
             makeColors(_colorPalette, _cellFlags, _reverseVideo, foregroundColor, backgroundColor);
-        if (!_selected && !_isCursor)
+        if (!_selected && !_isCursor && !_isHighlighted)
         {
             if (isCellHidden)
                 return tuple { bg, bg };
@@ -78,6 +79,10 @@ namespace
         auto const [selectionFg, selectionBg] = isCellHidden
                                                     ? getSelectionColor(fg, fg, _selected, _colorPalette)
                                                     : getSelectionColor(fg, bg, _selected, _colorPalette);
+        if (!_isCursor && _isHighlighted)
+            return { isCellHidden ? _colorPalette.highlightBackground : _colorPalette.highlightForeground,
+                     _colorPalette.highlightBackground };
+
         if (!_isCursor)
             return tuple { selectionFg, selectionBg };
 
@@ -233,6 +238,7 @@ std::tuple<RGBColor, RGBColor> RenderBufferBuilder<Cell>::makeColorsForCell(Cell
     // clang-format on
 
     auto const selected = terminal.isSelected(CellLocation { gridPosition.line, gridPosition.column });
+    auto const highlighted = terminal.isHighlighted(CellLocation { gridPosition.line, gridPosition.column });
 
     return makeColors(terminal.colorPalette(),
                       cellFlags,
@@ -240,7 +246,8 @@ std::tuple<RGBColor, RGBColor> RenderBufferBuilder<Cell>::makeColorsForCell(Cell
                       foregroundColor,
                       backgroundColor,
                       selected,
-                      paintCursor);
+                      paintCursor,
+                      highlighted);
 }
 
 template <typename Cell>

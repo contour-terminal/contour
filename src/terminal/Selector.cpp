@@ -44,15 +44,6 @@ namespace // {{{ helper
 
         return { move(result), from, to };
     }
-
-    // Constructs a top-left and bottom-right coordinate-pair from given input.
-    constexpr pair<CellLocation, CellLocation> orderedPoints(CellLocation a, CellLocation b) noexcept
-    {
-        auto const topLeft = CellLocation { min(a.line, b.line), min(a.column, b.column) };
-        auto const bottomRight = CellLocation { max(a.line, b.line), max(a.column, b.column) };
-        return pair { topLeft, bottomRight };
-    }
-
 } // namespace
 // }}}
 

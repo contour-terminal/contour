@@ -106,6 +106,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     void setTerminalProfile(std::string const& _configProfileName) override;
     void discardImage(terminal::Image const&) override;
     void inputModeChanged(terminal::ViMode mode) override;
+    void updateHighlights() override;
 
     // Input Events
     using Timestamp = std::chrono::steady_clock::time_point;
@@ -190,6 +191,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
 
   public Q_SLOTS:
     void onConfigReload();
+    void onHighlightUpdate();
 
   private:
     // helpers

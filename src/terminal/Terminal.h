@@ -75,6 +75,7 @@ class Terminal
         virtual void setTerminalProfile(std::string const& /*_configProfileName*/) {}
         virtual void discardImage(Image const&) {}
         virtual void inputModeChanged(ViMode /*mode*/) {}
+        virtual void updateHighlights() {}
     };
 
     Terminal(std::unique_ptr<Pty> _pty,
@@ -92,7 +93,8 @@ class Terminal
              bool _sixelCursorConformance = true,
              ColorPalette _colorPalette = {},
              double _refreshRate = 30.0,
-             bool _allowReflowOnResize = true);
+             bool _allowReflowOnResize = true,
+             std::chrono::milliseconds _highlightTimeout = std::chrono::milliseconds { 150 });
     ~Terminal() = default;
 
     void start();
@@ -136,6 +138,7 @@ class Terminal
     void setForegroundColor(Color _color);
     void setBackgroundColor(Color _color);
     void setUnderlineColor(Color _color);
+    void setHighlightRange(HighlightRange _range);
 
     // {{{ cursor
     Cursor const& cursor() const noexcept { return state_.cursor; }
@@ -267,6 +270,7 @@ class Terminal
     bool handleMouseSelection(Modifier _modifier, Timestamp _now);
 
     void inputModeChanged(ViMode mode) { eventListener_.inputModeChanged(mode); }
+    void updateHighlights() { eventListener_.updateHighlights(); }
 
     bool applicationCursorKeys() const noexcept { return state_.inputGenerator.applicationCursorKeys(); }
     bool applicationKeypad() const noexcept { return state_.inputGenerator.applicationKeypad(); }
@@ -384,6 +388,7 @@ class Terminal
     bool isAlternateScreen() const noexcept { return state_.screenType == ScreenType::Alternate; }
     ScreenType screenType() const noexcept { return state_.screenType; }
     void setScreen(ScreenType screenType);
+    void setHighlightTimeout(std::chrono::milliseconds timeout) { highlightTimeout_ = timeout; }
 
     Screen<Cell> const& primaryScreen() const noexcept { return primaryScreen_; }
     Screen<Cell>& primaryScreen() noexcept { return primaryScreen_; }
@@ -436,6 +441,7 @@ class Terminal
 
     Selection const* selector() const noexcept { return selection_.get(); }
     Selection* selector() noexcept { return selection_.get(); }
+    std::chrono::milliseconds highlightTimeout() const noexcept { return highlightTimeout_; }
 
     template <typename RenderTarget>
     void renderSelection(RenderTarget _renderTarget) const
@@ -472,6 +478,8 @@ class Terminal
     {
         return selection_ && selection_->state() != Selection::State::Waiting && selection_->contains(_coord);
     }
+
+    bool isHighlighted(CellLocation _cell) const noexcept;
 
     /// Sets or resets to a new selection.
     void setSelector(std::unique_ptr<Selection> _selector) { selection_ = std::move(_selector); }
@@ -564,6 +572,7 @@ class Terminal
 
     ViInputHandler& inputHandler() noexcept { return state_.inputHandler; }
     ViInputHandler const& inputHandler() const noexcept { return state_.inputHandler; }
+    void resetHighlight();
 
     void setStatusDisplay(StatusDisplayType statusDisplayType);
     void setActiveStatusDisplay(ActiveStatusDisplay activeDisplay);
@@ -652,6 +661,8 @@ class Terminal
         [[nodiscard]] int cellWidth(CellLocation _pos) const noexcept override;
     };
     SelectionHelper selectionHelper_;
+    std::optional<HighlightRange> highlightRange_ = std::nullopt;
+    std::chrono::milliseconds highlightTimeout_;
 };
 
 } // namespace terminal

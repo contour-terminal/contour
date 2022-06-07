@@ -121,7 +121,8 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
                 config_.sixelCursorConformance,
                 profile_.colors,
                 _display ? _display->refreshRate() : 50.0,
-                config_.reflowOnResize },
+                config_.reflowOnResize,
+                profile_.highlightTimeout },
     display_ { _display.release() }
 {
     if (_liveConfig)
@@ -467,8 +468,7 @@ void TerminalSession::inputModeChanged(terminal::ViMode mode)
     switch (mode)
     {
         case ViMode::Insert: configureCursor(profile_.inputModes.insert.cursor); break;
-        case ViMode::Normal:
-        case ViMode::NormalMotionVisual: configureCursor(profile_.inputModes.normal.cursor); break;
+        case ViMode::Normal: configureCursor(profile_.inputModes.normal.cursor); break;
         case ViMode::Visual:
         case ViMode::VisualLine:
         case ViMode::VisualBlock: configureCursor(profile_.inputModes.visual.cursor); break;
@@ -607,6 +607,15 @@ void TerminalSession::sendFocusOutEvent()
     scheduleRedraw();
 }
 
+void TerminalSession::updateHighlights()
+{
+    QTimer::singleShot(terminal().highlightTimeout(), this, SLOT(onHighlightUpdate()));
+}
+
+void TerminalSession::onHighlightUpdate()
+{
+    terminal_.resetHighlight();
+}
 // }}}
 // {{{ Actions
 bool TerminalSession::operator()(actions::CancelSelection)
@@ -1040,6 +1049,7 @@ void TerminalSession::configureTerminal()
     terminal_.colorPalette() = profile_.colors;
     terminal_.defaultColorPalette() = profile_.colors;
     terminal_.setMaxHistoryLineCount(profile_.maxHistoryLineCount);
+    terminal_.setHighlightTimeout(profile_.highlightTimeout);
 }
 
 void TerminalSession::configureCursor(config::CursorConfig const& cursorConfig)

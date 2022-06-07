@@ -96,9 +96,6 @@ bool ViInputHandler::sendKeyPressEvent(Key key, Modifier modifier)
     {
         case ViMode::Insert:
             return false;
-        case ViMode::NormalMotionVisual:
-            setMode(ViMode::Normal);
-            [[fallthrough]];
         case ViMode::Normal:
         case ViMode::Visual:
         case ViMode::VisualLine:
@@ -133,9 +130,6 @@ bool ViInputHandler::sendCharPressEvent(char32_t ch, Modifier modifier)
     {
         case ViMode::Insert:
             return false;
-        case ViMode::NormalMotionVisual:
-            setMode(ViMode::Normal);
-            [[fallthrough]];
         case ViMode::Normal:
             handleNormalMode(ch, modifier);
             return true;
@@ -334,7 +328,6 @@ bool ViInputHandler::parseTextObject(char32_t ch, Modifier modifier)
         {
             case ViMode::Insert:
                 break;
-            case ViMode::NormalMotionVisual:
             case ViMode::Normal:
                 if (pendingTextObjectScope && pendingOperator && *pendingOperator == ViOperator::Yank)
                     yank(*pendingTextObjectScope, *textObject);
@@ -372,7 +365,7 @@ bool ViInputHandler::parseModeSwitch(char32_t ch, Modifier modifier)
             return true;
         case 'a'_key:
         case 'i'_key:
-            if (!pendingOperator && (viMode == ViMode::Normal || viMode == ViMode::NormalMotionVisual))
+            if (!pendingOperator && viMode == ViMode::Normal )
             {
                 toggleMode(ViMode::Insert);
                 return true;

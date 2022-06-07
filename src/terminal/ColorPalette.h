@@ -167,6 +167,8 @@ struct ColorPalette
     } hyperlinkDecoration;
 
     std::shared_ptr<BackgroundImage const> backgroundImage;
+    RGBColor highlightForeground = 0x1D1F21_rgb;
+    RGBColor highlightBackground = 0xffA500_rgb;
 };
 
 enum class ColorTarget
