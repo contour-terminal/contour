@@ -15,6 +15,8 @@
 
 #include <catch2/catch.hpp>
 
+using std::string;
+using std::string_view;
 using namespace std::string_view_literals;
 
 TEST_CASE("utils.split.0")
@@ -126,4 +128,29 @@ TEST_CASE("fromHexString")
     CHECK(crispy::fromHexString(""sv).value() == ""sv);
     CHECK(crispy::fromHexString("61"sv).value() == "a"sv);
     CHECK(crispy::fromHexString("4162"sv).value() == "Ab"sv);
+}
+
+struct VariableCollector
+{
+    string operator()(string_view name) const { return fmt::format("({})", name); }
+};
+
+TEST_CASE("replaceVariables")
+{
+    // clang-format off
+    CHECK(""sv == crispy::replaceVariables("", VariableCollector()));
+    CHECK("()"sv == crispy::replaceVariables("${}", VariableCollector()));
+    CHECK("(Hello)"sv == crispy::replaceVariables("${Hello}", VariableCollector()));
+    CHECK("(Hello) World"sv == crispy::replaceVariables("${Hello} World", VariableCollector()));
+    CHECK("Hello, (World)!"sv == crispy::replaceVariables("Hello, ${World}!", VariableCollector()));
+    CHECK("(one), (two), (three)"sv == crispy::replaceVariables("${one}, ${two}, ${three}", VariableCollector()));
+    // clang-format on
+}
+
+TEST_CASE("homeResolvedPath")
+{
+    CHECK("" == crispy::homeResolvedPath("", "/var/tmp").generic_string());
+
+    CHECK("/var/tmp/workspace" == crispy::homeResolvedPath("~workspace", "/var/tmp").generic_string());
+    CHECK("/var/tmp/workspace" == crispy::homeResolvedPath("~/workspace", "/var/tmp").generic_string());
 }
