@@ -86,7 +86,7 @@ struct formatter<crispy::ImageSize>
     template <typename FormatContext>
     auto format(crispy::ImageSize value, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "{}x{}", value.width, value.height);
+        return fmt::format_to(ctx.out(), "{}x{}", value.width, value.height);
     }
 };
 } // namespace fmt

@@ -178,10 +178,10 @@ struct formatter<text::bitmap_format>
     {
         switch (value)
         {
-            case text::bitmap_format::alpha_mask: return format_to(ctx.out(), "alpha_mask");
-            case text::bitmap_format::rgb: return format_to(ctx.out(), "rgb");
-            case text::bitmap_format::rgba: return format_to(ctx.out(), "rgba");
-            default: return format_to(ctx.out(), "{}", static_cast<unsigned>(value));
+            case text::bitmap_format::alpha_mask: return fmt::format_to(ctx.out(), "alpha_mask");
+            case text::bitmap_format::rgb: return fmt::format_to(ctx.out(), "rgb");
+            case text::bitmap_format::rgba: return fmt::format_to(ctx.out(), "rgba");
+            default: return fmt::format_to(ctx.out(), "{}", static_cast<unsigned>(value));
         }
     }
 };
@@ -197,13 +197,13 @@ struct formatter<text::glyph_position>
     template <typename FormatContext>
     auto format(text::glyph_position const& _gpos, FormatContext& ctx)
     {
-        return format_to(ctx.out(),
-                         "({}+{}+{}|{}+{})",
-                         _gpos.glyph.index.value,
-                         _gpos.offset.x,
-                         _gpos.offset.y,
-                         _gpos.advance.x,
-                         _gpos.advance.y);
+        return fmt::format_to(ctx.out(),
+                              "({}+{}+{}|{}+{})",
+                              _gpos.glyph.index.value,
+                              _gpos.offset.x,
+                              _gpos.offset.y,
+                              _gpos.advance.x,
+                              _gpos.advance.y);
     }
 };
 
@@ -218,12 +218,12 @@ struct formatter<text::rasterized_glyph>
     template <typename FormatContext>
     auto format(text::rasterized_glyph const& _glyph, FormatContext& ctx)
     {
-        return format_to(ctx.out(),
-                         "rasterized_glyph({}, {}+{}, {})",
-                         _glyph.index.value,
-                         _glyph.bitmapSize,
-                         _glyph.position,
-                         _glyph.format);
+        return fmt::format_to(ctx.out(),
+                              "rasterized_glyph({}, {}+{}, {})",
+                              _glyph.index.value,
+                              _glyph.bitmapSize,
+                              _glyph.position,
+                              _glyph.format);
     }
 };
 } // namespace fmt

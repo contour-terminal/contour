@@ -123,7 +123,7 @@ std::optional<Action> fromString(std::string const& _name);
             template <typename FormatContext>                           \
             auto format(contour::actions::T const&, FormatContext& ctx) \
             {                                                           \
-                return format_to(ctx.out(), "{}", #T);                  \
+                return fmt::format_to(ctx.out(), "{}", #T);             \
             }                                                           \
         };                                                              \
     }
@@ -172,7 +172,7 @@ DECLARE_ACTION_FMT(WriteScreen)
     if (std::holds_alternative<contour::actions::T>(_action))                  \
     {                                                                          \
         contour::actions::T const& a = std::get<contour::actions::T>(_action); \
-        return format_to(ctx.out(), "{}", a);                                  \
+        return fmt::format_to(ctx.out(), "{}", a);                             \
     }
 
 namespace fmt
@@ -225,7 +225,7 @@ struct formatter<contour::actions::Action>
         HANDLE_ACTION(ViNormalMode);
         HANDLE_ACTION(WriteScreen);
         // }}}
-        return format_to(ctx.out(), "UNKNOWN ACTION");
+        return fmt::format_to(ctx.out(), "UNKNOWN ACTION");
     }
 };
 } // namespace fmt

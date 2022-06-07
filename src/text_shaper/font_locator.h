@@ -92,7 +92,7 @@ struct formatter<text::font_path>
     template <typename FormatContext>
     auto format(text::font_path path, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "path {}", path.value);
+        return fmt::format_to(ctx.out(), "path {}", path.value);
     }
 };
 
@@ -107,7 +107,7 @@ struct formatter<text::font_memory_ref>
     template <typename FormatContext>
     auto format(text::font_memory_ref ref, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "in-memory: {}", ref.identifier);
+        return fmt::format_to(ctx.out(), "in-memory: {}", ref.identifier);
     }
 };
 
@@ -123,10 +123,10 @@ struct formatter<text::font_source>
     auto format(text::font_source source, FormatContext& ctx)
     {
         if (std::holds_alternative<text::font_path>(source))
-            return format_to(ctx.out(), "{}", std::get<text::font_path>(source));
+            return fmt::format_to(ctx.out(), "{}", std::get<text::font_path>(source));
         if (std::holds_alternative<text::font_memory_ref>(source))
-            return format_to(ctx.out(), "{}", std::get<text::font_memory_ref>(source));
-        return format_to(ctx.out(), "UNKNOWN SOURCE");
+            return fmt::format_to(ctx.out(), "{}", std::get<text::font_memory_ref>(source));
+        return fmt::format_to(ctx.out(), "UNKNOWN SOURCE");
     }
 };
 } // namespace fmt

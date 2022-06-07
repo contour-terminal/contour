@@ -322,13 +322,13 @@ struct formatter<terminal::renderer::Arc>
         using terminal::renderer::Arc;
         switch (value)
         {
-            case Arc::NoArc: return format_to(ctx.out(), "NoArc");
-            case Arc::TopLeft: return format_to(ctx.out(), "TopLeft");
-            case Arc::TopRight: return format_to(ctx.out(), "TopRight");
-            case Arc::BottomLeft: return format_to(ctx.out(), "BottomLeft");
-            case Arc::BottomRight: return format_to(ctx.out(), "BottomRight");
+            case Arc::NoArc: return fmt::format_to(ctx.out(), "NoArc");
+            case Arc::TopLeft: return fmt::format_to(ctx.out(), "TopLeft");
+            case Arc::TopRight: return fmt::format_to(ctx.out(), "TopRight");
+            case Arc::BottomLeft: return fmt::format_to(ctx.out(), "BottomLeft");
+            case Arc::BottomRight: return fmt::format_to(ctx.out(), "BottomRight");
         }
-        return format_to(ctx.out(), "?");
+        return fmt::format_to(ctx.out(), "?");
     }
 };
 } // namespace fmt

@@ -221,14 +221,14 @@ struct formatter<terminal::ViMode>
         using terminal::ViMode;
         switch (mode)
         {
-            case ViMode::Normal: return format_to(ctx.out(), "Normal");
-            case ViMode::Insert: return format_to(ctx.out(), "Insert");
-            case ViMode::Visual: return format_to(ctx.out(), "Visual");
-            case ViMode::VisualLine: return format_to(ctx.out(), "VisualLine");
-            case ViMode::VisualBlock: return format_to(ctx.out(), "VisualBlock");
-            case ViMode::NormalMotionVisual: return format_to(ctx.out(), "NormalMotionVisual");
+            case ViMode::Normal: return fmt::format_to(ctx.out(), "Normal");
+            case ViMode::Insert: return fmt::format_to(ctx.out(), "Insert");
+            case ViMode::Visual: return fmt::format_to(ctx.out(), "Visual");
+            case ViMode::VisualLine: return fmt::format_to(ctx.out(), "VisualLine");
+            case ViMode::VisualBlock: return fmt::format_to(ctx.out(), "VisualBlock");
+            case ViMode::NormalMotionVisual: return fmt::format_to(ctx.out(), "NormalMotionVisual");
         }
-        return format_to(ctx.out(), "({})", static_cast<unsigned>(mode));
+        return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(mode));
     }
 };
 
@@ -246,10 +246,10 @@ struct formatter<terminal::TextObjectScope>
         using TextObjectScope = terminal::TextObjectScope;
         switch (scope)
         {
-            case TextObjectScope::Inner: return format_to(ctx.out(), "inner");
-            case TextObjectScope::A: return format_to(ctx.out(), "a");
+            case TextObjectScope::Inner: return fmt::format_to(ctx.out(), "inner");
+            case TextObjectScope::A: return fmt::format_to(ctx.out(), "a");
         }
-        return format_to(ctx.out(), "({})", static_cast<unsigned>(scope));
+        return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(scope));
     }
 };
 
@@ -267,17 +267,17 @@ struct formatter<terminal::TextObject>
         using terminal::TextObject;
         switch (value)
         {
-            case TextObject::AngleBrackets: return format_to(ctx.out(), "AngleBrackets");
-            case TextObject::BackQuotes: return format_to(ctx.out(), "BackQuotes");
-            case TextObject::CurlyBrackets: return format_to(ctx.out(), "CurlyBrackets");
-            case TextObject::DoubleQuotes: return format_to(ctx.out(), "DoubleQuotes");
-            case TextObject::Paragraph: return format_to(ctx.out(), "Paragraph");
-            case TextObject::RoundBrackets: return format_to(ctx.out(), "RoundBrackets");
-            case TextObject::SingleQuotes: return format_to(ctx.out(), "SingleQuotes");
-            case TextObject::SquareBrackets: return format_to(ctx.out(), "SquareBrackets");
-            case TextObject::Word: return format_to(ctx.out(), "Word");
+            case TextObject::AngleBrackets: return fmt::format_to(ctx.out(), "AngleBrackets");
+            case TextObject::BackQuotes: return fmt::format_to(ctx.out(), "BackQuotes");
+            case TextObject::CurlyBrackets: return fmt::format_to(ctx.out(), "CurlyBrackets");
+            case TextObject::DoubleQuotes: return fmt::format_to(ctx.out(), "DoubleQuotes");
+            case TextObject::Paragraph: return fmt::format_to(ctx.out(), "Paragraph");
+            case TextObject::RoundBrackets: return fmt::format_to(ctx.out(), "RoundBrackets");
+            case TextObject::SingleQuotes: return fmt::format_to(ctx.out(), "SingleQuotes");
+            case TextObject::SquareBrackets: return fmt::format_to(ctx.out(), "SquareBrackets");
+            case TextObject::Word: return fmt::format_to(ctx.out(), "Word");
         }
-        return format_to(ctx.out(), "({})", static_cast<unsigned>(value));
+        return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(value));
     }
 };
 template <>
@@ -294,13 +294,13 @@ struct formatter<terminal::ViOperator>
         using terminal::ViOperator;
         switch (op)
         {
-            case ViOperator::MoveCursor: return format_to(ctx.out(), "MoveCursor");
-            case ViOperator::Yank: return format_to(ctx.out(), "Yank");
-            case ViOperator::Paste: return format_to(ctx.out(), "Paste");
+            case ViOperator::MoveCursor: return fmt::format_to(ctx.out(), "MoveCursor");
+            case ViOperator::Yank: return fmt::format_to(ctx.out(), "Yank");
+            case ViOperator::Paste: return fmt::format_to(ctx.out(), "Paste");
             case ViOperator::ReverseSearchCurrentWord:
-                return format_to(ctx.out(), "ReverseSearchCurrentWord");
+                return fmt::format_to(ctx.out(), "ReverseSearchCurrentWord");
         }
-        return format_to(ctx.out(), "({})", static_cast<unsigned>(op));
+        return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(op));
     }
 };
 
@@ -318,31 +318,31 @@ struct formatter<terminal::ViMotion>
         using terminal::ViMotion;
         switch (motion)
         {
-            case ViMotion::Explicit: return format_to(ctx.out(), "Explicit");
-            case ViMotion::Selection: return format_to(ctx.out(), "Selection");
-            case ViMotion::FullLine: return format_to(ctx.out(), "FullLine");
-            case ViMotion::CharLeft: return format_to(ctx.out(), "CharLeft");
-            case ViMotion::CharRight: return format_to(ctx.out(), "CharRight");
-            case ViMotion::ScreenColumn: return format_to(ctx.out(), "ScreenColumn");
-            case ViMotion::FileBegin: return format_to(ctx.out(), "FileBegin");
-            case ViMotion::FileEnd: return format_to(ctx.out(), "FileEnd");
-            case ViMotion::LineBegin: return format_to(ctx.out(), "LineBegin");
-            case ViMotion::LineTextBegin: return format_to(ctx.out(), "LineTextBegin");
-            case ViMotion::LineDown: return format_to(ctx.out(), "LineDown");
-            case ViMotion::LineEnd: return format_to(ctx.out(), "LineEnd");
-            case ViMotion::LineUp: return format_to(ctx.out(), "LineUp");
-            case ViMotion::PageDown: return format_to(ctx.out(), "PageDown");
-            case ViMotion::PageUp: return format_to(ctx.out(), "PageUp");
-            case ViMotion::ParagraphBackward: return format_to(ctx.out(), "ParagraphBackward");
-            case ViMotion::ParagraphForward: return format_to(ctx.out(), "ParagraphForward");
-            case ViMotion::ParenthesisMatching: return format_to(ctx.out(), "ParenthesisMatching");
-            case ViMotion::SearchResultBackward: return format_to(ctx.out(), "SearchResultBackward");
-            case ViMotion::SearchResultForward: return format_to(ctx.out(), "SearchResultForward");
-            case ViMotion::WordBackward: return format_to(ctx.out(), "WordBackward");
-            case ViMotion::WordEndForward: return format_to(ctx.out(), "WordEndForward");
-            case ViMotion::WordForward: return format_to(ctx.out(), "WordForward");
+            case ViMotion::Explicit: return fmt::format_to(ctx.out(), "Explicit");
+            case ViMotion::Selection: return fmt::format_to(ctx.out(), "Selection");
+            case ViMotion::FullLine: return fmt::format_to(ctx.out(), "FullLine");
+            case ViMotion::CharLeft: return fmt::format_to(ctx.out(), "CharLeft");
+            case ViMotion::CharRight: return fmt::format_to(ctx.out(), "CharRight");
+            case ViMotion::ScreenColumn: return fmt::format_to(ctx.out(), "ScreenColumn");
+            case ViMotion::FileBegin: return fmt::format_to(ctx.out(), "FileBegin");
+            case ViMotion::FileEnd: return fmt::format_to(ctx.out(), "FileEnd");
+            case ViMotion::LineBegin: return fmt::format_to(ctx.out(), "LineBegin");
+            case ViMotion::LineTextBegin: return fmt::format_to(ctx.out(), "LineTextBegin");
+            case ViMotion::LineDown: return fmt::format_to(ctx.out(), "LineDown");
+            case ViMotion::LineEnd: return fmt::format_to(ctx.out(), "LineEnd");
+            case ViMotion::LineUp: return fmt::format_to(ctx.out(), "LineUp");
+            case ViMotion::PageDown: return fmt::format_to(ctx.out(), "PageDown");
+            case ViMotion::PageUp: return fmt::format_to(ctx.out(), "PageUp");
+            case ViMotion::ParagraphBackward: return fmt::format_to(ctx.out(), "ParagraphBackward");
+            case ViMotion::ParagraphForward: return fmt::format_to(ctx.out(), "ParagraphForward");
+            case ViMotion::ParenthesisMatching: return fmt::format_to(ctx.out(), "ParenthesisMatching");
+            case ViMotion::SearchResultBackward: return fmt::format_to(ctx.out(), "SearchResultBackward");
+            case ViMotion::SearchResultForward: return fmt::format_to(ctx.out(), "SearchResultForward");
+            case ViMotion::WordBackward: return fmt::format_to(ctx.out(), "WordBackward");
+            case ViMotion::WordEndForward: return fmt::format_to(ctx.out(), "WordEndForward");
+            case ViMotion::WordForward: return fmt::format_to(ctx.out(), "WordForward");
         }
-        return format_to(ctx.out(), "({})", static_cast<unsigned>(motion));
+        return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(motion));
     }
 };
 

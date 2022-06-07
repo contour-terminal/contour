@@ -128,7 +128,7 @@ struct formatter<crispy::Size>
     template <typename FormatContext>
     auto format(const crispy::Size& value, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "{}x{}", value.width, value.height);
+        return fmt::format_to(ctx.out(), "{}x{}", value.width, value.height);
     }
 };
 } // namespace fmt

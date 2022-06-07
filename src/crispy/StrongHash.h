@@ -277,7 +277,7 @@ struct formatter<crispy::StrongHash>
     template <typename FormatContext>
     auto format(crispy::StrongHash const& hash, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "{}", to_structured_string(hash));
+        return fmt::format_to(ctx.out(), "{}", to_structured_string(hash));
     }
 };
 } // namespace fmt

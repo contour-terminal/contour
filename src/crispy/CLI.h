@@ -249,18 +249,18 @@ struct formatter<crispy::cli::Value>
     auto format(crispy::cli::Value const& _value, FormatContext& ctx)
     {
         if (std::holds_alternative<bool>(_value))
-            return format_to(ctx.out(), "{}", std::get<bool>(_value));
+            return fmt::format_to(ctx.out(), "{}", std::get<bool>(_value));
         else if (std::holds_alternative<int>(_value))
-            return format_to(ctx.out(), "{}", std::get<int>(_value));
+            return fmt::format_to(ctx.out(), "{}", std::get<int>(_value));
         else if (std::holds_alternative<unsigned>(_value))
-            return format_to(ctx.out(), "{}", std::get<unsigned>(_value));
+            return fmt::format_to(ctx.out(), "{}", std::get<unsigned>(_value));
         else if (std::holds_alternative<double>(_value))
-            return format_to(ctx.out(), "{}", std::get<double>(_value));
+            return fmt::format_to(ctx.out(), "{}", std::get<double>(_value));
         else if (std::holds_alternative<std::string>(_value))
-            return format_to(ctx.out(), "{}", std::get<std::string>(_value));
+            return fmt::format_to(ctx.out(), "{}", std::get<std::string>(_value));
         else
-            return format_to(ctx.out(), "?");
-        // return format_to(ctx.out(), "{}..{}", range.from, range.to);
+            return fmt::format_to(ctx.out(), "?");
+        // return fmt::format_to(ctx.out(), "{}..{}", range.from, range.to);
     }
 };
 } // namespace fmt

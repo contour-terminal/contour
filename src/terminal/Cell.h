@@ -634,7 +634,7 @@ struct formatter<terminal::Cell>
                 codepoints += ", ";
             codepoints += fmt::format("{:02X}", static_cast<unsigned>(cell.codepoint(i)));
         }
-        return format_to(ctx.out(), "(chars={}, width={})", codepoints, cell.width());
+        return fmt::format_to(ctx.out(), "(chars={}, width={})", codepoints, cell.width());
     }
 };
 } // namespace fmt

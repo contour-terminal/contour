@@ -76,20 +76,26 @@ struct formatter<terminal::LogEvent>
         using namespace terminal;
         return std::visit(
             overloaded {
-                [&](ParserErrorEvent const& v) { return format_to(ctx.out(), "Parser Error. {}", v.reason); },
-                [&](TraceInputEvent const& v) { return format_to(ctx.out(), "Trace Input: {}", v.message); },
-                [&](RawInputEvent const& v) { return format_to(ctx.out(), "Raw Input: \"{}\"", v.sequence); },
+                [&](ParserErrorEvent const& v) {
+                    return fmt::format_to(ctx.out(), "Parser Error. {}", v.reason);
+                },
+                [&](TraceInputEvent const& v) {
+                    return fmt::format_to(ctx.out(), "Trace Input: {}", v.message);
+                },
+                [&](RawInputEvent const& v) {
+                    return fmt::format_to(ctx.out(), "Raw Input: \"{}\"", v.sequence);
+                },
                 [&](RawOutputEvent const& v) {
-                    return format_to(ctx.out(), "Raw Output: \"{}\"", v.sequence);
+                    return fmt::format_to(ctx.out(), "Raw Output: \"{}\"", v.sequence);
                 },
                 [&](InvalidOutputEvent const& v) {
-                    return format_to(ctx.out(), "Invalid output sequence: {}. {}", v.sequence, v.reason);
+                    return fmt::format_to(ctx.out(), "Invalid output sequence: {}. {}", v.sequence, v.reason);
                 },
                 [&](UnsupportedOutputEvent const& v) {
-                    return format_to(ctx.out(), "Unsupported output sequence: {}.", v.sequence);
+                    return fmt::format_to(ctx.out(), "Unsupported output sequence: {}.", v.sequence);
                 },
                 [&](TraceOutputEvent const& v) {
-                    return format_to(ctx.out(), "Trace output sequence: {}", v.sequence);
+                    return fmt::format_to(ctx.out(), "Trace output sequence: {}", v.sequence);
                 },
             },
             ev);

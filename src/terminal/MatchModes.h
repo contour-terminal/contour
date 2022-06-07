@@ -139,7 +139,7 @@ struct formatter<terminal::MatchModes>
         advance(terminal::MatchModes::Select, "Select");
         if (s.empty())
             s = "Any";
-        return format_to(_ctx.out(), "{}", s);
+        return fmt::format_to(_ctx.out(), "{}", s);
     }
 };
 } // namespace fmt

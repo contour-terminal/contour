@@ -198,11 +198,11 @@ struct formatter<terminal::Selection::State>
     {
         switch (_state)
         {
-            case State::Waiting: return format_to(ctx.out(), "Waiting");
-            case State::InProgress: return format_to(ctx.out(), "InProgress");
-            case State::Complete: return format_to(ctx.out(), "Complete");
+            case State::Waiting: return fmt::format_to(ctx.out(), "Waiting");
+            case State::InProgress: return fmt::format_to(ctx.out(), "InProgress");
+            case State::Complete: return fmt::format_to(ctx.out(), "Complete");
         }
-        return format_to(ctx.out(), "{}", static_cast<unsigned>(_state));
+        return fmt::format_to(ctx.out(), "{}", static_cast<unsigned>(_state));
     }
 };
 
@@ -218,17 +218,17 @@ struct formatter<terminal::Selection>
     template <typename FormatContext>
     auto format(const terminal::Selection& _selector, FormatContext& ctx)
     {
-        return format_to(ctx.out(),
-                         "{}({} from {} to {})",
-                         dynamic_cast<terminal::WordWiseSelection const*>(&_selector)   ? "WordWiseSelection"
-                         : dynamic_cast<terminal::FullLineSelection const*>(&_selector) ? "FullLineSelection"
-                         : dynamic_cast<terminal::RectangularSelection const*>(&_selector)
-                             ? "RectangularSelection"
-                         : dynamic_cast<terminal::LinearSelection const*>(&_selector) ? "LinearSelection"
-                                                                                      : "Selection",
-                         _selector.state(),
-                         _selector.from(),
-                         _selector.to());
+        return fmt::format_to(
+            ctx.out(),
+            "{}({} from {} to {})",
+            dynamic_cast<terminal::WordWiseSelection const*>(&_selector)      ? "WordWiseSelection"
+            : dynamic_cast<terminal::FullLineSelection const*>(&_selector)    ? "FullLineSelection"
+            : dynamic_cast<terminal::RectangularSelection const*>(&_selector) ? "RectangularSelection"
+            : dynamic_cast<terminal::LinearSelection const*>(&_selector)      ? "LinearSelection"
+                                                                              : "Selection",
+            _selector.state(),
+            _selector.from(),
+            _selector.to());
     }
 };
 } // namespace fmt

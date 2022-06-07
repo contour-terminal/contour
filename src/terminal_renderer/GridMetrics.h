@@ -94,7 +94,7 @@ struct formatter<terminal::renderer::GridMetrics>
     template <typename FormatContext>
     auto format(terminal::renderer::GridMetrics const& v, FormatContext& ctx)
     {
-        return format_to(
+        return fmt::format_to(
             ctx.out(),
             "(pageSize={}, cellSize={}, baseline={}, underline={}@{}, margin=(left={}, bottom={}))",
             v.pageSize,

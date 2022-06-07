@@ -111,7 +111,7 @@ struct formatter<terminal::renderer::Decorator>
             "underline", "double-underline", "curly-underline", "dotted-underline", "dashed-underline",
             "overline",  "crossed-out",      "framed",          "encircle",
         };
-        return format_to(ctx.out(), "{}", mappings.at(static_cast<size_t>(value)));
+        return fmt::format_to(ctx.out(), "{}", mappings.at(static_cast<size_t>(value)));
     }
 };
 } // namespace fmt

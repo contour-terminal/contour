@@ -407,13 +407,15 @@ struct formatter<terminal::MouseProtocol>
     {
         switch (_value)
         {
-            case terminal::MouseProtocol::X10: return format_to(ctx.out(), "X10");
-            case terminal::MouseProtocol::HighlightTracking: return format_to(ctx.out(), "HighlightTracking");
-            case terminal::MouseProtocol::ButtonTracking: return format_to(ctx.out(), "ButtonTracking");
-            case terminal::MouseProtocol::NormalTracking: return format_to(ctx.out(), "NormalTracking");
-            case terminal::MouseProtocol::AnyEventTracking: return format_to(ctx.out(), "AnyEventTracking");
+            case terminal::MouseProtocol::X10: return fmt::format_to(ctx.out(), "X10");
+            case terminal::MouseProtocol::HighlightTracking:
+                return fmt::format_to(ctx.out(), "HighlightTracking");
+            case terminal::MouseProtocol::ButtonTracking: return fmt::format_to(ctx.out(), "ButtonTracking");
+            case terminal::MouseProtocol::NormalTracking: return fmt::format_to(ctx.out(), "NormalTracking");
+            case terminal::MouseProtocol::AnyEventTracking:
+                return fmt::format_to(ctx.out(), "AnyEventTracking");
         }
-        return format_to(ctx.out(), "{}", unsigned(_value));
+        return fmt::format_to(ctx.out(), "{}", unsigned(_value));
     }
 };
 
@@ -442,7 +444,7 @@ struct formatter<terminal::Modifier>
         advance(_modifier.meta(), "Meta");
         if (s.empty())
             s = "None";
-        return format_to(_ctx.out(), "{}", s);
+        return fmt::format_to(_ctx.out(), "{}", s);
     }
 };
 
@@ -459,13 +461,14 @@ struct formatter<terminal::InputGenerator::MouseWheelMode>
     {
         switch (_value)
         {
-            case terminal::InputGenerator::MouseWheelMode::Default: return format_to(_ctx.out(), "Default");
+            case terminal::InputGenerator::MouseWheelMode::Default:
+                return fmt::format_to(_ctx.out(), "Default");
             case terminal::InputGenerator::MouseWheelMode::NormalCursorKeys:
-                return format_to(_ctx.out(), "NormalCursorKeys");
+                return fmt::format_to(_ctx.out(), "NormalCursorKeys");
             case terminal::InputGenerator::MouseWheelMode::ApplicationCursorKeys:
-                return format_to(_ctx.out(), "ApplicationCursorKeys");
+                return fmt::format_to(_ctx.out(), "ApplicationCursorKeys");
         }
-        return format_to(_ctx.out(), "<{}>", unsigned(_value));
+        return fmt::format_to(_ctx.out(), "<{}>", unsigned(_value));
     }
 };
 
@@ -482,10 +485,10 @@ struct formatter<terminal::KeyMode>
     {
         switch (_value)
         {
-            case terminal::KeyMode::Application: return format_to(_ctx.out(), "Application");
-            case terminal::KeyMode::Normal: return format_to(_ctx.out(), "Normal");
+            case terminal::KeyMode::Application: return fmt::format_to(_ctx.out(), "Application");
+            case terminal::KeyMode::Normal: return fmt::format_to(_ctx.out(), "Normal");
         }
-        return format_to(_ctx.out(), "<{}>", unsigned(_value));
+        return fmt::format_to(_ctx.out(), "<{}>", unsigned(_value));
     }
 };
 
@@ -502,14 +505,14 @@ struct formatter<terminal::MouseButton>
     {
         switch (_value)
         {
-            case terminal::MouseButton::Left: return format_to(_ctx.out(), "Left");
-            case terminal::MouseButton::Right: return format_to(_ctx.out(), "Right");
-            case terminal::MouseButton::Middle: return format_to(_ctx.out(), "Middle");
-            case terminal::MouseButton::Release: return format_to(_ctx.out(), "Release");
-            case terminal::MouseButton::WheelUp: return format_to(_ctx.out(), "WheelUp");
-            case terminal::MouseButton::WheelDown: return format_to(_ctx.out(), "WheelDown");
+            case terminal::MouseButton::Left: return fmt::format_to(_ctx.out(), "Left");
+            case terminal::MouseButton::Right: return fmt::format_to(_ctx.out(), "Right");
+            case terminal::MouseButton::Middle: return fmt::format_to(_ctx.out(), "Middle");
+            case terminal::MouseButton::Release: return fmt::format_to(_ctx.out(), "Release");
+            case terminal::MouseButton::WheelUp: return fmt::format_to(_ctx.out(), "WheelUp");
+            case terminal::MouseButton::WheelDown: return fmt::format_to(_ctx.out(), "WheelDown");
         }
-        return format_to(_ctx.out(), "<{}>", unsigned(_value));
+        return fmt::format_to(_ctx.out(), "<{}>", unsigned(_value));
     }
 };
 
@@ -526,13 +529,13 @@ struct formatter<terminal::MouseTransport>
     {
         switch (_value)
         {
-            case terminal::MouseTransport::Default: return format_to(_ctx.out(), "Default");
-            case terminal::MouseTransport::Extended: return format_to(_ctx.out(), "Extended");
-            case terminal::MouseTransport::SGR: return format_to(_ctx.out(), "SGR");
-            case terminal::MouseTransport::URXVT: return format_to(_ctx.out(), "URXVT");
-            case terminal::MouseTransport::SGRPixels: return format_to(_ctx.out(), "SGR-Pixels");
+            case terminal::MouseTransport::Default: return fmt::format_to(_ctx.out(), "Default");
+            case terminal::MouseTransport::Extended: return fmt::format_to(_ctx.out(), "Extended");
+            case terminal::MouseTransport::SGR: return fmt::format_to(_ctx.out(), "SGR");
+            case terminal::MouseTransport::URXVT: return fmt::format_to(_ctx.out(), "URXVT");
+            case terminal::MouseTransport::SGRPixels: return fmt::format_to(_ctx.out(), "SGR-Pixels");
         }
-        return format_to(_ctx.out(), "<{}>", unsigned(_value));
+        return fmt::format_to(_ctx.out(), "<{}>", unsigned(_value));
     }
 };
 
@@ -549,58 +552,58 @@ struct formatter<terminal::Key>
     {
         switch (_value)
         {
-            case terminal::Key::F1: return format_to(_ctx.out(), "F1");
-            case terminal::Key::F2: return format_to(_ctx.out(), "F2");
-            case terminal::Key::F3: return format_to(_ctx.out(), "F3");
-            case terminal::Key::F4: return format_to(_ctx.out(), "F4");
-            case terminal::Key::F5: return format_to(_ctx.out(), "F5");
-            case terminal::Key::F6: return format_to(_ctx.out(), "F6");
-            case terminal::Key::F7: return format_to(_ctx.out(), "F7");
-            case terminal::Key::F8: return format_to(_ctx.out(), "F8");
-            case terminal::Key::F9: return format_to(_ctx.out(), "F9");
-            case terminal::Key::F10: return format_to(_ctx.out(), "F10");
-            case terminal::Key::F11: return format_to(_ctx.out(), "F11");
-            case terminal::Key::F12: return format_to(_ctx.out(), "F12");
-            case terminal::Key::F13: return format_to(_ctx.out(), "F13");
-            case terminal::Key::F14: return format_to(_ctx.out(), "F14");
-            case terminal::Key::F15: return format_to(_ctx.out(), "F15");
-            case terminal::Key::F16: return format_to(_ctx.out(), "F16");
-            case terminal::Key::F17: return format_to(_ctx.out(), "F17");
-            case terminal::Key::F18: return format_to(_ctx.out(), "F18");
-            case terminal::Key::F19: return format_to(_ctx.out(), "F19");
-            case terminal::Key::F20: return format_to(_ctx.out(), "F20");
-            case terminal::Key::DownArrow: return format_to(_ctx.out(), "DownArrow");
-            case terminal::Key::LeftArrow: return format_to(_ctx.out(), "LeftArrow");
-            case terminal::Key::RightArrow: return format_to(_ctx.out(), "RightArrow");
-            case terminal::Key::UpArrow: return format_to(_ctx.out(), "UpArrow");
-            case terminal::Key::Insert: return format_to(_ctx.out(), "Insert");
-            case terminal::Key::Delete: return format_to(_ctx.out(), "Delete");
-            case terminal::Key::Home: return format_to(_ctx.out(), "Home");
-            case terminal::Key::End: return format_to(_ctx.out(), "End");
-            case terminal::Key::PageUp: return format_to(_ctx.out(), "PageUp");
-            case terminal::Key::PageDown: return format_to(_ctx.out(), "PageDown");
-            case terminal::Key::Numpad_NumLock: return format_to(_ctx.out(), "Numpad_NumLock");
-            case terminal::Key::Numpad_Divide: return format_to(_ctx.out(), "Numpad_Divide");
-            case terminal::Key::Numpad_Multiply: return format_to(_ctx.out(), "Numpad_Multiply");
-            case terminal::Key::Numpad_Subtract: return format_to(_ctx.out(), "Numpad_Subtract");
-            case terminal::Key::Numpad_CapsLock: return format_to(_ctx.out(), "Numpad_CapsLock");
-            case terminal::Key::Numpad_Add: return format_to(_ctx.out(), "Numpad_Add");
-            case terminal::Key::Numpad_Decimal: return format_to(_ctx.out(), "Numpad_Decimal");
-            case terminal::Key::Numpad_Enter: return format_to(_ctx.out(), "Numpad_Enter");
-            case terminal::Key::Numpad_Equal: return format_to(_ctx.out(), "Numpad_Equal");
-            case terminal::Key::Numpad_0: return format_to(_ctx.out(), "Numpad_0");
-            case terminal::Key::Numpad_1: return format_to(_ctx.out(), "Numpad_1");
-            case terminal::Key::Numpad_2: return format_to(_ctx.out(), "Numpad_2");
-            case terminal::Key::Numpad_3: return format_to(_ctx.out(), "Numpad_3");
-            case terminal::Key::Numpad_4: return format_to(_ctx.out(), "Numpad_4");
-            case terminal::Key::Numpad_5: return format_to(_ctx.out(), "Numpad_5");
-            case terminal::Key::Numpad_6: return format_to(_ctx.out(), "Numpad_6");
-            case terminal::Key::Numpad_7: return format_to(_ctx.out(), "Numpad_7");
-            case terminal::Key::Numpad_8: return format_to(_ctx.out(), "Numpad_8");
-            case terminal::Key::Numpad_9: return format_to(_ctx.out(), "Numpad_9");
+            case terminal::Key::F1: return fmt::format_to(_ctx.out(), "F1");
+            case terminal::Key::F2: return fmt::format_to(_ctx.out(), "F2");
+            case terminal::Key::F3: return fmt::format_to(_ctx.out(), "F3");
+            case terminal::Key::F4: return fmt::format_to(_ctx.out(), "F4");
+            case terminal::Key::F5: return fmt::format_to(_ctx.out(), "F5");
+            case terminal::Key::F6: return fmt::format_to(_ctx.out(), "F6");
+            case terminal::Key::F7: return fmt::format_to(_ctx.out(), "F7");
+            case terminal::Key::F8: return fmt::format_to(_ctx.out(), "F8");
+            case terminal::Key::F9: return fmt::format_to(_ctx.out(), "F9");
+            case terminal::Key::F10: return fmt::format_to(_ctx.out(), "F10");
+            case terminal::Key::F11: return fmt::format_to(_ctx.out(), "F11");
+            case terminal::Key::F12: return fmt::format_to(_ctx.out(), "F12");
+            case terminal::Key::F13: return fmt::format_to(_ctx.out(), "F13");
+            case terminal::Key::F14: return fmt::format_to(_ctx.out(), "F14");
+            case terminal::Key::F15: return fmt::format_to(_ctx.out(), "F15");
+            case terminal::Key::F16: return fmt::format_to(_ctx.out(), "F16");
+            case terminal::Key::F17: return fmt::format_to(_ctx.out(), "F17");
+            case terminal::Key::F18: return fmt::format_to(_ctx.out(), "F18");
+            case terminal::Key::F19: return fmt::format_to(_ctx.out(), "F19");
+            case terminal::Key::F20: return fmt::format_to(_ctx.out(), "F20");
+            case terminal::Key::DownArrow: return fmt::format_to(_ctx.out(), "DownArrow");
+            case terminal::Key::LeftArrow: return fmt::format_to(_ctx.out(), "LeftArrow");
+            case terminal::Key::RightArrow: return fmt::format_to(_ctx.out(), "RightArrow");
+            case terminal::Key::UpArrow: return fmt::format_to(_ctx.out(), "UpArrow");
+            case terminal::Key::Insert: return fmt::format_to(_ctx.out(), "Insert");
+            case terminal::Key::Delete: return fmt::format_to(_ctx.out(), "Delete");
+            case terminal::Key::Home: return fmt::format_to(_ctx.out(), "Home");
+            case terminal::Key::End: return fmt::format_to(_ctx.out(), "End");
+            case terminal::Key::PageUp: return fmt::format_to(_ctx.out(), "PageUp");
+            case terminal::Key::PageDown: return fmt::format_to(_ctx.out(), "PageDown");
+            case terminal::Key::Numpad_NumLock: return fmt::format_to(_ctx.out(), "Numpad_NumLock");
+            case terminal::Key::Numpad_Divide: return fmt::format_to(_ctx.out(), "Numpad_Divide");
+            case terminal::Key::Numpad_Multiply: return fmt::format_to(_ctx.out(), "Numpad_Multiply");
+            case terminal::Key::Numpad_Subtract: return fmt::format_to(_ctx.out(), "Numpad_Subtract");
+            case terminal::Key::Numpad_CapsLock: return fmt::format_to(_ctx.out(), "Numpad_CapsLock");
+            case terminal::Key::Numpad_Add: return fmt::format_to(_ctx.out(), "Numpad_Add");
+            case terminal::Key::Numpad_Decimal: return fmt::format_to(_ctx.out(), "Numpad_Decimal");
+            case terminal::Key::Numpad_Enter: return fmt::format_to(_ctx.out(), "Numpad_Enter");
+            case terminal::Key::Numpad_Equal: return fmt::format_to(_ctx.out(), "Numpad_Equal");
+            case terminal::Key::Numpad_0: return fmt::format_to(_ctx.out(), "Numpad_0");
+            case terminal::Key::Numpad_1: return fmt::format_to(_ctx.out(), "Numpad_1");
+            case terminal::Key::Numpad_2: return fmt::format_to(_ctx.out(), "Numpad_2");
+            case terminal::Key::Numpad_3: return fmt::format_to(_ctx.out(), "Numpad_3");
+            case terminal::Key::Numpad_4: return fmt::format_to(_ctx.out(), "Numpad_4");
+            case terminal::Key::Numpad_5: return fmt::format_to(_ctx.out(), "Numpad_5");
+            case terminal::Key::Numpad_6: return fmt::format_to(_ctx.out(), "Numpad_6");
+            case terminal::Key::Numpad_7: return fmt::format_to(_ctx.out(), "Numpad_7");
+            case terminal::Key::Numpad_8: return fmt::format_to(_ctx.out(), "Numpad_8");
+            case terminal::Key::Numpad_9: return fmt::format_to(_ctx.out(), "Numpad_9");
         }
 
-        return format_to(_ctx.out(), "{}", (unsigned) _value);
+        return fmt::format_to(_ctx.out(), "{}", (unsigned) _value);
     }
 };
 } // namespace fmt

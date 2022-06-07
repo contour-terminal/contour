@@ -612,7 +612,7 @@ struct formatter<terminal::Margin::Horizontal>
     template <typename FormatContext>
     auto format(const terminal::Margin::Horizontal range, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "{}..{}", range.from, range.to);
+        return fmt::format_to(ctx.out(), "{}..{}", range.from, range.to);
     }
 };
 
@@ -627,7 +627,7 @@ struct formatter<terminal::Margin::Vertical>
     template <typename FormatContext>
     auto format(const terminal::Margin::Vertical range, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "{}..{}", range.from, range.to);
+        return fmt::format_to(ctx.out(), "{}..{}", range.from, range.to);
     }
 };
 
