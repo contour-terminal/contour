@@ -1,4 +1,4 @@
-FROM fedora:latest AS base
+FROM fedora:35 AS base
 
 ARG VERSION
 ARG CONTOUR_VERSION=$VERSION
