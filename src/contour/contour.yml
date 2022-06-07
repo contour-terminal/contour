@@ -539,6 +539,7 @@ color_schemes:
 # - SendChars         Writes given characters in `chars` member to the applications input.
 # - ToggleAllKeyMaps  Disables/enables responding to all keybinds (this keybind will be preserved when disabling all others).
 # - ToggleFullScreen  Enables/disables full screen mode.
+# - ToggleInputProtection Enables/disables terminal input protection.
 # - ToggleStatusLine  Shows/hides the VT320 compatible Indicator status line.
 # - ToggleTitleBar    Shows/Hides titlebar
 # - ViNormalMode      Enters Vi-like normal mode. The cursor can then be moved via h/j/k/l movements and text can be selected via v, yanked via y, and clipboard pasted via p.

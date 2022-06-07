@@ -501,6 +501,7 @@ void TerminalSession::sendCharPressEvent(char32_t _value, Modifier _modifier, Ti
     InputLog()("Character press event received: {} {}",
                _modifier,
                crispy::escape(unicode::convert_to<char>(_value)));
+
     assert(display_ != nullptr);
 
     if (terminatedAndWaitingForKeyPress_)
@@ -867,6 +868,12 @@ bool TerminalSession::operator()(actions::ToggleFullscreen)
 {
     if (display_)
         display_->toggleFullScreen();
+    return true;
+}
+
+bool TerminalSession::operator()(actions::ToggleInputProtection)
+{
+    terminal().setAllowInput(!terminal().allowInput());
     return true;
 }
 

@@ -417,16 +417,23 @@ void Terminal::updateIndicatorStatusLine()
     // TODO: Future improvement would be to allow full VT sequence support for the Indicator-status-line,
     // such that we can pass display-control partially over to some user/thirdparty configuration.
     indicatorStatusScreen_.clearLine();
-    state_.cursor.graphicsRendition.styles |= CellFlags::Bold;
-    indicatorStatusScreen_.writeTextFromExternal(
-        fmt::format(" {} | {} | Screen: {} | Cursor: {}:{} | Mouse: {}:{}",
-                    state_.terminalId,
-                    inputModeStr,
-                    state_.screenType,
-                    savedCursor.position.line + 1,
-                    savedCursor.position.column + 1,
-                    currentMousePosition_.line + 1,
-                    currentMousePosition_.column + 1));
+    indicatorStatusScreen_.writeTextFromExternal(fmt::format(" {} | {}", state_.terminalId, inputModeStr));
+
+    if (!allowInput())
+    {
+        state_.cursor.graphicsRendition.foregroundColor = BrightColor::Red;
+        state_.cursor.graphicsRendition.styles |= CellFlags::Bold;
+        indicatorStatusScreen_.writeTextFromExternal(" (PROTECTED)");
+        state_.cursor.graphicsRendition.foregroundColor = DefaultColor();
+        state_.cursor.graphicsRendition.styles &= ~CellFlags::Bold;
+    }
+
+    indicatorStatusScreen_.writeTextFromExternal(fmt::format(" | Screen: {} | Cursor: {}:{} | Mouse: {}:{}",
+                                                             state_.screenType,
+                                                             savedCursor.position.line + 1,
+                                                             savedCursor.position.column + 1,
+                                                             currentMousePosition_.line + 1,
+                                                             currentMousePosition_.column + 1));
 
     // Cleaning up.
     currentScreen_ = savedActiveDisplay;
@@ -443,7 +450,7 @@ bool Terminal::sendKeyPressEvent(Key _key, Modifier _modifier, Timestamp _now)
     cursorBlinkState_ = 1;
     lastCursorBlink_ = _now;
 
-    if (state_.inputHandler.sendKeyPressEvent(_key, _modifier))
+    if (allowInput() && state_.inputHandler.sendKeyPressEvent(_key, _modifier))
         return true;
 
     // Early exit if KAM is enabled.
@@ -462,7 +469,7 @@ bool Terminal::sendCharPressEvent(char32_t _value, Modifier _modifier, Timestamp
     cursorBlinkState_ = 1;
     lastCursorBlink_ = _now;
 
-    if (state_.inputHandler.sendCharPressEvent(_value, _modifier))
+    if (allowInput() && state_.inputHandler.sendCharPressEvent(_value, _modifier))
         return true;
 
     // Early exit if KAM is enabled.
@@ -486,7 +493,7 @@ bool Terminal::sendMousePressEvent(Modifier _modifier,
     respectMouseProtocol_ =
         mouseProtocolBypassModifier_ == Modifier::None || !_modifier.contains(mouseProtocolBypassModifier_);
 
-    if (respectMouseProtocol_
+    if (allowInput() && respectMouseProtocol_
         && state_.inputGenerator.generateMousePress(
             _modifier, _button, currentMousePosition_, _pixelPosition))
     {
@@ -576,7 +583,7 @@ bool Terminal::sendMouseMoveEvent(Modifier _modifier,
     changed = changed || updateCursorHoveringState();
 
     // Do not handle mouse-move events in sub-cell dimensions.
-    if (respectMouseProtocol_
+    if (allowInput() && respectMouseProtocol_
         && state_.inputGenerator.generateMouseMove(_modifier, currentMousePosition_, _pixelPosition))
     {
         flushInput();
@@ -610,7 +617,7 @@ bool Terminal::sendMouseReleaseEvent(Modifier _modifier,
 {
     verifyState();
 
-    if (respectMouseProtocol_
+    if (allowInput() && respectMouseProtocol_
         && state_.inputGenerator.generateMouseRelease(
             _modifier, _button, currentMousePosition_, _pixelPosition))
     {
@@ -669,12 +676,18 @@ bool Terminal::sendFocusOutEvent()
 
 void Terminal::sendPaste(string_view _text)
 {
+    if (!allowInput())
+        return;
+
     state_.inputGenerator.generatePaste(_text);
     flushInput();
 }
 
 void Terminal::sendRaw(string_view _text)
 {
+    if (!allowInput())
+        return;
+
     state_.inputGenerator.generateRaw(_text);
 }
 
