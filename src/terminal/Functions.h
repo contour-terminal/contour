@@ -620,13 +620,13 @@ struct formatter<terminal::FunctionCategory>
         using terminal::FunctionCategory;
         switch (value)
         {
-            case FunctionCategory::C0: return format_to(ctx.out(), "C0");
-            case FunctionCategory::ESC: return format_to(ctx.out(), "ESC");
-            case FunctionCategory::CSI: return format_to(ctx.out(), "CSI");
-            case FunctionCategory::OSC: return format_to(ctx.out(), "OSC");
-            case FunctionCategory::DCS: return format_to(ctx.out(), "DCS");
+            case FunctionCategory::C0: return fmt::format_to(ctx.out(), "C0");
+            case FunctionCategory::ESC: return fmt::format_to(ctx.out(), "ESC");
+            case FunctionCategory::CSI: return fmt::format_to(ctx.out(), "CSI");
+            case FunctionCategory::OSC: return fmt::format_to(ctx.out(), "OSC");
+            case FunctionCategory::DCS: return fmt::format_to(ctx.out(), "DCS");
         }
-        return format_to(ctx.out(), "({})", static_cast<unsigned>(value));
+        return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(value));
     }
 };
 
@@ -643,44 +643,44 @@ struct formatter<terminal::FunctionDefinition>
     {
         switch (f.category)
         {
-            case terminal::FunctionCategory::C0: return format_to(ctx.out(), "{}", f.mnemonic);
+            case terminal::FunctionCategory::C0: return fmt::format_to(ctx.out(), "{}", f.mnemonic);
             case terminal::FunctionCategory::ESC:
-                return format_to(ctx.out(),
-                                 "{} {} {}",
-                                 f.category,
-                                 f.intermediate ? f.intermediate : ' ',
-                                 f.finalSymbol ? f.finalSymbol : ' ');
+                return fmt::format_to(ctx.out(),
+                                      "{} {} {}",
+                                      f.category,
+                                      f.intermediate ? f.intermediate : ' ',
+                                      f.finalSymbol ? f.finalSymbol : ' ');
             case terminal::FunctionCategory::OSC:
-                return format_to(ctx.out(), "{} {}", f.category, f.maximumParameters);
+                return fmt::format_to(ctx.out(), "{} {}", f.category, f.maximumParameters);
             case terminal::FunctionCategory::DCS:
             case terminal::FunctionCategory::CSI:
                 if (f.minimumParameters == f.maximumParameters)
-                    return format_to(ctx.out(),
-                                     "{} {} {}    {} {}",
-                                     f.category,
-                                     f.leader ? f.leader : ' ',
-                                     f.minimumParameters,
-                                     f.intermediate ? f.intermediate : ' ',
-                                     f.finalSymbol);
+                    return fmt::format_to(ctx.out(),
+                                          "{} {} {}    {} {}",
+                                          f.category,
+                                          f.leader ? f.leader : ' ',
+                                          f.minimumParameters,
+                                          f.intermediate ? f.intermediate : ' ',
+                                          f.finalSymbol);
                 else if (f.maximumParameters == terminal::ArgsMax)
-                    return format_to(ctx.out(),
-                                     "{} {} {}..  {} {}",
-                                     f.category,
-                                     f.leader ? f.leader : ' ',
-                                     f.minimumParameters,
-                                     f.intermediate ? f.intermediate : ' ',
-                                     f.finalSymbol);
+                    return fmt::format_to(ctx.out(),
+                                          "{} {} {}..  {} {}",
+                                          f.category,
+                                          f.leader ? f.leader : ' ',
+                                          f.minimumParameters,
+                                          f.intermediate ? f.intermediate : ' ',
+                                          f.finalSymbol);
                 else
-                    return format_to(ctx.out(),
-                                     "{} {} {}..{} {} {}",
-                                     f.category,
-                                     f.leader ? f.leader : ' ',
-                                     f.minimumParameters,
-                                     f.maximumParameters,
-                                     f.intermediate ? f.intermediate : ' ',
-                                     f.finalSymbol);
+                    return fmt::format_to(ctx.out(),
+                                          "{} {} {}..{} {} {}",
+                                          f.category,
+                                          f.leader ? f.leader : ' ',
+                                          f.minimumParameters,
+                                          f.maximumParameters,
+                                          f.intermediate ? f.intermediate : ' ',
+                                          f.finalSymbol);
         }
-        return format_to(ctx.out(), "?");
+        return fmt::format_to(ctx.out(), "?");
     }
 };
 
@@ -697,15 +697,16 @@ struct formatter<terminal::FunctionSelector>
     {
         switch (f.category)
         {
-            case terminal::FunctionCategory::OSC: return format_to(ctx.out(), "{} {}", f.category, f.argc);
+            case terminal::FunctionCategory::OSC:
+                return fmt::format_to(ctx.out(), "{} {}", f.category, f.argc);
             default:
-                return format_to(ctx.out(),
-                                 "{} {} {} {} {}",
-                                 f.category,
-                                 f.leader ? f.leader : ' ',
-                                 f.argc,
-                                 f.intermediate ? f.intermediate : ' ',
-                                 f.finalSymbol ? f.finalSymbol : ' ');
+                return fmt::format_to(ctx.out(),
+                                      "{} {} {} {} {}",
+                                      f.category,
+                                      f.leader ? f.leader : ' ',
+                                      f.argc,
+                                      f.intermediate ? f.intermediate : ' ',
+                                      f.finalSymbol ? f.finalSymbol : ' ');
         }
     }
 };

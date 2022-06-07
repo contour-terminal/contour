@@ -278,7 +278,7 @@ struct formatter<crispy::detail::LRUCacheEntry<K, V>>
     template <typename FormatContext>
     auto format(crispy::detail::LRUCacheEntry<K, V> const& entry, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "{}: {}", entry.key, entry.value);
+        return fmt::format_to(ctx.out(), "{}: {}", entry.key, entry.value);
     }
 };
 } // namespace fmt

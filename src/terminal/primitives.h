@@ -854,12 +854,12 @@ struct formatter<terminal::CursorShape>
     {
         switch (value)
         {
-            case terminal::CursorShape::Bar: return format_to(ctx.out(), "Bar");
-            case terminal::CursorShape::Block: return format_to(ctx.out(), "Block");
-            case terminal::CursorShape::Rectangle: return format_to(ctx.out(), "Rectangle");
-            case terminal::CursorShape::Underscore: return format_to(ctx.out(), "Underscore");
+            case terminal::CursorShape::Bar: return fmt::format_to(ctx.out(), "Bar");
+            case terminal::CursorShape::Block: return fmt::format_to(ctx.out(), "Block");
+            case terminal::CursorShape::Rectangle: return fmt::format_to(ctx.out(), "Rectangle");
+            case terminal::CursorShape::Underscore: return fmt::format_to(ctx.out(), "Underscore");
         }
-        return format_to(ctx.out(), "{}", static_cast<unsigned>(value));
+        return fmt::format_to(ctx.out(), "{}", static_cast<unsigned>(value));
     }
 };
 
@@ -874,7 +874,7 @@ struct formatter<terminal::CellLocation>
     template <typename FormatContext>
     auto format(terminal::CellLocation coord, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "({}, {})", coord.line, coord.column);
+        return fmt::format_to(ctx.out(), "({}, {})", coord.line, coord.column);
     }
 };
 
@@ -889,7 +889,7 @@ struct formatter<terminal::PageSize>
     template <typename FormatContext>
     auto format(terminal::PageSize value, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "{}x{}", value.columns, value.lines);
+        return fmt::format_to(ctx.out(), "{}x{}", value.columns, value.lines);
     }
 };
 
@@ -904,7 +904,7 @@ struct formatter<terminal::GridSize>
     template <typename FormatContext>
     auto format(terminal::GridSize value, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "{}x{}", value.columns, value.lines);
+        return fmt::format_to(ctx.out(), "{}x{}", value.columns, value.lines);
     }
 };
 
@@ -922,10 +922,10 @@ struct formatter<terminal::ScreenType>
     {
         switch (value)
         {
-            case terminal::ScreenType::Primary: return format_to(ctx.out(), "Primary");
-            case terminal::ScreenType::Alternate: return format_to(ctx.out(), "Alternate");
+            case terminal::ScreenType::Primary: return fmt::format_to(ctx.out(), "Primary");
+            case terminal::ScreenType::Alternate: return fmt::format_to(ctx.out(), "Alternate");
         }
-        return format_to(ctx.out(), "({})", static_cast<unsigned>(value));
+        return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(value));
     }
 };
 

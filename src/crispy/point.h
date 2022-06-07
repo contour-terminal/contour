@@ -111,7 +111,7 @@ struct formatter<crispy::Point>
     template <typename FormatContext>
     auto format(crispy::Point coord, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "({}, {})", coord.x, coord.y);
+        return fmt::format_to(ctx.out(), "({}, {})", coord.x, coord.y);
     }
 };
 } // namespace fmt

@@ -298,10 +298,10 @@ struct formatter<terminal::ImageFormat>
     {
         switch (value)
         {
-            case terminal::ImageFormat::RGB: return format_to(ctx.out(), "RGB");
-            case terminal::ImageFormat::RGBA: return format_to(ctx.out(), "RGBA");
+            case terminal::ImageFormat::RGB: return fmt::format_to(ctx.out(), "RGB");
+            case terminal::ImageFormat::RGBA: return fmt::format_to(ctx.out(), "RGBA");
         }
-        return format_to(ctx.out(), "{}", unsigned(value));
+        return fmt::format_to(ctx.out(), "{}", unsigned(value));
     }
 };
 
@@ -317,11 +317,11 @@ struct formatter<terminal::ImageStats>
     template <typename FormatContext>
     auto format(terminal::ImageStats stats, FormatContext& ctx)
     {
-        return format_to(ctx.out(),
-                         "{} instances, {} raster, {} fragments",
-                         stats.instances,
-                         stats.rasterized,
-                         stats.fragments);
+        return fmt::format_to(ctx.out(),
+                              "{} instances, {} raster, {} fragments",
+                              stats.instances,
+                              stats.rasterized,
+                              stats.fragments);
     }
 };
 
@@ -338,13 +338,13 @@ struct formatter<std::shared_ptr<terminal::Image const>>
     auto format(std::shared_ptr<terminal::Image const> const& _image, FormatContext& ctx)
     {
         if (!_image)
-            return format_to(ctx.out(), "nullptr");
+            return fmt::format_to(ctx.out(), "nullptr");
         terminal::Image const& image = *_image;
-        return format_to(ctx.out(),
-                         "Image<#{}, {}, size={}>",
-                         image.weak_from_this().use_count(),
-                         image.id(),
-                         image.size());
+        return fmt::format_to(ctx.out(),
+                              "Image<#{}, {}, size={}>",
+                              image.weak_from_this().use_count(),
+                              image.id(),
+                              image.size());
     }
 };
 
@@ -361,12 +361,12 @@ struct formatter<terminal::ImageResize>
     {
         switch (_value)
         {
-            case terminal::ImageResize::NoResize: return format_to(ctx.out(), "NoResize");
-            case terminal::ImageResize::ResizeToFit: return format_to(ctx.out(), "ResizeToFit");
-            case terminal::ImageResize::ResizeToFill: return format_to(ctx.out(), "ResizeToFill");
-            case terminal::ImageResize::StretchToFill: return format_to(ctx.out(), "StretchToFill");
+            case terminal::ImageResize::NoResize: return fmt::format_to(ctx.out(), "NoResize");
+            case terminal::ImageResize::ResizeToFit: return fmt::format_to(ctx.out(), "ResizeToFit");
+            case terminal::ImageResize::ResizeToFill: return fmt::format_to(ctx.out(), "ResizeToFill");
+            case terminal::ImageResize::StretchToFill: return fmt::format_to(ctx.out(), "StretchToFill");
         }
-        return format_to(ctx.out(), "ResizePolicy({})", int(_value));
+        return fmt::format_to(ctx.out(), "ResizePolicy({})", int(_value));
     }
 };
 
@@ -383,17 +383,17 @@ struct formatter<terminal::ImageAlignment>
     {
         switch (_value)
         {
-            case terminal::ImageAlignment::TopStart: return format_to(ctx.out(), "TopStart");
-            case terminal::ImageAlignment::TopCenter: return format_to(ctx.out(), "TopCenter");
-            case terminal::ImageAlignment::TopEnd: return format_to(ctx.out(), "TopEnd");
-            case terminal::ImageAlignment::MiddleStart: return format_to(ctx.out(), "MiddleStart");
-            case terminal::ImageAlignment::MiddleCenter: return format_to(ctx.out(), "MiddleCenter");
-            case terminal::ImageAlignment::MiddleEnd: return format_to(ctx.out(), "MiddleEnd");
-            case terminal::ImageAlignment::BottomStart: return format_to(ctx.out(), "BottomStart");
-            case terminal::ImageAlignment::BottomCenter: return format_to(ctx.out(), "BottomCenter");
-            case terminal::ImageAlignment::BottomEnd: return format_to(ctx.out(), "BottomEnd");
+            case terminal::ImageAlignment::TopStart: return fmt::format_to(ctx.out(), "TopStart");
+            case terminal::ImageAlignment::TopCenter: return fmt::format_to(ctx.out(), "TopCenter");
+            case terminal::ImageAlignment::TopEnd: return fmt::format_to(ctx.out(), "TopEnd");
+            case terminal::ImageAlignment::MiddleStart: return fmt::format_to(ctx.out(), "MiddleStart");
+            case terminal::ImageAlignment::MiddleCenter: return fmt::format_to(ctx.out(), "MiddleCenter");
+            case terminal::ImageAlignment::MiddleEnd: return fmt::format_to(ctx.out(), "MiddleEnd");
+            case terminal::ImageAlignment::BottomStart: return fmt::format_to(ctx.out(), "BottomStart");
+            case terminal::ImageAlignment::BottomCenter: return fmt::format_to(ctx.out(), "BottomCenter");
+            case terminal::ImageAlignment::BottomEnd: return fmt::format_to(ctx.out(), "BottomEnd");
         }
-        return format_to(ctx.out(), "ImageAlignment({})", int(_value));
+        return fmt::format_to(ctx.out(), "ImageAlignment({})", int(_value));
     }
 };
 
@@ -409,13 +409,13 @@ struct formatter<terminal::RasterizedImage>
     template <typename FormatContext>
     auto format(const terminal::RasterizedImage& _image, FormatContext& ctx)
     {
-        return format_to(ctx.out(),
-                         "RasterizedImage<{}, {}, {}, {}, {}>",
-                         _image.weak_from_this().use_count(),
-                         _image.cellSpan(),
-                         _image.resizePolicy(),
-                         _image.alignmentPolicy(),
-                         _image.image());
+        return fmt::format_to(ctx.out(),
+                              "RasterizedImage<{}, {}, {}, {}, {}>",
+                              _image.weak_from_this().use_count(),
+                              _image.cellSpan(),
+                              _image.resizePolicy(),
+                              _image.alignmentPolicy(),
+                              _image.image());
     }
 };
 
@@ -431,7 +431,7 @@ struct formatter<terminal::ImageFragment>
     template <typename FormatContext>
     auto format(const terminal::ImageFragment& _fragment, FormatContext& ctx)
     {
-        return format_to(
+        return fmt::format_to(
             ctx.out(), "ImageFragment<offset={}, {}>", _fragment.offset(), _fragment.rasterizedImage());
     }
 };

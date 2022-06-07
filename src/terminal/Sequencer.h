@@ -232,19 +232,19 @@ struct formatter<terminal::RequestStatusString>
     {
         switch (value)
         {
-            case terminal::RequestStatusString::SGR: return format_to(ctx.out(), "SGR");
-            case terminal::RequestStatusString::DECSCL: return format_to(ctx.out(), "DECSCL");
-            case terminal::RequestStatusString::DECSCUSR: return format_to(ctx.out(), "DECSCUSR");
-            case terminal::RequestStatusString::DECSCA: return format_to(ctx.out(), "DECSCA");
-            case terminal::RequestStatusString::DECSTBM: return format_to(ctx.out(), "DECSTBM");
-            case terminal::RequestStatusString::DECSLRM: return format_to(ctx.out(), "DECSLRM");
-            case terminal::RequestStatusString::DECSLPP: return format_to(ctx.out(), "DECSLPP");
-            case terminal::RequestStatusString::DECSCPP: return format_to(ctx.out(), "DECSCPP");
-            case terminal::RequestStatusString::DECSNLS: return format_to(ctx.out(), "DECSNLS");
-            case terminal::RequestStatusString::DECSASD: return format_to(ctx.out(), "DECSASD");
-            case terminal::RequestStatusString::DECSSDT: return format_to(ctx.out(), "DECSSDT");
+            case terminal::RequestStatusString::SGR: return fmt::format_to(ctx.out(), "SGR");
+            case terminal::RequestStatusString::DECSCL: return fmt::format_to(ctx.out(), "DECSCL");
+            case terminal::RequestStatusString::DECSCUSR: return fmt::format_to(ctx.out(), "DECSCUSR");
+            case terminal::RequestStatusString::DECSCA: return fmt::format_to(ctx.out(), "DECSCA");
+            case terminal::RequestStatusString::DECSTBM: return fmt::format_to(ctx.out(), "DECSTBM");
+            case terminal::RequestStatusString::DECSLRM: return fmt::format_to(ctx.out(), "DECSLRM");
+            case terminal::RequestStatusString::DECSLPP: return fmt::format_to(ctx.out(), "DECSLPP");
+            case terminal::RequestStatusString::DECSCPP: return fmt::format_to(ctx.out(), "DECSCPP");
+            case terminal::RequestStatusString::DECSNLS: return fmt::format_to(ctx.out(), "DECSNLS");
+            case terminal::RequestStatusString::DECSASD: return fmt::format_to(ctx.out(), "DECSASD");
+            case terminal::RequestStatusString::DECSSDT: return fmt::format_to(ctx.out(), "DECSSDT");
         }
-        return format_to(ctx.out(), "{}", unsigned(value));
+        return fmt::format_to(ctx.out(), "{}", unsigned(value));
     }
 };
 
@@ -259,7 +259,7 @@ struct formatter<terminal::Sequence>
     template <typename FormatContext>
     auto format(terminal::Sequence const& seq, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "{}", seq.text());
+        return fmt::format_to(ctx.out(), "{}", seq.text());
     }
 };
 } // namespace fmt

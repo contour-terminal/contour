@@ -244,7 +244,7 @@ struct formatter<terminal::renderer::RenderTileAttributes>
     template <typename FormatContext>
     auto format(terminal::renderer::RenderTileAttributes value, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "tile +{}x +{}y", value.x.value, value.y.value);
+        return fmt::format_to(ctx.out(), "tile +{}x +{}y", value.x.value, value.y.value);
     }
 };
 
@@ -261,7 +261,7 @@ struct formatter<terminal::renderer::atlas::TileAttributes<terminal::renderer::R
         terminal::renderer::atlas::TileAttributes<terminal::renderer::RenderTileAttributes> const& value,
         FormatContext& ctx)
     {
-        return format_to(
+        return fmt::format_to(
             ctx.out(), "(location {}; bitmap {}; {})", value.location, value.bitmapSize, value.metadata);
     }
 };

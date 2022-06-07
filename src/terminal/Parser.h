@@ -475,7 +475,7 @@ struct formatter<terminal::parser::State>
     template <typename FormatContext>
     auto format(terminal::parser::State _state, FormatContext& _ctx)
     {
-        return format_to(_ctx.out(), "{}", terminal::parser::to_string(_state));
+        return fmt::format_to(_ctx.out(), "{}", terminal::parser::to_string(_state));
     }
 };
 
@@ -491,7 +491,7 @@ struct formatter<terminal::parser::ActionClass>
     auto format(terminal::parser::ActionClass _value, FormatContext& _ctx)
     {
         auto constexpr mappings = std::array<std::string_view, 4> { "Enter", "Event", "Leave", "Transition" };
-        return format_to(_ctx.out(), "{}", mappings.at(static_cast<unsigned>(_value)));
+        return fmt::format_to(_ctx.out(), "{}", mappings.at(static_cast<unsigned>(_value)));
     }
 };
 
@@ -506,7 +506,7 @@ struct formatter<terminal::parser::Action>
     template <typename FormatContext>
     auto format(terminal::parser::Action _value, FormatContext& _ctx)
     {
-        return format_to(_ctx.out(), "{}", terminal::parser::to_string(_value));
+        return fmt::format_to(_ctx.out(), "{}", terminal::parser::to_string(_value));
     }
 };
 

@@ -125,23 +125,23 @@ struct formatter<terminal::Process::ExitStatus>
     template <typename FormatContext>
     auto format(terminal::Process::ExitStatus const& _status, FormatContext& _ctx)
     {
-        return std::visit(overloaded { [&](terminal::Process::NormalExit _exit) {
-                                          return format_to(_ctx.out(), "{} (normal exit)", _exit.exitCode);
-                                      },
-                                       [&](terminal::Process::SignalExit _exit) {
-                                           char buf[256];
+        return std::visit(
+            overloaded { [&](terminal::Process::NormalExit _exit) {
+                            return fmt::format_to(_ctx.out(), "{} (normal exit)", _exit.exitCode);
+                        },
+                         [&](terminal::Process::SignalExit _exit) {
+                             char buf[256];
 #if defined(_WIN32)
-                                           strerror_s(buf, sizeof(buf), errno);
-                                           return format_to(
-                                               _ctx.out(), "{} (signal number {})", buf, _exit.signum);
+                             strerror_s(buf, sizeof(buf), errno);
+                             return fmt::format_to(_ctx.out(), "{} (signal number {})", buf, _exit.signum);
 #else
-                                           return format_to(_ctx.out(),
-                                                            "{} (signal number {})",
-                                                            strerror_r(errno, buf, sizeof(buf)),
-                                                            _exit.signum);
+                             return fmt::format_to(_ctx.out(),
+                                                   "{} (signal number {})",
+                                                   strerror_r(errno, buf, sizeof(buf)),
+                                                   _exit.signum);
 #endif
-                                       } },
-                          _status);
+                         } },
+            _status);
     }
 };
 } // namespace fmt

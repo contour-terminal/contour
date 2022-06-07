@@ -221,7 +221,7 @@ struct formatter<terminal::AnsiMode>
     template <typename FormatContext>
     auto format(terminal::AnsiMode _mode, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "{}", to_string(_mode));
+        return fmt::format_to(ctx.out(), "{}", to_string(_mode));
     }
 };
 
@@ -236,7 +236,7 @@ struct formatter<terminal::DECMode>
     template <typename FormatContext>
     auto format(terminal::DECMode _mode, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "{}", to_string(_mode));
+        return fmt::format_to(ctx.out(), "{}", to_string(_mode));
     }
 };
 
@@ -251,11 +251,11 @@ struct formatter<terminal::Cursor>
     template <typename FormatContext>
     auto format(const terminal::Cursor cursor, FormatContext& ctx)
     {
-        return format_to(ctx.out(),
-                         "({}:{}{})",
-                         cursor.position.line,
-                         cursor.position.column,
-                         cursor.visible ? "" : ", (invis)");
+        return fmt::format_to(ctx.out(),
+                              "({}:{}{})",
+                              cursor.position.line,
+                              cursor.position.column,
+                              cursor.visible ? "" : ", (invis)");
     }
 };
 
@@ -274,15 +274,15 @@ struct formatter<terminal::DynamicColorName>
         using terminal::DynamicColorName;
         switch (name)
         {
-        case DynamicColorName::DefaultForegroundColor: return format_to(ctx.out(), "DefaultForegroundColor");
-        case DynamicColorName::DefaultBackgroundColor: return format_to(ctx.out(), "DefaultBackgroundColor");
-        case DynamicColorName::TextCursorColor: return format_to(ctx.out(), "TextCursorColor");
-        case DynamicColorName::MouseForegroundColor: return format_to(ctx.out(), "MouseForegroundColor");
-        case DynamicColorName::MouseBackgroundColor: return format_to(ctx.out(), "MouseBackgroundColor");
-        case DynamicColorName::HighlightForegroundColor: return format_to(ctx.out(), "HighlightForegroundColor");
-        case DynamicColorName::HighlightBackgroundColor: return format_to(ctx.out(), "HighlightBackgroundColor");
+        case DynamicColorName::DefaultForegroundColor: return fmt::format_to(ctx.out(), "DefaultForegroundColor");
+        case DynamicColorName::DefaultBackgroundColor: return fmt::format_to(ctx.out(), "DefaultBackgroundColor");
+        case DynamicColorName::TextCursorColor: return fmt::format_to(ctx.out(), "TextCursorColor");
+        case DynamicColorName::MouseForegroundColor: return fmt::format_to(ctx.out(), "MouseForegroundColor");
+        case DynamicColorName::MouseBackgroundColor: return fmt::format_to(ctx.out(), "MouseBackgroundColor");
+        case DynamicColorName::HighlightForegroundColor: return fmt::format_to(ctx.out(), "HighlightForegroundColor");
+        case DynamicColorName::HighlightBackgroundColor: return fmt::format_to(ctx.out(), "HighlightBackgroundColor");
         }
-        return format_to(ctx.out(), "({})", static_cast<unsigned>(name));
+        return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(name));
         // clang-format on
     }
 };

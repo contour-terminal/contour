@@ -70,7 +70,7 @@ struct formatter<crispy::LRUHashtableStats>
     template <typename FormatContext>
     auto format(crispy::LRUHashtableStats stats, FormatContext& ctx)
     {
-        return format_to(
+        return fmt::format_to(
             ctx.out(),
             "{} hits, {} misses, {} evictions, {:.3}% hit rate",
             stats.hits,

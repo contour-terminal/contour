@@ -301,12 +301,12 @@ struct formatter<contour::RenderState>
     {
         switch (state)
         {
-            case State::CleanIdle: return format_to(ctx.out(), "clean-idle");
-            case State::CleanPainting: return format_to(ctx.out(), "clean-painting");
-            case State::DirtyIdle: return format_to(ctx.out(), "dirty-idle");
-            case State::DirtyPainting: return format_to(ctx.out(), "dirty-painting");
+            case State::CleanIdle: return fmt::format_to(ctx.out(), "clean-idle");
+            case State::CleanPainting: return fmt::format_to(ctx.out(), "clean-painting");
+            case State::DirtyIdle: return fmt::format_to(ctx.out(), "dirty-idle");
+            case State::DirtyPainting: return fmt::format_to(ctx.out(), "dirty-painting");
         }
-        return format_to(ctx.out(), "Invalid");
+        return fmt::format_to(ctx.out(), "Invalid");
     }
 };
 } // namespace fmt

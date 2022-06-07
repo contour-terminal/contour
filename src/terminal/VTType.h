@@ -95,18 +95,18 @@ struct formatter<terminal::VTType>
     {
         switch (_id)
         {
-            case terminal::VTType::VT100: return format_to(ctx.out(), "VT100");
-            case terminal::VTType::VT220: return format_to(ctx.out(), "VT220");
-            case terminal::VTType::VT240: return format_to(ctx.out(), "VT240");
-            case terminal::VTType::VT320: return format_to(ctx.out(), "VT320");
-            case terminal::VTType::VT330: return format_to(ctx.out(), "VT330");
-            case terminal::VTType::VT340: return format_to(ctx.out(), "VT340");
-            case terminal::VTType::VT420: return format_to(ctx.out(), "VT420");
-            case terminal::VTType::VT510: return format_to(ctx.out(), "VT510");
-            case terminal::VTType::VT520: return format_to(ctx.out(), "VT520");
-            case terminal::VTType::VT525: return format_to(ctx.out(), "VT525");
+            case terminal::VTType::VT100: return fmt::format_to(ctx.out(), "VT100");
+            case terminal::VTType::VT220: return fmt::format_to(ctx.out(), "VT220");
+            case terminal::VTType::VT240: return fmt::format_to(ctx.out(), "VT240");
+            case terminal::VTType::VT320: return fmt::format_to(ctx.out(), "VT320");
+            case terminal::VTType::VT330: return fmt::format_to(ctx.out(), "VT330");
+            case terminal::VTType::VT340: return fmt::format_to(ctx.out(), "VT340");
+            case terminal::VTType::VT420: return fmt::format_to(ctx.out(), "VT420");
+            case terminal::VTType::VT510: return fmt::format_to(ctx.out(), "VT510");
+            case terminal::VTType::VT520: return fmt::format_to(ctx.out(), "VT520");
+            case terminal::VTType::VT525: return fmt::format_to(ctx.out(), "VT525");
         }
-        return format_to(ctx.out(), "INVALID-{}", static_cast<unsigned>(_id));
+        return fmt::format_to(ctx.out(), "INVALID-{}", static_cast<unsigned>(_id));
     }
 };
 } // namespace fmt

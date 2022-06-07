@@ -96,12 +96,15 @@ struct formatter<terminal::renderer::FontLocatorEngine>
     {
         switch (value)
         {
-            case terminal::renderer::FontLocatorEngine::CoreText: return format_to(ctx.out(), "CoreText");
-            case terminal::renderer::FontLocatorEngine::DWrite: return format_to(ctx.out(), "DirectWrite");
-            case terminal::renderer::FontLocatorEngine::FontConfig: return format_to(ctx.out(), "Fontconfig");
-            case terminal::renderer::FontLocatorEngine::Mock: return format_to(ctx.out(), "Mock");
+            case terminal::renderer::FontLocatorEngine::CoreText:
+                return fmt::format_to(ctx.out(), "CoreText");
+            case terminal::renderer::FontLocatorEngine::DWrite:
+                return fmt::format_to(ctx.out(), "DirectWrite");
+            case terminal::renderer::FontLocatorEngine::FontConfig:
+                return fmt::format_to(ctx.out(), "Fontconfig");
+            case terminal::renderer::FontLocatorEngine::Mock: return fmt::format_to(ctx.out(), "Mock");
         }
-        return format_to(ctx.out(), "({})", static_cast<unsigned>(value));
+        return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(value));
     }
 };
 
@@ -118,11 +121,14 @@ struct formatter<terminal::renderer::TextShapingEngine>
     {
         switch (value)
         {
-            case terminal::renderer::TextShapingEngine::CoreText: return format_to(ctx.out(), "CoreText");
-            case terminal::renderer::TextShapingEngine::DWrite: return format_to(ctx.out(), "DirectWrite");
-            case terminal::renderer::TextShapingEngine::OpenShaper: return format_to(ctx.out(), "harfbuzz");
+            case terminal::renderer::TextShapingEngine::CoreText:
+                return fmt::format_to(ctx.out(), "CoreText");
+            case terminal::renderer::TextShapingEngine::DWrite:
+                return fmt::format_to(ctx.out(), "DirectWrite");
+            case terminal::renderer::TextShapingEngine::OpenShaper:
+                return fmt::format_to(ctx.out(), "harfbuzz");
         }
-        return format_to(ctx.out(), "({})", static_cast<unsigned>(value));
+        return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(value));
     }
 };
 
@@ -137,17 +143,17 @@ struct formatter<terminal::renderer::FontDescriptions>
     template <typename FormatContext>
     auto format(terminal::renderer::FontDescriptions const& fd, FormatContext& ctx)
     {
-        return format_to(ctx.out(),
-                         "({}, {}, {}, {}, {}, {}, {}, {})",
-                         fd.size,
-                         fd.dpi,
-                         fd.dpiScale,
-                         fd.regular,
-                         fd.bold,
-                         fd.italic,
-                         fd.boldItalic,
-                         fd.emoji,
-                         fd.renderMode);
+        return fmt::format_to(ctx.out(),
+                              "({}, {}, {}, {}, {}, {}, {}, {})",
+                              fd.size,
+                              fd.dpi,
+                              fd.dpiScale,
+                              fd.regular,
+                              fd.bold,
+                              fd.italic,
+                              fd.boldItalic,
+                              fd.emoji,
+                              fd.renderMode);
     }
 };
 

@@ -312,11 +312,11 @@ struct formatter<contour::config::Permission>
     {
         switch (_perm)
         {
-            case contour::config::Permission::Allow: return format_to(ctx.out(), "allow");
-            case contour::config::Permission::Deny: return format_to(ctx.out(), "deny");
-            case contour::config::Permission::Ask: return format_to(ctx.out(), "ask");
+            case contour::config::Permission::Allow: return fmt::format_to(ctx.out(), "allow");
+            case contour::config::Permission::Deny: return fmt::format_to(ctx.out(), "deny");
+            case contour::config::Permission::Ask: return fmt::format_to(ctx.out(), "ask");
         }
-        return format_to(ctx.out(), "({})", unsigned(_perm));
+        return fmt::format_to(ctx.out(), "({})", unsigned(_perm));
     }
 };
 
@@ -334,12 +334,12 @@ struct formatter<contour::config::SelectionAction>
     {
         switch (_value)
         {
-            case SelectionAction::CopyToClipboard: return format_to(ctx.out(), "CopyToClipboard");
+            case SelectionAction::CopyToClipboard: return fmt::format_to(ctx.out(), "CopyToClipboard");
             case SelectionAction::CopyToSelectionClipboard:
-                return format_to(ctx.out(), "CopyToSelectionClipboard");
-            case SelectionAction::Nothing: return format_to(ctx.out(), "Waiting");
+                return fmt::format_to(ctx.out(), "CopyToSelectionClipboard");
+            case SelectionAction::Nothing: return fmt::format_to(ctx.out(), "Waiting");
         }
-        return format_to(ctx.out(), "{}", static_cast<unsigned>(_value));
+        return fmt::format_to(ctx.out(), "{}", static_cast<unsigned>(_value));
     }
 };
 
@@ -357,11 +357,11 @@ struct formatter<contour::config::ScrollBarPosition>
     {
         switch (_value)
         {
-            case ScrollBarPosition::Hidden: return format_to(ctx.out(), "Hidden");
-            case ScrollBarPosition::Left: return format_to(ctx.out(), "Left");
-            case ScrollBarPosition::Right: return format_to(ctx.out(), "Right");
+            case ScrollBarPosition::Hidden: return fmt::format_to(ctx.out(), "Hidden");
+            case ScrollBarPosition::Left: return fmt::format_to(ctx.out(), "Left");
+            case ScrollBarPosition::Right: return fmt::format_to(ctx.out(), "Right");
         }
-        return format_to(ctx.out(), "{}", static_cast<unsigned>(_value));
+        return fmt::format_to(ctx.out(), "{}", static_cast<unsigned>(_value));
     }
 };
 

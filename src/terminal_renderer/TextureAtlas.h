@@ -693,11 +693,11 @@ struct formatter<terminal::renderer::atlas::Format>
     {
         switch (value)
         {
-            case terminal::renderer::atlas::Format::Red: return format_to(ctx.out(), "R");
-            case terminal::renderer::atlas::Format::RGB: return format_to(ctx.out(), "RGB");
-            case terminal::renderer::atlas::Format::RGBA: return format_to(ctx.out(), "RGBA");
+            case terminal::renderer::atlas::Format::Red: return fmt::format_to(ctx.out(), "R");
+            case terminal::renderer::atlas::Format::RGB: return fmt::format_to(ctx.out(), "RGB");
+            case terminal::renderer::atlas::Format::RGBA: return fmt::format_to(ctx.out(), "RGBA");
         }
-        return format_to(ctx.out(), "{}", static_cast<unsigned>(value));
+        return fmt::format_to(ctx.out(), "{}", static_cast<unsigned>(value));
     }
 };
 
@@ -712,7 +712,7 @@ struct formatter<terminal::renderer::atlas::TileLocation>
     template <typename FormatContext>
     auto format(terminal::renderer::atlas::TileLocation value, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "Tile {}x+{}y", value.x.value, value.y.value);
+        return fmt::format_to(ctx.out(), "Tile {}x+{}y", value.x.value, value.y.value);
     }
 };
 
@@ -727,7 +727,7 @@ struct formatter<terminal::renderer::atlas::RenderTile>
     template <typename FormatContext>
     auto format(terminal::renderer::atlas::RenderTile const& value, FormatContext& ctx)
     {
-        return format_to(
+        return fmt::format_to(
             ctx.out(), "RenderTile({}x + {}y, {})", value.x.value, value.y.value, value.tileLocation);
     }
 };
@@ -743,11 +743,11 @@ struct formatter<terminal::renderer::atlas::AtlasProperties>
     template <typename FormatContext>
     auto format(terminal::renderer::atlas::AtlasProperties const& value, FormatContext& ctx)
     {
-        return format_to(ctx.out(),
-                         "tile size {}, format {}, direct-mapped {}",
-                         value.tileSize,
-                         value.format,
-                         value.directMappingCount);
+        return fmt::format_to(ctx.out(),
+                              "tile size {}, format {}, direct-mapped {}",
+                              value.tileSize,
+                              value.format,
+                              value.directMappingCount);
     }
 };
 } // namespace fmt

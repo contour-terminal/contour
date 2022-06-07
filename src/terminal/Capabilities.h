@@ -134,13 +134,13 @@ struct formatter<terminal::capabilities::Code>
     auto format(terminal::capabilities::Code _value, FormatContext& ctx)
     {
         if (_value.code & 0xFF0000)
-            return format_to(ctx.out(),
-                             "{}{}{}",
-                             char((_value.code >> 16) & 0xFF),
-                             char((_value.code >> 8) & 0xFF),
-                             char(_value.code & 0xFF));
+            return fmt::format_to(ctx.out(),
+                                  "{}{}{}",
+                                  char((_value.code >> 16) & 0xFF),
+                                  char((_value.code >> 8) & 0xFF),
+                                  char(_value.code & 0xFF));
 
-        return format_to(ctx.out(), "{}{}", char((_value.code >> 8) & 0xFF), char(_value.code & 0xFF));
+        return fmt::format_to(ctx.out(), "{}{}", char((_value.code >> 8) & 0xFF), char(_value.code & 0xFF));
     }
 };
 } // namespace fmt

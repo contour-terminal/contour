@@ -82,7 +82,7 @@ struct formatter<terminal::InputBinding<I, O>>
     template <typename FormatContext>
     auto format(terminal::InputBinding<I, O> const& _binding, FormatContext& _ctx)
     {
-        return format_to(_ctx.out(), "{} {} {}", _binding.modes, _binding.modifier, _binding.input);
+        return fmt::format_to(_ctx.out(), "{} {} {}", _binding.modes, _binding.modifier, _binding.input);
     }
 };
 } // namespace fmt
