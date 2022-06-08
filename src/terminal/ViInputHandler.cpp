@@ -314,6 +314,8 @@ bool ViInputHandler::parseTextObject(char32_t ch, Modifier modifier)
         case 'k'_key: return executePendingOrMoveCursor(ViMotion::LineUp);
         case 'J'_key: scrollViewport(ScrollOffset(-1)); return executePendingOrMoveCursor(ViMotion::LineDown);
         case 'K'_key: scrollViewport(ScrollOffset(+1)); return executePendingOrMoveCursor(ViMotion::LineUp);
+        case 'H'_key: return executePendingOrMoveCursor(ViMotion::PageTop);
+        case 'L'_key: return executePendingOrMoveCursor(ViMotion::PageBottom);
         case 'l'_key: return executePendingOrMoveCursor(ViMotion::CharRight);
         case 'n'_key: return executePendingOrMoveCursor(ViMotion::SearchResultForward);
         case 'w'_key: return executePendingOrMoveCursor(ViMotion::WordForward);

@@ -81,6 +81,8 @@ enum class ViMotion
     LineUp,               // k
     PageDown,             // <C-D>
     PageUp,               // <C-U>
+    PageTop,              // <S-H> (inspired by tmux)
+    PageBottom,           // <S-L> (inspired by tmux)
     ParagraphBackward,    // {
     ParagraphForward,     // }
     ParenthesisMatching,  // %
@@ -333,6 +335,8 @@ struct formatter<terminal::ViMotion>
             case ViMotion::LineUp: return fmt::format_to(ctx.out(), "LineUp");
             case ViMotion::PageDown: return fmt::format_to(ctx.out(), "PageDown");
             case ViMotion::PageUp: return fmt::format_to(ctx.out(), "PageUp");
+            case ViMotion::PageTop: return fmt::format_to(ctx.out(), "PageTop");
+            case ViMotion::PageBottom: return fmt::format_to(ctx.out(), "PageBottom");
             case ViMotion::ParagraphBackward: return fmt::format_to(ctx.out(), "ParagraphBackward");
             case ViMotion::ParagraphForward: return fmt::format_to(ctx.out(), "ParagraphForward");
             case ViMotion::ParenthesisMatching: return fmt::format_to(ctx.out(), "ParenthesisMatching");
