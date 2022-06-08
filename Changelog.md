@@ -24,7 +24,8 @@
   - Adds `^` motion.
   - When being in normal mode, pressing `a` also puts you back to insert mode.
   - Properly show cursor if it was hidden in insert mode and restore visibility & shape when going back to insert mode.
-  - `<S-K>` and `<S-J>` don't just move the cursor up/down but also move the terminal's viewport respectively.
+  - `<S-K>` and `<S-J>` don't just move the cursor up/down but also move the terminal's viewport respectively (inspired by tmux).
+  - `<S-H>` and `<S-L>` to move cursor to the current viewport's page top/bottom (inspired by tmux).
   - and more...
 - Adds specialized PTY implementation for Linux operating system utilizing OS-specific kernel APIs.
 - Adds basic support for Indicator status line and their VT sequences `DECSASD` and `DECSSDT`, and `DECRQSS` has been adapted (#687).

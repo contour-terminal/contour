@@ -272,6 +272,12 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
                      ColumnOffset(0) };
         case ViMotion::FileEnd: // G
             return { terminal.pageSize().lines.as<LineOffset>() - 1, ColumnOffset(0) };
+        case ViMotion::PageTop: // <S-H>
+            return { boxed_cast<LineOffset>(-terminal.viewport().scrollOffset()), ColumnOffset(0) };
+        case ViMotion::PageBottom: // <S-L>
+            return { boxed_cast<LineOffset>(-terminal.viewport().scrollOffset())
+                         + boxed_cast<LineOffset>(terminal.pageSize().lines - 1),
+                     ColumnOffset(0) };
         case ViMotion::LineBegin: // 0
             return { cursorPosition.line, ColumnOffset(0) };
         case ViMotion::LineTextBegin: // ^
