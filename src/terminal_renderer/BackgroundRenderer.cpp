@@ -34,6 +34,19 @@ void BackgroundRenderer::setRenderTarget(RenderTarget& renderTarget,
     Renderable::setRenderTarget(renderTarget, directMappingAllocator);
 }
 
+void BackgroundRenderer::renderLine(RenderLine const& line)
+{
+    if (line.backgroundColor == defaultColor_)
+        return;
+
+    auto const position = CellLocation { line.lineOffset, ColumnOffset(0) };
+    auto const pos = _gridMetrics.map(position);
+    auto const width = _gridMetrics.cellSize.width * Width::cast_from(line.usedColumns);
+
+    renderTarget().renderRectangle(
+        pos.x, pos.y, width, _gridMetrics.cellSize.height, RGBAColor(line.backgroundColor, opacity_));
+}
+
 void BackgroundRenderer::renderCell(RenderCell const& _cell)
 {
     if (_cell.backgroundColor == defaultColor_)

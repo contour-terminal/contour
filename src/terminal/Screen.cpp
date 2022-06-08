@@ -97,6 +97,11 @@ namespace // {{{ helper
     std::string vtSequenceParameterString(GraphicsAttributes const& _sgr)
     {
         std::string output;
+        // TODO: See if we can use VTWriter here instead (might need a little refactor).
+        // std::stringstream os;
+        // auto vtWriter = VTWriter(os);
+        // vtWriter.setForegroundColor(_sgr.foregroundColor);
+        // vtWriter.setBackgroundColor(_sgr.backgroundColor);
 
         auto const sgrSep = [&]() {
             if (!output.empty())
@@ -286,10 +291,6 @@ string_view Screen<Cell>::tryEmplaceChars(string_view _chars, size_t cellCount) 
     crlfIfWrapPending();
 
     auto const columnsAvailable = pageSize().columns.value - _state.cursor.position.column.value;
-
-#if defined(LIBTERMINAL_SCAN_UNICODE)
-    assert(cellCount <= static_cast<size_t>(columnsAvailable));
-#endif
 
     if (!_terminal.isModeEnabled(DECMode::AutoWrap) && cellCount > static_cast<size_t>(columnsAvailable))
         // With AutoWrap on, we can only emplace if it fits the line.

@@ -50,6 +50,7 @@ class DecorationRenderer: public Renderable
     }
 
     void renderCell(RenderCell const& _cell);
+    void renderLine(RenderLine const& line);
 
     void renderDecoration(Decorator _decoration,
                           crispy::Point _pos,

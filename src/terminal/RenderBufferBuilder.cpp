@@ -48,7 +48,7 @@ namespace
                                          Color backgroundColor,
                                          bool _selected,
                                          bool _isCursor,
-                                         bool _isHighlighted)
+                                         bool _isHighlighted) noexcept
     {
         bool const isCellHidden = _cellFlags & CellFlags::Hidden;
         auto const [fg, bg] =
@@ -67,8 +67,10 @@ namespace
             return { fgInv, fg };
         }
 
-        auto getSelectionColor =
-            [](auto fg, auto bg, bool selected, ColorPalette const& colors) -> tuple<RGBColor, RGBColor> {
+        auto getSelectionColor = [](auto fg,
+                                    auto bg,
+                                    bool selected,
+                                    ColorPalette const& colors) noexcept -> tuple<RGBColor, RGBColor> {
             auto const a = colors.selectionForeground.value_or(bg);
             auto const b = colors.selectionBackground.value_or(fg);
             if (selected)
@@ -223,10 +225,11 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCell(ColorPalette const& _colorP
 }
 
 template <typename Cell>
-std::tuple<RGBColor, RGBColor> RenderBufferBuilder<Cell>::makeColorsForCell(CellLocation gridPosition,
-                                                                            CellFlags cellFlags,
-                                                                            Color foregroundColor,
-                                                                            Color backgroundColor)
+std::tuple<RGBColor, RGBColor> RenderBufferBuilder<Cell>::makeColorsForCell(
+    CellLocation gridPosition,
+    CellFlags cellFlags,
+    Color foregroundColor,
+    Color backgroundColor) const noexcept
 {
     auto const hasCursor = gridPosition == cursorPosition;
 
@@ -251,16 +254,54 @@ std::tuple<RGBColor, RGBColor> RenderBufferBuilder<Cell>::makeColorsForCell(Cell
 }
 
 template <typename Cell>
+RenderLine RenderBufferBuilder<Cell>::createRenderLine(TriviallyStyledLineBuffer const& lineBuffer,
+                                                       LineOffset lineOffset) const
+{
+    auto const pos = CellLocation { lineOffset, ColumnOffset(0) };
+    auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(pos);
+    auto const [fg, bg] = makeColorsForCell(gridPosition,
+                                            lineBuffer.attributes.styles,
+                                            lineBuffer.attributes.foregroundColor,
+                                            lineBuffer.attributes.backgroundColor);
+    auto renderLine = RenderLine {};
+    renderLine.lineOffset = lineOffset;
+    renderLine.usedColumns = lineBuffer.usedColumns;
+    renderLine.foregroundColor = fg;
+    renderLine.backgroundColor = bg;
+    renderLine.decorationColor = getUnderlineColor(
+        terminal.colorPalette(), lineBuffer.attributes.styles, fg, lineBuffer.attributes.underlineColor);
+    renderLine.flags = lineBuffer.attributes.styles;
+    renderLine.text = lineBuffer.text.view();
+    return renderLine;
+}
+
+template <typename Cell>
 void RenderBufferBuilder<Cell>::renderTrivialLine(TriviallyStyledLineBuffer const& lineBuffer,
                                                   LineOffset lineOffset)
 {
-    // fmt::print("Rendering trivial line {:2} 0..{}/{}: \"{}\"\n",
-    //            lineOffset.value,
-    //            lineBuffer.text.size(),
-    //            lineBuffer.displayWidth,
-    //            lineBuffer.text.view());
+    // if (lineBuffer.text.size())
+    //     fmt::print("Rendering trivial line {:2} 0..{}/{} ({} bytes): \"{}\"\n",
+    //                lineOffset.value,
+    //                lineBuffer.usedColumns,
+    //                lineBuffer.displayWidth,
+    //                lineBuffer.text.size(),
+    //                lineBuffer.text.view());
 
     auto const frontIndex = output.cells.size();
+
+    // TODO(pr) Handle special case: visual selection can alter colors for some columns in this line.
+    // In that case, it seems like we cannot just pass it bare over but have to take the slower path.
+    // But that should be fine.
+    bool const canRenderViaSimpleLine = false; // <- Should be false if selection covers this line.
+
+    if (canRenderViaSimpleLine)
+    {
+        output.lines.emplace_back(createRenderLine(lineBuffer, lineOffset));
+        lineNr = lineOffset;
+        prevWidth = 0;
+        prevHasCursor = false;
+        return;
+    }
 
     auto const textMargin = min(boxed_cast<ColumnOffset>(terminal.pageSize().columns),
                                 ColumnOffset::cast_from(lineBuffer.usedColumns));
@@ -278,6 +319,11 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TriviallyStyledLineBuffer cons
                                                 lineBuffer.attributes.foregroundColor,
                                                 lineBuffer.attributes.backgroundColor);
         auto const width = graphemeClusterWidth(graphemeCluster);
+        // fmt::print(" start {}, count {}, bytes {}, grapheme cluster \"{}\"\n",
+        //            columnOffset,
+        //            width,
+        //            unicode::convert_to<char>(u32string_view(graphemeCluster)).size(),
+        //            unicode::convert_to<char>(u32string_view(graphemeCluster)));
 
         output.cells.emplace_back(makeRenderCellExplicit(terminal.colorPalette(),
                                                          graphemeCluster,

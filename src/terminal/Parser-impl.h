@@ -237,10 +237,7 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view co
         if (state_ == State::Ground)
         {
             auto const chunk = std::string_view(input, static_cast<size_t>(std::distance(input, end)));
-#if defined(LIBTERMINAL_LOG_TRACE)
-            if (VTTraceParserLog)
-                VTTraceParserLog()("scan_for_text(max={}, data=\"{}\")", maxCharCount, crispy::escape(chunk));
-#endif
+
             if (auto const cellCount = unicode::scan_for_text_ascii(chunk, maxCharCount); cellCount > 0)
             {
                 auto const next = input + cellCount;

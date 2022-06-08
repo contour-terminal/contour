@@ -314,6 +314,7 @@ uint64_t Renderer::render(Terminal& _terminal, bool _pressure)
         RenderBufferRef const renderBuffer = _terminal.renderBuffer();
         cursorOpt = renderBuffer.get().cursor;
         renderCells(renderBuffer.get().cells);
+        renderLines(renderBuffer.get().lines);
     }
     textRenderer_.endFrame();
 
@@ -378,6 +379,16 @@ void Renderer::renderCells(vector<RenderCell> const& _renderableCells)
         textRenderer_.renderCell(cell);
         if (cell.image)
             imageRenderer_.renderImage(gridMetrics_.map(cell.position), *cell.image);
+    }
+}
+
+void Renderer::renderLines(vector<RenderLine> const& renderableLines)
+{
+    for (RenderLine const& line: renderableLines)
+    {
+        backgroundRenderer_.renderLine(line);
+        decorationRenderer_.renderLine(line);
+        textRenderer_.renderLine(line);
     }
 }
 

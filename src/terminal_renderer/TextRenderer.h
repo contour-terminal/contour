@@ -88,6 +88,8 @@ class TextRenderer: public Renderable
                     TextStyle textStyle,
                     RGBColor foregroundColor);
 
+    void renderLine(RenderLine const& renderLine);
+
     /// Must be invoked when rendering the terminal's text has finished for this frame.
     void endFrame();
 

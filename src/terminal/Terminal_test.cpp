@@ -65,6 +65,11 @@ vector<string> textScreenshot(terminal::Terminal const& _terminal)
         lastPos = cell.position;
         lastCount = 1;
     }
+    for (terminal::RenderLine const& line: renderBuffer.buffer.lines)
+    {
+        auto& currentLine = lines.at(unbox<size_t>(line.lineOffset));
+        currentLine = line.text;
+    }
 
     return lines;
 }
