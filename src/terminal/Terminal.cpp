@@ -1041,7 +1041,7 @@ void Terminal::reply(string_view _reply)
     // most likely that's not the main thread, which will however write
     // the actual input events.
     // TODO: introduce new mutex to guard terminal writes.
-    sendRaw(_reply);
+    state_.inputGenerator.generateRaw(_reply);
 }
 
 void Terminal::requestWindowResize(PageSize _size)
