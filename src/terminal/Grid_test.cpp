@@ -127,6 +127,20 @@ constexpr Margin fullPageMargin(PageSize pageSize)
     logGridText(grid, "setup grid at 5x2");
     return grid;
 }
+
+Grid<Cell> setupGridForResizeTests2x3xN(LineCount _maxHistoryLineCount)
+{
+    auto constexpr reflowOnResize = true;
+    auto constexpr pageSize = PageSize { LineCount(2), ColumnCount(3) };
+
+    return setupGrid(pageSize, reflowOnResize, _maxHistoryLineCount, { "ABC", "DEF", "GHI", "JKL" });
+}
+
+Grid<Cell> setupGridForResizeTests2x3a3()
+{
+    return setupGridForResizeTests2x3xN(LineCount(3));
+}
+
 } // namespace
 
 TEST_CASE("Grid.setup", "[grid]")
@@ -304,19 +318,6 @@ TEST_CASE("LogicalLines.reverse_iterator", "[grid]")
 }
 
 // {{{ Resize
-Grid<Cell> setupGridForResizeTests2x3xN(LineCount _maxHistoryLineCount)
-{
-    auto constexpr reflowOnResize = true;
-    auto constexpr pageSize = PageSize { LineCount(2), ColumnCount(3) };
-
-    return setupGrid(pageSize, reflowOnResize, _maxHistoryLineCount, { "ABC", "DEF", "GHI", "JKL" });
-}
-
-Grid<Cell> setupGridForResizeTests2x3a3()
-{
-    return setupGridForResizeTests2x3xN(LineCount(3));
-}
-
 // TODO: test cases for resize: line grow
 //
 // 1. with scrollback moving into page area: partly

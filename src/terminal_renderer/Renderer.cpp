@@ -44,6 +44,9 @@ using std::chrono::steady_clock;
 namespace terminal::renderer
 {
 
+namespace
+{
+
 void loadGridMetricsFromFont(text::font_key _font, GridMetrics& _gm, text::shaper& _textShaper)
 {
     auto const m = _textShaper.metrics(_font);
@@ -115,6 +118,8 @@ unique_ptr<text::shaper> createTextShaper(TextShapingEngine _engine,
     RendererLog()("Using OpenShaper text shaping engine.");
     return make_unique<text::open_shaper>(_dpi, std::move(_locator));
 }
+
+} // namespace
 
 Renderer::Renderer(PageSize pageSize,
                    FontDescriptions fontDescriptions,
@@ -337,37 +342,6 @@ uint64_t Renderer::render(Terminal& _terminal, bool _pressure)
     _renderTarget->execute();
 
     return changes;
-}
-
-tuple<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette,
-                                     Cell const& _cell,
-                                     bool _reverseVideo,
-                                     bool _selected)
-{
-    auto const [fg, bg] = _cell.makeColors(_colorPalette, _reverseVideo);
-    if (!_selected)
-        return tuple { fg, bg };
-
-    auto const a = _colorPalette.selectionForeground.value_or(bg);
-    auto const b = _colorPalette.selectionBackground.value_or(fg);
-    return tuple { a, b };
-}
-
-constexpr CellFlags toCellStyle(Decorator _decorator)
-{
-    switch (_decorator)
-    {
-        case Decorator::Underline: return CellFlags::Underline;
-        case Decorator::DoubleUnderline: return CellFlags::DoublyUnderlined;
-        case Decorator::CurlyUnderline: return CellFlags::CurlyUnderlined;
-        case Decorator::DottedUnderline: return CellFlags::DottedUnderline;
-        case Decorator::DashedUnderline: return CellFlags::DashedUnderline;
-        case Decorator::Overline: return CellFlags::Overline;
-        case Decorator::CrossedOut: return CellFlags::CrossedOut;
-        case Decorator::Framed: return CellFlags::Framed;
-        case Decorator::Encircle: return CellFlags::Encircled;
-    }
-    return CellFlags {};
 }
 
 void Renderer::renderCells(vector<RenderCell> const& _renderableCells)

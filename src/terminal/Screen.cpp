@@ -2117,6 +2117,8 @@ void Screen<Cell>::smGraphics(XtSmGraphics::Item _item,
 // {{{ impl namespace (some command generator helpers)
 namespace impl
 {
+namespace
+{
     ApplyResult setAnsiMode(Sequence const& _seq, size_t _modeIndex, bool _enable, Terminal& term)
     {
         switch (_seq.param(_modeIndex))
@@ -2632,17 +2634,6 @@ namespace impl
         return out;
     }
 
-    string autoFontFace(string_view _value, string_view _regular, string_view _style)
-    {
-        (void) _style;
-        (void) _regular;
-        return string(_value);
-        // if (!_value.empty() && _value != "auto")
-        //     return string(_value);
-        // else
-        //     return fmt::format("{}:style={}", _regular, _style);
-    }
-
     ApplyResult setAllFont(Sequence const& _seq, Terminal& terminal)
     {
         // [read]  OSC 60 ST
@@ -2938,6 +2929,7 @@ namespace impl
 
         return ApplyResult::Ok;
     }
+} // namespace
 } // namespace impl
 // }}}
 
