@@ -1,8 +1,5 @@
 ### 0.3.2 (unreleased)
 
-- Adds new config option `profile.*.vi_mode_highlight_timeout` and `colorscheme.*.vi_mode_highlight` and adds cell highlighting on yank (#669).
-- Adds support for running on ARMv8 platform with crypto extensions (#611).
-- Adds E3 capability, so `clear` now defaults to clearing screen and scrollback (#693).
 - Fixes writing to a non-empty line sometimes destroying the contents of that line (#702).
 - Fixes underline decoration for wide character cells.
 - Fixes SGR 8 (Conceal/Hidden) attribute doesn't work as expected (#699).
@@ -15,8 +12,9 @@
 - Fixes command line arguments parser handling of `--` for switching to verbatim mode (#670).
 - Fixes rendering of U+E0B2  in pixel-perfect box drawing mode (#707).
 - Fixes rendering of cursor sometimes being almost invisible when foreground and background colors are similar/equal (#691).
+- Fixes Win32 command output: Attaches to parent console if present, so typing `contour help` in a terminal actually shows something.
 - Changes `XTSMGRAPHICS` to match implementation of xterm *exactly* when querying sixel image limits, to be capped at terminal viewport dimensions (#656).
-- Win32: Attaches to parent console if present, so typing `contour help` in a terminal actually shows something.
+- Changes CLI syntax for `contour parser-table` to `contour generate parser-table`.
 - Implements UTF-8 encoded mouse transport (`CSI ? 1005 h`)
 - Improved vi-like input modes.
   - Fixed the text cursor not being visible during selection.
@@ -28,12 +26,14 @@
   - `<S-K>` and `<S-J>` don't just move the cursor up/down but also move the terminal's viewport respectively (inspired by tmux).
   - `<S-H>` and `<S-L>` to move cursor to the current viewport's page top/bottom (inspired by tmux).
   - and more...
+- Adds new config option `profile.*.vi_mode_highlight_timeout` and `colorscheme.*.vi_mode_highlight` and adds cell highlighting on yank (#669).
+- Adds support for running on ARMv8 platform with crypto extensions (#611).
+- Adds E3 capability, so `clear` now defaults to clearing screen and scrollback (#693).
 - Adds specialized PTY implementation for Linux operating system utilizing OS-specific kernel APIs.
 - Adds basic support for Indicator status line and their VT sequences `DECSASD` and `DECSSDT`, and `DECRQSS` has been adapted (#687).
 - Adds configuration option `profiles.*.status_line.display` to be either `none` or `indicator` to reflect the initial state of the status line (more customizability of the Indicator status-line will come in future releases).
 - Adds new action `ToggleInputProtection` to protect terminal application against accidental input (#697).
 - Adds configuration options `logging.enabled` as well as `logging.file`.
-- Changes CLI syntax for `contour parser-table` to `contour generate parser-table`.
 
 ### 0.3.1 (2022-05-01)
 
