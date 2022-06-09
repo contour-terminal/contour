@@ -38,7 +38,7 @@ for everyday use. It is aiming for power users with a modern feature mindset.
 - ✅ Sixel inline images
 - ✅ Terminal page [buffer capture VT extension](https://github.com/contour-terminal/contour/wiki/VTExtensions#buffer-capture) to quickly extract contents.
 - ✅ Builtin [Fira Code inspired progress bar](https://github.com/contour-terminal/contour/issues/521) support.
-- ✅ Read-only mode, protecting against accidental user-input to the running application, such as <kbd>Ctrl</kbd>+<kbd>C</kbd> etc.
+- ✅ Read-only mode, protecting against accidental user-input to the running application, such as <kbd>Ctrl</kbd>+<kbd>C</kbd>.
 - ✅ VT320 Host-programmable and Indicator status line support.
 - ✅ and much more ...
 
