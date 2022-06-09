@@ -103,6 +103,16 @@ void DecorationRenderer::inspect(std::ostream& /*output*/) const
 {
 }
 
+void DecorationRenderer::renderLine(RenderLine const& line)
+{
+    for (auto const& mapping: CellFlagDecorationMappings)
+        if (line.flags & mapping.first)
+            renderDecoration(mapping.second,
+                             _gridMetrics.map(CellLocation { line.lineOffset }),
+                             line.usedColumns,
+                             line.decorationColor);
+}
+
 void DecorationRenderer::renderCell(RenderCell const& _cell)
 {
     for (auto const& mapping: CellFlagDecorationMappings)

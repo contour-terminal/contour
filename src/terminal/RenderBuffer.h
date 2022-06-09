@@ -28,6 +28,10 @@
 namespace terminal
 {
 
+/**
+ * Renderable representation of a grid cell with color-altering pre-applied and
+ * additional information for cell ranges that can be text-shaped together.
+ */
 struct RenderCell
 {
     std::u32string codepoints;
@@ -43,6 +47,20 @@ struct RenderCell
     bool groupEnd = false;
 };
 
+/**
+ * Renderable representation of a grid line with monochrome SGR styling.
+ */
+struct RenderLine
+{
+    std::string_view text;
+    LineOffset lineOffset;
+    ColumnCount usedColumns;
+    RGBColor foregroundColor;
+    RGBColor backgroundColor;
+    RGBColor decorationColor;
+    CellFlags flags;
+};
+
 struct RenderCursor
 {
     CellLocation position;
@@ -53,12 +71,14 @@ struct RenderCursor
 struct RenderBuffer
 {
     std::vector<RenderCell> cells {};
+    std::vector<RenderLine> lines {};
     std::optional<RenderCursor> cursor {};
     uint64_t frameID {};
 
     void clear()
     {
         cells.clear();
+        lines.clear();
         cursor.reset();
     }
 };

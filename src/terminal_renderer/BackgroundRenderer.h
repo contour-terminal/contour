@@ -45,6 +45,8 @@ class BackgroundRenderer: public Renderable
     /// Queues up a render with given background
     void renderCell(RenderCell const& _cell);
 
+    void renderLine(RenderLine const& line);
+
     void inspect(std::ostream& output) const override;
 
   private:
