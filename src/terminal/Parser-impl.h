@@ -27,7 +27,10 @@ namespace terminal::parser
 
 namespace detail
 {
-    constexpr uint8_t operator"" _b(unsigned long long _value) { return static_cast<uint8_t>(_value); }
+    constexpr uint8_t operator"" _b(unsigned long long _value)
+    {
+        return static_cast<uint8_t>(_value);
+    }
 } // namespace detail
 
 constexpr ParserTable ParserTable::get() // {{{

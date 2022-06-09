@@ -41,13 +41,19 @@ class Viewport
     {
     }
 
-    [[nodiscard]] ScrollOffset scrollOffset() const noexcept { return scrollOffset_; }
+    [[nodiscard]] ScrollOffset scrollOffset() const noexcept
+    {
+        return scrollOffset_;
+    }
 
     /// Tests if the viewport has been moved(/scrolled) off its main view position.
     ///
     /// @retval true viewport has been moved/scrolled off its main view position.
     /// @retval false viewport has NOT been moved/scrolled and is still located at its main view position.
-    [[nodiscard]] bool scrolled() const noexcept { return scrollOffset_.value != 0; }
+    [[nodiscard]] bool scrolled() const noexcept
+    {
+        return scrollOffset_.value != 0;
+    }
 
     [[nodiscard]] bool isLineVisible(LineOffset _line) const noexcept
     {

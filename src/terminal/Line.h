@@ -234,16 +234,37 @@ class Line
         return inflatedBuffer().at(unbox<size_t>(column)).width();
     }
 
-    [[nodiscard]] LineFlags flags() const noexcept { return static_cast<LineFlags>(flags_); }
+    [[nodiscard]] LineFlags flags() const noexcept
+    {
+        return static_cast<LineFlags>(flags_);
+    }
 
-    [[nodiscard]] bool marked() const noexcept { return isFlagEnabled(LineFlags::Marked); }
-    void setMarked(bool _enable) { setFlag(LineFlags::Marked, _enable); }
+    [[nodiscard]] bool marked() const noexcept
+    {
+        return isFlagEnabled(LineFlags::Marked);
+    }
+    void setMarked(bool _enable)
+    {
+        setFlag(LineFlags::Marked, _enable);
+    }
 
-    [[nodiscard]] bool wrapped() const noexcept { return isFlagEnabled(LineFlags::Wrapped); }
-    void setWrapped(bool _enable) { setFlag(LineFlags::Wrapped, _enable); }
+    [[nodiscard]] bool wrapped() const noexcept
+    {
+        return isFlagEnabled(LineFlags::Wrapped);
+    }
+    void setWrapped(bool _enable)
+    {
+        setFlag(LineFlags::Wrapped, _enable);
+    }
 
-    [[nodiscard]] bool wrappable() const noexcept { return isFlagEnabled(LineFlags::Wrappable); }
-    void setWrappable(bool _enable) { setFlag(LineFlags::Wrappable, _enable); }
+    [[nodiscard]] bool wrappable() const noexcept
+    {
+        return isFlagEnabled(LineFlags::Wrappable);
+    }
+    void setWrappable(bool _enable)
+    {
+        setFlag(LineFlags::Wrappable, _enable);
+    }
 
     [[nodiscard]] LineFlags wrappableFlag() const noexcept
     {
@@ -288,7 +309,10 @@ class Line
     InflatedBuffer& inflatedBuffer();
     InflatedBuffer const& inflatedBuffer() const;
 
-    [[nodiscard]] TrivialBuffer& trivialBuffer() noexcept { return std::get<TrivialBuffer>(storage_); }
+    [[nodiscard]] TrivialBuffer& trivialBuffer() noexcept
+    {
+        return std::get<TrivialBuffer>(storage_);
+    }
     [[nodiscard]] TrivialBuffer const& trivialBuffer() const noexcept
     {
         return std::get<TrivialBuffer>(storage_);
@@ -303,8 +327,14 @@ class Line
         return !std::holds_alternative<TrivialBuffer>(storage_);
     }
 
-    void setBuffer(TrivialBuffer const& buffer) noexcept { storage_ = buffer; }
-    void setBuffer(InflatedBuffer buffer) { storage_ = std::move(buffer); }
+    void setBuffer(TrivialBuffer const& buffer) noexcept
+    {
+        storage_ = buffer;
+    }
+    void setBuffer(InflatedBuffer buffer)
+    {
+        storage_ = std::move(buffer);
+    }
 
     void reset(GraphicsAttributes attributes,
                HyperlinkId hyperlink,

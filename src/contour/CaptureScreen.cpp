@@ -208,7 +208,10 @@ namespace
 #endif
         }
 
-        int write(string_view _text) { return write(_text.data(), _text.size()); }
+        int write(string_view _text)
+        {
+            return write(_text.data(), _text.size());
+        }
 
         int read(void* _buf, size_t _size)
         {

@@ -121,7 +121,10 @@ namespace // {{{ helper
         return output;
     } //  }}}
 
-    bool hasTokensAvailable(ParseContext const& context) { return context.pos < context.args.size(); }
+    bool hasTokensAvailable(ParseContext const& context)
+    {
+        return context.pos < context.args.size();
+    }
 
     auto currentToken(ParseContext const& _context) -> string_view
     {
@@ -131,9 +134,15 @@ namespace // {{{ helper
         return _context.args.at(_context.pos);
     }
 
-    auto isTrue(string_view _token) -> bool { return _token == "true" || _token == "yes"; }
+    auto isTrue(string_view _token) -> bool
+    {
+        return _token == "true" || _token == "yes";
+    }
 
-    auto isFalse(string_view _token) -> bool { return _token == "false" || _token == "no"; }
+    auto isFalse(string_view _token) -> bool
+    {
+        return _token == "false" || _token == "no";
+    }
 
     bool matchPrefix(string_view _text, string_view _prefix)
     {
@@ -525,7 +534,10 @@ namespace crispy::cli
 
 namespace // {{{ helpers
 {
-    string spaces(size_t _count) { return string(_count, ' '); }
+    string spaces(size_t _count)
+    {
+        return string(_count, ' ');
+    }
 
     string indent(unsigned _level, unsigned* _cursor = nullptr)
     {

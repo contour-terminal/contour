@@ -2117,223 +2117,229 @@ void Screen<Cell>::smGraphics(XtSmGraphics::Item _item,
 // {{{ impl namespace (some command generator helpers)
 namespace impl
 {
-namespace
-{
-    ApplyResult setAnsiMode(Sequence const& _seq, size_t _modeIndex, bool _enable, Terminal& term)
+    namespace
     {
-        switch (_seq.param(_modeIndex))
+        ApplyResult setAnsiMode(Sequence const& _seq, size_t _modeIndex, bool _enable, Terminal& term)
         {
-            case 2: // (AM) Keyboard Action Mode
-                return ApplyResult::Unsupported;
-            case 4: // (IRM) Insert Mode
-                term.setMode(AnsiMode::Insert, _enable);
+            switch (_seq.param(_modeIndex))
+            {
+                case 2: // (AM) Keyboard Action Mode
+                    return ApplyResult::Unsupported;
+                case 4: // (IRM) Insert Mode
+                    term.setMode(AnsiMode::Insert, _enable);
+                    return ApplyResult::Ok;
+                case 12: // (SRM) Send/Receive Mode
+                case 20: // (LNM) Automatic Newline
+                default: return ApplyResult::Unsupported;
+            }
+        }
+
+        optional<DECMode> toDECMode(unsigned _value)
+        {
+            switch (_value)
+            {
+                case 1: return DECMode::UseApplicationCursorKeys;
+                case 2: return DECMode::DesignateCharsetUSASCII;
+                case 3: return DECMode::Columns132;
+                case 4: return DECMode::SmoothScroll;
+                case 5: return DECMode::ReverseVideo;
+                case 6: return DECMode::Origin;
+                case 7: return DECMode::AutoWrap;
+                // TODO: Ps = 8  -> Auto-repeat Keys (DECARM), VT100.
+                case 9: return DECMode::MouseProtocolX10;
+                case 10: return DECMode::ShowToolbar;
+                case 12: return DECMode::BlinkingCursor;
+                case 19: return DECMode::PrinterExtend;
+                case 25: return DECMode::VisibleCursor;
+                case 30: return DECMode::ShowScrollbar;
+                // TODO: Ps = 3 5  -> Enable font-shifting functions (rxvt).
+                // IGNORE? Ps = 3 8  -> Enter Tektronix Mode (DECTEK), VT240, xterm.
+                // TODO: Ps = 4 0  -> Allow 80 -> 132 Mode, xterm.
+                case 40: return DECMode::AllowColumns80to132;
+                // IGNORE: Ps = 4 1  -> more(1) fix (see curses resource).
+                // TODO: Ps = 4 2  -> Enable National Replacement Character sets (DECNRCM), VT220.
+                // TODO: Ps = 4 4  -> Turn On Margin Bell, xterm.
+                // TODO: Ps = 4 5  -> Reverse-wraparound Mode, xterm.
+                case 46: return DECMode::DebugLogging;
+                case 47: return DECMode::UseAlternateScreen;
+                // TODO: Ps = 6 6  -> Application keypad (DECNKM), VT320.
+                // TODO: Ps = 6 7  -> Backarrow key sends backspace (DECBKM), VT340, VT420.  This sets the
+                // backarrowKey resource to "true".
+                case 69: return DECMode::LeftRightMargin;
+                case 80: return DECMode::SixelScrolling;
+                case 1000: return DECMode::MouseProtocolNormalTracking;
+                case 1001: return DECMode::MouseProtocolHighlightTracking;
+                case 1002: return DECMode::MouseProtocolButtonTracking;
+                case 1003: return DECMode::MouseProtocolAnyEventTracking;
+                case 1004: return DECMode::FocusTracking;
+                case 1005: return DECMode::MouseExtended;
+                case 1006: return DECMode::MouseSGR;
+                case 1007: return DECMode::MouseAlternateScroll;
+                case 1015: return DECMode::MouseURXVT;
+                case 1016: return DECMode::MouseSGRPixels;
+                case 1047: return DECMode::UseAlternateScreen;
+                case 1048: return DECMode::SaveCursor;
+                case 1049: return DECMode::ExtendedAltScreen;
+                case 2004: return DECMode::BracketedPaste;
+                case 2026: return DECMode::BatchedRendering;
+                case 2027: return DECMode::TextReflow;
+                case 8452: return DECMode::SixelCursorNextToGraphic;
+            }
+            return nullopt;
+        }
+
+        ApplyResult setModeDEC(Sequence const& _seq, size_t _modeIndex, bool _enable, Terminal& term)
+        {
+            if (auto const modeOpt = toDECMode(_seq.param(_modeIndex)); modeOpt.has_value())
+            {
+                term.setMode(modeOpt.value(), _enable);
                 return ApplyResult::Ok;
-            case 12: // (SRM) Send/Receive Mode
-            case 20: // (LNM) Automatic Newline
-            default: return ApplyResult::Unsupported;
-        }
-    }
-
-    optional<DECMode> toDECMode(unsigned _value)
-    {
-        switch (_value)
-        {
-            case 1: return DECMode::UseApplicationCursorKeys;
-            case 2: return DECMode::DesignateCharsetUSASCII;
-            case 3: return DECMode::Columns132;
-            case 4: return DECMode::SmoothScroll;
-            case 5: return DECMode::ReverseVideo;
-            case 6: return DECMode::Origin;
-            case 7: return DECMode::AutoWrap;
-            // TODO: Ps = 8  -> Auto-repeat Keys (DECARM), VT100.
-            case 9: return DECMode::MouseProtocolX10;
-            case 10: return DECMode::ShowToolbar;
-            case 12: return DECMode::BlinkingCursor;
-            case 19: return DECMode::PrinterExtend;
-            case 25: return DECMode::VisibleCursor;
-            case 30: return DECMode::ShowScrollbar;
-            // TODO: Ps = 3 5  -> Enable font-shifting functions (rxvt).
-            // IGNORE? Ps = 3 8  -> Enter Tektronix Mode (DECTEK), VT240, xterm.
-            // TODO: Ps = 4 0  -> Allow 80 -> 132 Mode, xterm.
-            case 40: return DECMode::AllowColumns80to132;
-            // IGNORE: Ps = 4 1  -> more(1) fix (see curses resource).
-            // TODO: Ps = 4 2  -> Enable National Replacement Character sets (DECNRCM), VT220.
-            // TODO: Ps = 4 4  -> Turn On Margin Bell, xterm.
-            // TODO: Ps = 4 5  -> Reverse-wraparound Mode, xterm.
-            case 46: return DECMode::DebugLogging;
-            case 47: return DECMode::UseAlternateScreen;
-            // TODO: Ps = 6 6  -> Application keypad (DECNKM), VT320.
-            // TODO: Ps = 6 7  -> Backarrow key sends backspace (DECBKM), VT340, VT420.  This sets the
-            // backarrowKey resource to "true".
-            case 69: return DECMode::LeftRightMargin;
-            case 80: return DECMode::SixelScrolling;
-            case 1000: return DECMode::MouseProtocolNormalTracking;
-            case 1001: return DECMode::MouseProtocolHighlightTracking;
-            case 1002: return DECMode::MouseProtocolButtonTracking;
-            case 1003: return DECMode::MouseProtocolAnyEventTracking;
-            case 1004: return DECMode::FocusTracking;
-            case 1005: return DECMode::MouseExtended;
-            case 1006: return DECMode::MouseSGR;
-            case 1007: return DECMode::MouseAlternateScroll;
-            case 1015: return DECMode::MouseURXVT;
-            case 1016: return DECMode::MouseSGRPixels;
-            case 1047: return DECMode::UseAlternateScreen;
-            case 1048: return DECMode::SaveCursor;
-            case 1049: return DECMode::ExtendedAltScreen;
-            case 2004: return DECMode::BracketedPaste;
-            case 2026: return DECMode::BatchedRendering;
-            case 2027: return DECMode::TextReflow;
-            case 8452: return DECMode::SixelCursorNextToGraphic;
-        }
-        return nullopt;
-    }
-
-    ApplyResult setModeDEC(Sequence const& _seq, size_t _modeIndex, bool _enable, Terminal& term)
-    {
-        if (auto const modeOpt = toDECMode(_seq.param(_modeIndex)); modeOpt.has_value())
-        {
-            term.setMode(modeOpt.value(), _enable);
-            return ApplyResult::Ok;
-        }
-        return ApplyResult::Invalid;
-    }
-
-    optional<RGBColor> parseColor(string_view const& _value)
-    {
-        try
-        {
-            // "rgb:RR/GG/BB"
-            //  0123456789a
-            if (_value.size() == 12 && _value.substr(0, 4) == "rgb:" && _value[6] == '/' && _value[9] == '/')
-            {
-                auto const r = crispy::to_integer<16, uint8_t>(_value.substr(4, 2));
-                auto const g = crispy::to_integer<16, uint8_t>(_value.substr(7, 2));
-                auto const b = crispy::to_integer<16, uint8_t>(_value.substr(10, 2));
-                return RGBColor { r.value(), g.value(), b.value() };
             }
-
-            // "#RRGGBB"
-            if (_value.size() == 7 && _value[0] == '#')
-            {
-                auto const r = crispy::to_integer<16, uint8_t>(_value.substr(1, 2));
-                auto const g = crispy::to_integer<16, uint8_t>(_value.substr(3, 2));
-                auto const b = crispy::to_integer<16, uint8_t>(_value.substr(5, 2));
-                return RGBColor { r.value(), g.value(), b.value() };
-            }
-
-            // "#RGB"
-            if (_value.size() == 4 && _value[0] == '#')
-            {
-                auto const r = crispy::to_integer<16, uint8_t>(_value.substr(1, 1));
-                auto const g = crispy::to_integer<16, uint8_t>(_value.substr(2, 1));
-                auto const b = crispy::to_integer<16, uint8_t>(_value.substr(3, 1));
-                auto const rr = static_cast<uint8_t>(r.value() << 4);
-                auto const gg = static_cast<uint8_t>(g.value() << 4);
-                auto const bb = static_cast<uint8_t>(b.value() << 4);
-                return RGBColor { rr, gg, bb };
-            }
-
-            return std::nullopt;
+            return ApplyResult::Invalid;
         }
-        catch (...)
-        {
-            // that will be a formatting error in stoul() then.
-            return std::nullopt;
-        }
-    }
 
-    Color parseColor(Sequence const& _seq, size_t* pi)
-    {
-        // We are at parameter index `i`.
-        //
-        // It may now follow:
-        // - ":2::r:g:b"        RGB color
-        // - ":3:F:C:M:Y"       CMY color  (F is scaling factor, what is max? 100 or 255?)
-        // - ":4:F:C:M:Y:K"     CMYK color (F is scaling factor, what is max? 100 or 255?)
-        // - ":5:P"
-        // Sub-parameters can also be delimited with ';' and thus are no sub-parameters per-se.
-        size_t i = *pi;
-        auto const len = _seq.subParameterCount(i);
-        if (_seq.subParameterCount(i) >= 1)
+        optional<RGBColor> parseColor(string_view const& _value)
         {
-            switch (_seq.param(i + 1))
+            try
             {
-                case 2: // ":2::R:G:B" and ":2:R:G:B"
+                // "rgb:RR/GG/BB"
+                //  0123456789a
+                if (_value.size() == 12 && _value.substr(0, 4) == "rgb:" && _value[6] == '/'
+                    && _value[9] == '/')
                 {
-                    if (len == 4 || len == 5)
+                    auto const r = crispy::to_integer<16, uint8_t>(_value.substr(4, 2));
+                    auto const g = crispy::to_integer<16, uint8_t>(_value.substr(7, 2));
+                    auto const b = crispy::to_integer<16, uint8_t>(_value.substr(10, 2));
+                    return RGBColor { r.value(), g.value(), b.value() };
+                }
+
+                // "#RRGGBB"
+                if (_value.size() == 7 && _value[0] == '#')
+                {
+                    auto const r = crispy::to_integer<16, uint8_t>(_value.substr(1, 2));
+                    auto const g = crispy::to_integer<16, uint8_t>(_value.substr(3, 2));
+                    auto const b = crispy::to_integer<16, uint8_t>(_value.substr(5, 2));
+                    return RGBColor { r.value(), g.value(), b.value() };
+                }
+
+                // "#RGB"
+                if (_value.size() == 4 && _value[0] == '#')
+                {
+                    auto const r = crispy::to_integer<16, uint8_t>(_value.substr(1, 1));
+                    auto const g = crispy::to_integer<16, uint8_t>(_value.substr(2, 1));
+                    auto const b = crispy::to_integer<16, uint8_t>(_value.substr(3, 1));
+                    auto const rr = static_cast<uint8_t>(r.value() << 4);
+                    auto const gg = static_cast<uint8_t>(g.value() << 4);
+                    auto const bb = static_cast<uint8_t>(b.value() << 4);
+                    return RGBColor { rr, gg, bb };
+                }
+
+                return std::nullopt;
+            }
+            catch (...)
+            {
+                // that will be a formatting error in stoul() then.
+                return std::nullopt;
+            }
+        }
+
+        Color parseColor(Sequence const& _seq, size_t* pi)
+        {
+            // We are at parameter index `i`.
+            //
+            // It may now follow:
+            // - ":2::r:g:b"        RGB color
+            // - ":3:F:C:M:Y"       CMY color  (F is scaling factor, what is max? 100 or 255?)
+            // - ":4:F:C:M:Y:K"     CMYK color (F is scaling factor, what is max? 100 or 255?)
+            // - ":5:P"
+            // Sub-parameters can also be delimited with ';' and thus are no sub-parameters per-se.
+            size_t i = *pi;
+            auto const len = _seq.subParameterCount(i);
+            if (_seq.subParameterCount(i) >= 1)
+            {
+                switch (_seq.param(i + 1))
+                {
+                    case 2: // ":2::R:G:B" and ":2:R:G:B"
                     {
-                        // NB: subparam(i, 1) may be ignored
-                        auto const r = _seq.subparam(i, len - 2);
-                        auto const g = _seq.subparam(i, len - 1);
-                        auto const b = _seq.subparam(i, len - 0);
-                        if (r <= 255 && g <= 255 && b <= 255)
+                        if (len == 4 || len == 5)
+                        {
+                            // NB: subparam(i, 1) may be ignored
+                            auto const r = _seq.subparam(i, len - 2);
+                            auto const g = _seq.subparam(i, len - 1);
+                            auto const b = _seq.subparam(i, len - 0);
+                            if (r <= 255 && g <= 255 && b <= 255)
+                            {
+                                *pi += len;
+                                return Color { RGBColor { static_cast<uint8_t>(r),
+                                                          static_cast<uint8_t>(g),
+                                                          static_cast<uint8_t>(b) } };
+                            }
+                        }
+                        break;
+                    }
+                    case 3: // ":3:F:C:M:Y" (TODO)
+                    case 4: // ":4:F:C:M:Y:K" (TODO)
+                        *pi += len;
+                        break;
+                    case 5: // ":5:P"
+                        if (auto const P = _seq.subparam(i, 2); P <= 255)
                         {
                             *pi += len;
-                            return Color { RGBColor {
-                                static_cast<uint8_t>(r), static_cast<uint8_t>(g), static_cast<uint8_t>(b) } };
+                            return static_cast<IndexedColor>(P);
                         }
-                    }
-                    break;
+                        break;
+                    default:
+                        // XXX invalid sub parameter
+                        break;
                 }
-                case 3: // ":3:F:C:M:Y" (TODO)
-                case 4: // ":4:F:C:M:Y:K" (TODO)
-                    *pi += len;
-                    break;
-                case 5: // ":5:P"
-                    if (auto const P = _seq.subparam(i, 2); P <= 255)
-                    {
-                        *pi += len;
-                        return static_cast<IndexedColor>(P);
-                    }
-                    break;
-                default:
-                    // XXX invalid sub parameter
-                    break;
             }
-        }
 
-        // Compatibility mode, colors using ';' instead of ':'.
-        if (i + 1 < _seq.parameterCount())
-        {
-            ++i;
-            auto const mode = _seq.param(i);
-            if (mode == 5)
+            // Compatibility mode, colors using ';' instead of ':'.
+            if (i + 1 < _seq.parameterCount())
             {
-                if (i + 1 < _seq.parameterCount())
+                ++i;
+                auto const mode = _seq.param(i);
+                if (mode == 5)
                 {
-                    ++i;
-                    auto const value = _seq.param(i);
-                    if (i <= 255)
+                    if (i + 1 < _seq.parameterCount())
                     {
-                        *pi = i;
-                        return static_cast<IndexedColor>(value);
+                        ++i;
+                        auto const value = _seq.param(i);
+                        if (i <= 255)
+                        {
+                            *pi = i;
+                            return static_cast<IndexedColor>(value);
+                        }
+                        else
+                        {
+                        } // TODO: _seq.logInvalidCSI("Invalid color indexing.");
                     }
                     else
                     {
-                    } // TODO: _seq.logInvalidCSI("Invalid color indexing.");
+                    } // TODO: _seq.logInvalidCSI("Missing color index.");
                 }
-                else
+                else if (mode == 2)
                 {
-                } // TODO: _seq.logInvalidCSI("Missing color index.");
-            }
-            else if (mode == 2)
-            {
-                if (i + 3 < _seq.parameterCount())
-                {
-                    auto const r = _seq.param(i + 1);
-                    auto const g = _seq.param(i + 2);
-                    auto const b = _seq.param(i + 3);
-                    i += 3;
-                    if (r <= 255 && g <= 255 && b <= 255)
+                    if (i + 3 < _seq.parameterCount())
                     {
-                        *pi = i;
-                        return RGBColor { static_cast<uint8_t>(r),
-                                          static_cast<uint8_t>(g),
-                                          static_cast<uint8_t>(b) };
+                        auto const r = _seq.param(i + 1);
+                        auto const g = _seq.param(i + 2);
+                        auto const b = _seq.param(i + 3);
+                        i += 3;
+                        if (r <= 255 && g <= 255 && b <= 255)
+                        {
+                            *pi = i;
+                            return RGBColor { static_cast<uint8_t>(r),
+                                              static_cast<uint8_t>(g),
+                                              static_cast<uint8_t>(b) };
+                        }
+                        else
+                        {
+                        } // TODO: _seq.logInvalidCSI("RGB color out of range.");
                     }
                     else
                     {
-                    } // TODO: _seq.logInvalidCSI("RGB color out of range.");
+                    } // TODO: _seq.logInvalidCSI("Invalid color mode.");
                 }
                 else
                 {
@@ -2341,595 +2347,606 @@ namespace
             }
             else
             {
-            } // TODO: _seq.logInvalidCSI("Invalid color mode.");
+            } // TODO: _seq.logInvalidCSI("Invalid color indexing.");
+
+            // failure case, skip this argument
+            *pi = i + 1;
+            return Color {};
         }
-        else
-        {
-        } // TODO: _seq.logInvalidCSI("Invalid color indexing.");
 
-        // failure case, skip this argument
-        *pi = i + 1;
-        return Color {};
-    }
-
-    template <typename Target>
-    ApplyResult applySGR(Target& target, Sequence const& seq, size_t parameterStart, size_t parameterEnd)
-    {
-        if (parameterStart == parameterEnd)
+        template <typename Target>
+        ApplyResult applySGR(Target& target, Sequence const& seq, size_t parameterStart, size_t parameterEnd)
         {
-            target.setGraphicsRendition(GraphicsRendition::Reset);
+            if (parameterStart == parameterEnd)
+            {
+                target.setGraphicsRendition(GraphicsRendition::Reset);
+                return ApplyResult::Ok;
+            }
+
+            for (size_t i = parameterStart; i < parameterEnd; ++i)
+            {
+                switch (seq.param(i))
+                {
+                    case 0: target.setGraphicsRendition(GraphicsRendition::Reset); break;
+                    case 1: target.setGraphicsRendition(GraphicsRendition::Bold); break;
+                    case 2: target.setGraphicsRendition(GraphicsRendition::Faint); break;
+                    case 3: target.setGraphicsRendition(GraphicsRendition::Italic); break;
+                    case 4:
+                        if (seq.subParameterCount(i) == 1)
+                        {
+                            switch (seq.subparam(i, 1))
+                            {
+                                case 0: target.setGraphicsRendition(GraphicsRendition::NoUnderline); break;
+                                case 1: target.setGraphicsRendition(GraphicsRendition::Underline); break;
+                                case 2:
+                                    target.setGraphicsRendition(GraphicsRendition::DoublyUnderlined);
+                                    break;
+                                case 3:
+                                    target.setGraphicsRendition(GraphicsRendition::CurlyUnderlined);
+                                    break;
+                                case 4:
+                                    target.setGraphicsRendition(GraphicsRendition::DottedUnderline);
+                                    break;
+                                case 5:
+                                    target.setGraphicsRendition(GraphicsRendition::DashedUnderline);
+                                    break;
+                                default: target.setGraphicsRendition(GraphicsRendition::Underline); break;
+                            }
+                            ++i;
+                        }
+                        else
+                            target.setGraphicsRendition(GraphicsRendition::Underline);
+                        break;
+                    case 5: target.setGraphicsRendition(GraphicsRendition::Blinking); break;
+                    case 7: target.setGraphicsRendition(GraphicsRendition::Inverse); break;
+                    case 8: target.setGraphicsRendition(GraphicsRendition::Hidden); break;
+                    case 9: target.setGraphicsRendition(GraphicsRendition::CrossedOut); break;
+                    case 21: target.setGraphicsRendition(GraphicsRendition::DoublyUnderlined); break;
+                    case 22: target.setGraphicsRendition(GraphicsRendition::Normal); break;
+                    case 23: target.setGraphicsRendition(GraphicsRendition::NoItalic); break;
+                    case 24: target.setGraphicsRendition(GraphicsRendition::NoUnderline); break;
+                    case 25: target.setGraphicsRendition(GraphicsRendition::NoBlinking); break;
+                    case 27: target.setGraphicsRendition(GraphicsRendition::NoInverse); break;
+                    case 28: target.setGraphicsRendition(GraphicsRendition::NoHidden); break;
+                    case 29: target.setGraphicsRendition(GraphicsRendition::NoCrossedOut); break;
+                    case 30: target.setForegroundColor(IndexedColor::Black); break;
+                    case 31: target.setForegroundColor(IndexedColor::Red); break;
+                    case 32: target.setForegroundColor(IndexedColor::Green); break;
+                    case 33: target.setForegroundColor(IndexedColor::Yellow); break;
+                    case 34: target.setForegroundColor(IndexedColor::Blue); break;
+                    case 35: target.setForegroundColor(IndexedColor::Magenta); break;
+                    case 36: target.setForegroundColor(IndexedColor::Cyan); break;
+                    case 37: target.setForegroundColor(IndexedColor::White); break;
+                    case 38: target.setForegroundColor(parseColor(seq, &i)); break;
+                    case 39: target.setForegroundColor(DefaultColor()); break;
+                    case 40: target.setBackgroundColor(IndexedColor::Black); break;
+                    case 41: target.setBackgroundColor(IndexedColor::Red); break;
+                    case 42: target.setBackgroundColor(IndexedColor::Green); break;
+                    case 43: target.setBackgroundColor(IndexedColor::Yellow); break;
+                    case 44: target.setBackgroundColor(IndexedColor::Blue); break;
+                    case 45: target.setBackgroundColor(IndexedColor::Magenta); break;
+                    case 46: target.setBackgroundColor(IndexedColor::Cyan); break;
+                    case 47: target.setBackgroundColor(IndexedColor::White); break;
+                    case 48: target.setBackgroundColor(parseColor(seq, &i)); break;
+                    case 49: target.setBackgroundColor(DefaultColor()); break;
+                    case 51: target.setGraphicsRendition(GraphicsRendition::Framed); break;
+                    case 53: target.setGraphicsRendition(GraphicsRendition::Overline); break;
+                    case 54: target.setGraphicsRendition(GraphicsRendition::NoFramed); break;
+                    case 55: target.setGraphicsRendition(GraphicsRendition::NoOverline); break;
+                    // 58 is reserved, but used for setting underline/decoration colors by some other VTEs
+                    // (such as mintty, kitty, libvte)
+                    case 58: target.setUnderlineColor(parseColor(seq, &i)); break;
+                    case 90: target.setForegroundColor(BrightColor::Black); break;
+                    case 91: target.setForegroundColor(BrightColor::Red); break;
+                    case 92: target.setForegroundColor(BrightColor::Green); break;
+                    case 93: target.setForegroundColor(BrightColor::Yellow); break;
+                    case 94: target.setForegroundColor(BrightColor::Blue); break;
+                    case 95: target.setForegroundColor(BrightColor::Magenta); break;
+                    case 96: target.setForegroundColor(BrightColor::Cyan); break;
+                    case 97: target.setForegroundColor(BrightColor::White); break;
+                    case 100: target.setBackgroundColor(BrightColor::Black); break;
+                    case 101: target.setBackgroundColor(BrightColor::Red); break;
+                    case 102: target.setBackgroundColor(BrightColor::Green); break;
+                    case 103: target.setBackgroundColor(BrightColor::Yellow); break;
+                    case 104: target.setBackgroundColor(BrightColor::Blue); break;
+                    case 105: target.setBackgroundColor(BrightColor::Magenta); break;
+                    case 106: target.setBackgroundColor(BrightColor::Cyan); break;
+                    case 107: target.setBackgroundColor(BrightColor::White); break;
+                    default: break; // TODO: logInvalidCSI("Invalid SGR number: {}", seq.param(i));
+                }
+            }
             return ApplyResult::Ok;
         }
 
-        for (size_t i = parameterStart; i < parameterEnd; ++i)
+        template <typename Cell>
+        ApplyResult CPR(Sequence const& _seq, Screen<Cell>& _screen)
         {
-            switch (seq.param(i))
+            switch (_seq.param(0))
             {
-                case 0: target.setGraphicsRendition(GraphicsRendition::Reset); break;
-                case 1: target.setGraphicsRendition(GraphicsRendition::Bold); break;
-                case 2: target.setGraphicsRendition(GraphicsRendition::Faint); break;
-                case 3: target.setGraphicsRendition(GraphicsRendition::Italic); break;
-                case 4:
-                    if (seq.subParameterCount(i) == 1)
-                    {
-                        switch (seq.subparam(i, 1))
-                        {
-                            case 0: target.setGraphicsRendition(GraphicsRendition::NoUnderline); break;
-                            case 1: target.setGraphicsRendition(GraphicsRendition::Underline); break;
-                            case 2: target.setGraphicsRendition(GraphicsRendition::DoublyUnderlined); break;
-                            case 3: target.setGraphicsRendition(GraphicsRendition::CurlyUnderlined); break;
-                            case 4: target.setGraphicsRendition(GraphicsRendition::DottedUnderline); break;
-                            case 5: target.setGraphicsRendition(GraphicsRendition::DashedUnderline); break;
-                            default: target.setGraphicsRendition(GraphicsRendition::Underline); break;
-                        }
-                        ++i;
-                    }
-                    else
-                        target.setGraphicsRendition(GraphicsRendition::Underline);
-                    break;
-                case 5: target.setGraphicsRendition(GraphicsRendition::Blinking); break;
-                case 7: target.setGraphicsRendition(GraphicsRendition::Inverse); break;
-                case 8: target.setGraphicsRendition(GraphicsRendition::Hidden); break;
-                case 9: target.setGraphicsRendition(GraphicsRendition::CrossedOut); break;
-                case 21: target.setGraphicsRendition(GraphicsRendition::DoublyUnderlined); break;
-                case 22: target.setGraphicsRendition(GraphicsRendition::Normal); break;
-                case 23: target.setGraphicsRendition(GraphicsRendition::NoItalic); break;
-                case 24: target.setGraphicsRendition(GraphicsRendition::NoUnderline); break;
-                case 25: target.setGraphicsRendition(GraphicsRendition::NoBlinking); break;
-                case 27: target.setGraphicsRendition(GraphicsRendition::NoInverse); break;
-                case 28: target.setGraphicsRendition(GraphicsRendition::NoHidden); break;
-                case 29: target.setGraphicsRendition(GraphicsRendition::NoCrossedOut); break;
-                case 30: target.setForegroundColor(IndexedColor::Black); break;
-                case 31: target.setForegroundColor(IndexedColor::Red); break;
-                case 32: target.setForegroundColor(IndexedColor::Green); break;
-                case 33: target.setForegroundColor(IndexedColor::Yellow); break;
-                case 34: target.setForegroundColor(IndexedColor::Blue); break;
-                case 35: target.setForegroundColor(IndexedColor::Magenta); break;
-                case 36: target.setForegroundColor(IndexedColor::Cyan); break;
-                case 37: target.setForegroundColor(IndexedColor::White); break;
-                case 38: target.setForegroundColor(parseColor(seq, &i)); break;
-                case 39: target.setForegroundColor(DefaultColor()); break;
-                case 40: target.setBackgroundColor(IndexedColor::Black); break;
-                case 41: target.setBackgroundColor(IndexedColor::Red); break;
-                case 42: target.setBackgroundColor(IndexedColor::Green); break;
-                case 43: target.setBackgroundColor(IndexedColor::Yellow); break;
-                case 44: target.setBackgroundColor(IndexedColor::Blue); break;
-                case 45: target.setBackgroundColor(IndexedColor::Magenta); break;
-                case 46: target.setBackgroundColor(IndexedColor::Cyan); break;
-                case 47: target.setBackgroundColor(IndexedColor::White); break;
-                case 48: target.setBackgroundColor(parseColor(seq, &i)); break;
-                case 49: target.setBackgroundColor(DefaultColor()); break;
-                case 51: target.setGraphicsRendition(GraphicsRendition::Framed); break;
-                case 53: target.setGraphicsRendition(GraphicsRendition::Overline); break;
-                case 54: target.setGraphicsRendition(GraphicsRendition::NoFramed); break;
-                case 55: target.setGraphicsRendition(GraphicsRendition::NoOverline); break;
-                // 58 is reserved, but used for setting underline/decoration colors by some other VTEs
-                // (such as mintty, kitty, libvte)
-                case 58: target.setUnderlineColor(parseColor(seq, &i)); break;
-                case 90: target.setForegroundColor(BrightColor::Black); break;
-                case 91: target.setForegroundColor(BrightColor::Red); break;
-                case 92: target.setForegroundColor(BrightColor::Green); break;
-                case 93: target.setForegroundColor(BrightColor::Yellow); break;
-                case 94: target.setForegroundColor(BrightColor::Blue); break;
-                case 95: target.setForegroundColor(BrightColor::Magenta); break;
-                case 96: target.setForegroundColor(BrightColor::Cyan); break;
-                case 97: target.setForegroundColor(BrightColor::White); break;
-                case 100: target.setBackgroundColor(BrightColor::Black); break;
-                case 101: target.setBackgroundColor(BrightColor::Red); break;
-                case 102: target.setBackgroundColor(BrightColor::Green); break;
-                case 103: target.setBackgroundColor(BrightColor::Yellow); break;
-                case 104: target.setBackgroundColor(BrightColor::Blue); break;
-                case 105: target.setBackgroundColor(BrightColor::Magenta); break;
-                case 106: target.setBackgroundColor(BrightColor::Cyan); break;
-                case 107: target.setBackgroundColor(BrightColor::White); break;
-                default: break; // TODO: logInvalidCSI("Invalid SGR number: {}", seq.param(i));
+                case 5: _screen.deviceStatusReport(); return ApplyResult::Ok;
+                case 6: _screen.reportCursorPosition(); return ApplyResult::Ok;
+                default: return ApplyResult::Unsupported;
             }
         }
-        return ApplyResult::Ok;
-    }
 
-    template <typename Cell>
-    ApplyResult CPR(Sequence const& _seq, Screen<Cell>& _screen)
-    {
-        switch (_seq.param(0))
+        template <typename Cell>
+        ApplyResult DECRQPSR(Sequence const& _seq, Screen<Cell>& _screen)
         {
-            case 5: _screen.deviceStatusReport(); return ApplyResult::Ok;
-            case 6: _screen.reportCursorPosition(); return ApplyResult::Ok;
-            default: return ApplyResult::Unsupported;
-        }
-    }
-
-    template <typename Cell>
-    ApplyResult DECRQPSR(Sequence const& _seq, Screen<Cell>& _screen)
-    {
-        if (_seq.parameterCount() != 1)
-            return ApplyResult::Invalid; // -> error
-        else if (_seq.param(0) == 1)
-            // TODO: https://vt100.net/docs/vt510-rm/DECCIR.html
-            // TODO return emitCommand<RequestCursorState>(); // or call it with ...Detailed?
-            return ApplyResult::Invalid;
-        else if (_seq.param(0) == 2)
-        {
-            _screen.requestTabStops();
-            return ApplyResult::Ok;
-        }
-        else
-            return ApplyResult::Invalid;
-    }
-
-    template <typename Cell>
-    ApplyResult DECSCUSR(Sequence const& _seq, Screen<Cell>& _screen)
-    {
-        if (_seq.parameterCount() <= 1)
-        {
-            switch (_seq.param_or(0, Sequence::Parameter { 1 }))
+            if (_seq.parameterCount() != 1)
+                return ApplyResult::Invalid; // -> error
+            else if (_seq.param(0) == 1)
+                // TODO: https://vt100.net/docs/vt510-rm/DECCIR.html
+                // TODO return emitCommand<RequestCursorState>(); // or call it with ...Detailed?
+                return ApplyResult::Invalid;
+            else if (_seq.param(0) == 2)
             {
-                case 0:
-                case 1: _screen.setCursorStyle(CursorDisplay::Blink, CursorShape::Block); break;
-                case 2: _screen.setCursorStyle(CursorDisplay::Steady, CursorShape::Block); break;
-                case 3: _screen.setCursorStyle(CursorDisplay::Blink, CursorShape::Underscore); break;
-                case 4: _screen.setCursorStyle(CursorDisplay::Steady, CursorShape::Underscore); break;
-                case 5: _screen.setCursorStyle(CursorDisplay::Blink, CursorShape::Bar); break;
-                case 6: _screen.setCursorStyle(CursorDisplay::Steady, CursorShape::Bar); break;
+                _screen.requestTabStops();
+                return ApplyResult::Ok;
+            }
+            else
+                return ApplyResult::Invalid;
+        }
+
+        template <typename Cell>
+        ApplyResult DECSCUSR(Sequence const& _seq, Screen<Cell>& _screen)
+        {
+            if (_seq.parameterCount() <= 1)
+            {
+                switch (_seq.param_or(0, Sequence::Parameter { 1 }))
+                {
+                    case 0:
+                    case 1: _screen.setCursorStyle(CursorDisplay::Blink, CursorShape::Block); break;
+                    case 2: _screen.setCursorStyle(CursorDisplay::Steady, CursorShape::Block); break;
+                    case 3: _screen.setCursorStyle(CursorDisplay::Blink, CursorShape::Underscore); break;
+                    case 4: _screen.setCursorStyle(CursorDisplay::Steady, CursorShape::Underscore); break;
+                    case 5: _screen.setCursorStyle(CursorDisplay::Blink, CursorShape::Bar); break;
+                    case 6: _screen.setCursorStyle(CursorDisplay::Steady, CursorShape::Bar); break;
+                    default: return ApplyResult::Invalid;
+                }
+                return ApplyResult::Ok;
+            }
+            else
+                return ApplyResult::Invalid;
+        }
+
+        template <typename Cell>
+        ApplyResult EL(Sequence const& _seq, Screen<Cell>& _screen)
+        {
+            switch (_seq.param_or(0, Sequence::Parameter { 0 }))
+            {
+                case 0: _screen.clearToEndOfLine(); break;
+                case 1: _screen.clearToBeginOfLine(); break;
+                case 2: _screen.clearLine(); break;
                 default: return ApplyResult::Invalid;
             }
             return ApplyResult::Ok;
         }
-        else
-            return ApplyResult::Invalid;
-    }
 
-    template <typename Cell>
-    ApplyResult EL(Sequence const& _seq, Screen<Cell>& _screen)
-    {
-        switch (_seq.param_or(0, Sequence::Parameter { 0 }))
+        template <typename Cell>
+        ApplyResult TBC(Sequence const& _seq, Screen<Cell>& _screen)
         {
-            case 0: _screen.clearToEndOfLine(); break;
-            case 1: _screen.clearToBeginOfLine(); break;
-            case 2: _screen.clearLine(); break;
-            default: return ApplyResult::Invalid;
-        }
-        return ApplyResult::Ok;
-    }
-
-    template <typename Cell>
-    ApplyResult TBC(Sequence const& _seq, Screen<Cell>& _screen)
-    {
-        if (_seq.parameterCount() != 1)
-        {
-            _screen.horizontalTabClear(HorizontalTabClear::UnderCursor);
-            return ApplyResult::Ok;
-        }
-
-        switch (_seq.param(0))
-        {
-            case 0: _screen.horizontalTabClear(HorizontalTabClear::UnderCursor); break;
-            case 3: _screen.horizontalTabClear(HorizontalTabClear::AllTabs); break;
-            default: return ApplyResult::Invalid;
-        }
-        return ApplyResult::Ok;
-    }
-
-    inline std::unordered_map<std::string_view, std::string_view> parseSubParamKeyValuePairs(
-        std::string_view const& s)
-    {
-        return crispy::splitKeyValuePairs(s, ':');
-    }
-
-    template <typename Cell>
-    ApplyResult setOrRequestDynamicColor(Sequence const& _seq, Screen<Cell>& _screen, DynamicColorName _name)
-    {
-        auto const& value = _seq.intermediateCharacters();
-        if (value == "?")
-            _screen.requestDynamicColor(_name);
-        else if (auto color = parseColor(value); color.has_value())
-            _screen.setDynamicColor(_name, color.value());
-        else
-            return ApplyResult::Invalid;
-
-        return ApplyResult::Ok;
-    }
-
-    bool queryOrSetColorPalette(string_view _text,
-                                std::function<void(uint8_t)> _queryColor,
-                                std::function<void(uint8_t, RGBColor)> _setColor)
-    {
-        // Sequence := [Param (';' Param)*]
-        // Param    := Index ';' Query | Set
-        // Index    := DIGIT+
-        // Query    := ?'
-        // Set      := 'rgb:' Hex8 '/' Hex8 '/' Hex8
-        // Hex8     := [0-9A-Za-z] [0-9A-Za-z]
-        // DIGIT    := [0-9]
-        int index = -1;
-        return crispy::split(_text, ';', [&](string_view value) {
-            if (index < 0)
+            if (_seq.parameterCount() != 1)
             {
-                index = crispy::to_integer<10, int>(value).value_or(-1);
-                if (!(0 <= index && index <= 0xFF))
-                    return false;
+                _screen.horizontalTabClear(HorizontalTabClear::UnderCursor);
+                return ApplyResult::Ok;
             }
-            else if (value == "?"sv)
-            {
-                _queryColor((uint8_t) index);
-                index = -1;
-            }
-            else if (auto const color = parseColor(value))
-            {
-                _setColor((uint8_t) index, color.value());
-                index = -1;
-            }
-            else
-                return false;
 
-            return true;
-        });
-    }
-
-    template <typename Cell>
-    ApplyResult RCOLPAL(Sequence const& _seq, Screen<Cell>& _screen)
-    {
-        if (_seq.intermediateCharacters().empty())
-        {
-            _screen.colorPalette() = _screen.defaultColorPalette();
-            return ApplyResult::Ok;
-        }
-
-        auto const index = crispy::to_integer<10, uint8_t>(_seq.intermediateCharacters());
-        if (!index.has_value())
-            return ApplyResult::Invalid;
-
-        _screen.colorPalette().palette[*index] = _screen.defaultColorPalette().palette[*index];
-
-        return ApplyResult::Ok;
-    }
-
-    ApplyResult SETCOLPAL(Sequence const& _seq, Terminal& _terminal)
-    {
-        bool const ok = queryOrSetColorPalette(
-            _seq.intermediateCharacters(),
-            [&](uint8_t index) {
-                auto const color = _terminal.colorPalette().palette.at(index);
-                _terminal.reply("\033]4;{};rgb:{:04x}/{:04x}/{:04x}\033\\",
-                                index,
-                                static_cast<uint16_t>(color.red) << 8 | color.red,
-                                static_cast<uint16_t>(color.green) << 8 | color.green,
-                                static_cast<uint16_t>(color.blue) << 8 | color.blue);
-            },
-            [&](uint8_t index, RGBColor color) { _terminal.colorPalette().palette.at(index) = color; });
-
-        return ok ? ApplyResult::Ok : ApplyResult::Invalid;
-    }
-
-    int toInt(string_view _value)
-    {
-        int out = 0;
-        for (auto const ch: _value)
-        {
-            if (!(ch >= '0' && ch <= '9'))
-                return 0;
-
-            out = out * 10 + (ch - '0');
-        }
-        return out;
-    }
-
-    ApplyResult setAllFont(Sequence const& _seq, Terminal& terminal)
-    {
-        // [read]  OSC 60 ST
-        // [write] OSC 60 ; size ; regular ; bold ; italic ; bold italic ST
-        auto const& params = _seq.intermediateCharacters();
-        auto const splits = crispy::split(params, ';');
-        auto const param = [&](unsigned _index) -> string_view {
-            if (_index < splits.size())
-                return splits.at(_index);
-            else
-                return {};
-        };
-        auto const emptyParams = [&]() -> bool {
-            for (auto const& x: splits)
-                if (!x.empty())
-                    return false;
-            return true;
-        }();
-        if (emptyParams)
-        {
-            auto const fonts = terminal.getFontDef();
-            terminal.reply("\033]60;{};{};{};{};{};{}\033\\",
-                           int(fonts.size * 100), // precission-shift
-                           fonts.regular,
-                           fonts.bold,
-                           fonts.italic,
-                           fonts.boldItalic,
-                           fonts.emoji);
-        }
-        else
-        {
-            auto const size = double(toInt(param(0))) / 100.0;
-            auto const regular = string(param(1));
-            auto const bold = string(param(2));
-            auto const italic = string(param(3));
-            auto const boldItalic = string(param(4));
-            auto const emoji = string(param(5));
-            terminal.setFontDef(FontDef { size, regular, bold, italic, boldItalic, emoji });
-        }
-        return ApplyResult::Ok;
-    }
-
-    ApplyResult setFont(Sequence const& _seq, Terminal& terminal)
-    {
-        auto const& params = _seq.intermediateCharacters();
-        auto const splits = crispy::split(params, ';');
-
-        if (splits.size() != 1)
-            return ApplyResult::Invalid;
-
-        if (splits[0] != "?"sv)
-        {
-            auto fontDef = FontDef {};
-            fontDef.regular = splits[0];
-            terminal.setFontDef(fontDef);
-        }
-        else
-        {
-            auto const fonts = terminal.getFontDef();
-            terminal.reply("\033]50;{}\033\\", fonts.regular);
-        }
-
-        return ApplyResult::Ok;
-    }
-
-    ApplyResult clipboard(Sequence const& _seq, Terminal& terminal)
-    {
-        // Only setting clipboard contents is supported, not reading.
-        auto const& params = _seq.intermediateCharacters();
-        if (auto const splits = crispy::split(params, ';'); splits.size() == 2 && splits[0] == "c")
-        {
-            terminal.copyToClipboard(crispy::base64::decode(splits[1]));
-            return ApplyResult::Ok;
-        }
-        else
-            return ApplyResult::Invalid;
-    }
-
-    template <typename Cell>
-    ApplyResult NOTIFY(Sequence const& _seq, Screen<Cell>& _screen)
-    {
-        auto const& value = _seq.intermediateCharacters();
-        if (auto const splits = crispy::split(value, ';'); splits.size() == 3 && splits[0] == "notify")
-        {
-            _screen.notify(string(splits[1]), string(splits[2]));
-            return ApplyResult::Ok;
-        }
-        else
-            return ApplyResult::Unsupported;
-    }
-
-    template <typename Cell>
-    ApplyResult SETCWD(Sequence const& _seq, Screen<Cell>& _screen)
-    {
-        string const& url = _seq.intermediateCharacters();
-        _screen.setCurrentWorkingDirectory(url);
-        return ApplyResult::Ok;
-    }
-
-    ApplyResult CAPTURE(Sequence const& _seq, Terminal& terminal)
-    {
-        // CSI Mode ; [; Count] t
-        //
-        // Mode: 0 = physical lines
-        //       1 = logical lines (unwrapped)
-        //
-        // Count: number of lines to capture from main page aera's bottom upwards
-        //        If omitted or 0, the main page area's line count will be used.
-
-        auto const logicalLines = _seq.param_or(0, 0);
-        if (logicalLines != 0 && logicalLines != 1)
-            return ApplyResult::Invalid;
-
-        auto const lineCount = LineCount(_seq.param_or(1, *terminal.pageSize().lines));
-
-        terminal.requestCaptureBuffer(lineCount, logicalLines);
-
-        return ApplyResult::Ok;
-    }
-
-    template <typename Cell>
-    ApplyResult HYPERLINK(Sequence const& _seq, Screen<Cell>& _screen)
-    {
-        auto const& value = _seq.intermediateCharacters();
-        // hyperlink_OSC ::= OSC '8' ';' params ';' URI
-        // params := pair (':' pair)*
-        // pair := TEXT '=' TEXT
-        if (auto const pos = value.find(';'); pos != value.npos)
-        {
-            auto const paramsStr = value.substr(0, pos);
-            auto const params = parseSubParamKeyValuePairs(paramsStr);
-
-            auto id = string {};
-            if (auto const p = params.find("id"); p != params.end())
-                id = p->second;
-
-            if (pos + 1 != value.size())
-                _screen.hyperlink(id, value.substr(pos + 1));
-            else
-                _screen.hyperlink(string { id }, string {});
-
-            return ApplyResult::Ok;
-        }
-        else
-            _screen.hyperlink(string {}, string {});
-
-        return ApplyResult::Ok;
-    }
-
-    template <typename Cell>
-    ApplyResult saveDECModes(Sequence const& _seq, Screen<Cell>& _screen)
-    {
-        vector<DECMode> modes;
-        for (size_t i = 0; i < _seq.parameterCount(); ++i)
-            if (optional<DECMode> mode = toDECMode(_seq.param(i)); mode.has_value())
-                modes.push_back(mode.value());
-        _screen.saveModes(modes);
-        return ApplyResult::Ok;
-    }
-
-    template <typename Cell>
-    ApplyResult restoreDECModes(Sequence const& _seq, Screen<Cell>& _screen)
-    {
-        vector<DECMode> modes;
-        for (size_t i = 0; i < _seq.parameterCount(); ++i)
-            if (optional<DECMode> mode = toDECMode(_seq.param(i)); mode.has_value())
-                modes.push_back(mode.value());
-        _screen.restoreModes(modes);
-        return ApplyResult::Ok;
-    }
-
-    ApplyResult WINDOWMANIP(Sequence const& _seq, Terminal& terminal)
-    {
-        if (_seq.parameterCount() == 3)
-        {
             switch (_seq.param(0))
             {
-                case 4: // resize in pixel units
-                    terminal.requestWindowResize(ImageSize { Width(_seq.param(2)), Height(_seq.param(1)) });
-                    break;
-                case 8: // resize in cell units
-                    terminal.requestWindowResize(PageSize { LineCount::cast_from(_seq.param(1)),
-                                                            ColumnCount::cast_from(_seq.param(2)) });
-                    break;
-                case 22: terminal.saveWindowTitle(); break;
-                case 23: terminal.restoreWindowTitle(); break;
-                default: return ApplyResult::Unsupported;
+                case 0: _screen.horizontalTabClear(HorizontalTabClear::UnderCursor); break;
+                case 3: _screen.horizontalTabClear(HorizontalTabClear::AllTabs); break;
+                default: return ApplyResult::Invalid;
             }
             return ApplyResult::Ok;
         }
-        else if (_seq.parameterCount() == 2 || _seq.parameterCount() == 1)
+
+        inline std::unordered_map<std::string_view, std::string_view> parseSubParamKeyValuePairs(
+            std::string_view const& s)
         {
-            switch (_seq.param(0))
+            return crispy::splitKeyValuePairs(s, ':');
+        }
+
+        template <typename Cell>
+        ApplyResult setOrRequestDynamicColor(Sequence const& _seq,
+                                             Screen<Cell>& _screen,
+                                             DynamicColorName _name)
+        {
+            auto const& value = _seq.intermediateCharacters();
+            if (value == "?")
+                _screen.requestDynamicColor(_name);
+            else if (auto color = parseColor(value); color.has_value())
+                _screen.setDynamicColor(_name, color.value());
+            else
+                return ApplyResult::Invalid;
+
+            return ApplyResult::Ok;
+        }
+
+        bool queryOrSetColorPalette(string_view _text,
+                                    std::function<void(uint8_t)> _queryColor,
+                                    std::function<void(uint8_t, RGBColor)> _setColor)
+        {
+            // Sequence := [Param (';' Param)*]
+            // Param    := Index ';' Query | Set
+            // Index    := DIGIT+
+            // Query    := ?'
+            // Set      := 'rgb:' Hex8 '/' Hex8 '/' Hex8
+            // Hex8     := [0-9A-Za-z] [0-9A-Za-z]
+            // DIGIT    := [0-9]
+            int index = -1;
+            return crispy::split(_text, ';', [&](string_view value) {
+                if (index < 0)
+                {
+                    index = crispy::to_integer<10, int>(value).value_or(-1);
+                    if (!(0 <= index && index <= 0xFF))
+                        return false;
+                }
+                else if (value == "?"sv)
+                {
+                    _queryColor((uint8_t) index);
+                    index = -1;
+                }
+                else if (auto const color = parseColor(value))
+                {
+                    _setColor((uint8_t) index, color.value());
+                    index = -1;
+                }
+                else
+                    return false;
+
+                return true;
+            });
+        }
+
+        template <typename Cell>
+        ApplyResult RCOLPAL(Sequence const& _seq, Screen<Cell>& _screen)
+        {
+            if (_seq.intermediateCharacters().empty())
             {
-                case 4:
-                case 8:
-                    // this means, resize to full display size
-                    // TODO: just create a dedicated callback for fulscreen resize!
-                    terminal.requestWindowResize(ImageSize {});
-                    break;
-                case 14:
-                    if (_seq.parameterCount() == 2 && _seq.param(1) == 2)
-                        terminal.primaryScreen().requestPixelSize(
-                            RequestPixelSize::WindowArea); // CSI 14 ; 2 t
-                    else
-                        terminal.primaryScreen().requestPixelSize(RequestPixelSize::TextArea); // CSI 14 t
-                    break;
-                case 16: terminal.primaryScreen().requestPixelSize(RequestPixelSize::CellArea); break;
-                case 18: terminal.primaryScreen().requestCharacterSize(RequestPixelSize::TextArea); break;
-                case 19: terminal.primaryScreen().requestCharacterSize(RequestPixelSize::WindowArea); break;
-                case 22: {
-                    switch (_seq.param(1))
-                    {
-                        case 0: terminal.saveWindowTitle(); break; // CSI 22 ; 0 t | save icon & window title
-                        case 1: return ApplyResult::Unsupported;   // CSI 22 ; 1 t | save icon title
-                        case 2: terminal.saveWindowTitle(); break; // CSI 22 ; 2 t | save window title
-                        default: return ApplyResult::Unsupported;
-                    }
-                    return ApplyResult::Ok;
-                }
-                case 23: {
-                    switch (_seq.param(1))
-                    {
-                        case 0:
-                            terminal.restoreWindowTitle();
-                            break;                               // CSI 22 ; 0 t | save icon & window title
-                        case 1: return ApplyResult::Unsupported; // CSI 22 ; 1 t | save icon title
-                        case 2: terminal.restoreWindowTitle(); break; // CSI 22 ; 2 t | save window title
-                        default: return ApplyResult::Unsupported;
-                    }
-                    return ApplyResult::Ok;
-                }
+                _screen.colorPalette() = _screen.defaultColorPalette();
+                return ApplyResult::Ok;
+            }
+
+            auto const index = crispy::to_integer<10, uint8_t>(_seq.intermediateCharacters());
+            if (!index.has_value())
+                return ApplyResult::Invalid;
+
+            _screen.colorPalette().palette[*index] = _screen.defaultColorPalette().palette[*index];
+
+            return ApplyResult::Ok;
+        }
+
+        ApplyResult SETCOLPAL(Sequence const& _seq, Terminal& _terminal)
+        {
+            bool const ok = queryOrSetColorPalette(
+                _seq.intermediateCharacters(),
+                [&](uint8_t index) {
+                    auto const color = _terminal.colorPalette().palette.at(index);
+                    _terminal.reply("\033]4;{};rgb:{:04x}/{:04x}/{:04x}\033\\",
+                                    index,
+                                    static_cast<uint16_t>(color.red) << 8 | color.red,
+                                    static_cast<uint16_t>(color.green) << 8 | color.green,
+                                    static_cast<uint16_t>(color.blue) << 8 | color.blue);
+                },
+                [&](uint8_t index, RGBColor color) { _terminal.colorPalette().palette.at(index) = color; });
+
+            return ok ? ApplyResult::Ok : ApplyResult::Invalid;
+        }
+
+        int toInt(string_view _value)
+        {
+            int out = 0;
+            for (auto const ch: _value)
+            {
+                if (!(ch >= '0' && ch <= '9'))
+                    return 0;
+
+                out = out * 10 + (ch - '0');
+            }
+            return out;
+        }
+
+        ApplyResult setAllFont(Sequence const& _seq, Terminal& terminal)
+        {
+            // [read]  OSC 60 ST
+            // [write] OSC 60 ; size ; regular ; bold ; italic ; bold italic ST
+            auto const& params = _seq.intermediateCharacters();
+            auto const splits = crispy::split(params, ';');
+            auto const param = [&](unsigned _index) -> string_view {
+                if (_index < splits.size())
+                    return splits.at(_index);
+                else
+                    return {};
+            };
+            auto const emptyParams = [&]() -> bool {
+                for (auto const& x: splits)
+                    if (!x.empty())
+                        return false;
+                return true;
+            }();
+            if (emptyParams)
+            {
+                auto const fonts = terminal.getFontDef();
+                terminal.reply("\033]60;{};{};{};{};{};{}\033\\",
+                               int(fonts.size * 100), // precission-shift
+                               fonts.regular,
+                               fonts.bold,
+                               fonts.italic,
+                               fonts.boldItalic,
+                               fonts.emoji);
+            }
+            else
+            {
+                auto const size = double(toInt(param(0))) / 100.0;
+                auto const regular = string(param(1));
+                auto const bold = string(param(2));
+                auto const italic = string(param(3));
+                auto const boldItalic = string(param(4));
+                auto const emoji = string(param(5));
+                terminal.setFontDef(FontDef { size, regular, bold, italic, boldItalic, emoji });
             }
             return ApplyResult::Ok;
         }
-        else
-            return ApplyResult::Unsupported;
-    }
 
-    template <typename Cell>
-    ApplyResult XTSMGRAPHICS(Sequence const& _seq, Screen<Cell>& _screen)
-    {
-        auto const Pi = _seq.param<unsigned>(0);
-        auto const Pa = _seq.param<unsigned>(1);
-        auto const Pv = _seq.param_or<unsigned>(2, 0);
-        auto const Pu = _seq.param_or<unsigned>(3, 0);
+        ApplyResult setFont(Sequence const& _seq, Terminal& terminal)
+        {
+            auto const& params = _seq.intermediateCharacters();
+            auto const splits = crispy::split(params, ';');
 
-        auto const item = [&]() -> optional<XtSmGraphics::Item> {
-            switch (Pi)
+            if (splits.size() != 1)
+                return ApplyResult::Invalid;
+
+            if (splits[0] != "?"sv)
             {
-                case 1: return XtSmGraphics::Item::NumberOfColorRegisters;
-                case 2: return XtSmGraphics::Item::SixelGraphicsGeometry;
-                case 3: return XtSmGraphics::Item::ReGISGraphicsGeometry;
-                default: return nullopt;
+                auto fontDef = FontDef {};
+                fontDef.regular = splits[0];
+                terminal.setFontDef(fontDef);
             }
-        }();
-        if (!item.has_value())
-            return ApplyResult::Invalid;
-
-        auto const action = [&]() -> optional<XtSmGraphics::Action> {
-            switch (Pa)
+            else
             {
-                case 1: return XtSmGraphics::Action::Read;
-                case 2: return XtSmGraphics::Action::ResetToDefault;
-                case 3: return XtSmGraphics::Action::SetToValue;
-                case 4: return XtSmGraphics::Action::ReadLimit;
-                default: return nullopt;
+                auto const fonts = terminal.getFontDef();
+                terminal.reply("\033]50;{}\033\\", fonts.regular);
             }
-        }();
-        if (!action.has_value())
-            return ApplyResult::Invalid;
 
-        if (*item != XtSmGraphics::Item::NumberOfColorRegisters && *action == XtSmGraphics::Action::SetToValue
-            && (!Pv || !Pu))
-            return ApplyResult::Invalid;
+            return ApplyResult::Ok;
+        }
 
-        auto const value = [&]() -> XtSmGraphics::Value {
-            using Action = XtSmGraphics::Action;
-            switch (*action)
+        ApplyResult clipboard(Sequence const& _seq, Terminal& terminal)
+        {
+            // Only setting clipboard contents is supported, not reading.
+            auto const& params = _seq.intermediateCharacters();
+            if (auto const splits = crispy::split(params, ';'); splits.size() == 2 && splits[0] == "c")
             {
-                case Action::Read:
-                case Action::ResetToDefault:
-                case Action::ReadLimit: return std::monostate {};
-                case Action::SetToValue:
-                    return *item == XtSmGraphics::Item::NumberOfColorRegisters
-                               ? XtSmGraphics::Value { Pv }
-                               : XtSmGraphics::Value { ImageSize { Width(Pv), Height(Pu) } };
+                terminal.copyToClipboard(crispy::base64::decode(splits[1]));
+                return ApplyResult::Ok;
             }
-            return std::monostate {};
-        }();
+            else
+                return ApplyResult::Invalid;
+        }
 
-        _screen.smGraphics(*item, *action, value);
+        template <typename Cell>
+        ApplyResult NOTIFY(Sequence const& _seq, Screen<Cell>& _screen)
+        {
+            auto const& value = _seq.intermediateCharacters();
+            if (auto const splits = crispy::split(value, ';'); splits.size() == 3 && splits[0] == "notify")
+            {
+                _screen.notify(string(splits[1]), string(splits[2]));
+                return ApplyResult::Ok;
+            }
+            else
+                return ApplyResult::Unsupported;
+        }
 
-        return ApplyResult::Ok;
-    }
-} // namespace
+        template <typename Cell>
+        ApplyResult SETCWD(Sequence const& _seq, Screen<Cell>& _screen)
+        {
+            string const& url = _seq.intermediateCharacters();
+            _screen.setCurrentWorkingDirectory(url);
+            return ApplyResult::Ok;
+        }
+
+        ApplyResult CAPTURE(Sequence const& _seq, Terminal& terminal)
+        {
+            // CSI Mode ; [; Count] t
+            //
+            // Mode: 0 = physical lines
+            //       1 = logical lines (unwrapped)
+            //
+            // Count: number of lines to capture from main page aera's bottom upwards
+            //        If omitted or 0, the main page area's line count will be used.
+
+            auto const logicalLines = _seq.param_or(0, 0);
+            if (logicalLines != 0 && logicalLines != 1)
+                return ApplyResult::Invalid;
+
+            auto const lineCount = LineCount(_seq.param_or(1, *terminal.pageSize().lines));
+
+            terminal.requestCaptureBuffer(lineCount, logicalLines);
+
+            return ApplyResult::Ok;
+        }
+
+        template <typename Cell>
+        ApplyResult HYPERLINK(Sequence const& _seq, Screen<Cell>& _screen)
+        {
+            auto const& value = _seq.intermediateCharacters();
+            // hyperlink_OSC ::= OSC '8' ';' params ';' URI
+            // params := pair (':' pair)*
+            // pair := TEXT '=' TEXT
+            if (auto const pos = value.find(';'); pos != value.npos)
+            {
+                auto const paramsStr = value.substr(0, pos);
+                auto const params = parseSubParamKeyValuePairs(paramsStr);
+
+                auto id = string {};
+                if (auto const p = params.find("id"); p != params.end())
+                    id = p->second;
+
+                if (pos + 1 != value.size())
+                    _screen.hyperlink(id, value.substr(pos + 1));
+                else
+                    _screen.hyperlink(string { id }, string {});
+
+                return ApplyResult::Ok;
+            }
+            else
+                _screen.hyperlink(string {}, string {});
+
+            return ApplyResult::Ok;
+        }
+
+        template <typename Cell>
+        ApplyResult saveDECModes(Sequence const& _seq, Screen<Cell>& _screen)
+        {
+            vector<DECMode> modes;
+            for (size_t i = 0; i < _seq.parameterCount(); ++i)
+                if (optional<DECMode> mode = toDECMode(_seq.param(i)); mode.has_value())
+                    modes.push_back(mode.value());
+            _screen.saveModes(modes);
+            return ApplyResult::Ok;
+        }
+
+        template <typename Cell>
+        ApplyResult restoreDECModes(Sequence const& _seq, Screen<Cell>& _screen)
+        {
+            vector<DECMode> modes;
+            for (size_t i = 0; i < _seq.parameterCount(); ++i)
+                if (optional<DECMode> mode = toDECMode(_seq.param(i)); mode.has_value())
+                    modes.push_back(mode.value());
+            _screen.restoreModes(modes);
+            return ApplyResult::Ok;
+        }
+
+        ApplyResult WINDOWMANIP(Sequence const& _seq, Terminal& terminal)
+        {
+            if (_seq.parameterCount() == 3)
+            {
+                switch (_seq.param(0))
+                {
+                    case 4: // resize in pixel units
+                        terminal.requestWindowResize(
+                            ImageSize { Width(_seq.param(2)), Height(_seq.param(1)) });
+                        break;
+                    case 8: // resize in cell units
+                        terminal.requestWindowResize(PageSize { LineCount::cast_from(_seq.param(1)),
+                                                                ColumnCount::cast_from(_seq.param(2)) });
+                        break;
+                    case 22: terminal.saveWindowTitle(); break;
+                    case 23: terminal.restoreWindowTitle(); break;
+                    default: return ApplyResult::Unsupported;
+                }
+                return ApplyResult::Ok;
+            }
+            else if (_seq.parameterCount() == 2 || _seq.parameterCount() == 1)
+            {
+                switch (_seq.param(0))
+                {
+                    case 4:
+                    case 8:
+                        // this means, resize to full display size
+                        // TODO: just create a dedicated callback for fulscreen resize!
+                        terminal.requestWindowResize(ImageSize {});
+                        break;
+                    case 14:
+                        if (_seq.parameterCount() == 2 && _seq.param(1) == 2)
+                            terminal.primaryScreen().requestPixelSize(
+                                RequestPixelSize::WindowArea); // CSI 14 ; 2 t
+                        else
+                            terminal.primaryScreen().requestPixelSize(RequestPixelSize::TextArea); // CSI 14 t
+                        break;
+                    case 16: terminal.primaryScreen().requestPixelSize(RequestPixelSize::CellArea); break;
+                    case 18: terminal.primaryScreen().requestCharacterSize(RequestPixelSize::TextArea); break;
+                    case 19:
+                        terminal.primaryScreen().requestCharacterSize(RequestPixelSize::WindowArea);
+                        break;
+                    case 22: {
+                        switch (_seq.param(1))
+                        {
+                            case 0:
+                                terminal.saveWindowTitle();
+                                break; // CSI 22 ; 0 t | save icon & window title
+                            case 1: return ApplyResult::Unsupported;   // CSI 22 ; 1 t | save icon title
+                            case 2: terminal.saveWindowTitle(); break; // CSI 22 ; 2 t | save window title
+                            default: return ApplyResult::Unsupported;
+                        }
+                        return ApplyResult::Ok;
+                    }
+                    case 23: {
+                        switch (_seq.param(1))
+                        {
+                            case 0:
+                                terminal.restoreWindowTitle();
+                                break; // CSI 22 ; 0 t | save icon & window title
+                            case 1: return ApplyResult::Unsupported;      // CSI 22 ; 1 t | save icon title
+                            case 2: terminal.restoreWindowTitle(); break; // CSI 22 ; 2 t | save window title
+                            default: return ApplyResult::Unsupported;
+                        }
+                        return ApplyResult::Ok;
+                    }
+                }
+                return ApplyResult::Ok;
+            }
+            else
+                return ApplyResult::Unsupported;
+        }
+
+        template <typename Cell>
+        ApplyResult XTSMGRAPHICS(Sequence const& _seq, Screen<Cell>& _screen)
+        {
+            auto const Pi = _seq.param<unsigned>(0);
+            auto const Pa = _seq.param<unsigned>(1);
+            auto const Pv = _seq.param_or<unsigned>(2, 0);
+            auto const Pu = _seq.param_or<unsigned>(3, 0);
+
+            auto const item = [&]() -> optional<XtSmGraphics::Item> {
+                switch (Pi)
+                {
+                    case 1: return XtSmGraphics::Item::NumberOfColorRegisters;
+                    case 2: return XtSmGraphics::Item::SixelGraphicsGeometry;
+                    case 3: return XtSmGraphics::Item::ReGISGraphicsGeometry;
+                    default: return nullopt;
+                }
+            }();
+            if (!item.has_value())
+                return ApplyResult::Invalid;
+
+            auto const action = [&]() -> optional<XtSmGraphics::Action> {
+                switch (Pa)
+                {
+                    case 1: return XtSmGraphics::Action::Read;
+                    case 2: return XtSmGraphics::Action::ResetToDefault;
+                    case 3: return XtSmGraphics::Action::SetToValue;
+                    case 4: return XtSmGraphics::Action::ReadLimit;
+                    default: return nullopt;
+                }
+            }();
+            if (!action.has_value())
+                return ApplyResult::Invalid;
+
+            if (*item != XtSmGraphics::Item::NumberOfColorRegisters
+                && *action == XtSmGraphics::Action::SetToValue && (!Pv || !Pu))
+                return ApplyResult::Invalid;
+
+            auto const value = [&]() -> XtSmGraphics::Value {
+                using Action = XtSmGraphics::Action;
+                switch (*action)
+                {
+                    case Action::Read:
+                    case Action::ResetToDefault:
+                    case Action::ReadLimit: return std::monostate {};
+                    case Action::SetToValue:
+                        return *item == XtSmGraphics::Item::NumberOfColorRegisters
+                                   ? XtSmGraphics::Value { Pv }
+                                   : XtSmGraphics::Value { ImageSize { Width(Pv), Height(Pu) } };
+                }
+                return std::monostate {};
+            }();
+
+            _screen.smGraphics(*item, *action, value);
+
+            return ApplyResult::Ok;
+        }
+    } // namespace
 } // namespace impl
 // }}}
 

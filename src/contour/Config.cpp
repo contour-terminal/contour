@@ -399,7 +399,8 @@ namespace // {{{ helper
         std::vector<FileSystem::path> paths;
 
 #if defined(CONTOUR_PROJECT_SOURCE_DIR) && !defined(NDEBUG)
-        paths.emplace_back(FileSystem::path(CONTOUR_PROJECT_SOURCE_DIR) / "src" / "terminal_view" / "shaders");
+        paths.emplace_back(FileSystem::path(CONTOUR_PROJECT_SOURCE_DIR) / "src" / "terminal_view"
+                           / "shaders");
 #endif
 
         paths.emplace_back(configHome(_programName));
@@ -524,7 +525,8 @@ namespace // {{{ helper
 
         bool boolValue = cursorConfig.cursorDisplay == terminal::CursorDisplay::Blink;
         tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking", boolValue);
-        cursorConfig.cursorDisplay = boolValue ? terminal::CursorDisplay::Blink : terminal::CursorDisplay::Steady;
+        cursorConfig.cursorDisplay =
+            boolValue ? terminal::CursorDisplay::Blink : terminal::CursorDisplay::Steady;
 
         auto uintValue = cursorConfig.cursorBlinkInterval.count();
         tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking_interval", uintValue);

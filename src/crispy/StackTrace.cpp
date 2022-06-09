@@ -172,14 +172,9 @@ optional<DebugInfo> StackTrace::getDebugInfoForFrame(void const* p)
 
 StackTrace::StackTrace():
 #if defined(HAVE_BACKTRACE)
-    frames_
-{
-    SKIP_FRAMES + MAX_FRAMES
-}
+    frames_ { SKIP_FRAMES + MAX_FRAMES }
 #else
-    frames_
-{
-}
+    frames_ {}
 #endif
 {
 #if defined(HAVE_BACKTRACE)

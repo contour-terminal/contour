@@ -35,7 +35,7 @@ jobs:
     - name: Run clang-format style check for C/C++/Protobuf programs.
       uses: jidicula/clang-format-action@v4.4.0
       with:
-        clang-format-version: '13'
+        clang-format-version: '14'
         check-path: 'src'
         exclude-regex: 'crispy/sse2neon.h'
 
