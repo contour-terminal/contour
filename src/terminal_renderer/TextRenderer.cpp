@@ -257,7 +257,7 @@ namespace
         return TextStyle::Regular;
     }
 
-    constexpr uint8_t graphemeClusterWidth(std::u32string_view text) noexcept
+    uint8_t graphemeClusterWidth(std::u32string_view text) noexcept
     {
         assert(text.size() != 0);
         auto const baseWidth = static_cast<uint8_t>(unicode::width(text[0]));
