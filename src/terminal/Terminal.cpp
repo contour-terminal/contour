@@ -45,6 +45,8 @@ namespace terminal
 
 namespace // {{{ helpers
 {
+    constexpr size_t MaxColorPaletteSaveStackSize = 10;
+
     void trimSpaceRight(string& value)
     {
         while (!value.empty() && value.back() == ' ')
@@ -123,6 +125,7 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
     selectionHelper_ { this },
     highlightTimeout_(_highlightTimeout)
 {
+    state_.savedColorPalettes.reserve(MaxColorPaletteSaveStackSize);
 #if 0
     hardReset();
 #else
@@ -1729,4 +1732,46 @@ void Terminal::setHighlightRange(HighlightRange _range)
     highlightRange_ = _range;
     eventListener_.updateHighlights();
 }
+
+constexpr auto MagicStackTopId = size_t { 0 };
+
+void Terminal::pushColorPalette(size_t slot)
+{
+    if (slot > MaxColorPaletteSaveStackSize)
+        return;
+
+    auto const index = slot == MagicStackTopId
+                           ? state_.savedColorPalettes.empty() ? 0 : state_.savedColorPalettes.size() - 1
+                           : slot - 1;
+
+    if (index >= state_.savedColorPalettes.size())
+        state_.savedColorPalettes.resize(index + 1);
+
+    // That's a totally weird idea.
+    // Looking at the xterm's source code, and simply mimmicking their semantics without questioning,
+    // simply to stay compatible (sadface).
+    if (slot != MagicStackTopId && state_.lastSavedColorPalette < state_.savedColorPalettes.size())
+        state_.lastSavedColorPalette = state_.savedColorPalettes.size();
+
+    state_.savedColorPalettes[index] = state_.colorPalette;
+}
+
+void Terminal::reportColorPaletteStack()
+{
+    // XTREPORTCOLORS
+    reply(fmt::format("\033[{};{}#Q", state_.savedColorPalettes.size(), state_.lastSavedColorPalette));
+}
+
+void Terminal::popColorPalette(size_t slot)
+{
+    if (state_.savedColorPalettes.empty())
+        return;
+
+    auto const index = slot == MagicStackTopId ? state_.savedColorPalettes.size() - 1 : slot - 1;
+
+    state_.colorPalette = state_.savedColorPalettes[index];
+    if (slot == MagicStackTopId)
+        state_.savedColorPalettes.pop_back();
+}
+
 } // namespace terminal
