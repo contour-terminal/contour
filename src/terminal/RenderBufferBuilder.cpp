@@ -289,7 +289,7 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TriviallyStyledLineBuffer cons
 
     auto const frontIndex = output.cells.size();
 
-    // TODO(pr) Handle special case: visual selection can alter colors for some columns in this line.
+    // TODO: visual selection can alter colors for some columns in this line.
     // In that case, it seems like we cannot just pass it bare over but have to take the slower path.
     // But that should be fine.
     bool const canRenderViaSimpleLine = false; // <- Should be false if selection covers this line.

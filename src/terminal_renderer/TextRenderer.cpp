@@ -256,6 +256,16 @@ namespace
             return TextStyle::Italic;
         return TextStyle::Regular;
     }
+
+    constexpr uint8_t graphemeClusterWidth(std::u32string_view text) noexcept
+    {
+        assert(text.size() != 0);
+        auto const baseWidth = static_cast<uint8_t>(unicode::width(text[0]));
+        for (size_t i = 1; i < text.size(); ++i)
+            if (text[i] == 0xFE0F)
+                return 2;
+        return baseWidth;
+    }
 } // namespace
 
 unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine)
@@ -420,8 +430,7 @@ void TextRenderer::renderLine(RenderLine const& renderLine)
         auto const gridPosition = CellLocation { renderLine.lineOffset, columnOffset };
         renderCell(gridPosition, graphemeCluster, textStyle, renderLine.foregroundColor);
 
-        auto const width =
-            static_cast<uint8_t>(unicode::width(graphemeCluster.front())); // TODO(pr): respect U+FEOF
+        auto const width = graphemeClusterWidth(graphemeCluster);
         columnOffset += ColumnOffset::cast_from(width);
     }
     flushTextClusterGroup();
