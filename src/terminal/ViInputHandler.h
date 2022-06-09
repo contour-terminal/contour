@@ -234,11 +234,11 @@ struct formatter<terminal::ViMode>
         using terminal::ViMode;
         switch (mode)
         {
-            case ViMode::Normal: return format_to(ctx.out(), "Normal");
-            case ViMode::Insert: return format_to(ctx.out(), "Insert");
-            case ViMode::Visual: return format_to(ctx.out(), "Visual");
-            case ViMode::VisualLine: return format_to(ctx.out(), "VisualLine");
-            case ViMode::VisualBlock: return format_to(ctx.out(), "VisualBlock");
+            case ViMode::Normal: return fmt::format_to(ctx.out(), "Normal");
+            case ViMode::Insert: return fmt::format_to(ctx.out(), "Insert");
+            case ViMode::Visual: return fmt::format_to(ctx.out(), "Visual");
+            case ViMode::VisualLine: return fmt::format_to(ctx.out(), "VisualLine");
+            case ViMode::VisualBlock: return fmt::format_to(ctx.out(), "VisualBlock");
         }
         return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(mode));
     }
