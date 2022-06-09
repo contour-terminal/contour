@@ -341,6 +341,9 @@ profiles:
                 blinking: false
                 blinking_interval: 500
 
+        # Time duration in milliseconds for which highlight is shown
+        vi_mode_highlight_timeout: 150
+
         status_line:
             # Either none or indicator.
             # This only reflects the initial state of the status line, as it can
@@ -422,6 +425,11 @@ color_schemes:
         hyperlink_decoration:
             normal: '#f0f000'
             hover: '#ff0000'
+
+        # color to pick for vi_mode highlights
+        vi_mode_highlight: 
+            background: '#ffa500'
+            foreground: '#1d1f21'
 
         # The text selection color can be customized here.
         # Leaving a value empty will default to the inverse of the content's color values.

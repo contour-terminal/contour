@@ -178,7 +178,7 @@ struct TerminalProfile
         InputModeConfig normal;
         InputModeConfig visual;
     } inputModes;
-
+    std::chrono::milliseconds highlightTimeout { 150 };
     terminal::StatusDisplayType initialStatusDisplayType = terminal::StatusDisplayType::None;
 
     terminal::Opacity backgroundOpacity; // value between 0 (fully transparent) and 0xFF (fully visible).

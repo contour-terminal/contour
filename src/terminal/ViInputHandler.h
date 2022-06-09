@@ -117,9 +117,6 @@ enum class ViMode
 
     /// Vi-like visual block-select mode.
     VisualBlock, // <C-V>
-
-    /// Acts exactly like normal mode, except that visual selection active and visible.
-    NormalMotionVisual // special one for yanks in Normal mode.
 };
 
 enum class TextObject
@@ -142,6 +139,20 @@ enum class TextObjectScope
 };
 
 using CellLocationRange = std::pair<CellLocation, CellLocation>;
+
+struct Highlight
+{
+    CellLocation from;
+    CellLocation to;
+};
+struct LinearHighlight: public Highlight
+{
+};
+struct RectangularHighlight: public Highlight
+{
+};
+
+using HighlightRange = std::variant<LinearHighlight, RectangularHighlight>;
 
 /**
  * ViInputHandler provides Vi-input handling.
@@ -223,12 +234,11 @@ struct formatter<terminal::ViMode>
         using terminal::ViMode;
         switch (mode)
         {
-            case ViMode::Normal: return fmt::format_to(ctx.out(), "Normal");
-            case ViMode::Insert: return fmt::format_to(ctx.out(), "Insert");
-            case ViMode::Visual: return fmt::format_to(ctx.out(), "Visual");
-            case ViMode::VisualLine: return fmt::format_to(ctx.out(), "VisualLine");
-            case ViMode::VisualBlock: return fmt::format_to(ctx.out(), "VisualBlock");
-            case ViMode::NormalMotionVisual: return fmt::format_to(ctx.out(), "NormalMotionVisual");
+            case ViMode::Normal: return format_to(ctx.out(), "Normal");
+            case ViMode::Insert: return format_to(ctx.out(), "Insert");
+            case ViMode::Visual: return format_to(ctx.out(), "Visual");
+            case ViMode::VisualLine: return format_to(ctx.out(), "VisualLine");
+            case ViMode::VisualBlock: return format_to(ctx.out(), "VisualBlock");
         }
         return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(mode));
     }

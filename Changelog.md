@@ -1,5 +1,6 @@
 ### 0.3.2 (unreleased)
 
+- Adds new config option `profile.*.vi_mode_highlight_timeout` and `colorscheme.*.vi_mode_highlight` and adds cell highlighting on yank. 
 - Adds support for running on ARMv8 platform with crypto extensions (#611).
 - Adds E3 capability, so `clear` now defaults to clearing screen and scrollback (#693).
 - Fixes writing to a non-empty line sometimes destroying the contents of that line (#702).

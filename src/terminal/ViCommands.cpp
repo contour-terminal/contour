@@ -55,9 +55,6 @@ void ViCommands::modeChanged(ViMode mode)
             terminal.viewport().forceScrollToBottom();
             terminal.screenUpdated();
             break;
-        case ViMode::NormalMotionVisual:
-            //.
-            break;
         case ViMode::Normal:
             lastCursorShape = terminal.cursorShape();
             lastCursorVisible = terminal.state().cursor.visible;
@@ -100,6 +97,12 @@ void ViCommands::executeYank(ViMotion motion, unsigned count)
     {
         case ViMotion::Selection: {
             assert(terminal.selector());
+            if (lastMode == ViMode::VisualBlock)
+                terminal.setHighlightRange(
+                    RectangularHighlight { { terminal.selector()->from(), terminal.selector()->to() } });
+            else
+                terminal.setHighlightRange(
+                    LinearHighlight { { terminal.selector()->from(), terminal.selector()->to() } });
             terminal.copyToClipboard(terminal.extractSelectionText());
             terminal.inputHandler().setMode(ViMode::Normal);
             break;
@@ -127,7 +130,9 @@ void ViCommands::executeYank(CellLocation from, CellLocation to)
     terminal.selector()->extend(to);
     auto const text = terminal.extractSelectionText();
     terminal.copyToClipboard(text);
-    terminal.inputHandler().setMode(ViMode::NormalMotionVisual);
+    terminal.clearSelection();
+    terminal.setHighlightRange(LinearHighlight { { from, to } });
+    terminal.inputHandler().setMode(ViMode::Normal);
     terminal.screenUpdated();
 }
 
@@ -409,7 +414,6 @@ void ViCommands::moveCursor(ViMotion motion, unsigned count)
 
     switch (terminal.inputHandler().mode())
     {
-        case ViMode::NormalMotionVisual:
         case ViMode::Normal:
         case ViMode::Insert: break;
         case ViMode::Visual:
