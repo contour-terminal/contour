@@ -137,6 +137,8 @@ struct TerminalState
 
     ColorPalette defaultColorPalette;
     ColorPalette colorPalette;
+    std::vector<ColorPalette> savedColorPalettes;
+    size_t lastSavedColorPalette = 0;
 
     bool focused = true;
 

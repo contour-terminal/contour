@@ -343,6 +343,9 @@ constexpr inline auto TBC         = detail::CSI(std::nullopt, 0, 1, std::nullopt
 constexpr inline auto VPA         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'd', VTType::VT100, "VPA", "Vertical Position Absolute");
 constexpr inline auto WINMANIP    = detail::CSI(std::nullopt, 1, 3, std::nullopt, 't', VTType::VT525, "WINMANIP", "Window Manipulation");
 constexpr inline auto XTSMGRAPHICS= detail::CSI('?', 2, 4, std::nullopt, 'S', VTType::VT525 /*Xterm*/, "XTSMGRAPHICS", "Setting/getting Sixel/ReGIS graphics settings.");
+constexpr inline auto XTPOPCOLORS    = detail::CSI(std::nullopt, 0, ArgsMax, '#', 'Q', VTType::VT525 /*Extension*/, "XTPOPCOLORS", "Pops the color palette from the palette's saved-stack.");
+constexpr inline auto XTPUSHCOLORS   = detail::CSI(std::nullopt, 0, ArgsMax, '#', 'P', VTType::VT525 /*Extension*/, "XTPUSHCOLORS", "Pushes the color palette onto the palette's saved-stack.");
+constexpr inline auto XTREPORTCOLORS = detail::CSI(std::nullopt, 0, 0, '#', 'R', VTType::VT525 /*Extension*/, "XTREPORTCOLORS", "Reports number of color palettes on the stack.");
 constexpr inline auto XTSHIFTESCAPE=detail::CSI('>', 0, 1, std::nullopt, 's', VTType::VT525 /*Xterm*/, "XTSHIFTESCAPE", "Set/reset shift-escape options.");
 constexpr inline auto XTVERSION   = detail::CSI('>', 0, 1, std::nullopt, 'q', VTType::VT525 /*Xterm*/, "XTVERSION", "Query terminal name and version");
 constexpr inline auto CAPTURE     = detail::CSI('>', 0, 2, std::nullopt, 't', VTType::VT525 /*Extension*/, "CAPTURE", "Report screen buffer capture.");
@@ -491,6 +494,9 @@ inline auto const& functions() noexcept
             TBC,
             VPA,
             WINMANIP,
+            XTPOPCOLORS,
+            XTPUSHCOLORS,
+            XTREPORTCOLORS,
             XTSHIFTESCAPE,
             XTSMGRAPHICS,
             XTVERSION,

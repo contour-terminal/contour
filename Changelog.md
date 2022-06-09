@@ -34,6 +34,7 @@
 - Adds configuration option `profiles.*.status_line.display` to be either `none` or `indicator` to reflect the initial state of the status line (more customizability of the Indicator status-line will come in future releases).
 - Adds new action `ToggleInputProtection` to protect terminal application against accidental input (#697).
 - Adds configuration options `logging.enabled` as well as `logging.file`.
+- Adds VT sequences `XTPUSHCOLORS`, `XTPOPCOLORS`, `XTREPORTCOLORS` (#714).
 
 ### 0.3.1 (2022-05-01)
 

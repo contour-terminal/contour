@@ -3279,6 +3279,21 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case WINMANIP: return impl::WINDOWMANIP(seq, _terminal);
         case DECMODERESTORE: return impl::restoreDECModes(seq, *this);
         case DECMODESAVE: return impl::saveDECModes(seq, *this);
+        case XTPOPCOLORS:
+            if (!seq.parameterCount())
+                _terminal.popColorPalette(0);
+            else
+                for (size_t i = 0; i < seq.parameterCount(); ++i)
+                    _terminal.popColorPalette(seq.param<size_t>(i));
+            return ApplyResult::Ok;
+        case XTPUSHCOLORS:
+            if (!seq.parameterCount())
+                _terminal.pushColorPalette(0);
+            else
+                for (size_t i = 0; i < seq.parameterCount(); ++i)
+                    _terminal.pushColorPalette(seq.param<size_t>(i));
+            return ApplyResult::Ok;
+        case XTREPORTCOLORS: _terminal.reportColorPaletteStack(); return ApplyResult::Ok;
         case XTSMGRAPHICS: return impl::XTSMGRAPHICS(seq, *this);
         case XTVERSION:
             _terminal.reply(fmt::format("\033P>|{} {}\033\\", LIBTERMINAL_NAME, LIBTERMINAL_VERSION_STRING));

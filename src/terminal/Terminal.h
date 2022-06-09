@@ -371,6 +371,10 @@ class Terminal
     ColorPalette& colorPalette() noexcept { return state_.colorPalette; }
     ColorPalette& defaultColorPalette() noexcept { return state_.defaultColorPalette; }
 
+    void pushColorPalette(size_t slot);
+    void popColorPalette(size_t slot);
+    void reportColorPaletteStack();
+
     ScreenBase& currentScreen() noexcept { return currentScreen_.get(); }
     ScreenBase const& currentScreen() const noexcept { return currentScreen_.get(); }
 
