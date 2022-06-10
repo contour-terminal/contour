@@ -175,7 +175,10 @@ namespace mappings
 #undef CSI
 #undef SS3
 
-    constexpr bool operator==(KeyMapping const& _km, Key _key) noexcept { return _km.key == _key; }
+    constexpr bool operator==(KeyMapping const& _km, Key _key) noexcept
+    {
+        return _km.key == _key;
+    }
 
     template <size_t N>
     optional<string_view> tryMap(array<KeyMapping, N> const& _mappings, Key _key) noexcept

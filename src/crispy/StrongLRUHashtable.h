@@ -267,8 +267,14 @@ class StrongLRUHashtable
 
     int validateChange(int adj);
 
-    Entry& sentinelEntry() noexcept { return _entries[0]; }
-    Entry const& sentinelEntry() const noexcept { return _entries[0]; }
+    Entry& sentinelEntry() noexcept
+    {
+        return _entries[0];
+    }
+    Entry const& sentinelEntry() const noexcept
+    {
+        return _entries[0];
+    }
     // }}}
 
     LRUHashtableStats _stats;
@@ -370,7 +376,7 @@ auto StrongLRUHashtable<Value>::create(StrongHashtableSize hashCount,
         return Ptr { nullptr, [](auto) {} };
     // clang-format on
 
-    memset(obj, 0, size);
+    memset((void*) obj, 0, size);
     new (obj) StrongLRUHashtable(hashCount, entryCount, std::move(name));
 
     auto deleter = [size, allocator = std::move(allocator)](auto p) mutable {

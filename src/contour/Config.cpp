@@ -393,301 +393,242 @@ namespace // {{{ helper
             return terminal::CellForegroundColor {};
         return terminal::RGBColor(_text);
     }
-} // namespace
-// }}}
 
-FileSystem::path configHome(string const& _programName)
-{
-#if defined(__unix__) || defined(__APPLE__)
-    if (auto const* value = getenv("XDG_CONFIG_HOME"); value && *value)
-        return FileSystem::path { value } / _programName;
-    else if (auto const* value = getenv("HOME"); value && *value)
-        return FileSystem::path { value } / ".config" / _programName;
-#endif
-
-#if defined(_WIN32)
-    DWORD size = GetEnvironmentVariable("LOCALAPPDATA", nullptr, 0);
-    if (size)
+    std::vector<FileSystem::path> configHomes(string const& _programName)
     {
-        std::vector<char> buf;
-        buf.resize(size);
-        GetEnvironmentVariable("LOCALAPPDATA", &buf[0], size);
-        return FileSystem::path { &buf[0] } / _programName;
-    }
-#endif
-
-    throw runtime_error { "Could not find config home folder." };
-}
-
-std::vector<FileSystem::path> configHomes(string const& _programName)
-{
-    std::vector<FileSystem::path> paths;
+        std::vector<FileSystem::path> paths;
 
 #if defined(CONTOUR_PROJECT_SOURCE_DIR) && !defined(NDEBUG)
-    paths.emplace_back(FileSystem::path(CONTOUR_PROJECT_SOURCE_DIR) / "src" / "terminal_view" / "shaders");
+        paths.emplace_back(FileSystem::path(CONTOUR_PROJECT_SOURCE_DIR) / "src" / "terminal_view"
+                           / "shaders");
 #endif
 
-    paths.emplace_back(configHome(_programName));
+        paths.emplace_back(configHome(_programName));
 
 #if defined(__unix__) || defined(__APPLE__)
-    paths.emplace_back(FileSystem::path("/etc") / _programName);
+        paths.emplace_back(FileSystem::path("/etc") / _programName);
 #endif
 
-    return paths;
-}
-
-FileSystem::path configHome()
-{
-    return configHome("contour");
-}
-
-std::string defaultConfigString()
-{
-    QFile file(":/contour/contour.yml");
-    file.open(QFile::ReadOnly);
-    return file.readAll().toStdString();
-}
-
-error_code createDefaultConfig(FileSystem::path const& _path)
-{
-    FileSystemError ec;
-    if (!_path.parent_path().empty())
-    {
-        FileSystem::create_directories(_path.parent_path(), ec);
-        if (ec)
-            return ec;
+        return paths;
     }
 
-    ofstream { _path.string(), ios::binary | ios::trunc } << defaultConfigString();
+    optional<terminal::Key> parseKey(string const& _name)
+    {
+        using terminal::Key;
+        auto static constexpr mappings = array { pair { "F1"sv, Key::F1 },
+                                                 pair { "F2"sv, Key::F2 },
+                                                 pair { "F3"sv, Key::F3 },
+                                                 pair { "F4"sv, Key::F4 },
+                                                 pair { "F5"sv, Key::F5 },
+                                                 pair { "F6"sv, Key::F6 },
+                                                 pair { "F7"sv, Key::F7 },
+                                                 pair { "F8"sv, Key::F8 },
+                                                 pair { "F9"sv, Key::F9 },
+                                                 pair { "F10"sv, Key::F10 },
+                                                 pair { "F11"sv, Key::F11 },
+                                                 pair { "F12"sv, Key::F12 },
+                                                 pair { "DownArrow"sv, Key::DownArrow },
+                                                 pair { "LeftArrow"sv, Key::LeftArrow },
+                                                 pair { "RightArrow"sv, Key::RightArrow },
+                                                 pair { "UpArrow"sv, Key::UpArrow },
+                                                 pair { "Insert"sv, Key::Insert },
+                                                 pair { "Delete"sv, Key::Delete },
+                                                 pair { "Home"sv, Key::Home },
+                                                 pair { "End"sv, Key::End },
+                                                 pair { "PageUp"sv, Key::PageUp },
+                                                 pair { "PageDown"sv, Key::PageDown },
+                                                 pair { "Numpad_NumLock"sv, Key::Numpad_NumLock },
+                                                 pair { "Numpad_Divide"sv, Key::Numpad_Divide },
+                                                 pair { "Numpad_Multiply"sv, Key::Numpad_Multiply },
+                                                 pair { "Numpad_Subtract"sv, Key::Numpad_Subtract },
+                                                 pair { "Numpad_CapsLock"sv, Key::Numpad_CapsLock },
+                                                 pair { "Numpad_Add"sv, Key::Numpad_Add },
+                                                 pair { "Numpad_Decimal"sv, Key::Numpad_Decimal },
+                                                 pair { "Numpad_Enter"sv, Key::Numpad_Enter },
+                                                 pair { "Numpad_Equal"sv, Key::Numpad_Equal },
+                                                 pair { "Numpad_0"sv, Key::Numpad_0 },
+                                                 pair { "Numpad_1"sv, Key::Numpad_1 },
+                                                 pair { "Numpad_2"sv, Key::Numpad_2 },
+                                                 pair { "Numpad_3"sv, Key::Numpad_3 },
+                                                 pair { "Numpad_4"sv, Key::Numpad_4 },
+                                                 pair { "Numpad_5"sv, Key::Numpad_5 },
+                                                 pair { "Numpad_6"sv, Key::Numpad_6 },
+                                                 pair { "Numpad_7"sv, Key::Numpad_7 },
+                                                 pair { "Numpad_8"sv, Key::Numpad_8 },
+                                                 pair { "Numpad_9"sv, Key::Numpad_9 } };
 
-    return error_code {};
-}
+        auto const name = toLower(_name);
 
-template <typename T>
-inline auto mapAction(std::string_view _name)
-{
-    return pair { _name, Action { T {} } };
-}
+        for (auto const& mapping: mappings)
+            if (name == toLower(mapping.first))
+                return mapping.second;
 
-optional<terminal::Key> parseKey(string const& _name)
-{
-    using terminal::Key;
-    auto static constexpr mappings = array { pair { "F1"sv, Key::F1 },
-                                             pair { "F2"sv, Key::F2 },
-                                             pair { "F3"sv, Key::F3 },
-                                             pair { "F4"sv, Key::F4 },
-                                             pair { "F5"sv, Key::F5 },
-                                             pair { "F6"sv, Key::F6 },
-                                             pair { "F7"sv, Key::F7 },
-                                             pair { "F8"sv, Key::F8 },
-                                             pair { "F9"sv, Key::F9 },
-                                             pair { "F10"sv, Key::F10 },
-                                             pair { "F11"sv, Key::F11 },
-                                             pair { "F12"sv, Key::F12 },
-                                             pair { "DownArrow"sv, Key::DownArrow },
-                                             pair { "LeftArrow"sv, Key::LeftArrow },
-                                             pair { "RightArrow"sv, Key::RightArrow },
-                                             pair { "UpArrow"sv, Key::UpArrow },
-                                             pair { "Insert"sv, Key::Insert },
-                                             pair { "Delete"sv, Key::Delete },
-                                             pair { "Home"sv, Key::Home },
-                                             pair { "End"sv, Key::End },
-                                             pair { "PageUp"sv, Key::PageUp },
-                                             pair { "PageDown"sv, Key::PageDown },
-                                             pair { "Numpad_NumLock"sv, Key::Numpad_NumLock },
-                                             pair { "Numpad_Divide"sv, Key::Numpad_Divide },
-                                             pair { "Numpad_Multiply"sv, Key::Numpad_Multiply },
-                                             pair { "Numpad_Subtract"sv, Key::Numpad_Subtract },
-                                             pair { "Numpad_CapsLock"sv, Key::Numpad_CapsLock },
-                                             pair { "Numpad_Add"sv, Key::Numpad_Add },
-                                             pair { "Numpad_Decimal"sv, Key::Numpad_Decimal },
-                                             pair { "Numpad_Enter"sv, Key::Numpad_Enter },
-                                             pair { "Numpad_Equal"sv, Key::Numpad_Equal },
-                                             pair { "Numpad_0"sv, Key::Numpad_0 },
-                                             pair { "Numpad_1"sv, Key::Numpad_1 },
-                                             pair { "Numpad_2"sv, Key::Numpad_2 },
-                                             pair { "Numpad_3"sv, Key::Numpad_3 },
-                                             pair { "Numpad_4"sv, Key::Numpad_4 },
-                                             pair { "Numpad_5"sv, Key::Numpad_5 },
-                                             pair { "Numpad_6"sv, Key::Numpad_6 },
-                                             pair { "Numpad_7"sv, Key::Numpad_7 },
-                                             pair { "Numpad_8"sv, Key::Numpad_8 },
-                                             pair { "Numpad_9"sv, Key::Numpad_9 } };
-
-    auto const name = toLower(_name);
-
-    for (auto const& mapping: mappings)
-        if (name == toLower(mapping.first))
-            return mapping.second;
-
-    return nullopt;
-}
-
-optional<variant<terminal::Key, char32_t>> parseKeyOrChar(string const& _name)
-{
-    using namespace terminal::ControlCode;
-
-    if (auto const key = parseKey(_name); key.has_value())
-        return key.value();
-
-    auto const text = QString::fromUtf8(_name.c_str()).toUcs4();
-    if (text.size() == 1)
-        return static_cast<char32_t>(toupper(static_cast<int>(text[0])));
-
-    auto constexpr namedChars = array { pair { "ENTER"sv, (char) C0::CR },
-                                        pair { "BACKSPACE"sv, (char) C0::BS },
-                                        pair { "TAB"sv, (char) C0::HT },
-                                        pair { "ESCAPE"sv, (char) C0::ESC },
-
-                                        pair { "LESS"sv, '<' },
-                                        pair { "GREATER"sv, '>' },
-                                        pair { "PLUS"sv, '+' },
-
-                                        pair { "APOSTROPHE"sv, '\'' },
-                                        pair { "ADD"sv, '+' },
-                                        pair { "BACKSLASH"sv, 'x' },
-                                        pair { "COMMA"sv, ',' },
-                                        pair { "DECIMAL"sv, '.' },
-                                        pair { "DIVIDE"sv, '/' },
-                                        pair { "EQUAL"sv, '=' },
-                                        pair { "LEFT_BRACKET"sv, '[' },
-                                        pair { "MINUS"sv, '-' },
-                                        pair { "MULTIPLY"sv, '*' },
-                                        pair { "PERIOD"sv, '.' },
-                                        pair { "RIGHT_BRACKET"sv, ']' },
-                                        pair { "SEMICOLON"sv, ';' },
-                                        pair { "SLASH"sv, '/' },
-                                        pair { "SUBTRACT"sv, '-' },
-                                        pair { "SPACE"sv, ' ' } };
-
-    auto const name = toUpper(_name);
-    for (auto const& mapping: namedChars)
-        if (name == mapping.first)
-            return static_cast<char32_t>(mapping.second);
-
-    return nullopt;
-}
-
-optional<config::CursorConfig> parseCursorConfig(YAML::Node rootNode,
-                                                 UsedKeys& usedKeys,
-                                                 std::string basePath)
-{
-    if (!rootNode)
         return nullopt;
+    }
 
-    auto cursorConfig = config::CursorConfig {};
-    auto strValue = "block"s;
-    tryLoadChildRelative(usedKeys, rootNode, basePath, "shape", strValue);
-    cursorConfig.cursorShape = terminal::makeCursorShape(strValue);
+    optional<variant<terminal::Key, char32_t>> parseKeyOrChar(string const& _name)
+    {
+        using namespace terminal::ControlCode;
 
-    bool boolValue = cursorConfig.cursorDisplay == terminal::CursorDisplay::Blink;
-    tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking", boolValue);
-    cursorConfig.cursorDisplay = boolValue ? terminal::CursorDisplay::Blink : terminal::CursorDisplay::Steady;
+        if (auto const key = parseKey(_name); key.has_value())
+            return key.value();
 
-    auto uintValue = cursorConfig.cursorBlinkInterval.count();
-    tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking_interval", uintValue);
-    cursorConfig.cursorBlinkInterval = chrono::milliseconds(uintValue);
-    return cursorConfig;
-}
+        auto const text = QString::fromUtf8(_name.c_str()).toUcs4();
+        if (text.size() == 1)
+            return static_cast<char32_t>(toupper(static_cast<int>(text[0])));
 
-optional<terminal::Modifier::Key> parseModifierKey(string const& _key)
-{
-    using terminal::Modifier;
-    auto const key = toUpper(_key);
-    if (key == "ALT")
-        return Modifier::Key::Alt;
-    if (key == "CONTROL")
-        return Modifier::Key::Control;
-    if (key == "SHIFT")
-        return Modifier::Key::Shift;
-    if (key == "META")
-        return Modifier::Key::Meta;
-    return nullopt;
-}
+        auto constexpr namedChars = array { pair { "ENTER"sv, (char) C0::CR },
+                                            pair { "BACKSPACE"sv, (char) C0::BS },
+                                            pair { "TAB"sv, (char) C0::HT },
+                                            pair { "ESCAPE"sv, (char) C0::ESC },
 
-optional<terminal::MatchModes> parseMatchModes(UsedKeys& _usedKeys,
+                                            pair { "LESS"sv, '<' },
+                                            pair { "GREATER"sv, '>' },
+                                            pair { "PLUS"sv, '+' },
+
+                                            pair { "APOSTROPHE"sv, '\'' },
+                                            pair { "ADD"sv, '+' },
+                                            pair { "BACKSLASH"sv, 'x' },
+                                            pair { "COMMA"sv, ',' },
+                                            pair { "DECIMAL"sv, '.' },
+                                            pair { "DIVIDE"sv, '/' },
+                                            pair { "EQUAL"sv, '=' },
+                                            pair { "LEFT_BRACKET"sv, '[' },
+                                            pair { "MINUS"sv, '-' },
+                                            pair { "MULTIPLY"sv, '*' },
+                                            pair { "PERIOD"sv, '.' },
+                                            pair { "RIGHT_BRACKET"sv, ']' },
+                                            pair { "SEMICOLON"sv, ';' },
+                                            pair { "SLASH"sv, '/' },
+                                            pair { "SUBTRACT"sv, '-' },
+                                            pair { "SPACE"sv, ' ' } };
+
+        auto const name = toUpper(_name);
+        for (auto const& mapping: namedChars)
+            if (name == mapping.first)
+                return static_cast<char32_t>(mapping.second);
+
+        return nullopt;
+    }
+
+    optional<config::CursorConfig> parseCursorConfig(YAML::Node rootNode,
+                                                     UsedKeys& usedKeys,
+                                                     std::string basePath)
+    {
+        if (!rootNode)
+            return nullopt;
+
+        auto cursorConfig = config::CursorConfig {};
+        auto strValue = "block"s;
+        tryLoadChildRelative(usedKeys, rootNode, basePath, "shape", strValue);
+        cursorConfig.cursorShape = terminal::makeCursorShape(strValue);
+
+        bool boolValue = cursorConfig.cursorDisplay == terminal::CursorDisplay::Blink;
+        tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking", boolValue);
+        cursorConfig.cursorDisplay =
+            boolValue ? terminal::CursorDisplay::Blink : terminal::CursorDisplay::Steady;
+
+        auto uintValue = cursorConfig.cursorBlinkInterval.count();
+        tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking_interval", uintValue);
+        cursorConfig.cursorBlinkInterval = chrono::milliseconds(uintValue);
+        return cursorConfig;
+    }
+
+    optional<terminal::Modifier::Key> parseModifierKey(string const& _key)
+    {
+        using terminal::Modifier;
+        auto const key = toUpper(_key);
+        if (key == "ALT")
+            return Modifier::Key::Alt;
+        if (key == "CONTROL")
+            return Modifier::Key::Control;
+        if (key == "SHIFT")
+            return Modifier::Key::Shift;
+        if (key == "META")
+            return Modifier::Key::Meta;
+        return nullopt;
+    }
+
+    optional<terminal::MatchModes> parseMatchModes(UsedKeys& _usedKeys,
+                                                   string const& _prefix,
+                                                   YAML::Node const& _node)
+    {
+        using terminal::MatchModes;
+        if (!_node)
+            return terminal::MatchModes {};
+        _usedKeys.emplace(_prefix);
+        if (!_node.IsScalar())
+            return nullopt;
+
+        auto matchModes = MatchModes {};
+
+        auto const modeStr = _node.as<string>();
+        auto const args = crispy::split(modeStr, '|');
+        for (string_view arg: args)
+        {
+            if (arg.empty())
+                continue;
+            bool negate = false;
+            if (arg.front() == '~')
+            {
+                negate = true;
+                arg.remove_prefix(1);
+            }
+
+            MatchModes::Flag flag = MatchModes::Flag::Default;
+            string const upperArg = toUpper(arg);
+            if (upperArg == "ALT"sv)
+                flag = MatchModes::AlternateScreen;
+            else if (upperArg == "APPCURSOR")
+                flag = MatchModes::AppCursor;
+            else if (upperArg == "APPKEYPAD")
+                flag = MatchModes::AppKeypad;
+            else if (upperArg == "INSERT")
+                flag = MatchModes::Insert;
+            else if (upperArg == "SELECT")
+                flag = MatchModes::Select;
+            else
+            {
+                errorlog()("Unknown input_mapping mode: {}", arg);
+                continue;
+            }
+
+            if (negate)
+                matchModes.disable(flag);
+            else
+                matchModes.enable(flag);
+        }
+
+        return matchModes;
+    }
+
+    optional<terminal::Modifier> parseModifier(UsedKeys& _usedKeys,
                                                string const& _prefix,
                                                YAML::Node const& _node)
-{
-    using terminal::MatchModes;
-    if (!_node)
-        return terminal::MatchModes {};
-    _usedKeys.emplace(_prefix);
-    if (!_node.IsScalar())
-        return nullopt;
-
-    auto matchModes = MatchModes {};
-
-    auto const modeStr = _node.as<string>();
-    auto const args = crispy::split(modeStr, '|');
-    for (string_view arg: args)
     {
-        if (arg.empty())
-            continue;
-        bool negate = false;
-        if (arg.front() == '~')
-        {
-            negate = true;
-            arg.remove_prefix(1);
-        }
-
-        MatchModes::Flag flag = MatchModes::Flag::Default;
-        string const upperArg = toUpper(arg);
-        if (upperArg == "ALT"sv)
-            flag = MatchModes::AlternateScreen;
-        else if (upperArg == "APPCURSOR")
-            flag = MatchModes::AppCursor;
-        else if (upperArg == "APPKEYPAD")
-            flag = MatchModes::AppKeypad;
-        else if (upperArg == "INSERT")
-            flag = MatchModes::Insert;
-        else if (upperArg == "SELECT")
-            flag = MatchModes::Select;
-        else
-        {
-            errorlog()("Unknown input_mapping mode: {}", arg);
-            continue;
-        }
-
-        if (negate)
-            matchModes.disable(flag);
-        else
-            matchModes.enable(flag);
-    }
-
-    return matchModes;
-}
-
-optional<terminal::Modifier> parseModifier(UsedKeys& _usedKeys,
-                                           string const& _prefix,
-                                           YAML::Node const& _node)
-{
-    using terminal::Modifier;
-    if (!_node)
-        return nullopt;
-    _usedKeys.emplace(_prefix);
-    if (_node.IsScalar())
-        return parseModifierKey(_node.as<string>());
-    if (!_node.IsSequence())
-        return nullopt;
-
-    terminal::Modifier mods;
-    for (const auto& i: _node)
-    {
-        if (!i.IsScalar())
+        using terminal::Modifier;
+        if (!_node)
+            return nullopt;
+        _usedKeys.emplace(_prefix);
+        if (_node.IsScalar())
+            return parseModifierKey(_node.as<string>());
+        if (!_node.IsSequence())
             return nullopt;
 
-        auto const mod = parseModifierKey(i.as<string>());
-        if (!mod)
-            return nullopt;
+        terminal::Modifier mods;
+        for (const auto& i: _node)
+        {
+            if (!i.IsScalar())
+                return nullopt;
 
-        mods |= *mod;
+            auto const mod = parseModifierKey(i.as<string>());
+            if (!mod)
+                return nullopt;
+
+            mods |= *mod;
+        }
+        return mods;
     }
-    return mods;
-}
-
-namespace // {{{ helper
-{
 
     template <typename Input>
     void appendOrCreateBinding(vector<terminal::InputBinding<Input, ActionList>>& _bindings,
@@ -882,6 +823,56 @@ namespace // {{{ helper
 
 } // namespace
 // }}}
+
+FileSystem::path configHome(string const& _programName)
+{
+#if defined(__unix__) || defined(__APPLE__)
+    if (auto const* value = getenv("XDG_CONFIG_HOME"); value && *value)
+        return FileSystem::path { value } / _programName;
+    else if (auto const* value = getenv("HOME"); value && *value)
+        return FileSystem::path { value } / ".config" / _programName;
+#endif
+
+#if defined(_WIN32)
+    DWORD size = GetEnvironmentVariable("LOCALAPPDATA", nullptr, 0);
+    if (size)
+    {
+        std::vector<char> buf;
+        buf.resize(size);
+        GetEnvironmentVariable("LOCALAPPDATA", &buf[0], size);
+        return FileSystem::path { &buf[0] } / _programName;
+    }
+#endif
+
+    throw runtime_error { "Could not find config home folder." };
+}
+
+FileSystem::path configHome()
+{
+    return configHome("contour");
+}
+
+std::string defaultConfigString()
+{
+    QFile file(":/contour/contour.yml");
+    file.open(QFile::ReadOnly);
+    return file.readAll().toStdString();
+}
+
+error_code createDefaultConfig(FileSystem::path const& _path)
+{
+    FileSystemError ec;
+    if (!_path.parent_path().empty())
+    {
+        FileSystem::create_directories(_path.parent_path(), ec);
+        if (ec)
+            return ec;
+    }
+
+    ofstream { _path.string(), ios::binary | ios::trunc } << defaultConfigString();
+
+    return error_code {};
+}
 
 std::string defaultConfigFilePath()
 {

@@ -94,7 +94,10 @@ namespace
             }
     }
 
-    constexpr double ptToEm(double pt) { return pt * (96.0 / 72.0); }
+    constexpr double ptToEm(double pt)
+    {
+        return pt * (96.0 / 72.0);
+    }
 } // namespace
 
 struct DxFontInfo

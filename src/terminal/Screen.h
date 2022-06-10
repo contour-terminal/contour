@@ -358,10 +358,16 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 #endif
     }
 
-    Cell& useCurrentCell() noexcept { return currentLine().useCellAt(_state.cursor.position.column); }
+    Cell& useCurrentCell() noexcept
+    {
+        return currentLine().useCellAt(_state.cursor.position.column);
+    }
 
     /// Gets a reference to the cell relative to screen origin (top left, 1:1).
-    Cell& at(LineOffset _line, ColumnOffset _column) noexcept { return grid().useCellAt(_line, _column); }
+    Cell& at(LineOffset _line, ColumnOffset _column) noexcept
+    {
+        return grid().useCellAt(_line, _column);
+    }
     Cell& useCellAt(LineOffset _line, ColumnOffset _column) noexcept
     {
         return grid().lineAt(_line).useCellAt(_column);
@@ -373,13 +379,28 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         return grid().at(_line, _column);
     }
 
-    Cell& at(CellLocation p) noexcept { return useCellAt(p.line, p.column); }
-    Cell& useCellAt(CellLocation p) noexcept { return useCellAt(p.line, p.column); }
-    Cell const& at(CellLocation p) const noexcept { return grid().at(p.line, p.column); }
+    Cell& at(CellLocation p) noexcept
+    {
+        return useCellAt(p.line, p.column);
+    }
+    Cell& useCellAt(CellLocation p) noexcept
+    {
+        return useCellAt(p.line, p.column);
+    }
+    Cell const& at(CellLocation p) const noexcept
+    {
+        return grid().at(p.line, p.column);
+    }
 
-    [[nodiscard]] Margin margin() const noexcept { return _state.margin; }
+    [[nodiscard]] Margin margin() const noexcept
+    {
+        return _state.margin;
+    }
 
-    [[nodiscard]] std::string const& windowTitle() const noexcept { return _state.windowTitle; }
+    [[nodiscard]] std::string const& windowTitle() const noexcept
+    {
+        return _state.windowTitle;
+    }
 
     /// Finds the next marker right after the given line position.
     ///
@@ -398,20 +419,41 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     [[nodiscard]] std::optional<LineOffset> findMarkerUpwards(LineOffset _currentCursorLine) const;
 
     /// ScreenBuffer's type, such as main screen or alternate screen.
-    [[nodiscard]] ScreenType bufferType() const noexcept { return _state.screenType; }
+    [[nodiscard]] ScreenType bufferType() const noexcept
+    {
+        return _state.screenType;
+    }
 
-    [[nodiscard]] bool synchronizeOutput() const noexcept { return false; } // TODO
+    [[nodiscard]] bool synchronizeOutput() const noexcept
+    {
+        return false;
+    } // TODO
 
-    void scrollUp(LineCount n) { scrollUp(n, _state.margin); }
-    void scrollDown(LineCount n) { scrollDown(n, _state.margin); }
+    void scrollUp(LineCount n)
+    {
+        scrollUp(n, _state.margin);
+    }
+    void scrollDown(LineCount n)
+    {
+        scrollDown(n, _state.margin);
+    }
 
     void verifyState() const override;
 
     /// @returns the primary screen's grid.
-    [[nodiscard]] Grid<Cell>& primaryGrid() noexcept { return _state.primaryBuffer; }
+    [[nodiscard]] Grid<Cell>& primaryGrid() noexcept
+    {
+        return _state.primaryBuffer;
+    }
 
-    [[nodiscard]] Grid<Cell> const& grid() const noexcept { return _grid; }
-    [[nodiscard]] Grid<Cell>& grid() noexcept { return _grid; }
+    [[nodiscard]] Grid<Cell> const& grid() const noexcept
+    {
+        return _grid;
+    }
+    [[nodiscard]] Grid<Cell>& grid() noexcept
+    {
+        return _grid;
+    }
 
     /// @returns true iff given absolute line number is wrapped, false otherwise.
     [[nodiscard]] bool isLineWrapped(LineOffset _lineNumber) const noexcept
@@ -419,10 +461,19 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         return _grid.isLineWrapped(_lineNumber);
     }
 
-    [[nodiscard]] ColorPalette& colorPalette() noexcept { return _state.colorPalette; }
-    [[nodiscard]] ColorPalette const& colorPalette() const noexcept { return _state.colorPalette; }
+    [[nodiscard]] ColorPalette& colorPalette() noexcept
+    {
+        return _state.colorPalette;
+    }
+    [[nodiscard]] ColorPalette const& colorPalette() const noexcept
+    {
+        return _state.colorPalette;
+    }
 
-    [[nodiscard]] ColorPalette& defaultColorPalette() noexcept { return _state.defaultColorPalette; }
+    [[nodiscard]] ColorPalette& defaultColorPalette() noexcept
+    {
+        return _state.defaultColorPalette;
+    }
     [[nodiscard]] ColorPalette const& defaultColorPalette() const noexcept
     {
         return _state.defaultColorPalette;
@@ -458,7 +509,10 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         return grid().lineAt(position.line).cellWithAt(position.column);
     }
 
-    [[nodiscard]] LineCount historyLineCount() const noexcept override { return grid().historyLineCount(); }
+    [[nodiscard]] LineCount historyLineCount() const noexcept override
+    {
+        return grid().historyLineCount();
+    }
 
     [[nodiscard]] HyperlinkId hyperlinkIdAt(CellLocation position) const noexcept override
     {
@@ -476,10 +530,19 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         return _state.hyperlinks.hyperlinkById(hyperlinkIdAt(pos));
     }
 
-    [[nodiscard]] HyperlinkStorage const& hyperlinks() const noexcept { return _state.hyperlinks; }
+    [[nodiscard]] HyperlinkStorage const& hyperlinks() const noexcept
+    {
+        return _state.hyperlinks;
+    }
 
-    void resetInstructionCounter() noexcept { _state.instructionCounter = 0; }
-    [[nodiscard]] uint64_t instructionCounter() const noexcept { return _state.instructionCounter; }
+    void resetInstructionCounter() noexcept
+    {
+        _state.instructionCounter = 0;
+    }
+    [[nodiscard]] uint64_t instructionCounter() const noexcept
+    {
+        return _state.instructionCounter;
+    }
     [[nodiscard]] char32_t precedingGraphicCharacter() const noexcept
     {
         return _state.precedingGraphicCharacter;

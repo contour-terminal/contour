@@ -20,21 +20,6 @@
 #include <array>
 #include <string_view>
 
-namespace terminal
-{
-std::ostream& operator<<(std::ostream& os, RGBAColor color)
-{
-    os << fmt::format("#{:02X}{:02X}{:02X}{:02X}", color.red(), color.green(), color.blue(), color.alpha());
-    return os;
-}
-
-std::ostream& operator<<(std::ostream& os, RGBColor color)
-{
-    os << fmt::format("#{:02X}{:02X}{:02X}", color.red, color.green, color.blue);
-    return os;
-}
-} // namespace terminal
-
 using namespace terminal;
 
 namespace

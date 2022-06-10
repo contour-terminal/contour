@@ -83,7 +83,10 @@ namespace
         return check;
     }
 
-    string getLastErrorAsString() { return strerror(errno); }
+    string getLastErrorAsString()
+    {
+        return strerror(errno);
+    }
 
     [[nodiscard]] char** createArgv(string const& _arg0,
                                     std::vector<string> const& _args,

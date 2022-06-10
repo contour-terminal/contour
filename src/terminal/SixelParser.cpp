@@ -26,18 +26,30 @@ namespace terminal
 
 namespace
 {
-    constexpr bool isDigit(char _value) noexcept { return _value >= '0' && _value <= '9'; }
+    constexpr bool isDigit(char _value) noexcept
+    {
+        return _value >= '0' && _value <= '9';
+    }
 
-    constexpr uint8_t toDigit(char _value) noexcept { return static_cast<uint8_t>(_value) - '0'; }
+    constexpr uint8_t toDigit(char _value) noexcept
+    {
+        return static_cast<uint8_t>(_value) - '0';
+    }
 
-    constexpr bool isSixel(char _value) noexcept { return _value >= 63 && _value <= 126; }
+    constexpr bool isSixel(char _value) noexcept
+    {
+        return _value >= 63 && _value <= 126;
+    }
 
     constexpr int8_t toSixel(char _value) noexcept
     {
         return static_cast<int8_t>(static_cast<int>(_value) - 63);
     }
 
-    constexpr RGBColor rgb(uint8_t r, uint8_t g, uint8_t b) { return RGBColor { r, g, b }; }
+    constexpr RGBColor rgb(uint8_t r, uint8_t g, uint8_t b)
+    {
+        return RGBColor { r, g, b };
+    }
 } // namespace
 
 // VT 340 default color palette (https://www.vt100.net/docs/vt3xx-gp/chapter2.html#S2.4)

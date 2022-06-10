@@ -138,6 +138,27 @@ void TextRenderBuilder::finish()
 {
 }
 
+MockTerm<MockPty> screenForDECRA()
+{
+    return MockTerm<MockPty> { PageSize { LineCount(5), ColumnCount(6) }, {}, 1024, [](auto& mock) {
+                                  mock.writeToScreen("ABCDEF\r\n"
+                                                     "abcdef\r\n"
+                                                     "123456\r\n");
+                                  mock.writeToScreen("\033[43m");
+                                  mock.writeToScreen("GHIJKL\r\n"
+                                                     "ghijkl");
+                                  mock.writeToScreen("\033[0m");
+
+                                  auto const initialText = "ABCDEF\n"
+                                                           "abcdef\n"
+                                                           "123456\n"
+                                                           "GHIJKL\n"
+                                                           "ghijkl\n";
+
+                                  CHECK(mock.terminal.primaryScreen().renderMainPageText() == initialText);
+                              } };
+}
+
 } // namespace
 // }}}
 
@@ -3172,27 +3193,6 @@ TEST_CASE("resize", "[screen]")
 // TODO: also test with: margins set and having them exceeded
 // TODO: also test with: overflowing source bottom/right dimensions
 // TODO: also test with: out-of-bounds target or source top/left positions
-
-MockTerm<MockPty> screenForDECRA()
-{
-    return MockTerm<MockPty> { PageSize { LineCount(5), ColumnCount(6) }, {}, 1024, [](auto& mock) {
-                                  mock.writeToScreen("ABCDEF\r\n"
-                                                     "abcdef\r\n"
-                                                     "123456\r\n");
-                                  mock.writeToScreen("\033[43m");
-                                  mock.writeToScreen("GHIJKL\r\n"
-                                                     "ghijkl");
-                                  mock.writeToScreen("\033[0m");
-
-                                  auto const initialText = "ABCDEF\n"
-                                                           "abcdef\n"
-                                                           "123456\n"
-                                                           "GHIJKL\n"
-                                                           "ghijkl\n";
-
-                                  CHECK(mock.terminal.primaryScreen().renderMainPageText() == initialText);
-                              } };
-}
 
 TEST_CASE("DECCRA.DownLeft.intersecting", "[screen]")
 {

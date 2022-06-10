@@ -44,77 +44,82 @@ using std::chrono::steady_clock;
 namespace terminal::renderer
 {
 
-void loadGridMetricsFromFont(text::font_key _font, GridMetrics& _gm, text::shaper& _textShaper)
+namespace
 {
-    auto const m = _textShaper.metrics(_font);
 
-    _gm.cellSize.width = Width::cast_from(m.advance);
-    _gm.cellSize.height = Height::cast_from(m.line_height);
-    _gm.baseline = m.line_height - m.ascender;
-    _gm.underline.position = _gm.baseline + m.underline_position;
-    _gm.underline.thickness = m.underline_thickness;
-
-    RendererLog()("Loading grid metrics {}", _gm);
-}
-
-GridMetrics loadGridMetrics(text::font_key _font, PageSize _pageSize, text::shaper& _textShaper)
-{
-    auto gm = GridMetrics {};
-
-    gm.pageSize = _pageSize;
-    gm.cellMargin = { 0, 0, 0, 0 }; // TODO (pass as args, and make use of them)
-    gm.pageMargin = { 0, 0 };       // TODO (fill early)
-
-    loadGridMetricsFromFont(_font, gm, _textShaper);
-
-    return gm;
-}
-
-FontKeys loadFontKeys(FontDescriptions const& _fd, text::shaper& _shaper)
-{
-    FontKeys output {};
-    auto const regularOpt = _shaper.load_font(_fd.regular, _fd.size);
-    Require(regularOpt.has_value());
-    output.regular = regularOpt.value();
-    output.bold = _shaper.load_font(_fd.bold, _fd.size).value_or(output.regular);
-    output.italic = _shaper.load_font(_fd.italic, _fd.size).value_or(output.regular);
-    output.boldItalic = _shaper.load_font(_fd.boldItalic, _fd.size).value_or(output.regular);
-    output.emoji = _shaper.load_font(_fd.emoji, _fd.size).value_or(output.regular);
-
-    return output;
-}
-
-unique_ptr<text::shaper> createTextShaper(TextShapingEngine _engine,
-                                          DPI _dpi,
-                                          unique_ptr<text::font_locator> _locator)
-{
-    switch (_engine)
+    void loadGridMetricsFromFont(text::font_key _font, GridMetrics& _gm, text::shaper& _textShaper)
     {
-        case TextShapingEngine::DWrite:
-#if defined(_WIN32)
-            RendererLog()("Using DirectWrite text shaping engine.");
-            // TODO: do we want to use custom font locator here?
-            return make_unique<text::directwrite_shaper>(_dpi, move(_locator));
-#else
-            RendererLog()("DirectWrite not available on this platform.");
-            break;
-#endif
+        auto const m = _textShaper.metrics(_font);
 
-        case TextShapingEngine::CoreText:
-#if defined(__APPLE__)
-            RendererLog()("CoreText not yet implemented.");
-            break;
-#else
-            RendererLog()("CoreText not available on this platform.");
-            break;
-#endif
+        _gm.cellSize.width = Width::cast_from(m.advance);
+        _gm.cellSize.height = Height::cast_from(m.line_height);
+        _gm.baseline = m.line_height - m.ascender;
+        _gm.underline.position = _gm.baseline + m.underline_position;
+        _gm.underline.thickness = m.underline_thickness;
 
-        case TextShapingEngine::OpenShaper: break;
+        RendererLog()("Loading grid metrics {}", _gm);
     }
 
-    RendererLog()("Using OpenShaper text shaping engine.");
-    return make_unique<text::open_shaper>(_dpi, std::move(_locator));
-}
+    GridMetrics loadGridMetrics(text::font_key _font, PageSize _pageSize, text::shaper& _textShaper)
+    {
+        auto gm = GridMetrics {};
+
+        gm.pageSize = _pageSize;
+        gm.cellMargin = { 0, 0, 0, 0 }; // TODO (pass as args, and make use of them)
+        gm.pageMargin = { 0, 0 };       // TODO (fill early)
+
+        loadGridMetricsFromFont(_font, gm, _textShaper);
+
+        return gm;
+    }
+
+    FontKeys loadFontKeys(FontDescriptions const& _fd, text::shaper& _shaper)
+    {
+        FontKeys output {};
+        auto const regularOpt = _shaper.load_font(_fd.regular, _fd.size);
+        Require(regularOpt.has_value());
+        output.regular = regularOpt.value();
+        output.bold = _shaper.load_font(_fd.bold, _fd.size).value_or(output.regular);
+        output.italic = _shaper.load_font(_fd.italic, _fd.size).value_or(output.regular);
+        output.boldItalic = _shaper.load_font(_fd.boldItalic, _fd.size).value_or(output.regular);
+        output.emoji = _shaper.load_font(_fd.emoji, _fd.size).value_or(output.regular);
+
+        return output;
+    }
+
+    unique_ptr<text::shaper> createTextShaper(TextShapingEngine _engine,
+                                              DPI _dpi,
+                                              unique_ptr<text::font_locator> _locator)
+    {
+        switch (_engine)
+        {
+            case TextShapingEngine::DWrite:
+#if defined(_WIN32)
+                RendererLog()("Using DirectWrite text shaping engine.");
+                // TODO: do we want to use custom font locator here?
+                return make_unique<text::directwrite_shaper>(_dpi, move(_locator));
+#else
+                RendererLog()("DirectWrite not available on this platform.");
+                break;
+#endif
+
+            case TextShapingEngine::CoreText:
+#if defined(__APPLE__)
+                RendererLog()("CoreText not yet implemented.");
+                break;
+#else
+                RendererLog()("CoreText not available on this platform.");
+                break;
+#endif
+
+            case TextShapingEngine::OpenShaper: break;
+        }
+
+        RendererLog()("Using OpenShaper text shaping engine.");
+        return make_unique<text::open_shaper>(_dpi, std::move(_locator));
+    }
+
+} // namespace
 
 Renderer::Renderer(PageSize pageSize,
                    FontDescriptions fontDescriptions,
@@ -337,37 +342,6 @@ uint64_t Renderer::render(Terminal& _terminal, bool _pressure)
     _renderTarget->execute();
 
     return changes;
-}
-
-tuple<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette,
-                                     Cell const& _cell,
-                                     bool _reverseVideo,
-                                     bool _selected)
-{
-    auto const [fg, bg] = _cell.makeColors(_colorPalette, _reverseVideo);
-    if (!_selected)
-        return tuple { fg, bg };
-
-    auto const a = _colorPalette.selectionForeground.value_or(bg);
-    auto const b = _colorPalette.selectionBackground.value_or(fg);
-    return tuple { a, b };
-}
-
-constexpr CellFlags toCellStyle(Decorator _decorator)
-{
-    switch (_decorator)
-    {
-        case Decorator::Underline: return CellFlags::Underline;
-        case Decorator::DoubleUnderline: return CellFlags::DoublyUnderlined;
-        case Decorator::CurlyUnderline: return CellFlags::CurlyUnderlined;
-        case Decorator::DottedUnderline: return CellFlags::DottedUnderline;
-        case Decorator::DashedUnderline: return CellFlags::DashedUnderline;
-        case Decorator::Overline: return CellFlags::Overline;
-        case Decorator::CrossedOut: return CellFlags::CrossedOut;
-        case Decorator::Framed: return CellFlags::Framed;
-        case Decorator::Encircle: return CellFlags::Encircled;
-    }
-    return CellFlags {};
 }
 
 void Renderer::renderCells(vector<RenderCell> const& _renderableCells)
