@@ -14,7 +14,7 @@
 #pragma once
 
 #include <contour/Actions.h>
-#include <contour/opengl/ShaderConfig.h>
+#include <contour/display/ShaderConfig.h>
 
 #include <terminal/Color.h>
 #include <terminal/ColorPalette.h>
@@ -126,8 +126,6 @@ std::vector<actions::Action> const* apply(
     return nullptr;
 }
 
-using opengl::ShaderConfig;
-
 struct CursorConfig
 {
     terminal::CursorShape cursorShape;
@@ -184,9 +182,9 @@ struct TerminalProfile
     terminal::Opacity backgroundOpacity; // value between 0 (fully transparent) and 0xFF (fully visible).
     bool backgroundBlur;                 // On Windows 10, this will enable Acrylic Backdrop.
 
-    std::optional<ShaderConfig> backgroundShader;
-    std::optional<ShaderConfig> backgroundImageShader;
-    std::optional<ShaderConfig> textShader;
+    std::optional<display::ShaderConfig> backgroundShader;
+    std::optional<display::ShaderConfig> backgroundImageShader;
+    std::optional<display::ShaderConfig> textShader;
 
     struct
     {
@@ -249,8 +247,10 @@ struct Config
 
     TerminalProfile* profile(std::string const& _name)
     {
+        assert(_name != "");
         if (auto i = profiles.find(_name); i != profiles.end())
             return &i->second;
+        assert(false && "Profile not found.");
         return nullptr;
     }
 
@@ -258,6 +258,7 @@ struct Config
     {
         if (auto i = profiles.find(_name); i != profiles.end())
             return &i->second;
+        assert(false && "Profile not found.");
         return nullptr;
     }
 

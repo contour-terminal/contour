@@ -11,10 +11,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <contour/display/Blur.h>
+#include <contour/display/OpenGLRenderer.h>
+#include <contour/display/ShaderConfig.h>
 #include <contour/helper.h>
-#include <contour/opengl/Blur.h>
-#include <contour/opengl/OpenGLRenderer.h>
-#include <contour/opengl/ShaderConfig.h>
 
 #include <terminal_renderer/TextureAtlas.h>
 
@@ -61,7 +61,7 @@ namespace atlas = terminal::renderer::atlas;
     #define CRISPY_PACKED /*!*/
 #endif
 
-namespace contour::opengl
+namespace contour::display
 {
 
 namespace
@@ -990,4 +990,4 @@ void OpenGLRenderer::executeRenderBackground(float timeValue)
 }
 // }}}
 
-} // namespace contour::opengl
+} // namespace contour::display

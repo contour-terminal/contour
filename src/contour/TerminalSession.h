@@ -14,7 +14,6 @@
 #pragma once
 
 #include <contour/Config.h>
-#include <contour/TerminalDisplay.h>
 
 #include <terminal/Terminal.h>
 
@@ -29,6 +28,11 @@
 
 namespace contour
 {
+
+namespace display
+{
+    class TerminalWidget;
+}
 
 class ContourGuiApp;
 
@@ -51,16 +55,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
      * @param _pty a PTY object (can be process, networked, mockup, ...)
      * @param _display fronend display to render the terminal.
      */
-    TerminalSession(std::unique_ptr<terminal::Pty> _pty,
-                    std::chrono::seconds _earlyExitThreshold,
-                    config::Config _config,
-                    bool _liveconfig,
-                    std::string _profileName,
-                    std::string _programPath,
-                    ContourGuiApp& _app,
-                    std::unique_ptr<TerminalDisplay> _display,
-                    std::function<void()> _displayInitialized,
-                    std::function<void()> _onExit);
+    TerminalSession(std::unique_ptr<terminal::Pty> _pty, ContourGuiApp& _app);
     ~TerminalSession() override;
 
     /// Starts the VT background thread.
@@ -80,10 +75,10 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     terminal::Terminal const& terminal() const noexcept { return terminal_; }
     terminal::ScreenType currentScreenType() const noexcept { return currentScreenType_; }
 
-    TerminalDisplay* display() noexcept { return display_; }
-    TerminalDisplay const* display() const noexcept { return display_; }
-    void setDisplay(std::unique_ptr<TerminalDisplay> _display);
-    void displayInitialized();
+    display::TerminalWidget* display() noexcept { return display_; }
+    display::TerminalWidget const* display() const noexcept { return display_; }
+
+    void attachDisplay(display::TerminalWidget& display);
 
     // Terminal::Events
     //
@@ -169,12 +164,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     bool operator()(actions::ViNormalMode);
     bool operator()(actions::WriteScreen const& _event);
 
-    void scheduleRedraw()
-    {
-        terminal_.markScreenDirty();
-        if (display_)
-            display_->scheduleRedraw();
-    }
+    void scheduleRedraw();
 
     ContourGuiApp& app() noexcept { return app_; }
 
@@ -189,7 +179,10 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
         return uptimeSecs;
     }
 
-  public Q_SLOTS:
+  signals:
+    void sessionClosed(TerminalSession&);
+
+  public slots:
     void onConfigReload();
     void onHighlightUpdate();
 
@@ -216,19 +209,15 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     // private data
     //
     std::chrono::steady_clock::time_point startTime_;
-    std::chrono::seconds earlyExitThreshold_;
     config::Config config_;
     std::string profileName_;
     config::TerminalProfile profile_;
     double contentScale_ = 1.0;
-    std::string programPath_;
     ContourGuiApp& app_;
-    std::function<void()> displayInitialized_;
-    std::function<void()> onExit_;
 
     terminal::Terminal terminal_;
     bool terminatedAndWaitingForKeyPress_ = false;
-    TerminalDisplay* display_ = nullptr;
+    display::TerminalWidget* display_ = nullptr;
 
     std::unique_ptr<QFileSystemWatcher> configFileChangeWatcher_;
 

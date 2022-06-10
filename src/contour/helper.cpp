@@ -11,8 +11,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <contour/TerminalDisplay.h>
 #include <contour/TerminalSession.h>
+#include <contour/display/TerminalWidget.h>
 #include <contour/helper.h>
 
 #include <terminal/Terminal.h>

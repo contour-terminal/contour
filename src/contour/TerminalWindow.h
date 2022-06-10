@@ -15,9 +15,9 @@
 
 #include <contour/Actions.h>
 #include <contour/Config.h>
-#include <contour/TerminalDisplay.h>
+#include <contour/ContourGuiApp.h>
 #include <contour/TerminalSession.h>
-#include <contour/opengl/TerminalWidget.h>
+#include <contour/display/TerminalWidget.h>
 
 #include <terminal/Metrics.h>
 
@@ -57,12 +57,7 @@ class TerminalWindow: public QMainWindow
     Q_OBJECT
 
   public:
-    TerminalWindow(std::chrono::seconds _earlyExitThreshold,
-                   config::Config _config,
-                   bool _liveConfig,
-                   std::string _profileName,
-                   std::string _programPath,
-                   ContourGuiApp& _app);
+    TerminalWindow(ContourGuiApp& _app);
     ~TerminalWindow() override;
 
     bool event(QEvent* _event) override;
@@ -70,12 +65,7 @@ class TerminalWindow: public QMainWindow
 
     // QSize sizeHint() const override;
 
-    config::TerminalProfile const& profile() const
-    {
-        config::TerminalProfile const* theProfile = config_.profile(profileName_);
-        Require(theProfile);
-        return *theProfile;
-    }
+    [[nodiscard]] config::TerminalProfile const& profile() const;
 
   public Q_SLOTS:
     void terminalBufferChanged(terminal::ScreenType);
@@ -84,20 +74,13 @@ class TerminalWindow: public QMainWindow
     void setBlurBehind(bool _enable);
 
   private:
-    // data members
-    //
-    config::Config config_;
-    const bool liveConfig_;
-    std::string profileName_;
-    std::string programPath_;
-    ContourGuiApp& app_;
+    ContourGuiApp& _app;
 
 #if defined(CONTOUR_SCROLLBAR)
     ScrollableDisplay* scrollableDisplay_ = nullptr;
 #endif
 
-    std::unique_ptr<TerminalSession> terminalSession_;
-    opengl::TerminalWidget* terminalWidget_ = nullptr;
+    display::TerminalWidget* terminalWidget_ = nullptr;
 };
 
 } // namespace contour

@@ -13,6 +13,7 @@
  */
 #include <contour/ContourGuiApp.h>
 #include <contour/TerminalSession.h>
+#include <contour/display/TerminalWidget.h>
 #include <contour/helper.h>
 
 #include <terminal/MatchModes.h>
@@ -87,25 +88,12 @@ namespace
     }
 } // namespace
 
-TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
-                                 std::chrono::seconds _earlyExitThreshold,
-                                 config::Config _config,
-                                 bool _liveConfig,
-                                 string _profileName,
-                                 string _programPath,
-                                 ContourGuiApp& _app,
-                                 unique_ptr<TerminalDisplay> _display,
-                                 std::function<void()> _displayInitialized,
-                                 std::function<void()> _onExit):
+TerminalSession::TerminalSession(unique_ptr<Pty> _pty, ContourGuiApp& _app):
     startTime_ { steady_clock::now() },
-    earlyExitThreshold_ { _earlyExitThreshold },
-    config_ { move(_config) },
-    profileName_ { move(_profileName) },
+    config_ { _app.config() },
+    profileName_ { _app.profileName() },
     profile_ { *config_.profile(profileName_) },
-    programPath_ { move(_programPath) },
     app_ { _app },
-    displayInitialized_ { move(_displayInitialized) },
-    onExit_ { move(_onExit) },
     terminal_ { move(_pty),
                 config_.ptyBufferObjectSize,
                 config_.ptyReadBufferSize,
@@ -120,12 +108,11 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty,
                 config_.maxImageColorRegisters,
                 config_.sixelCursorConformance,
                 profile_.colors,
-                _display ? _display->refreshRate() : 50.0,
+                50.0,
                 config_.reflowOnResize,
-                profile_.highlightTimeout },
-    display_ { _display.release() }
+                profile_.highlightTimeout }
 {
-    if (_liveConfig)
+    if (_app.liveConfig())
     {
         SessionLog()("Enable live configuration reloading of file {}.",
                      config_.backingFilePath.generic_string());
@@ -149,27 +136,29 @@ TerminalSession::~TerminalSession()
         screenUpdateThread_->join();
 }
 
-void TerminalSession::setDisplay(unique_ptr<TerminalDisplay> _display)
+void TerminalSession::attachDisplay(display::TerminalWidget& newDisplay)
 {
-    SessionLog()("Assigning display.");
-    display_ = _display.release();
+    SessionLog()("Attaching display.");
+    newDisplay.setSession(*this);
+    display_ = &newDisplay;
 
-    profile_ = *config_.profile(profileName_); // XXX do it again. but we've to be more efficient here
-}
+    setContentScale(newDisplay.contentScale());
 
-void TerminalSession::displayInitialized()
-{
     // NB: Inform connected TTY and local Screen instance about initial cell pixel size.
     auto const pixels = display_->cellSize() * terminal_.pageSize();
     // auto const pixels =
     //     ImageSize { display_->cellSize().width * boxed_cast<Width>(terminal_.pageSize().columns),
     //                 display_->cellSize().height * boxed_cast<Height>(terminal_.pageSize().lines) };
     terminal_.resizeScreen(terminal_.pageSize(), pixels);
-
+    terminal_.setRefreshRate(display_->refreshRate());
     configureDisplay();
+}
 
-    if (displayInitialized_)
-        displayInitialized_();
+void TerminalSession::scheduleRedraw()
+{
+    terminal_.markScreenDirty();
+    if (display_)
+        display_->scheduleRedraw();
 }
 
 void TerminalSession::start()
@@ -218,11 +207,17 @@ void TerminalSession::bell()
 
 void TerminalSession::bufferChanged(terminal::ScreenType _type)
 {
+    if (!display_)
+        return;
+
     display_->post([this, _type]() { display_->bufferChanged(_type); });
 }
 
 void TerminalSession::screenUpdated()
 {
+    if (!display_)
+        return;
+
     if (profile_.autoScrollOnUpdate && terminal().viewport().scrolled()
         && terminal().inputHandler().mode() == ViMode::Insert)
         terminal().viewport().scrollToBottom();
@@ -236,7 +231,7 @@ void TerminalSession::screenUpdated()
 void TerminalSession::flushInput()
 {
     terminal().flushInput();
-    if (terminal().hasInput())
+    if (terminal().hasInput() && display_)
         display_->post(bind(&TerminalSession::flushInput, this));
 }
 
@@ -250,6 +245,9 @@ void TerminalSession::renderBufferUpdated()
 
 void TerminalSession::requestCaptureBuffer(LineCount lines, bool logical)
 {
+    if (!display_)
+        return;
+
     display_->post([this, lines, logical]() {
         if (display_->requestPermission(profile_.permissions.captureBuffer, "capture screen buffer"))
         {
@@ -347,10 +345,9 @@ void TerminalSession::onClosed()
     else
         SessionLog()("Process terminated after {} seconds.", diff.count());
 
-    if (onExit_)
-        onExit_();
+    emit sessionClosed(*this);
 
-    if (diff < earlyExitThreshold_)
+    if (diff < app_.earlyExitThreshold())
     {
         // auto const w = terminal_.pageSize().columns.as<int>();
         auto constexpr SGR = "\033[1;38:2::255:255:255m\033[48:2::255:0:0m"sv;
@@ -996,7 +993,8 @@ void TerminalSession::spawnNewTerminal(string const& _profileName)
 
     if (config_.spawnNewProcess)
     {
-        ::contour::spawnNewTerminal(programPath_, config_.backingFilePath.generic_string(), _profileName, wd);
+        ::contour::spawnNewTerminal(
+            app_.programPath(), config_.backingFilePath.generic_string(), _profileName, wd);
     }
     else
     {
@@ -1089,6 +1087,8 @@ void TerminalSession::configureDisplay()
     display_->setHyperlinkDecoration(profile_.hyperlinkDecoration.normal, profile_.hyperlinkDecoration.hover);
 
     display_->setWindowTitle(terminal_.windowTitle());
+
+    display_->logDisplayTopInfo();
 }
 
 uint8_t TerminalSession::matchModeFlags() const
@@ -1190,7 +1190,7 @@ void TerminalSession::followHyperlink(terminal::HyperlinkInfo const& _hyperlink)
         args.append("config");
         args.append(QString::fromStdString(config_.backingFilePath.string()));
         args.append(QString::fromUtf8(_hyperlink.path().data(), static_cast<int>(_hyperlink.path().size())));
-        QProcess::execute(QString::fromStdString(programPath_), args);
+        QProcess::execute(QString::fromStdString(app_.programPath()), args);
     }
     else if (isLocal && fileInfo.isFile() && editorEnv && *editorEnv)
     {
@@ -1199,7 +1199,7 @@ void TerminalSession::followHyperlink(terminal::HyperlinkInfo const& _hyperlink)
         args.append(QString::fromStdString(config_.backingFilePath.string()));
         args.append(QString::fromStdString(editorEnv));
         args.append(QString::fromUtf8(_hyperlink.path().data(), static_cast<int>(_hyperlink.path().size())));
-        QProcess::execute(QString::fromStdString(programPath_), args);
+        QProcess::execute(QString::fromStdString(app_.programPath()), args);
     }
     else if (isLocal)
         QDesktopServices::openUrl(QUrl::fromLocalFile(QString::fromUtf8(string(_hyperlink.path()).c_str())));

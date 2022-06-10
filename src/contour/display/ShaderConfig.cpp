@@ -11,8 +11,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <contour/display/ShaderConfig.h>
 #include <contour/helper.h>
-#include <contour/opengl/ShaderConfig.h>
 
 #include <QtCore/QFile>
 
@@ -26,7 +26,7 @@ using std::string;
 using std::tuple;
 using namespace std::string_literals;
 
-namespace contour::opengl
+namespace contour::display
 {
 
 namespace
@@ -49,7 +49,7 @@ ShaderConfig builtinShaderConfig(ShaderClass shaderClass)
 
             auto const versionHeader = "#version 330\n";
 
-            auto const shaderFilePath = ":/contour/opengl/shaders/" + filename;
+            auto const shaderFilePath = ":/contour/display/shaders/" + filename;
 
             QFile file(shaderFilePath);
             file.open(QFile::ReadOnly);
@@ -106,4 +106,4 @@ std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderCo
     return shader;
 }
 
-} // namespace contour::opengl
+} // namespace contour::display

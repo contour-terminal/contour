@@ -88,6 +88,7 @@ namespace
     void segvHandler(int signum)
     {
         signal(signum, SIG_DFL);
+        return;
 
         std::stringstream sstr;
         crashLogger(sstr);
@@ -148,7 +149,7 @@ ContourApp::ContourApp(): App("contour", "Contour Terminal Emulator", CONTOUR_VE
     auto crashLogDirPath = crispy::App::instance()->localStateDir() / "crash";
     FileSystem::create_directories(crashLogDirPath);
     crashLogDir = crashLogDirPath.string();
-    signal(SIGSEGV, segvHandler);
+    // signal(SIGSEGV, segvHandler);
     signal(SIGABRT, segvHandler);
 #endif
 

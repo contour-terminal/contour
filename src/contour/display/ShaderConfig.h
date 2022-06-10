@@ -29,7 +29,7 @@
 #include <stdexcept>
 #include <string>
 
-namespace contour::opengl
+namespace contour::display
 {
 
 enum class ShaderClass
@@ -67,4 +67,4 @@ ShaderConfig builtinShaderConfig(ShaderClass shaderClass);
 
 std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderConfig);
 
-} // namespace contour::opengl
+} // namespace contour::display
