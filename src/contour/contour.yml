@@ -341,8 +341,8 @@ profiles:
                 blinking: false
                 blinking_interval: 500
 
-        # Time duration in milliseconds for which highlight is shown
-        vi_mode_highlight_timeout: 150
+        # Time duration in milliseconds for which yank highlight is shown.
+        vi_mode_highlight_timeout: 300
 
         status_line:
             # Either none or indicator.
@@ -426,8 +426,8 @@ color_schemes:
             normal: '#f0f000'
             hover: '#ff0000'
 
-        # color to pick for vi_mode highlights
-        vi_mode_highlight: 
+        # Color to pick for vi_mode highlights.
+        vi_mode_highlight:
             background: '#ffa500'
             foreground: '#1d1f21'
 
