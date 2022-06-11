@@ -16,6 +16,7 @@
 #include <contour/ContourApp.h>
 
 #include <terminal/Capabilities.h>
+#include <terminal/Functions.h>
 #include <terminal/Parser.h>
 
 #include <crispy/App.h>
@@ -24,6 +25,8 @@
 
 #include <fmt/chrono.h>
 #include <fmt/format.h>
+
+#include <range/v3/view/filter.hpp>
 
 #include <QtCore/QFile>
 
@@ -168,6 +171,7 @@ ContourApp::ContourApp(): App("contour", "Contour Terminal Emulator", CONTOUR_VE
     link("contour.generate.terminfo", bind(&ContourApp::terminfoAction, this));
     link("contour.generate.config", bind(&ContourApp::configAction, this));
     link("contour.generate.integration", bind(&ContourApp::integrationAction, this));
+    link("contour.info.vt", bind(&ContourApp::infoVT, this));
 }
 
 template <typename Callback>
@@ -184,6 +188,41 @@ auto withOutput(crispy::cli::FlagStore const& _flags, std::string const& _name, 
     }
 
     return _callback(*out);
+}
+
+int ContourApp::infoVT()
+{
+    using Category = terminal::FunctionCategory;
+    using std::pair;
+    using terminal::VTExtension;
+    using namespace std::string_view_literals;
+
+    for (auto const& [category, headline]: { pair { Category::C0, "Control Codes"sv },
+                                             pair { Category::ESC, "Escape Sequences"sv },
+                                             pair { Category::CSI, "Control Sequences"sv },
+                                             pair { Category::OSC, "Operating System Commands"sv },
+                                             pair { Category::DCS, "Device Control Sequences"sv } })
+    {
+        fmt::print("{}\n", headline);
+        fmt::print("{}\n\n", string(headline.size(), '='));
+
+        for (auto const& fn:
+             terminal::functions() | ranges::views::filter([category = category](auto const& f) {
+                 return f.category == category;
+             }))
+        {
+            auto const level = fn.extension == VTExtension::None ? fmt::format("{}", fn.conformanceLevel)
+                                                                 : fmt::format("{}", fn.extension);
+
+            // This could be much more improved in good looking and informationally.
+            // We can also print short/longer description, minimum required VT level,
+            // colored output for easier reading, and maybe more.
+            fmt::print("{:<20} {:<15} {} ({})\n", fn.mnemonic, fmt::format("{}", fn), fn.comment, level);
+        }
+        fmt::print("\n");
+    }
+
+    return EXIT_SUCCESS;
 }
 
 int ContourApp::integrationAction()
@@ -273,6 +312,13 @@ crispy::cli::Command ContourApp::parameterDefinition() const
             CLI::Command { "license",
                            "Shows the license, and project URL of the used projects and Contour." },
             CLI::Command { "list-debug-tags", "Lists all available debug tags and exits." },
+            CLI::Command {
+                "info",
+                "General informational outputs.",
+                CLI::OptionList {},
+                CLI::CommandList {
+                    CLI::Command { "vt", "Prints general information about supported VT sequences." },
+                } },
             CLI::Command {
                 "generate",
                 "Generation utilities.",
