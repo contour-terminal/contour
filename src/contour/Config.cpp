@@ -1574,6 +1574,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
         }
     }
 
+    strValue = "none";
     tryLoadChildRelative(_usedKeys, _profile, basePath, "status_line.display", strValue);
     if (strValue == "indicator")
         profile.initialStatusDisplayType = terminal::StatusDisplayType::Indicator;
