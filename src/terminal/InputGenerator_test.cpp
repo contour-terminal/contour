@@ -52,7 +52,7 @@ TEST_CASE("InputGenerator.Ctrl+Space", "[terminal,input]")
 {
     auto input = InputGenerator {};
     input.generate(L' ', Modifier::Control);
-    CHECK(escape(input.peek()) == "\\000");
+    CHECK(escape(input.peek()) == "\\x00");
 }
 
 TEST_CASE("InputGenerator.Ctrl+A", "[terminal,input]")
