@@ -75,15 +75,6 @@ namespace detail
             fmt::print("[{}:{}] {} {}\n", _file, _line, _message, _text);
         std::abort();
     }
-
-    inline void check(
-        bool _cond, std::string_view _text, std::string_view _message, std::string_view _file, int _line)
-    {
-        if (!_cond)
-        {
-            fail(_text, _message, _file, _line);
-        }
-    }
 } // namespace detail
 
 /// Sets a custom fail handler to be invoked when Expects() or Ensures() fails.
@@ -95,16 +86,22 @@ inline void set_fail_handler(fail_handler_t _handler)
     detail::fail_handler() = std::move(_handler);
 }
 
-#define Require(cond)                                                                       \
-    do                                                                                      \
-    {                                                                                       \
-        ::crispy::detail::check((cond), #cond, "Precondition failed.", __FILE__, __LINE__); \
+#define Require(cond)                                                                \
+    do                                                                               \
+    {                                                                                \
+        if (!(cond))                                                                 \
+        {                                                                            \
+            crispy::detail::fail(#cond, "Precondition failed.", __FILE__, __LINE__); \
+        }                                                                            \
     } while (0)
 
-#define Guarantee(cond)                                                                      \
-    do                                                                                       \
-    {                                                                                        \
-        ::crispy::detail::check((cond), #cond, "Postcondition failed.", __FILE__, __LINE__); \
+#define Guarantee(cond)                                                               \
+    do                                                                                \
+    {                                                                                 \
+        if (!(cond))                                                                  \
+        {                                                                             \
+            crispy::detail::fail(#cond, "Postcondition failed.", __FILE__, __LINE__); \
+        }                                                                             \
     } while (0)
 
 } // namespace crispy
