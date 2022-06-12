@@ -751,17 +751,26 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     // FIXME: this `2` is a hack of my bad knowledge. FIXME.
     // As I only know of emoji being colored fonts, and those take up 2 cell with units.
 
-    // Scale bitmap down iff bitmap is emoji and overflowing in diemensions
-    if (presentation == unicode::PresentationStyle::Emoji && glyph.format == text::bitmap_format::rgba)
+    // Scale bitmap down overflowing in diemensions
+    auto const emojiBoundingBox =
+        ImageSize { Width(_gridMetrics.cellSize.width.value * numCells),
+                    Height::cast_from(unbox<int>(_gridMetrics.cellSize.height) - _gridMetrics.baseline) };
+    if (glyph.format == text::bitmap_format::rgba)
     {
-        auto const emojiBoundingBox =
-            ImageSize { Width(_gridMetrics.cellSize.width.value * numCells),
-                        Height::cast_from(unbox<int>(_gridMetrics.cellSize.height) - _gridMetrics.baseline) };
-        if (glyph.bitmapSize.height > emojiBoundingBox.height)
+        if (glyph.bitmapSize.height > Height::cast_from(unbox<double>(emojiBoundingBox.height) * 1.1)
+            || glyph.bitmapSize.width > Width::cast_from(unbox<double>(emojiBoundingBox.width) * 1.5))
         {
+            if (RasterizerLog)
+                RasterizerLog()(
+                    "Scaling oversized glyph of {}+{} down to bounding box {} (expected cell count {}).",
+                    glyph.bitmapSize,
+                    glyph.position,
+                    emojiBoundingBox,
+                    numCells);
             auto [scaledGlyph, scaleFactor] = text::scale(glyph, emojiBoundingBox);
+
             glyph = move(scaledGlyph);
-            // glyph.position.y = unbox<int>(glyph.bitmapSize.height) - _gridMetrics.underline.position;
+            RasterizerLog()(" ==> scaled: {}/{}, factor {}", scaledGlyph, emojiBoundingBox, scaleFactor);
         }
     }
 
@@ -794,13 +803,20 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     // }}}
 
     if (RasterizerLog)
-        RasterizerLog()("Inserting {} id {} render mode {} {} yOverflow {} yMin {}.",
+    {
+        auto const boundingBox =
+            ImageSize { Width(_gridMetrics.cellSize.width.value * numCells),
+                        Height::cast_from(unbox<int>(_gridMetrics.cellSize.height) - _gridMetrics.baseline) };
+        RasterizerLog()("Inserting {} (bbox {}, numCells {}) id {} render mode {} {} yOverflow {} yMin {}.",
                         glyph,
+                        boundingBox,
+                        numCells,
                         glyphKey.index,
                         fontDescriptions_.renderMode,
                         presentation,
                         yOverflow,
                         yMin);
+    }
 
     return { createTileData(tileLocation,
                             move(glyph.bitmap),
@@ -824,8 +840,8 @@ text::shape_result TextRenderer::createTextShapedGlyphPositions()
     auto rs = unicode::run_segmenter(
         u32string_view(textClusterGroup_.codepoints.data(), textClusterGroup_.codepoints.size()));
     while (rs.consume(out(run)))
-        for (text::glyph_position const& glyphPosition: shapeTextRun(run))
-            glyphPositions.emplace_back(glyphPosition);
+        for (text::glyph_position& glyphPosition: shapeTextRun(run))
+            glyphPositions.emplace_back(std::move(glyphPosition));
 
     return glyphPositions;
 }
@@ -840,31 +856,28 @@ text::shape_result TextRenderer::createTextShapedGlyphPositions()
  */
 text::shape_result TextRenderer::shapeTextRun(unicode::run_segmenter::range const& _run)
 {
-    bool const isEmojiPresentation =
-        get<unicode::PresentationStyle>(_run.properties) == unicode::PresentationStyle::Emoji;
-
-    auto const font = isEmojiPresentation ? fonts_.emoji : getFontForStyle(fonts_, textClusterGroup_.style);
-
     // TODO(where to apply cell-advances) auto const advanceX = _gridMetrics.cellSize.width;
     auto const count = static_cast<size_t>(_run.end - _run.start);
     auto const codepoints = u32string_view(textClusterGroup_.codepoints.data() + _run.start, count);
     auto const clusters = gsl::span(textClusterGroup_.clusters.data() + _run.start, count);
+    auto const script = get<unicode::Script>(_run.properties);
+    auto const presentationStyle = get<unicode::PresentationStyle>(_run.properties);
+    auto const isEmojiPresentation = presentationStyle == unicode::PresentationStyle::Emoji;
+    auto const font = isEmojiPresentation ? fonts_.emoji : getFontForStyle(fonts_, textClusterGroup_.style);
 
     text::shape_result glyphPosition;
     glyphPosition.reserve(clusters.size());
     textShaper_.shape(font,
                       codepoints,
                       clusters,
-                      get<unicode::Script>(_run.properties),
-                      get<unicode::PresentationStyle>(_run.properties),
+                      script,            // get<unicode::Script>(_run.properties),
+                      presentationStyle, // get<unicode::PresentationStyle>(_run.properties),
                       glyphPosition);
 
     if (RasterizerLog && !glyphPosition.empty())
     {
         auto msg = RasterizerLog();
-        msg.append("Shaped codepoints ({}): {}",
-                   isEmojiPresentation ? "emoji" : "text",
-                   unicode::convert_to<char>(codepoints));
+        msg.append("Shaped codepoints ({}): {}", presentationStyle, unicode::convert_to<char>(codepoints));
 
         msg.append(" (");
         for (auto const [i, codepoint]: crispy::indexed(codepoints))

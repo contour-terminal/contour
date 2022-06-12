@@ -103,6 +103,7 @@
           <li>[Flatpak] Adds configuration key `profiles.*.escape_sandbox` to decide whether or not to escape the sandbox.</li>
           <li>[Packaging] Adding AppImage files to Github release page and CI artifacts and bump Ubuntu packages using Ubuntu 22.04 LTS</li>
           <li>Adds `CreateDebugDump` action to dump terminal state for debugging purposes.</li>
+          <li>Fixes glyph rendering for some unexpectly oversized glyphs (#423).</li>
         </ul>
       </description>
     </release>
