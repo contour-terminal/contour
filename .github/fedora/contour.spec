@@ -27,6 +27,7 @@ BuildRequires:  ninja-build
 BuildRequires:  pkgconf
 BuildRequires:  qt5-qtbase-devel
 BuildRequires:  qt5-qtbase-gui
+BuildRequires:  qt5-qtmultimedia-devel
 
 Requires:       fontconfig
 Requires:       freetype
@@ -35,6 +36,7 @@ Requires:       kf5-kwindowsystem
 Requires:       qt5-qtbase
 Requires:       qt5-qtbase-gui
 Requires:       yaml-cpp
+Requires:       qt5-qtmultimedia-devel
 
 %description
 contour is a modern terminal emulator, for everyday use.

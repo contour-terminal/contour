@@ -76,6 +76,7 @@ class Terminal
         virtual void discardImage(Image const&) {}
         virtual void inputModeChanged(ViMode /*mode*/) {}
         virtual void updateHighlights() {}
+        virtual void playSound([[maybe_unused]] terminal::Sequence::Parameters const& _) {}
     };
 
     Terminal(std::unique_ptr<Pty> _pty,
@@ -271,6 +272,7 @@ class Terminal
 
     void inputModeChanged(ViMode mode) { eventListener_.inputModeChanged(mode); }
     void updateHighlights() { eventListener_.updateHighlights(); }
+    void playSound(terminal::Sequence::Parameters const& params_) { eventListener_.playSound(params_); }
 
     bool applicationCursorKeys() const noexcept { return state_.inputGenerator.applicationCursorKeys(); }
     bool applicationKeypad() const noexcept { return state_.inputGenerator.applicationKeypad(); }

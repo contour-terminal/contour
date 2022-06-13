@@ -13,6 +13,7 @@
  */
 #pragma once
 
+#include <contour/Audio.h>
 #include <contour/Config.h>
 
 #include <terminal/Terminal.h>
@@ -102,6 +103,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     void discardImage(terminal::Image const&) override;
     void inputModeChanged(terminal::ViMode mode) override;
     void updateHighlights() override;
+    void playSound(terminal::Sequence::Parameters const& params_) override;
 
     // Input Events
     using Timestamp = std::chrono::steady_clock::time_point;
@@ -230,6 +232,8 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     terminal::ScreenType currentScreenType_ = terminal::ScreenType::Primary;
     terminal::CellLocation currentMousePosition_ = terminal::CellLocation {};
     bool allowKeyMappings_ = true;
+    Audio audio;
+    std::vector<int> musicalNotesBuffer_;
 };
 
 } // namespace contour

@@ -421,6 +421,7 @@ constexpr inline auto XTCAPTURE   = detail::CSI('>', 0, 2, std::nullopt, 't', VT
 
 constexpr inline auto DECSSDT     = detail::CSI(std::nullopt, 0, 1, '$', '~', VTType::VT320, "DECSSDT", "Select Status Display (Line) Type");
 constexpr inline auto DECSASD     = detail::CSI(std::nullopt, 0, 1, '$', '}', VTType::VT420, "DECSASD", "Select Active Status Display");
+constexpr inline auto DECPS       = detail::CSI(std::nullopt, 3, 18, ',', '~', VTType::VT520, "DECPS", "Controls the sound frequency or notes");
 
 // DCS functions
 constexpr inline auto STP         = detail::DCS(std::nullopt, 0, 0, '$', 'p', VTExtension::Contour, "XTSETPROFILE", "Set Terminal Profile");
@@ -528,6 +529,7 @@ inline auto const& functions() noexcept
             DECIC,
             XTRESTORE,
             XTSAVE,
+            DECPS,
             DECRM,
             DECRQM,
             DECRQM_ANSI,

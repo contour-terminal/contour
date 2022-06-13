@@ -123,7 +123,7 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty, ContourGuiApp& _app):
                 this,
                 SLOT(onConfigReload()));
     }
-
+    musicalNotesBuffer_.reserve(16);
     profile_ = *config_.profile(profileName_); // XXX do it again. but we've to be more efficient here
     configureTerminal();
 }
@@ -613,6 +613,15 @@ void TerminalSession::onHighlightUpdate()
 {
     terminal_.resetHighlight();
 }
+
+void TerminalSession::playSound(terminal::Sequence::Parameters const& params_)
+{
+    auto range = params_.range();
+    musicalNotesBuffer_.clear();
+    musicalNotesBuffer_.insert(musicalNotesBuffer_.begin(), range.begin() + 2, range.end());
+    emit audio.play(params_.at(0), params_.at(1), musicalNotesBuffer_);
+}
+
 // }}}
 // {{{ Actions
 bool TerminalSession::operator()(actions::CancelSelection)

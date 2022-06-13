@@ -26,7 +26,9 @@ class span
     //
     constexpr span(iterator _begin, iterator _end) noexcept: begin_ { _begin }, end_ { _end } {}
     constexpr span(iterator _begin, size_t _count) noexcept:
-        begin_ { _begin }, end_ { std::next(_begin, _count) }
+        begin_ { _begin },
+        end_ { std::next(_begin,
+                         static_cast<typename std::iterator_traits<iterator>::difference_type>(_count)) }
     {
     }
 

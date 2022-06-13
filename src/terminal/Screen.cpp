@@ -3328,6 +3328,7 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             }
             break;
 
+        case DECPS: _terminal.playSound(seq.parameters()); break;
         // OSC
         case SETTITLE:
             //(not supported) ChangeIconTitle(seq.intermediateCharacters());

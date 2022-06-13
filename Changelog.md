@@ -38,6 +38,7 @@
 - Adds configuration options `logging.enabled` as well as `logging.file`.
 - Adds VT sequences `XTPUSHCOLORS`, `XTPOPCOLORS`, `XTREPORTCOLORS` (#714).
 - Adds CLI syntax `contour info vt` to print list of supported VT sequences (#730).
+- Adds VT sequence `DECPS` (#237).
 
 ### 0.3.1 (2022-05-01)
 
