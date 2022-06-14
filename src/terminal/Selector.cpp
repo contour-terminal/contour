@@ -271,11 +271,17 @@ FullLineSelection::FullLineSelection(SelectionHelper const& _helper, CellLocatio
 {
     from_.column = ColumnOffset(0);
     to_.column = boxed_cast<ColumnOffset>(helper_.pageSize().columns - 1);
+
+    if (helper_.wrappedLine(from_.line))
+    {
+        while (helper_.wrappedLine(from_.line))
+            --from_.line;
+    }
 }
 
 void FullLineSelection::extend(CellLocation _to)
 {
-    if (_to >= from_)
+    if (_to.line >= from_.line)
     {
         from_.column = ColumnOffset(0);
         _to.column = boxed_cast<ColumnOffset>(helper_.pageSize().columns - 1);
@@ -284,6 +290,9 @@ void FullLineSelection::extend(CellLocation _to)
     }
     else
     {
+        if (_to.line < from_.line)
+            while (helper_.wrappedLine(from_.line + 1))
+                ++from_.line;
         from_.column = boxed_cast<ColumnOffset>(helper_.pageSize().columns - 1);
         _to.column = ColumnOffset(0);
         while (helper_.wrappedLine(_to.line))
