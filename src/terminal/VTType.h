@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include <crispy/assert.h>
+
 #include <fmt/format.h>
 
 #include <string>
@@ -39,6 +41,14 @@ enum class VTType
     VT510 = 61,
     VT520 = 64,
     VT525 = 65,
+};
+
+enum class VTExtension
+{
+    None,
+    Unknown,
+    XTerm,
+    Contour,
 };
 
 /**
@@ -106,7 +116,28 @@ struct formatter<terminal::VTType>
             case terminal::VTType::VT520: return fmt::format_to(ctx.out(), "VT520");
             case terminal::VTType::VT525: return fmt::format_to(ctx.out(), "VT525");
         }
-        return fmt::format_to(ctx.out(), "INVALID-{}", static_cast<unsigned>(_id));
+        crispy::unreachable();
+    }
+};
+template <>
+struct formatter<terminal::VTExtension>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(const terminal::VTExtension _id, FormatContext& ctx)
+    {
+        switch (_id)
+        {
+            case terminal::VTExtension::None: return fmt::format_to(ctx.out(), "none");
+            case terminal::VTExtension::Unknown: return fmt::format_to(ctx.out(), "unknown");
+            case terminal::VTExtension::XTerm: return fmt::format_to(ctx.out(), "XTerm");
+            case terminal::VTExtension::Contour: return fmt::format_to(ctx.out(), "Contour");
+        }
+        crispy::unreachable();
     }
 };
 } // namespace fmt

@@ -3286,8 +3286,8 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case TBC: return impl::TBC(seq, *this);
         case VPA: moveCursorToLine(seq.param_or<LineOffset>(0, LineOffset { 1 }) - 1); break;
         case WINMANIP: return impl::WINDOWMANIP(seq, _terminal);
-        case DECMODERESTORE: return impl::restoreDECModes(seq, *this);
-        case DECMODESAVE: return impl::saveDECModes(seq, *this);
+        case XTRESTORE: return impl::restoreDECModes(seq, *this);
+        case XTSAVE: return impl::saveDECModes(seq, *this);
         case XTPOPCOLORS:
             if (!seq.parameterCount())
                 _terminal.popColorPalette(0);
@@ -3340,7 +3340,7 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case RCOLPAL: return impl::RCOLPAL(seq, *this);
         case SETCWD: return impl::SETCWD(seq, *this);
         case HYPERLINK: return impl::HYPERLINK(seq, *this);
-        case CAPTURE: return impl::CAPTURE(seq, _terminal);
+        case XTCAPTURE: return impl::CAPTURE(seq, _terminal);
         case COLORFG:
             return impl::setOrRequestDynamicColor(seq, *this, DynamicColorName::DefaultForegroundColor);
         case COLORBG:

@@ -15,6 +15,7 @@
 
 #include <terminal/VTType.h>
 
+#include <crispy/escape.h>
 #include <crispy/sort.h>
 
 #include <fmt/format.h>
@@ -46,7 +47,12 @@ struct FunctionDefinition // TODO: rename Function
     uint8_t minimumParameters;  // (4 bits) 0..7
     uint16_t maximumParameters; // (10 bits) 0..1024 for integer value (OSC function parameter)
 
+    // Conformance level and extension are mutually exclusive.
+    // But it is unclear to me whether or not it is guaranteed to always have a constexpr-aware std::variant.
+    // So keep it the classic way (for now).
     VTType conformanceLevel;
+    VTExtension extension = VTExtension::None;
+
     std::string_view mnemonic;
     std::string_view comment;
 
@@ -159,14 +165,24 @@ namespace detail // {{{
 {
     constexpr auto C0(char _final, std::string_view _mnemonic, std::string_view _description) noexcept
     {
-        return FunctionDefinition { FunctionCategory::C0, 0,         0,           _final, 0, 0,
-                                    VTType::VT100,        _mnemonic, _description };
+        // clang-format off
+        return FunctionDefinition { FunctionCategory::C0, 0, 0, _final, 0, 0, VTType::VT100,
+                                    VTExtension::None, _mnemonic, _description };
+        // clang-format on
     }
 
-    constexpr auto OSC(uint16_t _code, std::string_view _mnemonic, std::string_view _description) noexcept
+    constexpr auto OSC(uint16_t _code,
+                       VTExtension ext,
+                       std::string_view _mnemonic,
+                       std::string_view _description) noexcept
     {
-        return FunctionDefinition { FunctionCategory::OSC, 0,         0,           0, 0, _code,
-                                    VTType::VT100,         _mnemonic, _description };
+        // clang-format off
+        return FunctionDefinition { FunctionCategory::OSC, 0, 0, 0, 0, _code,
+                                    VTType::VT100,
+                                    ext,
+                                    _mnemonic,
+                                    _description };
+        // clang-format on
     }
 
     constexpr auto ESC(std::optional<char> _intermediate,
@@ -175,9 +191,16 @@ namespace detail // {{{
                        std::string_view _mnemonic,
                        std::string_view _description) noexcept
     {
-        return FunctionDefinition {
-            FunctionCategory::ESC, 0, _intermediate.value_or(0), _final, 0, 0, _vt, _mnemonic, _description
-        };
+        return FunctionDefinition { FunctionCategory::ESC,
+                                    0,
+                                    _intermediate.value_or(0),
+                                    _final,
+                                    0,
+                                    0,
+                                    _vt,
+                                    VTExtension::None,
+                                    _mnemonic,
+                                    _description };
     }
 
     constexpr auto CSI(std::optional<char> _leader,
@@ -197,6 +220,29 @@ namespace detail // {{{
                                     _argc0,
                                     _argc1,
                                     _vt,
+                                    VTExtension::None,
+                                    _mnemonic,
+                                    _description };
+    }
+
+    constexpr auto CSI(std::optional<char> _leader,
+                       uint8_t _argc0,
+                       uint8_t _argc1,
+                       std::optional<char> _intermediate,
+                       char _final,
+                       VTExtension ext,
+                       std::string_view _mnemonic,
+                       std::string_view _description) noexcept
+    {
+        // TODO: static_assert on _leader/_intermediate range-or-null
+        return FunctionDefinition { FunctionCategory::CSI,
+                                    _leader.value_or(0),
+                                    _intermediate.value_or(0),
+                                    _final,
+                                    _argc0,
+                                    _argc1,
+                                    VTType::VT100,
+                                    ext,
                                     _mnemonic,
                                     _description };
     }
@@ -218,6 +264,29 @@ namespace detail // {{{
                                     _argc0,
                                     _argc1,
                                     _vt,
+                                    VTExtension::None,
+                                    _mnemonic,
+                                    _description };
+    }
+
+    constexpr auto DCS(std::optional<char> _leader,
+                       uint8_t _argc0,
+                       uint8_t _argc1,
+                       std::optional<char> _intermediate,
+                       char _final,
+                       VTExtension ext,
+                       std::string_view _mnemonic,
+                       std::string_view _description) noexcept
+    {
+        // TODO: static_assert on _leader/_intermediate range-or-null
+        return FunctionDefinition { FunctionCategory::DCS,
+                                    _leader.value_or(0),
+                                    _intermediate.value_or(0),
+                                    _final,
+                                    _argc0,
+                                    _argc1,
+                                    VTType::VT100,
+                                    ext,
                                     _mnemonic,
                                     _description };
     }
@@ -307,8 +376,8 @@ constexpr inline auto DECERA      = detail::CSI(std::nullopt, 0, 4, '$', 'z', VT
 constexpr inline auto DECFRA      = detail::CSI(std::nullopt, 0, 4, '$', 'x', VTType::VT420, "DECFRA", "Fill rectangular area");
 constexpr inline auto DECDC       = detail::CSI(std::nullopt, 0, 1, '\'', '~', VTType::VT420, "DECDC", "Delete column");
 constexpr inline auto DECIC       = detail::CSI(std::nullopt, 0, 1, '\'', '}', VTType::VT420, "DECIC", "Insert column");
-constexpr inline auto DECMODERESTORE = detail::CSI('?', 0, ArgsMax, std::nullopt, 'r', VTType::VT525, "DECMODERESTORE", "Restore DEC private modes.");
-constexpr inline auto DECMODESAVE    = detail::CSI('?', 0, ArgsMax, std::nullopt, 's', VTType::VT525, "DECMODESAVE", "Save DEC private modes.");
+constexpr inline auto XTRESTORE   = detail::CSI('?', 0, ArgsMax, std::nullopt, 'r', VTExtension::XTerm, "XTRESTORE", "Restore DEC private modes.");
+constexpr inline auto XTSAVE      = detail::CSI('?', 0, ArgsMax, std::nullopt, 's', VTExtension::XTerm, "XTSAVE", "Save DEC private modes.");
 constexpr inline auto DECRM       = detail::CSI('?', 1, ArgsMax, std::nullopt, 'l', VTType::VT100, "DECRM", "Reset DEC-mode");
 constexpr inline auto DECRQM      = detail::CSI('?', 1, 1, '$', 'p', VTType::VT100, "DECRQM", "Request DEC-mode");
 constexpr inline auto DECRQM_ANSI = detail::CSI(std::nullopt, 1, 1, '$', 'p', VTType::VT100, "DECRQM_ANSI", "Request ANSI-mode");
@@ -316,7 +385,7 @@ constexpr inline auto DECRQPSR    = detail::CSI(std::nullopt, 1, 1, '$', 'w', VT
 constexpr inline auto DECSCL      = detail::CSI(std::nullopt, 2, 2, '"', 'p', VTType::VT220, "DECSCL", "Set conformance level (DECSCL), VT220 and up.");
 constexpr inline auto DECSCPP     = detail::CSI(std::nullopt, 0, 1, '$', '|', VTType::VT100, "DECSCPP", "Select 80 or 132 Columns per Page");
 constexpr inline auto DECSNLS     = detail::CSI(std::nullopt, 0, 1, '*', '|', VTType::VT420, "DECSNLS", "Select number of lines per screen.");
-constexpr inline auto DECSCUSR    = detail::CSI(std::nullopt, 0, 1, ' ', 'q', VTType::VT100, "DECSCUSR", "Set Cursor Style");
+constexpr inline auto DECSCUSR    = detail::CSI(std::nullopt, 0, 1, ' ', 'q', VTType::VT520, "DECSCUSR", "Set Cursor Style");
 constexpr inline auto DECSLRM     = detail::CSI(std::nullopt, 2, 2, std::nullopt, 's', VTType::VT420, "DECSLRM", "Set left/right margin");
 constexpr inline auto DECSM       = detail::CSI('?', 1, ArgsMax, std::nullopt, 'h', VTType::VT100, "DECSM", "Set DEC-mode");
 constexpr inline auto DECSTBM     = detail::CSI(std::nullopt, 0, 2, std::nullopt, 'r', VTType::VT100, "DECSTBM", "Set top/bottom margin");
@@ -335,62 +404,62 @@ constexpr inline auto REP         = detail::CSI(std::nullopt, 1, 1, std::nullopt
 constexpr inline auto RM          = detail::CSI(std::nullopt, 1, ArgsMax, std::nullopt, 'l', VTType::VT100, "RM",  "Reset mode");
 constexpr inline auto SCOSC       = detail::CSI(std::nullopt, 0, 0, std::nullopt, 's', VTType::VT100, "SCOSC", "Save Cursor");
 constexpr inline auto SD          = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'T', VTType::VT100, "SD",  "Scroll down (pan up)");
-constexpr inline auto SETMARK     = detail::CSI('>', 0, 0, std::nullopt, 'M', VTType::VT100, "SETMARK", "Set Vertical Mark");
+constexpr inline auto SETMARK     = detail::CSI('>', 0, 0, std::nullopt, 'M', VTExtension::Contour, "XTSETMARK", "Set Vertical Mark (experimental syntax)");
 constexpr inline auto SGR         = detail::CSI(std::nullopt, 0, ArgsMax, std::nullopt, 'm', VTType::VT100, "SGR", "Select graphics rendition");
 constexpr inline auto SM          = detail::CSI(std::nullopt, 1, ArgsMax, std::nullopt, 'h', VTType::VT100, "SM",  "Set mode");
 constexpr inline auto SU          = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'S', VTType::VT100, "SU",  "Scroll up (pan down)");
 constexpr inline auto TBC         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'g', VTType::VT100, "TBC", "Horizontal Tab Clear");
 constexpr inline auto VPA         = detail::CSI(std::nullopt, 0, 1, std::nullopt, 'd', VTType::VT100, "VPA", "Vertical Position Absolute");
-constexpr inline auto WINMANIP    = detail::CSI(std::nullopt, 1, 3, std::nullopt, 't', VTType::VT525, "WINMANIP", "Window Manipulation");
-constexpr inline auto XTSMGRAPHICS= detail::CSI('?', 2, 4, std::nullopt, 'S', VTType::VT525 /*Xterm*/, "XTSMGRAPHICS", "Setting/getting Sixel/ReGIS graphics settings.");
-constexpr inline auto XTPOPCOLORS    = detail::CSI(std::nullopt, 0, ArgsMax, '#', 'Q', VTType::VT525 /*Extension*/, "XTPOPCOLORS", "Pops the color palette from the palette's saved-stack.");
-constexpr inline auto XTPUSHCOLORS   = detail::CSI(std::nullopt, 0, ArgsMax, '#', 'P', VTType::VT525 /*Extension*/, "XTPUSHCOLORS", "Pushes the color palette onto the palette's saved-stack.");
-constexpr inline auto XTREPORTCOLORS = detail::CSI(std::nullopt, 0, 0, '#', 'R', VTType::VT525 /*Extension*/, "XTREPORTCOLORS", "Reports number of color palettes on the stack.");
-constexpr inline auto XTSHIFTESCAPE=detail::CSI('>', 0, 1, std::nullopt, 's', VTType::VT525 /*Xterm*/, "XTSHIFTESCAPE", "Set/reset shift-escape options.");
-constexpr inline auto XTVERSION   = detail::CSI('>', 0, 1, std::nullopt, 'q', VTType::VT525 /*Xterm*/, "XTVERSION", "Query terminal name and version");
-constexpr inline auto CAPTURE     = detail::CSI('>', 0, 2, std::nullopt, 't', VTType::VT525 /*Extension*/, "CAPTURE", "Report screen buffer capture.");
+constexpr inline auto WINMANIP    = detail::CSI(std::nullopt, 1, 3, std::nullopt, 't', VTExtension::XTerm, "WINMANIP", "Window Manipulation");
+constexpr inline auto XTSMGRAPHICS= detail::CSI('?', 2, 4, std::nullopt, 'S', VTExtension::XTerm, "XTSMGRAPHICS", "Setting/getting Sixel/ReGIS graphics settings.");
+constexpr inline auto XTPOPCOLORS    = detail::CSI(std::nullopt, 0, ArgsMax, '#', 'Q', VTExtension::XTerm, "XTPOPCOLORS", "Pops the color palette from the palette's saved-stack.");
+constexpr inline auto XTPUSHCOLORS   = detail::CSI(std::nullopt, 0, ArgsMax, '#', 'P', VTExtension::XTerm, "XTPUSHCOLORS", "Pushes the color palette onto the palette's saved-stack.");
+constexpr inline auto XTREPORTCOLORS = detail::CSI(std::nullopt, 0, 0, '#', 'R', VTExtension::XTerm, "XTREPORTCOLORS", "Reports number of color palettes on the stack.");
+constexpr inline auto XTSHIFTESCAPE=detail::CSI('>', 0, 1, std::nullopt, 's', VTExtension::XTerm, "XTSHIFTESCAPE", "Set/reset shift-escape options.");
+constexpr inline auto XTVERSION   = detail::CSI('>', 0, 1, std::nullopt, 'q', VTExtension::XTerm, "XTVERSION", "Query terminal name and version");
+constexpr inline auto XTCAPTURE   = detail::CSI('>', 0, 2, std::nullopt, 't', VTExtension::Contour, "XTCAPTURE", "Report screen buffer capture.");
 
 constexpr inline auto DECSSDT     = detail::CSI(std::nullopt, 0, 1, '$', '~', VTType::VT320, "DECSSDT", "Select Status Display (Line) Type");
 constexpr inline auto DECSASD     = detail::CSI(std::nullopt, 0, 1, '$', '}', VTType::VT420, "DECSASD", "Select Active Status Display");
 
 // DCS functions
-constexpr inline auto STP         = detail::DCS(std::nullopt, 0, 0, '$', 'p', VTType::VT525, "STP", "Set Terminal Profile");
+constexpr inline auto STP         = detail::DCS(std::nullopt, 0, 0, '$', 'p', VTExtension::Contour, "XTSETPROFILE", "Set Terminal Profile");
 constexpr inline auto DECRQSS     = detail::DCS(std::nullopt, 0, 0, '$', 'q', VTType::VT420, "DECRQSS", "Request Status String");
 constexpr inline auto DECSIXEL    = detail::DCS(std::nullopt, 0, 3, std::nullopt, 'q', VTType::VT330, "DECSIXEL", "Sixel Graphics Image");
-constexpr inline auto XTGETTCAP   = detail::DCS(std::nullopt, 0, 0, '+', 'q', VTType::VT100, "XTGETTCAP", "Request Termcap/Terminfo String");
+constexpr inline auto XTGETTCAP   = detail::DCS(std::nullopt, 0, 0, '+', 'q', VTExtension::XTerm, "XTGETTCAP", "Request Termcap/Terminfo String");
 
 // OSC
-constexpr inline auto SETTITLE      = detail::OSC(0, "SETINICON", "Change Window & Icon Title");
-constexpr inline auto SETICON       = detail::OSC(1, "SETWINICON", "Change Icon Title");
-constexpr inline auto SETWINTITLE   = detail::OSC(2, "SETWINTITLE", "Change Window Title");
-constexpr inline auto SETXPROP      = detail::OSC(3, "SETXPROP", "Set X11 property");
-constexpr inline auto SETCOLPAL     = detail::OSC(4, "SETCOLPAL", "Set/Query color palette");
+constexpr inline auto SETTITLE      = detail::OSC(0, VTExtension::XTerm, "SETINICON", "Change Window & Icon Title");
+constexpr inline auto SETICON       = detail::OSC(1, VTExtension::XTerm, "SETWINICON", "Change Icon Title");
+constexpr inline auto SETWINTITLE   = detail::OSC(2, VTExtension::XTerm, "SETWINTITLE", "Change Window Title");
+constexpr inline auto SETXPROP      = detail::OSC(3, VTExtension::XTerm, "SETXPROP", "Set X11 property");
+constexpr inline auto SETCOLPAL     = detail::OSC(4, VTExtension::XTerm, "SETCOLPAL", "Set/Query color palette");
 // TODO: Ps = 4 ; c ; spec -> Change Color Number c to the color specified by spec.
 // TODO: Ps = 5 ; c ; spec -> Change Special Color Number c to the color specified by spec.
 // TODO: Ps = 6 ; c ; f -> Enable/disable Special Color Number c.
 // TODO: Ps = 7 (set current working directory)
-constexpr inline auto SETCWD        = detail::OSC(7, "SETCWD", "Set current working directory");
-constexpr inline auto HYPERLINK     = detail::OSC(8, "HYPERLINK", "Hyperlinked Text");
-constexpr inline auto COLORFG       = detail::OSC(10, "COLORFG", "Change or request text foreground color.");
-constexpr inline auto COLORBG       = detail::OSC(11, "COLORBG", "Change or request text background color.");
-constexpr inline auto COLORCURSOR   = detail::OSC(12, "COLORCURSOR", "Change text cursor color to Pt.");
-constexpr inline auto COLORMOUSEFG  = detail::OSC(13, "COLORMOUSEFG", "Change mouse foreground color.");
-constexpr inline auto COLORMOUSEBG  = detail::OSC(14, "COLORMOUSEBG", "Change mouse background color.");
-constexpr inline auto SETFONT       = detail::OSC(50, "SETFONT", "Get or set font.");
-constexpr inline auto SETFONTALL    = detail::OSC(60, "SETFONTALL", "Get or set all font faces, styles, size.");
+constexpr inline auto SETCWD        = detail::OSC(7, VTExtension::XTerm, "SETCWD", "Set current working directory");
+constexpr inline auto HYPERLINK     = detail::OSC(8, VTExtension::Unknown, "HYPERLINK", "Hyperlinked Text");
+constexpr inline auto COLORFG       = detail::OSC(10, VTExtension::XTerm, "COLORFG", "Change or request text foreground color.");
+constexpr inline auto COLORBG       = detail::OSC(11, VTExtension::XTerm, "COLORBG", "Change or request text background color.");
+constexpr inline auto COLORCURSOR   = detail::OSC(12, VTExtension::XTerm, "COLORCURSOR", "Change text cursor color to Pt.");
+constexpr inline auto COLORMOUSEFG  = detail::OSC(13, VTExtension::XTerm, "COLORMOUSEFG", "Change mouse foreground color.");
+constexpr inline auto COLORMOUSEBG  = detail::OSC(14, VTExtension::XTerm, "COLORMOUSEBG", "Change mouse background color.");
+constexpr inline auto SETFONT       = detail::OSC(50, VTExtension::XTerm, "SETFONT", "Get or set font.");
+constexpr inline auto SETFONTALL    = detail::OSC(60, VTExtension::Contour, "SETFONTALL", "Get or set all font faces, styles, size.");
 // printf "\033]52;c;$(printf "%s" "blabla" | base64)\a"
-constexpr inline auto CLIPBOARD     = detail::OSC(52, "CLIPBOARD", "Clipboard management.");
-constexpr inline auto RCOLPAL       = detail::OSC(104, "RCOLPAL", "Reset color full palette or entry");
-constexpr inline auto COLORSPECIAL  = detail::OSC(106, "COLORSPECIAL", "Enable/disable Special Color Number c.");
-constexpr inline auto RCOLORFG      = detail::OSC(110, "RCOLORFG", "Reset VT100 text foreground color.");
-constexpr inline auto RCOLORBG      = detail::OSC(111, "RCOLORBG", "Reset VT100 text background color.");
-constexpr inline auto RCOLORCURSOR  = detail::OSC(112, "RCOLORCURSOR", "Reset text cursor color.");
-constexpr inline auto RCOLORMOUSEFG = detail::OSC(113, "RCOLORMOUSEFG", "Reset mouse foreground color.");
-constexpr inline auto RCOLORMOUSEBG = detail::OSC(114, "RCOLORMOUSEBG", "Reset mouse background color.");
-constexpr inline auto RCOLORHIGHLIGHTFG = detail::OSC(119, "RCOLORHIGHLIGHTFG", "Reset highlight foreground color.");
-constexpr inline auto RCOLORHIGHLIGHTBG = detail::OSC(117, "RCOLORHIGHLIGHTBG", "Reset highlight background color.");
-constexpr inline auto NOTIFY        = detail::OSC(777, "NOTIFY", "Send Notification.");
-constexpr inline auto DUMPSTATE     = detail::OSC(888, "DUMPSTATE", "Dumps internal state to debug stream.");
+constexpr inline auto CLIPBOARD     = detail::OSC(52, VTExtension::XTerm, "CLIPBOARD", "Clipboard management.");
+constexpr inline auto RCOLPAL       = detail::OSC(104, VTExtension::XTerm, "RCOLPAL", "Reset color full palette or entry");
+constexpr inline auto COLORSPECIAL  = detail::OSC(106, VTExtension::XTerm, "COLORSPECIAL", "Enable/disable Special Color Number c.");
+constexpr inline auto RCOLORFG      = detail::OSC(110, VTExtension::XTerm, "RCOLORFG", "Reset VT100 text foreground color.");
+constexpr inline auto RCOLORBG      = detail::OSC(111, VTExtension::XTerm, "RCOLORBG", "Reset VT100 text background color.");
+constexpr inline auto RCOLORCURSOR  = detail::OSC(112, VTExtension::XTerm, "RCOLORCURSOR", "Reset text cursor color.");
+constexpr inline auto RCOLORMOUSEFG = detail::OSC(113, VTExtension::XTerm,"RCOLORMOUSEFG", "Reset mouse foreground color.");
+constexpr inline auto RCOLORMOUSEBG = detail::OSC(114, VTExtension::XTerm,"RCOLORMOUSEBG", "Reset mouse background color.");
+constexpr inline auto RCOLORHIGHLIGHTFG = detail::OSC(119, VTExtension::XTerm,"RCOLORHIGHLIGHTFG", "Reset highlight foreground color.");
+constexpr inline auto RCOLORHIGHLIGHTBG = detail::OSC(117, VTExtension::XTerm,"RCOLORHIGHLIGHTBG", "Reset highlight background color.");
+constexpr inline auto NOTIFY        = detail::OSC(777, VTExtension::XTerm,"NOTIFY", "Send Notification.");
+constexpr inline auto DUMPSTATE     = detail::OSC(888, VTExtension::Contour, "DUMPSTATE", "Dumps internal state to debug stream.");
 
 constexpr inline auto CaptureBufferCode = 314;
 
@@ -435,7 +504,7 @@ inline auto const& functions() noexcept
 
             // CSI
             ANSISYSSC,
-            CAPTURE,
+            XTCAPTURE,
             CBT,
             CHA,
             CHT,
@@ -457,8 +526,8 @@ inline auto const& functions() noexcept
             DECERA,
             DECFRA,
             DECIC,
-            DECMODERESTORE,
-            DECMODESAVE,
+            XTRESTORE,
+            XTSAVE,
             DECRM,
             DECRQM,
             DECRQM_ANSI,
@@ -649,7 +718,8 @@ struct formatter<terminal::FunctionDefinition>
     {
         switch (f.category)
         {
-            case terminal::FunctionCategory::C0: return fmt::format_to(ctx.out(), "{}", f.mnemonic);
+            case terminal::FunctionCategory::C0:
+                return fmt::format_to(ctx.out(), "{}", crispy::escape(static_cast<uint8_t>(f.finalSymbol)));
             case terminal::FunctionCategory::ESC:
                 return fmt::format_to(ctx.out(),
                                       "{} {} {}",

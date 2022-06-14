@@ -36,6 +36,7 @@
 - Adds new action `ToggleInputProtection` to protect terminal application against accidental input (#697).
 - Adds configuration options `logging.enabled` as well as `logging.file`.
 - Adds VT sequences `XTPUSHCOLORS`, `XTPOPCOLORS`, `XTREPORTCOLORS` (#714).
+- Adds CLI syntax `contour info vt` to print list of supported VT sequences (#730).
 
 ### 0.3.1 (2022-05-01)
 
