@@ -71,7 +71,7 @@ class Blur: protected QOpenGLFunctions_3_3_Core
     //.
 
     QVector<QOpenGLFramebufferObject*> m_FBO_vector;
-    QOpenGLTexture* m_textureToBlur;
+    QOpenGLTexture* m_textureToBlur = nullptr;
 
     QOpenGLVertexArrayObject m_VertexArrayObject;
     QOpenGLBuffer m_vertexBuffer;

@@ -13,6 +13,7 @@
 - Fixes rendering of U+E0B2  in pixel-perfect box drawing mode (#707).
 - Fixes rendering of cursor sometimes being almost invisible when foreground and background colors are similar/equal (#691).
 - Fixes line based selection sometimes not selecting the full line when wrapped over multiple lines.
+- Fixes warning message on terminal's console output when enabling blurred background images.
 - Fixes Win32 command output: Attaches to parent console if present, so typing `contour help` in a terminal actually shows something.
 - Changes `XTSMGRAPHICS` to match implementation of xterm *exactly* when querying sixel image limits, to be capped at terminal viewport dimensions (#656).
 - Changes CLI syntax for `contour parser-table` to `contour generate parser-table`.

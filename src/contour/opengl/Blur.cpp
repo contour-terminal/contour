@@ -81,12 +81,6 @@ Blur::Blur():
     m_shaderKawaseDown->enableAttributeArray(0);
     m_shaderKawaseDown->setAttributeBuffer(
         0, GL_FLOAT, Vertex::positionOffset(), Vertex::PositionTupleSize, Vertex::stride());
-
-    m_textureToBlur = new QOpenGLTexture(QImage());
-    m_textureToBlur->setWrapMode(QOpenGLTexture::ClampToEdge);
-    m_textureToBlur->setMinMagFilters(QOpenGLTexture::Linear, QOpenGLTexture::Linear);
-
-    m_imageToBlur = QImage();
 }
 
 Blur::~Blur()
