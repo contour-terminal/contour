@@ -428,7 +428,7 @@ inline std::string replace(std::string_view text, std::string_view pattern, T&& 
 
 inline FileSystem::path homeResolvedPath(std::string input, FileSystem::path homeDirectory)
 {
-    if (!input.empty())
+    if (!input.empty() && input[0] == '~')
     {
         bool const pathSepFound = input.size() >= 2 && (input[1] == '/' || input[1] == '\\');
         auto subPath = input.substr(pathSepFound ? 2 : 1);
