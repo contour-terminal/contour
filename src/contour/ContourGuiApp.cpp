@@ -14,7 +14,7 @@
 #include <contour/Config.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/TerminalWindow.h>
-#include <contour/opengl/TerminalWidget.h>
+#include <contour/display/TerminalWidget.h>
 
 #include <terminal/Process.h>
 
@@ -48,7 +48,7 @@ namespace CLI = crispy::cli;
 namespace contour
 {
 
-ContourGuiApp::ContourGuiApp()
+ContourGuiApp::ContourGuiApp(): _sessionManager(*this)
 {
     link("contour.terminal", bind(&ContourGuiApp::terminalGuiAction, this));
     link("contour.font-locator", bind(&ContourGuiApp::fontConfigAction, this));
@@ -60,8 +60,8 @@ ContourGuiApp::~ContourGuiApp()
 
 int ContourGuiApp::run(int argc, char const* argv[])
 {
-    argc_ = argc;
-    argv_ = argv;
+    _argc = argc;
+    _argv = argv;
 
     return ContourApp::run(argc, argv);
 }
@@ -160,11 +160,11 @@ string ContourGuiApp::profileName() const
     if (auto profile = parameters().get<string>("contour.terminal.profile"); !profile.empty())
         return profile;
 
-    if (!config_.defaultProfileName.empty())
-        return config_.defaultProfileName;
+    if (!_config.defaultProfileName.empty())
+        return _config.defaultProfileName;
 
-    if (config_.profiles.size() == 1)
-        return config_.profiles.begin()->first;
+    if (_config.profiles.size() == 1)
+        return _config.profiles.begin()->first;
 
     return ""s;
 }
@@ -183,7 +183,7 @@ void ContourGuiApp::onExit(TerminalSession& _session)
     if (!localProcess)
         return;
 
-    exitStatus_ = localProcess->checkStatus();
+    _exitStatus = localProcess->checkStatus();
 }
 
 bool ContourGuiApp::loadConfig(string const& target)
@@ -204,14 +204,14 @@ bool ContourGuiApp::loadConfig(string const& target)
 
     auto const configPath = QString::fromStdString(flags.get<string>(prefix + "config"));
 
-    config_ = configPath.isEmpty() ? contour::config::loadConfig()
+    _config = configPath.isEmpty() ? contour::config::loadConfig()
                                    : contour::config::loadConfigFromFile(configPath.toStdString());
 
-    if (!config_.profile(profileName()))
+    if (!_config.profile(profileName()))
     {
         auto const s =
-            accumulate(begin(config_.profiles),
-                       end(config_.profiles),
+            accumulate(begin(_config.profiles),
+                       end(_config.profiles),
                        ""s,
                        [](string const& acc, auto const& profile) -> string {
                            return acc.empty() ? profile.first : fmt::format("{}, {}", acc, profile.first);
@@ -221,9 +221,9 @@ bool ContourGuiApp::loadConfig(string const& target)
     }
 
     if (auto const wd = flags.get<string>("contour.terminal.working-directory"); !wd.empty())
-        config_.profile(profileName())->shell.workingDirectory = FileSystem::path(wd);
+        _config.profile(profileName())->shell.workingDirectory = FileSystem::path(wd);
 
-    config::TerminalProfile* profile = config_.profile(profileName());
+    config::TerminalProfile* profile = _config.profile(profileName());
     if (!profile)
         configLogger("Could not resolve configuration profile.");
 
@@ -251,7 +251,7 @@ bool ContourGuiApp::loadConfig(string const& target)
     }
 
     if (auto const wmClass = flags.get<string>("contour.terminal.class"); !wmClass.empty())
-        config_.profile(profileName())->wmClass = wmClass;
+        _config.profile(profileName())->wmClass = wmClass;
 
     return true;
 }
@@ -261,7 +261,7 @@ int ContourGuiApp::fontConfigAction()
     if (!loadConfig("font-locator"))
         return EXIT_FAILURE;
 
-    terminal::renderer::FontDescriptions const& fonts = config_.profile(config_.defaultProfileName)->fonts;
+    terminal::renderer::FontDescriptions const& fonts = _config.profile(_config.defaultProfileName)->fonts;
     text::font_description const& fontDescription = fonts.regular;
     std::unique_ptr<text::font_locator> fontLocator = createFontLocator(fonts.fontLocator);
     text::font_source_list fontSources = fontLocator->locate(fontDescription);
@@ -280,7 +280,7 @@ int ContourGuiApp::terminalGuiAction()
     if (!loadConfig("terminal"))
         return EXIT_FAILURE;
 
-    switch (config_.renderingBackend)
+    switch (_config.renderingBackend)
     {
         case config::RenderingBackend::OpenGL:
             QGuiApplication::setAttribute(Qt::AA_UseSoftwareOpenGL, false);
@@ -293,7 +293,7 @@ int ContourGuiApp::terminalGuiAction()
             break;
     }
 
-    auto const* profile = config_.profile(profileName());
+    auto const* profile = _config.profile(profileName());
     if (!profile)
     {
         errorlog()("Could not access configuration profile.");
@@ -306,7 +306,7 @@ int ContourGuiApp::terminalGuiAction()
 
     vector<string> qtArgsStore;
     vector<char const*> qtArgsPtr;
-    qtArgsPtr.push_back(argv_[0]);
+    qtArgsPtr.push_back(_argv[0]);
 
     auto const addQtArgIfSet = [&](string const& key, char const* arg) -> bool {
         if (string const& s = parameters().get<string>(key); !s.empty())
@@ -322,11 +322,11 @@ int ContourGuiApp::terminalGuiAction()
     addQtArgIfSet("contour.terminal.session", "-session");
     if (!addQtArgIfSet("contour.terminal.platform", "-platform"))
     {
-        if (!config_.platformPlugin.empty())
+        if (!_config.platformPlugin.empty())
         {
             static constexpr auto platformArg = string_view("-platform");
             qtArgsPtr.push_back(platformArg.data());
-            qtArgsPtr.push_back(config_.platformPlugin.c_str());
+            qtArgsPtr.push_back(_config.platformPlugin.c_str());
         }
     }
 
@@ -337,7 +337,7 @@ int ContourGuiApp::terminalGuiAction()
     auto qtArgsCount = static_cast<int>(qtArgsPtr.size());
     QApplication app(qtArgsCount, (char**) qtArgsPtr.data());
 
-    QSurfaceFormat::setDefaultFormat(contour::opengl::TerminalWidget::surfaceFormat());
+    QSurfaceFormat::setDefaultFormat(display::TerminalWidget::surfaceFormat());
 
     // auto const HTS = "\033H";
     // auto const TBC = "\033[g";
@@ -352,13 +352,13 @@ int ContourGuiApp::terminalGuiAction()
 
     auto rv = app.exec();
 
-    terminalWindows_.clear();
+    _terminalWindows.clear();
 
-    if (exitStatus_.has_value())
+    if (_exitStatus.has_value())
     {
-        if (holds_alternative<Process::NormalExit>(*exitStatus_))
-            rv = get<Process::NormalExit>(*exitStatus_).exitCode;
-        else if (holds_alternative<Process::SignalExit>(*exitStatus_))
+        if (holds_alternative<Process::NormalExit>(*_exitStatus))
+            rv = get<Process::NormalExit>(*_exitStatus).exitCode;
+        else if (holds_alternative<Process::SignalExit>(*_exitStatus))
             rv = EXIT_FAILURE;
     }
 
@@ -368,37 +368,30 @@ int ContourGuiApp::terminalGuiAction()
 
 TerminalWindow* ContourGuiApp::newWindow(contour::config::Config const& _config)
 {
-    auto const* profile = config_.profile(profileName());
+    auto const* profile = _config.profile(profileName());
     if (!profile)
         return nullptr;
-    auto const liveConfig = parameters().get<bool>("contour.terminal.live-config");
-    auto mainWindow = new TerminalWindow(earlyExitThreshold(),
-                                         _config,
-                                         liveConfig,
-                                         profileName(),
-                                         profile->shell.workingDirectory.string(),
-                                         *this);
+
+    auto mainWindow = new TerminalWindow(*this);
 
     mainWindow->show();
 
-    terminalWindows_.emplace_back(mainWindow);
+    _terminalWindows.emplace_back(mainWindow);
     // TODO: Remove window from list when destroyed.
 
     // QObject::connect(mainWindow, &TerminalWindow::showNotification,
     //                  this, &ContourGuiApp::showNotification);
 
-    return terminalWindows_.back();
+    return _terminalWindows.back();
 }
 
 TerminalWindow* ContourGuiApp::newWindow()
 {
-    auto const liveConfig = parameters().get<bool>("contour.terminal.live-config");
-    auto mainWindow =
-        new TerminalWindow(earlyExitThreshold(), config_, liveConfig, profileName(), argv_[0], *this);
+    auto mainWindow = new TerminalWindow(*this);
     mainWindow->show();
 
-    terminalWindows_.emplace_back(mainWindow);
-    return terminalWindows_.back();
+    _terminalWindows.emplace_back(mainWindow);
+    return _terminalWindows.back();
 }
 
 void ContourGuiApp::showNotification(std::string_view _title, std::string_view _content)

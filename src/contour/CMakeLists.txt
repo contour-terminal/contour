@@ -17,8 +17,7 @@ else()
    find_package(Qt5 COMPONENTS Gui Network Widgets REQUIRED)  # apt install qtbase5-dev libqt5gui5
 endif()
 
-# OpenGL accelerated TerminalDisplay
-add_subdirectory(opengl)
+add_subdirectory(display)
 
 # {{{ Linux/KDE
 # ! apt install extra-cmake-modules libkf5windowsystem-dev
@@ -39,12 +38,13 @@ set(contour_SRCS
 if(CONTOUR_FRONTEND_GUI)
     list(APPEND contour_SRCS
         Actions.cpp Actions.h
-        BackgroundBlur.cpp BackgroundBlur.h
+        BlurBehind.cpp BlurBehind.h
         Config.cpp Config.h
         ContourApp.cpp ContourApp.h
         ContourGuiApp.cpp ContourGuiApp.h
         ScrollableDisplay.cpp ScrollableDisplay.h
         TerminalSession.cpp TerminalSession.h
+        TerminalSessionManager.cpp TerminalSessionManager.h
         TerminalWindow.cpp TerminalWindow.h
         helper.cpp helper.h
     )
@@ -126,9 +126,9 @@ endif()
 
 if(CONTOUR_FRONTEND_GUI)
     if(CONTOUR_BUILD_WITH_QT6)
-        target_link_libraries(contour contour_frontend_opengl terminal_renderer Qt6::Core Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Widgets)
+        target_link_libraries(contour ContourTerminalDisplay terminal_renderer Qt6::Core Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Widgets)
     else()
-        target_link_libraries(contour contour_frontend_opengl terminal_renderer Qt5::Gui Qt5::Network Qt5::Widgets)
+        target_link_libraries(contour ContourTerminalDisplay terminal_renderer Qt5::Gui Qt5::Network Qt5::Widgets)
     endif()
     if(CONTOUR_BLUR_PLATFORM_KWIN) # TODO: auto-enable on Linux, if KDE dev libs were found.
         target_compile_definitions(contour PRIVATE CONTOUR_BLUR_PLATFORM_KWIN)

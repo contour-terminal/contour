@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <contour/opengl/Blur.h>
+#include <contour/display/Blur.h>
 
 #include <terminal/Image.h>
 
@@ -33,7 +33,7 @@
 #include <optional>
 #include <unordered_map>
 
-namespace contour::opengl
+namespace contour::display
 {
 
 struct ShaderConfig;
@@ -233,4 +233,4 @@ class OpenGLRenderer final:
     } _renderStateCache;
 };
 
-} // namespace contour::opengl
+} // namespace contour::display

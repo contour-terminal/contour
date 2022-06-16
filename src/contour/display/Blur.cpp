@@ -11,13 +11,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <contour/opengl/Blur.h>
+#include <contour/display/Blur.h>
 
 #include <type_traits>
 
 using std::move;
 
-namespace contour::opengl
+namespace contour::display
 {
 
 static const Vertex sg_vertexes[] = { Vertex(QVector3D(1.0f, 1.0f, 1.0f)),
@@ -49,18 +49,18 @@ Blur::Blur():
     // clang-format off
 
     // {{{ gaussian
-    m_gaussianBlur->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/contour/opengl/shaders/simple.vert");
-    m_gaussianBlur->addShaderFromSourceFile(QOpenGLShader::Fragment, ":/contour/opengl/shaders/blur_gaussian.frag");
+    m_gaussianBlur->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/contour/display/shaders/simple.vert");
+    m_gaussianBlur->addShaderFromSourceFile(QOpenGLShader::Fragment, ":/contour/display/shaders/blur_gaussian.frag");
     m_gaussianBlur->link();
     // }}}
 
     // {{{ dual kawase
-    m_shaderKawaseUp->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/contour/opengl/shaders/simple.vert");
-    m_shaderKawaseUp->addShaderFromSourceFile(QOpenGLShader::Fragment, ":/contour/opengl/shaders/dual_kawase_up.frag");
+    m_shaderKawaseUp->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/contour/display/shaders/simple.vert");
+    m_shaderKawaseUp->addShaderFromSourceFile(QOpenGLShader::Fragment, ":/contour/display/shaders/dual_kawase_up.frag");
     m_shaderKawaseUp->link();
 
-    m_shaderKawaseDown->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/contour/opengl/shaders/simple.vert");
-    m_shaderKawaseDown->addShaderFromSourceFile(QOpenGLShader::Fragment, ":/contour/opengl/shaders/dual_kawase_down.frag");
+    m_shaderKawaseDown->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/contour/display/shaders/simple.vert");
+    m_shaderKawaseDown->addShaderFromSourceFile(QOpenGLShader::Fragment, ":/contour/display/shaders/dual_kawase_down.frag");
     m_shaderKawaseDown->link();
     // }}}
 
@@ -248,4 +248,4 @@ float Blur::getCPUTime()
     return roundf(cpuTime * 1000) / 1000;
 }
 
-} // namespace contour::opengl
+} // namespace contour::display

@@ -1,5 +1,5 @@
 <RCC>
-    <qresource prefix="/contour/opengl">
+    <qresource prefix="/contour/display">
         <file>shaders/background.frag</file>
         <file>shaders/background.vert</file>
         <file>shaders/background_image.frag</file>

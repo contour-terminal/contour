@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <contour/opengl/Vertex.h>
+#include <contour/display/Vertex.h>
 
 #include <QtCore/QDebug>
 #include <QtCore/QElapsedTimer>
@@ -38,7 +38,7 @@
     #include <QtGui/QOpenGLVertexArrayObject>
 #endif
 
-namespace contour::opengl
+namespace contour::display
 {
 
 // Dual Kawase Blur (GDC 2015)
@@ -87,4 +87,4 @@ class Blur: protected QOpenGLFunctions_3_3_Core
     quint64 CPUTimerElapsedTime {};
 };
 
-} // namespace contour::opengl
+} // namespace contour::display

@@ -15,6 +15,7 @@
 
 #include <contour/Config.h>
 #include <contour/ContourApp.h>
+#include <contour/TerminalSessionManager.h>
 
 #include <terminal/Process.h>
 
@@ -41,6 +42,8 @@ class ContourGuiApp: public ContourApp
     ContourGuiApp();
     ~ContourGuiApp() override;
 
+    static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(ContourApp::instance()); }
+
     int run(int argc, char const* argv[]) override;
     crispy::cli::Command parameterDefinition() const override;
 
@@ -50,24 +53,42 @@ class ContourGuiApp: public ContourApp
 
     std::string profileName() const;
 
-    std::optional<terminal::Process::ExitStatus> exitStatus() const noexcept { return exitStatus_; }
+    std::optional<terminal::Process::ExitStatus> exitStatus() const noexcept { return _exitStatus; }
 
     std::optional<FileSystem::path> dumpStateAtExit() const;
 
     void onExit(TerminalSession& _session);
 
+    config::Config& config() noexcept { return _config; }
+    config::Config const& config() const noexcept { return _config; }
+    config::TerminalProfile const& profile() const noexcept
+    {
+        if (auto profile = config().profile(profileName()))
+            return *profile;
+        fmt::print("Failed to access config profile.\n");
+        Require(false);
+    }
+    bool liveConfig() const noexcept { return parameters().boolean("contour.terminal.live-config"); }
+
+    TerminalSessionManager& sessionsManager() noexcept { return _sessionManager; }
+
+    std::chrono::seconds earlyExitThreshold() const;
+
+    std::string programPath() const { return _argv[0]; }
+
   private:
     bool loadConfig(std::string const& target);
     int terminalGuiAction();
     int fontConfigAction();
-    std::chrono::seconds earlyExitThreshold() const;
-    config::Config config_;
 
-    int argc_ = 0;
-    char const** argv_ = nullptr;
-    std::optional<terminal::Process::ExitStatus> exitStatus_;
+    config::Config _config;
+    TerminalSessionManager _sessionManager;
 
-    std::list<TerminalWindow*> terminalWindows_;
+    int _argc = 0;
+    char const** _argv = nullptr;
+    std::optional<terminal::Process::ExitStatus> _exitStatus;
+
+    std::list<TerminalWindow*> _terminalWindows;
 };
 
 } // namespace contour

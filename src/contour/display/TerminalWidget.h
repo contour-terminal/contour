@@ -15,7 +15,6 @@
 
 #include <contour/Actions.h>
 #include <contour/Config.h>
-#include <contour/TerminalDisplay.h>
 #include <contour/TerminalSession.h>
 #include <contour/helper.h>
 
@@ -47,26 +46,51 @@
 #include <optional>
 #include <vector>
 
-namespace contour::opengl
+namespace contour::display
 {
+
+class OpenGLRenderer;
 
 // It currently just handles one terminal inside, but ideally later it can handle
 // multiple terminals in tabbed views as well tiled.
-class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpenGLExtraFunctions
+class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
 {
     Q_OBJECT
 
   public:
-    TerminalWidget(TerminalSession& _session,
-                   std::function<void()> _adaptSize,
-                   std::function<void(bool)> _enableBackgroundBlur);
+    explicit TerminalWidget(ContourGuiApp& _app);
 
     ~TerminalWidget() override;
 
+    [[nodiscard]] config::TerminalProfile const& profile() const noexcept
+    {
+        assert(session_ != nullptr);
+        return session_->profile();
+    }
+
+    [[nodiscard]] terminal::Terminal& terminal() noexcept
+    {
+        assert(session_ != nullptr);
+        return session_->terminal();
+    }
+
+    [[nodiscard]] bool hasSession() const noexcept { return session_ != nullptr; }
+
+    // NB: Use TerminalSession.attachDisplay, that one is calling this here.
+    void setSession(TerminalSession& newSession) { session_ = &newSession; }
+
+    [[nodiscard]] TerminalSession& session() noexcept
+    {
+        assert(session_ != nullptr);
+        return *session_;
+    }
+
+    terminal::PageSize windowSize() const noexcept;
+
     // {{{ OpenGL rendering handling
     static QSurfaceFormat surfaceFormat();
-    QSize minimumSizeHint() const override;
-    QSize sizeHint() const override;
+    [[nodiscard]] QSize minimumSizeHint() const override;
+    [[nodiscard]] QSize sizeHint() const override;
     void initializeGL() override;
     void resizeGL(int _width, int _height) override;
     void paintGL() override;
@@ -86,51 +110,55 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     // }}}
 
     // {{{ TerminalDisplay API
-    void closeDisplay() override;
-    void post(std::function<void()> _fn) override;
+    void closeDisplay();
+    void post(std::function<void()> _fn);
 
     // Attributes
-    double refreshRate() const override;
-    text::DPI fontDPI() const noexcept override;
+    [[nodiscard]] double refreshRate() const;
+    text::DPI fontDPI() const noexcept;
     text::DPI logicalDPI() const noexcept;
     text::DPI physicalDPI() const noexcept;
-    bool isFullScreen() const override;
-    terminal::ImageSize pixelSize() const override;
-    terminal::ImageSize cellSize() const override;
+    [[nodiscard]] bool isFullScreen() const;
+    [[nodiscard]] terminal::ImageSize pixelSize() const;
+    [[nodiscard]] terminal::ImageSize cellSize() const;
 
     // (user requested) actions
-    bool requestPermission(config::Permission _allowedByConfig, std::string_view _topicText) override;
-    terminal::FontDef getFontDef() override;
-    void bell() override;
-    void copyToClipboard(std::string_view /*_data*/) override;
-    void inspect() override;
+    bool requestPermission(config::Permission _allowedByConfig, std::string_view _topicText);
+    terminal::FontDef getFontDef();
+    void bell();
+    void copyToClipboard(std::string_view /*_data*/);
+    void inspect();
     void doDumpState();
-    void notify(std::string_view /*_title*/, std::string_view /*_body*/) override;
-    void resizeWindow(terminal::LineCount, terminal::ColumnCount) override;
-    void resizeWindow(terminal::Width, terminal::Height) override;
-    void setFonts(terminal::renderer::FontDescriptions _fontDescriptions) override;
-    bool setFontSize(text::font_size _size) override;
-    bool setPageSize(terminal::PageSize _newPageSize) override;
-    void setMouseCursorShape(MouseCursorShape _shape) override;
-    void setWindowTitle(std::string_view /*_title*/) override;
-    void setWindowFullScreen() override;
-    void setWindowMaximized() override;
-    void setWindowNormal() override;
-    void setBlurBehind(bool _enable) override;
-    void setBackgroundImage(std::shared_ptr<terminal::BackgroundImage const> const& backgroundImage) override;
-    void toggleFullScreen() override;
-    void toggleTitleBar() override;
-    void setHyperlinkDecoration(terminal::renderer::Decorator _normal,
-                                terminal::renderer::Decorator _hover) override;
-    void setBackgroundOpacity(terminal::Opacity _opacity) override;
+    void notify(std::string_view /*_title*/, std::string_view /*_body*/);
+    void resizeWindow(terminal::LineCount, terminal::ColumnCount);
+    void resizeWindow(terminal::Width, terminal::Height);
+    void setFonts(terminal::renderer::FontDescriptions _fontDescriptions);
+    bool setFontSize(text::font_size _size);
+    bool setPageSize(terminal::PageSize _newPageSize);
+    void setMouseCursorShape(MouseCursorShape _shape);
+    void setWindowTitle(std::string_view /*_title*/);
+    void setWindowFullScreen();
+    void setWindowMaximized();
+    void setWindowNormal();
+    void setBlurBehind(bool _enable);
+    void setBackgroundImage(std::shared_ptr<terminal::BackgroundImage const> const& backgroundImage);
+    void toggleFullScreen();
+    void toggleTitleBar();
+    void setHyperlinkDecoration(terminal::renderer::Decorator _normal, terminal::renderer::Decorator _hover);
+    void setBackgroundOpacity(terminal::Opacity _opacity);
 
     // terminal events
-    void scheduleRedraw() override;
-    void renderBufferUpdated() override;
-    void onSelectionCompleted() override;
-    void bufferChanged(terminal::ScreenType) override;
-    void discardImage(terminal::Image const&) override;
+    void scheduleRedraw();
+    void renderBufferUpdated();
+    void onSelectionCompleted();
+    void bufferChanged(terminal::ScreenType);
+    void discardImage(terminal::Image const&);
     // }}}
+
+    [[nodiscard]] double contentScale() const;
+
+    void logDisplayTopInfo();
+    void logDisplayInfo();
 
   public Q_SLOTS:
     void onFrameSwapped();
@@ -141,6 +169,9 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
     void onDpiConfigChanged();
 
   signals:
+    void displayInitialized();
+    void enableBlurBehind(bool);
+    void profileNameChanged();
     void terminalBufferChanged(terminal::ScreenType);
     void terminalBufferUpdated();
     void terminated();
@@ -149,27 +180,25 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
   private:
     // helper methods
     //
-    config::TerminalProfile const& profile() const noexcept { return session_.profile(); }
-    terminal::Terminal& terminal() noexcept { return session_.terminal(); }
     void configureScreenHooks();
-    void logDisplayTopInfo();
-    void logDisplayInfo();
     void watchKdeDpiSetting();
     void initializeRenderer();
-    float uptime() const noexcept;
+    [[nodiscard]] float uptime() const noexcept;
 
-    terminal::PageSize pageSize() const
+    [[nodiscard]] terminal::PageSize pageSize() const
     {
         return pageSizeForPixels(pixelSize(), renderer_.gridMetrics().cellSize);
     }
 
-    double contentScale() const;
     void updateMinimumSize();
 
     void statsSummary();
     void doResize(crispy::Size _size);
 
-    terminal::renderer::GridMetrics const& gridMetrics() const noexcept { return renderer_.gridMetrics(); }
+    [[nodiscard]] terminal::renderer::GridMetrics const& gridMetrics() const noexcept
+    {
+        return renderer_.gridMetrics();
+    }
 
     /// Flags the screen as dirty.
     ///
@@ -185,17 +214,18 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
 
     // private data fields
     //
-    TerminalSession& session_;
+    ContourGuiApp& app_;
+    std::string profileName_;
+    std::string programPath_;
+    TerminalSession* session_ = nullptr;
     std::chrono::steady_clock::time_point startTime_;
-    std::function<void()> adaptSize_;
-    std::function<void(bool)> enableBlurBehind_;
     text::DPI lastFontDPI_;
     terminal::renderer::Renderer renderer_;
     bool renderingPressure_ = false;
     std::unique_ptr<terminal::renderer::RenderTarget> renderTarget_;
     PermissionCache rememberedPermissions_ {};
     bool maximizedState_ = false;
-    bool titleBarState_ = !profile().show_title_bar;
+    bool titleBarState_;
 
     // update() timer used to animate the blinking cursor.
     QTimer updateTimer_;
@@ -217,4 +247,4 @@ class TerminalWidget: public QOpenGLWidget, public TerminalDisplay, private QOpe
 #endif
 };
 
-} // namespace contour::opengl
+} // namespace contour::display

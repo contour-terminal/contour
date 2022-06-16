@@ -22,8 +22,8 @@
 namespace contour
 {
 
-ScrollableDisplay::ScrollableDisplay(QWidget* _parent, TerminalSession& _session, QWidget* _main):
-    QWidget(_parent), session_ { _session }, mainWidget_ { _main }, scrollBar_ { nullptr }
+ScrollableDisplay::ScrollableDisplay(QWidget* _parent, display::TerminalWidget* _main):
+    QWidget(_parent), mainWidget_ { _main }, scrollBar_ { nullptr }
 {
     mainWidget_->setParent(this);
 
@@ -76,23 +76,36 @@ void ScrollableDisplay::showScrollBar(bool _show)
         scrollBar_->hide();
 }
 
+bool ScrollableDisplay::hasSession() const noexcept
+{
+    return mainWidget_->hasSession();
+}
+
+TerminalSession& ScrollableDisplay::session() const noexcept
+{
+    return mainWidget_->session();
+}
+
 void ScrollableDisplay::updateValues()
 {
-    if (!scrollBar_->isVisible())
+    if (!scrollBar_->isVisible() || !hasSession())
         return;
 
-    if (session_.terminal().isPrimaryScreen())
+    if (session().terminal().isPrimaryScreen())
     {
-        scrollBar_->setMaximum(session_.terminal().primaryScreen().historyLineCount().as<int>());
-        auto const s = session_.terminal().viewport().scrollOffset();
+        scrollBar_->setMaximum(session().terminal().primaryScreen().historyLineCount().as<int>());
+        auto const s = session().terminal().viewport().scrollOffset();
         scrollBar_->setValue(scrollBar_->maximum() - s.value);
     }
 }
 
 void ScrollableDisplay::updatePosition()
 {
+    if (!hasSession())
+        return;
+
     // terminalWidget_->setGeometry(calculateWidgetGeometry());
-    DisplayLog()("called with {}x{} in {}", width(), height(), session_.currentScreenType());
+    DisplayLog()("called with {}x{} in {}", width(), height(), session().currentScreenType());
 
     auto const resizeMainAndScrollArea = [&]() {
         QSize ms = mainWidget_->sizeHint();
@@ -104,13 +117,13 @@ void ScrollableDisplay::updatePosition()
         mainWidget_->resize(ms);
     };
 
-    if (session_.currentScreenType() != terminal::ScreenType::Alternate
-        || !session_.profile().hideScrollbarInAltScreen)
+    if (session().currentScreenType() != terminal::ScreenType::Alternate
+        || !session().profile().hideScrollbarInAltScreen)
     {
         auto const sbWidth = scrollBar_->width();
         auto const mainWidth = width() - sbWidth;
-        DisplayLog()("Scrollbar Pos: {}", session_.profile().scrollbarPosition);
-        switch (session_.profile().scrollbarPosition)
+        DisplayLog()("Scrollbar Pos: {}", session().profile().scrollbarPosition);
+        switch (session().profile().scrollbarPosition)
         {
             case config::ScrollBarPosition::Right:
                 resizeMainAndScrollArea();
@@ -153,9 +166,12 @@ void ScrollableDisplay::updatePosition()
 
 void ScrollableDisplay::onValueChanged()
 {
-    session_.terminal().viewport().scrollTo(
+    if (!hasSession())
+        return;
+
+    session().terminal().viewport().scrollTo(
         terminal::ScrollOffset::cast_from(scrollBar_->maximum() - scrollBar_->value()));
-    session_.scheduleRedraw();
+    session().scheduleRedraw();
 }
 
 } // end namespace contour

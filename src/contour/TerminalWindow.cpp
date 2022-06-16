@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 #include <contour/Actions.h>
-#include <contour/BackgroundBlur.h>
+#include <contour/BlurBehind.h>
 #include <contour/ContourGuiApp.h>
 #include <contour/TerminalWindow.h>
 #include <contour/helper.h>
@@ -21,7 +21,7 @@
     #include <contour/ScrollableDisplay.h>
 #endif
 
-#include <contour/opengl/TerminalWidget.h>
+#include <contour/display/TerminalWidget.h>
 
 #include <terminal/Metrics.h>
 #include <terminal/pty/Pty.h>
@@ -67,17 +67,7 @@ namespace contour
 
 using actions::Action;
 
-TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
-                               config::Config _config,
-                               bool _liveConfig,
-                               string _profileName,
-                               string _programPath,
-                               ContourGuiApp& _app):
-    config_ { std::move(_config) },
-    liveConfig_ { _liveConfig },
-    profileName_ { std::move(_profileName) },
-    programPath_ { std::move(_programPath) },
-    app_ { _app }
+TerminalWindow::TerminalWindow(ContourGuiApp& _app): _app { _app }
 {
     // connect(this, SIGNAL(screenChanged(QScreen*)), this, SLOT(onScreenChanged(QScreen*)));
 
@@ -102,16 +92,16 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
             return fallbackDefaultMaxImageSize;
         return ImageSize { Width::cast_from(size.width()), Height::cast_from(size.height()) };
     }();
-    if (config_.maxImageSize.width <= Width(0))
-        config_.maxImageSize.width = defaultMaxImageSize.width;
-    if (config_.maxImageSize.height <= Height(0))
-        config_.maxImageSize.height = defaultMaxImageSize.height;
+    if (_app.config().maxImageSize.width <= Width(0))
+        _app.config().maxImageSize.width = defaultMaxImageSize.width;
+    if (_app.config().maxImageSize.height <= Height(0))
+        _app.config().maxImageSize.height = defaultMaxImageSize.height;
     // }}}
 
     auto shell = profile().shell;
 #if defined(__APPLE__) || defined(_WIN32)
     {
-        auto const path = FileSystem::path(programPath_).parent_path();
+        auto const path = FileSystem::path(_app.programPath()).parent_path();
 
         if (shell.env.count("PATH"))
             shell.env["PATH"] += ":"s + path.string();
@@ -120,34 +110,9 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
     }
 #endif
 
-    terminalSession_ = make_unique<TerminalSession>(
-        make_unique<terminal::Process>(shell, terminal::createPty(profile().terminalSize, nullopt)),
-        _earlyExitThreshold,
-        config_,
-        liveConfig_,
-        profileName_,
-        programPath_,
-        app_,
-        unique_ptr<TerminalDisplay> {},
-        [this]() {
-    // NB: This is invoked whenever the newly assigned display
-    //     has finished initialization.
-#if defined(CONTOUR_SCROLLBAR)
-            scrollableDisplay_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
-#else
-            (void) this;
-#endif
-        },
-        [this]() { app_.onExit(*terminalSession_); });
+    TerminalSession* session = _app.sessionsManager().createSession();
 
-    terminalSession_->setDisplay(make_unique<opengl::TerminalWidget>(
-        *terminalSession_,
-        [this]() {
-            centralWidget()->updateGeometry();
-            update();
-        },
-        [this](bool _enable) { BlurBehind::setEnabled(windowHandle(), _enable); }));
-    terminalWidget_ = static_cast<opengl::TerminalWidget*>(terminalSession_->display());
+    terminalWidget_ = new display::TerminalWidget(_app);
 
     connect(terminalWidget_, SIGNAL(terminated()), this, SLOT(onTerminalClosed()));
     connect(terminalWidget_,
@@ -156,18 +121,32 @@ TerminalWindow::TerminalWindow(std::chrono::seconds _earlyExitThreshold,
             SLOT(terminalBufferChanged(terminal::ScreenType)));
 
 #if defined(CONTOUR_SCROLLBAR)
-    scrollableDisplay_ = new ScrollableDisplay(nullptr, *terminalSession_, terminalWidget_);
+    scrollableDisplay_ = new ScrollableDisplay(nullptr, terminalWidget_);
     setCentralWidget(scrollableDisplay_);
     connect(terminalWidget_, SIGNAL(terminalBufferUpdated()), scrollableDisplay_, SLOT(updateValues()));
 #else
     setCentralWidget(terminalWidget_);
 #endif
 
+    connect(terminalWidget_, &display::TerminalWidget::displayInitialized, [this, session]() {
+        session->attachDisplay(*terminalWidget_);
+#if defined(CONTOUR_SCROLLBAR)
+        scrollableDisplay_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+        scrollableDisplay_->updatePosition();
+#endif
+        session->start();
+    });
+
     terminalWidget_->setFocus();
 
     // statusBar()->showMessage("blurb");
+}
 
-    terminalSession_->start();
+config::TerminalProfile const& TerminalWindow::profile() const
+{
+    config::TerminalProfile const* theProfile = _app.config().profile(_app.profileName());
+    Require(theProfile);
+    return *theProfile;
 }
 
 TerminalWindow::~TerminalWindow()
@@ -177,7 +156,7 @@ TerminalWindow::~TerminalWindow()
 
 void TerminalWindow::onTerminalClosed()
 {
-    DisplayLog()("terminal closed: {}", terminalSession_->terminal().windowTitle());
+    DisplayLog()("terminal closed: {}", terminalWidget_->session().terminal().windowTitle());
     close();
 }
 
@@ -191,7 +170,7 @@ void TerminalWindow::profileChanged()
 #if defined(CONTOUR_SCROLLBAR)
     scrollableDisplay_->updatePosition();
 
-    if (terminalSession_->terminal().isPrimaryScreen())
+    if (terminalWidget_->session().terminal().isPrimaryScreen())
         scrollableDisplay_->showScrollBar(profile().scrollbarPosition != config::ScrollBarPosition::Hidden);
     else
         scrollableDisplay_->showScrollBar(!profile().hideScrollbarInAltScreen);
@@ -207,6 +186,8 @@ void TerminalWindow::terminalBufferChanged(terminal::ScreenType _type)
 
     scrollableDisplay_->updatePosition();
     scrollableDisplay_->updateValues();
+#else
+    crispy::ignore_unused(_type);
 #endif
 }
 

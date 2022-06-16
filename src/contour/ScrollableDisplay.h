@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include <contour/display/TerminalWidget.h>
+
 #include <QtWidgets/QScrollBar>
 #include <QtWidgets/QWidget>
 
@@ -26,7 +28,7 @@ class ScrollableDisplay: public QWidget
     Q_OBJECT
 
   public:
-    ScrollableDisplay(QWidget* _parent, TerminalSession& _session, QWidget* _main);
+    ScrollableDisplay(QWidget* _parent, display::TerminalWidget* _main);
 
     QSize sizeHint() const override;
     void resizeEvent(QResizeEvent* _event) override;
@@ -39,8 +41,10 @@ class ScrollableDisplay: public QWidget
     void onValueChanged();
 
   private:
-    TerminalSession& session_;
-    QWidget* mainWidget_;
+    bool hasSession() const noexcept;
+    TerminalSession& session() const noexcept;
+
+    display::TerminalWidget* mainWidget_;
     QScrollBar* scrollBar_;
 };
 
