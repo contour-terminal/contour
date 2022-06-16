@@ -11,10 +11,10 @@ option(CONTOUR_BLUR_PLATFORM_KWIN "Enables support for blurring transparent back
 option(CONTOUR_BUILD_WITH_QT6 "Use Qt 6" OFF)
 
 if(CONTOUR_BUILD_WITH_QT6)
-   find_package(Qt6 COMPONENTS Core Gui Network OpenGL OpenGLWidgets Widgets REQUIRED)
+	 find_package(Qt6 COMPONENTS Core Gui Network OpenGL OpenGLWidgets Widgets Multimedia REQUIRED)
    set(CONTOUR_BLUR_PLATFORM_KWIN OFF)
 else()
-   find_package(Qt5 COMPONENTS Gui Network Widgets REQUIRED)  # apt install qtbase5-dev libqt5gui5
+	 find_package(Qt5 COMPONENTS Gui Network Widgets Multimedia REQUIRED)  # apt install qtbase5-dev libqt5gui5
 endif()
 
 add_subdirectory(display)
@@ -46,7 +46,7 @@ if(CONTOUR_FRONTEND_GUI)
         TerminalSession.cpp TerminalSession.h
         TerminalSessionManager.cpp TerminalSessionManager.h
         TerminalWindow.cpp TerminalWindow.h
-        helper.cpp helper.h
+				helper.cpp helper.h Audio.cpp Audio.h
     )
 endif()
 
@@ -126,9 +126,9 @@ endif()
 
 if(CONTOUR_FRONTEND_GUI)
     if(CONTOUR_BUILD_WITH_QT6)
-        target_link_libraries(contour ContourTerminalDisplay terminal_renderer Qt6::Core Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Widgets)
+        target_link_libraries(contour ContourTerminalDisplay terminal_renderer Qt6::Core Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Widgets Qt6::Multimedia)
     else()
-        target_link_libraries(contour ContourTerminalDisplay terminal_renderer Qt5::Gui Qt5::Network Qt5::Widgets)
+        target_link_libraries(contour crispy::core ContourTerminalDisplay terminal_renderer Qt5::Gui Qt5::Network Qt5::Widgets Qt5::Multimedia)
     endif()
     if(CONTOUR_BLUR_PLATFORM_KWIN) # TODO: auto-enable on Linux, if KDE dev libs were found.
         target_compile_definitions(contour PRIVATE CONTOUR_BLUR_PLATFORM_KWIN)

@@ -18,6 +18,8 @@
 
 #include <crispy/boxed.h>
 
+#include <gsl/span>
+
 #include <algorithm>
 #include <cassert>
 #include <iterator>
@@ -78,6 +80,16 @@ class SequenceParameters
     [[nodiscard]] std::string subParameterBitString() const
     {
         return fmt::format("{:016b}: ", _subParameterTest);
+    }
+
+    [[nodiscard]] constexpr gsl::span<std::uint16_t> range() noexcept
+    {
+        return gsl::span { _values.begin(), _count };
+    }
+
+    [[nodiscard]] constexpr gsl::span<std::uint16_t const> range() const noexcept
+    {
+        return gsl::span { _values.cbegin(), _count };
     }
 
     [[nodiscard]] std::string str() const

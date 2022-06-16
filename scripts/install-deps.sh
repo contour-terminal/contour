@@ -151,6 +151,7 @@ install_deps_ubuntu()
         ncurses-bin
         pkg-config
         qtbase5-dev
+				qtmultimedia5-dev
     "
 
     RELEASE=`grep VERSION_ID /etc/os-release | cut -d= -f2 | tr -d '"'`
@@ -210,6 +211,7 @@ install_deps_FreeBSD()
         qt5-network \
         qt5-qmake \
         qt5-widgets \
+				qt5-multimedia \
         range-v3 \
         yaml-cpp
     "
@@ -230,6 +232,7 @@ install_deps_arch()
         microsoft-gsl \
         ninja \
         qt5-base \
+				qt5-multimedia \
         range-v3 \
         yaml-cpp
 }
@@ -254,6 +257,7 @@ install_deps_fedora()
         pkgconf
         qt5-qtbase-devel
         qt5-qtbase-gui
+				qt5-qtmultimedia-devel
         range-v3-devel
         yaml-cpp-devel
     "
