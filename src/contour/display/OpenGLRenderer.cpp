@@ -241,9 +241,12 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& textShaderConfig,
 
 void OpenGLRenderer::setRenderSize(ImageSize targetSurfaceSize)
 {
+    if (_renderTargetSize == targetSurfaceSize)
+        return;
+
     // glOrtho
     _renderTargetSize = targetSurfaceSize;
-    DisplayLog()("setRenderSize: {}", _renderTargetSize);
+    DisplayLog()("Setting render target size to {}.", _renderTargetSize);
     _projectionMatrix = ortho(0.0f,
                               unbox<float>(_renderTargetSize.width), // left, right
                               0.0f,
@@ -466,12 +469,6 @@ ImageSize OpenGLRenderer::renderBufferSize()
 
 void OpenGLRenderer::execute()
 {
-    static auto lastSize = crispy::ImageSize {};
-    if (lastSize != _renderTargetSize)
-    {
-        DisplayLog()("execute: {}", _renderTargetSize);
-        lastSize = _renderTargetSize;
-    }
     _currentTextureId = std::numeric_limits<GLuint>::max();
 
     // FIXME

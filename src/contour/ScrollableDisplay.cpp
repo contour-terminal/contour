@@ -105,7 +105,7 @@ void ScrollableDisplay::updatePosition()
         return;
 
     // terminalWidget_->setGeometry(calculateWidgetGeometry());
-    DisplayLog()("called with {}x{} in {}", width(), height(), session().currentScreenType());
+    // DisplayLog()("called with {}x{} in {}", width(), height(), session().currentScreenType());
 
     auto const resizeMainAndScrollArea = [&]() {
         QSize ms = mainWidget_->sizeHint();
@@ -122,7 +122,7 @@ void ScrollableDisplay::updatePosition()
     {
         auto const sbWidth = scrollBar_->width();
         auto const mainWidth = width() - sbWidth;
-        DisplayLog()("Scrollbar Pos: {}", session().profile().scrollbarPosition);
+        // DisplayLog()("Updating scrollbar position: {}", session().profile().scrollbarPosition);
         switch (session().profile().scrollbarPosition)
         {
             case config::ScrollBarPosition::Right:
@@ -144,22 +144,22 @@ void ScrollableDisplay::updatePosition()
                 break;
             }
         }
-        DisplayLog()("TW {}x{}+{}x{}, SB {}, {}x{}+{}x{}, value: {}/{}",
-                     mainWidget_->pos().x(),
-                     mainWidget_->pos().y(),
-                     mainWidget_->width(),
-                     mainWidget_->height(),
-                     scrollBar_->isVisible() ? "visible" : "invisible",
-                     scrollBar_->pos().x(),
-                     scrollBar_->pos().y(),
-                     scrollBar_->width(),
-                     scrollBar_->height(),
-                     scrollBar_->value(),
-                     scrollBar_->maximum());
+        // DisplayLog()("TW {}x{}+{}x{}, SB {}, {}x{}+{}x{}, value: {}/{}",
+        //              mainWidget_->pos().x(),
+        //              mainWidget_->pos().y(),
+        //              mainWidget_->width(),
+        //              mainWidget_->height(),
+        //              scrollBar_->isVisible() ? "visible" : "invisible",
+        //              scrollBar_->pos().x(),
+        //              scrollBar_->pos().y(),
+        //              scrollBar_->width(),
+        //              scrollBar_->height(),
+        //              scrollBar_->value(),
+        //              scrollBar_->maximum());
     }
     else
     {
-        DisplayLog()("Resize terminal widget over full contents.");
+        // DisplayLog()("Resize terminal widget over full contents.");
         scrollBar_->hide();
     }
 }
