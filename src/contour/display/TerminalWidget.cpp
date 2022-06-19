@@ -282,7 +282,6 @@ TerminalWidget::TerminalWidget(ContourGuiApp& app):
 
 TerminalWidget::~TerminalWidget()
 {
-    DisplayLog()("~TerminalWidget");
     makeCurrent(); // XXX must be called.
     renderTarget_.reset();
     doneCurrent();
@@ -302,7 +301,7 @@ QSize TerminalWidget::minimumSizeHint() const
     auto const cellSize = gridMetrics().cellSize;
     auto const hint = cellSize * MinimumPageSize / contentScale();
     auto const qHint = QSize(unbox<int>(hint.width), unbox<int>(hint.height));
-    DisplayLog()("sizeHint: {}", hint);
+    // DisplayLog()("minimumSizeHint: {}", hint);
     return qHint;
 }
 
@@ -313,11 +312,11 @@ QSize TerminalWidget::sizeHint() const
         auto const hint = cellSize * windowSize() / contentScale();
         return QSize(unbox<int>(hint.width), unbox<int>(hint.height));
     }();
-    DisplayLog()("sizeHint: {}x{} ({}x{})",
-                 hint.width(),
-                 hint.height(),
-                 hint.width() * devicePixelRatioF(),
-                 hint.height() * devicePixelRatioF());
+    // DisplayLog()("sizeHint: {}x{} ({}x{})",
+    //              hint.width(),
+    //              hint.height(),
+    //              hint.width() * devicePixelRatioF(),
+    //              hint.height() * devicePixelRatioF());
     return hint;
 }
 
@@ -395,6 +394,7 @@ void TerminalWidget::logDisplayTopInfo()
     QOpenGLContext::currentContext()->functions()->glGetIntegerv(GL_MAJOR_VERSION, &versionMajor);
     QOpenGLContext::currentContext()->functions()->glGetIntegerv(GL_MINOR_VERSION, &versionMinor);
     DisplayLog()("[FYI] OpenGL version      : {}.{}", versionMajor, versionMinor);
+    DisplayLog()("[FYI] Content scaling     : {:.2}", contentScale());
 
     string glslVersions = (char const*) glGetString(GL_SHADING_LANGUAGE_VERSION);
 
@@ -513,7 +513,6 @@ void TerminalWidget::initializeGL()
     CHECKED_GL(glDebugMessageCallback(&glMessageCallback, this));
 #endif
 
-    DisplayLog()("initializeGL: DONE");
     emit displayInitialized();
 }
 
@@ -523,7 +522,7 @@ void TerminalWidget::resizeGL(int _width, int _height)
     auto const qtBaseWidgetSize =
         terminal::ImageSize { Width::cast_from(_width), Height::cast_from(_height) };
     auto const newPixelSize = qtBaseWidgetSize * contentScale();
-    DisplayLog()("resizeGL: {}x{} ({})", _width, _height, newPixelSize);
+    DisplayLog()("Resizing view to {}x{} virtual ({} actual).", _width, _height, newPixelSize);
     applyResize(newPixelSize, *session_, renderer_);
 }
 
@@ -721,7 +720,6 @@ double TerminalWidget::contentScale() const
                 if (forcedDPI >= 96.0)
                 {
                     auto const dpr = (forcedDPI * dpiScale) / 96.0;
-                    DisplayLog()("contentScale(kcmfonts): {}", dpr);
                     return dpr;
                 }
             }
@@ -729,8 +727,6 @@ double TerminalWidget::contentScale() const
     }
 #endif
 
-    auto const dpr = devicePixelRatio() * dpiScale;
-    DisplayLog()("contentScale: {}", dpr);
     return devicePixelRatio() * dpiScale;
 }
 
