@@ -1,15 +1,15 @@
-uniform mat4      u_projection;
-uniform sampler2D u_backgroundImage;
-uniform vec2      u_resolution;
-uniform float     u_blur;
-uniform float     u_opacity;
-uniform float     u_time;
+uniform highp mat4     u_projection;
+uniform lowp sampler2D u_backgroundImage;
+uniform highp vec2     u_resolution;
+uniform highp float    u_blur;
+uniform highp float    u_opacity;
+uniform highp float    u_time;
 
-layout (location = 0) in vec3 vs_vertex;    // target vertex coordinates
-layout (location = 1) in vec2 vs_texCoords; // normalized texture coordinates
+layout (location = 0) in highp vec3 vs_vertex;    // target vertex coordinates
+layout (location = 1) in highp vec2 vs_texCoords; // normalized texture coordinates
 
-out vec2 fs_TexCoord;
-out vec2 fs_FragCoord;
+out highp vec2 fs_TexCoord;
+out highp vec2 fs_FragCoord;
 
 void main()
 {

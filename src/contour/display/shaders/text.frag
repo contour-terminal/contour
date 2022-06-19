@@ -1,27 +1,27 @@
-uniform float pixel_x;                  // 1.0 / lcdAtlas.width
-uniform sampler2D fs_textureAtlas;      // RGBA
-uniform float u_time;
+uniform highp float pixel_x;                  // 1.0 / lcdAtlas.width
+uniform highp sampler2D fs_textureAtlas;      // RGBA
+uniform highp float u_time;
 
-in vec4 fs_TexCoord;
-in vec4 fs_textColor;
+in highp vec4 fs_TexCoord;
+in highp vec4 fs_textColor;
 
 // Dual source blending (since OpenGL 3.3)
-// layout (location = 0, index = 0) out vec4 color;
-// layout (location = 0, index = 1) out vec4 colorMask;
-out vec4 fragColor;
+// layout (location = 0, index = 0) out highp vec4 color;
+// layout (location = 0, index = 1) out highp vec4 colorMask;
+out highp vec4 fragColor;
 
-const vec4 TEST_PIXEL = vec4(1.0, 0.0, 0.0, 1.0); // test pixel for debugging
+const highp vec4 TEST_PIXEL = vec4(1.0, 0.0, 0.0, 1.0); // test pixel for debugging
 
 void renderGrayscaleGlyph()
 {
     // XXX monochrome glyph (RGB)
-    //vec4 alphaMap = texture(fs_monochromeTextures, fs_TexCoord.xy);
+    //highp vec4 alphaMap = texture(fs_monochromeTextures, fs_TexCoord.xy);
     //fragColor = fs_textColor;
     //colorMask = alphaMap;
 
     // Using the RED-channel as alpha-mask of an anti-aliases glyph.
-    vec4 pixel = texture(fs_textureAtlas, fs_TexCoord.xy);
-    vec4 sampled = vec4(1.0, 1.0, 1.0, pixel.r);
+    highp vec4 pixel = texture(fs_textureAtlas, fs_TexCoord.xy);
+    highp vec4 sampled = vec4(1.0, 1.0, 1.0, pixel.r);
     fragColor = sampled * fs_textColor;
 }
 
@@ -29,7 +29,7 @@ void renderGrayscaleGlyph()
 void renderColoredRGBA()
 {
     // colored image (RGBA)
-    vec4 v = texture(fs_textureAtlas, fs_TexCoord.xy);
+    highp vec4 v = texture(fs_textureAtlas, fs_TexCoord.xy);
     //v = TEST_PIXEL;
     fragColor = v;
 }
@@ -39,10 +39,10 @@ void renderColoredRGBA()
 void renderLcdGlyphSimple()
 {
     // LCD glyph (RGB)
-    vec4 v = texture(fs_textureAtlas, fs_TexCoord.xy); // .rgb ?
+    highp vec4 v = texture(fs_textureAtlas, fs_TexCoord.xy); // .rgb ?
 
     // float a = min(v.r, min(v.g, v.b));
-    float a = (v.r + v.g + v.b) / 3.0;
+    highp float a = (v.r + v.g + v.b) / 3.0;
 
     fragColor = vec4(v.rgb * fs_textColor.rgb, a);
 }
@@ -55,14 +55,14 @@ void renderLcdGlyphSimple()
 //
 // @return the shifted pixel
 //
-vec3 lcdPixelShift(vec3 current, vec3 previous, float shift)
+highp vec3 lcdPixelShift(highp vec3 current, highp vec3 previous, highp float shift)
 {
-    const float OneThird = 1.0 / 3.0;
-    const float TwoThird = 2.0 / 3.0;
+    const highp float OneThird = 1.0 / 3.0;
+    const highp float TwoThird = 2.0 / 3.0;
 
-    float r = current.r;
-    float g = current.g;
-    float b = current.b;
+    highp float r = current.r;
+    highp float g = current.g;
+    highp float b = current.b;
 
     // maybe faster?
     //
@@ -71,21 +71,21 @@ vec3 lcdPixelShift(vec3 current, vec3 previous, float shift)
 
     if (shift <= OneThird)
     {
-        float z = shift / OneThird;
+        highp float z = shift / OneThird;
         r = mix(current.r, previous.b, z);
         g = mix(current.g, current.r,  z);
         b = mix(current.b, current.g,  z);
     }
     else if (shift <= TwoThird)
     {
-        float z = (shift - OneThird) / OneThird;
+        highp float z = (shift - OneThird) / OneThird;
         r = mix(previous.b, previous.g, z);
         g = mix(current.r,  previous.b, z);
         b = mix(current.g,  current.r,  z);
     }
     else if (shift < 1.0)
     {
-        float z = (shift - TwoThird) / OneThird;
+        highp float z = (shift - TwoThird) / OneThird;
         r = mix(previous.g, previous.r, z);
         g = mix(previous.b, previous.g, z);
         b = mix(current.r,  previous.b, z);
@@ -101,35 +101,35 @@ vec3 lcdPixelShift(vec3 current, vec3 previous, float shift)
 //     http://jcgt.org/published/0002/01/04/
 void renderLcdGlyph()
 {
-    float px = pixel_x;
-    vec2 pixelOffset = vec2(1.0, 0.0) * px;
-    //vec3 pixelOffset = vec3(1.0, 0.0, 0.0) * px;
+    highp float px = pixel_x;
+    highp vec2 pixelOffset = vec2(1.0, 0.0) * px;
+    //highp vec3 pixelOffset = vec3(1.0, 0.0, 0.0) * px;
 
     // LCD glyph (RGB)
-    vec4 current  = texture(fs_textureAtlas, fs_TexCoord.xy);
-    vec4 previous = texture(fs_textureAtlas, fs_TexCoord.xy - pixelOffset);
+    highp vec4 current  = texture(fs_textureAtlas, fs_TexCoord.xy);
+    highp vec4 previous = texture(fs_textureAtlas, fs_TexCoord.xy - pixelOffset);
 
     // The text in a terminal does enforce fixed-width advances, and therefore
     // rendering a glyph should always start at a full pixel with no shift.
     //
     // We keep this variable here anyways for clearance.
-    const float shift = 0.0;
-    vec3 shifted = lcdPixelShift(current.rgb, previous.rgb, shift);
+    const highp float shift = 0.0;
+    highp vec3 shifted = lcdPixelShift(current.rgb, previous.rgb, shift);
 
-    float r = shifted.r;
-    float g = shifted.g;
-    float b = shifted.b;
+    highp float r = shifted.r;
+    highp float g = shifted.g;
+    highp float b = shifted.b;
 
-    float rgbAvg = (r + g + b) / 3.0;
-    float rgbMin = min(min(r, g), b);
-    float rgbMax = max(max(r, g), b);
-    float rgbMaxNormComplement = 1.0 - rgbMax;
+    highp float rgbAvg = (r + g + b) / 3.0;
+    highp float rgbMin = min(min(r, g), b);
+    highp float rgbMax = max(max(r, g), b);
+    highp float rgbMaxNormComplement = 1.0 - rgbMax;
 
-    vec4 colorContribution = vec4(fs_textColor.rgb, rgbAvg) * rgbMax;
-    vec4 glyphContribution = vec4(r, g, b, rgbMin)          * rgbMaxNormComplement;
-    vec4 color = glyphContribution + colorContribution;
+    highp vec4 colorContribution = vec4(fs_textColor.rgb, rgbAvg) * rgbMax;
+    highp vec4 glyphContribution = vec4(r, g, b, rgbMin)          * rgbMaxNormComplement;
+    highp vec4 color = glyphContribution + colorContribution;
 
-    float alpha = color.a * fs_textColor.a;
+    highp float alpha = color.a * fs_textColor.a;
 
     fragColor = vec4(color.rgb, alpha);
 }

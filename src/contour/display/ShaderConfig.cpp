@@ -15,9 +15,11 @@
 #include <contour/helper.h>
 
 #include <QtCore/QFile>
+#include <QtGui/QOpenGLContext>
 
 #include <iostream>
 #include <string>
+#include <string_view>
 #include <tuple>
 
 using std::get;
@@ -38,16 +40,52 @@ namespace
     }
 } // namespace
 
+bool useOpenGLES() noexcept
+{
+#if defined(__linux__)
+    return true;
+#else
+    return QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES;
+#endif
+}
+
+QSurfaceFormat createSurfaceFormat()
+{
+    QSurfaceFormat format;
+
+    if (useOpenGLES())
+    {
+        format.setRenderableType(QSurfaceFormat::OpenGLES);
+        format.setVersion(3, 3);
+    }
+    else
+    {
+        format.setRenderableType(QSurfaceFormat::OpenGL);
+        format.setVersion(3, 3);
+    }
+
+    format.setProfile(QSurfaceFormat::CoreProfile);
+    format.setAlphaBufferSize(8);
+    format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
+    format.setSwapInterval(1);
+
+#if !defined(NDEBUG)
+    format.setOption(QSurfaceFormat::DebugContext);
+#endif
+
+    return format;
+}
+
 ShaderConfig builtinShaderConfig(ShaderClass shaderClass)
 {
+    using namespace std::string_view_literals;
     auto const makeConfig = [](ShaderClass shaderClass) -> ShaderConfig {
         auto const makeSource = [](QString const& filename) -> ShaderSource {
             QFile sharedDefinesFile(":/contour/terminal_renderer/shared_defines.h");
             sharedDefinesFile.open(QFile::ReadOnly);
             Require(sharedDefinesFile.isOpen());
             auto const sharedDefines = sharedDefinesFile.readAll().toStdString() + "\n#line 1\n";
-
-            auto const versionHeader = "#version 330\n";
+            auto const versionHeader = fmt::format("#version {}\n", useOpenGLES() ? "300 es" : "330");
 
             auto const shaderFilePath = ":/contour/display/shaders/" + filename;
 
@@ -103,6 +141,7 @@ std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderCo
     if (auto const logString = shader->log().toStdString(); !logString.empty())
         errorlog()("Shader log: {}", logString);
 
+    Guarantee(shader->isLinked());
     return shader;
 }
 

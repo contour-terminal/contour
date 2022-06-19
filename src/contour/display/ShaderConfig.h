@@ -20,9 +20,12 @@
 #include <QtCore/QtGlobal>
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    #include <QtGui/QSurfaceFormat>
+
     #include <QtOpenGL/QOpenGLShaderProgram>
 #else
     #include <QtGui/QOpenGLShaderProgram>
+    #include <QtGui/QSurfaceFormat>
 #endif
 
 #include <memory>
@@ -50,6 +53,9 @@ struct ShaderConfig
     ShaderSource vertexShader;
     ShaderSource fragmentShader;
 };
+
+bool useOpenGLES() noexcept;
+QSurfaceFormat createSurfaceFormat();
 
 inline std::string to_string(ShaderClass _shaderClass)
 {
