@@ -337,7 +337,7 @@ int ContourGuiApp::terminalGuiAction()
     auto qtArgsCount = static_cast<int>(qtArgsPtr.size());
     QApplication app(qtArgsCount, (char**) qtArgsPtr.data());
 
-    QSurfaceFormat::setDefaultFormat(display::TerminalWidget::surfaceFormat());
+    QSurfaceFormat::setDefaultFormat(display::createSurfaceFormat());
 
     // auto const HTS = "\033H";
     // auto const TBC = "\033[g";

@@ -109,15 +109,6 @@ namespace
         _bindable.release();
     }
 
-#define CHECKED_GL(code)                                              \
-    do                                                                \
-    {                                                                 \
-        (code);                                                       \
-        GLenum err {};                                                \
-        while ((err = glGetError()) != GL_NO_ERROR)                   \
-            DisplayLog()("OpenGL error {} for call: {}", err, #code); \
-    } while (0)
-
     template <typename F>
     inline void checkedGL(F&& region,
                           logstore::source_location location = logstore::source_location::current()) noexcept
@@ -645,6 +636,7 @@ void OpenGLRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)
 void OpenGLRenderer::executeUploadTile(atlas::UploadTile const& param)
 {
     auto const textureId = _textureAtlas.textureId;
+    Require(textureId != 0);
 
     auto constexpr target = GL_TEXTURE_2D;
     auto constexpr LevelOfDetail = 0;
@@ -660,15 +652,56 @@ void OpenGLRenderer::executeUploadTile(atlas::UploadTile const& param)
     // Image row alignment is 1 byte (OpenGL defaults to 4).
     CHECKED_GL(glPixelStorei(GL_UNPACK_ALIGNMENT, param.rowAlignment));
 
+    // Forece RGBA as OpenGL ES cannot implicitly convert on the driver-side.
+    auto bitmapFormat = glFormat(param.bitmapFormat);
+    auto bitmapData = (void const*) param.bitmap.data();
+    auto bitmapConverted = atlas::Buffer();
+    switch (param.bitmapFormat)
+    {
+        case atlas::Format::Red: {
+            bitmapFormat = GL_RGBA;
+            bitmapConverted.resize(param.bitmapSize.area() * 4);
+            bitmapData = bitmapConverted.data();
+            auto s = param.bitmap.data();
+            auto e = param.bitmap.data() + param.bitmap.size();
+            auto t = bitmapConverted.data();
+            while (s != e)
+            {
+                *t++ = *s++; // red
+                *t++ = 0x00; // green
+                *t++ = 0x00; // blue
+                *t++ = 0xFF; // alpha
+            }
+            break;
+        }
+        case atlas::Format::RGB: {
+            bitmapFormat = GL_RGBA;
+            bitmapConverted.resize(param.bitmapSize.area() * 4);
+            bitmapData = bitmapConverted.data();
+            auto s = param.bitmap.data();
+            auto e = param.bitmap.data() + param.bitmap.size();
+            auto t = bitmapConverted.data();
+            while (s != e)
+            {
+                *t++ = *s++; // red
+                *t++ = *s++; // green
+                *t++ = *s++; // blue
+                *t++ = 0xFF; // alpha
+            }
+            break;
+        }
+        case atlas::Format::RGBA: break;
+    }
+
     CHECKED_GL(glTexSubImage2D(target,
                                LevelOfDetail,
                                param.location.x.value,
                                param.location.y.value,
                                unbox<GLsizei>(param.bitmapSize.width),
                                unbox<GLsizei>(param.bitmapSize.height),
-                               glFormat(param.bitmapFormat),
+                               bitmapFormat,
                                BitmapType,
-                               param.bitmap.data()));
+                               bitmapData));
 }
 
 void OpenGLRenderer::executeDestroyAtlas()
@@ -857,6 +890,7 @@ void OpenGLRenderer::setBackgroundImage(shared_ptr<terminal::BackgroundImage con
 
         if (backgroundImage.blur)
         {
+            DisplayLog()("Blurring background image: {}", filePath.string());
             auto const contextGuard = OpenGLContextGuard {};
             auto blur = Blur {};
             // auto const offsetStr = qgetenv("CONTOUR_BLUR_OFFSET").toStdString();
@@ -865,8 +899,6 @@ void OpenGLRenderer::setBackgroundImage(shared_ptr<terminal::BackgroundImage con
             // auto const iterations = iterStr.empty() ? 5 : std::stoi(iterStr);
             // qImage = blur.blurDualKawase(move(qImage), offset, iterations);
             qImage = blur.blurGaussian(move(qImage));
-
-            DisplayLog()("blur performance: {:.3}s CPU, {:.3}s GPU", blur.getCPUTime(), blur.getGPUTime());
         }
 
         qImage = qImage.convertToFormat(QImage::Format_RGBA8888);
@@ -925,6 +957,8 @@ GLuint OpenGLRenderer::createAndUploadImage(QSize imageSize,
     auto const imageFormat = glFormat(format);
     auto const textureWidth = static_cast<GLsizei>(imageSize.width());
     auto const textureHeight = static_cast<GLsizei>(imageSize.height());
+
+    Require(imageFormat == internalFormat); // OpenGL ES cannot handle implicit conversion.
 
     CHECKED_GL(glTexImage2D(target,
                             levelOfDetail,

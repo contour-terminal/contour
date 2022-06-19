@@ -66,15 +66,6 @@
 // Temporarily disabled (I think it was OS/X that didn't like glDebugMessageCallback).
 // #define CONTOUR_DEBUG_OPENGL 1
 
-#define CHECKED_GL(code)                                              \
-    do                                                                \
-    {                                                                 \
-        (code);                                                       \
-        GLenum err {};                                                \
-        while ((err = glGetError()) != GL_NO_ERROR)                   \
-            DisplayLog()("OpenGL error {} for call: {}", err, #code); \
-    } while (0)
-
 #if defined(_MSC_VER)
     #define __PRETTY_FUNCTION__ __FUNCDNAME__
 #endif
@@ -275,7 +266,7 @@ TerminalWidget::TerminalWidget(ContourGuiApp& app):
     initializeResourcesForContourFrontendOpenGL();
 
     setMouseTracking(true);
-    setFormat(surfaceFormat());
+    setFormat(createSurfaceFormat());
 
     setAttribute(Qt::WA_InputMethodEnabled, true);
     setAttribute(Qt::WA_OpaquePaintEvent);
@@ -303,30 +294,6 @@ terminal::PageSize TerminalWidget::windowSize() const noexcept
         return app_.profile().terminalSize;
 
     return profile().terminalSize;
-}
-
-QSurfaceFormat TerminalWidget::surfaceFormat()
-{
-    QSurfaceFormat format;
-
-    bool useOpenGLES = QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES;
-
-    if (useOpenGLES)
-        format.setRenderableType(QSurfaceFormat::OpenGLES);
-    else
-        format.setRenderableType(QSurfaceFormat::OpenGL);
-
-    format.setVersion(3, 3);
-    format.setProfile(QSurfaceFormat::CoreProfile);
-    format.setAlphaBufferSize(8);
-    format.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
-    format.setSwapInterval(1);
-
-#if !defined(NDEBUG)
-    format.setOption(QSurfaceFormat::DebugContext);
-#endif
-
-    return format;
 }
 
 QSize TerminalWidget::minimumSizeHint() const
@@ -411,6 +378,8 @@ void TerminalWidget::logDisplayTopInfo()
     if (loggedOnce)
         return;
     loggedOnce = true;
+
+    Require(QOpenGLContext::currentContext() != nullptr);
 
     auto const openGLTypeString = QOpenGLContext::currentContext()->isOpenGLES() ? "OpenGL/ES" : "OpenGL";
 #if defined(CONTOUR_BUILD_TYPE)

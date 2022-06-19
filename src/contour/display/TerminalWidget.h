@@ -88,7 +88,6 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
     terminal::PageSize windowSize() const noexcept;
 
     // {{{ OpenGL rendering handling
-    static QSurfaceFormat surfaceFormat();
     [[nodiscard]] QSize minimumSizeHint() const override;
     [[nodiscard]] QSize sizeHint() const override;
     void initializeGL() override;

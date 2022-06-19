@@ -283,6 +283,15 @@ struct RenderStateManager
     }
 };
 
+#define CHECKED_GL(code)                                              \
+    do                                                                \
+    {                                                                 \
+        (code);                                                       \
+        GLenum err {};                                                \
+        while ((err = glGetError()) != GL_NO_ERROR)                   \
+            DisplayLog()("OpenGL error {} for call: {}", err, #code); \
+    } while (0)
+
 } // namespace contour
 
 namespace fmt

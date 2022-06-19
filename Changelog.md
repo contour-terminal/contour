@@ -30,6 +30,7 @@
   - and more...
 - Adds new config option `profile.*.vi_mode_highlight_timeout` and `colorscheme.*.vi_mode_highlight` and adds cell highlighting on yank (#669).
 - Adds support for running on ARMv8 platform with crypto extensions (#611).
+- Adds back support OpenGL ES (3.1).
 - Adds E3 capability, so `clear` now defaults to clearing screen and scrollback (#693).
 - Adds specialized PTY implementation for Linux operating system utilizing OS-specific kernel APIs.
 - Adds basic support for Indicator status line and their VT sequences `DECSASD` and `DECSSDT`, and `DECRQSS` has been adapted (#687).

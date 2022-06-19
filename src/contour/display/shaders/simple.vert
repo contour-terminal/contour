@@ -1,5 +1,4 @@
-#version 330
-layout(location = 0) in vec3 position;
+layout(location = 0) in highp vec3 position;
 
 void main()
 {

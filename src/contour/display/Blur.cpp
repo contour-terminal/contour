@@ -12,10 +12,19 @@
  * limitations under the License.
  */
 #include <contour/display/Blur.h>
+#include <contour/display/ShaderConfig.h>
+#include <contour/helper.h>
+
+#include <crispy/assert.h>
+
+#include <QtCore/QFile>
 
 #include <type_traits>
 
 using std::move;
+
+// NB: Cannot be enabled as it's not available on OpenGL ES, so it seems.
+// #define CONTOUR_GPU_TIMERS 1
 
 namespace contour::display
 {
@@ -25,6 +34,19 @@ static const Vertex sg_vertexes[] = { Vertex(QVector3D(1.0f, 1.0f, 1.0f)),
                                       Vertex(QVector3D(-1.0f, -1.0f, 1.0f)),
                                       Vertex(QVector3D(1.0f, -1.0f, 1.0f)) };
 
+QString loadShaderSource(QString const& shaderFilePath)
+{
+    DisplayLog()("Blur: Loading shader source {}", shaderFilePath.toStdString());
+    auto const versionHeader =
+        QString::fromStdString(fmt::format("#version {}\n", useOpenGLES() ? "300 es" : "330"));
+
+    QFile file(shaderFilePath);
+    file.open(QFile::ReadOnly);
+    Require(file.isOpen());
+    auto const fileContents = file.readAll();
+    return versionHeader + "#line 1\n" + fileContents;
+}
+
 Blur::Blur():
     m_context { new QOpenGLContext() },
     m_surface { new QOffscreenSurface() },
@@ -32,35 +54,39 @@ Blur::Blur():
     m_shaderKawaseUp { new QOpenGLShaderProgram() },
     m_shaderKawaseDown { new QOpenGLShaderProgram() }
 {
-    m_context->setFormat(QSurfaceFormat::defaultFormat());
-    m_context->create();
+    auto const contextCreationSucceed = m_context->create();
+    Require(contextCreationSucceed);
+    Require(m_context->isValid());
+    Require(m_context->format().renderableType() == QSurfaceFormat::RenderableType::OpenGL
+            || m_context->format().renderableType() == QSurfaceFormat::RenderableType::OpenGLES);
 
     m_surface->create();
+    Require(m_surface->format().renderableType() == QSurfaceFormat::RenderableType::OpenGL
+            || m_surface->format().renderableType() == QSurfaceFormat::RenderableType::OpenGLES);
 
-    QSurfaceFormat format;
-    format.setVersion(3, 3);
-    format.setProfile(QSurfaceFormat::CoreProfile);
-    m_surface->setFormat(format);
+    auto const makeCurrentSucceed = m_context->makeCurrent(m_surface);
+    Require(makeCurrentSucceed);
 
-    m_context->makeCurrent(m_surface);
+    Require(m_context->isValid());
 
     initializeOpenGLFunctions();
 
     // clang-format off
 
     // {{{ gaussian
-    m_gaussianBlur->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/contour/display/shaders/simple.vert");
-    m_gaussianBlur->addShaderFromSourceFile(QOpenGLShader::Fragment, ":/contour/display/shaders/blur_gaussian.frag");
+    m_gaussianBlur->addShaderFromSourceCode(QOpenGLShader::Vertex, loadShaderSource(":/contour/display/shaders/simple.vert"));
+    m_gaussianBlur->addShaderFromSourceCode(QOpenGLShader::Fragment, loadShaderSource(":/contour/display/shaders/blur_gaussian.frag"));
     m_gaussianBlur->link();
+    Guarantee(m_gaussianBlur->isLinked());
     // }}}
 
     // {{{ dual kawase
-    m_shaderKawaseUp->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/contour/display/shaders/simple.vert");
-    m_shaderKawaseUp->addShaderFromSourceFile(QOpenGLShader::Fragment, ":/contour/display/shaders/dual_kawase_up.frag");
+    m_shaderKawaseUp->addShaderFromSourceCode(QOpenGLShader::Vertex, loadShaderSource(":/contour/display/shaders/simple.vert"));
+    m_shaderKawaseUp->addShaderFromSourceCode(QOpenGLShader::Fragment, loadShaderSource(":/contour/display/shaders/dual_kawase_up.frag"));
     m_shaderKawaseUp->link();
 
-    m_shaderKawaseDown->addShaderFromSourceFile(QOpenGLShader::Vertex, ":/contour/display/shaders/simple.vert");
-    m_shaderKawaseDown->addShaderFromSourceFile(QOpenGLShader::Fragment, ":/contour/display/shaders/dual_kawase_down.frag");
+    m_shaderKawaseDown->addShaderFromSourceCode(QOpenGLShader::Vertex, loadShaderSource(":/contour/display/shaders/simple.vert"));
+    m_shaderKawaseDown->addShaderFromSourceCode(QOpenGLShader::Fragment, loadShaderSource(":/contour/display/shaders/dual_kawase_down.frag"));
     m_shaderKawaseDown->link();
     // }}}
 
@@ -100,12 +126,14 @@ Blur::~Blur()
 QImage Blur::blurGaussian(QImage imageToBlur)
 {
     m_context->makeCurrent(m_surface);
+    Require(m_context->isValid());
 
     if (imageToBlur != m_imageToBlur)
     {
         m_iterations = 1;
         m_imageToBlur = move(imageToBlur);
         initFBOTextures();
+        Require(m_gaussianBlur->isLinked());
 
         m_gaussianBlur->bind();
         m_gaussianBlur->setUniformValue(
@@ -113,14 +141,19 @@ QImage Blur::blurGaussian(QImage imageToBlur)
             QVector2D((float) m_imageToBlur.size().width(), (float) m_imageToBlur.size().height()));
     }
 
-    // Start the GPU timer
+// Start the GPU timer
+#if defined(CONTOUR_GPU_TIMERS)
     GLuint gpuTimerQuery {};
     glGenQueries(1, &gpuTimerQuery);
     glBeginQuery(GL_TIME_ELAPSED, gpuTimerQuery);
-
+#endif
     CPUTimer.start();
+
     renderToFBO(m_FBO_vector[0], m_textureToBlur->textureId(), m_gaussianBlur);
+
     CPUTimerElapsedTime = (quint64) CPUTimer.nsecsElapsed();
+
+#if defined(CONTOUR_GPU_TIMERS)
     glEndQuery(GL_TIME_ELAPSED);
     GLint GPUTimerAvailable = 0;
     while (!GPUTimerAvailable)
@@ -128,9 +161,16 @@ QImage Blur::blurGaussian(QImage imageToBlur)
 
     glGetQueryObjectui64v(gpuTimerQuery, GL_QUERY_RESULT, &GPUtimerElapsedTime);
     glDeleteQueries(1, &gpuTimerQuery);
+#endif
 
     auto image = m_FBO_vector[0]->toImage();
     m_context->doneCurrent();
+
+#if defined(CONTOUR_GPU_TIMERS)
+    DisplayLog()("Blur: Gaussian run performance: {:.3}s CPU, {:.3}s GPU.", getCPUTime(), getGPUTime());
+#else
+    DisplayLog()("Blur: Gaussian run performance: {:.3}s CPU.", getCPUTime());
+#endif
     return image;
 }
 
@@ -147,14 +187,17 @@ QImage Blur::blurDualKawase(QImage imageToBlur, int offset, int iterations)
         initFBOTextures();
     }
 
-    // Don't record the texture and FBO allocation time
+// Don't record the texture and FBO allocation time
 
-    // Start the GPU timer
+// Start the GPU timer
+#if defined(CONTOUR_GPU_TIMERS)
     GLuint gpuTimerQuery {};
     glGenQueries(1, &gpuTimerQuery);
     glBeginQuery(GL_TIME_ELAPSED, gpuTimerQuery);
+#endif
 
     CPUTimer.start();
+
     m_shaderKawaseDown->setUniformValue("u_offset", QVector2D((float) offset, (float) offset));
     m_shaderKawaseUp->setUniformValue("u_offset", QVector2D((float) offset, (float) offset));
 
@@ -176,7 +219,8 @@ QImage Blur::blurDualKawase(QImage imageToBlur, int offset, int iterations)
     // Get the CPU timer result
     CPUTimerElapsedTime = (quint64) CPUTimer.nsecsElapsed();
 
-    // Get the GPU timer result
+// Get the GPU timer result
+#if defined(CONTOUR_GPU_TIMERS)
     glEndQuery(GL_TIME_ELAPSED);
     GLint GPUTimerAvailable = 0;
     while (!GPUTimerAvailable)
@@ -184,6 +228,7 @@ QImage Blur::blurDualKawase(QImage imageToBlur, int offset, int iterations)
 
     glGetQueryObjectui64v(gpuTimerQuery, GL_QUERY_RESULT, &GPUtimerElapsedTime);
     glDeleteQueries(1, &gpuTimerQuery);
+#endif
 
     auto image = m_FBO_vector[0]->toImage();
     m_context->doneCurrent();
@@ -195,7 +240,7 @@ void Blur::renderToFBO(QOpenGLFramebufferObject* targetFBO,
                        QOpenGLShaderProgram* shader)
 {
     targetFBO->bind();
-    glBindTexture(GL_TEXTURE_2D, sourceTexture);
+    CHECKED_GL(glBindTexture(GL_TEXTURE_2D, sourceTexture));
     shader->bind();
 
     shader->setUniformValue("u_viewportResolution",
@@ -205,8 +250,8 @@ void Blur::renderToFBO(QOpenGLFramebufferObject* targetFBO,
         "u_halfpixel",
         QVector2D(0.5f / (float) targetFBO->size().width(), 0.5f / (float) targetFBO->size().height()));
 
-    glViewport(0, 0, targetFBO->size().width(), targetFBO->size().height());
-    glDrawArrays(GL_TRIANGLE_FAN, 0, sizeof(sg_vertexes) / sizeof(sg_vertexes[0]));
+    CHECKED_GL(glViewport(0, 0, targetFBO->size().width(), targetFBO->size().height()));
+    CHECKED_GL(glDrawArrays(GL_TRIANGLE_FAN, 0, sizeof(sg_vertexes) / sizeof(sg_vertexes[0])));
 }
 
 void Blur::initFBOTextures()
@@ -224,9 +269,9 @@ void Blur::initFBOTextures()
                                                          QOpenGLFramebufferObject::CombinedDepthStencil,
                                                          GL_TEXTURE_2D));
 
-        glBindTexture(GL_TEXTURE_2D, m_FBO_vector.last()->texture());
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        CHECKED_GL(glBindTexture(GL_TEXTURE_2D, m_FBO_vector.last()->texture()));
+        CHECKED_GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR));
+        CHECKED_GL(glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR));
     }
 
     delete m_textureToBlur;

@@ -1,34 +1,34 @@
-uniform mat4      u_projection;
-uniform sampler2D u_backgroundImage;
-uniform vec2      u_viewportResolution;
-uniform vec2      u_backgroundResolution;
-uniform float     u_blur;
-uniform float     u_opacity;
-uniform float     u_time;
+uniform highp mat4      u_projection;
+uniform lowp sampler2D  u_backgroundImage;
+uniform highp vec2      u_viewportResolution;
+uniform highp vec2      u_backgroundResolution;
+uniform highp float     u_blur;
+uniform highp float     u_opacity;
+uniform highp float     u_time;
 
-in vec2 fs_TexCoord;
+in highp vec2 fs_TexCoord;
 
-out vec4 fragColor;
+out highp vec4 fragColor;
 
 // {{{ Gaussian blur
 #define BlurSamples 128
 
-float gaussian(vec2 i)
+highp float gaussian(highp vec2 i)
 {
-    const float TwoPi = 6.28318530718;
-    const float Sigma = 0.25 * float(BlurSamples);
-    const float SigmaSquared = Sigma * Sigma;
-    vec2 iOverSigma = i / Sigma;
+    const highp float TwoPi = 6.28318530718;
+    const highp float Sigma = 0.25 * float(BlurSamples);
+    const highp float SigmaSquared = Sigma * Sigma;
+    highp vec2 iOverSigma = i / Sigma;
     return exp(-0.5 * dot(iOverSigma, iOverSigma)) / (TwoPi * SigmaSquared);
 }
 
-vec4 blur(sampler2D sp, vec2 uv, vec2 scale)
+highp vec4 blur(highp sampler2D sp, highp vec2 uv, highp vec2 scale)
 {
-    vec4 outputColor = vec4(0);
+    highp vec4 outputColor = vec4(0);
     int s = BlurSamples;
 
     for ( int i = 0; i < s*s; i++ ) {
-        vec2 d = vec2(i%s, i/s) - float(BlurSamples)/2.;
+        highp vec2 d = vec2(i%s, i/s) - float(BlurSamples)/2.;
         outputColor += gaussian(d) * texture( sp, uv + scale * d);
     }
 
