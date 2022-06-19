@@ -84,12 +84,12 @@ class SequenceParameters
 
     [[nodiscard]] constexpr gsl::span<std::uint16_t> range() noexcept
     {
-        return gsl::span { _values.begin(), _count };
+        return gsl::span { _values.data(), _count };
     }
 
     [[nodiscard]] constexpr gsl::span<std::uint16_t const> range() const noexcept
     {
-        return gsl::span { _values.cbegin(), _count };
+        return gsl::span { _values.data(), _count };
     }
 
     [[nodiscard]] std::string str() const
