@@ -172,6 +172,11 @@ class ring: public basic_ring<T, Container<T, Allocator>>
         this->rezero();
         this->_storage.resize(newSize);
     }
+    void resize(size_t newSize, const T& value)
+    {
+        this->rezero();
+        this->_storage.resize(newSize, value);
+    }
     void clear()
     {
         this->_storage.clear();

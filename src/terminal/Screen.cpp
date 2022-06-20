@@ -865,6 +865,8 @@ void Screen<Cell>::clearScreen()
     // Instead of *just* clearing the screen, and thus, losing potential important content,
     // we scroll up by RowCount number of lines, so move it all into history, so the user can scroll
     // up in case the content is still needed.
+    grid().setDefaultColor(_state.cursor.graphicsRendition.foregroundColor,
+                           _state.cursor.graphicsRendition.backgroundColor);
     scrollUp(_state.pageSize.lines);
 }
 

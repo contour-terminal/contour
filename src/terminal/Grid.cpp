@@ -56,7 +56,8 @@ namespace detail
     Lines<Cell> createLines(PageSize _pageSize,
                             LineCount _maxHistoryLineCount,
                             bool _reflowOnResize,
-                            GraphicsAttributes _initialSGR)
+                            GraphicsAttributes _initialSGR,
+                            Grid<Cell>& _grid)
     {
         auto const defaultLineFlags = _reflowOnResize ? LineFlags::Wrappable : LineFlags::None;
         auto const totalLineCount = unbox<size_t>(_pageSize.lines + _maxHistoryLineCount);
@@ -65,7 +66,7 @@ namespace detail
         lines.reserve(totalLineCount);
 
         for ([[maybe_unused]] auto const _: ranges::views::iota(0u, totalLineCount))
-            lines.emplace_back(defaultLineFlags, _pageSize.columns, _initialSGR);
+            lines.emplace_back(defaultLineFlags, _pageSize.columns, _initialSGR, _grid);
 
         return lines;
     }
@@ -87,8 +88,8 @@ namespace detail
         ColumnCount _newColumnCount,
         typename Line<Cell>::InflatedBuffer&& _logicalLineBuffer, // TODO: don't move, do (c)ref instead
         LineFlags _baseFlags,
-        bool _initialNoWrap // TODO: pass `LineFlags _defaultLineFlags` instead?
-    )
+        bool _initialNoWrap, // TODO: pass `LineFlags _defaultLineFlags` instead?
+        Grid<Cell>& _grid)
     {
         using LineBuffer = typename Line<Cell>::InflatedBuffer;
 
@@ -100,7 +101,7 @@ namespace detail
             auto from = _logicalLineBuffer.begin();
             auto to = from + _newColumnCount.as<std::ptrdiff_t>();
             auto const wrappedFlag = i == 0 && _initialNoWrap ? LineFlags::None : LineFlags::Wrapped;
-            _targetLines.emplace_back(_baseFlags | wrappedFlag, LineBuffer(from, to));
+            _targetLines.emplace_back(_baseFlags | wrappedFlag, LineBuffer(from, to), _grid);
             _logicalLineBuffer.erase(from, to);
             ++i;
         }
@@ -110,7 +111,7 @@ namespace detail
             auto const wrappedFlag = i == 0 && _initialNoWrap ? LineFlags::None : LineFlags::Wrapped;
             ++i;
             _logicalLineBuffer.resize(unbox<size_t>(_newColumnCount));
-            _targetLines.emplace_back(_baseFlags | wrappedFlag, move(_logicalLineBuffer));
+            _targetLines.emplace_back(_baseFlags | wrappedFlag, move(_logicalLineBuffer), _grid);
         }
         return LineCount::cast_from(i);
     }
@@ -123,7 +124,7 @@ Grid<Cell>::Grid(PageSize _pageSize, bool _reflowOnResize, LineCount _maxHistory
     reflowOnResize_ { _reflowOnResize },
     maxHistoryLineCount_ { _maxHistoryLineCount },
     lines_ { detail::createLines<Cell>(
-        _pageSize, _maxHistoryLineCount, _reflowOnResize, GraphicsAttributes {}) },
+        _pageSize, _maxHistoryLineCount, _reflowOnResize, GraphicsAttributes {}, *this) },
     linesUsed_ { _pageSize.lines }
 {
     verifyState();
@@ -134,7 +135,7 @@ void Grid<Cell>::setMaxHistoryLineCount(LineCount _maxHistoryLineCount)
 {
     verifyState();
     rezeroBuffers();
-    lines_.resize(unbox<size_t>(pageSize_.lines + _maxHistoryLineCount));
+    lines_.resize(unbox<size_t>(pageSize_.lines + _maxHistoryLineCount), Line(*this));
     linesUsed_ = min(linesUsed_, pageSize_.lines + _maxHistoryLineCount);
     maxHistoryLineCount_ = _maxHistoryLineCount;
     verifyState();
@@ -386,7 +387,7 @@ LineCount Grid<Cell>::scrollUp(LineCount linesCountToScrollUp, GraphicsAttribute
             Require(unbox<size_t>(linesUsed_) <= lines_.size());
             fill_n(next(lines_.begin(), *pageSize_.lines),
                    unbox<size_t>(linesAppendCount),
-                   Line<Cell> { defaultLineFlags(), pageSize_.columns, _defaultAttributes });
+                   Line<Cell> { defaultLineFlags(), pageSize_.columns, _defaultAttributes, *this });
             rotateBuffersLeft(linesAppendCount);
         }
         if (linesAppendCount < linesCountToScrollUp)
@@ -610,7 +611,7 @@ CellLocation Grid<Cell>::growLines(LineCount _newHeight, CellLocation _cursor)
     auto const linesToFill = max(0, *newTotalLineCount - *currentTotalLineCount);
 
     for ([[maybe_unused]] auto const _: ranges::views::iota(0, linesToFill))
-        lines_.emplace_back(wrappableFlag, pageSize_.columns, GraphicsAttributes {});
+        lines_.emplace_back(wrappableFlag, pageSize_.columns, GraphicsAttributes {}, *this);
 
     pageSize_.lines += totalLinesToExtend;
     linesUsed_ = min(linesUsed_ + totalLinesToExtend, LineCount::cast_from(lines_.size()));
@@ -719,21 +720,24 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
                     logicalLineBuffer.push_back(cell);
             };
 
-            auto const flushLogicalLine =
-                [_newColumnCount, &grownLines, &logicalLineBuffer, &logicalLineFlags]() {
-                    if (!logicalLineBuffer.empty())
-                    {
-                        detail::addNewWrappedLines(
-                            grownLines, _newColumnCount, move(logicalLineBuffer), logicalLineFlags, true);
-                        logicalLineBuffer.clear();
-                    }
-                };
+            auto const flushLogicalLine = [_newColumnCount,
+                                           &grownLines,
+                                           &logicalLineBuffer,
+                                           &logicalLineFlags,
+                                           this]() {
+                if (!logicalLineBuffer.empty())
+                {
+                    detail::addNewWrappedLines(
+                        grownLines, _newColumnCount, move(logicalLineBuffer), logicalLineFlags, true, *this);
+                    logicalLineBuffer.clear();
+                }
+            };
 
-            [[maybe_unused]] auto const logLogicalLine =
-                [&logicalLineBuffer]([[maybe_unused]] LineFlags lineFlags,
-                                     [[maybe_unused]] std::string_view msg) {
-                    GridLog()("{} |> \"{}\"", msg, Line<Cell>(lineFlags, logicalLineBuffer).toUtf8());
-                };
+            [[maybe_unused]] auto const logLogicalLine = [&logicalLineBuffer,
+                                                          this]([[maybe_unused]] LineFlags lineFlags,
+                                                                [[maybe_unused]] std::string_view msg) {
+                GridLog()("{} |> \"{}\"", msg, Line<Cell>(lineFlags, logicalLineBuffer, *this).toUtf8());
+            };
 
             for (int i = -*historyLineCount(); i < *pageSize_.lines; ++i)
             {
@@ -767,7 +771,8 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
                 // so fill the gap until we have a full page.
                 cy = pageSize_.lines - LineCount::cast_from(grownLines.size());
                 while (LineCount::cast_from(grownLines.size()) < pageSize_.lines)
-                    grownLines.emplace_back(defaultLineFlags(), _newColumnCount, GraphicsAttributes {});
+                    grownLines.emplace_back(
+                        defaultLineFlags(), _newColumnCount, GraphicsAttributes {}, *this);
 
                 Ensures(LineCount::cast_from(grownLines.size()) == pageSize_.lines);
             }
@@ -777,7 +782,7 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
             // Fill scrollback lines.
             auto const totalLineCount = unbox<size_t>(pageSize_.lines + maxHistoryLineCount_);
             while (grownLines.size() < totalLineCount)
-                grownLines.emplace_back(defaultLineFlags(), _newColumnCount, GraphicsAttributes {});
+                grownLines.emplace_back(defaultLineFlags(), _newColumnCount, GraphicsAttributes {}, *this);
 
             lines_ = move(grownLines);
             pageSize_.columns = _newColumnCount;
@@ -857,8 +862,12 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
                     else
                     {
                         // Insert NEW line(s) between previous and this line with previously wrapped columns.
-                        auto const numLinesInserted = detail::addNewWrappedLines(
-                            shrinkedLines, _newColumnCount, move(wrappedColumns), previousFlags, false);
+                        auto const numLinesInserted = detail::addNewWrappedLines(shrinkedLines,
+                                                                                 _newColumnCount,
+                                                                                 move(wrappedColumns),
+                                                                                 previousFlags,
+                                                                                 false,
+                                                                                 *this);
                         numLinesWritten += numLinesInserted;
                         previousFlags = line.inheritableFlags();
                     }
@@ -875,12 +884,12 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
                 Ensures(shrinkedLines.back().size() >= _newColumnCount);
             }
             numLinesWritten += detail::addNewWrappedLines(
-                shrinkedLines, _newColumnCount, move(wrappedColumns), previousFlags, false);
+                shrinkedLines, _newColumnCount, move(wrappedColumns), previousFlags, false, *this);
             Require(unbox<size_t>(numLinesWritten) == shrinkedLines.size());
             Require(numLinesWritten >= pageSize_.lines);
 
             while (shrinkedLines.size() < totalLineCount)
-                shrinkedLines.emplace_back(LineFlags::None, _newColumnCount, GraphicsAttributes {});
+                shrinkedLines.emplace_back(LineFlags::None, _newColumnCount, GraphicsAttributes {}, *this);
 
             shrinkedLines.rotate_left(
                 unbox<size_t>(numLinesWritten - pageSize_.lines)); // maybe to be done outisde?
@@ -955,8 +964,9 @@ void Grid<Cell>::appendNewLines(LineCount _count, GraphicsAttributes _attr)
 
     if (auto const n = std::min(_count, pageSize_.lines); *n > 0)
     {
-        generate_n(
-            back_inserter(lines_), *n, [&]() { return Line<Cell>(wrappableFlag, pageSize_.columns, _attr); });
+        generate_n(back_inserter(lines_), *n, [&]() {
+            return Line<Cell>(wrappableFlag, pageSize_.columns, _attr, *this);
+        });
         clampHistory();
     }
 }

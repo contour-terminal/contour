@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 #include <terminal/GraphicsAttributes.h>
+#include <terminal/Grid.h>
 #include <terminal/Line.h>
 
 #include <unicode/grapheme_segmenter.h>
@@ -142,7 +143,7 @@ std::string Line<Cell>::toUtf8Trimmed() const
 }
 
 template <typename Cell>
-InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input)
+InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input, Grid<Cell> const& grid)
 {
     static constexpr char32_t ReplacementCharacter { 0xFFFD };
 
@@ -189,20 +190,12 @@ InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input)
     }
     assert(columns.size() == unbox<size_t>(input.usedColumns));
 
+    auto [fg, bg] = grid.defaultColor();
+    GraphicsAttributes sgr { fg, bg };
     while (columns.size() < unbox<size_t>(input.displayWidth))
-        columns.emplace_back(Cell { input.attributes });
+        columns.emplace_back(Cell { sgr });
 
     return columns;
-}
-
-template <typename Cell>
-void Line<Cell>::fillRemainingCells(GraphicsAttributes const& _sgr, HyperlinkId hyperlink)
-{
-    auto& buffer = inflatedBuffer();
-    for (auto start = buffer.rbegin();
-         start != buffer.rend() && (start->empty() && (start->codepoint(0) != 0x20));
-         ++start)
-        start->reset(_sgr, hyperlink);
 }
 
 } // end namespace terminal

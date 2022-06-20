@@ -29,9 +29,13 @@
 #include <string>
 #include <vector>
 
+#include "fmt/core.h"
+
 namespace terminal
 {
 
+template <typename Cell>
+class Grid;
 enum class LineFlags : uint8_t
 {
     None = 0x0000,
@@ -74,7 +78,7 @@ using InflatedLineBuffer = std::vector<Cell>;
 
 /// Unpacks a TriviallyStyledLineBuffer into an InflatedLineBuffer<Cell>.
 template <typename Cell>
-InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input);
+InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input, Grid<Cell> const& grid);
 
 template <typename Cell>
 using LineStorage = std::variant<TriviallyStyledLineBuffer, InflatedLineBuffer<Cell>>;
@@ -89,7 +93,7 @@ template <typename Cell>
 class Line
 {
   public:
-    Line() = default;
+    // Line() = default;
     Line(Line const&) = default;
     Line(Line&&) noexcept = default;
     Line& operator=(Line const&) = default;
@@ -103,13 +107,16 @@ class Line
     using reverse_iterator = typename InflatedBuffer::reverse_iterator;
     using const_iterator = typename InflatedBuffer::const_iterator;
 
-    Line(LineFlags _flags, ColumnCount _width, GraphicsAttributes _templateSGR):
-        storage_ { TrivialBuffer { _width, _templateSGR } }, flags_ { static_cast<unsigned>(_flags) }
+    explicit Line(Grid<Cell> const& _grid): grid_(_grid) {}
+    Line(LineFlags _flags, ColumnCount _width, GraphicsAttributes _templateSGR, Grid<Cell> const& _grid):
+        storage_ { TrivialBuffer { _width, _templateSGR } },
+        flags_ { static_cast<unsigned>(_flags) },
+        grid_(_grid)
     {
     }
 
-    Line(LineFlags _flags, InflatedBuffer _buffer):
-        storage_ { std::move(_buffer) }, flags_ { static_cast<unsigned>(_flags) }
+    Line(LineFlags _flags, InflatedBuffer _buffer, Grid<Cell> const& _grid):
+        storage_ { std::move(_buffer) }, flags_ { static_cast<unsigned>(_flags) }, grid_(_grid)
     {
     }
 
@@ -122,7 +129,6 @@ class Line
             setBuffer(TrivialBuffer { size(), _attributes });
     }
 
-    void fillRemainingCells(GraphicsAttributes const& _sgr, HyperlinkId hyperlink);
     void fill(LineFlags _flags,
               GraphicsAttributes const& _attributes,
               char32_t _codepoint,
@@ -234,37 +240,16 @@ class Line
         return inflatedBuffer().at(unbox<size_t>(column)).width();
     }
 
-    [[nodiscard]] LineFlags flags() const noexcept
-    {
-        return static_cast<LineFlags>(flags_);
-    }
+    [[nodiscard]] LineFlags flags() const noexcept { return static_cast<LineFlags>(flags_); }
 
-    [[nodiscard]] bool marked() const noexcept
-    {
-        return isFlagEnabled(LineFlags::Marked);
-    }
-    void setMarked(bool _enable)
-    {
-        setFlag(LineFlags::Marked, _enable);
-    }
+    [[nodiscard]] bool marked() const noexcept { return isFlagEnabled(LineFlags::Marked); }
+    void setMarked(bool _enable) { setFlag(LineFlags::Marked, _enable); }
 
-    [[nodiscard]] bool wrapped() const noexcept
-    {
-        return isFlagEnabled(LineFlags::Wrapped);
-    }
-    void setWrapped(bool _enable)
-    {
-        setFlag(LineFlags::Wrapped, _enable);
-    }
+    [[nodiscard]] bool wrapped() const noexcept { return isFlagEnabled(LineFlags::Wrapped); }
+    void setWrapped(bool _enable) { setFlag(LineFlags::Wrapped, _enable); }
 
-    [[nodiscard]] bool wrappable() const noexcept
-    {
-        return isFlagEnabled(LineFlags::Wrappable);
-    }
-    void setWrappable(bool _enable)
-    {
-        setFlag(LineFlags::Wrappable, _enable);
-    }
+    [[nodiscard]] bool wrappable() const noexcept { return isFlagEnabled(LineFlags::Wrappable); }
+    void setWrappable(bool _enable) { setFlag(LineFlags::Wrappable, _enable); }
 
     [[nodiscard]] LineFlags wrappableFlag() const noexcept
     {
@@ -309,10 +294,7 @@ class Line
     InflatedBuffer& inflatedBuffer();
     InflatedBuffer const& inflatedBuffer() const;
 
-    [[nodiscard]] TrivialBuffer& trivialBuffer() noexcept
-    {
-        return std::get<TrivialBuffer>(storage_);
-    }
+    [[nodiscard]] TrivialBuffer& trivialBuffer() noexcept { return std::get<TrivialBuffer>(storage_); }
     [[nodiscard]] TrivialBuffer const& trivialBuffer() const noexcept
     {
         return std::get<TrivialBuffer>(storage_);
@@ -327,14 +309,8 @@ class Line
         return !std::holds_alternative<TrivialBuffer>(storage_);
     }
 
-    void setBuffer(TrivialBuffer const& buffer) noexcept
-    {
-        storage_ = buffer;
-    }
-    void setBuffer(InflatedBuffer buffer)
-    {
-        storage_ = std::move(buffer);
-    }
+    void setBuffer(TrivialBuffer const& buffer) noexcept { storage_ = buffer; }
+    void setBuffer(InflatedBuffer buffer) { storage_ = std::move(buffer); }
 
     void reset(GraphicsAttributes attributes,
                HyperlinkId hyperlink,
@@ -347,6 +323,7 @@ class Line
   private:
     Storage storage_;
     unsigned flags_ = 0;
+    std::reference_wrapper<Grid<Cell> const> grid_;
 };
 
 constexpr LineFlags operator|(LineFlags a, LineFlags b) noexcept
@@ -368,7 +345,7 @@ template <typename Cell>
 inline typename Line<Cell>::InflatedBuffer& Line<Cell>::inflatedBuffer()
 {
     if (std::holds_alternative<TrivialBuffer>(storage_))
-        storage_ = inflate<Cell>(std::get<TrivialBuffer>(storage_));
+        storage_ = inflate<Cell>(std::get<TrivialBuffer>(storage_), grid_);
     return std::get<InflatedBuffer>(storage_);
 }
 

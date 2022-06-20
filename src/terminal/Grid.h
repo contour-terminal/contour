@@ -13,6 +13,7 @@
  */
 #pragma once
 
+#include <terminal/Color.h>
 #include <terminal/GraphicsAttributes.h>
 #include <terminal/Line.h>
 #include <terminal/primitives.h>
@@ -506,6 +507,12 @@ class Grid
     [[nodiscard]] constexpr LineCount linesUsed() const noexcept;
 
     void verifyState() const;
+    void setDefaultColor(Color foreground, Color background) noexcept
+    {
+        defaultColors.first = foreground;
+        defaultColors.second = background;
+    }
+    auto defaultColor() const noexcept { return defaultColors; }
 
   private:
     CellLocation growLines(LineCount _newHeight, CellLocation _cursor);
@@ -516,7 +523,7 @@ class Grid
     void resizeBuffers(PageSize _newSize)
     {
         auto const newTotalLineCount = historyLineCount() + _newSize.lines;
-        lines_.resize(unbox<size_t>(newTotalLineCount));
+        lines_.resize(unbox<size_t>(newTotalLineCount), Line(*this));
         pageSize_ = _newSize;
     }
 
@@ -542,6 +549,7 @@ class Grid
 
     // Number of lines used in the Lines buffer.
     LineCount linesUsed_;
+    std::pair<Color, Color> defaultColors { DefaultColor(), DefaultColor() };
 };
 
 template <typename Cell>
