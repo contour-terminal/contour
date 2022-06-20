@@ -283,7 +283,7 @@ string_view Screen<Cell>::tryEmplaceChars(string_view _chars, size_t cellCount) 
 
     // In case the charset has been altered, no
     // optimization can be applied.
-    // Unless we're storing the charset in the TriviallyStyledLineBuffer, too.
+    // Unless we're storing the charset in the TrivialLineBuffer, too.
     // But for now that's too rare to be beneficial.
     if (!_state.cursor.charsets.isSelected(CharsetId::USASCII))
         return _chars;
@@ -400,7 +400,7 @@ bool Screen<Cell>::canResumeEmplace(std::string_view continuationChars) const no
     auto& line = currentLine();
     if (!line.isTrivialBuffer())
         return false;
-    TriviallyStyledLineBuffer const& buffer = line.trivialBuffer();
+    TrivialLineBuffer const& buffer = line.trivialBuffer();
     return buffer.text.view().end() == continuationChars.begin()
            && buffer.attributes == _state.cursor.graphicsRendition
            && buffer.hyperlink == _state.cursor.hyperlink

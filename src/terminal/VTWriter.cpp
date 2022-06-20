@@ -204,7 +204,7 @@ void VTWriter::write(Line<Cell> const& line)
 {
     if (line.isTrivialBuffer())
     {
-        TriviallyStyledLineBuffer const& lineBuffer = line.trivialBuffer();
+        TrivialLineBuffer const& lineBuffer = line.trivialBuffer();
         setForegroundColor(lineBuffer.attributes.foregroundColor);
         setBackgroundColor(lineBuffer.attributes.backgroundColor);
         // TODO: hyperlinks, underlineColor and other styles (curly underline etc.)

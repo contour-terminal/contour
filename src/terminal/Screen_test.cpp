@@ -105,7 +105,7 @@ struct TextRenderBuilder
     void startLine(LineOffset lineOffset);
     void renderCell(Cell const& cell, LineOffset lineOffset, ColumnOffset columnOffset);
     void endLine();
-    void renderTrivialLine(TriviallyStyledLineBuffer const& lineBuffer, LineOffset lineOffset);
+    void renderTrivialLine(TrivialLineBuffer const& lineBuffer, LineOffset lineOffset);
     void finish();
 };
 
@@ -125,7 +125,7 @@ void TextRenderBuilder::endLine()
     text += '\n';
 }
 
-void TextRenderBuilder::renderTrivialLine(TriviallyStyledLineBuffer const& lineBuffer, LineOffset lineOffset)
+void TextRenderBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer, LineOffset lineOffset)
 {
     if (!*lineOffset)
         text.clear();

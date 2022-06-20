@@ -51,7 +51,7 @@ template <typename T> struct OptionalProperty<T, true> { T value; };
 /**
  * Line storage with call columns sharing the same SGR attributes.
  */
-struct TriviallyStyledLineBuffer
+struct TrivialLineBuffer
 {
     ColumnCount displayWidth;
     GraphicsAttributes attributes;
@@ -72,12 +72,12 @@ struct TriviallyStyledLineBuffer
 template <typename Cell>
 using InflatedLineBuffer = std::vector<Cell>;
 
-/// Unpacks a TriviallyStyledLineBuffer into an InflatedLineBuffer<Cell>.
+/// Unpacks a TrivialLineBuffer into an InflatedLineBuffer<Cell>.
 template <typename Cell>
-InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input);
+InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input);
 
 template <typename Cell>
-using LineStorage = std::variant<TriviallyStyledLineBuffer, InflatedLineBuffer<Cell>>;
+using LineStorage = std::variant<TrivialLineBuffer, InflatedLineBuffer<Cell>>;
 
 /**
  * Line<Cell> API.
@@ -95,7 +95,7 @@ class Line
     Line& operator=(Line const&) = default;
     Line& operator=(Line&&) noexcept = default;
 
-    using TrivialBuffer = TriviallyStyledLineBuffer;
+    using TrivialBuffer = TrivialLineBuffer;
     using InflatedBuffer = InflatedLineBuffer<Cell>;
     using Storage = LineStorage<Cell>;
     using value_type = Cell;

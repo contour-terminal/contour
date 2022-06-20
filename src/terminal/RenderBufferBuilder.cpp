@@ -271,7 +271,7 @@ RenderAttributes RenderBufferBuilder<Cell>::createRenderAttributes(
 }
 
 template <typename Cell>
-RenderLine RenderBufferBuilder<Cell>::createRenderLine(TriviallyStyledLineBuffer const& lineBuffer,
+RenderLine RenderBufferBuilder<Cell>::createRenderLine(TrivialLineBuffer const& lineBuffer,
                                                        LineOffset lineOffset) const
 {
     auto const pos = CellLocation { lineOffset, ColumnOffset(0) };
@@ -286,8 +286,7 @@ RenderLine RenderBufferBuilder<Cell>::createRenderLine(TriviallyStyledLineBuffer
 }
 
 template <typename Cell>
-void RenderBufferBuilder<Cell>::renderTrivialLine(TriviallyStyledLineBuffer const& lineBuffer,
-                                                  LineOffset lineOffset)
+void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineBuffer, LineOffset lineOffset)
 {
     // if (lineBuffer.text.size())
     //     fmt::print("Rendering trivial line {:2} 0..{}/{} ({} bytes): \"{}\"\n",
