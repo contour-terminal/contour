@@ -352,6 +352,7 @@ size_t Screen<Cell>::emplaceCharsIntoCurrentLine(string_view _chars, size_t cell
         // Only use fastpath if the currently line hasn't been inflated already.
         // Because we might lose prior-written textual/SGR information otherwise.
         line.reset(_state.cursor.graphicsRendition,
+                   line.trivialBuffer().fillAttributes,
                    _state.cursor.hyperlink,
                    crispy::BufferFragment {
                        _terminal.currentPtyBuffer(),
@@ -402,7 +403,7 @@ bool Screen<Cell>::canResumeEmplace(std::string_view continuationChars) const no
         return false;
     TrivialLineBuffer const& buffer = line.trivialBuffer();
     return buffer.text.view().end() == continuationChars.begin()
-           && buffer.attributes == _state.cursor.graphicsRendition
+           && buffer.textAttributes == _state.cursor.graphicsRendition
            && buffer.hyperlink == _state.cursor.hyperlink
            && buffer.text.owner() == _terminal.currentPtyBuffer();
 }

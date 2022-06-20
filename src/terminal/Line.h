@@ -54,7 +54,8 @@ template <typename T> struct OptionalProperty<T, true> { T value; };
 struct TrivialLineBuffer
 {
     ColumnCount displayWidth;
-    GraphicsAttributes attributes;
+    GraphicsAttributes textAttributes;
+    GraphicsAttributes fillAttributes = textAttributes;
     HyperlinkId hyperlink {};
 
     ColumnCount usedColumns {};
@@ -62,7 +63,8 @@ struct TrivialLineBuffer
 
     void reset(GraphicsAttributes _attributes) noexcept
     {
-        attributes = _attributes;
+        textAttributes = _attributes;
+        fillAttributes = _attributes;
         hyperlink = {};
         usedColumns = {};
         text.reset();
@@ -336,12 +338,14 @@ class Line
         storage_ = std::move(buffer);
     }
 
-    void reset(GraphicsAttributes attributes,
+    void reset(GraphicsAttributes textAttributes,
+               GraphicsAttributes fillAttributes,
                HyperlinkId hyperlink,
                crispy::BufferFragment text,
                ColumnCount columnsUsed)
     {
-        storage_ = TrivialBuffer { size(), attributes, hyperlink, columnsUsed, std::move(text) };
+        storage_ =
+            TrivialBuffer { size(), textAttributes, fillAttributes, hyperlink, columnsUsed, std::move(text) };
     }
 
   private:

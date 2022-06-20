@@ -280,7 +280,8 @@ RenderLine RenderBufferBuilder<Cell>::createRenderLine(TrivialLineBuffer const& 
     renderLine.lineOffset = lineOffset;
     renderLine.usedColumns = lineBuffer.usedColumns;
     renderLine.text = lineBuffer.text.view();
-    renderLine.attributes = createRenderAttributes(gridPosition, lineBuffer.attributes);
+    renderLine.textAttributes = createRenderAttributes(gridPosition, lineBuffer.textAttributes);
+    renderLine.fillAttributes = createRenderAttributes(gridPosition, lineBuffer.fillAttributes);
 
     return renderLine;
 }
@@ -324,9 +325,9 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineB
         auto const pos = CellLocation { lineOffset, columnOffset };
         auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(pos);
         auto const [fg, bg] = makeColorsForCell(gridPosition,
-                                                lineBuffer.attributes.styles,
-                                                lineBuffer.attributes.foregroundColor,
-                                                lineBuffer.attributes.backgroundColor);
+                                                lineBuffer.textAttributes.styles,
+                                                lineBuffer.textAttributes.foregroundColor,
+                                                lineBuffer.textAttributes.backgroundColor);
         auto const width = graphemeClusterWidth(graphemeCluster);
         // fmt::print(" start {}, count {}, bytes {}, grapheme cluster \"{}\"\n",
         //            columnOffset,
@@ -337,10 +338,10 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineB
         output.cells.emplace_back(makeRenderCellExplicit(terminal.colorPalette(),
                                                          graphemeCluster,
                                                          width,
-                                                         lineBuffer.attributes.styles,
+                                                         lineBuffer.textAttributes.styles,
                                                          fg,
                                                          bg,
-                                                         lineBuffer.attributes.underlineColor,
+                                                         lineBuffer.textAttributes.underlineColor,
                                                          baseLine + lineOffset,
                                                          columnOffset));
 
@@ -356,14 +357,14 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineB
     {
         auto const pos = CellLocation { lineOffset, columnOffset };
         auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(pos);
-        auto renderAttributes = createRenderAttributes(gridPosition, lineBuffer.attributes);
+        auto renderAttributes = createRenderAttributes(gridPosition, lineBuffer.fillAttributes);
 
         output.cells.emplace_back(makeRenderCellExplicit(terminal.colorPalette(),
                                                          char32_t { 0 },
-                                                         lineBuffer.attributes.styles,
+                                                         lineBuffer.fillAttributes.styles,
                                                          renderAttributes.foregroundColor,
                                                          renderAttributes.backgroundColor,
-                                                         lineBuffer.attributes.underlineColor,
+                                                         lineBuffer.fillAttributes.underlineColor,
                                                          baseLine + lineOffset,
                                                          columnOffset));
     }

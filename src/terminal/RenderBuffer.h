@@ -63,7 +63,8 @@ struct RenderLine
     LineOffset lineOffset;
     ColumnCount usedColumns;
     ColumnCount displayWidth;
-    RenderAttributes attributes;
+    RenderAttributes textAttributes;
+    RenderAttributes fillAttributes;
 };
 
 struct RenderCursor

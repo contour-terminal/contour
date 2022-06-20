@@ -417,7 +417,7 @@ void TextRenderer::renderLine(RenderLine const& renderLine)
     if (renderLine.text.empty())
         return;
 
-    auto const textStyle = makeTextStyle(renderLine.attributes.flags);
+    auto const textStyle = makeTextStyle(renderLine.textAttributes.flags);
 
     auto graphemeClusterSegmenter = unicode::utf8_grapheme_segmenter(renderLine.text);
     auto columnOffset = ColumnOffset(0);
@@ -428,7 +428,7 @@ void TextRenderer::renderLine(RenderLine const& renderLine)
     for (u32string const& graphemeCluster: graphemeClusterSegmenter)
     {
         auto const gridPosition = CellLocation { renderLine.lineOffset, columnOffset };
-        renderCell(gridPosition, graphemeCluster, textStyle, renderLine.attributes.foregroundColor);
+        renderCell(gridPosition, graphemeCluster, textStyle, renderLine.textAttributes.foregroundColor);
 
         auto const width = graphemeClusterWidth(graphemeCluster);
         columnOffset += ColumnOffset::cast_from(width);
