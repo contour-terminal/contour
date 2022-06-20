@@ -106,19 +106,21 @@ void DecorationRenderer::inspect(std::ostream& /*output*/) const
 void DecorationRenderer::renderLine(RenderLine const& line)
 {
     for (auto const& mapping: CellFlagDecorationMappings)
-        if (line.flags & mapping.first)
+        if (line.attributes.flags & mapping.first)
             renderDecoration(mapping.second,
                              _gridMetrics.map(CellLocation { line.lineOffset }),
                              line.usedColumns,
-                             line.decorationColor);
+                             line.attributes.decorationColor);
 }
 
 void DecorationRenderer::renderCell(RenderCell const& _cell)
 {
     for (auto const& mapping: CellFlagDecorationMappings)
-        if (_cell.flags & mapping.first)
-            renderDecoration(
-                mapping.second, _gridMetrics.map(_cell.position), ColumnCount(1), _cell.decorationColor);
+        if (_cell.attributes.flags & mapping.first)
+            renderDecoration(mapping.second,
+                             _gridMetrics.map(_cell.position),
+                             ColumnCount(1),
+                             _cell.attributes.decorationColor);
 }
 
 auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocation tileLocation)

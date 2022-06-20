@@ -83,6 +83,9 @@ class RenderBufferBuilder
     [[nodiscard]] RenderLine createRenderLine(TriviallyStyledLineBuffer const& lineBuffer,
                                               LineOffset lineOffset) const;
 
+    [[nodiscard]] RenderAttributes createRenderAttributes(
+        CellLocation gridPosition, GraphicsAttributes graphicsAttributes) const noexcept;
+
     // clang-format off
     enum class State { Gap, Sequence };
     // clang-format on

@@ -209,6 +209,7 @@ void VTWriter::write(Line<Cell> const& line)
         setBackgroundColor(lineBuffer.attributes.backgroundColor);
         // TODO: hyperlinks, underlineColor and other styles (curly underline etc.)
         write(line.toUtf8());
+        // TODO: Write fill columns.
     }
     else
     {

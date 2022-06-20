@@ -36,20 +36,23 @@ void BackgroundRenderer::setRenderTarget(RenderTarget& renderTarget,
 
 void BackgroundRenderer::renderLine(RenderLine const& line)
 {
-    if (line.backgroundColor == defaultColor_)
-        return;
+    if (line.attributes.backgroundColor != defaultColor_)
+    {
+        auto const position = CellLocation { line.lineOffset, ColumnOffset(0) };
+        auto const pos = _gridMetrics.map(position);
+        auto const width = _gridMetrics.cellSize.width * Width::cast_from(line.usedColumns);
 
-    auto const position = CellLocation { line.lineOffset, ColumnOffset(0) };
-    auto const pos = _gridMetrics.map(position);
-    auto const width = _gridMetrics.cellSize.width * Width::cast_from(line.usedColumns);
-
-    renderTarget().renderRectangle(
-        pos.x, pos.y, width, _gridMetrics.cellSize.height, RGBAColor(line.backgroundColor, opacity_));
+        renderTarget().renderRectangle(pos.x,
+                                       pos.y,
+                                       width,
+                                       _gridMetrics.cellSize.height,
+                                       RGBAColor(line.attributes.backgroundColor, opacity_));
+    }
 }
 
 void BackgroundRenderer::renderCell(RenderCell const& _cell)
 {
-    if (_cell.backgroundColor == defaultColor_)
+    if (_cell.attributes.backgroundColor == defaultColor_)
         return;
 
     auto const pos = _gridMetrics.map(_cell.position);
@@ -58,7 +61,7 @@ void BackgroundRenderer::renderCell(RenderCell const& _cell)
                                    pos.y,
                                    _gridMetrics.cellSize.width,
                                    _gridMetrics.cellSize.height,
-                                   RGBAColor(_cell.backgroundColor, opacity_));
+                                   RGBAColor(_cell.attributes.backgroundColor, opacity_));
 }
 
 void BackgroundRenderer::inspect(std::ostream& /*output*/) const

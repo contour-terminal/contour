@@ -417,7 +417,7 @@ void TextRenderer::renderLine(RenderLine const& renderLine)
     if (renderLine.text.empty())
         return;
 
-    auto const textStyle = makeTextStyle(renderLine.flags);
+    auto const textStyle = makeTextStyle(renderLine.attributes.flags);
 
     auto graphemeClusterSegmenter = unicode::utf8_grapheme_segmenter(renderLine.text);
     auto columnOffset = ColumnOffset(0);
@@ -428,7 +428,7 @@ void TextRenderer::renderLine(RenderLine const& renderLine)
     for (u32string const& graphemeCluster: graphemeClusterSegmenter)
     {
         auto const gridPosition = CellLocation { renderLine.lineOffset, columnOffset };
-        renderCell(gridPosition, graphemeCluster, textStyle, renderLine.foregroundColor);
+        renderCell(gridPosition, graphemeCluster, textStyle, renderLine.attributes.foregroundColor);
 
         auto const width = graphemeClusterWidth(graphemeCluster);
         columnOffset += ColumnOffset::cast_from(width);
@@ -441,7 +441,10 @@ void TextRenderer::renderCell(RenderCell const& cell)
     if (cell.groupStart)
         updateInitialPenPosition_ = true;
 
-    renderCell(cell.position, cell.codepoints, makeTextStyle(cell.flags), cell.foregroundColor);
+    renderCell(cell.position,
+               cell.codepoints,
+               makeTextStyle(cell.attributes.flags),
+               cell.attributes.foregroundColor);
 
     if (cell.groupEnd)
         flushTextClusterGroup();

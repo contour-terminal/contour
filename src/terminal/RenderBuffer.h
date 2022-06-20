@@ -25,8 +25,18 @@
 #include <optional>
 #include <vector>
 
+#include <terminal_renderer/RenderTarget.h>
+
 namespace terminal
 {
+
+struct RenderAttributes
+{
+    RGBColor foregroundColor {};
+    RGBColor backgroundColor {};
+    RGBColor decorationColor {};
+    CellFlags flags {};
+};
 
 /**
  * Renderable representation of a grid cell with color-altering pre-applied and
@@ -37,11 +47,8 @@ struct RenderCell
     std::u32string codepoints;
     std::shared_ptr<ImageFragment> image;
     CellLocation position;
-    CellFlags flags;
+    RenderAttributes attributes;
     uint8_t width = 1;
-    RGBColor foregroundColor;
-    RGBColor backgroundColor;
-    RGBColor decorationColor;
 
     bool groupStart = false;
     bool groupEnd = false;
@@ -55,10 +62,8 @@ struct RenderLine
     std::string_view text;
     LineOffset lineOffset;
     ColumnCount usedColumns;
-    RGBColor foregroundColor;
-    RGBColor backgroundColor;
-    RGBColor decorationColor;
-    CellFlags flags;
+    ColumnCount displayWidth;
+    RenderAttributes attributes;
 };
 
 struct RenderCursor
