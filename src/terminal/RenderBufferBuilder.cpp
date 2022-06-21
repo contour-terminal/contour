@@ -148,12 +148,12 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(ColorPalette const&
                                                              ColumnOffset _column)
 {
     auto renderCell = RenderCell {};
-    renderCell.backgroundColor = bg;
-    renderCell.foregroundColor = fg;
-    renderCell.decorationColor = getUnderlineColor(_colorPalette, flags, fg, ul);
+    renderCell.attributes.backgroundColor = bg;
+    renderCell.attributes.foregroundColor = fg;
+    renderCell.attributes.decorationColor = getUnderlineColor(_colorPalette, flags, fg, ul);
+    renderCell.attributes.flags = flags;
     renderCell.position.line = _line;
     renderCell.position.column = _column;
-    renderCell.flags = flags;
     renderCell.width = unbox<uint8_t>(width);
     renderCell.codepoints = move(graphemeCluster);
     return renderCell;
@@ -170,12 +170,12 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(ColorPalette const&
                                                              ColumnOffset _column)
 {
     RenderCell renderCell;
-    renderCell.backgroundColor = bg;
-    renderCell.foregroundColor = fg;
-    renderCell.decorationColor = getUnderlineColor(_colorPalette, flags, fg, ul);
+    renderCell.attributes.backgroundColor = bg;
+    renderCell.attributes.foregroundColor = fg;
+    renderCell.attributes.decorationColor = getUnderlineColor(_colorPalette, flags, fg, ul);
+    renderCell.attributes.flags = flags;
     renderCell.position.line = _line;
     renderCell.position.column = _column;
-    renderCell.flags = flags;
     renderCell.width = 1;
     if (codepoint)
         renderCell.codepoints.push_back(codepoint);
@@ -192,12 +192,12 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCell(ColorPalette const& _colorP
                                                      ColumnOffset _column)
 {
     RenderCell renderCell;
-    renderCell.backgroundColor = bg;
-    renderCell.foregroundColor = fg;
-    renderCell.decorationColor = screenCell.getUnderlineColor(_colorPalette, fg);
+    renderCell.attributes.backgroundColor = bg;
+    renderCell.attributes.foregroundColor = fg;
+    renderCell.attributes.decorationColor = screenCell.getUnderlineColor(_colorPalette, fg);
+    renderCell.attributes.flags = screenCell.styles();
     renderCell.position.line = _line;
     renderCell.position.column = _column;
-    renderCell.flags = screenCell.styles();
     renderCell.width = screenCell.width();
 
     if (screenCell.codepointCount() != 0)
@@ -215,10 +215,10 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCell(ColorPalette const& _colorP
         // TODO(decoration): Move property into Terminal.
         auto const decoration =
             href->state == HyperlinkState::Hover
-                ? CellFlags::Underline        // TODO: decorationRenderer_.hyperlinkHover()
-                : CellFlags::DottedUnderline; // TODO: decorationRenderer_.hyperlinkNormal();
-        renderCell.flags |= decoration;       // toCellStyle(decoration);
-        renderCell.decorationColor = color;
+                ? CellFlags::Underline             // TODO: decorationRenderer_.hyperlinkHover()
+                : CellFlags::DottedUnderline;      // TODO: decorationRenderer_.hyperlinkNormal();
+        renderCell.attributes.flags |= decoration; // toCellStyle(decoration);
+        renderCell.attributes.decorationColor = color;
     }
 
     return renderCell;
@@ -254,30 +254,40 @@ std::tuple<RGBColor, RGBColor> RenderBufferBuilder<Cell>::makeColorsForCell(
 }
 
 template <typename Cell>
-RenderLine RenderBufferBuilder<Cell>::createRenderLine(TriviallyStyledLineBuffer const& lineBuffer,
+RenderAttributes RenderBufferBuilder<Cell>::createRenderAttributes(
+    CellLocation gridPosition, GraphicsAttributes graphicsAttributes) const noexcept
+{
+    auto const [fg, bg] = makeColorsForCell(gridPosition,
+                                            graphicsAttributes.styles,
+                                            graphicsAttributes.foregroundColor,
+                                            graphicsAttributes.backgroundColor);
+    auto renderAttributes = RenderAttributes {};
+    renderAttributes.foregroundColor = fg;
+    renderAttributes.backgroundColor = bg;
+    renderAttributes.decorationColor = getUnderlineColor(
+        terminal.colorPalette(), graphicsAttributes.styles, fg, graphicsAttributes.underlineColor);
+    renderAttributes.flags = graphicsAttributes.styles;
+    return renderAttributes;
+}
+
+template <typename Cell>
+RenderLine RenderBufferBuilder<Cell>::createRenderLine(TrivialLineBuffer const& lineBuffer,
                                                        LineOffset lineOffset) const
 {
     auto const pos = CellLocation { lineOffset, ColumnOffset(0) };
     auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(pos);
-    auto const [fg, bg] = makeColorsForCell(gridPosition,
-                                            lineBuffer.attributes.styles,
-                                            lineBuffer.attributes.foregroundColor,
-                                            lineBuffer.attributes.backgroundColor);
     auto renderLine = RenderLine {};
     renderLine.lineOffset = lineOffset;
     renderLine.usedColumns = lineBuffer.usedColumns;
-    renderLine.foregroundColor = fg;
-    renderLine.backgroundColor = bg;
-    renderLine.decorationColor = getUnderlineColor(
-        terminal.colorPalette(), lineBuffer.attributes.styles, fg, lineBuffer.attributes.underlineColor);
-    renderLine.flags = lineBuffer.attributes.styles;
     renderLine.text = lineBuffer.text.view();
+    renderLine.textAttributes = createRenderAttributes(gridPosition, lineBuffer.textAttributes);
+    renderLine.fillAttributes = createRenderAttributes(gridPosition, lineBuffer.fillAttributes);
+
     return renderLine;
 }
 
 template <typename Cell>
-void RenderBufferBuilder<Cell>::renderTrivialLine(TriviallyStyledLineBuffer const& lineBuffer,
-                                                  LineOffset lineOffset)
+void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineBuffer, LineOffset lineOffset)
 {
     // if (lineBuffer.text.size())
     //     fmt::print("Rendering trivial line {:2} 0..{}/{} ({} bytes): \"{}\"\n",
@@ -315,9 +325,9 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TriviallyStyledLineBuffer cons
         auto const pos = CellLocation { lineOffset, columnOffset };
         auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(pos);
         auto const [fg, bg] = makeColorsForCell(gridPosition,
-                                                lineBuffer.attributes.styles,
-                                                lineBuffer.attributes.foregroundColor,
-                                                lineBuffer.attributes.backgroundColor);
+                                                lineBuffer.textAttributes.styles,
+                                                lineBuffer.textAttributes.foregroundColor,
+                                                lineBuffer.textAttributes.backgroundColor);
         auto const width = graphemeClusterWidth(graphemeCluster);
         // fmt::print(" start {}, count {}, bytes {}, grapheme cluster \"{}\"\n",
         //            columnOffset,
@@ -328,10 +338,10 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TriviallyStyledLineBuffer cons
         output.cells.emplace_back(makeRenderCellExplicit(terminal.colorPalette(),
                                                          graphemeCluster,
                                                          width,
-                                                         lineBuffer.attributes.styles,
+                                                         lineBuffer.textAttributes.styles,
                                                          fg,
                                                          bg,
-                                                         lineBuffer.attributes.underlineColor,
+                                                         lineBuffer.textAttributes.underlineColor,
                                                          baseLine + lineOffset,
                                                          columnOffset));
 
@@ -347,17 +357,14 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TriviallyStyledLineBuffer cons
     {
         auto const pos = CellLocation { lineOffset, columnOffset };
         auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(pos);
-        auto const [fg, bg] = makeColorsForCell(gridPosition,
-                                                lineBuffer.attributes.styles,
-                                                lineBuffer.attributes.foregroundColor,
-                                                lineBuffer.attributes.backgroundColor);
+        auto renderAttributes = createRenderAttributes(gridPosition, lineBuffer.fillAttributes);
 
         output.cells.emplace_back(makeRenderCellExplicit(terminal.colorPalette(),
                                                          char32_t { 0 },
-                                                         lineBuffer.attributes.styles,
-                                                         fg,
-                                                         bg,
-                                                         lineBuffer.attributes.underlineColor,
+                                                         lineBuffer.fillAttributes.styles,
+                                                         renderAttributes.foregroundColor,
+                                                         renderAttributes.backgroundColor,
+                                                         lineBuffer.fillAttributes.underlineColor,
                                                          baseLine + lineOffset,
                                                          columnOffset));
     }

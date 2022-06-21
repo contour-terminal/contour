@@ -36,7 +36,7 @@ class RenderBufferBuilder
     /// with their grid cells are to be rendered using renderCell().
     ///
     /// @see renderCell
-    void renderTrivialLine(TriviallyStyledLineBuffer const& _lineBuffer, LineOffset _lineNo);
+    void renderTrivialLine(TrivialLineBuffer const& _lineBuffer, LineOffset _lineNo);
 
     /// This call is guaranteed to be invoked when the the full page has been rendered.
     void finish() noexcept {}
@@ -80,8 +80,11 @@ class RenderBufferBuilder
                                                                    Color foregroundColor,
                                                                    Color backgroundColor) const noexcept;
 
-    [[nodiscard]] RenderLine createRenderLine(TriviallyStyledLineBuffer const& lineBuffer,
+    [[nodiscard]] RenderLine createRenderLine(TrivialLineBuffer const& lineBuffer,
                                               LineOffset lineOffset) const;
+
+    [[nodiscard]] RenderAttributes createRenderAttributes(
+        CellLocation gridPosition, GraphicsAttributes graphicsAttributes) const noexcept;
 
     // clang-format off
     enum class State { Gap, Sequence };

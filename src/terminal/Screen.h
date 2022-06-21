@@ -519,7 +519,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         auto const& line = grid().lineAt(position.line);
         if (line.isTrivialBuffer())
         {
-            TriviallyStyledLineBuffer const& lineBuffer = line.trivialBuffer();
+            TrivialLineBuffer const& lineBuffer = line.trivialBuffer();
             return lineBuffer.hyperlink;
         }
         return at(position).hyperlink();

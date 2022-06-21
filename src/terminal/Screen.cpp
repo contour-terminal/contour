@@ -283,7 +283,7 @@ string_view Screen<Cell>::tryEmplaceChars(string_view _chars, size_t cellCount) 
 
     // In case the charset has been altered, no
     // optimization can be applied.
-    // Unless we're storing the charset in the TriviallyStyledLineBuffer, too.
+    // Unless we're storing the charset in the TrivialLineBuffer, too.
     // But for now that's too rare to be beneficial.
     if (!_state.cursor.charsets.isSelected(CharsetId::USASCII))
         return _chars;
@@ -352,6 +352,7 @@ size_t Screen<Cell>::emplaceCharsIntoCurrentLine(string_view _chars, size_t cell
         // Only use fastpath if the currently line hasn't been inflated already.
         // Because we might lose prior-written textual/SGR information otherwise.
         line.reset(_state.cursor.graphicsRendition,
+                   line.trivialBuffer().fillAttributes,
                    _state.cursor.hyperlink,
                    crispy::BufferFragment {
                        _terminal.currentPtyBuffer(),
@@ -400,9 +401,9 @@ bool Screen<Cell>::canResumeEmplace(std::string_view continuationChars) const no
     auto& line = currentLine();
     if (!line.isTrivialBuffer())
         return false;
-    TriviallyStyledLineBuffer const& buffer = line.trivialBuffer();
+    TrivialLineBuffer const& buffer = line.trivialBuffer();
     return buffer.text.view().end() == continuationChars.begin()
-           && buffer.attributes == _state.cursor.graphicsRendition
+           && buffer.textAttributes == _state.cursor.graphicsRendition
            && buffer.hyperlink == _state.cursor.hyperlink
            && buffer.text.owner() == _terminal.currentPtyBuffer();
 }

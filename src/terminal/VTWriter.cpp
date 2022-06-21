@@ -204,11 +204,12 @@ void VTWriter::write(Line<Cell> const& line)
 {
     if (line.isTrivialBuffer())
     {
-        TriviallyStyledLineBuffer const& lineBuffer = line.trivialBuffer();
-        setForegroundColor(lineBuffer.attributes.foregroundColor);
-        setBackgroundColor(lineBuffer.attributes.backgroundColor);
+        TrivialLineBuffer const& lineBuffer = line.trivialBuffer();
+        setForegroundColor(lineBuffer.textAttributes.foregroundColor);
+        setBackgroundColor(lineBuffer.textAttributes.backgroundColor);
         // TODO: hyperlinks, underlineColor and other styles (curly underline etc.)
         write(line.toUtf8());
+        // TODO: Write fill columns.
     }
     else
     {

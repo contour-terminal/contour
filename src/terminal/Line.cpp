@@ -142,7 +142,7 @@ std::string Line<Cell>::toUtf8Trimmed() const
 }
 
 template <typename Cell>
-InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input)
+InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
 {
     static constexpr char32_t ReplacementCharacter { 0xFFFD };
 
@@ -169,7 +169,8 @@ InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input)
         {
             columns.emplace_back(Cell {});
             columns.back().setHyperlink(input.hyperlink);
-            columns.back().write(input.attributes, nextChar, static_cast<uint8_t>(unicode::width(nextChar)));
+            columns.back().write(
+                input.textAttributes, nextChar, static_cast<uint8_t>(unicode::width(nextChar)));
         }
         else
         {
@@ -181,7 +182,7 @@ InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input)
                 auto const n = min(extendedWidth, cellsAvailable);
                 for (int i = 1; i < n; ++i)
                 {
-                    columns.emplace_back(Cell { input.attributes });
+                    columns.emplace_back(Cell { input.textAttributes });
                     columns.back().setHyperlink(input.hyperlink);
                 }
             }
@@ -190,7 +191,7 @@ InflatedLineBuffer<Cell> inflate(TriviallyStyledLineBuffer const& input)
     assert(columns.size() == unbox<size_t>(input.usedColumns));
 
     while (columns.size() < unbox<size_t>(input.displayWidth))
-        columns.emplace_back(Cell { input.attributes });
+        columns.emplace_back(Cell { input.fillAttributes });
 
     return columns;
 }
