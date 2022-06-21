@@ -1498,6 +1498,9 @@ void Terminal::hardReset()
     hostWritableStatusLineScreen_.clearScreen();
     hostWritableStatusLineScreen_.updateCursorIterator();
 
+    state_.margin =
+        Margin { Margin::Vertical { {}, boxed_cast<LineOffset>(state_.pageSize.lines) - 1 },
+                 Margin::Horizontal { {}, boxed_cast<ColumnOffset>(state_.pageSize.columns) - 1 } };
     primaryScreen_.verifyState();
 
     state_.inputGenerator.reset();
