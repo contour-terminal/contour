@@ -1480,9 +1480,11 @@ void Terminal::hardReset()
 
     state_.lastCursorPosition = state_.cursor.position;
 
-    state_.margin =
-        Margin { Margin::Vertical { {}, boxed_cast<LineOffset>(state_.pageSize.lines) - 1 },
-                 Margin::Horizontal { {}, boxed_cast<ColumnOffset>(state_.pageSize.columns) - 1 } };
+    state_.margin = Margin {
+        Margin::Vertical { {}, boxed_cast<LineOffset>(hostWritableStatusLineScreen_.pageSize().lines) - 1 },
+        Margin::Horizontal { {},
+                             boxed_cast<ColumnOffset>(hostWritableStatusLineScreen_.pageSize().columns) - 1 }
+    };
 
     state_.colorPalette = state_.defaultColorPalette;
 
