@@ -124,7 +124,6 @@ class Line
             setBuffer(TrivialBuffer { size(), _attributes });
     }
 
-    void fillRemainingCells(GraphicsAttributes const& _sgr, HyperlinkId hyperlink);
     void fill(LineFlags _flags,
               GraphicsAttributes const& _attributes,
               char32_t _codepoint,

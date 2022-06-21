@@ -1383,11 +1383,7 @@ void Terminal::setGraphicsRendition(GraphicsRendition _rendition)
     // 3.) clear some bits &= ~
     switch (_rendition)
     {
-        case GraphicsRendition::Reset:
-            state_.cursor.graphicsRendition = {};
-            primaryScreen_.currentLine().fillRemainingCells(state_.cursor.graphicsRendition,
-                                                            state_.cursor.hyperlink);
-            break;
+        case GraphicsRendition::Reset: state_.cursor.graphicsRendition = {}; break;
         case GraphicsRendition::Bold: state_.cursor.graphicsRendition.styles |= CellFlags::Bold; break;
         case GraphicsRendition::Faint: state_.cursor.graphicsRendition.styles |= CellFlags::Faint; break;
         case GraphicsRendition::Italic: state_.cursor.graphicsRendition.styles |= CellFlags::Italic; break;
