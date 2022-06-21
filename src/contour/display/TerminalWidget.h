@@ -58,7 +58,7 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
     Q_OBJECT
 
   public:
-    explicit TerminalWidget(ContourGuiApp& _app);
+    TerminalWidget();
 
     ~TerminalWidget() override;
 
@@ -77,7 +77,7 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
     [[nodiscard]] bool hasSession() const noexcept { return session_ != nullptr; }
 
     // NB: Use TerminalSession.attachDisplay, that one is calling this here.
-    void setSession(TerminalSession& newSession) { session_ = &newSession; }
+    void setSession(TerminalSession& newSession);
 
     [[nodiscard]] TerminalSession& session() noexcept
     {
@@ -186,7 +186,7 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
 
     [[nodiscard]] terminal::PageSize pageSize() const
     {
-        return pageSizeForPixels(pixelSize(), renderer_.gridMetrics().cellSize);
+        return pageSizeForPixels(pixelSize(), renderer_->gridMetrics().cellSize);
     }
 
     void updateMinimumSize();
@@ -196,7 +196,7 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
 
     [[nodiscard]] terminal::renderer::GridMetrics const& gridMetrics() const noexcept
     {
-        return renderer_.gridMetrics();
+        return renderer_->gridMetrics();
     }
 
     /// Flags the screen as dirty.
@@ -213,18 +213,17 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
 
     // private data fields
     //
-    ContourGuiApp& app_;
     std::string profileName_;
     std::string programPath_;
     TerminalSession* session_ = nullptr;
     std::chrono::steady_clock::time_point startTime_;
     text::DPI lastFontDPI_;
-    terminal::renderer::Renderer renderer_;
+    std::unique_ptr<terminal::renderer::Renderer> renderer_;
     bool renderingPressure_ = false;
     std::unique_ptr<terminal::renderer::RenderTarget> renderTarget_;
     PermissionCache rememberedPermissions_ {};
     bool maximizedState_ = false;
-    bool titleBarState_;
+    bool framelessWidget_ = false;
 
     // update() timer used to animate the blinking cursor.
     QTimer updateTimer_;
