@@ -19,13 +19,13 @@
 #include <terminal/Image.h>
 #include <terminal/primitives.h>
 
+#include <terminal_renderer/RenderTarget.h>
+
 #include <atomic>
 #include <chrono>
 #include <mutex>
 #include <optional>
 #include <vector>
-
-#include <terminal_renderer/RenderTarget.h>
 
 namespace terminal
 {
