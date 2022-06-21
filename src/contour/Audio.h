@@ -1,6 +1,6 @@
 #pragma once
 
-#include <crispy/span.h>
+#include <gsl/span>
 
 #include <memory>
 
@@ -28,7 +28,7 @@ class Audio: public QObject
     void handlePlayback(int volume, int duration, std::vector<int> const& notes);
 
   private:
-    void fillBuffer(int volume, int duration, crispy::span<const int> notes);
+    void fillBuffer(int volume, int duration, gsl::span<const int> notes);
     std::vector<std::int16_t> createMusicalNote(double volume, int duration, int note_) noexcept;
 
     QByteArray byteArray_;

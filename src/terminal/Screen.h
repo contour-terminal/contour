@@ -28,7 +28,6 @@
 #include <crispy/algorithm.h>
 #include <crispy/logstore.h>
 #include <crispy/size.h>
-#include <crispy/span.h>
 #include <crispy/utils.h>
 
 #include <unicode/grapheme_segmenter.h>
