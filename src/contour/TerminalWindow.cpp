@@ -112,7 +112,7 @@ TerminalWindow::TerminalWindow(ContourGuiApp& _app): _app { _app }
 
     TerminalSession* session = _app.sessionsManager().createSession();
 
-    terminalWidget_ = new display::TerminalWidget(_app);
+    terminalWidget_ = new display::TerminalWidget();
 
     connect(terminalWidget_, SIGNAL(terminated()), this, SLOT(onTerminalClosed()));
     connect(terminalWidget_,
