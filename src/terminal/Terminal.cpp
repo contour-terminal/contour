@@ -582,7 +582,7 @@ bool Terminal::sendMouseMoveEvent(Modifier _modifier,
 
     currentMousePosition_ = newPosition;
 
-    auto const relativePos = viewport_.translateScreenToGridCoordinate(currentMousePosition_);
+    auto relativePos = viewport_.translateScreenToGridCoordinate(currentMousePosition_);
 
     changed = changed || updateCursorHoveringState();
 
@@ -603,6 +603,10 @@ bool Terminal::sendMouseMoveEvent(Modifier _modifier,
     if (selectionAvailable() && selector()->state() != Selection::State::Complete
         && inputHandler().mode() == ViMode::Insert)
     {
+        if (currentScreen().isCellEmpty(relativePos) && !currentScreen().compareCellTextAt(relativePos, 0x20))
+        {
+            relativePos.column = ColumnOffset { 0 } + *(state_.pageSize.columns - 1);
+        }
         changed = true;
         selector()->extend(relativePos);
         breakLoopAndRefreshRenderBuffer();
