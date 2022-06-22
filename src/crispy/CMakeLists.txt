@@ -25,7 +25,6 @@ set(crispy_SOURCES
     overloaded.h
     reference.h
     ring.h
-    span.h
     stdfs.h
     times.h
 )

@@ -80,7 +80,7 @@ Audio::~Audio()
     soundThread_.wait();
 }
 
-void Audio::fillBuffer(int volume, int duration, crispy::span<int const> notes)
+void Audio::fillBuffer(int volume, int duration, gsl::span<int const> notes)
 {
     for (auto const i: notes)
     {
@@ -94,10 +94,10 @@ void Audio::handlePlayback(int volume, int duration, std::vector<int> const& not
     Require(audio);
     if (audio->state() == QAudio::State::ActiveState)
     {
-        fillBuffer(volume, duration, crispy::span(notes.data(), notes.size()));
+        fillBuffer(volume, duration, gsl::span(notes.data(), notes.size()));
         return;
     }
-    fillBuffer(volume, duration, crispy::span(notes.data(), notes.size()));
+    fillBuffer(volume, duration, gsl::span(notes.data(), notes.size()));
     audioBuffer_.setBuffer(&byteArray_);
     audioBuffer_.open(QIODevice::ReadWrite);
     audio->start(&audioBuffer_);
