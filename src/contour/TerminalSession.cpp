@@ -85,6 +85,15 @@ namespace
         pthread_setname_np(pthread_self(), name);
 #endif
     }
+
+    string normalize_crlf(QString&& text)
+    {
+#if !defined(_WIN32)
+        return text.replace("\r\n", "\n").replace("\r", "\n").toUtf8().toStdString();
+#else
+        return text.toUtf8().toStdString();
+#endif
+    }
 } // namespace
 
 TerminalSession::TerminalSession(unique_ptr<Pty> _pty, ContourGuiApp& _app):
@@ -374,7 +383,7 @@ void TerminalSession::pasteFromClipboard(unsigned count)
         SessionLog()("pasteFromClipboard: mime data contains {} formats.", md->formats().size());
         for (int i = 0; i < md->formats().size(); ++i)
             SessionLog()("pasteFromClipboard[{}]: {}\n", i, md->formats().at(i).toStdString());
-        string const text = clipboard->text(QClipboard::Clipboard).toUtf8().toStdString();
+        string const text = normalize_crlf(clipboard->text(QClipboard::Clipboard));
         if (text.empty())
             SessionLog()("Clipboard does not contain text.");
         else if (count == 1)
@@ -751,7 +760,7 @@ bool TerminalSession::operator()(actions::PasteSelection)
 {
     if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
     {
-        string const text = clipboard->text(QClipboard::Selection).toUtf8().toStdString();
+        string const text = normalize_crlf(clipboard->text(QClipboard::Selection));
         terminal().sendPaste(string_view { text });
     }
 
