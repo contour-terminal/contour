@@ -75,10 +75,10 @@ class RenderBufferBuilder
     /// Constructs the final foreground/background colors to be displayed on the screen.
     ///
     /// This call takes cursor-position, hyperlink-states, selection, and reverse-video mode into account.
-    [[nodiscard]] std::tuple<RGBColor, RGBColor> makeColorsForCell(CellLocation,
-                                                                   CellFlags cellFlags,
-                                                                   Color foregroundColor,
-                                                                   Color backgroundColor) const noexcept;
+    [[nodiscard]] RGBColorPair makeColorsForCell(CellLocation,
+                                                 CellFlags cellFlags,
+                                                 Color foregroundColor,
+                                                 Color backgroundColor) const noexcept;
 
     [[nodiscard]] RenderLine createRenderLine(TrivialLineBuffer const& lineBuffer,
                                               LineOffset lineOffset) const;

@@ -40,11 +40,10 @@
 #include <QtGui/QKeyEvent>
 #include <QtGui/QScreen>
 #include <QtGui/QWindow>
+#include <QtNetwork/QHostInfo>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QStyle>
-
-#include <QtNetwork/QHostInfo>
 
 #if defined(CONTOUR_BLUR_PLATFORM_KWIN)
     #include <KWindowEffects>

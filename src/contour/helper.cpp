@@ -24,13 +24,12 @@
 #include <QtCore/QStringList>
 #include <QtCore/QUrl>
 #include <QtGui/QGuiApplication>
+#include <QtNetwork/QHostInfo>
 #include <QtWidgets/QMessageBox>
 
 #include <algorithm>
 #include <array>
 #include <mutex>
-
-#include <QtNetwork/QHostInfo>
 
 using std::array;
 using std::clamp;
