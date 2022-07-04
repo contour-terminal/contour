@@ -6,8 +6,6 @@
 #include <unicode/convert.h>
 #include <unicode/utf8_grapheme_segmenter.h>
 
-#include <tuple>
-
 using namespace std;
 
 namespace terminal
@@ -25,76 +23,58 @@ namespace
         return baseWidth;
     }
 
-    constexpr RGBColor makeRGBColor(RGBColor fg, RGBColor bg, CellRGBColor cellColor) noexcept
+    constexpr RGBColor makeRGBColor(RGBColorPair actualColors, CellRGBColor configuredColor) noexcept
     {
-        if (holds_alternative<CellForegroundColor>(cellColor))
-            return fg;
-        if (holds_alternative<CellBackgroundColor>(cellColor))
-            return bg;
-        return get<RGBColor>(cellColor);
+        if (holds_alternative<CellForegroundColor>(configuredColor))
+            return actualColors.foreground;
+        if (holds_alternative<CellBackgroundColor>(configuredColor))
+            return actualColors.background;
+        return get<RGBColor>(configuredColor);
     }
 
-    constexpr RGBColor average(RGBColor a, RGBColor b) noexcept
+    RGBColorPair makeColors(ColorPalette const& _colorPalette,
+                            CellFlags _cellFlags,
+                            bool _reverseVideo,
+                            Color foregroundColor,
+                            Color backgroundColor,
+                            bool _selected,
+                            bool _isCursor,
+                            bool _isHighlighted) noexcept
     {
-        return RGBColor(static_cast<uint8_t>((a.red + b.red) / 2),
-                        static_cast<uint8_t>((a.green + b.green) / 2),
-                        static_cast<uint8_t>((a.blue + b.blue) / 2));
-    }
-
-    tuple<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette,
-                                         CellFlags _cellFlags,
-                                         bool _reverseVideo,
-                                         Color foregroundColor,
-                                         Color backgroundColor,
-                                         bool _selected,
-                                         bool _isCursor,
-                                         bool _isHighlighted) noexcept
-    {
-        bool const isCellHidden = _cellFlags & CellFlags::Hidden;
-        auto const [fg, bg] =
+        auto const sgrColors =
             makeColors(_colorPalette, _cellFlags, _reverseVideo, foregroundColor, backgroundColor);
-        if (!_selected && !_isCursor && !_isHighlighted)
-        {
-            if (isCellHidden)
-                return tuple { bg, bg };
-            else
-                return tuple { fg, bg };
-        }
-        else if (_isCursor && distance(fg, bg) < 0.1)
-        {
-            auto const fgInv =
-                RGBColor { uint8_t(255 - fg.red), uint8_t(255 - fg.green), uint8_t(255 - fg.blue) };
-            return { fgInv, fg };
-        }
 
-        auto getSelectionColor = [](auto fg,
-                                    auto bg,
-                                    bool selected,
-                                    ColorPalette const& colors) noexcept -> tuple<RGBColor, RGBColor> {
-            auto const a = colors.selectionForeground.value_or(bg);
-            auto const b = colors.selectionBackground.value_or(fg);
+        if (!_selected && !_isCursor && !_isHighlighted)
+            return sgrColors;
+
+        auto getSelectionColor =
+            [](RGBColorPair colorPair, bool selected, ColorPalette const& colors) noexcept -> RGBColorPair {
+            auto const out =
+                colorPair.constructDefaulted(colors.selectionForeground, colors.selectionBackground);
             if (selected)
-                return tuple { a, b };
+                return out.swapped();
             else
-                return tuple { b, a };
+                return out;
         };
-        auto const [selectionFg, selectionBg] = isCellHidden
-                                                    ? getSelectionColor(fg, fg, _selected, _colorPalette)
-                                                    : getSelectionColor(fg, bg, _selected, _colorPalette);
+
+        auto const selectionColors = getSelectionColor(sgrColors, _selected, _colorPalette);
         if (!_isCursor && _isHighlighted)
-            return { isCellHidden ? _colorPalette.highlightBackground : _colorPalette.highlightForeground,
-                     _colorPalette.highlightBackground };
+            return { _colorPalette.highlightForeground, _colorPalette.highlightBackground };
 
         if (!_isCursor)
-            return tuple { selectionFg, selectionBg };
+            return selectionColors;
 
-        auto const cursorFg = makeRGBColor(selectionFg, selectionBg, _colorPalette.cursor.textOverrideColor);
-        auto const cursorBg = makeRGBColor(selectionFg, selectionBg, _colorPalette.cursor.color);
+        if (!_selected)
+            return { makeRGBColor(sgrColors, _colorPalette.cursor.textOverrideColor),
+                     makeRGBColor(sgrColors, _colorPalette.cursor.color) };
 
-        if (_selected)
-            return tuple { average(selectionFg, cursorFg), average(selectionFg, cursorFg) };
+        Require(_isCursor && _selected);
 
-        return tuple { cursorFg, cursorBg };
+        auto cursorColor =
+            RGBColorPair { makeRGBColor(selectionColors, _colorPalette.cursor.textOverrideColor),
+                           makeRGBColor(selectionColors, _colorPalette.cursor.color) };
+
+        return mix(cursorColor, selectionColors, 0.25f).distinct();
     }
 
 } // namespace
@@ -225,11 +205,10 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCell(ColorPalette const& _colorP
 }
 
 template <typename Cell>
-std::tuple<RGBColor, RGBColor> RenderBufferBuilder<Cell>::makeColorsForCell(
-    CellLocation gridPosition,
-    CellFlags cellFlags,
-    Color foregroundColor,
-    Color backgroundColor) const noexcept
+RGBColorPair RenderBufferBuilder<Cell>::makeColorsForCell(CellLocation gridPosition,
+                                                          CellFlags cellFlags,
+                                                          Color foregroundColor,
+                                                          Color backgroundColor) const noexcept
 {
     auto const hasCursor = gridPosition == cursorPosition;
 

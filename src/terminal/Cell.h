@@ -160,8 +160,8 @@ class CONTOUR_PACKED Cell
 
     RGBColor getUnderlineColor(ColorPalette const& _colorPalette, RGBColor _defaultColor) const noexcept;
 
-    std::pair<RGBColor, RGBColor> makeColors(ColorPalette const& _colorPalette,
-                                             bool _reverseVideo) const noexcept;
+    [[nodiscard]] RGBColorPair makeColors(ColorPalette const& _colorPalette,
+                                          bool _reverseVideo) const noexcept;
 
     std::shared_ptr<ImageFragment> imageFragment() const noexcept;
     void setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, CellLocation offset);
@@ -515,11 +515,11 @@ inline RGBColor Cell::getUnderlineColor(ColorPalette const& _colorPalette,
     return terminal::getUnderlineColor(_colorPalette, styles(), _defaultColor, underlineColor());
 }
 
-inline std::pair<RGBColor, RGBColor> makeColors(ColorPalette const& colorPalette,
-                                                CellFlags cellFlags,
-                                                bool _reverseVideo,
-                                                Color foregroundColor,
-                                                Color backgroundColor) noexcept
+inline RGBColorPair makeColors(ColorPalette const& colorPalette,
+                               CellFlags cellFlags,
+                               bool _reverseVideo,
+                               Color foregroundColor,
+                               Color backgroundColor) noexcept
 {
     auto const mode = (cellFlags & CellFlags::Faint)                                    ? ColorMode::Dimmed
                       : ((cellFlags & CellFlags::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
@@ -529,15 +529,19 @@ inline std::pair<RGBColor, RGBColor> makeColors(ColorPalette const& colorPalette
         _reverseVideo ? std::pair { ColorTarget::Background, ColorTarget::Foreground }
                       : std::pair { ColorTarget::Foreground, ColorTarget::Background };
 
-    return (cellFlags & CellFlags::Inverse) == 0
-               ? std::pair { apply(colorPalette, foregroundColor, fgColorTarget, mode),
-                             apply(colorPalette, backgroundColor, bgColorTarget, mode) }
-               : std::pair { apply(colorPalette, backgroundColor, bgColorTarget, mode),
-                             apply(colorPalette, foregroundColor, fgColorTarget, mode) };
+    auto rgbColors = RGBColorPair { apply(colorPalette, foregroundColor, fgColorTarget, mode),
+                                    apply(colorPalette, backgroundColor, bgColorTarget, mode) };
+
+    if (cellFlags & CellFlags::Inverse)
+        rgbColors = rgbColors.swapped();
+
+    if (cellFlags & CellFlags::Hidden)
+        rgbColors = rgbColors.allBackground();
+
+    return rgbColors;
 }
 
-inline std::pair<RGBColor, RGBColor> Cell::makeColors(ColorPalette const& _colorPalette,
-                                                      bool _reverseVideo) const noexcept
+inline RGBColorPair Cell::makeColors(ColorPalette const& _colorPalette, bool _reverseVideo) const noexcept
 {
     return terminal::makeColors(_colorPalette, styles(), _reverseVideo, foregroundColor(), backgroundColor());
 }

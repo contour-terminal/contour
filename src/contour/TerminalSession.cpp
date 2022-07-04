@@ -38,13 +38,12 @@
 #include <QtGui/QKeyEvent>
 #include <QtGui/QScreen>
 #include <QtGui/QWindow>
+#include <QtNetwork/QHostInfo>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QMessageBox>
 
 #include <algorithm>
 #include <fstream>
-
-#include <QtNetwork/QHostInfo>
 
 #if !defined(_WIN32)
     #include <pthread.h>

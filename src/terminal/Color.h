@@ -80,6 +80,11 @@ struct RGBColor
         return static_cast<uint32_t>((red << 16) | (green << 8) | blue);
     }
 
+    [[nodiscard]] constexpr RGBColor inverse() const noexcept
+    {
+        return RGBColor { uint8_t(255 - red), uint8_t(255 - green), uint8_t(255 - blue) };
+    }
+
     explicit RGBColor(std::string const& _hexCode);
 
     RGBColor& operator=(std::string const& _hexCode);
@@ -90,6 +95,18 @@ constexpr RGBColor operator*(RGBColor c, float s) noexcept
     return RGBColor { static_cast<uint8_t>(std::clamp(static_cast<float>(c.red) * s, 0.0f, 255.0f)),
                       static_cast<uint8_t>(std::clamp(static_cast<float>(c.green) * s, 0.0f, 255.0f)),
                       static_cast<uint8_t>(std::clamp(static_cast<float>(c.blue) * s, 0.0f, 255.0f)) };
+}
+
+constexpr RGBColor operator+(RGBColor a, RGBColor b) noexcept
+{
+    return RGBColor { static_cast<uint8_t>(std::clamp<unsigned>(a.red + b.red, 0, 255)),
+                      static_cast<uint8_t>(std::clamp<unsigned>(a.green + b.green, 0, 255)),
+                      static_cast<uint8_t>(std::clamp<unsigned>(a.blue + b.blue, 0, 255)) };
+}
+
+constexpr RGBColor mix(RGBColor a, RGBColor b, float t = 0.5) noexcept
+{
+    return a * t + b * (1.0f - t);
 }
 
 inline double distance(RGBColor e1, RGBColor e2) noexcept
@@ -114,6 +131,57 @@ constexpr bool operator==(RGBColor a, RGBColor b) noexcept
 constexpr bool operator!=(RGBColor a, RGBColor b) noexcept
 {
     return !(a == b);
+}
+
+struct RGBColorPair
+{
+    RGBColor foreground;
+    RGBColor background;
+
+    [[nodiscard]] bool isTooSimilar(double threshold = 0.1) const noexcept
+    {
+        return distance(foreground, background) <= threshold;
+    }
+
+    [[nodiscard]] RGBColorPair distinct() const noexcept
+    {
+        if (isTooSimilar())
+            return { foreground.inverse(), foreground };
+        else
+            return *this;
+    }
+
+    [[nodiscard]] constexpr RGBColorPair constructDefaulted(std::optional<RGBColor> fgOpt,
+                                                            std::optional<RGBColor> bgOpt) const noexcept
+    {
+        return { fgOpt.value_or(foreground), bgOpt.value_or(background) };
+    }
+
+    [[nodiscard]] constexpr RGBColorPair swapped() const noexcept
+    {
+        // Swap fg/bg.
+        return { background, foreground };
+    }
+
+    [[nodiscard]] constexpr RGBColorPair allForeground() const noexcept
+    {
+        // All same color components as foreground.
+        return { foreground, foreground };
+    }
+
+    [[nodiscard]] constexpr RGBColorPair allBackground() const noexcept
+    {
+        // All same color components as foreground.
+        return { background, background };
+    }
+};
+
+constexpr RGBColorPair mix(RGBColorPair a, RGBColorPair b, float t = 0.5) noexcept
+{
+    return RGBColorPair {
+        mix(a.foreground, b.foreground, t),
+        mix(a.background, b.background, t),
+    };
 }
 // }}}
 
@@ -389,6 +457,41 @@ struct formatter<terminal::RGBAColor>
     auto format(terminal::RGBAColor value, FormatContext& ctx)
     {
         return fmt::format_to(ctx.out(), to_string(value));
+    }
+};
+
+template <>
+struct formatter<terminal::CellRGBColor>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::CellRGBColor value, FormatContext& ctx)
+    {
+        if (std::holds_alternative<terminal::CellForegroundColor>(value))
+            return fmt::format_to(ctx.out(), "CellForeground");
+        else if (std::holds_alternative<terminal::CellBackgroundColor>(value))
+            return fmt::format_to(ctx.out(), "CellBackground");
+        else
+            return fmt::format_to(ctx.out(), "{}", std::get<terminal::RGBColor>(value));
+    }
+};
+
+template <>
+struct formatter<terminal::RGBColorPair>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::RGBColorPair value, FormatContext& ctx)
+    {
+        return fmt::format_to(ctx.out(), "{}/{}", value.foreground, value.background);
     }
 };
 
