@@ -48,19 +48,25 @@ namespace
             return sgrColors;
 
         auto getSelectionColor =
-            [](RGBColorPair colorPair, bool selected, ColorPalette const& colors) noexcept -> RGBColorPair {
-            auto const out =
-                colorPair.constructDefaulted(colors.selectionForeground, colors.selectionBackground);
+            [&](RGBColorPair colorPair, bool selected, ColorPalette const& colors) noexcept -> RGBColorPair {
             if (selected)
-                return out.swapped();
+            {
+                return RGBColorPair { mix(makeRGBColor(sgrColors, colors.selectionForeground),
+                                          sgrColors.foreground,
+                                          colors.selectionForegroundAlpha),
+                                      mix(makeRGBColor(sgrColors, colors.selectionBackground),
+                                          sgrColors.background,
+                                          colors.selectionBackgroundAlpha) }
+                    .distinct();
+            }
             else
-                return out;
+                return colorPair;
         };
 
-        auto const selectionColors = getSelectionColor(sgrColors, _selected, _colorPalette);
         if (!_isCursor && _isHighlighted)
             return { _colorPalette.highlightForeground, _colorPalette.highlightBackground };
 
+        auto const selectionColors = getSelectionColor(sgrColors, _selected, _colorPalette);
         if (!_isCursor)
             return selectionColors;
 

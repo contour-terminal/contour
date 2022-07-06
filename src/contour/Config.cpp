@@ -933,18 +933,30 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _baseP
         if (auto fg = def["foreground"]; fg && fg.IsScalar())
         {
             _usedKeys.emplace(_basePath + ".selection.foreground");
-            colors.selectionForeground.emplace(fg.as<string>());
+            colors.selectionForeground = parseCellColor(fg.as<string>());
         }
         else
-            colors.selectionForeground.reset();
+            colors.selectionForeground = terminal::CellBackgroundColor {};
+
+        if (auto alpha = def["foreground_alpha"]; alpha && alpha.IsScalar())
+        {
+            _usedKeys.emplace(_basePath + ".selection.foreground_alpha");
+            colors.selectionForegroundAlpha = std::clamp(alpha.as<float>(), 0.0f, 1.0f);
+        }
 
         if (auto bg = def["background"]; bg && bg.IsScalar())
         {
             _usedKeys.emplace(_basePath + ".selection.background");
-            colors.selectionBackground.emplace(bg.as<string>());
+            colors.selectionBackground = parseCellColor(bg.as<string>());
         }
         else
-            colors.selectionBackground.reset();
+            colors.selectionBackground = terminal::CellForegroundColor {};
+
+        if (auto alpha = def["background_alpha"]; alpha && alpha.IsScalar())
+        {
+            _usedKeys.emplace(_basePath + ".selection.background_alpha");
+            colors.selectionBackgroundAlpha = std::clamp(alpha.as<float>(), 0.0f, 1.0f);
+        }
     }
 
     if (auto cursor = _node["cursor"]; cursor)

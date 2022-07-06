@@ -1687,13 +1687,13 @@ void Screen<Cell>::requestDynamicColor(DynamicColorName _name)
             case DynamicColorName::MouseForegroundColor: return _state.colorPalette.mouseForeground;
             case DynamicColorName::MouseBackgroundColor: return _state.colorPalette.mouseBackground;
             case DynamicColorName::HighlightForegroundColor:
-                if (_state.colorPalette.selectionForeground.has_value())
-                    return _state.colorPalette.selectionForeground.value();
+                if (holds_alternative<RGBColor>(_state.colorPalette.selectionForeground))
+                    return get<RGBColor>(_state.colorPalette.selectionForeground);
                 else
                     return nullopt;
             case DynamicColorName::HighlightBackgroundColor:
-                if (_state.colorPalette.selectionBackground.has_value())
-                    return _state.colorPalette.selectionBackground.value();
+                if (holds_alternative<RGBColor>(_state.colorPalette.selectionBackground))
+                    return get<RGBColor>(_state.colorPalette.selectionBackground);
                 else
                     return nullopt;
         }

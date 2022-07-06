@@ -152,8 +152,10 @@ struct ColorPalette
 
     RGBColor defaultForeground = 0xD0D0D0_rgb;
     RGBColor defaultBackground = 0x000000_rgb;
-    std::optional<RGBColor> selectionForeground = std::nullopt;
-    std::optional<RGBColor> selectionBackground = std::nullopt;
+    CellRGBColor selectionForeground = CellBackgroundColor {};
+    CellRGBColor selectionBackground = CellForegroundColor {};
+    float selectionForegroundAlpha = 1.0f;
+    float selectionBackgroundAlpha = 1.0f;
 
     CursorColor cursor;
 

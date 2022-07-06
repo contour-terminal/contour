@@ -936,5 +936,21 @@ struct formatter<terminal::ScreenType>
     }
 };
 
+template <>
+struct formatter<terminal::PixelCoordinate>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename FormatContext>
+    auto format(const terminal::PixelCoordinate coord, FormatContext& ctx)
+    {
+        return fmt::format_to(ctx.out(), "{}:{}", coord.x.value, coord.y.value);
+    }
+};
+
 } // namespace fmt
 // }}}
