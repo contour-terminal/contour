@@ -433,9 +433,31 @@ color_schemes:
 
         # The text selection color can be customized here.
         # Leaving a value empty will default to the inverse of the content's color values.
-        # selection:
-        #     foreground: '#c0c0c0'
-        #     background: '#a000a0'
+        #
+        # The color can be specified in RGB as usual, plus
+        # - CellForeground: Selects the cell's foreground color.
+        # - CellBackground: Selects the cell's background color.
+        selection:
+            # Specifies the color to be used for the selected text.
+            #
+            # Default: CellBackground
+            foreground: CellBackground
+            # Specifies the alpha value (between 0.0 and 1.0) the configured foreground color
+            # will contribute to the original color.
+            #
+            # A value of 1.0 will paint over, whereas a value of 0.5 will give
+            # a look of a half-transparently painted grid cell.
+            foreground_alpha: 1.0
+            # Specifies the color to be used for the selected background.
+            #
+            # Default: CellForeground
+            background: CellForeground
+            # Specifies the alpha value (between 0.0 and 1.0) the configured background color
+            # will contribute to the original color.
+            #
+            # A value of 1.0 will paint over, whereas a value of 0.5 will give
+            # a look of a half-transparently painted grid cell.
+            background_alpha: 1.0
 
         # Normal colors
         normal:

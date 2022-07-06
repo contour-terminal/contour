@@ -40,6 +40,8 @@
 - Adds VT sequences `XTPUSHCOLORS`, `XTPOPCOLORS`, `XTREPORTCOLORS` (#714).
 - Adds CLI syntax `contour info vt` to print list of supported VT sequences (#730).
 - Adds VT sequence `DECPS` (#237).
+- Adds new config option `colorscheme.selection.foreground_alpha` and `colorscheme.selection.background_alpha` to enable somewhat more eye-candy visual looks on text selection.
+- Extends config option `colorscheme.selection.foreground` and `colorscheme.selection.background` to also accept `CellForeground` and `CellBackground` as value.
 
 ### 0.3.1 (2022-05-01)
 
