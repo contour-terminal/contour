@@ -42,6 +42,7 @@ struct CellMargin
 struct PageMargin
 {
     int left;
+    int top;
     int bottom;
 };
 
@@ -83,7 +84,7 @@ struct GridMetrics
     constexpr crispy::Point mapTopLeft(LineOffset _line, ColumnOffset _column) const noexcept
     {
         auto const x = pageMargin.left + *_column * cellSize.width.as<int>();
-        auto const y = pageMargin.bottom + *_line * cellSize.height.as<int>();
+        auto const y = pageMargin.top + *_line * cellSize.height.as<int>();
 
         return { x, y };
     }

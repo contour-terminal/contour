@@ -416,12 +416,13 @@ terminal::renderer::PageMargin computeMargin(ImageSize _cellSize,
     auto const usedHeight = unbox<int>(_charCells.lines) * unbox<int>(_cellSize.height);
     auto const freeHeight = unbox<int>(_pixels.height) - usedHeight;
     auto const bottomMargin = freeHeight;
+    auto const topMargin = 0;
 
     // auto const usedWidth = _charCells.columns * regularFont_.maxAdvance();
     // auto const freeWidth = _pixels.width - usedWidth;
     auto constexpr leftMargin = 0;
 
-    return { leftMargin, bottomMargin };
+    return { leftMargin, topMargin, bottomMargin };
 }
 
 terminal::renderer::FontDescriptions sanitizeFontDescription(terminal::renderer::FontDescriptions _fonts,

@@ -66,7 +66,7 @@ namespace
 
         gm.pageSize = _pageSize;
         gm.cellMargin = { 0, 0, 0, 0 }; // TODO (pass as args, and make use of them)
-        gm.pageMargin = { 0, 0 };       // TODO (fill early)
+        gm.pageMargin = { 0, 0, 0 };    // TODO (fill early)
 
         loadGridMetricsFromFont(_font, gm, _textShaper);
 
