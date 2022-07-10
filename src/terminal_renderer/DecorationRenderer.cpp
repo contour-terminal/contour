@@ -108,7 +108,7 @@ void DecorationRenderer::renderLine(RenderLine const& line)
     for (auto const& mapping: CellFlagDecorationMappings)
         if (line.textAttributes.flags & mapping.first)
             renderDecoration(mapping.second,
-                             _gridMetrics.map(CellLocation { line.lineOffset }),
+                             _gridMetrics.mapBottomLeft(CellLocation { line.lineOffset }),
                              line.usedColumns,
                              line.textAttributes.decorationColor);
 }
@@ -118,7 +118,7 @@ void DecorationRenderer::renderCell(RenderCell const& _cell)
     for (auto const& mapping: CellFlagDecorationMappings)
         if (_cell.attributes.flags & mapping.first)
             renderDecoration(mapping.second,
-                             _gridMetrics.map(_cell.position),
+                             _gridMetrics.mapBottomLeft(_cell.position),
                              ColumnCount(1),
                              _cell.attributes.decorationColor);
 }
@@ -312,7 +312,7 @@ void DecorationRenderer::renderDecoration(Decorator decoration,
         TextureAtlas::TileCreateData tileData = createTileData(decoration, tileLocation);
         AtlasTileAttributes const& tileAttributes = _textureAtlas->directMapped(tileIndex);
         renderTile({ pos.x + unbox<int>(i) * unbox<int>(_gridMetrics.cellSize.width) },
-                   { pos.y },
+                   { pos.y - unbox<int>(tileAttributes.bitmapSize.height) },
                    color,
                    tileAttributes);
     }

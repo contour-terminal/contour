@@ -1,5 +1,7 @@
 ### 0.3.3 (unreleased)
 
+- Internal: Y-axis inverted to match GUI coordinate systems where (0, 0) is top left rather than bottom left.
+
 ### 0.3.2 (2022-07-07)
 
 - Fixes writing to a non-empty line sometimes destroying the contents of that line (#702).

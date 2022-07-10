@@ -64,19 +64,38 @@ struct GridMetrics
 
     /// Maps screen coordinates to target surface coordinates.
     ///
-    /// @param col screen coordinate's column (between 1 and number of screen columns)
-    /// @param line screen coordinate's line (between 1 and number of screen lines)
+    /// @param col screen coordinate's column (between 0 and number of screen columns minus 1)
+    /// @param line screen coordinate's line (between 0 and number of screen lines minus 1)
     ///
-    /// @return 2D point into drawing coordinate system
+    /// @return 2D point into the grid cell's top left in drawing system coordinates.
     constexpr crispy::Point map(LineOffset _line, ColumnOffset _column) const noexcept
     {
+        return mapTopLeft(_line, _column);
+    }
+
+    constexpr crispy::Point map(CellLocation _pos) const noexcept { return map(_pos.line, _pos.column); }
+
+    constexpr crispy::Point mapTopLeft(CellLocation _pos) const noexcept
+    {
+        return mapTopLeft(_pos.line, _pos.column);
+    }
+
+    constexpr crispy::Point mapTopLeft(LineOffset _line, ColumnOffset _column) const noexcept
+    {
         auto const x = pageMargin.left + *_column * cellSize.width.as<int>();
-        auto const y = pageMargin.bottom + (*pageSize.lines - *_line - 1) * cellSize.height.as<int>();
+        auto const y = pageMargin.bottom + *_line * cellSize.height.as<int>();
 
         return { x, y };
     }
 
-    constexpr crispy::Point map(CellLocation _pos) const noexcept { return map(_pos.line, _pos.column); }
+    constexpr crispy::Point mapBottomLeft(CellLocation _pos) const noexcept
+    {
+        return mapBottomLeft(_pos.line, _pos.column);
+    }
+    constexpr crispy::Point mapBottomLeft(LineOffset _line, ColumnOffset _column) const noexcept
+    {
+        return mapTopLeft(_line + 1, _column);
+    }
 };
 
 } // namespace terminal::renderer

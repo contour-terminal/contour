@@ -56,7 +56,7 @@ namespace
         for (auto i = 0; i < height; i++)
             for (auto j = 0; j < width; j++)
             {
-                const auto base = ((height - 1 - i) * width + j) * 3;
+                const auto base = (i * width + j) * 3;
                 const auto srcR = tmp[base];
                 const auto srcG = tmp[base + 1];
                 const auto srcB = tmp[base + 2];

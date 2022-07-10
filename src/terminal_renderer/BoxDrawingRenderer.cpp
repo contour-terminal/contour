@@ -52,7 +52,25 @@ namespace
                                                          "Logs box drawing debugging.",
                                                          logstore::Category::State::Disabled,
                                                          logstore::Category::Visibility::Hidden);
-}
+
+    // TODO: Do not depend on this function but rather construct the pixmaps using the correct Y-coordinates.
+    atlas::Buffer invertY(atlas::Buffer const& image, ImageSize cellSize)
+    {
+        atlas::Buffer dest;
+        dest.resize(cellSize.area());
+        auto const pitch = cellSize.width.as<size_t>();
+        auto const height = cellSize.height.as<size_t>();
+
+        for (size_t i = 0; i < cellSize.height.as<size_t>(); ++i)
+        {
+            for (size_t j = 0; j < cellSize.width.as<size_t>(); ++j)
+            {
+                dest[i * pitch + j] = image[(height - i - 1u) * pitch + j];
+            }
+        }
+        return dest;
+    }
+} // namespace
 
 namespace detail
 {
@@ -939,6 +957,7 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint, atlas::TileLocation 
 {
     if (optional<atlas::Buffer> image = buildElements(codepoint))
     {
+        *image = invertY(*image, _gridMetrics.cellSize);
         return { createTileData(tileLocation,
                                 move(*image),
                                 atlas::Format::Red,
@@ -977,6 +996,8 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint, atlas::TileLocation 
             return nullopt;
         pixels = move(*tmp);
     }
+
+    pixels = invertY(pixels, _gridMetrics.cellSize);
 
     return { createTileData(tileLocation,
                             move(pixels),
