@@ -39,7 +39,7 @@ void BackgroundRenderer::renderLine(RenderLine const& line)
     if (line.textAttributes.backgroundColor != defaultColor_)
     {
         auto const position = CellLocation { line.lineOffset, ColumnOffset(0) };
-        auto const pos = _gridMetrics.map(position);
+        auto const pos = _gridMetrics.mapTopLeft(position);
         auto const width = _gridMetrics.cellSize.width * Width::cast_from(line.usedColumns);
 
         renderTarget().renderRectangle(pos.x,
@@ -52,7 +52,7 @@ void BackgroundRenderer::renderLine(RenderLine const& line)
     if (line.fillAttributes.backgroundColor != defaultColor_)
     {
         auto const position = CellLocation { line.lineOffset, boxed_cast<ColumnOffset>(line.usedColumns) };
-        auto const pos = _gridMetrics.map(position);
+        auto const pos = _gridMetrics.mapTopLeft(position);
         auto const width =
             _gridMetrics.cellSize.width * Width::cast_from(line.displayWidth - line.usedColumns);
 
@@ -69,7 +69,7 @@ void BackgroundRenderer::renderCell(RenderCell const& _cell)
     if (_cell.attributes.backgroundColor == defaultColor_)
         return;
 
-    auto const pos = _gridMetrics.map(_cell.position);
+    auto const pos = _gridMetrics.mapTopLeft(_cell.position);
 
     renderTarget().renderRectangle(pos.x,
                                    pos.y,

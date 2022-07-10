@@ -204,10 +204,9 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& textShaderConfig,
     _now { _startTime },
     _renderTargetSize { targetSurfaceSize },
     _projectionMatrix { ortho(0.0f,
-                              unbox<float>(targetSurfaceSize.width), // left, right
-                              0.0f,
-                              unbox<float>(targetSurfaceSize.height) // bottom, top
-                              ) },
+                              unbox<float>(targetSurfaceSize.width),  // left, right
+                              unbox<float>(targetSurfaceSize.height), // bottom, top
+                              0.0f) },
     _margin { margin },
     _textShader { createShader(textShaderConfig) },
     _textProjectionLocation { _textShader->uniformLocation("vs_projection") },
@@ -248,10 +247,9 @@ void OpenGLRenderer::setRenderSize(ImageSize targetSurfaceSize)
     _renderTargetSize = targetSurfaceSize;
     DisplayLog()("Setting render target size to {}.", _renderTargetSize);
     _projectionMatrix = ortho(0.0f,
-                              unbox<float>(_renderTargetSize.width), // left, right
-                              0.0f,
-                              unbox<float>(_renderTargetSize.height) // bottom, top
-    );
+                              unbox<float>(_renderTargetSize.width),  // left, right
+                              unbox<float>(_renderTargetSize.height), // bottom, top
+                              0.0f);
 }
 
 void OpenGLRenderer::setMargin(terminal::renderer::PageMargin margin) noexcept

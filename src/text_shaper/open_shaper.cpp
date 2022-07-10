@@ -779,10 +779,8 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
             auto const pitch = static_cast<size_t>(ftBitmap.pitch);
             for (auto const i: iota(size_t { 0 }, static_cast<size_t>(ftBitmap.rows)))
                 for (auto const j: iota(size_t { 0 }, static_cast<size_t>(ftBitmap.width)))
-                    output.bitmap[i * width.as<size_t>() + j] =
-                        min(static_cast<uint8_t>(
-                                uint8_t(ftBitmap.buffer[(height.as<size_t>() - 1 - i) * pitch + j]) * 255),
-                            uint8_t { 255 });
+                    output.bitmap[i * width.as<size_t>() + j] = min(
+                        static_cast<uint8_t>(uint8_t(ftBitmap.buffer[i * pitch + j]) * 255), uint8_t { 255 });
 
             FT_Bitmap_Done(d->ft_, &ftBitmap);
             break;
@@ -796,8 +794,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
             auto const s = ftFace->glyph->bitmap.buffer;
             for (auto const i: iota(0u, *output.bitmapSize.height))
                 for (auto const j: iota(0u, *output.bitmapSize.width))
-                    output.bitmap[i * *output.bitmapSize.width + j] =
-                        s[(*output.bitmapSize.height - 1 - i) * pitch + j];
+                    output.bitmap[i * *output.bitmapSize.width + j] = s[i * pitch + j];
             break;
         }
         case FT_PIXEL_MODE_LCD: {
@@ -812,7 +809,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
             auto const s = ftFace->glyph->bitmap.buffer;
             for (auto const i: iota(0u, ftFace->glyph->bitmap.rows))
                 for (auto const j: iota(0u, ftFace->glyph->bitmap.width))
-                    output.bitmap[i * width + j] = s[(height - 1 - i) * pitch + j];
+                    output.bitmap[i * width + j] = s[i * pitch + j];
             break;
         }
         case FT_PIXEL_MODE_BGRA: {
@@ -820,7 +817,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
             auto const height = output.bitmapSize.height;
 
             output.format = bitmap_format::rgba;
-            output.bitmap.resize(height.as<size_t>() * width.as<size_t>() * 4);
+            output.bitmap.resize(output.bitmapSize.area() * 4);
             auto t = output.bitmap.begin();
 
             auto const pitch = static_cast<unsigned>(ftFace->glyph->bitmap.pitch);
@@ -829,8 +826,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
                 for (auto const j: iota(0u, width.as<size_t>()))
                 {
                     auto const s = &ftFace->glyph->bitmap
-                                        .buffer[static_cast<size_t>(height.as<size_t>() - i - 1u) * pitch
-                                                + static_cast<size_t>(j) * 4u];
+                                        .buffer[static_cast<size_t>(i) * pitch + static_cast<size_t>(j) * 4u];
 
                     // BGRA -> RGBA
                     *t++ = s[2];

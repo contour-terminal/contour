@@ -423,7 +423,7 @@ void TextRenderer::renderLine(RenderLine const& renderLine)
     auto columnOffset = ColumnOffset(0);
 
     textClusterGroup_.initialPenPosition =
-        _gridMetrics.map(CellLocation { renderLine.lineOffset, columnOffset });
+        _gridMetrics.mapBottomLeft(CellLocation { renderLine.lineOffset, columnOffset });
 
     for (u32string const& graphemeCluster: graphemeClusterSegmenter)
     {
@@ -458,7 +458,7 @@ void TextRenderer::renderCell(CellLocation position,
     if (updateInitialPenPosition_)
     {
         updateInitialPenPosition_ = false;
-        textClusterGroup_.initialPenPosition = _gridMetrics.map(position);
+        textClusterGroup_.initialPenPosition = _gridMetrics.mapBottomLeft(position);
     }
 
     bool const isBoxDrawingCharacter = fontDescriptions_.builtinBoxDrawing && codepoints.size() == 1
@@ -494,11 +494,11 @@ Point TextRenderer::applyGlyphPositionToPen(Point pen,
     auto const x = pen.x + glyphMetrics.x.value + gpos.offset.x;
 
     // Emoji are simple square bitmap fonts that do not need special positioning.
-    auto const y = pen.y                                        // -> base pen position
-                   + _gridMetrics.baseline                      // -> baseline
-                   + glyphMetrics.y.value                       // -> bitmap top
-                   + gpos.offset.y                              // -> harfbuzz adjustment
-                   - tileAttributes.bitmapSize.height.as<int>() // -> bitmap height
+    auto const y = pen.y                   // -> base pen position
+                   - _gridMetrics.baseline // -> text baseline
+                   - glyphMetrics.y.value  // -> bitmap top
+                   - gpos.offset.y         // -> harfbuzz adjustment
+                                           //- tileAttributes.bitmapSize.height.as<int>() // -> bitmap height
         ;
 
     // fmt::print("pen! {} <- {}, gpos {}, glyph offset {}x+{}y, glyph height {} ({})\n",
@@ -577,7 +577,7 @@ void TextRenderer::flushTextClusterGroup()
     if (!textClusterGroup_.codepoints.empty())
     {
         // fmt::print("TextRenderer.flushTextClusterGroup: textPos={}, cellCount={}, width={}, count={}\n",
-        //            textClusterGroup_.initialPenPosition.x, textClusterGroup_.cellCount,
+        //            textClusterGroup_.initialPenPosition, textClusterGroup_.cellCount,
         //            _gridMetrics.cellSize.width,
         //            textClusterGroup_.codepoints.size());
 
