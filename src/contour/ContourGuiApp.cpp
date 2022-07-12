@@ -366,12 +366,12 @@ int ContourGuiApp::terminalGuiAction()
     return rv;
 }
 
-TerminalWindow* ContourGuiApp::newWindow(contour::config::Config const& _config)
+TerminalWindow* ContourGuiApp::newWindow(contour::config::Config const& config)
 {
     auto const* profile = _config.profile(profileName());
     if (!profile)
         return nullptr;
-
+    _config = config;
     auto mainWindow = new TerminalWindow(*this);
 
     mainWindow->show();
