@@ -111,10 +111,8 @@ Image::Data RasterizedImage::fragment(CellLocation _pos) const
 
     for (int y = 0; y < availableHeight; ++y)
     {
-        auto const startOffset =
-            static_cast<size_t>(((*pixelOffset.line + (availableHeight - 1 - y)) * unbox<int>(image_->width())
-                                 + *pixelOffset.column)
-                                * 4);
+        auto const startOffset = static_cast<size_t>(
+            ((*pixelOffset.line + y) * unbox<int>(image_->width()) + *pixelOffset.column) * 4);
         auto const source = &image_->data()[startOffset];
         target = copy(source, source + static_cast<ptrdiff_t>(availableWidth) * 4, target);
 
