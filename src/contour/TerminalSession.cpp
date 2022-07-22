@@ -998,7 +998,7 @@ bool TerminalSession::executeAction(actions::Action const& _action)
 void TerminalSession::spawnNewTerminal(string const& _profileName)
 {
     auto const wd = [this]() -> string {
-#if defined(__APPLE__)
+#if !defined(_WIN32)
         if (auto const* ptyProcess = dynamic_cast<Process const*>(&terminal_.device()))
             return ptyProcess->workingDirectory();
 #else
