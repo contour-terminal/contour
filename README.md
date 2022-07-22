@@ -10,7 +10,7 @@
 
 **IMPORTANT: THIS PROJECT IS IN BETA STAGE & ACTIVE DEVELOPMENT**
 
-`contour` is a modern and actually fast virtual terminal emulator,
+`contour` is a modern and actually fast, modal, virtual terminal emulator,
 for everyday use. It is aiming for power users with a modern feature mindset.
 
 ## Features
@@ -23,7 +23,7 @@ for everyday use. It is aiming for power users with a modern feature mindset.
 - ✅ Bold and italic fonts
 - ✅ High-DPI support.
 - ✅ Vertical Line Markers (quickly jump to markers in your history!)
-- ✅ Vi-like input modes for improved selection and copy'n'paste experience.
+- ✅ Vi-like input modes for improved selection and copy'n'paste experience and Vi-like `scrolloff` feature.
 - ✅ Blurred behind transparent background when using Windows 10 or KDE window manager on Linux.
 - ✅ Blurrable Background image support.
 - ✅ Runtime configuration reload

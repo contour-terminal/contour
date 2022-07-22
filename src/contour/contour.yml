@@ -344,6 +344,11 @@ profiles:
         # Time duration in milliseconds for which yank highlight is shown.
         vi_mode_highlight_timeout: 300
 
+        # Configures a `scrolloff` for cursor movements in normal and visual (block) modes.
+        #
+        # Default: 8
+        vi_mode_scrolloff: 8
+
         status_line:
             # Either none or indicator.
             # This only reflects the initial state of the status line, as it can
