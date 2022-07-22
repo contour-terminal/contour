@@ -1065,6 +1065,7 @@ void TerminalSession::configureTerminal()
     terminal_.defaultColorPalette() = profile_.colors;
     terminal_.setMaxHistoryLineCount(profile_.maxHistoryLineCount);
     terminal_.setHighlightTimeout(profile_.highlightTimeout);
+    terminal_.viewport().setScrollOff(profile_.modalCursorScrollOff);
 }
 
 void TerminalSession::configureCursor(config::CursorConfig const& cursorConfig)

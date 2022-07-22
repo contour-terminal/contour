@@ -1,5 +1,6 @@
 ### 0.3.3 (unreleased)
 
+- Adds vim-like `scrolloff` feature to normal mode cursor movements to ensure a line padding when scrolling up/down.
 - Internal: Y-axis inverted to match GUI coordinate systems where (0, 0) is top left rather than bottom left.
 
 ### 0.3.2 (2022-07-07)

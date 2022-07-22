@@ -1551,6 +1551,8 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     strValue = "underline"; // TODO: fmt::format("{}", profile.hyperlinkDecoration.hover);
     tryLoadChildRelative(_usedKeys, _profile, basePath, "hyperlink_decoration.hover", strValue);
 
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "vi_mode_scrolloff", profile.modalCursorScrollOff);
+
     auto uintValue = profile.highlightTimeout.count();
     tryLoadChildRelative(_usedKeys, _profile, basePath, "vi_mode_highlight_timeout", uintValue);
     profile.highlightTimeout = chrono::milliseconds(uintValue);

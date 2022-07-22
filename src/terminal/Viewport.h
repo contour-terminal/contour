@@ -41,6 +41,12 @@ class Viewport
     {
     }
 
+    // Configures the vim-like `scrolloff` feature.
+    void setScrollOff(LineCount count) noexcept
+    {
+        scrollOff_ = count;
+    }
+
     [[nodiscard]] ScrollOffset scrollOffset() const noexcept
     {
         return scrollOffset_;
@@ -99,6 +105,8 @@ class Viewport
     ModifyEvent modified_;
     //!< scroll offset relative to scroll top (0) or nullopt if not scrolled into history
     ScrollOffset scrollOffset_;
+
+    LineCount scrollOff_ = LineCount(8);
 };
 
 } // namespace terminal

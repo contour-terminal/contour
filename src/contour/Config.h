@@ -170,6 +170,8 @@ struct TerminalProfile
     bool drawBoldTextWithBrightColors = false;
     terminal::ColorPalette colors {};
 
+    terminal::LineCount modalCursorScrollOff { 8 };
+
     struct
     {
         InputModeConfig insert;
