@@ -10,7 +10,7 @@
 
 **IMPORTANT: THIS PROJECT IS IN BETA STAGE & ACTIVE DEVELOPMENT**
 
-`contour` is a modern and actually fast virtual terminal emulator,
+`contour` is a modern and actually fast, modal, virtual terminal emulator,
 for everyday use. It is aiming for power users with a modern feature mindset.
 
 ## Features
