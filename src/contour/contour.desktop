@@ -6,7 +6,7 @@
 Type=Application
 TryExec=contour
 Exec=contour
-Icon=contour
+Icon=org.contourterminal.Contour
 Terminal=false
 Categories=Qt;System;TerminalEmulator;
 Actions=NewWindow;
@@ -145,6 +145,7 @@ Comment[zh_CN]=命令行访问
 Comment[zh_TW]=指令列
 
 [Desktop Action NewWindow]
+Exec=contour
 Name=Open a New Window
 Name[ar]=افتح نافذة جديدة
 Name[ast]=Abrir nuna ventana nueva
