@@ -60,7 +60,7 @@
       <li>Clipboard setting via OSC 52</li>
       <li>Sixel inline images</li>
       <li>Terminal page buffer capture VT extension</li>
-      <li>Builtin [Fira Code inspired progress bar support.</li>
+      <li>Builtin Fira Code inspired progress bar support.</li>
       <li>Read-only mode, protecting against accidental user-input to the running application, such as Ctrl+C.</li>
       <li>VT320 Host-programmable and Indicator status line support.</li>
       <li>and much more ...</li>
