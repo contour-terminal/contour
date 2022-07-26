@@ -37,42 +37,44 @@
       Contour is a modern and actually fast, modal, virtual terminal emulator,
       for everyday use. It is aiming for power users with a modern feature mindset.
     </p>
-    <p>
-      <ul>
-        <li>Available on all 4 major platforms, Linux, OS/X, FreeBSD, Windows.</li>
-        <li>GPU-accelerated rendering.</li>
-        <li>Font ligatures support (such as in Fira Code).</li>
-        <li>Unicode: Emoji support (-: 🌈 💝 😛 👪 - including ZWJ, VS15, VS16 emoji :-)</li>
-        <li>Unicode: Grapheme cluster support</li>
-        <li>Bold and italic fonts</li>
-        <li>High-DPI support.</li>
-        <li>Vertical Line Markers (quickly jump to markers in your history!)</li>
-        <li>Vi-like input modes for improved selection and copy'n'paste experience and Vi-like `scrolloff` feature.</li>
-        <li>Blurred behind transparent background when using Windows 10 or KDE window manager on Linux.</li>
-        <li>Blurrable Background image support.</li>
-        <li>Runtime configuration reload</li>
-        <li>256-color and Truecolor support</li>
-        <li>Key binding customization</li>
-        <li>Color Schemes</li>
-        <li>Profiles (grouped customization of: color scheme, login shell, and related behaviours)</li>
-        <li>Synchronized rendering</li>
-        <li>Text reflow (configurable via `SM ? 2027` / `RM ? 2027`)</li>
-        <li>Clickable hyperlinks via OSC 8</li>
-        <li>Clipboard setting via OSC 52</li>
-        <li>Sixel inline images</li>
-        <li>Terminal page buffer capture VT extension</li>
-        <li>Builtin [Fira Code inspired progress bar support.</li>
-        <li>Read-only mode, protecting against accidental user-input to the running application, such as Ctrl+C.</li>
-        <li>VT320 Host-programmable and Indicator status line support.</li>
-        <li>and much more ...</li>
-      </ul>
-    </p>
+    <ul>
+      <li>Available on all 4 major platforms, Linux, OS/X, FreeBSD, Windows.</li>
+      <li>GPU-accelerated rendering.</li>
+      <li>Font ligatures support (such as in Fira Code).</li>
+      <li>Unicode: Emoji support (-: 🌈 💝 😛 👪 - including ZWJ, VS15, VS16 emoji :-)</li>
+      <li>Unicode: Grapheme cluster support</li>
+      <li>Bold and italic fonts</li>
+      <li>High-DPI support.</li>
+      <li>Vertical Line Markers (quickly jump to markers in your history!)</li>
+      <li>Vi-like input modes for improved selection and copy'n'paste experience and Vi-like <code>scrolloff</code> feature.</li>
+      <li>Blurred behind transparent background when using Windows 10 or KDE window manager on Linux.</li>
+      <li>Blurrable Background image support.</li>
+      <li>Runtime configuration reload</li>
+      <li>256-color and Truecolor support</li>
+      <li>Key binding customization</li>
+      <li>Color Schemes</li>
+      <li>Profiles (grouped customization of: color scheme, login shell, and related behaviours)</li>
+      <li>Synchronized rendering</li>
+      <li>Text reflow (configurable via <code>SM ? 2027</code> / <code>RM ? 2027</code>)</li>
+      <li>Clickable hyperlinks via OSC 8</li>
+      <li>Clipboard setting via OSC 52</li>
+      <li>Sixel inline images</li>
+      <li>Terminal page buffer capture VT extension</li>
+      <li>Builtin [Fira Code inspired progress bar support.</li>
+      <li>Read-only mode, protecting against accidental user-input to the running application, such as Ctrl+C.</li>
+      <li>VT320 Host-programmable and Indicator status line support.</li>
+      <li>and much more ...</li>
+    </ul>
   </description>
 
   <screenshots>
     <screenshot type="default">
       <image>https://raw.githubusercontent.com/contour-terminal/contour/4f565357720915402aca5ca63ca1fa812ed4741f/docs/screenshots/contour-screenshots-0.1.0-pre2.png</image>
       <caption>Contour Terminal emulator being used to show some of its features</caption>
+    </screenshot>
+    <screenshot type="default">
+      <image>https://raw.githubusercontent.com/contour-terminal/contour/4f565357720915402aca5ca63ca1fa812ed4741f/docs/screenshots/contour-notcurses-ncneofetch.png</image>
+      <caption>Demonstrating (notcurses) neofetch tool on Fedora with a semi transparent image in the terminal</caption>
     </screenshot>
   </screenshots>
 
