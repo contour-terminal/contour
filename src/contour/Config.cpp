@@ -1679,14 +1679,17 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
     auto logFilePath = ""s;
     tryLoadValue(usedKeys, doc, "logging.file", logFilePath);
 
-    logFilePath =
-        homeResolvedPath(replaceVariables(logFilePath, VariableReplacer()), Process::homeDirectory())
-            .generic_string();
-
-    if (!logFilePath.empty())
+    if (logEnabled)
     {
-        _config.loggingSink = make_shared<logstore::Sink>(logEnabled, make_shared<ofstream>(logFilePath));
-        logstore::set_sink(*_config.loggingSink);
+        logFilePath =
+            homeResolvedPath(replaceVariables(logFilePath, VariableReplacer()), Process::homeDirectory())
+                .generic_string();
+
+        if (!logFilePath.empty())
+        {
+            _config.loggingSink = make_shared<logstore::Sink>(logEnabled, make_shared<ofstream>(logFilePath));
+            logstore::set_sink(*_config.loggingSink);
+        }
     }
 
     tryLoadValue(usedKeys, doc, "images.sixel_scrolling", _config.sixelScrolling);
