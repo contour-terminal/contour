@@ -100,15 +100,6 @@ Image::Data RasterizedImage::fragment(CellLocation _pos) const
 
     auto target = &fragData[0];
 
-    // fill horizontal gap at the bottom
-    for (auto y = availableHeight * unbox<int>(cellSize_.width); y < int(cellSize_.area()); ++y)
-    {
-        *target++ = defaultColor_.red();
-        *target++ = defaultColor_.green();
-        *target++ = defaultColor_.blue();
-        *target++ = defaultColor_.alpha();
-    }
-
     for (int y = 0; y < availableHeight; ++y)
     {
         auto const startOffset = static_cast<size_t>(
@@ -124,6 +115,15 @@ Image::Data RasterizedImage::fragment(CellLocation _pos) const
             *target++ = defaultColor_.blue();
             *target++ = defaultColor_.alpha();
         }
+    }
+
+    // fill horizontal gap at the bottom
+    for (auto y = availableHeight * unbox<int>(cellSize_.width); y < int(cellSize_.area()); ++y)
+    {
+        *target++ = defaultColor_.red();
+        *target++ = defaultColor_.green();
+        *target++ = defaultColor_.blue();
+        *target++ = defaultColor_.alpha();
     }
 
     return fragData;
