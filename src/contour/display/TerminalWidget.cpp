@@ -915,7 +915,7 @@ void TerminalWidget::doDumpState()
                 // between OpenGL and desktop screens is inverse.
                 uint8_t const* sourceLine = _buffer.data() + static_cast<ptrdiff_t>(i * pitch);
                 uint8_t const* sourceLineEnd = sourceLine + pitch;
-                uint8_t* targetLine = image.scanLine(unbox<int>(_size.height) - 1 - i);
+                uint8_t* targetLine = image.scanLine(i);
                 copy(sourceLine, sourceLineEnd, targetLine);
             }
             image.save(QString::fromStdString(_filename.generic_string()));
