@@ -1,6 +1,7 @@
 set(text_shaper_SRC
     font.cpp font.h
     font_locator.h
+    font_locator_provider.cpp font_locator_provider.h
     fontconfig_locator.cpp fontconfig_locator.h
     mock_font_locator.cpp mock_font_locator.h
     open_shaper.cpp open_shaper.h
