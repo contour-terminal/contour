@@ -222,7 +222,8 @@ install_deps_arch()
     fetch_and_unpack_fmtlib
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
-    pacman -S -y \
+    sudo pacman -S -y \
+	pkg-config \
         catch2 \
         cmake \
         extra-cmake-modules \
@@ -232,7 +233,7 @@ install_deps_arch()
         microsoft-gsl \
         ninja \
         qt5-base \
-				qt5-multimedia \
+        qt5-multimedia \
         range-v3 \
         yaml-cpp
 }
@@ -302,7 +303,7 @@ main()
     prepare_fetch_and_unpack
 
     case "$ID" in
-        arch)
+        arch|manjaro)
             install_deps_arch
             ;;
         fedora)
