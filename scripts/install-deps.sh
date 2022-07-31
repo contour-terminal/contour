@@ -208,10 +208,10 @@ install_deps_FreeBSD()
         qt5-buildtools \
         qt5-core \
         qt5-gui \
+        qt5-multimedia \
         qt5-network \
         qt5-qmake \
         qt5-widgets \
-        qt5-multimedia \
         range-v3 \
         yaml-cpp
     "
@@ -223,7 +223,6 @@ install_deps_arch()
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
     sudo pacman -S -y \
-        pkg-config \
         catch2 \
         cmake \
         extra-cmake-modules \
@@ -232,6 +231,7 @@ install_deps_arch()
         harfbuzz \
         microsoft-gsl \
         ninja \
+        pkg-config \
         qt5-base \
         qt5-multimedia \
         range-v3 \
@@ -279,13 +279,13 @@ install_deps_darwin()
     brew install $SYSDEP_ASSUME_YES \
         boost \
         cpp-gsl \
-        fontconfig \
         fmt \
+        fontconfig \
         freetype \
         harfbuzz \
         pkg-config \
-        range-v3 \
         qt@5 \
+        range-v3 \
         yaml-cpp
 }
 
