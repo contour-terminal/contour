@@ -151,7 +151,7 @@ install_deps_ubuntu()
         ncurses-bin
         pkg-config
         qtbase5-dev
-		qtmultimedia5-dev
+        qtmultimedia5-dev
     "
 
     RELEASE=`grep VERSION_ID /etc/os-release | cut -d= -f2 | tr -d '"'`
@@ -238,6 +238,37 @@ install_deps_arch()
         yaml-cpp
 }
 
+install_deps_suse()
+{
+    fetch_and_unpack_gsl
+    fetch_and_unpack_fmtlib
+
+    echo "SuSE: PREPARE_ONLY_EMBEDS=$PREPARE_ONLY_EMBEDS"
+    [ x$PREPARE_ONLY_EMBEDS = xON ] && return
+
+    # TODO: What's the name of this: kf5-kwindowsystem-devel
+    local packages="
+    libqt5-qtbase
+    libqt5-qtbase-common-devel
+    libqt5-qtmultimedia-devel
+    ncurses-devel
+        Catch2-devel
+        cmake
+        extra-cmake-modules
+        fontconfig-devel
+        freetype-devel
+        gcc-c++
+        harfbuzz-devel
+        libqt5-qtbase-devel
+        ninja
+        pkgconf
+        range-v3-devel
+        yaml-cpp-devel
+    "
+    # Sadly, gsl-devel system package is too old to be used.
+    sudo zypper install $SYSDEP_ASSUME_YES $packages
+}
+
 install_deps_fedora()
 {
     fetch_and_unpack_gsl
@@ -300,11 +331,17 @@ main()
         ID=`uname -s`
     fi
 
+    # Strip double-quotes, as used by opensuse for interesting reason.
+    ID=`echo $ID | tr -d '"'`
+
     prepare_fetch_and_unpack
 
     case "$ID" in
         arch|manjaro)
             install_deps_arch
+            ;;
+        opensuse*)
+            install_deps_suse
             ;;
         fedora)
             install_deps_fedora
