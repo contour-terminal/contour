@@ -5,6 +5,7 @@
 - [Linux] Changes the .desktop file name and icon file name to conform to the flatpak recommendations.
 - [Linux] Provide an AppStream XML file.
 - [Linux] Drop KDE/KWin dependency on the binary by implementing enabling blur-behind background manually.
+- [Linux] Adds support for blur-behind window on GNOME shell (Please read https://github.com/aunetx/blur-my-shell/issues/300 for further details if in trouble).
 - Internal: Y-axis inverted to match GUI coordinate systems where (0, 0) is top left rather than bottom left.
 - Fixes logging file toggle.
 

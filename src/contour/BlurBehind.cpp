@@ -39,6 +39,7 @@ void setEnabled(QWindow* window, bool enable, QRegion region)
         window->setProperty("kwin_background_contrast", 1);
         window->setProperty("kwin_background_intensity", 1);
         window->setProperty("kwin_background_saturation", 1);
+        window->setProperty("_MUTTER_HINTS", "blur-provider=sigma:60,brightness:0.9");
     }
     else
     {
@@ -47,6 +48,7 @@ void setEnabled(QWindow* window, bool enable, QRegion region)
         window->setProperty("kwin_background_contrast", {});
         window->setProperty("kwin_background_intensity", {});
         window->setProperty("kwin_background_saturation", {});
+        window->setProperty("_MUTTER_HINTS", {});
     }
 #elif defined(_WIN32)
     // Awesome hack with the noteworty links:
