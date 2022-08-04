@@ -41,10 +41,6 @@
 #include <QtWidgets/QMainWindow>
 #include <QtWidgets/QVBoxLayout>
 
-#if defined(CONTOUR_BLUR_PLATFORM_KWIN)
-    #include <KWindowEffects>
-#endif
-
 #include <cstring>
 #include <fstream>
 #include <stdexcept>

@@ -98,7 +98,7 @@ jobs:
       run: mkdir build
     - name: "cmake"
       env:
-        EXTRA_CMAKE_FLAGS: "-DCONTOUR_BLUR_PLATFORM_KWIN=OFF -DCONTOUR_SANITIZE=address"
+        EXTRA_CMAKE_FLAGS: "-DCONTOUR_SANITIZE=address"
         CMAKE_BUILD_TYPE: Debug
       run: ./scripts/ci-prepare-contour.sh
     - name: "build"

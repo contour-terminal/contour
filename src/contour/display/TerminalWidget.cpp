@@ -26,6 +26,11 @@
 #include <crispy/logstore.h>
 #include <crispy/stdfs.h>
 
+#include <fmt/chrono.h>
+#include <fmt/format.h>
+
+#include <range/v3/all.hpp>
+
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
 #include <QtCore/QFileSystemWatcher>
@@ -44,15 +49,6 @@
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QStyle>
-
-#if defined(CONTOUR_BLUR_PLATFORM_KWIN)
-    #include <KWindowEffects>
-#endif
-
-#include <fmt/chrono.h>
-#include <fmt/format.h>
-
-#include <range/v3/all.hpp>
 
 #include <algorithm>
 #include <cstring>

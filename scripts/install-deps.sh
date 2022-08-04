@@ -143,7 +143,6 @@ install_deps_ubuntu()
         libfontconfig1-dev
         libfreetype6-dev
         libharfbuzz-dev
-        libkf5windowsystem-dev
         libqt5gui5
         libqt5opengl5-dev
         libyaml-cpp-dev
@@ -246,7 +245,6 @@ install_deps_suse()
     echo "SuSE: PREPARE_ONLY_EMBEDS=$PREPARE_ONLY_EMBEDS"
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
-    # TODO: What's the name of this: kf5-kwindowsystem-devel
     local packages="
     libqt5-qtbase
     libqt5-qtbase-common-devel
@@ -284,7 +282,6 @@ install_deps_fedora()
         freetype-devel
         gcc-c++
         harfbuzz-devel
-        kf5-kwindowsystem-devel
         ninja-build
         pkgconf
         qt5-qtbase-devel

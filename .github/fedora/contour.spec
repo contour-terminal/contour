@@ -22,7 +22,6 @@ BuildRequires:  fontconfig-devel
 BuildRequires:  freetype-devel
 BuildRequires:  gcc-c++
 BuildRequires:  harfbuzz-devel
-BuildRequires:  kf5-kwindowsystem-devel
 BuildRequires:  ninja-build
 BuildRequires:  pkgconf
 BuildRequires:  qt5-qtbase-devel
@@ -32,7 +31,6 @@ BuildRequires:  qt5-qtmultimedia-devel
 Requires:       fontconfig
 Requires:       freetype
 Requires:       harfbuzz
-Requires:       kf5-kwindowsystem
 Requires:       qt5-qtbase
 Requires:       qt5-qtbase-gui
 Requires:       yaml-cpp
@@ -50,7 +48,6 @@ It is aiming for power users with a modern feature mindset.
 %build
 cmake . \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-    -DCONTOUR_BLUR_PLATFORM_KWIN=ON \
     -DCMAKE_INSTALL_PREFIX=/usr \
     -DPEDANTIC_COMPILER=ON \
     -DPEDANTIC_COMPILER_WERROR=ON \
