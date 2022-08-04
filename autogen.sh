@@ -18,9 +18,7 @@ else
     ROOTDIR="$(dirname $0)"
 fi
 
-if [[ "${CXX}" == "" ]]; then
-    CXX="g++"
-fi
+CXX=${CXX="g++"}
 
 BUILD_TYPE="${1:-Debug}"
 BUILD_DIR="${ROOTDIR}/target/$(uname -m)-$(uname -s)-${CXX}-${BUILD_TYPE}"
