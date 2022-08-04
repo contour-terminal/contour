@@ -22,7 +22,7 @@
 
 namespace BlurBehind
 {
-void setEnabled(QWindow* window, bool enable)
+void setEnabled(QWindow* window, bool enable, QRegion region)
 {
 #if !defined(__APPLE__) && !defined(_WIN32)
     // This #if should catch UNIX in general but not Mac, so we have not just Linux but also the BSDs and
@@ -32,8 +32,8 @@ void setEnabled(QWindow* window, bool enable)
     // the dependency and still support nice looking semi transparent blurred backgrounds.
     if (enable)
     {
-        window->setProperty("kwin_blur", QRegion());
-        window->setProperty("kwin_background_region", QRegion());
+        window->setProperty("kwin_blur", region);
+        window->setProperty("kwin_background_region", region);
         window->setProperty("kwin_background_contrast", 1);
         window->setProperty("kwin_background_intensity", 1);
         window->setProperty("kwin_background_saturation", 1);
