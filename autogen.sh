@@ -26,9 +26,6 @@ BUILD_TYPE="${1:-Debug}"
 BUILD_DIR="${ROOTDIR}/target/$(uname -m)-$(uname -s)-${CXX}-${BUILD_TYPE}"
 
 case "$OSTYPE" in
-    linux-gnu*)
-        EXTRA_CMAKE_FLAGS="${EXTRA_CMAKE_FLAGS} -DCONTOUR_BLUR_PLATFORM_KWIN=ON"
-        ;;
     darwin*)
         EXTRA_CMAKE_FLAGS="${EXTRA_CMAKE_FLAGS} -DQt5_DIR=$(brew --prefix qt5)/lib/cmake/Qt5"
         ;;

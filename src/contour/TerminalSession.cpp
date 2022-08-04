@@ -49,10 +49,6 @@
     #include <pthread.h>
 #endif
 
-#if defined(CONTOUR_BLUR_PLATFORM_KWIN)
-    #include <KWindowEffects>
-#endif
-
 #if !defined(_MSC_VER)
     #include <csignal>
 

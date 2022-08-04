@@ -7,28 +7,15 @@ endif()
 option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 option(CONTOUR_VT_METRICS "Enables collecting and exit-printing some VT usage metrics." OFF)
 option(CONTOUR_SCROLLBAR "Enables scrollbar in GUI frontend." ON)
-option(CONTOUR_BLUR_PLATFORM_KWIN "Enables support for blurring transparent background when using KWin (KDE window manager)." OFF)
 option(CONTOUR_BUILD_WITH_QT6 "Use Qt 6" OFF)
 
 if(CONTOUR_BUILD_WITH_QT6)
 	 find_package(Qt6 COMPONENTS Core Gui Network OpenGL OpenGLWidgets Widgets Multimedia REQUIRED)
-   set(CONTOUR_BLUR_PLATFORM_KWIN OFF)
 else()
 	 find_package(Qt5 COMPONENTS Gui Network Widgets Multimedia REQUIRED)  # apt install qtbase5-dev libqt5gui5
 endif()
 
 add_subdirectory(display)
-
-# {{{ Linux/KDE
-# ! apt install extra-cmake-modules libkf5windowsystem-dev
-if(CONTOUR_FRONTEND_GUI AND CONTOUR_BLUR_PLATFORM_KWIN)
-    set(KF5_MIN_VERSION "5.12.0")
-    find_package(ECM ${KF5_MIN_VERSION} REQUIRED NO_MODULE)
-    set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${ECM_MODULE_PATH})
-    include(FeatureSummary)
-    find_package(KF5 ${KF5_MIN_VERSION} REQUIRED WindowSystem)
-endif()
-# }}}
 
 set(contour_SRCS
     CaptureScreen.cpp CaptureScreen.h
@@ -46,7 +33,7 @@ if(CONTOUR_FRONTEND_GUI)
         TerminalSession.cpp TerminalSession.h
         TerminalSessionManager.cpp TerminalSessionManager.h
         TerminalWindow.cpp TerminalWindow.h
-				helper.cpp helper.h Audio.cpp Audio.h
+        helper.cpp helper.h Audio.cpp Audio.h
     )
 endif()
 
@@ -132,10 +119,6 @@ if(CONTOUR_FRONTEND_GUI)
         target_link_libraries(contour ContourTerminalDisplay terminal_renderer Qt6::Core Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Widgets Qt6::Multimedia)
     else()
         target_link_libraries(contour crispy::core ContourTerminalDisplay terminal_renderer Qt5::Gui Qt5::Network Qt5::Widgets Qt5::Multimedia)
-    endif()
-    if(CONTOUR_BLUR_PLATFORM_KWIN) # TODO: auto-enable on Linux, if KDE dev libs were found.
-        target_compile_definitions(contour PRIVATE CONTOUR_BLUR_PLATFORM_KWIN)
-        target_link_libraries(contour KF5::WindowSystem)
     endif()
 endif()
 
@@ -298,7 +281,7 @@ else()
 
     # Generator: Debian
     # see https://cmake.org/cmake/help/v3.6/module/CPackDeb.html#variable:CPACK_DEBIAN_PACKAGE_DEPENDS
-    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libfreetype6, libharfbuzz0b, libkf5windowsystem5, libqt5core5a, libqt5gui5, libqt5network5, ${YAML_CPP_PKG_NAME}")
+    set(CPACK_DEBIAN_PACKAGE_DEPENDS "libfreetype6, libharfbuzz0b, libqt5core5a, libqt5gui5, libqt5network5, ${YAML_CPP_PKG_NAME}")
     set(CPACK_DEBIAN_PACKAGE_SECTION "x11")
     set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/contour-terminal/contour/")
     set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "xdg-open")

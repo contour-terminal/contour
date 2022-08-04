@@ -13,13 +13,6 @@
  */
 #include "BlurBehind.h"
 
-#if defined(CONTOUR_BLUR_PLATFORM_KWIN)
-    #include <KWindowEffects>
-
-    #include <kwindowsystem_version.h>
-    #define KDE_MAKE_VERSION(a, b, c) (((a) << 16) | ((b) << 8) | (c))
-#endif
-
 #include <QtCore/QDebug>
 #include <QtGui/QWindow>
 
@@ -31,14 +24,28 @@ namespace BlurBehind
 {
 void setEnabled(QWindow* window, bool enable)
 {
-#if defined(CONTOUR_BLUR_PLATFORM_KWIN)
-    #if KWINDOWSYSTEM_VERSION >= KDE_MAKE_VERSION(5, 82, 0)
-    KWindowEffects::enableBlurBehind(window, enable);
-    KWindowEffects::enableBackgroundContrast(window, enable);
-    #else
-    KWindowEffects::enableBlurBehind(window->winId(), enable);
-    KWindowEffects::enableBackgroundContrast(window->winId(), enable);
-    #endif
+#if !defined(__APPLE__) && !defined(_WIN32)
+    // This #if should catch UNIX in general but not Mac, so we have not just Linux but also the BSDs and
+    // maybe others if one wants to.
+    //
+    // I was looking into the kwin source code and it's all in fact just a one-liner, so easy to get rid of
+    // the dependency and still support nice looking semi transparent blurred backgrounds.
+    if (enable)
+    {
+        window->setProperty("kwin_blur", QRegion());
+        window->setProperty("kwin_background_region", QRegion());
+        window->setProperty("kwin_background_contrast", 1);
+        window->setProperty("kwin_background_intensity", 1);
+        window->setProperty("kwin_background_saturation", 1);
+    }
+    else
+    {
+        window->setProperty("kwin_blur", {});
+        window->setProperty("kwin_background_region", {});
+        window->setProperty("kwin_background_contrast", {});
+        window->setProperty("kwin_background_intensity", {});
+        window->setProperty("kwin_background_saturation", {});
+    }
 #elif defined(_WIN32)
     // Awesome hack with the noteworty links:
     // * https://gist.github.com/ethanhs/0e157e4003812e99bf5bc7cb6f73459f (used as code template)
