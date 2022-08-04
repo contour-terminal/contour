@@ -19,6 +19,9 @@ add_library(ContourTerminalDisplay
 set_target_properties(ContourTerminalDisplay PROPERTIES AUTOMOC ON)
 set_target_properties(ContourTerminalDisplay PROPERTIES AUTORCC ON)
 
+# Disable all deprecated Qt functions prior to Qt 6.0
+target_compile_definitions(ContourTerminalDisplay PRIVATE QT_DISABLE_DEPRECATED_BEFORE=0x050F00)
+
 target_compile_definitions(ContourTerminalDisplay PRIVATE CONTOUR_BUILD_TYPE="${CMAKE_BUILD_TYPE}")
 
 if(CONTOUR_PERF_STATS)
