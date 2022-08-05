@@ -139,7 +139,9 @@ auto CursorRenderer::createTileData(CursorShape cursorShape,
                 assert(thickness <= static_cast<size_t>(baseline));
                 for (auto y = size_t(0); y <= static_cast<size_t>(thickness); ++y)
                     for (size_t x = 0; x < *width; ++x)
-                        image[(defaultBitmapSize.height.as<size_t>() - 1 - base_y + unsigned(y)) * unbox<size_t>(width) + x] = 0xFF;
+                        image[(defaultBitmapSize.height.as<size_t>() - 1 - base_y + unsigned(y))
+                                  * unbox<size_t>(width)
+                              + x] = 0xFF;
                 return image;
             });
         case CursorShape::Bar:
