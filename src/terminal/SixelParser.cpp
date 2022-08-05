@@ -21,6 +21,8 @@ using std::max;
 using std::min;
 using std::vector;
 
+// VT 340 sixel protocol is defined here: https://vt100.net/docs/vt3xx-gp/chapter14.html
+
 namespace terminal
 {
 
@@ -50,6 +52,46 @@ namespace
     {
         return RGBColor { r, g, b };
     }
+
+    constexpr double hue2rgb(double p, double q, double t) noexcept
+    {
+        if (t < 0)
+            t += 1;
+        if (t > 1)
+            t -= 1;
+        if (t < 1. / 6)
+            return p + (q - p) * 6 * t;
+        if (t < 1. / 2)
+            return q;
+        if (t < 2. / 3)
+            return p + (q - p) * (2. / 3 - t) * 6;
+        return p;
+    }
+
+    using NormalizedValue = double; // normalized value between [0, 1]
+
+    constexpr RGBColor hsl2rgb(NormalizedValue h, NormalizedValue s, NormalizedValue l) noexcept
+    {
+        // See http://en.wikipedia.org/wiki/HSL_color_space.
+
+        if (0 == s)
+        {
+            auto const grayscale = static_cast<uint8_t>(l * 255.);
+            return RGBColor { grayscale, grayscale, grayscale };
+        }
+        else
+        {
+            auto const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+            auto const p = 2 * l - q;
+
+            auto result = RGBColor {};
+            result.red = static_cast<uint8_t>(hue2rgb(p, q, h + 1. / 3) * 255);
+            result.green = static_cast<uint8_t>(hue2rgb(p, q, h) * 255);
+            result.blue = static_cast<uint8_t>(hue2rgb(p, q, h - 1. / 3) * 255);
+            return result;
+        }
+    }
+
 } // namespace
 
 // VT 340 default color palette (https://www.vt100.net/docs/vt3xx-gp/chapter2.html#S2.4)
@@ -274,13 +316,31 @@ void SixelParser::leaveState()
                 };
                 auto const index = params_[0];
                 auto const colorSpace = params_[1] == 2 ? Colorspace::RGB : Colorspace::HSL;
-                if (colorSpace == Colorspace::RGB)
+                switch (colorSpace)
                 {
-                    auto const p1 = convertValue(params_[2]);
-                    auto const p2 = convertValue(params_[3]);
-                    auto const p3 = convertValue(params_[4]);
-                    auto const color = RGBColor { p1, p2, p3 }; // TODO: convert HSL if requested
-                    events_.setColor(index, color);
+                    case Colorspace::RGB: {
+                        auto const p1 = convertValue(params_[2]);
+                        auto const p2 = convertValue(params_[3]);
+                        auto const p3 = convertValue(params_[4]);
+                        auto const color = RGBColor { p1, p2, p3 }; // TODO: convert HSL if requested
+                        events_.setColor(index, color);
+                        break;
+                    }
+                    case Colorspace::HSL: {
+                        // HLS Values
+                        // Px 	0 to 360 degrees 	Hue angle
+                        // Py 	0 to 100 percent 	Lightness
+                        // Pz 	0 to 100 percent 	Saturation
+                        //
+                        // (Hue angle seems to be shifted by 120 deg in other Sixel implementations.)
+                        auto const h = static_cast<double>(params_[2]) - 120.0;
+                        auto const H = (h < 0 ? 360 + h : h) / 360.0;
+                        auto const S = static_cast<double>(params_[3]) / 100.0;
+                        auto const L = static_cast<double>(params_[3]) / 100.0;
+                        auto const rgb = hsl2rgb(H, S, L);
+                        events_.setColor(index, rgb);
+                        break;
+                    }
                 }
             }
             break;

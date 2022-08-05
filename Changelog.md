@@ -1,6 +1,7 @@
 ### 0.3.3 (unreleased)
 
 - Adds vim-like `scrolloff` feature to normal mode cursor movements to ensure a line padding when scrolling up/down.
+- Adds support for HSL colorspace in Sixel images.
 - [Linux] Changes the .desktop file name and icon file name to conform to the flatpak recommendations.
 - [Linux] Provide an AppStream XML file.
 - [Linux] Drop KDE/KWin dependency on the binary by implementing enabling blur-behind background manually.
