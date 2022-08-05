@@ -13,6 +13,8 @@
  */
 #include "BlurBehind.h"
 
+#include <crispy/utils.h>
+
 #include <QtCore/QDebug>
 #include <QtGui/QWindow>
 
@@ -103,8 +105,7 @@ void setEnabled(QWindow* window, bool enable, QRegion region)
     }
 #else
     // Get me working on other platforms/compositors (such as OSX, Gnome, ...), please.
-    (void) window;
-    (void) enable;
+    crispy::ignore_unused(window, enable, region);
 #endif
 }
 
