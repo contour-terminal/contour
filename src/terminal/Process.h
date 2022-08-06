@@ -95,6 +95,7 @@ class [[nodiscard]] Process: public Pty
 
     // Pty overrides
     // clang-format off
+    void start() override;
     PtySlave& slave() noexcept override { return pty().slave(); }
     void close() override { pty().close(); }
     bool isClosed() const noexcept override { return pty().isClosed(); }

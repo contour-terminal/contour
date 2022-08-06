@@ -48,6 +48,7 @@
 #include <sys/wait.h>
 
 using crispy::BufferObject;
+using std::make_unique;
 using std::max;
 using std::min;
 using std::nullopt;
@@ -291,18 +292,22 @@ int UnixPty::Slave::write(std::string_view text) noexcept
 }
 // }}}
 
-UnixPty::UnixPty(PageSize const& _windowSize, optional<ImageSize> _pixels):
-    UnixPty(createUnixPty(_windowSize, _pixels), _windowSize)
+UnixPty::UnixPty(PageSize pageSize, optional<ImageSize> pixels):
+    // clang-format off
+    _masterFd { -1 },
+    _pipe { -1, -1 },
+    _pageSize { pageSize },
+    _pixels { pixels },
+    _slave { }
 {
 }
 
-UnixPty::UnixPty(PtyHandles handles, PageSize pageSize):
-    // clang-format off
-    _masterFd { unbox<int>(handles.master) },
-    _pipe {},
-    _pageSize { pageSize },
-    _slave { handles.slave }
+void UnixPty::start()
 {
+    auto const handles = createUnixPty(_pageSize, _pixels);
+    _masterFd = unbox<int>(handles.master);
+    _slave = make_unique<Slave>(handles.slave);
+
     // clang-format on
     if (!detail::setFileFlags(_masterFd, O_CLOEXEC | O_NONBLOCK))
         throw runtime_error { "Failed to configure PTY. "s + strerror(errno) };
@@ -332,7 +337,8 @@ UnixPty::~UnixPty()
 
 PtySlave& UnixPty::slave() noexcept
 {
-    return _slave;
+    assert(started());
+    return *_slave;
 }
 
 PtyMasterHandle UnixPty::handle() const noexcept

@@ -163,14 +163,16 @@ int LinuxPty::Slave::write(std::string_view text) noexcept
 }
 // }}}
 
-LinuxPty::LinuxPty(PageSize const& _windowSize, optional<ImageSize> _pixels):
-    LinuxPty(createLinuxPty(_windowSize, _pixels), _windowSize)
+LinuxPty::LinuxPty(PageSize pageSize, optional<ImageSize> pixels): _pageSize { pageSize }, _pixels { pixels }
 {
 }
 
-LinuxPty::LinuxPty(PtyHandles handles, PageSize pageSize):
-    _masterFd { unbox<int>(handles.master) }, _pageSize { pageSize }, _slave { handles.slave }
+void LinuxPty::start()
 {
+    auto const handles = createLinuxPty(_pageSize, _pixels);
+    _masterFd = unbox<int>(handles.master);
+    _slave = std::make_unique<Slave>(handles.slave);
+
     if (!detail::setFileFlags(_masterFd, O_CLOEXEC | O_NONBLOCK))
         throw runtime_error { "Failed to configure PTY. "s + strerror(errno) };
 
@@ -210,7 +212,8 @@ LinuxPty::~LinuxPty()
 
 PtySlave& LinuxPty::slave() noexcept
 {
-    return _slave;
+    assert(_slave);
+    return *_slave;
 }
 
 PtyMasterHandle LinuxPty::handle() const noexcept

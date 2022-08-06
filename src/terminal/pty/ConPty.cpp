@@ -69,6 +69,25 @@ ConPty::ConPty(PageSize const& _windowSize): size_ { _windowSize }
     master_ = INVALID_HANDLE_VALUE;
     input_ = INVALID_HANDLE_VALUE;
     output_ = INVALID_HANDLE_VALUE;
+    buffer_.resize(10240);
+}
+
+ConPty::~ConPty()
+{
+    PtyLog()("~ConPty()");
+    close();
+}
+
+bool ConPty::isClosed() const noexcept
+{
+    return master_ == INVALID_HANDLE_VALUE;
+}
+
+void ConPty::start()
+{
+    PtyLog()("Starting ConPTY");
+    assert(!slave_);
+
     slave_ = make_unique<ConPtySlave>(output_);
 
     HANDLE hPipePTYIn { INVALID_HANDLE_VALUE };
@@ -85,11 +104,8 @@ ConPty::ConPty(PageSize const& _windowSize): size_ { _windowSize }
     }
 
     // Create the Pseudo Console of the required size, attached to the PTY-end of the pipes
-    HRESULT hr = CreatePseudoConsole({ unbox<SHORT>(_windowSize.columns), unbox<SHORT>(_windowSize.lines) },
-                                     hPipePTYIn,
-                                     hPipePTYOut,
-                                     0,
-                                     &master_);
+    HRESULT hr = CreatePseudoConsole(
+        { unbox<SHORT>(size_.columns), unbox<SHORT>(size_.lines) }, hPipePTYIn, hPipePTYOut, 0, &master_);
 
     if (hPipePTYIn != INVALID_HANDLE_VALUE)
         CloseHandle(hPipePTYIn);
@@ -99,19 +115,6 @@ ConPty::ConPty(PageSize const& _windowSize): size_ { _windowSize }
 
     if (hr != S_OK)
         throw runtime_error { GetLastErrorAsString() };
-
-    buffer_.resize(10240);
-}
-
-ConPty::~ConPty()
-{
-    PtyLog()("~ConPty()");
-    close();
-}
-
-bool ConPty::isClosed() const noexcept
-{
-    return master_ == INVALID_HANDLE_VALUE;
 }
 
 void ConPty::close()

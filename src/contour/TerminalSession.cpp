@@ -167,6 +167,7 @@ void TerminalSession::scheduleRedraw()
 
 void TerminalSession::start()
 {
+    terminal_.device().start();
     screenUpdateThread_ = make_unique<std::thread>(bind(&TerminalSession::mainLoop, this));
 }
 

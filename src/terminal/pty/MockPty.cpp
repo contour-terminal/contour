@@ -56,6 +56,11 @@ void MockPty::resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels)
     pixelSize_ = _pixels;
 }
 
+void MockPty::start()
+{
+    closed_ = false;
+}
+
 void MockPty::close()
 {
     closed_ = true;
