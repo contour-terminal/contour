@@ -16,6 +16,7 @@
 #include <terminal/pty/Pty.h>
 
 #include <array>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -74,13 +75,13 @@ class UnixPty: public Pty
         PtySlaveHandle slave;
     };
 
-    UnixPty(PageSize const& _windowSize, std::optional<ImageSize> _pixels);
-    UnixPty(PtyHandles handles, PageSize size);
+    UnixPty(PageSize _windowSize, std::optional<ImageSize> _pixels);
     ~UnixPty() override;
 
     PtySlave& slave() noexcept override;
 
     PtyMasterHandle handle() const noexcept;
+    void start() override;
     void close() override;
     bool isClosed() const noexcept override;
     void wakeupReader() noexcept override;
@@ -96,11 +97,14 @@ class UnixPty: public Pty
   private:
     std::optional<std::string_view> readSome(int fd, char* target, size_t n) noexcept;
 
+    [[nodiscard]] bool started() const noexcept { return _masterFd != -1; }
+
     int _masterFd;
     std::array<int, 2> _pipe;
     UnixPipe _stdoutFastPipe;
     PageSize _pageSize;
-    Slave _slave;
+    std::optional<ImageSize> _pixels;
+    std::unique_ptr<Slave> _slave;
 };
 
 } // namespace terminal

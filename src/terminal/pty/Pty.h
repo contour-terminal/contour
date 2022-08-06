@@ -66,6 +66,9 @@ class Pty
 
     virtual ~Pty() = default;
 
+    /// Starts the PTY instance.
+    virtual void start() = 0;
+
     virtual PtySlave& slave() noexcept = 0;
 
     /// Releases this PTY early.

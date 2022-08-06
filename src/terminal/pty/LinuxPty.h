@@ -17,6 +17,7 @@
 #include <terminal/pty/UnixPty.h> // UnixPipe (TODO: move somewhere else)
 
 #include <array>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -49,13 +50,13 @@ class LinuxPty: public Pty
         PtySlaveHandle slave;
     };
 
-    LinuxPty(PageSize const& _windowSize, std::optional<ImageSize> _pixels);
-    LinuxPty(PtyHandles handles, PageSize size);
+    LinuxPty(PageSize _windowSize, std::optional<ImageSize> _pixels);
     ~LinuxPty() override;
 
     PtySlave& slave() noexcept override;
 
     [[nodiscard]] PtyMasterHandle handle() const noexcept;
+    void start() override;
     void close() override;
     [[nodiscard]] bool isClosed() const noexcept override;
     void wakeupReader() noexcept override;
@@ -72,12 +73,13 @@ class LinuxPty: public Pty
     std::optional<std::string_view> readSome(int fd, char* target, size_t n) noexcept;
     int waitForReadable(std::chrono::milliseconds timeout) noexcept;
 
-    int _masterFd;
-    int _epollFd;
-    int _eventFd;
+    int _masterFd = -1;
+    int _epollFd = -1;
+    int _eventFd = -1;
     UnixPipe _stdoutFastPipe;
     PageSize _pageSize;
-    Slave _slave;
+    std::optional<ImageSize> _pixels;
+    std::unique_ptr<Slave> _slave;
 };
 
 } // namespace terminal

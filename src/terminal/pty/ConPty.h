@@ -31,6 +31,7 @@ class ConPty: public Pty
     explicit ConPty(PageSize const& windowSize);
     ~ConPty() override;
 
+    void start() override;
     void close() override;
     bool isClosed() const noexcept override;
 

@@ -113,8 +113,13 @@ namespace
 
 struct Process::Private
 {
-    mutable pid_t pid {};
+    string path;
+    vector<string> args;
+    FileSystem::path cwd;
+    Environment env;
+
     unique_ptr<Pty> pty {};
+    mutable pid_t pid {};
     mutable std::mutex exitStatusMutex {};
     mutable std::optional<Process::ExitStatus> exitStatus {};
 
@@ -126,10 +131,15 @@ Process::Process(string const& _path,
                  FileSystem::path const& _cwd,
                  Environment const& _env,
                  unique_ptr<Pty> _pty):
-    d(new Private {}, [](Private* p) { delete p; })
+    d(new Private { _path, _args, _cwd, _env, move(_pty) }, [](Private* p) { delete p; })
 {
+}
+
+void Process::start()
+{
+    d->pty->start();
+
     d->pid = fork();
-    d->pty = move(_pty);
 
     UnixPipe* stdoutFastPipe = [this]() -> UnixPipe* {
         if (auto* p = dynamic_cast<SystemPty*>(d->pty.get()))
@@ -150,42 +160,42 @@ Process::Process(string const& _path,
         {
             (void) d->pty->slave().login();
 
-            auto const& cwd = _cwd.generic_string();
+            auto const& cwd = d->cwd.generic_string();
             if (!isFlatpak())
             {
-                if (!_cwd.empty() && chdir(cwd.c_str()) != 0)
+                if (!d->cwd.empty() && chdir(cwd.c_str()) != 0)
                 {
                     printf("Failed to chdir to \"%s\". %s\n", cwd.c_str(), strerror(errno));
                     exit(EXIT_FAILURE);
                 }
 
-                for (auto&& [name, value]: _env)
+                for (auto&& [name, value]: d->env)
                     setenv(name.c_str(), value.c_str(), true);
 
                 if (stdoutFastPipe)
                     setenv(StdoutFastPipeEnvironmentName.data(), StdoutFastPipeFdStr.data(), true);
             }
 
-            char** argv = [=]() -> char** {
+            char** argv = [stdoutFastPipe, this]() -> char** {
                 if (!isFlatpak())
-                    return createArgv(_path, _args, 0);
+                    return createArgv(d->path, d->args, 0);
 
                 // Prepend flatpak to jump out of sandbox:
                 // flatpak-spawn --host --watch-bus --env=TERM=$TERM /bin/zsh
                 auto realArgs = std::vector<string> {};
                 realArgs.emplace_back("--host");
                 realArgs.emplace_back("--watch-bus");
-                if (!_cwd.empty())
-                    realArgs.emplace_back(fmt::format("--directory={}", cwd));
+                if (!d->cwd.empty())
+                    realArgs.emplace_back(fmt::format("--directory={}", d->cwd.generic_string()));
                 if (auto const value = getenv("TERM"))
                     realArgs.emplace_back(fmt::format("--env=TERM={}", value));
-                for (auto&& [name, value]: _env)
+                for (auto&& [name, value]: d->env)
                     realArgs.emplace_back(fmt::format("--env={}={}", name, value));
                 if (stdoutFastPipe)
                     realArgs.emplace_back(
                         fmt::format("--env={}={}", StdoutFastPipeEnvironmentName, StdoutFastPipeFd));
-                realArgs.push_back(_path);
-                for (auto const& arg: _args)
+                realArgs.push_back(d->path);
+                for (auto const& arg: d->args)
                     realArgs.push_back(arg);
 
                 return createArgv("/usr/bin/flatpak-spawn", realArgs, 0);

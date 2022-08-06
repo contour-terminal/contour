@@ -36,6 +36,7 @@ class MockPty: public Pty
     [[nodiscard]] PageSize pageSize() const noexcept override;
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;
 
+    void start() override;
     void close() override;
     [[nodiscard]] bool isClosed() const noexcept override;
 
