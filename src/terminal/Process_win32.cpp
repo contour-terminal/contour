@@ -184,6 +184,8 @@ void Process::start()
 {
     Require(static_cast<ConPty const*>(d->pty.get()));
 
+    d->pty->start();
+
     initializeStartupInfoAttachedToPTY(d->startupInfo, static_cast<ConPty&>(*d->pty));
 
     string cmd = d->path;

@@ -177,6 +177,9 @@ PageSize ConPty::pageSize() const noexcept
 
 void ConPty::resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels)
 {
+    if (!slave_)
+        return;
+
     (void) _pixels; // TODO Can we pass that information, too?
 
     COORD coords;
