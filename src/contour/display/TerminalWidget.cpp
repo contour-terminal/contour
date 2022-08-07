@@ -886,15 +886,6 @@ void TerminalWidget::doDumpState()
         Alpha
     };
 
-    auto saveImage =
-        [](FileSystem::path const& _filename, vector<uint8_t> const& _buffer, ImageSize _size) {
-            DisplayLog()("Saving image {} to: {}", _size, _filename.generic_string());
-
-            QImage(_buffer.data(), _size.width.as<int>(), _size.height.as<int>(), QImage::Format_RGBA8888)
-                .mirrored(false, true)
-                .save(QString::fromStdString(_filename.generic_string()));
-        };
-
     terminal::renderer::RenderTarget& renderTarget = renderer_->renderTarget();
 
     do
@@ -904,8 +895,15 @@ void TerminalWidget::doDumpState()
             break;
 
         terminal::renderer::AtlasTextureScreenshot const& info = infoOpt.value();
-        auto const fileName = targetDir / fmt::format("texture-atlas-rgba.png");
-        saveImage(fileName, info.buffer, info.size);
+        auto const fileName = targetDir / "texture-atlas-rgba.png";
+        DisplayLog()("Saving image {} to: {}", info.size, fileName.generic_string());
+
+        QImage(info.buffer.data(),
+               info.size.width.as<int>(),
+               info.size.height.as<int>(),
+               QImage::Format_RGBA8888)
+            .mirrored(false, true)
+            .save(QString::fromStdString(fileName.generic_string()));
     } while (0);
 
     renderTarget.scheduleScreenshot(
