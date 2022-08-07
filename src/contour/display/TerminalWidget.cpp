@@ -902,21 +902,23 @@ void TerminalWidget::doDumpState()
                info.size.width.as<int>(),
                info.size.height.as<int>(),
                QImage::Format_RGBA8888)
-            .mirrored(false, true)
             .save(QString::fromStdString(fileName.generic_string()));
     } while (0);
 
-    renderTarget.scheduleScreenshot(
-        [this, targetDir, saveImage](std::vector<uint8_t> const& rgbaPixels, ImageSize imageSize) {
-            saveImage(targetDir / "screenshot.png", rgbaPixels, imageSize);
+    renderTarget.scheduleScreenshot([this, targetDir](std::vector<uint8_t> const& rgbaPixels,
+                                                      ImageSize imageSize) {
+        QImage(
+            rgbaPixels.data(), imageSize.width.as<int>(), imageSize.height.as<int>(), QImage::Format_RGBA8888)
+            .mirrored(false, true)
+            .save(QString::fromStdString((targetDir / "screenshot.png").generic_string()));
 
-            // If this dump-state was triggered due to the PTY being closed
-            // and a dump was requested at the end, then terminate this session here now.
-            if (session_->terminal().device().isClosed() && session_->app().dumpStateAtExit().has_value())
-            {
-                session_->terminate();
-            }
-        });
+        // If this dump-state was triggered due to the PTY being closed
+        // and a dump was requested at the end, then terminate this session here now.
+        if (session_->terminal().device().isClosed() && session_->app().dumpStateAtExit().has_value())
+        {
+            session_->terminate();
+        }
+    });
 
     // force an update to actually render the screenshot
     update();
