@@ -903,17 +903,7 @@ void TerminalWidget::doDumpState()
 
         return [_filename, theImageFormat, theElementCount](vector<uint8_t> const& _buffer, ImageSize _size) {
             DisplayLog()("Saving image {} to: {}", _size, _filename.generic_string());
-            auto image = QImage(_size.width.as<int>(), _size.height.as<int>(), theImageFormat);
-            auto const pitch = unbox<int>(_size.width) * theElementCount;
-            for (int i = 0; i < unbox<int>(_size.height); ++i)
-            {
-                // Vertically flip the image, because the coordinate system
-                // between OpenGL and desktop screens is inverse.
-                uint8_t const* sourceLine = _buffer.data() + static_cast<ptrdiff_t>(i * pitch);
-                uint8_t const* sourceLineEnd = sourceLine + pitch;
-                uint8_t* targetLine = image.scanLine(i);
-                copy(sourceLine, sourceLineEnd, targetLine);
-            }
+            auto const image = QImage(_size.width.as<int>(), _size.height.as<int>(), theImageFormat);
             image.save(QString::fromStdString(_filename.generic_string()));
         };
     };
