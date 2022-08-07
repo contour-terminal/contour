@@ -886,44 +886,14 @@ void TerminalWidget::doDumpState()
         Alpha
     };
 
-    auto screenshotSaver = [](FileSystem::path const& _filename, ImageBufferFormat _format) {
-        auto const [qImageFormat, elementCount] = [&]() -> tuple<QImage::Format, int> {
-            switch (_format)
-            {
-                case ImageBufferFormat::RGBA: return tuple { QImage::Format_RGBA8888, 4 };
-                case ImageBufferFormat::RGB: return tuple { QImage::Format_RGB888, 3 };
-                case ImageBufferFormat::Alpha: return tuple { QImage::Format_Grayscale8, 1 };
-            }
-            return tuple { QImage::Format_Grayscale8, 1 };
-        }();
-
-        // That's a little workaround for MacOS/X's C++ Clang compiler.
-        auto const theImageFormat = qImageFormat;
-        auto const theElementCount = elementCount;
-
-        return [_filename, theImageFormat, theElementCount](vector<uint8_t> const& _buffer, ImageSize _size) {
+    auto saveImage =
+        [](FileSystem::path const& _filename, vector<uint8_t> const& _buffer, ImageSize _size) {
             DisplayLog()("Saving image {} to: {}", _size, _filename.generic_string());
-            auto const image = QImage(_size.width.as<int>(), _size.height.as<int>(), theImageFormat);
-            image.save(QString::fromStdString(_filename.generic_string()));
-        };
-    };
 
-    auto const atlasScreenshotSaver = [screenshotSaver, targetDir](vector<uint8_t> const& _buffer,
-                                                                   ImageSize _size) {
-        return [screenshotSaver, targetDir, &_buffer, _size](ImageBufferFormat _format) {
-            auto const formatText = [&]() {
-                switch (_format)
-                {
-                    case ImageBufferFormat::RGBA: return "rgba"sv;
-                    case ImageBufferFormat::RGB: return "rgb"sv;
-                    case ImageBufferFormat::Alpha: return "alpha"sv;
-                }
-                return "unknown"sv;
-            }();
-            auto const fileName = targetDir / fmt::format("texture-atlas-{}.png", formatText);
-            return screenshotSaver(fileName, _format)(_buffer, _size);
+            QImage(_buffer.data(), _size.width.as<int>(), _size.height.as<int>(), QImage::Format_RGBA8888)
+                .mirrored(false, true)
+                .save(QString::fromStdString(_filename.generic_string()));
         };
-    };
 
     terminal::renderer::RenderTarget& renderTarget = renderer_->renderTarget();
 
@@ -934,19 +904,13 @@ void TerminalWidget::doDumpState()
             break;
 
         terminal::renderer::AtlasTextureScreenshot const& info = infoOpt.value();
-        auto const saveScreenshot = atlasScreenshotSaver(info.buffer, info.size);
-        switch (info.format)
-        {
-            case terminal::renderer::atlas::Format::RGBA: saveScreenshot(ImageBufferFormat::RGBA); break;
-            case terminal::renderer::atlas::Format::RGB: saveScreenshot(ImageBufferFormat::RGB); break;
-            case terminal::renderer::atlas::Format::Red: saveScreenshot(ImageBufferFormat::Alpha); break;
-        }
+        auto const fileName = targetDir / fmt::format("texture-atlas-rgba.png");
+        saveImage(fileName, info.buffer, info.size);
     } while (0);
 
     renderTarget.scheduleScreenshot(
-        [this, targetDir, screenshotSaver](std::vector<uint8_t> const& rgbaPixels, ImageSize imageSize) {
-            auto const take = screenshotSaver(targetDir / "screenshot.png", ImageBufferFormat::RGBA);
-            take(rgbaPixels, imageSize);
+        [this, targetDir, saveImage](std::vector<uint8_t> const& rgbaPixels, ImageSize imageSize) {
+            saveImage(targetDir / "screenshot.png", rgbaPixels, imageSize);
 
             // If this dump-state was triggered due to the PTY being closed
             // and a dump was requested at the end, then terminate this session here now.
