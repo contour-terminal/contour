@@ -154,12 +154,16 @@ namespace
 
 struct Process::Private
 {
+    string path;
+    vector<string> args;
+    FileSystem::path cwd;
+    Environment env;
+    std::unique_ptr<Pty> pty {};
+
     mutable HANDLE pid {};
     mutable std::mutex exitStatusMutex {};
     mutable std::optional<Process::ExitStatus> exitStatus {};
     std::optional<std::thread> exitWatcher;
-
-    std::unique_ptr<Pty> pty {};
 
     PROCESS_INFORMATION processInfo {};
     STARTUPINFOEX startupInfo {};
@@ -172,26 +176,29 @@ Process::Process(string const& _path,
                  FileSystem::path const& _cwd,
                  Environment const& _env,
                  std::unique_ptr<Pty> _pty):
-    d(new Private {}, [](Private* p) { delete p; })
+    d(new Private {_path, _args, _cwd, _env, move(_pty)}, [](Private* p) { delete p; })
 {
-    d->pty = move(_pty);
+}
+
+void Process::start()
+{
     Require(static_cast<ConPty const*>(d->pty.get()));
 
     initializeStartupInfoAttachedToPTY(d->startupInfo, static_cast<ConPty&>(*d->pty));
 
-    string cmd = _path;
-    for (size_t i = 0; i < _args.size(); ++i)
+    string cmd = d->path;
+    for (size_t i = 0; i < d->args.size(); ++i)
     {
         cmd += ' ';
-        if (_args[i].find(' ') != std::string::npos)
-            cmd += '\"' + _args[i] + '\"';
+        if (d->args[i].find(' ') != std::string::npos)
+            cmd += '\"' + d->args[i] + '\"';
         else
-            cmd += _args[i];
+            cmd += d->args[i];
     }
 
     // In case of PATH environment variable, extend it rather then overwriting it.
-    auto env = _env;
-    for (auto [name, value]: _env)
+    auto env = d->env;
+    for (auto const& [name, value]: d->env)
     {
         if (crispy::toUpper(name) == "PATH")
         {
@@ -203,7 +210,7 @@ Process::Process(string const& _path,
     }
     auto const envScope = InheritingEnvBlock { env };
 
-    auto const cwd = _cwd.generic_string();
+    auto const cwd = d->cwd.generic_string();
     auto const cwdPtr = !cwd.empty() ? cwd.c_str() : nullptr;
 
     PtyLog()("Creating process for command line: {}", cmd);
@@ -222,7 +229,7 @@ Process::Process(string const& _path,
         throw runtime_error { "Could not create process. "s + getLastErrorAsString() };
 
     d->exitWatcher = std::thread([this]() {
-        wait();
+        (void) wait();
         PtyLog()("Process terminated with exit code {}.", checkStatus().value());
         d->pty->close();
     });
