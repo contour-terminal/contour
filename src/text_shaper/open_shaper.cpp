@@ -391,8 +391,8 @@ namespace
 struct open_shaper::Private // {{{
 {
     crispy::finally ftCleanup_;
-    FT_Library ft_;
-    unique_ptr<font_locator> locator_;
+    FT_Library ft_ {};
+    font_locator* locator_ = nullptr;
     DPI dpi_;
     unordered_map<FontPathAndSize, font_key> fontPathAndSizeToKeyMapping;
     unordered_map<font_key, HbFontInfo> fontKeyToHbFontInfoMapping; // from font_key to FontInfo struct
@@ -473,12 +473,12 @@ struct open_shaper::Private // {{{
         return output;
     }
 
-    Private(DPI _dpi, unique_ptr<font_locator> _locator):
+    Private(DPI _dpi, font_locator& _locator):
         ftCleanup_ { [this]() {
             FT_Done_FreeType(ft_);
         } },
         ft_ {},
-        locator_ { move(_locator) },
+        locator_ { &_locator },
         dpi_ { _dpi },
         hb_buf_(hb_buffer_create(), [](auto p) { hb_buffer_destroy(p); }),
         nextFontKey_ {}
@@ -550,8 +550,8 @@ struct open_shaper::Private // {{{
     }
 }; // }}}
 
-open_shaper::open_shaper(DPI _dpi, unique_ptr<font_locator> _locator):
-    d(new Private(_dpi, move(_locator)), [](Private* p) { delete p; })
+open_shaper::open_shaper(DPI _dpi, font_locator& _locator):
+    d(new Private(_dpi, _locator), [](Private* p) { delete p; })
 {
 }
 
@@ -563,9 +563,9 @@ void open_shaper::set_dpi(DPI _dpi)
     d->dpi_ = _dpi;
 }
 
-void open_shaper::set_locator(unique_ptr<font_locator> _locator)
+void open_shaper::set_locator(font_locator& _locator)
 {
-    d->locator_ = move(_locator);
+    d->locator_ = &_locator;
 }
 
 void open_shaper::clear_cache()

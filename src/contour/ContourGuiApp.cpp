@@ -263,8 +263,8 @@ int ContourGuiApp::fontConfigAction()
 
     terminal::renderer::FontDescriptions const& fonts = _config.profile(_config.defaultProfileName)->fonts;
     text::font_description const& fontDescription = fonts.regular;
-    std::unique_ptr<text::font_locator> fontLocator = createFontLocator(fonts.fontLocator);
-    text::font_source_list fontSources = fontLocator->locate(fontDescription);
+    text::font_locator& fontLocator = createFontLocator(fonts.fontLocator);
+    text::font_source_list fontSources = fontLocator.locate(fontDescription);
 
     fmt::print("Matching fonts using  : {}\n", fonts.fontLocator);
     fmt::print("Font description      : {}\n", fontDescription);

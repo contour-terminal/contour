@@ -108,7 +108,7 @@ class shaper
     /**
      * Configures the font location API to be used.
      */
-    virtual void set_locator(std::unique_ptr<font_locator> _locator) = 0;
+    virtual void set_locator(font_locator& _locator) = 0;
 
     /**
      * Clears internal caches (if any).

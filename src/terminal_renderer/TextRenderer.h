@@ -45,7 +45,7 @@
 namespace terminal::renderer
 {
 
-std::unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine);
+text::font_locator& createFontLocator(FontLocatorEngine _engine);
 
 struct FontKeys
 {

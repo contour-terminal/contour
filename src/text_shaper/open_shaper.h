@@ -30,11 +30,11 @@ class font_locator;
 class open_shaper: public shaper
 {
   public:
-    explicit open_shaper(DPI _dpi, std::unique_ptr<font_locator> _locator);
+    explicit open_shaper(DPI _dpi, font_locator& _locator);
 
     void set_dpi(DPI _dpi) override;
 
-    void set_locator(std::unique_ptr<font_locator> _locator) override;
+    void set_locator(font_locator& _locator) override;
 
     void clear_cache() override;
 

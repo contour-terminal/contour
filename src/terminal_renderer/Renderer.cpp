@@ -89,7 +89,7 @@ namespace
 
     unique_ptr<text::shaper> createTextShaper(TextShapingEngine _engine,
                                               DPI _dpi,
-                                              unique_ptr<text::font_locator> _locator)
+                                              text::font_locator& _locator)
     {
         switch (_engine)
         {
@@ -97,7 +97,7 @@ namespace
 #if defined(_WIN32)
                 RendererLog()("Using DirectWrite text shaping engine.");
                 // TODO: do we want to use custom font locator here?
-                return make_unique<text::directwrite_shaper>(_dpi, move(_locator));
+                return make_unique<text::directwrite_shaper>(_dpi, _locator);
 #else
                 RendererLog()("DirectWrite not available on this platform.");
                 break;
@@ -116,7 +116,7 @@ namespace
         }
 
         RendererLog()("Using OpenShaper text shaping engine.");
-        return make_unique<text::open_shaper>(_dpi, std::move(_locator));
+        return make_unique<text::open_shaper>(_dpi, _locator);
     }
 
 } // namespace

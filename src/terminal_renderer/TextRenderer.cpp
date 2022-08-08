@@ -129,6 +129,7 @@ Making use of reserved glyph slots
 #include <terminal_renderer/shared_defines.h>
 #include <terminal_renderer/utils.h>
 
+#include <text_shaper/font_locator_provider.h>
 #include <text_shaper/fontconfig_locator.h>
 #include <text_shaper/mock_font_locator.h>
 
@@ -268,21 +269,21 @@ namespace
     }
 } // namespace
 
-unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine)
+text::font_locator& createFontLocator(FontLocatorEngine _engine)
 {
     switch (_engine)
     {
-        case FontLocatorEngine::Mock: return make_unique<text::mock_font_locator>();
+        case FontLocatorEngine::Mock: return text::font_locator_provider::get().mock();
         case FontLocatorEngine::DWrite:
 #if defined(_WIN32)
-            return make_unique<text::directwrite_locator>();
+            return text::font_locator_provider::get().directwrite();
 #else
             LocatorLog()("Font locator DirectWrite not supported on this platform.");
 #endif
             break;
         case FontLocatorEngine::CoreText:
 #if defined(__APPLE__)
-            return make_unique<text::coretext_locator>();
+            return text::font_locator_provider::get().coretext();
 #else
             LocatorLog()("Font locator CoreText not supported on this platform.");
 #endif
@@ -294,7 +295,7 @@ unique_ptr<text::font_locator> createFontLocator(FontLocatorEngine _engine)
     }
 
     LocatorLog()("Using font locator: fontconfig.");
-    return make_unique<text::fontconfig_locator>();
+    return text::font_locator_provider::get().fontconfig();
 }
 
 // TODO: What's a good value here? Or do we want to make that configurable,
