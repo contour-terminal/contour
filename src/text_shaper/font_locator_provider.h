@@ -50,5 +50,4 @@ class font_locator_provider
     std::unique_ptr<font_locator> _mock {};
 };
 
-
-}
+} // namespace text

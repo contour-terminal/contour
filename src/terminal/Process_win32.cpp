@@ -176,7 +176,7 @@ Process::Process(string const& _path,
                  FileSystem::path const& _cwd,
                  Environment const& _env,
                  std::unique_ptr<Pty> _pty):
-    d(new Private {_path, _args, _cwd, _env, move(_pty)}, [](Private* p) { delete p; })
+    d(new Private { _path, _args, _cwd, _env, move(_pty) }, [](Private* p) { delete p; })
 {
 }
 
