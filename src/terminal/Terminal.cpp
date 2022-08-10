@@ -1144,6 +1144,14 @@ void Terminal::setMode(AnsiMode _mode, bool _enable)
     if (!isValidAnsiMode(static_cast<unsigned int>(_mode)))
         return;
 
+    if (_mode == AnsiMode::KeyboardAction)
+    {
+        if (_enable)
+            pushStatusDisplay(StatusDisplayType::Indicator);
+        else
+            popStatusDisplay();
+    }
+
     state_.modes.set(_mode, _enable);
 }
 
@@ -1697,6 +1705,29 @@ void Terminal::setActiveStatusDisplay(ActiveStatusDisplay activeDisplay)
             break;
         }
     }
+}
+
+void Terminal::pushStatusDisplay(StatusDisplayType type)
+{
+    // Only remember the outermost saved status display type.
+    if (!state_.savedStatusDisplayType)
+        state_.savedStatusDisplayType = state_.statusDisplayType;
+
+    setStatusDisplay(type);
+}
+
+void Terminal::popStatusDisplay()
+{
+    if (!state_.savedStatusDisplayType)
+        return;
+
+    setStatusDisplay(state_.savedStatusDisplayType.value());
+    state_.savedStatusDisplayType.reset();
+}
+
+void Terminal::setAllowInput(bool enabled)
+{
+    setMode(AnsiMode::KeyboardAction, !enabled);
 }
 
 bool Terminal::isHighlighted(CellLocation _cell) const noexcept

@@ -2,6 +2,7 @@
 
 - Adds vim-like `scrolloff` feature to normal mode cursor movements to ensure a line padding when scrolling up/down.
 - Adds support for HSL colorspace in Sixel images.
+- Always show indicator status line when ANSI mode KAM is enabled (which can be toggled via action `ToggleInputProtection`).
 - [Linux] Changes the .desktop file name and icon file name to conform to the flatpak recommendations.
 - [Linux] Provide an AppStream XML file.
 - [Linux] Drop KDE/KWin dependency on the binary by implementing enabling blur-behind background manually.
