@@ -42,6 +42,7 @@ enum class CellFlags : uint16_t
     Framed = (1 << 12),
     Encircled = (1 << 13),
     Overline = (1 << 14),
+    RapidBlinking = (1 << 15),
 };
 
 constexpr CellFlags& operator|=(CellFlags& a, CellFlags b) noexcept
@@ -100,12 +101,13 @@ struct formatter<terminal::CellFlags>
     template <typename FormatContext>
     auto format(const terminal::CellFlags _flags, FormatContext& ctx)
     {
-        static const std::array<std::pair<terminal::CellFlags, std::string_view>, 15> nameMap = {
+        static const std::array<std::pair<terminal::CellFlags, std::string_view>, 16> nameMap = {
             std::pair { terminal::CellFlags::Bold, std::string_view("Bold") },
             std::pair { terminal::CellFlags::Faint, std::string_view("Faint") },
             std::pair { terminal::CellFlags::Italic, std::string_view("Italic") },
             std::pair { terminal::CellFlags::Underline, std::string_view("Underline") },
             std::pair { terminal::CellFlags::Blinking, std::string_view("Blinking") },
+            std::pair { terminal::CellFlags::RapidBlinking, std::string_view("RapidBlinking") },
             std::pair { terminal::CellFlags::Inverse, std::string_view("Inverse") },
             std::pair { terminal::CellFlags::Hidden, std::string_view("Hidden") },
             std::pair { terminal::CellFlags::CrossedOut, std::string_view("CrossedOut") },

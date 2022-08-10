@@ -302,6 +302,11 @@ class Terminal
         auto const changes = changes_.exchange(0);
         currentTime_ = _now;
         updateCursorVisibilityState();
+        if (isBlinkOnScreen())
+        {
+            tie(_rapidBlinker.state, _lastRapidBlink) = nextBlinkState(_rapidBlinker, _lastRapidBlink);
+            tie(_slowBlinker.state, _lastBlink) = nextBlinkState(_slowBlinker, _lastBlink);
+        }
         return changes;
     }
     // }}}
@@ -394,7 +399,7 @@ class Terminal
     bool isAlternateScreen() const noexcept { return state_.screenType == ScreenType::Alternate; }
     ScreenType screenType() const noexcept { return state_.screenType; }
     void setScreen(ScreenType screenType);
-    void setHighlightTimeout(std::chrono::milliseconds timeout) { highlightTimeout_ = timeout; }
+    void setHighlightTimeout(std::chrono::milliseconds timeout) noexcept { highlightTimeout_ = timeout; }
 
     Screen<Cell> const& primaryScreen() const noexcept { return primaryScreen_; }
     Screen<Cell>& primaryScreen() noexcept { return primaryScreen_; }
@@ -429,6 +434,8 @@ class Terminal
     {
         return state_.cursor.visible && (cursorDisplay_ == CursorDisplay::Steady || cursorBlinkState_);
     }
+
+    bool isBlinkOnScreen() const noexcept { return _lastRenderPassHints.containsBlinkingCells; }
 
     std::chrono::steady_clock::time_point lastCursorBlink() const noexcept { return lastCursorBlink_; }
 
@@ -486,6 +493,8 @@ class Terminal
     }
 
     bool isHighlighted(CellLocation _cell) const noexcept;
+    bool blinkState() const noexcept { return _slowBlinker.state; }
+    bool rapidBlinkState() const noexcept { return _rapidBlinker.state; }
 
     /// Sets or resets to a new selection.
     void setSelector(std::unique_ptr<Selection> _selector) { selection_ = std::move(_selector); }
@@ -597,6 +606,15 @@ class Terminal
     void updateIndicatorStatusLine();
     void updateCursorVisibilityState() const;
     bool updateCursorHoveringState();
+    template <typename BlinkerState>
+    std::pair<bool, std::chrono::steady_clock::time_point> nextBlinkState(
+        BlinkerState blinker, std::chrono::steady_clock::time_point lastBlink) const noexcept
+    {
+        auto const passed = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime_ - lastBlink);
+        if (passed < blinker.interval)
+            return { blinker.state, lastBlink };
+        return { !blinker.state, currentTime_ };
+    }
 
     // Reads from PTY.
     Pty::ReadResult readFromPty();
@@ -673,6 +691,16 @@ class Terminal
     SelectionHelper selectionHelper_;
     std::optional<HighlightRange> highlightRange_ = std::nullopt;
     std::chrono::milliseconds highlightTimeout_;
+    struct BlinkerState
+    {
+        bool state = false;
+        std::chrono::milliseconds const interval;
+    };
+    RenderPassHints _lastRenderPassHints;
+    mutable BlinkerState _slowBlinker { false, std::chrono::milliseconds { 500 } };
+    mutable BlinkerState _rapidBlinker { false, std::chrono::milliseconds { 300 } };
+    mutable std::chrono::steady_clock::time_point _lastBlink;
+    mutable std::chrono::steady_clock::time_point _lastRapidBlink;
 };
 
 } // namespace terminal

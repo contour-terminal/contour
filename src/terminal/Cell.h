@@ -161,7 +161,9 @@ class CONTOUR_PACKED Cell
     RGBColor getUnderlineColor(ColorPalette const& _colorPalette, RGBColor _defaultColor) const noexcept;
 
     [[nodiscard]] RGBColorPair makeColors(ColorPalette const& _colorPalette,
-                                          bool _reverseVideo) const noexcept;
+                                          bool _reverseVideo,
+                                          bool _blink,
+                                          bool _rapidBlink) const noexcept;
 
     std::shared_ptr<ImageFragment> imageFragment() const noexcept;
     void setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, CellLocation offset);
@@ -519,7 +521,9 @@ inline RGBColorPair makeColors(ColorPalette const& colorPalette,
                                CellFlags cellFlags,
                                bool _reverseVideo,
                                Color foregroundColor,
-                               Color backgroundColor) noexcept
+                               Color backgroundColor,
+                               bool blinkingState_,
+                               bool rapidBlinkState_) noexcept
 {
     auto const mode = (cellFlags & CellFlags::Faint)                                    ? ColorMode::Dimmed
                       : ((cellFlags & CellFlags::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
@@ -538,12 +542,21 @@ inline RGBColorPair makeColors(ColorPalette const& colorPalette,
     if (cellFlags & CellFlags::Hidden)
         rgbColors = rgbColors.allBackground();
 
+    if ((cellFlags & CellFlags::Blinking) && !blinkingState_)
+        return rgbColors.allBackground();
+    if ((cellFlags & CellFlags::RapidBlinking) && !rapidBlinkState_)
+        return rgbColors.allBackground();
+
     return rgbColors;
 }
 
-inline RGBColorPair Cell::makeColors(ColorPalette const& _colorPalette, bool _reverseVideo) const noexcept
+inline RGBColorPair Cell::makeColors(ColorPalette const& _colorPalette,
+                                     bool _reverseVideo,
+                                     bool _blink,
+                                     bool _rapidBlink) const noexcept
 {
-    return terminal::makeColors(_colorPalette, styles(), _reverseVideo, foregroundColor(), backgroundColor());
+    return terminal::makeColors(
+        _colorPalette, styles(), _reverseVideo, foregroundColor(), backgroundColor(), _blink, _rapidBlink);
 }
 
 inline std::shared_ptr<ImageFragment> Cell::imageFragment() const noexcept
@@ -589,7 +602,14 @@ inline void Cell::setGraphicsRendition(GraphicsRendition _rendition) noexcept
         case GraphicsRendition::Faint: extra().flags |= CellFlags::Faint; break;
         case GraphicsRendition::Italic: extra().flags |= CellFlags::Italic; break;
         case GraphicsRendition::Underline: extra().flags |= CellFlags::Underline; break;
-        case GraphicsRendition::Blinking: extra().flags |= CellFlags::Blinking; break;
+        case GraphicsRendition::Blinking:
+            extra().flags &= ~CellFlags::RapidBlinking;
+            extra().flags |= CellFlags::Blinking;
+            break;
+        case GraphicsRendition::RapidBlinking:
+            extra().flags &= ~CellFlags::Blinking;
+            extra().flags |= CellFlags::RapidBlinking;
+            break;
         case GraphicsRendition::Inverse: extra().flags |= CellFlags::Inverse; break;
         case GraphicsRendition::Hidden: extra().flags |= CellFlags::Hidden; break;
         case GraphicsRendition::CrossedOut: extra().flags |= CellFlags::CrossedOut; break;
@@ -605,7 +625,9 @@ inline void Cell::setGraphicsRendition(GraphicsRendition _rendition) noexcept
             extra().flags &= ~(CellFlags::Underline | CellFlags::DoublyUnderlined | CellFlags::CurlyUnderlined
                                | CellFlags::DottedUnderline | CellFlags::DashedUnderline);
             break;
-        case GraphicsRendition::NoBlinking: extra().flags &= ~CellFlags::Blinking; break;
+        case GraphicsRendition::NoBlinking:
+            extra().flags &= ~(CellFlags::Blinking | CellFlags::RapidBlinking);
+            break;
         case GraphicsRendition::NoInverse: extra().flags &= ~CellFlags::Inverse; break;
         case GraphicsRendition::NoHidden: extra().flags &= ~CellFlags::Hidden; break;
         case GraphicsRendition::NoCrossedOut: extra().flags &= ~CellFlags::CrossedOut; break;

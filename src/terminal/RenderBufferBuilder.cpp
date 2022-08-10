@@ -39,10 +39,12 @@ namespace
                             Color backgroundColor,
                             bool _selected,
                             bool _isCursor,
-                            bool _isHighlighted) noexcept
+                            bool _isHighlighted,
+                            bool _blink,
+                            bool _rapidBlink) noexcept
     {
-        auto const sgrColors =
-            makeColors(_colorPalette, _cellFlags, _reverseVideo, foregroundColor, backgroundColor);
+        auto const sgrColors = makeColors(
+            _colorPalette, _cellFlags, _reverseVideo, foregroundColor, backgroundColor, _blink, _rapidBlink);
 
         if (!_selected && !_isCursor && !_isHighlighted)
             return sgrColors;
@@ -227,6 +229,8 @@ RGBColorPair RenderBufferBuilder<Cell>::makeColorsForCell(CellLocation gridPosit
 
     auto const selected = terminal.isSelected(CellLocation { gridPosition.line, gridPosition.column });
     auto const highlighted = terminal.isHighlighted(CellLocation { gridPosition.line, gridPosition.column });
+    auto const blink = terminal.blinkState();
+    auto const rapidBlink = terminal.rapidBlinkState();
 
     return makeColors(terminal.colorPalette(),
                       cellFlags,
@@ -235,7 +239,9 @@ RGBColorPair RenderBufferBuilder<Cell>::makeColorsForCell(CellLocation gridPosit
                       backgroundColor,
                       selected,
                       paintCursor,
-                      highlighted);
+                      highlighted,
+                      blink,
+                      rapidBlink);
 }
 
 template <typename Cell>

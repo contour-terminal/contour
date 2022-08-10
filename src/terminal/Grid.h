@@ -107,6 +107,11 @@ constexpr bool operator!=(Margin const& a, PageSize b) noexcept
 template <typename Cell>
 using Lines = crispy::ring<Line<Cell>>;
 
+struct RenderPassHints
+{
+    bool containsBlinkingCells = false;
+};
+
 /**
  * Represents a logical grid line, i.e. a sequence lines that were written without
  * an explicit linefeed, triggering an auto-wrap.
@@ -490,7 +495,7 @@ class Grid
     // {{{ Rendering API
     /// Renders the full screen by passing every grid cell to the callback.
     template <typename RendererT>
-    void render(RendererT&& _render, ScrollOffset _scrollOffset = {}) const;
+    [[nodiscard]] RenderPassHints render(RendererT&& _render, ScrollOffset _scrollOffset = {}) const;
 
     /// Takes text-screenshot of the main page.
     [[nodiscard]] std::string renderMainPageText() const;
@@ -572,26 +577,38 @@ bool Grid<Cell>::isLineWrapped(LineOffset _line) const noexcept
 
 template <typename Cell>
 template <typename RendererT>
-void Grid<Cell>::render(RendererT&& _render, ScrollOffset _scrollOffset) const
+[[nodiscard]] RenderPassHints Grid<Cell>::render(RendererT&& _render, ScrollOffset _scrollOffset) const
 {
     assert(!_scrollOffset || unbox<LineCount>(_scrollOffset) <= historyLineCount());
 
     auto y = LineOffset(0);
+    auto hints = RenderPassHints {};
     for (int i = -*_scrollOffset, e = i + *pageSize_.lines; i != e; ++i, ++y)
     {
         auto x = ColumnOffset(0);
         Line<Cell> const& line = lines_[i];
         if (line.isTrivialBuffer())
+        {
+            auto const cellFlags = line.trivialBuffer().textAttributes.styles;
+            hints.containsBlinkingCells = hints.containsBlinkingCells || (CellFlags::Blinking & cellFlags)
+                                          || (CellFlags::RapidBlinking & cellFlags);
             _render.renderTrivialLine(line.trivialBuffer(), y);
+        }
         else
         {
             _render.startLine(y);
             for (Cell const& cell: line.cells())
+            {
+                hints.containsBlinkingCells = hints.containsBlinkingCells
+                                              || (CellFlags::Blinking & cell.styles())
+                                              || (CellFlags::RapidBlinking & cell.styles());
                 _render.renderCell(cell, y, x++);
+            }
             _render.endLine();
         }
     }
     _render.finish();
+    return hints;
 }
 // }}}
 

@@ -12,6 +12,7 @@
 - Changes behavior of PTY (and shell process) creation until only when a PTY is required by the terminal emulator during instanciation, possibly avoiding problems with xdotool running too early.
 - Internal: Y-axis inverted to match GUI coordinate systems where (0, 0) is top left rather than bottom left.
 - Fixes logging file toggle.
+- Adds `CSI 5m` (blink) and `CSI 6m` (rapid blink).
 
 ### 0.3.2 (2022-07-07)
 

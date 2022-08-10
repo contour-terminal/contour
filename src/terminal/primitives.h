@@ -526,6 +526,7 @@ enum class GraphicsRendition
     Italic = 3,            //!< Italic glyph
     Underline = 4,         //!< Underlined glyph
     Blinking = 5,          //!< Blinking glyph
+    RapidBlinking = 6,     //!< Blinking glyph
     Inverse = 7,           //!< Swaps foreground with background color.
     Hidden = 8,            //!< Glyph hidden (somewhat like space character).
     CrossedOut = 9,        //!< Crossed out glyph space.

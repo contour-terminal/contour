@@ -188,6 +188,7 @@ namespace // {{{ helper
             pair { CellFlags::Italic, "3"sv },
             pair { CellFlags::Underline, "4"sv },
             pair { CellFlags::Blinking, "5"sv },
+            pair { CellFlags::RapidBlinking, "6"sv },
             pair { CellFlags::Inverse, "7"sv },
             pair { CellFlags::Hidden, "8"sv },
             pair { CellFlags::CrossedOut, "9"sv },
@@ -2400,6 +2401,7 @@ namespace impl
                             target.setGraphicsRendition(GraphicsRendition::Underline);
                         break;
                     case 5: target.setGraphicsRendition(GraphicsRendition::Blinking); break;
+                    case 6: target.setGraphicsRendition(GraphicsRendition::RapidBlinking); break;
                     case 7: target.setGraphicsRendition(GraphicsRendition::Inverse); break;
                     case 8: target.setGraphicsRendition(GraphicsRendition::Hidden); break;
                     case 9: target.setGraphicsRendition(GraphicsRendition::CrossedOut); break;

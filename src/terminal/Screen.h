@@ -109,9 +109,9 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     /// Renders the full screen by passing every grid cell to the callback.
     template <typename Renderer>
-    void render(Renderer&& _render, ScrollOffset _scrollOffset = {}) const
+    RenderPassHints render(Renderer&& _render, ScrollOffset _scrollOffset = {}) const
     {
-        _grid.render(std::forward<Renderer>(_render), _scrollOffset);
+        return _grid.render(std::forward<Renderer>(_render), _scrollOffset);
     }
 
     /// Renders the full screen as text into the given string. Each line will be terminated by LF.
