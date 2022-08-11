@@ -904,6 +904,13 @@ bool TerminalSession::operator()(actions::ToggleStatusLine)
         terminal().setStatusDisplay(StatusDisplayType::Indicator);
     else
         terminal().setStatusDisplay(StatusDisplayType::None);
+
+    // `savedStatusDisplayType` holds only a value if the application has been overriding
+    // the status display type. But the user now actively requests a given type,
+    // so make sure restoring will not destroy the user's desire.
+    if (terminal().state().savedStatusDisplayType)
+        terminal().state().savedStatusDisplayType = terminal().state().statusDisplayType;
+
     return true;
 }
 

@@ -165,6 +165,7 @@ struct TerminalState
     Grid<Cell> hostWritableStatusBuffer; // writable status-display, see DECSASD and DECSSDT.
     Grid<Cell> indicatorStatusBuffer;    // status buffer as used for indicator status line AND error lines.
     StatusDisplayType statusDisplayType;
+    std::optional<StatusDisplayType> savedStatusDisplayType;
     ActiveStatusDisplay activeStatusDisplay;
 
     // cursor related

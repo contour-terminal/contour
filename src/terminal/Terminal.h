@@ -583,8 +583,12 @@ class Terminal
     void setStatusDisplay(StatusDisplayType statusDisplayType);
     void setActiveStatusDisplay(ActiveStatusDisplay activeDisplay);
 
+    void pushStatusDisplay(StatusDisplayType statusDisplayType);
+    void popStatusDisplay();
+
     bool allowInput() const noexcept { return !isModeEnabled(AnsiMode::KeyboardAction); }
-    void setAllowInput(bool enabled) noexcept { setMode(AnsiMode::KeyboardAction, !enabled); }
+
+    void setAllowInput(bool enabled);
 
   private:
     void mainLoop();

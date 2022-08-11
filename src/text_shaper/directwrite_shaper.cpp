@@ -115,7 +115,7 @@ struct directwrite_shaper::Private
 {
     ComPtr<IDWriteFactory7> factory;
     ComPtr<IDWriteTextAnalyzer1> textAnalyzer;
-    std::unique_ptr<font_locator> locator_;
+    font_locator* locator_;
 
     DPI dpi_;
     std::wstring userLocale;
@@ -124,7 +124,7 @@ struct directwrite_shaper::Private
 
     font_key nextFontKey;
 
-    Private(DPI dpi, std::unique_ptr<font_locator> _locator): dpi_ { dpi }, locator_ { move(_locator) }
+    Private(DPI dpi, font_locator& _locator): dpi_ { dpi }, locator_ { &_locator }
     {
         auto hr = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
                                       __uuidof(IDWriteFactory7),
@@ -271,8 +271,8 @@ struct directwrite_shaper::Private
     float pixelPerDip() { return dpi_.x / 96.0; }
 };
 
-directwrite_shaper::directwrite_shaper(DPI _dpi, std::unique_ptr<font_locator> _locator):
-    d(new Private(_dpi, move(_locator)), [](Private* p) { delete p; })
+directwrite_shaper::directwrite_shaper(DPI _dpi, font_locator& _locator):
+    d(new Private(_dpi, _locator), [](Private* p) { delete p; })
 {
 }
 
@@ -589,9 +589,9 @@ void directwrite_shaper::set_dpi(DPI dpi)
     clear_cache();
 }
 
-void directwrite_shaper::set_locator(std::unique_ptr<font_locator> _locator)
+void directwrite_shaper::set_locator(font_locator& _locator)
 {
-    // TODO: use the given font locator for subsequent font location requests.
+    d->locator_ = &_locator;
 }
 
 void directwrite_shaper::clear_cache()
