@@ -28,10 +28,10 @@ namespace text
 class directwrite_shaper: public shaper
 {
   public:
-    directwrite_shaper(DPI _dpi, std::unique_ptr<font_locator> _locator);
+    directwrite_shaper(DPI _dpi, font_locator& _locator);
 
     void set_dpi(DPI _dpi) override;
-    void set_locator(std::unique_ptr<font_locator> _locator) override;
+    void set_locator(font_locator& _locator) override;
     void clear_cache() override;
 
     std::optional<font_key> load_font(font_description const& _description, font_size _size) override;
