@@ -114,6 +114,10 @@ if(Boost_FILESYSTEM_FOUND)
     target_link_libraries(contour ${Boost_LIBRARIES})
 endif()
 
+if(NOT(WIN32) AND NOT(APPLE))
+    target_link_libraries(contour Qt5X11Extras xcb)
+endif()
+
 if(CONTOUR_FRONTEND_GUI)
     if(CONTOUR_BUILD_WITH_QT6)
         target_link_libraries(contour ContourTerminalDisplay terminal_renderer Qt6::Core Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Widgets Qt6::Multimedia)

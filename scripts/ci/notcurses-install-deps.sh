@@ -25,4 +25,5 @@ sudo apt install -y \
             libqt5gui5 \
             libqt5network5 \
             libqt5multimedia5 \
+            libqt5x11extras5 \
             libyaml-cpp0.6

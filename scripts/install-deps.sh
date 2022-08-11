@@ -145,12 +145,14 @@ install_deps_ubuntu()
         libharfbuzz-dev
         libqt5gui5
         libqt5opengl5-dev
+        libx11-xcb-dev
         libyaml-cpp-dev
         make
         ncurses-bin
         pkg-config
         qtbase5-dev
         qtmultimedia5-dev
+        libqt5x11extras5-dev
     "
 
     RELEASE=`grep VERSION_ID /etc/os-release | cut -d= -f2 | tr -d '"'`
@@ -210,8 +212,10 @@ install_deps_FreeBSD()
         qt5-multimedia \
         qt5-network \
         qt5-qmake \
+        qt5-x11extras \
         qt5-widgets \
         range-v3 \
+        xcb \
         yaml-cpp
     "
 }
@@ -228,11 +232,13 @@ install_deps_arch()
         fontconfig \
         git \
         harfbuzz \
+        libxcb \
         microsoft-gsl \
         ninja \
         pkg-config \
         qt5-base \
         qt5-multimedia \
+        qt5-qtx11extras \
         range-v3 \
         yaml-cpp
 }
@@ -246,10 +252,6 @@ install_deps_suse()
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
     local packages="
-    libqt5-qtbase
-    libqt5-qtbase-common-devel
-    libqt5-qtmultimedia-devel
-    ncurses-devel
         Catch2-devel
         cmake
         extra-cmake-modules
@@ -257,10 +259,15 @@ install_deps_suse()
         freetype-devel
         gcc-c++
         harfbuzz-devel
+        libqt5-qtbase
+        libqt5-qtbase-common-devel
         libqt5-qtbase-devel
+        libqt5-qtmultimedia-devel
+        ncurses-devel
         ninja
         pkgconf
         range-v3-devel
+        libxcb-devel
         yaml-cpp-devel
     "
     # Sadly, gsl-devel system package is too old to be used.
@@ -273,7 +280,6 @@ install_deps_fedora()
     fetch_and_unpack_fmtlib
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
-    # catch-devel
     local packages="
         catch-devel
         cmake
@@ -287,6 +293,8 @@ install_deps_fedora()
         qt5-qtbase-devel
         qt5-qtbase-gui
         qt5-qtmultimedia-devel
+        qt5-qtx11extras-devel
+        libxcb-devel
         range-v3-devel
         yaml-cpp-devel
     "
