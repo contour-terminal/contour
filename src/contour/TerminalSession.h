@@ -138,6 +138,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     bool operator()(actions::IncreaseFontSize);
     bool operator()(actions::IncreaseOpacity);
     bool operator()(actions::NewTerminal const&);
+    bool operator()(actions::NoSearchHighlight);
     bool operator()(actions::OpenConfiguration);
     bool operator()(actions::OpenFileManager);
     bool operator()(actions::PasteClipboard);
@@ -157,6 +158,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     bool operator()(actions::ScrollToBottom);
     bool operator()(actions::ScrollToTop);
     bool operator()(actions::ScrollUp);
+    bool operator()(actions::SearchReverse);
     bool operator()(actions::SendChars const& _event);
     bool operator()(actions::ToggleAllKeyMaps);
     bool operator()(actions::ToggleFullscreen);

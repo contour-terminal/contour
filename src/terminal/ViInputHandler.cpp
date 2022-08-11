@@ -17,6 +17,8 @@
 #include <crispy/assert.h>
 #include <crispy/utils.h>
 
+#include <unicode/convert.h>
+
 using std::nullopt;
 using std::optional;
 
@@ -41,6 +43,11 @@ namespace
         Modifier modifier;
         char32_t ch;
 
+        [[nodiscard]] constexpr uint32_t code() const noexcept
+        {
+            return uint32_t(ch << 5) | uint32_t(modifier.value() & 0b1'1111);
+        }
+
         constexpr operator uint32_t() const noexcept
         {
             return uint32_t(ch << 5) | uint32_t(modifier.value() & 0b1'1111);
@@ -50,6 +57,11 @@ namespace
     constexpr InputMatch operator"" _key(char ch)
     {
         return InputMatch { Modifier::None, static_cast<char32_t>(ch) };
+    }
+
+    constexpr InputMatch operator|(Modifier::Key modifier, char ch) noexcept
+    {
+        return InputMatch { Modifier { modifier }, (char32_t) ch };
     }
 
     constexpr InputMatch operator|(char ch, Modifier::Key modifier) noexcept
@@ -91,6 +103,14 @@ void ViInputHandler::setMode(ViMode theMode)
 
 bool ViInputHandler::sendKeyPressEvent(Key key, Modifier modifier)
 {
+    if (searchEditMode != SearchEditMode::Disabled)
+    {
+        // Do we want to do anything in here?
+        // TODO: support cursor movements.
+        errorlog()("ViInputHandler: Ignoring key input {}+{}.", modifier, key);
+        return true;
+    }
+
     // clang-format off
     switch (viMode)
     {
@@ -123,8 +143,74 @@ bool ViInputHandler::sendKeyPressEvent(Key key, Modifier modifier)
     return true;
 }
 
+void ViInputHandler::startSearchExternally()
+{
+    searchTerm.clear();
+    executor.searchStart();
+
+    if (viMode != ViMode::Insert)
+        searchEditMode = SearchEditMode::Enabled;
+    else
+    {
+        searchEditMode = SearchEditMode::ExternallyEnabled;
+        setMode(ViMode::Normal);
+        // ^^^ So that we can see the statusline (which contains the search edit field),
+        // AND it's weird to be in insert mode while typing in the search term anyways.
+    }
+}
+
+bool ViInputHandler::handleSearchEditor(char32_t ch, Modifier modifier)
+{
+    assert(searchEditMode != SearchEditMode::Disabled);
+
+    switch (InputMatch { modifier, ch })
+    {
+        case '\x1B'_key:
+            searchTerm.clear();
+            if (searchEditMode == SearchEditMode::ExternallyEnabled)
+                setMode(ViMode::Insert);
+            searchEditMode = SearchEditMode::Disabled;
+            executor.searchCancel();
+            break;
+        case '\x0D'_key:
+            if (searchEditMode == SearchEditMode::ExternallyEnabled)
+                setMode(ViMode::Insert);
+            searchEditMode = SearchEditMode::Disabled;
+            executor.searchDone();
+            break;
+        case '\x08'_key:
+        case '\x7F'_key:
+            if (searchTerm.size() > 0)
+                searchTerm.resize(searchTerm.size() - 1);
+            executor.updateSearchTerm(searchTerm);
+            break;
+        case Modifier::Control | 'L':
+        case Modifier::Control | 'U':
+            searchTerm.clear();
+            executor.updateSearchTerm(searchTerm);
+            break;
+        case Modifier::Control | 'A': // TODO: move cursor to BOL
+        case Modifier::Control | 'E': // TODO: move cursor to EOL
+        default:
+            if (ch >= 0x20 && modifier.without(Modifier::Shift).none())
+            {
+                searchTerm += ch;
+                executor.updateSearchTerm(searchTerm);
+            }
+            else
+                errorlog()("ViInputHandler: Receiving control code {}+0x{:02X} in search mode. Ignoring.",
+                           modifier,
+                           (unsigned) ch);
+    }
+
+    return true;
+}
+
 bool ViInputHandler::sendCharPressEvent(char32_t ch, Modifier modifier)
 {
+    if (searchEditMode != SearchEditMode::Disabled)
+        return handleSearchEditor(ch, modifier);
+
     // clang-format off
     switch (viMode)
     {
@@ -217,22 +303,33 @@ void ViInputHandler::handleVisualMode(char32_t ch, Modifier modifier)
         }
     }
 
-    switch (InputMatch { modifier, ch })
+    switch (InputMatch { modifier.without(Modifier::Shift), ch })
     {
+        case '/'_key: startSearch(); return;
         case '\033'_key: setMode(ViMode::Normal); return; // Escape key.
         case Modifier::Control | 'V': toggleMode(ViMode::VisualBlock); return;
-        case Modifier::Shift | 'V': toggleMode(ViMode::VisualLine); return;
+        case 'V'_key: toggleMode(ViMode::VisualLine); return;
         case 'v'_key: toggleMode(ViMode::Visual); return;
         case '#'_key: executor.reverseSearchCurrentWord(); return;
+        case '*'_key: executor.searchCurrentWord(); return;
         case 'Y'_key: execute(ViOperator::Yank, ViMotion::FullLine); return;
         case 'a'_key: pendingTextObjectScope = TextObjectScope::A; return;
         case 'i'_key: pendingTextObjectScope = TextObjectScope::Inner; return;
         case 'y'_key: execute(ViOperator::Yank, ViMotion::Selection); return;
+        case 'n'_key: executor.jumpToNextMatch(count ? count : 1); return;
+        case 'N' | Modifier::Shift: executor.jumpToPreviousMatch(count ? count : 1); return;
         default: break;
     }
 
     if (parseTextObject(ch, modifier))
         return;
+}
+
+void ViInputHandler::startSearch()
+{
+    searchEditMode = SearchEditMode::Enabled;
+    searchTerm.clear();
+    executor.searchStart();
 }
 
 void ViInputHandler::scrollViewport(ScrollOffset delta)
@@ -388,11 +485,15 @@ void ViInputHandler::handleNormalMode(char32_t ch, Modifier modifier)
     if (parseCount(ch, modifier))
         return;
 
-    switch (InputMatch { modifier, ch })
+    switch (InputMatch { modifier.without(Modifier::Shift), ch })
     {
+        case '/'_key: startSearch(); return;
         case 'v'_key: toggleMode(ViMode::Visual); return;
         case '#'_key: executor.reverseSearchCurrentWord(); return;
+        case '*'_key: executor.searchCurrentWord(); return;
         case 'p'_key: executor.paste(count ? count : 1); return;
+        case 'n'_key: executor.jumpToNextMatch(count ? count : 1); return;
+        case 'N'_key: executor.jumpToPreviousMatch(count ? count : 1); return;
         case 'y'_key:
             if (!pendingOperator.has_value())
                 pendingOperator = ViOperator::Yank;

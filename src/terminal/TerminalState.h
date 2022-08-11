@@ -108,6 +108,12 @@ struct Cursor
 };
 // }}}
 
+struct Search
+{
+    std::u32string pattern;
+    ScrollOffset initialScrollOffset {};
+};
+
 /**
  * Defines the state of a terminal.
  * All those data members used to live in Screen, but are moved
@@ -167,6 +173,8 @@ struct TerminalState
     StatusDisplayType statusDisplayType;
     std::optional<StatusDisplayType> savedStatusDisplayType;
     ActiveStatusDisplay activeStatusDisplay;
+
+    Search searchMode;
 
     // cursor related
     //

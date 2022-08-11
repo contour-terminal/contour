@@ -2774,6 +2774,50 @@ TEST_CASE("CursorBackwardTab.manualTabs", "[screen]")
     }
 }
 
+TEST_CASE("searchReverse", "[screen]")
+{
+    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(4) }, LineCount(10) };
+    mock.writeToScreen("1abc"); // -3: +
+    mock.writeToScreen("2def"); // -2: | history
+    mock.writeToScreen("3ghi"); // -1: +
+    mock.writeToScreen("4jkl"); //  0: +
+    mock.writeToScreen("5mno"); //  1: | main screen
+    mock.writeToScreen("6pqr"); //  2: +
+
+    auto& screen = mock.terminal.primaryScreen();
+    auto const cursorPosition = screen.cursor().position;
+
+    INFO(fmt::format("cursor pos {}", cursorPosition));
+
+    // for (bool const inflate: { false, true })
+    for (bool const inflate: { true })
+    {
+        INFO(fmt::format("Perform tests via {}", inflate ? "inflated buffer" : "trivial buffer"));
+        if (inflate)
+            for (auto lineOffset = LineOffset(-3); lineOffset < LineOffset(3); ++lineOffset)
+                screen.grid().lineAt(lineOffset).inflatedBuffer();
+        else
+            for (auto lineOffset = LineOffset(-3); lineOffset < LineOffset(3); ++lineOffset)
+                REQUIRE(screen.grid().lineAt(lineOffset).isTrivialBuffer());
+
+        // Find "qr" right at in front of the cursor.
+        CellLocation const qr = screen.searchReverse(U"qr", cursorPosition);
+        REQUIRE(qr == CellLocation { LineOffset(2), ColumnOffset(2) });
+
+        // Find something in main page area.
+        CellLocation const mn = screen.searchReverse(U"mn", cursorPosition);
+        REQUIRE(mn == CellLocation { LineOffset(1), ColumnOffset(1) });
+
+        // Search for something that doesn't exist.
+        CellLocation const nnOut = screen.searchReverse(U"XY", mn);
+        REQUIRE(nnOut == mn);
+
+        // Check that we can find a term in the top-most scrollback line.
+        CellLocation const oneAB = screen.searchReverse(U"1ab", mn);
+        REQUIRE(oneAB == CellLocation { LineOffset(-3), ColumnOffset(0) });
+    }
+}
+
 TEST_CASE("findMarkerDownwards", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(4) }, LineCount(10) };

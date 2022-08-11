@@ -138,8 +138,6 @@ enum class TextObjectScope
     A = 'a'
 };
 
-using CellLocationRange = std::pair<CellLocation, CellLocation>;
-
 struct Highlight
 {
     CellLocation from;
@@ -153,6 +151,13 @@ struct RectangularHighlight: public Highlight
 };
 
 using HighlightRange = std::variant<LinearHighlight, RectangularHighlight>;
+
+enum class SearchEditMode
+{
+    Disabled,
+    Enabled,
+    ExternallyEnabled,
+};
 
 /**
  * ViInputHandler provides Vi-input handling.
@@ -173,11 +178,21 @@ class ViInputHandler: public InputHandler
 
         virtual void modeChanged(ViMode mode) = 0;
 
+        virtual void searchStart() = 0;
+        virtual void searchDone() = 0;
+        virtual void searchCancel() = 0;
+        virtual void updateSearchTerm(std::u32string const& text) = 0;
+        virtual void jumpToNextMatch(unsigned count) = 0;
+        virtual void jumpToPreviousMatch(unsigned count) = 0;
+
         virtual void scrollViewport(ScrollOffset delta) = 0;
 
         // Starts searching for the word under the cursor position in reverse order.
         // This is like pressing # in Vi.
         virtual void reverseSearchCurrentWord() = 0;
+
+        // similar to reverse search, but searching forward.
+        virtual void searchCurrentWord() = 0;
     };
 
     ViInputHandler(Executor& theExecutor, ViMode initialMode):
@@ -195,10 +210,15 @@ class ViInputHandler: public InputHandler
     [[nodiscard]] CellLocationRange translateToCellRange(TextObjectScope scope,
                                                          TextObject textObject) const noexcept;
 
+    [[nodiscard]] bool isEditingSearch() const noexcept { return searchEditMode != SearchEditMode::Disabled; }
+
+    void startSearchExternally();
+
   private:
     bool parseCount(char32_t ch, Modifier modifier);
     bool parseModeSwitch(char32_t ch, Modifier modifier);
     bool parseTextObject(char32_t ch, Modifier modifier);
+    bool handleSearchEditor(char32_t ch, Modifier modifier);
     void handleNormalMode(char32_t ch, Modifier modifier);
     void handleVisualMode(char32_t ch, Modifier modifier);
     bool handleModeSwitches(char32_t ch, Modifier modifier);
@@ -207,8 +227,14 @@ class ViInputHandler: public InputHandler
     void scrollViewport(ScrollOffset delta);
     void yank(TextObjectScope scope, TextObject textObject);
     void select(TextObjectScope scope, TextObject textObject);
+    void startSearch();
 
     ViMode viMode = ViMode::Normal;
+
+    SearchEditMode searchEditMode = SearchEditMode::Disabled;
+    bool searchExternallyActivated = false;
+    std::u32string searchTerm;
+
     unsigned count = 0;
     std::optional<ViOperator> pendingOperator = std::nullopt;
     std::optional<TextObjectScope> pendingTextObjectScope = std::nullopt;

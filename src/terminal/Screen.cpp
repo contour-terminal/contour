@@ -436,8 +436,8 @@ void Screen<Cell>::writeTextFromExternal(std::string_view _chars)
         VTTraceSequenceLog()("external text: \"{}\"", _chars);
 #endif
 
-    for (char const ch: _chars)
-        writeTextInternal(static_cast<char32_t>(ch));
+    for (char32_t const ch: unicode::convert_to<char32_t>(_chars))
+        writeTextInternal(ch);
 }
 
 template <typename Cell>
@@ -3494,6 +3494,61 @@ unique_ptr<ParserExtension> Screen<Cell>::hookDECRQSS(Sequence const& /*_seq*/)
 
         // TODO: handle batching
     });
+}
+
+template <typename Cell>
+CellLocation Screen<Cell>::search(std::u32string_view searchText, CellLocation startPosition)
+{
+    // TODO use LogicalLines to spawn logical lines for improving the search on wrapped lines.
+
+    // First try match at start location.
+    if (_grid.lineAt(startPosition.line).matchTextAt(searchText, startPosition.column))
+        return startPosition;
+
+    // Search reverse until found or exhausted.
+    auto position = startPosition;
+    while (position.line < boxed_cast<LineOffset>(_state.pageSize.lines))
+    {
+        Line<Cell> const& line = _grid.lineAt(position.line);
+        auto newColumn = line.search(searchText, position.column);
+        if (newColumn.has_value())
+        {
+            position.column = *newColumn;
+            return position; // new match found
+        }
+
+        position.column = ColumnOffset(0);
+        position.line++;
+    }
+    return startPosition;
+}
+
+template <typename Cell>
+CellLocation Screen<Cell>::searchReverse(std::u32string_view searchText, CellLocation startPosition)
+{
+    // TODO use LogicalLinesReverse to spawn logical lines for improving the search on wrapped lines.
+
+    // First try match at start location.
+    if (_grid.lineAt(startPosition.line).matchTextAt(searchText, startPosition.column))
+        return startPosition;
+
+    // Search reverse until found or exhausted.
+    auto position = startPosition;
+    while (position.line >= -boxed_cast<LineOffset>(historyLineCount()))
+    {
+        Line<Cell> const& line = _grid.lineAt(position.line);
+        auto newColumn = line.searchReverse(searchText, position.column);
+        if (newColumn != position.column)
+        {
+            position.column = newColumn;
+            return position; // new match found
+        }
+
+        position.column = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
+        position.line--;
+    }
+
+    return startPosition;
 }
 
 } // namespace terminal

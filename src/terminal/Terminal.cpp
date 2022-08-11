@@ -23,6 +23,8 @@
 #include <crispy/stdfs.h>
 #include <crispy/utils.h>
 
+#include <unicode/convert.h>
+
 #include <fmt/chrono.h>
 
 #include <chrono>
@@ -280,21 +282,7 @@ PageSize Terminal::SelectionHelper::pageSize() const noexcept
 
 bool Terminal::SelectionHelper::wordDelimited(CellLocation _pos) const noexcept
 {
-    // Word selection may be off by one
-    _pos.column = min(_pos.column, boxed_cast<ColumnOffset>(terminal->pageSize().columns - 1));
-
-    if (terminal->isPrimaryScreen())
-    {
-        auto const& cell = terminal->primaryScreen().at(_pos);
-        return cell.empty()
-               || terminal->wordDelimiters_.find(cell.codepoint(0)) != terminal->wordDelimiters_.npos;
-    }
-    else
-    {
-        auto const& cell = terminal->alternateScreen().at(_pos);
-        return cell.empty()
-               || terminal->wordDelimiters_.find(cell.codepoint(0)) != terminal->wordDelimiters_.npos;
-    }
+    return terminal->wordDelimited(_pos);
 }
 
 bool Terminal::SelectionHelper::wrappedLine(LineOffset _line) const noexcept
@@ -315,7 +303,7 @@ int Terminal::SelectionHelper::cellWidth(CellLocation _pos) const noexcept
     // Word selection may be off by one
     _pos.column = min(_pos.column, boxed_cast<ColumnOffset>(terminal->pageSize().columns - 1));
 
-    return terminal->currentScreen().cellWithAt(_pos);
+    return terminal->currentScreen().cellWidthAt(_pos);
 }
 
 /**
@@ -360,11 +348,13 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
 
     if (isPrimaryScreen())
         _lastRenderPassHints = primaryScreen_.render(
-            RenderBufferBuilder<Cell> { *this, _output, LineOffset(0), mainDisplayReverseVideo },
+            RenderBufferBuilder<Cell> {
+                *this, _output, LineOffset(0), mainDisplayReverseVideo, HighlightSearchMatches::Yes },
             viewport_.scrollOffset());
     else
         _lastRenderPassHints = alternateScreen_.render(
-            RenderBufferBuilder<Cell> { *this, _output, LineOffset(0), mainDisplayReverseVideo },
+            RenderBufferBuilder<Cell> {
+                *this, _output, LineOffset(0), mainDisplayReverseVideo, HighlightSearchMatches::Yes },
             viewport_.scrollOffset());
 
     switch (state_.statusDisplayType)
@@ -374,15 +364,20 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
             break;
         case StatusDisplayType::Indicator:
             updateIndicatorStatusLine();
-            indicatorStatusScreen_.render(
-                RenderBufferBuilder<Cell> {
-                    *this, _output, state_.pageSize.lines.as<LineOffset>(), !mainDisplayReverseVideo },
-                ScrollOffset(0));
+            indicatorStatusScreen_.render(RenderBufferBuilder<Cell> { *this,
+                                                                      _output,
+                                                                      state_.pageSize.lines.as<LineOffset>(),
+                                                                      !mainDisplayReverseVideo,
+                                                                      HighlightSearchMatches::No },
+                                          ScrollOffset(0));
             break;
         case StatusDisplayType::HostWritable:
             hostWritableStatusLineScreen_.render(
-                RenderBufferBuilder<Cell> {
-                    *this, _output, state_.pageSize.lines.as<LineOffset>(), !mainDisplayReverseVideo },
+                RenderBufferBuilder<Cell> { *this,
+                                            _output,
+                                            state_.pageSize.lines.as<LineOffset>(),
+                                            !mainDisplayReverseVideo,
+                                            HighlightSearchMatches::No },
                 ScrollOffset(0));
             break;
     }
@@ -421,7 +416,7 @@ void Terminal::updateIndicatorStatusLine()
     // TODO: Future improvement would be to allow full VT sequence support for the Indicator-status-line,
     // such that we can pass display-control partially over to some user/thirdparty configuration.
     indicatorStatusScreen_.clearLine();
-    indicatorStatusScreen_.writeTextFromExternal(fmt::format(" {} | {}", state_.terminalId, inputModeStr));
+    indicatorStatusScreen_.writeTextFromExternal(fmt::format(" {} │ {}", state_.terminalId, inputModeStr));
 
     if (!allowInput())
     {
@@ -432,12 +427,9 @@ void Terminal::updateIndicatorStatusLine()
         state_.cursor.graphicsRendition.styles &= ~CellFlags::Bold;
     }
 
-    indicatorStatusScreen_.writeTextFromExternal(fmt::format(" | Screen: {} | Cursor: {}:{} | Mouse: {}:{}",
-                                                             state_.screenType,
-                                                             savedCursor.position.line + 1,
-                                                             savedCursor.position.column + 1,
-                                                             currentMousePosition_.line + 1,
-                                                             currentMousePosition_.column + 1));
+    if (state_.inputHandler.isEditingSearch())
+        indicatorStatusScreen_.writeTextFromExternal(fmt::format(
+            " │ Search: {}█", unicode::convert_to<char>(u32string_view(state_.searchMode.pattern))));
 
     // Cleaning up.
     currentScreen_ = savedActiveDisplay;
@@ -473,11 +465,11 @@ bool Terminal::sendCharPressEvent(char32_t _value, Modifier _modifier, Timestamp
     cursorBlinkState_ = 1;
     lastCursorBlink_ = _now;
 
-    if (allowInput() && state_.inputHandler.sendCharPressEvent(_value, _modifier))
-        return true;
-
     // Early exit if KAM is enabled.
     if (isModeEnabled(AnsiMode::KeyboardAction))
+        return true;
+
+    if (state_.inputHandler.sendCharPressEvent(_value, _modifier))
         return true;
 
     auto const success = state_.inputGenerator.generate(_value, _modifier);
@@ -687,16 +679,15 @@ void Terminal::sendPaste(string_view _text)
     if (!allowInput())
         return;
 
+    if (state_.inputHandler.isEditingSearch())
+    {
+        state_.searchMode.pattern += unicode::convert_to<char32_t>(_text);
+        screenUpdated();
+        return;
+    }
+
     state_.inputGenerator.generatePaste(_text);
     flushInput();
-}
-
-void Terminal::sendRaw(string_view _text)
-{
-    if (!allowInput())
-        return;
-
-    state_.inputGenerator.generateRaw(_text);
 }
 
 bool Terminal::hasInput() const noexcept
@@ -833,6 +824,8 @@ void Terminal::resizeScreenInternal(PageSize totalPageSize, std::optional<ImageS
                                          ? totalPageSize
                                          : totalPageSize - statusLineHeight;
 
+    auto const oldMainDisplayPageSize = state_.pageSize;
+
     state_.pageSize = mainDisplayPageSize;
     currentMousePosition_ = clampToScreen(currentMousePosition_);
     if (_pixels)
@@ -845,6 +838,14 @@ void Terminal::resizeScreenInternal(PageSize totalPageSize, std::optional<ImageS
     applyPageSizeToCurrentBuffer();
 
     pty_->resizeScreen(mainDisplayPageSize, _pixels);
+
+    // Adjust Normal-mode's cursor in order to avoid drift when growing/shrinking in main page line count.
+    if (mainDisplayPageSize.lines > oldMainDisplayPageSize.lines)
+        state_.viCommands.cursorPosition.line +=
+            boxed_cast<LineOffset>(mainDisplayPageSize.lines - oldMainDisplayPageSize.lines);
+    else if (oldMainDisplayPageSize.lines > mainDisplayPageSize.lines)
+        state_.viCommands.cursorPosition.line -=
+            boxed_cast<LineOffset>(oldMainDisplayPageSize.lines - mainDisplayPageSize.lines);
 
     verifyState();
 }
@@ -1645,6 +1646,11 @@ void Terminal::synchronizedOutput(bool _enabled)
 
 void Terminal::onBufferScrolled(LineCount _n) noexcept
 {
+    // Adjust Normal-mode's cursor accordingly to make it fixed at the scroll-offset as if nothing has
+    // happened.
+    state_.viCommands.cursorPosition.line -= _n;
+
+    // Adjust viewport accordingly to make it fixed at the scroll-offset as if nothing has happened.
     if (viewport().scrolled())
         viewport().scrollUp(_n);
 
@@ -1745,6 +1751,76 @@ void Terminal::popStatusDisplay()
 void Terminal::setAllowInput(bool enabled)
 {
     setMode(AnsiMode::KeyboardAction, !enabled);
+}
+
+CellLocation Terminal::searchReverse(u32string text, CellLocation searchPosition)
+{
+    if (state_.searchMode.pattern == text)
+        return searchPosition;
+
+    state_.searchMode.pattern = std::move(text);
+    return searchReverse(searchPosition);
+}
+
+CellLocation Terminal::search(std::u32string text, CellLocation searchPosition)
+{
+    if (state_.searchMode.pattern == text)
+        return searchPosition;
+
+    state_.searchMode.pattern = std::move(text);
+    return search(searchPosition);
+}
+
+CellLocation Terminal::search(CellLocation searchPosition)
+{
+    auto const searchText = u32string_view(state_.searchMode.pattern);
+    auto const matchLocation = currentScreen().search(searchText, searchPosition);
+
+    fmt::print("next match found in {}\n", matchLocation);
+
+    viewport().makeVisible(matchLocation.line);
+
+    screenUpdated();
+    return matchLocation;
+}
+
+bool Terminal::wordDelimited(CellLocation position) const noexcept
+{
+    // Word selection may be off by one
+    position.column = min(position.column, boxed_cast<ColumnOffset>(pageSize().columns - 1));
+
+    if (isPrimaryScreen())
+        return primaryScreen_.grid().cellEmptyOrContainsOneOf(position, wordDelimiters_);
+    else
+        return alternateScreen_.grid().cellEmptyOrContainsOneOf(position, wordDelimiters_);
+}
+
+std::tuple<std::u32string, CellLocationRange> Terminal::extractWordUnderCursor(
+    CellLocation position) const noexcept
+{
+    if (isPrimaryScreen())
+    {
+        auto const range =
+            primaryScreen_.grid().wordRangeUnderCursor(position, u32string_view(wordDelimiters_));
+        return { primaryScreen_.grid().extractText(range), range };
+    }
+    else
+    {
+        auto const range =
+            alternateScreen_.grid().wordRangeUnderCursor(position, u32string_view(wordDelimiters_));
+        return { alternateScreen_.grid().extractText(range), range };
+    }
+}
+
+CellLocation Terminal::searchReverse(CellLocation searchPosition)
+{
+    auto const searchText = u32string_view(state_.searchMode.pattern);
+    auto const matchLocation = currentScreen().searchReverse(searchText, searchPosition);
+
+    viewport().makeVisible(matchLocation.line);
+
+    screenUpdated();
+    return matchLocation;
 }
 
 bool Terminal::isHighlighted(CellLocation _cell) const noexcept

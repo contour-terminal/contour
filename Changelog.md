@@ -5,6 +5,9 @@
 - Fixes logging file toggle.
 - Adds VT sequence `CSI 5m` (blink) and `CSI 6m` (rapid blink).
 - Adds vim-like `scrolloff` feature to normal mode cursor movements to ensure a line padding when scrolling up/down.
+- Adds vim-like incremental search functionality with realtime highlighting and cycling through the matches.
+- Adds ability to initiate search via configuration action `SearchReverse` in input mappings.
+- Adds ability to cancel highlighted search terms via configuration action `NoSearchHighlight` in input mappings.
 - Adds support for HSL colorspace in Sixel images.
 - Always show indicator status line when ANSI mode KAM is enabled (which can be toggled via action `ToggleInputProtection`).
 - Always show indicator status line when in non-insert mode.

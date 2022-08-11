@@ -266,8 +266,6 @@ class Terminal
     void sendPaste(std::string_view _text); // Sends verbatim text in bracketed mode to application.
     void sendPasteFromClipboard(unsigned count = 1) { eventListener_.pasteFromClipboard(count); }
 
-    void sendRaw(std::string_view _text); // Sends raw string to the application.
-
     bool handleMouseSelection(Modifier _modifier, Timestamp _now);
 
     void inputModeChanged(ViMode mode) { eventListener_.inputModeChanged(mode); }
@@ -598,6 +596,22 @@ class Terminal
     bool allowInput() const noexcept { return !isModeEnabled(AnsiMode::KeyboardAction); }
 
     void setAllowInput(bool enabled);
+
+    // Sets the current search term to the given text and
+    // moves the viewport accordingly to make sure the given text is visible,
+    // or it will not move at all if the input text was not found.
+    CellLocation searchReverse(std::u32string text, CellLocation searchPosition);
+    CellLocation searchReverse(CellLocation searchPosition);
+
+    // Searches from current position the next item downwards.
+    CellLocation search(std::u32string text, CellLocation searchPosition);
+    CellLocation search(CellLocation searchPosition);
+
+    // Tests if the grid cell at the given location does contain a word delimiter.
+    [[nodiscard]] bool wordDelimited(CellLocation position) const noexcept;
+
+    [[nodiscard]] std::tuple<std::u32string, CellLocationRange> extractWordUnderCursor(
+        CellLocation position) const noexcept;
 
   private:
     void mainLoop();

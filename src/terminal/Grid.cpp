@@ -24,6 +24,8 @@
 
 using std::max;
 using std::min;
+using std::u32string;
+using std::u32string_view;
 using std::vector;
 
 namespace terminal
@@ -995,6 +997,138 @@ std::string dumpGrid(Grid<Cell> const& grid)
     return sstr.str();
 }
 // }}}
+
+template <typename Cell>
+CellLocationRange Grid<Cell>::wordRangeUnderCursor(CellLocation position,
+                                                   u32string_view wordDelimiters) const noexcept
+{
+    auto const left = [this, wordDelimiters, position]() {
+        auto last = position;
+        auto current = last;
+
+        for (;;)
+        {
+            auto const wrapIntoPreviousLine =
+                *current.column == 0 && *current.line > 0 && isLineWrapped(current.line);
+            if (*current.column > 0)
+                current.column--;
+            else if (*current.line > 0 || wrapIntoPreviousLine)
+            {
+                current.line--;
+                current.column = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
+            }
+            else
+                break;
+
+            if (cellEmptyOrContainsOneOf(current, wordDelimiters))
+                break;
+            last = current;
+        }
+        return last;
+    }();
+
+    auto const right = [this, wordDelimiters, position]() {
+        auto last = position;
+        auto current = last;
+
+        // get right word margin
+        for (;;)
+        {
+            if (*current.column == *pageSize().columns - 1 && *current.line + 1 < *pageSize().lines
+                && isLineWrapped(current.line))
+            {
+                current.line++;
+                current.column = ColumnOffset(0);
+                current = stretchedColumn(CellLocation { current.line, current.column + 1 });
+            }
+
+            if (*current.column + 1 < *pageSize().columns)
+            {
+                current = stretchedColumn(CellLocation { current.line, current.column + 1 });
+            }
+            else if (*current.line + 1 < *pageSize().lines)
+            {
+                current.line++;
+                current.column = ColumnOffset(0);
+            }
+            else
+                break;
+
+            if (cellEmptyOrContainsOneOf(current, wordDelimiters))
+                break;
+            last = current;
+        }
+        return last;
+    }();
+
+    return { left, right };
+}
+
+template <typename Cell>
+bool Grid<Cell>::cellEmptyOrContainsOneOf(CellLocation position, u32string_view delimiters) const noexcept
+{
+    // Word selection may be off by one
+    position.column = min(position.column, boxed_cast<ColumnOffset>(pageSize().columns - 1));
+
+    auto const& cell = at(position.line, position.column);
+    return cell.empty() || delimiters.find(cell.codepoint(0)) != delimiters.npos;
+}
+
+template <typename Cell>
+u32string Grid<Cell>::extractText(CellLocationRange range) const noexcept
+{
+    if (range.first.line > range.second.line)
+        std::swap(range.first, range.second);
+
+    auto output = u32string {};
+
+    assert(range.first.line == range.second.line);
+
+    auto const rightMargin = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
+    auto const numLines = LineCount::cast_from(range.second.line - range.first.line + 1);
+    auto ranges = vector<ColumnRange> {};
+
+    switch (numLines.value)
+    {
+        case 1:
+            ranges.emplace_back(
+                ColumnRange { range.first.line, range.first.column, min(range.second.column, rightMargin) });
+            break;
+        case 2:
+            ranges.emplace_back(ColumnRange { range.first.line, range.first.column, rightMargin });
+            ranges.emplace_back(
+                ColumnRange { range.first.line, ColumnOffset(0), min(range.second.column, rightMargin) });
+            break;
+        default:
+            ranges.emplace_back(ColumnRange { range.first.line, range.first.column, rightMargin });
+            for (auto j = range.first.line + 1; j < range.second.line; ++j)
+                ranges.emplace_back(ColumnRange { j, ColumnOffset(0), rightMargin });
+            ranges.emplace_back(
+                ColumnRange { range.second.line, ColumnOffset(0), min(range.second.column, rightMargin) });
+            break;
+    }
+
+    for (auto const& range: ranges)
+    {
+        if (!output.empty())
+            output += '\n';
+        for (auto column = range.fromColumn; column <= range.toColumn; ++column)
+        {
+            auto const& cell = at(range.line, column);
+            if (cell.codepointCount() != 0)
+                output += cell.codepoints();
+            else
+                output += L' ';
+        }
+    }
+
+    fmt::print("extractText({}..{}) -> \"{}\"\n",
+               range.first,
+               range.second,
+               unicode::convert_to<char>(u32string_view(output)));
+
+    return output;
+}
 
 template class Grid<Cell>;
 template std::string dumpGrid<Cell>(Grid<Cell> const& grid);

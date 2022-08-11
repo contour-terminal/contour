@@ -75,17 +75,7 @@ class Selection
     };
 
     /// Defines a columnar range at a given line.
-    struct Range
-    {
-        LineOffset line;
-        ColumnOffset fromColumn;
-        ColumnOffset toColumn;
-
-        [[nodiscard]] constexpr ColumnCount length() const noexcept
-        {
-            return boxed_cast<ColumnCount>(toColumn - fromColumn + 1);
-        }
-    };
+    using Range = ColumnRange;
 
     Selection(SelectionHelper const& _helper, CellLocation _start):
         helper_ { _helper }, from_ { _start }, to_ { _start }

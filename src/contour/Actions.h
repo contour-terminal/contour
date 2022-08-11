@@ -34,6 +34,7 @@ struct FollowHyperlink{};
 struct IncreaseFontSize{};
 struct IncreaseOpacity{};
 struct NewTerminal{ std::optional<std::string> profileName; };
+struct NoSearchHighlight{};
 struct OpenConfiguration{};
 struct OpenFileManager{};
 struct PasteClipboard{};
@@ -53,6 +54,7 @@ struct ScrollPageUp{};
 struct ScrollToBottom{};
 struct ScrollToTop{};
 struct ScrollUp{};
+struct SearchReverse{};
 struct SendChars{ std::string chars; };
 struct ToggleAllKeyMaps{};
 struct ToggleFullscreen{};
@@ -78,6 +80,7 @@ using Action = std::variant<CancelSelection,
                             IncreaseFontSize,
                             IncreaseOpacity,
                             NewTerminal,
+                            NoSearchHighlight,
                             OpenConfiguration,
                             OpenFileManager,
                             PasteClipboard,
@@ -97,6 +100,7 @@ using Action = std::variant<CancelSelection,
                             ScrollToBottom,
                             ScrollToTop,
                             ScrollUp,
+                            SearchReverse,
                             SendChars,
                             ToggleAllKeyMaps,
                             ToggleFullscreen,
@@ -141,6 +145,7 @@ DECLARE_ACTION_FMT(FollowHyperlink)
 DECLARE_ACTION_FMT(IncreaseFontSize)
 DECLARE_ACTION_FMT(IncreaseOpacity)
 DECLARE_ACTION_FMT(NewTerminal)
+DECLARE_ACTION_FMT(NoSearchHighlight)
 DECLARE_ACTION_FMT(OpenConfiguration)
 DECLARE_ACTION_FMT(OpenFileManager)
 DECLARE_ACTION_FMT(PasteClipboard)
@@ -160,6 +165,7 @@ DECLARE_ACTION_FMT(ScrollPageUp)
 DECLARE_ACTION_FMT(ScrollToBottom)
 DECLARE_ACTION_FMT(ScrollToTop)
 DECLARE_ACTION_FMT(ScrollUp)
+DECLARE_ACTION_FMT(SearchReverse)
 DECLARE_ACTION_FMT(SendChars)
 DECLARE_ACTION_FMT(ToggleAllKeyMaps)
 DECLARE_ACTION_FMT(ToggleFullscreen)
@@ -202,6 +208,7 @@ struct formatter<contour::actions::Action>
         HANDLE_ACTION(IncreaseFontSize);
         HANDLE_ACTION(IncreaseOpacity);
         HANDLE_ACTION(NewTerminal);
+        HANDLE_ACTION(NoSearchHighlight);
         HANDLE_ACTION(OpenConfiguration);
         HANDLE_ACTION(OpenFileManager);
         HANDLE_ACTION(PasteClipboard);
@@ -221,6 +228,7 @@ struct formatter<contour::actions::Action>
         HANDLE_ACTION(ScrollToBottom);
         HANDLE_ACTION(ScrollToTop);
         HANDLE_ACTION(ScrollUp);
+        HANDLE_ACTION(SearchReverse);
         HANDLE_ACTION(SendChars);
         HANDLE_ACTION(ToggleAllKeyMaps);
         HANDLE_ACTION(ToggleFullscreen);

@@ -36,6 +36,70 @@ void ViCommands::scrollViewport(ScrollOffset delta)
         terminal.viewport().scrollUp(boxed_cast<LineCount>(delta));
 }
 
+void ViCommands::searchStart()
+{
+    terminal.state().searchMode.pattern.clear();
+    terminal.screenUpdated();
+}
+
+void ViCommands::searchDone()
+{
+    terminal.screenUpdated();
+}
+
+void ViCommands::searchCancel()
+{
+    terminal.state().searchMode.pattern.clear();
+    terminal.screenUpdated();
+}
+
+void ViCommands::jumpToNextMatch(unsigned count)
+{
+    for (unsigned i = 0; i < count; ++i)
+    {
+        auto startPosition = cursorPosition;
+        if (startPosition.column < boxed_cast<ColumnOffset>(terminal.pageSize().columns))
+            startPosition.column++;
+        else if (cursorPosition.line < boxed_cast<LineOffset>(terminal.pageSize().lines) - 1)
+        {
+            startPosition.line++;
+            startPosition.column = ColumnOffset(0);
+        }
+
+        auto const nextPosition = terminal.search(startPosition);
+        if (nextPosition == startPosition)
+            break;
+
+        moveCursorTo(nextPosition);
+    }
+}
+
+void ViCommands::jumpToPreviousMatch(unsigned count)
+{
+    for (unsigned i = 0; i < count; ++i)
+    {
+        auto startPosition = cursorPosition;
+        if (startPosition.column != ColumnOffset(0))
+            startPosition.column--;
+        else if (cursorPosition.line > -boxed_cast<LineOffset>(terminal.currentScreen().historyLineCount()))
+        {
+            startPosition.line--;
+            startPosition.column = boxed_cast<ColumnOffset>(terminal.pageSize().columns) - 1;
+        }
+
+        auto const nextPosition = terminal.searchReverse(startPosition);
+        if (nextPosition == startPosition)
+            break;
+
+        moveCursorTo(nextPosition);
+    }
+}
+
+void ViCommands::updateSearchTerm(std::u32string const& text)
+{
+    moveCursorTo(terminal.searchReverse(text, cursorPosition));
+}
+
 void ViCommands::modeChanged(ViMode mode)
 {
     auto _ = crispy::finally { [this, mode]() {
@@ -92,7 +156,22 @@ void ViCommands::modeChanged(ViMode mode)
 
 void ViCommands::reverseSearchCurrentWord()
 {
-    // TODO
+    // auto const oldPos = cursorPosition;
+    auto const [wordUnderCursor, range] = terminal.extractWordUnderCursor(cursorPosition);
+    assert(range.contains(cursorPosition));
+    cursorPosition = range.first;
+
+    updateSearchTerm(wordUnderCursor);
+    jumpToPreviousMatch(1);
+}
+
+void ViCommands::searchCurrentWord()
+{
+    auto const [wordUnderCursor, range] = terminal.extractWordUnderCursor(cursorPosition);
+    assert(range.contains(cursorPosition));
+    cursorPosition = range.second;
+    updateSearchTerm(wordUnderCursor);
+    jumpToNextMatch(1);
 }
 
 void ViCommands::executeYank(ViMotion motion, unsigned count)
@@ -157,8 +236,7 @@ void ViCommands::execute(ViOperator op, ViMotion motion, unsigned count)
             //.
             terminal.sendPasteFromClipboard(count);
             break;
-        case ViOperator::ReverseSearchCurrentWord:
-            // TODO
+        case ViOperator::ReverseSearchCurrentWord: // TODO: Does this even make sense to have?
             break;
     }
     terminal.screenUpdated();
@@ -412,9 +490,16 @@ void ViCommands::moveCursor(ViMotion motion, unsigned count)
 {
     Require(terminal.inputHandler().mode() != ViMode::Insert);
 
-    cursorPosition = translateToCellLocation(motion, count);
+    auto const nextPosition = translateToCellLocation(motion, count);
+    InputLog()("Move cursor: {} to {}\n", motion, nextPosition);
+    moveCursorTo(nextPosition);
+}
+
+void ViCommands::moveCursorTo(CellLocation position)
+{
+    cursorPosition = position;
+
     terminal.viewport().makeVisible(cursorPosition.line);
-    InputLog()("Move cursor: {} to {}\n", motion, cursorPosition);
 
     switch (terminal.inputHandler().mode())
     {

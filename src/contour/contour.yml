@@ -552,6 +552,7 @@ color_schemes:
 # - IncreaseFontSize  Increases the font size by 1 pixel.
 # - IncreaseOpacity   Increases the default-background opacity by 5%.
 # - NewTerminal       Spawns a new terminal at the current terminals current working directory.
+# - NoSearchHighlight Disables current search highlighting, if anything is still highlighted due to a prior search.
 # - OpenConfiguration Opens the configuration file.
 # - OpenFileManager   Opens the current working directory in a system file manager.
 # - PasteClipboard    Pastes clipboard to standard input.
@@ -571,6 +572,7 @@ color_schemes:
 # - ScrollToBottom    Scrolls to the bottom of the screen buffer.
 # - ScrollToTop       Scrolls to the top of the screen buffer.
 # - ScrollUp          Scrolls up by the multiplier factor.
+# - SearchReverse     Initiates search mode (starting to search at current cursor position, moving upwards).
 # - SendChars         Writes given characters in `chars` member to the applications input.
 # - ToggleAllKeyMaps  Disables/enables responding to all keybinds (this keybind will be preserved when disabling all others).
 # - ToggleFullScreen  Enables/disables full screen mode.
@@ -618,3 +620,5 @@ input_mapping:
     - { mods: [Shift],          mouse: WheelUp,     action: ScrollPageUp }
     - { mods: [Control, Alt],   key: O,             action: OpenFileManager }
     - { mods: [Control, Alt],   key: '.',           action: ToggleStatusLine }
+    - { mods: [Control, Shift], key: 'F',           action: SearchReverse }
+    - { mods: [Control, Shift], key: 'H',           action: NoSearchHighlight }

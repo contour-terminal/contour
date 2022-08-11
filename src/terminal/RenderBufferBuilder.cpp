@@ -1,7 +1,22 @@
+/**
+ * This file is part of the "libterminal" project
+ *   Copyright (c) 2019-2020 Christian Parpart <christian@parpart.family>
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 #include <terminal/Color.h>
 #include <terminal/ColorPalette.h>
 #include <terminal/RenderBufferBuilder.h>
+
+#include <crispy/utils.h>
 
 #include <unicode/convert.h>
 #include <unicode/utf8_grapheme_segmenter.h>
@@ -10,6 +25,8 @@ using namespace std;
 
 namespace terminal
 {
+
+using crispy::beginsWith;
 
 namespace
 {
@@ -30,6 +47,18 @@ namespace
         if (holds_alternative<CellBackgroundColor>(configuredColor))
             return actualColors.background;
         return get<RGBColor>(configuredColor);
+    }
+
+    RGBColorPair makeRGBColorPair(RGBColorPair actualColors,
+                                  CellRGBColorAndAlphaPair configuredColor) noexcept
+    {
+        return RGBColorPair { mix(makeRGBColor(actualColors, configuredColor.foreground),
+                                  actualColors.foreground,
+                                  configuredColor.foregroundAlpha),
+                              mix(makeRGBColor(actualColors, configuredColor.background),
+                                  actualColors.background,
+                                  configuredColor.backgroundAlpha) }
+            .distinct();
     }
 
     RGBColorPair makeColors(ColorPalette const& _colorPalette,
@@ -91,14 +120,16 @@ template <typename Cell>
 RenderBufferBuilder<Cell>::RenderBufferBuilder(Terminal const& _terminal,
                                                RenderBuffer& _output,
                                                LineOffset base,
-                                               bool theReverseVideo):
+                                               bool theReverseVideo,
+                                               HighlightSearchMatches highlightSearchMatches):
     output { _output },
     terminal { _terminal },
     cursorPosition { _terminal.inputHandler().mode() == ViMode::Insert
                          ? _terminal.realCursorPosition()
                          : _terminal.state().viCommands.cursorPosition },
     baseLine { base },
-    reverseVideo { theReverseVideo }
+    reverseVideo { theReverseVideo },
+    _highlightSearchMatches { highlightSearchMatches }
 {
     output.frameID = _terminal.lastFrameID();
     output.cursor = renderCursor();
@@ -119,7 +150,7 @@ optional<RenderCursor> RenderBufferBuilder<Cell>::renderCursor() const
         CellLocation { cursorPosition.line + boxed_cast<LineOffset>(terminal.viewport().scrollOffset()),
                        cursorPosition.column };
 
-    auto const cellWidth = terminal.currentScreen().cellWithAt(cursorPosition);
+    auto const cellWidth = terminal.currentScreen().cellWidthAt(cursorPosition);
 
     return RenderCursor { cursorScreenPosition, shape, cellWidth };
 }
@@ -311,6 +342,9 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineB
     // {{{ render text
     auto graphemeClusterSegmenter = unicode::utf8_grapheme_segmenter(lineBuffer.text.view());
     auto columnOffset = ColumnOffset(0);
+
+    searchPatternOffset = 0;
+
     for (u32string const& graphemeCluster: graphemeClusterSegmenter)
     {
         auto const pos = CellLocation { lineOffset, columnOffset };
@@ -340,6 +374,8 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineB
         lineNr = lineOffset;
         prevWidth = 0;
         prevHasCursor = false;
+
+        matchSearchPattern(u32string_view(graphemeCluster));
     }
     // }}}
 
@@ -368,6 +404,50 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineB
 }
 
 template <typename Cell>
+template <typename T>
+void RenderBufferBuilder<Cell>::matchSearchPattern(T const& textCell)
+{
+    if (_highlightSearchMatches == HighlightSearchMatches::No)
+        return;
+
+    auto const& searchMode = terminal.state().searchMode;
+    if (searchMode.pattern.empty())
+        return;
+
+    if (!beginsWith(u32string_view(searchMode.pattern.data() + searchPatternOffset,
+                                   searchMode.pattern.size() - searchPatternOffset),
+                    textCell))
+    {
+        // match fail
+        searchPatternOffset = 0;
+        return;
+    }
+
+    if constexpr (std::is_same_v<Cell, T>)
+        searchPatternOffset += textCell.codepointCount();
+    else
+        searchPatternOffset += textCell.size();
+
+    if (searchPatternOffset < searchMode.pattern.size())
+        return; // match incomplete
+
+    // match complete
+
+    for (size_t i = output.cells.size() - searchPatternOffset; i < output.cells.size(); ++i)
+    {
+        auto& cellAttributes = output.cells[i].attributes;
+
+        auto const searchMatchColors =
+            makeRGBColorPair(RGBColorPair { cellAttributes.foregroundColor, cellAttributes.backgroundColor },
+                             terminal.colorPalette().searchHighlight);
+
+        cellAttributes.backgroundColor = searchMatchColors.background;
+        cellAttributes.foregroundColor = searchMatchColors.foreground;
+    }
+    searchPatternOffset = 0;
+}
+
+template <typename Cell>
 void RenderBufferBuilder<Cell>::startLine(LineOffset _line) noexcept
 {
     isNewLine = true;
@@ -390,7 +470,7 @@ void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset _l
 {
     auto const pos = CellLocation { _line, _column };
     auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(pos);
-    auto const [fg, bg] = makeColorsForCell(
+    auto /*const*/ [fg, bg] = makeColorsForCell(
         gridPosition, screenCell.styles(), screenCell.foregroundColor(), screenCell.backgroundColor());
 
     prevWidth = screenCell.width();
@@ -437,6 +517,8 @@ void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset _l
             break;
     }
     isNewLine = false;
+
+    matchSearchPattern(screenCell);
 }
 
 } // namespace terminal

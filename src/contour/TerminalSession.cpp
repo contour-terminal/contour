@@ -729,6 +729,12 @@ bool TerminalSession::operator()(actions::NewTerminal const& _action)
     return true;
 }
 
+bool TerminalSession::operator()(actions::NoSearchHighlight)
+{
+    terminal_.state().searchMode.pattern.clear();
+    return true;
+}
+
 bool TerminalSession::operator()(actions::OpenConfiguration)
 {
     if (!QDesktopServices::openUrl(QUrl(QString::fromUtf8(config_.backingFilePath.string().c_str()))))
@@ -863,6 +869,13 @@ bool TerminalSession::operator()(actions::ScrollToTop)
 bool TerminalSession::operator()(actions::ScrollUp)
 {
     terminal().viewport().scrollUp(profile_.historyScrollMultiplier);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SearchReverse)
+{
+    terminal_.inputHandler().startSearchExternally();
+
     return true;
 }
 
