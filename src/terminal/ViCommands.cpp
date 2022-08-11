@@ -53,7 +53,7 @@ void ViCommands::modeChanged(ViMode mode)
             terminal.state().cursor.visible = lastCursorVisible;
             terminal.setCursorShape(lastCursorShape);
             terminal.viewport().forceScrollToBottom();
-            terminal.pushStatusDisplay(StatusDisplayType::Indicator);
+            terminal.popStatusDisplay();
             terminal.screenUpdated();
             break;
         case ViMode::Normal:
@@ -65,25 +65,24 @@ void ViCommands::modeChanged(ViMode mode)
                 cursorPosition = terminal.realCursorPosition();
             if (terminal.selectionAvailable())
                 terminal.clearSelection();
-            terminal.popStatusDisplay();
+            terminal.pushStatusDisplay(StatusDisplayType::Indicator);
             terminal.screenUpdated();
             break;
         case ViMode::Visual:
             terminal.setSelector(make_unique<LinearSelection>(terminal.selectionHelper(), selectFrom));
             terminal.selector()->extend(cursorPosition);
-            terminal.popStatusDisplay();
-            terminal.screenUpdated();
+            terminal.pushStatusDisplay(StatusDisplayType::Indicator);
             break;
         case ViMode::VisualLine:
             terminal.setSelector(make_unique<FullLineSelection>(terminal.selectionHelper(), selectFrom));
             terminal.selector()->extend(cursorPosition);
-            terminal.popStatusDisplay();
+            terminal.pushStatusDisplay(StatusDisplayType::Indicator);
             terminal.screenUpdated();
             break;
         case ViMode::VisualBlock:
             terminal.setSelector(make_unique<RectangularSelection>(terminal.selectionHelper(), selectFrom));
             terminal.selector()->extend(cursorPosition);
-            terminal.popStatusDisplay();
+            terminal.pushStatusDisplay(StatusDisplayType::Indicator);
             terminal.screenUpdated();
             break;
     }
