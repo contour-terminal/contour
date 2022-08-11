@@ -359,11 +359,11 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
     auto const mainDisplayReverseVideo = isModeEnabled(terminal::DECMode::ReverseVideo);
 
     if (isPrimaryScreen())
-        primaryScreen_.render(
+        _lastRenderPassHints = primaryScreen_.render(
             RenderBufferBuilder<Cell> { *this, _output, LineOffset(0), mainDisplayReverseVideo },
             viewport_.scrollOffset());
     else
-        alternateScreen_.render(
+        _lastRenderPassHints = alternateScreen_.render(
             RenderBufferBuilder<Cell> { *this, _output, LineOffset(0), mainDisplayReverseVideo },
             viewport_.scrollOffset());
 
@@ -797,12 +797,21 @@ optional<chrono::milliseconds> Terminal::nextRender() const
     if (!state_.cursor.visible)
         return nullopt;
 
-    if (cursorDisplay_ != CursorDisplay::Blink)
+    if (cursorDisplay_ != CursorDisplay::Blink && !isBlinkOnScreen())
         return nullopt;
 
-    auto const passed = chrono::duration_cast<chrono::milliseconds>(currentTime_ - lastCursorBlink_);
-    if (passed <= cursorBlinkInterval_)
-        return cursorBlinkInterval_ - passed;
+    auto const passedCursor = chrono::duration_cast<chrono::milliseconds>(currentTime_ - lastCursorBlink_);
+    auto const passedSlowBlink = chrono::duration_cast<chrono::milliseconds>(currentTime_ - _lastBlink);
+    auto const passedRapidBlink = chrono::duration_cast<chrono::milliseconds>(currentTime_ - _lastRapidBlink);
+    auto nextBlink = chrono::milliseconds::max();
+    if (passedCursor <= cursorBlinkInterval_)
+        nextBlink = std::min(nextBlink, cursorBlinkInterval_ - passedCursor);
+    if (passedSlowBlink <= _slowBlinker.interval)
+        nextBlink = std::min(nextBlink, _slowBlinker.interval - passedSlowBlink);
+    if (passedRapidBlink <= _rapidBlinker.interval)
+        nextBlink = std::min(nextBlink, _rapidBlinker.interval - passedRapidBlink);
+    if (nextBlink != std::chrono::milliseconds::max())
+        return nextBlink;
     else
         return chrono::milliseconds::min();
 }
@@ -1403,7 +1412,12 @@ void Terminal::setGraphicsRendition(GraphicsRendition _rendition)
             state_.cursor.graphicsRendition.styles |= CellFlags::Underline;
             break;
         case GraphicsRendition::Blinking:
+            state_.cursor.graphicsRendition.styles &= ~CellFlags::RapidBlinking;
             state_.cursor.graphicsRendition.styles |= CellFlags::Blinking;
+            break;
+        case GraphicsRendition::RapidBlinking:
+            state_.cursor.graphicsRendition.styles &= ~CellFlags::Blinking;
+            state_.cursor.graphicsRendition.styles |= CellFlags::RapidBlinking;
             break;
         case GraphicsRendition::Inverse: state_.cursor.graphicsRendition.styles |= CellFlags::Inverse; break;
         case GraphicsRendition::Hidden: state_.cursor.graphicsRendition.styles |= CellFlags::Hidden; break;
@@ -1436,7 +1450,7 @@ void Terminal::setGraphicsRendition(GraphicsRendition _rendition)
                   | CellFlags::DottedUnderline | CellFlags::DashedUnderline);
             break;
         case GraphicsRendition::NoBlinking:
-            state_.cursor.graphicsRendition.styles &= ~CellFlags::Blinking;
+            state_.cursor.graphicsRendition.styles &= ~(CellFlags::Blinking | CellFlags::RapidBlinking);
             break;
         case GraphicsRendition::NoInverse:
             state_.cursor.graphicsRendition.styles &= ~CellFlags::Inverse;
