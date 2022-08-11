@@ -11,6 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 #include "BlurBehind.h"
 
 #include <crispy/utils.h>
@@ -18,15 +19,110 @@
 #include <QtCore/QDebug>
 #include <QtGui/QWindow>
 
+#include "ContourGuiApp.h"
+#include <xcb/xproto.h>
+
 #if defined(_WIN32)
     #include <Windows.h>
 #endif
 
+#if !defined(Q_OS_WINDOWS) && !defined(Q_OS_DARWIN)
+    #define CONTOUR_FRONTEND_XCB
+#endif
+
+#if defined(CONTOUR_FRONTEND_XCB)
+    #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        #include <private/qtx11extras_p.h>
+    #else
+        #include <QtX11Extras/QX11Info>
+    #endif
+#endif
+
 namespace BlurBehind
 {
+
+using std::nullopt;
+using std::optional;
+using std::string;
+
+#if defined(CONTOUR_FRONTEND_XCB)
+namespace
+{
+    struct XcbPropertyInfo
+    {
+        xcb_connection_t* connection;
+        xcb_window_t window;
+        xcb_atom_t propertyAtom;
+    };
+
+    optional<XcbPropertyInfo> queryXcbPropertyInfo(QWindow* window, string const& name)
+    {
+        auto const winId = static_cast<xcb_window_t>(window->winId());
+
+        xcb_connection_t* xcbConnection = QX11Info::connection();
+        if (!xcbConnection)
+            return nullopt;
+
+        auto const atomNameCookie =
+            xcb_intern_atom(xcbConnection, 0, static_cast<uint16_t>(name.size()), name.c_str());
+        xcb_intern_atom_reply_t* reply = xcb_intern_atom_reply(xcbConnection, atomNameCookie, nullptr);
+        if (!reply)
+            return nullopt;
+        auto const atomName = reply->atom;
+
+        return XcbPropertyInfo { xcbConnection, winId, atomName };
+    }
+
+    void setPropertyX11(QWindow* window, string const& name, uint32_t value)
+    {
+        if (auto infoOpt = queryXcbPropertyInfo(window, name))
+        {
+            xcb_change_property(infoOpt.value().connection,
+                                XCB_PROP_MODE_REPLACE,
+                                infoOpt.value().window,
+                                infoOpt.value().propertyAtom,
+                                XCB_ATOM_CARDINAL,
+                                32,
+                                1,
+                                &value);
+            xcb_flush(infoOpt.value().connection);
+        }
+    }
+
+    void setPropertyX11(QWindow* window, string const& name, string const& value)
+    {
+        if (auto infoOpt = queryXcbPropertyInfo(window, name))
+        {
+            xcb_change_property(infoOpt.value().connection,
+                                XCB_PROP_MODE_REPLACE,
+                                infoOpt.value().window,
+                                infoOpt.value().propertyAtom,
+                                XCB_ATOM_STRING,
+                                8,
+                                static_cast<uint32_t>(value.size()),
+                                value.data());
+
+            xcb_flush(infoOpt.value().connection);
+        }
+    }
+
+    void unsetPropertyX11(QWindow* window, string const& name)
+    {
+        if (auto infoOpt = queryXcbPropertyInfo(window, name))
+        {
+            xcb_delete_property(
+                infoOpt.value().connection, infoOpt.value().window, infoOpt.value().propertyAtom);
+        }
+    }
+
+} // namespace
+#endif
+
 void setEnabled(QWindow* window, bool enable, QRegion region)
 {
-#if !defined(__APPLE__) && !defined(_WIN32)
+    crispy::ignore_unused(region);
+
+#if !defined(Q_OS_WINDOWS) && !defined(Q_OS_DARWIN)
     // This #if should catch UNIX in general but not Mac, so we have not just Linux but also the BSDs and
     // maybe others if one wants to.
     //
@@ -34,23 +130,15 @@ void setEnabled(QWindow* window, bool enable, QRegion region)
     // the dependency and still support nice looking semi transparent blurred backgrounds.
     if (enable)
     {
-        window->setProperty("kwin_blur", region);
-        window->setProperty("kwin_background_region", region);
-        window->setProperty("kwin_background_contrast", 1);
-        window->setProperty("kwin_background_intensity", 1);
-        window->setProperty("kwin_background_saturation", 1);
-        window->setProperty("_MUTTER_HINTS", "blur-provider=sigma:60,brightness:0.9");
+        setPropertyX11(window, "_KDE_NET_WM_BLUR_BEHIND_REGION", uint32_t { 0 });
+        setPropertyX11(window, "_MUTTER_HINTS", "blur-provider=sigma:60,brightness:0.9");
     }
     else
     {
-        window->setProperty("kwin_blur", {});
-        window->setProperty("kwin_background_region", {});
-        window->setProperty("kwin_background_contrast", {});
-        window->setProperty("kwin_background_intensity", {});
-        window->setProperty("kwin_background_saturation", {});
-        window->setProperty("_MUTTER_HINTS", {});
+        unsetPropertyX11(window, "kwin_blur");
+        unsetPropertyX11(window, "_MUTTER_HINTS");
     }
-#elif defined(_WIN32)
+#elif defined(_WIN32) // {{{
     // Awesome hack with the noteworty links:
     // * https://gist.github.com/ethanhs/0e157e4003812e99bf5bc7cb6f73459f (used as code template)
     // * https://github.com/riverar/sample-win32-acrylicblur/blob/master/MainWindow.xaml.cs
@@ -105,9 +193,10 @@ void setEnabled(QWindow* window, bool enable, QRegion region)
             FreeLibrary(hModule);
         }
     }
+    // }}}
 #else
     // Get me working on other platforms/compositors (such as OSX, Gnome, ...), please.
-    crispy::ignore_unused(window, enable, region);
+    crispy::ignore_unused(window, enable);
 #endif
 }
 
