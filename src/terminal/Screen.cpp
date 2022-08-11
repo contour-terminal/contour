@@ -405,6 +405,7 @@ bool Screen<Cell>::canResumeEmplace(std::string_view continuationChars) const no
     return buffer.text.view().end() == continuationChars.begin()
            && buffer.textAttributes == _state.cursor.graphicsRendition
            && buffer.hyperlink == _state.cursor.hyperlink
+           && buffer.usedColumns == boxed_cast<ColumnCount>(cursor().position.column)
            && buffer.text.owner() == _terminal.currentPtyBuffer();
 }
 
