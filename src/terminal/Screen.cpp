@@ -3473,7 +3473,7 @@ unique_ptr<ParserExtension> Screen<Cell>::hookXTGETTCAP(Sequence const& /*_seq*/
 template <typename Cell>
 unique_ptr<ParserExtension> Screen<Cell>::hookDECRQSS(Sequence const& /*_seq*/)
 {
-    return make_unique<SimpleStringCollector>([this](string_view const& _data) {
+    return make_unique<SimpleStringCollector>([this](string_view _data) {
         auto const s = [](string_view _dataString) -> optional<RequestStatusString> {
             auto const mappings = array<pair<string_view, RequestStatusString>, 11> {
                 pair { "m", RequestStatusString::SGR },       pair { "\"p", RequestStatusString::DECSCL },
