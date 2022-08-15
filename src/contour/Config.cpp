@@ -67,6 +67,7 @@ using terminal::ImageSize;
 using terminal::Process;
 using terminal::Width;
 
+using terminal::CellRGBColorAndAlphaPair;
 using terminal::ColumnCount;
 using terminal::LineCount;
 using terminal::PageSize;
@@ -904,6 +905,44 @@ std::shared_ptr<terminal::BackgroundImage const> loadImage(string const& fileNam
     return make_shared<terminal::BackgroundImage const>(move(backgroundImage));
 }
 
+/// Loads a configuration sub-section to handle cell color foreground/background + alpha.
+///
+/// Example:
+///   { foreground: CellColor, foreground_alpha: FLOAT = 1.0,
+///     background: CellColor, background_alpha: FLOAT = 1.0 }
+std::optional<CellRGBColorAndAlphaPair> parseCellRGBColorAndAlphaPair(UsedKeys& usedKeys,
+                                                                      string const& basePath,
+                                                                      YAML::Node const& baseNode,
+                                                                      string const& childNodeName)
+{
+    auto node = baseNode[childNodeName];
+    if (!node)
+        return nullopt;
+
+    auto const childPath = fmt::format("{}.{}", basePath, childNodeName);
+    usedKeys.emplace(childPath);
+
+    auto cellRGBColorAndAlphaPair = CellRGBColorAndAlphaPair {};
+
+    cellRGBColorAndAlphaPair.foreground = parseCellColor(node["foreground"].as<string>());
+    usedKeys.emplace(childPath + ".foreground");
+    if (auto alpha = node["foreground_alpha"]; alpha && alpha.IsScalar())
+    {
+        usedKeys.emplace(childPath + ".foreground_alpha");
+        cellRGBColorAndAlphaPair.foregroundAlpha = std::clamp(alpha.as<float>(), 0.0f, 1.0f);
+    }
+
+    cellRGBColorAndAlphaPair.background = parseCellColor(node["background"].as<string>());
+    usedKeys.emplace(childPath + ".background");
+    if (auto alpha = node["background_alpha"]; alpha && alpha.IsScalar())
+    {
+        usedKeys.emplace(childPath + ".background_alpha");
+        cellRGBColorAndAlphaPair.backgroundAlpha = std::clamp(alpha.as<float>(), 0.0f, 1.0f);
+    }
+
+    return cellRGBColorAndAlphaPair;
+}
+
 terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _basePath, YAML::Node const& _node)
 {
     auto colors = terminal::ColorPalette {};
@@ -926,6 +965,9 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _baseP
             colors.defaultBackground = bg.as<string>();
         }
     }
+
+    if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "search_highlight"))
+        colors.searchHighlight = p.value();
 
     if (auto def = _node["selection"]; def && def.IsMap())
     {

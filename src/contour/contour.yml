@@ -464,6 +464,13 @@ color_schemes:
             # a look of a half-transparently painted grid cell.
             background_alpha: 1.0
 
+        # Search match highlighting. Similar to selection highlighting.
+        search_highlight:
+            foreground: CellBackground
+            background: CellForeground
+            foreground_alpha: 1.0
+            background_alpha: 1.0
+
         # Normal colors
         normal:
             black:   '#1d1f21'
