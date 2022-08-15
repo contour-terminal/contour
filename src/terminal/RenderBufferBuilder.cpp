@@ -87,7 +87,7 @@ namespace
         };
 
         if (!_isCursor && _isHighlighted)
-            return { _colorPalette.highlightForeground, _colorPalette.highlightBackground };
+            return makeRGBColorPair(sgrColors, _colorPalette.yankHighlight);
 
         auto const selectionColors = getSelectionColor(sgrColors, _selected, _colorPalette);
         if (!_isCursor)

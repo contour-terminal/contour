@@ -9,6 +9,7 @@
 - Adds ability to initiate search via configuration action `SearchReverse` in input mappings.
 - Adds ability to cancel highlighted search terms via configuration action `NoSearchHighlight` in input mappings.
 - Adds support for HSL colorspace in Sixel images.
+- Adds alpha value to `colorscheme.*.vi_mode_highlight` color configuration.
 - Always show indicator status line when ANSI mode KAM is enabled (which can be toggled via action `ToggleInputProtection`).
 - Always show indicator status line when in non-insert mode.
 - [Linux] Changes the .desktop file name and icon file name to conform to the flatpak recommendations.

@@ -166,10 +166,7 @@ struct ColorPalette
 
     std::shared_ptr<BackgroundImage const> backgroundImage;
 
-    // yankHighlight
-    RGBColor highlightForeground = 0x1D1F21_rgb;
-    RGBColor highlightBackground = 0xffA500_rgb;
-
+    CellRGBColorAndAlphaPair yankHighlight { CellForegroundColor {}, 1.0f, 0xffA500_rgb, 0.5f };
     CellRGBColorAndAlphaPair searchHighlight { CellBackgroundColor {}, 1.0f, CellForegroundColor {}, 1.0f };
     CellRGBColorAndAlphaPair selection { CellBackgroundColor {}, 1.0f, CellForegroundColor {}, 1.0f };
 };

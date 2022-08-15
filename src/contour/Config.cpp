@@ -972,6 +972,9 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _baseP
     if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "selection"))
         colors.selection = p.value();
 
+    if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "vi_mode_highlight"))
+        colors.yankHighlight = p.value();
+
     if (auto cursor = _node["cursor"]; cursor)
     {
         _usedKeys.emplace(_basePath + ".cursor");
@@ -1011,22 +1014,6 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _baseP
         {
             _usedKeys.emplace(_basePath + ".hyperlink_decoration.hover");
             colors.hyperlinkDecoration.hover = color.as<string>();
-        }
-    }
-
-    if (auto highlight = _node["vi_mode_highlight"]; highlight)
-    {
-        _usedKeys.emplace(_basePath + ".vi_mode_highlight");
-        if (auto color = highlight["foreground"]; color && color.IsScalar() && !color.as<string>().empty())
-        {
-            _usedKeys.emplace(_basePath + ".vi_mode_highlight.foreground");
-            colors.highlightForeground = color.as<string>();
-        }
-
-        if (auto color = highlight["background"]; color && color.IsScalar() && !color.as<string>().empty())
-        {
-            _usedKeys.emplace(_basePath + ".vi_mode_highlight.background");
-            colors.highlightBackground = color.as<string>();
         }
     }
 

@@ -432,9 +432,12 @@ color_schemes:
             hover: '#ff0000'
 
         # Color to pick for vi_mode highlights.
+        # The value format is equivalent to how selection colors and alpha contribution is defined.
         vi_mode_highlight:
+            foreground: CellForeground
+            foreground_alpha: 1.0
             background: '#ffa500'
-            foreground: '#1d1f21'
+            background_alpha: 0.5
 
         # The text selection color can be customized here.
         # Leaving a value empty will default to the inverse of the content's color values.
