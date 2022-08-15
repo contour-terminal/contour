@@ -1689,13 +1689,13 @@ void Screen<Cell>::requestDynamicColor(DynamicColorName _name)
             case DynamicColorName::MouseForegroundColor: return _state.colorPalette.mouseForeground;
             case DynamicColorName::MouseBackgroundColor: return _state.colorPalette.mouseBackground;
             case DynamicColorName::HighlightForegroundColor:
-                if (holds_alternative<RGBColor>(_state.colorPalette.selectionForeground))
-                    return get<RGBColor>(_state.colorPalette.selectionForeground);
+                if (holds_alternative<RGBColor>(_state.colorPalette.selection.foreground))
+                    return get<RGBColor>(_state.colorPalette.selection.foreground);
                 else
                     return nullopt;
             case DynamicColorName::HighlightBackgroundColor:
-                if (holds_alternative<RGBColor>(_state.colorPalette.selectionBackground))
-                    return get<RGBColor>(_state.colorPalette.selectionBackground);
+                if (holds_alternative<RGBColor>(_state.colorPalette.selection.background))
+                    return get<RGBColor>(_state.colorPalette.selection.background);
                 else
                     return nullopt;
         }
@@ -1928,10 +1928,10 @@ void Screen<Cell>::resetDynamicColor(DynamicColorName _name)
             _state.colorPalette.mouseBackground = _state.defaultColorPalette.mouseBackground;
             break;
         case DynamicColorName::HighlightForegroundColor:
-            _state.colorPalette.selectionForeground = _state.defaultColorPalette.selectionForeground;
+            _state.colorPalette.selection.foreground = _state.defaultColorPalette.selection.foreground;
             break;
         case DynamicColorName::HighlightBackgroundColor:
-            _state.colorPalette.selectionBackground = _state.defaultColorPalette.selectionBackground;
+            _state.colorPalette.selection.background = _state.defaultColorPalette.selection.background;
             break;
     }
 }
@@ -1947,10 +1947,10 @@ void Screen<Cell>::setDynamicColor(DynamicColorName _name, RGBColor _value)
         case DynamicColorName::MouseForegroundColor: _state.colorPalette.mouseForeground = _value; break;
         case DynamicColorName::MouseBackgroundColor: _state.colorPalette.mouseBackground = _value; break;
         case DynamicColorName::HighlightForegroundColor:
-            _state.colorPalette.selectionForeground = _value;
+            _state.colorPalette.selection.foreground = _value;
             break;
         case DynamicColorName::HighlightBackgroundColor:
-            _state.colorPalette.selectionBackground = _value;
+            _state.colorPalette.selection.background = _value;
             break;
     }
 }

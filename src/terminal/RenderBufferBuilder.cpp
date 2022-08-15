@@ -81,15 +81,7 @@ namespace
         auto getSelectionColor =
             [&](RGBColorPair colorPair, bool selected, ColorPalette const& colors) noexcept -> RGBColorPair {
             if (selected)
-            {
-                return RGBColorPair { mix(makeRGBColor(sgrColors, colors.selectionForeground),
-                                          sgrColors.foreground,
-                                          colors.selectionForegroundAlpha),
-                                      mix(makeRGBColor(sgrColors, colors.selectionBackground),
-                                          sgrColors.background,
-                                          colors.selectionBackgroundAlpha) }
-                    .distinct();
-            }
+                return makeRGBColorPair(sgrColors, colors.selection);
             else
                 return colorPair;
         };

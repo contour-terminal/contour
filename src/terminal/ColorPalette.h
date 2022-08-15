@@ -152,10 +152,6 @@ struct ColorPalette
 
     RGBColor defaultForeground = 0xD0D0D0_rgb;
     RGBColor defaultBackground = 0x000000_rgb;
-    CellRGBColor selectionForeground = CellBackgroundColor {};
-    CellRGBColor selectionBackground = CellForegroundColor {};
-    float selectionForegroundAlpha = 1.0f;
-    float selectionBackgroundAlpha = 1.0f;
 
     CursorColor cursor;
 
@@ -175,6 +171,7 @@ struct ColorPalette
     RGBColor highlightBackground = 0xffA500_rgb;
 
     CellRGBColorAndAlphaPair searchHighlight { CellBackgroundColor {}, 1.0f, CellForegroundColor {}, 1.0f };
+    CellRGBColorAndAlphaPair selection { CellBackgroundColor {}, 1.0f, CellForegroundColor {}, 1.0f };
 };
 
 enum class ColorTarget
