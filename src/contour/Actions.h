@@ -30,6 +30,8 @@ struct CopyPreviousMarkRange{};
 struct CopySelection{};
 struct DecreaseFontSize{};
 struct DecreaseOpacity{};
+struct FocusNextSearchMatch{};
+struct FocusPreviousSearchMatch{};
 struct FollowHyperlink{};
 struct IncreaseFontSize{};
 struct IncreaseOpacity{};
@@ -76,6 +78,8 @@ using Action = std::variant<CancelSelection,
                             CopySelection,
                             DecreaseFontSize,
                             DecreaseOpacity,
+                            FocusNextSearchMatch,
+                            FocusPreviousSearchMatch,
                             FollowHyperlink,
                             IncreaseFontSize,
                             IncreaseOpacity,
@@ -141,6 +145,8 @@ DECLARE_ACTION_FMT(CopyPreviousMarkRange)
 DECLARE_ACTION_FMT(CopySelection)
 DECLARE_ACTION_FMT(DecreaseFontSize)
 DECLARE_ACTION_FMT(DecreaseOpacity)
+DECLARE_ACTION_FMT(FocusNextSearchMatch)
+DECLARE_ACTION_FMT(FocusPreviousSearchMatch)
 DECLARE_ACTION_FMT(FollowHyperlink)
 DECLARE_ACTION_FMT(IncreaseFontSize)
 DECLARE_ACTION_FMT(IncreaseOpacity)
@@ -204,6 +210,8 @@ struct formatter<contour::actions::Action>
         HANDLE_ACTION(CopySelection);
         HANDLE_ACTION(DecreaseFontSize);
         HANDLE_ACTION(DecreaseOpacity);
+        HANDLE_ACTION(FocusNextSearchMatch);
+        HANDLE_ACTION(FocusPreviousSearchMatch);
         HANDLE_ACTION(FollowHyperlink);
         HANDLE_ACTION(IncreaseFontSize);
         HANDLE_ACTION(IncreaseOpacity);

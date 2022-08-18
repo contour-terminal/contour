@@ -223,7 +223,8 @@ struct CellLocationRange
         switch (abs(unbox<int>(first.line) - unbox<int>(second.line)))
         {
             case 0: // range is single line
-                return location.line == first.line && first.column <= location.column && location.column <= second.column;
+                return location.line == first.line && first.column <= location.column
+                       && location.column <= second.column;
             case 1: // range is two lines
                 return (location.line == first.line && first.column <= location.column)
                        || (location.line == second.line && location.column <= second.column);

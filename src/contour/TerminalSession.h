@@ -135,6 +135,8 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     bool operator()(actions::DecreaseFontSize);
     bool operator()(actions::DecreaseOpacity);
     bool operator()(actions::FollowHyperlink);
+    bool operator()(actions::FocusNextSearchMatch);
+    bool operator()(actions::FocusPreviousSearchMatch);
     bool operator()(actions::IncreaseFontSize);
     bool operator()(actions::IncreaseOpacity);
     bool operator()(actions::NewTerminal const&);

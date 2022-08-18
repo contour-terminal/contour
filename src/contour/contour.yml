@@ -565,6 +565,8 @@ color_schemes:
 # - CopySelection     Copies the current selection into the clipboard buffer.
 # - DecreaseFontSize  Decreases the font size by 1 pixel.
 # - DecreaseOpacity   Decreases the default-background opacity by 5%.
+# - FocusNextSearchMatch     Focuses the next search match (if any).
+# - FocusPreviousSearchMatch Focuses the next previous match (if any).
 # - FollowHyperlink   Follows the hyperlink that is exposed via OSC 8 under the current cursor position.
 # - IncreaseFontSize  Increases the font size by 1 pixel.
 # - IncreaseOpacity   Increases the default-background opacity by 5%.
@@ -639,3 +641,5 @@ input_mapping:
     - { mods: [Control, Alt],   key: '.',           action: ToggleStatusLine }
     - { mods: [Control, Shift], key: 'F',           action: SearchReverse }
     - { mods: [Control, Shift], key: 'H',           action: NoSearchHighlight }
+    - { mods: [],               key: 'F3',          action: FocusNextSearchMatch }
+    - { mods: [Shift],          key: 'F3',          action: FocusPreviousSearchMatch }

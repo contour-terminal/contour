@@ -50,6 +50,8 @@ optional<Action> fromString(string const& _name)
         mapAction<actions::CopySelection>("CopySelection"),
         mapAction<actions::DecreaseFontSize>("DecreaseFontSize"),
         mapAction<actions::DecreaseOpacity>("DecreaseOpacity"),
+        mapAction<actions::FocusNextSearchMatch>("FocusNextSearchMatch"),
+        mapAction<actions::FocusPreviousSearchMatch>("FocusPreviousSearchMatch"),
         mapAction<actions::FollowHyperlink>("FollowHyperlink"),
         mapAction<actions::IncreaseFontSize>("IncreaseFontSize"),
         mapAction<actions::IncreaseOpacity>("IncreaseOpacity"),
