@@ -513,14 +513,17 @@ class Grid
     void verifyState() const;
 
     // Retrieves the cell location range of the underlying word at the given cursor position.
-    [[nodiscard]] CellLocationRange wordRangeUnderCursor(CellLocation position, std::u32string_view delimiters) const noexcept;
+    [[nodiscard]] CellLocationRange wordRangeUnderCursor(CellLocation position,
+                                                         std::u32string_view delimiters) const noexcept;
 
-    [[nodiscard]] bool cellEmptyOrContainsOneOf(CellLocation position, std::u32string_view delimiters) const noexcept;
+    [[nodiscard]] bool cellEmptyOrContainsOneOf(CellLocation position,
+                                                std::u32string_view delimiters) const noexcept;
 
     // Lineary extracts the text of a given grid cell range.
     [[nodiscard]] std::u32string extractText(CellLocationRange range) const noexcept;
 
-    // Conditionally extends the cell location forward if the grid cell at the given location holds a wide character.
+    // Conditionally extends the cell location forward if the grid cell at the given location holds a wide
+    // character.
     [[nodiscard]] CellLocation stretchedColumn(CellLocation _coord) const noexcept
     {
         CellLocation stretched = _coord;

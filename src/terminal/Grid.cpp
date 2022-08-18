@@ -1122,11 +1122,6 @@ u32string Grid<Cell>::extractText(CellLocationRange range) const noexcept
         }
     }
 
-    fmt::print("extractText({}..{}) -> \"{}\"\n",
-               range.first,
-               range.second,
-               unicode::convert_to<char>(u32string_view(output)));
-
     return output;
 }
 

@@ -425,13 +425,24 @@ void RenderBufferBuilder<Cell>::matchSearchPattern(T const& textCell)
 
     // match complete
 
-    for (size_t i = output.cells.size() - searchPatternOffset; i < output.cells.size(); ++i)
+    auto const offsetIntoFront = output.cells.size() - searchPatternOffset;
+
+    auto const isFocusedMatch =
+        CellLocationRange {
+            output.cells[offsetIntoFront].position,
+            output.cells.back().position,
+        }
+            .contains(terminal.viewport().translateGridToScreenCoordinate(
+                terminal.state().viCommands.cursorPosition));
+
+    for (size_t i = offsetIntoFront; i < output.cells.size(); ++i)
     {
         auto& cellAttributes = output.cells[i].attributes;
 
         auto const searchMatchColors =
             makeRGBColorPair(RGBColorPair { cellAttributes.foregroundColor, cellAttributes.backgroundColor },
-                             terminal.colorPalette().searchHighlight);
+                             isFocusedMatch ? terminal.colorPalette().searchHighlightFocused
+                                            : terminal.colorPalette().searchHighlight);
 
         cellAttributes.backgroundColor = searchMatchColors.background;
         cellAttributes.foregroundColor = searchMatchColors.foreground;

@@ -1776,8 +1776,6 @@ CellLocation Terminal::search(CellLocation searchPosition)
     auto const searchText = u32string_view(state_.searchMode.pattern);
     auto const matchLocation = currentScreen().search(searchText, searchPosition);
 
-    fmt::print("next match found in {}\n", matchLocation);
-
     viewport().makeVisible(matchLocation.line);
 
     screenUpdated();

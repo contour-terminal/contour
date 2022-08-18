@@ -969,6 +969,9 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _baseP
     if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "search_highlight"))
         colors.searchHighlight = p.value();
 
+    if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "search_highlight_focused"))
+        colors.searchHighlightFocused = p.value();
+
     if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "selection"))
         colors.selection = p.value();
 

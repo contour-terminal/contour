@@ -474,6 +474,13 @@ color_schemes:
             foreground_alpha: 1.0
             background_alpha: 1.0
 
+        # Search match highlighting (focused term). Similar to selection highlighting.
+        search_highlight_focused:
+            foreground: CellBackground
+            background: CellForeground
+            foreground_alpha: 1.0
+            background_alpha: 1.0
+
         # Normal colors
         normal:
             black:   '#1d1f21'
