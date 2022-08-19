@@ -2,6 +2,8 @@
 
 - Fixes a screen buffer manipulation bug that may happen on non-stylyzed but interactive command prompts (#787).
 - Fixes viewport misalignment when in scrollback area white new lines are being added to the main page area.
+- Fixes logging file toggle.
+- Adds VT sequence `CSI 5m` (blink) and `CSI 6m` (rapid blink).
 - Adds vim-like `scrolloff` feature to normal mode cursor movements to ensure a line padding when scrolling up/down.
 - Adds support for HSL colorspace in Sixel images.
 - Always show indicator status line when ANSI mode KAM is enabled (which can be toggled via action `ToggleInputProtection`).
@@ -12,8 +14,6 @@
 - [Linux] Adds support for blur-behind window on GNOME shell (Please read https://github.com/aunetx/blur-my-shell/issues/300 for further details if in trouble).
 - Changes behavior of PTY (and shell process) creation until only when a PTY is required by the terminal emulator during instanciation, possibly avoiding problems with xdotool running too early.
 - Internal: Y-axis inverted to match GUI coordinate systems where (0, 0) is top left rather than bottom left.
-- Fixes logging file toggle.
-- Adds `CSI 5m` (blink) and `CSI 6m` (rapid blink).
 
 ### 0.3.2 (2022-07-07)
 
