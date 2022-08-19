@@ -9,10 +9,15 @@ option(CONTOUR_VT_METRICS "Enables collecting and exit-printing some VT usage me
 option(CONTOUR_SCROLLBAR "Enables scrollbar in GUI frontend." ON)
 option(CONTOUR_BUILD_WITH_QT6 "Use Qt 6" OFF)
 
+set(QtX11Extras)
+if(NOT(WIN32) AND NOT(APPLE))
+    set(QtX11Extras X11Extras)
+endif()
+
 if(CONTOUR_BUILD_WITH_QT6)
-    find_package(Qt6 COMPONENTS Core Gui Network OpenGL OpenGLWidgets Widgets Multimedia X11Extras REQUIRED)
+    find_package(Qt6 COMPONENTS Core Gui Network OpenGL OpenGLWidgets Widgets Multimedia ${QtX11Extras} REQUIRED)
 else()
-    find_package(Qt5 COMPONENTS Gui Network Widgets Multimedia X11Extras REQUIRED)  # apt install qtbase5-dev libqt5gui5
+    find_package(Qt5 COMPONENTS Gui Network Widgets Multimedia ${QtX11Extras} REQUIRED)  # apt install qtbase5-dev libqt5gui5
 endif()
 
 add_subdirectory(display)
