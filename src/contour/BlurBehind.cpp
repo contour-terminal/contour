@@ -20,7 +20,6 @@
 #include <QtGui/QWindow>
 
 #include "ContourGuiApp.h"
-#include <xcb/xproto.h>
 
 #if defined(_WIN32)
     #include <Windows.h>
@@ -28,6 +27,7 @@
 
 #if !defined(Q_OS_WINDOWS) && !defined(Q_OS_DARWIN)
     #define CONTOUR_FRONTEND_XCB
+    #include <xcb/xproto.h>
 #endif
 
 #if defined(CONTOUR_FRONTEND_XCB)

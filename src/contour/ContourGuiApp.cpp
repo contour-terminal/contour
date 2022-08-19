@@ -15,13 +15,13 @@
 #include <contour/ContourGuiApp.h>
 #include <contour/TerminalWindow.h>
 #include <contour/display/TerminalWidget.h>
-#include <crispy/utils.h>
 
 #include <terminal/Process.h>
 
 #include <text_shaper/font_locator.h>
 
 #include <crispy/logstore.h>
+#include <crispy/utils.h>
 
 #include <QtCore/QProcess>
 #include <QtGui/QSurfaceFormat>
