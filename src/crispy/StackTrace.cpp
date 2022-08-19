@@ -1,4 +1,5 @@
 #include <crispy/StackTrace.h>
+#include <crispy/utils.h>
 // #include <xzero/Tokenizer.h>
 // #include <xzero/Buffer.h>
 // #include <xzero/sysconfig.h>
@@ -90,6 +91,8 @@ vector<void*> StackTrace::getFrames(size_t _skip, size_t _max)
     frames.resize((size_t)::backtrace(&frames[0], static_cast<int>(_skip + _max)));
     std::copy(std::next(frames.begin(), (int) _skip), frames.end(), frames.begin());
     frames.resize(frames.size() > _skip ? frames.size() - _skip : std::min(frames.size(), _skip));
+#else
+    crispy::ignore_unused(_skip, _max);
 #endif
 
     return frames;

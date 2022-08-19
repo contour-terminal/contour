@@ -15,6 +15,7 @@
 #include <contour/ContourGuiApp.h>
 #include <contour/TerminalWindow.h>
 #include <contour/display/TerminalWidget.h>
+#include <crispy/utils.h>
 
 #include <terminal/Process.h>
 
@@ -420,6 +421,8 @@ void ContourGuiApp::showNotification(std::string_view _title, std::string_view _
     // TODO: use Toast
     (void) _title;
     (void) _content;
+#else
+    crispy::ignore_unused(_title, _content);
 #endif
 }
 

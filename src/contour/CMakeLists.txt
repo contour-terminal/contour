@@ -10,9 +10,9 @@ option(CONTOUR_SCROLLBAR "Enables scrollbar in GUI frontend." ON)
 option(CONTOUR_BUILD_WITH_QT6 "Use Qt 6" OFF)
 
 if(CONTOUR_BUILD_WITH_QT6)
-	 find_package(Qt6 COMPONENTS Core Gui Network OpenGL OpenGLWidgets Widgets Multimedia REQUIRED)
+    find_package(Qt6 COMPONENTS Core Gui Network OpenGL OpenGLWidgets Widgets Multimedia X11Extras REQUIRED)
 else()
-	 find_package(Qt5 COMPONENTS Gui Network Widgets Multimedia REQUIRED)  # apt install qtbase5-dev libqt5gui5
+    find_package(Qt5 COMPONENTS Gui Network Widgets Multimedia X11Extras REQUIRED)  # apt install qtbase5-dev libqt5gui5
 endif()
 
 add_subdirectory(display)
@@ -114,15 +114,17 @@ if(Boost_FILESYSTEM_FOUND)
     target_link_libraries(contour ${Boost_LIBRARIES})
 endif()
 
-if(NOT(WIN32) AND NOT(APPLE))
-    target_link_libraries(contour Qt5X11Extras xcb)
-endif()
-
 if(CONTOUR_FRONTEND_GUI)
     if(CONTOUR_BUILD_WITH_QT6)
         target_link_libraries(contour ContourTerminalDisplay terminal_renderer Qt6::Core Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Widgets Qt6::Multimedia)
+        if(NOT(WIN32) AND NOT(APPLE))
+            target_link_libraries(contour Qt6::X11Extras xcb)
+        endif()
     else()
         target_link_libraries(contour crispy::core ContourTerminalDisplay terminal_renderer Qt5::Gui Qt5::Network Qt5::Widgets Qt5::Multimedia)
+        if(NOT(WIN32) AND NOT(APPLE))
+            target_link_libraries(contour Qt5::X11Extras xcb)
+        endif()
     endif()
 endif()
 

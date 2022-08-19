@@ -388,6 +388,9 @@ string Process::workingDirectory() const
     {
         return "."s;
     }
+#else
+    // e.g. FreeBSD
+    return "."s;
 #endif
 }
 
