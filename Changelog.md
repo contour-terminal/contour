@@ -1,6 +1,7 @@
 ### 0.3.3 (unreleased)
 
 - Fixes a screen buffer manipulation bug that may happen on non-stylyzed but interactive command prompts (#787).
+- Fixes viewport misalignment when in scrollback area white new lines are being added to the main page area.
 - Adds vim-like `scrolloff` feature to normal mode cursor movements to ensure a line padding when scrolling up/down.
 - Adds support for HSL colorspace in Sixel images.
 - Always show indicator status line when ANSI mode KAM is enabled (which can be toggled via action `ToggleInputProtection`).

@@ -1645,6 +1645,9 @@ void Terminal::synchronizedOutput(bool _enabled)
 
 void Terminal::onBufferScrolled(LineCount _n) noexcept
 {
+    if (viewport().scrolled())
+        viewport().scrollUp(_n);
+
     if (!selection_)
         return;
 
