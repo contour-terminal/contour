@@ -385,6 +385,20 @@ struct CellBackgroundColor
 };
 using CellRGBColor = std::variant<RGBColor, CellForegroundColor, CellBackgroundColor>;
 
+struct CellRGBColorPair
+{
+    CellRGBColor foreground;
+    CellRGBColor background;
+};
+
+struct CellRGBColorAndAlphaPair
+{
+    CellRGBColor foreground;
+    float foregroundAlpha = 1.0f;
+    CellRGBColor background;
+    float backgroundAlpha = 1.0f;
+};
+
 struct CursorColor
 {
     CellRGBColor color = CellForegroundColor {};

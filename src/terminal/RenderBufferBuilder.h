@@ -8,6 +8,12 @@
 namespace terminal
 {
 
+enum class HighlightSearchMatches
+{
+    No,
+    Yes
+};
+
 /**
  * RenderBufferBuilder<Cell> renders the current screen state into a RenderBuffer.
  */
@@ -15,7 +21,11 @@ template <typename Cell>
 class RenderBufferBuilder
 {
   public:
-    RenderBufferBuilder(Terminal const& terminal, RenderBuffer& output, LineOffset base, bool reverseVideo);
+    RenderBufferBuilder(Terminal const& terminal,
+                        RenderBuffer& output,
+                        LineOffset base,
+                        bool reverseVideo,
+                        HighlightSearchMatches highlightSearchMatches);
 
     /// Renders a single grid cell.
     /// This call is guaranteed to be invoked sequencially, from top line
@@ -86,6 +96,9 @@ class RenderBufferBuilder
     [[nodiscard]] RenderAttributes createRenderAttributes(
         CellLocation gridPosition, GraphicsAttributes graphicsAttributes) const noexcept;
 
+    template <typename T>
+    void matchSearchPattern(T const& cellText);
+
     // clang-format off
     enum class State { Gap, Sequence };
     // clang-format on
@@ -95,12 +108,16 @@ class RenderBufferBuilder
     CellLocation cursorPosition;
     LineOffset baseLine;
     bool reverseVideo;
+    HighlightSearchMatches _highlightSearchMatches;
 
     int prevWidth = 0;
     bool prevHasCursor = false;
     State state = State::Gap;
     LineOffset lineNr = LineOffset(0);
     bool isNewLine = false;
+
+    // Offset into the search pattern that has been already matched.
+    size_t searchPatternOffset = 0;
 };
 
 } // namespace terminal

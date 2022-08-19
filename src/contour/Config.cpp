@@ -67,6 +67,7 @@ using terminal::ImageSize;
 using terminal::Process;
 using terminal::Width;
 
+using terminal::CellRGBColorAndAlphaPair;
 using terminal::ColumnCount;
 using terminal::LineCount;
 using terminal::PageSize;
@@ -904,6 +905,44 @@ std::shared_ptr<terminal::BackgroundImage const> loadImage(string const& fileNam
     return make_shared<terminal::BackgroundImage const>(move(backgroundImage));
 }
 
+/// Loads a configuration sub-section to handle cell color foreground/background + alpha.
+///
+/// Example:
+///   { foreground: CellColor, foreground_alpha: FLOAT = 1.0,
+///     background: CellColor, background_alpha: FLOAT = 1.0 }
+std::optional<CellRGBColorAndAlphaPair> parseCellRGBColorAndAlphaPair(UsedKeys& usedKeys,
+                                                                      string const& basePath,
+                                                                      YAML::Node const& baseNode,
+                                                                      string const& childNodeName)
+{
+    auto node = baseNode[childNodeName];
+    if (!node)
+        return nullopt;
+
+    auto const childPath = fmt::format("{}.{}", basePath, childNodeName);
+    usedKeys.emplace(childPath);
+
+    auto cellRGBColorAndAlphaPair = CellRGBColorAndAlphaPair {};
+
+    cellRGBColorAndAlphaPair.foreground = parseCellColor(node["foreground"].as<string>());
+    usedKeys.emplace(childPath + ".foreground");
+    if (auto alpha = node["foreground_alpha"]; alpha && alpha.IsScalar())
+    {
+        usedKeys.emplace(childPath + ".foreground_alpha");
+        cellRGBColorAndAlphaPair.foregroundAlpha = std::clamp(alpha.as<float>(), 0.0f, 1.0f);
+    }
+
+    cellRGBColorAndAlphaPair.background = parseCellColor(node["background"].as<string>());
+    usedKeys.emplace(childPath + ".background");
+    if (auto alpha = node["background_alpha"]; alpha && alpha.IsScalar())
+    {
+        usedKeys.emplace(childPath + ".background_alpha");
+        cellRGBColorAndAlphaPair.backgroundAlpha = std::clamp(alpha.as<float>(), 0.0f, 1.0f);
+    }
+
+    return cellRGBColorAndAlphaPair;
+}
+
 terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _basePath, YAML::Node const& _node)
 {
     auto colors = terminal::ColorPalette {};
@@ -927,37 +966,17 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _baseP
         }
     }
 
-    if (auto def = _node["selection"]; def && def.IsMap())
-    {
-        _usedKeys.emplace(_basePath + ".selection");
-        if (auto fg = def["foreground"]; fg && fg.IsScalar())
-        {
-            _usedKeys.emplace(_basePath + ".selection.foreground");
-            colors.selectionForeground = parseCellColor(fg.as<string>());
-        }
-        else
-            colors.selectionForeground = terminal::CellBackgroundColor {};
+    if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "search_highlight"))
+        colors.searchHighlight = p.value();
 
-        if (auto alpha = def["foreground_alpha"]; alpha && alpha.IsScalar())
-        {
-            _usedKeys.emplace(_basePath + ".selection.foreground_alpha");
-            colors.selectionForegroundAlpha = std::clamp(alpha.as<float>(), 0.0f, 1.0f);
-        }
+    if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "search_highlight_focused"))
+        colors.searchHighlightFocused = p.value();
 
-        if (auto bg = def["background"]; bg && bg.IsScalar())
-        {
-            _usedKeys.emplace(_basePath + ".selection.background");
-            colors.selectionBackground = parseCellColor(bg.as<string>());
-        }
-        else
-            colors.selectionBackground = terminal::CellForegroundColor {};
+    if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "selection"))
+        colors.selection = p.value();
 
-        if (auto alpha = def["background_alpha"]; alpha && alpha.IsScalar())
-        {
-            _usedKeys.emplace(_basePath + ".selection.background_alpha");
-            colors.selectionBackgroundAlpha = std::clamp(alpha.as<float>(), 0.0f, 1.0f);
-        }
-    }
+    if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "vi_mode_highlight"))
+        colors.yankHighlight = p.value();
 
     if (auto cursor = _node["cursor"]; cursor)
     {
@@ -998,22 +1017,6 @@ terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _baseP
         {
             _usedKeys.emplace(_basePath + ".hyperlink_decoration.hover");
             colors.hyperlinkDecoration.hover = color.as<string>();
-        }
-    }
-
-    if (auto highlight = _node["vi_mode_highlight"]; highlight)
-    {
-        _usedKeys.emplace(_basePath + ".vi_mode_highlight");
-        if (auto color = highlight["foreground"]; color && color.IsScalar() && !color.as<string>().empty())
-        {
-            _usedKeys.emplace(_basePath + ".vi_mode_highlight.foreground");
-            colors.highlightForeground = color.as<string>();
-        }
-
-        if (auto color = highlight["background"]; color && color.IsScalar() && !color.as<string>().empty())
-        {
-            _usedKeys.emplace(_basePath + ".vi_mode_highlight.background");
-            colors.highlightBackground = color.as<string>();
         }
     }
 

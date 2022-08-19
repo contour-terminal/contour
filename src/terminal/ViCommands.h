@@ -33,11 +33,21 @@ class ViCommands: public ViInputHandler::Executor
     void scrollViewport(ScrollOffset delta) override;
     void modeChanged(ViMode mode) override;
     void reverseSearchCurrentWord() override;
+    void searchCurrentWord() override;
     void execute(ViOperator op, ViMotion motion, unsigned count) override;
     void moveCursor(ViMotion motion, unsigned count) override;
     void select(TextObjectScope scope, TextObject textObject) override;
     void yank(TextObjectScope scope, TextObject textObject) override;
     void paste(unsigned count) override;
+
+    void searchStart() override;
+    void searchDone() override;
+    void searchCancel() override;
+    void updateSearchTerm(std::u32string const& text) override;
+    void jumpToNextMatch(unsigned count) override;
+    void jumpToPreviousMatch(unsigned count) override;
+
+    void moveCursorTo(CellLocation position);
 
     [[nodiscard]] CellLocation translateToCellLocation(ViMotion motion, unsigned count) const noexcept;
     [[nodiscard]] CellLocationRange translateToCellRange(ViMotion motion, unsigned count) const noexcept;

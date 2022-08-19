@@ -213,6 +213,48 @@ constexpr std::pair<CellLocation, CellLocation> orderedPoints(CellLocation a, Ce
     return std::pair { topLeft, bottomRight };
 }
 
+struct CellLocationRange
+{
+    CellLocation first;
+    CellLocation second;
+
+    [[nodiscard]] bool contains(CellLocation location) const noexcept
+    {
+        switch (abs(unbox<int>(first.line) - unbox<int>(second.line)))
+        {
+            case 0: // range is single line
+                return location.line == first.line && first.column <= location.column
+                       && location.column <= second.column;
+            case 1: // range is two lines
+                return (location.line == first.line && first.column <= location.column)
+                       || (location.line == second.line && location.column <= second.column);
+            default: // range is more than two lines
+                return (location.line == first.line && first.column <= location.column)
+                       || (first.line < location.line && location.line < second.line)
+                       || (location.line == second.line && location.column <= second.column);
+                break;
+        }
+        return false;
+    }
+};
+
+struct ColumnRange
+{
+    LineOffset line;
+    ColumnOffset fromColumn;
+    ColumnOffset toColumn;
+
+    [[nodiscard]] constexpr ColumnCount length() const noexcept
+    {
+        return boxed_cast<ColumnCount>(toColumn - fromColumn + 1);
+    }
+
+    [[nodiscard]] constexpr bool contains(CellLocation location) const noexcept
+    {
+        return line == location.line && fromColumn <= location.column && location.column <= toColumn;
+    }
+};
+
 // }}}
 // {{{ Range
 

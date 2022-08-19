@@ -30,10 +30,13 @@ struct CopyPreviousMarkRange{};
 struct CopySelection{};
 struct DecreaseFontSize{};
 struct DecreaseOpacity{};
+struct FocusNextSearchMatch{};
+struct FocusPreviousSearchMatch{};
 struct FollowHyperlink{};
 struct IncreaseFontSize{};
 struct IncreaseOpacity{};
 struct NewTerminal{ std::optional<std::string> profileName; };
+struct NoSearchHighlight{};
 struct OpenConfiguration{};
 struct OpenFileManager{};
 struct PasteClipboard{};
@@ -53,6 +56,7 @@ struct ScrollPageUp{};
 struct ScrollToBottom{};
 struct ScrollToTop{};
 struct ScrollUp{};
+struct SearchReverse{};
 struct SendChars{ std::string chars; };
 struct ToggleAllKeyMaps{};
 struct ToggleFullscreen{};
@@ -74,10 +78,13 @@ using Action = std::variant<CancelSelection,
                             CopySelection,
                             DecreaseFontSize,
                             DecreaseOpacity,
+                            FocusNextSearchMatch,
+                            FocusPreviousSearchMatch,
                             FollowHyperlink,
                             IncreaseFontSize,
                             IncreaseOpacity,
                             NewTerminal,
+                            NoSearchHighlight,
                             OpenConfiguration,
                             OpenFileManager,
                             PasteClipboard,
@@ -97,6 +104,7 @@ using Action = std::variant<CancelSelection,
                             ScrollToBottom,
                             ScrollToTop,
                             ScrollUp,
+                            SearchReverse,
                             SendChars,
                             ToggleAllKeyMaps,
                             ToggleFullscreen,
@@ -137,10 +145,13 @@ DECLARE_ACTION_FMT(CopyPreviousMarkRange)
 DECLARE_ACTION_FMT(CopySelection)
 DECLARE_ACTION_FMT(DecreaseFontSize)
 DECLARE_ACTION_FMT(DecreaseOpacity)
+DECLARE_ACTION_FMT(FocusNextSearchMatch)
+DECLARE_ACTION_FMT(FocusPreviousSearchMatch)
 DECLARE_ACTION_FMT(FollowHyperlink)
 DECLARE_ACTION_FMT(IncreaseFontSize)
 DECLARE_ACTION_FMT(IncreaseOpacity)
 DECLARE_ACTION_FMT(NewTerminal)
+DECLARE_ACTION_FMT(NoSearchHighlight)
 DECLARE_ACTION_FMT(OpenConfiguration)
 DECLARE_ACTION_FMT(OpenFileManager)
 DECLARE_ACTION_FMT(PasteClipboard)
@@ -160,6 +171,7 @@ DECLARE_ACTION_FMT(ScrollPageUp)
 DECLARE_ACTION_FMT(ScrollToBottom)
 DECLARE_ACTION_FMT(ScrollToTop)
 DECLARE_ACTION_FMT(ScrollUp)
+DECLARE_ACTION_FMT(SearchReverse)
 DECLARE_ACTION_FMT(SendChars)
 DECLARE_ACTION_FMT(ToggleAllKeyMaps)
 DECLARE_ACTION_FMT(ToggleFullscreen)
@@ -198,10 +210,13 @@ struct formatter<contour::actions::Action>
         HANDLE_ACTION(CopySelection);
         HANDLE_ACTION(DecreaseFontSize);
         HANDLE_ACTION(DecreaseOpacity);
+        HANDLE_ACTION(FocusNextSearchMatch);
+        HANDLE_ACTION(FocusPreviousSearchMatch);
         HANDLE_ACTION(FollowHyperlink);
         HANDLE_ACTION(IncreaseFontSize);
         HANDLE_ACTION(IncreaseOpacity);
         HANDLE_ACTION(NewTerminal);
+        HANDLE_ACTION(NoSearchHighlight);
         HANDLE_ACTION(OpenConfiguration);
         HANDLE_ACTION(OpenFileManager);
         HANDLE_ACTION(PasteClipboard);
@@ -221,6 +236,7 @@ struct formatter<contour::actions::Action>
         HANDLE_ACTION(ScrollToBottom);
         HANDLE_ACTION(ScrollToTop);
         HANDLE_ACTION(ScrollUp);
+        HANDLE_ACTION(SearchReverse);
         HANDLE_ACTION(SendChars);
         HANDLE_ACTION(ToggleAllKeyMaps);
         HANDLE_ACTION(ToggleFullscreen);

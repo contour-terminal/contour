@@ -94,6 +94,14 @@ class Viewport
         };
     }
 
+    constexpr CellLocation translateGridToScreenCoordinate(CellLocation p) const noexcept
+    {
+        return CellLocation {
+            p.line + boxed_cast<LineOffset>(scrollOffset_),
+            p.column,
+        };
+    }
+
   private:
     [[nodiscard]] LineCount historyLineCount() const noexcept;
     [[nodiscard]] LineCount screenLineCount() const noexcept;

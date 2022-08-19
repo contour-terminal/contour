@@ -432,9 +432,12 @@ color_schemes:
             hover: '#ff0000'
 
         # Color to pick for vi_mode highlights.
+        # The value format is equivalent to how selection colors and alpha contribution is defined.
         vi_mode_highlight:
+            foreground: CellForeground
+            foreground_alpha: 1.0
             background: '#ffa500'
-            foreground: '#1d1f21'
+            background_alpha: 0.5
 
         # The text selection color can be customized here.
         # Leaving a value empty will default to the inverse of the content's color values.
@@ -462,6 +465,20 @@ color_schemes:
             #
             # A value of 1.0 will paint over, whereas a value of 0.5 will give
             # a look of a half-transparently painted grid cell.
+            background_alpha: 1.0
+
+        # Search match highlighting. Similar to selection highlighting.
+        search_highlight:
+            foreground: CellBackground
+            background: CellForeground
+            foreground_alpha: 1.0
+            background_alpha: 1.0
+
+        # Search match highlighting (focused term). Similar to selection highlighting.
+        search_highlight_focused:
+            foreground: CellBackground
+            background: CellForeground
+            foreground_alpha: 1.0
             background_alpha: 1.0
 
         # Normal colors
@@ -548,10 +565,13 @@ color_schemes:
 # - CopySelection     Copies the current selection into the clipboard buffer.
 # - DecreaseFontSize  Decreases the font size by 1 pixel.
 # - DecreaseOpacity   Decreases the default-background opacity by 5%.
+# - FocusNextSearchMatch     Focuses the next search match (if any).
+# - FocusPreviousSearchMatch Focuses the next previous match (if any).
 # - FollowHyperlink   Follows the hyperlink that is exposed via OSC 8 under the current cursor position.
 # - IncreaseFontSize  Increases the font size by 1 pixel.
 # - IncreaseOpacity   Increases the default-background opacity by 5%.
 # - NewTerminal       Spawns a new terminal at the current terminals current working directory.
+# - NoSearchHighlight Disables current search highlighting, if anything is still highlighted due to a prior search.
 # - OpenConfiguration Opens the configuration file.
 # - OpenFileManager   Opens the current working directory in a system file manager.
 # - PasteClipboard    Pastes clipboard to standard input.
@@ -571,6 +591,7 @@ color_schemes:
 # - ScrollToBottom    Scrolls to the bottom of the screen buffer.
 # - ScrollToTop       Scrolls to the top of the screen buffer.
 # - ScrollUp          Scrolls up by the multiplier factor.
+# - SearchReverse     Initiates search mode (starting to search at current cursor position, moving upwards).
 # - SendChars         Writes given characters in `chars` member to the applications input.
 # - ToggleAllKeyMaps  Disables/enables responding to all keybinds (this keybind will be preserved when disabling all others).
 # - ToggleFullScreen  Enables/disables full screen mode.
@@ -618,3 +639,7 @@ input_mapping:
     - { mods: [Shift],          mouse: WheelUp,     action: ScrollPageUp }
     - { mods: [Control, Alt],   key: O,             action: OpenFileManager }
     - { mods: [Control, Alt],   key: '.',           action: ToggleStatusLine }
+    - { mods: [Control, Shift], key: 'F',           action: SearchReverse }
+    - { mods: [Control, Shift], key: 'H',           action: NoSearchHighlight }
+    - { mods: [],               key: 'F3',          action: FocusNextSearchMatch }
+    - { mods: [Shift],          key: 'F3',          action: FocusPreviousSearchMatch }

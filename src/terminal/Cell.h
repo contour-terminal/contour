@@ -190,6 +190,8 @@ class CONTOUR_PACKED Cell
     // TODO(perf) ^^ use CellExtraId = boxed<int24_t> into pre-alloc'ed vector<CellExtra>.
 };
 
+bool beginsWith(std::u32string_view text, Cell const& cell) noexcept;
+
 // {{{ impl: ctor's
 template <typename... Args>
 inline void Cell::createExtra(Args... args) noexcept
@@ -636,6 +638,24 @@ inline void Cell::setGraphicsRendition(GraphicsRendition _rendition) noexcept
     }
 }
 
+// }}}
+// {{{ free function implementations
+inline bool beginsWith(std::u32string_view text, Cell const& cell) noexcept
+{
+    assert(text.size() != 0);
+
+    if (cell.codepointCount() == 0)
+        return false;
+
+    if (text.size() < cell.codepointCount())
+        return false;
+
+    for (size_t i = 0; i < cell.codepointCount(); ++i)
+        if (cell.codepoint(i) != text[i])
+            return false;
+
+    return true;
+}
 // }}}
 
 } // namespace terminal

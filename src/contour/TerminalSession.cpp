@@ -692,6 +692,22 @@ bool TerminalSession::operator()(actions::DecreaseOpacity)
     return true;
 }
 
+bool TerminalSession::operator()(actions::FocusNextSearchMatch)
+{
+    terminal_.state().viCommands.jumpToNextMatch(1);
+    terminal_.viewport().makeVisible(terminal_.state().viCommands.cursorPosition.line);
+    // TODO why didn't the makeVisible() call from inside jumpToNextMatch not work?
+    return true;
+}
+
+bool TerminalSession::operator()(actions::FocusPreviousSearchMatch)
+{
+    terminal_.state().viCommands.jumpToPreviousMatch(1);
+    terminal_.viewport().makeVisible(terminal_.state().viCommands.cursorPosition.line);
+    // TODO why didn't the makeVisible() call from inside jumpToPreviousMatch not work?
+    return true;
+}
+
 bool TerminalSession::operator()(actions::FollowHyperlink)
 {
     auto const _l = scoped_lock { terminal() };
@@ -726,6 +742,12 @@ bool TerminalSession::operator()(actions::IncreaseOpacity)
 bool TerminalSession::operator()(actions::NewTerminal const& _action)
 {
     spawnNewTerminal(_action.profileName.value_or(profileName_));
+    return true;
+}
+
+bool TerminalSession::operator()(actions::NoSearchHighlight)
+{
+    terminal_.state().searchMode.pattern.clear();
     return true;
 }
 
@@ -863,6 +885,13 @@ bool TerminalSession::operator()(actions::ScrollToTop)
 bool TerminalSession::operator()(actions::ScrollUp)
 {
     terminal().viewport().scrollUp(profile_.historyScrollMultiplier);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::SearchReverse)
+{
+    terminal_.inputHandler().startSearchExternally();
+
     return true;
 }
 

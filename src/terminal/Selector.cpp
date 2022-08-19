@@ -93,6 +93,7 @@ bool Selection::intersects(Rect _area) const noexcept
 std::vector<Selection::Range> Selection::ranges() const
 {
     auto [result, from, to] = prepare(*this);
+
     auto const rightMargin = boxed_cast<ColumnOffset>(helper_.pageSize().columns - 1);
 
     switch (result.size())

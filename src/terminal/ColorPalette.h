@@ -152,10 +152,6 @@ struct ColorPalette
 
     RGBColor defaultForeground = 0xD0D0D0_rgb;
     RGBColor defaultBackground = 0x000000_rgb;
-    CellRGBColor selectionForeground = CellBackgroundColor {};
-    CellRGBColor selectionBackground = CellForegroundColor {};
-    float selectionForegroundAlpha = 1.0f;
-    float selectionBackgroundAlpha = 1.0f;
 
     CursorColor cursor;
 
@@ -169,8 +165,13 @@ struct ColorPalette
     } hyperlinkDecoration;
 
     std::shared_ptr<BackgroundImage const> backgroundImage;
-    RGBColor highlightForeground = 0x1D1F21_rgb;
-    RGBColor highlightBackground = 0xffA500_rgb;
+
+    // clang-format off
+    CellRGBColorAndAlphaPair yankHighlight { CellForegroundColor {}, 1.0f, 0xffA500_rgb, 0.5f };
+    CellRGBColorAndAlphaPair searchHighlight { CellBackgroundColor {}, 1.0f, CellForegroundColor {}, 1.0f };
+    CellRGBColorAndAlphaPair searchHighlightFocused { CellForegroundColor {}, 1.0f, RGBColor{0xFF, 0x30, 0x30}, 0.5f };
+    CellRGBColorAndAlphaPair selection { CellBackgroundColor {}, 1.0f, CellForegroundColor {}, 1.0f };
+    // clang-format on
 };
 
 enum class ColorTarget

@@ -63,7 +63,7 @@ class ScreenBase: public SequenceHandler
     [[nodiscard]] virtual bool compareCellTextAt(CellLocation position, char codepoint) const noexcept = 0;
     [[nodiscard]] virtual std::string cellTextAt(CellLocation position) const noexcept = 0;
     [[nodiscard]] virtual bool isLineEmpty(LineOffset line) const noexcept = 0;
-    [[nodiscard]] virtual uint8_t cellWithAt(CellLocation position) const noexcept = 0;
+    [[nodiscard]] virtual uint8_t cellWidthAt(CellLocation position) const noexcept = 0;
     [[nodiscard]] virtual LineCount historyLineCount() const noexcept = 0;
     [[nodiscard]] virtual HyperlinkId hyperlinkIdAt(CellLocation position) const noexcept = 0;
     [[nodiscard]] virtual std::shared_ptr<HyperlinkInfo const> hyperlinkAt(
@@ -71,6 +71,10 @@ class ScreenBase: public SequenceHandler
     virtual void inspect(std::string const& _message, std::ostream& _os) const = 0;
     virtual void moveCursorTo(LineOffset line, ColumnOffset column) = 0; // CUP
     virtual void updateCursorIterator() noexcept = 0;
+
+    [[nodiscard]] virtual CellLocation search(std::u32string_view searchText, CellLocation startPosition) = 0;
+    [[nodiscard]] virtual CellLocation searchReverse(std::u32string_view searchText,
+                                                     CellLocation startPosition) = 0;
 };
 
 //#define LIBTERMINAL_CURRENT_LINE_CACHE 1
@@ -327,6 +331,10 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
                && _coord.column <= boxed_cast<ColumnOffset>(_state.pageSize.columns);
     }
 
+    [[nodiscard]] CellLocation search(std::u32string_view searchText, CellLocation startPosition) override;
+    [[nodiscard]] CellLocation searchReverse(std::u32string_view searchText,
+                                             CellLocation startPosition) override;
+
     Cell& usePreviousCell() noexcept
     {
         return useCellAt(_state.lastCursorPosition.line, _state.lastCursorPosition.column);
@@ -503,9 +511,9 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         return grid().lineAt(line).empty();
     }
 
-    [[nodiscard]] uint8_t cellWithAt(CellLocation position) const noexcept override
+    [[nodiscard]] uint8_t cellWidthAt(CellLocation position) const noexcept override
     {
-        return grid().lineAt(position.line).cellWithAt(position.column);
+        return grid().lineAt(position.line).cellWidthAt(position.column);
     }
 
     [[nodiscard]] LineCount historyLineCount() const noexcept override

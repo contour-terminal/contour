@@ -512,6 +512,35 @@ class Grid
 
     void verifyState() const;
 
+    // Retrieves the cell location range of the underlying word at the given cursor position.
+    [[nodiscard]] CellLocationRange wordRangeUnderCursor(CellLocation position,
+                                                         std::u32string_view delimiters) const noexcept;
+
+    [[nodiscard]] bool cellEmptyOrContainsOneOf(CellLocation position,
+                                                std::u32string_view delimiters) const noexcept;
+
+    // Lineary extracts the text of a given grid cell range.
+    [[nodiscard]] std::u32string extractText(CellLocationRange range) const noexcept;
+
+    // Conditionally extends the cell location forward if the grid cell at the given location holds a wide
+    // character.
+    [[nodiscard]] CellLocation stretchedColumn(CellLocation _coord) const noexcept
+    {
+        CellLocation stretched = _coord;
+        if (auto const w = cellWidthAt(_coord); w > 1) // wide character
+        {
+            stretched.column += ColumnOffset::cast_from(w) - 1;
+            return stretched;
+        }
+
+        return stretched;
+    }
+
+    [[nodiscard]] uint8_t cellWidthAt(CellLocation position) const noexcept
+    {
+        return lineAt(position.line).cellWidthAt(position.column);
+    }
+
   private:
     CellLocation growLines(LineCount _newHeight, CellLocation _cursor);
     void appendNewLines(LineCount _count, GraphicsAttributes _attr);
