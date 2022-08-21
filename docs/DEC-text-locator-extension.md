@@ -1,6 +1,6 @@
 # DEC Locators
 
-Documented in DEC STD 070 manuall, section 13 (Text Locator Extension).
+Documented in DEC STD 070 manual, section 13 (Text Locator Extension).
 
 `vttest` (`11.8.5.8`) provides tests.
 
