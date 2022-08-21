@@ -1161,6 +1161,9 @@ uint8_t TerminalSession::matchModeFlags() const
     if (terminal_.inputHandler().mode() == ViMode::Insert)
         flags |= static_cast<uint8_t>(MatchModes::Flag::Insert);
 
+    if (!terminal_.state().searchMode.pattern.empty())
+        flags |= static_cast<uint8_t>(MatchModes::Flag::Search);
+
     return flags;
 }
 

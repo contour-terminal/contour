@@ -30,9 +30,8 @@ class MatchModes
         AppCursor = 0x02,
         AppKeypad = 0x04,
         Insert = 0x08, // vi-like insert mode
-        Select = 0x10,
-        // future modes
-        // ViSearch            = 0x10, // TODO: This mode we want.
+        Select = 0x10, // visual / visual-line / visual-block
+        Search = 0x20, // something's in the search buffer
     };
 
     enum class Status
@@ -147,6 +146,7 @@ struct formatter<terminal::MatchModes>
         advance(terminal::MatchModes::AlternateScreen, "AltScreen");
         advance(terminal::MatchModes::Insert, "Insert");
         advance(terminal::MatchModes::Select, "Select");
+        advance(terminal::MatchModes::Search, "Search");
         if (s.empty())
             s = "Any";
         return fmt::format_to(_ctx.out(), "{}", s);

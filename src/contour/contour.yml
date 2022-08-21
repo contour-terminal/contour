@@ -527,6 +527,7 @@ color_schemes:
 # - Select    : The terminal has currently an active grid cell selection (such as selected text).
 # - Insert    : The Insert input mode is active, that is the default and one way to test
 #               that the input mode is not in normal mode or any of the visual select modes.
+# - Search    : There is a search term currently being edited or already present.
 #
 # You can combine these modes by concatenating them via | and negate a single one
 # by prefixing with ~.

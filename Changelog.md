@@ -8,6 +8,7 @@
 - Adds vim-like incremental search functionality with realtime highlighting and cycling through the matches.
 - Adds ability to initiate search via configuration action `SearchReverse` in input mappings.
 - Adds ability to cancel highlighted search terms via configuration action `NoSearchHighlight` in input mappings.
+- Adds input mapping mode `Search` to conditionally enable input mapping when a search term is present.
 - Adds support for HSL colorspace in Sixel images.
 - Adds configuration key `colorscheme.*.search_highlight` for coloring search matches.
 - Adds configuration key `colorscheme.*.search_highlight_focused` for coloring the active search match, containing the cursor.

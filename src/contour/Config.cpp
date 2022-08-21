@@ -588,6 +588,8 @@ namespace // {{{ helper
                 flag = MatchModes::Insert;
             else if (upperArg == "SELECT")
                 flag = MatchModes::Select;
+            else if (upperArg == "SEARCH")
+                flag = MatchModes::Search;
             else
             {
                 errorlog()("Unknown input_mapping mode: {}", arg);
