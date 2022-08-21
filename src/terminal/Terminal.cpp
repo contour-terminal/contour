@@ -418,6 +418,9 @@ void Terminal::updateIndicatorStatusLine()
     indicatorStatusScreen_.clearLine();
     indicatorStatusScreen_.writeTextFromExternal(fmt::format(" {} │ {}", state_.terminalId, inputModeStr));
 
+    if (!state_.searchMode.pattern.empty() || state_.inputHandler.isEditingSearch())
+        indicatorStatusScreen_.writeTextFromExternal(" SEARCH");
+
     if (!allowInput())
     {
         state_.cursor.graphicsRendition.foregroundColor = BrightColor::Red;
@@ -1753,7 +1756,7 @@ void Terminal::setAllowInput(bool enabled)
     setMode(AnsiMode::KeyboardAction, !enabled);
 }
 
-CellLocation Terminal::searchReverse(u32string text, CellLocation searchPosition)
+optional<CellLocation> Terminal::searchReverse(u32string text, CellLocation searchPosition)
 {
     if (state_.searchMode.pattern == text)
         return searchPosition;
@@ -1762,7 +1765,7 @@ CellLocation Terminal::searchReverse(u32string text, CellLocation searchPosition
     return searchReverse(searchPosition);
 }
 
-CellLocation Terminal::search(std::u32string text, CellLocation searchPosition)
+optional<CellLocation> Terminal::search(std::u32string text, CellLocation searchPosition)
 {
     if (state_.searchMode.pattern == text)
         return searchPosition;
@@ -1771,12 +1774,13 @@ CellLocation Terminal::search(std::u32string text, CellLocation searchPosition)
     return search(searchPosition);
 }
 
-CellLocation Terminal::search(CellLocation searchPosition)
+optional<CellLocation> Terminal::search(CellLocation searchPosition)
 {
     auto const searchText = u32string_view(state_.searchMode.pattern);
     auto const matchLocation = currentScreen().search(searchText, searchPosition);
 
-    viewport().makeVisible(matchLocation.line);
+    if (matchLocation)
+        viewport().makeVisible(matchLocation.value().line);
 
     screenUpdated();
     return matchLocation;
@@ -1810,12 +1814,13 @@ std::tuple<std::u32string, CellLocationRange> Terminal::extractWordUnderCursor(
     }
 }
 
-CellLocation Terminal::searchReverse(CellLocation searchPosition)
+optional<CellLocation> Terminal::searchReverse(CellLocation searchPosition)
 {
     auto const searchText = u32string_view(state_.searchMode.pattern);
     auto const matchLocation = currentScreen().searchReverse(searchText, searchPosition);
 
-    viewport().makeVisible(matchLocation.line);
+    if (matchLocation)
+        viewport().makeVisible(matchLocation.value().line);
 
     screenUpdated();
     return matchLocation;

@@ -182,8 +182,8 @@ class ViInputHandler: public InputHandler
         virtual void searchDone() = 0;
         virtual void searchCancel() = 0;
         virtual void updateSearchTerm(std::u32string const& text) = 0;
-        virtual void jumpToNextMatch(unsigned count) = 0;
-        virtual void jumpToPreviousMatch(unsigned count) = 0;
+        virtual bool jumpToNextMatch(unsigned count) = 0;
+        virtual bool jumpToPreviousMatch(unsigned count) = 0;
 
         virtual void scrollViewport(ScrollOffset delta) = 0;
 

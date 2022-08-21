@@ -3497,9 +3497,12 @@ unique_ptr<ParserExtension> Screen<Cell>::hookDECRQSS(Sequence const& /*_seq*/)
 }
 
 template <typename Cell>
-CellLocation Screen<Cell>::search(std::u32string_view searchText, CellLocation startPosition)
+optional<CellLocation> Screen<Cell>::search(std::u32string_view searchText, CellLocation startPosition)
 {
     // TODO use LogicalLines to spawn logical lines for improving the search on wrapped lines.
+
+    if (searchText.empty())
+        return nullopt;
 
     // First try match at start location.
     if (_grid.lineAt(startPosition.line).matchTextAt(searchText, startPosition.column))
@@ -3520,13 +3523,16 @@ CellLocation Screen<Cell>::search(std::u32string_view searchText, CellLocation s
         position.column = ColumnOffset(0);
         position.line++;
     }
-    return startPosition;
+    return nullopt;
 }
 
 template <typename Cell>
-CellLocation Screen<Cell>::searchReverse(std::u32string_view searchText, CellLocation startPosition)
+optional<CellLocation> Screen<Cell>::searchReverse(std::u32string_view searchText, CellLocation startPosition)
 {
     // TODO use LogicalLinesReverse to spawn logical lines for improving the search on wrapped lines.
+
+    if (searchText.empty())
+        return nullopt;
 
     // First try match at start location.
     if (_grid.lineAt(startPosition.line).matchTextAt(searchText, startPosition.column))
@@ -3548,7 +3554,7 @@ CellLocation Screen<Cell>::searchReverse(std::u32string_view searchText, CellLoc
         position.line--;
     }
 
-    return startPosition;
+    return nullopt;
 }
 
 } // namespace terminal

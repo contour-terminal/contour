@@ -72,9 +72,10 @@ class ScreenBase: public SequenceHandler
     virtual void moveCursorTo(LineOffset line, ColumnOffset column) = 0; // CUP
     virtual void updateCursorIterator() noexcept = 0;
 
-    [[nodiscard]] virtual CellLocation search(std::u32string_view searchText, CellLocation startPosition) = 0;
-    [[nodiscard]] virtual CellLocation searchReverse(std::u32string_view searchText,
-                                                     CellLocation startPosition) = 0;
+    [[nodiscard]] virtual std::optional<CellLocation> search(std::u32string_view searchText,
+                                                             CellLocation startPosition) = 0;
+    [[nodiscard]] virtual std::optional<CellLocation> searchReverse(std::u32string_view searchText,
+                                                                    CellLocation startPosition) = 0;
 };
 
 //#define LIBTERMINAL_CURRENT_LINE_CACHE 1
@@ -331,9 +332,10 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
                && _coord.column <= boxed_cast<ColumnOffset>(_state.pageSize.columns);
     }
 
-    [[nodiscard]] CellLocation search(std::u32string_view searchText, CellLocation startPosition) override;
-    [[nodiscard]] CellLocation searchReverse(std::u32string_view searchText,
-                                             CellLocation startPosition) override;
+    [[nodiscard]] std::optional<CellLocation> search(std::u32string_view searchText,
+                                                     CellLocation startPosition) override;
+    [[nodiscard]] std::optional<CellLocation> searchReverse(std::u32string_view searchText,
+                                                            CellLocation startPosition) override;
 
     Cell& usePreviousCell() noexcept
     {

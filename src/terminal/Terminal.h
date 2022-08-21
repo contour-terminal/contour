@@ -600,12 +600,12 @@ class Terminal
     // Sets the current search term to the given text and
     // moves the viewport accordingly to make sure the given text is visible,
     // or it will not move at all if the input text was not found.
-    CellLocation searchReverse(std::u32string text, CellLocation searchPosition);
-    CellLocation searchReverse(CellLocation searchPosition);
+    std::optional<CellLocation> searchReverse(std::u32string text, CellLocation searchPosition);
+    std::optional<CellLocation> searchReverse(CellLocation searchPosition);
 
     // Searches from current position the next item downwards.
-    CellLocation search(std::u32string text, CellLocation searchPosition);
-    CellLocation search(CellLocation searchPosition);
+    std::optional<CellLocation> search(std::u32string text, CellLocation searchPosition);
+    std::optional<CellLocation> search(CellLocation searchPosition);
 
     // Tests if the grid cell at the given location does contain a word delimiter.
     [[nodiscard]] bool wordDelimited(CellLocation position) const noexcept;

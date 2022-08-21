@@ -53,7 +53,7 @@ void ViCommands::searchCancel()
     terminal.screenUpdated();
 }
 
-void ViCommands::jumpToNextMatch(unsigned count)
+bool ViCommands::jumpToNextMatch(unsigned count)
 {
     for (unsigned i = 0; i < count; ++i)
     {
@@ -67,14 +67,15 @@ void ViCommands::jumpToNextMatch(unsigned count)
         }
 
         auto const nextPosition = terminal.search(startPosition);
-        if (nextPosition == startPosition)
-            break;
+        if (!nextPosition)
+            return false;
 
-        moveCursorTo(nextPosition);
+        moveCursorTo(nextPosition.value());
     }
+    return true;
 }
 
-void ViCommands::jumpToPreviousMatch(unsigned count)
+bool ViCommands::jumpToPreviousMatch(unsigned count)
 {
     for (unsigned i = 0; i < count; ++i)
     {
@@ -88,16 +89,18 @@ void ViCommands::jumpToPreviousMatch(unsigned count)
         }
 
         auto const nextPosition = terminal.searchReverse(startPosition);
-        if (nextPosition == startPosition)
-            break;
+        if (!nextPosition)
+            return false;
 
-        moveCursorTo(nextPosition);
+        moveCursorTo(nextPosition.value());
     }
+    return true;
 }
 
 void ViCommands::updateSearchTerm(std::u32string const& text)
 {
-    moveCursorTo(terminal.searchReverse(text, cursorPosition));
+    if (auto const newLocation = terminal.searchReverse(text, cursorPosition))
+        moveCursorTo(newLocation.value());
 }
 
 void ViCommands::modeChanged(ViMode mode)

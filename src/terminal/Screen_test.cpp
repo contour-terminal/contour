@@ -2801,20 +2801,20 @@ TEST_CASE("searchReverse", "[screen]")
                 REQUIRE(screen.grid().lineAt(lineOffset).isTrivialBuffer());
 
         // Find "qr" right at in front of the cursor.
-        CellLocation const qr = screen.searchReverse(U"qr", cursorPosition);
-        REQUIRE(qr == CellLocation { LineOffset(2), ColumnOffset(2) });
+        optional<CellLocation> const qr = screen.searchReverse(U"qr", cursorPosition);
+        REQUIRE(qr.value() == CellLocation { LineOffset(2), ColumnOffset(2) });
 
         // Find something in main page area.
-        CellLocation const mn = screen.searchReverse(U"mn", cursorPosition);
-        REQUIRE(mn == CellLocation { LineOffset(1), ColumnOffset(1) });
+        optional<CellLocation> const mn = screen.searchReverse(U"mn", cursorPosition);
+        REQUIRE(mn.value() == CellLocation { LineOffset(1), ColumnOffset(1) });
 
         // Search for something that doesn't exist.
-        CellLocation const nnOut = screen.searchReverse(U"XY", mn);
-        REQUIRE(nnOut == mn);
+        optional<CellLocation> const nnOut = screen.searchReverse(U"XY", *mn);
+        REQUIRE(!nnOut.has_value());
 
         // Check that we can find a term in the top-most scrollback line.
-        CellLocation const oneAB = screen.searchReverse(U"1ab", mn);
-        REQUIRE(oneAB == CellLocation { LineOffset(-3), ColumnOffset(0) });
+        optional<CellLocation> const oneAB = screen.searchReverse(U"1ab", *mn);
+        REQUIRE(oneAB.value() == CellLocation { LineOffset(-3), ColumnOffset(0) });
     }
 }
 
