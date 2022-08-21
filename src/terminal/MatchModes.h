@@ -42,7 +42,7 @@ class MatchModes
         Disabled
     };
 
-    constexpr Status status(Flag _flag) const noexcept
+    [[nodiscard]] constexpr Status status(Flag _flag) const noexcept
     {
         if (enabled_ & static_cast<uint8_t>(_flag))
             return Status::Enabled;
@@ -51,8 +51,8 @@ class MatchModes
         return Status::Any;
     }
 
-    constexpr unsigned enabled() const noexcept { return enabled_; }
-    constexpr unsigned disabled() const noexcept { return disabled_; }
+    [[nodiscard]] constexpr unsigned enabled() const noexcept { return enabled_; }
+    [[nodiscard]] constexpr unsigned disabled() const noexcept { return disabled_; }
 
     constexpr void enable(Flag _flag) noexcept
     {
@@ -66,7 +66,7 @@ class MatchModes
         disabled_ |= static_cast<uint8_t>(_flag);
     }
 
-    constexpr bool has_value(Flag _flag) const noexcept
+    [[nodiscard]] constexpr bool has_value(Flag _flag) const noexcept
     {
         return enabled_ & static_cast<uint8_t>(_flag) || disabled_ & static_cast<uint8_t>(_flag);
     }
@@ -83,9 +83,23 @@ class MatchModes
         disabled_ = 0;
     }
 
-    constexpr bool any() const noexcept { return enabled_ || disabled_; }
+    [[nodiscard]] constexpr bool any() const noexcept { return enabled_ || disabled_; }
 
-    constexpr uint16_t hashcode() const noexcept { return static_cast<uint16_t>(enabled_ << 8 | disabled_); }
+    [[nodiscard]] constexpr uint16_t hashcode() const noexcept
+    {
+        return static_cast<uint16_t>(enabled_ << 8 | disabled_);
+    }
+
+    constexpr MatchModes() noexcept = default;
+    constexpr MatchModes(MatchModes const&) noexcept = default;
+    constexpr MatchModes(MatchModes&&) noexcept = default;
+    constexpr MatchModes& operator=(MatchModes const&) noexcept = default;
+    constexpr MatchModes& operator=(MatchModes&&) noexcept = default;
+
+    constexpr MatchModes(uint8_t enabled, uint8_t disabled) noexcept:
+        enabled_ { enabled }, disabled_ { disabled }
+    {
+    }
 
   private:
     uint8_t enabled_ = 0;
@@ -101,10 +115,6 @@ constexpr bool operator!=(MatchModes a, MatchModes b) noexcept
 {
     return !(a == b);
 }
-
-class Terminal;
-
-bool testMatch(Terminal const& _terminal, MatchModes _mode);
 
 } // namespace terminal
 
