@@ -95,7 +95,6 @@ fetch_and_unpack_gsl()
 
 fetch_and_unpack_embeds()
 {
-    set -x
     local termbench_pro_git_sha="cd571e3cebb7c00de9168126b28852f32fb204ed"
     fetch_and_unpack \
         termbench-pro-$termbench_pro_git_sha \
