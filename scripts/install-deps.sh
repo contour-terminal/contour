@@ -144,6 +144,7 @@ install_deps_ubuntu()
         libharfbuzz-dev
         libqt5gui5
         libqt5opengl5-dev
+        libqt5x11extras5-dev
         libx11-xcb-dev
         libyaml-cpp-dev
         make
@@ -151,7 +152,6 @@ install_deps_ubuntu()
         pkg-config
         qtbase5-dev
         qtmultimedia5-dev
-        libqt5x11extras5-dev
     "
 
     RELEASE=`grep VERSION_ID /etc/os-release | cut -d= -f2 | tr -d '"'`
@@ -211,8 +211,8 @@ install_deps_FreeBSD()
         qt5-multimedia \
         qt5-network \
         qt5-qmake \
-        qt5-x11extras \
         qt5-widgets \
+        qt5-x11extras \
         range-v3 \
         xcb \
         yaml-cpp
@@ -262,11 +262,11 @@ install_deps_suse()
         libqt5-qtbase-common-devel
         libqt5-qtbase-devel
         libqt5-qtmultimedia-devel
+        libxcb-devel
         ncurses-devel
         ninja
         pkgconf
         range-v3-devel
-        libxcb-devel
         yaml-cpp-devel
     "
     # Sadly, gsl-devel system package is too old to be used.
@@ -287,13 +287,13 @@ install_deps_fedora()
         freetype-devel
         gcc-c++
         harfbuzz-devel
+        libxcb-devel
         ninja-build
         pkgconf
         qt5-qtbase-devel
         qt5-qtbase-gui
         qt5-qtmultimedia-devel
         qt5-qtx11extras-devel
-        libxcb-devel
         range-v3-devel
         yaml-cpp-devel
     "
