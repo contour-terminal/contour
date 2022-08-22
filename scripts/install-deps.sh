@@ -237,7 +237,7 @@ install_deps_arch()
         pkg-config \
         qt5-base \
         qt5-multimedia \
-        qt5-qtx11extras \
+        qt5-x11extras \
         range-v3 \
         yaml-cpp
 }
