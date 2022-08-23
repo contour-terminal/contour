@@ -27,6 +27,8 @@ BUILD_DIR="${ROOTDIR}/target/$(uname -m)-$(uname -s)-${CXX_NAME}-${BUILD_TYPE}"
 case "$OSTYPE" in
     darwin*)
         EXTRA_CMAKE_FLAGS="${EXTRA_CMAKE_FLAGS} -DQt5_DIR=$(brew --prefix qt5)/lib/cmake/Qt5"
+        # EXTRA_CMAKE_FLAGS="${EXTRA_CMAKE_FLAGS} -DQt6_DIR=$(brew --prefix qt6)/lib/cmake/Qt6"
+        # EXTRA_CMAKE_FLAGS="${EXTRA_CMAKE_FLAGS} -DCONTOUR_BUILD_WITH_QT6=ON"
         ;;
     *)
         ;;
