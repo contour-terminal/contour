@@ -19,9 +19,10 @@ else
 fi
 
 CXX=${CXX="g++"}
+CXX_NAME=$(basename $CXX)
 
 BUILD_TYPE="${1:-Debug}"
-BUILD_DIR="${ROOTDIR}/target/$(uname -m)-$(uname -s)-${CXX}-${BUILD_TYPE}"
+BUILD_DIR="${ROOTDIR}/target/$(uname -m)-$(uname -s)-${CXX_NAME}-${BUILD_TYPE}"
 
 case "$OSTYPE" in
     darwin*)
