@@ -26,6 +26,7 @@
 #include <crispy/stdfs.h>
 #include <crispy/utils.h>
 
+#include <yaml-cpp/node/detail/iterator_fwd.h>
 #include <yaml-cpp/ostream_wrapper.h>
 #include <yaml-cpp/yaml.h>
 
@@ -239,7 +240,7 @@ namespace
 
         locations.emplace_back(getenv("HOME") + "/.terminfo"s);
 
-        if (auto const value = getenv("TERMINFO_DIRS"); value && *value)
+        if (auto const* value = getenv("TERMINFO_DIRS"); value && *value)
             for (auto const dir: crispy::split(string_view(value), ':'))
                 locations.emplace_back(string(dir));
 
@@ -523,7 +524,7 @@ namespace
         std::vector<FileSystem::path> paths;
 
 #if defined(CONTOUR_PROJECT_SOURCE_DIR) && !defined(NDEBUG)
-        paths.emplace_back(FileSystem::path(CONTOUR_PROJECT_SOURCE_DIR) / "src" / "terminal_view"
+        paths.emplace_back(FileSystem::path(CONTOUR_PROJECT_SOURCE_DIR) / "src" / "contour" / "display"
                            / "shaders");
 #endif
 
@@ -922,9 +923,9 @@ namespace
                         { "PNG", actions::CopyFormat::PNG },
                         { "VT", actions::CopyFormat::VT },
                     } };
-                if (auto const p = std::find_if(mappings.begin(),
-                                                mappings.end(),
-                                                [&](auto const& t) { return t.first == formatString; });
+                if (auto p = std::find_if(mappings.begin(),
+                                          mappings.end(),
+                                          [&](auto const& t) { return t.first == formatString; });
                     p != mappings.end())
                 {
                     return actions::CopySelection { p->second };
@@ -1639,8 +1640,8 @@ namespace
             pair { "monochrome"sv, text::render_mode::bitmap },
         };
 
-        auto const i = crispy::find_if(renderModeMap, [&](auto m) { return m.first == strValue; });
-        if (i != renderModeMap.end())
+        if (auto i = crispy::find_if(renderModeMap, [&](auto m) { return m.first == strValue; });
+            i != renderModeMap.end())
             profile.fonts.renderMode = i->second;
         else
             _logger("Invalid render_mode \"{}\" in configuration.", strValue);
@@ -1996,11 +1997,11 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
     if (tryLoadValue(usedKeys, doc, "renderer.backend", renderingBackendStr, logger))
     {
         renderingBackendStr = toUpper(renderingBackendStr);
-        if (renderingBackendStr == "OPENGL")
+        if (renderingBackendStr == "OPENGL"sv)
             _config.renderingBackend = RenderingBackend::OpenGL;
-        else if (renderingBackendStr == "SOFTWARE")
+        else if (renderingBackendStr == "SOFTWARE"sv)
             _config.renderingBackend = RenderingBackend::Software;
-        else if (renderingBackendStr != "" && renderingBackendStr != "DEFAULT")
+        else if (renderingBackendStr != ""sv && renderingBackendStr != "DEFAULT"sv)
             errorlog()("Unknown renderer: {}.", renderingBackendStr);
     }
 

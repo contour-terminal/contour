@@ -1,33 +1,35 @@
 #! /bin/bash
+#
+# Usage: Xvfb-contour-run.sh <dump-dir> <contour-args>
 
 set -x
 
-export LIBGL_ALWAYS_SOFTWARE='true'
-
-if [[ ! ~/.terminfo ]]
-then
-    ln -sf ./build/src/contour/terminfo ~/.terminfo
-fi
-
+LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-true}"
+CONTOUR_BIN=${CONTOUR_BIN:-contour}
+LOG="error,config,pty,gui.session,gui.display,vt.renderer,font.locator" # "all"
 DISPLAY=:99
-
-Xvfb $DISPLAY -screen 0 1280x1024x24 &
-XVFB_PID=$!
-
-sleep 3
+#CONTOUR_PREFIX=gdb --batch --command=./scripts/test.gdb --args
 
 DUMP_DIR="${1}"
 shift
 
-ldd `which contour`
+export LIBGL_ALWAYS_SOFTWARE
 
-LOG="error,config,pty,gui.session,gui.display,vt.renderer,font.locator"
-#LOG="all"
+if [[ ! ~/.terminfo ]] && [[ -d ./build/src/contour/terminfo ]]
+then
+    ln -sf ./build/src/contour/terminfo ~/.terminfo
+fi
 
-CONTOUR_PREFIX=gdb --batch --command=./scripts/test.gdb --args
+Xvfb $DISPLAY -screen 0 1280x1024x24 &
+XVFB_PID=$!
+trap "kill $XVFB_PID" EXIT
+
+sleep 3
+
+ldd `which $CONTOUR_BIN`
 
 $CONTOUR_PREFIX \
-    contour terminal \
+    $CONTOUR_BIN terminal \
         debug "$LOG" \
         display ${DISPLAY} \
         early-exit-threshold 0 \
@@ -36,7 +38,6 @@ $CONTOUR_PREFIX \
 
 # ~/opt/notcurses/bin/notcurses-demo -p ~/opt/notcurses/share/notcurses
 
-echo "exitCode=$?" >> "$GITHUB_OUTPUT"
-
-kill "${XVFB_PID}"
-
+if [[ "$GITHUB_OUTPUT" != "" ]]; then
+    echo "exitCode=$?" >> "$GITHUB_OUTPUT"
+fi

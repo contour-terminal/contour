@@ -2,6 +2,7 @@
 #
 # Runs "clang-format" on the commit before committing and prohibits commit if
 # changes happened.
+exit 0
 
 dir_list="$PWD"  # Add the directories you want here
 cmd="git diff -U0 --no-color --staged HEAD -- $dir_list | clang-format-diff -p1"

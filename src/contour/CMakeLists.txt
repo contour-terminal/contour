@@ -1,4 +1,3 @@
-
 include(FilesystemResolver)
 
 set(AppId "org.contourterminal.Contour")
@@ -15,9 +14,10 @@ option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 option(CONTOUR_VT_METRICS "Enables collecting and exit-printing some VT usage metrics." OFF)
 option(CONTOUR_SCROLLBAR "Enables scrollbar in GUI frontend." ON)
 
-set(QT_COMPONENTS Core Gui Network Multimedia Widgets)
+# Widgets is rquired for SystemTrayIcon's fallback implementation
+set(QT_COMPONENTS Core Gui Qml Quick QuickControls2 Network Multimedia Widgets)
 if(CONTOUR_QT_VERSION EQUAL 6)
-    list(APPEND QT_COMPONENTS OpenGL OpenGLWidgets)
+    list(APPEND QT_COMPONENTS OpenGL OpenGLWidgets Core5Compat)
 endif()
 if(NOT(WIN32) AND NOT(APPLE) AND (CONTOUR_QT_VERSION EQUAL 5))
     list(APPEND QT_COMPONENTS X11Extras)
@@ -37,15 +37,14 @@ set(contour_SRCS
 if(CONTOUR_FRONTEND_GUI)
     list(APPEND contour_SRCS
         Actions.cpp Actions.h
+        Audio.cpp Audio.h
         BlurBehind.cpp BlurBehind.h
         Config.cpp Config.h
         ContourApp.cpp ContourApp.h
         ContourGuiApp.cpp ContourGuiApp.h
-        ScrollableDisplay.cpp ScrollableDisplay.h
         TerminalSession.cpp TerminalSession.h
         TerminalSessionManager.cpp TerminalSessionManager.h
-        TerminalWindow.cpp TerminalWindow.h
-        helper.cpp helper.h Audio.cpp Audio.h
+        helper.cpp helper.h
     )
 endif()
 
@@ -53,14 +52,47 @@ if(WIN32)
     list(APPEND contour_SRCS contour.rc)
 endif()
 
+# {{{ configure QML files and their imports
+function(DeclareQmlImport name import version)
+    set(import_v6_alternative ${ARGN})
+
+    if(CONTOUR_QT_VERSION EQUAL "5")
+        set(${name} "${import} ${version}" PARENT_SCOPE)
+    elseif("${import_v6_alternative}" STREQUAL "")
+        set(${name} "${import}" PARENT_SCOPE)
+    else()
+        set(${name} "${import_v6_alternative}" PARENT_SCOPE)
+    endif()
+endfunction()
+
+DeclareQmlImport(qml_import_ContourTerminal "Contour.Terminal" "1.0")
+DeclareQmlImport(qml_import_QtQuick "QtQuick" "2.6")
+DeclareQmlImport(qml_import_QtQuickControls "QtQuick.Controls" "2.6")
+DeclareQmlImport(qml_import_QtQuickLayouts "QtQuick.Layouts" "1.11")
+DeclareQmlImport(qml_import_QtQuickWindow "QtQuick.Window" "2.6")
+DeclareQmlImport(qml_import_QtQuicklabs "Qt.labs.platform" "1.1")
+DeclareQmlImport(qml_import_QtMultimedia "QtMultimedia" "5.12")
+DeclareQmlImport(qml_import_QtGraphicalEffects "QtGraphicalEffects" "1.12" "Qt5Compat.GraphicalEffects")
+
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ui.template/RequestPermission.qml.in ${CMAKE_CURRENT_SOURCE_DIR}/ui/RequestPermission.qml)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ui.template/Terminal.qml.in ${CMAKE_CURRENT_SOURCE_DIR}/ui/Terminal.qml)
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/ui.template/main.qml.in ${CMAKE_CURRENT_SOURCE_DIR}/ui/main.qml)
+# }}}
 
 set(QT_RESOURCES resources.qrc)
 if(CONTOUR_QT_VERSION EQUAL "5")
     qt5_add_resources(QT_RESOURCES ${QT_RESOURCES})
+else()
+    qt_add_resources(QT_RESOURCES ${QT_RESOURCES})
 endif()
 
 add_executable(contour ${contour_SRCS} ${QT_RESOURCES})
+
 target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+# target_compile_definitions(contour PRIVATE $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:QT_QML_DEBUG>)
+target_compile_definitions(contour PRIVATE $<$<CONFIG:Debug>:QT_QML_DEBUG>)
+target_compile_definitions(contour PRIVATE $<$<CONFIG:Debug>:QMLJSDEBUGGER>)
+target_compile_definitions(contour PRIVATE $<$<CONFIG:Debug>:QT_DECLARATIVE_DEBUG>)
 target_compile_definitions(contour PRIVATE
     CONTOUR_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
     CONTOUR_VERSION_MINOR=${PROJECT_VERSION_MINOR}
@@ -70,6 +102,7 @@ target_compile_definitions(contour PRIVATE
 )
 
 set_target_properties(contour PROPERTIES AUTOMOC ON)
+
 set_target_properties(contour PROPERTIES AUTORCC ON)
 
 # Disable all deprecated Qt functions prior to Qt 6.0
@@ -89,6 +122,10 @@ endif()
 
 if(CONTOUR_SCROLLBAR)
     target_compile_definitions(contour PRIVATE CONTOUR_SCROLLBAR)
+endif()
+
+if("${CMAKE_BUILD_TYPE}" STREQUAL "Debug")
+    target_compile_definitions(contour PRIVATE CONTOUR_GUI_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
 endif()
 
 if(WIN32)
@@ -130,12 +167,31 @@ endif()
 
 if(CONTOUR_FRONTEND_GUI)
     if(CONTOUR_QT_VERSION EQUAL "6")
-        target_link_libraries(contour ContourTerminalDisplay vtrasterizer Qt6::Core Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Widgets Qt6::Multimedia)
+        target_link_libraries(contour 
+            ContourTerminalDisplay 
+            Qt6::Core 
+            Qt6::Core5Compat
+            Qt6::Multimedia 
+            Qt6::Network 
+            Qt6::OpenGL 
+            Qt6::Qml 
+            Qt6::Widgets
+            vtrasterizer 
+        )
         if(NOT(WIN32) AND NOT(APPLE))
             target_link_libraries(contour xcb)
         endif()
     else()
-        target_link_libraries(contour crispy::core ContourTerminalDisplay vtrasterizer Qt5::Gui Qt5::Network Qt5::Widgets Qt5::Multimedia)
+        target_link_libraries(contour 
+            ContourTerminalDisplay 
+            Qt5::Core 
+            Qt5::Gui 
+            Qt5::Multimedia
+            Qt5::Network 
+            Qt5::Widgets
+            crispy::core 
+            vtrasterizer 
+        )
         if(NOT(WIN32) AND NOT(APPLE) AND NOT(CONTOUR_QT_VERSION EQUAL "6"))
             target_link_libraries(contour Qt5::X11Extras xcb)
         endif()
@@ -283,7 +339,7 @@ if(WIN32)
             PATTERN "CMakeFiles" EXCLUDE
             PATTERN "*_autogen" EXCLUDE
             PATTERN "*.h" EXCLUDE
-            PATTERN "*.dll"
+            PATTERN "*"
     )
 elseif(APPLE)
     # {{{ NB: This would run macdeployqt after creating contour executable during build stage.
@@ -392,7 +448,6 @@ else()
     if(LINUX)
         set(DEPENDS_EXTRA ", libutempter0")
     endif()
-
 
     if(CONTOUR_QT_VERSION EQUAL "6")
         set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libqt6core6, libqt6opengl6, libqt6widgets6, libqt6openglwidgets6, qt6-qpa-plugins, libqt6multimedia6")

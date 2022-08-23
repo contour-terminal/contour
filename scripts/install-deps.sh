@@ -3,8 +3,7 @@
 set -e
 
 if test x$QTVER = x; then
-    # Default to Qt 5 for now.
-    QTVER=5
+    QTVER=6
 fi
 
 # Special environment variable to be used when only fetching and extracting
@@ -167,7 +166,6 @@ target_include_directories(utempter PUBLIC \${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(utempter PUBLIC
 "LIBEXECDIR=\"/usr/local/lib\"")" \
     > "$SYSDEPS_BASE_DIR/sources/libutempter-$libutempter_version/CMakeLists.txt"
-
 }
 
 prepare_fetch_and_unpack()
@@ -251,11 +249,18 @@ install_deps_ubuntu()
         packages="$packages
             libgl1-mesa-dev
             libglvnd-dev
+            libqt6core5compat6-dev
             libqt6opengl6-dev
-            libqt6openglwidgets6
-            libqt6widgets6
+            qml6-module-qt-labs-platform
+            qml6-module-qtqml-workerscript
+            qml6-module-qtquick-controls
+            qml6-module-qtquick-layouts
+            qml6-module-qtmultimedia
+            qml6-module-qtquick-templates
+            qml6-module-qtquick-window
             qt6-base-dev
             qt6-base-dev-tools
+            qt6-declarative-dev
             qt6-multimedia-dev
             qt6-qpa-plugins
         "
@@ -265,7 +270,11 @@ install_deps_ubuntu()
             libqt5opengl5-dev
             libqt5x11extras5-dev
             qtbase5-dev
+            qtdeclarative5-dev
             qtmultimedia5-dev
+            qtquickcontrols2-5-dev
+            qml-module-qtquick-controls
+            qml-module-qt-labs-platform
         "
     fi
 
@@ -279,11 +288,18 @@ install_deps_ubuntu()
             # Old Ubuntu's (especially 18.04 LTS) doesn't have a proper std::filesystem implementation.
             packages="$packages g++-8"
         fi
+        if [ "$RELEASE" = "22.04" ] || [ "$RELEASE" = "22.10"  ]; then
+            packages="$packages qml6-module-qt5compat-graphicaleffects "
+        fi
+        if [ "$RELEASE" = "23.04" ]; then
+            packages="$packages qml6-moduile-qtquick3d-spatialaudio qml6-module-qt5compat-graphicaleffects"
+        fi
+
     fi
 
     fetch_and_unpack_gsl
     case $RELEASE in
-        "18.04" | "19.04" | "20.04" | "21.04" | "21.10" | "22.04")
+        "18.04" | "19.04" | "20.04" | "21.04" | "21.10" | "22.04" | "23.04")
             # Older Ubuntu's don't have a recent enough fmt / range-v3, so supply it.
             fetch_and_unpack_range
             fetch_and_unpack_fmtlib
@@ -443,11 +459,13 @@ install_deps_fedora()
 
     if test x$QTVER = x6; then
         packages="$packages
+            qt6-qt5compat-devel
             qt6-qtbase-devel
             qt6-qtbase-gui
             qt6-qtdeclarative-devel
             qt6-qtmultimedia-devel
             qt6-qtwayland
+            qt5-qtquickcontrols2-devel
         "
     else
         packages="$packages
@@ -455,6 +473,7 @@ install_deps_fedora()
             qt5-qtbase-gui
             qt5-qtmultimedia-devel
             qt5-qtx11extras-devel
+            qt5-qtquickcontrols2-devel
         "
     fi
     # Sadly, gsl-devel system package is too old to be used.

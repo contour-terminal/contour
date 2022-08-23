@@ -122,7 +122,6 @@ namespace
 Renderer::Renderer(PageSize pageSize,
                    FontDescriptions fontDescriptions,
                    terminal::ColorPalette const& colorPalette,
-                   terminal::Opacity backgroundOpacity,
                    crispy::StrongHashtableSize atlasHashtableSlotCount,
                    crispy::LRUCapacity atlasTileCount,
                    bool atlasDirectMapping,
@@ -140,7 +139,6 @@ Renderer::Renderer(PageSize pageSize,
     _gridMetrics { loadGridMetrics(_fonts.regular, pageSize, *_textShaper) },
     //.
     _colorPalette { colorPalette },
-    _backgroundOpacity { backgroundOpacity },
     _backgroundRenderer { _gridMetrics, colorPalette.defaultBackground },
     _imageRenderer { _gridMetrics, cellSize() },
     _textRenderer { _gridMetrics, *_textShaper, _fontDescriptions, _fonts, _imageRenderer },
@@ -178,9 +176,6 @@ void Renderer::setRenderTarget(RenderTarget& renderTarget)
     _textRenderer.setRenderTarget(renderTarget, _directMappingAllocator);
 
     configureTextureAtlas();
-
-    if (_colorPalette.backgroundImage)
-        renderTarget.setBackgroundImage(_colorPalette.backgroundImage);
 }
 
 void Renderer::configureTextureAtlas()

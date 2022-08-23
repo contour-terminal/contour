@@ -43,6 +43,11 @@ struct RenderCursor
     crispy::Point position;
     CursorShape shape;
     int width;
+
+    RenderCursor(crispy::Point position, CursorShape shape, int width):
+        position(position), shape(shape), width(width)
+    {
+    }
 };
 
 /**
@@ -62,7 +67,6 @@ class Renderer
     Renderer(PageSize pageSize,
              FontDescriptions fontDescriptions,
              ColorPalette const& colorPalette,
-             Opacity backgroundOpacity,
              crispy::StrongHashtableSize atlasHashtableSlotCount,
              crispy::LRUCapacity atlasTileCount,
              bool atlasDirectMapping,
@@ -76,9 +80,6 @@ class Renderer
     void setRenderTarget(RenderTarget& renderTarget);
     RenderTarget& renderTarget() noexcept { return *_renderTarget; }
     [[nodiscard]] bool hasRenderTarget() const noexcept { return _renderTarget != nullptr; }
-
-    void setBackgroundOpacity(terminal::Opacity opacity) { _backgroundOpacity = opacity; }
-    [[nodiscard]] terminal::Opacity backgroundOpacity() const noexcept { return _backgroundOpacity; }
 
     bool setFontSize(text::font_size fontSize);
     void updateFontMetrics();
@@ -157,7 +158,6 @@ class Renderer
     GridMetrics _gridMetrics;
 
     ColorPalette const& _colorPalette;
-    Opacity _backgroundOpacity;
 
     std::mutex _imageDiscardLock;            //!< Lock guard for accessing _discardImageQueue.
     std::vector<ImageId> _discardImageQueue; //!< List of images to be discarded.

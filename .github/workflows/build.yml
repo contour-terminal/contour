@@ -135,10 +135,11 @@ jobs:
           cp -rvp . ${DISTDIR}
           tar czpf ${PKGNAME}.tar.gz -C "/tmp/dist" .
       - name: disable pedantic compiler on certain OS versions
-        if: ${{ matrix.os_version == 38 || matrix.os_version == 39 }}
+        # Generally disable -Werror.
+        #if: ${{ matrix.os_version == 38 || matrix.os_version == 39 }}
         run: |
           set -ex
-          sed -i -e "s/PEDANTIC_COMPILER=ON/PEDANTIC_COMPILER=OFF/" .github/fedora/contour.spec
+          #sed -i -e "s/PEDANTIC_COMPILER=ON/PEDANTIC_COMPILER=OFF/" .github/fedora/contour.spec
           sed -i -e "s/PEDANTIC_COMPILER_WERROR=ON/PEDANTIC_COMPILER_WERROR=OFF/" .github/fedora/contour.spec
       - name: Build ${{ matrix.arch }} release
         shell: bash
@@ -302,9 +303,9 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v3
         with:
-          #version: "6.4.*"
-          version: "5.15.*"
-          #modules: qtmultimedia
+          version: "6.6.*"
+          #version: "5.15.*"
+          modules: qtmultimedia qt5compat qtshadertools
       - name: "vcpkg: Install dependencies"
         uses: lukka/run-vcpkg@v11.1
         id: runvcpkg
@@ -320,7 +321,7 @@ jobs:
                 New-Item -ItemType Directory -Force -Path build
           }
       - name: "Generate build files"
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DCONTOUR_QT_VERSION=5 -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON -DCMAKE_CXX_STANDARD=17 -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -B build .
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DCONTOUR_QT_VERSION=6 -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON -DCMAKE_CXX_STANDARD=17 -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -B build .
       - name: "Build"
         run: cmake --build build/ --config Release
       - name: "test: crispy"
@@ -372,16 +373,17 @@ jobs:
             "Clang 12",
             "Clang 14",
           ]
-    name: "Ubuntu Linux 22.04 (${{ matrix.compiler }}, C++${{ matrix.cxx }})"
+        qt_version: [5, 6]
+    name: "Ubuntu Linux 22.04 (${{ matrix.compiler }}, C++${{ matrix.cxx }}, Qt${{ matrix.qt_version }})"
     runs-on: ubuntu-22.04
     outputs:
-      id: "${{ matrix.compiler }} (C++${{ matrix.cxx }}, ${{ matrix.build_type }})"
+      id: "${{ matrix.compiler }} (C++${{ matrix.cxx }}, ${{ matrix.build_type }}, ${{ matrix.qt_version }})"
     steps:
       - uses: actions/checkout@v3
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: "ccache-ubuntu2204-${{ matrix.compiler }}-${{ matrix.cxx }}-${{ matrix.build_type }}"
+          key: "ccache-ubuntu2204-${{ matrix.compiler }}-${{ matrix.cxx }}-${{ matrix.build_type }}-${{ matrix.qt_version  }}"
           max-size: 256M
       - name: "update APT database"
         run: sudo apt -q update
@@ -397,8 +399,16 @@ jobs:
         run: |
           CC_VERSION=$( echo "${{ matrix.compiler }}" | awk '{ print $2; }')
           echo "CC_VERSION=${CC_VERSION}" >> "$GITHUB_OUTPUT"
+      - name: "Set up QTVER var"
+        id: set_qtver
+        run: |
+          if [[ ${{ matrix.qt_version }} = "5" ]]; then
+            echo "QTVER=5" >> "$GITHUB_OUTPUT"
+          else
+            echo "QTVER=6" >> "$GITHUB_OUTPUT"
+          fi
       - name: "install dependencies"
-        run: sudo ./scripts/install-deps.sh
+        run: sudo env QTVER="${{ matrix.qt_version }}" ./scripts/install-deps.sh
       - name: "Post-fix embedded dependency permissions."
         run: sudo find _deps/sources -exec chown $UID {} \;
       - name: Install GCC
@@ -425,6 +435,7 @@ jobs:
                                -DCMAKE_CXX_STANDARD=${{ matrix.cxx }} \
                                -DCMAKE_INSTALL_PREFIX="/usr" \
                                -DCONTOUR_INSTALL_TOOLS=ON \
+                               -DCONTOUR_QT_VERSION=${{ matrix.qt_version }} \
                                -DPEDANTIC_COMPILER=ON \
                                -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON \
                                -DLIBUNICODE_UCD_BASE_DIR=$(pwd)/_ucd \
@@ -439,7 +450,7 @@ jobs:
       - name: "test: vtbackend"
         run: ./build/src/vtbackend/vtbackend_test
       - name: "Upload unit tests"
-        if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
+        if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' && matrix.qt_version == '5' }}
         uses: actions/upload-artifact@v3
         with:
           name: contour-ubuntu2204-tests
@@ -612,9 +623,7 @@ jobs:
       - name: set QTVER
         id: set_qtver
         run: |
-          # Recent Ubuntu versions ship with Qt 6. Use it.
-          # TODO: I mean, use it ASAP. :-)
-          if [[ ${{ matrix.os_version }} = "22.04" ]]; then
+          if [[ ${{ matrix.os_version }} = "20.04" ]]; then
             echo "QTVER=5" >> "$GITHUB_OUTPUT"
           fi
       - name: "install dependencies"
@@ -629,8 +638,11 @@ jobs:
         run: |
           # TODO: turn on -Werror again, that requires some code changes.
           CMAKE_CXX_STANDARD=20
-          if [[ "${{ matrix.os_version }}" = "22.04" ]]; then
+          if [[ "${{ matrix.os_version }}" = "20.04" ]]; then
             EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_QT_VERSION=5"
+          else
+          # use Qt6 for 22.04
+            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_QT_VERSION=6"
           fi
           BUILD_DIR="build" \
             CMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -977,8 +989,6 @@ jobs:
         ls -hlR ~/opt/
     - name: "install dependencies"
       run: ./scripts/ci/notcurses-install-deps.sh
-    - name: "install valgrind"
-      run: sudo apt install -y valgrind
     - name: "Run notcurses-demo -h"
       timeout-minutes: 1
       run: ~/opt/notcurses/bin/notcurses-demo -p ~/opt/notcurses/share/notcurses -h

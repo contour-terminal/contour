@@ -45,7 +45,7 @@ jobs:
           REPOSITORY: "${{ github.event.repository.name }}"
       - name: "Install build dependencies"
         # Note: Keep this in sync with that in build.yml!
-        run: sudo ./scripts/install-deps.sh
+        run: sudo env QTVER="5" SYSDEP_ASSUME_YES="ON" ./scripts/install-deps.sh
       - name: "Post-fix embedded dependency permissions."
         run: sudo find _deps/sources -exec chown $UID {} \;
       - name: "Prepare building Contour"

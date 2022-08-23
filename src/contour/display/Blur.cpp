@@ -21,8 +21,6 @@
 
 #include <type_traits>
 
-using std::move;
-
 // NB: Cannot be enabled as it's not available on OpenGL ES, so it seems.
 // #define CONTOUR_GPU_TIMERS 1
 

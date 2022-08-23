@@ -31,21 +31,17 @@
 #include <QtCore/QTimer>
 #include <QtGui/QOpenGLExtraFunctions>
 #include <QtGui/QVector4D>
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    #include <QtOpenGLWidgets/QOpenGLWidget>
-#else
-    #include <QtWidgets/QOpenGLWidget>
-#endif
 #include <QtMultimedia/QMediaPlayer>
-#include <QtWidgets/QMainWindow>
-#include <QtWidgets/QScrollBar>
-#include <QtWidgets/QSystemTrayIcon>
+#include <QtQuick/QQuickItem>
 
+#include <QtQml>
 #include <atomic>
 #include <fstream>
 #include <memory>
 #include <optional>
 #include <vector>
+
+#include <qqml.h>
 
 namespace contour::display
 {
@@ -54,14 +50,31 @@ class OpenGLRenderer;
 
 // It currently just handles one terminal inside, but ideally later it can handle
 // multiple terminals in tabbed views as well tiled.
-class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
+class TerminalWidget: public QQuickItem
 {
     Q_OBJECT
+    Q_PROPERTY(TerminalSession* session READ getSessionHelper WRITE setSession NOTIFY sessionChanged)
+    Q_PROPERTY(QString profile READ profileName WRITE setProfileName NOTIFY profileNameChanged)
+    Q_PROPERTY(QString title READ title NOTIFY titleChanged)
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
+    QML_ELEMENT
+#endif
+
+    TerminalSession* getSessionHelper() { return session_; }
 
   public:
-    TerminalWidget();
-
+    explicit TerminalWidget(QQuickItem* parent = nullptr);
     ~TerminalWidget() override;
+
+    // {{{ QML property helper
+    QString title() const
+    {
+        if (session_)
+            return session_->title();
+        else
+            return "No session";
+    }
+    // }}}
 
     [[nodiscard]] config::TerminalProfile const& profile() const noexcept
     {
@@ -84,7 +97,7 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
     [[nodiscard]] bool hasSession() const noexcept { return session_ != nullptr; }
 
     // NB: Use TerminalSession.attachDisplay, that one is calling this here.
-    void setSession(TerminalSession& newSession);
+    void setSession(TerminalSession* newSession);
 
     [[nodiscard]] TerminalSession& session() noexcept
     {
@@ -94,24 +107,19 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
 
     [[nodiscard]] terminal::PageSize windowSize() const noexcept;
 
-    // {{{ OpenGL rendering handling
-    [[nodiscard]] QSize minimumSizeHint() const override;
-    [[nodiscard]] QSize sizeHint() const override;
-    void initializeGL() override;
-    void resizeGL(int _width, int _height) override;
-    void paintGL() override;
-    // }}}
-
     // {{{ Input handling
     void keyPressEvent(QKeyEvent* _keyEvent) override;
     void wheelEvent(QWheelEvent* _wheelEvent) override;
     void mousePressEvent(QMouseEvent* _mousePressEvent) override;
     void mouseReleaseEvent(QMouseEvent* _mouseReleaseEvent) override;
     void mouseMoveEvent(QMouseEvent* _mouseMoveEvent) override;
+    void hoverMoveEvent(QHoverEvent* event) override;
     void focusInEvent(QFocusEvent* _event) override;
     void focusOutEvent(QFocusEvent* _event) override;
+#if QT_CONFIG(im)
     void inputMethodEvent(QInputMethodEvent* _event) override;
-    QVariant inputMethodQuery(Qt::InputMethodQuery _query) const override;
+    [[nodiscard]] QVariant inputMethodQuery(Qt::InputMethodQuery _query) const override;
+#endif
     bool event(QEvent* _event) override;
     // }}}
 
@@ -122,20 +130,15 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
     // Attributes
     [[nodiscard]] terminal::RefreshRate refreshRate() const;
     text::DPI fontDPI() const noexcept;
-    text::DPI logicalDPI() const noexcept;
-    text::DPI physicalDPI() const noexcept;
     [[nodiscard]] bool isFullScreen() const;
 
     [[nodiscard]] terminal::ImageSize pixelSize() const;
     [[nodiscard]] terminal::ImageSize cellSize() const;
 
     // (user requested) actions
-    bool requestPermission(config::Permission _allowedByConfig, std::string const& _topicText);
     terminal::FontDef getFontDef();
-    void bell();
     void copyToClipboard(std::string_view /*_data*/);
     void inspect();
-    void doDumpState();
     void notify(std::string_view /*_title*/, std::string_view /*_body*/);
     void resizeWindow(terminal::LineCount, terminal::ColumnCount);
     void resizeWindow(terminal::Width, terminal::Height);
@@ -143,17 +146,14 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
     bool setFontSize(text::font_size _size);
     bool setPageSize(terminal::PageSize _newPageSize);
     void setMouseCursorShape(MouseCursorShape _shape);
-    void setWindowTitle(std::string_view /*_title*/);
     void setWindowFullScreen();
     void setWindowMaximized();
     void setWindowNormal();
     void setBlurBehind(bool _enable);
-    void setBackgroundImage(std::shared_ptr<terminal::BackgroundImage const> const& backgroundImage);
     void toggleFullScreen();
     void toggleTitleBar();
     void setHyperlinkDecoration(terminal::rasterizer::Decorator _normal,
                                 terminal::rasterizer::Decorator _hover);
-    void setBackgroundOpacity(terminal::Opacity _opacity);
 
     // terminal events
     void scheduleRedraw();
@@ -165,40 +165,70 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
 
     [[nodiscard]] double contentScale() const;
 
-    void logDisplayTopInfo();
-    void logDisplayInfo();
+    Q_INVOKABLE void logDisplayInfo();
+
+    void releaseResources() override;
+
+    QString profileName() const { return QString::fromStdString(profileName_); }
+    void setProfileName(QString const& name) { profileName_ = name.toStdString(); }
 
   public Q_SLOTS:
-    void onFrameSwapped();
+    void onSceneGrapheInitialized();
+    void synchronize();
+    void onBeforeRendering();
+    void paint();
+
+    void handleWindowChanged(QQuickWindow* win);
+    void sizeChanged();
+    void cleanup();
+
+    void onAfterRendering();
     void onScrollBarValueChanged(int _value);
     void onRefreshRateChanged();
     void applyFontDPI();
     void onScreenChanged();
     void onDpiConfigChanged();
+    void doDumpState();
 
   signals:
-    void displayInitialized();
-    void enableBlurBehind(bool);
     void profileNameChanged();
+    void titleChanged(QString const&);
+    void sessionChanged(TerminalSession*);
     void terminalBufferChanged(terminal::ScreenType);
-    void terminalBufferUpdated();
     void terminated();
     void showNotification(QString const& _title, QString const& _body);
+
+  public:
+    Q_INVOKABLE [[nodiscard]] int pageLineCount() const noexcept
+    {
+        if (!session_)
+            return 1;
+        return unbox<int>(terminal().pageSize().lines);
+    }
+
+    Q_INVOKABLE [[nodiscard]] int historyLineCount() const noexcept
+    {
+        if (!session_)
+            return 0;
+        return unbox<int>(terminal().currentScreen().historyLineCount());
+    }
 
   private:
     // helper methods
     //
+    void createRenderer();
+    [[nodiscard]] QMatrix4x4 createModelMatrix() const;
     void configureScreenHooks();
     void watchKdeDpiSetting();
-    void initializeRenderer();
     [[nodiscard]] float uptime() const noexcept;
 
     [[nodiscard]] terminal::PageSize pageSize() const
     {
+        assert(renderer_);
         return pageSizeForPixels(pixelSize(), renderer_->gridMetrics().cellSize);
     }
 
-    void updateMinimumSize();
+    void updateSizeProperties();
 
     void statsSummary();
     void doResize(crispy::Size _size);
@@ -229,8 +259,7 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
     text::DPI lastFontDPI_;
     std::unique_ptr<terminal::rasterizer::Renderer> renderer_;
     bool renderingPressure_ = false;
-    std::unique_ptr<terminal::rasterizer::RenderTarget> renderTarget_;
-    PermissionCache rememberedPermissions_ {};
+    display::OpenGLRenderer* renderTarget_ = nullptr;
     bool maximizedState_ = false;
     bool framelessWidget_ = false;
 
@@ -242,9 +271,7 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
     QFileSystemWatcher filesystemWatcher_;
     QMediaPlayer mediaPlayer_;
 
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    QAudioOutput* audioOutput_ = nullptr;
-#endif
+    terminal::LineCount lastHistoryLineCount_ = terminal::LineCount(0);
 
     // ======================================================================
 

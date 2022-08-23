@@ -1,10 +1,17 @@
 <RCC>
     <qresource prefix="/contour">
+        <file alias="bell.oga">res/bell.oga</file>
+        <file>bell.wav</file>
+        <file alias="logo-256.png">res/images/contour-logo-256.png</file>
+        <file alias="logo.png">res/images/contour-logo-256.png</file>
         <file>contour.yml</file>
         <file>shell-integration/shell-integration.zsh</file>
         <file>shell-integration/shell-integration.fish</file>
         <file>shell-integration/shell-integration.tcsh</file>
-        <file alias="logo.png">res/images/contour-logo-256.png</file>
-        <file alias="bell.oga">res/bell.oga</file>
+        <file>ui/RequestPermission.qml</file>
+        <file>ui/Terminal.qml</file>
+        <file>ui/main.qml</file>
     </qresource>
 </RCC>
+<!-- vim:syntax=xml
+  -->

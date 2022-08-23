@@ -19,6 +19,8 @@
 
 #include <vtpty/Process.h>
 
+#include <QtQml/QQmlApplicationEngine>
+
 #include <list>
 #include <memory>
 #include <optional>
@@ -33,11 +35,12 @@ namespace config
 }
 
 class TerminalSession;
-class TerminalWindow;
 
 /// Extends ContourApp with terminal GUI capability.
-class ContourGuiApp: public ContourApp
+class ContourGuiApp: public QObject, public ContourApp
 {
+    Q_OBJECT
+
   public:
     ContourGuiApp();
 
@@ -46,8 +49,7 @@ class ContourGuiApp: public ContourApp
     int run(int argc, char const* argv[]) override;
     crispy::cli::Command parameterDefinition() const override;
 
-    TerminalWindow* newWindow();
-    TerminalWindow* newWindow(contour::config::Config const& _config);
+    void newWindow();
     void showNotification(std::string_view _title, std::string_view _content);
 
     std::string profileName() const;
@@ -76,6 +78,8 @@ class ContourGuiApp: public ContourApp
 
     std::string programPath() const { return _argv[0]; }
 
+    [[nodiscard]] QUrl resolveResource(std::string_view path) const;
+
   private:
     void ensureTermInfoFile();
     bool loadConfig(std::string const& target);
@@ -89,7 +93,7 @@ class ContourGuiApp: public ContourApp
     char const** _argv = nullptr;
     std::optional<terminal::Process::ExitStatus> _exitStatus;
 
-    std::list<TerminalWindow*> _terminalWindows;
+    std::unique_ptr<QQmlApplicationEngine> qmlEngine_;
 };
 
 } // namespace contour
