@@ -122,6 +122,7 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
     currentScreen_ { primaryScreen_ },
     viewport_ { *this,
                 [this]() {
+                    eventListener_.onScrollOffsetChanged(viewport_.scrollOffset());
                     breakLoopAndRefreshRenderBuffer();
                 } },
     selectionHelper_ { this },

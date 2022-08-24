@@ -75,6 +75,7 @@ class Renderer
     /// and then informs all renderables about the newly created texture atlas.
     void setRenderTarget(RenderTarget& renderTarget);
     RenderTarget& renderTarget() noexcept { return *_renderTarget; }
+    bool hasRenderTarget() const noexcept { return _renderTarget != nullptr; }
 
     void setBackgroundOpacity(terminal::Opacity _opacity) { backgroundOpacity_ = _opacity; }
     terminal::Opacity backgroundOpacity() const noexcept { return backgroundOpacity_; }

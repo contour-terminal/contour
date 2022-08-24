@@ -25,15 +25,13 @@ namespace terminal
 
 bool Viewport::scrollUp(LineCount _numLines)
 {
-    scrollOffset_ =
-        std::min(scrollOffset_ + _numLines.as<ScrollOffset>(), boxed_cast<ScrollOffset>(historyLineCount()));
-    return scrollTo(scrollOffset_);
+    return scrollTo(
+        std::min(scrollOffset_ + _numLines.as<ScrollOffset>(), boxed_cast<ScrollOffset>(historyLineCount())));
 }
 
 bool Viewport::scrollDown(LineCount _numLines)
 {
-    scrollOffset_ = std::max(scrollOffset_ - _numLines.as<ScrollOffset>(), ScrollOffset(0));
-    return scrollTo(scrollOffset_);
+    return scrollTo(std::max(scrollOffset_ - _numLines.as<ScrollOffset>(), ScrollOffset(0)));
 }
 
 bool Viewport::scrollToTop()
@@ -51,15 +49,7 @@ bool Viewport::scrollToBottom()
 
 bool Viewport::forceScrollToBottom()
 {
-    if (!scrollOffset_)
-        return false;
-
-#if defined(CONTOUR_LOG_VIEWPORT)
-    Log()("forcing scroll to bottom from {}", scrollOffset_);
-#endif
-    scrollOffset_ = ScrollOffset(0);
-    modified_();
-    return true;
+    return scrollTo(ScrollOffset(0));
 }
 
 bool Viewport::makeVisible(LineOffset lineOffset)
@@ -81,7 +71,7 @@ bool Viewport::makeVisible(LineOffset lineOffset)
 
 bool Viewport::scrollTo(ScrollOffset _offset)
 {
-    if (scrollingDisabled())
+    if (scrollingDisabled() && _offset != ScrollOffset(0))
         return false;
 
     if (_offset == scrollOffset_)
@@ -90,13 +80,16 @@ bool Viewport::scrollTo(ScrollOffset _offset)
     if (0 <= *_offset && _offset <= boxed_cast<ScrollOffset>(historyLineCount()))
     {
 #if defined(CONTOUR_LOG_VIEWPORT)
-        Log()("Scroll to offset {}", _offset);
+        ViewportLog()("Scroll to offset {}", _offset);
 #endif
         scrollOffset_ = _offset;
         modified_();
         return true;
     }
 
+#if defined(CONTOUR_LOG_VIEWPORT)
+    ViewportLog()("Scroll to offset {} ignored. Out of bounds.", _offset);
+#endif
     return false;
 }
 

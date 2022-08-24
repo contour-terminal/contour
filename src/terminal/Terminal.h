@@ -77,6 +77,7 @@ class Terminal
         virtual void inputModeChanged(ViMode /*mode*/) {}
         virtual void updateHighlights() {}
         virtual void playSound([[maybe_unused]] terminal::Sequence::Parameters const& _) {}
+        virtual void onScrollOffsetChanged(ScrollOffset) {}
     };
 
     Terminal(std::unique_ptr<Pty> _pty,
