@@ -77,12 +77,6 @@ namespace
     constexpr auto StdoutFastPipeFdStr = "3"sv;
     constexpr auto StdoutFastPipeEnvironmentName = "STDOUT_FASTPIPE"sv;
 
-    bool isFlatpak()
-    {
-        static bool check = FileSystem::exists("/.flatpak-info");
-        return check;
-    }
-
     string getLastErrorAsString()
     {
         return strerror(errno);
@@ -135,6 +129,12 @@ Process::Process(string const& _path,
 {
 }
 
+bool Process::isFlatpak()
+{
+    static bool check = FileSystem::exists("/.flatpak-info");
+    return check;
+}
+
 void Process::start()
 {
     d->pty->start();
@@ -185,6 +185,8 @@ void Process::start()
                 auto realArgs = std::vector<string> {};
                 realArgs.emplace_back("--host");
                 realArgs.emplace_back("--watch-bus");
+                if (stdoutFastPipe)
+                    realArgs.emplace_back(fmt::format("--forward-fd={}", StdoutFastPipeFdStr));
                 if (!d->cwd.empty())
                     realArgs.emplace_back(fmt::format("--directory={}", d->cwd.generic_string()));
                 if (auto const value = getenv("TERM"))

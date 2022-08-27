@@ -180,6 +180,11 @@ Process::Process(string const& _path,
 {
 }
 
+bool Process::isFlatpak()
+{
+    return false;
+}
+
 void Process::start()
 {
     Require(static_cast<ConPty const*>(d->pty.get()));
