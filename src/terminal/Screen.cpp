@@ -742,10 +742,11 @@ template <typename Cell>
 void Screen<Cell>::linefeed()
 {
     // If coming through stdout-fastpipe, the LF acts like CRLF.
-    if (_state.usingStdoutFastPipe)
-        linefeed(_state.margin.horizontal.from);
-    else
-        linefeed(_state.cursor.position.column);
+    auto const newColumnOffset =
+        _state.usingStdoutFastPipe || _terminal.isModeEnabled(AnsiMode::AutomaticNewLine)
+            ? _state.margin.horizontal.from
+            : _state.cursor.position.column;
+    linefeed(newColumnOffset);
 }
 
 template <typename Cell>

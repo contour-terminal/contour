@@ -13,6 +13,7 @@
 - Adds configuration key `colorscheme.*.search_highlight` for coloring search matches.
 - Adds configuration key `colorscheme.*.search_highlight_focused` for coloring the active search match, containing the cursor.
 - Adds alpha value to `colorscheme.*.vi_mode_highlight` color configuration.
+- Adds VT sequence for ANSI mode NLM (NewLine Mode).
 - Always show indicator status line when ANSI mode KAM is enabled (which can be toggled via action `ToggleInputProtection`).
 - Always show indicator status line when in non-insert mode.
 - [Linux] Changes the .desktop file name and icon file name to conform to the flatpak recommendations.
