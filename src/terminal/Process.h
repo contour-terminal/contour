@@ -70,6 +70,9 @@ class [[nodiscard]] Process: public Pty
 
     ~Process() override;
 
+    // Tests if the current process is running inside flatpak.
+    static bool isFlatpak();
+
     [[nodiscard]] bool alive() const noexcept
     {
         auto const status = checkStatus();

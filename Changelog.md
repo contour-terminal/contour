@@ -19,6 +19,8 @@
 - [Linux] Provide an AppStream XML file.
 - [Linux] Drop KDE/KWin dependency on the binary by implementing enabling blur-behind background manually.
 - [Linux] Adds support for blur-behind window on GNOME shell.
+- [Flatpak] Also pass stdout-fastpipe (`3`) to shell.
+- [Flatpak] Do not set controlling terminal in order to allow TTY abilities like Ctrl+C. This seems to be a known bug in flatpak.
 - Changes behavior of PTY (and shell process) creation until only when a PTY is required by the terminal emulator during instanciation, possibly avoiding problems with xdotool running too early.
 - Internal: Y-axis inverted to match GUI coordinate systems where (0, 0) is top left rather than bottom left.
 

@@ -11,6 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <terminal/Process.h>
 #include <terminal/pty/LinuxPty.h>
 #include <terminal/pty/UnixUtils.h>
 
@@ -126,6 +127,18 @@ bool LinuxPty::Slave::login()
     if (!configure())
         return false;
 
+    sigset_t signals;
+    sigemptyset(&signals);
+    sigprocmask(SIG_SETMASK, &signals, nullptr);
+
+    // clang-format off
+    struct sigaction act {};
+    act.sa_handler = SIG_DFL;
+    // clang-format on
+
+    for (auto const signo: { SIGCHLD, SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGALRM })
+        sigaction(signo, &act, nullptr);
+
     // This is doing what login_tty() is doing, too.
     // But doing it ourselfs allows for a little more flexibility.
     // return login_tty(_slaveFd) == 0;
@@ -133,8 +146,13 @@ bool LinuxPty::Slave::login()
     setsid();
 
 #if defined(TIOCSCTTY)
-    if (ioctl(_slaveFd, TIOCSCTTY, nullptr) == -1)
-        return false;
+    // Set controlling terminal.
+    // However, Flatpak is having issues with that, so we sadly have to avoid that then.
+    if (!Process::isFlatpak())
+    {
+        if (ioctl(_slaveFd, TIOCSCTTY, nullptr) == -1)
+            return false;
+    }
 #endif
 
     for (int const fd: { 0, 1, 2 })
