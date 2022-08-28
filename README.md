@@ -104,6 +104,23 @@ cmake --build build/
 cmake --build build/ --target install
 ```
 
+### Installing via Flatpak
+
+#### Prerequisites
+
+- Make sure you have flatpak installed in your system ([here is a tutorial on how to install it](https://flatpak.org/getting.html)), and make sure that the version is >= 0.10 (check it using this command: `flatpak --version`)
+- Add the [flathub](https://flathub.org) repository using the following command: `flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo`.
+- Proceed with one of the following options:
+  - [Install from Flathub](#install-from-flathub)
+  - [Install from GitHub release](https://github.com/contour-terminal/contour/releases)
+
+#### Install from Flathub
+
+Click the following button install Contour from the Flathub store.
+
+[![Get it on Flathub](https://raw.githubusercontent.com/flatpak-design-team/flathub-mockups/master/assets/download-button/download.svg?sanitize=true)](https://flathub.org/apps/details/org.contourterminal.Contour)
+
+
 # References
 
 * [VT510](https://vt100.net/docs/vt510-rm/): VT510 Manual, see Chapter 5.
