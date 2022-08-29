@@ -77,6 +77,7 @@ class ContourGuiApp: public ContourApp
     std::string programPath() const { return _argv[0]; }
 
   private:
+    void ensureTermInfoFile();
     bool loadConfig(std::string const& target);
     int terminalGuiAction();
     int fontConfigAction();
