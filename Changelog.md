@@ -1,4 +1,4 @@
-### 0.3.3 (unreleased)
+### 0.3.3 (2022-08-30)
 
 - Fixes a screen buffer manipulation bug that may happen on non-stylyzed but interactive command prompts (#787).
 - Fixes viewport misalignment when in scrollback area white new lines are being added to the main page area.
