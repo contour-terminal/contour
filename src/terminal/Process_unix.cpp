@@ -180,17 +180,25 @@ void Process::start()
                 if (!isFlatpak())
                     return createArgv(d->path, d->args, 0);
 
+                auto const terminfoBaseDirectory =
+                    homeDirectory() / ".var/app/org.contourterminal.Contour/terminfo";
+
                 // Prepend flatpak to jump out of sandbox:
                 // flatpak-spawn --host --watch-bus --env=TERM=$TERM /bin/zsh
                 auto realArgs = std::vector<string> {};
                 realArgs.emplace_back("--host");
                 realArgs.emplace_back("--watch-bus");
+                realArgs.emplace_back(
+                    fmt::format("--env=TERMINFO={}", terminfoBaseDirectory.generic_string()));
                 if (stdoutFastPipe)
+                {
+                    realArgs.emplace_back(
+                        fmt::format("--env={}={}", StdoutFastPipeEnvironmentName, StdoutFastPipeFdStr));
                     realArgs.emplace_back(fmt::format("--forward-fd={}", StdoutFastPipeFdStr));
+                }
                 if (!d->cwd.empty())
                     realArgs.emplace_back(fmt::format("--directory={}", d->cwd.generic_string()));
-                if (auto const value = getenv("TERM"))
-                    realArgs.emplace_back(fmt::format("--env=TERM={}", value));
+                realArgs.emplace_back(fmt::format("--env=TERM={}", "contour"));
                 for (auto&& [name, value]: d->env)
                     realArgs.emplace_back(fmt::format("--env={}={}", name, value));
                 if (stdoutFastPipe)

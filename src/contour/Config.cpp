@@ -136,6 +136,10 @@ namespace // {{{ helper
 #if defined(_WIN32)
         return "contour";
 #else
+
+        if (Process::isFlatpak())
+            return "contour";
+
         auto locations = getTermInfoDirs(_appTerminfoDir);
         auto const terms = vector<string> {
             "contour", "contour-latest", "xterm-256color", "xterm", "vt340", "vt220",

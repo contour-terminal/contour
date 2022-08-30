@@ -340,6 +340,8 @@ int ContourGuiApp::terminalGuiAction()
 
     QSurfaceFormat::setDefaultFormat(display::createSurfaceFormat());
 
+    ensureTermInfoFile();
+
     // auto const HTS = "\033H";
     // auto const TBC = "\033[g";
     // printf("\r%s        %s                        %s\r", TBC, HTS, HTS);
@@ -365,6 +367,21 @@ int ContourGuiApp::terminalGuiAction()
 
     // printf("\r%s", TBC);
     return rv;
+}
+
+void ContourGuiApp::ensureTermInfoFile()
+{
+    if (!terminal::Process::isFlatpak())
+        return;
+
+    auto const hostTerminfoBaseDirectory =
+        Process::homeDirectory() / ".var/app/org.contourterminal.Contour/terminfo/c";
+    if (!FileSystem::is_directory(hostTerminfoBaseDirectory))
+        FileSystem::create_directories(hostTerminfoBaseDirectory);
+
+    auto const sandboxTerminfoFile = FileSystem::path("/app/share/terminfo/c/contour");
+    if (!FileSystem::is_regular_file(hostTerminfoBaseDirectory / "contour"))
+        FileSystem::copy_file(sandboxTerminfoFile, hostTerminfoBaseDirectory / "contour");
 }
 
 TerminalWindow* ContourGuiApp::newWindow(contour::config::Config const& config)
