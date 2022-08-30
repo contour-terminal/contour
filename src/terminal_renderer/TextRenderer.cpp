@@ -793,6 +793,7 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     }
     // }}}
 
+#if !defined(__APPLE__) // Not building on OS/X CI?
     if (RasterizerLog)
         RasterizerLog()("Inserting {} id {} render mode {} {} yOverflow {} yMin {}.",
                         glyph,
@@ -801,6 +802,7 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
                         presentation,
                         yOverflow,
                         yMin);
+#endif
 
     return { createTileData(tileLocation,
                             move(glyph.bitmap),
@@ -862,9 +864,8 @@ text::shape_result TextRenderer::shapeTextRun(unicode::run_segmenter::range cons
     if (RasterizerLog && !glyphPosition.empty())
     {
         auto msg = RasterizerLog();
-        msg.append("Shaped codepoints ({}/{}): {}",
+        msg.append("Shaped codepoints ({}): {}",
                    isEmojiPresentation ? "emoji" : "text",
-                   get<unicode::PresentationStyle>(_run.properties),
                    unicode::convert_to<char>(codepoints));
 
         msg.append(" (");
