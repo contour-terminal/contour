@@ -77,6 +77,8 @@ TerminalWindow::TerminalWindow(ContourGuiApp& _app): _app { _app }
     setAttribute(Qt::WA_NoSystemBackground, false);
     setWindowFlag(Qt::FramelessWindowHint, !profile().show_title_bar);
 
+    setWindowIcon(QIcon(":/contour/logo.png"));
+
     // {{{ fill config's maxImageSize if not yet set.
     auto const defaultMaxImageSize = [&]() -> ImageSize {
         QScreen const* screen = QGuiApplication::primaryScreen();

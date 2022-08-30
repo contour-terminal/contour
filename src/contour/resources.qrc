@@ -2,5 +2,6 @@
     <qresource prefix="/contour">
         <file>contour.yml</file>
         <file>shell-integration.zsh</file>
+        <file alias="logo.png">res/images/contour-logo-256.png</file>
     </qresource>
 </RCC>
