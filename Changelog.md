@@ -1,3 +1,5 @@
+### 0.3.4 (unreleased)
+
 ### 0.3.3 (2022-08-30)
 
 - Fixes a screen buffer manipulation bug that may happen on non-stylyzed but interactive command prompts (#787).
