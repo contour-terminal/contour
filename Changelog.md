@@ -1,5 +1,5 @@
 ### 0.3.4 (unreleased)
-
+- Adds `line#24` to terminfo file for backwards compatibility.
 ### 0.3.3 (2022-08-30)
 
 - Fixes a screen buffer manipulation bug that may happen on non-stylyzed but interactive command prompts (#787).

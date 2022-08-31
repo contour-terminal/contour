@@ -102,10 +102,11 @@ namespace
     );
 
     constexpr inline auto numericalCaps = defineCapabilities(
-        Numeric { "co"_tcap, "cols"sv, 80 },    // number of columns in a line
-        Numeric { "it"_tcap, "it"sv, 8 },       // tabs initially every # spaces
-        Numeric { "Co"_tcap, "colors"sv, 256 }, // maximum number of colors on screen
-        Numeric { "pa"_tcap, "pairs"sv, 32767 } // maximum number of color-pairs on the screen
+        Numeric { "co"_tcap, "cols"sv, 80 },     // number of columns in a line
+        Numeric { "it"_tcap, "it"sv, 8 },        // tabs initially every # spaces
+        Numeric { "Co"_tcap, "colors"sv, 256 },  // maximum number of colors on screen
+        Numeric { "pa"_tcap, "pairs"sv, 32767 }, // maximum number of color-pairs on the screen
+        Numeric { "li"_tcap, "lines"sv, 24 }     // default number of lines in a terminal
     );
 
     constexpr auto inline Undefined = Code {};
