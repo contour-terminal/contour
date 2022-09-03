@@ -59,7 +59,12 @@ class [[nodiscard]] Process: public Pty
     static FileSystem::path homeDirectory();
 
     Process(ExecInfo const& _exe, std::unique_ptr<Pty> _pty):
-        Process(_exe.program, _exe.arguments, _exe.workingDirectory, _exe.env, _exe.escapeSandbox, std::move(_pty))
+        Process(_exe.program,
+                _exe.arguments,
+                _exe.workingDirectory,
+                _exe.env,
+                _exe.escapeSandbox,
+                std::move(_pty))
     {
     }
 
