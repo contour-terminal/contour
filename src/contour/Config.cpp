@@ -1252,13 +1252,14 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     // }}}
 
     string const basePath = fmt::format("{}.{}", _parentPath, _profileName);
+    tryLoadChildRelative(_usedKeys, _profile, basePath, "escape_sandbox", profile.shell.escapeSandbox);
     tryLoadChildRelative(_usedKeys, _profile, basePath, "shell", profile.shell.program);
     if (profile.shell.program.empty())
     {
         if (!profile.shell.arguments.empty())
             errorlog()("No shell defined but arguments. Ignoring arguments.");
 
-        auto loginShell = Process::loginShell();
+        auto loginShell = Process::loginShell(profile.shell.escapeSandbox);
         profile.shell.program = loginShell.front();
         loginShell.erase(loginShell.begin());
         profile.shell.arguments = loginShell;

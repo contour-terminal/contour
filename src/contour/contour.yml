@@ -141,6 +141,14 @@ profiles:
         # shell: "/bin/bash"
         # arguments: ["some", "optional", "arguments", "for", "the", "shell"]
 
+        # If this terminal is being executed from within Flatpak, enforces sandboxing
+        # then this boolean indicates whether or not that sandbox should be escaped or not.
+        #
+        # Default value is true.
+        #
+        # It only makes sense to set this value to false if you really know what you are doing.
+        escape_sandbox: true
+
         # Advanced value that is useful when CopyPreviousMarkRange is used
         # with multiline-prompts. This offset value is being added to the
         # current cursor's line number minus 1 (i.e. the line above the current cursor).

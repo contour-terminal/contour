@@ -50,15 +50,16 @@ class [[nodiscard]] Process: public Pty
         std::vector<std::string> arguments;
         FileSystem::path workingDirectory;
         Environment env;
+        bool escapeSandbox = false;
     };
 
     //! Returns login shell of current user.
-    static std::vector<std::string> loginShell();
+    static std::vector<std::string> loginShell(bool escapeSandbox);
 
     static FileSystem::path homeDirectory();
 
     Process(ExecInfo const& _exe, std::unique_ptr<Pty> _pty):
-        Process(_exe.program, _exe.arguments, _exe.workingDirectory, _exe.env, std::move(_pty))
+        Process(_exe.program, _exe.arguments, _exe.workingDirectory, _exe.env, _exe.escapeSandbox, std::move(_pty))
     {
     }
 
@@ -66,6 +67,7 @@ class [[nodiscard]] Process: public Pty
             std::vector<std::string> const& args,
             FileSystem::path const& _cwd,
             Environment const& env,
+            bool escapeSandbox,
             std::unique_ptr<Pty> pty);
 
     ~Process() override;

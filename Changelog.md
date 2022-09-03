@@ -2,6 +2,7 @@
 
 - [Linux] Changes context menu icon for "Run in Contour" action to be the Contour logo.
 - Adds `line#24` to terminfo file for backwards compatibility.
+- [Flatpak] Adds configuration key `profiles.*.escape_sandbox` to decide whether or not to escape the sandbox.
 
 ### 0.3.3 (2022-08-30)
 
