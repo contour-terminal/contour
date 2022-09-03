@@ -80,9 +80,9 @@ fetch_and_unpack_Catch2()
 fetch_and_unpack_fmtlib()
 {
     fetch_and_unpack \
-        fmt-8.1.1 \
-        fmtlib-8.1.1.tar.gz \
-        https://github.com/fmtlib/fmt/archive/refs/tags/8.1.1.tar.gz
+        fmt-9.1.0 \
+        fmtlib-9.1.0.tar.gz \
+        https://github.com/fmtlib/fmt/archive/refs/tags/9.1.0.tar.gz
 }
 
 fetch_and_unpack_gsl()
@@ -102,7 +102,7 @@ fetch_and_unpack_embeds()
         https://github.com/contour-terminal/termbench-pro/archive/$termbench_pro_git_sha.tar.gz \
         termbench_pro
 
-    local libunicode_git_sha="a511f3995cdf708f2e199276c90e21408db00a50"
+    local libunicode_git_sha="f464e0ffdb560cd20d8556226248d36e1b85d1a3"
     fetch_and_unpack \
         libunicode-$libunicode_git_sha \
         libunicode-$libunicode_git_sha.tar.gz \
@@ -169,7 +169,7 @@ install_deps_ubuntu()
 
     fetch_and_unpack_gsl
     case $RELEASE in
-        "18.04" | "19.04" | "20.04" | "21.04")
+        "18.04" | "19.04" | "20.04" | "21.04" | "21.10")
             # Older Ubuntu's don't have a recent enough fmt / range-v3, so supply it.
             fetch_and_unpack \
                 range-v3-0.11.0 \
@@ -192,15 +192,17 @@ install_deps_ubuntu()
 
 install_deps_FreeBSD()
 {
+    fetch_and_unpack_fmtlib
+
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
+    # NB: libfmt is available in pkg, but it's not version >= 9.0.0 (as of 2022-09-03).
     su root -c "pkg install $SYSDEP_ASSUME_YES \
         catch \
         cmake \
         fontconfig \
         freetype2 \
         harfbuzz \
-        libfmt \
         microsoft-gsl \
         ncurses \
         ninja \
