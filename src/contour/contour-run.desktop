@@ -8,7 +8,7 @@ X-KDE-AuthorizeAction=shell_access
 [Desktop Action runInContour]
 TryExec=contour
 Exec=contour %f
-Icon=utilities-terminal
+Icon=org.contourterminal.Contour
 
 Name=Run In Contour
 Name[ar]=شغل في كونسول
