@@ -900,7 +900,7 @@ void OpenGLRenderer::setBackgroundImage(shared_ptr<terminal::BackgroundImage con
         if (qImage.format() != QImage::Format_RGBA8888)
         {
             errorlog()("Unsupported image format {} for background image at {}.",
-                       qImage.format(),
+                       static_cast<int>(qImage.format()),
                        filePath.string());
             return;
         }

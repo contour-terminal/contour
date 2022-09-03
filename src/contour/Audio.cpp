@@ -116,7 +116,7 @@ void Audio::handleStateChanged(QAudio::State state)
         case QAudio::StoppedState:
             if (audio->error() != QAudio::NoError)
             {
-                errorlog()("Audio playback stopped: {}", audio->error());
+                errorlog()("Audio playback stopped: {}", static_cast<int>(audio->error()));
             }
             break;
         default: break;
