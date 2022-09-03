@@ -111,6 +111,7 @@ struct Process::Private
     vector<string> args;
     FileSystem::path cwd;
     Environment env;
+    bool escapeSandbox;
 
     unique_ptr<Pty> pty {};
     mutable pid_t pid {};
@@ -124,8 +125,9 @@ Process::Process(string const& _path,
                  vector<string> const& _args,
                  FileSystem::path const& _cwd,
                  Environment const& _env,
+                 bool escapeSandbox,
                  unique_ptr<Pty> _pty):
-    d(new Private { _path, _args, _cwd, _env, move(_pty) }, [](Private* p) { delete p; })
+    d(new Private { _path, _args, _cwd, _env, escapeSandbox, move(_pty) }, [](Private* p) { delete p; })
 {
 }
 
@@ -161,7 +163,7 @@ void Process::start()
             (void) d->pty->slave().login();
 
             auto const& cwd = d->cwd.generic_string();
-            if (!isFlatpak())
+            if (!isFlatpak() || !d->escapeSandbox)
             {
                 if (!d->cwd.empty() && chdir(cwd.c_str()) != 0)
                 {
@@ -177,7 +179,7 @@ void Process::start()
             }
 
             char** argv = [stdoutFastPipe, this]() -> char** {
-                if (!isFlatpak())
+                if (!isFlatpak() || !d->escapeSandbox)
                     return createArgv(d->path, d->args, 0);
 
                 auto const terminfoBaseDirectory =
@@ -232,7 +234,7 @@ void Process::start()
             ::execvp(argv[0], argv);
 
             // Fallback: Try login shell.
-            auto theLoginShell = loginShell();
+            auto theLoginShell = loginShell(d->escapeSandbox);
             fprintf(stdout,
                     "\r\n\033[31;1mFailed to spawn \"%s\". %s\033[m\r\nTrying login shell: %s\n",
                     argv[0],
@@ -327,7 +329,7 @@ Process::ExitStatus Process::wait()
     return *d->checkStatus(true);
 }
 
-vector<string> Process::loginShell()
+vector<string> Process::loginShell(bool escapeSandbox)
 {
     if (passwd const* pw = getpwuid(getuid()); pw != nullptr)
     {
@@ -336,7 +338,7 @@ vector<string> Process::loginShell()
         auto index = shell.rfind('/');
         return { "/bin/bash", "-c", fmt::format("exec -a -{} {}", shell.substr(index + 1, 5), pw->pw_shell) };
 #else
-        if (isFlatpak())
+        if (isFlatpak() && escapeSandbox)
         {
             char buf[1024];
             auto const cmd = fmt::format("flatpak-spawn --host getent passwd {}", pw->pw_name);
