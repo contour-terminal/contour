@@ -89,8 +89,8 @@
 
   <releases>
 
-    <!-- unreleased -->
-    <release version="0.3.4" type='development'>
+    <!-- unreleased: TODO: Don't forget to add date attribute to it. -->
+    <release version="0.3.4" urgency="medium" type="development">
       <description>
         <ul>
           <li>[Linux] Changes context menu icon for "Run in Contour" action to be the Contour logo.</li>
@@ -100,7 +100,7 @@
       </description>
     </release>
 
-    <release version="0.3.3.204" date="2022-08-30" type='stable' urgency='medium'>
+    <release version="0.3.3.204" date="2022-08-30" urgency="medium">
       <description>
         <ul>
           <li>Fixes a screen buffer manipulation bug that may happen on non-stylyzed but interactive command prompts (#787).</li>
@@ -132,7 +132,7 @@
       </description>
     </release>
 
-    <release version="0.3.2.202" date="2022-07-07" type='stable' urgency='medium'>
+    <release version="0.3.2.202" date="2022-07-07" urgency="medium">
       <description>
         <ul>
           <li>Fixes writing to a non-empty line sometimes destroying the contents of that line (#702).</li>
@@ -181,7 +181,7 @@
       </description>
     </release>
 
-    <release version="0.3.1.200" date="2022-05-01" type='stable' urgency='medium'>
+    <release version="0.3.1.200" date="2022-05-01" urgency="medium">
       <description>
         <ul>
           <li>Adds Vi-like input modes for improved selection and copy'n'paste experience.</li>
@@ -201,7 +201,7 @@
       </description>
     </release>
 
-    <release version="0.3.0.198" date="2022-04-18" type='stable' urgency='medium'>
+    <release version="0.3.0.198" date="2022-04-18" urgency="medium">
       <description>
         <p>
           TLDR; Many thanks to all for the great support and feedback. This release
@@ -247,7 +247,7 @@
       </description>
     </release>
 
-    <release version="0.2.3.183" date="2022-01-09" type='stable' urgency='medium'>
+    <release version="0.2.3.183" date="2022-01-09" urgency="medium">
       <description>
         <p>
           Important: It is recommended to also use the latest `contour` termcap file if you are already using one
@@ -273,7 +273,7 @@
       </description>
     </release>
 
-    <release version="0.2.2.175" date="2021-11-19" type='stable' urgency='medium'>
+    <release version="0.2.2.175" date="2021-11-19" urgency="medium">
       <description>
         <ul>
           <li>Fixes input mapping containing `Control` modifier.</li>
@@ -291,7 +291,7 @@
       </description>
     </release>
 
-    <release version="0.2.1.174" date="2021-11-14" type='stable' urgency='medium'>
+    <release version="0.2.1.174" date="2021-11-14" urgency="medium">
       <description>
         <ul>
           <li>Reverts change from 0.2.0: "Changes behaviour when receiving `U+FE0E` (VS15) to not enforce the width of 1 but leave it as is (usually 2). This seems to match what the web browser is doing, too."</li>
@@ -333,7 +333,7 @@
       </description>
     </release>
 
-    <release version="0.2.0.173" date="2021-08-17" type='stable' urgency='medium'>
+    <release version="0.2.0.173" date="2021-08-17" urgency="medium">
       <description>
         <ul>
           <li>Improved performance (optimized render loop, optimized grapheme cluster segmentation algorithm)</li>
@@ -402,7 +402,7 @@
       </description>
     </release>
 
-    <release version="0.1.1" date="2020-12-31" type='stable' urgency='medium'>
+    <release version="0.1.1" date="2020-12-31" urgency="medium">
       <description>
         <ul>
           <li>Fixes race condition when displaying image animations (e.g. gifs via sixel).</li>
@@ -416,7 +416,7 @@
       </description>
     </release>
 
-    <release version="0.1.0" date="2020-12-24" type='stable'>
+    <release version="0.1.0" date="2020-12-24">
       <description>
         <ul>
           <li>Available on all 3 major platforms, Linux, OS/X, Windows.</li>
