@@ -52,6 +52,8 @@ jobs:
           arch="${{ matrix.arch }}"
           echo ::set-output name=PLATFORM::${arch%% *}
           echo ::set-output name=ARCH::${arch##* }
+      - name: Installing xmllint for ci-set-vars
+        run: sudo apt -qy install libxml2-utils
       - name: set environment variables
         id: set_vars
         run: ./scripts/ci-set-vars.sh
@@ -99,6 +101,8 @@ jobs:
           arch="${{ matrix.arch }}"
           echo ::set-output name=PLATFORM::${arch%% *}
           echo ::set-output name=ARCH::${arch##* }
+      - name: Installing xmllint for ci-set-vars
+        run: sudo apt -qy install libxml2-utils
       - name: set environment variables
         id: set_vars
         run: ./scripts/ci-set-vars.sh
@@ -364,6 +368,8 @@ jobs:
       with:
         key: ccache-ubuntu_1804
         max-size: 256M
+    - name: Installing xmllint for ci-set-vars
+      run: sudo apt -qy install libxml2-utils
     - name: set environment variables
       id: set_vars
       run: ./scripts/ci-set-vars.sh
@@ -459,6 +465,8 @@ jobs:
         with:
           key: "ccache-ubuntu2004-${{ matrix.compiler }}-${{ matrix.cxx }}-${{ matrix.build_type }}"
           max-size: 256M
+      - name: Installing xmllint for ci-set-vars
+        run: sudo apt -qy install libxml2-utils
       - name: set environment variables
         id: set_vars
         run: ./scripts/ci-set-vars.sh
@@ -543,6 +551,8 @@ jobs:
         with:
           key: "ccache-ubuntu2004-${{ matrix.compiler }}-${{ matrix.cxx }}-${{ matrix.build_type }}"
           max-size: 256M
+      - name: Installing xmllint for ci-set-vars
+        run: sudo apt -qy install libxml2-utils
       - name: "set environment variables"
         id: set_vars
         run: ./scripts/ci-set-vars.sh

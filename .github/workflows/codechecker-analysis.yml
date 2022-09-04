@@ -36,6 +36,8 @@ jobs:
     steps:
       - name: "Check out repository"
         uses: actions/checkout@v3
+      - name: Installing xmllint for ci-set-vars
+        run: sudo apt -qy install libxml2-utils
       - name: "Set variables for Contour build-like CI"
         id: set_vars
         run: ./scripts/ci-set-vars.sh
