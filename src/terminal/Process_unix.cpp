@@ -334,6 +334,7 @@ vector<string> Process::loginShell(bool escapeSandbox)
     if (passwd const* pw = getpwuid(getuid()); pw != nullptr)
     {
 #if defined(__APPLE__)
+        crispy::ignore_unused(escapeSandbox);
         auto shell = string(pw->pw_shell);
         auto index = shell.rfind('/');
         return { "/bin/bash", "-c", fmt::format("exec -a -{} {}", shell.substr(index + 1, 5), pw->pw_shell) };
