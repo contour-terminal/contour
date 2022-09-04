@@ -793,7 +793,6 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     }
     // }}}
 
-#if !defined(__APPLE__) // Not building on OS/X CI?
     if (RasterizerLog)
         RasterizerLog()("Inserting {} id {} render mode {} {} yOverflow {} yMin {}.",
                         glyph,
@@ -802,7 +801,6 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
                         presentation,
                         yOverflow,
                         yMin);
-#endif
 
     return { createTileData(tileLocation,
                             move(glyph.bitmap),
