@@ -73,7 +73,7 @@ cd build
 
 %files
 %license LICENSE.txt
-%doc README.md Changelog.md CONTRIBUTING.md TODO.md
+%doc README.md CONTRIBUTING.md TODO.md
 %{_bindir}/*
 %{_datadir}/*
 

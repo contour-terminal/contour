@@ -15,7 +15,7 @@
 # The following locations are checked in order:
 # 1.) /version.txt file
 # 2.) /.git directory with the output of `git describe ...`)
-# 3.) /Changelog.md with the first line's version number and optional (suffix) string
+# 3.) /metainfo.xml with the first line's version number and optional (suffix) string
 #
 function(GetVersionInformation VersionTripleVar VersionStringVar)
     # 1.) /version.txt file
@@ -45,8 +45,8 @@ function(GetVersionInformation VersionTripleVar VersionStringVar)
         set(THE_GIT_SHA_SHORT "${git_sha_short}")
         message(STATUS "[Version] Git SHA: ${THE_GIT_SHA_SHORT}")
 
-        file(READ "${CMAKE_SOURCE_DIR}/Changelog.md" changelog_contents)
-        string(REGEX MATCH "^^### ([0-9]*\\.[0-9]+\\.[0-9]+).*$" _ "${changelog_contents}")
+        file(READ "${CMAKE_SOURCE_DIR}/metainfo.xml" changelog_contents)
+        string(REGEX MATCH "<release version=\"([0-9]*\\.[0-9]+\\.[0-9]+)\".*$" _ "${changelog_contents}")
         # extract and construct version triple
         set(THE_VERSION ${CMAKE_MATCH_1})
 
@@ -56,19 +56,15 @@ function(GetVersionInformation VersionTripleVar VersionStringVar)
         endif()
 
         # extract suffix, construct full version string
-        string(REGEX MATCH "^^### ([0-9]*\\.[0-9]+\\.[0-9]+) \\(([^\)]*)\\).*$" _ "${changelog_contents}")
+        string(REGEX MATCH "<release version=\"([0-9]*\\.[0-9]+\\.[0-9]+)\".*$" _ "${changelog_contents}")
 
-        if(NOT ("${CMAKE_MATCH_2}" STREQUAL ""))
-            set(THE_VERSION_STRING "${THE_VERSION}-${CMAKE_MATCH_2}-${THE_GIT_BRANCH}-${THE_GIT_SHA_SHORT}")
-        else()
-            set(THE_VERSION_STRING "${THE_VERSION}-${THE_GIT_BRANCH}-${THE_GIT_SHA_SHORT}")
-        endif()
-        set(THE_SOURCE "git & ${CMAKE_SOURCE_DIR}/Changelog.md")
+        set(THE_VERSION_STRING "${THE_VERSION}-${THE_GIT_BRANCH}-${THE_GIT_SHA_SHORT}")
+        set(THE_SOURCE "git & ${CMAKE_SOURCE_DIR}/metainfo.xml")
     endif()
 
-    # 3.) /Changelog.md with the first line's version number and optional (suffix) string
-    if(("${THE_VERSION}" STREQUAL "" OR "${THE_VERSION_STRING}" STREQUAL "") AND (EXISTS "${CMAKE_SOURCE_DIR}/Changelog.md"))
-        file(READ "${CMAKE_SOURCE_DIR}/Changelog.md" changelog_contents)
+    # 3.) /metainfo.xml with the first line's version number and optional (suffix) string
+    if(("${THE_VERSION}" STREQUAL "" OR "${THE_VERSION_STRING}" STREQUAL "") AND (EXISTS "${CMAKE_SOURCE_DIR}/metainfo.xml"))
+        file(READ "${CMAKE_SOURCE_DIR}/metainfo.xml" changelog_contents)
         # extract and construct version triple
         string(REGEX MATCH "^^### ([0-9]*\\.[0-9]+\\.[0-9]+).*$" _ "${changelog_contents}")
         set(THE_VERSION ${CMAKE_MATCH_1})
@@ -85,7 +81,7 @@ function(GetVersionInformation VersionTripleVar VersionStringVar)
         else()
             set(THE_VERSION_STRING "${THE_VERSION}")
         endif()
-        set(THE_SOURCE "${CMAKE_SOURCE_DIR}/Changelog.md")
+        set(THE_SOURCE "${CMAKE_SOURCE_DIR}/metainfo.xml")
     endif()
 
     if("${THE_VERSION}" STREQUAL "" OR "${THE_VERSION_STRING}" STREQUAL "")

@@ -1,9 +1,17 @@
 #! /bin/bash
 
-set -ex
+set -e
 
-VERSION_TRIPLE=$(grep '^### ' Changelog.md | head -n1 | awk '{print $2}')
-SUFFIX=$(grep '^### ' Changelog.md | head -n1 | awk '{print $3}' | tr -d '()' | sed 's/ /_/g')
+if ! which xmllint; then
+    echo "No xmllint installed"
+    exit 1
+fi
+
+project_root="`dirname $0`/.."
+metainfo_xml="$project_root/metainfo.xml"
+
+VERSION_TRIPLE=`xmllint --xpath 'string(/component/releases/release[1]/@version)' $metainfo_xml`
+#RELEASE_TYPE=`xmllint --xpath 'string(/component/releases/release[1]/@type)' $metainfo_xml`
 
 if [[ "${GITHUB_RUN_NUMBER}" != "" ]]; then
     VERSION="${VERSION_TRIPLE}.${GITHUB_RUN_NUMBER}"
@@ -27,7 +35,9 @@ esac
 # TODO: pass "/path/to/version.txt" target filename via CLI param "${1}", and only write that if given.
 echo "${VERSION_STRING}" >version.txt
 
-RELEASEBODY=$(awk 'BEGIN { RS="### "; FS="\n"; } /^'$VERSION_TRIPLE'/ {print $0}' Changelog.md | tail -n+3)
+RELEASEBODY=$(xmllint --xpath '/component/releases/release[1]/description/ul/li' $metainfo_xml |
+                    sed 's/<li>/ - /g' |
+                    sed 's,</li>,\n,g')
 RELEASEBODY="${RELEASEBODY//'%'/'%25'}"
 RELEASEBODY="${RELEASEBODY//$'\n'/'%0A'}"
 RELEASEBODY="${RELEASEBODY//$'\r'/'%0D'}"

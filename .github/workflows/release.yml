@@ -89,6 +89,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+      - name: Installing xmllint for ci-set-vars
+        run: sudo apt -qy install libxml2-utils
       - name: set variables
         id: set_vars
         run: ./scripts/ci-set-vars.sh
@@ -151,6 +153,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+      - name: Installing xmllint for ci-set-vars
+        run: sudo apt -qy install libxml2-utils
       - name: set variables
         id: set_vars
         run: ./scripts/ci-set-vars.sh
@@ -195,6 +199,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v3
+      - name: Installing xmllint for ci-set-vars
+        run: sudo apt -qy install libxml2-utils
       - name: set variables
         id: set_vars
         run: ./scripts/ci-set-vars.sh
@@ -272,6 +278,8 @@ jobs:
           arch="${{ matrix.arch }}"
           echo ::set-output name=PLATFORM::${arch%% *}
           echo ::set-output name=ARCH::${arch##* }
+      - name: Installing xmllint for ci-set-vars
+        run: sudo apt -qy install libxml2-utils
       - name: set environment variables
         id: set_vars
         run: ./scripts/ci-set-vars.sh
@@ -320,6 +328,8 @@ jobs:
         arch="${{ matrix.arch }}"
         echo ::set-output name=PLATFORM::${arch%% *}
         echo ::set-output name=ARCH::${arch##* }
+    - name: Installing xmllint for ci-set-vars
+      run: sudo apt -qy install libxml2-utils
     - name: set environment variables
       id: set_vars
       run: ./scripts/ci-set-vars.sh
@@ -386,6 +396,8 @@ jobs:
     needs: [build_ubuntu1804, build_ubuntu2004, build_windows, build_osx, build_archlinux, build_fedora]
     steps:
       - uses: actions/checkout@v3
+      - name: Installing xmllint for ci-set-vars
+        run: sudo apt -qy install libxml2-utils
       - name: set variables
         id: set_vars
         run: ./scripts/ci-set-vars.sh

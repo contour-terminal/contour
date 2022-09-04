@@ -1,9 +1,11 @@
 #!/usr/bin/env powershell
 
-$VERSION = Select-String -Path .\Changelog.md -Pattern '^### ([^ ]+)' | % { "$($_.matches.groups[1])" } | Select-Object -First 1
-$VERSION = "${VERSION}.${Env:GITHUB_RUN_NUMBER}"
+$VERSION = (Select-Xml -Path .\metainfo.xml -XPath '/component/releases/release[1]/@version').Node.Value
 
-# $SUFFIX  = Select-String -Path .\Changelog.md -Pattern '^### .* \(([^\)]+)\)' | % { "$($_.matches.groups[1])" } | Select-Object -First 1
+if ("${Env:GITHUB_RUN_NUMBER}" -ne "") {
+    # Guard, just in case it's run from outside the CI (e.g. for testing).
+    $VERSION = "${VERSION}.${Env:GITHUB_RUN_NUMBER}"
+}
 
 switch -Regex ($Env:GITHUB_REF) {
     "^refs/heads/(master|release)$" {

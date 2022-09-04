@@ -84,6 +84,8 @@ jobs:
       with:
         path: "**/cpm_modules"
         key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
+    - name: Installing xmllint for ci-set-vars
+      run: sudo apt -qy install libxml2-utils
     - name: set environment variables
       id: set_vars
       run: ./scripts/ci-set-vars.sh
@@ -250,6 +252,8 @@ jobs:
       CONTOUR_PREFIX: "" # valgrind --leak-check=full --num-callers=64 --error-exitcode=112"
     steps:
     - uses: actions/checkout@v3
+    - name: Installing xmllint for ci-set-vars
+      run: sudo apt -qy install libxml2-utils
     - name: set environment variables
       id: set_vars
       run: ./scripts/ci-set-vars.sh
