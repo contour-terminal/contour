@@ -312,13 +312,12 @@ else()
     install(FILES "res/images/contour-logo-128.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/128x128/apps" RENAME "${AppId}.png")
     install(FILES "res/images/contour-logo-64.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/64x64/apps" RENAME "${AppId}.png")
     install(FILES "res/images/contour-logo-32.png" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/32x32/apps" RENAME "${AppId}.png")
-    install(FILES "metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo" RENAME "${AppId}.metainfo.xml")
+    install(FILES "${PROJECT_SOURCE_DIR}/metainfo.xml" DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/metainfo" RENAME "${AppId}.metainfo.xml")
     install(FILES "shell-integration.zsh" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(FILES "${PROJECT_SOURCE_DIR}/Changelog.md" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(FILES "${PROJECT_SOURCE_DIR}/LICENSE.txt" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(FILES "${PROJECT_SOURCE_DIR}/README.md" DESTINATION "${CMAKE_INSTALL_DATADIR}/contour")
     install(DIRECTORY "${terminfo_basedir}" DESTINATION "${CMAKE_INSTALL_DATADIR}")
-    # TODO: install Changelog.md to /usr/share/doc/contour/Changelog.md(.gz)?
 endif()
 
 include(CPack)
@@ -328,5 +327,5 @@ if(UNIX)
     cpack_add_component(contour
         DISPLAY_NAME "${CPACK_PACKAGE_NAME}"
         REQUIRED
-        )
+    )
 endif()
