@@ -128,6 +128,33 @@ prepare_fetch_and_unpack()
     rm -f $SYSDEPS_CMAKE_FILE
 }
 # }}}
+install_deps_opensuse_tumbleweed()
+{
+    local packages="
+        fmt-devel
+        Catch2-devel
+        cmake
+        debhelper
+        dpkg-devel
+        extra-cmake-modules
+        gcc-c++
+        glibc-devel
+        --
+        libfontconfig1-dev
+        libfreetype6-dev
+        libharfbuzz-dev
+        libkf5windowsystem-dev
+        libqt5-qtx11extras-devel
+        libqt5gui5
+        libqt5opengl5-dev
+        libyaml-cpp-dev
+        make
+        ncurses-bin
+        pkg-config
+        qtbase5-dev
+        qtmultimedia5-dev
+    "
+}
 
 install_deps_ubuntu()
 {
@@ -354,6 +381,9 @@ main()
             ;;
         ubuntu|neon|debian)
             install_deps_ubuntu
+            ;;
+        opensuse-tumbleweed)
+            install_deps_opensuse_tumbleweed
             ;;
         Darwin)
             install_deps_darwin
