@@ -208,6 +208,8 @@ bool ContourGuiApp::loadConfig(string const& target)
     _config = configPath.isEmpty() ? contour::config::loadConfig()
                                    : contour::config::loadConfigFromFile(configPath.toStdString());
 
+    _config.live = _config.live || parameters().boolean("contour.terminal.live-config");
+
     if (!_config.profile(profileName()))
     {
         auto const s =

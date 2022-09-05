@@ -113,6 +113,11 @@ mouse_block_selection_modifier: Control
 # Default: CopyToSelectionClipboard
 on_mouse_select: CopyToSelectionClipboard
 
+# Determines whether the instance is reloading the configuration files whenever it is changing or not.
+#
+# Default: false
+live_config: false
+
 # Inline image related default configuration and limits
 # -----------------------------------------------------
 images:

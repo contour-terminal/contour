@@ -1683,6 +1683,8 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 
     tryLoadValue(usedKeys, doc, "spawn_new_process", _config.spawnNewProcess);
 
+    tryLoadValue(usedKeys, doc, "live_config", _config.live);
+
     auto logEnabled = false;
     tryLoadValue(usedKeys, doc, "logging.enabled", logEnabled);
 
