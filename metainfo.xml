@@ -93,6 +93,7 @@
     <release version="0.3.4" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Fixes selection magically deselecting when indicator status line was shown and the top page line was selected.</li>
           <li>[Linux] Changes context menu icon for "Run in Contour" action to be the Contour logo.</li>
           <li>Adds `line#24` to terminfo file for backwards compatibility.</li>
           <li>[Flatpak] Adds configuration key `profiles.*.escape_sandbox` to decide whether or not to escape the sandbox.</li>
