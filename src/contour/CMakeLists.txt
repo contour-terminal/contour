@@ -285,7 +285,7 @@ else()
         OUTPUT_STRIP_TRAILING_WHITESPACE
     )
 
-    set(YAML_CPP_PKG_NAME "libyaml-cpp0.6")
+    set(YAML_CPP_PKG_NAME "libyaml-cpp0.7")
     if ("${LSB_RELEASE_NUMBER}" STREQUAL "18.04")
         set(YAML_CPP_PKG_NAME "libyaml-cpp0.5v5")
     endif()

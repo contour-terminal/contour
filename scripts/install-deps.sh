@@ -169,7 +169,7 @@ install_deps_ubuntu()
 
     fetch_and_unpack_gsl
     case $RELEASE in
-        "18.04" | "19.04" | "20.04" | "21.04" | "21.10")
+        "18.04" | "19.04" | "20.04" | "21.04" | "21.10" | "22.04")
             # Older Ubuntu's don't have a recent enough fmt / range-v3, so supply it.
             fetch_and_unpack \
                 range-v3-0.11.0 \
