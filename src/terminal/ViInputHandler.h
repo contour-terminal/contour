@@ -17,6 +17,7 @@
 #include <terminal/Selector.h>
 #include <terminal/primitives.h>
 
+#include <crispy/assert.h>
 #include <crispy/logstore.h>
 
 namespace terminal
@@ -206,6 +207,19 @@ class ViInputHandler: public InputHandler
     void setMode(ViMode mode);
     void toggleMode(ViMode mode);
     [[nodiscard]] ViMode mode() const noexcept { return viMode; }
+
+    [[nodiscard]] bool isVisualMode() const noexcept
+    {
+        switch (viMode)
+        {
+            case ViMode::Insert:
+            case ViMode::Normal: return false;
+            case ViMode::Visual:
+            case ViMode::VisualBlock:
+            case ViMode::VisualLine: return true;
+        }
+        crispy::unreachable();
+    }
 
     [[nodiscard]] CellLocationRange translateToCellRange(TextObjectScope scope,
                                                          TextObject textObject) const noexcept;

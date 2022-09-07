@@ -55,6 +55,19 @@ namespace // {{{ helpers
             value.pop_back();
     }
 
+    string_view modeString(ViMode mode) noexcept
+    {
+        switch (mode)
+        {
+            case ViMode::Normal: return "NORMAL"sv;
+            case ViMode::Insert: return "INSERT"sv;
+            case ViMode::Visual: return "VISUAL"sv;
+            case ViMode::VisualLine: return "VISUAL LINE"sv;
+            case ViMode::VisualBlock: return "VISUAL BLOCK"sv;
+        }
+        crispy::unreachable();
+    }
+
 #if defined(CONTOUR_PERF_STATS)
     void logRenderBufferSwap(bool _success, uint64_t _frameID)
     {
@@ -387,37 +400,28 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
 
 void Terminal::updateIndicatorStatusLine()
 {
-    auto& savedActiveDisplay = currentScreen_.get();
-    assert(&savedActiveDisplay != &indicatorStatusScreen_);
+    assert(&currentScreen_.get() != &indicatorStatusScreen_);
 
+    auto& savedActiveDisplay = currentScreen_.get();
+    auto const savedActiveStatusDisplay = state_.activeStatusDisplay;
     auto savedCursor = state_.cursor;
     auto const savedWrapPending = state_.wrapPending;
 
     currentScreen_ = indicatorStatusScreen_;
+    state_.activeStatusDisplay = ActiveStatusDisplay::StatusLine;
 
     // Prepare old status line's cursor position and some other flags.
     state_.cursor = {};
     state_.wrapPending = false;
     indicatorStatusScreen_.updateCursorIterator();
 
-    auto const inputModeStr = [](auto mode) noexcept -> string_view {
-        switch (mode)
-        {
-            case ViMode::Normal: return "NORMAL"sv;
-            case ViMode::Insert: return "INSERT"sv;
-            case ViMode::Visual: return "VISUAL"sv;
-            case ViMode::VisualLine: return "VISUAL LINE"sv;
-            case ViMode::VisualBlock: return "VISUAL BLOCK"sv;
-        }
-        crispy::unreachable();
-    }(inputHandler().mode());
-
     // Run status-line update.
     // We cannot use VT writing here, because we shall not interfere with the application's VT state.
     // TODO: Future improvement would be to allow full VT sequence support for the Indicator-status-line,
     // such that we can pass display-control partially over to some user/thirdparty configuration.
     indicatorStatusScreen_.clearLine();
-    indicatorStatusScreen_.writeTextFromExternal(fmt::format(" {} │ {}", state_.terminalId, inputModeStr));
+    indicatorStatusScreen_.writeTextFromExternal(
+        fmt::format(" {} │ {}", state_.terminalId, modeString(inputHandler().mode())));
 
     if (!state_.searchMode.pattern.empty() || state_.inputHandler.isEditingSearch())
         indicatorStatusScreen_.writeTextFromExternal(" SEARCH");
@@ -437,6 +441,7 @@ void Terminal::updateIndicatorStatusLine()
 
     // Cleaning up.
     currentScreen_ = savedActiveDisplay;
+    state_.activeStatusDisplay = savedActiveStatusDisplay;
     // restoreCursor(savedCursor, savedWrapPending);
     state_.wrapPending = savedWrapPending;
     state_.cursor = savedCursor;
@@ -545,9 +550,14 @@ bool Terminal::handleMouseSelection(Modifier _modifier, Timestamp _now)
 
 void Terminal::clearSelection()
 {
+    if (state_.inputHandler.isVisualMode())
+        // Don't clear if in visual mode.
+        return;
+
     InputLog()("Clearing selection.");
     selection_.reset();
     speedClicks_ = 0;
+
     breakLoopAndRefreshRenderBuffer();
 }
 
@@ -1613,6 +1623,9 @@ void Terminal::discardImage(Image const& _image)
 
 void Terminal::markCellDirty(CellLocation _position) noexcept
 {
+    if (state_.activeStatusDisplay != ActiveStatusDisplay::Main)
+        return;
+
     if (!selection_)
         return;
 
@@ -1622,6 +1635,9 @@ void Terminal::markCellDirty(CellLocation _position) noexcept
 
 void Terminal::markRegionDirty(Rect _area) noexcept
 {
+    if (state_.activeStatusDisplay != ActiveStatusDisplay::Main)
+        return;
+
     if (!selection_)
         return;
 
