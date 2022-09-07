@@ -1287,7 +1287,6 @@ void Screen<Cell>::moveCursorToNextTab()
 template <typename Cell>
 void Screen<Cell>::notify(string const& _title, string const& _content)
 {
-    std::cout << "Screen.NOTIFY: title: '" << _title << "', content: '" << _content << "'\n";
     _terminal.notify(_title, _content);
 }
 
