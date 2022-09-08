@@ -28,7 +28,7 @@ jobs:
   # {{{ build fontconfig
   build_fontconfig:
     name: "Build patched fontconfig"
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v3
     - name: "get source"
@@ -71,14 +71,14 @@ jobs:
 
   # {{{ Build Contour
   build_contour:
-    name: "Build Contour @ Ubuntu Linux 20.04"
-    runs-on: ubuntu-20.04
+    name: "Build Contour @ Ubuntu Linux 22.04"
+    runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v3
     - name: ccache
       uses: hendrikmuhs/ccache-action@v1
       with:
-        key: ccache-ubuntu_2004-external-tests
+        key: ccache-ubuntu_2204-external-tests
         max-size: 256M
     - uses: actions/cache@v2
       with:
@@ -116,13 +116,13 @@ jobs:
         cpack -G DEB
         cd ..
         mv -v "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour.deb" \
-              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+              "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_22_04_amd64.deb"
         ls -hl
     - name: "Uploading artifact .deb package"
       uses: actions/upload-artifact@v2
       with:
-        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
-        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_22_04_amd64.deb"
+        path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_22_04_amd64.deb"
         if-no-files-found: error
         retention-days: 7
   # }}}
@@ -130,7 +130,7 @@ jobs:
   # {{{ Build notcurses
   build_notcurses:
     name: "Build notcurses"
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
     - name: "install dependencies"
       run: |
@@ -155,7 +155,7 @@ jobs:
     - name: ccache
       uses: hendrikmuhs/ccache-action@v1
       with:
-        key: ccache-ubuntu_2004-notcurses
+        key: ccache-ubuntu_2204-notcurses
         max-size: 256M
     - name: "configure cmake"
       run: |
@@ -185,7 +185,7 @@ jobs:
   # {{{ external test: notcurses
   test_notcurses:
     name: "notcurses-demo ${{ matrix.name }}"
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     needs: [build_contour, build_notcurses, build_fontconfig]
     strategy:
       fail-fast: false
@@ -261,7 +261,7 @@ jobs:
         REPOSITORY: ${{ github.event.repository.name }}
     - uses: actions/download-artifact@v2
       with:
-        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_22_04_amd64.deb"
     - uses: actions/download-artifact@v2
       with:
         name: "notcurses-install"
@@ -283,7 +283,7 @@ jobs:
       timeout-minutes: 1
       run: ~/opt/notcurses/bin/notcurses-demo -p ~/opt/notcurses/share/notcurses -h
     - name: "install contour"
-      run: sudo dpkg -i "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+      run: sudo dpkg -i "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_22_04_amd64.deb"
     - name: "contour executable test"
       run: |
         contour version

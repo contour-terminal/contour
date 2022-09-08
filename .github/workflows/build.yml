@@ -167,7 +167,7 @@ jobs:
           retention-days: 7
 
   freebsd:
-    runs-on: macos-10.15
+    runs-on: macos-12
     name: FreeBSD 13
     # env:
     #   MYTOKEN: "value1"
@@ -176,7 +176,7 @@ jobs:
       - uses: actions/checkout@v3
       - name: Test in FreeBSD
         id: test
-        uses: vmactions/freebsd-vm@v0.1.6
+        uses: vmactions/freebsd-vm@v0.2.4
         with:
           envs: 'MYTOKEN MYTOKEN2'
           usesh: true
@@ -440,7 +440,7 @@ jobs:
         sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.deb"
         sudo dpkg --install "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_18_04_amd64.ddeb"
 
-  ubuntu_2004_matrix:
+  ubuntu_2204_matrix:
     strategy:
       fail-fast: false
       matrix:
@@ -448,14 +448,13 @@ jobs:
         build_type: ["RelWithDebInfo"]
         compiler:
           [
-            "GCC 8",
             "GCC 10",
-            "Clang 9",
+            "GCC 11",
             "Clang 12",
             "Clang 14",
           ]
-    name: "Ubuntu Linux 20.04 (${{ matrix.compiler }}, C++${{ matrix.cxx }})"
-    runs-on: ubuntu-20.04
+    name: "Ubuntu Linux 22.04 (${{ matrix.compiler }}, C++${{ matrix.cxx }})"
+    runs-on: ubuntu-22.04
     outputs:
       id: "${{ matrix.compiler }} (C++${{ matrix.cxx }}, ${{ matrix.build_type }})"
     steps:
@@ -463,7 +462,7 @@ jobs:
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1
         with:
-          key: "ccache-ubuntu2004-${{ matrix.compiler }}-${{ matrix.cxx }}-${{ matrix.build_type }}"
+          key: "ccache-ubuntu2204-${{ matrix.compiler }}-${{ matrix.cxx }}-${{ matrix.build_type }}"
           max-size: 256M
       - name: Installing xmllint for ci-set-vars
         run: sudo apt -qy install libxml2-utils
@@ -488,14 +487,7 @@ jobs:
           sudo apt install -y g++-${{ steps.extract_matrix.outputs.CC_VERSION }}
       - name: Set up Clang
         if: ${{ startsWith(matrix.compiler, 'Clang') }}
-        run: |
-          if [[ ${{ steps.extract_matrix.outputs.CC_VERSION }} -ge 13 ]]; then
-            wget https://apt.llvm.org/llvm.sh
-            chmod +x llvm.sh
-            sudo ./llvm.sh ${{ steps.extract_matrix.outputs.CC_VERSION}}
-          else
-            sudo apt install -y clang-${{ steps.extract_matrix.outputs.CC_VERSION }}
-          fi
+        run: sudo apt install -y clang-${{ steps.extract_matrix.outputs.CC_VERSION }}
       - name: "create build directory"
         run: mkdir build
       - name: "cmake"
@@ -510,6 +502,7 @@ jobs:
             CXX="${CC_EXE}-${CC_VER}" \
             EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS \
                                -DCMAKE_CXX_STANDARD=${{ matrix.cxx }} \
+                               -DCMAKE_INSTALL_PREFIX="/usr" \
                                -DCONTOUR_INSTALL_TOOLS=ON \
                                -DPEDANTIC_COMPILER=ON \
                                " \
@@ -524,7 +517,7 @@ jobs:
         if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
         uses: actions/upload-artifact@v2
         with:
-          name: contour-ubuntu2004-builddir
+          name: contour-ubuntu2204-builddir
           path: |
             build
           retention-days: 1
@@ -532,7 +525,7 @@ jobs:
         if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
         uses: actions/upload-artifact@v2
         with:
-          name: contour-ubuntu2004-tests
+          name: contour-ubuntu2204-tests
           path: |
             build/src/crispy/crispy_test
             build/src/terminal/terminal_test
@@ -540,16 +533,16 @@ jobs:
           retention-days: 1
 
   # Create ZIP/DEB package (and test DEB installation).
-  ubuntu_2004_packaging:
-    name: "Ubuntu 20.04: Create package"
-    needs: ubuntu_2004_matrix
-    runs-on: ubuntu-20.04
+  ubuntu_2204_AppImage:
+    name: "Ubuntu 22.04: Create AppImage"
+    needs: ubuntu_2204_matrix
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v3
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1
         with:
-          key: "ccache-ubuntu2004-${{ matrix.compiler }}-${{ matrix.cxx }}-${{ matrix.build_type }}"
+          key: "ccache-ubuntu2204-${{ matrix.compiler }}-${{ matrix.cxx }}-${{ matrix.build_type }}"
           max-size: 256M
       - name: Installing xmllint for ci-set-vars
         run: sudo apt -qy install libxml2-utils
@@ -560,16 +553,78 @@ jobs:
           REPOSITORY: ${{ github.event.repository.name }}
       - name: "some var dumps"
         run: |
-          echo "ID: ${{ needs.ubuntu_2004_matrix.outputs.id }}"
+          echo "ID: ${{ needs.ubuntu_2204_matrix.outputs.id }}"
+      - name: "install linuxdeploy"
+        run: |
+          wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage -O /usr/local/bin/linuxdeploy
+          chmod 0755 /usr/local/bin/linuxdeploy
+      - name: "install libfuse2 (Dependency of AppImage programs)"
+        run: sudo apt -qy install libfuse2
       - name: "install dependencies"
         run: |
           set -ex
           sudo apt -q update
           sudo ./scripts/install-deps.sh
-      - name: "Download artifact: contour-ubuntu2004-builddir"
+      - name: "Download artifact: contour-ubuntu2204-builddir"
         uses: actions/download-artifact@v2
         with:
-          name: contour-ubuntu2004-builddir
+          name: contour-ubuntu2204-builddir
+          path: build/
+      - name: "linuxdeploy: Creating AppImage"
+        run: |
+          set -ex
+          cd build
+          make install DESTDIR=AppDir
+          linuxdeploy --appdir AppDir --output appimage
+          mv -v *.AppImage ../contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage
+      - name: "Uploading AppImage"
+        uses: actions/upload-artifact@v2
+        with:
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage"
+          path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage"
+          if-no-files-found: error
+          retention-days: 7
+
+  ubuntu_2204_packaging_cleanup:
+    name: "Ubuntu 22.04: Cleaning up intermedary artifacts"
+    needs: [ubuntu_2204_AppImage, ubuntu_2204_packaging]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: "Delete artifact: contour-ubuntu2204-builddir"
+        uses: geekyeggo/delete-artifact@v1
+        with:
+          name: contour-ubuntu2204-builddir
+
+  ubuntu_2204_packaging:
+    name: "Ubuntu 22.04: Create package"
+    needs: ubuntu_2204_matrix
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v3
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: "ccache-ubuntu2204-${{ matrix.compiler }}-${{ matrix.cxx }}-${{ matrix.build_type }}"
+          max-size: 256M
+      - name: Installing xmllint for ci-set-vars
+        run: sudo apt -qy install libxml2-utils
+      - name: "set environment variables"
+        id: set_vars
+        run: ./scripts/ci-set-vars.sh
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: "some var dumps"
+        run: |
+          echo "ID: ${{ needs.ubuntu_2204_matrix.outputs.id }}"
+      - name: "install dependencies"
+        run: |
+          set -ex
+          sudo apt -q update
+          sudo ./scripts/install-deps.sh
+      - name: "Download artifact: contour-ubuntu2204-builddir"
+        uses: actions/download-artifact@v2
+        with:
+          name: contour-ubuntu2204-builddir
           path: build/
       - name: "CPack: Creating DEB package"
         run: |
@@ -577,9 +632,9 @@ jobs:
           cd build
           cpack -G DEB -V
           mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour.deb" \
-                "../contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+                "../contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_22_04_amd64.deb"
           mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour-dbgsym.ddeb" \
-                "../contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.ddeb"
+                "../contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_22_04_amd64.ddeb"
       - name: "CPack: Creating TGZ package"
         run: |
           set -ex
@@ -587,46 +642,42 @@ jobs:
           cpack -G TGZ -V
           tar xzpf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux.tar.gz"
           mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux" \
-                "../contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
+                "../contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_22_04_amd64"
       - name: "Uploading artifact .deb package"
         uses: actions/upload-artifact@v2
         with:
-          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
-          path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_22_04_amd64.deb"
+          path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_22_04_amd64.deb"
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading artifact .ddeb package (debugging symbols)"
         uses: actions/upload-artifact@v2
         with:
-          name: "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.ddeb"
-          path: "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.ddeb"
+          name: "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_22_04_amd64.ddeb"
+          path: "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_22_04_amd64.ddeb"
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading artifact ZIP package"
         uses: actions/upload-artifact@v2
         with:
-          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
-          path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64"
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_22_04_amd64"
+          path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_22_04_amd64"
           if-no-files-found: error
           retention-days: 7
       - name: "Attempt installing the created .deb"
         run: |
-          sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.deb"
-          sudo dpkg --install "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_20_04_amd64.ddeb"
-      - name: "Delete artifact: contour-ubuntu2004-builddir"
-        uses: geekyeggo/delete-artifact@v1
-        with:
-          name: contour-ubuntu2004-builddir
+          sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_22_04_amd64.deb"
+          sudo dpkg --install "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_22_04_amd64.ddeb"
 
-  test_ubuntu2004_valgrind:
+  test_ubuntu2204_valgrind:
     name: "Run tests via valgrind"
-    runs-on: ubuntu-20.04
-    needs: [ubuntu_2004_matrix]
+    runs-on: ubuntu-22.04
+    needs: [ubuntu_2204_matrix]
     steps:
       - name: "download artifact"
         uses: actions/download-artifact@v2
         with:
-          name: contour-ubuntu2004-tests
+          name: contour-ubuntu2204-tests
       - name: "fix unit test permissions"
         run: find . -name '*_test' -exec chmod 0755 {} \;
       - name: "install dependencies"
@@ -640,32 +691,32 @@ jobs:
                           libharfbuzz0b \
                           libqt5gui5 \
                           libqt5opengl5 \
-                          libyaml-cpp0.6 \
+                          libyaml-cpp0.7 \
                           ncurses-bin \
                           valgrind
       - name: "test: crispy (via valgrind)"
         run: valgrind --error-exitcode=64 ./build/src/crispy/crispy_test
       - name: "test: libterminal (via valgrind)"
         run: valgrind --error-exitcode=64 ./build/src/terminal/terminal_test
-      - name: "Delete artifact: contour-ubuntu2004-tests"
+      - name: "Delete artifact: contour-ubuntu2204-tests"
         uses: geekyeggo/delete-artifact@v1
         with:
-          name: contour-ubuntu2004-tests
+          name: contour-ubuntu2204-tests
 
-  check_ubuntu2004_matrix_test_matrix:
+  check_ubuntu2204_matrix_test_matrix:
     if: ${{ always() }}
     runs-on: ubuntu-latest
-    name: "Ubuntu Linux 20.04 post-check"
+    name: "Ubuntu Linux 22.04 post-check"
     needs:
-      - ubuntu_2004_matrix
-      - ubuntu_2004_packaging
-      - test_ubuntu2004_valgrind
+      - ubuntu_2204_matrix
+      - ubuntu_2204_packaging
+      - test_ubuntu2204_valgrind
     steps:
       - name: Print matrix status
         run: |
-          echo "Result: ${{ needs.ubuntu_2004_matrix.result }}"
+          echo "Result: ${{ needs.ubuntu_2204_matrix.result }}"
       - name: Check build matrix status
-        if: ${{ needs.ubuntu_2004_matrix.result != 'success' && needs.ubuntu_2004_matrix.result != 'skipped' }}
+        if: ${{ needs.ubuntu_2204_matrix.result != 'success' && needs.ubuntu_2204_matrix.result != 'skipped' }}
         run: exit 1
 
   # }}}

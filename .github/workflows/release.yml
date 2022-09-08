@@ -22,6 +22,24 @@ concurrency:
 # [ ] label package files with "prerelease" if they're not a release
 
 jobs:
+  chk_release:
+    name: Release Checks
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Installing xmllint for ci-set-vars
+        run: sudo apt -qy install libxml2-utils
+      - name: set variables
+        id: set_vars
+        run: ./scripts/ci-set-vars.sh
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: Installing xmllint dependency
+        run: sudo apt -qy install libxml2-utils
+      - name: run release checks
+        run: ./scripts/check_release.sh
+
   build_windows:
     name: Build on Windows
     runs-on: windows-latest
@@ -147,27 +165,9 @@ jobs:
           sudo dpkg --install "contour_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb"
           sudo dpkg --install "contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb"
 
-  chk_release:
-    name: Release Checks
-    runs-on: ubuntu-20.04
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-      - name: Installing xmllint for ci-set-vars
-        run: sudo apt -qy install libxml2-utils
-      - name: set variables
-        id: set_vars
-        run: ./scripts/ci-set-vars.sh
-        env:
-          REPOSITORY: ${{ github.event.repository.name }}
-      - name: Installing xmllint dependency
-        run: sudo apt -qy install libxml2-utils
-      - name: run release checks
-        run: ./scripts/check_release.sh
-
-  build_ubuntu2004:
-    name: Build on Ubuntu 20.04
-    runs-on: ubuntu-20.04
+  build_ubuntu2204:
+    name: Build on Ubuntu 22.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -211,6 +211,67 @@ jobs:
       - name: "Attempt installing the created .deb"
         run: |
           sudo dpkg --install "contour_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.deb"
+
+  build_AppImage:
+    name: "Linux AppImage"
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v3
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: "ccache-ubuntu2204-AppImage"
+          max-size: 256M
+      - name: Installing xmllint for ci-set-vars
+        run: sudo apt -qy install libxml2-utils
+      - name: set environment variables
+        id: set_vars
+        run: ./scripts/ci-set-vars.sh
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: "install linuxdeploy"
+        run: |
+          wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage -O /usr/local/bin/linuxdeploy
+          chmod 0755 /usr/local/bin/linuxdeploy
+      - name: "install dependencies"
+        run: |
+          set -ex
+          sudo apt -q update
+          sudo ./scripts/install-deps.sh
+      - name: "create build directory"
+        run: mkdir build
+      - name: "cmake"
+        run: |
+          [[ "${{ matrix.compiler }}" = "GCC 8" ]] || EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DPEDANTIC_COMPILER_WERROR=ON"
+          BUILD_DIR="build" \
+            CMAKE_BUILD_TYPE="RelWithDebInfo" \
+            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS \
+                               -DCMAKE_CXX_STANDARD=20 \
+                               -DCMAKE_INSTALL_PREFIX="/usr" \
+                               -DCONTOUR_INSTALL_TOOLS=ON \
+                               -DPEDANTIC_COMPILER=ON \
+                               " \
+            ./scripts/ci-prepare-contour.sh
+      - name: "build"
+        run: cmake --build build/ -- -j3
+      - name: "test: crispy"
+        run: ./build/src/crispy/crispy_test
+      - name: "test: libterminal"
+        run: ./build/src/terminal/terminal_test
+      - name: "linuxdeploy: Creating AppImage"
+        run: |
+          set -ex
+          cd build
+          make install DESTDIR=AppDir
+          linuxdeploy --appdir AppDir --output appimage
+          mv -v *.AppImage ../contour-${{ steps.set_vars.outputs.version }}.AppImage
+      - name: "Uploading AppImage"
+        uses: actions/upload-artifact@v2
+        with:
+          name: "contour-${{ steps.set_vars.outputs.version }}_x86_64.AppImage"
+          path: "contour-${{ steps.set_vars.outputs.version }}_x86_64.AppImage"
+          if-no-files-found: error
+          retention-days: 7
 
   build_osx:
     name: Build on OS/X
@@ -411,7 +472,7 @@ jobs:
   do_release:
     name: Create Github release
     runs-on: ubuntu-latest
-    needs: [chk_release, build_ubuntu1804, build_ubuntu2004, build_windows, build_osx, build_archlinux, build_fedora]
+    needs: [chk_release, build_ubuntu1804, build_ubuntu2204, build_AppImage, build_windows, build_osx, build_archlinux, build_fedora]
     steps:
       - uses: actions/checkout@v3
       - name: Installing xmllint for ci-set-vars
@@ -469,8 +530,8 @@ jobs:
           asset_content_type: application/vnd.debian.binary-package
 
       # -------------------------------------------------------------
-      - name: Upload Ubuntu 20.04 package (.deb)
-        id: upload-release-asset-deb-2004
+      - name: Upload Ubuntu 22.04 package (.deb)
+        id: upload-release-asset-deb-2204
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -480,8 +541,8 @@ jobs:
           asset_name: contour_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.deb
           asset_content_type: application/vnd.debian.binary-package
 
-      - name: Upload Ubuntu 20.04 debug package (.ddeb)
-        id: upload-release-asset-ddeb-2004
+      - name: Upload Ubuntu 22.04 debug package (.ddeb)
+        id: upload-release-asset-ddeb-2204
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -490,6 +551,18 @@ jobs:
           asset_path: ./contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.ddeb
           asset_name: contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.ddeb
           asset_content_type: application/vnd.debian.binary-package
+
+      # -------------------------------------------------------------
+      - name: Upload AppImage package x86_64
+        id: upload-release-asset-archlinux-x86_64
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: contour-${{ steps.set_vars.outputs.version }}_x64_64.AppImage
+          asset_name: contour-${{ steps.set_vars.outputs.version }}_x64_64.AppImage
+          asset_content_type: application/x-zstd-compressed-tar
 
       # -------------------------------------------------------------
       - name: Upload Archlinux package x86_64
@@ -597,4 +670,3 @@ jobs:
           asset_path: contour-${{ steps.set_vars.outputs.version }}-osx.dmg
           asset_name: contour-${{ steps.set_vars.outputs.version }}-osx.dmg
           asset_content_type: application/x-apple-diskimage
-
