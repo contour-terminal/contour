@@ -208,6 +208,8 @@ struct Config
 {
     FileSystem::path backingFilePath;
 
+    bool live = false;
+
     /// Qt platform plugin to be loaded.
     /// This is equivalent to QT_QPA_PLATFORM.
     std::string platformPlugin;

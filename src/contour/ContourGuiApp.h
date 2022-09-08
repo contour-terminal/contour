@@ -68,7 +68,8 @@ class ContourGuiApp: public ContourApp
         fmt::print("Failed to access config profile.\n");
         Require(false);
     }
-    bool liveConfig() const noexcept { return parameters().boolean("contour.terminal.live-config"); }
+
+    [[nodiscard]] bool liveConfig() const noexcept { return _config.live; }
 
     TerminalSessionManager& sessionsManager() noexcept { return _sessionManager; }
 
