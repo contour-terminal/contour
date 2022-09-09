@@ -48,6 +48,7 @@ optional<Action> fromString(string const& _name)
         mapAction<actions::ClearHistoryAndReset>("ClearHistoryAndReset"),
         mapAction<actions::CopyPreviousMarkRange>("CopyPreviousMarkRange"),
         mapAction<actions::CopySelection>("CopySelection"),
+        mapAction<actions::CreateDebugDump>("CreateDebugDump"),
         mapAction<actions::DecreaseFontSize>("DecreaseFontSize"),
         mapAction<actions::DecreaseOpacity>("DecreaseOpacity"),
         mapAction<actions::FocusNextSearchMatch>("FocusNextSearchMatch"),

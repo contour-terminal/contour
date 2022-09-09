@@ -28,6 +28,7 @@ struct ChangeProfile{ std::string name; };
 struct ClearHistoryAndReset{};
 struct CopyPreviousMarkRange{};
 struct CopySelection{};
+struct CreateDebugDump{};
 struct DecreaseFontSize{};
 struct DecreaseOpacity{};
 struct FocusNextSearchMatch{};
@@ -76,6 +77,7 @@ using Action = std::variant<CancelSelection,
                             ClearHistoryAndReset,
                             CopyPreviousMarkRange,
                             CopySelection,
+                            CreateDebugDump,
                             DecreaseFontSize,
                             DecreaseOpacity,
                             FocusNextSearchMatch,
