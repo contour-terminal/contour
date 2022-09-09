@@ -672,6 +672,12 @@ bool TerminalSession::operator()(actions::CopySelection)
     return true;
 }
 
+bool TerminalSession::operator()(actions::CreateDebugDump)
+{
+    terminal_.inspect();
+    return true;
+}
+
 bool TerminalSession::operator()(actions::DecreaseFontSize)
 {
     auto constexpr OnePt = text::font_size { 1.0 };

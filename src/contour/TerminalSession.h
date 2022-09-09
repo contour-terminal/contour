@@ -132,6 +132,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     bool operator()(actions::ClearHistoryAndReset);
     bool operator()(actions::CopyPreviousMarkRange);
     bool operator()(actions::CopySelection);
+    bool operator()(actions::CreateDebugDump);
     bool operator()(actions::DecreaseFontSize);
     bool operator()(actions::DecreaseOpacity);
     bool operator()(actions::FollowHyperlink);
