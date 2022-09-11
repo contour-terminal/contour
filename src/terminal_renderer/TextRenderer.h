@@ -123,6 +123,8 @@ class TextRenderer: public Renderable
     std::optional<TextureAtlas::TileCreateData> createRasterizedGlyph(
         atlas::TileLocation tileLocation, text::glyph_key const& id, unicode::PresentationStyle presentation);
 
+    void restrictToTileSize(TextureAtlas::TileCreateData& tileCreateData);
+
     crispy::Point applyGlyphPositionToPen(crispy::Point pen,
                                           AtlasTileAttributes const& tileAttributes,
                                           text::glyph_position const& gpos) const noexcept;

@@ -352,6 +352,38 @@ void TextRenderer::clearCache()
     boxDrawingRenderer_.clearCache();
 }
 
+void TextRenderer::restrictToTileSize(TextureAtlas::TileCreateData& tileCreateData)
+{
+    if (tileCreateData.bitmapSize.width <= _textureAtlas->tileSize().width)
+        return;
+
+    // Shrink the image's width by recreating it.
+    // TODO: In the longer term it would be nice to simply touch the pitch value in order to shrink.
+    //       But this requires extending the data structure to also provide a pitch value.
+
+    auto const bitmapFormat = tileCreateData.bitmapFormat;
+    auto const colorComponentCount = atlas::element_count(bitmapFormat);
+
+    auto const subWidth = _textureAtlas->tileSize().width;
+    auto const subSize = ImageSize { subWidth, tileCreateData.bitmapSize.height };
+    auto const subPitch = unbox<uintptr_t>(subSize.width) * colorComponentCount;
+    auto const xOffset = 0;
+
+    auto slicedBitmap = vector<uint8_t>(subSize.area() * colorComponentCount);
+
+    for (uintptr_t rowIndex = 0; rowIndex < unbox<uintptr_t>(subSize.height); ++rowIndex)
+    {
+        uint8_t* targetRow = slicedBitmap.data() + rowIndex * subPitch;
+        uint8_t const* sourceRow =
+            tileCreateData.bitmap.data() + rowIndex * subPitch + uintptr_t(xOffset) * colorComponentCount;
+        Require(sourceRow + subPitch <= tileCreateData.bitmap.data() + tileCreateData.bitmap.size());
+        std::memcpy(targetRow, sourceRow, subPitch);
+    }
+
+    tileCreateData.bitmapSize = subSize;
+    tileCreateData.bitmap = std::move(slicedBitmap);
+}
+
 void TextRenderer::initializeDirectMapping()
 {
     Require(_textureAtlas);
@@ -379,7 +411,7 @@ void TextRenderer::initializeDirectMapping()
         if (!tileCreateData)
             continue;
 
-        // Require(tileCreateData->bitmapSize.width <= textureAtlas().tileSize().width);
+        restrictToTileSize(*tileCreateData);
 
         // fmt::print("Initialize direct mapping {} ({}) for {} {}; {}; {}\n",
         //            tileIndex,
@@ -787,12 +819,12 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     // {{{ crop underflow if yMin < 0
     // If the rasterized glyph is underflowing below the grid cell's minimum (0),
     // then cut off at grid cell's bottom.
-    if (false) // (yMin < 0)
+    if (yMin < 0)
     {
         auto const rowCount = (unsigned) -yMin;
         Require(rowCount <= unbox<unsigned>(glyph.bitmapSize.height));
         auto const pixelCount =
-            rowCount * unbox<unsigned>(glyph.bitmapSize.width) * text::pixel_size(glyph.format);
+            rowCount * unbox<size_t>(glyph.bitmapSize.width) * text::pixel_size(glyph.format);
         Require(0 < pixelCount && static_cast<size_t>(pixelCount) <= glyph.bitmap.size());
         RasterizerLog()("Cropping {} underflowing bitmap rows.", rowCount);
         glyph.bitmapSize.height += Height::cast_from(yMin);
