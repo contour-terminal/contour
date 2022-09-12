@@ -143,7 +143,7 @@ struct RGBColorPair
         return distance(foreground, background) <= threshold;
     }
 
-    [[nodiscard]] RGBColorPair distinct(double threshold = 0.1) const noexcept
+    [[nodiscard]] RGBColorPair distinct(double threshold = 0.25) const noexcept
     {
         if (isTooSimilar(threshold))
             return { foreground.inverse(), foreground };

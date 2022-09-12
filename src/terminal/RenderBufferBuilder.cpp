@@ -94,8 +94,9 @@ namespace
             return selectionColors;
 
         if (!_selected)
-            return { makeRGBColor(sgrColors, _colorPalette.cursor.textOverrideColor),
-                     makeRGBColor(sgrColors, _colorPalette.cursor.color) };
+            return RGBColorPair { makeRGBColor(sgrColors, _colorPalette.cursor.textOverrideColor),
+                                  makeRGBColor(sgrColors, _colorPalette.cursor.color) }
+                .distinct();
 
         Require(_isCursor && _selected);
 
