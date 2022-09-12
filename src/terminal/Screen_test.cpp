@@ -3404,7 +3404,7 @@ TEST_CASE("Sixel.AutoScroll-1", "[screen]")
     auto const pageSize = PageSize { LineCount(4), ColumnCount(10) };
     auto mock = MockTerm { pageSize, LineCount(5) };
     mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(10) });
-    mock.terminal.setMode(DECMode::SixelScrolling, true);
+    mock.terminal.setMode(DECMode::NoSixelScrolling, false);
 
     auto const sixelData = crispy::readFileAsString("./test/images/squirrel-50.sixel");
 

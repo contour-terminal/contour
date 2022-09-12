@@ -1580,8 +1580,7 @@ void Screen<Cell>::sixelImage(ImageSize _pixelSize, Image::Data&& _data)
     auto const lineCount =
         LineCount::cast_from(ceilf(float(*_pixelSize.height) / float(*_state.cellPixelSize.height)));
     auto const extent = GridSize { lineCount, columnCount };
-    auto const autoScrollAtBottomMargin = _terminal.isModeEnabled(
-        DECMode::SixelScrolling); // If DECSDM is enabled, scrolling is meant to be disabled.
+    auto const autoScrollAtBottomMargin = !_terminal.isModeEnabled(DECMode::NoSixelScrolling);
     auto const topLeft = autoScrollAtBottomMargin ? logicalCursorPosition() : CellLocation {};
 
     auto const alignmentPolicy = ImageAlignment::TopStart;
@@ -2169,7 +2168,7 @@ namespace impl
                 // TODO: Ps = 6 7  -> Backarrow key sends backspace (DECBKM), VT340, VT420.  This sets the
                 // backarrowKey resource to "true".
                 case 69: return DECMode::LeftRightMargin;
-                case 80: return DECMode::SixelScrolling;
+                case 80: return DECMode::NoSixelScrolling;
                 case 1000: return DECMode::MouseProtocolNormalTracking;
                 case 1001: return DECMode::MouseProtocolHighlightTracking;
                 case 1002: return DECMode::MouseProtocolButtonTracking;
