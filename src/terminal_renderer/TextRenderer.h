@@ -162,6 +162,8 @@ class TextRenderer: public Renderable
                && _directMappedGlyphKeyToTileIndex[glyph.index.value] != 0;
     }
 
+    AtlasTileAttributes const* ensureRasterizedIfDirectMapped(text::glyph_key const& glyphKey);
+
     // sub-renderer
     //
     BoxDrawingRenderer boxDrawingRenderer_;

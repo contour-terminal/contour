@@ -105,6 +105,7 @@
           <li>[Packaging] Adding AppImage files to Github release page and CI artifacts and bump Ubuntu packages using Ubuntu 22.04 LTS</li>
           <li>Adds `CreateDebugDump` action to dump terminal state for debugging purposes.</li>
           <li>Fixes glyph rendering for some unexpectly oversized glyphs (#423).</li>
+          <li>Improve startup-time by not pre-rasterizing all printable US-ASCII codepoints at once.</li>
         </ul>
       </description>
     </release>

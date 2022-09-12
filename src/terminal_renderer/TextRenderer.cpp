@@ -389,41 +389,53 @@ void TextRenderer::initializeDirectMapping()
     Require(_textureAtlas);
     Require(_directMapping.count == DirectMappedCharsCount);
 
-    auto constexpr presentation = unicode::PresentationStyle::Text;
-
     _directMappedGlyphKeyToTileIndex.clear();
     _directMappedGlyphKeyToTileIndex.resize(LastReservedChar + 1);
 
     for (char32_t codepoint = FirstReservedChar; codepoint <= LastReservedChar; ++codepoint)
     {
-        optional<text::glyph_position> gposOpt = textShaper_.shape(fonts_.regular, codepoint);
-        if (!gposOpt)
-            continue;
-        text::glyph_position& gpos = *gposOpt;
-
-        if (gpos.glyph.index.value >= _directMappedGlyphKeyToTileIndex.size())
-            _directMappedGlyphKeyToTileIndex.resize(gpos.glyph.index.value
-                                                    + (LastReservedChar - codepoint + 1));
-
-        auto const tileIndex = _directMapping.toTileIndex(codepoint - FirstReservedChar);
-        auto const tileLocation = _textureAtlas->tileLocation(tileIndex);
-        auto tileCreateData = createRasterizedGlyph(tileLocation, gpos.glyph, presentation);
-        if (!tileCreateData)
-            continue;
-
-        restrictToTileSize(*tileCreateData);
-
-        // fmt::print("Initialize direct mapping {} ({}) for {} {}; {}; {}\n",
-        //            tileIndex,
-        //            tileLocation,
-        //            codepoint,
-        //            gpos.glyph,
-        //            tileCreateData->bitmapSize,
-        //            tileCreateData->metadata);
-
-        _textureAtlas->setDirectMapping(tileIndex, move(*tileCreateData));
-        _directMappedGlyphKeyToTileIndex[gpos.glyph.index.value] = tileIndex;
+        if (optional<text::glyph_position> gposOpt = textShaper_.shape(fonts_.regular, codepoint))
+        {
+            text::glyph_key const& glyph = gposOpt.value().glyph;
+            if (glyph.index.value >= _directMappedGlyphKeyToTileIndex.size())
+                _directMappedGlyphKeyToTileIndex.resize(glyph.index.value
+                                                        + (LastReservedChar - codepoint + 1));
+            _directMappedGlyphKeyToTileIndex[glyph.index.value] =
+                _directMapping.toTileIndex(codepoint - FirstReservedChar);
+        }
     }
+}
+
+Renderable::AtlasTileAttributes const* TextRenderer::ensureRasterizedIfDirectMapped(
+    text::glyph_key const& glyph)
+{
+    if (!isGlyphDirectMapped(glyph))
+        return nullptr;
+
+    auto const tileIndex = _directMappedGlyphKeyToTileIndex[glyph.index.value];
+
+    if (_textureAtlas->directMapped(tileIndex).bitmapSize.width.value)
+        // TODO: Find a better way to test if the glyph was rasterized&uploaded already.
+        // like: if (_textureAtlas->isDirectMappingSet(tileIndex)) ...
+        return &_textureAtlas->directMapped(tileIndex);
+
+    auto const tileLocation = _textureAtlas->tileLocation(tileIndex);
+    auto tileCreateData = createRasterizedGlyph(tileLocation, glyph, unicode::PresentationStyle::Text);
+    if (!tileCreateData)
+        return nullptr;
+
+    // Require(tileCreateData->bitmapSize.width <= textureAtlas().tileSize().width);
+    restrictToTileSize(*tileCreateData);
+
+    // fmt::print("Initialize direct mapping {} ({}) for {}; {}; {}\n",
+    //            tileIndex,
+    //            tileLocation,
+    //            glyph,
+    //            tileCreateData->bitmapSize,
+    //            tileCreateData->metadata);
+
+    _textureAtlas->setDirectMapping(tileIndex, move(*tileCreateData));
+    return &_textureAtlas->directMapped(tileIndex);
 }
 
 void TextRenderer::updateFontMetrics()
@@ -623,13 +635,10 @@ void TextRenderer::flushTextClusterGroup()
 
         for (text::glyph_position const& glyphPosition: glyphPositions)
         {
-            if (isGlyphDirectMapped(glyphPosition.glyph))
+            if (AtlasTileAttributes const* attributes = ensureRasterizedIfDirectMapped(glyphPosition.glyph))
             {
-                auto const directMappingIndex =
-                    _directMappedGlyphKeyToTileIndex[glyphPosition.glyph.index.value];
-                AtlasTileAttributes const& attributes = _textureAtlas->directMapped(directMappingIndex);
-                auto const pen1 = applyGlyphPositionToPen(pen, attributes, glyphPosition);
-                renderRasterizedGlyph(pen1, textClusterGroup_.color, attributes);
+                auto const pen1 = applyGlyphPositionToPen(pen, *attributes, glyphPosition);
+                renderRasterizedGlyph(pen1, textClusterGroup_.color, *attributes);
                 pen.x += static_cast<decltype(pen.x)>(advanceX);
                 continue;
             }
