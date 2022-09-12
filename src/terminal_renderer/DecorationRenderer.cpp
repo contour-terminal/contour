@@ -279,7 +279,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(cellHeight), 0);
                 for (unsigned y = 0; y < thickness; ++y)
                     for (unsigned x = 0; x < unbox<unsigned>(width); ++x)
-                        image[(*cellHeight - y - 1) * *width + x] = 0xFF;
+                        image[y * *width + x] = 0xFF;
                 return image;
             });
         }
@@ -291,7 +291,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
                 for (unsigned y = 1; y <= thickness; ++y)
                     for (unsigned x = 0; x < unbox<unsigned>(width); ++x)
-                        image[(*height - y) * *width + x] = 0xFF;
+                        image[y * *width + x] = 0xFF;
                 return image;
             });
         }

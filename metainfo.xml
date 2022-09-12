@@ -97,6 +97,7 @@
           <li>Fixes interpretation of VT sequence DECSDM to disable Sixel auto-scrolling, if enabled.</li>
           <li>Fixes visibility of the cursor in some situation when blending too much into the background color.</li>
           <li>Fixes dim/faint coloring to not affect background and default text coloring when feint SGR attribute is set (#786).</li>
+          <li>Fixes SGR 9 (crossed out) and 53 (overline) to both look like underline.</li>
           <li>[Linux] Changes context menu icon for "Run in Contour" action to be the Contour logo.</li>
           <li>Adds `line#24` to terminfo file for backwards compatibility.</li>
           <li>Adds configuration key `live_config` to determine whether or not to reload running terminal instances on every config file change.</li>
