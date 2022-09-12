@@ -385,7 +385,14 @@ void OpenGLRenderer::uploadTile(atlas::UploadTile tile)
     //              tile.location.atlasID.value,
     //              tile.location.x.value,
     //              tile.location.y.value);
+    if (!(tile.bitmapSize.width <= _textureAtlas.properties.tileSize.width))
+        errorlog()("uploadTile assertion alert: width {} <= {} failed.", tile.bitmapSize.width, _textureAtlas.properties.tileSize.width);
+    if (!(tile.bitmapSize.height <= _textureAtlas.properties.tileSize.height))
+        errorlog()("uploadTile assertion alert: height {} <= {} failed.", tile.bitmapSize.height, _textureAtlas.properties.tileSize.height);
     // clang-format on
+
+    // Require(tile.bitmapSize.width <= _textureAtlas.properties.tileSize.width);
+    // Require(tile.bitmapSize.height <= _textureAtlas.properties.tileSize.height);
 
     _scheduledExecutions.uploadTiles.emplace_back(move(tile));
 }

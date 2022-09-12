@@ -663,7 +663,7 @@ void open_shaper::shape(font_key _font,
     if (TextShapingLog)
     {
         auto logMessage = TextShapingLog();
-        logMessage.append("Shaping codepoints:");
+        logMessage.append("Shaping codepoints ({}):", _presentation);
         for (auto [i, codepoint]: crispy::indexed(_codepoints))
             logMessage.append(" {}:U+{:x}", _clusters[i], static_cast<unsigned>(codepoint));
         logMessage.append("\n");

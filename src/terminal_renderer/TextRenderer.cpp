@@ -352,6 +352,38 @@ void TextRenderer::clearCache()
     boxDrawingRenderer_.clearCache();
 }
 
+void TextRenderer::restrictToTileSize(TextureAtlas::TileCreateData& tileCreateData)
+{
+    if (tileCreateData.bitmapSize.width <= _textureAtlas->tileSize().width)
+        return;
+
+    // Shrink the image's width by recreating it.
+    // TODO: In the longer term it would be nice to simply touch the pitch value in order to shrink.
+    //       But this requires extending the data structure to also provide a pitch value.
+
+    auto const bitmapFormat = tileCreateData.bitmapFormat;
+    auto const colorComponentCount = atlas::element_count(bitmapFormat);
+
+    auto const subWidth = _textureAtlas->tileSize().width;
+    auto const subSize = ImageSize { subWidth, tileCreateData.bitmapSize.height };
+    auto const subPitch = unbox<uintptr_t>(subSize.width) * colorComponentCount;
+    auto const xOffset = 0;
+
+    auto slicedBitmap = vector<uint8_t>(subSize.area() * colorComponentCount);
+
+    for (uintptr_t rowIndex = 0; rowIndex < unbox<uintptr_t>(subSize.height); ++rowIndex)
+    {
+        uint8_t* targetRow = slicedBitmap.data() + rowIndex * subPitch;
+        uint8_t const* sourceRow =
+            tileCreateData.bitmap.data() + rowIndex * subPitch + uintptr_t(xOffset) * colorComponentCount;
+        Require(sourceRow + subPitch <= tileCreateData.bitmap.data() + tileCreateData.bitmap.size());
+        std::memcpy(targetRow, sourceRow, subPitch);
+    }
+
+    tileCreateData.bitmapSize = subSize;
+    tileCreateData.bitmap = std::move(slicedBitmap);
+}
+
 void TextRenderer::initializeDirectMapping()
 {
     Require(_textureAtlas);
@@ -379,7 +411,7 @@ void TextRenderer::initializeDirectMapping()
         if (!tileCreateData)
             continue;
 
-        // Require(tileCreateData->bitmapSize.width <= textureAtlas().tileSize().width);
+        restrictToTileSize(*tileCreateData);
 
         // fmt::print("Initialize direct mapping {} ({}) for {} {}; {}; {}\n",
         //            tileIndex,
@@ -751,17 +783,26 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     // FIXME: this `2` is a hack of my bad knowledge. FIXME.
     // As I only know of emoji being colored fonts, and those take up 2 cell with units.
 
-    // Scale bitmap down iff bitmap is emoji and overflowing in diemensions
-    if (presentation == unicode::PresentationStyle::Emoji && glyph.format == text::bitmap_format::rgba)
+    // Scale bitmap down overflowing in diemensions
+    auto const emojiBoundingBox =
+        ImageSize { Width(_gridMetrics.cellSize.width.value * numCells),
+                    Height::cast_from(unbox<int>(_gridMetrics.cellSize.height) - _gridMetrics.baseline) };
+    if (glyph.format == text::bitmap_format::rgba)
     {
-        auto const emojiBoundingBox =
-            ImageSize { Width(_gridMetrics.cellSize.width.value * numCells),
-                        Height::cast_from(unbox<int>(_gridMetrics.cellSize.height) - _gridMetrics.baseline) };
-        if (glyph.bitmapSize.height > emojiBoundingBox.height)
+        if (glyph.bitmapSize.height > Height::cast_from(unbox<double>(emojiBoundingBox.height) * 1.1)
+            || glyph.bitmapSize.width > Width::cast_from(unbox<double>(emojiBoundingBox.width) * 1.5))
         {
+            if (RasterizerLog)
+                RasterizerLog()(
+                    "Scaling oversized glyph of {}+{} down to bounding box {} (expected cell count {}).",
+                    glyph.bitmapSize,
+                    glyph.position,
+                    emojiBoundingBox,
+                    numCells);
             auto [scaledGlyph, scaleFactor] = text::scale(glyph, emojiBoundingBox);
+
             glyph = move(scaledGlyph);
-            // glyph.position.y = unbox<int>(glyph.bitmapSize.height) - _gridMetrics.underline.position;
+            RasterizerLog()(" ==> scaled: {}/{}, factor {}", scaledGlyph, emojiBoundingBox, scaleFactor);
         }
     }
 
@@ -778,12 +819,12 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     // {{{ crop underflow if yMin < 0
     // If the rasterized glyph is underflowing below the grid cell's minimum (0),
     // then cut off at grid cell's bottom.
-    if (false) // (yMin < 0)
+    if (yMin < 0)
     {
         auto const rowCount = (unsigned) -yMin;
         Require(rowCount <= unbox<unsigned>(glyph.bitmapSize.height));
         auto const pixelCount =
-            rowCount * unbox<unsigned>(glyph.bitmapSize.width) * text::pixel_size(glyph.format);
+            rowCount * unbox<size_t>(glyph.bitmapSize.width) * text::pixel_size(glyph.format);
         Require(0 < pixelCount && static_cast<size_t>(pixelCount) <= glyph.bitmap.size());
         RasterizerLog()("Cropping {} underflowing bitmap rows.", rowCount);
         glyph.bitmapSize.height += Height::cast_from(yMin);
@@ -794,13 +835,20 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     // }}}
 
     if (RasterizerLog)
-        RasterizerLog()("Inserting {} id {} render mode {} {} yOverflow {} yMin {}.",
+    {
+        auto const boundingBox =
+            ImageSize { Width(_gridMetrics.cellSize.width.value * numCells),
+                        Height::cast_from(unbox<int>(_gridMetrics.cellSize.height) - _gridMetrics.baseline) };
+        RasterizerLog()("Inserting {} (bbox {}, numCells {}) id {} render mode {} {} yOverflow {} yMin {}.",
                         glyph,
+                        boundingBox,
+                        numCells,
                         glyphKey.index,
                         fontDescriptions_.renderMode,
                         presentation,
                         yOverflow,
                         yMin);
+    }
 
     return { createTileData(tileLocation,
                             move(glyph.bitmap),
@@ -824,8 +872,8 @@ text::shape_result TextRenderer::createTextShapedGlyphPositions()
     auto rs = unicode::run_segmenter(
         u32string_view(textClusterGroup_.codepoints.data(), textClusterGroup_.codepoints.size()));
     while (rs.consume(out(run)))
-        for (text::glyph_position const& glyphPosition: shapeTextRun(run))
-            glyphPositions.emplace_back(glyphPosition);
+        for (text::glyph_position& glyphPosition: shapeTextRun(run))
+            glyphPositions.emplace_back(std::move(glyphPosition));
 
     return glyphPositions;
 }
@@ -840,31 +888,28 @@ text::shape_result TextRenderer::createTextShapedGlyphPositions()
  */
 text::shape_result TextRenderer::shapeTextRun(unicode::run_segmenter::range const& _run)
 {
-    bool const isEmojiPresentation =
-        get<unicode::PresentationStyle>(_run.properties) == unicode::PresentationStyle::Emoji;
-
-    auto const font = isEmojiPresentation ? fonts_.emoji : getFontForStyle(fonts_, textClusterGroup_.style);
-
     // TODO(where to apply cell-advances) auto const advanceX = _gridMetrics.cellSize.width;
     auto const count = static_cast<size_t>(_run.end - _run.start);
     auto const codepoints = u32string_view(textClusterGroup_.codepoints.data() + _run.start, count);
     auto const clusters = gsl::span(textClusterGroup_.clusters.data() + _run.start, count);
+    auto const script = get<unicode::Script>(_run.properties);
+    auto const presentationStyle = get<unicode::PresentationStyle>(_run.properties);
+    auto const isEmojiPresentation = presentationStyle == unicode::PresentationStyle::Emoji;
+    auto const font = isEmojiPresentation ? fonts_.emoji : getFontForStyle(fonts_, textClusterGroup_.style);
 
     text::shape_result glyphPosition;
     glyphPosition.reserve(clusters.size());
     textShaper_.shape(font,
                       codepoints,
                       clusters,
-                      get<unicode::Script>(_run.properties),
-                      get<unicode::PresentationStyle>(_run.properties),
+                      script,            // get<unicode::Script>(_run.properties),
+                      presentationStyle, // get<unicode::PresentationStyle>(_run.properties),
                       glyphPosition);
 
     if (RasterizerLog && !glyphPosition.empty())
     {
         auto msg = RasterizerLog();
-        msg.append("Shaped codepoints ({}): {}",
-                   isEmojiPresentation ? "emoji" : "text",
-                   unicode::convert_to<char>(codepoints));
+        msg.append("Shaped codepoints ({}): {}", presentationStyle, unicode::convert_to<char>(codepoints));
 
         msg.append(" (");
         for (auto const [i, codepoint]: crispy::indexed(codepoints))
