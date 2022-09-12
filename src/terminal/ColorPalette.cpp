@@ -84,7 +84,9 @@ RGBColor apply(ColorPalette const& _profile, Color _color, ColorTarget _target, 
             break;
     }
     // clang-format on
-    return _target == ColorTarget::Foreground ? _profile.defaultForeground : _profile.defaultBackground;
+    auto const defaultColor =
+        _target == ColorTarget::Foreground ? _profile.defaultForeground : _profile.defaultBackground;
+    return mode == ColorMode::Dimmed ? defaultColor * 0.75 : defaultColor;
 }
 
 } // namespace terminal

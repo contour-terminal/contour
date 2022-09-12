@@ -527,16 +527,19 @@ inline RGBColorPair makeColors(ColorPalette const& colorPalette,
                                bool blinkingState_,
                                bool rapidBlinkState_) noexcept
 {
-    auto const mode = (cellFlags & CellFlags::Faint)                                    ? ColorMode::Dimmed
-                      : ((cellFlags & CellFlags::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
+    auto const fgMode = (cellFlags & CellFlags::Faint)                                    ? ColorMode::Dimmed
+                        : ((cellFlags & CellFlags::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
+                                                                                          : ColorMode::Normal;
+
+    auto const bgMode = ((cellFlags & CellFlags::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
                                                                                         : ColorMode::Normal;
 
     auto const [fgColorTarget, bgColorTarget] =
         _reverseVideo ? std::pair { ColorTarget::Background, ColorTarget::Foreground }
                       : std::pair { ColorTarget::Foreground, ColorTarget::Background };
 
-    auto rgbColors = RGBColorPair { apply(colorPalette, foregroundColor, fgColorTarget, mode),
-                                    apply(colorPalette, backgroundColor, bgColorTarget, mode) };
+    auto rgbColors = RGBColorPair { apply(colorPalette, foregroundColor, fgColorTarget, fgMode),
+                                    apply(colorPalette, backgroundColor, bgColorTarget, bgMode) };
 
     if (cellFlags & CellFlags::Inverse)
         rgbColors = rgbColors.swapped();

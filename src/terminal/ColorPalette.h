@@ -120,7 +120,7 @@ struct ColorPalette
         colors[256 + 4] = 0x000080_rgb; // blue
         colors[256 + 5] = 0x800080_rgb; // magenta
         colors[256 + 6] = 0x008080_rgb; // cy8n
-        colors[256 + 7] = 0xc0c0c0_rgb; // white
+        colors[256 + 7] = 0x808080_rgb; // white
 
         return colors;
     }
@@ -189,12 +189,49 @@ enum class ColorMode
 
 RGBColor apply(ColorPalette const& profile, Color color, ColorTarget target, ColorMode mode) noexcept;
 
-[[deprecated]] inline RGBColor apply(ColorPalette const& profile,
-                                     Color color,
-                                     ColorTarget target,
-                                     bool bright) noexcept
-{
-    return apply(profile, color, target, bright ? ColorMode::Bright : ColorMode::Normal);
-}
-
 } // namespace terminal
+
+namespace fmt // {{{
+{
+template <>
+struct formatter<terminal::ColorMode>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::ColorMode value, FormatContext& ctx)
+    {
+        switch (value)
+        {
+            case terminal::ColorMode::Normal: return fmt::format_to(ctx.out(), "Normal");
+            case terminal::ColorMode::Dimmed: return fmt::format_to(ctx.out(), "Dimmed");
+            case terminal::ColorMode::Bright: return fmt::format_to(ctx.out(), "Bright");
+        }
+        return fmt::format_to(ctx.out(), "{}", (int) value);
+    }
+};
+
+template <>
+struct formatter<terminal::ColorTarget>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::ColorTarget value, FormatContext& ctx)
+    {
+        switch (value)
+        {
+            case terminal::ColorTarget::Foreground: return fmt::format_to(ctx.out(), "Foreground");
+            case terminal::ColorTarget::Background: return fmt::format_to(ctx.out(), "Background");
+        }
+        return fmt::format_to(ctx.out(), "{}", (int) value);
+    }
+};
+} // namespace fmt
+// }}}
