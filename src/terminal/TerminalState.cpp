@@ -105,7 +105,7 @@ std::string to_string(DECMode _mode)
         case DECMode::UseAlternateScreen: return "UseAlternateScreen";
         case DECMode::BracketedPaste: return "BracketedPaste";
         case DECMode::FocusTracking: return "FocusTracking";
-        case DECMode::SixelScrolling: return "SixelScrolling";
+        case DECMode::NoSixelScrolling: return "NoSixelScrolling";
         case DECMode::UsePrivateColorRegisters: return "UsePrivateColorRegisters";
         case DECMode::MouseExtended: return "MouseExtended";
         case DECMode::MouseSGR: return "MouseSGR";

@@ -1091,7 +1091,7 @@ void TerminalSession::configureTerminal()
     terminal_.setSixelCursorConformance(config_.sixelCursorConformance);
     terminal_.setMaxImageColorRegisters(config_.maxImageColorRegisters);
     terminal_.setMaxImageSize(config_.maxImageSize);
-    terminal_.setMode(terminal::DECMode::SixelScrolling, config_.sixelScrolling);
+    terminal_.setMode(terminal::DECMode::NoSixelScrolling, !config_.sixelScrolling);
     terminal_.setStatusDisplay(profile_.initialStatusDisplayType);
     SessionLog()("maxImageSize={}, sixelScrolling={}", config_.maxImageSize, config_.sixelScrolling);
 

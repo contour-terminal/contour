@@ -677,7 +677,7 @@ enum class DECMode
     UseAlternateScreen,
     BracketedPaste,
     FocusTracking,            // 1004
-    SixelScrolling,           // ?80
+    NoSixelScrolling,         // ?80
     UsePrivateColorRegisters, // ?1070
 
     // {{{ Mouse related flags
@@ -785,7 +785,7 @@ constexpr unsigned toDECModeNum(DECMode m)
         case DECMode::ExtendedAltScreen: return 1049;
         case DECMode::BracketedPaste: return 2004;
         case DECMode::FocusTracking: return 1004;
-        case DECMode::SixelScrolling: return 80;
+        case DECMode::NoSixelScrolling: return 80;
         case DECMode::UsePrivateColorRegisters: return 1070;
         case DECMode::MouseExtended: return 1005;
         case DECMode::MouseSGR: return 1006;
@@ -828,7 +828,7 @@ constexpr bool isValidDECMode(unsigned int _mode) noexcept
         case DECMode::UseAlternateScreen:
         case DECMode::BracketedPaste:
         case DECMode::FocusTracking:
-        case DECMode::SixelScrolling:
+        case DECMode::NoSixelScrolling:
         case DECMode::UsePrivateColorRegisters:
         case DECMode::MouseExtended:
         case DECMode::MouseSGR:
