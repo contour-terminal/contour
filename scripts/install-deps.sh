@@ -221,6 +221,12 @@ install_deps_FreeBSD()
     "
 }
 
+install_deps_gentoo()
+{
+    fetch_and_unpack_fmtlib
+    fetch_and_unpack_embeds
+}
+
 install_deps_arch()
 {
     fetch_and_unpack_fmtlib
@@ -360,6 +366,9 @@ main()
             ;;
         freebsd)
             install_deps_FreeBSD
+            ;;
+        gentoo)
+            install_deps_gentoo
             ;;
         *)
             echo "OS not supported."
