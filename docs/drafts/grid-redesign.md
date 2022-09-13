@@ -27,7 +27,7 @@
   - if Reflow DEC mode is enabled, then continue appending character
   - else if AutoWrap DEC mode is enabled, then linefeed()
   - else overwrite character on right margin
-- I think with the above approach we do not need DEC mode 2027 for disabling
+- I think with the above approach we do not need DEC mode 2028 for disabling
   reflow in order to protect command prompts. as they're automatically protected
   by the grid line architecture.
 
