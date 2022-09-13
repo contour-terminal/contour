@@ -90,7 +90,16 @@
   <releases>
 
     <!-- unreleased: TODO: Don't forget to add date attribute to it. -->
-    <release version="0.3.4" urgency="medium" type="development">
+    <!--
+    <release version="x.y.z" urgency="medium" type="development">
+      <description>
+        <ul>
+        </ul>
+      </description>
+    </release>
+    -->
+
+    <release version="0.3.4" urgency="medium" date="2022-09-13">
       <description>
         <ul>
           <li>Fixes selection magically deselecting when indicator status line was shown and the top page line was selected.</li>
