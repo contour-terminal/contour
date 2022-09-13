@@ -531,8 +531,7 @@ inline RGBColorPair makeColors(ColorPalette const& colorPalette,
                         : ((cellFlags & CellFlags::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
                                                                                           : ColorMode::Normal;
 
-    auto const bgMode = ((cellFlags & CellFlags::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
-                                                                                        : ColorMode::Normal;
+    auto constexpr bgMode = ColorMode::Normal;
 
     auto const [fgColorTarget, bgColorTarget] =
         _reverseVideo ? std::pair { ColorTarget::Background, ColorTarget::Foreground }
