@@ -4,7 +4,6 @@ on:
   push:
     paths-ignore:
     - '.github/ISSUE_TEMPLATE/**'
-    - '.github/*.yml'
     - 'LICENSE.txt'
     branches:
     - master
@@ -17,15 +16,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check_CI_scripts:
+    name: "Check CI scripts"
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v3
+    - name: "Checking for common errors in CI scripts"
+      run: ./scripts/check-ci.sh
+
   check_PR_TODOs:
     name: "Check PR-TODOs"
     runs-on: ubuntu-20.04
     steps:
     - uses: actions/checkout@v3
     - name: "Checking for open PR-related TODO items"
-      run: |
-        set -ex
-        ./scripts/check-pr-todos.sh
+      run: ./scripts/check-pr-todos.sh
 
   check_clang_format:
     name: "Check C++ style"

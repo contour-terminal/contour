@@ -7,16 +7,11 @@ on:
       - '.github/ISSUE_TEMPLATE/**'
       - '.github/*.yml'
       - '*.md'
+      - '*.yml'
     branches:
       - master
       - 'codechecker*'
-
-      # Note: Keep these in sync with release.yml!
-      - 'release*'
-      - 'prerelease*'
-      - 'prerelease'
       - 'testing' # for public testing
-      - 'gh-actions' # only for testing
     # Note: Keep this in sync with relase.yml!
     tags:
       - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10

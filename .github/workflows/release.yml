@@ -35,10 +35,8 @@ jobs:
         run: ./scripts/ci-set-vars.sh
         env:
           REPOSITORY: ${{ github.event.repository.name }}
-      - name: Installing xmllint dependency
-        run: sudo apt -qy install libxml2-utils
       - name: run release checks
-        run: ./scripts/check_release.sh
+        run: ./scripts/check-release.sh
 
   build_windows:
     name: Build on Windows
@@ -62,7 +60,7 @@ jobs:
         with:
           vcpkgArguments: catch2 freetype fontconfig harfbuzz fmt yaml-cpp range-v3
           vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
-          vcpkgGitCommitId: faed44dfa013088fe1910908a8a65887622f412f
+          vcpkgGitCommitId: 927006b24c3a28dfd8aa0ec5f8ce43098480a7f1
           vcpkgTriplet: x64-windows
       - name: Cache Qt
         id: cache-qt
@@ -184,6 +182,7 @@ jobs:
           cat /etc/apt/sources.list
           sudo apt -q update
           sudo ./scripts/install-deps.sh
+          sudo apt install -qy libyaml-cpp0.7
       - name: "create debian package"
         run: |
           set -ex
@@ -224,6 +223,8 @@ jobs:
           max-size: 256M
       - name: Installing xmllint for ci-set-vars
         run: sudo apt -qy install libxml2-utils
+      - name: "install libfuse2 (Dependency of AppImage programs)"
+        run: sudo apt -qy install libfuse2
       - name: set environment variables
         id: set_vars
         run: ./scripts/ci-set-vars.sh
@@ -264,11 +265,10 @@ jobs:
           cd build
           make install DESTDIR=AppDir
           linuxdeploy --appdir AppDir --output appimage
-          mv -v *.AppImage ../contour-${{ steps.set_vars.outputs.version }}.AppImage
+          mv -v *.AppImage ../contour-${{ steps.set_vars.outputs.version }}_x86_64.AppImage
       - name: "Uploading AppImage"
         uses: actions/upload-artifact@v2
         with:
-          name: "contour-${{ steps.set_vars.outputs.version }}_x86_64.AppImage"
           path: "contour-${{ steps.set_vars.outputs.version }}_x86_64.AppImage"
           if-no-files-found: error
           retention-days: 7
@@ -278,8 +278,6 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v3
-      - name: Installing xmllint for ci-set-vars
-        run: sudo apt -qy install libxml2-utils
       - name: set variables
         id: set_vars
         run: ./scripts/ci-set-vars.sh
@@ -554,14 +552,14 @@ jobs:
 
       # -------------------------------------------------------------
       - name: Upload AppImage package x86_64
-        id: upload-release-asset-archlinux-x86_64
+        id: upload-release-asset-appimage-x86_64
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: contour-${{ steps.set_vars.outputs.version }}_x64_64.AppImage
-          asset_name: contour-${{ steps.set_vars.outputs.version }}_x64_64.AppImage
+          asset_path: ./contour-${{ steps.set_vars.outputs.version }}_x86_64.AppImage
+          asset_name: contour-${{ steps.set_vars.outputs.version }}_x86_64.AppImage
           asset_content_type: application/x-zstd-compressed-tar
 
       # -------------------------------------------------------------

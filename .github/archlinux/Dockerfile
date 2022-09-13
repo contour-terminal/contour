@@ -2,7 +2,7 @@ FROM archlinux/archlinux:base-devel
 
 WORKDIR /app
 
-RUN pacman -Syu --noconfirm --noprogressbar git
+RUN pacman -Syu --noconfirm --noprogressbar git libxml2
 
 RUN useradd -d /app builder
 RUN echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
