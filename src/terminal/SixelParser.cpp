@@ -246,7 +246,7 @@ void SixelParser::fallback(char _value)
 void SixelParser::done()
 {
     transitionTo(State::Ground); // this also ensures current state's leave action is invoked
-
+    events_.finalize();
     if (finalizer_)
         finalizer_();
 }
@@ -366,8 +366,8 @@ SixelImageBuilder::SixelImageBuilder(ImageSize _maxSize,
                                      std::shared_ptr<SixelColorPalette> _colorPalette):
     maxSize_ { _maxSize },
     colors_ { std::move(_colorPalette) },
-    size_ { _maxSize },
-    buffer_(size_.area() * 4),
+    size_ { ImageSize { Width { 1 }, Height { 1 } } },
+    buffer_(maxSize_.area() * 4),
     sixelCursor_ {},
     currentColor_ { 0 },
     aspectRatio_ { _aspectVertical, _aspectHorizontal }
@@ -379,8 +379,8 @@ void SixelImageBuilder::clear(RGBAColor _fillColor)
 {
     sixelCursor_ = {};
 
-    auto p = &buffer_[0];
-    auto const e = p + size_.area() * 4;
+    auto p = buffer_.data();
+    auto const e = p + maxSize_.area() * 4;
     while (p != e)
     {
         *p++ = _fillColor.red();
@@ -401,11 +401,20 @@ RGBAColor SixelImageBuilder::at(CellLocation _coord) const noexcept
 
 void SixelImageBuilder::write(CellLocation const& _coord, RGBColor const& _value) noexcept
 {
-    if (unbox<int>(_coord.line) >= 0 && unbox<int>(_coord.line) < unbox<int>(size_.height)
-        && unbox<int>(_coord.column) >= 0 && unbox<int>(_coord.column) < unbox<int>(size_.width))
+    if (unbox<int>(_coord.line) >= 0 && unbox<int>(_coord.line) < unbox<int>(maxSize_.height)
+        && unbox<int>(_coord.column) >= 0 && unbox<int>(_coord.column) < unbox<int>(maxSize_.width))
     {
-        auto const base = unbox<unsigned>(_coord.line) * unbox<unsigned>(size_.width) * 4
-                          + unbox<unsigned>(_coord.column) * 4;
+        if (!explicitSize_)
+        {
+            if (unbox<int>(_coord.line) >= unbox<int>(size_.height))
+                size_.height = Height::cast_from(_coord.line + 1);
+            if (unbox<int>(_coord.column) >= unbox<int>(size_.width))
+                size_.width = Width::cast_from(_coord.column + 1);
+        }
+
+        auto const base =
+            unbox<unsigned>(_coord.line) * unbox<unsigned>((explicitSize_ ? size_.width : maxSize_.width)) * 4
+            + unbox<unsigned>(_coord.column) * 4;
         buffer_[base + 0] = _value.red;
         buffer_[base + 1] = _value.green;
         buffer_[base + 2] = _value.blue;
@@ -432,7 +441,7 @@ void SixelImageBuilder::newline()
 {
     sixelCursor_.column = {};
 
-    if (unbox<int>(sixelCursor_.line) + 6 < unbox<int>(size_.height))
+    if (unbox<int>(sixelCursor_.line) + 6 < unbox<int>(maxSize_.height))
         sixelCursor_.line.value += 6;
 }
 
@@ -444,13 +453,14 @@ void SixelImageBuilder::setRaster(int _pan, int _pad, ImageSize _imageSize)
     size_.height = clamp(_imageSize.height, Height(0), maxSize_.height);
 
     buffer_.resize(size_.area() * 4);
+    explicitSize_ = true;
 }
 
 void SixelImageBuilder::render(int8_t _sixel)
 {
     // TODO: respect aspect ratio!
     auto const x = sixelCursor_.column;
-    if (unbox<int>(x) < unbox<int>(size_.width))
+    if (unbox<int>(x) < unbox<int>((explicitSize_ ? size_.width : maxSize_.width)))
     {
         for (int i = 0; i < 6; ++i)
         {
@@ -462,6 +472,25 @@ void SixelImageBuilder::render(int8_t _sixel)
                 write(pos, currentColor());
         }
         sixelCursor_.column++;
+    }
+}
+
+void SixelImageBuilder::finalize()
+{
+    if (!explicitSize_)
+    {
+        Buffer tempBuffer(static_cast<size_t>(size_.height.value * size_.width.value) * 4);
+        for (auto i = 0; i < unbox<int>(size_.height); ++i)
+        {
+            for (auto j = 0; j < unbox<int>(size_.width); ++j)
+            {
+                std::copy_n(buffer_.begin() + i * unbox<long>(maxSize_.width) * 4,
+                            size_.width.value * 4,
+                            tempBuffer.begin() + i * unbox<long>(size_.width) * 4);
+            }
+        }
+        buffer_.swap(tempBuffer);
+        explicitSize_ = false;
     }
 }
 
