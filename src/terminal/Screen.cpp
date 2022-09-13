@@ -2184,7 +2184,8 @@ namespace impl
                 case 1049: return DECMode::ExtendedAltScreen;
                 case 2004: return DECMode::BracketedPaste;
                 case 2026: return DECMode::BatchedRendering;
-                case 2027: return DECMode::TextReflow;
+                case 2027: return DECMode::Unicode;
+                case 2028: return DECMode::TextReflow;
                 case 8452: return DECMode::SixelCursorNextToGraphic;
             }
             return nullopt;

@@ -55,7 +55,7 @@
       <li>Color Schemes</li>
       <li>Profiles (grouped customization of: color scheme, login shell, and related behaviours)</li>
       <li>Synchronized rendering</li>
-      <li>Text reflow (configurable via SM ? 2027 / RM ? 2027)</li>
+      <li>Text reflow (configurable via SM ? 2028 / RM ? 2028)</li>
       <li>Clickable hyperlinks via OSC 8</li>
       <li>Clipboard setting via OSC 52</li>
       <li>Sixel inline images</li>
@@ -102,6 +102,7 @@
           <li>[Linux] Changes context menu icon for "Run in Contour" action to be the Contour logo.</li>
           <li>Adds `line#24` to terminfo file for backwards compatibility.</li>
           <li>Adds configuration key `live_config` to determine whether or not to reload running terminal instances on every config file change.</li>
+          <li>Adds DEC-mode 2027 for enabling/discovering Unicode support as per draft specification (Terminal Unicode Core).</li>
           <li>[Flatpak] Adds configuration key `profiles.*.escape_sandbox` to decide whether or not to escape the sandbox.</li>
           <li>[Packaging] Adding AppImage files to Github release page and CI artifacts and bump Ubuntu packages using Ubuntu 22.04 LTS</li>
           <li>Adds `CreateDebugDump` action to dump terminal state for debugging purposes.</li>

@@ -113,6 +113,7 @@ std::string to_string(DECMode _mode)
         case DECMode::MouseSGRPixels: return "MouseSGRPixels";
         case DECMode::MouseAlternateScroll: return "MouseAlternateScroll";
         case DECMode::BatchedRendering: return "BatchedRendering";
+        case DECMode::Unicode: return "Unicode";
         case DECMode::TextReflow: return "TextReflow";
         case DECMode::SixelCursorNextToGraphic: return "SixelCursorNextToGraphic";
     }

@@ -702,10 +702,13 @@ enum class DECMode
     // this feature is using CSI ? 2026 h (DECSM and DECRM).
     BatchedRendering = 2026,
 
+    // See https://github.com/contour-terminal/terminal-unicode-core
+    Unicode = 2027,
+
     // If this mode is unset, text reflow is blocked on on this line and any lines below.
     // If this mode is set, the current line and any line below is allowed to reflow.
     // Default: Enabled (if supported by terminal).
-    TextReflow = 2027,
+    TextReflow = 2028,
 
     // If enabled (default, as per spec), then the cursor is left next to the graphic,
     // that is, the text cursor is placed at the position of the sixel cursor.
@@ -793,7 +796,8 @@ constexpr unsigned toDECModeNum(DECMode m)
         case DECMode::MouseSGRPixels: return 1016;
         case DECMode::MouseAlternateScroll: return 1007;
         case DECMode::BatchedRendering: return 2026;
-        case DECMode::TextReflow: return 2027;
+        case DECMode::Unicode: return 2027;
+        case DECMode::TextReflow: return 2028;
         case DECMode::SixelCursorNextToGraphic: return 8452;
     }
     return static_cast<unsigned>(m);
@@ -836,6 +840,7 @@ constexpr bool isValidDECMode(unsigned int _mode) noexcept
         case DECMode::MouseSGRPixels:
         case DECMode::MouseAlternateScroll:
         case DECMode::BatchedRendering:
+        case DECMode::Unicode:
         case DECMode::TextReflow:
         case DECMode::SixelCursorNextToGraphic:
             //.
