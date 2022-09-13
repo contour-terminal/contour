@@ -27,7 +27,9 @@ namespace
 
 SixelImageBuilder sixelImageBuilder(ImageSize _size, RGBAColor _defaultColor)
 {
-    return SixelImageBuilder(_size, 1, 1, _defaultColor, std::make_shared<SixelColorPalette>(16, 256));
+    auto ib = SixelImageBuilder(_size, 1, 1, _defaultColor, std::make_shared<SixelColorPalette>(16, 256));
+    ib.setRaster(1, 1, _size);
+    return ib;
 }
 
 } // namespace

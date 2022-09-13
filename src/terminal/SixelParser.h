@@ -75,6 +75,9 @@ class SixelParser: public ParserExtension
 
         /// renders a given sixel at the current sixel-cursor position.
         virtual void render(int8_t _sixel) = 0;
+
+        /// Finalizes the image by optimizing the underlying storage to its minimal dimension in storage.
+        virtual void finalize() = 0;
     };
 
     using OnFinalize = std::function<void()>;
@@ -176,6 +179,7 @@ class SixelImageBuilder: public SixelParser::Events
     void newline() override;
     void setRaster(int _pan, int _pad, ImageSize _imageSize) override;
     void render(int8_t _sixel) override;
+    void finalize() override;
 
     [[nodiscard]] CellLocation const& sixelCursor() const noexcept { return sixelCursor_; }
 
@@ -194,6 +198,7 @@ class SixelImageBuilder: public SixelParser::Events
         int nominator;
         int denominator;
     } aspectRatio_;
+    bool explicitSize_ = false;
 };
 
 } // namespace terminal
