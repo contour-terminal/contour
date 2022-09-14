@@ -297,7 +297,7 @@
           <li>Adds CLI option `terminal dump-state-at-exit` to auto-dump internal state at exit.</li>
           <li>Adds support for CoreText for matching font descriptions and font fallback (#479).</li>
           <li>Adds support for font feature settings. This is currently only implemented for `openshaper`, not yet for `dwrite` (#520).</li>
-          <li>Adds pixel-perfect box-drawing for U+E0B4, U+E0B6, U+E0BC, U+E0BE (some Powerline extended codepoints, https://github.com/ryanoasis/powerline-extra-symbols#glyphs).</li>
+          <li>Adds pixel-perfect box-drawing for U+E0B4, U+E0B6, U+E0BC, U+E0BE (some Powerline extended codepoints).</li>
         </ul>
       </description>
     </release>
@@ -333,7 +333,7 @@
           <li>Adds missing config option `read_buffer_size` to default `contour.yml`.</li>
           <li>Adds new config option `reflow_on_resize` to mandate whether or not text reflow is enabled on primary screen. If this option is false, it cannot be enabled programmatically either.</li>
           <li>Adds new config option `on_mouse_select` to decide what action to pick when text has been selected (copy to clipboard or copy to selection-clipboard, or do nothing)</li>
-          <li>Unicode data updated to version 14.0 (release). See [Announcing The Unicode® Standard, Version 14.0](https://home.unicode.org/announcing-the-unicode-standard-version-14-0).</li>
+          <li>Unicode data updated to version 14.0 (release). See Announcing The Unicode® Standard, Version 14.0.</li>
           <li>Do not force OpenGL ES on Linux anymore.</li>
           <li>Changes default (Sixel) image size limits to the primary screen's pixel dimensions (#408).</li>
           <li>Changes font locator engine default on Windows to DirectWrite (#452).</li>
@@ -424,7 +424,7 @@
           <li>Adds new CLI command: `contour generate terminfo output OUTPUT_FILE` to create a Contour terminfo file.</li>
           <li>Adds new CLI command: `contour generate config output OUTPUT_FILE` to create a new default config.</li>
           <li>Adds new CLI command: `contour generate integration shell SHELL output OUTPUT_FILE` to create the shell integreation file for the given shell (only zsh supported for now). Also adds a pre-generated shell integration file for Linux (and OS/X) to `/usr/share/contour/shell-integration.zsh`.</li>
-          <li>Unicode data updated to version 14.0 beta. See https://home.unicode.org/unicode-14-0-beta-review.</li>
+          <li>Unicode data updated to version 14.0 beta.</li>
           <li>Adds support for building with Qt 6 (disabled by default).</li>
           <li>Adds support for building with mimalloc (experimental, disabled by default).</li>
         </ul>
