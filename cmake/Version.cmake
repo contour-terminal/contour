@@ -66,7 +66,7 @@ function(GetVersionInformation VersionTripleVar VersionStringVar)
     if(("${THE_VERSION}" STREQUAL "" OR "${THE_VERSION_STRING}" STREQUAL "") AND (EXISTS "${CMAKE_SOURCE_DIR}/metainfo.xml"))
         file(READ "${CMAKE_SOURCE_DIR}/metainfo.xml" changelog_contents)
         # extract and construct version triple
-        string(REGEX MATCH "^^### ([0-9]*\\.[0-9]+\\.[0-9]+).*$" _ "${changelog_contents}")
+        string(REGEX MATCH "<release version=\"([0-9]*\\.[0-9]+\\.[0-9]+)\".*$" _ "${changelog_contents}")
         set(THE_VERSION ${CMAKE_MATCH_1})
 
         # maybe append CI run-ID.
@@ -74,13 +74,7 @@ function(GetVersionInformation VersionTripleVar VersionStringVar)
             string(CONCAT THE_VERSION "${THE_VERSION}." $ENV{RUN_ID})
         endif()
 
-        # extract suffix, construct full version string
-        string(REGEX MATCH "^^### ([0-9]*\\.[0-9]+\\.[0-9]+) \\(([^\)]*)\\).*$" _ "${changelog_contents}")
-        if(NOT ("${CMAKE_MATCH_2}" STREQUAL ""))
-            set(THE_VERSION_STRING "${THE_VERSION}-${CMAKE_MATCH_2}")
-        else()
-            set(THE_VERSION_STRING "${THE_VERSION}")
-        endif()
+        set(THE_VERSION_STRING "${THE_VERSION}")
         set(THE_SOURCE "${CMAKE_SOURCE_DIR}/metainfo.xml")
     endif()
 
