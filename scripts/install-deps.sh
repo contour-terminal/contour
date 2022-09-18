@@ -118,6 +118,14 @@ fetch_and_unpack_yaml_cpp()
         https://github.com/jbeder/yaml-cpp/archive/refs/tags/yaml-cpp-0.7.0.tar.gz
 }
 
+fetch_and_unpack_range()
+{
+    fetch_and_unpack \
+        range-v3-0.11.0 \
+        range-v3-0.11.0.tar.gz \
+        https://github.com/ericniebler/range-v3/archive/refs/tags/0.11.0.tar.gz
+}
+
 prepare_fetch_and_unpack()
 {
     mkdir -p "${SYSDEPS_BASE_DIR}"
@@ -128,6 +136,46 @@ prepare_fetch_and_unpack()
     rm -f $SYSDEPS_CMAKE_FILE
 }
 # }}}
+
+install_deps_popos()
+{
+    local packages="
+        build-essential
+        cmake
+        debhelper
+        dpkg-dev
+        extra-cmake-modules
+        g++
+        libc6-dev
+        libfontconfig1-dev
+        libfreetype6-dev
+        libharfbuzz-dev
+        libqt5gui5
+        libqt5opengl5-dev
+        libqt5x11extras5-dev
+        libx11-xcb-dev
+        libyaml-cpp-dev
+        make
+        ncurses-bin
+        pkg-config
+        qtbase5-dev
+        qtmultimedia5-dev
+    "
+
+    RELEASE=`grep VERSION_ID /etc/os-release | cut -d= -f2 | tr -d '"'`
+
+    local NAME=`grep ^NAME /etc/os-release | cut -d= -f2 | cut -f1 | tr -d '"'`
+
+    fetch_and_unpack_gsl
+    fetch_and_unpack_fmtlib
+    fetch_and_unpack_range
+    fetch_and_unpack_Catch2
+
+    [ x$PREPARE_ONLY_EMBEDS = xON ] && return
+
+    sudo apt install $SYSDEP_ASSUME_YES $packages
+    # sudo snap install --classic powershell
+}
 
 install_deps_ubuntu()
 {
@@ -171,11 +219,7 @@ install_deps_ubuntu()
     case $RELEASE in
         "18.04" | "19.04" | "20.04" | "21.04" | "21.10" | "22.04")
             # Older Ubuntu's don't have a recent enough fmt / range-v3, so supply it.
-            fetch_and_unpack \
-                range-v3-0.11.0 \
-                range-v3-0.11.0.tar.gz \
-                https://github.com/ericniebler/range-v3/archive/refs/tags/0.11.0.tar.gz
-
+            fetch_and_unpack_range
             fetch_and_unpack_fmtlib
             fetch_and_unpack_Catch2
             ;;
@@ -352,6 +396,9 @@ main()
         fedora)
             install_deps_fedora
             ;;
+        pop)
+            install_deps_popos
+	    ;;
         ubuntu|neon|debian)
             install_deps_ubuntu
             ;;
@@ -362,7 +409,7 @@ main()
             install_deps_FreeBSD
             ;;
         *)
-            echo "OS not supported."
+            echo "OS $ID not supported."
             ;;
     esac
 
