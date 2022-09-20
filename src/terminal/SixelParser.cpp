@@ -440,8 +440,7 @@ void SixelImageBuilder::rewind()
 void SixelImageBuilder::newline()
 {
     sixelCursor_.column = {};
-
-    if (unbox<int>(sixelCursor_.line) + 6 < unbox<int>(maxSize_.height))
+    if (unbox<int>(sixelCursor_.line) + 6 < unbox<int>(explicitSize_ ? size_.height : maxSize_.height))
         sixelCursor_.line.value += 6;
 }
 
@@ -477,6 +476,12 @@ void SixelImageBuilder::render(int8_t _sixel)
 
 void SixelImageBuilder::finalize()
 {
+    if (unbox<int>(size_.height) == 1)
+    {
+        size_.height = Height::cast_from(sixelCursor_.line * aspectRatio_.nominator);
+        buffer_.resize(size_.area() * 4);
+        return;
+    }
     if (!explicitSize_)
     {
         Buffer tempBuffer(static_cast<size_t>(size_.height.value * size_.width.value) * 4);

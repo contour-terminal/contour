@@ -103,6 +103,7 @@
       <description>
         <ul>
           <li>Fixes a problem with oversized glyphs being wrongly cut off (#821).</li>
+          <li>Fixes vertical cursor movement for sixel graphics with only newlines (#822)</li>
         </ul>
       </description>
     </release>

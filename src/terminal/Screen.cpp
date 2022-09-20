@@ -1621,9 +1621,8 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> _image,
                                ImageResize _resizePolicy,
                                bool _autoScroll)
 {
-    // TODO: make use of _imageOffset and _imageSize
+    // TODO: make use of _imageOffset
     (void) _imageOffset;
-    (void) _imageSize;
 
     auto const linesAvailable = _state.pageSize.lines - _topLeft.line.as<LineCount>();
     auto const linesToBeRendered = min(_gridSize.lines, linesAvailable);
@@ -1634,7 +1633,21 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> _image,
     // TODO: make use of _imageOffset and _imageSize
     auto const rasterizedImage = _state.imagePool.rasterize(
         move(_image), _alignmentPolicy, _resizePolicy, gapColor, _gridSize, _state.cellPixelSize);
-
+    const auto lastSixelBand = _imageSize.height.value % 6;
+    const LineOffset offset = [&]() {
+        auto offset =
+            LineOffset::cast_from(std::ceil(static_cast<float>(_imageSize.height.value - lastSixelBand)
+                                            / float(*_state.cellPixelSize.height)))
+            - 1 * (lastSixelBand == 0);
+        auto const h = _imageSize.height.value - 1;
+        // VT340 has this behavior where for some heights it text cursor is placed not
+        // at the final sixel line but a line above it.
+        // See
+        // https://github.com/hackerb9/vt340test/blob/main/glitches.md#text-cursor-is-left-one-row-too-high-for-certain-sixel-heights
+        if (h % 6 > h % _state.cellPixelSize.height.value)
+            return offset - 1;
+        return offset;
+    }();
     if (*linesToBeRendered)
     {
         for (GridSize::Offset const offset: GridSize { linesToBeRendered, columnsToBeRendered })
@@ -1643,7 +1656,7 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> _image,
             cell.setImageFragment(rasterizedImage, CellLocation { offset.line, offset.column });
             cell.setHyperlink(_state.cursor.hyperlink);
         };
-        moveCursorTo(_topLeft.line + unbox<int>(linesToBeRendered) - 1, _topLeft.column);
+        moveCursorTo(_topLeft.line + offset, _topLeft.column);
     }
 
     // If there're lines to be rendered missing (because it didn't fit onto the screen just yet)
@@ -1667,7 +1680,7 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> _image,
         }
     }
     // move ansi text cursor to position of the sixel cursor
-    moveCursorToColumn(_topLeft.column + _gridSize.columns.as<ColumnOffset>());
+    moveCursorToColumn(_topLeft.column);
 }
 
 template <typename Cell>

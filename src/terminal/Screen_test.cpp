@@ -3372,8 +3372,8 @@ TEST_CASE("Sixel.simple", "[screen]")
 
     mock.writeToScreen(sixelData);
 
-    CHECK(mock.terminal.primaryScreen().cursor().position.column == ColumnOffset(8));
-    CHECK(mock.terminal.primaryScreen().cursor().position.line == LineOffset(4));
+    CHECK(mock.terminal.primaryScreen().cursor().position.column == ColumnOffset(0));
+    CHECK(mock.terminal.primaryScreen().cursor().position.line == LineOffset(5));
 
     for (auto line = LineOffset(0); line < boxed_cast<LineOffset>(pageSize.lines); ++line)
     {
@@ -3410,7 +3410,7 @@ TEST_CASE("Sixel.AutoScroll-1", "[screen]")
 
     mock.writeToScreen(sixelData);
 
-    CHECK(mock.terminal.primaryScreen().cursor().position.column == ColumnOffset(8));
+    CHECK(mock.terminal.primaryScreen().cursor().position.column == ColumnOffset(0));
     CHECK(mock.terminal.primaryScreen().cursor().position.line == LineOffset(3));
 
     for (auto line = LineOffset(-1); line < boxed_cast<LineOffset>(pageSize.lines); ++line)
