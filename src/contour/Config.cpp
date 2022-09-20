@@ -1705,7 +1705,6 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
     }
 
     tryLoadValue(usedKeys, doc, "images.sixel_scrolling", _config.sixelScrolling);
-    tryLoadValue(usedKeys, doc, "images.sixel_cursor_conformance", _config.sixelCursorConformance);
     tryLoadValue(usedKeys, doc, "images.sixel_register_count", _config.maxImageColorRegisters);
     tryLoadValue(usedKeys, doc, "images.max_width", _config.maxImageSize.width);
     tryLoadValue(usedKeys, doc, "images.max_height", _config.maxImageSize.height);

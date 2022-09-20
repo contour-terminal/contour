@@ -283,7 +283,6 @@ struct Config
     std::shared_ptr<logstore::Sink> loggingSink;
 
     bool sixelScrolling = true;
-    bool sixelCursorConformance = true;
     terminal::ImageSize maxImageSize = {}; // default to runtime system screen size.
     unsigned maxImageColorRegisters = 4096;
 

@@ -110,7 +110,7 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty, ContourGuiApp& _app):
                 config_.bypassMouseProtocolModifier, // TODO: you too
                 config_.maxImageSize,
                 config_.maxImageColorRegisters,
-                config_.sixelCursorConformance,
+                true,
                 profile_.colors,
                 50.0,
                 config_.reflowOnResize,
@@ -1088,7 +1088,7 @@ void TerminalSession::configureTerminal()
 
     SessionLog()("Setting terminal ID to {}.", profile_.terminalId);
     terminal_.setTerminalId(profile_.terminalId);
-    terminal_.setSixelCursorConformance(config_.sixelCursorConformance);
+    terminal_.setSixelCursorConformance(true);
     terminal_.setMaxImageColorRegisters(config_.maxImageColorRegisters);
     terminal_.setMaxImageSize(config_.maxImageSize);
     terminal_.setMode(terminal::DECMode::NoSixelScrolling, !config_.sixelScrolling);
