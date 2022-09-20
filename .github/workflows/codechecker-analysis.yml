@@ -2,12 +2,11 @@ name: CodeChecker C++ Static Analysis
 
 on:
   push:
-    paths-ignore:
-      - 'docs/**'
-      - '.github/ISSUE_TEMPLATE/**'
-      - '.github/*.yml'
-      - '*.md'
-      - '*.yml'
+    paths:
+      - 'CMakeLists.txt'
+      - '*.cmake'
+      - '*.cpp'
+      - '*.h'
     branches:
       - master
       - 'codechecker*'

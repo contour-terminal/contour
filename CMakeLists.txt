@@ -21,7 +21,6 @@ endif()
 
 include(EnableCcache)
 include(ClangTidy)
-include(CIncludeMe)
 
 if(NOT WIN32 AND NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Choose the build mode." FORCE)
