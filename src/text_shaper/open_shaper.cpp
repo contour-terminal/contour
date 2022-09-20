@@ -486,10 +486,8 @@ struct open_shaper::Private // {{{
         if (auto const ec = FT_Init_FreeType(&ft_); ec != FT_Err_Ok)
             throw runtime_error { "freetype: Failed to initialize. "s + ftErrorStr(ec) };
 
-#if defined(FT_LCD_FILTER_DEFAULT)
         if (auto const ec = FT_Library_SetLcdFilter(ft_, FT_LCD_FILTER_DEFAULT); ec != FT_Err_Ok)
             errorlog()("freetype: Failed to set LCD filter. {}", ftErrorStr(ec));
-#endif
     }
 
     bool tryShapeWithFallback(font_key _font,
@@ -747,10 +745,13 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
     if (!FT_HAS_COLOR(ftFace))
     {
         if (FT_Render_Glyph(ftFace->glyph, ftRenderMode(_mode)) != FT_Err_Ok)
+        {
+            RasterizerLog()("Failed to rasterize glyph {}.", _glyph);
             return nullopt;
+        }
     }
 
-    rasterized_glyph output {};
+    auto output = rasterized_glyph {};
     output.bitmapSize.width = crispy::Width::cast_from(ftFace->glyph->bitmap.width);
     output.bitmapSize.height = crispy::Height::cast_from(ftFace->glyph->bitmap.rows);
     output.position.x = ftFace->glyph->bitmap_left;
@@ -798,18 +799,34 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key _glyph, render_mode 
             break;
         }
         case FT_PIXEL_MODE_LCD: {
-            auto const width = static_cast<size_t>(ftFace->glyph->bitmap.width);
-            auto const height = static_cast<size_t>(ftFace->glyph->bitmap.rows);
+            auto const& ftBitmap = ftFace->glyph->bitmap;
+            // RasterizerLog()("Rasterizing using pixel mode: {}, rows={}, width={}, pitch={}, mode={}",
+            //                 "lcd",
+            //                 ftBitmap.rows,
+            //                 ftBitmap.width,
+            //                 ftBitmap.pitch,
+            //                 ftBitmap.pixel_mode);
 
             output.format = bitmap_format::rgb; // LCD
-            output.bitmap.resize(width * height);
+            output.bitmap.resize(static_cast<size_t>(ftBitmap.width) * static_cast<size_t>(ftBitmap.rows));
             output.bitmapSize.width /= crispy::Width(3);
 
-            auto const pitch = static_cast<unsigned>(ftFace->glyph->bitmap.pitch);
-            auto const s = ftFace->glyph->bitmap.buffer;
-            for (auto const i: iota(0u, ftFace->glyph->bitmap.rows))
-                for (auto const j: iota(0u, ftFace->glyph->bitmap.width))
-                    output.bitmap[i * width + j] = s[i * pitch + j];
+            auto s = ftBitmap.buffer;
+            auto t = output.bitmap.data();
+            if (ftBitmap.width == static_cast<unsigned>(std::abs(ftBitmap.pitch)))
+            {
+                std::copy_n(s, ftBitmap.width * ftBitmap.rows, t);
+            }
+            else
+            {
+                for (auto const _: iota(0u, ftBitmap.rows))
+                {
+                    crispy::ignore_unused(_);
+                    std::copy_n(s, ftBitmap.width, t);
+                    s += ftBitmap.pitch;
+                    t += ftBitmap.width;
+                }
+            }
             break;
         }
         case FT_PIXEL_MODE_BGRA: {

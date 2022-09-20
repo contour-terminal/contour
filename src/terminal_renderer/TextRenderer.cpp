@@ -368,14 +368,21 @@ void TextRenderer::restrictToTileSize(TextureAtlas::TileCreateData& tileCreateDa
     auto const subSize = ImageSize { subWidth, tileCreateData.bitmapSize.height };
     auto const subPitch = unbox<uintptr_t>(subSize.width) * colorComponentCount;
     auto const xOffset = 0;
+    auto const sourcePitch = unbox<uintptr_t>(tileCreateData.bitmapSize.width) * colorComponentCount;
 
     auto slicedBitmap = vector<uint8_t>(subSize.area() * colorComponentCount);
+
+    if (RasterizerLog)
+        RasterizerLog()("Cutting off oversized {} tile from {} down to {}.",
+                        tileCreateData.bitmapFormat,
+                        tileCreateData.bitmapSize,
+                        _textureAtlas->tileSize());
 
     for (uintptr_t rowIndex = 0; rowIndex < unbox<uintptr_t>(subSize.height); ++rowIndex)
     {
         uint8_t* targetRow = slicedBitmap.data() + rowIndex * subPitch;
         uint8_t const* sourceRow =
-            tileCreateData.bitmap.data() + rowIndex * subPitch + uintptr_t(xOffset) * colorComponentCount;
+            tileCreateData.bitmap.data() + rowIndex * sourcePitch + uintptr_t(xOffset) * colorComponentCount;
         Require(sourceRow + subPitch <= tileCreateData.bitmap.data() + tileCreateData.bitmap.size());
         std::memcpy(targetRow, sourceRow, subPitch);
     }
