@@ -191,14 +191,14 @@ TEST_CASE("SixelParser.raster", "[sixel]")
 
     REQUIRE(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
-    sp.parseFragment("\"123;234;320;240");
+    sp.parseFragment("\"12;34;32;24");
     sp.done();
 
     CHECK(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
-    CHECK(ib.aspectRatioNominator() == 123);
-    CHECK(ib.aspectRatioDenominator() == 234);
-    CHECK(*ib.size().width == 320);
-    CHECK(*ib.size().height == 240);
+    CHECK(ib.aspectRatioNominator() == 12);
+    CHECK(ib.aspectRatioDenominator() == 34);
+    CHECK(*ib.size().width == 32);
+    CHECK(*ib.size().height == 24);
 }
 
 TEST_CASE("SixelParser.rep", "[sixel]")
