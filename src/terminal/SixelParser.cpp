@@ -412,13 +412,19 @@ void SixelImageBuilder::write(CellLocation const& _coord, RGBColor const& _value
                 size_.width = Width::cast_from(_coord.column + 1);
         }
 
-        auto const base =
-            unbox<unsigned>(_coord.line) * unbox<unsigned>((explicitSize_ ? size_.width : maxSize_.width)) * 4
-            + unbox<unsigned>(_coord.column) * 4;
-        buffer_[base + 0] = _value.red;
-        buffer_[base + 1] = _value.green;
-        buffer_[base + 2] = _value.blue;
-        buffer_[base + 3] = 0xFF;
+        for (auto i = 0; i < aspectRatio_.nominator; ++i)
+        {
+            auto const base = unbox<unsigned>(_coord.line + i)
+                                  * unbox<unsigned>((explicitSize_ ? size_.width : maxSize_.width)) * 4
+                              + unbox<unsigned>(_coord.column) * 4;
+            for (auto j = 0; j < aspectRatio_.denominator; ++j)
+            {
+                buffer_[base + 0 + 4 * static_cast<unsigned int>(j)] = _value.red;
+                buffer_[base + 1 + 4 * static_cast<unsigned int>(j)] = _value.green;
+                buffer_[base + 2 + 4 * static_cast<unsigned int>(j)] = _value.blue;
+                buffer_[base + 3 + 4 * static_cast<unsigned int>(j)] = 0xFF;
+            }
+        }
     }
 }
 
@@ -451,7 +457,7 @@ void SixelImageBuilder::setRaster(int _pan, int _pad, ImageSize _imageSize)
     size_.width = clamp(_imageSize.width, Width(0), maxSize_.width);
     size_.height = clamp(_imageSize.height, Height(0), maxSize_.height);
 
-    buffer_.resize(size_.area() * 4);
+    buffer_.resize(size_.area() * static_cast<size_t>(_pad * _pan) * 4);
     explicitSize_ = true;
 }
 
