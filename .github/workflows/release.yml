@@ -99,180 +99,6 @@ jobs:
           path: contour-${{ steps.set_vars.outputs.version }}-win64.zip
           retention-days: 7
 
-  build_ubuntu1804:
-    name: Build on Ubuntu 18.04
-    runs-on: ubuntu-18.04
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-      - name: Installing xmllint for ci-set-vars
-        run: sudo apt -qy install libxml2-utils
-      - name: set variables
-        id: set_vars
-        run: ./scripts/ci-set-vars.sh
-        env:
-          REPOSITORY: ${{ github.event.repository.name }}
-      - name: "install dependencies"
-        run: |
-          set -ex
-          cat /etc/apt/sources.list
-          sudo apt -q update
-          sudo ./scripts/install-deps.sh
-      - name: "Get specific version CMake, v3.18.3"
-        uses: lukka/get-cmake@v3.18.3
-      - name: "create build directory"
-        run: mkdir build
-      - name: "cmake"
-        run: |
-          BUILD_DIR="build" \
-            CMAKE_BUILD_TYPE="RelWithDebInfo" \
-            CXX="g++-8" \
-            EXTRA_CMAKE_FLAGS="-DUSE_BOOST_FILESYSTEM=ON -DCONTOUR_INSTALL_TOOLS=ON" \
-            ./scripts/ci-prepare-contour.sh
-      - name: "build"
-        run: cmake --build build/ -- -j3
-      - name: "test: crispy"
-        run: ./build/src/crispy/crispy_test
-      - name: "test: libterminal"
-        run: ./build/src/terminal/terminal_test
-      - name: "CPack: Creating DEB package"
-        run: |
-          set -ex
-          cd build/
-          cpack -G DEB -V
-          cd ..
-          mv -v "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour.deb" \
-                "contour_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb"
-          mv -v "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour-dbgsym.ddeb" \
-                "contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb"
-          echo "pwd: `pwd`" && ls -hl
-      - name: "Uploading artifact .deb package"
-        uses: actions/upload-artifact@v2
-        with:
-          path: "contour_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb"
-          if-no-files-found: error
-          retention-days: 7
-      - name: "Uploading artifact .ddeb package (debugging symbols)"
-        uses: actions/upload-artifact@v2
-        with:
-          path: "contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb"
-          if-no-files-found: error
-          retention-days: 7
-      - name: "Attempt installing the created .deb"
-        run: |
-          sudo dpkg --install "contour_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb"
-          sudo dpkg --install "contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb"
-
-  build_ubuntu2204:
-    name: Build on Ubuntu 22.04
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-      - name: Installing xmllint for ci-set-vars
-        run: sudo apt -qy install libxml2-utils
-      - name: set variables
-        id: set_vars
-        run: ./scripts/ci-set-vars.sh
-        env:
-          REPOSITORY: ${{ github.event.repository.name }}
-      - name: "install dependencies"
-        run: |
-          set -ex
-          cat /etc/apt/sources.list
-          sudo apt -q update
-          sudo ./scripts/install-deps.sh
-          sudo apt install -qy libyaml-cpp0.7
-      - name: "create debian package"
-        run: |
-          set -ex
-          INCR=1
-          ./scripts/mkdebchangelog.sh "${{ steps.set_vars.outputs.version }}" ${INCR}
-          VERSION="${{ steps.set_vars.outputs.version }}"
-          sed -i -e "s/0.0.0-1/${VERSION}-${INCR}/g" debian/changelog
-          dpkg-buildpackage -uc -us
-          mkdir target
-          mv ../contour*.* target/
-      - name: "Rename files"
-        run: |
-          mv -v "target/contour_${{ steps.set_vars.outputs.version }}-1_amd64.deb" "contour_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.deb"
-          mv -v "target/contour-dbgsym_${{ steps.set_vars.outputs.version }}-1_amd64.ddeb" "contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.ddeb"
-      - name: "Uploading artifact .deb package"
-        uses: actions/upload-artifact@v2
-        with:
-          path: contour_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.deb
-          retention-days: 7
-      - name: "Uploading artifact .ddeb package (debugging symbols)"
-        uses: actions/upload-artifact@v2
-        with:
-          path: contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.ddeb
-          retention-days: 7
-      - name: "Attempt installing the created .deb"
-        run: |
-          sudo dpkg --install "contour_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.deb"
-
-  build_AppImage:
-    name: "Linux AppImage"
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v3
-      - name: ccache
-        uses: hendrikmuhs/ccache-action@v1
-        with:
-          key: "ccache-ubuntu2204-AppImage"
-          max-size: 256M
-      - name: Installing xmllint for ci-set-vars
-        run: sudo apt -qy install libxml2-utils
-      - name: "install libfuse2 (Dependency of AppImage programs)"
-        run: sudo apt -qy install libfuse2
-      - name: set environment variables
-        id: set_vars
-        run: ./scripts/ci-set-vars.sh
-        env:
-          REPOSITORY: ${{ github.event.repository.name }}
-      - name: "install linuxdeploy"
-        run: |
-          wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage -O /usr/local/bin/linuxdeploy
-          chmod 0755 /usr/local/bin/linuxdeploy
-      - name: "install dependencies"
-        run: |
-          set -ex
-          sudo apt -q update
-          sudo ./scripts/install-deps.sh
-      - name: "create build directory"
-        run: mkdir build
-      - name: "cmake"
-        run: |
-          [[ "${{ matrix.compiler }}" = "GCC 8" ]] || EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DPEDANTIC_COMPILER_WERROR=ON"
-          BUILD_DIR="build" \
-            CMAKE_BUILD_TYPE="RelWithDebInfo" \
-            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS \
-                               -DCMAKE_CXX_STANDARD=20 \
-                               -DCMAKE_INSTALL_PREFIX="/usr" \
-                               -DCONTOUR_INSTALL_TOOLS=ON \
-                               -DPEDANTIC_COMPILER=ON \
-                               " \
-            ./scripts/ci-prepare-contour.sh
-      - name: "build"
-        run: cmake --build build/ -- -j3
-      - name: "test: crispy"
-        run: ./build/src/crispy/crispy_test
-      - name: "test: libterminal"
-        run: ./build/src/terminal/terminal_test
-      - name: "linuxdeploy: Creating AppImage"
-        run: |
-          set -ex
-          cd build
-          make install DESTDIR=AppDir
-          linuxdeploy --appdir AppDir --output appimage
-          mv -v *.AppImage ../contour-${{ steps.set_vars.outputs.version }}_x86_64.AppImage
-      - name: "Uploading AppImage"
-        uses: actions/upload-artifact@v2
-        with:
-          path: "contour-${{ steps.set_vars.outputs.version }}_x86_64.AppImage"
-          if-no-files-found: error
-          retention-days: 7
-
   build_osx:
     name: Build on OS/X
     runs-on: macos-latest
@@ -467,10 +293,169 @@ jobs:
         if-no-files-found: error
         retention-days: 7
 
+  # Create AppImage (Using Ubuntu 18.04 as base).
+  package_for_AppImage:
+    name: "Packaging for AppImage"
+    runs-on: ubuntu-18.04
+    steps:
+      - uses: actions/checkout@v3
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: "ccache-ubuntu1804-AppImage"
+          max-size: 256M
+      - name: Remove GCC-11 to not mess with AppImage on stock Ubuntu 18.04
+        run: |
+          sudo apt-get autoremove -y libgcc-9-dev gcc-9 libgcc-10-dev gcc-10 libgcc-11-dev gcc-11
+          sudo apt-get install --allow-downgrades --no-remove --reinstall -y libstdc++6=8.4.0-1ubuntu1~18.04
+      - name: Updating APT package database
+        run: sudo apt -q update && sudo apt upgrade -y
+      - name: Installing xmllint for ci-set-vars
+        run: sudo apt -qy install libxml2-utils
+      - name: "set environment variables"
+        id: set_vars
+        run: ./scripts/ci-set-vars.sh
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: "install linuxdeploy"
+        run: |
+          wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage -O /usr/local/bin/linuxdeploy
+          chmod 0755 /usr/local/bin/linuxdeploy
+      - name: "install libfuse2 (Dependency of AppImage programs)"
+        run: sudo apt -qy install libfuse2
+      - name: "install dependencies"
+        run: sudo ./scripts/install-deps.sh
+      - name: "install GCC 10"
+        run: sudo apt install g++-10
+      - name: "cmake"
+        run: |
+          mkdir build
+          BUILD_DIR="build" \
+            CXX="g++-10" \
+            CMAKE_BUILD_TYPE=RelWithDebInfo \
+            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS \
+                               -DUSE_BOOST_FILESYSTEM=ON \
+                               -DCMAKE_INSTALL_PREFIX="/usr" \
+                               -DCONTOUR_INSTALL_TOOLS=ON \
+                               -DPEDANTIC_COMPILER=ON \
+                               -DPEDANTIC_COMPILER_WERROR=OFF \
+                               " \
+            ./scripts/ci-prepare-contour.sh
+      - name: "build"
+        run: cmake --build build/ -- -j3
+      - name: "test: crispy"
+        run: ./build/src/crispy/crispy_test
+      - name: "test: libterminal"
+        run: ./build/src/terminal/terminal_test
+      - name: "linuxdeploy: Creating AppImage"
+        run: |
+          set -ex
+          cd build
+          make install DESTDIR=AppDir
+          linuxdeploy --appdir AppDir --output appimage
+          mv -v *.AppImage ../contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage
+      - name: "Testing AppImage"
+        run: ./contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage version
+      - name: "Uploading AppImage"
+        uses: actions/upload-artifact@v2
+        with:
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage"
+          path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage"
+          if-no-files-found: error
+          retention-days: 7
+
+  package_for_Ubuntu:
+    name: "Packaging for Ubuntu ${{ matrix.os_version }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        os_version: ['18.04', '20.04', '22.04']
+    runs-on: ubuntu-${{ matrix.os_version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: Updating APT package database
+        run: sudo apt -q update && sudo apt upgrade -y
+      - name: Installing xmllint for ci-set-vars
+        run: sudo apt -qy install libxml2-utils
+      - name: set variables
+        id: set_vars
+        run: ./scripts/ci-set-vars.sh
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1
+        with:
+          key: "ccache-ubuntu-${{ matrix.os_version }}"
+          max-size: 256M
+      - name: "install dependencies"
+        run: sudo ./scripts/install-deps.sh
+      - name: "install GCC 10"
+        if: ${{ startsWith(matrix.OS_VERSION, '18.04') }}
+        run: sudo apt install g++-10
+      - name: "create build directory"
+        run: mkdir build
+      - name: "cmake"
+        run: |
+          # TODO: turn on -Werror again, that requires some code changes.
+          CMAKE_CXX_STANDARD=20
+          if [[ "${{ matrix.os_version }}" = "18.04" ]]; then
+            CMAKE_CXX_STANDARD=17
+            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DUSE_BOOST_FILESYSTEM=ON"
+            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_INSTALL_TOOLS=ON"
+            export CXX="g++-10"
+          fi
+          BUILD_DIR="build" \
+            CMAKE_BUILD_TYPE=RelWithDebInfo \
+            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS \
+                               -DCMAKE_CXX_STANDARD=$CMAKE_CXX_STANDARD \
+                               -DCMAKE_INSTALL_PREFIX="/usr" \
+                               -DCONTOUR_INSTALL_TOOLS=ON \
+                               -DPEDANTIC_COMPILER=ON \
+                               -DPEDANTIC_COMPILER_WERROR=OFF \
+                               " \
+            ./scripts/ci-prepare-contour.sh
+      - name: "build"
+        run: cmake --build build/ -- -j3
+      - name: "test: crispy"
+        run: ./build/src/crispy/crispy_test
+      - name: "test: libterminal"
+        run: ./build/src/terminal/terminal_test
+      - name: "CPack: Creating DEB package"
+        run: |
+          set -ex
+          cd build
+          cpack -G DEB -V
+          OS_VERSION=${{ matrix.os_version }}
+          OS_VERSION=${OS_OVERRIDE/./_}
+          mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour.deb" \
+                "../contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
+          mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour-dbgsym.ddeb" \
+                "../contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb"
+      - name: "Uploading artifact .deb package"
+        uses: actions/upload-artifact@v3.1.0
+        with:
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
+          path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
+          if-no-files-found: error
+          retention-days: 7
+      - name: "Uploading artifact .ddeb package (debugging symbols)"
+        uses: actions/upload-artifact@v3.1.0
+        with:
+          name: "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb"
+          path: "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb"
+          if-no-files-found: error
+          retention-days: 7
+      - name: "Attempt installing the created .deb"
+        run: |
+          sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
+          sudo dpkg --install "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb"
+
+  # {{{ Release
   do_release:
     name: Create Github release
     runs-on: ubuntu-latest
-    needs: [chk_release, build_ubuntu1804, build_ubuntu2204, build_AppImage, build_windows, build_osx, build_archlinux, build_fedora]
+    needs: [chk_release, package_for_AppImage, package_for_Ubuntu, build_windows, build_osx, build_archlinux, build_fedora]
     steps:
       - uses: actions/checkout@v3
       - name: Installing xmllint for ci-set-vars
@@ -668,3 +653,4 @@ jobs:
           asset_path: contour-${{ steps.set_vars.outputs.version }}-osx.dmg
           asset_name: contour-${{ steps.set_vars.outputs.version }}-osx.dmg
           asset_content_type: application/x-apple-diskimage
+  # }}}
