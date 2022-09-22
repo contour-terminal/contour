@@ -103,9 +103,9 @@
       <description>
         <ul>
           <li>Fixes a problem with oversized glyphs being wrongly cut off (#821).</li>
-          <li>Fixes vertical cursor movement for sixel graphics with only newlines (#822)</li>
-          <li>Fixes sixel rendering for images with aspect ratios other than 1:1</li>
-					<li>Removes `images.sixel_cursor_conformance` config option</li>
+          <li>Fixes vertical cursor movement for sixel graphics with only newlines (#822).</li>
+          <li>Fixes sixel rendering for images with aspect ratios other than 1:1.</li>
+					<li>Removes `images.sixel_cursor_conformance` config option.</li>
         </ul>
       </description>
     </release>
