@@ -338,3 +338,17 @@ TEST_CASE("SixelParser.newline", "[sixel]")
         }
     }
 }
+
+TEST_CASE("SixelParser.vertical_cursor_advance", "[sixel]")
+{
+    auto constexpr defaultColor = RGBAColor { 0, 0, 0, 255 };
+    SixelImageBuilder ib(
+        { Width(5), Height(30) }, 1, 1, defaultColor, std::make_shared<SixelColorPalette>(16, 256));
+    auto sp = SixelParser { ib };
+
+    sp.parseFragment("$-$-$-$-");
+    sp.done();
+
+    REQUIRE(ib.size() == terminal::ImageSize { Width(1), Height(24) });
+    REQUIRE(ib.sixelCursor() == CellLocation { LineOffset(24), ColumnOffset { 0 } });
+}
