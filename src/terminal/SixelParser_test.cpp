@@ -232,13 +232,14 @@ TEST_CASE("SixelParser.rep", "[sixel]")
 
 TEST_CASE("SixelParser.setAndUseColor", "[sixel]")
 {
-    auto constexpr pinColors = std::array<RGBAColor, 4> { RGBAColor { 255, 0, 0, 255 },
+    auto constexpr pinColors = std::array<RGBAColor, 5> { RGBAColor { 255, 255, 255, 255 },
+                                                          RGBAColor { 255, 0, 0, 255 },
                                                           RGBAColor { 0, 255, 0, 255 },
                                                           RGBAColor { 0, 0, 255, 255 },
                                                           RGBAColor { 255, 255, 255, 255 } };
 
     auto constexpr defaultColor = RGBAColor { 0, 0, 0, 0xFF };
-    auto ib = sixelImageBuilder(ImageSize { Width(4), Height(6) }, defaultColor);
+    auto ib = sixelImageBuilder(ImageSize { Width(5), Height(6) }, defaultColor);
     auto sp = SixelParser { ib };
 
     sp.parseFragment("#1;2;100;0;0");
@@ -246,18 +247,20 @@ TEST_CASE("SixelParser.setAndUseColor", "[sixel]")
     sp.parseFragment("#3;2;0;0;100");
     sp.parseFragment("#4;2;100;100;100");
 
+    sp.parseFragment("~"); // We paint with the last set color.
     sp.parseFragment("#1~");
     sp.parseFragment("#2~");
     sp.parseFragment("#3~");
     sp.parseFragment("#4~");
     sp.done();
 
-    REQUIRE(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(4) });
+    REQUIRE(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(5) });
 
     for (auto const [x, y]:
          crispy::times(ib.size().width.as<int>()) * crispy::times(ib.size().height.as<int>()))
     {
-        auto const& expectedColor = x < 4 && y < 6 ? pinColors.at(static_cast<size_t>(x)) : defaultColor;
+        auto const& expectedColor =
+            x < 5 && y < 6 ? pinColors.at(static_cast<size_t>(x ? x : 4)) : defaultColor;
         auto const& actualColor = ib.at(CellLocation { LineOffset(y), ColumnOffset(x) });
         // INFO(fmt::format("at {}, expect {}, actual {}",
         //                  CellLocation { LineOffset(y), ColumnOffset(x) },
