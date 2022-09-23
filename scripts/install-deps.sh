@@ -190,17 +190,32 @@ install_deps_ubuntu()
         libfontconfig1-dev
         libfreetype6-dev
         libharfbuzz-dev
-        libqt5gui5
-        libqt5opengl5-dev
-        libqt5x11extras5-dev
         libx11-xcb-dev
         libyaml-cpp-dev
         make
         ncurses-bin
         pkg-config
-        qtbase5-dev
-        qtmultimedia5-dev
     "
+
+    if test x$QTVER = x6; then
+        packages="$packages
+            libgl1-mesa-dev
+            libglvnd-dev
+            libqt6opengl6-dev
+            libqt6widgets6
+            qt6-base-dev
+            qt6-base-dev-tools
+            qt6-multimedia-dev
+        "
+    else
+        packages="$packages
+            libqt5gui5
+            libqt5opengl5-dev
+            libqt5x11extras5-dev
+            qtbase5-dev
+            qtmultimedia5-dev
+        "
+    fi
 
     RELEASE=`grep VERSION_ID /etc/os-release | cut -d= -f2 | tr -d '"'`
 
@@ -336,13 +351,25 @@ install_deps_fedora()
         libxcb-devel
         ninja-build
         pkgconf
-        qt5-qtbase-devel
-        qt5-qtbase-gui
-        qt5-qtmultimedia-devel
-        qt5-qtx11extras-devel
         range-v3-devel
         yaml-cpp-devel
     "
+
+    if test x$QTVER = x6; then
+        packages="$packages
+            qt6-qtbase-devel
+            qt6-qtbase-gui
+            qt6-qtdeclarative-devel
+            qt6-qtmultimedia-devel
+        "
+    else
+        packages="$packages
+            qt5-qtbase-devel
+            qt5-qtbase-gui
+            qt5-qtmultimedia-devel
+            qt5-qtx11extras-devel
+        "
+    fi
     # Sadly, gsl-devel system package is too old to be used.
     sudo dnf install $SYSDEP_ASSUME_YES $packages
 }

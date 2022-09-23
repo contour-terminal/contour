@@ -83,11 +83,12 @@ jobs:
   fedora:
     strategy:
       matrix:
+        os_version: [35, 36]
         arch:
           [
             "linux/amd64 x86_64"
           ]
-    name: "Fedora ${{ matrix.arch }}"
+    name: "Fedora ${{ matrix.os_version }} ${{ matrix.arch }}"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -132,6 +133,8 @@ jobs:
           set -x
           ARCH="${{ steps.tags.outputs.ARCH }}"
           VERSION="${{ steps.set_vars.outputs.VERSION }}"
+          OS_VERSION="${{ matrix.os_version }}"
+          sed -i -e "s/fedora:35/fedora:${{ matrix.os_version }}/" .github/fedora/Dockerfile
           docker buildx build --platform ${{ steps.tags.outputs.PLATFORM }} \
                   --tag contour:${ARCH} \
                   --build-arg VERSION=${VERSION} \
@@ -140,33 +143,33 @@ jobs:
                   --load \
                   .
           docker create --name contour-${ARCH} contour:${ARCH}
-          docker cp contour-${ARCH}:/app/rpmbuild/RPMS/${ARCH}/contour-${VERSION}-1.fc35.${ARCH}.rpm \
-                    contour-${VERSION}-1.fc35.${ARCH}.rpm
-          docker cp contour-${ARCH}:/app/rpmbuild/RPMS/${ARCH}/contour-debuginfo-${VERSION}-1.fc35.${ARCH}.rpm \
-                    contour-debuginfo-${VERSION}-1.fc35.${ARCH}.rpm
-          docker cp contour-${ARCH}:/app/rpmbuild/RPMS/${ARCH}/contour-debugsource-${VERSION}-1.fc35.${ARCH}.rpm \
-                    contour-debugsource-${VERSION}-1.fc35.${ARCH}.rpm
+          docker cp contour-${ARCH}:/app/rpmbuild/RPMS/${ARCH}/contour-${VERSION}-1.fc${OS_VERSION}.${ARCH}.rpm \
+                    contour-${VERSION}-1.fc${OS_VERSION}.${ARCH}.rpm
+          docker cp contour-${ARCH}:/app/rpmbuild/RPMS/${ARCH}/contour-debuginfo-${VERSION}-1.fc${OS_VERSION}.${ARCH}.rpm \
+                    contour-debuginfo-${VERSION}-1.fc${OS_VERSION}.${ARCH}.rpm
+          docker cp contour-${ARCH}:/app/rpmbuild/RPMS/${ARCH}/contour-debugsource-${VERSION}-1.fc${OS_VERSION}.${ARCH}.rpm \
+                    contour-debugsource-${VERSION}-1.fc${OS_VERSION}.${ARCH}.rpm
           docker container rm contour-${{ steps.tags.outputs.ARCH }}
           echo "pwd: `pwd`" && ls -hla
       - name: "Uploading Fedora RPM package"
         uses: actions/upload-artifact@v2
         with:
-          name: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
-          path: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
+          name: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm"
+          path: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm"
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading Fedora RPM package (debuginfo)"
         uses: actions/upload-artifact@v2
         with:
-          name: "contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
-          path: "contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
+          name: "contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm"
+          path: "contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm"
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading Fedora RPM package (debugsource)"
         uses: actions/upload-artifact@v2
         with:
-          name: "contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
-          path: "contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc35.${{ steps.tags.outputs.ARCH }}.rpm"
+          name: "contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm"
+          path: "contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm"
           if-no-files-found: error
           retention-days: 7
 
@@ -538,10 +541,17 @@ jobs:
         with:
           key: "ccache-ubuntu-${{ matrix.os_version }}"
           max-size: 256M
+      - name: set QTVER
+        id: set_qtver
+        run: |
+          # Recent Ubuntu versions ship with Qt 6. Use it.
+          if [[ ${{ matrix.os_version }} = "22.04" ]]; then
+            echo "::set-output name=QTVER::6"
+          fi
       - name: "install dependencies"
-        run: sudo ./scripts/install-deps.sh
+        run: sudo env QTVER="${{ steps.set_qtver.outputs.QTVER }}" ./scripts/install-deps.sh
       - name: "install GCC 10"
-        if: ${{ startsWith(matrix.OS_VERSION, '18.04') }}
+        if: ${{ startsWith(matrix.os_version, '18.04') }}
         run: sudo apt install g++-10
       - name: "create build directory"
         run: mkdir build
@@ -552,8 +562,9 @@ jobs:
           if [[ "${{ matrix.os_version }}" = "18.04" ]]; then
             CMAKE_CXX_STANDARD=17
             EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DUSE_BOOST_FILESYSTEM=ON"
-            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_INSTALL_TOOLS=ON"
             export CXX="g++-10"
+          elif [[ "${{ matrix.os_version }}" = "22.04" ]]; then
+            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_BUILD_WITH_QT6=ON"
           fi
           BUILD_DIR="build" \
             CMAKE_BUILD_TYPE=RelWithDebInfo \
