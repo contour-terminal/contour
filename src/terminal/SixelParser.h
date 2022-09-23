@@ -21,6 +21,7 @@
 
 #include <array>
 #include <memory>
+#include <optional>
 #include <string_view>
 #include <vector>
 
@@ -71,7 +72,7 @@ class SixelParser: public ParserExtension
 
         /// Defines the aspect ratio (pan / pad = aspect ratio) and image dimensions in pixels for
         /// the upcoming pixel data.
-        virtual void setRaster(int _pan, int _pad, ImageSize _imageSize) = 0;
+        virtual void setRaster(unsigned int _pan, unsigned int _pad, std::optional<ImageSize> _imageSize) = 0;
 
         /// renders a given sixel at the current sixel-cursor position.
         virtual void render(int8_t _sixel) = 0;
@@ -162,8 +163,7 @@ class SixelImageBuilder: public SixelParser::Events
 
     [[nodiscard]] ImageSize maxSize() const noexcept { return maxSize_; }
     [[nodiscard]] ImageSize size() const noexcept { return size_; }
-    [[nodiscard]] int aspectRatioNominator() const noexcept { return aspectRatio_.nominator; }
-    [[nodiscard]] int aspectRatioDenominator() const noexcept { return aspectRatio_.denominator; }
+    [[nodiscard]] unsigned int aspectRatio() const noexcept { return aspectRatio_; }
     [[nodiscard]] RGBColor currentColor() const noexcept { return colors_->at(currentColor_); }
 
     [[nodiscard]] RGBAColor at(CellLocation _coord) const noexcept;
@@ -177,7 +177,7 @@ class SixelImageBuilder: public SixelParser::Events
     void useColor(unsigned _index) override;
     void rewind() override;
     void newline() override;
-    void setRaster(int _pan, int _pad, ImageSize _imageSize) override;
+    void setRaster(unsigned int _pan, unsigned int _pad, std::optional<ImageSize> _imageSize) override;
     void render(int8_t _sixel) override;
     void finalize() override;
 
@@ -193,12 +193,12 @@ class SixelImageBuilder: public SixelParser::Events
     Buffer buffer_; /// RGBA buffer
     CellLocation sixelCursor_;
     unsigned currentColor_;
-    struct
-    {
-        int nominator;
-        int denominator;
-    } aspectRatio_;
     bool explicitSize_ = false;
+    // This is an int because vt3xx takes the given ratio pan/pad and rounds up the ratio
+    // to nearest integers. So 1:3 = 0.33 and it  becomes 1;
+    unsigned int aspectRatio_;
+    // Height of sixel band in pixels
+    unsigned int sixelBandHeight_;
 };
 
 } // namespace terminal

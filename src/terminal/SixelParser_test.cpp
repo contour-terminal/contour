@@ -195,10 +195,29 @@ TEST_CASE("SixelParser.raster", "[sixel]")
     sp.done();
 
     CHECK(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
-    CHECK(ib.aspectRatioNominator() == 12);
-    CHECK(ib.aspectRatioDenominator() == 34);
+    CHECK(ib.aspectRatio() == 1);
     CHECK(*ib.size().width == 32);
     CHECK(*ib.size().height == 24);
+    sp.parseFragment("\"12;34");
+    sp.done();
+    CHECK(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
+    CHECK(ib.aspectRatio() == 1);
+    sp.parseFragment("\"");
+    sp.done();
+    CHECK(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
+    CHECK(ib.aspectRatio() == 1);
+    sp.parseFragment("\"0;0");
+    sp.done();
+    CHECK(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
+    CHECK(ib.aspectRatio() == 1);
+    sp.parseFragment("\"5;0");
+    sp.done();
+    CHECK(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
+    CHECK(ib.aspectRatio() == 1);
+    sp.parseFragment("\"15;2");
+    sp.done();
+    CHECK(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
+    CHECK(ib.aspectRatio() == 8);
 }
 
 TEST_CASE("SixelParser.rep", "[sixel]")
