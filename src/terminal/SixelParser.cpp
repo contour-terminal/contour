@@ -342,6 +342,7 @@ void SixelParser::leaveState()
                         break;
                     }
                 }
+                events_.useColor(index); // Also use the specified color.
             }
             break;
     }
