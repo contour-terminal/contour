@@ -838,6 +838,7 @@ void Screen<Cell>::sendTerminalId()
     _terminal.reply("\033[>{};{};{}c", Pp, Pv, Pc);
 }
 
+// {{{ ED
 template <typename Cell>
 void Screen<Cell>::clearToEndOfScreen()
 {
@@ -871,6 +872,7 @@ void Screen<Cell>::clearScreen()
     // up in case the content is still needed.
     scrollUp(_state.pageSize.lines);
 }
+// }}}
 
 template <typename Cell>
 void Screen<Cell>::eraseCharacters(ColumnCount _n)
@@ -890,6 +892,139 @@ void Screen<Cell>::eraseCharacters(ColumnCount _n)
         line.useCellAt(_state.cursor.position.column + i).reset(_state.cursor.graphicsRendition);
 }
 
+// {{{ DECSEL
+template <typename Cell>
+void Screen<Cell>::selectiveEraseToEndOfLine()
+{
+    if (_terminal.isFullHorizontalMargins() && _state.cursor.position.column.value == 0)
+        selectiveEraseLine(_state.cursor.position.line);
+    else
+        selectiveErase(_state.cursor.position.line,
+                       _state.cursor.position.column,
+                       ColumnOffset::cast_from(_state.pageSize.columns));
+}
+
+template <typename Cell>
+void Screen<Cell>::selectiveEraseToBeginOfLine()
+{
+    if (_terminal.isFullHorizontalMargins()
+        && _state.cursor.position.column.value == _state.pageSize.columns.value)
+        selectiveEraseLine(_state.cursor.position.line);
+    else
+        selectiveErase(_state.cursor.position.line, ColumnOffset(0), _state.cursor.position.column + 1);
+}
+
+template <typename Cell>
+void Screen<Cell>::selectiveEraseLine(LineOffset line)
+{
+    if (containsProtectedCharacters(line, ColumnOffset(0), ColumnOffset::cast_from(_state.pageSize.columns)))
+    {
+        selectiveErase(line, ColumnOffset(0), ColumnOffset::cast_from(_state.pageSize.columns));
+        return;
+    }
+
+    currentLine().reset(grid().defaultLineFlags(), _state.cursor.graphicsRendition);
+
+    auto const left = ColumnOffset(0);
+    auto const right = boxed_cast<ColumnOffset>(_state.pageSize.columns - 1);
+    auto const area = Rect { Top(*line), Left(*left), Bottom(*line), Right(*right) };
+    _terminal.markRegionDirty(area);
+}
+
+template <typename Cell>
+void Screen<Cell>::selectiveErase(LineOffset line, ColumnOffset begin, ColumnOffset end)
+{
+    Cell* i = &at(line, begin);
+    Cell const* e = i + unbox<uintptr_t>(end - begin);
+    while (i != e)
+    {
+        if (i->isFlagEnabled(CellFlags::CharacterProtected))
+        {
+            ++i;
+            continue;
+        }
+        i->reset(_state.cursor.graphicsRendition);
+        ++i;
+    }
+
+    auto const left = begin;
+    auto const right = end - 1;
+    auto const area = Rect { Top(*line), Left(*left), Bottom(*line), Right(*right) };
+    _terminal.markRegionDirty(area);
+}
+
+template <typename Cell>
+bool Screen<Cell>::containsProtectedCharacters(LineOffset line, ColumnOffset begin, ColumnOffset end) const
+{
+    Cell const* i = &at(line, begin);
+    Cell const* e = i + unbox<uintptr_t>(end - begin);
+    while (i != e)
+    {
+        if (i->isFlagEnabled(CellFlags::CharacterProtected))
+            return true;
+        ++i;
+    }
+    return false;
+}
+// }}}
+// {{{ DECSED
+template <typename Cell>
+void Screen<Cell>::selectiveEraseToEndOfScreen()
+{
+    selectiveEraseToEndOfLine();
+
+    auto const lineStart = unbox<int>(_state.cursor.position.line) + 1;
+    auto const lineEnd = unbox<int>(_state.pageSize.lines);
+
+    for (auto const lineOffset: ranges::views::iota(lineStart, lineEnd))
+        selectiveEraseLine(LineOffset::cast_from(lineOffset));
+}
+
+template <typename Cell>
+void Screen<Cell>::selectiveEraseToBeginOfScreen()
+{
+    selectiveEraseToBeginOfLine();
+
+    for (auto const lineOffset: ranges::views::iota(0, *_state.cursor.position.line))
+        selectiveEraseLine(LineOffset::cast_from(lineOffset));
+}
+
+template <typename Cell>
+void Screen<Cell>::selectiveEraseScreen()
+{
+    for (auto const lineOffset: ranges::views::iota(0, *_state.pageSize.lines))
+        selectiveEraseLine(LineOffset::cast_from(lineOffset));
+}
+// }}}
+// {{{ DECSERA
+template <typename Cell>
+void Screen<Cell>::selectiveEraseArea(Rect area)
+{
+    auto const [top, left, bottom, right] = applyOriginMode(area).clampTo(_state.pageSize);
+    assert(unbox<int>(right) <= unbox<int>(_state.pageSize.columns));
+    assert(unbox<int>(bottom) <= unbox<int>(_state.pageSize.lines));
+
+    if (top.value > bottom.value || left.value > right.value)
+        return;
+
+    for (int y = top.value; y <= bottom.value; ++y)
+    {
+        for (Cell& cell: grid()
+                             .lineAt(LineOffset::cast_from(y))
+                             .useRange(ColumnOffset::cast_from(left),
+                                       ColumnCount::cast_from(right.value - left.value + 1)))
+        {
+            if (!cell.isFlagEnabled(CellFlags::CharacterProtected))
+            {
+                cell.writeTextOnly(L' ', 1);
+                cell.setHyperlink(HyperlinkId(0));
+            }
+        }
+    }
+}
+// }}}
+
+// {{{ EL
 template <typename Cell>
 void Screen<Cell>::clearToEndOfLine()
 {
@@ -943,6 +1078,7 @@ void Screen<Cell>::clearLine()
     auto const area = Rect { Top(*line), Left(*left), Bottom(*line), Right(*right) };
     _terminal.markRegionDirty(area);
 }
+// }}}
 
 template <typename Cell>
 void Screen<Cell>::moveCursorToNextLine(LineCount _n)
@@ -1821,9 +1957,11 @@ void Screen<Cell>::requestStatusString(RequestStatusString _value)
             case RequestStatusString::DECSNLS: return fmt::format("{}*|", _state.pageSize.lines);
             case RequestStatusString::SGR:
                 return fmt::format("0;{}m", vtSequenceParameterString(_state.cursor.graphicsRendition));
-            case RequestStatusString::DECSCA: // TODO
-                errorlog()(fmt::format("Requesting device status for {} not implemented yet.", _value));
-                break;
+            case RequestStatusString::DECSCA: {
+                auto const isProtected =
+                    _state.cursor.graphicsRendition.styles & CellFlags::CharacterProtected;
+                return fmt::format("{}\"q", isProtected ? 1 : 2);
+            }
             case RequestStatusString::DECSASD:
                 switch (_state.activeStatusDisplay)
                 {
@@ -3184,6 +3322,48 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         break;
         case DECDC: deleteColumns(seq.param_or(0, ColumnCount(1))); break;
         case DECIC: insertColumns(seq.param_or(0, ColumnCount(1))); break;
+        case DECSCA: {
+            auto const Pc = seq.param_or(0, 0);
+            switch (Pc)
+            {
+                case 1:
+                    _state.cursor.graphicsRendition.styles |= CellFlags::CharacterProtected;
+                    return ApplyResult::Ok;
+                case 0:
+                case 2:
+                    _state.cursor.graphicsRendition.styles &= ~CellFlags::CharacterProtected;
+                    return ApplyResult::Ok;
+                default: return ApplyResult::Invalid;
+            }
+        }
+        case DECSED: {
+            switch (seq.param_or(0, Sequence::Parameter { 0 }))
+            {
+                case 0: selectiveEraseToEndOfScreen(); break;
+                case 1: selectiveEraseToBeginOfScreen(); break;
+                case 2: selectiveEraseScreen(); break;
+                default: return ApplyResult::Unsupported;
+            }
+            return ApplyResult::Ok;
+        }
+        case DECSERA: {
+            auto const top = seq.param_or(0, Top(1)) - 1;
+            auto const left = seq.param_or(1, Left(1)) - 1;
+            auto const bottom = seq.param_or(2, Bottom::cast_from(_state.pageSize.lines)) - 1;
+            auto const right = seq.param_or(3, Right::cast_from(_state.pageSize.columns)) - 1;
+            selectiveEraseArea(Rect { top, left, bottom, right });
+            return ApplyResult::Ok;
+        }
+        case DECSEL: {
+            switch (seq.param_or(0, Sequence::Parameter { 0 }))
+            {
+                case 0: selectiveEraseToEndOfLine(); break;
+                case 1: selectiveEraseToBeginOfLine(); break;
+                case 2: selectiveEraseLine(_state.cursor.position.line); break;
+                default: return ApplyResult::Invalid;
+            }
+            return ApplyResult::Ok;
+        }
         case DECRM: {
             ApplyResult r = ApplyResult::Ok;
             crispy::for_each(crispy::times(seq.parameterCount()), [&](size_t i) {

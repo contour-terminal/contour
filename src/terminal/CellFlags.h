@@ -23,7 +23,7 @@
 namespace terminal
 {
 
-enum class CellFlags : uint16_t
+enum class CellFlags : uint32_t
 {
     None = 0,
 
@@ -43,6 +43,7 @@ enum class CellFlags : uint16_t
     Encircled = (1 << 13),
     Overline = (1 << 14),
     RapidBlinking = (1 << 15),
+    CharacterProtected = (1 << 16), // Character is protected by selective erase operations.
 };
 
 constexpr CellFlags& operator|=(CellFlags& a, CellFlags b) noexcept
@@ -101,7 +102,7 @@ struct formatter<terminal::CellFlags>
     template <typename FormatContext>
     auto format(const terminal::CellFlags _flags, FormatContext& ctx)
     {
-        static const std::array<std::pair<terminal::CellFlags, std::string_view>, 16> nameMap = {
+        static const std::array<std::pair<terminal::CellFlags, std::string_view>, 17> nameMap = {
             std::pair { terminal::CellFlags::Bold, std::string_view("Bold") },
             std::pair { terminal::CellFlags::Faint, std::string_view("Faint") },
             std::pair { terminal::CellFlags::Italic, std::string_view("Italic") },
@@ -118,6 +119,7 @@ struct formatter<terminal::CellFlags>
             std::pair { terminal::CellFlags::Framed, std::string_view("Framed") },
             std::pair { terminal::CellFlags::Encircled, std::string_view("Encircled") },
             std::pair { terminal::CellFlags::Overline, std::string_view("Overline") },
+            std::pair { terminal::CellFlags::CharacterProtected, std::string_view("CharacterProtected") },
         };
         std::string s;
         for (auto const& mapping: nameMap)
