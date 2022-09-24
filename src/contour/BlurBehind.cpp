@@ -32,7 +32,7 @@
 
 #if defined(CONTOUR_FRONTEND_XCB)
     #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-        #include <private/qtx11extras_p.h>
+        #include <QtGui/QGuiApplication>
     #else
         #include <QtX11Extras/QX11Info>
     #endif
@@ -55,11 +55,27 @@ namespace
         xcb_atom_t propertyAtom;
     };
 
+    xcb_connection_t* x11Connection()
+    {
+    #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        if (!qApp)
+            return nullptr;
+
+        auto native = qApp->nativeInterface<QNativeInterface::QX11Application>();
+        if (!native)
+            return nullptr;
+
+        return native->connection();
+    #else
+        return QX11Info::connection();
+    #endif
+    }
+
     optional<XcbPropertyInfo> queryXcbPropertyInfo(QWindow* window, string const& name)
     {
         auto const winId = static_cast<xcb_window_t>(window->winId());
 
-        xcb_connection_t* xcbConnection = QX11Info::connection();
+        xcb_connection_t* xcbConnection = x11Connection();
         if (!xcbConnection)
             return nullopt;
 

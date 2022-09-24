@@ -24,21 +24,22 @@ BuildRequires:  gcc-c++
 BuildRequires:  harfbuzz-devel
 BuildRequires:  ninja-build
 BuildRequires:  pkgconf
-BuildRequires:  qt5-qtbase-devel
-BuildRequires:  qt5-qtbase-gui
-BuildRequires:  qt5-qtmultimedia-devel
+BuildRequires:  qt6-qtbase-devel
+BuildRequires:  qt6-qtbase-gui
+BuildRequires:  qt6-qtdeclarative-devel
+BuildRequires:  qt6-qtmultimedia-devel
 
 Requires:       fontconfig
 Requires:       freetype
 Requires:       harfbuzz
-Requires:       qt5-qtbase
-Requires:       qt5-qtbase-gui
+Requires:       qt6-qtbase
+Requires:       qt6-qtbase-gui
+Requires:       qt6-qtmultimedia-devel
 Requires:       yaml-cpp
-Requires:       qt5-qtmultimedia-devel
 
 %description
-contour is a modern terminal emulator, for everyday use.
-It is aiming for power users with a modern feature mindset.
+Contour is a modern and actually fast, modal, virtual terminal emulator,
+for everyday use. It is aiming for power users with a modern feature mindset.
 
 
 %prep
@@ -49,6 +50,7 @@ It is aiming for power users with a modern feature mindset.
 cmake . \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DCMAKE_INSTALL_PREFIX=/usr \
+    -DCONTOUR_BUILD_WITH_QT6=ON \
     -DPEDANTIC_COMPILER=ON \
     -DPEDANTIC_COMPILER_WERROR=ON \
     -B build \
