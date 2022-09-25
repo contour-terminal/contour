@@ -23,6 +23,7 @@ using std::vector;
 
 // VT 340 sixel protocol is defined here: https://vt100.net/docs/vt3xx-gp/chapter14.html
 
+using namespace std;
 namespace terminal
 {
 
@@ -289,13 +290,17 @@ void SixelParser::leaveState()
         case State::RepeatIntroducer: break;
 
         case State::RasterSettings:
-            if (params_.size() == 4)
+            if (params_.size() > 1 && params_.size() < 5)
             {
                 auto const pan = params_[0];
                 auto const pad = params_[1];
-                auto const xPixels = Width(params_[2]);
-                auto const yPixels = Height(params_[3]);
-                events_.setRaster((int) pan, (int) pad, ImageSize { xPixels, yPixels });
+
+                auto const imageSize =
+                    params_.size() > 2
+                        ? optional<ImageSize> { ImageSize { Width(params_[2]), Height(params_[3]) } }
+                        : std::nullopt;
+
+                events_.setRaster(pan, pad, imageSize);
                 state_ = State::Ground;
             }
             break;
@@ -371,7 +376,9 @@ SixelImageBuilder::SixelImageBuilder(ImageSize _maxSize,
     buffer_(maxSize_.area() * 4),
     sixelCursor_ {},
     currentColor_ { 0 },
-    aspectRatio_ { _aspectVertical, _aspectHorizontal }
+    aspectRatio_(static_cast<unsigned int>(
+        std::ceil(static_cast<float>(_aspectVertical) / static_cast<float>(_aspectHorizontal)))),
+    sixelBandHeight_(6 * aspectRatio_)
 {
     clear(_backgroundColor);
 }
@@ -408,23 +415,20 @@ void SixelImageBuilder::write(CellLocation const& _coord, RGBColor const& _value
         if (!explicitSize_)
         {
             if (unbox<int>(_coord.line) >= unbox<int>(size_.height))
-                size_.height = Height::cast_from(_coord.line + 1);
+                size_.height = Height::cast_from(_coord.line.as<unsigned int>() + aspectRatio_);
             if (unbox<int>(_coord.column) >= unbox<int>(size_.width))
                 size_.width = Width::cast_from(_coord.column + 1);
         }
 
-        for (auto i = 0; i < aspectRatio_.nominator; ++i)
+        for (unsigned int i = 0; i < aspectRatio_; ++i)
         {
-            auto const base = unbox<unsigned>(_coord.line + i)
-                                  * unbox<unsigned>((explicitSize_ ? size_.width : maxSize_.width)) * 4
-                              + unbox<unsigned>(_coord.column) * 4;
-            for (auto j = 0; j < aspectRatio_.denominator; ++j)
-            {
-                buffer_[base + 0 + 4 * static_cast<unsigned int>(j)] = _value.red;
-                buffer_[base + 1 + 4 * static_cast<unsigned int>(j)] = _value.green;
-                buffer_[base + 2 + 4 * static_cast<unsigned int>(j)] = _value.blue;
-                buffer_[base + 3 + 4 * static_cast<unsigned int>(j)] = 0xFF;
-            }
+            auto const base = (_coord.line.as<unsigned int>() + i)
+                                  * unbox<unsigned int>((explicitSize_ ? size_.width : maxSize_.width)) * 4u
+                              + unbox<unsigned int>(_coord.column) * 4u;
+            buffer_[base + 0] = _value.red;
+            buffer_[base + 1] = _value.green;
+            buffer_[base + 2] = _value.blue;
+            buffer_[base + 3] = 0xFF;
         }
     }
 }
@@ -447,19 +451,25 @@ void SixelImageBuilder::rewind()
 void SixelImageBuilder::newline()
 {
     sixelCursor_.column = {};
-    if (unbox<int>(sixelCursor_.line) + 6 < unbox<int>(explicitSize_ ? size_.height : maxSize_.height))
-        sixelCursor_.line.value += 6;
+    if (unbox<unsigned int>(sixelCursor_.line) + sixelBandHeight_
+        < unbox<unsigned int>(explicitSize_ ? size_.height : maxSize_.height))
+        sixelCursor_.line = LineOffset::cast_from(sixelCursor_.line.as<unsigned int>() + sixelBandHeight_);
 }
 
-void SixelImageBuilder::setRaster(int _pan, int _pad, ImageSize _imageSize)
+void SixelImageBuilder::setRaster(unsigned int _pan, unsigned int _pad, optional<ImageSize> _imageSize)
 {
-    aspectRatio_.nominator = _pan;
-    aspectRatio_.denominator = _pad;
-    size_.width = clamp(_imageSize.width, Width(0), maxSize_.width);
-    size_.height = clamp(_imageSize.height, Height(0), maxSize_.height);
-
-    buffer_.resize(size_.area() * static_cast<size_t>(_pad * _pan) * 4);
-    explicitSize_ = true;
+    if (_pad != 0)
+        aspectRatio_ = max(
+            1u, static_cast<unsigned int>(std::ceil(static_cast<float>(_pan) / static_cast<float>(_pad))));
+    sixelBandHeight_ = 6 * aspectRatio_;
+    if (_imageSize)
+    {
+        _imageSize->height = Height::cast_from(_imageSize->height.value * aspectRatio_);
+        size_.width = clamp(_imageSize->width, Width(0), maxSize_.width);
+        size_.height = clamp(_imageSize->height, Height(0), maxSize_.height);
+        buffer_.resize(size_.area() * 4);
+        explicitSize_ = true;
+    }
 }
 
 void SixelImageBuilder::render(int8_t _sixel)
@@ -468,9 +478,9 @@ void SixelImageBuilder::render(int8_t _sixel)
     auto const x = sixelCursor_.column;
     if (unbox<int>(x) < unbox<int>((explicitSize_ ? size_.width : maxSize_.width)))
     {
-        for (int i = 0; i < 6; ++i)
+        for (unsigned int i = 0; i < 6; ++i)
         {
-            auto const y = sixelCursor_.line + i;
+            auto const y = sixelCursor_.line + static_cast<int>(i * aspectRatio_);
             auto const pos = CellLocation { y, x };
             auto const pin = 1 << i;
             auto const pinned = (_sixel & pin) != 0;
@@ -485,7 +495,7 @@ void SixelImageBuilder::finalize()
 {
     if (unbox<int>(size_.height) == 1)
     {
-        size_.height = Height::cast_from(sixelCursor_.line * aspectRatio_.nominator);
+        size_.height = Height::cast_from(sixelCursor_.line.as<unsigned int>() * aspectRatio_);
         buffer_.resize(size_.area() * 4);
         return;
     }

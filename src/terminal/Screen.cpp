@@ -3413,8 +3413,8 @@ unique_ptr<ParserExtension> Screen<Cell>::hookSixel(Sequence const& _seq)
             case 3: return 3;
             case 2: return 5;
             case 1:
-            case 0:
-            default: return 2;
+            case 0: return 2;
+            default: return 1;
         }
     }(Pa);
 
