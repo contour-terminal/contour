@@ -56,6 +56,14 @@ struct FontKeys
     text::font_key emoji;
 };
 
+struct TextRendererEvents
+{
+    virtual ~TextRendererEvents() = default;
+
+    virtual void onBeforeRenderingText() = 0;
+    virtual void onAfterRenderingText() = 0;
+};
+
 /// Text Rendering Pipeline
 class TextRenderer: public Renderable
 {
@@ -63,7 +71,8 @@ class TextRenderer: public Renderable
     TextRenderer(GridMetrics const& gridMetrics,
                  text::shaper& textShaper,
                  FontDescriptions& fontDescriptions,
-                 FontKeys const& fontKeys);
+                 FontKeys const& fontKeys,
+                 TextRendererEvents& textRendererEventHandler);
 
     void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
     void setTextureAtlas(TextureAtlas& atlas) override;
@@ -135,6 +144,7 @@ class TextRenderer: public Renderable
 
     // general properties
     //
+    TextRendererEvents& textRendererEvents_;
     FontDescriptions& fontDescriptions_;
     FontKeys const& fonts_;
 

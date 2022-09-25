@@ -106,6 +106,7 @@
           <li>Fixes Sixel mode, when updating the color palette with a new color, that color must also be used for subsequent paints.</li>
           <li>Fixes vertical cursor movement for Sixel graphics with only newlines (#822).</li>
           <li>Fixes Sixel rendering for images with aspect ratios other than 1:1.</li>
+          <li>Fixes Sixel rendering for images that show below but should be rendered above text (#831).</li>
 					<li>Removes `images.sixel_cursor_conformance` config option.</li>
         </ul>
       </description>

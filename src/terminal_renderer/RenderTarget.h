@@ -185,6 +185,11 @@ class Renderable
         TileSliceIndex sliceIndex,
         atlas::TileLocation tileLocation);
 
+    atlas::RenderTile createRenderTile(atlas::RenderTile::X x,
+                                       atlas::RenderTile::Y y,
+                                       RGBAColor color,
+                                       Renderable::AtlasTileAttributes const& attributes);
+
     void renderTile(atlas::RenderTile::X x,
                     atlas::RenderTile::Y y,
                     RGBAColor color,

@@ -91,10 +91,10 @@ auto Renderable::sliceTileData(Renderable::TextureAtlas::TileCreateData const& c
                           createData.metadata.fragmentShaderSelector);
 }
 
-void Renderable::renderTile(atlas::RenderTile::X x,
-                            atlas::RenderTile::Y y,
-                            RGBAColor color,
-                            Renderable::AtlasTileAttributes const& attributes)
+atlas::RenderTile Renderable::createRenderTile(atlas::RenderTile::X x,
+                                               atlas::RenderTile::Y y,
+                                               RGBAColor color,
+                                               Renderable::AtlasTileAttributes const& attributes)
 {
     auto renderTile = atlas::RenderTile {};
     renderTile.x = atlas::RenderTile::X { x };
@@ -105,5 +105,13 @@ void Renderable::renderTile(atlas::RenderTile::X x,
     renderTile.normalizedLocation = attributes.metadata.normalizedLocation;
     renderTile.targetSize = attributes.metadata.targetSize;
     renderTile.tileLocation = attributes.location;
-    textureScheduler().renderTile(renderTile);
+    return renderTile;
+}
+
+void Renderable::renderTile(atlas::RenderTile::X x,
+                            atlas::RenderTile::Y y,
+                            RGBAColor color,
+                            Renderable::AtlasTileAttributes const& attributes)
+{
+    textureScheduler().renderTile(createRenderTile(x, y, color, attributes));
 }
