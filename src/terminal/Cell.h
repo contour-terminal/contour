@@ -120,6 +120,8 @@ class CONTOUR_PACKED Cell
                uint8_t _width,
                HyperlinkId _hyperlink) noexcept;
 
+    void writeTextOnly(char32_t _ch, uint8_t _width) noexcept;
+
     std::u32string codepoints() const;
     char32_t codepoint(size_t i) const noexcept;
     std::size_t codepointCount() const noexcept;
@@ -292,12 +294,11 @@ inline void Cell::write(GraphicsAttributes const& _attributes,
                         uint8_t _width,
                         HyperlinkId _hyperlink) noexcept
 {
-    setWidth(_width);
-
-    codepoint_ = _ch;
+    writeTextOnly(_ch, _width);
     if (extra_)
     {
         extra_->codepoints.clear();
+        // Writing text into a cell destroys the image fragment (as least for Sixels).
         extra_->imageFragment = {};
     }
 
@@ -312,6 +313,14 @@ inline void Cell::write(GraphicsAttributes const& _attributes,
         ext.hyperlink = _hyperlink;
         ext.flags = _attributes.styles;
     }
+}
+
+inline void Cell::writeTextOnly(char32_t _ch, uint8_t _width) noexcept
+{
+    setWidth(_width);
+    codepoint_ = _ch;
+    if (extra_)
+        extra_->codepoints.clear();
 }
 
 inline void Cell::reset(GraphicsAttributes const& _attributes, HyperlinkId _hyperlink) noexcept

@@ -144,6 +144,23 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void clearToEndOfScreen();
     void clearScreen();
 
+    // DECSEL
+    void selectiveEraseToBeginOfLine();
+    void selectiveEraseToEndOfLine();
+    void selectiveEraseLine(LineOffset line);
+
+    // DECSED
+    void selectiveEraseToBeginOfScreen();
+    void selectiveEraseToEndOfScreen();
+    void selectiveEraseScreen();
+
+    void selectiveEraseArea(Rect area);
+
+    void selectiveErase(LineOffset line, ColumnOffset begin, ColumnOffset end);
+    [[nodiscard]] bool containsProtectedCharacters(LineOffset line,
+                                                   ColumnOffset begin,
+                                                   ColumnOffset end) const;
+
     void eraseCharacters(ColumnCount _n);  // ECH
     void insertCharacters(ColumnCount _n); // ICH
     void deleteCharacters(ColumnCount _n); // DCH
@@ -291,6 +308,36 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
             return pos;
         else
             return { pos.line + _state.margin.vertical.from, pos.column + _state.margin.horizontal.from };
+    }
+
+    [[nodiscard]] LineOffset applyOriginMode(LineOffset line) const noexcept
+    {
+        if (!_state.cursor.originMode)
+            return line;
+        else
+            return line + _state.margin.vertical.from;
+    }
+
+    [[nodiscard]] ColumnOffset applyOriginMode(ColumnOffset column) const noexcept
+    {
+        if (!_state.cursor.originMode)
+            return column;
+        else
+            return column + _state.margin.horizontal.from;
+    }
+
+    [[nodiscard]] Rect applyOriginMode(Rect area) const noexcept
+    {
+        if (!_state.cursor.originMode)
+            return area;
+
+        auto const top = Top::cast_from(area.top.value + _state.margin.vertical.from.value);
+        auto const left = Left::cast_from(area.top.value + _state.margin.horizontal.from.value);
+        auto const bottom = Bottom::cast_from(area.bottom.value + _state.margin.vertical.from.value);
+        auto const right = Right::cast_from(area.right.value + _state.margin.horizontal.from.value);
+        // TODO: Should this automatically clamp to margin's botom/right values?
+
+        return Rect { top, left, bottom, right };
     }
 
     /// Clamps given coordinates, respecting DECOM (Origin Mode).

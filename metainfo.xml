@@ -108,7 +108,8 @@
           <li>Fixes vertical cursor movement for Sixel graphics with only newlines (#822).</li>
           <li>Fixes Sixel rendering for images with aspect ratios other than 1:1.</li>
           <li>Fixes Sixel rendering for images that show below but should be rendered above text (#831).</li>
-					<li>Removes `images.sixel_cursor_conformance` config option.</li>
+          <li>Removes `images.sixel_cursor_conformance` config option.</li>
+          <li>Adds VT sequence DECSCA, DECSEL, DECSED and DECSERA to support protected grid areas during erase operations (#29, #30, #31).</li>
         </ul>
       </description>
     </release>

@@ -281,51 +281,6 @@ struct Range
 };
 
 // }}}
-// {{{ Rect & Margin
-
-// Rectangular operations
-//
-using Top = crispy::boxed<int, detail::tags::Top>;
-using Left = crispy::boxed<int, detail::tags::Left>;
-using Bottom = crispy::boxed<int, detail::tags::Bottom>;
-using Right = crispy::boxed<int, detail::tags::Right>;
-
-// Rectangular screen operations
-//
-struct Rect
-{
-    Top top;
-    Left left;
-    Bottom bottom;
-    Right right;
-};
-
-// Screen's page margin
-//
-struct PageMargin
-{
-    Top top;
-    Left left;
-    Bottom bottom;
-    Right right;
-};
-
-constexpr Range horizontal(PageMargin m) noexcept
-{
-    return Range { From { *m.top }, To { *m.bottom } };
-}
-constexpr Range vertical(PageMargin m) noexcept
-{
-    return Range { From { *m.left }, To { *m.right } };
-}
-
-// }}}
-// {{{ Length
-
-// Lengths and Ranges
-using Length = crispy::boxed<int, detail::tags::Length>;
-
-// }}}
 // {{{ PageSize
 struct PageSize
 {
@@ -360,6 +315,59 @@ constexpr bool operator<(CellLocation location, PageSize pageSize) noexcept
     return location.line < boxed_cast<LineOffset>(pageSize.lines)
            && location.column < boxed_cast<ColumnOffset>(pageSize.columns);
 }
+// }}}
+// {{{ Rect & Margin
+
+// Rectangular operations
+//
+using Top = crispy::boxed<int, detail::tags::Top>;
+using Left = crispy::boxed<int, detail::tags::Left>;
+using Bottom = crispy::boxed<int, detail::tags::Bottom>;
+using Right = crispy::boxed<int, detail::tags::Right>;
+
+// Rectangular screen operations
+//
+struct Rect
+{
+    Top top;
+    Left left;
+    Bottom bottom;
+    Right right;
+
+    [[nodiscard]] Rect clampTo(PageSize size) const noexcept
+    {
+        return Rect { top,
+                      left,
+                      std::min(bottom, Bottom::cast_from(size.lines)),
+                      std::min(right, Right::cast_from(size.columns)) };
+    }
+};
+
+// Screen's page margin
+//
+struct PageMargin
+{
+    Top top;
+    Left left;
+    Bottom bottom;
+    Right right;
+};
+
+constexpr Range horizontal(PageMargin m) noexcept
+{
+    return Range { From { *m.top }, To { *m.bottom } };
+}
+constexpr Range vertical(PageMargin m) noexcept
+{
+    return Range { From { *m.left }, To { *m.right } };
+}
+
+// }}}
+// {{{ Length
+
+// Lengths and Ranges
+using Length = crispy::boxed<int, detail::tags::Length>;
+
 // }}}
 // {{{ Coordinate types
 
