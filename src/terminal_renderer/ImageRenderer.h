@@ -16,6 +16,7 @@
 #include <terminal/Image.h>
 
 #include <terminal_renderer/RenderTarget.h>
+#include <terminal_renderer/TextRenderer.h>
 
 #include <crispy/FNV.h>
 #include <crispy/point.h>
@@ -51,7 +52,7 @@ struct ImageFragmentKey
 /// Image Rendering API.
 ///
 /// Can render any arbitrary RGBA image (for example Sixel Graphics images).
-class ImageRenderer: public Renderable
+class ImageRenderer: public Renderable, public TextRendererEvents
 {
   public:
     ImageRenderer(GridMetrics const& gridMetrics, ImageSize cellSize);
@@ -70,8 +71,15 @@ class ImageRenderer: public Renderable
 
     void inspect(std::ostream& output) const override;
 
+    void beginFrame();
+    void endFrame();
+
+    void onBeforeRenderingText() override;
+    void onAfterRenderingText() override;
+
   private:
     AtlasTileAttributes const* getOrCreateCachedTileAttributes(ImageFragment const& fragment);
+    std::vector<atlas::RenderTile> pendingRenderTilesAboveText_;
 
     // private data
     //

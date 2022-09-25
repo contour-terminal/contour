@@ -54,11 +54,42 @@ void ImageRenderer::renderImage(crispy::Point _pos, ImageFragment const& fragmen
         return;
 
     // clang-format off
-    renderTile(atlas::RenderTile::X { _pos.x },
-               atlas::RenderTile::Y { _pos.y },
-               RGBAColor::White,
-               *tileAttributes);
+    pendingRenderTilesAboveText_.emplace_back(createRenderTile(atlas::RenderTile::X { _pos.x },
+                                                               atlas::RenderTile::Y { _pos.y },
+                                                               RGBAColor::White, *tileAttributes));
     // clang-format on
+}
+
+void ImageRenderer::onBeforeRenderingText()
+{
+    // We could render here the images that should go below text.
+}
+
+void ImageRenderer::onAfterRenderingText()
+{
+    // We render here the images that should go above text.
+
+    for (auto& tile: pendingRenderTilesAboveText_)
+        textureScheduler().renderTile(std::move(tile));
+
+    pendingRenderTilesAboveText_.clear();
+}
+
+void ImageRenderer::beginFrame()
+{
+    assert(pendingRenderTilesAboveText_.empty());
+}
+
+void ImageRenderer::endFrame()
+{
+    if (!pendingRenderTilesAboveText_.empty())
+    {
+        // In case some image tiles are still pending but no text had to be rendered.
+
+        for (auto& tile: pendingRenderTilesAboveText_)
+            textureScheduler().renderTile(std::move(tile));
+        pendingRenderTilesAboveText_.clear();
+    }
 }
 
 Renderable::AtlasTileAttributes const* ImageRenderer::getOrCreateCachedTileAttributes(

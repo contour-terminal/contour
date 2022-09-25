@@ -305,8 +305,10 @@ constexpr uint32_t TextShapingCacheSize = 4000;
 TextRenderer::TextRenderer(GridMetrics const& gridMetrics,
                            text::shaper& _textShaper,
                            FontDescriptions& _fontDescriptions,
-                           FontKeys const& _fonts):
+                           FontKeys const& _fonts,
+                           TextRendererEvents& eventHandler):
     Renderable { gridMetrics },
+    textRendererEvents_ { eventHandler },
     fontDescriptions_ { _fontDescriptions },
     fonts_ { _fonts },
     textShapingCache_ { ShapingResultCache::create(crispy::StrongHashtableSize { 16384 },
@@ -633,6 +635,8 @@ void TextRenderer::flushTextClusterGroup()
         //            _gridMetrics.cellSize.width,
         //            textClusterGroup_.codepoints.size());
 
+        textRendererEvents_.onBeforeRenderingText();
+
         auto hash = hashTextAndStyle(
             u32string_view(textClusterGroup_.codepoints.data(), textClusterGroup_.codepoints.size()),
             textClusterGroup_.style);
@@ -679,6 +683,7 @@ void TextRenderer::flushTextClusterGroup()
                 pen.x += static_cast<decltype(pen.x)>(advanceX);
             }
         }
+        textRendererEvents_.onAfterRenderingText();
     }
 
     textClusterGroup_.resetAndMovePenForward(textClusterGroup_.cellCount

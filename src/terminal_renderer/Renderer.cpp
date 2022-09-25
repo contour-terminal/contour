@@ -146,7 +146,7 @@ Renderer::Renderer(PageSize pageSize,
     backgroundOpacity_ { backgroundOpacity },
     backgroundRenderer_ { gridMetrics_, colorPalette.defaultBackground },
     imageRenderer_ { gridMetrics_, cellSize() },
-    textRenderer_ { gridMetrics_, *textShaper_, fontDescriptions_, fonts_ },
+    textRenderer_ { gridMetrics_, *textShaper_, fontDescriptions_, fonts_, imageRenderer_ },
     decorationRenderer_ { gridMetrics_, hyperlinkNormal, hyperlinkHover },
     cursorRenderer_ { gridMetrics_, CursorShape::Block }
 {
@@ -313,6 +313,7 @@ uint64_t Renderer::render(Terminal& _terminal, bool _pressure)
 #endif // }}}
 
     optional<terminal::RenderCursor> cursorOpt;
+    imageRenderer_.beginFrame();
     textRenderer_.beginFrame();
     textRenderer_.setPressure(_pressure && _terminal.isPrimaryScreen());
     {
@@ -322,6 +323,7 @@ uint64_t Renderer::render(Terminal& _terminal, bool _pressure)
         renderLines(renderBuffer.get().lines);
     }
     textRenderer_.endFrame();
+    imageRenderer_.endFrame();
 
     if (cursorOpt && cursorOpt.value().shape != CursorShape::Block)
     {
