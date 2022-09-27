@@ -637,52 +637,65 @@ void TerminalWidget::focusOutEvent(QFocusEvent* _event)
 
 void TerminalWidget::inputMethodEvent(QInputMethodEvent* _event)
 {
+    terminal().updateInputMethodPreeditString(_event->preeditString().toStdString());
+
     if (!_event->commitString().isEmpty())
     {
+        assert(_event->preeditString().isEmpty());
         QKeyEvent keyEvent(QEvent::KeyPress, 0, Qt::NoModifier, _event->commitString());
         keyPressEvent(&keyEvent);
-        // TODO: emit keyPressedSignal(&keyEvent);
     }
-
-    // if (_readOnly && isCursorOnDisplay())
-    // {
-    //     // _inputMethodData.preeditString = event->preeditString();
-    //     // update(preeditRect() | _inputMethodData.previousPreeditRect);
-    // }
 
     _event->accept();
 }
 
 QVariant TerminalWidget::inputMethodQuery(Qt::InputMethodQuery _query) const
 {
-    const QPoint cursorPos = QPoint(); // TODO: realCursorPosition();
+    QPoint cursorPos = QPoint();
+    if (terminal().isCursorInViewport())
+    {
+        auto const gridCursorPos = terminal().cursor().position;
+        cursorPos.setX(int(unbox<double>(gridCursorPos.column)
+                           * unbox<double>(renderer_->gridMetrics().cellSize.width)));
+        cursorPos.setY(int(unbox<double>(gridCursorPos.line + 1)
+                           * unbox<double>(renderer_->gridMetrics().cellSize.height)));
+        cursorPos /= contentScale();
+    }
+
     switch (_query)
     {
-        // TODO?: case Qt::ImCursorRectangle:
-        // case Qt::ImMicroFocus:
-        //     return imageToWidget(QRect(cursorPos.x(), cursorPos.y(), 1, 1));
-        case Qt::ImFont: return font();
+        case Qt::ImCursorRectangle: {
+            auto const& gridMetrics = renderer_->gridMetrics();
+            auto theContentsRect = contentsRect();
+            auto result = QRect();
+            result.setLeft(theContentsRect.left() + cursorPos.x());
+            result.setTop(theContentsRect.top() + cursorPos.y());
+            result.setWidth(unbox<int>(gridMetrics.cellSize.width)); // TODO: respect double-width characters
+            result.setHeight(unbox<int>(gridMetrics.cellSize.height));
+            return result;
+            break;
+        }
+        case Qt::ImFont:
+            // Font to use for IME.
+            return font();
         case Qt::ImCursorPosition:
             // return the cursor position within the current line
             return cursorPos.x();
-        // case Qt::ImSurroundingText:
-        // {
-        //     // return the text from the current line
-        //     QString lineText;
-        //     QTextStream stream(&lineText);
-        //     PlainTextDecoder decoder;
-        //     decoder.begin(&stream);
-        //     if (isCursorOnDisplay()) {
-        //         decoder.decodeLine(&_image[loc(0, cursorPos.y())], _usedColumns, LINE_DEFAULT);
-        //     }
-        //     decoder.end();
-        //     return lineText;
-        // }
-        case Qt::ImCurrentSelection: return QString();
-        default: break;
-    }
+        case Qt::ImSurroundingText:
+            // return the text from the current line
+            if (terminal().isCursorInViewport())
+                return QString::fromStdString(
+                    terminal().currentScreen().lineTextAt(terminal().cursor().position.line));
 
-    return QVariant();
+            return QString();
+        case Qt::ImCurrentSelection:
+            // Nothing selected.
+            return QString();
+        default:
+            // bubble up
+            break;
+    }
+    return QOpenGLWidget::inputMethodQuery(_query);
 }
 
 bool TerminalWidget::event(QEvent* _event)

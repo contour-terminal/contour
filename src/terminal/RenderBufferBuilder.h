@@ -25,7 +25,8 @@ class RenderBufferBuilder
                         RenderBuffer& output,
                         LineOffset base,
                         bool reverseVideo,
-                        HighlightSearchMatches highlightSearchMatches);
+                        HighlightSearchMatches highlightSearchMatches,
+                        InputMethodData inputMethodData);
 
     /// Renders a single grid cell.
     /// This call is guaranteed to be invoked sequencially, from top line
@@ -96,6 +97,11 @@ class RenderBufferBuilder
     [[nodiscard]] RenderAttributes createRenderAttributes(
         CellLocation gridPosition, GraphicsAttributes graphicsAttributes) const noexcept;
 
+    ColumnCount renderUtf8Text(CellLocation screenPosition,
+                               GraphicsAttributes attributes,
+                               std::string_view text,
+                               bool allowMatchSearchPattern);
+
     template <typename T>
     void matchSearchPattern(T const& cellText);
 
@@ -109,6 +115,8 @@ class RenderBufferBuilder
     LineOffset baseLine;
     bool reverseVideo;
     HighlightSearchMatches _highlightSearchMatches;
+    InputMethodData _inputMethodData;
+    ColumnCount _inputMethodSkipColumns = ColumnCount(0);
 
     int prevWidth = 0;
     bool prevHasCursor = false;

@@ -68,6 +68,12 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
         return session_->profile();
     }
 
+    [[nodiscard]] terminal::Terminal const& terminal() const noexcept
+    {
+        assert(session_ != nullptr);
+        return session_->terminal();
+    }
+
     [[nodiscard]] terminal::Terminal& terminal() noexcept
     {
         assert(session_ != nullptr);
