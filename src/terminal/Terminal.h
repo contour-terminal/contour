@@ -204,6 +204,10 @@ class Terminal
         return insideVerticalMargin && insideHorizontalMargin;
     }
 
+    [[nodiscard]] bool isCursorInViewport() const noexcept
+    {
+        return viewport().isLineVisible(cursor().position.line);
+    }
     // }}}
 
     constexpr ImageSize cellPixelSize() const noexcept { return state_.cellPixelSize; }
