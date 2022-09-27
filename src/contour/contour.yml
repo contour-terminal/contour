@@ -398,9 +398,9 @@ color_schemes:
         # Default colors
         default:
             # Default background color (this can be made transparent, see above).
-            background: '#1d1f21'
+            background: '#000000'
             # Default foreground text color.
-            foreground: '#d5d8d6'
+            foreground: '#d0d0d0'
 
         # Background image support.
         background_image:
@@ -459,7 +459,7 @@ color_schemes:
             # Specifies the color to be used for the selected text.
             #
             # Default: CellBackground
-            foreground: CellBackground
+            foreground: CellForeground
             # Specifies the alpha value (between 0.0 and 1.0) the configured foreground color
             # will contribute to the original color.
             #
@@ -469,13 +469,13 @@ color_schemes:
             # Specifies the color to be used for the selected background.
             #
             # Default: CellForeground
-            background: CellForeground
+            background: '#4040f0'
             # Specifies the alpha value (between 0.0 and 1.0) the configured background color
             # will contribute to the original color.
             #
             # A value of 1.0 will paint over, whereas a value of 0.5 will give
             # a look of a half-transparently painted grid cell.
-            background_alpha: 1.0
+            background_alpha: 0.5
 
         # Search match highlighting. Similar to selection highlighting.
         search_highlight:
@@ -493,34 +493,34 @@ color_schemes:
 
         # Normal colors
         normal:
-            black:   '#1d1f21'
-            red:     '#cc342b'
-            green:   '#198844'
-            yellow:  '#fba922'
-            blue:    '#3971ed'
-            magenta: '#a36ac7'
-            cyan:    '#3971ed'
-            white:   '#c5c8c6'
-        # Dim (faint) colors, if not set, they're automatically computed based on normal colors.
-        dim:
-            black:   '#1d1f21'
-            red:     '#cc342b'
-            green:   '#198844'
-            yellow:  '#fba922'
-            blue:    '#3971ed'
-            magenta: '#a36ac7'
-            cyan:    '#3971ed'
-            white:   '#c5c8c6'
+            black:   '#000000'
+            red:     '#a00000'
+            green:   '#00a000'
+            yellow:  '#a0a000'
+            blue:    '#0000a0'
+            magenta: '#a000a0'
+            cyan:    '#00a0a0'
+            white:   '#c0c0c0'
         # Bright colors
         bright:
-            black:   '#969896'
-            red:     '#cc342b'
-            green:   '#198844'
-            yellow:  '#fba922'
-            blue:    '#3971ed'
-            magenta: '#a36ac7'
-            cyan:    '#3971ed'
+            black:   '#707070'
+            red:     '#ff0000'
+            green:   '#00ff00'
+            yellow:  '#ffff00'
+            blue:    '#0000ff'
+            magenta: '#ff00ff'
+            cyan:    '#00ffff'
             white:   '#ffffff'
+        # Dim (faint) colors, if not set, they're automatically computed based on normal colors.
+        # dim:
+        #     black:   '#1d1f21'
+        #     red:     '#cc342b'
+        #     green:   '#198844'
+        #     yellow:  '#fba922'
+        #     blue:    '#3971ed'
+        #     magenta: '#a36ac7'
+        #     cyan:    '#3971ed'
+        #     white:   '#c5c8c6'
 
 # Key Bindings
 # ------------
