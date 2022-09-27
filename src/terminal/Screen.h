@@ -62,6 +62,7 @@ class ScreenBase: public SequenceHandler
     [[nodiscard]] virtual bool isCellEmpty(CellLocation position) const noexcept = 0;
     [[nodiscard]] virtual bool compareCellTextAt(CellLocation position, char codepoint) const noexcept = 0;
     [[nodiscard]] virtual std::string cellTextAt(CellLocation position) const noexcept = 0;
+    [[nodiscard]] virtual std::string lineTextAt(LineOffset line) const noexcept = 0;
     [[nodiscard]] virtual bool isLineEmpty(LineOffset line) const noexcept = 0;
     [[nodiscard]] virtual uint8_t cellWidthAt(CellLocation position) const noexcept = 0;
     [[nodiscard]] virtual LineCount historyLineCount() const noexcept = 0;
@@ -553,6 +554,11 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     [[nodiscard]] std::string cellTextAt(CellLocation position) const noexcept override
     {
         return grid().lineAt(position.line).inflatedBuffer().at(position.column.as<size_t>()).toUtf8();
+    }
+
+    [[nodiscard]] std::string lineTextAt(LineOffset line) const noexcept override
+    {
+        return grid().lineAt(line).toUtf8Trimmed();
     }
 
     [[nodiscard]] bool isLineEmpty(LineOffset line) const noexcept override
