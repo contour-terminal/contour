@@ -42,6 +42,14 @@ namespace terminal
 template <typename Cell>
 class Screen;
 
+/// Helping information to visualize IME text that has not been comitted yet.
+struct InputMethodData
+{
+    // If this string is non-empty, the IME is active and the given data
+    // shall be displayed at the cursor's location.
+    std::string preeditString;
+};
+
 /// Terminal API to manage input and output devices of a pseudo terminal, such as keyboard, mouse, and screen.
 ///
 /// With a terminal being attached to a Process, the terminal's screen
@@ -204,6 +212,10 @@ class Terminal
         return insideVerticalMargin && insideHorizontalMargin;
     }
 
+    [[nodiscard]] bool isCursorInViewport() const noexcept
+    {
+        return viewport().isLineVisible(cursor().position.line);
+    }
     // }}}
 
     constexpr ImageSize cellPixelSize() const noexcept { return state_.cellPixelSize; }
@@ -360,6 +372,10 @@ class Terminal
     RenderBufferRef renderBuffer() const { return renderBuffer_.frontBuffer(); }
 
     RenderBufferState renderBufferState() const noexcept { return renderBuffer_.state; }
+
+    /// Updates the IME preedit-string to be rendered when IME is composing a new input.
+    /// Passing an empty string effectively disables IME rendering.
+    void updateInputMethodPreeditString(std::string preeditString);
     // }}}
 
     void lock() const
@@ -683,6 +699,8 @@ class Terminal
     Screen<Cell> hostWritableStatusLineScreen_;
     Screen<Cell> indicatorStatusScreen_;
     std::reference_wrapper<ScreenBase> currentScreen_;
+
+    InputMethodData inputMethodData_;
 
     std::mutex mutable outerLock_;
     std::mutex mutable innerLock_;

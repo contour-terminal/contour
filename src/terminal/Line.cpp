@@ -138,6 +138,12 @@ std::string Line<Cell>::toUtf8Trimmed() const
     std::string output = toUtf8();
     while (!output.empty() && isspace(output.back()))
         output.pop_back();
+
+    size_t frontGap = 0;
+    while (frontGap < output.size() && std::isspace(output[frontGap]))
+        frontGap++;
+    output = output.substr(frontGap);
+
     return output;
 }
 

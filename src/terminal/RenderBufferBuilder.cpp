@@ -114,7 +114,8 @@ RenderBufferBuilder<Cell>::RenderBufferBuilder(Terminal const& _terminal,
                                                RenderBuffer& _output,
                                                LineOffset base,
                                                bool theReverseVideo,
-                                               HighlightSearchMatches highlightSearchMatches):
+                                               HighlightSearchMatches highlightSearchMatches,
+                                               InputMethodData inputMethodData):
     output { _output },
     terminal { _terminal },
     cursorPosition { _terminal.inputHandler().mode() == ViMode::Insert
@@ -122,7 +123,8 @@ RenderBufferBuilder<Cell>::RenderBufferBuilder(Terminal const& _terminal,
                          : _terminal.state().viCommands.cursorPosition },
     baseLine { base },
     reverseVideo { theReverseVideo },
-    _highlightSearchMatches { highlightSearchMatches }
+    _highlightSearchMatches { highlightSearchMatches },
+    _inputMethodData { std::move(inputMethodData) }
 {
     output.frameID = _terminal.lastFrameID();
     output.cursor = renderCursor();
@@ -332,45 +334,12 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineB
                                 ColumnOffset::cast_from(lineBuffer.usedColumns));
     auto const pageColumnsEnd = boxed_cast<ColumnOffset>(terminal.pageSize().columns);
 
-    // {{{ render text
-    auto graphemeClusterSegmenter = unicode::utf8_grapheme_segmenter(lineBuffer.text.view());
-    auto columnOffset = ColumnOffset(0);
-
+    // render text
     searchPatternOffset = 0;
-
-    for (u32string const& graphemeCluster: graphemeClusterSegmenter)
-    {
-        auto const pos = CellLocation { lineOffset, columnOffset };
-        auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(pos);
-        auto const [fg, bg] = makeColorsForCell(gridPosition,
-                                                lineBuffer.textAttributes.styles,
-                                                lineBuffer.textAttributes.foregroundColor,
-                                                lineBuffer.textAttributes.backgroundColor);
-        auto const width = graphemeClusterWidth(graphemeCluster);
-        // fmt::print(" start {}, count {}, bytes {}, grapheme cluster \"{}\"\n",
-        //            columnOffset,
-        //            width,
-        //            unicode::convert_to<char>(u32string_view(graphemeCluster)).size(),
-        //            unicode::convert_to<char>(u32string_view(graphemeCluster)));
-
-        output.cells.emplace_back(makeRenderCellExplicit(terminal.colorPalette(),
-                                                         graphemeCluster,
-                                                         width,
-                                                         lineBuffer.textAttributes.styles,
-                                                         fg,
-                                                         bg,
-                                                         lineBuffer.textAttributes.underlineColor,
-                                                         baseLine + lineOffset,
-                                                         columnOffset));
-
-        columnOffset += ColumnOffset::cast_from(width);
-        lineNr = lineOffset;
-        prevWidth = 0;
-        prevHasCursor = false;
-
-        matchSearchPattern(u32string_view(graphemeCluster));
-    }
-    // }}}
+    renderUtf8Text(CellLocation { lineOffset, ColumnOffset(0) },
+                   lineBuffer.textAttributes,
+                   lineBuffer.text.view(),
+                   true);
 
     // {{{ fill the remaining empty cells
     for (auto columnOffset = textMargin; columnOffset < pageColumnsEnd; ++columnOffset)
@@ -470,10 +439,86 @@ void RenderBufferBuilder<Cell>::endLine() noexcept
 }
 
 template <typename Cell>
+ColumnCount RenderBufferBuilder<Cell>::renderUtf8Text(CellLocation screenPosition,
+                                                      GraphicsAttributes textAttributes,
+                                                      std::string_view text,
+                                                      bool allowMatchSearchPattern)
+{
+    auto columnCountRendered = ColumnCount(0);
+
+    auto graphemeClusterSegmenter = unicode::utf8_grapheme_segmenter(text);
+    for (u32string const& graphemeCluster: graphemeClusterSegmenter)
+    {
+        auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(screenPosition);
+        auto const [fg, bg] = makeColorsForCell(gridPosition,
+                                                textAttributes.styles,
+                                                textAttributes.foregroundColor,
+                                                textAttributes.backgroundColor);
+        auto const width = graphemeClusterWidth(graphemeCluster);
+        // fmt::print(" start {}, count {}, bytes {}, grapheme cluster \"{}\"\n",
+        //            columnOffset,
+        //            width,
+        //            unicode::convert_to<char>(u32string_view(graphemeCluster)).size(),
+        //            unicode::convert_to<char>(u32string_view(graphemeCluster)));
+
+        output.cells.emplace_back(
+            makeRenderCellExplicit(terminal.colorPalette(),
+                                   graphemeCluster,
+                                   width,
+                                   textAttributes.styles,
+                                   fg,
+                                   bg,
+                                   textAttributes.underlineColor,
+                                   baseLine + screenPosition.line,
+                                   screenPosition.column + ColumnOffset::cast_from(columnCountRendered)));
+
+        columnCountRendered += ColumnCount::cast_from(width);
+        lineNr = screenPosition.line;
+        prevWidth = 0;
+        prevHasCursor = false;
+
+        if (allowMatchSearchPattern)
+            matchSearchPattern(u32string_view(graphemeCluster));
+    }
+    return columnCountRendered;
+}
+
+template <typename Cell>
 void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset _line, ColumnOffset _column)
 {
-    auto const pos = CellLocation { _line, _column };
-    auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(pos);
+    auto const screenPosition = CellLocation { _line, _column };
+    auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(screenPosition);
+
+    // Render IME preeditString if available and screen position matches cursor position.
+    if (gridPosition == cursorPosition && !_inputMethodData.preeditString.empty())
+    {
+        auto textAttributes = GraphicsAttributes {};
+        textAttributes.foregroundColor = RGBColor(0xFF, 0xFF, 0xFF);
+        textAttributes.backgroundColor = RGBColor(0xFF, 0x00, 0x00);
+        textAttributes.styles |= CellFlags::Bold | CellFlags::Underline;
+
+        if (!output.cells.empty())
+            output.cells.back().groupEnd = true;
+
+        _inputMethodSkipColumns =
+            renderUtf8Text(screenPosition, textAttributes, _inputMethodData.preeditString, false);
+        if (_inputMethodSkipColumns > ColumnCount(0))
+        {
+            output.cursor->position.column += ColumnOffset::cast_from(_inputMethodSkipColumns);
+            output.cells.at(output.cells.size() - unbox<size_t>(_inputMethodSkipColumns)).groupStart = true;
+            output.cells.back().groupEnd = true;
+        }
+
+        state = State::Gap;
+    }
+
+    if (_inputMethodSkipColumns > ColumnCount(0))
+    {
+        // Skipping grid cells that have already been rendered due to IME.
+        _inputMethodSkipColumns--;
+        return;
+    }
+
     auto /*const*/ [fg, bg] = makeColorsForCell(
         gridPosition, screenCell.styles(), screenCell.foregroundColor(), screenCell.backgroundColor());
 

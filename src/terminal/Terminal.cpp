@@ -343,6 +343,15 @@ struct ScopedHyperlinkHover
     }
 };
 
+void Terminal::updateInputMethodPreeditString(std::string preeditString)
+{
+    if (inputMethodData_.preeditString == preeditString)
+        return;
+
+    inputMethodData_.preeditString = preeditString;
+    screenUpdated();
+}
+
 void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
 {
     verifyState();
@@ -362,15 +371,22 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
     auto const mainDisplayReverseVideo = isModeEnabled(terminal::DECMode::ReverseVideo);
 
     if (isPrimaryScreen())
-        _lastRenderPassHints = primaryScreen_.render(
-            RenderBufferBuilder<Cell> {
-                *this, _output, LineOffset(0), mainDisplayReverseVideo, HighlightSearchMatches::Yes },
-            viewport_.scrollOffset());
+        _lastRenderPassHints = primaryScreen_.render(RenderBufferBuilder<Cell> { *this,
+                                                                                 _output,
+                                                                                 LineOffset(0),
+                                                                                 mainDisplayReverseVideo,
+                                                                                 HighlightSearchMatches::Yes,
+                                                                                 inputMethodData_ },
+                                                     viewport_.scrollOffset());
     else
-        _lastRenderPassHints = alternateScreen_.render(
-            RenderBufferBuilder<Cell> {
-                *this, _output, LineOffset(0), mainDisplayReverseVideo, HighlightSearchMatches::Yes },
-            viewport_.scrollOffset());
+        _lastRenderPassHints =
+            alternateScreen_.render(RenderBufferBuilder<Cell> { *this,
+                                                                _output,
+                                                                LineOffset(0),
+                                                                mainDisplayReverseVideo,
+                                                                HighlightSearchMatches::Yes,
+                                                                inputMethodData_ },
+                                    viewport_.scrollOffset());
 
     switch (state_.statusDisplayType)
     {
@@ -383,7 +399,8 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
                                                                       _output,
                                                                       state_.pageSize.lines.as<LineOffset>(),
                                                                       !mainDisplayReverseVideo,
-                                                                      HighlightSearchMatches::No },
+                                                                      HighlightSearchMatches::No,
+                                                                      InputMethodData {} },
                                           ScrollOffset(0));
             break;
         case StatusDisplayType::HostWritable:
@@ -392,7 +409,8 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
                                             _output,
                                             state_.pageSize.lines.as<LineOffset>(),
                                             !mainDisplayReverseVideo,
-                                            HighlightSearchMatches::No },
+                                            HighlightSearchMatches::No,
+                                            InputMethodData {} },
                 ScrollOffset(0));
             break;
     }
