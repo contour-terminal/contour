@@ -207,7 +207,7 @@ class Line
 #endif
     }
 
-    Cell& useCellAt(ColumnOffset _column) noexcept
+    [[nodiscard]] Cell& useCellAt(ColumnOffset _column) noexcept
     {
         Require(ColumnOffset(0) <= _column);
         Require(_column <= ColumnOffset::cast_from(size())); // Allow off-by-one for sentinel.

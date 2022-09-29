@@ -122,20 +122,20 @@ class CONTOUR_PACKED Cell
 
     void writeTextOnly(char32_t _ch, uint8_t _width) noexcept;
 
-    std::u32string codepoints() const;
-    char32_t codepoint(size_t i) const noexcept;
-    std::size_t codepointCount() const noexcept;
+    [[nodiscard]] std::u32string codepoints() const;
+    [[nodiscard]] char32_t codepoint(size_t i) const noexcept;
+    [[nodiscard]] std::size_t codepointCount() const noexcept;
 
     [[nodiscard]] bool compareText(char codepoint) const noexcept;
 
-    bool empty() const noexcept;
+    [[nodiscard]] bool empty() const noexcept;
 
-    constexpr uint8_t width() const noexcept;
+    [[nodiscard]] constexpr uint8_t width() const noexcept;
     void setWidth(uint8_t _width) noexcept;
 
-    CellFlags flags() const noexcept;
+    [[nodiscard]] CellFlags flags() const noexcept;
 
-    bool isFlagEnabled(CellFlags testFlags) const noexcept { return flags() & testFlags; }
+    [[nodiscard]] bool isFlagEnabled(CellFlags testFlags) const noexcept { return flags() & testFlags; }
 
     void resetFlags() noexcept
     {
@@ -153,32 +153,33 @@ class CONTOUR_PACKED Cell
 
     void setGraphicsRendition(GraphicsRendition sgr) noexcept;
 
-    Color underlineColor() const noexcept;
+    [[nodiscard]] Color underlineColor() const noexcept;
     void setUnderlineColor(Color color) noexcept;
-    Color foregroundColor() const noexcept;
+    [[nodiscard]] Color foregroundColor() const noexcept;
     void setForegroundColor(Color color) noexcept;
-    Color backgroundColor() const noexcept;
+    [[nodiscard]] Color backgroundColor() const noexcept;
     void setBackgroundColor(Color color) noexcept;
 
-    RGBColor getUnderlineColor(ColorPalette const& _colorPalette, RGBColor _defaultColor) const noexcept;
+    [[nodiscard]] RGBColor getUnderlineColor(ColorPalette const& _colorPalette,
+                                             RGBColor _defaultColor) const noexcept;
 
     [[nodiscard]] RGBColorPair makeColors(ColorPalette const& _colorPalette,
                                           bool _reverseVideo,
                                           bool _blink,
                                           bool _rapidBlink) const noexcept;
 
-    std::shared_ptr<ImageFragment> imageFragment() const noexcept;
+    [[nodiscard]] std::shared_ptr<ImageFragment> imageFragment() const noexcept;
     void setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, CellLocation offset);
 
     void setCharacter(char32_t _codepoint) noexcept;
     void setCharacter(char32_t _codepoint, uint8_t _width) noexcept;
-    int appendCharacter(char32_t _codepoint) noexcept;
-    std::string toUtf8() const;
+    [[nodiscard]] int appendCharacter(char32_t _codepoint) noexcept;
+    [[nodiscard]] std::string toUtf8() const;
 
-    HyperlinkId hyperlink() const noexcept;
+    [[nodiscard]] HyperlinkId hyperlink() const noexcept;
     void setHyperlink(HyperlinkId _hyperlink);
 
-    CellExtra& extra() noexcept;
+    [[nodiscard]] CellExtra& extra() noexcept;
 
   private:
     template <typename... Args>

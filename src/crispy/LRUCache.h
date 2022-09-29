@@ -41,8 +41,8 @@ class LRUCache
 
     explicit LRUCache(std::size_t _capacity): capacity_ { _capacity } {}
 
-    std::size_t size() const noexcept { return items_.size(); }
-    std::size_t capacity() const noexcept { return capacity_; }
+    [[nodiscard]] std::size_t size() const noexcept { return items_.size(); }
+    [[nodiscard]] std::size_t capacity() const noexcept { return capacity_; }
 
     void clear()
     {

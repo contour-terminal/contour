@@ -75,12 +75,12 @@ class basic_ring
 
     Vector& storage() noexcept { return _storage; }
     Vector const& storage() const noexcept { return _storage; }
-    std::size_t zero_index() const noexcept { return _zero; }
+    [[nodiscard]] std::size_t zero_index() const noexcept { return _zero; }
 
     void rezero(iterator i);
     void rezero();
 
-    std::size_t size() const noexcept { return _storage.size(); }
+    [[nodiscard]] std::size_t size() const noexcept { return _storage.size(); }
 
     // positvie count rotates right, negative count rotates left
     void rotate(int count) noexcept { _zero = size_t(offset_type(_zero + size()) - count) % size(); }
@@ -164,7 +164,7 @@ class ring: public basic_ring<T, Container<T, Allocator>>
     ring(size_t capacity, T value): ring(Container<T, Allocator>(capacity, value)) {}
     explicit ring(size_t capacity): ring(capacity, T {}) {}
 
-    size_t size() const noexcept { return this->_storage.size(); }
+    [[nodiscard]] size_t size() const noexcept { return this->_storage.size(); }
 
     void reserve(size_t capacity) { this->_storage.reserve(capacity); }
     void resize(size_t newSize)

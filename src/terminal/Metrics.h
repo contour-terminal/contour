@@ -31,11 +31,11 @@ struct Metrics
     void operator()(Sequence const& _seq) { sequences[_seq.text()]++; }
 
     /// @returns an ordered list of collected metrics, with highest frequencey first.
-    std::vector<std::pair<std::string, uint64_t>> ordered() const
+    [[nodiscard]] std::vector<std::pair<std::string, uint64_t>> ordered() const
     {
         std::vector<std::pair<std::string, uint64_t>> vec;
         for (auto const& [name, freq]: sequences)
-            vec.emplace_back(std::pair { name, freq });
+            vec.emplace_back(name, freq);
 
         std::sort(vec.begin(), vec.end(), [](auto const& a, auto const& b) {
             if (a.second > b.second)

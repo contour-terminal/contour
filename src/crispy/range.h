@@ -35,7 +35,10 @@ struct range
     constexpr const_iterator cbegin() const { return begin_; }
     constexpr const_iterator cend() const { return end_; }
 
-    constexpr size_t size() const noexcept { return static_cast<size_t>(std::distance(begin_, end_)); }
+    [[nodiscard]] constexpr size_t size() const noexcept
+    {
+        return static_cast<size_t>(std::distance(begin_, end_));
+    }
 };
 
 template <typename Iter>

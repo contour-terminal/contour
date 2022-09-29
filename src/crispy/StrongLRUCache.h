@@ -66,7 +66,7 @@ class StrongLRUCache
     StrongLRUCache(StrongLRUCache const&) noexcept = delete;
     StrongLRUCache& operator=(StrongLRUCache&&) noexcept = default;
     StrongLRUCache& operator=(StrongLRUCache const&) noexcept = delete;
-    ~StrongLRUCache();
+    ~StrongLRUCache() = default;
 
     /// Returns the actual number of entries currently hold in this cache.
     [[nodiscard]] size_t size() const noexcept;
@@ -141,11 +141,6 @@ StrongLRUCache<Key, Value, Hasher>::StrongLRUCache(StrongHashtableSize hashCount
                                                    LRUCapacity entryCount,
                                                    std::string name):
     _hashtable { Hashtable::create(hashCount, entryCount, std::move(name)) }
-{
-}
-
-template <typename Key, typename Value, typename Hasher>
-StrongLRUCache<Key, Value, Hasher>::~StrongLRUCache()
 {
 }
 

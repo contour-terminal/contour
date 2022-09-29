@@ -76,7 +76,7 @@ class BufferObject: public std::enable_shared_from_this<BufferObject>
     char* data() noexcept;
     char const* data() const noexcept;
 
-    BufferFragment ref(std::size_t offset, std::size_t size) noexcept;
+    [[nodiscard]] BufferFragment ref(std::size_t offset, std::size_t size) noexcept;
 
     /// Returns a pointer to the first byte in the internal data storage.
     char* begin() noexcept { return data(); }

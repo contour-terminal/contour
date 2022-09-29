@@ -152,12 +152,15 @@ class Terminal
     void setHighlightRange(HighlightRange _range);
 
     // {{{ cursor
-    Cursor const& cursor() const noexcept { return state_.cursor; }
-    constexpr CellLocation realCursorPosition() const noexcept { return state_.cursor.position; }
+    [[nodiscard]] Cursor const& cursor() const noexcept { return state_.cursor; }
+    [[nodiscard]] constexpr CellLocation realCursorPosition() const noexcept
+    {
+        return state_.cursor.position;
+    }
 
     /// Returns identity if DECOM is disabled (default), but returns translated coordinates if DECOM is
     /// enabled.
-    CellLocation toRealCoordinate(CellLocation pos) const noexcept
+    [[nodiscard]] CellLocation toRealCoordinate(CellLocation pos) const noexcept
     {
         if (!state_.cursor.originMode)
             return pos;
@@ -166,7 +169,7 @@ class Terminal
     }
 
     /// Clamps given coordinates, respecting DECOM (Origin Mode).
-    CellLocation clampCoordinate(CellLocation coord) const noexcept
+    [[nodiscard]] CellLocation clampCoordinate(CellLocation coord) const noexcept
     {
         if (state_.cursor.originMode)
             return clampToOrigin(coord);
@@ -175,36 +178,36 @@ class Terminal
     }
 
     /// Clamps given logical coordinates to margins as used in when DECOM (origin mode) is enabled.
-    CellLocation clampToOrigin(CellLocation coord) const noexcept
+    [[nodiscard]] CellLocation clampToOrigin(CellLocation coord) const noexcept
     {
         return { std::clamp(coord.line, LineOffset { 0 }, state_.margin.vertical.to),
                  std::clamp(coord.column, ColumnOffset { 0 }, state_.margin.horizontal.to) };
     }
 
-    LineOffset clampedLine(LineOffset _line) const noexcept
+    [[nodiscard]] LineOffset clampedLine(LineOffset _line) const noexcept
     {
         return std::clamp(_line, LineOffset(0), boxed_cast<LineOffset>(state_.pageSize.lines) - 1);
     }
 
-    ColumnOffset clampedColumn(ColumnOffset _column) const noexcept
+    [[nodiscard]] ColumnOffset clampedColumn(ColumnOffset _column) const noexcept
     {
         return std::clamp(_column, ColumnOffset(0), boxed_cast<ColumnOffset>(state_.pageSize.columns) - 1);
     }
 
-    CellLocation clampToScreen(CellLocation coord) const noexcept
+    [[nodiscard]] CellLocation clampToScreen(CellLocation coord) const noexcept
     {
         return { clampedLine(coord.line), clampedColumn(coord.column) };
     }
 
     // Tests if given coordinate is within the visible screen area.
-    constexpr bool contains(CellLocation _coord) const noexcept
+    [[nodiscard]] constexpr bool contains(CellLocation _coord) const noexcept
     {
         return LineOffset(0) <= _coord.line && _coord.line < boxed_cast<LineOffset>(state_.pageSize.lines)
                && ColumnOffset(0) <= _coord.column
                && _coord.column <= boxed_cast<ColumnOffset>(state_.pageSize.columns);
     }
 
-    bool isCursorInsideMargins() const noexcept
+    [[nodiscard]] bool isCursorInsideMargins() const noexcept
     {
         bool const insideVerticalMargin = state_.margin.vertical.contains(state_.cursor.position.line);
         bool const insideHorizontalMargin =
@@ -219,19 +222,19 @@ class Terminal
     }
     // }}}
 
-    constexpr ImageSize cellPixelSize() const noexcept { return state_.cellPixelSize; }
+    [[nodiscard]] constexpr ImageSize cellPixelSize() const noexcept { return state_.cellPixelSize; }
     constexpr void setCellPixelSize(ImageSize _cellPixelSize) { state_.cellPixelSize = _cellPixelSize; }
 
     /// Retrieves the time point this terminal instance has been spawned.
-    std::chrono::steady_clock::time_point startTime() const noexcept { return startTime_; }
-    std::chrono::steady_clock::time_point currentTime() const noexcept { return currentTime_; }
+    [[nodiscard]] std::chrono::steady_clock::time_point startTime() const noexcept { return startTime_; }
+    [[nodiscard]] std::chrono::steady_clock::time_point currentTime() const noexcept { return currentTime_; }
 
     /// Retrieves reference to the underlying PTY device.
-    Pty& device() noexcept { return *pty_; }
+    [[nodiscard]] Pty& device() noexcept { return *pty_; }
 
-    PageSize pageSize() const noexcept { return pty_->pageSize(); }
+    [[nodiscard]] PageSize pageSize() const noexcept { return pty_->pageSize(); }
 
-    PageSize totalPageSize() const noexcept
+    [[nodiscard]] PageSize totalPageSize() const noexcept
     {
         switch (state_.statusDisplayType)
         {
@@ -303,8 +306,8 @@ class Terminal
     void writeToScreenInternal(std::string_view _text);
 
     // viewport management
-    Viewport& viewport() noexcept { return viewport_; }
-    Viewport const& viewport() const noexcept { return viewport_; }
+    [[nodiscard]] Viewport& viewport() noexcept { return viewport_; }
+    [[nodiscard]] Viewport const& viewport() const noexcept { return viewport_; }
 
     // {{{ Screen Render Proxy
     std::optional<std::chrono::milliseconds> nextRender() const;
@@ -370,9 +373,9 @@ class Terminal
     ///
     /// @see ensureFreshRenderBuffer()
     /// @see refreshRenderBuffer()
-    RenderBufferRef renderBuffer() const { return renderBuffer_.frontBuffer(); }
+    [[nodiscard]] RenderBufferRef renderBuffer() const { return renderBuffer_.frontBuffer(); }
 
-    RenderBufferState renderBufferState() const noexcept { return renderBuffer_.state; }
+    [[nodiscard]] RenderBufferState renderBufferState() const noexcept { return renderBuffer_.state; }
 
     /// Updates the IME preedit-string to be rendered when IME is composing a new input.
     /// Passing an empty string effectively disables IME rendering.
@@ -384,24 +387,25 @@ class Terminal
         outerLock_.lock();
         innerLock_.lock();
     }
+
     void unlock() const
     {
         outerLock_.unlock();
         innerLock_.unlock();
     }
 
-    ColorPalette const& colorPalette() const noexcept { return state_.colorPalette; }
-    ColorPalette& colorPalette() noexcept { return state_.colorPalette; }
-    ColorPalette& defaultColorPalette() noexcept { return state_.defaultColorPalette; }
+    [[nodiscard]] ColorPalette const& colorPalette() const noexcept { return state_.colorPalette; }
+    [[nodiscard]] ColorPalette& colorPalette() noexcept { return state_.colorPalette; }
+    [[nodiscard]] ColorPalette& defaultColorPalette() noexcept { return state_.defaultColorPalette; }
 
     void pushColorPalette(size_t slot);
     void popColorPalette(size_t slot);
     void reportColorPaletteStack();
 
-    ScreenBase& currentScreen() noexcept { return currentScreen_.get(); }
-    ScreenBase const& currentScreen() const noexcept { return currentScreen_.get(); }
+    [[nodiscard]] ScreenBase& currentScreen() noexcept { return currentScreen_.get(); }
+    [[nodiscard]] ScreenBase const& currentScreen() const noexcept { return currentScreen_.get(); }
 
-    ScreenBase& activeDisplay() noexcept
+    [[nodiscard]] ScreenBase& activeDisplay() noexcept
     {
         switch (state_.activeStatusDisplay)
         {
@@ -417,20 +421,20 @@ class Terminal
     void setScreen(ScreenType screenType);
     void setHighlightTimeout(std::chrono::milliseconds timeout) noexcept { highlightTimeout_ = timeout; }
 
-    Screen<Cell> const& primaryScreen() const noexcept { return primaryScreen_; }
-    Screen<Cell>& primaryScreen() noexcept { return primaryScreen_; }
+    [[nodiscard]] Screen<Cell> const& primaryScreen() const noexcept { return primaryScreen_; }
+    [[nodiscard]] Screen<Cell>& primaryScreen() noexcept { return primaryScreen_; }
 
-    Screen<Cell> const& alternateScreen() const noexcept { return alternateScreen_; }
-    Screen<Cell>& alternateScreen() noexcept { return alternateScreen_; }
+    [[nodiscard]] Screen<Cell> const& alternateScreen() const noexcept { return alternateScreen_; }
+    [[nodiscard]] Screen<Cell>& alternateScreen() noexcept { return alternateScreen_; }
 
-    bool isLineWrapped(LineOffset _lineNumber) const noexcept
+    [[nodiscard]] bool isLineWrapped(LineOffset _lineNumber) const noexcept
     {
         return isPrimaryScreen() && primaryScreen_.isLineWrapped(_lineNumber);
     }
 
-    CellLocation currentMousePosition() const noexcept { return currentMousePosition_; }
+    [[nodiscard]] CellLocation currentMousePosition() const noexcept { return currentMousePosition_; }
 
-    std::optional<CellLocation> currentMouseGridPosition() const noexcept
+    [[nodiscard]] std::optional<CellLocation> currentMouseGridPosition() const noexcept
     {
         if (currentScreen_.get().contains(currentMousePosition_))
             return viewport_.translateScreenToGridCoordinate(currentMousePosition_);
@@ -519,15 +523,15 @@ class Terminal
     bool selectionAvailable() const noexcept { return !!selection_; }
     // }}}
 
-    std::string extractSelectionText() const;
-    std::string extractLastMarkRange() const;
+    [[nodiscard]] std::string extractSelectionText() const;
+    [[nodiscard]] std::string extractLastMarkRange() const;
 
     /// Tests whether or not the mouse is currently hovering a hyperlink.
-    bool isMouseHoveringHyperlink() const noexcept { return hoveringHyperlink_.load(); }
+    [[nodiscard]] bool isMouseHoveringHyperlink() const noexcept { return hoveringHyperlink_.load(); }
 
     /// Retrieves the HyperlinkInfo that is currently behing hovered by the mouse, if so,
     /// or a nothing otherwise.
-    std::shared_ptr<HyperlinkInfo const> tryGetHoveringHyperlink() const noexcept
+    [[nodiscard]] std::shared_ptr<HyperlinkInfo const> tryGetHoveringHyperlink() const noexcept
     {
         if (auto const gridPosition = currentMouseGridPosition())
             return currentScreen_.get().hyperlinkAt(*gridPosition);
@@ -537,9 +541,9 @@ class Terminal
     bool processInputOnce();
 
     void markScreenDirty() { screenDirty_ = true; }
-    bool screenDirty() const noexcept { return screenDirty_; }
+    [[nodiscard]] bool screenDirty() const noexcept { return screenDirty_; }
 
-    uint64_t lastFrameID() const noexcept { return lastFrameID_.load(); }
+    [[nodiscard]] uint64_t lastFrameID() const noexcept { return lastFrameID_.load(); }
 
     // Screen's EventListener implementation
     //
@@ -548,7 +552,7 @@ class Terminal
     void bufferChanged(ScreenType);
     void scrollbackBufferCleared();
     void screenUpdated();
-    FontDef getFontDef();
+    [[nodiscard]] FontDef getFontDef();
     void setFontDef(FontDef const& _fontDef);
     void copyToClipboard(std::string_view _data);
     void inspect();
@@ -572,7 +576,7 @@ class Terminal
     void setMouseTransport(MouseTransport _transport);
     void setMouseWheelMode(InputGenerator::MouseWheelMode _mode);
     void setWindowTitle(std::string_view _title);
-    std::string const& windowTitle() const noexcept;
+    [[nodiscard]] std::string const& windowTitle() const noexcept;
     void saveWindowTitle();
     void restoreWindowTitle();
     void setTerminalProfile(std::string const& _configProfileName);
@@ -588,21 +592,24 @@ class Terminal
     void setMaxImageColorRegisters(unsigned value) noexcept { state_.maxImageColorRegisters = value; }
 
     /// @returns either an empty string or a file:// URL of the last set working directory.
-    std::string const& currentWorkingDirectory() const noexcept { return state_.currentWorkingDirectory; }
+    [[nodiscard]] std::string const& currentWorkingDirectory() const noexcept
+    {
+        return state_.currentWorkingDirectory;
+    }
 
     void verifyState();
 
-    TerminalState& state() noexcept { return state_; }
-    TerminalState const& state() const noexcept { return state_; }
+    [[nodiscard]] TerminalState& state() noexcept { return state_; }
+    [[nodiscard]] TerminalState const& state() const noexcept { return state_; }
 
     void applyPageSizeToCurrentBuffer();
 
-    crispy::BufferObjectPtr currentPtyBuffer() const noexcept { return currentPtyBuffer_; }
+    [[nodiscard]] crispy::BufferObjectPtr currentPtyBuffer() const noexcept { return currentPtyBuffer_; }
 
-    terminal::SelectionHelper& selectionHelper() noexcept { return selectionHelper_; }
+    [[nodiscard]] terminal::SelectionHelper& selectionHelper() noexcept { return selectionHelper_; }
 
-    ViInputHandler& inputHandler() noexcept { return state_.inputHandler; }
-    ViInputHandler const& inputHandler() const noexcept { return state_.inputHandler; }
+    [[nodiscard]] ViInputHandler& inputHandler() noexcept { return state_.inputHandler; }
+    [[nodiscard]] ViInputHandler const& inputHandler() const noexcept { return state_.inputHandler; }
     void resetHighlight();
 
     void setStatusDisplay(StatusDisplayType statusDisplayType);
@@ -618,12 +625,12 @@ class Terminal
     // Sets the current search term to the given text and
     // moves the viewport accordingly to make sure the given text is visible,
     // or it will not move at all if the input text was not found.
-    std::optional<CellLocation> searchReverse(std::u32string text, CellLocation searchPosition);
-    std::optional<CellLocation> searchReverse(CellLocation searchPosition);
+    [[nodiscard]] std::optional<CellLocation> searchReverse(std::u32string text, CellLocation searchPosition);
+    [[nodiscard]] std::optional<CellLocation> searchReverse(CellLocation searchPosition);
 
     // Searches from current position the next item downwards.
-    std::optional<CellLocation> search(std::u32string text, CellLocation searchPosition);
-    std::optional<CellLocation> search(CellLocation searchPosition);
+    [[nodiscard]] std::optional<CellLocation> search(std::u32string text, CellLocation searchPosition);
+    [[nodiscard]] std::optional<CellLocation> search(CellLocation searchPosition);
 
     // Tests if the grid cell at the given location does contain a word delimiter.
     [[nodiscard]] bool wordDelimited(CellLocation position) const noexcept;
@@ -638,8 +645,9 @@ class Terminal
     void updateIndicatorStatusLine();
     void updateCursorVisibilityState() const;
     bool updateCursorHoveringState();
+
     template <typename BlinkerState>
-    std::pair<bool, std::chrono::steady_clock::time_point> nextBlinkState(
+    [[nodiscard]] std::pair<bool, std::chrono::steady_clock::time_point> nextBlinkState(
         BlinkerState blinker, std::chrono::steady_clock::time_point lastBlink) const noexcept
     {
         auto const passed = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime_ - lastBlink);
@@ -649,10 +657,10 @@ class Terminal
     }
 
     // Reads from PTY.
-    Pty::ReadResult readFromPty();
+    [[nodiscard]] Pty::ReadResult readFromPty();
 
     // Writes partially or all input data to the PTY buffer object and returns a string view to it.
-    std::string_view lockedWriteToPtyBuffer(std::string_view data);
+    [[nodiscard]] std::string_view lockedWriteToPtyBuffer(std::string_view data);
 
     // private data
     //

@@ -66,7 +66,7 @@ class CharsetMapping
     {
     }
 
-    char32_t map(char32_t _code) noexcept
+    [[nodiscard]] char32_t map(char32_t _code) noexcept
     {
         // TODO: could surely be implemented branchless with a jump-table and computed goto.
         if (_code < 127)
@@ -85,7 +85,7 @@ class CharsetMapping
         }
     }
 
-    char32_t map(CharsetTable _table, char _code) const noexcept
+    [[nodiscard]] char32_t map(CharsetTable _table, char _code) const noexcept
     {
         return (*tables_[static_cast<size_t>(_table)])[static_cast<uint8_t>(_code)];
     }
@@ -110,7 +110,7 @@ class CharsetMapping
         tables_[static_cast<size_t>(_table)] = charsetMap(_id);
     }
 
-    constexpr CharsetTable currentTable() const noexcept { return shift_; }
+    [[nodiscard]] constexpr CharsetTable currentTable() const noexcept { return shift_; }
 
   private:
     CharsetTable shift_ = CharsetTable::G0;

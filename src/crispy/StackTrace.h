@@ -22,9 +22,9 @@ class StackTrace
     StackTrace& operator=(const StackTrace&) = default;
     ~StackTrace() = default;
 
-    std::vector<std::string> symbols() const;
-    size_t size() const noexcept { return frames_.size(); }
-    bool empty() const noexcept { return frames_.empty(); }
+    [[nodiscard]] std::vector<std::string> symbols() const;
+    [[nodiscard]] size_t size() const noexcept { return frames_.size(); }
+    [[nodiscard]] bool empty() const noexcept { return frames_.empty(); }
 
     static std::string demangleSymbol(const char* symbol);
     static std::vector<void*> getFrames(size_t _skip = 2, size_t _max = 64);

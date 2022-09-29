@@ -100,19 +100,19 @@ class [[nodiscard]] Process: public Pty
     };
     void terminate(TerminationHint _terminationHint);
 
-    Pty& pty() noexcept;
-    Pty const& pty() const noexcept;
+    [[nodiscard]] Pty& pty() noexcept;
+    [[nodiscard]] Pty const& pty() const noexcept;
 
     // Pty overrides
     // clang-format off
     void start() override;
-    PtySlave& slave() noexcept override { return pty().slave(); }
+    [[nodiscard]] PtySlave& slave() noexcept override { return pty().slave(); }
     void close() override { pty().close(); }
-    bool isClosed() const noexcept override { return pty().isClosed(); }
+    [[nodiscard]] bool isClosed() const noexcept override { return pty().isClosed(); }
     [[nodiscard]] ReadResult read(crispy::BufferObject& storage, std::chrono::milliseconds timeout, size_t n) override { return pty().read(storage, timeout, n); }
     void wakeupReader() override { return pty().wakeupReader(); }
-    int write(char const* buf, size_t size) override { return pty().write(buf, size); }
-    PageSize pageSize() const noexcept override { return pty().pageSize(); }
+    [[nodiscard]] int write(char const* buf, size_t size) override { return pty().write(buf, size); }
+    [[nodiscard]] PageSize pageSize() const noexcept override { return pty().pageSize(); }
     void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override { pty().resizeScreen(_cells, _pixels); }
     // clang-format on
 
