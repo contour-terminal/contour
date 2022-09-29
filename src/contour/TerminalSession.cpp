@@ -627,6 +627,10 @@ void TerminalSession::playSound(terminal::Sequence::Parameters const& params_)
     emit audio.play(params_.at(0), params_.at(1), musicalNotesBuffer_);
 }
 
+void TerminalSession::cursorPositionChanged()
+{
+    QGuiApplication::inputMethod()->update(Qt::ImCursorRectangle);
+}
 // }}}
 // {{{ Actions
 bool TerminalSession::operator()(actions::CancelSelection)

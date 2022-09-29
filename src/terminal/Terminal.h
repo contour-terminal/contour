@@ -84,7 +84,8 @@ class Terminal
         virtual void discardImage(Image const&) {}
         virtual void inputModeChanged(ViMode /*mode*/) {}
         virtual void updateHighlights() {}
-        virtual void playSound([[maybe_unused]] terminal::Sequence::Parameters const& _) {}
+        virtual void playSound(Sequence::Parameters const&) {}
+        virtual void cursorPositionChanged() {}
         virtual void onScrollOffsetChanged(ScrollOffset) {}
     };
 

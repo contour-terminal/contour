@@ -73,7 +73,7 @@ void BackgroundRenderer::renderCell(RenderCell const& _cell)
 
     renderTarget().renderRectangle(pos.x,
                                    pos.y,
-                                   _gridMetrics.cellSize.width,
+                                   _gridMetrics.cellSize.width * Width::cast_from(_cell.width),
                                    _gridMetrics.cellSize.height,
                                    RGBAColor(_cell.attributes.backgroundColor, opacity_));
 }
