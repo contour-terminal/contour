@@ -57,7 +57,7 @@ ImagePool::ImagePool(OnImageRemove _onImageRemove, ImageId _nextImageId):
     imageNameToImageCache_ { StrongHashtableSize { 1024 },
                              LRUCapacity { 100 },
                              "ImagePool name-to-image mappings" },
-    onImageRemove_ { move(_onImageRemove) }
+    onImageRemove_ { std::move(_onImageRemove) }
 {
 }
 
@@ -134,7 +134,7 @@ shared_ptr<Image const> ImagePool::create(ImageFormat _format, ImageSize _size, 
     // TODO: This operation should be idempotent, i.e. if that image has been created already, return a
     // reference to that.
     auto const id = nextImageId_++;
-    return make_shared<Image>(id, _format, move(_data), _size, onImageRemove_);
+    return make_shared<Image>(id, _format, std::move(_data), _size, onImageRemove_);
 }
 
 shared_ptr<RasterizedImage> ImagePool::rasterize(shared_ptr<Image const> _image,
@@ -145,12 +145,12 @@ shared_ptr<RasterizedImage> ImagePool::rasterize(shared_ptr<Image const> _image,
                                                  ImageSize _cellSize)
 {
     return make_shared<RasterizedImage>(
-        move(_image), _alignmentPolicy, _resizePolicy, _defaultColor, _cellSpan, _cellSize);
+        std::move(_image), _alignmentPolicy, _resizePolicy, _defaultColor, _cellSpan, _cellSize);
 }
 
 void ImagePool::link(string const& _name, shared_ptr<Image const> _imageRef)
 {
-    imageNameToImageCache_.emplace(_name, move(_imageRef));
+    imageNameToImageCache_.emplace(_name, std::move(_imageRef));
 }
 
 shared_ptr<Image const> ImagePool::findImageByName(string const& _name) const noexcept

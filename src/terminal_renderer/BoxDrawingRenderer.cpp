@@ -959,7 +959,7 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint, atlas::TileLocation 
     {
         *image = invertY(*image, _gridMetrics.cellSize);
         return { createTileData(tileLocation,
-                                move(*image),
+                                std::move(*image),
                                 atlas::Format::Red,
                                 _gridMetrics.cellSize,
                                 RenderTileAttributes::X { 0 },
@@ -994,13 +994,13 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint, atlas::TileLocation 
         auto tmp = buildBoxElements(codepoint, _gridMetrics.cellSize, _gridMetrics.underline.thickness);
         if (!tmp)
             return nullopt;
-        pixels = move(*tmp);
+        pixels = std::move(*tmp);
     }
 
     pixels = invertY(pixels, _gridMetrics.cellSize);
 
     return { createTileData(tileLocation,
-                            move(pixels),
+                            std::move(pixels),
                             atlas::Format::Red,
                             _gridMetrics.cellSize,
                             RenderTileAttributes::X { 0 },

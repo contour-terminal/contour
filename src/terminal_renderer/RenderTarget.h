@@ -230,7 +230,7 @@ inline Renderable::TextureAtlas::TileCreateData Renderable::createTileData(atlas
                                                                            uint32_t fragmentShaderSelector)
 {
     return createTileData(
-        tileLocation, move(bitmap), bitmapFormat, bitmapSize, bitmapSize, x, y, fragmentShaderSelector);
+        tileLocation, std::move(bitmap), bitmapFormat, bitmapSize, bitmapSize, x, y, fragmentShaderSelector);
 }
 
 } // namespace terminal::renderer

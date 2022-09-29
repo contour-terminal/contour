@@ -241,7 +241,7 @@ struct directwrite_shaper::Private
         fontFace->QueryInterface(&fontInfo.fontFace);
 
         auto key = create_font_key();
-        fonts.emplace(pair { key, move(fontInfo) });
+        fonts.emplace(pair { key, std::move(fontInfo) });
         fontsHasColor.emplace(pair { key, false });
         return key;
     }

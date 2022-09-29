@@ -436,15 +436,15 @@ struct open_shaper::Private // {{{
             return nullopt;
         }
 
-        auto ftFacePtr = move(ftFacePtrOpt.value());
+        auto ftFacePtr = std::move(ftFacePtrOpt.value());
         auto hbFontPtr =
             HbFontPtr(hb_ft_font_create_referenced(ftFacePtr.get()), [](auto p) { hb_font_destroy(p); });
 
-        auto fontInfo = HbFontInfo { source, {}, _fontSize, move(ftFacePtr), move(hbFontPtr) };
+        auto fontInfo = HbFontInfo { source, {}, _fontSize, std::move(ftFacePtr), std::move(hbFontPtr) };
 
         auto key = create_font_key();
         fontPathAndSizeToKeyMapping.emplace(pair { FontPathAndSize { sourceId, _fontSize }, key });
-        fontKeyToHbFontInfoMapping.emplace(pair { key, move(fontInfo) });
+        fontKeyToHbFontInfoMapping.emplace(pair { key, std::move(fontInfo) });
         LocatorLog()("Loading font: key={}, id=\"{}\" size={} dpi {} {}",
                      key,
                      sourceId,
@@ -588,7 +588,7 @@ optional<font_key> open_shaper::load_font(font_description const& _description, 
     sources.erase(sources.begin()); // remove primary font from list
 
     HbFontInfo& fontInfo = d->fontKeyToHbFontInfoMapping.at(*fontKeyOpt);
-    fontInfo.fallbacks = move(sources);
+    fontInfo.fallbacks = std::move(sources);
     fontInfo.description = _description;
 
     return fontKeyOpt;

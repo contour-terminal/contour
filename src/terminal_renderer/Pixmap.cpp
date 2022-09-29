@@ -60,7 +60,7 @@ atlas::Buffer Pixmap::take()
     if (_size != _downsampledSize)
         return downsample(_buffer, 1, _size, _downsampledSize);
     else
-        return move(_buffer);
+        return std::move(_buffer);
 }
 
 Pixmap& Pixmap::line(Ratio _from, Ratio _to)

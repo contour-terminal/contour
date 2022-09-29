@@ -342,7 +342,7 @@ namespace // {{{ helper
     void setOption(ParseContext& _context, string const& _key, Value _value)
     {
         CLI_DEBUG(fmt::format("setOption({}): {}", _key, _value));
-        _context.output.values[_key] = move(_value);
+        _context.output.values[_key] = std::move(_value);
     }
 
     void parseOptionList(ParseContext& _context)
@@ -358,7 +358,7 @@ namespace // {{{ helper
 
             auto& [option, value] = optionOptPair.value();
             auto const fqdn = optionPrefix + "." + Name(option->name.longName);
-            setOption(_context, fqdn, move(value));
+            setOption(_context, fqdn, std::move(value));
         }
     }
 
@@ -519,7 +519,7 @@ optional<FlagStore> parse(Command const& _command, StringViewList const& _args)
 
     validate(_command, context, "");
 
-    return move(context.output);
+    return std::move(context.output);
 }
 
 optional<FlagStore> parse(Command const& _command, int _argc, char const* const* _argv)

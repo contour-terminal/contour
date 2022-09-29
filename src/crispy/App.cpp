@@ -140,7 +140,7 @@ App::~App()
 
 void App::link(std::string _command, std::function<int()> _handler)
 {
-    handlers_[move(_command)] = move(_handler);
+    handlers_[std::move(_command)] = std::move(_handler);
 }
 
 void App::listDebugTags()

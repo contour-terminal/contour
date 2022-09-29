@@ -541,15 +541,15 @@ string StaticDatabase::terminfo() const
 
     output << "contour|contour-latest|Contour Terminal Emulator,\n";
 
-    for (auto const& cap: move(booleans) | actions::sort)
+    for (auto const& cap: std::move(booleans) | actions::sort)
         if (!cap.name.empty() && cap.value)
             output << "    " << cap.name << ",\n";
 
-    for (auto const& cap: move(numbers) | actions::sort)
+    for (auto const& cap: std::move(numbers) | actions::sort)
         if (!cap.name.empty())
             output << "    " << cap.name << "#" << cap.value << ",\n";
 
-    for (auto const& cap: move(strings) | actions::sort)
+    for (auto const& cap: std::move(strings) | actions::sort)
         if (!cap.name.empty())
             output << "    " << cap.name << "=" << crispy::escape(cap.value) << ",\n";
 

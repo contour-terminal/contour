@@ -1300,8 +1300,9 @@ void Screen<Cell>::hyperlink(string _id, string _uri)
     else
     {
         _state.cursor.hyperlink = _state.hyperlinks.nextHyperlinkId++;
-        _state.hyperlinks.cache.emplace(_state.cursor.hyperlink,
-                                        make_shared<HyperlinkInfo>(HyperlinkInfo { move(_id), move(_uri) }));
+        _state.hyperlinks.cache.emplace(
+            _state.cursor.hyperlink,
+            make_shared<HyperlinkInfo>(HyperlinkInfo { std::move(_id), std::move(_uri) }));
     }
     // TODO:
     // Care about eviction.
@@ -1725,7 +1726,7 @@ void Screen<Cell>::sixelImage(ImageSize _pixelSize, Image::Data&& _data)
     auto const imageOffset = PixelCoordinate {};
     auto const imageSize = _pixelSize;
 
-    shared_ptr<Image const> imageRef = uploadImage(ImageFormat::RGBA, _pixelSize, move(_data));
+    shared_ptr<Image const> imageRef = uploadImage(ImageFormat::RGBA, _pixelSize, std::move(_data));
     renderImage(imageRef,
                 topLeft,
                 extent,
@@ -1744,7 +1745,7 @@ shared_ptr<Image const> Screen<Cell>::uploadImage(ImageFormat _format,
                                                   ImageSize _imageSize,
                                                   Image::Data&& _pixmap)
 {
-    return _state.imagePool.create(_format, _imageSize, move(_pixmap));
+    return _state.imagePool.create(_format, _imageSize, std::move(_pixmap));
 }
 
 template <typename Cell>
@@ -1768,7 +1769,7 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> _image,
 
     // TODO: make use of _imageOffset and _imageSize
     auto const rasterizedImage = _state.imagePool.rasterize(
-        move(_image), _alignmentPolicy, _resizePolicy, gapColor, _gridSize, _state.cellPixelSize);
+        std::move(_image), _alignmentPolicy, _resizePolicy, gapColor, _gridSize, _state.cellPixelSize);
     const auto lastSixelBand = _imageSize.height.value % 6;
     const LineOffset offset = [&]() {
         auto offset =
@@ -3613,7 +3614,7 @@ unique_ptr<ParserExtension> Screen<Cell>::hookSixel(Sequence const& _seq)
 
     return make_unique<SixelParser>(*sixelImageBuilder_, [this]() {
         {
-            sixelImage(sixelImageBuilder_->size(), move(sixelImageBuilder_->data()));
+            sixelImage(sixelImageBuilder_->size(), std::move(sixelImageBuilder_->data()));
         }
     });
 }

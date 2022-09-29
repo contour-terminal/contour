@@ -131,7 +131,7 @@ QImage Blur::blurGaussian(QImage imageToBlur)
     if (imageToBlur != m_imageToBlur)
     {
         m_iterations = 1;
-        m_imageToBlur = move(imageToBlur);
+        m_imageToBlur = std::move(imageToBlur);
         initFBOTextures();
         Require(m_gaussianBlur->isLinked());
 
@@ -182,7 +182,7 @@ QImage Blur::blurDualKawase(QImage imageToBlur, int offset, int iterations)
     if (iterations != m_iterations || imageToBlur != m_imageToBlur)
     {
         m_iterations = iterations;
-        m_imageToBlur = move(imageToBlur);
+        m_imageToBlur = std::move(imageToBlur);
 
         initFBOTextures();
     }

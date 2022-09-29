@@ -98,7 +98,7 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty, ContourGuiApp& _app):
     profileName_ { _app.profileName() },
     profile_ { *config_.profile(profileName_) },
     app_ { _app },
-    terminal_ { move(_pty),
+    terminal_ { std::move(_pty),
                 config_.ptyBufferObjectSize,
                 config_.ptyReadBufferSize,
                 *this,
@@ -990,7 +990,7 @@ bool TerminalSession::reloadConfig(config::Config _newConfig, string const& _pro
                  _newConfig.backingFilePath.string(), _profileName);
     // clang-format on
 
-    config_ = move(_newConfig);
+    config_ = std::move(_newConfig);
     activateProfile(_profileName);
 
     return true;

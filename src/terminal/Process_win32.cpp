@@ -177,7 +177,7 @@ Process::Process(string const& _path,
                  Environment const& _env,
                  bool escapeSandbox,
                  std::unique_ptr<Pty> _pty):
-    d(new Private { _path, _args, _cwd, _env, move(_pty) }, [](Private* p) { delete p; })
+    d(new Private { _path, _args, _cwd, _env, std::move(_pty) }, [](Private* p) { delete p; })
 {
     crispy::ignore_unused(escapeSandbox);
 }

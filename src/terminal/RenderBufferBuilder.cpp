@@ -169,7 +169,7 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(ColorPalette const&
     renderCell.position.line = _line;
     renderCell.position.column = _column;
     renderCell.width = unbox<uint8_t>(width);
-    renderCell.codepoints = move(graphemeCluster);
+    renderCell.codepoints = std::move(graphemeCluster);
     return renderCell;
 }
 
