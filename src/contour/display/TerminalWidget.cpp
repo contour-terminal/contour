@@ -652,14 +652,15 @@ void TerminalWidget::inputMethodEvent(QInputMethodEvent* _event)
 QVariant TerminalWidget::inputMethodQuery(Qt::InputMethodQuery _query) const
 {
     QPoint cursorPos = QPoint();
+    auto const dpr = contentScale();
     if (terminal().isCursorInViewport())
     {
         auto const gridCursorPos = terminal().cursor().position;
         cursorPos.setX(int(unbox<double>(gridCursorPos.column)
                            * unbox<double>(renderer_->gridMetrics().cellSize.width)));
-        cursorPos.setY(int(unbox<double>(gridCursorPos.line + 1)
-                           * unbox<double>(renderer_->gridMetrics().cellSize.height)));
-        cursorPos /= contentScale();
+        cursorPos.setY(
+            int(unbox<double>(gridCursorPos.line) * unbox<double>(renderer_->gridMetrics().cellSize.height)));
+        cursorPos /= dpr;
     }
 
     switch (_query)
@@ -670,8 +671,9 @@ QVariant TerminalWidget::inputMethodQuery(Qt::InputMethodQuery _query) const
             auto result = QRect();
             result.setLeft(theContentsRect.left() + cursorPos.x());
             result.setTop(theContentsRect.top() + cursorPos.y());
-            result.setWidth(unbox<int>(gridMetrics.cellSize.width)); // TODO: respect double-width characters
-            result.setHeight(unbox<int>(gridMetrics.cellSize.height));
+            result.setWidth(int(unbox<double>(gridMetrics.cellSize.width)
+                                / dpr)); // TODO: respect double-width characters
+            result.setHeight(int(unbox<double>(gridMetrics.cellSize.height) / dpr));
             return result;
             break;
         }

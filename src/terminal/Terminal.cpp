@@ -356,6 +356,7 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
 {
     verifyState();
 
+    auto const lastCursorPos = std::move(_output.cursor);
     _output.clear();
 
     changes_.store(0);
@@ -413,6 +414,12 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
                                             InputMethodData {} },
                 ScrollOffset(0));
             break;
+    }
+
+    if (lastCursorPos.has_value() != _output.cursor.has_value()
+        || (_output.cursor.has_value() && _output.cursor->position != lastCursorPos->position))
+    {
+        eventListener_.cursorPositionChanged();
     }
 }
 // }}}

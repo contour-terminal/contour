@@ -177,6 +177,7 @@ using std::unique_ptr;
 using std::vector;
 
 using namespace std::placeholders;
+using namespace std::string_view_literals;
 
 namespace terminal::renderer
 {
@@ -499,6 +500,13 @@ void TextRenderer::renderCell(RenderCell const& cell)
                cell.codepoints,
                makeTextStyle(cell.attributes.flags),
                cell.attributes.foregroundColor);
+
+    if (cell.width > 1)
+    {
+        auto constexpr space = U" "sv;
+        appendCellTextToClusterGroup(
+            space, makeTextStyle(cell.attributes.flags), cell.attributes.foregroundColor);
+    }
 
     if (cell.groupEnd)
         flushTextClusterGroup();

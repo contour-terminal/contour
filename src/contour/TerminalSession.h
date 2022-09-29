@@ -104,6 +104,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     void inputModeChanged(terminal::ViMode mode) override;
     void updateHighlights() override;
     void playSound(terminal::Sequence::Parameters const& params_) override;
+    void cursorPositionChanged() override;
 
     // Input Events
     using Timestamp = std::chrono::steady_clock::time_point;
