@@ -261,7 +261,7 @@ TEST_CASE("Terminal.DECCARA", "[terminal]")
             auto const& someCell = mock.terminal().primaryScreen().at(LineOffset(line - 1), ColumnOffset(column - 1));
             auto const rgb = someCell.foregroundColor().rgb();
             auto const colorDec = fmt::format("{}/{}/{}", unsigned(rgb.red), unsigned(rgb.green), unsigned(rgb.blue));
-            INFO(fmt::format("at line {} column {}, flags {}", line, column, someCell.styles()));
+            INFO(fmt::format("at line {} column {}, flags {}", line, column, someCell.flags()));
             CHECK(colorDec == "171/178/191");
             CHECK(someCell.isFlagEnabled(terminal::CellFlags::Bold));
             CHECK(someCell.isFlagEnabled(terminal::CellFlags::Underline));

@@ -28,7 +28,7 @@ struct GraphicsAttributes
     Color foregroundColor { DefaultColor() };
     Color backgroundColor { DefaultColor() };
     Color underlineColor { DefaultColor() };
-    CellFlags styles {};
+    CellFlags flags {};
 };
 
 static_assert(std::is_trivially_copy_assignable_v<GraphicsAttributes>);
@@ -36,7 +36,7 @@ static_assert(std::is_trivially_copy_assignable_v<GraphicsAttributes>);
 constexpr bool operator==(GraphicsAttributes const& a, GraphicsAttributes const& b) noexcept
 {
     return a.backgroundColor == b.backgroundColor && a.foregroundColor == b.foregroundColor
-           && a.styles == b.styles && a.underlineColor == b.underlineColor;
+           && a.flags == b.flags && a.underlineColor == b.underlineColor;
 }
 
 constexpr bool operator!=(GraphicsAttributes const& a, GraphicsAttributes const& b) noexcept

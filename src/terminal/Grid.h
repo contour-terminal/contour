@@ -618,7 +618,7 @@ template <typename RendererT>
         Line<Cell> const& line = lines_[i];
         if (line.isTrivialBuffer())
         {
-            auto const cellFlags = line.trivialBuffer().textAttributes.styles;
+            auto const cellFlags = line.trivialBuffer().textAttributes.flags;
             hints.containsBlinkingCells = hints.containsBlinkingCells || (CellFlags::Blinking & cellFlags)
                                           || (CellFlags::RapidBlinking & cellFlags);
             _render.renderTrivialLine(line.trivialBuffer(), y);
@@ -629,8 +629,8 @@ template <typename RendererT>
             for (Cell const& cell: line.cells())
             {
                 hints.containsBlinkingCells = hints.containsBlinkingCells
-                                              || (CellFlags::Blinking & cell.styles())
-                                              || (CellFlags::RapidBlinking & cell.styles());
+                                              || (CellFlags::Blinking & cell.flags())
+                                              || (CellFlags::RapidBlinking & cell.flags());
                 _render.renderCell(cell, y, x++);
             }
             _render.endLine();

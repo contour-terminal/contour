@@ -202,7 +202,7 @@ namespace // {{{ helper
         };
 
         for (auto const& mask: masks)
-            if (_sgr.styles & mask.first)
+            if (_sgr.flags & mask.first)
                 sgrAddStr(mask.second);
 
         return output;
@@ -1960,7 +1960,7 @@ void Screen<Cell>::requestStatusString(RequestStatusString _value)
                 return fmt::format("0;{}m", vtSequenceParameterString(_state.cursor.graphicsRendition));
             case RequestStatusString::DECSCA: {
                 auto const isProtected =
-                    _state.cursor.graphicsRendition.styles & CellFlags::CharacterProtected;
+                    _state.cursor.graphicsRendition.flags & CellFlags::CharacterProtected;
                 return fmt::format("{}\"q", isProtected ? 1 : 2);
             }
             case RequestStatusString::DECSASD:
@@ -3328,11 +3328,11 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             switch (Pc)
             {
                 case 1:
-                    _state.cursor.graphicsRendition.styles |= CellFlags::CharacterProtected;
+                    _state.cursor.graphicsRendition.flags |= CellFlags::CharacterProtected;
                     return ApplyResult::Ok;
                 case 0:
                 case 2:
-                    _state.cursor.graphicsRendition.styles &= ~CellFlags::CharacterProtected;
+                    _state.cursor.graphicsRendition.flags &= ~CellFlags::CharacterProtected;
                     return ApplyResult::Ok;
                 default: return ApplyResult::Invalid;
             }

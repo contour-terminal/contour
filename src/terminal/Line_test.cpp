@@ -48,7 +48,7 @@ TEST_CASE("Line.inflate", "[Line]")
     sgr.foregroundColor = RGBColor(0x123456);
     sgr.backgroundColor = Color::Indexed(IndexedColor::Yellow);
     sgr.underlineColor = Color::Indexed(IndexedColor::Red);
-    sgr.styles |= CellFlags::CurlyUnderlined;
+    sgr.flags |= CellFlags::CurlyUnderlined;
     auto const trivial =
         TrivialLineBuffer { ColumnCount(10), sgr, sgr, HyperlinkId {}, ColumnCount(10), bufferFragment };
 
