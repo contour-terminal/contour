@@ -159,7 +159,7 @@ RGBColor SixelColorPalette::at(unsigned int _index) const noexcept
 // }}}
 
 SixelParser::SixelParser(Events& _events, OnFinalize _finalizer):
-    events_ { _events }, finalizer_ { move(_finalizer) }
+    events_ { _events }, finalizer_ { std::move(_finalizer) }
 {
 }
 

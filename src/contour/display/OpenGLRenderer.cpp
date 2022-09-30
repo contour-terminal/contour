@@ -394,7 +394,7 @@ void OpenGLRenderer::uploadTile(atlas::UploadTile tile)
     // Require(tile.bitmapSize.width <= _textureAtlas.properties.tileSize.width);
     // Require(tile.bitmapSize.height <= _textureAtlas.properties.tileSize.height);
 
-    _scheduledExecutions.uploadTiles.emplace_back(move(tile));
+    _scheduledExecutions.uploadTiles.emplace_back(std::move(tile));
 }
 
 void OpenGLRenderer::renderTile(atlas::RenderTile tile)
@@ -774,12 +774,12 @@ optional<terminal::renderer::AtlasTextureScreenshot> OpenGLRenderer::readAtlas()
     CHECKED_GL(glBindFramebuffer(GL_FRAMEBUFFER, 0));
     CHECKED_GL(glDeleteFramebuffers(1, &fbo));
 
-    return { move(output) };
+    return { std::move(output) };
 }
 
 void OpenGLRenderer::scheduleScreenshot(ScreenshotCallback callback)
 {
-    _pendingScreenshotCallback = move(callback);
+    _pendingScreenshotCallback = std::move(callback);
 }
 
 pair<ImageSize, vector<uint8_t>> OpenGLRenderer::takeScreenshot()
@@ -899,8 +899,8 @@ void OpenGLRenderer::setBackgroundImage(shared_ptr<terminal::BackgroundImage con
             // auto const iterStr = qgetenv("CONTOUR_BLUR_ITERATIONS").toStdString();
             // auto const offset = offsetStr.empty() ? 5 : std::stoi(offsetStr);
             // auto const iterations = iterStr.empty() ? 5 : std::stoi(iterStr);
-            // qImage = blur.blurDualKawase(move(qImage), offset, iterations);
-            qImage = blur.blurGaussian(move(qImage));
+            // qImage = blur.blurDualKawase(std::move(qImage), offset, iterations);
+            qImage = blur.blurGaussian(std::move(qImage));
         }
 
         qImage = qImage.convertToFormat(QImage::Format_RGBA8888);

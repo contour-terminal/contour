@@ -95,7 +95,7 @@ void DecorationRenderer::initializeDirectMapping()
         auto const tileIndex = _directMapping.toTileIndex(static_cast<uint32_t>(decoration));
         auto const tileLocation = _textureAtlas->tileLocation(tileIndex);
         TextureAtlas::TileCreateData tileData = createTileData(decoration, tileLocation);
-        _textureAtlas->setDirectMapping(tileIndex, move(tileData));
+        _textureAtlas->setDirectMapping(tileIndex, std::move(tileData));
     }
 }
 

@@ -83,7 +83,7 @@ auto Renderable::sliceTileData(Renderable::TextureAtlas::TileCreateData const& c
     }
 
     return createTileData(tileLocation,
-                          move(bitmap),
+                          std::move(bitmap),
                           bitmapFormat,
                           subSize,
                           RenderTileAttributes::X { (int) sliceIndex.beginX },

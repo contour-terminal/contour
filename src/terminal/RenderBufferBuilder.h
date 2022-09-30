@@ -53,35 +53,35 @@ class RenderBufferBuilder
     void finish() noexcept {}
 
   private:
-    std::optional<RenderCursor> renderCursor() const;
+    [[nodiscard]] std::optional<RenderCursor> renderCursor() const;
 
-    static RenderCell makeRenderCellExplicit(ColorPalette const& _colorPalette,
-                                             std::u32string graphemeCluster,
-                                             ColumnCount width,
-                                             CellFlags flags,
-                                             RGBColor fg,
-                                             RGBColor bg,
-                                             Color ul,
-                                             LineOffset _line,
-                                             ColumnOffset _column);
+    [[nodiscard]] static RenderCell makeRenderCellExplicit(ColorPalette const& _colorPalette,
+                                                           std::u32string graphemeCluster,
+                                                           ColumnCount width,
+                                                           CellFlags flags,
+                                                           RGBColor fg,
+                                                           RGBColor bg,
+                                                           Color ul,
+                                                           LineOffset _line,
+                                                           ColumnOffset _column);
 
-    static RenderCell makeRenderCellExplicit(ColorPalette const& _colorPalette,
-                                             char32_t codepoint,
-                                             CellFlags flags,
-                                             RGBColor fg,
-                                             RGBColor bg,
-                                             Color ul,
-                                             LineOffset _line,
-                                             ColumnOffset _column);
+    [[nodiscard]] static RenderCell makeRenderCellExplicit(ColorPalette const& _colorPalette,
+                                                           char32_t codepoint,
+                                                           CellFlags flags,
+                                                           RGBColor fg,
+                                                           RGBColor bg,
+                                                           Color ul,
+                                                           LineOffset _line,
+                                                           ColumnOffset _column);
 
     /// Constructs a RenderCell for the given screen Cell.
-    static RenderCell makeRenderCell(ColorPalette const& _colorPalette,
-                                     HyperlinkStorage const& _hyperlinks,
-                                     Cell const& _cell,
-                                     RGBColor fg,
-                                     RGBColor bg,
-                                     LineOffset _line,
-                                     ColumnOffset _column);
+    [[nodiscard]] static RenderCell makeRenderCell(ColorPalette const& _colorPalette,
+                                                   HyperlinkStorage const& _hyperlinks,
+                                                   Cell const& _cell,
+                                                   RGBColor fg,
+                                                   RGBColor bg,
+                                                   LineOffset _line,
+                                                   ColumnOffset _column);
 
     /// Constructs the final foreground/background colors to be displayed on the screen.
     ///

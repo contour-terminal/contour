@@ -444,7 +444,7 @@ Renderable::AtlasTileAttributes const* TextRenderer::ensureRasterizedIfDirectMap
     //            tileCreateData->bitmapSize,
     //            tileCreateData->metadata);
 
-    _textureAtlas->setDirectMapping(tileIndex, move(*tileCreateData));
+    _textureAtlas->setDirectMapping(tileIndex, std::move(*tileCreateData));
     return &_textureAtlas->directMapped(tileIndex);
 }
 
@@ -762,7 +762,7 @@ auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
                 }
 
                 return createTileData(tileLocation,
-                                      move(bitmap),
+                                      std::move(bitmap),
                                       bitmapFormat,
                                       subSize,
                                       RenderTileAttributes::X { 0 },
@@ -783,7 +783,7 @@ auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
                     headPitch);                                  // sub-image line length
 
     return { createTileData(tileLocation,
-                            move(headBitmap),
+                            std::move(headBitmap),
                             bitmapFormat,
                             headSize,
                             createData.metadata.x,
@@ -830,7 +830,7 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
                     numCells);
             auto [scaledGlyph, scaleFactor] = text::scale(glyph, emojiBoundingBox);
 
-            glyph = move(scaledGlyph);
+            glyph = std::move(scaledGlyph);
             RasterizerLog()(" ==> scaled: {}/{}, factor {}", scaledGlyph, emojiBoundingBox, scaleFactor);
         }
     }
@@ -880,7 +880,7 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     }
 
     return { createTileData(tileLocation,
-                            move(glyph.bitmap),
+                            std::move(glyph.bitmap),
                             toAtlasFormat(glyph.format),
                             glyph.bitmapSize,
                             RenderTileAttributes::X { glyph.position.x },

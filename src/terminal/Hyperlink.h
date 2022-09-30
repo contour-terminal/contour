@@ -46,7 +46,7 @@ struct HyperlinkInfo
 
     bool isLocal() const noexcept { return uri.size() >= 7 && uri.substr(0, 7) == "file://"; }
 
-    std::string_view host() const noexcept
+    [[nodiscard]] std::string_view host() const noexcept
     {
         if (auto const i = uri.find("://"); i != uri.npos)
             if (auto const j = uri.find('/', i + 3); j != uri.npos)
@@ -55,7 +55,7 @@ struct HyperlinkInfo
         return "";
     }
 
-    std::string_view path() const noexcept
+    [[nodiscard]] std::string_view path() const noexcept
     {
         if (auto const i = uri.find("://"); i != uri.npos)
             if (auto const j = uri.find('/', i + 3); j != uri.npos)
@@ -64,7 +64,7 @@ struct HyperlinkInfo
         return "";
     }
 
-    std::string_view scheme() const noexcept
+    [[nodiscard]] std::string_view scheme() const noexcept
     {
         if (auto const i = uri.find("://"); i != uri.npos)
             return std::string_view { uri.data(), i };

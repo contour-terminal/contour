@@ -72,7 +72,7 @@ class Image: public std::enable_shared_from_this<Image>
     Image(ImageId _id, ImageFormat _format, Data _data, ImageSize _pixelSize, OnImageRemove remover):
         id_ { _id },
         format_ { _format },
-        data_ { move(_data) },
+        data_ { std::move(_data) },
         size_ { _pixelSize },
         onImageRemove_ { std::move(remover) }
     {

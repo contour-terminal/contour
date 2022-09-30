@@ -33,16 +33,16 @@ class App
 
     static App* instance() noexcept { return instance_; }
 
-    virtual crispy::cli::Command parameterDefinition() const = 0;
-    crispy::cli::FlagStore const& parameters() const noexcept { return flags_.value(); }
+    [[nodiscard]] virtual crispy::cli::Command parameterDefinition() const = 0;
+    [[nodiscard]] cli::FlagStore const& parameters() const noexcept { return flags_.value(); }
 
     void link(std::string _command, std::function<int()> _handler);
 
     virtual int run(int argc, char const* argv[]);
 
-    std::string const& appName() const noexcept { return appName_; }
-    std::string const& appVersion() const noexcept { return appVersion_; }
-    FileSystem::path const& localStateDir() const noexcept { return localStateDir_; }
+    [[nodiscard]] std::string const& appName() const noexcept { return appName_; }
+    [[nodiscard]] std::string const& appVersion() const noexcept { return appVersion_; }
+    [[nodiscard]] FileSystem::path const& localStateDir() const noexcept { return localStateDir_; }
 
     static void customizeLogStoreOutput();
 

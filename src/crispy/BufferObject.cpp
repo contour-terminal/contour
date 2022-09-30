@@ -32,13 +32,13 @@ auto const inline BufferObjectLog = logstore::Category("BufferObject",
                                                        logstore::Category::Visibility::Hidden);
 
 BufferFragment::BufferFragment(BufferObjectPtr buffer, size_t offset, size_t size) noexcept:
-    buffer_ { move(buffer) }, region_ { buffer_->data() + offset, size }
+    buffer_ { std::move(buffer) }, region_ { buffer_->data() + offset, size }
 {
     assert(buffer_->begin() <= &*region_.begin() && &*region_.end() <= buffer_->end());
 }
 
 BufferFragment::BufferFragment(BufferObjectPtr buffer, string_view region) noexcept:
-    buffer_ { move(buffer) }, region_ { region }
+    buffer_ { std::move(buffer) }, region_ { region }
 {
     assert(buffer_->begin() <= &*region_.begin() && &*region_.end() <= buffer_->end());
 }
@@ -73,9 +73,9 @@ BufferObjectPtr BufferObject::create(size_t capacity, BufferObjectRelease releas
     auto const nettoCapacity = totalCapacity - sizeof(BufferObject);
     auto ptr = (BufferObject*) malloc(totalCapacity);
     new (ptr) BufferObject(nettoCapacity);
-    return BufferObjectPtr(ptr, move(release));
+    return BufferObjectPtr(ptr, std::move(release));
 #else
-    return BufferObjectPtr(new BufferObject(nextPowerOfTwo(capacity)), move(release));
+    return BufferObjectPtr(new BufferObject(nextPowerOfTwo(capacity)), std::move(release));
 #endif
 }
 
@@ -114,7 +114,7 @@ BufferObjectPtr BufferObjectPool::allocateBufferObject()
     if (unusedBuffers_.empty())
         return BufferObject::create(bufferSize_, [this](auto p) { release(p); });
 
-    BufferObjectPtr buffer = move(unusedBuffers_.front());
+    BufferObjectPtr buffer = std::move(unusedBuffers_.front());
     if (BufferObjectLog)
         BufferObjectLog()("Recycling BufferObject from pool: @{}.", (void*) buffer.get());
     unusedBuffers_.pop_front();

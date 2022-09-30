@@ -120,9 +120,9 @@ class RectangularSelection: public Selection
 {
   public:
     RectangularSelection(SelectionHelper const& _helper, CellLocation _start);
-    bool contains(CellLocation _coord) const noexcept override;
-    bool intersects(Rect _area) const noexcept override;
-    std::vector<Range> ranges() const override;
+    [[nodiscard]] bool contains(CellLocation _coord) const noexcept override;
+    [[nodiscard]] bool intersects(Rect _area) const noexcept override;
+    [[nodiscard]] std::vector<Range> ranges() const override;
 };
 
 class LinearSelection: public Selection
@@ -138,8 +138,8 @@ class WordWiseSelection: public Selection
 
     void extend(CellLocation _to) override;
 
-    CellLocation extendSelectionBackward(CellLocation _pos) const noexcept;
-    CellLocation extendSelectionForward(CellLocation _pos) const noexcept;
+    [[nodiscard]] CellLocation extendSelectionBackward(CellLocation _pos) const noexcept;
+    [[nodiscard]] CellLocation extendSelectionForward(CellLocation _pos) const noexcept;
 };
 
 class FullLineSelection: public Selection

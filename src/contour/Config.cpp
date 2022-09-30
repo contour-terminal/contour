@@ -648,13 +648,13 @@ namespace // {{{ helper
         {
             if (match(binding, _modes, _modifier, _input))
             {
-                binding.binding.emplace_back(move(_action));
+                binding.binding.emplace_back(std::move(_action));
                 return;
             }
         }
 
         _bindings.emplace_back(terminal::InputBinding<Input, ActionList> {
-            _modes, _modifier, _input, ActionList { move(_action) } });
+            _modes, _modifier, _input, ActionList { std::move(_action) } });
     }
 
     bool tryAddKey(InputMappings& _inputMappings,
@@ -675,13 +675,16 @@ namespace // {{{ helper
 
         if (holds_alternative<terminal::Key>(*input))
         {
-            appendOrCreateBinding(
-                _inputMappings.keyMappings, _modes, _modifier, get<terminal::Key>(*input), move(_action));
+            appendOrCreateBinding(_inputMappings.keyMappings,
+                                  _modes,
+                                  _modifier,
+                                  get<terminal::Key>(*input),
+                                  std::move(_action));
         }
         else if (holds_alternative<char32_t>(*input))
         {
             appendOrCreateBinding(
-                _inputMappings.charMappings, _modes, _modifier, get<char32_t>(*input), move(_action));
+                _inputMappings.charMappings, _modes, _modifier, get<char32_t>(*input), std::move(_action));
         }
         else
             assert(false && "The impossible happened.");
@@ -721,7 +724,7 @@ namespace // {{{ helper
         if (!mouseButton)
             return false;
 
-        appendOrCreateBinding(_bindings, _modes, _modifier, *mouseButton, move(_action));
+        appendOrCreateBinding(_bindings, _modes, _modifier, *mouseButton, std::move(_action));
         return true;
     }
 
@@ -908,7 +911,7 @@ std::shared_ptr<terminal::BackgroundImage const> loadImage(string const& fileNam
     backgroundImage.opacity = opacity;
     backgroundImage.blur = blur;
 
-    return make_shared<terminal::BackgroundImage const>(move(backgroundImage));
+    return make_shared<terminal::BackgroundImage const>(std::move(backgroundImage));
 }
 
 /// Loads a configuration sub-section to handle cell color foreground/background + alpha.
@@ -1752,9 +1755,9 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
             softLoadFont(usedKeys, fontBasePath, node, fds.description);
             fds.source = text::font_path { node["path"].as<string>() };
             usedKeys.emplace(fmt::format("{}.path", fontBasePath));
-            registry.emplace_back(move(fds));
+            registry.emplace_back(std::move(fds));
         }
-        text::mock_font_locator::configure(move(registry));
+        text::mock_font_locator::configure(std::move(registry));
     }
 
     tryLoadValue(usedKeys, doc, "read_buffer_size", _config.ptyReadBufferSize);

@@ -204,7 +204,7 @@ class Sink
     }
 
     Sink(bool enabled, std::shared_ptr<std::ostream> f):
-        Sink(enabled, [f = move(f)](std::string_view text) {
+        Sink(enabled, [f = std::move(f)](std::string_view text) {
             *f << text;
             f->flush();
         })

@@ -135,7 +135,7 @@ Renderer::Renderer(PageSize pageSize,
     _atlasDirectMapping { atlasDirectMapping },
     _renderTarget { nullptr },
     //.
-    fontDescriptions_ { move(fontDescriptions) },
+    fontDescriptions_ { std::move(fontDescriptions) },
     textShaper_ { createTextShaper(fontDescriptions_.textShapingEngine,
                                    fontDescriptions_.dpi,
                                    createFontLocator(fontDescriptions_.fontLocator)) },
@@ -259,7 +259,7 @@ void Renderer::setFonts(FontDescriptions _fontDescriptions)
                                        _fontDescriptions.dpi,
                                        createFontLocator(_fontDescriptions.fontLocator));
 
-    fontDescriptions_ = move(_fontDescriptions);
+    fontDescriptions_ = std::move(_fontDescriptions);
     fonts_ = loadFontKeys(fontDescriptions_, *textShaper_);
     updateFontMetrics();
 }

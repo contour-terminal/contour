@@ -142,7 +142,7 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::Im
     output.format = _bitmap.format;
     output.bitmapSize = newSize;
     output.position = _bitmap.position; // TODO Actually, left/top position should be adjusted
-    output.bitmap = move(dest);
+    output.bitmap = std::move(dest);
     output.position.x = unbox<int>(_boundingBox.width - output.bitmapSize.width) / 2;
     output.position.y =
         unbox<int>(output.bitmapSize.height) + unbox<int>(_boundingBox.height - output.bitmapSize.height) / 4;

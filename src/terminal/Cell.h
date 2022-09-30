@@ -67,7 +67,7 @@ struct CONTOUR_PACKED Owned
     }
 
     ~Owned() { reset(); }
-    Owned() noexcept {}
+    Owned() noexcept = default;
     Owned(Owned&& v) noexcept: ptr_ { v.release() } {}
     Owned& operator=(Owned&& v) noexcept
     {
@@ -122,20 +122,20 @@ class CONTOUR_PACKED Cell
 
     void writeTextOnly(char32_t _ch, uint8_t _width) noexcept;
 
-    std::u32string codepoints() const;
-    char32_t codepoint(size_t i) const noexcept;
-    std::size_t codepointCount() const noexcept;
+    [[nodiscard]] std::u32string codepoints() const;
+    [[nodiscard]] char32_t codepoint(size_t i) const noexcept;
+    [[nodiscard]] std::size_t codepointCount() const noexcept;
 
     [[nodiscard]] bool compareText(char codepoint) const noexcept;
 
-    bool empty() const noexcept;
+    [[nodiscard]] bool empty() const noexcept;
 
-    constexpr uint8_t width() const noexcept;
+    [[nodiscard]] constexpr uint8_t width() const noexcept;
     void setWidth(uint8_t _width) noexcept;
 
-    CellFlags styles() const noexcept;
+    [[nodiscard]] CellFlags flags() const noexcept;
 
-    bool isFlagEnabled(CellFlags testFlags) const noexcept { return styles() & testFlags; }
+    [[nodiscard]] bool isFlagEnabled(CellFlags testFlags) const noexcept { return flags() & testFlags; }
 
     void resetFlags() noexcept
     {
@@ -153,32 +153,33 @@ class CONTOUR_PACKED Cell
 
     void setGraphicsRendition(GraphicsRendition sgr) noexcept;
 
-    Color underlineColor() const noexcept;
+    [[nodiscard]] Color underlineColor() const noexcept;
     void setUnderlineColor(Color color) noexcept;
-    Color foregroundColor() const noexcept;
+    [[nodiscard]] Color foregroundColor() const noexcept;
     void setForegroundColor(Color color) noexcept;
-    Color backgroundColor() const noexcept;
+    [[nodiscard]] Color backgroundColor() const noexcept;
     void setBackgroundColor(Color color) noexcept;
 
-    RGBColor getUnderlineColor(ColorPalette const& _colorPalette, RGBColor _defaultColor) const noexcept;
+    [[nodiscard]] RGBColor getUnderlineColor(ColorPalette const& _colorPalette,
+                                             RGBColor _defaultColor) const noexcept;
 
     [[nodiscard]] RGBColorPair makeColors(ColorPalette const& _colorPalette,
                                           bool _reverseVideo,
                                           bool _blink,
                                           bool _rapidBlink) const noexcept;
 
-    std::shared_ptr<ImageFragment> imageFragment() const noexcept;
+    [[nodiscard]] std::shared_ptr<ImageFragment> imageFragment() const noexcept;
     void setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, CellLocation offset);
 
     void setCharacter(char32_t _codepoint) noexcept;
     void setCharacter(char32_t _codepoint, uint8_t _width) noexcept;
-    int appendCharacter(char32_t _codepoint) noexcept;
-    std::string toUtf8() const;
+    [[nodiscard]] int appendCharacter(char32_t _codepoint) noexcept;
+    [[nodiscard]] std::string toUtf8() const;
 
-    HyperlinkId hyperlink() const noexcept;
+    [[nodiscard]] HyperlinkId hyperlink() const noexcept;
     void setHyperlink(HyperlinkId _hyperlink);
 
-    CellExtra& extra() noexcept;
+    [[nodiscard]] CellExtra& extra() noexcept;
 
   private:
     template <typename... Args>
@@ -224,8 +225,8 @@ inline Cell::Cell(GraphicsAttributes const& _attributes, HyperlinkId hyperlink) 
     if (_attributes.underlineColor != DefaultColor() || extra_)
         extra().underlineColor = _attributes.underlineColor;
 
-    if (_attributes.styles != CellFlags::None || extra_)
-        extra().flags = _attributes.styles;
+    if (_attributes.flags != CellFlags::None || extra_)
+        extra().flags = _attributes.flags;
 }
 
 inline Cell::Cell(Cell const& v) noexcept:
@@ -262,8 +263,8 @@ inline void Cell::reset(GraphicsAttributes const& _attributes) noexcept
     foregroundColor_ = _attributes.foregroundColor;
     backgroundColor_ = _attributes.backgroundColor;
     extra_.reset();
-    if (_attributes.styles != CellFlags::None)
-        extra().flags = _attributes.styles;
+    if (_attributes.flags != CellFlags::None)
+        extra().flags = _attributes.flags;
     if (_attributes.underlineColor != DefaultColor())
         extra().underlineColor = _attributes.underlineColor;
 }
@@ -282,8 +283,8 @@ inline void Cell::write(GraphicsAttributes const& _attributes, char32_t _ch, uin
     foregroundColor_ = _attributes.foregroundColor;
     backgroundColor_ = _attributes.backgroundColor;
 
-    if (_attributes.styles != CellFlags::None || extra_)
-        extra().flags = _attributes.styles;
+    if (_attributes.flags != CellFlags::None || extra_)
+        extra().flags = _attributes.flags;
 
     if (_attributes.underlineColor != DefaultColor())
         extra().underlineColor = _attributes.underlineColor;
@@ -305,13 +306,13 @@ inline void Cell::write(GraphicsAttributes const& _attributes,
     foregroundColor_ = _attributes.foregroundColor;
     backgroundColor_ = _attributes.backgroundColor;
 
-    if (_attributes.styles != CellFlags::None || extra_ || _attributes.underlineColor != DefaultColor()
+    if (_attributes.flags != CellFlags::None || extra_ || _attributes.underlineColor != DefaultColor()
         || !!_hyperlink)
     {
         CellExtra& ext = extra();
         ext.underlineColor = _attributes.underlineColor;
         ext.hyperlink = _hyperlink;
-        ext.flags = _attributes.styles;
+        ext.flags = _attributes.flags;
     }
 }
 
@@ -332,8 +333,8 @@ inline void Cell::reset(GraphicsAttributes const& _attributes, HyperlinkId _hype
     extra_.reset();
     if (_attributes.underlineColor != DefaultColor())
         extra().underlineColor = _attributes.underlineColor;
-    if (_attributes.styles != CellFlags::None)
-        extra().flags = _attributes.styles;
+    if (_attributes.flags != CellFlags::None)
+        extra().flags = _attributes.flags;
     if (_hyperlink != HyperlinkId())
         extra().hyperlink = _hyperlink;
 }
@@ -463,7 +464,7 @@ inline CellExtra& Cell::extra() noexcept
     return *extra_;
 }
 
-inline CellFlags Cell::styles() const noexcept
+inline CellFlags Cell::flags() const noexcept
 {
     if (!extra_)
         return CellFlags::None;
@@ -525,7 +526,7 @@ inline RGBColor getUnderlineColor(ColorPalette const& colorPalette,
 inline RGBColor Cell::getUnderlineColor(ColorPalette const& _colorPalette,
                                         RGBColor _defaultColor) const noexcept
 {
-    return terminal::getUnderlineColor(_colorPalette, styles(), _defaultColor, underlineColor());
+    return terminal::getUnderlineColor(_colorPalette, flags(), _defaultColor, underlineColor());
 }
 
 inline RGBColorPair makeColors(ColorPalette const& colorPalette,
@@ -569,7 +570,7 @@ inline RGBColorPair Cell::makeColors(ColorPalette const& _colorPalette,
                                      bool _rapidBlink) const noexcept
 {
     return terminal::makeColors(
-        _colorPalette, styles(), _reverseVideo, foregroundColor(), backgroundColor(), _blink, _rapidBlink);
+        _colorPalette, flags(), _reverseVideo, foregroundColor(), backgroundColor(), _blink, _rapidBlink);
 }
 
 inline std::shared_ptr<ImageFragment> Cell::imageFragment() const noexcept

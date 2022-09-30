@@ -118,11 +118,14 @@ struct FlagStore
     std::map<Name, Value> values;
     std::vector<std::string_view> verbatim;
 
-    bool boolean(std::string const& _key) const { return std::get<bool>(values.at(_key)); }
-    int integer(std::string const& _key) const { return std::get<int>(values.at(_key)); }
-    unsigned uint(std::string const& _key) const { return std::get<unsigned>(values.at(_key)); }
-    double real(std::string const& _key) const { return std::get<double>(values.at(_key)); }
-    std::string const& str(std::string const& _key) const { return std::get<std::string>(values.at(_key)); }
+    [[nodiscard]] bool boolean(std::string const& _key) const { return std::get<bool>(values.at(_key)); }
+    [[nodiscard]] int integer(std::string const& _key) const { return std::get<int>(values.at(_key)); }
+    [[nodiscard]] unsigned uint(std::string const& _key) const { return std::get<unsigned>(values.at(_key)); }
+    [[nodiscard]] double real(std::string const& _key) const { return std::get<double>(values.at(_key)); }
+    [[nodiscard]] std::string const& str(std::string const& _key) const
+    {
+        return std::get<std::string>(values.at(_key));
+    }
 
     template <typename T>
     T get(std::string const& _key) const

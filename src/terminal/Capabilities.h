@@ -31,7 +31,7 @@ struct Code
 
     constexpr operator uint16_t() const noexcept { return code; }
 
-    std::string hex() const
+    [[nodiscard]] std::string hex() const
     {
         return fmt::format("{:02X}{:02X}", unsigned((code >> 8) & 0xFF), unsigned(code & 0xFF));
     }

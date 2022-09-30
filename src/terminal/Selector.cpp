@@ -42,7 +42,7 @@ namespace // {{{ helper
         auto const numLines = to.line - from.line + 1;
         result.resize(numLines.as<size_t>());
 
-        return { move(result), from, to };
+        return { std::move(result), from, to };
     }
 } // namespace
 // }}}

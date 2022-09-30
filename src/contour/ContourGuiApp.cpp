@@ -241,7 +241,7 @@ bool ContourGuiApp::loadConfig(string const& target)
         shell.arguments.clear();
         if (!exe.empty())
         {
-            shell.program = move(exe);
+            shell.program = std::move(exe);
             for (auto i: flags.verbatim)
                 shell.arguments.emplace_back(string(i));
         }

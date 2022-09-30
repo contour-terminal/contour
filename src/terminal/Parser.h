@@ -647,7 +647,7 @@ class Parser
             parseFragment(unicode::convert_to<char>(u32));
     }
 
-    State state() const noexcept { return state_; }
+    [[nodiscard]] State state() const noexcept { return state_; }
 
     size_t maxCharCount = 0;
 

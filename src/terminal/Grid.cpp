@@ -112,7 +112,7 @@ namespace detail
             auto const wrappedFlag = i == 0 && _initialNoWrap ? LineFlags::None : LineFlags::Wrapped;
             ++i;
             _logicalLineBuffer.resize(unbox<size_t>(_newColumnCount));
-            _targetLines.emplace_back(_baseFlags | wrappedFlag, move(_logicalLineBuffer));
+            _targetLines.emplace_back(_baseFlags | wrappedFlag, std::move(_logicalLineBuffer));
         }
         return LineCount::cast_from(i);
     }
@@ -721,15 +721,17 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
                     logicalLineBuffer.push_back(cell);
             };
 
-            auto const flushLogicalLine =
-                [_newColumnCount, &grownLines, &logicalLineBuffer, &logicalLineFlags]() {
-                    if (!logicalLineBuffer.empty())
-                    {
-                        detail::addNewWrappedLines(
-                            grownLines, _newColumnCount, move(logicalLineBuffer), logicalLineFlags, true);
-                        logicalLineBuffer.clear();
-                    }
-                };
+            auto const flushLogicalLine = [_newColumnCount,
+                                           &grownLines,
+                                           &logicalLineBuffer,
+                                           &logicalLineFlags]() {
+                if (!logicalLineBuffer.empty())
+                {
+                    detail::addNewWrappedLines(
+                        grownLines, _newColumnCount, std::move(logicalLineBuffer), logicalLineFlags, true);
+                    logicalLineBuffer.clear();
+                }
+            };
 
             [[maybe_unused]] auto const logLogicalLine =
                 [&logicalLineBuffer]([[maybe_unused]] LineFlags lineFlags,
@@ -781,7 +783,7 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
             while (grownLines.size() < totalLineCount)
                 grownLines.emplace_back(defaultLineFlags(), _newColumnCount, GraphicsAttributes {});
 
-            lines_ = move(grownLines);
+            lines_ = std::move(grownLines);
             pageSize_.columns = _newColumnCount;
 
             auto const newHistoryLineCount = linesUsed_ - pageSize_.lines;
@@ -860,7 +862,7 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
                     {
                         // Insert NEW line(s) between previous and this line with previously wrapped columns.
                         auto const numLinesInserted = detail::addNewWrappedLines(
-                            shrinkedLines, _newColumnCount, move(wrappedColumns), previousFlags, false);
+                            shrinkedLines, _newColumnCount, std::move(wrappedColumns), previousFlags, false);
                         numLinesWritten += numLinesInserted;
                         previousFlags = line.inheritableFlags();
                     }
@@ -877,7 +879,7 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
                 Ensures(shrinkedLines.back().size() >= _newColumnCount);
             }
             numLinesWritten += detail::addNewWrappedLines(
-                shrinkedLines, _newColumnCount, move(wrappedColumns), previousFlags, false);
+                shrinkedLines, _newColumnCount, std::move(wrappedColumns), previousFlags, false);
             Require(unbox<size_t>(numLinesWritten) == shrinkedLines.size());
             Require(numLinesWritten >= pageSize_.lines);
 
@@ -895,7 +897,7 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
             //     linesUsed_ -= overflow;
             // }
 
-            lines_ = move(shrinkedLines);
+            lines_ = std::move(shrinkedLines);
             pageSize_.columns = _newColumnCount;
 
             verifyState();

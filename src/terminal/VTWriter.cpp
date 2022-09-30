@@ -207,7 +207,7 @@ void VTWriter::write(Line<Cell> const& line)
         TrivialLineBuffer const& lineBuffer = line.trivialBuffer();
         setForegroundColor(lineBuffer.textAttributes.foregroundColor);
         setBackgroundColor(lineBuffer.textAttributes.backgroundColor);
-        // TODO: hyperlinks, underlineColor and other styles (curly underline etc.)
+        // TODO: hyperlinks, underlineColor and other flags (curly underline etc.)
         write(line.toUtf8());
         // TODO: Write fill columns.
     }
@@ -215,14 +215,14 @@ void VTWriter::write(Line<Cell> const& line)
     {
         for (Cell const& cell: line.inflatedBuffer())
         {
-            if (cell.styles() & CellFlags::Bold)
+            if (cell.flags() & CellFlags::Bold)
                 sgrAdd(GraphicsRendition::Bold);
             else
                 sgrAdd(GraphicsRendition::Normal);
 
             setForegroundColor(cell.foregroundColor());
             setBackgroundColor(cell.backgroundColor());
-            // TODO: other styles (such as underline), hyperlinks, image fragments.
+            // TODO: other flags (such as underline), hyperlinks, image fragments.
 
             if (!cell.codepointCount())
                 write(' ');

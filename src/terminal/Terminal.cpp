@@ -104,7 +104,7 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
     eventListener_ { _eventListener },
     refreshInterval_ { static_cast<long long>(1000.0 / _refreshRate) },
     renderBuffer_ {},
-    pty_ { move(_pty) },
+    pty_ { std::move(_pty) },
     startTime_ { _now },
     currentTime_ { _now },
     lastCursorBlink_ { _now },
@@ -122,7 +122,7 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
              _maxImageSize,
              _maxImageColorRegisters,
              _sixelCursorConformance,
-             move(_colorPalette),
+             std::move(_colorPalette),
              _allowReflowOnResize },
     // clang-format on
     ptyBufferPool_ { crispy::nextPowerOfTwo(ptyBufferObjectSize) },
@@ -455,10 +455,10 @@ void Terminal::updateIndicatorStatusLine()
     if (!allowInput())
     {
         state_.cursor.graphicsRendition.foregroundColor = BrightColor::Red;
-        state_.cursor.graphicsRendition.styles |= CellFlags::Bold;
+        state_.cursor.graphicsRendition.flags |= CellFlags::Bold;
         indicatorStatusScreen_.writeTextFromExternal(" (PROTECTED)");
         state_.cursor.graphicsRendition.foregroundColor = DefaultColor();
-        state_.cursor.graphicsRendition.styles &= ~CellFlags::Bold;
+        state_.cursor.graphicsRendition.flags &= ~CellFlags::Bold;
     }
 
     if (state_.inputHandler.isEditingSearch())
@@ -1446,63 +1446,61 @@ void Terminal::setGraphicsRendition(GraphicsRendition _rendition)
     switch (_rendition)
     {
         case GraphicsRendition::Reset: state_.cursor.graphicsRendition = {}; break;
-        case GraphicsRendition::Bold: state_.cursor.graphicsRendition.styles |= CellFlags::Bold; break;
-        case GraphicsRendition::Faint: state_.cursor.graphicsRendition.styles |= CellFlags::Faint; break;
-        case GraphicsRendition::Italic: state_.cursor.graphicsRendition.styles |= CellFlags::Italic; break;
+        case GraphicsRendition::Bold: state_.cursor.graphicsRendition.flags |= CellFlags::Bold; break;
+        case GraphicsRendition::Faint: state_.cursor.graphicsRendition.flags |= CellFlags::Faint; break;
+        case GraphicsRendition::Italic: state_.cursor.graphicsRendition.flags |= CellFlags::Italic; break;
         case GraphicsRendition::Underline:
-            state_.cursor.graphicsRendition.styles |= CellFlags::Underline;
+            state_.cursor.graphicsRendition.flags |= CellFlags::Underline;
             break;
         case GraphicsRendition::Blinking:
-            state_.cursor.graphicsRendition.styles &= ~CellFlags::RapidBlinking;
-            state_.cursor.graphicsRendition.styles |= CellFlags::Blinking;
+            state_.cursor.graphicsRendition.flags &= ~CellFlags::RapidBlinking;
+            state_.cursor.graphicsRendition.flags |= CellFlags::Blinking;
             break;
         case GraphicsRendition::RapidBlinking:
-            state_.cursor.graphicsRendition.styles &= ~CellFlags::Blinking;
-            state_.cursor.graphicsRendition.styles |= CellFlags::RapidBlinking;
+            state_.cursor.graphicsRendition.flags &= ~CellFlags::Blinking;
+            state_.cursor.graphicsRendition.flags |= CellFlags::RapidBlinking;
             break;
-        case GraphicsRendition::Inverse: state_.cursor.graphicsRendition.styles |= CellFlags::Inverse; break;
-        case GraphicsRendition::Hidden: state_.cursor.graphicsRendition.styles |= CellFlags::Hidden; break;
+        case GraphicsRendition::Inverse: state_.cursor.graphicsRendition.flags |= CellFlags::Inverse; break;
+        case GraphicsRendition::Hidden: state_.cursor.graphicsRendition.flags |= CellFlags::Hidden; break;
         case GraphicsRendition::CrossedOut:
-            state_.cursor.graphicsRendition.styles |= CellFlags::CrossedOut;
+            state_.cursor.graphicsRendition.flags |= CellFlags::CrossedOut;
             break;
         case GraphicsRendition::DoublyUnderlined:
-            state_.cursor.graphicsRendition.styles |= CellFlags::DoublyUnderlined;
+            state_.cursor.graphicsRendition.flags |= CellFlags::DoublyUnderlined;
             break;
         case GraphicsRendition::CurlyUnderlined:
-            state_.cursor.graphicsRendition.styles |= CellFlags::CurlyUnderlined;
+            state_.cursor.graphicsRendition.flags |= CellFlags::CurlyUnderlined;
             break;
         case GraphicsRendition::DottedUnderline:
-            state_.cursor.graphicsRendition.styles |= CellFlags::DottedUnderline;
+            state_.cursor.graphicsRendition.flags |= CellFlags::DottedUnderline;
             break;
         case GraphicsRendition::DashedUnderline:
-            state_.cursor.graphicsRendition.styles |= CellFlags::DashedUnderline;
+            state_.cursor.graphicsRendition.flags |= CellFlags::DashedUnderline;
             break;
-        case GraphicsRendition::Framed: state_.cursor.graphicsRendition.styles |= CellFlags::Framed; break;
-        case GraphicsRendition::Overline:
-            state_.cursor.graphicsRendition.styles |= CellFlags::Overline;
-            break;
+        case GraphicsRendition::Framed: state_.cursor.graphicsRendition.flags |= CellFlags::Framed; break;
+        case GraphicsRendition::Overline: state_.cursor.graphicsRendition.flags |= CellFlags::Overline; break;
         case GraphicsRendition::Normal:
-            state_.cursor.graphicsRendition.styles &= ~(CellFlags::Bold | CellFlags::Faint);
+            state_.cursor.graphicsRendition.flags &= ~(CellFlags::Bold | CellFlags::Faint);
             break;
-        case GraphicsRendition::NoItalic: state_.cursor.graphicsRendition.styles &= ~CellFlags::Italic; break;
+        case GraphicsRendition::NoItalic: state_.cursor.graphicsRendition.flags &= ~CellFlags::Italic; break;
         case GraphicsRendition::NoUnderline:
-            state_.cursor.graphicsRendition.styles &=
+            state_.cursor.graphicsRendition.flags &=
                 ~(CellFlags::Underline | CellFlags::DoublyUnderlined | CellFlags::CurlyUnderlined
                   | CellFlags::DottedUnderline | CellFlags::DashedUnderline);
             break;
         case GraphicsRendition::NoBlinking:
-            state_.cursor.graphicsRendition.styles &= ~(CellFlags::Blinking | CellFlags::RapidBlinking);
+            state_.cursor.graphicsRendition.flags &= ~(CellFlags::Blinking | CellFlags::RapidBlinking);
             break;
         case GraphicsRendition::NoInverse:
-            state_.cursor.graphicsRendition.styles &= ~CellFlags::Inverse;
+            state_.cursor.graphicsRendition.flags &= ~CellFlags::Inverse;
             break;
-        case GraphicsRendition::NoHidden: state_.cursor.graphicsRendition.styles &= ~CellFlags::Hidden; break;
+        case GraphicsRendition::NoHidden: state_.cursor.graphicsRendition.flags &= ~CellFlags::Hidden; break;
         case GraphicsRendition::NoCrossedOut:
-            state_.cursor.graphicsRendition.styles &= ~CellFlags::CrossedOut;
+            state_.cursor.graphicsRendition.flags &= ~CellFlags::CrossedOut;
             break;
-        case GraphicsRendition::NoFramed: state_.cursor.graphicsRendition.styles &= ~CellFlags::Framed; break;
+        case GraphicsRendition::NoFramed: state_.cursor.graphicsRendition.flags &= ~CellFlags::Framed; break;
         case GraphicsRendition::NoOverline:
-            state_.cursor.graphicsRendition.styles &= ~CellFlags::Overline;
+            state_.cursor.graphicsRendition.flags &= ~CellFlags::Overline;
             break;
     }
 }
