@@ -38,9 +38,9 @@ class open_shaper: public shaper
 
     void clear_cache() override;
 
-    std::optional<font_key> load_font(font_description const& _description, font_size _size) override;
+    [[nodiscard]] std::optional<font_key> load_font(font_description const& _description, font_size _size) override;
 
-    font_metrics metrics(font_key _key) const override;
+    [[nodiscard]] font_metrics metrics(font_key _key) const override;
 
     void shape(font_key _font,
                std::u32string_view _text,
@@ -49,9 +49,9 @@ class open_shaper: public shaper
                unicode::PresentationStyle _presentation,
                shape_result& _result) override;
 
-    std::optional<glyph_position> shape(font_key _font, char32_t _codepoint) override;
+    [[nodiscard]] std::optional<glyph_position> shape(font_key _font, char32_t _codepoint) override;
 
-    std::optional<rasterized_glyph> rasterize(glyph_key _glyph, render_mode _mode) override;
+    [[nodiscard]] std::optional<rasterized_glyph> rasterize(glyph_key _glyph, render_mode _mode) override;
 
   private:
     struct Private;

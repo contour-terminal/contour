@@ -29,6 +29,7 @@ namespace terminal::detail
 
 termios getTerminalSettings(int fd) noexcept;
 termios constructTerminalSettings(int fd) noexcept;
+bool applyTerminalSettings(int fd, termios const& tio);
 bool setFileFlags(int fd, int flags) noexcept;
 void saveClose(int* fd) noexcept;
 void saveDup2(int a, int b) noexcept;
@@ -39,6 +40,13 @@ inline termios getTerminalSettings(int fd) noexcept
     termios tio {};
     tcgetattr(fd, &tio);
     return tio;
+}
+
+inline bool applyTerminalSettings(int fd, termios const& tio)
+{
+    if (tcsetattr(fd, TCSANOW, &tio) == 0)
+        tcflush(fd, TCIOFLUSH);
+    return true;
 }
 
 inline termios constructTerminalSettings(int fd) noexcept

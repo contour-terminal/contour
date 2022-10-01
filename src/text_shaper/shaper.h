@@ -69,7 +69,7 @@ struct rasterized_glyph
     bitmap_format format;
     std::vector<uint8_t> bitmap;
 
-    bool valid() const
+    [[nodiscard]] bool valid() const
     {
         return bitmap.size()
                == text::pixel_size(format) * unbox<size_t>(bitmapSize.width)
@@ -122,12 +122,13 @@ class shaper
      * on Windows it will be a DirectWrite font,
      * and on Apple it will be using CoreText (but for now it'll be freetype, too).
      */
-    virtual std::optional<font_key> load_font(font_description const& _description, font_size _size) = 0;
+    [[nodiscard]] virtual std::optional<font_key> load_font(font_description const& _description,
+                                                            font_size _size) = 0;
 
     /**
      * Retrieves global font metrics of font identified by @p _key.
      */
-    virtual font_metrics metrics(font_key _key) const = 0;
+    [[nodiscard]] virtual font_metrics metrics(font_key _key) const = 0;
 
     /**
      * Shapes the given text @p _text using the font face @p _font.
@@ -150,7 +151,7 @@ class shaper
                        unicode::PresentationStyle _presentation,
                        shape_result& _result) = 0;
 
-    virtual std::optional<glyph_position> shape(font_key _font, char32_t _codepoint) = 0;
+    [[nodiscard]] virtual std::optional<glyph_position> shape(font_key _font, char32_t _codepoint) = 0;
 
     /**
      * Rasterizes (renders) the glyph using the given render mode.
@@ -158,7 +159,7 @@ class shaper
      * @param _glyph glyph identifier.
      * @param _mode  render technique to use.
      */
-    virtual std::optional<rasterized_glyph> rasterize(glyph_key _glyph, render_mode _mode) = 0;
+    [[nodiscard]] virtual std::optional<rasterized_glyph> rasterize(glyph_key _glyph, render_mode _mode) = 0;
 };
 
 } // end namespace text
