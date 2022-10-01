@@ -9,6 +9,10 @@ add_subdirectory(text_shaper)
 add_subdirectory(terminal)
 add_subdirectory(terminal_renderer)
 
+if(CONTOUR_TOOL_CHRONO)
+    add_subdirectory(chrono)
+endif()
+
 if(CONTOUR_FRONTEND_GUI)
     add_subdirectory(contour)
 endif()
