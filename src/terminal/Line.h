@@ -107,8 +107,8 @@ class Line
     using reverse_iterator = typename InflatedBuffer::reverse_iterator;
     using const_iterator = typename InflatedBuffer::const_iterator;
 
-    Line(LineFlags _flags, ColumnCount _width, GraphicsAttributes _templateSGR):
-        storage_ { TrivialBuffer { _width, _templateSGR } }, flags_ { static_cast<unsigned>(_flags) }
+    Line(LineFlags _flags, TrivialBuffer _buffer):
+        storage_ { std::move(_buffer) }, flags_ { static_cast<unsigned>(_flags) }
     {
     }
 
