@@ -38,7 +38,8 @@ class open_shaper: public shaper
 
     void clear_cache() override;
 
-    [[nodiscard]] std::optional<font_key> load_font(font_description const& _description, font_size _size) override;
+    [[nodiscard]] std::optional<font_key> load_font(font_description const& _description,
+                                                    font_size _size) override;
 
     [[nodiscard]] font_metrics metrics(font_key _key) const override;
 

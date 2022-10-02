@@ -39,9 +39,9 @@
 #include <signal.h>
 
 #if !defined(_WIN32)
-    #include <unistd.h>
-
     #include <sys/ioctl.h>
+
+    #include <unistd.h>
 #endif
 
 #if defined(_WIN32)

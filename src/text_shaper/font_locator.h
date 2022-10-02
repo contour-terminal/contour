@@ -61,20 +61,20 @@ class font_locator
     /**
      * Enumerates all available fonts.
      */
-    virtual font_source_list all() = 0;
+    [[nodiscard]] virtual font_source_list all() = 0;
 
     /**
      * Locates the font matching the given description the best
      * and an ordered list of fallback fonts.
      */
-    virtual font_source_list locate(font_description const& description) = 0;
+    [[nodiscard]] virtual font_source_list locate(font_description const& description) = 0;
 
     /**
      * Resolves the given codepoint sequence into an ordered list of
      * possible fonts that can be used for text shaping the given
      * codepoint sequence.
      */
-    virtual font_source_list resolve(gsl::span<const char32_t> codepoints) = 0;
+    [[nodiscard]] virtual font_source_list resolve(gsl::span<const char32_t> codepoints) = 0;
 };
 
 } // namespace text

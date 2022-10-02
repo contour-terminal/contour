@@ -95,9 +95,11 @@ IncludeCategories:
     Priority:  12
   - Regex:     '^<catch2/'
     Priority:  20
+  - Regex:     '^<sys/'
+    Priority:  30
   - Regex:     '^<[[:alnum:]_]+>'
-    Priority:  21
+    Priority:  41
   - Regex:     '<[[:alnum:]_]+\.h>'
-    Priority:  22
+    Priority:  42
   - Regex:     '.*'
-    Priority:  23
+    Priority:  99

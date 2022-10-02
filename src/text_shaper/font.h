@@ -180,10 +180,10 @@ struct font_description
     std::vector<font_feature> features;
 
     // returns "familyName [weight] [slant]"
-    std::string toPattern() const;
+    [[nodiscard]] std::string toPattern() const;
 
     // Parses a font pattern of form "familyName" into a font_description."
-    static font_description parse(std::string_view _pattern);
+    [[nodiscard]] static font_description parse(std::string_view _pattern);
 };
 
 inline bool operator==(font_description const& a, font_description const& b)

@@ -25,10 +25,10 @@
 #include <optional>
 
 #if !defined(_WIN32)
+    #include <sys/ioctl.h>
+
     #include <pwd.h>
     #include <unistd.h>
-
-    #include <sys/ioctl.h>
 #endif
 
 using std::bind;

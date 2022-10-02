@@ -50,13 +50,13 @@
     #include <pty.h>
 #endif
 
+#include <sys/types.h>
+#include <sys/wait.h>
+
 #include <csignal>
 
 #include <pwd.h>
 #include <unistd.h>
-
-#include <sys/types.h>
-#include <sys/wait.h>
 
 using namespace std;
 using namespace std::string_view_literals;

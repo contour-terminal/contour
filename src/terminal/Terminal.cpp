@@ -27,12 +27,12 @@
 
 #include <fmt/chrono.h>
 
+#include <sys/types.h>
+
 #include <chrono>
 #include <csignal>
 #include <iostream>
 #include <utility>
-
-#include <sys/types.h>
 
 using crispy::Size;
 

@@ -39,13 +39,13 @@
 #if !defined(__FreeBSD__)
     #include <utmp.h>
 #endif
-#include <pwd.h>
-#include <unistd.h>
-
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+
+#include <pwd.h>
+#include <unistd.h>
 
 using crispy::BufferObject;
 using std::make_unique;

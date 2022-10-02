@@ -33,9 +33,9 @@ class fontconfig_locator: public font_locator
     fontconfig_locator();
     ~fontconfig_locator() override;
 
-    font_source_list locate(font_description const& description) override;
-    font_source_list all() override;
-    font_source_list resolve(gsl::span<const char32_t> codepoints) override;
+    [[nodiscard]] font_source_list locate(font_description const& description) override;
+    [[nodiscard]] font_source_list all() override;
+    [[nodiscard]] font_source_list resolve(gsl::span<const char32_t> codepoints) override;
 
   private:
     struct Private;
