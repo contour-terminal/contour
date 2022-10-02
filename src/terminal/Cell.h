@@ -298,7 +298,6 @@ inline void Cell::write(GraphicsAttributes const& _attributes,
     writeTextOnly(_ch, _width);
     if (extra_)
     {
-        extra_->codepoints.clear();
         // Writing text into a cell destroys the image fragment (as least for Sixels).
         extra_->imageFragment = {};
     }
