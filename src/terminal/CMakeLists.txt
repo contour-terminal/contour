@@ -181,6 +181,12 @@ if(LIBTERMINAL_TESTING)
         if(WIN32)
             install(TARGETS bench-headless DESTINATION bin)
         elseif(APPLE)
+            # See: https://stackoverflow.com/questions/35612687/cmake-macos-x-bundle-with-bundleutiliies-for-qt-application/48035834#48035834
+            set(APP_NAME contour)
+            set(App_Contents "${APP_NAME}.app/Contents")
+            set(INSTALL_RUNTIME_DIR "${App_Contents}/MacOS")
+            set(INSTALL_CMAKE_DIR "${App_Contents}/Resources")
+
             set(INSTALL_RUNTIME_DIR "${App_Contents}/MacOS")
             install(TARGETS bench-headless
                 BUNDLE DESTINATION . COMPONENT Runtime
