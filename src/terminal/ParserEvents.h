@@ -46,7 +46,7 @@ class ParserEvents
      *
      * @param cellCount reflects the sum of the East Asian Width attribute for all passed codepoints.
      */
-    virtual void print(std::string_view _chars, size_t cellCount) = 0;
+    virtual size_t print(std::string_view _chars, size_t cellCount) = 0;
 
     /**
      * The C0 or C1 control function should be executed, which may have any one of a variety of
@@ -167,7 +167,7 @@ class BasicParserEvents: public ParserEvents
   public:
     void error(std::string_view const&) override {}
     void print(char) override {}
-    void print(std::string_view, size_t) override {}
+    size_t print(std::string_view, size_t) override { return 0; }
     void execute(char) override {}
     void clear() override {}
     void collect(char) override {}

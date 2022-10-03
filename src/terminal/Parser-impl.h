@@ -230,7 +230,8 @@ constexpr ParserTable ParserTable::get() // {{{
 } // }}}
 
 template <typename EventListener, bool TraceStateChanges>
-void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view const _data)
+void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view const _data,
+                                                             size_t maxCharCount)
 {
     auto input = _data.data();
     auto const end = _data.data() + _data.size();
@@ -261,7 +262,7 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view co
                         crispy::escape(std::string_view { input, byteCount }));
 #endif
 
-                eventListener_.print(std::string_view { input, byteCount }, cellCount);
+                maxCharCount = eventListener_.print(std::string_view { input, byteCount }, cellCount);
                 input = next;
 
                 // This optimization is for the `cat`-people.

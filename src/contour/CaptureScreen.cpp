@@ -288,7 +288,7 @@ namespace
             }
 
             auto const inputView = string_view(buf, static_cast<size_t>(rv));
-            parser.parseFragment(inputView);
+            parser.parseFragment(inputView, 80);
 
             if (captureBufferCollector.done)
                 return true;

@@ -54,7 +54,7 @@ class NullParserEvents
   public:
     void error(std::string_view /*_errorString*/) {}
     void print(char /*_text*/) {}
-    void print(std::string_view /*chars*/, size_t /*cellCount*/) {}
+    size_t print(std::string_view /*chars*/, size_t /*cellCount*/) { return 4096; }
     void execute(char /*_controlCode*/) {}
     void clear() {}
     void collect(char /*_char*/) {}
@@ -340,7 +340,7 @@ class ContourHeadlessBench: public crispy::App
         auto parser = terminal::parser::Parser { po };
         return baseBenchmark(
             [&](char const* a, size_t b) -> bool {
-                parser.parseFragment(string_view(a, b));
+                parser.parseFragment(string_view(a, b), 100);
                 return true;
             },
             benchOptionsFor("parser"),

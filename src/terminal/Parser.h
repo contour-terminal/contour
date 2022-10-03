@@ -639,17 +639,11 @@ class Parser
 
     explicit Parser(EventListener& _listener): eventListener_ { _listener } {}
 
-    void parseFragment(std::string_view s);
-
-    void parseFragment(std::u32string_view s)
-    {
-        for (char32_t const u32: s)
-            parseFragment(unicode::convert_to<char>(u32));
-    }
+    /// Parses the input string in UTF-8 encoding and emits VT events while processing.
+    /// With respect to text, only up to @p maxCharCount UTF-32 codepoints will be processed.
+    void parseFragment(std::string_view s, size_t maxCharCount);
 
     [[nodiscard]] State state() const noexcept { return state_; }
-
-    size_t maxCharCount = 0;
 
   private:
     void handle(ActionClass _actionClass, Action _action, uint8_t _char);

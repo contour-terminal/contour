@@ -56,7 +56,7 @@ void Sequencer::print(char _char)
     terminal_.state().precedingGraphicCharacter = codepoint;
 }
 
-void Sequencer::print(string_view _chars, size_t cellCount)
+size_t Sequencer::print(string_view _chars, size_t cellCount)
 {
     assert(_chars.size() != 0);
 
@@ -70,8 +70,8 @@ void Sequencer::print(string_view _chars, size_t cellCount)
         for (char const ch: _chars)
             print(ch);
 
-    terminal_.state().parser.maxCharCount = terminal_.state().pageSize.columns.as<size_t>()
-                                            - terminal_.state().cursor.position.column.as<size_t>();
+    return terminal_.state().pageSize.columns.as<size_t>()
+           - terminal_.state().cursor.position.column.as<size_t>();
 }
 
 void Sequencer::execute(char controlCode)

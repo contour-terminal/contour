@@ -207,9 +207,9 @@ bool Terminal::processInputOnce()
 
     {
         auto const _l = std::lock_guard { *this };
-        state_.parser.maxCharCount =
+        auto const numberOfAvailableColumnsInCurrentLine =
             static_cast<size_t>(state_.pageSize.columns.value - state_.cursor.position.column.value);
-        state_.parser.parseFragment(buf);
+        state_.parser.parseFragment(buf, numberOfAvailableColumnsInCurrentLine);
     }
 
     if (!state_.modes.enabled(DECMode::BatchedRendering))
@@ -763,7 +763,10 @@ void Terminal::writeToScreen(string_view _data)
                 currentPtyBuffer_ = ptyBufferPool_.allocateBufferObject();
             auto const chunk = _data.substr(0, std::min(_data.size(), currentPtyBuffer_->bytesAvailable()));
             _data.remove_prefix(chunk.size());
-            state_.parser.parseFragment(currentPtyBuffer_->writeAtEnd(chunk));
+            auto const numberOfAvailableColumnsInCurrentLine =
+                static_cast<size_t>(state_.pageSize.columns.value - state_.cursor.position.column.value);
+            state_.parser.parseFragment(currentPtyBuffer_->writeAtEnd(chunk),
+                                        numberOfAvailableColumnsInCurrentLine);
         }
     }
 
@@ -789,7 +792,9 @@ void Terminal::writeToScreenInternal(std::string_view data)
     {
         auto const chunk = lockedWriteToPtyBuffer(data);
         data.remove_prefix(chunk.size());
-        state_.parser.parseFragment(chunk);
+        auto const numberOfAvailableColumnsInCurrentLine =
+            static_cast<size_t>(state_.pageSize.columns.value - state_.cursor.position.column.value);
+        state_.parser.parseFragment(chunk, numberOfAvailableColumnsInCurrentLine);
     }
 }
 
