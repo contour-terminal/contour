@@ -419,11 +419,9 @@ void Screen<Cell>::writeText(string_view _chars, size_t cellCount)
         VTTraceSequenceLog()("text({} bytes): \"{}\"", _chars.size(), _chars);
 #endif
 
-#if defined(LIBTERMINAL_PTY_BUFFER_OBJECTS)
     _chars = tryEmplaceChars(_chars, cellCount);
     if (_chars.empty())
         return;
-#endif
 
     for (char const ch: _chars)
         writeTextInternal(static_cast<char32_t>(ch));

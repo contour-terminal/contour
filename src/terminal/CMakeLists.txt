@@ -12,10 +12,6 @@ option(LIBTERMINAL_LOG_TRACE "Enables VT sequence tracing. [default: ON]" ON)
 # But it's currently disabled by default as I am not fully satisfied with it yet.
 option(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE "Updates the render buffer within the terminal thread if set to ON (otherwise the render buffer is actively refreshed in the render thread)." OFF)
 
-# Tries to avoid unnecessary copies by reusing BufferObject fragments
-# in terminal grid lines buffer.
-option(LIBTERMINAL_PTY_BUFFER_OBJECTS "PTY Buffer Objects storage [default: ON]" ON)
-
 if(MSVC)
     add_definitions(-DNOMINMAX)
 endif()
@@ -128,10 +124,6 @@ target_compile_definitions(terminal PRIVATE
     LIBTERMINAL_VERSION_STRING="${CONTOUR_VERSION_STRING}"
     LIBTERMINAL_NAME="${PROJECT_NAME}"
 )
-
-if(LIBTERMINAL_PTY_BUFFER_OBJECTS)
-    target_compile_definitions(terminal PUBLIC LIBTERMINAL_PTY_BUFFER_OBJECTS=1)
-endif()
 
 target_include_directories(terminal PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
 target_link_libraries(terminal PUBLIC ${LIBTERMINAL_LIBRARIES})
