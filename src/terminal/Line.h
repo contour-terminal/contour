@@ -123,7 +123,7 @@ class Line
         if (isTrivialBuffer())
             trivialBuffer().reset(_attributes);
         else
-            setBuffer(TrivialBuffer { size(), _attributes });
+            setBuffer(TrivialBuffer { ColumnCount::cast_from(inflatedBuffer().size()), _attributes });
     }
 
     void fill(LineFlags _flags,
@@ -330,23 +330,9 @@ class Line
         return !std::holds_alternative<TrivialBuffer>(storage_);
     }
 
-    void setBuffer(TrivialBuffer const& buffer) noexcept
-    {
-        storage_ = buffer;
-    }
-    void setBuffer(InflatedBuffer buffer)
+    void setBuffer(Storage buffer) noexcept
     {
         storage_ = std::move(buffer);
-    }
-
-    void reset(GraphicsAttributes textAttributes,
-               GraphicsAttributes fillAttributes,
-               HyperlinkId hyperlink,
-               crispy::BufferFragment text,
-               ColumnCount columnsUsed)
-    {
-        storage_ =
-            TrivialBuffer { size(), textAttributes, fillAttributes, hyperlink, columnsUsed, std::move(text) };
     }
 
     // Tests if the given text can be matched in this line at the exact given start column.
