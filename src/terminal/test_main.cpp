@@ -11,11 +11,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <crispy/App.h>
+#include <crispy/logstore.h>
+
 #define CATCH_CONFIG_RUNNER
 #include <catch2/catch.hpp>
 
 int main(int argc, char const* argv[])
 {
+    char const* logFilterString = getenv("LOG");
+    if (logFilterString)
+    {
+        logstore::configure(logFilterString);
+        crispy::App::customizeLogStoreOutput();
+    }
     int const result = Catch::Session().run(argc, argv);
 
     // avoid closing extern console to close on VScode/windows
