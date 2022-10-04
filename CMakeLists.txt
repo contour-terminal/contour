@@ -32,6 +32,7 @@ find_package(Threads)
 if(DEFINED MSVC)
     add_definitions(-D_USE_MATH_DEFINES)
     add_definitions(-DNOMINMAX)
+    add_definitions(-D_ITERATOR_DEBUG_LEVEL=0)
 endif()
 
 if (CONTOUR_BUILD_WITH_MIMALLOC)
