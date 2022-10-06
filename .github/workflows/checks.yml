@@ -16,13 +16,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  check_CI_scripts:
+  check_common:
     name: "Check CI scripts"
     runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v3
-    - name: "Checking for common errors in CI scripts"
-      run: ./scripts/check-ci.sh
+    - name: "Checking for common errors in build, deployment, and CI."
+      run: ./scripts/check-common.sh
 
   check_PR_TODOs:
     name: "Check PR-TODOs"
