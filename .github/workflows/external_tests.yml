@@ -96,6 +96,8 @@ jobs:
         set -ex
         sudo apt -q update
         sudo ./scripts/install-deps.sh
+    - name: "Post-fix embedded dependency permissions."
+      run: sudo find _deps/sources -exec chown $UID {} \;
     - name: "create build directory"
       run: mkdir build
     - name: "cmake"

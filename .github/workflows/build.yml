@@ -119,6 +119,8 @@ jobs:
           PREPARE_ONLY_EMBEDS: 'ON'
           SYSDEP_ASSUME_YES: 'ON'
           OS_OVERRIDE: 'fedora'
+      - name: "Post-fix embedded dependency permissions."
+        run: sudo find _deps/sources -exec chown $UID {} \;
       - name: prepare distfile
         run: |
           set -x
@@ -405,6 +407,8 @@ jobs:
           echo "::set-output name=CC_VERSION::${CC_VERSION}"
       - name: "install dependencies"
         run: sudo ./scripts/install-deps.sh
+      - name: "Post-fix embedded dependency permissions."
+        run: sudo find _deps/sources -exec chown $UID {} \;
       - name: Set up GCC
         if: ${{ startsWith(matrix.compiler, 'GCC') }}
         run: sudo apt install -y g++-${{ steps.extract_matrix.outputs.CC_VERSION }}
@@ -413,6 +417,8 @@ jobs:
         run: sudo apt install -y clang-${{ steps.extract_matrix.outputs.CC_VERSION }}
       - name: "create build directory"
         run: mkdir build
+      - name: CMake version
+        run: cmake --version
       - name: "cmake"
         run: |
           CC_NAME=$(echo "${{ matrix.compiler }}" | awk '{ print tolower($1); }')
@@ -428,8 +434,12 @@ jobs:
                                -DCMAKE_INSTALL_PREFIX="/usr" \
                                -DCONTOUR_INSTALL_TOOLS=ON \
                                -DPEDANTIC_COMPILER=ON \
+                               -DLIBUNICODE_UCD_BASE_DIR=$(pwd)/_ucd \
                                " \
             ./scripts/ci-prepare-contour.sh
+            pwd
+            id
+            ls -hl _deps/sources/libunicode-bce00a7e45b6ab58c91350ce80f04ab1216b2667/src/unicode/
       - name: "build"
         run: cmake --build build/ -- -j3
       - name: "test: crispy"
@@ -479,8 +489,12 @@ jobs:
         run: sudo apt -qy install libfuse2
       - name: "install dependencies"
         run: sudo ./scripts/install-deps.sh
+      - name: "Post-fix embedded dependency permissions."
+        run: sudo find _deps/sources -exec chown $UID {} \;
       - name: "install Clang++-10"
         run: sudo apt install clang++-10
+      - name: CMake version
+        run: cmake --version
       - name: "cmake"
         run: |
           mkdir build
@@ -551,11 +565,15 @@ jobs:
           fi
       - name: "install dependencies"
         run: sudo env QTVER="${{ steps.set_qtver.outputs.QTVER }}" ./scripts/install-deps.sh
+      - name: "Post-fix embedded dependency permissions."
+        run: sudo find _deps/sources -exec chown $UID {} \;
       - name: "install GCC 10"
         if: ${{ startsWith(matrix.os_version, '18.04') }}
         run: sudo apt install g++-10
       - name: "create build directory"
         run: mkdir build
+      - name: CMake version
+        run: cmake --version
       - name: "cmake"
         run: |
           # TODO: turn on -Werror again, that requires some code changes.

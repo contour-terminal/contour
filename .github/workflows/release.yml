@@ -245,6 +245,8 @@ jobs:
         PREPARE_ONLY_EMBEDS: 'ON'
         SYSDEP_ASSUME_YES: 'ON'
         OS_OVERRIDE: 'fedora'
+    - name: "Post-fix embedded dependency permissions."
+      run: sudo find _deps/sources -exec chown $UID {} \;
     - name: prepare distfile
       run: |
         set -x
@@ -328,6 +330,8 @@ jobs:
         run: sudo apt -qy install libfuse2
       - name: "install dependencies"
         run: sudo ./scripts/install-deps.sh
+      - name: "Post-fix embedded dependency permissions."
+        run: sudo find _deps/sources -exec chown $UID {} \;
       - name: "install GCC 10"
         run: sudo apt install g++-10
       - name: "cmake"
@@ -393,6 +397,8 @@ jobs:
           max-size: 256M
       - name: "install dependencies"
         run: sudo ./scripts/install-deps.sh
+      - name: "Post-fix embedded dependency permissions."
+        run: sudo find _deps/sources -exec chown $UID {} \;
       - name: "install GCC 10"
         if: ${{ startsWith(matrix.OS_VERSION, '18.04') }}
         run: sudo apt install g++-10
