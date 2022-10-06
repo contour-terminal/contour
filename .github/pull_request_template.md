@@ -25,7 +25,7 @@ Go over all the following points, and put an `x` in all the boxes that apply.
 
 If you're unsure about any of these, don't hesitate to ask. We're here to help!
 
-- [ ] I have read the [**`CONTRIBUTING`**](/contour-terminal/contour/CONTRIBUTING.md) document in my spoken language, and understand the terms
+- [ ] I have read the [**`CONTRIBUTING`**](https://github.com/contour-terminal/contour/blob/master/CONTRIBUTING.md) document in my spoken language, and understand the terms
 - [ ] I have updated (or added) the documentation accordingly.
 - [ ] I have added tests to cover my changes.
 - [ ] I have gone through all the steps, and have thoroughly read the instructions
