@@ -772,8 +772,9 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
                 // so fill the gap until we have a full page.
                 cy = pageSize_.lines - LineCount::cast_from(grownLines.size());
                 while (LineCount::cast_from(grownLines.size()) < pageSize_.lines)
-                    grownLines.emplace_back(defaultLineFlags(),
-                                            TrivialLineBuffer { _newColumnCount, GraphicsAttributes {}, GraphicsAttributes {} });
+                    grownLines.emplace_back(
+                        defaultLineFlags(),
+                        TrivialLineBuffer { _newColumnCount, GraphicsAttributes {}, GraphicsAttributes {} });
 
                 Ensures(LineCount::cast_from(grownLines.size()) == pageSize_.lines);
             }
@@ -783,8 +784,9 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
             // Fill scrollback lines.
             auto const totalLineCount = unbox<size_t>(pageSize_.lines + maxHistoryLineCount_);
             while (grownLines.size() < totalLineCount)
-                grownLines.emplace_back(defaultLineFlags(),
-                                        TrivialLineBuffer { _newColumnCount, GraphicsAttributes {}, GraphicsAttributes {} });
+                grownLines.emplace_back(
+                    defaultLineFlags(),
+                    TrivialLineBuffer { _newColumnCount, GraphicsAttributes {}, GraphicsAttributes {} });
 
             lines_ = std::move(grownLines);
             pageSize_.columns = _newColumnCount;
@@ -887,8 +889,9 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
             Require(numLinesWritten >= pageSize_.lines);
 
             while (shrinkedLines.size() < totalLineCount)
-                shrinkedLines.emplace_back(LineFlags::None,
-                                           TrivialLineBuffer { _newColumnCount, GraphicsAttributes {}, GraphicsAttributes {} });
+                shrinkedLines.emplace_back(
+                    LineFlags::None,
+                    TrivialLineBuffer { _newColumnCount, GraphicsAttributes {}, GraphicsAttributes {} });
 
             shrinkedLines.rotate_left(
                 unbox<size_t>(numLinesWritten - pageSize_.lines)); // maybe to be done outisde?
