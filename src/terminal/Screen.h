@@ -607,7 +607,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     }
     [[nodiscard]] char32_t precedingGraphicCharacter() const noexcept
     {
-        return _state.precedingGraphicCharacter;
+        return _state.parser.precedingGraphicCharacter;
     }
 
     void applyAndLog(FunctionDefinition const& function, Sequence const& seq);

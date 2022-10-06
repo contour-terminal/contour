@@ -53,7 +53,7 @@ void Sequencer::print(char _char)
     auto const codepoint =
         holds_alternative<unicode::Success>(r) ? get<unicode::Success>(r).value : ReplacementCharacter;
     terminal_.activeDisplay().writeText(codepoint);
-    terminal_.state().precedingGraphicCharacter = codepoint;
+    terminal_.state().parser.precedingGraphicCharacter = codepoint;
 }
 
 size_t Sequencer::print(string_view _chars, size_t cellCount)
@@ -64,7 +64,7 @@ size_t Sequencer::print(string_view _chars, size_t cellCount)
     {
         terminal_.state().instructionCounter += _chars.size();
         terminal_.activeDisplay().writeText(_chars, cellCount);
-        terminal_.state().precedingGraphicCharacter = static_cast<char32_t>(_chars.back());
+        terminal_.state().parser.precedingGraphicCharacter = static_cast<char32_t>(_chars.back());
     }
     else
         for (char const ch: _chars)

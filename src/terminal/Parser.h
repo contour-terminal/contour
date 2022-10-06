@@ -355,6 +355,13 @@ enum class Action : uint8_t
      * to allow the OSC handler to finish neatly.
      */
     OSC_End,
+
+    /**
+     * This action is called when Ground state is entered. The previous graphic character is then
+     * being reset to 0 such that the grapheme cluster segmentation algorithm won't accidentally
+     * mix up with older text.
+     */
+    GroundStart,
 };
 
 constexpr State& operator++(State& s) noexcept
@@ -409,6 +416,7 @@ constexpr std::string_view to_string(Action action)
     switch (action)
     {
         case Action::Undefined: return "Undefined";
+        case Action::GroundStart: return "GroundStart";
         case Action::Ignore: return "Ignore";
         case Action::Execute: return "Execute";
         case Action::Print: return "Print";
@@ -644,6 +652,8 @@ class Parser
     void parseFragment(std::string_view s, size_t maxCharCount);
 
     [[nodiscard]] State state() const noexcept { return state_; }
+
+    char32_t precedingGraphicCharacter = 0;
 
   private:
     void handle(ActionClass _actionClass, Action _action, uint8_t _char);

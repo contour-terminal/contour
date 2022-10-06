@@ -42,6 +42,7 @@ constexpr ParserTable ParserTable::get() // {{{
     auto t = ParserTable {};
 
     // Ground
+    t.entry(State::Ground, Action::GroundStart);
     t.event(State::Ground, Action::Execute, Range { 0x00_b, 0x17_b }, 0x19_b, Range { 0x1C_b, 0x1F_b });
     t.event(State::Ground, Action::Print, Range { 0x20_b, 0x7F_b });
     t.event(State::Ground, Action::Print, Range { 0xA0_b, 0xFF_b });
@@ -246,6 +247,7 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view co
             {
                 auto const next = input + cellCount;
                 auto const byteCount = static_cast<size_t>(std::distance(input, next));
+                precedingGraphicCharacter = static_cast<char32_t>(input[cellCount - 1]);
                 assert(byteCount <= chunk.size());
                 assert(cellCount <= maxCharCount);
                 assert(next <= chunk.data() + chunk.size());
@@ -322,6 +324,7 @@ void Parser<EventListener, TraceStateChanges>::handle(ActionClass _actionClass,
 
     switch (_action)
     {
+        case Action::GroundStart: precedingGraphicCharacter = 0; break;
         case Action::Clear: eventListener_.clear(); break;
         case Action::CollectLeader: eventListener_.collectLeader(ch); break;
         case Action::Collect: eventListener_.collect(ch); break;

@@ -211,7 +211,6 @@ struct TerminalState
     ViCommands viCommands;
     ViInputHandler inputHandler;
 
-    char32_t precedingGraphicCharacter = {};
     bool terminating = false;
 };
 
