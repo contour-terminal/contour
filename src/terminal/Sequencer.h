@@ -138,7 +138,7 @@ class Sequencer
     // ParserEvents
     //
     void error(std::string_view _errorString);
-    void print(char _text);
+    void print(char32_t _codepoint);
     size_t print(std::string_view _chars, size_t cellCount);
     void execute(char _controlCode);
     void clear() noexcept;
@@ -169,13 +169,11 @@ class Sequencer
     }
 
   private:
-    void resetUtf8DecoderState() noexcept;
     void handleSequence();
 
     // private data
     //
     Terminal& terminal_;
-    unicode::utf8_decoder_state utf8DecoderState_ = {};
     Sequence sequence_ {};
     SequenceParameterBuilder parameterBuilder_;
 
@@ -184,16 +182,10 @@ class Sequencer
 };
 
 // {{{ inlines
-inline void Sequencer::resetUtf8DecoderState() noexcept
-{
-    utf8DecoderState_ = {};
-}
-
 inline void Sequencer::clear() noexcept
 {
     sequence_.clearExceptParameters();
     parameterBuilder_.reset();
-    resetUtf8DecoderState();
 }
 
 inline void Sequencer::paramDigit(char _char) noexcept

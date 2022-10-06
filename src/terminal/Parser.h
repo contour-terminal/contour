@@ -19,6 +19,7 @@
 #include <crispy/range.h>
 
 #include <unicode/convert.h>
+#include <unicode/utf8.h>
 
 #include <fmt/format.h>
 
@@ -657,11 +658,13 @@ class Parser
 
   private:
     void handle(ActionClass _actionClass, Action _action, uint8_t _char);
+    void printUtf8Byte(char ch);
 
     // private properties
     //
     State state_ = State::Ground;
     EventListener& eventListener_;
+    unicode::utf8_decoder_state utf8DecoderState_ = {};
 };
 
 /// @returns parsed tuple with OSC code and offset to first data parameter byte.

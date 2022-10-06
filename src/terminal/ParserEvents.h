@@ -39,7 +39,7 @@ class ParserEvents
      * be displayed. 20 (SP) and 7F (DEL) have special behaviour in later VT series, as
      * described in ground.
      */
-    virtual void print(char _text) = 0;
+    virtual void print(char32_t _text) = 0;
 
     /**
      * Optimization that passes in ASCII chars between [0x20 .. 0x7F].
@@ -166,7 +166,7 @@ class BasicParserEvents: public ParserEvents
 {
   public:
     void error(std::string_view const&) override {}
-    void print(char) override {}
+    void print(char32_t) override {}
     size_t print(std::string_view, size_t) override { return 0; }
     void execute(char) override {}
     void clear() override {}

@@ -41,17 +41,9 @@ void Sequencer::error(std::string_view _errorString)
         VTParserLog()("Parser error: {}", _errorString);
 }
 
-void Sequencer::print(char _char)
+void Sequencer::print(char32_t codepoint)
 {
-    unicode::ConvertResult const r = unicode::from_utf8(utf8DecoderState_, (uint8_t) _char);
-    if (holds_alternative<unicode::Incomplete>(r))
-        return;
-
-    static constexpr char32_t ReplacementCharacter { 0xFFFD };
-
     terminal_.state().instructionCounter++;
-    auto const codepoint =
-        holds_alternative<unicode::Success>(r) ? get<unicode::Success>(r).value : ReplacementCharacter;
     terminal_.activeDisplay().writeText(codepoint);
     terminal_.state().parser.precedingGraphicCharacter = codepoint;
 }
@@ -60,15 +52,8 @@ size_t Sequencer::print(string_view _chars, size_t cellCount)
 {
     assert(_chars.size() != 0);
 
-    if (utf8DecoderState_.expectedLength == 0)
-    {
-        terminal_.state().instructionCounter += _chars.size();
-        terminal_.activeDisplay().writeText(_chars, cellCount);
-        terminal_.state().parser.precedingGraphicCharacter = static_cast<char32_t>(_chars.back());
-    }
-    else
-        for (char const ch: _chars)
-            print(ch);
+    terminal_.state().instructionCounter += _chars.size();
+    terminal_.activeDisplay().writeText(_chars, cellCount);
 
     return terminal_.state().pageSize.columns.as<size_t>()
            - terminal_.state().cursor.position.column.as<size_t>();
@@ -77,7 +62,6 @@ size_t Sequencer::print(string_view _chars, size_t cellCount)
 void Sequencer::execute(char controlCode)
 {
     terminal_.activeDisplay().executeControlCode(controlCode);
-    resetUtf8DecoderState();
 }
 
 void Sequencer::collect(char _char)

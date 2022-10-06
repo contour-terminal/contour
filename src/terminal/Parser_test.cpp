@@ -30,7 +30,7 @@ class MockParserEvents: public terminal::BasicParserEvents
     size_t maxCharCount = 80;
 
     void error(string_view const& _msg) override { INFO(fmt::format("Parser error received. {}", _msg)); }
-    void print(char ch) override { text += ch; }
+    void print(char32_t ch) override { text += unicode::convert_to<char>(ch); }
     size_t print(std::string_view s, size_t cellCount) override
     {
         text += s;
