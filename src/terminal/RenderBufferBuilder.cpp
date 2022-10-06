@@ -449,7 +449,8 @@ ColumnCount RenderBufferBuilder<Cell>::renderUtf8Text(CellLocation screenPositio
     auto graphemeClusterSegmenter = unicode::utf8_grapheme_segmenter(text);
     for (u32string const& graphemeCluster: graphemeClusterSegmenter)
     {
-        auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(screenPosition);
+        auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(
+            screenPosition + ColumnOffset::cast_from(columnCountRendered));
         auto const [fg, bg] = makeColorsForCell(gridPosition,
                                                 textAttributes.flags,
                                                 textAttributes.foregroundColor,
