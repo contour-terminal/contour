@@ -45,7 +45,6 @@ void Sequencer::print(char32_t codepoint)
 {
     terminal_.state().instructionCounter++;
     terminal_.activeDisplay().writeText(codepoint);
-    terminal_.state().parser.precedingGraphicCharacter = codepoint;
 }
 
 size_t Sequencer::print(string_view _chars, size_t cellCount)
