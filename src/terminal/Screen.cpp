@@ -3448,14 +3448,14 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case ICH: insertCharacters(seq.param_or(0, ColumnCount { 1 })); break;
         case IL: insertLines(seq.param_or(0, LineCount { 1 })); break;
         case REP:
-            if (_terminal.state().precedingGraphicCharacter)
+            if (precedingGraphicCharacter())
             {
                 auto const requestedCount = seq.param<size_t>(0);
                 auto const availableColumns =
                     (margin().horizontal.to - cursor().position.column).template as<size_t>();
                 auto const effectiveCount = min(requestedCount, availableColumns);
                 for (size_t i = 0; i < effectiveCount; i++)
-                    writeText(_terminal.state().precedingGraphicCharacter);
+                    writeText(precedingGraphicCharacter());
             }
             break;
         case RM: {

@@ -19,6 +19,7 @@
 #include <crispy/range.h>
 
 #include <unicode/convert.h>
+#include <unicode/utf8.h>
 
 #include <fmt/format.h>
 
@@ -355,6 +356,13 @@ enum class Action : uint8_t
      * to allow the OSC handler to finish neatly.
      */
     OSC_End,
+
+    /**
+     * This action is called when Ground state is entered. The previous graphic character is then
+     * being reset to 0 such that the grapheme cluster segmentation algorithm won't accidentally
+     * mix up with older text.
+     */
+    GroundStart,
 };
 
 constexpr State& operator++(State& s) noexcept
@@ -409,6 +417,7 @@ constexpr std::string_view to_string(Action action)
     switch (action)
     {
         case Action::Undefined: return "Undefined";
+        case Action::GroundStart: return "GroundStart";
         case Action::Ignore: return "Ignore";
         case Action::Execute: return "Execute";
         case Action::Print: return "Print";
@@ -645,13 +654,17 @@ class Parser
 
     [[nodiscard]] State state() const noexcept { return state_; }
 
+    char32_t precedingGraphicCharacter = 0;
+
   private:
     void handle(ActionClass _actionClass, Action _action, uint8_t _char);
+    void printUtf8Byte(char ch);
 
     // private properties
     //
     State state_ = State::Ground;
     EventListener& eventListener_;
+    unicode::utf8_decoder_state utf8DecoderState_ = {};
 };
 
 /// @returns parsed tuple with OSC code and offset to first data parameter byte.

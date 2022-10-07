@@ -42,6 +42,7 @@ constexpr ParserTable ParserTable::get() // {{{
     auto t = ParserTable {};
 
     // Ground
+    t.entry(State::Ground, Action::GroundStart);
     t.event(State::Ground, Action::Execute, Range { 0x00_b, 0x17_b }, 0x19_b, Range { 0x1C_b, 0x1F_b });
     t.event(State::Ground, Action::Print, Range { 0x20_b, 0x7F_b });
     t.event(State::Ground, Action::Print, Range { 0xA0_b, 0xFF_b });
@@ -246,6 +247,7 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view co
             {
                 auto const next = input + cellCount;
                 auto const byteCount = static_cast<size_t>(std::distance(input, next));
+                precedingGraphicCharacter = static_cast<char32_t>(input[cellCount - 1]);
                 assert(byteCount <= chunk.size());
                 assert(cellCount <= maxCharCount);
                 assert(next <= chunk.data() + chunk.size());
@@ -262,7 +264,18 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view co
                         crispy::escape(std::string_view { input, byteCount }));
 #endif
 
-                maxCharCount = eventListener_.print(std::string_view { input, byteCount }, cellCount);
+                auto const text = std::string_view { input, byteCount };
+                if (utf8DecoderState_.expectedLength == 0)
+                {
+                    maxCharCount = eventListener_.print(text, cellCount);
+                    precedingGraphicCharacter = static_cast<char32_t>(text.back());
+                }
+                else
+                {
+                    for (char const ch: text)
+                        printUtf8Byte(ch);
+                }
+
                 input = next;
 
                 // This optimization is for the `cat`-people.
@@ -303,6 +316,20 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view co
 }
 
 template <typename EventListener, bool TraceStateChanges>
+void Parser<EventListener, TraceStateChanges>::printUtf8Byte(char ch)
+{
+    unicode::ConvertResult const r = unicode::from_utf8(utf8DecoderState_, (uint8_t) ch);
+    if (std::holds_alternative<unicode::Incomplete>(r))
+        return;
+
+    auto constexpr ReplacementCharacter = char32_t { 0xFFFD };
+    auto const codepoint = std::holds_alternative<unicode::Success>(r) ? std::get<unicode::Success>(r).value
+                                                                       : ReplacementCharacter;
+    eventListener_.print(codepoint);
+    precedingGraphicCharacter = codepoint;
+}
+
+template <typename EventListener, bool TraceStateChanges>
 void Parser<EventListener, TraceStateChanges>::handle(ActionClass _actionClass,
                                                       Action _action,
                                                       uint8_t codepoint)
@@ -322,6 +349,7 @@ void Parser<EventListener, TraceStateChanges>::handle(ActionClass _actionClass,
 
     switch (_action)
     {
+        case Action::GroundStart: precedingGraphicCharacter = 0; break;
         case Action::Clear: eventListener_.clear(); break;
         case Action::CollectLeader: eventListener_.collectLeader(ch); break;
         case Action::Collect: eventListener_.collect(ch); break;
@@ -332,7 +360,7 @@ void Parser<EventListener, TraceStateChanges>::handle(ActionClass _actionClass,
         case Action::Execute: eventListener_.execute(ch); break;
         case Action::ESC_Dispatch: eventListener_.dispatchESC(ch); break;
         case Action::CSI_Dispatch: eventListener_.dispatchCSI(ch); break;
-        case Action::Print: eventListener_.print(ch); break;
+        case Action::Print: printUtf8Byte(ch); break;
         case Action::OSC_Start: eventListener_.startOSC(); break;
         case Action::OSC_Put: eventListener_.putOSC(ch); break;
         case Action::OSC_End: eventListener_.dispatchOSC(); break;
