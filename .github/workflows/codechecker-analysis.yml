@@ -43,6 +43,8 @@ jobs:
           cat /etc/apt/sources.list
           sudo apt-get -qy update
           sudo ./scripts/install-deps.sh
+      - name: "Post-fix embedded dependency permissions."
+        run: sudo find _deps/sources -exec chown $UID {} \;
       - name: "Prepare building Contour"
         # Note: Keep this in sync with that in build.yml!
         run: |
