@@ -437,9 +437,6 @@ jobs:
                                -DLIBUNICODE_UCD_BASE_DIR=$(pwd)/_ucd \
                                " \
             ./scripts/ci-prepare-contour.sh
-            pwd
-            id
-            ls -hl _deps/sources/libunicode-bce00a7e45b6ab58c91350ce80f04ab1216b2667/src/unicode/
       - name: "build"
         run: cmake --build build/ -- -j3
       - name: "test: crispy"
