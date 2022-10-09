@@ -7,6 +7,7 @@ include(FilesystemResolver)
 
 option(LIBTERMINAL_TESTING "Enables building of unittests for libterminal [default: ON]" ON)
 option(LIBTERMINAL_LOG_TRACE "Enables VT sequence tracing. [default: ON]" ON)
+option(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER "Enables caching the pointer to the current line, which should improve performance. [default: OFF]" OFF)
 
 # This is an optimization feature that hopefully improves performance when enabled.
 # But it's currently disabled by default as I am not fully satisfied with it yet.
@@ -129,6 +130,9 @@ target_include_directories(terminal PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOU
 target_link_libraries(terminal PUBLIC ${LIBTERMINAL_LIBRARIES})
 if(LIBTERMINAL_LOG_TRACE)
     target_compile_definitions(terminal PUBLIC LIBTERMINAL_LOG_TRACE=1)
+endif()
+if(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER)
+    target_compile_definitions(terminal PUBLIC LIBTERMINAL_CACHE_CURRENT_LINE_POINTER=1)
 endif()
 if(CONTOUR_PERF_STATS)
     target_compile_definitions(terminal PUBLIC CONTOUR_PERF_STATS=1)

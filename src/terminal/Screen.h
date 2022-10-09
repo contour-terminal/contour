@@ -79,8 +79,6 @@ class ScreenBase: public SequenceHandler
                                                                     CellLocation startPosition) = 0;
 };
 
-//#define LIBTERMINAL_CURRENT_LINE_CACHE 1
-
 /**
  * Terminal Screen.
  *
@@ -392,14 +390,14 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     void updateCursorIterator() noexcept override
     {
-#if defined(LIBTERMINAL_CURRENT_LINE_CACHE)
+#if defined(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER)
         _currentLine = &grid().lineAt(_state.cursor.position.line);
 #endif
     }
 
     Line<Cell>& currentLine() noexcept
     {
-#if defined(LIBTERMINAL_CURRENT_LINE_CACHE)
+#if defined(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER)
         return *_currentLine;
 #else
         return grid().lineAt(_state.cursor.position.line);
@@ -408,7 +406,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     Line<Cell> const& currentLine() const noexcept
     {
-#if defined(LIBTERMINAL_CURRENT_LINE_CACHE)
+#if defined(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER)
         return *_currentLine;
 #else
         return grid().lineAt(_state.cursor.position.line);
@@ -650,7 +648,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     Terminal& _terminal;
     TerminalState& _state;
     Grid<Cell>& _grid;
-#if defined(LIBTERMINAL_CURRENT_LINE_CACHE)
+#if defined(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER)
     Line<Cell>* _currentLine = nullptr;
 #endif
     std::unique_ptr<SixelImageBuilder> sixelImageBuilder_;
