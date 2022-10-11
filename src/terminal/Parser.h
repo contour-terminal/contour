@@ -525,106 +525,6 @@ struct formatter<terminal::parser::Action>
 namespace terminal::parser
 {
 
-struct ParserTable
-{
-    //! State transition map from (State, Byte) to (State).
-    std::array<std::array<State, 256>, std::numeric_limits<State>::size()> transitions {
-        std::array<State, 256> { State::Ground /*XXX or Undefined?*/ }
-    };
-
-    //! actions to be invoked upon state entry
-    std::array<Action, std::numeric_limits<Action>::size()> entryEvents { Action::Undefined };
-
-    //! actions to be invoked upon state exit
-    std::array<Action, std::numeric_limits<Action>::size()> exitEvents { Action::Undefined };
-
-    //! actions to be invoked for a given (State, Byte) pair.
-    std::array<std::array<Action, 256>, std::numeric_limits<Action>::size()> events;
-
-    //! Standard state machine tables parsing VT225 to VT525.
-    static constexpr ParserTable get();
-
-    // {{{ implementation detail
-    struct Range
-    {
-        uint8_t first;
-        uint8_t last;
-    };
-
-    constexpr void entry(State _state, Action _action)
-    {
-        entryEvents.at(static_cast<size_t>(_state)) = _action;
-    }
-
-    constexpr void exit(State _state, Action _action)
-    {
-        exitEvents.at(static_cast<size_t>(_state)) = _action;
-    }
-
-    // Events
-    constexpr void event(State _state, Action _action, uint8_t _input)
-    {
-        events.at(static_cast<size_t>(_state)).at(_input) = _action;
-    }
-
-    constexpr void event(State _state, Action _action, Range _input)
-    {
-        for (unsigned input = _input.first; input <= _input.last; ++input)
-            event(_state, _action, static_cast<uint8_t>(input));
-    }
-
-    template <typename Arg, typename Arg2, typename... Args>
-    constexpr void event(State s, Action a, Arg a1, Arg2 a2, Args... more)
-    {
-        event(s, a, a1);
-        event(s, a, a2, more...);
-    }
-
-    // Transitions *with* actions
-    constexpr void transition(State _from, State _to, Action _action, uint8_t _input)
-    {
-        event(_from, _action, _input);
-        transitions[static_cast<size_t>(_from)][_input] = _to;
-    }
-
-    constexpr void transition(State _from, State _to, Action _action, Range _input)
-    {
-        event(_from, _action, _input);
-        for (unsigned input = _input.first; input <= _input.last; ++input)
-            transitions[static_cast<size_t>(_from)][input] = _to;
-    }
-
-    // template <typename Arg, typename Arg2, typename... Args>
-    // constexpr void transition(State s, State t, Action a, Arg a1, Arg2 a2, Args... more)
-    // {
-    //     transition(s, t, a, a1);
-    //     transition(s, t, a, a2, more...);
-    // }
-
-    // Transitions *without* actions
-    constexpr void transition(State _from, State _to, uint8_t _input)
-    {
-        event(_from, Action::Ignore, _input);
-        transitions[static_cast<size_t>(_from)][_input] = _to;
-    }
-
-    constexpr void transition(State _from, State _to, Range _input)
-    {
-        event(_from, Action::Ignore, _input);
-        for (unsigned input = _input.first; input <= _input.last; ++input)
-            transitions[static_cast<size_t>(_from)][input] = _to;
-    }
-
-    // template <typename Arg, typename Arg2, typename... Args>
-    // constexpr void transition(State s, State t, Arg a1, Arg2 a2, Args... more)
-    // {
-    //     transition(s, t, a1);
-    //     transition(s, t, a2, more...);
-    // }
-
-    // }}}
-};
-
 /**
  * Terminal Parser.
  *
@@ -690,8 +590,6 @@ inline std::pair<int, size_t> extractCodePrefix(T const& data) noexcept
     return std::pair { code, i };
 }
 
-void dot(std::ostream& _os, ParserTable const& _table);
+void parserTableDot(std::ostream& _os);
 
 } // end namespace terminal::parser
-
-#include <terminal/Parser-impl.h>

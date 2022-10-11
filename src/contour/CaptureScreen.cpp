@@ -71,7 +71,7 @@ using namespace std::string_view_literals;
 namespace contour
 {
 
-class CaptureBufferCollector: public terminal::BasicParserEvents
+class CaptureBufferCollector: public terminal::NullParserEvents
 {
   public:
     std::ostream& output;
@@ -262,7 +262,7 @@ namespace
     bool readCaptureReply(TTY& _input, timeval* timeout, bool words, ostream& output)
     {
         auto captureBufferCollector = CaptureBufferCollector { output, words };
-        auto parser = terminal::parser::Parser<CaptureBufferCollector> { captureBufferCollector };
+        auto parser = terminal::parser::Parser<terminal::ParserEvents> { captureBufferCollector };
 
         // Response is of format: PM 314 ; <screen capture> ST`
         while (true)

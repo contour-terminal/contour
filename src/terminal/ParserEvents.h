@@ -162,7 +162,7 @@ class ParserEvents
     virtual void dispatchPM() = 0;
 };
 
-class BasicParserEvents: public ParserEvents
+class NullParserEvents: public ParserEvents
 {
   public:
     void error(std::string_view const&) override {}
@@ -191,4 +191,5 @@ class BasicParserEvents: public ParserEvents
     void putPM(char) override {}
     void dispatchPM() override {}
 };
+
 } // end namespace terminal
