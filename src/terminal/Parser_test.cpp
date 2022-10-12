@@ -21,7 +21,7 @@
 using namespace std;
 using namespace terminal;
 
-class MockParserEvents: public terminal::BasicParserEvents
+class MockParserEvents: public terminal::NullParserEvents
 {
   public:
     std::string text;
@@ -49,7 +49,7 @@ class MockParserEvents: public terminal::BasicParserEvents
 TEST_CASE("Parser.utf8_single", "[Parser]")
 {
     MockParserEvents textListener;
-    auto p = parser::Parser(textListener);
+    auto p = parser::Parser<ParserEvents>(textListener);
 
     p.parseFragment("\xC3\xB6", 80); // ö
 
@@ -59,7 +59,7 @@ TEST_CASE("Parser.utf8_single", "[Parser]")
 TEST_CASE("Parser.PM")
 {
     MockParserEvents listener;
-    auto p = parser::Parser(listener);
+    auto p = parser::Parser<ParserEvents>(listener);
     REQUIRE(p.state() == parser::State::Ground);
     // Also include ✅ in the payload to ensure such codepoints work, too.
     p.parseFragment("ABC\033^hello ✅ world\033\\DEF"sv, 80);
@@ -71,7 +71,7 @@ TEST_CASE("Parser.PM")
 TEST_CASE("Parser.APC")
 {
     MockParserEvents listener;
-    auto p = parser::Parser(listener);
+    auto p = parser::Parser<ParserEvents>(listener);
     REQUIRE(p.state() == parser::State::Ground);
     p.parseFragment("ABC\033\\\033_Gi=1,a=q;\033\\DEF"sv, 80);
     REQUIRE(p.state() == parser::State::Ground);

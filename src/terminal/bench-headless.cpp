@@ -49,36 +49,6 @@ std::string createText(size_t bytes)
 
 } // namespace
 
-class NullParserEvents
-{
-  public:
-    void error(std::string_view /*_errorString*/) {}
-    void print(char32_t /*_text*/) {}
-    size_t print(std::string_view /*chars*/, size_t /*cellCount*/) { return 4096; }
-    void execute(char /*_controlCode*/) {}
-    void clear() {}
-    void collect(char /*_char*/) {}
-    void collectLeader(char /*_leader*/) {}
-    void param(char /*_char*/) {}
-    void paramDigit(char /*_char*/) {}
-    void paramSeparator() {}
-    void paramSubSeparator() {}
-    void dispatchESC(char /*_function*/) {}
-    void dispatchCSI(char /*_function*/) {}
-    void startOSC() {}
-    void putOSC(char /*_char*/) {}
-    void dispatchOSC() {}
-    void hook(char /*_function*/) {}
-    void put(char /*_char*/) {}
-    void unhook() {}
-    void startAPC() {}
-    void putAPC(char) {}
-    void dispatchAPC() {}
-    void startPM() {}
-    void putPM(char) {}
-    void dispatchPM() {}
-};
-
 struct BenchOptions
 {
     unsigned testSizeMB = 64;
@@ -336,8 +306,8 @@ class ContourHeadlessBench: public crispy::App
 
     int benchParserOnly()
     {
-        auto po = NullParserEvents {};
-        auto parser = terminal::parser::Parser { po };
+        auto po = terminal::NullParserEvents {};
+        auto parser = terminal::parser::Parser<terminal::ParserEvents> { po };
         return baseBenchmark(
             [&](char const* a, size_t b) -> bool {
                 parser.parseFragment(string_view(a, b), 100);

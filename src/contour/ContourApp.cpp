@@ -282,7 +282,7 @@ int ContourApp::captureAction()
 
 int ContourApp::parserTableAction()
 {
-    terminal::parser::dot(std::cout, terminal::parser::ParserTable::get());
+    terminal::parser::parserTableDot(std::cout);
     return EXIT_SUCCESS;
 }
 
