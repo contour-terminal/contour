@@ -123,11 +123,12 @@ template <typename Cell>
 Grid<Cell>::Grid(PageSize _pageSize, bool _reflowOnResize, LineCount _maxHistoryLineCount):
     pageSize_ { _pageSize },
     reflowOnResize_ { _reflowOnResize },
-    maxHistoryLineCount_ { _maxHistoryLineCount },
-    lines_ { detail::createLines<Cell>(
-        _pageSize, _maxHistoryLineCount, _reflowOnResize, GraphicsAttributes {}) },
     linesUsed_ { _pageSize.lines }
 {
+    defineMaxHistoryLineCount_(_maxHistoryLineCount);
+    lines_ = detail::createLines<Cell>(
+        _pageSize, maxHistoryLineCount_, _reflowOnResize, GraphicsAttributes {});
+
     verifyState();
 }
 
@@ -136,9 +137,9 @@ void Grid<Cell>::setMaxHistoryLineCount(LineCount _maxHistoryLineCount)
 {
     verifyState();
     rezeroBuffers();
-    lines_.resize(unbox<size_t>(pageSize_.lines + _maxHistoryLineCount));
-    linesUsed_ = min(linesUsed_, pageSize_.lines + _maxHistoryLineCount);
-    maxHistoryLineCount_ = _maxHistoryLineCount;
+    defineMaxHistoryLineCount_(_maxHistoryLineCount);
+    lines_.resize(unbox<size_t>(pageSize_.lines + maxHistoryLineCount_));
+    linesUsed_ = min(linesUsed_, pageSize_.lines + maxHistoryLineCount_);
     verifyState();
 }
 
@@ -360,6 +361,12 @@ LineCount Grid<Cell>::scrollUp(LineCount linesCountToScrollUp, GraphicsAttribute
     verifyState();
     if (unbox<size_t>(linesUsed_) == lines_.size()) // with all grid lines in-use
     {
+        if (isInfinite_)
+        {
+            maxHistoryLineCount_ += linesCountToScrollUp;
+            for ([[maybe_unused]] auto const _: ranges::views::iota(0, unbox<int>(linesCountToScrollUp)))
+                lines_.emplace_back(defaultLineFlags(), TrivialLineBuffer { pageSize_.columns, GraphicsAttributes {} });
+        }
         // TODO: ensure explicit test for this case
         rotateBuffersLeft(linesCountToScrollUp);
 

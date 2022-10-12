@@ -1524,7 +1524,8 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
 
     auto intValue = profile.maxHistoryLineCount;
     tryLoadChildRelative(_usedKeys, _profile, basePath, "history.limit", intValue);
-    if (unbox<int>(intValue) < 0)
+    // value -1 is used for infinite grid
+    if (unbox<int>(intValue) < -1)
         profile.maxHistoryLineCount = LineCount(0);
     else
         profile.maxHistoryLineCount = intValue;

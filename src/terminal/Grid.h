@@ -563,10 +563,24 @@ class Grid
     void rotateBuffersRight(LineCount count) noexcept { lines_.rotate_right(unbox<size_t>(count)); }
     // }}}
 
+    // {{{
+    void defineMaxHistoryLineCount_(LineCount _maxHistoryLineCount)
+    {
+        if(unbox<int>(_maxHistoryLineCount)==-1)
+        {
+            maxHistoryLineCount_ = LineCount::cast_from(0);
+            isInfinite_ = true;
+        }else {
+            maxHistoryLineCount_ = _maxHistoryLineCount;
+            isInfinite_ = false;
+        }
+    }
+    // }}}
     // private fields
     //
     PageSize pageSize_;
     bool reflowOnResize_ = false;
+    bool isInfinite_ = false;
     LineCount maxHistoryLineCount_;
 
     // Number of lines is at least the sum of maxHistoryLineCount_ + pageSize_.lines,
