@@ -366,6 +366,7 @@ LineCount Grid<Cell>::scrollUp(LineCount linesCountToScrollUp, GraphicsAttribute
             maxHistoryLineCount_ += linesCountToScrollUp;
             for ([[maybe_unused]] auto const _: ranges::views::iota(0, unbox<int>(linesCountToScrollUp)))
                 lines_.emplace_back(defaultLineFlags(), TrivialLineBuffer { pageSize_.columns, GraphicsAttributes {} });
+            return scrollUp(linesCountToScrollUp,_defaultAttributes);
         }
         // TODO: ensure explicit test for this case
         rotateBuffersLeft(linesCountToScrollUp);
