@@ -147,11 +147,16 @@ Grid<Cell>::Grid(PageSize _pageSize, bool _reflowOnResize, LineCount _maxHistory
 }
 
 template <typename Cell>
-void Grid<Cell>::setMaxHistoryLineCount(MaxHistoryLineCount _maxHistoryLineCount)
+void Grid<Cell>::setMaxHistoryLineCount(LineCount _maxHistoryLineCount)
 {
     verifyState();
     rezeroBuffers();
-    historyLimit_ = _maxHistoryLineCount;
+    historyLimit_ = [&]() -> MaxHistoryLineCount {
+        if (unbox<int>(_maxHistoryLineCount) == -1)
+            return Grid::Infinite();
+        else
+            return _maxHistoryLineCount;
+    }();
     lines_.resize(unbox<size_t>(pageSize_.lines + maxHistoryLineCount()));
     linesUsed_ = min(linesUsed_, pageSize_.lines + maxHistoryLineCount());
     verifyState();

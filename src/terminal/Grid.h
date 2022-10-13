@@ -403,20 +403,20 @@ class Grid
         }
         else
         {
-            return LineCount::cast_from(lines_.size());
+            return LineCount::cast_from(lines_.size()) - pageSize_.lines;
         }
     }
 
-    void setMaxHistoryLineCount(MaxHistoryLineCount _maxHistoryLineCount);
+    void setMaxHistoryLineCount(LineCount _maxHistoryLineCount);
 
     [[nodiscard]] LineCount totalLineCount() const noexcept
     {
-        return std::get<LineCount>(historyLimit_) + pageSize_.lines;
+        return maxHistoryLineCount() + pageSize_.lines;
     }
 
     [[nodiscard]] LineCount historyLineCount() const noexcept
     {
-        return std::min(std::get<LineCount>(historyLimit_), linesUsed_ - pageSize_.lines);
+        return std::min(maxHistoryLineCount(), linesUsed_ - pageSize_.lines);
     }
 
     [[nodiscard]] bool reflowOnResize() const noexcept { return reflowOnResize_; }
