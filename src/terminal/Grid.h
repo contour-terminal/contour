@@ -383,6 +383,11 @@ class Grid
 {
     // TODO: Rename all "History" to "Scrollback"?
   public:
+    struct Infinite
+    {
+    };
+    using MaxHistoryLineCount = std::variant<LineCount, Infinite>;
+
     Grid(PageSize _pageSize, bool _reflowOnResize, LineCount _maxHistoryLineCount);
 
     Grid(): Grid(PageSize { LineCount(25), ColumnCount(80) }, false, LineCount(0)) {}
@@ -390,14 +395,28 @@ class Grid
     void reset();
 
     // {{{ grid global properties
-    [[nodiscard]] LineCount maxHistoryLineCount() const noexcept { return maxHistoryLineCount_; }
-    void setMaxHistoryLineCount(LineCount _maxHistoryLineCount);
+    [[nodiscard]] LineCount maxHistoryLineCount() const noexcept
+    {
+        if (const LineCount* maxLineCount = std::get_if<LineCount>(&historyLimit_))
+        {
+            return *maxLineCount;
+        }
+        else
+        {
+            return LineCount::cast_from(lines_.size());
+        }
+    }
 
-    [[nodiscard]] LineCount totalLineCount() const noexcept { return maxHistoryLineCount_ + pageSize_.lines; }
+    void setMaxHistoryLineCount(MaxHistoryLineCount _maxHistoryLineCount);
+
+    [[nodiscard]] LineCount totalLineCount() const noexcept
+    {
+        return std::get<LineCount>(historyLimit_) + pageSize_.lines;
+    }
 
     [[nodiscard]] LineCount historyLineCount() const noexcept
     {
-        return std::min(maxHistoryLineCount_, linesUsed_ - pageSize_.lines);
+        return std::min(std::get<LineCount>(historyLimit_), linesUsed_ - pageSize_.lines);
     }
 
     [[nodiscard]] bool reflowOnResize() const noexcept { return reflowOnResize_; }
@@ -564,24 +583,12 @@ class Grid
     // }}}
 
     // {{{
-    void defineMaxHistoryLineCount_(LineCount _maxHistoryLineCount)
-    {
-        if(unbox<int>(_maxHistoryLineCount)==-1)
-        {
-            maxHistoryLineCount_ = LineCount::cast_from(0);
-            isInfinite_ = true;
-        }else {
-            maxHistoryLineCount_ = _maxHistoryLineCount;
-            isInfinite_ = false;
-        }
-    }
     // }}}
     // private fields
     //
     PageSize pageSize_;
     bool reflowOnResize_ = false;
-    bool isInfinite_ = false;
-    LineCount maxHistoryLineCount_;
+    MaxHistoryLineCount historyLimit_;
 
     // Number of lines is at least the sum of maxHistoryLineCount_ + pageSize_.lines,
     // because shrinking the page height does not necessarily

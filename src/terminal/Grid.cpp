@@ -22,6 +22,8 @@
 #include <algorithm>
 #include <iostream>
 
+#include "terminal/primitives.h"
+
 using std::max;
 using std::min;
 using std::u32string;
@@ -123,23 +125,35 @@ template <typename Cell>
 Grid<Cell>::Grid(PageSize _pageSize, bool _reflowOnResize, LineCount _maxHistoryLineCount):
     pageSize_ { _pageSize },
     reflowOnResize_ { _reflowOnResize },
+    historyLimit_ { [&]() -> MaxHistoryLineCount {
+        if (unbox<int>(_maxHistoryLineCount) == -1)
+            return Grid::Infinite();
+        else
+            return _maxHistoryLineCount;
+    }() },
+    lines_ { detail::createLines<Cell>(
+        _pageSize,
+        [&]() -> LineCount {
+            if (unbox<int>(_maxHistoryLineCount) == -1)
+                return LineCount::cast_from(0);
+            else
+                return _maxHistoryLineCount;
+        }(),
+        _reflowOnResize,
+        GraphicsAttributes {}) },
     linesUsed_ { _pageSize.lines }
 {
-    defineMaxHistoryLineCount_(_maxHistoryLineCount);
-    lines_ = detail::createLines<Cell>(
-        _pageSize, maxHistoryLineCount_, _reflowOnResize, GraphicsAttributes {});
-
     verifyState();
 }
 
 template <typename Cell>
-void Grid<Cell>::setMaxHistoryLineCount(LineCount _maxHistoryLineCount)
+void Grid<Cell>::setMaxHistoryLineCount(MaxHistoryLineCount _maxHistoryLineCount)
 {
     verifyState();
     rezeroBuffers();
-    defineMaxHistoryLineCount_(_maxHistoryLineCount);
-    lines_.resize(unbox<size_t>(pageSize_.lines + maxHistoryLineCount_));
-    linesUsed_ = min(linesUsed_, pageSize_.lines + maxHistoryLineCount_);
+    historyLimit_ = _maxHistoryLineCount;
+    lines_.resize(unbox<size_t>(pageSize_.lines + maxHistoryLineCount()));
+    linesUsed_ = min(linesUsed_, pageSize_.lines + maxHistoryLineCount());
     verifyState();
 }
 
@@ -361,12 +375,12 @@ LineCount Grid<Cell>::scrollUp(LineCount linesCountToScrollUp, GraphicsAttribute
     verifyState();
     if (unbox<size_t>(linesUsed_) == lines_.size()) // with all grid lines in-use
     {
-        if (isInfinite_)
+        if (std::get_if<Grid::Infinite>(&historyLimit_))
         {
-            maxHistoryLineCount_ += linesCountToScrollUp;
             for ([[maybe_unused]] auto const _: ranges::views::iota(0, unbox<int>(linesCountToScrollUp)))
-                lines_.emplace_back(defaultLineFlags(), TrivialLineBuffer { pageSize_.columns, GraphicsAttributes {} });
-            return scrollUp(linesCountToScrollUp,_defaultAttributes);
+                lines_.emplace_back(defaultLineFlags(),
+                                    TrivialLineBuffer { pageSize_.columns, GraphicsAttributes {} });
+            return scrollUp(linesCountToScrollUp, _defaultAttributes);
         }
         // TODO: ensure explicit test for this case
         rotateBuffersLeft(linesCountToScrollUp);
@@ -616,7 +630,7 @@ CellLocation Grid<Cell>::growLines(LineCount _newHeight, CellLocation _cursor)
     Require(*totalLinesToExtend >= 0);
     // ? Require(linesToTakeFromSavedLines == LineCount(0));
 
-    auto const newTotalLineCount = maxHistoryLineCount_ + _newHeight;
+    auto const newTotalLineCount = maxHistoryLineCount() + _newHeight;
     auto const currentTotalLineCount = LineCount::cast_from(lines_.size());
     auto const linesToFill = max(0, *newTotalLineCount - *currentTotalLineCount);
 
@@ -627,7 +641,7 @@ CellLocation Grid<Cell>::growLines(LineCount _newHeight, CellLocation _cursor)
     linesUsed_ = min(linesUsed_ + totalLinesToExtend, LineCount::cast_from(lines_.size()));
 
     Ensures(pageSize_.lines == _newHeight);
-    Ensures(lines_.size() >= unbox<size_t>(maxHistoryLineCount_ + pageSize_.lines));
+    Ensures(lines_.size() >= unbox<size_t>(maxHistoryLineCount() + pageSize_.lines));
     verifyState();
 
     return cursorMove;
@@ -661,7 +675,7 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
             pageSize_.lines - boxed_cast<LineCount>(_cursor.line + 1);
         auto const cutoffCount = min(numLinesToShrink, linesAvailableBelowCursorBeforeShrink);
         auto const numLinesToPushUp = numLinesToShrink - cutoffCount;
-        auto const numLinesToPushUpCapped = min(numLinesToPushUp, maxHistoryLineCount_);
+        auto const numLinesToPushUpCapped = min(numLinesToPushUp, maxHistoryLineCount());
 
         GridLog()(" -> shrink lines: numLinesToShrink {}, linesAvailableBelowCursorBeforeShrink {}, "
                   "cutoff {}, pushUp "
@@ -790,7 +804,7 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
             linesUsed_ = LineCount::cast_from(grownLines.size());
 
             // Fill scrollback lines.
-            auto const totalLineCount = unbox<size_t>(pageSize_.lines + maxHistoryLineCount_);
+            auto const totalLineCount = unbox<size_t>(pageSize_.lines + maxHistoryLineCount());
             while (grownLines.size() < totalLineCount)
                 grownLines.emplace_back(
                     defaultLineFlags(),
@@ -853,7 +867,7 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
             LineBuffer wrappedColumns;
             LineFlags previousFlags = lines_.front().inheritableFlags();
 
-            auto const totalLineCount = unbox<size_t>(pageSize_.lines + maxHistoryLineCount_);
+            auto const totalLineCount = unbox<size_t>(pageSize_.lines + maxHistoryLineCount());
             shrinkedLines.reserve(totalLineCount);
             Require(totalLineCount == unbox<size_t>(this->totalLineCount()));
 
