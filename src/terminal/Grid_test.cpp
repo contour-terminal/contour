@@ -846,4 +846,21 @@ TEST_CASE("Grid.reflow.tripple", "[grid]")
         // }}}
     }
 }
+
+TEST_CASE("Grid infinite", "[grid]")
+{
+    auto grid_finite = Grid<Cell>(PageSize { LineCount(2), ColumnCount(8) }, true, LineCount(0));
+    grid_finite.setLineText(LineOffset { 0 }, "ABCDEFGH"sv);
+    grid_finite.setLineText(LineOffset { 1 }, "abcdefgh"sv);
+    grid_finite.scrollUp(LineCount { 1 });
+    REQUIRE(grid_finite.lineText(LineOffset(0)) == "abcdefgh");
+    REQUIRE(grid_finite.lineText(LineOffset(-1)) == std::string(8,' '));
+
+    auto grid_infinite = Grid<Cell>(PageSize { LineCount(2), ColumnCount(8) }, true, LineCount(-1));
+    grid_infinite.setLineText(LineOffset { 0 }, "ABCDEFGH"sv);
+    grid_infinite.setLineText(LineOffset { 1 }, "abcdefgh"sv);
+    grid_infinite.scrollUp(LineCount { 1 });
+    REQUIRE(grid_infinite.lineText(LineOffset(0)) == "abcdefgh");
+    REQUIRE(grid_infinite.lineText(LineOffset(-1)) == "ABCDEFGH");
+}
 // }}}
