@@ -383,12 +383,7 @@ class Grid
 {
     // TODO: Rename all "History" to "Scrollback"?
   public:
-    struct Infinite
-    {
-    };
-    using MaxHistoryLineCount = std::variant<LineCount, Infinite>;
-
-    Grid(PageSize _pageSize, bool _reflowOnResize, LineCount _maxHistoryLineCount);
+    Grid(PageSize _pageSize, bool _reflowOnResize, MaxHistoryLineCount _maxHistoryLineCount);
 
     Grid(): Grid(PageSize { LineCount(25), ColumnCount(80) }, false, LineCount(0)) {}
 
@@ -397,17 +392,13 @@ class Grid
     // {{{ grid global properties
     [[nodiscard]] LineCount maxHistoryLineCount() const noexcept
     {
-        if (const LineCount* maxLineCount = std::get_if<LineCount>(&historyLimit_))
-        {
+        if (auto const* maxLineCount = std::get_if<LineCount>(&historyLimit_))
             return *maxLineCount;
-        }
         else
-        {
             return LineCount::cast_from(lines_.size()) - pageSize_.lines;
-        }
     }
 
-    void setMaxHistoryLineCount(LineCount _maxHistoryLineCount);
+    void setMaxHistoryLineCount(MaxHistoryLineCount _maxHistoryLineCount);
 
     [[nodiscard]] LineCount totalLineCount() const noexcept
     {
@@ -582,8 +573,6 @@ class Grid
     void rotateBuffersRight(LineCount count) noexcept { lines_.rotate_right(unbox<size_t>(count)); }
     // }}}
 
-    // {{{
-    // }}}
     // private fields
     //
     PageSize pageSize_;

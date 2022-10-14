@@ -13,6 +13,7 @@
  */
 #include <terminal/Cell.h>
 #include <terminal/Grid.h>
+#include <terminal/primitives.h>
 
 #include <crispy/assert.h>
 #include <crispy/logstore.h>
@@ -21,8 +22,6 @@
 
 #include <algorithm>
 #include <iostream>
-
-#include "terminal/primitives.h"
 
 using std::max;
 using std::min;
@@ -122,22 +121,17 @@ namespace detail
 } // namespace detail
 // {{{ Grid impl
 template <typename Cell>
-Grid<Cell>::Grid(PageSize _pageSize, bool _reflowOnResize, LineCount _maxHistoryLineCount):
+Grid<Cell>::Grid(PageSize _pageSize, bool _reflowOnResize, MaxHistoryLineCount _maxHistoryLineCount):
     pageSize_ { _pageSize },
     reflowOnResize_ { _reflowOnResize },
-    historyLimit_ { [&]() -> MaxHistoryLineCount {
-        if (unbox<int>(_maxHistoryLineCount) == -1)
-            return Grid::Infinite();
-        else
-            return _maxHistoryLineCount;
-    }() },
+    historyLimit_ { _maxHistoryLineCount },
     lines_ { detail::createLines<Cell>(
         _pageSize,
-        [&]() -> LineCount {
-            if (unbox<int>(_maxHistoryLineCount) == -1)
-                return LineCount::cast_from(0);
+        [_maxHistoryLineCount]() -> LineCount {
+            if (auto const* maxLineCount = std::get_if<LineCount>(&_maxHistoryLineCount))
+                return *maxLineCount;
             else
-                return _maxHistoryLineCount;
+                return LineCount::cast_from(0);
         }(),
         _reflowOnResize,
         GraphicsAttributes {}) },
@@ -147,16 +141,11 @@ Grid<Cell>::Grid(PageSize _pageSize, bool _reflowOnResize, LineCount _maxHistory
 }
 
 template <typename Cell>
-void Grid<Cell>::setMaxHistoryLineCount(LineCount _maxHistoryLineCount)
+void Grid<Cell>::setMaxHistoryLineCount(MaxHistoryLineCount _maxHistoryLineCount)
 {
     verifyState();
     rezeroBuffers();
-    historyLimit_ = [&]() -> MaxHistoryLineCount {
-        if (unbox<int>(_maxHistoryLineCount) == -1)
-            return Grid::Infinite();
-        else
-            return _maxHistoryLineCount;
-    }();
+    historyLimit_ = _maxHistoryLineCount;
     lines_.resize(unbox<size_t>(pageSize_.lines + maxHistoryLineCount()));
     linesUsed_ = min(linesUsed_, pageSize_.lines + maxHistoryLineCount());
     verifyState();
@@ -380,7 +369,7 @@ LineCount Grid<Cell>::scrollUp(LineCount linesCountToScrollUp, GraphicsAttribute
     verifyState();
     if (unbox<size_t>(linesUsed_) == lines_.size()) // with all grid lines in-use
     {
-        if (std::get_if<Grid::Infinite>(&historyLimit_))
+        if (std::get_if<Infinite>(&historyLimit_))
         {
             for ([[maybe_unused]] auto const _: ranges::views::iota(0, unbox<int>(linesCountToScrollUp)))
                 lines_.emplace_back(defaultLineFlags(),

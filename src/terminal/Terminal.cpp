@@ -87,7 +87,7 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
                    size_t ptyBufferObjectSize,
                    size_t _ptyReadBufferSize,
                    Terminal::Events& _eventListener,
-                   LineCount _maxHistoryLineCount,
+                   MaxHistoryLineCount _maxHistoryLineCount,
                    LineOffset _copyLastMarkRangeOffset,
                    chrono::milliseconds _cursorBlinkInterval,
                    chrono::steady_clock::time_point _now,
@@ -1715,7 +1715,7 @@ void Terminal::onBufferScrolled(LineCount _n) noexcept
 }
 // }}}
 
-void Terminal::setMaxHistoryLineCount(LineCount _maxHistoryLineCount)
+void Terminal::setMaxHistoryLineCount(MaxHistoryLineCount _maxHistoryLineCount)
 {
     primaryScreen_.grid().setMaxHistoryLineCount(_maxHistoryLineCount);
 }

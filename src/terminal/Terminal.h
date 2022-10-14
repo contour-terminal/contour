@@ -93,7 +93,7 @@ class Terminal
              size_t ptyBufferObjectSize,
              size_t _ptyReadBufferSize,
              Events& _eventListener,
-             LineCount _maxHistoryLineCount = LineCount(0),
+             MaxHistoryLineCount _maxHistoryLineCount = LineCount(0),
              LineOffset _copyLastMarkRangeOffset = LineOffset(0),
              std::chrono::milliseconds _cursorBlinkInterval = std::chrono::milliseconds { 500 },
              std::chrono::steady_clock::time_point _now = std::chrono::steady_clock::now(),
@@ -113,7 +113,7 @@ class Terminal
     void setRefreshRate(double _refreshRate);
     void setLastMarkRangeOffset(LineOffset _value) noexcept;
 
-    void setMaxHistoryLineCount(LineCount _maxHistoryLineCount);
+    void setMaxHistoryLineCount(MaxHistoryLineCount _maxHistoryLineCount);
     LineCount maxHistoryLineCount() const noexcept;
 
     void setTerminalId(VTType _id) noexcept { state_.terminalId = _id; }

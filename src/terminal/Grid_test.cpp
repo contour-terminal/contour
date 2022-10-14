@@ -856,7 +856,7 @@ TEST_CASE("Grid infinite", "[grid]")
     REQUIRE(grid_finite.lineText(LineOffset(0)) == "abcdefgh");
     REQUIRE(grid_finite.lineText(LineOffset(-1)) == std::string(8, ' '));
 
-    auto grid_infinite = Grid<Cell>(PageSize { LineCount(2), ColumnCount(8) }, true, LineCount(-1));
+    auto grid_infinite = Grid<Cell>(PageSize { LineCount(2), ColumnCount(8) }, true, Infinite());
     grid_infinite.setLineText(LineOffset { 0 }, "ABCDEFGH"sv);
     grid_infinite.setLineText(LineOffset { 1 }, "abcdefgh"sv);
     grid_infinite.scrollUp(LineCount { 1 });
