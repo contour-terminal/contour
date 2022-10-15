@@ -102,12 +102,20 @@ fetch_and_unpack_embeds()
         https://github.com/contour-terminal/termbench-pro/archive/$termbench_pro_git_sha.tar.gz \
         termbench_pro
 
-    local libunicode_git_sha="44969c6d80e44a4731b584d047ba108769926835"
-    fetch_and_unpack \
-        libunicode-$libunicode_git_sha \
-        libunicode-$libunicode_git_sha.tar.gz \
-        https://github.com/contour-terminal/libunicode/archive/$libunicode_git_sha.tar.gz \
-        libunicode
+    if test x$LIBUNICODE_SRC_DIR = x; then
+        local libunicode_git_sha="44969c6d80e44a4731b584d047ba108769926835"
+        fetch_and_unpack \
+            libunicode-$libunicode_git_sha \
+            libunicode-$libunicode_git_sha.tar.gz \
+            https://github.com/contour-terminal/libunicode/archive/$libunicode_git_sha.tar.gz \
+            libunicode
+    else
+        echo "Hard linking external libunicode source directory to: $LIBUNICODE_SRC_DIR"
+        MACRO="libunicode"
+        echo "macro(ContourThirdParties_Embed_$MACRO)" >> $SYSDEPS_CMAKE_FILE
+        echo "    add_subdirectory($LIBUNICODE_SRC_DIR libunicode EXCLUDE_FROM_ALL)" >> $SYSDEPS_CMAKE_FILE
+        echo "endmacro()" >> $SYSDEPS_CMAKE_FILE
+    fi
 }
 
 fetch_and_unpack_yaml_cpp()
