@@ -168,6 +168,8 @@ class Sequencer
         hookedParser_ = std::move(parserExtension);
     }
 
+    [[nodiscard]] bool acceptsBulkText() const noexcept;
+
   private:
     void handleSequence();
 

@@ -605,7 +605,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     }
     [[nodiscard]] char32_t precedingGraphicCharacter() const noexcept
     {
-        return _state.parser.precedingGraphicCharacter;
+        return _state.parser.precedingGraphicCharacter();
     }
 
     void applyAndLog(FunctionDefinition const& function, Sequence const& seq);
@@ -615,10 +615,14 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
   private:
     void writeTextInternal(char32_t _char);
+
+    /// Attempts to emplace the given character sequence into the current cursor position, assuming
+    /// that the current line is either empty or trivial and the input character sequence is contiguous.
+    ///
+    /// @returns the string view of the UTF-8 text that could not be emplaced.
     std::string_view tryEmplaceChars(std::string_view chars, size_t cellCount) noexcept;
-    std::string_view tryEmplaceContinuousChars(std::string_view chars, size_t cellCount) noexcept;
     size_t emplaceCharsIntoCurrentLine(std::string_view chars, size_t cellCount) noexcept;
-    [[nodiscard]] bool canResumeEmplace(std::string_view continuationChars) const noexcept;
+    [[nodiscard]] bool isContiguousToCurrentLine(std::string_view continuationChars) const noexcept;
     void advanceCursorAfterWrite(ColumnCount n) noexcept;
 
     void clearAllTabs();
@@ -658,6 +662,13 @@ template <typename Cell>
 inline void Screen<Cell>::scrollUp(LineCount _n, Margin _margin)
 {
     scrollUp(_n, cursor().graphicsRendition, _margin);
+}
+
+template <typename Cell>
+inline bool Screen<Cell>::isContiguousToCurrentLine(std::string_view continuationChars) const noexcept
+{
+    auto const& line = currentLine();
+    return line.isTrivialBuffer() && line.trivialBuffer().text.view().end() == continuationChars.begin();
 }
 
 } // namespace terminal

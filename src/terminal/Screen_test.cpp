@@ -430,8 +430,8 @@ TEST_CASE("AppendChar.emoji_VS15_smiley", "[screen]")
     mock.writeToScreen(U"\U0001F600");
     REQUIRE(*screen.logicalCursorPosition().column == 2);
     mock.writeToScreen(U"\uFE0E");
-    REQUIRE(*screen.logicalCursorPosition().column
-            == 2); // U+FE0E does *NOT* lower width to 1 (easier to implement)
+    REQUIRE(*screen.logicalCursorPosition().column == 2);
+    // ^^^ U+FE0E does *NOT* lower width to 1 (easier to implement)
     mock.writeToScreen("X");
     REQUIRE(*screen.logicalCursorPosition().column == 3);
     logScreenText(screen);

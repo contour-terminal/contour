@@ -292,6 +292,7 @@ string_view Screen<Cell>::tryEmplaceChars(string_view _chars, size_t cellCount) 
     crlfIfWrapPending();
 
     auto const columnsAvailable = pageSize().columns.value - _state.cursor.position.column.value;
+    assert(cellCount <= static_cast<size_t>(columnsAvailable));
 
     if (!_terminal.isModeEnabled(DECMode::AutoWrap) && cellCount > static_cast<size_t>(columnsAvailable))
         // With AutoWrap on, we can only emplace if it fits the line.
@@ -301,40 +302,25 @@ string_view Screen<Cell>::tryEmplaceChars(string_view _chars, size_t cellCount) 
     {
         if (currentLine().empty())
         {
-            _chars.remove_prefix(emplaceCharsIntoCurrentLine(_chars, cellCount));
-            _chars = tryEmplaceContinuousChars(_chars, cellCount);
-            _terminal.currentPtyBuffer()->advanceHotEndUntil(_chars.data());
-            return _chars;
+            auto const numberOfBytesEmplaced = emplaceCharsIntoCurrentLine(_chars, cellCount);
+            _terminal.currentPtyBuffer()->advanceHotEndUntil(_chars.data() + numberOfBytesEmplaced);
+            _chars.remove_prefix(numberOfBytesEmplaced);
+            assert(_chars.empty());
         }
         return _chars;
     }
 
-    if (canResumeEmplace(_chars))
+    if (isContiguousToCurrentLine(_chars))
     {
-        auto const charsToWrite = static_cast<size_t>(min(columnsAvailable, static_cast<int>(_chars.size())));
+        // We can append the chars to a pre-existing non-empty line.
+        assert(static_cast<int>(cellCount) <= columnsAvailable);
         auto& lineBuffer = currentLine().trivialBuffer();
-        lineBuffer.text.growBy(charsToWrite);
+        lineBuffer.text.growBy(_chars.size());
         lineBuffer.usedColumns += ColumnCount::cast_from(cellCount);
-        advanceCursorAfterWrite(ColumnCount::cast_from(charsToWrite));
-        _chars.remove_prefix(charsToWrite);
-        _chars = tryEmplaceContinuousChars(_chars, cellCount);
-        _terminal.currentPtyBuffer()->advanceHotEndUntil(_chars.data());
+        advanceCursorAfterWrite(ColumnCount::cast_from(cellCount));
+        _terminal.currentPtyBuffer()->advanceHotEndUntil(_chars.data() + _chars.size());
+        _chars.remove_prefix(_chars.size());
         return _chars;
-    }
-
-    return _chars;
-}
-
-template <typename Cell>
-string_view Screen<Cell>::tryEmplaceContinuousChars(string_view _chars, size_t cellCount) noexcept
-{
-    while (!_chars.empty())
-    {
-        crlf();
-        if (!currentLine().empty())
-            break;
-
-        _chars.remove_prefix(emplaceCharsIntoCurrentLine(_chars, cellCount));
     }
 
     return _chars;
@@ -343,9 +329,9 @@ string_view Screen<Cell>::tryEmplaceContinuousChars(string_view _chars, size_t c
 template <typename Cell>
 size_t Screen<Cell>::emplaceCharsIntoCurrentLine(string_view _chars, size_t cellCount) noexcept
 {
-    auto columnsAvailable = (_state.margin.horizontal.to.value + 1) - _state.cursor.position.column.value;
+    [[maybe_unused]] auto columnsAvailable =
+        (_state.margin.horizontal.to.value + 1) - _state.cursor.position.column.value;
     assert(cellCount <= static_cast<size_t>(columnsAvailable));
-    auto const charsToWrite = static_cast<size_t>(min(columnsAvailable, static_cast<int>(_chars.size())));
 
     Line<Cell>& line = currentLine();
     if (line.isTrivialBuffer() && line.empty())
@@ -357,29 +343,19 @@ size_t Screen<Cell>::emplaceCharsIntoCurrentLine(string_view _chars, size_t cell
                                            line.trivialBuffer().fillAttributes,
                                            _state.cursor.hyperlink,
                                            ColumnCount::cast_from(cellCount),
-                                           crispy::BufferFragment {
-                                               _terminal.currentPtyBuffer(),
-                                               _chars.substr(0, charsToWrite),
-                                           } });
+                                           crispy::BufferFragment { _terminal.currentPtyBuffer(), _chars } });
         advanceCursorAfterWrite(ColumnCount::cast_from(cellCount));
     }
     else
     {
         // Transforming _chars input from UTF-8 to UTF-32 even though right now it should only
         // be containing US-ASCII, but soon it'll be any arbitrary textual Unicode codepoints.
-        auto utf8DecoderState = unicode::utf8_decoder_state {};
         for (char const ch: _chars)
         {
-            auto const result = unicode::from_utf8(utf8DecoderState, static_cast<uint8_t>(ch));
-            if (holds_alternative<unicode::Success>(result))
-                writeText(get<unicode::Success>(result).value);
-            else if (holds_alternative<unicode::Invalid>(result))
-                writeText(U'\uFFFE'); // U+FFFE (Not a Character)
+            _state.parser.printUtf8Byte(ch);
         }
     }
-    // fmt::print("emplaceCharsIntoCurrentLine ({} cols, {} bytes): \"{}\"\n", cellCount, _chars.size(),
-    // _chars);
-    return charsToWrite;
+    return _chars.size();
 }
 
 template <typename Cell>
@@ -398,33 +374,24 @@ void Screen<Cell>::advanceCursorAfterWrite(ColumnCount n) noexcept
 }
 
 template <typename Cell>
-bool Screen<Cell>::canResumeEmplace(std::string_view continuationChars) const noexcept
-{
-    auto& line = currentLine();
-    if (!line.isTrivialBuffer())
-        return false;
-    TrivialLineBuffer const& buffer = line.trivialBuffer();
-    return buffer.text.view().end() == continuationChars.begin()
-           && buffer.textAttributes == _state.cursor.graphicsRendition
-           && buffer.hyperlink == _state.cursor.hyperlink
-           && buffer.usedColumns == boxed_cast<ColumnCount>(cursor().position.column)
-           && buffer.text.owner() == _terminal.currentPtyBuffer();
-}
-
-template <typename Cell>
 void Screen<Cell>::writeText(string_view _chars, size_t cellCount)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
     if (VTTraceSequenceLog)
-        VTTraceSequenceLog()("text({} bytes): \"{}\"", _chars.size(), _chars);
+        VTTraceSequenceLog()("text({} bytes, {} cells): \"{}\"", _chars.size(), cellCount, escape(_chars));
 #endif
+    assert(cellCount <= static_cast<size_t>(pageSize().columns.value - _state.cursor.position.column.value));
 
     _chars = tryEmplaceChars(_chars, cellCount);
     if (_chars.empty())
         return;
 
+    // Making use of the optimized code path for the input characters did NOT work, so we need to first
+    // convert UTF-8 to UTF-32 codepoints (reusing the logic in VT parser) and pass these codepoints
+    // to the grapheme cluster processor.
+
     for (char const ch: _chars)
-        writeTextInternal(static_cast<char32_t>(ch));
+        _state.parser.printUtf8Byte(ch);
 }
 
 template <typename Cell>

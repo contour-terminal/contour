@@ -19,6 +19,7 @@
 #include <crispy/range.h>
 
 #include <unicode/convert.h>
+#include <unicode/scan.h>
 #include <unicode/utf8.h>
 
 #include <fmt/format.h>
@@ -554,17 +555,18 @@ class Parser
 
     [[nodiscard]] State state() const noexcept { return state_; }
 
-    char32_t precedingGraphicCharacter = 0;
+    [[nodiscard]] char32_t precedingGraphicCharacter() const noexcept { return scanState_.lastCodepointHint; }
+
+    void printUtf8Byte(char ch);
 
   private:
     void handle(ActionClass _actionClass, Action _action, uint8_t _char);
-    void printUtf8Byte(char ch);
 
     // private properties
     //
     State state_ = State::Ground;
     EventListener& eventListener_;
-    unicode::utf8_decoder_state utf8DecoderState_ = {};
+    unicode::scan_state scanState_ {};
 };
 
 /// @returns parsed tuple with OSC code and offset to first data parameter byte.

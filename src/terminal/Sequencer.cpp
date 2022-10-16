@@ -150,6 +150,11 @@ void Sequencer::unhook()
     }
 }
 
+bool Sequencer::acceptsBulkText() const noexcept
+{
+    return terminal_.isPrimaryScreen() && terminal_.primaryScreen().currentLine().isTrivialBuffer();
+}
+
 void Sequencer::handleSequence()
 {
     parameterBuilder_.fixiate();
