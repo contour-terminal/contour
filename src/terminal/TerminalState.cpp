@@ -22,7 +22,7 @@ class Terminal;
 
 TerminalState::TerminalState(Terminal& _terminal,
                              PageSize _pageSize,
-                             LineCount _maxHistoryLineCount,
+                             MaxHistoryLineCount _maxHistoryLineCount,
                              ImageSize _maxImageSize,
                              unsigned _maxImageColorRegisters,
                              bool _sixelCursorConformance,

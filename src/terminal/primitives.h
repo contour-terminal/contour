@@ -23,6 +23,7 @@
 #include <limits>
 #include <ostream>
 #include <type_traits>
+#include <variant>
 
 // TODO
 // - [ ] rename all History to Scrollback
@@ -82,6 +83,13 @@ using ColumnOffset = crispy::boxed<int, detail::tags::ColumnOffset>;
 /// LineCount represents a number of lines.
 using LineCount = crispy::boxed<int, detail::tags::LineCount>;
 
+// clang-format off
+/// Special structure for inifinite history of Grid
+struct Infinite {};
+// clang-format on
+/// MaxHistoryLineCount represents type that are used to store number
+/// of lines that can be stored in history
+using MaxHistoryLineCount = std::variant<LineCount, Infinite>;
 /// Represents the line offset relative to main-page top.
 ///
 /// *  0  is top-most line on main page

@@ -69,6 +69,7 @@ using terminal::Width;
 
 using terminal::CellRGBColorAndAlphaPair;
 using terminal::ColumnCount;
+using terminal::Infinite;
 using terminal::LineCount;
 using terminal::PageSize;
 
@@ -1522,12 +1523,15 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     else
         errorlog()("Invalid render_mode \"{}\" in configuration.", strValue);
 
-    auto intValue = profile.maxHistoryLineCount;
+    auto intValue = LineCount();
     tryLoadChildRelative(_usedKeys, _profile, basePath, "history.limit", intValue);
-    if (unbox<int>(intValue) < 0)
-        profile.maxHistoryLineCount = LineCount(0);
+    // value -1 is used for infinite grid
+    if (unbox<int>(intValue) == -1)
+        profile.maxHistoryLineCount = Infinite();
+    else if (unbox<int>(intValue) > -1)
+        profile.maxHistoryLineCount = LineCount(intValue);
     else
-        profile.maxHistoryLineCount = intValue;
+        profile.maxHistoryLineCount = LineCount(0);
 
     strValue = fmt::format("{}", ScrollBarPosition::Right);
     if (tryLoadChildRelative(_usedKeys, _profile, basePath, "scrollbar.position", strValue))
