@@ -437,6 +437,11 @@ main()
             ;;
         *)
             echo "OS $ID not supported."
+            fetch_and_unpack_Catch2
+            fetch_and_unpack_fmtlib
+            fetch_and_unpack_gsl
+            fetch_and_unpack_yaml_cpp
+            fetch_and_unpack_range
             ;;
     esac
 
