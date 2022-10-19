@@ -436,12 +436,14 @@ main()
             install_deps_FreeBSD
             ;;
         *)
-            echo "OS $ID not supported."
             fetch_and_unpack_Catch2
             fetch_and_unpack_fmtlib
             fetch_and_unpack_gsl
             fetch_and_unpack_yaml_cpp
             fetch_and_unpack_range
+            echo "OS $ID not supported."
+            echo "Please install the remaining dependencies manually."
+            echo "Most importantly: Qt (including development headers)."
             ;;
     esac
 
