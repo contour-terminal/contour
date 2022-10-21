@@ -475,7 +475,7 @@ void Screen<Cell>::writeCharToCurrentAndAdvance(char32_t _character) noexcept
 
     _state.lastCursorPosition = _state.cursor.position;
 
-    clearAndAdvance(cell.width();
+    clearAndAdvance(cell.width());
 
     // TODO: maybe move selector API up? So we can make this call conditional,
     //       and only call it when something is selected?
