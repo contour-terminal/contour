@@ -475,30 +475,7 @@ void Screen<Cell>::writeCharToCurrentAndAdvance(char32_t _character) noexcept
 
     _state.lastCursorPosition = _state.cursor.position;
 
-#if 1
-    clearAndAdvance(cell.width());
-#else
-    bool const cursorInsideMargin =
-        _terminal.isModeEnabled(DECMode::LeftRightMargin) && _terminal.isCursorInsideMargins();
-    auto const cellsAvailable = cursorInsideMargin
-                                    ? *(_state.margin.horizontal.to - _state.cursor.position.column) - 1
-                                    : *_state.pageSize.columns - *_state.cursor.position.column - 1;
-
-    auto const n = min(cell.width(), cellsAvailable);
-
-    if (n == cell.width())
-    {
-        assert(n > 0);
-        _state.cursor.position.column++;
-        for (int i = 1; i < n; ++i)
-        {
-            currentCell().reset(_state.cursor.graphicsRendition, _state.cursor.hyperlink);
-            _state.cursor.position.column++;
-        }
-    }
-    else if (_state.cursor.autoWrap)
-        _state.wrapPending = true;
-#endif
+    clearAndAdvance(cell.width();
 
     // TODO: maybe move selector API up? So we can make this call conditional,
     //       and only call it when something is selected?
