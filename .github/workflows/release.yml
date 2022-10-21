@@ -500,7 +500,6 @@ jobs:
 
       # -------------------------------------------------------------
       - name: Upload Ubuntu 18.04 package (.deb)
-        id: upload-release-asset-deb
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -511,7 +510,6 @@ jobs:
           asset_content_type: application/vnd.debian.binary-package
 
       - name: Upload Ubuntu 18.04 debug package (.ddeb)
-        id: upload-release-asset-ddeb
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -523,7 +521,6 @@ jobs:
 
       # -------------------------------------------------------------
       - name: Upload Ubuntu 22.04 package (.deb)
-        id: upload-release-asset-deb-2204
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -534,7 +531,6 @@ jobs:
           asset_content_type: application/vnd.debian.binary-package
 
       - name: Upload Ubuntu 22.04 debug package (.ddeb)
-        id: upload-release-asset-ddeb-2204
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -546,7 +542,6 @@ jobs:
 
       # -------------------------------------------------------------
       - name: Upload AppImage package x86_64
-        id: upload-release-asset-appimage-x86_64
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -558,7 +553,6 @@ jobs:
 
       # -------------------------------------------------------------
       - name: Upload Archlinux package x86_64
-        id: upload-release-asset-archlinux-x86_64
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -581,7 +575,6 @@ jobs:
 
       # {{{ Fedora 35 packages
       - name: Upload Fedora 35 package x86_64
-        id: upload-release-asset-fedora-x86_64
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -592,7 +585,6 @@ jobs:
           asset_content_type: application/x-rpm
 
       - name: Upload Fedora (debuginfo) package x86_64
-        id: upload-release-asset-fedora-debuginfo-x86_64
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -603,7 +595,6 @@ jobs:
           asset_content_type: application/x-rpm
 
       - name: Upload Fedora (debugsource) package x86_64
-        id: upload-release-asset-fedora-debugsource-x86_64
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -616,7 +607,6 @@ jobs:
 
       # {{{ Fedora 36 packages
       - name: Upload Fedora 36 package x86_64
-        id: upload-release-asset-fedora-x86_64
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -627,7 +617,6 @@ jobs:
           asset_content_type: application/x-rpm
 
       - name: Upload Fedora 36 (debuginfo) package x86_64
-        id: upload-release-asset-fedora-debuginfo-x86_64
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -638,7 +627,6 @@ jobs:
           asset_content_type: application/x-rpm
 
       - name: Upload Fedora (debugsource) package x86_64
-        id: upload-release-asset-fedora-debugsource-x86_64
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -651,7 +639,6 @@ jobs:
 
       # -------------------------------------------------------------
       - name: Upload Windows MSI package
-        id: upload-release-msi-asset-winx64
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -663,7 +650,6 @@ jobs:
 
       # -------------------------------------------------------------
       - name: Upload Windows ZIP package
-        id: upload-release-zip-asset-winx64
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -675,7 +661,6 @@ jobs:
 
       # -------------------------------------------------------------
       - name: Upload OS/X ZIP package
-        id: upload-release-asset-osx-zip
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -687,7 +672,6 @@ jobs:
 
       # -------------------------------------------------------------
       - name: Upload OS/X DMG package
-        id: upload-release-asset-osx-dmg
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
