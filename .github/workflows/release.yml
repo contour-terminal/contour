@@ -360,14 +360,13 @@ jobs:
           cd build
           make install DESTDIR=AppDir
           linuxdeploy --appdir AppDir --output appimage
-          mv -v *.AppImage ../contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage
+          mv -v *.AppImage ../contour-${{ steps.set_vars.outputs.VERSION_STRING }}.x86_64.AppImage
       - name: "Testing AppImage"
-        run: ./contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage version
+        run: ./contour-${{ steps.set_vars.outputs.VERSION_STRING }}.x86_64.AppImage version
       - name: "Uploading AppImage"
         uses: actions/upload-artifact@v2
         with:
-          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage"
-          path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage"
+          path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}.x86_64.AppImage"
           if-no-files-found: error
           retention-days: 7
 
@@ -444,14 +443,12 @@ jobs:
       - name: "Uploading artifact .deb package"
         uses: actions/upload-artifact@v3.1.0
         with:
-          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
           path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
           if-no-files-found: error
           retention-days: 7
       - name: "Uploading artifact .ddeb package (debugging symbols)"
         uses: actions/upload-artifact@v3.1.0
         with:
-          name: "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb"
           path: "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb"
           if-no-files-found: error
           retention-days: 7
@@ -499,13 +496,15 @@ jobs:
           prerelease: ${{ steps.set_vars.outputs.IS_PRERELEASE }}
 
       # -------------------------------------------------------------
+
+      # {{{ Upload Ubuntu 18.04 package
       - name: Upload Ubuntu 18.04 package (.deb)
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./contour_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb
+          asset_path: contour-${{ steps.set_vars.outputs.version }}-ubuntu18.04-amd64.deb
           asset_name: contour_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.deb
           asset_content_type: application/vnd.debian.binary-package
 
@@ -515,19 +514,40 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb
+          asset_path: ./contour-dbgsym-${{ steps.set_vars.outputs.version }}-ubuntu18.04-amd64.ddeb
           asset_name: contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_18_04_amd64.ddeb
           asset_content_type: application/vnd.debian.binary-package
+      # }}}
+      # {{{ Upload Ubuntu 20.04 package
+      - name: Upload Ubuntu 20.04 package (.deb)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./contour-${{ steps.set_vars.outputs.version }}-ubuntu20.04-amd64.deb
+          asset_name: contour_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.deb
+          asset_content_type: application/vnd.debian.binary-package
 
-      # -------------------------------------------------------------
+      - name: Upload Ubuntu 20.04 debug package (.ddeb)
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./contour-dbgsym-${{ steps.set_vars.outputs.version }}-ubuntu20.04-amd64.ddeb
+          asset_name: contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.ddeb
+          asset_content_type: application/vnd.debian.binary-package
+      # }}}
+      # {{{ Upload Ubuntu 22.04 package
       - name: Upload Ubuntu 22.04 package (.deb)
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./contour_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.deb
-          asset_name: contour_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.deb
+          asset_path: ./contour-${{ steps.set_vars.outputs.version }}-ubuntu22.04-amd64.deb
+          asset_name: contour_${{ steps.set_vars.outputs.version }}-ubuntu_22_04_amd64.deb
           asset_content_type: application/vnd.debian.binary-package
 
       - name: Upload Ubuntu 22.04 debug package (.ddeb)
@@ -536,22 +556,22 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.ddeb
-          asset_name: contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_20_04_amd64.ddeb
+          asset_path: ./contour-dbgsym-${{ steps.set_vars.outputs.version }}-ubuntu22.04-amd64.ddeb
+          asset_name: contour-dbgsym_${{ steps.set_vars.outputs.version }}-ubuntu_22_04_amd64.ddeb
           asset_content_type: application/vnd.debian.binary-package
-
-      # -------------------------------------------------------------
+      # }}}
+      # {{{ Upload AppImage package x86_64
       - name: Upload AppImage package x86_64
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./contour-${{ steps.set_vars.outputs.version }}_x86_64.AppImage
-          asset_name: contour-${{ steps.set_vars.outputs.version }}_x86_64.AppImage
+          asset_path: contour-${{ steps.set_vars.outputs.version }}.x86_64.AppImage
+          asset_name: contour-${{ steps.set_vars.outputs.version }}.x86_64.AppImage
           asset_content_type: application/x-zstd-compressed-tar
-
-      # -------------------------------------------------------------
+      # }}}
+      # {{{ Upload Arch Linux
       - name: Upload Archlinux package x86_64
         uses: actions/upload-release-asset@v1
         env:
@@ -572,8 +592,8 @@ jobs:
           asset_path: ./contour_${{ steps.set_vars.outputs.version }}-archlinux_aarch64
           asset_name: contour_${{ steps.set_vars.outputs.version }}-archlinux_aarch64
           asset_content_type: application/x-zstd-compressed-tar
-
-      # {{{ Fedora 35 packages
+      # }}}
+      # {{{ Upload Fedora 35 packages
       - name: Upload Fedora 35 package x86_64
         uses: actions/upload-release-asset@v1
         env:
@@ -604,7 +624,6 @@ jobs:
           asset_name: contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc35.x86_64.rpm
           asset_content_type: application/x-rpm
       # }}}
-
       # {{{ Fedora 36 packages
       - name: Upload Fedora 36 package x86_64
         uses: actions/upload-release-asset@v1
@@ -636,8 +655,7 @@ jobs:
           asset_name: contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc36.x86_64.rpm
           asset_content_type: application/x-rpm
       # }}}
-
-      # -------------------------------------------------------------
+      # {{{ Windows
       - name: Upload Windows MSI package
         uses: actions/upload-release-asset@v1
         env:
@@ -648,7 +666,6 @@ jobs:
           asset_name: contour-${{ steps.set_vars.outputs.version }}-win64.msi
           asset_content_type: application/octet-stream
 
-      # -------------------------------------------------------------
       - name: Upload Windows ZIP package
         uses: actions/upload-release-asset@v1
         env:
@@ -658,8 +675,8 @@ jobs:
           asset_path: contour-${{ steps.set_vars.outputs.version }}-win64.zip
           asset_name: contour-${{ steps.set_vars.outputs.version }}-win64.zip
           asset_content_type: application/zip
-
-      # -------------------------------------------------------------
+      # }}}
+      # {{{ OS/X
       - name: Upload OS/X ZIP package
         uses: actions/upload-release-asset@v1
         env:
@@ -670,7 +687,6 @@ jobs:
           asset_name: contour-${{ steps.set_vars.outputs.version }}-osx.zip
           asset_content_type: application/zip
 
-      # -------------------------------------------------------------
       - name: Upload OS/X DMG package
         uses: actions/upload-release-asset@v1
         env:
@@ -680,4 +696,5 @@ jobs:
           asset_path: contour-${{ steps.set_vars.outputs.version }}-osx.dmg
           asset_name: contour-${{ steps.set_vars.outputs.version }}-osx.dmg
           asset_content_type: application/x-apple-diskimage
+      # }}}
   # }}}
