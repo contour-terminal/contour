@@ -99,7 +99,7 @@
     </release>
     -->
 
-    <release version="0.3.5" urgency="medium" type="development">
+    <release version="0.3.5" urgency="medium" date="2022-10-21">
       <description>
         <ul>
           <li>Fixes a problem with oversized glyphs being wrongly cut off (#821).</li>
