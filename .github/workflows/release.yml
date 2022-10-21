@@ -282,19 +282,19 @@ jobs:
     - name: "Uploading Fedora RPM package"
       uses: actions/upload-artifact@v2
       with:
-        path: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc${OS_VERSION}.${{ steps.tags.outputs.ARCH }}.rpm"
+        path: "contour-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm"
         if-no-files-found: error
         retention-days: 7
     - name: "Uploading Fedora RPM package (debuginfo)"
       uses: actions/upload-artifact@v2
       with:
-        path: "contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc${OS_VERSION}.${{ steps.tags.outputs.ARCH }}.rpm"
+        path: "contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm"
         if-no-files-found: error
         retention-days: 7
     - name: "Uploading Fedora RPM package (debugsource)"
       uses: actions/upload-artifact@v2
       with:
-        path: "contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc${OS_VERSION}.${{ steps.tags.outputs.ARCH }}.rpm"
+        path: "contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm"
         if-no-files-found: error
         retention-days: 7
 
