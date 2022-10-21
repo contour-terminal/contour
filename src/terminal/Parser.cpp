@@ -354,43 +354,49 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view co
     auto input = _data.data();
     auto const end = _data.data() + _data.size();
 
-    do
+    while (input != end)
     {
-        if (state_ == State::Ground)
+        if (state_ == State::Ground && eventListener_.acceptsBulkText())
         {
             auto const chunk = std::string_view(input, static_cast<size_t>(std::distance(input, end)));
+            auto const [cellCount, next, subStart, subEnd] =
+                unicode::scan_for_text(scanState_, chunk, maxCharCount);
 
-            if (auto const cellCount = unicode::scan_for_text_ascii(chunk, maxCharCount); cellCount > 0)
+            if (next != input)
             {
-                auto const next = input + cellCount;
-                auto const byteCount = static_cast<size_t>(std::distance(input, next));
-                precedingGraphicCharacter = static_cast<char32_t>(input[cellCount - 1]);
-                assert(byteCount <= chunk.size());
+                // We do not test on cellCount>0 because the scan could contain only a ZWJ (zero width
+                // joiner), and that would be misleading.
+
+                assert(subStart <= subEnd);
+                auto const byteCount = static_cast<size_t>(std::distance(subStart, subEnd));
                 assert(cellCount <= maxCharCount);
+                assert(subEnd <= chunk.data() + chunk.size());
                 assert(next <= chunk.data() + chunk.size());
 
 #if defined(LIBTERMINAL_LOG_TRACE)
                 if (VTTraceParserLog)
-                    VTTraceParserLog()(
-                        "[{}] Scanned text: cap {}; available cells {}; chars {}; bytes {}; \"{}\"",
-                        "US-ASCII",
-                        chunk.size(),
-                        maxCharCount,
-                        cellCount,
-                        byteCount,
-                        crispy::escape(std::string_view { input, byteCount }));
+                    VTTraceParserLog()("[Unicode] Scanned text: {}/{} cells; \"{}\"",
+                                       cellCount,
+                                       maxCharCount,
+                                       crispy::escape(std::string_view { input, byteCount }));
 #endif
 
-                auto const text = std::string_view { input, byteCount };
-                if (utf8DecoderState_.expectedLength == 0)
+                auto const text = std::string_view { subStart, byteCount };
+                if (scanState_.utf8.expectedLength == 0)
                 {
-                    maxCharCount = eventListener_.print(text, cellCount);
-                    precedingGraphicCharacter = static_cast<char32_t>(text.back());
+                    if (!text.empty())
+                    {
+                        maxCharCount = eventListener_.print(text, cellCount);
+                    }
                 }
                 else
                 {
-                    for (char const ch: text)
-                        printUtf8Byte(ch);
+                    // fmt::print("Parser.text: incomplete UTF-8 sequence at end: {}/{}\n",
+                    //            scanState_.utf8.currentLength,
+                    //            scanState_.utf8.expectedLength);
+
+                    // for (char const ch: text)
+                    //     printUtf8Byte(ch);
                 }
 
                 input = next;
@@ -429,13 +435,13 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view co
                             state_,
                             ch,
                             static_cast<unsigned>(ch)));
-    } while (input != end);
+    }
 }
 
 template <typename EventListener, bool TraceStateChanges>
 void Parser<EventListener, TraceStateChanges>::printUtf8Byte(char ch)
 {
-    unicode::ConvertResult const r = unicode::from_utf8(utf8DecoderState_, (uint8_t) ch);
+    unicode::ConvertResult const r = unicode::from_utf8(scanState_.utf8, (uint8_t) ch);
     if (std::holds_alternative<unicode::Incomplete>(r))
         return;
 
@@ -443,7 +449,7 @@ void Parser<EventListener, TraceStateChanges>::printUtf8Byte(char ch)
     auto const codepoint = std::holds_alternative<unicode::Success>(r) ? std::get<unicode::Success>(r).value
                                                                        : ReplacementCharacter;
     eventListener_.print(codepoint);
-    precedingGraphicCharacter = codepoint;
+    scanState_.lastCodepointHint = codepoint;
 }
 
 template <typename EventListener, bool TraceStateChanges>
@@ -466,7 +472,7 @@ void Parser<EventListener, TraceStateChanges>::handle(ActionClass _actionClass,
 
     switch (_action)
     {
-        case Action::GroundStart: precedingGraphicCharacter = 0; break;
+        case Action::GroundStart: scanState_.lastCodepointHint = 0; break;
         case Action::Clear: eventListener_.clear(); break;
         case Action::CollectLeader: eventListener_.collectLeader(ch); break;
         case Action::Collect: eventListener_.collect(ch); break;

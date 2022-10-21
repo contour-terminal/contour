@@ -154,10 +154,10 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
 
     auto columns = InflatedLineBuffer<Cell> {};
     columns.reserve(unbox<size_t>(input.displayWidth));
-    // fmt::print("Inflating {}/{}\n", input.text.size(), input.displayWidth);
 
     auto lastChar = char32_t { 0 };
     auto utf8DecoderState = unicode::utf8_decoder_state {};
+    auto gapPending = 0;
 
     for (char const ch: input.text.view())
     {
@@ -173,10 +173,16 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
 
         if (!lastChar || isAsciiBreakable || unicode::grapheme_segmenter::breakable(lastChar, nextChar))
         {
+            while (gapPending > 0)
+            {
+                columns.emplace_back(Cell { input.textAttributes, input.hyperlink });
+                --gapPending;
+            }
+            auto const charWidth = unicode::width(nextChar);
             columns.emplace_back(Cell {});
             columns.back().setHyperlink(input.hyperlink);
-            columns.back().write(
-                input.textAttributes, nextChar, static_cast<uint8_t>(unicode::width(nextChar)));
+            columns.back().write(input.textAttributes, nextChar, static_cast<uint8_t>(charWidth));
+            gapPending = charWidth - 1;
         }
         else
         {
@@ -193,7 +199,15 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
                 }
             }
         }
+        lastChar = nextChar;
     }
+
+    while (gapPending > 0)
+    {
+        columns.emplace_back(Cell { input.textAttributes, input.hyperlink });
+        --gapPending;
+    }
+
     assert(columns.size() == unbox<size_t>(input.usedColumns));
 
     while (columns.size() < unbox<size_t>(input.displayWidth))
