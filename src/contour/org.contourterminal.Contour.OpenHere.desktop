@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Service
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+MimeType=inode/directory;
+Actions=runContourHere;
+X-KDE-AuthorizeAction=shell_access
+
+[Desktop Action runContourHere]
+Exec=contour terminal working-directory %f
+Icon=org.contourterminal.Contour
+Name=Open Contour Terminal here
+Comment=Run Contour from the given working directory.
