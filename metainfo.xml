@@ -20,6 +20,7 @@
 
   <provides>
     <binary>contour</binary>
+    <mediatype>inode/directory</mediatype>
   </provides>
 
   <categories>
@@ -102,6 +103,7 @@
     <release version="0.3.6" urgency="medium" type="development">
       <description>
         <ul>
+          <li>Adds menu entry to Dolphin file manager to open Contour at current working directory.</li>
         </ul>
       </description>
     </release>
