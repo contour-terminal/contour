@@ -53,6 +53,7 @@ exec cmake "${ROOTDIR}" \
            -DCMAKE_CXX_COMPILER="${CXX}" \
            -DPEDANTIC_COMPILER=ON \
            -DPEDANTIC_COMPILER_WERROR=ON \
+           -DCMAKE_CXX_STANDARD=20 \
            ${EXTRA_CMAKE_FLAGS} \
            -B "${BUILD_DIR}" \
            -GNinja
