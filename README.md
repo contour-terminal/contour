@@ -96,7 +96,6 @@ It will neither build nor run on any prior Windows OS, due to libterminal making
 ### Compile
 
 ```sh
-mkdir build
 cmake -S . -B build
 cmake --build build/
 
