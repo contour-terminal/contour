@@ -576,7 +576,7 @@ jobs:
           # TODO: turn on -Werror again, that requires some code changes.
           CMAKE_CXX_STANDARD=20
           if [[ "${{ matrix.os_version }}" = "18.04" ]]; then
-            CMAKE_CXX_STANDARD=17
+            # CMAKE_CXX_STANDARD=17
             EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DUSE_BOOST_FILESYSTEM=ON"
             export CXX="g++-10"
           elif [[ "${{ matrix.os_version }}" = "22.04" ]]; then
