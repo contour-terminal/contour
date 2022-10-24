@@ -13,6 +13,7 @@
  */
 #pragma once
 
+#include <terminal/CellConcept.h>
 #include <terminal/InputGenerator.h>
 #include <terminal/InputHandler.h>
 #include <terminal/RenderBuffer.h>
@@ -24,6 +25,8 @@
 #include <terminal/Viewport.h>
 #include <terminal/primitives.h>
 #include <terminal/pty/Pty.h>
+
+#include <crispy/defines.h>
 
 #include <fmt/format.h>
 
@@ -40,6 +43,7 @@ namespace terminal
 {
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 class Screen;
 
 /// Helping information to visualize IME text that has not been comitted yet.

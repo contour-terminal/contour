@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal/Capabilities.h>
+#include <terminal/CellConcept.h>
 #include <terminal/Charset.h>
 #include <terminal/Color.h>
 #include <terminal/Grid.h>
@@ -88,6 +89,7 @@ class ScreenBase: public SequenceHandler
  * to be viewn.
  */
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 class Screen final: public ScreenBase, public capabilities::StaticDatabase
 {
   public:
@@ -659,12 +661,14 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 };
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 inline void Screen<Cell>::scrollUp(LineCount _n, Margin _margin)
 {
     scrollUp(_n, cursor().graphicsRendition, _margin);
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 inline bool Screen<Cell>::isContiguousToCurrentLine(std::string_view continuationChars) const noexcept
 {
     auto const& line = currentLine();
