@@ -38,14 +38,36 @@ namespace terminal
 
 /// Rarely needed extra cell data.
 ///
+/// In this struct we collect all the relevant cell data that is not frequently used,
+/// and thus, would only waste unnecessary memory in most situations.
+///
 /// @see Cell
 struct CellExtra
 {
+    /// With the main codepoint that is being stored in the Cell struct, followed by this
+    /// sequence of codepoints, a grapheme cluster is formed that represents the visual
+    /// character in this terminal cell.
+    ///
+    /// Since MOST content in the terminal is US-ASCII, all codepoints except the first one of a grapheme
+    /// cluster is stored in CellExtra.
     std::u32string codepoints = {};
+
+    /// Color for underline decoration (such as curly underline).
     Color underlineColor = DefaultColor();
+
+    /// With OSC-8 a hyperlink can be associated with a range of terminal cells.
     HyperlinkId hyperlink = {};
+
+    /// Holds a reference to an image tile to be rendered (above the text, if any).
     std::shared_ptr<ImageFragment> imageFragment = nullptr;
+
+    /// Cell flags.
     CellFlags flags = CellFlags::None;
+
+    /// In terminals, the Unicode's East asian Width property is used to determine the
+    /// number of columns, a graphical character is spanning.
+    /// Since most graphical characters in a terminal will be US-ASCII, this width property
+    /// will be only used when NOT being 1.
     uint8_t width = 1;
 };
 
