@@ -18,9 +18,10 @@
 #include <terminal/GraphicsAttributes.h>
 #include <terminal/Hyperlink.h>
 #include <terminal/Image.h>
-#include <terminal/defines.h>
 #include <terminal/primitives.h>
 
+#include <crispy/Owned.h>
+#include <crispy/defines.h>
 #include <crispy/times.h>
 
 #include <unicode/capi.h>
@@ -34,50 +35,6 @@
 
 namespace terminal
 {
-
-/**
- * Owned<T> behaves mostly like std::unique_ptr<T> except that it can be also
- * used within packed structs.
- */
-template <typename T>
-struct CONTOUR_PACKED Owned
-{
-    T* ptr_ = nullptr;
-
-    constexpr T* operator->() noexcept { return ptr_; }
-    constexpr T const* operator->() const noexcept { return ptr_; }
-    constexpr T& operator*() noexcept { return *ptr_; }
-    constexpr T const& operator*() const noexcept { return *ptr_; }
-
-    constexpr operator bool() const noexcept { return ptr_ != nullptr; }
-
-    void reset(T* p = nullptr)
-    {
-        if (ptr_)
-        {
-            delete ptr_;
-        }
-        ptr_ = p;
-    }
-    T* release() noexcept
-    {
-        auto p = ptr_;
-        ptr_ = nullptr;
-        return p;
-    }
-
-    ~Owned() { reset(); }
-    Owned() noexcept = default;
-    Owned(Owned&& v) noexcept: ptr_ { v.release() } {}
-    Owned& operator=(Owned&& v) noexcept
-    {
-        ptr_ = v.release();
-        return *this;
-    }
-
-    Owned(Owned const& v) noexcept = delete;
-    Owned& operator=(Owned const& v) = delete;
-};
 
 /// Rarely needed extra cell data.
 ///
@@ -96,15 +53,15 @@ struct CellExtra
 ///
 /// TODO(perf): ensure POD'ness so that we can SIMD-copy it.
 /// - Requires moving out CellExtra into Line<T>?
-class CONTOUR_PACKED Cell
+class CRISPY_PACKED Cell
 {
   public:
-    static int constexpr MaxCodepoints = 7;
+    static uint8_t constexpr MaxCodepoints = 7;
 
     Cell() noexcept;
     Cell(Cell const& v) noexcept;
     Cell& operator=(Cell const& v) noexcept;
-    explicit Cell(GraphicsAttributes const& _attributes, HyperlinkId hyperlink = {}) noexcept;
+    explicit Cell(GraphicsAttributes _attributes, HyperlinkId hyperlink = {}) noexcept;
 
     Cell(Cell&&) noexcept = default;
     Cell& operator=(Cell&&) noexcept = default;
@@ -189,7 +146,7 @@ class CONTOUR_PACKED Cell
     char32_t codepoint_ = 0; /// Primary Unicode codepoint to be displayed.
     Color foregroundColor_ = DefaultColor();
     Color backgroundColor_ = DefaultColor();
-    Owned<CellExtra> extra_ = {};
+    crispy::Owned<CellExtra> extra_ = {};
     // TODO(perf) ^^ use CellExtraId = boxed<int24_t> into pre-alloc'ed vector<CellExtra>.
 };
 
@@ -205,7 +162,7 @@ inline void Cell::createExtra(Args... args) noexcept
     }
     catch (std::bad_alloc const&)
     {
-        Require(extra_.ptr_ != nullptr);
+        Require(extra_.get() != nullptr);
     }
 }
 
@@ -214,13 +171,11 @@ inline Cell::Cell() noexcept
     setWidth(1);
 }
 
-inline Cell::Cell(GraphicsAttributes const& _attributes, HyperlinkId hyperlink) noexcept
+inline Cell::Cell(GraphicsAttributes _attributes, HyperlinkId hyperlink) noexcept:
+    foregroundColor_ { _attributes.foregroundColor }, backgroundColor_ { _attributes.backgroundColor }
 {
     setWidth(1);
     setHyperlink(hyperlink);
-
-    foregroundColor_ = _attributes.foregroundColor;
-    backgroundColor_ = _attributes.backgroundColor;
 
     if (_attributes.underlineColor != DefaultColor() || extra_)
         extra().underlineColor = _attributes.underlineColor;

@@ -19,6 +19,7 @@ set(crispy_SOURCES
     assert.h
     base64.h
     compose.h
+    defines.h
     escape.h
     indexed.h
     logstore.h

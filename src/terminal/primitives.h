@@ -13,8 +13,6 @@
  */
 #pragma once
 
-#include <terminal/defines.h>
-
 #include <crispy/ImageSize.h>
 #include <crispy/boxed.h>
 
