@@ -151,16 +151,15 @@ class CRISPY_PACKED Cell
     void setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, CellLocation offset);
 
     void setCharacter(char32_t _codepoint) noexcept;
-    void setCharacter(char32_t _codepoint, uint8_t _width) noexcept;
     [[nodiscard]] int appendCharacter(char32_t _codepoint) noexcept;
     [[nodiscard]] std::string toUtf8() const;
 
     [[nodiscard]] HyperlinkId hyperlink() const noexcept;
     void setHyperlink(HyperlinkId _hyperlink);
 
+  private:
     [[nodiscard]] CellExtra& extra() noexcept;
 
-  private:
     template <typename... Args>
     void createExtra(Args... args) noexcept;
 
@@ -329,22 +328,6 @@ inline void Cell::setWidth(uint8_t _width) noexcept
     if (_width > 1 || extra_)
         extra().width = _width;
     // TODO(perf) use u32_unused_bit_mask()
-}
-
-inline void Cell::setCharacter(char32_t _codepoint, uint8_t _width) noexcept
-{
-    assert(_codepoint != 0);
-
-    codepoint_ = _codepoint;
-
-    if (extra_)
-    {
-        extra_->codepoints.clear();
-        extra_->imageFragment = {};
-        extra_->width = _width;
-    }
-    else
-        setWidth(_width);
 }
 
 inline void Cell::setCharacter(char32_t _codepoint) noexcept
