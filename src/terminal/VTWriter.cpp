@@ -238,3 +238,6 @@ void VTWriter::write(Line<Cell> const& line)
 
 #include <terminal/Cell.h>
 template void terminal::VTWriter::write<terminal::Cell>(Line<Cell> const&);
+
+#include <terminal/DenseCell.h>
+template void terminal::VTWriter::write<terminal::DenseCell>(Line<DenseCell> const&);

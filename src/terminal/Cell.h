@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal/CellFlags.h>
+#include <terminal/CellUtil.h>
 #include <terminal/ColorPalette.h>
 #include <terminal/GraphicsAttributes.h>
 #include <terminal/Hyperlink.h>
@@ -75,7 +76,7 @@ struct CellExtra
 ///
 /// TODO(perf): ensure POD'ness so that we can SIMD-copy it.
 /// - Requires moving out CellExtra into Line<T>?
-class CRISPY_PACKED Cell
+class CRISPY_PACKED Cell: public CellBase<Cell>
 {
   public:
     static uint8_t constexpr MaxCodepoints = 7;
@@ -105,10 +106,6 @@ class CRISPY_PACKED Cell
     [[nodiscard]] char32_t codepoint(size_t i) const noexcept;
     [[nodiscard]] std::size_t codepointCount() const noexcept;
 
-    [[nodiscard]] bool compareText(char codepoint) const noexcept;
-
-    [[nodiscard]] bool empty() const noexcept;
-
     [[nodiscard]] constexpr uint8_t width() const noexcept;
     void setWidth(uint8_t _width) noexcept;
 
@@ -122,6 +119,11 @@ class CRISPY_PACKED Cell
             extra_->flags = CellFlags::None;
     }
 
+    void resetFlags(CellFlags flags) noexcept
+    {
+        extra().flags = flags;
+    }
+
     void setFlags(CellFlags flags, bool enable = true)
     {
         if (enable)
@@ -129,8 +131,6 @@ class CRISPY_PACKED Cell
         else
             extra().flags = CellFlags(int(extra().flags) & ~int(flags));
     }
-
-    void setGraphicsRendition(GraphicsRendition sgr) noexcept;
 
     [[nodiscard]] Color underlineColor() const noexcept;
     void setUnderlineColor(Color color) noexcept;
@@ -170,8 +170,6 @@ class CRISPY_PACKED Cell
     crispy::Owned<CellExtra> extra_ = {};
     // TODO(perf) ^^ use CellExtraId = boxed<int24_t> into pre-alloc'ed vector<CellExtra>.
 };
-
-bool beginsWith(std::u32string_view text, Cell const& cell) noexcept;
 
 // {{{ impl: ctor's
 template <typename... Args>
@@ -352,22 +350,9 @@ inline int Cell::appendCharacter(char32_t _codepoint) noexcept
     if (ext.codepoints.size() < MaxCodepoints - 1)
     {
         ext.codepoints.push_back(_codepoint);
-
-        constexpr bool AllowWidthChange = false; // TODO: make configurable
-
-        auto const w = [&]() {
-            switch (_codepoint)
-            {
-                case 0xFE0E: return 1;
-                case 0xFE0F: return 2;
-                default: return unicode::width(_codepoint);
-            }
-        }();
-
-        if (w != width() && AllowWidthChange)
+        if (auto const diff = CellUtil::computeWidthChange(*this, _codepoint))
         {
-            int const diff = w - width();
-            setWidth(static_cast<uint8_t>(w));
+            setWidth(static_cast<uint8_t>(static_cast<int>(width()) + diff));
             return diff;
         }
     }
@@ -386,14 +371,6 @@ inline std::size_t Cell::codepointCount() const noexcept
     return 0;
 }
 
-inline bool Cell::compareText(char codepoint) const noexcept
-{
-    if (codepointCount() != 1)
-        return false;
-
-    return codepoint_ == static_cast<char32_t>(codepoint);
-}
-
 inline char32_t Cell::codepoint(size_t i) const noexcept
 {
     if (i == 0)
@@ -410,11 +387,6 @@ inline char32_t Cell::codepoint(size_t i) const noexcept
 }
 // }}}
 // {{{ attrs
-inline bool Cell::empty() const noexcept
-{
-    return (codepointCount() == 0 || codepoint(0) == 0x20) && !imageFragment();
-}
-
 inline CellExtra& Cell::extra() noexcept
 {
     if (extra_)
@@ -467,60 +439,10 @@ inline void Cell::setUnderlineColor(Color color) noexcept
         extra().underlineColor = color;
 }
 
-inline RGBColor getUnderlineColor(ColorPalette const& colorPalette,
-                                  CellFlags cellFlags,
-                                  RGBColor defaultColor,
-                                  Color underlineColor) noexcept
-{
-    if (isDefaultColor(underlineColor))
-        return defaultColor;
-
-    auto const mode = (cellFlags & CellFlags::Faint)                                    ? ColorMode::Dimmed
-                      : ((cellFlags & CellFlags::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
-                                                                                        : ColorMode::Normal;
-
-    return apply(colorPalette, underlineColor, ColorTarget::Foreground, mode);
-}
-
 inline RGBColor Cell::getUnderlineColor(ColorPalette const& _colorPalette,
                                         RGBColor _defaultColor) const noexcept
 {
-    return terminal::getUnderlineColor(_colorPalette, flags(), _defaultColor, underlineColor());
-}
-
-inline RGBColorPair makeColors(ColorPalette const& colorPalette,
-                               CellFlags cellFlags,
-                               bool _reverseVideo,
-                               Color foregroundColor,
-                               Color backgroundColor,
-                               bool blinkingState_,
-                               bool rapidBlinkState_) noexcept
-{
-    auto const fgMode = (cellFlags & CellFlags::Faint)                                    ? ColorMode::Dimmed
-                        : ((cellFlags & CellFlags::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
-                                                                                          : ColorMode::Normal;
-
-    auto constexpr bgMode = ColorMode::Normal;
-
-    auto const [fgColorTarget, bgColorTarget] =
-        _reverseVideo ? std::pair { ColorTarget::Background, ColorTarget::Foreground }
-                      : std::pair { ColorTarget::Foreground, ColorTarget::Background };
-
-    auto rgbColors = RGBColorPair { apply(colorPalette, foregroundColor, fgColorTarget, fgMode),
-                                    apply(colorPalette, backgroundColor, bgColorTarget, bgMode) };
-
-    if (cellFlags & CellFlags::Inverse)
-        rgbColors = rgbColors.swapped();
-
-    if (cellFlags & CellFlags::Hidden)
-        rgbColors = rgbColors.allBackground();
-
-    if ((cellFlags & CellFlags::Blinking) && !blinkingState_)
-        return rgbColors.allBackground();
-    if ((cellFlags & CellFlags::RapidBlinking) && !rapidBlinkState_)
-        return rgbColors.allBackground();
-
-    return rgbColors;
+    return CellUtil::getUnderlineColor(_colorPalette, flags(), _defaultColor, underlineColor());
 }
 
 inline RGBColorPair Cell::makeColors(ColorPalette const& _colorPalette,
@@ -528,7 +450,7 @@ inline RGBColorPair Cell::makeColors(ColorPalette const& _colorPalette,
                                      bool _blink,
                                      bool _rapidBlink) const noexcept
 {
-    return terminal::makeColors(
+    return CellUtil::makeColors(
         _colorPalette, flags(), _reverseVideo, foregroundColor(), backgroundColor(), _blink, _rapidBlink);
 }
 
@@ -561,54 +483,6 @@ inline void Cell::setHyperlink(HyperlinkId _hyperlink)
     else if (extra_)
         extra_->hyperlink = {};
 }
-
-inline void Cell::setGraphicsRendition(GraphicsRendition _rendition) noexcept
-{
-    // TODO: optimize this as there are only 3 cases
-    // 1.) reset
-    // 2.) set some bits |=
-    // 3.) clear some bits &= ~
-    switch (_rendition)
-    {
-        case GraphicsRendition::Reset: extra().flags = {}; break;
-        case GraphicsRendition::Bold: extra().flags |= CellFlags::Bold; break;
-        case GraphicsRendition::Faint: extra().flags |= CellFlags::Faint; break;
-        case GraphicsRendition::Italic: extra().flags |= CellFlags::Italic; break;
-        case GraphicsRendition::Underline: extra().flags |= CellFlags::Underline; break;
-        case GraphicsRendition::Blinking:
-            extra().flags &= ~CellFlags::RapidBlinking;
-            extra().flags |= CellFlags::Blinking;
-            break;
-        case GraphicsRendition::RapidBlinking:
-            extra().flags &= ~CellFlags::Blinking;
-            extra().flags |= CellFlags::RapidBlinking;
-            break;
-        case GraphicsRendition::Inverse: extra().flags |= CellFlags::Inverse; break;
-        case GraphicsRendition::Hidden: extra().flags |= CellFlags::Hidden; break;
-        case GraphicsRendition::CrossedOut: extra().flags |= CellFlags::CrossedOut; break;
-        case GraphicsRendition::DoublyUnderlined: extra().flags |= CellFlags::DoublyUnderlined; break;
-        case GraphicsRendition::CurlyUnderlined: extra().flags |= CellFlags::CurlyUnderlined; break;
-        case GraphicsRendition::DottedUnderline: extra().flags |= CellFlags::DottedUnderline; break;
-        case GraphicsRendition::DashedUnderline: extra().flags |= CellFlags::DashedUnderline; break;
-        case GraphicsRendition::Framed: extra().flags |= CellFlags::Framed; break;
-        case GraphicsRendition::Overline: extra().flags |= CellFlags::Overline; break;
-        case GraphicsRendition::Normal: extra().flags &= ~(CellFlags::Bold | CellFlags::Faint); break;
-        case GraphicsRendition::NoItalic: extra().flags &= ~CellFlags::Italic; break;
-        case GraphicsRendition::NoUnderline:
-            extra().flags &= ~(CellFlags::Underline | CellFlags::DoublyUnderlined | CellFlags::CurlyUnderlined
-                               | CellFlags::DottedUnderline | CellFlags::DashedUnderline);
-            break;
-        case GraphicsRendition::NoBlinking:
-            extra().flags &= ~(CellFlags::Blinking | CellFlags::RapidBlinking);
-            break;
-        case GraphicsRendition::NoInverse: extra().flags &= ~CellFlags::Inverse; break;
-        case GraphicsRendition::NoHidden: extra().flags &= ~CellFlags::Hidden; break;
-        case GraphicsRendition::NoCrossedOut: extra().flags &= ~CellFlags::CrossedOut; break;
-        case GraphicsRendition::NoFramed: extra().flags &= ~CellFlags::Framed; break;
-        case GraphicsRendition::NoOverline: extra().flags &= ~CellFlags::Overline; break;
-    }
-}
-
 // }}}
 // {{{ free function implementations
 inline bool beginsWith(std::u32string_view text, Cell const& cell) noexcept

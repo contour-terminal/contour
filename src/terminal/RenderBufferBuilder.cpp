@@ -12,6 +12,7 @@
  * limitations under the License.
  */
 
+#include <terminal/CellUtil.h>
 #include <terminal/Color.h>
 #include <terminal/ColorPalette.h>
 #include <terminal/RenderBufferBuilder.h>
@@ -72,7 +73,7 @@ namespace
                             bool _blink,
                             bool _rapidBlink) noexcept
     {
-        auto const sgrColors = makeColors(
+        auto const sgrColors = CellUtil::makeColors(
             _colorPalette, _cellFlags, _reverseVideo, foregroundColor, backgroundColor, _blink, _rapidBlink);
 
         if (!_selected && !_isCursor && !_isHighlighted)
@@ -164,7 +165,7 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(ColorPalette const&
     auto renderCell = RenderCell {};
     renderCell.attributes.backgroundColor = bg;
     renderCell.attributes.foregroundColor = fg;
-    renderCell.attributes.decorationColor = getUnderlineColor(_colorPalette, flags, fg, ul);
+    renderCell.attributes.decorationColor = CellUtil::getUnderlineColor(_colorPalette, flags, fg, ul);
     renderCell.attributes.flags = flags;
     renderCell.position.line = _line;
     renderCell.position.column = _column;
@@ -186,7 +187,7 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(ColorPalette const&
     RenderCell renderCell;
     renderCell.attributes.backgroundColor = bg;
     renderCell.attributes.foregroundColor = fg;
-    renderCell.attributes.decorationColor = getUnderlineColor(_colorPalette, flags, fg, ul);
+    renderCell.attributes.decorationColor = CellUtil::getUnderlineColor(_colorPalette, flags, fg, ul);
     renderCell.attributes.flags = flags;
     renderCell.position.line = _line;
     renderCell.position.column = _column;
@@ -281,7 +282,7 @@ RenderAttributes RenderBufferBuilder<Cell>::createRenderAttributes(
     auto renderAttributes = RenderAttributes {};
     renderAttributes.foregroundColor = fg;
     renderAttributes.backgroundColor = bg;
-    renderAttributes.decorationColor = getUnderlineColor(
+    renderAttributes.decorationColor = CellUtil::getUnderlineColor(
         terminal.colorPalette(), graphicsAttributes.flags, fg, graphicsAttributes.underlineColor);
     renderAttributes.flags = graphicsAttributes.flags;
     return renderAttributes;
@@ -376,9 +377,22 @@ void RenderBufferBuilder<Cell>::matchSearchPattern(T const& textCell)
     if (searchMode.pattern.empty())
         return;
 
-    if (!beginsWith(u32string_view(searchMode.pattern.data() + searchPatternOffset,
-                                   searchMode.pattern.size() - searchPatternOffset),
-                    textCell))
+    auto const isFullMatch = [&]() -> bool {
+        if constexpr (std::is_same_v<Cell, T>)
+        {
+            return !CellUtil::beginsWith(u32string_view(searchMode.pattern.data() + searchPatternOffset,
+                                                        searchMode.pattern.size() - searchPatternOffset),
+                                         textCell);
+        }
+        else
+        {
+            return crispy::beginsWith(u32string_view(searchMode.pattern.data() + searchPatternOffset,
+                                                     searchMode.pattern.size() - searchPatternOffset),
+                                      textCell);
+        }
+    }();
+
+    if (isFullMatch)
     {
         // match fail
         searchPatternOffset = 0;
@@ -575,3 +589,6 @@ void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset _l
 
 #include <terminal/Cell.h>
 template class terminal::RenderBufferBuilder<terminal::Cell>;
+
+#include <terminal/DenseCell.h>
+template class terminal::RenderBufferBuilder<terminal::DenseCell>;

@@ -3820,3 +3820,6 @@ optional<CellLocation> Screen<Cell>::searchReverse(std::u32string_view searchTex
 
 #include <terminal/Cell.h>
 template class terminal::Screen<terminal::Cell>;
+
+#include <terminal/DenseCell.h>
+template class terminal::Screen<terminal::DenseCell>;

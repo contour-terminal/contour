@@ -428,8 +428,11 @@ class Terminal
     [[nodiscard]] Screen<Cell> const& primaryScreen() const noexcept { return primaryScreen_; }
     [[nodiscard]] Screen<Cell>& primaryScreen() noexcept { return primaryScreen_; }
 
-    [[nodiscard]] Screen<Cell> const& alternateScreen() const noexcept { return alternateScreen_; }
-    [[nodiscard]] Screen<Cell>& alternateScreen() noexcept { return alternateScreen_; }
+    [[nodiscard]] Screen<AlternateScreenCell> const& alternateScreen() const noexcept
+    {
+        return alternateScreen_;
+    }
+    [[nodiscard]] Screen<AlternateScreenCell>& alternateScreen() noexcept { return alternateScreen_; }
 
     [[nodiscard]] bool isLineWrapped(LineOffset _lineNumber) const noexcept
     {
@@ -707,10 +710,10 @@ class Terminal
     crispy::BufferObjectPool ptyBufferPool_;
     crispy::BufferObjectPtr currentPtyBuffer_;
     size_t ptyReadBufferSize_;
-    Screen<Cell> primaryScreen_;
-    Screen<Cell> alternateScreen_;
-    Screen<Cell> hostWritableStatusLineScreen_;
-    Screen<Cell> indicatorStatusScreen_;
+    Screen<PrimaryScreenCell> primaryScreen_;
+    Screen<AlternateScreenCell> alternateScreen_;
+    Screen<StatusDisplayCell> hostWritableStatusLineScreen_;
+    Screen<StatusDisplayCell> indicatorStatusScreen_;
     std::reference_wrapper<ScreenBase> currentScreen_;
 
     InputMethodData inputMethodData_;

@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal/Cell.h>
+#include <terminal/CellConfig.h>
 #include <terminal/Charset.h>
 #include <terminal/ColorPalette.h>
 #include <terminal/GraphicsAttributes.h>
@@ -166,10 +167,11 @@ struct TerminalState
     bool allowReflowOnResize;
 
     ScreenType screenType = ScreenType::Primary;
-    Grid<Cell> primaryBuffer;
-    Grid<Cell> alternateBuffer;
-    Grid<Cell> hostWritableStatusBuffer; // writable status-display, see DECSASD and DECSSDT.
-    Grid<Cell> indicatorStatusBuffer;    // status buffer as used for indicator status line AND error lines.
+    Grid<PrimaryScreenCell> primaryBuffer;
+    Grid<AlternateScreenCell> alternateBuffer;
+    Grid<StatusDisplayCell> hostWritableStatusBuffer; // writable status-display, see DECSASD and DECSSDT.
+    Grid<StatusDisplayCell>
+        indicatorStatusBuffer; // status buffer as used for indicator status line AND error lines.
     StatusDisplayType statusDisplayType;
     std::optional<StatusDisplayType> savedStatusDisplayType;
     ActiveStatusDisplay activeStatusDisplay;

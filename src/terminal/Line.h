@@ -13,6 +13,7 @@
  */
 #pragma once
 
+#include <terminal/CellUtil.h>
 #include <terminal/GraphicsAttributes.h>
 #include <terminal/Hyperlink.h>
 #include <terminal/primitives.h>
@@ -358,7 +359,7 @@ class Line
             size_t i = 0;
             while (i < text.size())
             {
-                if (!beginsWith(text.substr(i), cells[baseColumn + i]))
+                if (!CellUtil::beginsWith(text.substr(i), cells[baseColumn + i]))
                     return false;
                 ++i;
             }

@@ -11,7 +11,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/Cell.h>
 #include <terminal/Grid.h>
 #include <terminal/primitives.h>
 
@@ -50,7 +49,7 @@ namespace detail
     gsl::span<Cell> trimRight(gsl::span<Cell> cells)
     {
         size_t n = cells.size();
-        while (n && cells[n - 1].empty())
+        while (n && CellUtil::empty(cells[n - 1]))
             --n;
         return cells.subspan(0, n);
     }
@@ -344,7 +343,7 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 bool Grid<Cell>::isLineBlank(LineOffset _line) const noexcept
 {
     auto const is_blank = [](auto const& _cell) noexcept {
-        return _cell.empty();
+        return CellUtil::empty(_cell);
     };
 
     auto const line = lineBuffer(_line);
@@ -1130,7 +1129,7 @@ bool Grid<Cell>::cellEmptyOrContainsOneOf(CellLocation position, u32string_view 
     position.column = min(position.column, boxed_cast<ColumnOffset>(pageSize().columns - 1));
 
     auto const& cell = at(position.line, position.column);
-    return cell.empty() || delimiters.find(cell.codepoint(0)) != delimiters.npos;
+    return CellUtil::empty(cell) || delimiters.find(cell.codepoint(0)) != delimiters.npos;
 }
 
 template <typename Cell>
@@ -1185,7 +1184,12 @@ u32string Grid<Cell>::extractText(CellLocationRange range) const noexcept
     return output;
 }
 
-template class Grid<Cell>;
-template std::string dumpGrid<Cell>(Grid<Cell> const& grid);
-
 } // end namespace terminal
+
+#include <terminal/Cell.h>
+template class terminal::Grid<terminal::Cell>;
+template std::string terminal::dumpGrid<terminal::Cell>(terminal::Grid<terminal::Cell> const& grid);
+
+#include <terminal/DenseCell.h>
+template class terminal::Grid<terminal::DenseCell>;
+template std::string terminal::dumpGrid<terminal::DenseCell>(terminal::Grid<terminal::DenseCell> const&);

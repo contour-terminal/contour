@@ -20,7 +20,11 @@ endif()
 set(terminal_HEADERS
     Capabilities.h
     Cell.h
+    CellConcept.h
+    CellConfig.h
+    CellUtil.h
     Charset.h
+    DenseCell.h
     Color.h
     ColorPalette.h
     Functions.h

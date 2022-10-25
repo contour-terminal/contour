@@ -53,6 +53,9 @@ namespace terminal
 template <typename T>
 concept CellConcept = requires(T t)
 {
+    T(GraphicsAttributes {});
+    T(GraphicsAttributes {}, HyperlinkId {});
+
     t.reset();
     t.reset(GraphicsAttributes{});
     t.reset(GraphicsAttributes{}, HyperlinkId{});
@@ -74,8 +77,6 @@ concept CellConcept = requires(T t)
 
     { t.width() } noexcept -> std::convertible_to<uint8_t>;
     { t.setWidth(uint8_t{}) } noexcept;
-
-    { t.compareText(char{}) } noexcept -> std::same_as<bool>;
 
     { t.flags() } noexcept -> std::same_as<CellFlags>;
     { t.isFlagEnabled(CellFlags{}) } noexcept -> std::same_as<bool>;
