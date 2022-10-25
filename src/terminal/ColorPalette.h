@@ -15,7 +15,6 @@
 
 #include <terminal/Color.h>
 #include <terminal/Image.h>
-#include <terminal/defines.h>
 
 #include <crispy/StrongHash.h>
 #include <crispy/stdfs.h>

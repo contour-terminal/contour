@@ -121,6 +121,7 @@ namespace detail
 } // namespace detail
 // {{{ Grid impl
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 Grid<Cell>::Grid(PageSize _pageSize, bool _reflowOnResize, MaxHistoryLineCount _maxHistoryLineCount):
     pageSize_ { _pageSize },
     reflowOnResize_ { _reflowOnResize },
@@ -141,6 +142,7 @@ Grid<Cell>::Grid(PageSize _pageSize, bool _reflowOnResize, MaxHistoryLineCount _
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Grid<Cell>::setMaxHistoryLineCount(MaxHistoryLineCount _maxHistoryLineCount)
 {
     verifyState();
@@ -152,6 +154,7 @@ void Grid<Cell>::setMaxHistoryLineCount(MaxHistoryLineCount _maxHistoryLineCount
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Grid<Cell>::clearHistory()
 {
     linesUsed_ = pageSize_.lines;
@@ -159,6 +162,7 @@ void Grid<Cell>::clearHistory()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Grid<Cell>::verifyState() const
 {
 #if !defined(NDEBUG)
@@ -170,6 +174,7 @@ void Grid<Cell>::verifyState() const
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 std::string Grid<Cell>::renderAllText() const
 {
     std::string text;
@@ -185,6 +190,7 @@ std::string Grid<Cell>::renderAllText() const
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 std::string Grid<Cell>::renderMainPageText() const
 {
     std::string text;
@@ -199,6 +205,7 @@ std::string Grid<Cell>::renderMainPageText() const
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 Line<Cell>& Grid<Cell>::lineAt(LineOffset _line) noexcept
 {
     // Require(*_line < *pageSize_.lines);
@@ -206,6 +213,7 @@ Line<Cell>& Grid<Cell>::lineAt(LineOffset _line) noexcept
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 Line<Cell> const& Grid<Cell>::lineAt(LineOffset _line) const noexcept
 {
     // Require(*_line < *pageSize_.lines);
@@ -213,24 +221,28 @@ Line<Cell> const& Grid<Cell>::lineAt(LineOffset _line) const noexcept
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 Cell& Grid<Cell>::at(LineOffset _line, ColumnOffset _column) noexcept
 {
     return useCellAt(_line, _column);
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 Cell& Grid<Cell>::useCellAt(LineOffset _line, ColumnOffset _column) noexcept
 {
     return lineAt(_line).useCellAt(_column);
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 Cell const& Grid<Cell>::at(LineOffset _line, ColumnOffset _column) const noexcept
 {
     return const_cast<Grid&>(*this).at(_line, _column);
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 gsl::span<Line<Cell>> Grid<Cell>::pageAtScrollOffset(ScrollOffset _scrollOffset)
 {
     Require(unbox<LineCount>(_scrollOffset) <= historyLineCount());
@@ -243,6 +255,7 @@ gsl::span<Line<Cell>> Grid<Cell>::pageAtScrollOffset(ScrollOffset _scrollOffset)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 gsl::span<Line<Cell> const> Grid<Cell>::pageAtScrollOffset(ScrollOffset _scrollOffset) const
 {
     Require(unbox<LineCount>(_scrollOffset) <= historyLineCount());
@@ -255,12 +268,14 @@ gsl::span<Line<Cell> const> Grid<Cell>::pageAtScrollOffset(ScrollOffset _scrollO
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 gsl::span<Line<Cell> const> Grid<Cell>::mainPage() const
 {
     return pageAtScrollOffset({});
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 gsl::span<Line<Cell>> Grid<Cell>::mainPage()
 {
     return pageAtScrollOffset({});
@@ -268,12 +283,14 @@ gsl::span<Line<Cell>> Grid<Cell>::mainPage()
 // }}}
 // {{{ Grid impl: Line access
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 gsl::span<Cell const> Grid<Cell>::lineBufferRightTrimmed(LineOffset _line) const noexcept
 {
     return detail::trimRight(lineBuffer(_line));
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 std::string Grid<Cell>::lineText(LineOffset _line) const
 {
     std::string line;
@@ -289,6 +306,7 @@ std::string Grid<Cell>::lineText(LineOffset _line) const
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 std::string Grid<Cell>::lineTextTrimmed(LineOffset _line) const
 {
     std::string output = lineText(_line);
@@ -298,6 +316,7 @@ std::string Grid<Cell>::lineTextTrimmed(LineOffset _line) const
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 std::string Grid<Cell>::lineText(Line<Cell> const& _line) const
 {
     std::stringstream sstr;
@@ -312,6 +331,7 @@ std::string Grid<Cell>::lineText(Line<Cell> const& _line) const
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Grid<Cell>::setLineText(LineOffset _line, std::string_view _text)
 {
     size_t i = 0;
@@ -320,6 +340,7 @@ void Grid<Cell>::setLineText(LineOffset _line, std::string_view _text)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 bool Grid<Cell>::isLineBlank(LineOffset _line) const noexcept
 {
     auto const is_blank = [](auto const& _cell) noexcept {
@@ -334,6 +355,7 @@ bool Grid<Cell>::isLineBlank(LineOffset _line) const noexcept
  * Computes the relative line number for the bottom-most @p _n logical lines.
  */
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 int Grid<Cell>::computeLogicalLineNumberFromBottom(LineCount _n) const noexcept
 {
     int logicalLineCount = 0;
@@ -364,6 +386,7 @@ int Grid<Cell>::computeLogicalLineNumberFromBottom(LineCount _n) const noexcept
 // }}}
 // {{{ Grid impl: scrolling
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 LineCount Grid<Cell>::scrollUp(LineCount linesCountToScrollUp, GraphicsAttributes _defaultAttributes) noexcept
 {
     verifyState();
@@ -424,6 +447,7 @@ LineCount Grid<Cell>::scrollUp(LineCount linesCountToScrollUp, GraphicsAttribute
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 LineCount Grid<Cell>::scrollUp(LineCount _n, GraphicsAttributes _defaultAttributes, Margin _margin) noexcept
 {
     verifyState();
@@ -498,6 +522,7 @@ LineCount Grid<Cell>::scrollUp(LineCount _n, GraphicsAttributes _defaultAttribut
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Grid<Cell>::scrollDown(LineCount v_n,
                             GraphicsAttributes const& _defaultAttributes,
                             Margin const& _margin)
@@ -569,6 +594,7 @@ void Grid<Cell>::scrollDown(LineCount v_n,
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Grid<Cell>::scrollLeft(GraphicsAttributes _defaultAttributes, Margin _margin) noexcept
 {
     for (LineOffset lineNo = _margin.vertical.from; lineNo <= _margin.vertical.to; ++lineNo)
@@ -588,6 +614,7 @@ void Grid<Cell>::scrollLeft(GraphicsAttributes _defaultAttributes, Margin _margi
 // }}}
 // {{{ Grid impl: resize
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Grid<Cell>::reset()
 {
     linesUsed_ = pageSize_.lines;
@@ -598,6 +625,7 @@ void Grid<Cell>::reset()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 CellLocation Grid<Cell>::growLines(LineCount _newHeight, CellLocation _cursor)
 {
     // Grow line count by splicing available lines from history back into buffer, if available,
@@ -642,6 +670,7 @@ CellLocation Grid<Cell>::growLines(LineCount _newHeight, CellLocation _cursor)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPos, bool _wrapPending)
 {
     if (pageSize_ == _newSize)
@@ -955,12 +984,14 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Grid<Cell>::clampHistory()
 {
     // TODO: needed?
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Grid<Cell>::appendNewLines(LineCount _count, GraphicsAttributes _attr)
 {
     auto const wrappableFlag = lines_.back().wrappableFlag();
@@ -1025,6 +1056,7 @@ std::string dumpGrid(Grid<Cell> const& grid)
 // }}}
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 CellLocationRange Grid<Cell>::wordRangeUnderCursor(CellLocation position,
                                                    u32string_view wordDelimiters) const noexcept
 {
@@ -1091,6 +1123,7 @@ CellLocationRange Grid<Cell>::wordRangeUnderCursor(CellLocation position,
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 bool Grid<Cell>::cellEmptyOrContainsOneOf(CellLocation position, u32string_view delimiters) const noexcept
 {
     // Word selection may be off by one
@@ -1101,6 +1134,7 @@ bool Grid<Cell>::cellEmptyOrContainsOneOf(CellLocation position, u32string_view 
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 u32string Grid<Cell>::extractText(CellLocationRange range) const noexcept
 {
     if (range.first.line > range.second.line)

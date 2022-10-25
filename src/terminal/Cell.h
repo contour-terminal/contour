@@ -18,9 +18,10 @@
 #include <terminal/GraphicsAttributes.h>
 #include <terminal/Hyperlink.h>
 #include <terminal/Image.h>
-#include <terminal/defines.h>
 #include <terminal/primitives.h>
 
+#include <crispy/Owned.h>
+#include <crispy/defines.h>
 #include <crispy/times.h>
 
 #include <unicode/capi.h>
@@ -35,60 +36,38 @@
 namespace terminal
 {
 
-/**
- * Owned<T> behaves mostly like std::unique_ptr<T> except that it can be also
- * used within packed structs.
- */
-template <typename T>
-struct CONTOUR_PACKED Owned
-{
-    T* ptr_ = nullptr;
-
-    constexpr T* operator->() noexcept { return ptr_; }
-    constexpr T const* operator->() const noexcept { return ptr_; }
-    constexpr T& operator*() noexcept { return *ptr_; }
-    constexpr T const& operator*() const noexcept { return *ptr_; }
-
-    constexpr operator bool() const noexcept { return ptr_ != nullptr; }
-
-    void reset(T* p = nullptr)
-    {
-        if (ptr_)
-        {
-            delete ptr_;
-        }
-        ptr_ = p;
-    }
-    T* release() noexcept
-    {
-        auto p = ptr_;
-        ptr_ = nullptr;
-        return p;
-    }
-
-    ~Owned() { reset(); }
-    Owned() noexcept = default;
-    Owned(Owned&& v) noexcept: ptr_ { v.release() } {}
-    Owned& operator=(Owned&& v) noexcept
-    {
-        ptr_ = v.release();
-        return *this;
-    }
-
-    Owned(Owned const& v) noexcept = delete;
-    Owned& operator=(Owned const& v) = delete;
-};
-
 /// Rarely needed extra cell data.
+///
+/// In this struct we collect all the relevant cell data that is not frequently used,
+/// and thus, would only waste unnecessary memory in most situations.
 ///
 /// @see Cell
 struct CellExtra
 {
+    /// With the main codepoint that is being stored in the Cell struct, followed by this
+    /// sequence of codepoints, a grapheme cluster is formed that represents the visual
+    /// character in this terminal cell.
+    ///
+    /// Since MOST content in the terminal is US-ASCII, all codepoints except the first one of a grapheme
+    /// cluster is stored in CellExtra.
     std::u32string codepoints = {};
+
+    /// Color for underline decoration (such as curly underline).
     Color underlineColor = DefaultColor();
+
+    /// With OSC-8 a hyperlink can be associated with a range of terminal cells.
     HyperlinkId hyperlink = {};
+
+    /// Holds a reference to an image tile to be rendered (above the text, if any).
     std::shared_ptr<ImageFragment> imageFragment = nullptr;
+
+    /// Cell flags.
     CellFlags flags = CellFlags::None;
+
+    /// In terminals, the Unicode's East asian Width property is used to determine the
+    /// number of columns, a graphical character is spanning.
+    /// Since most graphical characters in a terminal will be US-ASCII, this width property
+    /// will be only used when NOT being 1.
     uint8_t width = 1;
 };
 
@@ -96,15 +75,15 @@ struct CellExtra
 ///
 /// TODO(perf): ensure POD'ness so that we can SIMD-copy it.
 /// - Requires moving out CellExtra into Line<T>?
-class CONTOUR_PACKED Cell
+class CRISPY_PACKED Cell
 {
   public:
-    static int constexpr MaxCodepoints = 7;
+    static uint8_t constexpr MaxCodepoints = 7;
 
     Cell() noexcept;
     Cell(Cell const& v) noexcept;
     Cell& operator=(Cell const& v) noexcept;
-    explicit Cell(GraphicsAttributes const& _attributes, HyperlinkId hyperlink = {}) noexcept;
+    explicit Cell(GraphicsAttributes _attributes, HyperlinkId hyperlink = {}) noexcept;
 
     Cell(Cell&&) noexcept = default;
     Cell& operator=(Cell&&) noexcept = default;
@@ -172,16 +151,15 @@ class CONTOUR_PACKED Cell
     void setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, CellLocation offset);
 
     void setCharacter(char32_t _codepoint) noexcept;
-    void setCharacter(char32_t _codepoint, uint8_t _width) noexcept;
     [[nodiscard]] int appendCharacter(char32_t _codepoint) noexcept;
     [[nodiscard]] std::string toUtf8() const;
 
     [[nodiscard]] HyperlinkId hyperlink() const noexcept;
     void setHyperlink(HyperlinkId _hyperlink);
 
+  private:
     [[nodiscard]] CellExtra& extra() noexcept;
 
-  private:
     template <typename... Args>
     void createExtra(Args... args) noexcept;
 
@@ -189,7 +167,7 @@ class CONTOUR_PACKED Cell
     char32_t codepoint_ = 0; /// Primary Unicode codepoint to be displayed.
     Color foregroundColor_ = DefaultColor();
     Color backgroundColor_ = DefaultColor();
-    Owned<CellExtra> extra_ = {};
+    crispy::Owned<CellExtra> extra_ = {};
     // TODO(perf) ^^ use CellExtraId = boxed<int24_t> into pre-alloc'ed vector<CellExtra>.
 };
 
@@ -205,7 +183,7 @@ inline void Cell::createExtra(Args... args) noexcept
     }
     catch (std::bad_alloc const&)
     {
-        Require(extra_.ptr_ != nullptr);
+        Require(extra_.get() != nullptr);
     }
 }
 
@@ -214,13 +192,11 @@ inline Cell::Cell() noexcept
     setWidth(1);
 }
 
-inline Cell::Cell(GraphicsAttributes const& _attributes, HyperlinkId hyperlink) noexcept
+inline Cell::Cell(GraphicsAttributes _attributes, HyperlinkId hyperlink) noexcept:
+    foregroundColor_ { _attributes.foregroundColor }, backgroundColor_ { _attributes.backgroundColor }
 {
     setWidth(1);
     setHyperlink(hyperlink);
-
-    foregroundColor_ = _attributes.foregroundColor;
-    backgroundColor_ = _attributes.backgroundColor;
 
     if (_attributes.underlineColor != DefaultColor() || extra_)
         extra().underlineColor = _attributes.underlineColor;
@@ -352,22 +328,6 @@ inline void Cell::setWidth(uint8_t _width) noexcept
     if (_width > 1 || extra_)
         extra().width = _width;
     // TODO(perf) use u32_unused_bit_mask()
-}
-
-inline void Cell::setCharacter(char32_t _codepoint, uint8_t _width) noexcept
-{
-    assert(_codepoint != 0);
-
-    codepoint_ = _codepoint;
-
-    if (extra_)
-    {
-        extra_->codepoints.clear();
-        extra_->imageFragment = {};
-        extra_->width = _width;
-    }
-    else
-        setWidth(_width);
 }
 
 inline void Cell::setCharacter(char32_t _codepoint) noexcept

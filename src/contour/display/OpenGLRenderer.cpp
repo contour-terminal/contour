@@ -20,6 +20,7 @@
 
 #include <crispy/algorithm.h>
 #include <crispy/assert.h>
+#include <crispy/defines.h>
 #include <crispy/utils.h>
 
 #include <range/v3/all.hpp>
@@ -54,12 +55,6 @@ using terminal::Width;
 
 namespace chrono = std::chrono;
 namespace atlas = terminal::renderer::atlas;
-
-#if !defined(_WIN32)
-    #define CRISPY_PACKED __attribute__((packed))
-#else
-    #define CRISPY_PACKED /*!*/
-#endif
 
 namespace contour::display
 {

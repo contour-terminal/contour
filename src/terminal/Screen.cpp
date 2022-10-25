@@ -243,6 +243,7 @@ namespace // {{{ helper
 // }}}
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 Screen<Cell>::Screen(TerminalState& terminalState, Grid<Cell>& grid):
     _terminal { terminalState.terminal }, _state { terminalState }, _grid { grid }
 {
@@ -250,6 +251,7 @@ Screen<Cell>::Screen(TerminalState& terminalState, Grid<Cell>& grid):
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 unsigned Screen<Cell>::numericCapability(capabilities::Code _cap) const
 {
     using namespace capabilities::literals;
@@ -264,12 +266,14 @@ unsigned Screen<Cell>::numericCapability(capabilities::Code _cap) const
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::verifyState() const
 {
     grid().verifyState();
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::fail(std::string const& _message) const
 {
     inspect(_message, std::cerr);
@@ -277,6 +281,7 @@ void Screen<Cell>::fail(std::string const& _message) const
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 string_view Screen<Cell>::tryEmplaceChars(string_view _chars, size_t cellCount) noexcept
 {
     if (!_terminal.isFullHorizontalMargins())
@@ -327,6 +332,7 @@ string_view Screen<Cell>::tryEmplaceChars(string_view _chars, size_t cellCount) 
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 size_t Screen<Cell>::emplaceCharsIntoCurrentLine(string_view _chars, size_t cellCount) noexcept
 {
     [[maybe_unused]] auto columnsAvailable =
@@ -359,6 +365,7 @@ size_t Screen<Cell>::emplaceCharsIntoCurrentLine(string_view _chars, size_t cell
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::advanceCursorAfterWrite(ColumnCount n) noexcept
 {
     assert(_state.cursor.position.column.value + n.value <= _state.margin.horizontal.to.value + 1);
@@ -374,6 +381,7 @@ void Screen<Cell>::advanceCursorAfterWrite(ColumnCount n) noexcept
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::writeText(string_view _chars, size_t cellCount)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
@@ -395,6 +403,7 @@ void Screen<Cell>::writeText(string_view _chars, size_t cellCount)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::writeTextFromExternal(std::string_view _chars)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
@@ -407,6 +416,7 @@ void Screen<Cell>::writeTextFromExternal(std::string_view _chars)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::crlfIfWrapPending()
 {
     if (_state.wrapPending && _state.cursor.autoWrap) // && !_terminal.isModeEnabled(DECMode::TextReflow))
@@ -419,6 +429,7 @@ void Screen<Cell>::crlfIfWrapPending()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::writeText(char32_t _char)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
@@ -430,6 +441,7 @@ void Screen<Cell>::writeText(char32_t _char)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::writeTextInternal(char32_t _char)
 {
     crlfIfWrapPending();
@@ -456,6 +468,7 @@ void Screen<Cell>::writeTextInternal(char32_t _char)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::writeCharToCurrentAndAdvance(char32_t _character) noexcept
 {
     Line<Cell>& line = currentLine();
@@ -486,6 +499,7 @@ void Screen<Cell>::writeCharToCurrentAndAdvance(char32_t _character) noexcept
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::clearAndAdvance(int _graphemeClusterWidth) noexcept
 {
     if (_graphemeClusterWidth == 0)
@@ -516,6 +530,7 @@ void Screen<Cell>::clearAndAdvance(int _graphemeClusterWidth) noexcept
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 std::string Screen<Cell>::screenshot(function<string(LineOffset)> const& _postLine) const
 {
     auto result = std::stringstream {};
@@ -533,6 +548,7 @@ std::string Screen<Cell>::screenshot(function<string(LineOffset)> const& _postLi
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 optional<LineOffset> Screen<Cell>::findMarkerUpwards(LineOffset _startLine) const
 {
     // XXX _startLine is an absolute history line coordinate
@@ -551,6 +567,7 @@ optional<LineOffset> Screen<Cell>::findMarkerUpwards(LineOffset _startLine) cons
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 optional<LineOffset> Screen<Cell>::findMarkerDownwards(LineOffset _lineOffset) const
 {
     if (_state.screenType != ScreenType::Primary)
@@ -571,12 +588,14 @@ optional<LineOffset> Screen<Cell>::findMarkerDownwards(LineOffset _lineOffset) c
 
 // {{{ tabs related
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::clearAllTabs()
 {
     _state.tabs.clear();
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::clearTabUnderCursor()
 {
     // populate tabs vector in case of default tab width is used (until now).
@@ -598,6 +617,7 @@ void Screen<Cell>::clearTabUnderCursor()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::setTabUnderCursor()
 {
     _state.tabs.emplace_back(realCursorPosition().column);
@@ -607,6 +627,7 @@ void Screen<Cell>::setTabUnderCursor()
 
 // {{{ others
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorTo(LineOffset _line, ColumnOffset _column)
 {
     auto const [line, column] = [&]() {
@@ -622,6 +643,7 @@ void Screen<Cell>::moveCursorTo(LineOffset _line, ColumnOffset _column)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::linefeed(ColumnOffset _newColumn)
 {
     _state.wrapPending = false;
@@ -649,6 +671,7 @@ void Screen<Cell>::linefeed(ColumnOffset _newColumn)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
 {
     auto const scrollCount = grid().scrollUp(n, sgr, margin);
@@ -658,6 +681,7 @@ void Screen<Cell>::scrollUp(LineCount n, GraphicsAttributes sgr, Margin margin)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::scrollDown(LineCount _n, Margin _margin)
 {
     grid().scrollDown(_n, cursor().graphicsRendition, _margin);
@@ -665,6 +689,7 @@ void Screen<Cell>::scrollDown(LineCount _n, Margin _margin)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::setCurrentColumn(ColumnOffset _n)
 {
     auto const col = _state.cursor.originMode ? _state.margin.horizontal.from + _n : _n;
@@ -674,6 +699,7 @@ void Screen<Cell>::setCurrentColumn(ColumnOffset _n)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 string Screen<Cell>::renderMainPageText() const
 {
     return grid().renderMainPageText();
@@ -682,6 +708,7 @@ string Screen<Cell>::renderMainPageText() const
 
 // {{{ ops
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::linefeed()
 {
     // If coming through stdout-fastpipe, the LF acts like CRLF.
@@ -693,6 +720,7 @@ void Screen<Cell>::linefeed()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::backspace()
 {
     if (_state.cursor.position.column.value)
@@ -700,18 +728,21 @@ void Screen<Cell>::backspace()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::deviceStatusReport()
 {
     _terminal.reply("\033[0n");
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::reportCursorPosition()
 {
     _terminal.reply("\033[{};{}R", logicalCursorPosition().line + 1, logicalCursorPosition().column + 1);
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::reportExtendedCursorPosition()
 {
     auto const pageNum = 1;
@@ -720,6 +751,7 @@ void Screen<Cell>::reportExtendedCursorPosition()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::selectConformanceLevel(VTType _level)
 {
     // Don't enforce the selected conformance level, just remember it.
@@ -727,6 +759,7 @@ void Screen<Cell>::selectConformanceLevel(VTType _level)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::sendDeviceAttributes()
 {
     // See https://vt100.net/docs/vt510-rm/DA1.html
@@ -762,6 +795,7 @@ void Screen<Cell>::sendDeviceAttributes()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::sendTerminalId()
 {
     // Note, this is "Secondary DA".
@@ -783,6 +817,7 @@ void Screen<Cell>::sendTerminalId()
 
 // {{{ ED
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::clearToEndOfScreen()
 {
     clearToEndOfLine();
@@ -796,6 +831,7 @@ void Screen<Cell>::clearToEndOfScreen()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::clearToBeginOfScreen()
 {
     clearToBeginOfLine();
@@ -808,6 +844,7 @@ void Screen<Cell>::clearToBeginOfScreen()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::clearScreen()
 {
     // Instead of *just* clearing the screen, and thus, losing potential important content,
@@ -818,6 +855,7 @@ void Screen<Cell>::clearScreen()
 // }}}
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::eraseCharacters(ColumnCount _n)
 {
     // Spec: https://vt100.net/docs/vt510-rm/ECH.html
@@ -837,6 +875,7 @@ void Screen<Cell>::eraseCharacters(ColumnCount _n)
 
 // {{{ DECSEL
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::selectiveEraseToEndOfLine()
 {
     if (_terminal.isFullHorizontalMargins() && _state.cursor.position.column.value == 0)
@@ -848,6 +887,7 @@ void Screen<Cell>::selectiveEraseToEndOfLine()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::selectiveEraseToBeginOfLine()
 {
     if (_terminal.isFullHorizontalMargins()
@@ -858,6 +898,7 @@ void Screen<Cell>::selectiveEraseToBeginOfLine()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::selectiveEraseLine(LineOffset line)
 {
     if (containsProtectedCharacters(line, ColumnOffset(0), ColumnOffset::cast_from(_state.pageSize.columns)))
@@ -875,6 +916,7 @@ void Screen<Cell>::selectiveEraseLine(LineOffset line)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::selectiveErase(LineOffset line, ColumnOffset begin, ColumnOffset end)
 {
     Cell* i = &at(line, begin);
@@ -897,6 +939,7 @@ void Screen<Cell>::selectiveErase(LineOffset line, ColumnOffset begin, ColumnOff
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 bool Screen<Cell>::containsProtectedCharacters(LineOffset line, ColumnOffset begin, ColumnOffset end) const
 {
     Cell const* i = &at(line, begin);
@@ -912,6 +955,7 @@ bool Screen<Cell>::containsProtectedCharacters(LineOffset line, ColumnOffset beg
 // }}}
 // {{{ DECSED
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::selectiveEraseToEndOfScreen()
 {
     selectiveEraseToEndOfLine();
@@ -924,6 +968,7 @@ void Screen<Cell>::selectiveEraseToEndOfScreen()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::selectiveEraseToBeginOfScreen()
 {
     selectiveEraseToBeginOfLine();
@@ -933,6 +978,7 @@ void Screen<Cell>::selectiveEraseToBeginOfScreen()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::selectiveEraseScreen()
 {
     for (auto const lineOffset: ranges::views::iota(0, *_state.pageSize.lines))
@@ -941,6 +987,7 @@ void Screen<Cell>::selectiveEraseScreen()
 // }}}
 // {{{ DECSERA
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::selectiveEraseArea(Rect area)
 {
     auto const [top, left, bottom, right] = applyOriginMode(area).clampTo(_state.pageSize);
@@ -969,6 +1016,7 @@ void Screen<Cell>::selectiveEraseArea(Rect area)
 
 // {{{ EL
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::clearToEndOfLine()
 {
     if (_terminal.isFullHorizontalMargins() && _state.cursor.position.column.value == 0)
@@ -993,6 +1041,7 @@ void Screen<Cell>::clearToEndOfLine()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::clearToBeginOfLine()
 {
     Cell* i = &at(_state.cursor.position.line, ColumnOffset(0));
@@ -1011,6 +1060,7 @@ void Screen<Cell>::clearToBeginOfLine()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::clearLine()
 {
     currentLine().reset(grid().defaultLineFlags(), _state.cursor.graphicsRendition);
@@ -1024,12 +1074,14 @@ void Screen<Cell>::clearLine()
 // }}}
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorToNextLine(LineCount _n)
 {
     moveCursorTo(logicalCursorPosition().line + _n.as<LineOffset>(), ColumnOffset(0));
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorToPrevLine(LineCount _n)
 {
     auto const n = min(_n.as<LineOffset>(), logicalCursorPosition().line);
@@ -1037,6 +1089,7 @@ void Screen<Cell>::moveCursorToPrevLine(LineCount _n)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::insertCharacters(ColumnCount _n)
 {
     if (_terminal.isCursorInsideMargins())
@@ -1045,6 +1098,7 @@ void Screen<Cell>::insertCharacters(ColumnCount _n)
 
 /// Inserts @p _n characters at given line @p _lineNo.
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::insertChars(LineOffset _lineNo, ColumnCount _n)
 {
     auto const n = min(*_n, *_state.margin.horizontal.to - *logicalCursorPosition().column + 1);
@@ -1063,6 +1117,7 @@ void Screen<Cell>::insertChars(LineOffset _lineNo, ColumnCount _n)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::insertLines(LineCount _n)
 {
     if (_terminal.isCursorInsideMargins())
@@ -1075,6 +1130,7 @@ void Screen<Cell>::insertLines(LineCount _n)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::insertColumns(ColumnCount _n)
 {
     if (_terminal.isCursorInsideMargins())
@@ -1083,6 +1139,7 @@ void Screen<Cell>::insertColumns(ColumnCount _n)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::copyArea(Rect _sourceArea, int _page, CellLocation _targetTopLeft, int _targetPage)
 {
     (void) _page;
@@ -1127,6 +1184,7 @@ void Screen<Cell>::copyArea(Rect _sourceArea, int _page, CellLocation _targetTop
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::eraseArea(int _top, int _left, int _bottom, int _right)
 {
     assert(_right <= unbox<int>(_state.pageSize.columns));
@@ -1147,6 +1205,7 @@ void Screen<Cell>::eraseArea(int _top, int _left, int _bottom, int _right)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::fillArea(char32_t _ch, int _top, int _left, int _bottom, int _right)
 {
     // "Pch can be any value from 32 to 126 or from 160 to 255."
@@ -1167,6 +1226,7 @@ void Screen<Cell>::fillArea(char32_t _ch, int _top, int _left, int _bottom, int 
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::deleteLines(LineCount _n)
 {
     if (_terminal.isCursorInsideMargins())
@@ -1178,6 +1238,7 @@ void Screen<Cell>::deleteLines(LineCount _n)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::deleteCharacters(ColumnCount _n)
 {
     if (_terminal.isCursorInsideMargins() && *_n != 0)
@@ -1185,6 +1246,7 @@ void Screen<Cell>::deleteCharacters(ColumnCount _n)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::deleteChars(LineOffset _line, ColumnOffset _column, ColumnCount _n)
 {
     auto& line = grid().lineAt(_line);
@@ -1204,6 +1266,7 @@ void Screen<Cell>::deleteChars(LineOffset _line, ColumnOffset _column, ColumnCou
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::deleteColumns(ColumnCount _n)
 {
     if (_terminal.isCursorInsideMargins())
@@ -1212,6 +1275,7 @@ void Screen<Cell>::deleteColumns(ColumnCount _n)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::horizontalTabClear(HorizontalTabClear _which)
 {
     switch (_which)
@@ -1222,18 +1286,21 @@ void Screen<Cell>::horizontalTabClear(HorizontalTabClear _which)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::horizontalTabSet()
 {
     setTabUnderCursor();
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::setCurrentWorkingDirectory(string const& _url)
 {
     _state.currentWorkingDirectory = _url;
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::hyperlink(string _id, string _uri)
 {
     if (_uri.empty())
@@ -1254,6 +1321,7 @@ void Screen<Cell>::hyperlink(string _id, string _uri)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorUp(LineCount _n)
 {
     _state.wrapPending = 0;
@@ -1267,6 +1335,7 @@ void Screen<Cell>::moveCursorUp(LineCount _n)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorDown(LineCount _n)
 {
     _state.wrapPending = 0;
@@ -1281,6 +1350,7 @@ void Screen<Cell>::moveCursorDown(LineCount _n)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorForward(ColumnCount _n)
 {
     _state.wrapPending = 0;
@@ -1289,6 +1359,7 @@ void Screen<Cell>::moveCursorForward(ColumnCount _n)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorBackward(ColumnCount _n)
 {
     // even if you move to 80th of 80 columns, it'll first write a char and THEN flag wrap pending
@@ -1300,24 +1371,28 @@ void Screen<Cell>::moveCursorBackward(ColumnCount _n)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorToColumn(ColumnOffset _column)
 {
     setCurrentColumn(_column);
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorToBeginOfLine()
 {
     setCurrentColumn(ColumnOffset(0));
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorToLine(LineOffset _row)
 {
     moveCursorTo(_row, _state.cursor.position.column);
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorToNextTab()
 {
     // TODO: I guess something must remember when a \t was added, for proper move-back?
@@ -1365,12 +1440,14 @@ void Screen<Cell>::moveCursorToNextTab()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::notify(string const& _title, string const& _content)
 {
     _terminal.notify(_title, _content);
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::captureBuffer(LineCount _lineCount, bool _logicalLines)
 {
     // TODO: Unit test case! (for ensuring line numbering and limits are working as expected)
@@ -1439,6 +1516,7 @@ void Screen<Cell>::captureBuffer(LineCount _lineCount, bool _logicalLines)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::cursorForwardTab(TabStopCount _count)
 {
     for (int i = 0; i < unbox<int>(_count); ++i)
@@ -1446,6 +1524,7 @@ void Screen<Cell>::cursorForwardTab(TabStopCount _count)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::cursorBackwardTab(TabStopCount _count)
 {
     if (!_count)
@@ -1491,6 +1570,7 @@ void Screen<Cell>::cursorBackwardTab(TabStopCount _count)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::index()
 {
     if (*realCursorPosition().line == *_state.margin.vertical.to)
@@ -1500,6 +1580,7 @@ void Screen<Cell>::index()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::reverseIndex()
 {
     if (unbox<int>(realCursorPosition().line) == unbox<int>(_state.margin.vertical.from))
@@ -1509,6 +1590,7 @@ void Screen<Cell>::reverseIndex()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::backIndex()
 {
     if (realCursorPosition().column == _state.margin.horizontal.from)
@@ -1518,6 +1600,7 @@ void Screen<Cell>::backIndex()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::forwardIndex()
 {
     if (*realCursorPosition().column == *_state.margin.horizontal.to)
@@ -1527,24 +1610,28 @@ void Screen<Cell>::forwardIndex()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::setForegroundColor(Color _color)
 {
     _state.cursor.graphicsRendition.foregroundColor = _color;
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::setBackgroundColor(Color _color)
 {
     _state.cursor.graphicsRendition.backgroundColor = _color;
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::setUnderlineColor(Color _color)
 {
     _state.cursor.graphicsRendition.underlineColor = _color;
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::setCursorStyle(CursorDisplay _display, CursorShape _shape)
 {
     _state.cursorDisplay = _display;
@@ -1554,24 +1641,28 @@ void Screen<Cell>::setCursorStyle(CursorDisplay _display, CursorShape _shape)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::setGraphicsRendition(GraphicsRendition _rendition)
 {
     _terminal.setGraphicsRendition(_rendition);
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::setMark()
 {
     currentLine().setMarked(true);
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::saveModes(std::vector<DECMode> const& _modes)
 {
     _state.modes.save(_modes);
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::restoreModes(std::vector<DECMode> const& _modes)
 {
     _state.modes.restore(_modes);
@@ -1587,6 +1678,7 @@ enum class ModeResponse
 };
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::requestAnsiMode(unsigned int _mode)
 {
     ModeResponse const modeResponse =
@@ -1600,6 +1692,7 @@ void Screen<Cell>::requestAnsiMode(unsigned int _mode)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::requestDECMode(unsigned int _mode)
 {
     ModeResponse const modeResponse =
@@ -1613,6 +1706,7 @@ void Screen<Cell>::requestDECMode(unsigned int _mode)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::screenAlignmentPattern()
 {
     // sets the margins to the extremes of the page
@@ -1632,12 +1726,14 @@ void Screen<Cell>::screenAlignmentPattern()
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::applicationKeypadMode(bool _enable)
 {
     _terminal.setApplicationkeypadMode(_enable);
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::designateCharset(CharsetTable _table, CharsetId _charset)
 {
     // TODO: unit test SCS and see if they also behave well with reset/softreset
@@ -1646,6 +1742,7 @@ void Screen<Cell>::designateCharset(CharsetTable _table, CharsetId _charset)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::singleShiftSelect(CharsetTable _table)
 {
     // TODO: unit test SS2, SS3
@@ -1653,6 +1750,7 @@ void Screen<Cell>::singleShiftSelect(CharsetTable _table)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::sixelImage(ImageSize _pixelSize, Image::Data&& _data)
 {
     auto const columnCount =
@@ -1684,6 +1782,7 @@ void Screen<Cell>::sixelImage(ImageSize _pixelSize, Image::Data&& _data)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 shared_ptr<Image const> Screen<Cell>::uploadImage(ImageFormat _format,
                                                   ImageSize _imageSize,
                                                   Image::Data&& _pixmap)
@@ -1692,6 +1791,7 @@ shared_ptr<Image const> Screen<Cell>::uploadImage(ImageFormat _format,
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::renderImage(shared_ptr<Image const> _image,
                                CellLocation _topLeft,
                                GridSize _gridSize,
@@ -1764,6 +1864,7 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> _image,
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::requestDynamicColor(DynamicColorName _name)
 {
     auto const color = [&]() -> optional<RGBColor> {
@@ -1802,6 +1903,7 @@ void Screen<Cell>::requestDynamicColor(DynamicColorName _name)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::requestPixelSize(RequestPixelSize _area)
 {
     switch (_area)
@@ -1820,6 +1922,7 @@ void Screen<Cell>::requestPixelSize(RequestPixelSize _area)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::requestCharacterSize(
     RequestPixelSize _area) // TODO: rename RequestPixelSize to RequestArea?
 {
@@ -1840,6 +1943,7 @@ void Screen<Cell>::requestCharacterSize(
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::requestStatusString(RequestStatusString _value)
 {
     // xterm responds with DCS 1 $ r Pt ST for valid requests
@@ -1929,6 +2033,7 @@ void Screen<Cell>::requestStatusString(RequestStatusString _value)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::requestTabStops()
 {
     // Response: `DCS 2 $ u Pt ST`
@@ -1966,6 +2071,7 @@ namespace
 } // namespace
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::requestCapability(std::string_view _name)
 {
     if (booleanCapability(_name))
@@ -1984,6 +2090,7 @@ void Screen<Cell>::requestCapability(std::string_view _name)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::requestCapability(capabilities::Code _code)
 {
     if (booleanCapability(_code))
@@ -2002,6 +2109,7 @@ void Screen<Cell>::requestCapability(capabilities::Code _code)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::resetDynamicColor(DynamicColorName _name)
 {
     switch (_name)
@@ -2031,6 +2139,7 @@ void Screen<Cell>::resetDynamicColor(DynamicColorName _name)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::setDynamicColor(DynamicColorName _name, RGBColor _value)
 {
     switch (_name)
@@ -2050,12 +2159,14 @@ void Screen<Cell>::setDynamicColor(DynamicColorName _name, RGBColor _value)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::inspect()
 {
     _terminal.inspect();
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::inspect(std::string const& _message, std::ostream& _os) const
 {
     auto const hline = [&]() {
@@ -2114,6 +2225,7 @@ void Screen<Cell>::inspect(std::string const& _message, std::ostream& _os) const
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::smGraphics(XtSmGraphics::Item _item,
                               XtSmGraphics::Action _action,
                               XtSmGraphics::Value _value)
@@ -3050,6 +3162,7 @@ namespace impl
 // }}}
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::executeControlCode(char controlCode)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
@@ -3093,6 +3206,7 @@ void Screen<Cell>::executeControlCode(char controlCode)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::processSequence(Sequence const& seq)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
@@ -3111,6 +3225,7 @@ void Screen<Cell>::processSequence(Sequence const& seq)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::applyAndLog(FunctionDefinition const& _function, Sequence const& _seq)
 {
     auto const result = apply(_function, _seq);
@@ -3132,6 +3247,7 @@ void Screen<Cell>::applyAndLog(FunctionDefinition const& _function, Sequence con
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence const& seq)
 {
     // This function assumed that the incoming instruction has been already resolved to a given
@@ -3520,6 +3636,7 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 unique_ptr<ParserExtension> Screen<Cell>::hookSixel(Sequence const& _seq)
 {
     auto const Pa = _seq.param_or(0, 1);
@@ -3563,6 +3680,7 @@ unique_ptr<ParserExtension> Screen<Cell>::hookSixel(Sequence const& _seq)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 unique_ptr<ParserExtension> Screen<Cell>::hookSTP(Sequence const& /*_seq*/)
 {
     return make_unique<SimpleStringCollector>(
@@ -3570,6 +3688,7 @@ unique_ptr<ParserExtension> Screen<Cell>::hookSTP(Sequence const& /*_seq*/)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 unique_ptr<ParserExtension> Screen<Cell>::hookXTGETTCAP(Sequence const& /*_seq*/)
 {
     // DCS + q Pt ST
@@ -3608,6 +3727,7 @@ unique_ptr<ParserExtension> Screen<Cell>::hookXTGETTCAP(Sequence const& /*_seq*/
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 unique_ptr<ParserExtension> Screen<Cell>::hookDECRQSS(Sequence const& /*_seq*/)
 {
     return make_unique<SimpleStringCollector>([this](string_view _data) {
@@ -3634,6 +3754,7 @@ unique_ptr<ParserExtension> Screen<Cell>::hookDECRQSS(Sequence const& /*_seq*/)
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 optional<CellLocation> Screen<Cell>::search(std::u32string_view searchText, CellLocation startPosition)
 {
     // TODO use LogicalLines to spawn logical lines for improving the search on wrapped lines.
@@ -3664,6 +3785,7 @@ optional<CellLocation> Screen<Cell>::search(std::u32string_view searchText, Cell
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 optional<CellLocation> Screen<Cell>::searchReverse(std::u32string_view searchText, CellLocation startPosition)
 {
     // TODO use LogicalLinesReverse to spawn logical lines for improving the search on wrapped lines.

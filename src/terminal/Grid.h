@@ -13,12 +13,14 @@
  */
 #pragma once
 
+#include <terminal/CellConcept.h>
 #include <terminal/GraphicsAttributes.h>
 #include <terminal/Line.h>
 #include <terminal/primitives.h>
 
 #include <crispy/algorithm.h>
 #include <crispy/assert.h>
+#include <crispy/defines.h>
 #include <crispy/ring.h>
 
 #include <unicode/convert.h>
@@ -379,6 +381,7 @@ struct ReverseLogicalLines
  * </pre>
  */
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 class Grid
 {
     // TODO: Rename all "History" to "Scrollback"?
@@ -596,18 +599,21 @@ std::string dumpGrid(Grid<Cell> const& grid);
 
 // {{{ impl
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 constexpr LineFlags Grid<Cell>::defaultLineFlags() const noexcept
 {
     return reflowOnResize_ ? LineFlags::Wrappable : LineFlags::None;
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 constexpr LineCount Grid<Cell>::linesUsed() const noexcept
 {
     return linesUsed_;
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 bool Grid<Cell>::isLineWrapped(LineOffset _line) const noexcept
 {
     return _line >= -boxed_cast<LineOffset>(historyLineCount())
@@ -615,6 +621,7 @@ bool Grid<Cell>::isLineWrapped(LineOffset _line) const noexcept
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 template <typename RendererT>
 [[nodiscard]] RenderPassHints Grid<Cell>::render(RendererT&& _render, ScrollOffset _scrollOffset) const
 {

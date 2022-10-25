@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <terminal/defines.h>
+#include <crispy/defines.h>
 
 #include <fmt/format.h>
 
@@ -250,7 +250,7 @@ enum class ColorType : uint8_t
     RGB
 };
 
-struct CONTOUR_PACKED Color
+struct CRISPY_PACKED Color
 {
     // Layout:
     //
