@@ -13,6 +13,7 @@
  */
 #include <terminal/GraphicsAttributes.h>
 #include <terminal/Line.h>
+#include <terminal/primitives.h>
 
 #include <unicode/grapheme_segmenter.h>
 #include <unicode/utf8.h>
@@ -29,6 +30,15 @@ template <typename Cell>
 typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount _newColumnCount)
 {
     using crispy::Comparison;
+    if (isTrivialBuffer())
+    {
+        switch (crispy::strongCompare(_newColumnCount, ColumnCount::cast_from(trivialBuffer().text.size())))
+        {
+            case Comparison::Greater: trivialBuffer().displayWidth = _newColumnCount;
+            case Comparison::Equal: return {};
+            case Comparison::Less:;
+        }
+    }
     auto& buffer = inflatedBuffer();
     // TODO: Efficiently handle TrivialBuffer-case.
     switch (crispy::strongCompare(_newColumnCount, size()))

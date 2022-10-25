@@ -14,6 +14,7 @@
 #include <terminal/Grid.h>
 #include <terminal/Parser.h>
 #include <terminal/cell/CellConfig.h>
+#include <terminal/primitives.h>
 
 #include <fmt/format.h>
 
@@ -885,6 +886,29 @@ TEST_CASE("Grid resize with wrap", "[grid]")
     REQUIRE(grid.lineText(LineOffset(0)) == "1    ");
     REQUIRE(grid.lineText(LineOffset(1)) == "2    ");
     REQUIRE(grid.lineText(LineOffset(2)) == "ABCDE");
+}
+
+TEST_CASE("Grid resize", "[grid]")
+{
+    auto width = ColumnCount(6);
+    auto grid = Grid<Cell>(PageSize { LineCount(2), width }, true, LineCount(0));
+    auto text = "abcd"sv;
+    auto pool = crispy::BufferObjectPool(32);
+    auto bufferObject = pool.allocateBufferObject();
+    bufferObject->writeAtEnd(text);
+    auto const bufferFragment = bufferObject->ref(0, 4);
+    auto sgr = GraphicsAttributes {};
+    auto const trivial = TrivialLineBuffer { width, sgr, sgr, HyperlinkId {}, width, bufferFragment };
+    auto line_trivial = Line<Cell>(LineFlags::None, trivial);
+    grid.lineAt(LineOffset(0)) = line_trivial;
+    REQUIRE(grid.lineAt(LineOffset(0)).isTrivialBuffer());
+    REQUIRE(grid.lineAt(LineOffset(1)).isTrivialBuffer());
+    (void) grid.resize(PageSize { LineCount(2), width + ColumnCount(1) }, CellLocation {}, false);
+    REQUIRE(grid.lineAt(LineOffset(0)).isTrivialBuffer());
+    REQUIRE(grid.lineAt(LineOffset(1)).isTrivialBuffer());
+    (void) grid.resize(PageSize { LineCount(2), width + ColumnCount(-1) }, CellLocation {}, false);
+    REQUIRE(grid.lineAt(LineOffset(0)).isTrivialBuffer());
+    REQUIRE(grid.lineAt(LineOffset(1)).isTrivialBuffer());
 }
 
 // }}}
