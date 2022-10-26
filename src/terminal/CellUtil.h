@@ -13,7 +13,10 @@
  */
 #pragma once
 
-#include <terminal/CellConcept.h>
+#include <terminal/CellFlags.h>
+#include <terminal/Color.h>
+#include <terminal/ColorPalette.h>
+#include <terminal/cell/CellConcept.h>
 
 #include <unicode/width.h>
 

@@ -1186,10 +1186,10 @@ u32string Grid<Cell>::extractText(CellLocationRange range) const noexcept
 
 } // end namespace terminal
 
-#include <terminal/Cell.h>
-template class terminal::Grid<terminal::Cell>;
-template std::string terminal::dumpGrid<terminal::Cell>(terminal::Grid<terminal::Cell> const& grid);
+#include <terminal/cell/ThinCell.h>
+template class terminal::Grid<terminal::ThinCell>;
+template std::string terminal::dumpGrid<terminal::ThinCell>(terminal::Grid<terminal::ThinCell> const& grid);
 
-#include <terminal/DenseCell.h>
+#include <terminal/cell/DenseCell.h>
 template class terminal::Grid<terminal::DenseCell>;
 template std::string terminal::dumpGrid<terminal::DenseCell>(terminal::Grid<terminal::DenseCell> const&);

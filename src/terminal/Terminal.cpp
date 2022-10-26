@@ -372,21 +372,22 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
     auto const mainDisplayReverseVideo = isModeEnabled(terminal::DECMode::ReverseVideo);
 
     if (isPrimaryScreen())
-        _lastRenderPassHints = primaryScreen_.render(RenderBufferBuilder<Cell> { *this,
-                                                                                 _output,
-                                                                                 LineOffset(0),
-                                                                                 mainDisplayReverseVideo,
-                                                                                 HighlightSearchMatches::Yes,
-                                                                                 inputMethodData_ },
-                                                     viewport_.scrollOffset());
+        _lastRenderPassHints =
+            primaryScreen_.render(RenderBufferBuilder<PrimaryScreenCell> { *this,
+                                                                           _output,
+                                                                           LineOffset(0),
+                                                                           mainDisplayReverseVideo,
+                                                                           HighlightSearchMatches::Yes,
+                                                                           inputMethodData_ },
+                                  viewport_.scrollOffset());
     else
         _lastRenderPassHints =
-            alternateScreen_.render(RenderBufferBuilder<DenseCell> { *this,
-                                                                     _output,
-                                                                     LineOffset(0),
-                                                                     mainDisplayReverseVideo,
-                                                                     HighlightSearchMatches::Yes,
-                                                                     inputMethodData_ },
+            alternateScreen_.render(RenderBufferBuilder<AlternateScreenCell> { *this,
+                                                                               _output,
+                                                                               LineOffset(0),
+                                                                               mainDisplayReverseVideo,
+                                                                               HighlightSearchMatches::Yes,
+                                                                               inputMethodData_ },
                                     viewport_.scrollOffset());
 
     switch (state_.statusDisplayType)
@@ -1019,13 +1020,13 @@ string Terminal::extractSelectionText() const
 
     if (isPrimaryScreen())
     {
-        auto se = SelectionRenderer<Cell> { *this, pageSize().columns.as<ColumnOffset>() - 1 };
+        auto se = SelectionRenderer<PrimaryScreenCell> { *this, pageSize().columns.as<ColumnOffset>() - 1 };
         terminal::renderSelection(*selection_, [&](CellLocation _pos) { se(_pos, primaryScreen_.at(_pos)); });
         return se.finish();
     }
     else
     {
-        auto se = SelectionRenderer<DenseCell> { *this, pageSize().columns.as<ColumnOffset>() - 1 };
+        auto se = SelectionRenderer<AlternateScreenCell> { *this, pageSize().columns.as<ColumnOffset>() - 1 };
         terminal::renderSelection(*selection_,
                                   [&](CellLocation _pos) { se(_pos, alternateScreen_.at(_pos)); });
         return se.finish();

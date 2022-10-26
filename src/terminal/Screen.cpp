@@ -3818,8 +3818,8 @@ optional<CellLocation> Screen<Cell>::searchReverse(std::u32string_view searchTex
 
 } // namespace terminal
 
-#include <terminal/Cell.h>
-template class terminal::Screen<terminal::Cell>;
+#include <terminal/cell/ThinCell.h>
+template class terminal::Screen<terminal::ThinCell>;
 
-#include <terminal/DenseCell.h>
+#include <terminal/cell/DenseCell.h>
 template class terminal::Screen<terminal::DenseCell>;

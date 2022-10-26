@@ -217,8 +217,8 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
 }
 } // end namespace terminal
 
-#include <terminal/Cell.h>
-template class terminal::Line<terminal::Cell>;
+#include <terminal/cell/ThinCell.h>
+template class terminal::Line<terminal::ThinCell>;
 
-#include <terminal/DenseCell.h>
+#include <terminal/cell/DenseCell.h>
 template class terminal::Line<terminal::DenseCell>;

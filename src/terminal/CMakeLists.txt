@@ -19,12 +19,12 @@ endif()
 
 set(terminal_HEADERS
     Capabilities.h
-    Cell.h
-    CellConcept.h
-    CellConfig.h
+    cell/CellConcept.h
+    cell/CellConfig.h
+    cell/DenseCell.h
+    cell/ThinCell.h
     CellUtil.h
     Charset.h
-    DenseCell.h
     Color.h
     ColorPalette.h
     Functions.h
@@ -69,7 +69,7 @@ endif()
 
 set(terminal_SOURCES
     Capabilities.cpp
-    Cell.cpp
+    cell/ThinCell.cpp
     Charset.cpp
     Color.cpp
     ColorPalette.cpp

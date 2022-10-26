@@ -14,7 +14,6 @@
 #pragma once
 
 #include <terminal/Capabilities.h>
-#include <terminal/CellConcept.h>
 #include <terminal/CellUtil.h>
 #include <terminal/Charset.h>
 #include <terminal/Color.h>
@@ -25,6 +24,7 @@
 #include <terminal/ScreenEvents.h>
 #include <terminal/TerminalState.h>
 #include <terminal/VTType.h>
+#include <terminal/cell/CellConcept.h>
 
 #include <crispy/StrongLRUCache.h>
 #include <crispy/algorithm.h>

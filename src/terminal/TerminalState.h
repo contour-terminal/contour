@@ -13,8 +13,6 @@
  */
 #pragma once
 
-#include <terminal/Cell.h>
-#include <terminal/CellConfig.h>
 #include <terminal/Charset.h>
 #include <terminal/ColorPalette.h>
 #include <terminal/GraphicsAttributes.h>
@@ -27,6 +25,7 @@
 #include <terminal/Sequencer.h>
 #include <terminal/ViCommands.h>
 #include <terminal/ViInputHandler.h>
+#include <terminal/cell/CellConfig.h>
 #include <terminal/primitives.h>
 
 #include <unicode/utf8.h>
