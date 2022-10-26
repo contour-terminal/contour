@@ -127,6 +127,12 @@ class Line
             setBuffer(TrivialBuffer { ColumnCount::cast_from(inflatedBuffer().size()), _attributes });
     }
 
+    void reset(LineFlags _flags, GraphicsAttributes _attributes, ColumnCount count) noexcept
+    {
+        flags_ = static_cast<unsigned>(_flags);
+        setBuffer(TrivialBuffer { count, _attributes });
+    }
+
     void fill(LineFlags _flags,
               GraphicsAttributes const& _attributes,
               char32_t _codepoint,

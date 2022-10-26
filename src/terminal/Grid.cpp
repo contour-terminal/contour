@@ -469,21 +469,19 @@ LineCount Grid<Cell>::scrollUp(LineCount _n, GraphicsAttributes _defaultAttribut
         // scroll up only inside vertical margin with full horizontal extend
         auto const marginHeight = LineCount(_margin.vertical.length());
         auto const n = std::min(_n, marginHeight);
-        if (n < marginHeight)
+        if (*n && n < marginHeight)
         {
             // rotate line attribs
-            auto u = next(begin(lines_), *_margin.vertical.from);
-            auto v = next(begin(lines_), *_margin.vertical.from + *n);
-            auto w = next(begin(lines_), *_margin.vertical.to + 1);
-            rotate(u, v, w);
+            for (auto topLineOffset = *_margin.vertical.from; topLineOffset <= *_margin.vertical.to - *n;
+                 ++topLineOffset)
+                lines_[topLineOffset] = std::move(lines_[topLineOffset + *n]);
         }
 
         auto const topEmptyLineNr = *_margin.vertical.to - *n + 1;
         auto const bottomLineNumber = *_margin.vertical.to;
         for (auto lineNumber = topEmptyLineNr; lineNumber <= bottomLineNumber; ++lineNumber)
         {
-            Line<Cell>& line = lines_[lineNumber];
-            line.reset(defaultLineFlags(), _defaultAttributes);
+            lines_[lineNumber].reset(defaultLineFlags(), _defaultAttributes, pageSize_.columns);
         }
     }
     else
