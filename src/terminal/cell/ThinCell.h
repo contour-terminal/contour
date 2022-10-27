@@ -76,7 +76,7 @@ struct CellExtra
 ///
 /// TODO(perf): ensure POD'ness so that we can SIMD-copy it.
 /// - Requires moving out CellExtra into Line<T>?
-class CRISPY_PACKED ThinCell: public CellBase<ThinCell>
+class CRISPY_PACKED ThinCell
 {
   public:
     static uint8_t constexpr MaxCodepoints = 7;
@@ -153,6 +153,10 @@ class CRISPY_PACKED ThinCell: public CellBase<ThinCell>
 
     [[nodiscard]] HyperlinkId hyperlink() const noexcept;
     void setHyperlink(HyperlinkId _hyperlink);
+
+    [[nodiscard]] bool empty() const noexcept;
+
+    void setGraphicsRendition(GraphicsRendition sgr) noexcept;
 
   private:
     [[nodiscard]] CellExtra& extra() noexcept;
@@ -480,6 +484,17 @@ inline void ThinCell::setHyperlink(HyperlinkId _hyperlink)
     else if (extra_)
         extra_->hyperlink = {};
 }
+
+inline bool ThinCell::empty() const noexcept
+{
+    return CellUtil::empty(*this);
+}
+
+inline void ThinCell::setGraphicsRendition(GraphicsRendition sgr) noexcept
+{
+    resetFlags(CellUtil::makeCellFlags(sgr, flags()));
+}
+
 // }}}
 // {{{ free function implementations
 inline bool beginsWith(std::u32string_view text, ThinCell const& cell) noexcept

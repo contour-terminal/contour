@@ -34,7 +34,7 @@ namespace terminal
 ///
 /// This means, only a fixed amount of cells should be living without the need
 /// of scrollback buffer and ideally fast access to all relevant properties.
-class SimpleCell: public CellBase<SimpleCell>
+class SimpleCell
 {
   public:
     explicit SimpleCell(GraphicsAttributes attributes, HyperlinkId hyperlink = {}) noexcept;
@@ -92,6 +92,8 @@ class SimpleCell: public CellBase<SimpleCell>
     [[nodiscard]] HyperlinkId hyperlink() const noexcept;
     void setHyperlink(HyperlinkId hyperlink) noexcept;
 
+    [[nodiscard]] bool empty() const noexcept { return CellUtil::empty(*this); }
+
   private:
     std::u32string _codepoints {};
     GraphicsAttributes _graphicsAttributes {};
@@ -135,9 +137,9 @@ inline void SimpleCell::write(GraphicsAttributes sgr, char32_t codepoint, uint8_
 }
 
 inline void SimpleCell::write(GraphicsAttributes sgr,
-                             char32_t codepoint,
-                             [[maybe_unused]] uint8_t width,
-                             [[maybe_unused]] HyperlinkId hyperlink)
+                              char32_t codepoint,
+                              [[maybe_unused]] uint8_t width,
+                              [[maybe_unused]] HyperlinkId hyperlink)
 {
     _graphicsAttributes = sgr;
     _codepoints.clear();
@@ -274,16 +276,16 @@ inline Color SimpleCell::underlineColor() const noexcept
 }
 
 inline RGBColorPair SimpleCell::makeColors(ColorPalette colorPalette,
-                                          bool reverseVideo,
-                                          bool blink,
-                                          bool rapidBlink) const noexcept
+                                           bool reverseVideo,
+                                           bool blink,
+                                           bool rapidBlink) const noexcept
 {
     return CellUtil::makeColors(
         colorPalette, flags(), reverseVideo, foregroundColor(), backgroundColor(), blink, rapidBlink);
 }
 
 inline RGBColor SimpleCell::getUnderlineColor(ColorPalette const& colorPalette,
-                                             RGBColor defaultColor) const noexcept
+                                              RGBColor defaultColor) const noexcept
 {
     return CellUtil::getUnderlineColor(colorPalette, flags(), defaultColor, underlineColor());
 }
@@ -293,7 +295,8 @@ inline std::shared_ptr<ImageFragment> SimpleCell::imageFragment() const noexcept
     return _imageFragment;
 }
 
-inline void SimpleCell::setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, CellLocation offset)
+inline void SimpleCell::setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage,
+                                         CellLocation offset)
 {
     _imageFragment = std::make_shared<ImageFragment>(rasterizedImage, offset);
 }

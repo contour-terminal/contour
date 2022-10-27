@@ -173,21 +173,3 @@ inline CellFlags makeCellFlags(GraphicsRendition rendition, CellFlags base) noex
 }
 
 } // namespace terminal::CellUtil
-
-namespace terminal
-{
-
-template <typename Impl>
-class CellBase
-{
-  public:
-    [[nodiscard]] bool empty() const noexcept { return CellUtil::empty(static_cast<Impl const&>(*this)); }
-
-    void setGraphicsRendition(GraphicsRendition sgr) noexcept
-    {
-        auto& self = static_cast<Impl&>(*this);
-        self.resetFlags(CellUtil::makeCellFlags(sgr, self.flags()));
-    }
-};
-
-} // namespace terminal
