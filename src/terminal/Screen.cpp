@@ -42,6 +42,7 @@
 #include <sstream>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <variant>
 
 using namespace std::string_view_literals;
@@ -2565,6 +2566,7 @@ namespace impl
         }
 
         template <typename Target>
+        CRISPY_REQUIRES((CellConcept<Target> || std::is_same_v<Target, Terminal>) )
         ApplyResult applySGR(Target& target, Sequence const& seq, size_t parameterStart, size_t parameterEnd)
         {
             if (parameterStart == parameterEnd)
