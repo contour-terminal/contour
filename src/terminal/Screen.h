@@ -482,11 +482,6 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         return _state.screenType;
     }
 
-    [[nodiscard]] bool synchronizeOutput() const noexcept
-    {
-        return false;
-    } // TODO
-
     void scrollUp(LineCount n)
     {
         scrollUp(n, _state.margin);
@@ -497,12 +492,6 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     }
 
     void verifyState() const override;
-
-    /// @returns the primary screen's grid.
-    [[nodiscard]] decltype(auto) primaryGrid() noexcept
-    {
-        return _state.primaryBuffer;
-    }
 
     [[nodiscard]] Grid<Cell> const& grid() const noexcept
     {
