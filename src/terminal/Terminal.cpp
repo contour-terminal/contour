@@ -1474,70 +1474,11 @@ void Terminal::softReset()
 
 void Terminal::setGraphicsRendition(GraphicsRendition _rendition)
 {
-    // TODO: optimize this as there are only 3 cases
-    // 1.) reset
-    // 2.) set some bits |=
-    // 3.) clear some bits &= ~
-    switch (_rendition)
-    {
-        case GraphicsRendition::Reset: state_.cursor.graphicsRendition = {}; break;
-        case GraphicsRendition::Bold: state_.cursor.graphicsRendition.flags |= CellFlags::Bold; break;
-        case GraphicsRendition::Faint: state_.cursor.graphicsRendition.flags |= CellFlags::Faint; break;
-        case GraphicsRendition::Italic: state_.cursor.graphicsRendition.flags |= CellFlags::Italic; break;
-        case GraphicsRendition::Underline:
-            state_.cursor.graphicsRendition.flags |= CellFlags::Underline;
-            break;
-        case GraphicsRendition::Blinking:
-            state_.cursor.graphicsRendition.flags &= ~CellFlags::RapidBlinking;
-            state_.cursor.graphicsRendition.flags |= CellFlags::Blinking;
-            break;
-        case GraphicsRendition::RapidBlinking:
-            state_.cursor.graphicsRendition.flags &= ~CellFlags::Blinking;
-            state_.cursor.graphicsRendition.flags |= CellFlags::RapidBlinking;
-            break;
-        case GraphicsRendition::Inverse: state_.cursor.graphicsRendition.flags |= CellFlags::Inverse; break;
-        case GraphicsRendition::Hidden: state_.cursor.graphicsRendition.flags |= CellFlags::Hidden; break;
-        case GraphicsRendition::CrossedOut:
-            state_.cursor.graphicsRendition.flags |= CellFlags::CrossedOut;
-            break;
-        case GraphicsRendition::DoublyUnderlined:
-            state_.cursor.graphicsRendition.flags |= CellFlags::DoublyUnderlined;
-            break;
-        case GraphicsRendition::CurlyUnderlined:
-            state_.cursor.graphicsRendition.flags |= CellFlags::CurlyUnderlined;
-            break;
-        case GraphicsRendition::DottedUnderline:
-            state_.cursor.graphicsRendition.flags |= CellFlags::DottedUnderline;
-            break;
-        case GraphicsRendition::DashedUnderline:
-            state_.cursor.graphicsRendition.flags |= CellFlags::DashedUnderline;
-            break;
-        case GraphicsRendition::Framed: state_.cursor.graphicsRendition.flags |= CellFlags::Framed; break;
-        case GraphicsRendition::Overline: state_.cursor.graphicsRendition.flags |= CellFlags::Overline; break;
-        case GraphicsRendition::Normal:
-            state_.cursor.graphicsRendition.flags &= ~(CellFlags::Bold | CellFlags::Faint);
-            break;
-        case GraphicsRendition::NoItalic: state_.cursor.graphicsRendition.flags &= ~CellFlags::Italic; break;
-        case GraphicsRendition::NoUnderline:
-            state_.cursor.graphicsRendition.flags &=
-                ~(CellFlags::Underline | CellFlags::DoublyUnderlined | CellFlags::CurlyUnderlined
-                  | CellFlags::DottedUnderline | CellFlags::DashedUnderline);
-            break;
-        case GraphicsRendition::NoBlinking:
-            state_.cursor.graphicsRendition.flags &= ~(CellFlags::Blinking | CellFlags::RapidBlinking);
-            break;
-        case GraphicsRendition::NoInverse:
-            state_.cursor.graphicsRendition.flags &= ~CellFlags::Inverse;
-            break;
-        case GraphicsRendition::NoHidden: state_.cursor.graphicsRendition.flags &= ~CellFlags::Hidden; break;
-        case GraphicsRendition::NoCrossedOut:
-            state_.cursor.graphicsRendition.flags &= ~CellFlags::CrossedOut;
-            break;
-        case GraphicsRendition::NoFramed: state_.cursor.graphicsRendition.flags &= ~CellFlags::Framed; break;
-        case GraphicsRendition::NoOverline:
-            state_.cursor.graphicsRendition.flags &= ~CellFlags::Overline;
-            break;
-    }
+    if (_rendition == GraphicsRendition::Reset)
+        state_.cursor.graphicsRendition = {};
+    else
+        state_.cursor.graphicsRendition.flags =
+            CellUtil::makeCellFlags(_rendition, state_.cursor.graphicsRendition.flags);
 }
 
 void Terminal::setForegroundColor(Color _color)

@@ -81,7 +81,7 @@ concept CellConcept = requires(T t, T const& u)
     { u.flags() } noexcept -> std::same_as<CellFlags>;
     { u.isFlagEnabled(CellFlags{}) } noexcept -> std::same_as<bool>;
     t.resetFlags();
-    t.setFlags(CellFlags{}, bool{});
+    t.resetFlags(CellFlags{});
 
     t.setGraphicsRendition(GraphicsRendition{});
 
@@ -93,10 +93,6 @@ concept CellConcept = requires(T t, T const& u)
 
     t.setUnderlineColor(Color{});
     { u.underlineColor() } noexcept -> std::same_as<Color>;
-
-    { u.getUnderlineColor(ColorPalette{}, RGBColor{} /*defaultColor*/) } -> std::same_as<RGBColor>;
-
-    { u.makeColors(ColorPalette{}, bool{} /*reverseVideo*/, bool{} /*blink*/, bool{} /*rapidBlink*/) } -> std::same_as<RGBColorPair>;
 
     { u.imageFragment() } -> std::same_as<std::shared_ptr<ImageFragment>>;
     t.setImageFragment(std::shared_ptr<RasterizedImage>{}, CellLocation{} /*offset*/);

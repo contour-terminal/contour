@@ -121,28 +121,12 @@ class CRISPY_PACKED CompactCell
 
     void resetFlags(CellFlags flags) noexcept { extra().flags = flags; }
 
-    void setFlags(CellFlags flags, bool enable = true)
-    {
-        if (enable)
-            extra().flags = extra().flags | flags;
-        else
-            extra().flags = CellFlags(int(extra().flags) & ~int(flags));
-    }
-
     [[nodiscard]] Color underlineColor() const noexcept;
     void setUnderlineColor(Color color) noexcept;
     [[nodiscard]] Color foregroundColor() const noexcept;
     void setForegroundColor(Color color) noexcept;
     [[nodiscard]] Color backgroundColor() const noexcept;
     void setBackgroundColor(Color color) noexcept;
-
-    [[nodiscard]] RGBColor getUnderlineColor(ColorPalette const& _colorPalette,
-                                             RGBColor _defaultColor) const noexcept;
-
-    [[nodiscard]] RGBColorPair makeColors(ColorPalette const& _colorPalette,
-                                          bool _reverseVideo,
-                                          bool _blink,
-                                          bool _rapidBlink) const noexcept;
 
     [[nodiscard]] std::shared_ptr<ImageFragment> imageFragment() const noexcept;
     void setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, CellLocation offset);
@@ -440,21 +424,6 @@ inline void CompactCell::setUnderlineColor(Color color) noexcept
         extra().underlineColor = color;
 }
 
-inline RGBColor CompactCell::getUnderlineColor(ColorPalette const& _colorPalette,
-                                               RGBColor _defaultColor) const noexcept
-{
-    return CellUtil::getUnderlineColor(_colorPalette, flags(), _defaultColor, underlineColor());
-}
-
-inline RGBColorPair CompactCell::makeColors(ColorPalette const& _colorPalette,
-                                            bool _reverseVideo,
-                                            bool _blink,
-                                            bool _rapidBlink) const noexcept
-{
-    return CellUtil::makeColors(
-        _colorPalette, flags(), _reverseVideo, foregroundColor(), backgroundColor(), _blink, _rapidBlink);
-}
-
 inline std::shared_ptr<ImageFragment> CompactCell::imageFragment() const noexcept
 {
     if (extra_)
@@ -493,7 +462,7 @@ inline bool CompactCell::empty() const noexcept
 
 inline void CompactCell::setGraphicsRendition(GraphicsRendition sgr) noexcept
 {
-    resetFlags(CellUtil::makeCellFlags(sgr, flags()));
+    CellUtil::applyGraphicsRendition(sgr, *this);
 }
 
 // }}}

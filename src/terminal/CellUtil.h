@@ -23,13 +23,13 @@
 namespace terminal::CellUtil
 {
 
-inline RGBColorPair makeColors(ColorPalette const& colorPalette,
-                               CellFlags cellFlags,
-                               bool _reverseVideo,
-                               Color foregroundColor,
-                               Color backgroundColor,
-                               bool blinkingState_,
-                               bool rapidBlinkState_) noexcept
+[[nodiscard]] inline RGBColorPair makeColors(ColorPalette const& colorPalette,
+                                             CellFlags cellFlags,
+                                             bool _reverseVideo,
+                                             Color foregroundColor,
+                                             Color backgroundColor,
+                                             bool blinkingState_,
+                                             bool rapidBlinkState_) noexcept
 {
     auto const fgMode = (cellFlags & CellFlags::Faint)                                    ? ColorMode::Dimmed
                         : ((cellFlags & CellFlags::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
@@ -58,10 +58,10 @@ inline RGBColorPair makeColors(ColorPalette const& colorPalette,
     return rgbColors;
 }
 
-inline RGBColor getUnderlineColor(ColorPalette const& colorPalette,
-                                  CellFlags cellFlags,
-                                  RGBColor defaultColor,
-                                  Color underlineColor) noexcept
+[[nodiscard]] inline RGBColor makeUnderlineColor(ColorPalette const& colorPalette,
+                                                 RGBColor defaultColor,
+                                                 Color underlineColor,
+                                                 CellFlags cellFlags) noexcept
 {
     if (isDefaultColor(underlineColor))
         return defaultColor;
@@ -75,7 +75,15 @@ inline RGBColor getUnderlineColor(ColorPalette const& colorPalette,
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-inline bool compareText(Cell const& cell, char asciiCharacter) noexcept
+[[nodiscard]] inline RGBColor
+    makeUnderlineColor(ColorPalette const& colorPalette, RGBColor defaultColor, Cell const& cell) noexcept
+{
+    return makeUnderlineColor(colorPalette, defaultColor, cell.underlineColor(), cell.flags());
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+[[nodiscard]] inline bool compareText(Cell const& cell, char asciiCharacter) noexcept
 {
     if (cell.codepointCount() != 1)
         return false;
@@ -85,14 +93,14 @@ inline bool compareText(Cell const& cell, char asciiCharacter) noexcept
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-inline bool empty(Cell const& cell) noexcept
+[[nodiscard]] inline bool empty(Cell const& cell) noexcept
 {
     return (cell.codepointCount() == 0 || cell.codepoint(0) == 0x20) && !cell.imageFragment();
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-inline int computeWidthChange(Cell const& cell, char32_t codepoint) noexcept
+[[nodiscard]] inline int computeWidthChange(Cell const& cell, char32_t codepoint) noexcept
 {
     constexpr bool AllowWidthChange = false; // TODO: make configurable
     if (!AllowWidthChange)
@@ -112,7 +120,7 @@ inline int computeWidthChange(Cell const& cell, char32_t codepoint) noexcept
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-inline bool beginsWith(std::u32string_view text, Cell const& cell) noexcept
+[[nodiscard]] inline bool beginsWith(std::u32string_view text, Cell const& cell) noexcept
 {
     assert(text.size() != 0);
 
@@ -129,7 +137,7 @@ inline bool beginsWith(std::u32string_view text, Cell const& cell) noexcept
     return true;
 }
 
-inline CellFlags makeCellFlags(GraphicsRendition rendition, CellFlags base) noexcept
+[[nodiscard]] inline CellFlags makeCellFlags(GraphicsRendition rendition, CellFlags base) noexcept
 {
     CellFlags flags = base;
     switch (rendition)
@@ -170,6 +178,13 @@ inline CellFlags makeCellFlags(GraphicsRendition rendition, CellFlags base) noex
         case GraphicsRendition::NoOverline: flags &= ~CellFlags::Overline; break;
     }
     return flags;
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+inline void applyGraphicsRendition(GraphicsRendition sgr, Cell& cell) noexcept
+{
+    cell.resetFlags(makeCellFlags(sgr, cell.flags()));
 }
 
 } // namespace terminal::CellUtil
