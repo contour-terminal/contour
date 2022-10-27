@@ -3821,5 +3821,5 @@ optional<CellLocation> Screen<Cell>::searchReverse(std::u32string_view searchTex
 #include <terminal/cell/ThinCell.h>
 template class terminal::Screen<terminal::ThinCell>;
 
-#include <terminal/cell/DenseCell.h>
-template class terminal::Screen<terminal::DenseCell>;
+#include <terminal/cell/SimpleCell.h>
+template class terminal::Screen<terminal::SimpleCell>;

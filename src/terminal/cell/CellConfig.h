@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <terminal/cell/DenseCell.h>
+#include <terminal/cell/SimpleCell.h>
 #include <terminal/cell/ThinCell.h>
 
 namespace terminal
@@ -26,6 +26,6 @@ using PrimaryScreenCell = ThinCell;
 using AlternateScreenCell = ThinCell;
 
 /// The Cell to be used with the indicator (and host writable) status line.
-using StatusDisplayCell = DenseCell;
+using StatusDisplayCell = SimpleCell;
 
 } // namespace terminal

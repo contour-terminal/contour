@@ -590,5 +590,5 @@ void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset _l
 #include <terminal/cell/ThinCell.h>
 template class terminal::RenderBufferBuilder<terminal::ThinCell>;
 
-#include <terminal/cell/DenseCell.h>
-template class terminal::RenderBufferBuilder<terminal::DenseCell>;
+#include <terminal/cell/SimpleCell.h>
+template class terminal::RenderBufferBuilder<terminal::SimpleCell>;

@@ -34,16 +34,16 @@ namespace terminal
 ///
 /// This means, only a fixed amount of cells should be living without the need
 /// of scrollback buffer and ideally fast access to all relevant properties.
-class DenseCell: public CellBase<DenseCell>
+class SimpleCell: public CellBase<SimpleCell>
 {
   public:
-    explicit DenseCell(GraphicsAttributes attributes, HyperlinkId hyperlink = {}) noexcept;
-    DenseCell() = default;
-    ~DenseCell() = default;
-    DenseCell(DenseCell&&) = default;
-    DenseCell(DenseCell const&) = default;
-    DenseCell& operator=(DenseCell&&) = default;
-    DenseCell& operator=(DenseCell const&) = default;
+    explicit SimpleCell(GraphicsAttributes attributes, HyperlinkId hyperlink = {}) noexcept;
+    SimpleCell() = default;
+    ~SimpleCell() = default;
+    SimpleCell(SimpleCell&&) = default;
+    SimpleCell(SimpleCell const&) = default;
+    SimpleCell& operator=(SimpleCell&&) = default;
+    SimpleCell& operator=(SimpleCell const&) = default;
 
     void reset();
     void reset(GraphicsAttributes sgr);
@@ -102,30 +102,30 @@ class DenseCell: public CellBase<DenseCell>
 };
 
 // {{{ implementation
-inline DenseCell::DenseCell(GraphicsAttributes attributes, HyperlinkId hyperlink) noexcept:
+inline SimpleCell::SimpleCell(GraphicsAttributes attributes, HyperlinkId hyperlink) noexcept:
     _graphicsAttributes { attributes }, _hyperlink { hyperlink }
 {
 }
 
-inline void DenseCell::reset()
+inline void SimpleCell::reset()
 {
     *this = {};
 }
 
-inline void DenseCell::reset(GraphicsAttributes sgr)
+inline void SimpleCell::reset(GraphicsAttributes sgr)
 {
     *this = {};
     _graphicsAttributes = sgr;
 }
 
-inline void DenseCell::reset(GraphicsAttributes sgr, HyperlinkId hyperlink)
+inline void SimpleCell::reset(GraphicsAttributes sgr, HyperlinkId hyperlink)
 {
     *this = {};
     _graphicsAttributes = sgr;
     _hyperlink = hyperlink;
 }
 
-inline void DenseCell::write(GraphicsAttributes sgr, char32_t codepoint, uint8_t width)
+inline void SimpleCell::write(GraphicsAttributes sgr, char32_t codepoint, uint8_t width)
 {
     _graphicsAttributes = sgr;
     _codepoints.clear();
@@ -134,7 +134,7 @@ inline void DenseCell::write(GraphicsAttributes sgr, char32_t codepoint, uint8_t
     _width = width;
 }
 
-inline void DenseCell::write(GraphicsAttributes sgr,
+inline void SimpleCell::write(GraphicsAttributes sgr,
                              char32_t codepoint,
                              [[maybe_unused]] uint8_t width,
                              [[maybe_unused]] HyperlinkId hyperlink)
@@ -146,19 +146,19 @@ inline void DenseCell::write(GraphicsAttributes sgr,
     _hyperlink = hyperlink;
 }
 
-inline void DenseCell::writeTextOnly(char32_t codepoint, uint8_t width)
+inline void SimpleCell::writeTextOnly(char32_t codepoint, uint8_t width)
 {
     _codepoints.clear();
     _codepoints.push_back(codepoint);
     _width = width;
 }
 
-inline std::u32string DenseCell::codepoints() const noexcept
+inline std::u32string SimpleCell::codepoints() const noexcept
 {
     return _codepoints;
 }
 
-inline char32_t DenseCell::codepoint(size_t index) const noexcept
+inline char32_t SimpleCell::codepoint(size_t index) const noexcept
 {
     if (index < _codepoints.size())
         return _codepoints[index];
@@ -166,12 +166,12 @@ inline char32_t DenseCell::codepoint(size_t index) const noexcept
         return 0;
 }
 
-inline size_t DenseCell::codepointCount() const noexcept
+inline size_t SimpleCell::codepointCount() const noexcept
 {
     return _codepoints.size();
 }
 
-inline void DenseCell::setCharacter(char32_t codepoint)
+inline void SimpleCell::setCharacter(char32_t codepoint)
 {
     _codepoints.clear();
     _imageFragment = {};
@@ -184,7 +184,7 @@ inline void DenseCell::setCharacter(char32_t codepoint)
         setWidth(1);
 }
 
-inline int DenseCell::appendCharacter(char32_t codepoint)
+inline int SimpleCell::appendCharacter(char32_t codepoint)
 {
     _codepoints.push_back(codepoint);
 
@@ -195,42 +195,42 @@ inline int DenseCell::appendCharacter(char32_t codepoint)
     return diff;
 }
 
-inline std::string DenseCell::toUtf8() const
+inline std::string SimpleCell::toUtf8() const
 {
     return unicode::convert_to<char>(std::u32string_view(_codepoints.data(), _codepoints.size()));
 }
 
-inline uint8_t DenseCell::width() const noexcept
+inline uint8_t SimpleCell::width() const noexcept
 {
     return _width;
 }
 
-inline void DenseCell::setWidth(uint8_t newWidth) noexcept
+inline void SimpleCell::setWidth(uint8_t newWidth) noexcept
 {
     _width = newWidth;
 }
 
-inline CellFlags DenseCell::flags() const noexcept
+inline CellFlags SimpleCell::flags() const noexcept
 {
     return _flags;
 }
 
-inline bool DenseCell::isFlagEnabled(CellFlags testFlags) const noexcept
+inline bool SimpleCell::isFlagEnabled(CellFlags testFlags) const noexcept
 {
     return _flags & testFlags;
 }
 
-inline void DenseCell::resetFlags() noexcept
+inline void SimpleCell::resetFlags() noexcept
 {
     _flags = CellFlags::None;
 }
 
-inline void DenseCell::resetFlags(CellFlags flags) noexcept
+inline void SimpleCell::resetFlags(CellFlags flags) noexcept
 {
     _flags = flags;
 }
 
-inline void DenseCell::setFlags(CellFlags flags, bool enabled)
+inline void SimpleCell::setFlags(CellFlags flags, bool enabled)
 {
     if (enabled)
         _flags = _flags | flags;
@@ -238,42 +238,42 @@ inline void DenseCell::setFlags(CellFlags flags, bool enabled)
         _flags = CellFlags(unsigned(_flags) & ~unsigned(flags));
 }
 
-inline void DenseCell::setGraphicsRendition(GraphicsRendition sgr) noexcept
+inline void SimpleCell::setGraphicsRendition(GraphicsRendition sgr) noexcept
 {
     _flags = CellUtil::makeCellFlags(sgr, _flags);
 }
 
-inline void DenseCell::setForegroundColor(Color color) noexcept
+inline void SimpleCell::setForegroundColor(Color color) noexcept
 {
     _graphicsAttributes.foregroundColor = color;
 }
 
-inline void DenseCell::setBackgroundColor(Color color) noexcept
+inline void SimpleCell::setBackgroundColor(Color color) noexcept
 {
     _graphicsAttributes.backgroundColor = color;
 }
 
-inline void DenseCell::setUnderlineColor(Color color) noexcept
+inline void SimpleCell::setUnderlineColor(Color color) noexcept
 {
     _graphicsAttributes.underlineColor = color;
 }
 
-inline Color DenseCell::foregroundColor() const noexcept
+inline Color SimpleCell::foregroundColor() const noexcept
 {
     return _graphicsAttributes.foregroundColor;
 }
 
-inline Color DenseCell::backgroundColor() const noexcept
+inline Color SimpleCell::backgroundColor() const noexcept
 {
     return _graphicsAttributes.backgroundColor;
 }
 
-inline Color DenseCell::underlineColor() const noexcept
+inline Color SimpleCell::underlineColor() const noexcept
 {
     return _graphicsAttributes.underlineColor;
 }
 
-inline RGBColorPair DenseCell::makeColors(ColorPalette colorPalette,
+inline RGBColorPair SimpleCell::makeColors(ColorPalette colorPalette,
                                           bool reverseVideo,
                                           bool blink,
                                           bool rapidBlink) const noexcept
@@ -282,28 +282,28 @@ inline RGBColorPair DenseCell::makeColors(ColorPalette colorPalette,
         colorPalette, flags(), reverseVideo, foregroundColor(), backgroundColor(), blink, rapidBlink);
 }
 
-inline RGBColor DenseCell::getUnderlineColor(ColorPalette const& colorPalette,
+inline RGBColor SimpleCell::getUnderlineColor(ColorPalette const& colorPalette,
                                              RGBColor defaultColor) const noexcept
 {
     return CellUtil::getUnderlineColor(colorPalette, flags(), defaultColor, underlineColor());
 }
 
-inline std::shared_ptr<ImageFragment> DenseCell::imageFragment() const noexcept
+inline std::shared_ptr<ImageFragment> SimpleCell::imageFragment() const noexcept
 {
     return _imageFragment;
 }
 
-inline void DenseCell::setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, CellLocation offset)
+inline void SimpleCell::setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, CellLocation offset)
 {
     _imageFragment = std::make_shared<ImageFragment>(rasterizedImage, offset);
 }
 
-inline HyperlinkId DenseCell::hyperlink() const noexcept
+inline HyperlinkId SimpleCell::hyperlink() const noexcept
 {
     return _hyperlink;
 }
 
-inline void DenseCell::setHyperlink(HyperlinkId hyperlink) noexcept
+inline void SimpleCell::setHyperlink(HyperlinkId hyperlink) noexcept
 {
     _hyperlink = hyperlink;
 }
@@ -313,7 +313,7 @@ inline void DenseCell::setHyperlink(HyperlinkId hyperlink) noexcept
 // {{{ Optimized version for helpers from CellUtil
 namespace CellUtil
 {
-    inline bool beginsWith(std::u32string_view text, DenseCell const& cell) noexcept
+    inline bool beginsWith(std::u32string_view text, SimpleCell const& cell) noexcept
     {
         assert(text.size() != 0);
         return text == cell.codepoints();

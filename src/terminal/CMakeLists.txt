@@ -21,7 +21,7 @@ set(terminal_HEADERS
     Capabilities.h
     cell/CellConcept.h
     cell/CellConfig.h
-    cell/DenseCell.h
+    cell/SimpleCell.h
     cell/ThinCell.h
     CellUtil.h
     Charset.h

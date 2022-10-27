@@ -239,5 +239,5 @@ void VTWriter::write(Line<Cell> const& line)
 #include <terminal/cell/ThinCell.h>
 template void terminal::VTWriter::write<terminal::ThinCell>(Line<ThinCell> const&);
 
-#include <terminal/cell/DenseCell.h>
-template void terminal::VTWriter::write<terminal::DenseCell>(Line<DenseCell> const&);
+#include <terminal/cell/SimpleCell.h>
+template void terminal::VTWriter::write<terminal::SimpleCell>(Line<SimpleCell> const&);
