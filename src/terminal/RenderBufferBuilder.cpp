@@ -165,7 +165,7 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(ColorPalette const&
     auto renderCell = RenderCell {};
     renderCell.attributes.backgroundColor = bg;
     renderCell.attributes.foregroundColor = fg;
-    renderCell.attributes.decorationColor = CellUtil::getUnderlineColor(_colorPalette, flags, fg, ul);
+    renderCell.attributes.decorationColor = CellUtil::makeUnderlineColor(_colorPalette, fg, ul, flags);
     renderCell.attributes.flags = flags;
     renderCell.position.line = _line;
     renderCell.position.column = _column;
@@ -187,7 +187,7 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(ColorPalette const&
     RenderCell renderCell;
     renderCell.attributes.backgroundColor = bg;
     renderCell.attributes.foregroundColor = fg;
-    renderCell.attributes.decorationColor = CellUtil::getUnderlineColor(_colorPalette, flags, fg, ul);
+    renderCell.attributes.decorationColor = CellUtil::makeUnderlineColor(_colorPalette, fg, ul, flags);
     renderCell.attributes.flags = flags;
     renderCell.position.line = _line;
     renderCell.position.column = _column;
@@ -209,7 +209,7 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCell(ColorPalette const& _colorP
     RenderCell renderCell;
     renderCell.attributes.backgroundColor = bg;
     renderCell.attributes.foregroundColor = fg;
-    renderCell.attributes.decorationColor = screenCell.getUnderlineColor(_colorPalette, fg);
+    renderCell.attributes.decorationColor = CellUtil::makeUnderlineColor(_colorPalette, fg, screenCell);
     renderCell.attributes.flags = screenCell.flags();
     renderCell.position.line = _line;
     renderCell.position.column = _column;
@@ -282,8 +282,8 @@ RenderAttributes RenderBufferBuilder<Cell>::createRenderAttributes(
     auto renderAttributes = RenderAttributes {};
     renderAttributes.foregroundColor = fg;
     renderAttributes.backgroundColor = bg;
-    renderAttributes.decorationColor = CellUtil::getUnderlineColor(
-        terminal.colorPalette(), graphicsAttributes.flags, fg, graphicsAttributes.underlineColor);
+    renderAttributes.decorationColor = CellUtil::makeUnderlineColor(
+        terminal.colorPalette(), fg, graphicsAttributes.underlineColor, graphicsAttributes.flags);
     renderAttributes.flags = graphicsAttributes.flags;
     return renderAttributes;
 }

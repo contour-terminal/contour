@@ -67,9 +67,7 @@ class SimpleCell
 
     [[nodiscard]] CellFlags flags() const noexcept;
     [[nodiscard]] bool isFlagEnabled(CellFlags flags) const noexcept;
-    void resetFlags() noexcept;
-    void resetFlags(CellFlags flags) noexcept;
-    void setFlags(CellFlags flags, bool enabled);
+    void resetFlags(CellFlags flags = CellFlags::None) noexcept;
 
     void setGraphicsRendition(GraphicsRendition sgr) noexcept;
     void setForegroundColor(Color color) noexcept;
@@ -78,13 +76,6 @@ class SimpleCell
     [[nodiscard]] Color foregroundColor() const noexcept;
     [[nodiscard]] Color backgroundColor() const noexcept;
     [[nodiscard]] Color underlineColor() const noexcept;
-    [[nodiscard]] RGBColorPair makeColors(ColorPalette colorPalette,
-                                          bool reverseVideo,
-                                          bool blink,
-                                          bool rapidBlink) const noexcept;
-
-    [[nodiscard]] RGBColor getUnderlineColor(ColorPalette const& palette,
-                                             RGBColor defaultColor) const noexcept;
 
     [[nodiscard]] std::shared_ptr<ImageFragment> imageFragment() const noexcept;
     void setImageFragment(std::shared_ptr<RasterizedImage> image, CellLocation offset);
@@ -222,27 +213,14 @@ inline bool SimpleCell::isFlagEnabled(CellFlags testFlags) const noexcept
     return _flags & testFlags;
 }
 
-inline void SimpleCell::resetFlags() noexcept
-{
-    _flags = CellFlags::None;
-}
-
 inline void SimpleCell::resetFlags(CellFlags flags) noexcept
 {
     _flags = flags;
 }
 
-inline void SimpleCell::setFlags(CellFlags flags, bool enabled)
-{
-    if (enabled)
-        _flags = _flags | flags;
-    else
-        _flags = CellFlags(unsigned(_flags) & ~unsigned(flags));
-}
-
 inline void SimpleCell::setGraphicsRendition(GraphicsRendition sgr) noexcept
 {
-    _flags = CellUtil::makeCellFlags(sgr, _flags);
+    CellUtil::applyGraphicsRendition(sgr, *this);
 }
 
 inline void SimpleCell::setForegroundColor(Color color) noexcept
@@ -273,21 +251,6 @@ inline Color SimpleCell::backgroundColor() const noexcept
 inline Color SimpleCell::underlineColor() const noexcept
 {
     return _graphicsAttributes.underlineColor;
-}
-
-inline RGBColorPair SimpleCell::makeColors(ColorPalette colorPalette,
-                                           bool reverseVideo,
-                                           bool blink,
-                                           bool rapidBlink) const noexcept
-{
-    return CellUtil::makeColors(
-        colorPalette, flags(), reverseVideo, foregroundColor(), backgroundColor(), blink, rapidBlink);
-}
-
-inline RGBColor SimpleCell::getUnderlineColor(ColorPalette const& colorPalette,
-                                              RGBColor defaultColor) const noexcept
-{
-    return CellUtil::getUnderlineColor(colorPalette, flags(), defaultColor, underlineColor());
 }
 
 inline std::shared_ptr<ImageFragment> SimpleCell::imageFragment() const noexcept

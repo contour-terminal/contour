@@ -1188,7 +1188,7 @@ u32string Grid<Cell>::extractText(CellLocationRange range) const noexcept
 
 #include <terminal/cell/CompactCell.h>
 template class terminal::Grid<terminal::CompactCell>;
-template std::string terminal::dumpGrid<terminal::CompactCell>(terminal::Grid<terminal::CompactCell> const& grid);
+template std::string terminal::dumpGrid<terminal::CompactCell>(terminal::Grid<terminal::CompactCell> const&);
 
 #include <terminal/cell/SimpleCell.h>
 template class terminal::Grid<terminal::SimpleCell>;
