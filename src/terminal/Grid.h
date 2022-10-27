@@ -489,6 +489,8 @@ class Grid
     /// @param _n number of lines to scroll up within the given margin.
     /// @param _defaultAttributes SGR attributes the newly created grid cells will be initialized with.
     /// @param _margin the margin coordinates to perform the scrolling action into.
+    ///
+    /// @return Number of lines the main page has been scrolled.
     LineCount scrollUp(LineCount _n, GraphicsAttributes _defaultAttributes, Margin _margin) noexcept;
 
     /// Scrolls up main page by @p _n lines and re-initializes grid cells with @p _defaultAttributes.
