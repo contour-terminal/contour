@@ -13,9 +13,9 @@
  */
 #pragma once
 
-#include <terminal/CellConcept.h>
 #include <terminal/GraphicsAttributes.h>
 #include <terminal/Line.h>
+#include <terminal/cell/CellConcept.h>
 #include <terminal/primitives.h>
 
 #include <crispy/algorithm.h>

@@ -14,6 +14,7 @@
 
 #include <terminal/MockTerm.h>
 #include <terminal/Terminal.h>
+#include <terminal/cell/CellConfig.h>
 #include <terminal/logging.h>
 #include <terminal/pty/MockViewPty.h>
 
@@ -174,10 +175,11 @@ class ContourHeadlessBench: public crispy::App
     int showMetaInfo()
     {
         // Show any interesting meta information.
-        fmt::print("Cell      : {} bytes\n", sizeof(terminal::Cell));
-        fmt::print("CellExtra : {} bytes\n", sizeof(terminal::CellExtra));
-        fmt::print("CellFlags : {} bytes\n", sizeof(terminal::CellFlags));
-        fmt::print("Color     : {} bytes\n", sizeof(terminal::Color));
+        fmt::print("SimpleCell  : {} bytes\n", sizeof(terminal::SimpleCell));
+        fmt::print("CompactCell : {} bytes\n", sizeof(terminal::CompactCell));
+        fmt::print("CellExtra   : {} bytes\n", sizeof(terminal::CellExtra));
+        fmt::print("CellFlags   : {} bytes\n", sizeof(terminal::CellFlags));
+        fmt::print("Color       : {} bytes\n", sizeof(terminal::Color));
         return EXIT_SUCCESS;
     }
 

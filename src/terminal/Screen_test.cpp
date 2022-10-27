@@ -103,7 +103,7 @@ struct TextRenderBuilder
     std::string text;
 
     void startLine(LineOffset lineOffset);
-    void renderCell(Cell const& cell, LineOffset lineOffset, ColumnOffset columnOffset);
+    void renderCell(PrimaryScreenCell const& cell, LineOffset lineOffset, ColumnOffset columnOffset);
     void endLine();
     void renderTrivialLine(TrivialLineBuffer const& lineBuffer, LineOffset lineOffset);
     void finish();
@@ -115,7 +115,7 @@ void TextRenderBuilder::startLine(LineOffset lineOffset)
         text.clear();
 }
 
-void TextRenderBuilder::renderCell(Cell const& cell, LineOffset, ColumnOffset)
+void TextRenderBuilder::renderCell(CompactCell const& cell, LineOffset, ColumnOffset)
 {
     text += cell.toUtf8();
 }
@@ -3528,7 +3528,7 @@ TEST_CASE("Sixel.simple", "[screen]")
     {
         for (auto column = ColumnOffset(0); column < boxed_cast<ColumnOffset>(pageSize.columns); ++column)
         {
-            Cell const& cell = mock.terminal.primaryScreen().at(line, column);
+            auto const& cell = mock.terminal.primaryScreen().at(line, column);
             if (line <= LineOffset(4) && column <= ColumnOffset(7))
             {
                 auto fragment = cell.imageFragment();
@@ -3568,7 +3568,7 @@ TEST_CASE("Sixel.AutoScroll-1", "[screen]")
         for (auto column = ColumnOffset(0); column < boxed_cast<ColumnOffset>(pageSize.columns); ++column)
         {
             INFO(fmt::format("column {}", column));
-            Cell const& cell = mock.terminal.primaryScreen().at(line, column);
+            auto const& cell = mock.terminal.primaryScreen().at(line, column);
             if (line <= LineOffset(4) && column <= ColumnOffset(7))
             {
                 auto fragment = cell.imageFragment();

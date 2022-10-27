@@ -11,8 +11,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/Cell.h>
 #include <terminal/Line.h>
+#include <terminal/cell/CellConfig.h>
 
 #include <crispy/escape.h>
 
@@ -22,6 +22,9 @@ using namespace std;
 
 using namespace terminal;
 using namespace crispy;
+
+// Default cell type for testing.
+using Cell = PrimaryScreenCell;
 
 TEST_CASE("Line.BufferFragment", "[Line]")
 {

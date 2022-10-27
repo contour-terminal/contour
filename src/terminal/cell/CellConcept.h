@@ -51,56 +51,57 @@ namespace terminal
  * but won't be needed for scrollback.
  */
 template <typename T>
-concept CellConcept = requires(T t)
+concept CellConcept = requires(T t, T const& u)
 {
+    T(GraphicsAttributes {});
+    T(GraphicsAttributes {}, HyperlinkId {});
+
     t.reset();
     t.reset(GraphicsAttributes{});
     t.reset(GraphicsAttributes{}, HyperlinkId{});
 
-    { t.empty() } noexcept -> std::same_as<bool>;
+    { u.empty() } noexcept -> std::same_as<bool>;
 
     t.write(GraphicsAttributes{}, char32_t{}, uint8_t{});
     t.write(GraphicsAttributes{}, char32_t{}, uint8_t{}, HyperlinkId{});
     t.writeTextOnly(char32_t{}, uint8_t{});
 
-    { t.codepoints() } -> std::convertible_to<std::u32string>;
-    { t.codepoint(size_t{}) } noexcept -> std::same_as<char32_t>;
-    { t.codepointCount() } noexcept -> std::same_as<size_t>;
+    { u.codepoints() } -> std::convertible_to<std::u32string>;
+    { u.codepoint(size_t{}) } noexcept -> std::same_as<char32_t>;
+    { u.codepointCount() } noexcept -> std::same_as<size_t>;
 
     t.setCharacter(char32_t{});
     { t.appendCharacter(char32_t{}) } -> std::same_as<int>;
 
-    { t.toUtf8() } -> std::convertible_to<std::string>;
+    { u.toUtf8() } -> std::convertible_to<std::string>;
 
-    { t.width() } noexcept -> std::convertible_to<uint8_t>;
+    { u.width() } noexcept -> std::convertible_to<uint8_t>;
     { t.setWidth(uint8_t{}) } noexcept;
 
-    { t.compareText(char{}) } noexcept -> std::same_as<bool>;
-
-    { t.flags() } noexcept -> std::same_as<CellFlags>;
-    { t.isFlagEnabled(CellFlags{}) } noexcept -> std::same_as<bool>;
+    { u.flags() } noexcept -> std::same_as<CellFlags>;
+    { u.isFlagEnabled(CellFlags{}) } noexcept -> std::same_as<bool>;
     t.resetFlags();
     t.setFlags(CellFlags{}, bool{});
 
     t.setGraphicsRendition(GraphicsRendition{});
 
     t.setForegroundColor(Color{});
-    { t.foregroundColor() } noexcept -> std::same_as<Color>;
+    { u.foregroundColor() } noexcept -> std::same_as<Color>;
 
     t.setBackgroundColor(Color{});
-    { t.backgroundColor() } noexcept -> std::same_as<Color>;
+    { u.backgroundColor() } noexcept -> std::same_as<Color>;
 
     t.setUnderlineColor(Color{});
-    { t.underlineColor() } noexcept -> std::same_as<Color>;
+    { u.underlineColor() } noexcept -> std::same_as<Color>;
 
-    { t.getUnderlineColor(ColorPalette{}, RGBColor{} /*defaultColor*/) } -> std::same_as<RGBColor>;
+    { u.getUnderlineColor(ColorPalette{}, RGBColor{} /*defaultColor*/) } -> std::same_as<RGBColor>;
 
-    { t.makeColors(ColorPalette{}, bool{} /*reverseVideo*/, bool{} /*blink*/, bool{} /*rapidBlink*/) } -> std::same_as<RGBColorPair>;
+    { u.makeColors(ColorPalette{}, bool{} /*reverseVideo*/, bool{} /*blink*/, bool{} /*rapidBlink*/) } -> std::same_as<RGBColorPair>;
 
-    { t.imageFragment() } -> std::same_as<std::shared_ptr<ImageFragment>>;
+    { u.imageFragment() } -> std::same_as<std::shared_ptr<ImageFragment>>;
     t.setImageFragment(std::shared_ptr<RasterizedImage>{}, CellLocation{} /*offset*/);
 
-    { t.hyperlink() } -> std::same_as<HyperlinkId>;
+    { u.hyperlink() } -> std::same_as<HyperlinkId>;
     t.setHyperlink(HyperlinkId{});
 };
 

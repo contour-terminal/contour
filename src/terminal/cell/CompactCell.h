@@ -14,6 +14,7 @@
 #pragma once
 
 #include <terminal/CellFlags.h>
+#include <terminal/CellUtil.h>
 #include <terminal/ColorPalette.h>
 #include <terminal/GraphicsAttributes.h>
 #include <terminal/Hyperlink.h>
@@ -41,10 +42,10 @@ namespace terminal
 /// In this struct we collect all the relevant cell data that is not frequently used,
 /// and thus, would only waste unnecessary memory in most situations.
 ///
-/// @see Cell
+/// @see CompactCell
 struct CellExtra
 {
-    /// With the main codepoint that is being stored in the Cell struct, followed by this
+    /// With the main codepoint that is being stored in the CompactCell struct, followed by this
     /// sequence of codepoints, a grapheme cluster is formed that represents the visual
     /// character in this terminal cell.
     ///
@@ -75,19 +76,19 @@ struct CellExtra
 ///
 /// TODO(perf): ensure POD'ness so that we can SIMD-copy it.
 /// - Requires moving out CellExtra into Line<T>?
-class CRISPY_PACKED Cell
+class CRISPY_PACKED CompactCell
 {
   public:
     static uint8_t constexpr MaxCodepoints = 7;
 
-    Cell() noexcept;
-    Cell(Cell const& v) noexcept;
-    Cell& operator=(Cell const& v) noexcept;
-    explicit Cell(GraphicsAttributes _attributes, HyperlinkId hyperlink = {}) noexcept;
+    CompactCell() noexcept;
+    CompactCell(CompactCell const& v) noexcept;
+    CompactCell& operator=(CompactCell const& v) noexcept;
+    explicit CompactCell(GraphicsAttributes _attributes, HyperlinkId hyperlink = {}) noexcept;
 
-    Cell(Cell&&) noexcept = default;
-    Cell& operator=(Cell&&) noexcept = default;
-    ~Cell() = default;
+    CompactCell(CompactCell&&) noexcept = default;
+    CompactCell& operator=(CompactCell&&) noexcept = default;
+    ~CompactCell() = default;
 
     void reset() noexcept;
     void reset(GraphicsAttributes const& _attributes) noexcept;
@@ -105,10 +106,6 @@ class CRISPY_PACKED Cell
     [[nodiscard]] char32_t codepoint(size_t i) const noexcept;
     [[nodiscard]] std::size_t codepointCount() const noexcept;
 
-    [[nodiscard]] bool compareText(char codepoint) const noexcept;
-
-    [[nodiscard]] bool empty() const noexcept;
-
     [[nodiscard]] constexpr uint8_t width() const noexcept;
     void setWidth(uint8_t _width) noexcept;
 
@@ -122,6 +119,8 @@ class CRISPY_PACKED Cell
             extra_->flags = CellFlags::None;
     }
 
+    void resetFlags(CellFlags flags) noexcept { extra().flags = flags; }
+
     void setFlags(CellFlags flags, bool enable = true)
     {
         if (enable)
@@ -129,8 +128,6 @@ class CRISPY_PACKED Cell
         else
             extra().flags = CellFlags(int(extra().flags) & ~int(flags));
     }
-
-    void setGraphicsRendition(GraphicsRendition sgr) noexcept;
 
     [[nodiscard]] Color underlineColor() const noexcept;
     void setUnderlineColor(Color color) noexcept;
@@ -157,13 +154,17 @@ class CRISPY_PACKED Cell
     [[nodiscard]] HyperlinkId hyperlink() const noexcept;
     void setHyperlink(HyperlinkId _hyperlink);
 
+    [[nodiscard]] bool empty() const noexcept;
+
+    void setGraphicsRendition(GraphicsRendition sgr) noexcept;
+
   private:
     [[nodiscard]] CellExtra& extra() noexcept;
 
     template <typename... Args>
     void createExtra(Args... args) noexcept;
 
-    // Cell data
+    // CompactCell data
     char32_t codepoint_ = 0; /// Primary Unicode codepoint to be displayed.
     Color foregroundColor_ = DefaultColor();
     Color backgroundColor_ = DefaultColor();
@@ -171,11 +172,9 @@ class CRISPY_PACKED Cell
     // TODO(perf) ^^ use CellExtraId = boxed<int24_t> into pre-alloc'ed vector<CellExtra>.
 };
 
-bool beginsWith(std::u32string_view text, Cell const& cell) noexcept;
-
 // {{{ impl: ctor's
 template <typename... Args>
-inline void Cell::createExtra(Args... args) noexcept
+inline void CompactCell::createExtra(Args... args) noexcept
 {
     try
     {
@@ -187,12 +186,12 @@ inline void Cell::createExtra(Args... args) noexcept
     }
 }
 
-inline Cell::Cell() noexcept
+inline CompactCell::CompactCell() noexcept
 {
     setWidth(1);
 }
 
-inline Cell::Cell(GraphicsAttributes _attributes, HyperlinkId hyperlink) noexcept:
+inline CompactCell::CompactCell(GraphicsAttributes _attributes, HyperlinkId hyperlink) noexcept:
     foregroundColor_ { _attributes.foregroundColor }, backgroundColor_ { _attributes.backgroundColor }
 {
     setWidth(1);
@@ -205,7 +204,7 @@ inline Cell::Cell(GraphicsAttributes _attributes, HyperlinkId hyperlink) noexcep
         extra().flags = _attributes.flags;
 }
 
-inline Cell::Cell(Cell const& v) noexcept:
+inline CompactCell::CompactCell(CompactCell const& v) noexcept:
     codepoint_ { v.codepoint_ },
     foregroundColor_ { v.foregroundColor_ },
     backgroundColor_ { v.backgroundColor_ }
@@ -214,7 +213,7 @@ inline Cell::Cell(Cell const& v) noexcept:
         createExtra(*v.extra_);
 }
 
-inline Cell& Cell::operator=(Cell const& v) noexcept
+inline CompactCell& CompactCell::operator=(CompactCell const& v) noexcept
 {
     codepoint_ = v.codepoint_;
     foregroundColor_ = v.foregroundColor_;
@@ -225,7 +224,7 @@ inline Cell& Cell::operator=(Cell const& v) noexcept
 }
 // }}}
 // {{{ impl: reset
-inline void Cell::reset() noexcept
+inline void CompactCell::reset() noexcept
 {
     codepoint_ = 0;
     foregroundColor_ = DefaultColor();
@@ -233,7 +232,7 @@ inline void Cell::reset() noexcept
     extra_.reset();
 }
 
-inline void Cell::reset(GraphicsAttributes const& _attributes) noexcept
+inline void CompactCell::reset(GraphicsAttributes const& _attributes) noexcept
 {
     codepoint_ = 0;
     foregroundColor_ = _attributes.foregroundColor;
@@ -245,7 +244,7 @@ inline void Cell::reset(GraphicsAttributes const& _attributes) noexcept
         extra().underlineColor = _attributes.underlineColor;
 }
 
-inline void Cell::write(GraphicsAttributes const& _attributes, char32_t _ch, uint8_t _width) noexcept
+inline void CompactCell::write(GraphicsAttributes const& _attributes, char32_t _ch, uint8_t _width) noexcept
 {
     setWidth(_width);
 
@@ -266,10 +265,10 @@ inline void Cell::write(GraphicsAttributes const& _attributes, char32_t _ch, uin
         extra().underlineColor = _attributes.underlineColor;
 }
 
-inline void Cell::write(GraphicsAttributes const& _attributes,
-                        char32_t _ch,
-                        uint8_t _width,
-                        HyperlinkId _hyperlink) noexcept
+inline void CompactCell::write(GraphicsAttributes const& _attributes,
+                               char32_t _ch,
+                               uint8_t _width,
+                               HyperlinkId _hyperlink) noexcept
 {
     writeTextOnly(_ch, _width);
     if (extra_)
@@ -291,7 +290,7 @@ inline void Cell::write(GraphicsAttributes const& _attributes,
     }
 }
 
-inline void Cell::writeTextOnly(char32_t _ch, uint8_t _width) noexcept
+inline void CompactCell::writeTextOnly(char32_t _ch, uint8_t _width) noexcept
 {
     setWidth(_width);
     codepoint_ = _ch;
@@ -299,7 +298,7 @@ inline void Cell::writeTextOnly(char32_t _ch, uint8_t _width) noexcept
         extra_->codepoints.clear();
 }
 
-inline void Cell::reset(GraphicsAttributes const& _attributes, HyperlinkId _hyperlink) noexcept
+inline void CompactCell::reset(GraphicsAttributes const& _attributes, HyperlinkId _hyperlink) noexcept
 {
     codepoint_ = 0;
     foregroundColor_ = _attributes.foregroundColor;
@@ -315,13 +314,13 @@ inline void Cell::reset(GraphicsAttributes const& _attributes, HyperlinkId _hype
 }
 // }}}
 // {{{ impl: character
-inline constexpr uint8_t Cell::width() const noexcept
+inline constexpr uint8_t CompactCell::width() const noexcept
 {
     return !extra_ ? 1 : extra_->width;
     // return static_cast<int>((codepoint_ >> 21) & 0x03); //return width_;
 }
 
-inline void Cell::setWidth(uint8_t _width) noexcept
+inline void CompactCell::setWidth(uint8_t _width) noexcept
 {
     assert(_width < MaxCodepoints);
     // codepoint_ = codepoint_ | ((_width << 21) & 0x03);
@@ -330,7 +329,7 @@ inline void Cell::setWidth(uint8_t _width) noexcept
     // TODO(perf) use u32_unused_bit_mask()
 }
 
-inline void Cell::setCharacter(char32_t _codepoint) noexcept
+inline void CompactCell::setCharacter(char32_t _codepoint) noexcept
 {
     codepoint_ = _codepoint;
     if (extra_)
@@ -344,7 +343,7 @@ inline void Cell::setCharacter(char32_t _codepoint) noexcept
         setWidth(1);
 }
 
-inline int Cell::appendCharacter(char32_t _codepoint) noexcept
+inline int CompactCell::appendCharacter(char32_t _codepoint) noexcept
 {
     assert(_codepoint != 0);
 
@@ -352,29 +351,16 @@ inline int Cell::appendCharacter(char32_t _codepoint) noexcept
     if (ext.codepoints.size() < MaxCodepoints - 1)
     {
         ext.codepoints.push_back(_codepoint);
-
-        constexpr bool AllowWidthChange = false; // TODO: make configurable
-
-        auto const w = [&]() {
-            switch (_codepoint)
-            {
-                case 0xFE0E: return 1;
-                case 0xFE0F: return 2;
-                default: return unicode::width(_codepoint);
-            }
-        }();
-
-        if (w != width() && AllowWidthChange)
+        if (auto const diff = CellUtil::computeWidthChange(*this, _codepoint))
         {
-            int const diff = w - width();
-            setWidth(static_cast<uint8_t>(w));
+            setWidth(static_cast<uint8_t>(static_cast<int>(width()) + diff));
             return diff;
         }
     }
     return 0;
 }
 
-inline std::size_t Cell::codepointCount() const noexcept
+inline std::size_t CompactCell::codepointCount() const noexcept
 {
     if (codepoint_)
     {
@@ -386,15 +372,7 @@ inline std::size_t Cell::codepointCount() const noexcept
     return 0;
 }
 
-inline bool Cell::compareText(char codepoint) const noexcept
-{
-    if (codepointCount() != 1)
-        return false;
-
-    return codepoint_ == static_cast<char32_t>(codepoint);
-}
-
-inline char32_t Cell::codepoint(size_t i) const noexcept
+inline char32_t CompactCell::codepoint(size_t i) const noexcept
 {
     if (i == 0)
         return codepoint_;
@@ -410,12 +388,7 @@ inline char32_t Cell::codepoint(size_t i) const noexcept
 }
 // }}}
 // {{{ attrs
-inline bool Cell::empty() const noexcept
-{
-    return (codepointCount() == 0 || codepoint(0) == 0x20) && !imageFragment();
-}
-
-inline CellExtra& Cell::extra() noexcept
+inline CellExtra& CompactCell::extra() noexcept
 {
     if (extra_)
         return *extra_;
@@ -423,35 +396,35 @@ inline CellExtra& Cell::extra() noexcept
     return *extra_;
 }
 
-inline CellFlags Cell::flags() const noexcept
+inline CellFlags CompactCell::flags() const noexcept
 {
     if (!extra_)
         return CellFlags::None;
     else
-        return const_cast<Cell*>(this)->extra_->flags;
+        return const_cast<CompactCell*>(this)->extra_->flags;
 }
 
-inline Color Cell::foregroundColor() const noexcept
+inline Color CompactCell::foregroundColor() const noexcept
 {
     return foregroundColor_;
 }
 
-inline void Cell::setForegroundColor(Color color) noexcept
+inline void CompactCell::setForegroundColor(Color color) noexcept
 {
     foregroundColor_ = color;
 }
 
-inline Color Cell::backgroundColor() const noexcept
+inline Color CompactCell::backgroundColor() const noexcept
 {
     return backgroundColor_;
 }
 
-inline void Cell::setBackgroundColor(Color color) noexcept
+inline void CompactCell::setBackgroundColor(Color color) noexcept
 {
     backgroundColor_ = color;
 }
 
-inline Color Cell::underlineColor() const noexcept
+inline Color CompactCell::underlineColor() const noexcept
 {
     if (!extra_)
         return DefaultColor();
@@ -459,7 +432,7 @@ inline Color Cell::underlineColor() const noexcept
         return extra_->underlineColor;
 }
 
-inline void Cell::setUnderlineColor(Color color) noexcept
+inline void CompactCell::setUnderlineColor(Color color) noexcept
 {
     if (extra_)
         extra_->underlineColor = color;
@@ -467,72 +440,22 @@ inline void Cell::setUnderlineColor(Color color) noexcept
         extra().underlineColor = color;
 }
 
-inline RGBColor getUnderlineColor(ColorPalette const& colorPalette,
-                                  CellFlags cellFlags,
-                                  RGBColor defaultColor,
-                                  Color underlineColor) noexcept
+inline RGBColor CompactCell::getUnderlineColor(ColorPalette const& _colorPalette,
+                                               RGBColor _defaultColor) const noexcept
 {
-    if (isDefaultColor(underlineColor))
-        return defaultColor;
-
-    auto const mode = (cellFlags & CellFlags::Faint)                                    ? ColorMode::Dimmed
-                      : ((cellFlags & CellFlags::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
-                                                                                        : ColorMode::Normal;
-
-    return apply(colorPalette, underlineColor, ColorTarget::Foreground, mode);
+    return CellUtil::getUnderlineColor(_colorPalette, flags(), _defaultColor, underlineColor());
 }
 
-inline RGBColor Cell::getUnderlineColor(ColorPalette const& _colorPalette,
-                                        RGBColor _defaultColor) const noexcept
+inline RGBColorPair CompactCell::makeColors(ColorPalette const& _colorPalette,
+                                            bool _reverseVideo,
+                                            bool _blink,
+                                            bool _rapidBlink) const noexcept
 {
-    return terminal::getUnderlineColor(_colorPalette, flags(), _defaultColor, underlineColor());
-}
-
-inline RGBColorPair makeColors(ColorPalette const& colorPalette,
-                               CellFlags cellFlags,
-                               bool _reverseVideo,
-                               Color foregroundColor,
-                               Color backgroundColor,
-                               bool blinkingState_,
-                               bool rapidBlinkState_) noexcept
-{
-    auto const fgMode = (cellFlags & CellFlags::Faint)                                    ? ColorMode::Dimmed
-                        : ((cellFlags & CellFlags::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
-                                                                                          : ColorMode::Normal;
-
-    auto constexpr bgMode = ColorMode::Normal;
-
-    auto const [fgColorTarget, bgColorTarget] =
-        _reverseVideo ? std::pair { ColorTarget::Background, ColorTarget::Foreground }
-                      : std::pair { ColorTarget::Foreground, ColorTarget::Background };
-
-    auto rgbColors = RGBColorPair { apply(colorPalette, foregroundColor, fgColorTarget, fgMode),
-                                    apply(colorPalette, backgroundColor, bgColorTarget, bgMode) };
-
-    if (cellFlags & CellFlags::Inverse)
-        rgbColors = rgbColors.swapped();
-
-    if (cellFlags & CellFlags::Hidden)
-        rgbColors = rgbColors.allBackground();
-
-    if ((cellFlags & CellFlags::Blinking) && !blinkingState_)
-        return rgbColors.allBackground();
-    if ((cellFlags & CellFlags::RapidBlinking) && !rapidBlinkState_)
-        return rgbColors.allBackground();
-
-    return rgbColors;
-}
-
-inline RGBColorPair Cell::makeColors(ColorPalette const& _colorPalette,
-                                     bool _reverseVideo,
-                                     bool _blink,
-                                     bool _rapidBlink) const noexcept
-{
-    return terminal::makeColors(
+    return CellUtil::makeColors(
         _colorPalette, flags(), _reverseVideo, foregroundColor(), backgroundColor(), _blink, _rapidBlink);
 }
 
-inline std::shared_ptr<ImageFragment> Cell::imageFragment() const noexcept
+inline std::shared_ptr<ImageFragment> CompactCell::imageFragment() const noexcept
 {
     if (extra_)
         return extra_->imageFragment;
@@ -540,13 +463,14 @@ inline std::shared_ptr<ImageFragment> Cell::imageFragment() const noexcept
         return {};
 }
 
-inline void Cell::setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, CellLocation offset)
+inline void CompactCell::setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage,
+                                          CellLocation offset)
 {
     CellExtra& ext = extra();
     ext.imageFragment = std::make_shared<ImageFragment>(rasterizedImage, offset);
 }
 
-inline HyperlinkId Cell::hyperlink() const noexcept
+inline HyperlinkId CompactCell::hyperlink() const noexcept
 {
     if (extra_)
         return extra_->hyperlink;
@@ -554,7 +478,7 @@ inline HyperlinkId Cell::hyperlink() const noexcept
         return HyperlinkId {};
 }
 
-inline void Cell::setHyperlink(HyperlinkId _hyperlink)
+inline void CompactCell::setHyperlink(HyperlinkId _hyperlink)
 {
     if (!!_hyperlink)
         extra().hyperlink = _hyperlink;
@@ -562,56 +486,19 @@ inline void Cell::setHyperlink(HyperlinkId _hyperlink)
         extra_->hyperlink = {};
 }
 
-inline void Cell::setGraphicsRendition(GraphicsRendition _rendition) noexcept
+inline bool CompactCell::empty() const noexcept
 {
-    // TODO: optimize this as there are only 3 cases
-    // 1.) reset
-    // 2.) set some bits |=
-    // 3.) clear some bits &= ~
-    switch (_rendition)
-    {
-        case GraphicsRendition::Reset: extra().flags = {}; break;
-        case GraphicsRendition::Bold: extra().flags |= CellFlags::Bold; break;
-        case GraphicsRendition::Faint: extra().flags |= CellFlags::Faint; break;
-        case GraphicsRendition::Italic: extra().flags |= CellFlags::Italic; break;
-        case GraphicsRendition::Underline: extra().flags |= CellFlags::Underline; break;
-        case GraphicsRendition::Blinking:
-            extra().flags &= ~CellFlags::RapidBlinking;
-            extra().flags |= CellFlags::Blinking;
-            break;
-        case GraphicsRendition::RapidBlinking:
-            extra().flags &= ~CellFlags::Blinking;
-            extra().flags |= CellFlags::RapidBlinking;
-            break;
-        case GraphicsRendition::Inverse: extra().flags |= CellFlags::Inverse; break;
-        case GraphicsRendition::Hidden: extra().flags |= CellFlags::Hidden; break;
-        case GraphicsRendition::CrossedOut: extra().flags |= CellFlags::CrossedOut; break;
-        case GraphicsRendition::DoublyUnderlined: extra().flags |= CellFlags::DoublyUnderlined; break;
-        case GraphicsRendition::CurlyUnderlined: extra().flags |= CellFlags::CurlyUnderlined; break;
-        case GraphicsRendition::DottedUnderline: extra().flags |= CellFlags::DottedUnderline; break;
-        case GraphicsRendition::DashedUnderline: extra().flags |= CellFlags::DashedUnderline; break;
-        case GraphicsRendition::Framed: extra().flags |= CellFlags::Framed; break;
-        case GraphicsRendition::Overline: extra().flags |= CellFlags::Overline; break;
-        case GraphicsRendition::Normal: extra().flags &= ~(CellFlags::Bold | CellFlags::Faint); break;
-        case GraphicsRendition::NoItalic: extra().flags &= ~CellFlags::Italic; break;
-        case GraphicsRendition::NoUnderline:
-            extra().flags &= ~(CellFlags::Underline | CellFlags::DoublyUnderlined | CellFlags::CurlyUnderlined
-                               | CellFlags::DottedUnderline | CellFlags::DashedUnderline);
-            break;
-        case GraphicsRendition::NoBlinking:
-            extra().flags &= ~(CellFlags::Blinking | CellFlags::RapidBlinking);
-            break;
-        case GraphicsRendition::NoInverse: extra().flags &= ~CellFlags::Inverse; break;
-        case GraphicsRendition::NoHidden: extra().flags &= ~CellFlags::Hidden; break;
-        case GraphicsRendition::NoCrossedOut: extra().flags &= ~CellFlags::CrossedOut; break;
-        case GraphicsRendition::NoFramed: extra().flags &= ~CellFlags::Framed; break;
-        case GraphicsRendition::NoOverline: extra().flags &= ~CellFlags::Overline; break;
-    }
+    return CellUtil::empty(*this);
+}
+
+inline void CompactCell::setGraphicsRendition(GraphicsRendition sgr) noexcept
+{
+    resetFlags(CellUtil::makeCellFlags(sgr, flags()));
 }
 
 // }}}
 // {{{ free function implementations
-inline bool beginsWith(std::u32string_view text, Cell const& cell) noexcept
+inline bool beginsWith(std::u32string_view text, CompactCell const& cell) noexcept
 {
     assert(text.size() != 0);
 
@@ -634,7 +521,7 @@ inline bool beginsWith(std::u32string_view text, Cell const& cell) noexcept
 namespace fmt // {{{
 {
 template <>
-struct formatter<terminal::Cell>
+struct formatter<terminal::CompactCell>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -642,7 +529,7 @@ struct formatter<terminal::Cell>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::Cell const& cell, FormatContext& ctx)
+    auto format(terminal::CompactCell const& cell, FormatContext& ctx)
     {
         std::string codepoints;
         for (auto const i: crispy::times(cell.codepointCount()))

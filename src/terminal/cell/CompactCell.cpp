@@ -11,12 +11,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/Cell.h>
+#include <terminal/cell/CompactCell.h>
 
 namespace terminal
 {
 
-std::u32string Cell::codepoints() const
+std::u32string CompactCell::codepoints() const
 {
     std::u32string s;
     if (codepoint_)
@@ -33,7 +33,7 @@ std::u32string Cell::codepoints() const
     return s;
 }
 
-std::string Cell::toUtf8() const
+std::string CompactCell::toUtf8() const
 {
     if (!codepoint_)
         return {};

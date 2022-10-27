@@ -14,7 +14,7 @@
 #pragma once
 
 #include <terminal/Capabilities.h>
-#include <terminal/CellConcept.h>
+#include <terminal/CellUtil.h>
 #include <terminal/Charset.h>
 #include <terminal/Color.h>
 #include <terminal/Grid.h>
@@ -24,6 +24,7 @@
 #include <terminal/ScreenEvents.h>
 #include <terminal/TerminalState.h>
 #include <terminal/VTType.h>
+#include <terminal/cell/CellConcept.h>
 
 #include <crispy/StrongLRUCache.h>
 #include <crispy/algorithm.h>
@@ -498,7 +499,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void verifyState() const override;
 
     /// @returns the primary screen's grid.
-    [[nodiscard]] Grid<Cell>& primaryGrid() noexcept
+    [[nodiscard]] decltype(auto) primaryGrid() noexcept
     {
         return _state.primaryBuffer;
     }
@@ -543,11 +544,8 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     [[nodiscard]] bool compareCellTextAt(CellLocation position, char codepoint) const noexcept override
     {
-        return grid()
-            .lineAt(position.line)
-            .inflatedBuffer()
-            .at(position.column.as<size_t>())
-            .compareText(codepoint);
+        auto const& cell = grid().lineAt(position.line).inflatedBuffer().at(position.column.as<size_t>());
+        return CellUtil::compareText(cell, codepoint);
     }
 
     // IMPORTANT: Invokig inflatedBuffer() is expensive. This function should be invoked with caution.

@@ -11,9 +11,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/Cell.h>
 #include <terminal/Grid.h>
 #include <terminal/Parser.h>
+#include <terminal/cell/CellConfig.h>
 
 #include <fmt/format.h>
 
@@ -26,6 +26,9 @@ using namespace std::string_literals;
 using namespace std::string_view_literals;
 using std::string;
 using std::string_view;
+
+// Default cell type for testing.
+using Cell = PrimaryScreenCell;
 
 namespace
 {

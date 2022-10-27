@@ -3818,5 +3818,8 @@ optional<CellLocation> Screen<Cell>::searchReverse(std::u32string_view searchTex
 
 } // namespace terminal
 
-#include <terminal/Cell.h>
-template class terminal::Screen<terminal::Cell>;
+#include <terminal/cell/CompactCell.h>
+template class terminal::Screen<terminal::CompactCell>;
+
+#include <terminal/cell/SimpleCell.h>
+template class terminal::Screen<terminal::SimpleCell>;

@@ -372,21 +372,22 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
     auto const mainDisplayReverseVideo = isModeEnabled(terminal::DECMode::ReverseVideo);
 
     if (isPrimaryScreen())
-        _lastRenderPassHints = primaryScreen_.render(RenderBufferBuilder<Cell> { *this,
-                                                                                 _output,
-                                                                                 LineOffset(0),
-                                                                                 mainDisplayReverseVideo,
-                                                                                 HighlightSearchMatches::Yes,
-                                                                                 inputMethodData_ },
-                                                     viewport_.scrollOffset());
+        _lastRenderPassHints =
+            primaryScreen_.render(RenderBufferBuilder<PrimaryScreenCell> { *this,
+                                                                           _output,
+                                                                           LineOffset(0),
+                                                                           mainDisplayReverseVideo,
+                                                                           HighlightSearchMatches::Yes,
+                                                                           inputMethodData_ },
+                                  viewport_.scrollOffset());
     else
         _lastRenderPassHints =
-            alternateScreen_.render(RenderBufferBuilder<Cell> { *this,
-                                                                _output,
-                                                                LineOffset(0),
-                                                                mainDisplayReverseVideo,
-                                                                HighlightSearchMatches::Yes,
-                                                                inputMethodData_ },
+            alternateScreen_.render(RenderBufferBuilder<AlternateScreenCell> { *this,
+                                                                               _output,
+                                                                               LineOffset(0),
+                                                                               mainDisplayReverseVideo,
+                                                                               HighlightSearchMatches::Yes,
+                                                                               inputMethodData_ },
                                     viewport_.scrollOffset());
 
     switch (state_.statusDisplayType)
@@ -396,22 +397,23 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
             break;
         case StatusDisplayType::Indicator:
             updateIndicatorStatusLine();
-            indicatorStatusScreen_.render(RenderBufferBuilder<Cell> { *this,
-                                                                      _output,
-                                                                      state_.pageSize.lines.as<LineOffset>(),
-                                                                      !mainDisplayReverseVideo,
-                                                                      HighlightSearchMatches::No,
-                                                                      InputMethodData {} },
-                                          ScrollOffset(0));
+            indicatorStatusScreen_.render(
+                RenderBufferBuilder<StatusDisplayCell> { *this,
+                                                         _output,
+                                                         state_.pageSize.lines.as<LineOffset>(),
+                                                         !mainDisplayReverseVideo,
+                                                         HighlightSearchMatches::No,
+                                                         InputMethodData {} },
+                ScrollOffset(0));
             break;
         case StatusDisplayType::HostWritable:
             hostWritableStatusLineScreen_.render(
-                RenderBufferBuilder<Cell> { *this,
-                                            _output,
-                                            state_.pageSize.lines.as<LineOffset>(),
-                                            !mainDisplayReverseVideo,
-                                            HighlightSearchMatches::No,
-                                            InputMethodData {} },
+                RenderBufferBuilder<StatusDisplayCell> { *this,
+                                                         _output,
+                                                         state_.pageSize.lines.as<LineOffset>(),
+                                                         !mainDisplayReverseVideo,
+                                                         HighlightSearchMatches::No,
+                                                         InputMethodData {} },
                 ScrollOffset(0));
             break;
     }
@@ -971,36 +973,64 @@ void Terminal::setWordDelimiters(string const& _wordDelimiters)
     wordDelimiters_ = unicode::from_utf8(_wordDelimiters);
 }
 
-string Terminal::extractSelectionText() const
+namespace
 {
-    using namespace terminal;
-    ColumnOffset lastColumn = {};
-    string text;
-    string currentLine;
+    template <typename Cell>
+    struct SelectionRenderer
+    {
+        Terminal const& term;
+        ColumnOffset const rightPage;
+        ColumnOffset lastColumn {};
+        string text {};
+        string currentLine {};
 
-    auto const _lock = scoped_lock { *this };
-    auto const rightPage = pageSize().columns.as<ColumnOffset>() - 1;
-    renderSelection([&](CellLocation const& _pos, Cell const& _cell) {
-        auto const isNewLine = _pos.column < lastColumn || (_pos.column == lastColumn && !text.empty());
-        bool const touchesRightPage = isSelected({ _pos.line, rightPage });
-        if (isNewLine && (!isLineWrapped(_pos.line) || !touchesRightPage))
+        void operator()(CellLocation _pos, Cell const& _cell)
         {
-            // TODO: handle logical line in word-selection (don't include LF in wrapped lines)
+            auto const isNewLine = _pos.column < lastColumn || (_pos.column == lastColumn && !text.empty());
+            bool const touchesRightPage = term.isSelected({ _pos.line, rightPage });
+            if (isNewLine && (!term.isLineWrapped(_pos.line) || !touchesRightPage))
+            {
+                // TODO: handle logical line in word-selection (don't include LF in wrapped lines)
+                trimSpaceRight(currentLine);
+                text += currentLine;
+                text += '\n';
+                currentLine.clear();
+            }
+            currentLine += _cell.toUtf8();
+            lastColumn = _pos.column;
+        }
+
+        std::string finish()
+        {
             trimSpaceRight(currentLine);
             text += currentLine;
-            text += '\n';
-            currentLine.clear();
+            if (dynamic_cast<FullLineSelection const*>(term.selector()))
+                text += '\n';
+            return std::move(text);
         }
-        currentLine += _cell.toUtf8();
-        lastColumn = _pos.column;
-    });
+    };
+} // namespace
 
-    trimSpaceRight(currentLine);
-    text += currentLine;
+string Terminal::extractSelectionText() const
+{
+    auto const _lock = scoped_lock { *this };
 
-    if (dynamic_cast<FullLineSelection const*>(selector()))
-        text += '\n';
-    return text;
+    if (!selection_)
+        return "";
+
+    if (isPrimaryScreen())
+    {
+        auto se = SelectionRenderer<PrimaryScreenCell> { *this, pageSize().columns.as<ColumnOffset>() - 1 };
+        terminal::renderSelection(*selection_, [&](CellLocation _pos) { se(_pos, primaryScreen_.at(_pos)); });
+        return se.finish();
+    }
+    else
+    {
+        auto se = SelectionRenderer<AlternateScreenCell> { *this, pageSize().columns.as<ColumnOffset>() - 1 };
+        terminal::renderSelection(*selection_,
+                                  [&](CellLocation _pos) { se(_pos, alternateScreen_.at(_pos)); });
+        return se.finish();
+    }
 }
 
 string Terminal::extractLastMarkRange() const
