@@ -312,7 +312,7 @@ class ContourHeadlessBench: public crispy::App
         auto parser = terminal::parser::Parser<terminal::ParserEvents> { po };
         return baseBenchmark(
             [&](char const* a, size_t b) -> bool {
-                parser.parseFragment(string_view(a, b), 100);
+                parser.parseFragment(string_view(a, b));
                 return true;
             },
             benchOptionsFor("parser"),

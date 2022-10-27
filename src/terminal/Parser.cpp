@@ -348,15 +348,15 @@ constexpr ParserTable ParserTable::get() // {{{
 } // }}}
 
 template <typename EventListener, bool TraceStateChanges>
-void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view const _data,
-                                                             size_t maxCharCount)
+void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view const _data)
 {
     auto input = _data.data();
     auto const end = _data.data() + _data.size();
 
     while (input != end)
     {
-        if (state_ == State::Ground && eventListener_.acceptsBulkText())
+        auto const maxCharCount = eventListener_.maxBulkTextSequenceWidth();
+        if (state_ == State::Ground && maxCharCount)
         {
             auto const chunk = std::string_view(input, static_cast<size_t>(std::distance(input, end)));
             auto const [cellCount, next, subStart, subEnd] =
@@ -386,7 +386,7 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view co
                 {
                     if (!text.empty())
                     {
-                        maxCharCount = eventListener_.print(text, cellCount);
+                        eventListener_.print(text, cellCount);
                     }
                 }
                 else

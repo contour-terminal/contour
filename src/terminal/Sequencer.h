@@ -168,7 +168,7 @@ class Sequencer
         hookedParser_ = std::move(parserExtension);
     }
 
-    [[nodiscard]] bool acceptsBulkText() const noexcept;
+    [[nodiscard]] size_t maxBulkTextSequenceWidth() const noexcept;
 
   private:
     void handleSequence();

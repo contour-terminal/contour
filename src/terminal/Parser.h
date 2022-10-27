@@ -550,8 +550,9 @@ class Parser
     explicit Parser(EventListener& _listener): eventListener_ { _listener } {}
 
     /// Parses the input string in UTF-8 encoding and emits VT events while processing.
-    /// With respect to text, only up to @p maxCharCount UTF-32 codepoints will be processed.
-    void parseFragment(std::string_view s, size_t maxCharCount);
+    /// With respect to text, only up to @c EventListener::maxBulkTextSequenceWidth() UTF-32 codepoints will
+    /// be processed.
+    void parseFragment(std::string_view s);
 
     [[nodiscard]] State state() const noexcept { return state_; }
 
