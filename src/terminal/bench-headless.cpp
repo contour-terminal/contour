@@ -175,10 +175,11 @@ class ContourHeadlessBench: public crispy::App
     int showMetaInfo()
     {
         // Show any interesting meta information.
-        fmt::print("Cell      : {} bytes\n", sizeof(terminal::ThinCell));
-        fmt::print("CellExtra : {} bytes\n", sizeof(terminal::CellExtra));
-        fmt::print("CellFlags : {} bytes\n", sizeof(terminal::CellFlags));
-        fmt::print("Color     : {} bytes\n", sizeof(terminal::Color));
+        fmt::print("SimpleCell  : {} bytes\n", sizeof(terminal::SimpleCell));
+        fmt::print("CompactCell : {} bytes\n", sizeof(terminal::CompactCell));
+        fmt::print("CellExtra   : {} bytes\n", sizeof(terminal::CellExtra));
+        fmt::print("CellFlags   : {} bytes\n", sizeof(terminal::CellFlags));
+        fmt::print("Color       : {} bytes\n", sizeof(terminal::Color));
         return EXIT_SUCCESS;
     }
 

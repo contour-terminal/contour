@@ -28,7 +28,7 @@ using std::string;
 using std::string_view;
 
 // Default cell type for testing.
-using Cell = ThinCell;
+using Cell = PrimaryScreenCell;
 
 namespace
 {

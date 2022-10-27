@@ -236,8 +236,8 @@ void VTWriter::write(Line<Cell> const& line)
 
 } // namespace terminal
 
-#include <terminal/cell/ThinCell.h>
-template void terminal::VTWriter::write<terminal::ThinCell>(Line<ThinCell> const&);
+#include <terminal/cell/CompactCell.h>
+template void terminal::VTWriter::write<terminal::CompactCell>(Line<CompactCell> const&);
 
 #include <terminal/cell/SimpleCell.h>
 template void terminal::VTWriter::write<terminal::SimpleCell>(Line<SimpleCell> const&);

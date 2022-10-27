@@ -22,7 +22,7 @@ set(terminal_HEADERS
     cell/CellConcept.h
     cell/CellConfig.h
     cell/SimpleCell.h
-    cell/ThinCell.h
+    cell/CompactCell.h
     CellUtil.h
     Charset.h
     Color.h
@@ -69,7 +69,7 @@ endif()
 
 set(terminal_SOURCES
     Capabilities.cpp
-    cell/ThinCell.cpp
+    cell/CompactCell.cpp
     Charset.cpp
     Color.cpp
     ColorPalette.cpp

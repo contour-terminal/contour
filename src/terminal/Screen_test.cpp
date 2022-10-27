@@ -103,7 +103,7 @@ struct TextRenderBuilder
     std::string text;
 
     void startLine(LineOffset lineOffset);
-    void renderCell(ThinCell const& cell, LineOffset lineOffset, ColumnOffset columnOffset);
+    void renderCell(PrimaryScreenCell const& cell, LineOffset lineOffset, ColumnOffset columnOffset);
     void endLine();
     void renderTrivialLine(TrivialLineBuffer const& lineBuffer, LineOffset lineOffset);
     void finish();
@@ -115,7 +115,7 @@ void TextRenderBuilder::startLine(LineOffset lineOffset)
         text.clear();
 }
 
-void TextRenderBuilder::renderCell(ThinCell const& cell, LineOffset, ColumnOffset)
+void TextRenderBuilder::renderCell(CompactCell const& cell, LineOffset, ColumnOffset)
 {
     text += cell.toUtf8();
 }

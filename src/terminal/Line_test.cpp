@@ -24,7 +24,7 @@ using namespace terminal;
 using namespace crispy;
 
 // Default cell type for testing.
-using Cell = ThinCell;
+using Cell = PrimaryScreenCell;
 
 TEST_CASE("Line.BufferFragment", "[Line]")
 {

@@ -587,8 +587,8 @@ void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset _l
 
 } // namespace terminal
 
-#include <terminal/cell/ThinCell.h>
-template class terminal::RenderBufferBuilder<terminal::ThinCell>;
+#include <terminal/cell/CompactCell.h>
+template class terminal::RenderBufferBuilder<terminal::CompactCell>;
 
 #include <terminal/cell/SimpleCell.h>
 template class terminal::RenderBufferBuilder<terminal::SimpleCell>;

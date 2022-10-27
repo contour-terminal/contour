@@ -13,17 +13,17 @@
  */
 #pragma once
 
+#include <terminal/cell/CompactCell.h>
 #include <terminal/cell/SimpleCell.h>
-#include <terminal/cell/ThinCell.h>
 
 namespace terminal
 {
 
 /// Type of cell to be used with the primary screen.
-using PrimaryScreenCell = ThinCell;
+using PrimaryScreenCell = CompactCell;
 
 /// Type of cell to be used with the alternate screen.
-using AlternateScreenCell = ThinCell;
+using AlternateScreenCell = CompactCell;
 
 /// The Cell to be used with the indicator (and host writable) status line.
 using StatusDisplayCell = SimpleCell;

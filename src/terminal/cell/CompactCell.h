@@ -42,10 +42,10 @@ namespace terminal
 /// In this struct we collect all the relevant cell data that is not frequently used,
 /// and thus, would only waste unnecessary memory in most situations.
 ///
-/// @see ThinCell
+/// @see CompactCell
 struct CellExtra
 {
-    /// With the main codepoint that is being stored in the ThinCell struct, followed by this
+    /// With the main codepoint that is being stored in the CompactCell struct, followed by this
     /// sequence of codepoints, a grapheme cluster is formed that represents the visual
     /// character in this terminal cell.
     ///
@@ -76,19 +76,19 @@ struct CellExtra
 ///
 /// TODO(perf): ensure POD'ness so that we can SIMD-copy it.
 /// - Requires moving out CellExtra into Line<T>?
-class CRISPY_PACKED ThinCell
+class CRISPY_PACKED CompactCell
 {
   public:
     static uint8_t constexpr MaxCodepoints = 7;
 
-    ThinCell() noexcept;
-    ThinCell(ThinCell const& v) noexcept;
-    ThinCell& operator=(ThinCell const& v) noexcept;
-    explicit ThinCell(GraphicsAttributes _attributes, HyperlinkId hyperlink = {}) noexcept;
+    CompactCell() noexcept;
+    CompactCell(CompactCell const& v) noexcept;
+    CompactCell& operator=(CompactCell const& v) noexcept;
+    explicit CompactCell(GraphicsAttributes _attributes, HyperlinkId hyperlink = {}) noexcept;
 
-    ThinCell(ThinCell&&) noexcept = default;
-    ThinCell& operator=(ThinCell&&) noexcept = default;
-    ~ThinCell() = default;
+    CompactCell(CompactCell&&) noexcept = default;
+    CompactCell& operator=(CompactCell&&) noexcept = default;
+    ~CompactCell() = default;
 
     void reset() noexcept;
     void reset(GraphicsAttributes const& _attributes) noexcept;
@@ -164,7 +164,7 @@ class CRISPY_PACKED ThinCell
     template <typename... Args>
     void createExtra(Args... args) noexcept;
 
-    // ThinCell data
+    // CompactCell data
     char32_t codepoint_ = 0; /// Primary Unicode codepoint to be displayed.
     Color foregroundColor_ = DefaultColor();
     Color backgroundColor_ = DefaultColor();
@@ -174,7 +174,7 @@ class CRISPY_PACKED ThinCell
 
 // {{{ impl: ctor's
 template <typename... Args>
-inline void ThinCell::createExtra(Args... args) noexcept
+inline void CompactCell::createExtra(Args... args) noexcept
 {
     try
     {
@@ -186,12 +186,12 @@ inline void ThinCell::createExtra(Args... args) noexcept
     }
 }
 
-inline ThinCell::ThinCell() noexcept
+inline CompactCell::CompactCell() noexcept
 {
     setWidth(1);
 }
 
-inline ThinCell::ThinCell(GraphicsAttributes _attributes, HyperlinkId hyperlink) noexcept:
+inline CompactCell::CompactCell(GraphicsAttributes _attributes, HyperlinkId hyperlink) noexcept:
     foregroundColor_ { _attributes.foregroundColor }, backgroundColor_ { _attributes.backgroundColor }
 {
     setWidth(1);
@@ -204,7 +204,7 @@ inline ThinCell::ThinCell(GraphicsAttributes _attributes, HyperlinkId hyperlink)
         extra().flags = _attributes.flags;
 }
 
-inline ThinCell::ThinCell(ThinCell const& v) noexcept:
+inline CompactCell::CompactCell(CompactCell const& v) noexcept:
     codepoint_ { v.codepoint_ },
     foregroundColor_ { v.foregroundColor_ },
     backgroundColor_ { v.backgroundColor_ }
@@ -213,7 +213,7 @@ inline ThinCell::ThinCell(ThinCell const& v) noexcept:
         createExtra(*v.extra_);
 }
 
-inline ThinCell& ThinCell::operator=(ThinCell const& v) noexcept
+inline CompactCell& CompactCell::operator=(CompactCell const& v) noexcept
 {
     codepoint_ = v.codepoint_;
     foregroundColor_ = v.foregroundColor_;
@@ -224,7 +224,7 @@ inline ThinCell& ThinCell::operator=(ThinCell const& v) noexcept
 }
 // }}}
 // {{{ impl: reset
-inline void ThinCell::reset() noexcept
+inline void CompactCell::reset() noexcept
 {
     codepoint_ = 0;
     foregroundColor_ = DefaultColor();
@@ -232,7 +232,7 @@ inline void ThinCell::reset() noexcept
     extra_.reset();
 }
 
-inline void ThinCell::reset(GraphicsAttributes const& _attributes) noexcept
+inline void CompactCell::reset(GraphicsAttributes const& _attributes) noexcept
 {
     codepoint_ = 0;
     foregroundColor_ = _attributes.foregroundColor;
@@ -244,7 +244,7 @@ inline void ThinCell::reset(GraphicsAttributes const& _attributes) noexcept
         extra().underlineColor = _attributes.underlineColor;
 }
 
-inline void ThinCell::write(GraphicsAttributes const& _attributes, char32_t _ch, uint8_t _width) noexcept
+inline void CompactCell::write(GraphicsAttributes const& _attributes, char32_t _ch, uint8_t _width) noexcept
 {
     setWidth(_width);
 
@@ -265,10 +265,10 @@ inline void ThinCell::write(GraphicsAttributes const& _attributes, char32_t _ch,
         extra().underlineColor = _attributes.underlineColor;
 }
 
-inline void ThinCell::write(GraphicsAttributes const& _attributes,
-                            char32_t _ch,
-                            uint8_t _width,
-                            HyperlinkId _hyperlink) noexcept
+inline void CompactCell::write(GraphicsAttributes const& _attributes,
+                               char32_t _ch,
+                               uint8_t _width,
+                               HyperlinkId _hyperlink) noexcept
 {
     writeTextOnly(_ch, _width);
     if (extra_)
@@ -290,7 +290,7 @@ inline void ThinCell::write(GraphicsAttributes const& _attributes,
     }
 }
 
-inline void ThinCell::writeTextOnly(char32_t _ch, uint8_t _width) noexcept
+inline void CompactCell::writeTextOnly(char32_t _ch, uint8_t _width) noexcept
 {
     setWidth(_width);
     codepoint_ = _ch;
@@ -298,7 +298,7 @@ inline void ThinCell::writeTextOnly(char32_t _ch, uint8_t _width) noexcept
         extra_->codepoints.clear();
 }
 
-inline void ThinCell::reset(GraphicsAttributes const& _attributes, HyperlinkId _hyperlink) noexcept
+inline void CompactCell::reset(GraphicsAttributes const& _attributes, HyperlinkId _hyperlink) noexcept
 {
     codepoint_ = 0;
     foregroundColor_ = _attributes.foregroundColor;
@@ -314,13 +314,13 @@ inline void ThinCell::reset(GraphicsAttributes const& _attributes, HyperlinkId _
 }
 // }}}
 // {{{ impl: character
-inline constexpr uint8_t ThinCell::width() const noexcept
+inline constexpr uint8_t CompactCell::width() const noexcept
 {
     return !extra_ ? 1 : extra_->width;
     // return static_cast<int>((codepoint_ >> 21) & 0x03); //return width_;
 }
 
-inline void ThinCell::setWidth(uint8_t _width) noexcept
+inline void CompactCell::setWidth(uint8_t _width) noexcept
 {
     assert(_width < MaxCodepoints);
     // codepoint_ = codepoint_ | ((_width << 21) & 0x03);
@@ -329,7 +329,7 @@ inline void ThinCell::setWidth(uint8_t _width) noexcept
     // TODO(perf) use u32_unused_bit_mask()
 }
 
-inline void ThinCell::setCharacter(char32_t _codepoint) noexcept
+inline void CompactCell::setCharacter(char32_t _codepoint) noexcept
 {
     codepoint_ = _codepoint;
     if (extra_)
@@ -343,7 +343,7 @@ inline void ThinCell::setCharacter(char32_t _codepoint) noexcept
         setWidth(1);
 }
 
-inline int ThinCell::appendCharacter(char32_t _codepoint) noexcept
+inline int CompactCell::appendCharacter(char32_t _codepoint) noexcept
 {
     assert(_codepoint != 0);
 
@@ -360,7 +360,7 @@ inline int ThinCell::appendCharacter(char32_t _codepoint) noexcept
     return 0;
 }
 
-inline std::size_t ThinCell::codepointCount() const noexcept
+inline std::size_t CompactCell::codepointCount() const noexcept
 {
     if (codepoint_)
     {
@@ -372,7 +372,7 @@ inline std::size_t ThinCell::codepointCount() const noexcept
     return 0;
 }
 
-inline char32_t ThinCell::codepoint(size_t i) const noexcept
+inline char32_t CompactCell::codepoint(size_t i) const noexcept
 {
     if (i == 0)
         return codepoint_;
@@ -388,7 +388,7 @@ inline char32_t ThinCell::codepoint(size_t i) const noexcept
 }
 // }}}
 // {{{ attrs
-inline CellExtra& ThinCell::extra() noexcept
+inline CellExtra& CompactCell::extra() noexcept
 {
     if (extra_)
         return *extra_;
@@ -396,35 +396,35 @@ inline CellExtra& ThinCell::extra() noexcept
     return *extra_;
 }
 
-inline CellFlags ThinCell::flags() const noexcept
+inline CellFlags CompactCell::flags() const noexcept
 {
     if (!extra_)
         return CellFlags::None;
     else
-        return const_cast<ThinCell*>(this)->extra_->flags;
+        return const_cast<CompactCell*>(this)->extra_->flags;
 }
 
-inline Color ThinCell::foregroundColor() const noexcept
+inline Color CompactCell::foregroundColor() const noexcept
 {
     return foregroundColor_;
 }
 
-inline void ThinCell::setForegroundColor(Color color) noexcept
+inline void CompactCell::setForegroundColor(Color color) noexcept
 {
     foregroundColor_ = color;
 }
 
-inline Color ThinCell::backgroundColor() const noexcept
+inline Color CompactCell::backgroundColor() const noexcept
 {
     return backgroundColor_;
 }
 
-inline void ThinCell::setBackgroundColor(Color color) noexcept
+inline void CompactCell::setBackgroundColor(Color color) noexcept
 {
     backgroundColor_ = color;
 }
 
-inline Color ThinCell::underlineColor() const noexcept
+inline Color CompactCell::underlineColor() const noexcept
 {
     if (!extra_)
         return DefaultColor();
@@ -432,7 +432,7 @@ inline Color ThinCell::underlineColor() const noexcept
         return extra_->underlineColor;
 }
 
-inline void ThinCell::setUnderlineColor(Color color) noexcept
+inline void CompactCell::setUnderlineColor(Color color) noexcept
 {
     if (extra_)
         extra_->underlineColor = color;
@@ -440,22 +440,22 @@ inline void ThinCell::setUnderlineColor(Color color) noexcept
         extra().underlineColor = color;
 }
 
-inline RGBColor ThinCell::getUnderlineColor(ColorPalette const& _colorPalette,
-                                            RGBColor _defaultColor) const noexcept
+inline RGBColor CompactCell::getUnderlineColor(ColorPalette const& _colorPalette,
+                                               RGBColor _defaultColor) const noexcept
 {
     return CellUtil::getUnderlineColor(_colorPalette, flags(), _defaultColor, underlineColor());
 }
 
-inline RGBColorPair ThinCell::makeColors(ColorPalette const& _colorPalette,
-                                         bool _reverseVideo,
-                                         bool _blink,
-                                         bool _rapidBlink) const noexcept
+inline RGBColorPair CompactCell::makeColors(ColorPalette const& _colorPalette,
+                                            bool _reverseVideo,
+                                            bool _blink,
+                                            bool _rapidBlink) const noexcept
 {
     return CellUtil::makeColors(
         _colorPalette, flags(), _reverseVideo, foregroundColor(), backgroundColor(), _blink, _rapidBlink);
 }
 
-inline std::shared_ptr<ImageFragment> ThinCell::imageFragment() const noexcept
+inline std::shared_ptr<ImageFragment> CompactCell::imageFragment() const noexcept
 {
     if (extra_)
         return extra_->imageFragment;
@@ -463,13 +463,14 @@ inline std::shared_ptr<ImageFragment> ThinCell::imageFragment() const noexcept
         return {};
 }
 
-inline void ThinCell::setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, CellLocation offset)
+inline void CompactCell::setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage,
+                                          CellLocation offset)
 {
     CellExtra& ext = extra();
     ext.imageFragment = std::make_shared<ImageFragment>(rasterizedImage, offset);
 }
 
-inline HyperlinkId ThinCell::hyperlink() const noexcept
+inline HyperlinkId CompactCell::hyperlink() const noexcept
 {
     if (extra_)
         return extra_->hyperlink;
@@ -477,7 +478,7 @@ inline HyperlinkId ThinCell::hyperlink() const noexcept
         return HyperlinkId {};
 }
 
-inline void ThinCell::setHyperlink(HyperlinkId _hyperlink)
+inline void CompactCell::setHyperlink(HyperlinkId _hyperlink)
 {
     if (!!_hyperlink)
         extra().hyperlink = _hyperlink;
@@ -485,19 +486,19 @@ inline void ThinCell::setHyperlink(HyperlinkId _hyperlink)
         extra_->hyperlink = {};
 }
 
-inline bool ThinCell::empty() const noexcept
+inline bool CompactCell::empty() const noexcept
 {
     return CellUtil::empty(*this);
 }
 
-inline void ThinCell::setGraphicsRendition(GraphicsRendition sgr) noexcept
+inline void CompactCell::setGraphicsRendition(GraphicsRendition sgr) noexcept
 {
     resetFlags(CellUtil::makeCellFlags(sgr, flags()));
 }
 
 // }}}
 // {{{ free function implementations
-inline bool beginsWith(std::u32string_view text, ThinCell const& cell) noexcept
+inline bool beginsWith(std::u32string_view text, CompactCell const& cell) noexcept
 {
     assert(text.size() != 0);
 
@@ -520,7 +521,7 @@ inline bool beginsWith(std::u32string_view text, ThinCell const& cell) noexcept
 namespace fmt // {{{
 {
 template <>
-struct formatter<terminal::ThinCell>
+struct formatter<terminal::CompactCell>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -528,7 +529,7 @@ struct formatter<terminal::ThinCell>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::ThinCell const& cell, FormatContext& ctx)
+    auto format(terminal::CompactCell const& cell, FormatContext& ctx)
     {
         std::string codepoints;
         for (auto const i: crispy::times(cell.codepointCount()))
