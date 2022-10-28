@@ -520,6 +520,13 @@ class Terminal
         return selection_ && selection_->state() != Selection::State::Waiting && selection_->contains(_coord);
     }
 
+    /// Tests whether given line offset is intersecting with selection.
+    bool isSelected(LineOffset line) const noexcept
+    {
+        return selection_ && selection_->state() != Selection::State::Waiting
+               && selection_->containsLine(line);
+    }
+
     bool isHighlighted(CellLocation _cell) const noexcept;
     bool blinkState() const noexcept { return _slowBlinker.state; }
     bool rapidBlinkState() const noexcept { return _rapidBlinker.state; }

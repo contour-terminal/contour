@@ -90,6 +90,7 @@ class Selection
     /// @returns boolean indicating whether or not given absolute coordinate is within the range of the
     /// selection.
     [[nodiscard]] virtual bool contains(CellLocation _coord) const noexcept;
+    [[nodiscard]] bool containsLine(LineOffset line) const noexcept;
     [[nodiscard]] virtual bool intersects(Rect _area) const noexcept;
 
     /// Tests whether the a selection is currently in progress.

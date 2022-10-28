@@ -79,6 +79,11 @@ bool Selection::contains(CellLocation _coord) const noexcept
     return crispy::ascending(from_, _coord, to_) || crispy::ascending(to_, _coord, from_);
 }
 
+bool Selection::containsLine(LineOffset line) const noexcept
+{
+    return crispy::ascending(from_.line, line, to_.line) || crispy::ascending(to_.line, line, from_.line);
+}
+
 bool Selection::intersects(Rect _area) const noexcept
 {
     // TODO: make me more efficient
