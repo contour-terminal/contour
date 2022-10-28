@@ -47,7 +47,7 @@ class RenderBufferBuilder
     /// with their grid cells are to be rendered using renderCell().
     ///
     /// @see renderCell
-    void renderTrivialLine(TrivialLineBuffer const& _lineBuffer, LineOffset _lineNo);
+    void renderTrivialLine(TrivialLineBuffer const& lineBuffer, LineOffset lineNo);
 
     /// This call is guaranteed to be invoked when the the full page has been rendered.
     void finish() noexcept {}

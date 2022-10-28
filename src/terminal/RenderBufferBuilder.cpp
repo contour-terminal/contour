@@ -297,6 +297,7 @@ RenderLine RenderBufferBuilder<Cell>::createRenderLine(TrivialLineBuffer const& 
     auto renderLine = RenderLine {};
     renderLine.lineOffset = lineOffset;
     renderLine.usedColumns = lineBuffer.usedColumns;
+    renderLine.displayWidth = terminal.pageSize().columns;
     renderLine.text = lineBuffer.text.view();
     renderLine.textAttributes = createRenderAttributes(gridPosition, lineBuffer.textAttributes);
     renderLine.fillAttributes = createRenderAttributes(gridPosition, lineBuffer.fillAttributes);
@@ -317,10 +318,10 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineB
 
     auto const frontIndex = output.cells.size();
 
-    // TODO: visual selection can alter colors for some columns in this line.
+    // Visual selection can alter colors for some columns in this line.
     // In that case, it seems like we cannot just pass it bare over but have to take the slower path.
     // But that should be fine.
-    bool const canRenderViaSimpleLine = false; // <- Should be false if selection covers this line.
+    bool const canRenderViaSimpleLine = !terminal.isSelected(lineOffset);
 
     if (canRenderViaSimpleLine)
     {
