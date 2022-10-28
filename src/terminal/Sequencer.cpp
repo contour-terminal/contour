@@ -150,9 +150,14 @@ void Sequencer::unhook()
     }
 }
 
-bool Sequencer::acceptsBulkText() const noexcept
+size_t Sequencer::maxBulkTextSequenceWidth() const noexcept
 {
-    return terminal_.isPrimaryScreen() && terminal_.primaryScreen().currentLine().isTrivialBuffer();
+    if (terminal_.isPrimaryScreen() && terminal_.primaryScreen().currentLine().isTrivialBuffer())
+    {
+        assert(terminal_.state().margin.horizontal.to >= terminal_.cursor().position.column);
+        return unbox<size_t>(terminal_.state().margin.horizontal.to - terminal_.cursor().position.column);
+    }
+    return 0;
 }
 
 void Sequencer::handleSequence()

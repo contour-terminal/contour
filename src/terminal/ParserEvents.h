@@ -13,6 +13,7 @@
  */
 #pragma once
 
+#include <limits>
 #include <string_view>
 
 namespace terminal
@@ -49,12 +50,13 @@ class ParserEvents
     virtual size_t print(std::string_view _chars, size_t cellCount) = 0;
 
     /**
-     * Used to indicate whether or not the print() overload may be used to process bulk text.
+     * Returns the number of terminal columns (cells) that are still available in the current line
+     * until the right page margin would be hit.
      *
-     * There may be situations where it would not be efficient to process bulk text. In such situations,
-     * simply calling print() per codepoint is sufficient (potentially being more performant).
+     * This accessor is used to determine whether or not bulk text processing can
+     * be used or not.
      */
-    [[nodiscard]] virtual bool acceptsBulkText() const noexcept = 0;
+    [[nodiscard]] virtual size_t maxBulkTextSequenceWidth() const noexcept = 0;
 
     /**
      * The C0 or C1 control function should be executed, which may have any one of a variety of
@@ -176,7 +178,9 @@ class NullParserEvents: public ParserEvents
     void error(std::string_view const&) override {}
     void print(char32_t) override {}
     size_t print(std::string_view, size_t) override { return 0; }
-    [[nodiscard]] bool acceptsBulkText() const noexcept override { return true; }
+    // clang-format off
+    [[nodiscard]] size_t maxBulkTextSequenceWidth() const noexcept override { return std::numeric_limits<size_t>::max(); }
+    // clang-format on
     void execute(char) override {}
     void clear() override {}
     void collect(char) override {}
