@@ -869,4 +869,22 @@ TEST_CASE("Grid infinite", "[grid]")
     REQUIRE(grid_infinite.lineText(LineOffset(-97)) == "abcdefgh");
     REQUIRE(grid_infinite.lineText(LineOffset(-98)) == "ABCDEFGH");
 }
+
+TEST_CASE("Grid resize with wrap", "[grid]")
+{
+    auto grid = Grid<Cell>(PageSize { LineCount(3), ColumnCount(5) }, true, LineCount(0));
+    grid.setLineText(LineOffset { 0 }, "1");
+    grid.setLineText(LineOffset { 1 }, "2");
+    grid.setLineText(LineOffset { 2 }, "ABCDE");
+    (void) grid.resize(PageSize { LineCount(3), ColumnCount(3) }, CellLocation {}, false);
+    REQUIRE(grid.lineText(LineOffset(0)) == "2  ");
+    REQUIRE(grid.lineText(LineOffset(1)) == "ABC");
+    REQUIRE(grid.lineText(LineOffset(2)) == "DE ");
+    (void) grid.resize(PageSize { LineCount(3), ColumnCount(5) }, CellLocation {}, false);
+    REQUIRE(unbox<int>(grid.historyLineCount()) == 0);
+    REQUIRE(grid.lineText(LineOffset(0)) == "1    ");
+    REQUIRE(grid.lineText(LineOffset(1)) == "2    ");
+    REQUIRE(grid.lineText(LineOffset(2)) == "ABCDE");
+}
+
 // }}}
