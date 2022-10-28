@@ -321,7 +321,13 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineB
     // Visual selection can alter colors for some columns in this line.
     // In that case, it seems like we cannot just pass it bare over but have to take the slower path.
     // But that should be fine.
-    bool const canRenderViaSimpleLine = !terminal.isSelected(lineOffset);
+    //
+    // Testing for the cursor's current line is made because the cursor might be a block cursor,
+    // which affects background/foreground color again.
+    // We're not testing for cursor shape (which should be done in order to be 100% correct)
+    // because it's not really draining performance.
+    bool const canRenderViaSimpleLine =
+        !terminal.isSelected(lineOffset) && terminal.state().cursor.position.line != lineOffset;
 
     if (canRenderViaSimpleLine)
     {
