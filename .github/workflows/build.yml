@@ -451,6 +451,7 @@ jobs:
           path: |
             build/src/crispy/crispy_test
             build/src/terminal/terminal_test
+            build/src/terminal/bench-headless
             test/images
           retention-days: 1
 
@@ -638,7 +639,9 @@ jobs:
         with:
           name: contour-ubuntu2204-tests
       - name: "fix unit test permissions"
-        run: find . -name '*_test' -exec chmod 0755 {} \;
+        run: |
+          find . -name '*_test' -exec chmod 0755 {} \;
+          find . -name 'bench-headless' -exec chmod 0755 {} \;
       - name: Updating APT package database
         run: sudo apt -q update && sudo apt upgrade -y
       - name: "install dependencies"
@@ -663,6 +666,48 @@ jobs:
         with:
           name: contour-ubuntu2204-tests
 
+  test_ubuntu2204_bench_headless:
+    strategy:
+      matrix:
+        test_case:
+          [
+            "grid cat",
+            "grid long"
+          ]
+    name: "Run bench-headless"
+    runs-on: ubuntu-22.04
+    needs: [ubuntu_2204_cc_matrix]
+    steps:
+      - name: "download artifact"
+        uses: actions/download-artifact@v2
+        with:
+          name: contour-ubuntu2204-tests
+      - name: "fix unit test permissions"
+        run: |
+          find . -name '*_test' -exec chmod 0755 {} \;
+          find . -name 'bench-headless' -exec chmod 0755 {} \;
+      - name: Updating APT package database
+        run: sudo apt -q update && sudo apt upgrade -y
+      - name: "install dependencies"
+        run: |
+          set -ex
+          ls -hlR
+          sudo apt install -y \
+                          libfontconfig1 \
+                          libfreetype6 \
+                          libharfbuzz0b \
+                          libqt5gui5 \
+                          libqt5opengl5 \
+                          libyaml-cpp0.7 \
+                          ncurses-bin \
+                          valgrind
+      - name: "bench-headless: ${{ matrix.test_case }}"
+        run: valgrind --error-exitcode=64 ./build/src/terminal/bench-headless ${{ matrix.test_case }} size 1
+      - name: "Delete artifact: contour-ubuntu2204-tests"
+        uses: geekyeggo/delete-artifact@v1
+        with:
+          name: contour-ubuntu2204-tests
+
   check_ubuntu2204_matrix_test_matrix:
     if: ${{ always() }}
     runs-on: ubuntu-latest
@@ -672,6 +717,7 @@ jobs:
       - package_for_AppImage
       - ubuntu_2204_cc_matrix
       - test_ubuntu2204_valgrind
+      - test_ubuntu2204_bench_headless
     steps:
       - name: Print matrix status
         run: |
