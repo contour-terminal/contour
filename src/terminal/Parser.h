@@ -561,6 +561,17 @@ class Parser
     void printUtf8Byte(char ch);
 
   private:
+    enum class ProcessKind
+    {
+        /// Processing bulk-text in ground state succeed, keep on going.
+        ContinueBulk,
+        /// Processing bulk-text failed (various reasons), fallback to finit state machine.
+        FallbackToFSM
+    };
+
+    std::tuple<ProcessKind, size_t> parseBulkText(char const* input, char const* end) noexcept;
+    void processOnceViaStateMachine(uint8_t input);
+
     void handle(ActionClass _actionClass, Action _action, uint8_t _char);
 
     // private properties

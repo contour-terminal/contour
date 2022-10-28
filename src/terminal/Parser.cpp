@@ -32,6 +32,7 @@
 #include <map>
 #include <ostream>
 #include <string_view>
+#include <tuple>
 
 #if defined(__SSE2__)
     #include <immintrin.h>
@@ -42,13 +43,15 @@ using namespace std;
 namespace terminal::parser
 {
 
-namespace detail
+namespace
 {
+    // clang-format off
     constexpr uint8_t operator"" _b(unsigned long long _value)
     {
         return static_cast<uint8_t>(_value);
     }
-} // namespace detail
+    // clang-format on
+} // namespace
 
 struct ParserTable
 {
@@ -152,8 +155,6 @@ struct ParserTable
 
 constexpr ParserTable ParserTable::get() // {{{
 {
-    using namespace detail;
-
     auto constexpr UnicodeRange = Range { 0x80, 0xFF };
 
     auto t = ParserTable {};
@@ -348,94 +349,122 @@ constexpr ParserTable ParserTable::get() // {{{
 } // }}}
 
 template <typename EventListener, bool TraceStateChanges>
-void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view const _data)
+void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view data)
 {
-    auto input = _data.data();
-    auto const end = _data.data() + _data.size();
+    auto input = data.data();
+    auto const end = data.data() + data.size();
 
     while (input != end)
     {
-        auto const maxCharCount = eventListener_.maxBulkTextSequenceWidth();
-        if (state_ == State::Ground && maxCharCount)
+        auto const [processKind, processedByteCount] = parseBulkText(input, end);
+        switch (processKind)
         {
-            auto const chunk = std::string_view(input, static_cast<size_t>(std::distance(input, end)));
-            auto const [cellCount, next, subStart, subEnd] =
-                unicode::scan_for_text(scanState_, chunk, maxCharCount);
+            case ProcessKind::ContinueBulk:
+                // clang-format off
+                input += processedByteCount;
+                break;
+                // clang-format on
+            case ProcessKind::FallbackToFSM:
+                processOnceViaStateMachine(static_cast<uint8_t>(*input++));
+                break;
+        }
+    }
+}
 
-            if (next != input)
-            {
-                // We do not test on cellCount>0 because the scan could contain only a ZWJ (zero width
-                // joiner), and that would be misleading.
+template <typename EventListener, bool TraceStateChanges>
+void Parser<EventListener, TraceStateChanges>::processOnceViaStateMachine(uint8_t ch)
+{
+    auto const s = static_cast<size_t>(state_);
+    ParserTable static constexpr table = ParserTable::get();
 
-                assert(subStart <= subEnd);
-                auto const byteCount = static_cast<size_t>(std::distance(subStart, subEnd));
-                assert(cellCount <= maxCharCount);
-                assert(subEnd <= chunk.data() + chunk.size());
-                assert(next <= chunk.data() + chunk.size());
+    if (auto const t = table.transitions[s][static_cast<uint8_t>(ch)]; t != State::Undefined)
+    {
+        // fmt::print("VTParser: Transitioning from {} to {}", state_, t);
+        // handle(_actionClass, _action, currentChar());
+        handle(ActionClass::Leave, table.exitEvents[s], ch);
+        handle(ActionClass::Transition, table.events[s][static_cast<size_t>(ch)], ch);
+        state_ = t;
+        handle(ActionClass::Enter, table.entryEvents[static_cast<size_t>(t)], ch);
+    }
+    else if (Action const a = table.events[s][ch]; a != Action::Undefined)
+        handle(ActionClass::Event, a, ch);
+    else
+        eventListener_.error(
+            fmt::format("Parser Error: Unknown action for state/input pair ({}, '{}' 0x{:02X})",
+                        state_,
+                        ch,
+                        static_cast<unsigned>(ch)));
+}
+
+template <typename EventListener, bool TraceStateChanges>
+auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, char const* end) noexcept
+    -> tuple<ProcessKind, size_t>
+{
+    auto input = begin;
+    if (state_ != State::Ground)
+        return { ProcessKind::FallbackToFSM, 0 };
+
+    auto const maxCharCount = eventListener_.maxBulkTextSequenceWidth();
+    if (!maxCharCount)
+        return { ProcessKind::FallbackToFSM, 0 };
+
+    auto const chunk = std::string_view(input, static_cast<size_t>(std::distance(input, end)));
+    auto const [cellCount, next, subStart, subEnd] = unicode::scan_for_text(scanState_, chunk, maxCharCount);
+
+    if (next == input)
+        return { ProcessKind::FallbackToFSM, 0 };
+
+    // We do not test on cellCount>0 because the scan could contain only a ZWJ (zero width
+    // joiner), and that would be misleading.
+
+    assert(subStart <= subEnd);
+    auto const byteCount = static_cast<size_t>(std::distance(subStart, subEnd));
+    if (byteCount == 0)
+        return { ProcessKind::FallbackToFSM, 0 };
+
+    assert(cellCount <= maxCharCount);
+    assert(subEnd <= chunk.data() + chunk.size());
+    assert(next <= chunk.data() + chunk.size());
 
 #if defined(LIBTERMINAL_LOG_TRACE)
-                if (VTTraceParserLog)
-                    VTTraceParserLog()("[Unicode] Scanned text: {}/{} cells; \"{}\"",
-                                       cellCount,
-                                       maxCharCount,
-                                       crispy::escape(std::string_view { input, byteCount }));
+    if (VTTraceParserLog)
+        VTTraceParserLog()(
+            "[Unicode] Scanned text: maxCharCount {}; cells {}; bytes {}; UTF-8 ({}/{}): \"{}\"",
+            maxCharCount,
+            cellCount,
+            byteCount,
+            scanState_.utf8.currentLength,
+            scanState_.utf8.expectedLength,
+            crispy::escape(std::string_view { input, byteCount }));
 #endif
 
-                auto const text = std::string_view { subStart, byteCount };
-                if (scanState_.utf8.expectedLength == 0)
-                {
-                    if (!text.empty())
-                    {
-                        eventListener_.print(text, cellCount);
-                    }
-                }
-                else
-                {
-                    // fmt::print("Parser.text: incomplete UTF-8 sequence at end: {}/{}\n",
-                    //            scanState_.utf8.currentLength,
-                    //            scanState_.utf8.expectedLength);
-
-                    // for (char const ch: text)
-                    //     printUtf8Byte(ch);
-                }
-
-                input = next;
-
-                // This optimization is for the `cat`-people.
-                // It further optimizes the throughput performance by bypassing
-                // the FSM for the `(TEXT LF+)+`-case.
-                //
-                // As of bench-headless, the performance incrrease is about 50x.
-                if (input != end && *input == '\n')
-                {
-                    eventListener_.execute(*input++);
-                }
-                continue;
-            }
-        }
-
-        auto const ch = static_cast<uint8_t>(*input++);
-        auto const s = static_cast<size_t>(state_);
-        ParserTable static constexpr table = ParserTable::get();
-
-        if (auto const t = table.transitions[s][static_cast<uint8_t>(ch)]; t != State::Undefined)
+    auto const text = std::string_view { subStart, byteCount };
+    if (scanState_.utf8.expectedLength == 0)
+    {
+        if (!text.empty())
         {
-            // fmt::print("VTParser: Transitioning from {} to {}", state_, t);
-            // handle(_actionClass, _action, currentChar());
-            handle(ActionClass::Leave, table.exitEvents[s], ch);
-            handle(ActionClass::Transition, table.events[s][static_cast<size_t>(ch)], ch);
-            state_ = t;
-            handle(ActionClass::Enter, table.entryEvents[static_cast<size_t>(t)], ch);
+            eventListener_.print(text, cellCount);
         }
-        else if (Action const a = table.events[s][ch]; a != Action::Undefined)
-            handle(ActionClass::Event, a, ch);
-        else
-            eventListener_.error(
-                fmt::format("Parser Error: Unknown action for state/input pair ({}, '{}' 0x{:02X})",
-                            state_,
-                            ch,
-                            static_cast<unsigned>(ch)));
+
+        // This optimization is for the `cat`-people.
+        // It further optimizes the throughput performance by bypassing
+        // the FSM for the `(TEXT LF+)+`-case.
+        //
+        // As of bench-headless, the performance incrrease is about 50x.
+        if (input != end && *input == '\n')
+            eventListener_.execute(*input++);
     }
+    else
+    {
+        // fmt::print("Parser.text: incomplete UTF-8 sequence at end: {}/{}\n",
+        //            scanState_.utf8.currentLength,
+        //            scanState_.utf8.expectedLength);
+
+        // for (char const ch: text)
+        //     printUtf8Byte(ch);
+    }
+
+    return { ProcessKind::ContinueBulk, static_cast<size_t>(std::distance(input, next)) };
 }
 
 template <typename EventListener, bool TraceStateChanges>
