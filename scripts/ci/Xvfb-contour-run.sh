@@ -36,7 +36,7 @@ $CONTOUR_PREFIX \
 
 # ~/opt/notcurses/bin/notcurses-demo -p ~/opt/notcurses/share/notcurses
 
-echo "::set-output name=exitCode::$?"
+echo "exitCode=$?" >> "$GITHUB_OUTPUT"
 
 kill "${XVFB_PID}"
 

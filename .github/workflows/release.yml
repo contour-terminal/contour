@@ -64,12 +64,12 @@ jobs:
           vcpkgTriplet: x64-windows
       - name: Cache Qt
         id: cache-qt
-        uses: actions/cache@v1
+        uses: actions/cache@v3
         with:
           path: ../Qt
           key: ${{ runner.os }}-QtCache
       - name: Install Qt
-        uses: jurplel/install-qt-action@v2
+        uses: jurplel/install-qt-action@v3
         with:
           cached: ${{ steps.cache-qt.outputs.cache-hit }}
       - name: "create build directory"
@@ -101,7 +101,7 @@ jobs:
 
   build_osx:
     name: Build on OS/X
-    runs-on: macos-latest
+    runs-on: macos-11
     steps:
       - uses: actions/checkout@v3
       - name: set variables
@@ -166,12 +166,12 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v1
+        uses: docker/setup-qemu-action@v2
         with:
           platforms: all
       - name: Set up Docker Buildx
         id: buildx
-        uses: docker/setup-buildx-action@v1
+        uses: docker/setup-buildx-action@v2
         with:
           version: latest
       - name: Read info
@@ -179,8 +179,8 @@ jobs:
         shell: bash
         run: |
           arch="${{ matrix.arch }}"
-          echo ::set-output name=PLATFORM::${arch%% *}
-          echo ::set-output name=ARCH::${arch##* }
+          echo "PLATFORM=${arch%% *}" >> "$GITHUB_OUTPUT"
+          echo "ARCH=${arch##* }" >> "$GITHUB_OUTPUT"
       - name: Installing xmllint for ci-set-vars
         run: sudo apt -qy install libxml2-utils
       - name: set environment variables
@@ -222,7 +222,7 @@ jobs:
     - uses: actions/checkout@v3
     - name: Set up Docker Buildx
       id: buildx
-      uses: docker/setup-buildx-action@v1
+      uses: docker/setup-buildx-action@v2
       with:
         version: latest
     - name: Read matrix info
@@ -230,8 +230,8 @@ jobs:
       shell: bash
       run: |
         arch="${{ matrix.arch }}"
-        echo ::set-output name=PLATFORM::${arch%% *}
-        echo ::set-output name=ARCH::${arch##* }
+        echo "PLATFORM=${arch%% *}" >> "$GITHUB_OUTPUT"
+        echo "ARCH=${arch##* }" >> "$GITHUB_OUTPUT"
     - name: Installing xmllint for ci-set-vars
       run: sudo apt -qy install libxml2-utils
     - name: set environment variables
@@ -305,7 +305,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - name: ccache
-        uses: hendrikmuhs/ccache-action@v1
+        uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: "ccache-ubuntu1804-AppImage"
           max-size: 256M
@@ -390,7 +390,7 @@ jobs:
         env:
           REPOSITORY: ${{ github.event.repository.name }}
       - name: ccache
-        uses: hendrikmuhs/ccache-action@v1
+        uses: hendrikmuhs/ccache-action@v1.2
         with:
           key: "ccache-ubuntu-${{ matrix.os_version }}"
           max-size: 256M
@@ -472,7 +472,7 @@ jobs:
         env:
           REPOSITORY: ${{ github.event.repository.name }}
       - name: fetch release artifacts
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
         with:
           name: artifact
 

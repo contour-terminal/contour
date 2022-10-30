@@ -23,15 +23,11 @@ switch -Regex ($Env:GITHUB_REF) {
 $VERSION_STRING = "${VERSION}${DELIM}${SUFFIX}"
 
 Set-Content -Path "version.txt" -Value "${VERSION_STRING}"
-Write-Output "::set-output name=version::${VERSION}"
-Write-Output "::set-output name=VERSION_STRING::${VERSION_STRING}"
-Write-Output "::set-output name=RUN_ID::$Env:GITHUB_RUN_NUMBER"
-Write-Output "::set-output name=IS_PRERELEASE::$IS_PRE"
-Write-Output "::set-output name=RELEASENAME_SUFFIX::$SUFFIX"
+echo "version=${VERSION}" >> "${Env:GITHUB_OUTPUT}"
+echo "VERSION_STRING=${VERSION_STRING}" >> "${Env:GITHUB_OUTPUT}"
+echo "RUN_ID=$Env:GITHUB_RUN_NUMBER" >> "${Env:GITHUB_OUTPUT}"
+echo "IS_PRERELEASE=$IS_PRE" >> "${Env:GITHUB_OUTPUT}"
+echo "RELEASENAME_SUFFIX=$SUFFIX" >> "${Env:GITHUB_OUTPUT}"
 
 # debug prints
-Write-Output "set-output name=version::${VERSION}"
-Write-Output "set-output name=VERSION_STRING::${VERSION_STRING}"
-Write-Output "set-output name=RUN_ID::$Env:GITHUB_RUN_NUMBER"
-Write-Output "set-output name=IS_PRERELEASE::$IS_PRE"
-Write-Output "set-output name=RELEASENAME_SUFFIX::$SUFFIX"
+Get-Content -Path "${Env:GITHUB_OUTPUT}"
