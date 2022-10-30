@@ -100,7 +100,7 @@
     </release>
     -->
 
-    <release version="0.3.6" urgency="medium" type="development">
+    <release version="0.3.6" urgency="medium" date="2022-10-30">
       <description>
         <ul>
           <li>Fixes ground-state infinite loop in corner case + refactor and tiny optimization.</li>
