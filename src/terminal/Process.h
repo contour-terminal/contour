@@ -50,7 +50,7 @@ class [[nodiscard]] Process: public Pty
         std::vector<std::string> arguments;
         FileSystem::path workingDirectory;
         Environment env;
-        bool escapeSandbox = false;
+        bool escapeSandbox = true;
     };
 
     //! Returns login shell of current user.
