@@ -106,6 +106,7 @@
           <li>Fixes ground-state infinite loop in corner case + refactor and tiny optimization.</li>
           <li>Fixes assertion in optimized bulk text processing.</li>
           <li>Fixes rare displacement of characters following a wide character (e.g. Emoji) in some cases.</li>
+          <li>Fixes IME (input method editor) background rendering for wide characters (e.g. Kanji).</li>
           <li>Improve throughput performance for scroll-up when custom vertical margins are in effect.</li>
           <li>Improve rendering performance slightly for so called trivial lines.</li>
           <li>Adds menu entry to Dolphin file manager to open Contour at current working directory.</li>

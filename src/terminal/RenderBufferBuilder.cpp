@@ -494,6 +494,21 @@ ColumnCount RenderBufferBuilder<Cell>::renderUtf8Text(CellLocation screenPositio
                                    baseLine + screenPosition.line,
                                    screenPosition.column + ColumnOffset::cast_from(columnCountRendered)));
 
+        // Span filling cells for preciding wide glyphs to get the background color properly painted.
+        for (auto i = ColumnCount(1); i < width; ++i)
+        {
+            output.cells.emplace_back(makeRenderCellExplicit(
+                terminal.colorPalette(),
+                U" ", // {}
+                ColumnCount(1),
+                textAttributes.flags,
+                fg,
+                bg,
+                textAttributes.underlineColor,
+                baseLine + screenPosition.line,
+                screenPosition.column + ColumnOffset::cast_from(columnCountRendered + i)));
+        }
+
         columnCountRendered += ColumnCount::cast_from(width);
         lineNr = screenPosition.line;
         prevWidth = 0;
