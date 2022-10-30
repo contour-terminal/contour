@@ -61,7 +61,7 @@ jobs:
         make -j3
         make install
     - name: "Uploading artifact"
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: "patched-fontconfig"
         path: "/home/runner/opt/fontconfig"
@@ -76,11 +76,11 @@ jobs:
     steps:
     - uses: actions/checkout@v3
     - name: ccache
-      uses: hendrikmuhs/ccache-action@v1
+      uses: hendrikmuhs/ccache-action@v1.2
       with:
         key: ccache-ubuntu_2204-external-tests
         max-size: 256M
-    - uses: actions/cache@v2
+    - uses: actions/cache@v3
       with:
         path: "**/cpm_modules"
         key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
@@ -121,7 +121,7 @@ jobs:
               "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_22_04_amd64.deb"
         ls -hl
     - name: "Uploading artifact .deb package"
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_22_04_amd64.deb"
         path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_22_04_amd64.deb"
@@ -155,7 +155,7 @@ jobs:
     - name: "git clone"
       run: git clone https://github.com/dankamongmen/notcurses.git
     - name: ccache
-      uses: hendrikmuhs/ccache-action@v1
+      uses: hendrikmuhs/ccache-action@v1.2
       with:
         key: ccache-ubuntu_2204-notcurses
         max-size: 256M
@@ -176,7 +176,7 @@ jobs:
     - name: "Install notcurses"
       run: cmake --build notcurses/build --config Release --target install/strip
     - name: "Uploading artifact"
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: "notcurses-install"
         path: ~/opt/notcurses
@@ -261,14 +261,14 @@ jobs:
       run: ./scripts/ci-set-vars.sh
       env:
         REPOSITORY: ${{ github.event.repository.name }}
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v3
       with:
         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu_22_04_amd64.deb"
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v3
       with:
         name: "notcurses-install"
         path: ~/opt/notcurses
-    - uses: actions/download-artifact@v2
+    - uses: actions/download-artifact@v3
       with:
         name: "patched-fontconfig"
         path: "/home/runner/opt/fontconfig"
@@ -310,7 +310,7 @@ jobs:
               ~/opt/notcurses/bin/notcurses-demo \
                   -p ~/opt/notcurses/share/notcurses ${{ matrix.id }}
     - name: "Save dump"
-      uses: actions/upload-artifact@v2
+      uses: actions/upload-artifact@v3
       with:
         name: notcurses-contour-dump
         path: notcurses-demo-dumps

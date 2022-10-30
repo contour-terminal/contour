@@ -3,11 +3,11 @@
 .vscode/**
 _deps
 _deps/**
-build
-build/**
-release
-release/**
-target
+[bB]uild
+[bB]uild/**
+[rR]elease
+[rR]elease/**
+[tT]arget
 
 # Visual Studio
 .vs
