@@ -483,12 +483,20 @@ void TextRenderer::renderLine(RenderLine const& renderLine)
     for (u32string const& graphemeCluster: graphemeClusterSegmenter)
     {
         auto const gridPosition = CellLocation { renderLine.lineOffset, columnOffset };
+        auto const width = graphemeClusterWidth(graphemeCluster);
         renderCell(gridPosition, graphemeCluster, textStyle, renderLine.textAttributes.foregroundColor);
 
-        auto const width = graphemeClusterWidth(graphemeCluster);
+        for (int i = 1; i < width; ++i)
+            renderCell(CellLocation { gridPosition.line, columnOffset + i },
+                       U" ",
+                       textStyle,
+                       renderLine.textAttributes.foregroundColor);
+
         columnOffset += ColumnOffset::cast_from(width);
     }
-    flushTextClusterGroup();
+
+    if (!textClusterGroup_.codepoints.empty())
+        flushTextClusterGroup();
 }
 
 void TextRenderer::renderCell(RenderCell const& cell)
@@ -500,13 +508,6 @@ void TextRenderer::renderCell(RenderCell const& cell)
                cell.codepoints,
                makeTextStyle(cell.attributes.flags),
                cell.attributes.foregroundColor);
-
-    if (cell.width > 1)
-    {
-        auto constexpr space = U" "sv;
-        appendCellTextToClusterGroup(
-            space, makeTextStyle(cell.attributes.flags), cell.attributes.foregroundColor);
-    }
 
     if (cell.groupEnd)
         flushTextClusterGroup();

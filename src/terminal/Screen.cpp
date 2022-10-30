@@ -449,11 +449,7 @@ void Screen<Cell>::writeTextInternal(char32_t _char)
 
     char32_t const codepoint = _state.cursor.charsets.map(_char);
 
-    auto const lastChar = precedingGraphicCharacter();
-    auto const isAsciiBreakable = lastChar < 128 && codepoint < 128;
-    // NB: This is an optimization for US-ASCII text versus grapheme cluster segmentation.
-
-    if (isAsciiBreakable || !lastChar || unicode::grapheme_segmenter::breakable(lastChar, codepoint))
+    if (unicode::grapheme_segmenter::breakable(precedingGraphicCharacter(), codepoint))
     {
         writeCharToCurrentAndAdvance(codepoint);
     }

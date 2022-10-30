@@ -68,6 +68,18 @@ namespace // {{{ helpers
         crispy::unreachable();
     }
 
+    std::string codepointText(std::u32string const& codepoints)
+    {
+        std::string text;
+        for (auto const codepoint: codepoints)
+        {
+            if (!text.empty())
+                text += ' ';
+            text += fmt::format("U+{:X}", static_cast<unsigned>(codepoint));
+        }
+        return text;
+    }
+
 #if defined(CONTOUR_PERF_STATS)
     void logRenderBufferSwap(bool _success, uint64_t _frameID)
     {
@@ -459,6 +471,19 @@ void Terminal::updateIndicatorStatusLine()
         indicatorStatusScreen_.writeTextFromExternal(" (PROTECTED)");
         state_.cursor.graphicsRendition.foregroundColor = DefaultColor();
         state_.cursor.graphicsRendition.flags &= ~CellFlags::Bold;
+    }
+
+    // TODO: Disabled for now, but generally I want that functionality, but configurable somehow.
+    auto constexpr indicatorLineShowCodepoints = false;
+    if (indicatorLineShowCodepoints)
+    {
+        auto const cursorPosition = state_.inputHandler.mode() == ViMode::Insert
+                                        ? state_.cursor.position
+                                        : state_.viCommands.cursorPosition;
+        auto const text =
+            codepointText(isPrimaryScreen() ? primaryScreen().useCellAt(cursorPosition).codepoints()
+                                            : alternateScreen().useCellAt(cursorPosition).codepoints());
+        indicatorStatusScreen_.writeTextFromExternal(fmt::format(" | {}", text));
     }
 
     if (state_.inputHandler.isEditingSearch())

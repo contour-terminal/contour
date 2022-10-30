@@ -167,11 +167,8 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
 
         auto const nextChar =
             holds_alternative<unicode::Success>(r) ? get<unicode::Success>(r).value : ReplacementCharacter;
-        auto const isAsciiBreakable =
-            lastChar < 128 && nextChar < 128; // NB: This is an optimization for US-ASCII text versus grapheme
-                                              // cluster segmentation.
 
-        if (!lastChar || isAsciiBreakable || unicode::grapheme_segmenter::breakable(lastChar, nextChar))
+        if (unicode::grapheme_segmenter::breakable(lastChar, nextChar))
         {
             while (gapPending > 0)
             {
