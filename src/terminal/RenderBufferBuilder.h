@@ -97,6 +97,8 @@ class RenderBufferBuilder
     [[nodiscard]] RenderAttributes createRenderAttributes(
         CellLocation gridPosition, GraphicsAttributes graphicsAttributes) const noexcept;
 
+    [[nodiscard]] bool tryRenderInputMethodEditor(CellLocation screenPosition, CellLocation gridPosition);
+
     ColumnCount renderUtf8Text(CellLocation screenPosition,
                                GraphicsAttributes attributes,
                                std::string_view text,

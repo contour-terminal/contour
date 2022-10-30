@@ -506,11 +506,9 @@ ColumnCount RenderBufferBuilder<Cell>::renderUtf8Text(CellLocation screenPositio
 }
 
 template <typename Cell>
-void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset _line, ColumnOffset _column)
+bool RenderBufferBuilder<Cell>::tryRenderInputMethodEditor(CellLocation screenPosition,
+                                                           CellLocation gridPosition)
 {
-    auto const screenPosition = CellLocation { _line, _column };
-    auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(screenPosition);
-
     // Render IME preeditString if available and screen position matches cursor position.
     if (gridPosition == cursorPosition && !_inputMethodData.preeditString.empty())
     {
@@ -534,12 +532,22 @@ void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset _l
         state = State::Gap;
     }
 
-    if (_inputMethodSkipColumns > ColumnCount(0))
-    {
-        // Skipping grid cells that have already been rendered due to IME.
-        _inputMethodSkipColumns--;
+    if (_inputMethodSkipColumns == ColumnCount(0))
+        return false;
+
+    // Skipping grid cells that have already been rendered due to IME.
+    _inputMethodSkipColumns--;
+    return true;
+}
+
+template <typename Cell>
+void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset _line, ColumnOffset _column)
+{
+    auto const screenPosition = CellLocation { _line, _column };
+    auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(screenPosition);
+
+    if (tryRenderInputMethodEditor(screenPosition, gridPosition))
         return;
-    }
 
     auto /*const*/ [fg, bg] = makeColorsForCell(
         gridPosition, screenCell.flags(), screenCell.foregroundColor(), screenCell.backgroundColor());
