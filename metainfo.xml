@@ -92,13 +92,24 @@
 
     <!-- unreleased: TODO: Don't forget to add date attribute to it. -->
     <!--
+
     <release version="x.y.z" urgency="medium" type="development">
       <description>
         <ul>
+          <li> ... </li>
         </ul>
       </description>
     </release>
+
     -->
+
+    <release version="x.y.z" urgency="medium" type="development">
+      <description>
+        <ul>
+          <li> ... </li>
+        </ul>
+      </description>
+    </release>
 
     <release version="0.3.6" urgency="medium" date="2022-10-30">
       <description>
