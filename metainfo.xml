@@ -103,7 +103,7 @@
 
     -->
 
-    <release version="0.3.7" urgency="medium" type="development">
+    <release version="0.3.7" urgency="medium" date="2022-10-31">
       <description>
         <ul>
           <li>Fixes display of non-insert mode (vi-like) cursor on monochrome lines.</li>
