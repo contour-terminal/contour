@@ -341,33 +341,59 @@ CellLocationRange ViCommands::translateToCellRange(ViMotion motion, unsigned cou
     }
 }
 
+CellLocation ViCommands::snapToCell(CellLocation location) const noexcept
+{
+    while (location.column > ColumnOffset(0) && terminal.currentScreen().compareCellTextAt(location, '\0'))
+        --location.column;
+
+    return location;
+}
+
+CellLocation ViCommands::snapToCellRight(CellLocation location) const noexcept
+{
+    auto const rightMargin = ColumnOffset::cast_from(terminal.pageSize().columns - 1);
+    while (location.column < rightMargin && terminal.currentScreen().compareCellTextAt(location, '\0'))
+        ++location.column;
+    return location;
+}
+
 CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count) const noexcept
 {
     switch (motion)
     {
         case ViMotion::CharLeft: // h
-            return cursorPosition - min(cursorPosition.column, ColumnOffset::cast_from(count));
+        {
+            auto resultPosition = cursorPosition;
+            // Jumping left to the next non-empty column (whitespace is not considered empty).
+            // This isn't the most efficient implementation, but it's invoked interactively only anyways.
+            for (unsigned i = 0; i < count && resultPosition.column > ColumnOffset(0); ++i)
+                resultPosition = snapToCell(resultPosition - ColumnOffset(1));
+            return resultPosition;
+        }
         case ViMotion::CharRight: // l
         {
-            auto const columnsAvailable =
-                terminal.pageSize().columns.as<ColumnOffset>() - cursorPosition.column.as<ColumnOffset>() - 1;
-            return cursorPosition + min(ColumnOffset::cast_from(count), columnsAvailable);
+            auto resultPosition = cursorPosition;
+            auto const rightMargin = ColumnOffset::cast_from(terminal.pageSize().columns - 1);
+            for (unsigned i = 0; i < count && resultPosition.column < rightMargin; ++i)
+                resultPosition = snapToCellRight(resultPosition + ColumnOffset(1));
+            return resultPosition;
         }
         case ViMotion::ScreenColumn: // |
-            return { cursorPosition.line,
-                     min(ColumnOffset::cast_from(count),
-                         terminal.pageSize().columns.as<ColumnOffset>() - 1) };
+            return snapToCell(
+                { cursorPosition.line,
+                  min(ColumnOffset::cast_from(count), terminal.pageSize().columns.as<ColumnOffset>() - 1) });
         case ViMotion::FileBegin: // gg
-            return { LineOffset::cast_from(-terminal.currentScreen().historyLineCount().as<int>()),
-                     ColumnOffset(0) };
+            return snapToCell({ LineOffset::cast_from(-terminal.currentScreen().historyLineCount().as<int>()),
+                                ColumnOffset(0) });
         case ViMotion::FileEnd: // G
-            return { terminal.pageSize().lines.as<LineOffset>() - 1, ColumnOffset(0) };
+            return snapToCell({ terminal.pageSize().lines.as<LineOffset>() - 1, ColumnOffset(0) });
         case ViMotion::PageTop: // <S-H>
-            return { boxed_cast<LineOffset>(-terminal.viewport().scrollOffset()), ColumnOffset(0) };
+            return snapToCell(
+                { boxed_cast<LineOffset>(-terminal.viewport().scrollOffset()), ColumnOffset(0) });
         case ViMotion::PageBottom: // <S-L>
-            return { boxed_cast<LineOffset>(-terminal.viewport().scrollOffset())
-                         + boxed_cast<LineOffset>(terminal.pageSize().lines - 1),
-                     ColumnOffset(0) };
+            return snapToCell({ boxed_cast<LineOffset>(-terminal.viewport().scrollOffset())
+                                    + boxed_cast<LineOffset>(terminal.pageSize().lines - 1),
+                                ColumnOffset(0) });
         case ViMotion::LineBegin: // 0
             return { cursorPosition.line, ColumnOffset(0) };
         case ViMotion::LineTextBegin: // ^
@@ -379,15 +405,15 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
             return result;
         }
         case ViMotion::LineDown: // j
-            return { min(cursorPosition.line + LineOffset::cast_from(count),
-                         terminal.pageSize().lines.as<LineOffset>() - 1),
-                     cursorPosition.column };
+            return snapToCell({ min(cursorPosition.line + LineOffset::cast_from(count),
+                                    terminal.pageSize().lines.as<LineOffset>() - 1),
+                                cursorPosition.column });
         case ViMotion::LineEnd: // $
             return { cursorPosition.line, terminal.pageSize().columns.as<ColumnOffset>() - 1 };
         case ViMotion::LineUp: // k
-            return { max(cursorPosition.line - LineOffset::cast_from(count),
-                         -terminal.currentScreen().historyLineCount().as<LineOffset>()),
-                     cursorPosition.column };
+            return snapToCell({ max(cursorPosition.line - LineOffset::cast_from(count),
+                                    -terminal.currentScreen().historyLineCount().as<LineOffset>()),
+                                cursorPosition.column });
         case ViMotion::PageDown:
             return { min(cursorPosition.line + LineOffset::cast_from(terminal.pageSize().lines / 2),
                          terminal.pageSize().lines.as<LineOffset>() - 1),
@@ -412,7 +438,7 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
                 prev.line = current.line;
                 current.line--;
             }
-            return current;
+            return snapToCell(current);
         }
         case ViMotion::ParagraphForward: // }
         {
@@ -428,7 +454,7 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
                 prev.line = current.line;
                 current.line++;
             }
-            return current;
+            return snapToCell(current);
         }
         case ViMotion::ParenthesisMatching:  // % TODO
         case ViMotion::SearchResultBackward: // N TODO
@@ -484,7 +510,7 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
         case ViMotion::Explicit:  // <special for explicit operations>
         case ViMotion::Selection: // <special for visual modes>
         case ViMotion::FullLine:  // <special for full-line operations>
-            return cursorPosition;
+            return snapToCell(cursorPosition);
     }
     crispy::unreachable();
 }

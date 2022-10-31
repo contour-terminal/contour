@@ -107,6 +107,7 @@
       <description>
         <ul>
           <li>Fixes display of non-insert mode (vi-like) cursor on monochrome lines.</li>
+          <li>Fixes cursor movements on wide characters for the vi-like cursor.</li>
         </ul>
       </description>
     </release>

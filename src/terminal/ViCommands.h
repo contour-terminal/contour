@@ -59,6 +59,14 @@ class ViCommands: public ViInputHandler::Executor
     void executeYank(ViMotion motion, unsigned count);
     void executeYank(CellLocation from, CellLocation to);
 
+    /// Snaps the input location to the correct cell location if the input location is part of a wide char
+    /// cell but not precisely the beginning cell location.
+    [[nodiscard]] CellLocation snapToCell(CellLocation location) const noexcept;
+
+    /// Snaps the input location to the cell right next to it iff the current cell does not contain
+    /// any codepoints.
+    [[nodiscard]] CellLocation snapToCellRight(CellLocation location) const noexcept;
+
     Terminal& terminal;
 
     // Cursor offset into the grid.
