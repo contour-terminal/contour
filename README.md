@@ -8,8 +8,6 @@
 
 ![screenshot showcasing notcurses ncneofetch on KDE/Fedora](docs/screenshots/contour-notcurses-ncneofetch.png "Screenshot")
 
-**IMPORTANT: THIS PROJECT IS IN BETA STAGE & ACTIVE DEVELOPMENT**
-
 `contour` is a modern and actually fast, modal, virtual terminal emulator,
 for everyday use. It is aiming for power users with a modern feature mindset.
 
