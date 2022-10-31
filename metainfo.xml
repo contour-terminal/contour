@@ -108,6 +108,7 @@
         <ul>
           <li>Fixes display of non-insert mode (vi-like) cursor on monochrome lines.</li>
           <li>Fixes cursor movements on wide characters for the vi-like cursor.</li>
+          <li>Fixes TERM value resolving in Flatpak environment when not escaping the sandbox.</li>
         </ul>
       </description>
     </release>

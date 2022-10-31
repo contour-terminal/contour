@@ -171,6 +171,9 @@ void Process::start()
                     exit(EXIT_FAILURE);
                 }
 
+                if (isFlatpak() && !d->escapeSandbox)
+                    setenv("TERMINFO", "/app/share/terminfo", true);
+
                 for (auto&& [name, value]: d->env)
                     setenv(name.c_str(), value.c_str(), true);
 
