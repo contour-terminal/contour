@@ -107,6 +107,11 @@ class RenderBufferBuilder
     template <typename T>
     void matchSearchPattern(T const& cellText);
 
+    /// Tests if the given screen line offset does contain a cursor (either ANSI cursor or vi cursor, if
+    /// shown) and returns false otherwise, which guarantees that no cursor is to be rendered
+    /// on the given line offset.
+    [[nodiscard]] bool gridLineContainsCursor(LineOffset screenLineOffset) const noexcept;
+
     // clang-format off
     enum class State { Gap, Sequence };
     // clang-format on

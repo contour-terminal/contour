@@ -86,7 +86,7 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 [[nodiscard]] inline bool compareText(Cell const& cell, char asciiCharacter) noexcept
 {
     if (cell.codepointCount() != 1)
-        return false;
+        return asciiCharacter == 0 && cell.codepointCount() == 0;
 
     return cell.codepoint(0) == static_cast<char32_t>(asciiCharacter);
 }

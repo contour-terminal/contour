@@ -102,6 +102,11 @@ class Viewport
         };
     }
 
+    [[nodiscard]] constexpr LineOffset translateGridToScreenCoordinate(LineOffset p) const noexcept
+    {
+        return p + boxed_cast<LineOffset>(scrollOffset_);
+    }
+
   private:
     [[nodiscard]] LineCount historyLineCount() const noexcept;
     [[nodiscard]] LineCount screenLineCount() const noexcept;
