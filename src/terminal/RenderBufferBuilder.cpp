@@ -306,6 +306,23 @@ RenderLine RenderBufferBuilder<Cell>::createRenderLine(TrivialLineBuffer const& 
 }
 
 template <typename Cell>
+bool RenderBufferBuilder<Cell>::gridLineContainsCursor(LineOffset lineOffset) const noexcept
+{
+    if (terminal.state().cursor.position.line == lineOffset)
+        return true;
+
+    if (terminal.state().inputHandler.mode() != ViMode::Insert)
+    {
+        auto const viCursor = terminal.viewport().translateGridToScreenCoordinate(
+            terminal.state().viCommands.cursorPosition.line);
+        if (viCursor == lineOffset)
+            return true;
+    }
+
+    return false;
+}
+
+template <typename Cell>
 void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineBuffer, LineOffset lineOffset)
 {
     // if (lineBuffer.text.size())
@@ -327,7 +344,7 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineB
     // We're not testing for cursor shape (which should be done in order to be 100% correct)
     // because it's not really draining performance.
     bool const canRenderViaSimpleLine =
-        !terminal.isSelected(lineOffset) && terminal.state().cursor.position.line != lineOffset;
+        !terminal.isSelected(lineOffset) && !gridLineContainsCursor(lineOffset);
 
     if (canRenderViaSimpleLine)
     {

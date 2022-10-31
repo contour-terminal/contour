@@ -106,7 +106,7 @@
     <release version="0.3.7" urgency="medium" type="development">
       <description>
         <ul>
-          <li> ... </li>
+          <li>Fixes display of non-insert mode (vi-like) cursor on monochrome lines.</li>
         </ul>
       </description>
     </release>
