@@ -43,13 +43,14 @@ RELEASEBODY=$(xmllint --xpath '/component/releases/release[1]/description/ul/li'
                     sed 's/<li>/ - /g' |
                     sed 's,</li>,\n,g')
 RELEASEBODY="${RELEASEBODY//'%'/'%25'}"
-RELEASEBODY="${RELEASEBODY//$'\n'/'%0A'}"
-RELEASEBODY="${RELEASEBODY//$'\r'/'%0D'}"
+RELEASEBODY="${RELEASEBODY//\"/\\\"}"
+RELEASEBODY="${RELEASEBODY//$'\n'/$'\\n'}"
+RELEASEBODY="${RELEASEBODY//$'\r'/''}"
 
 echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 echo "VERSION_STRING=${VERSION_STRING}" >> "$GITHUB_OUTPUT"
 echo "RUN_ID=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 echo "IS_PRERELEASE=${IS_PRE}" >> "$GITHUB_OUTPUT"
 echo "RELEASENAME_SUFFIX=${SUFFIX}" >> "$GITHUB_OUTPUT"
-echo "RELEASEBODY=${RELEASEBODY}" >> "$GITHUB_OUTPUT"
+echo "RELEASEBODY=\"${RELEASEBODY}\"" >> "$GITHUB_OUTPUT"
 
