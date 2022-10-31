@@ -19,6 +19,10 @@ else
     VERSION="${VERSION_TRIPLE}"
 fi
 
+if [[ -z "${GITHUB_OUTPUT}" ]]; then
+    GITHUB_OUTPUT="/dev/stdout"
+fi
+
 case "${GITHUB_REF}" in
     refs/heads/master|refs/heads/release)
         IS_PRE='false';
