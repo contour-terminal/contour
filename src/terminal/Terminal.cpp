@@ -158,6 +158,7 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
     hardReset();
 #else
     setMode(DECMode::AutoWrap, true);
+    setMode(DECMode::VisibleCursor, true);
     setMode(DECMode::Unicode, true);
     setMode(DECMode::TextReflow, true);
     setMode(DECMode::SixelCursorNextToGraphic, state_.sixelCursorConformance);
