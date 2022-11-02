@@ -107,6 +107,7 @@
       <description>
         <ul>
           <li>Fixes restoring the cursor visibility after leaving alternate screen when application wasn't restoring mode switches in reverse order.</li>
+          <li>Fixes country flags rendering due to misleading grapheme cluster segmentation in corner cases.</li>
         </ul>
       </description>
     </release>

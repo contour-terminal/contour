@@ -103,7 +103,7 @@ fetch_and_unpack_embeds()
         termbench_pro
 
     if test x$LIBUNICODE_SRC_DIR = x; then
-        local libunicode_git_sha="be83e5052f6e7590c244faad59be16af210db90b"
+        local libunicode_git_sha="2ced48a0401f1c4587242f723569a6eedd6f9ca4"
         fetch_and_unpack \
             libunicode-$libunicode_git_sha \
             libunicode-$libunicode_git_sha.tar.gz \
