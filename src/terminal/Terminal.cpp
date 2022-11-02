@@ -1522,6 +1522,7 @@ void Terminal::hardReset()
     setMode(DECMode::Unicode, true);
     setMode(DECMode::TextReflow, state_.allowReflowOnResize);
     setMode(DECMode::SixelCursorNextToGraphic, state_.sixelCursorConformance);
+    setMode(DECMode::VisibleCursor, true);
 
     state_.primaryBuffer.reset();
     state_.alternateBuffer.reset();
