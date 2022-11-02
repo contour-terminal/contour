@@ -460,7 +460,8 @@ class Terminal
 
     bool cursorCurrentlyVisible() const noexcept
     {
-        return state_.cursor.visible && (cursorDisplay_ == CursorDisplay::Steady || cursorBlinkState_);
+        return isModeEnabled(DECMode::VisibleCursor)
+               && (cursorDisplay_ == CursorDisplay::Steady || cursorBlinkState_);
     }
 
     bool isBlinkOnScreen() const noexcept { return _lastRenderPassHints.containsBlinkingCells; }

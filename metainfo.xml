@@ -103,6 +103,14 @@
 
     -->
 
+    <release version="0.3.8" urgency="medium" type="development">
+      <description>
+        <ul>
+          <li>Fixes restoring the cursor visibility after leaving alternate screen when application wasn't restoring mode switches in reverse order.</li>
+        </ul>
+      </description>
+    </release>
+
     <release version="0.3.7" urgency="medium" type="development">
       <description>
         <ul>
