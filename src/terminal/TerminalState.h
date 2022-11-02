@@ -98,7 +98,6 @@ struct Cursor
     CellLocation position { LineOffset(0), ColumnOffset(0) };
     bool autoWrap = true; // false;
     bool originMode = false;
-    bool visible = true;
     GraphicsAttributes graphicsRendition {};
     CharsetMapping charsets {};
     HyperlinkId hyperlink {};
@@ -262,11 +261,7 @@ struct formatter<terminal::Cursor>
     template <typename FormatContext>
     auto format(const terminal::Cursor cursor, FormatContext& ctx)
     {
-        return fmt::format_to(ctx.out(),
-                              "({}:{}{})",
-                              cursor.position.line,
-                              cursor.position.column,
-                              cursor.visible ? "" : ", (invis)");
+        return fmt::format_to(ctx.out(), "{}", cursor.position);
     }
 };
 
