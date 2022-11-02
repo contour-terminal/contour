@@ -850,7 +850,7 @@ bool Terminal::updateCursorHoveringState()
 
 optional<chrono::milliseconds> Terminal::nextRender() const
 {
-    if (!state_.cursor.visible)
+    if (!isModeEnabled(DECMode::VisibleCursor))
         return nullopt;
 
     if (cursorDisplay_ != CursorDisplay::Blink && !isBlinkOnScreen())
@@ -1348,7 +1348,6 @@ void Terminal::setMode(DECMode _mode, bool _enable)
         case DECMode::FocusTracking: setGenerateFocusEvents(_enable); break;
         case DECMode::UsePrivateColorRegisters: state_.usePrivateColorRegisters = _enable; break;
         case DECMode::VisibleCursor:
-            state_.cursor.visible = _enable;
             setCursorVisibility(_enable);
             break;
         case DECMode::MouseProtocolX10: setMouseProtocol(MouseProtocol::X10, _enable); break;
@@ -1757,7 +1756,6 @@ void Terminal::setActiveStatusDisplay(ActiveStatusDisplay activeDisplay)
             auto cursor = state_.cursor;
             cursor.position = state_.savedCursorStatusLine.position;
             cursor.originMode = false;
-            cursor.visible = false;
 
             // Backup current cursor state.
             state_.savedCursorStatusLine = state_.cursor;

@@ -117,7 +117,7 @@ void ViCommands::modeChanged(ViMode mode)
     {
         case ViMode::Insert:
             // Force re-render as viewport & cursor might have changed.
-            terminal.state().cursor.visible = lastCursorVisible;
+            terminal.setMode(DECMode::VisibleCursor, lastCursorVisible);
             terminal.setCursorShape(lastCursorShape);
             terminal.viewport().forceScrollToBottom();
             terminal.popStatusDisplay();
@@ -125,8 +125,8 @@ void ViCommands::modeChanged(ViMode mode)
             break;
         case ViMode::Normal:
             lastCursorShape = terminal.cursorShape();
-            lastCursorVisible = terminal.state().cursor.visible;
-            terminal.state().cursor.visible = true;
+            lastCursorVisible = terminal.isModeEnabled(DECMode::VisibleCursor);
+            terminal.setMode(DECMode::VisibleCursor, true);
 
             if (lastMode == ViMode::Insert)
                 cursorPosition = terminal.realCursorPosition();
