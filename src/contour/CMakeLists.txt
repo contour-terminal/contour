@@ -61,6 +61,7 @@ target_compile_definitions(contour PRIVATE
     CONTOUR_VERSION_STRING="${CONTOUR_VERSION_STRING}"
     CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
 )
+
 set_target_properties(contour PROPERTIES AUTOMOC ON)
 set_target_properties(contour PROPERTIES AUTORCC ON)
 
@@ -95,15 +96,14 @@ if(WIN32)
     endif()
 elseif(APPLE)
     set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/Modules" ${CMAKE_MODULE_PATH})
-    set(contour_version "0.1.0_pre")
     set_target_properties(contour PROPERTIES
         MACOSX_BUNDLE ON
         MACOSX_BUNDLE_BUNDLE_NAME "Contour Terminal"
         MACOSX_BUNDLE_INFO_STRING "Contour Terminal Emulator"
         MACOSX_BUNDLE_GUI_IDENTIFIER "org.contour-terminal.contour"
-        MACOSX_BUNDLE_LONG_VERSION_STRING "${contour_version}"
-        MACOSX_BUNDLE_SHORT_VERSION_STRING "${contour_version}"
-        MACOSX_BUNDLE_BUNDLE_VERSION "${contour_version}"
+        MACOSX_BUNDLE_LONG_VERSION_STRING "${PROJECT_VERSION_MAJOR}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION_MINOR}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION_PATCH}"
         # TODO: MACOSX_BUNDLE_ICON_FILE "contour.icns"
         # TODO: RESOURCE "images/icon.icns"
     )
