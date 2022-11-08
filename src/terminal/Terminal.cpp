@@ -1348,9 +1348,7 @@ void Terminal::setMode(DECMode _mode, bool _enable)
             break;
         case DECMode::FocusTracking: setGenerateFocusEvents(_enable); break;
         case DECMode::UsePrivateColorRegisters: state_.usePrivateColorRegisters = _enable; break;
-        case DECMode::VisibleCursor:
-            setCursorVisibility(_enable);
-            break;
+        case DECMode::VisibleCursor: setCursorVisibility(_enable); break;
         case DECMode::MouseProtocolX10: setMouseProtocol(MouseProtocol::X10, _enable); break;
         case DECMode::MouseProtocolNormalTracking:
             setMouseProtocol(MouseProtocol::NormalTracking, _enable);
