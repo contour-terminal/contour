@@ -147,6 +147,201 @@ struct LogicalLine
             output += line.get().toUtf8();
         return output;
     }
+
+    // Searches from left to right, taking into account line wrapping
+    [[nodiscard]] std::optional<terminal::CellLocation> search(std::u32string_view searchText,
+                                                               ColumnOffset startPosition) const
+    {
+        auto const lineLength = unbox<size_t>(lines.front().get().size());
+        auto i = top;
+        if (searchText.size() > lineLength)
+        {
+            for (auto line = lines.begin(); line != lines.end(); ++line)
+            {
+                std::u32string_view textOnThisLine(searchText.data(),
+                                                   lineLength - unbox<size_t>(startPosition));
+                // Find how much of searchText is on this line
+                auto const result = searchPartialMatch(textOnThisLine, line->get());
+                if (result != 0)
+                {
+                    // Match the remaining text
+                    std::u32string_view remainingTextToMatch(searchText.data() + result,
+                                                             searchText.size() - result);
+                    if (matchTextAt(remainingTextToMatch, ColumnOffset(0), line + 1))
+                        return CellLocation { i, ColumnOffset(static_cast<int>(lineLength - result)) };
+                }
+                startPosition = ColumnOffset(0);
+                ++i;
+            }
+            return std::nullopt;
+        }
+        for (auto line = lines.begin(); line != lines.end(); ++line)
+        {
+            auto result = line->get().search(searchText, startPosition);
+            if (result.has_value())
+            {
+                if (result->partialMatchLength == 0)
+                    return CellLocation { i, result->column };
+                auto remainingText = searchText;
+                remainingText.remove_prefix(result->partialMatchLength);
+                if (line + 1 != lines.end() && (line + 1)->get().matchTextAt(remainingText, ColumnOffset(0)))
+                    return CellLocation { i,
+                                          ColumnOffset::cast_from(
+                                              static_cast<int>(unbox<size_t>(line->get().size())
+                                                               - result->partialMatchLength)) };
+            }
+            startPosition = ColumnOffset(0);
+            ++i;
+        }
+        return std::nullopt;
+    }
+
+    // Searches from right to left, taking into account line wrapping
+    [[nodiscard]] std::optional<terminal::CellLocation> searchReverse(std::u32string_view searchText,
+                                                                      ColumnOffset startPosition) const
+    {
+        auto i = bottom;
+        auto const lineLength = unbox<size_t>(lines.front().get().size());
+        if (searchText.size() > lineLength)
+        {
+            for (auto line = lines.rbegin(); line != lines.rend(); ++line)
+            {
+                std::u32string_view textOnThisLine(searchText.data() + searchText.size()
+                                                       - unbox<size_t>(startPosition),
+                                                   unbox<size_t>(startPosition));
+                auto const result = searchPartialMatchReverse(textOnThisLine, line->get());
+                if (result != 0)
+                {
+                    std::u32string_view remainingText(searchText.data(), searchText.size() - result);
+                    // Check if the searchText can even fit in the available lines
+                    auto const willFit = [&] {
+                        auto const count = static_cast<size_t>(
+                            std::max(long { 0 }, static_cast<long>(std::distance(line + 1, lines.rend()))));
+                        auto const total = count * lineLength;
+                        return total >= remainingText.size();
+                    }();
+                    if (!willFit)
+                        return std::nullopt;
+
+                    // Column where the remaining text should start at
+                    auto const startCol = ColumnOffset::cast_from(
+                        (lineLength - (remainingText.size() % lineLength)) % lineLength);
+
+                    // Line where the remaining text should start at
+                    long const startLine = static_cast<long>(std::ceil(
+                        static_cast<double>(remainingText.size()) / static_cast<double>(lineLength)));
+
+                    if (matchTextAtReverse(remainingText, startCol, line + startLine))
+                        return CellLocation { LineOffset::cast_from(i.value - startLine), startCol };
+                }
+                startPosition = ColumnOffset::cast_from(lineLength - 1);
+                --i;
+            }
+            return std::nullopt;
+        }
+        auto const lastColumn = ColumnOffset::cast_from(lineLength);
+        for (auto line = lines.rbegin(); line != lines.rend(); ++line)
+        {
+            auto result = line->get().searchReverse(searchText, startPosition);
+            if (result.has_value())
+            {
+                if (result->partialMatchLength == 0)
+                    return CellLocation { i, result->column };
+                auto remainingText = searchText;
+                remainingText.remove_suffix(result->partialMatchLength);
+                if (line + 1 != lines.rend()
+                    && (line + 1)->get().matchTextAt(remainingText,
+                                                     lastColumn - static_cast<int>(remainingText.size())))
+                    return CellLocation { i - 1, lastColumn - static_cast<int>(remainingText.size()) };
+            }
+            startPosition = lastColumn - 1;
+            --i;
+        }
+        return std::nullopt;
+    }
+
+  private:
+    // Finds the maximum number of charecters of searchText that can be matched from right end of line
+    [[nodiscard]] size_t searchPartialMatch(std::u32string_view searchText,
+                                            const Line<Cell>& line) const noexcept
+    {
+        auto const lineLength = unbox<size_t>(line.size());
+        while (!searchText.empty())
+        {
+            if (line.matchTextAt(searchText, ColumnOffset(static_cast<int>(lineLength - searchText.size()))))
+                return searchText.size();
+            searchText.remove_suffix(1);
+        }
+        return 0;
+    }
+
+    // Finds the maximum number of charecters of searchText that can be matched from left end of line
+    [[nodiscard]] size_t searchPartialMatchReverse(std::u32string_view searchText,
+                                                   const Line<Cell>& line) const noexcept
+    {
+        while (!searchText.empty())
+        {
+            if (line.matchTextAt(searchText, ColumnOffset(0)))
+                return searchText.size();
+            searchText.remove_prefix(1);
+        }
+        return 0;
+    }
+
+    [[nodiscard]] auto segmentSearchText(std::u32string_view searchText, ColumnOffset startCol) const noexcept
+    {
+        std::vector<std::u32string_view> segments;
+        auto const lineLength = unbox<size_t>(lines.front().get().size());
+        if (startCol > ColumnOffset(0))
+        {
+            segments.emplace_back(searchText.data(), lineLength - unbox<size_t>(startCol));
+            searchText.remove_prefix(lineLength - unbox<size_t>(startCol));
+        }
+        while (!searchText.empty())
+        {
+            if (searchText.size() < lineLength)
+            {
+                segments.emplace_back(searchText);
+                break;
+            }
+            segments.emplace_back(searchText.data(), lineLength);
+            searchText.remove_prefix(lineLength);
+        }
+        return segments;
+    }
+
+    // Match searchText right to left starting at startCol in line startLine
+    template <typename Itr>
+    [[nodiscard]] bool matchTextAt(std::u32string_view searchText,
+                                   ColumnOffset startCol,
+                                   Itr startLine) const noexcept
+    {
+        auto segments = segmentSearchText(searchText, startCol);
+        for (auto segment: segments)
+        {
+            if (!startLine->get().matchTextAt(segment, startCol))
+                return false;
+            ++startLine;
+        }
+        return true;
+    }
+
+    // Match searchText right to left starting at startCol in line startLine
+    template <typename Itr>
+    [[nodiscard]] bool matchTextAtReverse(std::u32string_view searchText,
+                                          ColumnOffset startCol,
+                                          Itr startLine) const noexcept
+    {
+        auto segments = segmentSearchText(searchText, startCol);
+        for (auto i: segments)
+        {
+            if (!startLine->get().matchTextAt(i, startCol))
+                return false;
+            startCol = ColumnOffset::cast_from(0);
+            --startLine;
+        }
+        return true;
+    }
 };
 
 template <typename Cell>
@@ -199,7 +394,7 @@ struct LogicalLines
                 return *this;
             }
 
-            Require(!lines.get()[unbox<int>(next)].wrapped());
+            // Require(!lines.get()[unbox<int>(next)].wrapped());
 
             current.top = LineOffset::cast_from(next);
             current.lines.clear();
@@ -469,6 +664,11 @@ class Grid
                                     lines_ };
     }
 
+    LogicalLines<Cell> logicalLinesFrom(LineOffset offset)
+    {
+        return LogicalLines<Cell> { offset, boxed_cast<LineOffset>(pageSize_.lines - 1), lines_ };
+    }
+
     ReverseLogicalLines<Cell> logicalLinesReverse()
     {
         return ReverseLogicalLines<Cell> { boxed_cast<LineOffset>(-historyLineCount()),
@@ -476,6 +676,10 @@ class Grid
                                            lines_ };
     }
 
+    ReverseLogicalLines<Cell> logicalLinesReverseFrom(LineOffset offset)
+    {
+        return ReverseLogicalLines<Cell> { boxed_cast<LineOffset>(-historyLineCount()), offset, lines_ };
+    }
     // {{{ buffer manipulation
 
     /// Completely deletes all scrollback lines.

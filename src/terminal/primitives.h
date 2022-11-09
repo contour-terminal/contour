@@ -849,6 +849,12 @@ constexpr unsigned setDynamicColorCommand(DynamicColorName name)
     }
 }
 
+struct SearchResult
+{
+    ColumnOffset column;           // column at the start of match
+    size_t partialMatchLength = 0; // length of partial match that happens at either end
+};
+
 } // namespace terminal
 
 namespace std

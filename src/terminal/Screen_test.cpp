@@ -2964,6 +2964,17 @@ TEST_CASE("searchReverse", "[screen]")
         // Check that we can find a term in the top-most scrollback line.
         optional<CellLocation> const oneAB = screen.searchReverse(U"1ab", *mn);
         REQUIRE(oneAB.value() == CellLocation { LineOffset(-3), ColumnOffset(0) });
+
+        mock.writeToScreen("7abcd");
+
+        // Find text that got wrapped
+        optional<CellLocation> const cd = screen.searchReverse(U"cd", screen.cursor().position);
+        REQUIRE(cd.value() == CellLocation { LineOffset(1), ColumnOffset(3) });
+
+        // Find text larger than the line length
+        optional<CellLocation> const longSearch =
+            screen.searchReverse(U"6pqr7abcd", screen.cursor().position);
+        REQUIRE(longSearch.value() == CellLocation { LineOffset(0), ColumnOffset(0) });
     }
 }
 
