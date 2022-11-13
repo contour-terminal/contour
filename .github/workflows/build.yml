@@ -185,10 +185,11 @@ jobs:
       - uses: actions/checkout@v3
       - name: Test in FreeBSD
         id: test
-        uses: vmactions/freebsd-vm@v0.2.4
+        uses: vmactions/freebsd-vm@v0.3.0
         with:
           envs: 'MYTOKEN MYTOKEN2'
           usesh: true
+          copyback: false
           prepare: pkg install -y curl
           run: |
             set -ex
@@ -204,9 +205,6 @@ jobs:
             ./build/src/crispy/crispy_test
             ./build/src/terminal/terminal_test
             rm -rf _deps build
-      - name: post-inspect
-        run: |
-          ls -hal
 
   osx_qt5:
     name: "OS/X (Qt5)"
