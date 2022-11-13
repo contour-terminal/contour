@@ -869,15 +869,17 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
         auto const boundingBox =
             ImageSize { Width(_gridMetrics.cellSize.width.value * numCells),
                         Height::cast_from(unbox<int>(_gridMetrics.cellSize.height) - _gridMetrics.baseline) };
+        // clang-format off
         RasterizerLog()("Inserting {} (bbox {}, numCells {}) id {} render mode {} {} yOverflow {} yMin {}.",
                         glyph,
                         boundingBox,
                         numCells,
                         glyphKey.index,
                         fontDescriptions_.renderMode,
-                        presentation,
+                        [=](){ auto s = std::ostringstream(); s << presentation; return s.str(); }(),
                         yOverflow,
                         yMin);
+        // clang-format on
     }
 
     return { createTileData(tileLocation,
@@ -939,7 +941,11 @@ text::shape_result TextRenderer::shapeTextRun(unicode::run_segmenter::range cons
     if (RasterizerLog && !glyphPosition.empty())
     {
         auto msg = RasterizerLog();
-        msg.append("Shaped codepoints ({}): {}", presentationStyle, unicode::convert_to<char>(codepoints));
+        // clang-format off
+        msg.append("Shaped codepoints ({}): {}",
+                   [=](){ auto s = std::ostringstream(); s << presentationStyle; return s.str(); }(),
+                   unicode::convert_to<char>(codepoints));
+        // clang-format on
 
         msg.append(" (");
         for (auto const [i, codepoint]: crispy::indexed(codepoints))
