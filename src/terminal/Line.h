@@ -235,12 +235,14 @@ class Line
 
     [[nodiscard]] uint8_t cellWidthAt(ColumnOffset column) const noexcept
     {
+#if 0 // TODO: This optimization - but only when we return actual widths and not always 1.
         if (isTrivialBuffer())
         {
             Require(ColumnOffset(0) <= column);
             Require(column < ColumnOffset::cast_from(size()));
             return 1; // TODO: When trivial line is to support Unicode, this should be adapted here.
         }
+#endif
         return inflatedBuffer().at(unbox<size_t>(column)).width();
     }
 

@@ -372,10 +372,10 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
         }
         case ViMotion::CharRight: // l
         {
+            auto const cellWidth =
+                std::max(uint8_t { 1 }, terminal.currentScreen().cellWidthAt(cursorPosition));
             auto resultPosition = cursorPosition;
-            auto const rightMargin = ColumnOffset::cast_from(terminal.pageSize().columns - 1);
-            for (unsigned i = 0; i < count && resultPosition.column < rightMargin; ++i)
-                resultPosition = snapToCellRight(resultPosition + ColumnOffset(1));
+            resultPosition.column += ColumnOffset::cast_from(cellWidth);
             return resultPosition;
         }
         case ViMotion::ScreenColumn: // |
@@ -405,15 +405,15 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
             return result;
         }
         case ViMotion::LineDown: // j
-            return snapToCell({ min(cursorPosition.line + LineOffset::cast_from(count),
-                                    terminal.pageSize().lines.as<LineOffset>() - 1),
-                                cursorPosition.column });
+            return { min(cursorPosition.line + LineOffset::cast_from(count),
+                         terminal.pageSize().lines.as<LineOffset>() - 1),
+                     cursorPosition.column };
         case ViMotion::LineEnd: // $
             return { cursorPosition.line, terminal.pageSize().columns.as<ColumnOffset>() - 1 };
         case ViMotion::LineUp: // k
-            return snapToCell({ max(cursorPosition.line - LineOffset::cast_from(count),
-                                    -terminal.currentScreen().historyLineCount().as<LineOffset>()),
-                                cursorPosition.column });
+            return { max(cursorPosition.line - LineOffset::cast_from(count),
+                         -terminal.currentScreen().historyLineCount().as<LineOffset>()),
+                     cursorPosition.column };
         case ViMotion::PageDown:
             return { min(cursorPosition.line + LineOffset::cast_from(terminal.pageSize().lines / 2),
                          terminal.pageSize().lines.as<LineOffset>() - 1),
