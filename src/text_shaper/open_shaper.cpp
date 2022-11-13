@@ -21,6 +21,7 @@
 #include <crispy/times.h>
 
 #include <unicode/convert.h>
+#include <unicode/ucd_fmt.h>
 
 #include <range/v3/algorithm/any_of.hpp>
 #include <range/v3/view/iota.hpp>
@@ -40,6 +41,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <sstream>
 #include <stdexcept>
 #include <tuple>
 #include <unordered_map>
@@ -55,6 +57,7 @@ using std::move;
 using std::nullopt;
 using std::numeric_limits;
 using std::optional;
+using std::ostringstream;
 using std::pair;
 using std::runtime_error;
 using std::size_t;
@@ -661,7 +664,11 @@ void open_shaper::shape(font_key _font,
     if (TextShapingLog)
     {
         auto logMessage = TextShapingLog();
-        logMessage.append("Shaping codepoints ({}):", _presentation);
+        logMessage.append("Shaping codepoints (");
+        // clang-format off
+        logMessage.append([=]() { auto s = ostringstream(); s << _presentation; return s.str(); }());
+        // clang-format on
+        logMessage.append("):");
         for (auto [i, codepoint]: crispy::indexed(_codepoints))
             logMessage.append(" {}:U+{:x}", _clusters[i], static_cast<unsigned>(codepoint));
         logMessage.append("\n");
