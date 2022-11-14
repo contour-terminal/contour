@@ -34,7 +34,7 @@ typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount _newColumnCou
     {
         switch (crispy::strongCompare(_newColumnCount, ColumnCount::cast_from(trivialBuffer().text.size())))
         {
-            case Comparison::Greater: trivialBuffer().displayWidth = _newColumnCount; return{};
+            case Comparison::Greater: trivialBuffer().displayWidth = _newColumnCount; return {};
             case Comparison::Equal: return {};
             case Comparison::Less:;
         }
