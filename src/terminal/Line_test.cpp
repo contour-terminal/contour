@@ -49,7 +49,7 @@ TEST_CASE("Line.resize", "[Line]")
 
     auto const bufferFragment = bufferObject->ref(0, 4);
 
-    auto sgr = GraphicsAttributes {};
+    auto const sgr = GraphicsAttributes {};
     auto const trivial =
         TrivialLineBuffer { DisplayWidth, sgr, sgr, HyperlinkId {}, DisplayWidth, bufferFragment };
     CHECK(trivial.text.view() == string_view(text.data()));
@@ -76,7 +76,7 @@ TEST_CASE("Line.reflow", "[Line]")
 
     auto const bufferFragment = bufferObject->ref(0, 4);
 
-    auto sgr = GraphicsAttributes {};
+    auto const sgr = GraphicsAttributes {};
     auto const trivial =
         TrivialLineBuffer { DisplayWidth, sgr, sgr, HyperlinkId {}, DisplayWidth, bufferFragment };
     CHECK(trivial.text.view() == string_view(text.data()));

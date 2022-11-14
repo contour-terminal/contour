@@ -897,7 +897,7 @@ TEST_CASE("Grid resize", "[grid]")
     auto bufferObject = pool.allocateBufferObject();
     bufferObject->writeAtEnd(text);
     auto const bufferFragment = bufferObject->ref(0, 4);
-    auto sgr = GraphicsAttributes {};
+    auto const sgr = GraphicsAttributes {};
     auto const trivial = TrivialLineBuffer { width, sgr, sgr, HyperlinkId {}, width, bufferFragment };
     auto line_trivial = Line<Cell>(LineFlags::None, trivial);
     grid.lineAt(LineOffset(0)) = line_trivial;
