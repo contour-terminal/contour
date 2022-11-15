@@ -21,6 +21,7 @@
 
 using crispy::fixed_size_ring;
 using crispy::ring;
+using crispy::sparse_ring;
 using std::generate_n;
 
 namespace
@@ -173,4 +174,180 @@ TEST_CASE("ring.offset_negative")
     REQUIRE(r[-1] == 'c');
     REQUIRE(r[-2] == 'b');
     REQUIRE(r[-3] == 'a');
+}
+
+TEST_CASE("sparse_ring.init")
+{
+    sparse_ring<char> r(3);
+    generate_n(r.begin(), 3, [c = 'a']() mutable { return c++; });
+    REQUIRE(r[0] == 'a');
+    REQUIRE(r[1] == 'b');
+    REQUIRE(r[2] == 'c');
+}
+
+TEST_CASE("sparse_ring.push_back")
+{
+    sparse_ring<char> r;
+    r.push_back('a');
+    r.push_back('b');
+    r.push_back('c');
+    REQUIRE(r[0] == 'a');
+    REQUIRE(r[1] == 'b');
+    REQUIRE(r[2] == 'c');
+}
+
+TEST_CASE("sparse_ring.emplace_back")
+{
+    sparse_ring<char> r;
+    r.emplace_back('a');
+    r.emplace_back('b');
+    r.emplace_back('c');
+    REQUIRE(r[0] == 'a');
+    REQUIRE(r[1] == 'b');
+    REQUIRE(r[2] == 'c');
+}
+
+TEST_CASE("sparse_ring.rotate_right")
+{
+    sparse_ring<char> r(3, {});
+    r[0] = 'a';
+    r[1] = 'b';
+    r[2] = 'c';
+    r.rotate_right(1);
+    REQUIRE(r[0] == 'c');
+    REQUIRE(r[1] == 'a');
+    REQUIRE(r[2] == 'b');
+}
+
+TEST_CASE("sparse_ring.rotate_right_2")
+{
+    sparse_ring<char> r(3, {});
+    r[0] = 'a';
+    r[1] = 'b';
+    r[2] = 'c';
+    r.rotate_right(2);
+    REQUIRE(r[0] == 'b');
+    REQUIRE(r[1] == 'c');
+    REQUIRE(r[2] == 'a');
+}
+
+TEST_CASE("sparse_ring.rotate_left")
+{
+    sparse_ring<char> r(3, {});
+    r[0] = 'a';
+    r[1] = 'b';
+    r[2] = 'c';
+    r.rotate_left(1);
+    REQUIRE(r[0] == 'b');
+    REQUIRE(r[1] == 'c');
+    REQUIRE(r[2] == 'a');
+}
+
+TEST_CASE("sparse_ring.rotate_left_2")
+{
+    sparse_ring<char> r(3, {});
+    r[0] = 'a';
+    r[1] = 'b';
+    r[2] = 'c';
+    r.rotate_left(2);
+    REQUIRE(r[0] == 'c');
+    REQUIRE(r[1] == 'a');
+    REQUIRE(r[2] == 'b');
+}
+
+TEST_CASE("sparse_ring.rotate_left_3")
+{
+    sparse_ring<char> r(3, {});
+    r[0] = 'a';
+    r[1] = 'b';
+    r[2] = 'c';
+    r.rotate_left(3);
+    REQUIRE(r[0] == 'a');
+    REQUIRE(r[1] == 'b');
+    REQUIRE(r[2] == 'c');
+}
+
+TEST_CASE("sparse_ring.rezero")
+{
+    sparse_ring<char> r(6, {});
+    r[0] = 'a';
+    r[1] = 'b';
+    r[2] = 'c';
+    r[3] = 'd';
+    r[4] = 'e';
+    r[5] = 'f';
+
+    r.rotate_right(2);
+    r.rezero();
+    REQUIRE(r[0] == 'e');
+    REQUIRE(r[1] == 'f');
+    REQUIRE(r[2] == 'a');
+    REQUIRE(r[3] == 'b');
+    REQUIRE(r[4] == 'c');
+    REQUIRE(r[5] == 'd');
+}
+
+TEST_CASE("sparse_ring.rezero.iterator")
+{
+    sparse_ring<char> r(6);
+    r[0] = 'a';
+    r[1] = 'b';
+    r[2] = 'c';
+    r[3] = 'd';
+    r[4] = 'e';
+    r[5] = 'f';
+    r.rezero(std::next(r.begin(), 2));
+    REQUIRE(r[0] == 'c');
+    REQUIRE(r[1] == 'd');
+    REQUIRE(r[2] == 'e');
+    REQUIRE(r[3] == 'f');
+    REQUIRE(r[4] == 'a');
+    REQUIRE(r[5] == 'b');
+}
+
+TEST_CASE("sparse_ring.offset_negative")
+{
+    sparse_ring<char> r;
+    r.emplace_back('a');
+    r.emplace_back('b');
+    r.emplace_back('c');
+
+    REQUIRE(r[0] == 'a');
+    REQUIRE(r[1] == 'b');
+    REQUIRE(r[2] == 'c');
+    REQUIRE(r[-1] == 'c');
+    REQUIRE(r[-2] == 'b');
+    REQUIRE(r[-3] == 'a');
+}
+
+TEST_CASE("sparse_ring.insert_before")
+{
+    crispy::sparse_ring<char> r;
+    r.emplace_back('a');
+    r.emplace_back('b');
+    r.emplace_back('c');
+    // a b c -> a d b c
+    REQUIRE(r[0] == 'a');
+    REQUIRE(r[1] == 'b');
+    REQUIRE(r[2] == 'c');
+    r.insert_before('d',1);
+    REQUIRE(r[0] == 'a');
+    REQUIRE(r[1] == 'd');
+    REQUIRE(r[2] == 'b');
+    REQUIRE(r[3] == 'c');
+}
+
+TEST_CASE("sparse_sparse_ring.erase")
+{
+    sparse_ring<char> r;
+    r.emplace_back('a');
+    r.emplace_back('b');
+    r.emplace_back('c');
+    // a b c -> a c
+    REQUIRE(r[0] == 'a');
+    REQUIRE(r[1] == 'b');
+    REQUIRE(r[2] == 'c');
+    r.erase(1);
+    REQUIRE(r[0] == 'a');
+    REQUIRE(r[1] == 'c');
 }
