@@ -330,7 +330,7 @@ TEST_CASE("sparse_ring.insert_before")
     REQUIRE(r[0] == 'a');
     REQUIRE(r[1] == 'b');
     REQUIRE(r[2] == 'c');
-    r.insert_before('d',1);
+    r.insert_before('d', 1);
     REQUIRE(r[0] == 'a');
     REQUIRE(r[1] == 'd');
     REQUIRE(r[2] == 'b');

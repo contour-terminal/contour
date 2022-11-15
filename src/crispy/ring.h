@@ -31,175 +31,173 @@ struct RingIterator;
 template <typename T, typename Vector, typename Ring_type>
 struct RingReverseIterator;
 
-
 template <typename T, typename Vector = std::vector<T>>
-class sparse_ring{
-    public:
-        using value_type = T;
-        using iterator = RingIterator<value_type, Vector,sparse_ring<T,Vector>>;
-        using const_iterator = RingIterator<value_type const, Vector,sparse_ring<T,Vector>>;
-        using reverse_iterator = RingReverseIterator<value_type, Vector,sparse_ring<T,Vector>>;
-        using const_reverse_iterator = RingReverseIterator<value_type const, Vector,sparse_ring<T,Vector>>;
-        using difference_type = long;
-        using offset_type = long;
+class sparse_ring
+{
+  public:
+    using value_type = T;
+    using iterator = RingIterator<value_type, Vector, sparse_ring<value_type, Vector>>;
+    using const_iterator = RingIterator<value_type const, Vector, sparse_ring<value_type const, Vector>>;
+    using reverse_iterator = RingReverseIterator<value_type, Vector, sparse_ring<value_type, Vector>>;
+    using const_reverse_iterator =
+        RingReverseIterator<value_type const, Vector, sparse_ring<value_type const, Vector>>;
+    using difference_type = long;
+    using offset_type = long;
 
-        sparse_ring() = default;
-        sparse_ring(sparse_ring const&) = default;
-        sparse_ring& operator=(sparse_ring const&) = default;
-        sparse_ring(sparse_ring&&) noexcept = default;
-        sparse_ring& operator=(sparse_ring&&) noexcept = default;
+    sparse_ring() = default;
+    sparse_ring(sparse_ring const&) = default;
+    sparse_ring& operator=(sparse_ring const&) = default;
+    sparse_ring(sparse_ring&&) noexcept = default;
+    sparse_ring& operator=(sparse_ring&&) noexcept = default;
 
+    sparse_ring(size_t capacity, T value): _storage(capacity, value), _indexes(capacity)
+    {
+        offset_type ind { 0 };
+        std::for_each(_indexes.begin(), _indexes.end(), [&ind](offset_type& n) { n = ind++; });
+    }
+    explicit sparse_ring(size_t capacity): _storage(capacity), _indexes(capacity)
+    {
+        offset_type ind { 0 };
+        std::for_each(_indexes.begin(), _indexes.end(), [&ind](offset_type& n) { n = ind++; });
+    }
 
-        sparse_ring(size_t capacity, T value):_storage(capacity,value),_indexes(capacity)
-        {
-            offset_type ind{0};
-            std::for_each(_indexes.begin(),_indexes.end(), [&ind](offset_type &n){n=ind++;});
-        }
-        explicit sparse_ring(size_t capacity): _storage(capacity),_indexes(capacity)
-        {
-            offset_type ind{0};
-            std::for_each(_indexes.begin(),_indexes.end(), [&ind](offset_type &n){n=ind++;});
-        }
+    ~sparse_ring() = default;
 
-        ~sparse_ring() = default;
+    explicit sparse_ring(Vector storage): _storage(std::move(storage)) {}
 
-        explicit sparse_ring(Vector storage): _storage(std::move(storage)) {}
+    value_type const& operator[](offset_type i) const noexcept
+    {
+        offset_type offset = size_t(offset_type(_zero + size()) + i) % size();
+        return _storage[_indexes[offset]];
+    }
+    value_type& operator[](offset_type i) noexcept
+    {
+        offset_type offset = size_t(offset_type(_zero + size()) + i) % size();
+        return _storage[_indexes[offset]];
+    }
 
-        value_type const& operator[](offset_type i) const noexcept
-        {
-            offset_type offset = size_t(offset_type(_zero + size()) + i) % size();
-            return _storage[_indexes[offset]];
-        }
-        value_type& operator[](offset_type i) noexcept
-        {
-            offset_type offset = size_t(offset_type(_zero + size()) + i) % size();
-            return _storage[_indexes[offset]];
-        }
+    value_type const& at(offset_type i) const noexcept
+    {
+        offset_type offset = size_t(offset_type(_zero + size()) + i) % size();
+        return _storage[_indexes[offset]];
+    }
+    value_type& at(offset_type i) noexcept
+    {
+        offset_type offset = size_t(offset_type(_zero + size()) + i) % size();
+        return _storage[_indexes[offset]];
+    }
 
-        value_type const& at(offset_type i) const noexcept
-        {
-            offset_type offset = size_t(offset_type(_zero + size()) + i) % size();
-            return _storage[_indexes[offset]];
-        }
-        value_type& at(offset_type i) noexcept
-        {
-            offset_type offset = size_t(offset_type(_zero + size()) + i) % size();
-            return _storage[_indexes[offset]];
-        }
+    void push_back(value_type const& _value)
+    {
+        _storage.push_back(_value);
+        _indexes.push_back(_storage.size() - 1);
+    }
 
-        void push_back(value_type const& _value) {
-            _storage.push_back(_value);
-            _indexes.push_back(_storage.size()-1);
-        }
+    void push_back(value_type&& _value) { this->emplace_back(std::move(_value)); }
 
-        void push_back(value_type&& _value) {
-            this->emplace_back(std::move(_value));
-        }
+    template <typename... Args>
+    void emplace_back(Args&&... args)
+    {
+        this->_storage.emplace_back(std::forward<Args>(args)...);
+        this->_indexes.emplace_back(_storage.size() - 1);
+    }
 
-        template <typename... Args>
-        void emplace_back(Args&&... args)
-        {
-            this->_storage.emplace_back(std::forward<Args>(args)...);
-            this->_indexes.emplace_back(_storage.size()-1);
-        }
+    void insert_before(value_type const& _value, offset_type i)
+    {
+        _storage.push_back(_value);
+        offset_type offset_of_inserted = _storage.size() - 1;
+        _indexes.emplace(_indexes.begin() + i, offset_of_inserted);
+    }
 
-        void insert_before(value_type const& _value, offset_type i)
-        {
-            _storage.push_back(_value);
-            offset_type offset_of_inserted = _storage.size()-1;
-            _indexes.emplace(_indexes.begin() + i,offset_of_inserted);
-        }
+    void erase(offset_type i)
+    {
+        _storage[_indexes[i]] = 0;
+        _indexes.erase(_indexes.begin() + i);
+    }
 
-        void erase(offset_type i)
-        {
-            _storage[_indexes[i]] = 0;
-            _indexes.erase(_indexes.begin() + i);
-        }
+    [[nodiscard]] std::size_t zero_index() const noexcept { return _zero; }
 
-        [[nodiscard]] std::size_t zero_index() const noexcept { return _zero; }
+    [[nodiscard]] size_t size() const noexcept { return this->_storage.size(); }
 
-        [[nodiscard]] size_t size() const noexcept { return this->_storage.size(); }
+    // positvie count rotates right, negative count rotates left
+    void rotate(int count) noexcept { _zero = size_t(offset_type(_zero + size()) - count) % size(); }
 
-        // positvie count rotates right, negative count rotates left
-        void rotate(int count) noexcept { _zero = size_t(offset_type(_zero + size()) - count) % size(); }
+    void rotate_left(std::size_t count) noexcept { _zero = (_zero + size() + count) % size(); }
+    void rotate_right(std::size_t count) noexcept { _zero = (_zero + size() - count) % size(); }
+    void unrotate() { _zero = 0; }
 
-        void rotate_left(std::size_t count) noexcept { _zero = (_zero + size() + count) % size(); }
-        void rotate_right(std::size_t count) noexcept { _zero = (_zero + size() - count) % size(); }
-        void unrotate() { _zero = 0; }
+    void rezero()
+    {
+        std::rotate(begin(), std::next(begin(), static_cast<difference_type>(_zero)), end()); // shift-left
+        _zero = 0;
+    }
 
-        void rezero()
-        {
-            std::rotate(begin(), std::next(begin(), static_cast<difference_type>(_zero)), end()); // shift-left
-            _zero = 0;
-        }
+    void rezero(iterator i)
+    {
+        std::rotate(begin(), std::next(begin(), i.current), end()); // shift-left
+        _zero = 0;
+    }
 
-        void rezero(iterator i)
-        {
-            std::rotate(begin(), std::next(begin(), i.current), end()); // shift-left
-            _zero = 0;
-        }
+    value_type& front() noexcept { return at(0); }
+    value_type const& front() const noexcept { return at(0); }
 
-        value_type& front() noexcept { return at(0); }
-        value_type const& front() const noexcept { return at(0); }
+    value_type& back()
+    {
+        if (size() == 0)
+            throw std::length_error("empty");
 
-        value_type& back()
-        {
-            if (size() == 0)
-                throw std::length_error("empty");
+        return at(static_cast<offset_type>(size()) - 1);
+    }
 
-            return at(static_cast<offset_type>(size()) - 1);
-        }
+    value_type const& back() const
+    {
+        if (size() == 0)
+            throw std::length_error("empty");
 
-        value_type const& back() const
-        {
-            if (size() == 0)
-                throw std::length_error("empty");
+        return at(static_cast<offset_type>(size()) - 1);
+    }
 
-            return at(static_cast<offset_type>(size()) - 1);
-        }
+    iterator begin() noexcept { return iterator { this, 0 }; }
+    iterator end() noexcept { return iterator { this, static_cast<difference_type>(size()) }; }
 
-        iterator begin() noexcept { return iterator { this, 0 }; }
-        iterator end() noexcept { return iterator { this, static_cast<difference_type>(size()) }; }
+    const_iterator cbegin() const noexcept
+    {
+        return const_iterator { (sparse_ring<value_type const, Vector>*) this, 0 };
+    }
+    const_iterator cend() const noexcept
+    {
+        return const_iterator { (sparse_ring<value_type const, Vector>*) this,
+                                static_cast<difference_type>(size()) };
+    }
 
-        const_iterator cbegin() const noexcept
-        {
-            return const_iterator { (sparse_ring<value_type const, Vector>*) this, 0 };
-        }
-        const_iterator cend() const noexcept
-        {
-            return const_iterator { (sparse_ring<value_type const, Vector>*) this,
-            static_cast<difference_type>(size()) };
-        }
+    const_iterator begin() const noexcept { return cbegin(); }
+    const_iterator end() const noexcept { return cend(); }
 
-        const_iterator begin() const noexcept { return cbegin(); }
-        const_iterator end() const noexcept { return cend(); }
+    reverse_iterator rbegin() noexcept;
+    reverse_iterator rend() noexcept;
 
-        reverse_iterator rbegin() noexcept;
-        reverse_iterator rend() noexcept;
+    const_reverse_iterator rbegin() const noexcept;
+    const_reverse_iterator rend() const noexcept;
 
-        const_reverse_iterator rbegin() const noexcept;
-        const_reverse_iterator rend() const noexcept;
+    gsl::span<value_type> span(offset_type start, size_t count) noexcept
+    {
+        auto a = std::next(begin(), start);
+        auto b = std::next(a, count);
+        return gsl::make_span(a, b);
+    }
 
-        gsl::span<value_type> span(offset_type start, size_t count) noexcept
-        {
-            auto a = std::next(begin(), start);
-            auto b = std::next(a, count);
-            return gsl::make_span(a, b);
-        }
+    gsl::span<value_type const> span(offset_type start, size_t count) const noexcept
+    {
+        auto a = std::next(begin(), start);
+        auto b = std::next(a, count);
+        return gsl::make_span(a, b);
+    }
 
-        gsl::span<value_type const> span(offset_type start, size_t count) const noexcept
-        {
-            auto a = std::next(begin(), start);
-            auto b = std::next(a, count);
-            return gsl::make_span(a, b);
-        }
-
-    private:
-        Vector _storage;
-        std::vector<offset_type> _indexes;
-        std::size_t _zero = 0;
+  private:
+    Vector _storage;
+    std::vector<offset_type> _indexes;
+    std::size_t _zero = 0;
 };
-
 
 /**
  * Implements an efficient ring buffer over type T
@@ -210,10 +208,11 @@ class basic_ring
 {
   public:
     using value_type = T;
-    using iterator = RingIterator<value_type, Vector,basic_ring<T,Vector>>;
-    using const_iterator = RingIterator<value_type const, Vector,basic_ring<T,Vector>>;
-    using reverse_iterator = RingReverseIterator<value_type, Vector,basic_ring<T,Vector>>;
-    using const_reverse_iterator = RingReverseIterator<value_type const, Vector,basic_ring<T,Vector>>;
+    using iterator = RingIterator<value_type, Vector, basic_ring<value_type, Vector>>;
+    using const_iterator = RingIterator<value_type const, Vector, basic_ring<value_type const, Vector>>;
+    using reverse_iterator = RingReverseIterator<value_type, Vector, basic_ring<value_type, Vector>>;
+    using const_reverse_iterator =
+        RingReverseIterator<value_type const, Vector, basic_ring<value_type const, Vector>>;
     using difference_type = long;
     using offset_type = long;
 
@@ -378,9 +377,7 @@ struct RingIterator
     Ring_type* ring {};
     difference_type current {};
 
-    RingIterator(Ring_type* aRing, difference_type aCurrent): ring { aRing }, current { aCurrent }
-    {
-    }
+    RingIterator(Ring_type* aRing, difference_type aCurrent): ring { aRing }, current { aCurrent } {}
 
     RingIterator() = default;
 
@@ -469,10 +466,7 @@ struct RingReverseIterator
     Ring_type* ring;
     difference_type current;
 
-    RingReverseIterator(Ring_type* _ring, difference_type _current):
-        ring { _ring }, current { _current }
-    {
-    }
+    RingReverseIterator(Ring_type* _ring, difference_type _current): ring { _ring }, current { _current } {}
 
     RingReverseIterator(RingReverseIterator const&) = default;
     RingReverseIterator& operator=(RingReverseIterator const&) = default;
