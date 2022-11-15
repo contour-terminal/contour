@@ -89,7 +89,7 @@ class Pty
     /// @returns A view to the consumed buffer. The boolean in the ReadResult
     ///          indicates whether or not this data was coming through
     ///          the stdout-fastpipe.
-    [[nodiscard]] virtual ReadResult read(crispy::BufferObject& storage,
+    [[nodiscard]] virtual ReadResult read(crispy::BufferObject<char>& storage,
                                           std::chrono::milliseconds timeout,
                                           size_t size) = 0;
 

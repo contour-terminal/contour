@@ -806,7 +806,8 @@ string_view Terminal::lockedWriteToPtyBuffer(string_view data)
 
     auto const chunk = data.substr(0, std::min(data.size(), currentPtyBuffer_->bytesAvailable()));
     auto const _l = scoped_lock { *currentPtyBuffer_ };
-    return currentPtyBuffer_->writeAtEnd(chunk);
+    auto const ref = currentPtyBuffer_->writeAtEnd(chunk);
+    return string_view(ref.data(), ref.size());
 }
 
 void Terminal::writeToScreenInternal(std::string_view data)

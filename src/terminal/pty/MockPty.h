@@ -28,7 +28,7 @@ class MockPty: public Pty
     ~MockPty() override;
 
     PtySlave& slave() noexcept override;
-    [[nodiscard]] ReadResult read(crispy::BufferObject& storage,
+    [[nodiscard]] ReadResult read(crispy::BufferObject<char>& storage,
                                   std::chrono::milliseconds timeout,
                                   size_t size) override;
     void wakeupReader() override;

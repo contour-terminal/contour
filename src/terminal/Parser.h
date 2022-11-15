@@ -24,6 +24,9 @@
 
 #include <fmt/format.h>
 
+#include <gsl/span>
+#include <gsl/span_ext>
+
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -552,7 +555,7 @@ class Parser
     /// Parses the input string in UTF-8 encoding and emits VT events while processing.
     /// With respect to text, only up to @c EventListener::maxBulkTextSequenceWidth() UTF-32 codepoints will
     /// be processed.
-    void parseFragment(std::string_view s);
+    void parseFragment(gsl::span<char const> s);
 
     [[nodiscard]] State state() const noexcept { return state_; }
 

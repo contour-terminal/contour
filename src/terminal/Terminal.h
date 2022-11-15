@@ -620,7 +620,10 @@ class Terminal
 
     void applyPageSizeToCurrentBuffer();
 
-    [[nodiscard]] crispy::BufferObjectPtr currentPtyBuffer() const noexcept { return currentPtyBuffer_; }
+    [[nodiscard]] crispy::BufferObjectPtr<char> currentPtyBuffer() const noexcept
+    {
+        return currentPtyBuffer_;
+    }
 
     [[nodiscard]] terminal::SelectionHelper& selectionHelper() noexcept { return selectionHelper_; }
 
@@ -716,8 +719,8 @@ class Terminal
     LineOffset copyLastMarkRangeOffset_;
 
     TerminalState state_;
-    crispy::BufferObjectPool ptyBufferPool_;
-    crispy::BufferObjectPtr currentPtyBuffer_;
+    crispy::BufferObjectPool<char> ptyBufferPool_;
+    crispy::BufferObjectPtr<char> currentPtyBuffer_;
     size_t ptyReadBufferSize_;
     Screen<PrimaryScreenCell> primaryScreen_;
     Screen<AlternateScreenCell> alternateScreen_;

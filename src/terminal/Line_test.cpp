@@ -29,7 +29,7 @@ using Cell = PrimaryScreenCell;
 TEST_CASE("Line.BufferFragment", "[Line]")
 {
     auto constexpr testText = "0123456789ABCDEF"sv;
-    auto pool = BufferObjectPool(16);
+    auto pool = BufferObjectPool<char>(16);
     auto bufferObject = pool.allocateBufferObject();
     bufferObject->writeAtEnd(testText);
     auto const bufferFragment = bufferObject->ref(0, 10);
@@ -43,7 +43,7 @@ TEST_CASE("Line.resize", "[Line]")
 {
     auto constexpr DisplayWidth = ColumnCount(4);
     auto text = "abcd"sv;
-    auto pool = BufferObjectPool(32);
+    auto pool = BufferObjectPool<char>(32);
     auto bufferObject = pool.allocateBufferObject();
     bufferObject->writeAtEnd(text);
 
@@ -70,7 +70,7 @@ TEST_CASE("Line.reflow", "[Line]")
 {
     auto constexpr DisplayWidth = ColumnCount(4);
     auto text = "abcd"sv;
-    auto pool = BufferObjectPool(32);
+    auto pool = BufferObjectPool<char>(32);
     auto bufferObject = pool.allocateBufferObject();
     bufferObject->writeAtEnd(text);
 
@@ -93,7 +93,7 @@ TEST_CASE("Line.reflow", "[Line]")
 TEST_CASE("Line.inflate", "[Line]")
 {
     auto constexpr testText = "0123456789ABCDEF"sv;
-    auto pool = BufferObjectPool(16);
+    auto pool = BufferObjectPool<char>(16);
     auto bufferObject = pool.allocateBufferObject();
     bufferObject->writeAtEnd(testText);
     auto const bufferFragment = bufferObject->ref(0, 10);
@@ -127,7 +127,7 @@ TEST_CASE("Line.inflate.Unicode", "[Line]")
     auto constexpr testTextUtf32 = U"0\u2705123456789ABCDEF"sv;
     auto const testTextUtf8 = unicode::convert_to<char>(testTextUtf32);
 
-    auto pool = BufferObjectPool(32);
+    auto pool = BufferObjectPool<char>(32);
     auto bufferObject = pool.allocateBufferObject();
     bufferObject->writeAtEnd(testTextUtf8);
 
@@ -178,7 +178,7 @@ TEST_CASE("Line.inflate.Unicode.FamilyEmoji", "[Line]")
     auto const testTextUtf8 = unicode::convert_to<char>(testTextUtf32);
     auto const familyEmojiUtf8 = unicode::convert_to<char>(U"\U0001F468\u200D\U0001F468\u200D\U0001F467"sv);
 
-    auto pool = BufferObjectPool(32);
+    auto pool = BufferObjectPool<char>(32);
     auto bufferObject = pool.allocateBufferObject();
     bufferObject->writeAtEnd(testTextUtf8);
 
