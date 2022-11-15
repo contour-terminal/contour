@@ -797,10 +797,19 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
                 }
                 else // line is not wrapped
                 {
-                    flushLogicalLine();
-                    // logLogicalLine(line.flags(), " - start new logical line");
-                    appendToLogicalLine(line.cells());
-                    logicalLineFlags = line.flags() & ~LineFlags::Wrapped;
+                    if (line.isTrivialBuffer())
+                    {
+                        auto& buffer = line.trivialBuffer();
+                        buffer.displayWidth = _newColumnCount;
+                        grownLines.emplace_back(line);
+                    }
+                    else
+                    {
+                        flushLogicalLine();
+                        // logLogicalLine(line.flags(), " - start new logical line");
+                        appendToLogicalLine(line.cells());
+                        logicalLineFlags = line.flags() & ~LineFlags::Wrapped;
+                    }
                 }
             }
 

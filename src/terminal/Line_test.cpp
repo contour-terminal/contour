@@ -39,6 +39,57 @@ TEST_CASE("Line.BufferFragment", "[Line]")
     CHECK(fragment.view() == externalView);
 }
 
+TEST_CASE("Line.resize", "[Line]")
+{
+    auto constexpr DisplayWidth = ColumnCount(4);
+    auto text = "abcd"sv;
+    auto pool = BufferObjectPool(32);
+    auto bufferObject = pool.allocateBufferObject();
+    bufferObject->writeAtEnd(text);
+
+    auto const bufferFragment = bufferObject->ref(0, 4);
+
+    auto const sgr = GraphicsAttributes {};
+    auto const trivial =
+        TrivialLineBuffer { DisplayWidth, sgr, sgr, HyperlinkId {}, DisplayWidth, bufferFragment };
+    CHECK(trivial.text.view() == string_view(text.data()));
+    auto line_trivial = Line<Cell>(LineFlags::None, trivial);
+    CHECK(line_trivial.isTrivialBuffer());
+
+    line_trivial.resize(ColumnCount(10));
+    CHECK(line_trivial.isTrivialBuffer());
+
+    line_trivial.resize(ColumnCount(5));
+    CHECK(line_trivial.isTrivialBuffer());
+
+    line_trivial.resize(ColumnCount(3));
+    CHECK(line_trivial.isTrivialBuffer());
+}
+
+TEST_CASE("Line.reflow", "[Line]")
+{
+    auto constexpr DisplayWidth = ColumnCount(4);
+    auto text = "abcd"sv;
+    auto pool = BufferObjectPool(32);
+    auto bufferObject = pool.allocateBufferObject();
+    bufferObject->writeAtEnd(text);
+
+    auto const bufferFragment = bufferObject->ref(0, 4);
+
+    auto const sgr = GraphicsAttributes {};
+    auto const trivial =
+        TrivialLineBuffer { DisplayWidth, sgr, sgr, HyperlinkId {}, DisplayWidth, bufferFragment };
+    CHECK(trivial.text.view() == string_view(text.data()));
+    auto line_trivial = Line<Cell>(LineFlags::None, trivial);
+    CHECK(line_trivial.isTrivialBuffer());
+
+    (void) line_trivial.reflow(ColumnCount(5));
+    CHECK(line_trivial.isTrivialBuffer());
+
+    (void) line_trivial.reflow(ColumnCount(3));
+    CHECK(line_trivial.isInflatedBuffer());
+}
+
 TEST_CASE("Line.inflate", "[Line]")
 {
     auto constexpr testText = "0123456789ABCDEF"sv;
