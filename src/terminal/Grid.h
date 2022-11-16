@@ -588,6 +588,9 @@ class Grid
 
     // Number of lines used in the Lines buffer.
     LineCount linesUsed_;
+
+    crispy::BufferObjectPool<Cell> cellBufferObjectPool_;
+    crispy::BufferObject<Cell> cellBufferObject_;
 };
 
 template <typename Cell>

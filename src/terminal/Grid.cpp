@@ -424,10 +424,8 @@ LineCount Grid<Cell>::scrollUp(LineCount linesCountToScrollUp, GraphicsAttribute
         {
             linesUsed_ += linesAppendCount;
             Require(unbox<size_t>(linesUsed_) <= lines_.size());
-            fill_n(next(lines_.begin(), *pageSize_.lines),
-                   unbox<size_t>(linesAppendCount),
-                   Line<Cell> { defaultLineFlags(),
-                                TrivialLineBuffer { pageSize_.columns, _defaultAttributes } });
+            for (int n = 0; n < unbox<int>(linesAppendCount); ++n)
+                (*(lines_.begin() + *pageSize_.lines + n)).reset(defaultLineFlags(), _defaultAttributes);
             rotateBuffersLeft(linesAppendCount);
         }
         if (linesAppendCount < linesCountToScrollUp)
@@ -670,6 +668,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPos, bool _wrapPending)
 {
+#if 0
     if (pageSize_ == _newSize)
         return _currentCursorPos;
 
@@ -987,6 +986,12 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
     verifyState();
 
     return cursor;
+#else
+    // TODO(pr) resize
+    (void) _newSize;
+    (void) _wrapPending;
+    return _currentCursorPos;
+#endif
 }
 
 template <typename Cell>
@@ -1020,7 +1025,8 @@ void Grid<Cell>::appendNewLines(LineCount _count, GraphicsAttributes _attr)
     if (auto const n = std::min(_count, pageSize_.lines); *n > 0)
     {
         generate_n(back_inserter(lines_), *n, [&]() {
-            return Line<Cell>(wrappableFlag, TrivialLineBuffer { pageSize_.columns, _attr, _attr });
+            return Line<Cell>(
+                wrappableFlag, TrivialLineBuffer { pageSize_.columns, _attr, _attr }, cellBufferObject_);
         });
         clampHistory();
     }

@@ -75,11 +75,14 @@ struct TrivialLineBuffer
 };
 
 template <typename Cell>
-using InflatedLineBuffer = std::vector<Cell>;
+using CellBufferPool = crispy::BufferObjectPool<Cell>;
+
+template <typename Cell>
+using InflatedLineBuffer = gsl::span<Cell>;
 
 /// Unpacks a TrivialLineBuffer into an InflatedLineBuffer<Cell>.
 template <typename Cell>
-InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input);
+InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input, crispy::BufferObject<Cell>& cellPool);
 
 template <typename Cell>
 using LineStorage = std::variant<TrivialLineBuffer, InflatedLineBuffer<Cell>>;
@@ -105,16 +108,16 @@ class Line
     using Storage = LineStorage<Cell>;
     using value_type = Cell;
     using iterator = typename InflatedBuffer::iterator;
-    using reverse_iterator = typename InflatedBuffer::reverse_iterator;
-    using const_iterator = typename InflatedBuffer::const_iterator;
+    // using reverse_iterator = typename InflatedBuffer::reverse_iterator;
+    // using const_iterator = typename InflatedBuffer::const_iterator;
 
-    Line(LineFlags _flags, TrivialBuffer _buffer):
-        storage_ { std::move(_buffer) }, flags_ { static_cast<unsigned>(_flags) }
+    Line(LineFlags _flags, TrivialBuffer _buffer, crispy::BufferObject<Cell>& cellPool):
+        storage_ { std::move(_buffer) }, flags_ { static_cast<unsigned>(_flags) }, cellPool_ { cellPool }
     {
     }
 
-    Line(LineFlags _flags, InflatedBuffer _buffer):
-        storage_ { std::move(_buffer) }, flags_ { static_cast<unsigned>(_flags) }
+    Line(LineFlags _flags, InflatedBuffer _buffer, crispy::BufferObject<Cell>& cellPool):
+        storage_ { std::move(_buffer) }, flags_ { static_cast<unsigned>(_flags) }, cellPool_ { cellPool }
     {
     }
 
@@ -457,6 +460,7 @@ class Line
   private:
     Storage storage_;
     unsigned flags_ = 0;
+    std::reference_wrapper<crispy::BufferObject<Cell>> cellPool_; // TODO(pr) must be ref, not value.
 };
 
 constexpr LineFlags operator|(LineFlags a, LineFlags b) noexcept
@@ -478,7 +482,7 @@ template <typename Cell>
 inline typename Line<Cell>::InflatedBuffer& Line<Cell>::inflatedBuffer()
 {
     if (std::holds_alternative<TrivialBuffer>(storage_))
-        storage_ = inflate<Cell>(std::get<TrivialBuffer>(storage_));
+        storage_ = inflate<Cell>(std::get<TrivialBuffer>(storage_, cellPool_));
     return std::get<InflatedBuffer>(storage_);
 }
 

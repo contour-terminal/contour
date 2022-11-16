@@ -95,6 +95,7 @@ template <typename Cell>
 inline void Line<Cell>::resize(ColumnCount _count)
 {
     assert(*_count >= 0);
+#if 0 // TODO(pr)
     if (1) // constexpr (Optimized)
     {
         if (isTrivialBuffer())
@@ -105,6 +106,7 @@ inline void Line<Cell>::resize(ColumnCount _count)
         }
     }
     inflatedBuffer().resize(unbox<size_t>(_count));
+#endif
 }
 
 template <typename Cell>
@@ -158,11 +160,11 @@ std::string Line<Cell>::toUtf8Trimmed() const
 }
 
 template <typename Cell>
-InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
+InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input, crispy::BufferObject<Cell>& cellPool)
 {
     static constexpr char32_t ReplacementCharacter { 0xFFFD };
 
-    auto columns = InflatedLineBuffer<Cell> {};
+    auto columns = InflatedLineBuffer<Cell> { cellPool.advance(input.displayWidth) };
     columns.reserve(unbox<size_t>(input.displayWidth));
 
     auto lastChar = char32_t { 0 };
