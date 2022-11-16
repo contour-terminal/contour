@@ -388,11 +388,13 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
         case ViMotion::FileEnd: // G
             return snapToCell({ terminal.pageSize().lines.as<LineOffset>() - 1, ColumnOffset(0) });
         case ViMotion::PageTop: // <S-H>
-            return snapToCell(
-                { boxed_cast<LineOffset>(-terminal.viewport().scrollOffset()), ColumnOffset(0) });
+            return snapToCell({ boxed_cast<LineOffset>(-terminal.viewport().scrollOffset())
+                                    + *terminal.viewport().scrollOff(),
+                                ColumnOffset(0) });
         case ViMotion::PageBottom: // <S-L>
             return snapToCell({ boxed_cast<LineOffset>(-terminal.viewport().scrollOffset())
-                                    + boxed_cast<LineOffset>(terminal.pageSize().lines - 1),
+                                    + boxed_cast<LineOffset>(terminal.pageSize().lines
+                                                             - *terminal.viewport().scrollOff() - 1),
                                 ColumnOffset(0) });
         case ViMotion::LineBegin: // 0
             return { cursorPosition.line, ColumnOffset(0) };

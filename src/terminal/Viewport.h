@@ -47,6 +47,11 @@ class Viewport
         scrollOff_ = count;
     }
 
+    [[nodiscard]] LineCount scrollOff() const noexcept
+    {
+        return scrollOff_;
+    }
+
     [[nodiscard]] ScrollOffset scrollOffset() const noexcept
     {
         return scrollOffset_;
