@@ -240,7 +240,9 @@ BufferObject<T>::~BufferObject()
 {
     if (BufferObjectLog)
         BufferObjectLog()("Destroying BufferObject: {}..{}.", (void*) data(), (void*) end());
-#if !defined(BUFFER_OBJECT_INLINE)
+#if defined(BUFFER_OBJECT_INLINE)
+    std::destroy_n(data(), capacity());
+#else
     delete[] data_;
 #endif
 }
@@ -395,7 +397,7 @@ void BufferObjectPool<T>::release(BufferObject<T>* ptr)
     else
     {
 #if defined(BUFFER_OBJECT_INLINE)
-        destroy_n(ptr, 1);
+        std::destroy_n(ptr, 1);
         free(ptr);
 #else
         delete ptr;
