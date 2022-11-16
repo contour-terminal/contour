@@ -114,7 +114,7 @@ class BufferObject: public std::enable_shared_from_this<BufferObject<T>>
     T const* end() const noexcept { return end_; }
 
     /// Advances the end of the used area by the given amount of bytes.
-    void advance(size_t n) noexcept;
+    gsl::span<T> advance(size_t n) noexcept;
 
     void advanceHotEndUntil(T const* ptr) noexcept;
 
@@ -296,10 +296,12 @@ inline T const* BufferObject<T>::data() const noexcept
 }
 
 template <typename T>
-inline void BufferObject<T>::advance(size_t n) noexcept
+inline gsl::span<T> BufferObject<T>::advance(size_t n) noexcept
 {
     assert(hotEnd_ + n <= end_);
+    auto result = gsl::span<T>(hotEnd_, hotEnd_ + n);
     hotEnd_ += n;
+    return result;
 }
 
 template <typename T>
