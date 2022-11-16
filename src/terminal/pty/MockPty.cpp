@@ -23,14 +23,15 @@ PtySlave& MockPty::slave() noexcept
     return slave_;
 }
 
-Pty::ReadResult MockPty::read(crispy::BufferObject& storage,
+Pty::ReadResult MockPty::read(crispy::BufferObject<char>& storage,
                               std::chrono::milliseconds /*timeout*/,
                               size_t size)
 {
     auto const n = min(size, min(outputBuffer_.size() - outputReadOffset_, storage.bytesAvailable()));
     auto const chunk = string_view { outputBuffer_.data() + outputReadOffset_, n };
     outputReadOffset_ += n;
-    return { tuple { storage.writeAtEnd(chunk), false } };
+    auto const pooled = storage.writeAtEnd(chunk);
+    return { tuple { string_view(pooled.data(), pooled.size()), false } };
 }
 
 void MockPty::wakeupReader()

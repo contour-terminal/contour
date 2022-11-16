@@ -893,7 +893,7 @@ TEST_CASE("Grid resize", "[grid]")
     auto width = ColumnCount(6);
     auto grid = Grid<Cell>(PageSize { LineCount(2), width }, true, LineCount(0));
     auto text = "abcd"sv;
-    auto pool = crispy::BufferObjectPool(32);
+    auto pool = crispy::BufferObjectPool<char>(32);
     auto bufferObject = pool.allocateBufferObject();
     bufferObject->writeAtEnd(text);
     auto const bufferFragment = bufferObject->ref(0, 4);

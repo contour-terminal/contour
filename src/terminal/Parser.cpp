@@ -349,7 +349,7 @@ constexpr ParserTable ParserTable::get() // {{{
 } // }}}
 
 template <typename EventListener, bool TraceStateChanges>
-void Parser<EventListener, TraceStateChanges>::parseFragment(std::string_view data)
+void Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char const> data)
 {
     auto input = data.data();
     auto const end = data.data() + data.size();

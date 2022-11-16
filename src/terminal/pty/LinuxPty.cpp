@@ -41,7 +41,6 @@
 #include <unistd.h>
 #include <utmp.h>
 
-using crispy::BufferObject;
 using std::array;
 using std::max;
 using std::min;
@@ -333,7 +332,9 @@ int LinuxPty::waitForReadable(std::chrono::milliseconds timeout) noexcept
     }
 }
 
-Pty::ReadResult LinuxPty::read(crispy::BufferObject& sink, std::chrono::milliseconds timeout, size_t size)
+Pty::ReadResult LinuxPty::read(crispy::BufferObject<char>& sink,
+                               std::chrono::milliseconds timeout,
+                               size_t size)
 {
     if (int fd = waitForReadable(timeout); fd != -1)
     {

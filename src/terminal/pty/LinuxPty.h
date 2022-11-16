@@ -60,7 +60,7 @@ class LinuxPty: public Pty
     void close() override;
     [[nodiscard]] bool isClosed() const noexcept override;
     void wakeupReader() noexcept override;
-    [[nodiscard]] ReadResult read(crispy::BufferObject& storage,
+    [[nodiscard]] ReadResult read(crispy::BufferObject<char>& storage,
                                   std::chrono::milliseconds timeout,
                                   size_t size) override;
     int write(char const* buf, size_t size) override;

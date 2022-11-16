@@ -47,7 +47,6 @@
 #include <pwd.h>
 #include <unistd.h>
 
-using crispy::BufferObject;
 using std::make_unique;
 using std::max;
 using std::min;
@@ -388,7 +387,9 @@ optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
     return string_view { target, static_cast<size_t>(rv) };
 }
 
-Pty::ReadResult UnixPty::read(crispy::BufferObject& sink, std::chrono::milliseconds timeout, size_t size)
+Pty::ReadResult UnixPty::read(crispy::BufferObject<char>& sink,
+                              std::chrono::milliseconds timeout,
+                              size_t size)
 {
     if (int fd = waitForReadable(_masterFd, _stdoutFastPipe.reader(), _pipe[0], timeout); fd != -1)
     {

@@ -246,7 +246,7 @@ class ContourHeadlessBench: public crispy::App
         auto& ptySlave = pty.slave();
         (void) ptySlave.configure();
 
-        auto bufferObjectPool = crispy::BufferObjectPool(4 * 1024 * 1024);
+        auto bufferObjectPool = crispy::BufferObjectPool<char>(4 * 1024 * 1024);
         auto bufferObject = bufferObjectPool.allocateBufferObject();
 
         auto bytesTransferred = uint64_t { 0 };
