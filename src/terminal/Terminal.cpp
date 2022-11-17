@@ -547,9 +547,16 @@ bool Terminal::sendCharPressEvent(char32_t _value, Modifier _modifier, Timestamp
     return success;
 }
 
+bool Terminal::isMouseGrabbedByApp() const noexcept
+{
+    return allowInput() && respectMouseProtocol_ && state_.inputGenerator.mouseProtocol().has_value()
+           && !state_.inputGenerator.passiveMouseTracking();
+}
+
 bool Terminal::sendMousePressEvent(Modifier _modifier,
                                    MouseButton _button,
                                    PixelCoordinate _pixelPosition,
+                                   bool _uiHandledHint,
                                    Timestamp /*_now*/)
 {
     verifyState();
@@ -559,12 +566,12 @@ bool Terminal::sendMousePressEvent(Modifier _modifier,
 
     if (allowInput() && respectMouseProtocol_
         && state_.inputGenerator.generateMousePress(
-            _modifier, _button, currentMousePosition_, _pixelPosition))
+            _modifier, _button, currentMousePosition_, _pixelPosition, _uiHandledHint))
     {
         // TODO: Ctrl+(Left)Click's should still be catched by the terminal iff there's a hyperlink
         // under the current position
         flushInput();
-        return true;
+        return !isModeEnabled(DECMode::MousePassiveTracking);
     }
 
     return false;
@@ -633,6 +640,7 @@ void Terminal::clearSelection()
 bool Terminal::sendMouseMoveEvent(Modifier _modifier,
                                   CellLocation newPosition,
                                   PixelCoordinate _pixelPosition,
+                                  bool _uiHandledHint,
                                   Timestamp /*_now*/)
 {
     speedClicks_ = 0;
@@ -663,10 +671,12 @@ bool Terminal::sendMouseMoveEvent(Modifier _modifier,
 
     // Do not handle mouse-move events in sub-cell dimensions.
     if (allowInput() && respectMouseProtocol_
-        && state_.inputGenerator.generateMouseMove(_modifier, relativePos, _pixelPosition))
+        && state_.inputGenerator.generateMouseMove(_modifier, relativePos, _pixelPosition, _uiHandledHint || (leftMouseButtonPressed_ && !selectionAvailable())))
     {
         flushInput();
-        return true;
+
+        if (!isModeEnabled(DECMode::MousePassiveTracking))
+            return true;
     }
 
     if (leftMouseButtonPressed_ && !selectionAvailable())
@@ -696,16 +706,19 @@ bool Terminal::sendMouseMoveEvent(Modifier _modifier,
 bool Terminal::sendMouseReleaseEvent(Modifier _modifier,
                                      MouseButton _button,
                                      PixelCoordinate _pixelPosition,
+                                     bool _uiHandledHint,
                                      Timestamp /*_now*/)
 {
     verifyState();
 
     if (allowInput() && respectMouseProtocol_
         && state_.inputGenerator.generateMouseRelease(
-            _modifier, _button, currentMousePosition_, _pixelPosition))
+            _modifier, _button, currentMousePosition_, _pixelPosition, _uiHandledHint))
     {
         flushInput();
-        return true;
+
+        if (!isModeEnabled(DECMode::MousePassiveTracking))
+            return true;
     }
     respectMouseProtocol_ = true;
 
@@ -1352,6 +1365,11 @@ void Terminal::setMode(DECMode _mode, bool _enable)
             break;
         case DECMode::MouseExtended: setMouseTransport(MouseTransport::Extended); break;
         case DECMode::MouseURXVT: setMouseTransport(MouseTransport::URXVT); break;
+        case DECMode::MousePassiveTracking:
+            state_.inputGenerator.setPassiveMouseTracking(_enable);
+            setMode(DECMode::MouseSGR, _enable);                    // SGR is required.
+            setMode(DECMode::MouseProtocolButtonTracking, _enable); // ButtonTracking is default
+            break;
         case DECMode::MouseSGRPixels:
             if (_enable)
                 setMouseTransport(MouseTransport::SGRPixels);

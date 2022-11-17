@@ -542,7 +542,8 @@ bool InputGenerator::generateMouse(MouseEventType _eventType,
                                    Modifier _modifier,
                                    MouseButton _button,
                                    CellLocation _pos,
-                                   PixelCoordinate _pixelPosition)
+                                   PixelCoordinate _pixelPosition,
+                                   bool _uiHandled)
 {
     if (!mouseProtocol_.has_value())
         return false;
@@ -555,7 +556,12 @@ bool InputGenerator::generateMouse(MouseEventType _eventType,
     {
         case MouseProtocol::X10: // Old X10 mouse protocol
             if (_eventType == MouseEventType::Press)
-                mouseTransport(_eventType, buttonX10(_button), modifierBits(_modifier), _pos, _pixelPosition);
+                mouseTransport(_eventType,
+                               buttonX10(_button),
+                               modifierBits(_modifier),
+                               _pos,
+                               _pixelPosition,
+                               _uiHandled);
             return true;
         case MouseProtocol::NormalTracking: // Normal tracking mode, that's X10 with mouse release events and
                                             // modifiers
@@ -563,7 +569,7 @@ bool InputGenerator::generateMouse(MouseEventType _eventType,
             {
                 auto const button = mouseTransport_ != MouseTransport::SGR ? buttonNormal(_button, _eventType)
                                                                            : buttonX10(_button);
-                mouseTransport(_eventType, button, modifierBits(_modifier), _pos, _pixelPosition);
+                mouseTransport(_eventType, button, modifierBits(_modifier), _pos, _pixelPosition, _uiHandled);
             }
             return true;
         case MouseProtocol::ButtonTracking: // Button-event tracking protocol.
@@ -577,7 +583,8 @@ bool InputGenerator::generateMouse(MouseEventType _eventType,
                 uint8_t const draggableButton =
                     _eventType == MouseEventType::Drag ? uint8_t(button + 0x20) : button;
 
-                mouseTransport(_eventType, draggableButton, modifierBits(_modifier), _pos, _pixelPosition);
+                mouseTransport(
+                    _eventType, draggableButton, modifierBits(_modifier), _pos, _pixelPosition, _uiHandled);
                 return true;
             }
             return false;
@@ -590,7 +597,8 @@ bool InputGenerator::generateMouse(MouseEventType _eventType,
                 uint8_t const draggableButton =
                     _eventType == MouseEventType::Drag ? uint8_t(button + 0x20) : button;
 
-                mouseTransport(_eventType, draggableButton, modifierBits(_modifier), _pos, _pixelPosition);
+                mouseTransport(
+                    _eventType, draggableButton, modifierBits(_modifier), _pos, _pixelPosition, _uiHandled);
             }
             return true;
         case MouseProtocol::HighlightTracking: // Highlight mouse tracking
@@ -604,7 +612,8 @@ bool InputGenerator::mouseTransport(MouseEventType _eventType,
                                     uint8_t _button,
                                     uint8_t _modifier,
                                     CellLocation _pos,
-                                    PixelCoordinate _pixelPosition)
+                                    PixelCoordinate _pixelPosition,
+                                    bool _uiHandled)
 {
     if (_pos.line.value < 0 || _pos.column.value < 0)
         // Negative coordinates are not supported. Avoid sending bad values.
@@ -620,12 +629,13 @@ bool InputGenerator::mouseTransport(MouseEventType _eventType,
             mouseTransportExtended(_button, _modifier, _pos);
             return false;
         case MouseTransport::SGR: // mode: 1006
-            return mouseTransportSGR(_eventType, _button, _modifier, *_pos.column + 1, *_pos.line + 1);
+            return mouseTransportSGR(
+                _eventType, _button, _modifier, *_pos.column + 1, *_pos.line + 1, _uiHandled);
         case MouseTransport::URXVT: // mode: 1015
             return mouseTransportURXVT(_eventType, _button, _modifier, _pos);
         case MouseTransport::SGRPixels: // mode: 1016
             return mouseTransportSGR(
-                _eventType, _button, _modifier, _pixelPosition.x.value, _pixelPosition.y.value);
+                _eventType, _button, _modifier, _pixelPosition.x.value, _pixelPosition.y.value, _uiHandled);
     }
 
     return false;
@@ -672,7 +682,7 @@ bool InputGenerator::mouseTransportX10(uint8_t _button, uint8_t _modifier, CellL
 }
 
 bool InputGenerator::mouseTransportSGR(
-    MouseEventType _eventType, uint8_t _button, uint8_t _modifier, int x, int y)
+    MouseEventType _eventType, uint8_t _button, uint8_t _modifier, int x, int y, bool uiHandled)
 {
     append("\033[<");
     append(static_cast<unsigned>(_button | _modifier));
@@ -680,6 +690,13 @@ bool InputGenerator::mouseTransportSGR(
     append(static_cast<unsigned>(x));
     append(';');
     append(static_cast<unsigned>(y));
+
+    if (passiveMouseTracking_)
+    {
+        append(';');
+        append(uiHandled ? '1' : '0');
+    }
+
     append(_eventType != MouseEventType::Release ? 'M' : 'm');
 
     return true;
@@ -706,7 +723,8 @@ bool InputGenerator::mouseTransportURXVT(MouseEventType _eventType,
 bool InputGenerator::generateMousePress(Modifier _modifier,
                                         MouseButton _button,
                                         CellLocation _pos,
-                                        PixelCoordinate _pixelPosition)
+                                        PixelCoordinate _pixelPosition,
+                                        bool _uiHandled)
 {
     auto const logged = [=](bool success) -> bool {
         if (success)
@@ -722,6 +740,8 @@ bool InputGenerator::generateMousePress(Modifier _modifier,
     switch (mouseWheelMode())
     {
         case MouseWheelMode::NormalCursorKeys:
+            if (passiveMouseTracking_)
+                break;
             switch (_button)
             {
                 case MouseButton::WheelUp: return logged(append("\033[A"));
@@ -730,6 +750,8 @@ bool InputGenerator::generateMousePress(Modifier _modifier,
             }
             break;
         case MouseWheelMode::ApplicationCursorKeys:
+            if (passiveMouseTracking_)
+                break;
             switch (_button)
             {
                 case MouseButton::WheelUp: return logged(append("\033OA"));
@@ -744,14 +766,15 @@ bool InputGenerator::generateMousePress(Modifier _modifier,
         if (!currentlyPressedMouseButtons_.count(_button))
             currentlyPressedMouseButtons_.insert(_button);
 
-    return logged(
-        generateMouse(MouseEventType::Press, _modifier, _button, currentMousePosition_, _pixelPosition));
+    return logged(generateMouse(
+        MouseEventType::Press, _modifier, _button, currentMousePosition_, _pixelPosition, _uiHandled));
 }
 
 bool InputGenerator::generateMouseRelease(Modifier _modifier,
                                           MouseButton _button,
                                           CellLocation _pos,
-                                          PixelCoordinate _pixelPosition)
+                                          PixelCoordinate _pixelPosition,
+                                          bool _uiHandled)
 {
     auto const logged = [=](bool success) -> bool {
         if (success)
@@ -764,11 +787,14 @@ bool InputGenerator::generateMouseRelease(Modifier _modifier,
     if (auto i = currentlyPressedMouseButtons_.find(_button); i != currentlyPressedMouseButtons_.end())
         currentlyPressedMouseButtons_.erase(i);
 
-    return logged(
-        generateMouse(MouseEventType::Release, _modifier, _button, currentMousePosition_, _pixelPosition));
+    return logged(generateMouse(
+        MouseEventType::Release, _modifier, _button, currentMousePosition_, _pixelPosition, _uiHandled));
 }
 
-bool InputGenerator::generateMouseMove(Modifier _modifier, CellLocation _pos, PixelCoordinate _pixelPosition)
+bool InputGenerator::generateMouseMove(Modifier _modifier,
+                                       CellLocation _pos,
+                                       PixelCoordinate _pixelPosition,
+                                       bool _uiHandled)
 {
     auto const logged = [&](bool success) -> bool {
         if (success)
@@ -800,7 +826,8 @@ bool InputGenerator::generateMouseMove(Modifier _modifier, CellLocation _pos, Pi
             buttonsPressed ? *currentlyPressedMouseButtons_.begin() // what if multiple are pressed?
                            : MouseButton::Release,
             _pos,
-            _pixelPosition));
+            _pixelPosition,
+            _uiHandled));
 
     return false;
 }

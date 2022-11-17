@@ -288,6 +288,9 @@ class InputGenerator
     void setGenerateFocusEvents(bool _enable) noexcept { generateFocusEvents_ = _enable; }
     [[nodiscard]] bool generateFocusEvents() const noexcept { return generateFocusEvents_; }
 
+    void setPassiveMouseTracking(bool v) noexcept { passiveMouseTracking_ = v; }
+    [[nodiscard]] bool passiveMouseTracking() const noexcept { return passiveMouseTracking_; }
+
     bool generate(char32_t _characterEvent, Modifier _modifier);
     bool generate(std::u32string const& _characterEvent, Modifier _modifier);
     bool generate(Key _key, Modifier _modifier);
@@ -295,12 +298,17 @@ class InputGenerator
     bool generateMousePress(Modifier _modifier,
                             MouseButton _button,
                             CellLocation _pos,
-                            PixelCoordinate _pixelPosition);
-    bool generateMouseMove(Modifier _modifier, CellLocation _pos, PixelCoordinate _pixelPosition);
+                            PixelCoordinate _pixelPosition,
+                            bool _uiHandled);
+    bool generateMouseMove(Modifier _modifier,
+                           CellLocation _pos,
+                           PixelCoordinate _pixelPosition,
+                           bool _uiHandled);
     bool generateMouseRelease(Modifier _modifier,
                               MouseButton _button,
                               CellLocation _pos,
-                              PixelCoordinate _pixelPosition);
+                              PixelCoordinate _pixelPosition,
+                              bool _uiHandled);
 
     bool generateFocusInEvent();
     bool generateFocusOutEvent();
@@ -342,17 +350,21 @@ class InputGenerator
                        Modifier _modifier,
                        MouseButton _button,
                        CellLocation _pos,
-                       PixelCoordinate _pixelPosition);
+                       PixelCoordinate _pixelPosition,
+                       bool _uiHandled);
 
     bool mouseTransport(MouseEventType _eventType,
                         uint8_t _button,
                         uint8_t _modifier,
                         CellLocation _pos,
-                        PixelCoordinate _pixelPosition);
+                        PixelCoordinate _pixelPosition,
+                        bool _uiHandled);
+
     bool mouseTransportX10(uint8_t _button, uint8_t _modifier, CellLocation _pos);
     bool mouseTransportExtended(uint8_t _button, uint8_t _modifier, CellLocation _pos);
 
-    bool mouseTransportSGR(MouseEventType _type, uint8_t _button, uint8_t _modifier, int x, int y);
+    bool mouseTransportSGR(
+        MouseEventType _type, uint8_t _button, uint8_t _modifier, int x, int y, bool uiHandled);
 
     bool mouseTransportURXVT(MouseEventType _type, uint8_t _button, uint8_t _modifier, CellLocation _pos);
 
@@ -368,6 +380,7 @@ class InputGenerator
     bool bracketedPaste_ = false;
     bool generateFocusEvents_ = false;
     std::optional<MouseProtocol> mouseProtocol_ = std::nullopt;
+    bool passiveMouseTracking_ = false;
     MouseTransport mouseTransport_ = MouseTransport::Default;
     MouseWheelMode mouseWheelMode_ = MouseWheelMode::Default;
     Sequence pendingSequence_ {};

@@ -680,6 +680,10 @@ enum class DECMode
     // Default: Enabled (if supported by terminal).
     TextReflow = 2028,
 
+    // Tell the terminal emulator that the application is only passively tracking on mouse events.
+    // This for example might be used by the terminal emulator to still allow mouse selection.
+    MousePassiveTracking = 2029,
+
     // If enabled (default, as per spec), then the cursor is left next to the graphic,
     // that is, the text cursor is placed at the position of the sixel cursor.
     // If disabled otherwise, the cursor is placed below the image, as if CR LF was sent,
@@ -765,6 +769,7 @@ constexpr unsigned toDECModeNum(DECMode m)
         case DECMode::MouseURXVT: return 1015;
         case DECMode::MouseSGRPixels: return 1016;
         case DECMode::MouseAlternateScroll: return 1007;
+        case DECMode::MousePassiveTracking: return 2029;
         case DECMode::BatchedRendering: return 2026;
         case DECMode::Unicode: return 2027;
         case DECMode::TextReflow: return 2028;
@@ -809,6 +814,7 @@ constexpr bool isValidDECMode(unsigned int _mode) noexcept
         case DECMode::MouseURXVT:
         case DECMode::MouseSGRPixels:
         case DECMode::MouseAlternateScroll:
+        case DECMode::MousePassiveTracking:
         case DECMode::BatchedRendering:
         case DECMode::Unicode:
         case DECMode::TextReflow:

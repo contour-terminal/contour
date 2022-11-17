@@ -110,6 +110,7 @@ std::string to_string(DECMode _mode)
         case DECMode::MouseURXVT: return "MouseURXVT";
         case DECMode::MouseSGRPixels: return "MouseSGRPixels";
         case DECMode::MouseAlternateScroll: return "MouseAlternateScroll";
+        case DECMode::MousePassiveTracking: return "MousePassiveTracking";
         case DECMode::BatchedRendering: return "BatchedRendering";
         case DECMode::Unicode: return "Unicode";
         case DECMode::TextReflow: return "TextReflow";
