@@ -300,6 +300,7 @@ class Sequence
     {
         return intermediateCharacters_;
     }
+    [[nodiscard]] char leaderSymbol() const noexcept { return leaderSymbol_; }
     [[nodiscard]] char finalChar() const noexcept { return finalChar_; }
 
     template <typename T = unsigned>
