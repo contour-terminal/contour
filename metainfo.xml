@@ -114,8 +114,8 @@
           <li>Fixes normal mode's page top (S-H)/ page bottom (S-L) cursor movements to respect scroll offset.</li>
 					<li>Vi Mode search can handle line wrapping and searchText larger than line length (#869) (#870).</li>
           <li>Adds ability to highlight same words on double click via `profile.*.highlight_word_and_matches_on_double_click`.</li>
-          <li>Adds VT extension to enable passive mouse tracking via `CSI ? 2029 h` / `CSI ? 2029 l`. Passive mouse tracking enables the application to get notified on mouse events while still allowing mouse selection.</li>
-          <li>Adds VT extension to enable text selection tracking via `CSI ? 2030 h` / `CSI ? 2030 l`.</li>
+          <li>EXPERIMENTAL: Adds VT extension to enable passive mouse tracking via `CSI ? 2029 h` / `CSI ? 2029 l`. Passive mouse tracking enables the application to get notified on mouse events while still allowing mouse selection.</li>
+          <li>EXPERIMENTAL: Adds VT extension to enable text selection tracking via `CSI ? 2030 h` / `CSI ? 2030 l`.</li>
         </ul>
       </description>
     </release>
