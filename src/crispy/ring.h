@@ -67,23 +67,23 @@ class sparse_ring
 
     value_type const& operator[](offset_type i) const noexcept
     {
-        offset_type offset = size_t(offset_type(_zero + size()) + i) % size();
+        auto offset = size_t(offset_type(_zero + size()) + i) % size();
         return _storage[_indexes[offset]];
     }
     value_type& operator[](offset_type i) noexcept
     {
-        offset_type offset = size_t(offset_type(_zero + size()) + i) % size();
+        auto offset = size_t(offset_type(_zero + size()) + i) % size();
         return _storage[_indexes[offset]];
     }
 
     value_type const& at(offset_type i) const noexcept
     {
-        offset_type offset = size_t(offset_type(_zero + size()) + i) % size();
+        auto offset = size_t(offset_type(_zero + size()) + i) % size();
         return _storage[_indexes[offset]];
     }
     value_type& at(offset_type i) noexcept
     {
-        offset_type offset = size_t(offset_type(_zero + size()) + i) % size();
+        auto offset = size_t(offset_type(_zero + size()) + i) % size();
         return _storage[_indexes[offset]];
     }
 
@@ -102,22 +102,42 @@ class sparse_ring
         this->_indexes.emplace_back(_storage.size() - 1);
     }
 
+    template <typename... Args>
+    void emplace_before(offset_type i, Args&&... args)
+    {
+        auto offset = size_t(offset_type(_zero + size()) + i) % size();
+        this->_storage.emplace_back(std::forward<Args>(args)...);
+        this->_indexes.emplace(_indexes.begin() + offset, _storage.size() - 1);
+    }
+
     void insert_before(value_type const& _value, offset_type i)
     {
         _storage.push_back(_value);
-        offset_type offset_of_inserted = _storage.size() - 1;
-        _indexes.emplace(_indexes.begin() + i, offset_of_inserted);
+        auto offset_of_inserted = _storage.size() - 1;
+        auto offset = size_t(offset_type(_zero + size()) + i) % size();
+        if (i < 0)
+            offset++;
+        _indexes.emplace(_indexes.begin() + offset, offset_of_inserted);
     }
 
     void erase(offset_type i)
     {
-        _storage[_indexes[i]] = 0;
-        _indexes.erase(_indexes.begin() + i);
+        auto offset = size_t(offset_type(_zero + size()) + i) % size();
+        if (i < 0)
+            offset++;
+        _storage[_indexes[offset]] = value_type();
+        _indexes.erase(_indexes.begin() + offset);
+    }
+
+    void pop_front()
+    {
+        this->_storage[this->_indexes[0]] = value_type();
+        this->_indexes.erase(this->_indexes.begin());
     }
 
     [[nodiscard]] std::size_t zero_index() const noexcept { return _zero; }
 
-    [[nodiscard]] size_t size() const noexcept { return this->_storage.size(); }
+    [[nodiscard]] size_t size() const noexcept { return this->_indexes.size(); }
 
     // positvie count rotates right, negative count rotates left
     void rotate(int count) noexcept { _zero = size_t(offset_type(_zero + size()) - count) % size(); }
@@ -136,6 +156,17 @@ class sparse_ring
     {
         std::rotate(begin(), std::next(begin(), i.current), end()); // shift-left
         _zero = 0;
+    }
+    void reserve(size_t capacity)
+    {
+        this->_storage.reserve(capacity);
+        this->_indexes.reserve(capacity);
+    }
+    void resize(size_t newSize)
+    {
+        this->rezero();
+        this->_storage.resize(newSize);
+        this->_indexes.resize(newSize);
     }
 
     value_type& front() noexcept { return at(0); }
@@ -576,6 +607,31 @@ void basic_ring<T, Vector>::rezero(iterator i)
 {
     std::rotate(begin(), std::next(begin(), i.current), end()); // shift-left
     _zero = 0;
+}
+
+template <typename T, typename Vector>
+typename sparse_ring<T, Vector>::reverse_iterator sparse_ring<T, Vector>::rbegin() noexcept
+{
+    return reverse_iterator { this, 0 };
+}
+
+template <typename T, typename Vector>
+typename sparse_ring<T, Vector>::reverse_iterator sparse_ring<T, Vector>::rend() noexcept
+{
+    return reverse_iterator { this, size() };
+}
+
+template <typename T, typename Vector>
+typename sparse_ring<T, Vector>::const_reverse_iterator sparse_ring<T, Vector>::rbegin() const noexcept
+{
+    return const_reverse_iterator { (sparse_ring<T const, Vector>*) this, 0 };
+}
+
+template <typename T, typename Vector>
+typename sparse_ring<T, Vector>::const_reverse_iterator sparse_ring<T, Vector>::rend() const noexcept
+{
+    return const_reverse_iterator { (sparse_ring<T const, Vector>*) this,
+                                    static_cast<difference_type>(size()) };
 }
 // }}}
 

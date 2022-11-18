@@ -19,6 +19,8 @@
 
 #include <array>
 
+#include "crispy/assert.h"
+
 using crispy::fixed_size_ring;
 using crispy::ring;
 using crispy::sparse_ring;
@@ -330,11 +332,20 @@ TEST_CASE("sparse_ring.insert_before")
     REQUIRE(r[0] == 'a');
     REQUIRE(r[1] == 'b');
     REQUIRE(r[2] == 'c');
+    REQUIRE(r.size() == 3);
     r.insert_before('d', 1);
+    REQUIRE(r.size() == 4);
     REQUIRE(r[0] == 'a');
     REQUIRE(r[1] == 'd');
     REQUIRE(r[2] == 'b');
     REQUIRE(r[3] == 'c');
+    r.insert_before('e', -1); // weird
+    REQUIRE(r.size() == 5);
+    REQUIRE(r[0] == 'a');
+    REQUIRE(r[1] == 'd');
+    REQUIRE(r[2] == 'b');
+    REQUIRE(r[3] == 'c');
+    REQUIRE(r[4] == 'e');
 }
 
 TEST_CASE("sparse_sparse_ring.erase")
@@ -350,4 +361,72 @@ TEST_CASE("sparse_sparse_ring.erase")
     r.erase(1);
     REQUIRE(r[0] == 'a');
     REQUIRE(r[1] == 'c');
+    r.erase(-2); // quite weird
+    REQUIRE(r[0] == 'a');
+}
+
+TEST_CASE("sparse_sparse_ring.emplace_before")
+{
+    sparse_ring<char> r;
+    r.emplace_back('a');
+    r.emplace_back('b');
+    r.emplace_back('c');
+    // a b c -> a d bc
+    REQUIRE(r[0] == 'a');
+    REQUIRE(r[1] == 'b');
+    REQUIRE(r[2] == 'c');
+    r.emplace_before(1, 'd');
+    REQUIRE(r[0] == 'a');
+    REQUIRE(r[1] == 'd');
+    REQUIRE(r[2] == 'b');
+    REQUIRE(r[3] == 'c');
+}
+
+TEST_CASE("sparse_ring.pop_front")
+{
+    sparse_ring<char> r;
+    r.emplace_back('a');
+    r.emplace_back('b');
+    r.emplace_back('c');
+    // a b c -> a d bc
+    REQUIRE(r[0] == 'a');
+    REQUIRE(r[1] == 'b');
+    REQUIRE(r[2] == 'c');
+    REQUIRE(r.size() == 3);
+
+    r.pop_front();
+    REQUIRE(r[0] == 'b');
+    REQUIRE(r[1] == 'c');
+    REQUIRE(r.size() == 2);
+    r.pop_front();
+    REQUIRE(r[0] == 'c');
+    REQUIRE(r.size() == 1);
+}
+
+TEST_CASE("sparse_ring.emplace_instead")
+{
+    sparse_ring<char> r(3);
+    r[0] = 'a';
+    r[1] = 'b';
+    r[2] = 'c';
+
+    REQUIRE(r[0] == 'a');
+    REQUIRE(r[1] == 'b');
+    REQUIRE(r[2] == 'c');
+    REQUIRE(r.size() == 3);
+
+    std::vector<char> insert { 'g', 'h' };
+    int place { 1 };
+
+    r.erase(place);
+    for (auto& el: insert)
+    {
+        r.emplace_before(place, el);
+    }
+
+    REQUIRE(r[0] == 'a');
+    REQUIRE(r[1] == 'h');
+    REQUIRE(r[2] == 'g');
+    REQUIRE(r[3] == 'c');
+    REQUIRE(r.size() == 4);
 }
