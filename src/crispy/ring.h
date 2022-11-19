@@ -35,6 +35,7 @@ template <typename T, typename Vector = std::vector<T>>
 class sparse_ring
 {
   public:
+    using Vector_ind = std::vector<unsigned long>;
     using value_type = T;
     using iterator = RingIterator<value_type, Vector, sparse_ring<value_type, Vector>>;
     using const_iterator = RingIterator<value_type const, Vector, sparse_ring<value_type const, Vector>>;
@@ -107,7 +108,8 @@ class sparse_ring
     {
         auto offset = size_t(offset_type(_zero + size()) + i) % size();
         this->_storage.emplace_back(std::forward<Args>(args)...);
-        this->_indexes.emplace(_indexes.begin() + offset, _storage.size() - 1);
+        auto it = Vector_ind::const_iterator(_indexes.begin() + offset);
+        this->_indexes.emplace(it, _storage.size() - 1);
     }
 
     void insert_before(value_type const& _value, offset_type i)
@@ -117,7 +119,8 @@ class sparse_ring
         auto offset = size_t(offset_type(_zero + size()) + i) % size();
         if (i < 0)
             offset++;
-        _indexes.emplace(_indexes.begin() + offset, offset_of_inserted);
+        auto it = Vector_ind::const_iterator(_indexes.begin() + offset);
+        _indexes.emplace(it, offset_of_inserted);
     }
 
     void erase(offset_type i)
@@ -126,7 +129,8 @@ class sparse_ring
         if (i < 0)
             offset++;
         _storage[_indexes[offset]] = value_type();
-        _indexes.erase(_indexes.begin() + offset);
+        auto it = Vector_ind::const_iterator(_indexes.begin() + offset);
+        _indexes.erase(it);
     }
 
     void pop_front()
@@ -226,7 +230,7 @@ class sparse_ring
 
   private:
     Vector _storage;
-    std::vector<unsigned long> _indexes;
+    Vector_ind _indexes;
     std::size_t _zero = 0;
 };
 
