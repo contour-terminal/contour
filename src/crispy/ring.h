@@ -52,13 +52,13 @@ class sparse_ring
 
     sparse_ring(size_t capacity, T value): _storage(capacity, value), _indexes(capacity)
     {
-        offset_type ind { 0 };
-        std::for_each(_indexes.begin(), _indexes.end(), [&ind](offset_type& n) { n = ind++; });
+        unsigned long ind { 0 };
+        std::for_each(_indexes.begin(), _indexes.end(), [&ind](unsigned long& n) { n = ind++; });
     }
     explicit sparse_ring(size_t capacity): _storage(capacity), _indexes(capacity)
     {
-        offset_type ind { 0 };
-        std::for_each(_indexes.begin(), _indexes.end(), [&ind](offset_type& n) { n = ind++; });
+        unsigned long ind { 0 };
+        std::for_each(_indexes.begin(), _indexes.end(), [&ind](unsigned long& n) { n = ind++; });
     }
 
     ~sparse_ring() = default;
@@ -226,7 +226,7 @@ class sparse_ring
 
   private:
     Vector _storage;
-    std::vector<offset_type> _indexes;
+    std::vector<unsigned long> _indexes;
     std::size_t _zero = 0;
 };
 
