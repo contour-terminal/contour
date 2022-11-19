@@ -606,6 +606,10 @@ bool InputGenerator::mouseTransport(MouseEventType _eventType,
                                     CellLocation _pos,
                                     PixelCoordinate _pixelPosition)
 {
+    if (_pos.line.value < 0 || _pos.column.value < 0)
+        // Negative coordinates are not supported. Avoid sending bad values.
+        return true;
+
     switch (mouseTransport_)
     {
         case MouseTransport::Default: // mode: 9

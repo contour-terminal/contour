@@ -663,7 +663,7 @@ bool Terminal::sendMouseMoveEvent(Modifier _modifier,
 
     // Do not handle mouse-move events in sub-cell dimensions.
     if (allowInput() && respectMouseProtocol_
-        && state_.inputGenerator.generateMouseMove(_modifier, currentMousePosition_, _pixelPosition))
+        && state_.inputGenerator.generateMouseMove(_modifier, relativePos, _pixelPosition))
     {
         flushInput();
         return true;
