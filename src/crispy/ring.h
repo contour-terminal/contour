@@ -108,7 +108,7 @@ class sparse_ring
     {
         auto offset = size_t(offset_type(_zero + size()) + i) % size();
         this->_storage.emplace_back(std::forward<Args>(args)...);
-        auto it = Vector_ind::const_iterator(_indexes.begin() + offset);
+        auto it = Vector_ind::const_iterator(_indexes.begin() + static_cast<long>(offset));
         this->_indexes.emplace(it, _storage.size() - 1);
     }
 
@@ -119,7 +119,7 @@ class sparse_ring
         auto offset = size_t(offset_type(_zero + size()) + i) % size();
         if (i < 0)
             offset++;
-        auto it = Vector_ind::const_iterator(_indexes.begin() + offset);
+        auto it = Vector_ind::const_iterator(_indexes.begin() + static_cast<long>(offset));
         _indexes.emplace(it, offset_of_inserted);
     }
 
@@ -129,7 +129,7 @@ class sparse_ring
         if (i < 0)
             offset++;
         _storage[_indexes[offset]] = value_type();
-        auto it = Vector_ind::const_iterator(_indexes.begin() + offset);
+        auto it = Vector_ind::const_iterator(_indexes.begin() + static_cast<long>(offset));
         _indexes.erase(it);
     }
 
