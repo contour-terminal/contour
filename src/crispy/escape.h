@@ -36,7 +36,7 @@ inline std::string escape(uint8_t ch)
         case '\n': return "\\n";
         case '"': return "\\\"";
         default:
-            if (0x20 <= ch && ch < 0x80)
+            if (0x20 <= ch && ch < 0x7E)
                 return fmt::format("{}", static_cast<char>(ch));
             else
                 return fmt::format("\\x{:02x}", static_cast<uint8_t>(ch) & 0xFF);
