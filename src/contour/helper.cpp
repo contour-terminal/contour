@@ -238,6 +238,14 @@ bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
         return true;
     }
 
+    switch (key)
+    {
+        case Qt::Key_BraceLeft: _session.sendCharPressEvent(L'[', modifiers, now); return true;
+        case Qt::Key_Equal: _session.sendCharPressEvent(L'=', modifiers, now); return true;
+        case Qt::Key_BraceRight: _session.sendCharPressEvent(L']', modifiers, now); return true;
+        case Qt::Key_Backspace: _session.sendCharPressEvent(0x08, modifiers, now); return true;
+    }
+
     if (!_event->text().isEmpty())
     {
 #if defined(__APPLE__)
@@ -251,13 +259,6 @@ bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
 #endif
 
         return true;
-    }
-
-    switch (key)
-    {
-        case Qt::Key_BraceLeft: _session.sendCharPressEvent(L'[', modifiers, now); return true;
-        case Qt::Key_Equal: _session.sendCharPressEvent(L'=', modifiers, now); return true;
-        case Qt::Key_BraceRight: _session.sendCharPressEvent(L']', modifiers, now); return true;
     }
 
     InputLog()("Input not handled for mods {} key 0x{:X}", modifiers, key);
