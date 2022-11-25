@@ -1641,8 +1641,8 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
     catch (exception const& e)
     {
         errorlog()("Configuration file is corrupted. {}", e.what());
-        auto _newfileName = _fileName;
-        _newfileName.replace_filename("default_contour.yml");
+        auto newfileName = _fileName;
+        newfileName.replace_filename("default_contour.yml");
         createDefaultConfig(_newfileName);
         return loadConfigFromFile(_config, _newfileName);
     }
