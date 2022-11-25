@@ -1633,9 +1633,19 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
     _config.backingFilePath = _fileName;
     createFileIfNotExists(_config.backingFilePath);
     auto usedKeys = UsedKeys {};
-
-    YAML::Node doc = YAML::LoadFile(_fileName.string());
-
+    YAML::Node doc;
+    try
+    {
+        doc = YAML::LoadFile(_fileName.string());
+    }
+    catch (exception const& e)
+    {
+        errorlog()("Configuration file is corrupter. {}",e.what() );
+        auto _newfileName = _fileName;
+        _newfileName.replace_filename("default_contour.yml");
+        createDefaultConfig(_newfileName);
+        return loadConfigFromFile(_config,_newfileName);
+    }
     tryLoadValue(usedKeys, doc, "word_delimiters", _config.wordDelimiters);
 
     if (auto opt =
