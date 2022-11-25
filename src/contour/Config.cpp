@@ -1643,8 +1643,8 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         errorlog()("Configuration file is corrupted. {}", e.what());
         auto newfileName = _fileName;
         newfileName.replace_filename("default_contour.yml");
-        createDefaultConfig(_newfileName);
-        return loadConfigFromFile(_config, _newfileName);
+        createDefaultConfig(newfileName);
+        return loadConfigFromFile(_config, newfileName);
     }
     tryLoadValue(usedKeys, doc, "word_delimiters", _config.wordDelimiters);
 
