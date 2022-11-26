@@ -393,7 +393,6 @@ install_deps_darwin()
 
     # NB: Also available in brew: mimalloc
     brew install $SYSDEP_ASSUME_YES \
-        boost \
         cpp-gsl \
         fmt \
         fontconfig \

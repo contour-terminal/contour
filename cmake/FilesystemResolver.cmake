@@ -1,6 +1,6 @@
 option(USE_BOOST_FILESYSTEM "Compiles and links against boost::filesystem instead of std::filesystem [default: OFF]." OFF)
 
-if(${USE_BOOST_FILESYSTEM} OR APPLE)
+if(${USE_BOOST_FILESYSTEM})
     include(FindBoost)
     find_package(Boost 1.6 REQUIRED COMPONENTS filesystem)
     include_directories(${Boost_INCLUDE_DIRS})
