@@ -25,7 +25,12 @@
 namespace crispy
 {
 
-inline std::string escape(uint8_t ch)
+enum class NumericEscape {
+    Octal,
+    Hex
+};
+
+inline std::string escape(uint8_t ch, NumericEscape numericEscape = NumericEscape::Hex)
 {
     switch (ch)
     {
@@ -38,28 +43,30 @@ inline std::string escape(uint8_t ch)
         default:
             if (0x20 <= ch && ch < 0x7E)
                 return fmt::format("{}", static_cast<char>(ch));
-            else
+            else if (numericEscape == NumericEscape::Hex)
                 return fmt::format("\\x{:02x}", static_cast<uint8_t>(ch) & 0xFF);
+            else
+                return fmt::format("\\{:03o}", static_cast<uint8_t>(ch) & 0xFF);
     }
 }
 
 template <typename T>
-inline std::string escape(T begin, T end)
+inline std::string escape(T begin, T end, NumericEscape numericEscape = NumericEscape::Hex)
 {
     static_assert(sizeof(*std::declval<T>()) == 1,
                   "should be only 1 byte, such as: char, char8_t, uint8_t, byte, ...");
-    return std::accumulate(begin, end, std::string {}, [](auto const& a, auto ch) {
-        return a + escape(static_cast<uint8_t>(ch));
-    });
-    // auto result = std::string{};
-    // for (T cur = begin; cur != end; ++cur)
-    //     result += *cur;
-    // return result;
+    // return std::accumulate(begin, end, std::string {}, [](auto const& a, auto ch) {
+    //     return a + escape(static_cast<uint8_t>(ch));
+    // });
+    auto result = std::string{};
+    for (T cur = begin; cur != end; ++cur)
+        result += escape(static_cast<uint8_t>(*cur), numericEscape);
+    return result;
 }
 
-inline std::string escape(std::string_view s)
+inline std::string escape(std::string_view s, NumericEscape numericEscape = NumericEscape::Hex)
 {
-    return escape(begin(s), end(s));
+    return escape(begin(s), end(s), numericEscape);
 }
 
 inline std::string unescape(std::string_view _value)
