@@ -551,7 +551,8 @@ string StaticDatabase::terminfo() const
 
     for (auto const& cap: std::move(strings) | actions::sort)
         if (!cap.name.empty())
-            output << "    " << cap.name << "=" << crispy::escape(cap.value, crispy::NumericEscape::Octal) << ",\n";
+            output << "    " << cap.name << "=" << crispy::escape(cap.value, crispy::NumericEscape::Octal)
+                   << ",\n";
 
     return output.str();
 }
