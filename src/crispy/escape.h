@@ -25,7 +25,8 @@
 namespace crispy
 {
 
-enum class NumericEscape {
+enum class NumericEscape
+{
     Octal,
     Hex
 };
@@ -58,7 +59,7 @@ inline std::string escape(T begin, T end, NumericEscape numericEscape = NumericE
     // return std::accumulate(begin, end, std::string {}, [](auto const& a, auto ch) {
     //     return a + escape(static_cast<uint8_t>(ch));
     // });
-    auto result = std::string{};
+    auto result = std::string {};
     for (T cur = begin; cur != end; ++cur)
         result += escape(static_cast<uint8_t>(*cur), numericEscape);
     return result;
