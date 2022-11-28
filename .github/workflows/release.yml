@@ -342,7 +342,6 @@ jobs:
             CXX="g++-10" \
             CMAKE_BUILD_TYPE=RelWithDebInfo \
             EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS \
-                               -DUSE_BOOST_FILESYSTEM=ON \
                                -DCMAKE_INSTALL_PREFIX="/usr" \
                                -DCONTOUR_INSTALL_TOOLS=ON \
                                -DPEDANTIC_COMPILER=ON \
@@ -410,7 +409,6 @@ jobs:
           CMAKE_CXX_STANDARD=20
           if [[ "${{ matrix.os_version }}" = "18.04" ]]; then
             CMAKE_CXX_STANDARD=17
-            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DUSE_BOOST_FILESYSTEM=ON"
             EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_INSTALL_TOOLS=ON"
             export CXX="g++-10"
           fi

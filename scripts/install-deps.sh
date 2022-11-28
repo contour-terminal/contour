@@ -233,8 +233,7 @@ install_deps_ubuntu()
         # We cannot use [[ nor < here because that's not in /bin/sh.
         if [ "$RELEASE" = "18.04" ]; then
             # Old Ubuntu's (especially 18.04 LTS) doesn't have a proper std::filesystem implementation.
-            #packages+=libboost-all-dev
-            packages="$packages libboost-filesystem-dev g++-8"
+            packages="$packages g++-8"
         fi
     fi
 
