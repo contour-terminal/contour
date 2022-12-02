@@ -111,6 +111,7 @@
           <li>Fixes cursor movements for the vi-like cursor (normal mode).</li>
           <li>Fixes Alt+Backspace on OS/X.</li>
           <li>Fixes normal mode's page top (S-H)/ page bottom (S-L) cursor movements to respect scroll offset.</li>
+          <li>Adds ability to highlight same words on double click via `profile.*.highlight_word_and_matches_on_double_click`.</li>
         </ul>
       </description>
     </release>

@@ -110,6 +110,7 @@ class Terminal
              ColorPalette _colorPalette = {},
              double _refreshRate = 30.0,
              bool _allowReflowOnResize = true,
+             bool _visualizeSelectedWord = true,
              std::chrono::milliseconds _highlightTimeout = std::chrono::milliseconds { 150 });
     ~Terminal() = default;
 
@@ -537,6 +538,9 @@ class Terminal
 
     /// Tests whether or not some grid cells are selected.
     bool selectionAvailable() const noexcept { return !!selection_; }
+
+    bool visualizeSelectedWord() const noexcept { return visualizeSelectedWord_; }
+    void setVisualizeSelectedWord(bool enabled) noexcept { visualizeSelectedWord_ = enabled; }
     // }}}
 
     [[nodiscard]] std::string extractSelectionText() const;
@@ -648,8 +652,13 @@ class Terminal
     [[nodiscard]] std::optional<CellLocation> searchReverse(CellLocation searchPosition);
 
     // Searches from current position the next item downwards.
-    [[nodiscard]] std::optional<CellLocation> search(std::u32string text, CellLocation searchPosition);
+    [[nodiscard]] std::optional<CellLocation> search(std::u32string text,
+                                                     CellLocation searchPosition,
+                                                     bool initiatedByDoubleClick = false);
     [[nodiscard]] std::optional<CellLocation> search(CellLocation searchPosition);
+
+    bool setNewSearchTerm(std::u32string text, bool initiatedByDoubleClick);
+    void clearSearch();
 
     // Tests if the grid cell at the given location does contain a word delimiter.
     [[nodiscard]] bool wordDelimited(CellLocation position) const noexcept;
@@ -734,6 +743,7 @@ class Terminal
     std::mutex mutable innerLock_;
     Viewport viewport_;
     std::unique_ptr<Selection> selection_;
+    bool visualizeSelectedWord_ = true;
     std::atomic<bool> hoveringHyperlink_ = false;
     std::atomic<bool> renderBufferUpdateEnabled_ = true;
 

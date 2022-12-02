@@ -235,6 +235,18 @@ profiles:
             # The response can be read from stdin as sequence `OSC 314 ; <screen capture> ST`
             capture_buffer: ask
 
+        # If enabled, and you double-click on a word in the primary screen,
+        # all other words matching this word will be highlighted as well.
+        # So the double-clicked word will be selected as well as highlighted, along with
+        # all other words being simply highlighted.
+        #
+        # This is currently implemented by initiating a search on the double-clicked word.
+        # Therefore one can even use FocusNextSearchMatch and FocusPreviousSearchMatch to
+        # jump to the next/previous same word, also outside of the current viewport.
+        #
+        # Default: true
+        highlight_word_and_matches_on_double_click: true
+
         # Font related configuration (font face, styles, size, rendering mode).
         font:
             # Initial font size in pixels.

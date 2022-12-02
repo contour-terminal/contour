@@ -111,6 +111,7 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
                    ColorPalette _colorPalette,
                    double _refreshRate,
                    bool _allowReflowOnResize,
+                   bool _visualizeSelectedWord,
                    chrono::milliseconds _highlightTimeout):
     changes_ { 0 },
     eventListener_ { _eventListener },
@@ -150,6 +151,7 @@ Terminal::Terminal(unique_ptr<Pty> _pty,
                     eventListener_.onScrollOffsetChanged(viewport_.scrollOffset());
                     breakLoopAndRefreshRenderBuffer();
                 } },
+    visualizeSelectedWord_ { _visualizeSelectedWord },
     selectionHelper_ { this },
     highlightTimeout_(_highlightTimeout)
 {
@@ -580,15 +582,25 @@ bool Terminal::handleMouseSelection(Modifier _modifier, Timestamp _now)
     switch (speedClicks_)
     {
         case 1:
+            if (state_.searchMode.initiatedByDoubleClick)
+                clearSearch();
             if (_modifier == mouseBlockSelectionModifier_)
                 selection_ = make_unique<RectangularSelection>(selectionHelper_, startPos);
             else
                 selection_ = make_unique<LinearSelection>(selectionHelper_, startPos);
             break;
-        case 2:
+        case 2: {
             selection_ = make_unique<WordWiseSelection>(selectionHelper_, startPos);
             selection_->extend(startPos);
+            if (visualizeSelectedWord_)
+            {
+                auto const text = extractSelectionText();
+                auto const text32 = unicode::convert_to<char32_t>(string_view(text.data(), text.size()));
+                setNewSearchTerm(text32, true);
+                state_.searchMode.initiatedByDoubleClick = true;
+            }
             break;
+        }
         case 3:
             selection_ = make_unique<FullLineSelection>(selectionHelper_, startPos);
             selection_->extend(startPos);
@@ -1791,21 +1803,32 @@ void Terminal::setAllowInput(bool enabled)
     setMode(AnsiMode::KeyboardAction, !enabled);
 }
 
-optional<CellLocation> Terminal::searchReverse(u32string text, CellLocation searchPosition)
+bool Terminal::setNewSearchTerm(std::u32string text, bool initiatedByDoubleClick)
 {
+    state_.searchMode.initiatedByDoubleClick = initiatedByDoubleClick;
+
     if (state_.searchMode.pattern == text)
-        return searchPosition;
+        return false;
 
     state_.searchMode.pattern = std::move(text);
+    return true;
+}
+
+optional<CellLocation> Terminal::searchReverse(u32string text, CellLocation searchPosition)
+{
+    if (!setNewSearchTerm(std::move(text), false))
+        return searchPosition;
+
     return searchReverse(searchPosition);
 }
 
-optional<CellLocation> Terminal::search(std::u32string text, CellLocation searchPosition)
+optional<CellLocation> Terminal::search(std::u32string text,
+                                        CellLocation searchPosition,
+                                        bool initiatedByDoubleClick)
 {
-    if (state_.searchMode.pattern == text)
+    if (!setNewSearchTerm(std::move(text), initiatedByDoubleClick))
         return searchPosition;
 
-    state_.searchMode.pattern = std::move(text);
     return search(searchPosition);
 }
 
@@ -1819,6 +1842,12 @@ optional<CellLocation> Terminal::search(CellLocation searchPosition)
 
     screenUpdated();
     return matchLocation;
+}
+
+void Terminal::clearSearch()
+{
+    state_.searchMode.pattern.clear();
+    state_.searchMode.initiatedByDoubleClick = false;
 }
 
 bool Terminal::wordDelimited(CellLocation position) const noexcept
