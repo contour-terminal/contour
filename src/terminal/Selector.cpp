@@ -54,6 +54,7 @@ void Selection::extend(CellLocation _to)
            && "In order extend a selection, the selector must be active (started).");
     state_ = State::InProgress;
     to_ = _to;
+    onSelectionUpdated_();
 }
 
 void Selection::complete()
@@ -127,14 +128,18 @@ std::vector<Selection::Range> Selection::ranges() const
 }
 // }}}
 // {{{ LinearSelection
-LinearSelection::LinearSelection(SelectionHelper const& _helper, CellLocation _start):
-    Selection(_helper, _start)
+LinearSelection::LinearSelection(SelectionHelper const& _helper,
+                                 CellLocation _start,
+                                 OnSelectionUpdated onSelectionUpdated):
+    Selection(_helper, _start, std::move(onSelectionUpdated))
 {
 }
 // }}}
 // {{{ WordWiseSelection
-WordWiseSelection::WordWiseSelection(SelectionHelper const& _helper, CellLocation _start):
-    Selection(_helper, _start)
+WordWiseSelection::WordWiseSelection(SelectionHelper const& _helper,
+                                     CellLocation _start,
+                                     OnSelectionUpdated onSelectionUpdated):
+    Selection(_helper, _start, std::move(onSelectionUpdated))
 {
     from_ = extendSelectionBackward(from_);
     to_ = extendSelectionForward(to_);
@@ -215,8 +220,10 @@ void WordWiseSelection::extend(CellLocation _to)
 }
 // }}}
 // {{{ RectangularSelection
-RectangularSelection::RectangularSelection(SelectionHelper const& _helper, CellLocation _start):
-    Selection(_helper, _start)
+RectangularSelection::RectangularSelection(SelectionHelper const& _helper,
+                                           CellLocation _start,
+                                           OnSelectionUpdated onSelectionUpdated):
+    Selection(_helper, _start, std::move(onSelectionUpdated))
 {
 }
 
@@ -272,8 +279,10 @@ vector<Selection::Range> RectangularSelection::ranges() const
 }
 // }}}
 // {{{ FullLineSelection
-FullLineSelection::FullLineSelection(SelectionHelper const& _helper, CellLocation _start):
-    Selection(_helper, _start)
+FullLineSelection::FullLineSelection(SelectionHelper const& _helper,
+                                     CellLocation _start,
+                                     OnSelectionUpdated onSelectionUpdated):
+    Selection(_helper, _start, std::move(onSelectionUpdated))
 {
     from_.column = ColumnOffset(0);
     to_.column = boxed_cast<ColumnOffset>(helper_.pageSize().columns - 1);

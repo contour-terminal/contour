@@ -684,6 +684,10 @@ enum class DECMode
     // This for example might be used by the terminal emulator to still allow mouse selection.
     MousePassiveTracking = 2029,
 
+    // If enabled, UI text selection will be reported to the application for the regions
+    // intersecting with the main page area.
+    ReportGridCellSelection = 2030,
+
     // If enabled (default, as per spec), then the cursor is left next to the graphic,
     // that is, the text cursor is placed at the position of the sixel cursor.
     // If disabled otherwise, the cursor is placed below the image, as if CR LF was sent,
@@ -770,6 +774,7 @@ constexpr unsigned toDECModeNum(DECMode m)
         case DECMode::MouseSGRPixels: return 1016;
         case DECMode::MouseAlternateScroll: return 1007;
         case DECMode::MousePassiveTracking: return 2029;
+        case DECMode::ReportGridCellSelection: return 2030;
         case DECMode::BatchedRendering: return 2026;
         case DECMode::Unicode: return 2027;
         case DECMode::TextReflow: return 2028;
@@ -815,6 +820,7 @@ constexpr bool isValidDECMode(unsigned int _mode) noexcept
         case DECMode::MouseSGRPixels:
         case DECMode::MouseAlternateScroll:
         case DECMode::MousePassiveTracking:
+        case DECMode::ReportGridCellSelection:
         case DECMode::BatchedRendering:
         case DECMode::Unicode:
         case DECMode::TextReflow:

@@ -93,6 +93,31 @@ namespace // {{{ helpers
             RenderBufferLog()("Render buffer {} swapping failed.", _frameID);
     }
 #endif
+
+    int makeSelectionTypeId(Selection const& selection) noexcept
+    {
+        if (dynamic_cast<LinearSelection const*>(&selection))
+            return 1;
+
+        if (dynamic_cast<WordWiseSelection const*>(&selection))
+            // To the application, this is nothing more than a linear selection.
+            return 1;
+
+        if (dynamic_cast<FullLineSelection const*>(&selection))
+            return 2;
+
+        if (dynamic_cast<RectangularSelection const*>(&selection))
+            return 3;
+
+        assert(false && "Invalid code path. Should never be reached.");
+        return 0;
+    }
+
+    constexpr CellLocation raiseToMinimum(CellLocation location, LineOffset minimumLine) noexcept
+    {
+        return CellLocation { std::max(location.line, minimumLine), location.column };
+    }
+
 } // namespace
 // }}}
 
@@ -596,13 +621,16 @@ bool Terminal::handleMouseSelection(Modifier _modifier, Timestamp _now)
         case 1:
             if (state_.searchMode.initiatedByDoubleClick)
                 clearSearch();
+            clearSelection();
             if (_modifier == mouseBlockSelectionModifier_)
-                selection_ = make_unique<RectangularSelection>(selectionHelper_, startPos);
+                selection_ =
+                    make_unique<RectangularSelection>(selectionHelper_, startPos, selectionUpdatedHelper());
             else
-                selection_ = make_unique<LinearSelection>(selectionHelper_, startPos);
+                selection_ =
+                    make_unique<LinearSelection>(selectionHelper_, startPos, selectionUpdatedHelper());
             break;
         case 2: {
-            selection_ = make_unique<WordWiseSelection>(selectionHelper_, startPos);
+            selection_ = make_unique<WordWiseSelection>(selectionHelper_, startPos, selectionUpdatedHelper());
             selection_->extend(startPos);
             if (visualizeSelectedWord_)
             {
@@ -614,7 +642,7 @@ bool Terminal::handleMouseSelection(Modifier _modifier, Timestamp _now)
             break;
         }
         case 3:
-            selection_ = make_unique<FullLineSelection>(selectionHelper_, startPos);
+            selection_ = make_unique<FullLineSelection>(selectionHelper_, startPos, selectionUpdatedHelper());
             selection_->extend(startPos);
             break;
         default: clearSelection(); break;
@@ -630,9 +658,14 @@ void Terminal::clearSelection()
         // Don't clear if in visual mode.
         return;
 
+    if (!selection_)
+        return;
+
     InputLog()("Clearing selection.");
     selection_.reset();
     speedClicks_ = 0;
+
+    onSelectionUpdated();
 
     breakLoopAndRefreshRenderBuffer();
 }
@@ -671,7 +704,11 @@ bool Terminal::sendMouseMoveEvent(Modifier _modifier,
 
     // Do not handle mouse-move events in sub-cell dimensions.
     if (allowInput() && respectMouseProtocol_
-        && state_.inputGenerator.generateMouseMove(_modifier, relativePos, _pixelPosition, _uiHandledHint || (leftMouseButtonPressed_ && !selectionAvailable())))
+        && state_.inputGenerator.generateMouseMove(_modifier,
+                                                   relativePos,
+                                                   _pixelPosition,
+                                                   _uiHandledHint
+                                                       || (leftMouseButtonPressed_ && !selectionAvailable())))
     {
         flushInput();
 
@@ -682,7 +719,7 @@ bool Terminal::sendMouseMoveEvent(Modifier _modifier,
     if (leftMouseButtonPressed_ && !selectionAvailable())
     {
         changed = true;
-        setSelector(make_unique<LinearSelection>(selectionHelper_, relativePos));
+        setSelector(make_unique<LinearSelection>(selectionHelper_, relativePos, selectionUpdatedHelper()));
     }
 
     if (selectionAvailable() && selector()->state() != Selection::State::Complete
@@ -1125,14 +1162,14 @@ void Terminal::bell()
 
 void Terminal::bufferChanged(ScreenType _type)
 {
-    selection_.reset();
+    clearSelection();
     viewport_.forceScrollToBottom();
     eventListener_.bufferChanged(_type);
 }
 
 void Terminal::scrollbackBufferCleared()
 {
-    selection_.reset();
+    clearSelection();
     viewport_.scrollToBottom();
     breakLoopAndRefreshRenderBuffer();
 }
@@ -1735,7 +1772,7 @@ void Terminal::onBufferScrolled(LineCount _n) noexcept
     if (selection_->from().line > top && selection_->to().line > top)
         selection_->applyScroll(boxed_cast<LineOffset>(_n), primaryScreen_.historyLineCount());
     else
-        selection_.reset();
+        clearSelection();
 }
 // }}}
 
@@ -1932,6 +1969,33 @@ bool Terminal::isHighlighted(CellLocation _cell) const noexcept
                    }
                },
                highlightRange_.value());
+}
+
+void Terminal::onSelectionUpdated()
+{
+    if (!isModeEnabled(DECMode::ReportGridCellSelection))
+        return;
+
+    if (!selection_)
+    {
+        reply("\033[>M");
+    }
+    else
+    {
+        auto const& selection = *selection_;
+
+        auto const to = selection.to();
+        if (to.line < LineOffset(0))
+            return;
+
+        auto const from = raiseToMinimum(selection.from(), LineOffset(0));
+        reply("\033[>{};{};{};{};{}M",
+              makeSelectionTypeId(selection),
+              from.line + 1,
+              from.column + 1,
+              to.line + 1,
+              to.column + 1);
+    }
 }
 
 void Terminal::resetHighlight()

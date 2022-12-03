@@ -283,12 +283,12 @@ class Terminal
     bool sendMouseMoveEvent(Modifier _modifier,
                             CellLocation _pos,
                             PixelCoordinate _pixelPosition,
-                             bool _uiHandledHint,
+                            bool _uiHandledHint,
                             Timestamp _now);
     bool sendMouseReleaseEvent(Modifier _modifier,
                                MouseButton _button,
                                PixelCoordinate _pixelPosition,
-                             bool _uiHandledHint,
+                               bool _uiHandledHint,
                                Timestamp _now);
     bool sendFocusInEvent();
     bool sendFocusOutEvent();
@@ -636,6 +636,15 @@ class Terminal
     }
 
     [[nodiscard]] terminal::SelectionHelper& selectionHelper() noexcept { return selectionHelper_; }
+
+    [[nodiscard]] Selection::OnSelectionUpdated selectionUpdatedHelper()
+    {
+        return [this]() {
+            onSelectionUpdated();
+        };
+    }
+
+    void onSelectionUpdated();
 
     [[nodiscard]] ViInputHandler& inputHandler() noexcept { return state_.inputHandler; }
     [[nodiscard]] ViInputHandler const& inputHandler() const noexcept { return state_.inputHandler; }

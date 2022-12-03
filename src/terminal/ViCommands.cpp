@@ -136,18 +136,21 @@ void ViCommands::modeChanged(ViMode mode)
             terminal.screenUpdated();
             break;
         case ViMode::Visual:
-            terminal.setSelector(make_unique<LinearSelection>(terminal.selectionHelper(), selectFrom));
+            terminal.setSelector(make_unique<LinearSelection>(
+                terminal.selectionHelper(), selectFrom, terminal.selectionUpdatedHelper()));
             terminal.selector()->extend(cursorPosition);
             terminal.pushStatusDisplay(StatusDisplayType::Indicator);
             break;
         case ViMode::VisualLine:
-            terminal.setSelector(make_unique<FullLineSelection>(terminal.selectionHelper(), selectFrom));
+            terminal.setSelector(make_unique<FullLineSelection>(
+                terminal.selectionHelper(), selectFrom, terminal.selectionUpdatedHelper()));
             terminal.selector()->extend(cursorPosition);
             terminal.pushStatusDisplay(StatusDisplayType::Indicator);
             terminal.screenUpdated();
             break;
         case ViMode::VisualBlock:
-            terminal.setSelector(make_unique<RectangularSelection>(terminal.selectionHelper(), selectFrom));
+            terminal.setSelector(make_unique<RectangularSelection>(
+                terminal.selectionHelper(), selectFrom, terminal.selectionUpdatedHelper()));
             terminal.selector()->extend(cursorPosition);
             terminal.pushStatusDisplay(StatusDisplayType::Indicator);
             terminal.screenUpdated();
@@ -212,7 +215,8 @@ void ViCommands::executeYank(CellLocation from, CellLocation to)
     // Maybe via a event API to inform that a non-visual selection
     // has happened and that it can now either be instantly destroyed
     // or delayed (N msecs, configurable),
-    terminal.setSelector(make_unique<LinearSelection>(terminal.selectionHelper(), from));
+    terminal.setSelector(
+        make_unique<LinearSelection>(terminal.selectionHelper(), from, terminal.selectionUpdatedHelper()));
     terminal.selector()->extend(to);
     auto const text = terminal.extractSelectionText();
     terminal.copyToClipboard(text);
@@ -255,7 +259,8 @@ void ViCommands::select(TextObjectScope scope, TextObject textObject)
                textObject,
                from,
                to);
-    terminal.setSelector(make_unique<LinearSelection>(terminal.selectionHelper(), from));
+    terminal.setSelector(
+        make_unique<LinearSelection>(terminal.selectionHelper(), from, terminal.selectionUpdatedHelper()));
     terminal.selector()->extend(to);
     terminal.screenUpdated();
 }

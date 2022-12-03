@@ -551,7 +551,8 @@ void TerminalSession::sendMousePressEvent(Modifier _modifier,
 
     // First try to pass the mouse event to the application, as it might have requested that.
     auto uiHandledHint = actionHandled || selectionHandled;
-    auto const terminalHandled = terminal().sendMousePressEvent(_modifier, _button, _pixelPosition, uiHandledHint, _now);
+    auto const terminalHandled =
+        terminal().sendMousePressEvent(_modifier, _button, _pixelPosition, uiHandledHint, _now);
 
     if (uiHandledHint || terminalHandled)
         scheduleRedraw();
