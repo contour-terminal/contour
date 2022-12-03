@@ -111,6 +111,7 @@ struct Search
 {
     std::u32string pattern;
     ScrollOffset initialScrollOffset {};
+    bool initiatedByDoubleClick = false;
 };
 
 /**

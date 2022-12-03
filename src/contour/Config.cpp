@@ -1576,6 +1576,12 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     if (auto const pdeco = terminal::renderer::to_decorator(strValue); pdeco.has_value())
         profile.hyperlinkDecoration.hover = *pdeco;
 
+    tryLoadChildRelative(_usedKeys,
+                         _profile,
+                         basePath,
+                         "highlight_word_and_matches_on_double_click",
+                         profile.highlightDoubleClickedWord);
+
     if (optional<config::CursorConfig> cursorOpt =
             parseCursorConfig(_profile["cursor"], _usedKeys, basePath + ".cursor"))
     {

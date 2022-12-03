@@ -114,6 +114,7 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty, ContourGuiApp& _app):
                 profile_.colors,
                 50.0,
                 config_.reflowOnResize,
+                profile_.highlightDoubleClickedWord,
                 profile_.highlightTimeout }
 {
     if (_app.liveConfig())
@@ -757,7 +758,7 @@ bool TerminalSession::operator()(actions::NewTerminal const& _action)
 
 bool TerminalSession::operator()(actions::NoSearchHighlight)
 {
-    terminal_.state().searchMode.pattern.clear();
+    terminal_.clearSearch();
     return true;
 }
 
