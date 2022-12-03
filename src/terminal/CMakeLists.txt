@@ -37,7 +37,6 @@ set(terminal_HEADERS
     Line.h
     MatchModes.h
     MockTerm.h
-    Parser.h
     Process.h
     RenderBuffer.h
     RenderBufferBuilder.h
@@ -81,7 +80,6 @@ set(terminal_SOURCES
     Line.cpp
     MatchModes.cpp
     MockTerm.cpp
-    Parser.cpp
     Process${PLATFORM_SUFFIX}.cpp
     RenderBuffer.cpp
     RenderBufferBuilder.cpp
@@ -112,7 +110,13 @@ if(LINUX)
     set(terminal_SOURCES ${terminal_SOURCES} pty/LinuxPty.cpp)
 endif()
 
-set(LIBTERMINAL_LIBRARIES crispy::core fmt::fmt-header-only range-v3::range-v3 Threads::Threads Microsoft.GSL::GSL)
+add_library(vtparser STATIC
+    Parser.cpp
+    Parser.h
+)
+target_link_libraries(vtparser PUBLIC crispy::core fmt::fmt-header-only Microsoft.GSL::GSL)
+
+set(LIBTERMINAL_LIBRARIES vtparser crispy::core fmt::fmt-header-only range-v3::range-v3 Threads::Threads Microsoft.GSL::GSL)
 if(UNIX)
     list(APPEND LIBTERMINAL_LIBRARIES util)
     list(APPEND terminal_SOURCES pty/UnixPty.cpp)
