@@ -60,7 +60,7 @@ terminal::PageSize MockViewPty::pageSize() const noexcept
     return pageSize_;
 }
 
-void MockViewPty::resizeScreen(terminal::PageSize _cells, std::optional<terminal::ImageSize> _pixels)
+void MockViewPty::resizeScreen(terminal::PageSize _cells, std::optional<crispy::ImageSize> _pixels)
 {
     pageSize_ = _cells;
     pixelSize_ = _pixels;

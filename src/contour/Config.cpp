@@ -15,7 +15,7 @@
 
 #include <terminal/ControlCode.h>
 #include <terminal/InputGenerator.h>
-#include <terminal/Process.h>
+#include <terminal/pty/Process.h>
 
 #include <text_shaper/mock_font_locator.h>
 

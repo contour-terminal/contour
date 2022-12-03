@@ -17,9 +17,9 @@
 #include <contour/helper.h>
 
 #include <terminal/MatchModes.h>
-#include <terminal/Process.h>
 #include <terminal/Terminal.h>
 #include <terminal/ViCommands.h>
+#include <terminal/pty/Process.h>
 #include <terminal/pty/Pty.h>
 
 #include <crispy/StackTrace.h>

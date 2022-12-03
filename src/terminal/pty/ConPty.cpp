@@ -177,7 +177,7 @@ PageSize ConPty::pageSize() const noexcept
     return size_;
 }
 
-void ConPty::resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels)
+void ConPty::resizeScreen(PageSize _cells, std::optional<crispy::ImageSize> _pixels)
 {
     if (!slave_)
         return;

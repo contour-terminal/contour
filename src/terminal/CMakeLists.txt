@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.10)
 
 #project(libterminal VERSION "0.0.0" LANGUAGES CXX)
 
+add_subdirectory(pty)
+
 find_package(Threads)
 include(FilesystemResolver)
 
@@ -37,7 +39,6 @@ set(terminal_HEADERS
     Line.h
     MatchModes.h
     MockTerm.h
-    Process.h
     RenderBuffer.h
     RenderBufferBuilder.h
     Screen.h
@@ -52,19 +53,7 @@ set(terminal_HEADERS
     ViInputHandler.h
     ViCommands.h
     primitives.h
-    pty/ConPty.h
-    pty/MockPty.h
-    pty/MockViewPty.h
-    pty/Pty.h
-    pty/UnixPty.h
 )
-
-# Platform suffix can be either _win32 or _unix.
-if(WIN32)
-    set(PLATFORM_SUFFIX "_win32")
-else()
-    set(PLATFORM_SUFFIX "_unix")
-endif()
 
 set(terminal_SOURCES
     Capabilities.cpp
@@ -80,7 +69,6 @@ set(terminal_SOURCES
     Line.cpp
     MatchModes.cpp
     MockTerm.cpp
-    Process${PLATFORM_SUFFIX}.cpp
     RenderBuffer.cpp
     RenderBufferBuilder.cpp
     Screen.cpp
@@ -101,29 +89,11 @@ set(terminal_SOURCES
     pty/Pty.cpp
 )
 
-if (CMAKE_SYSTEM_NAME MATCHES "Linux")
-    set(LINUX TRUE)
-endif()
-
-if(LINUX)
-    set(terminal_HEADERS ${terminal_HEADERS} pty/LinuxPty.h)
-    set(terminal_SOURCES ${terminal_SOURCES} pty/LinuxPty.cpp)
-endif()
-
 add_library(vtparser STATIC
     Parser.cpp
     Parser.h
 )
 target_link_libraries(vtparser PUBLIC crispy::core fmt::fmt-header-only Microsoft.GSL::GSL)
-
-set(LIBTERMINAL_LIBRARIES vtparser crispy::core fmt::fmt-header-only range-v3::range-v3 Threads::Threads Microsoft.GSL::GSL)
-if(UNIX)
-    list(APPEND LIBTERMINAL_LIBRARIES util)
-    list(APPEND terminal_SOURCES pty/UnixPty.cpp)
-else()
-    list(APPEND terminal_SOURCES pty/ConPty.cpp)
-    #TODO: list(APPEND terminal_SOURCES pty/WinPty.cpp)
-endif()
 
 add_library(terminal STATIC ${terminal_SOURCES} ${terminal_HEADERS})
 target_compile_definitions(terminal PRIVATE
@@ -135,7 +105,7 @@ target_compile_definitions(terminal PRIVATE
 )
 
 target_include_directories(terminal PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
-target_link_libraries(terminal PUBLIC ${LIBTERMINAL_LIBRARIES})
+target_link_libraries(terminal PUBLIC vtparser vtpty crispy::core fmt::fmt-header-only range-v3::range-v3 Threads::Threads Microsoft.GSL::GSL)
 if(LIBTERMINAL_LOG_TRACE)
     target_compile_definitions(terminal PUBLIC LIBTERMINAL_LOG_TRACE=1)
 endif()

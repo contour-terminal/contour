@@ -13,9 +13,10 @@
  */
 #pragma once
 
-#include <terminal/primitives.h>
+#include <terminal/pty/PageSize.h>
 
 #include <crispy/BufferObject.h>
+#include <crispy/ImageSize.h>
 #include <crispy/boxed.h>
 #include <crispy/logstore.h>
 
@@ -113,10 +114,10 @@ class Pty
     [[nodiscard]] virtual PageSize pageSize() const noexcept = 0;
 
     /// Resizes underlying window buffer by given character width and height.
-    virtual void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) = 0;
+    virtual void resizeScreen(PageSize _cells, std::optional<crispy::ImageSize> _pixels = std::nullopt) = 0;
 };
 
-[[nodiscard]] std::unique_ptr<Pty> createPty(PageSize pageSize, std::optional<ImageSize> viewSize);
+[[nodiscard]] std::unique_ptr<Pty> createPty(PageSize pageSize, std::optional<crispy::ImageSize> viewSize);
 
 auto const inline PtyLog = logstore::Category("pty", "Logs general PTY informations.");
 auto const inline PtyInLog = logstore::Category("pty.input", "Logs PTY raw input.");

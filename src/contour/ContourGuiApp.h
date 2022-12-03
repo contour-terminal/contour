@@ -17,7 +17,7 @@
 #include <contour/ContourApp.h>
 #include <contour/TerminalSessionManager.h>
 
-#include <terminal/Process.h>
+#include <terminal/pty/Process.h>
 
 #include <list>
 #include <memory>
