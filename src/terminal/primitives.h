@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include <terminal/pty/PageSize.h>
+
 #include <crispy/ImageSize.h>
 #include <crispy/boxed.h>
 
@@ -34,12 +36,10 @@ namespace detail::tags // {{{
 {
     // clang-format off
     // column types
-    struct ColumnCount {};
     struct ColumnOffset {};
     struct ColumnPosition {};
 
     // line types
-    struct LineCount {};
     struct LineOffset {};
     struct ScrollOffset {};
 
@@ -64,9 +64,6 @@ namespace detail::tags // {{{
 
 // {{{ Column types
 
-/// ColumnCount simply represents a number of columns.
-using ColumnCount = crispy::boxed<int, detail::tags::ColumnCount>;
-
 /// ColumnPosition represents the absolute column on the visibile screen area
 /// (usually the main page unless scrolled upwards).
 ///
@@ -77,9 +74,6 @@ using ColumnOffset = crispy::boxed<int, detail::tags::ColumnOffset>;
 
 // }}}
 // {{{ Line types
-
-/// LineCount represents a number of lines.
-using LineCount = crispy::boxed<int, detail::tags::LineCount>;
 
 // clang-format off
 /// Special structure for inifinite history of Grid
@@ -219,6 +213,13 @@ constexpr std::pair<CellLocation, CellLocation> orderedPoints(CellLocation a, Ce
     return std::pair { topLeft, bottomRight };
 }
 
+/// Tests whether given CellLocation is within the right hand side's PageSize.
+constexpr bool operator<(CellLocation location, PageSize pageSize) noexcept
+{
+    return location.line < boxed_cast<LineOffset>(pageSize.lines)
+           && location.column < boxed_cast<ColumnOffset>(pageSize.columns);
+}
+
 struct CellLocationRange
 {
     CellLocation first;
@@ -286,41 +287,6 @@ struct Range
     // iterator end() const { return crispy::boxed_cast<iterator>(to) + iterator{1}; }
 };
 
-// }}}
-// {{{ PageSize
-struct PageSize
-{
-    LineCount lines;
-    ColumnCount columns;
-    [[nodiscard]] int area() const noexcept { return *lines * *columns; }
-};
-
-constexpr PageSize operator+(PageSize pageSize, LineCount lines) noexcept
-{
-    return PageSize { pageSize.lines + lines, pageSize.columns };
-}
-
-constexpr PageSize operator-(PageSize pageSize, LineCount lines) noexcept
-{
-    return PageSize { pageSize.lines - lines, pageSize.columns };
-}
-
-constexpr bool operator==(PageSize a, PageSize b) noexcept
-{
-    return a.lines == b.lines && a.columns == b.columns;
-}
-
-constexpr bool operator!=(PageSize a, PageSize b) noexcept
-{
-    return !(a == b);
-}
-
-/// Tests whether given CellLocation is within the right hand side's PageSize.
-constexpr bool operator<(CellLocation location, PageSize pageSize) noexcept
-{
-    return location.line < boxed_cast<LineOffset>(pageSize.lines)
-           && location.column < boxed_cast<ColumnOffset>(pageSize.columns);
-}
 // }}}
 // {{{ Rect & Margin
 
@@ -474,24 +440,8 @@ constexpr Length length(Range range) noexcept
 
 using Width = crispy::Width;
 using Height = crispy::Height;
-
 using ImageSize = crispy::ImageSize;
 
-constexpr ImageSize operator*(ImageSize a, PageSize b) noexcept
-{
-    return ImageSize { a.width * boxed_cast<Width>(b.columns), a.height * boxed_cast<Height>(b.lines) };
-}
-
-constexpr ImageSize operator/(ImageSize a, double s) noexcept
-{
-    return { Width::cast_from(unbox<double>(a.width) / s), Height::cast_from(unbox<double>(a.height) / s) };
-}
-
-constexpr ImageSize operator/(ImageSize a, PageSize s) noexcept
-{
-    return { Width::cast_from(unbox<unsigned>(a.width) / unbox<unsigned>(s.columns)),
-             Height::cast_from(unbox<unsigned>(a.height) / unbox<unsigned>(s.lines)) };
-}
 // }}}
 // {{{ Mixed boxed types operator overloads
 constexpr LineCount operator+(LineCount a, LineOffset b) noexcept

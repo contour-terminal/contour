@@ -25,7 +25,7 @@ class MockPty: public Pty
 {
   public:
     explicit MockPty(PageSize windowSize);
-    ~MockPty() override;
+    ~MockPty() override = default;
 
     PtySlave& slave() noexcept override;
     [[nodiscard]] ReadResult read(crispy::BufferObject<char>& storage,
@@ -34,7 +34,7 @@ class MockPty: public Pty
     void wakeupReader() override;
     int write(char const* buf, size_t size) override;
     [[nodiscard]] PageSize pageSize() const noexcept override;
-    void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;
+    void resizeScreen(PageSize _cells, std::optional<crispy::ImageSize> _pixels = std::nullopt) override;
 
     void start() override;
     void close() override;
@@ -62,7 +62,7 @@ class MockPty: public Pty
 
   private:
     PageSize pageSize_;
-    std::optional<ImageSize> pixelSize_;
+    std::optional<crispy::ImageSize> pixelSize_;
     std::string inputBuffer_;
     std::string outputBuffer_;
     std::size_t outputReadOffset_ = 0;

@@ -60,9 +60,9 @@ class UnixPty: public Pty
         int _slaveFd;
         explicit Slave(PtySlaveHandle fd): _slaveFd { unbox<int>(fd) } {}
         ~Slave() override;
-        PtySlaveHandle handle() const noexcept;
+        [[nodiscard]] PtySlaveHandle handle() const noexcept;
         void close() override;
-        bool isClosed() const noexcept override;
+        [[nodiscard]] bool isClosed() const noexcept override;
         bool configure() noexcept override;
         bool login() override;
         int write(std::string_view) noexcept override;
@@ -75,22 +75,22 @@ class UnixPty: public Pty
         PtySlaveHandle slave;
     };
 
-    UnixPty(PageSize _windowSize, std::optional<ImageSize> _pixels);
+    UnixPty(PageSize _windowSize, std::optional<crispy::ImageSize> _pixels);
     ~UnixPty() override;
 
     PtySlave& slave() noexcept override;
 
-    PtyMasterHandle handle() const noexcept;
+    [[nodiscard]] PtyMasterHandle handle() const noexcept;
     void start() override;
     void close() override;
-    bool isClosed() const noexcept override;
+    [[nodiscard]] bool isClosed() const noexcept override;
     void wakeupReader() noexcept override;
     [[nodiscard]] ReadResult read(crispy::BufferObject<char>& storage,
                                   std::chrono::milliseconds timeout,
                                   size_t size) override;
     int write(char const* buf, size_t size) override;
-    PageSize pageSize() const noexcept override;
-    void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;
+    [[nodiscard]] PageSize pageSize() const noexcept override;
+    void resizeScreen(PageSize _cells, std::optional<crispy::ImageSize> _pixels = std::nullopt) override;
 
     UnixPipe& stdoutFastPipe() noexcept { return _stdoutFastPipe; }
 
@@ -103,7 +103,7 @@ class UnixPty: public Pty
     std::array<int, 2> _pipe;
     UnixPipe _stdoutFastPipe;
     PageSize _pageSize;
-    std::optional<ImageSize> _pixels;
+    std::optional<crispy::ImageSize> _pixels;
     std::unique_ptr<Slave> _slave;
 };
 

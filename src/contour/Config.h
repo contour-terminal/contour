@@ -19,8 +19,8 @@
 #include <terminal/Color.h>
 #include <terminal/ColorPalette.h>
 #include <terminal/InputBinding.h>
-#include <terminal/Process.h>
 #include <terminal/Sequencer.h> // CursorDisplay
+#include <terminal/pty/Process.h>
 
 #include <terminal_renderer/Decorator.h>
 #include <terminal_renderer/FontDescriptions.h>

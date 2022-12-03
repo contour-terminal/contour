@@ -33,15 +33,15 @@ class ConPty: public Pty
 
     void start() override;
     void close() override;
-    bool isClosed() const noexcept override;
+    [[nodiscard]] bool isClosed() const noexcept override;
 
     [[nodiscard]] ReadResult read(crispy::BufferObject<char>& storage,
                                   std::chrono::milliseconds timeout,
                                   size_t size) override;
     void wakeupReader() override;
     int write(char const* buf, size_t size) override;
-    PageSize pageSize() const noexcept override;
-    void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;
+    [[nodiscard]] PageSize pageSize() const noexcept override;
+    void resizeScreen(PageSize _cells, std::optional<crispy::ImageSize> _pixels = std::nullopt) override;
 
     PtySlave& slave() noexcept override;
     HPCON master() const noexcept { return master_; }

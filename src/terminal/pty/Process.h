@@ -113,7 +113,7 @@ class [[nodiscard]] Process: public Pty
     void wakeupReader() override { return pty().wakeupReader(); }
     [[nodiscard]] int write(char const* buf, size_t size) override { return pty().write(buf, size); }
     [[nodiscard]] PageSize pageSize() const noexcept override { return pty().pageSize(); }
-    void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override { pty().resizeScreen(_cells, _pixels); }
+    void resizeScreen(PageSize _cells, std::optional<crispy::ImageSize> _pixels = std::nullopt) override { pty().resizeScreen(_cells, _pixels); }
     // clang-format on
 
   private:

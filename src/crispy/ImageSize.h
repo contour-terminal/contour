@@ -27,7 +27,10 @@ struct ImageSize
     Width width;
     Height height;
 
-    constexpr size_t area() const noexcept { return unbox<size_t>(width) * unbox<size_t>(height); }
+    [[nodiscard]] constexpr size_t area() const noexcept
+    {
+        return unbox<size_t>(width) * unbox<size_t>(height);
+    }
 };
 
 constexpr bool operator==(ImageSize a, ImageSize b) noexcept

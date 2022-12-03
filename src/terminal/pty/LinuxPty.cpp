@@ -11,8 +11,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/Process.h>
 #include <terminal/pty/LinuxPty.h>
+#include <terminal/pty/Process.h>
 #include <terminal/pty/UnixUtils.h>
 
 #include <crispy/deferred.h>
@@ -59,7 +59,7 @@ namespace terminal
 
 namespace
 {
-    LinuxPty::PtyHandles createLinuxPty(PageSize const& _windowSize, optional<ImageSize> _pixels)
+    LinuxPty::PtyHandles createLinuxPty(PageSize const& _windowSize, optional<crispy::ImageSize> _pixels)
     {
         // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
         assert(*_windowSize.lines <= numeric_limits<unsigned short>::max());
@@ -67,8 +67,8 @@ namespace
 
         winsize const ws { unbox<unsigned short>(_windowSize.lines),
                            unbox<unsigned short>(_windowSize.columns),
-                           unbox<unsigned short>(_pixels.value_or(ImageSize {}).width),
-                           unbox<unsigned short>(_pixels.value_or(ImageSize {}).height) };
+                           unbox<unsigned short>(_pixels.value_or(crispy::ImageSize {}).width),
+                           unbox<unsigned short>(_pixels.value_or(crispy::ImageSize {}).height) };
 
 #if defined(__APPLE__)
         winsize* wsa = const_cast<winsize*>(&ws);
@@ -180,7 +180,8 @@ int LinuxPty::Slave::write(std::string_view text) noexcept
 }
 // }}}
 
-LinuxPty::LinuxPty(PageSize pageSize, optional<ImageSize> pixels): _pageSize { pageSize }, _pixels { pixels }
+LinuxPty::LinuxPty(PageSize pageSize, optional<crispy::ImageSize> pixels):
+    _pageSize { pageSize }, _pixels { pixels }
 {
 }
 
@@ -394,7 +395,7 @@ PageSize LinuxPty::pageSize() const noexcept
     return _pageSize;
 }
 
-void LinuxPty::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
+void LinuxPty::resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixels)
 {
     if (_masterFd < 0)
         return;

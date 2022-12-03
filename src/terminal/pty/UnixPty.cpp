@@ -142,7 +142,7 @@ namespace
         }
     }
 
-    UnixPty::PtyHandles createUnixPty(PageSize const& _windowSize, optional<ImageSize> _pixels)
+    UnixPty::PtyHandles createUnixPty(PageSize const& _windowSize, optional<crispy::ImageSize> _pixels)
     {
         // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
         assert(*_windowSize.lines <= numeric_limits<unsigned short>::max());
@@ -150,8 +150,8 @@ namespace
 
         winsize const ws { unbox<unsigned short>(_windowSize.lines),
                            unbox<unsigned short>(_windowSize.columns),
-                           unbox<unsigned short>(_pixels.value_or(ImageSize {}).width),
-                           unbox<unsigned short>(_pixels.value_or(ImageSize {}).height) };
+                           unbox<unsigned short>(_pixels.value_or(crispy::ImageSize {}).width),
+                           unbox<unsigned short>(_pixels.value_or(crispy::ImageSize {}).height) };
 
 #if defined(__APPLE__)
         auto* wsa = const_cast<winsize*>(&ws);
@@ -291,7 +291,7 @@ int UnixPty::Slave::write(std::string_view text) noexcept
 }
 // }}}
 
-UnixPty::UnixPty(PageSize pageSize, optional<ImageSize> pixels):
+UnixPty::UnixPty(PageSize pageSize, optional<crispy::ImageSize> pixels):
     // clang-format off
     _masterFd { -1 },
     _pipe { -1, -1 },
@@ -449,7 +449,7 @@ PageSize UnixPty::pageSize() const noexcept
     return _pageSize;
 }
 
-void UnixPty::resizeScreen(PageSize cells, std::optional<ImageSize> pixels)
+void UnixPty::resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixels)
 {
     if (_masterFd < 0)
         return;

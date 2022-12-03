@@ -33,7 +33,7 @@ class MockViewPty: public Pty
     void wakeupReader() override;
     int write(char const* buf, size_t size) override;
     [[nodiscard]] PageSize pageSize() const noexcept override;
-    void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;
+    void resizeScreen(PageSize _cells, std::optional<crispy::ImageSize> _pixels = std::nullopt) override;
 
     void start() override;
     void close() override;
@@ -44,7 +44,7 @@ class MockViewPty: public Pty
 
   private:
     PageSize pageSize_;
-    std::optional<ImageSize> pixelSize_;
+    std::optional<crispy::ImageSize> pixelSize_;
     std::string inputBuffer_;
     std::string_view outputBuffer_;
     bool closed_ = false;

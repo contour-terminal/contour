@@ -50,7 +50,7 @@ class LinuxPty: public Pty
         PtySlaveHandle slave;
     };
 
-    LinuxPty(PageSize _windowSize, std::optional<ImageSize> _pixels);
+    LinuxPty(PageSize _windowSize, std::optional<crispy::ImageSize> _pixels);
     ~LinuxPty() override;
 
     PtySlave& slave() noexcept override;
@@ -65,7 +65,7 @@ class LinuxPty: public Pty
                                   size_t size) override;
     int write(char const* buf, size_t size) override;
     [[nodiscard]] PageSize pageSize() const noexcept override;
-    void resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels = std::nullopt) override;
+    void resizeScreen(PageSize _cells, std::optional<crispy::ImageSize> _pixels = std::nullopt) override;
 
     UnixPipe& stdoutFastPipe() noexcept { return _stdoutFastPipe; }
 
@@ -78,7 +78,7 @@ class LinuxPty: public Pty
     int _eventFd = -1;
     UnixPipe _stdoutFastPipe;
     PageSize _pageSize;
-    std::optional<ImageSize> _pixels;
+    std::optional<crispy::ImageSize> _pixels;
     std::unique_ptr<Slave> _slave;
 };
 

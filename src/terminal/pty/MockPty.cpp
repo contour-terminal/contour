@@ -14,10 +14,6 @@ MockPty::MockPty(PageSize _size): pageSize_ { _size }
 {
 }
 
-MockPty::~MockPty()
-{
-}
-
 PtySlave& MockPty::slave() noexcept
 {
     return slave_;
@@ -51,7 +47,7 @@ PageSize MockPty::pageSize() const noexcept
     return pageSize_;
 }
 
-void MockPty::resizeScreen(PageSize _cells, std::optional<ImageSize> _pixels)
+void MockPty::resizeScreen(PageSize _cells, std::optional<crispy::ImageSize> _pixels)
 {
     pageSize_ = _cells;
     pixelSize_ = _pixels;
