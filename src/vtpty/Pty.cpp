@@ -11,14 +11,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/pty/Pty.h>
+#include <vtpty/Pty.h>
 
 #if defined(__linux__)
-    #include <terminal/pty/LinuxPty.h>
+    #include <vtpty/LinuxPty.h>
 #elif defined(_MSC_VER)
-    #include <terminal/pty/ConPty.h>
+    #include <vtpty/ConPty.h>
 #else
-    #include <terminal/pty/UnixPty.h>
+    #include <vtpty/UnixPty.h>
 #endif
 
 using std::make_unique;

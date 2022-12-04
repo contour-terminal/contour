@@ -16,7 +16,8 @@
 #include <terminal/Terminal.h>
 #include <terminal/cell/CellConfig.h>
 #include <terminal/logging.h>
-#include <terminal/pty/MockViewPty.h>
+
+#include <vtpty/MockViewPty.h>
 
 #include <crispy/App.h>
 #include <crispy/CLI.h>

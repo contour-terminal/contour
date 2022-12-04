@@ -1085,14 +1085,15 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
         };
 
     // TODO: just check notcurses-info to get an idea what may be missing
+    // clang-format off
     switch (codepoint)
     {
-            // TODO: case 0x239B: // ⎛ LEFT PARENTHESIS UPPER HOOK
-            // TODO: case 0x239C: // ⎜ LEFT PARENTHESIS EXTENSION
-            // TODO: case 0x239D: // ⎝ LEFT PARENTHESIS LOWER HOOK
-            // TODO: case 0x239E: // ⎞ RIGHT PARENTHESIS UPPER HOOK
-            // TODO: case 0x239F: // ⎟ RIGHT PARENTHESIS EXTENSION
-            // TODO: case 0x23A0: // ⎠ RIGHT PARENTHESIS LOWER HOOK
+        // TODO: case 0x239B: // ⎛ LEFT PARENTHESIS UPPER HOOK
+        // TODO: case 0x239C: // ⎜ LEFT PARENTHESIS EXTENSION
+        // TODO: case 0x239D: // ⎝ LEFT PARENTHESIS LOWER HOOK
+        // TODO: case 0x239E: // ⎞ RIGHT PARENTHESIS UPPER HOOK
+        // TODO: case 0x239F: // ⎟ RIGHT PARENTHESIS EXTENSION
+        // TODO: case 0x23A0: // ⎠ RIGHT PARENTHESIS LOWER HOOK
 
         case 0x23A1: // ⎡ LEFT SQUARE BRACKET UPPER CORNER
             return blockElement(size) | (left(1 / 8_th) + upper(1 / 8_th) * left(1 / 2_th));
@@ -1324,8 +1325,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
         case 0x1FB38: return blockSextant(size, 1, 2, 4, 5, 6); // 🬸  BLOCK SEXTANT-12456
         case 0x1FB39: return blockSextant(size, 3, 4, 5, 6);    // 🬹  BLOCK SEXTANT-3456
         case 0x1FB3A: return blockSextant(size, 1, 3, 4, 5, 6); // 🬺  BLOCK SEXTANT-13456
-        case 0x1FB3B:
-            return blockSextant(size, 2, 3, 4, 5, 6); // 🬻  BLOCK SEXTANT-23456
+        case 0x1FB3B: return blockSextant(size, 2, 3, 4, 5, 6); // 🬻  BLOCK SEXTANT-23456
         // }}}
         // {{{ 1FB3C..1FBAF diagonals, nth, block elements
         case 0x1FB3C: return /* 🬼  */ ld({ 0, 3 / 4_th }, { 1 / 4_th, 1 });
@@ -1386,18 +1386,12 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
         case 0x1FB73: return blockElement(size) | vert_nth(1 / 8_th, 5); // 🭳  VERTICAL ONE EIGHTH BLOCK-5
         case 0x1FB74: return blockElement(size) | vert_nth(1 / 8_th, 6); // 🭴  VERTICAL ONE EIGHTH BLOCK-6
         case 0x1FB75: return blockElement(size) | vert_nth(1 / 8_th, 7); // 🭵  VERTICAL ONE EIGHTH BLOCK-7
-        case 0x1FB76:
-            return blockElement(size) | horiz_nth(1 / 8_th, 2); // 🭶  HORIZONTAL ONE EIGHTH BLOCK-2
-        case 0x1FB77:
-            return blockElement(size) | horiz_nth(1 / 8_th, 3); // 🭷  HORIZONTAL ONE EIGHTH BLOCK-3
-        case 0x1FB78:
-            return blockElement(size) | horiz_nth(1 / 8_th, 4); // 🭸  HORIZONTAL ONE EIGHTH BLOCK-4
-        case 0x1FB79:
-            return blockElement(size) | horiz_nth(1 / 8_th, 5); // 🭹  HORIZONTAL ONE EIGHTH BLOCK-5
-        case 0x1FB7A:
-            return blockElement(size) | horiz_nth(1 / 8_th, 6); // 🭺  HORIZONTAL ONE EIGHTH BLOCK-6
-        case 0x1FB7B:
-            return blockElement(size) | horiz_nth(1 / 8_th, 7); // 🭻  HORIZONTAL ONE EIGHTH BLOCK-7
+        case 0x1FB76: return blockElement(size) | horiz_nth(1 / 8_th, 2); // 🭶  HORIZONTAL ONE EIGHTH BLOCK-2
+        case 0x1FB77: return blockElement(size) | horiz_nth(1 / 8_th, 3); // 🭷  HORIZONTAL ONE EIGHTH BLOCK-3
+        case 0x1FB78: return blockElement(size) | horiz_nth(1 / 8_th, 4); // 🭸  HORIZONTAL ONE EIGHTH BLOCK-4
+        case 0x1FB79: return blockElement(size) | horiz_nth(1 / 8_th, 5); // 🭹  HORIZONTAL ONE EIGHTH BLOCK-5
+        case 0x1FB7A: return blockElement(size) | horiz_nth(1 / 8_th, 6); // 🭺  HORIZONTAL ONE EIGHTH BLOCK-6
+        case 0x1FB7B: return blockElement(size) | horiz_nth(1 / 8_th, 7); // 🭻  HORIZONTAL ONE EIGHTH BLOCK-7
         case 0x1FB7C:
             return blockElement(size)
                    | (left(1 / 8_th) + lower(1 / 8_th)); // 🭼  LEFT AND LOWER ONE EIGHTH BLOCK
@@ -1524,9 +1518,8 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
         case 0x1FBF6: return segmentArt().segment_bar(1, 3, 4, 5, 6, 7);
         case 0x1FBF7: return segmentArt().segment_bar(1, 2, 5);
         case 0x1FBF8: return segmentArt().segment_bar(1, 2, 3, 4, 5, 6, 7);
-        case 0x1FBF9:
-            return segmentArt().segment_bar(1, 2, 3, 4, 5, 6);
-            // }}}
+        case 0x1FBF9: return segmentArt().segment_bar(1, 2, 3, 4, 5, 6);
+        // }}}
 
         case 0xE0B0: return /*  */ triangle<Dir::Left, Inverted::No, 1>(size);
         case 0xE0B2: return /*  */ triangle<Dir::Right, Inverted::No, 1>(size);
@@ -1544,6 +1537,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
         case 0xEE04: return progressBar().middle().filled();
         case 0xEE05: return progressBar().right().filled();
     }
+    // clang-format off
 
     return nullopt;
 }

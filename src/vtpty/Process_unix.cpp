@@ -11,12 +11,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/pty/Process.h>
-#include <terminal/pty/Pty.h>
-#include <terminal/pty/UnixPty.h>
+#include <vtpty/Process.h>
+#include <vtpty/Pty.h>
+#include <vtpty/UnixPty.h>
 
 #if defined(__linux__)
-    #include <terminal/pty/LinuxPty.h>
+    #include <vtpty/LinuxPty.h>
 #endif
 
 #include <crispy/overloaded.h>

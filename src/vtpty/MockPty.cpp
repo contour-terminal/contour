@@ -1,4 +1,4 @@
-#include <terminal/pty/MockPty.h>
+#include <vtpty/MockPty.h>
 
 using namespace std::chrono;
 using std::min;

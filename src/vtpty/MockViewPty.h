@@ -14,7 +14,7 @@
 
 #pragma once
 
-#include <terminal/pty/Pty.h>
+#include <vtpty/Pty.h>
 
 namespace terminal
 {

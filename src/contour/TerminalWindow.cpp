@@ -24,15 +24,8 @@
 #include <contour/display/TerminalWidget.h>
 
 #include <terminal/Metrics.h>
-#include <terminal/pty/Pty.h>
 
-#include <qnamespace.h>
-
-#if defined(_MSC_VER)
-    #include <terminal/pty/ConPty.h>
-#else
-    #include <terminal/pty/UnixPty.h>
-#endif
+#include <vtpty/Pty.h>
 
 #include <QtCore/QDebug>
 #include <QtGui/QGuiApplication>
@@ -44,6 +37,8 @@
 #include <cstring>
 #include <fstream>
 #include <stdexcept>
+
+#include <qnamespace.h>
 
 using namespace std;
 using namespace std::placeholders;

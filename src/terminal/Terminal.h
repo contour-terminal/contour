@@ -25,7 +25,8 @@
 #include <terminal/cell/CellConcept.h>
 #include <terminal/cell/CellConfig.h>
 #include <terminal/primitives.h>
-#include <terminal/pty/Pty.h>
+
+#include <vtpty/Pty.h>
 
 #include <crispy/defines.h>
 

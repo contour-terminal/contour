@@ -71,35 +71,37 @@ IncludeCategories:
     Priority:  0
   - Regex:     '^<(terminal)/'
     Priority:  1
-  - Regex:     '^<(terminal_renderer)/'
+  - Regex:     '^<(vtpty)/'
     Priority:  2
-  - Regex:     '^<(text_shaper)/'
-    Priority:  3
-  - Regex:     '^<(crispy)/'
+  - Regex:     '^<(terminal_renderer)/'
     Priority:  4
-  - Regex:     '^<(unicode)/'
+  - Regex:     '^<(text_shaper)/'
     Priority:  5
-  - Regex:     '^<(fmt)/'
+  - Regex:     '^<(crispy)/'
     Priority:  6
-  - Regex:     '^<(yaml-cpp)/'
-    Priority:  7
-  - Regex:     '^<(range)/'
-    Priority:  8
-  - Regex:     '^<gsl/'
-    Priority:  9
-  - Regex:     '^<fontconfig/'
-    Priority:  10
-  - Regex:     '^<harfbuzz/'
-    Priority:  11
-  - Regex:     '^<(QtCore|QtGui|QtWidgets|QtQml|QtQuick|QtNetwork|QtMultimedia)/'
-    Priority:  12
-  - Regex:     '^<catch2/'
-    Priority:  20
-  - Regex:     '^<sys/'
-    Priority:  30
-  - Regex:     '^<[[:alnum:]_]+>'
-    Priority:  41
-  - Regex:     '<[[:alnum:]_]+\.h>'
+  - Regex:     '^<(unicode)/'
+    Priority:  40
+  - Regex:     '^<(fmt)/'
     Priority:  42
+  - Regex:     '^<(yaml-cpp)/'
+    Priority:  44
+  - Regex:     '^<(range)/'
+    Priority:  46
+  - Regex:     '^<gsl/'
+    Priority:  48
+  - Regex:     '^<fontconfig/'
+    Priority:  52
+  - Regex:     '^<harfbuzz/'
+    Priority:  53
+  - Regex:     '^<(QtCore|QtGui|QtWidgets|QtQml|QtQuick|QtNetwork|QtMultimedia)/'
+    Priority:  64
+  - Regex:     '^<catch2/'
+    Priority:  70
+  - Regex:     '^<sys/'
+    Priority:  80
+  - Regex:     '^<[[:alnum:]_]+>'
+    Priority:  81
+  - Regex:     '<[[:alnum:]_]+\.h>'
+    Priority:  82
   - Regex:     '.*'
     Priority:  99
