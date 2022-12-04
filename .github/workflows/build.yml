@@ -203,6 +203,7 @@ jobs:
             cmake -DCMAKE_BUILD_TYPE=Debug -S . -B build
             cmake --build build/ -j2
             ./build/src/crispy/crispy_test
+            ./build/src/vtparser/vtparser_test
             ./build/src/terminal/terminal_test
             rm -rf _deps build
 
@@ -239,6 +240,8 @@ jobs:
         run: cmake --build build/
       - name: "test: libcrispy"
         run: ./build/src/crispy/crispy_test
+      - name: "test: vtparser"
+        run: ./build/src/vtparser/vtparser_test
       - name: "test: libterminal"
         run: ./build/src/terminal/terminal_test
       - name: "Create Package(s)"
@@ -291,6 +294,8 @@ jobs:
         run: cmake --build build/
       - name: "test: libcrispy"
         run: ./build/src/crispy/crispy_test
+      - name: "test: vtparser"
+        run: ./build/src/vtparser/vtparser_test
       - name: "test: libterminal"
         run: ./build/src/terminal/terminal_test
 
@@ -331,8 +336,10 @@ jobs:
         run: cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -B build .
       - name: "Build"
         run: cmake --build build/ --config Release
-      - name: "test: libcrispy"
+      - name: "test: crispy"
         run: .\build\src\crispy\Release\crispy_test.exe
+      - name: "test: vtparser"
+        run: .\build\src\vtparser\Release\vtparser_test.exe
       - name: "test: libterminal"
         run: .\build\src\terminal\Release\terminal_test.exe
       - name: "Create Package(s)"
@@ -439,6 +446,8 @@ jobs:
         run: cmake --build build/ -- -j3
       - name: "test: crispy"
         run: ./build/src/crispy/crispy_test
+      - name: "test: vtparser"
+        run: ./build/src/vtparser/vtparser_test
       - name: "test: libterminal"
         run: ./build/src/terminal/terminal_test
       - name: "Upload unit tests"
@@ -448,6 +457,7 @@ jobs:
           name: contour-ubuntu2204-tests
           path: |
             build/src/crispy/crispy_test
+            build/src/vtparser/vtparser_test
             build/src/terminal/terminal_test
             build/src/terminal/bench-headless
             test/images
@@ -508,6 +518,8 @@ jobs:
         run: cmake --build build/ -- -j3
       - name: "test: crispy"
         run: ./build/src/crispy/crispy_test
+      - name: "test: vtparser"
+        run: ./build/src/vtparser/vtparser_test
       - name: "test: libterminal"
         run: ./build/src/terminal/terminal_test
       - name: "linuxdeploy: Creating AppImage"
@@ -593,6 +605,8 @@ jobs:
         run: cmake --build build/ -- -j3
       - name: "test: crispy"
         run: ./build/src/crispy/crispy_test
+      - name: "test: vtparser"
+        run: ./build/src/vtparser/vtparser_test
       - name: "test: libterminal"
         run: ./build/src/terminal/terminal_test
       - name: "CPack: Creating DEB package"
@@ -655,6 +669,8 @@ jobs:
                           valgrind
       - name: "test: crispy (via valgrind)"
         run: valgrind --error-exitcode=64 ./build/src/crispy/crispy_test
+      - name: "test: vtparser (via valgrind)"
+        run: valgrind --error-exitcode=64 ./build/src/vtparser/vtparser_test
       - name: "test: libterminal (via valgrind)"
         run: valgrind --error-exitcode=64 ./build/src/terminal/terminal_test
       - name: "Delete artifact: contour-ubuntu2204-tests"

@@ -71,8 +71,10 @@ IncludeCategories:
     Priority:  0
   - Regex:     '^<(terminal)/'
     Priority:  1
-  - Regex:     '^<(vtpty)/'
+  - Regex:     '^<(vtparser)/'
     Priority:  2
+  - Regex:     '^<(vtpty)/'
+    Priority:  3
   - Regex:     '^<(terminal_renderer)/'
     Priority:  4
   - Regex:     '^<(text_shaper)/'

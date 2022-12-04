@@ -11,8 +11,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/Parser.h>
-#include <terminal/ParserEvents.h>
+#include <vtparser/Parser.h>
+#include <vtparser/ParserEvents.h>
 
 #include <unicode/convert.h>
 

@@ -80,12 +80,6 @@ set(terminal_SOURCES
     primitives.cpp
 )
 
-add_library(vtparser STATIC
-    Parser.cpp
-    Parser.h
-)
-target_link_libraries(vtparser PUBLIC crispy::core fmt::fmt-header-only Microsoft.GSL::GSL)
-
 add_library(terminal STATIC ${terminal_SOURCES} ${terminal_HEADERS})
 target_compile_definitions(terminal PRIVATE
     LIBTERMINAL_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
@@ -123,7 +117,6 @@ if(LIBTERMINAL_TESTING)
         Functions_test.cpp
         Grid_test.cpp
         Line_test.cpp
-        Parser_test.cpp
         Screen_test.cpp
         Sequence_test.cpp
         Terminal_test.cpp

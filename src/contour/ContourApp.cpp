@@ -17,7 +17,8 @@
 
 #include <terminal/Capabilities.h>
 #include <terminal/Functions.h>
-#include <terminal/Parser.h>
+
+#include <vtparser/Parser.h>
 
 #include <crispy/App.h>
 #include <crispy/StackTrace.h>
@@ -25,8 +26,6 @@
 
 #include <fmt/chrono.h>
 #include <fmt/format.h>
-
-#include <range/v3/view/filter.hpp>
 
 #include <QtCore/QFile>
 
@@ -207,11 +206,11 @@ int ContourApp::infoVT()
         fmt::print("{}\n", headline);
         fmt::print("{}\n\n", string(headline.size(), '='));
 
-        for (auto const& fn:
-             terminal::functions() | ranges::views::filter([category = category](auto const& f) {
-                 return f.category == category;
-             }))
+        for (auto const& fn: terminal::functions())
         {
+            if (fn.category != category)
+                continue;
+
             auto const level = fn.extension == VTExtension::None ? fmt::format("{}", fn.conformanceLevel)
                                                                  : fmt::format("{}", fn.extension);
 

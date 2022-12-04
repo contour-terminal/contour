@@ -14,8 +14,9 @@
 #pragma once
 
 #include <terminal/Color.h>
-#include <terminal/ParserExtension.h>
 #include <terminal/primitives.h>
+
+#include <vtparser/ParserExtension.h>
 
 #include <crispy/range.h>
 

@@ -12,7 +12,6 @@
  * limitations under the License.
  */
 #include <terminal/Grid.h>
-#include <terminal/Parser.h>
 #include <terminal/cell/CellConfig.h>
 #include <terminal/primitives.h>
 

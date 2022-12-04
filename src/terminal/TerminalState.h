@@ -20,13 +20,14 @@
 #include <terminal/Hyperlink.h>
 #include <terminal/InputGenerator.h>
 #include <terminal/InputHandler.h>
-#include <terminal/Parser.h>
 #include <terminal/ScreenEvents.h> // ScreenType
 #include <terminal/Sequencer.h>
 #include <terminal/ViCommands.h>
 #include <terminal/ViInputHandler.h>
 #include <terminal/cell/CellConfig.h>
 #include <terminal/primitives.h>
+
+#include <vtparser/Parser.h>
 
 #include <unicode/utf8.h>
 
