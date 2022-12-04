@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <terminal/pty/PageSize.h>
+#include <vtpty/PageSize.h>
 
 #include <crispy/ImageSize.h>
 #include <crispy/boxed.h>

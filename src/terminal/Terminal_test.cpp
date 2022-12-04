@@ -12,7 +12,8 @@
  * limitations under the License.
  */
 #include <terminal/Terminal.h>
-#include <terminal/pty/MockPty.h>
+
+#include <vtpty/MockPty.h>
 
 #include <crispy/App.h>
 #include <crispy/times.h>

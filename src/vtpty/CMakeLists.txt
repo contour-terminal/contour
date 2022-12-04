@@ -9,7 +9,6 @@ else()
     set(PLATFORM_SUFFIX "_unix")
 endif()
 
-
 set(vtpty_LIBRARIES crispy::core fmt::fmt-header-only Microsoft.GSL::GSL)
 
 set(vtpty_SOURCES

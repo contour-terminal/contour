@@ -16,7 +16,7 @@
 #include <contour/TerminalWindow.h>
 #include <contour/display/TerminalWidget.h>
 
-#include <terminal/pty/Process.h>
+#include <vtpty/Process.h>
 
 #include <text_shaper/font_locator.h>
 

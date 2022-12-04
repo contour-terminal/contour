@@ -13,28 +13,21 @@
  */
 #pragma once
 
-#include <terminal/pty/Pty.h>
+#include <vtpty/Pty.h>
 
-#include <memory>
-#include <mutex>
-#include <vector>
-
-#include <Windows.h>
+#include <string>
 
 namespace terminal
 {
 
-/// ConPty implementation for newer Windows 10 versions.
-class ConPty: public Pty
+/// Mock-PTY, to be used in unit tests.
+class MockPty: public Pty
 {
   public:
-    explicit ConPty(PageSize const& windowSize);
-    ~ConPty() override;
+    explicit MockPty(PageSize windowSize);
+    ~MockPty() override = default;
 
-    void start() override;
-    void close() override;
-    [[nodiscard]] bool isClosed() const noexcept override;
-
+    PtySlave& slave() noexcept override;
     [[nodiscard]] ReadResult read(crispy::BufferObject<char>& storage,
                                   std::chrono::milliseconds timeout,
                                   size_t size) override;
@@ -43,17 +36,38 @@ class ConPty: public Pty
     [[nodiscard]] PageSize pageSize() const noexcept override;
     void resizeScreen(PageSize _cells, std::optional<crispy::ImageSize> _pixels = std::nullopt) override;
 
-    PtySlave& slave() noexcept override;
-    HPCON master() const noexcept { return master_; }
+    void start() override;
+    void close() override;
+    [[nodiscard]] bool isClosed() const noexcept override;
+
+    std::string& stdinBuffer() noexcept { return inputBuffer_; }
+
+    [[nodiscard]] bool isStdoutDataAvailable() const noexcept
+    {
+        return outputReadOffset_ < outputBuffer_.size();
+    }
+
+    void appendStdOutBuffer(std::string_view _that)
+    {
+        if (outputReadOffset_ == outputBuffer_.size())
+        {
+            outputReadOffset_ = 0;
+            outputBuffer_ = _that;
+        }
+        else
+        {
+            outputBuffer_ += _that;
+        }
+    }
 
   private:
-    std::mutex mutex_; // used to guard close()
-    PageSize size_;
-    HPCON master_;
-    HANDLE input_;
-    HANDLE output_;
-    std::vector<char> buffer_;
-    std::unique_ptr<PtySlave> slave_;
+    PageSize pageSize_;
+    std::optional<crispy::ImageSize> pixelSize_;
+    std::string inputBuffer_;
+    std::string outputBuffer_;
+    std::size_t outputReadOffset_ = 0;
+    bool closed_ = false;
+    PtySlaveDummy slave_;
 };
 
 } // namespace terminal

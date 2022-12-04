@@ -20,7 +20,8 @@
 
 #include <terminal/Color.h>
 #include <terminal/Metrics.h>
-#include <terminal/pty/Pty.h>
+
+#include <vtpty/Pty.h>
 
 #include <crispy/App.h>
 #include <crispy/logstore.h>

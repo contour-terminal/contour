@@ -12,7 +12,7 @@
  * limitations under the License.
  */
 
-#include <terminal/pty/MockViewPty.h>
+#include <vtpty/MockViewPty.h>
 
 using std::min;
 using std::optional;

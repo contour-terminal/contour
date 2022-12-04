@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <terminal/pty/Pty.h>
+#include <vtpty/Pty.h>
 
 #include <crispy/overloaded.h>
 #include <crispy/stdfs.h>

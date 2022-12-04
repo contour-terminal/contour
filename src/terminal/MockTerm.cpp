@@ -14,7 +14,8 @@
 
 #include <terminal/MockTerm.h>
 #include <terminal/Screen.h>
-#include <terminal/pty/MockPty.h>
+
+#include <vtpty/MockPty.h>
 
 #include <crispy/App.h>
 

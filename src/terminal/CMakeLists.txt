@@ -2,8 +2,6 @@ cmake_minimum_required(VERSION 3.10)
 
 #project(libterminal VERSION "0.0.0" LANGUAGES CXX)
 
-add_subdirectory(pty)
-
 find_package(Threads)
 include(FilesystemResolver)
 
@@ -84,9 +82,6 @@ set(terminal_SOURCES
     ViInputHandler.cpp
     ViCommands.cpp
     primitives.cpp
-    pty/MockPty.cpp
-    pty/MockViewPty.cpp
-    pty/Pty.cpp
 )
 
 add_library(vtparser STATIC

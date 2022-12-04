@@ -14,7 +14,8 @@
 #pragma once
 
 #include <terminal/Terminal.h>
-#include <terminal/pty/MockPty.h>
+
+#include <vtpty/MockPty.h>
 
 #include <unicode/convert.h>
 

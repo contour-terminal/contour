@@ -13,20 +13,45 @@
  */
 #pragma once
 
-#include <terminal/pty/Pty.h>
-#include <terminal/pty/UnixPty.h> // UnixPipe (TODO: move somewhere else)
+#include <vtpty/Pty.h>
 
 #include <array>
 #include <memory>
 #include <optional>
 #include <vector>
 
-#include <pty.h>
+#if defined(__APPLE__)
+    #include <util.h>
+#elif defined(__linux__)
+    #include <pty.h>
+#endif
 
 namespace terminal
 {
 
-class LinuxPty: public Pty
+struct UnixPipe
+{
+    int pfd[2];
+
+    UnixPipe();
+    UnixPipe(UnixPipe&&) noexcept;
+    UnixPipe& operator=(UnixPipe&&) noexcept;
+    UnixPipe(UnixPipe const&) = delete;
+    UnixPipe& operator=(UnixPipe const&) = delete;
+    ~UnixPipe();
+
+    [[nodiscard]] bool good() const noexcept { return pfd[0] != -1 && pfd[1] != -1; }
+
+    [[nodiscard]] int reader() noexcept { return pfd[0]; }
+    [[nodiscard]] int writer() noexcept { return pfd[1]; }
+
+    void closeReader() noexcept;
+    void closeWriter() noexcept;
+
+    void close();
+};
+
+class UnixPty: public Pty
 {
   private:
     class Slave: public PtySlave
@@ -38,9 +63,9 @@ class LinuxPty: public Pty
         [[nodiscard]] PtySlaveHandle handle() const noexcept;
         void close() override;
         [[nodiscard]] bool isClosed() const noexcept override;
-        [[nodiscard]] bool configure() noexcept override;
-        [[nodiscard]] bool login() override;
-        [[nodiscard]] int write(std::string_view) noexcept override;
+        bool configure() noexcept override;
+        bool login() override;
+        int write(std::string_view) noexcept override;
     };
 
   public:
@@ -50,8 +75,8 @@ class LinuxPty: public Pty
         PtySlaveHandle slave;
     };
 
-    LinuxPty(PageSize _windowSize, std::optional<crispy::ImageSize> _pixels);
-    ~LinuxPty() override;
+    UnixPty(PageSize _windowSize, std::optional<crispy::ImageSize> _pixels);
+    ~UnixPty() override;
 
     PtySlave& slave() noexcept override;
 
@@ -71,11 +96,11 @@ class LinuxPty: public Pty
 
   private:
     std::optional<std::string_view> readSome(int fd, char* target, size_t n) noexcept;
-    int waitForReadable(std::chrono::milliseconds timeout) noexcept;
 
-    int _masterFd = -1;
-    int _epollFd = -1;
-    int _eventFd = -1;
+    [[nodiscard]] bool started() const noexcept { return _masterFd != -1; }
+
+    int _masterFd;
+    std::array<int, 2> _pipe;
     UnixPipe _stdoutFastPipe;
     PageSize _pageSize;
     std::optional<crispy::ImageSize> _pixels;

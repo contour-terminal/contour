@@ -17,7 +17,8 @@
 #include <terminal/RenderBufferBuilder.h>
 #include <terminal/Terminal.h>
 #include <terminal/logging.h>
-#include <terminal/pty/MockPty.h>
+
+#include <vtpty/MockPty.h>
 
 #include <crispy/escape.h>
 #include <crispy/stdfs.h>
