@@ -13,10 +13,6 @@ option(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER "Enables caching the pointer to th
 # But it's currently disabled by default as I am not fully satisfied with it yet.
 option(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE "Updates the render buffer within the terminal thread if set to ON (otherwise the render buffer is actively refreshed in the render thread)." OFF)
 
-if(MSVC)
-    add_definitions(-DNOMINMAX)
-endif()
-
 set(terminal_HEADERS
     Capabilities.h
     cell/CellConcept.h
