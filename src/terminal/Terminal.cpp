@@ -384,6 +384,8 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
 
     auto const hoveringHyperlinkGuard = ScopedHyperlinkHover { *this, currentScreen_ };
     auto const mainDisplayReverseVideo = isModeEnabled(terminal::DECMode::ReverseVideo);
+    auto const highlightSearchMatches =
+        state_.searchMode.pattern.empty() ? HighlightSearchMatches::No : HighlightSearchMatches::Yes;
 
     if (isPrimaryScreen())
         _lastRenderPassHints =
@@ -393,7 +395,8 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
                                                                            mainDisplayReverseVideo,
                                                                            HighlightSearchMatches::Yes,
                                                                            inputMethodData_ },
-                                  viewport_.scrollOffset());
+                                  viewport_.scrollOffset(),
+                                  highlightSearchMatches);
     else
         _lastRenderPassHints =
             alternateScreen_.render(RenderBufferBuilder<AlternateScreenCell> { *this,
@@ -402,7 +405,8 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
                                                                                mainDisplayReverseVideo,
                                                                                HighlightSearchMatches::Yes,
                                                                                inputMethodData_ },
-                                    viewport_.scrollOffset());
+                                    viewport_.scrollOffset(),
+                                    highlightSearchMatches);
 
     switch (state_.statusDisplayType)
     {

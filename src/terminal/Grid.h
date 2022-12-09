@@ -507,7 +507,10 @@ class Grid
     // {{{ Rendering API
     /// Renders the full screen by passing every grid cell to the callback.
     template <typename RendererT>
-    [[nodiscard]] RenderPassHints render(RendererT&& _render, ScrollOffset _scrollOffset = {}) const;
+    [[nodiscard]] RenderPassHints render(
+        RendererT&& _render,
+        ScrollOffset _scrollOffset = {},
+        HighlightSearchMatches highlightSearchMatches = HighlightSearchMatches::Yes) const;
 
     /// Takes text-screenshot of the main page.
     [[nodiscard]] std::string renderMainPageText() const;
@@ -622,7 +625,9 @@ bool Grid<Cell>::isLineWrapped(LineOffset _line) const noexcept
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 template <typename RendererT>
-[[nodiscard]] RenderPassHints Grid<Cell>::render(RendererT&& _render, ScrollOffset _scrollOffset) const
+[[nodiscard]] RenderPassHints Grid<Cell>::render(RendererT&& _render,
+                                                 ScrollOffset _scrollOffset,
+                                                 HighlightSearchMatches highlightSearchMatches) const
 {
     assert(!_scrollOffset || unbox<LineCount>(_scrollOffset) <= historyLineCount());
 
@@ -632,7 +637,10 @@ template <typename RendererT>
     {
         auto x = ColumnOffset(0);
         Line<Cell> const& line = lines_[i];
-        if (line.isTrivialBuffer())
+        // NB: trivial liner rendering only works trivially if we don't do cell-based operations
+        // on the text. Therefore, we only move to the trivial fast path here if we don't want to
+        // highlight search matches.
+        if (line.isTrivialBuffer() && highlightSearchMatches == HighlightSearchMatches::No)
         {
             auto const cellFlags = line.trivialBuffer().textAttributes.flags;
             hints.containsBlinkingCells = hints.containsBlinkingCells || (CellFlags::Blinking & cellFlags)

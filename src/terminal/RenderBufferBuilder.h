@@ -2,17 +2,12 @@
 
 #include <terminal/RenderBuffer.h>
 #include <terminal/Terminal.h>
+#include <terminal/primitives.h>
 
 #include <optional>
 
 namespace terminal
 {
-
-enum class HighlightSearchMatches
-{
-    No,
-    Yes
-};
 
 /**
  * RenderBufferBuilder<Cell> renders the current screen state into a RenderBuffer.
