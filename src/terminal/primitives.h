@@ -483,6 +483,12 @@ constexpr ColumnOffset& operator-=(ColumnOffset& a, ColumnCount b) noexcept
 }
 // }}}
 
+enum class HighlightSearchMatches
+{
+    No,
+    Yes
+};
+
 enum class ScreenType
 {
     Primary = 0,
