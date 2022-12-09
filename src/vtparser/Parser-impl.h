@@ -1,3 +1,4 @@
+#pragma once
 /**
  * This file is part of the "libterminal" project
  *   Copyright (c) 2019-2020 Christian Parpart <christian@parpart.family>
@@ -11,37 +12,25 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/ControlCode.h>
-#include <terminal/Parser.h>
-#include <terminal/logging.h>
+#include <vtparser/Parser.h>
 
 #include <crispy/assert.h>
 #include <crispy/escape.h>
-#include <crispy/indexed.h>
-#include <crispy/overloaded.h>
+#include <crispy/logstore.h>
 #include <crispy/utils.h>
 
-#include <unicode/scan.h>
 #include <unicode/utf8.h>
-
-#include <fmt/format.h>
 
 #include <array>
 #include <cctype>
-#include <cstdio>
-#include <map>
-#include <ostream>
 #include <string_view>
 #include <tuple>
 
-#if defined(__SSE2__)
-    #include <immintrin.h>
-#endif
-
-using namespace std;
-
 namespace terminal::parser
 {
+
+auto const inline VTTraceParserLog =
+    logstore::Category("vt.trace.parser", "Logs terminal parser instruction trace.");
 
 namespace
 {
@@ -389,16 +378,12 @@ void Parser<EventListener, TraceStateChanges>::processOnceViaStateMachine(uint8_
     else if (Action const a = table.events[s][ch]; a != Action::Undefined)
         handle(ActionClass::Event, a, ch);
     else
-        eventListener_.error(
-            fmt::format("Parser Error: Unknown action for state/input pair ({}, '{}' 0x{:02X})",
-                        state_,
-                        ch,
-                        static_cast<unsigned>(ch)));
+        eventListener_.error("Parser error: Unknown action for state/input pair.");
 }
 
 template <typename EventListener, bool TraceStateChanges>
 auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, char const* end) noexcept
-    -> tuple<ProcessKind, size_t>
+    -> std::tuple<ProcessKind, size_t>
 {
     auto input = begin;
     if (state_ != State::Ground)
@@ -530,100 +515,4 @@ void Parser<EventListener, TraceStateChanges>::handle(ActionClass _actionClass,
     }
 }
 
-void parserTableDot(std::ostream& _os) // {{{
-{
-    using Transition = pair<State, State>;
-    using Range = ParserTable::Range;
-    using RangeSet = std::vector<Range>;
-
-    ParserTable const& table = ParserTable::get();
-    // (State, Byte) -> State
-    auto transitions = map<Transition, RangeSet> {};
-    for ([[maybe_unused]] auto const&& [sourceState, sourceTransitions]: crispy::indexed(table.transitions))
-    {
-        for (auto const [i, targetState]: crispy::indexed(sourceTransitions))
-        {
-            auto const ch = static_cast<uint8_t>(i);
-            if (targetState != State::Undefined)
-            {
-                //_os << fmt::format("({}, 0x{:0X}) -> {}\n", static_cast<State>(sourceState), ch,
-                // targetState);
-                auto const t = Transition { static_cast<State>(sourceState), targetState };
-                if (!transitions[t].empty() && ch == transitions[t].back().last + 1)
-                    transitions[t].back().last++;
-                else
-                    transitions[t].emplace_back(Range { ch, ch });
-            }
-        }
-    }
-    // TODO: isReachableFromAnywhere(targetState) to check if x can be reached from anywhere.
-
-    _os << "digraph {\n";
-    _os << "  node [shape=box];\n";
-    _os << "  ranksep = 0.75;\n";
-    _os << "  rankdir = LR;\n";
-    _os << "  concentrate = true;\n";
-
-    unsigned groundCount = 0;
-
-    for (auto const& t: transitions)
-    {
-        auto const sourceState = t.first.first;
-        auto const targetState = t.first.second;
-
-        if (sourceState == State::Undefined)
-            continue;
-
-        auto const targetStateName = targetState == State::Ground && targetState != sourceState
-                                         ? fmt::format("{}_{}", targetState, ++groundCount)
-                                         : fmt::format("{}", targetState);
-
-        // if (isReachableFromAnywhere(targetState))
-        //     _os << fmt::format("  {} [style=dashed, style=\"rounded, filled\", fillcolor=yellow];\n",
-        //     sourceStateName);
-
-        if (targetState == State::Ground && sourceState != State::Ground)
-            _os << fmt::format("  \"{}\" [style=\"dashed, filled\", fillcolor=gray, label=\"ground\"];\n",
-                               targetStateName);
-
-        _os << fmt::format(R"(  "{}" -> "{}" )", sourceState, targetStateName);
-        _os << "[";
-        _os << "label=\"";
-        for (auto const&& [rangeCount, u]: crispy::indexed(t.second))
-        {
-            if (rangeCount)
-            {
-                _os << ", ";
-                if (rangeCount % 3 == 0)
-                    _os << "\\n";
-            }
-            if (u.first == u.last)
-                _os << fmt::format("{:02X}", u.first);
-            else
-                _os << fmt::format("{:02X}-{:02X}", u.first, u.last);
-        }
-        _os << "\"";
-        _os << "]";
-        _os << ";\n";
-    }
-
-    // equal ranks
-    _os << "  { rank=same; ";
-    for (auto const state: { State::CSI_Entry, State::DCS_Entry, State::OSC_String })
-        _os << fmt::format(R"("{}"; )", state);
-    _os << "};\n";
-
-    _os << "  { rank=same; ";
-    for (auto const state: { State::CSI_Param, State::DCS_Param, State::OSC_String })
-        _os << fmt::format(R"("{}"; )", state);
-    _os << "};\n";
-
-    _os << "}\n";
-}
-// }}}
-
 } // namespace terminal::parser
-
-#include <terminal/Sequencer.h>
-template class terminal::parser::Parser<terminal::Sequencer>;
-template class terminal::parser::Parser<terminal::ParserEvents>;

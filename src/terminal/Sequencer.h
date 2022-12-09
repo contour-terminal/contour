@@ -15,11 +15,12 @@
 
 #include <terminal/Functions.h>
 #include <terminal/Image.h>
-#include <terminal/ParserEvents.h>
-#include <terminal/ParserExtension.h>
 #include <terminal/Sequence.h>
 #include <terminal/SixelParser.h>
 #include <terminal/primitives.h>
+
+#include <vtparser/ParserEvents.h>
+#include <vtparser/ParserExtension.h>
 
 #include <unicode/convert.h>
 #include <unicode/utf8.h>

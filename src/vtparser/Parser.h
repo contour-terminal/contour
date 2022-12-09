@@ -13,16 +13,12 @@
  */
 #pragma once
 
-#include <terminal/ControlCode.h>
-
 #include <crispy/overloaded.h>
-#include <crispy/range.h>
 
 #include <unicode/convert.h>
 #include <unicode/scan.h>
-#include <unicode/utf8.h>
 
-#include <fmt/format.h>
+#include <fmt/core.h>
 
 #include <gsl/span>
 #include <gsl/span_ext>
@@ -34,8 +30,6 @@
 #include <limits>
 #include <string>
 #include <string_view>
-#include <variant>
-#include <vector>
 
 namespace terminal::parser
 {
@@ -610,3 +604,5 @@ inline std::pair<int, size_t> extractCodePrefix(T const& data) noexcept
 void parserTableDot(std::ostream& _os);
 
 } // end namespace terminal::parser
+
+#include <vtparser/Parser-impl.h>

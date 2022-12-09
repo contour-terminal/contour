@@ -14,7 +14,6 @@
 #pragma once
 
 #include <terminal/Functions.h>
-#include <terminal/ParserExtension.h>
 
 #include <crispy/boxed.h>
 

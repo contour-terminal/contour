@@ -14,8 +14,9 @@
 #include <contour/CaptureScreen.h>
 
 #include <terminal/Functions.h>
-#include <terminal/Parser.h>
-#include <terminal/ParserEvents.h>
+
+#include <vtparser/Parser.h>
+#include <vtparser/ParserEvents.h>
 
 #include <crispy/utils.h>
 
@@ -36,7 +37,6 @@
 // clang-format off
 #if defined(_WIN32)
     #include <Winsock2.h>
-    #include <Windows.h>
 #else
     #include <fcntl.h>
     #include <sys/select.h>
@@ -50,14 +50,12 @@
 #endif
 
 using std::cerr;
-using std::copy_n;
 using std::cout;
 using std::make_unique;
 using std::nullopt;
 using std::ofstream;
 using std::optional;
 using std::ostream;
-using std::pair;
 using std::reference_wrapper;
 using std::stoi;
 using std::streamsize;

@@ -33,6 +33,10 @@ set(crispy_SOURCES
 add_library(crispy-core ${crispy_SOURCES})
 add_library(crispy::core ALIAS crispy-core)
 
+if(MSVC)
+    target_compile_definitions(crispy-core PUBLIC NOMINMAX)
+endif()
+
 set(CRISPY_CORE_LIBS range-v3::range-v3 fmt::fmt-header-only unicode::core Microsoft.GSL::GSL)
 if(${USING_BOOST_FILESYSTEM})
     target_compile_definitions(crispy-core PUBLIC USING_BOOST_FILESYSTEM=1)
@@ -46,7 +50,7 @@ if(CMAKE_SYSTEM_PROCESSOR STREQUAL x86_64 OR CMAKE_SYSTEM_PROCESSOR STREQUAL amd
 elseif(CMAKE_SYSTEM_PROCESSOR STREQUAL aarch64) # ARM64
     target_compile_options(crispy-core PUBLIC -march=armv8-a+fp+simd+crypto+crc)
 else()
-    message(FATAL_ERROR "Target architecture not detected.")
+    message(WARNING "Target architecture not detected.")
 endif()
 target_compile_features(crispy-core PUBLIC cxx_std_17)
 target_link_libraries(crispy-core PUBLIC ${CRISPY_CORE_LIBS})

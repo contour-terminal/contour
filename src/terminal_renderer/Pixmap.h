@@ -290,8 +290,8 @@ inline void Pixmap::paintOverThick(int x, int y, uint8_t intensity, int sx, int 
 template <typename F>
 Pixmap& Pixmap::fill(F const& filler)
 {
-    for (auto const y: ranges::views::iota(0, unbox<int>(_size.height)))
-        for (auto const x: ranges::views::iota(0, unbox<int>(_size.width)))
+    for (auto const y: ::ranges::views::iota(0, unbox<int>(_size.height)))
+        for (auto const x: ::ranges::views::iota(0, unbox<int>(_size.width)))
             paint(x, y, static_cast<uint8_t>(filler(x, y)));
     return *this;
 }

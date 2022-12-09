@@ -12,7 +12,6 @@
  * limitations under the License.
  */
 #include <terminal/Functions.h>
-#include <terminal/Parser.h>
 
 #include <fmt/format.h>
 

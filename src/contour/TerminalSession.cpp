@@ -25,8 +25,6 @@
 
 #include <crispy/StackTrace.h>
 
-#include <range/v3/all.hpp>
-
 #include <QtCore/QDebug>
 #include <QtCore/QFileInfo>
 #include <QtCore/QMetaObject>

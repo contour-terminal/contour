@@ -33,7 +33,7 @@
 #include <unicode/grapheme_segmenter.h>
 #include <unicode/word_segmenter.h>
 
-#include <range/v3/view.hpp>
+#include <range/v3/view/iota.hpp>
 
 #include <algorithm>
 #include <cassert>
@@ -533,7 +533,7 @@ std::string Screen<Cell>::screenshot(function<string(LineOffset)> const& _postLi
     auto result = std::stringstream {};
     auto writer = VTWriter(result);
 
-    for (int const line: ranges::views::iota(0, *_state.pageSize.lines))
+    for (int const line: ::ranges::views::iota(0, *_state.pageSize.lines))
     {
         writer.write(grid().lineAt(LineOffset(line)));
         if (_postLine)
@@ -819,8 +819,8 @@ void Screen<Cell>::clearToEndOfScreen()
 {
     clearToEndOfLine();
 
-    for (auto const lineOffset:
-         ranges::views::iota(unbox<int>(_state.cursor.position.line) + 1, unbox<int>(_state.pageSize.lines)))
+    for (auto const lineOffset: ::ranges::views::iota(unbox<int>(_state.cursor.position.line) + 1,
+                                                      unbox<int>(_state.pageSize.lines)))
     {
         Line<Cell>& line = grid().lineAt(LineOffset::cast_from(lineOffset));
         line.reset(grid().defaultLineFlags(), _state.cursor.graphicsRendition);
@@ -833,7 +833,7 @@ void Screen<Cell>::clearToBeginOfScreen()
 {
     clearToBeginOfLine();
 
-    for (auto const lineOffset: ranges::views::iota(0, *_state.cursor.position.line))
+    for (auto const lineOffset: ::ranges::views::iota(0, *_state.cursor.position.line))
     {
         Line<Cell>& line = grid().lineAt(LineOffset::cast_from(lineOffset));
         line.reset(grid().defaultLineFlags(), _state.cursor.graphicsRendition);
@@ -960,7 +960,7 @@ void Screen<Cell>::selectiveEraseToEndOfScreen()
     auto const lineStart = unbox<int>(_state.cursor.position.line) + 1;
     auto const lineEnd = unbox<int>(_state.pageSize.lines);
 
-    for (auto const lineOffset: ranges::views::iota(lineStart, lineEnd))
+    for (auto const lineOffset: ::ranges::views::iota(lineStart, lineEnd))
         selectiveEraseLine(LineOffset::cast_from(lineOffset));
 }
 
@@ -970,7 +970,7 @@ void Screen<Cell>::selectiveEraseToBeginOfScreen()
 {
     selectiveEraseToBeginOfLine();
 
-    for (auto const lineOffset: ranges::views::iota(0, *_state.cursor.position.line))
+    for (auto const lineOffset: ::ranges::views::iota(0, *_state.cursor.position.line))
         selectiveEraseLine(LineOffset::cast_from(lineOffset));
 }
 
@@ -978,7 +978,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::selectiveEraseScreen()
 {
-    for (auto const lineOffset: ranges::views::iota(0, *_state.pageSize.lines))
+    for (auto const lineOffset: ::ranges::views::iota(0, *_state.pageSize.lines))
         selectiveEraseLine(LineOffset::cast_from(lineOffset));
 }
 // }}}

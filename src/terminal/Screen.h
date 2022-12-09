@@ -20,11 +20,12 @@
 #include <terminal/Grid.h>
 #include <terminal/Hyperlink.h>
 #include <terminal/Image.h>
-#include <terminal/Parser.h>
 #include <terminal/ScreenEvents.h>
 #include <terminal/TerminalState.h>
 #include <terminal/VTType.h>
 #include <terminal/cell/CellConcept.h>
+
+#include <vtparser/ParserExtension.h>
 
 #include <crispy/StrongLRUCache.h>
 #include <crispy/algorithm.h>
