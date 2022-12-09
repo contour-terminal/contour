@@ -84,6 +84,8 @@ jobs:
       with:
         path: "**/cpm_modules"
         key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
+    - name: "update APT database"
+      run: sudo apt -q update
     - name: Installing xmllint for ci-set-vars
       run: sudo apt -qy install libxml2-utils
     - name: set environment variables
@@ -92,10 +94,7 @@ jobs:
       env:
         REPOSITORY: ${{ github.event.repository.name }}
     - name: "install dependencies"
-      run: |
-        set -ex
-        sudo apt -q update
-        sudo ./scripts/install-deps.sh
+      run: sudo ./scripts/install-deps.sh
     - name: "Post-fix embedded dependency permissions."
       run: sudo find _deps/sources -exec chown $UID {} \;
     - name: "create build directory"
@@ -254,6 +253,8 @@ jobs:
       CONTOUR_PREFIX: "" # valgrind --leak-check=full --num-callers=64 --error-exitcode=112"
     steps:
     - uses: actions/checkout@v3
+    - name: "update APT database"
+      run: sudo apt -q update
     - name: Installing xmllint for ci-set-vars
       run: sudo apt -qy install libxml2-utils
     - name: set environment variables
