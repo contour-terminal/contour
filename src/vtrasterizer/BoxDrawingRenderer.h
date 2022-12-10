@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <terminal/Color.h>
+#include <vtbackend/Color.h>
 
 #include <vtrasterizer/GridMetrics.h>
 #include <vtrasterizer/RenderTarget.h>

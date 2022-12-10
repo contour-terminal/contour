@@ -16,10 +16,10 @@
 #include <contour/Actions.h>
 #include <contour/display/ShaderConfig.h>
 
-#include <terminal/Color.h>
-#include <terminal/ColorPalette.h>
-#include <terminal/InputBinding.h>
-#include <terminal/Sequencer.h> // CursorDisplay
+#include <vtbackend/Color.h>
+#include <vtbackend/ColorPalette.h>
+#include <vtbackend/InputBinding.h>
+#include <vtbackend/Sequencer.h> // CursorDisplay
 
 #include <vtpty/Process.h>
 

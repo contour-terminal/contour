@@ -13,8 +13,8 @@
  */
 #include "Config.h"
 
-#include <terminal/ControlCode.h>
-#include <terminal/InputGenerator.h>
+#include <vtbackend/ControlCode.h>
+#include <vtbackend/InputGenerator.h>
 
 #include <vtpty/Process.h>
 

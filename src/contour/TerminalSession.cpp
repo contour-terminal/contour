@@ -16,9 +16,9 @@
 #include <contour/display/TerminalWidget.h>
 #include <contour/helper.h>
 
-#include <terminal/MatchModes.h>
-#include <terminal/Terminal.h>
-#include <terminal/ViCommands.h>
+#include <vtbackend/MatchModes.h>
+#include <vtbackend/Terminal.h>
+#include <vtbackend/ViCommands.h>
 
 #include <vtpty/Process.h>
 #include <vtpty/Pty.h>

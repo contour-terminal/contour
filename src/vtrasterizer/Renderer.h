@@ -13,9 +13,9 @@
  */
 #pragma once
 
-#include <terminal/ColorPalette.h>
-#include <terminal/Image.h>
-#include <terminal/Terminal.h>
+#include <vtbackend/ColorPalette.h>
+#include <vtbackend/Image.h>
+#include <vtbackend/Terminal.h>
 
 #include <vtrasterizer/BackgroundRenderer.h>
 #include <vtrasterizer/CursorRenderer.h>

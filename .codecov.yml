@@ -13,7 +13,7 @@ coverage:
     changes: no
 
   ignore:
-    - src/terminal/*_test.cpp
+    - src/vtbackend/*_test.cpp
     - 3rdparty/*
 
 parsers:

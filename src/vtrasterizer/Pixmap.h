@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <terminal/primitives.h>
+#include <vtbackend/primitives.h>
 
 #include <vtrasterizer/TextureAtlas.h> // Buffer
 

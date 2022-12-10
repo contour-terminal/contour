@@ -15,8 +15,8 @@
 #include <contour/Config.h>
 #include <contour/ContourApp.h>
 
-#include <terminal/Capabilities.h>
-#include <terminal/Functions.h>
+#include <vtbackend/Capabilities.h>
+#include <vtbackend/Functions.h>
 
 #include <vtparser/Parser.h>
 

@@ -13,7 +13,7 @@
  */
 #include <contour/CaptureScreen.h>
 
-#include <terminal/Functions.h>
+#include <vtbackend/Functions.h>
 
 #include <vtparser/Parser.h>
 #include <vtparser/ParserEvents.h>

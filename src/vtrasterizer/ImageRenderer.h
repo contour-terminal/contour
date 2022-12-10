@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#include <terminal/Image.h>
+#include <vtbackend/Image.h>
 
 #include <vtrasterizer/RenderTarget.h>
 #include <vtrasterizer/TextRenderer.h>

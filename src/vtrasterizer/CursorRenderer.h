@@ -13,8 +13,8 @@
  */
 #pragma once
 
-#include <terminal/Color.h>
-#include <terminal/primitives.h>
+#include <vtbackend/Color.h>
+#include <vtbackend/primitives.h>
 
 #include <vtrasterizer/GridMetrics.h>
 #include <vtrasterizer/RenderTarget.h>

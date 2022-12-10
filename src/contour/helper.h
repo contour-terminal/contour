@@ -15,8 +15,8 @@
 
 #include <contour/Config.h>
 
-#include <terminal/InputGenerator.h>
-#include <terminal/ScreenEvents.h>
+#include <vtbackend/InputGenerator.h>
+#include <vtbackend/ScreenEvents.h>
 
 #include <vtrasterizer/GridMetrics.h>
 

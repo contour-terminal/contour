@@ -13,9 +13,9 @@
  */
 #pragma once
 
-#include <terminal/Color.h>
-#include <terminal/RenderBuffer.h>
-#include <terminal/Screen.h>
+#include <vtbackend/Color.h>
+#include <vtbackend/RenderBuffer.h>
+#include <vtbackend/Screen.h>
 
 #include <vtrasterizer/BoxDrawingRenderer.h>
 #include <vtrasterizer/FontDescriptions.h>

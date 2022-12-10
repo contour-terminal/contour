@@ -15,7 +15,7 @@
 #include <contour/display/TerminalWidget.h>
 #include <contour/helper.h>
 
-#include <terminal/Terminal.h>
+#include <vtbackend/Terminal.h>
 
 #include <vtrasterizer/Renderer.h>
 

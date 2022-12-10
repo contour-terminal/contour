@@ -11,9 +11,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal/InputGenerator.h>
-#include <terminal/Sequence.h>
-#include <terminal/primitives.h>
+#include <vtbackend/InputGenerator.h>
+#include <vtbackend/Sequence.h>
+#include <vtbackend/primitives.h>
 
 #include <vtparser/Parser.h>
 #include <vtparser/ParserEvents.h>
