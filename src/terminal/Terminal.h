@@ -269,6 +269,8 @@ class Terminal
     void setMouseProtocolBypassModifier(Modifier _value) { mouseProtocolBypassModifier_ = _value; }
     void setMouseBlockSelectionModifier(Modifier _value) { mouseBlockSelectionModifier_ = _value; }
 
+    bool isMouseGrabbedByApp() const noexcept;
+
     // {{{ input proxy
     using Timestamp = std::chrono::steady_clock::time_point;
     bool sendKeyPressEvent(Key _key, Modifier _modifier, Timestamp _now);
@@ -276,14 +278,17 @@ class Terminal
     bool sendMousePressEvent(Modifier _modifier,
                              MouseButton _button,
                              PixelCoordinate _pixelPosition,
+                             bool _uiHandledHint,
                              Timestamp _now);
     bool sendMouseMoveEvent(Modifier _modifier,
                             CellLocation _pos,
                             PixelCoordinate _pixelPosition,
+                            bool _uiHandledHint,
                             Timestamp _now);
     bool sendMouseReleaseEvent(Modifier _modifier,
                                MouseButton _button,
                                PixelCoordinate _pixelPosition,
+                               bool _uiHandledHint,
                                Timestamp _now);
     bool sendFocusInEvent();
     bool sendFocusOutEvent();
@@ -631,6 +636,15 @@ class Terminal
     }
 
     [[nodiscard]] terminal::SelectionHelper& selectionHelper() noexcept { return selectionHelper_; }
+
+    [[nodiscard]] Selection::OnSelectionUpdated selectionUpdatedHelper()
+    {
+        return [this]() {
+            onSelectionUpdated();
+        };
+    }
+
+    void onSelectionUpdated();
 
     [[nodiscard]] ViInputHandler& inputHandler() noexcept { return state_.inputHandler; }
     [[nodiscard]] ViInputHandler const& inputHandler() const noexcept { return state_.inputHandler; }

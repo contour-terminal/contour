@@ -2390,6 +2390,8 @@ namespace impl
                 case 2026: return DECMode::BatchedRendering;
                 case 2027: return DECMode::Unicode;
                 case 2028: return DECMode::TextReflow;
+                case 2029: return DECMode::MousePassiveTracking;
+                case 2030: return DECMode::ReportGridCellSelection;
                 case 8452: return DECMode::SixelCursorNextToGraphic;
             }
             return nullopt;

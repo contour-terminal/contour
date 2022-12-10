@@ -93,6 +93,31 @@ namespace // {{{ helpers
             RenderBufferLog()("Render buffer {} swapping failed.", _frameID);
     }
 #endif
+
+    int makeSelectionTypeId(Selection const& selection) noexcept
+    {
+        if (dynamic_cast<LinearSelection const*>(&selection))
+            return 1;
+
+        if (dynamic_cast<WordWiseSelection const*>(&selection))
+            // To the application, this is nothing more than a linear selection.
+            return 1;
+
+        if (dynamic_cast<FullLineSelection const*>(&selection))
+            return 2;
+
+        if (dynamic_cast<RectangularSelection const*>(&selection))
+            return 3;
+
+        assert(false && "Invalid code path. Should never be reached.");
+        return 0;
+    }
+
+    constexpr CellLocation raiseToMinimum(CellLocation location, LineOffset minimumLine) noexcept
+    {
+        return CellLocation { std::max(location.line, minimumLine), location.column };
+    }
+
 } // namespace
 // }}}
 
@@ -547,9 +572,16 @@ bool Terminal::sendCharPressEvent(char32_t _value, Modifier _modifier, Timestamp
     return success;
 }
 
+bool Terminal::isMouseGrabbedByApp() const noexcept
+{
+    return allowInput() && respectMouseProtocol_ && state_.inputGenerator.mouseProtocol().has_value()
+           && !state_.inputGenerator.passiveMouseTracking();
+}
+
 bool Terminal::sendMousePressEvent(Modifier _modifier,
                                    MouseButton _button,
                                    PixelCoordinate _pixelPosition,
+                                   bool _uiHandledHint,
                                    Timestamp /*_now*/)
 {
     verifyState();
@@ -559,12 +591,12 @@ bool Terminal::sendMousePressEvent(Modifier _modifier,
 
     if (allowInput() && respectMouseProtocol_
         && state_.inputGenerator.generateMousePress(
-            _modifier, _button, currentMousePosition_, _pixelPosition))
+            _modifier, _button, currentMousePosition_, _pixelPosition, _uiHandledHint))
     {
         // TODO: Ctrl+(Left)Click's should still be catched by the terminal iff there's a hyperlink
         // under the current position
         flushInput();
-        return true;
+        return !isModeEnabled(DECMode::MousePassiveTracking);
     }
 
     return false;
@@ -589,13 +621,16 @@ bool Terminal::handleMouseSelection(Modifier _modifier, Timestamp _now)
         case 1:
             if (state_.searchMode.initiatedByDoubleClick)
                 clearSearch();
+            clearSelection();
             if (_modifier == mouseBlockSelectionModifier_)
-                selection_ = make_unique<RectangularSelection>(selectionHelper_, startPos);
+                selection_ =
+                    make_unique<RectangularSelection>(selectionHelper_, startPos, selectionUpdatedHelper());
             else
-                selection_ = make_unique<LinearSelection>(selectionHelper_, startPos);
+                selection_ =
+                    make_unique<LinearSelection>(selectionHelper_, startPos, selectionUpdatedHelper());
             break;
         case 2: {
-            selection_ = make_unique<WordWiseSelection>(selectionHelper_, startPos);
+            selection_ = make_unique<WordWiseSelection>(selectionHelper_, startPos, selectionUpdatedHelper());
             selection_->extend(startPos);
             if (visualizeSelectedWord_)
             {
@@ -607,7 +642,7 @@ bool Terminal::handleMouseSelection(Modifier _modifier, Timestamp _now)
             break;
         }
         case 3:
-            selection_ = make_unique<FullLineSelection>(selectionHelper_, startPos);
+            selection_ = make_unique<FullLineSelection>(selectionHelper_, startPos, selectionUpdatedHelper());
             selection_->extend(startPos);
             break;
         default: clearSelection(); break;
@@ -623,9 +658,14 @@ void Terminal::clearSelection()
         // Don't clear if in visual mode.
         return;
 
+    if (!selection_)
+        return;
+
     InputLog()("Clearing selection.");
     selection_.reset();
     speedClicks_ = 0;
+
+    onSelectionUpdated();
 
     breakLoopAndRefreshRenderBuffer();
 }
@@ -633,6 +673,7 @@ void Terminal::clearSelection()
 bool Terminal::sendMouseMoveEvent(Modifier _modifier,
                                   CellLocation newPosition,
                                   PixelCoordinate _pixelPosition,
+                                  bool _uiHandledHint,
                                   Timestamp /*_now*/)
 {
     speedClicks_ = 0;
@@ -663,16 +704,22 @@ bool Terminal::sendMouseMoveEvent(Modifier _modifier,
 
     // Do not handle mouse-move events in sub-cell dimensions.
     if (allowInput() && respectMouseProtocol_
-        && state_.inputGenerator.generateMouseMove(_modifier, currentMousePosition_, _pixelPosition))
+        && state_.inputGenerator.generateMouseMove(_modifier,
+                                                   relativePos,
+                                                   _pixelPosition,
+                                                   _uiHandledHint
+                                                       || (leftMouseButtonPressed_ && !selectionAvailable())))
     {
         flushInput();
-        return true;
+
+        if (!isModeEnabled(DECMode::MousePassiveTracking))
+            return true;
     }
 
     if (leftMouseButtonPressed_ && !selectionAvailable())
     {
         changed = true;
-        setSelector(make_unique<LinearSelection>(selectionHelper_, relativePos));
+        setSelector(make_unique<LinearSelection>(selectionHelper_, relativePos, selectionUpdatedHelper()));
     }
 
     if (selectionAvailable() && selector()->state() != Selection::State::Complete
@@ -696,16 +743,19 @@ bool Terminal::sendMouseMoveEvent(Modifier _modifier,
 bool Terminal::sendMouseReleaseEvent(Modifier _modifier,
                                      MouseButton _button,
                                      PixelCoordinate _pixelPosition,
+                                     bool _uiHandledHint,
                                      Timestamp /*_now*/)
 {
     verifyState();
 
     if (allowInput() && respectMouseProtocol_
         && state_.inputGenerator.generateMouseRelease(
-            _modifier, _button, currentMousePosition_, _pixelPosition))
+            _modifier, _button, currentMousePosition_, _pixelPosition, _uiHandledHint))
     {
         flushInput();
-        return true;
+
+        if (!isModeEnabled(DECMode::MousePassiveTracking))
+            return true;
     }
     respectMouseProtocol_ = true;
 
@@ -1112,14 +1162,14 @@ void Terminal::bell()
 
 void Terminal::bufferChanged(ScreenType _type)
 {
-    selection_.reset();
+    clearSelection();
     viewport_.forceScrollToBottom();
     eventListener_.bufferChanged(_type);
 }
 
 void Terminal::scrollbackBufferCleared()
 {
-    selection_.reset();
+    clearSelection();
     viewport_.scrollToBottom();
     breakLoopAndRefreshRenderBuffer();
 }
@@ -1352,6 +1402,11 @@ void Terminal::setMode(DECMode _mode, bool _enable)
             break;
         case DECMode::MouseExtended: setMouseTransport(MouseTransport::Extended); break;
         case DECMode::MouseURXVT: setMouseTransport(MouseTransport::URXVT); break;
+        case DECMode::MousePassiveTracking:
+            state_.inputGenerator.setPassiveMouseTracking(_enable);
+            setMode(DECMode::MouseSGR, _enable);                    // SGR is required.
+            setMode(DECMode::MouseProtocolButtonTracking, _enable); // ButtonTracking is default
+            break;
         case DECMode::MouseSGRPixels:
             if (_enable)
                 setMouseTransport(MouseTransport::SGRPixels);
@@ -1717,7 +1772,7 @@ void Terminal::onBufferScrolled(LineCount _n) noexcept
     if (selection_->from().line > top && selection_->to().line > top)
         selection_->applyScroll(boxed_cast<LineOffset>(_n), primaryScreen_.historyLineCount());
     else
-        selection_.reset();
+        clearSelection();
 }
 // }}}
 
@@ -1914,6 +1969,33 @@ bool Terminal::isHighlighted(CellLocation _cell) const noexcept
                    }
                },
                highlightRange_.value());
+}
+
+void Terminal::onSelectionUpdated()
+{
+    if (!isModeEnabled(DECMode::ReportGridCellSelection))
+        return;
+
+    if (!selection_)
+    {
+        reply("\033[>M");
+    }
+    else
+    {
+        auto const& selection = *selection_;
+
+        auto const to = selection.to();
+        if (to.line < LineOffset(0))
+            return;
+
+        auto const from = raiseToMinimum(selection.from(), LineOffset(0));
+        reply("\033[>{};{};{};{};{}M",
+              makeSelectionTypeId(selection),
+              from.line + 1,
+              from.column + 1,
+              to.line + 1,
+              to.column + 1);
+    }
 }
 
 void Terminal::resetHighlight()

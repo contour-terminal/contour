@@ -77,8 +77,13 @@ class Selection
     /// Defines a columnar range at a given line.
     using Range = ColumnRange;
 
-    Selection(SelectionHelper const& _helper, CellLocation _start):
-        helper_ { _helper }, from_ { _start }, to_ { _start }
+    using OnSelectionUpdated = std::function<void()>;
+
+    Selection(SelectionHelper const& _helper, CellLocation _start, OnSelectionUpdated onSelectionUpdated):
+        helper_ { _helper },
+        onSelectionUpdated_ { std::move(onSelectionUpdated) },
+        from_ { _start },
+        to_ { _start }
     {
     }
 
@@ -113,6 +118,7 @@ class Selection
   protected:
     State state_ = State::Waiting;
     SelectionHelper const& helper_;
+    OnSelectionUpdated onSelectionUpdated_;
     CellLocation from_;
     CellLocation to_;
 };
@@ -120,7 +126,9 @@ class Selection
 class RectangularSelection: public Selection
 {
   public:
-    RectangularSelection(SelectionHelper const& _helper, CellLocation _start);
+    RectangularSelection(SelectionHelper const& _helper,
+                         CellLocation _start,
+                         OnSelectionUpdated onSelectionUpdated);
     [[nodiscard]] bool contains(CellLocation _coord) const noexcept override;
     [[nodiscard]] bool intersects(Rect _area) const noexcept override;
     [[nodiscard]] std::vector<Range> ranges() const override;
@@ -129,13 +137,17 @@ class RectangularSelection: public Selection
 class LinearSelection: public Selection
 {
   public:
-    LinearSelection(SelectionHelper const& _helper, CellLocation _start);
+    LinearSelection(SelectionHelper const& _helper,
+                    CellLocation _start,
+                    OnSelectionUpdated onSelectionUpdated);
 };
 
 class WordWiseSelection: public Selection
 {
   public:
-    WordWiseSelection(SelectionHelper const& _helper, CellLocation _start);
+    WordWiseSelection(SelectionHelper const& _helper,
+                      CellLocation _start,
+                      OnSelectionUpdated onSelectionUpdated);
 
     void extend(CellLocation _to) override;
 
@@ -146,7 +158,9 @@ class WordWiseSelection: public Selection
 class FullLineSelection: public Selection
 {
   public:
-    explicit FullLineSelection(SelectionHelper const& _helper, CellLocation _start);
+    explicit FullLineSelection(SelectionHelper const& _helper,
+                               CellLocation _start,
+                               OnSelectionUpdated onSelectionUpdated);
     void extend(CellLocation _to) override;
 };
 

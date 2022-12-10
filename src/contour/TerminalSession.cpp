@@ -527,26 +527,35 @@ void TerminalSession::sendMousePressEvent(Modifier _modifier,
                                           Timestamp _now)
 {
     // InputLog()("sendMousePressEvent: {} {} at {}", _button, _modifier, currentMousePosition_);
+    bool mouseGrabbed = terminal().isMouseGrabbedByApp();
+
+    auto actionHandled = false;
+    if (!mouseGrabbed)
+    {
+        if (auto const* actions =
+                config::apply(config_.inputMappings.mouseMappings, _button, _modifier, matchModeFlags()))
+        {
+            if (executeAllActions(*actions))
+            {
+                actionHandled = true;
+            }
+        }
+    }
+
+    // clang-format off
+    auto const selectionHandled = !actionHandled
+                                  && !mouseGrabbed
+                                  && _button == MouseButton::Left
+                                  && terminal_.handleMouseSelection(_modifier, _now);
+    // clang-format on
 
     // First try to pass the mouse event to the application, as it might have requested that.
-    if (terminal().sendMousePressEvent(_modifier, _button, _pixelPosition, _now))
-    {
+    auto uiHandledHint = actionHandled || selectionHandled;
+    auto const terminalHandled =
+        terminal().sendMousePressEvent(_modifier, _button, _pixelPosition, uiHandledHint, _now);
+
+    if (uiHandledHint || terminalHandled)
         scheduleRedraw();
-        return;
-    }
-
-    if (auto const* actions =
-            config::apply(config_.inputMappings.mouseMappings, _button, _modifier, matchModeFlags()))
-    {
-        if (executeAllActions(*actions))
-            return;
-    }
-
-    if (_button != MouseButton::Left)
-        return;
-    if (!terminal_.handleMouseSelection(_modifier, _now))
-        return;
-    scheduleRedraw();
 }
 
 void TerminalSession::sendMouseMoveEvent(terminal::Modifier _modifier,
@@ -560,7 +569,8 @@ void TerminalSession::sendMouseMoveEvent(terminal::Modifier _modifier,
     if (!(_pos < terminal().pageSize()))
         return;
 
-    auto const handled = terminal().sendMouseMoveEvent(_modifier, _pos, _pixelPosition, _now);
+    auto const uiHandledHint = false;
+    auto const handled = terminal().sendMouseMoveEvent(_modifier, _pos, _pixelPosition, uiHandledHint, _now);
 
     if (_pos == currentMousePosition_)
         return;
@@ -585,7 +595,8 @@ void TerminalSession::sendMouseReleaseEvent(Modifier _modifier,
                                             PixelCoordinate _pixelPosition,
                                             Timestamp _now)
 {
-    terminal().sendMouseReleaseEvent(_modifier, _button, _pixelPosition, _now);
+    auto const uiHandledHint = false;
+    terminal().sendMouseReleaseEvent(_modifier, _button, _pixelPosition, uiHandledHint, _now);
     scheduleRedraw();
 }
 

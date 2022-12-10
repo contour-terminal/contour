@@ -105,7 +105,7 @@ TEST_CASE("Selector.Linear", "[selector]")
     SECTION("single-cell")
     { // "b"
         auto const pos = CellLocation { LineOffset(1), ColumnOffset(1) };
-        auto selector = LinearSelection(selectionHelper, pos);
+        auto selector = LinearSelection(selectionHelper, pos, []() {});
         selector.extend(pos);
         selector.complete();
 
@@ -125,7 +125,7 @@ TEST_CASE("Selector.Linear", "[selector]")
     SECTION("forward single-line")
     { // "b,c"
         auto const pos = CellLocation { LineOffset(1), ColumnOffset(1) };
-        auto selector = LinearSelection(selectionHelper, pos);
+        auto selector = LinearSelection(selectionHelper, pos, []() {});
         selector.extend(CellLocation { LineOffset(1), ColumnOffset(3) });
         selector.complete();
 
@@ -145,7 +145,7 @@ TEST_CASE("Selector.Linear", "[selector]")
     SECTION("forward multi-line")
     { // "b,cdefg,hi\n1234"
         auto const pos = CellLocation { LineOffset(1), ColumnOffset(1) };
-        auto selector = LinearSelection(selectionHelper, pos);
+        auto selector = LinearSelection(selectionHelper, pos, []() {});
         selector.extend(CellLocation { LineOffset(2), ColumnOffset(3) });
         selector.complete();
 
@@ -181,7 +181,8 @@ TEST_CASE("Selector.Linear", "[selector]")
          2 | "bar"
         */
 
-        auto selector = LinearSelection(selectionHelper, CellLocation { LineOffset(-2), ColumnOffset(6) });
+        auto selector =
+            LinearSelection(selectionHelper, CellLocation { LineOffset(-2), ColumnOffset(6) }, []() {});
         selector.extend(CellLocation { LineOffset(-1), ColumnOffset(2) });
         selector.complete();
 
@@ -217,7 +218,8 @@ TEST_CASE("Selector.Linear", "[selector]")
          2 | ""
         */
 
-        auto selector = LinearSelection(selectionHelper, CellLocation { LineOffset(-2), ColumnOffset(8) });
+        auto selector =
+            LinearSelection(selectionHelper, CellLocation { LineOffset(-2), ColumnOffset(8) }, []() {});
         selector.extend(CellLocation { LineOffset(0), ColumnOffset(1) });
         selector.complete();
 

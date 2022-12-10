@@ -108,11 +108,14 @@
         <ul>
           <li>Fixes restoring the cursor visibility after leaving alternate screen when application wasn't restoring mode switches in reverse order.</li>
           <li>Fixes country flags rendering due to misleading grapheme cluster segmentation in corner cases.</li>
+          <li>Fixes mouse reporting in primary screen when viewport has been scrolled into the scrollback area.</li>
           <li>Fixes cursor movements for the vi-like cursor (normal mode).</li>
           <li>Fixes Alt+Backspace on OS/X.</li>
           <li>Fixes normal mode's page top (S-H)/ page bottom (S-L) cursor movements to respect scroll offset.</li>
-          <li>Adds ability to highlight same words on double click via `profile.*.highlight_word_and_matches_on_double_click`.</li>
 					<li>Vi Mode search can handle line wrapping and searchText larger than line length (#869) (#870).</li>
+          <li>Adds ability to highlight same words on double click via `profile.*.highlight_word_and_matches_on_double_click`.</li>
+          <li>EXPERIMENTAL: Adds VT extension to enable passive mouse tracking via `CSI ? 2029 h` / `CSI ? 2029 l`. Passive mouse tracking enables the application to get notified on mouse events while still allowing mouse selection.</li>
+          <li>EXPERIMENTAL: Adds VT extension to enable text selection tracking via `CSI ? 2030 h` / `CSI ? 2030 l`.</li>
         </ul>
       </description>
     </release>

@@ -86,6 +86,7 @@ endif()
 
 include(ContourThirdParties)
 add_subdirectory(src)
+add_subdirectory(examples)
 
 # ----------------------------------------------------------------------------
 # Summary
