@@ -65,6 +65,9 @@
 #endif
 
 // Must be in global namespace
+// NB: must be publically visible, and due to -Wmissing-declarations, we better tell the compiler.
+void initializeResourcesForContourFrontendOpenGL();
+
 void initializeResourcesForContourFrontendOpenGL()
 {
     Q_INIT_RESOURCE(DisplayResources);
