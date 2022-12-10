@@ -13,8 +13,8 @@
  */
 #pragma once
 
-#include <terminal/RenderBuffer.h>
-#include <terminal/Screen.h>
+#include <vtbackend/RenderBuffer.h>
+#include <vtbackend/Screen.h>
 
 #include <vtrasterizer/Decorator.h>
 #include <vtrasterizer/RenderTarget.h>

@@ -7,9 +7,13 @@ OpenGL:
     - src/contour/opengl/*.cpp
     - src/contour/opengl/*.h
 "VT: backend":
-    - src/terminal/*.cpp
-    - src/terminal/*.h
-"VT: renderer":
+    - src/vtbackend/*.cpp
+    - src/vtbackend/*.h
+    - src/vtpty/*.cpp
+    - src/vtpty/*.h
+    - src/vtparser/*.cpp
+    - src/vtparser/*.h
+"VT: rasterizer":
     - src/vtrasterizer/*.cpp
     - src/vtrasterizer/*.h
 documentation:

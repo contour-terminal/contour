@@ -18,9 +18,9 @@
 #include <contour/TerminalSession.h>
 #include <contour/helper.h>
 
-#include <terminal/Color.h>
-#include <terminal/Metrics.h>
-#include <terminal/primitives.h>
+#include <vtbackend/Color.h>
+#include <vtbackend/Metrics.h>
+#include <vtbackend/primitives.h>
 
 #include <vtrasterizer/Renderer.h>
 

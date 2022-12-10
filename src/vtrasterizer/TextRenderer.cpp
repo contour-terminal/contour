@@ -120,8 +120,8 @@ Making use of reserved glyph slots
     }
 */
 
-#include <terminal/logging.h>
-#include <terminal/primitives.h>
+#include <vtbackend/logging.h>
+#include <vtbackend/primitives.h>
 
 #include <vtrasterizer/BoxDrawingRenderer.h>
 #include <vtrasterizer/GridMetrics.h>

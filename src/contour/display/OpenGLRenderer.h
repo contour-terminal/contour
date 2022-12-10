@@ -15,7 +15,7 @@
 
 #include <contour/display/Blur.h>
 
-#include <terminal/Image.h>
+#include <vtbackend/Image.h>
 
 #include <vtrasterizer/RenderTarget.h>
 #include <vtrasterizer/TextureAtlas.h>

@@ -16,7 +16,7 @@
 #include <contour/Audio.h>
 #include <contour/Config.h>
 
-#include <terminal/Terminal.h>
+#include <vtbackend/Terminal.h>
 
 #include <vtrasterizer/Renderer.h>
 

@@ -13,8 +13,8 @@
  */
 #pragma once
 
-#include <terminal/Color.h>
-#include <terminal/primitives.h> // ImageSize
+#include <vtbackend/Color.h>
+#include <vtbackend/primitives.h> // ImageSize
 
 #include <crispy/StrongHash.h>
 #include <crispy/StrongLRUHashtable.h>

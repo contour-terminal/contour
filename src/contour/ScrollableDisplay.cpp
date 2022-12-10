@@ -16,8 +16,8 @@
 #include <contour/TerminalSession.h>
 #include <contour/helper.h>
 
-#include <terminal/Terminal.h>
-#include <terminal/Viewport.h>
+#include <vtbackend/Terminal.h>
+#include <vtbackend/Viewport.h>
 
 namespace contour
 {

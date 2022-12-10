@@ -23,7 +23,7 @@
 
 #include <contour/display/TerminalWidget.h>
 
-#include <terminal/Metrics.h>
+#include <vtbackend/Metrics.h>
 
 #include <vtpty/Pty.h>
 

@@ -18,8 +18,8 @@
 #include <contour/display/TerminalWidget.h>
 #include <contour/helper.h>
 
-#include <terminal/Color.h>
-#include <terminal/Metrics.h>
+#include <vtbackend/Color.h>
+#include <vtbackend/Metrics.h>
 
 #include <vtpty/Pty.h>
 

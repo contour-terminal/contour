@@ -13,9 +13,9 @@
  */
 #pragma once
 
-#include <terminal/Color.h>
-#include <terminal/Grid.h> // cell attribs
-#include <terminal/primitives.h>
+#include <vtbackend/Color.h>
+#include <vtbackend/Grid.h> // cell attribs
+#include <vtbackend/primitives.h>
 
 #include <vtrasterizer/GridMetrics.h>
 #include <vtrasterizer/TextureAtlas.h>
