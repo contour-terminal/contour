@@ -29,23 +29,28 @@ using std::move;
 namespace contour::display
 {
 
-static const Vertex sg_vertexes[] = { Vertex(QVector3D(1.0f, 1.0f, 1.0f)),
-                                      Vertex(QVector3D(-1.0f, 1.0f, 1.0f)),
-                                      Vertex(QVector3D(-1.0f, -1.0f, 1.0f)),
-                                      Vertex(QVector3D(1.0f, -1.0f, 1.0f)) };
-
-QString loadShaderSource(QString const& shaderFilePath)
+namespace
 {
-    DisplayLog()("Blur: Loading shader source {}", shaderFilePath.toStdString());
-    auto const versionHeader =
-        QString::fromStdString(fmt::format("#version {}\n", useOpenGLES() ? "300 es" : "330"));
 
-    QFile file(shaderFilePath);
-    file.open(QFile::ReadOnly);
-    Require(file.isOpen());
-    auto const fileContents = file.readAll();
-    return versionHeader + "#line 1\n" + fileContents;
-}
+    static const Vertex sg_vertexes[] = { Vertex(QVector3D(1.0f, 1.0f, 1.0f)),
+                                          Vertex(QVector3D(-1.0f, 1.0f, 1.0f)),
+                                          Vertex(QVector3D(-1.0f, -1.0f, 1.0f)),
+                                          Vertex(QVector3D(1.0f, -1.0f, 1.0f)) };
+
+    QString loadShaderSource(QString const& shaderFilePath)
+    {
+        DisplayLog()("Blur: Loading shader source {}", shaderFilePath.toStdString());
+        auto const versionHeader =
+            QString::fromStdString(fmt::format("#version {}\n", useOpenGLES() ? "300 es" : "330"));
+
+        QFile file(shaderFilePath);
+        file.open(QFile::ReadOnly);
+        Require(file.isOpen());
+        auto const fileContents = file.readAll();
+        return versionHeader + "#line 1\n" + fileContents;
+    }
+
+} // namespace
 
 Blur::Blur():
     m_context { new QOpenGLContext() },

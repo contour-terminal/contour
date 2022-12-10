@@ -74,6 +74,10 @@ using terminal::Infinite;
 using terminal::LineCount;
 using terminal::PageSize;
 
+using contour::actions::Action;
+
+using UsedKeys = set<string>;
+
 namespace contour::config
 {
 
@@ -102,19 +106,77 @@ namespace
             return ""s;
         }
     };
-} // namespace
 
-using actions::Action;
+    std::shared_ptr<terminal::BackgroundImage const> loadImage(string const& fileName,
+                                                               float opacity,
+                                                               bool blur)
+    {
+        auto const resolvedFileName = homeResolvedPath(fileName, Process::homeDirectory());
 
-// TODO:
-// - [x] report missing keys
-// - [ ] report superfluous keys (by keeping track of loaded keys, then iterate
-//       through full document and report any key that has not been loaded but is available)
-// - [ ] Do we want to report when no color schemes are defined? (at least warn about?)
-// - [ ] Do we want to report when no input mappings are defined? (at least warn about?)
+        auto backgroundImage = terminal::BackgroundImage {};
+        backgroundImage.location = resolvedFileName;
+        backgroundImage.hash = crispy::StrongHash::compute(resolvedFileName.string());
+        backgroundImage.opacity = opacity;
+        backgroundImage.blur = blur;
 
-namespace // {{{ helper
-{
+        return make_shared<terminal::BackgroundImage const>(std::move(backgroundImage));
+    }
+
+    terminal::CellRGBColor parseCellColor(std::string const& _text)
+    {
+        auto const text = toUpper(_text);
+        if (text == "CELLBACKGROUND"sv)
+            return terminal::CellBackgroundColor {};
+        if (text == "CELLFOREGROUND"sv)
+            return terminal::CellForegroundColor {};
+        return terminal::RGBColor(_text);
+    }
+
+    /// Loads a configuration sub-section to handle cell color foreground/background + alpha.
+    ///
+    /// Example:
+    ///   { foreground: CellColor, foreground_alpha: FLOAT = 1.0,
+    ///     background: CellColor, background_alpha: FLOAT = 1.0 }
+    std::optional<CellRGBColorAndAlphaPair> parseCellRGBColorAndAlphaPair(UsedKeys& usedKeys,
+                                                                          string const& basePath,
+                                                                          YAML::Node const& baseNode,
+                                                                          string const& childNodeName)
+    {
+        auto node = baseNode[childNodeName];
+        if (!node)
+            return nullopt;
+
+        auto const childPath = fmt::format("{}.{}", basePath, childNodeName);
+        usedKeys.emplace(childPath);
+
+        auto cellRGBColorAndAlphaPair = CellRGBColorAndAlphaPair {};
+
+        cellRGBColorAndAlphaPair.foreground = parseCellColor(node["foreground"].as<string>());
+        usedKeys.emplace(childPath + ".foreground");
+        if (auto alpha = node["foreground_alpha"]; alpha && alpha.IsScalar())
+        {
+            usedKeys.emplace(childPath + ".foreground_alpha");
+            cellRGBColorAndAlphaPair.foregroundAlpha = std::clamp(alpha.as<float>(), 0.0f, 1.0f);
+        }
+
+        cellRGBColorAndAlphaPair.background = parseCellColor(node["background"].as<string>());
+        usedKeys.emplace(childPath + ".background");
+        if (auto alpha = node["background_alpha"]; alpha && alpha.IsScalar())
+        {
+            usedKeys.emplace(childPath + ".background_alpha");
+            cellRGBColorAndAlphaPair.backgroundAlpha = std::clamp(alpha.as<float>(), 0.0f, 1.0f);
+        }
+
+        return cellRGBColorAndAlphaPair;
+    }
+
+    // TODO:
+    // - [x] report missing keys
+    // - [ ] report superfluous keys (by keeping track of loaded keys, then iterate
+    //       through full document and report any key that has not been loaded but is available)
+    // - [ ] Do we want to report when no color schemes are defined? (at least warn about?)
+    // - [ ] Do we want to report when no input mappings are defined? (at least warn about?)
+
     vector<FileSystem::path> getTermInfoDirs(optional<FileSystem::path> const& _appTerminfoDir)
     {
         auto locations = vector<FileSystem::path>();
@@ -183,8 +245,6 @@ namespace // {{{ helper
                 throw runtime_error { fmt::format(
                     "Could not create directory {}. {}", _path.parent_path().string(), ec.message()) };
     }
-
-    using UsedKeys = set<string>;
 
     template <typename T>
     bool tryLoadValueRelative(UsedKeys& _usedKeys,
@@ -389,16 +449,6 @@ namespace // {{{ helper
         text.resize(size);
         ifs.read(text.data(), static_cast<std::streamsize>(size));
         return { text };
-    }
-
-    terminal::CellRGBColor parseCellColor(std::string const& _text)
-    {
-        auto const text = toUpper(_text);
-        if (text == "CELLBACKGROUND"sv)
-            return terminal::CellBackgroundColor {};
-        if (text == "CELLFOREGROUND"sv)
-            return terminal::CellForegroundColor {};
-        return terminal::RGBColor(_text);
     }
 
     std::vector<FileSystem::path> configHomes(string const& _programName)
@@ -833,6 +883,686 @@ namespace // {{{ helper
         }
     }
 
+    terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys,
+                                           string const& _basePath,
+                                           YAML::Node const& _node)
+    {
+        auto colors = terminal::ColorPalette {};
+        if (!_node)
+            return colors;
+
+        _usedKeys.emplace(_basePath);
+        using terminal::RGBColor;
+        if (auto def = _node["default"]; def)
+        {
+            _usedKeys.emplace(_basePath + ".default");
+            if (auto fg = def["foreground"]; fg)
+            {
+                _usedKeys.emplace(_basePath + ".default.foreground");
+                colors.defaultForeground = fg.as<string>();
+            }
+            if (auto bg = def["background"]; bg)
+            {
+                _usedKeys.emplace(_basePath + ".default.background");
+                colors.defaultBackground = bg.as<string>();
+            }
+        }
+
+        if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "search_highlight"))
+            colors.searchHighlight = p.value();
+
+        if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "search_highlight_focused"))
+            colors.searchHighlightFocused = p.value();
+
+        if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "selection"))
+            colors.selection = p.value();
+
+        if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "vi_mode_highlight"))
+            colors.yankHighlight = p.value();
+
+        if (auto cursor = _node["cursor"]; cursor)
+        {
+            _usedKeys.emplace(_basePath + ".cursor");
+            if (cursor.IsMap())
+            {
+                if (auto color = cursor["default"]; color.IsScalar())
+                {
+                    _usedKeys.emplace(_basePath + ".cursor.default");
+                    colors.cursor.color = parseCellColor(color.as<string>());
+                }
+                if (auto color = cursor["text"]; color.IsScalar())
+                {
+                    _usedKeys.emplace(_basePath + ".cursor.text");
+                    colors.cursor.textOverrideColor = parseCellColor(color.as<string>());
+                }
+            }
+            else if (cursor.IsScalar())
+            {
+                errorlog()(
+                    "Deprecated cursor config colorscheme entry. Please update your colorscheme entry for "
+                    "cursor.");
+                colors.cursor.color = RGBColor(cursor.as<string>());
+            }
+            else
+                errorlog()("Invalid cursor config colorscheme entry.");
+        }
+
+        if (auto hyperlink = _node["hyperlink_decoration"]; hyperlink)
+        {
+            _usedKeys.emplace(_basePath + ".hyperlink_decoration");
+            if (auto color = hyperlink["normal"]; color && color.IsScalar() && !color.as<string>().empty())
+            {
+                _usedKeys.emplace(_basePath + ".hyperlink_decoration.normal");
+                colors.hyperlinkDecoration.normal = color.as<string>();
+            }
+
+            if (auto color = hyperlink["hover"]; color && color.IsScalar() && !color.as<string>().empty())
+            {
+                _usedKeys.emplace(_basePath + ".hyperlink_decoration.hover");
+                colors.hyperlinkDecoration.hover = color.as<string>();
+            }
+        }
+
+        auto const loadColorMap = [&](YAML::Node const& _parent, string const& _key, size_t _offset) -> bool {
+            auto node = _parent[_key];
+            if (!node)
+                return false;
+
+            auto const colorKeyPath = fmt::format("{}.{}", _basePath, _key);
+            _usedKeys.emplace(colorKeyPath);
+            if (node.IsMap())
+            {
+                auto const assignColor = [&](size_t _index, string const& _name) {
+                    if (auto nodeValue = node[_name]; nodeValue)
+                    {
+                        _usedKeys.emplace(fmt::format("{}.{}", colorKeyPath, _name));
+                        if (auto const value = nodeValue.as<string>(); !value.empty())
+                        {
+                            if (value[0] == '#')
+                                colors.palette[_offset + _index] = value;
+                            else if (value.size() > 2 && value[0] == '0' && value[1] == 'x')
+                                colors.palette[_offset + _index] = RGBColor { nodeValue.as<uint32_t>() };
+                        }
+                    }
+                };
+                assignColor(0, "black");
+                assignColor(1, "red");
+                assignColor(2, "green");
+                assignColor(3, "yellow");
+                assignColor(4, "blue");
+                assignColor(5, "magenta");
+                assignColor(6, "cyan");
+                assignColor(7, "white");
+                return true;
+            }
+            else if (node.IsSequence())
+            {
+                for (size_t i = 0; i < node.size() && i < 8; ++i)
+                    if (node[i].IsScalar())
+                        colors.palette[i] = RGBColor { node[i].as<uint32_t>() };
+                    else
+                        colors.palette[i] = RGBColor { node[i].as<string>() };
+                return true;
+            }
+            return false;
+        };
+
+        loadColorMap(_node, "normal", 0);
+        loadColorMap(_node, "bright", 8);
+        if (!loadColorMap(_node, "dim", 256))
+        {
+            // calculate dim colors based on normal colors
+            for (unsigned i = 0; i < 8; ++i)
+                colors.palette[256 + i] = colors.palette[i] * 0.5f;
+        }
+
+        // TODO: color palette from 16..255
+
+        float opacityValue = 1.0;
+        tryLoadChildRelative(_usedKeys, _node, _basePath, "background_image.opacity", opacityValue);
+
+        bool imageBlur = false;
+        tryLoadChildRelative(_usedKeys, _node, _basePath, "background_image.blur", imageBlur);
+
+        string fileName;
+        if (tryLoadChildRelative(_usedKeys, _node, _basePath, "background_image.path", fileName))
+            colors.backgroundImage = loadImage(fileName, opacityValue, imageBlur);
+
+        return colors;
+    }
+
+    void softLoadFont(UsedKeys& _usedKeys,
+                      string_view _basePath,
+                      YAML::Node const& _node,
+                      text::font_description& _store)
+    {
+        if (_node.IsScalar())
+        {
+            _store.familyName = _node.as<string>();
+            _usedKeys.emplace(_basePath);
+        }
+        else if (_node.IsMap())
+        {
+            _usedKeys.emplace(_basePath);
+
+            if (_node["family"].IsScalar())
+            {
+                _usedKeys.emplace(fmt::format("{}.{}", _basePath, "family"));
+                _store.familyName = _node["family"].as<string>();
+            }
+
+            if (_node["slant"] && _node["slant"].IsScalar())
+            {
+                _usedKeys.emplace(fmt::format("{}.{}", _basePath, "slant"));
+                if (auto const p = text::make_font_slant(_node["slant"].as<string>()))
+                    _store.slant = p.value();
+            }
+
+            if (_node["weight"] && _node["weight"].IsScalar())
+            {
+                _usedKeys.emplace(fmt::format("{}.{}", _basePath, "weight"));
+                if (auto const p = text::make_font_weight(_node["weight"].as<string>()))
+                    _store.weight = p.value();
+            }
+
+            if (_node["features"] && _node["features"] && _node["features"].IsSequence())
+            {
+                _usedKeys.emplace(fmt::format("{}.{}", _basePath, "features"));
+                YAML::Node featuresNode = _node["features"];
+                for (auto&& i: featuresNode)
+                {
+                    auto const featureNode = i;
+                    if (!featureNode.IsScalar() || featureNode.as<string>().size() != 4)
+                    {
+                        errorlog()("Invalid font feature \"{}\".", featureNode.as<string>());
+                        continue;
+                    }
+                    auto const tag = featureNode.as<string>();
+                    _store.features.emplace_back(tag[0], tag[1], tag[2], tag[3]);
+                }
+            }
+        }
+    }
+
+    void softLoadFont(terminal::rasterizer::TextShapingEngine _textShapingEngine,
+                      UsedKeys& _usedKeys,
+                      string_view _basePath,
+                      YAML::Node const& _node,
+                      string const& _key,
+                      text::font_description& _store)
+    {
+        auto node = _node[_key];
+        if (!node)
+            return;
+
+        softLoadFont(_usedKeys, fmt::format("{}.{}", _basePath, _key), node, _store);
+
+        if (node.IsMap())
+        {
+            _usedKeys.emplace(fmt::format("{}.{}", _basePath, _key));
+            if (node["features"].IsSequence())
+            {
+                using terminal::rasterizer::TextShapingEngine;
+                switch (_textShapingEngine)
+                {
+                    case TextShapingEngine::OpenShaper: break;
+                    case TextShapingEngine::CoreText:
+                    case TextShapingEngine::DWrite:
+                        // TODO: Implement font feature settings handling for these engines.
+                        errorlog()("The configured text shaping engine {} does not yet support font feature "
+                                   "settings. Ignoring.",
+                                   _textShapingEngine);
+                }
+            }
+        }
+    }
+
+    template <typename T>
+    bool sanitizeRange(std::reference_wrapper<T> _value, T _min, T _max)
+    {
+        if (_min <= _value.get() && _value.get() <= _max)
+            return true;
+
+        _value.get() = std::clamp(_value.get(), _min, _max);
+        return false;
+    }
+
+    optional<terminal::VTType> stringToVTType(std::string const& _value)
+    {
+        using Type = terminal::VTType;
+        auto constexpr static mappings = array<tuple<string_view, terminal::VTType>, 10> {
+            tuple { "VT100"sv, Type::VT100 }, tuple { "VT220"sv, Type::VT220 },
+            tuple { "VT240"sv, Type::VT240 }, tuple { "VT330"sv, Type::VT330 },
+            tuple { "VT340"sv, Type::VT340 }, tuple { "VT320"sv, Type::VT320 },
+            tuple { "VT420"sv, Type::VT420 }, tuple { "VT510"sv, Type::VT510 },
+            tuple { "VT520"sv, Type::VT520 }, tuple { "VT525"sv, Type::VT525 }
+        };
+        for (auto const& mapping: mappings)
+            if (get<0>(mapping) == _value)
+                return get<1>(mapping);
+        return nullopt;
+    }
+
+    TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
+                                        YAML::Node const& _profile,
+                                        std::string const& _parentPath,
+                                        std::string const& _profileName,
+                                        unordered_map<string, terminal::ColorPalette> const& _colorschemes)
+    {
+        auto profile = TerminalProfile {};
+
+        if (auto colors = _profile["colors"]; colors) // {{{
+        {
+            _usedKeys.emplace(fmt::format("{}.{}.colors", _parentPath, _profileName));
+            auto const path = fmt::format("{}.{}.{}", _parentPath, _profileName, "colors");
+            if (colors.IsMap())
+                profile.colors = loadColorScheme(_usedKeys, path, colors);
+            else if (auto i = _colorschemes.find(colors.as<string>()); i != _colorschemes.end())
+            {
+                _usedKeys.emplace(path);
+                profile.colors = i->second;
+            }
+            else if (colors.IsScalar())
+            {
+                bool found = false;
+                for (FileSystem::path const& prefix: configHomes("contour"))
+                {
+                    auto const filePath = prefix / "colorschemes" / (colors.as<string>() + ".yml");
+                    auto fileContents = readFile(filePath);
+                    if (!fileContents)
+                        continue;
+                    YAML::Node subDocument = YAML::Load(fileContents.value());
+                    UsedKeys usedColorKeys;
+                    profile.colors = loadColorScheme(usedColorKeys, "", subDocument);
+                    // TODO: Check usedColorKeys for validity.
+                    ConfigLog()("Loaded colors from {}.", filePath.string());
+                    found = true;
+                    break;
+                }
+                if (!found)
+                    errorlog()("Could not open colorscheme file for \"{}\".", colors.as<string>());
+            }
+            else
+                errorlog()("scheme '{}' not found.", colors.as<string>());
+        }
+        else
+            errorlog()("No colors section in profile {} found.", _profileName);
+        // }}}
+
+        string const basePath = fmt::format("{}.{}", _parentPath, _profileName);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "escape_sandbox", profile.shell.escapeSandbox);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "shell", profile.shell.program);
+        if (profile.shell.program.empty())
+        {
+            if (!profile.shell.arguments.empty())
+                errorlog()("No shell defined but arguments. Ignoring arguments.");
+
+            auto loginShell = Process::loginShell(profile.shell.escapeSandbox);
+            profile.shell.program = loginShell.front();
+            loginShell.erase(loginShell.begin());
+            profile.shell.arguments = loginShell;
+        }
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "maximized", profile.maximized);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "fullscreen", profile.fullscreen);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "refresh_rate", profile.refreshRate);
+        tryLoadChildRelative(
+            _usedKeys, _profile, basePath, "copy_last_mark_range_offset", profile.copyLastMarkRangeOffset);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "show_title_bar", profile.show_title_bar);
+        tryLoadChildRelative(_usedKeys,
+                             _profile,
+                             basePath,
+                             "draw_bold_text_with_bright_colors",
+                             profile.colors.useBrightColors);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "wm_class", profile.wmClass);
+
+        if (auto args = _profile["arguments"]; args && args.IsSequence())
+        {
+            _usedKeys.emplace(fmt::format("{}.arguments", basePath));
+            for (auto const& argNode: args)
+                profile.shell.arguments.emplace_back(argNode.as<string>());
+        }
+
+        string strValue = FileSystem::current_path().generic_string();
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "initial_working_directory", strValue);
+        if (strValue.empty())
+            profile.shell.workingDirectory = FileSystem::current_path();
+
+        profile.shell.workingDirectory =
+            homeResolvedPath(profile.shell.workingDirectory.generic_string(), Process::homeDirectory());
+
+        profile.shell.env["TERMINAL_NAME"] = "contour";
+        profile.shell.env["TERMINAL_VERSION_TRIPLE"] =
+            fmt::format("{}.{}.{}", CONTOUR_VERSION_MAJOR, CONTOUR_VERSION_MINOR, CONTOUR_VERSION_PATCH);
+        profile.shell.env["TERMINAL_VERSION_STRING"] = CONTOUR_VERSION_STRING;
+
+        std::optional<FileSystem::path> appTerminfoDir;
+#if defined(__APPLE__)
+        {
+            char buf[1024];
+            uint32_t len = sizeof(buf);
+            if (_NSGetExecutablePath(buf, &len) == 0)
+            {
+                auto p = FileSystem::path(buf).parent_path().parent_path() / "Resources" / "terminfo";
+                if (FileSystem::is_directory(p))
+                {
+                    appTerminfoDir = p;
+                    profile.shell.env["TERMINFO_DIRS"] = p.string();
+                }
+            }
+        }
+#endif
+
+        if (auto env = _profile["environment"]; env)
+        {
+            auto const envpath = basePath + ".environment";
+            _usedKeys.emplace(envpath);
+            for (auto i = env.begin(); i != env.end(); ++i)
+            {
+                auto const name = i->first.as<string>();
+                auto const value = i->second.as<string>();
+                _usedKeys.emplace(fmt::format("{}.{}", envpath, name));
+                profile.shell.env[name] = value;
+            }
+        }
+
+        // force some default env
+        if (profile.shell.env.find("TERM") == profile.shell.env.end())
+        {
+            profile.shell.env["TERM"] = getDefaultTERM(appTerminfoDir);
+            ConfigLog()("Defaulting TERM to {}.", profile.shell.env["TERM"]);
+        }
+
+        if (profile.shell.env.find("COLORTERM") == profile.shell.env.end())
+            profile.shell.env["COLORTERM"] = "truecolor";
+
+        strValue = fmt::format("{}", profile.terminalId);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "terminal_id", strValue);
+        if (auto const idOpt = stringToVTType(strValue))
+            profile.terminalId = idOpt.value();
+        else
+            errorlog()("Invalid Terminal ID \"{}\", specified", strValue);
+
+        tryLoadChildRelative(
+            _usedKeys, _profile, basePath, "terminal_size.columns", profile.terminalSize.columns);
+        tryLoadChildRelative(
+            _usedKeys, _profile, basePath, "terminal_size.lines", profile.terminalSize.lines);
+        {
+            auto constexpr MinimalTerminalSize = PageSize { LineCount(3), ColumnCount(3) };
+            auto constexpr MaximumTerminalSize = PageSize { LineCount(200), ColumnCount(300) };
+
+            if (!sanitizeRange(ref(profile.terminalSize.columns.value),
+                               *MinimalTerminalSize.columns,
+                               *MaximumTerminalSize.columns))
+                errorlog()("Terminal width {} out of bounds. Should be between {} and {}.",
+                           profile.terminalSize.columns,
+                           MinimalTerminalSize.columns,
+                           MaximumTerminalSize.columns);
+
+            if (!sanitizeRange(
+                    ref(profile.terminalSize.lines), MinimalTerminalSize.lines, MaximumTerminalSize.lines))
+                errorlog()("Terminal height {} out of bounds. Should be between {} and {}.",
+                           profile.terminalSize.lines,
+                           MinimalTerminalSize.lines,
+                           MaximumTerminalSize.lines);
+        }
+
+        strValue = "ask";
+        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "permissions.capture_buffer", strValue))
+        {
+            if (auto x = toPermission(strValue))
+                profile.permissions.captureBuffer = x.value();
+        }
+
+        strValue = "ask";
+        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "permissions.change_font", strValue))
+        {
+            if (auto x = toPermission(strValue))
+                profile.permissions.changeFont = x.value();
+        }
+
+        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "font.size", profile.fonts.size.pt))
+        {
+            if (profile.fonts.size < MinimumFontSize)
+            {
+                errorlog()("Invalid font size {} set in config file. Minimum value is {}.",
+                           profile.fonts.size,
+                           MinimumFontSize);
+                profile.fonts.size = MinimumFontSize;
+            }
+        }
+
+        tryLoadChildRelative(
+            _usedKeys, _profile, basePath, "font.builtin_box_drawing", profile.fonts.builtinBoxDrawing);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "font.dpi_scale", profile.fonts.dpiScale);
+
+        auto constexpr NativeTextShapingEngine =
+#if defined(_WIN32)
+            terminal::rasterizer::TextShapingEngine::DWrite;
+#elif defined(__APPLE__)
+            terminal::rasterizer::TextShapingEngine::CoreText;
+#else
+            terminal::rasterizer::TextShapingEngine::OpenShaper;
+#endif
+
+        auto constexpr NativeFontLocator =
+#if defined(_WIN32)
+            terminal::rasterizer::FontLocatorEngine::DWrite;
+#elif defined(__APPLE__)
+            terminal::rasterizer::FontLocatorEngine::CoreText;
+#else
+            terminal::rasterizer::FontLocatorEngine::FontConfig;
+#endif
+
+        strValue = fmt::format("{}", profile.fonts.textShapingEngine);
+        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "font.text_shaping.engine", strValue))
+        {
+            auto const lwrValue = toLower(strValue);
+            if (lwrValue == "dwrite" || lwrValue == "directwrite")
+                profile.fonts.textShapingEngine = terminal::rasterizer::TextShapingEngine::DWrite;
+            else if (lwrValue == "core" || lwrValue == "coretext")
+                profile.fonts.textShapingEngine = terminal::rasterizer::TextShapingEngine::CoreText;
+            else if (lwrValue == "open" || lwrValue == "openshaper")
+                profile.fonts.textShapingEngine = terminal::rasterizer::TextShapingEngine::OpenShaper;
+            else if (lwrValue == "native")
+                profile.fonts.textShapingEngine = NativeTextShapingEngine;
+            else
+                ConfigLog()("Invalid value for configuration key {}.font.text_shaping.engine: {}",
+                            basePath,
+                            strValue);
+        }
+
+        profile.fonts.fontLocator = NativeFontLocator;
+        strValue = fmt::format("{}", profile.fonts.fontLocator);
+        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "font.locator", strValue))
+        {
+            auto const lwrValue = toLower(strValue);
+            if (lwrValue == "fontconfig")
+                profile.fonts.fontLocator = terminal::rasterizer::FontLocatorEngine::FontConfig;
+            else if (lwrValue == "coretext")
+                profile.fonts.fontLocator = terminal::rasterizer::FontLocatorEngine::CoreText;
+            else if (lwrValue == "dwrite" || lwrValue == "directwrite")
+                profile.fonts.fontLocator = terminal::rasterizer::FontLocatorEngine::DWrite;
+            else if (lwrValue == "native")
+                profile.fonts.fontLocator = NativeFontLocator;
+            else if (lwrValue == "mock")
+                profile.fonts.fontLocator = terminal::rasterizer::FontLocatorEngine::Mock;
+            else
+                ConfigLog()("Invalid value for configuration key {}.font.locator: {}", basePath, strValue);
+        }
+
+        bool strictSpacing = false;
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "font.strict_spacing", strictSpacing);
+
+        auto const fontBasePath = fmt::format("{}.{}.font", _parentPath, _profileName);
+
+        profile.fonts.regular.familyName = "regular";
+        profile.fonts.regular.spacing = text::font_spacing::mono;
+        profile.fonts.regular.strict_spacing = strictSpacing;
+        softLoadFont(profile.fonts.textShapingEngine,
+                     _usedKeys,
+                     fontBasePath,
+                     _profile["font"],
+                     "regular",
+                     profile.fonts.regular);
+
+        profile.fonts.bold = profile.fonts.regular;
+        profile.fonts.bold.weight = text::font_weight::bold;
+        softLoadFont(profile.fonts.textShapingEngine,
+                     _usedKeys,
+                     fontBasePath,
+                     _profile["font"],
+                     "bold",
+                     profile.fonts.bold);
+
+        profile.fonts.italic = profile.fonts.regular;
+        profile.fonts.italic.slant = text::font_slant::italic;
+        softLoadFont(profile.fonts.textShapingEngine,
+                     _usedKeys,
+                     fontBasePath,
+                     _profile["font"],
+                     "italic",
+                     profile.fonts.italic);
+
+        profile.fonts.boldItalic = profile.fonts.regular;
+        profile.fonts.boldItalic.weight = text::font_weight::bold;
+        profile.fonts.boldItalic.slant = text::font_slant::italic;
+        softLoadFont(profile.fonts.textShapingEngine,
+                     _usedKeys,
+                     fontBasePath,
+                     _profile["font"],
+                     "bold_italic",
+                     profile.fonts.boldItalic);
+
+        profile.fonts.emoji.familyName = "emoji";
+        profile.fonts.emoji.spacing = text::font_spacing::mono;
+        softLoadFont(profile.fonts.textShapingEngine,
+                     _usedKeys,
+                     fontBasePath,
+                     _profile["font"],
+                     "emoji",
+                     profile.fonts.emoji);
+
+#if defined(_WIN32)
+        // Windows does not understand font family "emoji", but fontconfig does. Rewrite user-input here.
+        if (profile.fonts.emoji.familyName == "emoji")
+            profile.fonts.emoji.familyName = "Segoe UI Emoji";
+#endif
+
+        strValue = "gray";
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "font.render_mode", strValue);
+        auto const static renderModeMap = array {
+            pair { "lcd"sv, text::render_mode::lcd },           pair { "light"sv, text::render_mode::light },
+            pair { "gray"sv, text::render_mode::gray },         pair { ""sv, text::render_mode::gray },
+            pair { "monochrome"sv, text::render_mode::bitmap },
+        };
+
+        auto const i = crispy::find_if(renderModeMap, [&](auto m) { return m.first == strValue; });
+        if (i != renderModeMap.end())
+            profile.fonts.renderMode = i->second;
+        else
+            errorlog()("Invalid render_mode \"{}\" in configuration.", strValue);
+
+        auto intValue = LineCount();
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "history.limit", intValue);
+        // value -1 is used for infinite grid
+        if (unbox<int>(intValue) == -1)
+            profile.maxHistoryLineCount = Infinite();
+        else if (unbox<int>(intValue) > -1)
+            profile.maxHistoryLineCount = LineCount(intValue);
+        else
+            profile.maxHistoryLineCount = LineCount(0);
+
+        strValue = fmt::format("{}", ScrollBarPosition::Right);
+        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "scrollbar.position", strValue))
+        {
+            auto const literal = toLower(strValue);
+            if (literal == "left")
+                profile.scrollbarPosition = ScrollBarPosition::Left;
+            else if (literal == "right")
+                profile.scrollbarPosition = ScrollBarPosition::Right;
+            else if (literal == "hidden")
+                profile.scrollbarPosition = ScrollBarPosition::Hidden;
+            else
+                errorlog()("Invalid value for config entry {}: {}", "scrollbar.position", strValue);
+        }
+        tryLoadChildRelative(
+            _usedKeys, _profile, basePath, "scrollbar.hide_in_alt_screen", profile.hideScrollbarInAltScreen);
+
+        tryLoadChildRelative(
+            _usedKeys, _profile, basePath, "history.auto_scroll_on_update", profile.autoScrollOnUpdate);
+        tryLoadChildRelative(
+            _usedKeys, _profile, basePath, "history.scroll_multiplier", profile.historyScrollMultiplier);
+
+        float floatValue = 1.0;
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "background.opacity", floatValue);
+        profile.backgroundOpacity =
+            (terminal::Opacity)(static_cast<unsigned>(255 * clamp(floatValue, 0.0f, 1.0f)));
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "background.blur", profile.backgroundBlur);
+
+        strValue = "dotted-underline"; // TODO: fmt::format("{}", profile.hyperlinkDecoration.normal);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "hyperlink_decoration.normal", strValue);
+        if (auto const pdeco = terminal::rasterizer::to_decorator(strValue); pdeco.has_value())
+            profile.hyperlinkDecoration.normal = *pdeco;
+
+        strValue = "underline"; // TODO: fmt::format("{}", profile.hyperlinkDecoration.hover);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "hyperlink_decoration.hover", strValue);
+
+        tryLoadChildRelative(
+            _usedKeys, _profile, basePath, "vi_mode_scrolloff", profile.modalCursorScrollOff);
+
+        auto uintValue = profile.highlightTimeout.count();
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "vi_mode_highlight_timeout", uintValue);
+        profile.highlightTimeout = chrono::milliseconds(uintValue);
+        if (auto const pdeco = terminal::rasterizer::to_decorator(strValue); pdeco.has_value())
+            profile.hyperlinkDecoration.hover = *pdeco;
+
+        tryLoadChildRelative(_usedKeys,
+                             _profile,
+                             basePath,
+                             "highlight_word_and_matches_on_double_click",
+                             profile.highlightDoubleClickedWord);
+
+        if (optional<config::CursorConfig> cursorOpt =
+                parseCursorConfig(_profile["cursor"], _usedKeys, basePath + ".cursor"))
+        {
+            _usedKeys.emplace(basePath + ".cursor");
+            profile.inputModes.insert.cursor = cursorOpt.value();
+        }
+
+        if (auto normalModeNode = _profile["normal_mode"])
+        {
+            _usedKeys.emplace(basePath + ".normal_mode");
+            if (optional<config::CursorConfig> cursorOpt =
+                    parseCursorConfig(normalModeNode["cursor"], _usedKeys, basePath + ".normal_mode.cursor"))
+            {
+                _usedKeys.emplace(basePath + ".normal_mode.cursor");
+                profile.inputModes.normal.cursor = cursorOpt.value();
+            }
+        }
+
+        if (auto visualModeNode = _profile["visual_mode"])
+        {
+            _usedKeys.emplace(basePath + ".visual_mode");
+            if (optional<config::CursorConfig> cursorOpt =
+                    parseCursorConfig(visualModeNode["cursor"], _usedKeys, basePath + ".visual_mode.cursor"))
+            {
+                _usedKeys.emplace(basePath + ".visual_mode.cursor");
+                profile.inputModes.normal.cursor = cursorOpt.value();
+            }
+        }
+
+        strValue = "none";
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "status_line.display", strValue);
+        if (strValue == "indicator")
+            profile.initialStatusDisplayType = terminal::StatusDisplayType::Indicator;
+        else if (strValue == "none")
+            profile.initialStatusDisplayType = terminal::StatusDisplayType::None;
+        else
+            errorlog()("Invalid value for config entry {}: {}", "status_line.display", strValue);
+
+        return profile;
+    }
+
 } // namespace
 // }}}
 
@@ -901,727 +1631,6 @@ Config loadConfigFromFile(FileSystem::path const& _fileName)
     Config config {};
     loadConfigFromFile(config, _fileName);
     return config;
-}
-
-std::shared_ptr<terminal::BackgroundImage const> loadImage(string const& fileName, float opacity, bool blur)
-{
-    auto const resolvedFileName = homeResolvedPath(fileName, Process::homeDirectory());
-
-    auto backgroundImage = terminal::BackgroundImage {};
-    backgroundImage.location = resolvedFileName;
-    backgroundImage.hash = crispy::StrongHash::compute(resolvedFileName.string());
-    backgroundImage.opacity = opacity;
-    backgroundImage.blur = blur;
-
-    return make_shared<terminal::BackgroundImage const>(std::move(backgroundImage));
-}
-
-/// Loads a configuration sub-section to handle cell color foreground/background + alpha.
-///
-/// Example:
-///   { foreground: CellColor, foreground_alpha: FLOAT = 1.0,
-///     background: CellColor, background_alpha: FLOAT = 1.0 }
-std::optional<CellRGBColorAndAlphaPair> parseCellRGBColorAndAlphaPair(UsedKeys& usedKeys,
-                                                                      string const& basePath,
-                                                                      YAML::Node const& baseNode,
-                                                                      string const& childNodeName)
-{
-    auto node = baseNode[childNodeName];
-    if (!node)
-        return nullopt;
-
-    auto const childPath = fmt::format("{}.{}", basePath, childNodeName);
-    usedKeys.emplace(childPath);
-
-    auto cellRGBColorAndAlphaPair = CellRGBColorAndAlphaPair {};
-
-    cellRGBColorAndAlphaPair.foreground = parseCellColor(node["foreground"].as<string>());
-    usedKeys.emplace(childPath + ".foreground");
-    if (auto alpha = node["foreground_alpha"]; alpha && alpha.IsScalar())
-    {
-        usedKeys.emplace(childPath + ".foreground_alpha");
-        cellRGBColorAndAlphaPair.foregroundAlpha = std::clamp(alpha.as<float>(), 0.0f, 1.0f);
-    }
-
-    cellRGBColorAndAlphaPair.background = parseCellColor(node["background"].as<string>());
-    usedKeys.emplace(childPath + ".background");
-    if (auto alpha = node["background_alpha"]; alpha && alpha.IsScalar())
-    {
-        usedKeys.emplace(childPath + ".background_alpha");
-        cellRGBColorAndAlphaPair.backgroundAlpha = std::clamp(alpha.as<float>(), 0.0f, 1.0f);
-    }
-
-    return cellRGBColorAndAlphaPair;
-}
-
-terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys, string const& _basePath, YAML::Node const& _node)
-{
-    auto colors = terminal::ColorPalette {};
-    if (!_node)
-        return colors;
-
-    _usedKeys.emplace(_basePath);
-    using terminal::RGBColor;
-    if (auto def = _node["default"]; def)
-    {
-        _usedKeys.emplace(_basePath + ".default");
-        if (auto fg = def["foreground"]; fg)
-        {
-            _usedKeys.emplace(_basePath + ".default.foreground");
-            colors.defaultForeground = fg.as<string>();
-        }
-        if (auto bg = def["background"]; bg)
-        {
-            _usedKeys.emplace(_basePath + ".default.background");
-            colors.defaultBackground = bg.as<string>();
-        }
-    }
-
-    if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "search_highlight"))
-        colors.searchHighlight = p.value();
-
-    if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "search_highlight_focused"))
-        colors.searchHighlightFocused = p.value();
-
-    if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "selection"))
-        colors.selection = p.value();
-
-    if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "vi_mode_highlight"))
-        colors.yankHighlight = p.value();
-
-    if (auto cursor = _node["cursor"]; cursor)
-    {
-        _usedKeys.emplace(_basePath + ".cursor");
-        if (cursor.IsMap())
-        {
-            if (auto color = cursor["default"]; color.IsScalar())
-            {
-                _usedKeys.emplace(_basePath + ".cursor.default");
-                colors.cursor.color = parseCellColor(color.as<string>());
-            }
-            if (auto color = cursor["text"]; color.IsScalar())
-            {
-                _usedKeys.emplace(_basePath + ".cursor.text");
-                colors.cursor.textOverrideColor = parseCellColor(color.as<string>());
-            }
-        }
-        else if (cursor.IsScalar())
-        {
-            errorlog()("Deprecated cursor config colorscheme entry. Please update your colorscheme entry for "
-                       "cursor.");
-            colors.cursor.color = RGBColor(cursor.as<string>());
-        }
-        else
-            errorlog()("Invalid cursor config colorscheme entry.");
-    }
-
-    if (auto hyperlink = _node["hyperlink_decoration"]; hyperlink)
-    {
-        _usedKeys.emplace(_basePath + ".hyperlink_decoration");
-        if (auto color = hyperlink["normal"]; color && color.IsScalar() && !color.as<string>().empty())
-        {
-            _usedKeys.emplace(_basePath + ".hyperlink_decoration.normal");
-            colors.hyperlinkDecoration.normal = color.as<string>();
-        }
-
-        if (auto color = hyperlink["hover"]; color && color.IsScalar() && !color.as<string>().empty())
-        {
-            _usedKeys.emplace(_basePath + ".hyperlink_decoration.hover");
-            colors.hyperlinkDecoration.hover = color.as<string>();
-        }
-    }
-
-    auto const loadColorMap = [&](YAML::Node const& _parent, string const& _key, size_t _offset) -> bool {
-        auto node = _parent[_key];
-        if (!node)
-            return false;
-
-        auto const colorKeyPath = fmt::format("{}.{}", _basePath, _key);
-        _usedKeys.emplace(colorKeyPath);
-        if (node.IsMap())
-        {
-            auto const assignColor = [&](size_t _index, string const& _name) {
-                if (auto nodeValue = node[_name]; nodeValue)
-                {
-                    _usedKeys.emplace(fmt::format("{}.{}", colorKeyPath, _name));
-                    if (auto const value = nodeValue.as<string>(); !value.empty())
-                    {
-                        if (value[0] == '#')
-                            colors.palette[_offset + _index] = value;
-                        else if (value.size() > 2 && value[0] == '0' && value[1] == 'x')
-                            colors.palette[_offset + _index] = RGBColor { nodeValue.as<uint32_t>() };
-                    }
-                }
-            };
-            assignColor(0, "black");
-            assignColor(1, "red");
-            assignColor(2, "green");
-            assignColor(3, "yellow");
-            assignColor(4, "blue");
-            assignColor(5, "magenta");
-            assignColor(6, "cyan");
-            assignColor(7, "white");
-            return true;
-        }
-        else if (node.IsSequence())
-        {
-            for (size_t i = 0; i < node.size() && i < 8; ++i)
-                if (node[i].IsScalar())
-                    colors.palette[i] = RGBColor { node[i].as<uint32_t>() };
-                else
-                    colors.palette[i] = RGBColor { node[i].as<string>() };
-            return true;
-        }
-        return false;
-    };
-
-    loadColorMap(_node, "normal", 0);
-    loadColorMap(_node, "bright", 8);
-    if (!loadColorMap(_node, "dim", 256))
-    {
-        // calculate dim colors based on normal colors
-        for (unsigned i = 0; i < 8; ++i)
-            colors.palette[256 + i] = colors.palette[i] * 0.5f;
-    }
-
-    // TODO: color palette from 16..255
-
-    float opacityValue = 1.0;
-    tryLoadChildRelative(_usedKeys, _node, _basePath, "background_image.opacity", opacityValue);
-
-    bool imageBlur = false;
-    tryLoadChildRelative(_usedKeys, _node, _basePath, "background_image.blur", imageBlur);
-
-    string fileName;
-    if (tryLoadChildRelative(_usedKeys, _node, _basePath, "background_image.path", fileName))
-        colors.backgroundImage = loadImage(fileName, opacityValue, imageBlur);
-
-    return colors;
-}
-
-void softLoadFont(UsedKeys& _usedKeys,
-                  string_view _basePath,
-                  YAML::Node const& _node,
-                  text::font_description& _store)
-{
-    if (_node.IsScalar())
-    {
-        _store.familyName = _node.as<string>();
-        _usedKeys.emplace(_basePath);
-    }
-    else if (_node.IsMap())
-    {
-        _usedKeys.emplace(_basePath);
-
-        if (_node["family"].IsScalar())
-        {
-            _usedKeys.emplace(fmt::format("{}.{}", _basePath, "family"));
-            _store.familyName = _node["family"].as<string>();
-        }
-
-        if (_node["slant"] && _node["slant"].IsScalar())
-        {
-            _usedKeys.emplace(fmt::format("{}.{}", _basePath, "slant"));
-            if (auto const p = text::make_font_slant(_node["slant"].as<string>()))
-                _store.slant = p.value();
-        }
-
-        if (_node["weight"] && _node["weight"].IsScalar())
-        {
-            _usedKeys.emplace(fmt::format("{}.{}", _basePath, "weight"));
-            if (auto const p = text::make_font_weight(_node["weight"].as<string>()))
-                _store.weight = p.value();
-        }
-
-        if (_node["features"] && _node["features"] && _node["features"].IsSequence())
-        {
-            _usedKeys.emplace(fmt::format("{}.{}", _basePath, "features"));
-            YAML::Node featuresNode = _node["features"];
-            for (auto&& i: featuresNode)
-            {
-                auto const featureNode = i;
-                if (!featureNode.IsScalar() || featureNode.as<string>().size() != 4)
-                {
-                    errorlog()("Invalid font feature \"{}\".", featureNode.as<string>());
-                    continue;
-                }
-                auto const tag = featureNode.as<string>();
-                _store.features.emplace_back(tag[0], tag[1], tag[2], tag[3]);
-            }
-        }
-    }
-}
-
-void softLoadFont(terminal::rasterizer::TextShapingEngine _textShapingEngine,
-                  UsedKeys& _usedKeys,
-                  string_view _basePath,
-                  YAML::Node const& _node,
-                  string const& _key,
-                  text::font_description& _store)
-{
-    auto node = _node[_key];
-    if (!node)
-        return;
-
-    softLoadFont(_usedKeys, fmt::format("{}.{}", _basePath, _key), node, _store);
-
-    if (node.IsMap())
-    {
-        _usedKeys.emplace(fmt::format("{}.{}", _basePath, _key));
-        if (node["features"].IsSequence())
-        {
-            using terminal::rasterizer::TextShapingEngine;
-            switch (_textShapingEngine)
-            {
-                case TextShapingEngine::OpenShaper: break;
-                case TextShapingEngine::CoreText:
-                case TextShapingEngine::DWrite:
-                    // TODO: Implement font feature settings handling for these engines.
-                    errorlog()("The configured text shaping engine {} does not yet support font feature "
-                               "settings. Ignoring.",
-                               _textShapingEngine);
-            }
-        }
-    }
-}
-
-template <typename T>
-bool sanitizeRange(std::reference_wrapper<T> _value, T _min, T _max)
-{
-    if (_min <= _value.get() && _value.get() <= _max)
-        return true;
-
-    _value.get() = std::clamp(_value.get(), _min, _max);
-    return false;
-}
-
-optional<terminal::VTType> stringToVTType(std::string const& _value)
-{
-    using Type = terminal::VTType;
-    auto constexpr static mappings = array<tuple<string_view, terminal::VTType>, 10> {
-        tuple { "VT100"sv, Type::VT100 }, tuple { "VT220"sv, Type::VT220 }, tuple { "VT240"sv, Type::VT240 },
-        tuple { "VT330"sv, Type::VT330 }, tuple { "VT340"sv, Type::VT340 }, tuple { "VT320"sv, Type::VT320 },
-        tuple { "VT420"sv, Type::VT420 }, tuple { "VT510"sv, Type::VT510 }, tuple { "VT520"sv, Type::VT520 },
-        tuple { "VT525"sv, Type::VT525 }
-    };
-    for (auto const& mapping: mappings)
-        if (get<0>(mapping) == _value)
-            return get<1>(mapping);
-    return nullopt;
-}
-
-TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
-                                    YAML::Node const& _profile,
-                                    std::string const& _parentPath,
-                                    std::string const& _profileName,
-                                    unordered_map<string, terminal::ColorPalette> const& _colorschemes)
-{
-    auto profile = TerminalProfile {};
-
-    if (auto colors = _profile["colors"]; colors) // {{{
-    {
-        _usedKeys.emplace(fmt::format("{}.{}.colors", _parentPath, _profileName));
-        auto const path = fmt::format("{}.{}.{}", _parentPath, _profileName, "colors");
-        if (colors.IsMap())
-            profile.colors = loadColorScheme(_usedKeys, path, colors);
-        else if (auto i = _colorschemes.find(colors.as<string>()); i != _colorschemes.end())
-        {
-            _usedKeys.emplace(path);
-            profile.colors = i->second;
-        }
-        else if (colors.IsScalar())
-        {
-            bool found = false;
-            for (FileSystem::path const& prefix: configHomes("contour"))
-            {
-                auto const filePath = prefix / "colorschemes" / (colors.as<string>() + ".yml");
-                auto fileContents = readFile(filePath);
-                if (!fileContents)
-                    continue;
-                YAML::Node subDocument = YAML::Load(fileContents.value());
-                UsedKeys usedColorKeys;
-                profile.colors = loadColorScheme(usedColorKeys, "", subDocument);
-                // TODO: Check usedColorKeys for validity.
-                ConfigLog()("Loaded colors from {}.", filePath.string());
-                found = true;
-                break;
-            }
-            if (!found)
-                errorlog()("Could not open colorscheme file for \"{}\".", colors.as<string>());
-        }
-        else
-            errorlog()("scheme '{}' not found.", colors.as<string>());
-    }
-    else
-        errorlog()("No colors section in profile {} found.", _profileName);
-    // }}}
-
-    string const basePath = fmt::format("{}.{}", _parentPath, _profileName);
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "escape_sandbox", profile.shell.escapeSandbox);
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "shell", profile.shell.program);
-    if (profile.shell.program.empty())
-    {
-        if (!profile.shell.arguments.empty())
-            errorlog()("No shell defined but arguments. Ignoring arguments.");
-
-        auto loginShell = Process::loginShell(profile.shell.escapeSandbox);
-        profile.shell.program = loginShell.front();
-        loginShell.erase(loginShell.begin());
-        profile.shell.arguments = loginShell;
-    }
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "maximized", profile.maximized);
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "fullscreen", profile.fullscreen);
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "refresh_rate", profile.refreshRate);
-    tryLoadChildRelative(
-        _usedKeys, _profile, basePath, "copy_last_mark_range_offset", profile.copyLastMarkRangeOffset);
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "show_title_bar", profile.show_title_bar);
-    tryLoadChildRelative(
-        _usedKeys, _profile, basePath, "draw_bold_text_with_bright_colors", profile.colors.useBrightColors);
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "wm_class", profile.wmClass);
-
-    if (auto args = _profile["arguments"]; args && args.IsSequence())
-    {
-        _usedKeys.emplace(fmt::format("{}.arguments", basePath));
-        for (auto const& argNode: args)
-            profile.shell.arguments.emplace_back(argNode.as<string>());
-    }
-
-    string strValue = FileSystem::current_path().generic_string();
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "initial_working_directory", strValue);
-    if (strValue.empty())
-        profile.shell.workingDirectory = FileSystem::current_path();
-
-    profile.shell.workingDirectory =
-        homeResolvedPath(profile.shell.workingDirectory.generic_string(), Process::homeDirectory());
-
-    profile.shell.env["TERMINAL_NAME"] = "contour";
-    profile.shell.env["TERMINAL_VERSION_TRIPLE"] =
-        fmt::format("{}.{}.{}", CONTOUR_VERSION_MAJOR, CONTOUR_VERSION_MINOR, CONTOUR_VERSION_PATCH);
-    profile.shell.env["TERMINAL_VERSION_STRING"] = CONTOUR_VERSION_STRING;
-
-    std::optional<FileSystem::path> appTerminfoDir;
-#if defined(__APPLE__)
-    {
-        char buf[1024];
-        uint32_t len = sizeof(buf);
-        if (_NSGetExecutablePath(buf, &len) == 0)
-        {
-            auto p = FileSystem::path(buf).parent_path().parent_path() / "Resources" / "terminfo";
-            if (FileSystem::is_directory(p))
-            {
-                appTerminfoDir = p;
-                profile.shell.env["TERMINFO_DIRS"] = p.string();
-            }
-        }
-    }
-#endif
-
-    if (auto env = _profile["environment"]; env)
-    {
-        auto const envpath = basePath + ".environment";
-        _usedKeys.emplace(envpath);
-        for (auto i = env.begin(); i != env.end(); ++i)
-        {
-            auto const name = i->first.as<string>();
-            auto const value = i->second.as<string>();
-            _usedKeys.emplace(fmt::format("{}.{}", envpath, name));
-            profile.shell.env[name] = value;
-        }
-    }
-
-    // force some default env
-    if (profile.shell.env.find("TERM") == profile.shell.env.end())
-    {
-        profile.shell.env["TERM"] = getDefaultTERM(appTerminfoDir);
-        ConfigLog()("Defaulting TERM to {}.", profile.shell.env["TERM"]);
-    }
-
-    if (profile.shell.env.find("COLORTERM") == profile.shell.env.end())
-        profile.shell.env["COLORTERM"] = "truecolor";
-
-    strValue = fmt::format("{}", profile.terminalId);
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "terminal_id", strValue);
-    if (auto const idOpt = stringToVTType(strValue))
-        profile.terminalId = idOpt.value();
-    else
-        errorlog()("Invalid Terminal ID \"{}\", specified", strValue);
-
-    tryLoadChildRelative(
-        _usedKeys, _profile, basePath, "terminal_size.columns", profile.terminalSize.columns);
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "terminal_size.lines", profile.terminalSize.lines);
-    {
-        auto constexpr MinimalTerminalSize = PageSize { LineCount(3), ColumnCount(3) };
-        auto constexpr MaximumTerminalSize = PageSize { LineCount(200), ColumnCount(300) };
-
-        if (!sanitizeRange(ref(profile.terminalSize.columns.value),
-                           *MinimalTerminalSize.columns,
-                           *MaximumTerminalSize.columns))
-            errorlog()("Terminal width {} out of bounds. Should be between {} and {}.",
-                       profile.terminalSize.columns,
-                       MinimalTerminalSize.columns,
-                       MaximumTerminalSize.columns);
-
-        if (!sanitizeRange(
-                ref(profile.terminalSize.lines), MinimalTerminalSize.lines, MaximumTerminalSize.lines))
-            errorlog()("Terminal height {} out of bounds. Should be between {} and {}.",
-                       profile.terminalSize.lines,
-                       MinimalTerminalSize.lines,
-                       MaximumTerminalSize.lines);
-    }
-
-    strValue = "ask";
-    if (tryLoadChildRelative(_usedKeys, _profile, basePath, "permissions.capture_buffer", strValue))
-    {
-        if (auto x = toPermission(strValue))
-            profile.permissions.captureBuffer = x.value();
-    }
-
-    strValue = "ask";
-    if (tryLoadChildRelative(_usedKeys, _profile, basePath, "permissions.change_font", strValue))
-    {
-        if (auto x = toPermission(strValue))
-            profile.permissions.changeFont = x.value();
-    }
-
-    if (tryLoadChildRelative(_usedKeys, _profile, basePath, "font.size", profile.fonts.size.pt))
-    {
-        if (profile.fonts.size < MinimumFontSize)
-        {
-            errorlog()("Invalid font size {} set in config file. Minimum value is {}.",
-                       profile.fonts.size,
-                       MinimumFontSize);
-            profile.fonts.size = MinimumFontSize;
-        }
-    }
-
-    tryLoadChildRelative(
-        _usedKeys, _profile, basePath, "font.builtin_box_drawing", profile.fonts.builtinBoxDrawing);
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "font.dpi_scale", profile.fonts.dpiScale);
-
-    auto constexpr NativeTextShapingEngine =
-#if defined(_WIN32)
-        terminal::rasterizer::TextShapingEngine::DWrite;
-#elif defined(__APPLE__)
-        terminal::rasterizer::TextShapingEngine::CoreText;
-#else
-        terminal::rasterizer::TextShapingEngine::OpenShaper;
-#endif
-
-    auto constexpr NativeFontLocator =
-#if defined(_WIN32)
-        terminal::rasterizer::FontLocatorEngine::DWrite;
-#elif defined(__APPLE__)
-        terminal::rasterizer::FontLocatorEngine::CoreText;
-#else
-        terminal::rasterizer::FontLocatorEngine::FontConfig;
-#endif
-
-    strValue = fmt::format("{}", profile.fonts.textShapingEngine);
-    if (tryLoadChildRelative(_usedKeys, _profile, basePath, "font.text_shaping.engine", strValue))
-    {
-        auto const lwrValue = toLower(strValue);
-        if (lwrValue == "dwrite" || lwrValue == "directwrite")
-            profile.fonts.textShapingEngine = terminal::rasterizer::TextShapingEngine::DWrite;
-        else if (lwrValue == "core" || lwrValue == "coretext")
-            profile.fonts.textShapingEngine = terminal::rasterizer::TextShapingEngine::CoreText;
-        else if (lwrValue == "open" || lwrValue == "openshaper")
-            profile.fonts.textShapingEngine = terminal::rasterizer::TextShapingEngine::OpenShaper;
-        else if (lwrValue == "native")
-            profile.fonts.textShapingEngine = NativeTextShapingEngine;
-        else
-            ConfigLog()(
-                "Invalid value for configuration key {}.font.text_shaping.engine: {}", basePath, strValue);
-    }
-
-    profile.fonts.fontLocator = NativeFontLocator;
-    strValue = fmt::format("{}", profile.fonts.fontLocator);
-    if (tryLoadChildRelative(_usedKeys, _profile, basePath, "font.locator", strValue))
-    {
-        auto const lwrValue = toLower(strValue);
-        if (lwrValue == "fontconfig")
-            profile.fonts.fontLocator = terminal::rasterizer::FontLocatorEngine::FontConfig;
-        else if (lwrValue == "coretext")
-            profile.fonts.fontLocator = terminal::rasterizer::FontLocatorEngine::CoreText;
-        else if (lwrValue == "dwrite" || lwrValue == "directwrite")
-            profile.fonts.fontLocator = terminal::rasterizer::FontLocatorEngine::DWrite;
-        else if (lwrValue == "native")
-            profile.fonts.fontLocator = NativeFontLocator;
-        else if (lwrValue == "mock")
-            profile.fonts.fontLocator = terminal::rasterizer::FontLocatorEngine::Mock;
-        else
-            ConfigLog()("Invalid value for configuration key {}.font.locator: {}", basePath, strValue);
-    }
-
-    bool strictSpacing = false;
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "font.strict_spacing", strictSpacing);
-
-    auto const fontBasePath = fmt::format("{}.{}.font", _parentPath, _profileName);
-
-    profile.fonts.regular.familyName = "regular";
-    profile.fonts.regular.spacing = text::font_spacing::mono;
-    profile.fonts.regular.strict_spacing = strictSpacing;
-    softLoadFont(profile.fonts.textShapingEngine,
-                 _usedKeys,
-                 fontBasePath,
-                 _profile["font"],
-                 "regular",
-                 profile.fonts.regular);
-
-    profile.fonts.bold = profile.fonts.regular;
-    profile.fonts.bold.weight = text::font_weight::bold;
-    softLoadFont(profile.fonts.textShapingEngine,
-                 _usedKeys,
-                 fontBasePath,
-                 _profile["font"],
-                 "bold",
-                 profile.fonts.bold);
-
-    profile.fonts.italic = profile.fonts.regular;
-    profile.fonts.italic.slant = text::font_slant::italic;
-    softLoadFont(profile.fonts.textShapingEngine,
-                 _usedKeys,
-                 fontBasePath,
-                 _profile["font"],
-                 "italic",
-                 profile.fonts.italic);
-
-    profile.fonts.boldItalic = profile.fonts.regular;
-    profile.fonts.boldItalic.weight = text::font_weight::bold;
-    profile.fonts.boldItalic.slant = text::font_slant::italic;
-    softLoadFont(profile.fonts.textShapingEngine,
-                 _usedKeys,
-                 fontBasePath,
-                 _profile["font"],
-                 "bold_italic",
-                 profile.fonts.boldItalic);
-
-    profile.fonts.emoji.familyName = "emoji";
-    profile.fonts.emoji.spacing = text::font_spacing::mono;
-    softLoadFont(profile.fonts.textShapingEngine,
-                 _usedKeys,
-                 fontBasePath,
-                 _profile["font"],
-                 "emoji",
-                 profile.fonts.emoji);
-
-#if defined(_WIN32)
-    // Windows does not understand font family "emoji", but fontconfig does. Rewrite user-input here.
-    if (profile.fonts.emoji.familyName == "emoji")
-        profile.fonts.emoji.familyName = "Segoe UI Emoji";
-#endif
-
-    strValue = "gray";
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "font.render_mode", strValue);
-    auto const static renderModeMap = array {
-        pair { "lcd"sv, text::render_mode::lcd },           pair { "light"sv, text::render_mode::light },
-        pair { "gray"sv, text::render_mode::gray },         pair { ""sv, text::render_mode::gray },
-        pair { "monochrome"sv, text::render_mode::bitmap },
-    };
-
-    auto const i = crispy::find_if(renderModeMap, [&](auto m) { return m.first == strValue; });
-    if (i != renderModeMap.end())
-        profile.fonts.renderMode = i->second;
-    else
-        errorlog()("Invalid render_mode \"{}\" in configuration.", strValue);
-
-    auto intValue = LineCount();
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "history.limit", intValue);
-    // value -1 is used for infinite grid
-    if (unbox<int>(intValue) == -1)
-        profile.maxHistoryLineCount = Infinite();
-    else if (unbox<int>(intValue) > -1)
-        profile.maxHistoryLineCount = LineCount(intValue);
-    else
-        profile.maxHistoryLineCount = LineCount(0);
-
-    strValue = fmt::format("{}", ScrollBarPosition::Right);
-    if (tryLoadChildRelative(_usedKeys, _profile, basePath, "scrollbar.position", strValue))
-    {
-        auto const literal = toLower(strValue);
-        if (literal == "left")
-            profile.scrollbarPosition = ScrollBarPosition::Left;
-        else if (literal == "right")
-            profile.scrollbarPosition = ScrollBarPosition::Right;
-        else if (literal == "hidden")
-            profile.scrollbarPosition = ScrollBarPosition::Hidden;
-        else
-            errorlog()("Invalid value for config entry {}: {}", "scrollbar.position", strValue);
-    }
-    tryLoadChildRelative(
-        _usedKeys, _profile, basePath, "scrollbar.hide_in_alt_screen", profile.hideScrollbarInAltScreen);
-
-    tryLoadChildRelative(
-        _usedKeys, _profile, basePath, "history.auto_scroll_on_update", profile.autoScrollOnUpdate);
-    tryLoadChildRelative(
-        _usedKeys, _profile, basePath, "history.scroll_multiplier", profile.historyScrollMultiplier);
-
-    float floatValue = 1.0;
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "background.opacity", floatValue);
-    profile.backgroundOpacity =
-        (terminal::Opacity)(static_cast<unsigned>(255 * clamp(floatValue, 0.0f, 1.0f)));
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "background.blur", profile.backgroundBlur);
-
-    strValue = "dotted-underline"; // TODO: fmt::format("{}", profile.hyperlinkDecoration.normal);
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "hyperlink_decoration.normal", strValue);
-    if (auto const pdeco = terminal::rasterizer::to_decorator(strValue); pdeco.has_value())
-        profile.hyperlinkDecoration.normal = *pdeco;
-
-    strValue = "underline"; // TODO: fmt::format("{}", profile.hyperlinkDecoration.hover);
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "hyperlink_decoration.hover", strValue);
-
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "vi_mode_scrolloff", profile.modalCursorScrollOff);
-
-    auto uintValue = profile.highlightTimeout.count();
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "vi_mode_highlight_timeout", uintValue);
-    profile.highlightTimeout = chrono::milliseconds(uintValue);
-    if (auto const pdeco = terminal::rasterizer::to_decorator(strValue); pdeco.has_value())
-        profile.hyperlinkDecoration.hover = *pdeco;
-
-    tryLoadChildRelative(_usedKeys,
-                         _profile,
-                         basePath,
-                         "highlight_word_and_matches_on_double_click",
-                         profile.highlightDoubleClickedWord);
-
-    if (optional<config::CursorConfig> cursorOpt =
-            parseCursorConfig(_profile["cursor"], _usedKeys, basePath + ".cursor"))
-    {
-        _usedKeys.emplace(basePath + ".cursor");
-        profile.inputModes.insert.cursor = cursorOpt.value();
-    }
-
-    if (auto normalModeNode = _profile["normal_mode"])
-    {
-        _usedKeys.emplace(basePath + ".normal_mode");
-        if (optional<config::CursorConfig> cursorOpt =
-                parseCursorConfig(normalModeNode["cursor"], _usedKeys, basePath + ".normal_mode.cursor"))
-        {
-            _usedKeys.emplace(basePath + ".normal_mode.cursor");
-            profile.inputModes.normal.cursor = cursorOpt.value();
-        }
-    }
-
-    if (auto visualModeNode = _profile["visual_mode"])
-    {
-        _usedKeys.emplace(basePath + ".visual_mode");
-        if (optional<config::CursorConfig> cursorOpt =
-                parseCursorConfig(visualModeNode["cursor"], _usedKeys, basePath + ".visual_mode.cursor"))
-        {
-            _usedKeys.emplace(basePath + ".visual_mode.cursor");
-            profile.inputModes.normal.cursor = cursorOpt.value();
-        }
-    }
-
-    strValue = "none";
-    tryLoadChildRelative(_usedKeys, _profile, basePath, "status_line.display", strValue);
-    if (strValue == "indicator")
-        profile.initialStatusDisplayType = terminal::StatusDisplayType::Indicator;
-    else if (strValue == "none")
-        profile.initialStatusDisplayType = terminal::StatusDisplayType::None;
-    else
-        errorlog()("Invalid value for config entry {}: {}", "status_line.display", strValue);
-
-    return profile;
 }
 
 /**
