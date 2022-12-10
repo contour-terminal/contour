@@ -20,7 +20,7 @@
 
 #include <fmt/format.h>
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 /**
@@ -99,12 +99,12 @@ struct GridMetrics
     }
 };
 
-} // namespace terminal::renderer
+} // namespace terminal::rasterizer
 
 namespace fmt
 {
 template <>
-struct formatter<terminal::renderer::GridMetrics>
+struct formatter<terminal::rasterizer::GridMetrics>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -112,7 +112,7 @@ struct formatter<terminal::renderer::GridMetrics>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::renderer::GridMetrics const& v, FormatContext& ctx)
+    auto format(terminal::rasterizer::GridMetrics const& v, FormatContext& ctx)
     {
         return fmt::format_to(
             ctx.out(),

@@ -15,15 +15,15 @@
 
 #include <terminal/Color.h>
 
-#include <terminal_renderer/GridMetrics.h>
-#include <terminal_renderer/RenderTarget.h>
-#include <terminal_renderer/TextureAtlas.h>
+#include <vtrasterizer/GridMetrics.h>
+#include <vtrasterizer/RenderTarget.h>
+#include <vtrasterizer/TextureAtlas.h>
 
 #include <crispy/point.h>
 
 #include <array>
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 // TODO: I think I should cincerely rename this class to
@@ -65,4 +65,4 @@ class BoxDrawingRenderer: public Renderable
     [[nodiscard]] std::optional<atlas::Buffer> buildElements(char32_t codepoint);
 };
 
-} // namespace terminal::renderer
+} // namespace terminal::rasterizer

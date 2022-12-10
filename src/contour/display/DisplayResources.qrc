@@ -11,8 +11,8 @@
         <file>shaders/text.frag</file>
         <file>shaders/text.vert</file>
     </qresource>
-    <qresource prefix="/contour/terminal_renderer">
-        <file alias='shared_defines.h'>../../terminal_renderer/shared_defines.h</file>
+    <qresource prefix="/contour/vtrasterizer">
+        <file alias='shared_defines.h'>../../vtrasterizer/shared_defines.h</file>
     </qresource>
 </RCC>
 

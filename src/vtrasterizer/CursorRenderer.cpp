@@ -13,7 +13,7 @@
  */
 #include <terminal/Color.h>
 
-#include <terminal_renderer/CursorRenderer.h>
+#include <vtrasterizer/CursorRenderer.h>
 
 #include <crispy/utils.h>
 
@@ -31,7 +31,7 @@ using std::optional;
 using std::runtime_error;
 using std::string;
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 namespace
@@ -191,4 +191,4 @@ void CursorRenderer::inspect(std::ostream& /*output*/) const
 {
 }
 
-} // namespace terminal::renderer
+} // namespace terminal::rasterizer

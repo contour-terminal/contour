@@ -19,7 +19,7 @@
 #include <terminal/Image.h>
 #include <terminal/primitives.h>
 
-#include <terminal_renderer/RenderTarget.h>
+#include <vtrasterizer/RenderTarget.h>
 
 #include <atomic>
 #include <chrono>

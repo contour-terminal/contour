@@ -75,7 +75,7 @@ IncludeCategories:
     Priority:  2
   - Regex:     '^<(vtpty)/'
     Priority:  3
-  - Regex:     '^<(terminal_renderer)/'
+  - Regex:     '^<(vtrasterizer)/'
     Priority:  4
   - Regex:     '^<(text_shaper)/'
     Priority:  5

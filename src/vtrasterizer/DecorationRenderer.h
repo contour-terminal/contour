@@ -16,11 +16,11 @@
 #include <terminal/RenderBuffer.h>
 #include <terminal/Screen.h>
 
-#include <terminal_renderer/Decorator.h>
-#include <terminal_renderer/RenderTarget.h>
-#include <terminal_renderer/TextureAtlas.h>
+#include <vtrasterizer/Decorator.h>
+#include <vtrasterizer/RenderTarget.h>
+#include <vtrasterizer/TextureAtlas.h>
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 struct GridMetrics;
@@ -75,4 +75,4 @@ class DecorationRenderer: public Renderable
     Decorator hyperlinkHover_ = Decorator::Underline;
 };
 
-} // namespace terminal::renderer
+} // namespace terminal::rasterizer

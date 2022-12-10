@@ -18,7 +18,7 @@
 
 #include <terminal/Terminal.h>
 
-#include <terminal_renderer/Renderer.h>
+#include <vtrasterizer/Renderer.h>
 
 #include <crispy/point.h>
 

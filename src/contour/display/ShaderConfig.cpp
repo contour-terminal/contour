@@ -81,7 +81,7 @@ ShaderConfig builtinShaderConfig(ShaderClass shaderClass)
     using namespace std::string_view_literals;
     auto const makeConfig = [](ShaderClass shaderClass) -> ShaderConfig {
         auto const makeSource = [](QString const& filename) -> ShaderSource {
-            QFile sharedDefinesFile(":/contour/terminal_renderer/shared_defines.h");
+            QFile sharedDefinesFile(":/contour/vtrasterizer/shared_defines.h");
             sharedDefinesFile.open(QFile::ReadOnly);
             Require(sharedDefinesFile.isOpen());
             auto const sharedDefines = sharedDefinesFile.readAll().toStdString() + "\n#line 1\n";

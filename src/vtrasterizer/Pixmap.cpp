@@ -11,8 +11,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal_renderer/Pixmap.h>
-#include <terminal_renderer/utils.h>
+#include <vtrasterizer/Pixmap.h>
+#include <vtrasterizer/utils.h>
 
 using std::clamp;
 using std::max;
@@ -20,7 +20,7 @@ using std::min;
 using std::move;
 using std::swap;
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 namespace
@@ -168,4 +168,4 @@ Pixmap& Pixmap::segment_bar(int which)
     return *this;
 }
 
-} // end namespace terminal::renderer
+} // end namespace terminal::rasterizer

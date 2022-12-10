@@ -268,7 +268,7 @@ void TerminalWidget::setSession(TerminalSession& newSession)
 
     framelessWidget_ = !profile().show_title_bar;
 
-    renderer_ = make_unique<terminal::renderer::Renderer>(
+    renderer_ = make_unique<terminal::rasterizer::Renderer>(
         newSession.profile().terminalSize,
         sanitizeFontDescription(profile().fonts, fontDPI()),
         newSession.profile().colors,
@@ -282,7 +282,7 @@ void TerminalWidget::setSession(TerminalSession& newSession)
     );
 
     auto const textureTileSize = gridMetrics().cellSize;
-    auto const viewportMargin = terminal::renderer::PageMargin {}; // TODO margin
+    auto const viewportMargin = terminal::rasterizer::PageMargin {}; // TODO margin
 
     auto const precalculatedVieewSize = [this]() -> ImageSize {
         auto const hint = sizeHint();
@@ -900,7 +900,7 @@ void TerminalWidget::doDumpState()
         Alpha
     };
 
-    terminal::renderer::RenderTarget& renderTarget = renderer_->renderTarget();
+    terminal::rasterizer::RenderTarget& renderTarget = renderer_->renderTarget();
 
     do
     {
@@ -908,7 +908,7 @@ void TerminalWidget::doDumpState()
         if (!infoOpt.has_value())
             break;
 
-        terminal::renderer::AtlasTextureScreenshot const& info = infoOpt.value();
+        terminal::rasterizer::AtlasTextureScreenshot const& info = infoOpt.value();
         auto const fileName = targetDir / "texture-atlas-rgba.png";
         DisplayLog()("Saving image {} to: {}", info.size, fileName.generic_string());
 
@@ -999,7 +999,7 @@ void TerminalWidget::resizeWindow(terminal::LineCount _lines, terminal::ColumnCo
     updateGeometry();
 }
 
-void TerminalWidget::setFonts(terminal::renderer::FontDescriptions fonts)
+void TerminalWidget::setFonts(terminal::rasterizer::FontDescriptions fonts)
 {
     Require(session_ != nullptr);
 
@@ -1131,8 +1131,8 @@ void TerminalWidget::toggleTitleBar()
     window()->move(pos);
 }
 
-void TerminalWidget::setHyperlinkDecoration(terminal::renderer::Decorator _normal,
-                                            terminal::renderer::Decorator _hover)
+void TerminalWidget::setHyperlinkDecoration(terminal::rasterizer::Decorator _normal,
+                                            terminal::rasterizer::Decorator _hover)
 {
     renderer_->setHyperlinkDecoration(_normal, _hover);
 }

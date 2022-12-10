@@ -26,7 +26,7 @@
 #include <variant> // monostate
 #include <vector>
 
-namespace terminal::renderer::atlas
+namespace terminal::rasterizer::atlas
 {
 
 using Buffer = std::vector<uint8_t>;
@@ -675,13 +675,13 @@ void TextureAtlas<Metadata>::inspect(std::ostream& output) const
 
 // }}}
 
-} // namespace terminal::renderer::atlas
+} // namespace terminal::rasterizer::atlas
 
 // {{{ fmt
 namespace fmt
 {
 template <>
-struct formatter<terminal::renderer::atlas::Format>
+struct formatter<terminal::rasterizer::atlas::Format>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -689,20 +689,20 @@ struct formatter<terminal::renderer::atlas::Format>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::renderer::atlas::Format value, FormatContext& ctx)
+    auto format(terminal::rasterizer::atlas::Format value, FormatContext& ctx)
     {
         switch (value)
         {
-            case terminal::renderer::atlas::Format::Red: return fmt::format_to(ctx.out(), "R");
-            case terminal::renderer::atlas::Format::RGB: return fmt::format_to(ctx.out(), "RGB");
-            case terminal::renderer::atlas::Format::RGBA: return fmt::format_to(ctx.out(), "RGBA");
+            case terminal::rasterizer::atlas::Format::Red: return fmt::format_to(ctx.out(), "R");
+            case terminal::rasterizer::atlas::Format::RGB: return fmt::format_to(ctx.out(), "RGB");
+            case terminal::rasterizer::atlas::Format::RGBA: return fmt::format_to(ctx.out(), "RGBA");
         }
         return fmt::format_to(ctx.out(), "{}", static_cast<unsigned>(value));
     }
 };
 
 template <>
-struct formatter<terminal::renderer::atlas::TileLocation>
+struct formatter<terminal::rasterizer::atlas::TileLocation>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -710,14 +710,14 @@ struct formatter<terminal::renderer::atlas::TileLocation>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::renderer::atlas::TileLocation value, FormatContext& ctx)
+    auto format(terminal::rasterizer::atlas::TileLocation value, FormatContext& ctx)
     {
         return fmt::format_to(ctx.out(), "Tile {}x+{}y", value.x.value, value.y.value);
     }
 };
 
 template <>
-struct formatter<terminal::renderer::atlas::RenderTile>
+struct formatter<terminal::rasterizer::atlas::RenderTile>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -725,7 +725,7 @@ struct formatter<terminal::renderer::atlas::RenderTile>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::renderer::atlas::RenderTile const& value, FormatContext& ctx)
+    auto format(terminal::rasterizer::atlas::RenderTile const& value, FormatContext& ctx)
     {
         return fmt::format_to(
             ctx.out(), "RenderTile({}x + {}y, {})", value.x.value, value.y.value, value.tileLocation);
@@ -733,7 +733,7 @@ struct formatter<terminal::renderer::atlas::RenderTile>
 };
 
 template <>
-struct formatter<terminal::renderer::atlas::AtlasProperties>
+struct formatter<terminal::rasterizer::atlas::AtlasProperties>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -741,7 +741,7 @@ struct formatter<terminal::renderer::atlas::AtlasProperties>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::renderer::atlas::AtlasProperties const& value, FormatContext& ctx)
+    auto format(terminal::rasterizer::atlas::AtlasProperties const& value, FormatContext& ctx)
     {
         return fmt::format_to(ctx.out(),
                               "tile size {}, format {}, direct-mapped {}",

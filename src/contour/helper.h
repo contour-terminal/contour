@@ -18,7 +18,7 @@
 #include <terminal/InputGenerator.h>
 #include <terminal/ScreenEvents.h>
 
-#include <terminal_renderer/GridMetrics.h>
+#include <vtrasterizer/GridMetrics.h>
 
 #include <crispy/logstore.h>
 
@@ -33,7 +33,7 @@
 #include <string>
 #include <string_view>
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 class Renderer;
 }
@@ -169,14 +169,14 @@ bool requestPermission(PermissionCache& _cache,
                        config::Permission _allowedByConfig,
                        std::string_view _topicText);
 
-terminal::FontDef getFontDefinition(terminal::renderer::Renderer& _renderer);
+terminal::FontDef getFontDefinition(terminal::rasterizer::Renderer& _renderer);
 
-terminal::renderer::PageMargin computeMargin(terminal::ImageSize _cellSize,
-                                             terminal::PageSize _charCells,
-                                             terminal::ImageSize _pixels) noexcept;
+terminal::rasterizer::PageMargin computeMargin(terminal::ImageSize _cellSize,
+                                               terminal::PageSize _charCells,
+                                               terminal::ImageSize _pixels) noexcept;
 
-terminal::renderer::FontDescriptions sanitizeFontDescription(terminal::renderer::FontDescriptions _fonts,
-                                                             text::DPI _screenDPI);
+terminal::rasterizer::FontDescriptions sanitizeFontDescription(terminal::rasterizer::FontDescriptions _fonts,
+                                                               text::DPI _screenDPI);
 
 constexpr terminal::PageSize pageSizeForPixels(crispy::ImageSize viewSize,
                                                crispy::ImageSize cellSize) noexcept
@@ -187,14 +187,14 @@ constexpr terminal::PageSize pageSizeForPixels(crispy::ImageSize viewSize,
 
 void applyResize(terminal::ImageSize _newPixelSize,
                  TerminalSession& _session,
-                 terminal::renderer::Renderer& _renderer);
+                 terminal::rasterizer::Renderer& _renderer);
 
 bool applyFontDescription(terminal::ImageSize _cellSize,
                           terminal::PageSize _pageSize,
                           terminal::ImageSize _pixelSize,
                           text::DPI _dpi,
-                          terminal::renderer::Renderer& _renderer,
-                          terminal::renderer::FontDescriptions _fontDescriptions);
+                          terminal::rasterizer::Renderer& _renderer,
+                          terminal::rasterizer::FontDescriptions _fontDescriptions);
 
 constexpr Qt::CursorShape toQtMouseShape(MouseCursorShape _shape)
 {

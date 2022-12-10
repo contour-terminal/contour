@@ -11,9 +11,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal_renderer/BoxDrawingRenderer.h>
-#include <terminal_renderer/Pixmap.h>
-#include <terminal_renderer/utils.h>
+#include <vtrasterizer/BoxDrawingRenderer.h>
+#include <vtrasterizer/Pixmap.h>
+#include <vtrasterizer/utils.h>
 
 #include <crispy/logstore.h>
 
@@ -43,7 +43,7 @@ using ranges::views::filter;
 using ranges::views::iota;
 using ranges::views::zip;
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 namespace
@@ -1754,4 +1754,4 @@ void BoxDrawingRenderer::inspect(std::ostream& /*output*/) const
 {
 }
 
-} // namespace terminal::renderer
+} // namespace terminal::rasterizer

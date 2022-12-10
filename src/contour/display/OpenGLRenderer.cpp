@@ -16,7 +16,7 @@
 #include <contour/display/ShaderConfig.h>
 #include <contour/helper.h>
 
-#include <terminal_renderer/TextureAtlas.h>
+#include <vtrasterizer/TextureAtlas.h>
 
 #include <crispy/algorithm.h>
 #include <crispy/assert.h>
@@ -54,7 +54,7 @@ using terminal::RGBAColor;
 using terminal::Width;
 
 namespace chrono = std::chrono;
-namespace atlas = terminal::renderer::atlas;
+namespace atlas = terminal::rasterizer::atlas;
 
 namespace contour::display
 {
@@ -194,7 +194,7 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& textShaderConfig,
                                ShaderConfig const& backgroundImageShaderConfig,
                                ImageSize targetSurfaceSize,
                                ImageSize /*textureTileSize*/,
-                               terminal::renderer::PageMargin margin):
+                               terminal::rasterizer::PageMargin margin):
     _startTime { chrono::steady_clock::now().time_since_epoch() },
     _now { _startTime },
     _renderTargetSize { targetSurfaceSize },
@@ -247,7 +247,7 @@ void OpenGLRenderer::setRenderSize(ImageSize targetSurfaceSize)
                               0.0f);
 }
 
-void OpenGLRenderer::setMargin(terminal::renderer::PageMargin margin) noexcept
+void OpenGLRenderer::setMargin(terminal::rasterizer::PageMargin margin) noexcept
 {
     _margin = margin;
 }
@@ -742,12 +742,12 @@ void OpenGLRenderer::renderRectangle(int ix, int iy, Width width, Height height,
     crispy::copy(vertices, back_inserter(_rectBuffer));
 }
 
-optional<terminal::renderer::AtlasTextureScreenshot> OpenGLRenderer::readAtlas()
+optional<terminal::rasterizer::AtlasTextureScreenshot> OpenGLRenderer::readAtlas()
 {
     // NB: to get all atlas pages, call this from instance base id up to and including current
     // instance id of the given allocator.
 
-    auto output = terminal::renderer::AtlasTextureScreenshot {};
+    auto output = terminal::rasterizer::AtlasTextureScreenshot {};
     output.atlasInstanceId = 0;
     output.size = _textureAtlas.textureSize;
     output.format = _textureAtlas.properties.format;

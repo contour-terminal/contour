@@ -15,11 +15,11 @@
 
 #include <terminal/primitives.h>
 
-#include <terminal_renderer/TextureAtlas.h>
+#include <vtrasterizer/TextureAtlas.h>
 
 #include <crispy/logstore.h>
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 auto const inline RendererLog =
@@ -35,4 +35,4 @@ std::vector<uint8_t> downsample(std::vector<uint8_t> const& _bitmap,
                                 ImageSize _size,
                                 ImageSize _newSize);
 
-} // namespace terminal::renderer
+} // namespace terminal::rasterizer

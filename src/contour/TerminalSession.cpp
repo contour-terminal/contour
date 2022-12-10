@@ -275,7 +275,7 @@ void TerminalSession::setFontDef(terminal::FontDef const& _fontDef)
             return;
 
         auto const& currentFonts = profile_.fonts;
-        terminal::renderer::FontDescriptions newFonts = currentFonts;
+        terminal::rasterizer::FontDescriptions newFonts = currentFonts;
 
         if (spec.size != 0.0)
             newFonts.size = text::font_size { spec.size };

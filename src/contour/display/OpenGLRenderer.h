@@ -17,8 +17,8 @@
 
 #include <terminal/Image.h>
 
-#include <terminal_renderer/RenderTarget.h>
-#include <terminal_renderer/TextureAtlas.h>
+#include <vtrasterizer/RenderTarget.h>
+#include <vtrasterizer/TextureAtlas.h>
 
 #include <QtGui/QMatrix4x4>
 #include <QtGui/QOpenGLExtraFunctions>
@@ -39,19 +39,19 @@ namespace contour::display
 struct ShaderConfig;
 
 class OpenGLRenderer final:
-    public terminal::renderer::RenderTarget,
-    public terminal::renderer::atlas::AtlasBackend,
+    public terminal::rasterizer::RenderTarget,
+    public terminal::rasterizer::atlas::AtlasBackend,
     public QOpenGLExtraFunctions
 {
     using ImageSize = terminal::ImageSize;
 
-    using AtlasTextureScreenshot = terminal::renderer::AtlasTextureScreenshot;
+    using AtlasTextureScreenshot = terminal::rasterizer::AtlasTextureScreenshot;
 
-    using AtlasTileID = terminal::renderer::atlas::AtlasTileID;
+    using AtlasTileID = terminal::rasterizer::atlas::AtlasTileID;
 
-    using ConfigureAtlas = terminal::renderer::atlas::ConfigureAtlas;
-    using UploadTile = terminal::renderer::atlas::UploadTile;
-    using RenderTile = terminal::renderer::atlas::RenderTile;
+    using ConfigureAtlas = terminal::rasterizer::atlas::ConfigureAtlas;
+    using UploadTile = terminal::rasterizer::atlas::UploadTile;
+    using RenderTile = terminal::rasterizer::atlas::RenderTile;
 
   public:
     /**
@@ -65,7 +65,7 @@ class OpenGLRenderer final:
                    ShaderConfig const& backgroundImageShaderConfig,
                    crispy::ImageSize renderSize,
                    crispy::ImageSize textureTileSize,
-                   terminal::renderer::PageMargin margin);
+                   terminal::rasterizer::PageMargin margin);
 
     ~OpenGLRenderer() override;
 
@@ -77,7 +77,7 @@ class OpenGLRenderer final:
 
     // RenderTarget implementation
     void setRenderSize(crispy::ImageSize _size) override;
-    void setMargin(terminal::renderer::PageMargin _margin) noexcept override;
+    void setMargin(terminal::rasterizer::PageMargin _margin) noexcept override;
     std::optional<AtlasTextureScreenshot> readAtlas() override;
     AtlasBackend& textureScheduler() override;
     void scheduleScreenshot(ScreenshotCallback _callback) override;
@@ -138,7 +138,7 @@ class OpenGLRenderer final:
     // {{{ scheduling data
     struct RenderBatch
     {
-        std::vector<terminal::renderer::atlas::RenderTile> renderTiles;
+        std::vector<terminal::rasterizer::atlas::RenderTile> renderTiles;
         std::vector<GLfloat> buffer;
         uint32_t userdata = 0;
 
@@ -151,8 +151,8 @@ class OpenGLRenderer final:
 
     struct Scheduler
     {
-        std::optional<terminal::renderer::atlas::ConfigureAtlas> configureAtlas = std::nullopt;
-        std::vector<terminal::renderer::atlas::UploadTile> uploadTiles {};
+        std::optional<terminal::rasterizer::atlas::ConfigureAtlas> configureAtlas = std::nullopt;
+        std::vector<terminal::rasterizer::atlas::UploadTile> uploadTiles {};
         RenderBatch renderBatch {};
 
         void clear()
@@ -172,7 +172,7 @@ class OpenGLRenderer final:
     crispy::ImageSize _renderTargetSize;
     QMatrix4x4 _projectionMatrix;
 
-    terminal::renderer::PageMargin _margin {};
+    terminal::rasterizer::PageMargin _margin {};
 
     std::unique_ptr<QOpenGLShaderProgram> _textShader;
     int _textProjectionLocation;
@@ -207,7 +207,7 @@ class OpenGLRenderer final:
     {
         GLuint textureId {};
         ImageSize textureSize {};
-        terminal::renderer::atlas::AtlasProperties properties {};
+        terminal::rasterizer::atlas::AtlasProperties properties {};
     };
     AtlasAttributes _textureAtlas {};
 

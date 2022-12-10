@@ -22,7 +22,7 @@
 #include <terminal/Metrics.h>
 #include <terminal/primitives.h>
 
-#include <terminal_renderer/Renderer.h>
+#include <vtrasterizer/Renderer.h>
 
 #include <crispy/deferred.h>
 
@@ -137,7 +137,7 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
     void notify(std::string_view /*_title*/, std::string_view /*_body*/);
     void resizeWindow(terminal::LineCount, terminal::ColumnCount);
     void resizeWindow(terminal::Width, terminal::Height);
-    void setFonts(terminal::renderer::FontDescriptions _fontDescriptions);
+    void setFonts(terminal::rasterizer::FontDescriptions _fontDescriptions);
     bool setFontSize(text::font_size _size);
     bool setPageSize(terminal::PageSize _newPageSize);
     void setMouseCursorShape(MouseCursorShape _shape);
@@ -149,7 +149,8 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
     void setBackgroundImage(std::shared_ptr<terminal::BackgroundImage const> const& backgroundImage);
     void toggleFullScreen();
     void toggleTitleBar();
-    void setHyperlinkDecoration(terminal::renderer::Decorator _normal, terminal::renderer::Decorator _hover);
+    void setHyperlinkDecoration(terminal::rasterizer::Decorator _normal,
+                                terminal::rasterizer::Decorator _hover);
     void setBackgroundOpacity(terminal::Opacity _opacity);
 
     // terminal events
@@ -200,7 +201,7 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
     void statsSummary();
     void doResize(crispy::Size _size);
 
-    [[nodiscard]] terminal::renderer::GridMetrics const& gridMetrics() const noexcept
+    [[nodiscard]] terminal::rasterizer::GridMetrics const& gridMetrics() const noexcept
     {
         return renderer_->gridMetrics();
     }
@@ -224,9 +225,9 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
     TerminalSession* session_ = nullptr;
     std::chrono::steady_clock::time_point startTime_;
     text::DPI lastFontDPI_;
-    std::unique_ptr<terminal::renderer::Renderer> renderer_;
+    std::unique_ptr<terminal::rasterizer::Renderer> renderer_;
     bool renderingPressure_ = false;
-    std::unique_ptr<terminal::renderer::RenderTarget> renderTarget_;
+    std::unique_ptr<terminal::rasterizer::RenderTarget> renderTarget_;
     PermissionCache rememberedPermissions_ {};
     bool maximizedState_ = false;
     bool framelessWidget_ = false;

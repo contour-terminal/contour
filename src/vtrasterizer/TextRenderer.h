@@ -17,10 +17,10 @@
 #include <terminal/RenderBuffer.h>
 #include <terminal/Screen.h>
 
-#include <terminal_renderer/BoxDrawingRenderer.h>
-#include <terminal_renderer/FontDescriptions.h>
-#include <terminal_renderer/RenderTarget.h>
-#include <terminal_renderer/TextureAtlas.h>
+#include <vtrasterizer/BoxDrawingRenderer.h>
+#include <vtrasterizer/FontDescriptions.h>
+#include <vtrasterizer/RenderTarget.h>
+#include <vtrasterizer/TextureAtlas.h>
 
 #include <text_shaper/font.h>
 #include <text_shaper/shaper.h>
@@ -42,7 +42,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 text::font_locator& createFontLocator(FontLocatorEngine _engine);
@@ -214,4 +214,4 @@ class TextRenderer: public Renderable
     bool updateInitialPenPosition_ = false;
 };
 
-} // namespace terminal::renderer
+} // namespace terminal::rasterizer
