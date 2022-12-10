@@ -3765,19 +3765,13 @@ optional<CellLocation> Screen<Cell>::search(std::u32string_view searchText, Cell
         return startPosition;
 
     // Search reverse until found or exhausted.
-    auto position = startPosition;
-    while (position.line < boxed_cast<LineOffset>(_state.pageSize.lines))
+    auto lines = grid().logicalLinesFrom(startPosition.line);
+    for (auto& line: lines)
     {
-        Line<Cell> const& line = _grid.lineAt(position.line);
-        auto newColumn = line.search(searchText, position.column);
-        if (newColumn.has_value())
-        {
-            position.column = *newColumn;
-            return position; // new match found
-        }
-
-        position.column = ColumnOffset(0);
-        position.line++;
+        auto result = line.search(searchText, startPosition.column);
+        if (result.has_value())
+            return result; // new match found
+        startPosition.column = ColumnOffset(0);
     }
     return nullopt;
 }
@@ -3796,21 +3790,14 @@ optional<CellLocation> Screen<Cell>::searchReverse(std::u32string_view searchTex
         return startPosition;
 
     // Search reverse until found or exhausted.
-    auto position = startPosition;
-    while (position.line >= -boxed_cast<LineOffset>(historyLineCount()))
+    auto lines = grid().logicalLinesReverseFrom(startPosition.line);
+    for (auto line: lines)
     {
-        Line<Cell> const& line = _grid.lineAt(position.line);
-        auto newColumn = line.searchReverse(searchText, position.column);
-        if (newColumn != position.column)
-        {
-            position.column = newColumn;
-            return position; // new match found
-        }
-
-        position.column = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
-        position.line--;
+        auto result = line.searchReverse(searchText, startPosition.column);
+        if (result.has_value())
+            return result; // new match found
+        startPosition.column = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
     }
-
     return nullopt;
 }
 

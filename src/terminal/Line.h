@@ -354,6 +354,8 @@ class Line
             if (!buffer.usedColumns)
                 return false;
             auto const column = std::min(startColumn, boxed_cast<ColumnOffset>(buffer.usedColumns - 1));
+            if (text.size() > static_cast<size_t>(column.value - buffer.usedColumns.value))
+                return false;
             auto const resultIndex = buffer.text.view()
                                          .substr(unbox<size_t>(column))
                                          .find(std::string_view(u8Text), unbox<size_t>(column));
@@ -363,6 +365,8 @@ class Line
         {
             auto const u8Text = unicode::convert_to<char>(text);
             InflatedBuffer const& cells = inflatedBuffer();
+            if (text.size() > unbox<size_t>(size()) - unbox<size_t>(startColumn))
+                return false;
             auto const baseColumn = unbox<size_t>(startColumn);
             size_t i = 0;
             while (i < text.size())
@@ -375,10 +379,11 @@ class Line
         }
     }
 
-    // Searches for the given text in this line starting at a specific column.
-    // Returns either the location of the beginning of found search term or the same input start column if
-    // not.
-    [[nodiscard]] std::optional<ColumnOffset> search(std::u32string_view text,
+    // Search a line from left to right if a complete match is found it returns the Column of
+    // start of match and partialMatchLength is set to 0, since it's a full match but if a partial
+    // match is found at the right end of line it returns startColumn as it is and the partialMatchLength
+    // is set equal to match found at the left end of line.
+    [[nodiscard]] std::optional<SearchResult> search(std::u32string_view text,
                                                      ColumnOffset startColumn) const noexcept
     {
         if (isTrivialBuffer())
@@ -390,7 +395,7 @@ class Line
             auto const column = std::min(startColumn, boxed_cast<ColumnOffset>(buffer.usedColumns - 1));
             auto const resultIndex = buffer.text.view().find(std::string_view(u8Text), unbox<size_t>(column));
             if (resultIndex != std::string_view::npos)
-                return ColumnOffset::cast_from(resultIndex);
+                return SearchResult { ColumnOffset::cast_from(resultIndex) };
             else
                 return std::nullopt; // Not found, so stay with initial column as result.
         }
@@ -400,13 +405,18 @@ class Line
             if (buffer.size() < text.size())
                 return std::nullopt; // not found: line is smaller than search term
 
-            auto baseColumn = std::min(startColumn, ColumnOffset::cast_from(buffer.size() - text.size()));
-            auto rightMostSearchPosition =
-                std::max(startColumn, ColumnOffset::cast_from(buffer.size() - text.size()));
+            auto baseColumn = startColumn;
+            auto rightMostSearchPosition = ColumnOffset::cast_from(buffer.size());
             while (baseColumn < rightMostSearchPosition)
             {
-                if (matchTextAt(text, baseColumn))
-                    return baseColumn;
+                if (buffer.size() - unbox<size_t>(baseColumn) < text.size())
+                {
+                    text.remove_suffix(text.size() - (unbox<size_t>(size()) - unbox<size_t>(baseColumn)));
+                    if (matchTextAt(text, baseColumn))
+                        return SearchResult { startColumn, text.size() };
+                }
+                else if (matchTextAt(text, baseColumn))
+                    return SearchResult { baseColumn };
                 baseColumn++;
             }
 
@@ -414,43 +424,50 @@ class Line
         }
     }
 
-    // Searches for the given input text in this line starting at a specific column from right to left.
-    //
-    // The column offset to the beginning of the match will be returned if found.
-    // If no match could be found, the input column will be returned instead.
-    [[nodiscard]] ColumnOffset searchReverse(std::u32string_view text,
-                                             ColumnOffset startColumn) const noexcept
+    // Search a line from right to left if a complete match is found it returns the Column of
+    // start of match and  partialMatchLength is set to 0, since it's a full match but if a partial
+    // match is found at the left end of line it returns startColumn as it is and the partialMatchLength
+    // is set equal to match found at the left end of line.
+    [[nodiscard]] std::optional<SearchResult> searchReverse(std::u32string_view text,
+                                                            ColumnOffset startColumn) const noexcept
     {
         if (isTrivialBuffer())
         {
             auto const u8Text = unicode::convert_to<char>(text);
             TrivialBuffer const& buffer = trivialBuffer();
             if (!buffer.usedColumns)
-                return startColumn;
+                return std::nullopt;
             auto const column = std::min(startColumn, boxed_cast<ColumnOffset>(buffer.usedColumns - 1));
             auto const resultIndex =
                 buffer.text.view().rfind(std::string_view(u8Text), unbox<size_t>(column));
             if (resultIndex != std::string_view::npos)
-                return ColumnOffset::cast_from(resultIndex);
+                return SearchResult { ColumnOffset::cast_from(resultIndex) };
             else
-                return startColumn; // Not found, so stay with initial column as result.
+                return std::nullopt; // Not found, so stay with initial column as result.
         }
         else
         {
             InflatedBuffer const& buffer = inflatedBuffer();
             if (buffer.size() < text.size())
-                return startColumn; // not found: line is smaller than search term
+                return std::nullopt; // not found: line is smaller than search term
 
             // reverse search from right@column to left until match is complete.
             auto baseColumn = std::min(startColumn, ColumnOffset::cast_from(buffer.size() - text.size()));
             while (baseColumn >= ColumnOffset(0))
             {
                 if (matchTextAt(text, baseColumn))
-                    return baseColumn;
+                    return SearchResult { baseColumn };
                 baseColumn--;
             }
-
-            return startColumn; // Not found, so stay with initial column as result.
+            baseColumn = ColumnOffset::cast_from(text.size() - 1);
+            while (!text.empty())
+            {
+                if (matchTextAt(text, ColumnOffset(0)))
+                    return SearchResult { startColumn, text.size() };
+                baseColumn--;
+                text.remove_prefix(1);
+            }
+            return std::nullopt; // Not found, so stay with initial column as result.
         }
     }
 
