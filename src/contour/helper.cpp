@@ -17,7 +17,7 @@
 
 #include <terminal/Terminal.h>
 
-#include <terminal_renderer/Renderer.h>
+#include <vtrasterizer/Renderer.h>
 
 #include <QtCore/QProcess>
 #include <QtCore/QString>
@@ -379,7 +379,7 @@ bool requestPermission(PermissionCache& _cache,
     return false;
 }
 
-terminal::FontDef getFontDefinition(terminal::renderer::Renderer& _renderer)
+terminal::FontDef getFontDefinition(terminal::rasterizer::Renderer& _renderer)
 {
     auto const fontByStyle = [&](text::font_weight _weight,
                                  text::font_slant _slant) -> text::font_description const& {
@@ -410,9 +410,9 @@ terminal::FontDef getFontDefinition(terminal::renderer::Renderer& _renderer)
              _renderer.fontDescriptions().emoji.toPattern() };
 }
 
-terminal::renderer::PageMargin computeMargin(ImageSize _cellSize,
-                                             PageSize _charCells,
-                                             ImageSize _pixels) noexcept
+terminal::rasterizer::PageMargin computeMargin(ImageSize _cellSize,
+                                               PageSize _charCells,
+                                               ImageSize _pixels) noexcept
 {
     auto const usedHeight = unbox<int>(_charCells.lines) * unbox<int>(_cellSize.height);
     auto const freeHeight = unbox<int>(_pixels.height) - usedHeight;
@@ -426,8 +426,8 @@ terminal::renderer::PageMargin computeMargin(ImageSize _cellSize,
     return { leftMargin, topMargin, bottomMargin };
 }
 
-terminal::renderer::FontDescriptions sanitizeFontDescription(terminal::renderer::FontDescriptions _fonts,
-                                                             text::DPI _dpi)
+terminal::rasterizer::FontDescriptions sanitizeFontDescription(terminal::rasterizer::FontDescriptions _fonts,
+                                                               text::DPI _dpi)
 {
     if (_fonts.dpi.x <= 0 || _fonts.dpi.y <= 0)
         _fonts.dpi = _dpi;
@@ -440,8 +440,8 @@ bool applyFontDescription(ImageSize _cellSize,
                           PageSize _pageSize,
                           ImageSize _pixelSize,
                           text::DPI _dpi,
-                          terminal::renderer::Renderer& _renderer,
-                          terminal::renderer::FontDescriptions _fontDescriptions)
+                          terminal::rasterizer::Renderer& _renderer,
+                          terminal::rasterizer::FontDescriptions _fontDescriptions)
 {
     if (_renderer.fontDescriptions() == _fontDescriptions)
         return false;
@@ -457,7 +457,7 @@ bool applyFontDescription(ImageSize _cellSize,
 
 void applyResize(terminal::ImageSize _newPixelSize,
                  TerminalSession& _session,
-                 terminal::renderer::Renderer& _renderer)
+                 terminal::rasterizer::Renderer& _renderer)
 {
     if (*_newPixelSize.width == 0 || *_newPixelSize.height == 0)
         return;

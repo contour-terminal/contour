@@ -15,8 +15,8 @@
 
 #include <terminal/Image.h>
 
-#include <terminal_renderer/RenderTarget.h>
-#include <terminal_renderer/TextRenderer.h>
+#include <vtrasterizer/RenderTarget.h>
+#include <vtrasterizer/TextRenderer.h>
 
 #include <crispy/FNV.h>
 #include <crispy/point.h>
@@ -26,7 +26,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 // NB: Ensure this struct does NOT contain padding (or adapt strong hash creation).
@@ -86,4 +86,4 @@ class ImageRenderer: public Renderable, public TextRendererEvents
     ImageSize cellSize_;
 };
 
-} // namespace terminal::renderer
+} // namespace terminal::rasterizer

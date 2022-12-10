@@ -11,14 +11,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal_renderer/utils.h>
+#include <vtrasterizer/utils.h>
 
 #include <range/v3/view/iota.hpp>
 
 #include <algorithm> // max?
 #include <cassert>
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 using namespace std;
@@ -153,4 +153,4 @@ vector<uint8_t> downsample(vector<uint8_t> const& _sourceBitmap, ImageSize _targ
     return targetBitmap;
 }
 
-} // namespace terminal::renderer
+} // namespace terminal::rasterizer

@@ -16,11 +16,11 @@
 #include <terminal/RenderBuffer.h>
 #include <terminal/Screen.h>
 
-#include <terminal_renderer/RenderTarget.h>
+#include <vtrasterizer/RenderTarget.h>
 
 #include <memory>
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 class RenderTarget;
@@ -55,4 +55,4 @@ class BackgroundRenderer: public Renderable
     uint8_t opacity_ = 255;
 };
 
-} // namespace terminal::renderer
+} // namespace terminal::rasterizer

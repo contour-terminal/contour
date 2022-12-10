@@ -29,7 +29,7 @@ if(CONTOUR_PERF_STATS)
 endif()
 
 target_include_directories(ContourTerminalDisplay PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/../..")
-target_link_libraries(ContourTerminalDisplay terminal_renderer)
+target_link_libraries(ContourTerminalDisplay vtrasterizer)
 if(CONTOUR_BUILD_WITH_QT6)
     target_link_libraries(ContourTerminalDisplay Qt6::Core Qt6::Gui Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Widgets)
 else()

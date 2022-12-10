@@ -1152,7 +1152,7 @@ void softLoadFont(UsedKeys& _usedKeys,
     }
 }
 
-void softLoadFont(terminal::renderer::TextShapingEngine _textShapingEngine,
+void softLoadFont(terminal::rasterizer::TextShapingEngine _textShapingEngine,
                   UsedKeys& _usedKeys,
                   string_view _basePath,
                   YAML::Node const& _node,
@@ -1170,7 +1170,7 @@ void softLoadFont(terminal::renderer::TextShapingEngine _textShapingEngine,
         _usedKeys.emplace(fmt::format("{}.{}", _basePath, _key));
         if (node["features"].IsSequence())
         {
-            using terminal::renderer::TextShapingEngine;
+            using terminal::rasterizer::TextShapingEngine;
             switch (_textShapingEngine)
             {
                 case TextShapingEngine::OpenShaper: break;
@@ -1400,20 +1400,20 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
 
     auto constexpr NativeTextShapingEngine =
 #if defined(_WIN32)
-        terminal::renderer::TextShapingEngine::DWrite;
+        terminal::rasterizer::TextShapingEngine::DWrite;
 #elif defined(__APPLE__)
-        terminal::renderer::TextShapingEngine::CoreText;
+        terminal::rasterizer::TextShapingEngine::CoreText;
 #else
-        terminal::renderer::TextShapingEngine::OpenShaper;
+        terminal::rasterizer::TextShapingEngine::OpenShaper;
 #endif
 
     auto constexpr NativeFontLocator =
 #if defined(_WIN32)
-        terminal::renderer::FontLocatorEngine::DWrite;
+        terminal::rasterizer::FontLocatorEngine::DWrite;
 #elif defined(__APPLE__)
-        terminal::renderer::FontLocatorEngine::CoreText;
+        terminal::rasterizer::FontLocatorEngine::CoreText;
 #else
-        terminal::renderer::FontLocatorEngine::FontConfig;
+        terminal::rasterizer::FontLocatorEngine::FontConfig;
 #endif
 
     strValue = fmt::format("{}", profile.fonts.textShapingEngine);
@@ -1421,11 +1421,11 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     {
         auto const lwrValue = toLower(strValue);
         if (lwrValue == "dwrite" || lwrValue == "directwrite")
-            profile.fonts.textShapingEngine = terminal::renderer::TextShapingEngine::DWrite;
+            profile.fonts.textShapingEngine = terminal::rasterizer::TextShapingEngine::DWrite;
         else if (lwrValue == "core" || lwrValue == "coretext")
-            profile.fonts.textShapingEngine = terminal::renderer::TextShapingEngine::CoreText;
+            profile.fonts.textShapingEngine = terminal::rasterizer::TextShapingEngine::CoreText;
         else if (lwrValue == "open" || lwrValue == "openshaper")
-            profile.fonts.textShapingEngine = terminal::renderer::TextShapingEngine::OpenShaper;
+            profile.fonts.textShapingEngine = terminal::rasterizer::TextShapingEngine::OpenShaper;
         else if (lwrValue == "native")
             profile.fonts.textShapingEngine = NativeTextShapingEngine;
         else
@@ -1439,15 +1439,15 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     {
         auto const lwrValue = toLower(strValue);
         if (lwrValue == "fontconfig")
-            profile.fonts.fontLocator = terminal::renderer::FontLocatorEngine::FontConfig;
+            profile.fonts.fontLocator = terminal::rasterizer::FontLocatorEngine::FontConfig;
         else if (lwrValue == "coretext")
-            profile.fonts.fontLocator = terminal::renderer::FontLocatorEngine::CoreText;
+            profile.fonts.fontLocator = terminal::rasterizer::FontLocatorEngine::CoreText;
         else if (lwrValue == "dwrite" || lwrValue == "directwrite")
-            profile.fonts.fontLocator = terminal::renderer::FontLocatorEngine::DWrite;
+            profile.fonts.fontLocator = terminal::rasterizer::FontLocatorEngine::DWrite;
         else if (lwrValue == "native")
             profile.fonts.fontLocator = NativeFontLocator;
         else if (lwrValue == "mock")
-            profile.fonts.fontLocator = terminal::renderer::FontLocatorEngine::Mock;
+            profile.fonts.fontLocator = terminal::rasterizer::FontLocatorEngine::Mock;
         else
             ConfigLog()("Invalid value for configuration key {}.font.locator: {}", basePath, strValue);
     }
@@ -1563,7 +1563,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
 
     strValue = "dotted-underline"; // TODO: fmt::format("{}", profile.hyperlinkDecoration.normal);
     tryLoadChildRelative(_usedKeys, _profile, basePath, "hyperlink_decoration.normal", strValue);
-    if (auto const pdeco = terminal::renderer::to_decorator(strValue); pdeco.has_value())
+    if (auto const pdeco = terminal::rasterizer::to_decorator(strValue); pdeco.has_value())
         profile.hyperlinkDecoration.normal = *pdeco;
 
     strValue = "underline"; // TODO: fmt::format("{}", profile.hyperlinkDecoration.hover);
@@ -1574,7 +1574,7 @@ TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
     auto uintValue = profile.highlightTimeout.count();
     tryLoadChildRelative(_usedKeys, _profile, basePath, "vi_mode_highlight_timeout", uintValue);
     profile.highlightTimeout = chrono::milliseconds(uintValue);
-    if (auto const pdeco = terminal::renderer::to_decorator(strValue); pdeco.has_value())
+    if (auto const pdeco = terminal::rasterizer::to_decorator(strValue); pdeco.has_value())
         profile.hyperlinkDecoration.hover = *pdeco;
 
     tryLoadChildRelative(_usedKeys,

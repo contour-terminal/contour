@@ -10,8 +10,8 @@ OpenGL:
     - src/terminal/*.cpp
     - src/terminal/*.h
 "VT: renderer":
-    - src/terminal_renderer/*.cpp
-    - src/terminal_renderer/*.h
+    - src/vtrasterizer/*.cpp
+    - src/vtrasterizer/*.h
 documentation:
     - "**/*.md"
     - docs/**

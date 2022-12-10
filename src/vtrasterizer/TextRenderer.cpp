@@ -123,11 +123,11 @@ Making use of reserved glyph slots
 #include <terminal/logging.h>
 #include <terminal/primitives.h>
 
-#include <terminal_renderer/BoxDrawingRenderer.h>
-#include <terminal_renderer/GridMetrics.h>
-#include <terminal_renderer/TextRenderer.h>
-#include <terminal_renderer/shared_defines.h>
-#include <terminal_renderer/utils.h>
+#include <vtrasterizer/BoxDrawingRenderer.h>
+#include <vtrasterizer/GridMetrics.h>
+#include <vtrasterizer/TextRenderer.h>
+#include <vtrasterizer/shared_defines.h>
+#include <vtrasterizer/utils.h>
 
 #include <text_shaper/font_locator_provider.h>
 #include <text_shaper/fontconfig_locator.h>
@@ -179,7 +179,7 @@ using std::vector;
 using namespace std::placeholders;
 using namespace std::string_view_literals;
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 using text::LocatorLog;
@@ -972,4 +972,4 @@ text::shape_result TextRenderer::shapeTextRun(unicode::run_segmenter::range cons
 }
 // }}}
 
-} // namespace terminal::renderer
+} // namespace terminal::rasterizer

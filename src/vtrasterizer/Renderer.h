@@ -17,14 +17,14 @@
 #include <terminal/Image.h>
 #include <terminal/Terminal.h>
 
-#include <terminal_renderer/BackgroundRenderer.h>
-#include <terminal_renderer/CursorRenderer.h>
-#include <terminal_renderer/DecorationRenderer.h>
-#include <terminal_renderer/Decorator.h>
-#include <terminal_renderer/GridMetrics.h>
-#include <terminal_renderer/ImageRenderer.h>
-#include <terminal_renderer/RenderTarget.h>
-#include <terminal_renderer/TextRenderer.h>
+#include <vtrasterizer/BackgroundRenderer.h>
+#include <vtrasterizer/CursorRenderer.h>
+#include <vtrasterizer/DecorationRenderer.h>
+#include <vtrasterizer/Decorator.h>
+#include <vtrasterizer/GridMetrics.h>
+#include <vtrasterizer/ImageRenderer.h>
+#include <vtrasterizer/RenderTarget.h>
+#include <vtrasterizer/TextRenderer.h>
 
 #include <crispy/size.h>
 
@@ -35,7 +35,7 @@
 #include <utility>
 #include <vector>
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 struct RenderCursor
@@ -163,4 +163,4 @@ class Renderer
     CursorRenderer cursorRenderer_;
 };
 
-} // namespace terminal::renderer
+} // namespace terminal::rasterizer

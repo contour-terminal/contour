@@ -23,8 +23,8 @@
 
 #include <vtpty/Process.h>
 
-#include <terminal_renderer/Decorator.h>
-#include <terminal_renderer/FontDescriptions.h>
+#include <vtrasterizer/Decorator.h>
+#include <vtrasterizer/FontDescriptions.h>
 
 #include <text_shaper/font.h>
 #include <text_shaper/mock_font_locator.h>
@@ -161,7 +161,7 @@ struct TerminalProfile
 
     bool autoScrollOnUpdate;
 
-    terminal::renderer::FontDescriptions fonts;
+    terminal::rasterizer::FontDescriptions fonts;
 
     struct
     {
@@ -193,8 +193,8 @@ struct TerminalProfile
 
     struct
     {
-        terminal::renderer::Decorator normal = terminal::renderer::Decorator::DottedUnderline;
-        terminal::renderer::Decorator hover = terminal::renderer::Decorator::Underline;
+        terminal::rasterizer::Decorator normal = terminal::rasterizer::Decorator::DottedUnderline;
+        terminal::rasterizer::Decorator hover = terminal::rasterizer::Decorator::Underline;
     } hyperlinkDecoration;
 };
 

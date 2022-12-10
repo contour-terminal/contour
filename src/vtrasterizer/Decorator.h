@@ -20,7 +20,7 @@
 #include <optional>
 #include <string>
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 /// Dectorator, to decorate a grid cell, eventually containing a character
@@ -77,14 +77,14 @@ inline std::optional<Decorator> to_decorator(std::string const& _value) noexcept
 }
 // }}}
 
-} // namespace terminal::renderer
+} // namespace terminal::rasterizer
 
 namespace std
 {
 template <>
-struct numeric_limits<terminal::renderer::Decorator>
+struct numeric_limits<terminal::rasterizer::Decorator>
 {
-    using Decorator = terminal::renderer::Decorator;
+    using Decorator = terminal::rasterizer::Decorator;
     constexpr static Decorator min() noexcept { return Decorator::Underline; }
     constexpr static Decorator max() noexcept { return Decorator::Encircle; }
     constexpr static size_t count() noexcept
@@ -97,7 +97,7 @@ struct numeric_limits<terminal::renderer::Decorator>
 namespace fmt
 {
 template <>
-struct formatter<terminal::renderer::Decorator>
+struct formatter<terminal::rasterizer::Decorator>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -105,7 +105,7 @@ struct formatter<terminal::renderer::Decorator>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::renderer::Decorator value, FormatContext& ctx)
+    auto format(terminal::rasterizer::Decorator value, FormatContext& ctx)
     {
         auto constexpr mappings = std::array {
             "underline", "double-underline", "curly-underline", "dotted-underline", "dashed-underline",

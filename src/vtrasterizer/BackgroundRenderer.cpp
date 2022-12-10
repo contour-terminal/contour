@@ -11,16 +11,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal_renderer/BackgroundRenderer.h>
-#include <terminal_renderer/GridMetrics.h>
-#include <terminal_renderer/RenderTarget.h>
+#include <vtrasterizer/BackgroundRenderer.h>
+#include <vtrasterizer/GridMetrics.h>
+#include <vtrasterizer/RenderTarget.h>
 
 #include <crispy/algorithm.h>
 
 #include <algorithm>
 #include <iostream>
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 BackgroundRenderer::BackgroundRenderer(GridMetrics const& gridMetrics, RGBColor const& defaultColor):
@@ -82,4 +82,4 @@ void BackgroundRenderer::inspect(std::ostream& /*output*/) const
 {
 }
 
-} // namespace terminal::renderer
+} // namespace terminal::rasterizer

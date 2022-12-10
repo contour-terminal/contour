@@ -11,10 +11,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal_renderer/DecorationRenderer.h>
-#include <terminal_renderer/GridMetrics.h>
-#include <terminal_renderer/Pixmap.h>
-#include <terminal_renderer/shared_defines.h>
+#include <vtrasterizer/DecorationRenderer.h>
+#include <vtrasterizer/GridMetrics.h>
+#include <vtrasterizer/Pixmap.h>
+#include <vtrasterizer/shared_defines.h>
 
 #include <crispy/times.h>
 #include <crispy/utils.h>
@@ -41,7 +41,7 @@ using std::optional;
 using std::pair;
 using std::string;
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 namespace
@@ -318,4 +318,4 @@ void DecorationRenderer::renderDecoration(Decorator decoration,
     }
 }
 
-} // namespace terminal::renderer
+} // namespace terminal::rasterizer

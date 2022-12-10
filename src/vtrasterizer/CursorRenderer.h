@@ -16,14 +16,14 @@
 #include <terminal/Color.h>
 #include <terminal/primitives.h>
 
-#include <terminal_renderer/GridMetrics.h>
-#include <terminal_renderer/RenderTarget.h>
+#include <vtrasterizer/GridMetrics.h>
+#include <vtrasterizer/RenderTarget.h>
 
 #include <crispy/point.h>
 
 #include <array>
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 /// Takes care of rendering the text cursor.
@@ -55,4 +55,4 @@ class CursorRenderer: public Renderable
     CursorShape shape_;
 };
 
-} // namespace terminal::renderer
+} // namespace terminal::rasterizer

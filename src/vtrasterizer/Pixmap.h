@@ -15,7 +15,7 @@
 
 #include <terminal/primitives.h>
 
-#include <terminal_renderer/TextureAtlas.h> // Buffer
+#include <vtrasterizer/TextureAtlas.h> // Buffer
 
 #include <crispy/point.h>
 
@@ -26,7 +26,7 @@
 #include <algorithm>
 #include <functional>
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 // Helper to write ratios like 1/8_th
@@ -304,12 +304,12 @@ Pixmap& Pixmap::segment_bar(int which, More... more)
 }
 // }}}
 
-} // end namespace terminal::renderer
+} // end namespace terminal::rasterizer
 
 namespace fmt // {{{
 {
 template <>
-struct formatter<terminal::renderer::Arc>
+struct formatter<terminal::rasterizer::Arc>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -317,9 +317,9 @@ struct formatter<terminal::renderer::Arc>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::renderer::Arc value, FormatContext& ctx)
+    auto format(terminal::rasterizer::Arc value, FormatContext& ctx)
     {
-        using terminal::renderer::Arc;
+        using terminal::rasterizer::Arc;
         switch (value)
         {
             case Arc::NoArc: return fmt::format_to(ctx.out(), "NoArc");

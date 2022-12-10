@@ -4,7 +4,7 @@
 
 #include <crispy/point.h>
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 enum class TextShapingEngine
@@ -77,14 +77,14 @@ constexpr bool operator<(TextStyle a, TextStyle b) noexcept
     return static_cast<unsigned>(a) < static_cast<unsigned>(b);
 }
 
-} // namespace terminal::renderer
+} // namespace terminal::rasterizer
 
 // {{{ fmt formatter
 namespace fmt
 {
 
 template <>
-struct formatter<terminal::renderer::FontLocatorEngine>
+struct formatter<terminal::rasterizer::FontLocatorEngine>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -92,24 +92,24 @@ struct formatter<terminal::renderer::FontLocatorEngine>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::renderer::FontLocatorEngine value, FormatContext& ctx)
+    auto format(terminal::rasterizer::FontLocatorEngine value, FormatContext& ctx)
     {
         switch (value)
         {
-            case terminal::renderer::FontLocatorEngine::CoreText:
+            case terminal::rasterizer::FontLocatorEngine::CoreText:
                 return fmt::format_to(ctx.out(), "CoreText");
-            case terminal::renderer::FontLocatorEngine::DWrite:
+            case terminal::rasterizer::FontLocatorEngine::DWrite:
                 return fmt::format_to(ctx.out(), "DirectWrite");
-            case terminal::renderer::FontLocatorEngine::FontConfig:
+            case terminal::rasterizer::FontLocatorEngine::FontConfig:
                 return fmt::format_to(ctx.out(), "Fontconfig");
-            case terminal::renderer::FontLocatorEngine::Mock: return fmt::format_to(ctx.out(), "Mock");
+            case terminal::rasterizer::FontLocatorEngine::Mock: return fmt::format_to(ctx.out(), "Mock");
         }
         return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(value));
     }
 };
 
 template <>
-struct formatter<terminal::renderer::TextShapingEngine>
+struct formatter<terminal::rasterizer::TextShapingEngine>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -117,15 +117,15 @@ struct formatter<terminal::renderer::TextShapingEngine>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::renderer::TextShapingEngine value, FormatContext& ctx)
+    auto format(terminal::rasterizer::TextShapingEngine value, FormatContext& ctx)
     {
         switch (value)
         {
-            case terminal::renderer::TextShapingEngine::CoreText:
+            case terminal::rasterizer::TextShapingEngine::CoreText:
                 return fmt::format_to(ctx.out(), "CoreText");
-            case terminal::renderer::TextShapingEngine::DWrite:
+            case terminal::rasterizer::TextShapingEngine::DWrite:
                 return fmt::format_to(ctx.out(), "DirectWrite");
-            case terminal::renderer::TextShapingEngine::OpenShaper:
+            case terminal::rasterizer::TextShapingEngine::OpenShaper:
                 return fmt::format_to(ctx.out(), "harfbuzz");
         }
         return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(value));
@@ -133,7 +133,7 @@ struct formatter<terminal::renderer::TextShapingEngine>
 };
 
 template <>
-struct formatter<terminal::renderer::FontDescriptions>
+struct formatter<terminal::rasterizer::FontDescriptions>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -141,7 +141,7 @@ struct formatter<terminal::renderer::FontDescriptions>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::renderer::FontDescriptions const& fd, FormatContext& ctx)
+    auto format(terminal::rasterizer::FontDescriptions const& fd, FormatContext& ctx)
     {
         return fmt::format_to(ctx.out(),
                               "({}, {}, {}, {}, {}, {}, {}, {})",

@@ -18,7 +18,7 @@ Add the following block to your Visual Studio Code's `settings.json`:
 * **src/** - project specific source code
   * **crispy/** - fundamentals library
   * **terminal/** - core terminal library
-  * **terminal_renderer/** - frontend independant Terminal rendering library
+  * **vtrasterizer/** - frontend independant Terminal rendering library
   * **contour/** - GUI terminal emulator application (business logic)
 * **test/** - Contains a set of test scripts.
 

@@ -12,11 +12,11 @@
  * limitations under the License.
  */
 
-#include <terminal_renderer/RenderTarget.h>
+#include <vtrasterizer/RenderTarget.h>
 
 using namespace crispy;
 using namespace std;
-using namespace terminal::renderer;
+using namespace terminal::rasterizer;
 using namespace terminal;
 
 Renderable::Renderable(GridMetrics const& gridMetrics): _gridMetrics { gridMetrics }

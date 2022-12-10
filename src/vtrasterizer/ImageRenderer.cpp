@@ -11,7 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal_renderer/ImageRenderer.h>
+#include <vtrasterizer/ImageRenderer.h>
 
 #include <crispy/algorithm.h>
 #include <crispy/times.h>
@@ -24,7 +24,7 @@ using std::array;
 using std::nullopt;
 using std::optional;
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 ImageRenderer::ImageRenderer(GridMetrics const& gridMetrics, ImageSize cellSize):
@@ -134,4 +134,4 @@ void ImageRenderer::inspect(std::ostream& /*output*/) const
 {
 }
 
-} // namespace terminal::renderer
+} // namespace terminal::rasterizer

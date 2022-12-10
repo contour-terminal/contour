@@ -11,9 +11,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <terminal_renderer/Renderer.h>
-#include <terminal_renderer/TextRenderer.h>
-#include <terminal_renderer/utils.h>
+#include <vtrasterizer/Renderer.h>
+#include <vtrasterizer/TextRenderer.h>
+#include <vtrasterizer/utils.h>
 
 #include <text_shaper/font_locator.h>
 #include <text_shaper/open_shaper.h>
@@ -41,7 +41,7 @@ using std::unique_ptr;
 using std::vector;
 using std::chrono::steady_clock;
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 namespace
@@ -375,4 +375,4 @@ void Renderer::inspect(std::ostream& _textOutput) const
         renderable.get().inspect(_textOutput);
 }
 
-} // namespace terminal::renderer
+} // namespace terminal::rasterizer

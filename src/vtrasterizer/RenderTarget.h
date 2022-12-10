@@ -17,9 +17,9 @@
 #include <terminal/Grid.h> // cell attribs
 #include <terminal/primitives.h>
 
-#include <terminal_renderer/GridMetrics.h>
-#include <terminal_renderer/TextureAtlas.h>
-#include <terminal_renderer/shared_defines.h>
+#include <vtrasterizer/GridMetrics.h>
+#include <vtrasterizer/TextureAtlas.h>
+#include <vtrasterizer/shared_defines.h>
 
 #include <crispy/size.h>
 #include <crispy/stdfs.h>
@@ -34,7 +34,7 @@ namespace terminal
 struct BackgroundImage;
 }
 
-namespace terminal::renderer
+namespace terminal::rasterizer
 {
 
 /**
@@ -103,7 +103,7 @@ class RenderTarget
     using RGBAColor = terminal::RGBAColor;
     using Width = crispy::Width;
     using Height = crispy::Height;
-    using TextureAtlas = terminal::renderer::atlas::TextureAtlas<RenderTileAttributes>;
+    using TextureAtlas = terminal::rasterizer::atlas::TextureAtlas<RenderTileAttributes>;
 
     virtual ~RenderTarget() = default;
 
@@ -137,7 +137,7 @@ class RenderTarget
     virtual void clearCache() = 0;
 
     /// Reads out the given texture atlas.
-    virtual std::optional<terminal::renderer::AtlasTextureScreenshot> readAtlas() = 0;
+    virtual std::optional<terminal::rasterizer::AtlasTextureScreenshot> readAtlas() = 0;
 
     virtual void inspect(std::ostream& output) const = 0;
 };
@@ -233,13 +233,13 @@ inline Renderable::TextureAtlas::TileCreateData Renderable::createTileData(atlas
         tileLocation, std::move(bitmap), bitmapFormat, bitmapSize, bitmapSize, x, y, fragmentShaderSelector);
 }
 
-} // namespace terminal::renderer
+} // namespace terminal::rasterizer
 
 // {{{ fmt
 namespace fmt
 {
 template <>
-struct formatter<terminal::renderer::RenderTileAttributes>
+struct formatter<terminal::rasterizer::RenderTileAttributes>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -247,14 +247,14 @@ struct formatter<terminal::renderer::RenderTileAttributes>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::renderer::RenderTileAttributes value, FormatContext& ctx)
+    auto format(terminal::rasterizer::RenderTileAttributes value, FormatContext& ctx)
     {
         return fmt::format_to(ctx.out(), "tile +{}x +{}y", value.x.value, value.y.value);
     }
 };
 
 template <>
-struct formatter<terminal::renderer::atlas::TileAttributes<terminal::renderer::RenderTileAttributes>>
+struct formatter<terminal::rasterizer::atlas::TileAttributes<terminal::rasterizer::RenderTileAttributes>>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -263,7 +263,7 @@ struct formatter<terminal::renderer::atlas::TileAttributes<terminal::renderer::R
     }
     template <typename FormatContext>
     auto format(
-        terminal::renderer::atlas::TileAttributes<terminal::renderer::RenderTileAttributes> const& value,
+        terminal::rasterizer::atlas::TileAttributes<terminal::rasterizer::RenderTileAttributes> const& value,
         FormatContext& ctx)
     {
         return fmt::format_to(
