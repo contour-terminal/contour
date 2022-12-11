@@ -879,7 +879,7 @@ TEST_CASE("DECFI", "[screen]")
     mock.terminal.setMode(DECMode::LeftRightMargin, true);
     mock.terminal.setLeftRightMargin(ColumnOffset(1), ColumnOffset(3));
     mock.terminal.setTopBottomMargin(LineOffset(1), LineOffset(3));
-    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.realCursorPosition() == CellLocation { LineOffset(4), ColumnOffset(4) });
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
 
     mock.writeToScreen("\033[1;1H");
@@ -932,7 +932,7 @@ TEST_CASE("InsertColumns", "[screen]")
     mock.terminal.setTopBottomMargin(LineOffset(1), LineOffset(3));
 
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(4), ColumnOffset(4) });
 
     SECTION("outside margins: top left")
     {
@@ -1352,7 +1352,7 @@ TEST_CASE("DeleteColumns", "[screen]")
     mock.terminal.setTopBottomMargin(LineOffset(1), LineOffset(3));
 
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(4), ColumnOffset(4) });
 
     SECTION("outside margin")
     {
@@ -2339,7 +2339,7 @@ TEST_CASE("ScreenAlignmentPattern", "[screen]")
     mock.terminal.setTopBottomMargin(LineOffset { 1 }, LineOffset { 3 });
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
 
-    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(4), ColumnOffset(4) });
 
     REQUIRE(1 == *screen.margin().vertical.from);
     REQUIRE(3 == *screen.margin().vertical.to);
@@ -3598,6 +3598,20 @@ TEST_CASE("Sixel.AutoScroll-1", "[screen]")
     // Um, we could actually test more precise here by validating the grid cell contents.
 }
 
+TEST_CASE("DECSTR", "[screen]")
+{
+    // Create a 10x3x5 grid and render a 7x5 image causing one a line-scroll by one.
+    auto const pageSize = PageSize { LineCount(4), ColumnCount(10) };
+    auto mock = MockTerm { pageSize, LineCount(5) };
+    mock.writeToScreen("ABCD\r\nDEFG\r\n");
+    CHECK(mock.terminal.primaryScreen().cursor().position.column == ColumnOffset(0));
+    CHECK(mock.terminal.primaryScreen().cursor().position.line == LineOffset(2));
+
+    mock.writeToScreen("\033[!p");
+    REQUIRE(mock.terminal.primaryScreen().cursor().position
+            == CellLocation { LineOffset(2), ColumnOffset(0) });
+    REQUIRE(mock.terminal.state().savedCursor.position == CellLocation { LineOffset(0), ColumnOffset(0) });
+}
 // TODO: Sixel: image that exceeds available lines
 
 // TODO: SetForegroundColor

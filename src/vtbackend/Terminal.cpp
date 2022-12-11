@@ -1471,7 +1471,6 @@ void Terminal::setTopBottomMargin(optional<LineOffset> _top, optional<LineOffset
     {
         state_.margin.vertical.from = top;
         state_.margin.vertical.to = bottom;
-        moveCursorTo({}, {});
     }
 }
 
@@ -1487,7 +1486,6 @@ void Terminal::setLeftRightMargin(optional<ColumnOffset> _left, optional<ColumnO
         {
             state_.margin.horizontal.from = left;
             state_.margin.horizontal.to = right;
-            moveCursorTo({}, {});
         }
     }
 }
