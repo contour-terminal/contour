@@ -3461,6 +3461,7 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             auto l = decr(seq.param_opt<ColumnOffset>(0));
             auto r = decr(seq.param_opt<ColumnOffset>(1));
             _terminal.setLeftRightMargin(l, r);
+            moveCursorTo({}, {});
         }
         break;
         case DECSM: {
@@ -3474,8 +3475,14 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case DECSTBM:
             _terminal.setTopBottomMargin(decr(seq.param_opt<LineOffset>(0)),
                                          decr(seq.param_opt<LineOffset>(1)));
+            moveCursorTo({}, {});
             break;
-        case DECSTR: _terminal.softReset(); break;
+        case DECSTR:
+            // For VTType VT100 and VT52 ignore this sequence
+            if (_terminal.state().terminalId == VTType::VT100)
+                return ApplyResult::Invalid;
+            _terminal.softReset();
+            break;
         case DECXCPR: reportExtendedCursorPosition(); break;
         case DL: deleteLines(seq.param_or(0, LineCount(1))); break;
         case ECH: eraseCharacters(seq.param_or(0, ColumnCount(1))); break;
