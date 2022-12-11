@@ -109,6 +109,7 @@
           <li>Fixes restoring the cursor visibility after leaving alternate screen when application wasn't restoring mode switches in reverse order.</li>
           <li>Fixes country flags rendering due to misleading grapheme cluster segmentation in corner cases.</li>
           <li>Fixes mouse reporting in primary screen when viewport has been scrolled into the scrollback area.</li>
+          <li>Fixes VT sequence `DECSTR` (soft reset) to not move the cursor to home position.</li>
           <li>Fixes cursor movements for the vi-like cursor (normal mode).</li>
           <li>Fixes Alt+Backspace on OS/X.</li>
           <li>Fixes normal mode's page top (S-H)/ page bottom (S-L) cursor movements to respect scroll offset.</li>
