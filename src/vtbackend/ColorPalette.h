@@ -71,6 +71,9 @@ struct ColorPalette
     /// This value is used by draw_bold_text_with_bright_colors in profile configuration.
     ///
     /// If disabled, normal color will be used instead.
+    ///
+    /// TODO: This should be part of Config's Profile instead of being here. That sounds just wrong.
+    /// TODO: And even the naming sounds wrong. Better would be makeIndexedColorsBrightForBoldText or similar.
     bool useBrightColors = false;
 
     Palette palette = []() constexpr

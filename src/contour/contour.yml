@@ -331,7 +331,13 @@ profiles:
             # Defaults to "emoji".
             emoji: "emoji"
 
-        bold_is_bright: false
+        # Indicates whether or not bold text should be rendered in bright colors,
+        # for indexed colors.
+        #
+        # If disabled, normal color will be used instead.
+        #
+        # Default: false
+        draw_bold_text_with_bright_colors: false
 
         # Terminal cursor display configuration
         cursor:
