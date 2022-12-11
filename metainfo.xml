@@ -112,6 +112,7 @@
           <li>Fixes VT sequence `DECSTR` (soft reset) to not move the cursor to home position.</li>
           <li>Fixes cursor movements for the vi-like cursor (normal mode).</li>
           <li>Fixes Alt+Backspace on OS/X.</li>
+          <li>Fixes default config entry `profiles.*.draw_bold_text_with_bright_colors` (it was renamed from `profiles.*.bold_is_bright`). Please rename this in your existing configuration if not done yet.</li>
           <li>Fixes normal mode's page top (S-H)/ page bottom (S-L) cursor movements to respect scroll offset.</li>
 					<li>Vi Mode search can handle line wrapping and searchText larger than line length (#869) (#870).</li>
           <li>Adds ability to highlight same words on double click via `profile.*.highlight_word_and_matches_on_double_click`.</li>
