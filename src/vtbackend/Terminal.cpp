@@ -526,7 +526,18 @@ void Terminal::updateIndicatorStatusLine()
             " │ Search: {}█", unicode::convert_to<char>(u32string_view(state_.searchMode.pattern))));
 
     auto rightString = ""s;
-    rightString += fmt::format(" {:%H:%M}", fmt::gmtime(std::chrono::system_clock::now()));
+
+    if (isPrimaryScreen())
+    {
+        if (viewport().scrollOffset().value)
+            rightString += fmt::format("{}/{}", viewport().scrollOffset(), primaryScreen_.historyLineCount());
+        else
+            rightString += fmt::format("{}", primaryScreen_.historyLineCount());
+    }
+
+    if (!rightString.empty())
+        rightString += " │ ";
+    rightString += fmt::format("{:%H:%M} ", fmt::gmtime(std::chrono::system_clock::now()));
 
     auto const columnsAvailable =
         indicatorStatusScreen_.pageSize().columns.as<int>() - state_.cursor.position.column.as<int>();
