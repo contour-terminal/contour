@@ -132,6 +132,36 @@ namespace
         return terminal::RGBColor(_text);
     }
 
+    std::optional<terminal::RGBColorPair> parseRGBColorPair(UsedKeys& usedKeys,
+                                                            string const& basePath,
+                                                            YAML::Node const& baseNode,
+                                                            string const& childNodeName,
+                                                            terminal::RGBColorPair defaultPair)
+    {
+        auto node = baseNode[childNodeName];
+        if (!node || !node.IsMap())
+            return nullopt;
+
+        auto const childPath = fmt::format("{}.{}", basePath, childNodeName);
+        usedKeys.emplace(childPath);
+
+        auto rgbColorPair = defaultPair;
+
+        if (auto const value = node["foreground"]; value && value.IsScalar())
+        {
+            rgbColorPair.foreground = value.as<string>();
+            usedKeys.emplace(childPath + ".foreground");
+        }
+
+        if (auto const value = node["background"]; value && value.IsScalar())
+        {
+            rgbColorPair.background = value.as<string>();
+            usedKeys.emplace(childPath + ".background");
+        }
+
+        return rgbColorPair;
+    }
+
     /// Loads a configuration sub-section to handle cell color foreground/background + alpha.
     ///
     /// Example:
@@ -919,6 +949,10 @@ namespace
 
         if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "vi_mode_highlight"))
             colors.yankHighlight = p.value();
+
+        if (auto p = parseRGBColorPair(
+                _usedKeys, _basePath, _node, "indicator_statusline", colors.indicatorStatusLine))
+            colors.indicatorStatusLine = p.value();
 
         if (auto cursor = _node["cursor"]; cursor)
         {

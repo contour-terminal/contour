@@ -504,6 +504,14 @@ color_schemes:
             foreground_alpha: 1.0
             background_alpha: 1.0
 
+        # Defines the colors to be used for the Indicator status line.
+        # Values must be in RGB form.
+        indicator_statusline:
+            # Default: default background
+            foreground: '#808080'
+            # Default: default foreground
+            background: '#000000'
+
         # Normal colors
         normal:
             black:   '#000000'
