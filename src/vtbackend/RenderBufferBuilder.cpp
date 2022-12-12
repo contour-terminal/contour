@@ -116,25 +116,27 @@ RenderBufferBuilder<Cell>::RenderBufferBuilder(Terminal const& _terminal,
                                                LineOffset base,
                                                bool theReverseVideo,
                                                HighlightSearchMatches highlightSearchMatches,
-                                               InputMethodData inputMethodData):
+                                               InputMethodData inputMethodData,
+                                               optional<CellLocation> theCursorPosition):
     output { _output },
     terminal { _terminal },
-    cursorPosition { _terminal.inputHandler().mode() == ViMode::Insert
-                         ? _terminal.realCursorPosition()
-                         : _terminal.state().viCommands.cursorPosition },
+    cursorPosition { theCursorPosition },
     baseLine { base },
     reverseVideo { theReverseVideo },
     _highlightSearchMatches { highlightSearchMatches },
     _inputMethodData { std::move(inputMethodData) }
 {
     output.frameID = _terminal.lastFrameID();
-    output.cursor = renderCursor();
+
+    if (cursorPosition)
+        output.cursor = renderCursor();
 }
 
 template <typename Cell>
 optional<RenderCursor> RenderBufferBuilder<Cell>::renderCursor() const
 {
-    if (!terminal.cursorCurrentlyVisible() || !terminal.viewport().isLineVisible(cursorPosition.line))
+    if (!cursorPosition || !terminal.cursorCurrentlyVisible()
+        || !terminal.viewport().isLineVisible(cursorPosition->line))
         return nullopt;
 
     // TODO: check if CursorStyle has changed, and update render context accordingly.
@@ -143,10 +145,10 @@ optional<RenderCursor> RenderBufferBuilder<Cell>::renderCursor() const
     auto const shape = terminal.state().focused ? terminal.cursorShape() : InactiveCursorShape;
 
     auto const cursorScreenPosition =
-        CellLocation { cursorPosition.line + boxed_cast<LineOffset>(terminal.viewport().scrollOffset()),
-                       cursorPosition.column };
+        CellLocation { cursorPosition->line + boxed_cast<LineOffset>(terminal.viewport().scrollOffset()),
+                       cursorPosition->column };
 
-    auto const cellWidth = terminal.currentScreen().cellWidthAt(cursorPosition);
+    auto const cellWidth = terminal.currentScreen().cellWidthAt(*cursorPosition);
 
     return RenderCursor { cursorScreenPosition, shape, cellWidth };
 }
@@ -245,7 +247,7 @@ RGBColorPair RenderBufferBuilder<Cell>::makeColorsForCell(CellLocation gridPosit
                                                           Color foregroundColor,
                                                           Color backgroundColor) const noexcept
 {
-    auto const hasCursor = gridPosition == cursorPosition;
+    auto const hasCursor = cursorPosition && gridPosition == *cursorPosition;
 
     // clang-format off
     bool const paintCursor =
@@ -311,10 +313,9 @@ bool RenderBufferBuilder<Cell>::gridLineContainsCursor(LineOffset lineOffset) co
     if (terminal.state().cursor.position.line == lineOffset)
         return true;
 
-    if (terminal.state().inputHandler.mode() != ViMode::Insert)
+    if (cursorPosition && terminal.state().inputHandler.mode() != ViMode::Insert)
     {
-        auto const viCursor = terminal.viewport().translateGridToScreenCoordinate(
-            terminal.state().viCommands.cursorPosition.line);
+        auto const viCursor = terminal.viewport().translateGridToScreenCoordinate(cursorPosition->line);
         if (viCursor == lineOffset)
             return true;
     }
@@ -542,7 +543,7 @@ bool RenderBufferBuilder<Cell>::tryRenderInputMethodEditor(CellLocation screenPo
                                                            CellLocation gridPosition)
 {
     // Render IME preeditString if available and screen position matches cursor position.
-    if (gridPosition == cursorPosition && !_inputMethodData.preeditString.empty())
+    if (cursorPosition && gridPosition == *cursorPosition && !_inputMethodData.preeditString.empty())
     {
         auto textAttributes = GraphicsAttributes {};
         textAttributes.foregroundColor = RGBColor(0xFF, 0xFF, 0xFF);
@@ -585,7 +586,7 @@ void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset _l
         gridPosition, screenCell.flags(), screenCell.foregroundColor(), screenCell.backgroundColor());
 
     prevWidth = screenCell.width();
-    prevHasCursor = gridPosition == cursorPosition;
+    prevHasCursor = cursorPosition && gridPosition == *cursorPosition;
 
     auto const cellEmpty = screenCell.empty();
     auto const customBackground = bg != terminal.colorPalette().defaultBackground || !!screenCell.flags();
