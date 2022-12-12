@@ -525,6 +525,20 @@ void Terminal::updateIndicatorStatusLine()
         indicatorStatusScreen_.writeTextFromExternal(fmt::format(
             " │ Search: {}█", unicode::convert_to<char>(u32string_view(state_.searchMode.pattern))));
 
+    auto rightString = ""s;
+    rightString += fmt::format(" {:%H:%M}", fmt::gmtime(std::chrono::system_clock::now()));
+
+    auto const columnsAvailable =
+        indicatorStatusScreen_.pageSize().columns.as<int>() - state_.cursor.position.column.as<int>();
+    if (rightString.size() <= static_cast<size_t>(columnsAvailable))
+    {
+        state_.cursor.position.column = ColumnOffset::cast_from(indicatorStatusScreen_.pageSize().columns)
+                                        - ColumnOffset::cast_from(rightString.size()) - ColumnOffset(1);
+        indicatorStatusScreen_.updateCursorIterator();
+
+        indicatorStatusScreen_.writeTextFromExternal(rightString);
+    }
+
     // Cleaning up.
     currentScreen_ = savedActiveDisplay;
     state_.activeStatusDisplay = savedActiveStatusDisplay;
@@ -921,26 +935,35 @@ bool Terminal::updateCursorHoveringState()
 
 optional<chrono::milliseconds> Terminal::nextRender() const
 {
-    if (!isModeEnabled(DECMode::VisibleCursor))
-        return nullopt;
-
-    if (cursorDisplay_ != CursorDisplay::Blink && !isBlinkOnScreen())
-        return nullopt;
-
-    auto const passedCursor = chrono::duration_cast<chrono::milliseconds>(currentTime_ - lastCursorBlink_);
-    auto const passedSlowBlink = chrono::duration_cast<chrono::milliseconds>(currentTime_ - _lastBlink);
-    auto const passedRapidBlink = chrono::duration_cast<chrono::milliseconds>(currentTime_ - _lastRapidBlink);
     auto nextBlink = chrono::milliseconds::max();
-    if (passedCursor <= cursorBlinkInterval_)
-        nextBlink = std::min(nextBlink, cursorBlinkInterval_ - passedCursor);
-    if (passedSlowBlink <= _slowBlinker.interval)
-        nextBlink = std::min(nextBlink, _slowBlinker.interval - passedSlowBlink);
-    if (passedRapidBlink <= _rapidBlinker.interval)
-        nextBlink = std::min(nextBlink, _rapidBlinker.interval - passedRapidBlink);
-    if (nextBlink != std::chrono::milliseconds::max())
-        return nextBlink;
-    else
-        return chrono::milliseconds::min();
+    if ((isModeEnabled(DECMode::VisibleCursor) && cursorDisplay_ == CursorDisplay::Blink)
+        || !isBlinkOnScreen())
+    {
+        auto const passedCursor =
+            chrono::duration_cast<chrono::milliseconds>(currentTime_ - lastCursorBlink_);
+        auto const passedSlowBlink = chrono::duration_cast<chrono::milliseconds>(currentTime_ - _lastBlink);
+        auto const passedRapidBlink =
+            chrono::duration_cast<chrono::milliseconds>(currentTime_ - _lastRapidBlink);
+        if (passedCursor <= cursorBlinkInterval_)
+            nextBlink = std::min(nextBlink, cursorBlinkInterval_ - passedCursor);
+        if (passedSlowBlink <= _slowBlinker.interval)
+            nextBlink = std::min(nextBlink, _slowBlinker.interval - passedSlowBlink);
+        if (passedRapidBlink <= _rapidBlinker.interval)
+            nextBlink = std::min(nextBlink, _rapidBlinker.interval - passedRapidBlink);
+    }
+
+    if (state_.statusDisplayType == StatusDisplayType::Indicator)
+    {
+        auto const currentSecond =
+            time_point_cast<seconds>(system_clock::now()).time_since_epoch().count() % 60;
+        auto const millisUntilNextMinute = duration_cast<milliseconds>(seconds(60 - currentSecond));
+        nextBlink = std::min(nextBlink, millisUntilNextMinute);
+    }
+
+    if (nextBlink == std::chrono::milliseconds::max())
+        return nullopt;
+
+    return nextBlink;
 }
 
 void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> _pixels)

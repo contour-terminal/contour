@@ -594,8 +594,16 @@ void TerminalWidget::onFrameSwapped()
 {
     if (!state_.finish())
         update();
-    else if (auto timeout = terminal().nextRender(); timeout.has_value())
-        updateTimer_.start(timeout.value());
+
+    auto timeoutOpt = terminal().nextRender();
+    if (!timeoutOpt.has_value())
+        return;
+
+    auto const timeout = *timeoutOpt;
+    if (timeout == chrono::milliseconds::min())
+        update();
+    else
+        updateTimer_.start(timeout);
 }
 // }}}
 
