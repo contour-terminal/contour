@@ -121,7 +121,7 @@ struct ColorPalette
         colors[256 + 3] = 0x808000_rgb; // yellow
         colors[256 + 4] = 0x000080_rgb; // blue
         colors[256 + 5] = 0x800080_rgb; // magenta
-        colors[256 + 6] = 0x008080_rgb; // cy8n
+        colors[256 + 6] = 0x008080_rgb; // cyan
         colors[256 + 7] = 0x808080_rgb; // white
 
         return colors;
