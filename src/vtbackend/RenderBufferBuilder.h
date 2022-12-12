@@ -21,7 +21,8 @@ class RenderBufferBuilder
                         LineOffset base,
                         bool reverseVideo,
                         HighlightSearchMatches highlightSearchMatches,
-                        InputMethodData inputMethodData);
+                        InputMethodData inputMethodData,
+                        std::optional<CellLocation> theCursorPosition);
 
     /// Renders a single grid cell.
     /// This call is guaranteed to be invoked sequencially, from top line
@@ -113,7 +114,7 @@ class RenderBufferBuilder
 
     RenderBuffer& output;
     Terminal const& terminal;
-    CellLocation cursorPosition;
+    std::optional<CellLocation> cursorPosition;
     LineOffset baseLine;
     bool reverseVideo;
     HighlightSearchMatches _highlightSearchMatches;

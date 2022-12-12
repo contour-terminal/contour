@@ -412,6 +412,12 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
     auto const highlightSearchMatches =
         state_.searchMode.pattern.empty() ? HighlightSearchMatches::No : HighlightSearchMatches::Yes;
 
+    auto const theCursorPosition = optional<CellLocation> {
+        inputHandler().mode() == ViMode::Insert ? (
+            isModeEnabled(DECMode::VisibleCursor) ? optional<CellLocation> { realCursorPosition() } : nullopt)
+                                                : state().viCommands.cursorPosition
+    };
+
     if (isPrimaryScreen())
         _lastRenderPassHints =
             primaryScreen_.render(RenderBufferBuilder<PrimaryScreenCell> { *this,
@@ -419,7 +425,8 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
                                                                            LineOffset(0),
                                                                            mainDisplayReverseVideo,
                                                                            HighlightSearchMatches::Yes,
-                                                                           inputMethodData_ },
+                                                                           inputMethodData_,
+                                                                           theCursorPosition },
                                   viewport_.scrollOffset(),
                                   highlightSearchMatches);
     else
@@ -429,7 +436,8 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
                                                                                LineOffset(0),
                                                                                mainDisplayReverseVideo,
                                                                                HighlightSearchMatches::Yes,
-                                                                               inputMethodData_ },
+                                                                               inputMethodData_,
+                                                                               theCursorPosition },
                                     viewport_.scrollOffset(),
                                     highlightSearchMatches);
 
@@ -446,7 +454,8 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
                                                          state_.pageSize.lines.as<LineOffset>(),
                                                          !mainDisplayReverseVideo,
                                                          HighlightSearchMatches::No,
-                                                         InputMethodData {} },
+                                                         InputMethodData {},
+                                                         nullopt },
                 ScrollOffset(0));
             break;
         case StatusDisplayType::HostWritable:
@@ -456,7 +465,8 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
                                                          state_.pageSize.lines.as<LineOffset>(),
                                                          !mainDisplayReverseVideo,
                                                          HighlightSearchMatches::No,
-                                                         InputMethodData {} },
+                                                         InputMethodData {},
+                                                         nullopt },
                 ScrollOffset(0));
             break;
     }
