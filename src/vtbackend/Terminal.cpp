@@ -483,6 +483,8 @@ void Terminal::updateIndicatorStatusLine()
 
     // Prepare old status line's cursor position and some other flags.
     state_.cursor = {};
+    state_.cursor.graphicsRendition.foregroundColor = colorPalette().indicatorStatusLine.foreground;
+    state_.cursor.graphicsRendition.backgroundColor = colorPalette().indicatorStatusLine.background;
     state_.wrapPending = false;
     indicatorStatusScreen_.updateCursorIterator();
 
