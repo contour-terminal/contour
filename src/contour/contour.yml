@@ -394,11 +394,6 @@ profiles:
         # Specifies a colorscheme to use (alternatively the colors can be inlined).
         colors: "default"
 
-        # If true, bold text is also using bright colors as well.
-        #
-        # Default: false
-        draw_bold_text_with_bright_colors: false
-
         # Hyperlinks (via OSC-8) can be stylized and colorized on hover.
         hyperlink_decoration:
             normal: dotted
