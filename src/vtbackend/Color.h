@@ -440,7 +440,7 @@ struct formatter<terminal::Color>
     template <typename FormatContext>
     auto format(terminal::Color value, FormatContext& ctx)
     {
-        return fmt::format_to(ctx.out(), to_string(value));
+        return fmt::format_to(ctx.out(), "{}", to_string(value));
     }
 };
 
@@ -455,7 +455,7 @@ struct formatter<terminal::RGBColor>
     template <typename FormatContext>
     auto format(terminal::RGBColor value, FormatContext& ctx)
     {
-        return fmt::format_to(ctx.out(), to_string(value));
+        return fmt::format_to(ctx.out(), "{}", to_string(value));
     }
 };
 
@@ -470,7 +470,7 @@ struct formatter<terminal::RGBAColor>
     template <typename FormatContext>
     auto format(terminal::RGBAColor value, FormatContext& ctx)
     {
-        return fmt::format_to(ctx.out(), to_string(value));
+        return fmt::format_to(ctx.out(), "{}", to_string(value));
     }
 };
 
