@@ -241,7 +241,7 @@ void ViCommands::execute(ViOperator op, ViMotion motion, unsigned count)
             break;
         case ViOperator::Paste:
             //.
-            terminal.sendPasteFromClipboard(count);
+            terminal.sendPasteFromClipboard(count, false);
             break;
         case ViOperator::ReverseSearchCurrentWord: // TODO: Does this even make sense to have?
             break;
@@ -276,7 +276,7 @@ void ViCommands::yank(TextObjectScope scope, TextObject textObject)
 
 void ViCommands::paste(unsigned count)
 {
-    terminal.sendPasteFromClipboard(count);
+    terminal.sendPasteFromClipboard(count, false);
 }
 
 CellLocationRange ViCommands::expandMatchingPair(TextObjectScope scope, char left, char right) const noexcept

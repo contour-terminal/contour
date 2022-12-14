@@ -606,7 +606,7 @@ color_schemes:
 # - NoSearchHighlight Disables current search highlighting, if anything is still highlighted due to a prior search.
 # - OpenConfiguration Opens the configuration file.
 # - OpenFileManager   Opens the current working directory in a system file manager.
-# - PasteClipboard    Pastes clipboard to standard input.
+# - PasteClipboard    Pastes clipboard to standard input. Pass boolean parameter 'strip' to indicate whether or not to strip repetitive whitespaces down to one and newlines to whitespaces.
 # - PasteSelection    Pastes current selection to standard input.
 # - Quit              Quits the application.
 # - ReloadConfig      Forces a configuration reload.
@@ -647,11 +647,11 @@ input_mapping:
     - { mods: [Control, Shift], key: Minus,         action: DecreaseFontSize }
     - { mods: [Control, Shift], key: '_',           action: DecreaseFontSize }
     - { mods: [Control, Shift], key: N,             action: NewTerminal }
-    - { mods: [Control, Shift], key: C,             action: CopySelection }
-    - { mods: [Control, Shift], key: V,             action: PasteClipboard }
+    - { mods: [Control, Shift], key: V,             action: PasteClipboard, strip: false }
+    - { mods: [Control, Alt],   key: V,             action: PasteClipboard, strip: true }
     - { mods: [Control],        key: C,             action: CopySelection, mode: 'Select|Insert' }
     - { mods: [Control],        key: C,             action: CancelSelection, mode: 'Select|Insert' }
-    - { mods: [Control],        key: V,             action: PasteClipboard, mode: 'Select|Insert' }
+    - { mods: [Control],        key: V,             action: PasteClipboard, strip: false, mode: 'Select|Insert' }
     - { mods: [Control],        key: V,             action: CancelSelection, mode: 'Select|Insert' }
     - { mods: [],               key: Escape,        action: CancelSelection, mode: 'Select|Insert' }
     - { mods: [Control, Shift], key: Space,         action: ViNormalMode, mode: 'Insert' }

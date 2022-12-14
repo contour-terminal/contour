@@ -94,7 +94,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     void inspect() override;
     void notify(std::string_view _title, std::string_view _body) override;
     void onClosed() override;
-    void pasteFromClipboard(unsigned count) override;
+    void pasteFromClipboard(unsigned count, bool strip) override;
     void onSelectionCompleted() override;
     void requestWindowResize(terminal::LineCount, terminal::ColumnCount) override;
     void requestWindowResize(terminal::Width, terminal::Height) override;

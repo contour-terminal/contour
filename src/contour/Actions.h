@@ -40,7 +40,7 @@ struct NewTerminal{ std::optional<std::string> profileName; };
 struct NoSearchHighlight{};
 struct OpenConfiguration{};
 struct OpenFileManager{};
-struct PasteClipboard{};
+struct PasteClipboard{ bool strip = false; };
 struct PasteSelection{};
 struct Quit{};
 struct ReloadConfig{ std::optional<std::string> profileName; };
