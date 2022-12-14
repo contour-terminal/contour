@@ -140,7 +140,6 @@ struct TerminalState
     PageSize pageSize;
     ImageSize cellPixelSize; ///< contains the pixel size of a single cell, or area(cellPixelSize_) == 0 if
                              ///< unknown.
-    Margin margin;
 
     ColorPalette defaultColorPalette;
     ColorPalette colorPalette;

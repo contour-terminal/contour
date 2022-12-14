@@ -1012,8 +1012,10 @@ void Terminal::resizeScreenInternal(PageSize totalPageSize, std::optional<ImageS
         setCellPixelSize(_pixels.value() / totalPageSize);
 
     // Reset margin to their default.
-    state_.margin = Margin { Margin::Vertical { {}, mainDisplayPageSize.lines.as<LineOffset>() - 1 },
-                             Margin::Horizontal { {}, mainDisplayPageSize.columns.as<ColumnOffset>() - 1 } };
+    primaryScreen().margin() =
+        Margin { Margin::Vertical { {}, mainDisplayPageSize.lines.as<LineOffset>() - 1 },
+                 Margin::Horizontal { {}, mainDisplayPageSize.columns.as<ColumnOffset>() - 1 } };
+    alternateScreen().margin() = primaryScreen().margin();
 
     applyPageSizeToCurrentBuffer();
 
@@ -1061,8 +1063,6 @@ void Terminal::verifyState()
     auto const thePageSize = state_.pageSize;
     Require(*currentMousePosition_.column < *thePageSize.columns);
     Require(*currentMousePosition_.line < *thePageSize.lines);
-    Require(0 <= *state_.margin.horizontal.from && *state_.margin.horizontal.to < *thePageSize.columns);
-    Require(0 <= *state_.margin.vertical.from && *state_.margin.vertical.to < *thePageSize.lines);
 
     if (isPrimaryScreen())
         Require(state_.primaryBuffer.pageSize() == state_.pageSize);
@@ -1384,7 +1384,7 @@ void Terminal::setMode(DECMode _mode, bool _enable)
         case DECMode::LeftRightMargin:
             // Resetting DECLRMM also resets the horizontal margins back to screen size.
             if (!_enable)
-                state_.margin.horizontal =
+                currentScreen().margin().horizontal =
                     Margin::Horizontal { ColumnOffset(0),
                                          boxed_cast<ColumnOffset>(state_.pageSize.columns - 1) };
             break;
@@ -1515,8 +1515,8 @@ void Terminal::setTopBottomMargin(optional<LineOffset> _top, optional<LineOffset
 
     if (top < bottom)
     {
-        state_.margin.vertical.from = top;
-        state_.margin.vertical.to = bottom;
+        currentScreen().margin().vertical.from = top;
+        currentScreen().margin().vertical.to = bottom;
     }
 }
 
@@ -1530,8 +1530,8 @@ void Terminal::setLeftRightMargin(optional<ColumnOffset> _left, optional<ColumnO
         auto const left = max(_left.value_or(defaultLeft), defaultLeft);
         if (left < right)
         {
-            state_.margin.horizontal.from = left;
-            state_.margin.horizontal.to = right;
+            currentScreen().margin().horizontal.from = left;
+            currentScreen().margin().horizontal.to = right;
         }
     }
 }
@@ -1652,12 +1652,6 @@ void Terminal::hardReset()
 
     state_.lastCursorPosition = state_.cursor.position;
 
-    state_.margin = Margin {
-        Margin::Vertical { {}, boxed_cast<LineOffset>(hostWritableStatusLineScreen_.pageSize().lines) - 1 },
-        Margin::Horizontal { {},
-                             boxed_cast<ColumnOffset>(hostWritableStatusLineScreen_.pageSize().columns) - 1 }
-    };
-
     state_.colorPalette = state_.defaultColorPalette;
 
     if (isPrimaryScreen())
@@ -1665,15 +1659,25 @@ void Terminal::hardReset()
     else
         alternateScreen_.updateCursorIterator();
 
+    hostWritableStatusLineScreen_.margin() = Margin {
+        Margin::Vertical { {}, boxed_cast<LineOffset>(hostWritableStatusLineScreen_.pageSize().lines) - 1 },
+        Margin::Horizontal { {},
+                             boxed_cast<ColumnOffset>(hostWritableStatusLineScreen_.pageSize().columns) - 1 }
+    };
+    hostWritableStatusLineScreen_.verifyState();
+
     setActiveStatusDisplay(ActiveStatusDisplay::Main);
     setStatusDisplay(StatusDisplayType::None);
     hostWritableStatusLineScreen_.clearScreen();
     hostWritableStatusLineScreen_.updateCursorIterator();
 
-    state_.margin =
+    primaryScreen().margin() =
         Margin { Margin::Vertical { {}, boxed_cast<LineOffset>(state_.pageSize.lines) - 1 },
                  Margin::Horizontal { {}, boxed_cast<ColumnOffset>(state_.pageSize.columns) - 1 } };
     primaryScreen_.verifyState();
+
+    alternateScreen().margin() = primaryScreen().margin();
+    alternateScreen_.verifyState();
 
     state_.inputGenerator.reset();
 }

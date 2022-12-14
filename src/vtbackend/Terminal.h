@@ -142,11 +142,6 @@ class Terminal
     void setTopBottomMargin(std::optional<LineOffset> _top, std::optional<LineOffset> _bottom);
     void setLeftRightMargin(std::optional<ColumnOffset> _left, std::optional<ColumnOffset> _right);
 
-    bool isFullHorizontalMargins() const noexcept
-    {
-        return state_.margin.horizontal.to.value + 1 == state_.pageSize.columns.value;
-    }
-
     void moveCursorTo(LineOffset _line, ColumnOffset _column);
     void saveCursor();
     void restoreCursor();
@@ -165,16 +160,6 @@ class Terminal
         return state_.cursor.position;
     }
 
-    /// Returns identity if DECOM is disabled (default), but returns translated coordinates if DECOM is
-    /// enabled.
-    [[nodiscard]] CellLocation toRealCoordinate(CellLocation pos) const noexcept
-    {
-        if (!state_.cursor.originMode)
-            return pos;
-        else
-            return { pos.line + state_.margin.vertical.from, pos.column + state_.margin.horizontal.from };
-    }
-
     /// Clamps given coordinates, respecting DECOM (Origin Mode).
     [[nodiscard]] CellLocation clampCoordinate(CellLocation coord) const noexcept
     {
@@ -187,8 +172,8 @@ class Terminal
     /// Clamps given logical coordinates to margins as used in when DECOM (origin mode) is enabled.
     [[nodiscard]] CellLocation clampToOrigin(CellLocation coord) const noexcept
     {
-        return { std::clamp(coord.line, LineOffset { 0 }, state_.margin.vertical.to),
-                 std::clamp(coord.column, ColumnOffset { 0 }, state_.margin.horizontal.to) };
+        return { std::clamp(coord.line, LineOffset { 0 }, currentScreen().margin().vertical.to),
+                 std::clamp(coord.column, ColumnOffset { 0 }, currentScreen().margin().horizontal.to) };
     }
 
     [[nodiscard]] LineOffset clampedLine(LineOffset _line) const noexcept
@@ -212,15 +197,6 @@ class Terminal
         return LineOffset(0) <= _coord.line && _coord.line < boxed_cast<LineOffset>(state_.pageSize.lines)
                && ColumnOffset(0) <= _coord.column
                && _coord.column <= boxed_cast<ColumnOffset>(state_.pageSize.columns);
-    }
-
-    [[nodiscard]] bool isCursorInsideMargins() const noexcept
-    {
-        bool const insideVerticalMargin = state_.margin.vertical.contains(state_.cursor.position.line);
-        bool const insideHorizontalMargin =
-            !isModeEnabled(DECMode::LeftRightMargin)
-            || state_.margin.horizontal.contains(state_.cursor.position.column);
-        return insideVerticalMargin && insideHorizontalMargin;
     }
 
     [[nodiscard]] bool isCursorInViewport() const noexcept
