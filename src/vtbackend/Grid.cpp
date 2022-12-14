@@ -797,6 +797,7 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
                 }
                 else // line is not wrapped
                 {
+                    flushLogicalLine();
                     if (line.isTrivialBuffer())
                     {
                         auto& buffer = line.trivialBuffer();
@@ -805,7 +806,6 @@ CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPo
                     }
                     else
                     {
-                        flushLogicalLine();
                         // logLogicalLine(line.flags(), " - start new logical line");
                         appendToLogicalLine(line.cells());
                         logicalLineFlags = line.flags() & ~LineFlags::Wrapped;
