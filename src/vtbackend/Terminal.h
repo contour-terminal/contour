@@ -81,7 +81,7 @@ class Terminal
         virtual void inspect() {}
         virtual void notify(std::string_view /*_title*/, std::string_view /*_body*/) {}
         virtual void onClosed() {}
-        virtual void pasteFromClipboard(unsigned /*count*/) {}
+        virtual void pasteFromClipboard(unsigned /*count*/, bool /*strip*/) {}
         virtual void onSelectionCompleted() {}
         virtual void requestWindowResize(LineCount, ColumnCount) {}
         virtual void requestWindowResize(Width, Height) {}
@@ -293,7 +293,10 @@ class Terminal
     bool sendFocusInEvent();
     bool sendFocusOutEvent();
     void sendPaste(std::string_view _text); // Sends verbatim text in bracketed mode to application.
-    void sendPasteFromClipboard(unsigned count = 1) { eventListener_.pasteFromClipboard(count); }
+    void sendPasteFromClipboard(unsigned count, bool strip)
+    {
+        eventListener_.pasteFromClipboard(count, strip);
+    }
 
     bool handleMouseSelection(Modifier _modifier, Timestamp _now);
 

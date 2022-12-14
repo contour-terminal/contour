@@ -55,7 +55,7 @@ endif()
 target_compile_features(crispy-core PUBLIC cxx_std_17)
 target_link_libraries(crispy-core PUBLIC ${CRISPY_CORE_LIBS})
 target_include_directories(crispy-core PUBLIC
-    $<BUILD_INTERFACE:${${PROJECT_NAME}_SOURCE_DIR}/src>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
 )
 

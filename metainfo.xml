@@ -120,6 +120,7 @@
           <li>Adds color scheme key `indicator_statusline.foreground` and `indicator_statusline.background` to customize indicator statusline colors.</li>
           <li>Adds clock to indicator status line.</li>
           <li>Adds current viewport position in scrollback buffer to indicator status line.</li>
+          <li>Adds optional parameter `strip` to PasteClipboard configuration action to allow stripping newlines and normalizing whitespaces.</li>
           <li>EXPERIMENTAL: Adds VT extension to enable passive mouse tracking via `CSI ? 2029 h` / `CSI ? 2029 l`. Passive mouse tracking enables the application to get notified on mouse events while still allowing mouse selection.</li>
           <li>EXPERIMENTAL: Adds VT extension to enable text selection tracking via `CSI ? 2030 h` / `CSI ? 2030 l`.</li>
         </ul>

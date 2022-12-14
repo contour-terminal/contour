@@ -870,6 +870,15 @@ namespace
                 return nullopt;
         }
 
+        if (holds_alternative<actions::PasteClipboard>(action))
+        {
+            if (auto node = _parent["strip"]; node && node.IsScalar())
+            {
+                _usedKeys.emplace(_prefix + ".strip");
+                return actions::PasteClipboard { node.as<bool>() };
+            }
+        }
+
         if (holds_alternative<actions::WriteScreen>(action))
         {
             if (auto chars = _parent["chars"]; chars.IsScalar())

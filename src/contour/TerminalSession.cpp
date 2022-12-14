@@ -89,6 +89,25 @@ namespace
         return text.toUtf8().toStdString();
 #endif
     }
+
+    string strip_if(string input, bool shouldStrip)
+    {
+        if (!shouldStrip)
+            return input;
+
+        string output = input;
+
+        do
+        {
+            std::swap(input, output);
+            output = crispy::replace(input, "  ", " ");
+            output = crispy::replace(output, "\t", " ");
+            output = crispy::replace(output, "\n", " ");
+        } while (input != output);
+
+        return output;
+    }
+
 } // namespace
 
 TerminalSession::TerminalSession(unique_ptr<Pty> _pty, ContourGuiApp& _app):
@@ -372,7 +391,7 @@ void TerminalSession::onClosed()
         display_->closeDisplay();
 }
 
-void TerminalSession::pasteFromClipboard(unsigned count)
+void TerminalSession::pasteFromClipboard(unsigned count, bool strip)
 {
     if (QClipboard* clipboard = QGuiApplication::clipboard(); clipboard != nullptr)
     {
@@ -380,7 +399,7 @@ void TerminalSession::pasteFromClipboard(unsigned count)
         SessionLog()("pasteFromClipboard: mime data contains {} formats.", md->formats().size());
         for (int i = 0; i < md->formats().size(); ++i)
             SessionLog()("pasteFromClipboard[{}]: {}\n", i, md->formats().at(i).toStdString());
-        string const text = normalize_crlf(clipboard->text(QClipboard::Clipboard));
+        string const text = strip_if(normalize_crlf(clipboard->text(QClipboard::Clipboard)), strip);
         if (text.empty())
             SessionLog()("Clipboard does not contain text.");
         else if (count == 1)
@@ -790,9 +809,9 @@ bool TerminalSession::operator()(actions::OpenFileManager)
     return true;
 }
 
-bool TerminalSession::operator()(actions::PasteClipboard)
+bool TerminalSession::operator()(actions::PasteClipboard paste)
 {
-    pasteFromClipboard(1);
+    pasteFromClipboard(1, paste.strip);
     return true;
 }
 

@@ -89,7 +89,10 @@ target_compile_definitions(terminal PRIVATE
     LIBTERMINAL_NAME="${PROJECT_NAME}"
 )
 
-target_include_directories(terminal PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
+target_include_directories(terminal PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
+)
 target_link_libraries(terminal PUBLIC vtparser vtpty crispy::core fmt::fmt-header-only range-v3::range-v3 Threads::Threads Microsoft.GSL::GSL)
 if(LIBTERMINAL_LOG_TRACE)
     target_compile_definitions(terminal PUBLIC LIBTERMINAL_LOG_TRACE=1)
