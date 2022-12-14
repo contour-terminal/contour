@@ -143,8 +143,10 @@ std::optional<Action> fromString(std::string const& _name);
 // {{{ declare
 DECLARE_ACTION_FMT(CancelSelection)
 DECLARE_ACTION_FMT(ChangeProfile)
+DECLARE_ACTION_FMT(ClearHistoryAndReset)
 DECLARE_ACTION_FMT(CopyPreviousMarkRange)
 DECLARE_ACTION_FMT(CopySelection)
+DECLARE_ACTION_FMT(CreateDebugDump)
 DECLARE_ACTION_FMT(DecreaseFontSize)
 DECLARE_ACTION_FMT(DecreaseOpacity)
 DECLARE_ACTION_FMT(FocusNextSearchMatch)
@@ -208,8 +210,10 @@ struct formatter<contour::actions::Action>
         // {{{ handle
         HANDLE_ACTION(CancelSelection);
         HANDLE_ACTION(ChangeProfile);
+        HANDLE_ACTION(ClearHistoryAndReset);
         HANDLE_ACTION(CopyPreviousMarkRange);
         HANDLE_ACTION(CopySelection);
+        HANDLE_ACTION(CreateDebugDump);
         HANDLE_ACTION(DecreaseFontSize);
         HANDLE_ACTION(DecreaseOpacity);
         HANDLE_ACTION(FocusNextSearchMatch);
@@ -242,6 +246,8 @@ struct formatter<contour::actions::Action>
         HANDLE_ACTION(SendChars);
         HANDLE_ACTION(ToggleAllKeyMaps);
         HANDLE_ACTION(ToggleFullscreen);
+        HANDLE_ACTION(ToggleInputProtection);
+        HANDLE_ACTION(ToggleStatusLine);
         HANDLE_ACTION(ToggleTitleBar);
         HANDLE_ACTION(ViNormalMode);
         HANDLE_ACTION(WriteScreen);
