@@ -158,8 +158,9 @@ size_t Sequencer::maxBulkTextSequenceWidth() const noexcept
     if (!terminal_.primaryScreen().currentLine().isTrivialBuffer())
         return 0;
 
-    assert(terminal_.state().margin.horizontal.to >= terminal_.cursor().position.column);
-    return unbox<size_t>(terminal_.state().margin.horizontal.to - terminal_.cursor().position.column);
+    assert(terminal_.currentScreen().margin().horizontal.to >= terminal_.cursor().position.column);
+    return unbox<size_t>(terminal_.currentScreen().margin().horizontal.to
+                         - terminal_.cursor().position.column);
 }
 
 void Sequencer::handleSequence()

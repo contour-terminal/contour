@@ -270,6 +270,8 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::verifyState() const
 {
+    Require(0 <= *margin().horizontal.from && *margin().horizontal.to < *pageSize().columns);
+    Require(0 <= *margin().vertical.from && *margin().vertical.to < *pageSize().lines);
     grid().verifyState();
 }
 
@@ -285,7 +287,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 string_view Screen<Cell>::tryEmplaceChars(string_view _chars, size_t cellCount) noexcept
 {
-    if (!_terminal.isFullHorizontalMargins())
+    if (!isFullHorizontalMargins())
         return _chars;
 
     // In case the charset has been altered, no
@@ -337,7 +339,7 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 size_t Screen<Cell>::emplaceCharsIntoCurrentLine(string_view _chars, size_t cellCount) noexcept
 {
     [[maybe_unused]] auto columnsAvailable =
-        (_state.margin.horizontal.to.value + 1) - _state.cursor.position.column.value;
+        (margin().horizontal.to.value + 1) - _state.cursor.position.column.value;
     assert(cellCount <= static_cast<size_t>(columnsAvailable));
 
     Line<Cell>& line = currentLine();
@@ -369,7 +371,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::advanceCursorAfterWrite(ColumnCount n) noexcept
 {
-    assert(_state.cursor.position.column.value + n.value <= _state.margin.horizontal.to.value + 1);
+    assert(_state.cursor.position.column.value + n.value <= margin().horizontal.to.value + 1);
     //  + 1 here because `to` is inclusive.
 
     if (_state.cursor.position.column.value + n.value < _state.pageSize.columns.value)
@@ -503,9 +505,9 @@ void Screen<Cell>::clearAndAdvance(int _graphemeClusterWidth) noexcept
         return;
 
     bool const cursorInsideMargin =
-        _terminal.isModeEnabled(DECMode::LeftRightMargin) && _terminal.isCursorInsideMargins();
+        _terminal.isModeEnabled(DECMode::LeftRightMargin) && isCursorInsideMargins();
     auto const cellsAvailable = cursorInsideMargin
-                                    ? *(_state.margin.horizontal.to - _state.cursor.position.column) - 1
+                                    ? *(margin().horizontal.to - _state.cursor.position.column) - 1
                                     : *_state.pageSize.columns - *_state.cursor.position.column - 1;
     auto const n = min(_graphemeClusterWidth, cellsAvailable);
 
@@ -631,7 +633,7 @@ void Screen<Cell>::moveCursorTo(LineOffset _line, ColumnOffset _column)
         if (!_state.cursor.originMode)
             return pair { _line, _column };
         else
-            return pair { _line + _state.margin.vertical.from, _column + _state.margin.horizontal.from };
+            return pair { _line + margin().vertical.from, _column + margin().horizontal.from };
     }();
 
     _state.wrapPending = false;
@@ -646,7 +648,7 @@ void Screen<Cell>::linefeed(ColumnOffset _newColumn)
     _state.wrapPending = false;
     _state.cursor.position.column = _newColumn;
 
-    if (*realCursorPosition().line == *_state.margin.vertical.to)
+    if (*realCursorPosition().line == *margin().vertical.to)
     {
         // TODO(perf) if we know that we text is following this LF
         // (i.e. parser state will be ground state),
@@ -654,14 +656,14 @@ void Screen<Cell>::linefeed(ColumnOffset _newColumn)
         // and make sure the subsequent text write will
         // possibly also reset remaining grid cells in that line
         // if the incoming text did not write to the full line
-        scrollUp(LineCount(1), {}, _state.margin);
+        scrollUp(LineCount(1), {}, margin());
     }
     else
     {
         // using moveCursorTo() would embrace code reusage,
         // but due to the fact that it's fully recalculating iterators,
         // it may be faster to just incrementally update them.
-        // moveCursorTo({logicalCursorPosition().line + 1, _state.margin.horizontal.from});
+        // moveCursorTo({logicalCursorPosition().line + 1, margin().horizontal.from});
         _state.cursor.position.line++;
         updateCursorIterator();
     }
@@ -689,7 +691,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::setCurrentColumn(ColumnOffset _n)
 {
-    auto const col = _state.cursor.originMode ? _state.margin.horizontal.from + _n : _n;
+    auto const col = _state.cursor.originMode ? margin().horizontal.from + _n : _n;
     auto const clampedCol = min(col, boxed_cast<ColumnOffset>(_state.pageSize.columns) - 1);
     _state.wrapPending = false;
     _state.cursor.position.column = clampedCol;
@@ -711,7 +713,7 @@ void Screen<Cell>::linefeed()
     // If coming through stdout-fastpipe, the LF acts like CRLF.
     auto const newColumnOffset =
         _state.usingStdoutFastPipe || _terminal.isModeEnabled(AnsiMode::AutomaticNewLine)
-            ? _state.margin.horizontal.from
+            ? margin().horizontal.from
             : _state.cursor.position.column;
     linefeed(newColumnOffset);
 }
@@ -847,7 +849,7 @@ void Screen<Cell>::clearScreen()
     // Instead of *just* clearing the screen, and thus, losing potential important content,
     // we scroll up by RowCount number of lines, so move it all into history, so the user can scroll
     // up in case the content is still needed.
-    scrollUp(_state.pageSize.lines);
+    scrollUp(grid().pageSize().lines);
 }
 // }}}
 
@@ -875,7 +877,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::selectiveEraseToEndOfLine()
 {
-    if (_terminal.isFullHorizontalMargins() && _state.cursor.position.column.value == 0)
+    if (isFullHorizontalMargins() && _state.cursor.position.column.value == 0)
         selectiveEraseLine(_state.cursor.position.line);
     else
         selectiveErase(_state.cursor.position.line,
@@ -887,8 +889,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::selectiveEraseToBeginOfLine()
 {
-    if (_terminal.isFullHorizontalMargins()
-        && _state.cursor.position.column.value == _state.pageSize.columns.value)
+    if (isFullHorizontalMargins() && _state.cursor.position.column.value == _state.pageSize.columns.value)
         selectiveEraseLine(_state.cursor.position.line);
     else
         selectiveErase(_state.cursor.position.line, ColumnOffset(0), _state.cursor.position.column + 1);
@@ -1016,7 +1017,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::clearToEndOfLine()
 {
-    if (_terminal.isFullHorizontalMargins() && _state.cursor.position.column.value == 0)
+    if (isFullHorizontalMargins() && _state.cursor.position.column.value == 0)
     {
         currentLine().reset(currentLine().flags(), _state.cursor.graphicsRendition);
         return;
@@ -1089,7 +1090,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::insertCharacters(ColumnCount _n)
 {
-    if (_terminal.isCursorInsideMargins())
+    if (isCursorInsideMargins())
         insertChars(realCursorPosition().line, _n);
 }
 
@@ -1098,11 +1099,11 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::insertChars(LineOffset _lineNo, ColumnCount _n)
 {
-    auto const n = min(*_n, *_state.margin.horizontal.to - *logicalCursorPosition().column + 1);
+    auto const n = min(*_n, *margin().horizontal.to - *logicalCursorPosition().column + 1);
 
     auto column0 = grid().lineAt(_lineNo).inflatedBuffer().begin() + *realCursorPosition().column;
-    auto column1 = grid().lineAt(_lineNo).inflatedBuffer().begin() + *_state.margin.horizontal.to - n + 1;
-    auto column2 = grid().lineAt(_lineNo).inflatedBuffer().begin() + *_state.margin.horizontal.to + 1;
+    auto column1 = grid().lineAt(_lineNo).inflatedBuffer().begin() + *margin().horizontal.to - n + 1;
+    auto column2 = grid().lineAt(_lineNo).inflatedBuffer().begin() + *margin().horizontal.to + 1;
 
     rotate(column0, column1, column2);
 
@@ -1117,11 +1118,11 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::insertLines(LineCount _n)
 {
-    if (_terminal.isCursorInsideMargins())
+    if (isCursorInsideMargins())
     {
         scrollDown(_n,
-                   Margin { Margin::Vertical { _state.cursor.position.line, _state.margin.vertical.to },
-                            _state.margin.horizontal });
+                   Margin { Margin::Vertical { _state.cursor.position.line, margin().vertical.to },
+                            margin().horizontal });
         updateCursorIterator();
     }
 }
@@ -1130,8 +1131,8 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::insertColumns(ColumnCount _n)
 {
-    if (_terminal.isCursorInsideMargins())
-        for (auto lineNo = _state.margin.vertical.from; lineNo <= _state.margin.vertical.to; ++lineNo)
+    if (isCursorInsideMargins())
+        for (auto lineNo = margin().vertical.from; lineNo <= margin().vertical.to; ++lineNo)
             insertChars(lineNo, _n);
 }
 
@@ -1226,11 +1227,11 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::deleteLines(LineCount _n)
 {
-    if (_terminal.isCursorInsideMargins())
+    if (isCursorInsideMargins())
     {
         scrollUp(_n,
-                 Margin { Margin::Vertical { _state.cursor.position.line, _state.margin.vertical.to },
-                          _state.margin.horizontal });
+                 Margin { Margin::Vertical { _state.cursor.position.line, margin().vertical.to },
+                          margin().horizontal });
     }
 }
 
@@ -1238,7 +1239,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::deleteCharacters(ColumnCount _n)
 {
-    if (_terminal.isCursorInsideMargins() && *_n != 0)
+    if (isCursorInsideMargins() && *_n != 0)
         deleteChars(realCursorPosition().line, realCursorPosition().column, _n);
 }
 
@@ -1250,7 +1251,7 @@ void Screen<Cell>::deleteChars(LineOffset _line, ColumnOffset _column, ColumnCou
     auto lineBuffer = line.cells();
 
     Cell* left = const_cast<Cell*>(lineBuffer.data() + _column.as<size_t>());
-    Cell* right = const_cast<Cell*>(lineBuffer.data() + *_state.margin.horizontal.to + 1);
+    Cell* right = const_cast<Cell*>(lineBuffer.data() + *margin().horizontal.to + 1);
     long const n = min(_n.as<long>(), static_cast<long>(std::distance(left, right)));
     Cell* mid = left + n;
 
@@ -1266,8 +1267,8 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::deleteColumns(ColumnCount _n)
 {
-    if (_terminal.isCursorInsideMargins())
-        for (auto lineNo = _state.margin.vertical.from; lineNo <= _state.margin.vertical.to; ++lineNo)
+    if (isCursorInsideMargins())
+        for (auto lineNo = margin().vertical.from; lineNo <= margin().vertical.to; ++lineNo)
             deleteChars(lineNo, realCursorPosition().column, _n);
 }
 
@@ -1323,8 +1324,8 @@ void Screen<Cell>::moveCursorUp(LineCount _n)
 {
     _state.wrapPending = 0;
     auto const n = min(_n.as<LineOffset>(),
-                       logicalCursorPosition().line > _state.margin.vertical.from
-                           ? logicalCursorPosition().line - _state.margin.vertical.from
+                       logicalCursorPosition().line > margin().vertical.from
+                           ? logicalCursorPosition().line - margin().vertical.from
                            : logicalCursorPosition().line);
 
     _state.cursor.position.line -= n;
@@ -1338,8 +1339,8 @@ void Screen<Cell>::moveCursorDown(LineCount _n)
     _state.wrapPending = 0;
     auto const currentLineNumber = logicalCursorPosition().line;
     auto const n = min(_n.as<LineOffset>(),
-                       currentLineNumber <= _state.margin.vertical.to
-                           ? _state.margin.vertical.to - currentLineNumber
+                       currentLineNumber <= margin().vertical.to
+                           ? margin().vertical.to - currentLineNumber
                            : (boxed_cast<LineOffset>(_state.pageSize.lines) - 1) - currentLineNumber);
 
     _state.cursor.position.line += n;
@@ -1352,7 +1353,7 @@ void Screen<Cell>::moveCursorForward(ColumnCount _n)
 {
     _state.wrapPending = 0;
     _state.cursor.position.column =
-        min(_state.cursor.position.column + _n.as<ColumnOffset>(), _state.margin.horizontal.to);
+        min(_state.cursor.position.column + _n.as<ColumnOffset>(), margin().horizontal.to);
 }
 
 template <typename Cell>
@@ -1406,15 +1407,15 @@ void Screen<Cell>::moveCursorToNextTab()
 
         if (i < _state.tabs.size())
             moveCursorForward(boxed_cast<ColumnCount>(_state.tabs[i] - currentCursorColumn));
-        else if (realCursorPosition().column < _state.margin.horizontal.to)
-            moveCursorForward(boxed_cast<ColumnCount>(_state.margin.horizontal.to - currentCursorColumn));
+        else if (realCursorPosition().column < margin().horizontal.to)
+            moveCursorForward(boxed_cast<ColumnCount>(margin().horizontal.to - currentCursorColumn));
         else
             moveCursorToNextLine(LineCount(1));
     }
     else if (TabWidth.value)
     {
         // default tab settings
-        if (realCursorPosition().column < _state.margin.horizontal.to)
+        if (realCursorPosition().column < margin().horizontal.to)
         {
             auto const n =
                 min((TabWidth - boxed_cast<ColumnCount>(_state.cursor.position.column) % TabWidth),
@@ -1427,9 +1428,9 @@ void Screen<Cell>::moveCursorToNextTab()
     else
     {
         // no tab stops configured
-        if (realCursorPosition().column < _state.margin.horizontal.to)
+        if (realCursorPosition().column < margin().horizontal.to)
             // then TAB moves to the end of the screen
-            moveCursorToColumn(_state.margin.horizontal.to);
+            moveCursorToColumn(margin().horizontal.to);
         else
             // then TAB moves to next line left margin
             moveCursorToNextLine(LineCount(1));
@@ -1542,7 +1543,7 @@ void Screen<Cell>::cursorBackwardTab(TabStopCount _count)
             }
             else
             {
-                moveCursorToColumn(_state.margin.horizontal.from);
+                moveCursorToColumn(margin().horizontal.from);
                 break;
             }
         }
@@ -1570,7 +1571,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::index()
 {
-    if (*realCursorPosition().line == *_state.margin.vertical.to)
+    if (*realCursorPosition().line == *margin().vertical.to)
         scrollUp(LineCount(1));
     else
         moveCursorDown(LineCount(1));
@@ -1580,7 +1581,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::reverseIndex()
 {
-    if (unbox<int>(realCursorPosition().line) == unbox<int>(_state.margin.vertical.from))
+    if (unbox<int>(realCursorPosition().line) == unbox<int>(margin().vertical.from))
         scrollDown(LineCount(1));
     else
         moveCursorUp(LineCount(1));
@@ -1590,7 +1591,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::backIndex()
 {
-    if (realCursorPosition().column == _state.margin.horizontal.from)
+    if (realCursorPosition().column == margin().horizontal.from)
         ; // TODO: scrollRight(1);
     else
         moveCursorForward(ColumnCount(1));
@@ -1600,8 +1601,8 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::forwardIndex()
 {
-    if (*realCursorPosition().column == *_state.margin.horizontal.to)
-        grid().scrollLeft(GraphicsAttributes {}, _state.margin);
+    if (*realCursorPosition().column == *margin().horizontal.to)
+        grid().scrollLeft(GraphicsAttributes {}, margin());
     else
         moveCursorForward(ColumnCount(1));
 }
@@ -1707,10 +1708,10 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::screenAlignmentPattern()
 {
     // sets the margins to the extremes of the page
-    _state.margin.vertical.from = LineOffset(0);
-    _state.margin.vertical.to = boxed_cast<LineOffset>(_state.pageSize.lines) - LineOffset(1);
-    _state.margin.horizontal.from = ColumnOffset(0);
-    _state.margin.horizontal.to = boxed_cast<ColumnOffset>(_state.pageSize.columns) - ColumnOffset(1);
+    margin().vertical.from = LineOffset(0);
+    margin().vertical.to = boxed_cast<LineOffset>(_state.pageSize.lines) - LineOffset(1);
+    margin().horizontal.from = ColumnOffset(0);
+    margin().horizontal.to = boxed_cast<ColumnOffset>(_state.pageSize.columns) - ColumnOffset(1);
 
     // and moves the cursor to the home position
     moveCursorTo({}, {});
@@ -1992,10 +1993,9 @@ void Screen<Cell>::requestStatusString(RequestStatusString _value)
                 errorlog()("Requesting device status for {} not with line count < 24 is undefined.");
                 return nullopt;
             case RequestStatusString::DECSTBM:
-                return fmt::format("{};{}r", 1 + *_state.margin.vertical.from, *_state.margin.vertical.to);
+                return fmt::format("{};{}r", 1 + *margin().vertical.from, *margin().vertical.to);
             case RequestStatusString::DECSLRM:
-                return fmt::format(
-                    "{};{}s", 1 + *_state.margin.horizontal.from, *_state.margin.horizontal.to);
+                return fmt::format("{};{}s", 1 + *margin().horizontal.from, *margin().horizontal.to);
             case RequestStatusString::DECSCPP:
                 // EXTENSION: Usually DECSCPP only knows about 80 and 132, but we take any.
                 return fmt::format("{}|$", _state.pageSize.columns);
@@ -2194,10 +2194,8 @@ void Screen<Cell>::inspect(std::string const& _message, std::ostream& _os) const
                        _terminal.primaryScreen().historyLineCount(),
                        _terminal.maxHistoryLineCount());
     _os << fmt::format("cursor position      : {}\n", _state.cursor);
-    if (_state.cursor.originMode)
-        _os << fmt::format("real cursor position : {})\n", toRealCoordinate(_state.cursor.position));
-    _os << fmt::format("vertical margins     : {}\n", _state.margin.vertical);
-    _os << fmt::format("horizontal margins   : {}\n", _state.margin.horizontal);
+    _os << fmt::format("vertical margins     : {}\n", margin().vertical);
+    _os << fmt::format("horizontal margins   : {}\n", margin().horizontal);
     _os << gridInfoLine(grid());
 
     hline();
@@ -3808,6 +3806,16 @@ optional<CellLocation> Screen<Cell>::searchReverse(std::u32string_view searchTex
         startPosition.column = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
     }
     return nullopt;
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+bool Screen<Cell>::isCursorInsideMargins() const noexcept
+{
+    bool const insideVerticalMargin = margin().vertical.contains(_state.cursor.position.line);
+    bool const insideHorizontalMargin = !_terminal.isModeEnabled(DECMode::LeftRightMargin)
+                                        || margin().horizontal.contains(_state.cursor.position.column);
+    return insideVerticalMargin && insideHorizontalMargin;
 }
 
 } // namespace terminal

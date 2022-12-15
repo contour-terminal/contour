@@ -61,6 +61,8 @@ class ScreenBase: public SequenceHandler
   public:
     virtual void verifyState() const = 0;
     virtual void fail(std::string const& _message) const = 0;
+    [[nodiscard]] virtual Margin margin() const noexcept = 0;
+    [[nodiscard]] virtual Margin& margin() noexcept = 0;
     [[nodiscard]] virtual bool contains(CellLocation _coord) const noexcept = 0;
     [[nodiscard]] virtual bool isCellEmpty(CellLocation position) const noexcept = 0;
     [[nodiscard]] virtual bool compareCellTextAt(CellLocation position, char codepoint) const noexcept = 0;
@@ -135,7 +137,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     ///          including initial clear screen, and initial cursor hide.
     std::string screenshot(std::function<std::string(LineOffset)> const& _postLine = {}) const;
 
-    void crlf() { linefeed(_state.margin.horizontal.from); }
+    void crlf() { linefeed(margin().horizontal.from); }
     void crlfIfWrapPending();
 
     // {{{ VT API
@@ -284,6 +286,16 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     [[nodiscard]] PageSize pageSize() const noexcept { return _grid.pageSize(); }
     [[nodiscard]] ImageSize pixelSize() const noexcept { return _state.cellPixelSize * _state.pageSize; }
 
+    [[nodiscard]] Margin margin() const noexcept override { return grid().margin(); }
+    [[nodiscard]] Margin& margin() noexcept override { return grid().margin(); }
+
+    [[nodiscard]] bool isFullHorizontalMargins() const noexcept
+    {
+        return margin().horizontal.to.value + 1 == pageSize().columns.value;
+    }
+
+    [[nodiscard]] bool isCursorInsideMargins() const noexcept;
+
     constexpr CellLocation realCursorPosition() const noexcept { return _state.cursor.position; }
 
     constexpr CellLocation logicalCursorPosition() const noexcept
@@ -291,8 +303,8 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         if (!_state.cursor.originMode)
             return realCursorPosition();
         else
-            return CellLocation { _state.cursor.position.line - _state.margin.vertical.from,
-                                  _state.cursor.position.column - _state.margin.horizontal.from };
+            return CellLocation { _state.cursor.position.line - margin().vertical.from,
+                                  _state.cursor.position.column - margin().horizontal.from };
     }
 
     constexpr CellLocation origin() const noexcept
@@ -300,7 +312,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         if (!_state.cursor.originMode)
             return {};
 
-        return { _state.margin.vertical.from, _state.margin.horizontal.from };
+        return { margin().vertical.from, margin().horizontal.from };
     }
 
     [[nodiscard]] Cursor const& cursor() const noexcept { return _state.cursor; }
@@ -312,7 +324,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         if (!_state.cursor.originMode)
             return pos;
         else
-            return { pos.line + _state.margin.vertical.from, pos.column + _state.margin.horizontal.from };
+            return { pos.line + margin().vertical.from, pos.column + margin().horizontal.from };
     }
 
     [[nodiscard]] LineOffset applyOriginMode(LineOffset line) const noexcept
@@ -320,7 +332,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         if (!_state.cursor.originMode)
             return line;
         else
-            return line + _state.margin.vertical.from;
+            return line + margin().vertical.from;
     }
 
     [[nodiscard]] ColumnOffset applyOriginMode(ColumnOffset column) const noexcept
@@ -328,7 +340,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         if (!_state.cursor.originMode)
             return column;
         else
-            return column + _state.margin.horizontal.from;
+            return column + margin().horizontal.from;
     }
 
     [[nodiscard]] Rect applyOriginMode(Rect area) const noexcept
@@ -336,10 +348,10 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         if (!_state.cursor.originMode)
             return area;
 
-        auto const top = Top::cast_from(area.top.value + _state.margin.vertical.from.value);
-        auto const left = Left::cast_from(area.top.value + _state.margin.horizontal.from.value);
-        auto const bottom = Bottom::cast_from(area.bottom.value + _state.margin.vertical.from.value);
-        auto const right = Right::cast_from(area.right.value + _state.margin.horizontal.from.value);
+        auto const top = Top::cast_from(area.top.value + margin().vertical.from.value);
+        auto const left = Left::cast_from(area.top.value + margin().horizontal.from.value);
+        auto const bottom = Bottom::cast_from(area.bottom.value + margin().vertical.from.value);
+        auto const right = Right::cast_from(area.right.value + margin().horizontal.from.value);
         // TODO: Should this automatically clamp to margin's botom/right values?
 
         return Rect { top, left, bottom, right };
@@ -357,8 +369,8 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     /// Clamps given logical coordinates to margins as used in when DECOM (origin mode) is enabled.
     CellLocation clampToOrigin(CellLocation coord) const noexcept
     {
-        return { std::clamp(coord.line, LineOffset { 0 }, _state.margin.vertical.to),
-                 std::clamp(coord.column, ColumnOffset { 0 }, _state.margin.horizontal.to) };
+        return { std::clamp(coord.line, LineOffset { 0 }, margin().vertical.to),
+                 std::clamp(coord.column, ColumnOffset { 0 }, margin().horizontal.to) };
     }
 
     [[nodiscard]] LineOffset clampedLine(LineOffset _line) const noexcept
@@ -453,11 +465,6 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         return grid().at(p.line, p.column);
     }
 
-    [[nodiscard]] Margin margin() const noexcept
-    {
-        return _state.margin;
-    }
-
     [[nodiscard]] std::string const& windowTitle() const noexcept
     {
         return _state.windowTitle;
@@ -487,11 +494,11 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     void scrollUp(LineCount n)
     {
-        scrollUp(n, _state.margin);
+        scrollUp(n, margin());
     }
     void scrollDown(LineCount n)
     {
-        scrollDown(n, _state.margin);
+        scrollDown(n, margin());
     }
 
     void verifyState() const override;
