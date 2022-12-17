@@ -1044,10 +1044,7 @@ void Terminal::verifyState()
     Require(hostWritableStatusLineScreen_.pageSize().lines == LineCount(1));
     Require(hostWritableStatusLineScreen_.pageSize().columns == settings_.pageSize.columns);
 
-    if (isPrimaryScreen())
-        Require(primaryScreen_.grid().pageSize() == settings_.pageSize);
-    else
-        Require(alternateScreen_.grid().pageSize() == settings_.pageSize);
+    // TODO: the current main display's page size PLUS visible status line count must match total page size.
 
     Require(hostWritableStatusLineScreen_.grid().pageSize().columns == settings_.pageSize.columns);
     Require(indicatorStatusScreen_.grid().pageSize().columns == settings_.pageSize.columns);
@@ -1732,8 +1729,8 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
     // Ensure correct screen buffer size for the buffer we've just switched to.
     cursorPosition =
         screenType == ScreenType::Primary
-            ? primaryScreen_.grid().resize(settings_.pageSize, cursorPosition, state_.wrapPending)
-            : alternateScreen_.grid().resize(settings_.pageSize, cursorPosition, state_.wrapPending);
+            ? primaryScreen_.grid().resize(mainDisplayPageSize, cursorPosition, state_.wrapPending)
+            : alternateScreen_.grid().resize(mainDisplayPageSize, cursorPosition, state_.wrapPending);
     cursorPosition = clampCoordinate(cursorPosition);
 
     auto const margin =
