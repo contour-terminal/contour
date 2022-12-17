@@ -203,19 +203,7 @@ class Terminal
 
     [[nodiscard]] PageSize pageSize() const noexcept { return pty_->pageSize(); }
 
-    [[nodiscard]] PageSize totalPageSize() const noexcept
-    {
-        switch (state_.statusDisplayType)
-        {
-            case StatusDisplayType::None:
-                //.
-                return pageSize();
-            case StatusDisplayType::Indicator:
-            case StatusDisplayType::HostWritable:
-                return pageSize() + hostWritableStatusLineScreen_.pageSize().lines;
-        }
-        crispy::unreachable();
-    }
+    [[nodiscard]] PageSize totalPageSize() const noexcept { return settings_.pageSize; }
 
     /// Resizes the terminal screen to the given amount of grid cells with their pixel dimensions.
     /// Important! In case a status line is currently visible, the status line count is being
@@ -396,6 +384,16 @@ class Terminal
     bool isAlternateScreen() const noexcept { return state_.screenType == ScreenType::Alternate; }
     ScreenType screenType() const noexcept { return state_.screenType; }
     void setScreen(ScreenType screenType);
+
+    ScreenBase& screenForType(ScreenType type) noexcept
+    {
+        switch (type)
+        {
+            case ScreenType::Primary: return primaryScreen_;
+            case ScreenType::Alternate: return alternateScreen_;
+        }
+        crispy::unreachable();
+    }
 
     void setHighlightTimeout(std::chrono::milliseconds timeout) noexcept
     {

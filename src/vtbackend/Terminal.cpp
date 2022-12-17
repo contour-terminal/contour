@@ -972,8 +972,6 @@ void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> _pixels)
 
 void Terminal::resizeScreenInternal(PageSize totalPageSize, std::optional<ImageSize> _pixels)
 {
-    Require(hostWritableStatusLineScreen_.pageSize() == indicatorStatusScreen_.pageSize());
-
     // NOTE: This will only resize the currently active buffer.
     // Any other buffer will be resized when it is switched to.
     auto const statusLineHeight = hostWritableStatusLineScreen_.pageSize().lines;
@@ -1722,6 +1720,11 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
 {
     auto cursorPosition = state_.cursor.position;
 
+    auto const statusLineHeight = LineCount(1);
+    auto const mainDisplayPageSize = state_.statusDisplayType == StatusDisplayType::None
+                                         ? settings_.pageSize
+                                         : settings_.pageSize - statusLineHeight;
+
     // Ensure correct screen buffer size for the buffer we've just switched to.
     cursorPosition =
         screenType == ScreenType::Primary
@@ -1729,10 +1732,17 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
             : alternateScreen_.grid().resize(settings_.pageSize, cursorPosition, state_.wrapPending);
     cursorPosition = clampCoordinate(cursorPosition);
 
-    (void) hostWritableStatusLineScreen_.grid().resize(
-        PageSize { LineCount(1), settings_.pageSize.columns }, CellLocation {}, false);
-    (void) indicatorStatusScreen_.grid().resize(
-        PageSize { LineCount(1), settings_.pageSize.columns }, CellLocation {}, false);
+    auto const margin =
+        Margin { Margin::Vertical { {}, mainDisplayPageSize.lines.as<LineOffset>() - 1 },
+                 Margin::Horizontal { {}, mainDisplayPageSize.columns.as<ColumnOffset>() - 1 } };
+
+    ScreenBase& targetScreen = screenForType(screenType);
+    targetScreen.margin() = margin;
+
+    // clang-format off
+    (void) hostWritableStatusLineScreen_.grid().resize(PageSize { LineCount(1), settings_.pageSize.columns }, CellLocation {}, false);
+    (void) indicatorStatusScreen_.grid().resize(PageSize { LineCount(1), settings_.pageSize.columns }, CellLocation {}, false);
+    // clang-format on
 
     if (state_.cursor.position.column < boxed_cast<ColumnOffset>(settings_.pageSize.columns))
         state_.wrapPending = false;
@@ -1740,10 +1750,7 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
     // update (last-)cursor position
     state_.cursor.position = cursorPosition;
     state_.lastCursorPosition = cursorPosition;
-    if (isPrimaryScreen())
-        primaryScreen_.updateCursorIterator();
-    else
-        alternateScreen_.updateCursorIterator();
+    targetScreen.updateCursorIterator();
 
     // truncating tabs
     while (!state_.tabs.empty() && state_.tabs.back() >= unbox<ColumnOffset>(settings_.pageSize.columns))
@@ -1848,11 +1855,10 @@ void Terminal::setStatusDisplay(StatusDisplayType statusDisplayType)
 
     auto const statusLineVisibleBefore = state_.statusDisplayType != StatusDisplayType::None;
     auto const statusLineVisibleAfter = statusDisplayType != StatusDisplayType::None;
-    auto const theTotalPageSize = totalPageSize();
     state_.statusDisplayType = statusDisplayType;
 
     if (statusLineVisibleBefore != statusLineVisibleAfter)
-        resizeScreenInternal(theTotalPageSize, nullopt);
+        resizeScreenInternal(settings_.pageSize, nullopt);
 }
 
 void Terminal::setActiveStatusDisplay(ActiveStatusDisplay activeDisplay)
