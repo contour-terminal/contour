@@ -428,7 +428,7 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
             indicatorStatusScreen_.render(
                 RenderBufferBuilder<StatusDisplayCell> { *this,
                                                          _output,
-                                                         settings_.pageSize.lines.as<LineOffset>(),
+                                                         pageSize().lines.as<LineOffset>(),
                                                          !mainDisplayReverseVideo,
                                                          HighlightSearchMatches::No,
                                                          InputMethodData {},
@@ -439,7 +439,7 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
             hostWritableStatusLineScreen_.render(
                 RenderBufferBuilder<StatusDisplayCell> { *this,
                                                          _output,
-                                                         settings_.pageSize.lines.as<LineOffset>(),
+                                                         pageSize().lines.as<LineOffset>(),
                                                          !mainDisplayReverseVideo,
                                                          HighlightSearchMatches::No,
                                                          InputMethodData {},
@@ -1039,6 +1039,10 @@ void Terminal::verifyState()
     auto const thePageSize = settings_.pageSize;
     Require(*currentMousePosition_.column < *thePageSize.columns);
     Require(*currentMousePosition_.line < *thePageSize.lines);
+
+    Require(hostWritableStatusLineScreen_.pageSize() == indicatorStatusScreen_.pageSize());
+    Require(hostWritableStatusLineScreen_.pageSize().lines == LineCount(1));
+    Require(hostWritableStatusLineScreen_.pageSize().columns == settings_.pageSize.columns);
 
     if (isPrimaryScreen())
         Require(primaryScreen_.grid().pageSize() == settings_.pageSize);
