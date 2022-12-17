@@ -1629,16 +1629,13 @@ void Terminal::hardReset()
     state_.imagePool.clear();
 
     state_.cursor = {};
+    primaryScreen_.updateCursorIterator();
+
+    state_.lastCursorPosition = {};
+
     state_.tabs.clear();
 
-    state_.lastCursorPosition = state_.cursor.position;
-
     state_.colorPalette = state_.defaultColorPalette;
-
-    if (isPrimaryScreen())
-        primaryScreen_.updateCursorIterator();
-    else
-        alternateScreen_.updateCursorIterator();
 
     hostWritableStatusLineScreen_.margin() = Margin {
         Margin::Vertical { {}, boxed_cast<LineOffset>(hostWritableStatusLineScreen_.pageSize().lines) - 1 },
@@ -1648,20 +1645,27 @@ void Terminal::hardReset()
     hostWritableStatusLineScreen_.verifyState();
 
     setActiveStatusDisplay(ActiveStatusDisplay::Main);
-    setStatusDisplay(StatusDisplayType::None);
     hostWritableStatusLineScreen_.clearScreen();
     hostWritableStatusLineScreen_.updateCursorIterator();
 
+    auto const statusLineHeight = LineCount(1);
+    auto const mainDisplayPageSize = state_.statusDisplayType == StatusDisplayType::None
+                                         ? settings_.pageSize
+                                         : settings_.pageSize - statusLineHeight;
+
     primaryScreen_.margin() =
-        Margin { Margin::Vertical { {}, boxed_cast<LineOffset>(settings_.pageSize.lines) - 1 },
-                 Margin::Horizontal { {}, boxed_cast<ColumnOffset>(settings_.pageSize.columns) - 1 } };
+        Margin { Margin::Vertical { {}, boxed_cast<LineOffset>(mainDisplayPageSize.lines) - 1 },
+                 Margin::Horizontal { {}, boxed_cast<ColumnOffset>(mainDisplayPageSize.columns) - 1 } };
     primaryScreen_.verifyState();
 
     alternateScreen_.margin() =
-        Margin { Margin::Vertical { {}, boxed_cast<LineOffset>(settings_.pageSize.lines) - 1 },
-                 Margin::Horizontal { {}, boxed_cast<ColumnOffset>(settings_.pageSize.columns) - 1 } };
+        Margin { Margin::Vertical { {}, boxed_cast<LineOffset>(mainDisplayPageSize.lines) - 1 },
+                 Margin::Horizontal { {}, boxed_cast<ColumnOffset>(mainDisplayPageSize.columns) - 1 } };
     alternateScreen().margin() = primaryScreen_.margin();
-    alternateScreen_.verifyState();
+    // NB: We do *NOT* verify alternate screen, because the page size would probably fail as it is
+    // designed to be adjusted when the given screen is activated.
+
+    setStatusDisplay(factorySettings_.statusDisplayType);
 
     state_.inputGenerator.reset();
 }
@@ -1722,10 +1726,9 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
     auto cursorPosition = state_.cursor.position;
 
     auto const statusLineHeight = LineCount(1);
-    auto const mainDisplayPageSize =
-        (state_.statusDisplayType == StatusDisplayType::None || state_.screenType != screenType)
-            ? settings_.pageSize
-            : settings_.pageSize - statusLineHeight;
+    auto const mainDisplayPageSize = state_.statusDisplayType == StatusDisplayType::None
+                                         ? settings_.pageSize
+                                         : settings_.pageSize - statusLineHeight;
 
     // Ensure correct screen buffer size for the buffer we've just switched to.
     cursorPosition =

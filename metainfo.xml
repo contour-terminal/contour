@@ -117,6 +117,7 @@
           <li>Fixes normal mode's page top (S-H)/ page bottom (S-L) cursor movements to respect scroll offset.</li>
           <li>Fixes VT sequences `RIS` and action `ClearHistoryAndReset` when statusline is shown.</li>
           <li>Fixes cursor going beyond the terminal screnn in vim mode, move right motion (#917)</li>
+          <li>Improves hard-reset (`RIS`) to restore initial statusline state.</li>
 					<li>Vi Mode search can handle line wrapping and searchText larger than line length (#869) (#870).</li>
           <li>Adds ability to highlight same words on double click via `profile.*.highlight_word_and_matches_on_double_click`.</li>
           <li>Adds color scheme key `indicator_statusline.foreground` and `indicator_statusline.background` to customize indicator statusline colors.</li>
