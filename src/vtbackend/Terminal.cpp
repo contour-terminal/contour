@@ -1665,7 +1665,8 @@ void Terminal::hardReset()
         Margin { Margin::Vertical { {}, boxed_cast<LineOffset>(mainDisplayPageSize.lines) - 1 },
                  Margin::Horizontal { {}, boxed_cast<ColumnOffset>(mainDisplayPageSize.columns) - 1 } };
     alternateScreen().margin() = primaryScreen_.margin();
-    alternateScreen_.verifyState();
+    // NB: We do *NOT* verify alternate screen, because the page size would probably fail as it is
+    // designed to be adjusted when the given screen is activated.
 
     setStatusDisplay(factorySettings_.statusDisplayType);
 
@@ -1728,10 +1729,9 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
     auto cursorPosition = state_.cursor.position;
 
     auto const statusLineHeight = LineCount(1);
-    auto const mainDisplayPageSize =
-        (state_.statusDisplayType == StatusDisplayType::None || state_.screenType != screenType)
-            ? settings_.pageSize
-            : settings_.pageSize - statusLineHeight;
+    auto const mainDisplayPageSize = state_.statusDisplayType == StatusDisplayType::None
+                                         ? settings_.pageSize
+                                         : settings_.pageSize - statusLineHeight;
 
     // Ensure correct screen buffer size for the buffer we've just switched to.
     cursorPosition =
