@@ -19,7 +19,8 @@
 #include <vtbackend/Color.h>
 #include <vtbackend/ColorPalette.h>
 #include <vtbackend/InputBinding.h>
-#include <vtbackend/Sequencer.h> // CursorDisplay
+#include <vtbackend/Settings.h>
+#include <vtbackend/primitives.h> // CursorDisplay
 
 #include <vtpty/Process.h>
 
@@ -146,7 +147,7 @@ struct TerminalProfile
     bool maximized = false;
     bool fullscreen = false;
     bool show_title_bar = true;
-    double refreshRate = 0.0; // 0=auto
+    terminal::RefreshRate refreshRate = { 0.0 }; // 0=auto
     terminal::LineOffset copyLastMarkRangeOffset = terminal::LineOffset(0);
 
     std::string wmClass;
@@ -244,7 +245,7 @@ struct Config
     // Size in bytes per PTY Buffer Object.
     //
     // Defaults to 1 MB, that's roughly 10k lines when column count is 100.
-    size_t ptyBufferObjectSize = 1024u * 1024u;
+    size_t ptyBufferObjectSize = 1024lu * 1024lu;
 
     bool reflowOnResize = true;
 

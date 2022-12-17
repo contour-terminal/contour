@@ -188,10 +188,10 @@ void ViCommands::executeYank(ViMotion motion, unsigned count)
             assert(terminal.selector());
             if (lastMode == ViMode::VisualBlock)
                 terminal.setHighlightRange(
-                    RectangularHighlight { { terminal.selector()->from(), terminal.selector()->to() } });
+                    RectangularHighlight { terminal.selector()->from(), terminal.selector()->to() });
             else
                 terminal.setHighlightRange(
-                    LinearHighlight { { terminal.selector()->from(), terminal.selector()->to() } });
+                    LinearHighlight { terminal.selector()->from(), terminal.selector()->to() });
             terminal.copyToClipboard(terminal.extractSelectionText());
             terminal.inputHandler().setMode(ViMode::Normal);
             break;
@@ -221,7 +221,7 @@ void ViCommands::executeYank(CellLocation from, CellLocation to)
     auto const text = terminal.extractSelectionText();
     terminal.copyToClipboard(text);
     terminal.clearSelection();
-    terminal.setHighlightRange(LinearHighlight { { from, to } });
+    terminal.setHighlightRange(LinearHighlight { from, to });
     terminal.inputHandler().setMode(ViMode::Normal);
     terminal.screenUpdated();
 }

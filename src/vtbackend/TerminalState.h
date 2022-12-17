@@ -22,6 +22,7 @@
 #include <vtbackend/InputHandler.h>
 #include <vtbackend/ScreenEvents.h> // ScreenType
 #include <vtbackend/Sequencer.h>
+#include <vtbackend/Settings.h>
 #include <vtbackend/ViCommands.h>
 #include <vtbackend/ViInputHandler.h>
 #include <vtbackend/cell/CellConfig.h>
@@ -126,20 +127,12 @@ struct Search
  */
 struct TerminalState
 {
-    TerminalState(Terminal& _terminal,
-                  PageSize _pageSize,
-                  MaxHistoryLineCount _maxHistoryLineCount,
-                  ImageSize _maxImageSize,
-                  unsigned _maxImageColorRegisters,
-                  bool _sixelCursorConformance,
-                  ColorPalette _colorPalette,
-                  bool _allowReflowOnResize);
+    explicit TerminalState(Terminal& _terminal);
 
-    Terminal& terminal;
+    Settings& settings;
 
-    PageSize pageSize;
-    ImageSize cellPixelSize; ///< contains the pixel size of a single cell, or area(cellPixelSize_) == 0 if
-                             ///< unknown.
+    /// contains the pixel size of a single cell, or area(cellPixelSize_) == 0 if unknown.
+    ImageSize cellPixelSize;
 
     ColorPalette defaultColorPalette;
     ColorPalette colorPalette;
@@ -153,24 +146,14 @@ struct TerminalState
     Modes modes;
     std::map<DECMode, std::vector<bool>> savedModes; //!< saved DEC modes
 
-    unsigned maxImageColorRegisters;
-    ImageSize maxImageSize;
-    ImageSize maxImageSizeLimit;
+    unsigned maxImageColorRegisters = 256;
+    ImageSize effectiveImageCanvasSize;
     std::shared_ptr<SixelColorPalette> imageColorPalette;
     ImagePool imagePool;
 
-    bool sixelCursorConformance = true;
-
     std::vector<ColumnOffset> tabs;
 
-    bool allowReflowOnResize;
-
     ScreenType screenType = ScreenType::Primary;
-    Grid<PrimaryScreenCell> primaryBuffer;
-    Grid<AlternateScreenCell> alternateBuffer;
-    Grid<StatusDisplayCell> hostWritableStatusBuffer; // writable status-display, see DECSASD and DECSSDT.
-    Grid<StatusDisplayCell>
-        indicatorStatusBuffer; // status buffer as used for indicator status line AND error lines.
     StatusDisplayType statusDisplayType;
     std::optional<StatusDisplayType> savedStatusDisplayType;
     ActiveStatusDisplay activeStatusDisplay;

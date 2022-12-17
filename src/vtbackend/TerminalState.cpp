@@ -20,32 +20,14 @@ namespace terminal
 
 class Terminal;
 
-TerminalState::TerminalState(Terminal& _terminal,
-                             PageSize _pageSize,
-                             MaxHistoryLineCount _maxHistoryLineCount,
-                             ImageSize _maxImageSize,
-                             unsigned _maxImageColorRegisters,
-                             bool _sixelCursorConformance,
-                             ColorPalette _colorPalette,
-                             bool _allowReflowOnResize):
-    terminal { _terminal },
-    pageSize { _pageSize },
+TerminalState::TerminalState(Terminal& _terminal):
+    settings { _terminal.settings() },
     cellPixelSize {},
-    defaultColorPalette { _colorPalette },
-    colorPalette { std::move(_colorPalette) },
-    maxImageColorRegisters { _maxImageColorRegisters },
-    maxImageSize { _maxImageSize },
-    maxImageSizeLimit { _maxImageSize },
+    effectiveImageCanvasSize { settings.maxImageSize },
     imageColorPalette { std::make_shared<SixelColorPalette>(maxImageColorRegisters, maxImageColorRegisters) },
-    imagePool { [this](Image const* _image) {
-        terminal.discardImage(*_image);
+    imagePool { [&](Image const* _image) {
+        _terminal.discardImage(*_image);
     } },
-    sixelCursorConformance { _sixelCursorConformance },
-    allowReflowOnResize { _allowReflowOnResize },
-    primaryBuffer { _pageSize, _allowReflowOnResize, _maxHistoryLineCount },
-    alternateBuffer { _pageSize, false, LineCount(0) },
-    hostWritableStatusBuffer { PageSize { LineCount(1), _pageSize.columns }, false, LineCount(0) },
-    indicatorStatusBuffer { PageSize { LineCount(1), _pageSize.columns }, false, LineCount(0) },
     statusDisplayType { StatusDisplayType::None },
     activeStatusDisplay { ActiveStatusDisplay::Main },
     cursor {},
@@ -53,7 +35,7 @@ TerminalState::TerminalState(Terminal& _terminal,
     hyperlinks { HyperlinkCache { 1024 } },
     sequencer { _terminal },
     parser { std::ref(sequencer) },
-    viCommands { terminal },
+    viCommands { _terminal },
     inputHandler { viCommands, ViMode::Insert }
 {
 }

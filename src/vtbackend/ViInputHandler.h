@@ -139,17 +139,10 @@ enum class TextObjectScope
     A = 'a'
 };
 
-struct Highlight
-{
-    CellLocation from;
-    CellLocation to;
-};
-struct LinearHighlight: public Highlight
-{
-};
-struct RectangularHighlight: public Highlight
-{
-};
+// clang-format off
+struct LinearHighlight{ CellLocation from; CellLocation to; };
+struct RectangularHighlight { CellLocation from; CellLocation to; };
+// clang-format on
 
 using HighlightRange = std::variant<LinearHighlight, RectangularHighlight>;
 

@@ -298,7 +298,7 @@ uint64_t Renderer::render(Terminal& _terminal, bool _pressure)
 {
     auto const statusLineHeight = _terminal.state().statusDisplayType == StatusDisplayType::None
                                       ? LineCount(0)
-                                      : _terminal.state().hostWritableStatusBuffer.pageSize().lines;
+                                      : _terminal.hostWritableStatusLineDisplay().pageSize().lines;
     gridMetrics_.pageSize = _terminal.pageSize() + statusLineHeight;
 
     auto const changes = _terminal.tick(steady_clock::now());

@@ -97,7 +97,15 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 class Screen final: public ScreenBase, public capabilities::StaticDatabase
 {
   public:
-    Screen(TerminalState& terminalState, Grid<Cell>& grid);
+    /// @param terminal            reference to the terminal this display belongs to.
+    /// @param pageSize            page size of this display. This is passed because it does not necessarily
+    ///                            need to match the terminal's main display page size.
+    /// @param reflowOnResize      whether or not to perform virtual line text reflow on resuze.
+    /// @param maxHistoryLineCount maximum number of lines that are can be scrolled back to via Viewport.
+    Screen(Terminal& terminal,
+           PageSize pageSize,
+           bool reflowOnResize,
+           MaxHistoryLineCount maxHistoryLineCount);
 
     Screen(Screen const&) = delete;
     Screen& operator=(Screen const&) = delete;
@@ -246,9 +254,6 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void smGraphics(XtSmGraphics::Item _item, XtSmGraphics::Action _action, XtSmGraphics::Value _value);
     // }}}
 
-    [[nodiscard]] ImageSize maxImageSize() const noexcept { return _state.maxImageSize; }
-    [[nodiscard]] ImageSize maxImageSizeLimit() const noexcept { return _state.maxImageSizeLimit; }
-
     std::shared_ptr<Image const> uploadImage(ImageFormat _format,
                                              ImageSize _imageSize,
                                              Image::Data&& _pixmap);
@@ -284,10 +289,10 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void requestDECMode(unsigned int _mode);
 
     [[nodiscard]] PageSize pageSize() const noexcept { return _grid.pageSize(); }
-    [[nodiscard]] ImageSize pixelSize() const noexcept { return _state.cellPixelSize * _state.pageSize; }
+    [[nodiscard]] ImageSize pixelSize() const noexcept { return _state.cellPixelSize * _settings.pageSize; }
 
-    [[nodiscard]] Margin margin() const noexcept override { return grid().margin(); }
-    [[nodiscard]] Margin& margin() noexcept override { return grid().margin(); }
+    [[nodiscard]] Margin margin() const noexcept override { return _grid.margin(); }
+    [[nodiscard]] Margin& margin() noexcept override { return _grid.margin(); }
 
     [[nodiscard]] bool isFullHorizontalMargins() const noexcept
     {
@@ -391,9 +396,9 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     // Tests if given coordinate is within the visible screen area.
     [[nodiscard]] bool contains(CellLocation _coord) const noexcept override
     {
-        return LineOffset(0) <= _coord.line && _coord.line < boxed_cast<LineOffset>(_state.pageSize.lines)
+        return LineOffset(0) <= _coord.line && _coord.line < boxed_cast<LineOffset>(_settings.pageSize.lines)
                && ColumnOffset(0) <= _coord.column
-               && _coord.column <= boxed_cast<ColumnOffset>(_state.pageSize.columns);
+               && _coord.column <= boxed_cast<ColumnOffset>(_settings.pageSize.columns);
     }
 
     [[nodiscard]] std::optional<CellLocation> search(std::u32string_view searchText,
@@ -409,7 +414,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     void updateCursorIterator() noexcept override
     {
 #if defined(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER)
-        _currentLine = &grid().lineAt(_state.cursor.position.line);
+        _currentLine = &_grid.lineAt(_state.cursor.position.line);
 #endif
     }
 
@@ -418,7 +423,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 #if defined(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER)
         return *_currentLine;
 #else
-        return grid().lineAt(_state.cursor.position.line);
+        return _grid.lineAt(_state.cursor.position.line);
 #endif
     }
 
@@ -427,48 +432,27 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 #if defined(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER)
         return *_currentLine;
 #else
-        return grid().lineAt(_state.cursor.position.line);
+        return _grid.lineAt(_state.cursor.position.line);
 #endif
     }
 
-    Cell& useCurrentCell() noexcept
-    {
-        return currentLine().useCellAt(_state.cursor.position.column);
-    }
+    Cell& useCurrentCell() noexcept { return currentLine().useCellAt(_state.cursor.position.column); }
 
     /// Gets a reference to the cell relative to screen origin (top left, 1:1).
-    Cell& at(LineOffset _line, ColumnOffset _column) noexcept
-    {
-        return grid().useCellAt(_line, _column);
-    }
+    Cell& at(LineOffset _line, ColumnOffset _column) noexcept { return _grid.useCellAt(_line, _column); }
     Cell& useCellAt(LineOffset _line, ColumnOffset _column) noexcept
     {
-        return grid().lineAt(_line).useCellAt(_column);
+        return _grid.lineAt(_line).useCellAt(_column);
     }
 
     /// Gets a reference to the cell relative to screen origin (top left, 1:1).
-    Cell const& at(LineOffset _line, ColumnOffset _column) const noexcept
-    {
-        return grid().at(_line, _column);
-    }
+    Cell const& at(LineOffset _line, ColumnOffset _column) const noexcept { return _grid.at(_line, _column); }
 
-    Cell& at(CellLocation p) noexcept
-    {
-        return useCellAt(p.line, p.column);
-    }
-    Cell& useCellAt(CellLocation p) noexcept
-    {
-        return useCellAt(p.line, p.column);
-    }
-    Cell const& at(CellLocation p) const noexcept
-    {
-        return grid().at(p.line, p.column);
-    }
+    Cell& at(CellLocation p) noexcept { return useCellAt(p.line, p.column); }
+    Cell& useCellAt(CellLocation p) noexcept { return useCellAt(p.line, p.column); }
+    Cell const& at(CellLocation p) const noexcept { return _grid.at(p.line, p.column); }
 
-    [[nodiscard]] std::string const& windowTitle() const noexcept
-    {
-        return _state.windowTitle;
-    }
+    [[nodiscard]] std::string const& windowTitle() const noexcept { return _state.windowTitle; }
 
     /// Finds the next marker right after the given line position.
     ///
@@ -487,30 +471,15 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     [[nodiscard]] std::optional<LineOffset> findMarkerUpwards(LineOffset _currentCursorLine) const;
 
     /// ScreenBuffer's type, such as main screen or alternate screen.
-    [[nodiscard]] ScreenType bufferType() const noexcept
-    {
-        return _state.screenType;
-    }
+    [[nodiscard]] ScreenType bufferType() const noexcept { return _state.screenType; }
 
-    void scrollUp(LineCount n)
-    {
-        scrollUp(n, margin());
-    }
-    void scrollDown(LineCount n)
-    {
-        scrollDown(n, margin());
-    }
+    void scrollUp(LineCount n) { scrollUp(n, margin()); }
+    void scrollDown(LineCount n) { scrollDown(n, margin()); }
 
     void verifyState() const override;
 
-    [[nodiscard]] Grid<Cell> const& grid() const noexcept
-    {
-        return _grid;
-    }
-    [[nodiscard]] Grid<Cell>& grid() noexcept
-    {
-        return _grid;
-    }
+    [[nodiscard]] Grid<Cell> const& grid() const noexcept { return _grid; }
+    [[nodiscard]] Grid<Cell>& grid() noexcept { return _grid; }
 
     /// @returns true iff given absolute line number is wrapped, false otherwise.
     [[nodiscard]] bool isLineWrapped(LineOffset _lineNumber) const noexcept
@@ -518,19 +487,10 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         return _grid.isLineWrapped(_lineNumber);
     }
 
-    [[nodiscard]] ColorPalette& colorPalette() noexcept
-    {
-        return _state.colorPalette;
-    }
-    [[nodiscard]] ColorPalette const& colorPalette() const noexcept
-    {
-        return _state.colorPalette;
-    }
+    [[nodiscard]] ColorPalette& colorPalette() noexcept { return _state.colorPalette; }
+    [[nodiscard]] ColorPalette const& colorPalette() const noexcept { return _state.colorPalette; }
 
-    [[nodiscard]] ColorPalette& defaultColorPalette() noexcept
-    {
-        return _state.defaultColorPalette;
-    }
+    [[nodiscard]] ColorPalette& defaultColorPalette() noexcept { return _state.defaultColorPalette; }
     [[nodiscard]] ColorPalette const& defaultColorPalette() const noexcept
     {
         return _state.defaultColorPalette;
@@ -538,44 +498,41 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     [[nodiscard]] bool isCellEmpty(CellLocation position) const noexcept override
     {
-        return grid().lineAt(position.line).cellEmptyAt(position.column);
+        return _grid.lineAt(position.line).cellEmptyAt(position.column);
     }
 
     [[nodiscard]] bool compareCellTextAt(CellLocation position, char codepoint) const noexcept override
     {
-        auto const& cell = grid().lineAt(position.line).inflatedBuffer().at(position.column.as<size_t>());
+        auto const& cell = _grid.lineAt(position.line).inflatedBuffer().at(position.column.as<size_t>());
         return CellUtil::compareText(cell, codepoint);
     }
 
     // IMPORTANT: Invokig inflatedBuffer() is expensive. This function should be invoked with caution.
     [[nodiscard]] std::string cellTextAt(CellLocation position) const noexcept override
     {
-        return grid().lineAt(position.line).inflatedBuffer().at(position.column.as<size_t>()).toUtf8();
+        return _grid.lineAt(position.line).inflatedBuffer().at(position.column.as<size_t>()).toUtf8();
     }
 
     [[nodiscard]] std::string lineTextAt(LineOffset line) const noexcept override
     {
-        return grid().lineAt(line).toUtf8Trimmed();
+        return _grid.lineAt(line).toUtf8Trimmed();
     }
 
     [[nodiscard]] bool isLineEmpty(LineOffset line) const noexcept override
     {
-        return grid().lineAt(line).empty();
+        return _grid.lineAt(line).empty();
     }
 
     [[nodiscard]] uint8_t cellWidthAt(CellLocation position) const noexcept override
     {
-        return grid().lineAt(position.line).cellWidthAt(position.column);
+        return _grid.lineAt(position.line).cellWidthAt(position.column);
     }
 
-    [[nodiscard]] LineCount historyLineCount() const noexcept override
-    {
-        return grid().historyLineCount();
-    }
+    [[nodiscard]] LineCount historyLineCount() const noexcept override { return _grid.historyLineCount(); }
 
     [[nodiscard]] HyperlinkId hyperlinkIdAt(CellLocation position) const noexcept override
     {
-        auto const& line = grid().lineAt(position.line);
+        auto const& line = _grid.lineAt(position.line);
         if (line.isTrivialBuffer())
         {
             TrivialLineBuffer const& lineBuffer = line.trivialBuffer();
@@ -589,19 +546,10 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
         return _state.hyperlinks.hyperlinkById(hyperlinkIdAt(pos));
     }
 
-    [[nodiscard]] HyperlinkStorage const& hyperlinks() const noexcept
-    {
-        return _state.hyperlinks;
-    }
+    [[nodiscard]] HyperlinkStorage const& hyperlinks() const noexcept { return _state.hyperlinks; }
 
-    void resetInstructionCounter() noexcept
-    {
-        _state.instructionCounter = 0;
-    }
-    [[nodiscard]] uint64_t instructionCounter() const noexcept
-    {
-        return _state.instructionCounter;
-    }
+    void resetInstructionCounter() noexcept { _state.instructionCounter = 0; }
+    [[nodiscard]] uint64_t instructionCounter() const noexcept { return _state.instructionCounter; }
     [[nodiscard]] char32_t precedingGraphicCharacter() const noexcept
     {
         return _state.parser.precedingGraphicCharacter();
@@ -649,8 +597,9 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     [[nodiscard]] std::unique_ptr<ParserExtension> hookXTGETTCAP(Sequence const& seq);
 
     Terminal& _terminal;
+    Settings& _settings;
     TerminalState& _state;
-    Grid<Cell>& _grid;
+    Grid<Cell> _grid;
 #if defined(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER)
     Line<Cell>* _currentLine = nullptr;
 #endif

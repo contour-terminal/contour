@@ -54,7 +54,7 @@ size_t Sequencer::print(string_view _chars, size_t cellCount)
     terminal_.state().instructionCounter += _chars.size();
     terminal_.activeDisplay().writeText(_chars, cellCount);
 
-    return terminal_.state().pageSize.columns.as<size_t>()
+    return terminal_.settings().pageSize.columns.as<size_t>()
            - terminal_.state().cursor.position.column.as<size_t>();
 }
 

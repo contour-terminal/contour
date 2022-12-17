@@ -91,7 +91,7 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
         return *session_;
     }
 
-    terminal::PageSize windowSize() const noexcept;
+    [[nodiscard]] terminal::PageSize windowSize() const noexcept;
 
     // {{{ OpenGL rendering handling
     [[nodiscard]] QSize minimumSizeHint() const override;
@@ -119,11 +119,12 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
     void post(std::function<void()> _fn);
 
     // Attributes
-    [[nodiscard]] double refreshRate() const;
+    [[nodiscard]] terminal::RefreshRate refreshRate() const;
     text::DPI fontDPI() const noexcept;
     text::DPI logicalDPI() const noexcept;
     text::DPI physicalDPI() const noexcept;
     [[nodiscard]] bool isFullScreen() const;
+
     [[nodiscard]] terminal::ImageSize pixelSize() const;
     [[nodiscard]] terminal::ImageSize cellSize() const;
 

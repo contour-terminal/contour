@@ -17,6 +17,8 @@
 
 #include <vtpty/MockPty.h>
 
+#include <crispy/App.h>
+
 #include <unicode/convert.h>
 
 namespace terminal
@@ -26,6 +28,8 @@ template <typename PtyDevice = MockPty>
 class MockTerm: public Terminal::Events
 {
   public:
+    MockTerm(ColumnCount _columns, LineCount _lines): MockTerm { PageSize { _lines, _columns } } {}
+
     explicit MockTerm(PageSize _size, LineCount _hist = {}, size_t ptyReadBufferSize = 1024);
 
     template <typename Init>
@@ -41,6 +45,9 @@ class MockTerm: public Terminal::Events
     decltype(auto) state() const noexcept { return terminal.state(); }
 
     PtyDevice& mockPty() noexcept { return static_cast<PtyDevice&>(terminal.device()); }
+    PtyDevice const& mockPty() const noexcept { return static_cast<PtyDevice const&>(terminal.device()); }
+
+    void writeToStdin(std::string_view _text) { mockPty().stdinBuffer() += _text; }
 
     void writeToScreen(std::string_view text)
     {
@@ -56,16 +63,41 @@ class MockTerm: public Terminal::Events
 
     // Events overrides
     void setWindowTitle(std::string_view title) override { windowTitle = title; }
+
+    static terminal::Settings createSettings(PageSize pageSize,
+                                             LineCount maxHistoryLineCount,
+                                             size_t ptyReadBufferSize)
+    {
+        auto settings = terminal::Settings {};
+        settings.pageSize = pageSize;
+        settings.maxHistoryLineCount = maxHistoryLineCount;
+        settings.ptyReadBufferSize = ptyReadBufferSize;
+        return settings;
+    }
+
+    std::string const& replyData() const noexcept { return mockPty().stdinBuffer(); }
+
+    void requestCaptureBuffer(LineCount lines, bool logical) override
+    {
+        terminal.primaryScreen().captureBuffer(lines, logical);
+    }
 };
 
 template <typename PtyDevice>
 inline MockTerm<PtyDevice>::MockTerm(PageSize pageSize,
                                      LineCount maxHistoryLineCount,
                                      size_t ptyReadBufferSize):
-    terminal {
-        std::make_unique<PtyDevice>(pageSize), 1024 * 1024, ptyReadBufferSize, *this, maxHistoryLineCount
-    }
+    terminal { *this,
+               std::make_unique<PtyDevice>(pageSize),
+               createSettings(pageSize, maxHistoryLineCount, ptyReadBufferSize),
+               std::chrono::steady_clock::time_point() } // explicitly start with empty timepoint
 {
+    char const* logFilterString = getenv("LOG");
+    if (logFilterString)
+    {
+        logstore::configure(logFilterString);
+        crispy::App::customizeLogStoreOutput();
+    }
 }
 
 } // namespace terminal
