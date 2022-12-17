@@ -381,6 +381,8 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
                 std::max(uint8_t { 1 }, terminal.currentScreen().cellWidthAt(cursorPosition));
             auto resultPosition = cursorPosition;
             resultPosition.column += ColumnOffset::cast_from(cellWidth);
+            resultPosition.column =
+                min(resultPosition.column, ColumnOffset::cast_from(terminal.pageSize().columns - 1));
             return resultPosition;
         }
         case ViMotion::ScreenColumn: // |
