@@ -19,6 +19,7 @@
 #include <vtbackend/ScreenEvents.h>
 #include <vtbackend/Selector.h>
 #include <vtbackend/Sequence.h>
+#include <vtbackend/Settings.h>
 #include <vtbackend/TerminalState.h>
 #include <vtbackend/ViInputHandler.h>
 #include <vtbackend/Viewport.h>
@@ -95,43 +96,28 @@ class Terminal
         virtual void onScrollOffsetChanged(ScrollOffset) {}
     };
 
-    Terminal(std::unique_ptr<Pty> _pty,
-             size_t ptyBufferObjectSize,
-             size_t _ptyReadBufferSize,
-             Events& _eventListener,
-             MaxHistoryLineCount _maxHistoryLineCount = LineCount(0),
-             LineOffset _copyLastMarkRangeOffset = LineOffset(0),
-             std::chrono::milliseconds _cursorBlinkInterval = std::chrono::milliseconds { 500 },
-             std::chrono::steady_clock::time_point _now = std::chrono::steady_clock::now(),
-             std::string const& _wordDelimiters = "",
-             Modifier _mouseProtocolBypassModifier = Modifier::Shift,
-             ImageSize _maxImageSize = ImageSize { Width(800), Height(600) },
-             unsigned _maxImageColorRegisters = 256,
-             bool _sixelCursorConformance = true,
-             ColorPalette _colorPalette = {},
-             double _refreshRate = 30.0,
-             bool _allowReflowOnResize = true,
-             bool _visualizeSelectedWord = true,
-             std::chrono::milliseconds _highlightTimeout = std::chrono::milliseconds { 150 });
+    Terminal(Events& _eventListener,
+             std::unique_ptr<Pty> _pty,
+             Settings _factorySettings,
+             std::chrono::steady_clock::time_point _now /* = std::chrono::steady_clock::now()*/);
     ~Terminal() = default;
 
     void start();
 
-    void setRefreshRate(double _refreshRate);
+    void setRefreshRate(RefreshRate _refreshRate);
     void setLastMarkRangeOffset(LineOffset _value) noexcept;
 
     void setMaxHistoryLineCount(MaxHistoryLineCount _maxHistoryLineCount);
     LineCount maxHistoryLineCount() const noexcept;
 
     void setTerminalId(VTType _id) noexcept { state_.terminalId = _id; }
-    void setSixelCursorConformance(bool _value) noexcept { state_.sixelCursorConformance = _value; }
 
-    void setMaxImageSize(ImageSize size) noexcept { state_.maxImageSize = size; }
+    void setMaxImageSize(ImageSize size) noexcept { state_.effectiveImageCanvasSize = size; }
 
     void setMaxImageSize(ImageSize _effective, ImageSize _limit)
     {
-        state_.maxImageSize = _effective;
-        state_.maxImageSizeLimit = _limit;
+        state_.effectiveImageCanvasSize = _effective;
+        settings_.maxImageSize = _limit;
     }
 
     bool isModeEnabled(AnsiMode m) const noexcept { return state_.modes.enabled(m); }
@@ -178,12 +164,12 @@ class Terminal
 
     [[nodiscard]] LineOffset clampedLine(LineOffset _line) const noexcept
     {
-        return std::clamp(_line, LineOffset(0), boxed_cast<LineOffset>(state_.pageSize.lines) - 1);
+        return std::clamp(_line, LineOffset(0), boxed_cast<LineOffset>(settings_.pageSize.lines) - 1);
     }
 
     [[nodiscard]] ColumnOffset clampedColumn(ColumnOffset _column) const noexcept
     {
-        return std::clamp(_column, ColumnOffset(0), boxed_cast<ColumnOffset>(state_.pageSize.columns) - 1);
+        return std::clamp(_column, ColumnOffset(0), boxed_cast<ColumnOffset>(settings_.pageSize.columns) - 1);
     }
 
     [[nodiscard]] CellLocation clampToScreen(CellLocation coord) const noexcept
@@ -194,9 +180,9 @@ class Terminal
     // Tests if given coordinate is within the visible screen area.
     [[nodiscard]] constexpr bool contains(CellLocation _coord) const noexcept
     {
-        return LineOffset(0) <= _coord.line && _coord.line < boxed_cast<LineOffset>(state_.pageSize.lines)
+        return LineOffset(0) <= _coord.line && _coord.line < boxed_cast<LineOffset>(settings_.pageSize.lines)
                && ColumnOffset(0) <= _coord.column
-               && _coord.column <= boxed_cast<ColumnOffset>(state_.pageSize.columns);
+               && _coord.column <= boxed_cast<ColumnOffset>(settings_.pageSize.columns);
     }
 
     [[nodiscard]] bool isCursorInViewport() const noexcept
@@ -209,11 +195,11 @@ class Terminal
     constexpr void setCellPixelSize(ImageSize _cellPixelSize) { state_.cellPixelSize = _cellPixelSize; }
 
     /// Retrieves the time point this terminal instance has been spawned.
-    [[nodiscard]] std::chrono::steady_clock::time_point startTime() const noexcept { return startTime_; }
     [[nodiscard]] std::chrono::steady_clock::time_point currentTime() const noexcept { return currentTime_; }
 
     /// Retrieves reference to the underlying PTY device.
     [[nodiscard]] Pty& device() noexcept { return *pty_; }
+    [[nodiscard]] Pty const& device() const noexcept { return *pty_; }
 
     [[nodiscard]] PageSize pageSize() const noexcept { return pty_->pageSize(); }
 
@@ -242,8 +228,8 @@ class Terminal
 
     void clearScreen();
 
-    void setMouseProtocolBypassModifier(Modifier _value) { mouseProtocolBypassModifier_ = _value; }
-    void setMouseBlockSelectionModifier(Modifier _value) { mouseBlockSelectionModifier_ = _value; }
+    void setMouseProtocolBypassModifier(Modifier value) { settings_.mouseProtocolBypassModifier = value; }
+    void setMouseBlockSelectionModifier(Modifier value) { settings_.mouseBlockSelectionModifier = value; }
 
     bool isMouseGrabbedByApp() const noexcept;
 
@@ -410,16 +396,20 @@ class Terminal
     bool isAlternateScreen() const noexcept { return state_.screenType == ScreenType::Alternate; }
     ScreenType screenType() const noexcept { return state_.screenType; }
     void setScreen(ScreenType screenType);
-    void setHighlightTimeout(std::chrono::milliseconds timeout) noexcept { highlightTimeout_ = timeout; }
 
+    void setHighlightTimeout(std::chrono::milliseconds timeout) noexcept
+    {
+        settings_.highlightTimeout = timeout;
+    }
+
+    // clang-format off
     [[nodiscard]] Screen<PrimaryScreenCell> const& primaryScreen() const noexcept { return primaryScreen_; }
     [[nodiscard]] Screen<PrimaryScreenCell>& primaryScreen() noexcept { return primaryScreen_; }
-
-    [[nodiscard]] Screen<AlternateScreenCell> const& alternateScreen() const noexcept
-    {
-        return alternateScreen_;
-    }
+    [[nodiscard]] Screen<AlternateScreenCell> const& alternateScreen() const noexcept { return alternateScreen_; }
     [[nodiscard]] Screen<AlternateScreenCell>& alternateScreen() noexcept { return alternateScreen_; }
+    [[nodiscard]] Screen<StatusDisplayCell> const& hostWritableStatusLineDisplay() const noexcept { return hostWritableStatusLineScreen_; }
+    [[nodiscard]] Screen<StatusDisplayCell> const& indicatorStatusLineDisplay() const noexcept { return indicatorStatusScreen_; }
+    // clang-format on
 
     [[nodiscard]] bool isLineWrapped(LineOffset _lineNumber) const noexcept
     {
@@ -436,10 +426,10 @@ class Terminal
     }
 
     // {{{ cursor management
-    CursorDisplay cursorDisplay() const noexcept { return cursorDisplay_; }
+    CursorDisplay cursorDisplay() const noexcept { return settings_.cursorDisplay; }
     void setCursorDisplay(CursorDisplay _value);
 
-    CursorShape cursorShape() const noexcept { return cursorShape_; }
+    CursorShape cursorShape() const noexcept { return settings_.cursorShape; }
     void setCursorShape(CursorShape _value);
 
     bool cursorBlinkActive() const noexcept { return cursorBlinkState_; }
@@ -447,7 +437,7 @@ class Terminal
     bool cursorCurrentlyVisible() const noexcept
     {
         return isModeEnabled(DECMode::VisibleCursor)
-               && (cursorDisplay_ == CursorDisplay::Steady || cursorBlinkState_);
+               && (cursorDisplay() == CursorDisplay::Steady || cursorBlinkState_);
     }
 
     bool isBlinkOnScreen() const noexcept { return _lastRenderPassHints.containsBlinkingCells; }
@@ -456,20 +446,23 @@ class Terminal
 
     constexpr void setCursorBlinkingInterval(std::chrono::milliseconds _value)
     {
-        cursorBlinkInterval_ = _value;
+        settings_.cursorBlinkInterval = _value;
     }
 
-    constexpr std::chrono::milliseconds cursorBlinkInterval() const noexcept { return cursorBlinkInterval_; }
+    constexpr std::chrono::milliseconds cursorBlinkInterval() const noexcept
+    {
+        return settings_.cursorBlinkInterval;
+    }
     // }}}
 
     // {{{ selection management
     // TODO: move you, too?
     void setWordDelimiters(std::string const& _wordDelimiters);
-    std::u32string const& wordDelimiters() const noexcept { return wordDelimiters_; }
+    std::u32string const& wordDelimiters() const noexcept { return settings_.wordDelimiters; }
 
     Selection const* selector() const noexcept { return selection_.get(); }
     Selection* selector() noexcept { return selection_.get(); }
-    std::chrono::milliseconds highlightTimeout() const noexcept { return highlightTimeout_; }
+    std::chrono::milliseconds highlightTimeout() const noexcept { return settings_.highlightTimeout; }
 
     template <typename RenderTarget>
     void renderSelection(RenderTarget _renderTarget) const
@@ -524,8 +517,8 @@ class Terminal
     /// Tests whether or not some grid cells are selected.
     bool selectionAvailable() const noexcept { return !!selection_; }
 
-    bool visualizeSelectedWord() const noexcept { return visualizeSelectedWord_; }
-    void setVisualizeSelectedWord(bool enabled) noexcept { visualizeSelectedWord_ = enabled; }
+    bool visualizeSelectedWord() const noexcept { return settings_.visualizeSelectedWord; }
+    void setVisualizeSelectedWord(bool enabled) noexcept { settings_.visualizeSelectedWord = enabled; }
     // }}}
 
     [[nodiscard]] std::string extractSelectionText() const;
@@ -588,6 +581,7 @@ class Terminal
     void useApplicationCursorKeys(bool _enabled);
     void softReset();
     void hardReset();
+    void forceRedraw(std::function<void()> artificialSleep);
     void discardImage(Image const&);
     void markCellDirty(CellLocation _position) noexcept;
     void markRegionDirty(Rect _area) noexcept;
@@ -608,6 +602,7 @@ class Terminal
     [[nodiscard]] TerminalState const& state() const noexcept { return state_; }
 
     void applyPageSizeToCurrentBuffer();
+    void applyPageSizeToMainDisplay(ScreenType screenType);
 
     [[nodiscard]] crispy::BufferObjectPtr<char> currentPtyBuffer() const noexcept
     {
@@ -629,6 +624,7 @@ class Terminal
     [[nodiscard]] ViInputHandler const& inputHandler() const noexcept { return state_.inputHandler; }
     void resetHighlight();
 
+    StatusDisplayType statusDisplayType() const noexcept { return state_.statusDisplayType; }
     void setStatusDisplay(StatusDisplayType statusDisplayType);
     void setActiveStatusDisplay(ActiveStatusDisplay activeDisplay);
 
@@ -660,6 +656,10 @@ class Terminal
     [[nodiscard]] std::tuple<std::u32string, CellLocationRange> extractWordUnderCursor(
         CellLocation position) const noexcept;
 
+    Settings const& factorySettings() const noexcept { return factorySettings_; }
+    Settings const& settings() const noexcept { return settings_; }
+    Settings& settings() noexcept { return settings_; }
+
   private:
     void mainLoop();
     void refreshRenderBuffer(RenderBuffer& _output); // <- acquires the lock
@@ -687,62 +687,62 @@ class Terminal
     // private data
     //
 
-    /// Boolean, indicating whether the terminal's screen buffer contains updates to be rendered.
-    mutable std::atomic<uint64_t> changes_;
-
     Events& eventListener_;
 
-    std::chrono::milliseconds refreshInterval_;
-    bool screenDirty_ = false;
-    RenderDoubleBuffer renderBuffer_ {};
+    // configuration state
+    Settings factorySettings_;
+    Settings settings_;
+    TerminalState state_;
 
-    std::unique_ptr<Pty> pty_;
+    // synchronization
+    std::mutex mutable outerLock_;
+    std::mutex mutable innerLock_;
 
-    std::chrono::steady_clock::time_point startTime_;
+    // terminal clock
     std::chrono::steady_clock::time_point currentTime_;
 
-    mutable std::chrono::steady_clock::time_point lastCursorBlink_;
-    CursorDisplay cursorDisplay_;
-    CursorShape cursorShape_;
-    std::chrono::milliseconds cursorBlinkInterval_;
-    mutable unsigned cursorBlinkState_;
-
-    std::u32string wordDelimiters_;
-
-    // helpers for detecting double/tripple clicks
-    std::chrono::steady_clock::time_point lastClick_ {};
-    unsigned int speedClicks_ = 0;
-
-    terminal::CellLocation currentMousePosition_ {}; // current mouse position
-    Modifier mouseProtocolBypassModifier_ = Modifier::Shift;
-    Modifier mouseBlockSelectionModifier_ = Modifier::Control;
-    bool respectMouseProtocol_ = true;    // shift-click can disable that, button release sets it back to true
-    bool leftMouseButtonPressed_ = false; // tracks left-mouse button pressed state (used for cell selection).
-
-    LineOffset copyLastMarkRangeOffset_;
-
-    TerminalState state_;
+    // {{{ PTY and PTY read buffer management
     crispy::BufferObjectPool<char> ptyBufferPool_;
     crispy::BufferObjectPtr<char> currentPtyBuffer_;
     size_t ptyReadBufferSize_;
+    std::unique_ptr<Pty> pty_;
+    // }}}
+
+    // {{{ mouse related state (helpers for detecting double/tripple clicks)
+    std::chrono::steady_clock::time_point lastClick_ {};
+    unsigned int speedClicks_ = 0;
+    terminal::CellLocation currentMousePosition_ {}; // current mouse position
+    bool respectMouseProtocol_ = true;    // shift-click can disable that, button release sets it back to true
+    bool leftMouseButtonPressed_ = false; // tracks left-mouse button pressed state (used for cell selection).
+    // }}}
+
+    // {{{ blinking state helpers
+    mutable std::chrono::steady_clock::time_point lastCursorBlink_;
+    mutable unsigned cursorBlinkState_;
+    struct BlinkerState
+    {
+        bool state = false;
+        std::chrono::milliseconds const interval;
+    };
+    mutable BlinkerState _slowBlinker { false, std::chrono::milliseconds { 500 } };
+    mutable BlinkerState _rapidBlinker { false, std::chrono::milliseconds { 300 } };
+    mutable std::chrono::steady_clock::time_point _lastBlink;
+    mutable std::chrono::steady_clock::time_point _lastRapidBlink;
+    // }}}
+
+    // {{{ Displays this terminal manages
+    // clang-format off
     Screen<PrimaryScreenCell> primaryScreen_;
     Screen<AlternateScreenCell> alternateScreen_;
     Screen<StatusDisplayCell> hostWritableStatusLineScreen_;
     Screen<StatusDisplayCell> indicatorStatusScreen_;
     std::reference_wrapper<ScreenBase> currentScreen_;
-
-    InputMethodData inputMethodData_;
-
-    std::mutex mutable outerLock_;
-    std::mutex mutable innerLock_;
     Viewport viewport_;
+    // clang-format on
+    // }}}
+
+    // {{{ selection states
     std::unique_ptr<Selection> selection_;
-    bool visualizeSelectedWord_ = true;
-    std::atomic<bool> hoveringHyperlink_ = false;
-    std::atomic<bool> renderBufferUpdateEnabled_ = true;
-
-    std::atomic<uint64_t> lastFrameID_ = 0;
-
     struct SelectionHelper: public terminal::SelectionHelper
     {
         Terminal* terminal;
@@ -754,18 +754,22 @@ class Terminal
         [[nodiscard]] int cellWidth(CellLocation _pos) const noexcept override;
     };
     SelectionHelper selectionHelper_;
+    // }}}
+
+    // {{{ Render buffer state
+    /// Boolean, indicating whether the terminal's screen buffer contains updates to be rendered.
+    mutable std::atomic<uint64_t> changes_ { 0 };
+    bool screenDirty_ = false; // TODO: just inc changes_ and delete this instead.
+    RefreshInterval refreshInterval_;
+    RenderDoubleBuffer renderBuffer_ {};
+    std::atomic<uint64_t> lastFrameID_ = 0;
+    RenderPassHints _lastRenderPassHints {};
+    // }}}
+
+    InputMethodData inputMethodData_ {};
+    std::atomic<bool> hoveringHyperlink_ = false;
+    std::atomic<bool> renderBufferUpdateEnabled_ = true; // for "Synchronized Updates" feature
     std::optional<HighlightRange> highlightRange_ = std::nullopt;
-    std::chrono::milliseconds highlightTimeout_;
-    struct BlinkerState
-    {
-        bool state = false;
-        std::chrono::milliseconds const interval;
-    };
-    RenderPassHints _lastRenderPassHints;
-    mutable BlinkerState _slowBlinker { false, std::chrono::milliseconds { 500 } };
-    mutable BlinkerState _rapidBlinker { false, std::chrono::milliseconds { 300 } };
-    mutable std::chrono::steady_clock::time_point _lastBlink;
-    mutable std::chrono::steady_clock::time_point _lastRapidBlink;
 };
 
 } // namespace terminal

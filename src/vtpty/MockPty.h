@@ -40,7 +40,8 @@ class MockPty: public Pty
     void close() override;
     [[nodiscard]] bool isClosed() const noexcept override;
 
-    std::string& stdinBuffer() noexcept { return inputBuffer_; }
+    [[nodiscard]] std::string& stdinBuffer() noexcept { return inputBuffer_; }
+    [[nodiscard]] std::string const& stdinBuffer() const noexcept { return inputBuffer_; }
 
     [[nodiscard]] bool isStdoutDataAvailable() const noexcept
     {

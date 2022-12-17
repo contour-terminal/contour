@@ -108,6 +108,29 @@ namespace
         return output;
     }
 
+    terminal::Settings createSettingsFromConfig(config::Config const& config,
+                                                config::TerminalProfile const& profile)
+    {
+        auto settings = terminal::Settings {};
+
+        settings.ptyBufferObjectSize = config.ptyBufferObjectSize;
+        settings.ptyReadBufferSize = config.ptyReadBufferSize;
+        settings.maxHistoryLineCount = profile.maxHistoryLineCount;
+        settings.copyLastMarkRangeOffset = profile.copyLastMarkRangeOffset;
+        settings.cursorBlinkInterval = profile.inputModes.insert.cursor.cursorBlinkInterval;
+        settings.wordDelimiters = unicode::from_utf8(config.wordDelimiters);
+        settings.mouseProtocolBypassModifier = config.bypassMouseProtocolModifier;
+        settings.maxImageSize = config.maxImageSize;
+        settings.maxImageRegisterCount = config.maxImageColorRegisters;
+        settings.colorPalette = profile.colors;
+        settings.refreshRate = profile.refreshRate;
+        settings.primaryScreen.allowReflowOnResize = config.reflowOnResize;
+        settings.highlightDoubleClickedWord = profile.highlightDoubleClickedWord;
+        settings.highlightTimeout = profile.highlightTimeout;
+
+        return settings;
+    }
+
 } // namespace
 
 TerminalSession::TerminalSession(unique_ptr<Pty> _pty, ContourGuiApp& _app):
@@ -116,24 +139,9 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty, ContourGuiApp& _app):
     profileName_ { _app.profileName() },
     profile_ { *config_.profile(profileName_) },
     app_ { _app },
-    terminal_ { std::move(_pty),
-                config_.ptyBufferObjectSize,
-                config_.ptyReadBufferSize,
-                *this,
-                profile_.maxHistoryLineCount,
-                profile_.copyLastMarkRangeOffset,
-                profile_.inputModes.insert.cursor.cursorBlinkInterval,
-                steady_clock::now(),
-                config_.wordDelimiters,              // TODO: move to profile!
-                config_.bypassMouseProtocolModifier, // TODO: you too
-                config_.maxImageSize,
-                config_.maxImageColorRegisters,
-                true,
-                profile_.colors,
-                50.0,
-                config_.reflowOnResize,
-                profile_.highlightDoubleClickedWord,
-                profile_.highlightTimeout }
+    terminal_ {
+        *this, std::move(_pty), createSettingsFromConfig(config_, profile_), std::chrono::steady_clock::now()
+    }
 {
     if (_app.liveConfig())
     {
@@ -683,14 +691,8 @@ bool TerminalSession::operator()(actions::ClearHistoryAndReset)
 {
     SessionLog()("Clearing history and perform terminal hard reset");
 
-    auto const pageSize = terminal_.pageSize();
-    auto const pixelSize = display_->pixelSize();
-
     terminal_.hardReset();
-    auto const tmpPageSize = PageSize { pageSize.lines, pageSize.columns + ColumnCount(1) };
-    terminal_.resizeScreen(tmpPageSize, pixelSize);
-    this_thread::yield();
-    terminal_.resizeScreen(pageSize, pixelSize);
+    terminal_.forceRedraw([]() { this_thread::yield(); });
     return true;
 }
 
@@ -1122,7 +1124,6 @@ void TerminalSession::configureTerminal()
 
     SessionLog()("Setting terminal ID to {}.", profile_.terminalId);
     terminal_.setTerminalId(profile_.terminalId);
-    terminal_.setSixelCursorConformance(true);
     terminal_.setMaxImageColorRegisters(config_.maxImageColorRegisters);
     terminal_.setMaxImageSize(config_.maxImageSize);
     terminal_.setMode(terminal::DECMode::NoSixelScrolling, !config_.sixelScrolling);

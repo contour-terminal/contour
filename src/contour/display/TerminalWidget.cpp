@@ -356,7 +356,7 @@ QSize TerminalWidget::sizeHint() const
 void TerminalWidget::onRefreshRateChanged()
 {
     auto const rate = refreshRate();
-    DisplayLog()("Refresh rate changed to {}.", rate);
+    DisplayLog()("Refresh rate changed to {}.", rate.value);
     session_->terminal().setRefreshRate(rate);
 }
 
@@ -474,7 +474,7 @@ void TerminalWidget::logDisplayInfo()
         Height::cast_from(screenOf(this)->size().height())
     };
     auto const actualScreenSize = normalScreenSize * devicePixelRatioF();
-    DisplayLog()("[FYI] Refresh rate        : {} Hz", refreshRate());
+    DisplayLog()("[FYI] Refresh rate        : {} Hz", refreshRate().value);
     DisplayLog()("[FYI] Screen size         : {}", actualScreenSize);
     DisplayLog()("[FYI] Logical DPI         : {}", logicalDPI());
     DisplayLog()("[FYI] Physical DPI        : {}", physicalDPI());
@@ -780,14 +780,15 @@ void TerminalWidget::updateMinimumSize()
 // }}}
 
 // {{{ TerminalDisplay: attributes
-double TerminalWidget::refreshRate() const
+terminal::RefreshRate TerminalWidget::refreshRate() const
 {
+    using terminal::RefreshRate;
     auto const screen = screenOf(this);
     if (!screen)
-        return profile().refreshRate != 0.0 ? profile().refreshRate : 30.0;
+        return { profile().refreshRate.value != 0.0 ? profile().refreshRate : RefreshRate { 30.0 } };
 
-    auto const systemRefreshRate = static_cast<double>(screen->refreshRate());
-    if (1.0 < profile().refreshRate && profile().refreshRate < systemRefreshRate)
+    auto const systemRefreshRate = RefreshRate { static_cast<double>(screen->refreshRate()) };
+    if (1.0 < profile().refreshRate.value && profile().refreshRate.value < systemRefreshRate.value)
         return profile().refreshRate;
     else
         return systemRefreshRate;

@@ -3532,8 +3532,8 @@ TEST_CASE("Sixel.simple", "[screen]")
 
     mock.writeToScreen(sixelData);
 
-    CHECK(mock.terminal.primaryScreen().cursor().position.column == ColumnOffset(0));
-    CHECK(mock.terminal.primaryScreen().cursor().position.line == LineOffset(5));
+    CHECK(mock.terminal.primaryScreen().cursor().position.column.value == ColumnOffset(0).value);
+    CHECK(mock.terminal.primaryScreen().cursor().position.line.value == LineOffset(5).value);
 
     for (auto line = LineOffset(0); line < boxed_cast<LineOffset>(pageSize.lines); ++line)
     {

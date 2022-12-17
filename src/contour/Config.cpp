@@ -1247,7 +1247,7 @@ namespace
         }
         tryLoadChildRelative(_usedKeys, _profile, basePath, "maximized", profile.maximized);
         tryLoadChildRelative(_usedKeys, _profile, basePath, "fullscreen", profile.fullscreen);
-        tryLoadChildRelative(_usedKeys, _profile, basePath, "refresh_rate", profile.refreshRate);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "refresh_rate", profile.refreshRate.value);
         tryLoadChildRelative(
             _usedKeys, _profile, basePath, "copy_last_mark_range_offset", profile.copyLastMarkRangeOffset);
         tryLoadChildRelative(_usedKeys, _profile, basePath, "show_title_bar", profile.show_title_bar);

@@ -11,6 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <vtbackend/MockTerm.h>
 #include <vtbackend/Terminal.h>
 
 #include <vtpty/MockPty.h>
@@ -28,12 +29,15 @@
 #include <string>
 #include <vector>
 
+#include "vtbackend/primitives.h"
+
 using namespace std;
 using terminal::CellFlags;
 using terminal::ColumnCount;
 using terminal::ColumnOffset;
 using terminal::LineCount;
 using terminal::LineOffset;
+using terminal::MockTerm;
 using terminal::PageSize;
 
 namespace
@@ -94,72 +98,24 @@ string join(vector<string> const& _lines)
     return output;
 }
 
-class MockTerm: public terminal::Terminal::Events
+template <typename T>
+std::string trimmedTextScreenshot(MockTerm<T> const& _mt)
 {
-  public:
-    MockTerm(ColumnCount _columns, LineCount _lines): MockTerm { PageSize { _lines, _columns } } {}
-
-    explicit MockTerm(PageSize _size):
-        terminal_ {
-            make_unique<terminal::MockPty>(_size),
-            1024 * 1024,
-            1024,
-            *this,
-            LineCount(1024), // max history line count
-            LineOffset(0),
-            chrono::milliseconds(500),          // cursor blink interval
-            chrono::steady_clock::time_point(), // initial time point
-        },
-        pty_ { static_cast<terminal::MockPty&>(terminal_.device()) }
-    {
-        char const* logFilterString = getenv("LOG");
-        if (logFilterString)
-        {
-            logstore::configure(logFilterString);
-            crispy::App::customizeLogStoreOutput();
-        }
-    }
-
-    terminal::MockPty& pty() noexcept { return pty_; }
-    terminal::Terminal& terminal() noexcept { return terminal_; }
-    terminal::Terminal const& terminal() const noexcept { return terminal_; }
-
-    void writeToStdin(std::string_view _text) { pty_.stdinBuffer() += _text; }
-
-    void writeToStdout(std::string_view _text)
-    {
-        pty_.appendStdOutBuffer(_text);
-        terminal_.processInputOnce();
-    }
-
-    string const& replyData() const noexcept { return pty_.stdinBuffer(); }
-
-    void requestCaptureBuffer(LineCount lines, bool logical) override
-    {
-        terminal_.primaryScreen().captureBuffer(lines, logical);
-    }
-
-    void logScreenText(std::string const& headline = "")
-    {
-        if (headline.empty())
-            UNSCOPED_INFO("dump:");
-        else
-            UNSCOPED_INFO(headline + ":");
-
-        for (int line = 1; line <= unbox<int>(terminal().pageSize().lines); ++line)
-            UNSCOPED_INFO(fmt::format(
-                "[{}] \"{}\"", line, terminal().primaryScreen().grid().lineText(terminal::LineOffset(line))));
-    }
-
-  private:
-    terminal::Terminal terminal_;
-    terminal::MockPty& pty_;
-};
-
-std::string trimmedTextScreenshot(MockTerm const& _mt)
-{
-    return trimRight(join(textScreenshot(_mt.terminal())));
+    return trimRight(join(textScreenshot(_mt.terminal)));
 }
+
+[[maybe_unused]] void logScreenText(terminal::Terminal const& terminal, std::string const& headline = "")
+{
+    if (headline.empty())
+        UNSCOPED_INFO("dump:");
+    else
+        UNSCOPED_INFO(headline + ":");
+
+    for (int line = 1; line <= unbox<int>(terminal.pageSize().lines); ++line)
+        UNSCOPED_INFO(fmt::format(
+            "[{}] \"{}\"", line, terminal.primaryScreen().grid().lineText(terminal::LineOffset(line))));
+}
+
 } // namespace
 
 // TODO: Test case posibilities:
@@ -180,7 +136,7 @@ std::string trimmedTextScreenshot(MockTerm const& _mt)
 TEST_CASE("Terminal.BlinkingCursor", "[terminal]")
 {
     auto mc = MockTerm { ColumnCount { 6 }, LineCount { 4 } };
-    auto& terminal = mc.terminal();
+    auto& terminal = mc.terminal;
     terminal.setCursorDisplay(terminal::CursorDisplay::Blink);
     auto constexpr BlinkInterval = chrono::milliseconds(500);
     terminal.setCursorBlinkingInterval(BlinkInterval);
@@ -223,33 +179,33 @@ TEST_CASE("Terminal.DECCARA", "[terminal]")
 {
     auto mock = MockTerm { ColumnCount(5), LineCount(5) };
     auto constexpr ClockBase = chrono::steady_clock::time_point();
-    mock.terminal().tick(ClockBase);
-    mock.terminal().ensureFreshRenderBuffer();
+    mock.terminal.tick(ClockBase);
+    mock.terminal.ensureFreshRenderBuffer();
     CHECK("" == trimmedTextScreenshot(mock));
 
-    mock.writeToStdout("12345\r\n"
+    mock.writeToScreen("12345\r\n"
                        "67890\r\n"
                        "ABCDE\r\n"
                        "abcde\r\n"
                        "fghij");
 
-    mock.terminal().tick(ClockBase + chrono::seconds(1));
-    mock.terminal().ensureFreshRenderBuffer();
+    mock.terminal.tick(ClockBase + chrono::seconds(1));
+    mock.terminal.ensureFreshRenderBuffer();
     CHECK("12345\n67890\nABCDE\nabcde\nfghij" == trimmedTextScreenshot(mock));
 
     auto const top = 2;
     auto const left = 3;
     auto const bottom = 4;
     auto const right = 5;
-    mock.writeToStdout(fmt::format("\033[{top};{left};{bottom};{right};{sgr}$r",
+    mock.writeToScreen(fmt::format("\033[{top};{left};{bottom};{right};{sgr}$r",
                                    fmt::arg("top", top),
                                    fmt::arg("left", left),
                                    fmt::arg("bottom", bottom),
                                    fmt::arg("right", right),
                                    fmt::arg("sgr", "1;38:2::171:178:191;4")));
 
-    mock.terminal().tick(ClockBase + chrono::seconds(2));
-    mock.terminal().ensureFreshRenderBuffer();
+    mock.terminal.tick(ClockBase + chrono::seconds(2));
+    mock.terminal.ensureFreshRenderBuffer();
     CHECK("12345\n67890\nABCDE\nabcde\nfghij" == trimmedTextScreenshot(mock));
 
     // Just peak into it and test. That's not really 100% precise, tbh., but
@@ -259,7 +215,7 @@ TEST_CASE("Terminal.DECCARA", "[terminal]")
         for (auto column = left; column <= right; ++column)
         {
             // clang-format off
-            auto const& someCell = mock.terminal().primaryScreen().at(LineOffset(line - 1), ColumnOffset(column - 1));
+            auto const& someCell = mock.terminal.primaryScreen().at(LineOffset(line - 1), ColumnOffset(column - 1));
             auto const rgb = someCell.foregroundColor().rgb();
             auto const colorDec = fmt::format("{}/{}/{}", unsigned(rgb.red), unsigned(rgb.green), unsigned(rgb.blue));
             INFO(fmt::format("at line {} column {}, flags {}", line, column, someCell.flags()));
@@ -275,26 +231,34 @@ TEST_CASE("Terminal.CaptureScreenBuffer")
     auto constexpr ClockBase = chrono::steady_clock::time_point();
     auto constexpr NoLogicalLines = 0; // 0=false
     auto constexpr NumberOfLinesToCapture = 7;
+    auto constexpr MaxHistoryLineCount = LineCount(20);
 
-    auto mock = MockTerm { ColumnCount(5), LineCount(5) };
+    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) }, MaxHistoryLineCount };
 
-    mock.terminal().tick(ClockBase);
-    mock.terminal().ensureFreshRenderBuffer();
+    logScreenText(mock.terminal, "init");
+
+    mock.terminal.tick(ClockBase);
+    mock.terminal.ensureFreshRenderBuffer();
 
     // fill screen buffer (5 lines into history + full 5 lines page buffer)
     for (int i = 1; i <= 10; ++i)
-        mock.writeToStdout(fmt::format("\r\n{}", i));
+    {
+        mock.writeToScreen(fmt::format("\r\n{}", i));
+        logScreenText(mock.terminal, fmt::format("write i {}", i));
+    }
 
-    mock.terminal().tick(ClockBase + chrono::seconds(1));
-    mock.terminal().ensureFreshRenderBuffer();
+    mock.terminal.tick(ClockBase + chrono::seconds(1));
+    mock.terminal.ensureFreshRenderBuffer();
     auto const actualScreen1 = trimmedTextScreenshot(mock);
     REQUIRE("6\n7\n8\n9\n10" == actualScreen1);
+    logScreenText(mock.terminal, "fini");
 
-    mock.writeToStdout(fmt::format("\033[>{};{}t", NoLogicalLines, NumberOfLinesToCapture));
-    mock.terminal().flushInput();
+    mock.writeToScreen(fmt::format("\033[>{};{}t", NoLogicalLines, NumberOfLinesToCapture));
+    mock.terminal.flushInput();
+    logScreenText(mock.terminal, "after flush");
 
-    mock.terminal().tick(ClockBase + chrono::seconds(1));
-    mock.terminal().ensureFreshRenderBuffer();
+    mock.terminal.tick(ClockBase + chrono::seconds(1));
+    mock.terminal.ensureFreshRenderBuffer();
     auto const actualScreen2 = trimmedTextScreenshot(mock);
     CHECK(actualScreen1 == actualScreen2);
 
@@ -302,6 +266,27 @@ TEST_CASE("Terminal.CaptureScreenBuffer")
 
     // I just realized we have a test as Screen.captureBuffer already.
     // But here we test the full cycle.
+}
+
+TEST_CASE("Terminal.RIS", "[terminal]")
+{
+    using namespace terminal;
+
+    constexpr auto RIS = "\033c"sv;
+
+    auto mc = MockTerm { ColumnCount(20), LineCount(5) };
+    mc.terminal.ensureFreshRenderBuffer();
+
+    mc.terminal.tick(mc.terminal.currentTime() + chrono::milliseconds(500));
+    mc.terminal.ensureFreshRenderBuffer();
+
+    mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+    mc.terminal.tick(mc.terminal.currentTime() + chrono::milliseconds(500));
+    mc.terminal.ensureFreshRenderBuffer();
+    mc.writeToScreen(RIS);
+    mc.terminal.forceRedraw({});
+
+    CHECK(mc.terminal.statusDisplayType() == StatusDisplayType::None);
 }
 
 TEST_CASE("Terminal.SynchronizedOutput", "[terminal]")
@@ -312,20 +297,20 @@ TEST_CASE("Terminal.SynchronizedOutput", "[terminal]")
     auto const now = chrono::steady_clock::now();
     auto mc = MockTerm { ColumnCount(20), LineCount(1) };
 
-    mc.writeToStdout(BatchOn);
-    mc.writeToStdout("Hello ");
-    mc.terminal().tick(now);
-    mc.terminal().ensureFreshRenderBuffer();
+    mc.writeToScreen(BatchOn);
+    mc.writeToScreen("Hello ");
+    mc.terminal.tick(now);
+    mc.terminal.ensureFreshRenderBuffer();
     CHECK("" == trimmedTextScreenshot(mc));
 
-    mc.writeToStdout(" World");
-    mc.terminal().tick(now);
-    mc.terminal().ensureFreshRenderBuffer();
+    mc.writeToScreen(" World");
+    mc.terminal.tick(now);
+    mc.terminal.ensureFreshRenderBuffer();
     CHECK("" == trimmedTextScreenshot(mc));
 
-    mc.writeToStdout(BatchOff);
-    mc.terminal().tick(now);
-    mc.terminal().ensureFreshRenderBuffer();
+    mc.writeToScreen(BatchOff);
+    mc.terminal.tick(now);
+    mc.terminal.ensureFreshRenderBuffer();
     CHECK("Hello  World" == trimmedTextScreenshot(mc));
 }
 
@@ -334,7 +319,7 @@ TEST_CASE("Terminal.XTPUSHCOLORS_and_XTPOPCOLORS", "[terminal]")
     using namespace terminal;
 
     auto mc = MockTerm { ColumnCount(20), LineCount(1) };
-    auto& vtState = mc.terminal().state();
+    auto& vtState = mc.terminal.state();
 
     auto const originalPalette = vtState.colorPalette;
 
@@ -343,59 +328,59 @@ TEST_CASE("Terminal.XTPUSHCOLORS_and_XTPOPCOLORS", "[terminal]")
 
     SECTION("pop on empty")
     {
-        mc.writeToStdout("\033[#Q");
+        mc.writeToScreen("\033[#Q");
         REQUIRE(vtState.savedColorPalettes.size() == 0);
         REQUIRE(vtState.colorPalette.palette == originalPalette.palette);
     }
 
     SECTION("default")
     {
-        mc.writeToStdout("\033[#P"); // XTPUSHCOLORS (default)
+        mc.writeToScreen("\033[#P"); // XTPUSHCOLORS (default)
         REQUIRE(vtState.savedColorPalettes.size() == 1);
         REQUIRE(vtState.savedColorPalettes.back().palette == originalPalette.palette);
         vtState.colorPalette.palette[0] = 0x123456_rgb;
         REQUIRE(vtState.colorPalette.palette != originalPalette.palette);
-        mc.writeToStdout("\033[#Q"); // XTPOPCOLORS
+        mc.writeToScreen("\033[#Q"); // XTPOPCOLORS
         REQUIRE(vtState.colorPalette.palette == originalPalette.palette);
     }
 
     SECTION("0")
     {
-        mc.writeToStdout("\033[0#P"); // push current color palette to slot 1 (default).
+        mc.writeToScreen("\033[0#P"); // push current color palette to slot 1 (default).
         REQUIRE(vtState.savedColorPalettes.size() == 1);
     }
 
     SECTION("1")
     {
         REQUIRE(vtState.savedColorPalettes.size() == 0);
-        mc.writeToStdout("\033[1#P"); // push current color palette to slot 1.
+        mc.writeToScreen("\033[1#P"); // push current color palette to slot 1.
         REQUIRE(vtState.savedColorPalettes.size() == 1);
     }
 
     SECTION("2")
     {
         REQUIRE(vtState.savedColorPalettes.size() == 0);
-        mc.writeToStdout("\033[2#P"); // push current color palette to slot 1.
+        mc.writeToScreen("\033[2#P"); // push current color palette to slot 1.
         REQUIRE(vtState.savedColorPalettes.size() == 2);
-        mc.writeToStdout("\033[#R");
-        mc.terminal().flushInput();
+        mc.writeToScreen("\033[#R");
+        mc.terminal.flushInput();
         REQUIRE(e("\033[2;2#Q") == e(mc.replyData()));
     }
 
     SECTION("10")
     {
         REQUIRE(vtState.savedColorPalettes.size() == 0);
-        mc.writeToStdout("\033[10#P"); // push current color palette to slot 10.
+        mc.writeToScreen("\033[10#P"); // push current color palette to slot 10.
         REQUIRE(vtState.savedColorPalettes.size() == 10);
-        mc.writeToStdout("\033[#R");
-        mc.terminal().flushInput();
+        mc.writeToScreen("\033[#R");
+        mc.terminal.flushInput();
         REQUIRE(e("\033[10;10#Q") == e(mc.replyData()));
     }
 
     SECTION("11")
     {
         REQUIRE(vtState.savedColorPalettes.size() == 0);
-        mc.writeToStdout("\033[11#P"); // push current color palette to slot 11: overflow.
+        mc.writeToScreen("\033[11#P"); // push current color palette to slot 11: overflow.
         REQUIRE(vtState.savedColorPalettes.size() == 0);
     }
 
@@ -403,44 +388,44 @@ TEST_CASE("Terminal.XTPUSHCOLORS_and_XTPOPCOLORS", "[terminal]")
     {
         vtState.colorPalette.palette[1] = 0x101010_rgb;
         auto const p1 = vtState.colorPalette;
-        mc.writeToStdout("\033[#P");
+        mc.writeToScreen("\033[#P");
 
         vtState.colorPalette.palette[3] = 0x303030_rgb;
         auto const p3 = vtState.colorPalette;
-        mc.writeToStdout("\033[3#P");
+        mc.writeToScreen("\033[3#P");
 
         vtState.colorPalette.palette[2] = 0x202020_rgb;
         auto const p2 = vtState.colorPalette;
-        mc.writeToStdout("\033[2#P");
+        mc.writeToScreen("\033[2#P");
 
         REQUIRE(vtState.savedColorPalettes.size() == 3);
         REQUIRE(vtState.colorPalette.palette == vtState.savedColorPalettes[2 - 1].palette);
 
-        mc.writeToStdout("\033[1#Q"); // XTPOPCOLORS
+        mc.writeToScreen("\033[1#Q"); // XTPOPCOLORS
         REQUIRE(vtState.savedColorPalettes.size() == 3);
         REQUIRE(vtState.colorPalette.palette == vtState.savedColorPalettes[1 - 1].palette);
 
-        mc.writeToStdout("\033[2#Q"); // XTPOPCOLORS
+        mc.writeToScreen("\033[2#Q"); // XTPOPCOLORS
         REQUIRE(vtState.savedColorPalettes.size() == 3);
         REQUIRE(vtState.colorPalette.palette == vtState.savedColorPalettes[2 - 1].palette);
 
-        mc.writeToStdout("\033[3#Q"); // XTPOPCOLORS
+        mc.writeToScreen("\033[3#Q"); // XTPOPCOLORS
         REQUIRE(vtState.savedColorPalettes.size() == 3);
         REQUIRE(vtState.colorPalette.palette == vtState.savedColorPalettes[3 - 1].palette);
 
-        mc.writeToStdout("\033[#Q"); // XTPOPCOLORS
+        mc.writeToScreen("\033[#Q"); // XTPOPCOLORS
         REQUIRE(vtState.savedColorPalettes.size() == 2);
         REQUIRE(vtState.colorPalette.palette == p3.palette);
 
-        mc.writeToStdout("\033[#Q"); // XTPOPCOLORS
+        mc.writeToScreen("\033[#Q"); // XTPOPCOLORS
         REQUIRE(vtState.savedColorPalettes.size() == 1);
         REQUIRE(vtState.colorPalette.palette == p2.palette);
 
-        mc.writeToStdout("\033[#Q"); // XTPOPCOLORS
+        mc.writeToScreen("\033[#Q"); // XTPOPCOLORS
         REQUIRE(vtState.savedColorPalettes.size() == 0);
         REQUIRE(vtState.colorPalette.palette == p1.palette);
 
-        mc.writeToStdout("\033[#Q"); // XTPOPCOLORS (underflow)
+        mc.writeToScreen("\033[#Q"); // XTPOPCOLORS (underflow)
         REQUIRE(vtState.savedColorPalettes.size() == 0);
         REQUIRE(vtState.colorPalette.palette == p1.palette);
     }
@@ -451,12 +436,12 @@ TEST_CASE("Terminal.CurlyUnderline", "[terminal]")
     auto const now = chrono::steady_clock::now();
     auto mc = MockTerm { ColumnCount(20), LineCount(1) };
 
-    mc.writeToStdout("\033[4:3mAB\033[mCD");
-    mc.terminal().tick(now);
-    mc.terminal().ensureFreshRenderBuffer();
+    mc.writeToScreen("\033[4:3mAB\033[mCD");
+    mc.terminal.tick(now);
+    mc.terminal.ensureFreshRenderBuffer();
     CHECK("ABCD" == trimmedTextScreenshot(mc));
 
-    auto& screen = mc.terminal().primaryScreen();
+    auto& screen = mc.terminal.primaryScreen();
 
     CHECK(screen.at(LineOffset(0), ColumnOffset(0)).isFlagEnabled(CellFlags::CurlyUnderlined));
     CHECK(screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlags::CurlyUnderlined));
