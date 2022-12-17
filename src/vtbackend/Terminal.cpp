@@ -1629,16 +1629,13 @@ void Terminal::hardReset()
     state_.imagePool.clear();
 
     state_.cursor = {};
+    primaryScreen_.updateCursorIterator();
+
+    state_.lastCursorPosition = {};
+
     state_.tabs.clear();
 
-    state_.lastCursorPosition = state_.cursor.position;
-
     state_.colorPalette = state_.defaultColorPalette;
-
-    if (isPrimaryScreen())
-        primaryScreen_.updateCursorIterator();
-    else
-        alternateScreen_.updateCursorIterator();
 
     hostWritableStatusLineScreen_.margin() = Margin {
         Margin::Vertical { {}, boxed_cast<LineOffset>(hostWritableStatusLineScreen_.pageSize().lines) - 1 },
