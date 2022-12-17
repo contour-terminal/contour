@@ -76,8 +76,7 @@ struct ColorPalette
     /// TODO: And even the naming sounds wrong. Better would be makeIndexedColorsBrightForBoldText or similar.
     bool useBrightColors = false;
 
-    Palette palette = []() constexpr
-    {
+    Palette palette = []() constexpr {
         Palette colors;
 
         // normal colors
@@ -125,8 +124,7 @@ struct ColorPalette
         colors[256 + 7] = 0x808080_rgb; // white
 
         return colors;
-    }
-    ();
+    }();
 
     [[nodiscard]] RGBColor normalColor(size_t _index) const noexcept
     {

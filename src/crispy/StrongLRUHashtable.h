@@ -267,14 +267,8 @@ class StrongLRUHashtable
 
     int validateChange(int adj);
 
-    Entry& sentinelEntry() noexcept
-    {
-        return _entries[0];
-    }
-    Entry const& sentinelEntry() const noexcept
-    {
-        return _entries[0];
-    }
+    Entry& sentinelEntry() noexcept { return _entries[0]; }
+    Entry const& sentinelEntry() const noexcept { return _entries[0]; }
     // }}}
 
     LRUHashtableStats _stats;

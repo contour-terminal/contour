@@ -472,8 +472,7 @@ constexpr inline auto CaptureBufferCode = 314;
 
 inline auto const& functions() noexcept
 {
-    static auto const funcs = []() constexpr
-    { // {{{
+    static auto const funcs = []() constexpr { // {{{
         auto f = std::array {
             // C0
             EOT,
@@ -614,12 +613,11 @@ inline auto const& functions() noexcept
             NOTIFY,
             DUMPSTATE,
         };
-        crispy::sort(
-            f,
-            [](FunctionDefinition const& a, FunctionDefinition const& b) constexpr { return compare(a, b); });
+        crispy::sort(f, [](FunctionDefinition const& a, FunctionDefinition const& b) constexpr {
+            return compare(a, b);
+        });
         return f;
-    }
-    (); // }}}
+    }(); // }}}
 
 #if 0
     for (auto [a, b] : crispy::indexed(funcs))
