@@ -1722,9 +1722,10 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
     auto cursorPosition = state_.cursor.position;
 
     auto const statusLineHeight = LineCount(1);
-    auto const mainDisplayPageSize = state_.statusDisplayType == StatusDisplayType::None
-                                         ? settings_.pageSize
-                                         : settings_.pageSize - statusLineHeight;
+    auto const mainDisplayPageSize =
+        (state_.statusDisplayType == StatusDisplayType::None || state_.screenType != screenType)
+            ? settings_.pageSize
+            : settings_.pageSize - statusLineHeight;
 
     // Ensure correct screen buffer size for the buffer we've just switched to.
     cursorPosition =
