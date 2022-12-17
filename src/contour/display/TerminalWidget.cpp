@@ -528,15 +528,18 @@ void TerminalWidget::initializeGL()
 
 void TerminalWidget::resizeGL(int _width, int _height)
 {
-    QOpenGLWidget::resizeGL(_width, _height);
+    Width const width =
+        profile().scrollbarPosition == config::ScrollBarPosition::Hidden
+            ? Width::cast_from(_width - qApp->style()->pixelMetric(QStyle::PM_ScrollBarExtent))
+            : Width::cast_from(_width);
+    QOpenGLWidget::resizeGL(width.as<int>(), _height);
 
     if (!session_)
         return;
 
-    auto const qtBaseWidgetSize =
-        terminal::ImageSize { Width::cast_from(_width), Height::cast_from(_height) };
+    auto const qtBaseWidgetSize = terminal::ImageSize { width, Height::cast_from(_height) };
     auto const newPixelSize = qtBaseWidgetSize * contentScale();
-    DisplayLog()("Resizing view to {}x{} virtual ({} actual).", _width, _height, newPixelSize);
+    DisplayLog()("Resizing view to {}x{} virtual ({} actual).", width, _height, newPixelSize);
     applyResize(newPixelSize, *session_, *renderer_);
 }
 
