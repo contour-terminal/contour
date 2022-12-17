@@ -124,6 +124,7 @@
           <li>Adds optional parameter `strip` to PasteClipboard configuration action to allow stripping newlines and normalizing whitespaces.</li>
           <li>EXPERIMENTAL: Adds VT extension to enable passive mouse tracking via `CSI ? 2029 h` / `CSI ? 2029 l`. Passive mouse tracking enables the application to get notified on mouse events while still allowing mouse selection.</li>
           <li>EXPERIMENTAL: Adds VT extension to enable text selection tracking via `CSI ? 2030 h` / `CSI ? 2030 l`.</li>
+          <li>Fixes cursor going beyond the terminal screnn in vim mode, move right motion (#917)</li>
         </ul>
       </description>
     </release>
