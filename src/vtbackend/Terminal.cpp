@@ -1648,20 +1648,26 @@ void Terminal::hardReset()
     hostWritableStatusLineScreen_.verifyState();
 
     setActiveStatusDisplay(ActiveStatusDisplay::Main);
-    setStatusDisplay(StatusDisplayType::None);
     hostWritableStatusLineScreen_.clearScreen();
     hostWritableStatusLineScreen_.updateCursorIterator();
 
+    auto const statusLineHeight = LineCount(1);
+    auto const mainDisplayPageSize = state_.statusDisplayType == StatusDisplayType::None
+                                         ? settings_.pageSize
+                                         : settings_.pageSize - statusLineHeight;
+
     primaryScreen_.margin() =
-        Margin { Margin::Vertical { {}, boxed_cast<LineOffset>(settings_.pageSize.lines) - 1 },
-                 Margin::Horizontal { {}, boxed_cast<ColumnOffset>(settings_.pageSize.columns) - 1 } };
+        Margin { Margin::Vertical { {}, boxed_cast<LineOffset>(mainDisplayPageSize.lines) - 1 },
+                 Margin::Horizontal { {}, boxed_cast<ColumnOffset>(mainDisplayPageSize.columns) - 1 } };
     primaryScreen_.verifyState();
 
     alternateScreen_.margin() =
-        Margin { Margin::Vertical { {}, boxed_cast<LineOffset>(settings_.pageSize.lines) - 1 },
-                 Margin::Horizontal { {}, boxed_cast<ColumnOffset>(settings_.pageSize.columns) - 1 } };
+        Margin { Margin::Vertical { {}, boxed_cast<LineOffset>(mainDisplayPageSize.lines) - 1 },
+                 Margin::Horizontal { {}, boxed_cast<ColumnOffset>(mainDisplayPageSize.columns) - 1 } };
     alternateScreen().margin() = primaryScreen_.margin();
     alternateScreen_.verifyState();
+
+    setStatusDisplay(factorySettings_.statusDisplayType);
 
     state_.inputGenerator.reset();
 }

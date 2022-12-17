@@ -122,6 +122,7 @@ namespace
         settings.mouseProtocolBypassModifier = config.bypassMouseProtocolModifier;
         settings.maxImageSize = config.maxImageSize;
         settings.maxImageRegisterCount = config.maxImageColorRegisters;
+        settings.statusDisplayType = profile.initialStatusDisplayType;
         settings.colorPalette = profile.colors;
         settings.refreshRate = profile.refreshRate;
         settings.primaryScreen.allowReflowOnResize = config.reflowOnResize;
