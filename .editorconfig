@@ -1,6 +1,22 @@
 root = true
 
-[*]
+[*.sh]
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+
+[*.h]
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
+
+[*.cpp]
 indent_style = space
 indent_size = 4
 insert_final_newline = true
@@ -11,15 +27,31 @@ trim_trailing_whitespace = true
 [*.md]
 indent_style = space
 indent_size = 2
+insert_final_newline = true
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
 
 [*.xml]
 indent_style = space
 indent_size = 2
+insert_final_newline = true
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
 
 [*.yml]
 indent_style = space
 indent_size = 4
+insert_final_newline = true
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
 
 [.github/**/*.yml]
 indent_style = space
 indent_size = 2
+insert_final_newline = true
+end_of_line = lf
+charset = utf-8
+trim_trailing_whitespace = true
