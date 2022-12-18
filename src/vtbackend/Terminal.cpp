@@ -694,21 +694,10 @@ bool Terminal::sendMouseMoveEvent(Modifier _modifier,
     if (leftMouseButtonPressed_ && isSelectionComplete())
         clearSelection();
 
-    // Force refresh on mouse position grid-cell change to get the Indicator status line updated.
-    auto changed = false;
-    auto const cursorPositionHasChanged = newPosition != currentMousePosition_;
-    auto const uiMaybeDisplayingMousePosition = state_.statusDisplayType == StatusDisplayType::Indicator;
-    if (cursorPositionHasChanged && uiMaybeDisplayingMousePosition)
-    {
-        currentMousePosition_ = newPosition;
-        markScreenDirty();
-        eventListener_.renderBufferUpdated();
-        changed = true;
-    }
-
     if (newPosition == currentMousePosition_ && !isModeEnabled(DECMode::MouseSGRPixels))
         return false;
 
+    auto changed = false;
     currentMousePosition_ = newPosition;
 
     auto relativePos = viewport_.translateScreenToGridCoordinate(currentMousePosition_);
