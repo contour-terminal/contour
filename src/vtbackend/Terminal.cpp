@@ -643,7 +643,7 @@ bool Terminal::handleMouseSelection(Modifier _modifier, Timestamp _now)
                 selection_ =
                     make_unique<LinearSelection>(selectionHelper_, startPos, selectionUpdatedHelper());
             break;
-        case 2: {
+        case 2:
             selection_ = make_unique<WordWiseSelection>(selectionHelper_, startPos, selectionUpdatedHelper());
             selection_->extend(startPos);
             if (settings_.visualizeSelectedWord)
@@ -654,7 +654,6 @@ bool Terminal::handleMouseSelection(Modifier _modifier, Timestamp _now)
                 state_.searchMode.initiatedByDoubleClick = true;
             }
             break;
-        }
         case 3:
             selection_ = make_unique<FullLineSelection>(selectionHelper_, startPos, selectionUpdatedHelper());
             selection_->extend(startPos);
@@ -695,21 +694,10 @@ bool Terminal::sendMouseMoveEvent(Modifier _modifier,
     if (leftMouseButtonPressed_ && isSelectionComplete())
         clearSelection();
 
-    // Force refresh on mouse position grid-cell change to get the Indicator status line updated.
-    auto changed = false;
-    auto const cursorPositionHasChanged = newPosition != currentMousePosition_;
-    auto const uiMaybeDisplayingMousePosition = state_.statusDisplayType == StatusDisplayType::Indicator;
-    if (cursorPositionHasChanged && uiMaybeDisplayingMousePosition)
-    {
-        currentMousePosition_ = newPosition;
-        markScreenDirty();
-        eventListener_.renderBufferUpdated();
-        changed = true;
-    }
-
     if (newPosition == currentMousePosition_ && !isModeEnabled(DECMode::MouseSGRPixels))
         return false;
 
+    auto changed = false;
     currentMousePosition_ = newPosition;
 
     auto relativePos = viewport_.translateScreenToGridCoordinate(currentMousePosition_);
