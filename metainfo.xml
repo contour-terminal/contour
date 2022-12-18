@@ -103,7 +103,7 @@
 
     -->
 
-    <release version="0.3.8" urgency="medium" type="development">
+    <release version="0.3.8" urgency="medium" date="2022-10-30">
       <description>
         <ul>
           <li>Fixes restoring the cursor visibility after leaving alternate screen when application wasn't restoring mode switches in reverse order.</li>
@@ -132,7 +132,7 @@
       </description>
     </release>
 
-    <release version="0.3.7" urgency="medium" type="development">
+    <release version="0.3.7" urgency="medium" date="2022-11-01">
       <description>
         <ul>
           <li>Fixes display of non-insert mode (vi-like) cursor on monochrome lines.</li>
