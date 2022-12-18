@@ -757,6 +757,27 @@ class Grid
         return stretched;
     }
 
+    [[nodiscard]] CellLocation rightMostNonEmptyAt(LineOffset lineOffset) const noexcept
+    {
+        auto const& line = lineAt(lineOffset);
+
+        if (line.isTrivialBuffer())
+        {
+            if (line.empty())
+                return CellLocation { lineOffset, ColumnOffset(0) };
+
+            auto const& trivial = line.trivialBuffer();
+            auto const columnOffset = ColumnOffset::cast_from(trivial.usedColumns - 1);
+            return CellLocation { lineOffset, columnOffset };
+        }
+
+        auto const& inflatedLine = line.cells();
+        auto columnOffset = ColumnOffset::cast_from(pageSize_.columns - 1);
+        while (columnOffset > ColumnOffset(0) && inflatedLine[unbox<size_t>(columnOffset)].empty())
+            --columnOffset;
+        return CellLocation { lineOffset, columnOffset };
+    }
+
     [[nodiscard]] uint8_t cellWidthAt(CellLocation position) const noexcept
     {
         return lineAt(position.line).cellWidthAt(position.column);

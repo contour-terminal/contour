@@ -22,6 +22,17 @@
 namespace terminal
 {
 
+namespace
+{
+    CellLocation getRightMostNonEmptyCellLocation(Terminal const& terminal, LineOffset lineOffset) noexcept
+    {
+        if (terminal.isPrimaryScreen())
+            return terminal.primaryScreen().grid().rightMostNonEmptyAt(lineOffset);
+        else
+            return terminal.alternateScreen().grid().rightMostNonEmptyAt(lineOffset);
+    }
+} // namespace
+
 using namespace std;
 
 ViCommands::ViCommands(Terminal& theTerminal): terminal { theTerminal }
@@ -418,7 +429,7 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
                          terminal.pageSize().lines.as<LineOffset>() - 1),
                      cursorPosition.column };
         case ViMotion::LineEnd: // $
-            return { cursorPosition.line, terminal.pageSize().columns.as<ColumnOffset>() - 1 };
+            return getRightMostNonEmptyCellLocation(terminal, cursorPosition.line);
         case ViMotion::LineUp: // k
             return { max(cursorPosition.line - LineOffset::cast_from(count),
                          -terminal.currentScreen().historyLineCount().as<LineOffset>()),
