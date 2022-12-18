@@ -27,6 +27,90 @@ namespace terminal
 {
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+Line<Cell>::Line(ColumnCount displayWidth, LineFlags flags, GraphicsAttributes attributes, InflatedBuffer inflatedBuffer):
+    _displayWidth { displayWidth },
+    _flags { static_cast<unsigned>(flags) },
+    _trivialBuffer { displayWidth, attributes },
+    _inflatedBuffer { inflatedBuffer }
+{
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+void Line<Cell>::reset(LineFlags flags, GraphicsAttributes attributes) noexcept
+{
+    _flags = static_cast<unsigned>(flags) | static_cast<unsigned>(LineFlags::Trivial);
+    _trivialBuffer = TrivialBuffer { _displayWidth, attributes };
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+bool Line<Cell>::empty() const noexcept
+{
+    if (isTrivialBuffer())
+        return trivialBuffer().text.empty();
+
+    for (auto const& cell: inflatedBuffer())
+        if (!cell.empty())
+            return false;
+    return true;
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+void Line<Cell>::fill(ColumnOffset _start, GraphicsAttributes _sgr, std::string_view _ascii)
+{
+    auto& buffer = inflatedBuffer();
+
+    assert(unbox<size_t>(_start) + _ascii.size() <= buffer.size());
+
+    auto constexpr ASCII_Width = 1;
+    auto const* s = _ascii.data();
+
+    Cell* i = &buffer[unbox<size_t>(_start)];
+    Cell* e = i + _ascii.size();
+    while (i != e)
+        (i++)->write(_sgr, static_cast<char32_t>(*s++), ASCII_Width);
+
+    auto const e2 = buffer.data() + buffer.size();
+    while (i != e2)
+        (i++)->reset();
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+void Line<Cell>::fill(LineFlags flags, GraphicsAttributes attributes, char32_t codepoint, uint8_t width) noexcept
+{
+    assert(!(static_cast<unsigned>(flags) & static_cast<unsigned>(LineFlags::Trivial)));
+
+    if (!codepoint)
+        reset(flags, attributes);
+    else
+    {
+        _flags = static_cast<unsigned>(flags);
+        for (Cell& cell: inflatedBuffer())
+        {
+            cell.reset();
+            cell.write(attributes, codepoint, width);
+        }
+    }
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+gsl::span<Cell> Line<Cell>::useRange(ColumnOffset _start, ColumnCount _count) noexcept
+{
+#if defined(__clang__) && __clang_major__ <= 11
+    auto const bufferSpan = gsl::span(inflatedBuffer());
+    return bufferSpan.subspan(unbox<size_t>(_start), unbox<size_t>(_count));
+#else
+    // Clang <= 11 cannot deal with this (e.g. FreeBSD 13 defaults to Clang 11).
+    return gsl::span(inflatedBuffer()).subspan(unbox<size_t>(_start), unbox<size_t>(_count));
+#endif
+}
+
+template <typename Cell>
 typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount _newColumnCount)
 {
     using crispy::Comparison;

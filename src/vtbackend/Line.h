@@ -16,6 +16,7 @@
 #include <vtbackend/CellUtil.h>
 #include <vtbackend/GraphicsAttributes.h>
 #include <vtbackend/Hyperlink.h>
+#include <vtbackend/cell/CellConcept.h>
 #include <vtbackend/primitives.h>
 
 #include <crispy/BufferObject.h>
@@ -38,12 +39,23 @@ namespace terminal
 enum class LineFlags : uint8_t
 {
     None = 0x0000,
-    Wrappable = 0x0001,
-    Wrapped = 0x0002,
-    Marked = 0x0004,
+    Trivial = 0x0001,
+    Wrappable = 0x0002,
+    Wrapped = 0x0004,
+    Marked = 0x0008,
     // TODO: DoubleWidth  = 0x0010,
     // TODO: DoubleHeight = 0x0020,
 };
+
+constexpr LineFlags operator|(LineFlags a, LineFlags b) noexcept
+{
+    return LineFlags(uint8_t(a) | uint8_t(b));
+}
+
+constexpr bool operator&(LineFlags a, LineFlags b) noexcept
+{
+    return (uint8_t(a) & uint8_t(b)) != 0;
+}
 
 // clang-format off
 template <typename, bool> struct OptionalProperty;
@@ -74,23 +86,13 @@ struct TrivialLineBuffer
     }
 };
 
-template <typename Cell>
-using InflatedLineBuffer = std::vector<Cell>;
-
-/// Unpacks a TrivialLineBuffer into an InflatedLineBuffer<Cell>.
-template <typename Cell>
-InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input);
-
-template <typename Cell>
-using LineStorage = std::variant<TrivialLineBuffer, InflatedLineBuffer<Cell>>;
-
 /**
  * Line<Cell> API.
  *
- * TODO: Use custom allocator for ensuring cache locality of Cells to sibling lines.
- * TODO: Make the line optimization work.
+ * Highlevel line API reflecting either a trivial line or an inflated line.
  */
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 class Line
 {
   public:
@@ -101,118 +103,39 @@ class Line
     Line& operator=(Line&&) noexcept = default;
 
     using TrivialBuffer = TrivialLineBuffer;
-    using InflatedBuffer = InflatedLineBuffer<Cell>;
-    using Storage = LineStorage<Cell>;
+    using InflatedBuffer = gsl::span<Cell>;
+
     using value_type = Cell;
     using iterator = typename InflatedBuffer::iterator;
     using reverse_iterator = typename InflatedBuffer::reverse_iterator;
     using const_iterator = typename InflatedBuffer::const_iterator;
 
-    Line(LineFlags _flags, TrivialBuffer _buffer):
-        storage_ { std::move(_buffer) }, flags_ { static_cast<unsigned>(_flags) }
-    {
-    }
+    Line(ColumnCount displayWidth, LineFlags flags, GraphicsAttributes attributes, InflatedBuffer inflatedBuffer);
 
-    Line(LineFlags _flags, InflatedBuffer _buffer):
-        storage_ { std::move(_buffer) }, flags_ { static_cast<unsigned>(_flags) }
-    {
-    }
+    void reset(LineFlags flags, GraphicsAttributes attributes) noexcept;
 
-    void reset(LineFlags _flags, GraphicsAttributes _attributes) noexcept
-    {
-        flags_ = static_cast<unsigned>(_flags);
-        if (isTrivialBuffer())
-            trivialBuffer().reset(_attributes);
-        else
-            setBuffer(TrivialBuffer { ColumnCount::cast_from(inflatedBuffer().size()), _attributes });
-    }
-
-    void reset(LineFlags _flags, GraphicsAttributes _attributes, ColumnCount count) noexcept
-    {
-        flags_ = static_cast<unsigned>(_flags);
-        setBuffer(TrivialBuffer { count, _attributes });
-    }
-
-    void fill(LineFlags _flags,
-              GraphicsAttributes const& _attributes,
-              char32_t _codepoint,
-              uint8_t _width) noexcept
-    {
-        if (_codepoint == 0)
-            reset(_flags, _attributes);
-        else
-        {
-            flags_ = static_cast<unsigned>(_flags);
-            for (Cell& cell: inflatedBuffer())
-            {
-                cell.reset();
-                cell.write(_attributes, _codepoint, _width);
-            }
-        }
-    }
+    // Fills each cell in the complete line with the given data.
+    void fill(LineFlags flags, GraphicsAttributes attributes, char32_t codepoint, uint8_t width) noexcept;
 
     /// Tests if all cells are empty.
-    [[nodiscard]] bool empty() const noexcept
-    {
-        if (isTrivialBuffer())
-            return trivialBuffer().text.empty();
-
-        for (auto const& cell: inflatedBuffer())
-            if (!cell.empty())
-                return false;
-        return true;
-    }
+    [[nodiscard]] bool empty() const noexcept;
 
     /**
      * Fills this line with the given content.
      *
-     * @p _start offset into this line of the first charater
-     * @p _sgr graphics rendition for the line starting at @c _start until the end
-     * @p _ascii the US-ASCII characters to fill with
+     * @param start   offset into this line of the first charater
+     * @param sgr     graphics rendition for the line starting at @c _start until the end
+     * @param text    the US-ASCII characters to fill with
      */
-    void fill(ColumnOffset _start, GraphicsAttributes const& _sgr, std::string_view _ascii)
-    {
-        auto& buffer = inflatedBuffer();
+    void fill(ColumnOffset start, GraphicsAttributes sgr, std::string_view text);
 
-        assert(unbox<size_t>(_start) + _ascii.size() <= buffer.size());
-
-        auto constexpr ASCII_Width = 1;
-        auto const* s = _ascii.data();
-
-        Cell* i = &buffer[unbox<size_t>(_start)];
-        Cell* e = i + _ascii.size();
-        while (i != e)
-            (i++)->write(_sgr, static_cast<char32_t>(*s++), ASCII_Width);
-
-        auto const e2 = buffer.data() + buffer.size();
-        while (i != e2)
-            (i++)->reset();
-    }
-
-    [[nodiscard]] ColumnCount size() const noexcept
-    {
-        if (isTrivialBuffer())
-            return trivialBuffer().displayWidth;
-        else
-            return ColumnCount::cast_from(inflatedBuffer().size());
-    }
+    [[nodiscard]] ColumnCount size() const noexcept { return _displayWidth; }
 
     void resize(ColumnCount _count);
 
-    gsl::span<Cell const> trim_blank_right() const noexcept;
-
-    gsl::span<Cell const> cells() const noexcept { return inflatedBuffer(); }
-
-    gsl::span<Cell> useRange(ColumnOffset _start, ColumnCount _count) noexcept
-    {
-#if defined(__clang__) && __clang_major__ <= 11
-        auto const bufferSpan = gsl::span(inflatedBuffer());
-        return bufferSpan.subspan(unbox<size_t>(_start), unbox<size_t>(_count));
-#else
-        // Clang <= 11 cannot deal with this (e.g. FreeBSD 13 defaults to Clang 11).
-        return gsl::span(inflatedBuffer()).subspan(unbox<size_t>(_start), unbox<size_t>(_count));
-#endif
-    }
+    [[nodiscard]] gsl::span<Cell const> trim_blank_right() const noexcept;
+    [[nodiscard]] gsl::span<Cell const> cells() const noexcept { return inflatedBuffer(); }
+    [[nodiscard]] gsl::span<Cell> useRange(ColumnOffset _start, ColumnCount _count) noexcept;
 
     [[nodiscard]] Cell& useCellAt(ColumnOffset _column) noexcept
     {
@@ -292,6 +215,9 @@ class Line
     [[nodiscard]] InflatedBuffer reflow(ColumnCount _newColumnCount);
     [[nodiscard]] std::string toUtf8() const;
     [[nodiscard]] std::string toUtf8Trimmed() const;
+
+    // Ensures this line is using the underlying inflated storage rather the trivial line storage.
+    void inflate() noexcept;
 
     // Returns a reference to this mutable grid-line buffer.
     //
@@ -445,8 +371,10 @@ class Line
     }
 
   private:
-    Storage storage_;
-    unsigned flags_ = 0;
+    ColumnCount _displayWidth;
+    unsigned _flags = 0;
+    TrivialLineBuffer _trivialBuffer;
+    InflatedBuffer _inflatedBuffer;
 };
 
 constexpr LineFlags operator|(LineFlags a, LineFlags b) noexcept

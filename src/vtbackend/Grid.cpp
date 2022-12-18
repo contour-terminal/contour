@@ -21,6 +21,7 @@
 
 #include <algorithm>
 #include <iostream>
+#include <variant>
 
 using std::max;
 using std::min;
@@ -55,19 +56,36 @@ namespace detail
     }
 
     template <typename Cell>
-    Lines<Cell> createLines(PageSize _pageSize,
-                            LineCount _maxHistoryLineCount,
-                            bool _reflowOnResize,
-                            GraphicsAttributes _initialSGR)
+    Lines<Cell> createLines(std::vector<Cell>& cellStorage,
+                            PageSize pageSize,
+                            MaxHistoryLineCount maxHistoryLineCount,
+                            bool reflowOnResize,
+                            GraphicsAttributes initialSGR)
     {
-        auto const defaultLineFlags = _reflowOnResize ? LineFlags::Wrappable : LineFlags::None;
-        auto const totalLineCount = unbox<size_t>(_pageSize.lines + _maxHistoryLineCount);
+        auto const historyLineCount = std::holds_alternative<LineCount>(maxHistoryLineCount)
+            ? std::get<LineCount>(maxHistoryLineCount)
+            : LineCount(0); // TODO(pr) <-- Fill reasonable initial value here.
+
+        auto const totalLineCount = unbox<size_t>(pageSize.lines + historyLineCount);
+
+        auto const cellElementCount = unbox<size_t>(pageSize.lines + historyLineCount)
+                                    * unbox<size_t>(pageSize.columns);
+
+        auto const defaultLineFlags = reflowOnResize ? LineFlags::Wrappable : LineFlags::None;
+
+        cellStorage.resize(cellElementCount);
 
         Lines<Cell> lines;
         lines.reserve(totalLineCount);
 
+        auto cellLineStart = size_t { 0 };
+
         for ([[maybe_unused]] auto const _: ranges::views::iota(0u, totalLineCount))
-            lines.emplace_back(defaultLineFlags, TrivialLineBuffer { _pageSize.columns, _initialSGR });
+        {
+            auto span = gsl::span<Cell>(cellStorage.data() + cellLineStart, unbox<size_t>(pageSize.columns));
+            lines.emplace_back(pageSize.columns, defaultLineFlags, initialSGR, span);
+            cellLineStart += unbox<size_t>(pageSize.columns);
+        }
 
         return lines;
     }
@@ -121,13 +139,28 @@ namespace detail
 // {{{ Grid impl
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
+size_t Grid<Cell>::calculateCellStorageElementCount() const noexcept
+{
+    auto const historyLineCount = std::holds_alternative<LineCount>(historyLimit_)
+        ? std::get<LineCount>(historyLimit_)
+        : LineCount(0); // TODO(pr) <-- Fill reasonable initial value here.
+
+    return unbox<size_t>(pageSize_.lines + historyLineCount)
+        * unbox<size_t>(pageSize_.columns)
+        ;
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 Grid<Cell>::Grid(PageSize _pageSize, bool _reflowOnResize, MaxHistoryLineCount _maxHistoryLineCount):
     pageSize_ { _pageSize },
     margin_ { Margin::Vertical { {}, pageSize_.lines.as<LineOffset>() - LineOffset(1) },
               Margin::Horizontal { {}, pageSize_.columns.as<ColumnOffset>() - ColumnOffset(1) } },
     reflowOnResize_ { _reflowOnResize },
     historyLimit_ { _maxHistoryLineCount },
+    cellStorage_(calculateCellStorageElementCount()),
     lines_ { detail::createLines<Cell>(
+        cellStorage_,
         _pageSize,
         [_maxHistoryLineCount]() -> LineCount {
             if (auto const* maxLineCount = std::get_if<LineCount>(&_maxHistoryLineCount))

@@ -787,6 +787,7 @@ class Grid
     CellLocation growLines(LineCount _newHeight, CellLocation _cursor);
     void appendNewLines(LineCount _count, GraphicsAttributes _attr);
     void clampHistory();
+    [[nodiscard]] size_t calculateCellStorageElementCount() const noexcept;
 
     // {{{ buffer helpers
     void resizeBuffers(PageSize _newSize)
@@ -811,6 +812,10 @@ class Grid
     Margin margin_;
     bool reflowOnResize_ = false;
     MaxHistoryLineCount historyLimit_;
+
+    // Big storage for inflated cells.
+    // InflatedLineBuffer will only reference into here.
+    std::vector<Cell> cellStorage_;
 
     // Number of lines is at least the sum of maxHistoryLineCount_ + pageSize_.lines,
     // because shrinking the page height does not necessarily
