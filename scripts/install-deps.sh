@@ -431,7 +431,7 @@ main()
             ;;
         pop)
             install_deps_popos
-	    ;;
+            ;;
         ubuntu|neon|debian)
             install_deps_ubuntu
             ;;
