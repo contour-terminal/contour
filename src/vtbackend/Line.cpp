@@ -111,6 +111,176 @@ gsl::span<Cell> Line<Cell>::useRange(ColumnOffset _start, ColumnCount _count) no
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+Cell& Line<Cell>::useCellAt(ColumnOffset _column) noexcept
+{
+    Require(ColumnOffset(0) <= _column);
+    Require(_column <= ColumnOffset::cast_from(size())); // Allow off-by-one for sentinel.
+    return inflatedBuffer()[unbox<size_t>(_column)];
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+uint8_t Line<Cell>::cellEmptyAt(ColumnOffset column) const noexcept
+{
+    if (isTrivialBuffer())
+    {
+        Require(ColumnOffset(0) <= column);
+        Require(column < ColumnOffset::cast_from(size()));
+        return unbox<size_t>(column) >= trivialBuffer().text.size()
+               || trivialBuffer().text[column.as<size_t>()] == 0x20;
+    }
+    return inflatedBuffer()[unbox<size_t>(column)].empty();
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+uint8_t Line<Cell>::cellWidthAt(ColumnOffset column) const noexcept
+{
+#if 0 // TODO: This optimization - but only when we return actual widths and not always 1.
+    if (isTrivialBuffer())
+    {
+        Require(ColumnOffset(0) <= column);
+        Require(column < ColumnOffset::cast_from(size()));
+        return 1; // TODO: When trivial line is to support Unicode, this should be adapted here.
+    }
+#endif
+    return inflatedBuffer()[unbox<size_t>(column)].width();
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+void Line<Cell>::inflate() noexcept
+{
+    // TODO(pr)
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+bool Line<Cell>::matchTextAt(std::u32string_view text, ColumnOffset startColumn) const noexcept
+{
+    if (isTrivialBuffer())
+    {
+        auto const u8Text = unicode::convert_to<char>(text);
+        TrivialBuffer const& buffer = trivialBuffer();
+        if (!buffer.usedColumns)
+            return false;
+        auto const column = std::min(startColumn, boxed_cast<ColumnOffset>(buffer.usedColumns - 1));
+        if (text.size() > static_cast<size_t>(column.value - buffer.usedColumns.value))
+            return false;
+        auto const resultIndex = buffer.text.view()
+                                     .substr(unbox<size_t>(column))
+                                     .find(std::string_view(u8Text), unbox<size_t>(column));
+        return resultIndex == 0;
+    }
+    else
+    {
+        auto const u8Text = unicode::convert_to<char>(text);
+        InflatedBuffer const& cells = inflatedBuffer();
+        if (text.size() > unbox<size_t>(size()) - unbox<size_t>(startColumn))
+            return false;
+        auto const baseColumn = unbox<size_t>(startColumn);
+        size_t i = 0;
+        while (i < text.size())
+        {
+            if (!CellUtil::beginsWith(text.substr(i), cells[baseColumn + i]))
+                return false;
+            ++i;
+        }
+        return i == text.size();
+    }
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+std::optional<SearchResult> Line<Cell>::search(std::u32string_view text,
+                                               ColumnOffset startColumn) const noexcept
+{
+    if (isTrivialBuffer())
+    {
+        auto const u8Text = unicode::convert_to<char>(text);
+        TrivialBuffer const& buffer = trivialBuffer();
+        if (!buffer.usedColumns)
+            return std::nullopt;
+        auto const column = std::min(startColumn, boxed_cast<ColumnOffset>(buffer.usedColumns - 1));
+        auto const resultIndex = buffer.text.view().find(std::string_view(u8Text), unbox<size_t>(column));
+        if (resultIndex != std::string_view::npos)
+            return SearchResult { ColumnOffset::cast_from(resultIndex) };
+        else
+            return std::nullopt; // Not found, so stay with initial column as result.
+    }
+    else
+    {
+        InflatedBuffer const& buffer = inflatedBuffer();
+        if (buffer.size() < text.size())
+            return std::nullopt; // not found: line is smaller than search term
+
+        auto baseColumn = startColumn;
+        auto rightMostSearchPosition = ColumnOffset::cast_from(buffer.size());
+        while (baseColumn < rightMostSearchPosition)
+        {
+            if (buffer.size() - unbox<size_t>(baseColumn) < text.size())
+            {
+                text.remove_suffix(text.size() - (unbox<size_t>(size()) - unbox<size_t>(baseColumn)));
+                if (matchTextAt(text, baseColumn))
+                    return SearchResult { startColumn, text.size() };
+            }
+            else if (matchTextAt(text, baseColumn))
+                return SearchResult { baseColumn };
+            baseColumn++;
+        }
+
+        return std::nullopt; // Not found, so stay with initial column as result.
+    }
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+std::optional<SearchResult> Line<Cell>::searchReverse(std::u32string_view text,
+                                                      ColumnOffset startColumn) const noexcept
+{
+    if (isTrivialBuffer())
+    {
+        auto const u8Text = unicode::convert_to<char>(text);
+        TrivialBuffer const& buffer = trivialBuffer();
+        if (!buffer.usedColumns)
+            return std::nullopt;
+        auto const column = std::min(startColumn, boxed_cast<ColumnOffset>(buffer.usedColumns - 1));
+        auto const resultIndex =
+            buffer.text.view().rfind(std::string_view(u8Text), unbox<size_t>(column));
+        if (resultIndex != std::string_view::npos)
+            return SearchResult { ColumnOffset::cast_from(resultIndex) };
+        else
+            return std::nullopt; // Not found, so stay with initial column as result.
+    }
+    else
+    {
+        InflatedBuffer const& buffer = inflatedBuffer();
+        if (buffer.size() < text.size())
+            return std::nullopt; // not found: line is smaller than search term
+
+        // reverse search from right@column to left until match is complete.
+        auto baseColumn = std::min(startColumn, ColumnOffset::cast_from(buffer.size() - text.size()));
+        while (baseColumn >= ColumnOffset(0))
+        {
+            if (matchTextAt(text, baseColumn))
+                return SearchResult { baseColumn };
+            baseColumn--;
+        }
+        baseColumn = ColumnOffset::cast_from(text.size() - 1);
+        while (!text.empty())
+        {
+            if (matchTextAt(text, ColumnOffset(0)))
+                return SearchResult { startColumn, text.size() };
+            baseColumn--;
+            text.remove_prefix(1);
+        }
+        return std::nullopt; // Not found, so stay with initial column as result.
+    }
+}
+// =====================================================================================================
+
+template <typename Cell>
 typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount _newColumnCount)
 {
     using crispy::Comparison;

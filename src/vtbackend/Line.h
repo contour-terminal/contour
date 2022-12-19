@@ -47,14 +47,19 @@ enum class LineFlags : uint8_t
     // TODO: DoubleHeight = 0x0020,
 };
 
+constexpr LineFlags operator~(LineFlags a) noexcept
+{
+    return LineFlags(~unsigned(a));
+}
+
 constexpr LineFlags operator|(LineFlags a, LineFlags b) noexcept
 {
     return LineFlags(uint8_t(a) | uint8_t(b));
 }
 
-constexpr bool operator&(LineFlags a, LineFlags b) noexcept
+constexpr LineFlags operator&(LineFlags a, LineFlags b) noexcept
 {
-    return (uint8_t(a) & uint8_t(b)) != 0;
+    return LineFlags(uint8_t(a) & uint8_t(b));
 }
 
 // clang-format off
@@ -96,12 +101,15 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 class Line
 {
   public:
+    // {{{ defaults
     Line() = default;
     Line(Line const&) = default;
     Line(Line&&) noexcept = default;
     Line& operator=(Line const&) = default;
     Line& operator=(Line&&) noexcept = default;
+    // }}}
 
+    // {{{ type defs
     using TrivialBuffer = TrivialLineBuffer;
     using InflatedBuffer = gsl::span<Cell>;
 
@@ -109,10 +117,29 @@ class Line
     using iterator = typename InflatedBuffer::iterator;
     using reverse_iterator = typename InflatedBuffer::reverse_iterator;
     using const_iterator = typename InflatedBuffer::const_iterator;
+    // }}}
 
+    // Initializes thius line with the given attributes.
+    //
+    // @param displayWidth    the number of columns this line will span.
+    // @param flags           line flags
+    // @param attributes      default attributes for each cell.
+    // @param inflatedBuffer  storage to be used for the inflated buffer.
     Line(ColumnCount displayWidth, LineFlags flags, GraphicsAttributes attributes, InflatedBuffer inflatedBuffer);
 
+    // @returns number of columns this line maintains
+    [[nodiscard]] ColumnCount size() const noexcept { return _displayWidth; }
+
+    // Resets the current line with the given attribvutes.
     void reset(LineFlags flags, GraphicsAttributes attributes) noexcept;
+
+    // TODO(pr) this function will become interesting. :-)
+    void resize(ColumnCount _count);
+
+    // TODO(pr) this function will become interesting. :-)
+    [[nodiscard]] InflatedBuffer reflow(ColumnCount _newColumnCount);
+
+    // ==========================================================
 
     // Fills each cell in the complete line with the given data.
     void fill(LineFlags flags, GraphicsAttributes attributes, char32_t codepoint, uint8_t width) noexcept;
@@ -129,47 +156,34 @@ class Line
      */
     void fill(ColumnOffset start, GraphicsAttributes sgr, std::string_view text);
 
-    [[nodiscard]] ColumnCount size() const noexcept { return _displayWidth; }
-
-    void resize(ColumnCount _count);
-
+    // {{{ inflated line range accessors
     [[nodiscard]] gsl::span<Cell const> trim_blank_right() const noexcept;
     [[nodiscard]] gsl::span<Cell const> cells() const noexcept { return inflatedBuffer(); }
     [[nodiscard]] gsl::span<Cell> useRange(ColumnOffset _start, ColumnCount _count) noexcept;
 
-    [[nodiscard]] Cell& useCellAt(ColumnOffset _column) noexcept
-    {
-        Require(ColumnOffset(0) <= _column);
-        Require(_column <= ColumnOffset::cast_from(size())); // Allow off-by-one for sentinel.
-        return inflatedBuffer()[unbox<size_t>(_column)];
-    }
+    // Returns a reference to this mutable grid-line buffer.
+    //
+    // If this line has been stored in an optimized state, then
+    // the line will be first unpacked into a vector of grid cells.
+    InflatedBuffer& inflatedBuffer();
+    InflatedBuffer const& inflatedBuffer() const;
 
-    [[nodiscard]] uint8_t cellEmptyAt(ColumnOffset column) const noexcept
-    {
-        if (isTrivialBuffer())
-        {
-            Require(ColumnOffset(0) <= column);
-            Require(column < ColumnOffset::cast_from(size()));
-            return unbox<size_t>(column) >= trivialBuffer().text.size()
-                   || trivialBuffer().text[column.as<size_t>()] == 0x20;
-        }
-        return inflatedBuffer().at(unbox<size_t>(column)).empty();
-    }
+    [[nodiscard]] TrivialBuffer& trivialBuffer() noexcept { return _trivialBuffer; }
+    [[nodiscard]] TrivialBuffer const& trivialBuffer() const noexcept { return _trivialBuffer; }
 
-    [[nodiscard]] uint8_t cellWidthAt(ColumnOffset column) const noexcept
-    {
-#if 0 // TODO: This optimization - but only when we return actual widths and not always 1.
-        if (isTrivialBuffer())
-        {
-            Require(ColumnOffset(0) <= column);
-            Require(column < ColumnOffset::cast_from(size()));
-            return 1; // TODO: When trivial line is to support Unicode, this should be adapted here.
-        }
-#endif
-        return inflatedBuffer().at(unbox<size_t>(column)).width();
-    }
+    // }}}
 
-    [[nodiscard]] LineFlags flags() const noexcept { return static_cast<LineFlags>(flags_); }
+    // {{{ high level accessors to column properties
+    [[nodiscard]] Cell& useCellAt(ColumnOffset _column) noexcept;
+    [[nodiscard]] uint8_t cellEmptyAt(ColumnOffset column) const noexcept;
+    [[nodiscard]] uint8_t cellWidthAt(ColumnOffset column) const noexcept;
+    // }}}
+
+    // {{{ line flags
+    [[nodiscard]] LineFlags flags() const noexcept { return static_cast<LineFlags>(_flags); }
+
+    [[nodiscard]] bool isTrivialBuffer() const noexcept { return isFlagEnabled(LineFlags::Trivial); }
+    [[nodiscard]] bool isInflatedBuffer() const noexcept { return !isFlagEnabled(LineFlags::Trivial); }
 
     [[nodiscard]] bool marked() const noexcept { return isFlagEnabled(LineFlags::Marked); }
     void setMarked(bool _enable) { setFlag(LineFlags::Marked, _enable); }
@@ -184,10 +198,12 @@ class Line
     {
         return wrappable() ? LineFlags::Wrappable : LineFlags::None;
     }
+
     [[nodiscard]] LineFlags wrappedFlag() const noexcept
     {
         return marked() ? LineFlags::Wrapped : LineFlags::None;
     }
+
     [[nodiscard]] LineFlags markedFlag() const noexcept
     {
         return marked() ? LineFlags::Marked : LineFlags::None;
@@ -196,211 +212,73 @@ class Line
     [[nodiscard]] LineFlags inheritableFlags() const noexcept
     {
         auto constexpr Inheritables = unsigned(LineFlags::Wrappable) | unsigned(LineFlags::Marked);
-        return static_cast<LineFlags>(flags_ & Inheritables);
+        return static_cast<LineFlags>(_flags & Inheritables);
     }
 
-    void setFlag(LineFlags _flag, bool _enable) noexcept
+    void setFlag(LineFlags flag, bool enable) noexcept
     {
-        if (_enable)
-            flags_ |= static_cast<unsigned>(_flag);
+        if (enable)
+            _flags |= static_cast<unsigned>(flag);
         else
-            flags_ &= ~static_cast<unsigned>(_flag);
+            _flags &= ~static_cast<unsigned>(flag);
     }
 
-    [[nodiscard]] bool isFlagEnabled(LineFlags _flag) const noexcept
+    [[nodiscard]] bool isFlagEnabled(LineFlags flag) const noexcept
     {
-        return (flags_ & static_cast<unsigned>(_flag)) != 0;
+        return (_flags & static_cast<unsigned>(flag)) != 0;
     }
+    // }}}
 
-    [[nodiscard]] InflatedBuffer reflow(ColumnCount _newColumnCount);
+    // {{{ convenience helpers
+    // Constructs an UTF-8 string containing the textual part of this line,
+    // including trailing whitespace.
+    // Be aware. This may be expensive!
     [[nodiscard]] std::string toUtf8() const;
+
+    // Constructs an UTF-8 string containing the textual part of this line,
+    // excluding trailing whitespace.
+    // Be aware. This may be expensive!
     [[nodiscard]] std::string toUtf8Trimmed() const;
 
-    // Ensures this line is using the underlying inflated storage rather the trivial line storage.
-    void inflate() noexcept;
-
-    // Returns a reference to this mutable grid-line buffer.
-    //
-    // If this line has been stored in an optimized state, then
-    // the line will be first unpacked into a vector of grid cells.
-    InflatedBuffer& inflatedBuffer();
-    InflatedBuffer const& inflatedBuffer() const;
-
-    [[nodiscard]] TrivialBuffer& trivialBuffer() noexcept { return std::get<TrivialBuffer>(storage_); }
-    [[nodiscard]] TrivialBuffer const& trivialBuffer() const noexcept
-    {
-        return std::get<TrivialBuffer>(storage_);
-    }
-
-    [[nodiscard]] bool isTrivialBuffer() const noexcept
-    {
-        return std::holds_alternative<TrivialBuffer>(storage_);
-    }
-    [[nodiscard]] bool isInflatedBuffer() const noexcept
-    {
-        return !std::holds_alternative<TrivialBuffer>(storage_);
-    }
-
-    void setBuffer(Storage buffer) noexcept { storage_ = std::move(buffer); }
-
     // Tests if the given text can be matched in this line at the exact given start column.
-    [[nodiscard]] bool matchTextAt(std::u32string_view text, ColumnOffset startColumn) const noexcept
-    {
-        if (isTrivialBuffer())
-        {
-            auto const u8Text = unicode::convert_to<char>(text);
-            TrivialBuffer const& buffer = trivialBuffer();
-            if (!buffer.usedColumns)
-                return false;
-            auto const column = std::min(startColumn, boxed_cast<ColumnOffset>(buffer.usedColumns - 1));
-            if (text.size() > static_cast<size_t>(column.value - buffer.usedColumns.value))
-                return false;
-            auto const resultIndex = buffer.text.view()
-                                         .substr(unbox<size_t>(column))
-                                         .find(std::string_view(u8Text), unbox<size_t>(column));
-            return resultIndex == 0;
-        }
-        else
-        {
-            auto const u8Text = unicode::convert_to<char>(text);
-            InflatedBuffer const& cells = inflatedBuffer();
-            if (text.size() > unbox<size_t>(size()) - unbox<size_t>(startColumn))
-                return false;
-            auto const baseColumn = unbox<size_t>(startColumn);
-            size_t i = 0;
-            while (i < text.size())
-            {
-                if (!CellUtil::beginsWith(text.substr(i), cells[baseColumn + i]))
-                    return false;
-                ++i;
-            }
-            return i == text.size();
-        }
-    }
+    [[nodiscard]] bool matchTextAt(std::u32string_view text, ColumnOffset startColumn) const noexcept;
 
     // Search a line from left to right if a complete match is found it returns the Column of
     // start of match and partialMatchLength is set to 0, since it's a full match but if a partial
     // match is found at the right end of line it returns startColumn as it is and the partialMatchLength
     // is set equal to match found at the left end of line.
     [[nodiscard]] std::optional<SearchResult> search(std::u32string_view text,
-                                                     ColumnOffset startColumn) const noexcept
-    {
-        if (isTrivialBuffer())
-        {
-            auto const u8Text = unicode::convert_to<char>(text);
-            TrivialBuffer const& buffer = trivialBuffer();
-            if (!buffer.usedColumns)
-                return std::nullopt;
-            auto const column = std::min(startColumn, boxed_cast<ColumnOffset>(buffer.usedColumns - 1));
-            auto const resultIndex = buffer.text.view().find(std::string_view(u8Text), unbox<size_t>(column));
-            if (resultIndex != std::string_view::npos)
-                return SearchResult { ColumnOffset::cast_from(resultIndex) };
-            else
-                return std::nullopt; // Not found, so stay with initial column as result.
-        }
-        else
-        {
-            InflatedBuffer const& buffer = inflatedBuffer();
-            if (buffer.size() < text.size())
-                return std::nullopt; // not found: line is smaller than search term
-
-            auto baseColumn = startColumn;
-            auto rightMostSearchPosition = ColumnOffset::cast_from(buffer.size());
-            while (baseColumn < rightMostSearchPosition)
-            {
-                if (buffer.size() - unbox<size_t>(baseColumn) < text.size())
-                {
-                    text.remove_suffix(text.size() - (unbox<size_t>(size()) - unbox<size_t>(baseColumn)));
-                    if (matchTextAt(text, baseColumn))
-                        return SearchResult { startColumn, text.size() };
-                }
-                else if (matchTextAt(text, baseColumn))
-                    return SearchResult { baseColumn };
-                baseColumn++;
-            }
-
-            return std::nullopt; // Not found, so stay with initial column as result.
-        }
-    }
+                                                     ColumnOffset startColumn) const noexcept;
 
     // Search a line from right to left if a complete match is found it returns the Column of
     // start of match and  partialMatchLength is set to 0, since it's a full match but if a partial
     // match is found at the left end of line it returns startColumn as it is and the partialMatchLength
     // is set equal to match found at the left end of line.
     [[nodiscard]] std::optional<SearchResult> searchReverse(std::u32string_view text,
-                                                            ColumnOffset startColumn) const noexcept
-    {
-        if (isTrivialBuffer())
-        {
-            auto const u8Text = unicode::convert_to<char>(text);
-            TrivialBuffer const& buffer = trivialBuffer();
-            if (!buffer.usedColumns)
-                return std::nullopt;
-            auto const column = std::min(startColumn, boxed_cast<ColumnOffset>(buffer.usedColumns - 1));
-            auto const resultIndex =
-                buffer.text.view().rfind(std::string_view(u8Text), unbox<size_t>(column));
-            if (resultIndex != std::string_view::npos)
-                return SearchResult { ColumnOffset::cast_from(resultIndex) };
-            else
-                return std::nullopt; // Not found, so stay with initial column as result.
-        }
-        else
-        {
-            InflatedBuffer const& buffer = inflatedBuffer();
-            if (buffer.size() < text.size())
-                return std::nullopt; // not found: line is smaller than search term
-
-            // reverse search from right@column to left until match is complete.
-            auto baseColumn = std::min(startColumn, ColumnOffset::cast_from(buffer.size() - text.size()));
-            while (baseColumn >= ColumnOffset(0))
-            {
-                if (matchTextAt(text, baseColumn))
-                    return SearchResult { baseColumn };
-                baseColumn--;
-            }
-            baseColumn = ColumnOffset::cast_from(text.size() - 1);
-            while (!text.empty())
-            {
-                if (matchTextAt(text, ColumnOffset(0)))
-                    return SearchResult { startColumn, text.size() };
-                baseColumn--;
-                text.remove_prefix(1);
-            }
-            return std::nullopt; // Not found, so stay with initial column as result.
-        }
-    }
+                                                            ColumnOffset startColumn) const noexcept;
+    // }}}
 
   private:
+    // Ensures this line is using the underlying inflated storage rather the trivial line storage.
+    void inflate() noexcept;
+
     ColumnCount _displayWidth;
     unsigned _flags = 0;
     TrivialLineBuffer _trivialBuffer;
     InflatedBuffer _inflatedBuffer;
 };
 
-constexpr LineFlags operator|(LineFlags a, LineFlags b) noexcept
-{
-    return LineFlags(unsigned(a) | unsigned(b));
-}
-
-constexpr LineFlags operator~(LineFlags a) noexcept
-{
-    return LineFlags(~unsigned(a));
-}
-
-constexpr LineFlags operator&(LineFlags a, LineFlags b) noexcept
-{
-    return LineFlags(unsigned(a) & unsigned(b));
-}
-
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 inline typename Line<Cell>::InflatedBuffer& Line<Cell>::inflatedBuffer()
 {
-    if (std::holds_alternative<TrivialBuffer>(storage_))
-        storage_ = inflate<Cell>(std::get<TrivialBuffer>(storage_));
-    return std::get<InflatedBuffer>(storage_);
+    if (isTrivialBuffer())
+        inflate();
+    return _inflatedBuffer;
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 inline typename Line<Cell>::InflatedBuffer const& Line<Cell>::inflatedBuffer() const
 {
     return const_cast<Line<Cell>*>(this)->inflatedBuffer();
