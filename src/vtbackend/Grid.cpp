@@ -57,7 +57,7 @@ namespace detail
     }
 
     template <typename Cell>
-    Lines<Cell> createLines(std::vector<Cell>& cellStorage,
+    Lines<Cell> createLines(crispy::BufferObject<Cell>& cellStorage,
                             PageSize pageSize,
                             MaxHistoryLineCount maxHistoryLineCount,
                             bool reflowOnResize,
@@ -69,23 +69,15 @@ namespace detail
 
         auto const totalLineCount = unbox<size_t>(pageSize.lines + historyLineCount);
 
-        auto const cellElementCount = unbox<size_t>(pageSize.lines + historyLineCount)
-                                    * unbox<size_t>(pageSize.columns);
-
         auto const defaultLineFlags = reflowOnResize ? LineFlags::Wrappable : LineFlags::None;
-
-        cellStorage.resize(cellElementCount);
 
         Lines<Cell> lines;
         lines.reserve(totalLineCount);
 
-        auto cellLineStart = size_t { 0 };
-
         for ([[maybe_unused]] auto const _: ranges::views::iota(0u, totalLineCount))
         {
-            auto span = gsl::span<Cell>(cellStorage.data() + cellLineStart, unbox<size_t>(pageSize.columns));
+            auto span = cellStorage.advance(unbox<size_t>(pageSize.columns));
             lines.emplace_back(pageSize.columns, defaultLineFlags, initialSGR, span);
-            cellLineStart += unbox<size_t>(pageSize.columns);
         }
 
         return lines;
@@ -144,11 +136,9 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 gsl::span<Cell> Grid<Cell>::allocateCellSpace(ColumnCount count)
 {
-    Require(nextAvailableCell_ + unbox<size_t>(count) < cellStorage_.size());
     // TODO(pr) properly handle inifite scrollback (probably, using BufferObjectPool).
-    auto cells = gsl::span<Cell>(cellStorage_.data() + nextAvailableCell_, unbox<size_t>(count));
-    nextAvailableCell_ += unbox<size_t>(count);
-    return cells;
+    Require(cellStorage_->bytesAvailable() >= unbox<size_t>(count));
+    return cellStorage_->advance(unbox<size_t>(count));
 }
 
 template <typename Cell>
@@ -172,9 +162,10 @@ Grid<Cell>::Grid(PageSize _pageSize, bool _reflowOnResize, MaxHistoryLineCount _
               Margin::Horizontal { {}, pageSize_.columns.as<ColumnOffset>() - ColumnOffset(1) } },
     reflowOnResize_ { _reflowOnResize },
     historyLimit_ { _maxHistoryLineCount },
-    cellStorage_(calculateCellStorageElementCount()),
+    cellStoragePool_(calculateCellStorageElementCount()),
+    cellStorage_(cellStoragePool_.allocateBufferObject()),
     lines_ { detail::createLines<Cell>(
-        cellStorage_,
+        *cellStorage_,
         _pageSize,
         [_maxHistoryLineCount]() -> LineCount {
             if (auto const* maxLineCount = std::get_if<LineCount>(&_maxHistoryLineCount))

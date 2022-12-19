@@ -818,8 +818,8 @@ class Grid
 
     // Big storage for inflated cells.
     // InflatedLineBuffer will only reference into here.
-    std::vector<Cell> cellStorage_;
-    size_t nextAvailableCell_ = 0;
+    crispy::BufferObjectPool<Cell> cellStoragePool_;
+    crispy::BufferObjectPtr<Cell> cellStorage_;
 
     // Number of lines is at least the sum of maxHistoryLineCount_ + pageSize_.lines,
     // because shrinking the page height does not necessarily
