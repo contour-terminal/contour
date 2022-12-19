@@ -23,6 +23,7 @@
 #include <iostream>
 #include <variant>
 
+using ranges::views::iota;
 using std::max;
 using std::min;
 using std::u32string;
@@ -667,13 +668,31 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
 {
     crispy::ignore_unused(newSize, currentCursorPos, wrapPending);
     crispy::todo();
-}
 
-template <typename Cell>
-CRISPY_REQUIRES(CellConcept<Cell>)
-void Grid<Cell>::clampHistory()
-{
-    crispy::todo();
+    auto const newHistoryLineCount = std::holds_alternative<LineCount>(historyLimit_)
+        ? std::get<LineCount>(historyLimit_)
+        : historyLineCount();
+
+    auto const totalLineCount = unbox<size_t>(pageSize_.lines + newHistoryLineCount);
+    Lines<Cell> newLines;
+    newLines.reserve(totalLineCount);
+
+    // For scrollback lines, we make use of the fact, that they will never change, for as long as they keep
+    // being in scrollback.
+    //
+    // Only main page lines need to be rewritten and refilled.
+
+    // Case 1: we shrink the columns
+    // -> trailing columns will yield new lines with wrapped flag set.
+    //
+    // Case 2: we grow the column count
+
+    for (int const lineOffset: iota(-unbox<int>(historyLineCount()), unbox<int>(pageSize().lines)))
+    {
+        Line<Cell> const& oldLine = lineAt(LineOffset::cast_from(lineOffset));
+        (void) oldLine;
+        newLines.emplace_back(/* TODO(pr) ... */);
+    }
 }
 // }}}
 // {{{ dumpGrid impl

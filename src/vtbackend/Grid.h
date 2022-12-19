@@ -786,7 +786,6 @@ class Grid
   private:
     CellLocation growLines(LineCount _newHeight, CellLocation _cursor);
     void appendNewLines(LineCount _count, GraphicsAttributes _attr);
-    void clampHistory();
     [[nodiscard]] size_t calculateCellStorageElementCount() const noexcept;
 
     gsl::span<Cell> allocateCellSpace(ColumnCount count);
