@@ -28,7 +28,10 @@ namespace terminal
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-Line<Cell>::Line(ColumnCount displayWidth, LineFlags flags, GraphicsAttributes attributes, InflatedBuffer inflatedBuffer):
+Line<Cell>::Line(ColumnCount displayWidth,
+                 LineFlags flags,
+                 GraphicsAttributes attributes,
+                 InflatedBuffer inflatedBuffer):
     _displayWidth { displayWidth },
     _flags { static_cast<unsigned>(flags) },
     _trivialBuffer { displayWidth, attributes },
@@ -42,6 +45,23 @@ void Line<Cell>::reset(LineFlags flags, GraphicsAttributes attributes) noexcept
 {
     _flags = static_cast<unsigned>(flags) | static_cast<unsigned>(LineFlags::Trivial);
     _trivialBuffer = TrivialBuffer { _displayWidth, attributes };
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+void Line<Cell>::resetToTrivialLine(LineFlags flags,
+                                    crispy::BufferFragment<char> text,
+                                    ColumnCount usedColumns,
+                                    GraphicsAttributes textSGR,
+                                    GraphicsAttributes fillSGR,
+                                    HyperlinkId hyperlink)
+{
+    _flags = static_cast<unsigned>(flags) | static_cast<unsigned>(LineFlags::Trivial);
+    _trivialBuffer.text = text;
+    _trivialBuffer.usedColumns = usedColumns;
+    _trivialBuffer.textAttributes = textSGR;
+    _trivialBuffer.fillAttributes = fillSGR;
+    _trivialBuffer.hyperlink = hyperlink;
 }
 
 template <typename Cell>
@@ -80,7 +100,10 @@ void Line<Cell>::fill(ColumnOffset _start, GraphicsAttributes _sgr, std::string_
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Line<Cell>::fill(LineFlags flags, GraphicsAttributes attributes, char32_t codepoint, uint8_t width) noexcept
+void Line<Cell>::fill(LineFlags flags,
+                      GraphicsAttributes attributes,
+                      char32_t codepoint,
+                      uint8_t width) noexcept
 {
     assert(!(static_cast<unsigned>(flags) & static_cast<unsigned>(LineFlags::Trivial)));
 
@@ -152,6 +175,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Line<Cell>::inflate() noexcept
 {
+    _flags &= ~unsigned(LineFlags::Trivial);
     terminal::inflate(_trivialBuffer, _inflatedBuffer);
 }
 
@@ -246,8 +270,7 @@ std::optional<SearchResult> Line<Cell>::searchReverse(std::u32string_view text,
         if (!buffer.usedColumns)
             return std::nullopt;
         auto const column = std::min(startColumn, boxed_cast<ColumnOffset>(buffer.usedColumns - 1));
-        auto const resultIndex =
-            buffer.text.view().rfind(std::string_view(u8Text), unbox<size_t>(column));
+        auto const resultIndex = buffer.text.view().rfind(std::string_view(u8Text), unbox<size_t>(column));
         if (resultIndex != std::string_view::npos)
             return SearchResult { ColumnOffset::cast_from(resultIndex) };
         else

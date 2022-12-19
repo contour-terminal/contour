@@ -74,6 +74,7 @@ template <typename T> struct OptionalProperty<T, true> { T value; };
 struct TrivialLineBuffer
 {
     ColumnCount displayWidth;
+    // TODO(pr) ^^^^^^^^^^^^ We probably don't need that anymore, or maybe not even the whole struct.
     GraphicsAttributes textAttributes;
     GraphicsAttributes fillAttributes = textAttributes;
     HyperlinkId hyperlink {};
@@ -124,13 +125,30 @@ class Line
     // @param flags           line flags
     // @param attributes      default attributes for each cell.
     // @param inflatedBuffer  storage to be used for the inflated buffer.
-    Line(ColumnCount displayWidth, LineFlags flags, GraphicsAttributes attributes, InflatedBuffer inflatedBuffer);
+    Line(ColumnCount displayWidth,
+         LineFlags flags,
+         GraphicsAttributes attributes,
+         InflatedBuffer inflatedBuffer);
 
     // @returns number of columns this line maintains
     [[nodiscard]] ColumnCount size() const noexcept { return _displayWidth; }
 
     // Resets the current line with the given attribvutes.
     void reset(LineFlags flags, GraphicsAttributes attributes) noexcept;
+
+    // Resets the line to represent a trivial line.
+    //
+    // @param text the monochrome styled text
+    // @param usedColumns number of grid columns to be used (equals the number of grapheme clusters)
+    // @param textSGR styling for the textual columns
+    // @param fillSGR styling for the remaining columns up until the right page border
+    // @param hyperlink optional hyperlink attribute for the textual columns
+    void resetToTrivialLine(LineFlags flags,
+                            crispy::BufferFragment<char> text,
+                            ColumnCount usedColumns,
+                            GraphicsAttributes textSGR,
+                            GraphicsAttributes fillSGR,
+                            HyperlinkId hyperlink = {});
 
     // TODO(pr) this function will become interesting. :-)
     void resize(ColumnCount _count);

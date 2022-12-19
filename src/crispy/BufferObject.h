@@ -31,7 +31,7 @@
 #include <mutex>
 #include <string_view>
 
-#define BUFFER_OBJECT_INLINE 1
+// TODO(pr) #define BUFFER_OBJECT_INLINE 1
 
 namespace crispy
 {
@@ -253,7 +253,7 @@ BufferObjectPtr<T> BufferObject<T>::create(size_t capacity, BufferObjectRelease<
 #if defined(BUFFER_OBJECT_INLINE)
     auto const totalCapacity = nextPowerOfTwo(static_cast<uint32_t>(sizeof(BufferObject) + capacity));
     auto const nettoCapacity = totalCapacity - sizeof(BufferObject);
-    auto ptr = (BufferObject*) malloc(totalCapacity);
+    auto ptr = (BufferObject*) std::aligned_alloc(sizeof(T), totalCapacity);
     new (ptr) BufferObject(nettoCapacity);
     return BufferObjectPtr<T>(ptr, std::move(release));
 #else

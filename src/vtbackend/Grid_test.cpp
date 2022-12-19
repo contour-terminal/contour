@@ -897,9 +897,14 @@ TEST_CASE("Grid resize", "[grid]")
     bufferObject->writeAtEnd(text);
     auto const bufferFragment = bufferObject->ref(0, 4);
     auto const sgr = GraphicsAttributes {};
-    auto const trivial = TrivialLineBuffer { width, sgr, sgr, HyperlinkId {}, width, bufferFragment };
-    auto line_trivial = Line<Cell>(LineFlags::None, trivial);
-    grid.lineAt(LineOffset(0)) = line_trivial;
+    grid.lineAt(LineOffset(0)).resetToTrivialLine(
+        LineFlags::None,
+        bufferFragment,
+        width,
+        sgr,
+        sgr,
+        HyperlinkId {}
+    );
     REQUIRE(grid.lineAt(LineOffset(0)).isTrivialBuffer());
     REQUIRE(grid.lineAt(LineOffset(1)).isTrivialBuffer());
     (void) grid.resize(PageSize { LineCount(2), width + ColumnCount(1) }, CellLocation {}, false);
