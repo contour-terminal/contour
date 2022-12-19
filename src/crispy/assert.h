@@ -86,6 +86,15 @@ inline void set_fail_handler(fail_handler_t _handler)
     detail::fail_handler() = std::move(_handler);
 }
 
+/// This method prints an error message and then terminates the program.
+[[noreturn]] inline void todo(std::string_view message = {})
+{
+    fmt::print("TODO: We have reached some code that is missing an implementation.\n");
+    if (!message.empty())
+        fmt::print("{}\n", message);
+    std::abort();
+}
+
 #define Require(cond)                                                                \
     do                                                                               \
     {                                                                                \
