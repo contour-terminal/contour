@@ -152,7 +152,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Line<Cell>::inflate() noexcept
 {
-    // TODO(pr)
+    terminal::inflate(_trivialBuffer, _inflatedBuffer);
 }
 
 template <typename Cell>
@@ -278,90 +278,25 @@ std::optional<SearchResult> Line<Cell>::searchReverse(std::u32string_view text,
         return std::nullopt; // Not found, so stay with initial column as result.
     }
 }
-// =====================================================================================================
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount _newColumnCount)
 {
-    using crispy::Comparison;
-    if (isTrivialBuffer())
-    {
-        switch (crispy::strongCompare(_newColumnCount, ColumnCount::cast_from(trivialBuffer().text.size())))
-        {
-            case Comparison::Greater: trivialBuffer().displayWidth = _newColumnCount; return {};
-            case Comparison::Equal: return {};
-            case Comparison::Less:;
-        }
-    }
-    auto& buffer = inflatedBuffer();
-    // TODO: Efficiently handle TrivialBuffer-case.
-    switch (crispy::strongCompare(_newColumnCount, size()))
-    {
-        case Comparison::Equal: break;
-        case Comparison::Greater: buffer.resize(unbox<size_t>(_newColumnCount)); break;
-        case Comparison::Less: {
-            // TODO: properly handle wide character cells
-            // - when cutting in the middle of a wide char, the wide char gets wrapped and an empty
-            //   cell needs to be injected to match the expected column width.
-
-            if (wrappable())
-            {
-                auto const [reflowStart, reflowEnd] = [_newColumnCount, &buffer]() {
-                    auto const reflowStart =
-                        next(buffer.begin(), *_newColumnCount /* - buffer[_newColumnCount].width()*/);
-
-                    auto reflowEnd = buffer.end();
-
-                    while (reflowEnd != reflowStart && prev(reflowEnd)->empty())
-                        reflowEnd = prev(reflowEnd);
-
-                    return std::tuple { reflowStart, reflowEnd };
-                }();
-
-                auto removedColumns = InflatedBuffer(reflowStart, reflowEnd);
-                buffer.erase(reflowStart, buffer.end());
-                assert(size() == _newColumnCount);
-#if 0
-                if (removedColumns.size() > 0 &&
-                        std::any_of(removedColumns.begin(), removedColumns.end(),
-                            [](Cell const& x)
-                            {
-                                if (!x.empty())
-                                    fmt::print("non-empty cell in reflow: {}\n", x.toUtf8());
-                                return !x.empty();
-                            }))
-                    printf("Wrapping around\n");
-#endif
-                return removedColumns;
-            }
-            else
-            {
-                buffer.resize(unbox<size_t>(_newColumnCount));
-                assert(size() == _newColumnCount);
-                return {};
-            }
-        }
-    }
-    return {};
+    (void) _newColumnCount;
+    crispy::todo();
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 inline void Line<Cell>::resize(ColumnCount _count)
 {
     assert(*_count >= 0);
-    if (1) // constexpr (Optimized)
-    {
-        if (isTrivialBuffer())
-        {
-            TrivialBuffer& buffer = trivialBuffer();
-            buffer.displayWidth = _count;
-            return;
-        }
-    }
-    inflatedBuffer().resize(unbox<size_t>(_count));
+    crispy::todo();
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 gsl::span<Cell const> Line<Cell>::trim_blank_right() const noexcept
 {
     auto i = inflatedBuffer().data();
@@ -374,6 +309,7 @@ gsl::span<Cell const> Line<Cell>::trim_blank_right() const noexcept
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 std::string Line<Cell>::toUtf8() const
 {
     if (isTrivialBuffer())
@@ -397,6 +333,7 @@ std::string Line<Cell>::toUtf8() const
 }
 
 template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
 std::string Line<Cell>::toUtf8Trimmed() const
 {
     std::string output = toUtf8();
@@ -412,12 +349,13 @@ std::string Line<Cell>::toUtf8Trimmed() const
 }
 
 template <typename Cell>
-InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
+CRISPY_REQUIRES(CellConcept<Cell>)
+void inflate(TrivialLineBuffer const& input, gsl::span<Cell>& output)
 {
     static constexpr char32_t ReplacementCharacter { 0xFFFD };
 
-    auto columns = InflatedLineBuffer<Cell> {};
-    columns.reserve(unbox<size_t>(input.displayWidth));
+    auto& columns = output;
+    auto columnsUsed = size_t { 0 };
 
     auto lastChar = char32_t { 0 };
     auto utf8DecoderState = unicode::utf8_decoder_state {};
@@ -436,27 +374,28 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
         {
             while (gapPending > 0)
             {
-                columns.emplace_back(Cell { input.textAttributes, input.hyperlink });
+                columns[columnsUsed++].reset(input.textAttributes, input.hyperlink);
                 --gapPending;
             }
             auto const charWidth = unicode::width(nextChar);
-            columns.emplace_back(Cell {});
-            columns.back().setHyperlink(input.hyperlink);
-            columns.back().write(input.textAttributes, nextChar, static_cast<uint8_t>(charWidth));
+            columns[columnsUsed] = Cell {};
+            columns[columnsUsed].setHyperlink(input.hyperlink);
+            columns[columnsUsed].write(input.textAttributes, nextChar, static_cast<uint8_t>(charWidth));
+            ++columnsUsed;
             gapPending = charWidth - 1;
         }
         else
         {
-            Cell& prevCell = columns.back();
+            assert(columnsUsed > 0);
+            Cell& prevCell = columns[columnsUsed - 1];
             auto const extendedWidth = prevCell.appendCharacter(nextChar);
             if (extendedWidth > 0)
             {
-                auto const cellsAvailable = *input.displayWidth - static_cast<int>(columns.size()) + 1;
+                auto const cellsAvailable = *input.displayWidth - static_cast<int>(columnsUsed) + 1;
                 auto const n = min(extendedWidth, cellsAvailable);
                 for (int i = 1; i < n; ++i)
                 {
-                    columns.emplace_back(Cell { input.textAttributes });
-                    columns.back().setHyperlink(input.hyperlink);
+                    columns[columnsUsed++].reset(input.textAttributes, input.hyperlink);
                 }
             }
         }
@@ -465,17 +404,16 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
 
     while (gapPending > 0)
     {
-        columns.emplace_back(Cell { input.textAttributes, input.hyperlink });
+        columns[columnsUsed++].reset(input.textAttributes, input.hyperlink);
         --gapPending;
     }
 
-    assert(columns.size() == unbox<size_t>(input.usedColumns));
+    assert(columnsUsed == unbox<size_t>(input.usedColumns));
 
-    while (columns.size() < unbox<size_t>(input.displayWidth))
-        columns.emplace_back(Cell { input.fillAttributes });
-
-    return columns;
+    while (columnsUsed < unbox<size_t>(input.displayWidth))
+        columns[columnsUsed++].reset(input.fillAttributes);
 }
+
 } // end namespace terminal
 
 #include <vtbackend/cell/CompactCell.h>

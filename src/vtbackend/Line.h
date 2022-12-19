@@ -116,7 +116,6 @@ class Line
     using value_type = Cell;
     using iterator = typename InflatedBuffer::iterator;
     using reverse_iterator = typename InflatedBuffer::reverse_iterator;
-    using const_iterator = typename InflatedBuffer::const_iterator;
     // }}}
 
     // Initializes thius line with the given attributes.
@@ -283,6 +282,10 @@ inline typename Line<Cell>::InflatedBuffer const& Line<Cell>::inflatedBuffer() c
 {
     return const_cast<Line<Cell>*>(this)->inflatedBuffer();
 }
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+void inflate(TrivialLineBuffer const& input, gsl::span<Cell>& output);
 
 } // namespace terminal
 

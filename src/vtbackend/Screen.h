@@ -503,14 +503,14 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     [[nodiscard]] bool compareCellTextAt(CellLocation position, char codepoint) const noexcept override
     {
-        auto const& cell = _grid.lineAt(position.line).inflatedBuffer().at(position.column.as<size_t>());
+        auto const& cell = _grid.lineAt(position.line).inflatedBuffer()[position.column.as<size_t>()];
         return CellUtil::compareText(cell, codepoint);
     }
 
     // IMPORTANT: Invokig inflatedBuffer() is expensive. This function should be invoked with caution.
     [[nodiscard]] std::string cellTextAt(CellLocation position) const noexcept override
     {
-        return _grid.lineAt(position.line).inflatedBuffer().at(position.column.as<size_t>()).toUtf8();
+        return _grid.lineAt(position.line).inflatedBuffer()[position.column.as<size_t>()].toUtf8();
     }
 
     [[nodiscard]] std::string lineTextAt(LineOffset line) const noexcept override

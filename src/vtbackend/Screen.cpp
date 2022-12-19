@@ -354,12 +354,11 @@ size_t Screen<Cell>::emplaceCharsIntoCurrentLine(string_view _chars, size_t cell
     {
         // Only use fastpath if the currently line hasn't been inflated already.
         // Because we might lose prior-written textual/SGR information otherwise.
-        line.setBuffer(TrivialLineBuffer { line.trivialBuffer().displayWidth,
-                                           _state.cursor.graphicsRendition,
-                                           line.trivialBuffer().fillAttributes,
-                                           _state.cursor.hyperlink,
-                                           ColumnCount::cast_from(cellCount),
-                                           crispy::BufferFragment { _terminal.currentPtyBuffer(), _chars } });
+        TrivialLineBuffer& trivialBuffer = line.trivialBuffer();
+        trivialBuffer.hyperlink = _state.cursor.hyperlink;
+        trivialBuffer.textAttributes = _state.cursor.graphicsRendition;
+        trivialBuffer.usedColumns = ColumnCount::cast_from(cellCount);
+        trivialBuffer.text = crispy::BufferFragment { _terminal.currentPtyBuffer(), _chars };
         advanceCursorAfterWrite(ColumnCount::cast_from(cellCount));
     }
     else

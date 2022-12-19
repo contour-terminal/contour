@@ -35,6 +35,7 @@ namespace terminal
 auto const inline GridLog = logstore::Category(
     "vt.grid", "Grid related", logstore::Category::State::Disabled, logstore::Category::Visibility::Hidden);
 
+// {{{ detail
 namespace detail
 {
     template <typename... Args>
@@ -136,7 +137,20 @@ namespace detail
     }
 
 } // namespace detail
+// }}}
+
 // {{{ Grid impl
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+gsl::span<Cell> Grid<Cell>::allocateCellSpace(ColumnCount count)
+{
+    Require(nextAvailableCell_ + unbox<size_t>(count) < cellStorage_.size());
+    // TODO(pr) properly handle inifite scrollback (probably, using BufferObjectPool).
+    auto cells = gsl::span<Cell>(cellStorage_.data() + nextAvailableCell_, unbox<size_t>(count));
+    nextAvailableCell_ += unbox<size_t>(count);
+    return cells;
+}
+
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 size_t Grid<Cell>::calculateCellStorageElementCount() const noexcept
@@ -172,6 +186,17 @@ Grid<Cell>::Grid(PageSize _pageSize, bool _reflowOnResize, MaxHistoryLineCount _
         GraphicsAttributes {}) },
     linesUsed_ { _pageSize.lines }
 {
+    verifyState();
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+void Grid<Cell>::reset()
+{
+    linesUsed_ = pageSize_.lines;
+    lines_.rotate_right(lines_.zero_index());
+    for (int i = 0; i < unbox<int>(pageSize_.lines); ++i)
+        lines_[i].reset(defaultLineFlags(), GraphicsAttributes {});
     verifyState();
 }
 
@@ -429,8 +454,10 @@ LineCount Grid<Cell>::scrollUp(LineCount linesCountToScrollUp, GraphicsAttribute
         if (std::get_if<Infinite>(&historyLimit_))
         {
             for ([[maybe_unused]] auto const _: ranges::views::iota(0, unbox<int>(linesCountToScrollUp)))
-                lines_.emplace_back(defaultLineFlags(),
-                                    TrivialLineBuffer { pageSize_.columns, GraphicsAttributes {} });
+                lines_.emplace_back(pageSize_.columns,
+                                    defaultLineFlags(),
+                                    GraphicsAttributes {},
+                                    allocateCellSpace(pageSize_.columns));;
             return scrollUp(linesCountToScrollUp, _defaultAttributes);
         }
         // TODO: ensure explicit test for this case
@@ -459,10 +486,8 @@ LineCount Grid<Cell>::scrollUp(LineCount linesCountToScrollUp, GraphicsAttribute
         {
             linesUsed_ += linesAppendCount;
             Require(unbox<size_t>(linesUsed_) <= lines_.size());
-            fill_n(next(lines_.begin(), *pageSize_.lines),
-                   unbox<size_t>(linesAppendCount),
-                   Line<Cell> { defaultLineFlags(),
-                                TrivialLineBuffer { pageSize_.columns, _defaultAttributes } });
+            for (int i = 0; i < unbox<int>(linesAppendCount); ++i)
+                lines_[unbox<int>(pageSize_.lines) + i].reset(defaultLineFlags(), _defaultAttributes);
             rotateBuffersLeft(linesAppendCount);
         }
         if (linesAppendCount < linesCountToScrollUp)
@@ -516,7 +541,7 @@ LineCount Grid<Cell>::scrollUp(LineCount _n, GraphicsAttributes _defaultAttribut
         auto const bottomLineNumber = *_margin.vertical.to;
         for (auto lineNumber = topEmptyLineNr; lineNumber <= bottomLineNumber; ++lineNumber)
         {
-            lines_[lineNumber].reset(defaultLineFlags(), _defaultAttributes, pageSize_.columns);
+            lines_[lineNumber].reset(defaultLineFlags(), _defaultAttributes);
         }
     }
     else
@@ -647,418 +672,17 @@ void Grid<Cell>::scrollLeft(GraphicsAttributes _defaultAttributes, Margin _margi
 // {{{ Grid impl: resize
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Grid<Cell>::reset()
+CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos, bool wrapPending)
 {
-    linesUsed_ = pageSize_.lines;
-    lines_.rotate_right(lines_.zero_index());
-    for (int i = 0; i < unbox<int>(pageSize_.lines); ++i)
-        lines_[i].reset(defaultLineFlags(), GraphicsAttributes {});
-    verifyState();
-}
-
-template <typename Cell>
-CRISPY_REQUIRES(CellConcept<Cell>)
-CellLocation Grid<Cell>::growLines(LineCount _newHeight, CellLocation _cursor)
-{
-    // Grow line count by splicing available lines from history back into buffer, if available,
-    // or create new ones until pageSize_.lines == _newHeight.
-
-    Require(_newHeight > pageSize_.lines);
-    // lines_.reserve(unbox<size_t>(maxHistoryLineCount_ + _newHeight));
-
-    // Pull down from history if cursor is at bottom and if scrollback available.
-    CellLocation cursorMove {};
-    if (*_cursor.line + 1 == *pageSize_.lines)
-    {
-        auto const totalLinesToExtend = _newHeight - pageSize_.lines;
-        auto const linesToTakeFromSavedLines = std::min(totalLinesToExtend, historyLineCount());
-        Require(totalLinesToExtend >= linesToTakeFromSavedLines);
-        Require(*linesToTakeFromSavedLines >= 0);
-        rotateBuffersRight(linesToTakeFromSavedLines);
-        pageSize_.lines += linesToTakeFromSavedLines;
-        cursorMove.line += boxed_cast<LineOffset>(linesToTakeFromSavedLines);
-    }
-
-    auto const wrappableFlag = lines_.back().wrappableFlag();
-    auto const totalLinesToExtend = _newHeight - pageSize_.lines;
-    Require(*totalLinesToExtend >= 0);
-    // ? Require(linesToTakeFromSavedLines == LineCount(0));
-
-    auto const newTotalLineCount = maxHistoryLineCount() + _newHeight;
-    auto const currentTotalLineCount = LineCount::cast_from(lines_.size());
-    auto const linesToFill = max(0, *newTotalLineCount - *currentTotalLineCount);
-
-    for ([[maybe_unused]] auto const _: ranges::views::iota(0, linesToFill))
-        lines_.emplace_back(wrappableFlag, TrivialLineBuffer { pageSize_.columns, GraphicsAttributes {} });
-
-    pageSize_.lines += totalLinesToExtend;
-    linesUsed_ = min(linesUsed_ + totalLinesToExtend, LineCount::cast_from(lines_.size()));
-
-    Ensures(pageSize_.lines == _newHeight);
-    Ensures(lines_.size() >= unbox<size_t>(maxHistoryLineCount() + pageSize_.lines));
-    verifyState();
-
-    return cursorMove;
-}
-
-template <typename Cell>
-CRISPY_REQUIRES(CellConcept<Cell>)
-CellLocation Grid<Cell>::resize(PageSize _newSize, CellLocation _currentCursorPos, bool _wrapPending)
-{
-    if (pageSize_ == _newSize)
-        return _currentCursorPos;
-
-    GridLog()("resize {} -> {} (cursor {})", pageSize_, _newSize, _currentCursorPos);
-
-    // Growing in line count with scrollback lines present will move
-    // the scrollback lines into the visible area.
-    //
-    // Shrinking in line count with the cursor at the bottom margin will move
-    // the top lines into the scrollback area.
-
-    // {{{ helper methods
-    auto const shrinkLines = [this](LineCount _newHeight, CellLocation _cursor) -> CellLocation {
-        // Shrink existing line count to _newSize.lines
-        // by splicing the number of lines to be shrinked by into savedLines bottom.
-
-        Require(_newHeight < pageSize_.lines);
-
-        // FIXME: in alt screen, when shrinking more then available below screen cursor -> assertion failure
-
-        auto const numLinesToShrink = pageSize_.lines - _newHeight;
-        auto const linesAvailableBelowCursorBeforeShrink =
-            pageSize_.lines - boxed_cast<LineCount>(_cursor.line + 1);
-        auto const cutoffCount = min(numLinesToShrink, linesAvailableBelowCursorBeforeShrink);
-        auto const numLinesToPushUp = numLinesToShrink - cutoffCount;
-        auto const numLinesToPushUpCapped = min(numLinesToPushUp, maxHistoryLineCount());
-
-        GridLog()(" -> shrink lines: numLinesToShrink {}, linesAvailableBelowCursorBeforeShrink {}, "
-                  "cutoff {}, pushUp "
-                  "{}/{}",
-                  numLinesToShrink,
-                  linesAvailableBelowCursorBeforeShrink,
-                  cutoffCount,
-                  numLinesToPushUp,
-                  numLinesToPushUpCapped);
-
-        Ensures(numLinesToShrink == cutoffCount + numLinesToPushUp);
-
-        // 1.) Shrink up to the number of lines below the cursor.
-        if (cutoffCount != LineCount(0))
-        {
-            pageSize_.lines -= cutoffCount;
-            linesUsed_ -= cutoffCount;
-            Ensures(*_cursor.line < *pageSize_.lines);
-            verifyState();
-        }
-
-        // 2.) If _newHeight is still below page line count, then shrink by rotating up.
-        Require(_newHeight <= pageSize_.lines);
-        if (*numLinesToPushUp)
-        {
-            GridLog()(" -> numLinesToPushUp {}", numLinesToPushUp);
-            Require(*_cursor.line + 1 == *pageSize_.lines);
-            rotateBuffersLeft(numLinesToPushUp);
-            pageSize_.lines -= numLinesToPushUp;
-            clampHistory();
-            verifyState();
-            return CellLocation { -boxed_cast<LineOffset>(numLinesToPushUp), {} };
-        }
-
-        verifyState();
-        return CellLocation {};
-    };
-
-    auto const growColumns = [this, _wrapPending](ColumnCount _newColumnCount) -> CellLocation {
-        using LineBuffer = typename Line<Cell>::InflatedBuffer;
-
-        if (!reflowOnResize_)
-        {
-            for (auto& line: lines_)
-                if (line.size() < _newColumnCount)
-                    line.resize(_newColumnCount);
-            pageSize_.columns = _newColumnCount;
-            verifyState();
-            return CellLocation { LineOffset(0), ColumnOffset(_wrapPending ? 1 : 0) };
-        }
-        else
-        {
-            // Grow columns by inverse shrink,
-            // i.e. the lines are traversed in reverse order.
-
-            auto const extendCount = _newColumnCount - pageSize_.columns;
-            Require(*extendCount > 0);
-
-            Lines<Cell> grownLines;
-            LineBuffer
-                logicalLineBuffer; // Temporary state, representing wrapped columns from the line "below".
-            LineFlags logicalLineFlags = LineFlags::None;
-
-            auto const appendToLogicalLine = [&logicalLineBuffer](gsl::span<Cell const> cells) {
-                for (auto const& cell: cells)
-                    logicalLineBuffer.push_back(cell);
-            };
-
-            auto const flushLogicalLine = [_newColumnCount,
-                                           &grownLines,
-                                           &logicalLineBuffer,
-                                           &logicalLineFlags]() {
-                if (!logicalLineBuffer.empty())
-                {
-                    detail::addNewWrappedLines(
-                        grownLines, _newColumnCount, std::move(logicalLineBuffer), logicalLineFlags, true);
-                    logicalLineBuffer.clear();
-                }
-            };
-
-            [[maybe_unused]] auto const logLogicalLine =
-                [&logicalLineBuffer]([[maybe_unused]] LineFlags lineFlags,
-                                     [[maybe_unused]] std::string_view msg) {
-                    GridLog()("{} |> \"{}\"", msg, Line<Cell>(lineFlags, logicalLineBuffer).toUtf8());
-                };
-
-            for (int i = -*historyLineCount(); i < *pageSize_.lines; ++i)
-            {
-                auto& line = lines_[i];
-                // logLogicalLine(line.flags(), fmt::format("Line[{:>2}]: next line: \"{}\"", i,
-                // line.toUtf8()));
-                Require(line.size() >= pageSize_.columns);
-
-                if (line.wrapped())
-                {
-                    // logLogicalLine(line.flags(), fmt::format(" - appending: \"{}\"",
-                    // line.toUtf8Trimmed()));
-                    appendToLogicalLine(line.trim_blank_right());
-                }
-                else // line is not wrapped
-                {
-                    flushLogicalLine();
-                    if (line.isTrivialBuffer())
-                    {
-                        auto& buffer = line.trivialBuffer();
-                        buffer.displayWidth = _newColumnCount;
-                        grownLines.emplace_back(line);
-                    }
-                    else
-                    {
-                        // logLogicalLine(line.flags(), " - start new logical line");
-                        appendToLogicalLine(line.cells());
-                        logicalLineFlags = line.flags() & ~LineFlags::Wrapped;
-                    }
-                }
-            }
-
-            flushLogicalLine(); // Flush last (bottom) line, if anything pending.
-
-            // auto diff = int(lines_.size()) - unbox<int>(pageSize_.lines);
-            auto cy = LineCount(0);
-            if (pageSize_.lines > LineCount::cast_from(grownLines.size()))
-            {
-                // The lines we've been reflowing do not fill the pageSize,
-                // so fill the gap until we have a full page.
-                cy = pageSize_.lines - LineCount::cast_from(grownLines.size());
-                while (LineCount::cast_from(grownLines.size()) < pageSize_.lines)
-                    grownLines.emplace_back(
-                        defaultLineFlags(),
-                        TrivialLineBuffer { _newColumnCount, GraphicsAttributes {}, GraphicsAttributes {} });
-
-                Ensures(LineCount::cast_from(grownLines.size()) == pageSize_.lines);
-            }
-
-            linesUsed_ = LineCount::cast_from(grownLines.size());
-
-            // Fill scrollback lines.
-            auto const totalLineCount = unbox<size_t>(pageSize_.lines + maxHistoryLineCount());
-            while (grownLines.size() < totalLineCount)
-                grownLines.emplace_back(
-                    defaultLineFlags(),
-                    TrivialLineBuffer { _newColumnCount, GraphicsAttributes {}, GraphicsAttributes {} });
-
-            lines_ = std::move(grownLines);
-            pageSize_.columns = _newColumnCount;
-
-            auto const newHistoryLineCount = linesUsed_ - pageSize_.lines;
-            rotateBuffersLeft(newHistoryLineCount);
-
-            verifyState();
-            return CellLocation { -boxed_cast<LineOffset>(cy), ColumnOffset(_wrapPending ? 1 : 0) };
-        }
-    };
-
-    auto const shrinkColumns = [this](ColumnCount _newColumnCount,
-                                      LineCount /*_newLineCount*/,
-                                      CellLocation _cursor) -> CellLocation {
-        using LineBuffer = typename Line<Cell>::InflatedBuffer;
-
-        if (!reflowOnResize_)
-        {
-            pageSize_.columns = _newColumnCount;
-            crispy::for_each(lines_, [=](Line<Cell>& line) {
-                if (_newColumnCount < line.size())
-                    line.resize(_newColumnCount);
-            });
-            verifyState();
-            return _cursor + std::min(_cursor.column, boxed_cast<ColumnOffset>(_newColumnCount));
-        }
-        else
-        {
-            // {{{ Shrinking progress
-            // -----------------------------------------------------------------------
-            //  (one-by-one)        | (from-5-to-2)
-            // -----------------------------------------------------------------------
-            // "ABCDE"              | "ABCDE"
-            // "abcde"              | "xy   "
-            // ->                   | "abcde"
-            // "ABCD"               | ->
-            // "E   "   Wrapped     | "AB"                  push "AB", wrap "CDE"
-            // "abcd"               | "CD"      Wrapped     push "CD", wrap "E"
-            // "e   "   Wrapped     | "E"       Wrapped     push "E",  inc line
-            // ->                   | "xy"      no-wrapped  push "xy", inc line
-            // "ABC"                | "ab"      no-wrapped  push "ab", wrap "cde"
-            // "DE "    Wrapped     | "cd"      Wrapped     push "cd", wrap "e"
-            // "abc"                | "e "      Wrapped     push "e",  inc line
-            // "de "    Wrapped
-            // ->
-            // "AB"
-            // "DE"     Wrapped
-            // "E "     Wrapped
-            // "ab"
-            // "cd"     Wrapped
-            // "e "     Wrapped
-            // }}}
-
-            Lines<Cell> shrinkedLines;
-            LineBuffer wrappedColumns;
-            LineFlags previousFlags = lines_.front().inheritableFlags();
-
-            auto const totalLineCount = unbox<size_t>(pageSize_.lines + maxHistoryLineCount());
-            shrinkedLines.reserve(totalLineCount);
-            Require(totalLineCount == unbox<size_t>(this->totalLineCount()));
-
-            auto numLinesWritten = LineCount(0);
-            for (auto i = -*historyLineCount(); i < *pageSize_.lines; ++i)
-            {
-                auto& line = lines_[i];
-
-                // do we have previous columns carried?
-                if (!wrappedColumns.empty())
-                {
-                    if (line.wrapped() && line.inheritableFlags() == previousFlags)
-                    {
-                        // Prepend previously wrapped columns into current line.
-                        auto& editable = line.inflatedBuffer();
-                        editable.insert(editable.begin(), wrappedColumns.begin(), wrappedColumns.end());
-                    }
-                    else
-                    {
-                        // Insert NEW line(s) between previous and this line with previously wrapped columns.
-                        auto const numLinesInserted = detail::addNewWrappedLines(
-                            shrinkedLines, _newColumnCount, std::move(wrappedColumns), previousFlags, false);
-                        numLinesWritten += numLinesInserted;
-                        previousFlags = line.inheritableFlags();
-                    }
-                }
-                else
-                {
-                    previousFlags = line.inheritableFlags();
-                }
-
-                wrappedColumns = line.reflow(_newColumnCount);
-
-                shrinkedLines.emplace_back(std::move(line));
-                numLinesWritten++;
-                Ensures(shrinkedLines.back().size() >= _newColumnCount);
-            }
-            numLinesWritten += detail::addNewWrappedLines(
-                shrinkedLines, _newColumnCount, std::move(wrappedColumns), previousFlags, false);
-            Require(unbox<size_t>(numLinesWritten) == shrinkedLines.size());
-            Require(numLinesWritten >= pageSize_.lines);
-
-            while (shrinkedLines.size() < totalLineCount)
-                shrinkedLines.emplace_back(
-                    LineFlags::None,
-                    TrivialLineBuffer { _newColumnCount, GraphicsAttributes {}, GraphicsAttributes {} });
-
-            shrinkedLines.rotate_left(
-                unbox<size_t>(numLinesWritten - pageSize_.lines)); // maybe to be done outisde?
-            linesUsed_ = LineCount::cast_from(numLinesWritten);
-
-            // if (LineCount::cast_from(shrinkedLines.size()) > pageSize_.lines)
-            // {
-            //     auto const overflow = LineCount::cast_from(shrinkedLines.size()) -
-            //     pageSize_.lines;
-            //     linesUsed_ -= overflow;
-            // }
-
-            lines_ = std::move(shrinkedLines);
-            pageSize_.columns = _newColumnCount;
-
-            verifyState();
-            return _cursor; // TODO
-        }
-    };
-    // }}}
-
-    CellLocation cursor = _currentCursorPos;
-
-    // grow/shrink columns
-    using crispy::Comparison;
-    switch (crispy::strongCompare(_newSize.columns, pageSize_.columns))
-    {
-        case Comparison::Greater: cursor += growColumns(_newSize.columns); break;
-        case Comparison::Less: cursor = shrinkColumns(_newSize.columns, _newSize.lines, cursor); break;
-        case Comparison::Equal: break;
-    }
-
-    // grow/shrink lines
-    switch (crispy::strongCompare(_newSize.lines, pageSize_.lines))
-    {
-        case Comparison::Greater: cursor += growLines(_newSize.lines, cursor); break;
-        case Comparison::Less: cursor += shrinkLines(_newSize.lines, cursor); break;
-        case Comparison::Equal: break;
-    }
-
-    Ensures(pageSize_ == _newSize);
-    verifyState();
-
-    return cursor;
+    crispy::ignore_unused(newSize, currentCursorPos, wrapPending);
+    crispy::todo();
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Grid<Cell>::clampHistory()
 {
-    // TODO: needed?
-}
-
-template <typename Cell>
-CRISPY_REQUIRES(CellConcept<Cell>)
-void Grid<Cell>::appendNewLines(LineCount _count, GraphicsAttributes _attr)
-{
-    auto const wrappableFlag = lines_.back().wrappableFlag();
-
-    if (historyLineCount() == maxHistoryLineCount())
-    {
-        // We've reached to history line count limit already.
-        // Rotate lines that would fall off down to the bottom again in a clean state.
-        // We do save quite some overhead due to avoiding unnecessary memory allocations.
-        for (int i = 0; i < unbox<int>(_count); ++i)
-        {
-            auto line = std::move(lines_.front());
-            lines_.pop_front();
-            line.reset(defaultLineFlags(), _attr);
-            lines_.emplace_back(std::move(line));
-        }
-        return;
-    }
-
-    if (auto const n = std::min(_count, pageSize_.lines); *n > 0)
-    {
-        generate_n(back_inserter(lines_), *n, [&]() {
-            return Line<Cell>(wrappableFlag, TrivialLineBuffer { pageSize_.columns, _attr, _attr });
-        });
-        clampHistory();
-    }
+    crispy::todo();
 }
 // }}}
 // {{{ dumpGrid impl
