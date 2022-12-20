@@ -293,7 +293,7 @@ else()
     endif()
 
     if(CONTOUR_BUILD_WITH_QT6)
-        set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libqt6core6, libqt6opengl6, libqt6widgets6, libqt6multimedia6")
+        set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libqt6core6, libqt6opengl6, libqt6widgets6, libqt6openglwidgets6, qt6-qpa-plugins, libqt6multimedia6")
     else()
         set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libqt5core5a, libqt5gui5, libqt5network5, libqt5multimedia5, libqt5x11extras5") # Qt 5
     endif()

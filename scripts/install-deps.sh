@@ -210,10 +210,12 @@ install_deps_ubuntu()
             libgl1-mesa-dev
             libglvnd-dev
             libqt6opengl6-dev
+            libqt6openglwidgets6
             libqt6widgets6
             qt6-base-dev
             qt6-base-dev-tools
             qt6-multimedia-dev
+            qt6-qpa-plugins
         "
     else
         packages="$packages
