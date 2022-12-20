@@ -25,7 +25,7 @@ renderer:
 
     # Number of hashtable slots to map to the texture tiles.
     # Larger values may increase performance, but too large may also decrease.
-    # This value is rounted up to a value equal to the power of two.
+    # This value is rounded up to a value equal to the power of two.
     #
     # Default: 4096
     tile_hashtable_slots: 4096
@@ -43,7 +43,7 @@ renderer:
 
     # Enables/disables the use of direct-mapped texture atlas tiles for
     # the most often used ones (US-ASCII, cursor shapes, underline styles)
-    # You most likely do not wnat to touch this.
+    # You most likely do not want to touch this.
     #
     # Default: true
     tile_direct_mapping: true
@@ -73,7 +73,7 @@ spawn_new_process: false
 reflow_on_resize: true
 
 # Section of experimental features.
-# All experimental features are disabled by default and must be explicitely enabled here.
+# All experimental features are disabled by default and must be explicitly enabled here.
 # NOTE: Contour currently has no experimental features behind this configuration wall.
 # experimental:
 #     # Enables experimental support for feature X/Y/Z
@@ -199,7 +199,7 @@ profiles:
         # Default: VT525
         terminal_id: VT525
 
-        # Determines the initial terminal sice in characters.
+        # Determines the initial terminal size in characters.
         terminal_size:
             columns: 80
             lines: 25
@@ -271,7 +271,7 @@ profiles:
                 # - native      : automatically choose the best available on the current platform.
                 # - DirectWrite : selects DirectWrite engine (Windows only)
                 # - CoreText    : selects CoreText engine (Mac OS/X only)
-                # - OpenShaper  : selects OpenShaper (harfbuzz/freetype/fontconfig, avilable on all
+                # - OpenShaper  : selects OpenShaper (harfbuzz/freetype/fontconfig, available on all
                 #                 platforms)
                 engine: native
 
@@ -282,7 +282,7 @@ profiles:
 
             # Font render modes tell the font rasterizer engine what rendering technique to use.
             #
-            # Modes availabe are:
+            # Modes available are:
             # - lcd          Uses a subpixel rendering technique optimized for LCD displays.
             # - light        Uses a subpixel rendering technique in gray-scale.
             # - gray         Uses standard gray-scaled anti-aliasing.
@@ -296,7 +296,7 @@ profiles:
             # Font family to use for displaying text.
             #
             # A font can be either described in detail as below or as a
-            # simple string value (e.g. "monospace" with teh appropriate
+            # simple string value (e.g. "monospace" with the appropriate
             # weight/slant applied automatically).
             regular:
                 # Font family defines the font family name, such as:
@@ -320,7 +320,7 @@ profiles:
                 # Default: []
                 features: []
 
-            # If bold/italic/bold_italic are not explicitely specified, the regular font with
+            # If bold/italic/bold_italic are not explicitly specified, the regular font with
             # the respective weight and slant will be used.
             #bold: "Hack"
             #italic: "Hack"
@@ -348,7 +348,7 @@ profiles:
             # - underscore    a line under the text
             # - bar:          the well known i-Beam
             shape: "bar"
-            # Determins whether or not the cursor will be blinking over time.
+            # Determines whether or not the cursor will be blinking over time.
             blinking: false
             # Blinking interval (in milliseconds) to use when cursor is blinking.
             blinking_interval: 500
@@ -402,7 +402,7 @@ profiles:
 # Color Profiles
 # --------------
 #
-# Here you can configure your color profiles, wereas a color can be expressed in standard web format,
+# Here you can configure your color profiles, whereas a color can be expressed in standard web format,
 # with a leading # followed by red/green/blue values, 7 characters in total.
 # You may alternatively use 0x as prefix instead of #.
 # For example 0x102030 is equal to '#102030'.
@@ -586,7 +586,7 @@ color_schemes:
 #   Numpad_5, Numpad_6, Numpad_7, Numpad_8, Numpad_9
 # or in case of standard characters, just the character.
 #
-# Mouse buttons can be one of the following self-explanary ones:
+# Mouse buttons can be one of the following self-explanatory ones:
 #   Left, Middle, Right, WheelUp, WheelDown
 #
 # Actions:
