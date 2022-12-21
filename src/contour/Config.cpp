@@ -113,6 +113,12 @@ namespace
     {
         auto const resolvedFileName = homeResolvedPath(fileName, Process::homeDirectory());
 
+        if (!FileSystem::exists(resolvedFileName))
+        {
+            errorlog()("Background image path not found: {}", resolvedFileName.string());
+            return nullptr;
+        }
+
         auto backgroundImage = terminal::BackgroundImage {};
         backgroundImage.location = resolvedFileName;
         backgroundImage.hash = crispy::StrongHash::compute(resolvedFileName.string());
