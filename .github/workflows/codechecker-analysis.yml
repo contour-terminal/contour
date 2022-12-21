@@ -6,7 +6,11 @@ on:
       - 'CMakeLists.txt'
       - '*.cmake'
       - '*.cpp'
+      - '*.cc'
+      - '*.c'
       - '*.h'
+      - '*.hh'
+      - '*.hpp'
     branches:
       - master
       - 'codechecker*'
@@ -25,13 +29,13 @@ concurrency:
 
 jobs:
   ubuntu_2004:
-    name: "Ubuntu Linux 20.04"
-    runs-on: ubuntu-20.04
+    name: "Ubuntu Linux 22.04"
+    runs-on: ubuntu-22.04
     steps:
       - name: "Check out repository"
         uses: actions/checkout@v3
-      - name: "update APT database"
-        run: sudo apt -q update
+      - name: "update APT package database"
+        run: sudo apt -q update && sudo apt upgrade -y
       - name: Installing xmllint for ci-set-vars
         run: sudo apt -qy install libxml2-utils
       - name: "Set variables for Contour build-like CI"
@@ -49,7 +53,7 @@ jobs:
         run: |
           BUILD_DIR="Build" \
             CMAKE_BUILD_TYPE="Debug" \
-            CXX="g++-9" \
+            CXX="g++-11" \
             ./scripts/ci-prepare-contour.sh
 
       - name: "Execute Static Analysis"
