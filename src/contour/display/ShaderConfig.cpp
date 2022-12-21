@@ -42,11 +42,7 @@ namespace
 
 bool useOpenGLES() noexcept
 {
-#if defined(__linux__)
-    return true;
-#else
     return QOpenGLContext::openGLModuleType() == QOpenGLContext::LibGLES;
-#endif
 }
 
 QSurfaceFormat createSurfaceFormat()
@@ -56,7 +52,7 @@ QSurfaceFormat createSurfaceFormat()
     if (useOpenGLES())
     {
         format.setRenderableType(QSurfaceFormat::OpenGLES);
-        format.setVersion(3, 3);
+        format.setVersion(3, 0);
     }
     else
     {

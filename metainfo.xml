@@ -107,6 +107,7 @@
       <description>
         <ul>
           <li>Fixes statusline clock to show the correct local time.</li>
+          <li>Fixes running within OpenGL/ES context.</li>
         </ul>
       </description>
     </release>
