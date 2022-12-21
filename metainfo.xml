@@ -108,6 +108,7 @@
         <ul>
           <li>Fixes statusline clock to show the correct local time.</li>
           <li>Fixes running within OpenGL/ES context.</li>
+          <li>Fixes failing startup due to `background_image.path` pointing to a non-existing file (#928).</li>
         </ul>
       </description>
     </release>
