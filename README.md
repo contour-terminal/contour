@@ -55,6 +55,7 @@ for everyday use. It is aiming for power users with a modern feature mindset.
                        [early-exit-threshold UINT] [working-directory DIRECTORY] [class WM_CLASS]
                        [platform PLATFORM[:OPTIONS]] [session SESSION_ID] [PROGRAM ARGS...]
     contour font-locator [config FILE] [profile NAME] [debug TAGS]
+    contour info vt
     contour help
     contour version
     contour license
