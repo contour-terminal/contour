@@ -109,6 +109,7 @@
           <li>Fixes statusline clock to show the correct local time.</li>
           <li>Fixes running within OpenGL/ES context.</li>
           <li>Fixes failing startup due to `background_image.path` pointing to a non-existing file (#928).</li>
+          <li>Adds config entry `indicator_statusline_inactive` colorscheme key to colorize the status line differently when the terminal is currently not in focus.</li>
         </ul>
       </description>
     </release>

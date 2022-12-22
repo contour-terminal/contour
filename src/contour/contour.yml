@@ -512,6 +512,14 @@ color_schemes:
             # Default: default foreground
             background: '#000000'
 
+        # Alternate colors to be used for the indicator status line when
+        # this terminal is currently not in focus.
+        indicator_statusline_inactive:
+            # Default: default background
+            foreground: '#808080'
+            # Default: default foreground
+            background: '#000000'
+
         # Normal colors
         normal:
             black:   '#000000'

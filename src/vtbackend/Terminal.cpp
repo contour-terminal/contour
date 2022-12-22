@@ -465,15 +465,18 @@ void Terminal::updateIndicatorStatusLine()
     auto savedCursor = state_.cursor;
     auto const savedWrapPending = state_.wrapPending;
 
+    auto const colors =
+        state_.focused ? colorPalette().indicatorStatusLine : colorPalette().indicatorStatusLineInactive;
+
     currentScreen_ = indicatorStatusScreen_;
     state_.activeStatusDisplay = ActiveStatusDisplay::StatusLine;
 
     // Prepare old status line's cursor position and some other flags.
     state_.cursor = {};
-    state_.cursor.graphicsRendition.foregroundColor = colorPalette().indicatorStatusLine.foreground;
-    state_.cursor.graphicsRendition.backgroundColor = colorPalette().indicatorStatusLine.background;
     state_.wrapPending = false;
     indicatorStatusScreen_.updateCursorIterator();
+    state_.cursor.graphicsRendition.foregroundColor = colors.foreground;
+    state_.cursor.graphicsRendition.backgroundColor = colors.background;
 
     // Run status-line update.
     // We cannot use VT writing here, because we shall not interfere with the application's VT state.

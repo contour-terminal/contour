@@ -969,6 +969,13 @@ namespace
                 _usedKeys, _basePath, _node, "indicator_statusline", colors.indicatorStatusLine))
             colors.indicatorStatusLine = p.value();
 
+        if (auto p = parseRGBColorPair(_usedKeys,
+                                       _basePath,
+                                       _node,
+                                       "indicator_statusline_inactive",
+                                       colors.indicatorStatusLineInactive))
+            colors.indicatorStatusLineInactive = p.value();
+
         if (auto cursor = _node["cursor"]; cursor)
         {
             _usedKeys.emplace(_basePath + ".cursor");
