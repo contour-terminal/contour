@@ -110,12 +110,10 @@ namespace
     );
 
     constexpr auto inline Undefined = Code {};
+    // clang-format off
     constexpr inline auto stringCaps = defineCapabilities( // {{{
         String { "TN"_tcap, ""sv, "xterm-256color"sv },    // termcap/terminfo name (xterm extension)
-        String { "ac"_tcap,
-                 "acsc"sv,
-                 "``aaffggiijjkkllmmnnooppqqrrssttuuvvwwxxyyzz{{||}}~~"sv }, // graphics charset pairs, based
-                                                                             // on vt100
+        String { "ac"_tcap, "acsc"sv, "``aaffggiijjkkllmmnnooppqqrrssttuuvvwwxxyyzz{{||}}~~"sv }, // graphics charset pairs, based on vt100
         String { "bl"_tcap, "bel"sv, "^G"sv },                               // The audible bell character
         String { "md"_tcap, "bold"sv, "\033[1m"sv },                         // Escape code for bold
         String { "bt"_tcap, "cbt"sv, "\033[Z"sv },                           // Back tab
@@ -125,7 +123,7 @@ namespace
         String { "ve"_tcap, "cnorm"sv, "\033[?12l\033[?25h"sv }, // Make cursor appear normal
         String { "cr"_tcap, "cr"sv, "^M"sv },                    // CR (carriage return \r)
         String { "cs"_tcap, "csr"sv, "\033[%i%p1%d;%p2%dr"sv },  // Change scroll region
-        String { "LE"_tcap, "cub"sv, "\033[%p1%dD"sv }, // // Move cursor to the left by the specified amount
+        String { "LE"_tcap, "cub"sv, "\033[%p1%dD"sv }, // Move cursor to the left by the specified amount
         String { "le"_tcap, "cub1"sv, "^H"sv },         // BS (backspace)
         // Move cursor down specified number of lines
         String { "DO"_tcap, "cud"sv, "\033[%p1%dB"sv },
@@ -134,14 +132,8 @@ namespace
         String { "RI"_tcap, "cuf"sv, "\033[%p1%dC"sv },
         String { "nd"_tcap, "cuf1"sv, "\033[C"sv },
         // Move cursor up specified number of lines
-        String { "UP"_tcap,
-                 "cuu"sv,
-                 ""
-                 "\033[%p1%dA"sv },
-        String { "up"_tcap,
-                 "cuu1"sv,
-                 ""
-                 "\033[A"sv },
+        String { "UP"_tcap, "cuu"sv, "" "\033[%p1%dA"sv },
+        String { "up"_tcap, "cuu1"sv, "" "\033[A"sv },
         // Move cursor to specified location
         String { "cm"_tcap, "cup"sv, "\033[%i%p1%d;%p2%dH"sv },
         // Make cursor very visible
@@ -150,16 +142,10 @@ namespace
         String { "DC"_tcap, "dch"sv, "\033[%p1%dP"sv },
         String { "dc"_tcap, "dch1"sv, "\033[P"sv },
         // Turn on half bright mode
-        String { "mh"_tcap,
-                 "dim"sv,
-                 ""
-                 "\033[2m"sv },
+        String { "mh"_tcap, "dim"sv, "" "\033[2m"sv },
         // Delete the specified number of lines
         String { "DL"_tcap, "dl"sv, "\033[%p1%dM"sv },
-        String { "dl"_tcap,
-                 "dl1"sv,
-                 ""
-                 "\033[M"sv },
+        String { "dl"_tcap, "dl1"sv, "" "\033[M"sv },
         // Erase specified number of characters
         String { "ec"_tcap, "ech"sv, "\033[%p1%dX"sv },
         // Clear to end of screen
@@ -176,15 +162,9 @@ namespace
         String { "AL"_tcap, "il"sv, "\033[%p1%dL"sv },                // insert #1 lines (P*)
         String { "al"_tcap, "il1"sv, "\033[L"sv },                    // insert line (P*)
         String { "sf"_tcap, "ind"sv, "^J"sv },                        // scroll up by specified amount
-        String { "SF"_tcap,
-                 "indn"sv,
-                 ""
-                 "\033[%p1%dS"sv }, // scroll forward #1 lines (P)
+        String { "SF"_tcap, "indn"sv, "" "\033[%p1%dS"sv },           // scroll forward #1 lines (P)
         // initialize color (set dynamic colors)
-        String {
-            "Ic"_tcap,
-            "initc"sv,
-            "\033]4;%p1%d;rgb:%p2%{255}%*%{1000}%/%2.2X/%p3%{255}%*%{1000}%/%2.2X/%p4%{255}%*%{1000}%/%2.2X\033\\"sv },
+        String { "Ic"_tcap, "initc"sv, "\033]4;%p1%d;rgb:%p2%{255}%*%{1000}%/%2.2X/%p3%{255}%*%{1000}%/%2.2X/%p4%{255}%*%{1000}%/%2.2X\033\\"sv },
         // Set all colors to original values
         String { "oc"_tcap, "oc"sv, "\033]104\033\\"sv },
         // turn on blank mode (characters invisible)
@@ -195,52 +175,26 @@ namespace
         String { "kF"_tcap, "kind"sv, "\033[1;2B"sv }, // scroll forwards (index)
         String { "rc"_tcap, "rc"sv, "\0338"sv },       // Restore cursor
         String { "rp"_tcap, "rep"sv, "%p1%c\033[%p2%{1}%-%db"sv }, // Repeat preceding character
-        String { "mr"_tcap,
-                 "rev"sv,
-                 ""
-                 "\033[7m"sv }, // Reverse video
-        String {
-            "sr"_tcap, "ri"sv, "\033M"sv }, // Scroll backwards the specified number of lines (reverse index)
+        String { "mr"_tcap, "rev"sv, "" "\033[7m"sv }, // Reverse video
+        String { "sr"_tcap, "ri"sv, "\033M"sv }, // Scroll backwards the specified number of lines (reverse index)
         String { "SR"_tcap, "rin"sv, "\033[%p1%dT"sv },
         String { "RA"_tcap, "rmam"sv, "\033[?7l"sv }, // Turn off automatic margins
-        String { "te"_tcap,
-                 "rmcup"sv,
-                 ""
-                 "\033[?1049l"sv },                   // Exit alternate screen
+        String { "te"_tcap, "rmcup"sv, "\033[?1049l"sv },                   // Exit alternate screen
         String { "ei"_tcap, "rmir"sv, "\033[4l"sv },  // Exit insert mode
         String { "ke"_tcap, "rmkx"sv, "\033[?1l"sv }, // Exit application keypad mode
         String { "se"_tcap, "rmso"sv, "\033[27m"sv }, // Exit standout mode
         String { "ue"_tcap, "rmul"sv, "\033[24m"sv }, // Exit underline mode
         String { "Te"_tcap, "rmxx"sv, "\033[29m"sv }, // Exit strikethrough mode
-        String { "r1"_tcap,
-                 "rs1"sv,
-                 ""
-                 "\033]\033\\\033c"sv }, // Reset string1 (empty OSC sequence to exit OSC/OTH modes, and
-                                         // regular reset)
+        String { "r1"_tcap, "rs1"sv, "\033]\033\\\033c"sv }, // Reset string1 (empty OSC sequence to exit OSC/OTH modes, and regular reset)
         String { "sc"_tcap, "sc"sv, "\0337"sv }, // Save cursor
-        String {
-            "AB"_tcap,
-            "setab"sv,
-            "\033[%?%p1%{8}%<%t4%p1%d%e%p1%{16}%<%t10%p1%{8}%-%d%e48;5;%p1%d%;m"sv }, // Set background color
-        String {
-            "AF"_tcap,
-            "setaf"sv,
-            "\033[%?%p1%{8}%<%t3%p1%d%e%p1%{16}%<%t9%p1%{8}%-%d%e38;5;%p1%d%;m"sv }, // Set foreground color
-        String {
-            "sa"_tcap,
-            "sgr"sv,
-            "%?%p9%t\033(0%e\033(B%;\033[0%?%p6%t;1%;%?%p2%t;4%;%?%p1%p3%|%t;7%;%?%p4%t;5%;%?%p7%t;8%;m"sv }, // Set attributes
+        String { "AB"_tcap, "setab"sv, "\033[%?%p1%{8}%<%t4%p1%d%e%p1%{16}%<%t10%p1%{8}%-%d%e48;5;%p1%d%;m"sv }, // Set background color
+        String { "AF"_tcap, "setaf"sv, "\033[%?%p1%{8}%<%t3%p1%d%e%p1%{16}%<%t9%p1%{8}%-%d%e38;5;%p1%d%;m"sv }, // Set foreground color
+        String { "sa"_tcap, "sgr"sv, "%?%p9%t\033(0%e\033(B%;\033[0%?%p6%t;1%;%?%p2%t;4%;%?%p1%p3%|%t;7%;%?%p4%t;5%;%?%p7%t;8%;m"sv }, // Set attributes
         String { "me"_tcap, "sgr0"sv, "\033(B\033[m"sv }, // Clear all attributes
         String { "op"_tcap, "op"sv, "\033[39;49m"sv },    // Reset color pair to its original value
-        String { "SA"_tcap,
-                 "smam"sv,
-                 ""
-                 "\033[?7h"sv },                          // Turn on automatic margins
+        String { "SA"_tcap, "smam"sv, "\033[?7h"sv },     // Turn on automatic margins
         String { "ti"_tcap, "smcup"sv, "\033[?1049h"sv }, // Start alternate screen
-        String { "im"_tcap,
-                 "smir"sv,
-                 ""
-                 "\033[4h"sv },                       // Enter insert mode
+        String { "im"_tcap, "smir"sv, "\033[4h"sv },  // Enter insert mode
         String { "ks"_tcap, "smkx"sv, "\033[?1h"sv }, // Enter application keymap mode
         String { "so"_tcap, "smso"sv, "\033[7m"sv },  // Enter standout mode
         String { "us"_tcap, "smul"sv, "\033[4m"sv },  // Enter underline mode
@@ -248,27 +202,12 @@ namespace
         String { "ct"_tcap, "tbc"sv, "\033[3g"sv },   // Clear all tab stops
         String { "ts"_tcap, "tsl"sv, "\033]2;"sv },   // To status line (used to set window titles)
         String { "fs"_tcap, "fsl"sv, "^G"sv },        // From status line (end window title string)
-        String { "ds"_tcap,
-                 "dsl"sv,
-                 ""
-                 "\033]2;\033\\"sv }, // Disable status line (clear window title)
-        String { "cv"_tcap,
-                 "vpa"sv,
-                 ""
-                 "\033[%i%p1%dd"sv },                // Move to specified line
+        String { "ds"_tcap, "dsl"sv, "\033]2;\033\\"sv }, // Disable status line (clear window title)
+        String { "cv"_tcap, "vpa"sv, "\033[%i%p1%dd"sv }, // Move to specified line
         String { "ZH"_tcap, "sitm"sv, "\033[3m"sv }, // Enter italics mode
-        String { "ZR"_tcap,
-                 "ritm"sv,
-                 ""
-                 "\033[23m"sv }, // Leave italics mode
-        String { "as"_tcap,
-                 "smacs"sv,
-                 ""
-                 "\033(0"sv }, // start alternate character set (P)
-        String { "ae"_tcap,
-                 "rmacs"sv,
-                 ""
-                 "\033(B"sv }, // end alternate character set (P)
+        String { "ZR"_tcap, "ritm"sv, "\033[23m"sv },// Leave italics mode
+        String { "as"_tcap, "smacs"sv, "\033(0"sv }, // start alternate character set (P)
+        String { "ae"_tcap, "rmacs"sv, "\033(B"sv }, // end alternate character set (P)
 
         // Synchronized Output
         String { Undefined, "Sync"sv, "\033[?2026%?%p1%{1}%-%tl%eh"sv },
@@ -439,8 +378,7 @@ namespace
         String { Undefined, "Smulx"sv, "\033[4:%p1%dm"sv },
 
         // Set underscore color.
-        String {
-            Undefined, "Setulc"sv, "\033[58:2:%p1%{65536}%/%d:%p1%{256}%/%{255}%&%d:%p1%{255}%&%d%;m"sv },
+        String { Undefined, "Setulc"sv, "\033[58:2:%p1%{65536}%/%d:%p1%{256}%/%{255}%&%d:%p1%{255}%&%d%;m"sv },
         // NB: the following would work, too.
         // String{ Undefined, "Setulc"sv, "\033[58:2:%p1%d:%p2%d:%p3%dm"sv },
         // }}}
@@ -448,7 +386,9 @@ namespace
         // RGB for the ncurses direct-color extension.
         // Only a terminfo name is provided, since termcap applica-
         // tions cannot use this information
-        String { Undefined, "RGB"sv, "8/8/8"sv }); // }}}
+        String { Undefined, "RGB"sv, "8/8/8"sv }
+    ); // }}}
+    // clang-format on
 } // namespace
 
 bool StaticDatabase::booleanCapability(Code _cap) const
