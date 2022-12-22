@@ -703,9 +703,23 @@ bool TerminalSession::operator()(actions::CopyPreviousMarkRange)
     return true;
 }
 
-bool TerminalSession::operator()(actions::CopySelection)
+bool TerminalSession::operator()(actions::CopySelection copySelection)
 {
-    copyToClipboard(terminal().extractSelectionText());
+    switch (copySelection.format)
+    {
+        case actions::CopyFormat::Text:
+            // Copy the selection in pure text, plus whitespaces and newline.
+            copyToClipboard(terminal().extractSelectionText());
+            break;
+        case actions::CopyFormat::HTML:
+            // TODO: This requires walking through each selected cell and construct HTML+CSS for it.
+        case actions::CopyFormat::VT:
+            // TODO: Construct VT escape sequences.
+        case actions::CopyFormat::PNG:
+            // TODO: Copy to clipboard as rendered PNG for the selected area.
+            errorlog()("CopySelection format {} is not yet supported.", copySelection.format);
+            return false;
+    }
     return true;
 }
 

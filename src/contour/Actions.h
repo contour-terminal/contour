@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include <crispy/assert.h>
+
 #include <fmt/format.h>
 
 #include <optional>
@@ -22,12 +24,28 @@
 namespace contour::actions
 {
 
+// Defines the format to use when extracting a selection range from the terminal.
+enum class CopyFormat
+{
+    // Copies purely the text (with their whitespaces, and newlines, but no formatting).
+    Text,
+
+    // Copies the selection in HTML format.
+    HTML,
+
+    // Copies the selection in escaped VT sequence format.
+    VT,
+
+    // Copies the selection as PNG image.
+    PNG,
+};
+
 // clang-format off
 struct CancelSelection{};
 struct ChangeProfile{ std::string name; };
 struct ClearHistoryAndReset{};
 struct CopyPreviousMarkRange{};
-struct CopySelection{};
+struct CopySelection{ CopyFormat format = CopyFormat::Text; };
 struct CreateDebugDump{};
 struct DecreaseFontSize{};
 struct DecreaseOpacity{};
@@ -255,6 +273,28 @@ struct formatter<contour::actions::Action>
         return fmt::format_to(ctx.out(), "UNKNOWN ACTION");
     }
 };
+template <>
+struct formatter<contour::actions::CopyFormat>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(contour::actions::CopyFormat value, FormatContext& ctx)
+    {
+        switch (value)
+        {
+            case contour::actions::CopyFormat::Text: return fmt::format_to(ctx.out(), "Text");
+            case contour::actions::CopyFormat::HTML: return fmt::format_to(ctx.out(), "HTML");
+            case contour::actions::CopyFormat::PNG: return fmt::format_to(ctx.out(), "PNG");
+            case contour::actions::CopyFormat::VT: return fmt::format_to(ctx.out(), "VT");
+        }
+        crispy::unreachable();
+    }
+};
+
 } // namespace fmt
 #undef HANDLE_ACTION
 // ]}}
