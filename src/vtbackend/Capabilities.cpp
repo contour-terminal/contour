@@ -363,7 +363,7 @@ namespace
         // {{{ Extensions originally introduced by tmux.
         //
         String { "Ss"_tcap, "Ss"sv, "\033[%p1%d q" }, // Set cursor style.
-        String { "Se"_tcap, "Ss"sv, "\033[ q" },      // Reset cursor style.
+        String { "Se"_tcap, "Se"sv, "\033[ q" },      // Reset cursor style.
 
         // Set cursor color.
         String { "Cs"_tcap, "Cs"sv, "\033]12;%p1%s\033\\"sv },
@@ -373,6 +373,7 @@ namespace
 
         // Enable overline SGR attribute.
         String { Undefined, "Smol"sv, "\033[53m"sv },
+        String { Undefined, "Rmol"sv, "\033[55m"sv },
 
         // Set styled underscore.
         String { Undefined, "Smulx"sv, "\033[4:%p1%dm"sv },
@@ -386,7 +387,11 @@ namespace
         // RGB for the ncurses direct-color extension.
         // Only a terminfo name is provided, since termcap applica-
         // tions cannot use this information
-        String { Undefined, "RGB"sv, "8/8/8"sv }
+        String { Undefined, "RGB"sv, "8/8/8"sv },
+
+        // Synchronized Output.
+        // Terminfo extension as introduced by tmux.
+        String { Undefined, "Sync"sv, "Sync=\033[?2026%?%p1%{1}%-%tl%eh"sv }
     ); // }}}
     // clang-format on
 } // namespace
