@@ -128,6 +128,7 @@ struct ColorPalette
     // clang-format on
 
     RGBColorPair indicatorStatusLine = { 0x000000_rgb, 0x808080_rgb };
+    RGBColorPair indicatorStatusLineInactive = { 0x000000_rgb, 0x808080_rgb };
 };
 
 enum class ColorTarget
