@@ -14,6 +14,8 @@
 #include <text_shaper/font.h>
 #include <text_shaper/fontconfig_locator.h>
 
+#include <crispy/assert.h>
+
 #include <range/v3/view/iota.hpp>
 
 #include <fontconfig/fontconfig.h>
@@ -47,39 +49,58 @@ namespace
         }
     }
 
+    auto static constexpr fontWeightMappings = std::array<std::pair<font_weight, int>, 12> { {
+        { font_weight::thin, FC_WEIGHT_THIN },
+        { font_weight::extra_light, FC_WEIGHT_EXTRALIGHT },
+        { font_weight::light, FC_WEIGHT_LIGHT },
+        { font_weight::demilight, FC_WEIGHT_DEMILIGHT },
+        { font_weight::book, FC_WEIGHT_BOOK },
+        { font_weight::normal, FC_WEIGHT_NORMAL },
+        { font_weight::medium, FC_WEIGHT_MEDIUM },
+        { font_weight::demibold, FC_WEIGHT_DEMIBOLD },
+        { font_weight::bold, FC_WEIGHT_BOLD },
+        { font_weight::extra_bold, FC_WEIGHT_EXTRABOLD },
+        { font_weight::black, FC_WEIGHT_BLACK },
+        { font_weight::extra_black, FC_WEIGHT_EXTRABLACK },
+    } };
+
+    // clang-format off
+    auto static constexpr fontSlantMappings = std::array<std::pair<font_slant, int>, 3>{ {
+        { font_slant::italic, FC_SLANT_ITALIC },
+        { font_slant::oblique, FC_SLANT_OBLIQUE },
+        { font_slant::normal, FC_SLANT_ROMAN }
+    } };
+    // clang-format on
+
+    constexpr optional<font_weight> fcToFontWeight(int value) noexcept
+    {
+        for (auto const& mapping: fontWeightMappings)
+            if (mapping.second == value)
+                return mapping.first;
+        return nullopt;
+    }
+
+    constexpr optional<font_slant> fcToFontSlant(int value) noexcept
+    {
+        for (auto const& mapping: fontSlantMappings)
+            if (mapping.second == value)
+                return mapping.first;
+        return nullopt;
+    }
+
     constexpr int fcWeight(font_weight _weight) noexcept
     {
-        switch (_weight)
-        {
-            case font_weight::thin: return FC_WEIGHT_THIN;
-            case font_weight::extra_light: return FC_WEIGHT_EXTRALIGHT;
-            case font_weight::light: return FC_WEIGHT_LIGHT;
-            case font_weight::demilight:
-#if defined(FC_WEIGHT_DEMILIGHT)
-                return FC_WEIGHT_DEMILIGHT;
-#else
-                return FC_WEIGHT_LIGHT; // Is this a good fallback? Maybe.
-#endif
-            case font_weight::book: return FC_WEIGHT_BOOK;
-            case font_weight::normal: return FC_WEIGHT_NORMAL;
-            case font_weight::medium: return FC_WEIGHT_MEDIUM;
-            case font_weight::demibold: return FC_WEIGHT_DEMIBOLD;
-            case font_weight::bold: return FC_WEIGHT_BOLD;
-            case font_weight::extra_bold: return FC_WEIGHT_EXTRABOLD;
-            case font_weight::black: return FC_WEIGHT_BLACK;
-            case font_weight::extra_black: return FC_WEIGHT_EXTRABLACK;
-        }
-        return FC_WEIGHT_NORMAL;
+        for (auto const& mapping: fontWeightMappings)
+            if (mapping.first == _weight)
+                return mapping.second;
+        crispy::fatal("Implementation error. font weight cannot be mapped.");
     }
 
     constexpr int fcSlant(font_slant _slant) noexcept
     {
-        switch (_slant)
-        {
-            case font_slant::italic: return FC_SLANT_ITALIC;
-            case font_slant::oblique: return FC_SLANT_OBLIQUE;
-            case font_slant::normal: return FC_SLANT_ROMAN;
-        }
+        for (auto const& mapping: fontSlantMappings)
+            if (mapping.first == _slant)
+                return mapping.second;
         return FC_SLANT_ROMAN;
     }
 
@@ -245,8 +266,26 @@ font_source_list fontconfig_locator::locate(font_description const& _fd)
             }
         }
 
-        output.emplace_back(font_path { string { (char const*) (file) } });
-        LocatorLog()("Font {} (spacing {}) in chain: {}", output.size(), spacing, (char const*) file);
+        int integerValue = -1;
+        optional<font_weight> weight = nullopt;
+        optional<font_slant> slant = nullopt;
+        int ttcIndex = -1;
+
+        if (FcPatternGetInteger(font, FC_INDEX, 0, &integerValue) == FcResultMatch && integerValue >= 0)
+            ttcIndex = integerValue;
+        if (FcPatternGetInteger(font, FC_WEIGHT, 0, &integerValue) == FcResultMatch)
+            weight = fcToFontWeight(integerValue);
+        if (FcPatternGetInteger(font, FC_SLANT, 0, &integerValue) == FcResultMatch)
+            slant = fcToFontSlant(integerValue);
+
+        output.emplace_back(font_path { string { (char const*) (file) }, ttcIndex, weight, slant });
+        LocatorLog()("Font {} (ttc index {}, weight {}, slant {}, spacing {}) in chain: {}",
+                     output.size(),
+                     ttcIndex,
+                     weight.has_value() ? fmt::format("{}", *weight) : "NONE",
+                     slant.has_value() ? fmt::format("{}", *slant) : "NONE",
+                     spacing,
+                     (char const*) file);
     }
 
 #if defined(_WIN32)

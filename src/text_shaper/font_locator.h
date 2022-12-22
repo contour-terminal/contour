@@ -32,6 +32,13 @@ namespace text
 struct font_path
 {
     std::string value;
+
+    // in case the font file this path points to is a collection file (e.g. TTC), then this index
+    // can be used to mandate which font within this TTC is to be used.
+    int collectionIndex = 0;
+
+    std::optional<font_weight> weight = std::nullopt;
+    std::optional<font_slant> slant = std::nullopt;
 };
 
 /// Holds a view into the contents of a font file.
@@ -90,9 +97,11 @@ struct formatter<text::font_path>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(text::font_path path, FormatContext& ctx)
+    auto format(text::font_path spec, FormatContext& ctx)
     {
-        return fmt::format_to(ctx.out(), "path {}", path.value);
+        auto weightMod = spec.weight ? fmt::format(" {}", spec.weight.value()) : "";
+        auto slantMod = spec.slant ? fmt::format(" {}", spec.slant.value()) : "";
+        return fmt::format_to(ctx.out(), "path {}{}{}", spec.value, weightMod, slantMod);
     }
 };
 
