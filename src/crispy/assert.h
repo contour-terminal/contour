@@ -13,6 +13,8 @@
  */
 #pragma once
 
+#include <crispy/logstore.h>
+
 #include <fmt/format.h>
 
 #include <exception>
@@ -92,6 +94,17 @@ inline void set_fail_handler(fail_handler_t _handler)
     fmt::print("TODO: We have reached some code that is missing an implementation.\n");
     if (!message.empty())
         fmt::print("{}\n", message);
+    std::abort();
+}
+
+[[noreturn]] inline void fatal(std::string_view message, logstore::source_location location = logstore::source_location::current())
+{
+    auto static FatalLog = logstore::Category("fatal", "Fatal error Logger", logstore::Category::State::Enabled);
+    fmt::print("TODO: We have reached some code that is missing an implementation.\n");
+    if (!message.empty())
+        FatalLog(location)("Fatal error. {}", message);
+    else
+        FatalLog(location)("Fatal error.");
     std::abort();
 }
 
