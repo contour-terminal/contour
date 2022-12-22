@@ -658,10 +658,15 @@ class Terminal
     Settings const& settings() const noexcept { return settings_; }
     Settings& settings() noexcept { return settings_; }
 
+    // Renders current visual terminal state to the render buffer.
+    //
+    // @param output target render buffer to write the current visual state to.
+    // @param _includeSelection boolean to indicate whether or not to include colorize selection.
+    void fillRenderBuffer(RenderBuffer& output, bool includeSelection); // <- acquires the lock
+
   private:
     void mainLoop();
-    void refreshRenderBuffer(RenderBuffer& _output); // <- acquires the lock
-    void refreshRenderBufferInternal(RenderBuffer& _output);
+    void fillRenderBufferInternal(RenderBuffer& _output, bool includeSelection);
     void updateIndicatorStatusLine();
     void updateCursorVisibilityState() const;
     bool updateCursorHoveringState();

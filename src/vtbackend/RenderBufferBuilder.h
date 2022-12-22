@@ -22,7 +22,8 @@ class RenderBufferBuilder
                         bool reverseVideo,
                         HighlightSearchMatches highlightSearchMatches,
                         InputMethodData inputMethodData,
-                        std::optional<CellLocation> theCursorPosition);
+                        std::optional<CellLocation> theCursorPosition,
+                        bool includeSelection);
 
     /// Renders a single grid cell.
     /// This call is guaranteed to be invoked sequencially, from top line
@@ -119,6 +120,7 @@ class RenderBufferBuilder
     bool reverseVideo;
     HighlightSearchMatches _highlightSearchMatches;
     InputMethodData _inputMethodData;
+    bool _includeSelection;
     ColumnCount _inputMethodSkipColumns = ColumnCount(0);
 
     int prevWidth = 0;

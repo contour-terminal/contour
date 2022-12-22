@@ -275,13 +275,21 @@ bool Terminal::ensureFreshRenderBuffer(bool _locked)
                 break;
             renderBuffer_.state = RenderBufferState::RefreshBuffersAndTrySwap;
             [[fallthrough]];
-        case RenderBufferState::RefreshBuffersAndTrySwap:
+        case RenderBufferState::RefreshBuffersAndTrySwap: {
+            auto& backBuffer = renderBuffer_.backBuffer();
+            auto const lastCursorPos = std::move(backBuffer.cursor);
             if (!_locked)
-                refreshRenderBuffer(renderBuffer_.backBuffer());
+                fillRenderBuffer(renderBuffer_.backBuffer(), true);
             else
-                refreshRenderBufferInternal(renderBuffer_.backBuffer());
+                fillRenderBufferInternal(renderBuffer_.backBuffer(), true);
+            auto const cursorChanged =
+                lastCursorPos.has_value() != backBuffer.cursor.has_value()
+                || (backBuffer.cursor.has_value() && backBuffer.cursor->position != lastCursorPos->position);
+            if (cursorChanged)
+                eventListener_.cursorPositionChanged();
             renderBuffer_.state = RenderBufferState::TrySwapBuffers;
             [[fallthrough]];
+        }
         case RenderBufferState::TrySwapBuffers: {
             [[maybe_unused]] auto const success = renderBuffer_.swapBuffers(currentTime_);
 
@@ -298,12 +306,6 @@ bool Terminal::ensureFreshRenderBuffer(bool _locked)
         break;
     }
     return true;
-}
-
-void Terminal::refreshRenderBuffer(RenderBuffer& _output)
-{
-    auto const _l = lock_guard { *this };
-    refreshRenderBufferInternal(_output);
 }
 
 PageSize Terminal::SelectionHelper::pageSize() const noexcept
@@ -368,12 +370,17 @@ void Terminal::updateInputMethodPreeditString(std::string preeditString)
     screenUpdated();
 }
 
-void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
+void Terminal::fillRenderBuffer(RenderBuffer& output, bool includeSelection)
+{
+    auto const _l = lock_guard { *this };
+    fillRenderBufferInternal(output, includeSelection);
+}
+
+void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelection)
 {
     verifyState();
 
-    auto const lastCursorPos = std::move(_output.cursor);
-    _output.clear();
+    output.clear();
 
     changes_.store(0);
     screenDirty_ = false;
@@ -398,23 +405,25 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
     if (isPrimaryScreen())
         _lastRenderPassHints =
             primaryScreen_.render(RenderBufferBuilder<PrimaryScreenCell> { *this,
-                                                                           _output,
+                                                                           output,
                                                                            LineOffset(0),
                                                                            mainDisplayReverseVideo,
                                                                            HighlightSearchMatches::Yes,
                                                                            inputMethodData_,
-                                                                           theCursorPosition },
+                                                                           theCursorPosition,
+                                                                           includeSelection },
                                   viewport_.scrollOffset(),
                                   highlightSearchMatches);
     else
         _lastRenderPassHints =
             alternateScreen_.render(RenderBufferBuilder<AlternateScreenCell> { *this,
-                                                                               _output,
+                                                                               output,
                                                                                LineOffset(0),
                                                                                mainDisplayReverseVideo,
                                                                                HighlightSearchMatches::Yes,
                                                                                inputMethodData_,
-                                                                               theCursorPosition },
+                                                                               theCursorPosition,
+                                                                               includeSelection },
                                     viewport_.scrollOffset(),
                                     highlightSearchMatches);
 
@@ -427,31 +436,27 @@ void Terminal::refreshRenderBufferInternal(RenderBuffer& _output)
             updateIndicatorStatusLine();
             indicatorStatusScreen_.render(
                 RenderBufferBuilder<StatusDisplayCell> { *this,
-                                                         _output,
+                                                         output,
                                                          pageSize().lines.as<LineOffset>(),
                                                          !mainDisplayReverseVideo,
                                                          HighlightSearchMatches::No,
                                                          InputMethodData {},
-                                                         nullopt },
+                                                         nullopt,
+                                                         includeSelection },
                 ScrollOffset(0));
             break;
         case StatusDisplayType::HostWritable:
             hostWritableStatusLineScreen_.render(
                 RenderBufferBuilder<StatusDisplayCell> { *this,
-                                                         _output,
+                                                         output,
                                                          pageSize().lines.as<LineOffset>(),
                                                          !mainDisplayReverseVideo,
                                                          HighlightSearchMatches::No,
                                                          InputMethodData {},
-                                                         nullopt },
+                                                         nullopt,
+                                                         includeSelection },
                 ScrollOffset(0));
             break;
-    }
-
-    if (lastCursorPos.has_value() != _output.cursor.has_value()
-        || (_output.cursor.has_value() && _output.cursor->position != lastCursorPos->position))
-    {
-        eventListener_.cursorPositionChanged();
     }
 }
 // }}}
