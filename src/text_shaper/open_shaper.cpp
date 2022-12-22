@@ -241,7 +241,7 @@ namespace
         if (holds_alternative<font_path>(_source))
         {
             auto const& sourcePath = get<font_path>(_source);
-            FT_Error ec = FT_New_Face(_ft, sourcePath.value.c_str(), 0, &ftFace);
+            FT_Error ec = FT_New_Face(_ft, sourcePath.value.c_str(), sourcePath.collectionIndex, &ftFace);
             if (!ftFace)
             {
                 // clang-format off
