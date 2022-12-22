@@ -31,6 +31,33 @@ using terminal::Modifier;
 using Buffer = terminal::InputGenerator::Sequence;
 using crispy::escape;
 
+TEST_CASE("InputGenerator.Modifier.encodings")
+{
+    // Ensures we can construct the correct values that are needed
+    // as parameters for input events in the VT protocol.
+
+    auto constexpr alt = Modifier(Modifier::Alt);
+    auto constexpr shift = Modifier(Modifier::Shift);
+    auto constexpr control = Modifier(Modifier::Control);
+    auto constexpr meta = Modifier(Modifier::Meta);
+
+    CHECK((1 + shift.value()) == 2);
+    CHECK((1 + alt.value()) == 3);
+    CHECK((1 + (shift | alt).value()) == 4);
+    CHECK((1 + control.value()) == 5);
+    CHECK((1 + (shift | control).value()) == 6);
+    CHECK((1 + (alt | control).value()) == 7);
+    CHECK((1 + (shift | alt | control).value()) == 8);
+    CHECK((1 + meta.value()) == 9);
+    CHECK((1 + (meta | shift).value()) == 10);
+    CHECK((1 + (meta | alt).value()) == 11);
+    CHECK((1 + (meta | alt | shift).value()) == 12);
+    CHECK((1 + (meta | control).value()) == 13);
+    CHECK((1 + (meta | control | shift).value()) == 14);
+    CHECK((1 + (meta | control | alt).value()) == 15);
+    CHECK((1 + (meta | control | alt | shift).value()) == 16);
+}
+
 TEST_CASE("InputGenerator.consume")
 {
     auto received = string {};

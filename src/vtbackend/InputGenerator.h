@@ -109,6 +109,11 @@ class Modifier
     unsigned mask_ = 0;
 };
 
+constexpr Modifier operator|(Modifier a, Modifier b) noexcept
+{
+    return Modifier(static_cast<Modifier::Key>(a.value() | b.value()));
+}
+
 constexpr bool operator<(Modifier _lhs, Modifier _rhs) noexcept
 {
     return _lhs.value() < _rhs.value();
