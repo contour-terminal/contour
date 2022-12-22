@@ -97,10 +97,12 @@ inline void set_fail_handler(fail_handler_t _handler)
     std::abort();
 }
 
-[[noreturn]] inline void fatal(std::string_view message, logstore::source_location location = logstore::source_location::current())
+[[noreturn]] inline void fatal(std::string_view message,
+                               logstore::source_location location = logstore::source_location::current())
 {
-    auto static FatalLog = logstore::Category("fatal", "Fatal error Logger", logstore::Category::State::Enabled);
-    fmt::print("TODO: We have reached some code that is missing an implementation.\n");
+    auto static FatalLog =
+        logstore::Category("fatal", "Fatal error Logger", logstore::Category::State::Enabled);
+
     if (!message.empty())
         FatalLog(location)("Fatal error. {}", message);
     else
