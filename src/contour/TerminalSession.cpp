@@ -705,14 +705,31 @@ bool TerminalSession::operator()(actions::CopyPreviousMarkRange)
 
 bool TerminalSession::operator()(actions::CopySelection copySelection)
 {
+    SessionLog()("Action is called");
     switch (copySelection.format)
     {
         case actions::CopyFormat::Text:
             // Copy the selection in pure text, plus whitespaces and newline.
+            SessionLog()("Text");
             copyToClipboard(terminal().extractSelectionText());
             break;
         case actions::CopyFormat::HTML:
+            SessionLog()("HTML");
+            copyToClipboard(terminal().extractSelectionTextAsHtml());
+            // I select some text in contour terminal and then i press ctrl H in keyboard (to override format in CopySelection)
+            // The following should happen:
+            // Loop through the selected cells of a grid. (Corresponding classes RenderCell with RenderAttributes???)
+            // Map the colour,font, from RenderAttributes or enum class CellFlags and construct the html
+
+            // I found the following in the kde terminal
+            // https://github.com/KDE/konsole/blob/master/src/decoders/HTMLDecoder.cpp
+            // https://github.com/KDE/konsole/blob/master/src/autotests/TerminalCharacterDecoderTest.cpp (see function TerminalCharacterDecoderTest::testHTMLDecoder_data() )
+            //
+            // monospace bold(enum class CellFlags ) 000000 ffffff are parameters (in our case properties are coming from the cell)
+            // <span style="font-family:monospace"><span style="font-weight:bold;color:#000000;background-color:#ffffff;">hello</span><br></span>
+            // I checked how the final output in the terminal would look like using https://html.onlineviewer.net/ the above will write hello in bold with white brackgournd
             // TODO: This requires walking through each selected cell and construct HTML+CSS for it.
+            break;
         case actions::CopyFormat::VT:
             // TODO: Construct VT escape sequences.
         case actions::CopyFormat::PNG:

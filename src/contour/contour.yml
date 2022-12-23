@@ -663,7 +663,8 @@ input_mapping:
     - { mods: [Control, Shift], key: N,             action: NewTerminal }
     - { mods: [Control, Shift], key: V,             action: PasteClipboard, strip: false }
     - { mods: [Control, Alt],   key: V,             action: PasteClipboard, strip: true }
-    - { mods: [Control],        key: C,             action: CopySelection, mode: 'Select|Insert' }
+    - { mods: [Control],        key: C,             action: CopySelection, mode: 'Select|Insert', format: "Text"}
+    - { mods: [Control],        key: H,             action: CopySelection, mode: 'Select|Insert', format: "Html"}
     - { mods: [Control],        key: C,             action: CancelSelection, mode: 'Select|Insert' }
     - { mods: [Control],        key: V,             action: PasteClipboard, strip: false, mode: 'Select|Insert' }
     - { mods: [Control],        key: V,             action: CancelSelection, mode: 'Select|Insert' }

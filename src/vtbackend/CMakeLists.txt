@@ -43,6 +43,7 @@ set(terminal_HEADERS
     Terminal.h
     VTType.h
     VTWriter.h
+    HtmlWriter.h
     Viewport.h
     ViInputHandler.h
     ViCommands.h
@@ -74,6 +75,7 @@ set(terminal_SOURCES
     TerminalState.cpp
     VTType.cpp
     VTWriter.cpp
+    HtmlWriter.cpp
     Viewport.cpp
     ViInputHandler.cpp
     ViCommands.cpp

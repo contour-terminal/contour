@@ -555,6 +555,7 @@ class Terminal
     // }}}
 
     [[nodiscard]] std::string extractSelectionText() const;
+    [[nodiscard]] std::string extractSelectionTextAsHtml() const;
     [[nodiscard]] std::string extractLastMarkRange() const;
 
     /// Tests whether or not the mouse is currently hovering a hyperlink.

@@ -1174,6 +1174,28 @@ string Terminal::extractSelectionText() const
     }
 }
 
+string Terminal::extractSelectionTextAsHtml() const
+{
+    auto const _lock = scoped_lock { *this };
+
+    if (!_selection)
+        return "";
+
+    if (isPrimaryScreen())
+    {
+        auto se = SelectionRenderer<PrimaryScreenCell> { *this, pageSize().columns.as<ColumnOffset>() - 1 };
+        terminal::renderSelection(*_selection, [&](CellLocation _pos) { se(_pos, _primaryScreen.at(_pos)); });
+        return se.finish();
+    }
+    else
+    {
+        auto se = SelectionRenderer<AlternateScreenCell> { *this, pageSize().columns.as<ColumnOffset>() - 1 };
+        terminal::renderSelection(*_selection,
+                                  [&](CellLocation _pos) { se(_pos, _alternateScreen.at(_pos)); });
+        return se.finish();
+    }
+}
+
 string Terminal::extractLastMarkRange() const
 {
     auto const _ = std::lock_guard { *this };
