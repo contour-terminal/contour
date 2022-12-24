@@ -83,7 +83,7 @@ jobs:
   fedora:
     strategy:
       matrix:
-        os_version: [35, 36]
+        os_version: [37, 36]
         arch:
           [
             "linux/amd64 x86_64"

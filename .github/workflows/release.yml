@@ -212,7 +212,7 @@ jobs:
   build_fedora:
     strategy:
       matrix:
-        os_version: [35, 36]
+        os_version: [36, 37]
         arch:
           [
             "linux/amd64 x86_64"
@@ -592,15 +592,15 @@ jobs:
           asset_name: contour_${{ steps.set_vars.outputs.version }}-archlinux_aarch64
           asset_content_type: application/x-zstd-compressed-tar
       # }}}
-      # {{{ Upload Fedora 35 packages
-      - name: Upload Fedora 35 package x86_64
+      # {{{ Upload Fedora 37 packages
+      - name: Upload Fedora 37 package x86_64
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: "./contour-${{ steps.set_vars.outputs.VERSION }}-1.fc35.x86_64.rpm"
-          asset_name: contour-${{ steps.set_vars.outputs.VERSION }}-1.fc35.x86_64.rpm
+          asset_path: "./contour-${{ steps.set_vars.outputs.VERSION }}-1.fc37.x86_64.rpm"
+          asset_name: contour-${{ steps.set_vars.outputs.VERSION }}-1.fc37.x86_64.rpm
           asset_content_type: application/x-rpm
 
       - name: Upload Fedora (debuginfo) package x86_64
@@ -609,8 +609,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: "./contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc35.x86_64.rpm"
-          asset_name: contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc35.x86_64.rpm
+          asset_path: "./contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc37.x86_64.rpm"
+          asset_name: contour-debuginfo-${{ steps.set_vars.outputs.VERSION }}-1.fc37.x86_64.rpm
           asset_content_type: application/x-rpm
 
       - name: Upload Fedora (debugsource) package x86_64
@@ -619,8 +619,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: "./contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc35.x86_64.rpm"
-          asset_name: contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc35.x86_64.rpm
+          asset_path: "./contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc37.x86_64.rpm"
+          asset_name: contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc37.x86_64.rpm
           asset_content_type: application/x-rpm
       # }}}
       # {{{ Fedora 36 packages
