@@ -41,10 +41,8 @@ echo "${VERSION_STRING}" >version.txt
 
 RELEASEBODY=$(xmllint --xpath '/component/releases/release[1]/description/ul/li' $metainfo_xml |
                     sed 's/<li>/ - /g' |
-                    sed 's,</li>,\n,g')
-RELEASEBODY="${RELEASEBODY//'%'/'%25'}"
+                    sed 's,</li>,,g')
 RELEASEBODY="${RELEASEBODY//\"/\\\"}"
-RELEASEBODY="${RELEASEBODY//$'\n'/$'\\n'}"
 RELEASEBODY="${RELEASEBODY//$'\r'/''}"
 
 echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
@@ -52,5 +50,7 @@ echo "VERSION_STRING=${VERSION_STRING}" >> "$GITHUB_OUTPUT"
 echo "RUN_ID=${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 echo "IS_PRERELEASE=${IS_PRE}" >> "$GITHUB_OUTPUT"
 echo "RELEASENAME_SUFFIX=${SUFFIX}" >> "$GITHUB_OUTPUT"
-echo "RELEASEBODY=\"${RELEASEBODY}\"" >> "$GITHUB_OUTPUT"
+
+echo "${RELEASEBODY}" >release-body.md
+echo "${RELEASEBODY}"
 
