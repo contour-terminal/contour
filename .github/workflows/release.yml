@@ -72,6 +72,7 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v3
         with:
+          version: "6.4.*"
           cached: ${{ steps.cache-qt.outputs.cache-hit }}
       - name: "create build directory"
         run: mkdir build
@@ -115,14 +116,14 @@ jobs:
           set -ex
           #brew update
           ./scripts/install-deps.sh
-          brew install qt5
+          brew install qt6 openssl
       - name: "Create build directory"
         run: mkdir build
       - name: "Generate build files"
         run: |
           cmake . \
                 -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-                -DQt5_DIR="$(brew --prefix qt5)/lib/cmake/Qt5" \
+                -DCONTOUR_BUILD_WITH_QT6=ON \
                 -B build/
       - name: "Build"
         run: cmake --build build/

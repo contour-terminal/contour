@@ -14,9 +14,12 @@ if(NOT(WIN32) AND NOT(APPLE) AND NOT(CONTOUR_BUILD_WITH_QT6))
     set(QtX11Extras X11Extras)
 endif()
 
+message(STATUS "Build contour using Qt 6: ${CONTOUR_BUILD_WITH_QT6}")
 if(CONTOUR_BUILD_WITH_QT6)
+    message(STATUS "this is with qt6")
     find_package(Qt6 COMPONENTS Core Gui Network OpenGL OpenGLWidgets Widgets Multimedia ${QtX11Extras} REQUIRED)
 else()
+    message(STATUS "this is with qt5")
     find_package(Qt5 COMPONENTS Gui Network Widgets Multimedia ${QtX11Extras} REQUIRED)  # apt install qtbase5-dev libqt5gui5
 endif()
 
