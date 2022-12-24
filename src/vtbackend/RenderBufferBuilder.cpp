@@ -117,14 +117,16 @@ RenderBufferBuilder<Cell>::RenderBufferBuilder(Terminal const& _terminal,
                                                bool theReverseVideo,
                                                HighlightSearchMatches highlightSearchMatches,
                                                InputMethodData inputMethodData,
-                                               optional<CellLocation> theCursorPosition):
+                                               optional<CellLocation> theCursorPosition,
+                                               bool includeSelection):
     output { _output },
     terminal { _terminal },
     cursorPosition { theCursorPosition },
     baseLine { base },
     reverseVideo { theReverseVideo },
     _highlightSearchMatches { highlightSearchMatches },
-    _inputMethodData { std::move(inputMethodData) }
+    _inputMethodData { std::move(inputMethodData) },
+    _includeSelection { includeSelection }
 {
     output.frameID = _terminal.lastFrameID();
 
@@ -256,7 +258,8 @@ RGBColorPair RenderBufferBuilder<Cell>::makeColorsForCell(CellLocation gridPosit
             && output.cursor->shape == CursorShape::Block;
     // clang-format on
 
-    auto const selected = terminal.isSelected(CellLocation { gridPosition.line, gridPosition.column });
+    auto const selected =
+        _includeSelection && terminal.isSelected(CellLocation { gridPosition.line, gridPosition.column });
     auto const highlighted = terminal.isHighlighted(CellLocation { gridPosition.line, gridPosition.column });
     auto const blink = terminal.blinkState();
     auto const rapidBlink = terminal.rapidBlinkState();
@@ -345,7 +348,7 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineB
     // We're not testing for cursor shape (which should be done in order to be 100% correct)
     // because it's not really draining performance.
     bool const canRenderViaSimpleLine =
-        !terminal.isSelected(lineOffset) && !gridLineContainsCursor(lineOffset);
+        (!terminal.isSelected(lineOffset) || !_includeSelection) && !gridLineContainsCursor(lineOffset);
 
     if (canRenderViaSimpleLine)
     {

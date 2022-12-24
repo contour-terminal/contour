@@ -88,7 +88,7 @@ namespace
         return nullopt;
     }
 
-    constexpr int fcWeight(font_weight _weight) noexcept
+    int fcWeight(font_weight _weight) noexcept
     {
         for (auto const& mapping: fontWeightMappings)
             if (mapping.first == _weight)

@@ -43,6 +43,8 @@
 #include <utility>
 #include <vector>
 
+#include "contour/Actions.h"
+
 #if defined(_WIN32)
     #include <Windows.h>
 #elif defined(__APPLE__)
@@ -874,6 +876,32 @@ namespace
             }
             else
                 return nullopt;
+        }
+
+        if (holds_alternative<actions::CopySelection>(action))
+        {
+            if (auto node = _parent["format"]; node && node.IsScalar())
+            {
+                _usedKeys.emplace(_prefix + ".format");
+                auto const formatString = toUpper(node.as<string>());
+                static auto constexpr mappings =
+                    std::array<std::pair<std::string_view, actions::CopyFormat>, 4> { {
+                        { "TEXT", actions::CopyFormat::Text },
+                        { "HTML", actions::CopyFormat::HTML },
+                        { "PNG", actions::CopyFormat::PNG },
+                        { "VT", actions::CopyFormat::VT },
+                    } };
+                if (auto const p = std::find_if(mappings.begin(),
+                                                mappings.end(),
+                                                [&](auto const& t) { return t.first == formatString; });
+                    p != mappings.end())
+                {
+                    return actions::CopySelection { p->second };
+                }
+                errorlog()("Invalid format '{}' in CopySelection action. Defaulting to 'text'.",
+                           node.as<string>());
+                return actions::CopySelection { actions::CopyFormat::Text };
+            }
         }
 
         if (holds_alternative<actions::PasteClipboard>(action))
