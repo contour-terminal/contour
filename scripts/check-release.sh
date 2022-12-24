@@ -20,6 +20,14 @@ release_date=`xmllint --xpath 'string(/component/releases/release[1]/@date)' $me
 release_type=`xmllint --xpath 'string(/component/releases/release[1]/@type)' $metainfo_xml`
 [[ "${release_type}" = "development" ]] && error "Release type must not be 'development'"
 
+# Ensure the release date points to today
+year=$(echo $release_date | cut -d- -f1)
+month=$(echo $release_date | cut -d- -f2)
+day=$(echo $release_date | cut -d- -f3)
+[[ "$year" = $(date +%Y) ]] || error "Release year does not match the current year ($day vs $(date +%Y)."
+[[ "$month" = $(date +%m) ]] || error "Release month does not match the current month ($day vs $(date +%m)."
+[[ "$day" = $(date +%d) ]] || error "Release day does not match the current day ($day vs $(date +%d)."
+
 if [[ $error_count -ne 0 ]]; then
     echo 1>&2 "Please fix them."
     exit 1
