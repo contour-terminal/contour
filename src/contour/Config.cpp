@@ -827,7 +827,7 @@ namespace
         auto actionOpt = actions::fromString(actionName);
         if (!actionOpt)
         {
-            cerr << "Unknown action: '" << _parent["action"].as<string>() << '\'' << endl;
+            errorlog()("Unknown action '{}'.", _parent["action"].as<string>());
             return nullopt;
         }
 
