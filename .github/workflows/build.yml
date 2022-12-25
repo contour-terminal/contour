@@ -207,60 +207,6 @@ jobs:
             ./build/src/vtbackend/terminal_test
             rm -rf _deps build
 
-  osx_qt5:
-    name: "OS/X (Qt5)"
-    runs-on: macos-11
-    steps:
-      - uses: actions/checkout@v3
-      - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: ccache-osx_qt5
-          max-size: 256M
-      - name: set variables
-        id: set_vars
-        run: ./scripts/ci-set-vars.sh
-        env:
-          REPOSITORY: ${{ github.event.repository.name }}
-      - name: "Install dependencies"
-        run: |
-          set -ex
-          #brew update
-          ./scripts/install-deps.sh
-          brew install qt5
-      - name: "Create build directory"
-        run: mkdir build
-      - name: "Generate build files"
-        run: |
-          cmake . \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DQt5_DIR="$(brew --prefix qt5)/lib/cmake/Qt5" \
-                -B build/
-      - name: "Build"
-        run: cmake --build build/
-      - name: "test: libcrispy"
-        run: ./build/src/crispy/crispy_test
-      - name: "test: vtparser"
-        run: ./build/src/vtparser/vtparser_test
-      - name: "test: libterminal"
-        run: ./build/src/vtbackend/terminal_test
-      - name: "Create Package(s)"
-        run: |
-          set -ex
-          cd build
-          sudo cpack -V
-          BASENAME="contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx"
-          echo "pwd: `pwd`:" && ls -hl
-          mv -vf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.zip" "../${BASENAME}.zip"
-          mv -vf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "../${BASENAME}.dmg"
-      - name: Upload to artifact store (DMG)
-        uses: actions/upload-artifact@v3
-        with:
-          name: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.dmg
-          path: contour-${{ steps.set_vars.outputs.version }}-${{ steps.set_vars.outputs.RUN_ID }}-osx.dmg
-          if-no-files-found: error
-          retention-days: 7
-
   osx_qt6:
     name: "OS/X (Qt6)"
     runs-on: macos-11
