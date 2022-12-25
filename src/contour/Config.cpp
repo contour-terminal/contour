@@ -1662,12 +1662,12 @@ FileSystem::path configHome(string const& _programName)
 #endif
 
 #if defined(_WIN32)
-    DWORD size = GetEnvironmentVariable("LOCALAPPDATA", nullptr, 0);
+    DWORD size = GetEnvironmentVariableA("LOCALAPPDATA", nullptr, 0);
     if (size)
     {
         std::vector<char> buf;
         buf.resize(size);
-        GetEnvironmentVariable("LOCALAPPDATA", &buf[0], size);
+        GetEnvironmentVariableA("LOCALAPPDATA", &buf[0], size);
         return FileSystem::path { &buf[0] } / _programName;
     }
 #endif
