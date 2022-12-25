@@ -1310,6 +1310,8 @@ namespace
         tryLoadChildRelative(_usedKeys, _profile, basePath, "initial_working_directory", strValue);
         if (strValue.empty())
             profile.shell.workingDirectory = FileSystem::current_path();
+        else
+            profile.shell.workingDirectory = FileSystem::path(strValue);
 
         profile.shell.workingDirectory =
             homeResolvedPath(profile.shell.workingDirectory.generic_string(), Process::homeDirectory());

@@ -106,7 +106,7 @@
     <release version="0.3.10" urgency="medium" type="development">
       <description>
         <ul>
-          <li> ... </li>
+          <li>Fixes `initial_working_directory` setting being ignored.</li>
         </ul>
       </description>
     </release>
