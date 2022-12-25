@@ -107,6 +107,7 @@
       <description>
         <ul>
           <li>Fixes `initial_working_directory` setting being ignored.</li>
+          <li>Fixes linefeed not inheriting graphics attributes when scrolling up to create a new line (#945).</li>
         </ul>
       </description>
     </release>
