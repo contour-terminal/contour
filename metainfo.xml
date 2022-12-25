@@ -106,7 +106,8 @@
     <release version="0.3.10" urgency="medium" type="development">
       <description>
         <ul>
-          <li>The linefeed will scroll up to new line with graphics attributes applied from cursor (#945).</li>
+          <li>Fixes `initial_working_directory` setting being ignored.</li>
+          <li>Fixes linefeed not inheriting graphics attributes when scrolling up to create a new line (#945).</li>
         </ul>
       </description>
     </release>
