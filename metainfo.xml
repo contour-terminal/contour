@@ -106,7 +106,7 @@
     <release version="0.3.10" urgency="medium" type="development">
       <description>
         <ul>
-          <li>Fixes `initial_working_directory` setting being ignored.</li>
+          <li>Fixes `initial_working_directory` setting being ignored (#946).</li>
           <li>Fixes linefeed not inheriting graphics attributes when scrolling up to create a new line (#945).</li>
         </ul>
       </description>
