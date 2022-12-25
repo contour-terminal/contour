@@ -663,7 +663,7 @@ void Screen<Cell>::linefeed(ColumnOffset _newColumn)
         // and make sure the subsequent text write will
         // possibly also reset remaining grid cells in that line
         // if the incoming text did not write to the full line
-        scrollUp(LineCount(1), {}, margin());
+        scrollUp(LineCount(1), _state.cursor.graphicsRendition, margin());
     }
     else
     {
