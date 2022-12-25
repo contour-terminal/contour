@@ -73,11 +73,12 @@ jobs:
         uses: jurplel/install-qt-action@v3
         with:
           version: "6.4.*"
+          modules: qtmultimedia
           cached: ${{ steps.cache-qt.outputs.cache-hit }}
       - name: "create build directory"
         run: mkdir build
       - name: "Generate build files"
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17 -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=OFF -DLIBUNICODE_TESTING=OFF -B build .
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DCONTOUR_BUILD_WITH_QT6=ON -DCMAKE_CXX_STANDARD=17 -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=OFF -DLIBUNICODE_TESTING=OFF -B build .
       - name: "Build"
         run: cmake --build build/ --config Release
       - name: "Create Package(s)"
