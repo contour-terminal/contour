@@ -30,8 +30,6 @@ TerminalState::TerminalState(Terminal& _terminal):
     } },
     statusDisplayType { StatusDisplayType::None },
     activeStatusDisplay { ActiveStatusDisplay::Main },
-    cursor {},
-    lastCursorPosition {},
     hyperlinks { HyperlinkCache { 1024 } },
     sequencer { _terminal },
     parser { std::ref(sequencer) },

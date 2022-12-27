@@ -140,7 +140,7 @@ void ViCommands::modeChanged(ViMode mode)
             terminal.setMode(DECMode::VisibleCursor, true);
 
             if (lastMode == ViMode::Insert)
-                cursorPosition = terminal.realCursorPosition();
+                cursorPosition = terminal.currentScreen().cursor().position;
             if (terminal.selectionAvailable())
                 terminal.clearSelection();
             terminal.pushStatusDisplay(StatusDisplayType::Indicator);

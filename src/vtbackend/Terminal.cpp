@@ -396,11 +396,12 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
     auto const highlightSearchMatches =
         state_.searchMode.pattern.empty() ? HighlightSearchMatches::No : HighlightSearchMatches::Yes;
 
-    auto const theCursorPosition = optional<CellLocation> {
-        inputHandler().mode() == ViMode::Insert ? (
-            isModeEnabled(DECMode::VisibleCursor) ? optional<CellLocation> { realCursorPosition() } : nullopt)
-                                                : state().viCommands.cursorPosition
-    };
+    auto const theCursorPosition =
+        optional<CellLocation> { inputHandler().mode() == ViMode::Insert
+                                     ? (isModeEnabled(DECMode::VisibleCursor)
+                                            ? optional<CellLocation> { currentScreen().cursor().position }
+                                            : nullopt)
+                                     : state().viCommands.cursorPosition };
 
     if (isPrimaryScreen())
         _lastRenderPassHints =
@@ -467,7 +468,6 @@ void Terminal::updateIndicatorStatusLine()
 
     auto& savedActiveDisplay = currentScreen_.get();
     auto const savedActiveStatusDisplay = state_.activeStatusDisplay;
-    auto savedCursor = state_.cursor;
 
     auto const colors =
         state_.focused ? colorPalette().indicatorStatusLine : colorPalette().indicatorStatusLineInactive;
@@ -476,10 +476,10 @@ void Terminal::updateIndicatorStatusLine()
     state_.activeStatusDisplay = ActiveStatusDisplay::StatusLine;
 
     // Prepare old status line's cursor position and some other flags.
-    state_.cursor = {};
+    indicatorStatusScreen_.cursor() = {};
     indicatorStatusScreen_.updateCursorIterator();
-    state_.cursor.graphicsRendition.foregroundColor = colors.foreground;
-    state_.cursor.graphicsRendition.backgroundColor = colors.background;
+    indicatorStatusScreen_.cursor().graphicsRendition.foregroundColor = colors.foreground;
+    indicatorStatusScreen_.cursor().graphicsRendition.backgroundColor = colors.background;
 
     // Run status-line update.
     // We cannot use VT writing here, because we shall not interfere with the application's VT state.
@@ -494,11 +494,11 @@ void Terminal::updateIndicatorStatusLine()
 
     if (!allowInput())
     {
-        state_.cursor.graphicsRendition.foregroundColor = BrightColor::Red;
-        state_.cursor.graphicsRendition.flags |= CellFlags::Bold;
+        indicatorStatusScreen_.cursor().graphicsRendition.foregroundColor = BrightColor::Red;
+        indicatorStatusScreen_.cursor().graphicsRendition.flags |= CellFlags::Bold;
         indicatorStatusScreen_.writeTextFromExternal(" (PROTECTED)");
-        state_.cursor.graphicsRendition.foregroundColor = DefaultColor();
-        state_.cursor.graphicsRendition.flags &= ~CellFlags::Bold;
+        indicatorStatusScreen_.cursor().graphicsRendition.foregroundColor = DefaultColor();
+        indicatorStatusScreen_.cursor().graphicsRendition.flags &= ~CellFlags::Bold;
     }
 
     // TODO: Disabled for now, but generally I want that functionality, but configurable somehow.
@@ -506,7 +506,7 @@ void Terminal::updateIndicatorStatusLine()
     if (indicatorLineShowCodepoints)
     {
         auto const cursorPosition = state_.inputHandler.mode() == ViMode::Insert
-                                        ? state_.cursor.position
+                                        ? indicatorStatusScreen_.cursor().position
                                         : state_.viCommands.cursorPosition;
         auto const text =
             codepointText(isPrimaryScreen() ? primaryScreen_.useCellAt(cursorPosition).codepoints()
@@ -532,24 +532,21 @@ void Terminal::updateIndicatorStatusLine()
         rightString += " │ ";
     rightString += fmt::format("{:%H:%M} ", fmt::localtime(std::chrono::system_clock::now()));
 
-    auto const columnsAvailable =
-        indicatorStatusScreen_.pageSize().columns.as<int>() - state_.cursor.position.column.as<int>();
+    auto const columnsAvailable = indicatorStatusScreen_.pageSize().columns.as<int>()
+                                  - indicatorStatusScreen_.cursor().position.column.as<int>();
     if (rightString.size() <= static_cast<size_t>(columnsAvailable))
     {
-        state_.cursor.position.column = ColumnOffset::cast_from(indicatorStatusScreen_.pageSize().columns)
-                                        - ColumnOffset::cast_from(rightString.size()) - ColumnOffset(1);
+        indicatorStatusScreen_.cursor().position.column =
+            ColumnOffset::cast_from(indicatorStatusScreen_.pageSize().columns)
+            - ColumnOffset::cast_from(rightString.size()) - ColumnOffset(1);
         indicatorStatusScreen_.updateCursorIterator();
 
         indicatorStatusScreen_.writeTextFromExternal(rightString);
     }
 
     // Cleaning up.
-    currentScreen_ = savedActiveDisplay;
     state_.activeStatusDisplay = savedActiveStatusDisplay;
-    // restoreCursor(savedCursor);
-    state_.cursor = savedCursor;
-    state_.cursor.position = clampCoordinate(savedCursor.position);
-    currentScreen_.get().updateCursorIterator();
+    currentScreen_ = savedActiveDisplay;
     verifyState();
 }
 
@@ -1042,20 +1039,7 @@ void Terminal::verifyState()
     Require(hostWritableStatusLineScreen_.grid().pageSize().columns == settings_.pageSize.columns);
     Require(indicatorStatusScreen_.grid().pageSize().columns == settings_.pageSize.columns);
 
-    Require(*state_.cursor.position.column < *settings_.pageSize.columns);
-    Require(*state_.cursor.position.line < *settings_.pageSize.lines);
-
     Require(state_.tabs.empty() || state_.tabs.back() < unbox<ColumnOffset>(settings_.pageSize.columns));
-
-    // verify cursor positions
-    [[maybe_unused]] auto const clampedCursorPos = clampToScreen(state_.cursor.position);
-    if (state_.cursor.position != clampedCursorPos)
-    {
-        auto const errorMessage =
-            fmt::format("Cursor {} does not match clamp to screen {}.", state_.cursor, clampedCursorPos);
-        currentScreen_.get().fail(errorMessage);
-        // FIXME: the above triggers on tmux vertical screen split (cursor.column off-by-one)
-    }
 
     currentScreen_.get().verifyState();
 #endif
@@ -1141,7 +1125,8 @@ string Terminal::extractLastMarkRange() const
     auto const _l = std::lock_guard { *this };
 
     // -1 because we always want to start extracting one line above the cursor by default.
-    auto const bottomLine = state_.cursor.position.line + LineOffset(-1) + settings_.copyLastMarkRangeOffset;
+    auto const bottomLine =
+        currentScreen_.get().cursor().position.line + LineOffset(-1) + settings_.copyLastMarkRangeOffset;
 
     auto const marker1 = optional { bottomLine };
 
@@ -1350,7 +1335,7 @@ void Terminal::setMode(DECMode _mode, bool _enable)
 
     switch (_mode)
     {
-        case DECMode::AutoWrap: state_.cursor.autoWrap = _enable; break;
+        case DECMode::AutoWrap: currentScreen_.get().cursor().autoWrap = _enable; break;
         case DECMode::LeftRightMargin:
             // Resetting DECLRMM also resets the horizontal margins back to screen size.
             if (!_enable)
@@ -1358,7 +1343,7 @@ void Terminal::setMode(DECMode _mode, bool _enable)
                     Margin::Horizontal { ColumnOffset(0),
                                          boxed_cast<ColumnOffset>(settings_.pageSize.columns - 1) };
             break;
-        case DECMode::Origin: state_.cursor.originMode = _enable; break;
+        case DECMode::Origin: currentScreen_.get().cursor().originMode = _enable; break;
         case DECMode::Columns132:
             if (!isModeEnabled(DECMode::AllowColumns80to132))
                 break;
@@ -1382,7 +1367,7 @@ void Terminal::setMode(DECMode _mode, bool _enable)
             {
                 // Enabling reflow enables every line in the main page area.
                 // Disabling reflow only affects currently line and below.
-                auto const startLine = _enable ? LineOffset(0) : realCursorPosition().line;
+                auto const startLine = _enable ? LineOffset(0) : currentScreen().cursor().position.line;
                 for (auto line = startLine; line < boxed_cast<LineOffset>(settings_.pageSize.lines); ++line)
                     primaryScreen_.grid().lineAt(line).setWrappable(_enable);
             }
@@ -1453,21 +1438,21 @@ void Terminal::setMode(DECMode _mode, bool _enable)
             break;
         case DECMode::SaveCursor:
             if (_enable)
-                saveCursor();
+                currentScreen_.get().saveCursor();
             else
-                restoreCursor();
+                currentScreen_.get().restoreCursor();
             break;
         case DECMode::ExtendedAltScreen:
             if (_enable)
             {
-                state_.savedPrimaryCursor = cursor();
                 setMode(DECMode::UseAlternateScreen, true);
                 clearScreen();
             }
             else
             {
                 setMode(DECMode::UseAlternateScreen, false);
-                restoreCursor(state_.savedPrimaryCursor);
+                // NB: The cursor position doesn't need to be restored,
+                // because it's local to the screen buffer.
             }
             break;
         default: break;
@@ -1519,36 +1504,13 @@ void Terminal::moveCursorTo(LineOffset _line, ColumnOffset _column)
     currentScreen_.get().moveCursorTo(_line, _column);
 }
 
-void Terminal::saveCursor()
-{
-    // https://vt100.net/docs/vt510-rm/DECSC.html
-    state_.savedCursor = state_.cursor;
-}
-
-void Terminal::restoreCursor()
-{
-    // https://vt100.net/docs/vt510-rm/DECRC.html
-    restoreCursor(state_.savedCursor);
-
-    setMode(DECMode::AutoWrap, state_.savedCursor.autoWrap);
-    setMode(DECMode::Origin, state_.savedCursor.originMode);
-}
-
-void Terminal::restoreCursor(Cursor const& _savedCursor)
-{
-    state_.cursor = _savedCursor;
-    state_.cursor.position = clampCoordinate(_savedCursor.position);
-    currentScreen().updateCursorIterator();
-    verifyState();
-}
-
 void Terminal::softReset()
 {
     // https://vt100.net/docs/vt510-rm/DECSTR.html
     setMode(DECMode::BatchedRendering, false);
     setMode(DECMode::TextReflow, settings_.primaryScreen.allowReflowOnResize);
     setGraphicsRendition(GraphicsRendition::Reset);    // SGR
-    state_.savedCursor.position = {};                  // DECSC (Save cursor state)
+    currentScreen_.get().resetSavedCursorState();      // DECSC (Save cursor state)
     setMode(DECMode::VisibleCursor, true);             // DECTCEM (Text cursor enable)
     setMode(DECMode::Origin, false);                   // DECOM
     setMode(AnsiMode::KeyboardAction, false);          // KAM
@@ -1558,7 +1520,7 @@ void Terminal::softReset()
     setTopBottomMargin({}, boxed_cast<LineOffset>(settings_.pageSize.lines) - LineOffset(1));       // DECSTBM
     setLeftRightMargin({}, boxed_cast<ColumnOffset>(settings_.pageSize.columns) - ColumnOffset(1)); // DECRLM
 
-    state_.cursor.hyperlink = {};
+    currentScreen_.get().cursor().hyperlink = {};
     state_.colorPalette = state_.defaultColorPalette;
 
     setActiveStatusDisplay(ActiveStatusDisplay::Main);
@@ -1577,25 +1539,25 @@ void Terminal::softReset()
 void Terminal::setGraphicsRendition(GraphicsRendition _rendition)
 {
     if (_rendition == GraphicsRendition::Reset)
-        state_.cursor.graphicsRendition = {};
+        currentScreen_.get().cursor().graphicsRendition = {};
     else
-        state_.cursor.graphicsRendition.flags =
-            CellUtil::makeCellFlags(_rendition, state_.cursor.graphicsRendition.flags);
+        currentScreen_.get().cursor().graphicsRendition.flags =
+            CellUtil::makeCellFlags(_rendition, currentScreen_.get().cursor().graphicsRendition.flags);
 }
 
 void Terminal::setForegroundColor(Color _color)
 {
-    state_.cursor.graphicsRendition.foregroundColor = _color;
+    currentScreen_.get().cursor().graphicsRendition.foregroundColor = _color;
 }
 
 void Terminal::setBackgroundColor(Color _color)
 {
-    state_.cursor.graphicsRendition.backgroundColor = _color;
+    currentScreen_.get().cursor().graphicsRendition.backgroundColor = _color;
 }
 
 void Terminal::setUnderlineColor(Color _color)
 {
-    state_.cursor.graphicsRendition.underlineColor = _color;
+    currentScreen_.get().cursor().graphicsRendition.underlineColor = _color;
 }
 
 void Terminal::hardReset()
@@ -1613,18 +1575,12 @@ void Terminal::hardReset()
     setMode(DECMode::SixelCursorNextToGraphic, true);
     setMode(DECMode::VisibleCursor, true);
 
-    primaryScreen_.grid().reset();
-    alternateScreen_.grid().reset();
-    hostWritableStatusLineScreen_.grid().reset();
-    indicatorStatusScreen_.grid().reset();
+    primaryScreen_.hardReset();
+    alternateScreen_.hardReset();
+    hostWritableStatusLineScreen_.hardReset();
+    indicatorStatusScreen_.hardReset();
 
     state_.imagePool.clear();
-
-    state_.cursor = {};
-    primaryScreen_.updateCursorIterator();
-
-    state_.lastCursorPosition = {};
-
     state_.tabs.clear();
 
     state_.colorPalette = state_.defaultColorPalette;
@@ -1696,12 +1652,6 @@ void Terminal::setScreen(ScreenType _type)
 
     state_.screenType = _type;
 
-    // Reset wrapPending-flag when switching buffer.
-    state_.cursor.wrapPending = false;
-
-    // Reset last-cursor position.
-    state_.lastCursorPosition = state_.cursor.position;
-
     // Ensure correct screen buffer size for the buffer we've just switched to.
     applyPageSizeToCurrentBuffer();
 
@@ -1715,51 +1665,31 @@ void Terminal::applyPageSizeToCurrentBuffer()
 
 void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
 {
-    auto cursorPosition = state_.cursor.position;
-
     auto const statusLineHeight = LineCount(1);
     auto const mainDisplayPageSize = state_.statusDisplayType == StatusDisplayType::None
                                          ? settings_.pageSize
                                          : settings_.pageSize - statusLineHeight;
 
-    // Ensure correct screen buffer size for the buffer we've just switched to.
-    cursorPosition =
-        screenType == ScreenType::Primary
-            ? primaryScreen_.grid().resize(mainDisplayPageSize, cursorPosition, state_.cursor.wrapPending)
-            : alternateScreen_.grid().resize(mainDisplayPageSize, cursorPosition, state_.cursor.wrapPending);
-    cursorPosition = clampCoordinate(cursorPosition);
-
-    auto const margin =
-        Margin { Margin::Vertical { {}, mainDisplayPageSize.lines.as<LineOffset>() - 1 },
-                 Margin::Horizontal { {}, mainDisplayPageSize.columns.as<ColumnOffset>() - 1 } };
-
-    ScreenBase& targetScreen = screenForType(screenType);
-    targetScreen.margin() = margin;
-
     // clang-format off
+    switch (screenType)
+    {
+        case ScreenType::Primary:
+            primaryScreen_.applyPageSizeToMainDisplay(mainDisplayPageSize);
+            break;
+        case ScreenType::Alternate:
+            alternateScreen_.applyPageSizeToMainDisplay(mainDisplayPageSize);
+            break;
+    }
+
     (void) hostWritableStatusLineScreen_.grid().resize(PageSize { LineCount(1), settings_.pageSize.columns }, CellLocation {}, false);
     (void) indicatorStatusScreen_.grid().resize(PageSize { LineCount(1), settings_.pageSize.columns }, CellLocation {}, false);
     // clang-format on
-
-    if (state_.cursor.position.column < boxed_cast<ColumnOffset>(settings_.pageSize.columns))
-        state_.cursor.wrapPending = false;
-
-    // update (last-)cursor position
-    state_.cursor.position = cursorPosition;
-    state_.lastCursorPosition = cursorPosition;
-    targetScreen.updateCursorIterator();
 
     // truncating tabs
     while (!state_.tabs.empty() && state_.tabs.back() >= unbox<ColumnOffset>(settings_.pageSize.columns))
         state_.tabs.pop_back();
 
-        // TODO: find out what to do with DECOM mode. Reset it to?
-#if 0
-    inspect("after resize", std::cout);
-    fmt::print("applyPageSizeToCurrentBuffer: cursor pos before: {} after: {}\n", oldCursorPos, state_.cursor.position);
-#endif
-
-    verifyState();
+    // verifyState();
 }
 
 void Terminal::discardImage(Image const& _image)
@@ -1867,31 +1797,25 @@ void Terminal::setActiveStatusDisplay(ActiveStatusDisplay activeDisplay)
 
     state_.activeStatusDisplay = activeDisplay;
 
+    // clang-format off
     switch (activeDisplay)
     {
         case ActiveStatusDisplay::Main:
             switch (state_.screenType)
             {
-                case ScreenType::Primary: currentScreen_ = primaryScreen_; break;
-                case ScreenType::Alternate: currentScreen_ = alternateScreen_; break;
+                case ScreenType::Primary:
+                    currentScreen_ = primaryScreen_;
+                    break;
+                case ScreenType::Alternate:
+                    currentScreen_ = alternateScreen_;
+                    break;
             }
-            restoreCursor(state_.savedCursorStatusLine);
             break;
-        case ActiveStatusDisplay::StatusLine: {
+        case ActiveStatusDisplay::StatusLine:
             currentScreen_ = hostWritableStatusLineScreen_;
-            // Prepare old status line's cursor position and some other flags.
-            auto cursor = state_.cursor;
-            cursor.position = state_.savedCursorStatusLine.position;
-            cursor.originMode = false;
-
-            // Backup current cursor state.
-            state_.savedCursorStatusLine = state_.cursor;
-
-            // Activate cursor.
-            restoreCursor(cursor);
             break;
-        }
     }
+    // clang-format on
 }
 
 void Terminal::pushStatusDisplay(StatusDisplayType type)

@@ -313,7 +313,7 @@ RenderLine RenderBufferBuilder<Cell>::createRenderLine(TrivialLineBuffer const& 
 template <typename Cell>
 bool RenderBufferBuilder<Cell>::gridLineContainsCursor(LineOffset lineOffset) const noexcept
 {
-    if (terminal.state().cursor.position.line == lineOffset)
+    if (terminal.currentScreen().cursor().position.line == lineOffset)
         return true;
 
     if (cursorPosition && terminal.state().inputHandler.mode() != ViMode::Insert)

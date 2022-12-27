@@ -161,14 +161,6 @@ struct TerminalState
 
     Search searchMode;
 
-    // cursor related
-    //
-    Cursor cursor;
-    Cursor savedCursor;
-    Cursor savedPrimaryCursor;    //!< Saved cursor of primary-screen when switching to alt-screen.
-    Cursor savedCursorStatusLine; //!< Saved cursor of the status line if not active, the other way around.
-    CellLocation lastCursorPosition;
-
     CursorDisplay cursorDisplay = CursorDisplay::Steady;
     CursorShape cursorShape = CursorShape::Block;
 
