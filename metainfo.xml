@@ -108,6 +108,7 @@
         <ul>
           <li>Fixes `initial_working_directory` setting being ignored (#946).</li>
           <li>Fixes background image being accidentally inverted (Bug introduced in 0.3.3.204).</li>
+          <li>Fixes crash in some corner cases of too small fonts (#949).</li>
           <li>Fixes linefeed not inheriting graphics attributes when scrolling up to create a new line (#945).</li>
         </ul>
       </description>
