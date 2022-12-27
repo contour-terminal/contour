@@ -137,6 +137,48 @@ enum class C1_8bit
     APC = 0x9F,  //!< Application Program Command
 };
 
+constexpr std::string_view to_short_string(C0 code)
+{
+    switch (code)
+    {
+        case C0::NUL: return "NUL";
+        case C0::SOH: return "SOH";
+        case C0::STX: return "STX";
+        case C0::ETX: return "ETX";
+        case C0::EOT: return "EOT";
+        case C0::ENQ: return "ENQ";
+        case C0::ACK: return "ACK";
+        case C0::BEL: return "BEL";
+        case C0::BS: return "BS";
+        case C0::HT: return "HT";
+        case C0::LF: return "LF";
+        case C0::VT: return "VT";
+        case C0::FF: return "FF";
+        case C0::CR: return "CR";
+        case C0::SO: return "SO";
+        case C0::SI: return "SI";
+        case C0::DLE: return "DLE";
+        case C0::DC1: return "DC1";
+        case C0::DC2: return "DC2";
+        case C0::DC3: return "DC3";
+        case C0::DC4: return "DC4";
+        case C0::NAK: return "NAK";
+        case C0::SYN: return "SYN";
+        case C0::ETB: return "ETB";
+        case C0::CAN: return "CAN";
+        case C0::EM: return "EM";
+        case C0::SUB: return "SUB";
+        case C0::ESC: return "ESC";
+        case C0::FS: return "FS";
+        case C0::GS: return "GS";
+        case C0::RS: return "RS";
+        case C0::US: return "US";
+        case C0::SP: return "SP";
+        case C0::DEL: return "DEL";
+        default: return "?";
+    }
+}
+
 constexpr std::string_view to_string(C0 code)
 {
     switch (code)

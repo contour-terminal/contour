@@ -541,8 +541,10 @@ void Screen<Cell>::writeCharToCurrentAndAdvance(char32_t _character) noexcept
         cell.reset();
 #endif
 
-    cell.write(
-        _cursor.graphicsRendition, _character, (uint8_t) unicode::width(_character), _cursor.hyperlink);
+    cell.write(_cursor.graphicsRendition,
+               _character,
+               static_cast<uint8_t>(unicode::width(_character)),
+               _cursor.hyperlink);
 
     _lastCursorPosition = _cursor.position;
 
@@ -2068,6 +2070,7 @@ void Screen<Cell>::requestStatusString(RequestStatusString _value)
                 {
                     case ActiveStatusDisplay::Main: return "0$}";
                     case ActiveStatusDisplay::StatusLine: return "1$}";
+                    case ActiveStatusDisplay::IndicatorStatusLine: return "2$}"; // XXX This is not standard
                 }
                 break;
             case RequestStatusString::DECSSDT:

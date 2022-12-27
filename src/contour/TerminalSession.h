@@ -13,6 +13,7 @@
  */
 #pragma once
 
+#include <contour/Actions.h>
 #include <contour/Audio.h>
 #include <contour/Config.h>
 
@@ -169,6 +170,10 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     bool operator()(actions::ToggleInputProtection);
     bool operator()(actions::ToggleStatusLine);
     bool operator()(actions::ToggleTitleBar);
+    bool operator()(actions::TraceBreakAtEmptyQueue);
+    bool operator()(actions::TraceEnter);
+    bool operator()(actions::TraceLeave);
+    bool operator()(actions::TraceStep);
     bool operator()(actions::ViNormalMode);
     bool operator()(actions::WriteScreen const& _event);
 

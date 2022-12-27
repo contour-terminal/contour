@@ -576,6 +576,8 @@ enum class ActiveStatusDisplay
 
     // Selects the host-writable status line. The terminal sends data to the status line only.
     StatusLine,
+
+    IndicatorStatusLine,
 };
 
 enum class AnsiMode

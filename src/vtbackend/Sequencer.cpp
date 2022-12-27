@@ -44,7 +44,7 @@ void Sequencer::error(std::string_view _errorString)
 void Sequencer::print(char32_t codepoint)
 {
     terminal_.state().instructionCounter++;
-    terminal_.activeDisplay().writeText(codepoint);
+    terminal_.sequenceHandler().writeText(codepoint);
 }
 
 size_t Sequencer::print(string_view _chars, size_t cellCount)
@@ -52,7 +52,7 @@ size_t Sequencer::print(string_view _chars, size_t cellCount)
     assert(_chars.size() != 0);
 
     terminal_.state().instructionCounter += _chars.size();
-    terminal_.activeDisplay().writeText(_chars, cellCount);
+    terminal_.sequenceHandler().writeText(_chars, cellCount);
 
     return terminal_.settings().pageSize.columns.as<size_t>()
            - terminal_.currentScreen().cursor().position.column.as<size_t>();
@@ -60,7 +60,7 @@ size_t Sequencer::print(string_view _chars, size_t cellCount)
 
 void Sequencer::execute(char controlCode)
 {
-    terminal_.activeDisplay().executeControlCode(controlCode);
+    terminal_.sequenceHandler().executeControlCode(controlCode);
 }
 
 void Sequencer::collect(char _char)
@@ -167,7 +167,7 @@ size_t Sequencer::maxBulkTextSequenceWidth() const noexcept
 void Sequencer::handleSequence()
 {
     parameterBuilder_.fixiate();
-    terminal_.activeDisplay().processSequence(sequence_);
+    terminal_.sequenceHandler().processSequence(sequence_);
 }
 
 } // namespace terminal

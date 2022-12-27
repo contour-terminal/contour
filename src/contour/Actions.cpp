@@ -84,6 +84,10 @@ optional<Action> fromString(string const& _name)
         mapAction<actions::ToggleInputProtection>("ToggleInputProtection"),
         mapAction<actions::ToggleStatusLine>("ToggleStatusLine"),
         mapAction<actions::ToggleTitleBar>("ToggleTitleBar"),
+        mapAction<actions::TraceBreakAtEmptyQueue>("TraceBreakAtEmptyQueue"),
+        mapAction<actions::TraceEnter>("TraceEnter"),
+        mapAction<actions::TraceLeave>("TraceLeave"),
+        mapAction<actions::TraceStep>("TraceStep"),
         mapAction<actions::ViNormalMode>("ViNormalMode"),
         mapAction<actions::WriteScreen>("WriteScreen"),
     };
