@@ -911,6 +911,8 @@ void OpenGLRenderer::setBackgroundImage(shared_ptr<terminal::BackgroundImage con
         DisplayLog()("Background image from disk: {}x{} {}", qImage.width(), qImage.height(), imageFormat);
         _renderStateCache.backgroundImageHash = crispy::StrongHash::compute(filePath.string());
         _renderStateCache.backgroundResolution = qImage.size();
+        // for glTextImage2D image must be inverted
+        qImage.mirror();
         _backgroundImageTexture =
             createAndUploadImage(qImage.size(), imageFormat, rowAlignment, qImage.constBits());
     }
