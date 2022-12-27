@@ -166,8 +166,9 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
         }
         case Decorator::DoubleUnderline: {
             auto const thickness = max(1u, unsigned(ceil(double(underlineThickness()) * 2.0) / 3.0));
-            auto const y1 = max(0u, unsigned(underlinePosition()) + thickness);
-            auto const y0 = max(0u, y1 - 3 * thickness);
+            auto const y1 = max(0u, underlinePosition() + thickness);
+            // y1 - 3 thickness can be negative
+            auto const y0 = max(0, static_cast<int>(y1) - 3 * static_cast<int>(thickness));
             auto const height = Height(y1 + thickness);
             auto const imageSize = ImageSize { width, height };
             return create(imageSize, [&]() -> atlas::Buffer {
