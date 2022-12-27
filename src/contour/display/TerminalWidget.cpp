@@ -665,7 +665,7 @@ QVariant TerminalWidget::inputMethodQuery(Qt::InputMethodQuery _query) const
     auto const dpr = contentScale();
     if (terminal().isCursorInViewport())
     {
-        auto const gridCursorPos = terminal().cursor().position;
+        auto const gridCursorPos = terminal().currentScreen().cursor().position;
         cursorPos.setX(int(unbox<double>(gridCursorPos.column)
                            * unbox<double>(renderer_->gridMetrics().cellSize.width)));
         cursorPos.setY(
@@ -697,7 +697,7 @@ QVariant TerminalWidget::inputMethodQuery(Qt::InputMethodQuery _query) const
             // return the text from the current line
             if (terminal().isCursorInViewport())
                 return QString::fromStdString(
-                    terminal().currentScreen().lineTextAt(terminal().cursor().position.line));
+                    terminal().currentScreen().lineTextAt(terminal().currentScreen().cursor().position.line));
 
             return QString();
         case Qt::ImCurrentSelection:

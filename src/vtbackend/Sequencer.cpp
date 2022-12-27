@@ -55,7 +55,7 @@ size_t Sequencer::print(string_view _chars, size_t cellCount)
     terminal_.activeDisplay().writeText(_chars, cellCount);
 
     return terminal_.settings().pageSize.columns.as<size_t>()
-           - terminal_.state().cursor.position.column.as<size_t>();
+           - terminal_.currentScreen().cursor().position.column.as<size_t>();
 }
 
 void Sequencer::execute(char controlCode)
@@ -158,9 +158,10 @@ size_t Sequencer::maxBulkTextSequenceWidth() const noexcept
     if (!terminal_.primaryScreen().currentLine().isTrivialBuffer())
         return 0;
 
-    assert(terminal_.currentScreen().margin().horizontal.to >= terminal_.cursor().position.column);
+    assert(terminal_.currentScreen().margin().horizontal.to
+           >= terminal_.currentScreen().cursor().position.column);
     return unbox<size_t>(terminal_.currentScreen().margin().horizontal.to
-                         - terminal_.cursor().position.column);
+                         - terminal_.currentScreen().cursor().position.column);
 }
 
 void Sequencer::handleSequence()

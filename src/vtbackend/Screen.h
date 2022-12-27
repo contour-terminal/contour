@@ -61,6 +61,14 @@ class ScreenBase: public SequenceHandler
   public:
     virtual void verifyState() const = 0;
     virtual void fail(std::string const& _message) const = 0;
+
+    [[nodiscard]] Cursor& cursor() noexcept { return _cursor; }
+    [[nodiscard]] Cursor const& cursor() const noexcept { return _cursor; }
+    [[nodiscard]] Cursor const& savedCursorState() const noexcept { return _savedCursor; }
+    void resetSavedCursorState() { _savedCursor = {}; }
+    virtual void saveCursor() = 0;
+    virtual void restoreCursor() = 0;
+
     [[nodiscard]] virtual Margin margin() const noexcept = 0;
     [[nodiscard]] virtual Margin& margin() noexcept = 0;
     [[nodiscard]] virtual bool contains(CellLocation _coord) const noexcept = 0;
@@ -82,6 +90,10 @@ class ScreenBase: public SequenceHandler
                                                              CellLocation startPosition) = 0;
     [[nodiscard]] virtual std::optional<CellLocation> searchReverse(std::u32string_view searchText,
                                                                     CellLocation startPosition) = 0;
+
+  protected:
+    Cursor _cursor {};
+    Cursor _savedCursor {};
 };
 
 /**
@@ -301,32 +313,30 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     [[nodiscard]] bool isCursorInsideMargins() const noexcept;
 
-    constexpr CellLocation realCursorPosition() const noexcept { return _state.cursor.position; }
+    constexpr CellLocation realCursorPosition() const noexcept { return _cursor.position; }
 
     constexpr CellLocation logicalCursorPosition() const noexcept
     {
-        if (!_state.cursor.originMode)
+        if (!_cursor.originMode)
             return realCursorPosition();
         else
-            return CellLocation { _state.cursor.position.line - margin().vertical.from,
-                                  _state.cursor.position.column - margin().horizontal.from };
+            return CellLocation { _cursor.position.line - margin().vertical.from,
+                                  _cursor.position.column - margin().horizontal.from };
     }
 
     constexpr CellLocation origin() const noexcept
     {
-        if (!_state.cursor.originMode)
+        if (!_cursor.originMode)
             return {};
 
         return { margin().vertical.from, margin().horizontal.from };
     }
 
-    [[nodiscard]] Cursor const& cursor() const noexcept { return _state.cursor; }
-
     /// Returns identity if DECOM is disabled (default), but returns translated coordinates if DECOM is
     /// enabled.
     CellLocation toRealCoordinate(CellLocation pos) const noexcept
     {
-        if (!_state.cursor.originMode)
+        if (!_cursor.originMode)
             return pos;
         else
             return { pos.line + margin().vertical.from, pos.column + margin().horizontal.from };
@@ -334,7 +344,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     [[nodiscard]] LineOffset applyOriginMode(LineOffset line) const noexcept
     {
-        if (!_state.cursor.originMode)
+        if (!_cursor.originMode)
             return line;
         else
             return line + margin().vertical.from;
@@ -342,7 +352,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     [[nodiscard]] ColumnOffset applyOriginMode(ColumnOffset column) const noexcept
     {
-        if (!_state.cursor.originMode)
+        if (!_cursor.originMode)
             return column;
         else
             return column + margin().horizontal.from;
@@ -350,7 +360,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     [[nodiscard]] Rect applyOriginMode(Rect area) const noexcept
     {
-        if (!_state.cursor.originMode)
+        if (!_cursor.originMode)
             return area;
 
         auto const top = Top::cast_from(area.top.value + margin().vertical.from.value);
@@ -365,7 +375,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     /// Clamps given coordinates, respecting DECOM (Origin Mode).
     CellLocation clampCoordinate(CellLocation coord) const noexcept
     {
-        if (_state.cursor.originMode)
+        if (_cursor.originMode)
             return clampToOrigin(coord);
         else
             return clampToScreen(coord);
@@ -408,13 +418,13 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     Cell& usePreviousCell() noexcept
     {
-        return useCellAt(_state.lastCursorPosition.line, _state.lastCursorPosition.column);
+        return useCellAt(_lastCursorPosition.line, _lastCursorPosition.column);
     }
 
     void updateCursorIterator() noexcept override
     {
 #if defined(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER)
-        _currentLine = &_grid.lineAt(_state.cursor.position.line);
+        _currentLine = &_grid.lineAt(_cursor.position.line);
 #endif
     }
 
@@ -423,7 +433,7 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 #if defined(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER)
         return *_currentLine;
 #else
-        return _grid.lineAt(_state.cursor.position.line);
+        return _grid.lineAt(_cursor.position.line);
 #endif
     }
 
@@ -432,11 +442,11 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 #if defined(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER)
         return *_currentLine;
 #else
-        return _grid.lineAt(_state.cursor.position.line);
+        return _grid.lineAt(_cursor.position.line);
 #endif
     }
 
-    Cell& useCurrentCell() noexcept { return currentLine().useCellAt(_state.cursor.position.column); }
+    Cell& useCurrentCell() noexcept { return currentLine().useCellAt(_cursor.position.column); }
 
     /// Gets a reference to the cell relative to screen origin (top left, 1:1).
     Cell& at(LineOffset _line, ColumnOffset _column) noexcept { return _grid.useCellAt(_line, _column); }
@@ -560,6 +570,13 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
 
     void fail(std::string const& _message) const override;
 
+    void hardReset();
+    void applyPageSizeToMainDisplay(PageSize pageSize);
+
+    void saveCursor() override;
+    void restoreCursor() override;
+    void restoreCursor(Cursor const& savedCursor);
+
   private:
     void writeTextInternal(char32_t _char);
 
@@ -600,6 +617,9 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     Settings& _settings;
     TerminalState& _state;
     Grid<Cell> _grid;
+
+    CellLocation _lastCursorPosition {};
+
 #if defined(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER)
     Line<Cell>* _currentLine = nullptr;
 #endif

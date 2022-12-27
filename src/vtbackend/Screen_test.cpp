@@ -2103,7 +2103,7 @@ TEST_CASE("SaveCursor and RestoreCursor", "[screen]")
     auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.terminal.setMode(DECMode::AutoWrap, false);
-    mock.terminal.saveCursor();
+    mock.terminal.currentScreen().saveCursor();
 
     // mutate the cursor's position, autowrap and origin flags
     screen.moveCursorTo(LineOffset { 2 }, ColumnOffset { 2 });
@@ -2111,7 +2111,7 @@ TEST_CASE("SaveCursor and RestoreCursor", "[screen]")
     mock.terminal.setMode(DECMode::Origin, true);
 
     // restore cursor and see if the changes have been reverted
-    mock.terminal.restoreCursor();
+    mock.terminal.currentScreen().restoreCursor();
     CHECK(screen.logicalCursorPosition() == CellLocation { LineOffset(0), ColumnOffset(0) });
     CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::AutoWrap));
     CHECK_FALSE(mock.terminal.isModeEnabled(DECMode::Origin));
@@ -3604,13 +3604,14 @@ TEST_CASE("DECSTR", "[screen]")
     auto const pageSize = PageSize { LineCount(4), ColumnCount(10) };
     auto mock = MockTerm { pageSize, LineCount(5) };
     mock.writeToScreen("ABCD\r\nDEFG\r\n");
-    CHECK(mock.terminal.primaryScreen().cursor().position.column == ColumnOffset(0));
     CHECK(mock.terminal.primaryScreen().cursor().position.line == LineOffset(2));
+    CHECK(mock.terminal.primaryScreen().cursor().position.column == ColumnOffset(0));
 
     mock.writeToScreen("\033[!p");
     REQUIRE(mock.terminal.primaryScreen().cursor().position
             == CellLocation { LineOffset(2), ColumnOffset(0) });
-    REQUIRE(mock.terminal.state().savedCursor.position == CellLocation { LineOffset(0), ColumnOffset(0) });
+    REQUIRE(mock.terminal.primaryScreen().savedCursorState().position
+            == CellLocation { LineOffset(0), ColumnOffset(0) });
 }
 // TODO: Sixel: image that exceeds available lines
 

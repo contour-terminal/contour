@@ -129,9 +129,6 @@ class Terminal
     void setLeftRightMargin(std::optional<ColumnOffset> _left, std::optional<ColumnOffset> _right);
 
     void moveCursorTo(LineOffset _line, ColumnOffset _column);
-    void saveCursor();
-    void restoreCursor();
-    void restoreCursor(Cursor const& _savedCursor);
 
     void setGraphicsRendition(GraphicsRendition _rendition);
     void setForegroundColor(Color _color);
@@ -140,21 +137,6 @@ class Terminal
     void setHighlightRange(HighlightRange _range);
 
     // {{{ cursor
-    [[nodiscard]] Cursor const& cursor() const noexcept { return state_.cursor; }
-    [[nodiscard]] constexpr CellLocation realCursorPosition() const noexcept
-    {
-        return state_.cursor.position;
-    }
-
-    /// Clamps given coordinates, respecting DECOM (Origin Mode).
-    [[nodiscard]] CellLocation clampCoordinate(CellLocation coord) const noexcept
-    {
-        if (state_.cursor.originMode)
-            return clampToOrigin(coord);
-        else
-            return clampToScreen(coord);
-    }
-
     /// Clamps given logical coordinates to margins as used in when DECOM (origin mode) is enabled.
     [[nodiscard]] CellLocation clampToOrigin(CellLocation coord) const noexcept
     {
@@ -187,7 +169,7 @@ class Terminal
 
     [[nodiscard]] bool isCursorInViewport() const noexcept
     {
-        return viewport().isLineVisible(cursor().position.line);
+        return viewport().isLineVisible(currentScreen().cursor().position.line);
     }
     // }}}
 
