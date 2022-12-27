@@ -100,6 +100,7 @@ struct Cursor
     CellLocation position { LineOffset(0), ColumnOffset(0) };
     bool autoWrap = true; // false;
     bool originMode = false;
+    bool wrapPending = false;
     GraphicsAttributes graphicsRendition {};
     CharsetMapping charsets {};
     HyperlinkId hyperlink {};
@@ -167,7 +168,6 @@ struct TerminalState
     Cursor savedPrimaryCursor;    //!< Saved cursor of primary-screen when switching to alt-screen.
     Cursor savedCursorStatusLine; //!< Saved cursor of the status line if not active, the other way around.
     CellLocation lastCursorPosition;
-    bool wrapPending = false;
 
     CursorDisplay cursorDisplay = CursorDisplay::Steady;
     CursorShape cursorShape = CursorShape::Block;

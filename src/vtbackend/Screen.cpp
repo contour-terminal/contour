@@ -386,7 +386,7 @@ void Screen<Cell>::advanceCursorAfterWrite(ColumnCount n) noexcept
     else
     {
         _state.cursor.position.column.value += n.value - 1;
-        _state.wrapPending = true;
+        _state.cursor.wrapPending = true;
     }
 }
 
@@ -429,7 +429,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::crlfIfWrapPending()
 {
-    if (_state.wrapPending && _state.cursor.autoWrap) // && !_terminal.isModeEnabled(DECMode::TextReflow))
+    if (_state.cursor.wrapPending && _state.cursor.autoWrap) // && !_terminal.isModeEnabled(DECMode::TextReflow))
     {
         bool const lineWrappable = currentLine().wrappable();
         crlf();
@@ -531,7 +531,7 @@ void Screen<Cell>::clearAndAdvance(int _graphemeClusterWidth) noexcept
     }
     else if (_state.cursor.autoWrap)
     {
-        _state.wrapPending = true;
+        _state.cursor.wrapPending = true;
     }
 }
 
@@ -643,7 +643,7 @@ void Screen<Cell>::moveCursorTo(LineOffset _line, ColumnOffset _column)
             return pair { _line + margin().vertical.from, _column + margin().horizontal.from };
     }();
 
-    _state.wrapPending = false;
+    _state.cursor.wrapPending = false;
     _state.cursor.position = clampToScreen({ line, column });
     updateCursorIterator();
 }
@@ -652,7 +652,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::linefeed(ColumnOffset _newColumn)
 {
-    _state.wrapPending = false;
+    _state.cursor.wrapPending = false;
     _state.cursor.position.column = _newColumn;
 
     if (*realCursorPosition().line == *margin().vertical.to)
@@ -700,7 +700,7 @@ void Screen<Cell>::setCurrentColumn(ColumnOffset _n)
 {
     auto const col = _state.cursor.originMode ? margin().horizontal.from + _n : _n;
     auto const clampedCol = min(col, boxed_cast<ColumnOffset>(_settings.pageSize.columns) - 1);
-    _state.wrapPending = false;
+    _state.cursor.wrapPending = false;
     _state.cursor.position.column = clampedCol;
 }
 
@@ -1330,7 +1330,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorUp(LineCount _n)
 {
-    _state.wrapPending = 0;
+    _state.cursor.wrapPending = false;
     auto const n = min(_n.as<LineOffset>(),
                        logicalCursorPosition().line > margin().vertical.from
                            ? logicalCursorPosition().line - margin().vertical.from
@@ -1344,7 +1344,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorDown(LineCount _n)
 {
-    _state.wrapPending = 0;
+    _state.cursor.wrapPending = false;
     auto const currentLineNumber = logicalCursorPosition().line;
     auto const n = min(_n.as<LineOffset>(),
                        currentLineNumber <= margin().vertical.to
@@ -1359,7 +1359,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorForward(ColumnCount _n)
 {
-    _state.wrapPending = 0;
+    _state.cursor.wrapPending = false;
     _state.cursor.position.column =
         min(_state.cursor.position.column + _n.as<ColumnOffset>(), margin().horizontal.to);
 }
@@ -1369,7 +1369,7 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorBackward(ColumnCount _n)
 {
     // even if you move to 80th of 80 columns, it'll first write a char and THEN flag wrap pending
-    _state.wrapPending = false;
+    _state.cursor.wrapPending = false;
 
     // TODO: skip cells that in counting when iterating backwards over a wide cell (such as emoji)
     auto const n = min(_n.as<ColumnOffset>(), _state.cursor.position.column);

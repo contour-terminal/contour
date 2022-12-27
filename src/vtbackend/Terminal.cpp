@@ -468,7 +468,6 @@ void Terminal::updateIndicatorStatusLine()
     auto& savedActiveDisplay = currentScreen_.get();
     auto const savedActiveStatusDisplay = state_.activeStatusDisplay;
     auto savedCursor = state_.cursor;
-    auto const savedWrapPending = state_.wrapPending;
 
     auto const colors =
         state_.focused ? colorPalette().indicatorStatusLine : colorPalette().indicatorStatusLineInactive;
@@ -478,7 +477,6 @@ void Terminal::updateIndicatorStatusLine()
 
     // Prepare old status line's cursor position and some other flags.
     state_.cursor = {};
-    state_.wrapPending = false;
     indicatorStatusScreen_.updateCursorIterator();
     state_.cursor.graphicsRendition.foregroundColor = colors.foreground;
     state_.cursor.graphicsRendition.backgroundColor = colors.background;
@@ -548,8 +546,7 @@ void Terminal::updateIndicatorStatusLine()
     // Cleaning up.
     currentScreen_ = savedActiveDisplay;
     state_.activeStatusDisplay = savedActiveStatusDisplay;
-    // restoreCursor(savedCursor, savedWrapPending);
-    state_.wrapPending = savedWrapPending;
+    // restoreCursor(savedCursor);
     state_.cursor = savedCursor;
     state_.cursor.position = clampCoordinate(savedCursor.position);
     currentScreen_.get().updateCursorIterator();
@@ -1539,7 +1536,6 @@ void Terminal::restoreCursor()
 
 void Terminal::restoreCursor(Cursor const& _savedCursor)
 {
-    state_.wrapPending = false;
     state_.cursor = _savedCursor;
     state_.cursor.position = clampCoordinate(_savedCursor.position);
     currentScreen().updateCursorIterator();
@@ -1701,7 +1697,7 @@ void Terminal::setScreen(ScreenType _type)
     state_.screenType = _type;
 
     // Reset wrapPending-flag when switching buffer.
-    state_.wrapPending = false;
+    state_.cursor.wrapPending = false;
 
     // Reset last-cursor position.
     state_.lastCursorPosition = state_.cursor.position;
@@ -1729,8 +1725,8 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
     // Ensure correct screen buffer size for the buffer we've just switched to.
     cursorPosition =
         screenType == ScreenType::Primary
-            ? primaryScreen_.grid().resize(mainDisplayPageSize, cursorPosition, state_.wrapPending)
-            : alternateScreen_.grid().resize(mainDisplayPageSize, cursorPosition, state_.wrapPending);
+            ? primaryScreen_.grid().resize(mainDisplayPageSize, cursorPosition, state_.cursor.wrapPending)
+            : alternateScreen_.grid().resize(mainDisplayPageSize, cursorPosition, state_.cursor.wrapPending);
     cursorPosition = clampCoordinate(cursorPosition);
 
     auto const margin =
@@ -1746,7 +1742,7 @@ void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
     // clang-format on
 
     if (state_.cursor.position.column < boxed_cast<ColumnOffset>(settings_.pageSize.columns))
-        state_.wrapPending = false;
+        state_.cursor.wrapPending = false;
 
     // update (last-)cursor position
     state_.cursor.position = cursorPosition;
