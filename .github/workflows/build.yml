@@ -198,7 +198,7 @@ jobs:
             whoami
             env
             freebsd-version
-            SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
+            QTVER=6 SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
             mkdir build
             cmake -DCMAKE_BUILD_TYPE=Debug -S . -B build
             cmake --build build/ -j2
@@ -208,7 +208,7 @@ jobs:
             rm -rf _deps build
 
   osx_qt6:
-    name: "OS/X (Qt6)"
+    name: "OS/X"
     runs-on: macos-11
     steps:
       - uses: actions/checkout@v3

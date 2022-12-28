@@ -275,14 +275,11 @@ install_deps_FreeBSD()
         ncurses \
         ninja \
         pkgconf \
-        qt5-buildtools \
-        qt5-core \
-        qt5-gui \
-        qt5-multimedia \
-        qt5-network \
-        qt5-qmake \
-        qt5-widgets \
-        qt5-x11extras \
+        qt6-5compat \
+        qt6-base \
+        qt6-declarative \
+        qt6-multimedia \
+        qt6-tools \
         range-v3 \
         xcb \
         yaml-cpp
@@ -305,9 +302,10 @@ install_deps_arch()
         microsoft-gsl \
         ninja \
         pkg-config \
-        qt5-base \
-        qt5-multimedia \
-        qt5-x11extras \
+        qt6-5compat \
+        qt6-base \
+        qt6-declarative \
+        qt6-multimedia \
         range-v3 \
         yaml-cpp
 }

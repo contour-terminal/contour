@@ -4,10 +4,15 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD")
     set(FREEBSD TRUE)
 endif()
 
+set(QT6_DEFAULT OFF)
+if(APPLE OR WIN32 OR FREEBSD)
+    set(QT6_DEFAULT ON)
+endif()
+
 option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 option(CONTOUR_VT_METRICS "Enables collecting and exit-printing some VT usage metrics." OFF)
 option(CONTOUR_SCROLLBAR "Enables scrollbar in GUI frontend." ON)
-option(CONTOUR_BUILD_WITH_QT6 "Use Qt 6" OFF)
+option(CONTOUR_BUILD_WITH_QT6 "Use Qt 6" ${QT6_DEFAULT})
 
 set(QtX11Extras)
 if(NOT(WIN32) AND NOT(APPLE) AND NOT(CONTOUR_BUILD_WITH_QT6))
@@ -16,10 +21,8 @@ endif()
 
 message(STATUS "Build contour using Qt 6: ${CONTOUR_BUILD_WITH_QT6}")
 if(CONTOUR_BUILD_WITH_QT6)
-    message(STATUS "this is with qt6")
     find_package(Qt6 COMPONENTS Core Gui Network OpenGL OpenGLWidgets Widgets Multimedia ${QtX11Extras} REQUIRED)
 else()
-    message(STATUS "this is with qt5")
     find_package(Qt5 COMPONENTS Gui Network Widgets Multimedia ${QtX11Extras} REQUIRED)  # apt install qtbase5-dev libqt5gui5
 endif()
 
