@@ -2140,7 +2140,10 @@ void TraceHandler::flushOne(PendingSequence const& pendingSequence)
 {
     if (auto const* seq = std::get_if<Sequence>(&pendingSequence))
     {
-        fmt::print("\t{}\n", seq->text());
+        if (auto const* functionDefinition = seq->functionDefinition())
+            fmt::print("\t{:<20} ; {:<18} ; {}\n", seq->text(), functionDefinition->mnemonic, functionDefinition->comment);
+        else
+            fmt::print("\t{:<20}\n", seq->text());
         _terminal.activeDisplay().processSequence(*seq);
     }
     else if (auto const* codepoint = std::get_if<char32_t>(&pendingSequence))
