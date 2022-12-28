@@ -911,8 +911,9 @@ void OpenGLRenderer::setBackgroundImage(shared_ptr<terminal::BackgroundImage con
         DisplayLog()("Background image from disk: {}x{} {}", qImage.width(), qImage.height(), imageFormat);
         _renderStateCache.backgroundImageHash = crispy::StrongHash::compute(filePath.string());
         _renderStateCache.backgroundResolution = qImage.size();
-        // for glTextImage2D image must be inverted
-        qImage.mirror();
+        // For glTextImage2D image must be inverted.
+        // TODO: This can be rewritten to `qImage.mirror();` as soon as we drop Qt 5.
+        qImage = qImage.mirrored();
         _backgroundImageTexture =
             createAndUploadImage(qImage.size(), imageFormat, rowAlignment, qImage.constBits());
     }
