@@ -82,6 +82,10 @@ struct ToggleFullscreen{};
 struct ToggleInputProtection{};
 struct ToggleStatusLine{};
 struct ToggleTitleBar{};
+struct TraceBreakAtEmptyQueue{};
+struct TraceEnter{};
+struct TraceLeave{};
+struct TraceStep{};
 struct ViNormalMode{};
 struct WriteScreen{ std::string chars; }; // "\033[2J\033[3J"
 // CloseTab
@@ -131,6 +135,10 @@ using Action = std::variant<CancelSelection,
                             ToggleInputProtection,
                             ToggleStatusLine,
                             ToggleTitleBar,
+                            TraceBreakAtEmptyQueue,
+                            TraceEnter,
+                            TraceLeave,
+                            TraceStep,
                             ViNormalMode,
                             WriteScreen>;
 
@@ -200,6 +208,10 @@ DECLARE_ACTION_FMT(ToggleFullscreen)
 DECLARE_ACTION_FMT(ToggleInputProtection)
 DECLARE_ACTION_FMT(ToggleStatusLine)
 DECLARE_ACTION_FMT(ToggleTitleBar)
+DECLARE_ACTION_FMT(TraceBreakAtEmptyQueue)
+DECLARE_ACTION_FMT(TraceEnter)
+DECLARE_ACTION_FMT(TraceLeave)
+DECLARE_ACTION_FMT(TraceStep)
 DECLARE_ACTION_FMT(ViNormalMode)
 DECLARE_ACTION_FMT(WriteScreen)
 // }}}
@@ -267,12 +279,17 @@ struct formatter<contour::actions::Action>
         HANDLE_ACTION(ToggleInputProtection);
         HANDLE_ACTION(ToggleStatusLine);
         HANDLE_ACTION(ToggleTitleBar);
+        HANDLE_ACTION(TraceBreakAtEmptyQueue);
+        HANDLE_ACTION(TraceEnter);
+        HANDLE_ACTION(TraceLeave);
+        HANDLE_ACTION(TraceStep);
         HANDLE_ACTION(ViNormalMode);
         HANDLE_ACTION(WriteScreen);
         // }}}
         return fmt::format_to(ctx.out(), "UNKNOWN ACTION");
     }
 };
+
 template <>
 struct formatter<contour::actions::CopyFormat>
 {

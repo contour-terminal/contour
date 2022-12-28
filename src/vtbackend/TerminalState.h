@@ -34,9 +34,12 @@
 
 #include <fmt/format.h>
 
+#include <atomic>
 #include <bitset>
+#include <condition_variable>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <stack>
 #include <vector>
 
@@ -117,6 +120,32 @@ struct Search
     bool initiatedByDoubleClick = false;
 };
 
+// Mandates what execution mode the terminal will take to process VT sequences.
+//
+enum class ExecutionMode
+{
+    // Normal execution mode, with no tracing enabled.
+    Normal,
+
+    // Trace mode is enabled and waiting for command to continue execution.
+    Waiting,
+
+    // Tracing mode is enabled and execution is stopped after each VT sequence.
+    SingleStep,
+
+    // Tracing mode is enabled, execution is stopped after queue of pending VT sequences is empty.
+    BreakAtEmptyQueue,
+
+    // Trace mode is enabled and execution is stopped at frame marker.
+    // TODO: BreakAtFrame,
+};
+
+enum class WrapPending
+{
+    Yes,
+    No,
+};
+
 /**
  * Defines the state of a terminal.
  * All those data members used to live in Screen, but are moved
@@ -131,6 +160,10 @@ struct TerminalState
     explicit TerminalState(Terminal& _terminal);
 
     Settings& settings;
+
+    std::atomic<ExecutionMode> executionMode = ExecutionMode::Normal;
+    std::mutex breakMutex;
+    std::condition_variable breakCondition;
 
     /// contains the pixel size of a single cell, or area(cellPixelSize_) == 0 if unknown.
     ImageSize cellPixelSize;
@@ -186,8 +219,6 @@ struct TerminalState
 
     ViCommands viCommands;
     ViInputHandler inputHandler;
-
-    bool terminating = false;
 };
 
 } // namespace terminal
@@ -266,6 +297,30 @@ struct formatter<terminal::DynamicColorName>
         }
         return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(name));
         // clang-format on
+    }
+};
+
+template <>
+struct formatter<terminal::ExecutionMode>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::ExecutionMode value, FormatContext& ctx)
+    {
+        // clang-format off
+        switch (value)
+        {
+            case terminal::ExecutionMode::Normal: return fmt::format_to(ctx.out(), "NORMAL");
+            case terminal::ExecutionMode::Waiting: return fmt::format_to(ctx.out(), "WAITING");
+            case terminal::ExecutionMode::SingleStep: return fmt::format_to(ctx.out(), "SINGLE STEP");
+            case terminal::ExecutionMode::BreakAtEmptyQueue: return fmt::format_to(ctx.out(), "BREAK AT EMPTY");
+        }
+        // clang-format on
+        return fmt::format_to(ctx.out(), "UNKNOWN");
     }
 };
 

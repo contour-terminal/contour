@@ -684,6 +684,8 @@ namespace
                 flag = MatchModes::Select;
             else if (upperArg == "SEARCH")
                 flag = MatchModes::Search;
+            else if (upperArg == "TRACE")
+                flag = MatchModes::Trace;
             else
             {
                 errorlog()("Unknown input_mapping mode: {}", arg);

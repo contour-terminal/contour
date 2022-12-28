@@ -32,6 +32,7 @@ class MatchModes
         Insert = 0x08, // vi-like insert mode
         Select = 0x10, // visual / visual-line / visual-block
         Search = 0x20, // something's in the search buffer
+        Trace = 0x40,
     };
 
     enum class Status
@@ -147,6 +148,7 @@ struct formatter<terminal::MatchModes>
         advance(terminal::MatchModes::Insert, "Insert");
         advance(terminal::MatchModes::Select, "Select");
         advance(terminal::MatchModes::Search, "Search");
+        advance(terminal::MatchModes::Trace, "Trace");
         if (s.empty())
             s = "Any";
         return fmt::format_to(_ctx.out(), "{}", s);

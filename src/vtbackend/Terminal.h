@@ -29,12 +29,14 @@
 
 #include <vtpty/Pty.h>
 
+#include <crispy/assert.h>
 #include <crispy/defines.h>
 
 #include <fmt/format.h>
 
 #include <atomic>
 #include <chrono>
+#include <deque>
 #include <functional>
 #include <memory>
 #include <mutex>
@@ -55,6 +57,43 @@ struct InputMethodData
     // If this string is non-empty, the IME is active and the given data
     // shall be displayed at the cursor's location.
     std::string preeditString;
+};
+
+// Implements Trace mode handling for the given controls.
+//
+// It either directly forwards the sequences to the actually current main display,
+// or puts them into a pending queue if execution is currently suspend.
+//
+// In case of single-step, only one sequence will be handled and the execution mode put to suspend mode,
+// and in case of break-at-frame, the execution will conditionally break iff the currently
+// pending VT sequence indicates a frame start.
+class TraceHandler: public SequenceHandler
+{
+  public:
+    explicit TraceHandler(Terminal& terminal);
+
+    void executeControlCode(char controlCode) override;
+    void processSequence(Sequence const& sequence) override;
+    void writeText(char32_t codepoint) override;
+    void writeText(std::string_view codepoints, size_t cellCount) override;
+
+    struct CodepointSequence
+    {
+        std::string_view text;
+        size_t cellCount;
+    };
+    using PendingSequence = std::variant<char32_t, CodepointSequence, Sequence>;
+    using PendingSequenceQueue = std::deque<PendingSequence>;
+
+    [[nodiscard]] PendingSequenceQueue const& pendingSequences() const noexcept { return _pendingSequences; }
+
+    void flushAllPending();
+    void flushOne();
+
+  private:
+    void flushOne(PendingSequence const& pendingSequence);
+    Terminal& _terminal;
+    PendingSequenceQueue _pendingSequences = {};
 };
 
 /// Terminal API to manage input and output devices of a pseudo terminal, such as keyboard, mouse, and screen.
@@ -358,6 +397,20 @@ class Terminal
         {
             case ActiveStatusDisplay::Main: return currentScreen_.get();
             case ActiveStatusDisplay::StatusLine: return hostWritableStatusLineScreen_;
+            case ActiveStatusDisplay::IndicatorStatusLine: return indicatorStatusScreen_;
+        }
+        crispy::unreachable();
+    }
+
+    [[nodiscard]] SequenceHandler& sequenceHandler() noexcept
+    {
+        // TODO(pr) avoid double-switch by introducing a `SequenceHandler& _sequenceHandler` member.
+        switch (state_.executionMode)
+        {
+            case ExecutionMode::Normal: return activeDisplay();
+            case ExecutionMode::BreakAtEmptyQueue:
+            case ExecutionMode::Waiting: [[fallthrough]];
+            case ExecutionMode::SingleStep: return traceHandler_;
         }
         crispy::unreachable();
     }
@@ -515,6 +568,9 @@ class Terminal
             return currentScreen_.get().hyperlinkAt(*gridPosition);
         return {};
     }
+
+    [[nodiscard]] ExecutionMode executionMode() const noexcept { return state_.executionMode; }
+    void setExecutionMode(ExecutionMode mode);
 
     bool processInputOnce();
 
@@ -723,6 +779,7 @@ class Terminal
     Screen<StatusDisplayCell> indicatorStatusScreen_;
     std::reference_wrapper<ScreenBase> currentScreen_;
     Viewport viewport_;
+    TraceHandler traceHandler_;
     // clang-format on
     // }}}
 
@@ -758,3 +815,34 @@ class Terminal
 };
 
 } // namespace terminal
+
+namespace fmt
+{
+
+template <>
+struct formatter<terminal::TraceHandler::PendingSequence>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::TraceHandler::PendingSequence const& pendingSequence, FormatContext& ctx)
+    {
+        if (auto const* p = std::get_if<terminal::Sequence>(&pendingSequence))
+            return fmt::format_to(ctx.out(), "{}", p->text());
+        else if (auto const* p = std::get_if<terminal::TraceHandler::CodepointSequence>(&pendingSequence))
+            return fmt::format_to(ctx.out(), "\"{}\"", crispy::escape(p->text));
+        else if (auto const* p = std::get_if<char32_t>(&pendingSequence))
+            return fmt::format_to(ctx.out(), "'{}'", unicode::convert_to<char>(*p));
+        else
+            return fmt::format_to(ctx.out(), "Internal Error!");
+        // {
+        //     crispy::fatal("Should never happen.");
+        //     return fmt::format_to(ctx.out(), "Internal error!");
+        // }
+    }
+};
+
+} // namespace fmt

@@ -16,7 +16,9 @@
 #include <vtbackend/RenderBuffer.h>
 #include <vtbackend/RenderBufferBuilder.h>
 #include <vtbackend/Terminal.h>
+#include <vtbackend/TerminalState.h>
 #include <vtbackend/logging.h>
+#include <vtbackend/primitives.h>
 
 #include <vtpty/MockPty.h>
 
@@ -34,6 +36,7 @@
 #include <csignal>
 #include <iostream>
 #include <utility>
+#include <variant>
 
 using crispy::Size;
 
@@ -154,6 +157,7 @@ Terminal::Terminal(Events& _eventListener,
                     eventListener_.onScrollOffsetChanged(viewport_.scrollOffset());
                     breakLoopAndRefreshRenderBuffer();
                 } },
+    traceHandler_ { *this },
     selectionHelper_ { this },
     refreshInterval_ { settings_.refreshRate }
 {
@@ -200,18 +204,58 @@ Pty::ReadResult Terminal::readFromPty()
     return pty_->read(*currentPtyBuffer_, timeout, ptyReadBufferSize_);
 }
 
+void Terminal::setExecutionMode(ExecutionMode mode)
+{
+    auto _ = std::unique_lock(state_.breakMutex);
+    state_.executionMode = mode;
+    state_.breakCondition.notify_one();
+    pty_->wakeupReader();
+}
+
 bool Terminal::processInputOnce()
 {
+    // clang-format off
+    switch (state_.executionMode)
+    {
+        case ExecutionMode::BreakAtEmptyQueue:
+            state_.executionMode = ExecutionMode::Waiting;
+            [[fallthrough]];
+        case ExecutionMode::Normal:
+            if (!traceHandler_.pendingSequences().empty())
+            {
+                auto const _ = std::lock_guard { *this };
+                traceHandler_.flushAllPending();
+                return true;
+            }
+            break;
+        case ExecutionMode::Waiting:
+        {
+            auto lock = std::unique_lock(state_.breakMutex);
+            state_.breakCondition.wait(lock, [this]() { return state_.executionMode != ExecutionMode::Waiting; });
+            return true;
+        }
+        case ExecutionMode::SingleStep:
+            if (!traceHandler_.pendingSequences().empty())
+            {
+                auto const _ = std::lock_guard { *this };
+                state_.executionMode = ExecutionMode::Waiting;
+                traceHandler_.flushOne();
+                return true;
+            }
+            break;
+    }
+    // clang-format on
+
     auto const readResult = readFromPty();
 
     if (!readResult)
     {
-        if (errno != EINTR && errno != EAGAIN)
-        {
-            TerminalLog()("PTY read failed. {}", strerror(errno));
-            pty_->close();
-        }
-        return errno == EINTR || errno == EAGAIN;
+        if (errno == EINTR || errno == EAGAIN)
+            return true;
+
+        TerminalLog()("PTY read failed. {}", strerror(errno));
+        pty_->close();
+        return false;
     }
     string_view const buf = get<0>(*readResult);
     state_.usingStdoutFastPipe = get<1>(*readResult);
@@ -464,20 +508,21 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
 
 void Terminal::updateIndicatorStatusLine()
 {
-    assert(&currentScreen_.get() != &indicatorStatusScreen_);
+    Require(state_.activeStatusDisplay != ActiveStatusDisplay::IndicatorStatusLine);
 
-    auto& savedActiveDisplay = currentScreen_.get();
-    auto const savedActiveStatusDisplay = state_.activeStatusDisplay;
+    auto const _ = crispy::finally { [this, savedActiveStatusDisplay = state_.activeStatusDisplay]() {
+        // Cleaning up.
+        setActiveStatusDisplay(savedActiveStatusDisplay);
+        verifyState();
+    } };
 
     auto const colors =
         state_.focused ? colorPalette().indicatorStatusLine : colorPalette().indicatorStatusLineInactive;
 
-    currentScreen_ = indicatorStatusScreen_;
-    state_.activeStatusDisplay = ActiveStatusDisplay::StatusLine;
+    setActiveStatusDisplay(ActiveStatusDisplay::IndicatorStatusLine);
 
     // Prepare old status line's cursor position and some other flags.
-    indicatorStatusScreen_.cursor() = {};
-    indicatorStatusScreen_.updateCursorIterator();
+    indicatorStatusScreen_.moveCursorTo({}, {});
     indicatorStatusScreen_.cursor().graphicsRendition.foregroundColor = colors.foreground;
     indicatorStatusScreen_.cursor().graphicsRendition.backgroundColor = colors.background;
 
@@ -497,7 +542,23 @@ void Terminal::updateIndicatorStatusLine()
         indicatorStatusScreen_.cursor().graphicsRendition.foregroundColor = BrightColor::Red;
         indicatorStatusScreen_.cursor().graphicsRendition.flags |= CellFlags::Bold;
         indicatorStatusScreen_.writeTextFromExternal(" (PROTECTED)");
-        indicatorStatusScreen_.cursor().graphicsRendition.foregroundColor = DefaultColor();
+        indicatorStatusScreen_.cursor().graphicsRendition.foregroundColor = colors.foreground;
+        indicatorStatusScreen_.cursor().graphicsRendition.flags &= ~CellFlags::Bold;
+    }
+
+    if (state_.executionMode != ExecutionMode::Normal)
+    {
+        indicatorStatusScreen_.writeTextFromExternal(" | ");
+        indicatorStatusScreen_.cursor().graphicsRendition.foregroundColor = BrightColor::Yellow;
+        indicatorStatusScreen_.cursor().graphicsRendition.flags |= CellFlags::Bold;
+        indicatorStatusScreen_.writeTextFromExternal("TRACING");
+        if (!traceHandler_.pendingSequences().empty())
+            indicatorStatusScreen_.writeTextFromExternal(
+                fmt::format(" (#{}): {}",
+                            traceHandler_.pendingSequences().size(),
+                            traceHandler_.pendingSequences().front()));
+
+        indicatorStatusScreen_.cursor().graphicsRendition.foregroundColor = colors.foreground;
         indicatorStatusScreen_.cursor().graphicsRendition.flags &= ~CellFlags::Bold;
     }
 
@@ -543,11 +604,6 @@ void Terminal::updateIndicatorStatusLine()
 
         indicatorStatusScreen_.writeTextFromExternal(rightString);
     }
-
-    // Cleaning up.
-    state_.activeStatusDisplay = savedActiveStatusDisplay;
-    currentScreen_ = savedActiveDisplay;
-    verifyState();
 }
 
 bool Terminal::sendKeyPressEvent(Key _key, Modifier _modifier, Timestamp _now)
@@ -1793,8 +1849,6 @@ void Terminal::setActiveStatusDisplay(ActiveStatusDisplay activeDisplay)
     if (state_.activeStatusDisplay == activeDisplay)
         return;
 
-    assert(&currentScreen_.get() != &indicatorStatusScreen_);
-
     state_.activeStatusDisplay = activeDisplay;
 
     // clang-format off
@@ -1813,6 +1867,9 @@ void Terminal::setActiveStatusDisplay(ActiveStatusDisplay activeDisplay)
             break;
         case ActiveStatusDisplay::StatusLine:
             currentScreen_ = hostWritableStatusLineScreen_;
+            break;
+        case ActiveStatusDisplay::IndicatorStatusLine:
+            currentScreen_ = indicatorStatusScreen_;
             break;
     }
     // clang-format on
@@ -2034,5 +2091,69 @@ void Terminal::popColorPalette(size_t slot)
     if (slot == MagicStackTopId)
         state_.savedColorPalettes.pop_back();
 }
+
+// {{{ TraceHandler
+TraceHandler::TraceHandler(Terminal& terminal): _terminal { terminal }
+{
+}
+
+void TraceHandler::executeControlCode(char controlCode)
+{
+    auto seq = Sequence {};
+    seq.setCategory(FunctionCategory::C0);
+    seq.setFinalChar(controlCode);
+    _pendingSequences.emplace_back(std::move(seq));
+}
+
+void TraceHandler::processSequence(Sequence const& sequence)
+{
+    _pendingSequences.emplace_back(sequence);
+}
+
+void TraceHandler::writeText(char32_t codepoint)
+{
+    _pendingSequences.emplace_back(codepoint);
+}
+
+void TraceHandler::writeText(std::string_view codepoints, size_t cellCount)
+{
+    _pendingSequences.emplace_back(CodepointSequence { codepoints, cellCount });
+}
+
+void TraceHandler::flushAllPending()
+{
+    for (auto const& pendingSequence: _pendingSequences)
+        flushOne(pendingSequence);
+    _pendingSequences.clear();
+}
+
+void TraceHandler::flushOne()
+{
+    if (!_pendingSequences.empty())
+    {
+        flushOne(_pendingSequences.front());
+        _pendingSequences.pop_front();
+    }
+}
+
+void TraceHandler::flushOne(PendingSequence const& pendingSequence)
+{
+    if (auto const* seq = std::get_if<Sequence>(&pendingSequence))
+    {
+        fmt::print("\t{}\n", seq->text());
+        _terminal.activeDisplay().processSequence(*seq);
+    }
+    else if (auto const* codepoint = std::get_if<char32_t>(&pendingSequence))
+    {
+        fmt::print("\t'{}'\n", unicode::convert_to<char>(*codepoint));
+        _terminal.activeDisplay().writeText(*codepoint);
+    }
+    else if (auto const* codepoints = std::get_if<CodepointSequence>(&pendingSequence))
+    {
+        fmt::print("\t\"{}\"   ; {} cells\n", codepoints->text, codepoints->cellCount);
+        _terminal.activeDisplay().writeText(codepoints->text, codepoints->cellCount);
+    }
+}
+// }}}
 
 } // namespace terminal

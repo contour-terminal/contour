@@ -1007,6 +1007,32 @@ bool TerminalSession::operator()(actions::ToggleTitleBar)
     return true;
 }
 
+// {{{ Trace debug mode
+bool TerminalSession::operator()(actions::TraceBreakAtEmptyQueue)
+{
+    terminal_.setExecutionMode(ExecutionMode::BreakAtEmptyQueue);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::TraceEnter)
+{
+    terminal_.setExecutionMode(ExecutionMode::Waiting);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::TraceLeave)
+{
+    terminal_.setExecutionMode(ExecutionMode::Normal);
+    return true;
+}
+
+bool TerminalSession::operator()(actions::TraceStep)
+{
+    terminal_.setExecutionMode(ExecutionMode::SingleStep);
+    return true;
+}
+// }}}
+
 bool TerminalSession::operator()(actions::ViNormalMode)
 {
     terminal().inputHandler().setMode(ViMode::Normal);
@@ -1219,6 +1245,9 @@ uint8_t TerminalSession::matchModeFlags() const
 
     if (!terminal_.state().searchMode.pattern.empty())
         flags |= static_cast<uint8_t>(MatchModes::Flag::Search);
+
+    if (terminal_.executionMode() != ExecutionMode::Normal)
+        flags |= static_cast<uint8_t>(MatchModes::Flag::Trace);
 
     return flags;
 }

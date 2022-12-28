@@ -1,3 +1,4 @@
+#include <vtbackend/ControlCode.h>
 #include <vtbackend/Sequence.h>
 
 #include <crispy/escape.h>
@@ -53,6 +54,12 @@ std::string Sequence::raw() const
 string Sequence::text() const
 {
     stringstream sstr;
+
+    if (category_ == FunctionCategory::C0)
+    {
+        sstr << to_short_string(ControlCode::C0(finalChar_));
+        return sstr.str();
+    }
 
     sstr << fmt::format("{}", category_);
 
