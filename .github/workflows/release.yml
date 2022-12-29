@@ -112,6 +112,11 @@ jobs:
         run: ./scripts/ci-set-vars.sh
         env:
           REPOSITORY: ${{ github.event.repository.name }}
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ccache-osx_qt6-release
+          max-size: 256M
       - name: "Install dependencies"
         run: |
           set -ex
