@@ -20,7 +20,7 @@
 namespace terminal
 {
 
-bool RenderDoubleBuffer::swapBuffers(std::chrono::steady_clock::time_point _now) noexcept
+bool RenderDoubleBuffer::swapBuffers(std::chrono::steady_clock::time_point now) noexcept
 {
     // If the terminal thread (writer) cannot try_lock (w/o wait time)
     // the front buffer, it'll just flush back buffer instead of swapping
@@ -31,7 +31,7 @@ bool RenderDoubleBuffer::swapBuffers(std::chrono::steady_clock::time_point _now)
     if (!readerLock.try_lock())
         return false;
 
-    auto const _l = std::lock_guard<decltype(readerLock)>(readerLock, std::adopt_lock);
+    auto const _ = std::lock_guard<decltype(readerLock)>(readerLock, std::adopt_lock);
 
     for (;;)
     {
@@ -40,7 +40,7 @@ bool RenderDoubleBuffer::swapBuffers(std::chrono::steady_clock::time_point _now)
             break;
     }
 
-    lastUpdate = _now;
+    lastUpdate = now;
     state = RenderBufferState::WaitingForRefresh;
     return true;
 }

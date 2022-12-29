@@ -32,22 +32,22 @@ using Cell = PrimaryScreenCell;
 
 namespace
 {
-void logGridText(Grid<Cell> const& _grid, string const& _headline = "")
+void logGridText(Grid<Cell> const& grid, string const& headline = "")
 {
     UNSCOPED_INFO(fmt::format("Grid.dump(hist {}, max hist {}, size {}, ZI {}): {}",
-                              _grid.historyLineCount(),
-                              _grid.maxHistoryLineCount(),
-                              _grid.pageSize(),
-                              _grid.zero_index(),
-                              _headline));
+                              grid.historyLineCount(),
+                              grid.maxHistoryLineCount(),
+                              grid.pageSize(),
+                              grid.zero_index(),
+                              headline));
 
-    for (int line = -_grid.historyLineCount().as<int>(); line < _grid.pageSize().lines.as<int>(); ++line)
+    for (int line = -grid.historyLineCount().as<int>(); line < grid.pageSize().lines.as<int>(); ++line)
     {
         UNSCOPED_INFO(
             fmt::format("{:>2}: \"{}\" {}\n",
                         line,
-                        _grid.lineText(LineOffset::cast_from(line - _grid.historyLineCount().as<int>())),
-                        (unsigned) _grid.lineAt(LineOffset::cast_from(line)).flags()));
+                        grid.lineText(LineOffset::cast_from(line - grid.historyLineCount().as<int>())),
+                        (unsigned) grid.lineAt(LineOffset::cast_from(line)).flags()));
     }
 }
 
@@ -62,17 +62,17 @@ void logGridText(Grid<Cell> const& _grid, string const& _headline = "")
     fmt::print("{}\n", dumpGrid(grid));
 }
 
-Grid<Cell> setupGrid(PageSize _pageSize,
-                     bool _reflowOnResize,
-                     LineCount _maxHistoryLineCount,
+Grid<Cell> setupGrid(PageSize pageSize,
+                     bool reflowOnResize,
+                     LineCount maxHistoryLineCount,
                      std::initializer_list<std::string_view> init)
 {
-    auto grid = Grid<Cell>(_pageSize, _reflowOnResize, _maxHistoryLineCount);
+    auto grid = Grid<Cell>(pageSize, reflowOnResize, maxHistoryLineCount);
 
     int cursor = 0;
     for (string_view line: init)
     {
-        if (cursor == *_pageSize.lines)
+        if (cursor == *pageSize.lines)
             grid.scrollUp(LineCount(1));
         else
             ++cursor;
@@ -81,9 +81,9 @@ Grid<Cell> setupGrid(PageSize _pageSize,
 
         logGridText(grid,
                     fmt::format("setup grid at {}x{}x{}: line {}",
-                                _pageSize.columns,
-                                _pageSize.lines,
-                                _maxHistoryLineCount,
+                                pageSize.columns,
+                                pageSize.lines,
+                                maxHistoryLineCount,
                                 cursor - 1));
     }
 
@@ -131,12 +131,12 @@ constexpr Margin fullPageMargin(PageSize pageSize)
     return grid;
 }
 
-Grid<Cell> setupGridForResizeTests2x3xN(LineCount _maxHistoryLineCount)
+Grid<Cell> setupGridForResizeTests2x3xN(LineCount maxHistoryLineCount)
 {
     auto constexpr reflowOnResize = true;
     auto constexpr pageSize = PageSize { LineCount(2), ColumnCount(3) };
 
-    return setupGrid(pageSize, reflowOnResize, _maxHistoryLineCount, { "ABC", "DEF", "GHI", "JKL" });
+    return setupGrid(pageSize, reflowOnResize, maxHistoryLineCount, { "ABC", "DEF", "GHI", "JKL" });
 }
 
 Grid<Cell> setupGridForResizeTests2x3a3()

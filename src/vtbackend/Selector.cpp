@@ -28,15 +28,15 @@ namespace // {{{ helper
 {
 
     tuple<vector<Selection::Range>, CellLocation const, CellLocation const> prepare(
-        Selection const& _selection)
+        Selection const& selection)
     {
         vector<Selection::Range> result;
 
         auto const [from, to] = [&]() {
-            if (_selection.from() <= _selection.to())
-                return pair { _selection.from(), _selection.to() };
+            if (selection.from() <= selection.to())
+                return pair { selection.from(), selection.to() };
             else
-                return pair { _selection.to(), _selection.from() };
+                return pair { selection.to(), selection.from() };
         }();
 
         auto const numLines = to.line - from.line + 1;
@@ -48,25 +48,25 @@ namespace // {{{ helper
 // }}}
 
 // {{{ Selection
-void Selection::extend(CellLocation _to)
+void Selection::extend(CellLocation to)
 {
-    assert(state_ != State::Complete
+    assert(_state != State::Complete
            && "In order extend a selection, the selector must be active (started).");
-    state_ = State::InProgress;
-    to_ = _to;
-    onSelectionUpdated_();
+    _state = State::InProgress;
+    _to = to;
+    _onSelectionUpdated();
 }
 
 void Selection::complete()
 {
-    if (state_ == State::InProgress)
-        state_ = State::Complete;
+    if (_state == State::InProgress)
+        _state = State::Complete;
 }
 
-CellLocation Selection::stretchedColumn(SelectionHelper const& _grid, CellLocation _coord) noexcept
+CellLocation Selection::stretchedColumn(SelectionHelper const& grid, CellLocation coord) noexcept
 {
-    CellLocation stretched = _coord;
-    if (auto const w = _grid.cellWidth(_coord); w > 1) // wide character
+    CellLocation stretched = coord;
+    if (auto const w = grid.cellWidth(coord); w > 1) // wide character
     {
         stretched.column += ColumnOffset::cast_from(w - 1);
         return stretched;
@@ -75,21 +75,21 @@ CellLocation Selection::stretchedColumn(SelectionHelper const& _grid, CellLocati
     return stretched;
 }
 
-bool Selection::contains(CellLocation _coord) const noexcept
+bool Selection::contains(CellLocation coord) const noexcept
 {
-    return crispy::ascending(from_, _coord, to_) || crispy::ascending(to_, _coord, from_);
+    return crispy::ascending(_from, coord, _to) || crispy::ascending(_to, coord, _from);
 }
 
 bool Selection::containsLine(LineOffset line) const noexcept
 {
-    return crispy::ascending(from_.line, line, to_.line) || crispy::ascending(to_.line, line, from_.line);
+    return crispy::ascending(_from.line, line, _to.line) || crispy::ascending(_to.line, line, _from.line);
 }
 
-bool Selection::intersects(Rect _area) const noexcept
+bool Selection::intersects(Rect area) const noexcept
 {
     // TODO: make me more efficient
-    for (auto line = _area.top.as<LineOffset>(); line <= _area.bottom.as<LineOffset>(); ++line)
-        for (auto col = _area.left.as<ColumnOffset>(); col <= _area.right.as<ColumnOffset>(); ++col)
+    for (auto line = area.top.as<LineOffset>(); line <= area.bottom.as<LineOffset>(); ++line)
+        for (auto col = area.left.as<ColumnOffset>(); col <= area.right.as<ColumnOffset>(); ++col)
             if (contains({ line, col }))
                 return true;
 
@@ -100,7 +100,7 @@ std::vector<Selection::Range> Selection::ranges() const
 {
     auto [result, from, to] = prepare(*this);
 
-    auto const rightMargin = boxed_cast<ColumnOffset>(helper_.pageSize().columns - 1);
+    auto const rightMargin = boxed_cast<ColumnOffset>(_helper.pageSize().columns - 1);
 
     switch (result.size())
     {
@@ -128,42 +128,42 @@ std::vector<Selection::Range> Selection::ranges() const
 }
 // }}}
 // {{{ LinearSelection
-LinearSelection::LinearSelection(SelectionHelper const& _helper,
-                                 CellLocation _start,
+LinearSelection::LinearSelection(SelectionHelper const& helper,
+                                 CellLocation start,
                                  OnSelectionUpdated onSelectionUpdated):
-    Selection(_helper, _start, std::move(onSelectionUpdated))
+    Selection(helper, start, std::move(onSelectionUpdated))
 {
 }
 // }}}
 // {{{ WordWiseSelection
-WordWiseSelection::WordWiseSelection(SelectionHelper const& _helper,
-                                     CellLocation _start,
+WordWiseSelection::WordWiseSelection(SelectionHelper const& helper,
+                                     CellLocation start,
                                      OnSelectionUpdated onSelectionUpdated):
-    Selection(_helper, _start, std::move(onSelectionUpdated))
+    Selection(helper, start, std::move(onSelectionUpdated))
 {
-    from_ = extendSelectionBackward(from_);
-    to_ = extendSelectionForward(to_);
+    _from = extendSelectionBackward(_from);
+    _to = extendSelectionForward(_to);
 }
 
-CellLocation WordWiseSelection::extendSelectionBackward(CellLocation _pos) const noexcept
+CellLocation WordWiseSelection::extendSelectionBackward(CellLocation pos) const noexcept
 {
-    auto last = _pos;
+    auto last = pos;
     auto current = last;
     for (;;)
     {
         auto const wrapIntoPreviousLine =
-            *current.column == 0 && *current.line > 0 && helper_.wrappedLine(current.line);
+            *current.column == 0 && *current.line > 0 && _helper.wrappedLine(current.line);
         if (*current.column > 0)
             current.column--;
         else if (*current.line > 0 || wrapIntoPreviousLine)
         {
             current.line--;
-            current.column = boxed_cast<ColumnOffset>(helper_.pageSize().columns) - 1;
+            current.column = boxed_cast<ColumnOffset>(_helper.pageSize().columns) - 1;
         }
         else
             break;
 
-        if (helper_.wordDelimited(current))
+        if (_helper.wordDelimited(current))
             break;
         last = current;
     }
@@ -171,25 +171,25 @@ CellLocation WordWiseSelection::extendSelectionBackward(CellLocation _pos) const
     return last;
 }
 
-CellLocation WordWiseSelection::extendSelectionForward(CellLocation _pos) const noexcept
+CellLocation WordWiseSelection::extendSelectionForward(CellLocation pos) const noexcept
 {
-    auto last = _pos;
+    auto last = pos;
     auto current = last;
     for (;;)
     {
-        if (*current.column == *helper_.pageSize().columns - 1
-            && *current.line + 1 < *helper_.pageSize().lines && helper_.wrappedLine(current.line))
+        if (*current.column == *_helper.pageSize().columns - 1
+            && *current.line + 1 < *_helper.pageSize().lines && _helper.wrappedLine(current.line))
         {
             current.line++;
             current.column = ColumnOffset(0);
-            current = stretchedColumn(helper_, { current.line, current.column + 1 });
+            current = stretchedColumn(_helper, { current.line, current.column + 1 });
         }
 
-        if (*current.column + 1 < *helper_.pageSize().columns)
+        if (*current.column + 1 < *_helper.pageSize().columns)
         {
-            current = stretchedColumn(helper_, { current.line, current.column + 1 });
+            current = stretchedColumn(_helper, { current.line, current.column + 1 });
         }
-        else if (*current.line + 1 < *helper_.pageSize().lines)
+        else if (*current.line + 1 < *_helper.pageSize().lines)
         {
             current.line++;
             current.column = ColumnOffset(0);
@@ -197,71 +197,71 @@ CellLocation WordWiseSelection::extendSelectionForward(CellLocation _pos) const 
         else
             break;
 
-        if (helper_.wordDelimited(current))
+        if (_helper.wordDelimited(current))
             break;
         last = current;
     }
 
-    return stretchedColumn(helper_, last);
+    return stretchedColumn(_helper, last);
 }
 
-void WordWiseSelection::extend(CellLocation _to)
+void WordWiseSelection::extend(CellLocation to)
 {
-    if (_to >= from_) // extending to the right
+    if (to >= _from) // extending to the right
     {
-        from_ = extendSelectionBackward(from_);
-        Selection::extend(extendSelectionForward(_to));
+        _from = extendSelectionBackward(_from);
+        Selection::extend(extendSelectionForward(to));
     }
     else // extending to the left
     {
-        from_ = extendSelectionForward(from_);
-        Selection::extend(extendSelectionBackward(_to));
+        _from = extendSelectionForward(_from);
+        Selection::extend(extendSelectionBackward(to));
     }
 }
 // }}}
 // {{{ RectangularSelection
-RectangularSelection::RectangularSelection(SelectionHelper const& _helper,
-                                           CellLocation _start,
+RectangularSelection::RectangularSelection(SelectionHelper const& helper,
+                                           CellLocation start,
                                            OnSelectionUpdated onSelectionUpdated):
-    Selection(_helper, _start, std::move(onSelectionUpdated))
+    Selection(helper, start, std::move(onSelectionUpdated))
 {
 }
 
-bool RectangularSelection::contains(CellLocation _coord) const noexcept
+bool RectangularSelection::contains(CellLocation coord) const noexcept
 {
-    auto const [from, to] = orderedPoints(from_, to_);
+    auto const [from, to] = orderedPoints(_from, _to);
 
-    return crispy::ascending(from.line, _coord.line, to.line)
-           && crispy::ascending(from.column, _coord.column, to.column);
+    return crispy::ascending(from.line, coord.line, to.line)
+           && crispy::ascending(from.column, coord.column, to.column);
 }
 
-bool RectangularSelection::intersects(Rect _area) const noexcept
+bool RectangularSelection::intersects(Rect area) const noexcept
 {
-    auto const [from, to] = orderedPoints(from_, to_);
+    auto const [from, to] = orderedPoints(_from, _to);
 
     // selection is above area
-    if (to.line < _area.top.as<LineOffset>())
+    if (to.line < area.top.as<LineOffset>())
         return false;
 
     // selection is below area
-    if (from.line > _area.bottom.as<LineOffset>())
+    if (from.line > area.bottom.as<LineOffset>())
         return false;
 
     // selection starts at area-top
-    if (from.line == _area.top.as<LineOffset>())
-        return _area.left.as<ColumnOffset>() <= from.column && from.column <= _area.right.as<ColumnOffset>();
+    if (from.line == area.top.as<LineOffset>())
+        return area.left.as<ColumnOffset>() <= from.column && from.column <= area.right.as<ColumnOffset>();
 
     // selection ends at area-top
-    if (to.line == _area.bottom.as<LineOffset>())
-        return _area.left.as<ColumnOffset>() <= to.column && to.column <= _area.right.as<ColumnOffset>();
+    if (to.line == area.bottom.as<LineOffset>())
+        return area.left.as<ColumnOffset>() <= to.column && to.column <= area.right.as<ColumnOffset>();
 
     // innser
-    return _area.top.as<LineOffset>() < from.line && to.line < _area.bottom.as<LineOffset>();
+    return area.top.as<LineOffset>() < from.line && to.line < area.bottom.as<LineOffset>();
 }
 
 vector<Selection::Range> RectangularSelection::ranges() const
 {
-    auto const [from, to] = orderedPoints(from_, to_);
+    auto const [from, to] = orderedPoints(_from, _to);
 
     vector<Selection::Range> result;
     auto const numLines = to.line - from.line + 1;
@@ -271,7 +271,7 @@ vector<Selection::Range> RectangularSelection::ranges() const
     {
         auto const line = from.line + LineOffset::cast_from(i);
         auto const left = from.column;
-        auto const right = stretchedColumn(helper_, CellLocation { line, to.column }).column;
+        auto const right = stretchedColumn(_helper, CellLocation { line, to.column }).column;
         result[i] = Range { line, left, right };
     }
 
@@ -279,42 +279,42 @@ vector<Selection::Range> RectangularSelection::ranges() const
 }
 // }}}
 // {{{ FullLineSelection
-FullLineSelection::FullLineSelection(SelectionHelper const& _helper,
-                                     CellLocation _start,
+FullLineSelection::FullLineSelection(SelectionHelper const& helper,
+                                     CellLocation start,
                                      OnSelectionUpdated onSelectionUpdated):
-    Selection(_helper, _start, std::move(onSelectionUpdated))
+    Selection(helper, start, std::move(onSelectionUpdated))
 {
-    from_.column = ColumnOffset(0);
-    to_.column = boxed_cast<ColumnOffset>(helper_.pageSize().columns - 1);
+    _from.column = ColumnOffset(0);
+    _to.column = boxed_cast<ColumnOffset>(_helper.pageSize().columns - 1);
 
-    if (helper_.wrappedLine(from_.line))
+    if (_helper.wrappedLine(_from.line))
     {
-        while (helper_.wrappedLine(from_.line))
-            --from_.line;
+        while (_helper.wrappedLine(_from.line))
+            --_from.line;
     }
 }
 
-void FullLineSelection::extend(CellLocation _to)
+void FullLineSelection::extend(CellLocation to)
 {
-    if (_to.line >= from_.line)
+    if (to.line >= _from.line)
     {
-        from_.column = ColumnOffset(0);
-        _to.column = boxed_cast<ColumnOffset>(helper_.pageSize().columns - 1);
-        while (helper_.wrappedLine(_to.line + 1))
-            ++_to.line;
+        _from.column = ColumnOffset(0);
+        to.column = boxed_cast<ColumnOffset>(_helper.pageSize().columns - 1);
+        while (_helper.wrappedLine(to.line + 1))
+            ++to.line;
     }
     else
     {
-        if (_to.line < from_.line)
-            while (helper_.wrappedLine(from_.line + 1))
-                ++from_.line;
-        from_.column = boxed_cast<ColumnOffset>(helper_.pageSize().columns - 1);
-        _to.column = ColumnOffset(0);
-        while (helper_.wrappedLine(_to.line))
-            --_to.line;
+        if (to.line < _from.line)
+            while (_helper.wrappedLine(_from.line + 1))
+                ++_from.line;
+        _from.column = boxed_cast<ColumnOffset>(_helper.pageSize().columns - 1);
+        to.column = ColumnOffset(0);
+        while (_helper.wrappedLine(to.line))
+            --to.line;
     }
 
-    Selection::extend(_to);
+    Selection::extend(to);
 }
 // }}}
 

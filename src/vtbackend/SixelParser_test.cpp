@@ -25,10 +25,10 @@ using namespace terminal;
 namespace
 {
 
-SixelImageBuilder sixelImageBuilder(ImageSize _size, RGBAColor _defaultColor)
+SixelImageBuilder sixelImageBuilder(ImageSize size, RGBAColor defaultColor)
 {
-    auto ib = SixelImageBuilder(_size, 1, 1, _defaultColor, std::make_shared<SixelColorPalette>(16, 256));
-    ib.setRaster(1, 1, _size);
+    auto ib = SixelImageBuilder(size, 1, 1, defaultColor, std::make_shared<SixelColorPalette>(16, 256));
+    ib.setRaster(1, 1, size);
     return ib;
 }
 

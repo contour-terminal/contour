@@ -48,7 +48,7 @@ enum class CharsetTable
 };
 
 /// @returns the charset
-CharsetMap const* charsetMap(CharsetId _id) noexcept;
+CharsetMap const* charsetMap(CharsetId id) noexcept;
 
 /// Charset mapping API for tables G0, G1, G2, and G3.
 ///
@@ -57,7 +57,7 @@ class CharsetMapping
 {
   public:
     CharsetMapping() noexcept:
-        tables_ {
+        _tables {
             charsetMap(CharsetId::USASCII),
             charsetMap(CharsetId::USASCII),
             charsetMap(CharsetId::USASCII),
@@ -66,18 +66,18 @@ class CharsetMapping
     {
     }
 
-    [[nodiscard]] char32_t map(char32_t _code) noexcept
+    [[nodiscard]] char32_t map(char32_t code) noexcept
     {
         // TODO: could surely be implemented branchless with a jump-table and computed goto.
-        if (_code < 127)
+        if (code < 127)
         {
-            auto result = map(shift_, static_cast<char>(_code));
-            shift_ = selected_;
+            auto result = map(_shift, static_cast<char>(code));
+            _shift = _selected;
             return result;
         }
-        else if (_code != 127)
+        else if (code != 127)
         {
-            return static_cast<char32_t>(_code);
+            return static_cast<char32_t>(code);
         }
         else
         {
@@ -85,39 +85,39 @@ class CharsetMapping
         }
     }
 
-    [[nodiscard]] char32_t map(CharsetTable _table, char _code) const noexcept
+    [[nodiscard]] char32_t map(CharsetTable table, char code) const noexcept
     {
-        return (*tables_[static_cast<size_t>(_table)])[static_cast<uint8_t>(_code)];
+        return (*_tables[static_cast<size_t>(table)])[static_cast<uint8_t>(code)];
     }
 
-    constexpr void singleShift(CharsetTable _table) noexcept { shift_ = _table; }
+    constexpr void singleShift(CharsetTable table) noexcept { _shift = table; }
 
-    constexpr void selectDefaultTable(CharsetTable _table) noexcept
+    constexpr void selectDefaultTable(CharsetTable table) noexcept
     {
-        selected_ = _table;
-        shift_ = _table;
+        _selected = table;
+        _shift = table;
     }
 
-    [[nodiscard]] bool isSelected(CharsetTable _table, CharsetId _id) const noexcept
+    [[nodiscard]] bool isSelected(CharsetTable table, CharsetId id) const noexcept
     {
-        return tables_[static_cast<size_t>(_table)] == charsetMap(_id);
+        return _tables[static_cast<size_t>(table)] == charsetMap(id);
     }
 
-    [[nodiscard]] bool isSelected(CharsetId _id) const noexcept { return isSelected(currentTable(), _id); }
+    [[nodiscard]] bool isSelected(CharsetId id) const noexcept { return isSelected(currentTable(), id); }
 
-    void select(CharsetTable _table, CharsetId _id) noexcept
+    void select(CharsetTable table, CharsetId id) noexcept
     {
-        tables_[static_cast<size_t>(_table)] = charsetMap(_id);
+        _tables[static_cast<size_t>(table)] = charsetMap(id);
     }
 
-    [[nodiscard]] constexpr CharsetTable currentTable() const noexcept { return shift_; }
+    [[nodiscard]] constexpr CharsetTable currentTable() const noexcept { return _shift; }
 
   private:
-    CharsetTable shift_ = CharsetTable::G0;
-    CharsetTable selected_ = CharsetTable::G0;
+    CharsetTable _shift = CharsetTable::G0;
+    CharsetTable _selected = CharsetTable::G0;
 
     using Tables = std::array<CharsetMap const*, 4>;
-    Tables tables_;
+    Tables _tables;
 };
 
 } // namespace terminal

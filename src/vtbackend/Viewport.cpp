@@ -23,15 +23,15 @@
 namespace terminal
 {
 
-bool Viewport::scrollUp(LineCount _numLines)
+bool Viewport::scrollUp(LineCount numLines)
 {
     return scrollTo(
-        std::min(scrollOffset_ + _numLines.as<ScrollOffset>(), boxed_cast<ScrollOffset>(historyLineCount())));
+        std::min(_scrollOffset + numLines.as<ScrollOffset>(), boxed_cast<ScrollOffset>(historyLineCount())));
 }
 
-bool Viewport::scrollDown(LineCount _numLines)
+bool Viewport::scrollDown(LineCount numLines)
 {
-    return scrollTo(std::max(scrollOffset_ - _numLines.as<ScrollOffset>(), ScrollOffset(0)));
+    return scrollTo(std::max(_scrollOffset - numLines.as<ScrollOffset>(), ScrollOffset(0)));
 }
 
 bool Viewport::scrollToTop()
@@ -54,9 +54,9 @@ bool Viewport::forceScrollToBottom()
 
 bool Viewport::makeVisible(LineOffset lineOffset)
 {
-    auto const viewportTop = -scrollOffset_.as<LineOffset>() + boxed_cast<LineOffset>(scrollOff_);
-    auto const viewportBottom = boxed_cast<LineOffset>(screenLineCount() - 1) - scrollOffset_.as<int>()
-                                - boxed_cast<LineOffset>(scrollOff_);
+    auto const viewportTop = -_scrollOffset.as<LineOffset>() + boxed_cast<LineOffset>(_scrollOff);
+    auto const viewportBottom = boxed_cast<LineOffset>(screenLineCount() - 1) - _scrollOffset.as<int>()
+                                - boxed_cast<LineOffset>(_scrollOff);
 
     // Is the line above the viewport?
     if (!(viewportTop < lineOffset))
@@ -69,26 +69,26 @@ bool Viewport::makeVisible(LineOffset lineOffset)
     return false;
 }
 
-bool Viewport::scrollTo(ScrollOffset _offset)
+bool Viewport::scrollTo(ScrollOffset offset)
 {
-    if (scrollingDisabled() && _offset != ScrollOffset(0))
+    if (scrollingDisabled() && offset != ScrollOffset(0))
         return false;
 
-    if (_offset == scrollOffset_)
+    if (offset == _scrollOffset)
         return false;
 
-    if (0 <= *_offset && _offset <= boxed_cast<ScrollOffset>(historyLineCount()))
+    if (0 <= *offset && offset <= boxed_cast<ScrollOffset>(historyLineCount()))
     {
 #if defined(CONTOUR_LOG_VIEWPORT)
-        ViewportLog()("Scroll to offset {}", _offset);
+        ViewportLog()("Scroll to offset {}", offset);
 #endif
-        scrollOffset_ = _offset;
-        modified_();
+        _scrollOffset = offset;
+        _modified();
         return true;
     }
 
 #if defined(CONTOUR_LOG_VIEWPORT)
-    ViewportLog()("Scroll to offset {} ignored. Out of bounds.", _offset);
+    ViewportLog()("Scroll to offset {} ignored. Out of bounds.", offset);
 #endif
     return false;
 }
@@ -99,7 +99,7 @@ bool Viewport::scrollMarkUp()
         return false;
 
     auto const newScrollOffset =
-        terminal_.primaryScreen().findMarkerUpwards(-boxed_cast<LineOffset>(scrollOffset_));
+        _terminal.primaryScreen().findMarkerUpwards(-boxed_cast<LineOffset>(_scrollOffset));
     if (newScrollOffset.has_value())
         return scrollTo(boxed_cast<ScrollOffset>(-*newScrollOffset));
 
@@ -112,7 +112,7 @@ bool Viewport::scrollMarkDown()
         return false;
 
     auto const newScrollOffset =
-        terminal_.primaryScreen().findMarkerDownwards(-boxed_cast<LineOffset>(scrollOffset_));
+        _terminal.primaryScreen().findMarkerDownwards(-boxed_cast<LineOffset>(_scrollOffset));
     if (newScrollOffset)
         return scrollTo(boxed_cast<ScrollOffset>(-*newScrollOffset));
     else
@@ -123,18 +123,18 @@ bool Viewport::scrollMarkDown()
 
 LineCount Viewport::historyLineCount() const noexcept
 {
-    return terminal_.currentScreen().historyLineCount();
+    return _terminal.currentScreen().historyLineCount();
 }
 
 LineCount Viewport::screenLineCount() const noexcept
 {
-    return terminal_.pageSize().lines;
+    return _terminal.pageSize().lines;
 }
 
 bool Viewport::scrollingDisabled() const noexcept
 {
     // TODO: make configurable
-    return terminal_.isAlternateScreen();
+    return _terminal.isAlternateScreen();
 }
 
 } // namespace terminal

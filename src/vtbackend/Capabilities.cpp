@@ -81,9 +81,9 @@ using String = Cap<std::string_view>;
 namespace
 {
     template <typename T, typename... Ts>
-    constexpr auto defineCapabilities(T _element, Ts... _elements)
+    constexpr auto defineCapabilities(T element, Ts... elements)
     {
-        return std::array<T, 1 + sizeof...(Ts)>({ _element, _elements... });
+        return std::array<T, 1 + sizeof...(Ts)>({ element, elements... });
     }
 
     constexpr inline auto booleanCaps = defineCapabilities(
@@ -396,79 +396,79 @@ namespace
     // clang-format on
 } // namespace
 
-bool StaticDatabase::booleanCapability(Code _cap) const
+bool StaticDatabase::booleanCapability(Code value) const
 {
     for (auto const& cap: booleanCaps)
-        if (cap.code.code == _cap.code)
+        if (cap.code.code == value.code)
             return cap.value;
 
     return false;
 }
 
-unsigned StaticDatabase::numericCapability(Code _cap) const
+unsigned StaticDatabase::numericCapability(Code value) const
 {
     for (auto const& cap: numericalCaps)
-        if (cap.code.code == _cap.code)
+        if (cap.code.code == value.code)
             return cap.value;
 
     return npos;
 }
 
-string_view StaticDatabase::stringCapability(Code _cap) const
+string_view StaticDatabase::stringCapability(Code value) const
 {
     for (auto const& cap: stringCaps)
-        if (cap.code.code == _cap.code)
+        if (cap.code.code == value.code)
             return cap.value;
 
     return {};
 }
 
-bool StaticDatabase::booleanCapability(string_view _cap) const
+bool StaticDatabase::booleanCapability(string_view cap) const
 {
     for (auto const tcap: booleanCaps)
-        if (tcap.name == _cap || tcap.code == _cap)
+        if (tcap.name == cap || tcap.code == cap)
             return tcap.value;
 
     return false;
 }
 
-unsigned StaticDatabase::numericCapability(string_view _cap) const
+unsigned StaticDatabase::numericCapability(string_view cap) const
 {
     for (auto const tcap: numericalCaps)
-        if (tcap.name == _cap || tcap.code == _cap)
+        if (tcap.name == cap || tcap.code == cap)
             return tcap.value;
 
     return npos;
 }
 
-string_view StaticDatabase::stringCapability(string_view _cap) const
+string_view StaticDatabase::stringCapability(string_view cap) const
 {
     for (auto const tcap: stringCaps)
-        if (tcap.name == _cap || tcap.code == _cap)
+        if (tcap.name == cap || tcap.code == cap)
             return tcap.value;
 
     return {};
 }
 
-optional<Code> StaticDatabase::codeFromName(string_view _name) const
+optional<Code> StaticDatabase::codeFromName(string_view name) const
 {
     for (auto const& cap: numericalCaps)
-        if (cap.name == _name)
+        if (cap.name == name)
             return cap.code;
 
     for (auto const& cap: booleanCaps)
-        if (cap.name == _name)
+        if (cap.name == name)
             return cap.code;
 
     for (auto const& cap: stringCaps)
-        if (cap.name == _name)
+        if (cap.name == name)
             return cap.code;
 
     // using ranges::views::concat;
     // using ranges::views::transform;
     // auto const tr = transform([](auto cap) { return std::pair { cap.name, cap.code }; });
     // for (auto const cap: concat(numericalCaps | tr, booleanCaps | tr, stringCaps | tr))
-    //     if (cap.first == _name)
+    //     if (cap.first == name)
     //         return cap.second;
 
     return nullopt;

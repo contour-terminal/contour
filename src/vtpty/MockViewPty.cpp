@@ -22,10 +22,10 @@ using std::tuple;
 namespace terminal
 {
 
-void MockViewPty::setReadData(std::string_view _data)
+void MockViewPty::setReadData(std::string_view data)
 {
     assert(outputBuffer_.empty());
-    outputBuffer_ = _data;
+    outputBuffer_ = data;
 }
 
 PtySlave& MockViewPty::slave() noexcept
@@ -60,10 +60,10 @@ terminal::PageSize MockViewPty::pageSize() const noexcept
     return pageSize_;
 }
 
-void MockViewPty::resizeScreen(terminal::PageSize _cells, std::optional<crispy::ImageSize> _pixels)
+void MockViewPty::resizeScreen(terminal::PageSize cells, std::optional<crispy::ImageSize> pixels)
 {
-    pageSize_ = _cells;
-    pixelSize_ = _pixels;
+    pageSize_ = cells;
+    pixelSize_ = pixels;
 }
 
 void MockViewPty::start()

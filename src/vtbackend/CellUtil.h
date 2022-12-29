@@ -25,7 +25,7 @@ namespace terminal::CellUtil
 
 [[nodiscard]] inline RGBColorPair makeColors(ColorPalette const& colorPalette,
                                              CellFlags cellFlags,
-                                             bool _reverseVideo,
+                                             bool reverseVideo,
                                              Color foregroundColor,
                                              Color backgroundColor,
                                              bool blinkingState_,
@@ -38,8 +38,8 @@ namespace terminal::CellUtil
     auto constexpr bgMode = ColorMode::Normal;
 
     auto const [fgColorTarget, bgColorTarget] =
-        _reverseVideo ? std::pair { ColorTarget::Background, ColorTarget::Foreground }
-                      : std::pair { ColorTarget::Foreground, ColorTarget::Background };
+        reverseVideo ? std::pair { ColorTarget::Background, ColorTarget::Foreground }
+                     : std::pair { ColorTarget::Foreground, ColorTarget::Background };
 
     auto rgbColors = RGBColorPair { apply(colorPalette, foregroundColor, fgColorTarget, fgMode),
                                     apply(colorPalette, backgroundColor, bgColorTarget, bgMode) };

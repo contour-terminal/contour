@@ -13,6 +13,7 @@
  */
 #include <vtbackend/MockTerm.h>
 #include <vtbackend/Terminal.h>
+#include <vtbackend/primitives.h>
 
 #include <vtpty/MockPty.h>
 
@@ -28,8 +29,6 @@
 #include <iterator>
 #include <string>
 #include <vector>
-
-#include "vtbackend/primitives.h"
 
 using namespace std;
 using terminal::CellFlags;
@@ -50,12 +49,12 @@ decltype(auto) e(S const& s)
 }
 
 /// Takes a textual screenshot using the terminals render buffer.
-vector<string> textScreenshot(terminal::Terminal const& _terminal)
+vector<string> textScreenshot(terminal::Terminal const& terminal)
 {
-    terminal::RenderBufferRef renderBuffer = _terminal.renderBuffer();
+    terminal::RenderBufferRef renderBuffer = terminal.renderBuffer();
 
     vector<string> lines;
-    lines.resize(_terminal.pageSize().lines.as<size_t>());
+    lines.resize(terminal.pageSize().lines.as<size_t>());
 
     terminal::CellLocation lastPos = {};
     size_t lastCount = 0;
@@ -79,18 +78,18 @@ vector<string> textScreenshot(terminal::Terminal const& _terminal)
     return lines;
 }
 
-string trimRight(string _text)
+string trimRight(string text)
 {
     constexpr auto Whitespaces = "\x20\t\r\n"sv;
-    while (!_text.empty() && Whitespaces.find(_text.back()) != Whitespaces.npos)
-        _text.resize(_text.size() - 1);
-    return _text;
+    while (!text.empty() && Whitespaces.find(text.back()) != Whitespaces.npos)
+        text.resize(text.size() - 1);
+    return text;
 }
 
-string join(vector<string> const& _lines)
+string join(vector<string> const& lines)
 {
     string output;
-    for (string const& line: _lines)
+    for (string const& line: lines)
     {
         output += trimRight(line);
         output += '\n';
@@ -99,9 +98,9 @@ string join(vector<string> const& _lines)
 }
 
 template <typename T>
-std::string trimmedTextScreenshot(MockTerm<T> const& _mt)
+std::string trimmedTextScreenshot(MockTerm<T> const& mt)
 {
-    return trimRight(join(textScreenshot(_mt.terminal)));
+    return trimRight(join(textScreenshot(mt.terminal)));
 }
 
 [[maybe_unused]] void logScreenText(terminal::Terminal const& terminal, std::string const& headline = "")

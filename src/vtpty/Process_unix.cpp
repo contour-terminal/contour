@@ -82,18 +82,18 @@ namespace
         return strerror(errno);
     }
 
-    [[nodiscard]] char** createArgv(string const& _arg0,
-                                    std::vector<string> const& _args,
+    [[nodiscard]] char** createArgv(string const& arg0,
+                                    std::vector<string> const& args,
                                     size_t startIndex = 0)
     {
         // Factor out in order to avoid false-positive by static analysers.
-        auto const argCount = _args.size() - startIndex;
-        assert(startIndex <= _args.size());
+        auto const argCount = args.size() - startIndex;
+        assert(startIndex <= args.size());
 
         char** argv = new char*[argCount + 2];
-        argv[0] = strdup(_arg0.c_str());
+        argv[0] = strdup(arg0.c_str());
         for (size_t i = 0; i < argCount; ++i)
-            argv[i + 1] = strdup(_args[i + startIndex].c_str());
+            argv[i + 1] = strdup(args[i + startIndex].c_str());
         argv[argCount + 1] = nullptr;
         return argv;
     }
@@ -118,16 +118,16 @@ struct Process::Private
     mutable std::mutex exitStatusMutex {};
     mutable std::optional<Process::ExitStatus> exitStatus {};
 
-    [[nodiscard]] std::optional<ExitStatus> checkStatus(bool _waitForExit) const;
+    [[nodiscard]] std::optional<ExitStatus> checkStatus(bool waitForExit) const;
 };
 
-Process::Process(string const& _path,
-                 vector<string> const& _args,
-                 FileSystem::path const& _cwd,
-                 Environment const& _env,
+Process::Process(string const& path,
+                 vector<string> const& args,
+                 FileSystem::path const& cwd,
+                 Environment const& env,
                  bool escapeSandbox,
-                 unique_ptr<Pty> _pty):
-    d(new Private { _path, _args, _cwd, _env, escapeSandbox, std::move(_pty) }, [](Private* p) { delete p; })
+                 unique_ptr<Pty> pty):
+    d(new Private { path, args, cwd, env, escapeSandbox, std::move(pty) }, [](Private* p) { delete p; })
 {
 }
 
@@ -281,7 +281,7 @@ optional<Process::ExitStatus> Process::checkStatus() const
     return d->checkStatus(false);
 }
 
-optional<Process::ExitStatus> Process::Private::checkStatus(bool _waitForExit) const
+optional<Process::ExitStatus> Process::Private::checkStatus(bool waitForExit) const
 {
     {
         auto const _ = lock_guard { exitStatusMutex };
@@ -291,7 +291,7 @@ optional<Process::ExitStatus> Process::Private::checkStatus(bool _waitForExit) c
 
     assert(pid != -1);
     int status = 0;
-    int const rv = waitpid(pid, &status, _waitForExit ? 0 : WNOHANG);
+    int const rv = waitpid(pid, &status, waitForExit ? 0 : WNOHANG);
 
     if (rv < 0)
     {
@@ -300,7 +300,7 @@ optional<Process::ExitStatus> Process::Private::checkStatus(bool _waitForExit) c
             return exitStatus;
         throw runtime_error { "waitpid: "s + getLastErrorAsString() };
     }
-    else if (rv == 0 && !_waitForExit)
+    else if (rv == 0 && !waitForExit)
         return nullopt;
     else
     {
@@ -319,12 +319,12 @@ optional<Process::ExitStatus> Process::Private::checkStatus(bool _waitForExit) c
     }
 }
 
-void Process::terminate(TerminationHint _terminationHint)
+void Process::terminate(TerminationHint terminationHint)
 {
     if (!alive())
         return;
 
-    ::kill(d->pid, _terminationHint == TerminationHint::Hangup ? SIGHUP : SIGTERM);
+    ::kill(d->pid, terminationHint == TerminationHint::Hangup ? SIGHUP : SIGTERM);
 }
 
 Process::ExitStatus Process::wait()

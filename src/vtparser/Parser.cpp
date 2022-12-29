@@ -26,7 +26,7 @@ namespace terminal::parser
 
 using namespace std;
 
-void parserTableDot(std::ostream& _os) // {{{
+void parserTableDot(std::ostream& os) // {{{
 {
     using Transition = pair<State, State>;
     using Range = ParserTable::Range;
@@ -42,8 +42,8 @@ void parserTableDot(std::ostream& _os) // {{{
             auto const ch = static_cast<uint8_t>(i);
             if (targetState != State::Undefined)
             {
-                //_os << fmt::format("({}, 0x{:0X}) -> {}\n", static_cast<State>(sourceState), ch,
-                // targetState);
+                // os << fmt::format("({}, 0x{:0X}) -> {}\n", static_cast<State>(sourceState), ch,
+                //  targetState);
                 auto const t = Transition { static_cast<State>(sourceState), targetState };
                 if (!transitions[t].empty() && ch == transitions[t].back().last + 1)
                     transitions[t].back().last++;
@@ -54,11 +54,11 @@ void parserTableDot(std::ostream& _os) // {{{
     }
     // TODO: isReachableFromAnywhere(targetState) to check if x can be reached from anywhere.
 
-    _os << "digraph {\n";
-    _os << "  node [shape=box];\n";
-    _os << "  ranksep = 0.75;\n";
-    _os << "  rankdir = LR;\n";
-    _os << "  concentrate = true;\n";
+    os << "digraph {\n";
+    os << "  node [shape=box];\n";
+    os << "  ranksep = 0.75;\n";
+    os << "  rankdir = LR;\n";
+    os << "  concentrate = true;\n";
 
     unsigned groundCount = 0;
 
@@ -75,46 +75,46 @@ void parserTableDot(std::ostream& _os) // {{{
                                          : fmt::format("{}", targetState);
 
         // if (isReachableFromAnywhere(targetState))
-        //     _os << fmt::format("  {} [style=dashed, style=\"rounded, filled\", fillcolor=yellow];\n",
+        //     os << fmt::format("  {} [style=dashed, style=\"rounded, filled\", fillcolor=yellow];\n",
         //     sourceStateName);
 
         if (targetState == State::Ground && sourceState != State::Ground)
-            _os << fmt::format("  \"{}\" [style=\"dashed, filled\", fillcolor=gray, label=\"ground\"];\n",
-                               targetStateName);
+            os << fmt::format("  \"{}\" [style=\"dashed, filled\", fillcolor=gray, label=\"ground\"];\n",
+                              targetStateName);
 
-        _os << fmt::format(R"(  "{}" -> "{}" )", sourceState, targetStateName);
-        _os << "[";
-        _os << "label=\"";
+        os << fmt::format(R"(  "{}" -> "{}" )", sourceState, targetStateName);
+        os << "[";
+        os << "label=\"";
         for (auto const&& [rangeCount, u]: crispy::indexed(t.second))
         {
             if (rangeCount)
             {
-                _os << ", ";
+                os << ", ";
                 if (rangeCount % 3 == 0)
-                    _os << "\\n";
+                    os << "\\n";
             }
             if (u.first == u.last)
-                _os << fmt::format("{:02X}", u.first);
+                os << fmt::format("{:02X}", u.first);
             else
-                _os << fmt::format("{:02X}-{:02X}", u.first, u.last);
+                os << fmt::format("{:02X}-{:02X}", u.first, u.last);
         }
-        _os << "\"";
-        _os << "]";
-        _os << ";\n";
+        os << "\"";
+        os << "]";
+        os << ";\n";
     }
 
     // equal ranks
-    _os << "  { rank=same; ";
+    os << "  { rank=same; ";
     for (auto const state: { State::CSI_Entry, State::DCS_Entry, State::OSC_String })
-        _os << fmt::format(R"("{}"; )", state);
-    _os << "};\n";
+        os << fmt::format(R"("{}"; )", state);
+    os << "};\n";
 
-    _os << "  { rank=same; ";
+    os << "  { rank=same; ";
     for (auto const state: { State::CSI_Param, State::DCS_Param, State::OSC_String })
-        _os << fmt::format(R"("{}"; )", state);
-    _os << "};\n";
+        os << fmt::format(R"("{}"; )", state);
+    os << "};\n";
 
-    _os << "}\n";
+    os << "}\n";
 }
 // }}}
 

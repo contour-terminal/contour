@@ -41,7 +41,7 @@ class ConPty: public Pty
     void wakeupReader() override;
     int write(char const* buf, size_t size) override;
     [[nodiscard]] PageSize pageSize() const noexcept override;
-    void resizeScreen(PageSize _cells, std::optional<crispy::ImageSize> _pixels = std::nullopt) override;
+    void resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixels = std::nullopt) override;
 
     PtySlave& slave() noexcept override;
     HPCON master() const noexcept { return master_; }

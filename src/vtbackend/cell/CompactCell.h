@@ -84,30 +84,30 @@ class CRISPY_PACKED CompactCell
     CompactCell() noexcept;
     CompactCell(CompactCell const& v) noexcept;
     CompactCell& operator=(CompactCell const& v) noexcept;
-    explicit CompactCell(GraphicsAttributes _attributes, HyperlinkId hyperlink = {}) noexcept;
+    explicit CompactCell(GraphicsAttributes attributes, HyperlinkId hyperlink = {}) noexcept;
 
     CompactCell(CompactCell&&) noexcept = default;
     CompactCell& operator=(CompactCell&&) noexcept = default;
     ~CompactCell() = default;
 
     void reset() noexcept;
-    void reset(GraphicsAttributes const& _attributes) noexcept;
-    void reset(GraphicsAttributes const& _attributes, HyperlinkId _hyperlink) noexcept;
+    void reset(GraphicsAttributes const& attributes) noexcept;
+    void reset(GraphicsAttributes const& attributes, HyperlinkId hyperlink) noexcept;
 
-    void write(GraphicsAttributes const& _attributes, char32_t _ch, uint8_t _width) noexcept;
-    void write(GraphicsAttributes const& _attributes,
-               char32_t _ch,
-               uint8_t _width,
-               HyperlinkId _hyperlink) noexcept;
+    void write(GraphicsAttributes const& attributes, char32_t ch, uint8_t width) noexcept;
+    void write(GraphicsAttributes const& attributes,
+               char32_t ch,
+               uint8_t width,
+               HyperlinkId hyperlink) noexcept;
 
-    void writeTextOnly(char32_t _ch, uint8_t _width) noexcept;
+    void writeTextOnly(char32_t ch, uint8_t width) noexcept;
 
     [[nodiscard]] std::u32string codepoints() const;
     [[nodiscard]] char32_t codepoint(size_t i) const noexcept;
     [[nodiscard]] std::size_t codepointCount() const noexcept;
 
     [[nodiscard]] constexpr uint8_t width() const noexcept;
-    void setWidth(uint8_t _width) noexcept;
+    void setWidth(uint8_t width) noexcept;
 
     [[nodiscard]] CellFlags flags() const noexcept;
 
@@ -115,8 +115,8 @@ class CRISPY_PACKED CompactCell
 
     void resetFlags() noexcept
     {
-        if (extra_)
-            extra_->flags = CellFlags::None;
+        if (_extra)
+            _extra->flags = CellFlags::None;
     }
 
     void resetFlags(CellFlags flags) noexcept { extra().flags = flags; }
@@ -131,12 +131,12 @@ class CRISPY_PACKED CompactCell
     [[nodiscard]] std::shared_ptr<ImageFragment> imageFragment() const noexcept;
     void setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, CellLocation offset);
 
-    void setCharacter(char32_t _codepoint) noexcept;
-    [[nodiscard]] int appendCharacter(char32_t _codepoint) noexcept;
+    void setCharacter(char32_t codepoint) noexcept;
+    [[nodiscard]] int appendCharacter(char32_t codepoint) noexcept;
     [[nodiscard]] std::string toUtf8() const;
 
     [[nodiscard]] HyperlinkId hyperlink() const noexcept;
-    void setHyperlink(HyperlinkId _hyperlink);
+    void setHyperlink(HyperlinkId hyperlink);
 
     [[nodiscard]] bool empty() const noexcept;
 
@@ -149,10 +149,10 @@ class CRISPY_PACKED CompactCell
     void createExtra(Args... args) noexcept;
 
     // CompactCell data
-    char32_t codepoint_ = 0; /// Primary Unicode codepoint to be displayed.
-    Color foregroundColor_ = DefaultColor();
-    Color backgroundColor_ = DefaultColor();
-    crispy::Owned<CellExtra> extra_ = {};
+    char32_t _codepoint = 0; /// Primary Unicode codepoint to be displayed.
+    Color _foregroundColor = DefaultColor();
+    Color _backgroundColor = DefaultColor();
+    crispy::Owned<CellExtra> _extra = {};
     // TODO(perf) ^^ use CellExtraId = boxed<int24_t> into pre-alloc'ed vector<CellExtra>.
 };
 
@@ -162,11 +162,11 @@ inline void CompactCell::createExtra(Args... args) noexcept
 {
     try
     {
-        extra_.reset(new CellExtra(std::forward<Args>(args)...));
+        _extra.reset(new CellExtra(std::forward<Args>(args)...));
     }
     catch (std::bad_alloc const&)
     {
-        Require(extra_.get() != nullptr);
+        Require(_extra.get() != nullptr);
     }
 }
 
@@ -175,167 +175,167 @@ inline CompactCell::CompactCell() noexcept
     setWidth(1);
 }
 
-inline CompactCell::CompactCell(GraphicsAttributes _attributes, HyperlinkId hyperlink) noexcept:
-    foregroundColor_ { _attributes.foregroundColor }, backgroundColor_ { _attributes.backgroundColor }
+inline CompactCell::CompactCell(GraphicsAttributes attributes, HyperlinkId hyperlink) noexcept:
+    _foregroundColor { attributes.foregroundColor }, _backgroundColor { attributes.backgroundColor }
 {
     setWidth(1);
     setHyperlink(hyperlink);
 
-    if (_attributes.underlineColor != DefaultColor() || extra_)
-        extra().underlineColor = _attributes.underlineColor;
+    if (attributes.underlineColor != DefaultColor() || _extra)
+        extra().underlineColor = attributes.underlineColor;
 
-    if (_attributes.flags != CellFlags::None || extra_)
-        extra().flags = _attributes.flags;
+    if (attributes.flags != CellFlags::None || _extra)
+        extra().flags = attributes.flags;
 }
 
 inline CompactCell::CompactCell(CompactCell const& v) noexcept:
-    codepoint_ { v.codepoint_ },
-    foregroundColor_ { v.foregroundColor_ },
-    backgroundColor_ { v.backgroundColor_ }
+    _codepoint { v._codepoint },
+    _foregroundColor { v._foregroundColor },
+    _backgroundColor { v._backgroundColor }
 {
-    if (v.extra_)
-        createExtra(*v.extra_);
+    if (v._extra)
+        createExtra(*v._extra);
 }
 
 inline CompactCell& CompactCell::operator=(CompactCell const& v) noexcept
 {
-    codepoint_ = v.codepoint_;
-    foregroundColor_ = v.foregroundColor_;
-    backgroundColor_ = v.backgroundColor_;
-    if (v.extra_)
-        createExtra(*v.extra_);
+    _codepoint = v._codepoint;
+    _foregroundColor = v._foregroundColor;
+    _backgroundColor = v._backgroundColor;
+    if (v._extra)
+        createExtra(*v._extra);
     return *this;
 }
 // }}}
 // {{{ impl: reset
 inline void CompactCell::reset() noexcept
 {
-    codepoint_ = 0;
-    foregroundColor_ = DefaultColor();
-    backgroundColor_ = DefaultColor();
-    extra_.reset();
+    _codepoint = 0;
+    _foregroundColor = DefaultColor();
+    _backgroundColor = DefaultColor();
+    _extra.reset();
 }
 
-inline void CompactCell::reset(GraphicsAttributes const& _attributes) noexcept
+inline void CompactCell::reset(GraphicsAttributes const& attributes) noexcept
 {
-    codepoint_ = 0;
-    foregroundColor_ = _attributes.foregroundColor;
-    backgroundColor_ = _attributes.backgroundColor;
-    extra_.reset();
-    if (_attributes.flags != CellFlags::None)
-        extra().flags = _attributes.flags;
-    if (_attributes.underlineColor != DefaultColor())
-        extra().underlineColor = _attributes.underlineColor;
+    _codepoint = 0;
+    _foregroundColor = attributes.foregroundColor;
+    _backgroundColor = attributes.backgroundColor;
+    _extra.reset();
+    if (attributes.flags != CellFlags::None)
+        extra().flags = attributes.flags;
+    if (attributes.underlineColor != DefaultColor())
+        extra().underlineColor = attributes.underlineColor;
 }
 
-inline void CompactCell::write(GraphicsAttributes const& _attributes, char32_t _ch, uint8_t _width) noexcept
+inline void CompactCell::write(GraphicsAttributes const& attributes, char32_t ch, uint8_t width) noexcept
 {
-    setWidth(_width);
+    setWidth(width);
 
-    codepoint_ = _ch;
-    if (extra_)
+    _codepoint = ch;
+    if (_extra)
     {
-        extra_->codepoints.clear();
-        extra_->imageFragment = {};
+        _extra->codepoints.clear();
+        _extra->imageFragment = {};
     }
 
-    foregroundColor_ = _attributes.foregroundColor;
-    backgroundColor_ = _attributes.backgroundColor;
+    _foregroundColor = attributes.foregroundColor;
+    _backgroundColor = attributes.backgroundColor;
 
-    if (_attributes.flags != CellFlags::None || extra_)
-        extra().flags = _attributes.flags;
+    if (attributes.flags != CellFlags::None || _extra)
+        extra().flags = attributes.flags;
 
-    if (_attributes.underlineColor != DefaultColor())
-        extra().underlineColor = _attributes.underlineColor;
+    if (attributes.underlineColor != DefaultColor())
+        extra().underlineColor = attributes.underlineColor;
 }
 
-inline void CompactCell::write(GraphicsAttributes const& _attributes,
-                               char32_t _ch,
-                               uint8_t _width,
-                               HyperlinkId _hyperlink) noexcept
+inline void CompactCell::write(GraphicsAttributes const& attributes,
+                               char32_t ch,
+                               uint8_t width,
+                               HyperlinkId hyperlink) noexcept
 {
-    writeTextOnly(_ch, _width);
-    if (extra_)
+    writeTextOnly(ch, width);
+    if (_extra)
     {
         // Writing text into a cell destroys the image fragment (as least for Sixels).
-        extra_->imageFragment = {};
+        _extra->imageFragment = {};
     }
 
-    foregroundColor_ = _attributes.foregroundColor;
-    backgroundColor_ = _attributes.backgroundColor;
+    _foregroundColor = attributes.foregroundColor;
+    _backgroundColor = attributes.backgroundColor;
 
-    if (_attributes.flags != CellFlags::None || extra_ || _attributes.underlineColor != DefaultColor()
-        || !!_hyperlink)
+    if (attributes.flags != CellFlags::None || _extra || attributes.underlineColor != DefaultColor()
+        || !!hyperlink)
     {
         CellExtra& ext = extra();
-        ext.underlineColor = _attributes.underlineColor;
-        ext.hyperlink = _hyperlink;
-        ext.flags = _attributes.flags;
+        ext.underlineColor = attributes.underlineColor;
+        ext.hyperlink = hyperlink;
+        ext.flags = attributes.flags;
     }
 }
 
-inline void CompactCell::writeTextOnly(char32_t _ch, uint8_t _width) noexcept
+inline void CompactCell::writeTextOnly(char32_t ch, uint8_t width) noexcept
 {
-    setWidth(_width);
-    codepoint_ = _ch;
-    if (extra_)
-        extra_->codepoints.clear();
+    setWidth(width);
+    _codepoint = ch;
+    if (_extra)
+        _extra->codepoints.clear();
 }
 
-inline void CompactCell::reset(GraphicsAttributes const& _attributes, HyperlinkId _hyperlink) noexcept
+inline void CompactCell::reset(GraphicsAttributes const& attributes, HyperlinkId hyperlink) noexcept
 {
-    codepoint_ = 0;
-    foregroundColor_ = _attributes.foregroundColor;
-    backgroundColor_ = _attributes.backgroundColor;
+    _codepoint = 0;
+    _foregroundColor = attributes.foregroundColor;
+    _backgroundColor = attributes.backgroundColor;
 
-    extra_.reset();
-    if (_attributes.underlineColor != DefaultColor())
-        extra().underlineColor = _attributes.underlineColor;
-    if (_attributes.flags != CellFlags::None)
-        extra().flags = _attributes.flags;
-    if (_hyperlink != HyperlinkId())
-        extra().hyperlink = _hyperlink;
+    _extra.reset();
+    if (attributes.underlineColor != DefaultColor())
+        extra().underlineColor = attributes.underlineColor;
+    if (attributes.flags != CellFlags::None)
+        extra().flags = attributes.flags;
+    if (hyperlink != HyperlinkId())
+        extra().hyperlink = hyperlink;
 }
 // }}}
 // {{{ impl: character
 inline constexpr uint8_t CompactCell::width() const noexcept
 {
-    return !extra_ ? 1 : extra_->width;
-    // return static_cast<int>((codepoint_ >> 21) & 0x03); //return width_;
+    return !_extra ? 1 : _extra->width;
+    // return static_cast<int>((_codepoint >> 21) & 0x03); //return _width;
 }
 
-inline void CompactCell::setWidth(uint8_t _width) noexcept
+inline void CompactCell::setWidth(uint8_t width) noexcept
 {
-    assert(_width < MaxCodepoints);
-    // codepoint_ = codepoint_ | ((_width << 21) & 0x03);
-    if (_width > 1 || extra_)
-        extra().width = _width;
+    assert(width < MaxCodepoints);
+    // _codepoint = _codepoint | ((width << 21) & 0x03);
+    if (width > 1 || _extra)
+        extra().width = width;
     // TODO(perf) use u32_unused_bit_mask()
 }
 
-inline void CompactCell::setCharacter(char32_t _codepoint) noexcept
+inline void CompactCell::setCharacter(char32_t codepoint) noexcept
 {
-    codepoint_ = _codepoint;
-    if (extra_)
+    _codepoint = codepoint;
+    if (_extra)
     {
-        extra_->codepoints.clear();
-        extra_->imageFragment = {};
+        _extra->codepoints.clear();
+        _extra->imageFragment = {};
     }
-    if (_codepoint)
-        setWidth(static_cast<uint8_t>(std::max(unicode::width(_codepoint), 1)));
+    if (codepoint)
+        setWidth(static_cast<uint8_t>(std::max(unicode::width(codepoint), 1)));
     else
         setWidth(1);
 }
 
-inline int CompactCell::appendCharacter(char32_t _codepoint) noexcept
+inline int CompactCell::appendCharacter(char32_t codepoint) noexcept
 {
-    assert(_codepoint != 0);
+    assert(codepoint != 0);
 
     CellExtra& ext = extra();
     if (ext.codepoints.size() < MaxCodepoints - 1)
     {
-        ext.codepoints.push_back(_codepoint);
-        if (auto const diff = CellUtil::computeWidthChange(*this, _codepoint))
+        ext.codepoints.push_back(codepoint);
+        if (auto const diff = CellUtil::computeWidthChange(*this, codepoint))
         {
             setWidth(static_cast<uint8_t>(static_cast<int>(width()) + diff));
             return diff;
@@ -346,12 +346,12 @@ inline int CompactCell::appendCharacter(char32_t _codepoint) noexcept
 
 inline std::size_t CompactCell::codepointCount() const noexcept
 {
-    if (codepoint_)
+    if (_codepoint)
     {
-        if (!extra_)
+        if (!_extra)
             return 1;
 
-        return 1 + extra_->codepoints.size();
+        return 1 + _extra->codepoints.size();
     }
     return 0;
 }
@@ -359,75 +359,75 @@ inline std::size_t CompactCell::codepointCount() const noexcept
 inline char32_t CompactCell::codepoint(size_t i) const noexcept
 {
     if (i == 0)
-        return codepoint_;
+        return _codepoint;
 
-    if (!extra_)
+    if (!_extra)
         return 0;
 
 #if !defined(NDEBUG)
-    return extra_->codepoints.at(i - 1);
+    return _extra->codepoints.at(i - 1);
 #else
-    return extra_->codepoints[i - 1];
+    return _extra->codepoints[i - 1];
 #endif
 }
 // }}}
 // {{{ attrs
 inline CellExtra& CompactCell::extra() noexcept
 {
-    if (extra_)
-        return *extra_;
+    if (_extra)
+        return *_extra;
     createExtra();
-    return *extra_;
+    return *_extra;
 }
 
 inline CellFlags CompactCell::flags() const noexcept
 {
-    if (!extra_)
+    if (!_extra)
         return CellFlags::None;
     else
-        return const_cast<CompactCell*>(this)->extra_->flags;
+        return const_cast<CompactCell*>(this)->_extra->flags;
 }
 
 inline Color CompactCell::foregroundColor() const noexcept
 {
-    return foregroundColor_;
+    return _foregroundColor;
 }
 
 inline void CompactCell::setForegroundColor(Color color) noexcept
 {
-    foregroundColor_ = color;
+    _foregroundColor = color;
 }
 
 inline Color CompactCell::backgroundColor() const noexcept
 {
-    return backgroundColor_;
+    return _backgroundColor;
 }
 
 inline void CompactCell::setBackgroundColor(Color color) noexcept
 {
-    backgroundColor_ = color;
+    _backgroundColor = color;
 }
 
 inline Color CompactCell::underlineColor() const noexcept
 {
-    if (!extra_)
+    if (!_extra)
         return DefaultColor();
     else
-        return extra_->underlineColor;
+        return _extra->underlineColor;
 }
 
 inline void CompactCell::setUnderlineColor(Color color) noexcept
 {
-    if (extra_)
-        extra_->underlineColor = color;
+    if (_extra)
+        _extra->underlineColor = color;
     else if (color != DefaultColor())
         extra().underlineColor = color;
 }
 
 inline std::shared_ptr<ImageFragment> CompactCell::imageFragment() const noexcept
 {
-    if (extra_)
-        return extra_->imageFragment;
+    if (_extra)
+        return _extra->imageFragment;
     else
         return {};
 }
@@ -441,18 +441,18 @@ inline void CompactCell::setImageFragment(std::shared_ptr<RasterizedImage> raste
 
 inline HyperlinkId CompactCell::hyperlink() const noexcept
 {
-    if (extra_)
-        return extra_->hyperlink;
+    if (_extra)
+        return _extra->hyperlink;
     else
         return HyperlinkId {};
 }
 
-inline void CompactCell::setHyperlink(HyperlinkId _hyperlink)
+inline void CompactCell::setHyperlink(HyperlinkId hyperlink)
 {
-    if (!!_hyperlink)
-        extra().hyperlink = _hyperlink;
-    else if (extra_)
-        extra_->hyperlink = {};
+    if (!!hyperlink)
+        extra().hyperlink = hyperlink;
+    else if (_extra)
+        _extra->hyperlink = {};
 }
 
 inline bool CompactCell::empty() const noexcept

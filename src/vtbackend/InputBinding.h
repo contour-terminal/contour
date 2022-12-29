@@ -31,9 +31,9 @@ struct InputBinding
 };
 
 template <typename Input, typename Binding>
-bool match(InputBinding<Input, Binding> const& _binding, MatchModes _modes, Modifier _modifier, Input _input)
+bool match(InputBinding<Input, Binding> const& binding, MatchModes modes, Modifier modifier, Input input)
 {
-    return _binding.modes == _modes && _binding.modifier == _modifier && _binding.input == _input;
+    return binding.modes == modes && binding.modifier == modifier && binding.input == input;
 }
 
 template <typename I, typename O>
@@ -80,9 +80,9 @@ struct formatter<terminal::InputBinding<I, O>>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::InputBinding<I, O> const& _binding, FormatContext& _ctx)
+    auto format(terminal::InputBinding<I, O> const& binding, FormatContext& ctx)
     {
-        return fmt::format_to(_ctx.out(), "{} {} {}", _binding.modes, _binding.modifier, _binding.input);
+        return fmt::format_to(ctx.out(), "{} {} {}", binding.modes, binding.modifier, binding.input);
     }
 };
 } // namespace fmt

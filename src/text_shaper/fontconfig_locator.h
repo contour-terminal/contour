@@ -31,7 +31,6 @@ class fontconfig_locator: public font_locator
 {
   public:
     fontconfig_locator();
-    ~fontconfig_locator() override;
 
     [[nodiscard]] font_source_list locate(font_description const& description) override;
     [[nodiscard]] font_source_list all() override;

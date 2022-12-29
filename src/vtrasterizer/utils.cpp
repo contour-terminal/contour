@@ -23,34 +23,34 @@ namespace terminal::rasterizer
 
 using namespace std;
 
-vector<uint8_t> downsampleRGBA(vector<uint8_t> const& _bitmap, ImageSize _size, ImageSize _newSize)
+vector<uint8_t> downsampleRGBA(vector<uint8_t> const& bitmap, ImageSize size, ImageSize newSize)
 {
-    assert(_size.width >= _newSize.width);
-    assert(_size.height >= _newSize.height);
+    assert(size.width >= newSize.width);
+    assert(size.height >= newSize.height);
 
-    auto const ratioX = unbox<double>(_size.width) / unbox<double>(_newSize.width);
-    auto const ratioY = unbox<double>(_size.height) / unbox<double>(_newSize.height);
+    auto const ratioX = unbox<double>(size.width) / unbox<double>(newSize.width);
+    auto const ratioY = unbox<double>(size.height) / unbox<double>(newSize.height);
     auto const ratio = max(ratioX, ratioY);
     auto const factor = static_cast<unsigned>(ceil(ratio));
 
     std::vector<uint8_t> dest;
-    dest.resize(*_newSize.height * *_newSize.width * 4);
+    dest.resize(*newSize.height * *newSize.width * 4);
 
     // RasterizerLog()("scaling from {} to {}, ratio {}x{} ({}), factor {}",
-    //                 _size, _newSize, ratioX, ratioY, ratio, factor);
+    //                 size, newSize, ratioX, ratioY, ratio, factor);
 
     uint8_t* d = dest.data();
     // TODO: use iota
-    for (unsigned i = 0, sr = 0; i < *_newSize.height; i++, sr += factor)
+    for (unsigned i = 0, sr = 0; i < *newSize.height; i++, sr += factor)
     {
-        for (unsigned j = 0, sc = 0; j < *_newSize.width; j++, sc += factor, d += 4)
+        for (unsigned j = 0, sc = 0; j < *newSize.width; j++, sc += factor, d += 4)
         {
             // calculate area average
             unsigned int r = 0, g = 0, b = 0, a = 0, count = 0;
-            for (unsigned y = sr; y < min(sr + factor, _size.height.as<unsigned>()); y++)
+            for (unsigned y = sr; y < min(sr + factor, size.height.as<unsigned>()); y++)
             {
-                uint8_t const* p = _bitmap.data() + (y * *_size.width * 4) + sc * 4;
-                for (unsigned x = sc; x < min(sc + factor, _size.width.as<unsigned>()); x++, count++)
+                uint8_t const* p = bitmap.data() + (y * *size.width * 4) + sc * 4;
+                for (unsigned x = sc; x < min(sc + factor, size.width.as<unsigned>()); x++, count++)
                 {
                     b += *(p++);
                     g += *(p++);
@@ -72,24 +72,24 @@ vector<uint8_t> downsampleRGBA(vector<uint8_t> const& _bitmap, ImageSize _size, 
     return dest;
 }
 
-vector<uint8_t> downsample(vector<uint8_t> const& _bitmap,
-                           uint8_t _numComponents,
-                           ImageSize _size,
-                           ImageSize _newSize)
+vector<uint8_t> downsample(vector<uint8_t> const& bitmap,
+                           uint8_t numComponents,
+                           ImageSize size,
+                           ImageSize newSize)
 {
-    assert(_size.width >= _newSize.width);
-    assert(_size.height >= _newSize.height);
+    assert(size.width >= newSize.width);
+    assert(size.height >= newSize.height);
 
-    auto const ratioX = unbox<double>(_size.width) / unbox<double>(_newSize.width);
-    auto const ratioY = unbox<double>(_size.height) / unbox<double>(_newSize.height);
+    auto const ratioX = unbox<double>(size.width) / unbox<double>(newSize.width);
+    auto const ratioY = unbox<double>(size.height) / unbox<double>(newSize.height);
     auto const ratio = max(ratioX, ratioY);
     auto const factor = static_cast<unsigned>(ceil(ratio));
 
-    std::vector<uint8_t> dest(*_newSize.width * *_newSize.height * _numComponents, 0);
+    std::vector<uint8_t> dest(*newSize.width * *newSize.height * numComponents, 0);
 
     RasterizerLog()("downsample from {} to {}, ratio {}x{} ({}), factor {}",
-                    _size,
-                    _newSize,
+                    size,
+                    newSize,
                     ratioX,
                     ratioY,
                     ratio,
@@ -97,19 +97,19 @@ vector<uint8_t> downsample(vector<uint8_t> const& _bitmap,
 
     uint8_t* d = dest.data();
     // TODO: use iota
-    for (unsigned i = 0, sr = 0; i < *_newSize.height; i++, sr += factor)
+    for (unsigned i = 0, sr = 0; i < *newSize.height; i++, sr += factor)
     {
-        for (unsigned j = 0, sc = 0; j < *_newSize.width; j++, sc += factor, d += _numComponents)
+        for (unsigned j = 0, sc = 0; j < *newSize.width; j++, sc += factor, d += numComponents)
         {
             // calculate area average
             vector<unsigned> values;
-            values.resize(_numComponents);
+            values.resize(numComponents);
             unsigned count = 0; // number of pixels being averaged
-            for (auto y = sr; y < min(sr + factor, _size.height.as<unsigned>()); y++)
+            for (auto y = sr; y < min(sr + factor, size.height.as<unsigned>()); y++)
             {
-                uint8_t const* p = _bitmap.data() + (y * *_size.width * _numComponents) + sc * _numComponents;
-                for (auto x = sc; x < min(sc + factor, _size.width.as<unsigned>()); x++, count++)
-                    for (auto const k: ::ranges::views::iota(0u, _numComponents))
+                uint8_t const* p = bitmap.data() + (y * *size.width * numComponents) + sc * numComponents;
+                for (auto x = sc; x < min(sc + factor, size.width.as<unsigned>()); x++, count++)
+                    for (auto const k: ::ranges::views::iota(0u, numComponents))
                         values.at(k) += *(p++);
             }
 
@@ -124,28 +124,28 @@ vector<uint8_t> downsample(vector<uint8_t> const& _bitmap,
     return dest;
 }
 
-vector<uint8_t> downsample(vector<uint8_t> const& _sourceBitmap, ImageSize _targetSize, uint8_t _factor)
+vector<uint8_t> downsample(vector<uint8_t> const& sourceBitmap, ImageSize targetSize, uint8_t factor)
 {
-    vector<uint8_t> targetBitmap(*_targetSize.width * *_targetSize.height, 0);
+    vector<uint8_t> targetBitmap(*targetSize.width * *targetSize.height, 0);
 
-    auto const sourceWidth = _factor * *_targetSize.width;
+    auto const sourceWidth = factor * *targetSize.width;
     auto const average_intensity_in_src = [&](unsigned destX, unsigned destY) -> unsigned {
-        auto sourceY = destY * _factor;
-        auto sourceX = destX * _factor;
+        auto sourceY = destY * factor;
+        auto sourceX = destX * factor;
         auto total = 0u;
-        for (auto const y: ::ranges::views::iota(sourceY, sourceY + _factor))
+        for (auto const y: ::ranges::views::iota(sourceY, sourceY + factor))
         {
             auto const offset = sourceWidth * y;
-            for (auto const x: ::ranges::views::iota(sourceX, sourceX + _factor))
-                total += _sourceBitmap[offset + x];
+            for (auto const x: ::ranges::views::iota(sourceX, sourceX + factor))
+                total += sourceBitmap[offset + x];
         }
-        return unsigned(double(total) / double(_factor * _factor));
+        return unsigned(double(total) / double(factor * factor));
     };
 
-    for (auto const y: ::ranges::views::iota(0u, *_targetSize.height))
+    for (auto const y: ::ranges::views::iota(0u, *targetSize.height))
     {
-        auto const offset = *_targetSize.width * y;
-        for (auto const x: ::ranges::views::iota(0u, *_targetSize.width))
+        auto const offset = *targetSize.width * y;
+        for (auto const x: ::ranges::views::iota(0u, *targetSize.width))
             targetBitmap[offset + x] =
                 (uint8_t) min(255u, unsigned(targetBitmap[offset + x]) + average_intensity_in_src(x, y));
     }

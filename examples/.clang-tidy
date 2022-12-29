@@ -8,16 +8,19 @@ Checks: >-
   cppcoreguidelines-*,
   -cppcoreguidelines-avoid-c-arrays,
   -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-avoid-non-const-global-variables,
   -cppcoreguidelines-macro-usage,
   -cppcoreguidelines-no-malloc,
   -cppcoreguidelines-non-private-member-variables-in-classes,
-  -cppcoreguidelines-pro-bounds-constant-array-index,
   -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-prefer-member-initializer,
   -cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+  -cppcoreguidelines-pro-bounds-constant-array-index,
   -cppcoreguidelines-pro-bounds-pointer-arithmetic,
   -cppcoreguidelines-pro-type-const-cast,
   -cppcoreguidelines-pro-type-cstyle-cast,
   -cppcoreguidelines-pro-type-static-cast-downcast,
+  -cppcoreguidelines-pro-type-union-access,
   -cppcoreguidelines-pro-type-vararg,
   -cppcoreguidelines-special-member-functions,
   modernize-*,
@@ -30,6 +33,7 @@ Checks: >-
   readability-non-const-parameter,
   readability-redundant-*
   -readability-redundant-access-specifiers,
+  readability-identifier-naming
 WarningsAsErrors: >-
   clang-analyzer-*,
   clang-diagnostic-*,
@@ -73,17 +77,19 @@ CheckOptions:
     value:           'NULL'
   - key:             modernize-use-default-member-init.UseAssignment
     value:           '1'
-  # - key:   readability-identifier-naming.EnumCase
-  #   value: CamelCase
-  # - key:   readability-identifier-naming.ClassCase
-  #   value: CamelCase
-  # - key:   readability-identifier-naming.ClassMemberCase
-  #   value: camelBack
-  # - key:   readability-identifier-naming.ClassMethodCase
-  #   value: camelBack
-  # - key:   readability-identifier-naming.ParameterCase
-  #   value: camelBack
-  # - key:   readability-identifier-naming.ParameterPrefix
-  #   value: ''
-  # - key:   readability-identifier-naming.ScopedEnumConstantCase
-  #   value: CamelCase
+  - key:   readability-identifier-naming.EnumCase
+    value: CamelCase
+  - key:   readability-identifier-naming.ClassCase
+    value: CamelCase
+  - key:   readability-identifier-naming.ClassMemberCase
+    value: camelBack
+  - key:   readability-identifier-naming.ClassMemberPrefix
+    value: '_'
+  - key:   readability-identifier-naming.ClassMethodCase
+    value: camelBack
+  - key:   readability-identifier-naming.ParameterCase
+    value: camelBack
+  - key:   readability-identifier-naming.ParameterPrefix
+    value: ''
+  - key:   readability-identifier-naming.ScopedEnumConstantCase
+    value: CamelCase

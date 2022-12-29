@@ -59,16 +59,16 @@ namespace terminal
 
 namespace
 {
-    LinuxPty::PtyHandles createLinuxPty(PageSize const& _windowSize, optional<crispy::ImageSize> _pixels)
+    LinuxPty::PtyHandles createLinuxPty(PageSize const& windowSize, optional<crispy::ImageSize> pixels)
     {
         // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
-        assert(*_windowSize.lines <= numeric_limits<unsigned short>::max());
-        assert(*_windowSize.columns <= numeric_limits<unsigned short>::max());
+        assert(*windowSize.lines <= numeric_limits<unsigned short>::max());
+        assert(*windowSize.columns <= numeric_limits<unsigned short>::max());
 
-        winsize const ws { unbox<unsigned short>(_windowSize.lines),
-                           unbox<unsigned short>(_windowSize.columns),
-                           unbox<unsigned short>(_pixels.value_or(crispy::ImageSize {}).width),
-                           unbox<unsigned short>(_pixels.value_or(crispy::ImageSize {}).height) };
+        winsize const ws { unbox<unsigned short>(windowSize.lines),
+                           unbox<unsigned short>(windowSize.columns),
+                           unbox<unsigned short>(pixels.value_or(crispy::ImageSize {}).width),
+                           unbox<unsigned short>(pixels.value_or(crispy::ImageSize {}).height) };
 
 #if defined(__APPLE__)
         winsize* wsa = const_cast<winsize*>(&ws);

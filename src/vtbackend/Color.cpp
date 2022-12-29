@@ -22,14 +22,14 @@ using namespace std;
 namespace terminal
 {
 
-string to_string(Color _color)
+string to_string(Color color)
 {
     using Type = ColorType;
-    switch (_color.type())
+    switch (color.type())
     {
-        case Type::Indexed: return fmt::format("{}", _color.index());
+        case Type::Indexed: return fmt::format("{}", color.index());
         case Type::Bright:
-            switch (_color.index())
+            switch (color.index())
             {
                 case 0: return "bright-black";
                 case 1: return "bright-red";
@@ -43,7 +43,7 @@ string to_string(Color _color)
             }
             return "?";
         case Type::Default:
-            switch (_color.index())
+            switch (color.index())
             {
                 case 0: return "black";
                 case 1: return "red";
@@ -57,8 +57,7 @@ string to_string(Color _color)
             }
             return "?";
         case Type::RGB:
-            return fmt::format(
-                "#{:02X}{:02X}{:02X}", _color.rgb().red, _color.rgb().green, _color.rgb().blue);
+            return fmt::format("#{:02X}{:02X}{:02X}", color.rgb().red, color.rgb().green, color.rgb().blue);
         case Type::Undefined: break;
     }
     return "?";
@@ -97,36 +96,36 @@ string to_string(BrightColor color)
     return fmt::format("BrightColor:{}", static_cast<unsigned>(color));
 }
 
-RGBColor::RGBColor(std::string const& _hexCode): RGBColor()
+RGBColor::RGBColor(std::string const& hexCode): RGBColor()
 {
-    *this = _hexCode;
+    *this = hexCode;
 }
 
-RGBColor& RGBColor::operator=(string const& _hexCode)
+RGBColor& RGBColor::operator=(string const& hexCode)
 {
-    if (_hexCode.size() == 7 && _hexCode[0] == '#')
+    if (hexCode.size() == 7 && hexCode[0] == '#')
     {
         char* eptr = nullptr;
-        auto const value = static_cast<uint32_t>(strtoul(_hexCode.c_str() + 1, &eptr, 16));
+        auto const value = static_cast<uint32_t>(strtoul(hexCode.c_str() + 1, &eptr, 16));
         if (eptr && *eptr == '\0')
             *this = RGBColor { value };
     }
-    if (_hexCode.size() >= 3 && _hexCode[0] == '0' && _hexCode[1] == 'x')
+    if (hexCode.size() >= 3 && hexCode[0] == '0' && hexCode[1] == 'x')
     {
         char* eptr = nullptr;
-        auto const value = static_cast<uint32_t>(strtoul(_hexCode.c_str() + 2, &eptr, 16));
+        auto const value = static_cast<uint32_t>(strtoul(hexCode.c_str() + 2, &eptr, 16));
         if (eptr && *eptr == '\0')
             *this = RGBColor { value };
     }
     return *this;
 }
 
-RGBAColor& RGBAColor::operator=(string const& _hexCode)
+RGBAColor& RGBAColor::operator=(string const& hexCode)
 {
-    if (_hexCode.size() == 9 && _hexCode[0] == '#')
+    if (hexCode.size() == 9 && hexCode[0] == '#')
     {
         char* eptr = nullptr;
-        auto const value = static_cast<uint32_t>(strtoul(_hexCode.c_str() + 1, &eptr, 16));
+        auto const value = static_cast<uint32_t>(strtoul(hexCode.c_str() + 1, &eptr, 16));
         if (eptr && *eptr == '\0')
             *this = RGBAColor { value };
     }

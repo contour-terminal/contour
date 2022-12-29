@@ -99,7 +99,7 @@ struct RenderBufferRef
 
     [[nodiscard]] RenderBuffer const& get() const noexcept { return buffer; }
 
-    RenderBufferRef(RenderBuffer const& _buf, std::mutex& _lock): buffer { _buf }, guard { _lock }
+    RenderBufferRef(RenderBuffer const& buf, std::mutex& lock): buffer { buf }, guard { lock }
     {
         guard.lock();
     }
@@ -116,9 +116,9 @@ enum class RenderBufferState
     TrySwapBuffers
 };
 
-constexpr std::string_view to_string(RenderBufferState _state) noexcept
+constexpr std::string_view to_string(RenderBufferState state) noexcept
 {
-    switch (_state)
+    switch (state)
     {
         case RenderBufferState::WaitingForRefresh: return "WaitingForRefresh";
         case RenderBufferState::RefreshBuffersAndTrySwap: return "RefreshBuffersAndTrySwap";
@@ -148,7 +148,7 @@ struct RenderDoubleBuffer
     void clear() { backBuffer().clear(); }
 
     // Swaps front with back buffer. May only be invoked by the writer thread.
-    bool swapBuffers(std::chrono::steady_clock::time_point _now) noexcept;
+    bool swapBuffers(std::chrono::steady_clock::time_point now) noexcept;
 };
 
 } // namespace terminal

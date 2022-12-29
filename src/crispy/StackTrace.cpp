@@ -64,10 +64,9 @@ struct Pipe // {{{
             perror("pipe");
     }
 
-    bool good() const noexcept { return pfd[0] != -1 && pfd[1] != -1; }
-
-    int reader() noexcept { return pfd[0]; }
-    int writer() noexcept { return pfd[1]; }
+    [[nodiscard]] bool good() const noexcept { return pfd[0] != -1 && pfd[1] != -1; }
+    [[nodiscard]] int reader() noexcept { return pfd[0]; }
+    [[nodiscard]] int writer() noexcept { return pfd[1]; }
 
     ~Pipe() { close(); }
 

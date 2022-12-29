@@ -31,11 +31,14 @@ struct TestSelectionHelper: public terminal::SelectionHelper
     Screen<T>* screen;
     explicit TestSelectionHelper(Screen<T>& self): screen { &self } {}
 
-    PageSize pageSize() const noexcept { return screen->pageSize(); }
-    bool wordDelimited(CellLocation /*_pos*/) const noexcept { return true; } // TODO
-    bool wrappedLine(LineOffset _line) const noexcept { return screen->isLineWrapped(_line); }
-    bool cellEmpty(CellLocation _pos) const noexcept { return screen->at(_pos).empty(); }
-    int cellWidth(CellLocation _pos) const noexcept { return screen->at(_pos).width(); }
+    [[nodiscard]] PageSize pageSize() const noexcept override { return screen->pageSize(); }
+    [[nodiscard]] bool wordDelimited(CellLocation /*pos*/) const noexcept override { return true; } // TODO
+    [[nodiscard]] bool wrappedLine(LineOffset line) const noexcept override
+    {
+        return screen->isLineWrapped(line);
+    }
+    [[nodiscard]] bool cellEmpty(CellLocation pos) const noexcept override { return screen->at(pos).empty(); }
+    [[nodiscard]] int cellWidth(CellLocation pos) const noexcept override { return screen->at(pos).width(); }
 };
 
 template <typename T>
@@ -74,12 +77,12 @@ struct TextSelection
 
     explicit TextSelection(Screen<T> const& s): screen { &s } {}
 
-    void operator()(CellLocation const& _pos)
+    void operator()(CellLocation const& pos)
     {
-        auto const& cell = screen->at(_pos);
-        text += _pos.column < lastColumn_ ? "\n" : "";
+        auto const& cell = screen->at(pos);
+        text += pos.column < lastColumn_ ? "\n" : "";
         text += cell.toUtf8();
-        lastColumn_ = _pos.column;
+        lastColumn_ = pos.column;
     }
 };
 template <typename T>

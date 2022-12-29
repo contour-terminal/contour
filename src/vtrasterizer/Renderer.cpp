@@ -47,57 +47,55 @@ namespace terminal::rasterizer
 namespace
 {
 
-    void loadGridMetricsFromFont(text::font_key _font, GridMetrics& _gm, text::shaper& _textShaper)
+    void loadGridMetricsFromFont(text::font_key font, GridMetrics& gm, text::shaper& textShaper)
     {
-        auto const m = _textShaper.metrics(_font);
+        auto const m = textShaper.metrics(font);
 
-        _gm.cellSize.width = Width::cast_from(m.advance);
-        _gm.cellSize.height = Height::cast_from(m.line_height);
-        _gm.baseline = m.line_height - m.ascender;
-        _gm.underline.position = _gm.baseline + m.underline_position;
-        _gm.underline.thickness = m.underline_thickness;
+        gm.cellSize.width = Width::cast_from(m.advance);
+        gm.cellSize.height = Height::cast_from(m.line_height);
+        gm.baseline = m.line_height - m.ascender;
+        gm.underline.position = gm.baseline + m.underline_position;
+        gm.underline.thickness = m.underline_thickness;
 
-        RendererLog()("Loading grid metrics {}", _gm);
+        RendererLog()("Loading grid metrics {}", gm);
     }
 
-    GridMetrics loadGridMetrics(text::font_key _font, PageSize _pageSize, text::shaper& _textShaper)
+    GridMetrics loadGridMetrics(text::font_key font, PageSize pageSize, text::shaper& textShaper)
     {
         auto gm = GridMetrics {};
 
-        gm.pageSize = _pageSize;
+        gm.pageSize = pageSize;
         gm.cellMargin = { 0, 0, 0, 0 }; // TODO (pass as args, and make use of them)
         gm.pageMargin = { 0, 0, 0 };    // TODO (fill early)
 
-        loadGridMetricsFromFont(_font, gm, _textShaper);
+        loadGridMetricsFromFont(font, gm, textShaper);
 
         return gm;
     }
 
-    FontKeys loadFontKeys(FontDescriptions const& _fd, text::shaper& _shaper)
+    FontKeys loadFontKeys(FontDescriptions const& fd, text::shaper& shaper)
     {
         FontKeys output {};
-        auto const regularOpt = _shaper.load_font(_fd.regular, _fd.size);
+        auto const regularOpt = shaper.load_font(fd.regular, fd.size);
         Require(regularOpt.has_value());
         output.regular = regularOpt.value();
-        output.bold = _shaper.load_font(_fd.bold, _fd.size).value_or(output.regular);
-        output.italic = _shaper.load_font(_fd.italic, _fd.size).value_or(output.regular);
-        output.boldItalic = _shaper.load_font(_fd.boldItalic, _fd.size).value_or(output.regular);
-        output.emoji = _shaper.load_font(_fd.emoji, _fd.size).value_or(output.regular);
+        output.bold = shaper.load_font(fd.bold, fd.size).value_or(output.regular);
+        output.italic = shaper.load_font(fd.italic, fd.size).value_or(output.regular);
+        output.boldItalic = shaper.load_font(fd.boldItalic, fd.size).value_or(output.regular);
+        output.emoji = shaper.load_font(fd.emoji, fd.size).value_or(output.regular);
 
         return output;
     }
 
-    unique_ptr<text::shaper> createTextShaper(TextShapingEngine _engine,
-                                              DPI _dpi,
-                                              text::font_locator& _locator)
+    unique_ptr<text::shaper> createTextShaper(TextShapingEngine engine, DPI dpi, text::font_locator& locator)
     {
-        switch (_engine)
+        switch (engine)
         {
             case TextShapingEngine::DWrite:
 #if defined(_WIN32)
                 RendererLog()("Using DirectWrite text shaping engine.");
                 // TODO: do we want to use custom font locator here?
-                return make_unique<text::directwrite_shaper>(_dpi, _locator);
+                return make_unique<text::directwrite_shaper>(dpi, locator);
 #else
                 RendererLog()("DirectWrite not available on this platform.");
                 break;
@@ -116,7 +114,7 @@ namespace
         }
 
         RendererLog()("Using OpenShaper text shaping engine.");
-        return make_unique<text::open_shaper>(_dpi, _locator);
+        return make_unique<text::open_shaper>(dpi, locator);
     }
 
 } // namespace

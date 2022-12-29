@@ -77,14 +77,14 @@ class Renderer
     RenderTarget& renderTarget() noexcept { return *_renderTarget; }
     [[nodiscard]] bool hasRenderTarget() const noexcept { return _renderTarget != nullptr; }
 
-    void setBackgroundOpacity(terminal::Opacity _opacity) { _backgroundOpacity = _opacity; }
+    void setBackgroundOpacity(terminal::Opacity opacity) { _backgroundOpacity = opacity; }
     [[nodiscard]] terminal::Opacity backgroundOpacity() const noexcept { return _backgroundOpacity; }
 
-    bool setFontSize(text::font_size _fontSize);
+    bool setFontSize(text::font_size fontSize);
     void updateFontMetrics();
 
     [[nodiscard]] FontDescriptions const& fontDescriptions() const noexcept { return _fontDescriptions; }
-    void setFonts(FontDescriptions _fontDescriptions);
+    void setFonts(FontDescriptions fontDescriptions);
 
     [[nodiscard]] GridMetrics const& gridMetrics() const noexcept { return _gridMetrics; }
 
@@ -103,17 +103,17 @@ class Renderer
     }
 
     /**
-     * Renders the given @p _terminal to the current OpenGL context.
+     * Renders the given @p terminal to the current OpenGL context.
      *
-     * @p _now The time hint to use when rendering the eventually blinking cursor.
+     * @p now The time hint to use when rendering the eventually blinking cursor.
      */
-    uint64_t render(Terminal& _terminal, bool _pressure);
+    uint64_t render(Terminal& terminal, bool pressure);
 
-    void discardImage(Image const& _image);
+    void discardImage(Image const& image);
 
     void clearCache();
 
-    void inspect(std::ostream& _textOutput) const;
+    void inspect(std::ostream& textOutput) const;
 
     std::array<std::reference_wrapper<Renderable>, 5> renderables()
     {
@@ -131,7 +131,7 @@ class Renderer
 
   private:
     void configureTextureAtlas();
-    void renderCells(std::vector<RenderCell> const& _renderableCells);
+    void renderCells(std::vector<RenderCell> const& renderableCells);
     void renderLines(std::vector<RenderLine> const& renderableLines);
     void executeImageDiscards();
 

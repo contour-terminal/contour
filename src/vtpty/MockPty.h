@@ -34,7 +34,7 @@ class MockPty: public Pty
     void wakeupReader() override;
     int write(char const* buf, size_t size) override;
     [[nodiscard]] PageSize pageSize() const noexcept override;
-    void resizeScreen(PageSize _cells, std::optional<crispy::ImageSize> _pixels = std::nullopt) override;
+    void resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixels = std::nullopt) override;
 
     void start() override;
     void close() override;
@@ -48,16 +48,16 @@ class MockPty: public Pty
         return outputReadOffset_ < outputBuffer_.size();
     }
 
-    void appendStdOutBuffer(std::string_view _that)
+    void appendStdOutBuffer(std::string_view that)
     {
         if (outputReadOffset_ == outputBuffer_.size())
         {
             outputReadOffset_ = 0;
-            outputBuffer_ = _that;
+            outputBuffer_ = that;
         }
         else
         {
-            outputBuffer_ += _that;
+            outputBuffer_ += that;
         }
     }
 

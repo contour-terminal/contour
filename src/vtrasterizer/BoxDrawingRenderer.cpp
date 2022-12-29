@@ -922,13 +922,13 @@ void BoxDrawingRenderer::clearCache()
     // to clear here anything. It's done for us already.
 }
 
-bool BoxDrawingRenderer::render(LineOffset _line, ColumnOffset _column, char32_t _codepoint, RGBColor _color)
+bool BoxDrawingRenderer::render(LineOffset line, ColumnOffset column, char32_t codepoint, RGBColor color)
 {
-    Renderable::AtlasTileAttributes const* data = getOrCreateCachedTileAttributes(_codepoint);
+    Renderable::AtlasTileAttributes const* data = getOrCreateCachedTileAttributes(codepoint);
     if (!data)
         return false;
 
-    auto const pos = _gridMetrics.map(_line, _column);
+    auto const pos = _gridMetrics.map(line, column);
     auto const x = pos.x;
     auto const y = pos.y;
 
@@ -936,7 +936,7 @@ bool BoxDrawingRenderer::render(LineOffset _line, ColumnOffset _column, char32_t
     renderTile.x = atlas::RenderTile::X { x };
     renderTile.y = atlas::RenderTile::Y { y };
     renderTile.bitmapSize = data->bitmapSize;
-    renderTile.color = atlas::normalize(_color);
+    renderTile.color = atlas::normalize(color);
     renderTile.normalizedLocation = data->metadata.normalizedLocation;
     renderTile.tileLocation = data->location;
 
@@ -1542,21 +1542,21 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
     return nullopt;
 }
 
-optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint,
-                                                             ImageSize _size,
-                                                             int _lineThickness)
+optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
+                                                             ImageSize size,
+                                                             int lineThickness)
 {
-    if (!(_codepoint >= 0x2500 && _codepoint <= 0x257F))
+    if (!(codepoint >= 0x2500 && codepoint <= 0x257F))
         return nullopt;
 
-    auto box = detail::boxDrawingDefinitions[_codepoint - 0x2500];
+    auto box = detail::boxDrawingDefinitions[codepoint - 0x2500];
 
-    auto const height = _size.height;
-    auto const width = _size.width;
+    auto const height = size.height;
+    auto const width = size.width;
     auto const horizontalOffset = *height / 2;
     auto const verticalOffset = *width / 2;
-    auto const lightThickness = (unsigned) _lineThickness;
-    auto const heavyThickness = (unsigned) _lineThickness * 2;
+    auto const lightThickness = (unsigned) lineThickness;
+    auto const heavyThickness = (unsigned) lineThickness * 2;
 
     auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0x00);
 
@@ -1727,7 +1727,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint
             for (auto const y: iota(0u, height.as<unsigned>()))
             {
                 auto const x = int(double(y) * aInv);
-                for (auto const xi: iota(-int(_lineThickness) / 2, int(_lineThickness) / 2))
+                for (auto const xi: iota(-int(lineThickness) / 2, int(lineThickness) / 2))
                     image[y * *width + (unsigned) max(0, min(x + xi, unbox<int>(width) - 1))] = 0xFF;
             }
         }
@@ -1736,16 +1736,16 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t _codepoint
             for (auto const y: iota(0u, height.as<unsigned>()))
             {
                 auto const x = int(double(*height - y - 1) * aInv);
-                for (auto const xi: iota(-int(_lineThickness) / 2, int(_lineThickness) / 2))
+                for (auto const xi: iota(-int(lineThickness) / 2, int(lineThickness) / 2))
                     image[y * *width + (unsigned) max(0, min(x + xi, unbox<int>(width) - 1))] = 0xFF;
             }
         }
     }
 
     if (box.arc_ != NoArc)
-        detail::drawArc(image, _size, lightThickness, box.arc_);
+        detail::drawArc(image, size, lightThickness, box.arc_);
 
-    BoxDrawingLog()("BoxDrawing: build U+{:04X} ({})", static_cast<uint32_t>(_codepoint), _size);
+    BoxDrawingLog()("BoxDrawing: build U+{:04X} ({})", static_cast<uint32_t>(codepoint), size);
 
     return image;
 }

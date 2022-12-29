@@ -101,9 +101,9 @@ struct formatter<terminal::VTType>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(const terminal::VTType _id, FormatContext& ctx)
+    auto format(const terminal::VTType id, FormatContext& ctx)
     {
-        switch (_id)
+        switch (id)
         {
             case terminal::VTType::VT100: return fmt::format_to(ctx.out(), "VT100");
             case terminal::VTType::VT220: return fmt::format_to(ctx.out(), "VT220");
@@ -128,9 +128,9 @@ struct formatter<terminal::VTExtension>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(const terminal::VTExtension _id, FormatContext& ctx)
+    auto format(const terminal::VTExtension id, FormatContext& ctx)
     {
-        switch (_id)
+        switch (id)
         {
             case terminal::VTExtension::None: return fmt::format_to(ctx.out(), "none");
             case terminal::VTExtension::Unknown: return fmt::format_to(ctx.out(), "unknown");

@@ -253,10 +253,10 @@ class Sequence
         dataString_.clear();
     }
 
-    void setCategory(FunctionCategory _cat) noexcept { category_ = _cat; }
-    void setLeader(char _ch) noexcept { leaderSymbol_ = _ch; }
+    void setCategory(FunctionCategory cat) noexcept { category_ = cat; }
+    void setLeader(char ch) noexcept { leaderSymbol_ = ch; }
     [[nodiscard]] Intermediaries& intermediateCharacters() noexcept { return intermediateCharacters_; }
-    void setFinalChar(char _ch) noexcept { finalChar_ = _ch; }
+    void setFinalChar(char ch) noexcept { finalChar_ = ch; }
 
     [[nodiscard]] DataString const& dataString() const noexcept { return dataString_; }
     [[nodiscard]] DataString& dataString() noexcept { return dataString_; }
@@ -317,9 +317,9 @@ class Sequence
     }
 
     template <typename T = unsigned>
-    [[nodiscard]] T param_or(size_t parameterIndex, T _defaultValue) const noexcept
+    [[nodiscard]] T param_or(size_t parameterIndex, T defaultValue) const noexcept
     {
-        return param_opt<T>(parameterIndex).value_or(_defaultValue);
+        return param_opt<T>(parameterIndex).value_or(defaultValue);
     }
 
     template <typename T = unsigned>
@@ -344,17 +344,17 @@ class Sequence
     }
 
     template <typename T = unsigned>
-    [[nodiscard]] bool containsParameter(T _value) const noexcept
+    [[nodiscard]] bool containsParameter(T value) const noexcept
     {
         for (size_t i = 0; i < parameterCount(); ++i)
             if constexpr (crispy::is_boxed<T>)
             {
-                if (T::cast_from(parameters_.at(i)) == _value)
+                if (T::cast_from(parameters_.at(i)) == value)
                     return true;
             }
             else
             {
-                if (T(parameters_.at(i)) == _value)
+                if (T(parameters_.at(i)) == value)
                     return true;
             }
         return false;

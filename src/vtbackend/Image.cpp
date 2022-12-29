@@ -52,22 +52,22 @@ ImageFragment::~ImageFragment()
     --ImageStats::get().fragments;
 }
 
-ImagePool::ImagePool(OnImageRemove _onImageRemove, ImageId _nextImageId):
-    nextImageId_ { _nextImageId },
+ImagePool::ImagePool(OnImageRemove onImageRemove, ImageId nextImageId):
+    nextImageId_ { nextImageId },
     imageNameToImageCache_ { StrongHashtableSize { 1024 },
                              LRUCapacity { 100 },
                              "ImagePool name-to-image mappings" },
-    onImageRemove_ { std::move(_onImageRemove) }
+    onImageRemove_ { std::move(onImageRemove) }
 {
 }
 
-Image::Data RasterizedImage::fragment(CellLocation _pos) const
+Image::Data RasterizedImage::fragment(CellLocation pos) const
 {
     // TODO: respect alignment hint
     // TODO: respect resize hint
 
-    auto const xOffset = _pos.column * unbox<int>(cellSize_.width);
-    auto const yOffset = _pos.line * unbox<int>(cellSize_.height);
+    auto const xOffset = pos.column * unbox<int>(cellSize_.width);
+    auto const yOffset = pos.line * unbox<int>(cellSize_.height);
     auto const pixelOffset = CellLocation { yOffset, xOffset };
 
     Image::Data fragData;
@@ -80,7 +80,7 @@ Image::Data RasterizedImage::fragment(CellLocation _pos) const
     // auto const availableSize = Size{availableWidth, availableHeight};
     // std::cout << fmt::format(
     //     "RasterizedImage.fragment({}): pixelOffset={}, cellSize={}/{}\n",
-    //     _pos,
+    //     pos,
     //     pixelOffset,
     //     cellSize_,
     //     availableSize
@@ -129,41 +129,41 @@ Image::Data RasterizedImage::fragment(CellLocation _pos) const
     return fragData;
 }
 
-shared_ptr<Image const> ImagePool::create(ImageFormat _format, ImageSize _size, Image::Data&& _data)
+shared_ptr<Image const> ImagePool::create(ImageFormat format, ImageSize size, Image::Data&& data)
 {
     // TODO: This operation should be idempotent, i.e. if that image has been created already, return a
     // reference to that.
     auto const id = nextImageId_++;
-    return make_shared<Image>(id, _format, std::move(_data), _size, onImageRemove_);
+    return make_shared<Image>(id, format, std::move(data), size, onImageRemove_);
 }
 
-shared_ptr<RasterizedImage> ImagePool::rasterize(shared_ptr<Image const> _image,
-                                                 ImageAlignment _alignmentPolicy,
-                                                 ImageResize _resizePolicy,
-                                                 RGBAColor _defaultColor,
-                                                 GridSize _cellSpan,
-                                                 ImageSize _cellSize)
+shared_ptr<RasterizedImage> ImagePool::rasterize(shared_ptr<Image const> image,
+                                                 ImageAlignment alignmentPolicy,
+                                                 ImageResize resizePolicy,
+                                                 RGBAColor defaultColor,
+                                                 GridSize cellSpan,
+                                                 ImageSize cellSize)
 {
     return make_shared<RasterizedImage>(
-        std::move(_image), _alignmentPolicy, _resizePolicy, _defaultColor, _cellSpan, _cellSize);
+        std::move(image), alignmentPolicy, resizePolicy, defaultColor, cellSpan, cellSize);
 }
 
-void ImagePool::link(string const& _name, shared_ptr<Image const> _imageRef)
+void ImagePool::link(string const& name, shared_ptr<Image const> imageRef)
 {
-    imageNameToImageCache_.emplace(_name, std::move(_imageRef));
+    imageNameToImageCache_.emplace(name, std::move(imageRef));
 }
 
-shared_ptr<Image const> ImagePool::findImageByName(string const& _name) const noexcept
+shared_ptr<Image const> ImagePool::findImageByName(string const& name) const noexcept
 {
-    if (auto imageRef = imageNameToImageCache_.try_get(_name))
+    if (auto imageRef = imageNameToImageCache_.try_get(name))
         return *imageRef;
 
     return {};
 }
 
-void ImagePool::unlink(string const& _name)
+void ImagePool::unlink(string const& name)
 {
-    imageNameToImageCache_.remove(_name);
+    imageNameToImageCache_.remove(name);
 }
 
 void ImagePool::clear()

@@ -42,11 +42,11 @@ class MatchModes
         Disabled
     };
 
-    [[nodiscard]] constexpr Status status(Flag _flag) const noexcept
+    [[nodiscard]] constexpr Status status(Flag flag) const noexcept
     {
-        if (enabled_ & static_cast<uint8_t>(_flag))
+        if (enabled_ & static_cast<uint8_t>(flag))
             return Status::Enabled;
-        if (disabled_ & static_cast<uint8_t>(_flag))
+        if (disabled_ & static_cast<uint8_t>(flag))
             return Status::Disabled;
         return Status::Any;
     }
@@ -54,27 +54,27 @@ class MatchModes
     [[nodiscard]] constexpr unsigned enabled() const noexcept { return enabled_; }
     [[nodiscard]] constexpr unsigned disabled() const noexcept { return disabled_; }
 
-    constexpr void enable(Flag _flag) noexcept
+    constexpr void enable(Flag flag) noexcept
     {
-        enabled_ |= static_cast<uint8_t>(_flag);
-        disabled_ = (uint8_t) (disabled_ & ~static_cast<uint8_t>(_flag));
+        enabled_ |= static_cast<uint8_t>(flag);
+        disabled_ = (uint8_t) (disabled_ & ~static_cast<uint8_t>(flag));
     }
 
-    constexpr void disable(Flag _flag) noexcept
+    constexpr void disable(Flag flag) noexcept
     {
-        enabled_ = (uint8_t) (enabled_ & ~static_cast<uint8_t>(_flag));
-        disabled_ |= static_cast<uint8_t>(_flag);
+        enabled_ = (uint8_t) (enabled_ & ~static_cast<uint8_t>(flag));
+        disabled_ |= static_cast<uint8_t>(flag);
     }
 
-    [[nodiscard]] constexpr bool has_value(Flag _flag) const noexcept
+    [[nodiscard]] constexpr bool has_value(Flag flag) const noexcept
     {
-        return enabled_ & static_cast<uint8_t>(_flag) || disabled_ & static_cast<uint8_t>(_flag);
+        return enabled_ & static_cast<uint8_t>(flag) || disabled_ & static_cast<uint8_t>(flag);
     }
 
-    constexpr void clear(Flag _flag) noexcept
+    constexpr void clear(Flag flag) noexcept
     {
-        enabled_ = (uint8_t) (enabled_ & ~static_cast<uint8_t>(_flag));
-        disabled_ = (uint8_t) (disabled_ & ~static_cast<uint8_t>(_flag));
+        enabled_ = (uint8_t) (enabled_ & ~static_cast<uint8_t>(flag));
+        disabled_ = (uint8_t) (disabled_ & ~static_cast<uint8_t>(flag));
     }
 
     constexpr void reset() noexcept
@@ -129,18 +129,18 @@ struct formatter<terminal::MatchModes>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::MatchModes m, FormatContext& _ctx)
+    auto format(terminal::MatchModes m, FormatContext& ctx)
     {
         std::string s;
-        auto const advance = [&](terminal::MatchModes::Flag _cond, std::string_view _text) {
-            auto const status = m.status(_cond);
+        auto const advance = [&](terminal::MatchModes::Flag cond, std::string_view text) {
+            auto const status = m.status(cond);
             if (status == terminal::MatchModes::Status::Any)
                 return;
             if (!s.empty())
                 s += '|';
             if (status == terminal::MatchModes::Status::Disabled)
                 s += "~";
-            s += _text;
+            s += text;
         };
         advance(terminal::MatchModes::AppCursor, "AppCursor");
         advance(terminal::MatchModes::AppKeypad, "AppKeypad");
@@ -151,7 +151,7 @@ struct formatter<terminal::MatchModes>
         advance(terminal::MatchModes::Trace, "Trace");
         if (s.empty())
             s = "Any";
-        return fmt::format_to(_ctx.out(), "{}", s);
+        return fmt::format_to(ctx.out(), "{}", s);
     }
 };
 } // namespace fmt

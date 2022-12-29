@@ -114,7 +114,7 @@ class Pty
     [[nodiscard]] virtual PageSize pageSize() const noexcept = 0;
 
     /// Resizes underlying window buffer by given character width and height.
-    virtual void resizeScreen(PageSize _cells, std::optional<crispy::ImageSize> _pixels = std::nullopt) = 0;
+    virtual void resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixels = std::nullopt) = 0;
 };
 
 [[nodiscard]] std::unique_ptr<Pty> createPty(PageSize pageSize, std::optional<crispy::ImageSize> viewSize);

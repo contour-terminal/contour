@@ -41,12 +41,9 @@ struct Code
     constexpr Code& operator=(Code const&) noexcept = default;
     constexpr Code(Code&&) noexcept = default;
     constexpr Code& operator=(Code&&) noexcept = default;
-    constexpr explicit Code(uint16_t _code) noexcept: code { _code } {}
+    constexpr explicit Code(uint16_t code) noexcept: code { code } {}
 
-    constexpr explicit Code(std::string_view _code) noexcept: code { uint16_t(_code[0] << 8 | _code[1]) }
-    {
-        code = uint16_t(_code[0] << 8 | _code[1]);
-    }
+    constexpr explicit Code(std::string_view value) noexcept: code { uint16_t(value[0] << 8 | value[1]) } {}
 };
 
 constexpr bool operator==(Code a, Code b) noexcept
@@ -76,9 +73,9 @@ constexpr auto inline eat_newline_glitch = Def { Code { "xn" }, "xenl" };
 
 namespace literals
 {
-    constexpr Code operator"" _tcap(char const* _code, size_t)
+    constexpr Code operator"" _tcap(char const* code, size_t)
     {
-        return Code { uint16_t(_code[0] << 8 | _code[1]) };
+        return Code { uint16_t(code[0] << 8 | code[1]) };
     }
 } // namespace literals
 
@@ -89,15 +86,15 @@ class Database
 
     virtual ~Database() = default;
 
-    virtual bool booleanCapability(Code _cap) const = 0;
-    virtual unsigned numericCapability(Code _cap) const = 0;
-    virtual std::string_view stringCapability(Code _cap) const = 0;
+    virtual bool booleanCapability(Code cap) const = 0;
+    virtual unsigned numericCapability(Code cap) const = 0;
+    virtual std::string_view stringCapability(Code cap) const = 0;
 
-    virtual bool booleanCapability(std::string_view _cap) const = 0;
-    virtual unsigned numericCapability(std::string_view _cap) const = 0;
-    virtual std::string_view stringCapability(std::string_view _cap) const = 0;
+    virtual bool booleanCapability(std::string_view cap) const = 0;
+    virtual unsigned numericCapability(std::string_view cap) const = 0;
+    virtual std::string_view stringCapability(std::string_view cap) const = 0;
 
-    virtual std::optional<Code> codeFromName(std::string_view _name) const = 0;
+    virtual std::optional<Code> codeFromName(std::string_view name) const = 0;
 
     virtual std::string terminfo() const = 0;
 };
@@ -105,15 +102,15 @@ class Database
 class StaticDatabase: public Database
 {
   public:
-    bool booleanCapability(Code _cap) const override;
-    unsigned numericCapability(Code _cap) const override;
-    std::string_view stringCapability(Code _cap) const override;
+    bool booleanCapability(Code cap) const override;
+    unsigned numericCapability(Code cap) const override;
+    std::string_view stringCapability(Code cap) const override;
 
-    bool booleanCapability(std::string_view _cap) const override;
-    unsigned numericCapability(std::string_view _cap) const override;
-    std::string_view stringCapability(std::string_view _cap) const override;
+    bool booleanCapability(std::string_view cap) const override;
+    unsigned numericCapability(std::string_view cap) const override;
+    std::string_view stringCapability(std::string_view cap) const override;
 
-    std::optional<Code> codeFromName(std::string_view _name) const override;
+    std::optional<Code> codeFromName(std::string_view name) const override;
 
     std::string terminfo() const override;
 };
@@ -131,16 +128,16 @@ struct formatter<terminal::capabilities::Code>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::capabilities::Code _value, FormatContext& ctx)
+    auto format(terminal::capabilities::Code value, FormatContext& ctx)
     {
-        if (_value.code & 0xFF0000)
+        if (value.code & 0xFF0000)
             return fmt::format_to(ctx.out(),
                                   "{}{}{}",
-                                  char((_value.code >> 16) & 0xFF),
-                                  char((_value.code >> 8) & 0xFF),
-                                  char(_value.code & 0xFF));
+                                  char((value.code >> 16) & 0xFF),
+                                  char((value.code >> 8) & 0xFF),
+                                  char(value.code & 0xFF));
 
-        return fmt::format_to(ctx.out(), "{}{}", char((_value.code >> 8) & 0xFF), char(_value.code & 0xFF));
+        return fmt::format_to(ctx.out(), "{}{}", char((value.code >> 8) & 0xFF), char(value.code & 0xFF));
     }
 };
 } // namespace fmt

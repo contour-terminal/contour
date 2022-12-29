@@ -55,9 +55,9 @@ struct Margin
         {
             return unbox<ColumnCount>(to - from) + ColumnCount(1);
         }
-        [[nodiscard]] constexpr bool contains(ColumnOffset _value) const noexcept
+        [[nodiscard]] constexpr bool contains(ColumnOffset value) const noexcept
         {
-            return from <= _value && _value <= to;
+            return from <= value && value <= to;
         }
         [[nodiscard]] constexpr bool operator==(Horizontal rhs) const noexcept
         {
@@ -76,9 +76,9 @@ struct Margin
         {
             return unbox<LineCount>(to - from) + LineCount(1);
         }
-        [[nodiscard]] constexpr bool contains(LineOffset _value) const noexcept
+        [[nodiscard]] constexpr bool contains(LineOffset value) const noexcept
         {
-            return from <= _value && _value <= to;
+            return from <= value && value <= to;
         }
         [[nodiscard]] constexpr bool operator==(Vertical const& rhs) const noexcept
         {
@@ -371,14 +371,14 @@ struct LogicalLines
         LineOffset bottom;
         LogicalLine<Cell> current;
 
-        iterator(std::reference_wrapper<Lines<Cell>> _lines,
-                 LineOffset _top,
-                 LineOffset _next,
-                 LineOffset _bottom):
-            lines { _lines }, top { _top }, next { _next }, bottom { _bottom }
+        iterator(std::reference_wrapper<Lines<Cell>> lines,
+                 LineOffset top,
+                 LineOffset next,
+                 LineOffset bottom):
+            lines { lines }, top { top }, next { next }, bottom { bottom }
         {
-            Require(_top <= next);
-            Require(next <= _bottom + 1);
+            Require(top <= next);
+            Require(next <= bottom + 1);
             ++*this;
         }
 
@@ -468,14 +468,14 @@ struct ReverseLogicalLines
         LineOffset bottom;
         LogicalLine<Cell> current;
 
-        iterator(std::reference_wrapper<Lines<Cell>> _lines,
-                 LineOffset _top,
-                 LineOffset _next,
-                 LineOffset _bottom):
-            lines { _lines }, top { _top }, next { _next }, bottom { _bottom }
+        iterator(std::reference_wrapper<Lines<Cell>> lines,
+                 LineOffset top,
+                 LineOffset next,
+                 LineOffset bottom):
+            lines { lines }, top { top }, next { next }, bottom { bottom }
         {
-            Require(_top - 1 <= next);
-            Require(next <= _bottom);
+            Require(top - 1 <= next);
+            Require(next <= bottom);
             ++*this;
         }
 
@@ -581,7 +581,7 @@ class Grid
 {
     // TODO: Rename all "History" to "Scrollback"?
   public:
-    Grid(PageSize _pageSize, bool _reflowOnResize, MaxHistoryLineCount _maxHistoryLineCount);
+    Grid(PageSize pageSize, bool reflowOnResize, MaxHistoryLineCount maxHistoryLineCount);
 
     Grid(): Grid(PageSize { LineCount(25), ColumnCount(80) }, false, LineCount(0)) {}
 
@@ -590,132 +590,132 @@ class Grid
     // {{{ grid global properties
     [[nodiscard]] LineCount maxHistoryLineCount() const noexcept
     {
-        if (auto const* maxLineCount = std::get_if<LineCount>(&historyLimit_))
+        if (auto const* maxLineCount = std::get_if<LineCount>(&_historyLimit))
             return *maxLineCount;
         else
-            return LineCount::cast_from(lines_.size()) - pageSize_.lines;
+            return LineCount::cast_from(_lines.size()) - _pageSize.lines;
     }
 
-    void setMaxHistoryLineCount(MaxHistoryLineCount _maxHistoryLineCount);
+    void setMaxHistoryLineCount(MaxHistoryLineCount maxHistoryLineCount);
 
     [[nodiscard]] LineCount totalLineCount() const noexcept
     {
-        return maxHistoryLineCount() + pageSize_.lines;
+        return maxHistoryLineCount() + _pageSize.lines;
     }
 
-    [[nodiscard]] LineCount historyLineCount() const noexcept { return linesUsed_ - pageSize_.lines; }
+    [[nodiscard]] LineCount historyLineCount() const noexcept { return _linesUsed - _pageSize.lines; }
 
-    [[nodiscard]] bool reflowOnResize() const noexcept { return reflowOnResize_; }
-    void setReflowOnResize(bool _enabled) { reflowOnResize_ = _enabled; }
+    [[nodiscard]] bool reflowOnResize() const noexcept { return _reflowOnResize; }
+    void setReflowOnResize(bool enabled) { _reflowOnResize = enabled; }
 
-    [[nodiscard]] PageSize pageSize() const noexcept { return pageSize_; }
-    [[nodiscard]] Margin margin() const noexcept { return margin_; }
-    [[nodiscard]] Margin& margin() noexcept { return margin_; }
+    [[nodiscard]] PageSize pageSize() const noexcept { return _pageSize; }
+    [[nodiscard]] Margin margin() const noexcept { return _margin; }
+    [[nodiscard]] Margin& margin() noexcept { return _margin; }
 
     /// Resizes the main page area of the grid and adapts the scrollback area's width accordingly.
     ///
-    /// @param _pageSize          new size of the main page area
-    /// @param _currentCursorPos  current cursor position
-    /// @param _wrapPending       AutoWrap is on and a wrap is pending
+    /// @param pageSize          new size of the main page area
+    /// @param currentCursorPos  current cursor position
+    /// @param wrapPending       AutoWrap is on and a wrap is pending
     ///
     /// @returns updated cursor position.
-    [[nodiscard]] CellLocation resize(PageSize _pageSize, CellLocation _currentCursorPos, bool _wrapPending);
+    [[nodiscard]] CellLocation resize(PageSize pageSize, CellLocation currentCursorPos, bool wrapPending);
     // }}}
 
     // {{{ Line API
-    /// @returns reference to Line at given relative offset @p _line.
-    Line<Cell>& lineAt(LineOffset _line) noexcept;
-    Line<Cell> const& lineAt(LineOffset _line) const noexcept;
+    /// @returns reference to Line at given relative offset @p line.
+    Line<Cell>& lineAt(LineOffset line) noexcept;
+    Line<Cell> const& lineAt(LineOffset line) const noexcept;
 
-    gsl::span<Cell const> lineBuffer(LineOffset _line) const noexcept { return lineAt(_line).cells(); }
-    gsl::span<Cell const> lineBufferRightTrimmed(LineOffset _line) const noexcept;
+    gsl::span<Cell const> lineBuffer(LineOffset line) const noexcept { return lineAt(line).cells(); }
+    gsl::span<Cell const> lineBufferRightTrimmed(LineOffset line) const noexcept;
 
-    [[nodiscard]] std::string lineText(LineOffset _line) const;
-    [[nodiscard]] std::string lineTextTrimmed(LineOffset _line) const;
-    [[nodiscard]] std::string lineText(Line<Cell> const& _line) const;
+    [[nodiscard]] std::string lineText(LineOffset line) const;
+    [[nodiscard]] std::string lineTextTrimmed(LineOffset line) const;
+    [[nodiscard]] std::string lineText(Line<Cell> const& line) const;
 
-    void setLineText(LineOffset _line, std::string_view _text);
+    void setLineText(LineOffset line, std::string_view text);
 
-    // void resetLine(LineOffset _line, GraphicsAttributes _attribs) noexcept
-    // { lineAt(_line).reset(_attribs); }
+    // void resetLine(LineOffset line, GraphicsAttributes attribs) noexcept
+    // { lineAt(line).reset(attribs); }
 
-    [[nodiscard]] ColumnCount lineLength(LineOffset _line) const noexcept { return lineAt(_line).size(); }
-    [[nodiscard]] bool isLineBlank(LineOffset _line) const noexcept;
-    [[nodiscard]] bool isLineWrapped(LineOffset _line) const noexcept;
+    [[nodiscard]] ColumnCount lineLength(LineOffset line) const noexcept { return lineAt(line).size(); }
+    [[nodiscard]] bool isLineBlank(LineOffset line) const noexcept;
+    [[nodiscard]] bool isLineWrapped(LineOffset line) const noexcept;
 
-    [[nodiscard]] int computeLogicalLineNumberFromBottom(LineCount _n) const noexcept;
+    [[nodiscard]] int computeLogicalLineNumberFromBottom(LineCount n) const noexcept;
 
-    [[nodiscard]] size_t zero_index() const noexcept { return lines_.zero_index(); }
+    [[nodiscard]] size_t zero_index() const noexcept { return _lines.zero_index(); }
     // }}}
 
     /// Gets a reference to the cell relative to screen origin (top left, 0:0).
-    [[nodiscard]] Cell& useCellAt(LineOffset _line, ColumnOffset _column) noexcept;
-    [[nodiscard]] Cell& at(LineOffset _line, ColumnOffset _column) noexcept;
-    [[nodiscard]] Cell const& at(LineOffset _line, ColumnOffset _column) const noexcept;
+    [[nodiscard]] Cell& useCellAt(LineOffset line, ColumnOffset column) noexcept;
+    [[nodiscard]] Cell& at(LineOffset line, ColumnOffset column) noexcept;
+    [[nodiscard]] Cell const& at(LineOffset line, ColumnOffset column) const noexcept;
 
     // page view API
-    gsl::span<Line<Cell>> pageAtScrollOffset(ScrollOffset _scrollOffset);
-    gsl::span<Line<Cell> const> pageAtScrollOffset(ScrollOffset _scrollOffset) const;
+    gsl::span<Line<Cell>> pageAtScrollOffset(ScrollOffset scrollOffset);
+    gsl::span<Line<Cell> const> pageAtScrollOffset(ScrollOffset scrollOffset) const;
     gsl::span<Line<Cell>> mainPage();
     gsl::span<Line<Cell> const> mainPage() const;
 
     LogicalLines<Cell> logicalLines()
     {
         return LogicalLines<Cell> { boxed_cast<LineOffset>(-historyLineCount()),
-                                    boxed_cast<LineOffset>(pageSize_.lines - 1),
-                                    lines_ };
+                                    boxed_cast<LineOffset>(_pageSize.lines - 1),
+                                    _lines };
     }
 
     LogicalLines<Cell> logicalLinesFrom(LineOffset offset)
     {
-        return LogicalLines<Cell> { offset, boxed_cast<LineOffset>(pageSize_.lines - 1), lines_ };
+        return LogicalLines<Cell> { offset, boxed_cast<LineOffset>(_pageSize.lines - 1), _lines };
     }
 
     ReverseLogicalLines<Cell> logicalLinesReverse()
     {
         return ReverseLogicalLines<Cell> { boxed_cast<LineOffset>(-historyLineCount()),
-                                           boxed_cast<LineOffset>(pageSize_.lines - 1),
-                                           lines_ };
+                                           boxed_cast<LineOffset>(_pageSize.lines - 1),
+                                           _lines };
     }
 
     ReverseLogicalLines<Cell> logicalLinesReverseFrom(LineOffset offset)
     {
-        return ReverseLogicalLines<Cell> { boxed_cast<LineOffset>(-historyLineCount()), offset, lines_ };
+        return ReverseLogicalLines<Cell> { boxed_cast<LineOffset>(-historyLineCount()), offset, _lines };
     }
     // {{{ buffer manipulation
 
     /// Completely deletes all scrollback lines.
     void clearHistory();
 
-    /// Scrolls up by @p _n lines within the given margin.
+    /// Scrolls up by @p n lines within the given margin.
     ///
-    /// @param _n number of lines to scroll up within the given margin.
-    /// @param _defaultAttributes SGR attributes the newly created grid cells will be initialized with.
-    /// @param _margin the margin coordinates to perform the scrolling action into.
+    /// @param n number of lines to scroll up within the given margin.
+    /// @param defaultAttributes SGR attributes the newly created grid cells will be initialized with.
+    /// @param margin the margin coordinates to perform the scrolling action into.
     ///
     /// @return Number of lines the main page has been scrolled.
-    LineCount scrollUp(LineCount _n, GraphicsAttributes _defaultAttributes, Margin _margin) noexcept;
+    LineCount scrollUp(LineCount n, GraphicsAttributes defaultAttributes, Margin margin) noexcept;
 
-    /// Scrolls up main page by @p _n lines and re-initializes grid cells with @p _defaultAttributes.
-    LineCount scrollUp(LineCount _n, GraphicsAttributes _defaultAttributes = {}) noexcept;
+    /// Scrolls up main page by @p n lines and re-initializes grid cells with @p defaultAttributes.
+    LineCount scrollUp(LineCount n, GraphicsAttributes defaultAttributes = {}) noexcept;
 
-    /// Scrolls down by @p _n lines within the given margin.
+    /// Scrolls down by @p n lines within the given margin.
     ///
-    /// @param _n number of lines to scroll down within the given margin.
-    /// @param _defaultAttributes SGR attributes the newly created grid cells will be initialized with.
-    /// @param _margin the margin coordinates to perform the scrolling action into.
-    void scrollDown(LineCount _n, GraphicsAttributes const& _defaultAttributes, Margin const& _margin);
+    /// @param n number of lines to scroll down within the given margin.
+    /// @param defaultAttributes SGR attributes the newly created grid cells will be initialized with.
+    /// @param margin the margin coordinates to perform the scrolling action into.
+    void scrollDown(LineCount n, GraphicsAttributes const& defaultAttributes, Margin const& margin);
 
     // Scrolls the data within the margins to the left filling the new space on the right with empty cells.
-    void scrollLeft(GraphicsAttributes _defaultAttributes, Margin _margin) noexcept;
+    void scrollLeft(GraphicsAttributes defaultAttributes, Margin margin) noexcept;
     // }}}
 
     // {{{ Rendering API
     /// Renders the full screen by passing every grid cell to the callback.
     template <typename RendererT>
     [[nodiscard]] RenderPassHints render(
-        RendererT&& _render,
-        ScrollOffset _scrollOffset = {},
+        RendererT&& render,
+        ScrollOffset scrollOffset = {},
         HighlightSearchMatches highlightSearchMatches = HighlightSearchMatches::Yes) const;
 
     /// Takes text-screenshot of the main page.
@@ -745,10 +745,10 @@ class Grid
 
     // Conditionally extends the cell location forward if the grid cell at the given location holds a wide
     // character.
-    [[nodiscard]] CellLocation stretchedColumn(CellLocation _coord) const noexcept
+    [[nodiscard]] CellLocation stretchedColumn(CellLocation coord) const noexcept
     {
-        CellLocation stretched = _coord;
-        if (auto const w = cellWidthAt(_coord); w > 1) // wide character
+        CellLocation stretched = coord;
+        if (auto const w = cellWidthAt(coord); w > 1) // wide character
         {
             stretched.column += ColumnOffset::cast_from(w) - 1;
             return stretched;
@@ -772,7 +772,7 @@ class Grid
         }
 
         auto const& inflatedLine = line.cells();
-        auto columnOffset = ColumnOffset::cast_from(pageSize_.columns - 1);
+        auto columnOffset = ColumnOffset::cast_from(_pageSize.columns - 1);
         while (columnOffset > ColumnOffset(0) && inflatedLine[unbox<size_t>(columnOffset)].empty())
             --columnOffset;
         return CellLocation { lineOffset, columnOffset };
@@ -784,41 +784,41 @@ class Grid
     }
 
   private:
-    CellLocation growLines(LineCount _newHeight, CellLocation _cursor);
-    void appendNewLines(LineCount _count, GraphicsAttributes _attr);
+    CellLocation growLines(LineCount newHeight, CellLocation cursor);
+    void appendNewLines(LineCount count, GraphicsAttributes attr);
     void clampHistory();
 
     // {{{ buffer helpers
-    void resizeBuffers(PageSize _newSize)
+    void resizeBuffers(PageSize newSize)
     {
-        auto const newTotalLineCount = historyLineCount() + _newSize.lines;
-        lines_.resize(unbox<size_t>(newTotalLineCount));
-        pageSize_ = _newSize;
+        auto const newTotalLineCount = historyLineCount() + newSize.lines;
+        _lines.resize(unbox<size_t>(newTotalLineCount));
+        _pageSize = newSize;
     }
 
-    void rezeroBuffers() noexcept { lines_.rezero(); }
+    void rezeroBuffers() noexcept { _lines.rezero(); }
 
-    void rotateBuffers(int offset) noexcept { lines_.rotate(offset); }
+    void rotateBuffers(int offset) noexcept { _lines.rotate(offset); }
 
-    void rotateBuffersLeft(LineCount count) noexcept { lines_.rotate_left(unbox<size_t>(count)); }
+    void rotateBuffersLeft(LineCount count) noexcept { _lines.rotate_left(unbox<size_t>(count)); }
 
-    void rotateBuffersRight(LineCount count) noexcept { lines_.rotate_right(unbox<size_t>(count)); }
+    void rotateBuffersRight(LineCount count) noexcept { _lines.rotate_right(unbox<size_t>(count)); }
     // }}}
 
     // private fields
     //
-    PageSize pageSize_;
-    Margin margin_;
-    bool reflowOnResize_ = false;
-    MaxHistoryLineCount historyLimit_;
+    PageSize _pageSize;
+    Margin _margin;
+    bool _reflowOnResize = false;
+    MaxHistoryLineCount _historyLimit;
 
-    // Number of lines is at least the sum of maxHistoryLineCount_ + pageSize_.lines,
+    // Number of lines is at least the sum of _maxHistoryLineCount + _pageSize.lines,
     // because shrinking the page height does not necessarily
     // have to resize the array (as optimization).
-    Lines<Cell> lines_;
+    Lines<Cell> _lines;
 
     // Number of lines used in the Lines buffer.
-    LineCount linesUsed_;
+    LineCount _linesUsed;
 };
 
 template <typename Cell>
@@ -832,39 +832,39 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 constexpr LineFlags Grid<Cell>::defaultLineFlags() const noexcept
 {
-    return reflowOnResize_ ? LineFlags::Wrappable : LineFlags::None;
+    return _reflowOnResize ? LineFlags::Wrappable : LineFlags::None;
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 constexpr LineCount Grid<Cell>::linesUsed() const noexcept
 {
-    return linesUsed_;
+    return _linesUsed;
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-bool Grid<Cell>::isLineWrapped(LineOffset _line) const noexcept
+bool Grid<Cell>::isLineWrapped(LineOffset line) const noexcept
 {
-    return _line >= -boxed_cast<LineOffset>(historyLineCount())
-           && boxed_cast<LineCount>(_line) < pageSize_.lines && lineAt(_line).wrapped();
+    return line >= -boxed_cast<LineOffset>(historyLineCount())
+           && boxed_cast<LineCount>(line) < _pageSize.lines && lineAt(line).wrapped();
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 template <typename RendererT>
-[[nodiscard]] RenderPassHints Grid<Cell>::render(RendererT&& _render,
-                                                 ScrollOffset _scrollOffset,
+[[nodiscard]] RenderPassHints Grid<Cell>::render(RendererT&& render,
+                                                 ScrollOffset scrollOffset,
                                                  HighlightSearchMatches highlightSearchMatches) const
 {
-    assert(!_scrollOffset || unbox<LineCount>(_scrollOffset) <= historyLineCount());
+    assert(!scrollOffset || unbox<LineCount>(scrollOffset) <= historyLineCount());
 
     auto y = LineOffset(0);
     auto hints = RenderPassHints {};
-    for (int i = -*_scrollOffset, e = i + *pageSize_.lines; i != e; ++i, ++y)
+    for (int i = -*scrollOffset, e = i + *_pageSize.lines; i != e; ++i, ++y)
     {
         auto x = ColumnOffset(0);
-        Line<Cell> const& line = lines_[i];
+        Line<Cell> const& line = _lines[i];
         // NB: trivial liner rendering only works trivially if we don't do cell-based operations
         // on the text. Therefore, we only move to the trivial fast path here if we don't want to
         // highlight search matches.
@@ -873,22 +873,22 @@ template <typename RendererT>
             auto const cellFlags = line.trivialBuffer().textAttributes.flags;
             hints.containsBlinkingCells = hints.containsBlinkingCells || (CellFlags::Blinking & cellFlags)
                                           || (CellFlags::RapidBlinking & cellFlags);
-            _render.renderTrivialLine(line.trivialBuffer(), y);
+            render.renderTrivialLine(line.trivialBuffer(), y);
         }
         else
         {
-            _render.startLine(y);
+            render.startLine(y);
             for (Cell const& cell: line.cells())
             {
                 hints.containsBlinkingCells = hints.containsBlinkingCells
                                               || (CellFlags::Blinking & cell.flags())
                                               || (CellFlags::RapidBlinking & cell.flags());
-                _render.renderCell(cell, y, x++);
+                render.renderCell(cell, y, x++);
             }
-            _render.endLine();
+            render.endLine();
         }
     }
-    _render.finish();
+    render.finish();
     return hints;
 }
 // }}}

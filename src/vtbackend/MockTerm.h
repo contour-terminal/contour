@@ -28,9 +28,9 @@ template <typename PtyDevice = MockPty>
 class MockTerm: public Terminal::Events
 {
   public:
-    MockTerm(ColumnCount _columns, LineCount _lines): MockTerm { PageSize { _lines, _columns } } {}
+    MockTerm(ColumnCount columns, LineCount lines): MockTerm { PageSize { lines, columns } } {}
 
-    explicit MockTerm(PageSize _size, LineCount _hist = {}, size_t ptyReadBufferSize = 1024);
+    explicit MockTerm(PageSize size, LineCount hist = {}, size_t ptyReadBufferSize = 1024);
 
     template <typename Init>
     MockTerm(
@@ -47,7 +47,7 @@ class MockTerm: public Terminal::Events
     PtyDevice& mockPty() noexcept { return static_cast<PtyDevice&>(terminal.device()); }
     PtyDevice const& mockPty() const noexcept { return static_cast<PtyDevice const&>(terminal.device()); }
 
-    void writeToStdin(std::string_view _text) { mockPty().stdinBuffer() += _text; }
+    void writeToStdin(std::string_view text) { mockPty().stdinBuffer() += text; }
 
     void writeToScreen(std::string_view text)
     {

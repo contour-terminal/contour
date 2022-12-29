@@ -64,7 +64,7 @@ struct ConPtySlave: public PtySlaveDummy
     }
 };
 
-ConPty::ConPty(PageSize const& _windowSize): size_ { _windowSize }
+ConPty::ConPty(PageSize const& windowSize): size_ { windowSize }
 {
     master_ = INVALID_HANDLE_VALUE;
     input_ = INVALID_HANDLE_VALUE;
@@ -177,22 +177,22 @@ PageSize ConPty::pageSize() const noexcept
     return size_;
 }
 
-void ConPty::resizeScreen(PageSize _cells, std::optional<crispy::ImageSize> _pixels)
+void ConPty::resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixels)
 {
     if (!slave_)
         return;
 
-    (void) _pixels; // TODO Can we pass that information, too?
+    (void) pixels; // TODO Can we pass that information, too?
 
     COORD coords;
-    coords.X = unbox<unsigned short>(_cells.columns);
-    coords.Y = unbox<unsigned short>(_cells.lines);
+    coords.X = unbox<unsigned short>(cells.columns);
+    coords.Y = unbox<unsigned short>(cells.lines);
 
     HRESULT const result = ResizePseudoConsole(master_, coords);
     if (result != S_OK)
         throw runtime_error { GetLastErrorAsString() };
 
-    size_ = _cells;
+    size_ = cells;
 }
 
 PtySlave& ConPty::slave() noexcept

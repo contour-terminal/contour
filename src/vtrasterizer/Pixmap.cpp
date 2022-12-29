@@ -63,12 +63,12 @@ atlas::Buffer Pixmap::take()
         return std::move(_buffer);
 }
 
-Pixmap& Pixmap::line(Ratio _from, Ratio _to)
+Pixmap& Pixmap::line(Ratio rFrom, Ratio rTo)
 {
-    if (_from.y > _to.y)
-        swap(_from, _to);
-    auto const from = _size * _from;
-    auto const to = _size * _to;
+    if (rFrom.y > rTo.y)
+        swap(rFrom, rTo);
+    auto const from = _size * rFrom;
+    auto const to = _size * rTo;
     auto const z = max(1, _lineThickness / 2);
     if (from.x != to.x)
     {

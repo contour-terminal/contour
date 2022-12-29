@@ -48,9 +48,9 @@ struct BasicParserEvents: public NullParserEvents // {{{
 
     BasicParserEvents(): _parameterBuilder(_sequence.parameters()) {}
 
-    void collect(char _char) override { _sequence.intermediateCharacters().push_back(_char); }
+    void collect(char ch) override { _sequence.intermediateCharacters().push_back(ch); }
 
-    void collectLeader(char _leader) noexcept override { _sequence.setLeader(_leader); }
+    void collectLeader(char leader) noexcept override { _sequence.setLeader(leader); }
 
     void clear() noexcept override
     {
@@ -58,18 +58,18 @@ struct BasicParserEvents: public NullParserEvents // {{{
         _parameterBuilder.reset();
     }
 
-    void paramDigit(char _char) noexcept override
+    void paramDigit(char ch) noexcept override
     {
-        _parameterBuilder.multiplyBy10AndAdd(static_cast<uint8_t>(_char - '0'));
+        _parameterBuilder.multiplyBy10AndAdd(static_cast<uint8_t>(ch - '0'));
     }
 
     void paramSeparator() noexcept override { _parameterBuilder.nextParameter(); }
 
     void paramSubSeparator() noexcept override { _parameterBuilder.nextSubParameter(); }
 
-    void param(char _char) noexcept override
+    void param(char ch) noexcept override
     {
-        switch (_char)
+        switch (ch)
         {
             case ';': paramSeparator(); break;
             case ':': paramSubSeparator(); break;
@@ -82,7 +82,7 @@ struct BasicParserEvents: public NullParserEvents // {{{
             case '6':
             case '7':
             case '8':
-            case '9': paramDigit(_char); break;
+            case '9': paramDigit(ch); break;
         }
     }
 
@@ -94,26 +94,26 @@ struct BasicParserEvents: public NullParserEvents // {{{
         handleSequence();
     }
 
-    void dispatchESC(char _finalChar) override
+    void dispatchESC(char finalChar) override
     {
         _sequence.setCategory(FunctionCategory::ESC);
-        _sequence.setFinalChar(_finalChar);
+        _sequence.setFinalChar(finalChar);
         executeSequenceHandler();
     }
 
-    void dispatchCSI(char _finalChar) override
+    void dispatchCSI(char finalChar) override
     {
         _sequence.setCategory(FunctionCategory::CSI);
-        _sequence.setFinalChar(_finalChar);
+        _sequence.setFinalChar(finalChar);
         executeSequenceHandler();
     }
 
     void startOSC() override { _sequence.setCategory(FunctionCategory::OSC); }
 
-    void putOSC(char _char) override
+    void putOSC(char ch) override
     {
         if (_sequence.intermediateCharacters().size() + 1 < Sequence::MaxOscLength)
-            _sequence.intermediateCharacters().push_back(_char);
+            _sequence.intermediateCharacters().push_back(ch);
     }
 
     void dispatchOSC() override
@@ -125,10 +125,10 @@ struct BasicParserEvents: public NullParserEvents // {{{
         clear();
     }
 
-    void hook(char _finalChar) override
+    void hook(char finalChar) override
     {
         _sequence.setCategory(FunctionCategory::DCS);
-        _sequence.setFinalChar(_finalChar);
+        _sequence.setFinalChar(finalChar);
         executeSequenceHandler();
     }
 };
@@ -136,7 +136,7 @@ struct BasicParserEvents: public NullParserEvents // {{{
 
 struct MouseTracker final: public BasicParserEvents
 {
-    static bool running;
+    static bool _running;
 
     int mouseButton = -1;
     int line = -1;
@@ -175,29 +175,29 @@ struct MouseTracker final: public BasicParserEvents
 
     static void signalHandler(int signo)
     {
-        running = false;
+        _running = false;
         signal(signo, SIG_DFL);
     }
 
-    void execute(char /*controlCode*/) override { running = false; }
+    void execute(char /*controlCode*/) override { _running = false; }
 
     void print(char32_t ch) override
     {
         if (ch == U'q' || ch == U'Q')
-            running = false;
+            _running = false;
     }
 
     size_t print(std::string_view text, size_t /*columnsUsed*/) override
     {
         if (text == "q" || text == "Q")
-            running = false;
+            _running = false;
         return 0;
     }
 
     int run()
     {
         checkPassiveMouseTrackingSupport();
-        while (running)
+        while (_running)
         {
             writeToTTY(fmt::format("\rMouse position {}:{}, 0x{:X}, {} ({})\033[K",
                                    line,
@@ -297,7 +297,7 @@ struct MouseTracker final: public BasicParserEvents
     std::optional<std::pair<int, int>> _decrpm;
 };
 
-bool MouseTracker::running = true;
+bool MouseTracker::_running = true;
 
 } // namespace
 
