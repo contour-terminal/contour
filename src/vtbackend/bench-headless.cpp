@@ -61,42 +61,41 @@ struct BenchOptions
 };
 
 template <typename Writer>
-int baseBenchmark(Writer&& _writer, BenchOptions _options, string_view _title)
+int baseBenchmark(Writer&& writer, BenchOptions options, string_view title)
 {
-    if (!(_options.binary || _options.longLines || _options.manyLines || _options.sgr))
+    if (!(options.binary || options.longLines || options.manyLines || options.sgr))
     {
         cout << "No test cases specified. Defaulting to: cat, long, sgr.\n";
-        _options.manyLines = true;
-        _options.longLines = true;
-        _options.sgr = true;
+        options.manyLines = true;
+        options.longLines = true;
+        options.sgr = true;
     }
 
-    auto const titleText =
-        fmt::format("Running benchmark: {} (test size: {} MB)", _title, _options.testSizeMB);
+    auto const titleText = fmt::format("Running benchmark: {} (test size: {} MB)", title, options.testSizeMB);
 
     cout << titleText << '\n' << string(titleText.size(), '=') << '\n';
 
-    auto tbp = contour::termbench::Benchmark { std::forward<Writer>(_writer),
-                                               _options.testSizeMB,
+    auto tbp = contour::termbench::Benchmark { std::forward<Writer>(writer),
+                                               options.testSizeMB,
                                                80,
                                                24,
-                                               [&](contour::termbench::Test const& _test) {
-                                                   cout << fmt::format("Running test {} ...\n", _test.name);
+                                               [&](contour::termbench::Test const& test) {
+                                                   cout << fmt::format("Running test {} ...\n", test.name);
                                                } };
 
-    if (_options.manyLines)
+    if (options.manyLines)
         tbp.add(contour::termbench::tests::many_lines());
 
-    if (_options.longLines)
+    if (options.longLines)
         tbp.add(contour::termbench::tests::long_lines());
 
-    if (_options.sgr)
+    if (options.sgr)
     {
         tbp.add(contour::termbench::tests::sgr_fg_lines());
         tbp.add(contour::termbench::tests::sgr_fgbg_lines());
     }
 
-    if (_options.binary)
+    if (options.binary)
         tbp.add(contour::termbench::tests::binary());
 
     tbp.runAll();
@@ -184,9 +183,9 @@ class ContourHeadlessBench: public crispy::App
         return EXIT_SUCCESS;
     }
 
-    BenchOptions benchOptionsFor(string_view _kind)
+    BenchOptions benchOptionsFor(string_view kind)
     {
-        auto const prefix = fmt::format("bench-headless.{}.", _kind);
+        auto const prefix = fmt::format("bench-headless.{}.", kind);
         auto opts = BenchOptions {};
         opts.testSizeMB = parameters().uint(prefix + "size");
         opts.manyLines = parameters().boolean(prefix + "cat");
@@ -247,7 +246,7 @@ class ContourHeadlessBench: public crispy::App
         auto& ptySlave = pty.slave();
         (void) ptySlave.configure();
 
-        auto bufferObjectPool = crispy::BufferObjectPool<char>(4 * 1024 * 1024);
+        auto bufferObjectPool = crispy::BufferObjectPool<char>(4llu * 1024 * 1024);
         auto bufferObject = bufferObjectPool.allocateBufferObject();
 
         auto bytesTransferred = uint64_t { 0 };

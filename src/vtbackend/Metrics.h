@@ -28,7 +28,7 @@ struct Metrics
     // XXX Too bad the key is a string.
     std::map<std::string, uint64_t> sequences;
 
-    void operator()(Sequence const& _seq) { sequences[_seq.text()]++; }
+    void operator()(Sequence const& seq) { sequences[seq.text()]++; }
 
     /// @returns an ordered list of collected metrics, with highest frequencey first.
     [[nodiscard]] std::vector<std::pair<std::string, uint64_t>> ordered() const

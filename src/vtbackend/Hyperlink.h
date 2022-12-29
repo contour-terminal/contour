@@ -81,7 +81,7 @@ namespace detail
 } // namespace detail
 using HyperlinkId = crispy::boxed<uint16_t, detail::HyperlinkTag>;
 
-bool is_local(HyperlinkInfo const& _hyperlink);
+bool is_local(HyperlinkInfo const& hyperlink);
 
 using HyperlinkCache = crispy::LRUCache<HyperlinkId, std::shared_ptr<HyperlinkInfo>>;
 
@@ -90,27 +90,27 @@ struct HyperlinkStorage
     HyperlinkCache cache { 1024 };
     HyperlinkId nextHyperlinkId = HyperlinkId(1);
 
-    std::shared_ptr<HyperlinkInfo> hyperlinkById(HyperlinkId _id) noexcept
+    std::shared_ptr<HyperlinkInfo> hyperlinkById(HyperlinkId id) noexcept
     {
-        if (!!_id)
-            if (auto href = cache.try_get(_id))
+        if (!!id)
+            if (auto href = cache.try_get(id))
                 return *href;
         return {};
     }
 
-    std::shared_ptr<HyperlinkInfo const> hyperlinkById(HyperlinkId _id) const noexcept
+    std::shared_ptr<HyperlinkInfo const> hyperlinkById(HyperlinkId id) const noexcept
     {
-        if (!!_id)
-            if (auto href = cache.try_get(_id))
+        if (!!id)
+            if (auto href = cache.try_get(id))
                 return *href;
         return {};
     }
 
-    HyperlinkId hyperlinkIdByUserId(std::string const& _id) noexcept
+    HyperlinkId hyperlinkIdByUserId(std::string const& id) noexcept
     {
         for (auto& href: cache)
         {
-            if (href.value->userId == _id)
+            if (href.value->userId == id)
             {
                 cache.touch(href.key);
                 return href.key;

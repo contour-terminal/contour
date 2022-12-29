@@ -64,10 +64,10 @@ struct TrivialLineBuffer
     ColumnCount usedColumns {};
     crispy::BufferFragment<char> text {};
 
-    void reset(GraphicsAttributes _attributes) noexcept
+    void reset(GraphicsAttributes attributes) noexcept
     {
-        textAttributes = _attributes;
-        fillAttributes = _attributes;
+        textAttributes = attributes;
+        fillAttributes = attributes;
         hyperlink = {};
         usedColumns = {};
         text.reset();
@@ -108,45 +108,45 @@ class Line
     using reverse_iterator = typename InflatedBuffer::reverse_iterator;
     using const_iterator = typename InflatedBuffer::const_iterator;
 
-    Line(LineFlags _flags, TrivialBuffer _buffer):
-        storage_ { std::move(_buffer) }, flags_ { static_cast<unsigned>(_flags) }
+    Line(LineFlags flags, TrivialBuffer buffer):
+        storage_ { std::move(buffer) }, flags_ { static_cast<unsigned>(flags) }
     {
     }
 
-    Line(LineFlags _flags, InflatedBuffer _buffer):
-        storage_ { std::move(_buffer) }, flags_ { static_cast<unsigned>(_flags) }
+    Line(LineFlags flags, InflatedBuffer buffer):
+        storage_ { std::move(buffer) }, flags_ { static_cast<unsigned>(flags) }
     {
     }
 
-    void reset(LineFlags _flags, GraphicsAttributes _attributes) noexcept
+    void reset(LineFlags flags, GraphicsAttributes attributes) noexcept
     {
-        flags_ = static_cast<unsigned>(_flags);
+        flags_ = static_cast<unsigned>(flags);
         if (isTrivialBuffer())
-            trivialBuffer().reset(_attributes);
+            trivialBuffer().reset(attributes);
         else
-            setBuffer(TrivialBuffer { ColumnCount::cast_from(inflatedBuffer().size()), _attributes });
+            setBuffer(TrivialBuffer { ColumnCount::cast_from(inflatedBuffer().size()), attributes });
     }
 
-    void reset(LineFlags _flags, GraphicsAttributes _attributes, ColumnCount count) noexcept
+    void reset(LineFlags flags, GraphicsAttributes attributes, ColumnCount count) noexcept
     {
-        flags_ = static_cast<unsigned>(_flags);
-        setBuffer(TrivialBuffer { count, _attributes });
+        flags_ = static_cast<unsigned>(flags);
+        setBuffer(TrivialBuffer { count, attributes });
     }
 
-    void fill(LineFlags _flags,
-              GraphicsAttributes const& _attributes,
-              char32_t _codepoint,
-              uint8_t _width) noexcept
+    void fill(LineFlags flags,
+              GraphicsAttributes const& attributes,
+              char32_t codepoint,
+              uint8_t width) noexcept
     {
-        if (_codepoint == 0)
-            reset(_flags, _attributes);
+        if (codepoint == 0)
+            reset(flags, attributes);
         else
         {
-            flags_ = static_cast<unsigned>(_flags);
+            flags_ = static_cast<unsigned>(flags);
             for (Cell& cell: inflatedBuffer())
             {
                 cell.reset();
-                cell.write(_attributes, _codepoint, _width);
+                cell.write(attributes, codepoint, width);
             }
         }
     }
@@ -166,23 +166,23 @@ class Line
     /**
      * Fills this line with the given content.
      *
-     * @p _start offset into this line of the first charater
-     * @p _sgr graphics rendition for the line starting at @c _start until the end
-     * @p _ascii the US-ASCII characters to fill with
+     * @p start offset into this line of the first charater
+     * @p sgr graphics rendition for the line starting at @c start until the end
+     * @p ascii the US-ASCII characters to fill with
      */
-    void fill(ColumnOffset _start, GraphicsAttributes const& _sgr, std::string_view _ascii)
+    void fill(ColumnOffset start, GraphicsAttributes const& sgr, std::string_view ascii)
     {
         auto& buffer = inflatedBuffer();
 
-        assert(unbox<size_t>(_start) + _ascii.size() <= buffer.size());
+        assert(unbox<size_t>(start) + ascii.size() <= buffer.size());
 
         auto constexpr ASCII_Width = 1;
-        auto const* s = _ascii.data();
+        auto const* s = ascii.data();
 
-        Cell* i = &buffer[unbox<size_t>(_start)];
-        Cell* e = i + _ascii.size();
+        Cell* i = &buffer[unbox<size_t>(start)];
+        Cell* e = i + ascii.size();
         while (i != e)
-            (i++)->write(_sgr, static_cast<char32_t>(*s++), ASCII_Width);
+            (i++)->write(sgr, static_cast<char32_t>(*s++), ASCII_Width);
 
         auto const e2 = buffer.data() + buffer.size();
         while (i != e2)
@@ -197,28 +197,28 @@ class Line
             return ColumnCount::cast_from(inflatedBuffer().size());
     }
 
-    void resize(ColumnCount _count);
+    void resize(ColumnCount count);
 
     gsl::span<Cell const> trim_blank_right() const noexcept;
 
     gsl::span<Cell const> cells() const noexcept { return inflatedBuffer(); }
 
-    gsl::span<Cell> useRange(ColumnOffset _start, ColumnCount _count) noexcept
+    gsl::span<Cell> useRange(ColumnOffset start, ColumnCount count) noexcept
     {
 #if defined(__clang__) && __clang_major__ <= 11
         auto const bufferSpan = gsl::span(inflatedBuffer());
-        return bufferSpan.subspan(unbox<size_t>(_start), unbox<size_t>(_count));
+        return bufferSpan.subspan(unbox<size_t>(start), unbox<size_t>(count));
 #else
         // Clang <= 11 cannot deal with this (e.g. FreeBSD 13 defaults to Clang 11).
-        return gsl::span(inflatedBuffer()).subspan(unbox<size_t>(_start), unbox<size_t>(_count));
+        return gsl::span(inflatedBuffer()).subspan(unbox<size_t>(start), unbox<size_t>(count));
 #endif
     }
 
-    [[nodiscard]] Cell& useCellAt(ColumnOffset _column) noexcept
+    [[nodiscard]] Cell& useCellAt(ColumnOffset column) noexcept
     {
-        Require(ColumnOffset(0) <= _column);
-        Require(_column <= ColumnOffset::cast_from(size())); // Allow off-by-one for sentinel.
-        return inflatedBuffer()[unbox<size_t>(_column)];
+        Require(ColumnOffset(0) <= column);
+        Require(column <= ColumnOffset::cast_from(size())); // Allow off-by-one for sentinel.
+        return inflatedBuffer()[unbox<size_t>(column)];
     }
 
     [[nodiscard]] uint8_t cellEmptyAt(ColumnOffset column) const noexcept
@@ -249,13 +249,13 @@ class Line
     [[nodiscard]] LineFlags flags() const noexcept { return static_cast<LineFlags>(flags_); }
 
     [[nodiscard]] bool marked() const noexcept { return isFlagEnabled(LineFlags::Marked); }
-    void setMarked(bool _enable) { setFlag(LineFlags::Marked, _enable); }
+    void setMarked(bool enable) { setFlag(LineFlags::Marked, enable); }
 
     [[nodiscard]] bool wrapped() const noexcept { return isFlagEnabled(LineFlags::Wrapped); }
-    void setWrapped(bool _enable) { setFlag(LineFlags::Wrapped, _enable); }
+    void setWrapped(bool enable) { setFlag(LineFlags::Wrapped, enable); }
 
     [[nodiscard]] bool wrappable() const noexcept { return isFlagEnabled(LineFlags::Wrappable); }
-    void setWrappable(bool _enable) { setFlag(LineFlags::Wrappable, _enable); }
+    void setWrappable(bool enable) { setFlag(LineFlags::Wrappable, enable); }
 
     [[nodiscard]] LineFlags wrappableFlag() const noexcept
     {
@@ -276,20 +276,20 @@ class Line
         return static_cast<LineFlags>(flags_ & Inheritables);
     }
 
-    void setFlag(LineFlags _flag, bool _enable) noexcept
+    void setFlag(LineFlags flag, bool enable) noexcept
     {
-        if (_enable)
-            flags_ |= static_cast<unsigned>(_flag);
+        if (enable)
+            flags_ |= static_cast<unsigned>(flag);
         else
-            flags_ &= ~static_cast<unsigned>(_flag);
+            flags_ &= ~static_cast<unsigned>(flag);
     }
 
-    [[nodiscard]] bool isFlagEnabled(LineFlags _flag) const noexcept
+    [[nodiscard]] bool isFlagEnabled(LineFlags flag) const noexcept
     {
-        return (flags_ & static_cast<unsigned>(_flag)) != 0;
+        return (flags_ & static_cast<unsigned>(flag)) != 0;
     }
 
-    [[nodiscard]] InflatedBuffer reflow(ColumnCount _newColumnCount);
+    [[nodiscard]] InflatedBuffer reflow(ColumnCount newColumnCount);
     [[nodiscard]] std::string toUtf8() const;
     [[nodiscard]] std::string toUtf8Trimmed() const;
 
@@ -491,7 +491,7 @@ struct formatter<terminal::LineFlags>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(const terminal::LineFlags _flags, FormatContext& ctx) const
+    auto format(const terminal::LineFlags flags, FormatContext& ctx) const
     {
         static const std::array<std::pair<terminal::LineFlags, std::string_view>, 3> nameMap = {
             std::pair { terminal::LineFlags::Wrappable, std::string_view("Wrappable") },
@@ -501,7 +501,7 @@ struct formatter<terminal::LineFlags>
         std::string s;
         for (auto const& mapping: nameMap)
         {
-            if ((mapping.first & _flags) != terminal::LineFlags::None)
+            if ((mapping.first & flags) != terminal::LineFlags::None)
             {
                 if (!s.empty())
                     s += ",";

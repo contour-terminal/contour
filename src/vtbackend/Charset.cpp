@@ -257,7 +257,7 @@ constexpr CharsetMap createSwissCharset()
     return result;
 }
 
-CharsetMap const* charsetMap(CharsetId _id) noexcept
+CharsetMap const* charsetMap(CharsetId id) noexcept
 {
     static auto const british = createBritishCharset();
     static auto const dutch = createDutchCharset();
@@ -272,7 +272,7 @@ CharsetMap const* charsetMap(CharsetId _id) noexcept
     static auto const swiss = createSwissCharset();
     static auto const usascii = usasciiCharset();
 
-    switch (_id)
+    switch (id)
     {
         case CharsetId::British: return &british;
         case CharsetId::Dutch: return &dutch;

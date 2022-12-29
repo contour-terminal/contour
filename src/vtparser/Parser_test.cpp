@@ -29,7 +29,7 @@ class MockParserEvents: public terminal::NullParserEvents
     std::string pm;
     size_t maxCharCount = 80;
 
-    void error(string_view const& _msg) override { INFO(fmt::format("Parser error received. {}", _msg)); }
+    void error(string_view const& msg) override { INFO(fmt::format("Parser error received. {}", msg)); }
     void print(char32_t ch) override { text += unicode::convert_to<char>(ch); }
     size_t print(std::string_view s, size_t cellCount) override
     {

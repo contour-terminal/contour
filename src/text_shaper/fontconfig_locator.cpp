@@ -165,10 +165,6 @@ fontconfig_locator::fontconfig_locator():
 {
 }
 
-fontconfig_locator::~fontconfig_locator()
-{
-}
-
 font_source_list fontconfig_locator::locate(font_description const& _fd)
 {
     LocatorLog()("Locating font chain for: {}", _fd);
@@ -234,7 +230,7 @@ font_source_list fontconfig_locator::locate(font_description const& _fd)
     {
         FcPattern* font = fs->fonts[i];
 
-        FcChar8* file;
+        FcChar8* file = nullptr;
         if (FcPatternGetString(font, FC_FILE, 0, &file) != FcResultMatch)
             continue;
 

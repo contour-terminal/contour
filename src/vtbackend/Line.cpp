@@ -27,24 +27,24 @@ namespace terminal
 {
 
 template <typename Cell>
-typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount _newColumnCount)
+typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount newColumnCount)
 {
     using crispy::Comparison;
     if (isTrivialBuffer())
     {
-        switch (crispy::strongCompare(_newColumnCount, ColumnCount::cast_from(trivialBuffer().text.size())))
+        switch (crispy::strongCompare(newColumnCount, ColumnCount::cast_from(trivialBuffer().text.size())))
         {
-            case Comparison::Greater: trivialBuffer().displayWidth = _newColumnCount; return {};
+            case Comparison::Greater: trivialBuffer().displayWidth = newColumnCount; return {};
             case Comparison::Equal: return {};
             case Comparison::Less:;
         }
     }
     auto& buffer = inflatedBuffer();
     // TODO: Efficiently handle TrivialBuffer-case.
-    switch (crispy::strongCompare(_newColumnCount, size()))
+    switch (crispy::strongCompare(newColumnCount, size()))
     {
         case Comparison::Equal: break;
-        case Comparison::Greater: buffer.resize(unbox<size_t>(_newColumnCount)); break;
+        case Comparison::Greater: buffer.resize(unbox<size_t>(newColumnCount)); break;
         case Comparison::Less: {
             // TODO: properly handle wide character cells
             // - when cutting in the middle of a wide char, the wide char gets wrapped and an empty
@@ -52,9 +52,9 @@ typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount _newColumnCou
 
             if (wrappable())
             {
-                auto const [reflowStart, reflowEnd] = [_newColumnCount, &buffer]() {
+                auto const [reflowStart, reflowEnd] = [newColumnCount, &buffer]() {
                     auto const reflowStart =
-                        next(buffer.begin(), *_newColumnCount /* - buffer[_newColumnCount].width()*/);
+                        next(buffer.begin(), *newColumnCount /* - buffer[newColumnCount].width()*/);
 
                     auto reflowEnd = buffer.end();
 
@@ -66,7 +66,7 @@ typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount _newColumnCou
 
                 auto removedColumns = InflatedBuffer(reflowStart, reflowEnd);
                 buffer.erase(reflowStart, buffer.end());
-                assert(size() == _newColumnCount);
+                assert(size() == newColumnCount);
 #if 0
                 if (removedColumns.size() > 0 &&
                         std::any_of(removedColumns.begin(), removedColumns.end(),
@@ -82,8 +82,8 @@ typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount _newColumnCou
             }
             else
             {
-                buffer.resize(unbox<size_t>(_newColumnCount));
-                assert(size() == _newColumnCount);
+                buffer.resize(unbox<size_t>(newColumnCount));
+                assert(size() == newColumnCount);
                 return {};
             }
         }
@@ -92,19 +92,19 @@ typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount _newColumnCou
 }
 
 template <typename Cell>
-inline void Line<Cell>::resize(ColumnCount _count)
+inline void Line<Cell>::resize(ColumnCount count)
 {
-    assert(*_count >= 0);
+    assert(*count >= 0);
     if (1) // constexpr (Optimized)
     {
         if (isTrivialBuffer())
         {
             TrivialBuffer& buffer = trivialBuffer();
-            buffer.displayWidth = _count;
+            buffer.displayWidth = count;
             return;
         }
     }
-    inflatedBuffer().resize(unbox<size_t>(_count));
+    inflatedBuffer().resize(unbox<size_t>(count));
 }
 
 template <typename Cell>

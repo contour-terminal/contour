@@ -80,28 +80,28 @@ struct ColorPalette
 
     Palette palette = defaultColorPalette;
 
-    [[nodiscard]] RGBColor normalColor(size_t _index) const noexcept
+    [[nodiscard]] RGBColor normalColor(size_t index) const noexcept
     {
-        assert(_index < 8);
-        return palette.at(_index);
+        assert(index < 8);
+        return palette.at(index);
     }
 
-    [[nodiscard]] RGBColor brightColor(size_t _index) const noexcept
+    [[nodiscard]] RGBColor brightColor(size_t index) const noexcept
     {
-        assert(_index < 8);
-        return palette.at(_index + 8);
+        assert(index < 8);
+        return palette.at(index + 8);
     }
 
-    [[nodiscard]] RGBColor dimColor(size_t _index) const noexcept
+    [[nodiscard]] RGBColor dimColor(size_t index) const noexcept
     {
-        assert(_index < 8);
-        return palette[256 + _index];
+        assert(index < 8);
+        return palette[256 + index];
     }
 
-    [[nodiscard]] RGBColor indexedColor(size_t _index) const noexcept
+    [[nodiscard]] RGBColor indexedColor(size_t index) const noexcept
     {
-        assert(_index < 256);
-        return palette.at(_index);
+        assert(index < 256);
+        return palette.at(index);
     }
 
     RGBColor defaultForeground = 0xD0D0D0_rgb;
@@ -144,7 +144,7 @@ enum class ColorMode
     Bright
 };
 
-RGBColor apply(ColorPalette const& profile, Color color, ColorTarget target, ColorMode mode) noexcept;
+RGBColor apply(ColorPalette const& colorPalette, Color color, ColorTarget target, ColorMode mode) noexcept;
 
 } // namespace terminal
 

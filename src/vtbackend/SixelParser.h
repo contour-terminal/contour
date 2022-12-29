@@ -60,10 +60,10 @@ class SixelParser: public ParserExtension
         virtual ~Events() = default;
 
         /// Defines a new color at given register index.
-        virtual void setColor(unsigned _index, RGBColor const& _color) = 0;
+        virtual void setColor(unsigned index, RGBColor const& color) = 0;
 
         /// Uses the given color for future paints
-        virtual void useColor(unsigned _index) = 0;
+        virtual void useColor(unsigned index) = 0;
 
         /// moves sixel-cursor to the left border
         virtual void rewind() = 0;
@@ -73,79 +73,76 @@ class SixelParser: public ParserExtension
 
         /// Defines the aspect ratio (pan / pad = aspect ratio) and image dimensions in pixels for
         /// the upcoming pixel data.
-        virtual void setRaster(unsigned int _pan, unsigned int _pad, std::optional<ImageSize> _imageSize) = 0;
+        virtual void setRaster(unsigned int pan, unsigned int pad, std::optional<ImageSize> imageSize) = 0;
 
         /// renders a given sixel at the current sixel-cursor position.
-        virtual void render(int8_t _sixel) = 0;
+        virtual void render(int8_t sixel) = 0;
 
         /// Finalizes the image by optimizing the underlying storage to its minimal dimension in storage.
         virtual void finalize() = 0;
     };
 
     using OnFinalize = std::function<void()>;
-    explicit SixelParser(Events& _events, OnFinalize _finisher = {});
+    explicit SixelParser(Events& events, OnFinalize finisher = {});
 
     using iterator = char const*;
 
-    void parseFragment(iterator _begin, iterator _end)
+    void parseFragment(iterator begin, iterator end)
     {
-        for (auto const ch: crispy::range(_begin, _end))
+        for (auto const ch: crispy::range(begin, end))
             parse(ch);
     }
 
-    void parseFragment(std::string_view _range)
-    {
-        parseFragment(_range.data(), _range.data() + _range.size());
-    }
+    void parseFragment(std::string_view range) { parseFragment(range.data(), range.data() + range.size()); }
 
-    void parse(char _value);
+    void parse(char value);
     void done();
 
-    static void parse(std::string_view _range, Events& _events)
+    static void parse(std::string_view range, Events& events)
     {
-        auto parser = SixelParser { _events };
-        parser.parseFragment(_range.data(), _range.data() + _range.size());
+        auto parser = SixelParser { events };
+        parser.parseFragment(range.data(), range.data() + range.size());
         parser.done();
     }
 
     // ParserExtension overrides
-    void pass(char _char) override;
+    void pass(char ch) override;
     void finalize() override;
 
   private:
-    void paramShiftAndAddDigit(unsigned _value);
-    void transitionTo(State _newState);
+    void paramShiftAndAddDigit(unsigned value);
+    void transitionTo(State newState);
     void enterState();
     void leaveState();
-    void fallback(char _value);
+    void fallback(char value);
 
   private:
-    State state_ = State::Ground;
-    std::vector<unsigned> params_;
+    State _state = State::Ground;
+    std::vector<unsigned> _params;
 
-    Events& events_;
-    OnFinalize finalizer_;
+    Events& _events;
+    OnFinalize _finalizer;
 };
 
 class SixelColorPalette
 {
   public:
-    SixelColorPalette(unsigned int _size, unsigned int _maxSize);
+    SixelColorPalette(unsigned int size, unsigned int maxSize);
 
     void reset();
 
-    [[nodiscard]] unsigned int size() const noexcept { return static_cast<unsigned int>(palette_.size()); }
-    void setSize(unsigned int _newSize);
+    [[nodiscard]] unsigned int size() const noexcept { return static_cast<unsigned int>(_palette.size()); }
+    void setSize(unsigned int newSize);
 
-    [[nodiscard]] unsigned int maxSize() const noexcept { return maxSize_; }
-    void setMaxSize(unsigned int _newSize);
+    [[nodiscard]] unsigned int maxSize() const noexcept { return _maxSize; }
+    void setMaxSize(unsigned int newSize);
 
-    void setColor(unsigned int _index, RGBColor const& _color);
-    [[nodiscard]] RGBColor at(unsigned int _index) const noexcept;
+    void setColor(unsigned int index, RGBColor const& color);
+    [[nodiscard]] RGBColor at(unsigned int index) const noexcept;
 
   private:
-    std::vector<RGBColor> palette_;
-    unsigned int maxSize_;
+    std::vector<RGBColor> _palette;
+    unsigned int _maxSize;
 };
 
 /// Sixel Image Builder API
@@ -156,50 +153,50 @@ class SixelImageBuilder: public SixelParser::Events
   public:
     using Buffer = std::vector<uint8_t>;
 
-    SixelImageBuilder(ImageSize _maxSize,
-                      int _aspectVertical,
-                      int _aspectHorizontal,
-                      RGBAColor _backgroundColor,
-                      std::shared_ptr<SixelColorPalette> _colorPalette);
+    SixelImageBuilder(ImageSize maxSize,
+                      int aspectVertical,
+                      int aspectHorizontal,
+                      RGBAColor backgroundColor,
+                      std::shared_ptr<SixelColorPalette> colorPalette);
 
-    [[nodiscard]] ImageSize maxSize() const noexcept { return maxSize_; }
-    [[nodiscard]] ImageSize size() const noexcept { return size_; }
-    [[nodiscard]] unsigned int aspectRatio() const noexcept { return aspectRatio_; }
-    [[nodiscard]] RGBColor currentColor() const noexcept { return colors_->at(currentColor_); }
+    [[nodiscard]] ImageSize maxSize() const noexcept { return _maxSize; }
+    [[nodiscard]] ImageSize size() const noexcept { return _size; }
+    [[nodiscard]] unsigned int aspectRatio() const noexcept { return _aspectRatio; }
+    [[nodiscard]] RGBColor currentColor() const noexcept { return _colors->at(_currentColor); }
 
-    [[nodiscard]] RGBAColor at(CellLocation _coord) const noexcept;
+    [[nodiscard]] RGBAColor at(CellLocation coord) const noexcept;
 
-    [[nodiscard]] Buffer const& data() const noexcept { return buffer_; }
-    [[nodiscard]] Buffer& data() noexcept { return buffer_; }
+    [[nodiscard]] Buffer const& data() const noexcept { return _buffer; }
+    [[nodiscard]] Buffer& data() noexcept { return _buffer; }
 
-    void clear(RGBAColor _fillColor);
+    void clear(RGBAColor fillColor);
 
-    void setColor(unsigned _index, RGBColor const& _color) override;
-    void useColor(unsigned _index) override;
+    void setColor(unsigned index, RGBColor const& color) override;
+    void useColor(unsigned index) override;
     void rewind() override;
     void newline() override;
-    void setRaster(unsigned int _pan, unsigned int _pad, std::optional<ImageSize> _imageSize) override;
-    void render(int8_t _sixel) override;
+    void setRaster(unsigned int pan, unsigned int pad, std::optional<ImageSize> imageSize) override;
+    void render(int8_t sixel) override;
     void finalize() override;
 
-    [[nodiscard]] CellLocation const& sixelCursor() const noexcept { return sixelCursor_; }
+    [[nodiscard]] CellLocation const& sixelCursor() const noexcept { return _sixelCursor; }
 
   private:
-    void write(CellLocation const& _coord, RGBColor const& _value) noexcept;
+    void write(CellLocation const& coord, RGBColor const& value) noexcept;
 
   private:
-    ImageSize const maxSize_;
-    std::shared_ptr<SixelColorPalette> colors_;
-    ImageSize size_;
-    Buffer buffer_; /// RGBA buffer
-    CellLocation sixelCursor_;
-    unsigned currentColor_;
-    bool explicitSize_ = false;
+    ImageSize const _maxSize;
+    std::shared_ptr<SixelColorPalette> _colors;
+    ImageSize _size;
+    Buffer _buffer; /// RGBA buffer
+    CellLocation _sixelCursor;
+    unsigned _currentColor;
+    bool _explicitSize = false;
     // This is an int because vt3xx takes the given ratio pan/pad and rounds up the ratio
     // to nearest integers. So 1:3 = 0.33 and it  becomes 1;
-    unsigned int aspectRatio_;
+    unsigned int _aspectRatio;
     // Height of sixel band in pixels
-    unsigned int sixelBandHeight_;
+    unsigned int _sixelBandHeight;
 };
 
 } // namespace terminal

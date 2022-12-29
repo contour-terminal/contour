@@ -25,24 +25,24 @@ using std::transform;
 namespace terminal
 {
 
-CursorShape makeCursorShape(string const& _name)
+CursorShape makeCursorShape(string const& name)
 {
-    auto const name = [](auto const& _input) -> std::string {
+    auto const lowerName = [](auto const& input) -> std::string {
         string output;
-        transform(begin(_input), end(_input), back_inserter(output), [](auto ch) { return tolower(ch); });
+        transform(begin(input), end(input), back_inserter(output), [](auto ch) { return tolower(ch); });
         return output;
-    }(_name);
+    }(name);
 
-    if (name == "block")
+    if (lowerName == "block")
         return CursorShape::Block;
-    else if (name == "rectangle")
+    else if (lowerName == "rectangle")
         return CursorShape::Rectangle;
-    else if (name == "underscore")
+    else if (lowerName == "underscore")
         return CursorShape::Underscore;
-    else if (name == "bar")
+    else if (lowerName == "bar")
         return CursorShape::Bar;
     else
-        throw invalid_argument { "Invalid cursor shape: " + _name };
+        throw invalid_argument { "Invalid cursor shape: " + name };
 }
 
 } // namespace terminal

@@ -72,9 +72,9 @@ namespace
       public:
         using Environment = terminal::Process::Environment;
 
-        explicit InheritingEnvBlock(Environment const& _newValues)
+        explicit InheritingEnvBlock(Environment const& newValues)
         {
-            for (auto const& env: _newValues)
+            for (auto const& env: newValues)
             {
                 if (auto len = GetEnvironmentVariable(env.first.c_str(), nullptr, 0); len != 0)
                 {
@@ -100,7 +100,7 @@ namespace
         Environment oldValues_;
     };
 
-    HRESULT initializeStartupInfoAttachedToPTY(STARTUPINFOEX& _startupInfoEx, ConPty& _pty)
+    HRESULT initializeStartupInfoAttachedToPTY(STARTUPINFOEX& startupInfoEx, ConPty& pty)
     {
         // Initializes the specified startup info struct with the required properties and
         // updates its thread attribute list with the specified ConPTY handle
@@ -109,24 +109,24 @@ namespace
 
         size_t attrListSize {};
 
-        _startupInfoEx.StartupInfo.cb = sizeof(STARTUPINFOEX);
+        startupInfoEx.StartupInfo.cb = sizeof(STARTUPINFOEX);
 
         // Get the size of the thread attribute list.
         InitializeProcThreadAttributeList(NULL, 1, 0, &attrListSize);
 
         // Allocate a thread attribute list of the correct size
-        _startupInfoEx.lpAttributeList = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(malloc(attrListSize));
+        startupInfoEx.lpAttributeList = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(malloc(attrListSize));
 
         // Initialize thread attribute list
-        if (_startupInfoEx.lpAttributeList
-            && InitializeProcThreadAttributeList(_startupInfoEx.lpAttributeList, 1, 0, &attrListSize))
+        if (startupInfoEx.lpAttributeList
+            && InitializeProcThreadAttributeList(startupInfoEx.lpAttributeList, 1, 0, &attrListSize))
         {
             // Set Pseudo Console attribute
-            hr = UpdateProcThreadAttribute(_startupInfoEx.lpAttributeList,
+            hr = UpdateProcThreadAttribute(startupInfoEx.lpAttributeList,
                                            0,
                                            PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE,
-                                           _pty.master(),
-                                           sizeof(decltype(_pty.master())),
+                                           pty.master(),
+                                           sizeof(decltype(pty.master())),
                                            nullptr,
                                            nullptr)
                      ? S_OK
@@ -139,14 +139,13 @@ namespace
         return hr;
     }
 
-    char** createArgv(string const& _arg0, std::vector<string> const& _args, size_t i = 0)
+    char** createArgv(string const& arg0, std::vector<string> const& args, size_t i = 0)
     {
-        auto const argCount =
-            _args.size(); // factor out in order to avoid false-positive by static analysers.
+        auto const argCount = args.size(); // factor out in order to avoid false-positive by static analysers.
         char** argv = new char*[argCount + 2 - i];
-        argv[0] = const_cast<char*>(_arg0.c_str());
+        argv[0] = const_cast<char*>(arg0.c_str());
         for (size_t i = 0; i < argCount; ++i)
-            argv[i + 1] = const_cast<char*>(_args[i].c_str());
+            argv[i + 1] = const_cast<char*>(args[i].c_str());
         argv[argCount + 1] = nullptr;
         return argv;
     }
@@ -168,16 +167,16 @@ struct Process::Private
     PROCESS_INFORMATION processInfo {};
     STARTUPINFOEX startupInfo {};
 
-    [[nodiscard]] optional<Process::ExitStatus> checkStatus(bool _waitForExit) const;
+    [[nodiscard]] optional<Process::ExitStatus> checkStatus(bool waitForExit) const;
 };
 
-Process::Process(string const& _path,
-                 vector<string> const& _args,
-                 FileSystem::path const& _cwd,
-                 Environment const& _env,
+Process::Process(string const& path,
+                 vector<string> const& args,
+                 FileSystem::path const& cwd,
+                 Environment const& env,
                  bool escapeSandbox,
-                 std::unique_ptr<Pty> _pty):
-    d(new Private { _path, _args, _cwd, _env, std::move(_pty) }, [](Private* p) { delete p; })
+                 std::unique_ptr<Pty> pty):
+    d(new Private { path, args, cwd, env, std::move(pty) }, [](Private* p) { delete p; })
 {
     crispy::ignore_unused(escapeSandbox);
 }
@@ -271,7 +270,7 @@ optional<Process::ExitStatus> Process::checkStatus() const
     return d->checkStatus(false);
 }
 
-optional<Process::ExitStatus> Process::Private::checkStatus(bool _waitForExit) const
+optional<Process::ExitStatus> Process::Private::checkStatus(bool waitForExit) const
 {
     {
         auto const _ = lock_guard { exitStatusMutex };
@@ -279,7 +278,7 @@ optional<Process::ExitStatus> Process::Private::checkStatus(bool _waitForExit) c
             return exitStatus;
     }
 
-    if (_waitForExit)
+    if (waitForExit)
         if (WaitForSingleObject(processInfo.hThread, INFINITE /*10 * 1000*/) != S_OK)
             printf("WaitForSingleObject(thr): %s\n", getLastErrorAsString().c_str());
 
@@ -292,7 +291,7 @@ optional<Process::ExitStatus> Process::Private::checkStatus(bool _waitForExit) c
         return exitStatus = ExitStatus { NormalExit { static_cast<int>(exitCode) } };
 }
 
-void Process::terminate(TerminationHint _terminationHint)
+void Process::terminate(TerminationHint terminationHint)
 {
     if (!alive())
         return;

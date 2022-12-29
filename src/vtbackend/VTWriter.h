@@ -65,7 +65,7 @@ class VTWriter
     template <typename... Args>
     void sgrAdd(unsigned n, Args... values)
     {
-        if (sgr_.size() + sizeof...(values) > MaxParameterCount)
+        if (_sgr.size() + sizeof...(values) > MaxParameterCount)
             sgrFlush();
 
         sgrAddExplicit(n);
@@ -73,13 +73,13 @@ class VTWriter
     }
 
   private:
-    Writer writer_;
-    std::vector<unsigned> sgr_;
+    Writer _writer;
+    std::vector<unsigned> _sgr;
     std::stringstream sstr;
-    std::vector<unsigned> lastSGR_;
-    Color currentForegroundColor_ = DefaultColor();
-    Color currentUnderlineColor_ = DefaultColor();
-    Color currentBackgroundColor_ = DefaultColor();
+    std::vector<unsigned> _lastSGR;
+    Color _currentForegroundColor = DefaultColor();
+    Color _currentUnderlineColor = DefaultColor();
+    Color _currentBackgroundColor = DefaultColor();
 };
 
 template <typename... T>

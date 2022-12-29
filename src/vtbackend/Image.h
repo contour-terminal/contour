@@ -67,13 +67,13 @@ class Image: public std::enable_shared_from_this<Image>
     using OnImageRemove = std::function<void(Image const*)>;
     /// Constructs an RGBA image.
     ///
-    /// @param _data      RGBA buffer data
-    /// @param _pixelSize image dimensionss in pixels
-    Image(ImageId _id, ImageFormat _format, Data _data, ImageSize _pixelSize, OnImageRemove remover):
-        id_ { _id },
-        format_ { _format },
-        data_ { std::move(_data) },
-        size_ { _pixelSize },
+    /// @param data      RGBA buffer data
+    /// @param pixelSize image dimensionss in pixels
+    Image(ImageId id, ImageFormat format, Data data, ImageSize pixelSize, OnImageRemove remover):
+        id_ { id },
+        format_ { format },
+        data_ { std::move(data) },
+        size_ { pixelSize },
         onImageRemove_ { std::move(remover) }
     {
         ++ImageStats::get().instances;
@@ -132,18 +132,18 @@ enum class ImageAlignment
 class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
 {
   public:
-    RasterizedImage(std::shared_ptr<Image const> _image,
-                    ImageAlignment _alignmentPolicy,
-                    ImageResize _resizePolicy,
-                    RGBAColor _defaultColor,
-                    GridSize _cellSpan,
-                    ImageSize _cellSize):
-        image_ { std::move(_image) },
-        alignmentPolicy_ { _alignmentPolicy },
-        resizePolicy_ { _resizePolicy },
-        defaultColor_ { _defaultColor },
-        cellSpan_ { _cellSpan },
-        cellSize_ { _cellSize }
+    RasterizedImage(std::shared_ptr<Image const> image,
+                    ImageAlignment alignmentPolicy,
+                    ImageResize resizePolicy,
+                    RGBAColor defaultColor,
+                    GridSize cellSpan,
+                    ImageSize cellSize):
+        image_ { std::move(image) },
+        alignmentPolicy_ { alignmentPolicy },
+        resizePolicy_ { resizePolicy },
+        defaultColor_ { defaultColor },
+        cellSpan_ { cellSpan },
+        cellSize_ { cellSize }
     {
         ++ImageStats::get().rasterized;
     }
@@ -165,8 +165,8 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
     GridSize cellSpan() const noexcept { return cellSpan_; }
     ImageSize cellSize() const noexcept { return cellSize_; }
 
-    /// @returns an RGBA buffer for a grid cell at given coordinate @p _pos of the rasterized image.
-    Image::Data fragment(CellLocation _pos) const;
+    /// @returns an RGBA buffer for a grid cell at given coordinate @p pos of the rasterized image.
+    Image::Data fragment(CellLocation pos) const;
 
   private:
     std::shared_ptr<Image const> const image_; //!< Reference to the Image to be rasterized.
@@ -183,10 +183,10 @@ class ImageFragment
   public:
     ImageFragment() = delete;
 
-    /// @param _image  the Image this fragment is being cut off from
-    /// @param _offset 0-based grid-offset into the rasterized image
-    ImageFragment(std::shared_ptr<RasterizedImage const> _image, CellLocation _offset):
-        rasterizedImage_ { std::move(_image) }, offset_ { _offset }
+    /// @param image  the Image this fragment is being cut off from
+    /// @param offset 0-based grid-offset into the rasterized image
+    ImageFragment(std::shared_ptr<RasterizedImage const> image, CellLocation offset):
+        rasterizedImage_ { std::move(image) }, offset_ { offset }
     {
         ++ImageStats::get().fragments;
     }
@@ -244,31 +244,31 @@ class ImagePool
     using OnImageRemove = std::function<void(Image const*)>;
 
     ImagePool(
-        OnImageRemove _onImageRemove = [](auto) {}, ImageId _nextImageId = ImageId(1));
+        OnImageRemove onImageRemove = [](auto) {}, ImageId nextImageId = ImageId(1));
 
     /// Creates an RGBA image of given size in pixels.
-    std::shared_ptr<Image const> create(ImageFormat _format, ImageSize _pixelSize, Image::Data&& _data);
+    std::shared_ptr<Image const> create(ImageFormat format, ImageSize pixelSize, Image::Data&& data);
 
     /// Rasterizes an Image.
-    std::shared_ptr<RasterizedImage> rasterize(std::shared_ptr<Image const> _image,
-                                               ImageAlignment _alignmentPolicy,
-                                               ImageResize _resizePolicy,
-                                               RGBAColor _defaultColor,
-                                               GridSize _cellSpan,
-                                               ImageSize _cellSize);
+    std::shared_ptr<RasterizedImage> rasterize(std::shared_ptr<Image const> image,
+                                               ImageAlignment alignmentPolicy,
+                                               ImageResize resizePolicy,
+                                               RGBAColor defaultColor,
+                                               GridSize cellSpan,
+                                               ImageSize cellSize);
 
     // named image access
     //
-    void link(std::string const& _name, std::shared_ptr<Image const> _imageRef);
-    [[nodiscard]] std::shared_ptr<Image const> findImageByName(std::string const& _name) const noexcept;
-    void unlink(std::string const& _name);
+    void link(std::string const& name, std::shared_ptr<Image const> imageRef);
+    [[nodiscard]] std::shared_ptr<Image const> findImageByName(std::string const& name) const noexcept;
+    void unlink(std::string const& name);
 
     void inspect(std::ostream& os) const;
 
     void clear();
 
   private:
-    void removeRasterizedImage(RasterizedImage* _image); //!< Removes a rasterized image from pool.
+    void removeRasterizedImage(RasterizedImage* image); //!< Removes a rasterized image from pool.
 
     using NameToImageIdCache = crispy::StrongLRUCache<std::string, std::shared_ptr<Image const>>;
 
@@ -335,16 +335,16 @@ struct formatter<std::shared_ptr<terminal::Image const>>
     }
 
     template <typename FormatContext>
-    auto format(std::shared_ptr<terminal::Image const> const& _image, FormatContext& ctx)
+    auto format(std::shared_ptr<terminal::Image const> const& image, FormatContext& ctx)
     {
-        if (!_image)
+        if (!image)
             return fmt::format_to(ctx.out(), "nullptr");
-        terminal::Image const& image = *_image;
+        terminal::Image const& imageRef = *image;
         return fmt::format_to(ctx.out(),
                               "Image<#{}, {}, size={}>",
-                              image.weak_from_this().use_count(),
-                              image.id(),
-                              image.size());
+                              imageRef.weak_from_this().use_count(),
+                              imageRef.id(),
+                              imageRef.size());
     }
 };
 
@@ -357,16 +357,16 @@ struct formatter<terminal::ImageResize>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(const terminal::ImageResize _value, FormatContext& ctx)
+    auto format(const terminal::ImageResize value, FormatContext& ctx)
     {
-        switch (_value)
+        switch (value)
         {
             case terminal::ImageResize::NoResize: return fmt::format_to(ctx.out(), "NoResize");
             case terminal::ImageResize::ResizeToFit: return fmt::format_to(ctx.out(), "ResizeToFit");
             case terminal::ImageResize::ResizeToFill: return fmt::format_to(ctx.out(), "ResizeToFill");
             case terminal::ImageResize::StretchToFill: return fmt::format_to(ctx.out(), "StretchToFill");
         }
-        return fmt::format_to(ctx.out(), "ResizePolicy({})", int(_value));
+        return fmt::format_to(ctx.out(), "ResizePolicy({})", int(value));
     }
 };
 
@@ -379,9 +379,9 @@ struct formatter<terminal::ImageAlignment>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(const terminal::ImageAlignment _value, FormatContext& ctx)
+    auto format(const terminal::ImageAlignment value, FormatContext& ctx)
     {
-        switch (_value)
+        switch (value)
         {
             case terminal::ImageAlignment::TopStart: return fmt::format_to(ctx.out(), "TopStart");
             case terminal::ImageAlignment::TopCenter: return fmt::format_to(ctx.out(), "TopCenter");
@@ -393,7 +393,7 @@ struct formatter<terminal::ImageAlignment>
             case terminal::ImageAlignment::BottomCenter: return fmt::format_to(ctx.out(), "BottomCenter");
             case terminal::ImageAlignment::BottomEnd: return fmt::format_to(ctx.out(), "BottomEnd");
         }
-        return fmt::format_to(ctx.out(), "ImageAlignment({})", int(_value));
+        return fmt::format_to(ctx.out(), "ImageAlignment({})", int(value));
     }
 };
 
@@ -407,15 +407,15 @@ struct formatter<terminal::RasterizedImage>
     }
 
     template <typename FormatContext>
-    auto format(const terminal::RasterizedImage& _image, FormatContext& ctx)
+    auto format(const terminal::RasterizedImage& image, FormatContext& ctx)
     {
         return fmt::format_to(ctx.out(),
                               "RasterizedImage<{}, {}, {}, {}, {}>",
-                              _image.weak_from_this().use_count(),
-                              _image.cellSpan(),
-                              _image.resizePolicy(),
-                              _image.alignmentPolicy(),
-                              _image.image());
+                              image.weak_from_this().use_count(),
+                              image.cellSpan(),
+                              image.resizePolicy(),
+                              image.alignmentPolicy(),
+                              image.image());
     }
 };
 
@@ -429,10 +429,10 @@ struct formatter<terminal::ImageFragment>
     }
 
     template <typename FormatContext>
-    auto format(const terminal::ImageFragment& _fragment, FormatContext& ctx)
+    auto format(const terminal::ImageFragment& fragment, FormatContext& ctx)
     {
         return fmt::format_to(
-            ctx.out(), "ImageFragment<offset={}, {}>", _fragment.offset(), _fragment.rasterizedImage());
+            ctx.out(), "ImageFragment<offset={}, {}>", fragment.offset(), fragment.rasterizedImage());
     }
 };
 } // namespace fmt

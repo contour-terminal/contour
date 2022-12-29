@@ -24,7 +24,7 @@ namespace terminal
 
 // TODO: compare with old sgr value set instead to be more generic in reusing stuff
 
-VTWriter::VTWriter(Writer writer): writer_ { std::move(writer) }
+VTWriter::VTWriter(Writer writer): _writer { std::move(writer) }
 {
 }
 
@@ -54,17 +54,17 @@ void VTWriter::write(char32_t v)
 void VTWriter::write(string_view s)
 {
     sgrFlush();
-    writer_(s.data(), s.size());
+    _writer(s.data(), s.size());
 }
 
 void VTWriter::sgrFlush()
 {
-    if (sgr_.empty())
+    if (_sgr.empty())
         return;
 
-    auto const f = sgrFlush(sgr_);
-    if (sgr_ != lastSGR_)
-        writer_(f.data(), f.size());
+    auto const f = sgrFlush(_sgr);
+    if (_sgr != _lastSGR)
+        _writer(f.data(), f.size());
 
     sgrRewind();
 }
@@ -89,30 +89,30 @@ void VTWriter::sgrAddExplicit(unsigned n)
 {
     if (n == 0)
     {
-        currentForegroundColor_ = DefaultColor();
-        currentBackgroundColor_ = DefaultColor();
-        currentUnderlineColor_ = DefaultColor();
+        _currentForegroundColor = DefaultColor();
+        _currentBackgroundColor = DefaultColor();
+        _currentUnderlineColor = DefaultColor();
     }
 
-    sgr_.push_back(n);
+    _sgr.push_back(n);
 }
 
 void VTWriter::sgrAdd(unsigned n)
 {
     if (n == 0)
     {
-        sgr_.clear();
-        sgr_.push_back(n);
-        currentForegroundColor_ = DefaultColor();
-        currentBackgroundColor_ = DefaultColor();
-        currentUnderlineColor_ = DefaultColor();
+        _sgr.clear();
+        _sgr.push_back(n);
+        _currentForegroundColor = DefaultColor();
+        _currentBackgroundColor = DefaultColor();
+        _currentUnderlineColor = DefaultColor();
     }
     else
     {
-        if (sgr_.empty() || sgr_.back() != n)
-            sgr_.push_back(n);
+        if (_sgr.empty() || _sgr.back() != n)
+            _sgr.push_back(n);
 
-        if (sgr_.size() == MaxParameterCount)
+        if (_sgr.size() == MaxParameterCount)
         {
             sgrFlush();
         }
@@ -121,8 +121,8 @@ void VTWriter::sgrAdd(unsigned n)
 
 void VTWriter::sgrRewind()
 {
-    swap(lastSGR_, sgr_);
-    sgr_.clear();
+    swap(_lastSGR, _sgr);
+    _sgr.clear();
 }
 
 void VTWriter::sgrAdd(GraphicsRendition m)
@@ -130,68 +130,68 @@ void VTWriter::sgrAdd(GraphicsRendition m)
     sgrAdd(static_cast<unsigned>(m));
 }
 
-void VTWriter::setForegroundColor(Color _color)
+void VTWriter::setForegroundColor(Color color)
 {
-    // if (_color == currentForegroundColor_)
+    // if (color == _currentForegroundColor)
     //     return;
 
-    currentForegroundColor_ = _color;
-    switch (_color.type())
+    _currentForegroundColor = color;
+    switch (color.type())
     {
         case ColorType::Default:
             //.
             sgrAdd(39);
             break;
         case ColorType::Indexed:
-            if (static_cast<unsigned>(_color.index()) < 8)
-                sgrAdd(30 + static_cast<unsigned>(_color.index()));
+            if (static_cast<unsigned>(color.index()) < 8)
+                sgrAdd(30 + static_cast<unsigned>(color.index()));
             else
-                sgrAdd(38, 5, static_cast<unsigned>(_color.index()));
+                sgrAdd(38, 5, static_cast<unsigned>(color.index()));
             break;
         case ColorType::Bright:
             //.
-            sgrAdd(90 + static_cast<unsigned>(getBrightColor(_color)));
+            sgrAdd(90 + static_cast<unsigned>(getBrightColor(color)));
             break;
         case ColorType::RGB:
             // clang-format off
-            sgrAdd(38, 2, static_cast<unsigned>(_color.rgb().red),
-                          static_cast<unsigned>(_color.rgb().green),
-                          static_cast<unsigned>(_color.rgb().blue));
+            sgrAdd(38, 2, static_cast<unsigned>(color.rgb().red),
+                          static_cast<unsigned>(color.rgb().green),
+                          static_cast<unsigned>(color.rgb().blue));
             // clang-format on
             break;
         case ColorType::Undefined: break;
     }
 }
 
-void VTWriter::setBackgroundColor(Color _color)
+void VTWriter::setBackgroundColor(Color color)
 {
-    // if (_color == currentBackgroundColor_)
+    // if (color == _currentBackgroundColor)
     //     return;
 
-    currentBackgroundColor_ = _color;
-    switch (_color.type())
+    _currentBackgroundColor = color;
+    switch (color.type())
     {
         case ColorType::Default: sgrAdd(49); break;
         case ColorType::Indexed:
-            if (static_cast<unsigned>(_color.index()) < 8)
-                sgrAdd(40 + static_cast<unsigned>(_color.index()));
+            if (static_cast<unsigned>(color.index()) < 8)
+                sgrAdd(40 + static_cast<unsigned>(color.index()));
             else
             {
                 sgrAdd(48);
                 sgrAdd(5);
-                sgrAdd(static_cast<unsigned>(_color.index()));
+                sgrAdd(static_cast<unsigned>(color.index()));
             }
             break;
         case ColorType::Bright:
             //.
-            sgrAdd(100 + static_cast<unsigned>(getBrightColor(_color)));
+            sgrAdd(100 + static_cast<unsigned>(getBrightColor(color)));
             break;
         case ColorType::RGB:
             sgrAdd(48);
             sgrAdd(2);
-            sgrAdd(static_cast<unsigned>(_color.rgb().red));
-            sgrAdd(static_cast<unsigned>(_color.rgb().green));
-            sgrAdd(static_cast<unsigned>(_color.rgb().blue));
+            sgrAdd(static_cast<unsigned>(color.rgb().red));
+            sgrAdd(static_cast<unsigned>(color.rgb().green));
+            sgrAdd(static_cast<unsigned>(color.rgb().blue));
             break;
         case ColorType::Undefined:
             //.

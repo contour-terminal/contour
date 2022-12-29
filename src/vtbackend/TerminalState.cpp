@@ -20,28 +20,28 @@ namespace terminal
 
 class Terminal;
 
-TerminalState::TerminalState(Terminal& _terminal):
-    settings { _terminal.settings() },
+TerminalState::TerminalState(Terminal& terminal):
+    settings { terminal.settings() },
     cellPixelSize {},
     effectiveImageCanvasSize { settings.maxImageSize },
     imageColorPalette { std::make_shared<SixelColorPalette>(maxImageColorRegisters, maxImageColorRegisters) },
-    imagePool { [&](Image const* _image) {
-        _terminal.discardImage(*_image);
+    imagePool { [te = &terminal](Image const* image) {
+        te->discardImage(*image);
     } },
     statusDisplayType { StatusDisplayType::None },
     activeStatusDisplay { ActiveStatusDisplay::Main },
     hyperlinks { HyperlinkCache { 1024 } },
-    sequencer { _terminal },
+    sequencer { terminal },
     parser { std::ref(sequencer) },
-    viCommands { _terminal },
+    viCommands { terminal },
     inputHandler { viCommands, ViMode::Insert }
 {
 }
 
 /// Applies a FunctionDefinition to a given context, emitting the respective command.
-std::string to_string(AnsiMode _mode)
+std::string to_string(AnsiMode mode)
 {
-    switch (_mode)
+    switch (mode)
     {
         case AnsiMode::KeyboardAction: return "KeyboardAction";
         case AnsiMode::Insert: return "Insert";
@@ -49,12 +49,12 @@ std::string to_string(AnsiMode _mode)
         case AnsiMode::AutomaticNewLine: return "AutomaticNewLine";
     }
 
-    return fmt::format("({})", static_cast<unsigned>(_mode));
+    return fmt::format("({})", static_cast<unsigned>(mode));
 }
 
-std::string to_string(DECMode _mode)
+std::string to_string(DECMode mode)
 {
-    switch (_mode)
+    switch (mode)
     {
         case DECMode::UseApplicationCursorKeys: return "UseApplicationCursorKeys";
         case DECMode::DesignateCharsetUSASCII: return "DesignateCharsetUSASCII";
@@ -95,7 +95,7 @@ std::string to_string(DECMode _mode)
         case DECMode::TextReflow: return "TextReflow";
         case DECMode::SixelCursorNextToGraphic: return "SixelCursorNextToGraphic";
     }
-    return fmt::format("({})", static_cast<unsigned>(_mode));
+    return fmt::format("({})", static_cast<unsigned>(mode));
 }
 
 } // namespace terminal

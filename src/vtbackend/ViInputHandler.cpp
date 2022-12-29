@@ -90,20 +90,20 @@ namespace
 
 void ViInputHandler::setMode(ViMode theMode)
 {
-    if (viMode == theMode)
+    if (_viMode == theMode)
         return;
 
-    viMode = theMode;
-    count = 0;
-    pendingOperator = nullopt;
-    pendingTextObjectScope = nullopt;
+    _viMode = theMode;
+    _count = 0;
+    _pendingOperator = nullopt;
+    _pendingTextObjectScope = nullopt;
 
-    executor.modeChanged(theMode);
+    _executor.modeChanged(theMode);
 }
 
 bool ViInputHandler::sendKeyPressEvent(Key key, Modifier modifier)
 {
-    if (searchEditMode != SearchEditMode::Disabled)
+    if (_searchEditMode != SearchEditMode::Disabled)
     {
         // Do we want to do anything in here?
         // TODO: support cursor movements.
@@ -112,7 +112,7 @@ bool ViInputHandler::sendKeyPressEvent(Key key, Modifier modifier)
     }
 
     // clang-format off
-    switch (viMode)
+    switch (_viMode)
     {
         case ViMode::Insert:
             return false;
@@ -145,14 +145,14 @@ bool ViInputHandler::sendKeyPressEvent(Key key, Modifier modifier)
 
 void ViInputHandler::startSearchExternally()
 {
-    searchTerm.clear();
-    executor.searchStart();
+    _searchTerm.clear();
+    _executor.searchStart();
 
-    if (viMode != ViMode::Insert)
-        searchEditMode = SearchEditMode::Enabled;
+    if (_viMode != ViMode::Insert)
+        _searchEditMode = SearchEditMode::Enabled;
     else
     {
-        searchEditMode = SearchEditMode::ExternallyEnabled;
+        _searchEditMode = SearchEditMode::ExternallyEnabled;
         setMode(ViMode::Normal);
         // ^^^ So that we can see the statusline (which contains the search edit field),
         // AND it's weird to be in insert mode while typing in the search term anyways.
@@ -161,41 +161,41 @@ void ViInputHandler::startSearchExternally()
 
 bool ViInputHandler::handleSearchEditor(char32_t ch, Modifier modifier)
 {
-    assert(searchEditMode != SearchEditMode::Disabled);
+    assert(_searchEditMode != SearchEditMode::Disabled);
 
     switch (InputMatch { modifier, ch })
     {
         case '\x1B'_key:
-            searchTerm.clear();
-            if (searchEditMode == SearchEditMode::ExternallyEnabled)
+            _searchTerm.clear();
+            if (_searchEditMode == SearchEditMode::ExternallyEnabled)
                 setMode(ViMode::Insert);
-            searchEditMode = SearchEditMode::Disabled;
-            executor.searchCancel();
+            _searchEditMode = SearchEditMode::Disabled;
+            _executor.searchCancel();
             break;
         case '\x0D'_key:
-            if (searchEditMode == SearchEditMode::ExternallyEnabled)
+            if (_searchEditMode == SearchEditMode::ExternallyEnabled)
                 setMode(ViMode::Insert);
-            searchEditMode = SearchEditMode::Disabled;
-            executor.searchDone();
+            _searchEditMode = SearchEditMode::Disabled;
+            _executor.searchDone();
             break;
         case '\x08'_key:
         case '\x7F'_key:
-            if (searchTerm.size() > 0)
-                searchTerm.resize(searchTerm.size() - 1);
-            executor.updateSearchTerm(searchTerm);
+            if (_searchTerm.size() > 0)
+                _searchTerm.resize(_searchTerm.size() - 1);
+            _executor.updateSearchTerm(_searchTerm);
             break;
         case Modifier::Control | 'L':
         case Modifier::Control | 'U':
-            searchTerm.clear();
-            executor.updateSearchTerm(searchTerm);
+            _searchTerm.clear();
+            _executor.updateSearchTerm(_searchTerm);
             break;
         case Modifier::Control | 'A': // TODO: move cursor to BOL
         case Modifier::Control | 'E': // TODO: move cursor to EOL
         default:
             if (ch >= 0x20 && modifier.without(Modifier::Shift).none())
             {
-                searchTerm += ch;
-                executor.updateSearchTerm(searchTerm);
+                _searchTerm += ch;
+                _executor.updateSearchTerm(_searchTerm);
             }
             else
                 errorlog()("ViInputHandler: Receiving control code {}+0x{:02X} in search mode. Ignoring.",
@@ -208,11 +208,11 @@ bool ViInputHandler::handleSearchEditor(char32_t ch, Modifier modifier)
 
 bool ViInputHandler::sendCharPressEvent(char32_t ch, Modifier modifier)
 {
-    if (searchEditMode != SearchEditMode::Disabled)
+    if (_searchEditMode != SearchEditMode::Disabled)
         return handleSearchEditor(ch, modifier);
 
     // clang-format off
-    switch (viMode)
+    switch (_viMode)
     {
         case ViMode::Insert:
             return false;
@@ -238,7 +238,7 @@ bool ViInputHandler::parseCount(char32_t ch, Modifier modifier)
     switch (ch)
     {
         case '0':
-            if (!count)
+            if (!_count)
                 break;
             [[fallthrough]];
         case '1':
@@ -251,7 +251,7 @@ bool ViInputHandler::parseCount(char32_t ch, Modifier modifier)
         case '8':
         case '9':
             //.
-            count = count * 10 + (ch - '0');
+            _count = _count * 10 + (ch - '0');
             return true;
     }
     return false;
@@ -259,34 +259,34 @@ bool ViInputHandler::parseCount(char32_t ch, Modifier modifier)
 
 void ViInputHandler::yank(TextObjectScope scope, TextObject textObject)
 {
-    executor.yank(scope, textObject);
+    _executor.yank(scope, textObject);
 
-    count = 0;
-    pendingOperator.reset();
-    pendingTextObjectScope.reset();
+    _count = 0;
+    _pendingOperator.reset();
+    _pendingTextObjectScope.reset();
 }
 
 void ViInputHandler::select(TextObjectScope scope, TextObject textObject)
 {
-    executor.select(scope, textObject);
+    _executor.select(scope, textObject);
 
-    count = 0;
-    pendingOperator.reset();
-    pendingTextObjectScope.reset();
+    _count = 0;
+    _pendingOperator.reset();
+    _pendingTextObjectScope.reset();
 }
 
 void ViInputHandler::execute(ViOperator op, ViMotion motion)
 {
-    executor.execute(op, motion, count ? count : 1);
+    _executor.execute(op, motion, _count ? _count : 1);
 
-    count = 0;
-    pendingOperator.reset();
-    pendingTextObjectScope.reset();
+    _count = 0;
+    _pendingOperator.reset();
+    _pendingTextObjectScope.reset();
 }
 
 void ViInputHandler::handleVisualMode(char32_t ch, Modifier modifier)
 {
-    Require(viMode == ViMode::Visual || viMode == ViMode::VisualLine || viMode == ViMode::VisualBlock);
+    Require(_viMode == ViMode::Visual || _viMode == ViMode::VisualLine || _viMode == ViMode::VisualBlock);
 
     if (parseModeSwitch(ch, modifier))
         return;
@@ -294,11 +294,11 @@ void ViInputHandler::handleVisualMode(char32_t ch, Modifier modifier)
     if (parseCount(ch, modifier))
         return;
 
-    if (pendingTextObjectScope)
+    if (_pendingTextObjectScope)
     {
         if (optional<TextObject> const textObject = charToTextObject(ch))
         {
-            select(*pendingTextObjectScope, *textObject);
+            select(*_pendingTextObjectScope, *textObject);
             return;
         }
     }
@@ -310,14 +310,14 @@ void ViInputHandler::handleVisualMode(char32_t ch, Modifier modifier)
         case Modifier::Control | 'V': toggleMode(ViMode::VisualBlock); return;
         case 'V'_key: toggleMode(ViMode::VisualLine); return;
         case 'v'_key: toggleMode(ViMode::Visual); return;
-        case '#'_key: executor.reverseSearchCurrentWord(); return;
-        case '*'_key: executor.searchCurrentWord(); return;
+        case '#'_key: _executor.reverseSearchCurrentWord(); return;
+        case '*'_key: _executor.searchCurrentWord(); return;
         case 'Y'_key: execute(ViOperator::Yank, ViMotion::FullLine); return;
-        case 'a'_key: pendingTextObjectScope = TextObjectScope::A; return;
-        case 'i'_key: pendingTextObjectScope = TextObjectScope::Inner; return;
+        case 'a'_key: _pendingTextObjectScope = TextObjectScope::A; return;
+        case 'i'_key: _pendingTextObjectScope = TextObjectScope::Inner; return;
         case 'y'_key: execute(ViOperator::Yank, ViMotion::Selection); return;
-        case 'n'_key: executor.jumpToNextMatch(count ? count : 1); return;
-        case 'N' | Modifier::Shift: executor.jumpToPreviousMatch(count ? count : 1); return;
+        case 'n'_key: _executor.jumpToNextMatch(_count ? _count : 1); return;
+        case 'N' | Modifier::Shift: _executor.jumpToPreviousMatch(_count ? _count : 1); return;
         default: break;
     }
 
@@ -327,60 +327,60 @@ void ViInputHandler::handleVisualMode(char32_t ch, Modifier modifier)
 
 void ViInputHandler::startSearch()
 {
-    searchEditMode = SearchEditMode::Enabled;
-    searchTerm.clear();
-    executor.searchStart();
+    _searchEditMode = SearchEditMode::Enabled;
+    _searchTerm.clear();
+    _executor.searchStart();
 }
 
 void ViInputHandler::scrollViewport(ScrollOffset delta)
 {
-    executor.scrollViewport(delta);
+    _executor.scrollViewport(delta);
 }
 
 bool ViInputHandler::executePendingOrMoveCursor(ViMotion motion)
 {
-    switch (pendingOperator.value_or(ViOperator::MoveCursor))
+    switch (_pendingOperator.value_or(ViOperator::MoveCursor))
     {
-        case ViOperator::MoveCursor: executor.moveCursor(motion, count ? count : 1); break;
+        case ViOperator::MoveCursor: _executor.moveCursor(motion, _count ? _count : 1); break;
         case ViOperator::Yank:
             // XXX executor.yank(pendingTextObjectScope.value(), pending)
             logstore::ErrorLog()("Yank: Implementation coming: {}", motion);
             break;
-        case ViOperator::Paste: executor.paste(count ? count : 1); break;
-        case ViOperator::ReverseSearchCurrentWord: executor.reverseSearchCurrentWord(); break;
+        case ViOperator::Paste: _executor.paste(_count ? _count : 1); break;
+        case ViOperator::ReverseSearchCurrentWord: _executor.reverseSearchCurrentWord(); break;
     }
 
-    count = 0;
-    pendingOperator.reset();
-    pendingTextObjectScope.reset();
+    _count = 0;
+    _pendingOperator.reset();
+    _pendingTextObjectScope.reset();
 
     return true;
 }
 
 bool ViInputHandler::parseTextObject(char32_t ch, Modifier modifier)
 {
-    Require(viMode != ViMode::Insert);
+    Require(_viMode != ViMode::Insert);
 
-    if (viMode != ViMode::Normal || pendingOperator)
+    if (_viMode != ViMode::Normal || _pendingOperator)
     {
         switch (InputMatch { modifier.without(Modifier::Shift), ch })
         {
-            case 'i'_key: pendingTextObjectScope = TextObjectScope::Inner; return true;
-            case 'a'_key: pendingTextObjectScope = TextObjectScope::A; return true;
+            case 'i'_key: _pendingTextObjectScope = TextObjectScope::Inner; return true;
+            case 'a'_key: _pendingTextObjectScope = TextObjectScope::A; return true;
         }
     }
 
-    if (pendingTextObjectScope && pendingOperator)
+    if (_pendingTextObjectScope && _pendingOperator)
     {
         if (optional<TextObject> const textObject = charToTextObject(ch))
         {
-            switch (*pendingOperator)
+            switch (*_pendingOperator)
             {
-                case ViOperator::Yank: yank(*pendingTextObjectScope, *textObject); break;
+                case ViOperator::Yank: yank(*_pendingTextObjectScope, *textObject); break;
                 default:
                     logstore::ErrorLog()(
                         "ViInputHandler: trying to operate on text object with unsupported operator {}.",
-                        pendingOperator.value());
+                        _pendingOperator.value());
                     break;
             }
             return true;
@@ -421,19 +421,19 @@ bool ViInputHandler::parseTextObject(char32_t ch, Modifier modifier)
     if (optional<TextObject> const textObject = charToTextObject(ch))
     {
         // clang-format off
-        switch (viMode)
+        switch (_viMode)
         {
             case ViMode::Insert:
                 break;
             case ViMode::Normal:
-                if (pendingTextObjectScope && pendingOperator && *pendingOperator == ViOperator::Yank)
-                    yank(*pendingTextObjectScope, *textObject);
+                if (_pendingTextObjectScope && _pendingOperator && *_pendingOperator == ViOperator::Yank)
+                    yank(*_pendingTextObjectScope, *textObject);
                 break;
             case ViMode::Visual:
             case ViMode::VisualLine:
             case ViMode::VisualBlock:
-                if (pendingTextObjectScope)
-                    select(*pendingTextObjectScope, *textObject);
+                if (_pendingTextObjectScope)
+                    select(*_pendingTextObjectScope, *textObject);
                 break;
         }
         // clang-format off
@@ -445,12 +445,12 @@ bool ViInputHandler::parseTextObject(char32_t ch, Modifier modifier)
 
 void ViInputHandler::toggleMode(ViMode newMode)
 {
-    setMode(newMode != viMode ? newMode : ViMode::Normal);
+    setMode(newMode != _viMode ? newMode : ViMode::Normal);
 }
 
 bool ViInputHandler::parseModeSwitch(char32_t ch, Modifier modifier)
 {
-    Require(viMode != ViMode::Insert);
+    Require(_viMode != ViMode::Insert);
 
     switch (InputMatch { modifier, ch })
     {
@@ -462,7 +462,7 @@ bool ViInputHandler::parseModeSwitch(char32_t ch, Modifier modifier)
             return true;
         case 'a'_key:
         case 'i'_key:
-            if (!pendingOperator && viMode == ViMode::Normal )
+            if (!_pendingOperator && _viMode == ViMode::Normal )
             {
                 toggleMode(ViMode::Insert);
                 return true;
@@ -477,7 +477,7 @@ bool ViInputHandler::parseModeSwitch(char32_t ch, Modifier modifier)
 
 void ViInputHandler::handleNormalMode(char32_t ch, Modifier modifier)
 {
-    Require(viMode == ViMode::Normal);
+    Require(_viMode == ViMode::Normal);
 
     if (parseModeSwitch(ch, modifier))
         return;
@@ -489,18 +489,18 @@ void ViInputHandler::handleNormalMode(char32_t ch, Modifier modifier)
     {
         case '/'_key: startSearch(); return;
         case 'v'_key: toggleMode(ViMode::Visual); return;
-        case '#'_key: executor.reverseSearchCurrentWord(); return;
-        case '*'_key: executor.searchCurrentWord(); return;
-        case 'p'_key: executor.paste(count ? count : 1); return;
-        case 'n'_key: executor.jumpToNextMatch(count ? count : 1); return;
-        case 'N'_key: executor.jumpToPreviousMatch(count ? count : 1); return;
+        case '#'_key: _executor.reverseSearchCurrentWord(); return;
+        case '*'_key: _executor.searchCurrentWord(); return;
+        case 'p'_key: _executor.paste(_count ? _count : 1); return;
+        case 'n'_key: _executor.jumpToNextMatch(_count ? _count : 1); return;
+        case 'N'_key: _executor.jumpToPreviousMatch(_count ? _count : 1); return;
         case 'y'_key:
-            if (!pendingOperator.has_value())
-                pendingOperator = ViOperator::Yank;
-            else if (pendingOperator == ViOperator::Yank)
+            if (!_pendingOperator.has_value())
+                _pendingOperator = ViOperator::Yank;
+            else if (_pendingOperator == ViOperator::Yank)
                 execute(ViOperator::Yank, ViMotion::FullLine);
             else
-                pendingOperator.reset(); // is this good?
+                _pendingOperator.reset(); // is this good?
             return;
     }
 

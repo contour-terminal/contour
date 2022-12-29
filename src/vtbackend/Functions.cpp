@@ -44,11 +44,11 @@ using std::stringstream;
 namespace terminal
 {
 
-FunctionDefinition const* select(FunctionSelector const& _selector) noexcept
+FunctionDefinition const* select(FunctionSelector const& selector) noexcept
 {
     auto static const& funcs = functions();
 
-    // std::cout << fmt::format("select: {}\n", _selector);
+    // std::cout << fmt::format("select: {}\n", selector);
 
     auto a = size_t { 0 };
     auto b = funcs.size() - 1;
@@ -56,7 +56,7 @@ FunctionDefinition const* select(FunctionSelector const& _selector) noexcept
     {
         auto const i = (a + b) / 2;
         auto const& I = funcs[i];
-        auto const rel = compare(_selector, I);
+        auto const rel = compare(selector, I);
         // std::cout << fmt::format(" - a:{:>2} b:{:>2} i:{} rel:{} I: {}\n", a, b, i, rel < 0 ? '<' : rel > 0
         // ? '>' : '=', I);
         if (rel > 0)

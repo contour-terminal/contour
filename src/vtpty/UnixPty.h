@@ -75,7 +75,7 @@ class UnixPty: public Pty
         PtySlaveHandle slave;
     };
 
-    UnixPty(PageSize _windowSize, std::optional<crispy::ImageSize> _pixels);
+    UnixPty(PageSize windowSize, std::optional<crispy::ImageSize> pixels);
     ~UnixPty() override;
 
     PtySlave& slave() noexcept override;
@@ -90,7 +90,7 @@ class UnixPty: public Pty
                                   size_t size) override;
     int write(char const* buf, size_t size) override;
     [[nodiscard]] PageSize pageSize() const noexcept override;
-    void resizeScreen(PageSize _cells, std::optional<crispy::ImageSize> _pixels = std::nullopt) override;
+    void resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixels = std::nullopt) override;
 
     UnixPipe& stdoutFastPipe() noexcept { return _stdoutFastPipe; }
 

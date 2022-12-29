@@ -67,15 +67,14 @@ class ViCommands: public ViInputHandler::Executor
     /// any codepoints.
     [[nodiscard]] CellLocation snapToCellRight(CellLocation location) const noexcept;
 
-    Terminal& terminal;
-
     // Cursor offset into the grid.
     CellLocation cursorPosition {};
 
   private:
-    ViMode lastMode = ViMode::Insert;
-    CursorShape lastCursorShape = CursorShape::Block;
-    bool lastCursorVisible = true;
+    Terminal& _terminal;
+    ViMode _lastMode = ViMode::Insert;
+    CursorShape _lastCursorShape = CursorShape::Block;
+    bool _lastCursorVisible = true;
 };
 
 } // namespace terminal

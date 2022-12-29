@@ -30,52 +30,51 @@ using namespace std::string_view_literals;
 namespace terminal
 {
 
-Sequencer::Sequencer(Terminal& _terminal):
-    terminal_ { _terminal }, parameterBuilder_ { sequence_.parameters() }
+Sequencer::Sequencer(Terminal& terminal): _terminal { terminal }, _parameterBuilder { _sequence.parameters() }
 {
 }
 
-void Sequencer::error(std::string_view _errorString)
+void Sequencer::error(std::string_view errorString)
 {
     if (VTParserLog)
-        VTParserLog()("Parser error: {}", _errorString);
+        VTParserLog()("Parser error: {}", errorString);
 }
 
 void Sequencer::print(char32_t codepoint)
 {
-    terminal_.state().instructionCounter++;
-    terminal_.sequenceHandler().writeText(codepoint);
+    _terminal.state().instructionCounter++;
+    _terminal.sequenceHandler().writeText(codepoint);
 }
 
-size_t Sequencer::print(string_view _chars, size_t cellCount)
+size_t Sequencer::print(string_view chars, size_t cellCount)
 {
-    assert(_chars.size() != 0);
+    assert(chars.size() != 0);
 
-    terminal_.state().instructionCounter += _chars.size();
-    terminal_.sequenceHandler().writeText(_chars, cellCount);
+    _terminal.state().instructionCounter += chars.size();
+    _terminal.sequenceHandler().writeText(chars, cellCount);
 
-    return terminal_.settings().pageSize.columns.as<size_t>()
-           - terminal_.currentScreen().cursor().position.column.as<size_t>();
+    return _terminal.settings().pageSize.columns.as<size_t>()
+           - _terminal.currentScreen().cursor().position.column.as<size_t>();
 }
 
 void Sequencer::execute(char controlCode)
 {
-    terminal_.sequenceHandler().executeControlCode(controlCode);
+    _terminal.sequenceHandler().executeControlCode(controlCode);
 }
 
-void Sequencer::collect(char _char)
+void Sequencer::collect(char ch)
 {
-    sequence_.intermediateCharacters().push_back(_char);
+    _sequence.intermediateCharacters().push_back(ch);
 }
 
-void Sequencer::collectLeader(char _leader) noexcept
+void Sequencer::collectLeader(char leader) noexcept
 {
-    sequence_.setLeader(_leader);
+    _sequence.setLeader(leader);
 }
 
-void Sequencer::param(char _char) noexcept
+void Sequencer::param(char ch) noexcept
 {
-    switch (_char)
+    switch (ch)
     {
         case ';': paramSeparator(); break;
         case ':': paramSubSeparator(); break;
@@ -88,86 +87,86 @@ void Sequencer::param(char _char) noexcept
         case '6':
         case '7':
         case '8':
-        case '9': paramDigit(_char); break;
+        case '9': paramDigit(ch); break;
     }
 }
 
-void Sequencer::dispatchESC(char _finalChar)
+void Sequencer::dispatchESC(char finalChar)
 {
-    sequence_.setCategory(FunctionCategory::ESC);
-    sequence_.setFinalChar(_finalChar);
+    _sequence.setCategory(FunctionCategory::ESC);
+    _sequence.setFinalChar(finalChar);
     handleSequence();
 }
 
-void Sequencer::dispatchCSI(char _finalChar)
+void Sequencer::dispatchCSI(char finalChar)
 {
-    sequence_.setCategory(FunctionCategory::CSI);
-    sequence_.setFinalChar(_finalChar);
+    _sequence.setCategory(FunctionCategory::CSI);
+    _sequence.setFinalChar(finalChar);
     handleSequence();
 }
 
 void Sequencer::startOSC()
 {
-    sequence_.setCategory(FunctionCategory::OSC);
+    _sequence.setCategory(FunctionCategory::OSC);
 }
 
-void Sequencer::putOSC(char _char)
+void Sequencer::putOSC(char ch)
 {
-    if (sequence_.intermediateCharacters().size() + 1 < Sequence::MaxOscLength)
-        sequence_.intermediateCharacters().push_back(_char);
+    if (_sequence.intermediateCharacters().size() + 1 < Sequence::MaxOscLength)
+        _sequence.intermediateCharacters().push_back(ch);
 }
 
 void Sequencer::dispatchOSC()
 {
-    auto const [code, skipCount] = parser::extractCodePrefix(sequence_.intermediateCharacters());
-    parameterBuilder_.set(static_cast<Sequence::Parameter>(code));
-    sequence_.intermediateCharacters().erase(0, skipCount);
+    auto const [code, skipCount] = parser::extractCodePrefix(_sequence.intermediateCharacters());
+    _parameterBuilder.set(static_cast<Sequence::Parameter>(code));
+    _sequence.intermediateCharacters().erase(0, skipCount);
     handleSequence();
     clear();
 }
 
-void Sequencer::hook(char _finalChar)
+void Sequencer::hook(char finalChar)
 {
-    terminal_.state().instructionCounter++;
-    sequence_.setCategory(FunctionCategory::DCS);
-    sequence_.setFinalChar(_finalChar);
+    _terminal.state().instructionCounter++;
+    _sequence.setCategory(FunctionCategory::DCS);
+    _sequence.setFinalChar(finalChar);
 
     handleSequence();
 }
 
-void Sequencer::put(char _char)
+void Sequencer::put(char ch)
 {
-    if (hookedParser_)
-        hookedParser_->pass(_char);
+    if (_hookedParser)
+        _hookedParser->pass(ch);
 }
 
 void Sequencer::unhook()
 {
-    if (hookedParser_)
+    if (_hookedParser)
     {
-        hookedParser_->finalize();
-        hookedParser_.reset();
+        _hookedParser->finalize();
+        _hookedParser.reset();
     }
 }
 
 size_t Sequencer::maxBulkTextSequenceWidth() const noexcept
 {
-    if (!terminal_.isPrimaryScreen())
+    if (!_terminal.isPrimaryScreen())
         return 0;
 
-    if (!terminal_.primaryScreen().currentLine().isTrivialBuffer())
+    if (!_terminal.primaryScreen().currentLine().isTrivialBuffer())
         return 0;
 
-    assert(terminal_.currentScreen().margin().horizontal.to
-           >= terminal_.currentScreen().cursor().position.column);
-    return unbox<size_t>(terminal_.currentScreen().margin().horizontal.to
-                         - terminal_.currentScreen().cursor().position.column);
+    assert(_terminal.currentScreen().margin().horizontal.to
+           >= _terminal.currentScreen().cursor().position.column);
+    return unbox<size_t>(_terminal.currentScreen().margin().horizontal.to
+                         - _terminal.currentScreen().cursor().position.column);
 }
 
 void Sequencer::handleSequence()
 {
-    parameterBuilder_.fixiate();
-    terminal_.sequenceHandler().processSequence(sequence_);
+    _parameterBuilder.fixiate();
+    _terminal.sequenceHandler().processSequence(_sequence);
 }
 
 } // namespace terminal

@@ -19,12 +19,12 @@ namespace terminal
 std::u32string CompactCell::codepoints() const
 {
     std::u32string s;
-    if (codepoint_)
+    if (_codepoint)
     {
-        s += codepoint_;
-        if (extra_)
+        s += _codepoint;
+        if (_extra)
         {
-            for (char32_t const cp: extra_->codepoints)
+            for (char32_t const cp: _extra->codepoints)
             {
                 s += cp;
             }
@@ -35,13 +35,13 @@ std::u32string CompactCell::codepoints() const
 
 std::string CompactCell::toUtf8() const
 {
-    if (!codepoint_)
+    if (!_codepoint)
         return {};
 
     std::string text;
-    text += unicode::convert_to<char>(codepoint_);
-    if (extra_)
-        for (char32_t const cp: extra_->codepoints)
+    text += unicode::convert_to<char>(_codepoint);
+    if (_extra)
+        for (char32_t const cp: _extra->codepoints)
             text += unicode::convert_to<char>(cp);
     return text;
 }

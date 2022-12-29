@@ -195,21 +195,21 @@ class Renderable
                     RGBAColor color,
                     Renderable::AtlasTileAttributes const& attributes);
 
-    constexpr bool renderTargetAvailable() const noexcept { return _renderTarget; }
+    [[nodiscard]] constexpr bool renderTargetAvailable() const noexcept { return _renderTarget; }
 
-    RenderTarget& renderTarget() noexcept
+    [[nodiscard]] RenderTarget& renderTarget() noexcept
     {
         assert(_renderTarget);
         return *_renderTarget;
     }
 
-    TextureAtlas& textureAtlas() noexcept
+    [[nodiscard]] TextureAtlas& textureAtlas() noexcept
     {
         assert(_textureAtlas);
         return *_textureAtlas;
     }
 
-    atlas::AtlasBackend& textureScheduler() noexcept { return *_textureScheduler; }
+    [[nodiscard]] atlas::AtlasBackend& textureScheduler() noexcept { return *_textureScheduler; }
 
     virtual void inspect(std::ostream& output) const = 0;
 

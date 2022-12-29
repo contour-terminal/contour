@@ -22,9 +22,9 @@ namespace terminal
 class MockViewPty: public Pty
 {
   public:
-    explicit MockViewPty(PageSize _windowSize): pageSize_ { _windowSize } {}
+    explicit MockViewPty(PageSize windowSize): pageSize_ { windowSize } {}
 
-    void setReadData(std::string_view _data);
+    void setReadData(std::string_view data);
 
     PtySlave& slave() noexcept override;
     [[nodiscard]] std::optional<std::tuple<std::string_view, bool>> read(crispy::BufferObject<char>& storage,
@@ -33,7 +33,7 @@ class MockViewPty: public Pty
     void wakeupReader() override;
     int write(char const* buf, size_t size) override;
     [[nodiscard]] PageSize pageSize() const noexcept override;
-    void resizeScreen(PageSize _cells, std::optional<crispy::ImageSize> _pixels = std::nullopt) override;
+    void resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixels = std::nullopt) override;
 
     void start() override;
     void close() override;

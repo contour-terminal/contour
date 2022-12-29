@@ -368,8 +368,8 @@ struct GridSize
     struct iterator
     {
       public:
-        constexpr iterator(ColumnCount _width, int _next) noexcept:
-            width { _width }, next { _next }, offset { makeOffset(_next) }
+        constexpr iterator(ColumnCount width, int next) noexcept:
+            width { width }, next { next }, offset { makeOffset(next) }
         {
         }
 
@@ -521,7 +521,7 @@ enum class CursorShape
     Bar,
 };
 
-CursorShape makeCursorShape(std::string const& _name);
+CursorShape makeCursorShape(std::string const& name);
 
 enum class ControlTransmissionMode
 {
@@ -724,9 +724,9 @@ constexpr unsigned toAnsiModeNum(AnsiMode m)
     return static_cast<unsigned>(m);
 }
 
-constexpr bool isValidAnsiMode(unsigned int _mode) noexcept
+constexpr bool isValidAnsiMode(unsigned int mode) noexcept
 {
-    switch (static_cast<AnsiMode>(_mode))
+    switch (static_cast<AnsiMode>(mode))
     {
         case AnsiMode::KeyboardAction:
         case AnsiMode::Insert:
@@ -736,8 +736,8 @@ constexpr bool isValidAnsiMode(unsigned int _mode) noexcept
     return false;
 }
 
-std::string to_string(AnsiMode _mode);
-std::string to_string(DECMode _mode);
+std::string to_string(AnsiMode mode);
+std::string to_string(DECMode mode);
 
 constexpr unsigned toDECModeNum(DECMode m)
 {
@@ -785,9 +785,9 @@ constexpr unsigned toDECModeNum(DECMode m)
     return static_cast<unsigned>(m);
 }
 
-constexpr bool isValidDECMode(unsigned int _mode) noexcept
+constexpr bool isValidDECMode(unsigned int mode) noexcept
 {
-    switch (static_cast<DECMode>(_mode))
+    switch (static_cast<DECMode>(mode))
     {
         case DECMode::UseApplicationCursorKeys:
         case DECMode::DesignateCharsetUSASCII:

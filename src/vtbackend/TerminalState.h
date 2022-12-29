@@ -55,26 +55,23 @@ class Terminal;
 class Modes
 {
   public:
-    void set(AnsiMode _mode, bool _enabled) { ansi_.set(static_cast<size_t>(_mode), _enabled); }
+    void set(AnsiMode mode, bool enabled) { ansi_.set(static_cast<size_t>(mode), enabled); }
 
-    void set(DECMode _mode, bool _enabled) { dec_.set(static_cast<size_t>(_mode), _enabled); }
+    void set(DECMode mode, bool enabled) { dec_.set(static_cast<size_t>(mode), enabled); }
 
-    [[nodiscard]] bool enabled(AnsiMode _mode) const noexcept
+    [[nodiscard]] bool enabled(AnsiMode mode) const noexcept { return ansi_.test(static_cast<size_t>(mode)); }
+
+    [[nodiscard]] bool enabled(DECMode mode) const noexcept { return dec_.test(static_cast<size_t>(mode)); }
+
+    void save(std::vector<DECMode> const& modes)
     {
-        return ansi_.test(static_cast<size_t>(_mode));
-    }
-
-    [[nodiscard]] bool enabled(DECMode _mode) const noexcept { return dec_.test(static_cast<size_t>(_mode)); }
-
-    void save(std::vector<DECMode> const& _modes)
-    {
-        for (DECMode const mode: _modes)
+        for (DECMode const mode: modes)
             savedModes_[mode].push_back(enabled(mode));
     }
 
-    void restore(std::vector<DECMode> const& _modes)
+    void restore(std::vector<DECMode> const& modes)
     {
-        for (DECMode const mode: _modes)
+        for (DECMode const mode: modes)
         {
             if (auto i = savedModes_.find(mode); i != savedModes_.end() && !i->second.empty())
             {
@@ -157,7 +154,7 @@ enum class WrapPending
  */
 struct TerminalState
 {
-    explicit TerminalState(Terminal& _terminal);
+    explicit TerminalState(Terminal& terminal);
 
     Settings& settings;
 
@@ -236,9 +233,9 @@ struct formatter<terminal::AnsiMode>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::AnsiMode _mode, FormatContext& ctx)
+    auto format(terminal::AnsiMode mode, FormatContext& ctx)
     {
-        return fmt::format_to(ctx.out(), "{}", to_string(_mode));
+        return fmt::format_to(ctx.out(), "{}", to_string(mode));
     }
 };
 
@@ -251,9 +248,9 @@ struct formatter<terminal::DECMode>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::DECMode _mode, FormatContext& ctx)
+    auto format(terminal::DECMode mode, FormatContext& ctx)
     {
-        return fmt::format_to(ctx.out(), "{}", to_string(_mode));
+        return fmt::format_to(ctx.out(), "{}", to_string(mode));
     }
 };
 

@@ -108,33 +108,33 @@ void ImageData::updateHash() noexcept
     // clang-format on
 }
 
-RGBColor apply(ColorPalette const& _profile, Color _color, ColorTarget _target, ColorMode mode) noexcept
+RGBColor apply(ColorPalette const& colorPalette, Color color, ColorTarget target, ColorMode mode) noexcept
 {
     // clang-format off
-    switch (_color.type())
+    switch (color.type())
     {
         case ColorType::RGB:
-            return _color.rgb();
+            return color.rgb();
         case ColorType::Indexed:
         {
-            auto const index = static_cast<size_t>(_color.index());
+            auto const index = static_cast<size_t>(color.index());
             if (mode == ColorMode::Bright && index < 8)
-                return _profile.brightColor(index);
+                return colorPalette.brightColor(index);
             else if (mode == ColorMode::Dimmed && index < 8)
-                return _profile.dimColor(index);
+                return colorPalette.dimColor(index);
             else
-                return _profile.indexedColor(index);
+                return colorPalette.indexedColor(index);
             break;
         }
         case ColorType::Bright:
-            return _profile.brightColor(static_cast<size_t>(_color.index()));
+            return colorPalette.brightColor(static_cast<size_t>(color.index()));
         case ColorType::Undefined:
         case ColorType::Default:
             break;
     }
     // clang-format on
     auto const defaultColor =
-        _target == ColorTarget::Foreground ? _profile.defaultForeground : _profile.defaultBackground;
+        target == ColorTarget::Foreground ? colorPalette.defaultForeground : colorPalette.defaultBackground;
     return mode == ColorMode::Dimmed ? defaultColor * 0.75 : defaultColor;
 }
 

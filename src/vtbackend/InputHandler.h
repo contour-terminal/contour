@@ -28,8 +28,8 @@ class InputHandler
 {
   public:
     virtual ~InputHandler() = default;
-    virtual bool sendKeyPressEvent(Key _key, Modifier _modifier) = 0;
-    virtual bool sendCharPressEvent(char32_t _char, Modifier _modifier) = 0;
+    virtual bool sendKeyPressEvent(Key key, Modifier modifier) = 0;
+    virtual bool sendCharPressEvent(char32_t codepoint, Modifier modifier) = 0;
 };
 
 } // namespace terminal

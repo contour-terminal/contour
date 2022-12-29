@@ -47,57 +47,55 @@ namespace terminal::rasterizer
 namespace
 {
 
-    void loadGridMetricsFromFont(text::font_key _font, GridMetrics& _gm, text::shaper& _textShaper)
+    void loadGridMetricsFromFont(text::font_key font, GridMetrics& gm, text::shaper& textShaper)
     {
-        auto const m = _textShaper.metrics(_font);
+        auto const m = textShaper.metrics(font);
 
-        _gm.cellSize.width = Width::cast_from(m.advance);
-        _gm.cellSize.height = Height::cast_from(m.line_height);
-        _gm.baseline = m.line_height - m.ascender;
-        _gm.underline.position = _gm.baseline + m.underline_position;
-        _gm.underline.thickness = m.underline_thickness;
+        gm.cellSize.width = Width::cast_from(m.advance);
+        gm.cellSize.height = Height::cast_from(m.line_height);
+        gm.baseline = m.line_height - m.ascender;
+        gm.underline.position = gm.baseline + m.underline_position;
+        gm.underline.thickness = m.underline_thickness;
 
-        RendererLog()("Loading grid metrics {}", _gm);
+        RendererLog()("Loading grid metrics {}", gm);
     }
 
-    GridMetrics loadGridMetrics(text::font_key _font, PageSize _pageSize, text::shaper& _textShaper)
+    GridMetrics loadGridMetrics(text::font_key font, PageSize pageSize, text::shaper& textShaper)
     {
         auto gm = GridMetrics {};
 
-        gm.pageSize = _pageSize;
+        gm.pageSize = pageSize;
         gm.cellMargin = { 0, 0, 0, 0 }; // TODO (pass as args, and make use of them)
         gm.pageMargin = { 0, 0, 0 };    // TODO (fill early)
 
-        loadGridMetricsFromFont(_font, gm, _textShaper);
+        loadGridMetricsFromFont(font, gm, textShaper);
 
         return gm;
     }
 
-    FontKeys loadFontKeys(FontDescriptions const& _fd, text::shaper& _shaper)
+    FontKeys loadFontKeys(FontDescriptions const& fd, text::shaper& shaper)
     {
         FontKeys output {};
-        auto const regularOpt = _shaper.load_font(_fd.regular, _fd.size);
+        auto const regularOpt = shaper.load_font(fd.regular, fd.size);
         Require(regularOpt.has_value());
         output.regular = regularOpt.value();
-        output.bold = _shaper.load_font(_fd.bold, _fd.size).value_or(output.regular);
-        output.italic = _shaper.load_font(_fd.italic, _fd.size).value_or(output.regular);
-        output.boldItalic = _shaper.load_font(_fd.boldItalic, _fd.size).value_or(output.regular);
-        output.emoji = _shaper.load_font(_fd.emoji, _fd.size).value_or(output.regular);
+        output.bold = shaper.load_font(fd.bold, fd.size).value_or(output.regular);
+        output.italic = shaper.load_font(fd.italic, fd.size).value_or(output.regular);
+        output.boldItalic = shaper.load_font(fd.boldItalic, fd.size).value_or(output.regular);
+        output.emoji = shaper.load_font(fd.emoji, fd.size).value_or(output.regular);
 
         return output;
     }
 
-    unique_ptr<text::shaper> createTextShaper(TextShapingEngine _engine,
-                                              DPI _dpi,
-                                              text::font_locator& _locator)
+    unique_ptr<text::shaper> createTextShaper(TextShapingEngine engine, DPI dpi, text::font_locator& locator)
     {
-        switch (_engine)
+        switch (engine)
         {
             case TextShapingEngine::DWrite:
 #if defined(_WIN32)
                 RendererLog()("Using DirectWrite text shaping engine.");
                 // TODO: do we want to use custom font locator here?
-                return make_unique<text::directwrite_shaper>(_dpi, _locator);
+                return make_unique<text::directwrite_shaper>(dpi, locator);
 #else
                 RendererLog()("DirectWrite not available on this platform.");
                 break;
@@ -116,7 +114,7 @@ namespace
         }
 
         RendererLog()("Using OpenShaper text shaping engine.");
-        return make_unique<text::open_shaper>(_dpi, _locator);
+        return make_unique<text::open_shaper>(dpi, locator);
     }
 
 } // namespace
@@ -135,23 +133,23 @@ Renderer::Renderer(PageSize pageSize,
     _atlasDirectMapping { atlasDirectMapping },
     _renderTarget { nullptr },
     //.
-    fontDescriptions_ { std::move(fontDescriptions) },
-    textShaper_ { createTextShaper(fontDescriptions_.textShapingEngine,
-                                   fontDescriptions_.dpi,
-                                   createFontLocator(fontDescriptions_.fontLocator)) },
-    fonts_ { loadFontKeys(fontDescriptions_, *textShaper_) },
-    gridMetrics_ { loadGridMetrics(fonts_.regular, pageSize, *textShaper_) },
+    _fontDescriptions { std::move(fontDescriptions) },
+    _textShaper { createTextShaper(_fontDescriptions.textShapingEngine,
+                                   _fontDescriptions.dpi,
+                                   createFontLocator(_fontDescriptions.fontLocator)) },
+    _fonts { loadFontKeys(_fontDescriptions, *_textShaper) },
+    _gridMetrics { loadGridMetrics(_fonts.regular, pageSize, *_textShaper) },
     //.
-    colorPalette_ { colorPalette },
-    backgroundOpacity_ { backgroundOpacity },
-    backgroundRenderer_ { gridMetrics_, colorPalette.defaultBackground },
-    imageRenderer_ { gridMetrics_, cellSize() },
-    textRenderer_ { gridMetrics_, *textShaper_, fontDescriptions_, fonts_, imageRenderer_ },
-    decorationRenderer_ { gridMetrics_, hyperlinkNormal, hyperlinkHover },
-    cursorRenderer_ { gridMetrics_, CursorShape::Block }
+    _colorPalette { colorPalette },
+    _backgroundOpacity { backgroundOpacity },
+    _backgroundRenderer { _gridMetrics, colorPalette.defaultBackground },
+    _imageRenderer { _gridMetrics, cellSize() },
+    _textRenderer { _gridMetrics, *_textShaper, _fontDescriptions, _fonts, _imageRenderer },
+    _decorationRenderer { _gridMetrics, hyperlinkNormal, hyperlinkHover },
+    _cursorRenderer { _gridMetrics, CursorShape::Block }
 {
-    textRenderer_.updateFontMetrics();
-    imageRenderer_.setCellSize(cellSize());
+    _textRenderer.updateFontMetrics();
+    _imageRenderer.setCellSize(cellSize());
 
     // clang-format off
     if (_atlasTileCount.value > atlasTileCount.value)
@@ -169,21 +167,21 @@ void Renderer::setRenderTarget(RenderTarget& renderTarget)
     _renderTarget = &renderTarget;
 
     // Reset DirectMappingAllocator (also skipping zero-tile).
-    directMappingAllocator_ = atlas::DirectMappingAllocator<RenderTileAttributes> { 1 };
+    _directMappingAllocator = atlas::DirectMappingAllocator<RenderTileAttributes> { 1 };
 
     // Explicitly enable direct mapping for everything BUT the text renderer.
     // Only the text renderer's direct mapping is configurable (for simplicity for now).
-    directMappingAllocator_.enabled = true;
+    _directMappingAllocator.enabled = true;
     for (Renderable* renderable: initializer_list<Renderable*> {
-             &backgroundRenderer_, &cursorRenderer_, &decorationRenderer_, &imageRenderer_ })
-        renderable->setRenderTarget(renderTarget, directMappingAllocator_);
-    directMappingAllocator_.enabled = _atlasDirectMapping;
-    textRenderer_.setRenderTarget(renderTarget, directMappingAllocator_);
+             &_backgroundRenderer, &_cursorRenderer, &_decorationRenderer, &_imageRenderer })
+        renderable->setRenderTarget(renderTarget, _directMappingAllocator);
+    _directMappingAllocator.enabled = _atlasDirectMapping;
+    _textRenderer.setRenderTarget(renderTarget, _directMappingAllocator);
 
     configureTextureAtlas();
 
-    if (colorPalette_.backgroundImage)
-        renderTarget.setBackgroundImage(colorPalette_.backgroundImage);
+    if (_colorPalette.backgroundImage)
+        renderTarget.setBackgroundImage(_colorPalette.backgroundImage);
 }
 
 void Renderer::configureTextureAtlas()
@@ -192,44 +190,44 @@ void Renderer::configureTextureAtlas()
 
     auto atlasProperties =
         atlas::AtlasProperties { atlas::Format::RGBA,
-                                 gridMetrics_.cellSize, // Cell size is used as GPU tile size.
+                                 _gridMetrics.cellSize, // Cell size is used as GPU tile size.
                                  _atlasHashtableSlotCount,
                                  _atlasTileCount,
-                                 directMappingAllocator_.currentlyAllocatedCount };
+                                 _directMappingAllocator.currentlyAllocatedCount };
 
     Require(atlasProperties.tileCount.value > 0);
 
-    textureAtlas_ = make_unique<Renderable::TextureAtlas>(_renderTarget->textureScheduler(), atlasProperties);
+    _textureAtlas = make_unique<Renderable::TextureAtlas>(_renderTarget->textureScheduler(), atlasProperties);
 
     // clang-format off
     RendererLog()("Configuring texture atlas.\n", atlasProperties);
     RendererLog()("- Atlas properties     : {}\n", atlasProperties);
-    RendererLog()("- Atlas texture size   : {} pixels\n", textureAtlas_->atlasSize());
+    RendererLog()("- Atlas texture size   : {} pixels\n", _textureAtlas->atlasSize());
     RendererLog()("- Atlas hashtable      : {} slots\n", _atlasHashtableSlotCount.value);
-    RendererLog()("- Atlas tile count     : {} = {}x * {}y\n", textureAtlas_->capacity(), textureAtlas_->tilesInX(), textureAtlas_->tilesInY());
+    RendererLog()("- Atlas tile count     : {} = {}x * {}y\n", _textureAtlas->capacity(), _textureAtlas->tilesInX(), _textureAtlas->tilesInY());
     RendererLog()("- Atlas direct mapping : {} (for text rendering)", _atlasDirectMapping ? "enabled" : "disabled");
     // clang-format on
 
     for (reference_wrapper<Renderable>& renderable: renderables())
-        renderable.get().setTextureAtlas(*textureAtlas_);
+        renderable.get().setTextureAtlas(*_textureAtlas);
 }
 
-void Renderer::discardImage(Image const& _image)
+void Renderer::discardImage(Image const& image)
 {
     // Defer rendering into the renderer thread & render stage, as this call might have
     // been coming out of bounds from another thread (e.g. the terminal's screen update thread)
-    auto _l = scoped_lock { imageDiscardLock_ };
-    discardImageQueue_.emplace_back(_image.id());
+    auto _l = scoped_lock { _imageDiscardLock };
+    _discardImageQueue.emplace_back(image.id());
 }
 
 void Renderer::executeImageDiscards()
 {
-    auto _l = scoped_lock { imageDiscardLock_ };
+    auto _l = scoped_lock { _imageDiscardLock };
 
-    for (auto const imageId: discardImageQueue_)
-        imageRenderer_.discardImage(imageId);
+    for (auto const imageId: _discardImageQueue)
+        _imageRenderer.discardImage(imageId);
 
-    discardImageQueue_.clear();
+    _discardImageQueue.clear();
 }
 
 void Renderer::clearCache()
@@ -245,35 +243,35 @@ void Renderer::clearCache()
         renderable.get().clearCache();
 }
 
-void Renderer::setFonts(FontDescriptions _fontDescriptions)
+void Renderer::setFonts(FontDescriptions fontDescriptions)
 {
-    if (fontDescriptions_.textShapingEngine == _fontDescriptions.textShapingEngine)
+    if (_fontDescriptions.textShapingEngine == fontDescriptions.textShapingEngine)
     {
-        textShaper_->clear_cache();
-        textShaper_->set_dpi(_fontDescriptions.dpi);
-        if (fontDescriptions_.fontLocator != _fontDescriptions.fontLocator)
-            textShaper_->set_locator(createFontLocator(_fontDescriptions.fontLocator));
+        _textShaper->clear_cache();
+        _textShaper->set_dpi(fontDescriptions.dpi);
+        if (_fontDescriptions.fontLocator != fontDescriptions.fontLocator)
+            _textShaper->set_locator(createFontLocator(fontDescriptions.fontLocator));
     }
     else
-        textShaper_ = createTextShaper(_fontDescriptions.textShapingEngine,
-                                       _fontDescriptions.dpi,
-                                       createFontLocator(_fontDescriptions.fontLocator));
+        _textShaper = createTextShaper(fontDescriptions.textShapingEngine,
+                                       fontDescriptions.dpi,
+                                       createFontLocator(fontDescriptions.fontLocator));
 
-    fontDescriptions_ = std::move(_fontDescriptions);
-    fonts_ = loadFontKeys(fontDescriptions_, *textShaper_);
+    _fontDescriptions = std::move(fontDescriptions);
+    _fonts = loadFontKeys(_fontDescriptions, *_textShaper);
     updateFontMetrics();
 }
 
-bool Renderer::setFontSize(text::font_size _fontSize)
+bool Renderer::setFontSize(text::font_size fontSize)
 {
-    if (_fontSize.pt < 5.) // Let's not be crazy.
+    if (fontSize.pt < 5.) // Let's not be crazy.
         return false;
 
-    if (_fontSize.pt > 200.)
+    if (fontSize.pt > 200.)
         return false;
 
-    fontDescriptions_.size = _fontSize;
-    fonts_ = loadFontKeys(fontDescriptions_, *textShaper_);
+    _fontDescriptions.size = fontSize;
+    _fonts = loadFontKeys(_fontDescriptions, *_textShaper);
     updateFontMetrics();
 
     return true;
@@ -281,27 +279,27 @@ bool Renderer::setFontSize(text::font_size _fontSize)
 
 void Renderer::updateFontMetrics()
 {
-    RendererLog()("Updating grid metrics: {}", gridMetrics_);
+    RendererLog()("Updating grid metrics: {}", _gridMetrics);
 
-    gridMetrics_ = loadGridMetrics(fonts_.regular, gridMetrics_.pageSize, *textShaper_);
+    _gridMetrics = loadGridMetrics(_fonts.regular, _gridMetrics.pageSize, *_textShaper);
 
     if (_renderTarget)
         configureTextureAtlas();
 
-    textRenderer_.updateFontMetrics();
-    imageRenderer_.setCellSize(cellSize());
+    _textRenderer.updateFontMetrics();
+    _imageRenderer.setCellSize(cellSize());
 
     clearCache();
 }
 
-uint64_t Renderer::render(Terminal& _terminal, bool _pressure)
+uint64_t Renderer::render(Terminal& terminal, bool pressure)
 {
-    auto const statusLineHeight = _terminal.state().statusDisplayType == StatusDisplayType::None
+    auto const statusLineHeight = terminal.state().statusDisplayType == StatusDisplayType::None
                                       ? LineCount(0)
-                                      : _terminal.hostWritableStatusLineDisplay().pageSize().lines;
-    gridMetrics_.pageSize = _terminal.pageSize() + statusLineHeight;
+                                      : terminal.hostWritableStatusLineDisplay().pageSize().lines;
+    _gridMetrics.pageSize = terminal.pageSize() + statusLineHeight;
 
-    auto const changes = _terminal.tick(steady_clock::now());
+    auto const changes = terminal.tick(steady_clock::now());
 
     executeImageDiscards();
 
@@ -309,36 +307,36 @@ uint64_t Renderer::render(Terminal& _terminal, bool _pressure)
     // Windows 10 (ConPTY) workaround. ConPTY can't handle non-blocking I/O,
     // so we have to explicitly refresh the render buffer
     // from within the render (reader) thread instead ofthe terminal (writer) thread.
-    _terminal.refreshRenderBuffer();
+    terminal.refreshRenderBuffer();
 #endif // }}}
 
     optional<terminal::RenderCursor> cursorOpt;
-    imageRenderer_.beginFrame();
-    textRenderer_.beginFrame();
-    textRenderer_.setPressure(_pressure && _terminal.isPrimaryScreen());
+    _imageRenderer.beginFrame();
+    _textRenderer.beginFrame();
+    _textRenderer.setPressure(pressure && terminal.isPrimaryScreen());
     {
-        RenderBufferRef const renderBuffer = _terminal.renderBuffer();
+        RenderBufferRef const renderBuffer = terminal.renderBuffer();
         cursorOpt = renderBuffer.get().cursor;
         renderCells(renderBuffer.get().cells);
         renderLines(renderBuffer.get().lines);
     }
-    textRenderer_.endFrame();
-    imageRenderer_.endFrame();
+    _textRenderer.endFrame();
+    _imageRenderer.endFrame();
 
     if (cursorOpt && cursorOpt.value().shape != CursorShape::Block)
     {
         // Note. Block cursor is implicitly rendered via standard grid cell rendering.
         auto const cursor = *cursorOpt;
-        cursorRenderer_.setShape(cursor.shape);
+        _cursorRenderer.setShape(cursor.shape);
         auto const cursorColor = [&]() {
-            if (holds_alternative<CellForegroundColor>(colorPalette_.cursor.color))
-                return colorPalette_.defaultForeground;
-            else if (holds_alternative<CellBackgroundColor>(colorPalette_.cursor.color))
-                return colorPalette_.defaultBackground;
+            if (holds_alternative<CellForegroundColor>(_colorPalette.cursor.color))
+                return _colorPalette.defaultForeground;
+            else if (holds_alternative<CellBackgroundColor>(_colorPalette.cursor.color))
+                return _colorPalette.defaultBackground;
             else
-                return get<RGBColor>(colorPalette_.cursor.color);
+                return get<RGBColor>(_colorPalette.cursor.color);
         }();
-        cursorRenderer_.render(gridMetrics_.map(cursor.position), cursor.width, cursorColor);
+        _cursorRenderer.render(_gridMetrics.map(cursor.position), cursor.width, cursorColor);
     }
 
     _renderTarget->execute();
@@ -346,15 +344,15 @@ uint64_t Renderer::render(Terminal& _terminal, bool _pressure)
     return changes;
 }
 
-void Renderer::renderCells(vector<RenderCell> const& _renderableCells)
+void Renderer::renderCells(vector<RenderCell> const& renderableCells)
 {
-    for (RenderCell const& cell: _renderableCells)
+    for (RenderCell const& cell: renderableCells)
     {
-        backgroundRenderer_.renderCell(cell);
-        decorationRenderer_.renderCell(cell);
-        textRenderer_.renderCell(cell);
+        _backgroundRenderer.renderCell(cell);
+        _decorationRenderer.renderCell(cell);
+        _textRenderer.renderCell(cell);
         if (cell.image)
-            imageRenderer_.renderImage(gridMetrics_.map(cell.position), *cell.image);
+            _imageRenderer.renderImage(_gridMetrics.map(cell.position), *cell.image);
     }
 }
 
@@ -362,17 +360,17 @@ void Renderer::renderLines(vector<RenderLine> const& renderableLines)
 {
     for (RenderLine const& line: renderableLines)
     {
-        backgroundRenderer_.renderLine(line);
-        decorationRenderer_.renderLine(line);
-        textRenderer_.renderLine(line);
+        _backgroundRenderer.renderLine(line);
+        _decorationRenderer.renderLine(line);
+        _textRenderer.renderLine(line);
     }
 }
 
-void Renderer::inspect(std::ostream& _textOutput) const
+void Renderer::inspect(std::ostream& textOutput) const
 {
-    textureAtlas_->inspect(_textOutput);
+    _textureAtlas->inspect(textOutput);
     for (auto const& renderable: renderables())
-        renderable.get().inspect(_textOutput);
+        renderable.get().inspect(textOutput);
 }
 
 } // namespace terminal::rasterizer

@@ -83,7 +83,7 @@ class TextRenderer: public Renderable
 
     void updateFontMetrics();
 
-    void setPressure(bool _pressure) noexcept { pressure_ = _pressure; }
+    void setPressure(bool pressure) noexcept { _pressure = pressure; }
 
     /// Must be invoked before a new terminal frame is rendered.
     void beginFrame();
@@ -107,7 +107,7 @@ class TextRenderer: public Renderable
 
     /// Puts a sequence of codepoints that belong to the same grid cell at @p _pos
     /// at the end of the currently filled line.
-    void appendCellTextToClusterGroup(std::u32string_view _codepoints, TextStyle _style, RGBColor _color);
+    void appendCellTextToClusterGroup(std::u32string_view codepoints, TextStyle style, RGBColor color);
 
     /// Gets the text shaping result of the current text cluster group
     text::shape_result const& getOrCreateCachedGlyphPositions(crispy::StrongHash hash);
@@ -144,30 +144,30 @@ class TextRenderer: public Renderable
 
     // general properties
     //
-    TextRendererEvents& textRendererEvents_;
-    FontDescriptions& fontDescriptions_;
-    FontKeys const& fonts_;
+    TextRendererEvents& _textRendererEvents;
+    FontDescriptions& _fontDescriptions;
+    FontKeys const& _fonts;
 
     // performance optimizations
     //
-    bool pressure_ = false;
+    bool _pressure = false;
 
     using ShapingResultCache = crispy::StrongLRUHashtable<text::shape_result>;
     using ShapingResultCachePtr = ShapingResultCache::Ptr;
 
-    ShapingResultCachePtr textShapingCache_;
+    ShapingResultCachePtr _textShapingCache;
     // TODO: make unique_ptr, get owned, export cref for other users in Renderer impl.
-    text::shaper& textShaper_;
+    text::shaper& _textShaper;
 
     DirectMapping _directMapping {};
 
     // Maps from glyph index to tile index.
     std::vector<uint32_t> _directMappedGlyphKeyToTileIndex {};
 
-    bool isGlyphDirectMapped(text::glyph_key const& glyph) const noexcept
+    [[nodiscard]] bool isGlyphDirectMapped(text::glyph_key const& glyph) const noexcept
     {
         return _directMapping                  // Is direct mapping enabled?
-               && glyph.font == fonts_.regular // Only regular font is direct-mapped for now.
+               && glyph.font == _fonts.regular // Only regular font is direct-mapped for now.
                && glyph.index.value < _directMappedGlyphKeyToTileIndex.size()
                && _directMappedGlyphKeyToTileIndex[glyph.index.value] != 0;
     }
@@ -176,7 +176,7 @@ class TextRenderer: public Renderable
 
     // sub-renderer
     //
-    BoxDrawingRenderer boxDrawingRenderer_;
+    BoxDrawingRenderer _boxDrawingRenderer;
 
     // work-data for the current text cluster group
     struct TextClusterGroup
@@ -208,10 +208,10 @@ class TextRenderer: public Renderable
             initialPenPosition.x += penIncrementInX;
         }
     };
-    TextClusterGroup textClusterGroup_ {};
+    TextClusterGroup _textClusterGroup {};
 
-    bool textStartFound_ = false;
-    bool updateInitialPenPosition_ = false;
+    bool _textStartFound = false;
+    bool _updateInitialPenPosition = false;
 };
 
 } // namespace terminal::rasterizer

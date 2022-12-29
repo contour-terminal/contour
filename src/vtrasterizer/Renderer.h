@@ -69,69 +69,69 @@ class Renderer
              Decorator hyperlinkNormal,
              Decorator hyperlinkHover);
 
-    ImageSize cellSize() const noexcept { return gridMetrics_.cellSize; }
+    [[nodiscard]] ImageSize cellSize() const noexcept { return _gridMetrics.cellSize; }
 
     /// Initializes the render and all render subsystems with the given RenderTarget
     /// and then informs all renderables about the newly created texture atlas.
     void setRenderTarget(RenderTarget& renderTarget);
     RenderTarget& renderTarget() noexcept { return *_renderTarget; }
-    bool hasRenderTarget() const noexcept { return _renderTarget != nullptr; }
+    [[nodiscard]] bool hasRenderTarget() const noexcept { return _renderTarget != nullptr; }
 
-    void setBackgroundOpacity(terminal::Opacity _opacity) { backgroundOpacity_ = _opacity; }
-    terminal::Opacity backgroundOpacity() const noexcept { return backgroundOpacity_; }
+    void setBackgroundOpacity(terminal::Opacity opacity) { _backgroundOpacity = opacity; }
+    [[nodiscard]] terminal::Opacity backgroundOpacity() const noexcept { return _backgroundOpacity; }
 
-    bool setFontSize(text::font_size _fontSize);
+    bool setFontSize(text::font_size fontSize);
     void updateFontMetrics();
 
-    FontDescriptions const& fontDescriptions() const noexcept { return fontDescriptions_; }
-    void setFonts(FontDescriptions _fontDescriptions);
+    [[nodiscard]] FontDescriptions const& fontDescriptions() const noexcept { return _fontDescriptions; }
+    void setFonts(FontDescriptions fontDescriptions);
 
-    GridMetrics const& gridMetrics() const noexcept { return gridMetrics_; }
+    [[nodiscard]] GridMetrics const& gridMetrics() const noexcept { return _gridMetrics; }
 
-    void setHyperlinkDecoration(Decorator _normal, Decorator _hover)
+    void setHyperlinkDecoration(Decorator normal, Decorator hover)
     {
-        decorationRenderer_.setHyperlinkDecoration(_normal, _hover);
+        _decorationRenderer.setHyperlinkDecoration(normal, hover);
     }
 
-    void setPageSize(PageSize _screenSize) noexcept { gridMetrics_.pageSize = _screenSize; }
+    void setPageSize(PageSize screenSize) noexcept { _gridMetrics.pageSize = screenSize; }
 
-    void setMargin(PageMargin _margin) noexcept
+    void setMargin(PageMargin margin) noexcept
     {
         if (_renderTarget)
-            _renderTarget->setMargin(_margin);
-        gridMetrics_.pageMargin = _margin;
+            _renderTarget->setMargin(margin);
+        _gridMetrics.pageMargin = margin;
     }
 
     /**
-     * Renders the given @p _terminal to the current OpenGL context.
+     * Renders the given @p terminal to the current OpenGL context.
      *
-     * @p _now The time hint to use when rendering the eventually blinking cursor.
+     * @p now The time hint to use when rendering the eventually blinking cursor.
      */
-    uint64_t render(Terminal& _terminal, bool _pressure);
+    uint64_t render(Terminal& terminal, bool pressure);
 
-    void discardImage(Image const& _image);
+    void discardImage(Image const& image);
 
     void clearCache();
 
-    void inspect(std::ostream& _textOutput) const;
+    void inspect(std::ostream& textOutput) const;
 
     std::array<std::reference_wrapper<Renderable>, 5> renderables()
     {
         return std::array<std::reference_wrapper<Renderable>, 5> {
-            backgroundRenderer_, cursorRenderer_, decorationRenderer_, imageRenderer_, textRenderer_
+            _backgroundRenderer, _cursorRenderer, _decorationRenderer, _imageRenderer, _textRenderer
         };
     }
 
-    std::array<std::reference_wrapper<Renderable const>, 5> renderables() const
+    [[nodiscard]] std::array<std::reference_wrapper<Renderable const>, 5> renderables() const
     {
         return std::array<std::reference_wrapper<Renderable const>, 5> {
-            backgroundRenderer_, cursorRenderer_, decorationRenderer_, imageRenderer_, textRenderer_
+            _backgroundRenderer, _cursorRenderer, _decorationRenderer, _imageRenderer, _textRenderer
         };
     }
 
   private:
     void configureTextureAtlas();
-    void renderCells(std::vector<RenderCell> const& _renderableCells);
+    void renderCells(std::vector<RenderCell> const& renderableCells);
     void renderLines(std::vector<RenderLine> const& renderableLines);
     void executeImageDiscards();
 
@@ -141,26 +141,26 @@ class Renderer
 
     RenderTarget* _renderTarget;
 
-    Renderable::DirectMappingAllocator directMappingAllocator_;
-    std::unique_ptr<Renderable::TextureAtlas> textureAtlas_;
+    Renderable::DirectMappingAllocator _directMappingAllocator;
+    std::unique_ptr<Renderable::TextureAtlas> _textureAtlas;
 
-    FontDescriptions fontDescriptions_;
-    std::unique_ptr<text::shaper> textShaper_;
-    FontKeys fonts_;
+    FontDescriptions _fontDescriptions;
+    std::unique_ptr<text::shaper> _textShaper;
+    FontKeys _fonts;
 
-    GridMetrics gridMetrics_;
+    GridMetrics _gridMetrics;
 
-    ColorPalette const& colorPalette_;
-    Opacity backgroundOpacity_;
+    ColorPalette const& _colorPalette;
+    Opacity _backgroundOpacity;
 
-    std::mutex imageDiscardLock_;            //!< Lock guard for accessing discardImageQueue_.
-    std::vector<ImageId> discardImageQueue_; //!< List of images to be discarded.
+    std::mutex _imageDiscardLock;            //!< Lock guard for accessing _discardImageQueue.
+    std::vector<ImageId> _discardImageQueue; //!< List of images to be discarded.
 
-    BackgroundRenderer backgroundRenderer_;
-    ImageRenderer imageRenderer_;
-    TextRenderer textRenderer_;
-    DecorationRenderer decorationRenderer_;
-    CursorRenderer cursorRenderer_;
+    BackgroundRenderer _backgroundRenderer;
+    ImageRenderer _imageRenderer;
+    TextRenderer _textRenderer;
+    DecorationRenderer _decorationRenderer;
+    CursorRenderer _cursorRenderer;
 };
 
 } // namespace terminal::rasterizer

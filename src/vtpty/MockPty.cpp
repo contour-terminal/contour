@@ -10,7 +10,7 @@ using std::tuple;
 namespace terminal
 {
 
-MockPty::MockPty(PageSize _size): pageSize_ { _size }
+MockPty::MockPty(PageSize size): pageSize_ { size }
 {
 }
 
@@ -47,10 +47,10 @@ PageSize MockPty::pageSize() const noexcept
     return pageSize_;
 }
 
-void MockPty::resizeScreen(PageSize _cells, std::optional<crispy::ImageSize> _pixels)
+void MockPty::resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixels)
 {
-    pageSize_ = _cells;
-    pixelSize_ = _pixels;
+    pageSize_ = cells;
+    pixelSize_ = pixels;
 }
 
 void MockPty::start()

@@ -163,132 +163,132 @@ constexpr int compare(FunctionSelector const& a, FunctionDefinition const& b) no
 
 namespace detail // {{{
 {
-    constexpr auto C0(char _final, std::string_view _mnemonic, std::string_view _description) noexcept
+    constexpr auto C0(char finalCharacter, std::string_view mnemonic, std::string_view description) noexcept
     {
         // clang-format off
-        return FunctionDefinition { FunctionCategory::C0, 0, 0, _final, 0, 0, VTType::VT100,
-                                    VTExtension::None, _mnemonic, _description };
+        return FunctionDefinition { FunctionCategory::C0, 0, 0, finalCharacter, 0, 0, VTType::VT100,
+                                    VTExtension::None, mnemonic, description };
         // clang-format on
     }
 
-    constexpr auto OSC(uint16_t _code,
+    constexpr auto OSC(uint16_t code,
                        VTExtension ext,
-                       std::string_view _mnemonic,
-                       std::string_view _description) noexcept
+                       std::string_view mnemonic,
+                       std::string_view description) noexcept
     {
         // clang-format off
-        return FunctionDefinition { FunctionCategory::OSC, 0, 0, 0, 0, _code,
+        return FunctionDefinition { FunctionCategory::OSC, 0, 0, 0, 0, code,
                                     VTType::VT100,
                                     ext,
-                                    _mnemonic,
-                                    _description };
+                                    mnemonic,
+                                    description };
         // clang-format on
     }
 
-    constexpr auto ESC(std::optional<char> _intermediate,
-                       char _final,
-                       VTType _vt,
-                       std::string_view _mnemonic,
-                       std::string_view _description) noexcept
+    constexpr auto ESC(std::optional<char> intermediate,
+                       char finalCharacter,
+                       VTType vt,
+                       std::string_view mnemonic,
+                       std::string_view description) noexcept
     {
         return FunctionDefinition { FunctionCategory::ESC,
                                     0,
-                                    _intermediate.value_or(0),
-                                    _final,
+                                    intermediate.value_or(0),
+                                    finalCharacter,
                                     0,
                                     0,
-                                    _vt,
+                                    vt,
                                     VTExtension::None,
-                                    _mnemonic,
-                                    _description };
+                                    mnemonic,
+                                    description };
     }
 
-    constexpr auto CSI(std::optional<char> _leader,
-                       uint8_t _argc0,
-                       uint8_t _argc1,
-                       std::optional<char> _intermediate,
-                       char _final,
-                       VTType _vt,
-                       std::string_view _mnemonic,
-                       std::string_view _description) noexcept
+    constexpr auto CSI(std::optional<char> leader,
+                       uint8_t argc0,
+                       uint8_t argc1,
+                       std::optional<char> intermediate,
+                       char finalCharacter,
+                       VTType vt,
+                       std::string_view mnemonic,
+                       std::string_view description) noexcept
     {
-        // TODO: static_assert on _leader/_intermediate range-or-null
+        // TODO: static_assert on leader/intermediate range-or-null
         return FunctionDefinition { FunctionCategory::CSI,
-                                    _leader.value_or(0),
-                                    _intermediate.value_or(0),
-                                    _final,
-                                    _argc0,
-                                    _argc1,
-                                    _vt,
+                                    leader.value_or(0),
+                                    intermediate.value_or(0),
+                                    finalCharacter,
+                                    argc0,
+                                    argc1,
+                                    vt,
                                     VTExtension::None,
-                                    _mnemonic,
-                                    _description };
+                                    mnemonic,
+                                    description };
     }
 
-    constexpr auto CSI(std::optional<char> _leader,
-                       uint8_t _argc0,
-                       uint8_t _argc1,
-                       std::optional<char> _intermediate,
-                       char _final,
+    constexpr auto CSI(std::optional<char> leader,
+                       uint8_t argc0,
+                       uint8_t argc1,
+                       std::optional<char> intermediate,
+                       char finalCharacter,
                        VTExtension ext,
-                       std::string_view _mnemonic,
-                       std::string_view _description) noexcept
+                       std::string_view mnemonic,
+                       std::string_view description) noexcept
     {
-        // TODO: static_assert on _leader/_intermediate range-or-null
+        // TODO: static_assert on leader/intermediate range-or-null
         return FunctionDefinition { FunctionCategory::CSI,
-                                    _leader.value_or(0),
-                                    _intermediate.value_or(0),
-                                    _final,
-                                    _argc0,
-                                    _argc1,
+                                    leader.value_or(0),
+                                    intermediate.value_or(0),
+                                    finalCharacter,
+                                    argc0,
+                                    argc1,
                                     VTType::VT100,
                                     ext,
-                                    _mnemonic,
-                                    _description };
+                                    mnemonic,
+                                    description };
     }
 
-    constexpr auto DCS(std::optional<char> _leader,
-                       uint8_t _argc0,
-                       uint8_t _argc1,
-                       std::optional<char> _intermediate,
-                       char _final,
-                       VTType _vt,
-                       std::string_view _mnemonic,
-                       std::string_view _description) noexcept
+    constexpr auto DCS(std::optional<char> leader,
+                       uint8_t argc0,
+                       uint8_t argc1,
+                       std::optional<char> intermediate,
+                       char finalCharacter,
+                       VTType vt,
+                       std::string_view mnemonic,
+                       std::string_view description) noexcept
     {
-        // TODO: static_assert on _leader/_intermediate range-or-null
+        // TODO: static_assert on leader/intermediate range-or-null
         return FunctionDefinition { FunctionCategory::DCS,
-                                    _leader.value_or(0),
-                                    _intermediate.value_or(0),
-                                    _final,
-                                    _argc0,
-                                    _argc1,
-                                    _vt,
+                                    leader.value_or(0),
+                                    intermediate.value_or(0),
+                                    finalCharacter,
+                                    argc0,
+                                    argc1,
+                                    vt,
                                     VTExtension::None,
-                                    _mnemonic,
-                                    _description };
+                                    mnemonic,
+                                    description };
     }
 
-    constexpr auto DCS(std::optional<char> _leader,
-                       uint8_t _argc0,
-                       uint8_t _argc1,
-                       std::optional<char> _intermediate,
-                       char _final,
+    constexpr auto DCS(std::optional<char> leader,
+                       uint8_t argc0,
+                       uint8_t argc1,
+                       std::optional<char> intermediate,
+                       char finalCharacter,
                        VTExtension ext,
-                       std::string_view _mnemonic,
-                       std::string_view _description) noexcept
+                       std::string_view mnemonic,
+                       std::string_view description) noexcept
     {
-        // TODO: static_assert on _leader/_intermediate range-or-null
+        // TODO: static_assert on leader/intermediate range-or-null
         return FunctionDefinition { FunctionCategory::DCS,
-                                    _leader.value_or(0),
-                                    _intermediate.value_or(0),
-                                    _final,
-                                    _argc0,
-                                    _argc1,
+                                    leader.value_or(0),
+                                    intermediate.value_or(0),
+                                    finalCharacter,
+                                    argc0,
+                                    argc1,
                                     VTType::VT100,
                                     ext,
-                                    _mnemonic,
-                                    _description };
+                                    mnemonic,
+                                    description };
     }
 } // namespace detail
 
@@ -630,46 +630,46 @@ inline auto const& functions() noexcept
 /// Selects a FunctionDefinition based on a FunctionSelector.
 ///
 /// @return the matching FunctionDefinition or nullptr if none matched.
-FunctionDefinition const* select(FunctionSelector const& _selector) noexcept;
+FunctionDefinition const* select(FunctionSelector const& selector) noexcept;
 
 /// Selects a FunctionDefinition based on given input Escape sequence fields.
 ///
-/// @p _intermediate an optional intermediate character between (0x20 .. 0x2F)
-/// @p _final between 0x40 .. 0x7F
+/// @p intermediate an optional intermediate character between (0x20 .. 0x2F)
+/// @p finalCharacter between 0x40 .. 0x7F
 ///
 /// @notice multi-character intermediates are intentionally not supported.
 ///
 /// @return the matching FunctionDefinition or nullptr if none matched.
-inline FunctionDefinition const* selectEscape(char _intermediate, char _final)
+inline FunctionDefinition const* selectEscape(char intermediate, char finalCharacter)
 {
-    return select({ FunctionCategory::ESC, 0, 0, _intermediate, _final });
+    return select({ FunctionCategory::ESC, 0, 0, intermediate, finalCharacter });
 }
 
 /// Selects a FunctionDefinition based on given input control sequence fields.
 ///
-/// @p _leader an optional value between 0x3C .. 0x3F
-/// @p _argc number of arguments supplied
-/// @p _intermediate an optional intermediate character between (0x20 .. 0x2F)
-/// @p _final between 0x40 .. 0x7F
+/// @p leader an optional value between 0x3C .. 0x3F
+/// @p argc number of arguments supplied
+/// @p intermediate an optional intermediate character between (0x20 .. 0x2F)
+/// @p finalCharacter between 0x40 .. 0x7F
 ///
 /// @notice multi-character intermediates are intentionally not supported.
 ///
 /// @return the matching FunctionDefinition or nullptr if none matched.
-inline FunctionDefinition const* selectControl(char _leader, int _argc, char _intermediate, char _final)
+inline FunctionDefinition const* selectControl(char leader, int argc, char intermediate, char finalCharacter)
 {
-    return select({ FunctionCategory::CSI, _leader, _argc, _intermediate, _final });
+    return select({ FunctionCategory::CSI, leader, argc, intermediate, finalCharacter });
 }
 
 /// Selects a FunctionDefinition based on given input control sequence fields.
 ///
-/// @p _id leading numeric identifier (such as 8 for hyperlink)
+/// @p id leading numeric identifier (such as 8 for hyperlink)
 ///
 /// @notice multi-character intermediates are intentionally not supported.
 ///
 /// @return the matching FunctionDefinition or nullptr if none matched.
-inline FunctionDefinition const* selectOSCommand(int _id)
+inline FunctionDefinition const* selectOSCommand(int id)
 {
-    return select({ FunctionCategory::OSC, 0, _id, 0, 0 });
+    return select({ FunctionCategory::OSC, 0, id, 0, 0 });
 }
 
 } // namespace terminal
@@ -680,10 +680,7 @@ template <>
 struct hash<terminal::FunctionDefinition>
 {
     /// This is actually perfect hashing.
-    constexpr uint32_t operator()(terminal::FunctionDefinition const& _fun) const noexcept
-    {
-        return _fun.id();
-    }
+    constexpr uint32_t operator()(terminal::FunctionDefinition const& fun) const noexcept { return fun.id(); }
 };
 } // namespace std
 

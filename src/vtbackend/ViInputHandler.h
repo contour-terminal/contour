@@ -190,7 +190,7 @@ class ViInputHandler: public InputHandler
     };
 
     ViInputHandler(Executor& theExecutor, ViMode initialMode):
-        viMode { initialMode }, executor { theExecutor }
+        _viMode { initialMode }, _executor { theExecutor }
     {
     }
 
@@ -199,11 +199,11 @@ class ViInputHandler: public InputHandler
 
     void setMode(ViMode mode);
     void toggleMode(ViMode mode);
-    [[nodiscard]] ViMode mode() const noexcept { return viMode; }
+    [[nodiscard]] ViMode mode() const noexcept { return _viMode; }
 
     [[nodiscard]] bool isVisualMode() const noexcept
     {
-        switch (viMode)
+        switch (_viMode)
         {
             case ViMode::Insert:
             case ViMode::Normal: return false;
@@ -217,7 +217,10 @@ class ViInputHandler: public InputHandler
     [[nodiscard]] CellLocationRange translateToCellRange(TextObjectScope scope,
                                                          TextObject textObject) const noexcept;
 
-    [[nodiscard]] bool isEditingSearch() const noexcept { return searchEditMode != SearchEditMode::Disabled; }
+    [[nodiscard]] bool isEditingSearch() const noexcept
+    {
+        return _searchEditMode != SearchEditMode::Disabled;
+    }
 
     void startSearchExternally();
 
@@ -236,17 +239,17 @@ class ViInputHandler: public InputHandler
     void select(TextObjectScope scope, TextObject textObject);
     void startSearch();
 
-    ViMode viMode = ViMode::Normal;
+    ViMode _viMode = ViMode::Normal;
 
-    SearchEditMode searchEditMode = SearchEditMode::Disabled;
-    bool searchExternallyActivated = false;
-    std::u32string searchTerm;
+    SearchEditMode _searchEditMode = SearchEditMode::Disabled;
+    bool _searchExternallyActivated = false;
+    std::u32string _searchTerm;
 
-    unsigned count = 0;
-    std::optional<ViOperator> pendingOperator = std::nullopt;
-    std::optional<TextObjectScope> pendingTextObjectScope = std::nullopt;
-    // std::optional<TextObject> pendingTextObject;
-    Executor& executor;
+    unsigned _count = 0;
+    std::optional<ViOperator> _pendingOperator = std::nullopt;
+    std::optional<TextObjectScope> _pendingTextObjectScope = std::nullopt;
+    // std::optional<TextObject> _pendingTextObject;
+    Executor& _executor;
 };
 
 } // namespace terminal

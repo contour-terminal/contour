@@ -74,7 +74,7 @@ enum class HorizontalTabClear
 ///  Input: CSI 14 t (for text area size)
 ///  Input: CSI 14; 2 t (for full window size)
 /// Output: CSI 14 ; width ; height ; t
-enum class RequestPixelSize
+enum class RequestPixelSize // TODO: rename RequestPixelSize to RequestArea?
 {
     CellArea,
     TextArea,
@@ -134,28 +134,28 @@ class Sequencer
 {
   public:
     /// Constructs the sequencer stage.
-    explicit Sequencer(Terminal& _terminal);
+    explicit Sequencer(Terminal& terminal);
 
     // ParserEvents
     //
-    void error(std::string_view _errorString);
-    void print(char32_t _codepoint);
-    size_t print(std::string_view _chars, size_t cellCount);
-    void execute(char _controlCode);
+    void error(std::string_view errorString);
+    void print(char32_t codepoint);
+    size_t print(std::string_view chars, size_t cellCount);
+    void execute(char controlCode);
     void clear() noexcept;
-    void collect(char _char);
-    void collectLeader(char _leader) noexcept;
-    void param(char _char) noexcept;
-    void paramDigit(char _char) noexcept;
+    void collect(char ch);
+    void collectLeader(char leader) noexcept;
+    void param(char ch) noexcept;
+    void paramDigit(char ch) noexcept;
     void paramSeparator() noexcept;
     void paramSubSeparator() noexcept;
-    void dispatchESC(char _function);
-    void dispatchCSI(char _function);
+    void dispatchESC(char function);
+    void dispatchCSI(char function);
     void startOSC();
-    void putOSC(char _char);
+    void putOSC(char ch);
     void dispatchOSC();
-    void hook(char _function);
-    void put(char _char);
+    void hook(char function);
+    void put(char ch);
     void unhook();
     void startAPC() {}
     void putAPC(char) {}
@@ -166,7 +166,7 @@ class Sequencer
 
     void hookParser(std::unique_ptr<ParserExtension> parserExtension) noexcept
     {
-        hookedParser_ = std::move(parserExtension);
+        _hookedParser = std::move(parserExtension);
     }
 
     [[nodiscard]] size_t maxBulkTextSequenceWidth() const noexcept;
@@ -176,34 +176,34 @@ class Sequencer
 
     // private data
     //
-    Terminal& terminal_;
-    Sequence sequence_ {};
-    SequenceParameterBuilder parameterBuilder_;
+    Terminal& _terminal;
+    Sequence _sequence {};
+    SequenceParameterBuilder _parameterBuilder;
 
-    std::unique_ptr<ParserExtension> hookedParser_;
-    std::unique_ptr<SixelImageBuilder> sixelImageBuilder_;
+    std::unique_ptr<ParserExtension> _hookedParser;
+    std::unique_ptr<SixelImageBuilder> _sixelImageBuilder;
 };
 
 // {{{ inlines
 inline void Sequencer::clear() noexcept
 {
-    sequence_.clearExceptParameters();
-    parameterBuilder_.reset();
+    _sequence.clearExceptParameters();
+    _parameterBuilder.reset();
 }
 
-inline void Sequencer::paramDigit(char _char) noexcept
+inline void Sequencer::paramDigit(char ch) noexcept
 {
-    parameterBuilder_.multiplyBy10AndAdd(static_cast<uint8_t>(_char - '0'));
+    _parameterBuilder.multiplyBy10AndAdd(static_cast<uint8_t>(ch - '0'));
 }
 
 inline void Sequencer::paramSeparator() noexcept
 {
-    parameterBuilder_.nextParameter();
+    _parameterBuilder.nextParameter();
 }
 
 inline void Sequencer::paramSubSeparator() noexcept
 {
-    parameterBuilder_.nextSubParameter();
+    _parameterBuilder.nextSubParameter();
 }
 // }}}
 

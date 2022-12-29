@@ -35,39 +35,39 @@ class Viewport
 
     using ModifyEvent = std::function<void()>;
 
-    explicit Viewport(Terminal& term, ModifyEvent _onModify = {}):
-        terminal_ { term }, modified_ { _onModify ? std::move(_onModify) : []() {
+    explicit Viewport(Terminal& term, ModifyEvent onModify = {}):
+        _terminal { term }, _modified { onModify ? std::move(onModify) : []() {
         } }
     {
     }
 
     // Configures the vim-like `scrolloff` feature.
-    void setScrollOff(LineCount count) noexcept { scrollOff_ = count; }
+    void setScrollOff(LineCount count) noexcept { _scrollOff = count; }
 
-    [[nodiscard]] LineCount scrollOff() const noexcept { return scrollOff_; }
+    [[nodiscard]] LineCount scrollOff() const noexcept { return _scrollOff; }
 
-    [[nodiscard]] ScrollOffset scrollOffset() const noexcept { return scrollOffset_; }
+    [[nodiscard]] ScrollOffset scrollOffset() const noexcept { return _scrollOffset; }
 
     /// Tests if the viewport has been moved(/scrolled) off its main view position.
     ///
     /// @retval true viewport has been moved/scrolled off its main view position.
     /// @retval false viewport has NOT been moved/scrolled and is still located at its main view position.
-    [[nodiscard]] bool scrolled() const noexcept { return scrollOffset_.value != 0; }
+    [[nodiscard]] bool scrolled() const noexcept { return _scrollOffset.value != 0; }
 
-    [[nodiscard]] bool isLineVisible(LineOffset _line) const noexcept
+    [[nodiscard]] bool isLineVisible(LineOffset line) const noexcept
     {
-        auto const a = -scrollOffset_.as<int>();
-        auto const b = _line.as<int>();
-        auto const c = unbox<int>(screenLineCount()) - scrollOffset_.as<int>();
+        auto const a = -_scrollOffset.as<int>();
+        auto const b = line.as<int>();
+        auto const c = unbox<int>(screenLineCount()) - _scrollOffset.as<int>();
         return a <= b && b < c;
     }
 
-    bool scrollUp(LineCount _numLines);
-    bool scrollDown(LineCount _numLines);
+    bool scrollUp(LineCount numLines);
+    bool scrollDown(LineCount numLines);
     bool scrollToTop();
     bool scrollToBottom();
     bool forceScrollToBottom();
-    bool scrollTo(ScrollOffset _offset);
+    bool scrollTo(ScrollOffset offset);
     bool scrollMarkUp();
     bool scrollMarkDown();
 
@@ -82,7 +82,7 @@ class Viewport
     constexpr CellLocation translateScreenToGridCoordinate(CellLocation p) const noexcept
     {
         return CellLocation {
-            p.line - boxed_cast<LineOffset>(scrollOffset_),
+            p.line - boxed_cast<LineOffset>(_scrollOffset),
             p.column,
         };
     }
@@ -90,14 +90,14 @@ class Viewport
     constexpr CellLocation translateGridToScreenCoordinate(CellLocation p) const noexcept
     {
         return CellLocation {
-            p.line + boxed_cast<LineOffset>(scrollOffset_),
+            p.line + boxed_cast<LineOffset>(_scrollOffset),
             p.column,
         };
     }
 
     [[nodiscard]] constexpr LineOffset translateGridToScreenCoordinate(LineOffset p) const noexcept
     {
-        return p + boxed_cast<LineOffset>(scrollOffset_);
+        return p + boxed_cast<LineOffset>(_scrollOffset);
     }
 
   private:
@@ -107,12 +107,12 @@ class Viewport
 
     // private fields
     //
-    Terminal& terminal_;
-    ModifyEvent modified_;
+    Terminal& _terminal;
+    ModifyEvent _modified;
     //!< scroll offset relative to scroll top (0) or nullopt if not scrolled into history
-    ScrollOffset scrollOffset_;
+    ScrollOffset _scrollOffset;
 
-    LineCount scrollOff_ = LineCount(8);
+    LineCount _scrollOff = LineCount(8);
 };
 
 } // namespace terminal

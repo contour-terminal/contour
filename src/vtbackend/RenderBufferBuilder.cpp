@@ -62,21 +62,21 @@ namespace
             .distinct();
     }
 
-    RGBColorPair makeColors(ColorPalette const& _colorPalette,
-                            CellFlags _cellFlags,
-                            bool _reverseVideo,
+    RGBColorPair makeColors(ColorPalette const& colorPalette,
+                            CellFlags cellFlags,
+                            bool reverseVideo,
                             Color foregroundColor,
                             Color backgroundColor,
-                            bool _selected,
-                            bool _isCursor,
-                            bool _isHighlighted,
-                            bool _blink,
-                            bool _rapidBlink) noexcept
+                            bool selected,
+                            bool isCursor,
+                            bool isHighlighted,
+                            bool blink,
+                            bool rapidBlink) noexcept
     {
         auto const sgrColors = CellUtil::makeColors(
-            _colorPalette, _cellFlags, _reverseVideo, foregroundColor, backgroundColor, _blink, _rapidBlink);
+            colorPalette, cellFlags, reverseVideo, foregroundColor, backgroundColor, blink, rapidBlink);
 
-        if (!_selected && !_isCursor && !_isHighlighted)
+        if (!selected && !isCursor && !isHighlighted)
             return sgrColors;
 
         auto getSelectionColor =
@@ -87,23 +87,23 @@ namespace
                 return colorPair;
         };
 
-        if (!_isCursor && _isHighlighted)
-            return makeRGBColorPair(sgrColors, _colorPalette.yankHighlight);
+        if (!isCursor && isHighlighted)
+            return makeRGBColorPair(sgrColors, colorPalette.yankHighlight);
 
-        auto const selectionColors = getSelectionColor(sgrColors, _selected, _colorPalette);
-        if (!_isCursor)
+        auto const selectionColors = getSelectionColor(sgrColors, selected, colorPalette);
+        if (!isCursor)
             return selectionColors;
 
-        if (!_selected)
-            return RGBColorPair { makeRGBColor(sgrColors, _colorPalette.cursor.textOverrideColor),
-                                  makeRGBColor(sgrColors, _colorPalette.cursor.color) }
+        if (!selected)
+            return RGBColorPair { makeRGBColor(sgrColors, colorPalette.cursor.textOverrideColor),
+                                  makeRGBColor(sgrColors, colorPalette.cursor.color) }
                 .distinct();
 
-        Require(_isCursor && _selected);
+        Require(isCursor && selected);
 
         auto cursorColor =
-            RGBColorPair { makeRGBColor(selectionColors, _colorPalette.cursor.textOverrideColor),
-                           makeRGBColor(selectionColors, _colorPalette.cursor.color) };
+            RGBColorPair { makeRGBColor(selectionColors, colorPalette.cursor.textOverrideColor),
+                           makeRGBColor(selectionColors, colorPalette.cursor.color) };
 
         return mix(cursorColor, selectionColors, 0.25f).distinct();
     }
@@ -111,16 +111,16 @@ namespace
 } // namespace
 
 template <typename Cell>
-RenderBufferBuilder<Cell>::RenderBufferBuilder(Terminal const& _terminal,
-                                               RenderBuffer& _output,
+RenderBufferBuilder<Cell>::RenderBufferBuilder(Terminal const& terminal,
+                                               RenderBuffer& output,
                                                LineOffset base,
                                                bool theReverseVideo,
                                                HighlightSearchMatches highlightSearchMatches,
                                                InputMethodData inputMethodData,
                                                optional<CellLocation> theCursorPosition,
                                                bool includeSelection):
-    output { _output },
-    terminal { _terminal },
+    output { output },
+    terminal { terminal },
     cursorPosition { theCursorPosition },
     baseLine { base },
     reverseVideo { theReverseVideo },
@@ -128,7 +128,7 @@ RenderBufferBuilder<Cell>::RenderBufferBuilder(Terminal const& _terminal,
     _inputMethodData { std::move(inputMethodData) },
     _includeSelection { includeSelection }
 {
-    output.frameID = _terminal.lastFrameID();
+    output.frameID = terminal.lastFrameID();
 
     if (cursorPosition)
         output.cursor = renderCursor();
@@ -156,45 +156,45 @@ optional<RenderCursor> RenderBufferBuilder<Cell>::renderCursor() const
 }
 
 template <typename Cell>
-RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(ColorPalette const& _colorPalette,
+RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(ColorPalette const& colorPalette,
                                                              u32string graphemeCluster,
                                                              ColumnCount width,
                                                              CellFlags flags,
                                                              RGBColor fg,
                                                              RGBColor bg,
                                                              Color ul,
-                                                             LineOffset _line,
-                                                             ColumnOffset _column)
+                                                             LineOffset line,
+                                                             ColumnOffset column)
 {
     auto renderCell = RenderCell {};
     renderCell.attributes.backgroundColor = bg;
     renderCell.attributes.foregroundColor = fg;
-    renderCell.attributes.decorationColor = CellUtil::makeUnderlineColor(_colorPalette, fg, ul, flags);
+    renderCell.attributes.decorationColor = CellUtil::makeUnderlineColor(colorPalette, fg, ul, flags);
     renderCell.attributes.flags = flags;
-    renderCell.position.line = _line;
-    renderCell.position.column = _column;
+    renderCell.position.line = line;
+    renderCell.position.column = column;
     renderCell.width = unbox<uint8_t>(width);
     renderCell.codepoints = std::move(graphemeCluster);
     return renderCell;
 }
 
 template <typename Cell>
-RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(ColorPalette const& _colorPalette,
+RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(ColorPalette const& colorPalette,
                                                              char32_t codepoint,
                                                              CellFlags flags,
                                                              RGBColor fg,
                                                              RGBColor bg,
                                                              Color ul,
-                                                             LineOffset _line,
-                                                             ColumnOffset _column)
+                                                             LineOffset line,
+                                                             ColumnOffset column)
 {
     RenderCell renderCell;
     renderCell.attributes.backgroundColor = bg;
     renderCell.attributes.foregroundColor = fg;
-    renderCell.attributes.decorationColor = CellUtil::makeUnderlineColor(_colorPalette, fg, ul, flags);
+    renderCell.attributes.decorationColor = CellUtil::makeUnderlineColor(colorPalette, fg, ul, flags);
     renderCell.attributes.flags = flags;
-    renderCell.position.line = _line;
-    renderCell.position.column = _column;
+    renderCell.position.line = line;
+    renderCell.position.column = column;
     renderCell.width = 1;
     if (codepoint)
         renderCell.codepoints.push_back(codepoint);
@@ -202,21 +202,21 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(ColorPalette const&
 }
 
 template <typename Cell>
-RenderCell RenderBufferBuilder<Cell>::makeRenderCell(ColorPalette const& _colorPalette,
-                                                     HyperlinkStorage const& _hyperlinks,
+RenderCell RenderBufferBuilder<Cell>::makeRenderCell(ColorPalette const& colorPalette,
+                                                     HyperlinkStorage const& hyperlinks,
                                                      Cell const& screenCell,
                                                      RGBColor fg,
                                                      RGBColor bg,
-                                                     LineOffset _line,
-                                                     ColumnOffset _column)
+                                                     LineOffset line,
+                                                     ColumnOffset column)
 {
     RenderCell renderCell;
     renderCell.attributes.backgroundColor = bg;
     renderCell.attributes.foregroundColor = fg;
-    renderCell.attributes.decorationColor = CellUtil::makeUnderlineColor(_colorPalette, fg, screenCell);
+    renderCell.attributes.decorationColor = CellUtil::makeUnderlineColor(colorPalette, fg, screenCell);
     renderCell.attributes.flags = screenCell.flags();
-    renderCell.position.line = _line;
-    renderCell.position.column = _column;
+    renderCell.position.line = line;
+    renderCell.position.column = column;
     renderCell.width = screenCell.width();
 
     if (screenCell.codepointCount() != 0)
@@ -227,10 +227,10 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCell(ColorPalette const& _colorP
 
     renderCell.image = screenCell.imageFragment();
 
-    if (auto href = _hyperlinks.hyperlinkById(screenCell.hyperlink()))
+    if (auto href = hyperlinks.hyperlinkById(screenCell.hyperlink()))
     {
-        auto const& color = href->state == HyperlinkState::Hover ? _colorPalette.hyperlinkDecoration.hover
-                                                                 : _colorPalette.hyperlinkDecoration.normal;
+        auto const& color = href->state == HyperlinkState::Hover ? colorPalette.hyperlinkDecoration.hover
+                                                                 : colorPalette.hyperlinkDecoration.normal;
         // TODO(decoration): Move property into Terminal.
         auto const decoration =
             href->state == HyperlinkState::Hover
@@ -463,10 +463,10 @@ void RenderBufferBuilder<Cell>::matchSearchPattern(T const& textCell)
 }
 
 template <typename Cell>
-void RenderBufferBuilder<Cell>::startLine(LineOffset _line) noexcept
+void RenderBufferBuilder<Cell>::startLine(LineOffset line) noexcept
 {
     isNewLine = true;
-    lineNr = _line;
+    lineNr = line;
     prevWidth = 0;
     prevHasCursor = false;
 }
@@ -577,9 +577,9 @@ bool RenderBufferBuilder<Cell>::tryRenderInputMethodEditor(CellLocation screenPo
 }
 
 template <typename Cell>
-void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset _line, ColumnOffset _column)
+void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset line, ColumnOffset column)
 {
-    auto const screenPosition = CellLocation { _line, _column };
+    auto const screenPosition = CellLocation { line, column };
     auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(screenPosition);
 
     if (tryRenderInputMethodEditor(screenPosition, gridPosition))
@@ -605,8 +605,8 @@ void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset _l
                                                          screenCell,
                                                          fg,
                                                          bg,
-                                                         baseLine + _line,
-                                                         _column));
+                                                         baseLine + line,
+                                                         column));
                 output.cells.back().groupStart = true;
             }
             break;
@@ -623,8 +623,8 @@ void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset _l
                                                          screenCell,
                                                          fg,
                                                          bg,
-                                                         baseLine + _line,
-                                                         _column));
+                                                         baseLine + line,
+                                                         column));
 
                 if (isNewLine)
                     output.cells.back().groupStart = true;

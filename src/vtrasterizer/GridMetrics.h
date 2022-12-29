@@ -69,33 +69,33 @@ struct GridMetrics
     /// @param line screen coordinate's line (between 0 and number of screen lines minus 1)
     ///
     /// @return 2D point into the grid cell's top left in drawing system coordinates.
-    constexpr crispy::Point map(LineOffset _line, ColumnOffset _column) const noexcept
+    constexpr crispy::Point map(LineOffset line, ColumnOffset column) const noexcept
     {
-        return mapTopLeft(_line, _column);
+        return mapTopLeft(line, column);
     }
 
-    constexpr crispy::Point map(CellLocation _pos) const noexcept { return map(_pos.line, _pos.column); }
+    constexpr crispy::Point map(CellLocation pos) const noexcept { return map(pos.line, pos.column); }
 
-    constexpr crispy::Point mapTopLeft(CellLocation _pos) const noexcept
+    constexpr crispy::Point mapTopLeft(CellLocation pos) const noexcept
     {
-        return mapTopLeft(_pos.line, _pos.column);
+        return mapTopLeft(pos.line, pos.column);
     }
 
-    constexpr crispy::Point mapTopLeft(LineOffset _line, ColumnOffset _column) const noexcept
+    constexpr crispy::Point mapTopLeft(LineOffset line, ColumnOffset column) const noexcept
     {
-        auto const x = pageMargin.left + *_column * cellSize.width.as<int>();
-        auto const y = pageMargin.top + *_line * cellSize.height.as<int>();
+        auto const x = pageMargin.left + *column * cellSize.width.as<int>();
+        auto const y = pageMargin.top + *line * cellSize.height.as<int>();
 
         return { x, y };
     }
 
-    constexpr crispy::Point mapBottomLeft(CellLocation _pos) const noexcept
+    constexpr crispy::Point mapBottomLeft(CellLocation pos) const noexcept
     {
-        return mapBottomLeft(_pos.line, _pos.column);
+        return mapBottomLeft(pos.line, pos.column);
     }
-    constexpr crispy::Point mapBottomLeft(LineOffset _line, ColumnOffset _column) const noexcept
+    constexpr crispy::Point mapBottomLeft(LineOffset line, ColumnOffset column) const noexcept
     {
-        return mapTopLeft(_line + 1, _column);
+        return mapTopLeft(line + 1, column);
     }
 };
 

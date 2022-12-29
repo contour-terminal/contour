@@ -58,19 +58,14 @@ class [[nodiscard]] Process: public Pty
 
     static FileSystem::path homeDirectory();
 
-    Process(ExecInfo const& _exe, std::unique_ptr<Pty> _pty):
-        Process(_exe.program,
-                _exe.arguments,
-                _exe.workingDirectory,
-                _exe.env,
-                _exe.escapeSandbox,
-                std::move(_pty))
+    Process(ExecInfo const& exe, std::unique_ptr<Pty> pty):
+        Process(exe.program, exe.arguments, exe.workingDirectory, exe.env, exe.escapeSandbox, std::move(pty))
     {
     }
 
     Process(const std::string& path,
             std::vector<std::string> const& args,
-            FileSystem::path const& _cwd,
+            FileSystem::path const& cwd,
             Environment const& env,
             bool escapeSandbox,
             std::unique_ptr<Pty> pty);
@@ -98,7 +93,7 @@ class [[nodiscard]] Process: public Pty
         Normal,
         Hangup
     };
-    void terminate(TerminationHint _terminationHint);
+    void terminate(TerminationHint terminationHint);
 
     [[nodiscard]] Pty& pty() noexcept;
     [[nodiscard]] Pty const& pty() const noexcept;
@@ -113,7 +108,7 @@ class [[nodiscard]] Process: public Pty
     void wakeupReader() override { return pty().wakeupReader(); }
     [[nodiscard]] int write(char const* buf, size_t size) override { return pty().write(buf, size); }
     [[nodiscard]] PageSize pageSize() const noexcept override { return pty().pageSize(); }
-    void resizeScreen(PageSize _cells, std::optional<crispy::ImageSize> _pixels = std::nullopt) override { pty().resizeScreen(_cells, _pixels); }
+    void resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixels = std::nullopt) override { pty().resizeScreen(cells, pixels); }
     // clang-format on
 
   private:
@@ -134,25 +129,25 @@ struct formatter<terminal::Process::ExitStatus>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::Process::ExitStatus const& _status, FormatContext& _ctx)
+    auto format(terminal::Process::ExitStatus const& status, FormatContext& ctx)
     {
-        return std::visit(
-            overloaded { [&](terminal::Process::NormalExit _exit) {
-                            return fmt::format_to(_ctx.out(), "{} (normal exit)", _exit.exitCode);
-                        },
-                         [&](terminal::Process::SignalExit _exit) {
-                             char buf[256];
+        return std::visit(overloaded { [&](terminal::Process::NormalExit exit) {
+                                          return fmt::format_to(ctx.out(), "{} (normal exit)", exit.exitCode);
+                                      },
+                                       [&](terminal::Process::SignalExit exit) {
+                                           char buf[256];
 #if defined(_WIN32)
-                             strerror_s(buf, sizeof(buf), errno);
-                             return fmt::format_to(_ctx.out(), "{} (signal number {})", buf, _exit.signum);
+                                           strerror_s(buf, sizeof(buf), errno);
+                                           return fmt::format_to(
+                                               ctx.out(), "{} (signal number {})", buf, exit.signum);
 #else
-                             return fmt::format_to(_ctx.out(),
-                                                   "{} (signal number {})",
-                                                   strerror_r(errno, buf, sizeof(buf)),
-                                                   _exit.signum);
+                                           return fmt::format_to(ctx.out(),
+                                                                 "{} (signal number {})",
+                                                                 strerror_r(errno, buf, sizeof(buf)),
+                                                                 exit.signum);
 #endif
-                         } },
-            _status);
+                                       } },
+                          status);
     }
 };
 } // namespace fmt
