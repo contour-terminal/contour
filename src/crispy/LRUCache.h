@@ -39,7 +39,7 @@ class LRUCache
     using iterator = typename ItemList::iterator;
     using const_iterator = typename ItemList::const_iterator;
 
-    explicit LRUCache(std::size_t _capacity): capacity_ { _capacity } {}
+    explicit LRUCache(std::size_t capacity): capacity_ { capacity } {}
 
     [[nodiscard]] std::size_t size() const noexcept { return items_.size(); }
     [[nodiscard]] std::size_t capacity() const noexcept { return capacity_; }
@@ -50,52 +50,52 @@ class LRUCache
         items_.clear();
     }
 
-    void touch(Key _key) noexcept { (void) try_get(_key); }
+    void touch(Key key) noexcept { (void) try_get(key); }
 
-    [[nodiscard]] bool contains(Key _key) const noexcept { return itemByKeyMapping_.count(_key) != 0; }
+    [[nodiscard]] bool contains(Key key) const noexcept { return itemByKeyMapping_.count(key) != 0; }
 
-    [[nodiscard]] Value* try_get(Key _key) const { return const_cast<LRUCache*>(this)->try_get(_key); }
+    [[nodiscard]] Value* try_get(Key key) const { return const_cast<LRUCache*>(this)->try_get(key); }
 
-    [[nodiscard]] Value* try_get(Key _key)
+    [[nodiscard]] Value* try_get(Key key)
     {
-        if (auto i = itemByKeyMapping_.find(_key); i != itemByKeyMapping_.end())
+        if (auto i = itemByKeyMapping_.find(key); i != itemByKeyMapping_.end())
         {
             // move it to the front, and return it
             auto i2 = moveItemToFront(i->second);
-            itemByKeyMapping_.at(_key) = i2;
+            itemByKeyMapping_.at(key) = i2;
             return &i2->value;
         }
 
         return nullptr;
     }
 
-    [[nodiscard]] Value& at(Key _key)
+    [[nodiscard]] Value& at(Key key)
     {
-        if (Value* p = try_get(_key))
+        if (Value* p = try_get(key))
             return *p;
 
-        throw std::out_of_range("_key");
+        throw std::out_of_range("key");
     }
 
-    [[nodiscard]] Value const& at(Key _key) const
+    [[nodiscard]] Value const& at(Key key) const
     {
-        if (Value const* p = try_get(_key))
+        if (Value const* p = try_get(key))
             return *p;
 
-        throw std::out_of_range("_key");
+        throw std::out_of_range("key");
     }
 
     /// Returns the value for the given key, default-constructing it in case
     /// if it wasn't in the cache just yet.
-    [[nodiscard]] Value& operator[](Key _key)
+    [[nodiscard]] Value& operator[](Key key)
     {
-        if (Value* p = try_get(_key))
+        if (Value* p = try_get(key))
             return *p;
 
         if (items_.size() == capacity_)
-            return evict_one_and_push_front(_key, Value {})->value;
+            return evict_one_and_push_front(key, Value {})->value;
 
-        return emplaceItemToFront(_key, Value {})->value;
+        return emplaceItemToFront(key, Value {})->value;
     }
 
     /// Conditionally creates a new item to the LRU-Cache iff its key was not present yet.
@@ -103,34 +103,34 @@ class LRUCache
     /// @retval true the key did not exist in cache yet, a new value was constructed.
     /// @retval false The key is already in the cache, no entry was constructed.
     template <typename ValueConstructFn>
-    [[nodiscard]] bool try_emplace(Key _key, ValueConstructFn _constructValue)
+    [[nodiscard]] bool try_emplace(Key key, ValueConstructFn constructValue)
     {
-        if (Value* p = try_get(_key))
+        if (Value* p = try_get(key))
             return false;
 
         if (items_.size() == capacity_)
-            evict_one_and_push_front(_key, _constructValue());
+            evict_one_and_push_front(key, constructValue());
         else
-            emplaceItemToFront(_key, _constructValue());
+            emplaceItemToFront(key, constructValue());
         return true;
     }
 
     template <typename ValueConstructFn>
-    [[nodiscard]] Value& get_or_emplace(Key _key, ValueConstructFn _constructValue)
+    [[nodiscard]] Value& get_or_emplace(Key key, ValueConstructFn constructValue)
     {
-        if (Value* p = try_get(_key))
+        if (Value* p = try_get(key))
             return *p;
-        return emplace(_key, _constructValue());
+        return emplace(key, constructValue());
     }
 
-    Value& emplace(Key _key, Value&& _value)
+    Value& emplace(Key key, Value&& value)
     {
-        Require(!contains(_key));
+        Require(!contains(key));
 
         if (items_.size() == capacity_)
-            return evict_one_and_push_front(_key, std::move(_value))->value;
+            return evict_one_and_push_front(key, std::move(value))->value;
 
-        return emplaceItemToFront(_key, std::move(_value))->value;
+        return emplaceItemToFront(key, std::move(value))->value;
     }
 
     [[nodiscard]] iterator begin() { return items_.begin(); }
@@ -152,32 +152,32 @@ class LRUCache
         return result;
     }
 
-    void erase(iterator _iter)
+    void erase(iterator iter)
     {
-        items_.erase(_iter);
-        itemByKeyMapping_.erase(_iter->key);
+        items_.erase(iter);
+        itemByKeyMapping_.erase(iter->key);
     }
 
-    void erase(Key const& _key)
+    void erase(Key const& key)
     {
-        if (auto keyMappingIterator = itemByKeyMapping_.find(_key);
+        if (auto keyMappingIterator = itemByKeyMapping_.find(key);
             keyMappingIterator != itemByKeyMapping_.end())
             erase(keyMappingIterator->second);
     }
 
   private:
     /// Evicts least recently used item and prepares (/reuses) its storage for a new item.
-    iterator evict_one_and_push_front(Key _newKey, Value&& _newValue)
+    iterator evict_one_and_push_front(Key newKey, Value&& newValue)
     {
         auto const oldKey = items_.back().key;
         auto keyMappingIterator = itemByKeyMapping_.find(oldKey);
         Require(keyMappingIterator != itemByKeyMapping_.end());
 
         auto newItemIterator = moveItemToFront(keyMappingIterator->second);
-        newItemIterator->key = _newKey;
-        newItemIterator->value = std::move(_newValue);
+        newItemIterator->key = newKey;
+        newItemIterator->value = std::move(newValue);
         itemByKeyMapping_.erase(keyMappingIterator);
-        itemByKeyMapping_.emplace(_newKey, newItemIterator);
+        itemByKeyMapping_.emplace(newKey, newItemIterator);
 
         return newItemIterator;
     }
@@ -189,10 +189,10 @@ class LRUCache
         return items_.begin();
     }
 
-    iterator emplaceItemToFront(Key _key, Value&& _value)
+    iterator emplaceItemToFront(Key key, Value&& value)
     {
-        items_.emplace_front(Item { _key, std::move(_value) });
-        itemByKeyMapping_.emplace(_key, items_.begin());
+        items_.emplace_front(Item { key, std::move(value) });
+        itemByKeyMapping_.emplace(key, items_.begin());
         return items_.begin();
     }
 

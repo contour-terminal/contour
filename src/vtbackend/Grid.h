@@ -731,7 +731,7 @@ class Grid
 
     [[nodiscard]] constexpr LineCount linesUsed() const noexcept;
 
-    void verifyState() const;
+    void verifyState() const noexcept;
 
     // Retrieves the cell location range of the underlying word at the given cursor position.
     [[nodiscard]] CellLocationRange wordRangeUnderCursor(CellLocation position,

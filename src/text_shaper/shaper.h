@@ -50,9 +50,9 @@ enum class bitmap_format
     rgba
 };
 
-constexpr size_t pixel_size(bitmap_format _format) noexcept
+constexpr size_t pixel_size(bitmap_format format) noexcept
 {
-    switch (_format)
+    switch (format)
     {
         case bitmap_format::rgba: return 4;
         case bitmap_format::rgb: return 3;
@@ -77,7 +77,7 @@ struct rasterized_glyph
     }
 };
 
-std::tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::ImageSize _newSize);
+std::tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, crispy::ImageSize newSize);
 
 struct glyph_position
 {
@@ -103,12 +103,12 @@ class shaper
     /**
      * Sets or updates DPI to the given value.
      */
-    virtual void set_dpi(DPI _dpi) = 0;
+    virtual void set_dpi(DPI dpi) = 0;
 
     /**
      * Configures the font location API to be used.
      */
-    virtual void set_locator(font_locator& _locator) = 0;
+    virtual void set_locator(font_locator& locator) = 0;
 
     /**
      * Clears internal caches (if any).
@@ -122,44 +122,44 @@ class shaper
      * on Windows it will be a DirectWrite font,
      * and on Apple it will be using CoreText (but for now it'll be freetype, too).
      */
-    [[nodiscard]] virtual std::optional<font_key> load_font(font_description const& _description,
-                                                            font_size _size) = 0;
+    [[nodiscard]] virtual std::optional<font_key> load_font(font_description const& description,
+                                                            font_size size) = 0;
 
     /**
-     * Retrieves global font metrics of font identified by @p _key.
+     * Retrieves global font metrics of font identified by @p key.
      */
-    [[nodiscard]] virtual font_metrics metrics(font_key _key) const = 0;
+    [[nodiscard]] virtual font_metrics metrics(font_key key) const = 0;
 
     /**
-     * Shapes the given text @p _text using the font face @p _font.
+     * Shapes the given text @p text using the font face @p font.
      *
-     * @param _font     font_key identifying the font to use for text shaping.
-     * @param _font     the font to use for text shaping.
-     * @param _text     the sequence of codepoints to shape (must be all of the same script).
-     * @param _clusters codepoint clusters
-     * @param _script   the script of the given text.
-     * @param _presentation the pre-determined presentation style that is being stored in each glyph position.
-     * @param _result   vector at which the text shaping result will be stored.
+     * @param font     font_key identifying the font to use for text shaping.
+     * @param font     the font to use for text shaping.
+     * @param text     the sequence of codepoints to shape (must be all of the same script).
+     * @param clusters codepoint clusters
+     * @param script   the script of the given text.
+     * @param presentation the pre-determined presentation style that is being stored in each glyph position.
+     * @param result   vector at which the text shaping result will be stored.
      *
      * The call always returns a usable shape result, optionally using font fallback if the given
      * font did not satisfy.
      */
-    virtual void shape(font_key _font,
-                       std::u32string_view _text,
-                       gsl::span<unsigned> _clusters,
-                       unicode::Script _script,
-                       unicode::PresentationStyle _presentation,
-                       shape_result& _result) = 0;
+    virtual void shape(font_key font,
+                       std::u32string_view text,
+                       gsl::span<unsigned> clusters,
+                       unicode::Script script,
+                       unicode::PresentationStyle presentation,
+                       shape_result& result) = 0;
 
-    [[nodiscard]] virtual std::optional<glyph_position> shape(font_key _font, char32_t _codepoint) = 0;
+    [[nodiscard]] virtual std::optional<glyph_position> shape(font_key font, char32_t codepoint) = 0;
 
     /**
      * Rasterizes (renders) the glyph using the given render mode.
      *
-     * @param _glyph glyph identifier.
-     * @param _mode  render technique to use.
+     * @param glyph glyph identifier.
+     * @param mode  render technique to use.
      */
-    [[nodiscard]] virtual std::optional<rasterized_glyph> rasterize(glyph_key _glyph, render_mode _mode) = 0;
+    [[nodiscard]] virtual std::optional<rasterized_glyph> rasterize(glyph_key glyph, render_mode mode) = 0;
 };
 
 } // end namespace text
@@ -196,15 +196,15 @@ struct formatter<text::glyph_position>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(text::glyph_position const& _gpos, FormatContext& ctx)
+    auto format(text::glyph_position const& gpos, FormatContext& ctx)
     {
         return fmt::format_to(ctx.out(),
                               "({}+{}+{}|{}+{})",
-                              _gpos.glyph.index.value,
-                              _gpos.offset.x,
-                              _gpos.offset.y,
-                              _gpos.advance.x,
-                              _gpos.advance.y);
+                              gpos.glyph.index.value,
+                              gpos.offset.x,
+                              gpos.offset.y,
+                              gpos.advance.x,
+                              gpos.advance.y);
     }
 };
 
@@ -217,14 +217,14 @@ struct formatter<text::rasterized_glyph>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(text::rasterized_glyph const& _glyph, FormatContext& ctx)
+    auto format(text::rasterized_glyph const& glyph, FormatContext& ctx)
     {
         return fmt::format_to(ctx.out(),
                               "rasterized_glyph({}, {}+{}, {})",
-                              _glyph.index.value,
-                              _glyph.bitmapSize,
-                              _glyph.position,
-                              _glyph.format);
+                              glyph.index.value,
+                              glyph.bitmapSize,
+                              glyph.position,
+                              glyph.format);
     }
 };
 } // namespace fmt

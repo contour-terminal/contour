@@ -96,8 +96,8 @@ class StrongLRUCache
     [[nodiscard]] bool contains(Key key) const noexcept;
 
     /// Returns the value for the given key if found, nullptr otherwise.
-    [[nodiscard]] Value* try_get(Key key);
-    [[nodiscard]] Value const* try_get(Key key) const;
+    [[nodiscard]] Value* try_get(Key key) noexcept;
+    [[nodiscard]] Value const* try_get(Key key) const noexcept;
 
     /// Returns the value for the given key,
     /// throwing std::out_of_range if key was not found.
@@ -187,7 +187,7 @@ inline bool StrongLRUCache<Key, Value, Hasher>::contains(Key key) const noexcept
 }
 
 template <typename Key, typename Value, typename Hasher>
-inline Value* StrongLRUCache<Key, Value, Hasher>::try_get(Key key)
+inline Value* StrongLRUCache<Key, Value, Hasher>::try_get(Key key) noexcept
 {
     if (Entry* e = _hashtable->try_get(Hasher {}(key)))
         return &e->value;
@@ -195,7 +195,7 @@ inline Value* StrongLRUCache<Key, Value, Hasher>::try_get(Key key)
 }
 
 template <typename Key, typename Value, typename Hasher>
-inline Value const* StrongLRUCache<Key, Value, Hasher>::try_get(Key key) const
+inline Value const* StrongLRUCache<Key, Value, Hasher>::try_get(Key key) const noexcept
 {
     if (Entry const* e = _hashtable->try_get(Hasher {}(key)))
         return &e->value;

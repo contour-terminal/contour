@@ -30,12 +30,11 @@
 #include <QtCore/QFile>
 
 #include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <memory>
-
-#include <signal.h>
 
 #if !defined(_WIN32)
     #include <sys/ioctl.h>
@@ -76,8 +75,8 @@ namespace
 
         auto stackTrace = crispy::StackTrace();
         auto symbols = stackTrace.symbols();
-        for (size_t i = 0; i < symbols.size(); ++i)
-            out << symbols[i] << "\r\n";
+        for (auto const& symbol: symbols)
+            out << symbol << "\r\n";
     }
 
     // Have this directory string already pre-created, as in case of a SEGV

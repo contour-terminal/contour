@@ -110,7 +110,7 @@ enum class OptionStyle
 class ParserError: public std::runtime_error
 {
   public:
-    explicit ParserError(std::string const& _msg): std::runtime_error(_msg) {}
+    explicit ParserError(std::string const& msg): std::runtime_error(msg) {}
 };
 
 struct FlagStore
@@ -118,43 +118,43 @@ struct FlagStore
     std::map<Name, Value> values;
     std::vector<std::string_view> verbatim;
 
-    [[nodiscard]] bool boolean(std::string const& _key) const { return std::get<bool>(values.at(_key)); }
-    [[nodiscard]] int integer(std::string const& _key) const { return std::get<int>(values.at(_key)); }
-    [[nodiscard]] unsigned uint(std::string const& _key) const { return std::get<unsigned>(values.at(_key)); }
-    [[nodiscard]] double real(std::string const& _key) const { return std::get<double>(values.at(_key)); }
-    [[nodiscard]] std::string const& str(std::string const& _key) const
+    [[nodiscard]] bool boolean(std::string const& key) const { return std::get<bool>(values.at(key)); }
+    [[nodiscard]] int integer(std::string const& key) const { return std::get<int>(values.at(key)); }
+    [[nodiscard]] unsigned uint(std::string const& key) const { return std::get<unsigned>(values.at(key)); }
+    [[nodiscard]] double real(std::string const& key) const { return std::get<double>(values.at(key)); }
+    [[nodiscard]] std::string const& str(std::string const& key) const
     {
-        return std::get<std::string>(values.at(_key));
+        return std::get<std::string>(values.at(key));
     }
 
     template <typename T>
-    T get(std::string const& _key) const
+    T get(std::string const& key) const
     {
-        return std::get<T>(values.at(_key));
+        return std::get<T>(values.at(key));
     }
 };
 
 /*
- * Validates @p _command to be well-formed and throws an exception otherwise.
+ * Validates @p command to be well-formed and throws an exception otherwise.
  */
-// TODO: void validate(Command const& _command);
+// TODO: void validate(Command const& command);
 
 using StringViewList = std::vector<std::string_view>;
 
 /**
- * Parses the command line arguments with respect to @p _command as passed via @p _args.
+ * Parses the command line arguments with respect to @p command as passed via @p args.
  *
  * @returns a @c FlagStore containing the parsed result or std::nullopt on failure.
  */
-std::optional<FlagStore> parse(Command const& _command, StringViewList const& _args);
+std::optional<FlagStore> parse(Command const& command, StringViewList const& args);
 
 /**
- * Parses the command line arguments with respect to @p _command as passed via (_argc, _argv) suitable
+ * Parses the command line arguments with respect to @p command as passed via (argc, argv) suitable
  * for a general main() functions's argc and argv.
  *
  * @returns a @c FlagStore containing the parsed result or std::nullopt on failure.
  */
-std::optional<FlagStore> parse(Command const& _command, int _argc, char const* const* _argv);
+std::optional<FlagStore> parse(Command const& command, int argc, char const* const* argv);
 
 enum class HelpElement
 {
@@ -182,27 +182,27 @@ struct HelpStyle // TODO: maybe call HelpDisplayStyle?
 /**
  * Constructs a usage text suitable for printing out the command usage syntax in terminals.
  *
- * @param _command      The command to construct the usage text for.
- * @param _style        Determines how to format and colorize the output string.
- * @param _margin       Number of characters to write at most per line.
- * @param _cmdPrefix    Some text to prepend in front of each generated line in the output.
+ * @param command      The command to construct the usage text for.
+ * @param style        Determines how to format and colorize the output string.
+ * @param margin       Number of characters to write at most per line.
+ * @param cmdPrefix    Some text to prepend in front of each generated line in the output.
  */
-std::string usageText(Command const& _command,
-                      HelpStyle const& _style,
-                      unsigned _margin,
-                      std::string const& _cmdPrefix = {});
+std::string usageText(Command const& command,
+                      HelpStyle const& style,
+                      unsigned margin,
+                      std::string const& cmdPrefix = {});
 
 /**
  * Constructs a help text suitable for printing out the command usage syntax in terminals.
  *
- * @param _command      The command to construct the usage text for.
- * @param _style        Determines how to format and colorize the output string.
- * @param _margin       Number of characters to write at most per line.
+ * @param command      The command to construct the usage text for.
+ * @param style        Determines how to format and colorize the output string.
+ * @param margin       Number of characters to write at most per line.
  */
-std::string helpText(Command const& _command, HelpStyle const& _style, unsigned _margin);
+std::string helpText(Command const& command, HelpStyle const& style, unsigned margin);
 
 // Throw if Command is not well defined.
-void validate(Command const& _command);
+void validate(Command const& command);
 
 namespace about
 {
@@ -219,9 +219,9 @@ namespace about
         return instance;
     }
 
-    inline void registerProjects(Project _project)
+    inline void registerProjects(Project project)
     {
-        store().emplace_back(_project);
+        store().emplace_back(project);
         using crispy::toLower;
         std::sort(store().begin(), store().end(), [](auto const& a, auto const& b) {
             return toLower(a.title) < toLower(b.title);
@@ -229,10 +229,10 @@ namespace about
     }
 
     template <typename... Args>
-    void registerProjects(Project&& _project0, Args&&... _more)
+    void registerProjects(Project&& project0, Args&&... more)
     {
-        store().emplace_back(_project0);
-        registerProjects(std::forward<Args>(_more)...);
+        store().emplace_back(project0);
+        registerProjects(std::forward<Args>(more)...);
     }
 } // namespace about
 
@@ -249,18 +249,18 @@ struct formatter<crispy::cli::Value>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(crispy::cli::Value const& _value, FormatContext& ctx)
+    auto format(crispy::cli::Value const& value, FormatContext& ctx)
     {
-        if (std::holds_alternative<bool>(_value))
-            return fmt::format_to(ctx.out(), "{}", std::get<bool>(_value));
-        else if (std::holds_alternative<int>(_value))
-            return fmt::format_to(ctx.out(), "{}", std::get<int>(_value));
-        else if (std::holds_alternative<unsigned>(_value))
-            return fmt::format_to(ctx.out(), "{}", std::get<unsigned>(_value));
-        else if (std::holds_alternative<double>(_value))
-            return fmt::format_to(ctx.out(), "{}", std::get<double>(_value));
-        else if (std::holds_alternative<std::string>(_value))
-            return fmt::format_to(ctx.out(), "{}", std::get<std::string>(_value));
+        if (std::holds_alternative<bool>(value))
+            return fmt::format_to(ctx.out(), "{}", std::get<bool>(value));
+        else if (std::holds_alternative<int>(value))
+            return fmt::format_to(ctx.out(), "{}", std::get<int>(value));
+        else if (std::holds_alternative<unsigned>(value))
+            return fmt::format_to(ctx.out(), "{}", std::get<unsigned>(value));
+        else if (std::holds_alternative<double>(value))
+            return fmt::format_to(ctx.out(), "{}", std::get<double>(value));
+        else if (std::holds_alternative<std::string>(value))
+            return fmt::format_to(ctx.out(), "{}", std::get<std::string>(value));
         else
             return fmt::format_to(ctx.out(), "?");
         // return fmt::format_to(ctx.out(), "{}..{}", range.from, range.to);

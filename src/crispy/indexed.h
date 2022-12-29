@@ -22,15 +22,15 @@ namespace crispy
 namespace impl
 { // {{{
     template <typename Container, typename Index>
-    struct indexed
+    struct indexed // NOLINT(readability-identifier-naming)
     {
         using container_type = std::remove_const_t<std::remove_reference_t<Container>>;
 
         Container container;
         Index start;
 
-        struct iterator
-        { // {{{
+        struct iterator // NOLINT(readability-identifier-naming)
+        {               // {{{
             using inner_type = decltype(std::declval<container_type>().begin());
             typename container_type::iterator iter;
             Index index = 0;
@@ -54,8 +54,8 @@ namespace impl
             constexpr bool operator!=(const iterator& rhs) const noexcept { return iter != rhs.iter; }
         };
         // }}}
-        struct const_iterator
-        { // {{{
+        struct const_iterator // NOLINT(readability-identifier-naming)
+        {                     // {{{
             typename container_type::const_iterator iter;
             Index index = 0;
 
@@ -88,12 +88,12 @@ namespace impl
 } // namespace impl
 
 template <typename Container, typename Index = std::size_t>
-constexpr auto indexed(Container&& c, Index _start = 0)
+constexpr auto indexed(Container&& c, Index start = 0)
 {
     if constexpr (std::is_const_v<Container>)
-        return std::add_const_t<impl::indexed<Container, Index>> { std::forward<Container>(c), _start };
+        return std::add_const_t<impl::indexed<Container, Index>> { std::forward<Container>(c), start };
     else
-        return impl::indexed<Container, Index> { std::forward<Container>(c), _start };
+        return impl::indexed<Container, Index> { std::forward<Container>(c), start };
 }
 
 } // namespace crispy

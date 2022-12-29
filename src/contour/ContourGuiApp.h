@@ -40,7 +40,6 @@ class ContourGuiApp: public ContourApp
 {
   public:
     ContourGuiApp();
-    ~ContourGuiApp() override;
 
     static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(ContourApp::instance()); }
 

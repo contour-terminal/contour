@@ -48,8 +48,8 @@ class Sink;
 class SourceLocation
 {
   public:
-    SourceLocation(char const* _filename, int _line, char const* _functionName) noexcept:
-        fileName_ { _filename }, line_ { _line }, functionName_ { _functionName }
+    SourceLocation(char const* filename, int line, char const* functionName) noexcept:
+        fileName_ { filename }, line_ { line }, functionName_ { functionName }
     {
     }
 
@@ -174,7 +174,7 @@ class Category
         return MessageBuilder(*this, location);
     }
 
-    static std::string default_formatter(MessageBuilder const& _message);
+    static std::string defaultFormatter(MessageBuilder const& message);
 
   private:
     std::string_view _name;
@@ -193,10 +193,10 @@ class Sink
   public:
     using Writer = std::function<void(std::string_view const&)>;
 
-    Sink(bool _enabled, Writer _writer): enabled_ { _enabled }, writer_ { std::move(_writer) } {}
+    Sink(bool enabled, Writer writer): enabled_ { enabled }, writer_ { std::move(writer) } {}
 
-    Sink(bool _enabled, std::ostream& _output):
-        Sink(_enabled, [out = &_output](std::string_view text) {
+    Sink(bool enabled, std::ostream& output):
+        Sink(enabled, [out = &output](std::string_view text) {
             *out << text;
             out->flush();
         })
@@ -211,10 +211,10 @@ class Sink
     {
     }
 
-    void set_writer(Writer _writer);
+    void set_writer(Writer writer);
 
     /// Writes given built message to this sink.
-    void write(MessageBuilder const& _message);
+    void write(MessageBuilder const& message);
 
     void set_enabled(bool enabled) { enabled_ = enabled; }
 
@@ -225,7 +225,7 @@ class Sink
         return instance;
     }
 
-    static inline Sink& error_console()
+    static inline Sink& error_console() // NOLINT(readability-identifier-naming)
     {
         static auto instance = Sink(true, std::cerr);
         return instance;
@@ -238,7 +238,7 @@ class Sink
 
 std::vector<std::reference_wrapper<Category>>& get();
 Category* get(std::string_view categoryName);
-void set_sink(Sink& _sink);
+void set_sink(Sink& sink);
 void set_formatter(Category::Formatter const& f);
 void enable(std::string_view categoryName, bool enabled = true);
 void disable(std::string_view categoryName);
@@ -355,24 +355,24 @@ inline Category::~Category()
     }
 }
 
-inline std::string Category::default_formatter(MessageBuilder const& _message)
+inline std::string Category::defaultFormatter(MessageBuilder const& message)
 {
     return fmt::format("[{}:{}:{}]: {}\n",
-                       _message.category().name(),
-                       _message.location().file_name(),
-                       _message.location().line(),
-                       _message.text());
+                       message.category().name(),
+                       message.location().file_name(),
+                       message.location().line(),
+                       message.text());
 }
 
-inline void Sink::write(MessageBuilder const& _message)
+inline void Sink::write(MessageBuilder const& message)
 {
-    if (enabled_ && _message.category().is_enabled())
-        writer_(_message.message());
+    if (enabled_ && message.category().is_enabled())
+        writer_(message.message());
 }
 
-inline void Sink::set_writer(Writer _writer)
+inline void Sink::set_writer(Writer writer)
 {
-    writer_ = std::move(_writer);
+    writer_ = std::move(writer);
 }
 // }}}
 

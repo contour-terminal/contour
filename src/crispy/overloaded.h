@@ -14,7 +14,7 @@
 #pragma once
 
 template <class... Ts>
-struct overloaded: Ts...
+struct overloaded: Ts... // NOLINT(readability-identifier-naming)
 {
     using Ts::operator()...;
 };

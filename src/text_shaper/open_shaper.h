@@ -30,29 +30,29 @@ class font_locator;
 class open_shaper: public shaper
 {
   public:
-    explicit open_shaper(DPI _dpi, font_locator& _locator);
+    explicit open_shaper(DPI dpi, font_locator& locator);
 
-    void set_dpi(DPI _dpi) override;
+    void set_dpi(DPI dpi) override;
 
-    void set_locator(font_locator& _locator) override;
+    void set_locator(font_locator& locator) override;
 
     void clear_cache() override;
 
-    [[nodiscard]] std::optional<font_key> load_font(font_description const& _description,
-                                                    font_size _size) override;
+    [[nodiscard]] std::optional<font_key> load_font(font_description const& description,
+                                                    font_size size) override;
 
-    [[nodiscard]] font_metrics metrics(font_key _key) const override;
+    [[nodiscard]] font_metrics metrics(font_key key) const override;
 
-    void shape(font_key _font,
-               std::u32string_view _text,
-               gsl::span<unsigned> _clusters,
-               unicode::Script _script,
-               unicode::PresentationStyle _presentation,
-               shape_result& _result) override;
+    void shape(font_key font,
+               std::u32string_view text,
+               gsl::span<unsigned> clusters,
+               unicode::Script script,
+               unicode::PresentationStyle presentation,
+               shape_result& result) override;
 
-    [[nodiscard]] std::optional<glyph_position> shape(font_key _font, char32_t _codepoint) override;
+    [[nodiscard]] std::optional<glyph_position> shape(font_key font, char32_t codepoint) override;
 
-    [[nodiscard]] std::optional<rasterized_glyph> rasterize(glyph_key _glyph, render_mode _mode) override;
+    [[nodiscard]] std::optional<rasterized_glyph> rasterize(glyph_key glyph, render_mode mode) override;
 
   private:
     struct Private;

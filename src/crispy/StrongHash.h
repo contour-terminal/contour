@@ -35,16 +35,16 @@ inline __m128i _mm_aesimc_si128(__m128i a) noexcept
 {
     return vreinterpretq_m128i_u8(vaesimcq_u8(vreinterpretq_u8_m128i(a)));
 }
-inline __m128i _mm_aesdec_si128(__m128i a, __m128i RoundKey) noexcept
+inline __m128i _mm_aesdec_si128(__m128i a, __m128i roundKey) noexcept
 {
     return vreinterpretq_m128i_u8(
-        vaesimcq_u8(vaesdq_u8(vreinterpretq_u8_m128i(a), vdupq_n_u8(0)) ^ vreinterpretq_u8_m128i(RoundKey)));
+        vaesimcq_u8(vaesdq_u8(vreinterpretq_u8_m128i(a), vdupq_n_u8(0)) ^ vreinterpretq_u8_m128i(roundKey)));
 }
 
-inline __m128i _mm_aesdeclast_si128(__m128i a, __m128i RoundKey) noexcept
+inline __m128i _mm_aesdeclast_si128(__m128i a, __m128i roundKey) noexcept
 {
     return vreinterpretq_m128i_u8(vaesdq_u8(vreinterpretq_u8_m128i(a), vdupq_n_u8(0))
-                                  ^ vreinterpretq_u8_m128i(RoundKey));
+                                  ^ vreinterpretq_u8_m128i(roundKey));
 }
 #endif
 
@@ -55,6 +55,7 @@ struct StrongHash
 {
     // some random seed
     static constexpr std::array<unsigned char, 16> DefaultSeed = {
+        // NOLINT(readability-identifier-naming)
         114, 188, 209, 2, 232, 4, 178, 176, 240, 216, 201, 127, 40, 41, 95, 143,
     };
 

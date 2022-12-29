@@ -24,11 +24,11 @@ using namespace std;
 using namespace std::string_view_literals;
 
 // template <typename A, typename B>
-// void dump_it(crispy::LRUCache<A, B> const& cache, std::string_view _header)
+// void dump_it(crispy::LRUCache<A, B> const& cache, std::string_view header)
 // {
 //     std::ostream& out = std::cout;
 //
-//     out << fmt::format("LRUCache({}/{}): {}\n", cache.size(), cache.capacity(), _header);
+//     out << fmt::format("LRUCache({}/{}): {}\n", cache.size(), cache.capacity(), header);
 //     for (typename crispy::LRUCache<A, B>::Item const& item: cache)
 //     {
 //         out << fmt::format("{}: {}\n", item.key, item.value);
@@ -37,14 +37,14 @@ using namespace std::string_view_literals;
 // }
 
 template <typename T>
-static std::string join(std::vector<T> const& _list, std::string_view _delimiter = " "sv)
+static std::string join(std::vector<T> const& list, std::string_view delimiter = " "sv)
 {
     std::string s;
-    for (size_t i = 0; i < _list.size(); ++i)
+    for (size_t i = 0; i < list.size(); ++i)
     {
         if (i)
-            s += _delimiter;
-        s += fmt::format("{}", _list[i]);
+            s += delimiter;
+        s += fmt::format("{}", list[i]);
     }
     return s;
 }
