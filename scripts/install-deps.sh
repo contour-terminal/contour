@@ -398,7 +398,7 @@ install_deps_darwin()
         freetype \
         harfbuzz \
         pkg-config \
-        qt@5 \
+        qt \
         range-v3 \
         yaml-cpp
 }

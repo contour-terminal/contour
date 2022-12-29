@@ -212,16 +212,16 @@ jobs:
     runs-on: macos-11
     steps:
       - uses: actions/checkout@v3
-      - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: ccache-osx_qt6
-          max-size: 256M
       - name: set variables
         id: set_vars
         run: ./scripts/ci-set-vars.sh
         env:
           REPOSITORY: ${{ github.event.repository.name }}
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: ccache-osx_qt6
+          max-size: 256M
       - name: "Install dependencies"
         run: |
           set -ex
@@ -233,7 +233,7 @@ jobs:
       - name: "Generate build files"
         run: |
           cmake . \
-                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_BUILD_TYPE=RelWithDebInfo \
                 -DCONTOUR_BUILD_WITH_QT6=ON \
                 -B build/
       - name: "Build"
@@ -244,20 +244,20 @@ jobs:
         run: ./build/src/vtparser/vtparser_test
       - name: "test: libterminal"
         run: ./build/src/vtbackend/terminal_test
-      - name: "Create Package(s)"
-        run: |
-          set -ex
-          cd build
-          sudo cpack -G "DragNDrop;ZIP"
-          ls -hl
-          BASENAME="contour-${{ steps.set_vars.outputs.version }}-osx"
-          mv -vf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.zip" "../${BASENAME}.zip"
-          mv -vf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "../${BASENAME}.dmg"
-      - name: upload to artifact store (DMG)
-        uses: actions/upload-artifact@v2
-        with:
-          path: contour-${{ steps.set_vars.outputs.version }}-osx.dmg
-          retention-days: 7
+      # - name: "Create Package(s)"
+      #   run: |
+      #     set -ex
+      #     cd build
+      #     sudo cpack -G "DragNDrop"
+      #     ls -hl
+      #     BASENAME="contour-${{ steps.set_vars.outputs.version }}-osx"
+      #     mv -vf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.zip" "../${BASENAME}.zip"
+      #     mv -vf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "../${BASENAME}.dmg"
+      # - name: upload to artifact store (DMG)
+      #   uses: actions/upload-artifact@v2
+      #   with:
+      #     path: contour-${{ steps.set_vars.outputs.version }}-osx.dmg
+      #     retention-days: 7
 
   windows:
     name: "Windows"

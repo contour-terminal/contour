@@ -213,6 +213,8 @@ if(WIN32)
             PATTERN "*.dll"
     )
 elseif(APPLE)
+    # TODO: include(DeployQt)
+    # TODO: macdeployqt(contour)
     include(GNUInstallDirs)
     set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.icns")
 
