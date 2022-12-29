@@ -437,7 +437,7 @@ main()
             ;;
         debian)
             install_deps_ubuntu
-            fetch_and_unpack_fmtlib        
+            fetch_and_unpack_fmtlib
             ;;
         Darwin)
             install_deps_darwin
