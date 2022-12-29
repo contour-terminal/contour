@@ -44,6 +44,34 @@ jobs:
         check-path: 'src'
         exclude-regex: 'crispy/sse2neon.h'
 
+  check_clang_tidy:
+    name: "Check C++ clang-tidy"
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v2
+    - name: Updating APT package database
+      run: sudo apt -q update && sudo apt upgrade -y
+    - name: Installing xmllint for ci-set-vars
+      run: sudo apt -qy install libxml2-utils
+    - name: set environment variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - name: "install dependencies"
+      run: sudo ./scripts/install-deps.sh
+    - name: "Post-fix embedded dependency permissions."
+      run: sudo find _deps/sources -exec chown $UID {} \;
+    - uses: HorstBaerbel/action-clang-tidy@1.2
+      name: Run clang-tidy
+      # These are optional (defaults displayed)
+      with:
+        scandir: '.'
+        builddir: 'build'
+        excludedirs: ''
+        extensions: 'cpp,h,hpp'
+        cmakeoptions: ''
+
   editorconfig:
     name: "Check editorconfig"
     runs-on: ubuntu-20.04
