@@ -30,20 +30,20 @@ class BackgroundRenderer: public Renderable
   public:
     /// Constructs the decoration renderer.
     ///
-    /// @param _gridMetrics
-    /// @param _defaultColor
-    /// @param _renderTarget
-    BackgroundRenderer(GridMetrics const& _gridMetrics, RGBColor const& _defaultColor);
+    /// @param gridMetrics
+    /// @param defaultColor
+    /// @param renderTarget
+    BackgroundRenderer(GridMetrics const& gridMetrics, RGBColor const& defaultColor);
 
     void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
 
-    constexpr void setOpacity(float _value) noexcept { opacity_ = static_cast<uint8_t>(_value * 255.f); }
+    constexpr void setOpacity(float value) noexcept { _opacity = static_cast<uint8_t>(value * 255.f); }
 
     // TODO: pass background color directly (instead of whole grid cell),
     // because there is no need to detect bg/fg color more than once per grid cell!
 
     /// Queues up a render with given background
-    void renderCell(RenderCell const& _cell);
+    void renderCell(RenderCell const& cell);
 
     void renderLine(RenderLine const& line);
 
@@ -51,8 +51,8 @@ class BackgroundRenderer: public Renderable
 
   private:
     // private data
-    RGBColor const& defaultColor_;
-    uint8_t opacity_ = 255;
+    RGBColor const& _defaultColor;
+    uint8_t _opacity = 255;
 };
 
 } // namespace terminal::rasterizer

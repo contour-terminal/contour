@@ -51,10 +51,10 @@ enum class Decorator
     Encircle,
 };
 
-std::optional<Decorator> to_decorator(std::string const& _value) noexcept;
+std::optional<Decorator> to_decorator(std::string const& value) noexcept;
 
 // {{{ impl
-inline std::optional<Decorator> to_decorator(std::string const& _value) noexcept
+inline std::optional<Decorator> to_decorator(std::string const& value) noexcept
 {
     using std::pair;
     auto constexpr mappings = std::array {
@@ -70,7 +70,7 @@ inline std::optional<Decorator> to_decorator(std::string const& _value) noexcept
     };
 
     for (auto const& mapping: mappings)
-        if (mapping.first == _value)
+        if (mapping.first == value)
             return { mapping.second };
 
     return std::nullopt;

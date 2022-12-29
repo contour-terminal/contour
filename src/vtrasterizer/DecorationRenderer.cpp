@@ -59,10 +59,10 @@ namespace
     };
 }
 
-DecorationRenderer::DecorationRenderer(GridMetrics const& _gridMetrics,
-                                       Decorator _hyperlinkNormal,
-                                       Decorator _hyperlinkHover):
-    Renderable { _gridMetrics }, hyperlinkNormal_ { _hyperlinkNormal }, hyperlinkHover_ { _hyperlinkHover }
+DecorationRenderer::DecorationRenderer(GridMetrics const& gridMetrics,
+                                       Decorator hyperlinkNormal,
+                                       Decorator hyperlinkHover):
+    Renderable { gridMetrics }, _hyperlinkNormal { hyperlinkNormal }, _hyperlinkHover { hyperlinkHover }
 {
 }
 
@@ -113,14 +113,14 @@ void DecorationRenderer::renderLine(RenderLine const& line)
                              line.textAttributes.decorationColor);
 }
 
-void DecorationRenderer::renderCell(RenderCell const& _cell)
+void DecorationRenderer::renderCell(RenderCell const& cell)
 {
     for (auto const& mapping: CellFlagDecorationMappings)
-        if (_cell.attributes.flags & mapping.first)
+        if (cell.attributes.flags & mapping.first)
             renderDecoration(mapping.second,
-                             _gridMetrics.mapBottomLeft(_cell.position),
+                             _gridMetrics.mapBottomLeft(cell.position),
                              ColumnCount(1),
-                             _cell.attributes.decorationColor);
+                             cell.attributes.decorationColor);
 }
 
 auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocation tileLocation)

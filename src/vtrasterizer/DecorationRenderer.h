@@ -31,37 +31,39 @@ class DecorationRenderer: public Renderable
   public:
     /// Constructs the decoration renderer.
     ///
-    /// @param _commandListener
-    /// @param _monochromeTextureAtlas
-    /// @param _gridMetrics
-    DecorationRenderer(GridMetrics const& _gridMetrics,
-                       Decorator _hyperlinkNormal,
-                       Decorator _hyperlinkHover);
+    /// @param commandListener
+    /// @param monochromeTextureAtlas
+    /// @param gridMetrics
+    DecorationRenderer(GridMetrics const& gridMetrics, Decorator hyperlinkNormal, Decorator hyperlinkHover);
 
     void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
     void setTextureAtlas(TextureAtlas& atlas) override;
     void clearCache() override;
     void inspect(std::ostream& output) const override;
 
-    void setHyperlinkDecoration(Decorator _normal, Decorator _hover)
+    void setHyperlinkDecoration(Decorator normal, Decorator hover)
     {
-        hyperlinkNormal_ = _normal;
-        hyperlinkHover_ = _hover;
+        _hyperlinkNormal = normal;
+        _hyperlinkHover = hover;
     }
 
-    void renderCell(RenderCell const& _cell);
+    void renderCell(RenderCell const& cell);
     void renderLine(RenderLine const& line);
 
-    void renderDecoration(Decorator _decoration,
-                          crispy::Point _pos,
+    void renderDecoration(Decorator decoration,
+                          crispy::Point pos,
                           ColumnCount columnCount,
-                          RGBColor const& _color);
+                          RGBColor const& color);
 
-    constexpr Decorator hyperlinkNormal() const noexcept { return hyperlinkNormal_; }
-    constexpr Decorator hyperlinkHover() const noexcept { return hyperlinkHover_; }
+    [[nodiscard]] constexpr Decorator hyperlinkNormal() const noexcept { return _hyperlinkNormal; }
+    [[nodiscard]] constexpr Decorator hyperlinkHover() const noexcept { return _hyperlinkHover; }
 
-    constexpr int underlineThickness() const noexcept { return _gridMetrics.underline.thickness; }
-    constexpr int underlinePosition() const noexcept { return _gridMetrics.underline.position; }
+    [[nodiscard]] constexpr int underlineThickness() const noexcept
+    {
+        return _gridMetrics.underline.thickness;
+    }
+
+    [[nodiscard]] constexpr int underlinePosition() const noexcept { return _gridMetrics.underline.position; }
 
   private:
     void initializeDirectMapping();
@@ -71,8 +73,8 @@ class DecorationRenderer: public Renderable
     // private data members
     //
     DirectMapping _directMapping;
-    Decorator hyperlinkNormal_ = Decorator::DottedUnderline;
-    Decorator hyperlinkHover_ = Decorator::Underline;
+    Decorator _hyperlinkNormal = Decorator::DottedUnderline;
+    Decorator _hyperlinkHover = Decorator::Underline;
 };
 
 } // namespace terminal::rasterizer

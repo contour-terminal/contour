@@ -28,7 +28,7 @@ namespace terminal::rasterizer
 {
 
 ImageRenderer::ImageRenderer(GridMetrics const& gridMetrics, ImageSize cellSize):
-    Renderable { gridMetrics }, cellSize_ { cellSize }
+    Renderable { gridMetrics }, _cellSize { cellSize }
 {
 }
 
@@ -39,13 +39,13 @@ void ImageRenderer::setRenderTarget(RenderTarget& renderTarget,
     clearCache();
 }
 
-void ImageRenderer::setCellSize(ImageSize _cellSize)
+void ImageRenderer::setCellSize(ImageSize cellSize)
 {
-    cellSize_ = _cellSize;
+    _cellSize = cellSize;
     // TODO: recompute rasterized images slices here?
 }
 
-void ImageRenderer::renderImage(crispy::Point _pos, ImageFragment const& fragment)
+void ImageRenderer::renderImage(crispy::Point pos, ImageFragment const& fragment)
 {
     // std::cout << fmt::format("ImageRenderer.renderImage: {}\n", fragment);
 
@@ -54,8 +54,8 @@ void ImageRenderer::renderImage(crispy::Point _pos, ImageFragment const& fragmen
         return;
 
     // clang-format off
-    pendingRenderTilesAboveText_.emplace_back(createRenderTile(atlas::RenderTile::X { _pos.x },
-                                                               atlas::RenderTile::Y { _pos.y },
+    _pendingRenderTilesAboveText.emplace_back(createRenderTile(atlas::RenderTile::X { pos.x },
+                                                               atlas::RenderTile::Y { pos.y },
                                                                RGBAColor::White, *tileAttributes));
     // clang-format on
 }
@@ -69,26 +69,26 @@ void ImageRenderer::onAfterRenderingText()
 {
     // We render here the images that should go above text.
 
-    for (auto& tile: pendingRenderTilesAboveText_)
+    for (auto& tile: _pendingRenderTilesAboveText)
         textureScheduler().renderTile(std::move(tile));
 
-    pendingRenderTilesAboveText_.clear();
+    _pendingRenderTilesAboveText.clear();
 }
 
 void ImageRenderer::beginFrame()
 {
-    assert(pendingRenderTilesAboveText_.empty());
+    assert(_pendingRenderTilesAboveText.empty());
 }
 
 void ImageRenderer::endFrame()
 {
-    if (!pendingRenderTilesAboveText_.empty())
+    if (!_pendingRenderTilesAboveText.empty())
     {
         // In case some image tiles are still pending but no text had to be rendered.
 
-        for (auto& tile: pendingRenderTilesAboveText_)
+        for (auto& tile: _pendingRenderTilesAboveText)
             textureScheduler().renderTile(std::move(tile));
-        pendingRenderTilesAboveText_.clear();
+        _pendingRenderTilesAboveText.clear();
     }
 }
 
@@ -111,14 +111,14 @@ Renderable::AtlasTileAttributes const* ImageRenderer::getOrCreateCachedTileAttri
                                   fragment.data(),
                                   atlas::Format::RGBA,
                                   fragment.rasterizedImage().cellSize(),
-                                  cellSize_,
+                                  _cellSize,
                                   RenderTileAttributes::X { 0 },
                                   RenderTileAttributes::Y { 0 },
                                   FRAGMENT_SELECTOR_IMAGE_BGRA);
         });
 }
 
-void ImageRenderer::discardImage(ImageId /*_imageId*/)
+void ImageRenderer::discardImage(ImageId /*imageId*/)
 {
     // We currently don't really discard.
     // Because the GPU texture atlas is resource-guarded by an LRU hashtable.

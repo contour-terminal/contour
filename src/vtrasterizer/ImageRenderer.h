@@ -61,13 +61,13 @@ class ImageRenderer: public Renderable, public TextRendererEvents
     void clearCache() override;
 
     /// Reconfigures the slicing properties of existing images.
-    void setCellSize(ImageSize _cellSize);
+    void setCellSize(ImageSize cellSize);
 
-    void renderImage(crispy::Point _pos, ImageFragment const& fragment);
+    void renderImage(crispy::Point pos, ImageFragment const& fragment);
 
     /// notify underlying cache that this fragment is not going to be rendered anymore, maybe freeing up some
     /// GPU caches.
-    void discardImage(ImageId _imageId);
+    void discardImage(ImageId imageId);
 
     void inspect(std::ostream& output) const override;
 
@@ -79,11 +79,11 @@ class ImageRenderer: public Renderable, public TextRendererEvents
 
   private:
     AtlasTileAttributes const* getOrCreateCachedTileAttributes(ImageFragment const& fragment);
-    std::vector<atlas::RenderTile> pendingRenderTilesAboveText_;
+    std::vector<atlas::RenderTile> _pendingRenderTilesAboveText;
 
     // private data
     //
-    ImageSize cellSize_;
+    ImageSize _cellSize;
 };
 
 } // namespace terminal::rasterizer

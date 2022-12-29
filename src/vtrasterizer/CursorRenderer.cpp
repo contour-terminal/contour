@@ -51,7 +51,7 @@ namespace
 } // namespace
 
 CursorRenderer::CursorRenderer(GridMetrics const& gridMetrics, CursorShape shape):
-    Renderable { gridMetrics }, shape_ { shape }
+    Renderable { gridMetrics }, _shape { shape }
 {
 }
 
@@ -68,9 +68,9 @@ void CursorRenderer::setTextureAtlas(TextureAtlas& atlas)
     initializeDirectMapping();
 }
 
-void CursorRenderer::setShape(CursorShape _shape)
+void CursorRenderer::setShape(CursorShape shape)
 {
-    shape_ = _shape;
+    _shape = shape;
 }
 
 void CursorRenderer::clearCache()
@@ -175,15 +175,15 @@ auto CursorRenderer::createTileData(CursorShape cursorShape,
     return {};
 }
 
-void CursorRenderer::render(crispy::Point _pos, int _columnWidth, RGBColor _color)
+void CursorRenderer::render(crispy::Point pos, int columnWidth, RGBColor color)
 {
-    for (uint32_t i = 0; i < uint32_t(_columnWidth); ++i)
+    for (uint32_t i = 0; i < uint32_t(columnWidth); ++i)
     {
-        auto const directMappingIndex = toDirectMappingIndex(shape_, _columnWidth, i);
+        auto const directMappingIndex = toDirectMappingIndex(_shape, columnWidth, i);
         auto const tileIndex = _directMapping.toTileIndex(directMappingIndex);
-        auto const x = _pos.x + int(i) * unbox<int>(_gridMetrics.cellSize.width);
+        auto const x = pos.x + int(i) * unbox<int>(_gridMetrics.cellSize.width);
         AtlasTileAttributes const& tileAttributes = _textureAtlas->directMapped(tileIndex);
-        renderTile({ int(x) }, { _pos.y }, _color, tileAttributes);
+        renderTile({ int(x) }, { pos.y }, color, tileAttributes);
     }
 }
 

@@ -124,7 +124,7 @@ namespace detail
             Crossing = 0x03
         };
 
-        void drawArc(atlas::Buffer& _buffer, ImageSize _imageSize, unsigned _thickness, Arc _arc)
+        void drawArc(atlas::Buffer& buffer, ImageSize imageSize, unsigned thickness, Arc arc)
         {
             // Used to record all the pixel coordinates that have been written to per scanline.
             //
@@ -136,40 +136,40 @@ namespace detail
             // This is needed in order to fill the gaps.
             using GapFills = std::vector<std::vector<unsigned>>;
             GapFills gaps;
-            gaps.resize(unbox<size_t>(_imageSize.height));
+            gaps.resize(unbox<size_t>(imageSize.height));
 
-            auto const w = unbox<unsigned>(_imageSize.width);
-            auto const h = unbox<unsigned>(_imageSize.height);
+            auto const w = unbox<unsigned>(imageSize.width);
+            auto const h = unbox<unsigned>(imageSize.height);
 
-            // fmt::print("{}.drawArc: size={}\n", _arc, _imageSize);
-            auto const putpixel = [&](int x, int y, uint8_t _alpha = 0xFFu) {
+            // fmt::print("{}.drawArc: size={}\n", arc, imageSize);
+            auto const putpixel = [&](int x, int y, uint8_t alpha = 0xFFu) {
                 auto const fy = clamp((unsigned) y, 0u, h - 1);
                 auto const fx = clamp((unsigned) x, 0u, w - 1);
-                _buffer[fy * w + fx] = _alpha;
+                buffer[fy * w + fx] = alpha;
                 gaps[fy].push_back(fx);
             };
 
             // inner circle
             drawEllipseArc(putpixel,
-                           _imageSize,
+                           imageSize,
                            crispy::Point { // radius
-                                           unbox<int>(_imageSize.width) / 2 - int(_thickness) / 2,
-                                           unbox<int>(_imageSize.height) / 2 - int(_thickness) / 2 },
-                           _arc);
+                                           unbox<int>(imageSize.width) / 2 - int(thickness) / 2,
+                                           unbox<int>(imageSize.height) / 2 - int(thickness) / 2 },
+                           arc);
 
             // outer circle
             drawEllipseArc(putpixel,
-                           _imageSize,
+                           imageSize,
                            crispy::Point { // radius
-                                           unbox<int>(_imageSize.width) / 2 + int(_thickness) / 2 - 1,
-                                           unbox<int>(_imageSize.height) / 2 + int(_thickness) / 2 - 1 },
-                           _arc);
+                                           unbox<int>(imageSize.width) / 2 + int(thickness) / 2 - 1,
+                                           unbox<int>(imageSize.height) / 2 + int(thickness) / 2 - 1 },
+                           arc);
 
             // Close arc at open ends to filling works.
-            // bool const isLeft = _arc == Arc::TopLeft || _arc == Arc::BottomLeft;
-            // auto const xCorner = isLeft ? unbox<unsigned>(_imageSize.width) : 0u;
-            // for (auto const i: iota(0, _thickness))
-            //     gaps.at(unbox<size_t>(_imageSize.height) / 2 - _thickness/2 + i).push_back(xCorner);
+            // bool const isLeft = arc == Arc::TopLeft || arc == Arc::BottomLeft;
+            // auto const xCorner = isLeft ? unbox<unsigned>(imageSize.width) : 0u;
+            // for (auto const i: iota(0, thickness))
+            //     gaps.at(unbox<size_t>(imageSize.height) / 2 - thickness/2 + i).push_back(xCorner);
 
             // fill gap
             for (size_t y = 0; y < gaps.size(); ++y)
@@ -178,7 +178,7 @@ namespace detail
                 {
                     sort(begin(gap), end(gap));
                     for (auto const xi: iota(gap.front(), gap.back()))
-                        _buffer.at(y * unbox<size_t>(_imageSize.width) + xi) = 0xFF;
+                        buffer.at(y * unbox<size_t>(imageSize.width) + xi) = 0xFF;
                 }
             }
         }
@@ -271,41 +271,41 @@ namespace detail
             Diagonal diagonal_ = NoDiagonal;
             Arc arc_ = NoArc;
 
-            [[nodiscard]] constexpr Box up(Line _value = Light)
+            [[nodiscard]] constexpr Box up(Line value = Light)
             {
                 Box b(*this);
-                b.up_ = _value;
+                b.up_ = value;
                 return b;
             }
-            [[nodiscard]] constexpr Box right(Line _value = Light)
+            [[nodiscard]] constexpr Box right(Line value = Light)
             {
                 Box b(*this);
-                b.right_ = _value;
+                b.right_ = value;
                 return b;
             }
-            [[nodiscard]] constexpr Box down(Line _value = Light)
+            [[nodiscard]] constexpr Box down(Line value = Light)
             {
                 Box b(*this);
-                b.down_ = _value;
+                b.down_ = value;
                 return b;
             }
-            [[nodiscard]] constexpr Box left(Line _value = Light)
+            [[nodiscard]] constexpr Box left(Line value = Light)
             {
                 Box b(*this);
-                b.left_ = _value;
+                b.left_ = value;
                 return b;
             }
-            [[nodiscard]] constexpr Box diagonal(Diagonal _value)
+            [[nodiscard]] constexpr Box diagonal(Diagonal value)
             {
                 Box b(*this);
-                b.diagonal_ = _value;
+                b.diagonal_ = value;
                 return b;
             }
 
-            [[nodiscard]] constexpr Box arc(Arc _value)
+            [[nodiscard]] constexpr Box arc(Arc value)
             {
                 Box b(*this);
-                b.arc_ = _value;
+                b.arc_ = value;
                 return b;
             }
 
@@ -319,30 +319,30 @@ namespace detail
                 return get_dashed(up_, down_);
             }
 
-            [[nodiscard]] constexpr Box vertical(Line _value = Light)
+            [[nodiscard]] constexpr Box vertical(Line value = Light)
             {
                 Box b(*this);
-                b.up_ = _value;
-                b.down_ = _value;
+                b.up_ = value;
+                b.down_ = value;
                 return b;
             }
 
-            [[nodiscard]] constexpr Box horizontal(Line _value = Light)
+            [[nodiscard]] constexpr Box horizontal(Line value = Light)
             {
                 Box b(*this);
-                b.left_ = _value;
-                b.right_ = _value;
+                b.left_ = value;
+                b.right_ = value;
                 return b;
             }
 
           private:
-            [[nodiscard]] constexpr optional<pair<uint8_t, Thickness>> get_dashed(Line _a,
-                                                                                  Line _b) const noexcept
+            [[nodiscard]] constexpr optional<pair<uint8_t, Thickness>> get_dashed(Line a,
+                                                                                  Line b) const noexcept
             {
-                if (_a != _b)
+                if (a != b)
                     return nullopt;
 
-                switch (_a)
+                switch (a)
                 {
                     case detail::Light2: return pair { 2, Thickness::Light };
                     case detail::Light3: return pair { 3, Thickness::Light };
