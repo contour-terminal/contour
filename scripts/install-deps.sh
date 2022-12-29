@@ -432,8 +432,12 @@ main()
         pop)
             install_deps_popos
             ;;
-        ubuntu|neon|debian)
+        ubuntu|neon)
             install_deps_ubuntu
+            ;;
+        debian)
+            install_deps_ubuntu
+            fetch_and_unpack_fmtlib        
             ;;
         Darwin)
             install_deps_darwin
