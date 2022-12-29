@@ -61,7 +61,7 @@ struct boxed
     using element_type = T;
 
     constexpr boxed(): value {} {}
-    constexpr explicit boxed(T _value) noexcept: value { _value } {}
+    constexpr explicit boxed(T value) noexcept: value { value } {}
     constexpr boxed(boxed const&) = default;
     constexpr boxed& operator=(boxed const&) = default;
     constexpr boxed(boxed&&) noexcept = default;
@@ -83,12 +83,12 @@ struct boxed
     }
 
     template <typename Source>
-    constexpr static boxed<T, Tag> cast_from(Source _value)
+    constexpr static boxed<T, Tag> cast_from(Source value) // NOLINT(readability-identifier-naming)
     {
         if constexpr (is_boxed<Source>)
-            return boxed<T, Tag> { static_cast<T>(_value.value) };
+            return boxed<T, Tag> { static_cast<T>(value.value) };
         else
-            return boxed<T, Tag>(static_cast<T>(_value));
+            return boxed<T, Tag>(static_cast<T>(value));
     }
 };
 
@@ -140,13 +140,13 @@ namespace helper
     template <typename A>
     struct is_boxed
     {
-        constexpr static bool value = false;
+        constexpr static bool value = false; // NOLINT(readability-identifier-naming)
     };
 
     template <typename A, typename B>
     struct is_boxed<crispy::boxed<A, B>>
     {
-        constexpr static bool value = true;
+        constexpr static bool value = true; // NOLINT(readability-identifier-naming)
     };
 } // namespace helper
 
@@ -174,6 +174,8 @@ struct numeric_limits<crispy::boxed<A, B>>
     using value_type = A;
     using Boxed = crispy::boxed<A, B>;
 
+    // clang-format off
+    // NOLINTBEGIN(readability-identifier-naming)
     static Boxed min() noexcept { return Boxed { std::numeric_limits<A>::min() }; }
     static Boxed max() noexcept { return Boxed { std::numeric_limits<A>::max() }; }
     static Boxed lowest() noexcept { return Boxed { std::numeric_limits<A>::lowest() }; }
@@ -181,11 +183,10 @@ struct numeric_limits<crispy::boxed<A, B>>
     static Boxed round_error() noexcept { return Boxed { std::numeric_limits<A>::round_error() }; }
     static Boxed infinity() noexcept { return Boxed { std::numeric_limits<A>::infinity() }; }
     static Boxed quiet_NaN() noexcept { return Boxed { std::numeric_limits<A>::quiet_NaN() }; }
-    static Boxed signaling_NaN() noexcept
-    {
-        return Boxed { std::numeric_limits<A>::signaling_NaNinfinity() };
-    }
+    static Boxed signaling_NaN() noexcept { return Boxed { std::numeric_limits<A>::signaling_NaNinfinity() }; }
     static Boxed denorm_min() noexcept { return Boxed { std::numeric_limits<A>::denorm_min() }; }
+    // NOLINTEND(readability-identifier-naming)
+    // clang-format on
 };
 } // namespace std
 
@@ -210,9 +211,9 @@ struct formatter<crispy::boxed<A, B>>: formatter<A>
         return ctx.begin();
     }
     template <typename FormatContext>
-    constexpr auto format(crispy::boxed<A, B> _value, FormatContext& ctx)
+    constexpr auto format(crispy::boxed<A, B> value, FormatContext& ctx)
     {
-        return formatter<A>::format(_value.value, ctx);
+        return formatter<A>::format(value.value, ctx);
     }
 };
 } // namespace fmt

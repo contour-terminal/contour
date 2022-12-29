@@ -192,8 +192,8 @@ namespace detail
                 Right
             };
 
-            ImageSize const size {};
-            int const underlinePosition = 1;
+            ImageSize size {};
+            int underlinePosition = 1;
 
             Part part_ = Part::Middle;
             bool filled_ = false;

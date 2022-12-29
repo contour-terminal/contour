@@ -65,47 +65,47 @@ struct EncoderState
 };
 
 template <typename Alphabet, typename Sink>
-constexpr void encode(uint8_t _byte, Alphabet const& alphabet, EncoderState& _state, Sink&& _sink)
+constexpr void encode(uint8_t ch, Alphabet const& alphabet, EncoderState& state, Sink&& sink)
 {
-    _state.pending[_state.modulo] = _byte;
-    if (++_state.modulo != 3)
+    state.pending[state.modulo] = ch;
+    if (++state.modulo != 3)
         return;
 
-    _state.modulo = 0;
-    auto const* input = _state.pending;
-    _sink(alphabet[(input[0] >> 2) & 0x3F],
-          alphabet[static_cast<uint8_t>(((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4))],
-          alphabet[static_cast<uint8_t>(((input[1] & 0x0F) << 2) | ((uint8_t) (input[2] & 0xC0) >> 6))],
-          alphabet[input[2] & 0x3F]);
+    state.modulo = 0;
+    auto const* input = state.pending;
+    sink(alphabet[(input[0] >> 2) & 0x3F],
+         alphabet[static_cast<uint8_t>(((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4))],
+         alphabet[static_cast<uint8_t>(((input[1] & 0x0F) << 2) | ((uint8_t) (input[2] & 0xC0) >> 6))],
+         alphabet[input[2] & 0x3F]);
 }
 
 template <typename Alphabet, typename Sink>
-constexpr void finish(Alphabet const& alphabet, EncoderState& _state, Sink&& _sink)
+constexpr void finish(Alphabet const& alphabet, EncoderState& state, Sink&& sink)
 {
-    if (_state.modulo == 0)
+    if (state.modulo == 0)
         return;
 
-    auto const* input = _state.pending;
+    auto const* input = state.pending;
 
-    switch (_state.modulo)
+    switch (state.modulo)
     {
         case 2: {
-            _sink(
+            sink(
                 alphabet[(input[0] >> 2) & 0x3F],
                 alphabet[static_cast<uint8_t>(((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4))],
                 alphabet[static_cast<uint8_t>(((input[1] & 0x0F) << 2))],
                 '=');
-            _state.modulo = 0;
+            state.modulo = 0;
         }
         break;
         case 1: {
             // clang-format off
-        _sink(alphabet[(input[0] >> 2) & 0x3F],
+        sink(alphabet[(input[0] >> 2) & 0x3F],
               alphabet[static_cast<size_t>(input[0] & 0x03) << 4],
               '=',
               '=');
             // clang-format on
-            _state.modulo = 0;
+            state.modulo = 0;
         }
         break;
         case 0: break;
@@ -113,15 +113,15 @@ constexpr void finish(Alphabet const& alphabet, EncoderState& _state, Sink&& _si
 }
 
 template <typename Sink>
-constexpr void encode(uint8_t _byte, EncoderState& _state, Sink&& _sink)
+constexpr void encode(uint8_t ch, EncoderState& state, Sink&& sink)
 {
-    return encode(_byte, detail::Base64Alphabet, _state, std::forward<Sink>(_sink));
+    return encode(ch, detail::Base64Alphabet, state, std::forward<Sink>(sink));
 }
 
 template <typename Sink>
-constexpr void finish(EncoderState& _state, Sink&& _sink)
+constexpr void finish(EncoderState& state, Sink&& sink)
 {
-    finish(detail::indexmap, _state, std::forward<Sink>(_sink));
+    finish(detail::indexmap, state, std::forward<Sink>(sink));
 }
 
 template <typename Iterator, typename Alphabet>
@@ -151,9 +151,9 @@ std::string encode(Iterator begin, Iterator end)
     return encode(begin, end, detail::Base64Alphabet);
 }
 
-inline std::string encode(std::string_view _value)
+inline std::string encode(std::string_view value)
 {
-    return encode(_value.begin(), _value.end());
+    return encode(value.begin(), value.end());
 }
 
 template <typename Iterator, typename IndexTable>

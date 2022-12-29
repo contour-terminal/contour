@@ -2,7 +2,10 @@
 Checks: >-
   -*,
   bugprone-*,
+  -bugprone-branch-clone,
   -bugprone-easily-swappable-parameters,
+  -bugprone-implicit-widening-of-multiplication-result,
+  -bugprone-reserved-identifier,
   -bugprone-suspicious-include,
   -bugprone-unchecked-optional-access,
   cppcoreguidelines-*,
@@ -19,6 +22,7 @@ Checks: >-
   -cppcoreguidelines-pro-bounds-pointer-arithmetic,
   -cppcoreguidelines-pro-type-const-cast,
   -cppcoreguidelines-pro-type-cstyle-cast,
+  -cppcoreguidelines-pro-type-reinterpret-cast,
   -cppcoreguidelines-pro-type-static-cast-downcast,
   -cppcoreguidelines-pro-type-union-access,
   -cppcoreguidelines-pro-type-vararg,
@@ -79,11 +83,17 @@ CheckOptions:
     value:           '1'
   - key:   readability-identifier-naming.EnumCase
     value: CamelCase
+  - key:   readability-identifier-naming.EnumConstantCase
+    value: CamelCase
+  - key:   readability-identifier-naming.ConstantMemberCase
+    value: CamelCase
   - key:   readability-identifier-naming.ClassCase
     value: CamelCase
   - key:   readability-identifier-naming.ClassMemberCase
     value: camelBack
-  - key:   readability-identifier-naming.ClassMemberPrefix
+  - key:   readability-identifier-naming.PublicMemberPrefix
+    value: ''
+  - key:   readability-identifier-naming.PrivateMemberPrefix
     value: '_'
   - key:   readability-identifier-naming.ClassMethodCase
     value: camelBack

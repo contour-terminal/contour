@@ -44,11 +44,11 @@ auto const inline LocatorLog = logstore::Category("font.locator", "Logs about fo
 namespace detail
 {
     template <typename T>
-    constexpr std::optional<T> try_match(std::string_view _text,
-                                         std::initializer_list<std::pair<std::string_view, T>> _mappings)
+    constexpr std::optional<T> try_match(std::string_view text,
+                                         std::initializer_list<std::pair<std::string_view, T>> mappings)
     {
-        for (auto const& mapping: _mappings)
-            if (mapping.first == _text) // TODO: improvable (ignore case, '_' can be one or many ' ')
+        for (auto const& mapping: mappings)
+            if (mapping.first == text) // TODO: improvable (ignore case, '_' can be one or many ' ')
                 return mapping.second;
 
         return std::nullopt;
@@ -103,11 +103,11 @@ enum class font_weight
     extra_black, // aka. ultrablack
 };
 
-constexpr std::optional<font_weight> make_font_weight(std::string_view _text)
+constexpr std::optional<font_weight> make_font_weight(std::string_view text)
 {
     using namespace std::string_view_literals;
     using std::pair;
-    return detail::try_match(_text,
+    return detail::try_match(text,
                              { pair { "thin"sv, font_weight::thin },
                                pair { "extra light"sv, font_weight::extra_light },
                                pair { "light"sv, font_weight::light },
@@ -129,11 +129,11 @@ enum class font_slant
     oblique
 };
 
-constexpr std::optional<font_slant> make_font_slant(std::string_view _text)
+constexpr std::optional<font_slant> make_font_slant(std::string_view text)
 {
     using namespace std::string_view_literals;
     using std::pair;
-    return detail::try_match(_text,
+    return detail::try_match(text,
                              { pair { "thin"sv, font_slant::normal },
                                pair { "italic"sv, font_slant::italic },
                                pair { "oblique"sv, font_slant::oblique } });
@@ -145,12 +145,12 @@ enum class font_spacing
     mono
 };
 
-constexpr std::optional<font_spacing> make_font_spacing(std::string_view _text)
+constexpr std::optional<font_spacing> make_font_spacing(std::string_view text)
 {
     using namespace std::string_view_literals;
     using std::pair;
     return detail::try_match(
-        _text,
+        text,
         { pair { "proportional"sv, font_spacing::proportional }, pair { "mono"sv, font_spacing::mono } });
 }
 
@@ -183,7 +183,7 @@ struct font_description
     [[nodiscard]] std::string toPattern() const;
 
     // Parses a font pattern of form "familyName" into a font_description."
-    [[nodiscard]] static font_description parse(std::string_view _pattern);
+    [[nodiscard]] static font_description parse(std::string_view pattern);
 };
 
 inline bool operator==(font_description const& a, font_description const& b)
@@ -229,7 +229,7 @@ constexpr bool operator<(font_size a, font_size b) noexcept
 
 struct font_key
 {
-    unsigned value;
+    unsigned value = 0;
 };
 
 constexpr bool operator<(font_key a, font_key b) noexcept
@@ -290,23 +290,23 @@ namespace std
 template <>
 struct hash<text::font_key>
 {
-    std::size_t operator()(text::font_key _key) const noexcept { return _key.value; }
+    std::size_t operator()(text::font_key key) const noexcept { return key.value; }
 };
 
 template <>
 struct hash<text::glyph_index>
 {
-    std::size_t operator()(text::glyph_index _index) const noexcept { return _index.value; }
+    std::size_t operator()(text::glyph_index index) const noexcept { return index.value; }
 };
 
 template <>
 struct hash<text::glyph_key>
 {
-    std::size_t operator()(text::glyph_key const& _key) const noexcept
+    std::size_t operator()(text::glyph_key const& key) const noexcept
     {
-        auto const f = _key.font.value;
-        auto const i = _key.index.value;
-        auto const s = int(_key.size.pt * 10.0);
+        auto const f = key.font.value;
+        auto const i = key.index.value;
+        auto const s = int(key.size.pt * 10.0);
         return std::size_t(((size_t(f) << 32) & 0xFFFF) | ((i << 16) & 0xFFFF) | (s & 0xFF));
     }
 };
@@ -353,9 +353,9 @@ struct formatter<text::font_weight>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(text::font_weight _value, FormatContext& ctx)
+    auto format(text::font_weight value, FormatContext& ctx)
     {
-        switch (_value)
+        switch (value)
         {
             case text::font_weight::thin: return fmt::format_to(ctx.out(), "Thin");
             case text::font_weight::extra_light: return fmt::format_to(ctx.out(), "ExtraLight");
@@ -370,7 +370,7 @@ struct formatter<text::font_weight>
             case text::font_weight::black: return fmt::format_to(ctx.out(), "Black");
             case text::font_weight::extra_black: return fmt::format_to(ctx.out(), "ExtraBlack");
         }
-        return fmt::format_to(ctx.out(), "({})", unsigned(_value));
+        return fmt::format_to(ctx.out(), "({})", unsigned(value));
     }
 };
 
@@ -383,15 +383,15 @@ struct formatter<text::font_slant>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(text::font_slant _value, FormatContext& ctx)
+    auto format(text::font_slant value, FormatContext& ctx)
     {
-        switch (_value)
+        switch (value)
         {
             case text::font_slant::normal: return fmt::format_to(ctx.out(), "Roman");
             case text::font_slant::italic: return fmt::format_to(ctx.out(), "Italic");
             case text::font_slant::oblique: return fmt::format_to(ctx.out(), "Oblique");
         }
-        return fmt::format_to(ctx.out(), "({})", unsigned(_value));
+        return fmt::format_to(ctx.out(), "({})", unsigned(value));
     }
 };
 
@@ -404,14 +404,14 @@ struct formatter<text::font_spacing>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(text::font_spacing _value, FormatContext& ctx)
+    auto format(text::font_spacing value, FormatContext& ctx)
     {
-        switch (_value)
+        switch (value)
         {
             case text::font_spacing::proportional: return fmt::format_to(ctx.out(), "Proportional");
             case text::font_spacing::mono: return fmt::format_to(ctx.out(), "Monospace");
         }
-        return fmt::format_to(ctx.out(), "({})", unsigned(_value));
+        return fmt::format_to(ctx.out(), "({})", unsigned(value));
     }
 };
 
@@ -424,15 +424,15 @@ struct formatter<text::font_description>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(text::font_description const& _desc, FormatContext& ctx)
+    auto format(text::font_description const& desc, FormatContext& ctx)
     {
         return fmt::format_to(ctx.out(),
                               "(family={} weight={} slant={} spacing={}, strict_spacing={})",
-                              _desc.familyName,
-                              _desc.weight,
-                              _desc.slant,
-                              _desc.spacing,
-                              _desc.strict_spacing ? "yes" : "no");
+                              desc.familyName,
+                              desc.weight,
+                              desc.slant,
+                              desc.spacing,
+                              desc.strict_spacing ? "yes" : "no");
     }
 };
 
@@ -445,16 +445,16 @@ struct formatter<text::font_metrics>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(text::font_metrics const& _metrics, FormatContext& ctx)
+    auto format(text::font_metrics const& metrics, FormatContext& ctx)
     {
         return fmt::format_to(ctx.out(),
                               "({}, {}, {}, {}, {}, {})",
-                              _metrics.line_height,
-                              _metrics.advance,
-                              _metrics.ascender,
-                              _metrics.descender,
-                              _metrics.underline_position,
-                              _metrics.underline_thickness);
+                              metrics.line_height,
+                              metrics.advance,
+                              metrics.ascender,
+                              metrics.descender,
+                              metrics.underline_position,
+                              metrics.underline_thickness);
     }
 };
 
@@ -467,9 +467,9 @@ struct formatter<text::font_size>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(text::font_size _size, FormatContext& ctx)
+    auto format(text::font_size size, FormatContext& ctx)
     {
-        return fmt::format_to(ctx.out(), "{}pt", _size.pt);
+        return fmt::format_to(ctx.out(), "{}pt", size.pt);
     }
 };
 
@@ -482,9 +482,9 @@ struct formatter<text::font_key>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(text::font_key _key, FormatContext& ctx)
+    auto format(text::font_key key, FormatContext& ctx)
     {
-        return fmt::format_to(ctx.out(), "{}", _key.value);
+        return fmt::format_to(ctx.out(), "{}", key.value);
     }
 };
 
@@ -497,9 +497,9 @@ struct formatter<text::glyph_index>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(text::glyph_index _value, FormatContext& ctx)
+    auto format(text::glyph_index value, FormatContext& ctx)
     {
-        return fmt::format_to(ctx.out(), "{}", _value.value);
+        return fmt::format_to(ctx.out(), "{}", value.value);
     }
 };
 
@@ -512,18 +512,18 @@ struct formatter<text::glyph_key>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(text::glyph_key const& _key, FormatContext& ctx)
+    auto format(text::glyph_key const& key, FormatContext& ctx)
     {
 #if defined(GLYPH_KEY_DEBUG)
         return fmt::format_to(
             ctx.out(),
             "({}, {}:{}, \"{}\")",
-            _key.size,
-            _key.font,
-            _key.index,
-            unicode::convert_to<char>(std::u32string_view(_key.text.data(), _key.text.size())));
+            key.size,
+            key.font,
+            key.index,
+            unicode::convert_to<char>(std::u32string_view(key.text.data(), key.text.size())));
 #else
-        return fmt::format_to(ctx.out(), "({}, {}, {})", _key.font, _key.size, _key.index);
+        return fmt::format_to(ctx.out(), "({}, {}, {})", key.font, key.size, key.index);
 #endif
     }
 };
@@ -537,10 +537,10 @@ struct formatter<text::font_feature>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(text::font_feature _value, FormatContext& ctx)
+    auto format(text::font_feature value, FormatContext& ctx)
     {
         return fmt::format_to(
-            ctx.out(), "{}{}{}{}", _value.name[0], _value.name[1], _value.name[2], _value.name[3]);
+            ctx.out(), "{}{}{}{}", value.name[0], value.name[1], value.name[2], value.name[3]);
     }
 };
 
@@ -553,9 +553,9 @@ struct formatter<text::render_mode>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(text::render_mode _value, FormatContext& ctx)
+    auto format(text::render_mode value, FormatContext& ctx)
     {
-        switch (_value)
+        switch (value)
         {
             case text::render_mode::bitmap: return fmt::format_to(ctx.out(), "Bitmap");
             case text::render_mode::gray: return fmt::format_to(ctx.out(), "Gray");
@@ -563,7 +563,7 @@ struct formatter<text::render_mode>
             case text::render_mode::lcd: return fmt::format_to(ctx.out(), "LCD");
             case text::render_mode::color: return fmt::format_to(ctx.out(), "Color");
         }
-        return fmt::format_to(ctx.out(), "({})", unsigned(_value));
+        return fmt::format_to(ctx.out(), "({})", unsigned(value));
     }
 };
 } // namespace fmt

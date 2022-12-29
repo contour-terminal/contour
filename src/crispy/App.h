@@ -28,21 +28,21 @@ namespace crispy
 class App
 {
   public:
-    App(std::string _appName, std::string _appTitle, std::string _appVersion, std::string _appLicense);
+    App(std::string appName, std::string appTitle, std::string appVersion, std::string appLicense);
     virtual ~App();
 
-    static App* instance() noexcept { return instance_; }
+    static App* instance() noexcept { return _instance; }
 
     [[nodiscard]] virtual crispy::cli::Command parameterDefinition() const = 0;
-    [[nodiscard]] cli::FlagStore const& parameters() const noexcept { return flags_.value(); }
+    [[nodiscard]] cli::FlagStore const& parameters() const noexcept { return _flags.value(); }
 
-    void link(std::string _command, std::function<int()> _handler);
+    void link(std::string command, std::function<int()> handler);
 
     virtual int run(int argc, char const* argv[]);
 
-    [[nodiscard]] std::string const& appName() const noexcept { return appName_; }
-    [[nodiscard]] std::string const& appVersion() const noexcept { return appVersion_; }
-    [[nodiscard]] FileSystem::path const& localStateDir() const noexcept { return localStateDir_; }
+    [[nodiscard]] std::string const& appName() const noexcept { return _appName; }
+    [[nodiscard]] std::string const& appVersion() const noexcept { return _appVersion; }
+    [[nodiscard]] FileSystem::path const& localStateDir() const noexcept { return _localStateDir; }
 
     static void customizeLogStoreOutput();
 
@@ -54,16 +54,16 @@ class App
     int licenseAction();
     int helpAction();
 
-    static App* instance_;
+    static App* _instance;
 
-    std::string appName_;
-    std::string appTitle_;
-    std::string appVersion_;
-    std::string appLicense_;
-    FileSystem::path localStateDir_;
-    std::optional<crispy::cli::Command> syntax_;
-    std::optional<crispy::cli::FlagStore> flags_;
-    std::map<std::string, std::function<int()>> handlers_;
+    std::string _appName;
+    std::string _appTitle;
+    std::string _appVersion;
+    std::string _appLicense;
+    FileSystem::path _localStateDir;
+    std::optional<crispy::cli::Command> _syntax;
+    std::optional<crispy::cli::FlagStore> _flags;
+    std::map<std::string, std::function<int()>> _handlers;
 };
 
 } // namespace crispy

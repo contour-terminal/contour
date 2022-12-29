@@ -107,14 +107,14 @@ namespace // {{{ helper
         FlagStore output = {};
     };
 
-    auto namePrefix(ParseContext const& _context, char _delim = '.') -> string // {{{
+    auto namePrefix(ParseContext const& context, char delim = '.') -> string // {{{
     {
         string output;
-        for (size_t i = 0; i < _context.currentCommand.size(); ++i) // TODO: use crispy::indexed()
+        for (size_t i = 0; i < context.currentCommand.size(); ++i) // TODO: use crispy::indexed()
         {
-            Command const* v = _context.currentCommand.at(i);
+            Command const* v = context.currentCommand.at(i);
             if (i)
-                output += _delim;
+                output += delim;
             output += v->name;
         }
 
@@ -126,38 +126,38 @@ namespace // {{{ helper
         return context.pos < context.args.size();
     }
 
-    auto currentToken(ParseContext const& _context) -> string_view
+    auto currentToken(ParseContext const& context) -> string_view
     {
-        if (_context.pos >= _context.args.size())
+        if (context.pos >= context.args.size())
             return string_view {}; // not enough arguments available
 
-        return _context.args.at(_context.pos);
+        return context.args.at(context.pos);
     }
 
-    auto isTrue(string_view _token) -> bool
+    auto isTrue(string_view token) -> bool
     {
-        return _token == "true" || _token == "yes";
+        return token == "true" || token == "yes";
     }
 
-    auto isFalse(string_view _token) -> bool
+    auto isFalse(string_view token) -> bool
     {
-        return _token == "false" || _token == "no";
+        return token == "false" || token == "no";
     }
 
-    bool matchPrefix(string_view _text, string_view _prefix)
+    bool matchPrefix(string_view text, string_view prefix)
     {
-        if (_text.size() < _prefix.size())
+        if (text.size() < prefix.size())
             return false;
-        for (size_t i = 0; i < _prefix.size(); ++i)
-            if (_text[i] != _prefix[i])
+        for (size_t i = 0; i < prefix.size(); ++i)
+            if (text[i] != prefix[i])
                 return false;
         return true;
     }
 
-    Option const* findOption(ParseContext const& _context, string_view _name)
+    Option const* findOption(ParseContext const& context, string_view name)
     {
-        for (auto const& option: _context.currentCommand.back()->options)
-            if (_name == option.name.longName || (_name.size() == 1 && _name[0] == option.name.shortName))
+        for (auto const& option: context.currentCommand.back()->options)
+            if (name == option.name.longName || (name.size() == 1 && name[0] == option.name.shortName))
             {
                 if (option.deprecated)
                     logstore::ErrorLog()("Deprecated option \"{}\" used. {}",
@@ -168,28 +168,28 @@ namespace // {{{ helper
         return nullptr;
     }
 
-    string_view consumeToken(ParseContext& _context)
+    string_view consumeToken(ParseContext& context)
     {
         // NAME := <just a name>
-        if (_context.pos >= _context.args.size())
+        if (context.pos >= context.args.size())
             throw ParserError("Not enough arguments specified.");
 
-        CLI_DEBUG(fmt::format("Consuming token '{}'", currentToken(_context)));
-        return _context.args.at(_context.pos++);
+        CLI_DEBUG(fmt::format("Consuming token '{}'", currentToken(context)));
+        return context.args.at(context.pos++);
     }
 
-    /// Parses the given parameter value @p _text with respect to the given @p _option.
-    Value parseValue(ParseContext& _context, string_view _text) // {{{
+    /// Parses the given parameter value @p text with respect to the given @p option.
+    Value parseValue(ParseContext& context, string_view text) // {{{
     {
         // Value := STR | BOOL | FLOAT | INT | UINT
 
         // BOOL
-        if (holds_alternative<bool>(_context.currentOption->value))
+        if (holds_alternative<bool>(context.currentOption->value))
         {
-            if (isTrue(_text))
+            if (isTrue(text))
                 return Value { true };
 
-            if (isFalse(_text))
+            if (isFalse(text))
                 return Value { false };
 
             throw ParserError("Boolean value expected but something else specified.");
@@ -198,9 +198,9 @@ namespace // {{{ helper
         // FLOAT
         try
         {
-            if (holds_alternative<double>(_context.currentOption->value))
+            if (holds_alternative<double>(context.currentOption->value))
             {
-                return Value { stod(string(_text)) }; // TODO: avoid malloc
+                return Value { stod(string(text)) }; // TODO: avoid malloc
             }
         }
         catch (...)
@@ -211,8 +211,8 @@ namespace // {{{ helper
         // UINT
         try
         {
-            if (holds_alternative<unsigned>(_context.currentOption->value))
-                return Value { unsigned(stoul(string(_text))) };
+            if (holds_alternative<unsigned>(context.currentOption->value))
+                return Value { unsigned(stoul(string(text))) };
         }
         catch (...)
         {
@@ -222,8 +222,8 @@ namespace // {{{ helper
         // INT
         try
         {
-            if (holds_alternative<int>(_context.currentOption->value))
-                return Value { stoi(string(_text)) };
+            if (holds_alternative<int>(context.currentOption->value))
+                return Value { stoi(string(text)) };
         }
         catch (...)
         {
@@ -231,22 +231,22 @@ namespace // {{{ helper
         }
 
         // STR
-        return Value { string(_text) };
-    }                                        // }}}
-    Value parseValue(ParseContext& _context) // {{{
+        return Value { string(text) };
+    }                                       // }}}
+    Value parseValue(ParseContext& context) // {{{
     {
-        if (holds_alternative<bool>(_context.currentOption->value))
+        if (holds_alternative<bool>(context.currentOption->value))
         {
-            auto const text = currentToken(_context);
+            auto const text = currentToken(context);
             if (isTrue(text))
             {
-                consumeToken(_context);
+                consumeToken(context);
                 return Value { true };
             }
 
             if (isFalse(text))
             {
-                consumeToken(_context);
+                consumeToken(context);
                 return Value { false };
             }
 
@@ -254,15 +254,15 @@ namespace // {{{ helper
             // and are considered to be true (implicit).
             return Value { true };
         }
-        return parseValue(_context, consumeToken(_context));
+        return parseValue(context, consumeToken(context));
     } // }}}
 
     struct ScopedOption
     {
         ParseContext& context;
-        ScopedOption(ParseContext& _context, Option const& _option): context { _context }
+        ScopedOption(ParseContext& context, Option const& option): context { context }
         {
-            context.currentOption = &_option;
+            context.currentOption = &option;
         }
         ~ScopedOption() { context.currentOption = nullptr; }
     };
@@ -270,9 +270,9 @@ namespace // {{{ helper
     struct ScopedCommand
     {
         ParseContext& context;
-        ScopedCommand(ParseContext& _context, Command const& _command): context { _context }
+        ScopedCommand(ParseContext& context, Command const& command): context { context }
         {
-            context.currentCommand.emplace_back(&_command);
+            context.currentCommand.emplace_back(&command);
         }
         ~ScopedCommand() { context.currentCommand.pop_back(); }
     };
@@ -282,92 +282,92 @@ namespace // {{{ helper
     /// @throw ParserError on parserfailures
     /// @returns nullptr if current token is no option name a pair of an @c Option pointer and its optional
     /// value otherwise.
-    optional<pair<Option const*, Value>> tryParseOption(ParseContext& _context)
+    optional<pair<Option const*, Value>> tryParseOption(ParseContext& context)
     {
         // NAME [VALUE]
         // -NAME [VALUE]
         // --NAME[=VALUE]
-        auto const current = currentToken(_context);
+        auto const current = currentToken(context);
         if (matchPrefix(current, "--")) // POSIX-style long-option
         {
             if (auto const i = current.find('='); i != current.npos)
             {
                 auto const name = current.substr(2, i - 2);
                 auto const valueText = current.substr(i + 1);
-                if (Option const* opt = findOption(_context, name)) // --NAME=VALUE
+                if (Option const* opt = findOption(context, name)) // --NAME=VALUE
                 {
-                    consumeToken(_context);
+                    consumeToken(context);
                     if (valueText.empty() && !holds_alternative<string>(opt->value))
                         throw ParserError("Explicit empty value passed but a non-string value expected.");
 
-                    auto const _optionScope = ScopedOption { _context, *opt };
-                    return pair { opt, parseValue(_context, valueText) };
+                    auto const optionScope = ScopedOption { context, *opt };
+                    return pair { opt, parseValue(context, valueText) };
                 }
             }
             else
             {
                 auto const name = current.substr(2);
-                if (Option const* opt = findOption(_context, name)) // --NAME
+                if (Option const* opt = findOption(context, name)) // --NAME
                 {
-                    consumeToken(_context);
-                    auto const _optionScope = ScopedOption { _context, *opt };
-                    return pair { opt, parseValue(_context) };
+                    consumeToken(context);
+                    auto const optionScope = ScopedOption { context, *opt };
+                    return pair { opt, parseValue(context) };
                 }
             }
         }
         else if (matchPrefix(current, "-")) // POSIX-style short opt (or otherwise ...)
         {
             auto const name = current.substr(1);
-            if (Option const* opt = findOption(_context, name)) // -NAME
+            if (Option const* opt = findOption(context, name)) // -NAME
             {
-                consumeToken(_context);
-                auto const _optionScope = ScopedOption { _context, *opt };
-                return pair { opt, parseValue(_context) };
+                consumeToken(context);
+                auto const optionScope = ScopedOption { context, *opt };
+                return pair { opt, parseValue(context) };
             }
         }
         else // Natural style option
         {
             auto const name = current;
-            if (Option const* opt = findOption(_context, name)) // -NAME
+            if (Option const* opt = findOption(context, name)) // -NAME
             {
-                consumeToken(_context);
-                auto const _optionScope = ScopedOption { _context, *opt };
-                return pair { opt, parseValue(_context) };
+                consumeToken(context);
+                auto const optionScope = ScopedOption { context, *opt };
+                return pair { opt, parseValue(context) };
             }
         }
 
         return nullopt;
     }
 
-    void setOption(ParseContext& _context, string const& _key, Value _value)
+    void setOption(ParseContext& context, string const& key, Value value)
     {
-        CLI_DEBUG(fmt::format("setOption({}): {}", _key, _value));
-        _context.output.values[_key] = std::move(_value);
+        CLI_DEBUG(fmt::format("setOption({}): {}", key, value));
+        context.output.values[key] = std::move(value);
     }
 
-    void parseOptionList(ParseContext& _context)
+    void parseOptionList(ParseContext& context)
     {
         // Option := Option*
-        auto const optionPrefix = namePrefix(_context);
+        auto const optionPrefix = namePrefix(context);
 
         while (true)
         {
-            auto optionOptPair = tryParseOption(_context);
+            auto optionOptPair = tryParseOption(context);
             if (!optionOptPair.has_value())
                 break;
 
             auto& [option, value] = optionOptPair.value();
             auto const fqdn = optionPrefix + "." + Name(option->name.longName);
-            setOption(_context, fqdn, std::move(value));
+            setOption(context, fqdn, std::move(value));
         }
     }
 
-    auto tryLookupCommand(ParseContext const& _context) -> Command const*
+    auto tryLookupCommand(ParseContext const& context) -> Command const*
     {
-        auto const token = matchPrefix(currentToken(_context), "--") ? currentToken(_context).substr(2)
-                                                                     : currentToken(_context);
+        auto const token = matchPrefix(currentToken(context), "--") ? currentToken(context).substr(2)
+                                                                    : currentToken(context);
 
-        for (Command const& command: _context.currentCommand.back()->children)
+        for (Command const& command: context.currentCommand.back()->children)
         {
             if (token == command.name)
                 return &command;
@@ -376,9 +376,9 @@ namespace // {{{ helper
         return nullptr; // not found
     }
 
-    auto tryImplicitCommand(ParseContext const& _context) -> Command const*
+    auto tryImplicitCommand(ParseContext const& context) -> Command const*
     {
-        for (Command const& command: _context.currentCommand.back()->children)
+        for (Command const& command: context.currentCommand.back()->children)
             if (command.select == CommandSelect::Implicit)
             {
                 CLI_DEBUG(fmt::format("Select implicit command {}.", command.name));
@@ -388,107 +388,107 @@ namespace // {{{ helper
         return nullptr;
     }
 
-    void prefillDefaults(ParseContext& _context, Command const& _command)
+    void prefillDefaults(ParseContext& context, Command const& command)
     {
-        auto const _commandScope = ScopedCommand { _context, _command };
-        auto const prefix = namePrefix(_context) + ".";
+        auto const commandScope = ScopedCommand { context, command };
+        auto const prefix = namePrefix(context) + ".";
 
-        for (Option const& option: _context.currentCommand.back()->options)
+        for (Option const& option: context.currentCommand.back()->options)
         {
             if (option.presence == Presence::Required)
                 continue; // Do not prefill options that are required anyways.
 
             auto const fqdn = prefix + Name(option.name.longName);
-            _context.output.values[fqdn] = option.value;
-            setOption(_context, fqdn, option.value);
+            context.output.values[fqdn] = option.value;
+            setOption(context, fqdn, option.value);
         }
 
-        for (Command const& _subcmd: _command.children)
+        for (Command const& subcmd: command.children)
         {
-            auto const fqdn = prefix + Name(_subcmd.name);
-            setOption(_context, fqdn, Value { false });
+            auto const fqdn = prefix + Name(subcmd.name);
+            setOption(context, fqdn, Value { false });
 
-            prefillDefaults(_context, _subcmd);
+            prefillDefaults(context, subcmd);
         }
     }
 
-    auto parseCommand(Command const& _command, ParseContext& _context) -> bool
+    auto parseCommand(Command const& command, ParseContext& context) -> bool
     {
         // Command := NAME Option* Section*
-        auto const _commandScope = ScopedCommand { _context, _command };
-        _context.output.values[namePrefix(_context)] = Value { true };
+        auto const commandScope = ScopedCommand { context, command };
+        context.output.values[namePrefix(context)] = Value { true };
 
-        parseOptionList(_context);
+        parseOptionList(context);
 
-        if (Command const* subcmd = tryLookupCommand(_context))
+        if (Command const* subcmd = tryLookupCommand(context))
         {
             CLI_DEBUG(fmt::format("parseCommand: found sub command: {}", subcmd->name));
-            consumeToken(_context); // Name was already ensured to be right (or is assumed to be right).
-            parseCommand(*subcmd, _context);
+            consumeToken(context); // Name was already ensured to be right (or is assumed to be right).
+            parseCommand(*subcmd, context);
         }
-        else if (Command const* subcmd = tryImplicitCommand(_context))
+        else if (Command const* subcmd = tryImplicitCommand(context))
         {
             CLI_DEBUG(fmt::format("parseCommand: found implicit sub command: {}", subcmd->name));
             // DO not consume token
-            parseCommand(*subcmd, _context);
+            parseCommand(*subcmd, context);
         }
-        else if (_command.verbatim.has_value())
+        else if (command.verbatim.has_value())
         {
             CLI_DEBUG(fmt::format("parseCommand: going verbatim."));
-            if (hasTokensAvailable(_context))
+            if (hasTokensAvailable(context))
             {
-                if (currentToken(_context) == "--")
-                    (void) consumeToken(_context); // consume "--"
-                while (_context.pos < _context.args.size())
-                    _context.output.verbatim.emplace_back(consumeToken(_context));
+                if (currentToken(context) == "--")
+                    (void) consumeToken(context); // consume "--"
+                while (context.pos < context.args.size())
+                    context.output.verbatim.emplace_back(consumeToken(context));
             }
         }
 
-        if (_context.pos == _context.args.size())
-            _context.output.values[namePrefix(_context)] = Value { true };
+        if (context.pos == context.args.size())
+            context.output.values[namePrefix(context)] = Value { true };
 
         // A command must not leave any trailing tokens at the end of parsing
-        return _context.pos == _context.args.size();
+        return context.pos == context.args.size();
     }
 
-    StringViewList stringViewList(int argc, char const* const* _argv)
+    StringViewList stringViewList(int argc, char const* const* argv)
     {
         StringViewList output;
         output.resize(static_cast<unsigned>(argc));
 
         for (auto const i: ranges::views::iota(0u, static_cast<unsigned>(argc)))
-            output[i] = _argv[i];
+            output[i] = argv[i];
 
         return output;
     }
 
-    void validate(Command const& _command, ParseContext& _context, string const& _keyPrefix)
+    void validate(Command const& command, ParseContext& context, string const& keyPrefix)
     {
         auto const key =
-            _keyPrefix.empty() ? string(_command.name) : fmt::format("{}.{}", _keyPrefix, _command.name);
+            keyPrefix.empty() ? string(command.name) : fmt::format("{}.{}", keyPrefix, command.name);
 
         // Ensure all required fields are provided for those commands that have been provided.
-        for (Option const& option: _command.options)
+        for (Option const& option: command.options)
         {
             auto const optionKey = fmt::format("{}.{}", key, option.name.longName);
-            if (option.presence == Presence::Required && !_context.output.values.count(optionKey))
+            if (option.presence == Presence::Required && !context.output.values.count(optionKey))
                 throw invalid_argument(fmt::format("Missing option: {}", optionKey));
         }
 
-        for (Command const& subcmd: _command.children)
+        for (Command const& subcmd: command.children)
         {
             auto const commandKey = fmt::format("{}.{}", key, subcmd.name);
-            if (_context.output.get<bool>(commandKey))
-                validate(subcmd, _context, key);
+            if (context.output.get<bool>(commandKey))
+                validate(subcmd, context, key);
         }
     }
 
 } // namespace
 // }}}
 
-void validate(Command const& _command)
+void validate(Command const& command)
 {
-    (void) _command;
+    (void) command;
     // TODO: throw if Command is not well defined.
     //
     // - no duplicated nems in same scope
@@ -496,20 +496,20 @@ void validate(Command const& _command)
     // - must not contain '='
 }
 
-optional<FlagStore> parse(Command const& _command, StringViewList const& _args)
+optional<FlagStore> parse(Command const& command, StringViewList const& args)
 {
-    validate(_command);
+    validate(command);
 
-    auto context = ParseContext { _args };
+    auto context = ParseContext { args };
 
-    prefillDefaults(context, _command);
+    prefillDefaults(context, command);
 
     // XXX do not enforce checking the first token, as for main()'s argv[0] this most likely is different.
-    // if (currentToken(context) != _command.name)
+    // if (currentToken(context) != command.name)
     //     return nullopt;
 
     consumeToken(context); // Name was already ensured to be right (or is assumed to be right).
-    if (!parseCommand(_command, context))
+    if (!parseCommand(command, context))
         return nullopt;
 
     // auto const& flags = context.output;
@@ -517,14 +517,14 @@ optional<FlagStore> parse(Command const& _command, StringViewList const& _args)
     // for (auto const & [k, v] : flags.values)
     //     std::cout << fmt::format(" - {}: {}\n", k, v);
 
-    validate(_command, context, "");
+    validate(command, context, "");
 
     return std::move(context.output);
 }
 
-optional<FlagStore> parse(Command const& _command, int _argc, char const* const* _argv)
+optional<FlagStore> parse(Command const& command, int argc, char const* const* argv)
 {
-    return parse(_command, stringViewList(_argc, _argv));
+    return parse(command, stringViewList(argc, argv));
 }
 
 } // namespace crispy::cli
@@ -534,114 +534,111 @@ namespace crispy::cli
 
 namespace // {{{ helpers
 {
-    string spaces(size_t _count)
+    string spaces(size_t count)
     {
-        return string(_count, ' ');
+        return string(count, ' ');
     }
 
-    string indent(unsigned _level, unsigned* _cursor = nullptr)
+    string indent(unsigned level, unsigned* cursor = nullptr)
     {
         auto constexpr TabWidth = 4u;
 
-        if (_cursor)
-            *_cursor += _level * TabWidth;
+        if (cursor)
+            *cursor += level * TabWidth;
 
-        return spaces(static_cast<size_t>(_level) * TabWidth);
+        return spaces(static_cast<size_t>(level) * TabWidth);
     }
 
     // TODO: this and OSC-8 (hyperlinks)
-    auto stylizer(HelpStyle const& _style) -> function<string(string_view, HelpElement)>
+    auto stylizer(HelpStyle const& style) -> function<string(string_view, HelpElement)>
     {
-        return [_style](string_view _text, HelpElement _element) -> string {
+        return [style](string_view text, HelpElement element) -> string {
             auto const [pre, post] = [&]() -> pair<string_view, string_view> {
-                if (_style.colors.has_value() && _style.colors.value().count(_element))
-                    return { _style.colors.value().at(_element), "\033[m"sv };
+                if (style.colors.has_value() && style.colors.value().count(element))
+                    return { style.colors.value().at(element), "\033[m"sv };
                 else
                     return { ""sv, ""sv };
             }();
 
-            if (!_style.hyperlink)
-                return fmt::format("{}{}{}", pre, _text, post);
+            if (!style.hyperlink)
+                return fmt::format("{}{}{}", pre, text, post);
 
             string output;
             size_t a = 0;
             for (;;)
             {
-                size_t const b = _text.find("://", a);
-                if (b == _text.npos || !b)
+                size_t const b = text.find("://", a);
+                if (b == text.npos || !b)
                     break;
 
                 size_t left = b;
-                while (left > 0 && isalpha(_text.at(left - 1)))
+                while (left > 0 && isalpha(text.at(left - 1)))
                     --left;
 
                 size_t right = b + 3;
-                while (right < _text.size() && _text.at(right) != ' ')
+                while (right < text.size() && text.at(right) != ' ')
                     right++;
 
                 output += pre;
-                output += _text.substr(a, left - a);
+                output += text.substr(a, left - a);
                 output += post;
 
                 output += "\033]8;;";
-                output += _text.substr(left, right - left);
+                output += text.substr(left, right - left);
                 output += "\033\\";
 
-                output += _text.substr(left, right - left);
+                output += text.substr(left, right - left);
 
                 output += "\033]8;;\033\\";
 
                 a = right;
             }
             output += pre;
-            output += _text.substr(a);
+            output += text.substr(a);
             output += post;
 
             return output;
         };
     }
 
-    auto colorizer(optional<HelpStyle::ColorMap> const& _colors) -> function<string(string_view, HelpElement)>
+    auto colorizer(optional<HelpStyle::ColorMap> const& colors) -> function<string(string_view, HelpElement)>
     {
         HelpStyle style {};
-        style.colors = _colors;
+        style.colors = colors;
         return stylizer(style);
     }
 
-    string_view wordWrapped(string_view _text,
-                            unsigned _margin,
-                            unsigned _cursor,
-                            bool* _trimLeadingWhitespaces)
+    string_view wordWrapped(string_view text, unsigned margin, unsigned cursor, bool* trimLeadingWhitespaces)
     {
-        auto const linefeed = _text.find('\n');
+        auto const linefeed = text.find('\n');
         if (linefeed != string_view::npos)
         {
             auto i = linefeed - 1; // Position before the found LF and trim off right whitespaces.
-            while (i > 0 && _text[i] == ' ')
+            while (i > 0 && text[i] == ' ')
                 --i;
-            *_trimLeadingWhitespaces = false;
-            return _text.substr(0, i + 1);
+            *trimLeadingWhitespaces = false;
+            return text.substr(0, i + 1);
         }
 
-        *_trimLeadingWhitespaces = true;
+        *trimLeadingWhitespaces = true;
 
-        auto const unwrappedLength = _cursor + _text.size();
-        if (unwrappedLength <= _margin)
-            return _text;
+        auto const unwrappedLength = cursor + text.size();
+        if (unwrappedLength <= margin)
+            return text;
 
         // Cut string at right margin, then shift left until we've hit a whitespace character.
-        auto const rightMargin = _margin - _cursor + 1;
+        auto const rightMargin = margin - cursor + 1;
         if (rightMargin <= 0)
-            return _text;
+            return text;
 
         auto i = rightMargin - 1;
-        while (i > 0 && (_text[i] != ' ' && _text[i] != '\n'))
+        while (i > 0 && (text[i] != ' ' && text[i] != '\n'))
             --i;
 
-        return _text.substr(0, i);
+        return text.substr(0, i);
     }
 
-    string wordWrapped(string_view _text, unsigned _indent, unsigned _margin, unsigned* _cursor)
+    string wordWrapped(string_view text, unsigned indent, unsigned margin, unsigned* cursor)
     {
         string output;
         size_t i = 0;
@@ -649,190 +646,185 @@ namespace // {{{ helpers
         for (;;)
         {
             auto const trimChar = trimLeadingWhitespaces ? ' ' : '\n';
-            while (i < _text.size() && _text[i] == trimChar)
+            while (i < text.size() && text[i] == trimChar)
                 ++i; // skip leading whitespaces
 
-            auto const chunk = wordWrapped(_text.substr(i), _margin, *_cursor, &trimLeadingWhitespaces);
+            auto const chunk = wordWrapped(text.substr(i), margin, *cursor, &trimLeadingWhitespaces);
 
             output += chunk;
-            *_cursor += static_cast<unsigned>(chunk.size());
+            *cursor += static_cast<unsigned>(chunk.size());
             i += chunk.size();
 
-            if (i == _text.size())
+            if (i == text.size())
                 break;
 
             output += '\n';
-            output += spaces(_indent);
-            *_cursor = _indent + 1;
+            output += spaces(indent);
+            *cursor = indent + 1;
         }
         return output;
     }
 
-    string printParam(optional<HelpStyle::ColorMap> const& _colors,
-                      OptionStyle _optionStyle,
-                      OptionName const& _name,
-                      string_view _placeholder,
-                      Presence _presense)
+    string printParam(optional<HelpStyle::ColorMap> const& colors,
+                      OptionStyle optionStyle,
+                      OptionName const& name,
+                      string_view placeholder,
+                      Presence presense)
     {
-        auto const colorize = colorizer(_colors);
+        auto const colorize = colorizer(colors);
 
         stringstream os;
 
-        if (_presense == Presence::Optional)
+        if (presense == Presence::Optional)
             os << colorize("[", HelpElement::Braces);
-        switch (_optionStyle)
+        switch (optionStyle)
         {
             case OptionStyle::Natural:
-                // if (_name.shortName)
+                // if (name.shortName)
                 // {
-                //     os << colorize(string(1, _name.shortName), HelpElement::OptionName);
+                //     os << colorize(string(1, name.shortName), HelpElement::OptionName);
                 //     os << ", ";
                 // }
-                os << colorize(_name.longName, HelpElement::OptionName);
-                if (!_placeholder.empty())
-                    os << ' ' << colorize(_placeholder, HelpElement::OptionValue);
+                os << colorize(name.longName, HelpElement::OptionName);
+                if (!placeholder.empty())
+                    os << ' ' << colorize(placeholder, HelpElement::OptionValue);
                 break;
             case OptionStyle::Posix:
-                if (_name.shortName)
+                if (name.shortName)
                 {
                     os << colorize("-", HelpElement::OptionDash);
-                    os << colorize(string(1, _name.shortName), HelpElement::OptionName);
+                    os << colorize(string(1, name.shortName), HelpElement::OptionName);
                     os << ", ";
                 }
                 os << colorize("--", HelpElement::OptionDash)
-                   << colorize(_name.longName, HelpElement::OptionName);
-                if (!_placeholder.empty())
+                   << colorize(name.longName, HelpElement::OptionName);
+                if (!placeholder.empty())
                     os << colorize("=", HelpElement::OptionEqual)
-                       << colorize(_placeholder, HelpElement::OptionValue);
+                       << colorize(placeholder, HelpElement::OptionValue);
                 break;
         }
-        if (_presense == Presence::Optional)
+        if (presense == Presence::Optional)
             os << colorize("]", HelpElement::Braces);
 
         return os.str();
     }
 
-    string printOption(Option const& _option,
-                       optional<HelpStyle::ColorMap> const& _colors,
-                       OptionStyle _optionStyle)
+    string printOption(Option const& option,
+                       optional<HelpStyle::ColorMap> const& colors,
+                       OptionStyle optionStyle)
     {
-        // TODO: make use of _option.placeholder
-        auto const placeholder = [](Option const& _option, string_view _type) -> string_view {
-            return !_option.placeholder.empty() ? _option.placeholder : _type;
+        // TODO: make use of option.placeholder
+        auto const placeholder = [](Option const& option, string_view type) -> string_view {
+            return !option.placeholder.empty() ? option.placeholder : type;
         };
 
-        if (holds_alternative<bool>(_option.value))
+        if (holds_alternative<bool>(option.value))
+            return printParam(colors, optionStyle, option.name, placeholder(option, ""), option.presence);
+        else if (holds_alternative<int>(option.value))
+            return printParam(colors, optionStyle, option.name, placeholder(option, "INT"), option.presence);
+        else if (holds_alternative<unsigned int>(option.value))
+            return printParam(colors, optionStyle, option.name, placeholder(option, "UINT"), option.presence);
+        else if (holds_alternative<double>(option.value))
             return printParam(
-                _colors, _optionStyle, _option.name, placeholder(_option, ""), _option.presence);
-        else if (holds_alternative<int>(_option.value))
-            return printParam(
-                _colors, _optionStyle, _option.name, placeholder(_option, "INT"), _option.presence);
-        else if (holds_alternative<unsigned int>(_option.value))
-            return printParam(
-                _colors, _optionStyle, _option.name, placeholder(_option, "UINT"), _option.presence);
-        else if (holds_alternative<double>(_option.value))
-            return printParam(
-                _colors, _optionStyle, _option.name, placeholder(_option, "FLOAT"), _option.presence);
+                colors, optionStyle, option.name, placeholder(option, "FLOAT"), option.presence);
         else
             return printParam(
-                _colors, _optionStyle, _option.name, placeholder(_option, "STRING"), _option.presence);
+                colors, optionStyle, option.name, placeholder(option, "STRING"), option.presence);
     }
 
-    string printOption(Option const& _option,
-                       optional<HelpStyle::ColorMap> const& _colors,
-                       OptionStyle _displayStyle,
-                       unsigned _indent,
-                       unsigned _margin,
-                       unsigned* _cursor)
+    string printOption(Option const& option,
+                       optional<HelpStyle::ColorMap> const& colors,
+                       OptionStyle displayStyle,
+                       unsigned indent,
+                       unsigned margin,
+                       unsigned* cursor)
     {
-        auto const plainTextLength =
-            static_cast<unsigned>(printOption(_option, nullopt, _displayStyle).size());
-        if (*_cursor + plainTextLength < _margin)
+        auto const plainTextLength = static_cast<unsigned>(printOption(option, nullopt, displayStyle).size());
+        if (*cursor + plainTextLength < margin)
         {
-            *_cursor += plainTextLength;
-            return printOption(_option, _colors, _displayStyle);
+            *cursor += plainTextLength;
+            return printOption(option, colors, displayStyle);
         }
         else
         {
-            *_cursor = static_cast<unsigned>(_indent + 1 + plainTextLength);
-            return "\n" + spaces(_indent) + printOption(_option, _colors, _displayStyle);
+            *cursor = static_cast<unsigned>(indent + 1 + plainTextLength);
+            return "\n" + spaces(indent) + printOption(option, colors, displayStyle);
         }
     }
 
-    size_t longestOptionText(OptionList const& _options, OptionStyle _displayStyle)
+    size_t longestOptionText(OptionList const& options, OptionStyle displayStyle)
     {
         size_t result = 0;
-        for (Option const& option: _options)
-            result = max(result, printOption(option, nullopt, _displayStyle).size());
+        for (Option const& option: options)
+            result = max(result, printOption(option, nullopt, displayStyle).size());
         return result;
     }
 
-    void detailedDescription(ostream& _os,
-                             Command const& _command,
-                             HelpStyle const& _style,
-                             unsigned _margin,
-                             vector<Command const*>& _parents)
+    void detailedDescription(ostream& os,
+                             Command const& command,
+                             HelpStyle const& style,
+                             unsigned margin,
+                             vector<Command const*>& parents)
     {
         // NOTE: We asume that cursor position is at first column!
-        auto const stylize = stylizer(_style);
-        bool const hasParentCommand = !_parents.empty();
-        bool const isLeafCommand = _command.children.empty();
+        auto const stylize = stylizer(style);
+        bool const hasParentCommand = !parents.empty();
+        bool const isLeafCommand = command.children.empty();
 
-        if (isLeafCommand || !_command.options.empty()
-            || _command.verbatim.has_value()) // {{{ print command sequence
+        if (isLeafCommand || !command.options.empty()
+            || command.verbatim.has_value()) // {{{ print command sequence
         {
-            _os << indent(1);
-            for (Command const* parent: _parents)
-                _os << stylize(parent->name, HelpElement::OptionValue /*well, yeah*/) << ' ';
+            os << indent(1);
+            for (Command const* parent: parents)
+                os << stylize(parent->name, HelpElement::OptionValue /*well, yeah*/) << ' ';
 
-            if (_command.select == CommandSelect::Explicit)
-                _os << _command.name;
+            if (command.select == CommandSelect::Explicit)
+                os << command.name;
             else
             {
-                _os << stylize("[", HelpElement::Braces);
-                _os << stylize(_command.name, HelpElement::ImplicitCommand);
-                _os << stylize("]", HelpElement::Braces);
+                os << stylize("[", HelpElement::Braces);
+                os << stylize(command.name, HelpElement::ImplicitCommand);
+                os << stylize("]", HelpElement::Braces);
             }
 
-            _os << "\n";
+            os << "\n";
 
             if (hasParentCommand)
             {
                 unsigned cursor = 1;
-                _os << indent(2, &cursor);
-                _os << stylize(wordWrapped(_command.helpText, cursor, _margin, &cursor),
-                               HelpElement::HelpText)
-                    << "\n\n";
+                os << indent(2, &cursor);
+                os << stylize(wordWrapped(command.helpText, cursor, margin, &cursor), HelpElement::HelpText)
+                   << "\n\n";
             }
         }
         // }}}
-        if (!_command.options.empty() || _command.verbatim.has_value()) // {{{ print options
+        if (!command.options.empty() || command.verbatim.has_value()) // {{{ print options
         {
-            _os << indent(2) << stylize("Options:", HelpElement::Header) << "\n\n";
+            os << indent(2) << stylize("Options:", HelpElement::Header) << "\n\n";
 
             auto const leftPadding = indent(3);
             auto const minRightPadSize = 2;
-            auto const maxOptionTextSize = longestOptionText(_command.options, _style.optionStyle);
+            auto const maxOptionTextSize = longestOptionText(command.options, style.optionStyle);
             auto const columnWidth =
                 static_cast<unsigned>(leftPadding.size() + maxOptionTextSize + minRightPadSize);
 
-            for (Option const& option: _command.options)
+            for (Option const& option: command.options)
             {
                 // if (option.deprecated)
                 //     continue;
 
                 auto const leftSize =
-                    leftPadding.size() + printOption(option, nullopt, _style.optionStyle).size();
+                    leftPadding.size() + printOption(option, nullopt, style.optionStyle).size();
                 assert(columnWidth >= leftSize);
                 auto const actualRightPaddingSize = columnWidth - leftSize;
-                auto const left = leftPadding + printOption(option, _style.colors, _style.optionStyle)
+                auto const left = leftPadding + printOption(option, style.colors, style.optionStyle)
                                   + spaces(actualRightPaddingSize);
 
-                _os << left;
+                os << left;
 
                 auto cursor = columnWidth + 1;
-                _os << stylize(wordWrapped(option.helpText, columnWidth, _margin, &cursor),
-                               HelpElement::HelpText);
+                os << stylize(wordWrapped(option.helpText, columnWidth, margin, &cursor),
+                              HelpElement::HelpText);
 
                 // {{{ append default value, if any
                 auto const defaultValueStr = fmt::format("{}", option.value);
@@ -845,18 +837,18 @@ namespace // {{{ helpers
                                              + stylize("]", HelpElement::Braces);
                     auto const defaultTextLength =
                         1 + DefaultTextPrefix.size() + 1 + defaultValueStr.size() + 1;
-                    if (cursor + defaultTextLength > _margin)
-                        _os << "\n" << spaces(columnWidth) << defaultText;
+                    if (cursor + defaultTextLength > margin)
+                        os << "\n" << spaces(columnWidth) << defaultText;
                     else
-                        _os << " " << defaultText;
+                        os << " " << defaultText;
                 }
                 // }}}
 
-                _os << '\n';
+                os << '\n';
             }
-            if (_command.verbatim.has_value())
+            if (command.verbatim.has_value())
             {
-                auto const& verbatim = _command.verbatim.value();
+                auto const& verbatim = command.verbatim.value();
                 auto const leftSize =
                     static_cast<unsigned>(leftPadding.size() + 2 + verbatim.placeholder.size());
                 assert(columnWidth > leftSize);
@@ -865,28 +857,28 @@ namespace // {{{ helpers
                                   + stylize(verbatim.placeholder, HelpElement::Verbatim)
                                   + stylize("]", HelpElement::Braces) + spaces(actualRightPaddingSize);
 
-                _os << left;
+                os << left;
                 auto cursor = columnWidth + 1;
-                _os << stylize(wordWrapped(verbatim.helpText, columnWidth, _margin, &cursor),
-                               HelpElement::HelpText);
-                _os << '\n';
+                os << stylize(wordWrapped(verbatim.helpText, columnWidth, margin, &cursor),
+                              HelpElement::HelpText);
+                os << '\n';
             }
-            _os << '\n';
+            os << '\n';
         }
         // }}}
-        if (!_command.children.empty()) // {{{ recurse to sub commands
+        if (!command.children.empty()) // {{{ recurse to sub commands
         {
-            _parents.emplace_back(&_command);
-            for (Command const& subcmd: _command.children)
-                detailedDescription(_os, subcmd, _style, _margin, _parents);
-            _parents.pop_back();
+            parents.emplace_back(&command);
+            for (Command const& subcmd: command.children)
+                detailedDescription(os, subcmd, style, margin, parents);
+            parents.pop_back();
         } // }}}
     }
 
-    void detailedDescription(ostream& _os, Command const& _command, HelpStyle const& _style, unsigned _margin)
+    void detailedDescription(ostream& os, Command const& command, HelpStyle const& style, unsigned margin)
     {
         vector<Command const*> parents;
-        detailedDescription(_os, _command, _style, _margin, parents);
+        detailedDescription(os, command, style, margin, parents);
     }
 } // namespace
 // }}}
@@ -905,51 +897,51 @@ HelpStyle::ColorMap HelpStyle::defaultColors()
 /**
  * Constructs a usage text suitable for printing out the command usage syntax in terminals.
  *
- * @param _command The command to construct the usage text for.
- * @param _colored Boolean indicating whether or not to colorize the output via VT sequences.
- * @param _margin  Number of characters to write at most per line.
+ * @param command The command to construct the usage text for.
+ * @param colored Boolean indicating whether or not to colorize the output via VT sequences.
+ * @param margin  Number of characters to write at most per line.
  */
-string usageText(Command const& _command, HelpStyle const& _style, unsigned _margin, string const& _cmdPrefix)
+string usageText(Command const& command, HelpStyle const& style, unsigned margin, string const& cmdPrefix)
 {
-    auto const colorize = colorizer(_style.colors);
-    auto const indentationWidth = static_cast<unsigned>(_cmdPrefix.size());
+    auto const colorize = colorizer(style.colors);
+    auto const indentationWidth = static_cast<unsigned>(cmdPrefix.size());
 
-    auto const printOptionList = [&](ostream& _os, OptionList const& _options, unsigned* _cursor) {
-        auto const indent = *_cursor;
-        for (Option const& option: _options)
+    auto const printOptionList = [&](ostream& os, OptionList const& options, unsigned* cursor) {
+        auto const indent = *cursor;
+        for (Option const& option: options)
         {
             // if (option.deprecated)
             //     continue;
 
-            _os << ' ' << printOption(option, _style.colors, _style.optionStyle, indent, _margin, _cursor);
+            os << ' ' << printOption(option, style.colors, style.optionStyle, indent, margin, cursor);
         }
     };
 
     auto cursor = indentationWidth + 1;
-    if (_command.children.empty())
+    if (command.children.empty())
     {
         stringstream sstr;
-        sstr << _cmdPrefix;
+        sstr << cmdPrefix;
 
-        if (_command.select == CommandSelect::Explicit)
+        if (command.select == CommandSelect::Explicit)
         {
-            cursor += static_cast<unsigned>(_command.name.size());
-            sstr << _command.name;
+            cursor += static_cast<unsigned>(command.name.size());
+            sstr << command.name;
         }
         else
         {
-            cursor += static_cast<unsigned>(_command.name.size()) + 2;
+            cursor += static_cast<unsigned>(command.name.size()) + 2;
             sstr << colorize("[", HelpElement::Braces);
-            sstr << colorize(_command.name, HelpElement::ImplicitCommand);
+            sstr << colorize(command.name, HelpElement::ImplicitCommand);
             sstr << colorize("]", HelpElement::Braces);
         }
 
         auto const indent = cursor;
-        printOptionList(sstr, _command.options, &cursor);
+        printOptionList(sstr, command.options, &cursor);
 
-        if (_command.verbatim.has_value())
+        if (command.verbatim.has_value())
         {
-            if (cursor + 3 + _command.verbatim.value().placeholder.size() > size_t(_margin))
+            if (cursor + 3 + command.verbatim.value().placeholder.size() > size_t(margin))
             {
                 sstr << "\n";
                 sstr << spaces(indent);
@@ -958,7 +950,7 @@ string usageText(Command const& _command, HelpStyle const& _style, unsigned _mar
                 sstr << ' ';
 
             sstr << colorize("[", HelpElement::Braces);
-            sstr << colorize(_command.verbatim.value().placeholder, HelpElement::Verbatim);
+            sstr << colorize(command.verbatim.value().placeholder, HelpElement::Verbatim);
             sstr << colorize("]", HelpElement::Braces);
         }
 
@@ -968,36 +960,36 @@ string usageText(Command const& _command, HelpStyle const& _style, unsigned _mar
     else
     {
         stringstream prefix;
-        prefix << _cmdPrefix << _command.name;
-        printOptionList(prefix, _command.options, &cursor);
+        prefix << cmdPrefix << command.name;
+        printOptionList(prefix, command.options, &cursor);
         prefix << ' ';
 
         string const prefixStr = prefix.str();
         stringstream sstr;
-        for (Command const& subcmd: _command.children)
-            sstr << usageText(subcmd, _style, _margin, prefixStr);
-        if (_command.children.empty())
+        for (Command const& subcmd: command.children)
+            sstr << usageText(subcmd, style, margin, prefixStr);
+        if (command.children.empty())
             sstr << '\n';
         return sstr.str();
     }
 }
 
-string helpText(Command const& _command, HelpStyle const& _style, unsigned _margin)
+string helpText(Command const& command, HelpStyle const& style, unsigned margin)
 {
-    auto const stylize = stylizer(_style);
+    auto const stylize = stylizer(style);
 
     stringstream output;
 
-    output << stylize(_command.helpText, HelpElement::HelpText) << "\n\n";
+    output << stylize(command.helpText, HelpElement::HelpText) << "\n\n";
 
     output << "  " << stylize("Usage:", HelpElement::Header) << "\n\n";
-    output << usageText(_command, _style, _margin, indent(1));
+    output << usageText(command, style, margin, indent(1));
     output << '\n';
 
     auto constexpr DescriptionHeader = string_view { "Detailed description:" };
 
     output << "  " << stylize(DescriptionHeader, HelpElement::Header) << "\n\n";
-    detailedDescription(output, _command, _style, _margin);
+    detailedDescription(output, command, style, margin);
 
     return output.str();
 }

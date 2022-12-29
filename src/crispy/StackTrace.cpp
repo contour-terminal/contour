@@ -81,17 +81,17 @@ struct Pipe // {{{
 // }}}
 #endif
 
-vector<void*> StackTrace::getFrames(size_t _skip, size_t _max)
+vector<void*> StackTrace::getFrames(size_t skip, size_t max)
 {
     vector<void*> frames;
 
 #if defined(HAVE_BACKTRACE)
-    frames.resize(_skip + _max);
-    frames.resize((size_t)::backtrace(&frames[0], static_cast<int>(_skip + _max)));
-    std::copy(std::next(frames.begin(), (int) _skip), frames.end(), frames.begin());
-    frames.resize(frames.size() > _skip ? frames.size() - _skip : std::min(frames.size(), _skip));
+    frames.resize(skip + max);
+    frames.resize((size_t)::backtrace(&frames[0], static_cast<int>(skip + max)));
+    std::copy(std::next(frames.begin(), (int) skip), frames.end(), frames.begin());
+    frames.resize(frames.size() > skip ? frames.size() - skip : std::min(frames.size(), skip));
 #else
-    crispy::ignore_unused(_skip, _max);
+    crispy::ignore_unused(skip, max);
 #endif
 
     return frames;
@@ -174,13 +174,13 @@ optional<DebugInfo> StackTrace::getDebugInfoForFrame(void const* p)
 
 StackTrace::StackTrace():
 #if defined(HAVE_BACKTRACE)
-    frames_ { SKIP_FRAMES + MAX_FRAMES }
+    _frames { SKIP_FRAMES + MAX_FRAMES }
 #else
-    frames_ {}
+    _frames {}
 #endif
 {
 #if defined(HAVE_BACKTRACE)
-    frames_.resize((size_t)::backtrace(&frames_[0], SKIP_FRAMES + MAX_FRAMES));
+    _frames.resize((size_t)::backtrace(&_frames[0], SKIP_FRAMES + MAX_FRAMES));
 #endif
 }
 

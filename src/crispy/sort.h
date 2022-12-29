@@ -23,51 +23,51 @@ namespace crispy
 namespace detail
 {
     template <typename Container, typename Comp, typename size_type>
-    constexpr size_type partition(Container& _container, Comp _compare, size_type _low, size_type _high)
+    constexpr size_type partition(Container& container, Comp compare, size_type low, size_type high)
     {
-        auto i = _low - 1;
-        auto& pivot = _container[_high];
+        auto i = low - 1;
+        auto& pivot = container[high];
 
-        for (auto const j: crispy::times(_low, static_cast<decltype(_low)>(_high - _low)))
+        for (auto const j: crispy::times(low, static_cast<decltype(low)>(high - low)))
         {
-            if (_compare(_container[j], pivot) <= 0)
+            if (compare(container[j], pivot) <= 0)
             {
                 i++;
-                std::swap(_container[i], _container[j]);
+                std::swap(container[i], container[j]);
             }
         }
 
         i++;
-        std::swap(_container[i], _container[_high]);
+        std::swap(container[i], container[high]);
         return i;
     }
 } // namespace detail
 
 template <typename Container, typename Comp>
-constexpr void sort(Container& _container, Comp _compare, size_t _low, size_t _high)
+constexpr void sort(Container& container, Comp compare, size_t low, size_t high)
 {
-    if (_low < _high)
+    if (low < high)
     {
-        auto const pi = detail::partition(_container, _compare, _low, _high);
+        auto const pi = detail::partition(container, compare, low, high);
         if (pi > 0)
-            sort(_container, _compare, _low, pi - 1);
-        sort(_container, _compare, pi + 1, _high);
+            sort(container, compare, low, pi - 1);
+        sort(container, compare, pi + 1, high);
     }
 }
 
 template <typename Container, typename Comp>
-constexpr void sort(Container& _container, Comp _compare)
+constexpr void sort(Container& container, Comp compare)
 {
-    if (auto const count = std::size(_container); count > 1)
-        sort(_container, _compare, 0, count - 1);
+    if (auto const count = std::size(container); count > 1)
+        sort(container, compare, 0, count - 1);
 }
 
 template <typename Container>
-constexpr void sort(Container& _container)
+constexpr void sort(Container& container)
 {
-    if (auto const count = std::size(_container); count > 1)
+    if (auto const count = std::size(container); count > 1)
         sort(
-            _container,
+            container,
             [](auto const& a, auto const& b) { return a < b   ? -1
                                                       : a > b ? +1
                                                               : 0; },

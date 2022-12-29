@@ -31,19 +31,19 @@ string font_description::toPattern() const
     return fmt::format("{}{}", familyName, m);
 }
 
-font_description font_description::parse(string_view _pattern)
+font_description font_description::parse(string_view pattern)
 {
     font_description fd {};
 
     // TODO: find proper style suffix
-    // auto const i = _pattern.rfind(' ');
-    // if (i != _pattern.npos)
+    // auto const i = pattern.rfind(' ');
+    // if (i != pattern.npos)
     // {
-    //     fd.familyName = _pattern.substr(0, i);
-    //     fd.styleName = _pattern.substr(i + 1);
+    //     fd.familyName = pattern.substr(0, i);
+    //     fd.styleName = pattern.substr(i + 1);
     // }
     // else
-    fd.familyName = _pattern;
+    fd.familyName = pattern;
 
     return fd;
 }

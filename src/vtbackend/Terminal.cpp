@@ -1983,7 +1983,7 @@ optional<CellLocation> Terminal::searchReverse(CellLocation searchPosition)
     return matchLocation;
 }
 
-bool Terminal::isHighlighted(CellLocation cell) const noexcept
+bool Terminal::isHighlighted(CellLocation cell) const noexcept // NOLINT(bugprone-exception-escape)
 {
     return _highlightRange.has_value()
            && std::visit(

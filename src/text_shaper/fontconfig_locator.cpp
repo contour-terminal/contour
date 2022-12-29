@@ -37,15 +37,15 @@ namespace text
 namespace
 {
 
-    string fcSpacingStr(int _value)
+    string fcSpacingStr(int value)
     {
-        switch (_value)
+        switch (value)
         {
             case FC_PROPORTIONAL: return "proportional";
             case FC_DUAL: return "dual";
             case FC_MONO: return "mono";
             case FC_CHARCELL: return "charcell";
-            default: return fmt::format("({})", _value);
+            default: return fmt::format("({})", value);
         }
     }
 
@@ -88,25 +88,25 @@ namespace
         return nullopt;
     }
 
-    int fcWeight(font_weight _weight) noexcept
+    int fcWeight(font_weight weight) noexcept
     {
         for (auto const& mapping: fontWeightMappings)
-            if (mapping.first == _weight)
+            if (mapping.first == weight)
                 return mapping.second;
         crispy::fatal("Implementation error. font weight cannot be mapped.");
     }
 
-    constexpr int fcSlant(font_slant _slant) noexcept
+    constexpr int fcSlant(font_slant slant) noexcept
     {
         for (auto const& mapping: fontSlantMappings)
-            if (mapping.first == _slant)
+            if (mapping.first == slant)
                 return mapping.second;
         return FC_SLANT_ROMAN;
     }
 
-    char const* fcWeightStr(int _value)
+    char const* fcWeightStr(int value)
     {
-        switch (_value)
+        switch (value)
         {
             case FC_WEIGHT_THIN: return "Thin";
             case FC_WEIGHT_EXTRALIGHT: return "ExtraLight";
@@ -126,9 +126,9 @@ namespace
         }
     }
 
-    char const* fcSlantStr(int _value)
+    char const* fcSlantStr(int value)
     {
-        switch (_value)
+        switch (value)
         {
             case FC_SLANT_ROMAN: return "Roman";
             case FC_SLANT_ITALIC: return "Italic";
@@ -165,9 +165,9 @@ fontconfig_locator::fontconfig_locator():
 {
 }
 
-font_source_list fontconfig_locator::locate(font_description const& _fd)
+font_source_list fontconfig_locator::locate(font_description const& fd)
 {
-    LocatorLog()("Locating font chain for: {}", _fd);
+    LocatorLog()("Locating font chain for: {}", fd);
     auto pat =
         unique_ptr<FcPattern, void (*)(FcPattern*)>(FcPatternCreate(), [](auto p) { FcPatternDestroy(p); });
 
@@ -178,34 +178,34 @@ font_source_list fontconfig_locator::locate(font_description const& _fd)
     // XXX It should be recommended to turn that on if you are looking for colored fonts,
     //     such as for emoji, but it seems like fontconfig doesn't care, it works either way.
     //
-    // bool const _color = true;
-    // FcPatternAddBool(pat.get(), FC_COLOR, _color);
+    // bool const color = true;
+    // FcPatternAddBool(pat.get(), FC_COLOR, color);
 
-    if (!_fd.familyName.empty())
-        FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) _fd.familyName.c_str());
+    if (!fd.familyName.empty())
+        FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) fd.familyName.c_str());
 
-    if (_fd.spacing != font_spacing::proportional)
+    if (fd.spacing != font_spacing::proportional)
     {
 #if defined(_WIN32)
         // On Windows FontConfig can't find "monospace". We need to use "Consolas" instead.
-        if (_fd.familyName == "monospace")
+        if (fd.familyName == "monospace")
             FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) "Consolas");
 #elif defined(__APPLE__)
         // Same for macOS, we use "Menlo" for "monospace".
-        if (_fd.familyName == "monospace")
+        if (fd.familyName == "monospace")
             FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) "Menlo");
 #else
-        if (_fd.familyName != "monospace")
+        if (fd.familyName != "monospace")
             FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) "monospace");
 #endif
         FcPatternAddInteger(pat.get(), FC_SPACING, FC_MONO);
         FcPatternAddInteger(pat.get(), FC_SPACING, FC_DUAL);
     }
 
-    if (_fd.weight != font_weight::normal)
-        FcPatternAddInteger(pat.get(), FC_WEIGHT, fcWeight(_fd.weight));
-    if (_fd.slant != font_slant::normal)
-        FcPatternAddInteger(pat.get(), FC_SLANT, fcSlant(_fd.slant));
+    if (fd.weight != font_weight::normal)
+        FcPatternAddInteger(pat.get(), FC_WEIGHT, fcWeight(fd.weight));
+    if (fd.slant != font_slant::normal)
+        FcPatternAddInteger(pat.get(), FC_SLANT, fcSlant(fd.slant));
 
     FcConfigSubstitute(d->ftConfig, pat.get(), FcMatchPattern);
     FcDefaultSubstitute(pat.get());
@@ -237,7 +237,7 @@ font_source_list fontconfig_locator::locate(font_description const& _fd)
 #if defined(FC_COLOR) // Not available on OS/X?
 // FcBool color = FcFalse;
 // FcPatternGetInteger(font, FC_COLOR, 0, &color);
-// if (color && !_color)
+// if (color && !color)
 // {
 //     LocatorLog()("Skipping font (contains color). {}", (char const*) file);
 //     continue;
@@ -246,13 +246,13 @@ font_source_list fontconfig_locator::locate(font_description const& _fd)
 
         int spacing = -1;
         FcPatternGetInteger(font, FC_SPACING, 0, &spacing);
-        if (_fd.strict_spacing)
+        if (fd.strict_spacing)
         {
             // Some fonts don't seem to tell us their spacing attribute. ;-(
             // But instead of ignoring them all together, try to be more friendly.
             if (spacing != -1
-                && ((_fd.spacing == font_spacing::proportional && spacing < FC_PROPORTIONAL)
-                    || (_fd.spacing == font_spacing::mono && spacing < FC_MONO)))
+                && ((fd.spacing == font_spacing::proportional && spacing < FC_PROPORTIONAL)
+                    || (fd.spacing == font_spacing::mono && spacing < FC_MONO)))
             {
                 LocatorLog()("Skipping font: {} ({} < {}).",
                              (char const*) (file),
@@ -286,22 +286,22 @@ font_source_list fontconfig_locator::locate(font_description const& _fd)
 
 #if defined(_WIN32)
     #define FONTDIR "C:\\Windows\\Fonts\\"
-    if (_fd.familyName == "emoji")
+    if (fd.familyName == "emoji")
     {
         addFontFile(FONTDIR "seguiemj.ttf");
         addFontFile(FONTDIR "seguisym.ttf");
     }
-    else if (_fd.weight != font_weight::normal && _fd.slant != font_slant::normal)
+    else if (fd.weight != font_weight::normal && fd.slant != font_slant::normal)
     {
         addFontFile(FONTDIR "consolaz.ttf");
         addFontFile(FONTDIR "seguisbi.ttf");
     }
-    else if (_fd.weight != font_weight::normal)
+    else if (fd.weight != font_weight::normal)
     {
         addFontFile(FONTDIR "consolab.ttf");
         addFontFile(FONTDIR "seguisb.ttf");
     }
-    else if (_fd.slant != font_slant::normal)
+    else if (fd.slant != font_slant::normal)
     {
         addFontFile(FONTDIR "consolai.ttf");
         addFontFile(FONTDIR "seguisli.ttf");

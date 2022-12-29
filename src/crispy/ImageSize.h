@@ -57,21 +57,21 @@ inline ImageSize operator-(ImageSize a, ImageSize b) noexcept
     return ImageSize { a.width - b.width, a.height - b.height };
 }
 
-inline ImageSize operator*(ImageSize _a, double _scalar) noexcept
+inline ImageSize operator*(ImageSize a, double scalar) noexcept
 {
-    return ImageSize { Width::cast_from(ceil(double(*_a.width) * _scalar)),
-                       Height::cast_from(ceil(double(*_a.height) * _scalar)) };
+    return ImageSize { Width::cast_from(ceil(double(*a.width) * scalar)),
+                       Height::cast_from(ceil(double(*a.height) * scalar)) };
 }
 
-inline ImageSize operator/(ImageSize _a, double _scalar) noexcept
+inline ImageSize operator/(ImageSize a, double scalar) noexcept
 {
-    return ImageSize { Width::cast_from(ceil(double(*_a.width) / _scalar)),
-                       Height::cast_from(ceil(double(*_a.height) / _scalar)) };
+    return ImageSize { Width::cast_from(ceil(double(*a.width) / scalar)),
+                       Height::cast_from(ceil(double(*a.height) / scalar)) };
 }
 
-constexpr ImageSize operator/(ImageSize _a, ImageSize _b) noexcept
+constexpr ImageSize operator/(ImageSize a, ImageSize b) noexcept
 {
-    return ImageSize { _a.width / _b.width, _a.height / _b.height };
+    return ImageSize { a.width / b.width, a.height / b.height };
 }
 
 } // namespace crispy

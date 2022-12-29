@@ -164,7 +164,7 @@ void Grid<Cell>::clearHistory()
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Grid<Cell>::verifyState() const
+void Grid<Cell>::verifyState() const noexcept
 {
 #if !defined(NDEBUG)
     // _maxHistoryLineCount + _pageSize.lines

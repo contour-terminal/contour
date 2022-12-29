@@ -60,21 +60,21 @@ using fail_handler_t = std::function<void(std::string_view, std::string_view, st
 
 namespace detail
 {
-    inline fail_handler_t& fail_handler()
+    inline fail_handler_t& fail_handler() noexcept
     {
         static fail_handler_t storage {};
         return storage;
     }
 
-    [[noreturn]] inline void fail(std::string_view _text,
-                                  std::string_view _message,
-                                  std::string_view _file,
-                                  int _line)
+    [[noreturn]] inline void fail(std::string_view text,
+                                  std::string_view message,
+                                  std::string_view file,
+                                  int line) noexcept // NOLINT(bugprone-exception-escape)
     {
         if (fail_handler())
-            fail_handler()(_text, _message, _file, _line);
+            fail_handler()(text, message, file, line);
         else
-            fmt::print("[{}:{}] {} {}\n", _file, _line, _message, _text);
+            fmt::print("[{}:{}] {} {}\n", file, line, message, text);
         std::abort();
     }
 } // namespace detail
@@ -83,9 +83,9 @@ namespace detail
 ///
 /// This handler is supposed to report and terminate but may very well
 /// just ignore either or both.
-inline void set_fail_handler(fail_handler_t _handler)
+inline void set_fail_handler(fail_handler_t handler)
 {
-    detail::fail_handler() = std::move(_handler);
+    detail::fail_handler() = std::move(handler);
 }
 
 /// This method prints an error message and then terminates the program.

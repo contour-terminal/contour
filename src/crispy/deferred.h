@@ -21,11 +21,11 @@ namespace crispy
 {
 
 template <typename T>
-struct deferred
+struct deferred // NOLINT(readability-identifier-naming)
 {
     std::optional<T> storage;
 
-    constexpr bool is_initialized() const noexcept { return storage.has_value(); }
+    [[nodiscard]] constexpr bool is_initialized() const noexcept { return storage.has_value(); }
 
     template <typename... Args>
     void initialize(Args&&... args)

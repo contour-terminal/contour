@@ -40,7 +40,7 @@ namespace crispy
 // {{{ details
 namespace detail
 {
-    static constexpr bool isPowerOfTwo(uint32_t value) noexcept
+    constexpr bool isPowerOfTwo(uint32_t value) noexcept
     {
         //.
         return (value & (value - 1)) == 0;
@@ -274,7 +274,7 @@ class StrongLRUHashtable
     LRUHashtableStats _stats;
     uint32_t _hashMask;
     StrongHashtableSize _hashCount;
-    uint32_t _size;
+    uint32_t _size = 0;
     LRUCapacity _capacity;
     std::string _name;
 
@@ -296,7 +296,6 @@ StrongLRUHashtable<Value>::StrongLRUHashtable(StrongHashtableSize hashCount,
     _stats {},
     _hashMask { hashCount.value - 1 },
     _hashCount { hashCount },
-    _size { 0 },
     _capacity { entryCount },
     _name { std::move(name) },
     _hashTable { (uint32_t*) (this + 1) },
@@ -305,8 +304,8 @@ StrongLRUHashtable<Value>::StrongLRUHashtable(StrongHashtableSize hashCount,
         static_assert(detail::isPowerOfTwo(Alignment));
         constexpr uintptr_t AlignMask = Alignment - 1;
 
-        uint32_t* hashTableEnd = _hashTable + _hashCount.value;
-        Entry* entryTable = (Entry*) (uintptr_t((char*) hashTableEnd + AlignMask) & ~AlignMask);
+        auto* hashTableEnd = _hashTable + _hashCount.value;
+        auto* entryTable = (Entry*) (uintptr_t((char*) hashTableEnd + AlignMask) & ~AlignMask);
 
         return entryTable;
     }() }
@@ -363,7 +362,7 @@ auto StrongLRUHashtable<Value>::create(StrongHashtableSize hashCount,
 
     Allocator allocator;
     auto const size = requiredMemorySize(hashCount, entryCount);
-    StrongLRUHashtable* obj = (StrongLRUHashtable*) allocator.allocate(size);
+    auto* obj = (StrongLRUHashtable*) allocator.allocate(size);
 
     // clang-format off
     if (!obj)
@@ -408,8 +407,8 @@ inline size_t StrongLRUHashtable<Value>::storageSize() const noexcept
 template <typename Value>
 inline uint32_t* StrongLRUHashtable<Value>::hashTableSlot(StrongHash const& hash) noexcept
 {
-    uint32_t const index = static_cast<uint32_t>(_mm_cvtsi128_si32(hash.value));
-    uint32_t const slot = index & _hashMask;
+    auto const index = static_cast<uint32_t>(_mm_cvtsi128_si32(hash.value));
+    auto const slot = index & _hashMask;
     return _hashTable + slot;
 }
 
@@ -425,7 +424,7 @@ template <typename Value>
 void StrongLRUHashtable<Value>::clear()
 {
     Entry& sentinel = sentinelEntry();
-    uint32_t entryIndex = sentinel.nextInLRU;
+    auto entryIndex = sentinel.nextInLRU;
     while (entryIndex)
     {
         Entry& entry = _entries[entryIndex];

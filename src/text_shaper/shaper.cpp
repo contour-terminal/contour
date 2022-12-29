@@ -70,25 +70,25 @@ namespace
 
 } // namespace
 
-tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::ImageSize _boundingBox)
+tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, crispy::ImageSize boundingBox)
 {
     // NB: We're only supporting down-scaling.
-    assert(_bitmap.bitmapSize.width >= _boundingBox.width);
-    assert(_bitmap.bitmapSize.height >= _boundingBox.height);
+    assert(bitmap.bitmapSize.width >= boundingBox.width);
+    assert(bitmap.bitmapSize.height >= boundingBox.height);
 
-    auto const ratioX = unbox<double>(_bitmap.bitmapSize.width) / unbox<double>(_boundingBox.width);
-    auto const ratioY = unbox<double>(_bitmap.bitmapSize.height) / unbox<double>(_boundingBox.height);
+    auto const ratioX = unbox<double>(bitmap.bitmapSize.width) / unbox<double>(boundingBox.width);
+    auto const ratioY = unbox<double>(bitmap.bitmapSize.height) / unbox<double>(boundingBox.height);
     auto const ratio = max(ratioX, ratioY);
     auto const factor = static_cast<unsigned>(ceil(ratio));
 
     // Adjust new image size to respect ratio.
     auto const newSize =
-        crispy::ImageSize { crispy::Width::cast_from(unbox<double>(_bitmap.bitmapSize.width) / ratio),
-                            crispy::Height::cast_from(unbox<double>(_bitmap.bitmapSize.height) / ratio) };
+        crispy::ImageSize { crispy::Width::cast_from(unbox<double>(bitmap.bitmapSize.width) / ratio),
+                            crispy::Height::cast_from(unbox<double>(bitmap.bitmapSize.height) / ratio) };
 
     RasterizerLog()("scaling {} from {} to {}, ratio {}x{} ({}), factor {}",
-                    _bitmap.format,
-                    _bitmap.bitmapSize,
+                    bitmap.format,
+                    bitmap.bitmapSize,
                     newSize,
                     ratioX,
                     ratioY,
@@ -96,16 +96,16 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::Im
                     factor);
 
     vector<uint8_t> dest;
-    switch (_bitmap.format)
+    switch (bitmap.format)
     {
         case bitmap_format::rgba:
-            scaleDownExplicit<4>(_bitmap.bitmap, _bitmap.bitmapSize, newSize, factor, dest);
+            scaleDownExplicit<4>(bitmap.bitmap, bitmap.bitmapSize, newSize, factor, dest);
             break;
         case bitmap_format::rgb:
-            scaleDownExplicit<3>(_bitmap.bitmap, _bitmap.bitmapSize, newSize, factor, dest);
+            scaleDownExplicit<3>(bitmap.bitmap, bitmap.bitmapSize, newSize, factor, dest);
             break;
         case bitmap_format::alpha_mask:
-            scaleDownExplicit<1>(_bitmap.bitmap, _bitmap.bitmapSize, newSize, factor, dest);
+            scaleDownExplicit<1>(bitmap.bitmap, bitmap.bitmapSize, newSize, factor, dest);
             break;
     }
 
@@ -115,10 +115,10 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::Im
     //     {
     //         // calculate area average
     //         unsigned int r = 0, g = 0, b = 0, a = 0, count = 0;
-    //         for (unsigned y = sr; y < min(sr + factor, _bitmap.bitmapSize.height.as<unsigned>()); y++)
+    //         for (unsigned y = sr; y < min(sr + factor, bitmap.bitmapSize.height.as<unsigned>()); y++)
     //         {
-    //             uint8_t const* p = _bitmap.bitmap.data() + (y * *_bitmap.bitmapSize.width * 4) + sc * 4;
-    //             for (unsigned x = sc; x < min(sc + factor, _bitmap.bitmapSize.width.as<unsigned>());
+    //             uint8_t const* p = bitmap.bitmap.data() + (y * *bitmap.bitmapSize.width * 4) + sc * 4;
+    //             for (unsigned x = sc; x < min(sc + factor, bitmap.bitmapSize.width.as<unsigned>());
     //                  x++, count++)
     //             {
     //                 b += *(p++);
@@ -139,13 +139,13 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& _bitmap, crispy::Im
     // }
 
     auto output = rasterized_glyph {};
-    output.format = _bitmap.format;
+    output.format = bitmap.format;
     output.bitmapSize = newSize;
-    output.position = _bitmap.position; // TODO Actually, left/top position should be adjusted
+    output.position = bitmap.position; // TODO Actually, left/top position should be adjusted
     output.bitmap = std::move(dest);
-    output.position.x = unbox<int>(_boundingBox.width - output.bitmapSize.width) / 2;
+    output.position.x = unbox<int>(boundingBox.width - output.bitmapSize.width) / 2;
     output.position.y =
-        unbox<int>(output.bitmapSize.height) + unbox<int>(_boundingBox.height - output.bitmapSize.height) / 4;
+        unbox<int>(output.bitmapSize.height) + unbox<int>(boundingBox.height - output.bitmapSize.height) / 4;
 
     return { output, factor };
 }

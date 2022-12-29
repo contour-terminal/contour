@@ -70,10 +70,10 @@ inline std::string escape(std::string_view s, NumericEscape numericEscape = Nume
     return escape(begin(s), end(s), numericEscape);
 }
 
-inline std::string unescape(std::string_view _value)
+inline std::string unescape(std::string_view value)
 {
     std::string out;
-    out.reserve(_value.size());
+    out.reserve(value.size());
 
     enum class State
     {
@@ -87,18 +87,18 @@ inline std::string unescape(std::string_view _value)
     State state = State::Text;
     char buf[3] = {};
 
-    for (size_t i = 0; i < _value.size(); ++i)
+    for (size_t i = 0; i < value.size(); ++i)
     {
         switch (state)
         {
             case State::Text:
-                if (_value[i] == '\\')
+                if (value[i] == '\\')
                     state = State::Escape;
                 else
-                    out.push_back(_value[i]);
+                    out.push_back(value[i]);
                 break;
             case State::Escape:
-                switch (_value[i])
+                switch (value[i])
                 {
                     case '0':
                         //.
@@ -147,26 +147,26 @@ inline std::string unescape(std::string_view _value)
                     default:
                         // Unknown escape sequence, so just continue as text.
                         out.push_back('\\');
-                        out.push_back(_value[i]);
+                        out.push_back(value[i]);
                         state = State::Text;
                         break;
                 }
                 break;
             case State::Octal1:
-                buf[0] = _value[i];
+                buf[0] = value[i];
                 state = State::Octal2;
                 break;
             case State::Octal2:
-                buf[1] = _value[i];
+                buf[1] = value[i];
                 out.push_back(static_cast<char>(strtoul(buf, nullptr, 8)));
                 state = State::Text;
                 break;
             case State::Hex1:
-                buf[0] = _value[i];
+                buf[0] = value[i];
                 state = State::Hex2;
                 break;
             case State::Hex2:
-                buf[1] = _value[i];
+                buf[1] = value[i];
                 out.push_back(static_cast<char>(strtoul(buf, nullptr, 16)));
                 state = State::Text;
                 break;

@@ -55,10 +55,6 @@ ContourGuiApp::ContourGuiApp(): _sessionManager(*this)
     link("contour.font-locator", bind(&ContourGuiApp::fontConfigAction, this));
 }
 
-ContourGuiApp::~ContourGuiApp()
-{
-}
-
 int ContourGuiApp::run(int argc, char const* argv[])
 {
     _argc = argc;
@@ -243,13 +239,13 @@ bool ContourGuiApp::loadConfig(string const& target)
         {
             shell.program = std::move(exe);
             for (auto i: flags.verbatim)
-                shell.arguments.emplace_back(string(i));
+                shell.arguments.emplace_back(i);
         }
         else
         {
             shell.program = flags.verbatim.front();
             for (size_t i = 1; i < flags.verbatim.size(); ++i)
-                shell.arguments.emplace_back(string(flags.verbatim.at(i)));
+                shell.arguments.emplace_back(flags.verbatim.at(i));
         }
     }
 
