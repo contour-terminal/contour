@@ -3,7 +3,6 @@ Checks: >-
   -*,
   bugprone-*,
   -bugprone-branch-clone,
-  -bugprone-easily-swappable-parameters,
   -bugprone-implicit-widening-of-multiplication-result,
   -bugprone-reserved-identifier,
   -bugprone-suspicious-include,
