@@ -38,8 +38,8 @@ namespace mappings
 {
     struct KeyMapping
     {
-        Key const key;
-        std::string_view const mapping {};
+        Key key;
+        std::string_view mapping {};
     };
 
     // TODO: implement constexpr-binary-search by:

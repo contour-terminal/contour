@@ -389,7 +389,7 @@ int Terminal::SelectionHelper::cellWidth(CellLocation pos) const noexcept
  */
 struct ScopedHyperlinkHover
 {
-    shared_ptr<HyperlinkInfo const> const href;
+    shared_ptr<HyperlinkInfo const> href;
 
     ScopedHyperlinkHover(Terminal const& terminal, ScreenBase const& /*screen*/):
         href { terminal.tryGetHoveringHyperlink() }
@@ -1121,7 +1121,7 @@ namespace
     struct SelectionRenderer
     {
         Terminal const& term;
-        ColumnOffset const rightPage;
+        ColumnOffset rightPage;
         ColumnOffset lastColumn {};
         string text {};
         string currentLine {};
