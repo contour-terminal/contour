@@ -1,5 +1,7 @@
 include(FilesystemResolver)
 
+set(AppId "org.contourterminal.Contour")
+
 if(${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD")
     set(FREEBSD TRUE)
 endif()
@@ -104,12 +106,13 @@ elseif(APPLE)
     set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/Modules" ${CMAKE_MODULE_PATH})
     set_target_properties(contour PROPERTIES
         MACOSX_BUNDLE ON
-        MACOSX_BUNDLE_BUNDLE_NAME "Contour Terminal"
+        MACOSX_BUNDLE_BUNDLE_NAME "Contour"
         MACOSX_BUNDLE_INFO_STRING "Contour Terminal Emulator"
-        MACOSX_BUNDLE_GUI_IDENTIFIER "org.contour-terminal.contour"
-        MACOSX_BUNDLE_LONG_VERSION_STRING "${PROJECT_VERSION_MAJOR}"
-        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION_MINOR}"
-        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION_PATCH}"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "${AppId}"
+        MACOSX_BUNDLE_LONG_VERSION_STRING "${CONTOUR_VERSION_STRING}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${CONTOUR_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${CONTOUR_VERSION}"
+        XCODE_ATTRIBUTE_PRODUCT_NAME "Contour Terminal Emulator"
         # TODO: MACOSX_BUNDLE_ICON_FILE "contour.icns"
         # TODO: RESOURCE "images/icon.icns"
     )
@@ -285,8 +288,6 @@ elseif(APPLE)
     ")
 else()
     # any other Unix
-    set(AppId "org.contourterminal.Contour")
-
     find_program(LSB_RELEASE_EXEC lsb_release)
     execute_process(COMMAND ${LSB_RELEASE_EXEC} -rs
         OUTPUT_VARIABLE LSB_RELEASE_NUMBER
