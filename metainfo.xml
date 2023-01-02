@@ -124,6 +124,7 @@
           <li>Fixes terminfo entries `Se`, and adds missing entries `Rmol`, `Sync` (#936).</li>
           <li>Fixes rendering glitches (reverting PR #918 until a better solution has been found).</li>
           <li>Fixes loading TTC (TrueType Collection) font files not honor which face to load within the collection (#939).</li>
+          <li>Adds config entry `mouse.hide_while_typing` to specify mouse behavior while typing whether hide it or not.</li>
           <li>Adds config entry `indicator_statusline_inactive` colorscheme key to colorize the status line differently when the terminal is currently not in focus.</li>
         </ul>
       </description>
