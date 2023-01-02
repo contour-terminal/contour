@@ -1577,6 +1577,9 @@ namespace
             _usedKeys, _profile, basePath, "scrollbar.hide_in_alt_screen", profile.hideScrollbarInAltScreen);
 
         tryLoadChildRelative(
+            _usedKeys, _profile, basePath, "mouse.hide_while_typing", profile.mouse_hide_while_typing);
+
+        tryLoadChildRelative(
             _usedKeys, _profile, basePath, "history.auto_scroll_on_update", profile.autoScrollOnUpdate);
         tryLoadChildRelative(
             _usedKeys, _profile, basePath, "history.scroll_multiplier", profile.historyScrollMultiplier);

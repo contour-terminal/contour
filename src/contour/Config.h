@@ -148,6 +148,7 @@ struct TerminalProfile
     bool maximized = false;
     bool fullscreen = false;
     bool show_title_bar = true;
+    bool mouse_hide_while_typing = true;
     terminal::RefreshRate refreshRate = { 0.0 }; // 0=auto
     terminal::LineOffset copyLastMarkRangeOffset = terminal::LineOffset(0);
 

@@ -220,6 +220,13 @@ profiles:
             # whether or not to hide the scrollbar when in alt-screen.
             hide_in_alt_screen: true
 
+        # mouse setting
+        mouse:
+            # whether or not to hide mouse when typing
+            #
+            # Default value: true
+            hide_while_typing: true
+
         # Some VT sequences should need access permissions.
         #
         # These can be to:
