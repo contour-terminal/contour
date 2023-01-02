@@ -517,7 +517,8 @@ void TerminalSession::sendKeyPressEvent(Key _key, Modifier _modifier, Timestamp 
         return;
     }
 
-    display_->setMouseCursorShape(MouseCursorShape::Hidden);
+    if(profile_.mouse_hide_while_typing)
+        display_->setMouseCursorShape(MouseCursorShape::Hidden);
 
     if (auto const* actions =
             config::apply(config_.inputMappings.keyMappings, _key, _modifier, matchModeFlags()))
@@ -540,7 +541,8 @@ void TerminalSession::sendCharPressEvent(char32_t _value, Modifier _modifier, Ti
         return;
     }
 
-    display_->setMouseCursorShape(MouseCursorShape::Hidden);
+    if(profile_.mouse_hide_while_typing)
+        display_->setMouseCursorShape(MouseCursorShape::Hidden);
 
     if (auto const* actions =
             config::apply(config_.inputMappings.charMappings, _value, _modifier, matchModeFlags()))
