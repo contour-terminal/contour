@@ -223,6 +223,8 @@ profiles:
         # mouse setting
         mouse:
             # whether or not to hide mouse when typing
+            #
+            # Default value: true
             hide_while_typing: true
 
         # Some VT sequences should need access permissions.
