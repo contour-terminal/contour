@@ -16,7 +16,7 @@
 namespace terminal
 {
 
-constexpr CharsetMap usasciiCharset()
+constexpr CharsetMap usasciiCharset() noexcept
 {
     CharsetMap result {};
 
@@ -29,7 +29,7 @@ constexpr CharsetMap usasciiCharset()
 /// British:
 ///     ESC (A
 ///     Reference: http://vt100.net/docs/vt220-rm/table2-5.html
-constexpr CharsetMap createBritishCharset()
+constexpr CharsetMap createBritishCharset() noexcept
 {
     auto result = usasciiCharset();
     result['#'] = 0x00A3; // U'£';
@@ -38,7 +38,7 @@ constexpr CharsetMap createBritishCharset()
 
 /// German:
 ///     ESC ( K
-constexpr CharsetMap createGermanCharset()
+constexpr CharsetMap createGermanCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -57,7 +57,7 @@ constexpr CharsetMap createGermanCharset()
 /// DEC Special Character and Line Drawing Set.
 ///
 /// Reference: http://vt100.net/docs/vt102-ug/table5-13.html
-constexpr CharsetMap createSpecialCharset()
+constexpr CharsetMap createSpecialCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -99,7 +99,7 @@ constexpr CharsetMap createSpecialCharset()
 /// Dutch:
 ///     ESC ( 4
 ///
-constexpr CharsetMap createDutchCharset()
+constexpr CharsetMap createDutchCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -119,7 +119,7 @@ constexpr CharsetMap createDutchCharset()
 /// Finnish:
 ///     ESC ( C
 ///     ESC ( 5
-constexpr CharsetMap createFinnishCharset()
+constexpr CharsetMap createFinnishCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -138,7 +138,7 @@ constexpr CharsetMap createFinnishCharset()
 
 /// French:
 ///     ESC ( R
-constexpr CharsetMap createFrenchCharset()
+constexpr CharsetMap createFrenchCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -157,7 +157,7 @@ constexpr CharsetMap createFrenchCharset()
 
 /// French Canadian:
 ///     ESC ( Q
-constexpr CharsetMap createFrenchCanadianCharset()
+constexpr CharsetMap createFrenchCanadianCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -178,7 +178,7 @@ constexpr CharsetMap createFrenchCanadianCharset()
 /// Norwegian/Danich:
 ///     ESC ( E
 ///     ESC ( 6
-constexpr CharsetMap createNorwegianDanishCharset()
+constexpr CharsetMap createNorwegianDanishCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -198,7 +198,7 @@ constexpr CharsetMap createNorwegianDanishCharset()
 
 /// Spanish:
 ///     ESC ( Z
-constexpr CharsetMap createSpanishCharset()
+constexpr CharsetMap createSpanishCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -217,7 +217,7 @@ constexpr CharsetMap createSpanishCharset()
 /// Swedish:
 ///     ESC ( H
 ///     ESC ( 7
-constexpr CharsetMap createSwedishCharset()
+constexpr CharsetMap createSwedishCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -237,7 +237,7 @@ constexpr CharsetMap createSwedishCharset()
 
 /// Swiss:
 ///     ESC ( =
-constexpr CharsetMap createSwissCharset()
+constexpr CharsetMap createSwissCharset() noexcept
 {
     auto result = usasciiCharset();
 
