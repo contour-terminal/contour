@@ -11,6 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <vtbackend/Charset.h>
 #include <vtbackend/MockTerm.h>
 #include <vtbackend/Screen.h>
 #include <vtbackend/Viewport.h>
@@ -33,6 +34,7 @@ using crispy::Size;
 using namespace terminal;
 using namespace terminal::test;
 using namespace std;
+using namespace std::literals::chrono_literals;
 
 namespace // {{{
 {
@@ -3580,6 +3582,42 @@ TEST_CASE("DECSTR", "[screen]")
     REQUIRE(mock.terminal.primaryScreen().savedCursorState().position
             == CellLocation { LineOffset(0), ColumnOffset(0) });
 }
+
+TEST_CASE("LS1 and LS0", "[screen]")
+{
+    auto mock = MockTerm { ColumnCount(8), LineCount(4) };
+
+    auto const writeTickAndRender = [&](auto text) {
+        mock.writeToScreen(text);
+        mock.terminal.tick(1s);
+        mock.terminal.ensureFreshRenderBuffer();
+        logScreenText(mock.terminal.primaryScreen(), fmt::format("writeTickAndRender: {}", e(text)));
+    };
+
+    REQUIRE(mock.terminal.primaryScreen().cursor().charsets.isSelected(CharsetTable::G0, CharsetId::USASCII));
+    REQUIRE(mock.terminal.primaryScreen().cursor().charsets.isSelected(CharsetTable::G1, CharsetId::USASCII));
+    writeTickAndRender("ab");
+    REQUIRE(trimmedTextScreenshot(mock) == "ab");
+
+    // Set G1 to Special
+    mock.writeToScreen("\033)0");
+    REQUIRE(mock.terminal.primaryScreen().cursor().charsets.isSelected(CharsetTable::G1, CharsetId::Special));
+
+    // LS1: load G1 into GL
+    mock.writeToScreen("\x0E");
+    REQUIRE(mock.terminal.primaryScreen().cursor().charsets.isSelected(CharsetId::Special));
+
+    writeTickAndRender("ab");
+    REQUIRE(trimmedTextScreenshot(mock) == "ab▒␉");
+
+    // LS0: load G0 into GL
+    mock.writeToScreen("\x0F");
+    REQUIRE(mock.terminal.primaryScreen().cursor().charsets.isSelected(CharsetId::USASCII));
+
+    writeTickAndRender("ab");
+    REQUIRE(trimmedTextScreenshot(mock) == "ab▒␉ab");
+}
+
 // TODO: Sixel: image that exceeds available lines
 
 // TODO: SetForegroundColor

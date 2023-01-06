@@ -3246,6 +3246,14 @@ void Screen<Cell>::executeControlCode(char controlCode)
             // Even though FF means Form Feed, it seems that xterm is doing an IND instead.
             index();
             break;
+        case LS1.finalSymbol: // LS1 (SO)
+            // Invokes G1 character set into GL. G1 is designated by a select-character-set (SCS) sequence.
+            _cursor.charsets.lockingShift(CharsetTable::G1);
+            break;
+        case LS0.finalSymbol: // LSO (SI)
+            // Invoke G0 character set into GL. G0 is designated by a select-character-set sequence (SCS).
+            _cursor.charsets.lockingShift(CharsetTable::G0);
+            break;
         case 0x0D: moveCursorToBeginOfLine(); break;
         case 0x37: saveCursor(); break;
         case 0x38: restoreCursor(); break;
