@@ -15,6 +15,7 @@
 #include <vtbackend/Screen.h>
 #include <vtbackend/Viewport.h>
 #include <vtbackend/primitives.h>
+#include <vtbackend/test_helpers.h>
 
 #include <crispy/escape.h>
 #include <crispy/utils.h>
@@ -30,39 +31,11 @@
 using crispy::escape;
 using crispy::Size;
 using namespace terminal;
+using namespace terminal::test;
 using namespace std;
 
 namespace // {{{
 {
-template <typename T>
-string mainPageText(Screen<T> const& screen)
-{
-    return screen.renderMainPageText();
-}
-
-template <typename T>
-[[maybe_unused]] void logScreenTextAlways(Screen<T> const& screen, string const& headline = "")
-{
-    fmt::print("{}: ZI={} cursor={} HM={}..{}\n",
-               headline.empty() ? "screen dump"s : headline,
-               screen.grid().zero_index(),
-               screen.realCursorPosition(),
-               screen.margin().horizontal.from,
-               screen.margin().horizontal.to);
-    fmt::print("{}\n", dumpGrid(screen.grid()));
-}
-
-template <typename T>
-void logScreenText(Screen<T> const& screen, string const& headline = "")
-{
-    if (headline.empty())
-        UNSCOPED_INFO("dump:");
-    else
-        UNSCOPED_INFO(headline + ":");
-
-    for (auto const line: ::ranges::views::iota(0, *screen.pageSize().lines))
-        UNSCOPED_INFO(fmt::format("[{}] \"{}\"", line, screen.grid().lineText(LineOffset::cast_from(line))));
-}
 
 // class MockScreen : public MockScreenEvents,
 //                    public Screen<MockScreenEvents> {
@@ -91,12 +64,6 @@ void logScreenText(Screen<T> const& screen, string const& headline = "")
 //         windowTitle = _title;
 //     }
 // };
-
-template <typename S>
-decltype(auto) e(S const& s)
-{
-    return crispy::escape(s);
-}
 
 struct TextRenderBuilder
 {

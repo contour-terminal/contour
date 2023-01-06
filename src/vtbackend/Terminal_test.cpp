@@ -14,6 +14,7 @@
 #include <vtbackend/MockTerm.h>
 #include <vtbackend/Terminal.h>
 #include <vtbackend/primitives.h>
+#include <vtbackend/test_helpers.h>
 
 #include <vtpty/MockPty.h>
 
@@ -39,83 +40,7 @@ using terminal::LineOffset;
 using terminal::MockTerm;
 using terminal::PageSize;
 
-namespace
-{
-
-template <typename S>
-decltype(auto) e(S const& s)
-{
-    return crispy::escape(s);
-}
-
-/// Takes a textual screenshot using the terminals render buffer.
-vector<string> textScreenshot(terminal::Terminal const& terminal)
-{
-    terminal::RenderBufferRef renderBuffer = terminal.renderBuffer();
-
-    vector<string> lines;
-    lines.resize(terminal.pageSize().lines.as<size_t>());
-
-    terminal::CellLocation lastPos = {};
-    size_t lastCount = 0;
-    for (terminal::RenderCell const& cell: renderBuffer.buffer.cells)
-    {
-        auto const gap = (cell.position.column + static_cast<int>(lastCount) - 1) - lastPos.column;
-        auto& currentLine = lines.at(unbox<size_t>(cell.position.line));
-        if (*gap > 0) // Did we jump?
-            currentLine.insert(currentLine.end(), unbox<size_t>(gap) - 1, ' ');
-
-        currentLine += unicode::convert_to<char>(u32string_view(cell.codepoints));
-        lastPos = cell.position;
-        lastCount = 1;
-    }
-    for (terminal::RenderLine const& line: renderBuffer.buffer.lines)
-    {
-        auto& currentLine = lines.at(unbox<size_t>(line.lineOffset));
-        currentLine = line.text;
-    }
-
-    return lines;
-}
-
-string trimRight(string text)
-{
-    constexpr auto Whitespaces = "\x20\t\r\n"sv;
-    while (!text.empty() && Whitespaces.find(text.back()) != Whitespaces.npos)
-        text.resize(text.size() - 1);
-    return text;
-}
-
-string join(vector<string> const& lines)
-{
-    string output;
-    for (string const& line: lines)
-    {
-        output += trimRight(line);
-        output += '\n';
-    }
-    return output;
-}
-
-template <typename T>
-std::string trimmedTextScreenshot(MockTerm<T> const& mt)
-{
-    return trimRight(join(textScreenshot(mt.terminal)));
-}
-
-[[maybe_unused]] void logScreenText(terminal::Terminal const& terminal, std::string const& headline = "")
-{
-    if (headline.empty())
-        UNSCOPED_INFO("dump:");
-    else
-        UNSCOPED_INFO(headline + ":");
-
-    for (int line = 1; line <= unbox<int>(terminal.pageSize().lines); ++line)
-        UNSCOPED_INFO(fmt::format(
-            "[{}] \"{}\"", line, terminal.primaryScreen().grid().lineText(terminal::LineOffset(line))));
-}
-
-} // namespace
+using namespace terminal::test;
 
 // TODO: Test case posibilities:
 //
