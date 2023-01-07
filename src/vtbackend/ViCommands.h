@@ -38,6 +38,7 @@ class ViCommands: public ViInputHandler::Executor
     void moveCursor(ViMotion motion, unsigned count) override;
     void select(TextObjectScope scope, TextObject textObject) override;
     void yank(TextObjectScope scope, TextObject textObject) override;
+    void yank(ViMotion motion) override;
     void paste(unsigned count) override;
 
     void searchStart() override;

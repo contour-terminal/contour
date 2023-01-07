@@ -285,6 +285,15 @@ void ViCommands::yank(TextObjectScope scope, TextObject textObject)
     _terminal.screenUpdated();
 }
 
+void ViCommands::yank(ViMotion motion)
+{
+    auto const [from, to] = translateToCellRange(motion, 1);
+    cursorPosition = from;
+    InputLog()("{}: Executing: motion-yank {}\n", _terminal.inputHandler().mode(), motion);
+    executeYank(from, to);
+    _terminal.screenUpdated();
+}
+
 void ViCommands::paste(unsigned count)
 {
     _terminal.sendPasteFromClipboard(count, false);

@@ -168,6 +168,7 @@ class ViInputHandler: public InputHandler
         virtual void moveCursor(ViMotion motion, unsigned count) = 0;
         virtual void select(TextObjectScope scope, TextObject textObject) = 0;
         virtual void yank(TextObjectScope scope, TextObject textObject) = 0;
+        virtual void yank(ViMotion motion) = 0;
         virtual void paste(unsigned count) = 0;
 
         virtual void modeChanged(ViMode mode) = 0;
