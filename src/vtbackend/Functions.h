@@ -163,10 +163,13 @@ constexpr int compare(FunctionSelector const& a, FunctionDefinition const& b) no
 
 namespace detail // {{{
 {
-    constexpr auto C0(char finalCharacter, std::string_view mnemonic, std::string_view description) noexcept
+    constexpr auto C0(char finalCharacter,
+                      std::string_view mnemonic,
+                      std::string_view description,
+                      VTType vt = VTType::VT100) noexcept
     {
         // clang-format off
-        return FunctionDefinition { FunctionCategory::C0, 0, 0, finalCharacter, 0, 0, VTType::VT100,
+        return FunctionDefinition { FunctionCategory::C0, 0, 0, finalCharacter, 0, 0, vt,
                                     VTExtension::None, mnemonic, description };
         // clang-format on
     }
@@ -303,8 +306,8 @@ constexpr inline auto LF  = detail::C0('\x0A', "LF", "Line Feed");
 constexpr inline auto VT  = detail::C0('\x0B', "VT", "Vertical Tab"); // Even though VT means Vertical Tab, it seems that xterm is doing an IND instead.
 constexpr inline auto FF  = detail::C0('\x0C', "FF", "Form Feed");
 constexpr inline auto CR  = detail::C0('\x0D', "CR", "Carriage Return");
-constexpr inline auto SO  = detail::C0('\x0E', "SO", "Shift Out; Switch to an alternative character set. ");
-constexpr inline auto SI  = detail::C0('\x0F', "SI", "Shift In; Return to regular character set after Shift Out.");
+constexpr inline auto LS1 = detail::C0('\x0E', "LS1", "Shift Out; Maps G1 into GL.", VTType::VT220);
+constexpr inline auto LS0 = detail::C0('\x0F', "LS0", "Shift In; Maps G0 into GL (the default).", VTType::VT220);
 
 // SCS to support (G0, G1, G2, G3)
 // A        UK (British), VT100
@@ -483,8 +486,8 @@ inline auto const& functions() noexcept
             VT,
             FF,
             CR,
-            SO,
-            SI,
+            LS0,
+            LS1,
 
             // ESC
             DECALN,

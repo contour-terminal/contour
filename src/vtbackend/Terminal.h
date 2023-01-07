@@ -310,6 +310,8 @@ class Terminal
         }
         return changes;
     }
+
+    uint64_t tick(std::chrono::milliseconds delta) { return tick(_currentTime + delta); }
     // }}}
 
     // {{{ RenderBuffer synchronization API
