@@ -365,19 +365,19 @@ struct GridSize
     };
 
     /// This iterator can be used to iterate through each and every point between (0, 0) and (width, height).
-    struct iterator
+    struct iterator // NOLINT(readability-identifier-naming)
     {
       public:
         constexpr iterator(ColumnCount width, int next) noexcept:
-            width { width }, next { next }, offset { makeOffset(next) }
+            _width { width }, _next { next }, _offset { makeOffset(next) }
         {
         }
 
-        constexpr auto operator*() const noexcept { return offset; }
+        constexpr auto operator*() const noexcept { return _offset; }
 
         constexpr iterator& operator++() noexcept
         {
-            offset = makeOffset(++next);
+            _offset = makeOffset(++_next);
             return *this;
         }
 
@@ -387,17 +387,17 @@ struct GridSize
             return *this;
         }
 
-        constexpr bool operator==(iterator const& other) const noexcept { return next == other.next; }
-        constexpr bool operator!=(iterator const& other) const noexcept { return next != other.next; }
+        constexpr bool operator==(iterator const& other) const noexcept { return _next == other._next; }
+        constexpr bool operator!=(iterator const& other) const noexcept { return _next != other._next; }
 
       private:
-        ColumnCount width;
-        int next;
-        Offset offset;
+        ColumnCount _width;
+        int _next;
+        Offset _offset;
 
         constexpr Offset makeOffset(int offset) noexcept
         {
-            return Offset { LineOffset(offset / *width), ColumnOffset(offset % *width) };
+            return Offset { LineOffset(offset / *_width), ColumnOffset(offset % *_width) };
         }
     };
 
