@@ -75,13 +75,17 @@ namespace
         {
             case '"': return TextObject::DoubleQuotes;
             case '(': return TextObject::RoundBrackets;
+            case ')': return TextObject::RoundBrackets;
             case '<': return TextObject::AngleBrackets;
+            case '>': return TextObject::AngleBrackets;
             case '[': return TextObject::SquareBrackets;
             case '\'': return TextObject::SingleQuotes;
+            case ']': return TextObject::SquareBrackets;
             case '`': return TextObject::BackQuotes;
             case 'p': return TextObject::Paragraph;
             case 'w': return TextObject::Word;
             case '{': return TextObject::CurlyBrackets;
+            case '}': return TextObject::CurlyBrackets;
             default: return nullopt;
         }
     }
