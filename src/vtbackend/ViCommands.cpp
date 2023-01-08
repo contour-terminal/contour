@@ -496,8 +496,7 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
             auto current = prev;
 
             while (current.column.value > 0
-                   && (!_terminal.currentScreen().isCellEmpty(current)
-                       || _terminal.currentScreen().isCellEmpty(prev)))
+                   && !(!_terminal.wordDelimited(prev) && _terminal.wordDelimited(current)))
             {
                 prev.column = current.column;
                 current.column--;
@@ -514,8 +513,7 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
                 prev.column++;
             auto current = prev;
             while (current.column + 1 < rightMargin
-                   && (!_terminal.currentScreen().isCellEmpty(current)
-                       || _terminal.currentScreen().isCellEmpty(prev)))
+                   && !(!_terminal.wordDelimited(prev) && _terminal.wordDelimited(current)))
             {
                 prev.column = current.column;
                 current.column++;
@@ -529,8 +527,7 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
                 prev.column++;
             auto current = prev;
             while (current.column + 1 < rightMargin
-                   && (_terminal.currentScreen().isCellEmpty(current)
-                       || !_terminal.currentScreen().isCellEmpty(prev)))
+                   && !(_terminal.wordDelimited(prev) ^ _terminal.wordDelimited(current)))
             {
                 prev = current;
                 current.column++;
