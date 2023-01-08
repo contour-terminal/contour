@@ -535,9 +535,9 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
             return resultPosition;
         }
         case ViMotion::ScreenColumn: // |
-            return snapToCell(
-                { cursorPosition.line,
-                  min(ColumnOffset::cast_from(count), _terminal.pageSize().columns.as<ColumnOffset>() - 1) });
+            return snapToCell({ cursorPosition.line,
+                                min(ColumnOffset::cast_from(count - 1),
+                                    _terminal.pageSize().columns.as<ColumnOffset>() - 1) });
         case ViMotion::FileBegin: // gg
             return snapToCell(
                 { LineOffset::cast_from(-_terminal.currentScreen().historyLineCount().as<int>()),
