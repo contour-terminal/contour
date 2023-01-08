@@ -332,12 +332,10 @@ CellLocationRange ViCommands::expandMatchingPair(TextObjectScope scope, char lef
         {
             a.line--;
             a.column = rightMargin;
-            fmt::print("decr.a: {} .. {}\n", a, b);
         }
         else
             break;
     }
-    fmt::print("final.a: {} .. {}\n", a, b);
 
     // advance forward
     depth = 1;
@@ -358,12 +356,10 @@ CellLocationRange ViCommands::expandMatchingPair(TextObjectScope scope, char lef
         {
             b.line++;
             b.column = ColumnOffset(0);
-            fmt::print("incr.b: {} .. {}\n", a, b);
         }
         else
             break;
     }
-    fmt::print("final.b: {} .. {}\n", a, b);
 
     if (inner)
     {
@@ -380,7 +376,6 @@ CellLocationRange ViCommands::expandMatchingPair(TextObjectScope scope, char lef
             }
         }
     }
-    fmt::print("final: {} .. {}\n", a, b);
 
     return { a, b };
 }
