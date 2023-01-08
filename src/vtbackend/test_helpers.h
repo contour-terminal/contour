@@ -28,6 +28,21 @@
 namespace terminal::test
 {
 
+constexpr LineOffset operator""_lineOffset(unsigned long long value) noexcept
+{
+    return LineOffset::cast_from(value);
+}
+
+constexpr ColumnOffset operator""_columnOffset(unsigned long long value) noexcept
+{
+    return ColumnOffset::cast_from(value);
+}
+
+constexpr CellLocation operator+(LineOffset line, ColumnOffset column) noexcept
+{
+    return { line, column };
+}
+
 template <typename S>
 [[nodiscard]] inline decltype(auto) e(S const& s)
 {

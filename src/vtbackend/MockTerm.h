@@ -49,6 +49,16 @@ class MockTerm: public Terminal::Events
 
     void writeToStdin(std::string_view text) { mockPty().stdinBuffer() += text; }
 
+    // Convenience method to type into stdin a sequence of characters.
+    void sendCharPressSequence(std::string_view sequence,
+                               Modifier modifier = Modifier::None,
+                               Terminal::Timestamp now = std::chrono::steady_clock::now())
+    {
+        auto const codepoints = unicode::convert_to<char32_t>(sequence);
+        for (auto const codepoint: codepoints)
+            terminal.sendCharPressEvent(codepoint, modifier, now);
+    }
+
     void writeToScreen(std::string_view text)
     {
         mockPty().appendStdOutBuffer(text);
