@@ -115,6 +115,7 @@
           <li>Improvements to text objects in vi-like normal mode (`i)`, `a)`, `i>`, `a>`, `i]`, `a]`, `i}`, `a}`).</li>
           <li>Improvements to vi-like normal mode: yank-motions (`yw`, `y$`, etc).</li>
           <li>Improvements to vi-like normal mode: word motions (`b`, `w`, `e`) now respect configurable word delimiters.</li>
+          <li>Improvements to vi-like normal mode: support nested matching pairs, such as `{`, `(` etc in text objects.</li>
         </ul>
       </description>
     </release>

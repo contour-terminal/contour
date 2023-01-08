@@ -307,15 +307,80 @@ CellLocationRange ViCommands::expandMatchingPair(TextObjectScope scope, char lef
     auto const rightMargin = _terminal.pageSize().columns.as<ColumnOffset>() - 1;
     bool const inner = scope == TextObjectScope::Inner;
 
-    while (a.column.value > 0 && !_terminal.currentScreen().compareCellTextAt(a, left))
-        --a.column;
-    if (inner && _terminal.currentScreen().compareCellTextAt(a, left))
-        ++a.column;
+    auto const topLineOffset = _terminal.isPrimaryScreen()
+                                   ? -boxed_cast<LineOffset>(_terminal.primaryScreen().historyLineCount()) + 1
+                                   : LineOffset(0);
 
-    while (b.column < rightMargin && !_terminal.currentScreen().compareCellTextAt(b, right))
-        ++b.column;
-    if (inner && _terminal.currentScreen().compareCellTextAt(b, right))
-        --b.column;
+    auto const bottomLineOffset = boxed_cast<LineOffset>(_terminal.pageSize().lines - 1);
+
+    // advance backwards
+    int depth = 1;
+    while (true)
+    {
+        if (compareCellTextAt(a, right))
+            ++depth;
+        else if (compareCellTextAt(a, left))
+        {
+            --depth;
+            if (depth == 0)
+                break;
+        }
+
+        if (a.column.value > 0)
+            --a.column;
+        else if (a.line > topLineOffset)
+        {
+            a.line--;
+            a.column = rightMargin;
+            fmt::print("decr.a: {} .. {}\n", a, b);
+        }
+        else
+            break;
+    }
+    fmt::print("final.a: {} .. {}\n", a, b);
+
+    // advance forward
+    depth = 1;
+    while (true)
+    {
+        if (compareCellTextAt(b, left))
+            ++depth;
+        else if (compareCellTextAt(b, right))
+        {
+            --depth;
+            if (depth == 0)
+                break;
+        }
+
+        if (b.column < rightMargin)
+            ++b.column;
+        else if (b.line < bottomLineOffset)
+        {
+            b.line++;
+            b.column = ColumnOffset(0);
+            fmt::print("incr.b: {} .. {}\n", a, b);
+        }
+        else
+            break;
+    }
+    fmt::print("final.b: {} .. {}\n", a, b);
+
+    if (inner)
+    {
+        if (compareCellTextAt(a, left))
+            ++a.column;
+        if (compareCellTextAt(b, right))
+        {
+            if (b.column.value > 0)
+                --b.column;
+            else
+            {
+                b.line--;
+                b.column = rightMargin;
+            }
+        }
+    }
+    fmt::print("final: {} .. {}\n", a, b);
 
     return { a, b };
 }
@@ -368,7 +433,7 @@ CellLocationRange ViCommands::translateToCellRange(ViMotion motion, unsigned cou
 
 CellLocation ViCommands::snapToCell(CellLocation location) const noexcept
 {
-    while (location.column > ColumnOffset(0) && _terminal.currentScreen().compareCellTextAt(location, '\0'))
+    while (location.column > ColumnOffset(0) && compareCellTextAt(location, '\0'))
         --location.column;
 
     return location;
@@ -377,9 +442,14 @@ CellLocation ViCommands::snapToCell(CellLocation location) const noexcept
 CellLocation ViCommands::snapToCellRight(CellLocation location) const noexcept
 {
     auto const rightMargin = ColumnOffset::cast_from(_terminal.pageSize().columns - 1);
-    while (location.column < rightMargin && _terminal.currentScreen().compareCellTextAt(location, '\0'))
+    while (location.column < rightMargin && compareCellTextAt(location, '\0'))
         ++location.column;
     return location;
+}
+
+bool ViCommands::compareCellTextAt(CellLocation position, char codepoint) const noexcept
+{
+    return _terminal.currentScreen().compareCellTextAt(position, codepoint);
 }
 
 CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count) const noexcept

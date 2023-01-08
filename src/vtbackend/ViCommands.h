@@ -68,6 +68,8 @@ class ViCommands: public ViInputHandler::Executor
     /// any codepoints.
     [[nodiscard]] CellLocation snapToCellRight(CellLocation location) const noexcept;
 
+    [[nodiscard]] bool compareCellTextAt(CellLocation position, char codepoint) const noexcept;
+
     // Cursor offset into the grid.
     CellLocation cursorPosition {};
 
