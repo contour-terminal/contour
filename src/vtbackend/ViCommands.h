@@ -54,6 +54,10 @@ class ViCommands: public ViInputHandler::Executor
     [[nodiscard]] CellLocationRange translateToCellRange(ViMotion motion, unsigned count) const noexcept;
     [[nodiscard]] CellLocationRange translateToCellRange(TextObjectScope scope,
                                                          TextObject textObject) const noexcept;
+    [[nodiscard]] CellLocation prev(CellLocation location) const noexcept;
+    [[nodiscard]] CellLocation next(CellLocation location) const noexcept;
+    [[nodiscard]] CellLocation findMatchingPairLeft(char left, char right) const noexcept;
+    [[nodiscard]] CellLocation findMatchingPairRight(char left, char right) const noexcept;
     [[nodiscard]] CellLocationRange expandMatchingPair(TextObjectScope scope,
                                                        char lhs,
                                                        char rhs) const noexcept;

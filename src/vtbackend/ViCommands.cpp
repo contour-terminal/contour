@@ -299,22 +299,44 @@ void ViCommands::paste(unsigned count)
     _terminal.sendPasteFromClipboard(count, false);
 }
 
-CellLocationRange ViCommands::expandMatchingPair(TextObjectScope scope, char left, char right) const noexcept
+CellLocation ViCommands::prev(CellLocation location) const noexcept
 {
-    auto a = cursorPosition;
-    auto b = cursorPosition;
+    if (location.column.value > 0)
+        return { location.line, location.column - 1 };
 
     auto const rightMargin = _terminal.pageSize().columns.as<ColumnOffset>() - 1;
-    bool const inner = scope == TextObjectScope::Inner;
-
     auto const topLineOffset = _terminal.isPrimaryScreen()
                                    ? -boxed_cast<LineOffset>(_terminal.primaryScreen().historyLineCount()) + 1
                                    : LineOffset(0);
+    if (location.line > topLineOffset)
+    {
+        location.line--;
+        location.column = rightMargin;
+    }
 
-    auto const bottomLineOffset = boxed_cast<LineOffset>(_terminal.pageSize().lines - 1);
+    return location;
+}
 
-    // advance backwards
-    int depth = 1;
+CellLocation ViCommands::next(CellLocation location) const noexcept
+{
+    auto const rightMargin = _terminal.pageSize().columns.as<ColumnOffset>() - 1;
+    if (location.column < rightMargin)
+        return { location.line, location.column + 1 };
+
+    if (location.line < boxed_cast<LineOffset>(_terminal.pageSize().lines))
+    {
+        location.line++;
+        location.column = ColumnOffset(0);
+    }
+
+    return location;
+}
+
+CellLocation ViCommands::findMatchingPairLeft(char left, char right) const noexcept
+{
+    auto a = cursorPosition;
+    auto depth = 1;
+
     while (true)
     {
         if (compareCellTextAt(a, right))
@@ -326,19 +348,19 @@ CellLocationRange ViCommands::expandMatchingPair(TextObjectScope scope, char lef
                 break;
         }
 
-        if (a.column.value > 0)
-            --a.column;
-        else if (a.line > topLineOffset)
-        {
-            a.line--;
-            a.column = rightMargin;
-        }
+        if (auto const prevA = prev(a); prevA != a)
+            a = prevA;
         else
             break;
     }
+    return a;
+}
 
+CellLocation ViCommands::findMatchingPairRight(char left, char right) const noexcept
+{
     // advance forward
-    depth = 1;
+    int depth = 1;
+    auto b = cursorPosition;
     while (true)
     {
         if (compareCellTextAt(b, left))
@@ -350,31 +372,26 @@ CellLocationRange ViCommands::expandMatchingPair(TextObjectScope scope, char lef
                 break;
         }
 
-        if (b.column < rightMargin)
-            ++b.column;
-        else if (b.line < bottomLineOffset)
-        {
-            b.line++;
-            b.column = ColumnOffset(0);
-        }
+        if (auto const nextB = next(b); nextB != b)
+            b = nextB;
         else
             break;
     }
 
-    if (inner)
+    return b;
+}
+
+CellLocationRange ViCommands::expandMatchingPair(TextObjectScope scope, char left, char right) const noexcept
+{
+    auto a = findMatchingPairLeft(left, right);
+    auto b = findMatchingPairRight(left, right);
+
+    if (scope == TextObjectScope::Inner)
     {
         if (compareCellTextAt(a, left))
-            ++a.column;
+            a = next(a);
         if (compareCellTextAt(b, right))
-        {
-            if (b.column.value > 0)
-                --b.column;
-            else
-            {
-                b.line--;
-                b.column = rightMargin;
-            }
-        }
+            b = prev(b);
     }
 
     return { a, b };
@@ -554,6 +571,8 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
         case ViMotion::ParenthesisMatching:  // % TODO
         case ViMotion::SearchResultBackward: // N TODO
         case ViMotion::SearchResultForward:  // n TODO
+            errorlog()("TODO: Missing implementation. Sorry. That will come. :-)");
+            return cursorPosition;
         case ViMotion::WordBackward: {       // b
             auto prev = cursorPosition;
             if (prev.column.value > 0)
