@@ -268,7 +268,7 @@ profiles:
             # Possible values are:
             # - native          : automatically choose the best available on the current platform
             # - fontconfig      : uses fontconfig to select fonts
-            # - CoreText        : uses OS/X CoreText to select fonts (currently not implemented).
+            # - CoreText        : uses OS/X CoreText to select fonts.
             # - DirectWrite     : selects DirectWrite engine (Windows only)
             locator: native
 
@@ -278,7 +278,7 @@ profiles:
                 # Supported values are:
                 # - native      : automatically choose the best available on the current platform.
                 # - DirectWrite : selects DirectWrite engine (Windows only)
-                # - CoreText    : selects CoreText engine (Mac OS/X only)
+                # - CoreText    : selects CoreText engine (Mac OS/X only) (currently not implemented)
                 # - OpenShaper  : selects OpenShaper (harfbuzz/freetype/fontconfig, available on all
                 #                 platforms)
                 engine: native
