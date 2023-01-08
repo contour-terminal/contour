@@ -56,8 +56,9 @@ class ViCommands: public ViInputHandler::Executor
                                                          TextObject textObject) const noexcept;
     [[nodiscard]] CellLocation prev(CellLocation location) const noexcept;
     [[nodiscard]] CellLocation next(CellLocation location) const noexcept;
-    [[nodiscard]] CellLocation findMatchingPairLeft(char left, char right) const noexcept;
-    [[nodiscard]] CellLocation findMatchingPairRight(char left, char right) const noexcept;
+    [[nodiscard]] CellLocation findMatchingPairFrom(CellLocation location) const noexcept;
+    [[nodiscard]] CellLocation findMatchingPairLeft(char left, char right, int initialDepth) const noexcept;
+    [[nodiscard]] CellLocation findMatchingPairRight(char left, char right, int initialDepth) const noexcept;
     [[nodiscard]] CellLocationRange expandMatchingPair(TextObjectScope scope,
                                                        char lhs,
                                                        char rhs) const noexcept;

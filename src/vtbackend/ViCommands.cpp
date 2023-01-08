@@ -31,6 +31,27 @@ namespace
         else
             return terminal.alternateScreen().grid().rightMostNonEmptyAt(lineOffset);
     }
+
+    constexpr std::optional<std::pair<char, bool>> matchingPairOfChar(char input) noexcept
+    {
+        auto constexpr pairs = std::array {
+            std::pair { '(', ')' },
+            std::pair { '[', ']' },
+            std::pair { '{', '}' },
+            std::pair { '<', '>' },
+        };
+
+        for (auto const& pair: pairs)
+        {
+            if (input == pair.first)
+                return { { pair.second, true } };
+            if (input == pair.second)
+                return { { pair.first, false } };
+        }
+
+        return std::nullopt;
+    }
+
 } // namespace
 
 using namespace std;
@@ -332,15 +353,37 @@ CellLocation ViCommands::next(CellLocation location) const noexcept
     return location;
 }
 
-CellLocation ViCommands::findMatchingPairLeft(char left, char right) const noexcept
+CellLocation ViCommands::findMatchingPairFrom(CellLocation location) const noexcept
+{
+    auto const& cell = _terminal.primaryScreen().at(cursorPosition);
+    if (cell.codepointCount() != 1)
+        return location;
+
+    auto const a = cell.codepoint(0);
+    auto const matchResult = matchingPairOfChar(a);
+    if (!matchResult)
+        return location;
+    auto const [b, left] = *matchResult;
+
+    if (left)
+        return findMatchingPairRight(a, b, 0);
+    else
+        return findMatchingPairLeft(b, a, 0);
+}
+
+CellLocation ViCommands::findMatchingPairLeft(char left, char right, int initialDepth) const noexcept
 {
     auto a = cursorPosition;
-    auto depth = 1;
+    auto depth = initialDepth;
 
     while (true)
     {
         if (compareCellTextAt(a, right))
+        {
             ++depth;
+            if (depth == 0)
+                break;
+        }
         else if (compareCellTextAt(a, left))
         {
             --depth;
@@ -356,15 +399,19 @@ CellLocation ViCommands::findMatchingPairLeft(char left, char right) const noexc
     return a;
 }
 
-CellLocation ViCommands::findMatchingPairRight(char left, char right) const noexcept
+CellLocation ViCommands::findMatchingPairRight(char left, char right, int initialDepth) const noexcept
 {
-    // advance forward
-    int depth = 1;
+    auto depth = initialDepth;
     auto b = cursorPosition;
+
     while (true)
     {
         if (compareCellTextAt(b, left))
+        {
             ++depth;
+            if (depth == 0)
+                break;
+        }
         else if (compareCellTextAt(b, right))
         {
             --depth;
@@ -383,8 +430,8 @@ CellLocation ViCommands::findMatchingPairRight(char left, char right) const noex
 
 CellLocationRange ViCommands::expandMatchingPair(TextObjectScope scope, char left, char right) const noexcept
 {
-    auto a = findMatchingPairLeft(left, right);
-    auto b = findMatchingPairRight(left, right);
+    auto a = findMatchingPairLeft(left, right, left != right ? 1 : -1);
+    auto b = findMatchingPairRight(left, right, left != right ? 1 : -1);
 
     if (scope == TextObjectScope::Inner)
     {
@@ -568,12 +615,13 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
             }
             return snapToCell(current);
         }
-        case ViMotion::ParenthesisMatching:  // % TODO
+        case ViMotion::ParenthesisMatching: // % TODO
+            return findMatchingPairFrom(cursorPosition);
         case ViMotion::SearchResultBackward: // N TODO
         case ViMotion::SearchResultForward:  // n TODO
             errorlog()("TODO: Missing implementation. Sorry. That will come. :-)");
             return cursorPosition;
-        case ViMotion::WordBackward: {       // b
+        case ViMotion::WordBackward: { // b
             auto prev = cursorPosition;
             if (prev.column.value > 0)
                 prev.column--;
