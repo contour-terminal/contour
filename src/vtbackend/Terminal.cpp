@@ -1050,6 +1050,8 @@ void Terminal::resizeScreenInternal(PageSize totalPageSize, std::optional<ImageS
         _state.viCommands.cursorPosition.line -=
             boxed_cast<LineOffset>(oldMainDisplayPageSize.lines - mainDisplayPageSize.lines);
 
+    _state.viCommands.cursorPosition = clampToScreen(_state.viCommands.cursorPosition);
+
     verifyState();
 }
 
