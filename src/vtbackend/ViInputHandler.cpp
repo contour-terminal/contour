@@ -75,13 +75,17 @@ namespace
         {
             case '"': return TextObject::DoubleQuotes;
             case '(': return TextObject::RoundBrackets;
+            case ')': return TextObject::RoundBrackets;
             case '<': return TextObject::AngleBrackets;
+            case '>': return TextObject::AngleBrackets;
             case '[': return TextObject::SquareBrackets;
             case '\'': return TextObject::SingleQuotes;
+            case ']': return TextObject::SquareBrackets;
             case '`': return TextObject::BackQuotes;
             case 'p': return TextObject::Paragraph;
             case 'w': return TextObject::Word;
             case '{': return TextObject::CurlyBrackets;
+            case '}': return TextObject::CurlyBrackets;
             default: return nullopt;
         }
     }
@@ -339,13 +343,11 @@ void ViInputHandler::scrollViewport(ScrollOffset delta)
 
 bool ViInputHandler::executePendingOrMoveCursor(ViMotion motion)
 {
+    // Require(!_pendingTextObjectScope);
     switch (_pendingOperator.value_or(ViOperator::MoveCursor))
     {
         case ViOperator::MoveCursor: _executor.moveCursor(motion, _count ? _count : 1); break;
-        case ViOperator::Yank:
-            // XXX executor.yank(pendingTextObjectScope.value(), pending)
-            logstore::ErrorLog()("Yank: Implementation coming: {}", motion);
-            break;
+        case ViOperator::Yank: _executor.yank(motion); break;
         case ViOperator::Paste: _executor.paste(_count ? _count : 1); break;
         case ViOperator::ReverseSearchCurrentWord: _executor.reverseSearchCurrentWord(); break;
     }
