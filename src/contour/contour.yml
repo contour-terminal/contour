@@ -266,6 +266,7 @@ profiles:
             # Selects an engine to use for locating font files on the system.
             # This is implicitly also responsible for font fallback
             # Possible values are:
+            # - native          : automatically choose the best available on the current platform
             # - fontconfig      : uses fontconfig to select fonts
             # - CoreText        : uses OS/X CoreText to select fonts (currently not implemented).
             # - DirectWrite     : selects DirectWrite engine (Windows only)
