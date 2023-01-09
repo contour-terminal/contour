@@ -765,7 +765,7 @@ class Terminal
     struct BlinkerState
     {
         bool state = false;
-        std::chrono::milliseconds const interval;
+        std::chrono::milliseconds const interval; // NOLINT(readability-identifier-naming)
     };
     mutable BlinkerState _slowBlinker { false, std::chrono::milliseconds { 500 } };
     mutable BlinkerState _rapidBlinker { false, std::chrono::milliseconds { 300 } };
