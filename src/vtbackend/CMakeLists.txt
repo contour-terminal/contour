@@ -124,6 +124,7 @@ if(LIBTERMINAL_TESTING)
         Sequence_test.cpp
         Terminal_test.cpp
         SixelParser_test.cpp
+        ViCommands_test.cpp
     )
     target_link_libraries(terminal_test fmt::fmt-header-only Catch2::Catch2 terminal)
     add_test(terminal_test ./terminal_test)
