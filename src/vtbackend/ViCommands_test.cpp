@@ -160,3 +160,32 @@ TEST_CASE("vi.motions: M", "[vi]")
     mock.sendCharPressSequence("M");
     CHECK(mock.terminal.state().viCommands.cursorPosition == 4_lineOffset + 1_columnOffset);
 }
+
+TEST_CASE("vi.motion: b", "[vi]")
+{
+    auto mock = setupMockTerminal("One.Two..Three and more\r\n"
+                                  "   On the next line.",
+                                  terminal::PageSize { terminal::LineCount(10), terminal::ColumnCount(40) });
+    mock.sendCharPressSequence("j$"); // jump to line 2, at the right-most non-space character.
+    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 1_lineOffset + 19_columnOffset);
+
+    mock.sendCharPressSequence("b"); // l[ine.]
+    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 1_lineOffset + 15_columnOffset);
+    mock.sendCharPressSequence("2b"); // t[he]
+    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 1_lineOffset + 6_columnOffset);
+    mock.sendCharPressSequence("3b"); // a[nd] -- on line 1
+    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 15_columnOffset);
+    mock.sendCharPressSequence("b"); // T[hree]
+    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 9_columnOffset);
+    mock.sendCharPressSequence("b"); // .[.]
+    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 7_columnOffset);
+    mock.sendCharPressSequence("b"); // T[wo]
+    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 4_columnOffset);
+    mock.sendCharPressSequence("b"); // .
+    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 3_columnOffset);
+    mock.sendCharPressSequence("b"); // O[ne]
+    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 0_columnOffset);
+
+    mock.sendCharPressSequence("b");
+    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 0_columnOffset);
+}

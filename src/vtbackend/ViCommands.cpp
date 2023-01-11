@@ -15,6 +15,8 @@
 #include <vtbackend/ViCommands.h>
 #include <vtbackend/logging.h>
 
+#include <unicode/ucd.h>
+
 #include <fmt/format.h>
 
 #include <memory>
@@ -24,6 +26,97 @@ namespace terminal
 
 namespace
 {
+    constexpr bool isWord(char32_t codepoint) noexcept
+    {
+        // A word consists of a sequence of letters, digits and underscores, or a
+        // sequence of other non-blank characters, separated with white space (spaces,
+        // tabs, <EOL>).  This can be changed with the 'iskeyword' option.  An empty line
+        // is also considered to be a word.
+        return ('a' <= codepoint && codepoint <= 'z') || ('A' <= codepoint && codepoint <= 'Z')
+               || ('0' <= codepoint && codepoint <= '9') || codepoint == '_';
+    }
+
+    constexpr bool isKeyword(char32_t codepoint) noexcept
+    {
+        // vim default: (default: @,48-57,_,192-255)
+        //
+        // For '@' characters above 255 check the "word" character class
+        // (any character that is not white space or punctuation).
+        //
+        // TODO: The punctuation test is highly inefficient. Adapt libunicode to allow O(1) access to these.
+        return (codepoint > 255
+                && !(unicode::general_category::space_separator(codepoint)
+                     || unicode::general_category::initial_punctuation(codepoint)
+                     || unicode::general_category::final_punctuation(codepoint)
+                     || unicode::general_category::open_punctuation(codepoint)
+                     || unicode::general_category::close_punctuation(codepoint)
+                     || unicode::general_category::dash_punctuation(codepoint)))
+               || (192 <= codepoint && codepoint <= 255);
+    }
+
+    enum class WordSkipClass
+    {
+        Word,
+        Keyword,
+        Whitespace,
+        Other
+    };
+
+    [[maybe_unused]] std::string_view str(WordSkipClass value)
+    {
+        switch (value)
+        {
+            case WordSkipClass::Word: return "Word";
+            case WordSkipClass::Keyword: return "Keyword";
+            case WordSkipClass::Whitespace: return "Whitespace";
+            case WordSkipClass::Other: return "Other";
+        }
+        return "Wow";
+    }
+
+    constexpr WordSkipClass wordSkipClass(char32_t codepoint) noexcept
+    {
+        if (isWord(codepoint))
+            return WordSkipClass::Word;
+        else if (isKeyword(codepoint))
+            return WordSkipClass::Keyword;
+        else if (codepoint == ' ' || codepoint == '\t' || codepoint == 0)
+            return WordSkipClass::Whitespace;
+        else
+            return WordSkipClass::Other;
+    }
+
+    WordSkipClass wordSkipClass(std::string text) noexcept
+    {
+        auto const s32 = unicode::convert_to<char32_t>(std::string_view(text.data(), text.size()));
+        if (s32.size() == 0)
+            return WordSkipClass::Whitespace;
+        if (s32.size() == 1)
+            return wordSkipClass(s32[0]);
+        else
+            return WordSkipClass::Other;
+    }
+
+    // constexpr bool shouldSkipForUntilWordBeginReverse(WordSkipClass current, WordSkipClass& initial)
+    // noexcept
+    // {
+    //     auto const result = current == initial
+    //                         || (current == WordSkipClass::Whitespace && initial !=
+    //                         WordSkipClass::Whitespace);
+    //     return result;
+    // }
+
+    constexpr bool shouldSkipForUntilWordBegin(WordSkipClass current, WordSkipClass& initial) noexcept
+    {
+        bool const result = current == initial
+                            || (current == WordSkipClass::Whitespace && initial != WordSkipClass::Whitespace);
+
+        if (current == WordSkipClass::Whitespace && initial != WordSkipClass::Whitespace)
+            initial = WordSkipClass::Whitespace;
+
+        return result;
+    }
+
     CellLocation getRightMostNonEmptyCellLocation(Terminal const& terminal, LineOffset lineOffset) noexcept
     {
         if (terminal.isPrimaryScreen())
@@ -329,14 +422,14 @@ CellLocation ViCommands::prev(CellLocation location) const noexcept
     if (location.column.value > 0)
         return { location.line, location.column - 1 };
 
-    auto const rightMargin = _terminal.pageSize().columns.as<ColumnOffset>() - 1;
     auto const topLineOffset = _terminal.isPrimaryScreen()
-                                   ? -boxed_cast<LineOffset>(_terminal.primaryScreen().historyLineCount()) + 1
+                                   ? -boxed_cast<LineOffset>(_terminal.primaryScreen().historyLineCount())
                                    : LineOffset(0);
     if (location.line > topLineOffset)
     {
-        location.line--;
-        location.column = rightMargin;
+        location = getRightMostNonEmptyCellLocation(_terminal, location.line - 1);
+        if (location.column + 1 < boxed_cast<ColumnOffset>(_terminal.pageSize().columns))
+            ++location.column;
     }
 
     return location;
@@ -346,9 +439,12 @@ CellLocation ViCommands::next(CellLocation location) const noexcept
 {
     auto const rightMargin = _terminal.pageSize().columns.as<ColumnOffset>() - 1;
     if (location.column < rightMargin)
-        return { location.line, location.column + 1 };
+    {
+        auto const width = max(uint8_t { 1 }, _terminal.currentScreen().cellWidthAt(location));
+        return { location.line, location.column + ColumnOffset::cast_from(width) };
+    }
 
-    if (location.line < boxed_cast<LineOffset>(_terminal.pageSize().lines))
+    if (location.line < boxed_cast<LineOffset>(_terminal.pageSize().lines - 1))
     {
         location.line++;
         location.column = ColumnOffset(0);
@@ -629,22 +725,31 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
         case ViMotion::SearchResultForward:  // n TODO
             errorlog()("TODO: Missing implementation. Sorry. That will come. :-)");
             return cursorPosition;
-        case ViMotion::WordBackward: { // b
-            auto prev = cursorPosition;
-            if (prev.column.value > 0)
-                prev.column--;
-            auto current = prev;
+        case ViMotion::WordBackward: // b
+        {
+            auto const firstAddressableLocation =
+                CellLocation { -LineOffset::cast_from(_terminal.currentScreen().historyLineCount()),
+                               ColumnOffset(0) };
 
-            while (current.column.value > 0
-                   && !(!_terminal.wordDelimited(prev) && _terminal.wordDelimited(current)))
+            auto current = cursorPosition;
+            for (unsigned i = 0; i < count; ++i)
             {
-                prev.column = current.column;
-                current.column--;
+                auto next = prev(current);
+                auto nextClass = wordSkipClass(_terminal.currentScreen().cellTextAt(next));
+                auto continuationClass = nextClass;
+
+                while (current != firstAddressableLocation && nextClass == continuationClass)
+                {
+                    current = next;
+                    next = prev(current);
+                    nextClass = wordSkipClass(_terminal.currentScreen().cellTextAt(next));
+                    if (continuationClass == WordSkipClass::Whitespace
+                        && nextClass != WordSkipClass::Whitespace)
+                        continuationClass = nextClass;
+                }
             }
-            if (current.column.value == 0)
-                return current;
-            else
-                return prev;
+
+            return current;
         }
         case ViMotion::WordEndForward: { // e
             auto const rightMargin = _terminal.pageSize().columns.as<ColumnOffset>();
@@ -660,19 +765,20 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
             }
             return prev;
         }
-        case ViMotion::WordForward: { // w
-            auto const rightMargin = _terminal.pageSize().columns.as<ColumnOffset>();
-            auto prev = cursorPosition;
-            if (prev.column + 1 < rightMargin)
-                prev.column++;
-            auto current = prev;
-            while (current.column + 1 < rightMargin
-                   && !(_terminal.wordDelimited(prev) ^ _terminal.wordDelimited(current)))
-            {
-                prev = current;
-                current.column++;
-            }
-            return current;
+        case ViMotion::WordForward: // w
+        {
+            auto const lastAddressableLocation =
+                CellLocation { LineOffset::cast_from(_terminal.pageSize().lines - 1),
+                               ColumnOffset::cast_from(_terminal.pageSize().columns - 1) };
+            auto initialClass = wordSkipClass(_terminal.currentScreen().cellTextAt(cursorPosition));
+            auto result = next(cursorPosition);
+
+            while (result != lastAddressableLocation
+                   && shouldSkipForUntilWordBegin(wordSkipClass(_terminal.currentScreen().cellTextAt(result)),
+                                                  initialClass))
+                result = next(result);
+
+            return result;
         }
         case ViMotion::Explicit:  // <special for explicit operations>
         case ViMotion::Selection: // <special for visual modes>
