@@ -80,6 +80,7 @@ enum class ViMotion
     LineDown,             // j
     LineEnd,              // $
     LineUp,               // k
+    LinesCenter,          // M
     PageDown,             // <C-D>
     PageUp,               // <C-U>
     PageTop,              // <S-H> (inspired by tmux)
@@ -380,6 +381,7 @@ struct formatter<terminal::ViMotion>
             case ViMotion::LineDown: return fmt::format_to(ctx.out(), "LineDown");
             case ViMotion::LineEnd: return fmt::format_to(ctx.out(), "LineEnd");
             case ViMotion::LineUp: return fmt::format_to(ctx.out(), "LineUp");
+            case ViMotion::LinesCenter: return fmt::format_to(ctx.out(), "LinesCenter");
             case ViMotion::PageDown: return fmt::format_to(ctx.out(), "PageDown");
             case ViMotion::PageUp: return fmt::format_to(ctx.out(), "PageUp");
             case ViMotion::PageTop: return fmt::format_to(ctx.out(), "PageTop");

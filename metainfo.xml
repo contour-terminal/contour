@@ -119,6 +119,7 @@
           <li>Improvements to vi-like normal mode: word motions (`b`, `w`, `e`) now respect configurable word delimiters.</li>
           <li>Improvements to vi-like normal mode: support nested matching pairs, such as `{`, `(` etc in text objects.</li>
           <li>Improvements to vi-like normal mode: Add `%` motion to jump to matching symbol pairs.</li>
+          <li>Improvements to vi-like normal mode: Add `M` motion to jump to middle screen line (same column).</li>
         </ul>
       </description>
     </release>

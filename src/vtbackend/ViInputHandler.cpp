@@ -395,6 +395,7 @@ bool ViInputHandler::parseTextObject(char32_t ch, Modifier modifier)
         case 'U' | Modifier::Control: return executePendingOrMoveCursor(ViMotion::PageUp);
         case '$'_key: return executePendingOrMoveCursor(ViMotion::LineEnd);
         case '%'_key: return executePendingOrMoveCursor(ViMotion::ParenthesisMatching);
+        case 'M'_key: return executePendingOrMoveCursor(ViMotion::LinesCenter);
         case '0'_key: return executePendingOrMoveCursor(ViMotion::LineBegin);
         case '^'_key: return executePendingOrMoveCursor(ViMotion::LineTextBegin);
         case 'G'_key: return executePendingOrMoveCursor(ViMotion::FileEnd);

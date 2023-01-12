@@ -146,3 +146,17 @@ TEST_CASE("vi.motions: text objects", "[vi]")
         CHECK(selection.to() == 4_lineOffset + 33_columnOffset);
     }
 }
+
+TEST_CASE("vi.motions: M", "[vi]")
+{
+    auto mock = setupMockTerminal("Hello\r\n",
+                                  terminal::PageSize { terminal::LineCount(10), terminal::ColumnCount(40) });
+
+    // first move cursor by one right, to also ensure that column is preserved
+    mock.sendCharPressSequence("lM");
+    CHECK(mock.terminal.state().viCommands.cursorPosition == 4_lineOffset + 1_columnOffset);
+
+    // running M again won't change anything
+    mock.sendCharPressSequence("M");
+    CHECK(mock.terminal.state().viCommands.cursorPosition == 4_lineOffset + 1_columnOffset);
+}

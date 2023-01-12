@@ -573,6 +573,9 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
             return { max(cursorPosition.line - LineOffset::cast_from(count),
                          -_terminal.currentScreen().historyLineCount().as<LineOffset>()),
                      cursorPosition.column };
+        case ViMotion::LinesCenter: // M
+            return { max(LineOffset(0), LineOffset::cast_from(_terminal.pageSize().lines / 2 - 1)),
+                     cursorPosition.column };
         case ViMotion::PageDown:
             return { min(cursorPosition.line + LineOffset::cast_from(_terminal.pageSize().lines / 2),
                          _terminal.pageSize().lines.as<LineOffset>() - 1),
