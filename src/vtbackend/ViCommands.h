@@ -39,7 +39,7 @@ class ViCommands: public ViInputHandler::Executor
     void select(TextObjectScope scope, TextObject textObject) override;
     void yank(TextObjectScope scope, TextObject textObject) override;
     void yank(ViMotion motion) override;
-    void paste(unsigned count) override;
+    void paste(unsigned count, bool stripped) override;
 
     void searchStart() override;
     void searchDone() override;

@@ -275,6 +275,10 @@ void ViCommands::execute(ViOperator op, ViMotion motion, unsigned count)
             //.
             _terminal.sendPasteFromClipboard(count, false);
             break;
+        case ViOperator::PasteStripped:
+            //.
+            _terminal.sendPasteFromClipboard(count, true);
+            break;
         case ViOperator::ReverseSearchCurrentWord: // TODO: Does this even make sense to have?
             break;
     }
@@ -315,9 +319,9 @@ void ViCommands::yank(ViMotion motion)
     _terminal.screenUpdated();
 }
 
-void ViCommands::paste(unsigned count)
+void ViCommands::paste(unsigned count, bool stripped)
 {
-    _terminal.sendPasteFromClipboard(count, false);
+    _terminal.sendPasteFromClipboard(count, stripped);
 }
 
 CellLocation ViCommands::prev(CellLocation location) const noexcept
