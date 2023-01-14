@@ -100,6 +100,7 @@ enum class ViOperator
     MoveCursor,
     Yank = 'y',
     Paste = 'p',
+    PasteStripped = 'P',
     ReverseSearchCurrentWord = '#',
 };
 
@@ -170,7 +171,7 @@ class ViInputHandler: public InputHandler
         virtual void select(TextObjectScope scope, TextObject textObject) = 0;
         virtual void yank(TextObjectScope scope, TextObject textObject) = 0;
         virtual void yank(ViMotion motion) = 0;
-        virtual void paste(unsigned count) = 0;
+        virtual void paste(unsigned count, bool stripped) = 0;
 
         virtual void modeChanged(ViMode mode) = 0;
 
@@ -347,6 +348,7 @@ struct formatter<terminal::ViOperator>
             case ViOperator::MoveCursor: return fmt::format_to(ctx.out(), "MoveCursor");
             case ViOperator::Yank: return fmt::format_to(ctx.out(), "Yank");
             case ViOperator::Paste: return fmt::format_to(ctx.out(), "Paste");
+            case ViOperator::PasteStripped: return fmt::format_to(ctx.out(), "PasteStripped");
             case ViOperator::ReverseSearchCurrentWord:
                 return fmt::format_to(ctx.out(), "ReverseSearchCurrentWord");
         }

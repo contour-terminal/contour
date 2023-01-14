@@ -348,7 +348,8 @@ bool ViInputHandler::executePendingOrMoveCursor(ViMotion motion)
     {
         case ViOperator::MoveCursor: _executor.moveCursor(motion, _count ? _count : 1); break;
         case ViOperator::Yank: _executor.yank(motion); break;
-        case ViOperator::Paste: _executor.paste(_count ? _count : 1); break;
+        case ViOperator::Paste: _executor.paste(_count ? _count : 1, false); break;
+        case ViOperator::PasteStripped: _executor.paste(_count ? _count : 1, true); break;
         case ViOperator::ReverseSearchCurrentWord: _executor.reverseSearchCurrentWord(); break;
     }
 
@@ -494,7 +495,8 @@ void ViInputHandler::handleNormalMode(char32_t ch, Modifier modifier)
         case 'v'_key: toggleMode(ViMode::Visual); return;
         case '#'_key: _executor.reverseSearchCurrentWord(); return;
         case '*'_key: _executor.searchCurrentWord(); return;
-        case 'p'_key: _executor.paste(_count ? _count : 1); return;
+        case 'p'_key: _executor.paste(_count ? _count : 1, false); return;
+        case 'P'_key: _executor.paste(_count ? _count : 1, true); return;
         case 'n'_key: _executor.jumpToNextMatch(_count ? _count : 1); return;
         case 'N'_key: _executor.jumpToPreviousMatch(_count ? _count : 1); return;
         case 'y'_key:
