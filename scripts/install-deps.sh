@@ -306,6 +306,7 @@ install_deps_arch()
         qt6-base \
         qt6-declarative \
         qt6-multimedia \
+        qt6-wayland \
         range-v3 \
         yaml-cpp
 }
@@ -368,6 +369,7 @@ install_deps_fedora()
             qt6-qtbase-gui
             qt6-qtdeclarative-devel
             qt6-qtmultimedia-devel
+            qt6-qtwayland
         "
     else
         packages="$packages
