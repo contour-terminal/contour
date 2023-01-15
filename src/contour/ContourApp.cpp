@@ -228,20 +228,21 @@ int ContourApp::integrationAction()
 {
     return withOutput(parameters(), "contour.generate.integration.to", [&](auto& _stream) {
         auto const shell = parameters().get<string>("contour.generate.integration.shell");
+        QFile file;
         if (shell == "zsh")
-        {
-            QFile file(":/contour/shell-integration.zsh");
-            file.open(QFile::ReadOnly);
-            auto const contents = file.readAll();
-            _stream.write(contents.constData(), contents.size());
-            return EXIT_SUCCESS;
-        }
+            file.setFileName(":/contour/shell-integration/shell-integration.zsh");
+        else if (shell == "fish")
+            file.setFileName(":/contour/shell-integration/shell-integration.fish");
         else
         {
             std::cerr << fmt::format("Cannot generate shell integration for an unsupported shell, {}.\n",
                                      shell);
             return EXIT_FAILURE;
         }
+        file.open(QFile::ReadOnly);
+        auto const contents = file.readAll();
+        _stream.write(contents.constData(), contents.size());
+        return EXIT_SUCCESS;
     });
 }
 
@@ -352,12 +353,12 @@ crispy::cli::Command ContourApp::parameterDefinition() const
                         "integration",
                         "Generates shell integration script.",
                         CLI::OptionList {
-                            CLI::Option {
-                                "shell",
-                                CLI::Value { ""s },
-                                "Shell name to create the integration for. Currently only zsh is supported.",
-                                "SHELL",
-                                CLI::Presence::Required },
+                            CLI::Option { "shell",
+                                          CLI::Value { ""s },
+                                          "Shell name to create the integration for. Currently only zsh and "
+                                          "fish are supported.",
+                                          "SHELL",
+                                          CLI::Presence::Required },
                             CLI::Option { "to",
                                           CLI::Value { ""s },
                                           "Output file name to store the shell integration file to. If - "
