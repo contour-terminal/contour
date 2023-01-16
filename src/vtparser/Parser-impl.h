@@ -381,6 +381,18 @@ void Parser<EventListener, TraceStateChanges>::processOnceViaStateMachine(uint8_
         eventListener_.error("Parser error: Unknown action for state/input pair.");
 }
 
+namespace detail
+{
+    inline std::string hex(auto const& text)
+    {
+        std::string encodedText;
+        encodedText.reserve(text.size() * 4);
+        for (auto const ch: text)
+            encodedText += fmt::format("\\x{:02X}", static_cast<unsigned>(ch));
+        return encodedText;
+    }
+} // namespace detail
+
 template <typename EventListener, bool TraceStateChanges>
 auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, char const* end) noexcept
     -> std::tuple<ProcessKind, size_t>
@@ -394,7 +406,39 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
         return { ProcessKind::FallbackToFSM, 0 };
 
     auto const chunk = std::string_view(input, static_cast<size_t>(std::distance(input, end)));
-    auto const [cellCount, next, subStart, subEnd] = unicode::scan_for_text(scanState_, chunk, maxCharCount);
+    // VTTraceParserLog()("scan_for_test: input chunk: {}", detail::hex(chunk));
+    auto const [cellCount, next, subStart, subEnd] = unicode::scan_text(scanState_, chunk, maxCharCount);
+    #if 0
+    // next      := 1 byte behind last successfully scanned byte (continue here on next iteration)
+    // subStart  := Pointer to UTF-8 grapheme cluster start.
+    // subEnd    := Pointer to UTF-8 grapheme cluster end, i.e. one byte behind
+    //              the last successfuly processed complete UTF-8 byte..
+    VTTraceParserLog()("scan_for_test: cellCount {}, parsed {}, remaining: {}",
+                       cellCount,
+                       detail::hex(chunk.substr(0, next - (chunk.data() + chunk.size()))),
+                       detail::hex(std::string_view(next, chunk.data() + chunk.size())));
+    {
+        std::string underline(chunk.size() * 4, ' ');
+        char ch = 'a';
+        for (auto const ptr: { next, subStart, subEnd })
+        {
+            if (ptr < chunk.data())
+                continue;
+            if (ptr > chunk.data() + chunk.size())
+                continue;
+            auto const offset = std::distance(chunk.data(), ptr);
+            assert(offset >= 0);
+            for (unsigned i = 2; i < 4; ++i)
+            {
+                assert(unsigned(offset) * 4u + i < underline.size());
+                underline[unsigned(offset) * 4u + i] = ch;
+            }
+            ch++;
+        }
+        VTTraceParserLog()("text: {}\n", detail::hex(chunk));
+        VTTraceParserLog()("    : {}\n", underline);
+    }
+    #endif
 
     if (next == input)
         return { ProcessKind::FallbackToFSM, 0 };
@@ -411,7 +455,10 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     assert(subEnd <= chunk.data() + chunk.size());
     assert(next <= chunk.data() + chunk.size());
 
-#if defined(LIBTERMINAL_LOG_TRACE)
+    // if (cellCount == 0)
+    //     sleep(3);
+
+#if 1 // defined(LIBTERMINAL_LOG_TRACE)
     if (VTTraceParserLog)
         VTTraceParserLog()(
             "[Unicode] Scanned text: maxCharCount {}; cells {}; bytes {}; UTF-8 ({}/{}): \"{}\"",
