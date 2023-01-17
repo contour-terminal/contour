@@ -1140,7 +1140,10 @@ namespace
                 text += '\n';
                 currentLine.clear();
             }
-            currentLine += cell.toUtf8();
+            if (cell.empty())
+                currentLine += ' ';
+            else
+                currentLine += cell.toUtf8();
             lastColumn = pos.column;
         }
 
