@@ -3,5 +3,6 @@
         <file>contour.yml</file>
         <file>shell-integration.zsh</file>
         <file alias="logo.png">res/images/contour-logo-256.png</file>
+        <file alias="bell.oga">res/bell.oga</file>
     </qresource>
 </RCC>
