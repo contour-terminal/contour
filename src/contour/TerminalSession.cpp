@@ -232,10 +232,7 @@ void TerminalSession::terminate()
 // {{{ Events implementations
 void TerminalSession::bell()
 {
-    SessionLog()("TODO: Beep!");
-    QApplication::beep();
-    // QApplication::beep() requires Qt Widgets dependency. doesn't suound good.
-    // so maybe just a visual bell then? That would require additional OpenGL/shader work then though.
+    display_->post([this]() { display_->bell(); });
 }
 
 void TerminalSession::bufferChanged(terminal::ScreenType _type)

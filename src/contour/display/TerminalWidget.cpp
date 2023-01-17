@@ -48,6 +48,9 @@
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QStyle>
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    #include <QtMultimedia/QAudioOutput>
+#endif
 
 #include <algorithm>
 #include <cstring>
@@ -239,7 +242,8 @@ TerminalWidget::TerminalWidget():
     QOpenGLWidget(nullptr, Qt::WindowFlags()),
     startTime_ { steady_clock::time_point::min() },
     lastFontDPI_ { fontDPI() },
-    filesystemWatcher_(this)
+    filesystemWatcher_(this),
+    mediaPlayer_()
 {
     initializeResourcesForContourFrontendOpenGL();
 
@@ -256,6 +260,14 @@ TerminalWidget::TerminalWidget():
     connect(&updateTimer_, &QTimer::timeout, [this]() { scheduleRedraw(); });
 
     connect(this, SIGNAL(frameSwapped()), this, SLOT(onFrameSwapped()));
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    audioOutput_ = new QAudioOutput(this);
+    audioOutput_->setVolume(100);
+    mediaPlayer_.setAudioOutput(audioOutput_);
+#else
+    mediaPlayer_.setVolume(100);
+#endif
 }
 
 void TerminalWidget::setSession(TerminalSession& newSession)
@@ -315,6 +327,10 @@ TerminalWidget::~TerminalWidget()
     makeCurrent(); // XXX must be called.
     renderTarget_.reset();
     doneCurrent();
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    delete audioOutput_;
+#endif
 }
 
 terminal::PageSize TerminalWidget::windowSize() const noexcept
@@ -848,7 +864,21 @@ terminal::FontDef TerminalWidget::getFontDef()
 
 void TerminalWidget::bell()
 {
-    QApplication::beep();
+    auto const bellUrl = QUrl("qrc:/contour/bell.oga");
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    if (mediaPlayer_.playbackState() == QMediaPlayer::PlaybackState::PlayingState)
+        mediaPlayer_.stop();
+
+    mediaPlayer_.setSource(bellUrl);
+#else
+    if (mediaPlayer_.state() == QMediaPlayer::State::PlayingState)
+        mediaPlayer_.stop();
+
+    mediaPlayer_.setMedia(QMediaContent(bellUrl));
+#endif
+
+    mediaPlayer_.play();
 }
 
 void TerminalWidget::copyToClipboard(std::string_view _data)

@@ -114,6 +114,7 @@
           <li>Fixes switching to normal mode sometimes placing the vi cursor wrong.</li>
           <li>Fixes vi-like normal mode's word motions `w`, `e`, and `b` to better emulate vim's behaviour.</li>
           <li>Fixes copying text to clipboard stripping TAB-character generated spaces (#982).</li>
+          <li>Fixes `BEL`'s audio feedback not working on some platform by streamlineing the behaviour with a custom bell sound.</li>
           <li>Adds trace mode to single-step through each VT sequence. New actions: `TraceEnter`, `TraceLeave`, `TraceStep`, `TraceBreakAtEmptyQueue` and new mode flag `Trace`.</li>
           <li>Adds implementation for `SO` and `SI` control codes.</li>
           <li>Improvements to text objects in vi-like normal mode (`i)`, `a)`, `i>`, `a>`, `i]`, `a]`, `i}`, `a}`).</li>

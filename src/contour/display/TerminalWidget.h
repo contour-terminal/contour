@@ -36,6 +36,7 @@
 #else
     #include <QtWidgets/QOpenGLWidget>
 #endif
+#include <QtMultimedia/QMediaPlayer>
 #include <QtWidgets/QMainWindow>
 #include <QtWidgets/QScrollBar>
 #include <QtWidgets/QSystemTrayIcon>
@@ -239,6 +240,11 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
     RenderStateManager state_;
 
     QFileSystemWatcher filesystemWatcher_;
+    QMediaPlayer mediaPlayer_;
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    QAudioOutput* audioOutput_ = nullptr;
+#endif
 
     // ======================================================================
 
