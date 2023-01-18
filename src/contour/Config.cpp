@@ -1164,13 +1164,33 @@ namespace
                 for (auto&& i: featuresNode)
                 {
                     auto const featureNode = i;
-                    if (!featureNode.IsScalar() || featureNode.as<string>().size() != 4)
+                    if (!featureNode.IsScalar())
                     {
                         errorlog()("Invalid font feature \"{}\".", featureNode.as<string>());
                         continue;
                     }
-                    auto const tag = featureNode.as<string>();
-                    _store.features.emplace_back(tag[0], tag[1], tag[2], tag[3]);
+
+                    // Feature can be either 4 letter code or optionally ending with - to denote disabling it.
+                    auto const [tag, enabled] = [&]() -> tuple<string, bool> {
+                        auto value = featureNode.as<string>();
+                        if (!value.empty())
+                        {
+                            if (value[0] == '+')
+                                return { value.substr(1), true };
+                            if (value[0] == '-')
+                                return { value.substr(1), false };
+                        }
+                        return { std::move(value), true };
+                    }();
+
+                    if (tag.size() != 4)
+                    {
+                        errorlog()(
+                            "Invalid font feature \"{}\". Font features are denoted as 4-letter codes.",
+                            featureNode.as<string>());
+                        continue;
+                    }
+                    _store.features.emplace_back(tag[0], tag[1], tag[2], tag[3], enabled);
                 }
             }
         }
