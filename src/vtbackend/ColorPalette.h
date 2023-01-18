@@ -122,8 +122,13 @@ struct ColorPalette
 
     // clang-format off
     CellRGBColorAndAlphaPair yankHighlight { CellForegroundColor {}, 1.0f, 0xffA500_rgb, 0.5f };
+
     CellRGBColorAndAlphaPair searchHighlight { CellBackgroundColor {}, 1.0f, CellForegroundColor {}, 1.0f };
     CellRGBColorAndAlphaPair searchHighlightFocused { CellForegroundColor {}, 1.0f, RGBColor{0xFF, 0x30, 0x30}, 0.5f };
+
+    CellRGBColorAndAlphaPair wordHighlight { CellForegroundColor {}, 1.0f, RGBColor{0x30, 0x90, 0x90}, 0.4f };
+    CellRGBColorAndAlphaPair wordHighlightCurrent { CellForegroundColor {}, 1.0f, RGBColor{0x90, 0x90, 0x90}, 0.6f };
+
     CellRGBColorAndAlphaPair selection { CellBackgroundColor {}, 1.0f, CellForegroundColor {}, 1.0f };
     // clang-format on
 

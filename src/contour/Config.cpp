@@ -989,6 +989,12 @@ namespace
         if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "search_highlight_focused"))
             colors.searchHighlightFocused = p.value();
 
+        if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "word_highlight_current"))
+            colors.wordHighlightCurrent = p.value();
+
+        if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "word_highlight_other"))
+            colors.wordHighlight = p.value();
+
         if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "selection"))
             colors.selection = p.value();
 

@@ -512,6 +512,25 @@ color_schemes:
             foreground_alpha: 1.0
             background_alpha: 1.0
 
+        # Coloring for the word that is highlighted due to double-clicking it.
+        #
+        # The format is similar to selection highlighting.
+        word_highlight_current:
+            foreground: CellForeground
+            background: '#909090'
+            foreground_alpha: 1.0
+            background_alpha: 0.5
+
+        # Coloring for the word that is highlighted due to double-clicking
+        # another word that matches this word.
+        #
+        # The format is similar to selection highlighting.
+        word_highlight_other:
+            foreground: CellForeground
+            background: '#909090'
+            foreground_alpha: 1.0
+            background_alpha: 0.5
+
         # Defines the colors to be used for the Indicator status line.
         # Values must be in RGB form.
         indicator_statusline:

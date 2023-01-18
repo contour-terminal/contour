@@ -709,7 +709,6 @@ bool Terminal::handleMouseSelection(Modifier modifier, Timestamp now)
                 auto const text = extractSelectionText();
                 auto const text32 = unicode::convert_to<char32_t>(string_view(text.data(), text.size()));
                 setNewSearchTerm(text32, true);
-                _state.searchMode.initiatedByDoubleClick = true;
             }
             break;
         case 3:

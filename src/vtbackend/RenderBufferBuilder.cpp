@@ -447,14 +447,30 @@ void RenderBufferBuilder<Cell>::matchSearchPattern(T const& textCell)
             .contains(terminal.viewport().translateGridToScreenCoordinate(
                 terminal.state().viCommands.cursorPosition));
 
+    auto highlightColors = [&]() -> CellRGBColorAndAlphaPair {
+        // Oh yeah, this can be optimized :)
+        if (isFocusedMatch)
+        {
+            if (terminal.state().searchMode.initiatedByDoubleClick)
+                return terminal.colorPalette().wordHighlightCurrent;
+            else
+                return terminal.colorPalette().searchHighlightFocused;
+        }
+        else
+        {
+            if (terminal.state().searchMode.initiatedByDoubleClick)
+                return terminal.colorPalette().wordHighlight;
+            else
+                return terminal.colorPalette().searchHighlight;
+        }
+    }();
+
     for (size_t i = offsetIntoFront; i < output.cells.size(); ++i)
     {
         auto& cellAttributes = output.cells[i].attributes;
-
-        auto const searchMatchColors =
-            makeRGBColorPair(RGBColorPair { cellAttributes.foregroundColor, cellAttributes.backgroundColor },
-                             isFocusedMatch ? terminal.colorPalette().searchHighlightFocused
-                                            : terminal.colorPalette().searchHighlight);
+        auto const actualColors =
+            RGBColorPair { cellAttributes.foregroundColor, cellAttributes.backgroundColor };
+        auto const searchMatchColors = makeRGBColorPair(actualColors, highlightColors);
 
         cellAttributes.backgroundColor = searchMatchColors.background;
         cellAttributes.foregroundColor = searchMatchColors.foreground;
