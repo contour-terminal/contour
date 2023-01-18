@@ -352,7 +352,7 @@ namespace
         {
             hb_feature_t hbFeature;
             hbFeature.tag = HB_TAG(feature.name[0], feature.name[1], feature.name[2], feature.name[3]);
-            hbFeature.value = 1;
+            hbFeature.value = feature.enabled ? 1 : 0;
             hbFeature.start = 0;
             hbFeature.end = HB_FEATURE_GLOBAL_END;
             hbFeatures.emplace_back(hbFeature);

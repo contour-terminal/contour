@@ -157,8 +157,13 @@ constexpr std::optional<font_spacing> make_font_spacing(std::string_view text)
 struct font_feature
 {
     std::array<char, 4> name; // well defined unique four-letter font feature identifier.
+    bool enabled = true;
 
-    font_feature(char a, char b, char c, char d): name { a, b, c, d } {}
+    font_feature(char a, char b, char c, char d, bool enabled = true):
+        name { a, b, c, d }, enabled { enabled }
+    {
+    }
+
     font_feature(font_feature const&) = default;
     font_feature(font_feature&&) = default;
     font_feature& operator=(font_feature const&) = default;
@@ -539,8 +544,13 @@ struct formatter<text::font_feature>
     template <typename FormatContext>
     auto format(text::font_feature value, FormatContext& ctx)
     {
-        return fmt::format_to(
-            ctx.out(), "{}{}{}{}", value.name[0], value.name[1], value.name[2], value.name[3]);
+        return fmt::format_to(ctx.out(),
+                              "{}{}{}{}{}",
+                              value.enabled ? '+' : '-',
+                              value.name[0],
+                              value.name[1],
+                              value.name[2],
+                              value.name[3]);
     }
 };
 
