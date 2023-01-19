@@ -87,18 +87,20 @@ namespace
     }
 
     constexpr inline auto booleanCaps = defineCapabilities(
-        Boolean { "Su"_tcap, "Su"sv, true },   // supports extended underline styling (such as undercurl)
-        Boolean { "am"_tcap, "am"sv, true },   // terminal has automatic margins
-        Boolean { "ut"_tcap, "bce"sv, true },  // screen erased with background color
-        Boolean { "cc"_tcap, "ccc"sv, true },  // terminal can re-define existing colors
-        Boolean { "xn"_tcap, "xenl"sv, true }, // newline ignored after 80 cols (concept)
-        Boolean { "km"_tcap, "km"sv, true },   // Has a meta key (i.e., sets 8th-bit)
-        Boolean { "mi"_tcap, "mir"sv, true },  // safe to move while in insert mode
-        Boolean { "ms"_tcap, "msgr"sv, true }, // safe to move while in standout mode
-        Boolean { "NP"_tcap, "npc"sv, true },  // pad character does not exist
-        Boolean { "5i"_tcap, "mc5i"sv, true }, // printer will not echo on screen
-        Boolean { "YD"_tcap, "xvpa"sv, true }, // only positive motion for vpa/mvpa caps
-        Boolean { "Tc"_tcap, "Tc"sv, true }    // RGB color support (introduced by Tmux in 2016)
+        Boolean { "Su"_tcap, "Su"sv, true },    // supports extended underline styling (such as undercurl)
+        Boolean { "am"_tcap, "am"sv, true },    // terminal has automatic margins
+        Boolean { "hs"_tcap, "hs"sv, true },    // has extra status line (has_status_line)
+        Boolean { "es"_tcap, "eslok"sv, true }, // escapes in status-line are okay
+        Boolean { "ut"_tcap, "bce"sv, true },   // screen erased with background color
+        Boolean { "cc"_tcap, "ccc"sv, true },   // terminal can re-define existing colors
+        Boolean { "xn"_tcap, "xenl"sv, true },  // newline ignored after 80 cols (concept)
+        Boolean { "km"_tcap, "km"sv, true },    // Has a meta key (i.e., sets 8th-bit)
+        Boolean { "mi"_tcap, "mir"sv, true },   // safe to move while in insert mode
+        Boolean { "ms"_tcap, "msgr"sv, true },  // safe to move while in standout mode
+        Boolean { "NP"_tcap, "npc"sv, true },   // pad character does not exist
+        Boolean { "5i"_tcap, "mc5i"sv, true },  // printer will not echo on screen
+        Boolean { "YD"_tcap, "xvpa"sv, true },  // only positive motion for vpa/mvpa caps
+        Boolean { "Tc"_tcap, "Tc"sv, true }     // RGB color support (introduced by Tmux in 2016)
     );
 
     constexpr inline auto numericalCaps = defineCapabilities(
@@ -200,14 +202,25 @@ namespace
         String { "us"_tcap, "smul"sv, "\033[4m"sv },  // Enter underline mode
         String { "Ts"_tcap, "smxx"sv, "\033[9m"sv },  // Enter strikethrough mode
         String { "ct"_tcap, "tbc"sv, "\033[3g"sv },   // Clear all tab stops
-        String { "ts"_tcap, "tsl"sv, "\033]2;"sv },   // To status line (used to set window titles)
-        String { "fs"_tcap, "fsl"sv, "^G"sv },        // From status line (end window title string)
-        String { "ds"_tcap, "dsl"sv, "\033]2;\033\\"sv }, // Disable status line (clear window title)
         String { "cv"_tcap, "vpa"sv, "\033[%i%p1%dd"sv }, // Move to specified line
         String { "ZH"_tcap, "sitm"sv, "\033[3m"sv }, // Enter italics mode
         String { "ZR"_tcap, "ritm"sv, "\033[23m"sv },// Leave italics mode
         String { "as"_tcap, "smacs"sv, "\033(0"sv }, // start alternate character set (P)
         String { "ae"_tcap, "rmacs"sv, "\033(B"sv }, // end alternate character set (P)
+
+        // tsl (to_status_line):
+        // 1. DECSSDT 2 (show to host writable status line)
+        // 2. DECSASD 1 (set host writable statusline as active target)
+        // 3. CUP 1;%d (move cursor to given column, defaulting to 1)
+        String { "ts"_tcap, "tsl"sv, "\033[2$~\033[1$}\033[1;%dH"sv }, // To status line (used to set window titles)
+
+        // fsl (from_status_line):
+        // 1. DECSASD (set main display as active display target again)
+        String { "fs"_tcap, "fsl"sv, "\033[$}"sv },                    // From status line (end window title string)
+
+        // ds (dis_status_line):
+        // DECSSDT 0 (set status display type to none)
+        String { "ds"_tcap, "dsl"sv, "\033[$~"sv }, // Disable status line
 
         // Synchronized Output
         String { Undefined, "Sync"sv, "\033[?2026%?%p1%{1}%-%tl%eh"sv },

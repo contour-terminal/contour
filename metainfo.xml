@@ -119,6 +119,8 @@
           <li>Adds trace mode to single-step through each VT sequence. New actions: `TraceEnter`, `TraceLeave`, `TraceStep`, `TraceBreakAtEmptyQueue` and new mode flag `Trace`.</li>
           <li>Adds implementation for `SO` and `SI` control codes.</li>
           <li>Adds ability to explicitly disable a font feature by prefixing the feature with a `-`, such as `-calt`, explicitly enabling via `+` prefix was added as well.</li>
+          <li>Adds terminal capability `hs` and `es` to improve status-line feature detection via terminfo.</li>
+          <li>Changes terminfo entries `tsl`, `fsl` and `dsl` to make use of the host-writable statusline.</li>
           <li>Improvements to text objects in vi-like normal mode (`i)`, `a)`, `i>`, `a>`, `i]`, `a]`, `i}`, `a}`).</li>
           <li>Improvements to vi-like normal mode: yank-motions (`yw`, `y$`, etc).</li>
           <li>Improvements to vi-like normal mode: support nested matching pairs, such as `{`, `(` etc in text objects.</li>
