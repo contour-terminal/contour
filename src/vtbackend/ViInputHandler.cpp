@@ -84,6 +84,7 @@ namespace
             case '`': return TextObject::BackQuotes;
             case 'p': return TextObject::Paragraph;
             case 'w': return TextObject::Word;
+            case 'W': return TextObject::BigWord;
             case '{': return TextObject::CurlyBrackets;
             case '}': return TextObject::CurlyBrackets;
             default: return nullopt;
@@ -417,6 +418,9 @@ bool ViInputHandler::parseTextObject(char32_t ch, Modifier modifier)
         case '{'_key: return executePendingOrMoveCursor(ViMotion::ParagraphBackward);
         case '|'_key: return executePendingOrMoveCursor(ViMotion::ScreenColumn);
         case '}'_key: return executePendingOrMoveCursor(ViMotion::ParagraphForward);
+        case 'W'_key: return executePendingOrMoveCursor(ViMotion::BigWordForward);
+        case 'B'_key: return executePendingOrMoveCursor(ViMotion::BigWordBackward);
+        case 'E'_key: return executePendingOrMoveCursor(ViMotion::BigWordEndForward);
     }
 
     if (modifier.any())

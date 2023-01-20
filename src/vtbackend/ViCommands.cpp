@@ -568,11 +568,15 @@ CellLocationRange ViCommands::translateToCellRange(TextObjectScope scope,
         case TextObject::SingleQuotes: return expandMatchingPair(scope, '\'', '\'');
         case TextObject::SquareBrackets: return expandMatchingPair(scope, '[', ']');
         case TextObject::Word:
-            while (a.column.value > 0 && !_terminal.currentScreen().isCellEmpty({ a.line, a.column - 1 }))
-                --a.column;
-            while (b.column < rightMargin && !_terminal.currentScreen().isCellEmpty({ b.line, b.column }))
-                ++b.column;
+            // TODO
+        case TextObject::BigWord:
+        {
+            while (a.column.value > 0 && !_terminal.currentScreen().isCellEmpty(prev(a)))
+                a = prev(a);
+            while (b.column < rightMargin && !_terminal.currentScreen().isCellEmpty(next(b)))
+                b = next(b);
             break;
+        }
     }
     return { a, b };
 }
@@ -764,6 +768,57 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
                 current.column++;
             }
             return prev;
+        }
+        case ViMotion::BigWordForward: // W
+        {
+            auto const rightMargin = _terminal.pageSize().columns.as<ColumnOffset>();
+            auto prev = cursorPosition;
+            if (prev.column + 1 < rightMargin)
+                prev.column++;
+            auto current = prev;
+            while (current.column + 1 < rightMargin
+                   && (_terminal.currentScreen().isCellEmpty(current)
+                       || !_terminal.currentScreen().isCellEmpty(prev)))
+            {
+                prev = current;
+                current.column++;
+            }
+            return current;
+        }
+        case ViMotion::BigWordEndForward: // E
+        {
+            auto const rightMargin = _terminal.pageSize().columns.as<ColumnOffset>();
+            auto prev = cursorPosition;
+            if (prev.column + 1 < rightMargin)
+                prev.column++;
+            auto current = prev;
+            while (current.column + 1 < rightMargin
+                   && (!_terminal.currentScreen().isCellEmpty(current)
+                       || _terminal.currentScreen().isCellEmpty(prev)))
+            {
+                prev.column = current.column;
+                current.column++;
+            }
+            return prev;
+        }
+        case ViMotion::BigWordBackward:   // B
+        {
+            auto prev = cursorPosition;
+            if (prev.column.value > 0)
+                prev.column--;
+            auto current = prev;
+
+            while (current.column.value > 0
+                   && (!_terminal.currentScreen().isCellEmpty(current)
+                       || _terminal.currentScreen().isCellEmpty(prev)))
+            {
+                prev.column = current.column;
+                current.column--;
+            }
+            if (current.column.value == 0)
+                return current;
+            else
+                return prev;
         }
         case ViMotion::WordForward: // w
         {
