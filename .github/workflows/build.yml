@@ -278,8 +278,9 @@ jobs:
       - name: Install Qt
         uses: jurplel/install-qt-action@v3
         with:
-          version: "6.4.*"
-          modules: qtmultimedia
+          #version: "6.4.*"
+          version: "5.15.*"
+          #modules: qtmultimedia
       - name: "vcpkg: Install dependencies"
         uses: lukka/run-vcpkg@v5
         id: runvcpkg
@@ -296,7 +297,7 @@ jobs:
                 New-Item -ItemType Directory -Force -Path build
           }
       - name: "Generate build files"
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DCONTOUR_BUILD_WITH_QT6=ON -DCMAKE_CXX_STANDARD=17 -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -B build .
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DCONTOUR_BUILD_WITH_QT6=OFF -DCMAKE_CXX_STANDARD=17 -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -B build .
       - name: "Build"
         run: cmake --build build/ --config Release
       - name: "test: crispy"
@@ -552,7 +553,7 @@ jobs:
             # CMAKE_CXX_STANDARD=17
             export CXX="g++-10"
           elif [[ "${{ matrix.os_version }}" = "22.04" ]]; then
-            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_BUILD_WITH_QT6=ON"
+            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_BUILD_WITH_QT6=OFF"
           fi
           BUILD_DIR="build" \
             CMAKE_BUILD_TYPE=RelWithDebInfo \
