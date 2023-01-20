@@ -14,6 +14,7 @@
 #pragma once
 
 #include <vtbackend/InputGenerator.h>
+#include <vtbackend/ViInputHandler.h>
 
 #include <crispy/size.h>
 #include <crispy/times.h>
@@ -79,8 +80,12 @@ class Selection
 
     using OnSelectionUpdated = std::function<void()>;
 
-    Selection(SelectionHelper const& helper, CellLocation start, OnSelectionUpdated onSelectionUpdated):
+    Selection(SelectionHelper const& helper,
+              ViMode viMode,
+              CellLocation start,
+              OnSelectionUpdated onSelectionUpdated):
         _helper { helper },
+        _viMode { viMode },
         _onSelectionUpdated { std::move(onSelectionUpdated) },
         _from { start },
         _to { start }
@@ -97,6 +102,8 @@ class Selection
     [[nodiscard]] virtual bool contains(CellLocation coord) const noexcept;
     [[nodiscard]] bool containsLine(LineOffset line) const noexcept;
     [[nodiscard]] virtual bool intersects(Rect area) const noexcept;
+
+    [[nodiscard]] ViMode viMode() const noexcept { return _viMode; }
 
     /// Tests whether the a selection is currently in progress.
     [[nodiscard]] constexpr State state() const noexcept { return _state; }
@@ -118,6 +125,7 @@ class Selection
   protected:
     State _state = State::Waiting;
     SelectionHelper const& _helper;
+    ViMode _viMode;
     OnSelectionUpdated _onSelectionUpdated;
     CellLocation _from;
     CellLocation _to;

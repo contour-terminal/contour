@@ -688,6 +688,9 @@ bool Terminal::handleMouseSelection(Modifier modifier, Timestamp now)
         _currentMousePosition.column,
     };
 
+    if (_state.inputHandler.mode() != ViMode::Insert)
+        _state.viCommands.cursorPosition = startPos;
+
     switch (_speedClicks)
     {
         case 1:
@@ -695,11 +698,19 @@ bool Terminal::handleMouseSelection(Modifier modifier, Timestamp now)
                 clearSearch();
             clearSelection();
             if (modifier == _settings.mouseBlockSelectionModifier)
+            {
                 _selection =
                     make_unique<RectangularSelection>(_selectionHelper, startPos, selectionUpdatedHelper());
+                // if (_state.inputHandler.mode() != ViMode::Insert)
+                //     _state.inputHandler.setMode(ViMode::VisualBlock);
+            }
             else
+            {
                 _selection =
                     make_unique<LinearSelection>(_selectionHelper, startPos, selectionUpdatedHelper());
+                // if (_state.inputHandler.mode() != ViMode::Insert)
+                //     _state.inputHandler.setMode(ViMode::Visual);
+            }
             break;
         case 2:
             _selection = make_unique<WordWiseSelection>(_selectionHelper, startPos, selectionUpdatedHelper());
@@ -709,11 +720,15 @@ bool Terminal::handleMouseSelection(Modifier modifier, Timestamp now)
                 auto const text = extractSelectionText();
                 auto const text32 = unicode::convert_to<char32_t>(string_view(text.data(), text.size()));
                 setNewSearchTerm(text32, true);
+                // if (_state.inputHandler.mode() != ViMode::Insert)
+                //     _state.inputHandler.setMode(ViMode::Visual);
             }
             break;
         case 3:
             _selection = make_unique<FullLineSelection>(_selectionHelper, startPos, selectionUpdatedHelper());
             _selection->extend(startPos);
+            // if (_state.inputHandler.mode() != ViMode::Insert)
+            //     _state.inputHandler.setMode(ViMode::VisualLine);
             break;
         default: clearSelection(); break;
     }
@@ -725,8 +740,12 @@ bool Terminal::handleMouseSelection(Modifier modifier, Timestamp now)
 void Terminal::clearSelection()
 {
     if (_state.inputHandler.isVisualMode())
-        // Don't clear if in visual mode.
-        return;
+    {
+        if (!_leftMouseButtonPressed)
+            // Don't clear if in visual mode and mouse wasn't used.
+            return;
+        _state.inputHandler.setMode(ViMode::Normal);
+    }
 
     if (!_selection)
         return;
@@ -746,18 +765,32 @@ bool Terminal::sendMouseMoveEvent(Modifier modifier,
                                   bool uiHandledHint,
                                   Timestamp /*now*/)
 {
+    // Speed-clicks are only counted when not moving the mouse in between, so reset on mouse move here.
     _speedClicks = 0;
 
     if (_leftMouseButtonPressed && isSelectionComplete())
+    {
+        // Mouse is pressed but current selection is complete, which means, it's a new mouse-down event,
+        // and we clear the current selection before continueing to create a new one.
         clearSelection();
+    }
 
+    // TODO(pr): move back to normal mode, if in visual. when mouse is released
+    // as this is sometimes(???) leaked
+
+    // Only continue if he mouse position has changed to a new grid value or we're tracking pixel values.
     if (newPosition == _currentMousePosition && !isModeEnabled(DECMode::MouseSGRPixels))
         return false;
 
-    auto changed = false;
     _currentMousePosition = newPosition;
 
+    if (!_leftMouseButtonPressed)
+        return false;
+
+    auto changed = false;
     auto relativePos = _viewport.translateScreenToGridCoordinate(_currentMousePosition);
+    _state.viCommands.cursorPosition = relativePos;
+    _viewport.makeVisible(_state.viCommands.cursorPosition.line);
 
     changed = changed || updateCursorHoveringState();
 
@@ -781,14 +814,18 @@ bool Terminal::sendMouseMoveEvent(Modifier modifier,
         setSelector(make_unique<LinearSelection>(_selectionHelper, relativePos, selectionUpdatedHelper()));
     }
 
-    if (selectionAvailable() && selector()->state() != Selection::State::Complete
-        && inputHandler().mode() == ViMode::Insert)
+    if (selectionAvailable()
+        && (selector()->state() != Selection::State::Complete && _leftMouseButtonPressed))
     {
         if (currentScreen().isCellEmpty(relativePos) && !currentScreen().compareCellTextAt(relativePos, 0x20))
         {
             relativePos.column = ColumnOffset { 0 } + *(_settings.pageSize.columns - 1);
         }
         changed = true;
+        _state.viCommands.cursorPosition = relativePos;
+        _viewport.makeVisible(_state.viCommands.cursorPosition.line);
+        if (_state.inputHandler.mode() != ViMode::Insert)
+            _state.inputHandler.setMode(selector()->viMode());
         selector()->extend(relativePos);
         breakLoopAndRefreshRenderBuffer();
         return true;
@@ -826,7 +863,8 @@ bool Terminal::sendMouseReleaseEvent(Modifier modifier,
             switch (selector()->state())
             {
                 case Selection::State::InProgress:
-                    selector()->complete();
+                    if (_state.inputHandler.mode() == ViMode::Insert)
+                        selector()->complete();
                     _eventListener.onSelectionCompleted();
                     break;
                 case Selection::State::Waiting: _selection.reset(); break;
