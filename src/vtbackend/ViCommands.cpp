@@ -594,6 +594,46 @@ CellLocationRange ViCommands::translateToCellRange(ViMotion motion, unsigned cou
     }
 }
 
+CellLocation ViCommands::findBeginOfWordAt(CellLocation location, JumpOver jumpOver) const noexcept
+{
+    auto const firstAddressableLocation =
+        CellLocation { -LineOffset::cast_from(_terminal.currentScreen().historyLineCount()),
+                       ColumnOffset(0) };
+
+    auto current = location;
+    auto leftLocation = prev(current);
+    auto leftClass = wordSkipClass(_terminal.currentScreen().cellTextAt(leftLocation));
+    auto continuationClass =
+        jumpOver == JumpOver::Yes ? leftClass : wordSkipClass(_terminal.currentScreen().cellTextAt(current));
+
+    while (current != firstAddressableLocation && leftClass == continuationClass)
+    {
+        current = leftLocation;
+        leftLocation = prev(current);
+        leftClass = wordSkipClass(_terminal.currentScreen().cellTextAt(leftLocation));
+        if (continuationClass == WordSkipClass::Whitespace && leftClass != WordSkipClass::Whitespace)
+            continuationClass = leftClass;
+    }
+
+    return current;
+}
+
+CellLocation ViCommands::findEndOfWordAt(CellLocation location, JumpOver jumpOver) const noexcept
+{
+    auto const rightMargin = _terminal.pageSize().columns.as<ColumnOffset>();
+    auto leftOfCurrent = location;
+    if (leftOfCurrent.column + 1 < rightMargin && jumpOver == JumpOver::Yes)
+        leftOfCurrent.column++;
+    auto current = leftOfCurrent;
+    while (current.column + 1 < rightMargin
+           && !(!_terminal.wordDelimited(leftOfCurrent) && _terminal.wordDelimited(current)))
+    {
+        leftOfCurrent.column = current.column;
+        current.column++;
+    }
+    return leftOfCurrent;
+}
+
 CellLocation ViCommands::snapToCell(CellLocation location) const noexcept
 {
     while (location.column > ColumnOffset(0) && compareCellTextAt(location, '\0'))
@@ -731,43 +771,18 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
             return cursorPosition;
         case ViMotion::WordBackward: // b
         {
-            auto const firstAddressableLocation =
-                CellLocation { -LineOffset::cast_from(_terminal.currentScreen().historyLineCount()),
-                               ColumnOffset(0) };
-
             auto current = cursorPosition;
             for (unsigned i = 0; i < count; ++i)
-            {
-                auto next = prev(current);
-                auto nextClass = wordSkipClass(_terminal.currentScreen().cellTextAt(next));
-                auto continuationClass = nextClass;
-
-                while (current != firstAddressableLocation && nextClass == continuationClass)
-                {
-                    current = next;
-                    next = prev(current);
-                    nextClass = wordSkipClass(_terminal.currentScreen().cellTextAt(next));
-                    if (continuationClass == WordSkipClass::Whitespace
-                        && nextClass != WordSkipClass::Whitespace)
-                        continuationClass = nextClass;
-                }
-            }
+                current = findBeginOfWordAt(current, JumpOver::Yes);
 
             return current;
         }
-        case ViMotion::WordEndForward: { // e
-            auto const rightMargin = _terminal.pageSize().columns.as<ColumnOffset>();
-            auto prev = cursorPosition;
-            if (prev.column + 1 < rightMargin)
-                prev.column++;
-            auto current = prev;
-            while (current.column + 1 < rightMargin
-                   && !(!_terminal.wordDelimited(prev) && _terminal.wordDelimited(current)))
-            {
-                prev.column = current.column;
-                current.column++;
-            }
-            return prev;
+        case ViMotion::WordEndForward: // e
+        {
+            auto current = cursorPosition;
+            for (unsigned i = 0; i < count; ++i)
+                current = findEndOfWordAt(cursorPosition, JumpOver::Yes);
+            return current;
         }
         case ViMotion::BigWordForward: // W
         {
@@ -801,7 +816,7 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
             }
             return prev;
         }
-        case ViMotion::BigWordBackward:   // B
+        case ViMotion::BigWordBackward: // B
         {
             auto prev = cursorPosition;
             if (prev.column.value > 0)
