@@ -93,6 +93,9 @@ enum class ViMotion
     WordBackward,         // b
     WordEndForward,       // e
     WordForward,          // w
+    BigWordBackward,      // B
+    BigWordEndForward,    // E
+    BigWordForward,       // W
 };
 
 enum class ViOperator
@@ -133,6 +136,7 @@ enum class TextObject
     BackQuotes = '`',     // i`  a`
     SquareBrackets = '[', // i[  a[
     Word = 'w',           // iw  aw
+    BigWord = 'W',        // iW  aW
 };
 
 enum class TextObjectScope
@@ -327,6 +331,7 @@ struct formatter<terminal::TextObject>
             case TextObject::SingleQuotes: return fmt::format_to(ctx.out(), "SingleQuotes");
             case TextObject::SquareBrackets: return fmt::format_to(ctx.out(), "SquareBrackets");
             case TextObject::Word: return fmt::format_to(ctx.out(), "Word");
+            case TextObject::BigWord: return fmt::format_to(ctx.out(), "BigWord");
         }
         return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(value));
     }
@@ -396,6 +401,9 @@ struct formatter<terminal::ViMotion>
             case ViMotion::WordBackward: return fmt::format_to(ctx.out(), "WordBackward");
             case ViMotion::WordEndForward: return fmt::format_to(ctx.out(), "WordEndForward");
             case ViMotion::WordForward: return fmt::format_to(ctx.out(), "WordForward");
+            case ViMotion::BigWordBackward: return fmt::format_to(ctx.out(), "BigWordBackward");
+            case ViMotion::BigWordEndForward: return fmt::format_to(ctx.out(), "BigWordEndForward");
+            case ViMotion::BigWordForward: return fmt::format_to(ctx.out(), "BigWordForward");
         }
         return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(motion));
     }

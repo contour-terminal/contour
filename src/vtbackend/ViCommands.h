@@ -22,6 +22,12 @@ namespace terminal
 
 class Terminal;
 
+enum class JumpOver
+{
+    Yes,
+    No
+};
+
 /**
  * Implements the Vi commands for a Terminal as emitted by ViInputHandler.
  */
@@ -62,6 +68,8 @@ class ViCommands: public ViInputHandler::Executor
     [[nodiscard]] CellLocationRange expandMatchingPair(TextObjectScope scope,
                                                        char lhs,
                                                        char rhs) const noexcept;
+    [[nodiscard]] CellLocation findBeginOfWordAt(CellLocation location, JumpOver jumpOver) const noexcept;
+    [[nodiscard]] CellLocation findEndOfWordAt(CellLocation location, JumpOver jumpOver) const noexcept;
     void executeYank(ViMotion motion, unsigned count);
     void executeYank(CellLocation from, CellLocation to);
 
