@@ -567,10 +567,12 @@ CellLocationRange ViCommands::translateToCellRange(TextObjectScope scope,
         case TextObject::RoundBrackets: return expandMatchingPair(scope, '(', ')');
         case TextObject::SingleQuotes: return expandMatchingPair(scope, '\'', '\'');
         case TextObject::SquareBrackets: return expandMatchingPair(scope, '[', ']');
-        case TextObject::Word:
-            // TODO
-        case TextObject::BigWord:
-        {
+        case TextObject::Word: {
+            a = findBeginOfWordAt(a, JumpOver::No);
+            b = findEndOfWordAt(b, JumpOver::No);
+            break;
+        }
+        case TextObject::BigWord: {
             while (a.column.value > 0 && !_terminal.currentScreen().isCellEmpty(prev(a)))
                 a = prev(a);
             while (b.column < rightMargin && !_terminal.currentScreen().isCellEmpty(next(b)))
