@@ -15,6 +15,7 @@ set(crispy_SOURCES
     LRUCache.h
     StrongLRUCache.h
     StackTrace.cpp StackTrace.h
+    TrieMap.h
     algorithm.h
     assert.h
     base64.h
@@ -122,6 +123,7 @@ if(CRISPY_TESTING)
         LRUCache_test.cpp
         StrongLRUCache_test.cpp
         StrongLRUHashtable_test.cpp
+        TrieMap_test.cpp
         base64_test.cpp
         indexed_test.cpp
         compose_test.cpp
