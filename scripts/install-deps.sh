@@ -291,7 +291,7 @@ install_deps_arch()
     fetch_and_unpack_fmtlib
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
-    sudo pacman -S -y \
+    packages="
         catch2 \
         cmake \
         extra-cmake-modules \
@@ -302,13 +302,27 @@ install_deps_arch()
         microsoft-gsl \
         ninja \
         pkg-config \
-        qt6-5compat \
-        qt6-base \
-        qt6-declarative \
-        qt6-multimedia \
-        qt6-wayland \
         range-v3 \
-        yaml-cpp
+        yaml-cpp \
+    "
+
+    if test x$QTVER = x6; then
+        packages="$packages \
+            qt6-5compat \
+            qt6-base \
+            qt6-declarative \
+            qt6-multimedia \
+            qt6-wayland \
+        "
+    else
+        packages="$packages \
+            qt5-base \
+            qt5-multimedia \
+            qt5-x11extras \
+        "
+    fi
+
+    sudo pacman -S -y $packages
 }
 
 install_deps_suse()
