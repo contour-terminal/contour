@@ -775,9 +775,6 @@ bool Terminal::sendMouseMoveEvent(Modifier modifier,
         clearSelection();
     }
 
-    // TODO(pr): move back to normal mode, if in visual. when mouse is released
-    // as this is sometimes(???) leaked
-
     // Only continue if he mouse position has changed to a new grid value or we're tracking pixel values.
     if (newPosition == _currentMousePosition && !isModeEnabled(DECMode::MouseSGRPixels))
         return false;

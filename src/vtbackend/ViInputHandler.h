@@ -17,6 +17,7 @@
 #include <vtbackend/Selector.h>
 #include <vtbackend/primitives.h>
 
+#include <crispy/TrieMap.h>
 #include <crispy/assert.h>
 #include <crispy/logstore.h>
 
@@ -178,10 +179,7 @@ class ViInputHandler: public InputHandler
         virtual void searchCurrentWord() = 0;
     };
 
-    ViInputHandler(Executor& theExecutor, ViMode initialMode):
-        _viMode { initialMode }, _executor { theExecutor }
-    {
-    }
+    ViInputHandler(Executor& theExecutor, ViMode initialMode);
 
     bool sendKeyPressEvent(Key key, Modifier modifier) override;
     bool sendCharPressEvent(char32_t ch, Modifier modifier) override;
@@ -214,18 +212,29 @@ class ViInputHandler: public InputHandler
     void startSearchExternally();
 
   private:
+    enum class ModeSelect
+    {
+        Normal,
+        Visual
+    };
+
+    using CommandHandler = std::function<void()>;
+    using CommandHandlerMap = crispy::TrieMap<std::string, CommandHandler>;
+
+    void registerAllCommands();
+    void registerCommand(ModeSelect modes, std::string_view command, CommandHandler handler);
+    void registerCommand(ModeSelect modes,
+                         std::vector<std::string_view> const& commands,
+                         CommandHandler handler);
+    void appendModifierToPendingInput(Modifier modifier);
+    [[nodiscard]] bool handlePendingInput();
+    void clearPendingInput();
+    [[nodiscard]] unsigned count() const noexcept { return _count ? _count : 1; }
+
     bool parseCount(char32_t ch, Modifier modifier);
-    bool parseModeSwitch(char32_t ch, Modifier modifier);
     bool parseTextObject(char32_t ch, Modifier modifier);
     bool handleSearchEditor(char32_t ch, Modifier modifier);
-    void handleNormalMode(char32_t ch, Modifier modifier);
-    void handleVisualMode(char32_t ch, Modifier modifier);
     bool handleModeSwitches(char32_t ch, Modifier modifier);
-    void execute(ViOperator op, ViMotion motion);
-    bool executePendingOrMoveCursor(ViMotion motion);
-    void scrollViewport(ScrollOffset delta);
-    void yank(TextObjectScope scope, TextObject textObject);
-    void select(TextObjectScope scope, TextObject textObject);
     void startSearch();
 
     ViMode _viMode = ViMode::Normal;
@@ -234,10 +243,10 @@ class ViInputHandler: public InputHandler
     bool _searchExternallyActivated = false;
     std::u32string _searchTerm;
 
+    std::string _pendingInput;
+    CommandHandlerMap _normalMode;
+    CommandHandlerMap _visualMode;
     unsigned _count = 0;
-    std::optional<ViOperator> _pendingOperator = std::nullopt;
-    std::optional<TextObjectScope> _pendingTextObjectScope = std::nullopt;
-    // std::optional<TextObject> _pendingTextObject;
     Executor& _executor;
 };
 

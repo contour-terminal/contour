@@ -129,6 +129,7 @@
           <li>Improvements to vi-like normal mode: Add `%` motion to jump to matching symbol pairs.</li>
           <li>Improvements to vi-like normal mode: Add `M` motion to jump to middle screen line (same column).</li>
           <li>Improvements to vi-like normal mode: Add `P` to paste the clipboard with newlines stripped.</li>
+          <li>Improvements to vi-like normal mode: Add `SP` and `BS` to move left/right.</li>
         </ul>
       </description>
     </release>

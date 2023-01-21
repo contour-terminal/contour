@@ -664,20 +664,21 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
         case ViMotion::CharLeft: // h
         {
             auto resultPosition = cursorPosition;
-            // Jumping left to the next non-empty column (whitespace is not considered empty).
-            // This isn't the most efficient implementation, but it's invoked interactively only anyways.
-            for (unsigned i = 0; i < count && resultPosition.column > ColumnOffset(0); ++i)
-                resultPosition = snapToCell(resultPosition - ColumnOffset(1));
+            while (count)
+            {
+                resultPosition = prev(resultPosition);
+                --count;
+            }
             return resultPosition;
         }
         case ViMotion::CharRight: // l
         {
-            auto const cellWidth =
-                std::max(uint8_t { 1 }, _terminal.currentScreen().cellWidthAt(cursorPosition));
             auto resultPosition = cursorPosition;
-            resultPosition.column += ColumnOffset::cast_from(cellWidth);
-            resultPosition.column =
-                min(resultPosition.column, ColumnOffset::cast_from(_terminal.pageSize().columns - 1));
+            while (count)
+            {
+                resultPosition = next(resultPosition);
+                --count;
+            }
             return resultPosition;
         }
         case ViMotion::ScreenColumn: // |
@@ -768,9 +769,32 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
         case ViMotion::ParenthesisMatching: // % TODO
             return findMatchingPairFrom(cursorPosition);
         case ViMotion::SearchResultBackward: // N TODO
-        case ViMotion::SearchResultForward:  // n TODO
-            errorlog()("TODO: Missing implementation. Sorry. That will come. :-)");
-            return cursorPosition;
+        {
+            auto startPosition = cursorPosition;
+            for (unsigned i = 0; i < count; ++i)
+            {
+                startPosition = prev(startPosition);
+                auto const nextPosition = _terminal.searchReverse(startPosition);
+                if (!nextPosition)
+                    return cursorPosition;
+
+                startPosition = *nextPosition;
+            }
+            return startPosition;
+        }
+        case ViMotion::SearchResultForward: // n
+        {
+            auto startPosition = cursorPosition;
+            for (unsigned i = 0; i < count; ++i)
+            {
+                startPosition = next(startPosition);
+                auto const nextPosition = _terminal.search(startPosition);
+                if (!nextPosition)
+                    return cursorPosition;
+                startPosition = *nextPosition;
+            }
+            return startPosition;
+        }
         case ViMotion::WordBackward: // b
         {
             auto current = cursorPosition;
