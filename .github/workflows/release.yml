@@ -116,14 +116,16 @@ jobs:
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: ccache-osx_qt6-release
+          key: ccache-osx_qt5-release
           max-size: 256M
       - name: "Install dependencies"
         run: |
           set -ex
           #brew update
           ./scripts/install-deps.sh
-          brew install qt5 openssl
+          brew install qt${QTVER} openssl
+        env:
+          QTVER: '5'
       - name: "Create build directory"
         run: mkdir build
       - name: "Generate build files"
