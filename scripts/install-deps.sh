@@ -2,6 +2,11 @@
 
 set -e
 
+if test x$QTVER = x; then
+    # Default to Qt 5 for now.
+    QTVER=5
+fi
+
 # Special environment variable to be used when only fetching and extracting
 # embedded dependencies should be done, i.e. no system package manager is
 # being invoked.
@@ -414,7 +419,7 @@ install_deps_darwin()
         freetype \
         harfbuzz \
         pkg-config \
-        qt \
+        qt$QTVER \
         range-v3 \
         yaml-cpp
 }
