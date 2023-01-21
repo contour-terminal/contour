@@ -59,9 +59,9 @@ jobs:
         uses: lukka/run-vcpkg@v5
         id: runvcpkg
         with:
-          vcpkgArguments: catch2 freetype fontconfig harfbuzz fmt yaml-cpp range-v3
+          vcpkgArguments: catch2 fmt freetype fontconfig harfbuzz yaml-cpp range-v3
           vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
-          vcpkgGitCommitId: 927006b24c3a28dfd8aa0ec5f8ce43098480a7f1
+          vcpkgGitCommitId: e69dd972ba64840955f46704ecce6241bf607c0f
           vcpkgTriplet: x64-windows
       - name: Cache Qt
         id: cache-qt
