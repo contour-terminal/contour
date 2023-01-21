@@ -531,8 +531,9 @@ jobs:
         id: set_qtver
         run: |
           # Recent Ubuntu versions ship with Qt 6. Use it.
+          # TODO: I mean, use it ASAP. :-)
           if [[ ${{ matrix.os_version }} = "22.04" ]]; then
-            echo "QTVER=6" >> "$GITHUB_OUTPUT"
+            echo "QTVER=5" >> "$GITHUB_OUTPUT"
           fi
       - name: "install dependencies"
         run: sudo env QTVER="${{ steps.set_qtver.outputs.QTVER }}" ./scripts/install-deps.sh

@@ -403,8 +403,16 @@ jobs:
         with:
           key: "ccache-ubuntu-${{ matrix.os_version }}"
           max-size: 256M
+      - name: set QTVER
+        id: set_qtver
+        run: |
+          # Recent Ubuntu versions ship with Qt 6. Use it.
+          # TODO: I mean, use it ASAP. :-)
+          if [[ ${{ matrix.os_version }} = "22.04" ]]; then
+            echo "QTVER=5" >> "$GITHUB_OUTPUT"
+          fi
       - name: "install dependencies"
-        run: sudo ./scripts/install-deps.sh
+        run: sudo env QTVER="${{ steps.set_qtver.outputs.QTVER }}" ./scripts/install-deps.sh
       - name: "Post-fix embedded dependency permissions."
         run: sudo find _deps/sources -exec chown $UID {} \;
       - name: "install GCC 10"
