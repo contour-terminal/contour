@@ -121,6 +121,7 @@
           <li>Adds ability to explicitly disable a font feature by prefixing the feature with a `-`, such as `-calt`, explicitly enabling via `+` prefix was added as well.</li>
           <li>Adds terminal capability `hs` and `es` to improve status-line feature detection via terminfo.</li>
           <li>Adds normal mode motion: `B`, `B`, `E`.</li>
+          <li>Adds support for mouse in normal mode for selection and normal-mode's cursor placement.</li>
           <li>Changes terminfo entries `tsl`, `fsl` and `dsl` to make use of the host-writable statusline.</li>
           <li>Improvements to text objects in vi-like normal mode (`i)`, `a)`, `i>`, `a>`, `i]`, `a]`, `i}`, `a}`).</li>
           <li>Improvements to vi-like normal mode: yank-motions (`yw`, `y$`, etc).</li>

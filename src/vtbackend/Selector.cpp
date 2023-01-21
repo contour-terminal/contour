@@ -131,7 +131,7 @@ std::vector<Selection::Range> Selection::ranges() const
 LinearSelection::LinearSelection(SelectionHelper const& helper,
                                  CellLocation start,
                                  OnSelectionUpdated onSelectionUpdated):
-    Selection(helper, start, std::move(onSelectionUpdated))
+    Selection(helper, ViMode::Visual, start, std::move(onSelectionUpdated))
 {
 }
 // }}}
@@ -139,7 +139,7 @@ LinearSelection::LinearSelection(SelectionHelper const& helper,
 WordWiseSelection::WordWiseSelection(SelectionHelper const& helper,
                                      CellLocation start,
                                      OnSelectionUpdated onSelectionUpdated):
-    Selection(helper, start, std::move(onSelectionUpdated))
+    Selection(helper, ViMode::Visual, start, std::move(onSelectionUpdated))
 {
     _from = extendSelectionBackward(_from);
     _to = extendSelectionForward(_to);
@@ -223,7 +223,7 @@ void WordWiseSelection::extend(CellLocation to)
 RectangularSelection::RectangularSelection(SelectionHelper const& helper,
                                            CellLocation start,
                                            OnSelectionUpdated onSelectionUpdated):
-    Selection(helper, start, std::move(onSelectionUpdated))
+    Selection(helper, ViMode::VisualBlock, start, std::move(onSelectionUpdated))
 {
 }
 
@@ -282,7 +282,7 @@ vector<Selection::Range> RectangularSelection::ranges() const
 FullLineSelection::FullLineSelection(SelectionHelper const& helper,
                                      CellLocation start,
                                      OnSelectionUpdated onSelectionUpdated):
-    Selection(helper, start, std::move(onSelectionUpdated))
+    Selection(helper, ViMode::VisualLine, start, std::move(onSelectionUpdated))
 {
     _from.column = ColumnOffset(0);
     _to.column = boxed_cast<ColumnOffset>(_helper.pageSize().columns - 1);

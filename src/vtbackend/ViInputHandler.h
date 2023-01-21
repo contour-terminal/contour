@@ -107,24 +107,6 @@ enum class ViOperator
     ReverseSearchCurrentWord = '#',
 };
 
-enum class ViMode
-{
-    /// Vi-like normal-mode.
-    Normal, // <Escape>, <C-[>
-
-    /// Vi-like insert/terminal mode.
-    Insert, // i
-
-    /// Vi-like visual select mode.
-    Visual, // v
-
-    /// Vi-like visual line-select mode.
-    VisualLine, // V
-
-    /// Vi-like visual block-select mode.
-    VisualBlock, // <C-V>
-};
-
 enum class TextObject
 {
     AngleBrackets = '<',  // i<  a<
@@ -263,29 +245,6 @@ class ViInputHandler: public InputHandler
 
 namespace fmt // {{{
 {
-template <>
-struct formatter<terminal::ViMode>
-{
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::ViMode mode, FormatContext& ctx)
-    {
-        using terminal::ViMode;
-        switch (mode)
-        {
-            case ViMode::Normal: return fmt::format_to(ctx.out(), "Normal");
-            case ViMode::Insert: return fmt::format_to(ctx.out(), "Insert");
-            case ViMode::Visual: return fmt::format_to(ctx.out(), "Visual");
-            case ViMode::VisualLine: return fmt::format_to(ctx.out(), "VisualLine");
-            case ViMode::VisualBlock: return fmt::format_to(ctx.out(), "VisualBlock");
-        }
-        return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(mode));
-    }
-};
 
 template <>
 struct formatter<terminal::TextObjectScope>
