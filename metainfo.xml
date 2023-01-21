@@ -103,7 +103,7 @@
 
     -->
 
-    <release version="0.3.10" urgency="medium" type="development">
+    <release version="0.3.10" urgency="medium" date="2023-01-22">
       <description>
         <ul>
           <li>Fixes `initial_working_directory` setting being ignored (#946).</li>
