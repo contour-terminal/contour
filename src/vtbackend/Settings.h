@@ -64,6 +64,7 @@ struct Settings
     std::chrono::milliseconds highlightTimeout = std::chrono::milliseconds { 150 };
     bool highlightDoubleClickedWord = true;
     // TODO: ^^^ make also use of it. probably rename to how VScode has named it.
+    bool expandTabs = false;
 
     struct PrimaryScreen
     {

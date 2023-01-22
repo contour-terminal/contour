@@ -73,6 +73,7 @@ class SimpleCell
     void setForegroundColor(Color color) noexcept;
     void setBackgroundColor(Color color) noexcept;
     void setUnderlineColor(Color color) noexcept;
+    void setTab(bool tab) noexcept;
     [[nodiscard]] Color foregroundColor() const noexcept;
     [[nodiscard]] Color backgroundColor() const noexcept;
     [[nodiscard]] Color underlineColor() const noexcept;
@@ -84,6 +85,7 @@ class SimpleCell
     void setHyperlink(HyperlinkId hyperlink) noexcept;
 
     [[nodiscard]] bool empty() const noexcept { return CellUtil::empty(*this); }
+    [[nodiscard]] bool isTab() const noexcept { return _flags & CellFlags::Tab; }
 
   private:
     std::u32string _codepoints {};
@@ -123,7 +125,6 @@ inline void SimpleCell::write(GraphicsAttributes sgr, char32_t codepoint, uint8_
     _graphicsAttributes = sgr;
     _codepoints.clear();
     _codepoints.push_back(codepoint);
-
     _width = width;
 }
 
@@ -236,6 +237,14 @@ inline void SimpleCell::setBackgroundColor(Color color) noexcept
 inline void SimpleCell::setUnderlineColor(Color color) noexcept
 {
     _graphicsAttributes.underlineColor = color;
+}
+
+inline void SimpleCell::setTab(bool tab) noexcept
+{
+    if (tab)
+        _flags |= CellFlags::Tab;
+    else
+        _flags &= ~CellFlags::Tab;
 }
 
 inline Color SimpleCell::foregroundColor() const noexcept

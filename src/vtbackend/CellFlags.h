@@ -44,6 +44,7 @@ enum class CellFlags : uint32_t
     Overline = (1 << 14),
     RapidBlinking = (1 << 15),
     CharacterProtected = (1 << 16), // Character is protected by selective erase operations.
+    Tab = (1 << 17),                // Cell is part of tab character.
 };
 
 constexpr CellFlags& operator|=(CellFlags& a, CellFlags b) noexcept

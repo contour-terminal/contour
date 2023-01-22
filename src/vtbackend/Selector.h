@@ -111,6 +111,9 @@ class Selection
     /// Extends the selection to the given coordinate.
     [[nodiscard]] virtual bool extend(CellLocation to);
 
+    /// Include the given pos
+    [[nodiscard]] virtual bool extendStart(CellLocation from);
+
     /// Constructs a vector of ranges for this selection.
     [[nodiscard]] virtual std::vector<Range> ranges() const;
 

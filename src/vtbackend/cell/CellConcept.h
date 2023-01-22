@@ -99,6 +99,8 @@ concept CellConcept = requires(T t, T const& u)
 
     { u.hyperlink() } -> std::same_as<HyperlinkId>;
     t.setHyperlink(HyperlinkId{});
+    t.setTab(bool{});
+    { u.isTab() } noexcept -> std::same_as<bool>;
 };
 
 

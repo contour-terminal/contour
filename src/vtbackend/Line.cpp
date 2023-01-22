@@ -34,7 +34,7 @@ typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount newColumnCoun
     {
         switch (crispy::strongCompare(newColumnCount, ColumnCount::cast_from(trivialBuffer().text.size())))
         {
-            case Comparison::Greater: trivialBuffer().displayWidth = newColumnCount; return {};
+            case Comparison::Greater: trivialBuffer().resize(newColumnCount); return {};
             case Comparison::Equal: return {};
             case Comparison::Less:;
         }
@@ -99,8 +99,7 @@ inline void Line<Cell>::resize(ColumnCount count)
     {
         if (isTrivialBuffer())
         {
-            TrivialBuffer& buffer = trivialBuffer();
-            buffer.displayWidth = count;
+            trivialBuffer().resize(count);
             return;
         }
     }
@@ -179,7 +178,7 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
     auto lastChar = char32_t { 0 };
     auto utf8DecoderState = unicode::utf8_decoder_state {};
     auto gapPending = 0;
-
+    size_t cellNr = 0;
     for (char const ch: input.text.view())
     {
         unicode::ConvertResult const r = unicode::from_utf8(utf8DecoderState, static_cast<uint8_t>(ch));
@@ -200,6 +199,7 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
             columns.emplace_back(Cell {});
             columns.back().setHyperlink(input.hyperlink);
             columns.back().write(input.textAttributes, nextChar, static_cast<uint8_t>(charWidth));
+            columns.back().setTab(input.tabstops[cellNr]);
             gapPending = charWidth - 1;
         }
         else
@@ -218,6 +218,7 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
             }
         }
         lastChar = nextChar;
+        ++cellNr;
     }
 
     while (gapPending > 0)
@@ -229,9 +230,30 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
     assert(columns.size() == unbox<size_t>(input.usedColumns));
 
     while (columns.size() < unbox<size_t>(input.displayWidth))
+    {
         columns.emplace_back(Cell { input.fillAttributes });
+        columns.back().setTab(input.tabstops[cellNr]);
+        ++cellNr;
+    }
 
     return columns;
+}
+
+template <typename Cell>
+void Line<Cell>::setTab(ColumnOffset start, ColumnCount n, bool tab)
+{
+    if (isInflatedBuffer())
+    {
+        for (; n > ColumnCount(0); --n)
+            useCellAt(start++).setTab(tab);
+    }
+    else
+    {
+        auto& buffer = trivialBuffer();
+        for (; n > ColumnCount(0); --n)
+            buffer.tabstops[(start++).as<size_t>()] = true;
+        // assert(false);
+    }
 }
 } // end namespace terminal
 

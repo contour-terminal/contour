@@ -86,8 +86,6 @@ using std::vector;
 namespace terminal
 {
 
-auto constexpr inline TabWidth = ColumnCount(8);
-
 auto const inline VTCaptureBufferLog = logstore::Category("vt.ext.capturebuffer",
                                                           "Capture Buffer debug logging.",
                                                           logstore::Category::State::Disabled,
@@ -1468,9 +1466,12 @@ void Screen<Cell>::moveCursorToNextTab()
             ++i;
 
         auto const currentCursorColumn = logicalCursorPosition().column;
-
         if (i < _state.tabs.size())
-            moveCursorForward(boxed_cast<ColumnCount>(_state.tabs[i] - currentCursorColumn));
+        {
+            auto const cursorMoveAmount = boxed_cast<ColumnCount>(_state.tabs[i] - currentCursorColumn);
+            currentLine().setTab(currentCursorColumn, cursorMoveAmount, true);
+            moveCursorForward(cursorMoveAmount);
+        }
         else if (realCursorPosition().column < margin().horizontal.to)
             moveCursorForward(boxed_cast<ColumnCount>(margin().horizontal.to - currentCursorColumn));
     }
@@ -1482,6 +1483,7 @@ void Screen<Cell>::moveCursorToNextTab()
             auto const n =
                 min((TabWidth - boxed_cast<ColumnCount>(_cursor.position.column) % TabWidth),
                     _settings.pageSize.columns - boxed_cast<ColumnCount>(logicalCursorPosition().column));
+            currentLine().setTab(logicalCursorPosition().column, n, true);
             moveCursorForward(n);
         }
     }
@@ -3912,6 +3914,49 @@ bool Screen<Cell>::isCursorInsideMargins() const noexcept
     return insideVerticalMargin && insideHorizontalMargin;
 }
 
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+CellLocation Screen<Cell>::getTabstopStart(CellLocation position) const noexcept
+{
+    if (!_state.tabs.empty())
+    {
+        auto tab = std::lower_bound(_state.tabs.begin(), _state.tabs.end(), position.column);
+        position.column =
+            (tab == _state.tabs.end()) ? ColumnOffset::cast_from(_settings.pageSize.columns - 1) : *tab - 1;
+    }
+    else
+    {
+        auto const n = min(boxed_cast<ColumnCount>(position.column) % TabWidth,
+                           _settings.pageSize.columns - boxed_cast<ColumnCount>(position.column));
+        position.column -= n;
+    }
+    auto const& line = _grid.lineAt(position.line);
+    while (!line.hasTabstop(position.column))
+        ++position.column;
+    return position;
+}
+
+template <typename Cell>
+CRISPY_REQUIRES(CellConcept<Cell>)
+CellLocation Screen<Cell>::getTabstopEnd(CellLocation position) const noexcept
+{
+    if (!_state.tabs.empty())
+    {
+        auto tab = std::upper_bound(_state.tabs.begin(), _state.tabs.end(), position.column);
+        position.column =
+            (tab == _state.tabs.end()) ? ColumnOffset::cast_from(_settings.pageSize.columns - 1) : *tab - 1;
+    }
+    else
+    {
+        auto const n = min((TabWidth - boxed_cast<ColumnCount>(position.column) % TabWidth - 1),
+                           _settings.pageSize.columns - boxed_cast<ColumnCount>(position.column));
+        position.column += n;
+    }
+    auto const& line = _grid.lineAt(position.line);
+    while (!line.hasTabstop(position.column))
+        --position.column;
+    return position;
+}
 } // namespace terminal
 
 #include <vtbackend/cell/CompactCell.h>

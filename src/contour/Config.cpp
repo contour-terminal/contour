@@ -1969,6 +1969,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
     }
 
     tryLoadValue(usedKeys, doc, "reflow_on_resize", _config.reflowOnResize);
+    tryLoadValue(usedKeys, doc, "expand_tabs", _config.expandTabs);
 
     if (auto profiles = doc["profiles"]; profiles)
     {

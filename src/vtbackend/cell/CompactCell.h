@@ -126,6 +126,7 @@ class CRISPY_PACKED CompactCell
     void setForegroundColor(Color color) noexcept;
     [[nodiscard]] Color backgroundColor() const noexcept;
     void setBackgroundColor(Color color) noexcept;
+    void setTab(bool tab) noexcept;
 
     [[nodiscard]] std::shared_ptr<ImageFragment> imageFragment() const noexcept;
     void setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, CellLocation offset);
@@ -138,6 +139,7 @@ class CRISPY_PACKED CompactCell
     void setHyperlink(HyperlinkId hyperlink);
 
     [[nodiscard]] bool empty() const noexcept;
+    [[nodiscard]] bool isTab() const noexcept;
 
     void setGraphicsRendition(GraphicsRendition sgr) noexcept;
 
@@ -407,6 +409,14 @@ inline void CompactCell::setBackgroundColor(Color color) noexcept
     _backgroundColor = color;
 }
 
+inline void CompactCell::setTab(bool tab) noexcept
+{
+    if (tab)
+        extra().flags |= CellFlags::Tab;
+    else
+        extra().flags &= ~CellFlags::Tab;
+}
+
 inline Color CompactCell::underlineColor() const noexcept
 {
     if (!_extra)
@@ -459,6 +469,10 @@ inline bool CompactCell::empty() const noexcept
     return CellUtil::empty(*this);
 }
 
+inline bool CompactCell::isTab() const noexcept
+{
+    return _extra && _extra->flags & CellFlags::Tab;
+}
 inline void CompactCell::setGraphicsRendition(GraphicsRendition sgr) noexcept
 {
     CellUtil::applyGraphicsRendition(sgr, *this);

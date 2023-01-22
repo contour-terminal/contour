@@ -64,7 +64,7 @@ struct TrivialLineBuffer
 
     ColumnCount usedColumns {};
     crispy::BufferFragment<char> text {};
-
+    std::vector<bool> tabstops = std::vector<bool>(displayWidth.value, false);
     void reset(GraphicsAttributes attributes) noexcept
     {
         textAttributes = attributes;
@@ -72,6 +72,12 @@ struct TrivialLineBuffer
         hyperlink = {};
         usedColumns = {};
         text.reset();
+        tabstops.clear();
+    }
+    void resize(ColumnCount count)
+    {
+        displayWidth = count;
+        tabstops.resize(count.as<size_t>());
     }
 };
 
@@ -234,6 +240,15 @@ class Line
         return inflatedBuffer().at(unbox<size_t>(column)).empty();
     }
 
+    [[nodiscard]] bool hasTabstop(ColumnOffset column) const noexcept
+    {
+        Require(ColumnOffset(0) <= column);
+        Require(column <= ColumnOffset::cast_from(size()));
+        if (isInflatedBuffer())
+            return cells()[column.as<size_t>()].isTab();
+        return trivialBuffer().tabstops[column.as<size_t>()];
+    }
+
     [[nodiscard]] uint8_t cellWidthAt(ColumnOffset column) const noexcept
     {
 #if 0 // TODO: This optimization - but only when we return actual widths and not always 1.
@@ -257,6 +272,8 @@ class Line
 
     [[nodiscard]] bool wrappable() const noexcept { return isFlagEnabled(LineFlags::Wrappable); }
     void setWrappable(bool enable) { setFlag(LineFlags::Wrappable, enable); }
+
+    void setTab(ColumnOffset start, ColumnCount n, bool tab);
 
     [[nodiscard]] LineFlags wrappableFlag() const noexcept
     {

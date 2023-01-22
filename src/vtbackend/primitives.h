@@ -735,6 +735,13 @@ enum class ViMode
     VisualBlock, // <C-V>
 };
 
+enum class SelectionDirection
+{
+    Left,
+    Right,
+    None
+};
+
 std::string to_string(GraphicsRendition s);
 
 constexpr unsigned toAnsiModeNum(AnsiMode m)
@@ -1039,5 +1046,26 @@ struct formatter<terminal::ViMode>
     }
 };
 
+template <>
+struct formatter<terminal::SelectionDirection>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+    template <typename FormatContext>
+    auto format(terminal::SelectionDirection value, FormatContext& ctx)
+    {
+        using enum terminal::SelectionDirection;
+        switch (value)
+        {
+            case None: return fmt::format_to(ctx.out(), "None");
+            case Right: return fmt::format_to(ctx.out(), "Right");
+            case Left: return fmt::format_to(ctx.out(), "Left");
+        }
+        return fmt::format_to(ctx.out(), "{}", static_cast<unsigned>(value));
+    }
+};
 } // namespace fmt
 // }}}
