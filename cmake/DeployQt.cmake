@@ -22,12 +22,13 @@
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
+set(DEPLOY_QT_VERSION 5)
 
-find_package(Qt6Core REQUIRED)
+find_package(Qt${DEPLOY_QT_VERSION}Core REQUIRED)
 
 # Retrieve the absolute path to qmake and then use that path to find
 # the windeployqt and macdeployqt binaries
-get_target_property(_qmake_executable Qt6::qmake IMPORTED_LOCATION)
+get_target_property(_qmake_executable Qt${DEPLOY_QT_VERSION}::qmake IMPORTED_LOCATION)
 get_filename_component(_qt_bin_dir "${_qmake_executable}" DIRECTORY)
 
 find_program(WINDEPLOYQT_EXECUTABLE windeployqt HINTS "${_qt_bin_dir}")
