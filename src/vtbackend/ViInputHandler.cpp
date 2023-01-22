@@ -19,8 +19,13 @@
 
 #include <unicode/convert.h>
 
+#include <variant>
+
 using std::nullopt;
 using std::optional;
+using std::pair;
+using std::vector;
+using namespace std::string_view_literals;
 
 namespace terminal
 {
@@ -63,35 +68,184 @@ namespace
     {
         return InputMatch { Modifier { modifier }, (char32_t) ch };
     }
-
-    constexpr InputMatch operator|(char ch, Modifier::Key modifier) noexcept
-    {
-        return InputMatch { Modifier { modifier }, (char32_t) ch };
-    }
-
-    optional<TextObject> charToTextObject(char32_t ch) noexcept
-    {
-        switch (ch)
-        {
-            case '"': return TextObject::DoubleQuotes;
-            case '(': return TextObject::RoundBrackets;
-            case ')': return TextObject::RoundBrackets;
-            case '<': return TextObject::AngleBrackets;
-            case '>': return TextObject::AngleBrackets;
-            case '[': return TextObject::SquareBrackets;
-            case '\'': return TextObject::SingleQuotes;
-            case ']': return TextObject::SquareBrackets;
-            case '`': return TextObject::BackQuotes;
-            case 'p': return TextObject::Paragraph;
-            case 'w': return TextObject::Word;
-            case 'W': return TextObject::BigWord;
-            case '{': return TextObject::CurlyBrackets;
-            case '}': return TextObject::CurlyBrackets;
-            default: return nullopt;
-        }
-    }
-
 } // namespace
+
+ViInputHandler::ViInputHandler(Executor& theExecutor, ViMode initialMode):
+    _viMode { initialMode }, _executor { theExecutor }
+{
+    registerAllCommands();
+}
+
+void ViInputHandler::registerAllCommands()
+{
+    auto constexpr scopeMappings =
+        std::array<std::pair<char, TextObjectScope>, 2> { { std::pair { 'i', TextObjectScope::Inner },
+                                                            std::pair { 'a', TextObjectScope::A } } };
+
+    auto constexpr motionMappings = std::array<std::pair<std::string_view, ViMotion>, 34> { {
+        { "$", ViMotion::LineEnd },           { "%", ViMotion::ParenthesisMatching },
+        { "0", ViMotion::LineBegin },         { "<BS>", ViMotion::CharLeft },
+        { "<Down>", ViMotion::LineDown },     { "<Left>", ViMotion::CharLeft },
+        { "<Right>", ViMotion::CharRight },   { "<Space>", ViMotion::CharRight },
+        { "<Up>", ViMotion::LineUp },         { "B", ViMotion::BigWordBackward },
+        { "C-D", ViMotion::PageDown },        { "C-U", ViMotion::PageUp },
+        { "<PageDown>", ViMotion::PageDown }, { "<PageUp>", ViMotion::PageUp },
+        { "E", ViMotion::BigWordEndForward }, { "G", ViMotion::FileEnd },
+        { "H", ViMotion::PageTop },           { "L", ViMotion::PageBottom },
+        { "M", ViMotion::LinesCenter },       { "N", ViMotion::SearchResultBackward },
+        { "W", ViMotion::BigWordForward },    { "^", ViMotion::LineTextBegin },
+        { "b", ViMotion::WordBackward },      { "e", ViMotion::WordEndForward },
+        { "gg", ViMotion::FileBegin },        { "h", ViMotion::CharLeft },
+        { "j", ViMotion::LineDown },          { "k", ViMotion::LineUp },
+        { "l", ViMotion::CharRight },         { "n", ViMotion::SearchResultForward },
+        { "w", ViMotion::WordForward },       { "{", ViMotion::ParagraphBackward },
+        { "|", ViMotion::ScreenColumn },      { "}", ViMotion::ParagraphForward },
+    } };
+
+    auto constexpr textObjectMappings = std::array<std::pair<char, TextObject>, 14> { {
+        { '"', TextObject::DoubleQuotes },
+        { '(', TextObject::RoundBrackets },
+        { ')', TextObject::RoundBrackets },
+        { '<', TextObject::AngleBrackets },
+        { '>', TextObject::AngleBrackets },
+        { 'W', TextObject::BigWord },
+        { '[', TextObject::SquareBrackets },
+        { ']', TextObject::SquareBrackets },
+        { '\'', TextObject::SingleQuotes },
+        { '`', TextObject::BackQuotes },
+        { 'p', TextObject::Paragraph },
+        { 'w', TextObject::Word },
+        { '{', TextObject::CurlyBrackets },
+        { '}', TextObject::CurlyBrackets },
+    } };
+
+    // normal mode and visual mode
+    for (auto const modeSelect: { ModeSelect::Normal, ModeSelect::Visual })
+        for (auto const& [motionChar, motion]: motionMappings)
+            registerCommand(
+                modeSelect, motionChar, [this, motion = motion]() { _executor.moveCursor(motion, count()); });
+
+    // clang-format off
+    // {{{ normal mode
+    registerCommand(ModeSelect::Normal, "a", [this]() { setMode(ViMode::Insert); });
+    registerCommand(ModeSelect::Normal, "i", [this]() { setMode(ViMode::Insert); });
+    registerCommand(ModeSelect::Normal, "<Insert>", [this]() { setMode(ViMode::Insert); });
+    registerCommand(ModeSelect::Normal, "v", [this]() { toggleMode(ViMode::Visual); });
+    registerCommand(ModeSelect::Normal, "V", [this]() { toggleMode(ViMode::VisualLine); });
+    registerCommand(ModeSelect::Normal, "C-V", [this]() { toggleMode(ViMode::VisualBlock); });
+    registerCommand(ModeSelect::Normal, "/", [this]() { startSearch(); });
+    registerCommand(ModeSelect::Normal, "#", [this]() { _executor.reverseSearchCurrentWord(); });
+    registerCommand(ModeSelect::Normal, "*", [this]() { _executor.searchCurrentWord(); });
+    registerCommand(ModeSelect::Normal, "p", [this]() { _executor.paste(count(), false); });
+    registerCommand(ModeSelect::Normal, "P", [this]() { _executor.paste(count(), true); });
+    // TODO(pr) registerCommand(ModeSelect::Normal, "n", [this]() { _executor.jumpToNextMatch(count()); });
+    // TODO(pr) registerCommand(ModeSelect::Normal, "N", [this]() { _executor.jumpToPreviousMatch(count()); });
+
+    registerCommand(ModeSelect::Normal, "Y", [this]() { _executor.execute(ViOperator::Yank, ViMotion::FullLine, count()); });
+    registerCommand(ModeSelect::Normal, "yy", [this]() { _executor.execute(ViOperator::Yank, ViMotion::FullLine, count()); });
+    registerCommand(ModeSelect::Normal, "yb", [this]() { _executor.execute(ViOperator::Yank, ViMotion::WordBackward, count()); });
+    registerCommand(ModeSelect::Normal, "ye", [this]() { _executor.execute(ViOperator::Yank, ViMotion::WordEndForward, count()); });
+    registerCommand(ModeSelect::Normal, "yw", [this]() { _executor.execute(ViOperator::Yank, ViMotion::WordForward, count()); });
+    registerCommand(ModeSelect::Normal, "yB", [this]() { _executor.execute(ViOperator::Yank, ViMotion::BigWordBackward, count()); });
+    registerCommand(ModeSelect::Normal, "yE", [this]() { _executor.execute(ViOperator::Yank, ViMotion::BigWordEndForward, count()); });
+    registerCommand(ModeSelect::Normal, "yW", [this]() { _executor.execute(ViOperator::Yank, ViMotion::BigWordForward, count()); });
+    // clang-format on
+
+    for (auto const& [scopeChar, scope]: scopeMappings)
+        for (auto const& [objectChar, obj]: textObjectMappings)
+            registerCommand(ModeSelect::Normal,
+                            fmt::format("y{}{}", scopeChar, objectChar),
+                            [this, scope = scope, obj = obj]() { _executor.yank(scope, obj); });
+
+    // visual mode
+    registerCommand(ModeSelect::Visual, "/", [this]() { startSearch(); });
+    registerCommand(ModeSelect::Visual, "y", [this]() {
+        _executor.execute(ViOperator::Yank, ViMotion::Selection, count());
+    });
+    registerCommand(ModeSelect::Visual, "v", [this]() { toggleMode(ViMode::Normal); });
+    registerCommand(ModeSelect::Visual, "V", [this]() { toggleMode(ViMode::VisualLine); });
+    registerCommand(ModeSelect::Visual, "C-V", [this]() { toggleMode(ViMode::VisualBlock); });
+    registerCommand(ModeSelect::Visual, "<ESC>", [this]() { setMode(ViMode::Normal); });
+    for (auto const& [scopeChar, scope]: scopeMappings)
+        for (auto const& [objectChar, obj]: textObjectMappings)
+            registerCommand(ModeSelect::Visual,
+                            fmt::format("{}{}", scopeChar, objectChar),
+                            [this, scope = scope, obj = obj]() { _executor.select(scope, obj); });
+}
+
+void ViInputHandler::registerCommand(ModeSelect modes,
+                                     std::vector<std::string_view> const& commands,
+                                     CommandHandler handler)
+{
+    for (auto const& command: commands)
+        registerCommand(modes, command, handler);
+}
+
+void ViInputHandler::registerCommand(ModeSelect modes, std::string_view command, CommandHandler handler)
+{
+    Require(!!handler);
+
+    auto commandStr = std::string(command.data(), command.size());
+
+    switch (modes)
+    {
+        case ModeSelect::Normal: {
+            InputLog()("Registering normal mode command: {}", command);
+            Require(!_normalMode.contains(commandStr));
+            _normalMode.insert(std::move(commandStr), std::move(handler));
+            break;
+        }
+        case ModeSelect::Visual: {
+            InputLog()("Registering visual mode command: {}", command);
+            Require(!_visualMode.contains(commandStr));
+            _visualMode.insert(std::move(commandStr), std::move(handler));
+            break;
+        }
+        default: crispy::unreachable();
+    }
+}
+
+void ViInputHandler::appendModifierToPendingInput(Modifier modifier)
+{
+    if (modifier.meta())
+        _pendingInput += "M-";
+    if (modifier.alt())
+        _pendingInput += "A-";
+    if (modifier.shift())
+        _pendingInput += "S-";
+    if (modifier.control())
+        _pendingInput += "C-";
+}
+
+bool ViInputHandler::handlePendingInput()
+{
+    CommandHandlerMap const& mapping = isVisualMode() ? _visualMode : _normalMode;
+    auto const mappingResult = mapping.search(_pendingInput);
+    if (std::holds_alternative<crispy::ExactMatch<CommandHandler>>(mappingResult))
+    {
+        InputLog()("Executing handler for: {}{}", _count ? fmt::format("{} ", _count) : "", _pendingInput);
+        std::get<crispy::ExactMatch<CommandHandler>>(mappingResult).value();
+        clearPendingInput();
+    }
+    else if (std::holds_alternative<crispy::NoMatch>(mappingResult))
+    {
+        InputLog()("Invalid command: {}", _pendingInput);
+        clearPendingInput();
+    }
+    else
+    {
+        InputLog()("Incomplete input: {}", _pendingInput);
+    }
+
+    return true;
+}
+
+void ViInputHandler::clearPendingInput()
+{
+    InputLog()("Resetting pending input: {}", _pendingInput);
+    _count = 0;
+    _pendingInput.clear();
+}
 
 void ViInputHandler::setMode(ViMode theMode)
 {
@@ -99,9 +253,7 @@ void ViInputHandler::setMode(ViMode theMode)
         return;
 
     _viMode = theMode;
-    _count = 0;
-    _pendingOperator = nullopt;
-    _pendingTextObjectScope = nullopt;
+    clearPendingInput();
 
     _executor.modeChanged(theMode);
 }
@@ -132,20 +284,27 @@ bool ViInputHandler::sendKeyPressEvent(Key key, Modifier modifier)
     if (modifier.any())
         return true;
 
-    switch (key)
-    {
-        case Key::DownArrow: return executePendingOrMoveCursor(ViMotion::LineDown);
-        case Key::LeftArrow: return executePendingOrMoveCursor(ViMotion::CharLeft);
-        case Key::RightArrow: return executePendingOrMoveCursor(ViMotion::CharRight);
-        case Key::UpArrow: return executePendingOrMoveCursor(ViMotion::LineUp);
-        case Key::Insert: setMode(ViMode::Insert); return true;
-        case Key::Home: return executePendingOrMoveCursor(ViMotion::FileBegin);
-        case Key::End: return executePendingOrMoveCursor(ViMotion::FileEnd);
-        case Key::PageUp: return executePendingOrMoveCursor(ViMotion::PageUp);
-        case Key::PageDown: return executePendingOrMoveCursor(ViMotion::PageDown);
-        default: break;
-    }
-    return true;
+    auto const keyMappings = std::array<std::pair<Key, std::string_view>, 10> { {
+        { Key::DownArrow, "<Down>" },
+        { Key::LeftArrow, "<Left>" },
+        { Key::RightArrow, "<Right>" },
+        { Key::UpArrow, "<Up>" },
+        { Key::Insert, "<Insert>" },
+        { Key::Delete, "<Delete>" },
+        { Key::Home, "<Home>" },
+        { Key::End, "<End>" },
+        { Key::PageUp, "<PageUp>" },
+        { Key::PageDown, "<PageDown>" },
+    } };
+
+    for (auto const& [mappedKey, mappedText]: keyMappings)
+        if (key == mappedKey)
+        {
+            _pendingInput += mappedText;
+            break;
+        }
+
+    return handlePendingInput();
 }
 
 void ViInputHandler::startSearchExternally()
@@ -216,23 +375,34 @@ bool ViInputHandler::sendCharPressEvent(char32_t ch, Modifier modifier)
     if (_searchEditMode != SearchEditMode::Disabled)
         return handleSearchEditor(ch, modifier);
 
-    // clang-format off
-    switch (_viMode)
-    {
-        case ViMode::Insert:
-            return false;
-        case ViMode::Normal:
-            handleNormalMode(ch, modifier);
-            return true;
-        case ViMode::Visual:
-        case ViMode::VisualLine:
-        case ViMode::VisualBlock:
-            handleVisualMode(ch, modifier);
-            return true;
-    }
-    // clang-format on
+    if (_viMode == ViMode::Insert)
+        return false;
 
-    crispy::unreachable();
+    if (ch == 033 && modifier.none())
+    {
+        clearPendingInput();
+        setMode(ViMode::Normal);
+        return true;
+    }
+
+    if (parseCount(ch, modifier))
+        return true;
+
+    appendModifierToPendingInput(ch > 0x20 ? modifier.without(Modifier::Shift) : modifier);
+
+    if (ch == '\033')
+        _pendingInput += "<ESC>";
+    else if (ch == '\b')
+        _pendingInput += "<BS>";
+    else if (ch == ' ')
+        _pendingInput += "<Space>";
+    else
+        _pendingInput += unicode::convert_to<char>(ch);
+
+    if (handlePendingInput())
+        return true;
+
+    return false;
 }
 
 bool ViInputHandler::parseCount(char32_t ch, Modifier modifier)
@@ -262,74 +432,6 @@ bool ViInputHandler::parseCount(char32_t ch, Modifier modifier)
     return false;
 }
 
-void ViInputHandler::yank(TextObjectScope scope, TextObject textObject)
-{
-    _executor.yank(scope, textObject);
-
-    _count = 0;
-    _pendingOperator.reset();
-    _pendingTextObjectScope.reset();
-}
-
-void ViInputHandler::select(TextObjectScope scope, TextObject textObject)
-{
-    _executor.select(scope, textObject);
-
-    _count = 0;
-    _pendingOperator.reset();
-    _pendingTextObjectScope.reset();
-}
-
-void ViInputHandler::execute(ViOperator op, ViMotion motion)
-{
-    _executor.execute(op, motion, _count ? _count : 1);
-
-    _count = 0;
-    _pendingOperator.reset();
-    _pendingTextObjectScope.reset();
-}
-
-void ViInputHandler::handleVisualMode(char32_t ch, Modifier modifier)
-{
-    Require(_viMode == ViMode::Visual || _viMode == ViMode::VisualLine || _viMode == ViMode::VisualBlock);
-
-    if (parseModeSwitch(ch, modifier))
-        return;
-
-    if (parseCount(ch, modifier))
-        return;
-
-    if (_pendingTextObjectScope)
-    {
-        if (optional<TextObject> const textObject = charToTextObject(ch))
-        {
-            select(*_pendingTextObjectScope, *textObject);
-            return;
-        }
-    }
-
-    switch (InputMatch { modifier.without(Modifier::Shift), ch })
-    {
-        case '/'_key: startSearch(); return;
-        case '\033'_key: setMode(ViMode::Normal); return; // Escape key.
-        case Modifier::Control | 'V': toggleMode(ViMode::VisualBlock); return;
-        case 'V'_key: toggleMode(ViMode::VisualLine); return;
-        case 'v'_key: toggleMode(ViMode::Visual); return;
-        case '#'_key: _executor.reverseSearchCurrentWord(); return;
-        case '*'_key: _executor.searchCurrentWord(); return;
-        case 'Y'_key: execute(ViOperator::Yank, ViMotion::FullLine); return;
-        case 'a'_key: _pendingTextObjectScope = TextObjectScope::A; return;
-        case 'i'_key: _pendingTextObjectScope = TextObjectScope::Inner; return;
-        case 'y'_key: execute(ViOperator::Yank, ViMotion::Selection); return;
-        case 'n'_key: _executor.jumpToNextMatch(_count ? _count : 1); return;
-        case 'N' | Modifier::Shift: _executor.jumpToPreviousMatch(_count ? _count : 1); return;
-        default: break;
-    }
-
-    if (parseTextObject(ch, modifier))
-        return;
-}
-
 void ViInputHandler::startSearch()
 {
     _searchEditMode = SearchEditMode::Enabled;
@@ -337,184 +439,9 @@ void ViInputHandler::startSearch()
     _executor.searchStart();
 }
 
-void ViInputHandler::scrollViewport(ScrollOffset delta)
-{
-    _executor.scrollViewport(delta);
-}
-
-bool ViInputHandler::executePendingOrMoveCursor(ViMotion motion)
-{
-    // Require(!_pendingTextObjectScope);
-    switch (_pendingOperator.value_or(ViOperator::MoveCursor))
-    {
-        case ViOperator::MoveCursor: _executor.moveCursor(motion, _count ? _count : 1); break;
-        case ViOperator::Yank: _executor.yank(motion); break;
-        case ViOperator::Paste: _executor.paste(_count ? _count : 1, false); break;
-        case ViOperator::PasteStripped: _executor.paste(_count ? _count : 1, true); break;
-        case ViOperator::ReverseSearchCurrentWord: _executor.reverseSearchCurrentWord(); break;
-    }
-
-    _count = 0;
-    _pendingOperator.reset();
-    _pendingTextObjectScope.reset();
-
-    return true;
-}
-
-bool ViInputHandler::parseTextObject(char32_t ch, Modifier modifier)
-{
-    Require(_viMode != ViMode::Insert);
-
-    if (_viMode != ViMode::Normal || _pendingOperator)
-    {
-        switch (InputMatch { modifier.without(Modifier::Shift), ch })
-        {
-            case 'i'_key: _pendingTextObjectScope = TextObjectScope::Inner; return true;
-            case 'a'_key: _pendingTextObjectScope = TextObjectScope::A; return true;
-        }
-    }
-
-    if (_pendingTextObjectScope && _pendingOperator)
-    {
-        if (optional<TextObject> const textObject = charToTextObject(ch))
-        {
-            switch (*_pendingOperator)
-            {
-                case ViOperator::Yank: yank(*_pendingTextObjectScope, *textObject); break;
-                default:
-                    logstore::ErrorLog()(
-                        "ViInputHandler: trying to operate on text object with unsupported operator {}.",
-                        _pendingOperator.value());
-                    break;
-            }
-            return true;
-        }
-    }
-
-    switch (InputMatch { modifier.without(Modifier::Shift), ch })
-    {
-        case 'D' | Modifier::Control: return executePendingOrMoveCursor(ViMotion::PageDown);
-        case 'U' | Modifier::Control: return executePendingOrMoveCursor(ViMotion::PageUp);
-        case '$'_key: return executePendingOrMoveCursor(ViMotion::LineEnd);
-        case '%'_key: return executePendingOrMoveCursor(ViMotion::ParenthesisMatching);
-        case 'M'_key: return executePendingOrMoveCursor(ViMotion::LinesCenter);
-        case '0'_key: return executePendingOrMoveCursor(ViMotion::LineBegin);
-        case '^'_key: return executePendingOrMoveCursor(ViMotion::LineTextBegin);
-        case 'G'_key: return executePendingOrMoveCursor(ViMotion::FileEnd);
-        case 'N'_key: return executePendingOrMoveCursor(ViMotion::SearchResultBackward);
-        case 'b'_key: return executePendingOrMoveCursor(ViMotion::WordBackward);
-        case 'e'_key: return executePendingOrMoveCursor(ViMotion::WordEndForward);
-        case 'g'_key: return executePendingOrMoveCursor(ViMotion::FileBegin);
-        case 'h'_key: return executePendingOrMoveCursor(ViMotion::CharLeft);
-        case 'j'_key: return executePendingOrMoveCursor(ViMotion::LineDown);
-        case 'k'_key: return executePendingOrMoveCursor(ViMotion::LineUp);
-        case 'J'_key: scrollViewport(ScrollOffset(-1)); return executePendingOrMoveCursor(ViMotion::LineDown);
-        case 'K'_key: scrollViewport(ScrollOffset(+1)); return executePendingOrMoveCursor(ViMotion::LineUp);
-        case 'H'_key: return executePendingOrMoveCursor(ViMotion::PageTop);
-        case 'L'_key: return executePendingOrMoveCursor(ViMotion::PageBottom);
-        case 'l'_key: return executePendingOrMoveCursor(ViMotion::CharRight);
-        case 'n'_key: return executePendingOrMoveCursor(ViMotion::SearchResultForward);
-        case 'w'_key: return executePendingOrMoveCursor(ViMotion::WordForward);
-        case '{'_key: return executePendingOrMoveCursor(ViMotion::ParagraphBackward);
-        case '|'_key: return executePendingOrMoveCursor(ViMotion::ScreenColumn);
-        case '}'_key: return executePendingOrMoveCursor(ViMotion::ParagraphForward);
-        case 'W'_key: return executePendingOrMoveCursor(ViMotion::BigWordForward);
-        case 'B'_key: return executePendingOrMoveCursor(ViMotion::BigWordBackward);
-        case 'E'_key: return executePendingOrMoveCursor(ViMotion::BigWordEndForward);
-    }
-
-    if (modifier.any())
-        return false;
-
-    if (optional<TextObject> const textObject = charToTextObject(ch))
-    {
-        // clang-format off
-        switch (_viMode)
-        {
-            case ViMode::Insert:
-                break;
-            case ViMode::Normal:
-                if (_pendingTextObjectScope && _pendingOperator && *_pendingOperator == ViOperator::Yank)
-                    yank(*_pendingTextObjectScope, *textObject);
-                break;
-            case ViMode::Visual:
-            case ViMode::VisualLine:
-            case ViMode::VisualBlock:
-                if (_pendingTextObjectScope)
-                    select(*_pendingTextObjectScope, *textObject);
-                break;
-        }
-        // clang-format off
-        return true;
-    }
-
-    return false;
-}
-
 void ViInputHandler::toggleMode(ViMode newMode)
 {
     setMode(newMode != _viMode ? newMode : ViMode::Normal);
-}
-
-bool ViInputHandler::parseModeSwitch(char32_t ch, Modifier modifier)
-{
-    Require(_viMode != ViMode::Insert);
-
-    switch (InputMatch { modifier, ch })
-    {
-        case 'V' | Modifier::Control:
-            toggleMode(ViMode::VisualBlock);
-            return true;
-        case 'V' | Modifier::Shift:
-            toggleMode(ViMode::VisualLine);
-            return true;
-        case 'a'_key:
-        case 'i'_key:
-            if (!_pendingOperator && _viMode == ViMode::Normal )
-            {
-                toggleMode(ViMode::Insert);
-                return true;
-            }
-            break;
-        case 'v'_key:
-            toggleMode(ViMode::Visual);
-            return true;
-    }
-    return false;
-}
-
-void ViInputHandler::handleNormalMode(char32_t ch, Modifier modifier)
-{
-    Require(_viMode == ViMode::Normal);
-
-    if (parseModeSwitch(ch, modifier))
-        return;
-
-    if (parseCount(ch, modifier))
-        return;
-
-    switch (InputMatch { modifier.without(Modifier::Shift), ch })
-    {
-        case '/'_key: startSearch(); return;
-        case 'v'_key: toggleMode(ViMode::Visual); return;
-        case '#'_key: _executor.reverseSearchCurrentWord(); return;
-        case '*'_key: _executor.searchCurrentWord(); return;
-        case 'p'_key: _executor.paste(_count ? _count : 1, false); return;
-        case 'P'_key: _executor.paste(_count ? _count : 1, true); return;
-        case 'n'_key: _executor.jumpToNextMatch(_count ? _count : 1); return;
-        case 'N'_key: _executor.jumpToPreviousMatch(_count ? _count : 1); return;
-        case 'y'_key:
-            if (!_pendingOperator.has_value())
-                _pendingOperator = ViOperator::Yank;
-            else if (_pendingOperator == ViOperator::Yank)
-                execute(ViOperator::Yank, ViMotion::FullLine);
-            else
-                _pendingOperator.reset(); // is this good?
-            return;
-    }
-
-    if (parseTextObject(ch, modifier))
-        return;
 }
 
 } // namespace terminal
