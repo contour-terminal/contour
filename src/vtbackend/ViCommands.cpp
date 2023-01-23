@@ -794,6 +794,10 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
             return globalCharUp(cursorPosition, '{', count);
         case ViMotion::GlobalCurlyOpenDown: // ]]
             return globalCharDown(cursorPosition, '{', count);
+        case ViMotion::GlobalCurlyCloseUp: // []
+            return globalCharUp(cursorPosition, '}', count);
+        case ViMotion::GlobalCurlyCloseDown: // ][
+            return globalCharDown(cursorPosition, '}', count);
         case ViMotion::LineMarkUp: // [m
         {
             auto const pageTop = -_terminal.currentScreen().historyLineCount().as<LineOffset>();

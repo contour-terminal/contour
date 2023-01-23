@@ -88,8 +88,10 @@ enum class ViMotion
     PageBottom,           // <S-L> (inspired by tmux)
     ParagraphBackward,    // {
     ParagraphForward,     // }
-    GlobalCurlyOpenUp,   // [[
-    GlobalCurlyOpenDown, // ]]
+    GlobalCurlyCloseUp,   // []
+    GlobalCurlyCloseDown, // ][
+    GlobalCurlyOpenUp,    // [[
+    GlobalCurlyOpenDown,  // ]]
     LineMarkUp,           // [m
     LineMarkDown,         // ]m
     ParenthesisMatching,  // %
@@ -376,6 +378,8 @@ struct formatter<terminal::ViMotion>
             case ViMotion::BigWordBackward: return fmt::format_to(ctx.out(), "BigWordBackward");
             case ViMotion::BigWordEndForward: return fmt::format_to(ctx.out(), "BigWordEndForward");
             case ViMotion::BigWordForward: return fmt::format_to(ctx.out(), "BigWordForward");
+            case ViMotion::GlobalCurlyCloseUp: return fmt::format_to(ctx.out(), "GlobalCurlyCloseUp");
+            case ViMotion::GlobalCurlyCloseDown: return fmt::format_to(ctx.out(), "GlobalCurlyCloseDown");
             case ViMotion::GlobalCurlyOpenUp: return fmt::format_to(ctx.out(), "GlobalCurlyOpenUp");
             case ViMotion::GlobalCurlyOpenDown: return fmt::format_to(ctx.out(), "GlobalCurlyOpenDown");
             case ViMotion::LineMarkUp: return fmt::format_to(ctx.out(), "LineMarkUp");
