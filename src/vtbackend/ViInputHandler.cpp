@@ -82,7 +82,8 @@ void ViInputHandler::registerAllCommands()
         std::array<std::pair<char, TextObjectScope>, 2> { { std::pair { 'i', TextObjectScope::Inner },
                                                             std::pair { 'a', TextObjectScope::A } } };
 
-    auto constexpr motionMappings = std::array<std::pair<std::string_view, ViMotion>, 36> { {
+    auto constexpr motionMappings = std::array<std::pair<std::string_view, ViMotion>, 38> { {
+        // clang-format off
         { "$", ViMotion::LineEnd },
         { "%", ViMotion::ParenthesisMatching },
         { "0", ViMotion::LineBegin },
@@ -105,7 +106,9 @@ void ViInputHandler::registerAllCommands()
         { "N", ViMotion::SearchResultBackward },
         { "W", ViMotion::BigWordForward },
         { "[[", ViMotion::GlobalCurlyStartUp },
+        { "[m", ViMotion::LineMarkUp },
         { "]]", ViMotion::GlobalCurlyStartDown },
+        { "]m", ViMotion::LineMarkDown },
         { "^", ViMotion::LineTextBegin },
         { "b", ViMotion::WordBackward },
         { "e", ViMotion::WordEndForward },
@@ -119,6 +122,7 @@ void ViInputHandler::registerAllCommands()
         { "{", ViMotion::ParagraphBackward },
         { "|", ViMotion::ScreenColumn },
         { "}", ViMotion::ParagraphForward },
+        // clang-format on
     } };
 
     auto constexpr textObjectMappings = std::array<std::pair<char, TextObject>, 14> { {

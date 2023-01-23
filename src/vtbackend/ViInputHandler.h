@@ -90,6 +90,8 @@ enum class ViMotion
     ParagraphForward,     // }
     GlobalCurlyStartUp,   // [[
     GlobalCurlyStartDown, // ]]
+    LineMarkUp,           // [m
+    LineMarkDown,         // ]m
     ParenthesisMatching,  // %
     SearchResultBackward, // N
     SearchResultForward,  // n
@@ -376,6 +378,8 @@ struct formatter<terminal::ViMotion>
             case ViMotion::BigWordForward: return fmt::format_to(ctx.out(), "BigWordForward");
             case ViMotion::GlobalCurlyStartUp: return fmt::format_to(ctx.out(), "GlobalCurlyStartUp");
             case ViMotion::GlobalCurlyStartDown: return fmt::format_to(ctx.out(), "GlobalCurlyStartDown");
+            case ViMotion::LineMarkUp: return fmt::format_to(ctx.out(), "LineMarkUp");
+            case ViMotion::LineMarkDown: return fmt::format_to(ctx.out(), "LineMarkDown");
         }
         return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(motion));
     }
