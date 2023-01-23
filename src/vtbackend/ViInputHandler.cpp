@@ -164,6 +164,9 @@ void ViInputHandler::registerAllCommands()
     registerCommand(ModeSelect::Normal, "p", [this]() { _executor.paste(count(), false); });
     registerCommand(ModeSelect::Normal, "P", [this]() { _executor.paste(count(), true); });
 
+    registerCommand(ModeSelect::Normal, "J", [this]() { _executor.scrollViewport(ScrollOffset(-1)); _executor.moveCursor(ViMotion::LineDown, 1);});
+    registerCommand(ModeSelect::Normal, "K", [this]() { _executor.scrollViewport(ScrollOffset(+1)); _executor.moveCursor(ViMotion::LineUp, 1);});
+
     registerCommand(ModeSelect::Normal, "Y", [this]() { _executor.execute(ViOperator::Yank, ViMotion::FullLine, count()); });
     registerCommand(ModeSelect::Normal, "yy", [this]() { _executor.execute(ViOperator::Yank, ViMotion::FullLine, count()); });
     registerCommand(ModeSelect::Normal, "yb", [this]() { _executor.execute(ViOperator::Yank, ViMotion::WordBackward, count()); });
