@@ -750,6 +750,44 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
             }
             return snapToCell(current);
         }
+        case ViMotion::GlobalCurlyStartUp: // [[
+        {
+            auto const pageTop = -_terminal.currentScreen().historyLineCount().as<LineOffset>();
+            auto result = CellLocation { cursorPosition.line, ColumnOffset(0) };
+            while (count > 0)
+            {
+                if (cursorPosition.column == ColumnOffset(0) && result.line > pageTop)
+                    --result.line;
+                while (result.line > pageTop)
+                {
+                    auto const& line = _terminal.currentScreen().lineTextAt(result.line, false, true);
+                    if (line == "{")
+                        break;
+                    --result.line;
+                }
+                --count;
+            }
+            return result;
+        }
+        case ViMotion::GlobalCurlyStartDown: // ]]
+        {
+            auto const pageBottom = _terminal.pageSize().lines.as<LineOffset>() - 1;
+            auto result = CellLocation { cursorPosition.line, ColumnOffset(0) };
+            while (count > 0)
+            {
+                if (cursorPosition.column == ColumnOffset(0) && result.line < pageBottom)
+                    ++result.line;
+                while (result.line < pageBottom)
+                {
+                    auto const& line = _terminal.currentScreen().lineTextAt(result.line, false, true);
+                    if (line == "{")
+                        break;
+                    ++result.line;
+                }
+                --count;
+            }
+            return result;
+        }
         case ViMotion::ParagraphForward: // }
         {
             auto const pageBottom = _terminal.pageSize().lines.as<LineOffset>() - 1;
