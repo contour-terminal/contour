@@ -657,6 +657,46 @@ bool ViCommands::compareCellTextAt(CellLocation position, char codepoint) const 
     return _terminal.currentScreen().compareCellTextAt(position, codepoint);
 }
 
+CellLocation ViCommands::globalCharUp(CellLocation location, char ch, unsigned count) const noexcept
+{
+    auto const pageTop = -_terminal.currentScreen().historyLineCount().as<LineOffset>();
+    auto result = CellLocation { location.line, ColumnOffset(0) };
+    while (count > 0)
+    {
+        if (location.column == ColumnOffset(0) && result.line > pageTop)
+            --result.line;
+        while (result.line > pageTop)
+        {
+            auto const& line = _terminal.currentScreen().lineTextAt(result.line, false, true);
+            if (line.size() == 1 && line[0] == ch)
+                break;
+            --result.line;
+        }
+        --count;
+    }
+    return result;
+}
+
+CellLocation ViCommands::globalCharDown(CellLocation location, char ch, unsigned count) const noexcept
+{
+    auto const pageBottom = _terminal.pageSize().lines.as<LineOffset>() - 1;
+    auto result = CellLocation { location.line, ColumnOffset(0) };
+    while (count > 0)
+    {
+        if (location.column == ColumnOffset(0) && result.line < pageBottom)
+            ++result.line;
+        while (result.line < pageBottom)
+        {
+            auto const& line = _terminal.currentScreen().lineTextAt(result.line, false, true);
+            if (line.size() == 1 && line[0] == ch)
+                break;
+            ++result.line;
+        }
+        --count;
+    }
+    return result;
+}
+
 CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count) const noexcept
 {
     switch (motion)
@@ -750,7 +790,15 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
             }
             return snapToCell(current);
         }
-        case ViMotion::GlobalCurlyStartUp: // [[
+        case ViMotion::GlobalCurlyOpenUp: // [[
+            return globalCharUp(cursorPosition, '{', count);
+        case ViMotion::GlobalCurlyOpenDown: // ]]
+            return globalCharDown(cursorPosition, '{', count);
+        case ViMotion::GlobalCurlyCloseUp: // []
+            return globalCharUp(cursorPosition, '}', count);
+        case ViMotion::GlobalCurlyCloseDown: // ][
+            return globalCharDown(cursorPosition, '}', count);
+        case ViMotion::LineMarkUp: // [m
         {
             auto const pageTop = -_terminal.currentScreen().historyLineCount().as<LineOffset>();
             auto result = CellLocation { cursorPosition.line, ColumnOffset(0) };
@@ -760,8 +808,8 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
                     --result.line;
                 while (result.line > pageTop)
                 {
-                    auto const& line = _terminal.currentScreen().lineTextAt(result.line, false, true);
-                    if (line == "{")
+                    if (unsigned(_terminal.currentScreen().lineFlagsAt(result.line))
+                        & unsigned(LineFlags::Marked))
                         break;
                     --result.line;
                 }
@@ -769,7 +817,7 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
             }
             return result;
         }
-        case ViMotion::GlobalCurlyStartDown: // ]]
+        case ViMotion::LineMarkDown: // ]m
         {
             auto const pageBottom = _terminal.pageSize().lines.as<LineOffset>() - 1;
             auto result = CellLocation { cursorPosition.line, ColumnOffset(0) };
@@ -779,8 +827,8 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
                     ++result.line;
                 while (result.line < pageBottom)
                 {
-                    auto const& line = _terminal.currentScreen().lineTextAt(result.line, false, true);
-                    if (line == "{")
+                    if (unsigned(_terminal.currentScreen().lineFlagsAt(result.line))
+                        & unsigned(LineFlags::Marked))
                         break;
                     ++result.line;
                 }

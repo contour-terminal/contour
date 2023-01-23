@@ -88,8 +88,12 @@ enum class ViMotion
     PageBottom,           // <S-L> (inspired by tmux)
     ParagraphBackward,    // {
     ParagraphForward,     // }
-    GlobalCurlyStartUp,   // [[
-    GlobalCurlyStartDown, // ]]
+    GlobalCurlyCloseUp,   // []
+    GlobalCurlyCloseDown, // ][
+    GlobalCurlyOpenUp,    // [[
+    GlobalCurlyOpenDown,  // ]]
+    LineMarkUp,           // [m
+    LineMarkDown,         // ]m
     ParenthesisMatching,  // %
     SearchResultBackward, // N
     SearchResultForward,  // n
@@ -168,8 +172,6 @@ class ViInputHandler: public InputHandler
         virtual void searchDone() = 0;
         virtual void searchCancel() = 0;
         virtual void updateSearchTerm(std::u32string const& text) = 0;
-        virtual bool jumpToNextMatch(unsigned count) = 0;
-        virtual bool jumpToPreviousMatch(unsigned count) = 0;
 
         virtual void scrollViewport(ScrollOffset delta) = 0;
 
@@ -374,8 +376,12 @@ struct formatter<terminal::ViMotion>
             case ViMotion::BigWordBackward: return fmt::format_to(ctx.out(), "BigWordBackward");
             case ViMotion::BigWordEndForward: return fmt::format_to(ctx.out(), "BigWordEndForward");
             case ViMotion::BigWordForward: return fmt::format_to(ctx.out(), "BigWordForward");
-            case ViMotion::GlobalCurlyStartUp: return fmt::format_to(ctx.out(), "GlobalCurlyStartUp");
-            case ViMotion::GlobalCurlyStartDown: return fmt::format_to(ctx.out(), "GlobalCurlyStartDown");
+            case ViMotion::GlobalCurlyCloseUp: return fmt::format_to(ctx.out(), "GlobalCurlyCloseUp");
+            case ViMotion::GlobalCurlyCloseDown: return fmt::format_to(ctx.out(), "GlobalCurlyCloseDown");
+            case ViMotion::GlobalCurlyOpenUp: return fmt::format_to(ctx.out(), "GlobalCurlyOpenUp");
+            case ViMotion::GlobalCurlyOpenDown: return fmt::format_to(ctx.out(), "GlobalCurlyOpenDown");
+            case ViMotion::LineMarkUp: return fmt::format_to(ctx.out(), "LineMarkUp");
+            case ViMotion::LineMarkDown: return fmt::format_to(ctx.out(), "LineMarkDown");
         }
         return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(motion));
     }

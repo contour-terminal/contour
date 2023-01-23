@@ -106,7 +106,9 @@
     <release version="0.3.11" urgency="medium" type="development">
       <description>
         <ul>
-          <li>Adds normal mode command `[[` and `]]` mimmicking exactly what vim does.</li>
+          <li>Fixes normal mode motion `J` and `M` that got accidentally unimplemented.</li>
+          <li>Adds normal mode motion `[[`, `]]`, `[]`, `][` mimmicking exactly what vim does.</li>
+          <li>Adds normal mode motion `[m` and `]m` to jump line marks up/down.</li>
         </ul>
       </description>
     </release>

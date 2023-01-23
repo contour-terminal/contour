@@ -82,7 +82,8 @@ void ViInputHandler::registerAllCommands()
         std::array<std::pair<char, TextObjectScope>, 2> { { std::pair { 'i', TextObjectScope::Inner },
                                                             std::pair { 'a', TextObjectScope::A } } };
 
-    auto constexpr motionMappings = std::array<std::pair<std::string_view, ViMotion>, 36> { {
+    auto constexpr motionMappings = std::array<std::pair<std::string_view, ViMotion>, 40> { {
+        // clang-format off
         { "$", ViMotion::LineEnd },
         { "%", ViMotion::ParenthesisMatching },
         { "0", ViMotion::LineBegin },
@@ -104,8 +105,12 @@ void ViInputHandler::registerAllCommands()
         { "M", ViMotion::LinesCenter },
         { "N", ViMotion::SearchResultBackward },
         { "W", ViMotion::BigWordForward },
-        { "[[", ViMotion::GlobalCurlyStartUp },
-        { "]]", ViMotion::GlobalCurlyStartDown },
+        { "[[", ViMotion::GlobalCurlyOpenUp },
+        { "[]", ViMotion::GlobalCurlyCloseUp },
+        { "[m", ViMotion::LineMarkUp },
+        { "][", ViMotion::GlobalCurlyCloseDown },
+        { "]]", ViMotion::GlobalCurlyOpenDown },
+        { "]m", ViMotion::LineMarkDown },
         { "^", ViMotion::LineTextBegin },
         { "b", ViMotion::WordBackward },
         { "e", ViMotion::WordEndForward },
@@ -119,6 +124,7 @@ void ViInputHandler::registerAllCommands()
         { "{", ViMotion::ParagraphBackward },
         { "|", ViMotion::ScreenColumn },
         { "}", ViMotion::ParagraphForward },
+        // clang-format on
     } };
 
     auto constexpr textObjectMappings = std::array<std::pair<char, TextObject>, 14> { {
@@ -157,8 +163,9 @@ void ViInputHandler::registerAllCommands()
     registerCommand(ModeSelect::Normal, "*", [this]() { _executor.searchCurrentWord(); });
     registerCommand(ModeSelect::Normal, "p", [this]() { _executor.paste(count(), false); });
     registerCommand(ModeSelect::Normal, "P", [this]() { _executor.paste(count(), true); });
-    // TODO(pr) registerCommand(ModeSelect::Normal, "n", [this]() { _executor.jumpToNextMatch(count()); });
-    // TODO(pr) registerCommand(ModeSelect::Normal, "N", [this]() { _executor.jumpToPreviousMatch(count()); });
+
+    registerCommand(ModeSelect::Normal, "J", [this]() { _executor.scrollViewport(ScrollOffset(-1)); _executor.moveCursor(ViMotion::LineDown, 1);});
+    registerCommand(ModeSelect::Normal, "K", [this]() { _executor.scrollViewport(ScrollOffset(+1)); _executor.moveCursor(ViMotion::LineUp, 1);});
 
     registerCommand(ModeSelect::Normal, "Y", [this]() { _executor.execute(ViOperator::Yank, ViMotion::FullLine, count()); });
     registerCommand(ModeSelect::Normal, "yy", [this]() { _executor.execute(ViOperator::Yank, ViMotion::FullLine, count()); });
