@@ -292,6 +292,7 @@ class Line
     [[nodiscard]] InflatedBuffer reflow(ColumnCount newColumnCount);
     [[nodiscard]] std::string toUtf8() const;
     [[nodiscard]] std::string toUtf8Trimmed() const;
+    [[nodiscard]] std::string toUtf8Trimmed(bool stripLeadingSpaces, bool stripTrailingSpaces) const;
 
     // Returns a reference to this mutable grid-line buffer.
     //

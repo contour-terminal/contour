@@ -145,14 +145,25 @@ std::string Line<Cell>::toUtf8() const
 template <typename Cell>
 std::string Line<Cell>::toUtf8Trimmed() const
 {
-    std::string output = toUtf8();
-    while (!output.empty() && isspace(output.back()))
-        output.pop_back();
+    return toUtf8Trimmed(true, true);
+}
 
-    size_t frontGap = 0;
-    while (frontGap < output.size() && std::isspace(output[frontGap]))
-        frontGap++;
-    output = output.substr(frontGap);
+template <typename Cell>
+std::string Line<Cell>::toUtf8Trimmed(bool stripLeadingSpaces, bool stripTrailingSpaces) const
+{
+    std::string output = toUtf8();
+
+    if (stripTrailingSpaces)
+        while (!output.empty() && isspace(output.back()))
+            output.pop_back();
+
+    if (stripLeadingSpaces)
+    {
+        size_t frontGap = 0;
+        while (frontGap < output.size() && std::isspace(output[frontGap]))
+            frontGap++;
+        output = output.substr(frontGap);
+    }
 
     return output;
 }
