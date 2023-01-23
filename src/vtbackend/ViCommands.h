@@ -51,8 +51,8 @@ class ViCommands: public ViInputHandler::Executor
     void searchDone() override;
     void searchCancel() override;
     void updateSearchTerm(std::u32string const& text) override;
-    bool jumpToNextMatch(unsigned count) override;
-    bool jumpToPreviousMatch(unsigned count) override;
+    bool jumpToNextMatch(unsigned count);
+    bool jumpToPreviousMatch(unsigned count);
 
     void moveCursorTo(CellLocation position);
 

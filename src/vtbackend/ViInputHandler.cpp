@@ -163,8 +163,6 @@ void ViInputHandler::registerAllCommands()
     registerCommand(ModeSelect::Normal, "*", [this]() { _executor.searchCurrentWord(); });
     registerCommand(ModeSelect::Normal, "p", [this]() { _executor.paste(count(), false); });
     registerCommand(ModeSelect::Normal, "P", [this]() { _executor.paste(count(), true); });
-    // TODO(pr) registerCommand(ModeSelect::Normal, "n", [this]() { _executor.jumpToNextMatch(count()); });
-    // TODO(pr) registerCommand(ModeSelect::Normal, "N", [this]() { _executor.jumpToPreviousMatch(count()); });
 
     registerCommand(ModeSelect::Normal, "Y", [this]() { _executor.execute(ViOperator::Yank, ViMotion::FullLine, count()); });
     registerCommand(ModeSelect::Normal, "yy", [this]() { _executor.execute(ViOperator::Yank, ViMotion::FullLine, count()); });
