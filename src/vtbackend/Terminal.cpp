@@ -656,6 +656,12 @@ bool Terminal::sendMousePressEvent(Modifier modifier,
                                    bool uiHandledHint,
                                    Timestamp /*now*/)
 {
+    if (modifier.contains(_settings.mouseProtocolBypassModifier))
+        return false;
+
+    if (!allowInput())
+        return false;
+
     verifyState();
 
     _respectMouseProtocol = _settings.mouseProtocolBypassModifier == Modifier::None
