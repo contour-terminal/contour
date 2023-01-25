@@ -708,15 +708,11 @@ bool Terminal::handleMouseSelection(Modifier modifier, Timestamp now)
             {
                 setSelector(
                     make_unique<RectangularSelection>(_selectionHelper, startPos, selectionUpdatedHelper()));
-                // if (_state.inputHandler.mode() != ViMode::Insert)
-                //     _state.inputHandler.setMode(ViMode::VisualBlock);
             }
             else
             {
                 setSelector(
                     make_unique<LinearSelection>(_selectionHelper, startPos, selectionUpdatedHelper()));
-                // if (_state.inputHandler.mode() != ViMode::Insert)
-                //     _state.inputHandler.setMode(ViMode::Visual);
             }
             break;
         case 2:
@@ -727,15 +723,11 @@ bool Terminal::handleMouseSelection(Modifier modifier, Timestamp now)
                 auto const text = extractSelectionText();
                 auto const text32 = unicode::convert_to<char32_t>(string_view(text.data(), text.size()));
                 setNewSearchTerm(text32, true);
-                // if (_state.inputHandler.mode() != ViMode::Insert)
-                //     _state.inputHandler.setMode(ViMode::Visual);
             }
             break;
         case 3:
             setSelector(make_unique<FullLineSelection>(_selectionHelper, startPos, selectionUpdatedHelper()));
             _selection->extend(startPos);
-            // if (_state.inputHandler.mode() != ViMode::Insert)
-            //     _state.inputHandler.setMode(ViMode::VisualLine);
             break;
         default: clearSelection(); break;
     }
