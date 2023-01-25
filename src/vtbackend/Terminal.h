@@ -547,7 +547,7 @@ class Terminal
     bool rapidBlinkState() const noexcept { return _rapidBlinker.state; }
 
     /// Sets or resets to a new selection.
-    void setSelector(std::unique_ptr<Selection> selector) { _selection = std::move(selector); }
+    void setSelector(std::unique_ptr<Selection> selector);
 
     /// Tests whether or not some grid cells are selected.
     bool selectionAvailable() const noexcept { return !!_selection; }

@@ -553,7 +553,8 @@ void TerminalSession::sendMousePressEvent(Modifier _modifier,
                                           PixelCoordinate _pixelPosition,
                                           Timestamp _now)
 {
-    auto constexpr uiHandledHint = false;
+    auto const uiHandledHint = terminal().handleMouseSelection(_modifier, _now);
+
     if (terminal().sendMousePressEvent(_modifier, _button, _pixelPosition, uiHandledHint, _now))
     {
         scheduleRedraw();
