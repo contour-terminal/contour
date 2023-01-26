@@ -48,13 +48,16 @@ namespace // {{{ helper
 // }}}
 
 // {{{ Selection
-void Selection::extend(CellLocation to)
+bool Selection::extend(CellLocation to)
 {
     assert(_state != State::Complete
            && "In order extend a selection, the selector must be active (started).");
+    if (_to == to)
+        return false;
     _state = State::InProgress;
     _to = to;
     _onSelectionUpdated();
+    return true;
 }
 
 void Selection::complete()
@@ -205,17 +208,17 @@ CellLocation WordWiseSelection::extendSelectionForward(CellLocation pos) const n
     return stretchedColumn(_helper, last);
 }
 
-void WordWiseSelection::extend(CellLocation to)
+bool WordWiseSelection::extend(CellLocation to)
 {
     if (to >= _from) // extending to the right
     {
         _from = extendSelectionBackward(_from);
-        Selection::extend(extendSelectionForward(to));
+        return Selection::extend(extendSelectionForward(to));
     }
     else // extending to the left
     {
         _from = extendSelectionForward(_from);
-        Selection::extend(extendSelectionBackward(to));
+        return Selection::extend(extendSelectionBackward(to));
     }
 }
 // }}}
@@ -294,7 +297,7 @@ FullLineSelection::FullLineSelection(SelectionHelper const& helper,
     }
 }
 
-void FullLineSelection::extend(CellLocation to)
+bool FullLineSelection::extend(CellLocation to)
 {
     if (to.line >= _from.line)
     {
@@ -314,7 +317,7 @@ void FullLineSelection::extend(CellLocation to)
             --to.line;
     }
 
-    Selection::extend(to);
+    return Selection::extend(to);
 }
 // }}}
 
