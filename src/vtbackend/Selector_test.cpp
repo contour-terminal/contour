@@ -109,7 +109,7 @@ TEST_CASE("Selector.Linear", "[selector]")
     { // "b"
         auto const pos = CellLocation { LineOffset(1), ColumnOffset(1) };
         auto selector = LinearSelection(selectionHelper, pos, []() {});
-        selector.extend(pos);
+        (void) selector.extend(pos);
         selector.complete();
 
         vector<Selection::Range> const selection = selector.ranges();
@@ -129,7 +129,7 @@ TEST_CASE("Selector.Linear", "[selector]")
     { // "b,c"
         auto const pos = CellLocation { LineOffset(1), ColumnOffset(1) };
         auto selector = LinearSelection(selectionHelper, pos, []() {});
-        selector.extend(CellLocation { LineOffset(1), ColumnOffset(3) });
+        (void) selector.extend(CellLocation { LineOffset(1), ColumnOffset(3) });
         selector.complete();
 
         vector<Selection::Range> const selection = selector.ranges();
@@ -149,7 +149,7 @@ TEST_CASE("Selector.Linear", "[selector]")
     { // "b,cdefg,hi\n1234"
         auto const pos = CellLocation { LineOffset(1), ColumnOffset(1) };
         auto selector = LinearSelection(selectionHelper, pos, []() {});
-        selector.extend(CellLocation { LineOffset(2), ColumnOffset(3) });
+        (void) selector.extend(CellLocation { LineOffset(2), ColumnOffset(3) });
         selector.complete();
 
         vector<Selection::Range> const selection = selector.ranges();
@@ -186,7 +186,7 @@ TEST_CASE("Selector.Linear", "[selector]")
 
         auto selector =
             LinearSelection(selectionHelper, CellLocation { LineOffset(-2), ColumnOffset(6) }, []() {});
-        selector.extend(CellLocation { LineOffset(-1), ColumnOffset(2) });
+        (void) selector.extend(CellLocation { LineOffset(-1), ColumnOffset(2) });
         selector.complete();
 
         vector<Selection::Range> const selection = selector.ranges();
@@ -223,7 +223,7 @@ TEST_CASE("Selector.Linear", "[selector]")
 
         auto selector =
             LinearSelection(selectionHelper, CellLocation { LineOffset(-2), ColumnOffset(8) }, []() {});
-        selector.extend(CellLocation { LineOffset(0), ColumnOffset(1) });
+        (void) selector.extend(CellLocation { LineOffset(0), ColumnOffset(1) });
         selector.complete();
 
         vector<Selection::Range> const selection = selector.ranges();

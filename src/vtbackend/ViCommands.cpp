@@ -263,20 +263,20 @@ void ViCommands::modeChanged(ViMode mode)
         case ViMode::Visual:
             _terminal.setSelector(make_unique<LinearSelection>(
                 _terminal.selectionHelper(), selectFrom, _terminal.selectionUpdatedHelper()));
-            _terminal.selector()->extend(cursorPosition);
+            (void) _terminal.selector()->extend(cursorPosition);
             _terminal.pushStatusDisplay(StatusDisplayType::Indicator);
             break;
         case ViMode::VisualLine:
             _terminal.setSelector(make_unique<FullLineSelection>(
                 _terminal.selectionHelper(), selectFrom, _terminal.selectionUpdatedHelper()));
-            _terminal.selector()->extend(cursorPosition);
+            (void) _terminal.selector()->extend(cursorPosition);
             _terminal.pushStatusDisplay(StatusDisplayType::Indicator);
             _terminal.screenUpdated();
             break;
         case ViMode::VisualBlock:
             _terminal.setSelector(make_unique<RectangularSelection>(
                 _terminal.selectionHelper(), selectFrom, _terminal.selectionUpdatedHelper()));
-            _terminal.selector()->extend(cursorPosition);
+            (void) _terminal.selector()->extend(cursorPosition);
             _terminal.pushStatusDisplay(StatusDisplayType::Indicator);
             _terminal.screenUpdated();
             break;
@@ -342,7 +342,7 @@ void ViCommands::executeYank(CellLocation from, CellLocation to)
     // or delayed (N msecs, configurable),
     _terminal.setSelector(
         make_unique<LinearSelection>(_terminal.selectionHelper(), from, _terminal.selectionUpdatedHelper()));
-    _terminal.selector()->extend(to);
+    (void) _terminal.selector()->extend(to);
     auto const text = _terminal.extractSelectionText();
     _terminal.copyToClipboard(text);
     _terminal.clearSelection();
@@ -390,7 +390,7 @@ void ViCommands::select(TextObjectScope scope, TextObject textObject)
                to);
     _terminal.setSelector(
         make_unique<LinearSelection>(_terminal.selectionHelper(), from, _terminal.selectionUpdatedHelper()));
-    _terminal.selector()->extend(to);
+    (void) _terminal.selector()->extend(to);
     _terminal.screenUpdated();
 }
 
@@ -993,7 +993,7 @@ void ViCommands::moveCursorTo(CellLocation position)
         case ViMode::VisualLine:
         case ViMode::VisualBlock:
             if (_terminal.selector())
-                _terminal.selector()->extend(cursorPosition);
+                (void) _terminal.selector()->extend(cursorPosition);
             break;
     }
 

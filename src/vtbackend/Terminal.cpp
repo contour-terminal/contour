@@ -644,27 +644,13 @@ bool Terminal::sendCharPressEvent(char32_t value, Modifier modifier, Timestamp n
     return success;
 }
 
-bool Terminal::isMouseGrabbedByApp() const noexcept
-{
-    return allowInput() && _respectMouseProtocol && _state.inputGenerator.mouseProtocol().has_value()
-           && !_state.inputGenerator.passiveMouseTracking();
-}
-
 bool Terminal::sendMousePressEvent(Modifier modifier,
                                    MouseButton button,
                                    PixelCoordinate pixelPosition,
                                    bool uiHandledHint,
                                    Timestamp /*now*/)
 {
-    if (modifier.contains(_settings.mouseProtocolBypassModifier))
-        return false;
-
-    if (!allowInput())
-        return false;
-
-    _respectMouseProtocol = _settings.mouseProtocolBypassModifier == Modifier::None
-                            || !modifier.contains(_settings.mouseProtocolBypassModifier);
-    if (!_respectMouseProtocol)
+    if (!allowPassMouseEventToApp(modifier))
         return false;
 
     verifyState();
@@ -717,7 +703,7 @@ bool Terminal::handleMouseSelection(Modifier modifier, Timestamp now)
             break;
         case 2:
             setSelector(make_unique<WordWiseSelection>(_selectionHelper, startPos, selectionUpdatedHelper()));
-            _selection->extend(startPos);
+            (void) _selection->extend(startPos);
             if (_settings.visualizeSelectedWord)
             {
                 auto const text = extractSelectionText();
@@ -727,7 +713,7 @@ bool Terminal::handleMouseSelection(Modifier modifier, Timestamp now)
             break;
         case 3:
             setSelector(make_unique<FullLineSelection>(_selectionHelper, startPos, selectionUpdatedHelper()));
-            _selection->extend(startPos);
+            (void) _selection->extend(startPos);
             break;
         default: clearSelection(); break;
     }
@@ -765,12 +751,14 @@ void Terminal::clearSelection()
     breakLoopAndRefreshRenderBuffer();
 }
 
-bool Terminal::sendMouseMoveEvent(Modifier modifier,
+void Terminal::sendMouseMoveEvent(Modifier modifier,
                                   CellLocation newPosition,
                                   PixelCoordinate pixelPosition,
                                   bool uiHandledHint,
                                   Timestamp /*now*/)
 {
+    verifyState();
+
     // Speed-clicks are only counted when not moving the mouse in between, so reset on mouse move here.
     _speedClicks = 0;
 
@@ -783,22 +771,21 @@ bool Terminal::sendMouseMoveEvent(Modifier modifier,
 
     // Only continue if he mouse position has changed to a new grid value or we're tracking pixel values.
     if (newPosition == _currentMousePosition && !isModeEnabled(DECMode::MouseSGRPixels))
-        return false;
+        return;
 
     _currentMousePosition = newPosition;
 
-    if (!_leftMouseButtonPressed)
-        return false;
+    updateCursorHoveringState();
 
-    auto changed = false;
+    if (!_leftMouseButtonPressed)
+        return;
+
     auto relativePos = _viewport.translateScreenToGridCoordinate(_currentMousePosition);
     _state.viCommands.cursorPosition = relativePos;
     _viewport.makeVisible(_state.viCommands.cursorPosition.line);
 
-    changed = changed || updateCursorHoveringState();
-
     // Do not handle mouse-move events in sub-cell dimensions.
-    if (allowInput() && _respectMouseProtocol
+    if (allowPassMouseEventToApp(modifier)
         && _state.inputGenerator.generateMouseMove(modifier,
                                                    relativePos,
                                                    pixelPosition,
@@ -806,16 +793,12 @@ bool Terminal::sendMouseMoveEvent(Modifier modifier,
                                                        || (_leftMouseButtonPressed && !selectionAvailable())))
     {
         flushInput();
-
         if (!isModeEnabled(DECMode::MousePassiveTracking))
-            return true;
+            return;
     }
 
     if (_leftMouseButtonPressed && !selectionAvailable())
-    {
-        changed = true;
         setSelector(make_unique<LinearSelection>(_selectionHelper, relativePos, selectionUpdatedHelper()));
-    }
 
     if (selectionAvailable()
         && (selector()->state() != Selection::State::Complete && _leftMouseButtonPressed))
@@ -824,19 +807,13 @@ bool Terminal::sendMouseMoveEvent(Modifier modifier,
         {
             relativePos.column = ColumnOffset { 0 } + *(_settings.pageSize.columns - 1);
         }
-        changed = true;
         _state.viCommands.cursorPosition = relativePos;
         _viewport.makeVisible(_state.viCommands.cursorPosition.line);
         if (_state.inputHandler.mode() != ViMode::Insert)
             _state.inputHandler.setMode(selector()->viMode());
-        selector()->extend(relativePos);
-        breakLoopAndRefreshRenderBuffer();
-        return true;
+        if (selector()->extend(relativePos))
+            screenUpdated();
     }
-
-    // TODO: adjust selector's start lines according the the current viewport
-
-    return changed;
 }
 
 bool Terminal::sendMouseReleaseEvent(Modifier modifier,
@@ -865,7 +842,7 @@ bool Terminal::sendMouseReleaseEvent(Modifier modifier,
         }
     }
 
-    if (allowInput() && _respectMouseProtocol
+    if (allowPassMouseEventToApp(modifier)
         && _state.inputGenerator.generateMouseRelease(
             modifier, button, _currentMousePosition, pixelPosition, uiHandledHint))
     {
@@ -874,8 +851,6 @@ bool Terminal::sendMouseReleaseEvent(Modifier modifier,
         if (!isModeEnabled(DECMode::MousePassiveTracking))
             return true;
     }
-
-    _respectMouseProtocol = true;
 
     return true;
 }
@@ -1000,21 +975,17 @@ void Terminal::updateCursorVisibilityState() const
     _cursorBlinkState = (_cursorBlinkState + 1) % 2;
 }
 
-bool Terminal::updateCursorHoveringState()
+void Terminal::updateCursorHoveringState()
 {
-    verifyState();
+    auto const newState = _currentScreen.get().contains(_currentMousePosition)
+                              ? _currentScreen.get().hyperlinkIdAt(
+                                  _viewport.translateScreenToGridCoordinate(_currentMousePosition))
+                              : HyperlinkId {};
 
-    auto const mouseInView = isPrimaryScreen() ? _primaryScreen.contains(_currentMousePosition)
-                                               : _alternateScreen.contains(_currentMousePosition);
-    if (!mouseInView)
-        return false;
+    auto const oldState = _hoveringHyperlinkId.exchange(newState);
 
-    auto const relCursorPos = _viewport.translateScreenToGridCoordinate(_currentMousePosition);
-    auto const mouseInView2 = _currentScreen.get().contains(_currentMousePosition);
-    auto const newState = mouseInView2 && !!_currentScreen.get().hyperlinkIdAt(relCursorPos);
-
-    auto const oldState = _hoveringHyperlink.exchange(newState);
-    return newState != oldState;
+    if (newState != oldState)
+        screenUpdated();
 }
 
 optional<chrono::milliseconds> Terminal::nextRender() const

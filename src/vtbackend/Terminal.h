@@ -240,8 +240,6 @@ class Terminal
     void setMouseProtocolBypassModifier(Modifier value) { _settings.mouseProtocolBypassModifier = value; }
     void setMouseBlockSelectionModifier(Modifier value) { _settings.mouseBlockSelectionModifier = value; }
 
-    bool isMouseGrabbedByApp() const noexcept;
-
     // {{{ input proxy
     using Timestamp = std::chrono::steady_clock::time_point;
     bool sendKeyPressEvent(Key key, Modifier modifier, Timestamp now);
@@ -251,7 +249,7 @@ class Terminal
                              PixelCoordinate pixelPosition,
                              bool uiHandledHint,
                              Timestamp now);
-    bool sendMouseMoveEvent(Modifier modifier,
+    void sendMouseMoveEvent(Modifier modifier,
                             CellLocation pos,
                             PixelCoordinate pixelPosition,
                             bool uiHandledHint,
@@ -560,7 +558,10 @@ class Terminal
     [[nodiscard]] std::string extractLastMarkRange() const;
 
     /// Tests whether or not the mouse is currently hovering a hyperlink.
-    [[nodiscard]] bool isMouseHoveringHyperlink() const noexcept { return _hoveringHyperlink.load(); }
+    [[nodiscard]] bool isMouseHoveringHyperlink() const noexcept
+    {
+        return _hoveringHyperlinkId.load().value != 0;
+    }
 
     /// Retrieves the HyperlinkInfo that is currently behing hovered by the mouse, if so,
     /// or a nothing otherwise.
@@ -576,7 +577,7 @@ class Terminal
 
     bool processInputOnce();
 
-    void markScreenDirty() { _screenDirty = true; }
+    void markScreenDirty() noexcept { _screenDirty = true; }
     [[nodiscard]] bool screenDirty() const noexcept { return _screenDirty; }
 
     [[nodiscard]] uint64_t lastFrameID() const noexcept { return _lastFrameID.load(); }
@@ -709,7 +710,20 @@ class Terminal
     void fillRenderBufferInternal(RenderBuffer& output, bool includeSelection);
     void updateIndicatorStatusLine();
     void updateCursorVisibilityState() const;
-    bool updateCursorHoveringState();
+    void updateCursorHoveringState();
+
+    // Tests if the App mouse protocol is explicitly being bypassed by the user,
+    // by pressing a special bypass modifier (usualy Shift).
+    bool allowBypassAppMouseGrabViaModifier(Modifier modifier) const noexcept
+    {
+        return _settings.mouseProtocolBypassModifier != Modifier::None
+               && modifier.contains(_settings.mouseProtocolBypassModifier);
+    }
+
+    bool allowPassMouseEventToApp(Modifier currentlyPressedModifier) const noexcept
+    {
+        return allowInput() && !allowBypassAppMouseGrabViaModifier(currentlyPressedModifier);
+    }
 
     template <typename BlinkerState>
     [[nodiscard]] std::pair<bool, std::chrono::steady_clock::time_point> nextBlinkState(
@@ -755,8 +769,8 @@ class Terminal
     std::chrono::steady_clock::time_point _lastClick {};
     unsigned int _speedClicks = 0;
     terminal::CellLocation _currentMousePosition {}; // current mouse position
-    bool _respectMouseProtocol = true;    // shift-click can disable that, button release sets it back to true
     bool _leftMouseButtonPressed = false; // tracks left-mouse button pressed state (used for cell selection).
+    bool _respectMouseProtocol = true;    // shift-click can disable that, button release sets it back to true
     // }}}
 
     // {{{ blinking state helpers
@@ -811,7 +825,7 @@ class Terminal
     // }}}
 
     InputMethodData _inputMethodData {};
-    std::atomic<bool> _hoveringHyperlink = false;
+    std::atomic<HyperlinkId> _hoveringHyperlinkId;
     std::atomic<bool> _renderBufferUpdateEnabled = true; // for "Synchronized Updates" feature
     std::optional<HighlightRange> _highlightRange = std::nullopt;
 };

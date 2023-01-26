@@ -109,7 +109,7 @@ class Selection
     [[nodiscard]] constexpr State state() const noexcept { return _state; }
 
     /// Extends the selection to the given coordinate.
-    virtual void extend(CellLocation to);
+    [[nodiscard]] virtual bool extend(CellLocation to);
 
     /// Constructs a vector of ranges for this selection.
     [[nodiscard]] virtual std::vector<Range> ranges() const;
@@ -155,7 +155,7 @@ class WordWiseSelection: public Selection
                       CellLocation start,
                       OnSelectionUpdated onSelectionUpdated);
 
-    void extend(CellLocation to) override;
+    bool extend(CellLocation to) override;
 
     [[nodiscard]] CellLocation extendSelectionBackward(CellLocation pos) const noexcept;
     [[nodiscard]] CellLocation extendSelectionForward(CellLocation pos) const noexcept;
@@ -167,7 +167,7 @@ class FullLineSelection: public Selection
     explicit FullLineSelection(SelectionHelper const& helper,
                                CellLocation start,
                                OnSelectionUpdated onSelectionUpdated);
-    void extend(CellLocation to) override;
+    bool extend(CellLocation to) override;
 };
 
 template <typename Renderer>
