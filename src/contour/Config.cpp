@@ -319,7 +319,7 @@ namespace
                     parentKey += '.';
                 parentKey += _keys[i];
             }
-            ConfigLog()("Missing key {}. Using default: {}.", parentKey, defaultStrQuoted);
+            errorlog()("Missing key {}. Using default: {}.", parentKey, defaultStrQuoted);
             return false;
         }
 
@@ -360,7 +360,7 @@ namespace
                 parentKey += '.';
                 parentKey += _keys[i];
             }
-            ConfigLog()(
+            errorlog()(
                 "Missing key {}. Using default: {}.", parentKey, !defaultStr.empty() ? defaultStr : R"("")");
             return false;
         }
