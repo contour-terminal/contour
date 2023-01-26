@@ -825,7 +825,7 @@ class Terminal
     // }}}
 
     InputMethodData _inputMethodData {};
-    std::atomic<HyperlinkId> _hoveringHyperlinkId = {};
+    std::atomic<HyperlinkId> _hoveringHyperlinkId;
     std::atomic<bool> _renderBufferUpdateEnabled = true; // for "Synchronized Updates" feature
     std::optional<HighlightRange> _highlightRange = std::nullopt;
 };
