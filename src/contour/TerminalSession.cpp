@@ -582,24 +582,25 @@ void TerminalSession::sendMouseMoveEvent(terminal::Modifier _modifier,
         return;
 
     auto const uiHandledHint = false;
-    auto const handled = terminal().sendMouseMoveEvent(_modifier, _pos, _pixelPosition, uiHandledHint, _now);
+    terminal().sendMouseMoveEvent(_modifier, _pos, _pixelPosition, uiHandledHint, _now);
 
     if (_pos == currentMousePosition_)
         return;
 
     bool const mouseHoveringHyperlink = terminal().isMouseHoveringHyperlink();
     currentMousePosition_ = _pos;
+
+    // if (lastHoveringHyperlinkState != mouseHoveringHyperlink)
+    //     scheduleRedraw();
+
     if (mouseHoveringHyperlink)
+    {
         display_->setMouseCursorShape(MouseCursorShape::PointingHand);
+        // terminal().screenUpdated();
+        // terminal().breakLoopAndRefreshRenderBuffer();
+    }
     else
         setDefaultCursor();
-
-    // TODO: enter this if only if: `&& only if selection has changed!`
-    if (mouseHoveringHyperlink || handled || terminal().isSelectionInProgress())
-    {
-        terminal().breakLoopAndRefreshRenderBuffer();
-        scheduleRedraw();
-    }
 }
 
 void TerminalSession::sendMouseReleaseEvent(Modifier _modifier,
