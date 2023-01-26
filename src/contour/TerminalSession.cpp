@@ -553,36 +553,21 @@ void TerminalSession::sendMousePressEvent(Modifier _modifier,
                                           PixelCoordinate _pixelPosition,
                                           Timestamp _now)
 {
-    // InputLog()("sendMousePressEvent: {} {} at {}", _button, _modifier, currentMousePosition_);
-    bool mouseGrabbed = terminal().isMouseGrabbedByApp();
+    auto const uiHandledHint = terminal().handleMouseSelection(_modifier, _now);
 
-    auto actionHandled = false;
-    if (!mouseGrabbed)
+    if (terminal().sendMousePressEvent(_modifier, _button, _pixelPosition, uiHandledHint, _now))
     {
-        if (auto const* actions =
-                config::apply(config_.inputMappings.mouseMappings, _button, _modifier, matchModeFlags()))
-        {
-            if (executeAllActions(*actions))
-            {
-                actionHandled = true;
-            }
-        }
+        scheduleRedraw();
+        return;
     }
 
-    // clang-format off
-    auto const selectionHandled = !actionHandled
-                                  && !mouseGrabbed
-                                  && _button == MouseButton::Left
-                                  && terminal_.handleMouseSelection(_modifier, _now);
-    // clang-format on
+    auto const modifier = _modifier.contains(config_.bypassMouseProtocolModifier)
+                              ? _modifier.without(config_.bypassMouseProtocolModifier)
+                              : _modifier;
 
-    // First try to pass the mouse event to the application, as it might have requested that.
-    auto uiHandledHint = actionHandled || selectionHandled;
-    auto const terminalHandled =
-        terminal().sendMousePressEvent(_modifier, _button, _pixelPosition, uiHandledHint, _now);
-
-    if (uiHandledHint || terminalHandled)
-        scheduleRedraw();
+    if (auto const* actions =
+            config::apply(config_.inputMappings.mouseMappings, _button, modifier, matchModeFlags()))
+        executeAllActions(*actions);
 }
 
 void TerminalSession::sendMouseMoveEvent(terminal::Modifier _modifier,

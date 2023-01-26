@@ -656,22 +656,29 @@ bool Terminal::sendMousePressEvent(Modifier modifier,
                                    bool uiHandledHint,
                                    Timestamp /*now*/)
 {
-    verifyState();
+    if (modifier.contains(_settings.mouseProtocolBypassModifier))
+        return false;
+
+    if (!allowInput())
+        return false;
 
     _respectMouseProtocol = _settings.mouseProtocolBypassModifier == Modifier::None
                             || !modifier.contains(_settings.mouseProtocolBypassModifier);
+    if (!_respectMouseProtocol)
+        return false;
 
-    if (allowInput() && _respectMouseProtocol
-        && _state.inputGenerator.generateMousePress(
-            modifier, button, _currentMousePosition, pixelPosition, uiHandledHint))
-    {
-        // TODO: Ctrl+(Left)Click's should still be catched by the terminal iff there's a hyperlink
-        // under the current position
-        flushInput();
-        return !isModeEnabled(DECMode::MousePassiveTracking);
-    }
+    verifyState();
 
-    return false;
+    auto const eventSent = _state.inputGenerator.generateMousePress(
+        modifier, button, _currentMousePosition, pixelPosition, uiHandledHint);
+
+    if (!eventSent)
+        return false;
+
+    // TODO: Ctrl+(Left)Click's should still be catched by the terminal iff there's a hyperlink
+    // under the current position
+    flushInput();
+    return !isModeEnabled(DECMode::MousePassiveTracking);
 }
 
 bool Terminal::handleMouseSelection(Modifier modifier, Timestamp now)
@@ -699,42 +706,41 @@ bool Terminal::handleMouseSelection(Modifier modifier, Timestamp now)
             clearSelection();
             if (modifier == _settings.mouseBlockSelectionModifier)
             {
-                _selection =
-                    make_unique<RectangularSelection>(_selectionHelper, startPos, selectionUpdatedHelper());
-                // if (_state.inputHandler.mode() != ViMode::Insert)
-                //     _state.inputHandler.setMode(ViMode::VisualBlock);
+                setSelector(
+                    make_unique<RectangularSelection>(_selectionHelper, startPos, selectionUpdatedHelper()));
             }
             else
             {
-                _selection =
-                    make_unique<LinearSelection>(_selectionHelper, startPos, selectionUpdatedHelper());
-                // if (_state.inputHandler.mode() != ViMode::Insert)
-                //     _state.inputHandler.setMode(ViMode::Visual);
+                setSelector(
+                    make_unique<LinearSelection>(_selectionHelper, startPos, selectionUpdatedHelper()));
             }
             break;
         case 2:
-            _selection = make_unique<WordWiseSelection>(_selectionHelper, startPos, selectionUpdatedHelper());
+            setSelector(make_unique<WordWiseSelection>(_selectionHelper, startPos, selectionUpdatedHelper()));
             _selection->extend(startPos);
             if (_settings.visualizeSelectedWord)
             {
                 auto const text = extractSelectionText();
                 auto const text32 = unicode::convert_to<char32_t>(string_view(text.data(), text.size()));
                 setNewSearchTerm(text32, true);
-                // if (_state.inputHandler.mode() != ViMode::Insert)
-                //     _state.inputHandler.setMode(ViMode::Visual);
             }
             break;
         case 3:
-            _selection = make_unique<FullLineSelection>(_selectionHelper, startPos, selectionUpdatedHelper());
+            setSelector(make_unique<FullLineSelection>(_selectionHelper, startPos, selectionUpdatedHelper()));
             _selection->extend(startPos);
-            // if (_state.inputHandler.mode() != ViMode::Insert)
-            //     _state.inputHandler.setMode(ViMode::VisualLine);
             break;
         default: clearSelection(); break;
     }
 
     breakLoopAndRefreshRenderBuffer();
     return true;
+}
+
+void Terminal::setSelector(std::unique_ptr<Selection> selector)
+{
+    Require(selector.get() != nullptr);
+    InputLog()("Creating cell selector: {}", *selector);
+    _selection = std::move(selector);
 }
 
 void Terminal::clearSelection()
@@ -841,17 +847,6 @@ bool Terminal::sendMouseReleaseEvent(Modifier modifier,
 {
     verifyState();
 
-    if (allowInput() && _respectMouseProtocol
-        && _state.inputGenerator.generateMouseRelease(
-            modifier, button, _currentMousePosition, pixelPosition, uiHandledHint))
-    {
-        flushInput();
-
-        if (!isModeEnabled(DECMode::MousePassiveTracking))
-            return true;
-    }
-    _respectMouseProtocol = true;
-
     if (button == MouseButton::Left)
     {
         _leftMouseButtonPressed = false;
@@ -869,6 +864,18 @@ bool Terminal::sendMouseReleaseEvent(Modifier modifier,
             }
         }
     }
+
+    if (allowInput() && _respectMouseProtocol
+        && _state.inputGenerator.generateMouseRelease(
+            modifier, button, _currentMousePosition, pixelPosition, uiHandledHint))
+    {
+        flushInput();
+
+        if (!isModeEnabled(DECMode::MousePassiveTracking))
+            return true;
+    }
+
+    _respectMouseProtocol = true;
 
     return true;
 }
