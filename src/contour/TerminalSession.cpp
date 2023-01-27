@@ -550,12 +550,13 @@ void TerminalSession::sendCharPressEvent(char32_t _value, Modifier _modifier, Ti
 
 void TerminalSession::sendMousePressEvent(Modifier _modifier,
                                           MouseButton _button,
-                                          PixelCoordinate _pixelPosition,
-                                          Timestamp _now)
+                                          PixelCoordinate _pixelPosition)
 {
-    auto const uiHandledHint = terminal().handleMouseSelection(_modifier, _now);
+    auto const uiHandledHint = false;
 
-    if (terminal().sendMousePressEvent(_modifier, _button, _pixelPosition, uiHandledHint, _now))
+    terminal().tick(steady_clock::now());
+
+    if (terminal().sendMousePressEvent(_modifier, _button, _pixelPosition, uiHandledHint))
         return;
 
     auto const modifier = _modifier.contains(config_.bypassMouseProtocolModifier)
@@ -569,8 +570,7 @@ void TerminalSession::sendMousePressEvent(Modifier _modifier,
 
 void TerminalSession::sendMouseMoveEvent(terminal::Modifier _modifier,
                                          terminal::CellLocation _pos,
-                                         terminal::PixelCoordinate _pixelPosition,
-                                         Timestamp _now)
+                                         terminal::PixelCoordinate _pixelPosition)
 {
     // NB: This translation depends on the display's margin, so maybe
     //     the display should provide the translation?
@@ -578,8 +578,10 @@ void TerminalSession::sendMouseMoveEvent(terminal::Modifier _modifier,
     if (!(_pos < terminal().pageSize()))
         return;
 
+    terminal().tick(steady_clock::now());
+
     auto constexpr uiHandledHint = false;
-    terminal().sendMouseMoveEvent(_modifier, _pos, _pixelPosition, uiHandledHint, _now);
+    terminal().sendMouseMoveEvent(_modifier, _pos, _pixelPosition, uiHandledHint);
 
     if (_pos != currentMousePosition_)
     {
@@ -594,11 +596,12 @@ void TerminalSession::sendMouseMoveEvent(terminal::Modifier _modifier,
 
 void TerminalSession::sendMouseReleaseEvent(Modifier _modifier,
                                             MouseButton _button,
-                                            PixelCoordinate _pixelPosition,
-                                            Timestamp _now)
+                                            PixelCoordinate _pixelPosition)
 {
+    terminal().tick(steady_clock::now());
+
     auto const uiHandledHint = false;
-    terminal().sendMouseReleaseEvent(_modifier, _button, _pixelPosition, uiHandledHint, _now);
+    terminal().sendMouseReleaseEvent(_modifier, _button, _pixelPosition, uiHandledHint);
     scheduleRedraw();
 }
 

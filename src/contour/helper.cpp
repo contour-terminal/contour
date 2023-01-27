@@ -275,7 +275,7 @@ void sendWheelEvent(QWheelEvent* _event, TerminalSession& _session)
         auto const button = yDelta > 0 ? terminal::MouseButton::WheelUp : terminal::MouseButton::WheelDown;
         auto const pixelPosition = makeMousePixelPosition(_event, _session.contentScale());
 
-        _session.sendMousePressEvent(modifier, button, pixelPosition, steady_clock::now());
+        _session.sendMousePressEvent(modifier, button, pixelPosition);
     }
 }
 
@@ -283,8 +283,7 @@ void sendMousePressEvent(QMouseEvent* _event, TerminalSession& _session)
 {
     _session.sendMousePressEvent(makeModifier(_event->modifiers()),
                                  makeMouseButton(_event->button()),
-                                 makeMousePixelPosition(_event, _session.contentScale()),
-                                 steady_clock::now());
+                                 makeMousePixelPosition(_event, _session.contentScale()));
     _event->accept();
 }
 
@@ -292,8 +291,7 @@ void sendMouseReleaseEvent(QMouseEvent* _event, TerminalSession& _session)
 {
     _session.sendMouseReleaseEvent(makeModifier(_event->modifiers()),
                                    makeMouseButton(_event->button()),
-                                   makeMousePixelPosition(_event, _session.contentScale()),
-                                   steady_clock::now());
+                                   makeMousePixelPosition(_event, _session.contentScale()));
     _event->accept();
 }
 
@@ -301,8 +299,7 @@ void sendMouseMoveEvent(QMouseEvent* _event, TerminalSession& _session)
 {
     _session.sendMouseMoveEvent(makeModifier(_event->modifiers()),
                                 makeMouseCellLocation(_event, _session),
-                                makeMousePixelPosition(_event, _session.contentScale()),
-                                steady_clock::now());
+                                makeMousePixelPosition(_event, _session.contentScale()));
 }
 
 void spawnNewTerminal(string const& _programPath,

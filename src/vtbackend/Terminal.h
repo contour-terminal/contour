@@ -247,18 +247,15 @@ class Terminal
     bool sendMousePressEvent(Modifier modifier,
                              MouseButton button,
                              PixelCoordinate pixelPosition,
-                             bool uiHandledHint,
-                             Timestamp now);
+                             bool uiHandledHint);
     void sendMouseMoveEvent(Modifier modifier,
                             CellLocation pos,
                             PixelCoordinate pixelPosition,
-                            bool uiHandledHint,
-                            Timestamp now);
+                            bool uiHandledHint);
     bool sendMouseReleaseEvent(Modifier modifier,
                                MouseButton button,
                                PixelCoordinate pixelPosition,
-                               bool uiHandledHint,
-                               Timestamp now);
+                               bool uiHandledHint);
     bool sendFocusInEvent();
     bool sendFocusOutEvent();
     void sendPaste(std::string_view text); // Sends verbatim text in bracketed mode to application.
@@ -266,8 +263,6 @@ class Terminal
     {
         _eventListener.pasteFromClipboard(count, strip);
     }
-
-    bool handleMouseSelection(Modifier modifier, Timestamp now);
 
     void inputModeChanged(ViMode mode) { _eventListener.inputModeChanged(mode); }
     void updateHighlights() { _eventListener.updateHighlights(); }
@@ -296,6 +291,8 @@ class Terminal
     // {{{ Screen Render Proxy
     std::optional<std::chrono::milliseconds> nextRender() const;
 
+    /// Updates the internal clock to the given time point,
+    /// and ensures internal time-dependant state is updated.
     uint64_t tick(std::chrono::steady_clock::time_point now)
     {
         auto const changes = _changes.exchange(0);
@@ -711,6 +708,7 @@ class Terminal
     void updateIndicatorStatusLine();
     void updateCursorVisibilityState() const;
     void updateCursorHoveringState();
+    bool handleMouseSelection(Modifier modifier);
 
     // Tests if the App mouse protocol is explicitly being bypassed by the user,
     // by pressing a special bypass modifier (usualy Shift).

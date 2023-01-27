@@ -647,9 +647,10 @@ bool Terminal::sendCharPressEvent(char32_t value, Modifier modifier, Timestamp n
 bool Terminal::sendMousePressEvent(Modifier modifier,
                                    MouseButton button,
                                    PixelCoordinate pixelPosition,
-                                   bool uiHandledHint,
-                                   Timestamp /*now*/)
+                                   bool uiHandledHint)
 {
+    uiHandledHint = handleMouseSelection(modifier) || uiHandledHint;
+
     if (!allowPassMouseEventToApp(modifier))
         return false;
 
@@ -667,12 +668,12 @@ bool Terminal::sendMousePressEvent(Modifier modifier,
     return !isModeEnabled(DECMode::MousePassiveTracking);
 }
 
-bool Terminal::handleMouseSelection(Modifier modifier, Timestamp now)
+bool Terminal::handleMouseSelection(Modifier modifier)
 {
     verifyState();
 
-    double const diff_ms = chrono::duration<double, milli>(now - _lastClick).count();
-    _lastClick = now;
+    double const diff_ms = chrono::duration<double, milli>(_currentTime - _lastClick).count();
+    _lastClick = _currentTime;
     _speedClicks = diff_ms >= 0.0 && diff_ms <= 500.0 ? _speedClicks + 1 : 1;
     _leftMouseButtonPressed = true;
 
@@ -754,8 +755,7 @@ void Terminal::clearSelection()
 void Terminal::sendMouseMoveEvent(Modifier modifier,
                                   CellLocation newPosition,
                                   PixelCoordinate pixelPosition,
-                                  bool uiHandledHint,
-                                  Timestamp /*now*/)
+                                  bool uiHandledHint)
 {
     verifyState();
 
@@ -819,8 +819,7 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
 bool Terminal::sendMouseReleaseEvent(Modifier modifier,
                                      MouseButton button,
                                      PixelCoordinate pixelPosition,
-                                     bool uiHandledHint,
-                                     Timestamp /*now*/)
+                                     bool uiHandledHint)
 {
     verifyState();
 
