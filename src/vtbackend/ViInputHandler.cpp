@@ -160,6 +160,7 @@ void ViInputHandler::registerAllCommands()
     registerCommand(ModeSelect::Normal, "C-V", [this]() { toggleMode(ViMode::VisualBlock); });
     registerCommand(ModeSelect::Normal, "/", [this]() { startSearch(); });
     registerCommand(ModeSelect::Normal, "#", [this]() { _executor.reverseSearchCurrentWord(); });
+    registerCommand(ModeSelect::Normal, "mm", [this]() { _executor.toggleLineMark(); });
     registerCommand(ModeSelect::Normal, "*", [this]() { _executor.searchCurrentWord(); });
     registerCommand(ModeSelect::Normal, "p", [this]() { _executor.paste(count(), false); });
     registerCommand(ModeSelect::Normal, "P", [this]() { _executor.paste(count(), true); });

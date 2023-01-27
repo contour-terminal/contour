@@ -179,7 +179,10 @@ class ViInputHandler: public InputHandler
         // This is like pressing # in Vi.
         virtual void reverseSearchCurrentWord() = 0;
 
-        // similar to reverse search, but searching forward.
+        // Toggle line mark (see LineFlags::Flagged).
+        virtual void toggleLineMark() = 0;
+
+        // Similar to reverse search, but searching forward.
         virtual void searchCurrentWord() = 0;
     };
 

@@ -39,6 +39,7 @@ class ViCommands: public ViInputHandler::Executor
     void scrollViewport(ScrollOffset delta) override;
     void modeChanged(ViMode mode) override;
     void reverseSearchCurrentWord() override;
+    void toggleLineMark() override;
     void searchCurrentWord() override;
     void execute(ViOperator op, ViMotion motion, unsigned count) override;
     void moveCursor(ViMotion motion, unsigned count) override;
