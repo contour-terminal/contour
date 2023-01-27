@@ -105,9 +105,15 @@ class Renderer
     /**
      * Renders the given @p terminal to the current OpenGL context.
      *
-     * @p now The time hint to use when rendering the eventually blinking cursor.
+     * @param terminal       The terminal to render
+     * @param pressureHint   Indicates whether or not this render will most likely be
+     *                       updated right after again, allowing a few optimizations
+     *                       to performa that reduce visual features as they are
+     *                       CPU intensive but allow to render fast.
+     *                       The user shall not notice that, because this frame
+     *                       is known already to be updated right after again.
      */
-    uint64_t render(Terminal& terminal, bool pressure);
+    void render(Terminal& terminal, bool pressureHint);
 
     void discardImage(Image const& image);
 

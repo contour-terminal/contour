@@ -991,7 +991,7 @@ optional<chrono::milliseconds> Terminal::nextRender() const
 {
     auto nextBlink = chrono::milliseconds::max();
     if ((isModeEnabled(DECMode::VisibleCursor) && _settings.cursorDisplay == CursorDisplay::Blink)
-        || !isBlinkOnScreen())
+        || isBlinkOnScreen())
     {
         auto const passedCursor =
             chrono::duration_cast<chrono::milliseconds>(_currentTime - _lastCursorBlink);

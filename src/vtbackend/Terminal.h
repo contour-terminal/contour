@@ -293,9 +293,11 @@ class Terminal
 
     /// Updates the internal clock to the given time point,
     /// and ensures internal time-dependant state is updated.
-    uint64_t tick(std::chrono::steady_clock::time_point now)
+    void tick(std::chrono::steady_clock::time_point now)
     {
         auto const changes = _changes.exchange(0);
+        (void) changes;
+        // TODO: update render buffer if  (changes != 0)
         _currentTime = now;
         updateCursorVisibilityState();
         if (isBlinkOnScreen())
@@ -303,10 +305,9 @@ class Terminal
             tie(_rapidBlinker.state, _lastRapidBlink) = nextBlinkState(_rapidBlinker, _lastRapidBlink);
             tie(_slowBlinker.state, _lastBlink) = nextBlinkState(_slowBlinker, _lastBlink);
         }
-        return changes;
     }
 
-    uint64_t tick(std::chrono::milliseconds delta) { return tick(_currentTime + delta); }
+    void tick(std::chrono::milliseconds delta) { tick(_currentTime + delta); }
     // }}}
 
     // {{{ RenderBuffer synchronization API
