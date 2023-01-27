@@ -131,7 +131,7 @@ class RenderTarget
     virtual void clear(terminal::RGBAColor _fillColor) = 0;
 
     /// Executes all previously scheduled render commands.
-    virtual void execute() = 0;
+    virtual void execute(std::chrono::steady_clock::time_point now) = 0;
 
     /// Clears any existing caches.
     virtual void clearCache() = 0;

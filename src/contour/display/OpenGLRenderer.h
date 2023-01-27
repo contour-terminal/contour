@@ -85,7 +85,7 @@ class OpenGLRenderer final:
         std::shared_ptr<terminal::BackgroundImage const> const& _backgroundImage) override;
     void renderRectangle(int x, int y, Width, Height, RGBAColor color) override;
     void clear(terminal::RGBAColor _fillColor) override;
-    void execute() override;
+    void execute(std::chrono::steady_clock::time_point now) override;
 
     std::pair<crispy::ImageSize, std::vector<uint8_t>> takeScreenshot();
 
@@ -93,12 +93,10 @@ class OpenGLRenderer final:
 
     void inspect(std::ostream& output) const override;
 
-    void setTime(std::chrono::steady_clock::time_point value) { _now = value; }
-
-    float uptime() noexcept
+    float uptime(std::chrono::steady_clock::time_point now) noexcept
     {
         using namespace std::chrono;
-        auto const uptimeMsecs = duration_cast<milliseconds>(_now - _startTime).count();
+        auto const uptimeMsecs = duration_cast<milliseconds>(now - _startTime).count();
         auto const uptimeSecs = static_cast<float>(uptimeMsecs) / 1000.0f;
         return uptimeSecs;
     }
@@ -168,7 +166,6 @@ class OpenGLRenderer final:
 
     bool _initialized = false;
     std::chrono::steady_clock::time_point _startTime;
-    std::chrono::steady_clock::time_point _now;
     crispy::ImageSize _renderTargetSize;
     QMatrix4x4 _projectionMatrix;
 

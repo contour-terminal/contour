@@ -292,14 +292,12 @@ void Renderer::updateFontMetrics()
     clearCache();
 }
 
-uint64_t Renderer::render(Terminal& terminal, bool pressure)
+void Renderer::render(Terminal& terminal, bool pressure)
 {
     auto const statusLineHeight = terminal.state().statusDisplayType == StatusDisplayType::None
                                       ? LineCount(0)
                                       : terminal.hostWritableStatusLineDisplay().pageSize().lines;
     _gridMetrics.pageSize = terminal.pageSize() + statusLineHeight;
-
-    auto const changes = terminal.tick(steady_clock::now());
 
     executeImageDiscards();
 
@@ -339,9 +337,7 @@ uint64_t Renderer::render(Terminal& terminal, bool pressure)
         _cursorRenderer.render(_gridMetrics.map(cursor.position), cursor.width, cursorColor);
     }
 
-    _renderTarget->execute();
-
-    return changes;
+    _renderTarget->execute(terminal.currentTime());
 }
 
 void Renderer::renderCells(vector<RenderCell> const& renderableCells)

@@ -583,7 +583,9 @@ void TerminalWidget::paintGL()
         }
 #endif
 
-        static_cast<OpenGLRenderer*>(renderTarget_.get())->setTime(steady_clock::now());
+        auto const now = steady_clock::now();
+
+        terminal().tick(now);
 
         renderTarget_->clear(
             terminal().isModeEnabled(terminal::DECMode::ReverseVideo)
@@ -610,6 +612,9 @@ void TerminalWidget::onFrameSwapped()
 {
     if (!state_.finish())
         update();
+
+    // Update the terminal's world clock, such that nextRender() knows when to render next (if needed).
+    terminal().tick(steady_clock::now());
 
     auto timeoutOpt = terminal().nextRender();
     if (!timeoutOpt.has_value())

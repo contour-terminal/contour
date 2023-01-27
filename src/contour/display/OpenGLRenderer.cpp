@@ -196,7 +196,6 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig const& textShaderConfig,
                                ImageSize /*textureTileSize*/,
                                terminal::rasterizer::PageMargin margin):
     _startTime { chrono::steady_clock::now().time_since_epoch() },
-    _now { _startTime },
     _renderTargetSize { targetSurfaceSize },
     _projectionMatrix { ortho(0.0f,
                               unbox<float>(targetSurfaceSize.width),  // left, right
@@ -467,7 +466,7 @@ ImageSize OpenGLRenderer::renderBufferSize()
 #endif
 }
 
-void OpenGLRenderer::execute()
+void OpenGLRenderer::execute(std::chrono::steady_clock::time_point now)
 {
     _currentTextureId = std::numeric_limits<GLuint>::max();
 
@@ -477,7 +476,7 @@ void OpenGLRenderer::execute()
     // glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
     // glBlendFunc(GL_SRC1_COLOR, GL_ONE_MINUS_SRC1_COLOR);
 
-    auto const timeValue = uptime();
+    auto const timeValue = uptime(now);
 
     if (_backgroundImageTexture)
     {
