@@ -76,6 +76,7 @@ class ScreenBase: public SequenceHandler
     [[nodiscard]] virtual bool compareCellTextAt(CellLocation position, char codepoint) const noexcept = 0;
     [[nodiscard]] virtual std::string cellTextAt(CellLocation position) const noexcept = 0;
     [[nodiscard]] virtual LineFlags lineFlagsAt(LineOffset line) const noexcept = 0;
+    virtual void enableLineFlags(LineOffset lineOffset, LineFlags flags, bool enable) noexcept = 0;
     [[nodiscard]] virtual std::string lineTextAt(LineOffset line,
                                                  bool stripLeadingSpaces = true,
                                                  bool stripTrailingSpaces = true) const noexcept = 0;
@@ -527,6 +528,11 @@ class Screen final: public ScreenBase, public capabilities::StaticDatabase
     [[nodiscard]] LineFlags lineFlagsAt(LineOffset line) const noexcept override
     {
         return _grid.lineAt(line).flags();
+    }
+
+    void enableLineFlags(LineOffset lineOffset, LineFlags flags, bool enable) noexcept override
+    {
+        _grid.lineAt(lineOffset).setFlag(flags, enable);
     }
 
     [[nodiscard]] std::string lineTextAt(LineOffset line,

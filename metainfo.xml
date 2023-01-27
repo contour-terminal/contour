@@ -110,6 +110,7 @@
           <li>Fixes use of config `bypass_mouse_protocol_modifier` that was ignored.</li>
           <li>Adds normal mode motion `[[`, `]]`, `[]`, `][` mimmicking exactly what vim does.</li>
           <li>Adds normal mode motion `[m` and `]m` to jump line marks up/down.</li>
+          <li>Adds normal mode motion `mm` to toggle the line mark at the current active cursor position.</li>
           <li>Adds shell integration for fish shell.</li>
         </ul>
       </description>

@@ -296,6 +296,13 @@ void ViCommands::reverseSearchCurrentWord()
     jumpToPreviousMatch(1);
 }
 
+void ViCommands::toggleLineMark()
+{
+    auto const currentLineFlags = _terminal.currentScreen().lineFlagsAt(cursorPosition.line);
+    _terminal.currentScreen().enableLineFlags(
+        cursorPosition.line, LineFlags::Marked, !unsigned(currentLineFlags & LineFlags::Marked));
+}
+
 void ViCommands::searchCurrentWord()
 {
     auto const [wordUnderCursor, range] = _terminal.extractWordUnderCursor(cursorPosition);
