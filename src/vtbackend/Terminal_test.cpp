@@ -32,6 +32,7 @@
 #include <vector>
 
 using namespace std;
+using namespace std::chrono_literals;
 using terminal::CellFlags;
 using terminal::ColumnCount;
 using terminal::ColumnOffset;
@@ -376,4 +377,57 @@ TEST_CASE("Terminal.CurlyUnderline", "[terminal]")
     CHECK(!screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlags::Italic));
     CHECK(!screen.at(LineOffset(0), ColumnOffset(2)).isFlagEnabled(CellFlags::Italic));
     CHECK(!screen.at(LineOffset(0), ColumnOffset(3)).isFlagEnabled(CellFlags::Italic));
+}
+
+TEST_CASE("Terminal.TextSelection", "[terminal]")
+{
+    // Create empty TE
+    auto mock = MockTerm { ColumnCount(5), LineCount(5) };
+    auto constexpr ClockBase = chrono::steady_clock::time_point();
+    mock.terminal.tick(ClockBase);
+    mock.terminal.ensureFreshRenderBuffer();
+    CHECK("" == trimmedTextScreenshot(mock));
+
+    // Fill main page with text
+    mock.writeToScreen("12345\r\n"
+                       "67890\r\n"
+                       "ABCDE\r\n"
+                       "abcde\r\n"
+                       "fghij");
+
+    mock.terminal.tick(ClockBase + chrono::seconds(1));
+    mock.terminal.ensureFreshRenderBuffer();
+    CHECK("12345\n67890\nABCDE\nabcde\nfghij" == trimmedTextScreenshot(mock));
+
+    // Perform selection
+    using namespace terminal;
+    auto constexpr uiHandledHint = false;
+    auto constexpr pixelCoordinate = PixelCoordinate {};
+
+    mock.terminal.tick(1s);
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None, 1_lineOffset + 1_columnOffset, pixelCoordinate, uiHandledHint);
+
+    mock.terminal.tick(1s);
+    mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, pixelCoordinate, uiHandledHint);
+    CHECK(mock.terminal.selector()->state() == Selection::State::Waiting);
+
+    // Mouse is pressed, but we did not start selecting (by moving the mouse) yet,
+    // so any text extraction shall be empty.
+    CHECK(mock.terminal.extractSelectionText() == "");
+
+    mock.terminal.tick(1s);
+    mock.terminal.sendMouseMoveEvent(
+        Modifier::None, 2_lineOffset + 2_columnOffset, pixelCoordinate, uiHandledHint);
+    CHECK(mock.terminal.extractSelectionText() == "7890\nABC");
+
+    mock.terminal.tick(1s);
+    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, pixelCoordinate, uiHandledHint);
+    CHECK(mock.terminal.extractSelectionText() == "7890\nABC");
+
+    // Clear selection by simply left-clicking.
+    mock.terminal.tick(1s);
+    mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, pixelCoordinate, uiHandledHint);
+    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, pixelCoordinate, uiHandledHint);
+    CHECK(mock.terminal.extractSelectionText() == "");
 }

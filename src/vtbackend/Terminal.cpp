@@ -1173,7 +1173,7 @@ string Terminal::extractSelectionText() const
 {
     auto const _ = scoped_lock { *this };
 
-    if (!_selection)
+    if (!_selection || _selection->state() == Selection::State::Waiting)
         return "";
 
     if (isPrimaryScreen())
