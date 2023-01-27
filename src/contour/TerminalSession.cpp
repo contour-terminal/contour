@@ -556,10 +556,7 @@ void TerminalSession::sendMousePressEvent(Modifier _modifier,
     auto const uiHandledHint = terminal().handleMouseSelection(_modifier, _now);
 
     if (terminal().sendMousePressEvent(_modifier, _button, _pixelPosition, uiHandledHint, _now))
-    {
-        scheduleRedraw();
         return;
-    }
 
     auto const modifier = _modifier.contains(config_.bypassMouseProtocolModifier)
                               ? _modifier.without(config_.bypassMouseProtocolModifier)
@@ -581,26 +578,18 @@ void TerminalSession::sendMouseMoveEvent(terminal::Modifier _modifier,
     if (!(_pos < terminal().pageSize()))
         return;
 
-    auto const uiHandledHint = false;
+    auto constexpr uiHandledHint = false;
     terminal().sendMouseMoveEvent(_modifier, _pos, _pixelPosition, uiHandledHint, _now);
 
-    if (_pos == currentMousePosition_)
-        return;
-
-    bool const mouseHoveringHyperlink = terminal().isMouseHoveringHyperlink();
-    currentMousePosition_ = _pos;
-
-    // if (lastHoveringHyperlinkState != mouseHoveringHyperlink)
-    //     scheduleRedraw();
-
-    if (mouseHoveringHyperlink)
+    if (_pos != currentMousePosition_)
     {
-        display_->setMouseCursorShape(MouseCursorShape::PointingHand);
-        // terminal().screenUpdated();
-        // terminal().breakLoopAndRefreshRenderBuffer();
+        // Change cursor shape only when changing grid cell.
+        currentMousePosition_ = _pos;
+        if (terminal().isMouseHoveringHyperlink())
+            display_->setMouseCursorShape(MouseCursorShape::PointingHand);
+        else
+            setDefaultCursor();
     }
-    else
-        setDefaultCursor();
 }
 
 void TerminalSession::sendMouseReleaseEvent(Modifier _modifier,
