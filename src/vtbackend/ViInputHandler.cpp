@@ -151,7 +151,13 @@ void ViInputHandler::registerAllCommands()
                 modeSelect, motionChar, [this, motion = motion]() { _executor.moveCursor(motion, count()); });
 
     // clang-format off
-    // {{{ normal mode
+    registerCommand(ModeSelect::Normal, "t.", [this]() { _executor.moveCursor(ViMotion::TillBeforeCharRight, count(), _lastChar); });
+    registerCommand(ModeSelect::Normal, "T.", [this]() { _executor.moveCursor(ViMotion::TillAfterCharLeft, count(), _lastChar); });
+    registerCommand(ModeSelect::Normal, "f.", [this]() { _executor.moveCursor(ViMotion::ToCharRight, count(), _lastChar); });
+    registerCommand(ModeSelect::Normal, "F.", [this]() { _executor.moveCursor(ViMotion::ToCharLeft, count(), _lastChar); });
+    registerCommand(ModeSelect::Normal, ";", [this]() { _executor.moveCursor(ViMotion::RepeatCharMove, count()); });
+    registerCommand(ModeSelect::Normal, ",", [this]() { _executor.moveCursor(ViMotion::RepeatCharMoveReverse, count()); });
+
     registerCommand(ModeSelect::Normal, "a", [this]() { setMode(ViMode::Insert); });
     registerCommand(ModeSelect::Normal, "i", [this]() { setMode(ViMode::Insert); });
     registerCommand(ModeSelect::Normal, "<Insert>", [this]() { setMode(ViMode::Insert); });
@@ -176,6 +182,10 @@ void ViInputHandler::registerAllCommands()
     registerCommand(ModeSelect::Normal, "yB", [this]() { _executor.execute(ViOperator::Yank, ViMotion::BigWordBackward, count()); });
     registerCommand(ModeSelect::Normal, "yE", [this]() { _executor.execute(ViOperator::Yank, ViMotion::BigWordEndForward, count()); });
     registerCommand(ModeSelect::Normal, "yW", [this]() { _executor.execute(ViOperator::Yank, ViMotion::BigWordForward, count()); });
+    registerCommand(ModeSelect::Normal, "yt.", [this]() { _executor.execute(ViOperator::Yank, ViMotion::TillBeforeCharRight, count(), _lastChar); });
+    registerCommand(ModeSelect::Normal, "yT.", [this]() { _executor.execute(ViOperator::Yank, ViMotion::TillAfterCharLeft, count(), _lastChar); });
+    registerCommand(ModeSelect::Normal, "yf.", [this]() { _executor.execute(ViOperator::Yank, ViMotion::ToCharRight, count(), _lastChar); });
+    registerCommand(ModeSelect::Normal, "yF.", [this]() { _executor.execute(ViOperator::Yank, ViMotion::ToCharLeft, count(), _lastChar); });
     // clang-format on
 
     for (auto const& [scopeChar, scope]: scopeMappings)
@@ -246,11 +256,18 @@ void ViInputHandler::appendModifierToPendingInput(Modifier modifier)
 
 bool ViInputHandler::handlePendingInput()
 {
+    Require(!_pendingInput.empty());
+
+    auto constexpr TrieMapAllowWildcardDot = true;
+
     CommandHandlerMap const& mapping = isVisualMode() ? _visualMode : _normalMode;
-    auto const mappingResult = mapping.search(_pendingInput);
+    auto const mappingResult = mapping.search(_pendingInput, TrieMapAllowWildcardDot);
     if (std::holds_alternative<crispy::ExactMatch<CommandHandler>>(mappingResult))
     {
         InputLog()("Executing handler for: {}{}", _count ? fmt::format("{} ", _count) : "", _pendingInput);
+        _lastChar =
+            unicode::convert_to<char32_t>(std::string_view(_pendingInput.data(), _pendingInput.size()))
+                .back();
         std::get<crispy::ExactMatch<CommandHandler>>(mappingResult).value();
         clearPendingInput();
     }
