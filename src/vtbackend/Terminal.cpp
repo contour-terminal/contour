@@ -649,7 +649,8 @@ bool Terminal::sendMousePressEvent(Modifier modifier,
                                    PixelCoordinate pixelPosition,
                                    bool uiHandledHint)
 {
-    uiHandledHint = handleMouseSelection(modifier) || uiHandledHint;
+    if (button == MouseButton::Left)
+        uiHandledHint = handleMouseSelection(modifier) || uiHandledHint;
 
     if (!allowPassMouseEventToApp(modifier))
         return false;
