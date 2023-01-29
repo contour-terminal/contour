@@ -1456,6 +1456,7 @@ void Screen<Cell>::moveCursorToNextTab()
     // TODO: I guess something must remember when a \t was added, for proper move-back?
     // TODO: respect HTS/TBC
 
+    static_assert(TabWidth > ColumnCount(0));
     if (!_state.tabs.empty())
     {
         // advance to the next tab
@@ -1469,10 +1470,8 @@ void Screen<Cell>::moveCursorToNextTab()
             moveCursorForward(boxed_cast<ColumnCount>(_state.tabs[i] - currentCursorColumn));
         else if (realCursorPosition().column < margin().horizontal.to)
             moveCursorForward(boxed_cast<ColumnCount>(margin().horizontal.to - currentCursorColumn));
-        else
-            moveCursorToNextLine(LineCount(1));
     }
-    else if (TabWidth.value)
+    else
     {
         // default tab settings
         if (realCursorPosition().column < margin().horizontal.to)
@@ -1482,18 +1481,6 @@ void Screen<Cell>::moveCursorToNextTab()
                     _settings.pageSize.columns - boxed_cast<ColumnCount>(logicalCursorPosition().column));
             moveCursorForward(n);
         }
-        else
-            moveCursorToNextLine(LineCount(1));
-    }
-    else
-    {
-        // no tab stops configured
-        if (realCursorPosition().column < margin().horizontal.to)
-            // then TAB moves to the end of the screen
-            moveCursorToColumn(margin().horizontal.to);
-        else
-            // then TAB moves to next line left margin
-            moveCursorToNextLine(LineCount(1));
     }
 }
 
