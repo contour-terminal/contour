@@ -145,7 +145,7 @@ WordWiseSelection::WordWiseSelection(SelectionHelper const& helper,
     Selection(helper, ViMode::Visual, start, std::move(onSelectionUpdated))
 {
     _from = extendSelectionBackward(_from);
-    _to = extendSelectionForward(_to);
+    extend(extendSelectionForward(_to));
 }
 
 CellLocation WordWiseSelection::extendSelectionBackward(CellLocation pos) const noexcept
@@ -288,13 +288,7 @@ FullLineSelection::FullLineSelection(SelectionHelper const& helper,
     Selection(helper, ViMode::VisualLine, start, std::move(onSelectionUpdated))
 {
     _from.column = ColumnOffset(0);
-    _to.column = boxed_cast<ColumnOffset>(_helper.pageSize().columns - 1);
-
-    if (_helper.wrappedLine(_from.line))
-    {
-        while (_helper.wrappedLine(_from.line))
-            --_from.line;
-    }
+    extend(CellLocation { _to.line, boxed_cast<ColumnOffset>(_helper.pageSize().columns - 1) });
 }
 
 bool FullLineSelection::extend(CellLocation to)

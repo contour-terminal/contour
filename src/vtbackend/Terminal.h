@@ -707,7 +707,7 @@ class Terminal
     void mainLoop();
     void fillRenderBufferInternal(RenderBuffer& output, bool includeSelection);
     void updateIndicatorStatusLine();
-    void updateCursorVisibilityState() const;
+    void updateCursorVisibilityState() const noexcept;
     void updateCursorHoveringState();
     bool handleMouseSelection(Modifier modifier);
 

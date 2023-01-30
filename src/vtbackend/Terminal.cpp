@@ -675,7 +675,7 @@ bool Terminal::handleMouseSelection(Modifier modifier)
 
     double const diff_ms = chrono::duration<double, milli>(_currentTime - _lastClick).count();
     _lastClick = _currentTime;
-    _speedClicks = diff_ms >= 0.0 && diff_ms <= 500.0 ? _speedClicks + 1 : 1;
+    _speedClicks = (diff_ms >= 0.0 && diff_ms <= 750.0 ? _speedClicks : 0) % 3 + 1;
     _leftMouseButtonPressed = true;
 
     auto const startPos = CellLocation {
@@ -705,7 +705,8 @@ bool Terminal::handleMouseSelection(Modifier modifier)
             break;
         case 2:
             setSelector(make_unique<WordWiseSelection>(_selectionHelper, startPos, selectionUpdatedHelper()));
-            (void) _selection->extend(startPos);
+            if (_selection->extend(startPos))
+                onSelectionUpdated();
             if (_settings.visualizeSelectedWord)
             {
                 auto const text = extractSelectionText();
@@ -715,12 +716,13 @@ bool Terminal::handleMouseSelection(Modifier modifier)
             break;
         case 3:
             setSelector(make_unique<FullLineSelection>(_selectionHelper, startPos, selectionUpdatedHelper()));
-            (void) _selection->extend(startPos);
+            if (_selection->extend(startPos))
+                onSelectionUpdated();
             break;
         default: clearSelection(); break;
     }
 
-    breakLoopAndRefreshRenderBuffer();
+    screenUpdated();
     return true;
 }
 
@@ -962,7 +964,7 @@ void Terminal::writeToScreenInternal(std::string_view data)
     }
 }
 
-void Terminal::updateCursorVisibilityState() const
+void Terminal::updateCursorVisibilityState() const noexcept
 {
     if (_settings.cursorDisplay == CursorDisplay::Steady)
         return;
