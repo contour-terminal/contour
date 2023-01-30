@@ -563,7 +563,6 @@ class Terminal
     bool processInputOnce();
 
     void markScreenDirty() noexcept { _screenDirty = true; }
-    [[nodiscard]] bool screenDirty() const noexcept { return _screenDirty; }
 
     [[nodiscard]] uint64_t lastFrameID() const noexcept { return _lastFrameID.load(); }
 
