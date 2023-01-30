@@ -152,6 +152,9 @@ void ViInputHandler::registerAllCommands()
             registerCommand(
                 modeSelect, motionChar, [this, motion = motion]() { _executor.moveCursor(motion, count()); });
 
+        registerCommand(modeSelect, "J", [this]() { _executor.scrollViewport(ScrollOffset(-1)); _executor.moveCursor(ViMotion::LineDown, 1);});
+        registerCommand(modeSelect, "K", [this]() { _executor.scrollViewport(ScrollOffset(+1)); _executor.moveCursor(ViMotion::LineUp, 1);});
+
         registerCommand(modeSelect, "t.", [this]() { _executor.moveCursor(ViMotion::TillBeforeCharRight, count(), _lastChar); });
         registerCommand(modeSelect, "T.", [this]() { _executor.moveCursor(ViMotion::TillAfterCharLeft, count(), _lastChar); });
         registerCommand(modeSelect, "f.", [this]() { _executor.moveCursor(ViMotion::ToCharRight, count(), _lastChar); });
@@ -172,9 +175,6 @@ void ViInputHandler::registerAllCommands()
     registerCommand(ModeSelect::Normal, "*", [this]() { _executor.searchCurrentWord(); });
     registerCommand(ModeSelect::Normal, "p", [this]() { _executor.paste(count(), false); });
     registerCommand(ModeSelect::Normal, "P", [this]() { _executor.paste(count(), true); });
-
-    registerCommand(ModeSelect::Normal, "J", [this]() { _executor.scrollViewport(ScrollOffset(-1)); _executor.moveCursor(ViMotion::LineDown, 1);});
-    registerCommand(ModeSelect::Normal, "K", [this]() { _executor.scrollViewport(ScrollOffset(+1)); _executor.moveCursor(ViMotion::LineUp, 1);});
 
     registerCommand(ModeSelect::Normal, "Y", [this]() { _executor.execute(ViOperator::Yank, ViMotion::FullLine, count()); });
     registerCommand(ModeSelect::Normal, "yy", [this]() { _executor.execute(ViOperator::Yank, ViMotion::FullLine, count()); });
