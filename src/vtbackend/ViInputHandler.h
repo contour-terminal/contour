@@ -68,41 +68,47 @@ namespace terminal
 
 enum class ViMotion
 {
-    Explicit,             // <special one for explicit operators>
-    Selection,            // <special one for v_ modes>
-    FullLine,             // <special one for full-line motions>
-    CharLeft,             // h
-    CharRight,            // l
-    ScreenColumn,         // |
-    FileBegin,            // gg
-    FileEnd,              // G
-    LineBegin,            // 0
-    LineTextBegin,        // ^
-    LineDown,             // j
-    LineEnd,              // $
-    LineUp,               // k
-    LinesCenter,          // M
-    PageDown,             // <C-D>
-    PageUp,               // <C-U>
-    PageTop,              // <S-H> (inspired by tmux)
-    PageBottom,           // <S-L> (inspired by tmux)
-    ParagraphBackward,    // {
-    ParagraphForward,     // }
-    GlobalCurlyCloseUp,   // []
-    GlobalCurlyCloseDown, // ][
-    GlobalCurlyOpenUp,    // [[
-    GlobalCurlyOpenDown,  // ]]
-    LineMarkUp,           // [m
-    LineMarkDown,         // ]m
-    ParenthesisMatching,  // %
-    SearchResultBackward, // N
-    SearchResultForward,  // n
-    WordBackward,         // b
-    WordEndForward,       // e
-    WordForward,          // w
-    BigWordBackward,      // B
-    BigWordEndForward,    // E
-    BigWordForward,       // W
+    Explicit,              // <special one for explicit operators>
+    Selection,             // <special one for v_ modes>
+    FullLine,              // <special one for full-line motions>
+    CharLeft,              // h
+    CharRight,             // l
+    ScreenColumn,          // |
+    FileBegin,             // gg
+    FileEnd,               // G
+    LineBegin,             // 0
+    LineTextBegin,         // ^
+    LineDown,              // j
+    LineEnd,               // $
+    LineUp,                // k
+    LinesCenter,           // M
+    PageDown,              // <C-D>
+    PageUp,                // <C-U>
+    PageTop,               // <S-H> (inspired by tmux)
+    PageBottom,            // <S-L> (inspired by tmux)
+    ParagraphBackward,     // {
+    ParagraphForward,      // }
+    GlobalCurlyCloseUp,    // []
+    GlobalCurlyCloseDown,  // ][
+    GlobalCurlyOpenUp,     // [[
+    GlobalCurlyOpenDown,   // ]]
+    LineMarkUp,            // [m
+    LineMarkDown,          // ]m
+    ParenthesisMatching,   // %
+    SearchResultBackward,  // N
+    SearchResultForward,   // n
+    WordBackward,          // b
+    WordEndForward,        // e
+    WordForward,           // w
+    BigWordBackward,       // B
+    BigWordEndForward,     // E
+    BigWordForward,        // W
+    TillBeforeCharRight,   // t {char}
+    TillAfterCharLeft,     // T {char}
+    ToCharRight,           // f {char}
+    ToCharLeft,            // F {char}
+    RepeatCharMove,        // ;
+    RepeatCharMoveReverse, // ,
 };
 
 enum class ViOperator
@@ -159,8 +165,8 @@ class ViInputHandler: public InputHandler
       public:
         virtual ~Executor() = default;
 
-        virtual void execute(ViOperator op, ViMotion motion, unsigned count) = 0;
-        virtual void moveCursor(ViMotion motion, unsigned count) = 0;
+        virtual void execute(ViOperator op, ViMotion motion, unsigned count, char32_t lastChar = U'\0') = 0;
+        virtual void moveCursor(ViMotion motion, unsigned count, char32_t lastChar = U'\0') = 0;
         virtual void select(TextObjectScope scope, TextObject textObject) = 0;
         virtual void yank(TextObjectScope scope, TextObject textObject) = 0;
         virtual void yank(ViMotion motion) = 0;
@@ -254,6 +260,7 @@ class ViInputHandler: public InputHandler
     CommandHandlerMap _normalMode;
     CommandHandlerMap _visualMode;
     unsigned _count = 0;
+    char32_t _lastChar = 0;
     Executor& _executor;
 };
 
@@ -379,6 +386,12 @@ struct formatter<terminal::ViMotion>
             case ViMotion::BigWordBackward: return fmt::format_to(ctx.out(), "BigWordBackward");
             case ViMotion::BigWordEndForward: return fmt::format_to(ctx.out(), "BigWordEndForward");
             case ViMotion::BigWordForward: return fmt::format_to(ctx.out(), "BigWordForward");
+            case ViMotion::TillBeforeCharRight: return fmt::format_to(ctx.out(), "TillBeforeCharRight");
+            case ViMotion::TillAfterCharLeft: return fmt::format_to(ctx.out(), "TillAfterCharLeft");
+            case ViMotion::ToCharRight: return fmt::format_to(ctx.out(), "ToCharRight");
+            case ViMotion::ToCharLeft: return fmt::format_to(ctx.out(), "ToCharLeft");
+            case ViMotion::RepeatCharMove: return fmt::format_to(ctx.out(), "RepeatCharMove");
+            case ViMotion::RepeatCharMoveReverse: return fmt::format_to(ctx.out(), "RepeatCharMoveReverse");
             case ViMotion::GlobalCurlyCloseUp: return fmt::format_to(ctx.out(), "GlobalCurlyCloseUp");
             case ViMotion::GlobalCurlyCloseDown: return fmt::format_to(ctx.out(), "GlobalCurlyCloseDown");
             case ViMotion::GlobalCurlyOpenUp: return fmt::format_to(ctx.out(), "GlobalCurlyOpenUp");

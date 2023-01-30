@@ -14,6 +14,7 @@
 #include <vtbackend/Terminal.h>
 #include <vtbackend/ViCommands.h>
 #include <vtbackend/logging.h>
+#include <vtbackend/primitives.h>
 
 #include <unicode/ucd.h>
 
@@ -143,6 +144,32 @@ namespace
         }
 
         return std::nullopt;
+    }
+
+    constexpr bool isValidCharMove(std::optional<ViMotion> motion) noexcept
+    {
+        if (!motion.has_value())
+            return false;
+        switch (*motion)
+        {
+            case ViMotion::TillBeforeCharRight:
+            case ViMotion::TillAfterCharLeft:
+            case ViMotion::ToCharRight:
+            case ViMotion::ToCharLeft: return true;
+            default: return false;
+        }
+    }
+
+    constexpr ViMotion invertCharMove(ViMotion motion) noexcept
+    {
+        switch (motion)
+        {
+            case ViMotion::TillBeforeCharRight: return ViMotion::TillAfterCharLeft;
+            case ViMotion::TillAfterCharLeft: return ViMotion::TillBeforeCharRight;
+            case ViMotion::ToCharRight: return ViMotion::ToCharLeft;
+            case ViMotion::ToCharLeft: return ViMotion::ToCharRight;
+            default: return motion;
+        }
     }
 
 } // namespace
@@ -358,7 +385,7 @@ void ViCommands::executeYank(CellLocation from, CellLocation to)
     _terminal.screenUpdated();
 }
 
-void ViCommands::execute(ViOperator op, ViMotion motion, unsigned count)
+void ViCommands::execute(ViOperator op, ViMotion motion, unsigned count, char32_t lastChar)
 {
     InputLog()("{}: Executing: {} {} {}\n", _terminal.inputHandler().mode(), count, op, motion);
     switch (op)
@@ -369,6 +396,11 @@ void ViCommands::execute(ViOperator op, ViMotion motion, unsigned count)
             break;
         case ViOperator::Yank:
             //.
+            if (isValidCharMove(motion))
+            {
+                _lastCharMotion = motion;
+                _lastChar = lastChar;
+            }
             executeYank(motion, count);
             break;
         case ViOperator::Paste:
@@ -973,13 +1005,91 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
         case ViMotion::Selection: // <special for visual modes>
         case ViMotion::FullLine:  // <special for full-line operations>
             return snapToCell(cursorPosition);
+        case ViMotion::TillBeforeCharRight: // t {char}
+            if (auto const result = toCharRight(count); result)
+                return result.value() - ColumnOffset(1);
+            else
+                return cursorPosition;
+        case ViMotion::TillAfterCharLeft: // T {char} TODO(pr)
+            if (auto const result = toCharLeft(count); result)
+                return result.value() + ColumnOffset(1);
+            else
+                return cursorPosition;
+        case ViMotion::ToCharRight: // f {char}
+            return toCharRight(count).value_or(cursorPosition);
+        case ViMotion::ToCharLeft: // F {char}
+            return toCharLeft(count).value_or(cursorPosition);
+        case ViMotion::RepeatCharMove:
+            if (isValidCharMove(_lastCharMotion))
+                return translateToCellLocation(*_lastCharMotion, count);
+            return cursorPosition;
+        case ViMotion::RepeatCharMoveReverse:
+            if (isValidCharMove(_lastCharMotion))
+                return translateToCellLocation(invertCharMove(*_lastCharMotion), count);
+            return cursorPosition;
     }
     crispy::unreachable();
 }
 
-void ViCommands::moveCursor(ViMotion motion, unsigned count)
+optional<CellLocation> ViCommands::toCharRight(CellLocation startPosition) const noexcept
+{
+    auto result = next(startPosition);
+
+    while (true)
+    {
+        if (result.line != startPosition.line)
+            return std::nullopt;
+        if (_terminal.currentScreen().compareCellTextAt(result, _lastChar))
+            return result;
+        result = next(result);
+    }
+}
+
+optional<CellLocation> ViCommands::toCharLeft(CellLocation startPosition) const noexcept
+{
+    auto result = prev(startPosition);
+
+    while (true)
+    {
+        if (result.line != startPosition.line)
+            return std::nullopt;
+        if (_terminal.currentScreen().compareCellTextAt(result, _lastChar))
+            return result;
+        result = prev(result);
+    }
+}
+
+optional<CellLocation> ViCommands::toCharRight(unsigned count) const noexcept
+{
+    auto result = optional { cursorPosition };
+    while (count > 0 && result.has_value())
+    {
+        result = toCharRight(*result);
+        --count;
+    }
+    return result;
+}
+
+optional<CellLocation> ViCommands::toCharLeft(unsigned count) const noexcept
+{
+    auto result = optional { cursorPosition };
+    while (count > 0 && result.has_value())
+    {
+        result = toCharLeft(*result);
+        --count;
+    }
+    return result;
+}
+
+void ViCommands::moveCursor(ViMotion motion, unsigned count, char32_t lastChar)
 {
     Require(_terminal.inputHandler().mode() != ViMode::Insert);
+
+    if (isValidCharMove(motion))
+    {
+        _lastCharMotion = motion;
+        _lastChar = lastChar;
+    }
 
     auto const nextPosition = translateToCellLocation(motion, count);
     InputLog()("Move cursor: {} to {}\n", motion, nextPosition);

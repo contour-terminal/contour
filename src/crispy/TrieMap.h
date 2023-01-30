@@ -52,7 +52,7 @@ class TrieMap
 
     [[nodiscard]] size_t size() const noexcept { return _size; }
 
-    [[nodiscard]] TrieMatch<Value> search(Key const& key) const noexcept;
+    [[nodiscard]] TrieMatch<Value> search(Key const& key, bool allowWhildcardDot = false) const noexcept;
     [[nodiscard]] bool contains(Key const& key) const noexcept;
 
   private:
@@ -71,6 +71,8 @@ void TrieMap<Key, Value>::clear()
 template <typename Key, typename Value>
 void TrieMap<Key, Value>::insert(Key const& key, Value value)
 {
+    assert(!key.empty());
+
     detail::TrieNode<Value>* currentNode = &_root;
     for (auto const element: key)
     {
@@ -89,15 +91,18 @@ void TrieMap<Key, Value>::insert(Key const& key, Value value)
 }
 
 template <typename Key, typename Value>
-TrieMatch<Value> TrieMap<Key, Value>::search(Key const& key) const noexcept
+TrieMatch<Value> TrieMap<Key, Value>::search(Key const& key, bool allowWhildcardDot) const noexcept
 {
     detail::TrieNode<Value> const* currentNode = &_root;
     for (auto const element: key)
     {
         auto const childIndex = static_cast<uint8_t>(element);
-        if (!currentNode->children[childIndex])
+        if (currentNode->children[childIndex])
+            currentNode = currentNode->children[childIndex].get();
+        else if (allowWhildcardDot && currentNode->children[static_cast<uint8_t>('.')])
+            currentNode = currentNode->children[static_cast<uint8_t>('.')].get();
+        else
             return NoMatch {};
-        currentNode = currentNode->children[childIndex].get();
     }
 
     if (currentNode->value.has_value())

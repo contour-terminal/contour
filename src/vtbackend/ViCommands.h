@@ -15,6 +15,7 @@
 
 #include <vtbackend/ViInputHandler.h>
 
+#include <optional>
 #include <utility>
 
 namespace terminal
@@ -41,8 +42,8 @@ class ViCommands: public ViInputHandler::Executor
     void reverseSearchCurrentWord() override;
     void toggleLineMark() override;
     void searchCurrentWord() override;
-    void execute(ViOperator op, ViMotion motion, unsigned count) override;
-    void moveCursor(ViMotion motion, unsigned count) override;
+    void execute(ViOperator op, ViMotion motion, unsigned count, char32_t lastChar = U'\0') override;
+    void moveCursor(ViMotion motion, unsigned count, char32_t lastChar = U'\0') override;
     void select(TextObjectScope scope, TextObject textObject) override;
     void yank(TextObjectScope scope, TextObject textObject) override;
     void yank(ViMotion motion) override;
@@ -73,6 +74,10 @@ class ViCommands: public ViInputHandler::Executor
     [[nodiscard]] CellLocation findEndOfWordAt(CellLocation location, JumpOver jumpOver) const noexcept;
     [[nodiscard]] CellLocation globalCharUp(CellLocation location, char ch, unsigned count) const noexcept;
     [[nodiscard]] CellLocation globalCharDown(CellLocation location, char ch, unsigned count) const noexcept;
+    [[nodiscard]] std::optional<CellLocation> toCharRight(CellLocation startPosition) const noexcept;
+    [[nodiscard]] std::optional<CellLocation> toCharLeft(CellLocation startPosition) const noexcept;
+    [[nodiscard]] std::optional<CellLocation> toCharRight(unsigned count) const noexcept;
+    [[nodiscard]] std::optional<CellLocation> toCharLeft(unsigned count) const noexcept;
     void executeYank(ViMotion motion, unsigned count);
     void executeYank(CellLocation from, CellLocation to);
 
@@ -93,6 +98,8 @@ class ViCommands: public ViInputHandler::Executor
     Terminal& _terminal;
     ViMode _lastMode = ViMode::Insert;
     CursorShape _lastCursorShape = CursorShape::Block;
+    mutable char32_t _lastChar = U'\0';
+    std::optional<ViMotion> _lastCharMotion = std::nullopt;
     bool _lastCursorVisible = true;
 };
 
