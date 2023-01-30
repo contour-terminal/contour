@@ -1001,6 +1001,9 @@ namespace
         if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "vi_mode_highlight"))
             colors.yankHighlight = p.value();
 
+        if (auto p = parseCellRGBColorAndAlphaPair(_usedKeys, _basePath, _node, "vi_mode_cursorline"))
+            colors.normalModeCursorline = p.value();
+
         if (auto p = parseRGBColorPair(
                 _usedKeys, _basePath, _node, "indicator_statusline", colors.indicatorStatusLine))
             colors.indicatorStatusLine = p.value();

@@ -50,6 +50,8 @@ class RenderBufferBuilder
     void finish() noexcept {}
 
   private:
+    [[nodiscard]] bool isCursorLine(LineOffset line) const noexcept;
+
     [[nodiscard]] std::optional<RenderCursor> renderCursor() const;
 
     [[nodiscard]] static RenderCell makeRenderCellExplicit(ColorPalette const& colorPalette,
@@ -128,6 +130,7 @@ class RenderBufferBuilder
     State state = State::Gap;
     LineOffset lineNr = LineOffset(0);
     bool isNewLine = false;
+    bool _useCursorlineColoring = false;
 
     // Offset into the search pattern that has been already matched.
     size_t searchPatternOffset = 0;

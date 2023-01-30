@@ -69,12 +69,16 @@ namespace
                             Color backgroundColor,
                             bool selected,
                             bool isCursor,
+                            bool isCursorLine,
                             bool isHighlighted,
                             bool blink,
                             bool rapidBlink) noexcept
     {
-        auto const sgrColors = CellUtil::makeColors(
+        auto sgrColors = CellUtil::makeColors(
             colorPalette, cellFlags, reverseVideo, foregroundColor, backgroundColor, blink, rapidBlink);
+
+        if (isCursorLine)
+            sgrColors = makeRGBColorPair(sgrColors, colorPalette.normalModeCursorline);
 
         if (!selected && !isCursor && !isHighlighted)
             return sgrColors;
@@ -271,6 +275,7 @@ RGBColorPair RenderBufferBuilder<Cell>::makeColorsForCell(CellLocation gridPosit
                       backgroundColor,
                       selected,
                       paintCursor,
+                      _useCursorlineColoring,
                       highlighted,
                       blink,
                       rapidBlink);
@@ -336,6 +341,9 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineB
     //                lineBuffer.displayWidth,
     //                lineBuffer.text.size(),
     //                lineBuffer.text.view());
+
+    // No need to call isCursorLine(lineOffset) because lines containing a cursor are always inflated.
+    _useCursorlineColoring = false;
 
     auto const frontIndex = output.cells.size();
 
@@ -485,6 +493,16 @@ void RenderBufferBuilder<Cell>::startLine(LineOffset line) noexcept
     lineNr = line;
     prevWidth = 0;
     prevHasCursor = false;
+
+    _useCursorlineColoring = isCursorLine(line);
+}
+
+template <typename Cell>
+bool RenderBufferBuilder<Cell>::isCursorLine(LineOffset line) const noexcept
+{
+    return terminal.inputHandler().mode() != ViMode::Insert && cursorPosition
+           && cursorPosition->line
+                  == terminal.viewport().translateGridToScreenCoordinate(CellLocation { line, {} }).line;
 }
 
 template <typename Cell>

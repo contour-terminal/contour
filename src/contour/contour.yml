@@ -470,6 +470,15 @@ color_schemes:
             background: '#ffa500'
             background_alpha: 0.5
 
+        # Color override for the current cursor's line when in vi_mode:
+        # The value format is equivalent to how selection colors and alpha contribution is defined.
+        # To disable cursorline in vi_mode, set foreground to CellForeground and background to CellBackground.
+        vi_mode_cursorline:
+            foreground: '#ffffff'
+            foreground_alpha: 0.2
+            background: '#808080'
+            background_alpha: 0.3
+
         # The text selection color can be customized here.
         # Leaving a value empty will default to the inverse of the content's color values.
         #

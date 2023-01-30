@@ -112,6 +112,7 @@
           <li>Adds normal mode motion `[m` and `]m` to jump line marks up/down.</li>
           <li>Adds normal mode motion `mm` to toggle the line mark at the current active cursor position.</li>
           <li>Adds normal mode motion `t{char}`, `T{char}`, `f{char}`, `F{char}`, `;`, `,` to move cursor in line till before/after or to given `{char}`.</li>
+          <li>Adds config entry `vi_mode_highlight` to color palette to highlight current cursor's line when not in insert mode (aka. in Vi-mode).</li>
           <li>Adds shell integration for fish shell.</li>
         </ul>
       </description>
