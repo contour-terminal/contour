@@ -1023,6 +1023,21 @@ optional<chrono::milliseconds> Terminal::nextRender() const
     return nextBlink;
 }
 
+void Terminal::tick(std::chrono::steady_clock::time_point now) noexcept
+{
+    auto const changes = _changes.exchange(0);
+    (void) changes;
+    // TODO: update render buffer if  (changes != 0)
+
+    _currentTime = now;
+    updateCursorVisibilityState();
+    if (isBlinkOnScreen())
+    {
+        tie(_rapidBlinker.state, _lastRapidBlink) = nextBlinkState(_rapidBlinker, _lastRapidBlink);
+        tie(_slowBlinker.state, _lastBlink) = nextBlinkState(_slowBlinker, _lastBlink);
+    }
+}
+
 void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
 {
     auto const _ = lock_guard { *this };
