@@ -32,9 +32,9 @@ $ThirdParties =
         Macro   = "libunicode"
     };
     [ThirdParty]@{
-        Folder  = "termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed";
-        Archive = "termbench-pro-cd571e3cebb7c00de9168126b28852f32fb204ed.zip";
-        URI     = "https://github.com/contour-terminal/termbench-pro/archive/cd571e3cebb7c00de9168126b28852f32fb204ed.zip";
+        Folder  = "termbench-pro-a4feadd3a698e4fe2d9dd5b03d5f941534a25a91";
+        Archive = "termbench-pro-a4feadd3a698e4fe2d9dd5b03d5f941534a25a91.zip";
+        URI     = "https://github.com/contour-terminal/termbench-pro/archive/a4feadd3a698e4fe2d9dd5b03d5f941534a25a91.zip";
         Macro   = "termbench_pro"
     }
 )
