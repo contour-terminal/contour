@@ -44,9 +44,9 @@ case "$OSTYPE" in
         ;;
 esac
 
-if [ "${BUILD_TYPE}" != "Debug" ]; then
-    EXTRA_CMAKE_FLAGS="${EXTRA_CMAKE_FLAGS} -DCMAKE_INSTALL_PREFIX=~/usr/opt/contour"
-fi
+# if [ "${BUILD_TYPE}" != "Debug" ]; then
+#     EXTRA_CMAKE_FLAGS="${EXTRA_CMAKE_FLAGS} -DCMAKE_INSTALL_PREFIX=~/usr/opt/contour"
+# fi
 
 echo "EXTRA_CMAKE_FLAGS: ${EXTRA_CMAKE_FLAGS}"
 
