@@ -130,6 +130,8 @@ struct ColorPalette
     CellRGBColorAndAlphaPair wordHighlightCurrent { CellForegroundColor {}, 1.0f, RGBColor{0x90, 0x90, 0x90}, 0.6f };
 
     CellRGBColorAndAlphaPair selection { CellBackgroundColor {}, 1.0f, CellForegroundColor {}, 1.0f };
+
+    CellRGBColorAndAlphaPair normalModeCursorline = { 0xFFFFFF_rgb, 0.2f, 0x404000_rgb, 0.3f };
     // clang-format on
 
     RGBColorPair indicatorStatusLine = { 0x000000_rgb, 0x808080_rgb };
