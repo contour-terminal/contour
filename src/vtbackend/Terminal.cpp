@@ -287,6 +287,7 @@ void Terminal::breakLoopAndRefreshRenderBuffer()
 {
     _changes++;
     _renderBuffer.state = RenderBufferState::RefreshBuffersAndTrySwap;
+    _eventListener.renderBufferUpdated();
 
     // if (this_thread::get_id() == _mainLoopThreadID)
     //     return;
@@ -722,7 +723,7 @@ bool Terminal::handleMouseSelection(Modifier modifier)
         default: clearSelection(); break;
     }
 
-    screenUpdated();
+    breakLoopAndRefreshRenderBuffer();
     return true;
 }
 
@@ -815,7 +816,7 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
         if (_state.inputHandler.mode() != ViMode::Insert)
             _state.inputHandler.setMode(selector()->viMode());
         if (selector()->extend(relativePos))
-            screenUpdated();
+            breakLoopAndRefreshRenderBuffer();
     }
 }
 
