@@ -501,8 +501,10 @@ template <typename Cell>
 bool RenderBufferBuilder<Cell>::isCursorLine(LineOffset line) const noexcept
 {
     return terminal.inputHandler().mode() != ViMode::Insert && cursorPosition
-           && cursorPosition->line
-                  == terminal.viewport().translateGridToScreenCoordinate(CellLocation { line, {} }).line;
+           && line
+                  == terminal.viewport()
+                         .translateGridToScreenCoordinate(CellLocation { cursorPosition->line, {} })
+                         .line;
 }
 
 template <typename Cell>
