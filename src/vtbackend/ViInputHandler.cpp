@@ -145,18 +145,20 @@ void ViInputHandler::registerAllCommands()
     } };
 
     // normal mode and visual mode
+    // clang-format off
     for (auto const modeSelect: { ModeSelect::Normal, ModeSelect::Visual })
+    {
         for (auto const& [motionChar, motion]: motionMappings)
             registerCommand(
                 modeSelect, motionChar, [this, motion = motion]() { _executor.moveCursor(motion, count()); });
 
-    // clang-format off
-    registerCommand(ModeSelect::Normal, "t.", [this]() { _executor.moveCursor(ViMotion::TillBeforeCharRight, count(), _lastChar); });
-    registerCommand(ModeSelect::Normal, "T.", [this]() { _executor.moveCursor(ViMotion::TillAfterCharLeft, count(), _lastChar); });
-    registerCommand(ModeSelect::Normal, "f.", [this]() { _executor.moveCursor(ViMotion::ToCharRight, count(), _lastChar); });
-    registerCommand(ModeSelect::Normal, "F.", [this]() { _executor.moveCursor(ViMotion::ToCharLeft, count(), _lastChar); });
-    registerCommand(ModeSelect::Normal, ";", [this]() { _executor.moveCursor(ViMotion::RepeatCharMove, count()); });
-    registerCommand(ModeSelect::Normal, ",", [this]() { _executor.moveCursor(ViMotion::RepeatCharMoveReverse, count()); });
+        registerCommand(modeSelect, "t.", [this]() { _executor.moveCursor(ViMotion::TillBeforeCharRight, count(), _lastChar); });
+        registerCommand(modeSelect, "T.", [this]() { _executor.moveCursor(ViMotion::TillAfterCharLeft, count(), _lastChar); });
+        registerCommand(modeSelect, "f.", [this]() { _executor.moveCursor(ViMotion::ToCharRight, count(), _lastChar); });
+        registerCommand(modeSelect, "F.", [this]() { _executor.moveCursor(ViMotion::ToCharLeft, count(), _lastChar); });
+        registerCommand(modeSelect, ";", [this]() { _executor.moveCursor(ViMotion::RepeatCharMove, count()); });
+        registerCommand(modeSelect, ",", [this]() { _executor.moveCursor(ViMotion::RepeatCharMoveReverse, count()); });
+    }
 
     registerCommand(ModeSelect::Normal, "a", [this]() { setMode(ViMode::Insert); });
     registerCommand(ModeSelect::Normal, "i", [this]() { setMode(ViMode::Insert); });
