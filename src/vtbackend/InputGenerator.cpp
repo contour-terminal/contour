@@ -371,7 +371,7 @@ bool InputGenerator::generate(char32_t characterEvent, Modifier modifier)
     else
         append(unicode::convert_to<char>(characterEvent));
 
-    InputLog()("Sending \"{}\" {}.", crispy::escape(unicode::convert_to<char>(characterEvent)), modifier);
+    InputLog()("Sending {} \"{}\".", modifier, crispy::escape(unicode::convert_to<char>(characterEvent)));
     return true;
 }
 
@@ -379,7 +379,7 @@ bool InputGenerator::generate(Key key, Modifier modifier)
 {
     auto const logged = [key, modifier](bool success) -> bool {
         if (success)
-            InputLog()("Sending {} {}.", (unsigned) key, (unsigned) modifier);
+            InputLog()("Sending {} {}.", modifier, key);
         return success;
     };
 

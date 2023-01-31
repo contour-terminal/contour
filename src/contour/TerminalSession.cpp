@@ -506,7 +506,7 @@ void TerminalSession::inputModeChanged(terminal::ViMode mode)
 // {{{ Input Events
 void TerminalSession::sendKeyPressEvent(Key _key, Modifier _modifier, Timestamp _now)
 {
-    InputLog()("key press: {} {}", _modifier, _key);
+    InputLog()("Key press event received: {} {}", _modifier, _key);
 
     if (terminatedAndWaitingForKeyPress_)
     {
