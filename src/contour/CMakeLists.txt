@@ -59,8 +59,10 @@ set(QT_RESOURCES resources.qrc)
 if(NOT(CONTOUR_BUILD_WITH_QT6))
     qt5_add_resources(QT_RESOURCES ${QT_RESOURCES})
 endif()
+add_library(contour_no_SA STATIC ${QT_RESOURCES})
+set_target_properties(contour_no_SA PROPERTIES CXX_CLANG_TIDY "")
 
-add_executable(contour ${contour_SRCS} ${QT_RESOURCES})
+add_executable(contour ${contour_SRCS} $<TARGET_OBJECTS:contour_no_SA>)
 target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_compile_definitions(contour PRIVATE
     CONTOUR_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}

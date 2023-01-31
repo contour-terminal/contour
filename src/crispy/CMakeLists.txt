@@ -34,6 +34,8 @@ set(crispy_SOURCES
 add_library(crispy-core ${crispy_SOURCES})
 add_library(crispy::core ALIAS crispy-core)
 
+set_target_properties(crispy-core PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
+
 if(MSVC)
     target_compile_definitions(crispy-core PUBLIC NOMINMAX)
 endif()

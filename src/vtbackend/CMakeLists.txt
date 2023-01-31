@@ -81,6 +81,7 @@ set(terminal_SOURCES
 )
 
 add_library(terminal STATIC ${terminal_SOURCES} ${terminal_HEADERS})
+set_target_properties(terminal PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
 target_compile_definitions(terminal PRIVATE
     LIBTERMINAL_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
     LIBTERMINAL_VERSION_MINOR=${PROJECT_VERSION_MINOR}

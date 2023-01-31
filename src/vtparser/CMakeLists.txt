@@ -7,6 +7,7 @@ add_library(vtparser STATIC
     Parser-impl.h
     ParserEvents.h
 )
+set_target_properties(vtparser PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
 target_link_libraries(vtparser PUBLIC crispy::core fmt::fmt-header-only Microsoft.GSL::GSL)
 
 option(VTPARSER_TESTING "Enables building of unittests for vtparser [default: ON]" ON)
