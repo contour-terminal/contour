@@ -51,3 +51,49 @@ jobs:
       - uses: actions/checkout@v2
       - uses: editorconfig-checker/action-editorconfig-checker@main
       - run: editorconfig-checker
+
+  check_clang_tidy:
+    name: "Clang Tidy"
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v3
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: "ccache-ubuntu2204-clang-tidy"
+          max-size: 256M
+      - name: Updating APT package database
+        run: sudo apt -q update && sudo apt upgrade -y
+      - name: Installing xmllint for ci-set-vars
+        run: sudo apt -qy install libxml2-utils
+      - name: Installing clang-tidy
+        run: sudo apt -qy install clang-tidy
+      - name: set environment variables
+        id: set_vars
+        run: ./scripts/ci-set-vars.sh
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: "install dependencies"
+        run: sudo ./scripts/install-deps.sh
+      - name: "Post-fix embedded dependency permissions."
+        run: sudo find _deps/sources -exec chown $UID {} \;
+      - name: Install Clang
+        run: sudo apt install -y clang-14
+      - name: "create build directory"
+        run: mkdir build
+      - name: CMake version
+        run: cmake --version
+      - name: "cmake"
+        run: |
+          BUILD_DIR="build" \
+            CXX="clang++-14" \
+            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS \
+                               -DCMAKE_INSTALL_PREFIX="/usr" \
+                               -DCONTOUR_INSTALL_TOOLS=ON \
+                               -DPEDANTIC_COMPILER=ON \
+                               -DLIBUNICODE_UCD_BASE_DIR=$(pwd)/_ucd \
+                               -DENABLE_TIDY=ON \
+                               " \
+            ./scripts/ci-prepare-contour.sh
+      - name: "build"
+        run: cmake --build build/ -- -j3
