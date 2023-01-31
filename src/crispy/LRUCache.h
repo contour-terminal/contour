@@ -39,30 +39,30 @@ class LRUCache
     using iterator = typename ItemList::iterator;
     using const_iterator = typename ItemList::const_iterator;
 
-    explicit LRUCache(std::size_t capacity): capacity_ { capacity } {}
+    explicit LRUCache(std::size_t capacity): _capacity { capacity } {}
 
-    [[nodiscard]] std::size_t size() const noexcept { return items_.size(); }
-    [[nodiscard]] std::size_t capacity() const noexcept { return capacity_; }
+    [[nodiscard]] std::size_t size() const noexcept { return _items.size(); }
+    [[nodiscard]] std::size_t capacity() const noexcept { return _capacity; }
 
     void clear()
     {
-        itemByKeyMapping_.clear();
-        items_.clear();
+        _itemByKeyMapping.clear();
+        _items.clear();
     }
 
     void touch(Key key) noexcept { (void) try_get(key); }
 
-    [[nodiscard]] bool contains(Key key) const noexcept { return itemByKeyMapping_.count(key) != 0; }
+    [[nodiscard]] bool contains(Key key) const noexcept { return _itemByKeyMapping.count(key) != 0; }
 
     [[nodiscard]] Value* try_get(Key key) const { return const_cast<LRUCache*>(this)->try_get(key); }
 
     [[nodiscard]] Value* try_get(Key key)
     {
-        if (auto i = itemByKeyMapping_.find(key); i != itemByKeyMapping_.end())
+        if (auto i = _itemByKeyMapping.find(key); i != _itemByKeyMapping.end())
         {
             // move it to the front, and return it
             auto i2 = moveItemToFront(i->second);
-            itemByKeyMapping_.at(key) = i2;
+            _itemByKeyMapping.at(key) = i2;
             return &i2->value;
         }
 
@@ -92,7 +92,7 @@ class LRUCache
         if (Value* p = try_get(key))
             return *p;
 
-        if (items_.size() == capacity_)
+        if (_items.size() == _capacity)
             return evict_one_and_push_front(key, Value {})->value;
 
         return emplaceItemToFront(key, Value {})->value;
@@ -108,7 +108,7 @@ class LRUCache
         if (Value* p = try_get(key))
             return false;
 
-        if (items_.size() == capacity_)
+        if (_items.size() == _capacity)
             evict_one_and_push_front(key, constructValue());
         else
             emplaceItemToFront(key, constructValue());
@@ -127,41 +127,41 @@ class LRUCache
     {
         Require(!contains(key));
 
-        if (items_.size() == capacity_)
+        if (_items.size() == _capacity)
             return evict_one_and_push_front(key, std::move(value))->value;
 
         return emplaceItemToFront(key, std::move(value))->value;
     }
 
-    [[nodiscard]] iterator begin() { return items_.begin(); }
-    [[nodiscard]] iterator end() { return items_.end(); }
+    [[nodiscard]] iterator begin() { return _items.begin(); }
+    [[nodiscard]] iterator end() { return _items.end(); }
 
-    [[nodiscard]] const_iterator begin() const { return items_.cbegin(); }
-    [[nodiscard]] const_iterator end() const { return items_.cend(); }
+    [[nodiscard]] const_iterator begin() const { return _items.cbegin(); }
+    [[nodiscard]] const_iterator end() const { return _items.cend(); }
 
-    [[nodiscard]] const_iterator cbegin() const { return items_.cbegin(); }
-    [[nodiscard]] const_iterator cend() const { return items_.cend(); }
+    [[nodiscard]] const_iterator cbegin() const { return _items.cbegin(); }
+    [[nodiscard]] const_iterator cend() const { return _items.cend(); }
 
     [[nodiscard]] std::vector<Key> keys() const
     {
         std::vector<Key> result;
-        result.resize(items_.size());
+        result.resize(_items.size());
         size_t i = 0;
-        for (Item const& item: items_)
+        for (Item const& item: _items)
             result[i++] = item.key;
         return result;
     }
 
     void erase(iterator iter)
     {
-        items_.erase(iter);
-        itemByKeyMapping_.erase(iter->key);
+        _items.erase(iter);
+        _itemByKeyMapping.erase(iter->key);
     }
 
     void erase(Key const& key)
     {
-        if (auto keyMappingIterator = itemByKeyMapping_.find(key);
-            keyMappingIterator != itemByKeyMapping_.end())
+        if (auto keyMappingIterator = _itemByKeyMapping.find(key);
+            keyMappingIterator != _itemByKeyMapping.end())
             erase(keyMappingIterator->second);
     }
 
@@ -169,38 +169,38 @@ class LRUCache
     /// Evicts least recently used item and prepares (/reuses) its storage for a new item.
     iterator evict_one_and_push_front(Key newKey, Value&& newValue)
     {
-        auto const oldKey = items_.back().key;
-        auto keyMappingIterator = itemByKeyMapping_.find(oldKey);
-        Require(keyMappingIterator != itemByKeyMapping_.end());
+        auto const oldKey = _items.back().key;
+        auto keyMappingIterator = _itemByKeyMapping.find(oldKey);
+        Require(keyMappingIterator != _itemByKeyMapping.end());
 
         auto newItemIterator = moveItemToFront(keyMappingIterator->second);
         newItemIterator->key = newKey;
         newItemIterator->value = std::move(newValue);
-        itemByKeyMapping_.erase(keyMappingIterator);
-        itemByKeyMapping_.emplace(newKey, newItemIterator);
+        _itemByKeyMapping.erase(keyMappingIterator);
+        _itemByKeyMapping.emplace(newKey, newItemIterator);
 
         return newItemIterator;
     }
 
     [[nodiscard]] iterator moveItemToFront(iterator i)
     {
-        items_.emplace_front(std::move(*i));
-        items_.erase(i);
-        return items_.begin();
+        _items.emplace_front(std::move(*i));
+        _items.erase(i);
+        return _items.begin();
     }
 
     iterator emplaceItemToFront(Key key, Value&& value)
     {
-        items_.emplace_front(Item { key, std::move(value) });
-        itemByKeyMapping_.emplace(key, items_.begin());
-        return items_.begin();
+        _items.emplace_front(Item { key, std::move(value) });
+        _itemByKeyMapping.emplace(key, _items.begin());
+        return _items.begin();
     }
 
     // private data
     //
-    std::list<Item> items_;
-    std::unordered_map<Key, iterator> itemByKeyMapping_;
-    std::size_t capacity_;
+    std::list<Item> _items;
+    std::unordered_map<Key, iterator> _itemByKeyMapping;
+    std::size_t _capacity;
 };
 
 } // namespace crispy

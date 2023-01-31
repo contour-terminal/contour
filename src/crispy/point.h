@@ -22,8 +22,8 @@ namespace crispy
 
 struct [[nodiscard]] Point
 {
-    int x;
-    int y;
+    int x {};
+    int y {};
 };
 
 template <typename T>

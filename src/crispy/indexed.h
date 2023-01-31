@@ -79,11 +79,17 @@ namespace impl
         };
         // }}}
 
-        constexpr auto begin() const { return const_iterator { container.cbegin(), start }; }
-        constexpr auto end() const { return const_iterator { container.cend() }; }
+        [[nodiscard]] constexpr auto begin() const { return const_iterator { container.cbegin(), start }; }
+        [[nodiscard]] constexpr auto end() const { return const_iterator { container.cend() }; }
 
-        constexpr auto begin() { return iterator { const_cast<container_type&>(container).begin(), start }; }
-        constexpr auto end() { return iterator { const_cast<container_type&>(container).end() }; }
+        [[nodiscard]] constexpr auto begin()
+        {
+            return iterator { const_cast<container_type&>(container).begin(), start };
+        }
+        [[nodiscard]] constexpr auto end()
+        {
+            return iterator { const_cast<container_type&>(container).end() };
+        }
     };
 } // namespace impl
 

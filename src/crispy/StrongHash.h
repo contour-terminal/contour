@@ -54,7 +54,7 @@ namespace crispy
 struct StrongHash
 {
     // some random seed
-    static constexpr std::array<unsigned char, 16> DefaultSeed = {
+    static constexpr std::array<unsigned char, 16> defaultSeed = {
         // NOLINT(readability-identifier-naming)
         114, 188, 209, 2, 232, 4, 178, 176, 240, 216, 201, 127, 40, 41, 95, 143,
     };
@@ -73,10 +73,10 @@ struct StrongHash
     static StrongHash compute(T const& value) noexcept;
 
     template <typename T>
-    static StrongHash compute(std::basic_string_view<T> value) noexcept;
+    static StrongHash compute(std::basic_string_view<T> text) noexcept;
 
     template <typename T, typename Alloc>
-    static StrongHash compute(std::basic_string<T, Alloc> const& value) noexcept;
+    static StrongHash compute(std::basic_string<T, Alloc> const& text) noexcept;
 
     static StrongHash compute(void const* data, size_t n) noexcept;
 
@@ -86,7 +86,7 @@ struct StrongHash
 inline StrongHash::StrongHash(uint32_t a, uint32_t b, uint32_t c, uint32_t d) noexcept:
     StrongHash(_mm_xor_si128(
         _mm_set_epi32(static_cast<int>(a), static_cast<int>(b), static_cast<int>(c), static_cast<int>(d)),
-        _mm_loadu_si128((__m128i const*) DefaultSeed.data())))
+        _mm_loadu_si128((__m128i const*) defaultSeed.data())))
 {
 }
 
@@ -159,7 +159,7 @@ inline StrongHash StrongHash::compute(void const* data, size_t n) noexcept
     auto constexpr ChunkSize = static_cast<int>(sizeof(__m128i));
 
     __m128i hashValue = _mm_cvtsi64_si128(static_cast<long long>(n));
-    hashValue = _mm_xor_si128(hashValue, _mm_loadu_si128((__m128i const*) DefaultSeed.data()));
+    hashValue = _mm_xor_si128(hashValue, _mm_loadu_si128((__m128i const*) defaultSeed.data()));
 
     char const* inputPtr = (char const*) data;
     for (int chunkIndex = 0; chunkIndex < static_cast<int>(n) / ChunkSize; chunkIndex++)

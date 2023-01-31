@@ -49,13 +49,13 @@ class SourceLocation
 {
   public:
     SourceLocation(char const* filename, int line, char const* functionName) noexcept:
-        fileName_ { filename }, line_ { line }, functionName_ { functionName }
+        _fileName { filename }, _line { line }, _functionName { functionName }
     {
     }
 
-    [[nodiscard]] char const* file_name() const noexcept { return fileName_; }
-    [[nodiscard]] int line() const noexcept { return line_; }
-    [[nodiscard]] char const* function_name() const noexcept { return functionName_; }
+    [[nodiscard]] char const* file_name() const noexcept { return _fileName; }
+    [[nodiscard]] int line() const noexcept { return _line; }
+    [[nodiscard]] char const* function_name() const noexcept { return _functionName; }
 
     static SourceLocation current() noexcept
     {
@@ -63,9 +63,9 @@ class SourceLocation
     }
 
   private:
-    char const* fileName_;
-    int line_;
-    char const* functionName_;
+    char const* _fileName;
+    int _line;
+    char const* _functionName;
 };
 
 // #if __has_include(<source_location>) && !defined(_WIN32)
@@ -193,7 +193,7 @@ class Sink
   public:
     using Writer = std::function<void(std::string_view const&)>;
 
-    Sink(bool enabled, Writer writer): enabled_ { enabled }, writer_ { std::move(writer) } {}
+    Sink(bool enabled, Writer writer): _enabled { enabled }, _writer { std::move(writer) } {}
 
     Sink(bool enabled, std::ostream& output):
         Sink(enabled, [out = &output](std::string_view text) {
@@ -216,7 +216,7 @@ class Sink
     /// Writes given built message to this sink.
     void write(MessageBuilder const& message);
 
-    void set_enabled(bool enabled) { enabled_ = enabled; }
+    void set_enabled(bool enabled) { _enabled = enabled; }
 
     /// Retrieves reference to standard debug-logging sink.
     static inline Sink& console()
@@ -232,8 +232,8 @@ class Sink
     }
 
   private:
-    bool enabled_;
-    Writer writer_;
+    bool _enabled;
+    Writer _writer;
 };
 
 std::vector<std::reference_wrapper<Category>>& get();
@@ -366,13 +366,13 @@ inline std::string Category::defaultFormatter(MessageBuilder const& message)
 
 inline void Sink::write(MessageBuilder const& message)
 {
-    if (enabled_ && message.category().is_enabled())
-        writer_(message.message());
+    if (_enabled && message.category().is_enabled())
+        _writer(message.message());
 }
 
 inline void Sink::set_writer(Writer writer)
 {
-    writer_ = std::move(writer);
+    _writer = std::move(writer);
 }
 // }}}
 

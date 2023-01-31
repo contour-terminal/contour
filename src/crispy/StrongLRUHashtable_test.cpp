@@ -39,10 +39,10 @@ inline string sh(T value)
 }
 
 template <typename Value, typename... Values>
-inline string sh(Value value, Value next, Values... more)
+inline string sh(Value first, Value second, Values... remaining)
 {
-    auto left = to_structured_string(h(value));
-    auto right = sh(next, more...);
+    auto left = to_structured_string(h(first));
+    auto right = sh(second, remaining...); // NOLINT(readability-suspicious-call-argument)
     return left + ", " + right;
 }
 
@@ -59,10 +59,10 @@ inline string ch(T value)
 }
 
 template <typename Value, typename... Values>
-inline string ch(Value value, Value next, Values... more)
+inline string ch(Value first, Value second, Values... remaining)
 {
-    auto left = to_structured_string(collidingHash(value));
-    auto right = ch(next, more...);
+    auto left = to_structured_string(collidingHash(first));
+    auto right = ch(second, remaining...); // NOLINT(readability-suspicious-call-argument)
     return left + ", " + right;
 }
 } // namespace
@@ -226,19 +226,19 @@ TEST_CASE("StrongLRUHashtable.try_get", "")
     REQUIRE(joinHumanReadable(cache.hashes()) == sh(4, 3, 2, 1));
 
     // no-op (found)
-    auto const p1 = cache.try_get(h(4));
+    auto* const p1 = cache.try_get(h(4));
     REQUIRE(p1 != nullptr);
     REQUIRE(*p1 == 8);
     REQUIRE(joinHumanReadable(cache.hashes()) == sh(4, 3, 2, 1));
 
     // middle to front
-    auto const p2 = cache.try_get(h(3));
+    auto* const p2 = cache.try_get(h(3));
     REQUIRE(p2 != nullptr);
     REQUIRE(*p2 == 6);
     REQUIRE(joinHumanReadable(cache.hashes()) == sh(3, 4, 2, 1));
 
     // back to front
-    auto const p3 = cache.try_get(h(1));
+    auto* const p3 = cache.try_get(h(1));
     REQUIRE(p3 != nullptr);
     REQUIRE(*p3 == 2);
     REQUIRE(joinHumanReadable(cache.hashes()) == sh(1, 3, 4, 2));
@@ -359,7 +359,7 @@ TEST_CASE("StrongLRUHashtable.remove", "")
 
     // remove last
     cache.remove(h(3));
-    REQUIRE(joinHumanReadable(cache.hashes()) == "");
+    REQUIRE(joinHumanReadable(cache.hashes()).empty());
 }
 
 TEST_CASE("StrongLRUHashtable.insert_with_cache_collision", "")
@@ -405,7 +405,7 @@ TEST_CASE("StrongLRUHashtable.remove_with_hashTable_lookup_collision", "")
 
     // remove last
     cache.remove(collidingHash(3));
-    REQUIRE(joinHumanReadable(cache.hashes()) == "");
+    REQUIRE(joinHumanReadable(cache.hashes()).empty());
 }
 
 TEST_CASE("StrongLRUHashtable.peek", "")

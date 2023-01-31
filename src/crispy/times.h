@@ -69,15 +69,15 @@ namespace detail
 
         using iterator = TimesIterator<I, T>;
 
-        constexpr std::size_t size() const noexcept { return count; }
+        [[nodiscard]] constexpr std::size_t size() const noexcept { return count; }
         constexpr T operator[](size_t i) const noexcept { return start + i * step; }
 
-        constexpr iterator begin() const noexcept
+        [[nodiscard]] constexpr iterator begin() const noexcept
         {
             return TimesIterator<I, T> { start, count, step, start };
         }
 
-        constexpr iterator end() const noexcept
+        [[nodiscard]] constexpr iterator end() const noexcept
         {
             return iterator { start, I {}, step, static_cast<T>(start + count * step) };
         }
@@ -87,25 +87,25 @@ namespace detail
     Times(T, I, T) -> Times<I, T>;
 
     template <typename I, typename T>
-    constexpr auto begin(Times<I, T> const& _times) noexcept
+    constexpr auto begin(Times<I, T> const& times) noexcept
     {
-        return _times.begin();
+        return times.begin();
     }
     template <typename I, typename T>
-    constexpr auto end(Times<I, T> const& _times) noexcept
+    constexpr auto end(Times<I, T> const& times) noexcept
     {
-        return _times.end();
+        return times.end();
     }
 
     template <typename I, typename T>
-    constexpr auto begin(Times<I, T>& _times) noexcept
+    constexpr auto begin(Times<I, T>& times) noexcept
     {
-        return _times.begin();
+        return times.begin();
     }
     template <typename I, typename T>
-    constexpr auto end(Times<I, T>& _times) noexcept
+    constexpr auto end(Times<I, T>& times) noexcept
     {
-        return _times.end();
+        return times.end();
     }
 
     template <typename I, typename T1, typename T2>
@@ -119,11 +119,11 @@ namespace detail
         typename Outer::iterator outerIt;
         typename Inner::iterator innerIt;
 
-        constexpr Times2DIterator(Outer _outer, Inner _inner, bool _init) noexcept:
-            first { std::move(_outer) },
-            second { std::move(_inner) },
-            outerIt { _init ? std::begin(first) : std::end(first) },
-            innerIt { _init ? std::begin(second) : std::end(second) }
+        constexpr Times2DIterator(Outer outer, Inner inner, bool init) noexcept:
+            first { std::move(outer) },
+            second { std::move(inner) },
+            outerIt { init ? std::begin(first) : std::end(first) },
+            innerIt { init ? std::begin(second) : std::end(second) }
         {
         }
 
@@ -164,35 +164,35 @@ namespace detail
 
         using iterator = Times2DIterator<I, T1, T2>;
 
-        constexpr std::size_t size() const noexcept { return first.size() * second.size(); }
+        [[nodiscard]] constexpr std::size_t size() const noexcept { return first.size() * second.size(); }
         constexpr auto operator[](std::size_t i) const noexcept { return second[i % second.size()]; }
 
-        constexpr iterator begin() const noexcept { return iterator { first, second, true }; }
-        constexpr iterator end() const noexcept { return iterator { first, second, false }; }
+        [[nodiscard]] constexpr iterator begin() const noexcept { return iterator { first, second, true }; }
+        [[nodiscard]] constexpr iterator end() const noexcept { return iterator { first, second, false }; }
     };
 
     template <typename I, typename T1, typename T2>
-    constexpr auto begin(detail::Times2D<I, T1, T2> const& _times) noexcept
+    constexpr auto begin(detail::Times2D<I, T1, T2> const& times) noexcept
     {
-        return _times.begin();
+        return times.begin();
     }
 
     template <typename I, typename T1, typename T2>
-    constexpr auto end(detail::Times2D<I, T1, T2> const& _times) noexcept
+    constexpr auto end(detail::Times2D<I, T1, T2> const& times) noexcept
     {
-        return _times.end();
+        return times.end();
     }
 
     template <typename I, typename T1, typename T2>
-    constexpr auto begin(detail::Times2D<I, T1, T2>& _times) noexcept
+    constexpr auto begin(detail::Times2D<I, T1, T2>& times) noexcept
     {
-        return _times.begin();
+        return times.begin();
     }
 
     template <typename I, typename T1, typename T2>
-    constexpr auto end(detail::Times2D<I, T1, T2>& _times) noexcept
+    constexpr auto end(detail::Times2D<I, T1, T2>& times) noexcept
     {
-        return _times.end();
+        return times.end();
     }
 
     template <typename I, typename T1, typename T2>
@@ -220,20 +220,20 @@ template <typename I,
           typename T,
           typename Callable,
           typename std::enable_if_t<std::is_invocable_r_v<void, Callable, T>, int> = 0>
-constexpr void operator|(detail::Times<I, T> _times, Callable _callable)
+constexpr void operator|(detail::Times<I, T> times, Callable callable)
 {
-    for (auto&& i: _times)
-        _callable(i);
+    for (auto&& i: times)
+        callable(i);
 }
 
 template <typename I,
           typename T,
           typename Callable,
           typename std::enable_if_t<std::is_invocable_r_v<void, Callable>, int> = 0>
-constexpr void operator|(detail::Times<I, T> _times, Callable _callable)
+constexpr void operator|(detail::Times<I, T> times, Callable callable)
 {
-    for ([[maybe_unused]] auto&& i: _times)
-        _callable();
+    for ([[maybe_unused]] auto&& i: times)
+        callable();
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -249,10 +249,10 @@ template <typename I,
           typename T2,
           typename Callable,
           typename std::enable_if_t<std::is_invocable_r_v<void, Callable, T1, T2>, int> = 0>
-constexpr void operator|(detail::Times2D<I, T1, T2> _times, Callable _callable)
+constexpr void operator|(detail::Times2D<I, T1, T2> times, Callable callable)
 {
-    for (auto&& [i, j]: _times)
-        _callable(i, j);
+    for (auto&& [i, j]: times)
+        callable(i, j);
 }
 
 } // namespace crispy

@@ -22,7 +22,7 @@ using namespace std::string_view_literals;
 TEST_CASE("utils.split.0")
 {
     auto result = crispy::splitKeyValuePairs("", ':');
-    CHECK(result.size() == 0);
+    CHECK(result.empty());
 }
 
 TEST_CASE("utils.split.1")
@@ -132,7 +132,7 @@ TEST_CASE("fromHexString")
 
 struct VariableCollector
 {
-    string operator()(string_view name) const { return fmt::format("({})", name); }
+    auto operator()(string_view name) const { return fmt::format("({})", name); }
 };
 
 TEST_CASE("replaceVariables")
@@ -149,7 +149,7 @@ TEST_CASE("replaceVariables")
 
 TEST_CASE("homeResolvedPath")
 {
-    CHECK("" == crispy::homeResolvedPath("", "/var/tmp").generic_string());
+    CHECK(crispy::homeResolvedPath("", "/var/tmp").generic_string().empty());
 
     CHECK("/var/tmp/workspace" == crispy::homeResolvedPath("~workspace", "/var/tmp").generic_string());
     CHECK("/var/tmp/workspace" == crispy::homeResolvedPath("~/workspace", "/var/tmp").generic_string());

@@ -87,7 +87,7 @@ vector<void*> StackTrace::getFrames(size_t skip, size_t max)
 
 #if defined(HAVE_BACKTRACE)
     frames.resize(skip + max);
-    frames.resize((size_t)::backtrace(&frames[0], static_cast<int>(skip + max)));
+    frames.resize((size_t)::backtrace(frames.data(), static_cast<int>(skip + max)));
     std::copy(std::next(frames.begin(), (int) skip), frames.end(), frames.begin());
     frames.resize(frames.size() > skip ? frames.size() - skip : std::min(frames.size(), skip));
 #else
@@ -97,9 +97,9 @@ vector<void*> StackTrace::getFrames(size_t skip, size_t max)
     return frames;
 }
 
-optional<DebugInfo> StackTrace::getDebugInfoForFrame(void const* p)
+optional<DebugInfo> StackTrace::getDebugInfoForFrame(void const* frameAddress)
 {
-    if (!p)
+    if (!frameAddress)
         return nullopt;
 
 #if defined(__linux__)
@@ -117,7 +117,7 @@ optional<DebugInfo> StackTrace::getDebugInfoForFrame(void const* p)
             if (ssize_t rv = readlink("/proc/self/exe", exe, sizeof(exe)); rv < 0)
                 _exit(EXIT_FAILURE);
             char addr[32];
-            snprintf(addr, sizeof(addr), "%p", p);
+            snprintf(addr, sizeof(addr), "%p", frameAddress);
             char const* const argv[] = { addr2lineExe.c_str(), "-pe", exe, addr, nullptr };
             close(STDIN_FILENO);
             if (pipe.writer() != STDOUT_FILENO)
@@ -180,7 +180,7 @@ StackTrace::StackTrace():
 #endif
 {
 #if defined(HAVE_BACKTRACE)
-    _frames.resize((size_t)::backtrace(&_frames[0], SKIP_FRAMES + MAX_FRAMES));
+    _frames.resize((size_t)::backtrace(_frames.data(), SKIP_FRAMES + MAX_FRAMES));
 #endif
 }
 
@@ -188,7 +188,7 @@ string StackTrace::demangleSymbol(const char* symbol)
 {
 #if defined(__linux__) || defined(__APPLE__)
     int status = 0;
-    char* demangled = abi::__cxa_demangle(symbol, nullptr, 0, &status);
+    char* demangled = abi::__cxa_demangle(symbol, nullptr, nullptr, &status);
 
     if (demangled)
     {

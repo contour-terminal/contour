@@ -128,7 +128,7 @@ struct FlagStore
     }
 
     template <typename T>
-    T get(std::string const& key) const
+    [[nodiscard]] T get(std::string const& key) const
     {
         return std::get<T>(values.at(key));
     }

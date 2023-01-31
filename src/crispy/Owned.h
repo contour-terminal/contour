@@ -38,8 +38,8 @@ struct CRISPY_PACKED Owned
     Owned(Owned const& v) noexcept = delete;
     Owned& operator=(Owned const& v) = delete;
 
-    T* get() noexcept { return _ptr; }
-    T const* get() const noexcept { return _ptr; }
+    [[nodiscard]] T* get() noexcept { return _ptr; }
+    [[nodiscard]] T const* get() const noexcept { return _ptr; }
 
     constexpr T* operator->() noexcept { return _ptr; }
     constexpr T const* operator->() const noexcept { return _ptr; }
@@ -51,8 +51,7 @@ struct CRISPY_PACKED Owned
 
     void reset(T* p = nullptr)
     {
-        if (_ptr)
-            delete _ptr;
+        delete _ptr;
         _ptr = p;
     }
 
