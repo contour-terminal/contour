@@ -30,6 +30,7 @@
 #include <iterator>
 #include <sstream>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace terminal
