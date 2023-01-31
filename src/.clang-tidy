@@ -1,12 +1,23 @@
 ---
 Checks: >-
-  -*,
   bugprone-*,
   -bugprone-branch-clone,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-exception-escape,
   -bugprone-implicit-widening-of-multiplication-result,
   -bugprone-reserved-identifier,
   -bugprone-suspicious-include,
   -bugprone-unchecked-optional-access,
+  clang-analyzer-core.*,
+  clang-analyzer-cplusplus.*,
+  clang-analyzer-deadcode.*,
+  clang-analyzer-nullability.*,
+  clang-analyzer-optin.performance.*,
+  clang-analyzer-optin.portability.*,
+  clang-analyzer-security.*,
+  clang-analyzer-unix.*,
+  clang-diagnostic-*,
+  cppcoreguidelines-*,
   cppcoreguidelines-*,
   -cppcoreguidelines-avoid-c-arrays,
   -cppcoreguidelines-avoid-magic-numbers,
@@ -33,18 +44,20 @@ Checks: >-
   -modernize-use-bool-literals,
   -modernize-use-nullptr,
   -modernize-use-trailing-return-type,
-  readability-non-const-parameter,
-  readability-redundant-*
-  -readability-redundant-access-specifiers,
-  readability-identifier-naming
-WarningsAsErrors: >-
-  clang-analyzer-*,
-  clang-diagnostic-*,
   performance-*,
   -performance-no-int-to-ptr,
+  readability-*,
+  -readability-braces-around-statements,
+  -readability-function-cognitive-complexity,
+  -readability-identifier-length,
+  -readability-magic-numbers,
+  -readability-redundant-access-specifiers,
+  -readability-simplify-boolean-expr,
+  -readability-uppercase-literal-suffix,
+WarningsAsErrors: >-
   readability-identifier-naming
 UseColor: true
-HeaderFilterRegex: '^src/(terminal.*)/.*\.(h|cpp)$'
+HeaderFilterRegex: 'src/(contour|crispy|text_shaper|vtpty|vtparser|vtbackend|vtrasterizer)/'
 AnalyzeTemporaryDtors: false
 FormatStyle:     none
 CheckOptions:
@@ -80,25 +93,25 @@ CheckOptions:
     value:           'NULL'
   - key:             modernize-use-default-member-init.UseAssignment
     value:           '1'
-  - key:   readability-identifier-naming.EnumCase
-    value: CamelCase
-  - key:   readability-identifier-naming.EnumConstantCase
-    value: CamelCase
-  - key:   readability-identifier-naming.ConstantMemberCase
-    value: CamelCase
-  - key:   readability-identifier-naming.ClassCase
-    value: CamelCase
-  - key:   readability-identifier-naming.ClassMemberCase
-    value: camelBack
-  - key:   readability-identifier-naming.PublicMemberPrefix
-    value: ''
-  - key:   readability-identifier-naming.PrivateMemberPrefix
-    value: '_'
-  - key:   readability-identifier-naming.ClassMethodCase
-    value: camelBack
-  - key:   readability-identifier-naming.ParameterCase
-    value: camelBack
-  - key:   readability-identifier-naming.ParameterPrefix
-    value: ''
-  - key:   readability-identifier-naming.ScopedEnumConstantCase
-    value: CamelCase
+  - key:             readability-identifier-naming.EnumCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.EnumConstantCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.ConstantMemberCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.ClassCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.ClassMemberCase
+    value:           camelBack
+  - key:             readability-identifier-naming.PublicMemberPrefix
+    value:           ''
+  - key:             readability-identifier-naming.PrivateMemberPrefix
+    value:           '_'
+  - key:             readability-identifier-naming.ClassMethodCase
+    value:           camelBack
+  - key:             readability-identifier-naming.ParameterCase
+    value:           camelBack
+  - key:             readability-identifier-naming.ParameterPrefix
+    value:           ''
+  - key:             readability-identifier-naming.ScopedEnumConstantCase
+    value:           CamelCase

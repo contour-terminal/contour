@@ -28,7 +28,7 @@
         #include <wmmintrin.h>
     #endif
 #elif defined(__aarch64__)
-    #include <crispy/sse2neon.h>
+    #include <sse2neon/sse2neon.h>
 // The following inline functions were borrowed from:
 // https://github.com/f1ed/emp/blob/master/emp-tool/utils/block.h
 inline __m128i _mm_aesimc_si128(__m128i a) noexcept
