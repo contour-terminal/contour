@@ -12,6 +12,8 @@ Checks: >-
   clang-analyzer-cplusplus.*,
   clang-analyzer-deadcode.*,
   clang-analyzer-nullability.*,
+  clang-analyzer-optin.cplusplus.*,
+  -clang-analyzer-optin.cplusplus.UninitializedObject,
   clang-analyzer-optin.performance.*,
   clang-analyzer-optin.portability.*,
   clang-analyzer-security.*,
@@ -48,14 +50,17 @@ Checks: >-
   -performance-no-int-to-ptr,
   readability-*,
   -readability-braces-around-statements,
+  -readability-else-after-return,
   -readability-function-cognitive-complexity,
   -readability-identifier-length,
+  -readability-implicit-bool-conversion,
   -readability-magic-numbers,
+  -readability-named-parameter,
   -readability-redundant-access-specifiers,
   -readability-simplify-boolean-expr,
   -readability-uppercase-literal-suffix,
-WarningsAsErrors: >-
-  readability-identifier-naming
+# WarningsAsErrors: >-
+#   readability-identifier-naming
 UseColor: true
 HeaderFilterRegex: 'src/(contour|crispy|text_shaper|vtpty|vtparser|vtbackend|vtrasterizer)/'
 AnalyzeTemporaryDtors: false

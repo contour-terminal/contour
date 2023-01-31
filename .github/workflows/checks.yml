@@ -88,6 +88,7 @@ jobs:
           BUILD_DIR="build" \
             CXX="clang++-14" \
             EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS \
+                               -DCMAKE_BUILD_TYPE=Debug \
                                -DCMAKE_INSTALL_PREFIX="/usr" \
                                -DCONTOUR_INSTALL_TOOLS=ON \
                                -DPEDANTIC_COMPILER=ON \
