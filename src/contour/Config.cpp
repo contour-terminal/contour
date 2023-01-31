@@ -140,6 +140,19 @@ namespace
         return terminal::RGBColor(_text);
     }
 
+    terminal::CellRGBColor parseCellColor(UsedKeys& usedKeys,
+                                          YAML::Node const& parentNode,
+                                          std::string const& parentPath,
+                                          std::string const& name,
+                                          terminal::CellRGBColor defaultValue)
+    {
+        auto colorNode = parentNode[name];
+        if (!colorNode || !colorNode.IsScalar())
+            return defaultValue;
+        usedKeys.emplace(parentPath + "." + name);
+        return parseCellColor(colorNode.as<string>());
+    }
+
     std::optional<terminal::RGBColorPair> parseRGBColorPair(UsedKeys& usedKeys,
                                                             string const& basePath,
                                                             YAML::Node const& baseNode,
@@ -189,16 +202,16 @@ namespace
 
         auto cellRGBColorAndAlphaPair = CellRGBColorAndAlphaPair {};
 
-        cellRGBColorAndAlphaPair.foreground = parseCellColor(node["foreground"].as<string>());
-        usedKeys.emplace(childPath + ".foreground");
+        cellRGBColorAndAlphaPair.foreground =
+            parseCellColor(usedKeys, node, childPath, "foreground", terminal::CellForegroundColor {});
         if (auto alpha = node["foreground_alpha"]; alpha && alpha.IsScalar())
         {
             usedKeys.emplace(childPath + ".foreground_alpha");
             cellRGBColorAndAlphaPair.foregroundAlpha = std::clamp(alpha.as<float>(), 0.0f, 1.0f);
         }
 
-        cellRGBColorAndAlphaPair.background = parseCellColor(node["background"].as<string>());
-        usedKeys.emplace(childPath + ".background");
+        cellRGBColorAndAlphaPair.background =
+            parseCellColor(usedKeys, node, childPath, "background", terminal::CellBackgroundColor {});
         if (auto alpha = node["background_alpha"]; alpha && alpha.IsScalar())
         {
             usedKeys.emplace(childPath + ".background_alpha");

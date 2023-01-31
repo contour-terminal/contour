@@ -108,6 +108,7 @@
         <ul>
           <li>Fixes normal mode motion `J` and `K` that got accidentally unimplemented and make it also available to visual mode.</li>
           <li>Fixes use of config `bypass_mouse_protocol_modifier` that was ignored.</li>
+          <li>Fixes abnormal termination on incomplete foreground/background color-pair specification.</li>
           <li>Adds normal mode motion `[[`, `]]`, `[]`, `][` mimmicking exactly what vim does.</li>
           <li>Adds normal mode motion `[m` and `]m` to jump line marks up/down.</li>
           <li>Adds normal mode motion `mm` to toggle the line mark at the current active cursor position.</li>
