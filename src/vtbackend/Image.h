@@ -69,7 +69,7 @@ class Image: public std::enable_shared_from_this<Image>
     ///
     /// @param data      RGBA buffer data
     /// @param pixelSize image dimensionss in pixels
-    Image(ImageId id, ImageFormat format, Data data, ImageSize pixelSize, OnImageRemove remover):
+    Image(ImageId id, ImageFormat format, Data data, ImageSize pixelSize, OnImageRemove remover) noexcept:
         id_ { id },
         format_ { format },
         data_ { std::move(data) },
@@ -83,8 +83,8 @@ class Image: public std::enable_shared_from_this<Image>
 
     Image(Image const&) = delete;
     Image& operator=(Image const&) = delete;
-    Image(Image&&) = default;
-    Image& operator=(Image&&) = default;
+    Image(Image&&) noexcept = default;
+    Image& operator=(Image&&) noexcept = default;
 
     constexpr ImageId id() const noexcept { return id_; }
     constexpr ImageFormat format() const noexcept { return format_; }
