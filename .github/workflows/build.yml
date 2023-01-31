@@ -378,10 +378,10 @@ jobs:
         run: sudo ./scripts/install-deps.sh
       - name: "Post-fix embedded dependency permissions."
         run: sudo find _deps/sources -exec chown $UID {} \;
-      - name: Set up GCC
+      - name: Install GCC
         if: ${{ startsWith(matrix.compiler, 'GCC') }}
         run: sudo apt install -y g++-${{ steps.extract_matrix.outputs.CC_VERSION }}
-      - name: Set up Clang
+      - name: Install Clang
         if: ${{ startsWith(matrix.compiler, 'Clang') }}
         run: sudo apt install -y clang-${{ steps.extract_matrix.outputs.CC_VERSION }}
       - name: "create build directory"
