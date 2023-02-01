@@ -50,26 +50,26 @@ namespace terminal
 
 struct ConPtySlave: public PtySlaveDummy
 {
-    HANDLE output_;
+    HANDLE _output;
 
-    explicit ConPtySlave(HANDLE output): output_ { output } {}
+    explicit ConPtySlave(HANDLE output): _output { output } {}
 
     int write(std::string_view text) noexcept override
     {
         DWORD nwritten {};
-        if (WriteFile(output_, text.data(), static_cast<DWORD>(text.size()), &nwritten, nullptr))
+        if (WriteFile(_output, text.data(), static_cast<DWORD>(text.size()), &nwritten, nullptr))
             return static_cast<int>(nwritten);
         else
             return -1;
     }
 };
 
-ConPty::ConPty(PageSize const& windowSize): size_ { windowSize }
+ConPty::ConPty(PageSize const& windowSize): _size { windowSize }
 {
-    master_ = INVALID_HANDLE_VALUE;
-    input_ = INVALID_HANDLE_VALUE;
-    output_ = INVALID_HANDLE_VALUE;
-    buffer_.resize(10240);
+    _master = INVALID_HANDLE_VALUE;
+    _input = INVALID_HANDLE_VALUE;
+    _output = INVALID_HANDLE_VALUE;
+    _buffer.resize(10240);
 }
 
 ConPty::~ConPty()
@@ -80,24 +80,24 @@ ConPty::~ConPty()
 
 bool ConPty::isClosed() const noexcept
 {
-    return master_ == INVALID_HANDLE_VALUE;
+    return _master == INVALID_HANDLE_VALUE;
 }
 
 void ConPty::start()
 {
     PtyLog()("Starting ConPTY");
-    assert(!slave_);
+    assert(!_slave);
 
-    slave_ = make_unique<ConPtySlave>(output_);
+    _slave = make_unique<ConPtySlave>(_output);
 
     HANDLE hPipePTYIn { INVALID_HANDLE_VALUE };
     HANDLE hPipePTYOut { INVALID_HANDLE_VALUE };
 
     // Create the pipes to which the ConPty will connect to
-    if (!CreatePipe(&hPipePTYIn, &output_, NULL, 0))
+    if (!CreatePipe(&hPipePTYIn, &_output, NULL, 0))
         throw runtime_error { GetLastErrorAsString() };
 
-    if (!CreatePipe(&input_, &hPipePTYOut, NULL, 0))
+    if (!CreatePipe(&_input, &hPipePTYOut, NULL, 0))
     {
         CloseHandle(hPipePTYIn);
         throw runtime_error { GetLastErrorAsString() };
@@ -105,7 +105,7 @@ void ConPty::start()
 
     // Create the Pseudo Console of the required size, attached to the PTY-end of the pipes
     HRESULT hr = CreatePseudoConsole(
-        { unbox<SHORT>(size_.columns), unbox<SHORT>(size_.lines) }, hPipePTYIn, hPipePTYOut, 0, &master_);
+        { unbox<SHORT>(_size.columns), unbox<SHORT>(_size.lines) }, hPipePTYIn, hPipePTYOut, 0, &_master);
 
     if (hPipePTYIn != INVALID_HANDLE_VALUE)
         CloseHandle(hPipePTYIn);
@@ -120,24 +120,24 @@ void ConPty::start()
 void ConPty::close()
 {
     PtyLog()("ConPty.close()");
-    auto const _ = std::lock_guard { mutex_ };
+    auto const _ = std::lock_guard { _mutex };
 
-    if (master_ != INVALID_HANDLE_VALUE)
+    if (_master != INVALID_HANDLE_VALUE)
     {
-        ClosePseudoConsole(master_);
-        master_ = INVALID_HANDLE_VALUE;
+        ClosePseudoConsole(_master);
+        _master = INVALID_HANDLE_VALUE;
     }
 
-    if (input_ != INVALID_HANDLE_VALUE)
+    if (_input != INVALID_HANDLE_VALUE)
     {
-        CloseHandle(input_);
-        input_ = INVALID_HANDLE_VALUE;
+        CloseHandle(_input);
+        _input = INVALID_HANDLE_VALUE;
     }
 
-    if (output_ != INVALID_HANDLE_VALUE)
+    if (_output != INVALID_HANDLE_VALUE)
     {
-        CloseHandle(output_);
-        output_ = INVALID_HANDLE_VALUE;
+        CloseHandle(_output);
+        _output = INVALID_HANDLE_VALUE;
     }
 }
 
@@ -151,7 +151,7 @@ Pty::ReadResult ConPty::read(crispy::BufferObject<char>& buffer,
     auto const n = static_cast<DWORD>(min(size, buffer.bytesAvailable()));
 
     DWORD nread {};
-    if (!ReadFile(input_, buffer.hotEnd(), n, &nread, nullptr))
+    if (!ReadFile(_input, buffer.hotEnd(), n, &nread, nullptr))
         return nullopt;
 
     return { tuple { string_view { buffer.hotEnd(), nread }, false } };
@@ -166,7 +166,7 @@ void ConPty::wakeupReader()
 int ConPty::write(char const* buf, size_t size)
 {
     DWORD nwritten {};
-    if (WriteFile(output_, buf, static_cast<DWORD>(size), &nwritten, nullptr))
+    if (WriteFile(_output, buf, static_cast<DWORD>(size), &nwritten, nullptr))
         return static_cast<int>(nwritten);
     else
         return -1;
@@ -174,12 +174,12 @@ int ConPty::write(char const* buf, size_t size)
 
 PageSize ConPty::pageSize() const noexcept
 {
-    return size_;
+    return _size;
 }
 
 void ConPty::resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixels)
 {
-    if (!slave_)
+    if (!_slave)
         return;
 
     (void) pixels; // TODO Can we pass that information, too?
@@ -188,16 +188,16 @@ void ConPty::resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixel
     coords.X = unbox<unsigned short>(cells.columns);
     coords.Y = unbox<unsigned short>(cells.lines);
 
-    HRESULT const result = ResizePseudoConsole(master_, coords);
+    HRESULT const result = ResizePseudoConsole(_master, coords);
     if (result != S_OK)
         throw runtime_error { GetLastErrorAsString() };
 
-    size_ = cells;
+    _size = cells;
 }
 
 PtySlave& ConPty::slave() noexcept
 {
-    return *slave_;
+    return *_slave;
 }
 
 } // namespace terminal

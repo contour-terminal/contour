@@ -40,35 +40,35 @@ class MockPty: public Pty
     void close() override;
     [[nodiscard]] bool isClosed() const noexcept override;
 
-    [[nodiscard]] std::string& stdinBuffer() noexcept { return inputBuffer_; }
-    [[nodiscard]] std::string const& stdinBuffer() const noexcept { return inputBuffer_; }
+    [[nodiscard]] std::string& stdinBuffer() noexcept { return _inputBuffer; }
+    [[nodiscard]] std::string const& stdinBuffer() const noexcept { return _inputBuffer; }
 
     [[nodiscard]] bool isStdoutDataAvailable() const noexcept
     {
-        return outputReadOffset_ < outputBuffer_.size();
+        return _outputReadOffset < _outputBuffer.size();
     }
 
     void appendStdOutBuffer(std::string_view that)
     {
-        if (outputReadOffset_ == outputBuffer_.size())
+        if (_outputReadOffset == _outputBuffer.size())
         {
-            outputReadOffset_ = 0;
-            outputBuffer_ = that;
+            _outputReadOffset = 0;
+            _outputBuffer = that;
         }
         else
         {
-            outputBuffer_ += that;
+            _outputBuffer += that;
         }
     }
 
   private:
-    PageSize pageSize_;
-    std::optional<crispy::ImageSize> pixelSize_;
-    std::string inputBuffer_;
-    std::string outputBuffer_;
-    std::size_t outputReadOffset_ = 0;
-    bool closed_ = false;
-    PtySlaveDummy slave_;
+    PageSize _pageSize;
+    std::optional<crispy::ImageSize> _pixelSize;
+    std::string _inputBuffer;
+    std::string _outputBuffer;
+    std::size_t _outputReadOffset = 0;
+    bool _closed = false;
+    PtySlaveDummy _slave;
 };
 
 } // namespace terminal

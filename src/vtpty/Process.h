@@ -113,7 +113,7 @@ class [[nodiscard]] Process: public Pty
 
   private:
     struct Private;
-    std::unique_ptr<Private, void (*)(Private*)> d;
+    std::unique_ptr<Private, void (*)(Private*)> _d;
 };
 
 } // namespace terminal

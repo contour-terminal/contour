@@ -24,22 +24,22 @@ namespace terminal
 
 void MockViewPty::setReadData(std::string_view data)
 {
-    assert(outputBuffer_.empty());
-    outputBuffer_ = data;
+    assert(_outputBuffer.empty());
+    _outputBuffer = data;
 }
 
 PtySlave& MockViewPty::slave() noexcept
 {
-    return slave_;
+    return _slave;
 }
 
 optional<tuple<string_view, bool>> MockViewPty::read(crispy::BufferObject<char>& storage,
                                                      std::chrono::milliseconds /*timeout*/,
                                                      size_t size)
 {
-    auto const n = min(min(outputBuffer_.size(), storage.bytesAvailable()), size);
-    auto result = storage.writeAtEnd(outputBuffer_.substr(0, n));
-    outputBuffer_.remove_prefix(n);
+    auto const n = min(min(_outputBuffer.size(), storage.bytesAvailable()), size);
+    auto result = storage.writeAtEnd(_outputBuffer.substr(0, n));
+    _outputBuffer.remove_prefix(n);
     return { tuple { string_view(result.data(), result.size()), false } };
 }
 
@@ -51,34 +51,34 @@ void MockViewPty::wakeupReader()
 int MockViewPty::write(char const* buf, size_t size)
 {
     // Writing into stdin.
-    inputBuffer_ += std::string_view(buf, size);
+    _inputBuffer += std::string_view(buf, size);
     return static_cast<int>(size);
 }
 
 terminal::PageSize MockViewPty::pageSize() const noexcept
 {
-    return pageSize_;
+    return _pageSize;
 }
 
 void MockViewPty::resizeScreen(terminal::PageSize cells, std::optional<crispy::ImageSize> pixels)
 {
-    pageSize_ = cells;
-    pixelSize_ = pixels;
+    _pageSize = cells;
+    _pixelSize = pixels;
 }
 
 void MockViewPty::start()
 {
-    closed_ = false;
+    _closed = false;
 }
 
 void MockViewPty::close()
 {
-    closed_ = true;
+    _closed = true;
 }
 
 bool MockViewPty::isClosed() const noexcept
 {
-    return closed_;
+    return _closed;
 }
 
 } // namespace terminal

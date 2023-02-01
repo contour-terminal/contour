@@ -51,10 +51,10 @@ struct UnixPipe
     void close();
 };
 
-class UnixPty: public Pty
+class UnixPty final: public Pty
 {
   private:
-    class Slave: public PtySlave
+    class Slave final: public PtySlave
     {
       public:
         int _slaveFd;
@@ -75,7 +75,7 @@ class UnixPty: public Pty
         PtySlaveHandle slave;
     };
 
-    UnixPty(PageSize windowSize, std::optional<crispy::ImageSize> pixels);
+    UnixPty(PageSize pageSize, std::optional<crispy::ImageSize> pixels);
     ~UnixPty() override;
 
     PtySlave& slave() noexcept override;
@@ -99,8 +99,8 @@ class UnixPty: public Pty
 
     [[nodiscard]] bool started() const noexcept { return _masterFd != -1; }
 
-    int _masterFd;
-    std::array<int, 2> _pipe;
+    int _masterFd = -1;
+    std::array<int, 2> _pipe = { -1, -1 };
     UnixPipe _stdoutFastPipe;
     PageSize _pageSize;
     std::optional<crispy::ImageSize> _pixels;

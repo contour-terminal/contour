@@ -176,7 +176,7 @@ Process::Process(string const& path,
                  Environment const& env,
                  bool escapeSandbox,
                  std::unique_ptr<Pty> pty):
-    d(new Private { path, args, cwd, env, std::move(pty) }, [](Private* p) { delete p; })
+    _d(new Private { path, args, cwd, env, std::move(pty) }, [](Private* p) { delete p; })
 {
     crispy::ignore_unused(escapeSandbox);
 }
@@ -188,25 +188,25 @@ bool Process::isFlatpak()
 
 void Process::start()
 {
-    Require(static_cast<ConPty const*>(d->pty.get()));
+    Require(static_cast<ConPty const*>(_d->pty.get()));
 
-    d->pty->start();
+    _d->pty->start();
 
-    initializeStartupInfoAttachedToPTY(d->startupInfo, static_cast<ConPty&>(*d->pty));
+    initializeStartupInfoAttachedToPTY(_d->startupInfo, static_cast<ConPty&>(*_d->pty));
 
-    string cmd = d->path;
-    for (size_t i = 0; i < d->args.size(); ++i)
+    string cmd = _d->path;
+    for (size_t i = 0; i < _d->args.size(); ++i)
     {
         cmd += ' ';
-        if (d->args[i].find(' ') != std::string::npos)
-            cmd += '\"' + d->args[i] + '\"';
+        if (_d->args[i].find(' ') != std::string::npos)
+            cmd += '\"' + _d->args[i] + '\"';
         else
-            cmd += d->args[i];
+            cmd += _d->args[i];
     }
 
     // In case of PATH environment variable, extend it rather then overwriting it.
-    auto env = d->env;
-    for (auto const& [name, value]: d->env)
+    auto env = _d->env;
+    for (auto const& [name, value]: _d->env)
     {
         if (crispy::toUpper(name) == "PATH")
         {
@@ -218,7 +218,7 @@ void Process::start()
     }
     auto const envScope = InheritingEnvBlock { env };
 
-    auto const cwd = d->cwd.generic_string();
+    auto const cwd = _d->cwd.generic_string();
     auto const cwdPtr = !cwd.empty() ? cwd.c_str() : nullptr;
 
     PtyLog()("Creating process for command line: {}", cmd);
@@ -231,43 +231,43 @@ void Process::start()
                                  EXTENDED_STARTUPINFO_PRESENT,   // Creation flags
                                  nullptr,                        // Use parent's environment block
                                  const_cast<LPSTR>(cwdPtr),      // Use parent's starting directory
-                                 &d->startupInfo.StartupInfo,    // Pointer to STARTUPINFO
-                                 &d->processInfo);               // Pointer to PROCESS_INFORMATION
+                                 &_d->startupInfo.StartupInfo,   // Pointer to STARTUPINFO
+                                 &_d->processInfo);              // Pointer to PROCESS_INFORMATION
     if (!success)
         throw runtime_error { "Could not create process. "s + getLastErrorAsString() };
 
-    d->exitWatcher = std::thread([this]() {
+    _d->exitWatcher = std::thread([this]() {
         (void) wait();
         PtyLog()("Process terminated with exit code {}.", checkStatus().value());
-        d->pty->close();
+        _d->pty->close();
     });
 }
 
 Pty& Process::pty() noexcept
 {
-    return *d->pty;
+    return *_d->pty;
 }
 
 Pty const& Process::pty() const noexcept
 {
-    return *d->pty;
+    return *_d->pty;
 }
 
 Process::~Process()
 {
-    if (d->exitWatcher)
-        d->exitWatcher.value().join();
+    if (_d->exitWatcher)
+        _d->exitWatcher.value().join();
 
-    CloseHandle(d->processInfo.hThread);
-    CloseHandle(d->processInfo.hProcess);
+    CloseHandle(_d->processInfo.hThread);
+    CloseHandle(_d->processInfo.hProcess);
 
-    DeleteProcThreadAttributeList(d->startupInfo.lpAttributeList);
-    free(d->startupInfo.lpAttributeList);
+    DeleteProcThreadAttributeList(_d->startupInfo.lpAttributeList);
+    free(_d->startupInfo.lpAttributeList);
 }
 
 optional<Process::ExitStatus> Process::checkStatus() const
 {
-    return d->checkStatus(false);
+    return _d->checkStatus(false);
 }
 
 optional<Process::ExitStatus> Process::Private::checkStatus(bool waitForExit) const
@@ -296,12 +296,12 @@ void Process::terminate(TerminationHint terminationHint)
     if (!alive())
         return;
 
-    TerminateProcess(d->pid, 1);
+    TerminateProcess(_d->pid, 1);
 }
 
 Process::ExitStatus Process::wait()
 {
-    return *d->checkStatus(true);
+    return *_d->checkStatus(true);
 }
 
 vector<string> Process::loginShell(bool escapeSandbox)

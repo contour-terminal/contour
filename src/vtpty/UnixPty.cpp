@@ -84,7 +84,9 @@ namespace
 
         for (;;)
         {
-            fd_set rfd, wfd, efd;
+            fd_set rfd;
+            fd_set wfd;
+            fd_set efd;
             FD_ZERO(&rfd);
             FD_ZERO(&wfd);
             FD_ZERO(&efd);
@@ -292,12 +294,7 @@ int UnixPty::Slave::write(std::string_view text) noexcept
 // }}}
 
 UnixPty::UnixPty(PageSize pageSize, optional<crispy::ImageSize> pixels):
-    // clang-format off
-    _masterFd { -1 },
-    _pipe { -1, -1 },
-    _pageSize { pageSize },
-    _pixels { pixels },
-    _slave { }
+    _pageSize { pageSize }, _pixels { pixels }
 {
 }
 
@@ -307,7 +304,6 @@ void UnixPty::start()
     _masterFd = unbox<int>(handles.master);
     _slave = make_unique<Slave>(handles.slave);
 
-    // clang-format on
     if (!detail::setFileFlags(_masterFd, O_CLOEXEC | O_NONBLOCK))
         throw runtime_error { "Failed to configure PTY. "s + strerror(errno) };
 
@@ -387,14 +383,14 @@ optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
     return string_view { target, static_cast<size_t>(rv) };
 }
 
-Pty::ReadResult UnixPty::read(crispy::BufferObject<char>& sink,
+Pty::ReadResult UnixPty::read(crispy::BufferObject<char>& storage,
                               std::chrono::milliseconds timeout,
                               size_t size)
 {
     if (int fd = waitForReadable(_masterFd, _stdoutFastPipe.reader(), _pipe[0], timeout); fd != -1)
     {
-        auto const _l = scoped_lock { sink };
-        if (auto x = readSome(fd, sink.hotEnd(), min(size, sink.bytesAvailable())))
+        auto const _l = scoped_lock { storage };
+        if (auto x = readSome(fd, storage.hotEnd(), min(size, storage.bytesAvailable())))
             return { tuple { x.value(), fd == _stdoutFastPipe.reader() } };
     }
 
@@ -407,7 +403,9 @@ int UnixPty::write(char const* buf, size_t size)
     tv.tv_sec = 1;
     tv.tv_usec = 0;
 
-    fd_set rfd, wfd, efd;
+    fd_set rfd;
+    fd_set wfd;
+    fd_set efd;
     FD_ZERO(&rfd);
     FD_ZERO(&wfd);
     FD_ZERO(&efd);
