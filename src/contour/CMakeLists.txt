@@ -118,7 +118,7 @@ elseif(APPLE)
     )
 endif()
 
-target_link_libraries(contour terminal yaml-cpp)
+target_link_libraries(contour vtbackend yaml-cpp)
 if(FREEBSD)
     # FreeBSD does not find yaml-cpp in /usr/local but weirdly everything else.
     target_link_directories(contour PUBLIC "/usr/local/lib")

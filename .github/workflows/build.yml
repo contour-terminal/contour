@@ -204,7 +204,7 @@ jobs:
             cmake --build build/ -j2
             ./build/src/crispy/crispy_test
             ./build/src/vtparser/vtparser_test
-            ./build/src/vtbackend/terminal_test
+            ./build/src/vtbackend/vtbackend_test
             rm -rf _deps build
 
   osx_qt6:
@@ -243,7 +243,7 @@ jobs:
       - name: "test: vtparser"
         run: ./build/src/vtparser/vtparser_test
       - name: "test: libterminal"
-        run: ./build/src/vtbackend/terminal_test
+        run: ./build/src/vtbackend/vtbackend_test
       # - name: "Create Package(s)"
       #   run: |
       #     set -ex
@@ -305,7 +305,7 @@ jobs:
       - name: "test: vtparser"
         run: .\build\src\vtparser\Release\vtparser_test.exe
       - name: "test: libterminal"
-        run: .\build\src\vtbackend\Release\terminal_test.exe
+        run: .\build\src\vtbackend\Release\vtbackend_test.exe
       - name: "Create Package(s)"
         shell: powershell
         run: |
@@ -413,7 +413,7 @@ jobs:
       - name: "test: vtparser"
         run: ./build/src/vtparser/vtparser_test
       - name: "test: libterminal"
-        run: ./build/src/vtbackend/terminal_test
+        run: ./build/src/vtbackend/vtbackend_test
       - name: "Upload unit tests"
         if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
         uses: actions/upload-artifact@v3
@@ -422,7 +422,7 @@ jobs:
           path: |
             build/src/crispy/crispy_test
             build/src/vtparser/vtparser_test
-            build/src/vtbackend/terminal_test
+            build/src/vtbackend/vtbackend_test
             build/src/vtbackend/bench-headless
             test/images
           retention-days: 1
@@ -485,7 +485,7 @@ jobs:
       - name: "test: vtparser"
         run: ./build/src/vtparser/vtparser_test
       - name: "test: libterminal"
-        run: ./build/src/vtbackend/terminal_test
+        run: ./build/src/vtbackend/vtbackend_test
       - name: "linuxdeploy: Creating AppImage"
         run: |
           set -ex
@@ -573,7 +573,7 @@ jobs:
       - name: "test: vtparser"
         run: ./build/src/vtparser/vtparser_test
       - name: "test: libterminal"
-        run: ./build/src/vtbackend/terminal_test
+        run: ./build/src/vtbackend/vtbackend_test
       - name: "CPack: Creating DEB package"
         run: |
           set -ex
@@ -637,7 +637,7 @@ jobs:
       - name: "test: vtparser (via valgrind)"
         run: valgrind --error-exitcode=64 ./build/src/vtparser/vtparser_test
       - name: "test: libterminal (via valgrind)"
-        run: valgrind --error-exitcode=64 ./build/src/vtbackend/terminal_test
+        run: valgrind --error-exitcode=64 ./build/src/vtbackend/vtbackend_test
       - name: "Delete artifact: contour-ubuntu2204-tests"
         uses: geekyeggo/delete-artifact@v2
         with:

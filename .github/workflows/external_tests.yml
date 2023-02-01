@@ -109,7 +109,7 @@ jobs:
     - name: "test: crispy"
       run: ./build/src/crispy/crispy_test
     - name: "test: libterminal"
-      run: ./build/src/vtbackend/terminal_test
+      run: ./build/src/vtbackend/vtbackend_test
     - name: "CPack: Creating DEB package"
       run: |
         set -ex

@@ -13,7 +13,7 @@ option(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER "Enables caching the pointer to th
 # But it's currently disabled by default as I am not fully satisfied with it yet.
 option(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE "Updates the render buffer within the terminal thread if set to ON (otherwise the render buffer is actively refreshed in the render thread)." OFF)
 
-set(terminal_HEADERS
+set(vtbackend_HEADERS
     Capabilities.h
     cell/CellConcept.h
     cell/CellConfig.h
@@ -49,7 +49,7 @@ set(terminal_HEADERS
     primitives.h
 )
 
-set(terminal_SOURCES
+set(vtbackend_SOURCES
     Capabilities.cpp
     cell/CompactCell.cpp
     Charset.cpp
@@ -80,9 +80,9 @@ set(terminal_SOURCES
     primitives.cpp
 )
 
-add_library(terminal STATIC ${terminal_SOURCES} ${terminal_HEADERS})
-set_target_properties(terminal PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
-target_compile_definitions(terminal PRIVATE
+add_library(vtbackend STATIC ${vtbackend_SOURCES} ${vtbackend_HEADERS})
+set_target_properties(vtbackend PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
+target_compile_definitions(vtbackend PRIVATE
     LIBTERMINAL_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
     LIBTERMINAL_VERSION_MINOR=${PROJECT_VERSION_MINOR}
     LIBTERMINAL_VERSION_PATCH=${PROJECT_VERSION_PATCH}
@@ -90,29 +90,29 @@ target_compile_definitions(terminal PRIVATE
     LIBTERMINAL_NAME="${PROJECT_NAME}"
 )
 
-target_include_directories(terminal PUBLIC
+target_include_directories(vtbackend PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
 )
-target_link_libraries(terminal PUBLIC vtparser vtpty crispy::core fmt::fmt-header-only range-v3::range-v3 Threads::Threads Microsoft.GSL::GSL)
+target_link_libraries(vtbackend PUBLIC vtparser vtpty crispy::core fmt::fmt-header-only range-v3::range-v3 Threads::Threads Microsoft.GSL::GSL)
 if(LIBTERMINAL_LOG_TRACE)
-    target_compile_definitions(terminal PUBLIC LIBTERMINAL_LOG_TRACE=1)
+    target_compile_definitions(vtbackend PUBLIC LIBTERMINAL_LOG_TRACE=1)
 endif()
 if(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER)
-    target_compile_definitions(terminal PUBLIC LIBTERMINAL_CACHE_CURRENT_LINE_POINTER=1)
+    target_compile_definitions(vtbackend PUBLIC LIBTERMINAL_CACHE_CURRENT_LINE_POINTER=1)
 endif()
 if(CONTOUR_PERF_STATS)
-    target_compile_definitions(terminal PUBLIC CONTOUR_PERF_STATS=1)
+    target_compile_definitions(vtbackend PUBLIC CONTOUR_PERF_STATS=1)
 endif()
 
 if(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE AND NOT(WIN32))
-    target_compile_definitions(terminal PUBLIC LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE=1)
+    target_compile_definitions(vtbackend PUBLIC LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE=1)
 endif()
 
 # ----------------------------------------------------------------------------
 if(LIBTERMINAL_TESTING)
     enable_testing()
-    add_executable(terminal_test
+    add_executable(vtbackend_test
         test_main.cpp
         Capabilities_test.cpp
         Color_test.cpp
@@ -127,8 +127,8 @@ if(LIBTERMINAL_TESTING)
         SixelParser_test.cpp
         ViCommands_test.cpp
     )
-    target_link_libraries(terminal_test fmt::fmt-header-only Catch2::Catch2 terminal)
-    add_test(terminal_test ./terminal_test)
+    target_link_libraries(vtbackend_test fmt::fmt-header-only Catch2::Catch2 vtbackend)
+    add_test(vtbackend_test ./vtbackend_test)
 
     add_executable(bench-headless bench-headless.cpp)
     target_compile_definitions(bench-headless PRIVATE
@@ -138,7 +138,7 @@ if(LIBTERMINAL_TESTING)
         CONTOUR_VERSION_STRING="${CONTOUR_VERSION_STRING}"
         CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
     )
-    target_link_libraries(bench-headless fmt::fmt-header-only terminal termbench)
+    target_link_libraries(bench-headless fmt::fmt-header-only vtbackend termbench)
 
     if(CONTOUR_INSTALL_TOOLS)
         if(WIN32)
