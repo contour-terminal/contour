@@ -62,7 +62,8 @@ endif()
 add_library(contour_no_SA STATIC ${QT_RESOURCES})
 set_target_properties(contour_no_SA PROPERTIES CXX_CLANG_TIDY "" LINKER_LANGUAGE CXX)
 
-add_executable(contour ${contour_SRCS} $<TARGET_OBJECTS:contour_no_SA>)
+add_executable(contour ${contour_SRCS})
+target_link_libraries(contour contour_no_SA)
 target_include_directories(contour PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
 target_compile_definitions(contour PRIVATE
     CONTOUR_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
