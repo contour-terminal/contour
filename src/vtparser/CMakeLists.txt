@@ -9,6 +9,10 @@ add_library(vtparser STATIC
 )
 set_target_properties(vtparser PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
 target_link_libraries(vtparser PUBLIC crispy::core fmt::fmt-header-only Microsoft.GSL::GSL)
+target_include_directories(vtparser PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
+)
 
 option(VTPARSER_TESTING "Enables building of unittests for vtparser [default: ON]" ON)
 if(VTPARSER_TESTING)

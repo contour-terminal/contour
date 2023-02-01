@@ -32,7 +32,7 @@ class ParserEvents
     /**
      * Invoked on parsing errors (UTF-8 decoding error or parser state errors).
      */
-    virtual void error(std::string_view const& _errorString) = 0;
+    virtual void error(std::string_view const& errorString) = 0;
 
     /**
      * This action only occurs in ground state. The current code should be mapped to a glyph
@@ -40,14 +40,14 @@ class ParserEvents
      * be displayed. 20 (SP) and 7F (DEL) have special behaviour in later VT series, as
      * described in ground.
      */
-    virtual void print(char32_t _text) = 0;
+    virtual void print(char32_t text) = 0;
 
     /**
      * Optimization that passes in ASCII chars between [0x20 .. 0x7F].
      *
      * @param cellCount reflects the sum of the East Asian Width attribute for all passed codepoints.
      */
-    virtual size_t print(std::string_view _chars, size_t cellCount) = 0;
+    virtual size_t print(std::string_view chars, size_t cellCount) = 0;
 
     /**
      * Returns the number of terminal columns (cells) that are still available in the current line
@@ -63,7 +63,7 @@ class ParserEvents
      * effects, including changing the cursor position, suspending or resuming communications or
      * changing the shift states in effect. There are no parameters to this action.
      */
-    virtual void execute(char _controlCode) = 0;
+    virtual void execute(char controlCode) = 0;
 
     /**
      * This action causes the current private flag, intermediate characters, final character and
@@ -81,12 +81,12 @@ class ParserEvents
      * strings with one. If more than two intermediate characters arrive, the parser can just
      * flag this so that the dispatch can be turned into a null operation.
      */
-    virtual void collect(char _char) = 0;
+    virtual void collect(char value) = 0;
 
     /**
      * Collects the leading private marker, such as the '?' in `CSI ? Ps h`
      */
-    virtual void collectLeader(char _leader) = 0;
+    virtual void collectLeader(char leader) = 0;
 
     /**
      * This action collects the characters of a parameter string for a control sequence or
@@ -96,7 +96,7 @@ class ParserEvents
      * string, although a maximum of 16 parameters need be stored. If more than 16 parameters
      * arrive, all the extra parameters are silently ignored.
      */
-    virtual void param(char _char) = 0;
+    virtual void param(char value) = 0;
 
     virtual void paramDigit(char /*_char*/) = 0;
     virtual void paramSeparator() = 0;
@@ -107,7 +107,7 @@ class ParserEvents
      * to be executed from the intermediate character(s) and final character, and execute it.
      * The intermediate characters are available because collect stored them as they arrived.
      */
-    virtual void dispatchESC(char _function) = 0;
+    virtual void dispatchESC(char function) = 0;
 
     /**
      * A final character has arrived, so determine the control function to be executed from
@@ -115,7 +115,7 @@ class ParserEvents
      * the parameter list. The private marker and intermediate characters are available because
      * collect stored them as they arrived.
      */
-    virtual void dispatchCSI(char _function) = 0;
+    virtual void dispatchCSI(char function) = 0;
 
     /**
      * When the control function OSC (Operating System Command) is recognised,
@@ -131,7 +131,7 @@ class ParserEvents
      * This action passes characters from the control string to the OSC Handler as they arrive.
      * There is therefore no need to buffer characters until the end of the control string is recognised.
      */
-    virtual void putOSC(char _char) = 0;
+    virtual void putOSC(char value) = 0;
 
     /**
      * This action is called when the OSC string is terminated by ST, CAN, SUB or ESC,
@@ -147,14 +147,14 @@ class ParserEvents
      * handler function will be called by the put action for every character in the control
      * string as it arrives.
      */
-    virtual void hook(char _function) = 0;
+    virtual void hook(char function) = 0;
 
     /**
      * This action passes characters from the data string part of a device control string to a
      * handler that has previously been selected by the hook action. C0 controls are also passed
      * to the handler.
      */
-    virtual void put(char _char) = 0;
+    virtual void put(char value) = 0;
 
     /**
      * When a device control string is terminated by ST, CAN, SUB or ESC, this action calls the

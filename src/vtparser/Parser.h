@@ -34,6 +34,7 @@
 namespace terminal::parser
 {
 
+// NOLINTBEGIN(readability-identifier-naming)
 enum class State : uint8_t
 {
     /// Internal state to signal that this state doesn't exist (or hasn't been set).
@@ -208,6 +209,7 @@ enum class State : uint8_t
      */
     IgnoreUntilST,
 };
+// NOLINTEND(readability-identifier-naming)
 
 /// Actions can be invoked due to various reasons.
 enum class ActionClass
@@ -286,6 +288,8 @@ enum class Action : uint8_t
     ParamSeparator,    // ';'
     ParamSubSeparator, // ':'
 
+    // NOLINTBEGIN(readability-identifier-naming)
+
     /**
      * The final character of an escape sequence has arrived, so determined the control function
      * to be executed from the intermediate character(s) and final character, and execute it.
@@ -362,6 +366,7 @@ enum class Action : uint8_t
      */
     GroundStart,
 };
+// NOLINTEND(readability-identifier-naming)
 
 constexpr State& operator++(State& s) noexcept
 {
@@ -480,9 +485,9 @@ struct formatter<terminal::parser::State>
     }
 
     template <typename FormatContext>
-    auto format(terminal::parser::State _state, FormatContext& _ctx)
+    auto format(terminal::parser::State state, FormatContext& ctx)
     {
-        return fmt::format_to(_ctx.out(), "{}", terminal::parser::to_string(_state));
+        return fmt::format_to(ctx.out(), "{}", terminal::parser::to_string(state));
     }
 };
 
@@ -495,10 +500,10 @@ struct formatter<terminal::parser::ActionClass>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::parser::ActionClass _value, FormatContext& _ctx)
+    auto format(terminal::parser::ActionClass value, FormatContext& ctx)
     {
         auto constexpr mappings = std::array<std::string_view, 4> { "Enter", "Event", "Leave", "Transition" };
-        return fmt::format_to(_ctx.out(), "{}", mappings.at(static_cast<unsigned>(_value)));
+        return fmt::format_to(ctx.out(), "{}", mappings.at(static_cast<unsigned>(value)));
     }
 };
 
@@ -511,9 +516,9 @@ struct formatter<terminal::parser::Action>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::parser::Action _value, FormatContext& _ctx)
+    auto format(terminal::parser::Action value, FormatContext& ctx)
     {
-        return fmt::format_to(_ctx.out(), "{}", terminal::parser::to_string(_value));
+        return fmt::format_to(ctx.out(), "{}", terminal::parser::to_string(value));
     }
 };
 
@@ -536,24 +541,24 @@ template <typename EventListener, bool TraceStateChanges = false>
 // TODO: C++20 concepts: EventListener must satisfy the original ParserEvents interface
 class Parser
 {
-  private:
-    Parser() = default;
+  public:
     friend EventListener;
 
-  public:
+    Parser() = default;
+
+    explicit Parser(EventListener& listener): _eventListener { listener } {}
+
     using ParseError = std::function<void(std::string const&)>;
     using iterator = uint8_t const*;
-
-    explicit Parser(EventListener& _listener): eventListener_ { _listener } {}
 
     /// Parses the input string in UTF-8 encoding and emits VT events while processing.
     /// With respect to text, only up to @c EventListener::maxBulkTextSequenceWidth() UTF-32 codepoints will
     /// be processed.
-    void parseFragment(gsl::span<char const> s);
+    void parseFragment(gsl::span<char const> data);
 
-    [[nodiscard]] State state() const noexcept { return state_; }
+    [[nodiscard]] State state() const noexcept { return _state; }
 
-    [[nodiscard]] char32_t precedingGraphicCharacter() const noexcept { return scanState_.lastCodepointHint; }
+    [[nodiscard]] char32_t precedingGraphicCharacter() const noexcept { return _scanState.lastCodepointHint; }
 
     void printUtf8Byte(char ch);
 
@@ -566,16 +571,16 @@ class Parser
         FallbackToFSM
     };
 
-    std::tuple<ProcessKind, size_t> parseBulkText(char const* input, char const* end) noexcept;
-    void processOnceViaStateMachine(uint8_t input);
+    std::tuple<ProcessKind, size_t> parseBulkText(char const* begin, char const* end) noexcept;
+    void processOnceViaStateMachine(uint8_t ch);
 
-    void handle(ActionClass _actionClass, Action _action, uint8_t _char);
+    void handle(ActionClass actionClass, Action action, uint8_t codepoint);
 
     // private properties
     //
-    State state_ = State::Ground;
-    EventListener& eventListener_;
-    unicode::scan_state scanState_ {};
+    State _state = State::Ground;
+    EventListener& _eventListener;
+    unicode::scan_state _scanState {};
 };
 
 /// @returns parsed tuple with OSC code and offset to first data parameter byte.
@@ -601,7 +606,7 @@ inline std::pair<int, size_t> extractCodePrefix(T const& data) noexcept
     return std::pair { code, i };
 }
 
-void parserTableDot(std::ostream& _os);
+void parserTableDot(std::ostream& os);
 
 } // end namespace terminal::parser
 

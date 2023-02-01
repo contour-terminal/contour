@@ -35,9 +35,9 @@ auto const inline VTTraceParserLog =
 namespace
 {
     // clang-format off
-    constexpr uint8_t operator"" _b(unsigned long long _value)
+    constexpr uint8_t operator"" _b(unsigned long long value)
     {
-        return static_cast<uint8_t>(_value);
+        return static_cast<uint8_t>(value);
     }
     // clang-format on
 } // namespace
@@ -68,26 +68,26 @@ struct ParserTable
         uint8_t last;
     };
 
-    constexpr void entry(State _state, Action _action)
+    constexpr void entry(State state, Action action) noexcept
     {
-        entryEvents.at(static_cast<size_t>(_state)) = _action;
+        entryEvents[static_cast<size_t>(state)] = action;
     }
 
-    constexpr void exit(State _state, Action _action)
+    constexpr void exit(State state, Action action) noexcept
     {
-        exitEvents.at(static_cast<size_t>(_state)) = _action;
+        exitEvents[static_cast<size_t>(state)] = action;
     }
 
     // Events
-    constexpr void event(State _state, Action _action, uint8_t _input)
+    constexpr void event(State state, Action action, uint8_t input) noexcept
     {
-        events.at(static_cast<size_t>(_state)).at(_input) = _action;
+        events[static_cast<size_t>(state)][input] = action;
     }
 
-    constexpr void event(State _state, Action _action, Range _input)
+    constexpr void event(State state, Action action, Range input) noexcept
     {
-        for (unsigned input = _input.first; input <= _input.last; ++input)
-            event(_state, _action, static_cast<uint8_t>(input));
+        for (unsigned ch = input.first; ch <= input.last; ++ch)
+            event(state, action, static_cast<uint8_t>(ch));
     }
 
     template <typename Arg, typename Arg2, typename... Args>
@@ -98,17 +98,17 @@ struct ParserTable
     }
 
     // Transitions *with* actions
-    constexpr void transition(State _from, State _to, Action _action, uint8_t _input)
+    constexpr void transition(State from, State to, Action action, uint8_t input)
     {
-        event(_from, _action, _input);
-        transitions[static_cast<size_t>(_from)][_input] = _to;
+        event(from, action, input);
+        transitions[static_cast<size_t>(from)][input] = to;
     }
 
-    constexpr void transition(State _from, State _to, Action _action, Range _input)
+    constexpr void transition(State from, State to, Action action, Range input)
     {
-        event(_from, _action, _input);
-        for (unsigned input = _input.first; input <= _input.last; ++input)
-            transitions[static_cast<size_t>(_from)][input] = _to;
+        event(from, action, input);
+        for (unsigned ch = input.first; ch <= input.last; ++ch)
+            transitions[static_cast<size_t>(from)][ch] = to;
     }
 
     // template <typename Arg, typename Arg2, typename... Args>
@@ -119,17 +119,17 @@ struct ParserTable
     // }
 
     // Transitions *without* actions
-    constexpr void transition(State _from, State _to, uint8_t _input)
+    constexpr void transition(State from, State to, uint8_t input)
     {
-        event(_from, Action::Ignore, _input);
-        transitions[static_cast<size_t>(_from)][_input] = _to;
+        event(from, Action::Ignore, input);
+        transitions[static_cast<size_t>(from)][input] = to;
     }
 
-    constexpr void transition(State _from, State _to, Range _input)
+    constexpr void transition(State from, State to, Range input)
     {
-        event(_from, Action::Ignore, _input);
-        for (unsigned input = _input.first; input <= _input.last; ++input)
-            transitions[static_cast<size_t>(_from)][input] = _to;
+        event(from, Action::Ignore, input);
+        for (unsigned ch = input.first; ch <= input.last; ++ch)
+            transitions[static_cast<size_t>(from)][ch] = to;
     }
 
     // template <typename Arg, typename Arg2, typename... Args>
@@ -340,8 +340,8 @@ constexpr ParserTable ParserTable::get() // {{{
 template <typename EventListener, bool TraceStateChanges>
 void Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char const> data)
 {
-    auto input = data.data();
-    auto const end = data.data() + data.size();
+    const auto* input = data.data();
+    const auto* const end = data.data() + data.size();
 
     while (input != end)
     {
@@ -363,38 +363,37 @@ void Parser<EventListener, TraceStateChanges>::parseFragment(gsl::span<char cons
 template <typename EventListener, bool TraceStateChanges>
 void Parser<EventListener, TraceStateChanges>::processOnceViaStateMachine(uint8_t ch)
 {
-    auto const s = static_cast<size_t>(state_);
+    auto const s = static_cast<size_t>(_state);
     ParserTable static constexpr table = ParserTable::get();
 
     if (auto const t = table.transitions[s][static_cast<uint8_t>(ch)]; t != State::Undefined)
     {
-        // fmt::print("VTParser: Transitioning from {} to {}", state_, t);
-        // handle(_actionClass, _action, currentChar());
+        // fmt::print("VTParser: Transitioning from {} to {}", _state, t);
         handle(ActionClass::Leave, table.exitEvents[s], ch);
         handle(ActionClass::Transition, table.events[s][static_cast<size_t>(ch)], ch);
-        state_ = t;
+        _state = t;
         handle(ActionClass::Enter, table.entryEvents[static_cast<size_t>(t)], ch);
     }
     else if (Action const a = table.events[s][ch]; a != Action::Undefined)
         handle(ActionClass::Event, a, ch);
     else
-        eventListener_.error("Parser error: Unknown action for state/input pair.");
+        _eventListener.error("Parser error: Unknown action for state/input pair.");
 }
 
 template <typename EventListener, bool TraceStateChanges>
 auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, char const* end) noexcept
     -> std::tuple<ProcessKind, size_t>
 {
-    auto input = begin;
-    if (state_ != State::Ground)
+    const auto* input = begin;
+    if (_state != State::Ground)
         return { ProcessKind::FallbackToFSM, 0 };
 
-    auto const maxCharCount = eventListener_.maxBulkTextSequenceWidth();
+    auto const maxCharCount = _eventListener.maxBulkTextSequenceWidth();
     if (!maxCharCount)
         return { ProcessKind::FallbackToFSM, 0 };
 
     auto const chunk = std::string_view(input, static_cast<size_t>(std::distance(input, end)));
-    auto const [cellCount, next, subStart, subEnd] = unicode::scan_for_text(scanState_, chunk, maxCharCount);
+    auto const [cellCount, next, subStart, subEnd] = unicode::scan_for_text(_scanState, chunk, maxCharCount);
 
     if (next == input)
         return { ProcessKind::FallbackToFSM, 0 };
@@ -418,17 +417,17 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
             maxCharCount,
             cellCount,
             byteCount,
-            scanState_.utf8.currentLength,
-            scanState_.utf8.expectedLength,
+            _scanState.utf8.currentLength,
+            _scanState.utf8.expectedLength,
             crispy::escape(std::string_view { input, byteCount }));
 #endif
 
     auto const text = std::string_view { subStart, byteCount };
-    if (scanState_.utf8.expectedLength == 0)
+    if (_scanState.utf8.expectedLength == 0)
     {
         if (!text.empty())
         {
-            eventListener_.print(text, cellCount);
+            _eventListener.print(text, cellCount);
         }
 
         // This optimization is for the `cat`-people.
@@ -437,13 +436,13 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
         //
         // As of bench-headless, the performance incrrease is about 50x.
         if (input != end && *input == '\n')
-            eventListener_.execute(*input++);
+            _eventListener.execute(*input++);
     }
     else
     {
         // fmt::print("Parser.text: incomplete UTF-8 sequence at end: {}/{}\n",
-        //            scanState_.utf8.currentLength,
-        //            scanState_.utf8.expectedLength);
+        //            _scanState.utf8.currentLength,
+        //            _scanState.utf8.expectedLength);
 
         // for (char const ch: text)
         //     printUtf8Byte(ch);
@@ -455,61 +454,58 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
 template <typename EventListener, bool TraceStateChanges>
 void Parser<EventListener, TraceStateChanges>::printUtf8Byte(char ch)
 {
-    unicode::ConvertResult const r = unicode::from_utf8(scanState_.utf8, (uint8_t) ch);
+    unicode::ConvertResult const r = unicode::from_utf8(_scanState.utf8, (uint8_t) ch);
     if (std::holds_alternative<unicode::Incomplete>(r))
         return;
 
     auto constexpr ReplacementCharacter = char32_t { 0xFFFD };
     auto const codepoint = std::holds_alternative<unicode::Success>(r) ? std::get<unicode::Success>(r).value
                                                                        : ReplacementCharacter;
-    eventListener_.print(codepoint);
-    scanState_.lastCodepointHint = codepoint;
+    _eventListener.print(codepoint);
+    _scanState.lastCodepointHint = codepoint;
 }
 
 template <typename EventListener, bool TraceStateChanges>
-void Parser<EventListener, TraceStateChanges>::handle(ActionClass _actionClass,
-                                                      Action _action,
+void Parser<EventListener, TraceStateChanges>::handle(ActionClass actionClass,
+                                                      Action action,
                                                       uint8_t codepoint)
 {
-    (void) _actionClass;
+    (void) actionClass;
     auto const ch = static_cast<char>(codepoint);
 
 #if defined(LIBTERMINAL_LOG_TRACE)
     if constexpr (TraceStateChanges)
-        if (VTTraceParserLog && _action != Action::Ignore && _action != Action::Undefined)
-            VTTraceParserLog()("handle: {} {} {} {}",
-                               state_,
-                               _actionClass,
-                               _action,
-                               crispy::escape(static_cast<uint8_t>(ch)));
+        if (VTTraceParserLog && action != Action::Ignore && action != Action::Undefined)
+            VTTraceParserLog()(
+                "handle: {} {} {} {}", _state, actionClass, action, crispy::escape(static_cast<uint8_t>(ch)));
 #endif
 
-    switch (_action)
+    switch (action)
     {
-        case Action::GroundStart: scanState_.lastCodepointHint = 0; break;
-        case Action::Clear: eventListener_.clear(); break;
-        case Action::CollectLeader: eventListener_.collectLeader(ch); break;
-        case Action::Collect: eventListener_.collect(ch); break;
-        case Action::Param: eventListener_.param(ch); break;
-        case Action::ParamDigit: eventListener_.paramDigit(ch); break;
-        case Action::ParamSeparator: eventListener_.paramSeparator(); break;
-        case Action::ParamSubSeparator: eventListener_.paramSubSeparator(); break;
-        case Action::Execute: eventListener_.execute(ch); break;
-        case Action::ESC_Dispatch: eventListener_.dispatchESC(ch); break;
-        case Action::CSI_Dispatch: eventListener_.dispatchCSI(ch); break;
+        case Action::GroundStart: _scanState.lastCodepointHint = 0; break;
+        case Action::Clear: _eventListener.clear(); break;
+        case Action::CollectLeader: _eventListener.collectLeader(ch); break;
+        case Action::Collect: _eventListener.collect(ch); break;
+        case Action::Param: _eventListener.param(ch); break;
+        case Action::ParamDigit: _eventListener.paramDigit(ch); break;
+        case Action::ParamSeparator: _eventListener.paramSeparator(); break;
+        case Action::ParamSubSeparator: _eventListener.paramSubSeparator(); break;
+        case Action::Execute: _eventListener.execute(ch); break;
+        case Action::ESC_Dispatch: _eventListener.dispatchESC(ch); break;
+        case Action::CSI_Dispatch: _eventListener.dispatchCSI(ch); break;
         case Action::Print: printUtf8Byte(ch); break;
-        case Action::OSC_Start: eventListener_.startOSC(); break;
-        case Action::OSC_Put: eventListener_.putOSC(ch); break;
-        case Action::OSC_End: eventListener_.dispatchOSC(); break;
-        case Action::Hook: eventListener_.hook(ch); break;
-        case Action::Put: eventListener_.put(ch); break;
-        case Action::Unhook: eventListener_.unhook(); break;
-        case Action::APC_Start: eventListener_.startAPC(); break;
-        case Action::APC_Put: eventListener_.putAPC(ch); break;
-        case Action::APC_End: eventListener_.dispatchAPC(); break;
-        case Action::PM_Start: eventListener_.startPM(); break;
-        case Action::PM_Put: eventListener_.putPM(ch); break;
-        case Action::PM_End: eventListener_.dispatchPM(); break;
+        case Action::OSC_Start: _eventListener.startOSC(); break;
+        case Action::OSC_Put: _eventListener.putOSC(ch); break;
+        case Action::OSC_End: _eventListener.dispatchOSC(); break;
+        case Action::Hook: _eventListener.hook(ch); break;
+        case Action::Put: _eventListener.put(ch); break;
+        case Action::Unhook: _eventListener.unhook(); break;
+        case Action::APC_Start: _eventListener.startAPC(); break;
+        case Action::APC_Put: _eventListener.putAPC(ch); break;
+        case Action::APC_End: _eventListener.dispatchAPC(); break;
+        case Action::PM_Start: _eventListener.startPM(); break;
+        case Action::PM_Put: _eventListener.putPM(ch); break;
+        case Action::PM_End: _eventListener.dispatchPM(); break;
         case Action::Ignore:
         case Action::Undefined: break;
     }
