@@ -1,3 +1,5 @@
+// NOLINTBEGIN(modernize-macro-to-enum)
+
 // Shared preprocessor definitions between C++ and GLSL.
 //
 // This file has no header guards because GLSL does not seem to understand that.
@@ -13,3 +15,5 @@
 
 // Render an LCD-subpixel antialiased glyph (advanced algorithm)
 #define FRAGMENT_SELECTOR_GLYPH_LCD 3
+
+// NOLINTEND(modernize-macro-to-enum)

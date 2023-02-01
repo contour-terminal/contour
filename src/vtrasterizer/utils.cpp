@@ -46,7 +46,11 @@ vector<uint8_t> downsampleRGBA(vector<uint8_t> const& bitmap, ImageSize size, Im
         for (unsigned j = 0, sc = 0; j < *newSize.width; j++, sc += factor, d += 4)
         {
             // calculate area average
-            unsigned int r = 0, g = 0, b = 0, a = 0, count = 0;
+            unsigned int r = 0;
+            unsigned int g = 0;
+            unsigned int b = 0;
+            unsigned int a = 0;
+            unsigned int count = 0;
             for (unsigned y = sr; y < min(sr + factor, size.height.as<unsigned>()); y++)
             {
                 uint8_t const* p = bitmap.data() + (y * *size.width * 4) + sc * 4;
