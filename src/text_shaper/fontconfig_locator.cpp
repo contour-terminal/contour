@@ -49,7 +49,7 @@ namespace
         }
     }
 
-    auto static constexpr fontWeightMappings = std::array<std::pair<font_weight, int>, 12> { {
+    auto constexpr fontWeightMappings = std::array<std::pair<font_weight, int>, 12> { {
         { font_weight::thin, FC_WEIGHT_THIN },
         { font_weight::extra_light, FC_WEIGHT_EXTRALIGHT },
         { font_weight::light, FC_WEIGHT_LIGHT },
@@ -65,7 +65,7 @@ namespace
     } };
 
     // clang-format off
-    auto static constexpr fontSlantMappings = std::array<std::pair<font_slant, int>, 3>{ {
+    auto constexpr fontSlantMappings = std::array<std::pair<font_slant, int>, 3>{ {
         { font_slant::italic, FC_SLANT_ITALIC },
         { font_slant::oblique, FC_SLANT_OBLIQUE },
         { font_slant::normal, FC_SLANT_ROMAN }
@@ -159,15 +159,15 @@ struct fontconfig_locator::Private
 };
 
 fontconfig_locator::fontconfig_locator():
-    d { new Private(), [](Private* p) {
-           delete p;
-       } }
+    _d { new Private(), [](Private* p) {
+            delete p;
+        } }
 {
 }
 
-font_source_list fontconfig_locator::locate(font_description const& fd)
+font_source_list fontconfig_locator::locate(font_description const& description)
 {
-    LocatorLog()("Locating font chain for: {}", fd);
+    LocatorLog()("Locating font chain for: {}", description);
     auto pat =
         unique_ptr<FcPattern, void (*)(FcPattern*)>(FcPatternCreate(), [](auto p) { FcPatternDestroy(p); });
 
@@ -181,38 +181,38 @@ font_source_list fontconfig_locator::locate(font_description const& fd)
     // bool const color = true;
     // FcPatternAddBool(pat.get(), FC_COLOR, color);
 
-    if (!fd.familyName.empty())
-        FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) fd.familyName.c_str());
+    if (!description.familyName.empty())
+        FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) description.familyName.c_str());
 
-    if (fd.spacing != font_spacing::proportional)
+    if (description.spacing != font_spacing::proportional)
     {
 #if defined(_WIN32)
         // On Windows FontConfig can't find "monospace". We need to use "Consolas" instead.
-        if (fd.familyName == "monospace")
+        if (description.familyName == "monospace")
             FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) "Consolas");
 #elif defined(__APPLE__)
         // Same for macOS, we use "Menlo" for "monospace".
-        if (fd.familyName == "monospace")
+        if (description.familyName == "monospace")
             FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) "Menlo");
 #else
-        if (fd.familyName != "monospace")
+        if (description.familyName != "monospace")
             FcPatternAddString(pat.get(), FC_FAMILY, (FcChar8 const*) "monospace");
 #endif
         FcPatternAddInteger(pat.get(), FC_SPACING, FC_MONO);
         FcPatternAddInteger(pat.get(), FC_SPACING, FC_DUAL);
     }
 
-    if (fd.weight != font_weight::normal)
-        FcPatternAddInteger(pat.get(), FC_WEIGHT, fcWeight(fd.weight));
-    if (fd.slant != font_slant::normal)
-        FcPatternAddInteger(pat.get(), FC_SLANT, fcSlant(fd.slant));
+    if (description.weight != font_weight::normal)
+        FcPatternAddInteger(pat.get(), FC_WEIGHT, fcWeight(description.weight));
+    if (description.slant != font_slant::normal)
+        FcPatternAddInteger(pat.get(), FC_SLANT, fcSlant(description.slant));
 
-    FcConfigSubstitute(d->ftConfig, pat.get(), FcMatchPattern);
+    FcConfigSubstitute(_d->ftConfig, pat.get(), FcMatchPattern);
     FcDefaultSubstitute(pat.get());
 
     FcResult result = FcResultNoMatch;
     auto fs = unique_ptr<FcFontSet, void (*)(FcFontSet*)>(
-        FcFontSort(d->ftConfig, pat.get(), /*unicode-trim*/ FcTrue, /*FcCharSet***/ nullptr, &result),
+        FcFontSort(_d->ftConfig, pat.get(), /*unicode-trim*/ FcTrue, /*FcCharSet***/ nullptr, &result),
         [](auto p) { FcFontSetDestroy(p); });
 
     if (!fs || result != FcResultMatch)
@@ -246,13 +246,13 @@ font_source_list fontconfig_locator::locate(font_description const& fd)
 
         int spacing = -1;
         FcPatternGetInteger(font, FC_SPACING, 0, &spacing);
-        if (fd.strict_spacing)
+        if (description.strict_spacing)
         {
             // Some fonts don't seem to tell us their spacing attribute. ;-(
             // But instead of ignoring them all together, try to be more friendly.
             if (spacing != -1
-                && ((fd.spacing == font_spacing::proportional && spacing < FC_PROPORTIONAL)
-                    || (fd.spacing == font_spacing::mono && spacing < FC_MONO)))
+                && ((description.spacing == font_spacing::proportional && spacing < FC_PROPORTIONAL)
+                    || (description.spacing == font_spacing::mono && spacing < FC_MONO)))
             {
                 LocatorLog()("Skipping font: {} ({} < {}).",
                              (char const*) (file),
@@ -286,22 +286,22 @@ font_source_list fontconfig_locator::locate(font_description const& fd)
 
 #if defined(_WIN32)
     #define FONTDIR "C:\\Windows\\Fonts\\"
-    if (fd.familyName == "emoji")
+    if (description.familyName == "emoji")
     {
         addFontFile(FONTDIR "seguiemj.ttf");
         addFontFile(FONTDIR "seguisym.ttf");
     }
-    else if (fd.weight != font_weight::normal && fd.slant != font_slant::normal)
+    else if (description.weight != font_weight::normal && description.slant != font_slant::normal)
     {
         addFontFile(FONTDIR "consolaz.ttf");
         addFontFile(FONTDIR "seguisbi.ttf");
     }
-    else if (fd.weight != font_weight::normal)
+    else if (description.weight != font_weight::normal)
     {
         addFontFile(FONTDIR "consolab.ttf");
         addFontFile(FONTDIR "seguisb.ttf");
     }
-    else if (fd.slant != font_slant::normal)
+    else if (description.slant != font_slant::normal)
     {
         addFontFile(FONTDIR "consolai.ttf");
         addFontFile(FONTDIR "seguisli.ttf");
@@ -342,7 +342,7 @@ font_source_list fontconfig_locator::all()
         FC_WEIGHT,
         FC_WIDTH,
         NULL);
-    FcFontSet* fs = FcFontList(d->ftConfig, pat, os);
+    FcFontSet* fs = FcFontList(_d->ftConfig, pat, os);
 
     font_source_list output;
 

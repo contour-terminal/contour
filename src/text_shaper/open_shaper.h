@@ -44,7 +44,7 @@ class open_shaper: public shaper
     [[nodiscard]] font_metrics metrics(font_key key) const override;
 
     void shape(font_key font,
-               std::u32string_view text,
+               std::u32string_view codepoints,
                gsl::span<unsigned> clusters,
                unicode::Script script,
                unicode::PresentationStyle presentation,
@@ -56,7 +56,7 @@ class open_shaper: public shaper
 
   private:
     struct Private;
-    std::unique_ptr<Private, void (*)(Private*)> d;
+    std::unique_ptr<Private, void (*)(Private*)> _d;
 };
 
 } // namespace text

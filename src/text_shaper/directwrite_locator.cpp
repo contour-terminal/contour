@@ -127,9 +127,9 @@ struct directwrite_locator::Private
 };
 
 directwrite_locator::directwrite_locator():
-    d { new Private(), [](Private* p) {
-           delete p;
-       } }
+    _d { new Private(), [](Private* p) {
+            delete p;
+        } }
 {
 }
 
@@ -145,17 +145,17 @@ font_source_list directwrite_locator::locate(font_description const& _fd)
 
     UINT32 familyIndex;
     BOOL familyExists = FALSE;
-    d->systemFontCollection->FindFamilyName(familyName.data(), &familyIndex, &familyExists);
+    _d->systemFontCollection->FindFamilyName(familyName.data(), &familyIndex, &familyExists);
 
     if (!familyExists)
     {
         // Fallback to Consolas
         const wchar_t* consolas = L"Consolas";
-        d->systemFontCollection->FindFamilyName(consolas, &familyIndex, &familyExists);
+        _d->systemFontCollection->FindFamilyName(consolas, &familyIndex, &familyExists);
     }
 
     ComPtr<IDWriteFontFamily> fontFamily;
-    d->systemFontCollection->GetFontFamily(familyIndex, &fontFamily);
+    _d->systemFontCollection->GetFontFamily(familyIndex, &fontFamily);
 
     for (UINT32 k = 0, ke = fontFamily->GetFontCount(); k < ke; ++k)
     {
@@ -199,19 +199,19 @@ font_source_list directwrite_locator::resolve(gsl::span<const char32_t> codepoin
     ComPtr<IDWriteFont> mappedFont;
     FLOAT scale = 0.0f;
 
-    dwrite_analysis_wrapper analysisWrapper(wText, d->userLocale);
+    dwrite_analysis_wrapper analysisWrapper(wText, _d->userLocale);
 
-    d->systemFontFallback->MapCharacters(&analysisWrapper,
-                                         0,
-                                         textLength,
-                                         d->systemFontCollection.Get(),
-                                         nullptr,
-                                         DWRITE_FONT_WEIGHT_NORMAL,
-                                         DWRITE_FONT_STYLE_NORMAL,
-                                         DWRITE_FONT_STRETCH_NORMAL,
-                                         &mappedLength,
-                                         &mappedFont,
-                                         &scale);
+    _d->systemFontFallback->MapCharacters(&analysisWrapper,
+                                          0,
+                                          textLength,
+                                          _d->systemFontCollection.Get(),
+                                          nullptr,
+                                          DWRITE_FONT_WEIGHT_NORMAL,
+                                          DWRITE_FONT_STYLE_NORMAL,
+                                          DWRITE_FONT_STRETCH_NORMAL,
+                                          &mappedLength,
+                                          &mappedFont,
+                                          &scale);
 
     if (mappedFont)
     {

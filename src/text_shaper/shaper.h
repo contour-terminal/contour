@@ -43,12 +43,14 @@ namespace text
 auto const inline RasterizerLog = logstore::Category("font.render", "Logs details about rendering glyphs.");
 auto const inline TextShapingLog = logstore::Category("font.textshaping", "Logs details about text shaping.");
 
+// NOLINTBEGIN(readability-identifier-naming)
 enum class bitmap_format
 {
     alpha_mask,
     rgb,
     rgba
 };
+// NOLINTEND(readability-identifier-naming)
 
 constexpr size_t pixel_size(bitmap_format format) noexcept
 {
@@ -77,7 +79,7 @@ struct rasterized_glyph
     }
 };
 
-std::tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, crispy::ImageSize newSize);
+std::tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, crispy::ImageSize boundingBox);
 
 struct glyph_position
 {
@@ -85,7 +87,7 @@ struct glyph_position
     crispy::Point offset;
     crispy::Point advance;
 
-    unicode::PresentationStyle presentation;
+    unicode::PresentationStyle presentation {};
 };
 
 using shape_result = std::vector<glyph_position>;

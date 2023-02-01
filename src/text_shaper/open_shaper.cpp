@@ -138,7 +138,7 @@ namespace
     }
 
     // clang-format off
-    static string ftErrorStr(FT_Error errorCode)
+    string ftErrorStr(FT_Error errorCode)
     {
         #undef __FTERRORS_H__
         #define FT_ERROR_START_LIST     switch (errorCode) {
@@ -224,10 +224,11 @@ namespace
         for (int i = 0; i < face->num_fixed_sizes; ++i)
         {
             auto const currentWidth = face->available_sizes[i].width;
-            auto const d = currentWidth > fontWidth ? currentWidth - fontWidth : fontWidth - currentWidth;
-            if (d < diff)
+            auto const theDiff =
+                currentWidth > fontWidth ? currentWidth - fontWidth : fontWidth - currentWidth;
+            if (theDiff < diff)
             {
-                diff = d;
+                diff = theDiff;
                 best = i;
             }
         }
@@ -454,7 +455,7 @@ struct open_shaper::Private // {{{
     font_metrics metrics(font_key key)
     {
         Require(fontKeyToHbFontInfoMapping.count(key) == 1);
-        auto ftFace = fontKeyToHbFontInfoMapping.at(key).ftFace.get();
+        auto* ftFace = fontKeyToHbFontInfoMapping.at(key).ftFace.get();
 
         font_metrics output {};
 
@@ -544,7 +545,7 @@ struct open_shaper::Private // {{{
 }; // }}}
 
 open_shaper::open_shaper(DPI dpi, font_locator& locator):
-    d(new Private(dpi, locator), [](Private* p) { delete p; })
+    _d(new Private(dpi, locator), [](Private* p) { delete p; })
 {
 }
 
@@ -553,36 +554,36 @@ void open_shaper::set_dpi(DPI dpi)
     if (!dpi)
         return;
 
-    d->_dpi = dpi;
+    _d->_dpi = dpi;
 }
 
 void open_shaper::set_locator(font_locator& locator)
 {
-    d->_locator = &locator;
+    _d->_locator = &locator;
 }
 
 void open_shaper::clear_cache()
 {
     LocatorLog()("Clearing cache ({} keys, {} font infos).",
-                 d->fontPathAndSizeToKeyMapping.size(),
-                 d->fontKeyToHbFontInfoMapping.size());
-    d->fontPathAndSizeToKeyMapping.clear();
-    d->fontKeyToHbFontInfoMapping.clear();
+                 _d->fontPathAndSizeToKeyMapping.size(),
+                 _d->fontKeyToHbFontInfoMapping.size());
+    _d->fontPathAndSizeToKeyMapping.clear();
+    _d->fontKeyToHbFontInfoMapping.clear();
 }
 
 optional<font_key> open_shaper::load_font(font_description const& description, font_size size)
 {
-    font_source_list sources = d->_locator->locate(description);
+    font_source_list sources = _d->_locator->locate(description);
     if (sources.empty())
         return nullopt;
 
-    optional<font_key> fontKeyOpt = d->getOrCreateKeyForFont(sources[0], size);
+    optional<font_key> fontKeyOpt = _d->getOrCreateKeyForFont(sources[0], size);
     if (!fontKeyOpt.has_value())
         return nullopt;
 
     sources.erase(sources.begin()); // remove primary font from list
 
-    HbFontInfo& fontInfo = d->fontKeyToHbFontInfoMapping.at(*fontKeyOpt);
+    HbFontInfo& fontInfo = _d->fontKeyToHbFontInfoMapping.at(*fontKeyOpt);
     fontInfo.fallbacks = std::move(sources);
     fontInfo.description = description;
 
@@ -591,31 +592,31 @@ optional<font_key> open_shaper::load_font(font_description const& description, f
 
 font_metrics open_shaper::metrics(font_key key) const
 {
-    Require(d->fontKeyToHbFontInfoMapping.count(key) == 1);
-    HbFontInfo& fontInfo = d->fontKeyToHbFontInfoMapping.at(key);
+    Require(_d->fontKeyToHbFontInfoMapping.count(key) == 1);
+    HbFontInfo& fontInfo = _d->fontKeyToHbFontInfoMapping.at(key);
     if (fontInfo.metrics.has_value())
         return fontInfo.metrics.value();
 
-    fontInfo.metrics = d->metrics(key);
+    fontInfo.metrics = _d->metrics(key);
     LocatorLog()("Calculating font metrics for {}: {}", fontInfo.description, *fontInfo.metrics);
     return fontInfo.metrics.value();
 }
 
 optional<glyph_position> open_shaper::shape(font_key font, char32_t codepoint)
 {
-    Require(d->fontKeyToHbFontInfoMapping.count(font) == 1);
-    HbFontInfo& fontInfo = d->fontKeyToHbFontInfoMapping.at(font);
+    Require(_d->fontKeyToHbFontInfoMapping.count(font) == 1);
+    HbFontInfo& fontInfo = _d->fontKeyToHbFontInfoMapping.at(font);
 
     glyph_index glyphIndex { FT_Get_Char_Index(fontInfo.ftFace.get(), codepoint) };
     if (!glyphIndex.value)
     {
         for (font_source const& fallbackFont: fontInfo.fallbacks)
         {
-            optional<font_key> fallbackKeyOpt = d->getOrCreateKeyForFont(fallbackFont, fontInfo.size);
+            optional<font_key> fallbackKeyOpt = _d->getOrCreateKeyForFont(fallbackFont, fontInfo.size);
             if (!fallbackKeyOpt.has_value())
                 continue;
-            Require(d->fontKeyToHbFontInfoMapping.count(fallbackKeyOpt.value()) == 1);
-            HbFontInfo const& fallbackFontInfo = d->fontKeyToHbFontInfoMapping.at(fallbackKeyOpt.value());
+            Require(_d->fontKeyToHbFontInfoMapping.count(fallbackKeyOpt.value()) == 1);
+            HbFontInfo const& fallbackFontInfo = _d->fontKeyToHbFontInfoMapping.at(fallbackKeyOpt.value());
             glyphIndex = glyph_index { FT_Get_Char_Index(fallbackFontInfo.ftFace.get(), codepoint) };
             if (glyphIndex.value)
                 break;
@@ -644,13 +645,13 @@ void open_shaper::shape(font_key font,
 {
     assert(clusters.size() == codepoints.size());
     TextShapingLog()("Shaping using font key: {}, text: \"{}\"", font, unicode::convert_to<char>(codepoints));
-    if (!d->fontKeyToHbFontInfoMapping.count(font))
+    if (!_d->fontKeyToHbFontInfoMapping.count(font))
         TextShapingLog()("Font not found? {}", font);
 
-    Require(d->fontKeyToHbFontInfoMapping.count(font) == 1);
-    HbFontInfo& fontInfo = d->fontKeyToHbFontInfoMapping.at(font);
+    Require(_d->fontKeyToHbFontInfoMapping.count(font) == 1);
+    HbFontInfo& fontInfo = _d->fontKeyToHbFontInfoMapping.at(font);
     hb_font_t* hbFont = fontInfo.hbFont.get();
-    hb_buffer_t* hbBuf = d->_hb_buf.get();
+    hb_buffer_t* hbBuf = _d->_hb_buf.get();
 
     if (TextShapingLog)
     {
@@ -666,7 +667,7 @@ void open_shaper::shape(font_key font,
         logMessage.append("Using font: key={}, path=\"{}\"\n", font, identifierOf(fontInfo.primary));
     }
 
-    if (d->tryShapeWithFallback(
+    if (_d->tryShapeWithFallback(
             font, fontInfo, hbBuf, hbFont, script, presentation, codepoints, clusters, result))
         return;
 
@@ -681,15 +682,15 @@ void open_shaper::shape(font_key font,
         if (cluster != clusters[i])
         {
             size_t const count = i - start;
-            d->tryShapeWithFallback(font,
-                                    fontInfo,
-                                    hbBuf,
-                                    hbFont,
-                                    script,
-                                    presentation,
-                                    codepoints.substr(start, count),
-                                    clusters.subspan(start, count),
-                                    result);
+            _d->tryShapeWithFallback(font,
+                                     fontInfo,
+                                     hbBuf,
+                                     hbFont,
+                                     script,
+                                     presentation,
+                                     codepoints.substr(start, count),
+                                     clusters.subspan(start, count),
+                                     result);
             start = i;
             cluster = clusters[i];
         }
@@ -697,15 +698,15 @@ void open_shaper::shape(font_key font,
 
     // shape last cluster
     auto const end = clusters.size();
-    d->tryShapeWithFallback(font,
-                            fontInfo,
-                            hbBuf,
-                            hbFont,
-                            script,
-                            presentation,
-                            codepoints.substr(start, end - start),
-                            clusters.subspan(start, end - start),
-                            result);
+    _d->tryShapeWithFallback(font,
+                             fontInfo,
+                             hbBuf,
+                             hbFont,
+                             script,
+                             presentation,
+                             codepoints.substr(start, end - start),
+                             clusters.subspan(start, end - start),
+                             result);
 
     // last resort
     replaceMissingGlyphs(fontInfo.ftFace.get(), result);
@@ -714,7 +715,7 @@ void open_shaper::shape(font_key font,
 optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode mode)
 {
     auto const font = glyph.font;
-    auto ftFace = d->fontKeyToHbFontInfoMapping.at(font).ftFace.get();
+    auto* ftFace = _d->fontKeyToHbFontInfoMapping.at(font).ftFace.get();
     auto const glyphIndex = glyph.index;
     auto const flags = static_cast<FT_Int32>(ftRenderFlag(mode) | (FT_HAS_COLOR(ftFace) ? FT_LOAD_COLOR : 0));
 
@@ -764,7 +765,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
             FT_Bitmap ftBitmap;
             FT_Bitmap_Init(&ftBitmap);
 
-            auto const ec = FT_Bitmap_Convert(d->_ft, &ftFace->glyph->bitmap, &ftBitmap, 1);
+            auto const ec = FT_Bitmap_Convert(_d->_ft, &ftFace->glyph->bitmap, &ftBitmap, 1);
             if (ec != FT_Err_Ok)
                 return nullopt;
 
@@ -780,7 +781,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
                     output.bitmap[i * width.as<size_t>() + j] = min(
                         static_cast<uint8_t>(uint8_t(ftBitmap.buffer[i * pitch + j]) * 255), uint8_t { 255 });
 
-            FT_Bitmap_Done(d->_ft, &ftBitmap);
+            FT_Bitmap_Done(_d->_ft, &ftBitmap);
             break;
         }
         case FT_PIXEL_MODE_GRAY: {
@@ -789,7 +790,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
                                  * unbox<size_t>(output.bitmapSize.width));
 
             auto const pitch = static_cast<unsigned>(ftFace->glyph->bitmap.pitch);
-            auto const s = ftFace->glyph->bitmap.buffer;
+            auto const* const s = ftFace->glyph->bitmap.buffer;
             for (auto const i: iota(0u, *output.bitmapSize.height))
                 for (auto const j: iota(0u, *output.bitmapSize.width))
                     output.bitmap[i * *output.bitmapSize.width + j] = s[i * pitch + j];
@@ -808,8 +809,8 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
             output.bitmap.resize(static_cast<size_t>(ftBitmap.width) * static_cast<size_t>(ftBitmap.rows));
             output.bitmapSize.width /= crispy::Width(3);
 
-            auto s = ftBitmap.buffer;
-            auto t = output.bitmap.data();
+            auto const* s = ftBitmap.buffer;
+            auto* t = output.bitmap.data();
             if (ftBitmap.width == static_cast<unsigned>(std::abs(ftBitmap.pitch)))
             {
                 std::copy_n(s, ftBitmap.width * ftBitmap.rows, t);
@@ -839,8 +840,9 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
             {
                 for (auto const j: iota(0u, width.as<size_t>()))
                 {
-                    auto const s = &ftFace->glyph->bitmap
-                                        .buffer[static_cast<size_t>(i) * pitch + static_cast<size_t>(j) * 4u];
+                    auto const* s =
+                        &ftFace->glyph->bitmap
+                             .buffer[static_cast<size_t>(i) * pitch + static_cast<size_t>(j) * 4u];
 
                     // BGRA -> RGBA
                     *t++ = s[2];

@@ -38,15 +38,15 @@ void mock_font_locator::configure(std::vector<font_description_and_source> regis
     mock_detail::registry = std::move(registry);
 }
 
-font_source_list mock_font_locator::locate(font_description const& fd)
+font_source_list mock_font_locator::locate(font_description const& description)
 {
-    LocatorLog()("Locating font chain for: {}", fd);
+    LocatorLog()("Locating font chain for: {}", description);
 
     font_source_list output;
 
     for (auto const& item: mock_detail::registry)
     {
-        if (item.description != fd)
+        if (item.description != description)
             continue;
 
         output.emplace_back(item.source);
@@ -55,13 +55,13 @@ font_source_list mock_font_locator::locate(font_description const& fd)
 
     for (auto const& item: mock_detail::registry)
     {
-        if (item.description.slant != fd.slant)
+        if (item.description.slant != description.slant)
             continue;
 
-        if (item.description.weight != fd.weight)
+        if (item.description.weight != description.weight)
             continue;
 
-        if (item.description.spacing != fd.spacing && fd.strict_spacing)
+        if (item.description.spacing != description.spacing && description.strict_spacing)
             continue;
 
         output.emplace_back(item.source);
