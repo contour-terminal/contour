@@ -1,5 +1,6 @@
 ---
 Checks: >-
+  -*,
   bugprone-*,
   -bugprone-branch-clone,
   -bugprone-easily-swappable-parameters,
