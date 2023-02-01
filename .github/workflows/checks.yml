@@ -68,6 +68,12 @@ jobs:
         run: sudo apt -qy install libxml2-utils
       - name: Installing clang-tidy
         run: sudo apt -qy install clang-tidy
+      - name: Installing CodeChecker
+        run: |
+          set -ex
+          sudo apt install libxml2-dev libxslt-dev
+          sudo pip3 install CodeChecker
+          CodeChecker -h
       - name: set environment variables
         id: set_vars
         run: ./scripts/ci-set-vars.sh
