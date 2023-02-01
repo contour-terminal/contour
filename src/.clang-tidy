@@ -45,12 +45,12 @@ Checks: >-
   -modernize-avoid-c-arrays,
   -modernize-return-braced-init-list,
   -modernize-use-bool-literals,
-  -modernize-use-nullptr,
   -modernize-use-trailing-return-type,
   performance-*,
   -performance-no-int-to-ptr,
   readability-*,
   -readability-braces-around-statements,
+  -readability-container-contains,
   -readability-else-after-return,
   -readability-function-cognitive-complexity,
   -readability-identifier-length,
@@ -60,8 +60,10 @@ Checks: >-
   -readability-redundant-access-specifiers,
   -readability-simplify-boolean-expr,
   -readability-uppercase-literal-suffix,
-# WarningsAsErrors: >-
-#   readability-identifier-naming
+  -readability-use-anyofallof,
+WarningsAsErrors: >-
+  readability-identifier-naming,
+  modernize-use-nullptr,
 UseColor: true
 HeaderFilterRegex: 'src/(contour|crispy|text_shaper|vtpty|vtparser|vtbackend|vtrasterizer)/'
 AnalyzeTemporaryDtors: false
@@ -104,7 +106,9 @@ CheckOptions:
   - key:             readability-identifier-naming.EnumConstantCase
     value:           CamelCase
   - key:             readability-identifier-naming.ConstantMemberCase
-    value:           CamelCase
+    value:           camelBack
+  - key:             readability-identifier-naming.ConstantMemberPrefix
+    value:           '_'
   - key:             readability-identifier-naming.ClassCase
     value:           CamelCase
   - key:             readability-identifier-naming.ClassMemberCase
