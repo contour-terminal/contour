@@ -18,6 +18,7 @@ add_library(ContourTerminalDisplay
     OpenGLRenderer.cpp OpenGLRenderer.h
     ShaderConfig.cpp ShaderConfig.h
     TerminalWidget.cpp TerminalWidget.h
+    $<TARGET_OBJECTS:ContourTerminalDisplay_no_SA>
 )
 target_link_libraries(ContourTerminalDisplay ContourTerminalDisplay_no_SA)
 set_target_properties(ContourTerminalDisplay PROPERTIES AUTOMOC ON)
