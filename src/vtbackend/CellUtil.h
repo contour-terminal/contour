@@ -28,8 +28,8 @@ namespace terminal::CellUtil
                                              bool reverseVideo,
                                              Color foregroundColor,
                                              Color backgroundColor,
-                                             bool blinkingState_,
-                                             bool rapidBlinkState_) noexcept
+                                             bool blinkingState,
+                                             bool rapidBlinkState) noexcept
 {
     auto const fgMode = (cellFlags & CellFlags::Faint)                                    ? ColorMode::Dimmed
                         : ((cellFlags & CellFlags::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
@@ -50,9 +50,9 @@ namespace terminal::CellUtil
     if (cellFlags & CellFlags::Hidden)
         rgbColors = rgbColors.allBackground();
 
-    if ((cellFlags & CellFlags::Blinking) && !blinkingState_)
+    if ((cellFlags & CellFlags::Blinking) && !blinkingState)
         return rgbColors.allBackground();
-    if ((cellFlags & CellFlags::RapidBlinking) && !rapidBlinkState_)
+    if ((cellFlags & CellFlags::RapidBlinking) && !rapidBlinkState)
         return rgbColors.allBackground();
 
     return rgbColors;
@@ -122,7 +122,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 [[nodiscard]] inline bool beginsWith(std::u32string_view text, Cell const& cell) noexcept
 {
-    assert(text.size() != 0);
+    assert(!text.empty());
 
     if (cell.codepointCount() == 0)
         return false;

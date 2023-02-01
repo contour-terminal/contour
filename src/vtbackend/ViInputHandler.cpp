@@ -214,7 +214,7 @@ void ViInputHandler::registerAllCommands()
 
 void ViInputHandler::registerCommand(ModeSelect modes,
                                      std::vector<std::string_view> const& commands,
-                                     CommandHandler handler)
+                                     CommandHandler const& handler)
 {
     for (auto const& command: commands)
         registerCommand(modes, command, handler);
@@ -231,13 +231,13 @@ void ViInputHandler::registerCommand(ModeSelect modes, std::string_view command,
         case ModeSelect::Normal: {
             InputLog()("Registering normal mode command: {}", command);
             Require(!_normalMode.contains(commandStr));
-            _normalMode.insert(std::move(commandStr), std::move(handler));
+            _normalMode.insert(commandStr, std::move(handler));
             break;
         }
         case ModeSelect::Visual: {
             InputLog()("Registering visual mode command: {}", command);
             Require(!_visualMode.contains(commandStr));
-            _visualMode.insert(std::move(commandStr), std::move(handler));
+            _visualMode.insert(commandStr, std::move(handler));
             break;
         }
         default: crispy::unreachable();
@@ -390,7 +390,7 @@ bool ViInputHandler::handleSearchEditor(char32_t ch, Modifier modifier)
             break;
         case '\x08'_key:
         case '\x7F'_key:
-            if (_searchTerm.size() > 0)
+            if (!_searchTerm.empty())
                 _searchTerm.resize(_searchTerm.size() - 1);
             _executor.updateSearchTerm(_searchTerm);
             break;

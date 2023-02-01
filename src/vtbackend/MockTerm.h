@@ -30,7 +30,7 @@ class MockTerm: public Terminal::Events
   public:
     MockTerm(ColumnCount columns, LineCount lines): MockTerm { PageSize { lines, columns } } {}
 
-    explicit MockTerm(PageSize size, LineCount hist = {}, size_t ptyReadBufferSize = 1024);
+    explicit MockTerm(PageSize size, LineCount maxHistoryLineCount = {}, size_t ptyReadBufferSize = 1024);
 
     template <typename Init>
     MockTerm(

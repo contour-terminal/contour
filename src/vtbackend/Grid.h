@@ -363,6 +363,7 @@ struct LogicalLines
     LineOffset bottomMostLine;
     std::reference_wrapper<Lines<Cell>> lines;
 
+    // NOLINTNEXTLINE(readability-identifier-naming)
     struct iterator // {{{
     {
         std::reference_wrapper<Lines<Cell>> lines;
@@ -449,8 +450,11 @@ struct LogicalLines
         bool operator!=(iterator const& other) const noexcept { return current != other.current; }
     }; // }}}
 
-    iterator begin() const { return iterator(lines, topMostLine, topMostLine, bottomMostLine); }
-    iterator end() const { return iterator(lines, topMostLine, bottomMostLine + 1, bottomMostLine); }
+    [[nodiscard]] iterator begin() const { return iterator(lines, topMostLine, topMostLine, bottomMostLine); }
+    [[nodiscard]] iterator end() const
+    {
+        return iterator(lines, topMostLine, bottomMostLine + 1, bottomMostLine);
+    }
 };
 
 template <typename Cell>
@@ -460,6 +464,7 @@ struct ReverseLogicalLines
     LineOffset bottomMostLine;
     std::reference_wrapper<Lines<Cell>> lines;
 
+    // NOLINTNEXTLINE(readability-identifier-naming)
     struct iterator // {{{
     {
         std::reference_wrapper<Lines<Cell>> lines;
@@ -545,8 +550,14 @@ struct ReverseLogicalLines
         bool operator!=(iterator const& other) const noexcept { return current != other.current; }
     }; // }}}
 
-    iterator begin() const { return iterator(lines, topMostLine, bottomMostLine, bottomMostLine); }
-    iterator end() const { return iterator(lines, topMostLine, topMostLine - 1, bottomMostLine); }
+    [[nodiscard]] iterator begin() const
+    {
+        return iterator(lines, topMostLine, bottomMostLine, bottomMostLine);
+    }
+    [[nodiscard]] iterator end() const
+    {
+        return iterator(lines, topMostLine, topMostLine - 1, bottomMostLine);
+    }
 };
 
 /**
@@ -619,16 +630,19 @@ class Grid
     /// @param wrapPending       AutoWrap is on and a wrap is pending
     ///
     /// @returns updated cursor position.
-    [[nodiscard]] CellLocation resize(PageSize pageSize, CellLocation currentCursorPos, bool wrapPending);
+    [[nodiscard]] CellLocation resize(PageSize newSize, CellLocation currentCursorPos, bool wrapPending);
     // }}}
 
     // {{{ Line API
     /// @returns reference to Line at given relative offset @p line.
-    Line<Cell>& lineAt(LineOffset line) noexcept;
-    Line<Cell> const& lineAt(LineOffset line) const noexcept;
+    [[nodiscard]] Line<Cell>& lineAt(LineOffset line) noexcept;
+    [[nodiscard]] Line<Cell> const& lineAt(LineOffset line) const noexcept;
 
-    gsl::span<Cell const> lineBuffer(LineOffset line) const noexcept { return lineAt(line).cells(); }
-    gsl::span<Cell const> lineBufferRightTrimmed(LineOffset line) const noexcept;
+    [[nodiscard]] gsl::span<Cell const> lineBuffer(LineOffset line) const noexcept
+    {
+        return lineAt(line).cells();
+    }
+    [[nodiscard]] gsl::span<Cell const> lineBufferRightTrimmed(LineOffset line) const noexcept;
 
     [[nodiscard]] std::string lineText(LineOffset line) const;
     [[nodiscard]] std::string lineTextTrimmed(LineOffset line) const;
@@ -654,34 +668,35 @@ class Grid
     [[nodiscard]] Cell const& at(LineOffset line, ColumnOffset column) const noexcept;
 
     // page view API
-    gsl::span<Line<Cell>> pageAtScrollOffset(ScrollOffset scrollOffset);
-    gsl::span<Line<Cell> const> pageAtScrollOffset(ScrollOffset scrollOffset) const;
-    gsl::span<Line<Cell>> mainPage();
-    gsl::span<Line<Cell> const> mainPage() const;
+    [[nodiscard]] gsl::span<Line<Cell>> pageAtScrollOffset(ScrollOffset scrollOffset);
+    [[nodiscard]] gsl::span<Line<Cell> const> pageAtScrollOffset(ScrollOffset scrollOffset) const;
+    [[nodiscard]] gsl::span<Line<Cell>> mainPage();
+    [[nodiscard]] gsl::span<Line<Cell> const> mainPage() const;
 
-    LogicalLines<Cell> logicalLines()
+    [[nodiscard]] LogicalLines<Cell> logicalLines()
     {
         return LogicalLines<Cell> { boxed_cast<LineOffset>(-historyLineCount()),
                                     boxed_cast<LineOffset>(_pageSize.lines - 1),
                                     _lines };
     }
 
-    LogicalLines<Cell> logicalLinesFrom(LineOffset offset)
+    [[nodiscard]] LogicalLines<Cell> logicalLinesFrom(LineOffset offset)
     {
         return LogicalLines<Cell> { offset, boxed_cast<LineOffset>(_pageSize.lines - 1), _lines };
     }
 
-    ReverseLogicalLines<Cell> logicalLinesReverse()
+    [[nodiscard]] ReverseLogicalLines<Cell> logicalLinesReverse()
     {
         return ReverseLogicalLines<Cell> { boxed_cast<LineOffset>(-historyLineCount()),
                                            boxed_cast<LineOffset>(_pageSize.lines - 1),
                                            _lines };
     }
 
-    ReverseLogicalLines<Cell> logicalLinesReverseFrom(LineOffset offset)
+    [[nodiscard]] ReverseLogicalLines<Cell> logicalLinesReverseFrom(LineOffset offset)
     {
         return ReverseLogicalLines<Cell> { boxed_cast<LineOffset>(-historyLineCount()), offset, _lines };
     }
+
     // {{{ buffer manipulation
 
     /// Completely deletes all scrollback lines.
@@ -697,7 +712,7 @@ class Grid
     LineCount scrollUp(LineCount n, GraphicsAttributes defaultAttributes, Margin margin) noexcept;
 
     /// Scrolls up main page by @p n lines and re-initializes grid cells with @p defaultAttributes.
-    LineCount scrollUp(LineCount n, GraphicsAttributes defaultAttributes = {}) noexcept;
+    LineCount scrollUp(LineCount linesCountToScrollUp, GraphicsAttributes defaultAttributes = {}) noexcept;
 
     /// Scrolls down by @p n lines within the given margin.
     ///

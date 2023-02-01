@@ -68,8 +68,8 @@ class ViCommands: public ViInputHandler::Executor
     [[nodiscard]] CellLocation findMatchingPairLeft(char left, char right, int initialDepth) const noexcept;
     [[nodiscard]] CellLocation findMatchingPairRight(char left, char right, int initialDepth) const noexcept;
     [[nodiscard]] CellLocationRange expandMatchingPair(TextObjectScope scope,
-                                                       char lhs,
-                                                       char rhs) const noexcept;
+                                                       char left,
+                                                       char right) const noexcept;
     [[nodiscard]] CellLocation findBeginOfWordAt(CellLocation location, JumpOver jumpOver) const noexcept;
     [[nodiscard]] CellLocation findEndOfWordAt(CellLocation location, JumpOver jumpOver) const noexcept;
     [[nodiscard]] CellLocation globalCharUp(CellLocation location, char ch, unsigned count) const noexcept;

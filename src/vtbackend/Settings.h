@@ -54,7 +54,7 @@ struct Settings
     //
     // This value must be integer-devisable by 16.
     size_t ptyReadBufferSize = 4096;
-    std::u32string wordDelimiters = U"";
+    std::u32string wordDelimiters;
     Modifier mouseProtocolBypassModifier = Modifier::Shift;
     Modifier mouseBlockSelectionModifier = Modifier::Control;
     LineOffset copyLastMarkRangeOffset = LineOffset(0);

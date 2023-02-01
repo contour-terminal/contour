@@ -28,8 +28,6 @@ TerminalState::TerminalState(Terminal& terminal):
     imagePool { [te = &terminal](Image const* image) {
         te->discardImage(*image);
     } },
-    statusDisplayType { StatusDisplayType::None },
-    activeStatusDisplay { ActiveStatusDisplay::Main },
     hyperlinks { HyperlinkCache { 1024 } },
     sequencer { terminal },
     parser { std::ref(sequencer) },

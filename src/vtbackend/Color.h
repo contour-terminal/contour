@@ -224,6 +224,7 @@ struct RGBAColor
 
     [[nodiscard]] RGBAColor& operator=(std::string const& hexCode);
 
+    // NOLINTNEXTLINE(readability-identifier-naming)
     constexpr static inline auto White = uint32_t(0xFF'FF'FF'FF);
 };
 
@@ -285,6 +286,7 @@ struct CRISPY_PACKED Color
     [[nodiscard]] constexpr uint8_t index() const noexcept { return content & 0xFF; }
     [[nodiscard]] constexpr RGBColor rgb() const noexcept { return RGBColor(content & 0xFFFFFF); }
 
+    // NOLINTBEGIN(readability-identifier-naming)
     [[nodiscard]] constexpr static Color Undefined() noexcept { return Color { ColorType::Undefined, 0 }; }
     [[nodiscard]] constexpr static Color Default() noexcept { return Color { ColorType::Default, 0 }; }
     [[nodiscard]] constexpr static Color Bright(uint8_t index) noexcept
@@ -299,6 +301,8 @@ struct CRISPY_PACKED Color
     {
         return Color { ColorType::Indexed, (uint8_t) index };
     }
+    // NOLINTEND(readability-identifier-naming)
+
     // TODO: The line below breaks on Windows, most likely because RGB is a PPD, let's find out. ;-)
     // constexpr static Color RGB(RGBColor color) noexcept { return Color{color}; }
 

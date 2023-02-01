@@ -132,15 +132,12 @@ Terminal::Terminal(Events& eventListener,
     _factorySettings { std::move(factorySettings) },
     _settings { _factorySettings },
     _state { *this },
-    _outerLock {},
-    _innerLock {},
     _currentTime { now },
     _ptyBufferPool { crispy::nextPowerOfTwo(_settings.ptyBufferObjectSize) },
     _currentPtyBuffer { _ptyBufferPool.allocateBufferObject() },
     _ptyReadBufferSize { crispy::nextPowerOfTwo(_settings.ptyReadBufferSize) },
     _pty { std::move(pty) },
     _lastCursorBlink { now },
-    _cursorBlinkState { 1 },
     _primaryScreen {
         *this, _settings.pageSize, _settings.primaryScreen.allowReflowOnResize, _settings.maxHistoryLineCount
     },
@@ -322,7 +319,7 @@ bool Terminal::ensureFreshRenderBuffer(bool locked)
             [[fallthrough]];
         case RenderBufferState::RefreshBuffersAndTrySwap: {
             auto& backBuffer = _renderBuffer.backBuffer();
-            auto const lastCursorPos = std::move(backBuffer.cursor);
+            auto const lastCursorPos = backBuffer.cursor;
             if (!locked)
                 fillRenderBuffer(_renderBuffer.backBuffer(), true);
             else
@@ -411,7 +408,7 @@ void Terminal::updateInputMethodPreeditString(std::string preeditString)
     if (_inputMethodData.preeditString == preeditString)
         return;
 
-    _inputMethodData.preeditString = preeditString;
+    _inputMethodData.preeditString = std::move(preeditString);
     screenUpdated();
 }
 
@@ -626,7 +623,7 @@ bool Terminal::sendKeyPressEvent(Key key, Modifier modifier, Timestamp now)
     return success;
 }
 
-bool Terminal::sendCharPressEvent(char32_t value, Modifier modifier, Timestamp now)
+bool Terminal::sendCharPressEvent(char32_t ch, Modifier modifier, Timestamp now)
 {
     _cursorBlinkState = 1;
     _lastCursorBlink = now;
@@ -635,10 +632,10 @@ bool Terminal::sendCharPressEvent(char32_t value, Modifier modifier, Timestamp n
     if (isModeEnabled(AnsiMode::KeyboardAction))
         return true;
 
-    if (_state.inputHandler.sendCharPressEvent(value, modifier))
+    if (_state.inputHandler.sendCharPressEvent(ch, modifier))
         return true;
 
-    auto const success = _state.inputGenerator.generate(value, modifier);
+    auto const success = _state.inputGenerator.generate(ch, modifier);
 
     flushInput();
     _viewport.scrollToBottom();
@@ -907,11 +904,6 @@ bool Terminal::hasInput() const noexcept
     return !_state.inputGenerator.peek().empty();
 }
 
-size_t Terminal::pendingInputBytes() const noexcept
-{
-    return !_state.inputGenerator.peek().size();
-}
-
 void Terminal::flushInput()
 {
     if (_state.inputGenerator.peek().empty())
@@ -924,16 +916,18 @@ void Terminal::flushInput()
         _state.inputGenerator.consume(rv);
 }
 
-void Terminal::writeToScreen(string_view data)
+void Terminal::writeToScreen(string_view vtStream)
 {
     {
         auto const l = std::lock_guard { *this };
-        while (!data.empty())
+        while (!vtStream.empty())
         {
-            if (_currentPtyBuffer->bytesAvailable() < 64 && _currentPtyBuffer->bytesAvailable() < data.size())
+            if (_currentPtyBuffer->bytesAvailable() < 64
+                && _currentPtyBuffer->bytesAvailable() < vtStream.size())
                 _currentPtyBuffer = _ptyBufferPool.allocateBufferObject();
-            auto const chunk = data.substr(0, std::min(data.size(), _currentPtyBuffer->bytesAvailable()));
-            data.remove_prefix(chunk.size());
+            auto const chunk =
+                vtStream.substr(0, std::min(vtStream.size(), _currentPtyBuffer->bytesAvailable()));
+            vtStream.remove_prefix(chunk.size());
             _state.parser.parseFragment(_currentPtyBuffer->writeAtEnd(chunk));
         }
     }
@@ -955,12 +949,12 @@ string_view Terminal::lockedWriteToPtyBuffer(string_view data)
     return string_view(ref.data(), ref.size());
 }
 
-void Terminal::writeToScreenInternal(std::string_view data)
+void Terminal::writeToScreenInternal(std::string_view vtStream)
 {
-    while (!data.empty())
+    while (!vtStream.empty())
     {
-        auto const chunk = lockedWriteToPtyBuffer(data);
-        data.remove_prefix(chunk.size());
+        auto const chunk = lockedWriteToPtyBuffer(vtStream);
+        vtStream.remove_prefix(chunk.size());
         _state.parser.parseFragment(chunk);
     }
 }
@@ -1304,13 +1298,13 @@ void Terminal::notify(string_view title, string_view body)
     _eventListener.notify(title, body);
 }
 
-void Terminal::reply(string_view reply)
+void Terminal::reply(string_view text)
 {
     // this is invoked from within the terminal thread.
     // most likely that's not the main thread, which will however write
     // the actual input events.
     // TODO: introduce new mutex to guard terminal writes.
-    _state.inputGenerator.generateRaw(reply);
+    _state.inputGenerator.generateRaw(text);
 }
 
 void Terminal::requestWindowResize(PageSize size)
@@ -1707,7 +1701,7 @@ void Terminal::hardReset()
     _state.inputGenerator.reset();
 }
 
-void Terminal::forceRedraw(std::function<void()> artificialSleep)
+void Terminal::forceRedraw(std::function<void()> const& artificialSleep)
 {
     auto const totalPageSize = _settings.pageSize;
     auto const pageSizeInPixels = cellPixelSize() * totalPageSize;

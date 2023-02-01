@@ -208,7 +208,7 @@ class SequenceParameterBuilder
 class Sequence
 {
   public:
-    size_t constexpr static MaxOscLength = 512;
+    size_t constexpr static MaxOscLength = 512; // NOLINT(readability-identifier-naming)
 
     using Parameter = uint16_t;
     using Intermediaries = std::string;
@@ -216,24 +216,24 @@ class Sequence
     using Parameters = SequenceParameters;
 
   private:
-    FunctionCategory category_;
-    char leaderSymbol_ = 0;
-    Parameters parameters_;
-    Intermediaries intermediateCharacters_;
-    char finalChar_ = 0;
-    DataString dataString_;
+    FunctionCategory _category = {};
+    char _leaderSymbol = 0;
+    Parameters _parameters;
+    Intermediaries _intermediateCharacters;
+    char _finalChar = 0;
+    DataString _dataString;
 
   public:
     // parameter accessors
     //
 
-    [[nodiscard]] Parameters& parameters() noexcept { return parameters_; }
-    [[nodiscard]] Parameters const& parameters() const noexcept { return parameters_; }
+    [[nodiscard]] Parameters& parameters() noexcept { return _parameters; }
+    [[nodiscard]] Parameters const& parameters() const noexcept { return _parameters; }
 
-    [[nodiscard]] size_t parameterCount() const noexcept { return parameters_.count(); }
+    [[nodiscard]] size_t parameterCount() const noexcept { return _parameters.count(); }
     [[nodiscard]] size_t subParameterCount(size_t i) const noexcept
     {
-        return parameters_.subParameterCount(i);
+        return _parameters.subParameterCount(i);
     }
 
     // mutators
@@ -241,25 +241,25 @@ class Sequence
     void clear()
     {
         clearExceptParameters();
-        parameters_.clear();
+        _parameters.clear();
     }
 
     void clearExceptParameters()
     {
-        category_ = FunctionCategory::C0;
-        leaderSymbol_ = 0;
-        intermediateCharacters_.clear();
-        finalChar_ = 0;
-        dataString_.clear();
+        _category = FunctionCategory::C0;
+        _leaderSymbol = 0;
+        _intermediateCharacters.clear();
+        _finalChar = 0;
+        _dataString.clear();
     }
 
-    void setCategory(FunctionCategory cat) noexcept { category_ = cat; }
-    void setLeader(char ch) noexcept { leaderSymbol_ = ch; }
-    [[nodiscard]] Intermediaries& intermediateCharacters() noexcept { return intermediateCharacters_; }
-    void setFinalChar(char ch) noexcept { finalChar_ = ch; }
+    void setCategory(FunctionCategory cat) noexcept { _category = cat; }
+    void setLeader(char ch) noexcept { _leaderSymbol = ch; }
+    [[nodiscard]] Intermediaries& intermediateCharacters() noexcept { return _intermediateCharacters; }
+    void setFinalChar(char ch) noexcept { _finalChar = ch; }
 
-    [[nodiscard]] DataString const& dataString() const noexcept { return dataString_; }
-    [[nodiscard]] DataString& dataString() noexcept { return dataString_; }
+    [[nodiscard]] DataString const& dataString() const noexcept { return _dataString; }
+    [[nodiscard]] DataString& dataString() noexcept { return _dataString; }
 
     /// @returns this VT-sequence into a human readable string form.
     [[nodiscard]] std::string text() const;
@@ -273,20 +273,20 @@ class Sequence
     /// FunctionDefinition.
     [[nodiscard]] FunctionSelector selector() const noexcept
     {
-        switch (category_)
+        switch (_category)
         {
             case FunctionCategory::OSC:
                 return FunctionSelector {
-                    category_, 0, static_cast<int>(parameterCount() ? param(0) : 0), 0, 0
+                    _category, 0, static_cast<int>(parameterCount() ? param(0) : 0), 0, 0
                 };
             default: {
                 // Only support CSI sequences with 0 or 1 intermediate characters.
-                char const intermediate = intermediateCharacters_.size() == 1
-                                              ? static_cast<char>(intermediateCharacters_[0])
+                char const intermediate = _intermediateCharacters.size() == 1
+                                              ? static_cast<char>(_intermediateCharacters[0])
                                               : char {};
 
                 return FunctionSelector {
-                    category_, leaderSymbol_, static_cast<int>(parameterCount()), intermediate, finalChar_
+                    _category, _leaderSymbol, static_cast<int>(parameterCount()), intermediate, _finalChar
                 };
             }
         }
@@ -294,23 +294,23 @@ class Sequence
 
     // accessors
     //
-    [[nodiscard]] FunctionCategory category() const noexcept { return category_; }
+    [[nodiscard]] FunctionCategory category() const noexcept { return _category; }
     [[nodiscard]] Intermediaries const& intermediateCharacters() const noexcept
     {
-        return intermediateCharacters_;
+        return _intermediateCharacters;
     }
-    [[nodiscard]] char leaderSymbol() const noexcept { return leaderSymbol_; }
-    [[nodiscard]] char finalChar() const noexcept { return finalChar_; }
+    [[nodiscard]] char leaderSymbol() const noexcept { return _leaderSymbol; }
+    [[nodiscard]] char finalChar() const noexcept { return _finalChar; }
 
     template <typename T = unsigned>
     [[nodiscard]] std::optional<T> param_opt(size_t parameterIndex) const noexcept
     {
-        if (parameterIndex < parameters_.count())
+        if (parameterIndex < _parameters.count())
         {
             if constexpr (crispy::is_boxed<T>)
-                return { T::cast_from(parameters_.at(parameterIndex)) };
+                return { T::cast_from(_parameters.at(parameterIndex)) };
             else
-                return { static_cast<T>(parameters_.at(parameterIndex)) };
+                return { static_cast<T>(_parameters.at(parameterIndex)) };
         }
         else
             return std::nullopt;
@@ -325,11 +325,11 @@ class Sequence
     template <typename T = unsigned>
     [[nodiscard]] T param(size_t parameterIndex) const noexcept
     {
-        assert(parameterIndex < parameters_.count());
+        assert(parameterIndex < _parameters.count());
         if constexpr (crispy::is_boxed<T>)
-            return T::cast_from(parameters_.at(parameterIndex));
+            return T::cast_from(_parameters.at(parameterIndex));
         else
-            return static_cast<T>(parameters_.at(parameterIndex));
+            return static_cast<T>(_parameters.at(parameterIndex));
     }
 
     template <typename T = unsigned>
@@ -340,7 +340,7 @@ class Sequence
 
     [[nodiscard]] bool isSubParameter(size_t parameterIndex) const noexcept
     {
-        return parameters_.isSubParameter(parameterIndex);
+        return _parameters.isSubParameter(parameterIndex);
     }
 
     template <typename T = unsigned>
@@ -349,12 +349,12 @@ class Sequence
         for (size_t i = 0; i < parameterCount(); ++i)
             if constexpr (crispy::is_boxed<T>)
             {
-                if (T::cast_from(parameters_.at(i)) == value)
+                if (T::cast_from(_parameters.at(i)) == value)
                     return true;
             }
             else
             {
-                if (T(parameters_.at(i)) == value)
+                if (T(_parameters.at(i)) == value)
                     return true;
             }
         return false;

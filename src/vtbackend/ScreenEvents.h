@@ -79,7 +79,7 @@ class ScreenEvents
 class MockScreenEvents: public ScreenEvents
 {
   public:
-    void reply(std::string_view _response) override { replyData += _response; }
+    void reply(std::string_view response) override { replyData += response; }
 
     template <typename... T>
     void reply(fmt::format_string<T...> fmt, T&&... args)
@@ -87,7 +87,7 @@ class MockScreenEvents: public ScreenEvents
         reply(fmt::vformat(fmt, fmt::make_format_args(args...)));
     }
 
-    void setWindowTitle(std::string_view _title) override { windowTitle = _title; }
+    void setWindowTitle(std::string_view title) override { windowTitle = title; }
 
     std::string replyData;
     std::string windowTitle;

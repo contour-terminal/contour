@@ -55,25 +55,25 @@ class Terminal;
 class Modes
 {
   public:
-    void set(AnsiMode mode, bool enabled) { ansi_.set(static_cast<size_t>(mode), enabled); }
+    void set(AnsiMode mode, bool enabled) { _ansi.set(static_cast<size_t>(mode), enabled); }
 
-    void set(DECMode mode, bool enabled) { dec_.set(static_cast<size_t>(mode), enabled); }
+    void set(DECMode mode, bool enabled) { _dec.set(static_cast<size_t>(mode), enabled); }
 
-    [[nodiscard]] bool enabled(AnsiMode mode) const noexcept { return ansi_.test(static_cast<size_t>(mode)); }
+    [[nodiscard]] bool enabled(AnsiMode mode) const noexcept { return _ansi.test(static_cast<size_t>(mode)); }
 
-    [[nodiscard]] bool enabled(DECMode mode) const noexcept { return dec_.test(static_cast<size_t>(mode)); }
+    [[nodiscard]] bool enabled(DECMode mode) const noexcept { return _dec.test(static_cast<size_t>(mode)); }
 
     void save(std::vector<DECMode> const& modes)
     {
         for (DECMode const mode: modes)
-            savedModes_[mode].push_back(enabled(mode));
+            _savedModes[mode].push_back(enabled(mode));
     }
 
     void restore(std::vector<DECMode> const& modes)
     {
         for (DECMode const mode: modes)
         {
-            if (auto i = savedModes_.find(mode); i != savedModes_.end() && !i->second.empty())
+            if (auto i = _savedModes.find(mode); i != _savedModes.end() && !i->second.empty())
             {
                 auto& saved = i->second;
                 set(mode, saved.back());
@@ -85,9 +85,9 @@ class Modes
   private:
     // TODO: make this a vector<bool> by casting from Mode, but that requires ensured small linearity in Mode
     // enum values.
-    std::bitset<32> ansi_;                            // AnsiMode
-    std::bitset<8452 + 1> dec_;                       // DECMode
-    std::map<DECMode, std::vector<bool>> savedModes_; //!< saved DEC modes
+    std::bitset<32> _ansi;                            // AnsiMode
+    std::bitset<8452 + 1> _dec;                       // DECMode
+    std::map<DECMode, std::vector<bool>> _savedModes; //!< saved DEC modes
 };
 // }}}
 
@@ -185,9 +185,9 @@ struct TerminalState
     std::vector<ColumnOffset> tabs;
 
     ScreenType screenType = ScreenType::Primary;
-    StatusDisplayType statusDisplayType;
-    std::optional<StatusDisplayType> savedStatusDisplayType;
-    ActiveStatusDisplay activeStatusDisplay;
+    StatusDisplayType statusDisplayType = StatusDisplayType::None;
+    std::optional<StatusDisplayType> savedStatusDisplayType = std::nullopt;
+    ActiveStatusDisplay activeStatusDisplay = ActiveStatusDisplay::Main;
 
     Search searchMode;
 

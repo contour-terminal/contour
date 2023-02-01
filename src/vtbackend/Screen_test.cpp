@@ -118,11 +118,11 @@ MockTerm<MockPty> screenForDECRA()
                                                      "ghijkl");
                                   mock.writeToScreen("\033[0m");
 
-                                  auto const initialText = "ABCDEF\n"
-                                                           "abcdef\n"
-                                                           "123456\n"
-                                                           "GHIJKL\n"
-                                                           "ghijkl\n";
+                                  auto const* const initialText = "ABCDEF\n"
+                                                                  "abcdef\n"
+                                                                  "123456\n"
+                                                                  "GHIJKL\n"
+                                                                  "ghijkl\n";
 
                                   CHECK(mock.terminal.primaryScreen().renderMainPageText() == initialText);
                               } };
@@ -2448,7 +2448,7 @@ TEST_CASE("ReportCursorPosition", "[screen]")
     screen.moveCursorTo(LineOffset { 1 }, ColumnOffset { 2 });
 
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE("" == mock.terminal.peekInput());
+    REQUIRE(mock.terminal.peekInput().empty());
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
 
     SECTION("with Origin mode disabled")
@@ -2478,7 +2478,7 @@ TEST_CASE("ReportExtendedCursorPosition", "[screen]")
     screen.moveCursorTo(LineOffset { 1 }, ColumnOffset { 2 });
 
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
-    REQUIRE("" == mock.terminal.peekInput());
+    REQUIRE(mock.terminal.peekInput().empty());
     REQUIRE(screen.logicalCursorPosition() == CellLocation { LineOffset(1), ColumnOffset(2) });
 
     SECTION("with Origin mode disabled")
@@ -2913,7 +2913,7 @@ TEST_CASE("searchReverse", "[screen]")
         INFO(fmt::format("Perform tests via {}", inflate ? "inflated buffer" : "trivial buffer"));
         if (inflate)
             for (auto lineOffset = LineOffset(-3); lineOffset < LineOffset(3); ++lineOffset)
-                screen.grid().lineAt(lineOffset).inflatedBuffer();
+                (void) screen.grid().lineAt(lineOffset).inflatedBuffer();
         else
             for (auto lineOffset = LineOffset(-3); lineOffset < LineOffset(3); ++lineOffset)
                 REQUIRE(screen.grid().lineAt(lineOffset).isTrivialBuffer());
@@ -3371,11 +3371,11 @@ TEST_CASE("DECCRA.DownLeft.intersecting", "[screen]")
 {
     auto mock = screenForDECRA();
     auto& screen = mock.terminal.primaryScreen();
-    auto const initialText = "ABCDEF\n"
-                             "abcdef\n"
-                             "123456\n"
-                             "GHIJKL\n"
-                             "ghijkl\n";
+    auto const* const initialText = "ABCDEF\n"
+                                    "abcdef\n"
+                                    "123456\n"
+                                    "GHIJKL\n"
+                                    "ghijkl\n";
     CHECK(screen.renderMainPageText() == initialText);
 
     auto constexpr page = 0;
@@ -3389,11 +3389,11 @@ TEST_CASE("DECCRA.DownLeft.intersecting", "[screen]")
     auto constexpr tTop = 3;
     auto constexpr tLeft = 2;
 
-    auto const expectedText = "ABCDEF\n"
-                              "abcdef\n" // .3456.
-                              "1IJKL6\n" // .IJKL.
-                              "GijklL\n"
-                              "ghijkl\n";
+    auto const* const expectedText = "ABCDEF\n"
+                                     "abcdef\n" // .3456.
+                                     "1IJKL6\n" // .IJKL.
+                                     "GijklL\n"
+                                     "ghijkl\n";
 
     // copy up by one line (4 to 3), 2 lines
     // copy left by one column (3 to 2), 2 columns
@@ -3412,17 +3412,17 @@ TEST_CASE("DECCRA.Right.intersecting", "[screen]")
     auto mock = screenForDECRA();
     auto& screen = mock.terminal.primaryScreen();
 
-    auto const initialText = "ABCDEF\n"
-                             "abcdef\n"
-                             "123456\n"
-                             "GHIJKL\n"
-                             "ghijkl\n";
-    REQUIRE(screen.renderMainPageText() == initialText);
-    auto const expectedText = "ABCDEF\n"
-                              "abbcdf\n"
-                              "122346\n"
-                              "GHHIJL\n"
+    auto const* initialText = "ABCDEF\n"
+                              "abcdef\n"
+                              "123456\n"
+                              "GHIJKL\n"
                               "ghijkl\n";
+    REQUIRE(screen.renderMainPageText() == initialText);
+    auto const* expectedText = "ABCDEF\n"
+                               "abbcdf\n"
+                               "122346\n"
+                               "GHHIJL\n"
+                               "ghijkl\n";
 
     auto constexpr page = 0;
     auto constexpr sTopLeft = CellLocation { LineOffset(1), ColumnOffset(1) };
@@ -3449,18 +3449,18 @@ TEST_CASE("DECCRA.Left.intersecting", "[screen]")
     // Moves a rectangular area by one column to the left.
     auto mock = screenForDECRA();
     auto& screen = mock.terminal.primaryScreen();
-    auto const initialText = "ABCDEF\n"
-                             "abcdef\n"
-                             "123456\n"
-                             "GHIJKL\n"
-                             "ghijkl\n";
+    auto const* const initialText = "ABCDEF\n"
+                                    "abcdef\n"
+                                    "123456\n"
+                                    "GHIJKL\n"
+                                    "ghijkl\n";
     CHECK(screen.renderMainPageText() == initialText);
 
-    auto const expectedText = "ABCDEF\n"
-                              "abdeff\n"
-                              "124566\n"
-                              "GHIJKL\n"
-                              "ghijkl\n";
+    auto const* const expectedText = "ABCDEF\n"
+                                     "abdeff\n"
+                                     "124566\n"
+                                     "GHIJKL\n"
+                                     "ghijkl\n";
 
     auto constexpr page = 0;
     auto constexpr sTopLeft = CellLocation { LineOffset(1), ColumnOffset(3) };
@@ -3515,7 +3515,7 @@ TEST_CASE("Sixel.simple", "[screen]")
                 REQUIRE(fragment);
                 CHECK(fragment->offset().line == line);
                 CHECK(fragment->offset().column == column);
-                CHECK(fragment->data().size() != 0);
+                CHECK(!fragment->data().empty());
             }
             else
             {
@@ -3555,7 +3555,7 @@ TEST_CASE("Sixel.AutoScroll-1", "[screen]")
                 REQUIRE(fragment);
                 CHECK(fragment->offset().line == line + 1);
                 CHECK(fragment->offset().column == column);
-                CHECK(fragment->data().size() != 0);
+                CHECK(!fragment->data().empty());
             }
             else
             {

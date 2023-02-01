@@ -403,9 +403,6 @@ struct GridSize
 
     [[nodiscard]] constexpr iterator begin() const noexcept { return iterator { columns, 0 }; }
     [[nodiscard]] constexpr iterator end() const noexcept { return iterator { columns, *columns * *lines }; }
-
-    [[nodiscard]] constexpr iterator begin() noexcept { return iterator { columns, 0 }; }
-    [[nodiscard]] constexpr iterator end() noexcept { return iterator { columns, *columns * *lines }; }
 };
 
 constexpr CellLocation operator+(CellLocation a, GridSize::Offset b) noexcept

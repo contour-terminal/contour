@@ -48,8 +48,8 @@ struct HyperlinkInfo
 
     [[nodiscard]] std::string_view host() const noexcept
     {
-        if (auto const i = uri.find("://"); i != uri.npos)
-            if (auto const j = uri.find('/', i + 3); j != uri.npos)
+        if (auto const i = uri.find("://"); i != terminal::URI::npos)
+            if (auto const j = uri.find('/', i + 3); j != terminal::URI::npos)
                 return std::string_view { uri.data() + i + 3, j - i - 3 };
 
         return "";
@@ -57,8 +57,8 @@ struct HyperlinkInfo
 
     [[nodiscard]] std::string_view path() const noexcept
     {
-        if (auto const i = uri.find("://"); i != uri.npos)
-            if (auto const j = uri.find('/', i + 3); j != uri.npos)
+        if (auto const i = uri.find("://"); i != terminal::URI::npos)
+            if (auto const j = uri.find('/', i + 3); j != terminal::URI::npos)
                 return std::string_view { uri.data() + j };
 
         return "";
@@ -66,7 +66,7 @@ struct HyperlinkInfo
 
     [[nodiscard]] std::string_view scheme() const noexcept
     {
-        if (auto const i = uri.find("://"); i != uri.npos)
+        if (auto const i = uri.find("://"); i != terminal::URI::npos)
             return std::string_view { uri.data(), i };
         else
             return {};
@@ -93,7 +93,7 @@ struct HyperlinkStorage
     std::shared_ptr<HyperlinkInfo> hyperlinkById(HyperlinkId id) noexcept
     {
         if (!!id)
-            if (auto href = cache.try_get(id))
+            if (auto* href = cache.try_get(id))
                 return *href;
         return {};
     }
@@ -101,7 +101,7 @@ struct HyperlinkStorage
     std::shared_ptr<HyperlinkInfo const> hyperlinkById(HyperlinkId id) const noexcept
     {
         if (!!id)
-            if (auto href = cache.try_get(id))
+            if (auto* href = cache.try_get(id))
                 return *href;
         return {};
     }

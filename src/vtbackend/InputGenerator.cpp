@@ -437,10 +437,10 @@ inline bool InputGenerator::append(uint8_t byte)
     return true;
 }
 
-inline bool InputGenerator::append(unsigned int number)
+inline bool InputGenerator::append(unsigned int asciiChar)
 {
     char buf[16];
-    int n = snprintf(buf, sizeof(buf), "%u", number);
+    int n = snprintf(buf, sizeof(buf), "%u", asciiChar);
     return append(string_view(buf, static_cast<size_t>(n)));
 }
 

@@ -91,7 +91,7 @@ target_compile_definitions(vtbackend PRIVATE
 )
 
 target_include_directories(vtbackend PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
 )
 target_link_libraries(vtbackend PUBLIC vtparser vtpty crispy::core fmt::fmt-header-only range-v3::range-v3 Threads::Threads Microsoft.GSL::GSL)

@@ -86,33 +86,33 @@ class Database
 
     virtual ~Database() = default;
 
-    virtual bool booleanCapability(Code cap) const = 0;
-    virtual unsigned numericCapability(Code cap) const = 0;
-    virtual std::string_view stringCapability(Code cap) const = 0;
+    [[nodiscard]] virtual bool booleanCapability(Code value) const = 0;
+    [[nodiscard]] virtual unsigned numericCapability(Code value) const = 0;
+    [[nodiscard]] virtual std::string_view stringCapability(Code value) const = 0;
 
-    virtual bool booleanCapability(std::string_view cap) const = 0;
-    virtual unsigned numericCapability(std::string_view cap) const = 0;
-    virtual std::string_view stringCapability(std::string_view cap) const = 0;
+    [[nodiscard]] virtual bool booleanCapability(std::string_view value) const = 0;
+    [[nodiscard]] virtual unsigned numericCapability(std::string_view value) const = 0;
+    [[nodiscard]] virtual std::string_view stringCapability(std::string_view value) const = 0;
 
-    virtual std::optional<Code> codeFromName(std::string_view name) const = 0;
+    [[nodiscard]] virtual std::optional<Code> codeFromName(std::string_view name) const = 0;
 
-    virtual std::string terminfo() const = 0;
+    [[nodiscard]] virtual std::string terminfo() const = 0;
 };
 
 class StaticDatabase: public Database
 {
   public:
-    bool booleanCapability(Code cap) const override;
-    unsigned numericCapability(Code cap) const override;
-    std::string_view stringCapability(Code cap) const override;
+    [[nodiscard]] bool booleanCapability(Code code) const override;
+    [[nodiscard]] unsigned numericCapability(Code code) const override;
+    [[nodiscard]] std::string_view stringCapability(Code code) const override;
 
-    bool booleanCapability(std::string_view cap) const override;
-    unsigned numericCapability(std::string_view cap) const override;
-    std::string_view stringCapability(std::string_view cap) const override;
+    [[nodiscard]] bool booleanCapability(std::string_view name) const override;
+    [[nodiscard]] unsigned numericCapability(std::string_view name) const override;
+    [[nodiscard]] std::string_view stringCapability(std::string_view name) const override;
 
-    std::optional<Code> codeFromName(std::string_view name) const override;
+    [[nodiscard]] std::optional<Code> codeFromName(std::string_view name) const override;
 
-    std::string terminfo() const override;
+    [[nodiscard]] std::string terminfo() const override;
 };
 
 } // namespace terminal::capabilities

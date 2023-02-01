@@ -18,7 +18,7 @@ std::string Sequence::raw() const
 {
     stringstream sstr;
 
-    switch (category_)
+    switch (_category)
     {
         case FunctionCategory::C0: break;
         case FunctionCategory::ESC: sstr << "\033"; break;
@@ -27,7 +27,7 @@ std::string Sequence::raw() const
         case FunctionCategory::OSC: sstr << "\033]"; break;
     }
 
-    // if (parameterCount() > 1 || (parameterCount() == 1 && parameters_.at(0) != 0))
+    // if (parameterCount() > 1 || (parameterCount() == 1 && _parameters.at(0) != 0))
     {
         for (size_t i = 0; i < parameterCount(); ++i)
         {
@@ -42,11 +42,11 @@ std::string Sequence::raw() const
 
     sstr << intermediateCharacters();
 
-    if (finalChar_)
-        sstr << finalChar_;
+    if (_finalChar)
+        sstr << _finalChar;
 
-    if (!dataString_.empty())
-        sstr << dataString_ << "\033\\";
+    if (!_dataString.empty())
+        sstr << _dataString << "\033\\";
 
     return sstr.str();
 }
@@ -55,28 +55,28 @@ string Sequence::text() const
 {
     stringstream sstr;
 
-    if (category_ == FunctionCategory::C0)
+    if (_category == FunctionCategory::C0)
     {
-        sstr << to_short_string(ControlCode::C0(finalChar_));
+        sstr << to_short_string(ControlCode::C0(_finalChar));
         return sstr.str();
     }
 
-    sstr << fmt::format("{}", category_);
+    sstr << fmt::format("{}", _category);
 
-    if (leaderSymbol_)
-        sstr << ' ' << leaderSymbol_;
+    if (_leaderSymbol)
+        sstr << ' ' << _leaderSymbol;
 
-    if (parameterCount() > 1 || (parameterCount() == 1 && parameters_.at(0) != 0))
-        sstr << ' ' << parameters_.str();
+    if (parameterCount() > 1 || (parameterCount() == 1 && _parameters.at(0) != 0))
+        sstr << ' ' << _parameters.str();
 
     if (!intermediateCharacters().empty())
         sstr << ' ' << intermediateCharacters();
 
-    if (finalChar_)
-        sstr << ' ' << finalChar_;
+    if (_finalChar)
+        sstr << ' ' << _finalChar;
 
-    if (!dataString_.empty())
-        sstr << " \"" << crispy::escape(dataString_) << "\" ST";
+    if (!_dataString.empty())
+        sstr << " \"" << crispy::escape(_dataString) << "\" ST";
 
     return sstr.str();
 }

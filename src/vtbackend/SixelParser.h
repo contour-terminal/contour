@@ -83,7 +83,7 @@ class SixelParser: public ParserExtension
     };
 
     using OnFinalize = std::function<void()>;
-    explicit SixelParser(Events& events, OnFinalize finisher = {});
+    explicit SixelParser(Events& events, OnFinalize finalizer = {});
 
     using iterator = char const*;
 
@@ -135,7 +135,7 @@ class SixelColorPalette
     void setSize(unsigned int newSize);
 
     [[nodiscard]] unsigned int maxSize() const noexcept { return _maxSize; }
-    void setMaxSize(unsigned int newSize);
+    void setMaxSize(unsigned int value) { _maxSize = value; }
 
     void setColor(unsigned int index, RGBColor const& color);
     [[nodiscard]] RGBColor at(unsigned int index) const noexcept;
@@ -189,8 +189,8 @@ class SixelImageBuilder: public SixelParser::Events
     std::shared_ptr<SixelColorPalette> _colors;
     ImageSize _size;
     Buffer _buffer; /// RGBA buffer
-    CellLocation _sixelCursor;
-    unsigned _currentColor;
+    CellLocation _sixelCursor {};
+    unsigned _currentColor = 0;
     bool _explicitSize = false;
     // This is an int because vt3xx takes the given ratio pan/pad and rounds up the ratio
     // to nearest integers. So 1:3 = 0.33 and it  becomes 1;

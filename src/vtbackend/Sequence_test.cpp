@@ -26,7 +26,7 @@ TEST_CASE("SequenceParameterBuilder.empty")
     auto parameters = SequenceParameters {};
     auto builder = SequenceParameterBuilder { parameters };
     builder.fixiate();
-    CHECK(parameters.str() == "");
+    CHECK(parameters.str().empty());
 }
 
 TEST_CASE("SequenceParameterBuilder.0")
@@ -35,7 +35,7 @@ TEST_CASE("SequenceParameterBuilder.0")
     auto builder = SequenceParameterBuilder { parameters };
     builder.multiplyBy10AndAdd(0);
     builder.fixiate();
-    CHECK(parameters.str() == "");
+    CHECK(parameters.str().empty());
 }
 
 TEST_CASE("SequenceParameterBuilder.1")

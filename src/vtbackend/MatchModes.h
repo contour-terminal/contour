@@ -44,50 +44,50 @@ class MatchModes
 
     [[nodiscard]] constexpr Status status(Flag flag) const noexcept
     {
-        if (enabled_ & static_cast<uint8_t>(flag))
+        if (_enabled & static_cast<uint8_t>(flag))
             return Status::Enabled;
-        if (disabled_ & static_cast<uint8_t>(flag))
+        if (_disabled & static_cast<uint8_t>(flag))
             return Status::Disabled;
         return Status::Any;
     }
 
-    [[nodiscard]] constexpr unsigned enabled() const noexcept { return enabled_; }
-    [[nodiscard]] constexpr unsigned disabled() const noexcept { return disabled_; }
+    [[nodiscard]] constexpr unsigned enabled() const noexcept { return _enabled; }
+    [[nodiscard]] constexpr unsigned disabled() const noexcept { return _disabled; }
 
     constexpr void enable(Flag flag) noexcept
     {
-        enabled_ |= static_cast<uint8_t>(flag);
-        disabled_ = (uint8_t) (disabled_ & ~static_cast<uint8_t>(flag));
+        _enabled |= static_cast<uint8_t>(flag);
+        _disabled = (uint8_t) (_disabled & ~static_cast<uint8_t>(flag));
     }
 
     constexpr void disable(Flag flag) noexcept
     {
-        enabled_ = (uint8_t) (enabled_ & ~static_cast<uint8_t>(flag));
-        disabled_ |= static_cast<uint8_t>(flag);
+        _enabled = (uint8_t) (_enabled & ~static_cast<uint8_t>(flag));
+        _disabled |= static_cast<uint8_t>(flag);
     }
 
     [[nodiscard]] constexpr bool has_value(Flag flag) const noexcept
     {
-        return enabled_ & static_cast<uint8_t>(flag) || disabled_ & static_cast<uint8_t>(flag);
+        return _enabled & static_cast<uint8_t>(flag) || _disabled & static_cast<uint8_t>(flag);
     }
 
     constexpr void clear(Flag flag) noexcept
     {
-        enabled_ = (uint8_t) (enabled_ & ~static_cast<uint8_t>(flag));
-        disabled_ = (uint8_t) (disabled_ & ~static_cast<uint8_t>(flag));
+        _enabled = (uint8_t) (_enabled & ~static_cast<uint8_t>(flag));
+        _disabled = (uint8_t) (_disabled & ~static_cast<uint8_t>(flag));
     }
 
     constexpr void reset() noexcept
     {
-        enabled_ = 0;
-        disabled_ = 0;
+        _enabled = 0;
+        _disabled = 0;
     }
 
-    [[nodiscard]] constexpr bool any() const noexcept { return enabled_ || disabled_; }
+    [[nodiscard]] constexpr bool any() const noexcept { return _enabled || _disabled; }
 
     [[nodiscard]] constexpr uint16_t hashcode() const noexcept
     {
-        return static_cast<uint16_t>(enabled_ << 8 | disabled_);
+        return static_cast<uint16_t>(_enabled << 8 | _disabled);
     }
 
     constexpr MatchModes() noexcept = default;
@@ -97,13 +97,13 @@ class MatchModes
     constexpr MatchModes& operator=(MatchModes&&) noexcept = default;
 
     constexpr MatchModes(uint8_t enabled, uint8_t disabled) noexcept:
-        enabled_ { enabled }, disabled_ { disabled }
+        _enabled { enabled }, _disabled { disabled }
     {
     }
 
   private:
-    uint8_t enabled_ = 0;
-    uint8_t disabled_ = 0;
+    uint8_t _enabled = 0;
+    uint8_t _disabled = 0;
 };
 
 constexpr bool operator==(MatchModes a, MatchModes b) noexcept
