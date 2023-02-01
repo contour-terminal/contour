@@ -30,11 +30,13 @@
 function precmd_hook_contour -d "Shell Integration hook to be invoked before each prompt" -e fish_prompt 
     # Disable text reflow for the command prompt (and below).
     printf '\e[?2028l'
+
     # Marks the current line (command prompt) so that you can jump to it via key bindings.
-    printf '\e[>M'
+    #printf '\e[>M'
+    printf "\e[>M"
 
     # Informs contour terminal about the current working directory, so that e.g. OpenFileManager works.
-    printf '\e]7;'$(pwd)'\e\\'
+    printf "\e]7;$PWD\e\\"
 
     # Example hook to update configuration profile based on base directory.
     # update_profile
