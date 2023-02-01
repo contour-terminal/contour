@@ -9,18 +9,13 @@ if(NOT(CONTOUR_BUILD_WITH_QT6))
     qt5_add_resources(QT_RESOURCES ${QT_RESOURCES})
 endif()
 
-add_library(ContourTerminalDisplay_no_SA ${QT_RESOURCES})
-# NOTE: Resetting only needed as we have a global CMAKE_CXX_CLANG_TIDY
-set_target_properties(ContourTerminalDisplay_no_SA PROPERTIES CXX_CLANG_TIDY "" LINKER_LANGUAGE CXX)
-
 add_library(ContourTerminalDisplay
     Blur.cpp Blur.h
     OpenGLRenderer.cpp OpenGLRenderer.h
     ShaderConfig.cpp ShaderConfig.h
     TerminalWidget.cpp TerminalWidget.h
-    $<TARGET_OBJECTS:ContourTerminalDisplay_no_SA>
+    ${QT_RESOURCES}
 )
-target_link_libraries(ContourTerminalDisplay ContourTerminalDisplay_no_SA)
 set_target_properties(ContourTerminalDisplay PROPERTIES AUTOMOC ON)
 set_target_properties(ContourTerminalDisplay PROPERTIES AUTORCC ON)
 
