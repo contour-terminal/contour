@@ -261,7 +261,7 @@ namespace
 
     uint8_t graphemeClusterWidth(std::u32string_view text) noexcept
     {
-        assert(text.size() != 0);
+        assert(!text.empty());
         auto const baseWidth = static_cast<uint8_t>(unicode::width(text[0]));
         for (size_t i = 1; i < text.size(); ++i)
             if (text[i] == 0xFE0F)
@@ -306,12 +306,12 @@ constexpr uint32_t TextShapingCacheSize = 4000;
 TextRenderer::TextRenderer(GridMetrics const& gridMetrics,
                            text::shaper& textShaper,
                            FontDescriptions& fontDescriptions,
-                           FontKeys const& fonts,
+                           FontKeys const& fontKeys,
                            TextRendererEvents& eventHandler):
     Renderable { gridMetrics },
     _textRendererEvents { eventHandler },
     _fontDescriptions { fontDescriptions },
-    _fonts { fonts },
+    _fonts { fontKeys },
     _textShapingCache { ShapingResultCache::create(crispy::StrongHashtableSize { 16384 },
                                                    crispy::LRUCapacity { TextShapingCacheSize },
                                                    "Text shaping cache") },
@@ -514,7 +514,7 @@ void TextRenderer::renderCell(RenderCell const& cell)
 }
 
 void TextRenderer::renderCell(CellLocation position,
-                              std::u32string_view codepoints,
+                              std::u32string_view graphemeCluster,
                               TextStyle textStyle,
                               RGBColor foregroundColor)
 {
@@ -524,13 +524,13 @@ void TextRenderer::renderCell(CellLocation position,
         _textClusterGroup.initialPenPosition = _gridMetrics.mapBottomLeft(position);
     }
 
-    bool const isBoxDrawingCharacter = _fontDescriptions.builtinBoxDrawing && codepoints.size() == 1
-                                       && _boxDrawingRenderer.renderable(codepoints[0]);
+    bool const isBoxDrawingCharacter = _fontDescriptions.builtinBoxDrawing && graphemeCluster.size() == 1
+                                       && BoxDrawingRenderer::renderable(graphemeCluster[0]);
 
     if (isBoxDrawingCharacter)
     {
         auto const success =
-            _boxDrawingRenderer.render(position.line, position.column, codepoints[0], foregroundColor);
+            _boxDrawingRenderer.render(position.line, position.column, graphemeCluster[0], foregroundColor);
         if (success)
         {
             if (!_updateInitialPenPosition)
@@ -540,7 +540,7 @@ void TextRenderer::renderCell(CellLocation position,
         }
     }
 
-    appendCellTextToClusterGroup(codepoints, textStyle, foregroundColor);
+    appendCellTextToClusterGroup(graphemeCluster, textStyle, foregroundColor);
 }
 
 void TextRenderer::endFrame()

@@ -246,17 +246,27 @@ class TextureAtlas
 
     void reset(AtlasProperties atlasProperties);
 
-    AtlasBackend& backend() noexcept { return _backend; }
+    [[nodiscard]] AtlasBackend& backend() noexcept { return _backend; }
 
     [[nodiscard]] ImageSize atlasSize() const noexcept { return _atlasSize; }
     [[nodiscard]] ImageSize tileSize() const noexcept { return _atlasProperties.tileSize; }
 
     // Tests in LRU-cache if the tile
-    [[nodiscard]] constexpr bool contains(crispy::StrongHash const& _id) const noexcept;
+    [[nodiscard]] constexpr bool contains(crispy::StrongHash const& id) const noexcept;
 
     // Return type for in-place tile-construction callback.
     struct TileCreateData
     {
+        TileCreateData(): bitmapFormat {}, bitmapSize {}, metadata {} {}
+
+        TileCreateData(Buffer bitmap, Format bitmapFormat, ImageSize bitmapSize, Metadata metadata):
+            bitmap(std::move(bitmap)),
+            bitmapFormat(bitmapFormat),
+            bitmapSize(bitmapSize),
+            metadata(std::move(metadata))
+        {
+        }
+
         Buffer bitmap; // RGBA bitmap data
         Format bitmapFormat;
         ImageSize bitmapSize;
@@ -290,7 +300,7 @@ class TextureAtlas
     // Receives a reference to the metadata of a direct-mapped tile slot.
     //
     // The index must be between 0 and number of direct-mapped tiles minus 1.
-    TileAttributes<Metadata> const& directMapped(uint32_t index) const;
+    [[nodiscard]] TileAttributes<Metadata> const& directMapped(uint32_t index) const;
 
     [[nodiscard]] bool isDirectMappingEnabled() const noexcept { return !_directMapping.empty(); }
 
@@ -309,7 +319,8 @@ class TextureAtlas
     using TileCachePtr = typename TileCache::Ptr;
 
     template <typename CreateTileDataFn>
-    std::optional<TileAttributes<Metadata>> constructTile(CreateTileDataFn fn, uint32_t entryIndex);
+    std::optional<TileAttributes<Metadata>> constructTile(CreateTileDataFn createTileData,
+                                                          uint32_t entryIndex);
 
     AtlasBackend& _backend;
     AtlasProperties _atlasProperties;
@@ -360,7 +371,7 @@ struct DirectMappingAllocator
     /// Allocates a new DirectMapping container.
     ///
     /// Returns either mapping for the fully requested count or an empty mapping.
-    DirectMapping<Metadata> allocate(uint32_t count)
+    [[nodiscard]] DirectMapping<Metadata> allocate(uint32_t count)
     {
         if (!enabled)
             return DirectMapping<Metadata> {};
@@ -390,7 +401,7 @@ constexpr auto sliced(Width tileWidth, uint32_t offsetX, ImageSize bitmapSize)
         uint32_t offsetX;
         ImageSize bitmapSize;
 
-        struct iterator
+        struct iterator // NOLINT(readability-identifier-naming)
         {
             Width tileWidth;
             TileSliceIndex value;
@@ -418,7 +429,7 @@ constexpr auto sliced(Width tileWidth, uint32_t offsetX, ImageSize bitmapSize)
             return unbox<uint32_t>(bitmapSize.width) + c;
         }
 
-        constexpr iterator begin() noexcept
+        [[nodiscard]] constexpr iterator begin() noexcept
         {
             return iterator { tileWidth,
                               TileSliceIndex {
@@ -427,7 +438,8 @@ constexpr auto sliced(Width tileWidth, uint32_t offsetX, ImageSize bitmapSize)
                                   unbox<uint32_t>(tileWidth) // end
                               } };
         }
-        constexpr iterator end() noexcept
+
+        [[nodiscard]] constexpr iterator end() noexcept
         {
             return iterator { tileWidth,
                               TileSliceIndex {
@@ -532,9 +544,9 @@ TextureAtlas<Metadata>::TextureAtlas(AtlasBackend& backend, AtlasProperties atla
 }
 
 template <typename Metadata>
-constexpr bool TextureAtlas<Metadata>::contains(crispy::StrongHash const& _id) const noexcept
+constexpr bool TextureAtlas<Metadata>::contains(crispy::StrongHash const& id) const noexcept
 {
-    return _tileCache->contains(_id);
+    return _tileCache->contains(id);
 }
 
 template <typename Metadata>
@@ -572,11 +584,11 @@ auto TextureAtlas<Metadata>::constructTile(CreateTileDataFn createTileData, uint
 template <typename Metadata>
 template <typename CreateTileDataFn>
 TileAttributes<Metadata>& TextureAtlas<Metadata>::get_or_emplace(crispy::StrongHash const& key,
-                                                                 CreateTileDataFn createTileData)
+                                                                 CreateTileDataFn constructValue)
 {
     return _tileCache->get_or_emplace(key,
                                       [&](uint32_t entryIndex) -> std::optional<TileAttributes<Metadata>> {
-                                          return constructTile(std::move(createTileData), entryIndex);
+                                          return constructTile(std::move(constructValue), entryIndex);
                                       });
 }
 
@@ -589,17 +601,17 @@ TileAttributes<Metadata> const* TextureAtlas<Metadata>::try_get(crispy::StrongHa
 template <typename Metadata>
 template <typename CreateTileDataFn>
 [[nodiscard]] TileAttributes<Metadata> const* TextureAtlas<Metadata>::get_or_try_emplace(
-    crispy::StrongHash const& key, CreateTileDataFn createTileData)
+    crispy::StrongHash const& key, CreateTileDataFn constructValue)
 {
     return _tileCache->get_or_try_emplace(
         key, [&](uint32_t entryIndex) -> std::optional<TileAttributes<Metadata>> {
-            return constructTile(std::move(createTileData), entryIndex);
+            return constructTile(std::move(constructValue), entryIndex);
         });
 }
 
 template <typename Metadata>
 template <typename CreateTileDataFn>
-void TextureAtlas<Metadata>::emplace(crispy::StrongHash const& key, CreateTileDataFn createTileData)
+void TextureAtlas<Metadata>::emplace(crispy::StrongHash const& key, CreateTileDataFn constructValue)
 {
     // clang-format off
     _tileCache->emplace(
@@ -610,7 +622,7 @@ void TextureAtlas<Metadata>::emplace(crispy::StrongHash const& key, CreateTileDa
                 [&](TileLocation location)
                 -> std::optional<TileCreateData>
                 {
-                    return { createTileData(location) };
+                    return { constructValue(location) };
                 },
                 entryIndex
             ).value();

@@ -311,12 +311,12 @@ namespace detail
 
             [[nodiscard]] constexpr optional<pair<uint8_t, Thickness>> get_dashed_horizontal() const noexcept
             {
-                return get_dashed(left_, right_);
+                return getDashed(left_, right_);
             }
 
             [[nodiscard]] constexpr optional<pair<uint8_t, Thickness>> get_dashed_vertical() const noexcept
             {
-                return get_dashed(up_, down_);
+                return getDashed(up_, down_);
             }
 
             [[nodiscard]] constexpr Box vertical(Line value = Light)
@@ -336,8 +336,8 @@ namespace detail
             }
 
           private:
-            [[nodiscard]] constexpr optional<pair<uint8_t, Thickness>> get_dashed(Line a,
-                                                                                  Line b) const noexcept
+            [[nodiscard]] static constexpr optional<pair<uint8_t, Thickness>> getDashed(Line a,
+                                                                                        Line b) noexcept
             {
                 if (a != b)
                     return nullopt;
@@ -1017,7 +1017,7 @@ Renderable::AtlasTileAttributes const* BoxDrawingRenderer::getOrCreateCachedTile
         });
 }
 
-bool BoxDrawingRenderer::renderable(char32_t codepoint) const noexcept
+bool BoxDrawingRenderer::renderable(char32_t codepoint) noexcept
 {
     auto const ascending = [codepoint](char32_t a, char32_t b) noexcept -> bool {
         return a <= codepoint && codepoint <= b;

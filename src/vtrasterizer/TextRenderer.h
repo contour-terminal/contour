@@ -45,7 +45,7 @@
 namespace terminal::rasterizer
 {
 
-text::font_locator& createFontLocator(FontLocatorEngine _engine);
+text::font_locator& createFontLocator(FontLocatorEngine engine);
 
 struct FontKeys
 {
@@ -72,12 +72,12 @@ class TextRenderer: public Renderable
                  text::shaper& textShaper,
                  FontDescriptions& fontDescriptions,
                  FontKeys const& fontKeys,
-                 TextRendererEvents& textRendererEventHandler);
+                 TextRendererEvents& eventHandler);
 
     void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
     void setTextureAtlas(TextureAtlas& atlas) override;
 
-    void inspect(std::ostream& _textOutput) const override;
+    void inspect(std::ostream& textOutput) const override;
 
     void clearCache() override;
 
@@ -90,7 +90,7 @@ class TextRenderer: public Renderable
 
     /// Renders a given terminal's grid cell that has been
     /// transformed into a RenderCell.
-    void renderCell(RenderCell const& _cell);
+    void renderCell(RenderCell const& cell);
 
     void renderCell(CellLocation position,
                     std::u32string_view graphemeCluster,
@@ -112,7 +112,7 @@ class TextRenderer: public Renderable
     /// Gets the text shaping result of the current text cluster group
     text::shape_result const& getOrCreateCachedGlyphPositions(crispy::StrongHash hash);
     text::shape_result createTextShapedGlyphPositions();
-    text::shape_result shapeTextRun(unicode::run_segmenter::range const& _run);
+    text::shape_result shapeTextRun(unicode::run_segmenter::range const& run);
     void flushTextClusterGroup();
 
     AtlasTileAttributes const* getOrCreateRasterizedMetadata(crispy::StrongHash const& hash,
@@ -125,12 +125,14 @@ class TextRenderer: public Renderable
      */
     std::optional<TextureAtlas::TileCreateData> createSlicedRasterizedGlyph(
         atlas::TileLocation tileLocation,
-        text::glyph_key const& id,
+        text::glyph_key const& glyphKey,
         unicode::PresentationStyle presentation,
         crispy::StrongHash const& hash);
 
     std::optional<TextureAtlas::TileCreateData> createRasterizedGlyph(
-        atlas::TileLocation tileLocation, text::glyph_key const& id, unicode::PresentationStyle presentation);
+        atlas::TileLocation tileLocation,
+        text::glyph_key const& glyphKey,
+        unicode::PresentationStyle presentation);
 
     void restrictToTileSize(TextureAtlas::TileCreateData& tileCreateData);
 
@@ -138,9 +140,7 @@ class TextRenderer: public Renderable
                                           AtlasTileAttributes const& tileAttributes,
                                           text::glyph_position const& gpos) const noexcept;
 
-    void renderRasterizedGlyph(crispy::Point targetSurfacePosition,
-                               RGBAColor glyphColor,
-                               AtlasTileAttributes const& attributes);
+    void renderRasterizedGlyph(crispy::Point pen, RGBAColor color, AtlasTileAttributes const& attributes);
 
     // general properties
     //

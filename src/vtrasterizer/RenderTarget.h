@@ -109,14 +109,14 @@ class RenderTarget
 
     /// Sets the render target's size in pixels.
     /// This is the size that can be rendered to.
-    virtual void setRenderSize(ImageSize _size) = 0;
+    virtual void setRenderSize(ImageSize size) = 0;
 
-    virtual void setMargin(PageMargin _margin) = 0;
+    virtual void setMargin(PageMargin margin) = 0;
 
     virtual atlas::AtlasBackend& textureScheduler() = 0;
 
     virtual void setBackgroundImage(
-        std::shared_ptr<terminal::BackgroundImage const> const& _backgroundImage) = 0;
+        std::shared_ptr<terminal::BackgroundImage const> const& backgroundImage) = 0;
 
     /// Fills a rectangular area with the given solid color.
     virtual void renderRectangle(int x, int y, Width, Height, RGBAColor color) = 0;
@@ -125,10 +125,10 @@ class RenderTarget
         std::function<void(std::vector<uint8_t> const& /*_rgbaBuffer*/, ImageSize /*_pixelSize*/)>;
 
     /// Schedules taking a screenshot of the current scene and forwards it to the given callback.
-    virtual void scheduleScreenshot(ScreenshotCallback _callback) = 0;
+    virtual void scheduleScreenshot(ScreenshotCallback callback) = 0;
 
     /// Clears the target surface with the given fill color.
-    virtual void clear(terminal::RGBAColor _fillColor) = 0;
+    virtual void clear(terminal::RGBAColor fillColor) = 0;
 
     /// Executes all previously scheduled render commands.
     virtual void execute(std::chrono::steady_clock::time_point now) = 0;
@@ -163,32 +163,33 @@ class Renderable
     virtual void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator);
     virtual void setTextureAtlas(TextureAtlas& atlas) { _textureAtlas = &atlas; }
 
-    TextureAtlas::TileCreateData createTileData(atlas::TileLocation tileLocation,
-                                                std::vector<uint8_t> bitmap,
-                                                atlas::Format bitmapFormat,
-                                                ImageSize bitmapSize,
-                                                RenderTileAttributes::X x,
-                                                RenderTileAttributes::Y y,
-                                                uint32_t fragmentShaderSelector);
+    [[nodiscard]] TextureAtlas::TileCreateData createTileData(atlas::TileLocation tileLocation,
+                                                              std::vector<uint8_t> bitmap,
+                                                              atlas::Format bitmapFormat,
+                                                              ImageSize bitmapSize,
+                                                              RenderTileAttributes::X x,
+                                                              RenderTileAttributes::Y y,
+                                                              uint32_t fragmentShaderSelector);
 
-    TextureAtlas::TileCreateData createTileData(atlas::TileLocation tileLocation,
-                                                std::vector<uint8_t> bitmap,
-                                                atlas::Format bitmapFormat,
-                                                ImageSize bitmapSize,
-                                                ImageSize renderBitmapSize,
-                                                RenderTileAttributes::X x,
-                                                RenderTileAttributes::Y y,
-                                                uint32_t fragmentShaderSelector);
+    [[nodiscard]] TextureAtlas::TileCreateData createTileData(atlas::TileLocation tileLocation,
+                                                              std::vector<uint8_t> bitmap,
+                                                              atlas::Format bitmapFormat,
+                                                              ImageSize bitmapSize,
+                                                              ImageSize renderBitmapSize,
+                                                              RenderTileAttributes::X x,
+                                                              RenderTileAttributes::Y y,
+                                                              uint32_t fragmentShaderSelector);
 
-    Renderable::TextureAtlas::TileCreateData sliceTileData(
+    [[nodiscard]] Renderable::TextureAtlas::TileCreateData sliceTileData(
         Renderable::TextureAtlas::TileCreateData const& createData,
         TileSliceIndex sliceIndex,
         atlas::TileLocation tileLocation);
 
-    atlas::RenderTile createRenderTile(atlas::RenderTile::X x,
-                                       atlas::RenderTile::Y y,
-                                       RGBAColor color,
-                                       Renderable::AtlasTileAttributes const& attributes);
+    [[nodiscard]] static atlas::RenderTile createRenderTile(
+        atlas::RenderTile::X x,
+        atlas::RenderTile::Y y,
+        RGBAColor color,
+        Renderable::AtlasTileAttributes const& attributes);
 
     void renderTile(atlas::RenderTile::X x,
                     atlas::RenderTile::Y y,

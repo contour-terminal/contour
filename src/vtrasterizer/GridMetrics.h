@@ -52,7 +52,7 @@ struct GridMetrics
     PageSize pageSize;  // page size in column- and line count
     ImageSize cellSize; // grid cell size in pixels
 
-    int baseline; // glyph's baseline position relative to cell bottom.
+    int baseline = 0; // glyph's baseline position relative to cell bottom.
 
     struct
     {

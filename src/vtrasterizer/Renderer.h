@@ -59,7 +59,7 @@ class Renderer
      * @p atlasDirectMapping Indicates whether or not direct mapped tiles are allowed.
      * @p atlasTileCount     Number of tiles guaranteed to be available in LRU cache.
      */
-    Renderer(PageSize screenSize,
+    Renderer(PageSize pageSize,
              FontDescriptions fontDescriptions,
              ColorPalette const& colorPalette,
              Opacity backgroundOpacity,
@@ -145,7 +145,7 @@ class Renderer
     crispy::LRUCapacity _atlasTileCount;
     bool _atlasDirectMapping;
 
-    RenderTarget* _renderTarget;
+    RenderTarget* _renderTarget = nullptr;
 
     Renderable::DirectMappingAllocator _directMappingAllocator;
     std::unique_ptr<Renderable::TextureAtlas> _textureAtlas;
