@@ -1,3 +1,5 @@
+# This is a **quick** style analysis job that's meaningful to run for
+# every commit whatsoever, just like the continuous build.
 name: Checks
 
 on:
@@ -32,6 +34,14 @@ jobs:
     - name: "Checking for open PR-related TODO items"
       run: ./scripts/check-pr-todos.sh
 
+  editorconfig:
+    name: "Check editorconfig"
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v3
+      - uses: editorconfig-checker/action-editorconfig-checker@main
+      - run: editorconfig-checker
+
   check_clang_format:
     name: "Check C++ style"
     runs-on: ubuntu-20.04
@@ -44,10 +54,63 @@ jobs:
         check-path: 'src'
         #exclude-regex: 'sse2neon.h'
 
-  editorconfig:
-    name: "Check editorconfig"
-    runs-on: ubuntu-20.04
+  clang_tidy:
+    name: "Clang-Tidy verifying checks"
+    runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v2
-      - uses: editorconfig-checker/action-editorconfig-checker@main
-      - run: editorconfig-checker
+      - name: "Check out repository"
+        uses: actions/checkout@v3
+      - name: "update APT package database"
+        run: sudo apt -q update && sudo apt upgrade -y
+      - name: Installing xmllint for ci-set-vars
+        run: sudo apt -qy install libxml2-utils
+      - name: "Set variables for Contour build-like CI"
+        id: set_vars
+        run: ./scripts/ci-set-vars.sh
+        env:
+          REPOSITORY: "${{ github.event.repository.name }}"
+      - name: "Install build dependencies"
+        # Note: Keep this in sync with that in build.yml!
+        run: sudo ./scripts/install-deps.sh
+      - name: "Post-fix embedded dependency permissions."
+        run: sudo find _deps/sources -exec chown $UID {} \;
+      - name: "Prepare building Contour"
+        # Note: Keep this in sync with that in build.yml!
+        run: |
+          BUILD_DIR="Build" \
+            CMAKE_BUILD_TYPE="Debug" \
+            CXX="g++-11" \
+            ./scripts/ci-prepare-contour.sh
+
+      - name: "Execute Clang-Tidy"
+        uses: whisperity/codechecker-analysis-action@v1
+        id: codechecker
+        continue-on-error: true
+        with:
+          # CodeChecker version. This currently misreports as an 'rc' but is
+          # in fact not an RC...
+          version: '6.21.0'
+          llvm-version: '15'
+
+          config: .github/codechecker/config-verify.json
+
+          build-command: "cd Build && cmake --build . -- -j3"
+
+      - name: "Upload HTML reports"
+        uses: actions/upload-artifact@v3
+        with:
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-codechecker-${{ steps.codechecker.outputs.codechecker-version }}+${{ steps.codechecker.outputs.codechecker-hash }}-llvm-${{ steps.codechecker.outputs.llvm-version }}-results"
+          path: "${{ steps.codechecker.outputs.result-html-dir }}"
+          if-no-files-found: error
+      - name: "Upload analysis failure reproducers"
+        uses: actions/upload-artifact@v3
+        with:
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-codechecker-${{ steps.codechecker.outputs.codechecker-version }}+${{ steps.codechecker.outputs.codechecker-hash }}-llvm-${{ steps.codechecker.outputs.llvm-version }}-failure-zips"
+          path: "${{ steps.codechecker.outputs.analyze-output }}/failed"
+          if-no-files-found: ignore
+
+      - name: "Break build if CodeChecker reported any findings"
+        if: ${{ steps.codechecker.outputs.warnings == 'true' }}
+        run: |
+          echo "::error title=Clang-Tidy::Style and code health verification checks reported."
+          exit 1

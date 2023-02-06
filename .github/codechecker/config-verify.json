@@ -1,0 +1,26 @@
+{
+  "analyze": [
+    "--analyzers=clang-tidy",
+    "--skip=.github/codechecker/skipfile.txt",
+    "--disable=default",
+    "--disable=clang-diagnostic",
+    "--enable=cert-dcl16-c",
+    "--checker-config", "clang-tidy:cert-dcl16-c:NewSuffixes=L;LL;LU;LLU",
+    "--enable=readability-identifier-naming",
+    "--checker-config", "clang-tidy:readability-identifier-naming.ClassCase=CamelCase",
+    "--checker-config", "clang-tidy:readability-identifier-naming.ClassMemberCase=camelBack",
+    "--checker-config", "clang-tidy:readability-identifier-naming.ClassMethodCase=camelBack",
+    "--checker-config", "clang-tidy:readability-identifier-naming.ConstantMemberCase=camelBack",
+    "--checker-config", "clang-tidy:readability-identifier-naming.ConstantMemberPrefix='_'",
+    "--checker-config", "clang-tidy:readability-identifier-naming.EnumCase=CamelCase",
+    "--checker-config", "clang-tidy:readability-identifier-naming.EnumConstantCase=CamelCase",
+    "--checker-config", "clang-tidy:readability-identifier-naming.ParameterCase=camelBack",
+    "--checker-config", "clang-tidy:readability-identifier-naming.ParameterPrefix=\"\"",
+    "--checker-config", "clang-tidy:readability-identifier-naming.PrivateMemberPrefix='_'",
+    "--checker-config", "clang-tidy:readability-identifier-naming.PublicMemberPrefix=\"\"",
+    "--checker-config", "clang-tidy:readability-identifier-naming.ScopedEnumConstantCase=CamelCase"
+  ],
+  "parse": [
+    "--skip=.github/codechecker/skipfile.txt"
+  ]
+}
