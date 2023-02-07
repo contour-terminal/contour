@@ -113,7 +113,7 @@ namespace // {{{ helper
         for (size_t i = 0; i < context.currentCommand.size(); ++i) // TODO: use crispy::indexed()
         {
             Command const* v = context.currentCommand.at(i);
-            if (i)
+            if (i != 0)
                 output += delim;
             output += v->name;
         }
@@ -290,7 +290,7 @@ namespace // {{{ helper
         auto const current = currentToken(context);
         if (matchPrefix(current, "--")) // POSIX-style long-option
         {
-            if (auto const i = current.find('='); i != current.npos)
+            if (auto const i = current.find('='); i != std::string_view::npos)
             {
                 auto const name = current.substr(2, i - 2);
                 auto const valueText = current.substr(i + 1);
@@ -471,6 +471,7 @@ namespace // {{{ helper
         for (Option const& option: command.options)
         {
             auto const optionKey = fmt::format("{}.{}", key, option.name.longName);
+            // NOLINTNEXTLINE(readability-container-contains)
             if (option.presence == Presence::Required && !context.output.values.count(optionKey))
                 throw invalid_argument(fmt::format("Missing option: {}", optionKey));
         }
@@ -543,7 +544,7 @@ namespace // {{{ helpers
     {
         auto constexpr TabWidth = 4u;
 
-        if (cursor)
+        if (cursor != nullptr)
             *cursor += level * TabWidth;
 
         return spaces(static_cast<size_t>(level) * TabWidth);
@@ -554,6 +555,7 @@ namespace // {{{ helpers
     {
         return [style](string_view text, HelpElement element) -> string {
             auto const [pre, post] = [&]() -> pair<string_view, string_view> {
+                // NOLINTNEXTLINE(readability-container-contains)
                 if (style.colors.has_value() && style.colors.value().count(element))
                     return { style.colors.value().at(element), "\033[m"sv };
                 else
@@ -568,11 +570,11 @@ namespace // {{{ helpers
             for (;;)
             {
                 size_t const b = text.find("://", a);
-                if (b == text.npos || !b)
+                if (b == std::string_view::npos || (b == 0))
                     break;
 
                 size_t left = b;
-                while (left > 0 && isalpha(text.at(left - 1)))
+                while (left > 0 && isalpha(text.at(left - 1))) // NOLINT(readability-implicit-bool-conversion)
                     --left;
 
                 size_t right = b + 3;
@@ -690,7 +692,7 @@ namespace // {{{ helpers
                     os << ' ' << colorize(placeholder, HelpElement::OptionValue);
                 break;
             case OptionStyle::Posix:
-                if (name.shortName)
+                if (name.shortName != '\0')
                 {
                     os << colorize("-", HelpElement::OptionDash);
                     os << colorize(string(1, name.shortName), HelpElement::OptionName);

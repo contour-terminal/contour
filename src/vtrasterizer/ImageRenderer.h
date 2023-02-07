@@ -32,9 +32,9 @@ namespace terminal::rasterizer
 // NB: Ensure this struct does NOT contain padding (or adapt strong hash creation).
 struct ImageFragmentKey
 {
-    ImageId const imageId;
-    CellLocation const offset;
-    ImageSize const size;
+    ImageId imageId;
+    CellLocation offset;
+    ImageSize size;
 
     bool operator==(ImageFragmentKey const& b) const noexcept
     {

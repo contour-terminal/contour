@@ -55,14 +55,14 @@ namespace detail
     }
 } // namespace detail
 
-struct [[nodiscard]] DPI
+struct [[nodiscard]] DPI // NOLINT(readability-identifier-naming)
 {
     int x;
     int y;
 
     // constexpr DPI(DPI const&) = default;
     // DPI& operator=(DPI const&) = default;
-    constexpr bool operator!() noexcept { return !x && !y; }
+    constexpr bool operator!() const noexcept { return !x && !y; }
 };
 
 constexpr bool operator==(DPI a, DPI b) noexcept
@@ -87,6 +87,7 @@ constexpr double average(DPI dpi) noexcept
     return 0.5 * static_cast<double>(dpi.x + dpi.y);
 }
 
+// NOLINTBEGIN(readability-identifier-naming)
 enum class font_weight
 {
     thin,
@@ -102,6 +103,7 @@ enum class font_weight
     black,
     extra_black, // aka. ultrablack
 };
+// NOLINTEND(readability-identifier-naming)
 
 constexpr std::optional<font_weight> make_font_weight(std::string_view text)
 {
@@ -122,12 +124,14 @@ constexpr std::optional<font_weight> make_font_weight(std::string_view text)
                                pair { "extra black"sv, font_weight::extra_black } });
 }
 
+// NOLINTBEGIN(readability-identifier-naming)
 enum class font_slant
 {
     normal,
     italic,
     oblique
 };
+// NOLINTEND(readability-identifier-naming)
 
 constexpr std::optional<font_slant> make_font_slant(std::string_view text)
 {
@@ -139,11 +143,13 @@ constexpr std::optional<font_slant> make_font_slant(std::string_view text)
                                pair { "oblique"sv, font_slant::oblique } });
 }
 
+// NOLINTBEGIN(readability-identifier-naming)
 enum class font_spacing
 {
     proportional,
     mono
 };
+// NOLINTEND(readability-identifier-naming)
 
 constexpr std::optional<font_spacing> make_font_spacing(std::string_view text)
 {
@@ -261,9 +267,9 @@ struct glyph_key
 
 #if defined(GLYPH_KEY_DEBUG)
     std::u32string text = {};
-    static constexpr inline bool Debug = true;
+    static constexpr inline bool debug = true;
 #else
-    static constexpr inline bool Debug = false;
+    static constexpr inline bool debug = false;
 #endif
 };
 
@@ -278,6 +284,7 @@ constexpr bool operator<(glyph_key const& a, glyph_key const& b) noexcept
            || (a.font.value == b.font.value && a.size.pt == b.size.pt && a.index.value < b.index.value);
 }
 
+// NOLINTBEGIN(readability-identifier-naming)
 enum class render_mode
 {
     bitmap, //!< bitmaps are preferred
@@ -286,6 +293,7 @@ enum class render_mode
     lcd,    //!< LCD-optimized anti-aliasing
     color   //!< embedded color bitmaps are preferred
 };
+// NOLINTEND(readability-identifier-naming)
 
 } // namespace text
 

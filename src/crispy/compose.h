@@ -36,17 +36,17 @@
  * @return the result of applying all parameters to the composed function.
  */
 template <typename F, typename... Args>
-constexpr auto compose(F _fun, Args... _args) -> std::pair<F, std::tuple<Args...>>
+constexpr auto compose(F fun, Args... args) -> std::pair<F, std::tuple<Args...>>
 {
-    return std::pair { std::move(_fun), std::make_tuple(std::forward<Args>(_args)...) };
+    return std::pair { std::move(fun), std::make_tuple(std::forward<Args>(args)...) };
 }
 
 /**
  * Function composition operator, to be used with the compose() function.
  */
 template <typename S, typename F, typename... Args>
-constexpr auto operator>>(S _input, std::pair<F, std::tuple<Args...>> _chain)
+constexpr auto operator>>(S input, std::pair<F, std::tuple<Args...>> chain)
 {
-    return std::apply(_chain.first,
-                      std::tuple_cat(std::move(_chain.second), std::tuple<S> { std::move(_input) }));
+    return std::apply(chain.first,
+                      std::tuple_cat(std::move(chain.second), std::tuple<S> { std::move(input) }));
 }

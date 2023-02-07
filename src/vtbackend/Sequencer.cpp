@@ -34,6 +34,7 @@ Sequencer::Sequencer(Terminal& terminal): _terminal { terminal }, _parameterBuil
 {
 }
 
+// NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 void Sequencer::error(std::string_view errorString)
 {
     if (VTParserLog)
@@ -48,7 +49,7 @@ void Sequencer::print(char32_t codepoint)
 
 size_t Sequencer::print(string_view chars, size_t cellCount)
 {
-    assert(chars.size() != 0);
+    assert(!chars.empty());
 
     _terminal.state().instructionCounter += chars.size();
     _terminal.sequenceHandler().writeText(chars, cellCount);

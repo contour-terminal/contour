@@ -59,6 +59,7 @@ enum class C0 : char
     DEL = 0x7F, //!< Delete
 };
 
+// NOLINTBEGIN(readability-identifier-naming)
 enum class C1_7bit
 {
     SCS_G0 = 0x28,       //!< Set Character Set (0)
@@ -136,6 +137,7 @@ enum class C1_8bit
     PM = 0x9E,   //!< Privacy Message
     APC = 0x9F,  //!< Application Program Command
 };
+// NOLINTEND(readability-identifier-naming)
 
 constexpr std::string_view to_short_string(C0 code)
 {

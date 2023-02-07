@@ -446,36 +446,36 @@ void Screen<Cell>::advanceCursorAfterWrite(ColumnCount n) noexcept
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::writeText(string_view chars, size_t cellCount)
+void Screen<Cell>::writeText(string_view text, size_t cellCount)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
     if (VTTraceSequenceLog)
-        VTTraceSequenceLog()("text({} bytes, {} cells): \"{}\"", chars.size(), cellCount, escape(chars));
+        VTTraceSequenceLog()("text({} bytes, {} cells): \"{}\"", text.size(), cellCount, escape(text));
 #endif
     assert(cellCount <= static_cast<size_t>(pageSize().columns.value - _cursor.position.column.value));
 
-    chars = tryEmplaceChars(chars, cellCount);
-    if (chars.empty())
+    text = tryEmplaceChars(text, cellCount);
+    if (text.empty())
         return;
 
     // Making use of the optimized code path for the input characters did NOT work, so we need to first
     // convert UTF-8 to UTF-32 codepoints (reusing the logic in VT parser) and pass these codepoints
     // to the grapheme cluster processor.
 
-    for (char const ch: chars)
+    for (char const ch: text)
         _state.parser.printUtf8Byte(ch);
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::writeTextFromExternal(std::string_view chars)
+void Screen<Cell>::writeTextFromExternal(std::string_view text)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
     if (VTTraceSequenceLog)
-        VTTraceSequenceLog()("external text: \"{}\"", chars);
+        VTTraceSequenceLog()("external text: \"{}\"", text);
 #endif
 
-    for (char32_t const ch: unicode::convert_to<char32_t>(chars))
+    for (char32_t const ch: unicode::convert_to<char32_t>(text))
         writeTextInternal(ch);
 }
 
@@ -560,9 +560,9 @@ void Screen<Cell>::writeCharToCurrentAndAdvance(char32_t codepoint) noexcept
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::clearAndAdvance(int graphemeClusterWidth) noexcept
+void Screen<Cell>::clearAndAdvance(int offset) noexcept
 {
-    if (graphemeClusterWidth == 0)
+    if (offset == 0)
         return;
 
     bool const cursorInsideMargin =
@@ -570,9 +570,9 @@ void Screen<Cell>::clearAndAdvance(int graphemeClusterWidth) noexcept
     auto const cellsAvailable = cursorInsideMargin
                                     ? *(margin().horizontal.to - _cursor.position.column) - 1
                                     : *_settings.pageSize.columns - *_cursor.position.column - 1;
-    auto const n = min(graphemeClusterWidth, cellsAvailable);
+    auto const n = min(offset, cellsAvailable);
 
-    if (n == graphemeClusterWidth)
+    if (n == offset)
     {
         _cursor.position.column++;
         auto& line = currentLine();
@@ -627,12 +627,12 @@ optional<LineOffset> Screen<Cell>::findMarkerUpwards(LineOffset startLine) const
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-optional<LineOffset> Screen<Cell>::findMarkerDownwards(LineOffset lineOffset) const
+optional<LineOffset> Screen<Cell>::findMarkerDownwards(LineOffset startLine) const
 {
     if (_state.screenType != ScreenType::Primary)
         return nullopt;
 
-    auto const top = std::clamp(lineOffset,
+    auto const top = std::clamp(startLine,
                                 -boxed_cast<LineOffset>(historyLineCount()),
                                 +boxed_cast<LineOffset>(_settings.pageSize.lines) - 1);
 
@@ -1158,18 +1158,21 @@ void Screen<Cell>::insertCharacters(ColumnCount n)
 /// Inserts @p n characters at given line @p lineNo.
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::insertChars(LineOffset lineNo, ColumnCount n)
+void Screen<Cell>::insertChars(LineOffset lineOffset, ColumnCount columnsToInsert)
 {
-    auto const sanitizedN = min(*n, *margin().horizontal.to - *logicalCursorPosition().column + 1);
+    auto const sanitizedN =
+        min(*columnsToInsert, *margin().horizontal.to - *logicalCursorPosition().column + 1);
 
-    auto column0 = _grid.lineAt(lineNo).inflatedBuffer().begin() + *realCursorPosition().column;
-    auto column1 = _grid.lineAt(lineNo).inflatedBuffer().begin() + *margin().horizontal.to - sanitizedN + 1;
-    auto column2 = _grid.lineAt(lineNo).inflatedBuffer().begin() + *margin().horizontal.to + 1;
+    auto column0 = _grid.lineAt(lineOffset).inflatedBuffer().begin() + *realCursorPosition().column;
+    auto column1 =
+        _grid.lineAt(lineOffset).inflatedBuffer().begin() + *margin().horizontal.to - sanitizedN + 1;
+    auto column2 = _grid.lineAt(lineOffset).inflatedBuffer().begin() + *margin().horizontal.to + 1;
 
     rotate(column0, column1, column2);
 
-    for (Cell& cell: _grid.lineAt(lineNo).useRange(boxed_cast<ColumnOffset>(_cursor.position.column),
-                                                   ColumnCount::cast_from(sanitizedN)))
+    for (Cell& cell:
+         _grid.lineAt(lineOffset)
+             .useRange(boxed_cast<ColumnOffset>(_cursor.position.column), ColumnCount::cast_from(sanitizedN)))
     {
         cell.write(_cursor.graphicsRendition, L' ', 1);
     }
@@ -1444,9 +1447,9 @@ void Screen<Cell>::moveCursorToBeginOfLine()
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::moveCursorToLine(LineOffset row)
+void Screen<Cell>::moveCursorToLine(LineOffset n)
 {
-    moveCursorTo(row, _cursor.position.column);
+    moveCursorTo(n, _cursor.position.column);
 }
 
 template <typename Cell>
@@ -1796,7 +1799,7 @@ void Screen<Cell>::singleShiftSelect(CharsetTable table)
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::sixelImage(ImageSize pixelSize, Image::Data&& data)
+void Screen<Cell>::sixelImage(ImageSize pixelSize, Image::Data&& rgbaData)
 {
     auto const columnCount =
         ColumnCount::cast_from(ceilf(float(*pixelSize.width) / float(*_state.cellPixelSize.width)));
@@ -1812,7 +1815,7 @@ void Screen<Cell>::sixelImage(ImageSize pixelSize, Image::Data&& data)
     auto const imageOffset = PixelCoordinate {};
     auto const imageSize = pixelSize;
 
-    shared_ptr<Image const> imageRef = uploadImage(ImageFormat::RGBA, pixelSize, std::move(data));
+    shared_ptr<Image const> imageRef = uploadImage(ImageFormat::RGBA, pixelSize, std::move(rgbaData));
     renderImage(imageRef,
                 topLeft,
                 extent,
@@ -2183,20 +2186,20 @@ void Screen<Cell>::resetDynamicColor(DynamicColorName name)
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::setDynamicColor(DynamicColorName name, RGBColor value)
+void Screen<Cell>::setDynamicColor(DynamicColorName name, RGBColor color)
 {
     switch (name)
     {
-        case DynamicColorName::DefaultForegroundColor: _state.colorPalette.defaultForeground = value; break;
-        case DynamicColorName::DefaultBackgroundColor: _state.colorPalette.defaultBackground = value; break;
-        case DynamicColorName::TextCursorColor: _state.colorPalette.cursor.color = value; break;
-        case DynamicColorName::MouseForegroundColor: _state.colorPalette.mouseForeground = value; break;
-        case DynamicColorName::MouseBackgroundColor: _state.colorPalette.mouseBackground = value; break;
+        case DynamicColorName::DefaultForegroundColor: _state.colorPalette.defaultForeground = color; break;
+        case DynamicColorName::DefaultBackgroundColor: _state.colorPalette.defaultBackground = color; break;
+        case DynamicColorName::TextCursorColor: _state.colorPalette.cursor.color = color; break;
+        case DynamicColorName::MouseForegroundColor: _state.colorPalette.mouseForeground = color; break;
+        case DynamicColorName::MouseBackgroundColor: _state.colorPalette.mouseBackground = color; break;
         case DynamicColorName::HighlightForegroundColor:
-            _state.colorPalette.selection.foreground = value;
+            _state.colorPalette.selection.foreground = color;
             break;
         case DynamicColorName::HighlightBackgroundColor:
-            _state.colorPalette.selection.background = value;
+            _state.colorPalette.selection.background = color;
             break;
     }
 }
@@ -3023,7 +3026,7 @@ namespace impl
             // hyperlink_OSC ::= OSC '8' ';' params ';' URI
             // params := pair (':' pair)*
             // pair := TEXT '=' TEXT
-            if (auto const pos = value.find(';'); pos != value.npos)
+            if (auto const pos = value.find(';'); pos != Sequence::Intermediaries::npos)
             {
                 auto const paramsStr = value.substr(0, pos);
                 auto const params = parseSubParamKeyValuePairs(paramsStr);
@@ -3874,7 +3877,7 @@ optional<CellLocation> Screen<Cell>::searchReverse(std::u32string_view searchTex
 
     // Search reverse until found or exhausted.
     auto lines = _grid.logicalLinesReverseFrom(startPosition.line);
-    for (auto line: lines)
+    for (auto const& line: lines)
     {
         auto result = line.searchReverse(searchText, startPosition.column);
         if (result.has_value())

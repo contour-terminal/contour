@@ -250,7 +250,7 @@ inline std::string decode(std::string_view input)
 {
     std::string output;
     output.resize(decodeLength(input));
-    output.resize(decode(input, &output[0]));
+    output.resize(decode(input, output.data()));
     return output;
 }
 

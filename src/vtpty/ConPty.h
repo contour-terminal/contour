@@ -44,16 +44,16 @@ class ConPty: public Pty
     void resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixels = std::nullopt) override;
 
     PtySlave& slave() noexcept override;
-    HPCON master() const noexcept { return master_; }
+    HPCON master() const noexcept { return _master; }
 
   private:
-    std::mutex mutex_; // used to guard close()
-    PageSize size_;
-    HPCON master_;
-    HANDLE input_;
-    HANDLE output_;
-    std::vector<char> buffer_;
-    std::unique_ptr<PtySlave> slave_;
+    std::mutex _mutex; // used to guard close()
+    PageSize _size;
+    HPCON _master;
+    HANDLE _input;
+    HANDLE _output;
+    std::vector<char> _buffer;
+    std::unique_ptr<PtySlave> _slave;
 };
 
 } // namespace terminal

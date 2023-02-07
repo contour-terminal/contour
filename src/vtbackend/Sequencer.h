@@ -149,12 +149,12 @@ class Sequencer
     void paramDigit(char ch) noexcept;
     void paramSeparator() noexcept;
     void paramSubSeparator() noexcept;
-    void dispatchESC(char function);
-    void dispatchCSI(char function);
+    void dispatchESC(char finalChar);
+    void dispatchCSI(char finalChar);
     void startOSC();
     void putOSC(char ch);
     void dispatchOSC();
-    void hook(char function);
+    void hook(char finalChar);
     void put(char ch);
     void unhook();
     void startAPC() {}

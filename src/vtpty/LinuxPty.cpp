@@ -333,14 +333,14 @@ int LinuxPty::waitForReadable(std::chrono::milliseconds timeout) noexcept
     }
 }
 
-Pty::ReadResult LinuxPty::read(crispy::BufferObject<char>& sink,
+Pty::ReadResult LinuxPty::read(crispy::BufferObject<char>& storage,
                                std::chrono::milliseconds timeout,
                                size_t size)
 {
     if (int fd = waitForReadable(timeout); fd != -1)
     {
-        auto const _l = scoped_lock { sink };
-        if (auto x = readSome(fd, sink.hotEnd(), min(size, sink.bytesAvailable())))
+        auto const _l = scoped_lock { storage };
+        if (auto x = readSome(fd, storage.hotEnd(), min(size, storage.bytesAvailable())))
             return { tuple { x.value(), fd == _stdoutFastPipe.reader() } };
     }
 
@@ -353,7 +353,9 @@ int LinuxPty::write(char const* buf, size_t size)
     tv.tv_sec = 1;
     tv.tv_usec = 0;
 
-    fd_set rfd, wfd, efd;
+    fd_set rfd;
+    fd_set wfd;
+    fd_set efd;
     FD_ZERO(&rfd);
     FD_ZERO(&wfd);
     FD_ZERO(&efd);

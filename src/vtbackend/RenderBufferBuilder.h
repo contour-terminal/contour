@@ -44,7 +44,7 @@ class RenderBufferBuilder
     /// with their grid cells are to be rendered using renderCell().
     ///
     /// @see renderCell
-    void renderTrivialLine(TrivialLineBuffer const& lineBuffer, LineOffset lineNo);
+    void renderTrivialLine(TrivialLineBuffer const& lineBuffer, LineOffset lineOffset);
 
     /// This call is guaranteed to be invoked when the the full page has been rendered.
     void finish() noexcept {}
@@ -115,25 +115,25 @@ class RenderBufferBuilder
     enum class State { Gap, Sequence };
     // clang-format on
 
-    RenderBuffer& output;
-    Terminal const& terminal;
-    std::optional<CellLocation> cursorPosition;
-    LineOffset baseLine;
-    bool reverseVideo;
+    RenderBuffer& _output;
+    Terminal const& _terminal;
+    std::optional<CellLocation> _cursorPosition;
+    LineOffset _baseLine;
+    bool _reverseVideo;
     HighlightSearchMatches _highlightSearchMatches;
     InputMethodData _inputMethodData;
     bool _includeSelection;
     ColumnCount _inputMethodSkipColumns = ColumnCount(0);
 
-    int prevWidth = 0;
-    bool prevHasCursor = false;
-    State state = State::Gap;
-    LineOffset lineNr = LineOffset(0);
-    bool isNewLine = false;
+    int _prevWidth = 0;
+    bool _prevHasCursor = false;
+    State _state = State::Gap;
+    LineOffset _lineNr = LineOffset(0);
+    bool _isNewLine = false;
     bool _useCursorlineColoring = false;
 
     // Offset into the search pattern that has been already matched.
-    size_t searchPatternOffset = 0;
+    size_t _searchPatternOffset = 0;
 };
 
 } // namespace terminal

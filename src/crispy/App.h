@@ -47,14 +47,14 @@ class App
     static void customizeLogStoreOutput();
 
   protected:
-    void listDebugTags();
+    static void listDebugTags();
 
   private:
     int versionAction();
     int licenseAction();
     int helpAction();
 
-    static App* _instance;
+    static App* _instance; // NOLINT(readability-identifier-naming)
 
     std::string _appName;
     std::string _appTitle;

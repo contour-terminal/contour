@@ -409,55 +409,55 @@ namespace
     // clang-format on
 } // namespace
 
-bool StaticDatabase::booleanCapability(Code value) const
+bool StaticDatabase::booleanCapability(Code code) const
 {
     for (auto const& cap: booleanCaps)
-        if (cap.code.code == value.code)
+        if (cap.code.code == code.code)
             return cap.value;
 
     return false;
 }
 
-unsigned StaticDatabase::numericCapability(Code value) const
+unsigned StaticDatabase::numericCapability(Code code) const
 {
     for (auto const& cap: numericalCaps)
-        if (cap.code.code == value.code)
+        if (cap.code.code == code.code)
             return cap.value;
 
     return npos;
 }
 
-string_view StaticDatabase::stringCapability(Code value) const
+string_view StaticDatabase::stringCapability(Code code) const
 {
     for (auto const& cap: stringCaps)
-        if (cap.code.code == value.code)
+        if (cap.code.code == code.code)
             return cap.value;
 
     return {};
 }
 
-bool StaticDatabase::booleanCapability(string_view cap) const
+bool StaticDatabase::booleanCapability(string_view name) const
 {
     for (auto const tcap: booleanCaps)
-        if (tcap.name == cap || tcap.code == cap)
+        if (tcap.name == name || tcap.code == name)
             return tcap.value;
 
     return false;
 }
 
-unsigned StaticDatabase::numericCapability(string_view cap) const
+unsigned StaticDatabase::numericCapability(string_view name) const
 {
     for (auto const tcap: numericalCaps)
-        if (tcap.name == cap || tcap.code == cap)
+        if (tcap.name == name || tcap.code == name)
             return tcap.value;
 
     return npos;
 }
 
-string_view StaticDatabase::stringCapability(string_view cap) const
+string_view StaticDatabase::stringCapability(string_view name) const
 {
     for (auto const tcap: stringCaps)
-        if (tcap.name == cap || tcap.code == cap)
+        if (tcap.name == name || tcap.code == name)
             return tcap.value;
 
     return {};
@@ -499,15 +499,15 @@ string StaticDatabase::terminfo() const
 
     output << "contour|contour-latest|Contour Terminal Emulator,\n";
 
-    for (auto const& cap: std::move(booleans) | actions::sort)
+    for (auto const& cap: move(booleans) | actions::sort)
         if (!cap.name.empty() && cap.value)
             output << "    " << cap.name << ",\n";
 
-    for (auto const& cap: std::move(numbers) | actions::sort)
+    for (auto const& cap: move(numbers) | actions::sort)
         if (!cap.name.empty())
             output << "    " << cap.name << "#" << cap.value << ",\n";
 
-    for (auto const& cap: std::move(strings) | actions::sort)
+    for (auto const& cap: move(strings) | actions::sort)
         if (!cap.name.empty())
             output << "    " << cap.name << "=" << crispy::escape(cap.value, crispy::NumericEscape::Octal)
                    << ",\n";

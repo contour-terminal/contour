@@ -261,7 +261,7 @@ inline std::shared_ptr<ImageFragment> SimpleCell::imageFragment() const noexcept
 inline void SimpleCell::setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage,
                                          CellLocation offset)
 {
-    _imageFragment = std::make_shared<ImageFragment>(rasterizedImage, offset);
+    _imageFragment = std::make_shared<ImageFragment>(std::move(rasterizedImage), offset);
 }
 
 inline HyperlinkId SimpleCell::hyperlink() const noexcept
@@ -281,7 +281,7 @@ namespace CellUtil
 {
     inline bool beginsWith(std::u32string_view text, SimpleCell const& cell) noexcept
     {
-        assert(text.size() != 0);
+        assert(!text.empty());
         return text == cell.codepoints();
     }
 } // namespace CellUtil

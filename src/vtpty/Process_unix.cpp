@@ -127,7 +127,7 @@ Process::Process(string const& path,
                  Environment const& env,
                  bool escapeSandbox,
                  unique_ptr<Pty> pty):
-    d(new Private { path, args, cwd, env, escapeSandbox, std::move(pty) }, [](Private* p) { delete p; })
+    _d(new Private { path, args, cwd, env, escapeSandbox, std::move(pty) }, [](Private* p) { delete p; })
 {
 }
 
@@ -139,20 +139,20 @@ bool Process::isFlatpak()
 
 void Process::start()
 {
-    d->pty->start();
+    _d->pty->start();
 
-    d->pid = fork();
+    _d->pid = fork();
 
     UnixPipe* stdoutFastPipe = [this]() -> UnixPipe* {
-        if (auto* p = dynamic_cast<SystemPty*>(d->pty.get()))
+        if (auto* p = dynamic_cast<SystemPty*>(_d->pty.get()))
             return &p->stdoutFastPipe();
         return nullptr;
     }();
 
-    switch (d->pid)
+    switch (_d->pid)
     {
         default: // in parent
-            d->pty->slave().close();
+            _d->pty->slave().close();
             if (stdoutFastPipe)
                 stdoutFastPipe->closeWriter();
             break;
@@ -160,21 +160,21 @@ void Process::start()
             throw runtime_error { getLastErrorAsString() };
         case 0: // in child
         {
-            (void) d->pty->slave().login();
+            (void) _d->pty->slave().login();
 
-            auto const& cwd = d->cwd.generic_string();
-            if (!isFlatpak() || !d->escapeSandbox)
+            auto const& cwd = _d->cwd.generic_string();
+            if (!isFlatpak() || !_d->escapeSandbox)
             {
-                if (!d->cwd.empty() && chdir(cwd.c_str()) != 0)
+                if (!_d->cwd.empty() && chdir(cwd.c_str()) != 0)
                 {
                     printf("Failed to chdir to \"%s\". %s\n", cwd.c_str(), strerror(errno));
                     exit(EXIT_FAILURE);
                 }
 
-                if (isFlatpak() && !d->escapeSandbox)
+                if (isFlatpak() && !_d->escapeSandbox)
                     setenv("TERMINFO", "/app/share/terminfo", true);
 
-                for (auto&& [name, value]: d->env)
+                for (auto&& [name, value]: _d->env)
                     setenv(name.c_str(), value.c_str(), true);
 
                 if (stdoutFastPipe)
@@ -182,8 +182,8 @@ void Process::start()
             }
 
             char** argv = [stdoutFastPipe, this]() -> char** {
-                if (!isFlatpak() || !d->escapeSandbox)
-                    return createArgv(d->path, d->args, 0);
+                if (!isFlatpak() || !_d->escapeSandbox)
+                    return createArgv(_d->path, _d->args, 0);
 
                 auto const terminfoBaseDirectory =
                     homeDirectory() / ".var/app/org.contourterminal.Contour/terminfo";
@@ -201,22 +201,22 @@ void Process::start()
                         fmt::format("--env={}={}", StdoutFastPipeEnvironmentName, StdoutFastPipeFdStr));
                     realArgs.emplace_back(fmt::format("--forward-fd={}", StdoutFastPipeFdStr));
                 }
-                if (!d->cwd.empty())
-                    realArgs.emplace_back(fmt::format("--directory={}", d->cwd.generic_string()));
+                if (!_d->cwd.empty())
+                    realArgs.emplace_back(fmt::format("--directory={}", _d->cwd.generic_string()));
                 realArgs.emplace_back(fmt::format("--env=TERM={}", "contour"));
-                for (auto&& [name, value]: d->env)
+                for (auto&& [name, value]: _d->env)
                     realArgs.emplace_back(fmt::format("--env={}={}", name, value));
                 if (stdoutFastPipe)
                     realArgs.emplace_back(
                         fmt::format("--env={}={}", StdoutFastPipeEnvironmentName, StdoutFastPipeFd));
-                realArgs.push_back(d->path);
-                for (auto const& arg: d->args)
+                realArgs.push_back(_d->path);
+                for (auto const& arg: _d->args)
                     realArgs.push_back(arg);
 
                 return createArgv("/usr/bin/flatpak-spawn", realArgs, 0);
             }();
 
-            if (auto pty = dynamic_cast<SystemPty*>(d->pty.get()))
+            if (auto* pty = dynamic_cast<SystemPty*>(_d->pty.get()))
             {
                 if (pty->stdoutFastPipe().writer() != -1)
                 {
@@ -237,7 +237,7 @@ void Process::start()
             ::execvp(argv[0], argv);
 
             // Fallback: Try login shell.
-            auto theLoginShell = loginShell(d->escapeSandbox);
+            auto theLoginShell = loginShell(_d->escapeSandbox);
             fprintf(stdout,
                     "\r\n\033[31;1mFailed to spawn \"%s\". %s\033[m\r\nTrying login shell: %s\n",
                     argv[0],
@@ -262,23 +262,23 @@ void Process::start()
 
 Process::~Process()
 {
-    if (d->pid != -1)
+    if (_d->pid != -1)
         (void) wait();
 }
 
 Pty& Process::pty() noexcept
 {
-    return *d->pty;
+    return *_d->pty;
 }
 
 Pty const& Process::pty() const noexcept
 {
-    return *d->pty;
+    return *_d->pty;
 }
 
 optional<Process::ExitStatus> Process::checkStatus() const
 {
-    return d->checkStatus(false);
+    return _d->checkStatus(false);
 }
 
 optional<Process::ExitStatus> Process::Private::checkStatus(bool waitForExit) const
@@ -324,12 +324,12 @@ void Process::terminate(TerminationHint terminationHint)
     if (!alive())
         return;
 
-    ::kill(d->pid, terminationHint == TerminationHint::Hangup ? SIGHUP : SIGTERM);
+    ::kill(_d->pid, terminationHint == TerminationHint::Hangup ? SIGHUP : SIGTERM);
 }
 
 Process::ExitStatus Process::wait()
 {
-    return *d->checkStatus(true);
+    return *_d->checkStatus(true);
 }
 
 vector<string> Process::loginShell(bool escapeSandbox)
@@ -380,7 +380,7 @@ string Process::workingDirectory() const
 #if defined(__linux__)
     try
     {
-        auto const path = FileSystem::path { fmt::format("/proc/{}/cwd", d->pid) };
+        auto const path = FileSystem::path { fmt::format("/proc/{}/cwd", _d->pid) };
         auto const cwd = FileSystem::read_symlink(path);
         return cwd.string();
     }
@@ -393,7 +393,7 @@ string Process::workingDirectory() const
     try
     {
         auto vpi = proc_vnodepathinfo {};
-        auto const pid = tcgetpgrp(unbox<int>(static_cast<SystemPty const*>(d->pty.get())->handle()));
+        auto const pid = tcgetpgrp(unbox<int>(static_cast<SystemPty const*>(_d->pty.get())->handle()));
 
         if (proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &vpi, sizeof(vpi)) <= 0)
             return "."s;

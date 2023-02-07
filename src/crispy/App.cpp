@@ -68,7 +68,7 @@ CLI::HelpStyle helpStyle()
     style.optionStyle = CLI::OptionStyle::Natural;
 
 #if !defined(_WIN32)
-    if (!isatty(STDOUT_FILENO))
+    if (isatty(STDOUT_FILENO) == 0)
     {
         style.colors.reset();
         style.hyperlink = false;
@@ -93,14 +93,14 @@ unsigned screenWidth()
 
 FileSystem::path xdgStateHome()
 {
-    if (auto const* p = getenv("XDG_STATE_HOME"); p && *p)
+    if (auto const* p = getenv("XDG_STATE_HOME"); (p != nullptr) && (*p != '\0'))
         return FileSystem::path(p);
 
 #if defined(_WIN32)
     if (auto const* p = getenv("LOCALAPPDATA"); p && *p)
         return FileSystem::path(p);
 #else
-    if (passwd const* pw = getpwuid(getuid()); pw && pw->pw_dir)
+    if (passwd const* pw = getpwuid(getuid()); (pw != nullptr) && (pw->pw_dir != nullptr))
         return FileSystem::path(pw->pw_dir) / ".local" / "state";
 #endif
 
@@ -255,7 +255,7 @@ void App::customizeLogStoreOutput()
     // A curated list of colors.
     static const bool colorized =
 #if !defined(_WIN32)
-        isatty(STDOUT_FILENO);
+        isatty(STDOUT_FILENO) != 0;
 #else
         true;
 #endif
@@ -266,7 +266,7 @@ void App::customizeLogStoreOutput()
         auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string> {
             if (!colorized)
                 return { "", "", "" };
-            auto const tagStart = "\033[1m";
+            const auto* const tagStart = "\033[1m";
             auto const colorIndex =
                 colors.at(std::hash<string_view> {}(msg.category().name()) % colors.size());
             auto const msgStart = fmt::format("\033[38;5;{}m", colorIndex);
@@ -319,9 +319,9 @@ void App::customizeLogStoreOutput()
         auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string> {
             if (!colorized)
                 return { "", "", "" };
-            auto const tagStart = "\033[1;31m";
-            auto const msgStart = "\033[31m";
-            auto const resetSGR = "\033[m";
+            const auto* const tagStart = "\033[1;31m";
+            const auto* const msgStart = "\033[31m";
+            const auto* const resetSGR = "\033[m";
             return { tagStart, msgStart, resetSGR };
         }();
 

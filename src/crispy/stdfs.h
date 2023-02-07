@@ -17,7 +17,7 @@
     #include <filesystem>
     #include <system_error>
 namespace FileSystem = std::filesystem;
-typedef std::error_code FileSystemError;
+using FileSystemError = std::error_code;
 #elif defined(USING_BOOST_FILESYSTEM) && (USING_BOOST_FILESYSTEM)
     #include <boost/filesystem.hpp>
 namespace FileSystem = boost::filesystem;

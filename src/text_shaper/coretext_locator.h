@@ -29,6 +29,6 @@ class coretext_locator: public font_locator
 
   private:
     struct Private;
-    std::unique_ptr<Private, void (*)(Private*)> d;
+    std::unique_ptr<Private, void (*)(Private*)> _d;
 };
 } // namespace text

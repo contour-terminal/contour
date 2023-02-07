@@ -59,7 +59,7 @@ class Modifier
         Meta = 8,
     };
 
-    constexpr Modifier(Key key): mask_ { static_cast<unsigned>(key) } {}
+    constexpr Modifier(Key key): _mask { static_cast<unsigned>(key) } {}
 
     constexpr Modifier() = default;
     constexpr Modifier(Modifier&&) = default;
@@ -67,7 +67,7 @@ class Modifier
     constexpr Modifier& operator=(Modifier&&) = default;
     constexpr Modifier& operator=(Modifier const&) = default;
 
-    [[nodiscard]] constexpr unsigned value() const noexcept { return mask_; }
+    [[nodiscard]] constexpr unsigned value() const noexcept { return _mask; }
 
     [[nodiscard]] constexpr bool none() const noexcept { return value() == 0; }
     [[nodiscard]] constexpr bool some() const noexcept { return value() != 0; }
@@ -76,37 +76,37 @@ class Modifier
     [[nodiscard]] constexpr bool control() const noexcept { return value() & Control; }
     [[nodiscard]] constexpr bool meta() const noexcept { return value() & Meta; }
 
-    constexpr operator unsigned() const noexcept { return mask_; }
+    constexpr operator unsigned() const noexcept { return _mask; }
 
-    [[nodiscard]] constexpr bool any() const noexcept { return mask_ != 0; }
+    [[nodiscard]] constexpr bool any() const noexcept { return _mask != 0; }
 
     constexpr Modifier& operator|=(Modifier const& other) noexcept
     {
-        mask_ |= other.mask_;
+        _mask |= other._mask;
         return *this;
     }
 
     [[nodiscard]] constexpr Modifier with(Modifier const& other) const noexcept
     {
-        return Modifier(static_cast<Key>(mask_ | other.mask_));
+        return Modifier(static_cast<Key>(_mask | other._mask));
     }
 
     [[nodiscard]] constexpr Modifier without(Modifier const& other) const noexcept
     {
-        return Modifier(static_cast<Key>(mask_ & ~other.mask_));
+        return Modifier(static_cast<Key>(_mask & ~other._mask));
     }
 
     [[nodiscard]] bool contains(Modifier const& other) const noexcept
     {
-        return (mask_ & other.mask_) == other.mask_;
+        return (_mask & other._mask) == other._mask;
     }
 
-    constexpr void enable(Key key) noexcept { mask_ |= key; }
+    constexpr void enable(Key key) noexcept { _mask |= key; }
 
-    constexpr void disable(Key key) noexcept { mask_ &= ~static_cast<unsigned>(key); }
+    constexpr void disable(Key key) noexcept { _mask &= ~static_cast<unsigned>(key); }
 
   private:
-    unsigned mask_ = 0;
+    unsigned _mask = 0;
 };
 
 constexpr Modifier operator|(Modifier a, Modifier b) noexcept
@@ -190,6 +190,7 @@ enum class Key
     PageDown,
 
     // numpad keys
+    // NOLINTBEGIN(readability-identifier-naming)
     Numpad_NumLock,
     Numpad_Divide,
     Numpad_Multiply,
@@ -209,6 +210,7 @@ enum class Key
     Numpad_7,
     Numpad_8,
     Numpad_9,
+    // NOLINTEND(readability-identifier-naming)
 };
 
 std::string to_string(Key key);
@@ -261,21 +263,21 @@ class InputGenerator
 
     void setApplicationKeypadMode(bool enable);
 
-    [[nodiscard]] bool normalCursorKeys() const noexcept { return cursorKeysMode_ == KeyMode::Normal; }
+    [[nodiscard]] bool normalCursorKeys() const noexcept { return _cursorKeysMode == KeyMode::Normal; }
     [[nodiscard]] bool applicationCursorKeys() const noexcept { return !normalCursorKeys(); }
 
-    [[nodiscard]] bool numericKeypad() const noexcept { return numpadKeysMode_ == KeyMode::Normal; }
+    [[nodiscard]] bool numericKeypad() const noexcept { return _numpadKeysMode == KeyMode::Normal; }
     [[nodiscard]] bool applicationKeypad() const noexcept { return !numericKeypad(); }
 
-    [[nodiscard]] bool bracketedPaste() const noexcept { return bracketedPaste_; }
-    void setBracketedPaste(bool enable) { bracketedPaste_ = enable; }
+    [[nodiscard]] bool bracketedPaste() const noexcept { return _bracketedPaste; }
+    void setBracketedPaste(bool enable) { _bracketedPaste = enable; }
 
     void setMouseProtocol(MouseProtocol mouseProtocol, bool enabled);
-    [[nodiscard]] std::optional<MouseProtocol> mouseProtocol() const noexcept { return mouseProtocol_; }
+    [[nodiscard]] std::optional<MouseProtocol> mouseProtocol() const noexcept { return _mouseProtocol; }
 
     // Sets mouse event transport protocol (default, extended, xgr, urxvt)
     void setMouseTransport(MouseTransport mouseTransport);
-    [[nodiscard]] MouseTransport mouseTransport() const noexcept { return mouseTransport_; }
+    [[nodiscard]] MouseTransport mouseTransport() const noexcept { return _mouseTransport; }
 
     enum class MouseWheelMode
     {
@@ -288,13 +290,13 @@ class InputGenerator
     };
 
     void setMouseWheelMode(MouseWheelMode mode) noexcept;
-    [[nodiscard]] MouseWheelMode mouseWheelMode() const noexcept { return mouseWheelMode_; }
+    [[nodiscard]] MouseWheelMode mouseWheelMode() const noexcept { return _mouseWheelMode; }
 
-    void setGenerateFocusEvents(bool enable) noexcept { generateFocusEvents_ = enable; }
-    [[nodiscard]] bool generateFocusEvents() const noexcept { return generateFocusEvents_; }
+    void setGenerateFocusEvents(bool enable) noexcept { _generateFocusEvents = enable; }
+    [[nodiscard]] bool generateFocusEvents() const noexcept { return _generateFocusEvents; }
 
-    void setPassiveMouseTracking(bool v) noexcept { passiveMouseTracking_ = v; }
-    [[nodiscard]] bool passiveMouseTracking() const noexcept { return passiveMouseTracking_; }
+    void setPassiveMouseTracking(bool v) noexcept { _passiveMouseTracking = v; }
+    [[nodiscard]] bool passiveMouseTracking() const noexcept { return _passiveMouseTracking; }
 
     bool generate(char32_t characterEvent, Modifier modifier);
     bool generate(std::u32string const& characterEvent, Modifier modifier);
@@ -326,17 +328,17 @@ class InputGenerator
     /// @return a view into the generated buffer sequence.
     [[nodiscard]] std::string_view peek() const noexcept
     {
-        return std::string_view(pendingSequence_.data() + consumedBytes_,
-                                size_t(pendingSequence_.size() - size_t(consumedBytes_)));
+        return std::string_view(_pendingSequence.data() + _consumedBytes,
+                                size_t(_pendingSequence.size() - size_t(_consumedBytes)));
     }
 
     void consume(int n)
     {
-        consumedBytes_ += n;
-        if (consumedBytes_ == static_cast<int>(pendingSequence_.size()))
+        _consumedBytes += n;
+        if (_consumedBytes == static_cast<int>(_pendingSequence.size()))
         {
-            consumedBytes_ = 0;
-            pendingSequence_.clear();
+            _consumedBytes = 0;
+            _pendingSequence.clear();
         }
     }
 
@@ -380,19 +382,19 @@ class InputGenerator
 
     // private fields
     //
-    KeyMode cursorKeysMode_ = KeyMode::Normal;
-    KeyMode numpadKeysMode_ = KeyMode::Normal;
-    bool bracketedPaste_ = false;
-    bool generateFocusEvents_ = false;
-    std::optional<MouseProtocol> mouseProtocol_ = std::nullopt;
-    bool passiveMouseTracking_ = false;
-    MouseTransport mouseTransport_ = MouseTransport::Default;
-    MouseWheelMode mouseWheelMode_ = MouseWheelMode::Default;
-    Sequence pendingSequence_ {};
-    int consumedBytes_ {};
+    KeyMode _cursorKeysMode = KeyMode::Normal;
+    KeyMode _numpadKeysMode = KeyMode::Normal;
+    bool _bracketedPaste = false;
+    bool _generateFocusEvents = false;
+    std::optional<MouseProtocol> _mouseProtocol = std::nullopt;
+    bool _passiveMouseTracking = false;
+    MouseTransport _mouseTransport = MouseTransport::Default;
+    MouseWheelMode _mouseWheelMode = MouseWheelMode::Default;
+    Sequence _pendingSequence {};
+    int _consumedBytes {};
 
-    std::set<MouseButton> currentlyPressedMouseButtons_ {};
-    CellLocation currentMousePosition_ {}; // current mouse position
+    std::set<MouseButton> _currentlyPressedMouseButtons {};
+    CellLocation _currentMousePosition {}; // current mouse position
 };
 
 inline std::string to_string(InputGenerator::MouseEventType value)

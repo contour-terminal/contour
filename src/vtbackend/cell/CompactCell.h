@@ -32,8 +32,6 @@
 #include <memory>
 #include <string>
 
-#define LIBTERMINAL_GRAPHEME_CLUSTERS 1
-
 namespace terminal
 {
 
@@ -79,6 +77,7 @@ struct CellExtra
 class CRISPY_PACKED CompactCell
 {
   public:
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static uint8_t constexpr MaxCodepoints = 7;
 
     CompactCell() noexcept;
@@ -436,7 +435,7 @@ inline void CompactCell::setImageFragment(std::shared_ptr<RasterizedImage> raste
                                           CellLocation offset)
 {
     CellExtra& ext = extra();
-    ext.imageFragment = std::make_shared<ImageFragment>(rasterizedImage, offset);
+    ext.imageFragment = std::make_shared<ImageFragment>(std::move(rasterizedImage), offset);
 }
 
 inline HyperlinkId CompactCell::hyperlink() const noexcept
@@ -469,7 +468,7 @@ inline void CompactCell::setGraphicsRendition(GraphicsRendition sgr) noexcept
 // {{{ free function implementations
 inline bool beginsWith(std::u32string_view text, CompactCell const& cell) noexcept
 {
-    assert(text.size() != 0);
+    assert(!text.empty());
 
     if (cell.codepointCount() == 0)
         return false;

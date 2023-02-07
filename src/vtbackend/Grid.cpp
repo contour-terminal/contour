@@ -1133,7 +1133,7 @@ bool Grid<Cell>::cellEmptyOrContainsOneOf(CellLocation position, u32string_view 
     position.column = min(position.column, boxed_cast<ColumnOffset>(pageSize().columns - 1));
 
     auto const& cell = at(position.line, position.column);
-    return CellUtil::empty(cell) || delimiters.find(cell.codepoint(0)) != delimiters.npos;
+    return CellUtil::empty(cell) || delimiters.find(cell.codepoint(0)) != std::u32string_view::npos;
 }
 
 template <typename Cell>

@@ -70,7 +70,7 @@ cd build
 
 %check
 ./build/src/crispy/crispy_test
-./build/src/vtbackend/terminal_test
+./build/src/vtbackend/vtbackend_test
 
 
 %files

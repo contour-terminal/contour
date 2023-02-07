@@ -64,9 +64,9 @@ constexpr bool operator&(CellFlags a, CellFlags b) noexcept
     return (static_cast<unsigned>(a) & static_cast<unsigned>(b)) != 0;
 }
 
-constexpr bool contains_all(CellFlags _base, CellFlags _test) noexcept
+constexpr bool contains_all(CellFlags base, CellFlags test) noexcept
 {
-    return (static_cast<unsigned>(_base) & static_cast<unsigned>(_test)) == static_cast<unsigned>(_test);
+    return (static_cast<unsigned>(base) & static_cast<unsigned>(test)) == static_cast<unsigned>(test);
 }
 
 /// Merges two CellFlags sets.
@@ -100,7 +100,7 @@ struct formatter<terminal::CellFlags>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(const terminal::CellFlags _flags, FormatContext& ctx)
+    auto format(const terminal::CellFlags flags, FormatContext& ctx)
     {
         static const std::array<std::pair<terminal::CellFlags, std::string_view>, 17> nameMap = {
             std::pair { terminal::CellFlags::Bold, std::string_view("Bold") },
@@ -124,7 +124,7 @@ struct formatter<terminal::CellFlags>
         std::string s;
         for (auto const& mapping: nameMap)
         {
-            if (mapping.first & _flags)
+            if (mapping.first & flags)
             {
                 if (!s.empty())
                     s += ",";

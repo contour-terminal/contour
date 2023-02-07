@@ -34,6 +34,8 @@ set(crispy_SOURCES
 add_library(crispy-core ${crispy_SOURCES})
 add_library(crispy::core ALIAS crispy-core)
 
+set_target_properties(crispy-core PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
+
 if(MSVC)
     target_compile_definitions(crispy-core PUBLIC NOMINMAX)
 endif()
@@ -56,7 +58,7 @@ endif()
 target_compile_features(crispy-core PUBLIC cxx_std_17)
 target_link_libraries(crispy-core PUBLIC ${CRISPY_CORE_LIBS})
 target_include_directories(crispy-core PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/..>
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
 )
 

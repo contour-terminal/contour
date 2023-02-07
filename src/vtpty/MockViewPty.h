@@ -22,7 +22,7 @@ namespace terminal
 class MockViewPty: public Pty
 {
   public:
-    explicit MockViewPty(PageSize windowSize): pageSize_ { windowSize } {}
+    explicit MockViewPty(PageSize windowSize): _pageSize { windowSize } {}
 
     void setReadData(std::string_view data);
 
@@ -39,16 +39,16 @@ class MockViewPty: public Pty
     void close() override;
     [[nodiscard]] bool isClosed() const noexcept override;
 
-    [[nodiscard]] std::string& stdinBuffer() noexcept { return inputBuffer_; }
-    [[nodiscard]] std::string_view& stdoutBuffer() noexcept { return outputBuffer_; }
+    [[nodiscard]] std::string& stdinBuffer() noexcept { return _inputBuffer; }
+    [[nodiscard]] std::string_view& stdoutBuffer() noexcept { return _outputBuffer; }
 
   private:
-    PageSize pageSize_;
-    std::optional<crispy::ImageSize> pixelSize_;
-    std::string inputBuffer_;
-    std::string_view outputBuffer_;
-    bool closed_ = false;
-    PtySlaveDummy slave_;
+    PageSize _pageSize;
+    std::optional<crispy::ImageSize> _pixelSize;
+    std::string _inputBuffer;
+    std::string_view _outputBuffer;
+    bool _closed = false;
+    PtySlaveDummy _slave;
 };
 
 } // namespace terminal

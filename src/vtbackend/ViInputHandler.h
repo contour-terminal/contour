@@ -238,7 +238,7 @@ class ViInputHandler: public InputHandler
     void registerCommand(ModeSelect modes, std::string_view command, CommandHandler handler);
     void registerCommand(ModeSelect modes,
                          std::vector<std::string_view> const& commands,
-                         CommandHandler handler);
+                         CommandHandler const& handler);
     void appendModifierToPendingInput(Modifier modifier);
     [[nodiscard]] bool handlePendingInput();
     void clearPendingInput();

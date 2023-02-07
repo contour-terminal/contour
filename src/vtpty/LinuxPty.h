@@ -26,10 +26,10 @@
 namespace terminal
 {
 
-class LinuxPty: public Pty
+class LinuxPty final: public Pty
 {
   private:
-    class Slave: public PtySlave
+    class Slave final: public PtySlave
     {
       public:
         int _slaveFd;
@@ -50,7 +50,7 @@ class LinuxPty: public Pty
         PtySlaveHandle slave;
     };
 
-    LinuxPty(PageSize windowSize, std::optional<crispy::ImageSize> pixels);
+    LinuxPty(PageSize pageSize, std::optional<crispy::ImageSize> pixels);
     ~LinuxPty() override;
 
     PtySlave& slave() noexcept override;

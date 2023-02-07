@@ -40,5 +40,9 @@ else()
 endif()
 
 add_library(vtpty STATIC ${vtpty_SOURCES} ${vtpty_HEADERS})
-target_include_directories(vtpty PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src)
+set_target_properties(vtpty PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
+target_include_directories(vtpty PUBLIC
+    $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
+)
 target_link_libraries(vtpty PUBLIC ${vtpty_LIBRARIES})

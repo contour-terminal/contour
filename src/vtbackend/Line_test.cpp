@@ -210,9 +210,9 @@ TEST_CASE("Line.inflate.Unicode.FamilyEmoji", "[Line]")
 
     REQUIRE(inflated[0].toUtf8() == "A");
     REQUIRE(inflated[1].toUtf8() == familyEmojiUtf8);
-    REQUIRE(inflated[2].toUtf8() == "");
+    REQUIRE(inflated[2].toUtf8().empty());
     REQUIRE(inflated[3].toUtf8() == "B");
-    REQUIRE(inflated[4].toUtf8() == "");
+    REQUIRE(inflated[4].toUtf8().empty());
 
     for (auto const i: { 0u, 2u, 1u, 3u })
     {

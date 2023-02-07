@@ -131,7 +131,6 @@ Renderer::Renderer(PageSize pageSize,
     _atlasHashtableSlotCount { crispy::nextPowerOfTwo(atlasHashtableSlotCount.value) },
     _atlasTileCount { std::max(atlasTileCount.value, static_cast<uint32_t>(pageSize.area())) },
     _atlasDirectMapping { atlasDirectMapping },
-    _renderTarget { nullptr },
     //.
     _fontDescriptions { std::move(fontDescriptions) },
     _textShaper { createTextShaper(_fontDescriptions.textShapingEngine,

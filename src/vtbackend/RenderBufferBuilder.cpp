@@ -123,38 +123,38 @@ RenderBufferBuilder<Cell>::RenderBufferBuilder(Terminal const& terminal,
                                                InputMethodData inputMethodData,
                                                optional<CellLocation> theCursorPosition,
                                                bool includeSelection):
-    output { output },
-    terminal { terminal },
-    cursorPosition { theCursorPosition },
-    baseLine { base },
-    reverseVideo { theReverseVideo },
+    _output { output },
+    _terminal { terminal },
+    _cursorPosition { theCursorPosition },
+    _baseLine { base },
+    _reverseVideo { theReverseVideo },
     _highlightSearchMatches { highlightSearchMatches },
     _inputMethodData { std::move(inputMethodData) },
     _includeSelection { includeSelection }
 {
     output.frameID = terminal.lastFrameID();
 
-    if (cursorPosition)
+    if (_cursorPosition)
         output.cursor = renderCursor();
 }
 
 template <typename Cell>
 optional<RenderCursor> RenderBufferBuilder<Cell>::renderCursor() const
 {
-    if (!cursorPosition || !terminal.cursorCurrentlyVisible()
-        || !terminal.viewport().isLineVisible(cursorPosition->line))
+    if (!_cursorPosition || !_terminal.cursorCurrentlyVisible()
+        || !_terminal.viewport().isLineVisible(_cursorPosition->line))
         return nullopt;
 
     // TODO: check if CursorStyle has changed, and update render context accordingly.
 
     auto constexpr InactiveCursorShape = CursorShape::Rectangle; // TODO configurable
-    auto const shape = terminal.state().focused ? terminal.cursorShape() : InactiveCursorShape;
+    auto const shape = _terminal.state().focused ? _terminal.cursorShape() : InactiveCursorShape;
 
     auto const cursorScreenPosition =
-        CellLocation { cursorPosition->line + boxed_cast<LineOffset>(terminal.viewport().scrollOffset()),
-                       cursorPosition->column };
+        CellLocation { _cursorPosition->line + boxed_cast<LineOffset>(_terminal.viewport().scrollOffset()),
+                       _cursorPosition->column };
 
-    auto const cellWidth = terminal.currentScreen().cellWidthAt(*cursorPosition);
+    auto const cellWidth = _terminal.currentScreen().cellWidthAt(*_cursorPosition);
 
     return RenderCursor { cursorScreenPosition, shape, cellWidth };
 }
@@ -253,24 +253,24 @@ RGBColorPair RenderBufferBuilder<Cell>::makeColorsForCell(CellLocation gridPosit
                                                           Color foregroundColor,
                                                           Color backgroundColor) const noexcept
 {
-    auto const hasCursor = cursorPosition && gridPosition == *cursorPosition;
+    auto const hasCursor = _cursorPosition && gridPosition == *_cursorPosition;
 
     // clang-format off
     bool const paintCursor =
-        (hasCursor || (prevHasCursor && prevWidth == 2))
-            && output.cursor.has_value()
-            && output.cursor->shape == CursorShape::Block;
+        (hasCursor || (_prevHasCursor && _prevWidth == 2))
+            && _output.cursor.has_value()
+            && _output.cursor->shape == CursorShape::Block;
     // clang-format on
 
     auto const selected =
-        _includeSelection && terminal.isSelected(CellLocation { gridPosition.line, gridPosition.column });
-    auto const highlighted = terminal.isHighlighted(CellLocation { gridPosition.line, gridPosition.column });
-    auto const blink = terminal.blinkState();
-    auto const rapidBlink = terminal.rapidBlinkState();
+        _includeSelection && _terminal.isSelected(CellLocation { gridPosition.line, gridPosition.column });
+    auto const highlighted = _terminal.isHighlighted(CellLocation { gridPosition.line, gridPosition.column });
+    auto const blink = _terminal.blinkState();
+    auto const rapidBlink = _terminal.rapidBlinkState();
 
-    return makeColors(terminal.colorPalette(),
+    return makeColors(_terminal.colorPalette(),
                       cellFlags,
-                      reverseVideo,
+                      _reverseVideo,
                       foregroundColor,
                       backgroundColor,
                       selected,
@@ -293,7 +293,7 @@ RenderAttributes RenderBufferBuilder<Cell>::createRenderAttributes(
     renderAttributes.foregroundColor = fg;
     renderAttributes.backgroundColor = bg;
     renderAttributes.decorationColor = CellUtil::makeUnderlineColor(
-        terminal.colorPalette(), fg, graphicsAttributes.underlineColor, graphicsAttributes.flags);
+        _terminal.colorPalette(), fg, graphicsAttributes.underlineColor, graphicsAttributes.flags);
     renderAttributes.flags = graphicsAttributes.flags;
     return renderAttributes;
 }
@@ -303,11 +303,11 @@ RenderLine RenderBufferBuilder<Cell>::createRenderLine(TrivialLineBuffer const& 
                                                        LineOffset lineOffset) const
 {
     auto const pos = CellLocation { lineOffset, ColumnOffset(0) };
-    auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(pos);
+    auto const gridPosition = _terminal.viewport().translateScreenToGridCoordinate(pos);
     auto renderLine = RenderLine {};
     renderLine.lineOffset = lineOffset;
     renderLine.usedColumns = lineBuffer.usedColumns;
-    renderLine.displayWidth = terminal.pageSize().columns;
+    renderLine.displayWidth = _terminal.pageSize().columns;
     renderLine.text = lineBuffer.text.view();
     renderLine.textAttributes = createRenderAttributes(gridPosition, lineBuffer.textAttributes);
     renderLine.fillAttributes = createRenderAttributes(gridPosition, lineBuffer.fillAttributes);
@@ -318,12 +318,12 @@ RenderLine RenderBufferBuilder<Cell>::createRenderLine(TrivialLineBuffer const& 
 template <typename Cell>
 bool RenderBufferBuilder<Cell>::gridLineContainsCursor(LineOffset lineOffset) const noexcept
 {
-    if (terminal.currentScreen().cursor().position.line == lineOffset)
+    if (_terminal.currentScreen().cursor().position.line == lineOffset)
         return true;
 
-    if (cursorPosition && terminal.state().inputHandler.mode() != ViMode::Insert)
+    if (_cursorPosition && _terminal.state().inputHandler.mode() != ViMode::Insert)
     {
-        auto const viCursor = terminal.viewport().translateGridToScreenCoordinate(cursorPosition->line);
+        auto const viCursor = _terminal.viewport().translateGridToScreenCoordinate(_cursorPosition->line);
         if (viCursor == lineOffset)
             return true;
     }
@@ -345,7 +345,7 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineB
     // No need to call isCursorLine(lineOffset) because lines containing a cursor are always inflated.
     _useCursorlineColoring = false;
 
-    auto const frontIndex = output.cells.size();
+    auto const frontIndex = _output.cells.size();
 
     // Visual selection can alter colors for some columns in this line.
     // In that case, it seems like we cannot just pass it bare over but have to take the slower path.
@@ -356,23 +356,23 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineB
     // We're not testing for cursor shape (which should be done in order to be 100% correct)
     // because it's not really draining performance.
     bool const canRenderViaSimpleLine =
-        (!terminal.isSelected(lineOffset) || !_includeSelection) && !gridLineContainsCursor(lineOffset);
+        (!_terminal.isSelected(lineOffset) || !_includeSelection) && !gridLineContainsCursor(lineOffset);
 
     if (canRenderViaSimpleLine)
     {
-        output.lines.emplace_back(createRenderLine(lineBuffer, lineOffset));
-        lineNr = lineOffset;
-        prevWidth = 0;
-        prevHasCursor = false;
+        _output.lines.emplace_back(createRenderLine(lineBuffer, lineOffset));
+        _lineNr = lineOffset;
+        _prevWidth = 0;
+        _prevHasCursor = false;
         return;
     }
 
-    auto const textMargin = min(boxed_cast<ColumnOffset>(terminal.pageSize().columns),
+    auto const textMargin = min(boxed_cast<ColumnOffset>(_terminal.pageSize().columns),
                                 ColumnOffset::cast_from(lineBuffer.usedColumns));
-    auto const pageColumnsEnd = boxed_cast<ColumnOffset>(terminal.pageSize().columns);
+    auto const pageColumnsEnd = boxed_cast<ColumnOffset>(_terminal.pageSize().columns);
 
     // render text
-    searchPatternOffset = 0;
+    _searchPatternOffset = 0;
     renderUtf8Text(CellLocation { lineOffset, ColumnOffset(0) },
                    lineBuffer.textAttributes,
                    lineBuffer.text.view(),
@@ -382,100 +382,100 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(TrivialLineBuffer const& lineB
     for (auto columnOffset = textMargin; columnOffset < pageColumnsEnd; ++columnOffset)
     {
         auto const pos = CellLocation { lineOffset, columnOffset };
-        auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(pos);
+        auto const gridPosition = _terminal.viewport().translateScreenToGridCoordinate(pos);
         auto renderAttributes = createRenderAttributes(gridPosition, lineBuffer.fillAttributes);
 
-        output.cells.emplace_back(makeRenderCellExplicit(terminal.colorPalette(),
-                                                         char32_t { 0 },
-                                                         lineBuffer.fillAttributes.flags,
-                                                         renderAttributes.foregroundColor,
-                                                         renderAttributes.backgroundColor,
-                                                         lineBuffer.fillAttributes.underlineColor,
-                                                         baseLine + lineOffset,
-                                                         columnOffset));
+        _output.cells.emplace_back(makeRenderCellExplicit(_terminal.colorPalette(),
+                                                          char32_t { 0 },
+                                                          lineBuffer.fillAttributes.flags,
+                                                          renderAttributes.foregroundColor,
+                                                          renderAttributes.backgroundColor,
+                                                          lineBuffer.fillAttributes.underlineColor,
+                                                          _baseLine + lineOffset,
+                                                          columnOffset));
     }
     // }}}
 
-    auto const backIndex = output.cells.size() - 1;
+    auto const backIndex = _output.cells.size() - 1;
 
-    output.cells[frontIndex].groupStart = true;
-    output.cells[backIndex].groupEnd = true;
+    _output.cells[frontIndex].groupStart = true;
+    _output.cells[backIndex].groupEnd = true;
 }
 
 template <typename Cell>
 template <typename T>
-void RenderBufferBuilder<Cell>::matchSearchPattern(T const& textCell)
+void RenderBufferBuilder<Cell>::matchSearchPattern(T const& cellText)
 {
     if (_highlightSearchMatches == HighlightSearchMatches::No)
         return;
 
-    auto const& searchMode = terminal.state().searchMode;
+    auto const& searchMode = _terminal.state().searchMode;
     if (searchMode.pattern.empty())
         return;
 
     auto const isFullMatch = [&]() -> bool {
         if constexpr (std::is_same_v<Cell, T>)
         {
-            return !CellUtil::beginsWith(u32string_view(searchMode.pattern.data() + searchPatternOffset,
-                                                        searchMode.pattern.size() - searchPatternOffset),
-                                         textCell);
+            return !CellUtil::beginsWith(u32string_view(searchMode.pattern.data() + _searchPatternOffset,
+                                                        searchMode.pattern.size() - _searchPatternOffset),
+                                         cellText);
         }
         else
         {
-            return crispy::beginsWith(u32string_view(searchMode.pattern.data() + searchPatternOffset,
-                                                     searchMode.pattern.size() - searchPatternOffset),
-                                      textCell);
+            return crispy::beginsWith(u32string_view(searchMode.pattern.data() + _searchPatternOffset,
+                                                     searchMode.pattern.size() - _searchPatternOffset),
+                                      cellText);
         }
     }();
 
     if (isFullMatch)
     {
         // match fail
-        searchPatternOffset = 0;
+        _searchPatternOffset = 0;
         return;
     }
 
     if constexpr (std::is_same_v<Cell, T>)
-        searchPatternOffset += textCell.codepointCount();
+        _searchPatternOffset += cellText.codepointCount();
     else
-        searchPatternOffset += textCell.size();
+        _searchPatternOffset += cellText.size();
 
-    if (searchPatternOffset < searchMode.pattern.size())
+    if (_searchPatternOffset < searchMode.pattern.size())
         return; // match incomplete
 
     // match complete
 
-    auto const offsetIntoFront = output.cells.size() - searchPatternOffset;
+    auto const offsetIntoFront = _output.cells.size() - _searchPatternOffset;
 
     auto const isFocusedMatch =
         CellLocationRange {
-            output.cells[offsetIntoFront].position,
-            output.cells.back().position,
+            _output.cells[offsetIntoFront].position,
+            _output.cells.back().position,
         }
-            .contains(terminal.viewport().translateGridToScreenCoordinate(
-                terminal.state().viCommands.cursorPosition));
+            .contains(_terminal.viewport().translateGridToScreenCoordinate(
+                _terminal.state().viCommands.cursorPosition));
 
     auto highlightColors = [&]() -> CellRGBColorAndAlphaPair {
         // Oh yeah, this can be optimized :)
         if (isFocusedMatch)
         {
-            if (terminal.state().searchMode.initiatedByDoubleClick)
-                return terminal.colorPalette().wordHighlightCurrent;
+            if (_terminal.state().searchMode.initiatedByDoubleClick)
+                return _terminal.colorPalette().wordHighlightCurrent;
             else
-                return terminal.colorPalette().searchHighlightFocused;
+                return _terminal.colorPalette().searchHighlightFocused;
         }
         else
         {
-            if (terminal.state().searchMode.initiatedByDoubleClick)
-                return terminal.colorPalette().wordHighlight;
+            if (_terminal.state().searchMode.initiatedByDoubleClick)
+                return _terminal.colorPalette().wordHighlight;
             else
-                return terminal.colorPalette().searchHighlight;
+                return _terminal.colorPalette().searchHighlight;
         }
     }();
 
-    for (size_t i = offsetIntoFront; i < output.cells.size(); ++i)
+    for (size_t i = offsetIntoFront; i < _output.cells.size(); ++i)
     {
-        auto& cellAttributes = output.cells[i].attributes;
+        auto& cellAttributes = _output.cells[i].attributes;
         auto const actualColors =
             RGBColorPair { cellAttributes.foregroundColor, cellAttributes.backgroundColor };
         auto const searchMatchColors = makeRGBColorPair(actualColors, highlightColors);
@@ -483,16 +483,16 @@ void RenderBufferBuilder<Cell>::matchSearchPattern(T const& textCell)
         cellAttributes.backgroundColor = searchMatchColors.background;
         cellAttributes.foregroundColor = searchMatchColors.foreground;
     }
-    searchPatternOffset = 0;
+    _searchPatternOffset = 0;
 }
 
 template <typename Cell>
 void RenderBufferBuilder<Cell>::startLine(LineOffset line) noexcept
 {
-    isNewLine = true;
-    lineNr = line;
-    prevWidth = 0;
-    prevHasCursor = false;
+    _isNewLine = true;
+    _lineNr = line;
+    _prevWidth = 0;
+    _prevHasCursor = false;
 
     _useCursorlineColoring = isCursorLine(line);
 }
@@ -500,19 +500,19 @@ void RenderBufferBuilder<Cell>::startLine(LineOffset line) noexcept
 template <typename Cell>
 bool RenderBufferBuilder<Cell>::isCursorLine(LineOffset line) const noexcept
 {
-    return terminal.inputHandler().mode() != ViMode::Insert && cursorPosition
+    return _terminal.inputHandler().mode() != ViMode::Insert && _cursorPosition
            && line
-                  == terminal.viewport()
-                         .translateGridToScreenCoordinate(CellLocation { cursorPosition->line, {} })
+                  == _terminal.viewport()
+                         .translateGridToScreenCoordinate(CellLocation { _cursorPosition->line, {} })
                          .line;
 }
 
 template <typename Cell>
 void RenderBufferBuilder<Cell>::endLine() noexcept
 {
-    if (!output.cells.empty())
+    if (!_output.cells.empty())
     {
-        output.cells.back().groupEnd = true;
+        _output.cells.back().groupEnd = true;
     }
 }
 
@@ -527,7 +527,7 @@ ColumnCount RenderBufferBuilder<Cell>::renderUtf8Text(CellLocation screenPositio
     auto graphemeClusterSegmenter = unicode::utf8_grapheme_segmenter(text);
     for (u32string const& graphemeCluster: graphemeClusterSegmenter)
     {
-        auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(
+        auto const gridPosition = _terminal.viewport().translateScreenToGridCoordinate(
             screenPosition + ColumnOffset::cast_from(columnCountRendered));
         auto const [fg, bg] = makeColorsForCell(gridPosition,
                                                 textAttributes.flags,
@@ -540,36 +540,36 @@ ColumnCount RenderBufferBuilder<Cell>::renderUtf8Text(CellLocation screenPositio
         //            unicode::convert_to<char>(u32string_view(graphemeCluster)).size(),
         //            unicode::convert_to<char>(u32string_view(graphemeCluster)));
 
-        output.cells.emplace_back(
-            makeRenderCellExplicit(terminal.colorPalette(),
+        _output.cells.emplace_back(
+            makeRenderCellExplicit(_terminal.colorPalette(),
                                    graphemeCluster,
                                    width,
                                    textAttributes.flags,
                                    fg,
                                    bg,
                                    textAttributes.underlineColor,
-                                   baseLine + screenPosition.line,
+                                   _baseLine + screenPosition.line,
                                    screenPosition.column + ColumnOffset::cast_from(columnCountRendered)));
 
         // Span filling cells for preciding wide glyphs to get the background color properly painted.
         for (auto i = ColumnCount(1); i < width; ++i)
         {
-            output.cells.emplace_back(makeRenderCellExplicit(
-                terminal.colorPalette(),
+            _output.cells.emplace_back(makeRenderCellExplicit(
+                _terminal.colorPalette(),
                 U" ", // {}
                 ColumnCount(1),
                 textAttributes.flags,
                 fg,
                 bg,
                 textAttributes.underlineColor,
-                baseLine + screenPosition.line,
+                _baseLine + screenPosition.line,
                 screenPosition.column + ColumnOffset::cast_from(columnCountRendered + i)));
         }
 
         columnCountRendered += ColumnCount::cast_from(width);
-        lineNr = screenPosition.line;
-        prevWidth = 0;
-        prevHasCursor = false;
+        _lineNr = screenPosition.line;
+        _prevWidth = 0;
+        _prevHasCursor = false;
 
         if (allowMatchSearchPattern)
             matchSearchPattern(u32string_view(graphemeCluster));
@@ -582,26 +582,26 @@ bool RenderBufferBuilder<Cell>::tryRenderInputMethodEditor(CellLocation screenPo
                                                            CellLocation gridPosition)
 {
     // Render IME preeditString if available and screen position matches cursor position.
-    if (cursorPosition && gridPosition == *cursorPosition && !_inputMethodData.preeditString.empty())
+    if (_cursorPosition && gridPosition == *_cursorPosition && !_inputMethodData.preeditString.empty())
     {
         auto textAttributes = GraphicsAttributes {};
         textAttributes.foregroundColor = RGBColor(0xFF, 0xFF, 0xFF);
         textAttributes.backgroundColor = RGBColor(0xFF, 0x00, 0x00);
         textAttributes.flags |= CellFlags::Bold | CellFlags::Underline;
 
-        if (!output.cells.empty())
-            output.cells.back().groupEnd = true;
+        if (!_output.cells.empty())
+            _output.cells.back().groupEnd = true;
 
         _inputMethodSkipColumns =
             renderUtf8Text(screenPosition, textAttributes, _inputMethodData.preeditString, false);
         if (_inputMethodSkipColumns > ColumnCount(0))
         {
-            output.cursor->position.column += ColumnOffset::cast_from(_inputMethodSkipColumns);
-            output.cells.at(output.cells.size() - unbox<size_t>(_inputMethodSkipColumns)).groupStart = true;
-            output.cells.back().groupEnd = true;
+            _output.cursor->position.column += ColumnOffset::cast_from(_inputMethodSkipColumns);
+            _output.cells.at(_output.cells.size() - unbox<size_t>(_inputMethodSkipColumns)).groupStart = true;
+            _output.cells.back().groupEnd = true;
         }
 
-        state = State::Gap;
+        _state = State::Gap;
     }
 
     if (_inputMethodSkipColumns == ColumnCount(0))
@@ -616,7 +616,7 @@ template <typename Cell>
 void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset line, ColumnOffset column)
 {
     auto const screenPosition = CellLocation { line, column };
-    auto const gridPosition = terminal.viewport().translateScreenToGridCoordinate(screenPosition);
+    auto const gridPosition = _terminal.viewport().translateScreenToGridCoordinate(screenPosition);
 
     if (tryRenderInputMethodEditor(screenPosition, gridPosition))
         return;
@@ -624,50 +624,50 @@ void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset li
     auto /*const*/ [fg, bg] = makeColorsForCell(
         gridPosition, screenCell.flags(), screenCell.foregroundColor(), screenCell.backgroundColor());
 
-    prevWidth = screenCell.width();
-    prevHasCursor = cursorPosition && gridPosition == *cursorPosition;
+    _prevWidth = screenCell.width();
+    _prevHasCursor = _cursorPosition && gridPosition == *_cursorPosition;
 
     auto const cellEmpty = screenCell.empty();
-    auto const customBackground = bg != terminal.colorPalette().defaultBackground || !!screenCell.flags();
+    auto const customBackground = bg != _terminal.colorPalette().defaultBackground || !!screenCell.flags();
 
-    switch (state)
+    switch (_state)
     {
         case State::Gap:
             if (!cellEmpty || customBackground)
             {
-                state = State::Sequence;
-                output.cells.emplace_back(makeRenderCell(terminal.colorPalette(),
-                                                         terminal.state().hyperlinks,
-                                                         screenCell,
-                                                         fg,
-                                                         bg,
-                                                         baseLine + line,
-                                                         column));
-                output.cells.back().groupStart = true;
+                _state = State::Sequence;
+                _output.cells.emplace_back(makeRenderCell(_terminal.colorPalette(),
+                                                          _terminal.state().hyperlinks,
+                                                          screenCell,
+                                                          fg,
+                                                          bg,
+                                                          _baseLine + line,
+                                                          column));
+                _output.cells.back().groupStart = true;
             }
             break;
         case State::Sequence:
             if (cellEmpty && !customBackground)
             {
-                output.cells.back().groupEnd = true;
-                state = State::Gap;
+                _output.cells.back().groupEnd = true;
+                _state = State::Gap;
             }
             else
             {
-                output.cells.emplace_back(makeRenderCell(terminal.colorPalette(),
-                                                         terminal.state().hyperlinks,
-                                                         screenCell,
-                                                         fg,
-                                                         bg,
-                                                         baseLine + line,
-                                                         column));
+                _output.cells.emplace_back(makeRenderCell(_terminal.colorPalette(),
+                                                          _terminal.state().hyperlinks,
+                                                          screenCell,
+                                                          fg,
+                                                          bg,
+                                                          _baseLine + line,
+                                                          column));
 
-                if (isNewLine)
-                    output.cells.back().groupStart = true;
+                if (_isNewLine)
+                    _output.cells.back().groupStart = true;
             }
             break;
     }
-    isNewLine = false;
+    _isNewLine = false;
 
     matchSearchPattern(screenCell);
 }

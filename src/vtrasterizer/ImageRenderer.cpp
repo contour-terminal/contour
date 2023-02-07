@@ -69,8 +69,8 @@ void ImageRenderer::onAfterRenderingText()
 {
     // We render here the images that should go above text.
 
-    for (auto& tile: _pendingRenderTilesAboveText)
-        textureScheduler().renderTile(std::move(tile));
+    for (auto const& tile: _pendingRenderTilesAboveText)
+        textureScheduler().renderTile(tile);
 
     _pendingRenderTilesAboveText.clear();
 }
@@ -87,7 +87,7 @@ void ImageRenderer::endFrame()
         // In case some image tiles are still pending but no text had to be rendered.
 
         for (auto& tile: _pendingRenderTilesAboveText)
-            textureScheduler().renderTile(std::move(tile));
+            textureScheduler().renderTile(tile);
         _pendingRenderTilesAboveText.clear();
     }
 }

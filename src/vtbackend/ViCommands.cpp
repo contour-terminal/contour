@@ -90,12 +90,12 @@ namespace
     WordSkipClass wordSkipClass(std::string text) noexcept
     {
         auto const s32 = unicode::convert_to<char32_t>(std::string_view(text.data(), text.size()));
-        if (s32.size() == 0)
-            return WordSkipClass::Whitespace;
-        if (s32.size() == 1)
-            return wordSkipClass(s32[0]);
-        else
-            return WordSkipClass::Other;
+        switch (s32.size())
+        {
+            case 0: return WordSkipClass::Whitespace;
+            case 1: return wordSkipClass(s32[0]);
+            default: return WordSkipClass::Other;
+        }
     }
 
     // constexpr bool shouldSkipForUntilWordBeginReverse(WordSkipClass current, WordSkipClass& initial)

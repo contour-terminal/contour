@@ -16,19 +16,19 @@ struct [[nodiscard]] Size
     int height;
 
     /// This iterator can be used to iterate through each and every point between (0, 0) and (width, height).
-    struct iterator
+    struct iterator // NOLINT(readability-identifier-naming)
     {
       public:
-        constexpr iterator(int _width, int _next) noexcept:
-            width { _width }, next { _next }, coord { makeCoordinate(_next) }
+        constexpr iterator(int width, int next) noexcept:
+            _width { width }, _next { next }, _coord { makeCoordinate(next) }
         {
         }
 
-        constexpr auto operator*() const noexcept { return coord; }
+        constexpr auto operator*() const noexcept { return _coord; }
 
         constexpr iterator& operator++() noexcept
         {
-            coord = makeCoordinate(++next);
+            _coord = makeCoordinate(++_next);
             return *this;
         }
 
@@ -38,25 +38,22 @@ struct [[nodiscard]] Size
             return *this;
         }
 
-        constexpr bool operator==(iterator const& other) const noexcept { return next == other.next; }
-        constexpr bool operator!=(iterator const& other) const noexcept { return next != other.next; }
+        constexpr bool operator==(iterator const& other) const noexcept { return _next == other._next; }
+        constexpr bool operator!=(iterator const& other) const noexcept { return _next != other._next; }
 
       private:
-        int width;
-        int next;
-        Point coord { 0, 0 };
+        int _width;
+        int _next;
+        Point _coord { 0, 0 };
 
-        constexpr Point makeCoordinate(int offset) noexcept
+        constexpr Point makeCoordinate(int offset) const noexcept
         {
-            return Point { offset % width, offset / width };
+            return Point { offset % _width, offset / _width };
         }
     };
 
-    constexpr iterator begin() const noexcept { return iterator { width, 0 }; }
-    constexpr iterator end() const noexcept { return iterator { width, width * height }; }
-
-    constexpr iterator begin() noexcept { return iterator { width, 0 }; }
-    constexpr iterator end() noexcept { return iterator { width, width * height }; }
+    [[nodiscard]] constexpr iterator begin() const noexcept { return iterator { width, 0 }; }
+    [[nodiscard]] constexpr iterator end() const noexcept { return iterator { width, width * height }; }
 };
 
 constexpr Size::iterator begin(Size const& s) noexcept
@@ -78,39 +75,39 @@ constexpr bool operator<(Size a, Size b) noexcept
     return a.width < b.width || (a.width == b.width && a.height < b.height);
 }
 
-constexpr bool operator==(Size const& _a, Size const& _b) noexcept
+constexpr bool operator==(Size const& a, Size const& b) noexcept
 {
-    return _a.width == _b.width && _a.height == _b.height;
+    return a.width == b.width && a.height == b.height;
 }
 
-constexpr bool operator!=(Size const& _a, Size const& _b) noexcept
+constexpr bool operator!=(Size const& a, Size const& b) noexcept
 {
-    return !(_a == _b);
+    return !(a == b);
 }
 
-constexpr Size operator+(Size _a, Size _b) noexcept
+constexpr Size operator+(Size a, Size b) noexcept
 {
-    return Size { _a.width + _b.width, _a.height + _b.height };
+    return Size { a.width + b.width, a.height + b.height };
 }
 
-constexpr Size operator-(Size _a, Size _b) noexcept
+constexpr Size operator-(Size a, Size b) noexcept
 {
-    return Size { _a.width - _b.width, _a.height - _b.height };
+    return Size { a.width - b.width, a.height - b.height };
 }
 
-constexpr Size operator*(Size _a, Size _b) noexcept
+constexpr Size operator*(Size a, Size b) noexcept
 {
-    return Size { _a.width * _b.width, _a.height * _b.height };
+    return Size { a.width * b.width, a.height * b.height };
 }
 
-inline Size operator*(Size _a, double _scalar) noexcept
+inline Size operator*(Size a, double scalar) noexcept
 {
-    return Size { int(ceil(double(_a.width) * _scalar)), int(ceil(double(_a.height) * _scalar)) };
+    return Size { int(ceil(double(a.width) * scalar)), int(ceil(double(a.height) * scalar)) };
 }
 
-constexpr Size operator/(Size _a, Size _b) noexcept
+constexpr Size operator/(Size a, Size b) noexcept
 {
-    return Size { _a.width / _b.width, _a.height / _b.height };
+    return Size { a.width / b.width, a.height / b.height };
 }
 
 } // end namespace crispy

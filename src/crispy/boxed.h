@@ -70,11 +70,11 @@ struct boxed
 
     T value;
 
-    constexpr T& get() noexcept { return value; }
-    constexpr T const& get() const noexcept { return value; }
+    [[nodiscard]] constexpr T& get() noexcept { return value; }
+    [[nodiscard]] constexpr T const& get() const noexcept { return value; }
 
     template <typename To>
-    constexpr auto as() const noexcept
+    [[nodiscard]] constexpr auto as() const noexcept
     {
         if constexpr (is_boxed<To>)
             return To { static_cast<typename To::element_type>(value) };
@@ -83,7 +83,8 @@ struct boxed
     }
 
     template <typename Source>
-    constexpr static boxed<T, Tag> cast_from(Source value) // NOLINT(readability-identifier-naming)
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    [[nodiscard]] constexpr static boxed<T, Tag> cast_from(Source value)
     {
         if constexpr (is_boxed<Source>)
             return boxed<T, Tag> { static_cast<T>(value.value) };

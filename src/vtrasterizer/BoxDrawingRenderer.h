@@ -43,7 +43,7 @@ class BoxDrawingRenderer: public Renderable
     void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
     void clearCache() override;
 
-    [[nodiscard]] bool renderable(char32_t codepoint) const noexcept;
+    [[nodiscard]] static bool renderable(char32_t codepoint) noexcept;
 
     /// Renders boxdrawing character.
     ///
@@ -59,9 +59,9 @@ class BoxDrawingRenderer: public Renderable
     [[nodiscard]] std::optional<TextureAtlas::TileCreateData> createTileData(
         char32_t codepoint, atlas::TileLocation tileLocation);
 
-    [[nodiscard]] std::optional<atlas::Buffer> buildBoxElements(char32_t codepoint,
-                                                                ImageSize size,
-                                                                int lineThickness);
+    [[nodiscard]] static std::optional<atlas::Buffer> buildBoxElements(char32_t codepoint,
+                                                                       ImageSize size,
+                                                                       int lineThickness);
     [[nodiscard]] std::optional<atlas::Buffer> buildElements(char32_t codepoint);
 };
 

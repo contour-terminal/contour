@@ -28,7 +28,9 @@ auto const inline RasterizerLog = logstore::Category("vt.rasterizer", "Logs deta
 
 std::vector<uint8_t> downsampleRGBA(std::vector<uint8_t> const& bitmap, ImageSize size, ImageSize newSize);
 
-std::vector<uint8_t> downsample(std::vector<uint8_t> const& src, ImageSize targetSize, uint8_t factor);
+std::vector<uint8_t> downsample(std::vector<uint8_t> const& sourceBitmap,
+                                ImageSize targetSize,
+                                uint8_t factor);
 
 std::vector<uint8_t> downsample(std::vector<uint8_t> const& bitmap,
                                 uint8_t numComponents,

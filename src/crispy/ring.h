@@ -35,7 +35,7 @@ struct RingReverseIterator;
  * and the underlying storage Vector.
  */
 template <typename T, typename Vector = std::vector<T>>
-class basic_ring
+class basic_ring // NOLINT(readability-identifier-naming)
 {
   public:
     using value_type = T;
@@ -46,7 +46,7 @@ class basic_ring
     using difference_type = long;
     using offset_type = long;
 
-    basic_ring() = default;
+    basic_ring() = default; // NOLINT(cppcoreguidelines-pro-type-member-init)
     basic_ring(basic_ring const&) = default;
     basic_ring& operator=(basic_ring const&) = default;
     basic_ring(basic_ring&&) noexcept = default;
@@ -55,26 +55,26 @@ class basic_ring
 
     explicit basic_ring(Vector storage): _storage(std::move(storage)) {}
 
-    value_type const& operator[](offset_type i) const noexcept
+    [[nodiscard]] value_type const& operator[](offset_type i) const noexcept
     {
         return _storage[size_t(offset_type(_zero + size()) + i) % size()];
     }
-    value_type& operator[](offset_type i) noexcept
+    [[nodiscard]] value_type& operator[](offset_type i) noexcept
     {
         return _storage[size_t(offset_type(_zero + size()) + i) % size()];
     }
 
-    value_type const& at(offset_type i) const noexcept
+    [[nodiscard]] value_type const& at(offset_type i) const noexcept
     {
         return _storage[size_t(_zero + size() + i) % size()];
     }
-    value_type& at(offset_type i) noexcept
+    [[nodiscard]] value_type& at(offset_type i) noexcept
     {
         return _storage[size_t(offset_type(_zero + size()) + i) % size()];
     }
 
-    Vector& storage() noexcept { return _storage; }
-    Vector const& storage() const noexcept { return _storage; }
+    [[nodiscard]] Vector& storage() noexcept { return _storage; }
+    [[nodiscard]] Vector const& storage() const noexcept { return _storage; }
     [[nodiscard]] std::size_t zero_index() const noexcept { return _zero; }
 
     void rezero(iterator i);
@@ -89,10 +89,10 @@ class basic_ring
     void rotate_right(std::size_t count) noexcept { _zero = (_zero + size() - count) % size(); }
     void unrotate() { _zero = 0; }
 
-    value_type& front() noexcept { return at(0); }
-    value_type const& front() const noexcept { return at(0); }
+    [[nodiscard]] value_type& front() noexcept { return at(0); }
+    [[nodiscard]] value_type const& front() const noexcept { return at(0); }
 
-    value_type& back()
+    [[nodiscard]] value_type& back()
     {
         if (size() == 0)
             throw std::length_error("empty");
@@ -100,7 +100,7 @@ class basic_ring
         return at(static_cast<offset_type>(size()) - 1);
     }
 
-    value_type const& back() const
+    [[nodiscard]] value_type const& back() const
     {
         if (size() == 0)
             throw std::length_error("empty");
@@ -108,36 +108,36 @@ class basic_ring
         return at(static_cast<offset_type>(size()) - 1);
     }
 
-    iterator begin() noexcept { return iterator { this, 0 }; }
-    iterator end() noexcept { return iterator { this, static_cast<difference_type>(size()) }; }
+    [[nodiscard]] iterator begin() noexcept { return iterator { this, 0 }; }
+    [[nodiscard]] iterator end() noexcept { return iterator { this, static_cast<difference_type>(size()) }; }
 
-    const_iterator cbegin() const noexcept
+    [[nodiscard]] const_iterator cbegin() const noexcept
     {
         return const_iterator { (basic_ring<value_type const, Vector>*) this, 0 };
     }
-    const_iterator cend() const noexcept
+    [[nodiscard]] const_iterator cend() const noexcept
     {
         return const_iterator { (basic_ring<value_type const, Vector>*) this,
                                 static_cast<difference_type>(size()) };
     }
 
-    const_iterator begin() const noexcept { return cbegin(); }
-    const_iterator end() const noexcept { return cend(); }
+    [[nodiscard]] const_iterator begin() const noexcept { return cbegin(); }
+    [[nodiscard]] const_iterator end() const noexcept { return cend(); }
 
-    reverse_iterator rbegin() noexcept;
-    reverse_iterator rend() noexcept;
+    [[nodiscard]] reverse_iterator rbegin() noexcept;
+    [[nodiscard]] reverse_iterator rend() noexcept;
 
-    const_reverse_iterator rbegin() const noexcept;
-    const_reverse_iterator rend() const noexcept;
+    [[nodiscard]] const_reverse_iterator rbegin() const noexcept;
+    [[nodiscard]] const_reverse_iterator rend() const noexcept;
 
-    gsl::span<value_type> span(offset_type start, size_t count) noexcept
+    [[nodiscard]] gsl::span<value_type> span(offset_type start, size_t count) noexcept
     {
         auto a = std::next(begin(), start);
         auto b = std::next(a, count);
         return gsl::make_span(a, b);
     }
 
-    gsl::span<value_type const> span(offset_type start, size_t count) const noexcept
+    [[nodiscard]] gsl::span<value_type const> span(offset_type start, size_t count) const noexcept
     {
         auto a = std::next(begin(), start);
         auto b = std::next(a, count);
@@ -156,7 +156,7 @@ class basic_ring
 template <typename T,
           template <typename, typename> class Container = std::vector,
           typename Allocator = std::allocator<T>>
-class ring: public basic_ring<T, Container<T, Allocator>>
+class ring: public basic_ring<T, Container<T, Allocator>> // NOLINT(readability-identifier-naming)
 {
   public:
     using basic_ring<T, Container<T, Allocator>>::basic_ring;
@@ -177,9 +177,9 @@ class ring: public basic_ring<T, Container<T, Allocator>>
         this->_storage.clear();
         this->_zero = 0;
     }
-    void push_back(T const& _value) { this->_storage.push_back(_value); }
+    void push_back(T const& value) { this->_storage.push_back(value); }
 
-    void push_back(T&& _value) { this->emplace_back(std::move(_value)); }
+    void push_back(T&& value) { this->emplace_back(std::move(value)); }
 
     template <typename... Args>
     void emplace_back(Args&&... args)
@@ -298,8 +298,8 @@ struct RingReverseIterator
     basic_ring<T, Vector>* ring;
     difference_type current;
 
-    RingReverseIterator(basic_ring<T, Vector>* _ring, difference_type _current):
-        ring { _ring }, current { _current }
+    RingReverseIterator(basic_ring<T, Vector>* ring, difference_type current):
+        ring { ring }, current { current }
     {
     }
 

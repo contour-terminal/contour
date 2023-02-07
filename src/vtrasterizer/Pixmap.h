@@ -119,7 +119,10 @@ constexpr void drawEllipse(F doDraw4WaySymmetric, crispy::Point radius)
     auto const rx = radius.x;
     auto const ry = radius.y;
 
-    double dx {}, dy {}, d1 {}, d2 {};
+    double dx {};
+    double dy {};
+    double d1 {};
+    double d2 {};
     double x { 0 };
     double y { static_cast<double>(ry) };
 
@@ -206,7 +209,7 @@ struct Pixmap
         _baseLine = n;
         return *this;
     }
-    Pixmap& line(Ratio _from, Ratio _to);
+    Pixmap& line(Ratio from, Ratio to);
 
     Pixmap& rect(Ratio topLeft, Ratio bottomRight) noexcept
     {
@@ -257,7 +260,7 @@ Pixmap blockElement(ImageSize size, F f)
 }
 
 // {{{ Pixmap inlines
-inline void Pixmap::paint(int x, int y, uint8_t _value)
+inline void Pixmap::paint(int x, int y, uint8_t value)
 {
     auto const w = unbox<int>(_size.width);
     auto const h = unbox<int>(_size.height) - 1;
@@ -265,7 +268,7 @@ inline void Pixmap::paint(int x, int y, uint8_t _value)
         return;
     if (!(0 <= x && x < w))
         return;
-    _buffer.at(static_cast<unsigned>((h - y) * w + x)) = _value;
+    _buffer.at(static_cast<unsigned>((h - y) * w + x)) = value;
 }
 
 inline void Pixmap::paintOver(int x, int y, uint8_t intensity)

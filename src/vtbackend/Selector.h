@@ -120,7 +120,7 @@ class Selection
     /// Applies any scroll action to the line offsets.
     void applyScroll(LineOffset value, LineCount historyLineCount);
 
-    static CellLocation stretchedColumn(SelectionHelper const& helper, CellLocation coord) noexcept;
+    static CellLocation stretchedColumn(SelectionHelper const& gridHelper, CellLocation coord) noexcept;
 
   protected:
     State _state = State::Waiting;
@@ -142,13 +142,13 @@ class RectangularSelection: public Selection
     [[nodiscard]] std::vector<Range> ranges() const override;
 };
 
-class LinearSelection: public Selection
+class LinearSelection final: public Selection
 {
   public:
     LinearSelection(SelectionHelper const& helper, CellLocation start, OnSelectionUpdated onSelectionUpdated);
 };
 
-class WordWiseSelection: public Selection
+class WordWiseSelection final: public Selection
 {
   public:
     WordWiseSelection(SelectionHelper const& helper,
@@ -161,7 +161,7 @@ class WordWiseSelection: public Selection
     [[nodiscard]] CellLocation extendSelectionForward(CellLocation pos) const noexcept;
 };
 
-class FullLineSelection: public Selection
+class FullLineSelection final: public Selection
 {
   public:
     explicit FullLineSelection(SelectionHelper const& helper,

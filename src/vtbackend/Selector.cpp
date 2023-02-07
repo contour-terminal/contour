@@ -66,10 +66,10 @@ void Selection::complete()
         _state = State::Complete;
 }
 
-CellLocation Selection::stretchedColumn(SelectionHelper const& grid, CellLocation coord) noexcept
+CellLocation Selection::stretchedColumn(SelectionHelper const& gridHelper, CellLocation coord) noexcept
 {
     CellLocation stretched = coord;
-    if (auto const w = grid.cellWidth(coord); w > 1) // wide character
+    if (auto const w = gridHelper.cellWidth(coord); w > 1) // wide character
     {
         stretched.column += ColumnOffset::cast_from(w - 1);
         return stretched;

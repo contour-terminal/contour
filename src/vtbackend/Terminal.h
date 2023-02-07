@@ -229,8 +229,8 @@ class Terminal
     /// Resizes the terminal screen to the given amount of grid cells with their pixel dimensions.
     /// Important! In case a status line is currently visible, the status line count is being
     /// accumulated into the screen size, too.
-    void resizeScreen(PageSize cells, std::optional<ImageSize> pixels = std::nullopt);
-    void resizeScreenInternal(PageSize cells, std::optional<ImageSize> pixels);
+    void resizeScreen(PageSize totalPageSize, std::optional<ImageSize> pixels = std::nullopt);
+    void resizeScreenInternal(PageSize totalPageSize, std::optional<ImageSize> pixels);
 
     /// Implements semantics for  DECCOLM / DECSCPP.
     void resizeColumns(ColumnCount newColumnCount, bool clear);
@@ -249,7 +249,7 @@ class Terminal
                              PixelCoordinate pixelPosition,
                              bool uiHandledHint);
     void sendMouseMoveEvent(Modifier modifier,
-                            CellLocation pos,
+                            CellLocation newPosition,
                             PixelCoordinate pixelPosition,
                             bool uiHandledHint);
     bool sendMouseReleaseEvent(Modifier modifier,
@@ -272,17 +272,16 @@ class Terminal
     bool applicationKeypad() const noexcept { return _state.inputGenerator.applicationKeypad(); }
 
     bool hasInput() const noexcept;
-    size_t pendingInputBytes() const noexcept;
     void flushInput();
 
     std::string_view peekInput() const noexcept { return _state.inputGenerator.peek(); }
     // }}}
 
     /// Writes a given VT-sequence to screen.
-    void writeToScreen(std::string_view text);
+    void writeToScreen(std::string_view vtStream);
 
     /// Writes a given VT-sequence to screen - but without acquiring the lock (must be already acquired).
-    void writeToScreenInternal(std::string_view text);
+    void writeToScreenInternal(std::string_view vtStream);
 
     // viewport management
     [[nodiscard]] Viewport& viewport() noexcept { return _viewport; }
@@ -445,10 +444,10 @@ class Terminal
 
     // {{{ cursor management
     CursorDisplay cursorDisplay() const noexcept { return _settings.cursorDisplay; }
-    void setCursorDisplay(CursorDisplay value);
+    void setCursorDisplay(CursorDisplay display);
 
     CursorShape cursorShape() const noexcept { return _settings.cursorShape; }
-    void setCursorShape(CursorShape value);
+    void setCursorShape(CursorShape shape);
 
     bool cursorBlinkActive() const noexcept { return _cursorBlinkState; }
 
@@ -578,7 +577,7 @@ class Terminal
     void copyToClipboard(std::string_view data);
     void inspect();
     void notify(std::string_view title, std::string_view body);
-    void reply(std::string_view response);
+    void reply(std::string_view text);
 
     template <typename... T>
     void reply(fmt::format_string<T...> fmt, T&&... args)
@@ -604,7 +603,7 @@ class Terminal
     void useApplicationCursorKeys(bool enabled);
     void softReset();
     void hardReset();
-    void forceRedraw(std::function<void()> artificialSleep);
+    void forceRedraw(std::function<void()> const& artificialSleep);
     void discardImage(Image const&);
     void markCellDirty(CellLocation position) noexcept;
     void markRegionDirty(Rect area) noexcept;
@@ -760,7 +759,7 @@ class Terminal
 
     // {{{ blinking state helpers
     mutable std::chrono::steady_clock::time_point _lastCursorBlink;
-    mutable unsigned _cursorBlinkState;
+    mutable unsigned _cursorBlinkState = 1;
     struct BlinkerState
     {
         bool state = false;

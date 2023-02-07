@@ -69,12 +69,18 @@ namespace detail
     [[noreturn]] inline void fail(std::string_view text,
                                   std::string_view message,
                                   std::string_view file,
-                                  int line) noexcept // NOLINT(bugprone-exception-escape)
+                                  int line) noexcept
     {
-        if (fail_handler())
-            fail_handler()(text, message, file, line);
-        else
-            fmt::print("[{}:{}] {} {}\n", file, line, message, text);
+        try
+        {
+            if (fail_handler())
+                fail_handler()(text, message, file, line);
+            else
+                fmt::print("[{}:{}] {} {}\n", file, line, message, text);
+        }
+        catch (...)
+        {
+        }
         std::abort();
     }
 } // namespace detail

@@ -135,11 +135,6 @@ void SixelColorPalette::setSize(unsigned int newSize)
     _palette.resize(static_cast<size_t>(max(0u, min(newSize, _maxSize))));
 }
 
-void SixelColorPalette::setMaxSize(unsigned int value)
-{
-    _maxSize = value;
-}
-
 void SixelColorPalette::setColor(unsigned int index, RGBColor const& color)
 {
     if (index < _maxSize)
@@ -375,7 +370,6 @@ SixelImageBuilder::SixelImageBuilder(ImageSize maxSize,
     _size { ImageSize { Width { 1 }, Height { 1 } } },
     _buffer(_maxSize.area() * 4),
     _sixelCursor {},
-    _currentColor { 0 },
     _aspectRatio(static_cast<unsigned int>(
         std::ceil(static_cast<float>(aspectVertical) / static_cast<float>(aspectHorizontal)))),
     _sixelBandHeight(6 * _aspectRatio)
@@ -387,8 +381,8 @@ void SixelImageBuilder::clear(RGBAColor fillColor)
 {
     _sixelCursor = {};
 
-    auto p = _buffer.data();
-    auto const e = p + _maxSize.area() * 4;
+    auto* p = _buffer.data();
+    auto* const e = p + _maxSize.area() * 4;
     while (p != e)
     {
         *p++ = fillColor.red();
@@ -403,7 +397,7 @@ RGBAColor SixelImageBuilder::at(CellLocation coord) const noexcept
     auto const line = unbox<unsigned>(coord.line) % unbox<unsigned>(_size.height);
     auto const col = unbox<unsigned>(coord.column) % unbox<unsigned>(_size.width);
     auto const base = line * unbox<unsigned>(_size.width) * 4 + col * 4;
-    auto const color = &_buffer[base];
+    const auto* const color = &_buffer[base];
     return RGBAColor { color[0], color[1], color[2], color[3] };
 }
 

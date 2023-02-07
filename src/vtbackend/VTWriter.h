@@ -35,7 +35,7 @@ class VTWriter
   public:
     using Writer = std::function<void(char const*, size_t)>;
 
-    static constexpr inline auto MaxParameterCount = 16;
+    static constexpr inline auto maxParameterCount = 16;
 
     explicit VTWriter(Writer writer);
     explicit VTWriter(std::ostream& output);
@@ -53,7 +53,6 @@ class VTWriter
     void write(char32_t v);
 
     void sgrFlush();
-    std::string sgrFlush(std::vector<unsigned> const& sgr);
     void sgrAdd(unsigned n);
     void sgrRewind();
     void sgrAdd(GraphicsRendition m);
@@ -65,7 +64,7 @@ class VTWriter
     template <typename... Args>
     void sgrAdd(unsigned n, Args... values)
     {
-        if (_sgr.size() + sizeof...(values) > MaxParameterCount)
+        if (_sgr.size() + sizeof...(values) > maxParameterCount)
             sgrFlush();
 
         sgrAddExplicit(n);
@@ -73,9 +72,11 @@ class VTWriter
     }
 
   private:
+    static std::string sgrFlush(std::vector<unsigned> const& sgr);
+
     Writer _writer;
     std::vector<unsigned> _sgr;
-    std::stringstream sstr;
+    std::stringstream _sstr;
     std::vector<unsigned> _lastSGR;
     Color _currentForegroundColor = DefaultColor();
     Color _currentUnderlineColor = DefaultColor();

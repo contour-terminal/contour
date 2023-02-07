@@ -190,16 +190,16 @@ TEST_CASE("iteratorAt", "[grid]")
     grid.setLineText(LineOffset { 2 }, "GHI"sv);
     logGridText(grid);
 
-    auto const a00 = &grid.at(LineOffset(0), ColumnOffset(0));
+    auto* const a00 = &grid.at(LineOffset(0), ColumnOffset(0));
     CHECK(a00->toUtf8() == "A");
-    auto const a01 = &grid.at(LineOffset(0), ColumnOffset(1));
+    auto* const a01 = &grid.at(LineOffset(0), ColumnOffset(1));
     CHECK(a01->toUtf8() == "B");
-    auto const a02 = &grid.at(LineOffset(0), ColumnOffset(2));
+    auto* const a02 = &grid.at(LineOffset(0), ColumnOffset(2));
     CHECK(a02->toUtf8() == "C");
 
-    auto const a11 = &grid.at(LineOffset(1), ColumnOffset(1));
+    auto* const a11 = &grid.at(LineOffset(1), ColumnOffset(1));
     CHECK(a11->toUtf8() == "E");
-    auto const a22 = &grid.at(LineOffset(2), ColumnOffset(2));
+    auto* const a22 = &grid.at(LineOffset(2), ColumnOffset(2));
     CHECK(a22->toUtf8() == "I");
 }
 

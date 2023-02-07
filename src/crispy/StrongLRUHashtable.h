@@ -25,7 +25,7 @@
 #if defined(__x86_64__)
     #include <immintrin.h>
 #elif defined(__aarch64__)
-    #include <crispy/sse2neon.h>
+    #include <sse2neon/sse2neon.h>
 #endif
 
 #define DEBUG_STRONG_LRU_HASHTABLE 1
@@ -117,10 +117,13 @@ class StrongLRUHashtable
 
     using Ptr = std::unique_ptr<StrongLRUHashtable, std::function<void(StrongLRUHashtable*)>>;
 
-    static constexpr inline size_t requiredMemorySize(StrongHashtableSize hashCount, LRUCapacity entryCount);
+    [[nodiscard]] static constexpr inline size_t requiredMemorySize(StrongHashtableSize hashCount,
+                                                                    LRUCapacity entryCount);
 
     template <typename Allocator = std::allocator<unsigned char>>
-    static Ptr create(StrongHashtableSize hashCount, LRUCapacity entryCount, std::string name = "");
+    [[nodiscard]] static Ptr create(StrongHashtableSize hashCount,
+                                    LRUCapacity entryCount,
+                                    std::string name = "");
 
     /// Returns the actual number of entries currently hold in this hashtable.
     [[nodiscard]] size_t size() const noexcept;
@@ -240,13 +243,13 @@ class StrongLRUHashtable
   private:
     // {{{ details
     // Maps the given hash hash key to a slot in the hash table.
-    uint32_t* hashTableSlot(StrongHash const& hash) noexcept;
+    [[nodiscard]] uint32_t* hashTableSlot(StrongHash const& hash) noexcept;
 
     // Returns entry index to an unused entry, possibly by evicting
     // the least recently used entry if no free entries are available.
     //
     // This entry is not inserted into the LRU-chain yet.
-    uint32_t allocateEntry(StrongHash const& hash, uint32_t* slot);
+    [[nodiscard]] uint32_t allocateEntry(StrongHash const& hash, uint32_t* slot);
 
     // Relinks the given entry to the front of the LRU-chain.
     void linkToLRUChainHead(uint32_t entryIndex) noexcept;
@@ -257,7 +260,7 @@ class StrongLRUHashtable
     // Returns the index to the entry associated with the given hash key.
     // If the hash key was not found and force is set to true, it'll be created,
     // otherwise 0 is returned.
-    uint32_t findEntry(StrongHash const& hash, bool force);
+    [[nodiscard]] uint32_t findEntry(StrongHash const& hash, bool force);
 
     // Evicts the least recently used entry in the LRU chain
     // and links it to the unused-entries chain.
@@ -267,8 +270,8 @@ class StrongLRUHashtable
 
     int validateChange(int adj);
 
-    Entry& sentinelEntry() noexcept { return _entries[0]; }
-    Entry const& sentinelEntry() const noexcept { return _entries[0]; }
+    [[nodiscard]] Entry& sentinelEntry() noexcept { return _entries[0]; }
+    [[nodiscard]] Entry const& sentinelEntry() const noexcept { return _entries[0]; }
     // }}}
 
     LRUHashtableStats _stats;
@@ -495,7 +498,7 @@ void StrongLRUHashtable<Value>::remove(StrongHash const& hash)
 template <typename Value>
 inline void StrongLRUHashtable<Value>::touch(StrongHash const& hash) noexcept
 {
-    findEntry(hash, false);
+    (void) findEntry(hash, false);
 }
 
 template <typename Value>

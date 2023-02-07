@@ -51,7 +51,7 @@ jobs:
       - name: "test: libcrispy"
         run: ./build/src/crispy/crispy_test
       - name: "test: libterminal"
-        run: ./build/src/vtbackend/terminal_test
+        run: ./build/src/vtbackend/vtbackend_test
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v1

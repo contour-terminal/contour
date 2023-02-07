@@ -69,12 +69,12 @@ class Image: public std::enable_shared_from_this<Image>
     ///
     /// @param data      RGBA buffer data
     /// @param pixelSize image dimensionss in pixels
-    Image(ImageId id, ImageFormat format, Data data, ImageSize pixelSize, OnImageRemove remover):
-        id_ { id },
-        format_ { format },
-        data_ { std::move(data) },
-        size_ { pixelSize },
-        onImageRemove_ { std::move(remover) }
+    Image(ImageId id, ImageFormat format, Data data, ImageSize pixelSize, OnImageRemove remover) noexcept:
+        _id { id },
+        _format { format },
+        _data { std::move(data) },
+        _size { pixelSize },
+        _onImageRemove { std::move(remover) }
     {
         ++ImageStats::get().instances;
     }
@@ -83,22 +83,22 @@ class Image: public std::enable_shared_from_this<Image>
 
     Image(Image const&) = delete;
     Image& operator=(Image const&) = delete;
-    Image(Image&&) = default;
-    Image& operator=(Image&&) = default;
+    Image(Image&&) noexcept = default;
+    Image& operator=(Image&&) noexcept = default;
 
-    constexpr ImageId id() const noexcept { return id_; }
-    constexpr ImageFormat format() const noexcept { return format_; }
-    Data const& data() const noexcept { return data_; }
-    constexpr ImageSize size() const noexcept { return size_; }
-    constexpr Width width() const noexcept { return size_.width; }
-    constexpr Height height() const noexcept { return size_.height; }
+    constexpr ImageId id() const noexcept { return _id; }
+    constexpr ImageFormat format() const noexcept { return _format; }
+    Data const& data() const noexcept { return _data; }
+    constexpr ImageSize size() const noexcept { return _size; }
+    constexpr Width width() const noexcept { return _size.width; }
+    constexpr Height height() const noexcept { return _size.height; }
 
   private:
-    ImageId id_;
-    ImageFormat format_;
-    Data data_;
-    ImageSize size_;
-    OnImageRemove onImageRemove_;
+    ImageId _id;
+    ImageFormat _format;
+    Data _data;
+    ImageSize _size;
+    OnImageRemove _onImageRemove;
 };
 
 /// Image resize hints are used to properly fit/fill the area to place the image onto.
@@ -138,12 +138,12 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
                     RGBAColor defaultColor,
                     GridSize cellSpan,
                     ImageSize cellSize):
-        image_ { std::move(image) },
-        alignmentPolicy_ { alignmentPolicy },
-        resizePolicy_ { resizePolicy },
-        defaultColor_ { defaultColor },
-        cellSpan_ { cellSpan },
-        cellSize_ { cellSize }
+        _image { std::move(image) },
+        _alignmentPolicy { alignmentPolicy },
+        _resizePolicy { resizePolicy },
+        _defaultColor { defaultColor },
+        _cellSpan { cellSpan },
+        _cellSize { cellSize }
     {
         ++ImageStats::get().rasterized;
     }
@@ -155,26 +155,26 @@ class RasterizedImage: public std::enable_shared_from_this<RasterizedImage>
     RasterizedImage& operator=(RasterizedImage const&) = delete;
     RasterizedImage& operator=(RasterizedImage&&) = delete;
 
-    bool valid() const noexcept { return !!image_; }
+    bool valid() const noexcept { return !!_image; }
 
-    std::shared_ptr<Image const> const& imagePointer() const noexcept { return image_; }
-    Image const& image() const noexcept { return *image_; }
-    ImageAlignment alignmentPolicy() const noexcept { return alignmentPolicy_; }
-    ImageResize resizePolicy() const noexcept { return resizePolicy_; }
-    RGBAColor defaultColor() const noexcept { return defaultColor_; }
-    GridSize cellSpan() const noexcept { return cellSpan_; }
-    ImageSize cellSize() const noexcept { return cellSize_; }
+    std::shared_ptr<Image const> const& imagePointer() const noexcept { return _image; }
+    Image const& image() const noexcept { return *_image; }
+    ImageAlignment alignmentPolicy() const noexcept { return _alignmentPolicy; }
+    ImageResize resizePolicy() const noexcept { return _resizePolicy; }
+    RGBAColor defaultColor() const noexcept { return _defaultColor; }
+    GridSize cellSpan() const noexcept { return _cellSpan; }
+    ImageSize cellSize() const noexcept { return _cellSize; }
 
     /// @returns an RGBA buffer for a grid cell at given coordinate @p pos of the rasterized image.
     Image::Data fragment(CellLocation pos) const;
 
   private:
-    std::shared_ptr<Image const> const image_; //!< Reference to the Image to be rasterized.
-    ImageAlignment const alignmentPolicy_;     //!< Alignment policy of the image inside the raster size.
-    ImageResize const resizePolicy_;           //!< Image resize policy
-    RGBAColor const defaultColor_;             //!< Default color to be applied at corners when needed.
-    GridSize const cellSpan_;                  //!< Number of grid cells to span the pixel image onto.
-    ImageSize const cellSize_; //!< number of pixels in X and Y dimension one grid cell has to fill.
+    std::shared_ptr<Image const> _image; //!< Reference to the Image to be rasterized.
+    ImageAlignment _alignmentPolicy;     //!< Alignment policy of the image inside the raster size.
+    ImageResize _resizePolicy;           //!< Image resize policy
+    RGBAColor _defaultColor;             //!< Default color to be applied at corners when needed.
+    GridSize _cellSpan;                  //!< Number of grid cells to span the pixel image onto.
+    ImageSize _cellSize;                 //!< number of pixels in X and Y dimension one grid cell has to fill.
 };
 
 /// An ImageFragment holds a graphical image that ocupies one full grid cell.
@@ -186,7 +186,7 @@ class ImageFragment
     /// @param image  the Image this fragment is being cut off from
     /// @param offset 0-based grid-offset into the rasterized image
     ImageFragment(std::shared_ptr<RasterizedImage const> image, CellLocation offset):
-        rasterizedImage_ { std::move(image) }, offset_ { offset }
+        _rasterizedImage { std::move(image) }, _offset { offset }
     {
         ++ImageStats::get().fragments;
     }
@@ -199,17 +199,17 @@ class ImageFragment
 
     ~ImageFragment();
 
-    [[nodiscard]] RasterizedImage const& rasterizedImage() const noexcept { return *rasterizedImage_; }
+    [[nodiscard]] RasterizedImage const& rasterizedImage() const noexcept { return *_rasterizedImage; }
 
     /// @returns offset of this image fragment in pixels into the underlying image.
-    CellLocation offset() const noexcept { return offset_; }
+    CellLocation offset() const noexcept { return _offset; }
 
     /// Extracts the data from the image that is to be rendered.
-    [[nodiscard]] Image::Data data() const { return rasterizedImage_->fragment(offset_); }
+    [[nodiscard]] Image::Data data() const { return _rasterizedImage->fragment(_offset); }
 
   private:
-    std::shared_ptr<RasterizedImage const> rasterizedImage_;
-    CellLocation offset_;
+    std::shared_ptr<RasterizedImage const> _rasterizedImage;
+    CellLocation _offset;
 };
 
 namespace detail
@@ -274,9 +274,9 @@ class ImagePool
 
     // data members
     //
-    ImageId nextImageId_;                      //!< ID for next image to be put into the pool
-    NameToImageIdCache imageNameToImageCache_; //!< keeps mapping from name to raw image
-    OnImageRemove const onImageRemove_;        //!< Callback to be invoked when image gets removed from pool.
+    ImageId _nextImageId;                      //!< ID for next image to be put into the pool
+    NameToImageIdCache _imageNameToImageCache; //!< keeps mapping from name to raw image
+    OnImageRemove _onImageRemove;              //!< Callback to be invoked when image gets removed from pool.
 };
 
 } // namespace terminal

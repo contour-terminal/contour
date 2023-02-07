@@ -53,34 +53,34 @@ constexpr bool ascending(T low, T val, T high) noexcept
     return low <= val && val <= high;
 }
 
-constexpr unsigned long strntoul(char const* _data, size_t _count, char const** _eptr, unsigned _base = 10)
+constexpr unsigned long strntoul(char const* data, size_t count, char const** eptr, unsigned base = 10)
 {
     constexpr auto values = std::string_view { "0123456789ABCDEF" };
     constexpr auto lowerLetters = std::string_view { "abcdef" };
 
     unsigned long result = 0;
-    while (_count != 0)
+    while (count != 0)
     {
-        if (auto const i = values.find(*_data); i != values.npos && i < _base)
+        if (auto const i = values.find(*data); i != std::string_view::npos && i < base)
         {
-            result *= _base;
+            result *= base;
             result += static_cast<unsigned long>(i);
-            ++_data;
-            --_count;
+            ++data;
+            --count;
         }
-        else if (auto const i = lowerLetters.find(*_data); i != lowerLetters.npos && _base == 16)
+        else if (auto const i = lowerLetters.find(*data); i != std::string_view::npos && base == 16)
         {
-            result *= _base;
+            result *= base;
             result += static_cast<unsigned long>(i);
-            ++_data;
-            --_count;
+            ++data;
+            --count;
         }
         else
             return 0;
     }
 
-    if (_eptr)
-        *_eptr = _data;
+    if (eptr != nullptr)
+        *eptr = data;
 
     return result;
 }
@@ -112,30 +112,30 @@ std::string joinHumanReadableQuoted(std::vector<T> const& list, U sep = ", ")
 }
 
 template <typename T, typename Callback>
-constexpr inline bool split(std::basic_string_view<T> _text, T _delimiter, Callback&& _callback)
+constexpr inline bool split(std::basic_string_view<T> text, T delimiter, Callback&& callback)
 {
     size_t a = 0;
     size_t b = 0;
-    while ((b = _text.find(_delimiter, a)) != std::basic_string_view<T>::npos)
+    while ((b = text.find(delimiter, a)) != std::basic_string_view<T>::npos)
     {
-        if (!(_callback(_text.substr(a, b - a))))
+        if (!(callback(text.substr(a, b - a))))
             return false;
 
         a = b + 1;
     }
 
-    if (a < _text.size())
-        return _callback(_text.substr(a));
+    if (a < text.size())
+        return callback(text.substr(a));
 
     return true;
 }
 
 template <typename T>
-constexpr inline auto split(std::basic_string_view<T> _text, T _delimiter)
+constexpr inline auto split(std::basic_string_view<T> text, T delimiter)
     -> std::vector<std::basic_string_view<T>>
 {
     std::vector<std::basic_string_view<T>> output {};
-    split(_text, _delimiter, [&](auto value) {
+    split(text, delimiter, [&](auto value) {
         output.emplace_back(value);
         return true;
     });
@@ -143,13 +143,13 @@ constexpr inline auto split(std::basic_string_view<T> _text, T _delimiter)
 }
 
 template <typename T>
-inline auto split(std::basic_string<T> const& _text, T _delimiter) -> std::vector<std::basic_string_view<T>>
+inline auto split(std::basic_string<T> const& text, T delimiter) -> std::vector<std::basic_string_view<T>>
 {
-    return split(std::basic_string_view<T>(_text), _delimiter);
+    return split(std::basic_string_view<T>(text), delimiter);
 }
 
-inline std::unordered_map<std::string_view, std::string_view> splitKeyValuePairs(
-    std::string_view const& _text, char _delimiter)
+inline std::unordered_map<std::string_view, std::string_view> splitKeyValuePairs(std::string_view const& text,
+                                                                                 char delimiter)
 {
     // params := pair (':' pair)*
     // pair := TEXT '=' TEXT
@@ -159,13 +159,13 @@ inline std::unordered_map<std::string_view, std::string_view> splitKeyValuePairs
     std::unordered_map<std::string_view, std::string_view> params;
 
     size_t i_beg = 0;
-    size_t i = _text.find(_delimiter);
+    size_t i = text.find(delimiter);
 
     // e.g.: foo=bar::foo2=bar2:....
-    while (i != _text.npos)
+    while (i != std::string_view::npos)
     {
-        std::string_view param(_text.data() + i_beg, i - i_beg);
-        if (auto const k = param.find('='); k != param.npos)
+        std::string_view param(text.data() + i_beg, i - i_beg);
+        if (auto const k = param.find('='); k != std::string_view::npos)
         {
             auto const key = param.substr(0, k);
             auto const val = param.substr(k + 1);
@@ -173,11 +173,11 @@ inline std::unordered_map<std::string_view, std::string_view> splitKeyValuePairs
                 params[key] = val;
         }
         i_beg = i + 1;
-        i = _text.find(_delimiter, i_beg);
+        i = text.find(delimiter, i_beg);
     }
 
-    std::string_view param(_text.data() + i_beg);
-    if (auto const k = param.find('='); k != param.npos)
+    std::string_view param(text.data() + i_beg);
+    if (auto const k = param.find('='); k != std::string_view::npos)
     {
         auto const key = param.substr(0, k);
         auto const val = param.substr(k + 1);
@@ -189,44 +189,44 @@ inline std::unordered_map<std::string_view, std::string_view> splitKeyValuePairs
 }
 
 template <typename Ch>
-bool startsWith(std::basic_string_view<Ch> _text, std::basic_string_view<Ch> _prefix)
+bool startsWith(std::basic_string_view<Ch> text, std::basic_string_view<Ch> prefix)
 {
-    if (_text.size() < _prefix.size())
+    if (text.size() < prefix.size())
         return false;
 
-    for (size_t i = 0; i < _prefix.size(); ++i)
-        if (_text[i] != _prefix[i])
+    for (size_t i = 0; i < prefix.size(); ++i)
+        if (text[i] != prefix[i])
             return false;
 
     return true;
 }
 
 template <typename Ch>
-bool endsWith(std::basic_string_view<Ch> _text, std::basic_string_view<Ch> _prefix)
+bool endsWith(std::basic_string_view<Ch> text, std::basic_string_view<Ch> prefix)
 {
-    if (_text.size() < _prefix.size())
+    if (text.size() < prefix.size())
         return false;
 
-    for (size_t i = 0; i < _prefix.size(); ++i)
-        if (_text[_text.size() - _prefix.size() + i] != _prefix[i])
+    for (size_t i = 0; i < prefix.size(); ++i)
+        if (text[text.size() - prefix.size() + i] != prefix[i])
             return false;
 
     return true;
 }
 
 template <std::size_t Base = 10, typename T = unsigned, typename C>
-constexpr std::optional<T> to_integer(std::basic_string_view<C> _text) noexcept
+constexpr std::optional<T> to_integer(std::basic_string_view<C> text) noexcept
 {
     static_assert(Base == 2 || Base == 8 || Base == 10 || Base == 16, "Only base-2/8/10/16 supported.");
     static_assert(std::is_integral_v<T>, "T must be an integral type.");
     static_assert(std::is_integral_v<C>, "C must be an integral type.");
 
-    if (_text.empty())
+    if (text.empty())
         return std::nullopt;
 
     auto value = T { 0 };
 
-    for (auto const ch: _text)
+    for (auto const ch: text)
     {
         value = static_cast<T>(value * static_cast<T>(Base));
         switch (Base)
@@ -266,12 +266,12 @@ constexpr std::optional<T> to_integer(std::basic_string_view<C> _text) noexcept
 }
 
 template <std::size_t Base = 10, typename T = unsigned, typename C>
-constexpr std::optional<T> to_integer(std::basic_string<C> _text) noexcept
+constexpr std::optional<T> to_integer(std::basic_string<C> text) noexcept
 {
-    return to_integer<Base, T, C>(std::basic_string_view<C>(_text));
+    return to_integer<Base, T, C>(std::basic_string_view<C>(text));
 }
 
-struct finally
+struct finally // NOLINT(readability-identifier-naming)
 {
     std::function<void()> hook {};
 
@@ -292,28 +292,28 @@ struct finally
     }
 };
 
-inline std::optional<unsigned> fromHexDigit(char _value)
+inline std::optional<unsigned> fromHexDigit(char value)
 {
-    if ('0' <= _value && _value <= '9')
-        return _value - '0';
-    if ('a' <= _value && _value <= 'f')
-        return 10 + _value - 'a';
-    if ('A' <= _value && _value <= 'F')
-        return 10 + _value - 'A';
+    if ('0' <= value && value <= '9')
+        return value - '0';
+    if ('a' <= value && value <= 'f')
+        return 10 + value - 'a';
+    if ('A' <= value && value <= 'F')
+        return 10 + value - 'A';
     return std::nullopt;
 }
 
 template <typename T>
-std::optional<std::basic_string<T>> fromHexString(std::basic_string_view<T> _hexString)
+std::optional<std::basic_string<T>> fromHexString(std::basic_string_view<T> hexString)
 {
-    if (_hexString.size() % 2)
+    if (hexString.size() % 2)
         return std::nullopt;
 
     std::basic_string<T> output;
-    output.resize(_hexString.size() / 2);
+    output.resize(hexString.size() / 2);
 
-    auto i = _hexString.rbegin();
-    auto e = _hexString.rend();
+    auto i = hexString.rbegin();
+    auto e = hexString.rend();
     size_t k = output.size();
     while (i != e)
     {
@@ -329,45 +329,44 @@ std::optional<std::basic_string<T>> fromHexString(std::basic_string_view<T> _hex
 }
 
 template <typename T>
-std::basic_string<T> toHexString(std::basic_string_view<T> _input)
+std::basic_string<T> toHexString(std::basic_string_view<T> input)
 {
     std::basic_string<T> output;
 
-    for (T const ch: _input)
+    for (T const ch: input)
         output += fmt::format("{:02X}", static_cast<unsigned>(ch));
 
     return output;
 }
 
 template <typename T>
-inline std::basic_string<T> toLower(std::basic_string_view<T> _value)
+inline std::basic_string<T> toLower(std::basic_string_view<T> value)
 {
     std::basic_string<T> result;
-    result.reserve(_value.size());
-    transform(begin(_value), end(_value), back_inserter(result), [](auto ch) { return tolower(ch); });
+    result.reserve(value.size());
+    transform(begin(value), end(value), back_inserter(result), [](auto ch) { return tolower(ch); });
     return result;
 }
 
 template <typename T>
-inline std::basic_string<T> toLower(std::basic_string<T> const& _value)
+inline std::basic_string<T> toLower(std::basic_string<T> const& value)
 {
-    return toLower<T>(std::basic_string_view<T>(_value));
+    return toLower<T>(std::basic_string_view<T>(value));
 }
 
 template <typename T>
-inline std::basic_string<T> toUpper(std::basic_string_view<T> _value)
+inline std::basic_string<T> toUpper(std::basic_string_view<T> value)
 {
     std::basic_string<T> result;
-    result.reserve(_value.size());
-    std::transform(
-        begin(_value), end(_value), back_inserter(result), [](auto ch) { return std::toupper(ch); });
+    result.reserve(value.size());
+    std::transform(begin(value), end(value), back_inserter(result), [](auto ch) { return std::toupper(ch); });
     return result;
 }
 
 template <typename T>
-inline std::basic_string<T> toUpper(std::basic_string<T> const& _value)
+inline std::basic_string<T> toUpper(std::basic_string<T> const& value)
 {
-    return toUpper<T>(std::basic_string_view<T>(_value));
+    return toUpper<T>(std::basic_string_view<T>(value));
 }
 
 inline std::string readFileAsString(FileSystem::path const& path)
@@ -390,7 +389,7 @@ constexpr auto each_element() noexcept
 {
     struct Container
     {
-        struct iterator
+        struct iterator // NOLINT(readability-identifier-naming)
         {
             T value;
             constexpr T& operator*() noexcept { return value; }
@@ -426,13 +425,13 @@ inline std::string replace(std::string_view text, std::string_view pattern, T&& 
     return os.str();
 }
 
-inline FileSystem::path homeResolvedPath(std::string input, FileSystem::path homeDirectory)
+inline FileSystem::path homeResolvedPath(std::string input, const FileSystem::path& homeDirectory)
 {
     if (!input.empty() && input[0] == '~')
     {
         bool const pathSepFound = input.size() >= 2 && (input[1] == '/' || input[1] == '\\');
         auto subPath = input.substr(pathSepFound ? 2 : 1);
-        return std::move(homeDirectory) / FileSystem::path(subPath);
+        return homeDirectory / FileSystem::path(subPath);
     }
 
     return FileSystem::path(input);

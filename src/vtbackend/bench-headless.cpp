@@ -128,8 +128,8 @@ class ContourHeadlessBench: public crispy::App
             Project { "fmt", "MIT", "https://github.com/fmtlib/fmt" });
         link("bench-headless.parser", bind(&ContourHeadlessBench::benchParserOnly, this));
         link("bench-headless.grid", bind(&ContourHeadlessBench::benchGrid, this));
-        link("bench-headless.pty", bind(&ContourHeadlessBench::benchPTY, this));
-        link("bench-headless.meta", bind(&ContourHeadlessBench::showMetaInfo, this));
+        link("bench-headless.pty", bind(&ContourHeadlessBench::benchPTY));
+        link("bench-headless.meta", bind(&ContourHeadlessBench::showMetaInfo));
 
         char const* logFilterString = getenv("LOG");
         if (logFilterString)
@@ -172,7 +172,7 @@ class ContourHeadlessBench: public crispy::App
         };
     }
 
-    int showMetaInfo()
+    static int showMetaInfo()
     {
         // Show any interesting meta information.
         fmt::print("SimpleCell  : {} bytes\n", sizeof(terminal::SimpleCell));
@@ -223,7 +223,7 @@ class ContourHeadlessBench: public crispy::App
         return rv;
     }
 
-    int benchPTY()
+    static int benchPTY()
     {
         using std::chrono::steady_clock;
         using terminal::ColumnCount;

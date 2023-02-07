@@ -79,7 +79,7 @@ namespace text
 
 
     coretext_locator::coretext_locator() :
-        d{ new Private(), [](Private* p) { delete p; } }
+        _d{ new Private(), [](Private* p) { delete p; } }
     {
     }
 
@@ -94,7 +94,7 @@ namespace text
                               ? _fd.familyName.c_str()
                               : "Apple Color Emoji";
 
-        NSArray<NSArray *>* fonts = [d->fm
+        NSArray<NSArray *>* fonts = [_d->fm
             availableMembersOfFontFamily: [NSString
                 stringWithCString: familyName
                 encoding: [NSString defaultCStringEncoding]
@@ -104,7 +104,7 @@ namespace text
         if (fonts == nil)
         {
             LocatorLog()("No fonts found. Falling back to font family: Menlo.");
-            fonts = [d->fm availableMembersOfFontFamily:@"Menlo"];
+            fonts = [_d->fm availableMembersOfFontFamily:@"Menlo"];
         }
 
         for (bool const forceWeight: {true, false})
@@ -140,7 +140,7 @@ namespace text
     {
         font_source_list output;
 
-        NSArray<NSString *> const* fonts = [d->fm availableFonts];
+        NSArray<NSString *> const* fonts = [_d->fm availableFonts];
 
         for (NSString const* fontName in fonts) {
             output.emplace_back(ctFontPath(fontName));

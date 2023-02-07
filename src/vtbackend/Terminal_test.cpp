@@ -106,7 +106,7 @@ TEST_CASE("Terminal.DECCARA", "[terminal]")
     auto constexpr ClockBase = chrono::steady_clock::time_point();
     mock.terminal.tick(ClockBase);
     mock.terminal.ensureFreshRenderBuffer();
-    CHECK("" == trimmedTextScreenshot(mock));
+    CHECK(trimmedTextScreenshot(mock).empty());
 
     mock.writeToScreen("12345\r\n"
                        "67890\r\n"
@@ -226,12 +226,12 @@ TEST_CASE("Terminal.SynchronizedOutput", "[terminal]")
     mc.writeToScreen("Hello ");
     mc.terminal.tick(now);
     mc.terminal.ensureFreshRenderBuffer();
-    CHECK("" == trimmedTextScreenshot(mc));
+    CHECK(trimmedTextScreenshot(mc).empty());
 
     mc.writeToScreen(" World");
     mc.terminal.tick(now);
     mc.terminal.ensureFreshRenderBuffer();
-    CHECK("" == trimmedTextScreenshot(mc));
+    CHECK(trimmedTextScreenshot(mc).empty());
 
     mc.writeToScreen(BatchOff);
     mc.terminal.tick(now);
@@ -254,7 +254,7 @@ TEST_CASE("Terminal.XTPUSHCOLORS_and_XTPOPCOLORS", "[terminal]")
     SECTION("pop on empty")
     {
         mc.writeToScreen("\033[#Q");
-        REQUIRE(vtState.savedColorPalettes.size() == 0);
+        REQUIRE(vtState.savedColorPalettes.empty());
         REQUIRE(vtState.colorPalette.palette == originalPalette.palette);
     }
 
@@ -277,14 +277,14 @@ TEST_CASE("Terminal.XTPUSHCOLORS_and_XTPOPCOLORS", "[terminal]")
 
     SECTION("1")
     {
-        REQUIRE(vtState.savedColorPalettes.size() == 0);
+        REQUIRE(vtState.savedColorPalettes.empty());
         mc.writeToScreen("\033[1#P"); // push current color palette to slot 1.
         REQUIRE(vtState.savedColorPalettes.size() == 1);
     }
 
     SECTION("2")
     {
-        REQUIRE(vtState.savedColorPalettes.size() == 0);
+        REQUIRE(vtState.savedColorPalettes.empty());
         mc.writeToScreen("\033[2#P"); // push current color palette to slot 1.
         REQUIRE(vtState.savedColorPalettes.size() == 2);
         mc.writeToScreen("\033[#R");
@@ -294,7 +294,7 @@ TEST_CASE("Terminal.XTPUSHCOLORS_and_XTPOPCOLORS", "[terminal]")
 
     SECTION("10")
     {
-        REQUIRE(vtState.savedColorPalettes.size() == 0);
+        REQUIRE(vtState.savedColorPalettes.empty());
         mc.writeToScreen("\033[10#P"); // push current color palette to slot 10.
         REQUIRE(vtState.savedColorPalettes.size() == 10);
         mc.writeToScreen("\033[#R");
@@ -304,9 +304,9 @@ TEST_CASE("Terminal.XTPUSHCOLORS_and_XTPOPCOLORS", "[terminal]")
 
     SECTION("11")
     {
-        REQUIRE(vtState.savedColorPalettes.size() == 0);
+        REQUIRE(vtState.savedColorPalettes.empty());
         mc.writeToScreen("\033[11#P"); // push current color palette to slot 11: overflow.
-        REQUIRE(vtState.savedColorPalettes.size() == 0);
+        REQUIRE(vtState.savedColorPalettes.empty());
     }
 
     SECTION("push and direct copy")
@@ -347,11 +347,11 @@ TEST_CASE("Terminal.XTPUSHCOLORS_and_XTPOPCOLORS", "[terminal]")
         REQUIRE(vtState.colorPalette.palette == p2.palette);
 
         mc.writeToScreen("\033[#Q"); // XTPOPCOLORS
-        REQUIRE(vtState.savedColorPalettes.size() == 0);
+        REQUIRE(vtState.savedColorPalettes.empty());
         REQUIRE(vtState.colorPalette.palette == p1.palette);
 
         mc.writeToScreen("\033[#Q"); // XTPOPCOLORS (underflow)
-        REQUIRE(vtState.savedColorPalettes.size() == 0);
+        REQUIRE(vtState.savedColorPalettes.empty());
         REQUIRE(vtState.colorPalette.palette == p1.palette);
     }
 }
@@ -386,7 +386,7 @@ TEST_CASE("Terminal.TextSelection", "[terminal]")
     auto constexpr ClockBase = chrono::steady_clock::time_point();
     mock.terminal.tick(ClockBase);
     mock.terminal.ensureFreshRenderBuffer();
-    CHECK("" == trimmedTextScreenshot(mock));
+    CHECK(trimmedTextScreenshot(mock).empty());
 
     // Fill main page with text
     mock.writeToScreen("12345\r\n"
@@ -414,7 +414,7 @@ TEST_CASE("Terminal.TextSelection", "[terminal]")
 
     // Mouse is pressed, but we did not start selecting (by moving the mouse) yet,
     // so any text extraction shall be empty.
-    CHECK(mock.terminal.extractSelectionText() == "");
+    CHECK(mock.terminal.extractSelectionText().empty());
 
     mock.terminal.tick(1s);
     mock.terminal.sendMouseMoveEvent(
@@ -429,5 +429,5 @@ TEST_CASE("Terminal.TextSelection", "[terminal]")
     mock.terminal.tick(1s);
     mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, pixelCoordinate, uiHandledHint);
     mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, pixelCoordinate, uiHandledHint);
-    CHECK(mock.terminal.extractSelectionText() == "");
+    CHECK(mock.terminal.extractSelectionText().empty());
 }

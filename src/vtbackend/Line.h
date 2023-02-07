@@ -30,6 +30,7 @@
 #include <iterator>
 #include <sstream>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace terminal
@@ -109,18 +110,18 @@ class Line
     using const_iterator = typename InflatedBuffer::const_iterator;
 
     Line(LineFlags flags, TrivialBuffer buffer):
-        storage_ { std::move(buffer) }, flags_ { static_cast<unsigned>(flags) }
+        _storage { std::move(buffer) }, _flags { static_cast<unsigned>(flags) }
     {
     }
 
     Line(LineFlags flags, InflatedBuffer buffer):
-        storage_ { std::move(buffer) }, flags_ { static_cast<unsigned>(flags) }
+        _storage { std::move(buffer) }, _flags { static_cast<unsigned>(flags) }
     {
     }
 
     void reset(LineFlags flags, GraphicsAttributes attributes) noexcept
     {
-        flags_ = static_cast<unsigned>(flags);
+        _flags = static_cast<unsigned>(flags);
         if (isTrivialBuffer())
             trivialBuffer().reset(attributes);
         else
@@ -129,7 +130,7 @@ class Line
 
     void reset(LineFlags flags, GraphicsAttributes attributes, ColumnCount count) noexcept
     {
-        flags_ = static_cast<unsigned>(flags);
+        _flags = static_cast<unsigned>(flags);
         setBuffer(TrivialBuffer { count, attributes });
     }
 
@@ -142,7 +143,7 @@ class Line
             reset(flags, attributes);
         else
         {
-            flags_ = static_cast<unsigned>(flags);
+            _flags = static_cast<unsigned>(flags);
             for (Cell& cell: inflatedBuffer())
             {
                 cell.reset();
@@ -199,11 +200,11 @@ class Line
 
     void resize(ColumnCount count);
 
-    gsl::span<Cell const> trim_blank_right() const noexcept;
+    [[nodiscard]] gsl::span<Cell const> trim_blank_right() const noexcept;
 
-    gsl::span<Cell const> cells() const noexcept { return inflatedBuffer(); }
+    [[nodiscard]] gsl::span<Cell const> cells() const noexcept { return inflatedBuffer(); }
 
-    gsl::span<Cell> useRange(ColumnOffset start, ColumnCount count) noexcept
+    [[nodiscard]] gsl::span<Cell> useRange(ColumnOffset start, ColumnCount count) noexcept
     {
 #if defined(__clang__) && __clang_major__ <= 11
         auto const bufferSpan = gsl::span(inflatedBuffer());
@@ -246,7 +247,7 @@ class Line
         return inflatedBuffer().at(unbox<size_t>(column)).width();
     }
 
-    [[nodiscard]] LineFlags flags() const noexcept { return static_cast<LineFlags>(flags_); }
+    [[nodiscard]] LineFlags flags() const noexcept { return static_cast<LineFlags>(_flags); }
 
     [[nodiscard]] bool marked() const noexcept { return isFlagEnabled(LineFlags::Marked); }
     void setMarked(bool enable) { setFlag(LineFlags::Marked, enable); }
@@ -273,20 +274,20 @@ class Line
     [[nodiscard]] LineFlags inheritableFlags() const noexcept
     {
         auto constexpr Inheritables = unsigned(LineFlags::Wrappable) | unsigned(LineFlags::Marked);
-        return static_cast<LineFlags>(flags_ & Inheritables);
+        return static_cast<LineFlags>(_flags & Inheritables);
     }
 
     void setFlag(LineFlags flag, bool enable) noexcept
     {
         if (enable)
-            flags_ |= static_cast<unsigned>(flag);
+            _flags |= static_cast<unsigned>(flag);
         else
-            flags_ &= ~static_cast<unsigned>(flag);
+            _flags &= ~static_cast<unsigned>(flag);
     }
 
     [[nodiscard]] bool isFlagEnabled(LineFlags flag) const noexcept
     {
-        return (flags_ & static_cast<unsigned>(flag)) != 0;
+        return (_flags & static_cast<unsigned>(flag)) != 0;
     }
 
     [[nodiscard]] InflatedBuffer reflow(ColumnCount newColumnCount);
@@ -298,25 +299,25 @@ class Line
     //
     // If this line has been stored in an optimized state, then
     // the line will be first unpacked into a vector of grid cells.
-    InflatedBuffer& inflatedBuffer();
-    InflatedBuffer const& inflatedBuffer() const;
+    [[nodiscard]] InflatedBuffer& inflatedBuffer();
+    [[nodiscard]] InflatedBuffer const& inflatedBuffer() const;
 
-    [[nodiscard]] TrivialBuffer& trivialBuffer() noexcept { return std::get<TrivialBuffer>(storage_); }
+    [[nodiscard]] TrivialBuffer& trivialBuffer() noexcept { return std::get<TrivialBuffer>(_storage); }
     [[nodiscard]] TrivialBuffer const& trivialBuffer() const noexcept
     {
-        return std::get<TrivialBuffer>(storage_);
+        return std::get<TrivialBuffer>(_storage);
     }
 
     [[nodiscard]] bool isTrivialBuffer() const noexcept
     {
-        return std::holds_alternative<TrivialBuffer>(storage_);
+        return std::holds_alternative<TrivialBuffer>(_storage);
     }
     [[nodiscard]] bool isInflatedBuffer() const noexcept
     {
-        return !std::holds_alternative<TrivialBuffer>(storage_);
+        return !std::holds_alternative<TrivialBuffer>(_storage);
     }
 
-    void setBuffer(Storage buffer) noexcept { storage_ = std::move(buffer); }
+    void setBuffer(Storage buffer) noexcept { _storage = std::move(buffer); }
 
     // Tests if the given text can be matched in this line at the exact given start column.
     [[nodiscard]] bool matchTextAt(std::u32string_view text, ColumnOffset startColumn) const noexcept
@@ -446,8 +447,8 @@ class Line
     }
 
   private:
-    Storage storage_;
-    unsigned flags_ = 0;
+    Storage _storage;
+    unsigned _flags = 0;
 };
 
 constexpr LineFlags operator|(LineFlags a, LineFlags b) noexcept
@@ -468,9 +469,9 @@ constexpr LineFlags operator&(LineFlags a, LineFlags b) noexcept
 template <typename Cell>
 inline typename Line<Cell>::InflatedBuffer& Line<Cell>::inflatedBuffer()
 {
-    if (std::holds_alternative<TrivialBuffer>(storage_))
-        storage_ = inflate<Cell>(std::get<TrivialBuffer>(storage_));
-    return std::get<InflatedBuffer>(storage_);
+    if (std::holds_alternative<TrivialBuffer>(_storage))
+        _storage = inflate<Cell>(std::get<TrivialBuffer>(_storage));
+    return std::get<InflatedBuffer>(_storage);
 }
 
 template <typename Cell>
