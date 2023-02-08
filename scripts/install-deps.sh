@@ -350,6 +350,7 @@ install_deps_suse()
         libqt5-qtbase-common-devel
         libqt5-qtbase-devel
         libqt5-qtmultimedia-devel
+        libqt5-qtx11extras-devel
         libxcb-devel
         ncurses-devel
         ninja
