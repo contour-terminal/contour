@@ -263,6 +263,7 @@ class Terminal
     {
         _eventListener.pasteFromClipboard(count, strip);
     }
+    void sendRawInput(std::string_view text);
 
     void inputModeChanged(ViMode mode) { _eventListener.inputModeChanged(mode); }
     void updateHighlights() { _eventListener.updateHighlights(); }
