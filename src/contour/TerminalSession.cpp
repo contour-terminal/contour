@@ -929,14 +929,12 @@ bool TerminalSession::operator()(actions::SearchReverse)
     return true;
 }
 
-bool TerminalSession::operator()(actions::SendChars const& _event)
+bool TerminalSession::operator()(actions::SendChars const& event)
 {
-    auto const now = steady_clock::now();
-
-    for (auto const ch: _event.chars)
-    {
-        terminal().sendCharPressEvent(static_cast<char32_t>(ch), terminal::Modifier::None, now);
-    }
+    // auto const now = steady_clock::now();
+    // for (auto const ch: event.chars)
+    //     terminal().sendCharPressEvent(static_cast<char32_t>(ch), terminal::Modifier::None, now);
+    terminal().sendRawInput(event.chars);
     return true;
 }
 

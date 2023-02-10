@@ -899,6 +899,24 @@ void Terminal::sendPaste(string_view text)
     flushInput();
 }
 
+void Terminal::sendRawInput(string_view text)
+{
+    if (!allowInput())
+        return;
+
+    if (_state.inputHandler.isEditingSearch())
+    {
+        InputLog()("Sending raw input to search input: {}", crispy::escape(text));
+        _state.searchMode.pattern += unicode::convert_to<char32_t>(text);
+        screenUpdated();
+        return;
+    }
+
+    InputLog()("Sending raw input to stdin: {}", crispy::escape(text));
+    _state.inputGenerator.generateRaw(text);
+    flushInput();
+}
+
 bool Terminal::hasInput() const noexcept
 {
     return !_state.inputGenerator.peek().empty();
