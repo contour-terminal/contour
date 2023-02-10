@@ -243,7 +243,7 @@ struct CollidingHasher
         // Since the hashtable lookup only looks at the
         // least significant 32 bit, this will always cause
         // a hash-table entry collision.
-        return StrongHash { _mm_set_epi32(0, 0, v, 0) };
+        return StrongHash { 0, 0, static_cast<uint32_t>(v), 0 };
     }
 };
 // clang-format on
