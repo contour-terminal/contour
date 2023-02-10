@@ -477,7 +477,7 @@ color_schemes:
             foreground: '#ffffff'
             foreground_alpha: 0.2
             background: '#808080'
-            background_alpha: 0.3
+            background_alpha: 0.4
 
         # The text selection color can be customized here.
         # Leaving a value empty will default to the inverse of the content's color values.
