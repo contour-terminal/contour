@@ -44,3 +44,14 @@ Default: `true`
 
     reflow_on_resize: true
 
+# Backspace character
+
+There is little consistency between systems as to what should be sent when the
+user presses the backspace key. By default Contour sends ^? but if you prefer
+to send ^H (or something else again) then you can add an entry to the
+`input_mapping` section of your config file like:
+
+```
+- { mods: [], key: BackSpace, action: SendChars, chars: "\x08" }
+- { mods: [Control], key: BackSpace, action: SendChars, chars: "\x7F" }
+```
