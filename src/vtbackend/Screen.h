@@ -27,7 +27,6 @@
 
 #include <vtparser/ParserExtension.h>
 
-#include <crispy/StrongLRUCache.h>
 #include <crispy/algorithm.h>
 #include <crispy/logstore.h>
 #include <crispy/size.h>

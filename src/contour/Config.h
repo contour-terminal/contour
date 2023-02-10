@@ -30,6 +30,7 @@
 #include <text_shaper/font.h>
 #include <text_shaper/mock_font_locator.h>
 
+#include <crispy/StrongLRUHashtable.h>
 #include <crispy/size.h>
 #include <crispy/stdfs.h>
 

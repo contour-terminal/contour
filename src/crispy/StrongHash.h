@@ -21,20 +21,25 @@
 #include <string_view>
 #include <type_traits>
 
-#if defined(__x86_64__)
-    #include <immintrin.h>
+// #define STRONGHASH_USE_AES_NI 1
 
-    #if defined(__AES__)
-        #include <wmmintrin.h>
-    #endif
-#elif defined(__aarch64__)
-    #include <sse2neon/sse2neon.h>
+#if defined(STRONGHASH_USE_AES_NI)
+    #if defined(__x86_64__)
+        #include <immintrin.h>
+
+        #if defined(__AES__)
+            #include <wmmintrin.h>
+        #endif
+    #elif defined(__aarch64__)
+        #include <sse2neon/sse2neon.h>
+
 // The following inline functions were borrowed from:
 // https://github.com/f1ed/emp/blob/master/emp-tool/utils/block.h
 inline __m128i _mm_aesimc_si128(__m128i a) noexcept
 {
     return vreinterpretq_m128i_u8(vaesimcq_u8(vreinterpretq_u8_m128i(a)));
 }
+
 inline __m128i _mm_aesdec_si128(__m128i a, __m128i roundKey) noexcept
 {
     return vreinterpretq_m128i_u8(
@@ -46,6 +51,9 @@ inline __m128i _mm_aesdeclast_si128(__m128i a, __m128i roundKey) noexcept
     return vreinterpretq_m128i_u8(vaesdq_u8(vreinterpretq_u8_m128i(a), vdupq_n_u8(0))
                                   ^ vreinterpretq_u8_m128i(roundKey));
 }
+    #endif //
+#else
+    #include <crispy/FNV.h>
 #endif
 
 namespace crispy
@@ -61,7 +69,9 @@ struct StrongHash
 
     StrongHash(uint32_t a, uint32_t b, uint32_t c, uint32_t d) noexcept;
 
+#if defined(STRONGHASH_USE_AES_NI)
     explicit StrongHash(__m128i v) noexcept;
+#endif
 
     StrongHash() = default;
     StrongHash(StrongHash const&) = default;
@@ -80,23 +90,48 @@ struct StrongHash
 
     static StrongHash compute(void const* data, size_t n) noexcept;
 
+    // Retrieves the 4th 32-bit component of the internal representation.
+    // TODO: Provide access also to: a, b, c.
+    [[nodiscard]] uint32_t d() const noexcept
+    {
+#if defined(STRONGHASH_USE_AES_NI)
+        return static_cast<uint32_t>(_mm_cvtsi128_si32(value));
+#else
+        return value[3];
+#endif
+    }
+
+#if defined(STRONGHASH_USE_AES_NI)
     __m128i value {};
+#else
+    std::array<uint32_t, 4> value;
+#endif
 };
 
 inline StrongHash::StrongHash(uint32_t a, uint32_t b, uint32_t c, uint32_t d) noexcept:
+#if defined(STRONGHASH_USE_AES_NI)
     StrongHash(_mm_xor_si128(
         _mm_set_epi32(static_cast<int>(a), static_cast<int>(b), static_cast<int>(c), static_cast<int>(d)),
         _mm_loadu_si128((__m128i const*) defaultSeed.data())))
+#else
+    value { a, b, c, d }
+#endif
 {
 }
 
+#if defined(STRONGHASH_USE_AES_NI)
 inline StrongHash::StrongHash(__m128i v) noexcept: value { v }
 {
 }
+#endif
 
 inline bool operator==(StrongHash a, StrongHash b) noexcept
 {
+#if defined(STRONGHASH_USE_AES_NI)
     return _mm_movemask_epi8(_mm_cmpeq_epi32(a.value, b.value)) == 0xFFFF;
+#else
+    return a.value == b.value;
+#endif
 }
 
 inline bool operator!=(StrongHash a, StrongHash b) noexcept
@@ -106,6 +141,7 @@ inline bool operator!=(StrongHash a, StrongHash b) noexcept
 
 inline StrongHash operator*(StrongHash const& a, StrongHash const& b) noexcept
 {
+#if defined(STRONGHASH_USE_AES_NI)
     // TODO AES-NI fallback
     __m128i hashValue = a.value;
 
@@ -116,6 +152,12 @@ inline StrongHash operator*(StrongHash const& a, StrongHash const& b) noexcept
     hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
 
     return StrongHash { hashValue };
+#else
+    return StrongHash { FNV<uint32_t, uint32_t>()(a.value[0], b.value[0]),
+                        FNV<uint32_t, uint32_t>()(a.value[1], b.value[1]),
+                        FNV<uint32_t, uint32_t>()(a.value[2], b.value[2]),
+                        FNV<uint32_t, uint32_t>()(a.value[3], b.value[3]) };
+#endif
 }
 
 inline StrongHash operator*(StrongHash a, uint32_t b) noexcept
@@ -127,8 +169,7 @@ template <typename T>
 StrongHash StrongHash::compute(std::basic_string_view<T> text) noexcept
 {
     // return compute(value.data(), value.size());
-    StrongHash hash;
-    hash = StrongHash(0, 0, 0, static_cast<uint32_t>(text.size()));
+    auto hash = StrongHash(0, 0, 0, static_cast<uint32_t>(text.size()));
     for (auto const codepoint: text)
         hash = hash * codepoint; // StrongHash(0, 0, 0, static_cast<uint32_t>(codepoint));
     return hash;
@@ -138,8 +179,7 @@ template <typename T, typename Alloc>
 StrongHash StrongHash::compute(std::basic_string<T, Alloc> const& text) noexcept
 {
     // return compute(value.data(), value.size());
-    StrongHash hash;
-    hash = StrongHash(0, 0, 0, static_cast<uint32_t>(text.size()));
+    auto hash = StrongHash(0, 0, 0, static_cast<uint32_t>(text.size()));
     for (T const codepoint: text)
         hash = hash * static_cast<uint32_t>(codepoint);
     return hash;
@@ -153,8 +193,7 @@ StrongHash StrongHash::compute(T const& value) noexcept
 
 inline StrongHash StrongHash::compute(void const* data, size_t n) noexcept
 {
-    // TODO AES-NI fallback
-
+#if defined(STRONGHASH_USE_AES_NI)
     static_assert(sizeof(__m128i) == 16);
     auto constexpr ChunkSize = static_cast<int>(sizeof(__m128i));
 
@@ -189,6 +228,16 @@ inline StrongHash StrongHash::compute(void const* data, size_t n) noexcept
     }
 
     return StrongHash { hashValue };
+#else
+    auto const* i = (uint8_t const*) data;
+    auto const* e = i + n;
+    auto const result = FNV<uint8_t, uint64_t>()(i, e);
+    auto constexpr a = 0;
+    auto constexpr b = 0;
+    auto const c = static_cast<uint32_t>((result >> 32) & 0xFFFFFFFFu);
+    auto const d = static_cast<uint32_t>(result & 0xFFFFFFFFu);
+    return StrongHash { a, b, c, d };
+#endif
 }
 
 inline std::string to_string(StrongHash const& hash)
@@ -216,7 +265,11 @@ inline std::string to_structured_string(StrongHash const& hash)
 
 inline int to_integer(StrongHash hash) noexcept
 {
+#if defined(STRONGHASH_USE_AES_NI)
     return _mm_cvtsi128_si32(hash.value);
+#else
+    return static_cast<int>(hash.value.back());
+#endif
 }
 
 template <typename T>
@@ -225,23 +278,44 @@ struct StrongHasher
     StrongHash operator()(T const&) noexcept; // Specialize and implement me.
 };
 
+template <>
+struct StrongHasher<uint64_t>
+{
+    inline StrongHash operator()(uint64_t v) noexcept
+    {
+        auto const c = static_cast<uint32_t>((v >> 32) & 0xFFFFFFFFu);
+        auto const d = static_cast<uint32_t>(v & 0xFFFFFFFFu);
+#if defined(STRONGHASH_USE_AES_NI)
+        return StrongHash { _mm_set_epi32(0, 0, c, d) };
+#else
+        return StrongHash { 0, 0, c, d };
+#endif
+    }
+};
 // {{{ some standard hash implementations
 namespace detail
 {
     template <typename T>
     struct StdHash32
     {
-        inline StrongHash operator()(T v) noexcept { return StrongHash { _mm_set_epi32(0, 0, 0, v) }; }
+        inline StrongHash operator()(T v) noexcept
+        {
+#if defined(STRONGHASH_USE_AES_NI)
+            return StrongHash { _mm_set_epi32(0, 0, 0, v) };
+#else
+            return StrongHash { 0, 0, 0, static_cast<uint32_t>(v) };
+#endif
+        }
     };
 } // namespace detail
 
 // clang-format off
 template <> struct StrongHasher<char>: public detail::StdHash32<char> { };
 template <> struct StrongHasher<unsigned char>: public detail::StdHash32<char> { };
-template <> struct StrongHasher<short>: public detail::StdHash32<short> { };
-template <> struct StrongHasher<unsigned short>: public detail::StdHash32<unsigned short> { };
-template <> struct StrongHasher<int>: public detail::StdHash32<int> { };
-template <> struct StrongHasher<unsigned int>: public detail::StdHash32<int> { };
+template <> struct StrongHasher<int16_t>: public detail::StdHash32<int16_t> { };
+template <> struct StrongHasher<uint16_t>: public detail::StdHash32<uint16_t> { };
+template <> struct StrongHasher<int32_t>: public detail::StdHash32<int32_t> { };
+template <> struct StrongHasher<uint32_t>: public detail::StdHash32<uint32_t> { };
 // clang-format on
 // }}}
 
