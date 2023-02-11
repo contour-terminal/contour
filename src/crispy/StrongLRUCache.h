@@ -22,12 +22,6 @@
 #include <stdexcept>
 #include <vector>
 
-#if defined(__x86_64__)
-    #include <immintrin.h>
-#elif defined(__aarch64__)
-    #include <sse2neon/sse2neon.h>
-#endif
-
 #define DEBUG_STRONG_LRU_CACHE 1
 
 #if defined(NDEBUG) && defined(DEBUG_STRONG_LRU_CACHE)

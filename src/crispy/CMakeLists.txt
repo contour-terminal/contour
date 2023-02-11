@@ -7,6 +7,8 @@ endif()
 # --------------------------------------------------------------------------------------------------------
 # crispy::core
 
+option(STRONGHASH_USE_AES_NI "Build StrongHash with AES-NI support [default: ON]" ON)
+
 set(crispy_SOURCES
     App.cpp App.h
     BufferObject.cpp BufferObject.h
@@ -35,6 +37,10 @@ add_library(crispy-core ${crispy_SOURCES})
 add_library(crispy::core ALIAS crispy-core)
 
 set_target_properties(crispy-core PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
+
+if(STRONGHASH_USE_AES_NI)
+    target_compile_definitions(crispy-core PUBLIC -DSTRONGHASH_USE_AES_NI=1)
+endif()
 
 if(MSVC)
     target_compile_definitions(crispy-core PUBLIC NOMINMAX)

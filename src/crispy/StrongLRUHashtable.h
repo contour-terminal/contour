@@ -22,12 +22,6 @@
 #include <stdexcept>
 #include <vector>
 
-#if defined(__x86_64__)
-    #include <immintrin.h>
-#elif defined(__aarch64__)
-    #include <sse2neon/sse2neon.h>
-#endif
-
 #define DEBUG_STRONG_LRU_HASHTABLE 1
 
 #if defined(NDEBUG) && defined(DEBUG_STRONG_LRU_HASHTABLE)
@@ -410,7 +404,7 @@ inline size_t StrongLRUHashtable<Value>::storageSize() const noexcept
 template <typename Value>
 inline uint32_t* StrongLRUHashtable<Value>::hashTableSlot(StrongHash const& hash) noexcept
 {
-    auto const index = static_cast<uint32_t>(_mm_cvtsi128_si32(hash.value));
+    auto const index = hash.d();
     auto const slot = index & _hashMask;
     return _hashTable + slot;
 }
