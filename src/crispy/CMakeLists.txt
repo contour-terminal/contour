@@ -7,7 +7,7 @@ endif()
 # --------------------------------------------------------------------------------------------------------
 # crispy::core
 
-option(STRONGHASH_USE_AES_NI "Build StrongHash with AES-NI support [default: ON]" ON)
+option(STRONGHASH_USE_INTRINSICS "Build StrongHash with AES-NI (x86-64) / NEON (ARM64) support [default: ON]" ON)
 
 set(crispy_SOURCES
     App.cpp App.h

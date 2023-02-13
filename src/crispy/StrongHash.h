@@ -22,37 +22,10 @@
 #include <type_traits>
 
 // NB: That should be defined via CMakeLists.txt's option()...
-// #define STRONGHASH_USE_AES_NI 1
+// #define STRONGHASH_USE_INTRINSICS 1
 
-#if defined(STRONGHASH_USE_AES_NI)
-    #if defined(__x86_64__)
-        #include <immintrin.h>
-
-        #if defined(__AES__)
-            #include <wmmintrin.h>
-        #endif
-    #elif defined(__aarch64__)
-        #include <sse2neon/sse2neon.h>
-
-// The following inline functions were borrowed from:
-// https://github.com/f1ed/emp/blob/master/emp-tool/utils/block.h
-inline __m128i _mm_aesimc_si128(__m128i a) noexcept
-{
-    return vreinterpretq_m128i_u8(vaesimcq_u8(vreinterpretq_u8_m128i(a)));
-}
-
-inline __m128i _mm_aesdec_si128(__m128i a, __m128i roundKey) noexcept
-{
-    return vreinterpretq_m128i_u8(
-        vaesimcq_u8(vaesdq_u8(vreinterpretq_u8_m128i(a), vdupq_n_u8(0)) ^ vreinterpretq_u8_m128i(roundKey)));
-}
-
-inline __m128i _mm_aesdeclast_si128(__m128i a, __m128i roundKey) noexcept
-{
-    return vreinterpretq_m128i_u8(vaesdq_u8(vreinterpretq_u8_m128i(a), vdupq_n_u8(0))
-                                  ^ vreinterpretq_u8_m128i(roundKey));
-}
-    #endif
+#if defined(STRONGHASH_USE_INTRINSICS)
+    #include <crispy/Intrinsics.h>
 #else
     #include <crispy/FNV.h>
 #endif
@@ -70,8 +43,8 @@ struct StrongHash
 
     StrongHash(uint32_t a, uint32_t b, uint32_t c, uint32_t d) noexcept;
 
-#if defined(STRONGHASH_USE_AES_NI)
-    explicit StrongHash(__m128i v) noexcept;
+#if defined(STRONGHASH_USE_INTRINSICS)
+    explicit StrongHash(Intrinsics::m128i v) noexcept;
 #endif
 
     StrongHash() = default;
@@ -95,32 +68,31 @@ struct StrongHash
     // TODO: Provide access also to: a, b, c.
     [[nodiscard]] uint32_t d() const noexcept
     {
-#if defined(STRONGHASH_USE_AES_NI)
-        return static_cast<uint32_t>(_mm_cvtsi128_si32(value));
+#if defined(STRONGHASH_USE_INTRINSICS)
+        return static_cast<uint32_t>(Intrinsics::castToInt32(value));
 #else
         return value[3];
 #endif
     }
 
-#if defined(STRONGHASH_USE_AES_NI)
-    __m128i value {};
+#if defined(STRONGHASH_USE_INTRINSICS)
+    Intrinsics::m128i value {};
 #else
     std::array<uint32_t, 4> value;
 #endif
 };
 
 inline StrongHash::StrongHash(uint32_t a, uint32_t b, uint32_t c, uint32_t d) noexcept:
-#if defined(STRONGHASH_USE_AES_NI)
-    StrongHash(_mm_xor_si128(
-        _mm_set_epi32(static_cast<int>(a), static_cast<int>(b), static_cast<int>(c), static_cast<int>(d)),
-        _mm_loadu_si128((__m128i const*) defaultSeed.data())))
+#if defined(STRONGHASH_USE_INTRINSICS)
+    StrongHash(Intrinsics::xor128(Intrinsics::load32(a, b, c, d),
+                                  Intrinsics::loadUnaligned((__m128i const*) defaultSeed.data())))
 #else
     value { a, b, c, d }
 #endif
 {
 }
 
-#if defined(STRONGHASH_USE_AES_NI)
+#if defined(STRONGHASH_USE_INTRINSICS)
 inline StrongHash::StrongHash(__m128i v) noexcept: value { v }
 {
 }
@@ -128,8 +100,8 @@ inline StrongHash::StrongHash(__m128i v) noexcept: value { v }
 
 inline bool operator==(StrongHash a, StrongHash b) noexcept
 {
-#if defined(STRONGHASH_USE_AES_NI)
-    return _mm_movemask_epi8(_mm_cmpeq_epi32(a.value, b.value)) == 0xFFFF;
+#if defined(STRONGHASH_USE_INTRINSICS)
+    return Intrinsics::compare(a.value, b.value);
 #else
     return a.value == b.value;
 #endif
@@ -142,15 +114,14 @@ inline bool operator!=(StrongHash a, StrongHash b) noexcept
 
 inline StrongHash operator*(StrongHash const& a, StrongHash const& b) noexcept
 {
-#if defined(STRONGHASH_USE_AES_NI)
-    // TODO AES-NI fallback
-    __m128i hashValue = a.value;
+#if defined(STRONGHASH_USE_INTRINSICS)
+    Intrinsics::m128i hashValue = a.value;
 
-    hashValue = _mm_xor_si128(hashValue, b.value);
-    hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
-    hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
-    hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
-    hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
+    hashValue = Intrinsics::xor128(hashValue, b.value);
+    hashValue = Intrinsics::aesdec(hashValue, Intrinsics::setzero());
+    hashValue = Intrinsics::aesdec(hashValue, Intrinsics::setzero());
+    hashValue = Intrinsics::aesdec(hashValue, Intrinsics::setzero());
+    hashValue = Intrinsics::aesdec(hashValue, Intrinsics::setzero());
 
     return StrongHash { hashValue };
 #else
@@ -194,23 +165,23 @@ StrongHash StrongHash::compute(T const& value) noexcept
 
 inline StrongHash StrongHash::compute(void const* data, size_t n) noexcept
 {
-#if defined(STRONGHASH_USE_AES_NI)
+#if defined(STRONGHASH_USE_INTRINSICS)
     static_assert(sizeof(__m128i) == 16);
     auto constexpr ChunkSize = static_cast<int>(sizeof(__m128i));
 
-    __m128i hashValue = _mm_cvtsi64_si128(static_cast<long long>(n));
-    hashValue = _mm_xor_si128(hashValue, _mm_loadu_si128((__m128i const*) defaultSeed.data()));
+    __m128i hashValue = Intrinsics::cvtsi64_si128(static_cast<long long>(n));
+    hashValue = Intrinsics::xor128(hashValue, Intrinsics::loadUnaligned((__m128i const*) defaultSeed.data()));
 
     char const* inputPtr = (char const*) data;
     for (int chunkIndex = 0; chunkIndex < static_cast<int>(n) / ChunkSize; chunkIndex++)
     {
-        __m128i chunk = _mm_loadu_si128((__m128i const*) inputPtr);
+        auto chunk = Intrinsics::loadUnaligned((Intrinsics::m128i const*) inputPtr);
 
-        hashValue = _mm_xor_si128(hashValue, chunk);
-        hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
-        hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
-        hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
-        hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
+        hashValue = Intrinsics::xor128(hashValue, chunk);
+        hashValue = Intrinsics::aesdec(hashValue, Intrinsics::setzero());
+        hashValue = Intrinsics::aesdec(hashValue, Intrinsics::setzero());
+        hashValue = Intrinsics::aesdec(hashValue, Intrinsics::setzero());
+        hashValue = Intrinsics::aesdec(hashValue, Intrinsics::setzero());
 
         inputPtr += ChunkSize;
     }
@@ -220,12 +191,12 @@ inline StrongHash StrongHash::compute(void const* data, size_t n) noexcept
     {
         char lastChunk[ChunkSize] { 0 };
         std::memcpy(lastChunk + ChunkSize - remainingByteCount, inputPtr, remainingByteCount);
-        __m128i chunk = _mm_loadu_si128((__m128i*) lastChunk);
-        hashValue = _mm_xor_si128(hashValue, chunk);
-        hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
-        hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
-        hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
-        hashValue = _mm_aesdec_si128(hashValue, _mm_setzero_si128());
+        __m128i chunk = Intrinsics::loadUnaligned((__m128i*) lastChunk);
+        hashValue = Intrinsics::xor128(hashValue, chunk);
+        hashValue = Intrinsics::aesdec(hashValue, Intrinsics::setzero());
+        hashValue = Intrinsics::aesdec(hashValue, Intrinsics::setzero());
+        hashValue = Intrinsics::aesdec(hashValue, Intrinsics::setzero());
+        hashValue = Intrinsics::aesdec(hashValue, Intrinsics::setzero());
     }
 
     return StrongHash { hashValue };
@@ -266,8 +237,8 @@ inline std::string to_structured_string(StrongHash const& hash)
 
 inline int to_integer(StrongHash hash) noexcept
 {
-#if defined(STRONGHASH_USE_AES_NI)
-    return _mm_cvtsi128_si32(hash.value);
+#if defined(STRONGHASH_USE_INTRINSICS)
+    return Intrinsics::castToInt32(hash.value);
 #else
     return static_cast<int>(hash.value.back());
 #endif
@@ -286,8 +257,8 @@ struct StrongHasher<uint64_t>
     {
         auto const c = static_cast<uint32_t>((v >> 32) & 0xFFFFFFFFu);
         auto const d = static_cast<uint32_t>(v & 0xFFFFFFFFu);
-#if defined(STRONGHASH_USE_AES_NI)
-        return StrongHash { _mm_set_epi32(0, 0, c, d) };
+#if defined(STRONGHASH_USE_INTRINSICS)
+        return StrongHash { Intrinsics::load32(0, 0, c, d) };
 #else
         return StrongHash { 0, 0, c, d };
 #endif
@@ -301,8 +272,8 @@ namespace detail
     {
         inline StrongHash operator()(T v) noexcept
         {
-#if defined(STRONGHASH_USE_AES_NI)
-            return StrongHash { _mm_set_epi32(0, 0, 0, v) };
+#if defined(STRONGHASH_USE_INTRINSICS)
+            return StrongHash { Intrinsics::load32(0, 0, 0, v) };
 #else
             return StrongHash { 0, 0, 0, static_cast<uint32_t>(v) };
 #endif
