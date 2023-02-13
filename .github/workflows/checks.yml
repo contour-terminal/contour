@@ -42,7 +42,7 @@ jobs:
       with:
         clang-format-version: '15'
         check-path: 'src'
-        exclude-regex: 'sse2neon.h'
+        #exclude-regex: 'sse2neon.h'
 
   editorconfig:
     name: "Check editorconfig"
