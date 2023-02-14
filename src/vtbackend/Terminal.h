@@ -707,7 +707,8 @@ class Terminal
 
     bool allowPassMouseEventToApp(Modifier currentlyPressedModifier) const noexcept
     {
-        return allowInput() && !allowBypassAppMouseGrabViaModifier(currentlyPressedModifier);
+        return _state.inputGenerator.mouseProtocol().has_value() && allowInput()
+               && !allowBypassAppMouseGrabViaModifier(currentlyPressedModifier);
     }
 
     template <typename BlinkerState>
