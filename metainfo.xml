@@ -110,6 +110,7 @@
           <li>Fixes use of config `bypass_mouse_protocol_modifier` that was ignored.</li>
           <li>Fixes abnormal termination on incomplete foreground/background color-pair specification.</li>
           <li>Fixes `SendChars` input acion to actually send the chars as-is to the standard input of the connected application.</li>
+          <li>Fixes mouse selection to only be initiated if actually meant to, i.e. in alt screen mode only if bypass-modifier was pressed (#1017).</li>
           <li>Adds normal mode motion `[[`, `]]`, `[]`, `][` mimmicking exactly what vim does.</li>
           <li>Adds normal mode motion `[m` and `]m` to jump line marks up/down.</li>
           <li>Adds normal mode motion `mm` to toggle the line mark at the current active cursor position.</li>

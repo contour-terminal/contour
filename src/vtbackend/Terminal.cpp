@@ -648,18 +648,17 @@ bool Terminal::sendMousePressEvent(Modifier modifier,
                                    bool uiHandledHint)
 {
     if (button == MouseButton::Left)
-        uiHandledHint = handleMouseSelection(modifier) || uiHandledHint;
-
-    if (!allowPassMouseEventToApp(modifier))
-        return false;
+    {
+        _leftMouseButtonPressed = true;
+        if (!allowPassMouseEventToApp(modifier))
+            uiHandledHint = handleMouseSelection(modifier) || uiHandledHint;
+    }
 
     verifyState();
 
-    auto const eventSent = _state.inputGenerator.generateMousePress(
-        modifier, button, _currentMousePosition, pixelPosition, uiHandledHint);
-
-    if (!eventSent)
-        return false;
+    if (allowPassMouseEventToApp(modifier))
+        _state.inputGenerator.generateMousePress(
+            modifier, button, _currentMousePosition, pixelPosition, uiHandledHint);
 
     // TODO: Ctrl+(Left)Click's should still be catched by the terminal iff there's a hyperlink
     // under the current position
@@ -674,7 +673,6 @@ bool Terminal::handleMouseSelection(Modifier modifier)
     double const diff_ms = chrono::duration<double, milli>(_currentTime - _lastClick).count();
     _lastClick = _currentTime;
     _speedClicks = (diff_ms >= 0.0 && diff_ms <= 750.0 ? _speedClicks : 0) % 3 + 1;
-    _leftMouseButtonPressed = true;
 
     auto const startPos = CellLocation {
         _currentMousePosition.line - boxed_cast<LineOffset>(_viewport.scrollOffset()),
