@@ -52,11 +52,16 @@ bool Viewport::forceScrollToBottom()
     return scrollTo(ScrollOffset(0));
 }
 
-bool Viewport::makeVisible(LineOffset lineOffset)
+bool Viewport::makeVisibleWithinSafeArea(LineOffset lineOffset)
 {
-    auto const viewportTop = -_scrollOffset.as<LineOffset>() + boxed_cast<LineOffset>(_scrollOff);
+    return makeVisibleWithinSafeArea(lineOffset, _scrollOff);
+}
+
+bool Viewport::makeVisibleWithinSafeArea(LineOffset lineOffset, LineCount paddingLines)
+{
+    auto const viewportTop = -_scrollOffset.as<LineOffset>() + boxed_cast<LineOffset>(paddingLines);
     auto const viewportBottom = boxed_cast<LineOffset>(screenLineCount() - 1) - _scrollOffset.as<int>()
-                                - boxed_cast<LineOffset>(_scrollOff);
+                                - boxed_cast<LineOffset>(paddingLines);
 
     // Is the line above the viewport?
     if (!(viewportTop < lineOffset))
@@ -67,6 +72,11 @@ bool Viewport::makeVisible(LineOffset lineOffset)
         return scrollDown(LineCount::cast_from(lineOffset - viewportBottom));
 
     return false;
+}
+
+bool Viewport::makeVisible(LineOffset lineOffset)
+{
+    return makeVisibleWithinSafeArea(lineOffset, LineCount(0));
 }
 
 bool Viewport::scrollTo(ScrollOffset offset)

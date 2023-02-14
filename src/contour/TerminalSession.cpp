@@ -729,16 +729,16 @@ bool TerminalSession::operator()(actions::DecreaseOpacity)
 bool TerminalSession::operator()(actions::FocusNextSearchMatch)
 {
     if (terminal_.state().viCommands.jumpToNextMatch(1))
-        terminal_.viewport().makeVisible(terminal_.state().viCommands.cursorPosition.line);
-    // TODO why didn't the makeVisible() call from inside jumpToNextMatch not work?
+        terminal_.viewport().makeVisibleWithinSafeArea(terminal_.state().viCommands.cursorPosition.line);
+    // TODO why didn't the makeVisibleWithinSafeArea() call from inside jumpToNextMatch not work?
     return true;
 }
 
 bool TerminalSession::operator()(actions::FocusPreviousSearchMatch)
 {
     if (terminal_.state().viCommands.jumpToPreviousMatch(1))
-        terminal_.viewport().makeVisible(terminal_.state().viCommands.cursorPosition.line);
-    // TODO why didn't the makeVisible() call from inside jumpToPreviousMatch not work?
+        terminal_.viewport().makeVisibleWithinSafeArea(terminal_.state().viCommands.cursorPosition.line);
+    // TODO why didn't the makeVisibleWithinSafeArea() call from inside jumpToPreviousMatch not work?
     return true;
 }
 
