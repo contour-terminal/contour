@@ -77,6 +77,9 @@ class Viewport
     /// If the line is already visible, no scrolling is applied.
     bool makeVisible(LineOffset line);
 
+    bool makeVisibleWithinSafeArea(LineOffset line);
+    bool makeVisibleWithinSafeArea(LineOffset line, LineCount paddingLines);
+
     /// Translates a screen coordinate to a Grid-coordinate by applying
     /// the scroll-offset to it.
     constexpr CellLocation translateScreenToGridCoordinate(CellLocation p) const noexcept

@@ -803,11 +803,8 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
         && (selector()->state() != Selection::State::Complete && _leftMouseButtonPressed))
     {
         if (currentScreen().isCellEmpty(relativePos) && !currentScreen().compareCellTextAt(relativePos, 0x20))
-        {
             relativePos.column = ColumnOffset { 0 } + *(_settings.pageSize.columns - 1);
-        }
         _state.viCommands.cursorPosition = relativePos;
-        _viewport.makeVisible(_state.viCommands.cursorPosition.line);
         if (_state.inputHandler.mode() != ViMode::Insert)
             _state.inputHandler.setMode(selector()->viMode());
         if (selector()->extend(relativePos))
@@ -1976,7 +1973,7 @@ optional<CellLocation> Terminal::search(CellLocation searchPosition)
     auto const matchLocation = currentScreen().search(searchText, searchPosition);
 
     if (matchLocation)
-        viewport().makeVisible(matchLocation.value().line);
+        viewport().makeVisibleWithinSafeArea(matchLocation.value().line);
 
     screenUpdated();
     return matchLocation;
@@ -2022,7 +2019,7 @@ optional<CellLocation> Terminal::searchReverse(CellLocation searchPosition)
     auto const matchLocation = currentScreen().searchReverse(searchText, searchPosition);
 
     if (matchLocation)
-        viewport().makeVisible(matchLocation.value().line);
+        viewport().makeVisibleWithinSafeArea(matchLocation.value().line);
 
     screenUpdated();
     return matchLocation;

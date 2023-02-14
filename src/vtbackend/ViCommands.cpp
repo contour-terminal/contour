@@ -1100,7 +1100,7 @@ void ViCommands::moveCursorTo(CellLocation position)
 {
     cursorPosition = position;
 
-    _terminal.viewport().makeVisible(cursorPosition.line);
+    _terminal.viewport().makeVisibleWithinSafeArea(cursorPosition.line);
 
     switch (_terminal.inputHandler().mode())
     {
