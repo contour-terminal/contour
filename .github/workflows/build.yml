@@ -52,8 +52,6 @@ jobs:
           arch="${{ matrix.arch }}"
           echo "PLATFORM=${arch%% *}" >> "$GITHUB_OUTPUT"
           echo "ARCH=${arch##* }" >> "$GITHUB_OUTPUT"
-      - name: Updating APT package database
-        run: sudo apt -q update && sudo apt upgrade -y
       - name: Installing xmllint for ci-set-vars
         run: sudo apt -qy install libxml2-utils
       - name: set environment variables
@@ -104,8 +102,6 @@ jobs:
           arch="${{ matrix.arch }}"
           echo "PLATFORM=${arch%% *}" >> "$GITHUB_OUTPUT"
           echo "ARCH=${arch##* }" >> "$GITHUB_OUTPUT"
-      - name: Updating APT package database
-        run: sudo apt -q update && sudo apt upgrade -y
       - name: Installing xmllint for ci-set-vars
         run: sudo apt -qy install libxml2-utils
       - name: set environment variables
@@ -360,8 +356,6 @@ jobs:
         with:
           key: "ccache-ubuntu2204-${{ matrix.compiler }}-${{ matrix.cxx }}-${{ matrix.build_type }}"
           max-size: 256M
-      - name: Updating APT package database
-        run: sudo apt -q update && sudo apt upgrade -y
       - name: Installing xmllint for ci-set-vars
         run: sudo apt -qy install libxml2-utils
       - name: set environment variables
@@ -442,8 +436,6 @@ jobs:
         run: |
           sudo apt-get autoremove -y libgcc-9-dev gcc-9 libgcc-10-dev gcc-10 libgcc-11-dev gcc-11
           sudo apt-get install --allow-downgrades --no-remove --reinstall -y libstdc++6=8.4.0-1ubuntu1~18.04
-      - name: Updating APT package database
-        run: sudo apt -q update && sudo apt upgrade -y
       - name: Installing xmllint for ci-set-vars
         run: sudo apt -qy install libxml2-utils
       - name: "set environment variables"
@@ -513,8 +505,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-      - name: Updating APT package database
-        run: sudo apt -q update && sudo apt upgrade -y
       - name: Installing xmllint for ci-set-vars
         run: sudo apt -qy install libxml2-utils
       - name: set variables
@@ -617,8 +607,6 @@ jobs:
         run: |
           find . -name '*_test' -exec chmod 0755 {} \;
           find . -name 'bench-headless' -exec chmod 0755 {} \;
-      - name: Updating APT package database
-        run: sudo apt -q update && sudo apt upgrade -y
       - name: "install dependencies"
         run: |
           set -ex
@@ -663,8 +651,6 @@ jobs:
         run: |
           find . -name '*_test' -exec chmod 0755 {} \;
           find . -name 'bench-headless' -exec chmod 0755 {} \;
-      - name: Updating APT package database
-        run: sudo apt -q update && sudo apt upgrade -y
       - name: "install dependencies"
         run: |
           set -ex
