@@ -325,8 +325,6 @@ jobs:
         run: |
           sudo apt-get autoremove -y libgcc-9-dev gcc-9 libgcc-10-dev gcc-10 libgcc-11-dev gcc-11
           sudo apt-get install --allow-downgrades --no-remove --reinstall -y libstdc++6=8.4.0-1ubuntu1~18.04
-      - name: Updating APT package database
-        run: sudo apt -q update && sudo apt upgrade -y
       - name: Installing xmllint for ci-set-vars
         run: sudo apt -qy install libxml2-utils
       - name: "set environment variables"
@@ -391,8 +389,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-      - name: Updating APT package database
-        run: sudo apt -q update && sudo apt upgrade -y
       - name: Installing xmllint for ci-set-vars
         run: sudo apt -qy install libxml2-utils
       - name: set variables
