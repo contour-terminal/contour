@@ -238,12 +238,13 @@ int App::run(int argc, char const* argv[])
             if (parameters().get<bool>(name))
                 return handler();
 
-        std::cerr << fmt::format("Usage error.\n");
+        std::cerr << fmt::format("Usage error.\n") << endl;
         return EXIT_FAILURE;
     }
     catch (exception const& e)
     {
-        std::cerr << fmt::format("Unhandled error caught. {}", e.what());
+        std::cerr << fmt::format("Unhandled error caught. {}", e.what())
+			<< endl;
         return EXIT_FAILURE;
     }
 }
