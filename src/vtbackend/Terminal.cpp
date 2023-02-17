@@ -656,14 +656,14 @@ bool Terminal::sendMousePressEvent(Modifier modifier,
 
     verifyState();
 
-    if (allowPassMouseEventToApp(modifier))
-        _state.inputGenerator.generateMousePress(
-            modifier, button, _currentMousePosition, pixelPosition, uiHandledHint);
+    auto const eventHandledByApp = allowPassMouseEventToApp(modifier)
+                                   && _state.inputGenerator.generateMousePress(
+                                       modifier, button, _currentMousePosition, pixelPosition, uiHandledHint);
 
     // TODO: Ctrl+(Left)Click's should still be catched by the terminal iff there's a hyperlink
     // under the current position
     flushInput();
-    return !isModeEnabled(DECMode::MousePassiveTracking);
+    return eventHandledByApp && !isModeEnabled(DECMode::MousePassiveTracking);
 }
 
 bool Terminal::handleMouseSelection(Modifier modifier)

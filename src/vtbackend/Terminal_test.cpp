@@ -409,7 +409,13 @@ TEST_CASE("Terminal.TextSelection", "[terminal]")
         Modifier::None, 1_lineOffset + 1_columnOffset, pixelCoordinate, uiHandledHint);
 
     mock.terminal.tick(1s);
-    mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, pixelCoordinate, uiHandledHint);
+    auto const appHandledMouse =
+        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, pixelCoordinate, uiHandledHint);
+
+    // We want to ensure that this call is returning false if the app has not explicitly requested
+    // to listen on mouse events (without passive mode being on).
+    REQUIRE(appHandledMouse == false);
+
     CHECK(mock.terminal.selector()->state() == Selection::State::Waiting);
 
     // Mouse is pressed, but we did not start selecting (by moving the mouse) yet,
