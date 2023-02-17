@@ -553,6 +553,7 @@ void TerminalSession::sendMousePressEvent(Modifier _modifier,
                                           PixelCoordinate _pixelPosition)
 {
     auto const uiHandledHint = false;
+    InputLog()("Mouse press received: {} {}\n", _modifier, _button);
 
     terminal().tick(steady_clock::now());
 
