@@ -224,7 +224,7 @@ void ViInputHandler::registerCommand(ModeSelect modes, std::string_view command,
 {
     Require(!!handler);
 
-    auto commandStr = std::string(command.data(), command.size());
+    auto commandStr = crispy::replace(std::string(command.data(), command.size()), "<Space>", " ");
 
     switch (modes)
     {
@@ -440,8 +440,6 @@ bool ViInputHandler::sendCharPressEvent(char32_t ch, Modifier modifier)
         _pendingInput += "<ESC>";
     else if (ch == '\b')
         _pendingInput += "<BS>";
-    else if (ch == ' ')
-        _pendingInput += "<Space>";
     else
         _pendingInput += unicode::convert_to<char>(ch);
 

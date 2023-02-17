@@ -161,6 +161,18 @@ TEST_CASE("vi.motions: M", "[vi]")
     CHECK(mock.terminal.state().viCommands.cursorPosition == 4_lineOffset + 1_columnOffset);
 }
 
+TEST_CASE("vi.motion: t{char}", "[vi]")
+{
+    auto mock = setupMockTerminal("One.Two..Three and more\r\n"
+                                  "   On the next line.",
+                                  terminal::PageSize { terminal::LineCount(10), terminal::ColumnCount(40) });
+    mock.sendCharPressSequence("te"); // jump to the char before first `e`, which is `n`.
+    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 1_columnOffset);
+
+    mock.sendCharPressSequence("t "); // jump to the char before first space character, which is `e`.
+    REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 13_columnOffset);
+}
+
 TEST_CASE("vi.motion: b", "[vi]")
 {
     auto mock = setupMockTerminal("One.Two..Three and more\r\n"
