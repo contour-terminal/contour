@@ -119,6 +119,7 @@
           <li>Adds normal mode motion `t{char}`, `T{char}`, `f{char}`, `F{char}`, `;`, `,` to move cursor in line till before/after or to given `{char}`.</li>
           <li>Adds config entry `vi_mode_highlight` to color palette to highlight current cursor's line when not in insert mode (aka. in Vi-mode).</li>
           <li>Adds shell integration for fish shell.</li>
+          <li>Adds shell integration for tcsh shell.</li>
           <li>Improve performance of parsing UTF-8 text on ARM64 platfroms through the use SIMD instructions.</li>
           <li>Contour can now run on platforms not supporting hardware crypto extension for ARM64 nor AES-NI for x86-64. Hardware acceleration support can be configured to be included at compile time.</li>
         </ul>

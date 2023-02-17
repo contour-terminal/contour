@@ -233,6 +233,8 @@ int ContourApp::integrationAction()
             file.setFileName(":/contour/shell-integration/shell-integration.zsh");
         else if (shell == "fish")
             file.setFileName(":/contour/shell-integration/shell-integration.fish");
+        else if (shell == "tcsh")
+            file.setFileName(":/contour/shell-integration/shell-integration.tcsh");
         else
         {
             std::cerr << fmt::format("Cannot generate shell integration for an unsupported shell, {}.\n",
@@ -355,8 +357,8 @@ crispy::cli::Command ContourApp::parameterDefinition() const
                         CLI::OptionList {
                             CLI::Option { "shell",
                                           CLI::Value { ""s },
-                                          "Shell name to create the integration for. Currently only zsh and "
-                                          "fish are supported.",
+                                          "Shell name to create the integration for. "
+                                          "Supported shells: fish, zsh, tcsh",
                                           "SHELL",
                                           CLI::Presence::Required },
                             CLI::Option { "to",
