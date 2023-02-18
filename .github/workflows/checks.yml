@@ -60,8 +60,6 @@ jobs:
     steps:
       - name: "Check out repository"
         uses: actions/checkout@v3
-      - name: "update APT package database"
-        run: sudo apt -q update && sudo apt upgrade -y
       - name: Installing xmllint for ci-set-vars
         run: sudo apt -qy install libxml2-utils
       - name: "Set variables for Contour build-like CI"
