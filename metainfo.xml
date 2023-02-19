@@ -123,6 +123,7 @@
           <li>Adds shell integration for tcsh shell.</li>
           <li>Improve performance of parsing UTF-8 text on ARM64 platfroms through the use SIMD instructions.</li>
           <li>Contour can now run on platforms not supporting hardware crypto extension for ARM64 nor AES-NI for x86-64. Hardware acceleration support can be configured to be included at compile time.</li>
+          <li>Fixes scroll up when infinte history limit is set</li>
         </ul>
       </description>
     </release>

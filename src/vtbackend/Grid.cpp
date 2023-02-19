@@ -391,15 +391,22 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 LineCount Grid<Cell>::scrollUp(LineCount linesCountToScrollUp, GraphicsAttributes defaultAttributes) noexcept
 {
     verifyState();
+    // Number of lines in the ring buffer that are not yet
+    // used by the grid system.
+    auto const linesAvailable = LineCount::cast_from(_lines.size() - unbox<size_t>(_linesUsed));
+    if (std::holds_alternative<Infinite>(_historyLimit) && linesAvailable < linesCountToScrollUp)
+    {
+        auto const linesToAllocate = unbox<int>(linesCountToScrollUp - linesAvailable);
+
+        for ([[maybe_unused]] auto const _: ranges::views::iota(0, linesToAllocate))
+        {
+            _lines.emplace_back(defaultLineFlags(),
+                                TrivialLineBuffer { _pageSize.columns, GraphicsAttributes() });
+        }
+        return scrollUp(linesCountToScrollUp, defaultAttributes);
+    }
     if (unbox<size_t>(_linesUsed) == _lines.size()) // with all grid lines in-use
     {
-        if (std::get_if<Infinite>(&_historyLimit))
-        {
-            for ([[maybe_unused]] auto const _: ranges::views::iota(0, unbox<int>(linesCountToScrollUp)))
-                _lines.emplace_back(defaultLineFlags(),
-                                    TrivialLineBuffer { _pageSize.columns, GraphicsAttributes {} });
-            return scrollUp(linesCountToScrollUp, defaultAttributes);
-        }
         // TODO: ensure explicit test for this case
         rotateBuffersLeft(linesCountToScrollUp);
 
@@ -414,10 +421,6 @@ LineCount Grid<Cell>::scrollUp(LineCount linesCountToScrollUp, GraphicsAttribute
     else
     {
         Require(unbox<size_t>(_linesUsed) < _lines.size());
-
-        // Number of lines in the ring buffer that are not yet
-        // used by the grid system.
-        auto const linesAvailable = LineCount::cast_from(_lines.size() - unbox<size_t>(_linesUsed));
 
         // Number of lines in the ring buffer that we can allocate at the head.
         auto const linesAppendCount = std::min(linesCountToScrollUp, linesAvailable);
