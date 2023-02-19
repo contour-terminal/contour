@@ -143,7 +143,7 @@ if(CONTOUR_FRONTEND_GUI)
 endif()
 
 if(CONTOUR_BUILD_WITH_MIMALLOC)
-    target_link_libraries(contour mimalloc-static)
+    target_link_libraries(contour mimalloc)
 endif()
 
 if(NOT(WIN32))
