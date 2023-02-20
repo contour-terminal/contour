@@ -118,6 +118,10 @@ Click the following button install Contour from the Flathub store.
 
 [![Get it on Flathub](https://raw.githubusercontent.com/flatpak-design-team/flathub-mockups/master/assets/download-button/download.svg?sanitize=true)](https://flathub.org/apps/details/org.contourterminal.Contour)
 
+## Configuration
+
+
+In order to set up Contour, it is necessary to modify the configuration file `contour.yml`, which is initially generated in the `$HOME/.config/contour` directory.
 
 # References
 
