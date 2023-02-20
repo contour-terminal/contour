@@ -200,6 +200,40 @@ namespace detail
     {
         return detail::Times2D<I, T1, T2> { std::move(a), std::move(b) };
     }
+
+    template <typename I,
+              typename T,
+              typename Callable,
+              typename std::enable_if_t<std::is_invocable_r_v<void, Callable, T>, int> = 0>
+    constexpr void operator|(detail::Times<I, T> times, Callable callable)
+    {
+        for (auto&& i: times)
+            callable(i);
+    }
+
+    template <typename I,
+              typename T,
+              typename Callable,
+              typename std::enable_if_t<std::is_invocable_r_v<void, Callable>, int> = 0>
+    constexpr void operator|(detail::Times<I, T> times, Callable callable)
+    {
+        for ([[maybe_unused]] auto&& i: times)
+            callable();
+    }
+
+    // ---------------------------------------------------------------------------------------------------
+
+    template <typename I,
+              typename T1,
+              typename T2,
+              typename Callable,
+              typename std::enable_if_t<std::is_invocable_r_v<void, Callable, T1, T2>, int> = 0>
+    constexpr void operator|(detail::Times2D<I, T1, T2> times, Callable callable)
+    {
+        for (auto&& [i, j]: times)
+            callable(i, j);
+    }
+
 } // namespace detail
 
 // TODO: give random access hints to STL algorithms
@@ -216,43 +250,10 @@ constexpr inline detail::Times<T, T> times(T count)
     return detail::Times<T, T> { T(0), count, T(1) };
 }
 
-template <typename I,
-          typename T,
-          typename Callable,
-          typename std::enable_if_t<std::is_invocable_r_v<void, Callable, T>, int> = 0>
-constexpr void operator|(detail::Times<I, T> times, Callable callable)
-{
-    for (auto&& i: times)
-        callable(i);
-}
-
-template <typename I,
-          typename T,
-          typename Callable,
-          typename std::enable_if_t<std::is_invocable_r_v<void, Callable>, int> = 0>
-constexpr void operator|(detail::Times<I, T> times, Callable callable)
-{
-    for ([[maybe_unused]] auto&& i: times)
-        callable();
-}
-
-// ---------------------------------------------------------------------------------------------------
-
 template <typename T>
 constexpr inline detail::Times2D<T, T, T> times2D(T a, T b)
 {
     return detail::Times2D<T, T, T> { std::move(a), std::move(b) };
-}
-
-template <typename I,
-          typename T1,
-          typename T2,
-          typename Callable,
-          typename std::enable_if_t<std::is_invocable_r_v<void, Callable, T1, T2>, int> = 0>
-constexpr void operator|(detail::Times2D<I, T1, T2> times, Callable callable)
-{
-    for (auto&& [i, j]: times)
-        callable(i, j);
 }
 
 } // namespace crispy
