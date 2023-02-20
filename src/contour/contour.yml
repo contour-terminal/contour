@@ -216,7 +216,7 @@ profiles:
         # visual scrollbar support
         scrollbar:
             # scroll bar position: Left, Right, Hidden (ignore-case)
-            position: right
+            position: Hidden
             # whether or not to hide the scrollbar when in alt-screen.
             hide_in_alt_screen: true
 
@@ -419,7 +419,7 @@ color_schemes:
         # Default colors
         default:
             # Default background color (this can be made transparent, see above).
-            background: '#000000'
+            background: '#1a1716'
             # Default foreground text color.
             foreground: '#d0d0d0'
 
@@ -559,11 +559,11 @@ color_schemes:
         # Normal colors
         normal:
             black:   '#000000'
-            red:     '#a00000'
+            red:     '#c63939'
             green:   '#00a000'
             yellow:  '#a0a000'
-            blue:    '#0000a0'
-            magenta: '#a000a0'
+            blue:    '#4d79ff'
+            magenta: '#ff66ff'
             cyan:    '#00a0a0'
             white:   '#c0c0c0'
         # Bright colors

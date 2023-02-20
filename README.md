@@ -40,6 +40,63 @@ for everyday use. It is aiming for power users with a modern feature mindset.
 - ✅ VT320 Host-programmable and Indicator status line support.
 - ✅ and much more ...
 
+
+## Installing from source
+
+It's best installed from supported package managers, but if you want
+to build from source, it is recommended to execute the `scripts/install-deps.sh` script.
+
+### Prerequisites UNIX-like systems (Linux, FreeBSD, OS/X)
+
+```sh
+./scripts/install-deps.sh
+```
+
+This script *might* ask you for the administrator password if a package dependency
+can be insalled via the system package manager.
+
+### Prerequisites Windows 10 or newer
+
+For Windows, you must have Windows 10, 2018 Fall Creators Update, and Visual Studio 2019, installed.
+It will neither build nor run on any prior Windows OS, due to libterminal making use of [ConPTY API](https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/).
+
+```psh
+.\scripts\install-deps.ps1
+```
+
+### Compile
+
+```sh
+cmake -S . -B build -G Ninja
+cmake --build build/
+
+# Optionally, if you want to install from source
+cmake --build build/ --target install
+```
+
+### Installing via Flatpak
+
+#### Install from Flathub
+
+Click the following button install Contour from the Flathub store.
+
+[![Get it on Flathub](https://raw.githubusercontent.com/flatpak-design-team/flathub-mockups/master/assets/download-button/download.svg?sanitize=true)](https://flathub.org/apps/details/org.contourterminal.Contour)
+
+
+#### Prerequisites
+
+- Make sure you have flatpak installed in your system ([here is a tutorial on how to install it](https://flatpak.org/getting.html)), and make sure that the version is >= 0.10 (check it using this command: `flatpak --version`)
+- Add the [flathub](https://flathub.org) repository using the following command: `flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo`.
+- Proceed with one of the following options:
+  - [Install from Flathub](#install-from-flathub)
+  - [Install from GitHub release](https://github.com/contour-terminal/contour/releases)
+
+
+## Configuration
+
+
+In order to set up Contour, it is necessary to modify the configuration file `contour.yml`, which is initially generated in the `$HOME/.config/contour` directory.
+
 ## Requirements
 
 - **operating system**: A *recent* operating system (OS/X 12, Windows 10+, an up-to-date Linux, or FreeBSD)
@@ -68,56 +125,6 @@ for everyday use. It is aiming for power users with a modern feature mindset.
     contour set profile [to NAME]
 
 ```
-
-## Installing from source
-
-It's best installed from supported package managers, but if you want
-to build from source, it is recommended to execute the `scripts/install-deps.sh` script.
-
-### Prerequisites UNIX-like systems (Linux, FreeBSD, OS/X)
-
-```sh
-./scripts/install-deps.sh
-```
-
-This script *might* ask you for the administrator password if a package dependency
-can be insalled via the system package manager.
-
-### Prerequisites Windows 10 or newer
-
-For Windows, you must have Windows 10, 2018 Fall Creators Update, and Visual Studio 2019, installed.
-It will neither build nor run on any prior Windows OS, due to libterminal making use of [ConPTY API](https://devblogs.microsoft.com/commandline/windows-command-line-introducing-the-windows-pseudo-console-conpty/).
-
-```psh
-.\scripts\install-deps.ps1
-```
-
-### Compile
-
-```sh
-cmake -S . -B build
-cmake --build build/
-
-# Optionally, if you want to install from source
-cmake --build build/ --target install
-```
-
-### Installing via Flatpak
-
-#### Prerequisites
-
-- Make sure you have flatpak installed in your system ([here is a tutorial on how to install it](https://flatpak.org/getting.html)), and make sure that the version is >= 0.10 (check it using this command: `flatpak --version`)
-- Add the [flathub](https://flathub.org) repository using the following command: `flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo`.
-- Proceed with one of the following options:
-  - [Install from Flathub](#install-from-flathub)
-  - [Install from GitHub release](https://github.com/contour-terminal/contour/releases)
-
-#### Install from Flathub
-
-Click the following button install Contour from the Flathub store.
-
-[![Get it on Flathub](https://raw.githubusercontent.com/flatpak-design-team/flathub-mockups/master/assets/download-button/download.svg?sanitize=true)](https://flathub.org/apps/details/org.contourterminal.Contour)
-
 
 # References
 
