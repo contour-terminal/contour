@@ -24,8 +24,8 @@
 #include <crispy/point.h>
 
 #if defined(GLYPH_KEY_DEBUG)
-    #include <unicode/convert.h>
-    #include <unicode/width.h>
+    #include <libunicode/convert.h>
+    #include <libunicode/width.h>
 #endif
 
 #include <fmt/format.h>

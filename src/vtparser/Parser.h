@@ -15,9 +15,6 @@
 
 #include <crispy/overloaded.h>
 
-#include <unicode/convert.h>
-#include <unicode/scan.h>
-
 #include <fmt/core.h>
 
 #include <gsl/span>
@@ -30,6 +27,9 @@
 #include <limits>
 #include <string>
 #include <string_view>
+
+#include <libunicode/convert.h>
+#include <libunicode/scan.h>
 
 namespace terminal::parser
 {

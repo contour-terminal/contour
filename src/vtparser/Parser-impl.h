@@ -19,12 +19,12 @@
 #include <crispy/logstore.h>
 #include <crispy/utils.h>
 
-#include <unicode/utf8.h>
-
 #include <array>
 #include <cctype>
 #include <string_view>
 #include <tuple>
+
+#include <libunicode/utf8.h>
 
 namespace terminal::parser
 {
@@ -393,7 +393,7 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
         return { ProcessKind::FallbackToFSM, 0 };
 
     auto const chunk = std::string_view(input, static_cast<size_t>(std::distance(input, end)));
-    auto const [cellCount, next, subStart, subEnd] = unicode::scan_for_text(_scanState, chunk, maxCharCount);
+    auto const [cellCount, next, subStart, subEnd] = unicode::scan_text(_scanState, chunk, maxCharCount);
 
     if (next == input)
         return { ProcessKind::FallbackToFSM, 0 };

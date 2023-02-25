@@ -18,8 +18,6 @@
 #include <crispy/escape.h>
 #include <crispy/overloaded.h>
 
-#include <unicode/convert.h>
-
 #include <mutex>
 #include <optional>
 #include <set>
@@ -28,6 +26,8 @@
 #include <utility>
 #include <variant>
 #include <vector>
+
+#include <libunicode/convert.h>
 
 namespace terminal
 {

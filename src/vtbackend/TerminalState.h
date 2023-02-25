@@ -30,8 +30,6 @@
 
 #include <vtparser/Parser.h>
 
-#include <unicode/utf8.h>
-
 #include <fmt/format.h>
 
 #include <atomic>
@@ -42,6 +40,8 @@
 #include <mutex>
 #include <stack>
 #include <vector>
+
+#include <libunicode/utf8.h>
 
 namespace terminal
 {

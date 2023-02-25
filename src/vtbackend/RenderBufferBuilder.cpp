@@ -19,8 +19,8 @@
 
 #include <crispy/utils.h>
 
-#include <unicode/convert.h>
-#include <unicode/utf8_grapheme_segmenter.h>
+#include <libunicode/convert.h>
+#include <libunicode/utf8_grapheme_segmenter.h>
 
 using namespace std;
 
