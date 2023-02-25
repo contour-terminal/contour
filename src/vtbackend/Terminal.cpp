@@ -1056,10 +1056,7 @@ void Terminal::resizeScreenInternal(PageSize totalPageSize, std::optional<ImageS
 {
     // NOTE: This will only resize the currently active buffer.
     // Any other buffer will be resized when it is switched to.
-    auto const statusLineHeight = _hostWritableStatusLineScreen.pageSize().lines;
-    auto const mainDisplayPageSize = _state.statusDisplayType == StatusDisplayType::None
-                                         ? totalPageSize
-                                         : totalPageSize - statusLineHeight;
+    auto const mainDisplayPageSize = totalPageSize - statusLineHeight();
 
     auto const oldMainDisplayPageSize = _settings.pageSize;
 
@@ -1692,10 +1689,7 @@ void Terminal::hardReset()
     _hostWritableStatusLineScreen.clearScreen();
     _hostWritableStatusLineScreen.updateCursorIterator();
 
-    auto const statusLineHeight = LineCount(1);
-    auto const mainDisplayPageSize = _state.statusDisplayType == StatusDisplayType::None
-                                         ? _settings.pageSize
-                                         : _settings.pageSize - statusLineHeight;
+    auto const mainDisplayPageSize = _settings.pageSize - statusLineHeight();
 
     _primaryScreen.margin() =
         Margin { Margin::Vertical { {}, boxed_cast<LineOffset>(mainDisplayPageSize.lines) - 1 },
@@ -1761,10 +1755,7 @@ void Terminal::applyPageSizeToCurrentBuffer()
 
 void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
 {
-    auto const statusLineHeight = LineCount(1);
-    auto const mainDisplayPageSize = _state.statusDisplayType == StatusDisplayType::None
-                                         ? _settings.pageSize
-                                         : _settings.pageSize - statusLineHeight;
+    auto const mainDisplayPageSize = _settings.pageSize - statusLineHeight();
 
     // clang-format off
     switch (screenType)
