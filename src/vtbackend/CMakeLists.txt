@@ -94,7 +94,18 @@ target_include_directories(vtbackend PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
 )
-target_link_libraries(vtbackend PUBLIC vtparser vtpty crispy::core fmt::fmt-header-only range-v3::range-v3 Threads::Threads Microsoft.GSL::GSL)
+
+target_link_libraries(vtbackend PUBLIC 
+    Microsoft.GSL::GSL
+    Threads::Threads 
+    crispy::core 
+    fmt::fmt-header-only
+    range-v3::range-v3 
+    ${LIBUNICODE_LIBS}  
+    vtparser 
+    vtpty 
+)
+
 if(LIBTERMINAL_LOG_TRACE)
     target_compile_definitions(vtbackend PUBLIC LIBTERMINAL_LOG_TRACE=1)
 endif()

@@ -23,8 +23,6 @@
 #include <crispy/defines.h>
 #include <crispy/ring.h>
 
-#include <unicode/convert.h>
-
 #include <range/v3/algorithm/copy.hpp>
 #include <range/v3/iterator/insert_iterators.hpp>
 #include <range/v3/view/iota.hpp>
@@ -38,6 +36,8 @@
 #include <string>
 #include <string_view>
 #include <utility>
+
+#include <libunicode/convert.h>
 
 namespace terminal
 {

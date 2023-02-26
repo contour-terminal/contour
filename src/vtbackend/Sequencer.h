@@ -22,14 +22,14 @@
 #include <vtparser/ParserEvents.h>
 #include <vtparser/ParserExtension.h>
 
-#include <unicode/convert.h>
-#include <unicode/utf8.h>
-
 #include <cassert>
 #include <memory>
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include <libunicode/convert.h>
+#include <libunicode/utf8.h>
 
 namespace terminal
 {

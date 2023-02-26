@@ -21,13 +21,13 @@
 #include <crispy/escape.h>
 #include <crispy/utils.h>
 
-#include <unicode/convert.h>
-
 #include <range/v3/view/iota.hpp>
 
 #include <catch2/catch.hpp>
 
 #include <string_view>
+
+#include <libunicode/convert.h>
 
 using crispy::escape;
 using crispy::Size;

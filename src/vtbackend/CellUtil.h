@@ -18,7 +18,7 @@
 #include <vtbackend/ColorPalette.h>
 #include <vtbackend/cell/CellConcept.h>
 
-#include <unicode/width.h>
+#include <libunicode/width.h>
 
 namespace terminal::CellUtil
 {

@@ -28,11 +28,6 @@
 #include <crispy/times.h>
 #include <crispy/utils.h>
 
-#include <unicode/convert.h>
-#include <unicode/emoji_segmenter.h>
-#include <unicode/grapheme_segmenter.h>
-#include <unicode/word_segmenter.h>
-
 #include <range/v3/view/iota.hpp>
 
 #include <algorithm>
@@ -44,6 +39,11 @@
 #include <tuple>
 #include <type_traits>
 #include <variant>
+
+#include <libunicode/convert.h>
+#include <libunicode/emoji_segmenter.h>
+#include <libunicode/grapheme_segmenter.h>
+#include <libunicode/word_segmenter.h>
 
 using namespace std::string_view_literals;
 

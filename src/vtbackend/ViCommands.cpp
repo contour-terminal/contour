@@ -16,11 +16,11 @@
 #include <vtbackend/logging.h>
 #include <vtbackend/primitives.h>
 
-#include <unicode/ucd.h>
-
 #include <fmt/format.h>
 
 #include <memory>
+
+#include <libunicode/ucd.h>
 
 namespace terminal
 {

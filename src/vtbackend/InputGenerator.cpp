@@ -17,8 +17,6 @@
 
 #include <crispy/utils.h>
 
-#include <unicode/convert.h>
-
 #include <fmt/format.h>
 
 #include <algorithm>
@@ -28,6 +26,8 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+
+#include <libunicode/convert.h>
 
 using namespace std;
 

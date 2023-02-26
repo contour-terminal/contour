@@ -98,7 +98,7 @@ fetch_and_unpack_gsl()
         https://github.com/microsoft/GSL/archive/refs/tags/v3.1.0.tar.gz
 }
 
-fetch_and_unpack_embeds()
+fetch_and_unpack_termbenchpro()
 {
     local termbench_pro_git_sha="a4feadd3a698e4fe2d9dd5b03d5f941534a25a91"
     fetch_and_unpack \
@@ -106,9 +106,12 @@ fetch_and_unpack_embeds()
         termbench-pro-$termbench_pro_git_sha.tar.gz \
         https://github.com/contour-terminal/termbench-pro/archive/$termbench_pro_git_sha.tar.gz \
         termbench_pro
+}
 
+fetch_and_unpack_libunicode()
+{
     if test x$LIBUNICODE_SRC_DIR = x; then
-        local libunicode_git_sha="5eef8abaa0277c58db08542806753e51f0513b52"
+        local libunicode_git_sha="9ad16040e91d147e582f1761fb8f3b550b334bcb"
         fetch_and_unpack \
             libunicode-$libunicode_git_sha \
             libunicode-$libunicode_git_sha.tar.gz \
@@ -179,6 +182,7 @@ install_deps_popos()
 
     local NAME=`grep ^NAME /etc/os-release | cut -d= -f2 | cut -f1 | tr -d '"'`
 
+    fetch_and_unpack_libunicode
     fetch_and_unpack_gsl
     fetch_and_unpack_fmtlib
     fetch_and_unpack_range
@@ -192,6 +196,7 @@ install_deps_popos()
 
 install_deps_ubuntu()
 {
+    fetch_and_unpack_libunicode
     local packages="
         build-essential
         cmake
@@ -266,6 +271,7 @@ install_deps_ubuntu()
 install_deps_FreeBSD()
 {
     fetch_and_unpack_fmtlib
+    fetch_and_unpack_libunicode
 
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
@@ -293,6 +299,7 @@ install_deps_FreeBSD()
 
 install_deps_arch()
 {
+    fetch_and_unpack_libunicode
     fetch_and_unpack_fmtlib
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
@@ -332,6 +339,7 @@ install_deps_arch()
 
 install_deps_suse()
 {
+    fetch_and_unpack_libunicode
     fetch_and_unpack_gsl
     fetch_and_unpack_fmtlib
 
@@ -364,6 +372,7 @@ install_deps_suse()
 
 install_deps_fedora()
 {
+    fetch_and_unpack_libunicode
     fetch_and_unpack_gsl
     fetch_and_unpack_fmtlib
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
@@ -409,6 +418,8 @@ install_deps_darwin()
     # NB: catch2 is available on brew but version 3, and we are still using version 2
     # due to all the other supported platforms.
     fetch_and_unpack_Catch2
+
+    fetch_and_unpack_libunicode
 
     [ x$PREPARE_ONLY_EMBEDS = xON ] && return
 
@@ -473,13 +484,14 @@ main()
             fetch_and_unpack_gsl
             fetch_and_unpack_yaml_cpp
             fetch_and_unpack_range
+            fetch_and_unpack_libunicode
             echo "OS $ID not supported."
             echo "Please install the remaining dependencies manually."
-            echo "Most importantly: Qt (including development headers)."
+            echo "Most importantly: Qt, freetype, harfbuzz (including development headers)."
             ;;
     esac
 
-    fetch_and_unpack_embeds
+    fetch_and_unpack_termbenchpro
 }
 
 main $*

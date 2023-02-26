@@ -26,8 +26,6 @@
 #include <crispy/stdfs.h>
 #include <crispy/utils.h>
 
-#include <unicode/convert.h>
-
 #include <fmt/chrono.h>
 
 #include <sys/types.h>
@@ -37,6 +35,8 @@
 #include <iostream>
 #include <utility>
 #include <variant>
+
+#include <libunicode/convert.h>
 
 using crispy::Size;
 

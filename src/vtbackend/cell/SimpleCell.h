@@ -21,11 +21,11 @@
 #include <vtbackend/Hyperlink.h>
 #include <vtbackend/Image.h>
 
-#include <unicode/convert.h>
-#include <unicode/width.h>
-
 #include <string>
 #include <utility>
+
+#include <libunicode/convert.h>
+#include <libunicode/width.h>
 
 namespace terminal
 {

@@ -15,8 +15,6 @@
 
 #include <crispy/escape.h>
 
-#include <unicode/convert.h>
-
 #include <catch2/catch.hpp>
 
 #include <algorithm>
@@ -24,6 +22,8 @@
 #include <iterator>
 #include <string>
 #include <vector>
+
+#include <libunicode/convert.h>
 
 using namespace std;
 using terminal::InputGenerator;
