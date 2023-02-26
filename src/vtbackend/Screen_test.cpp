@@ -67,6 +67,21 @@ namespace // {{{
 //     }
 // };
 
+// Chessboard image with each square of size 10x10 pixels
+std::string const chessBoard =
+    R"=(P0;0;0q"1;1;100;100#0;2;0;0;0#1;2;100;100;100#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-#0!10N!10o!10N!10o!10N!10o!10N!10o!10N!10o$#1!10o!10N!10o!10N!10o!10N!10o!10N!10o!10N-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10{!10B!10{!10B!10{!10B!10{!10B!10{!10B$#1!10B!10{!10B!10{!10B!10{!10B!10{!10B!10{-#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10o!10N!10o!10N!10o!10N!10o!10N!10o!10N$#1!10N!10o!10N!10o!10N!10o!10N!10o!10N!10o-#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-#0!10B!10{!10B!10{!10B!10{!10B!10{!10B!10{$#1!10{!10B!10{!10B!10{!10B!10{!10B!10{!10B-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-#0!10N!10o!10N!10o!10N!10o!10N!10o!10N!10o$#1!10o!10N!10o!10N!10o!10N!10o!10N!10o!10N-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10{!10B!10{!10B!10{!10B!10{!10B!10{!10B$#1!10B!10{!10B!10{!10B!10{!10B!10{!10B!10{-#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-#1!10N#0!10N#1!10N#0!10N#1!10N#0!10N#1!10N#0!10N#1!10N#0!10N-\)=";
+
+Image::Data const black10x10 = [] {
+    Image::Data ret(100 * 4, 0);
+    for (size_t i = 3; i < ret.size(); i += 4)
+    {
+        ret[i] = 255;
+    }
+    return ret;
+}();
+
+Image::Data const white10x10(100 * 4, 255);
+
 struct TextRenderBuilder
 {
     std::string text;
@@ -3493,26 +3508,29 @@ TEST_CASE("Screen.tcap.string", "[screen, tcap]")
 
 TEST_CASE("Sixel.simple", "[screen]")
 {
-    auto const pageSize = PageSize { LineCount(10), ColumnCount(10) };
-    auto mock = MockTerm { pageSize, LineCount(10) };
+    auto const pageSize = PageSize { LineCount(11), ColumnCount(11) };
+    auto mock = MockTerm { pageSize, LineCount(11) };
     mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(10) });
 
-    auto const sixelData = crispy::readFileAsString("./test/images/squirrel-50.sixel");
-
-    mock.writeToScreen(sixelData);
+    mock.writeToScreen(chessBoard);
 
     CHECK(mock.terminal.primaryScreen().cursor().position.column.value == ColumnOffset(0).value);
-    CHECK(mock.terminal.primaryScreen().cursor().position.line.value == LineOffset(5).value);
+    CHECK(mock.terminal.primaryScreen().cursor().position.line.value == LineOffset(10).value);
 
     for (auto line = LineOffset(0); line < boxed_cast<LineOffset>(pageSize.lines); ++line)
     {
         for (auto column = ColumnOffset(0); column < boxed_cast<ColumnOffset>(pageSize.columns); ++column)
         {
             auto const& cell = mock.terminal.primaryScreen().at(line, column);
-            if (line <= LineOffset(4) && column <= ColumnOffset(7))
+            if (line <= LineOffset(9) && column <= ColumnOffset(9))
             {
                 auto fragment = cell.imageFragment();
                 REQUIRE(fragment);
+                if ((column.value + line.value) % 2)
+                    REQUIRE_THAT(white10x10, Catch::Matchers::Equals(fragment->data()));
+                else
+                    REQUIRE_THAT(black10x10, Catch::Matchers::Equals(fragment->data()));
+
                 CHECK(fragment->offset().line == line);
                 CHECK(fragment->offset().column == column);
                 CHECK(!fragment->data().empty());
@@ -3523,24 +3541,20 @@ TEST_CASE("Sixel.simple", "[screen]")
             }
         }
     }
-
-    // Um, we could actually test more precise here by validating the grid cell contents.
 }
 
 TEST_CASE("Sixel.AutoScroll-1", "[screen]")
 {
-    // Create a 10x3x5 grid and render a 7x5 image causing one a line-scroll by one.
-    auto const pageSize = PageSize { LineCount(4), ColumnCount(10) };
-    auto mock = MockTerm { pageSize, LineCount(5) };
+    // Create a 11x9x10 grid and render a 10x10 image causing a line-scroll by one.
+    auto const pageSize = PageSize { LineCount(9), ColumnCount(10) };
+    auto mock = MockTerm { pageSize, LineCount(11) };
     mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(10) });
     mock.terminal.setMode(DECMode::NoSixelScrolling, false);
 
-    auto const sixelData = crispy::readFileAsString("./test/images/squirrel-50.sixel");
-
-    mock.writeToScreen(sixelData);
+    mock.writeToScreen(chessBoard);
 
     CHECK(mock.terminal.primaryScreen().cursor().position.column == ColumnOffset(0));
-    CHECK(mock.terminal.primaryScreen().cursor().position.line == LineOffset(3));
+    CHECK(mock.terminal.primaryScreen().cursor().position.line == LineOffset(8));
 
     for (auto line = LineOffset(-1); line < boxed_cast<LineOffset>(pageSize.lines); ++line)
     {
@@ -3549,10 +3563,14 @@ TEST_CASE("Sixel.AutoScroll-1", "[screen]")
         {
             INFO(fmt::format("column {}", column));
             auto const& cell = mock.terminal.primaryScreen().at(line, column);
-            if (line <= LineOffset(4) && column <= ColumnOffset(7))
+            if (line <= LineOffset(9) && column <= ColumnOffset(9))
             {
                 auto fragment = cell.imageFragment();
                 REQUIRE(fragment);
+                if ((column.value + line.value) % 2)
+                    REQUIRE_THAT(black10x10, Catch::Matchers::Equals(fragment->data()));
+                else
+                    REQUIRE_THAT(white10x10, Catch::Matchers::Equals(fragment->data()));
                 CHECK(fragment->offset().line == line + 1);
                 CHECK(fragment->offset().column == column);
                 CHECK(!fragment->data().empty());
@@ -3563,8 +3581,46 @@ TEST_CASE("Sixel.AutoScroll-1", "[screen]")
             }
         }
     }
+}
 
-    // Um, we could actually test more precise here by validating the grid cell contents.
+TEST_CASE("Sixel.status_line", "[screen]")
+{
+    // Test for #1050
+    auto const pageSize = PageSize { LineCount(5), ColumnCount(11) };
+    auto mock = MockTerm { pageSize, LineCount(12) };
+    mock.terminal.setCellPixelSize(ImageSize { Width(10), Height(10) });
+    mock.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+
+    mock.writeToScreen(chessBoard);
+
+    CHECK(mock.terminal.primaryScreen().cursor().position.column.value == ColumnOffset(0).value);
+    CHECK(mock.terminal.primaryScreen().cursor().position.line.value == LineOffset(3).value);
+
+    auto const lastLine = boxed_cast<LineOffset>(pageSize.lines - mock.terminal.statusLineHeight());
+    for (auto line = LineOffset(-6); line < lastLine; ++line)
+    {
+        for (auto column = ColumnOffset(0); column < boxed_cast<ColumnOffset>(pageSize.columns); ++column)
+        {
+            auto const& cell = mock.terminal.primaryScreen().at(line, column);
+            if (line <= LineOffset(9) && column <= ColumnOffset(9))
+            {
+                auto fragment = cell.imageFragment();
+                REQUIRE(fragment);
+                if ((column.value + line.value) % 2)
+                    REQUIRE_THAT(white10x10, Catch::Matchers::Equals(fragment->data()));
+                else
+                    REQUIRE_THAT(black10x10, Catch::Matchers::Equals(fragment->data()));
+
+                CHECK(fragment->offset().line == line + 6);
+                CHECK(fragment->offset().column == column);
+                CHECK(!fragment->data().empty());
+            }
+            else
+            {
+                CHECK(cell.empty());
+            }
+        }
+    }
 }
 
 TEST_CASE("DECSTR", "[screen]")

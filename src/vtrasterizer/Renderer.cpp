@@ -293,9 +293,7 @@ void Renderer::updateFontMetrics()
 
 void Renderer::render(Terminal& terminal, bool pressure)
 {
-    auto const statusLineHeight = terminal.state().statusDisplayType == StatusDisplayType::None
-                                      ? LineCount(0)
-                                      : terminal.hostWritableStatusLineDisplay().pageSize().lines;
+    auto const statusLineHeight = terminal.statusLineHeight();
     _gridMetrics.pageSize = terminal.pageSize() + statusLineHeight;
 
     executeImageDiscards();

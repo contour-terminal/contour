@@ -226,6 +226,19 @@ class Terminal
 
     [[nodiscard]] PageSize totalPageSize() const noexcept { return _settings.pageSize; }
 
+    // Returns number of lines for the currently displayed status line,
+    // or 0 if status line is currently not displayed.
+    [[nodiscard]] LineCount statusLineHeight() const noexcept
+    {
+        switch (_state.statusDisplayType)
+        {
+            case StatusDisplayType::None: return LineCount(0);
+            case StatusDisplayType::Indicator: return _indicatorStatusScreen.pageSize().lines;
+            case StatusDisplayType::HostWritable: return _hostWritableStatusLineScreen.pageSize().lines;
+        }
+        crispy::unreachable();
+    }
+
     /// Resizes the terminal screen to the given amount of grid cells with their pixel dimensions.
     /// Important! In case a status line is currently visible, the status line count is being
     /// accumulated into the screen size, too.

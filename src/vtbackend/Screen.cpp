@@ -1852,7 +1852,8 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> image,
     // TODO: make use of imageOffset
     (void) imageOffset;
 
-    auto const linesAvailable = _settings.pageSize.lines - topLeft.line.as<LineCount>();
+    auto const linesAvailable =
+        _settings.pageSize.lines - topLeft.line.as<LineCount>() - _terminal.statusLineHeight();
     auto const linesToBeRendered = min(gridSize.lines, linesAvailable);
     auto const columnsAvailable = *_settings.pageSize.columns - *topLeft.column;
     auto const columnsToBeRendered = ColumnCount(min(columnsAvailable, *gridSize.columns));
@@ -1901,7 +1902,8 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> image,
                 auto const offset =
                     CellLocation { boxed_cast<LineOffset>(linesToBeRendered) + lineOffset, columnOffset };
                 Cell& cell =
-                    at(boxed_cast<LineOffset>(_settings.pageSize.lines) - 1, topLeft.column + columnOffset);
+                    at(boxed_cast<LineOffset>(_settings.pageSize.lines - _terminal.statusLineHeight()) - 1,
+                       topLeft.column + columnOffset);
                 cell.setImageFragment(rasterizedImage, offset);
                 cell.setHyperlink(_cursor.hyperlink);
             };
