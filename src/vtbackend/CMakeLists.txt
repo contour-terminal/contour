@@ -13,6 +13,8 @@ option(LIBTERMINAL_CACHE_CURRENT_LINE_POINTER "Enables caching the pointer to th
 # But it's currently disabled by default as I am not fully satisfied with it yet.
 option(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE "Updates the render buffer within the terminal thread if set to ON (otherwise the render buffer is actively refreshed in the render thread)." OFF)
 
+option(LIBTERMINAL_BUILD_BENCH_HEADLESS "Builds bench-headless CLI tool to benchmark libvtbackend [default: OFF]" OFF)
+
 set(vtbackend_HEADERS
     Capabilities.h
     cell/CellConcept.h
@@ -141,33 +143,35 @@ if(LIBTERMINAL_TESTING)
     target_link_libraries(vtbackend_test fmt::fmt-header-only Catch2::Catch2 vtbackend)
     add_test(vtbackend_test ./vtbackend_test)
 
-    add_executable(bench-headless bench-headless.cpp)
-    target_compile_definitions(bench-headless PRIVATE
-        CONTOUR_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
-        CONTOUR_VERSION_MINOR=${PROJECT_VERSION_MINOR}
-        CONTOUR_VERSION_PATCH=${PROJECT_VERSION_PATCH}
-        CONTOUR_VERSION_STRING="${CONTOUR_VERSION_STRING}"
-        CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
-    )
-    target_link_libraries(bench-headless fmt::fmt-header-only vtbackend termbench)
+    if (LIBTERMINAL_BUILD_BENCH_HEADLESS)
+        add_executable(bench-headless bench-headless.cpp)
+        target_compile_definitions(bench-headless PRIVATE
+            CONTOUR_VERSION_MAJOR=${PROJECT_VERSION_MAJOR}
+            CONTOUR_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+            CONTOUR_VERSION_PATCH=${PROJECT_VERSION_PATCH}
+            CONTOUR_VERSION_STRING="${CONTOUR_VERSION_STRING}"
+            CONTOUR_PROJECT_SOURCE_DIR="${PROJECT_SOURCE_DIR}"
+        )
+        target_link_libraries(bench-headless fmt::fmt-header-only vtbackend termbench)
 
-    if(CONTOUR_INSTALL_TOOLS)
-        if(WIN32)
-            install(TARGETS bench-headless DESTINATION bin)
-        elseif(APPLE)
-            # See: https://stackoverflow.com/questions/35612687/cmake-macos-x-bundle-with-bundleutiliies-for-qt-application/48035834#48035834
-            set(APP_NAME contour)
-            set(App_Contents "${APP_NAME}.app/Contents")
-            set(INSTALL_RUNTIME_DIR "${App_Contents}/MacOS")
-            set(INSTALL_CMAKE_DIR "${App_Contents}/Resources")
+        if(CONTOUR_INSTALL_TOOLS)
+            if(WIN32)
+                install(TARGETS bench-headless DESTINATION bin)
+            elseif(APPLE)
+                # See: https://stackoverflow.com/questions/35612687/cmake-macos-x-bundle-with-bundleutiliies-for-qt-application/48035834#48035834
+                set(APP_NAME contour)
+                set(App_Contents "${APP_NAME}.app/Contents")
+                set(INSTALL_RUNTIME_DIR "${App_Contents}/MacOS")
+                set(INSTALL_CMAKE_DIR "${App_Contents}/Resources")
 
-            set(INSTALL_RUNTIME_DIR "${App_Contents}/MacOS")
-            install(TARGETS bench-headless
-                BUNDLE DESTINATION . COMPONENT Runtime
-                RUNTIME DESTINATION "${INSTALL_RUNTIME_DIR}" COMPONENT Runtime
-            )
-        else()
-            install(TARGETS bench-headless DESTINATION bin)
+                set(INSTALL_RUNTIME_DIR "${App_Contents}/MacOS")
+                install(TARGETS bench-headless
+                    BUNDLE DESTINATION . COMPONENT Runtime
+                    RUNTIME DESTINATION "${INSTALL_RUNTIME_DIR}" COMPONENT Runtime
+                )
+            else()
+                install(TARGETS bench-headless DESTINATION bin)
+            endif()
         endif()
     endif()
 endif()
