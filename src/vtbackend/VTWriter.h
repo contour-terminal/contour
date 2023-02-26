@@ -17,14 +17,14 @@
 #include <vtbackend/Line.h>
 #include <vtbackend/primitives.h>
 
-#include <unicode/convert.h>
-
 #include <fmt/format.h>
 
 #include <functional>
 #include <ostream>
 #include <sstream>
 #include <vector>
+
+#include <libunicode/convert.h>
 
 namespace terminal
 {

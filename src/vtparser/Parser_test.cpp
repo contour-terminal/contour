@@ -14,9 +14,9 @@
 #include <vtparser/Parser.h>
 #include <vtparser/ParserEvents.h>
 
-#include <unicode/convert.h>
-
 #include <catch2/catch.hpp>
+
+#include <libunicode/convert.h>
 
 using namespace std;
 using namespace terminal;

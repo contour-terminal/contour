@@ -15,9 +15,9 @@
 #include <vtbackend/Line.h>
 #include <vtbackend/primitives.h>
 
-#include <unicode/grapheme_segmenter.h>
-#include <unicode/utf8.h>
-#include <unicode/width.h>
+#include <libunicode/grapheme_segmenter.h>
+#include <libunicode/utf8.h>
+#include <libunicode/width.h>
 
 using std::get;
 using std::holds_alternative;

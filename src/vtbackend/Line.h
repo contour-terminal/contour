@@ -22,8 +22,6 @@
 #include <crispy/Comparison.h>
 #include <crispy/assert.h>
 
-#include <unicode/convert.h>
-
 #include <gsl/span>
 #include <gsl/span_ext>
 
@@ -32,6 +30,8 @@
 #include <string>
 #include <variant>
 #include <vector>
+
+#include <libunicode/convert.h>
 
 namespace terminal
 {

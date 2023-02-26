@@ -25,12 +25,12 @@
 #include <crispy/defines.h>
 #include <crispy/times.h>
 
-#include <unicode/capi.h>
-#include <unicode/convert.h>
-#include <unicode/width.h>
-
 #include <memory>
 #include <string>
+
+#include <libunicode/capi.h>
+#include <libunicode/convert.h>
+#include <libunicode/width.h>
 
 namespace terminal
 {

@@ -30,9 +30,6 @@
 #include <crispy/point.h>
 #include <crispy/size.h>
 
-#include <unicode/convert.h>
-#include <unicode/run_segmenter.h>
-
 #include <gsl/span>
 #include <gsl/span_ext>
 
@@ -41,6 +38,9 @@
 #include <memory>
 #include <unordered_map>
 #include <vector>
+
+#include <libunicode/convert.h>
+#include <libunicode/run_segmenter.h>
 
 namespace terminal::rasterizer
 {

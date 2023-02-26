@@ -19,7 +19,7 @@
 
 #include <crispy/App.h>
 
-#include <unicode/convert.h>
+#include <libunicode/convert.h>
 
 namespace terminal
 {

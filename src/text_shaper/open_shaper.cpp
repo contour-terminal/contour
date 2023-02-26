@@ -20,11 +20,11 @@
 #include <crispy/indexed.h>
 #include <crispy/times.h>
 
-#include <unicode/convert.h>
-#include <unicode/ucd_fmt.h>
-
 #include <range/v3/algorithm/any_of.hpp>
 #include <range/v3/view/iota.hpp>
+
+#include <libunicode/convert.h>
+#include <libunicode/ucd_fmt.h>
 
 // clang-format off
 #include <ft2build.h>
