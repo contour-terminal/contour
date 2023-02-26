@@ -196,7 +196,7 @@ jobs:
             freebsd-version
             QTVER=6 SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
             mkdir build
-            cmake -DCMAKE_BUILD_TYPE=Debug -S . -B build
+            cmake -DCMAKE_BUILD_TYPE=Debug -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON -S . -B build
             cmake --build build/ -j2
             ./build/src/crispy/crispy_test
             ./build/src/vtparser/vtparser_test
@@ -230,6 +230,7 @@ jobs:
         run: |
           cmake . \
                 -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+                -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON \
                 -DCONTOUR_BUILD_WITH_QT6=ON \
                 -B build/
       - name: "Build"
@@ -293,7 +294,7 @@ jobs:
                 New-Item -ItemType Directory -Force -Path build
           }
       - name: "Generate build files"
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DCONTOUR_BUILD_WITH_QT6=OFF -DCMAKE_CXX_STANDARD=17 -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -B build .
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DCONTOUR_BUILD_WITH_QT6=OFF -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON -DCMAKE_CXX_STANDARD=17 -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=ON -DLIBUNICODE_TESTING=ON -B build .
       - name: "Build"
         run: cmake --build build/ --config Release
       - name: "test: crispy"
@@ -397,6 +398,7 @@ jobs:
                                -DCMAKE_INSTALL_PREFIX="/usr" \
                                -DCONTOUR_INSTALL_TOOLS=ON \
                                -DPEDANTIC_COMPILER=ON \
+                               -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON \
                                -DLIBUNICODE_UCD_BASE_DIR=$(pwd)/_ucd \
                                " \
             ./scripts/ci-prepare-contour.sh
@@ -552,6 +554,7 @@ jobs:
                                -DCMAKE_CXX_STANDARD=$CMAKE_CXX_STANDARD \
                                -DCMAKE_INSTALL_PREFIX="/usr" \
                                -DCONTOUR_INSTALL_TOOLS=ON \
+                               -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON \
                                -DPEDANTIC_COMPILER=ON \
                                -DPEDANTIC_COMPILER_WERROR=OFF \
                                " \
