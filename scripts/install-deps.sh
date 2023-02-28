@@ -43,10 +43,10 @@ fetch_and_unpack()
     FULL_DISTFILE="$SYSDEPS_DIST_DIR/$DISTFILE"
 
     if ! test -f "$FULL_DISTFILE"; then
-        if which curl &>/dev/null; then
-            curl -L -o "$FULL_DISTFILE" "$URL"
-        elif which wget &>/dev/null; then
+        if which wget &>/dev/null; then
             wget -O "$FULL_DISTFILE" "$URL"
+        elif which curl &>/dev/null; then
+            curl -L -o "$FULL_DISTFILE" "$URL"
         elif which fetch &>/dev/null; then
             # FreeBSD
             fetch -o "$FULL_DISTFILE" "$URL"
@@ -172,6 +172,7 @@ install_deps_popos()
         libx11-xcb-dev
         libyaml-cpp-dev
         make
+        ninja-build
         ncurses-bin
         pkg-config
         qtbase5-dev
@@ -211,6 +212,7 @@ install_deps_ubuntu()
         libx11-xcb-dev
         libyaml-cpp-dev
         make
+        ninja-build
         ncurses-bin
         pkg-config
     "
