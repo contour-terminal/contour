@@ -25,7 +25,7 @@ set(crispy_SOURCES
     defines.h
     escape.h
     indexed.h
-    logstore.h
+    logstore.cpp logstore.h
     overloaded.h
     reference.h
     ring.h
@@ -33,7 +33,7 @@ set(crispy_SOURCES
     times.h
 )
 
-add_library(crispy-core ${crispy_SOURCES})
+add_library(crispy-core STATIC ${crispy_SOURCES})
 add_library(crispy::core ALIAS crispy-core)
 
 set_target_properties(crispy-core PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
@@ -97,10 +97,7 @@ if(UNIX)
     # The following options are all important to get stacktrace dumping working
     target_link_libraries(crispy-core PUBLIC dl)
     if(NOT(FREEBSD))
-        target_link_options(crispy-core PUBLIC -rdynamic -fno-pie)
-    endif()
-    if(NOT(APPLE OR FREEBSD))
-        target_link_options(crispy-core PUBLIC -no-pie)
+        target_link_options(crispy-core PUBLIC -rdynamic)
     endif()
     target_compile_definitions(crispy-core PUBLIC BOOST_STACKTRACE_USE_ADDR2LINE=1)
     if(CONTOUR_STACKTRACE_ADDR2LINE)

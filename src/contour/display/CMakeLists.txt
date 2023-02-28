@@ -9,7 +9,7 @@ if(NOT(CONTOUR_BUILD_WITH_QT6))
     qt5_add_resources(QT_RESOURCES ${QT_RESOURCES})
 endif()
 
-add_library(ContourTerminalDisplay
+add_library(ContourTerminalDisplay STATIC
     Blur.cpp Blur.h
     OpenGLRenderer.cpp OpenGLRenderer.h
     ShaderConfig.cpp ShaderConfig.h

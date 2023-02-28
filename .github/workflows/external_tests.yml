@@ -84,8 +84,8 @@ jobs:
       with:
         path: "**/cpm_modules"
         key: ${{github.workflow}}-cpm-modules-${{ hashFiles('**/CMakeLists.txt', '**/*.cmake') }}
-    - name: "update APT database"
-      run: sudo apt -q update
+    # - name: "update APT database"
+    #   run: sudo apt -q update
     - name: Installing xmllint for ci-set-vars
       run: sudo apt -qy install libxml2-utils
     - name: set environment variables
@@ -136,7 +136,7 @@ jobs:
     - name: "install dependencies"
       run: |
         set -ex
-        sudo apt -q update
+        # sudo apt -q update
         sudo apt install -y \
                     build-essential \
                     cmake \
@@ -253,8 +253,8 @@ jobs:
       CONTOUR_PREFIX: "" # valgrind --leak-check=full --num-callers=64 --error-exitcode=112"
     steps:
     - uses: actions/checkout@v3
-    - name: "update APT database"
-      run: sudo apt -q update
+    # - name: "update APT database"
+    #   run: sudo apt -q update
     - name: Installing xmllint for ci-set-vars
       run: sudo apt -qy install libxml2-utils
     - name: set environment variables
