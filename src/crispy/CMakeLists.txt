@@ -25,7 +25,7 @@ set(crispy_SOURCES
     defines.h
     escape.h
     indexed.h
-    logstore.h
+    logstore.cpp logstore.h
     overloaded.h
     reference.h
     ring.h

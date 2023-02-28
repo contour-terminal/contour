@@ -193,23 +193,9 @@ class Sink
   public:
     using Writer = std::function<void(std::string_view const&)>;
 
-    Sink(bool enabled, Writer writer): _enabled { enabled }, _writer { std::move(writer) } {}
-
-    Sink(bool enabled, std::ostream& output):
-        Sink(enabled, [out = &output](std::string_view text) {
-            *out << text;
-            out->flush();
-        })
-    {
-    }
-
-    Sink(bool enabled, std::shared_ptr<std::ostream> f):
-        Sink(enabled, [f = std::move(f)](std::string_view text) {
-            *f << text;
-            f->flush();
-        })
-    {
-    }
+    Sink(bool enabled, Writer writer);
+    Sink(bool enabled, std::ostream& output);
+    Sink(bool enabled, std::shared_ptr<std::ostream> f);
 
     void set_writer(Writer writer);
 
@@ -219,17 +205,8 @@ class Sink
     void set_enabled(bool enabled) { _enabled = enabled; }
 
     /// Retrieves reference to standard debug-logging sink.
-    static inline Sink& console()
-    {
-        static auto instance = Sink(false, std::cout);
-        return instance;
-    }
-
-    static inline Sink& error_console() // NOLINT(readability-identifier-naming)
-    {
-        static auto instance = Sink(true, std::cerr);
-        return instance;
-    }
+    static Sink& console();
+    static Sink& error_console(); // NOLINT(readability-identifier-naming)
 
   private:
     bool _enabled;
