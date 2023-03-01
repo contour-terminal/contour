@@ -120,7 +120,6 @@
           <li>Fixes `SendChars` input acion to actually send the chars as-is to the standard input of the connected application.</li>
           <li>Fixes mouse selection to only be initiated if actually meant to, i.e. in alt screen mode only if bypass-modifier was pressed (#1017).</li>
           <li>Fixes mouse selection within scrolloff setting to not cause the viewport to jump anymore (#1019).</li>
-          <li>Fixes vi-like motion `t{space}` (#1037).</li>
           <li>Fixes rendering sixel image when status line is active (#1050).</li>
           <li>Adds normal mode motion `[[`, `]]`, `[]`, `][` mimmicking exactly what vim does.</li>
           <li>Adds normal mode motion `[m` and `]m` to jump line marks up/down.</li>
