@@ -25,7 +25,7 @@
     #include <Windows.h>
 #endif
 
-#if !defined(Q_OS_WINDOWS) && !defined(Q_OS_DARWIN)
+#if !defined(Q_OS_WINDOWS) && !defined(Q_OS_DARWIN) && !defined(CONTOUR_LINK_STATIC)
     #define CONTOUR_FRONTEND_XCB
     #include <xcb/xproto.h>
 #endif
@@ -138,7 +138,7 @@ void setEnabled(QWindow* window, bool enable, QRegion region)
 {
     crispy::ignore_unused(region);
 
-#if !defined(Q_OS_WINDOWS) && !defined(Q_OS_DARWIN)
+#if defined(CONTOUR_FRONTEND_XCB)
     // This #if should catch UNIX in general but not Mac, so we have not just Linux but also the BSDs and
     // maybe others if one wants to.
     //

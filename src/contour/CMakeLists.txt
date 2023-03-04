@@ -15,6 +15,7 @@ option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 option(CONTOUR_VT_METRICS "Enables collecting and exit-printing some VT usage metrics." OFF)
 option(CONTOUR_SCROLLBAR "Enables scrollbar in GUI frontend." ON)
 option(CONTOUR_BUILD_WITH_QT6 "Use Qt 6" ${QT6_DEFAULT})
+option(CONTOUR_LINK_STATIC "Build statically linked contour executable" OFF)
 
 set(QtX11Extras)
 if(NOT(WIN32) AND NOT(APPLE) AND NOT(CONTOUR_BUILD_WITH_QT6))
@@ -92,6 +93,16 @@ if(CONTOUR_SCROLLBAR)
     target_compile_definitions(contour PRIVATE CONTOUR_SCROLLBAR)
 endif()
 
+if(CONTOUR_LINK_STATIC)
+    target_compile_definitions(contour PRIVATE CONTOUR_LINK_STATIC)
+	set_target_properties(contour PROPERTIES
+        LINK_FLAGS -static
+		#LINK_FLAGS "-static-libgcc -static-libstdc++"
+		# LINK_SEARCH_START_STATIC ON
+		# LINK_SEARCH_END_STATIC ON
+	)
+endif()
+
 if(WIN32)
     if (NOT ("${CMAKE_BUILD_TYPE}" STREQUAL "Debug"))
         set_target_properties(contour PROPERTIES
@@ -131,13 +142,14 @@ endif()
 if(CONTOUR_FRONTEND_GUI)
     if(CONTOUR_BUILD_WITH_QT6)
         target_link_libraries(contour ContourTerminalDisplay vtrasterizer Qt6::Core Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Widgets Qt6::Multimedia)
-        if(NOT(WIN32) AND NOT(APPLE))
-            target_link_libraries(contour xcb)
-        endif()
+        # if(NOT(WIN32) AND NOT(APPLE))
+        #     target_link_libraries(contour xcb)
+        # endif()
     else()
         target_link_libraries(contour crispy::core ContourTerminalDisplay vtrasterizer Qt5::Gui Qt5::Network Qt5::Widgets Qt5::Multimedia)
         if(NOT(WIN32) AND NOT(APPLE) AND NOT(CONTOUR_BUILD_WITH_QT6))
-            target_link_libraries(contour Qt5::X11Extras xcb)
+            target_link_libraries(contour Qt5::X11Extras)
+            # target_link_libraries(contour Qt5::X11Extras xcb)
         endif()
     endif()
 endif()

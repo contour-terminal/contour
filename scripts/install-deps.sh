@@ -1,4 +1,12 @@
 #! /bin/sh
+#
+# Input Environment Variables:
+#
+# CONTOUR_LINK_STATIC=ON    Installs static versions of dependencies (Only fedora supported for now)
+# QTVER=6                   Installs Qt 6 dependency
+# QTVER=5                   Installs Qt 5 dependency (default)
+# PREPARE_ONLY_EMBEDS=ON    Install only embedded deps and not system deps.
+# SYSDEP_ASSUME_YES=ON      Appends -y to system install command to allow non-interactive installation
 
 set -e
 
@@ -372,6 +380,10 @@ install_deps_suse()
     sudo zypper install $SYSDEP_ASSUME_YES $packages
 }
 
+contour_link_static() {
+    test x$CONTOUR_LINK_STATIC = xON
+}
+
 install_deps_fedora()
 {
     fetch_and_unpack_libunicode
@@ -390,9 +402,20 @@ install_deps_fedora()
         libxcb-devel
         ninja-build
         pkgconf
-        range-v3-devel
-        yaml-cpp-devel
     "
+
+    if contour_link_static; then
+        fetch_and_unpack_yaml_cpp
+        fetch_and_unpack_range
+        packages="$packages
+            glibc-static
+        "
+    else
+        packages="$packages
+            yaml-cpp-devel
+            range-v3-devel
+        "
+    fi
 
     if test x$QTVER = x6; then
         packages="$packages
@@ -402,12 +425,19 @@ install_deps_fedora()
             qt6-qtmultimedia-devel
             qt6-qtwayland
         "
+        contour_link_static && packages="$packages
+            qt6-qtbase-static
+            qt6-qtdeclarative-static
+        "
     else
         packages="$packages
             qt5-qtbase-devel
             qt5-qtbase-gui
             qt5-qtmultimedia-devel
             qt5-qtx11extras-devel
+        "
+        contour_link_static && packages="$packages
+            qt5-qtbase-static
         "
     fi
     # Sadly, gsl-devel system package is too old to be used.
