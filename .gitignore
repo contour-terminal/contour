@@ -26,6 +26,7 @@ compile_commands.json
 
 # CMake (CTest)
 /Testing/
+CMakeUserPresets.json
 
 # This is a workspace-local sandbox directory with test files not to be included in Git.
 sandbox
