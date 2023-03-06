@@ -211,8 +211,9 @@ namespace
         // tsl (to_status_line):
         // 1. DECSSDT 2 (show to host writable status line)
         // 2. DECSASD 1 (set host writable statusline as active target)
-        // 3. CUP 1;%d (move cursor to given column, defaulting to 1)
-        String { "ts"_tcap, "tsl"sv, "\033[2$~\033[1$}\033[1;%dH"sv }, // To status line (used to set window titles)
+        // 3. CUP (move cursor to top left)
+        // 4. ED 2 (clear screen)
+        String { "ts"_tcap, "tsl"sv, "\033[2$~\033[1$}\033[H\033[2J"sv }, // To status line (used to set window titles)
 
         // fsl (from_status_line):
         // 1. DECSASD (set main display as active display target again)
