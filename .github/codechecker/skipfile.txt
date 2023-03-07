@@ -3,8 +3,8 @@
 -*/Build/*
 -*/Build/src/contour/contour_autogen/*
 -*/Build/src/contour/opengl/contour_frontend_opengl_autogen/*
-+*/_deps/sources/libunicode-*/*
-+*/_deps/sources/termbench-pro-*/*
+-*/_deps/sources/libunicode-*/*
+-*/_deps/sources/termbench-pro-*/*
 -*/_deps/sources/*
 -*/_deps/*
-+*/src/contour/*
+-*/src/contour/*
