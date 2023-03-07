@@ -167,7 +167,7 @@ using PermissionCache = std::map<std::string, bool>;
 bool requestPermission(PermissionCache& _cache,
                        QWidget* _parent,
                        config::Permission _allowedByConfig,
-                       std::string_view _topicText);
+                       std::string const& _topicText);
 
 terminal::FontDef getFontDefinition(terminal::rasterizer::Renderer& _renderer);
 

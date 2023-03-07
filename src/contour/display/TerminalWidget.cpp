@@ -856,7 +856,7 @@ void TerminalWidget::post(std::function<void()> _fn)
     postToObject(this, std::move(_fn));
 }
 
-bool TerminalWidget::requestPermission(config::Permission _allowedByConfig, string_view _topicText)
+bool TerminalWidget::requestPermission(config::Permission _allowedByConfig, string const& _topicText)
 {
     return contour::requestPermission(rememberedPermissions_, this, _allowedByConfig, _topicText);
 }

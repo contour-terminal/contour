@@ -1249,6 +1249,11 @@ void Terminal::requestCaptureBuffer(LineCount lines, bool logical)
     return _eventListener.requestCaptureBuffer(lines, logical);
 }
 
+void Terminal::requestShowHostWritableStatusLine()
+{
+    _eventListener.requestShowHostWritableStatusLine();
+}
+
 void Terminal::bell()
 {
     _eventListener.bell();

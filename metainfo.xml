@@ -107,6 +107,7 @@
       <description>
         <ul>
           <li>Fixes terminfo `tsl` to how todays apps are using it (e.g. zsh) to simply set the window title.</li>
+          <li>Adds `profiles.*.permissions.display_host_writable_statusline` to allow the user to intervene in `DECSSDT` VT sequence to show the host writable statusline even if the indicator statusline is currently active.</li>
         </ul>
       </description>
     </release>
