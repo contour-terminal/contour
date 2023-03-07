@@ -288,6 +288,22 @@ void TerminalSession::requestCaptureBuffer(LineCount lines, bool logical)
     });
 }
 
+void TerminalSession::requestShowHostWritableStatusLine()
+{
+    if (!display_)
+        return;
+
+    display_->post([this]() {
+        if (display_->requestPermission(profile_.permissions.displayHostWritableStatusLine,
+                                        "display host writable statusline"))
+        {
+            terminal_.setStatusDisplay(terminal::StatusDisplayType::HostWritable);
+            DisplayLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
+            flushInput();
+        }
+    });
+}
+
 terminal::FontDef TerminalSession::getFontDef()
 {
     return display_->getFontDef();
@@ -1322,7 +1338,7 @@ void TerminalSession::followHyperlink(terminal::HyperlinkInfo const& _hyperlink)
         QDesktopServices::openUrl(QString::fromUtf8(_hyperlink.uri.c_str()));
 }
 
-bool TerminalSession::requestPermission(config::Permission _allowedByConfig, string_view _topicText)
+bool TerminalSession::requestPermission(config::Permission _allowedByConfig, string const& _topicText)
 {
     return display_->requestPermission(_allowedByConfig, _topicText);
 }

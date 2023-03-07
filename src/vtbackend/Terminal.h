@@ -125,6 +125,7 @@ class Terminal
         virtual void onSelectionCompleted() {}
         virtual void requestWindowResize(LineCount, ColumnCount) {}
         virtual void requestWindowResize(Width, Height) {}
+        virtual void requestShowHostWritableStatusLine() {}
         virtual void setWindowTitle(std::string_view /*title*/) {}
         virtual void setTerminalProfile(std::string const& /*configProfileName*/) {}
         virtual void discardImage(Image const&) {}
@@ -582,6 +583,7 @@ class Terminal
     // Screen's EventListener implementation
     //
     void requestCaptureBuffer(LineCount lines, bool logical);
+    void requestShowHostWritableStatusLine();
     void bell();
     void bufferChanged(ScreenType);
     void scrollbackBufferCleared();

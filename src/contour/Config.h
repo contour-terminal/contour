@@ -171,6 +171,7 @@ struct TerminalProfile
     {
         Permission captureBuffer = Permission::Ask;
         Permission changeFont = Permission::Ask;
+        Permission displayHostWritableStatusLine = Permission::Ask;
     } permissions;
 
     bool drawBoldTextWithBrightColors = false;

@@ -130,7 +130,7 @@ class TerminalWidget: public QOpenGLWidget, private QOpenGLExtraFunctions
     [[nodiscard]] terminal::ImageSize cellSize() const;
 
     // (user requested) actions
-    bool requestPermission(config::Permission _allowedByConfig, std::string_view _topicText);
+    bool requestPermission(config::Permission _allowedByConfig, std::string const& _topicText);
     terminal::FontDef getFontDef();
     void bell();
     void copyToClipboard(std::string_view /*_data*/);

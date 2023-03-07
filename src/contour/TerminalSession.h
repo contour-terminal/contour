@@ -85,6 +85,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     // Terminal::Events
     //
     void requestCaptureBuffer(terminal::LineCount lineCount, bool logical) override;
+    void requestShowHostWritableStatusLine() override;
     void bell() override;
     void bufferChanged(terminal::ScreenType) override;
     void renderBufferUpdated() override;
@@ -206,7 +207,7 @@ class TerminalSession: public QObject, public terminal::Terminal::Events
     bool reloadConfigWithProfile(std::string const& _profileName);
     bool resetConfig();
     void followHyperlink(terminal::HyperlinkInfo const& _hyperlink);
-    bool requestPermission(config::Permission _allowedByConfig, std::string_view _topicText);
+    bool requestPermission(config::Permission _allowedByConfig, std::string const& _topicText);
     void setFontSize(text::font_size _size);
     void setDefaultCursor();
     void configureTerminal();

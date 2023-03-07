@@ -1450,6 +1450,14 @@ namespace
                 profile.permissions.changeFont = x.value();
         }
 
+        strValue = "ask";
+        if (tryLoadChildRelative(
+                _usedKeys, _profile, basePath, "permissions.display_host_writable_statusline", strValue))
+        {
+            if (auto x = toPermission(strValue))
+                profile.permissions.displayHostWritableStatusLine = x.value();
+        }
+
         if (tryLoadChildRelative(_usedKeys, _profile, basePath, "font.size", profile.fonts.size.pt))
         {
             if (profile.fonts.size < MinimumFontSize)

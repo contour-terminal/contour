@@ -337,7 +337,7 @@ void spawnNewTerminal(string const& _programPath,
 bool requestPermission(PermissionCache& _cache,
                        QWidget* _parent,
                        config::Permission _allowedByConfig,
-                       std::string_view _topicText)
+                       std::string const& _topicText)
 {
     switch (_allowedByConfig)
     {
@@ -351,7 +351,7 @@ bool requestPermission(PermissionCache& _cache,
     }
 
     // Did we remember a last interactive question?
-    if (auto const i = _cache.find(string(_topicText)); i != _cache.end())
+    if (auto const i = _cache.find(_topicText); i != _cache.end())
         return i->second;
 
     SessionLog()("Permission for {} requires asking user.", _topicText);
@@ -367,8 +367,8 @@ bool requestPermission(PermissionCache& _cache,
 
     switch (reply)
     {
-        case QMessageBox::StandardButton::NoToAll: _cache[string(_topicText)] = false; break;
-        case QMessageBox::StandardButton::YesToAll: _cache[string(_topicText)] = true; [[fallthrough]];
+        case QMessageBox::StandardButton::NoToAll: _cache[_topicText] = false; break;
+        case QMessageBox::StandardButton::YesToAll: _cache[_topicText] = true; [[fallthrough]];
         case QMessageBox::StandardButton::Yes: return true;
         default: break;
     }
