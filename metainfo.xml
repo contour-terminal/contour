@@ -106,7 +106,7 @@
     <release version="0.3.12" urgency="medium" type="development">
       <description>
         <ul>
-          <li> ... </li>
+          <li>Fixes terminfo `tsl` to how todays apps are using it (e.g. zsh) to simply set the window title.</li>
         </ul>
       </description>
     </release>
