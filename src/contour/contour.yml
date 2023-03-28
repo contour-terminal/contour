@@ -683,7 +683,7 @@ color_schemes:
 # - TraceEnter        Enables trace mode, suspending execution until explicitly requested to continue (See TraceLeave and TraceStep).
 # - TraceLeave        Disables trace mode. Any pending VT sequence will be flushed out and normal execution will be resumed.
 # - TraceStep         Executes a single VT sequence that is to be executed next.
-# - ViNormalMode      Enters Vi-like normal mode. The cursor can then be moved via h/j/k/l movements and text can be selected via v, yanked via y, and clipboard pasted via p.
+# - ViNormalMode      Enters/Leaves Vi-like normal mode. The cursor can then be moved via h/j/k/l movements in normal mode and text can be selected via v, yanked via y, and clipboard pasted via p.
 # - WriteScreen       Writes VT sequence in `chars` member to the screen (bypassing the application).
 
 input_mapping:

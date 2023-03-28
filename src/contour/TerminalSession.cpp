@@ -1027,7 +1027,10 @@ bool TerminalSession::operator()(actions::TraceStep)
 
 bool TerminalSession::operator()(actions::ViNormalMode)
 {
-    terminal().inputHandler().setMode(ViMode::Normal);
+    if (terminal().inputHandler().mode() == ViMode::Insert)
+        terminal().inputHandler().setMode(ViMode::Normal);
+    else if (terminal().inputHandler().mode() == ViMode::Normal)
+        terminal().inputHandler().setMode(ViMode::Insert);
     return true;
 }
 
