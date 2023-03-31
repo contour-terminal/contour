@@ -744,7 +744,6 @@ void Terminal::clearSelection()
 
     InputLog()("Clearing selection.");
     _selection.reset();
-    _speedClicks = 0;
 
     onSelectionUpdated();
 
