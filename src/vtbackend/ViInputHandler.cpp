@@ -82,12 +82,13 @@ void ViInputHandler::registerAllCommands()
         std::array<std::pair<char, TextObjectScope>, 2> { { std::pair { 'i', TextObjectScope::Inner },
                                                             std::pair { 'a', TextObjectScope::A } } };
 
-    auto constexpr motionMappings = std::array<std::pair<std::string_view, ViMotion>, 40> { {
+    auto constexpr motionMappings = std::array<std::pair<std::string_view, ViMotion>, 41> { {
         // clang-format off
         { "$", ViMotion::LineEnd },
         { "%", ViMotion::ParenthesisMatching },
         { "0", ViMotion::LineBegin },
         { "<BS>", ViMotion::CharLeft },
+        { "<NL>", ViMotion::LineDown },
         { "<Down>", ViMotion::LineDown },
         { "<Left>", ViMotion::CharLeft },
         { "<PageDown>", ViMotion::PageDown },
@@ -440,6 +441,8 @@ bool ViInputHandler::sendCharPressEvent(char32_t ch, Modifier modifier)
         _pendingInput += "<ESC>";
     else if (ch == '\b')
         _pendingInput += "<BS>";
+    else if (ch == '\n' || ch == '\r')
+        _pendingInput += "<NL>";
     else
         _pendingInput += unicode::convert_to<char>(ch);
 
