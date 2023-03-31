@@ -107,6 +107,7 @@
       <description>
         <ul>
           <li>Fixes terminfo `tsl` to how todays apps are using it (e.g. zsh) to simply set the window title.</li>
+          <li>Fixes selecting a single character not working easily (#1066).</li>
           <li>Adds `profiles.*.permissions.display_host_writable_statusline` to allow the user to intervene in `DECSSDT` VT sequence to show the host writable statusline even if the indicator statusline is currently active.</li>
           <li>Extends `ViNormalMode` to toggle between insert and normal mode rather than just entering normal mode.</li>
           <li>Modal mode: Adds Return key to also move the cursor down (like vim).</li>

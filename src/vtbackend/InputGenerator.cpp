@@ -788,6 +788,10 @@ bool InputGenerator::generateMouseMove(Modifier modifier,
                                        PixelCoordinate pixelPosition,
                                        bool uiHandled)
 {
+    if (pos == _currentMousePosition && _mouseTransport != MouseTransport::SGRPixels)
+        // Only generate a mouse move event if the coordinate of interest(!) has actually changed.
+        return false;
+
     auto const logged = [&](bool success) -> bool {
         if (success)
         {
