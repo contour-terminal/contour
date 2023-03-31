@@ -1028,6 +1028,10 @@ namespace
                                        colors.indicatorStatusLineInactive))
             colors.indicatorStatusLineInactive = p.value();
 
+        if (auto const p = parseRGBColorPair(
+                _usedKeys, _basePath, _node, "input_method_editor", colors.inputMethodEditor))
+            colors.inputMethodEditor = p.value();
+
         if (auto cursor = _node["cursor"]; cursor)
         {
             _usedKeys.emplace(_basePath + ".cursor");

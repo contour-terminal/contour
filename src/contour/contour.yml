@@ -559,6 +559,13 @@ color_schemes:
             # Default: default foreground
             background: '#000000'
 
+        # Colors for the IME (Input Method Editor) area.
+        input_method_editor:
+            # Default: default #FFFFFF
+            foreground: '#FFFFFF'
+            # Default: default #FF0000
+            background: '#FF0000'
+
         # Normal colors
         normal:
             black:   '#000000'

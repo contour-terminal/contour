@@ -118,6 +118,8 @@ struct ColorPalette
         RGBColor hover = 0xFF0000_rgb;
     } hyperlinkDecoration;
 
+    RGBColorPair inputMethodEditor = { 0xFFFFFF_rgb, 0xFF0000_rgb };
+
     std::shared_ptr<BackgroundImage const> backgroundImage;
 
     // clang-format off
