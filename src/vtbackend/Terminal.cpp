@@ -744,7 +744,6 @@ void Terminal::clearSelection()
 
     InputLog()("Clearing selection.");
     _selection.reset();
-    _speedClicks = 0;
 
     onSelectionUpdated();
 
@@ -768,13 +767,11 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
         clearSelection();
     }
 
-    // Only continue if he mouse position has changed to a new grid value or we're tracking pixel values.
-    if (newPosition == _currentMousePosition && !isModeEnabled(DECMode::MouseSGRPixels))
-        return;
-
-    _currentMousePosition = newPosition;
-
-    updateCursorHoveringState();
+    if (newPosition != _currentMousePosition)
+    {
+        _currentMousePosition = newPosition;
+        updateCursorHoveringState();
+    }
 
     if (!_leftMouseButtonPressed)
         return;

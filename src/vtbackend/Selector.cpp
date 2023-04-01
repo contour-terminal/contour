@@ -52,8 +52,6 @@ bool Selection::extend(CellLocation to)
 {
     assert(_state != State::Complete
            && "In order extend a selection, the selector must be active (started).");
-    if (_to == to)
-        return false;
     _state = State::InProgress;
     _to = to;
     _onSelectionUpdated();

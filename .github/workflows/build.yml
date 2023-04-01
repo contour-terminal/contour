@@ -357,6 +357,8 @@ jobs:
         with:
           key: "ccache-ubuntu2204-${{ matrix.compiler }}-${{ matrix.cxx }}-${{ matrix.build_type }}"
           max-size: 256M
+      - name: "update APT database"
+        run: sudo apt -q update
       - name: Installing xmllint for ci-set-vars
         run: sudo apt -qy install libxml2-utils
       - name: set environment variables
@@ -507,6 +509,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
+      - name: "update APT database"
+        run: sudo apt -q update
       - name: Installing xmllint for ci-set-vars
         run: sudo apt -qy install libxml2-utils
       - name: set variables
