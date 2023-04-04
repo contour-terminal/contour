@@ -584,9 +584,10 @@ bool RenderBufferBuilder<Cell>::tryRenderInputMethodEditor(CellLocation screenPo
     // Render IME preeditString if available and screen position matches cursor position.
     if (_cursorPosition && gridPosition == *_cursorPosition && !_inputMethodData.preeditString.empty())
     {
+        auto const inputMethodEditorStyles = _terminal.colorPalette().inputMethodEditor;
         auto textAttributes = GraphicsAttributes {};
-        textAttributes.foregroundColor = RGBColor(0xFF, 0xFF, 0xFF);
-        textAttributes.backgroundColor = RGBColor(0xFF, 0x00, 0x00);
+        textAttributes.foregroundColor = inputMethodEditorStyles.foreground;
+        textAttributes.backgroundColor = inputMethodEditorStyles.background;
         textAttributes.flags |= CellFlags::Bold | CellFlags::Underline;
 
         if (!_output.cells.empty())
