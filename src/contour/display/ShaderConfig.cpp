@@ -31,7 +31,7 @@ using namespace std::string_literals;
 namespace contour::display
 {
 
-auto const ShaderLog = logstore::Category("shader", "Logs shader configuration");
+auto const ShaderLog = logstore::Category("gui.shader", "Logs shader configuration");
 
 namespace
 {
