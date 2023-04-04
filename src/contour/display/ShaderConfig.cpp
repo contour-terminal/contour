@@ -31,6 +31,8 @@ using namespace std::string_literals;
 namespace contour::display
 {
 
+auto const ShaderLog = logstore::Category("gui.shader", "Logs shader configuration");
+
 namespace
 {
     template <size_t N>
@@ -135,7 +137,7 @@ std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderCo
     }
 
     if (auto const logString = shader->log().toStdString(); !logString.empty())
-        errorlog()("Shader log: {}", logString);
+        ShaderLog()("{}", logString);
 
     Guarantee(shader->isLinked());
     return shader;
