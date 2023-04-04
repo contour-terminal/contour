@@ -137,9 +137,11 @@ jobs:
                 -B build/
       - name: "Build"
         run: cmake --build build/
-      - name: "test: libcrispy"
+      - name: "test: crispy"
         run: ./build/src/crispy/crispy_test
-      - name: "test: libterminal"
+      - name: "test: vtparser"
+        run: ./build/src/vtparser/vtparser_test
+      - name: "test: vtbackend"
         run: ./build/src/vtbackend/vtbackend_test
       - name: inspect
         run: |

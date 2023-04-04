@@ -10,6 +10,7 @@ sudo apt install -y \
             \
             ffmpeg \
             libavcodec58 \
+            libavdevice58 \
             libavformat58 \
             libavutil56 \
             libdeflate0 \
