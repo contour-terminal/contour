@@ -137,7 +137,7 @@ std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderCo
     }
 
     if (auto const logString = shader->log().toStdString(); !logString.empty())
-        ShaderLog()("Shader log: {}", logString);
+        ShaderLog()("{}", logString);
 
     Guarantee(shader->isLinked());
     return shader;
