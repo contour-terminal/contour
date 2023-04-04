@@ -241,8 +241,7 @@ profiles:
             # Allows capturing the screen buffer via `CSI > Pm ; Ps ; Pc ST`.
             # The response can be read from stdin as sequence `OSC 314 ; <screen capture> ST`
             capture_buffer: ask
-            # Allows displaying the "Host Writable Statusline" even when
-            # the indicator statusline is currently shown.
+            # Allows displaying the "Host Writable Statusline" programmatically using `DECSSDT 2`.
             display_host_writable_statusline: ask
 
         # If enabled, and you double-click on a word in the primary screen,

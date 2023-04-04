@@ -3657,10 +3657,8 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
                 case 0: _terminal.setStatusDisplay(StatusDisplayType::None); break;
                 case 1: _terminal.setStatusDisplay(StatusDisplayType::Indicator); break;
                 case 2:
-                    if (_terminal.statusDisplayType() == StatusDisplayType::Indicator)
+                    if (_terminal.statusDisplayType() != StatusDisplayType::HostWritable)
                         _terminal.requestShowHostWritableStatusLine();
-                    else
-                        _terminal.setStatusDisplay(StatusDisplayType::HostWritable);
                     break;
                 default: return ApplyResult::Invalid;
             }
