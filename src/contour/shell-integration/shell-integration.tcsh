@@ -1,2 +1,2 @@
-alias precmd 'echo -n "\033[?2028l\033[>M\033]7;$PWD\033\\";'
-alias postcmd 'echo -n "\033[?2028h";'
+alias precmd 'echo -n "\\e[?2028l\\e[>M\\e]7;$PWD\\e\\\\";'
+alias postcmd 'echo -n "\\e[?2028h";'
