@@ -144,6 +144,7 @@ jobs:
                     doctest-dev \
                     ffmpeg \
                     libavcodec-dev \
+                    libavdevice-dev \
                     libavformat-dev \
                     libavutil-dev \
                     libdeflate-dev \
