@@ -709,8 +709,15 @@ class Terminal
     void fillRenderBufferInternal(RenderBuffer& output, bool includeSelection);
     void updateIndicatorStatusLine();
     void updateCursorVisibilityState() const noexcept;
-    void updateCursorHoveringState();
+    void updateHoveringHyperlinkState();
     bool handleMouseSelection(Modifier modifier);
+
+    /// Tests if the text selection should be extended by the given mouse position or not.
+    ///
+    /// @retval false if either no selection is available, selection is complete, or the new pixel position is
+    /// not enough into the next grid cell yet
+    /// @retval true otherwise
+    bool shouldExtendSelectionByMouse(CellLocation newPosition, PixelCoordinate pixelPosition) const noexcept;
 
     // Tests if the App mouse protocol is explicitly being bypassed by the user,
     // by pressing a special bypass modifier (usualy Shift).
@@ -770,6 +777,7 @@ class Terminal
     std::chrono::steady_clock::time_point _lastClick {};
     unsigned int _speedClicks = 0;
     terminal::CellLocation _currentMousePosition {}; // current mouse position
+    terminal::PixelCoordinate _lastMousePixelPositionOnLeftClick {};
     bool _leftMouseButtonPressed = false; // tracks left-mouse button pressed state (used for cell selection).
     bool _respectMouseProtocol = true;    // shift-click can disable that, button release sets it back to true
     // }}}

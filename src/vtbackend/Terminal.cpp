@@ -650,6 +650,7 @@ bool Terminal::sendMousePressEvent(Modifier modifier,
     if (button == MouseButton::Left)
     {
         _leftMouseButtonPressed = true;
+        _lastMousePixelPositionOnLeftClick = pixelPosition;
         if (!allowPassMouseEventToApp(modifier))
             uiHandledHint = handleMouseSelection(modifier) || uiHandledHint;
     }
@@ -750,54 +751,84 @@ void Terminal::clearSelection()
     breakLoopAndRefreshRenderBuffer();
 }
 
+bool Terminal::shouldExtendSelectionByMouse(CellLocation newPosition, PixelCoordinate pixelPosition) const noexcept
+{
+    if (!selectionAvailable() || selector()->state() == Selection::State::Complete)
+        return false;
+
+    auto selectionCorner = selector()->to();
+    auto const cellPixelWidth = unbox<int>(cellPixelSize().width);
+    if (selector()->state() == Selection::State::Waiting)
+    {
+        if (!(newPosition.line != selectionCorner.line
+              || abs(_lastMousePixelPositionOnLeftClick.x.value - pixelPosition.x.value)
+                     / (cellPixelWidth / 2)))
+            return false;
+    }
+    else if (newPosition.line == selectionCorner.line)
+    {
+        auto const mod = pixelPosition.x.value % cellPixelWidth;
+        if (newPosition.column > selectionCorner.column) // selection to the right
+        {
+            if (mod < cellPixelWidth / 2)
+                return false;
+        }
+        else if (newPosition.column < selectionCorner.column) // selection to the left
+        {
+            if (mod > cellPixelWidth / 2)
+                return false;
+        }
+    }
+
+    return true;
+}
+
 void Terminal::sendMouseMoveEvent(Modifier modifier,
                                   CellLocation newPosition,
                                   PixelCoordinate pixelPosition,
                                   bool uiHandledHint)
 {
+    // Updates the internal state to remember the current mouse' position.
+    // On top of that, a few more things are happening:
+    // - updates cursor hovering state (e.g. necessary for properly highlighting hyperlinks)
+    // - the internal speed-clicks counter (for tracking rapid multi click) is reset
+    // - grid text selection is extended
     verifyState();
-
-    // Speed-clicks are only counted when not moving the mouse in between, so reset on mouse move here.
-    _speedClicks = 0;
-
-    if (_leftMouseButtonPressed && isSelectionComplete())
-    {
-        // Mouse is pressed but current selection is complete, which means, it's a new mouse-down event,
-        // and we clear the current selection before continueing to create a new one.
-        clearSelection();
-    }
 
     if (newPosition != _currentMousePosition)
     {
+        // Speed-clicks are only counted when not moving the mouse in between, so reset on mouse move here.
+        _speedClicks = 0;
+
         _currentMousePosition = newPosition;
-        updateCursorHoveringState();
+        updateHoveringHyperlinkState();
     }
 
     if (!_leftMouseButtonPressed)
         return;
 
-    auto relativePos = _viewport.translateScreenToGridCoordinate(_currentMousePosition);
-    _state.viCommands.cursorPosition = relativePos;
-    _viewport.makeVisible(_state.viCommands.cursorPosition.line);
+    auto const shouldExtendSelection = shouldExtendSelectionByMouse(newPosition, pixelPosition);
+
+    auto relativePos = _viewport.translateScreenToGridCoordinate(newPosition);
+    if (shouldExtendSelection)
+    {
+        _state.viCommands.cursorPosition = relativePos;
+        _viewport.makeVisible(_state.viCommands.cursorPosition.line);
+    }
 
     // Do not handle mouse-move events in sub-cell dimensions.
     if (allowPassMouseEventToApp(modifier)
-        && _state.inputGenerator.generateMouseMove(modifier,
-                                                   relativePos,
-                                                   pixelPosition,
-                                                   uiHandledHint
-                                                       || (_leftMouseButtonPressed && !selectionAvailable())))
+        && _state.inputGenerator.generateMouseMove(
+            modifier, relativePos, pixelPosition, uiHandledHint || !selectionAvailable()))
     {
         flushInput();
         if (!isModeEnabled(DECMode::MousePassiveTracking))
             return;
     }
 
-    if (_leftMouseButtonPressed && !selectionAvailable())
+    if (!selectionAvailable())
         setSelector(make_unique<LinearSelection>(_selectionHelper, relativePos, selectionUpdatedHelper()));
-
-    if (selectionAvailable()
-        && (selector()->state() != Selection::State::Complete && _leftMouseButtonPressed))
+    else if (selector()->state() != Selection::State::Complete && shouldExtendSelection)
     {
         if (currentScreen().isCellEmpty(relativePos) && !currentScreen().compareCellTextAt(relativePos, 0x20))
             relativePos.column = ColumnOffset { 0 } + *(_settings.pageSize.columns - 1);
@@ -982,7 +1013,7 @@ void Terminal::updateCursorVisibilityState() const noexcept
     _cursorBlinkState = (_cursorBlinkState + 1) % 2;
 }
 
-void Terminal::updateCursorHoveringState()
+void Terminal::updateHoveringHyperlinkState()
 {
     auto const newState = _currentScreen.get().contains(_currentMousePosition)
                               ? _currentScreen.get().hyperlinkIdAt(
