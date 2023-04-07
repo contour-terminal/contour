@@ -151,7 +151,8 @@ optional<RenderCursor> RenderBufferBuilder<Cell>::renderCursor() const
     auto const shape = _terminal.state().focused ? _terminal.cursorShape() : InactiveCursorShape;
 
     auto const cursorScreenPosition =
-        CellLocation { _cursorPosition->line + boxed_cast<LineOffset>(_terminal.viewport().scrollOffset()),
+        CellLocation { _baseLine + _cursorPosition->line
+                           + boxed_cast<LineOffset>(_terminal.viewport().scrollOffset()),
                        _cursorPosition->column };
 
     auto const cellWidth = _terminal.currentScreen().cellWidthAt(*_cursorPosition);

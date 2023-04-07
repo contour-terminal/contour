@@ -707,6 +707,7 @@ class Terminal
   private:
     void mainLoop();
     void fillRenderBufferInternal(RenderBuffer& output, bool includeSelection);
+    LineCount fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, LineOffset base);
     void updateIndicatorStatusLine();
     void updateCursorVisibilityState() const noexcept;
     void updateHoveringHyperlinkState();
