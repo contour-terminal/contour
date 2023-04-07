@@ -817,11 +817,11 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
     }
 
     // Do not handle mouse-move events in sub-cell dimensions.
-    if (allowPassMouseEventToApp(modifier)
-        && _state.inputGenerator.generateMouseMove(
-            modifier, relativePos, pixelPosition, uiHandledHint || !selectionAvailable()))
+    if (allowPassMouseEventToApp(modifier))
     {
-        flushInput();
+        if (_state.inputGenerator.generateMouseMove(
+                modifier, relativePos, pixelPosition, uiHandledHint || !selectionAvailable()))
+            flushInput();
         if (!isModeEnabled(DECMode::MousePassiveTracking))
             return;
     }
