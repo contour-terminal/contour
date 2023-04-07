@@ -436,6 +436,9 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
 
     auto baseLine = LineOffset(0);
 
+    if (_settings.statusDisplayPosition == StatusDisplayPosition::Top)
+        baseLine += fillRenderBufferStatusLine(output, includeSelection, baseLine).as<LineOffset>();
+
     auto const hoveringHyperlinkGuard = ScopedHyperlinkHover { *this, _currentScreen };
     auto const mainDisplayReverseVideo = isModeEnabled(terminal::DECMode::ReverseVideo);
     auto const highlightSearchMatches =
@@ -472,9 +475,12 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                                                includeSelection },
                                     _viewport.scrollOffset(),
                                     highlightSearchMatches);
-    baseLine += _primaryScreen.pageSize().lines.as<LineOffset>();
 
-    fillRenderBufferStatusLine(output, includeSelection, baseLine);
+    if (_settings.statusDisplayPosition == StatusDisplayPosition::Bottom)
+    {
+        baseLine += _primaryScreen.pageSize().lines.as<LineOffset>();
+        fillRenderBufferStatusLine(output, includeSelection, baseLine);
+    }
 }
 
 LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, LineOffset base)

@@ -123,6 +123,7 @@ namespace
         settings.maxImageSize = config.maxImageSize;
         settings.maxImageRegisterCount = config.maxImageColorRegisters;
         settings.statusDisplayType = profile.initialStatusDisplayType;
+        settings.statusDisplayPosition = profile.statusDisplayPosition;
         settings.colorPalette = profile.colors;
         settings.refreshRate = profile.refreshRate;
         settings.primaryScreen.allowReflowOnResize = config.reflowOnResize;
