@@ -398,6 +398,11 @@ profiles:
             # Default: bottom
             position: bottom
 
+            # Synchronize the window title with the Host Writable status_line if
+            # and only if the host writable status line was denied to be shown.
+            # Default: false
+            sync_to_window_title: false
+
         # Background configuration
         background:
             # Background opacity to use. A value of 1.0 means fully opaque whereas 0.0 means fully

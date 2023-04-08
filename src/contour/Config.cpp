@@ -1717,6 +1717,11 @@ namespace
                 errorlog()("Invalid value for config entry {}: {}", "status_line.position", strValue);
         }
 
+        bool boolValue = false;
+        if (tryLoadChildRelative(
+                _usedKeys, _profile, basePath, "status_line.sync_to_window_title", boolValue))
+            profile.syncWindowTitleWithHostWritableStatusDisplay = boolValue;
+
         return profile;
     }
 
