@@ -26,6 +26,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <regex>
 #include <stack>
 #include <vector>
 
@@ -193,6 +194,7 @@ struct TerminalState
     // Hyperlink related
     //
     HyperlinkStorage hyperlinks {};
+    std::regex urlPattern;
 
     std::string windowTitle {};
     std::stack<std::string> savedWindowTitles {};

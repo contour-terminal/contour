@@ -16,6 +16,9 @@ TerminalState::TerminalState(Terminal& terminal):
         te->discardImage(*image);
     } },
     hyperlinks { HyperlinkCache { 1024 } },
+    urlPattern { settings.urlPattern,
+                 std::regex_constants::ECMAScript | std::regex_constants::optimize
+                     | std::regex_constants::icase },
     sequencer { terminal },
     parser { std::ref(sequencer) },
     viCommands { terminal },
