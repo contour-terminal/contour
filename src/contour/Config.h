@@ -161,6 +161,8 @@ struct TerminalProfile
     terminal::MaxHistoryLineCount maxHistoryLineCount;
     terminal::LineCount historyScrollMultiplier = terminal::LineCount(3);
     ScrollBarPosition scrollbarPosition = ScrollBarPosition::Right;
+    terminal::StatusDisplayPosition statusDisplayPosition = terminal::StatusDisplayPosition::Bottom;
+    bool syncWindowTitleWithHostWritableStatusDisplay = false;
     bool hideScrollbarInAltScreen = true;
 
     bool autoScrollOnUpdate;

@@ -186,6 +186,7 @@ struct TerminalState
 
     ScreenType screenType = ScreenType::Primary;
     StatusDisplayType statusDisplayType = StatusDisplayType::None;
+    bool syncWindowTitleWithHostWritableStatusDisplay = false;
     std::optional<StatusDisplayType> savedStatusDisplayType = std::nullopt;
     ActiveStatusDisplay activeStatusDisplay = ActiveStatusDisplay::Main;
 

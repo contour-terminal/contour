@@ -44,6 +44,7 @@
 #include <vector>
 
 #include "contour/Actions.h"
+#include "vtbackend/primitives.h"
 
 #if defined(_WIN32)
     #include <Windows.h>
@@ -1704,6 +1705,22 @@ namespace
             profile.initialStatusDisplayType = terminal::StatusDisplayType::None;
         else
             errorlog()("Invalid value for config entry {}: {}", "status_line.display", strValue);
+
+        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "status_line.position", strValue))
+        {
+            auto const literal = toLower(strValue);
+            if (literal == "bottom")
+                profile.statusDisplayPosition = terminal::StatusDisplayPosition::Bottom;
+            else if (literal == "top")
+                profile.statusDisplayPosition = terminal::StatusDisplayPosition::Top;
+            else
+                errorlog()("Invalid value for config entry {}: {}", "status_line.position", strValue);
+        }
+
+        bool boolValue = false;
+        if (tryLoadChildRelative(
+                _usedKeys, _profile, basePath, "status_line.sync_to_window_title", boolValue))
+            profile.syncWindowTitleWithHostWritableStatusDisplay = boolValue;
 
         return profile;
     }

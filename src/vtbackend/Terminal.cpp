@@ -22,6 +22,7 @@
 
 #include <vtpty/MockPty.h>
 
+#include <crispy/assert.h>
 #include <crispy/escape.h>
 #include <crispy/stdfs.h>
 #include <crispy/utils.h>
@@ -433,6 +434,11 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
         TerminalLog()("{}: Refreshing render buffer.\n", _lastFrameID.load());
 #endif
 
+    auto baseLine = LineOffset(0);
+
+    if (_settings.statusDisplayPosition == StatusDisplayPosition::Top)
+        baseLine += fillRenderBufferStatusLine(output, includeSelection, baseLine).as<LineOffset>();
+
     auto const hoveringHyperlinkGuard = ScopedHyperlinkHover { *this, _currentScreen };
     auto const mainDisplayReverseVideo = isModeEnabled(terminal::DECMode::ReverseVideo);
     auto const highlightSearchMatches =
@@ -449,7 +455,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
         _lastRenderPassHints =
             _primaryScreen.render(RenderBufferBuilder<PrimaryScreenCell> { *this,
                                                                            output,
-                                                                           LineOffset(0),
+                                                                           baseLine,
                                                                            mainDisplayReverseVideo,
                                                                            HighlightSearchMatches::Yes,
                                                                            _inputMethodData,
@@ -461,7 +467,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
         _lastRenderPassHints =
             _alternateScreen.render(RenderBufferBuilder<AlternateScreenCell> { *this,
                                                                                output,
-                                                                               LineOffset(0),
+                                                                               baseLine,
                                                                                mainDisplayReverseVideo,
                                                                                HighlightSearchMatches::Yes,
                                                                                _inputMethodData,
@@ -470,37 +476,47 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                     _viewport.scrollOffset(),
                                     highlightSearchMatches);
 
+    if (_settings.statusDisplayPosition == StatusDisplayPosition::Bottom)
+    {
+        baseLine += _primaryScreen.pageSize().lines.as<LineOffset>();
+        fillRenderBufferStatusLine(output, includeSelection, baseLine);
+    }
+}
+
+LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, LineOffset base)
+{
+    auto const mainDisplayReverseVideo = isModeEnabled(terminal::DECMode::ReverseVideo);
     switch (_state.statusDisplayType)
     {
         case StatusDisplayType::None:
             //.
-            break;
+            return LineCount(0);
         case StatusDisplayType::Indicator:
             updateIndicatorStatusLine();
-            _indicatorStatusScreen.render(
-                RenderBufferBuilder<StatusDisplayCell> { *this,
-                                                         output,
-                                                         pageSize().lines.as<LineOffset>(),
-                                                         !mainDisplayReverseVideo,
-                                                         HighlightSearchMatches::No,
-                                                         InputMethodData {},
-                                                         nullopt,
-                                                         includeSelection },
-                ScrollOffset(0));
-            break;
+            _indicatorStatusScreen.render(RenderBufferBuilder<StatusDisplayCell> { *this,
+                                                                                   output,
+                                                                                   base,
+                                                                                   !mainDisplayReverseVideo,
+                                                                                   HighlightSearchMatches::No,
+                                                                                   InputMethodData {},
+                                                                                   nullopt,
+                                                                                   includeSelection },
+                                          ScrollOffset(0));
+            return _indicatorStatusScreen.pageSize().lines;
         case StatusDisplayType::HostWritable:
             _hostWritableStatusLineScreen.render(
                 RenderBufferBuilder<StatusDisplayCell> { *this,
                                                          output,
-                                                         pageSize().lines.as<LineOffset>(),
+                                                         base,
                                                          !mainDisplayReverseVideo,
                                                          HighlightSearchMatches::No,
                                                          InputMethodData {},
                                                          nullopt,
                                                          includeSelection },
                 ScrollOffset(0));
-            break;
+            return _hostWritableStatusLineScreen.pageSize().lines;
     }
+    crispy::unreachable();
 }
 // }}}
 

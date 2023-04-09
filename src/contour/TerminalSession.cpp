@@ -123,6 +123,8 @@ namespace
         settings.maxImageSize = config.maxImageSize;
         settings.maxImageRegisterCount = config.maxImageColorRegisters;
         settings.statusDisplayType = profile.initialStatusDisplayType;
+        settings.statusDisplayPosition = profile.statusDisplayPosition;
+        settings.syncWindowTitleWithHostWritableStatusDisplay = profile.syncWindowTitleWithHostWritableStatusDisplay;
         settings.colorPalette = profile.colors;
         settings.refreshRate = profile.refreshRate;
         settings.primaryScreen.allowReflowOnResize = config.reflowOnResize;
@@ -300,7 +302,11 @@ void TerminalSession::requestShowHostWritableStatusLine()
             terminal_.setStatusDisplay(terminal::StatusDisplayType::HostWritable);
             DisplayLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
             flushInput();
+            terminal_.state().syncWindowTitleWithHostWritableStatusDisplay = false;
         }
+        else
+            terminal_.state().syncWindowTitleWithHostWritableStatusDisplay =
+                terminal_.settings().syncWindowTitleWithHostWritableStatusDisplay;
     });
 }
 

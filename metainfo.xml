@@ -114,6 +114,8 @@
           <li>Adds `profiles.*.permissions.display_host_writable_statusline` to allow the user to intervene in `DECSSDT 2` VT sequence to show the host writable statusline.</li>
           <li>Adds config entry `input_method_editor` colorscheme key to allow customization of the IME (input method editor) region (#1058).</li>
           <li>Adds `gui.shader` log option for the output of shader configuration procedure (#715).</li>
+          <li>Adds config entry `profiles.*.status_line.position` to change statusline position to be either bottom (default) or top.</li>
+          <li>Adds config entry `profiles.*.status_line.sync_to_window_title` to synchronize the window title with the host writable statusline (if it was denied to be shown).</li>
           <li>Extends `ViNormalMode` to toggle between insert and normal mode rather than just entering normal mode.</li>
           <li>Modal mode: Adds Return key to also move the cursor down (like vim).</li>
         </ul>

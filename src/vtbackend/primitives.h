@@ -565,6 +565,16 @@ enum class StatusDisplayType
     HostWritable,
 };
 
+// Mandates the position to show the statusline at.
+enum class StatusDisplayPosition
+{
+    // The status line is classically shown at the bottom of the render target.
+    Bottom,
+
+    // The status line is shown at the top of the render target
+    Top,
+};
+
 // Selects whether the terminal sends data to the main display or the status line.
 enum class ActiveStatusDisplay
 {

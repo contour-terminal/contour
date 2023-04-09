@@ -3668,7 +3668,17 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             // Selects whether the terminal sends data to the main display or the status line.
             switch (seq.param_or(0, 0))
             {
-                case 0: _terminal.setActiveStatusDisplay(ActiveStatusDisplay::Main); break;
+                case 0:
+                    if (_state.activeStatusDisplay == ActiveStatusDisplay::StatusLine
+                        && _state.syncWindowTitleWithHostWritableStatusDisplay)
+                    {
+                        _terminal.setWindowTitle(crispy::trimRight(
+                            _terminal.hostWritableStatusLineDisplay().grid().lineText(LineOffset(0))));
+                        _state.syncWindowTitleWithHostWritableStatusDisplay = false;
+                    }
+                    _terminal.setActiveStatusDisplay(ActiveStatusDisplay::Main);
+                    break;
+
                 case 1: _terminal.setActiveStatusDisplay(ActiveStatusDisplay::StatusLine); break;
                 default: return ApplyResult::Invalid;
             }

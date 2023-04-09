@@ -37,6 +37,8 @@ struct Settings
     ImageSize maxImageSize { Width(800), Height(600) };
     unsigned maxImageRegisterCount = 256;
     StatusDisplayType statusDisplayType = StatusDisplayType::None;
+    StatusDisplayPosition statusDisplayPosition = StatusDisplayPosition::Bottom;
+    bool syncWindowTitleWithHostWritableStatusDisplay = true;
     CursorDisplay cursorDisplay = CursorDisplay::Steady;
     CursorShape cursorShape = CursorShape::Block;
 
