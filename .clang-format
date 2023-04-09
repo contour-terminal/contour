@@ -77,6 +77,8 @@ IncludeCategories:
     Priority:  3
   - Regex:     '^<(vtrasterizer)/'
     Priority:  4
+  - Regex:     '^<(regex_dfa)/'
+    Priority:  5
   - Regex:     '^<(text_shaper)/'
     Priority:  5
   - Regex:     '^<(crispy)/'
