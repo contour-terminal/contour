@@ -991,13 +991,17 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
             auto const lastAddressableLocation =
                 CellLocation { LineOffset::cast_from(_terminal.pageSize().lines - 1),
                                ColumnOffset::cast_from(_terminal.pageSize().columns - 1) };
-            auto initialClass = wordSkipClass(_terminal.currentScreen().cellTextAt(cursorPosition));
-            auto result = next(cursorPosition);
-
-            while (result != lastAddressableLocation
-                   && shouldSkipForUntilWordBegin(wordSkipClass(_terminal.currentScreen().cellTextAt(result)),
-                                                  initialClass))
+            auto result = cursorPosition;
+            while (count > 0)
+            {
+                auto initialClass = wordSkipClass(_terminal.currentScreen().cellTextAt(result));
                 result = next(result);
+                while (result != lastAddressableLocation
+                       && shouldSkipForUntilWordBegin(
+                           wordSkipClass(_terminal.currentScreen().cellTextAt(result)), initialClass))
+                    result = next(result);
+                --count;
+            }
 
             return result;
         }
