@@ -40,6 +40,26 @@ for everyday use. It is aiming for power users with a modern feature mindset.
 - ✅ VT320 Host-programmable and Indicator status line support.
 - ✅ and much more ...
 
+## Installation
+
+`contour` is packaged and available for installation on multiple distributions.
+ - `Fedora` use official [package](https://packages.fedoraproject.org/pkgs/contour-terminal/contour-terminal/)
+
+```sh
+sudo dnf install contour-terminal
+```
+
+ - `Arch` use AUR [package](https://aur.archlinux.org/packages/contour-git)
+
+## Requirements
+
+- **operating system**: A *recent* operating system (OS/X 12, Windows 10+, an up-to-date Linux, or FreeBSD)
+- **GPU**: driver must support at least OpenGL 3.3 hardware accelerated or as software rasterizer.
+- **CPU**: x86-64 AMD or Intel with AES-NI instruction set or ARMv8 with crypto extensions.
+
+## Configuration
+
+In order to set up Contour, it is necessary to modify the configuration file `contour.yml`, which is initially generated in the `$HOME/.config/contour` directory.
 
 ## Installing from source
 
@@ -90,18 +110,6 @@ Click the following button install Contour from the Flathub store.
 - Proceed with one of the following options:
   - [Install from Flathub](#install-from-flathub)
   - [Install from GitHub release](https://github.com/contour-terminal/contour/releases)
-
-
-## Configuration
-
-
-In order to set up Contour, it is necessary to modify the configuration file `contour.yml`, which is initially generated in the `$HOME/.config/contour` directory.
-
-## Requirements
-
-- **operating system**: A *recent* operating system (OS/X 12, Windows 10+, an up-to-date Linux, or FreeBSD)
-- **GPU**: driver must support at least OpenGL 3.3 hardware accelerated or as software rasterizer.
-- **CPU**: x86-64 AMD or Intel with AES-NI instruction set or ARMv8 with crypto extensions.
 
 ## CLI - Command Line Interface
 
