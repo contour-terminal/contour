@@ -767,7 +767,8 @@ void Terminal::clearSelection()
     breakLoopAndRefreshRenderBuffer();
 }
 
-bool Terminal::shouldExtendSelectionByMouse(CellLocation newPosition, PixelCoordinate pixelPosition) const noexcept
+bool Terminal::shouldExtendSelectionByMouse(CellLocation newPosition,
+                                            PixelCoordinate pixelPosition) const noexcept
 {
     if (!selectionAvailable() || selector()->state() == Selection::State::Complete)
         return false;
