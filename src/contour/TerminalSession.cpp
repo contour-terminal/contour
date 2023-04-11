@@ -124,7 +124,8 @@ namespace
         settings.maxImageRegisterCount = config.maxImageColorRegisters;
         settings.statusDisplayType = profile.initialStatusDisplayType;
         settings.statusDisplayPosition = profile.statusDisplayPosition;
-        settings.syncWindowTitleWithHostWritableStatusDisplay = profile.syncWindowTitleWithHostWritableStatusDisplay;
+        settings.syncWindowTitleWithHostWritableStatusDisplay =
+            profile.syncWindowTitleWithHostWritableStatusDisplay;
         settings.colorPalette = profile.colors;
         settings.refreshRate = profile.refreshRate;
         settings.primaryScreen.allowReflowOnResize = config.reflowOnResize;
