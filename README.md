@@ -76,7 +76,10 @@ Click the following button install Contour from the Flathub store.
 
 ## Configuration
 
-In order to set up Contour, it is necessary to modify the configuration file `contour.yml`, which is initially generated in the `$HOME/.config/contour` directory.
+In order to set up Contour, it is necessary to modify the configuration file
+`contour.yml`, which is initially generated in the `$HOME/.config/contour`
+directory. Some features also require shell integration. These can be generated
+via the CLI (see below), these currently exist for zsh, fish and tcsh.
 
 ## Installing from source
 
