@@ -78,6 +78,69 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  ubuntu18:
+    strategy:
+      matrix:
+        arch:
+          [
+          "linux/amd64 x86_64"
+          ]
+    name: "Packaging for Ubuntu 18.04"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+        with:
+          platforms: all
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v2
+        with:
+          version: latest
+      - name: Read info
+        id: tags
+        shell: bash
+        run: |
+          arch="${{ matrix.arch }}"
+          echo "PLATFORM=${arch%% *}" >> "$GITHUB_OUTPUT"
+          echo "ARCH=${arch##* }" >> "$GITHUB_OUTPUT"
+      - name: Installing xmllint for ci-set-vars
+        run: sudo apt -qy install libxml2-utils
+      - name: set environment variables
+        id: set_vars
+        run: ./scripts/ci-set-vars.sh
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: Build ${{ matrix.arch }} release
+        shell: bash
+        run: |
+          docker buildx build --platform ${{ steps.tags.outputs.PLATFORM }} \
+          --tag contour:${{ steps.tags.outputs.ARCH }} \
+          -f .github/ubuntu18/Dockerfile \
+          --load \
+          .
+          docker create --name contour-${{ steps.tags.outputs.ARCH }} contour:${{ steps.tags.outputs.ARCH }}
+          docker cp contour-${{ steps.tags.outputs.ARCH }}:/home/docker/contour/package.deb \
+          "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu18.04-amd64.deb"
+          docker cp contour-${{ steps.tags.outputs.ARCH }}:/home/docker/contour/package.ddeb \
+          "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu18.04-amd64.ddeb"
+          docker container rm contour-${{ steps.tags.outputs.ARCH }}
+      - name: "Uploading artifact .deb package"
+        uses: actions/upload-artifact@v3
+        with:
+          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu18.04-amd64.deb"
+          path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu18.04-amd64.deb"
+          if-no-files-found: error
+          retention-days: 7
+      - name: "Uploading artifact .ddeb package (debugging symbols)"
+        uses: actions/upload-artifact@v3
+        with:
+          name: "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu18.04-amd64.ddeb"
+          path: "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu18.04-amd64.ddeb"
+          if-no-files-found: error
+          retention-days: 7
+
   fedora:
     strategy:
       matrix:
@@ -170,7 +233,6 @@ jobs:
           path: "contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm"
           if-no-files-found: error
           retention-days: 7
-
   freebsd:
     runs-on: macos-12
     name: FreeBSD 13
@@ -427,21 +489,17 @@ jobs:
             test/images
           retention-days: 1
 
-  # Create AppImage (Using Ubuntu 18.04 as base).
+  # Create AppImage (Using Ubuntu 20.04 as base).
   package_for_AppImage:
     name: "Packaging for AppImage"
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v3
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: "ccache-ubuntu1804-AppImage"
+          key: "ccache-ubuntu2004-AppImage"
           max-size: 256M
-      - name: Remove GCC-11 to not mess with AppImage on stock Ubuntu 18.04
-        run: |
-          sudo apt-get autoremove -y libgcc-9-dev gcc-9 libgcc-10-dev gcc-10 libgcc-11-dev gcc-11
-          sudo apt-get install --allow-downgrades --no-remove --reinstall -y libstdc++6=8.4.0-1ubuntu1~18.04
       - name: Installing xmllint for ci-set-vars
         run: sudo apt -qy install libxml2-utils
       - name: "set environment variables"
@@ -459,15 +517,13 @@ jobs:
         run: sudo ./scripts/install-deps.sh
       - name: "Post-fix embedded dependency permissions."
         run: sudo find _deps/sources -exec chown $UID {} \;
-      - name: "install Clang++-10"
-        run: sudo apt install clang++-10
       - name: CMake version
         run: cmake --version
       - name: "cmake"
         run: |
           mkdir build
           BUILD_DIR="build" \
-            CXX="g++-8" \
+            CXX="g++-10" \
             CMAKE_BUILD_TYPE=RelWithDebInfo \
             EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS \
                                -DCMAKE_INSTALL_PREFIX="/usr" \
@@ -506,7 +562,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os_version: ['18.04', '20.04', '22.04']
+        os_version: ['20.04', '22.04']
     runs-on: ubuntu-${{ matrix.os_version }}
     steps:
       - name: Checkout code
@@ -537,9 +593,6 @@ jobs:
         run: sudo env QTVER="${{ steps.set_qtver.outputs.QTVER }}" ./scripts/install-deps.sh
       - name: "Post-fix embedded dependency permissions."
         run: sudo find _deps/sources -exec chown $UID {} \;
-      - name: "install GCC 10"
-        if: ${{ startsWith(matrix.os_version, '18.04') }}
-        run: sudo apt install g++-10
       - name: "create build directory"
         run: mkdir build
       - name: CMake version
@@ -548,10 +601,7 @@ jobs:
         run: |
           # TODO: turn on -Werror again, that requires some code changes.
           CMAKE_CXX_STANDARD=20
-          if [[ "${{ matrix.os_version }}" = "18.04" ]]; then
-            # CMAKE_CXX_STANDARD=17
-            export CXX="g++-10"
-          elif [[ "${{ matrix.os_version }}" = "22.04" ]]; then
+          if [[ "${{ matrix.os_version }}" = "22.04" ]]; then
             EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_BUILD_WITH_QT6=OFF"
           fi
           BUILD_DIR="build" \
