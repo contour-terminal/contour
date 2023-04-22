@@ -1367,10 +1367,14 @@ void Screen<Cell>::hyperlink(string id, string uri)
 {
     if (uri.empty())
         _cursor.hyperlink = {};
-    else if (!id.empty())
-        _cursor.hyperlink = _state.hyperlinks.hyperlinkIdByUserId(id);
     else
     {
+        if (!id.empty())
+        {
+            _cursor.hyperlink = _state.hyperlinks.hyperlinkIdByUserId(id);
+            if (_cursor.hyperlink != HyperlinkId {})
+                return;
+        }
         _cursor.hyperlink = _state.hyperlinks.nextHyperlinkId++;
         _state.hyperlinks.cache.emplace(
             _cursor.hyperlink, make_shared<HyperlinkInfo>(HyperlinkInfo { std::move(id), std::move(uri) }));
