@@ -120,6 +120,7 @@
           <li>Extends `ViNormalMode` to toggle between insert and normal mode rather than just entering normal mode.</li>
           <li>Modal mode: Adds Return key to also move the cursor down (like vim).</li>
           <li>Fixes hyperlinks with IDs (#1088)</li>
+          <li>Fixes hyperlink highlight when screen has been scrolled (#1084)</li>
         </ul>
       </description>
     </release>
