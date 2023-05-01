@@ -233,8 +233,25 @@ void Process::start()
                                  const_cast<LPSTR>(cwdPtr),      // Use parent's starting directory
                                  &_d->startupInfo.StartupInfo,   // Pointer to STARTUPINFO
                                  &_d->processInfo);              // Pointer to PROCESS_INFORMATION
+
     if (!success)
+    {
+        success = CreateProcess(nullptr, // No module name - use Command Line
+                                const_cast<LPSTR>((this->loginShell(false)[0]).c_str()), // Command Line
+                                nullptr,                      // Process handle not inheritable
+                                nullptr,                      // Thread handle not inheritable
+                                FALSE,                        // Inherit handles
+                                EXTENDED_STARTUPINFO_PRESENT, // Creation flags
+                                nullptr,                      // Use parent's environment block
+                                const_cast<LPSTR>(cwdPtr),    // Use parent's starting directory
+                                &_d->startupInfo.StartupInfo, // Pointer to STARTUPINFO
+                                &_d->processInfo);            // Pointer to PROCESS_INFORMATION
+    }
+
+    if (!success)
+    {
         throw runtime_error { "Could not create process. "s + getLastErrorAsString() };
+    }
 
     _d->exitWatcher = std::thread([this]() {
         (void) wait();
