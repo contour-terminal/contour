@@ -112,6 +112,8 @@
           <li>Fixes tcsh shell integration not working (#1074).</li>
           <li>Fixes `[count]w` ignoring the `[count]` parameter in modal mode.</li>
           <li>Fixes statusline being misplaced after resize when being in alt screen (#1091).</li>
+          <li>Fixes hyperlinks with IDs (#1088)</li>
+          <li>Fixes hyperlink highlight when screen has been scrolled (#1084)</li>
           <li>Improves mouse selection to be more natural extending into new grid cells.</li>
           <li>Adds `profiles.*.permissions.display_host_writable_statusline` to allow the user to intervene in `DECSSDT 2` VT sequence to show the host writable statusline.</li>
           <li>Adds config entry `input_method_editor` colorscheme key to allow customization of the IME (input method editor) region (#1058).</li>
@@ -120,8 +122,6 @@
           <li>Adds config entry `profiles.*.status_line.sync_to_window_title` to synchronize the window title with the host writable statusline (if it was denied to be shown).</li>
           <li>Extends `ViNormalMode` to toggle between insert and normal mode rather than just entering normal mode.</li>
           <li>Modal mode: Adds Return key to also move the cursor down (like vim).</li>
-          <li>Fixes hyperlinks with IDs (#1088)</li>
-          <li>Fixes hyperlink highlight when screen has been scrolled (#1084)</li>
         </ul>
       </description>
     </release>
