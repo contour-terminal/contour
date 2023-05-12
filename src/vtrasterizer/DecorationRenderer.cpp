@@ -153,7 +153,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
         case Decorator::Underline: {
             auto const thickness_half = max(1u, unsigned(ceil(underlineThickness() / 2.0)));
             auto const thickness = thickness_half * 2;
-            auto const y0 = max(0u, unsigned(underlinePosition()) - thickness_half);
+            auto const y0 = max(0, (underlinePosition() - static_cast<int>(thickness_half)));
             auto const height = Height(y0 + thickness);
             auto const imageSize = ImageSize { width, height };
             return create(imageSize, [&]() -> atlas::Buffer {
@@ -235,7 +235,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             // whereas the middle one is being skipped.
             auto const thickness_half = max(1u, unsigned(ceil(underlineThickness() / 2.0)));
             auto const thickness = max(1u, thickness_half * 2);
-            auto const y0 = max(0u, unsigned(underlinePosition()) - thickness_half);
+            auto const y0 = max(0, underlinePosition() - static_cast<int>(thickness_half));
             auto const height = Height(y0 + thickness);
             auto const imageSize = ImageSize { width, height };
             return create(imageSize, [&]() -> atlas::Buffer {
