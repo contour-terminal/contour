@@ -119,6 +119,7 @@
           <li>Adds config entry `profiles.*.status_line.sync_to_window_title` to synchronize the window title with the host writable statusline (if it was denied to be shown).</li>
           <li>Extends `ViNormalMode` to toggle between insert and normal mode rather than just entering normal mode.</li>
           <li>Modal mode: Adds Return key to also move the cursor down (like vim).</li>
+          <li>Fixes hyperlinks with IDs (#1088)</li>
         </ul>
       </description>
     </release>
