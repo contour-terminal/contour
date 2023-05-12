@@ -61,7 +61,7 @@ jobs:
         with:
           vcpkgArguments: catch2 fmt freetype fontconfig harfbuzz yaml-cpp range-v3
           vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
-          vcpkgGitCommitId: e69dd972ba64840955f46704ecce6241bf607c0f
+          vcpkgGitCommitId: 2023.04.15
           vcpkgTriplet: x64-windows
       - name: Cache Qt
         id: cache-qt
