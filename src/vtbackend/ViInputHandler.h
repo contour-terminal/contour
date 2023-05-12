@@ -125,6 +125,7 @@ enum class TextObject
     AngleBrackets = '<',  // i<  a<
     CurlyBrackets = '{',  // i{  a{
     DoubleQuotes = '"',   // i"  a"
+    LineMark = 'm',       // im  am
     Paragraph = 'p',      // ip  ap
     RoundBrackets = '(',  // i(  a(
     SingleQuotes = '\'',  // i'  a'
@@ -308,6 +309,7 @@ struct formatter<terminal::TextObject>
             case TextObject::BackQuotes: return fmt::format_to(ctx.out(), "BackQuotes");
             case TextObject::CurlyBrackets: return fmt::format_to(ctx.out(), "CurlyBrackets");
             case TextObject::DoubleQuotes: return fmt::format_to(ctx.out(), "DoubleQuotes");
+            case TextObject::LineMark: return fmt::format_to(ctx.out(), "LineMark");
             case TextObject::Paragraph: return fmt::format_to(ctx.out(), "Paragraph");
             case TextObject::RoundBrackets: return fmt::format_to(ctx.out(), "RoundBrackets");
             case TextObject::SingleQuotes: return fmt::format_to(ctx.out(), "SingleQuotes");

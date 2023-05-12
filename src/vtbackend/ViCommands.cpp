@@ -597,6 +597,25 @@ CellLocationRange ViCommands::translateToCellRange(TextObjectScope scope,
         case TextObject::BackQuotes: return expandMatchingPair(scope, '`', '`');
         case TextObject::CurlyBrackets: return expandMatchingPair(scope, '{', '}');
         case TextObject::DoubleQuotes: return expandMatchingPair(scope, '"', '"');
+        case TextObject::LineMark:
+            // Walk the line upwards until we find a marked line.
+            while (
+                a.line > gridTop
+                && !(unsigned(_terminal.currentScreen().lineFlagsAt(a.line)) & unsigned(LineFlags::Marked)))
+                --a.line;
+            if (scope == TextObjectScope::Inner && a != cursorPosition)
+                ++a.line;
+            // Walk the line downwards until we find a marked line.
+            while (
+                b.line < gridBottom
+                && !(unsigned(_terminal.currentScreen().lineFlagsAt(b.line)) & unsigned(LineFlags::Marked)))
+                ++b.line;
+            if (scope == TextObjectScope::Inner && b != cursorPosition)
+                --b.line;
+            // Span the range from left most column to right most column.
+            a.column = ColumnOffset(0);
+            b.column = rightMargin;
+            break;
         case TextObject::Paragraph:
             while (a.line > gridTop && !_terminal.currentScreen().isLineEmpty(a.line - 1))
                 --a.line;

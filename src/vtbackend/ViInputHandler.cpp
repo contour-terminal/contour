@@ -128,8 +128,9 @@ void ViInputHandler::registerAllCommands()
         // clang-format on
     } };
 
-    auto constexpr textObjectMappings = std::array<std::pair<char, TextObject>, 14> { {
+    auto constexpr textObjectMappings = std::array<std::pair<char, TextObject>, 15> { {
         { '"', TextObject::DoubleQuotes },
+        { 'm', TextObject::LineMark },
         { '(', TextObject::RoundBrackets },
         { ')', TextObject::RoundBrackets },
         { '<', TextObject::AngleBrackets },
