@@ -258,7 +258,7 @@ jobs:
             freebsd-version
             QTVER=6 SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
             mkdir build
-            cmake -DCMAKE_BUILD_TYPE=Debug -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON -S . -B build
+            cmake -DCMAKE_BUILD_TYPE=Debug -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON DCONTOUR_QT_VERSION=6 -S . -B build
             cmake --build build/ -j2
             ./build/src/crispy/crispy_test
             ./build/src/vtparser/vtparser_test
