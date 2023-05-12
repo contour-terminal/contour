@@ -50,7 +50,7 @@ for everyday use. It is aiming for power users with a modern feature mindset.
 cmake . \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo \
     -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCONTOUR_BUILD_WITH_QT6=ON \
+    -DCONTOUR_QT_VERSION=6 \
     -DPEDANTIC_COMPILER=ON \
     -DPEDANTIC_COMPILER_WERROR=ON \
     -B build \

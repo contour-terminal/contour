@@ -1,3 +1,4 @@
+
 include(FilesystemResolver)
 
 set(AppId "org.contourterminal.Contour")
@@ -6,23 +7,17 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD")
     set(FREEBSD TRUE)
 endif()
 
-set(QT6_DEFAULT OFF)
-if(APPLE OR WIN32 OR FREEBSD)
-    set(QT6_DEFAULT ON)
-endif()
-
 option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 option(CONTOUR_VT_METRICS "Enables collecting and exit-printing some VT usage metrics." OFF)
 option(CONTOUR_SCROLLBAR "Enables scrollbar in GUI frontend." ON)
-option(CONTOUR_BUILD_WITH_QT6 "Use Qt 6" ${QT6_DEFAULT})
 
 set(QtX11Extras)
-if(NOT(WIN32) AND NOT(APPLE) AND NOT(CONTOUR_BUILD_WITH_QT6))
+if(NOT(WIN32) AND NOT(APPLE) AND (CONTOUR_QT_VERSION EQUAL "5"))
     set(QtX11Extras X11Extras)
 endif()
 
-message(STATUS "Build contour using Qt 6: ${CONTOUR_BUILD_WITH_QT6}")
-if(CONTOUR_BUILD_WITH_QT6)
+message(STATUS "Build contour using Qt : ${CONTOUR_QT_VERSION}")
+if(CONTOUR_QT_VERSION EQUAL "6")
     find_package(Qt6 COMPONENTS Core Gui Network OpenGL OpenGLWidgets Widgets Multimedia ${QtX11Extras} REQUIRED)
 else()
     find_package(Qt5 COMPONENTS Gui Network Widgets Multimedia ${QtX11Extras} REQUIRED)  # apt install qtbase5-dev libqt5gui5
@@ -56,7 +51,7 @@ endif()
 
 
 set(QT_RESOURCES resources.qrc)
-if(NOT(CONTOUR_BUILD_WITH_QT6))
+if(CONTOUR_QT_VERSION EQUAL "5")
     qt5_add_resources(QT_RESOURCES ${QT_RESOURCES})
 endif()
 
@@ -129,14 +124,14 @@ if(Boost_FILESYSTEM_FOUND)
 endif()
 
 if(CONTOUR_FRONTEND_GUI)
-    if(CONTOUR_BUILD_WITH_QT6)
+    if(CONTOUR_QT_VERSION EQUAL "6")
         target_link_libraries(contour ContourTerminalDisplay vtrasterizer Qt6::Core Qt6::Network Qt6::OpenGL Qt6::OpenGLWidgets Qt6::Widgets Qt6::Multimedia)
         if(NOT(WIN32) AND NOT(APPLE))
             target_link_libraries(contour xcb)
         endif()
     else()
         target_link_libraries(contour crispy::core ContourTerminalDisplay vtrasterizer Qt5::Gui Qt5::Network Qt5::Widgets Qt5::Multimedia)
-        if(NOT(WIN32) AND NOT(APPLE) AND NOT(CONTOUR_BUILD_WITH_QT6))
+        if(NOT(WIN32) AND NOT(APPLE) AND NOT(CONTOUR_QT_VERSION EQUAL "6"))
             target_link_libraries(contour Qt5::X11Extras xcb)
         endif()
     endif()
@@ -227,7 +222,7 @@ elseif(APPLE)
     set(INSTALL_RUNTIME_DIR "${App_Contents}/MacOS")
     set(INSTALL_CMAKE_DIR "${App_Contents}/Resources")
 
-    if(NOT CONTOUR_BUILD_WITH_QT6)
+    if(CONTOUR_QT_VERSION EQUAL "5")
       # based on code from CMake's QtDialog/CMakeLists.txt
       macro(install_qt5_plugin _qt_plugin_name _qt_plugins_var _prefix)
           get_target_property(_qt_plugin_path "${_qt_plugin_name}" LOCATION)
@@ -301,7 +296,8 @@ else()
         set(DEPENDS_EXTRA ", libyaml-cpp0.6")
     endif()
 
-    if(CONTOUR_BUILD_WITH_QT6)
+
+    if(CONTOUR_QT_VERSION EQUAL "6")
         set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libqt6core6, libqt6opengl6, libqt6widgets6, libqt6openglwidgets6, qt6-qpa-plugins, libqt6multimedia6")
     else()
         set(DEPENDS_EXTRA "${DEPENDS_EXTRA}, libqt5core5a, libqt5gui5, libqt5network5, libqt5multimedia5, libqt5x11extras5") # Qt 5
