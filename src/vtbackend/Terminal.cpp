@@ -1040,7 +1040,7 @@ void Terminal::updateHoveringHyperlinkState()
     auto const oldState = _hoveringHyperlinkId.exchange(newState);
 
     if (newState != oldState)
-        screenUpdated();
+        renderBufferUpdated();
 }
 
 optional<chrono::milliseconds> Terminal::nextRender() const
@@ -1331,6 +1331,21 @@ void Terminal::screenUpdated()
 
     _screenDirty = true;
     _eventListener.screenUpdated();
+}
+
+void Terminal::renderBufferUpdated()
+{
+    if (!_renderBufferUpdateEnabled)
+        return;
+
+    if (_renderBuffer.state == RenderBufferState::TrySwapBuffers)
+    {
+        _renderBuffer.swapBuffers(_renderBuffer.lastUpdate);
+        return;
+    }
+
+    _screenDirty = true;
+    _eventListener.renderBufferUpdated();
 }
 
 FontDef Terminal::getFontDef()

@@ -588,6 +588,7 @@ class Terminal
     void bufferChanged(ScreenType);
     void scrollbackBufferCleared();
     void screenUpdated();
+    void renderBufferUpdated();
     [[nodiscard]] FontDef getFontDef();
     void setFontDef(FontDef const& fontDef);
     void copyToClipboard(std::string_view data);
