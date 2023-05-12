@@ -478,7 +478,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
 
     if (_settings.statusDisplayPosition == StatusDisplayPosition::Bottom)
     {
-        baseLine += _primaryScreen.pageSize().lines.as<LineOffset>();
+        baseLine += pageSize().lines.as<LineOffset>();
         fillRenderBufferStatusLine(output, includeSelection, baseLine);
     }
 }
