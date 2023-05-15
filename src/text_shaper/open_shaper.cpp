@@ -23,6 +23,8 @@
 #include <range/v3/algorithm/any_of.hpp>
 #include <range/v3/view/iota.hpp>
 
+#include <limits>
+
 #include <libunicode/convert.h>
 #include <libunicode/ucd_fmt.h>
 
@@ -71,11 +73,6 @@ using std::vector;
 
 using namespace std::string_literals;
 using namespace std::string_view_literals;
-
-#if !defined(HB_FEATURE_GLOBAL_END)
-    // Ubuntu 18.04 has a too old harfbuzz that doesn't provide this definition yet.
-    #define HB_FEATURE_GLOBAL_END ((size_t) -1)
-#endif
 
 namespace
 {
@@ -355,7 +352,7 @@ namespace
             hbFeature.tag = HB_TAG(feature.name[0], feature.name[1], feature.name[2], feature.name[3]);
             hbFeature.value = feature.enabled ? 1 : 0;
             hbFeature.start = 0;
-            hbFeature.end = HB_FEATURE_GLOBAL_END;
+            hbFeature.end = std::numeric_limits<decltype(hbFeature.end)>::max();
             hbFeatures.emplace_back(hbFeature);
         }
 
