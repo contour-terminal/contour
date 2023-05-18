@@ -123,6 +123,7 @@
           <li>Extends `ViNormalMode` to toggle between insert and normal mode rather than just entering normal mode.</li>
           <li>Modal mode: Adds Return key to also move the cursor down (like vim).</li>
           <li>Model mode: Adds text object `im` and `am` to select the range between two line marks.</li>
+          <li>Model mode: Adds handling of `Home` and `End` keys (#1098).</li>
         </ul>
       </description>
     </release>
