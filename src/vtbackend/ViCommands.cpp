@@ -858,19 +858,16 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
             return globalCharDown(cursorPosition, '}', count);
         case ViMotion::LineMarkUp: // [m
         {
-            auto const pageTop = -_terminal.currentScreen().historyLineCount().as<LineOffset>();
+            auto const gridTop = -_terminal.currentScreen().historyLineCount().as<LineOffset>();
             auto result = CellLocation { cursorPosition.line, ColumnOffset(0) };
             while (count > 0)
             {
-                if (cursorPosition.column == ColumnOffset(0) && result.line > pageTop)
+                if (result.line > gridTop
+                    && _terminal.currentScreen().isLineFlagEnabledAt(result.line, LineFlags::Marked))
                     --result.line;
-                while (result.line > pageTop)
-                {
-                    if (unsigned(_terminal.currentScreen().lineFlagsAt(result.line))
-                        & unsigned(LineFlags::Marked))
-                        break;
+                while (result.line > gridTop
+                       && !_terminal.currentScreen().isLineFlagEnabledAt(result.line, LineFlags::Marked))
                     --result.line;
-                }
                 --count;
             }
             return result;
