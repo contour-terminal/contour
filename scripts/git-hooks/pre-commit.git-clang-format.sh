@@ -3,56 +3,27 @@
 # Runs "clang-format" on the commit before committing and prohibits commit if
 # changes happened.
 
-command -v clang-format &>/dev/null
+dir_list="$PWD"  # Add the directories you want here
+cmd="git diff -U0 --no-color --staged HEAD -- $dir_list | clang-format-diff -p1"
+
+echo ""
+echo "Running clang-format on this commit"
+echo ""
+
+diff=$(eval "$cmd")
 if [[ $? -ne 0 ]]
 then
-  echo "'clang-format' binary not found in PATH..." >&2
-  exit 2
+    echo "Command failed to execute."
+    exit 1
 fi
 
-command -v git-clang-format &>/dev/null
-if [[ $? -ne 0 ]]
+if [[ -z "$diff" ]]
 then
-  echo "'git-clang-format' script not found in PATH..." >&2
-  exit 2
-fi
-
-STATUS_CMD="git status --porcelain=1 --untracked-files=no --ignored=no"
-
-FILES_ADDED_IN_INDEX=$(${STATUS_CMD} | grep "^[MARC]" | awk '{ print $2; }')
-
-STATUS=$(${STATUS_CMD})
-
-git-clang-format ${FILES_ADDED_IN_INDEX}
-if [[ $? -ne 0 ]]
-then
-  exit 3
-fi
-
-STATUS_AFTER=$(${STATUS_CMD})
-
-# Calculate the difference git-clang-format's call made, and then cut to the
-# the new (inserted) lines only. Also remove the insertion marker "+".
-DIFF=$(diff -U 0 <(echo "${STATUS}") <(echo "${STATUS_AFTER}") |
-    grep -v "^+++ \|^--- \|^@@" |
-    grep "^\+" |
-    cut -c2-)
-
-# Get the second status character from the changes.
-# First letter would be the index status, second letter is the workdir->index
-# diff. The latter one interests us.
-LETTERS=$(echo "${DIFF}" |
-  awk -F='\n' '{ print substr($0,0,2); }' |
-  cut -c2)
-
-echo "${LETTERS}" | grep "M" >/dev/null
-if [[ $? -ne 0 ]]
-then
-  # grep did not match any locally modified files in the diff, this means
-  # clang-format did not modify anything.
-  exit 0
+    echo "Everything is clean"
+    exit 0
 else
-  echo "Modified files were detected after clang-format."
-  echo "Please either add the changes, or unstage them."
-  exit 1
+    echo 1>&2 "$diff"
+    echo 1>&2 ""
+    echo 1>&2 "Commit aborted due to code format inconsistencies."
+    exit 1
 fi
