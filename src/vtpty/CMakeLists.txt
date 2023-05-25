@@ -29,6 +29,7 @@ set(vtpty_HEADERS
 if(LINUX)
     set(vtpty_HEADERS ${vtpty_HEADERS} LinuxPty.h)
     set(vtpty_SOURCES ${vtpty_SOURCES} LinuxPty.cpp)
+    set(vtpty_LIBRARIES ${vtpty_LIBRARIES} utempter)
 endif()
 
 if(UNIX)

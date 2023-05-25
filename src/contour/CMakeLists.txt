@@ -7,6 +7,10 @@ if(${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD")
     set(FREEBSD TRUE)
 endif()
 
+if(${CMAKE_SYSTEM_NAME} MATCHES "Linux")
+    set(LINUX TRUE)
+endif()
+
 option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 option(CONTOUR_VT_METRICS "Enables collecting and exit-printing some VT usage metrics." OFF)
 option(CONTOUR_SCROLLBAR "Enables scrollbar in GUI frontend." ON)
@@ -294,6 +298,10 @@ else()
         set(DEPENDS_EXTRA ", libyaml-cpp0.5v5")
     elseif("${LSB_RELEASE_NUMBER}" STREQUAL "20.04")
         set(DEPENDS_EXTRA ", libyaml-cpp0.6")
+    endif()
+
+    if(LINUX)
+        set(DEPENDS_EXTRA ", libutempter0")
     endif()
 
 

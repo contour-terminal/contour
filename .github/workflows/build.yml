@@ -610,7 +610,6 @@ jobs:
           CMAKE_CXX_STANDARD=20
           if [[ "${{ matrix.os_version }}" = "22.04" ]]; then
             EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_QT_VERSION=5"
-
           fi
           BUILD_DIR="build" \
             CMAKE_BUILD_TYPE=RelWithDebInfo \
