@@ -289,7 +289,7 @@ jobs:
   build_fedora:
     strategy:
       matrix:
-        os_version: [36, 37]
+        os_version: [36, 37, 38]
         arch:
           [
             "linux/amd64 x86_64"

@@ -143,8 +143,9 @@ jobs:
 
   fedora:
     strategy:
+      fail-fast: false
       matrix:
-        os_version: [37, 36]
+        os_version: [38, 37, 36]
         arch:
           [
             "linux/amd64 x86_64"
@@ -188,6 +189,12 @@ jobs:
           mkdir -p ${DISTDIR}
           cp -rvp . ${DISTDIR}
           tar czpf ${PKGNAME}.tar.gz -C "/tmp/dist" .
+      - name: disable pedantic compiler if broken GCC
+        if: ${{ matrix.os_version == 38 }}
+        run: |
+          set -ex
+          sed -i -e "s/PEDANTIC_COMPILER=ON/PEDANTIC_COMPILER=OFF/" .github/fedora/contour.spec
+          sed -i -e "s/PEDANTIC_COMPILER_WERROR=ON/PEDANTIC_COMPILER_WERROR=OFF/" .github/fedora/contour.spec
       - name: Build ${{ matrix.arch }} release
         shell: bash
         run: |
@@ -663,6 +670,8 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: contour-ubuntu2204-tests
+      - name: "update APT database"
+        run: sudo apt -q update
       - name: "fix unit test permissions"
         run: |
           find . -name '*_test' -exec chmod 0755 {} \;
@@ -707,6 +716,8 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: contour-ubuntu2204-tests
+      - name: "update APT database"
+        run: sudo apt -q update
       - name: "fix unit test permissions"
         run: |
           find . -name '*_test' -exec chmod 0755 {} \;
