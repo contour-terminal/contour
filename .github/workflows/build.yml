@@ -663,6 +663,8 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: contour-ubuntu2204-tests
+      - name: "update APT database"
+        run: sudo apt -q update
       - name: "fix unit test permissions"
         run: |
           find . -name '*_test' -exec chmod 0755 {} \;
@@ -707,6 +709,8 @@ jobs:
         uses: actions/download-artifact@v3
         with:
           name: contour-ubuntu2204-tests
+      - name: "update APT database"
+        run: sudo apt -q update
       - name: "fix unit test permissions"
         run: |
           find . -name '*_test' -exec chmod 0755 {} \;
