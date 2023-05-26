@@ -114,6 +114,7 @@
           <li>Fixes statusline being misplaced after resize when being in alt screen (#1091).</li>
           <li>Fixes hyperlinks with IDs (#1088)</li>
           <li>Fixes hyperlink highlight when screen has been scrolled (#1084)</li>
+          <li>Fixes cursor shape changes when entering vi-like normal mode or visual mode.</li>
           <li>Improves mouse selection to be more natural extending into new grid cells.</li>
           <li>Modal mode: Improves how `[m` jumps from the current prompt to the next prompt above it.</li>
           <li>Adds `profiles.*.permissions.display_host_writable_statusline` to allow the user to intervene in `DECSSDT 2` VT sequence to show the host writable statusline.</li>

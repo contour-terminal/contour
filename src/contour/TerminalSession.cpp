@@ -1190,6 +1190,10 @@ void TerminalSession::configureCursor(config::CursorConfig const& cursorConfig)
     terminal_.setCursorBlinkingInterval(cursorConfig.cursorBlinkInterval);
     terminal_.setCursorDisplay(cursorConfig.cursorDisplay);
     terminal_.setCursorShape(cursorConfig.cursorShape);
+
+    // Force a redraw of the screen
+    // to ensure the correct cursor shape is displayed.
+    scheduleRedraw();
 }
 
 void TerminalSession::configureDisplay()
