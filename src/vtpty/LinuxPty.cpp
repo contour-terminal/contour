@@ -39,7 +39,7 @@
 #include <pty.h>
 #include <pwd.h>
 #include <unistd.h>
-#include <utmp.h>
+#include <utempter.h>
 
 using std::array;
 using std::max;
@@ -218,11 +218,14 @@ void LinuxPty::start()
     ev.data.fd = _stdoutFastPipe.reader();
     if (epoll_ctl(_epollFd, EPOLL_CTL_ADD, _stdoutFastPipe.reader(), &ev) < 0)
         throw runtime_error { "epoll setup failed to add stdout-fastpipe. "s + strerror(errno) };
+
+    utempter_add_record(_masterFd, getenv("DISPLAY"));
 }
 
 LinuxPty::~LinuxPty()
 {
     PtyLog()("PTY destroying master (file descriptor {}).", _masterFd);
+    utempter_remove_record(_masterFd);
     detail::saveClose(&_eventFd);
     detail::saveClose(&_epollFd);
     detail::saveClose(&_masterFd);

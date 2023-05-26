@@ -169,6 +169,7 @@ install_deps_popos()
         libqt5gui5
         libqt5opengl5-dev
         libqt5x11extras5-dev
+        libutempter-dev
         libx11-xcb-dev
         libyaml-cpp-dev
         make
@@ -209,6 +210,7 @@ install_deps_ubuntu()
         libfontconfig1-dev
         libfreetype6-dev
         libharfbuzz-dev
+        libutempter-dev
         libx11-xcb-dev
         libyaml-cpp-dev
         make
@@ -317,6 +319,7 @@ install_deps_arch()
         ninja \
         pkg-config \
         range-v3 \
+        libutempter \
         yaml-cpp \
     "
 
@@ -361,6 +364,7 @@ install_deps_suse()
         libqt5-qtbase-devel
         libqt5-qtmultimedia-devel
         libqt5-qtx11extras-devel
+        libutempter-devel
         libxcb-devel
         ncurses-devel
         ninja
@@ -387,6 +391,7 @@ install_deps_fedora()
         ninja-build
         pkgconf
         range-v3-devel
+        libutempter-devel
         yaml-cpp-devel
     "
 
