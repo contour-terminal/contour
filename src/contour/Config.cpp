@@ -620,9 +620,9 @@ namespace
         return nullopt;
     }
 
-    optional<config::CursorConfig> parseCursorConfig(YAML::Node rootNode,
+    optional<config::CursorConfig> parseCursorConfig(YAML::Node const& rootNode,
                                                      UsedKeys& usedKeys,
-                                                     std::string basePath)
+                                                     std::string const& basePath)
     {
         if (!rootNode)
             return nullopt;
