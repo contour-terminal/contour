@@ -1693,7 +1693,7 @@ namespace
                     parseCursorConfig(visualModeNode["cursor"], _usedKeys, basePath + ".visual_mode.cursor"))
             {
                 _usedKeys.emplace(basePath + ".visual_mode.cursor");
-                profile.inputModes.normal.cursor = cursorOpt.value();
+                profile.inputModes.visual.cursor = cursorOpt.value();
             }
         }
 
