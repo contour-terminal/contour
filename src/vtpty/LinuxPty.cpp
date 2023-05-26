@@ -87,6 +87,15 @@ namespace
         return { PtyMasterHandle::cast_from(masterFd), PtySlaveHandle::cast_from(slaveFd) };
     }
 
+    char const* hostnameForUtmp()
+    {
+        for (auto const* env: { "DISPLAY", "WAYLAND_DISPLAY" })
+            if (auto const* value = std::getenv(env))
+                return value;
+
+        return nullptr;
+    }
+
 } // namespace
 
 // {{{ LinuxPty::Slave
@@ -219,7 +228,7 @@ void LinuxPty::start()
     if (epoll_ctl(_epollFd, EPOLL_CTL_ADD, _stdoutFastPipe.reader(), &ev) < 0)
         throw runtime_error { "epoll setup failed to add stdout-fastpipe. "s + strerror(errno) };
 
-    utempter_add_record(_masterFd, getenv("DISPLAY"));
+    utempter_add_record(_masterFd, hostnameForUtmp());
 }
 
 LinuxPty::~LinuxPty()
