@@ -2,6 +2,8 @@
 #include <vtbackend/Terminal.h>
 #include <vtbackend/TerminalState.h>
 
+#include <regex_dfa/RegExprParser.h>
+
 namespace terminal
 {
 
@@ -16,9 +18,7 @@ TerminalState::TerminalState(Terminal& terminal):
         te->discardImage(*image);
     } },
     hyperlinks { HyperlinkCache { 1024 } },
-    urlPattern { settings.urlPattern,
-                 std::regex_constants::ECMAScript | std::regex_constants::optimize
-                     | std::regex_constants::icase },
+    urlPattern { regex_dfa::RegExprParser {}.parse(settings.urlPattern) },
     sequencer { terminal },
     parser { std::ref(sequencer) },
     viCommands { terminal },
