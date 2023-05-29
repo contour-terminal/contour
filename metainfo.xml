@@ -103,7 +103,7 @@
 
     -->
 
-    <release version="0.3.12" urgency="medium" type="development">
+    <release version="0.3.12" urgency="medium" date="2023-05-29">
       <description>
         <ul>
           <li>Fixes terminfo `tsl` to how todays apps are using it (e.g. zsh) to simply set the window title.</li>
