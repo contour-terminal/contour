@@ -39,7 +39,10 @@
 #include <pty.h>
 #include <pwd.h>
 #include <unistd.h>
-#include <utempter.h>
+
+#if !defined(FLATPAK)
+    #include <utempter.h>
+#endif
 
 using std::array;
 using std::max;
@@ -228,13 +231,17 @@ void LinuxPty::start()
     if (epoll_ctl(_epollFd, EPOLL_CTL_ADD, _stdoutFastPipe.reader(), &ev) < 0)
         throw runtime_error { "epoll setup failed to add stdout-fastpipe. "s + strerror(errno) };
 
+#if !defined(FLATPAK)
     utempter_add_record(_masterFd, hostnameForUtmp());
+#endif
 }
 
 LinuxPty::~LinuxPty()
 {
     PtyLog()("PTY destroying master (file descriptor {}).", _masterFd);
+#if !defined(FLATPAK)
     utempter_remove_record(_masterFd);
+#endif
     detail::saveClose(&_eventFd);
     detail::saveClose(&_epollFd);
     detail::saveClose(&_masterFd);
