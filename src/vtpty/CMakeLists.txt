@@ -9,6 +9,10 @@ else()
     set(PLATFORM_SUFFIX "_unix")
 endif()
 
+if(EXISTS "/.flatpak-info")
+    set(FLATPAK TRUE)
+endif()
+
 set(vtpty_LIBRARIES crispy::core fmt::fmt-header-only Microsoft.GSL::GSL)
 
 set(vtpty_SOURCES
@@ -29,7 +33,9 @@ set(vtpty_HEADERS
 if(LINUX)
     set(vtpty_HEADERS ${vtpty_HEADERS} LinuxPty.h)
     set(vtpty_SOURCES ${vtpty_SOURCES} LinuxPty.cpp)
-    set(vtpty_LIBRARIES ${vtpty_LIBRARIES} utempter)
+    if(NOT FLATPAK)
+        set(vtpty_LIBRARIES ${vtpty_LIBRARIES} utempter)
+    endif()
 endif()
 
 if(UNIX)
@@ -42,6 +48,9 @@ endif()
 
 add_library(vtpty STATIC ${vtpty_SOURCES} ${vtpty_HEADERS})
 set_target_properties(vtpty PROPERTIES CXX_CLANG_TIDY "${CLANG_TIDY_EXE}")
+if(FLATPAK)
+    target_compile_definitions(vtpty PRIVATE FLATPAK=1)
+endif()
 target_include_directories(vtpty PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
