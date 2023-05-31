@@ -56,12 +56,11 @@ jobs:
           ./scripts/install-deps.ps1 --skip-vcpkg
           type ./_deps/sources/CMakeLists.txt
       - name: "vcpkg: Install dependencies"
-        uses: lukka/run-vcpkg@v5
+        uses: lukka/run-vcpkg@v11.1
         id: runvcpkg
         with:
-          vcpkgArguments: catch2 fmt freetype fontconfig harfbuzz yaml-cpp range-v3
           vcpkgDirectory: ${{ runner.workspace }}/vcpkg/
-          vcpkgGitCommitId: 2023.04.15
+          vcpkgGitCommitId: 3e93bb69a1cadeb36fe9eca3b6f3912d84f618d5
           vcpkgTriplet: x64-windows
       - name: Cache Qt
         id: cache-qt
