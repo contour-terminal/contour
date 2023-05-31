@@ -310,7 +310,7 @@ jobs:
         run: ./build/src/crispy/crispy_test
       - name: "test: vtparser"
         run: ./build/src/vtparser/vtparser_test
-      - name: "test: libterminal"
+      - name: "test: vtbackend"
         run: ./build/src/vtbackend/vtbackend_test
       - name: "Create Package(s)"
         run: |
@@ -372,7 +372,7 @@ jobs:
         run: .\build\src\crispy\Release\crispy_test.exe
       - name: "test: vtparser"
         run: .\build\src\vtparser\Release\vtparser_test.exe
-      - name: "test: libterminal"
+      - name: "test: vtbackend"
         run: .\build\src\vtbackend\Release\vtbackend_test.exe
       - name: "Create Package(s)"
         shell: powershell
@@ -481,7 +481,7 @@ jobs:
         run: ./build/src/crispy/crispy_test
       - name: "test: vtparser"
         run: ./build/src/vtparser/vtparser_test
-      - name: "test: libterminal"
+      - name: "test: vtbackend"
         run: ./build/src/vtbackend/vtbackend_test
       - name: "Upload unit tests"
         if: ${{ matrix.compiler == 'GCC 10' && matrix.cxx == '20' }}
@@ -545,7 +545,7 @@ jobs:
         run: ./build/src/crispy/crispy_test
       - name: "test: vtparser"
         run: ./build/src/vtparser/vtparser_test
-      - name: "test: libterminal"
+      - name: "test: vtbackend"
         run: ./build/src/vtbackend/vtbackend_test
       - name: "linuxdeploy: Creating AppImage"
         run: |
@@ -628,7 +628,7 @@ jobs:
         run: ./build/src/crispy/crispy_test
       - name: "test: vtparser"
         run: ./build/src/vtparser/vtparser_test
-      - name: "test: libterminal"
+      - name: "test: vtbackend"
         run: ./build/src/vtbackend/vtbackend_test
       - name: "CPack: Creating DEB package"
         run: |
@@ -692,7 +692,7 @@ jobs:
         run: valgrind --error-exitcode=64 ./build/src/crispy/crispy_test
       - name: "test: vtparser (via valgrind)"
         run: valgrind --error-exitcode=64 ./build/src/vtparser/vtparser_test
-      - name: "test: libterminal (via valgrind)"
+      - name: "test: vtbackend (via valgrind)"
         run: valgrind --error-exitcode=64 ./build/src/vtbackend/vtbackend_test
       - name: "Delete artifact: contour-ubuntu2204-tests"
         uses: geekyeggo/delete-artifact@v2

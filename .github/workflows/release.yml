@@ -432,7 +432,7 @@ jobs:
   #       run: cmake --build build/ -- -j3
   #     - name: "test: crispy"
   #       run: ./build/src/crispy/crispy_test
-  #     - name: "test: libterminal"
+  #     - name: "test: vtbackend"
   #       run: ./build/src/vtbackend/vtbackend_test
   #     - name: "linuxdeploy: Creating AppImage"
   #       run: |
@@ -512,7 +512,7 @@ jobs:
         run: cmake --build build/ -- -j3
       - name: "test: crispy"
         run: ./build/src/crispy/crispy_test
-      - name: "test: libterminal"
+      - name: "test: vtbackend"
         run: ./build/src/vtbackend/vtbackend_test
       - name: "CPack: Creating DEB package"
         run: |
