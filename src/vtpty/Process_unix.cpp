@@ -239,7 +239,7 @@ void Process::start()
             // Fallback: Try login shell.
             auto theLoginShell = loginShell(_d->escapeSandbox);
             fprintf(stdout,
-                    "\r\n\033[31;1mFailed to spawn %s\033[m\r\nTrying login shell: %s\n",
+                    "\r\033[31;1mFailed to spawn %s\033[m\r\nTrying login shell: %s\n",
                     argv[0],
                     crispy::joinHumanReadableQuoted(theLoginShell, ' ').c_str());
             fflush(stdout);
