@@ -40,12 +40,18 @@
 #include <libunicode/convert.h>
 
 using crispy::Size;
+using std::nullopt;
+using std::optional;
+using std::string;
+using std::string_view;
+using std::u32string;
+using std::u32string_view;
 
-using namespace std;
-using namespace std::chrono;
+namespace chrono = std::chrono;
+
 using namespace std::placeholders;
-
-using std::move;
+using namespace std::string_literals;
+using namespace std::string_view_literals;
 
 namespace terminal
 {
@@ -128,7 +134,7 @@ namespace // {{{ helpers
 Terminal::Terminal(Events& eventListener,
                    std::unique_ptr<Pty> pty,
                    Settings factorySettings,
-                   std::chrono::steady_clock::time_point now):
+                   chrono::steady_clock::time_point now):
     _eventListener { eventListener },
     _factorySettings { std::move(factorySettings) },
     _settings { _factorySettings },
@@ -185,9 +191,9 @@ void Terminal::setLastMarkRangeOffset(LineOffset value) noexcept
 Pty::ReadResult Terminal::readFromPty()
 {
     auto const timeout = _renderBuffer.state == RenderBufferState::WaitingForRefresh && !_screenDirty
-                             ? std::chrono::seconds(4)
-                             //: _refreshInterval : std::chrono::seconds(0)
-                             : std::chrono::seconds(30);
+                             ? chrono::seconds(4)
+                             //: _refreshInterval : chrono::seconds(0)
+                             : chrono::seconds(30);
 
     // Request a new Buffer Object if the current one cannot sufficiently
     // store a single text line.
@@ -255,8 +261,8 @@ bool Terminal::processInputOnce()
         _pty->close();
         return false;
     }
-    string_view const buf = get<0>(*readResult);
-    _state.usingStdoutFastPipe = get<1>(*readResult);
+    string_view const buf = std::get<0>(*readResult);
+    _state.usingStdoutFastPipe = std::get<1>(*readResult);
 
     if (buf.empty())
     {
@@ -369,7 +375,7 @@ bool Terminal::SelectionHelper::wrappedLine(LineOffset line) const noexcept
 bool Terminal::SelectionHelper::cellEmpty(CellLocation pos) const noexcept
 {
     // Word selection may be off by one
-    pos.column = min(pos.column, boxed_cast<ColumnOffset>(terminal->pageSize().columns - 1));
+    pos.column = std::min(pos.column, boxed_cast<ColumnOffset>(terminal->pageSize().columns - 1));
 
     return terminal->currentScreen().isCellEmpty(pos);
 }
@@ -377,7 +383,7 @@ bool Terminal::SelectionHelper::cellEmpty(CellLocation pos) const noexcept
 int Terminal::SelectionHelper::cellWidth(CellLocation pos) const noexcept
 {
     // Word selection may be off by one
-    pos.column = min(pos.column, boxed_cast<ColumnOffset>(terminal->pageSize().columns - 1));
+    pos.column = std::min(pos.column, boxed_cast<ColumnOffset>(terminal->pageSize().columns - 1));
 
     return terminal->currentScreen().cellWidthAt(pos);
 }
@@ -388,7 +394,7 @@ int Terminal::SelectionHelper::cellWidth(CellLocation pos) const noexcept
  */
 struct ScopedHyperlinkHover
 {
-    shared_ptr<HyperlinkInfo const> href;
+    std::shared_ptr<HyperlinkInfo const> href;
 
     ScopedHyperlinkHover(Terminal const& terminal, ScreenBase const& /*screen*/):
         href { terminal.tryGetHoveringHyperlink() }
@@ -415,7 +421,7 @@ void Terminal::updateInputMethodPreeditString(std::string preeditString)
 
 void Terminal::fillRenderBuffer(RenderBuffer& output, bool includeSelection)
 {
-    auto const _ = lock_guard { *this };
+    auto const _ = std::lock_guard { *this };
     fillRenderBufferInternal(output, includeSelection);
 }
 
@@ -689,7 +695,7 @@ bool Terminal::handleMouseSelection(Modifier modifier)
 {
     verifyState();
 
-    double const diff_ms = chrono::duration<double, milli>(_currentTime - _lastClick).count();
+    double const diff_ms = chrono::duration<double, std::milli>(_currentTime - _lastClick).count();
     _lastClick = _currentTime;
     _speedClicks = (diff_ms >= 0.0 && diff_ms <= 750.0 ? _speedClicks : 0) % 3 + 1;
 
@@ -709,17 +715,18 @@ bool Terminal::handleMouseSelection(Modifier modifier)
             clearSelection();
             if (modifier == _settings.mouseBlockSelectionModifier)
             {
-                setSelector(
-                    make_unique<RectangularSelection>(_selectionHelper, startPos, selectionUpdatedHelper()));
+                setSelector(std::make_unique<RectangularSelection>(
+                    _selectionHelper, startPos, selectionUpdatedHelper()));
             }
             else
             {
                 setSelector(
-                    make_unique<LinearSelection>(_selectionHelper, startPos, selectionUpdatedHelper()));
+                    std::make_unique<LinearSelection>(_selectionHelper, startPos, selectionUpdatedHelper()));
             }
             break;
         case 2:
-            setSelector(make_unique<WordWiseSelection>(_selectionHelper, startPos, selectionUpdatedHelper()));
+            setSelector(
+                std::make_unique<WordWiseSelection>(_selectionHelper, startPos, selectionUpdatedHelper()));
             if (_selection->extend(startPos))
                 onSelectionUpdated();
             if (_settings.visualizeSelectedWord)
@@ -730,7 +737,8 @@ bool Terminal::handleMouseSelection(Modifier modifier)
             }
             break;
         case 3:
-            setSelector(make_unique<FullLineSelection>(_selectionHelper, startPos, selectionUpdatedHelper()));
+            setSelector(
+                std::make_unique<FullLineSelection>(_selectionHelper, startPos, selectionUpdatedHelper()));
             if (_selection->extend(startPos))
                 onSelectionUpdated();
             break;
@@ -846,7 +854,8 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
     }
 
     if (!selectionAvailable())
-        setSelector(make_unique<LinearSelection>(_selectionHelper, relativePos, selectionUpdatedHelper()));
+        setSelector(
+            std::make_unique<LinearSelection>(_selectionHelper, relativePos, selectionUpdatedHelper()));
     else if (selector()->state() != Selection::State::Complete && shouldExtendSelection)
     {
         if (currentScreen().isCellEmpty(relativePos) && !currentScreen().compareCellTextAt(relativePos, 0x20))
@@ -1004,7 +1013,7 @@ string_view Terminal::lockedWriteToPtyBuffer(string_view data)
         _currentPtyBuffer = _ptyBufferPool.allocateBufferObject();
 
     auto const chunk = data.substr(0, std::min(data.size(), _currentPtyBuffer->bytesAvailable()));
-    auto const _ = scoped_lock { *_currentPtyBuffer };
+    auto const _ = std::scoped_lock { *_currentPtyBuffer };
     auto const ref = _currentPtyBuffer->writeAtEnd(chunk);
     return string_view(ref.data(), ref.size());
 }
@@ -1067,18 +1076,20 @@ optional<chrono::milliseconds> Terminal::nextRender() const
     if (_state.statusDisplayType == StatusDisplayType::Indicator)
     {
         auto const currentSecond =
-            time_point_cast<seconds>(system_clock::now()).time_since_epoch().count() % 60;
-        auto const millisUntilNextMinute = duration_cast<milliseconds>(seconds(60 - currentSecond));
+            chrono::time_point_cast<chrono::seconds>(chrono::system_clock::now()).time_since_epoch().count()
+            % 60;
+        auto const millisUntilNextMinute =
+            chrono::duration_cast<chrono::milliseconds>(chrono::seconds(60 - currentSecond));
         nextBlink = std::min(nextBlink, millisUntilNextMinute);
     }
 
-    if (nextBlink == std::chrono::milliseconds::max())
+    if (nextBlink == chrono::milliseconds::max())
         return nullopt;
 
     return nextBlink;
 }
 
-void Terminal::tick(std::chrono::steady_clock::time_point now) noexcept
+void Terminal::tick(chrono::steady_clock::time_point now) noexcept
 {
     auto const changes = _changes.exchange(0);
     (void) changes;
@@ -1095,7 +1106,7 @@ void Terminal::tick(std::chrono::steady_clock::time_point now) noexcept
 
 void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
 {
-    auto const _ = lock_guard { *this };
+    auto const _ = std::lock_guard { *this };
     resizeScreenInternal(totalPageSize, pixels);
 }
 
@@ -1241,7 +1252,7 @@ namespace
 
 string Terminal::extractSelectionText() const
 {
-    auto const _ = scoped_lock { *this };
+    auto const _ = std::scoped_lock { *this };
 
     if (!_selection || _selection->state() == Selection::State::Waiting)
         return "";
@@ -1625,8 +1636,8 @@ void Terminal::setTopBottomMargin(optional<LineOffset> top, optional<LineOffset>
 {
     auto const defaultTop = LineOffset(0);
     auto const defaultBottom = boxed_cast<LineOffset>(_settings.pageSize.lines) - 1;
-    auto const sanitizedTop = max(defaultTop, top.value_or(defaultTop));
-    auto const sanitizedBottom = min(defaultBottom, bottom.value_or(defaultBottom));
+    auto const sanitizedTop = std::max(defaultTop, top.value_or(defaultTop));
+    auto const sanitizedBottom = std::min(defaultBottom, bottom.value_or(defaultBottom));
 
     if (top < bottom)
     {
@@ -1641,8 +1652,8 @@ void Terminal::setLeftRightMargin(optional<ColumnOffset> left, optional<ColumnOf
     {
         auto const defaultLeft = ColumnOffset(0);
         auto const defaultRight = boxed_cast<ColumnOffset>(_settings.pageSize.columns) - 1;
-        auto const sanitizedRight = min(right.value_or(defaultRight), defaultRight);
-        auto const sanitizedLeft = max(left.value_or(defaultLeft), defaultLeft);
+        auto const sanitizedRight = std::min(right.value_or(defaultRight), defaultRight);
+        auto const sanitizedLeft = std::max(left.value_or(defaultLeft), defaultLeft);
         if (left < right)
         {
             currentScreen().margin().horizontal.from = sanitizedLeft;
@@ -1881,7 +1892,7 @@ void Terminal::synchronizedOutput(bool enabled)
     if (enabled)
         return;
 
-    tick(steady_clock::now());
+    tick(chrono::steady_clock::now());
 
     auto const diff = _currentTime - _renderBuffer.lastUpdate;
     if (diff < _refreshInterval.value)
@@ -2046,7 +2057,7 @@ void Terminal::clearSearch()
 bool Terminal::wordDelimited(CellLocation position) const noexcept
 {
     // Word selection may be off by one
-    position.column = min(position.column, boxed_cast<ColumnOffset>(pageSize().columns - 1));
+    position.column = std::min(position.column, boxed_cast<ColumnOffset>(pageSize().columns - 1));
 
     if (isPrimaryScreen())
         return _primaryScreen.grid().cellEmptyOrContainsOneOf(position, _settings.wordDelimiters);
