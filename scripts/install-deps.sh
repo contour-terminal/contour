@@ -165,7 +165,7 @@ add_library(utempter STATIC
 target_include_directories(utempter PUBLIC \${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(utempter PUBLIC
 "LIBEXECDIR=\"/usr/local/lib\"")" \
-    > "$SYSDEPS_BASE_DIR/sources/libutempter-1.2.1/CMakeLists.txt"
+    > "$SYSDEPS_BASE_DIR/sources/libutempter-$libutempter_version/CMakeLists.txt"
 
 }
 
