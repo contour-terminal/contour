@@ -127,9 +127,7 @@ class RenderBufferBuilder
 
     int _prevWidth = 0;
     bool _prevHasCursor = false;
-    State _state = State::Gap;
     LineOffset _lineNr = LineOffset(0);
-    bool _isNewLine = false;
     bool _useCursorlineColoring = false;
 
     // Offset into the search pattern that has been already matched.
