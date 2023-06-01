@@ -490,7 +490,6 @@ void RenderBufferBuilder<Cell>::matchSearchPattern(T const& cellText)
 template <typename Cell>
 void RenderBufferBuilder<Cell>::startLine(LineOffset line) noexcept
 {
-    _isNewLine = true;
     _lineNr = line;
     _prevWidth = 0;
     _prevHasCursor = false;
@@ -602,8 +601,6 @@ bool RenderBufferBuilder<Cell>::tryRenderInputMethodEditor(CellLocation screenPo
             _output.cells.at(_output.cells.size() - unbox<size_t>(_inputMethodSkipColumns)).groupStart = true;
             _output.cells.back().groupEnd = true;
         }
-
-        _state = State::Gap;
     }
 
     if (_inputMethodSkipColumns == ColumnCount(0))
@@ -629,47 +626,16 @@ void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, LineOffset li
     _prevWidth = screenCell.width();
     _prevHasCursor = _cursorPosition && gridPosition == *_cursorPosition;
 
-    auto const cellEmpty = screenCell.empty();
-    auto const customBackground = bg != _terminal.colorPalette().defaultBackground || !!screenCell.flags();
+    _output.cells.emplace_back(makeRenderCell(_terminal.colorPalette(),
+                                              _terminal.state().hyperlinks,
+                                              screenCell,
+                                              fg,
+                                              bg,
+                                              _baseLine + line,
+                                              column));
 
-    switch (_state)
-    {
-        case State::Gap:
-            if (!cellEmpty || customBackground)
-            {
-                _state = State::Sequence;
-                _output.cells.emplace_back(makeRenderCell(_terminal.colorPalette(),
-                                                          _terminal.state().hyperlinks,
-                                                          screenCell,
-                                                          fg,
-                                                          bg,
-                                                          _baseLine + line,
-                                                          column));
-                _output.cells.back().groupStart = true;
-            }
-            break;
-        case State::Sequence:
-            if (cellEmpty && !customBackground)
-            {
-                _output.cells.back().groupEnd = true;
-                _state = State::Gap;
-            }
-            else
-            {
-                _output.cells.emplace_back(makeRenderCell(_terminal.colorPalette(),
-                                                          _terminal.state().hyperlinks,
-                                                          screenCell,
-                                                          fg,
-                                                          bg,
-                                                          _baseLine + line,
-                                                          column));
-
-                if (_isNewLine)
-                    _output.cells.back().groupStart = true;
-            }
-            break;
-    }
-    _isNewLine = false;
+    if (column == ColumnOffset(0))
+        _output.cells.back().groupStart = true;
 
     matchSearchPattern(screenCell);
 }
