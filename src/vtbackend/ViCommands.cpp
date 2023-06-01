@@ -190,7 +190,6 @@ void ViCommands::scrollViewport(ScrollOffset delta)
 
 void ViCommands::searchStart()
 {
-    _terminal.state().searchMode.pattern.clear();
     _terminal.screenUpdated();
 }
 

@@ -485,7 +485,6 @@ bool ViInputHandler::parseCount(char32_t ch, Modifier modifier)
 void ViInputHandler::startSearch()
 {
     _searchEditMode = SearchEditMode::Enabled;
-    _searchTerm.clear();
     _executor.searchStart();
 }
 

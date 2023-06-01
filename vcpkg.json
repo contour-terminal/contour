@@ -1,0 +1,12 @@
+{
+    "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+    "dependencies": [
+        "catch2",
+        "fmt",
+        "fontconfig",
+        "freetype",
+        "harfbuzz",
+        "range-v3",
+        "yaml-cpp"
+    ]
+}
