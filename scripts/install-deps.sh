@@ -142,6 +142,33 @@ fetch_and_unpack_range()
         https://github.com/ericniebler/range-v3/archive/refs/tags/0.11.0.tar.gz
 }
 
+fetch_and_unpack_libutempter()
+{
+    local libutempter_version="1.2.1"
+    fetch_and_unpack \
+        libutempter-$libutempter_version \
+        libutempter-$libutempter_version.tar.gz \
+        http://ftp.altlinux.org/pub/people/ldv/utempter/libutempter-$libutempter_version.tar.gz
+    printf \
+        "cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
+project(utempter VERSION "$libutempter_version" LANGUAGES C)
+
+add_library(utempter STATIC
+        utempter.c
+        utempter.h
+        iface.c
+        diag.h
+)
+
+target_include_directories(utempter PUBLIC \${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(utempter PUBLIC
+"LIBEXECDIR=\"/usr/local/lib\"")" \
+    > "$SYSDEPS_BASE_DIR/sources/libutempter-$libutempter_version/CMakeLists.txt"
+
+}
+
 prepare_fetch_and_unpack()
 {
     mkdir -p "${SYSDEPS_BASE_DIR}"
@@ -501,6 +528,7 @@ main()
             fetch_and_unpack_yaml_cpp
             fetch_and_unpack_range
             fetch_and_unpack_libunicode
+            fetch_and_unpack_libutempter
             echo "OS $ID not supported."
             echo "Please install the remaining dependencies manually."
             echo "Most importantly: Qt, freetype, harfbuzz (including development headers)."
