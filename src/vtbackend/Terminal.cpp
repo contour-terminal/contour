@@ -605,7 +605,9 @@ void Terminal::updateIndicatorStatusLine()
 
     if (!rightString.empty())
         rightString += " │ ";
-    rightString += fmt::format("{:%H:%M} ", fmt::localtime(std::chrono::system_clock::now()));
+
+    // NB: Cannot use std::chrono::system_clock::now() here, because MSVC can't handle it.
+    rightString += fmt::format("{:%H:%M} ", fmt::localtime(std::time(nullptr)));
 
     auto const columnsAvailable = _indicatorStatusScreen.pageSize().columns.as<int>()
                                   - _indicatorStatusScreen.cursor().position.column.as<int>();
