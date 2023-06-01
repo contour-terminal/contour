@@ -153,7 +153,7 @@ fetch_and_unpack_libutempter()
         "cmake_minimum_required(VERSION 3.14 FATAL_ERROR)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
-project(utempter VERSION "1.2.1" LANGUAGES C)
+project(utempter VERSION "$libutempter_version" LANGUAGES C)
 
 add_library(utempter STATIC
         utempter.c
