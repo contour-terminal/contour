@@ -26,7 +26,6 @@ namespace terminal
 
 namespace // {{{ helper
 {
-
     tuple<vector<Selection::Range>, CellLocation const, CellLocation const> prepare(
         Selection const& selection)
     {
@@ -54,6 +53,16 @@ bool Selection::extend(CellLocation to)
            && "In order extend a selection, the selector must be active (started).");
     _state = State::InProgress;
     _to = to;
+    _onSelectionUpdated();
+    return true;
+}
+
+bool Selection::extendStart(CellLocation from)
+{
+    assert(_state != State::Complete
+           && "In order extend a selection, the selector must be active (started).");
+    _state = State::InProgress;
+    _from = from;
     _onSelectionUpdated();
     return true;
 }

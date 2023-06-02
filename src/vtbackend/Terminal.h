@@ -47,6 +47,8 @@
 namespace terminal
 {
 
+constexpr static inline auto TabWidth = ColumnCount(8);
+
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 class Screen;
@@ -839,6 +841,7 @@ class Terminal
     std::atomic<HyperlinkId> _hoveringHyperlinkId = HyperlinkId {};
     std::atomic<bool> _renderBufferUpdateEnabled = true; // for "Synchronized Updates" feature
     std::optional<HighlightRange> _highlightRange = std::nullopt;
+    std::optional<CellLocation> _selectionStartedFrom;
 };
 
 } // namespace terminal

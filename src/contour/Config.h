@@ -254,6 +254,7 @@ struct Config
     size_t ptyBufferObjectSize = 1024lu * 1024lu;
 
     bool reflowOnResize = true;
+    bool expandTabs = false;
 
     std::unordered_map<std::string, terminal::ColorPalette> colorschemes;
     std::unordered_map<std::string, TerminalProfile> profiles;

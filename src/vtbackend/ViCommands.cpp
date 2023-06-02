@@ -458,7 +458,13 @@ void ViCommands::paste(unsigned count, bool stripped)
 CellLocation ViCommands::prev(CellLocation location) const noexcept
 {
     if (location.column.value > 0)
+    {
+        if (_terminal.currentScreen().hasTabstop({ location.line, location.column - 1 }))
+        {
+            return _terminal.currentScreen().getTabstopStart({ location.line, location.column - 1 });
+        }
         return { location.line, location.column - 1 };
+    }
 
     auto const topLineOffset = _terminal.isPrimaryScreen()
                                    ? -boxed_cast<LineOffset>(_terminal.primaryScreen().historyLineCount())
@@ -478,6 +484,10 @@ CellLocation ViCommands::next(CellLocation location) const noexcept
     auto const rightMargin = _terminal.pageSize().columns.as<ColumnOffset>() - 1;
     if (location.column < rightMargin)
     {
+        if (_terminal.currentScreen().hasTabstop({ location.line, location.column + 1 }))
+        {
+            return _terminal.currentScreen().getTabstopEnd({ location.line, location.column + 1 });
+        }
         auto const width = max(uint8_t { 1 }, _terminal.currentScreen().cellWidthAt(location));
         return { location.line, location.column + ColumnOffset::cast_from(width) };
     }

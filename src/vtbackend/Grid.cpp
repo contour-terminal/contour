@@ -801,8 +801,7 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
                     flushLogicalLine();
                     if (line.isTrivialBuffer())
                     {
-                        auto& buffer = line.trivialBuffer();
-                        buffer.displayWidth = newColumnCount;
+                        line.trivialBuffer().resize(newColumnCount);
                         grownLines.emplace_back(line);
                     }
                     else

@@ -131,6 +131,7 @@ namespace
         settings.primaryScreen.allowReflowOnResize = config.reflowOnResize;
         settings.highlightDoubleClickedWord = profile.highlightDoubleClickedWord;
         settings.highlightTimeout = profile.highlightTimeout;
+        settings.expandTabs = config.expandTabs;
 
         return settings;
     }

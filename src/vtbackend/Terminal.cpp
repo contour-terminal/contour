@@ -37,6 +37,7 @@
 #include <utility>
 #include <variant>
 
+#include "vtbackend/Functions.h"
 #include <libunicode/convert.h>
 
 using crispy::Size;
@@ -55,7 +56,7 @@ using namespace std::string_view_literals;
 
 namespace terminal
 {
-
+// inline constexpr auto TabWidth = ColumnCount(8);
 namespace // {{{ helpers
 {
     constexpr size_t MaxColorPaletteSaveStackSize = 10;
@@ -754,6 +755,7 @@ void Terminal::setSelector(std::unique_ptr<Selection> selector)
     Require(selector.get() != nullptr);
     InputLog()("Creating cell selector: {}", *selector);
     _selection = std::move(selector);
+    _selectionStartedFrom = _selection->from();
 }
 
 void Terminal::clearSelection()
@@ -859,12 +861,101 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
     else if (selector()->state() != Selection::State::Complete && shouldExtendSelection)
     {
         if (currentScreen().isCellEmpty(relativePos) && !currentScreen().compareCellTextAt(relativePos, 0x20))
-            relativePos.column = ColumnOffset { 0 } + *(_settings.pageSize.columns - 1);
+        {
+            if (currentScreen().hasTabstop(relativePos))
+            {
+                // TODO add the behaviours where if a charecter is inserted inbetween the tab tab converted
+                // into space and tab
+                // TODO handle case where if I go into opposite dir then selection should reduce.
+
+                auto const tabstopStart = currentScreen().getTabstopStart(relativePos);
+                auto const tabstopEnd = currentScreen().getTabstopEnd(relativePos);
+
+                auto const selectionDirection = [&, this] {
+                    if (relativePos == selector()->from())
+                        return SelectionDirection::None;
+                    if (selector()->to() == selector()->from())
+                    {
+                        return relativePos.line > selector()->from().line
+                                       || relativePos.column > selector()->to().column
+                                   ? SelectionDirection::Right
+                                   : SelectionDirection::Left;
+                    }
+                    return selector()->to().line > selector()->from().line
+                                   || selector()->to().column > selector()->from().column
+                               ? SelectionDirection::Right
+                               : SelectionDirection::Left;
+                }();
+
+                bool updateNeeded = false;
+
+                bool const startingFromMidTabstop = [=, this] {
+                    return crispy::ascending(tabstopStart, selector()->from(), tabstopEnd)
+                           || crispy::ascending(tabstopEnd, selector()->from(), tabstopStart);
+                }();
+
+                bool const directionChanged = [&, this] {
+                    using enum SelectionDirection;
+                    switch (selectionDirection)
+                    {
+                        case Right:
+                            return relativePos.line == selector()->from().line
+                                   && relativePos.column <= selector()->from().column;
+                        case Left:
+                            return relativePos.line == selector()->from().line
+                                   && relativePos.column >= selector()->from().column;
+                    };
+                    return true;
+                }();
+
+                if (directionChanged)
+                {
+                    selector()->extendStart(
+                        std::max(selector()->from() - ColumnOffset(1),
+                                 CellLocation { selector()->from().line, ColumnOffset(0) }));
+                    selector()->extend(selector()->from());
+                    return;
+                }
+
+                if (selectionDirection == SelectionDirection::Right)
+                {
+                    if (startingFromMidTabstop)
+                    {
+                        selector()->extendStart(tabstopStart);
+                    }
+                    selector()->extend(tabstopEnd);
+                    updateNeeded = true;
+                }
+                else if (selectionDirection == SelectionDirection::Left)
+                {
+                    if (startingFromMidTabstop)
+                    {
+                        selector()->extendStart(tabstopEnd);
+                    }
+                    selector()->extend(tabstopStart);
+                    updateNeeded = true;
+                }
+                else
+                    return;
+
+                if (updateNeeded)
+                {
+                    breakLoopAndRefreshRenderBuffer();
+                }
+                return;
+            }
+            else
+            {
+                relativePos.column = ColumnOffset::cast_from(_settings.pageSize.columns - 1);
+            }
+        }
         _state.viCommands.cursorPosition = relativePos;
         if (_state.inputHandler.mode() != ViMode::Insert)
             _state.inputHandler.setMode(selector()->viMode());
         if (selector()->extend(relativePos))
+        {
             breakLoopAndRefreshRenderBuffer();
+        }
     }
 }
 
@@ -1217,12 +1308,14 @@ namespace
         Terminal const& term;
         ColumnOffset rightPage;
         ColumnOffset lastColumn {};
+        bool wasLastCellTab = false;
         string text {};
         string currentLine {};
 
         void operator()(CellLocation pos, Cell const& cell)
         {
-            auto const isNewLine = pos.column < lastColumn || (pos.column == lastColumn && !text.empty());
+            auto const isNewLine =
+                (pos.column < lastColumn && !cell.isTab()) || (pos.column == lastColumn && !text.empty());
             bool const touchesRightPage = term.isSelected({ pos.line, rightPage });
             if (isNewLine && (!term.isLineWrapped(pos.line) || !touchesRightPage))
             {
@@ -1232,10 +1325,34 @@ namespace
                 text += '\n';
                 currentLine.clear();
             }
-            if (cell.empty())
-                currentLine += ' ';
-            else
-                currentLine += cell.toUtf8();
+            if (cell.isTab())
+            {
+                if (term.settings().expandTabs)
+                    currentLine += ' ';
+                else if (!wasLastCellTab)
+                {
+                    auto const& tabs = term.state().tabs;
+                    if (!tabs.empty())
+                    {
+                        auto itr = std::lower_bound(tabs.begin(), tabs.end(), pos.column);
+                        if (itr != tabs.end())
+                        {
+                            pos.column = *itr;
+                        }
+                        else
+                        {
+                            assert(false);
+                        }
+                    }
+                    else
+                    {
+                        pos.column += TabWidth - boxed_cast<ColumnCount>(pos.column) % TabWidth;
+                    }
+                    currentLine += '\t';
+                }
+            }
+            wasLastCellTab = cell.isTab();
+            currentLine += cell.toUtf8();
             lastColumn = pos.column;
         }
 
