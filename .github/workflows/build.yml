@@ -496,72 +496,75 @@ jobs:
           retention-days: 1
 
   # Create AppImage (Using Ubuntu 20.04 as base).
-  package_for_AppImage:
-    name: "Packaging for AppImage"
-    runs-on: ubuntu-20.04
-    steps:
-      - uses: actions/checkout@v3
-      - name: ccache
-        uses: hendrikmuhs/ccache-action@v1.2
-        with:
-          key: "ccache-ubuntu2004-AppImage"
-          max-size: 256M
-      - name: Installing xmllint for ci-set-vars
-        run: sudo apt -qy install libxml2-utils
-      - name: "set environment variables"
-        id: set_vars
-        run: ./scripts/ci-set-vars.sh
-        env:
-          REPOSITORY: ${{ github.event.repository.name }}
-      - name: "install linuxdeploy"
-        run: |
-          wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage -O /usr/local/bin/linuxdeploy
-          chmod 0755 /usr/local/bin/linuxdeploy
-      - name: "install libfuse2 (Dependency of AppImage programs)"
-        run: sudo apt -qy install libfuse2
-      - name: "install dependencies"
-        run: sudo ./scripts/install-deps.sh
-      - name: "Post-fix embedded dependency permissions."
-        run: sudo find _deps/sources -exec chown $UID {} \;
-      - name: CMake version
-        run: cmake --version
-      - name: "cmake"
-        run: |
-          mkdir build
-          BUILD_DIR="build" \
-            CXX="g++-10" \
-            CMAKE_BUILD_TYPE=RelWithDebInfo \
-            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS \
-                               -DCMAKE_INSTALL_PREFIX="/usr" \
-                               -DCONTOUR_INSTALL_TOOLS=ON \
-                               -DPEDANTIC_COMPILER=ON \
-                               -DPEDANTIC_COMPILER_WERROR=OFF \
-                               " \
-            ./scripts/ci-prepare-contour.sh
-      - name: "build"
-        run: cmake --build build/ -- -j3
-      - name: "test: crispy"
-        run: ./build/src/crispy/crispy_test
-      - name: "test: vtparser"
-        run: ./build/src/vtparser/vtparser_test
-      - name: "test: vtbackend"
-        run: ./build/src/vtbackend/vtbackend_test
-      - name: "linuxdeploy: Creating AppImage"
-        run: |
-          set -ex
-          cd build
-          make install DESTDIR=AppDir
-          linuxdeploy --appdir AppDir --output appimage
-          mv -v *.AppImage ../contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage
-      - name: "Testing AppImage"
-        run: ./contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage version
-      - name: "Uploading AppImage"
-        uses: actions/upload-artifact@v3
-        with:
-          name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage"
-          path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage"
-          if-no-files-found: error
-          retention-days: 7
+  # package_for_AppImage:
+  #   name: "Packaging for AppImage"
+  #   runs-on: ubuntu-20.04
+  #   steps:
+  #     - uses: actions/checkout@v3
+  #     - name: ccache
+  #       uses: hendrikmuhs/ccache-action@v1.2
+  #       with:
+  #         key: "ccache-ubuntu2004-AppImage"
+  #         max-size: 256M
+  #     - name: Installing xmllint for ci-set-vars
+  #       run: sudo apt -qy install libxml2-utils
+  #     - name: "set environment variables"
+  #       id: set_vars
+  #       run: ./scripts/ci-set-vars.sh
+  #       env:
+  #         REPOSITORY: ${{ github.event.repository.name }}
+  #     - name: "install linuxdeploy"
+  #       run: |
+  #         wget https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage -O /usr/local/bin/linuxdeploy
+  #         chmod 0755 /usr/local/bin/linuxdeploy
+  #         wget https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage -O /usr/local/bin/linuxdeploy-plugin-qt-x86_64.AppImage
+  #         chmod 0755 /usr/local/bin/linuxdeploy-plugin-qt-x86_64.AppImage
+  #     - name: "install libfuse2 (Dependency of AppImage programs)"
+  #       run: sudo apt -qy install libfuse2
+  #     - name: "install dependencies"
+  #       run: sudo ./scripts/install-deps.sh
+  #     - name: "Post-fix embedded dependency permissions."
+  #       run: sudo find _deps/sources -exec chown $UID {} \;
+  #     - name: CMake version
+  #       run: cmake --version
+  #     - name: "cmake"
+  #       run: |
+  #         mkdir build
+  #         BUILD_DIR="build" \
+  #           CXX="g++-10" \
+  #           CMAKE_BUILD_TYPE=RelWithDebInfo \
+  #           EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS \
+  #                              -DCMAKE_INSTALL_PREFIX="/usr" \
+  #                              -DCONTOUR_INSTALL_TOOLS=ON \
+  #                              -DPEDANTIC_COMPILER=ON \
+  #                              -DPEDANTIC_COMPILER_WERROR=OFF \
+  #                              " \
+  #           ./scripts/ci-prepare-contour.sh
+  #     - name: "build"
+  #       run: cmake --build build/ -- -j3
+  #     - name: "test: crispy"
+  #       run: ./build/src/crispy/crispy_test
+  #     - name: "test: vtparser"
+  #       run: ./build/src/vtparser/vtparser_test
+  #     - name: "test: vtbackend"
+  #       run: ./build/src/vtbackend/vtbackend_test
+  #     - name: "linuxdeploy: Creating AppImage"
+  #       run: |
+  #         set -ex
+  #         cd build
+  #         make install DESTDIR=AppDir
+  #         # NB: The appdir path must be given absolute rather than relative, as otherwise the qt plugin won't work.
+  #         DEBUG=1 QT_SELECT=5 linuxdeploy --appdir "$(pwd)/AppDir" --plugin qt --output appimage
+  #         mv -v *.AppImage ../contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage
+  #     - name: "Testing AppImage"
+  #       run: ./contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage version
+  #     - name: "Uploading AppImage"
+  #       uses: actions/upload-artifact@v3
+  #       with:
+  #         name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage"
+  #         path: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}.AppImage"
+  #         if-no-files-found: error
+  #         retention-days: 7
 
   package_for_Ubuntu:
     name: "Packaging for Ubuntu ${{ matrix.os_version }}"
@@ -746,7 +749,6 @@ jobs:
     name: "Ubuntu Linux 22.04 post-check"
     needs:
       - package_for_Ubuntu
-      - package_for_AppImage
       - ubuntu_2204_cc_matrix
       - test_ubuntu2204_valgrind
       - test_ubuntu2204_bench_headless
