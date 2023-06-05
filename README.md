@@ -142,6 +142,9 @@ cmake --build build/
 cmake --build build/ --target install
 ```
 
+#### Distribution Packages
+
+[![Packaging status](https://repology.org/badge/vertical-allrepos/contour-terminal.svg)](https://repology.org/project/contour-terminal/versions)
 
 ## CLI - Command Line Interface
 
