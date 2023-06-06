@@ -57,6 +57,7 @@
 #endif
 
 auto constexpr MinimumFontSize = text::font_size { 8.0 };
+auto constexpr MinimumDpiScale = double { 1.0 };
 
 using namespace std;
 using crispy::escape;
@@ -1476,7 +1477,17 @@ namespace
 
         tryLoadChildRelative(
             _usedKeys, _profile, basePath, "font.builtin_box_drawing", profile.fonts.builtinBoxDrawing);
-        tryLoadChildRelative(_usedKeys, _profile, basePath, "font.dpi_scale", profile.fonts.dpiScale);
+        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "font.dpi_scale", profile.fonts.dpiScale))
+        {
+            if (profile.fonts.dpiScale < 1.0)
+            {
+                errorlog()("Bad value for fonts.dpi_scale {}. Minimum value is {}.  Using default: {} ",
+                           profile.fonts.dpiScale,
+                           MinimumDpiScale,
+                           MinimumDpiScale);
+                profile.fonts.dpiScale = MinimumDpiScale;
+            }
+        }
 
         auto constexpr NativeTextShapingEngine =
 #if defined(_WIN32)
