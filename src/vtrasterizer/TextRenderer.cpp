@@ -837,7 +837,13 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     }
 
     // y-position relative to cell-bottom of glyphs top.
-    auto const yMax = _gridMetrics.baseline + glyph.position.y;
+    auto yMax = _gridMetrics.baseline + glyph.position.y;
+
+    if(yMax < 0)
+    {
+        RasterizerLog()("Encountered glyph with inverted direction, swaping to normal");
+        yMax *= -1;
+    }
 
     // y-position relative to cell-bottom of the glyphs bottom.
     auto const yMin = yMax - glyph.bitmapSize.height.as<int>();
