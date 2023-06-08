@@ -839,10 +839,10 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     // y-position relative to cell-bottom of glyphs top.
     auto yMax = _gridMetrics.baseline + glyph.position.y;
 
-    if(yMax < 0)
+    if (yMax < 0)
     {
         RasterizerLog()("Encountered glyph with inverted direction, swaping to normal");
-        yMax *= -1;
+        yMax = std::abs(yMax);
     }
 
     // y-position relative to cell-bottom of the glyphs bottom.
