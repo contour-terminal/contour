@@ -1,4 +1,4 @@
-# Contour Input Modes
+# Input Modes
 
 Normally, a terminal emulator only knows about one input mode, so
 there is no need of distinction.
