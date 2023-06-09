@@ -1,0 +1,64 @@
+site_name: Contour Terminal Emulator
+dev_addr: 0.0.0.0:8080
+docs_dir: docs
+repo_url: https://github.com/contour-terminal/contour/
+repo_name: contour-terminal/contour
+site_description: Technical Landing Page for Contour Terminal Emulator
+site_author: Christian Parpart
+theme:
+  name: material
+  logo: /assets/contour-logo.png
+  favicon: /assets/contour-logo.png
+  palette:
+  - media: "(prefers-color-scheme: light)"
+    scheme: default
+    primary: deep red
+    accent: deep red
+    toggle:
+      icon: material/weather-sunny
+      name: Switch to dark mode
+
+  - media: "(prefers-color-scheme: dark)"
+    scheme: slate
+    primary: deep red
+    accent: red
+    toggle:
+      icon: material/weather-night
+      name: Switch to light mode
+  features:
+    - content.action.edit
+    - content.action.view
+    - content.code.copy
+    - content.tabs.link
+    - navigation.expand # Do we want this?
+    - navigation.footer
+    - navigation.indexes
+    # - navigation.instant # conflicts with colorscheme preview
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.top
+    - navigation.sections
+    - navigation.tracking
+    - search.highlight
+    - search.share
+    - search.suggest
+    - toc.follow
+markdown_extensions:
+  - attr_list
+  - md_in_html
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+plugins:
+  - glightbox
+  - exclude:
+      glob:
+        - 'drafts/*'
+        - 'configuration/*' # disabled until ready
+  - search:
+      separator: '[\s\-,:!=\[\]()"/]+|(?!\b)(?=[A-Z][a-z])'
+

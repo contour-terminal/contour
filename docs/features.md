@@ -1,16 +1,10 @@
-# Contour Feature Overview
+## Main Features
 
-## Features
-
-- ✅ Available on all 3 major platforms, Linux, OS/X, Windows (Windows is alpha stage).
 - ✅ GPU-accelerated rendering.
-- ✅ Font ligatures support (such as in Fira Code).
-- ✅ Unicode: Emoji support (-: 🌈 💝 😛 👪 - including ZWJ, VS15, VS16 emoji :-)
 - ✅ Unicode: Grapheme cluster support
-- ✅ Bold and italic fonts
 - ✅ High-DPI support.
-- ✅ Vertical Line Markers (quickly jump to markers in your history!)
 - ✅ Blurred behind transparent background when using Windows 10 or KDE window manager on Linux.
+- ✅ Blurrable Background image support.
 - ✅ Runtime configuration reload
 - ✅ 256-color and Truecolor support
 - ✅ Key binding customization
@@ -20,7 +14,8 @@
 - ✅ Text reflow (configurable via `SM ? 2028` / `RM ? 2028`)
 - ✅ Clickable hyperlinks via [OSC 8](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda)
 - ✅ Clipboard setting via OSC 52
-- ✅ Sixel inline images
 - ✅ Terminal page [buffer capture VT extension](https://github.com/contour-terminal/contour/wiki/VTExtensions#buffer-capture) to quickly extract contents.
+- ✅ Builtin [Fira Code inspired progress bar](https://github.com/contour-terminal/contour/issues/521) support.
+- ✅ Read-only mode, protecting against accidental user-input to the running application, such as <kbd>Ctrl</kbd>+<kbd>C</kbd>.
 - ✅ and much more ...
 
