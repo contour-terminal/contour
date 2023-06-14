@@ -7,10 +7,6 @@ on:
       - '.github/workflows/docs.yml'
     branches:
       - master
-      - edge
-  pull_request:
-    branches:
-      - master
 
 concurrency:
   group: docs-${{ github.ref }}
