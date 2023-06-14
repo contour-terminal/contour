@@ -1,4 +1,4 @@
-FROM archlinux/archlinux:base-devel
+FROM archlinux:base-devel
 
 WORKDIR /app
 
