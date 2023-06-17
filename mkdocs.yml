@@ -90,6 +90,13 @@ nav:
     - Line marks: demo/line-marks.md
     - Status line: demo/statusline.md
     - Input modes: input-modes.md
+  - VT extensions:
+    - vt-extensions/index.md
+    - vt-extensions/clickable-links.md
+    - vt-extensions/vertical-line-marks.md
+    - vt-extensions/synchronized-output.md
+    - vt-extensions/buffer-capture.md
+    - vt-extensions/font-settings.md
   - Internals:
     - internals/index.md
     - internals/CODING_STYLE.md
