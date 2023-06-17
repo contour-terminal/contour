@@ -1,4 +1,4 @@
-# Installation
+ Installation
 
 `contour` is packaged and available for installation on multiple distributions.
 
@@ -26,7 +26,7 @@ Please use the AUR, at [https://aur.archlinux.org/packages/contour-git](https://
 
 ## Ubuntu Linux
 
-Please download Contour for Ubuntu Linux (the `.deb` files) from our official release page,
+Please download Contour for Ubuntu Linux (the `.deb` files) from our official [release](https://github.com/contour-terminal/contour/releases) page,
 and then use the following command to install:
 
 ```sh
@@ -41,7 +41,7 @@ sudo dpkg -i ~/Downloads/contour-0.3.12.262-UBUNTU_VERSION-ARCH.ddeb
 
 ## Flatpak
 
-Click the following button install Contour from the Flathub store.
+Contour is available at the Flathub store.
 
 [![Get it on Flathub](https://raw.githubusercontent.com/flatpak-design-team/flathub-mockups/master/assets/download-button/download.svg?sanitize=true)](https://flathub.org/apps/details/org.contourterminal.Contour)
 
