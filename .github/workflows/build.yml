@@ -12,11 +12,17 @@ on:
       - '*.sh'
     branches:
       - master
-      - edge
   pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '.github/ISSUE_TEMPLATE/**'
+      - '.github/*.yml'
+      - 'LICENSE.txt'
+      - 'mkdocs.yml'
+      - '*.md'
+      - '*.sh'
     branches:
       - master
-      - edge
 
 concurrency:
   group: ${{ github.ref }}
