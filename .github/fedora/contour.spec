@@ -75,7 +75,7 @@ cd build
 
 %files
 %license LICENSE.txt
-%doc README.md CONTRIBUTING.md TODO.md
+%doc README.md docs/CONTRIBUTING.md TODO.md
 %{_bindir}/*
 %{_datadir}/*
 
