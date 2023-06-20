@@ -142,7 +142,7 @@ crispy::cli::Command ContourGuiApp::parameterDefinition() const
             CLI::CommandList {},
             CLI::CommandSelect::Implicit,
             CLI::Verbatim { "PROGRAM ARGS...",
-                            "Executes given program instead of the configuration profided one." } });
+                            "Executes given program instead of the one provided in the configuration." } });
 
     return command;
 }
