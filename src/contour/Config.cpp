@@ -305,7 +305,8 @@ namespace
                               string const& _basePath,
                               vector<string_view> const& _keys,
                               size_t _offset,
-                              T& _store)
+                              T& _store,
+                              logstore::MessageBuilder const& _logger)
     {
         string parentKey = _basePath;
         for (size_t i = 0; i < _offset; ++i)
@@ -334,13 +335,13 @@ namespace
                     parentKey += '.';
                 parentKey += _keys[i];
             }
-            errorlog()("Missing key {}. Using default: {}.", parentKey, defaultStrQuoted);
+            _logger("Missing key {}. Using default: {}.", parentKey, defaultStrQuoted);
             return false;
         }
 
         _usedKeys.emplace(parentKey);
 
-        return tryLoadValueRelative(_usedKeys, child, _keys, _offset + 1, _store);
+        return tryLoadValueRelative(_usedKeys, child, _keys, _offset + 1, _store, _logger);
     }
 
     template <typename T>
@@ -348,7 +349,8 @@ namespace
                       YAML::Node const& _root,
                       vector<string_view> const& _keys,
                       size_t _offset,
-                      T& _store)
+                      T& _store,
+                      logstore::MessageBuilder _logger)
     {
         string parentKey;
         for (size_t i = 0; i < _offset; ++i)
@@ -375,14 +377,14 @@ namespace
                 parentKey += '.';
                 parentKey += _keys[i];
             }
-            errorlog()(
+            _logger(
                 "Missing key {}. Using default: {}.", parentKey, !defaultStr.empty() ? defaultStr : R"("")");
             return false;
         }
 
         _usedKeys.emplace(parentKey);
 
-        return tryLoadValue(_usedKeys, child, _keys, _offset + 1, _store);
+        return tryLoadValue(_usedKeys, child, _keys, _offset + 1, _store, _logger);
     }
 
     template <typename T, typename U>
@@ -390,34 +392,44 @@ namespace
                       YAML::Node const& _root,
                       vector<string_view> const& _keys,
                       size_t _offset,
-                      crispy::boxed<T, U>& _store)
+                      crispy::boxed<T, U>& _store,
+                      logstore::MessageBuilder const& _logger)
     {
-        return tryLoadValue(_usedKeys, _root, _keys, _offset, _store.value);
+        return tryLoadValue(_usedKeys, _root, _keys, _offset, _store.value, _logger);
     }
 
     template <typename T>
-    bool tryLoadValue(UsedKeys& _usedKeys, YAML::Node const& _root, string const& _path, T& _store)
+    bool tryLoadValue(UsedKeys& _usedKeys,
+                      YAML::Node const& _root,
+                      string const& _path,
+                      T& _store,
+                      logstore::MessageBuilder const& _logger)
     {
         auto const keys = crispy::split(_path, '.');
         _usedKeys.emplace(_path);
-        return tryLoadValue(_usedKeys, _root, keys, 0, _store);
+        return tryLoadValue(_usedKeys, _root, keys, 0, _store, _logger);
     }
 
     template <typename T, typename U>
     bool tryLoadValue(UsedKeys& _usedKeys,
                       YAML::Node const& _root,
                       string const& _path,
-                      crispy::boxed<T, U>& _store)
+                      crispy::boxed<T, U>& _store,
+                      logstore::MessageBuilder const& _logger)
     {
-        return tryLoadValue(_usedKeys, _root, _path, _store.value);
+        return tryLoadValue(_usedKeys, _root, _path, _store.value, _logger);
     }
 
     template <typename T>
-    bool tryLoadChild(
-        UsedKeys& _usedKeys, YAML::Node const& _doc, string const& _parentPath, string const& _key, T& _store)
+    bool tryLoadChild(UsedKeys& _usedKeys,
+                      YAML::Node const& _doc,
+                      string const& _parentPath,
+                      string const& _key,
+                      T& _store,
+                      logstore::MessageBuilder const& _logger)
     {
         auto const path = fmt::format("{}.{}", _parentPath, _key);
-        return tryLoadValue(_usedKeys, _doc, path, _store);
+        return tryLoadValue(_usedKeys, _doc, path, _store, _logger);
     }
 
     template <typename T>
@@ -425,7 +437,8 @@ namespace
                               YAML::Node const& _node,
                               string const& _parentPath,
                               string const& _childKeyPath,
-                              T& _store)
+                              T& _store,
+                              logstore::MessageBuilder const& _logger)
     {
         // return tryLoadValue(_usedKeys, _node, _childKeyPath, _store); // XXX _parentPath
         auto const keys = crispy::split(_childKeyPath, '.');
@@ -435,7 +448,7 @@ namespace
             s += fmt::format(".{}", key);
             _usedKeys.emplace(s);
         }
-        return tryLoadValue(_usedKeys, _node, keys, 0, _store);
+        return tryLoadValue(_usedKeys, _node, keys, 0, _store, _logger);
     }
 
     template <typename T, typename U>
@@ -443,9 +456,10 @@ namespace
                       YAML::Node const& _doc,
                       string const& _parentPath,
                       string const& _key,
-                      crispy::boxed<T, U>& _store)
+                      crispy::boxed<T, U>& _store,
+                      logstore::MessageBuilder const& _logger)
     {
-        return tryLoadChild(_usedKeys, _doc, _parentPath, _key, _store.value);
+        return tryLoadChild(_usedKeys, _doc, _parentPath, _key, _store.value, _logger);
     }
 
     void checkForSuperfluousKeys(YAML::Node _root, string const& _prefix, UsedKeys const& _usedKeys)
@@ -630,16 +644,16 @@ namespace
 
         auto cursorConfig = config::CursorConfig {};
         auto strValue = "block"s;
-        tryLoadChildRelative(usedKeys, rootNode, basePath, "shape", strValue);
+        tryLoadChildRelative(usedKeys, rootNode, basePath, "shape", strValue, errorlog());
         cursorConfig.cursorShape = terminal::makeCursorShape(strValue);
 
         bool boolValue = cursorConfig.cursorDisplay == terminal::CursorDisplay::Blink;
-        tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking", boolValue);
+        tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking", boolValue, errorlog());
         cursorConfig.cursorDisplay =
             boolValue ? terminal::CursorDisplay::Blink : terminal::CursorDisplay::Steady;
 
         auto uintValue = cursorConfig.cursorBlinkInterval.count();
-        tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking_interval", uintValue);
+        tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking_interval", uintValue, errorlog());
         cursorConfig.cursorBlinkInterval = chrono::milliseconds(uintValue);
         return cursorConfig;
     }
@@ -1133,13 +1147,14 @@ namespace
         // TODO: color palette from 16..255
 
         float opacityValue = 1.0;
-        tryLoadChildRelative(_usedKeys, _node, _basePath, "background_image.opacity", opacityValue);
+        tryLoadChildRelative(
+            _usedKeys, _node, _basePath, "background_image.opacity", opacityValue, errorlog());
 
         bool imageBlur = false;
-        tryLoadChildRelative(_usedKeys, _node, _basePath, "background_image.blur", imageBlur);
+        tryLoadChildRelative(_usedKeys, _node, _basePath, "background_image.blur", imageBlur, errorlog());
 
         string fileName;
-        if (tryLoadChildRelative(_usedKeys, _node, _basePath, "background_image.path", fileName))
+        if (tryLoadChildRelative(_usedKeys, _node, _basePath, "background_image.path", fileName, errorlog()))
             colors.backgroundImage = loadImage(fileName, opacityValue, imageBlur);
 
         return colors;
@@ -1225,6 +1240,8 @@ namespace
                       string const& _key,
                       text::font_description& _store)
     {
+        if (!_node)
+            return;
         auto node = _node[_key];
         if (!node)
             return;
@@ -1277,13 +1294,14 @@ namespace
         return nullopt;
     }
 
-    TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
-                                        YAML::Node const& _profile,
-                                        std::string const& _parentPath,
-                                        std::string const& _profileName,
-                                        unordered_map<string, terminal::ColorPalette> const& _colorschemes)
+    void updateTerminalProfile(TerminalProfile& profile,
+                               UsedKeys& _usedKeys,
+                               YAML::Node const& _profile,
+                               std::string const& _parentPath,
+                               std::string const& _profileName,
+                               unordered_map<string, terminal::ColorPalette> const& _colorschemes,
+                               logstore::MessageBuilder _logger)
     {
-        auto profile = TerminalProfile {};
 
         if (auto colors = _profile["colors"]; colors) // {{{
         {
@@ -1314,40 +1332,48 @@ namespace
                     break;
                 }
                 if (!found)
-                    errorlog()("Could not open colorscheme file for \"{}\".", colors.as<string>());
+                    _logger("Could not open colorscheme file for \"{}\".", colors.as<string>());
             }
             else
-                errorlog()("scheme '{}' not found.", colors.as<string>());
+                _logger("scheme '{}' not found.", colors.as<string>());
         }
         else
-            errorlog()("No colors section in profile {} found.", _profileName);
+            _logger("No colors section in profile {} found.", _profileName);
         // }}}
 
         string const basePath = fmt::format("{}.{}", _parentPath, _profileName);
-        tryLoadChildRelative(_usedKeys, _profile, basePath, "escape_sandbox", profile.shell.escapeSandbox);
-        tryLoadChildRelative(_usedKeys, _profile, basePath, "shell", profile.shell.program);
+        tryLoadChildRelative(
+            _usedKeys, _profile, basePath, "escape_sandbox", profile.shell.escapeSandbox, _logger);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "shell", profile.shell.program, _logger);
         if (profile.shell.program.empty())
         {
             if (!profile.shell.arguments.empty())
-                errorlog()("No shell defined but arguments. Ignoring arguments.");
+                _logger("No shell defined but arguments. Ignoring arguments.");
 
             auto loginShell = Process::loginShell(profile.shell.escapeSandbox);
             profile.shell.program = loginShell.front();
             loginShell.erase(loginShell.begin());
             profile.shell.arguments = loginShell;
         }
-        tryLoadChildRelative(_usedKeys, _profile, basePath, "maximized", profile.maximized);
-        tryLoadChildRelative(_usedKeys, _profile, basePath, "fullscreen", profile.fullscreen);
-        tryLoadChildRelative(_usedKeys, _profile, basePath, "refresh_rate", profile.refreshRate.value);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "maximized", profile.maximized, _logger);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "fullscreen", profile.fullscreen, _logger);
         tryLoadChildRelative(
-            _usedKeys, _profile, basePath, "copy_last_mark_range_offset", profile.copyLastMarkRangeOffset);
-        tryLoadChildRelative(_usedKeys, _profile, basePath, "show_title_bar", profile.show_title_bar);
+            _usedKeys, _profile, basePath, "refresh_rate", profile.refreshRate.value, _logger);
+        tryLoadChildRelative(_usedKeys,
+                             _profile,
+                             basePath,
+                             "copy_last_mark_range_offset",
+                             profile.copyLastMarkRangeOffset,
+                             _logger);
+        tryLoadChildRelative(
+            _usedKeys, _profile, basePath, "show_title_bar", profile.show_title_bar, _logger);
         tryLoadChildRelative(_usedKeys,
                              _profile,
                              basePath,
                              "draw_bold_text_with_bright_colors",
-                             profile.colors.useBrightColors);
-        tryLoadChildRelative(_usedKeys, _profile, basePath, "wm_class", profile.wmClass);
+                             profile.colors.useBrightColors,
+                             _logger);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "wm_class", profile.wmClass, _logger);
 
         if (auto args = _profile["arguments"]; args && args.IsSequence())
         {
@@ -1357,7 +1383,7 @@ namespace
         }
 
         string strValue = FileSystem::current_path().generic_string();
-        tryLoadChildRelative(_usedKeys, _profile, basePath, "initial_working_directory", strValue);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "initial_working_directory", strValue, _logger);
         if (strValue.empty())
             profile.shell.workingDirectory = FileSystem::current_path();
         else
@@ -1412,16 +1438,16 @@ namespace
             profile.shell.env["COLORTERM"] = "truecolor";
 
         strValue = fmt::format("{}", profile.terminalId);
-        tryLoadChildRelative(_usedKeys, _profile, basePath, "terminal_id", strValue);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "terminal_id", strValue, _logger);
         if (auto const idOpt = stringToVTType(strValue))
             profile.terminalId = idOpt.value();
         else
-            errorlog()("Invalid Terminal ID \"{}\", specified", strValue);
+            _logger("Invalid Terminal ID \"{}\", specified", strValue);
 
         tryLoadChildRelative(
-            _usedKeys, _profile, basePath, "terminal_size.columns", profile.terminalSize.columns);
+            _usedKeys, _profile, basePath, "terminal_size.columns", profile.terminalSize.columns, _logger);
         tryLoadChildRelative(
-            _usedKeys, _profile, basePath, "terminal_size.lines", profile.terminalSize.lines);
+            _usedKeys, _profile, basePath, "terminal_size.lines", profile.terminalSize.lines, _logger);
         {
             auto constexpr MinimalTerminalSize = PageSize { LineCount(3), ColumnCount(3) };
             auto constexpr MaximumTerminalSize = PageSize { LineCount(200), ColumnCount(300) };
@@ -1429,62 +1455,72 @@ namespace
             if (!sanitizeRange(ref(profile.terminalSize.columns.value),
                                *MinimalTerminalSize.columns,
                                *MaximumTerminalSize.columns))
-                errorlog()("Terminal width {} out of bounds. Should be between {} and {}.",
-                           profile.terminalSize.columns,
-                           MinimalTerminalSize.columns,
-                           MaximumTerminalSize.columns);
+                _logger("Terminal width {} out of bounds. Should be between {} and {}.",
+                        profile.terminalSize.columns,
+                        MinimalTerminalSize.columns,
+                        MaximumTerminalSize.columns);
 
             if (!sanitizeRange(
                     ref(profile.terminalSize.lines), MinimalTerminalSize.lines, MaximumTerminalSize.lines))
-                errorlog()("Terminal height {} out of bounds. Should be between {} and {}.",
-                           profile.terminalSize.lines,
-                           MinimalTerminalSize.lines,
-                           MaximumTerminalSize.lines);
+                _logger("Terminal height {} out of bounds. Should be between {} and {}.",
+                        profile.terminalSize.lines,
+                        MinimalTerminalSize.lines,
+                        MaximumTerminalSize.lines);
         }
 
         strValue = "ask";
-        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "permissions.capture_buffer", strValue))
+        if (tryLoadChildRelative(
+                _usedKeys, _profile, basePath, "permissions.capture_buffer", strValue, _logger))
         {
             if (auto x = toPermission(strValue))
                 profile.permissions.captureBuffer = x.value();
         }
 
         strValue = "ask";
-        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "permissions.change_font", strValue))
+        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "permissions.change_font", strValue, _logger))
         {
             if (auto x = toPermission(strValue))
                 profile.permissions.changeFont = x.value();
         }
 
         strValue = "ask";
-        if (tryLoadChildRelative(
-                _usedKeys, _profile, basePath, "permissions.display_host_writable_statusline", strValue))
+        if (tryLoadChildRelative(_usedKeys,
+                                 _profile,
+                                 basePath,
+                                 "permissions.display_host_writable_statusline",
+                                 strValue,
+                                 _logger))
         {
             if (auto x = toPermission(strValue))
                 profile.permissions.displayHostWritableStatusLine = x.value();
         }
 
-        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "font.size", profile.fonts.size.pt))
+        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "font.size", profile.fonts.size.pt, _logger))
         {
             if (profile.fonts.size < MinimumFontSize)
             {
-                errorlog()("Invalid font size {} set in config file. Minimum value is {}.",
-                           profile.fonts.size,
-                           MinimumFontSize);
+                _logger("Invalid font size {} set in config file. Minimum value is {}.",
+                        profile.fonts.size,
+                        MinimumFontSize);
                 profile.fonts.size = MinimumFontSize;
             }
         }
 
-        tryLoadChildRelative(
-            _usedKeys, _profile, basePath, "font.builtin_box_drawing", profile.fonts.builtinBoxDrawing);
-        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "font.dpi_scale", profile.fonts.dpiScale))
+        tryLoadChildRelative(_usedKeys,
+                             _profile,
+                             basePath,
+                             "font.builtin_box_drawing",
+                             profile.fonts.builtinBoxDrawing,
+                             _logger);
+        if (tryLoadChildRelative(
+                _usedKeys, _profile, basePath, "font.dpi_scale", profile.fonts.dpiScale, _logger))
         {
             if (profile.fonts.dpiScale < 1.0)
             {
-                errorlog()("Bad value for fonts.dpi_scale {}. Minimum value is {}.  Using default: {} ",
-                           profile.fonts.dpiScale,
-                           MinimumDpiScale,
-                           MinimumDpiScale);
+                _logger("Bad value for fonts.dpi_scale {}. Minimum value is {}.  Using default: {} ",
+                        profile.fonts.dpiScale,
+                        MinimumDpiScale,
+                        MinimumDpiScale);
                 profile.fonts.dpiScale = MinimumDpiScale;
             }
         }
@@ -1508,7 +1544,8 @@ namespace
 #endif
 
         strValue = fmt::format("{}", profile.fonts.textShapingEngine);
-        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "font.text_shaping.engine", strValue))
+        if (tryLoadChildRelative(
+                _usedKeys, _profile, basePath, "font.text_shaping.engine", strValue, _logger))
         {
             auto const lwrValue = toLower(strValue);
             if (lwrValue == "dwrite" || lwrValue == "directwrite")
@@ -1527,7 +1564,7 @@ namespace
 
         profile.fonts.fontLocator = NativeFontLocator;
         strValue = fmt::format("{}", profile.fonts.fontLocator);
-        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "font.locator", strValue))
+        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "font.locator", strValue, _logger))
         {
             auto const lwrValue = toLower(strValue);
             if (lwrValue == "fontconfig")
@@ -1545,7 +1582,7 @@ namespace
         }
 
         bool strictSpacing = false;
-        tryLoadChildRelative(_usedKeys, _profile, basePath, "font.strict_spacing", strictSpacing);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "font.strict_spacing", strictSpacing, _logger);
 
         auto const fontBasePath = fmt::format("{}.{}.font", _parentPath, _profileName);
 
@@ -1603,7 +1640,7 @@ namespace
 #endif
 
         strValue = "gray";
-        tryLoadChildRelative(_usedKeys, _profile, basePath, "font.render_mode", strValue);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "font.render_mode", strValue, _logger);
         auto const static renderModeMap = array {
             pair { "lcd"sv, text::render_mode::lcd },           pair { "light"sv, text::render_mode::light },
             pair { "gray"sv, text::render_mode::gray },         pair { ""sv, text::render_mode::gray },
@@ -1614,10 +1651,10 @@ namespace
         if (i != renderModeMap.end())
             profile.fonts.renderMode = i->second;
         else
-            errorlog()("Invalid render_mode \"{}\" in configuration.", strValue);
+            _logger("Invalid render_mode \"{}\" in configuration.", strValue);
 
         auto intValue = LineCount();
-        tryLoadChildRelative(_usedKeys, _profile, basePath, "history.limit", intValue);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "history.limit", intValue, _logger);
         // value -1 is used for infinite grid
         if (unbox<int>(intValue) == -1)
             profile.maxHistoryLineCount = Infinite();
@@ -1627,7 +1664,7 @@ namespace
             profile.maxHistoryLineCount = LineCount(0);
 
         strValue = fmt::format("{}", ScrollBarPosition::Right);
-        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "scrollbar.position", strValue))
+        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "scrollbar.position", strValue, _logger))
         {
             auto const literal = toLower(strValue);
             if (literal == "left")
@@ -1637,38 +1674,55 @@ namespace
             else if (literal == "hidden")
                 profile.scrollbarPosition = ScrollBarPosition::Hidden;
             else
-                errorlog()("Invalid value for config entry {}: {}", "scrollbar.position", strValue);
+                _logger("Invalid value for config entry {}: {}", "scrollbar.position", strValue);
         }
-        tryLoadChildRelative(
-            _usedKeys, _profile, basePath, "scrollbar.hide_in_alt_screen", profile.hideScrollbarInAltScreen);
+        tryLoadChildRelative(_usedKeys,
+                             _profile,
+                             basePath,
+                             "scrollbar.hide_in_alt_screen",
+                             profile.hideScrollbarInAltScreen,
+                             _logger);
 
-        tryLoadChildRelative(
-            _usedKeys, _profile, basePath, "mouse.hide_while_typing", profile.mouse_hide_while_typing);
+        tryLoadChildRelative(_usedKeys,
+                             _profile,
+                             basePath,
+                             "mouse.hide_while_typing",
+                             profile.mouse_hide_while_typing,
+                             _logger);
 
-        tryLoadChildRelative(
-            _usedKeys, _profile, basePath, "history.auto_scroll_on_update", profile.autoScrollOnUpdate);
-        tryLoadChildRelative(
-            _usedKeys, _profile, basePath, "history.scroll_multiplier", profile.historyScrollMultiplier);
+        tryLoadChildRelative(_usedKeys,
+                             _profile,
+                             basePath,
+                             "history.auto_scroll_on_update",
+                             profile.autoScrollOnUpdate,
+                             _logger);
+        tryLoadChildRelative(_usedKeys,
+                             _profile,
+                             basePath,
+                             "history.scroll_multiplier",
+                             profile.historyScrollMultiplier,
+                             _logger);
 
         float floatValue = 1.0;
-        tryLoadChildRelative(_usedKeys, _profile, basePath, "background.opacity", floatValue);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "background.opacity", floatValue, _logger);
         profile.backgroundOpacity =
             (terminal::Opacity)(static_cast<unsigned>(255 * clamp(floatValue, 0.0f, 1.0f)));
-        tryLoadChildRelative(_usedKeys, _profile, basePath, "background.blur", profile.backgroundBlur);
+        tryLoadChildRelative(
+            _usedKeys, _profile, basePath, "background.blur", profile.backgroundBlur, _logger);
 
         strValue = "dotted-underline"; // TODO: fmt::format("{}", profile.hyperlinkDecoration.normal);
-        tryLoadChildRelative(_usedKeys, _profile, basePath, "hyperlink_decoration.normal", strValue);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "hyperlink_decoration.normal", strValue, _logger);
         if (auto const pdeco = terminal::rasterizer::to_decorator(strValue); pdeco.has_value())
             profile.hyperlinkDecoration.normal = *pdeco;
 
         strValue = "underline"; // TODO: fmt::format("{}", profile.hyperlinkDecoration.hover);
-        tryLoadChildRelative(_usedKeys, _profile, basePath, "hyperlink_decoration.hover", strValue);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "hyperlink_decoration.hover", strValue, _logger);
 
         tryLoadChildRelative(
-            _usedKeys, _profile, basePath, "vi_mode_scrolloff", profile.modalCursorScrollOff);
+            _usedKeys, _profile, basePath, "vi_mode_scrolloff", profile.modalCursorScrollOff, _logger);
 
         auto uintValue = profile.highlightTimeout.count();
-        tryLoadChildRelative(_usedKeys, _profile, basePath, "vi_mode_highlight_timeout", uintValue);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "vi_mode_highlight_timeout", uintValue, _logger);
         profile.highlightTimeout = chrono::milliseconds(uintValue);
         if (auto const pdeco = terminal::rasterizer::to_decorator(strValue); pdeco.has_value())
             profile.hyperlinkDecoration.hover = *pdeco;
@@ -1677,7 +1731,8 @@ namespace
                              _profile,
                              basePath,
                              "highlight_word_and_matches_on_double_click",
-                             profile.highlightDoubleClickedWord);
+                             profile.highlightDoubleClickedWord,
+                             _logger);
 
         if (optional<config::CursorConfig> cursorOpt =
                 parseCursorConfig(_profile["cursor"], _usedKeys, basePath + ".cursor"))
@@ -1709,15 +1764,15 @@ namespace
         }
 
         strValue = "none";
-        tryLoadChildRelative(_usedKeys, _profile, basePath, "status_line.display", strValue);
+        tryLoadChildRelative(_usedKeys, _profile, basePath, "status_line.display", strValue, _logger);
         if (strValue == "indicator")
             profile.initialStatusDisplayType = terminal::StatusDisplayType::Indicator;
         else if (strValue == "none")
             profile.initialStatusDisplayType = terminal::StatusDisplayType::None;
         else
-            errorlog()("Invalid value for config entry {}: {}", "status_line.display", strValue);
+            _logger("Invalid value for config entry {}: {}", "status_line.display", strValue);
 
-        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "status_line.position", strValue))
+        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "status_line.position", strValue, _logger))
         {
             auto const literal = toLower(strValue);
             if (literal == "bottom")
@@ -1725,14 +1780,24 @@ namespace
             else if (literal == "top")
                 profile.statusDisplayPosition = terminal::StatusDisplayPosition::Top;
             else
-                errorlog()("Invalid value for config entry {}: {}", "status_line.position", strValue);
+                _logger("Invalid value for config entry {}: {}", "status_line.position", strValue);
         }
 
         bool boolValue = false;
         if (tryLoadChildRelative(
-                _usedKeys, _profile, basePath, "status_line.sync_to_window_title", boolValue))
+                _usedKeys, _profile, basePath, "status_line.sync_to_window_title", boolValue, _logger))
             profile.syncWindowTitleWithHostWritableStatusDisplay = boolValue;
+    }
 
+    TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
+                                        YAML::Node const& _profile,
+                                        std::string const& _parentPath,
+                                        std::string const& _profileName,
+                                        unordered_map<string, terminal::ColorPalette> const& _colorschemes)
+    {
+        auto profile = TerminalProfile {}; // default profile
+        updateTerminalProfile(
+            profile, _usedKeys, _profile, _parentPath, _profileName, _colorschemes, errorlog());
         return profile;
     }
 
@@ -1811,6 +1876,7 @@ Config loadConfigFromFile(FileSystem::path const& _fileName)
  */
 void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 {
+    auto _logger = errorlog();
     ConfigLog()("Loading configuration from file: {}", _fileName.string());
     _config.backingFilePath = _fileName;
     createFileIfNotExists(_config.backingFilePath);
@@ -1828,7 +1894,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         createDefaultConfig(newfileName);
         return loadConfigFromFile(_config, newfileName);
     }
-    tryLoadValue(usedKeys, doc, "word_delimiters", _config.wordDelimiters);
+    tryLoadValue(usedKeys, doc, "word_delimiters", _config.wordDelimiters, _logger);
 
     if (auto opt =
             parseModifier(usedKeys, "bypass_mouse_protocol_modifier", doc["bypass_mouse_protocol_modifier"]);
@@ -1887,15 +1953,15 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         }
     }
 
-    tryLoadValue(usedKeys, doc, "spawn_new_process", _config.spawnNewProcess);
+    tryLoadValue(usedKeys, doc, "spawn_new_process", _config.spawnNewProcess,_logger);
 
-    tryLoadValue(usedKeys, doc, "live_config", _config.live);
+    tryLoadValue(usedKeys, doc, "live_config", _config.live,_logger);
 
     auto logEnabled = false;
-    tryLoadValue(usedKeys, doc, "logging.enabled", logEnabled);
+    tryLoadValue(usedKeys, doc, "logging.enabled", logEnabled,_logger);
 
     auto logFilePath = ""s;
-    tryLoadValue(usedKeys, doc, "logging.file", logFilePath);
+    tryLoadValue(usedKeys, doc, "logging.file", logFilePath,_logger);
 
     if (logEnabled)
     {
@@ -1910,10 +1976,10 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         }
     }
 
-    tryLoadValue(usedKeys, doc, "images.sixel_scrolling", _config.sixelScrolling);
-    tryLoadValue(usedKeys, doc, "images.sixel_register_count", _config.maxImageColorRegisters);
-    tryLoadValue(usedKeys, doc, "images.max_width", _config.maxImageSize.width);
-    tryLoadValue(usedKeys, doc, "images.max_height", _config.maxImageSize.height);
+    tryLoadValue(usedKeys, doc, "images.sixel_scrolling", _config.sixelScrolling,_logger);
+    tryLoadValue(usedKeys, doc, "images.sixel_register_count", _config.maxImageColorRegisters,_logger);
+    tryLoadValue(usedKeys, doc, "images.max_width", _config.maxImageSize.width,_logger);
+    tryLoadValue(usedKeys, doc, "images.max_height", _config.maxImageSize.height,_logger);
 
     if (auto colorschemes = doc["color_schemes"]; colorschemes)
     {
@@ -1926,12 +1992,12 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         }
     }
 
-    tryLoadValue(usedKeys, doc, "platform_plugin", _config.platformPlugin);
+    tryLoadValue(usedKeys, doc, "platform_plugin", _config.platformPlugin,_logger);
     if (_config.platformPlugin == "auto")
         _config.platformPlugin = ""; // Mapping "auto" to its internally equivalent "".
 
     string renderingBackendStr;
-    if (tryLoadValue(usedKeys, doc, "renderer.backend", renderingBackendStr))
+    if (tryLoadValue(usedKeys, doc, "renderer.backend", renderingBackendStr,_logger))
     {
         renderingBackendStr = toUpper(renderingBackendStr);
         if (renderingBackendStr == "OPENGL")
@@ -1942,9 +2008,9 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
             errorlog()("Unknown renderer: {}.", renderingBackendStr);
     }
 
-    tryLoadValue(usedKeys, doc, "renderer.tile_hashtable_slots", _config.textureAtlasHashtableSlots.value);
-    tryLoadValue(usedKeys, doc, "renderer.tile_cache_count", _config.textureAtlasTileCount.value);
-    tryLoadValue(usedKeys, doc, "renderer.tile_direct_mapping", _config.textureAtlasDirectMapping);
+    tryLoadValue(usedKeys, doc, "renderer.tile_hashtable_slots", _config.textureAtlasHashtableSlots.value,_logger);
+    tryLoadValue(usedKeys, doc, "renderer.tile_cache_count", _config.textureAtlasTileCount.value,_logger);
+    tryLoadValue(usedKeys, doc, "renderer.tile_direct_mapping", _config.textureAtlasDirectMapping,_logger);
 
     if (doc["mock_font_locator"].IsSequence())
     {
@@ -1963,14 +2029,14 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         text::mock_font_locator::configure(std::move(registry));
     }
 
-    tryLoadValue(usedKeys, doc, "read_buffer_size", _config.ptyReadBufferSize);
+    tryLoadValue(usedKeys, doc, "read_buffer_size", _config.ptyReadBufferSize,_logger);
     if ((_config.ptyReadBufferSize % 16) != 0)
     {
         // For improved performance ...
         ConfigLog()("read_buffer_size must be a multiple of 16.");
     }
 
-    tryLoadValue(usedKeys, doc, "pty_buffer_size", _config.ptyBufferObjectSize);
+    tryLoadValue(usedKeys, doc, "pty_buffer_size", _config.ptyBufferObjectSize,_logger);
     if (_config.ptyBufferObjectSize < 1024 * 256)
     {
         // For improved performance ...
@@ -1979,28 +2045,44 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         _config.ptyBufferObjectSize = 1024 * 256;
     }
 
-    tryLoadValue(usedKeys, doc, "reflow_on_resize", _config.reflowOnResize);
-
-    if (auto profiles = doc["profiles"]; profiles)
-    {
-        usedKeys.emplace("profiles");
-        for (auto i = profiles.begin(); i != profiles.end(); ++i)
-        {
-            auto const& name = i->first.as<string>();
-            auto const profile = i->second;
-            auto const parentPath = "profiles"s;
-            usedKeys.emplace(fmt::format("{}.{}", parentPath, name));
-            _config.profiles[name] =
-                loadTerminalProfile(usedKeys, profile, parentPath, name, _config.colorschemes);
-        }
-    }
+    tryLoadValue(usedKeys, doc, "reflow_on_resize", _config.reflowOnResize,_logger);
 
     // TODO: If there is only one profile, prefill default_profile with that name.
     // TODO: If there are more than one profile, prefill with the top-most one.
-    tryLoadValue(usedKeys, doc, "default_profile", _config.defaultProfileName);
-    if (!_config.defaultProfileName.empty() && _config.profile(_config.defaultProfileName) == nullptr)
+    tryLoadValue(usedKeys, doc, "default_profile", _config.defaultProfileName,_logger);
+
+    if (auto profiles = doc["profiles"])
     {
-        errorlog()("default_profile \"{}\" not found in profiles list.", escape(_config.defaultProfileName));
+        auto const parentPath = "profiles"s;
+
+        usedKeys.emplace("profiles");
+        usedKeys.emplace(fmt::format("{}.{}", parentPath, _config.defaultProfileName));
+        _config.profiles[_config.defaultProfileName] =
+            loadTerminalProfile(usedKeys,
+                                profiles[_config.defaultProfileName],
+                                parentPath,
+                                _config.defaultProfileName,
+                                _config.colorschemes);
+
+        if (!_config.defaultProfileName.empty() && _config.profile(_config.defaultProfileName) == nullptr)
+        {
+            errorlog()("default_profile \"{}\" not found in profiles list.",
+                       escape(_config.defaultProfileName));
+        }
+        auto dummy = logstore::Category("dymmy", "empty logger", logstore::Category::State::Disabled);
+
+        for (auto i = profiles.begin(); i != profiles.end(); ++i)
+        {
+            auto const& name = i->first.as<string>();
+            if (name == _config.defaultProfileName)
+                continue;
+            auto const profile = i->second;
+            usedKeys.emplace(fmt::format("{}.{}", parentPath, name));
+            _config.profiles[name] = _config.profiles[_config.defaultProfileName];
+            bool emmit_errors = false;
+            updateTerminalProfile(
+                _config.profiles[name], usedKeys, profile, parentPath, name, _config.colorschemes, dummy());
+        }
     }
 
     if (auto mapping = doc["input_mapping"]; mapping)
