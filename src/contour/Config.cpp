@@ -635,17 +635,18 @@ namespace
         return nullopt;
     }
 
-    optional<config::CursorConfig> parseCursorConfig(YAML::Node const& rootNode,
-                                                     UsedKeys& usedKeys,
-                                                     std::string const& basePath)
+    void parseCursorConfig(CursorConfig& cursorConfig,
+                           YAML::Node const& rootNode,
+                           UsedKeys& usedKeys,
+                           std::string const& basePath)
     {
         if (!rootNode)
-            return nullopt;
+            return;
 
-        auto cursorConfig = config::CursorConfig {};
-        auto strValue = "block"s;
+        std::string strValue;
         tryLoadChildRelative(usedKeys, rootNode, basePath, "shape", strValue, errorlog());
-        cursorConfig.cursorShape = terminal::makeCursorShape(strValue);
+        if (!strValue.empty())
+            cursorConfig.cursorShape = terminal::makeCursorShape(strValue);
 
         bool boolValue = cursorConfig.cursorDisplay == terminal::CursorDisplay::Blink;
         tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking", boolValue, errorlog());
@@ -655,7 +656,6 @@ namespace
         auto uintValue = cursorConfig.cursorBlinkInterval.count();
         tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking_interval", uintValue, errorlog());
         cursorConfig.cursorBlinkInterval = chrono::milliseconds(uintValue);
-        return cursorConfig;
     }
 
     optional<terminal::Modifier::Key> parseModifierKey(string const& _key)
@@ -1586,9 +1586,6 @@ namespace
 
         auto const fontBasePath = fmt::format("{}.{}.font", _parentPath, _profileName);
 
-        profile.fonts.regular.familyName = "regular";
-        profile.fonts.regular.spacing = text::font_spacing::mono;
-        profile.fonts.regular.strict_spacing = strictSpacing;
         softLoadFont(profile.fonts.textShapingEngine,
                      _usedKeys,
                      fontBasePath,
@@ -1596,7 +1593,6 @@ namespace
                      "regular",
                      profile.fonts.regular);
 
-        profile.fonts.bold = profile.fonts.regular;
         profile.fonts.bold.weight = text::font_weight::bold;
         softLoadFont(profile.fonts.textShapingEngine,
                      _usedKeys,
@@ -1605,7 +1601,6 @@ namespace
                      "bold",
                      profile.fonts.bold);
 
-        profile.fonts.italic = profile.fonts.regular;
         profile.fonts.italic.slant = text::font_slant::italic;
         softLoadFont(profile.fonts.textShapingEngine,
                      _usedKeys,
@@ -1614,7 +1609,6 @@ namespace
                      "italic",
                      profile.fonts.italic);
 
-        profile.fonts.boldItalic = profile.fonts.regular;
         profile.fonts.boldItalic.weight = text::font_weight::bold;
         profile.fonts.boldItalic.slant = text::font_slant::italic;
         softLoadFont(profile.fonts.textShapingEngine,
@@ -1734,33 +1728,28 @@ namespace
                              profile.highlightDoubleClickedWord,
                              _logger);
 
-        if (optional<config::CursorConfig> cursorOpt =
-                parseCursorConfig(_profile["cursor"], _usedKeys, basePath + ".cursor"))
-        {
-            _usedKeys.emplace(basePath + ".cursor");
-            profile.inputModes.insert.cursor = cursorOpt.value();
-        }
+        parseCursorConfig(
+            profile.inputModes.insert.cursor, _profile["cursor"], _usedKeys, basePath + ".cursor");
+        _usedKeys.emplace(basePath + ".cursor");
 
         if (auto normalModeNode = _profile["normal_mode"])
         {
             _usedKeys.emplace(basePath + ".normal_mode");
-            if (optional<config::CursorConfig> cursorOpt =
-                    parseCursorConfig(normalModeNode["cursor"], _usedKeys, basePath + ".normal_mode.cursor"))
-            {
-                _usedKeys.emplace(basePath + ".normal_mode.cursor");
-                profile.inputModes.normal.cursor = cursorOpt.value();
-            }
+            parseCursorConfig(profile.inputModes.normal.cursor,
+                              normalModeNode["cursor"],
+                              _usedKeys,
+                              basePath + ".normal_mode.cursor");
+            _usedKeys.emplace(basePath + ".normal_mode.cursor");
         }
 
         if (auto visualModeNode = _profile["visual_mode"])
         {
             _usedKeys.emplace(basePath + ".visual_mode");
-            if (optional<config::CursorConfig> cursorOpt =
-                    parseCursorConfig(visualModeNode["cursor"], _usedKeys, basePath + ".visual_mode.cursor"))
-            {
-                _usedKeys.emplace(basePath + ".visual_mode.cursor");
-                profile.inputModes.visual.cursor = cursorOpt.value();
-            }
+            parseCursorConfig(profile.inputModes.visual.cursor,
+                              visualModeNode["cursor"],
+                              _usedKeys,
+                              basePath + ".visual_mode.cursor");
+            _usedKeys.emplace(basePath + ".visual_mode.cursor");
         }
 
         strValue = "none";
@@ -2079,7 +2068,6 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
             auto const profile = i->second;
             usedKeys.emplace(fmt::format("{}.{}", parentPath, name));
             _config.profiles[name] = _config.profiles[_config.defaultProfileName];
-            bool emmit_errors = false;
             updateTerminalProfile(
                 _config.profiles[name], usedKeys, profile, parentPath, name, _config.colorschemes, dummy());
         }

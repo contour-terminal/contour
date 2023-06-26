@@ -133,8 +133,8 @@ std::vector<actions::Action> const* apply(
 
 struct CursorConfig
 {
-    terminal::CursorShape cursorShape;
-    terminal::CursorDisplay cursorDisplay;
+    terminal::CursorShape cursorShape { terminal::CursorShape::Block };
+    terminal::CursorDisplay cursorDisplay { terminal::CursorDisplay::Steady };
     std::chrono::milliseconds cursorBlinkInterval;
 };
 
