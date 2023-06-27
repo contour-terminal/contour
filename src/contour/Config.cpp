@@ -1382,11 +1382,9 @@ namespace
                 profile.shell.arguments.emplace_back(argNode.as<string>());
         }
 
-        string strValue = FileSystem::current_path().generic_string();
+        std::string strValue;
         tryLoadChildRelative(_usedKeys, _profile, basePath, "initial_working_directory", strValue, _logger);
-        if (strValue.empty())
-            profile.shell.workingDirectory = FileSystem::current_path();
-        else
+        if (!strValue.empty())
             profile.shell.workingDirectory = FileSystem::path(strValue);
 
         profile.shell.workingDirectory =
