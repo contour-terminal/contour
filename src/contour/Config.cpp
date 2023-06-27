@@ -988,13 +988,15 @@ namespace
         }
     }
 
-    void updateColorScheme(terminal::ColorPalette& colors, UsedKeys& _usedKeys,
-                                           string const& _basePath,
-                                           YAML::Node const& _node)
+    void updateColorScheme(terminal::ColorPalette& colors,
+                           UsedKeys& _usedKeys,
+                           string const& _basePath,
+                           YAML::Node const& _node)
 
     {
         if (!_node)
-            return;;
+            return;
+        ;
 
         _usedKeys.emplace(_basePath);
         using terminal::RGBColor;
@@ -1157,9 +1159,7 @@ namespace
         string fileName;
         if (tryLoadChildRelative(_usedKeys, _node, _basePath, "background_image.path", fileName, errorlog()))
             colors.backgroundImage = loadImage(fileName, opacityValue, imageBlur);
-
     }
-
 
     terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys,
                                            string const& _basePath,
@@ -1170,7 +1170,6 @@ namespace
         updateColorScheme(colors, _usedKeys, _basePath, _node);
         return colors;
     }
-
 
     void softLoadFont(UsedKeys& _usedKeys,
                       string_view _basePath,
@@ -1957,10 +1956,10 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
     tryLoadValue(usedKeys, doc, "live_config", _config.live, logger);
 
     auto logEnabled = false;
-    tryLoadValue(usedKeys, doc, "logging.enabled", logEnabled,logger);
+    tryLoadValue(usedKeys, doc, "logging.enabled", logEnabled, logger);
 
     auto logFilePath = ""s;
-    tryLoadValue(usedKeys, doc, "logging.file", logFilePath,logger);
+    tryLoadValue(usedKeys, doc, "logging.file", logFilePath, logger);
 
     if (logEnabled)
     {
@@ -1975,10 +1974,10 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         }
     }
 
-    tryLoadValue(usedKeys, doc, "images.sixel_scrolling", _config.sixelScrolling,logger);
-    tryLoadValue(usedKeys, doc, "images.sixel_register_count", _config.maxImageColorRegisters,logger);
-    tryLoadValue(usedKeys, doc, "images.max_width", _config.maxImageSize.width,logger);
-    tryLoadValue(usedKeys, doc, "images.max_height", _config.maxImageSize.height,logger);
+    tryLoadValue(usedKeys, doc, "images.sixel_scrolling", _config.sixelScrolling, logger);
+    tryLoadValue(usedKeys, doc, "images.sixel_register_count", _config.maxImageColorRegisters, logger);
+    tryLoadValue(usedKeys, doc, "images.max_width", _config.maxImageSize.width, logger);
+    tryLoadValue(usedKeys, doc, "images.max_height", _config.maxImageSize.height, logger);
 
     if (auto colorschemes = doc["color_schemes"]; colorschemes)
     {
@@ -1986,12 +1985,13 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         // load default colorschemes
         const std::string name_default = "default";
         auto const path_default = "color_schemes." + name_default;
-        _config.colorschemes[name_default] = loadColorScheme(usedKeys, path_default, colorschemes.begin()->second);
+        _config.colorschemes[name_default] =
+            loadColorScheme(usedKeys, path_default, colorschemes.begin()->second);
 
         for (auto i = colorschemes.begin(); i != colorschemes.end(); ++i)
         {
             auto const name = i->first.as<string>();
-            if(name == name_default)
+            if (name == name_default)
                 continue;
             auto const path = "color_schemes." + name;
             _config.colorschemes[name] = _config.colorschemes[name_default];
@@ -1999,12 +1999,12 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         }
     }
 
-    tryLoadValue(usedKeys, doc, "platform_plugin", _config.platformPlugin,logger);
+    tryLoadValue(usedKeys, doc, "platform_plugin", _config.platformPlugin, logger);
     if (_config.platformPlugin == "auto")
         _config.platformPlugin = ""; // Mapping "auto" to its internally equivalent "".
 
     string renderingBackendStr;
-    if (tryLoadValue(usedKeys, doc, "renderer.backend", renderingBackendStr,logger))
+    if (tryLoadValue(usedKeys, doc, "renderer.backend", renderingBackendStr, logger))
     {
         renderingBackendStr = toUpper(renderingBackendStr);
         if (renderingBackendStr == "OPENGL")
@@ -2015,9 +2015,10 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
             errorlog()("Unknown renderer: {}.", renderingBackendStr);
     }
 
-    tryLoadValue(usedKeys, doc, "renderer.tile_hashtable_slots", _config.textureAtlasHashtableSlots.value,logger);
-    tryLoadValue(usedKeys, doc, "renderer.tile_cache_count", _config.textureAtlasTileCount.value,logger);
-    tryLoadValue(usedKeys, doc, "renderer.tile_direct_mapping", _config.textureAtlasDirectMapping,logger);
+    tryLoadValue(
+        usedKeys, doc, "renderer.tile_hashtable_slots", _config.textureAtlasHashtableSlots.value, logger);
+    tryLoadValue(usedKeys, doc, "renderer.tile_cache_count", _config.textureAtlasTileCount.value, logger);
+    tryLoadValue(usedKeys, doc, "renderer.tile_direct_mapping", _config.textureAtlasDirectMapping, logger);
 
     if (doc["mock_font_locator"].IsSequence())
     {
@@ -2036,14 +2037,14 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         text::mock_font_locator::configure(std::move(registry));
     }
 
-    tryLoadValue(usedKeys, doc, "read_buffer_size", _config.ptyReadBufferSize,logger);
+    tryLoadValue(usedKeys, doc, "read_buffer_size", _config.ptyReadBufferSize, logger);
     if ((_config.ptyReadBufferSize % 16) != 0)
     {
         // For improved performance ...
         ConfigLog()("read_buffer_size must be a multiple of 16.");
     }
 
-    tryLoadValue(usedKeys, doc, "pty_buffer_size", _config.ptyBufferObjectSize,logger);
+    tryLoadValue(usedKeys, doc, "pty_buffer_size", _config.ptyBufferObjectSize, logger);
     if (_config.ptyBufferObjectSize < 1024 * 256)
     {
         // For improved performance ...
@@ -2052,11 +2053,11 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         _config.ptyBufferObjectSize = 1024 * 256;
     }
 
-    tryLoadValue(usedKeys, doc, "reflow_on_resize", _config.reflowOnResize,logger);
+    tryLoadValue(usedKeys, doc, "reflow_on_resize", _config.reflowOnResize, logger);
 
     // TODO: If there is only one profile, prefill default_profile with that name.
     // TODO: If there are more than one profile, prefill with the top-most one.
-    tryLoadValue(usedKeys, doc, "default_profile", _config.defaultProfileName,logger);
+    tryLoadValue(usedKeys, doc, "default_profile", _config.defaultProfileName, logger);
 
     if (auto profiles = doc["profiles"])
     {
