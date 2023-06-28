@@ -180,7 +180,7 @@ struct font_description
 {
     std::string familyName { "regular" };
 #if defined(_WIN32)
-    std::wstring wFamilyName { "regular" };
+    std::wstring wFamilyName { L"regular" };
 #endif
 
     font_weight weight = font_weight::normal;
