@@ -152,7 +152,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os_version: [38, 37, 36]
+        os_version: [36, 37, 38, rawhide]
         arch:
           [
             "linux/amd64 x86_64"
