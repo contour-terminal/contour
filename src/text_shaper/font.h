@@ -178,9 +178,9 @@ struct font_feature
 
 struct font_description
 {
-    std::string familyName;
+    std::string familyName { "regular" };
 #if defined(_WIN32)
-    std::wstring wFamilyName;
+    std::wstring wFamilyName { L"regular" };
 #endif
 
     font_weight weight = font_weight::normal;
