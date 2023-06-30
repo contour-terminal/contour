@@ -84,10 +84,11 @@ fetch_and_unpack_Catch2()
 
 fetch_and_unpack_fmtlib()
 {
+    fmtlib_version="10.0.0"
     fetch_and_unpack \
-        fmt-9.1.0 \
-        fmtlib-9.1.0.tar.gz \
-        https://github.com/fmtlib/fmt/archive/refs/tags/9.1.0.tar.gz
+        fmt-$fmtlib_version \
+        fmtlib-$fmtlib_version.tar.gz \
+        https://github.com/fmtlib/fmt/archive/refs/tags/$fmtlib_version.tar.gz
 }
 
 fetch_and_unpack_gsl()
@@ -424,7 +425,12 @@ install_deps_fedora()
 
     fetch_and_unpack_libunicode
     fetch_and_unpack_gsl
-    fetch_and_unpack_fmtlib
+
+    if test "$os_version" -ge 39; then
+        packages="$packages fmt"
+    else
+        fetch_and_unpack_fmtlib
+    fi
 
     # catch-devel on Fedora 38 is too new, so we need to use the one we downloaded.
     if test "$os_version" -lt 38; then
