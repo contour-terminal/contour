@@ -1,17 +1,43 @@
-# Custom profiles
 
-Multiple profiles can be defines and switched between at runtime
-or set at process start-up.
+All profiles inside configuration files shares parent node `profiles`. To create profile you need to specify child node
+```
+profiles:
+    main:
+    #default configuration
+    profile_for_windows:
+    # windows specific entries
+    profie_for_macos:
+    # macos specific entries
 
-## Configuring the default profile
-
-The default profile is automatically the top (first)
-defined profile in the configuration file, but
-can be explicitly set to an order-independant name
-using `default_profile` configuration key.
-
-    default_profile: main
+```
 
 
-TODO: Here be dragons.
+Full list of values that can be configured inside one profile <br/>
 
+`shell`:
+`escape_sandbox`:
+`copy_last_mark_range_offset`:
+`initial_working_directory`:
+`show_title_bar`:
+`fullscreen`:
+`maximized`:
+`wm_class`:
+`terminal_id`:
+`terminal_size`:
+`history`:
+`scrollbar`:
+`mouse:`
+`permissions`:
+`highlight_word_and_matches_on_double_click`:
+`font`:
+`draw_bold_text_with_bright_colors`:
+`cursor`:
+`normal_mode`:
+`visual_mode`:
+`vi_mode_highlight_timeout`:
+`vi_mode_scrolloff`:
+`status_line`:
+`background`:
+`colors`:
+`hyperlink_decoration:`:
+```

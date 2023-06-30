@@ -64,7 +64,7 @@ plugins:
   - exclude:
       glob:
         - 'drafts/*'
-        - 'configuration/*' # disabled until ready
+        - 'configuration/advanced/*' # disabled until ready
   - search:
       separator: '[\s\-,:!=\[\]()"/]+|(?!\b)(?=[A-Z][a-z])'
 
@@ -75,14 +75,12 @@ nav:
     - CONTRIBUTING.md
   - Getting started:
     - Installation: install.md
-    # - Configuration:
-    #   - configuration/index.md
-    #   - Profiles: configuration/profiles.md
-    #   - Theming: configuration/theming.md
-    #   - Images (Advanced) : configuration/advanced/images.md
-    #   - Mouse (Advanced) : configuration/advanced/images.md
-    #   - Misc (Advanced) : configuration/advanced/mouse.md
-    #   - Rendered (Advanced) : configuration/advanced/rendered.md
+  - Configuration:
+    - configuration/index.md
+    #- Images (Advanced) : configuration/advanced/images.md
+    #- Mouse (Advanced) : configuration/advanced/images.md
+    #- Misc (Advanced) : configuration/advanced/mouse.md
+    #- Rendered (Advanced) : configuration/advanced/rendered.md
   - Features:
     - List of features: features.md
     - Font liagatures: demo/font-ligatures.md
