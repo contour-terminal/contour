@@ -152,7 +152,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os_version: [36, 37, 38, rawhide]
+        os_version: [36, 37, 38, 39]
         arch:
           [
             "linux/amd64 x86_64"
@@ -196,8 +196,8 @@ jobs:
           mkdir -p ${DISTDIR}
           cp -rvp . ${DISTDIR}
           tar czpf ${PKGNAME}.tar.gz -C "/tmp/dist" .
-      - name: disable pedantic compiler if broken GCC
-        if: ${{ matrix.os_version == 38 }}
+      - name: disable pedantic compiler on certain OS versions
+        if: ${{ matrix.os_version == 38 || matrix.os_version == 39 }}
         run: |
           set -ex
           sed -i -e "s/PEDANTIC_COMPILER=ON/PEDANTIC_COMPILER=OFF/" .github/fedora/contour.spec
@@ -247,6 +247,7 @@ jobs:
           path: "contour-debugsource-${{ steps.set_vars.outputs.VERSION }}-1.fc${{ matrix.os_version }}.${{ steps.tags.outputs.ARCH }}.rpm"
           if-no-files-found: error
           retention-days: 7
+
   freebsd:
     runs-on: macos-12
     name: FreeBSD 13
