@@ -1,7 +1,11 @@
 # Contour Terminal Emulator
 
-Contour is a modern and actually fast, modal, virtual terminal emulator,
-for everyday use. It is aiming for power users with a modern feature mindset.
+Contour is modern, fast, and designed for everyday use.
+It's not just a terminal emulator, but a powerhouse of features tailored for those who seek efficiency and control. With GPU-accelerated rendering and high-DPI support, experience the smoothest and most responsive terminal emulator like never before.
+
+Contour is designed with the advanced power user in mind, offering high-speed, feature-rich functionality across all major platforms. From Linux and OS/X to FreeBSD and Windows, we've got you covered. <br/>
+Contour offers a suite of unique features designed to enhance your productivity and user experience. Enjoy support for font ligatures, emoji, and Unicode grapheme clusters. Navigate quickly with vertical line markers and vi-like input modes. Control your settings with runtime configuration reload and customizable key bindings. <br/>
+Bring your terminal to life with color schemes, profiles, and sixel inline images. Enjoy the convenience of clickable hyperlinks, and set your clipboard with OSC 52.  <br/>
 
 **This website is still in DRAFT mode, please be patient while we're building up the content.**
 
