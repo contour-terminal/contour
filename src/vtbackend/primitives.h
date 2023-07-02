@@ -908,136 +908,91 @@ struct numeric_limits<terminal::CursorShape>
 } // namespace std
 
 // {{{ fmt formatter
-namespace fmt
-{
-
 template <>
-struct formatter<terminal::CursorShape>
+struct fmt::formatter<terminal::CursorShape>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::CursorShape value, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::CursorShape value, FormatContext& ctx)
-    {
+        string_view name;
         switch (value)
         {
-            case terminal::CursorShape::Bar: return fmt::format_to(ctx.out(), "Bar");
-            case terminal::CursorShape::Block: return fmt::format_to(ctx.out(), "Block");
-            case terminal::CursorShape::Rectangle: return fmt::format_to(ctx.out(), "Rectangle");
-            case terminal::CursorShape::Underscore: return fmt::format_to(ctx.out(), "Underscore");
+            case terminal::CursorShape::Bar: name = "Bar"; break;
+            case terminal::CursorShape::Block: name = "Block"; break;
+            case terminal::CursorShape::Rectangle: name = "Rectangle"; break;
+            case terminal::CursorShape::Underscore: name = "Underscore"; break;
         }
-        return fmt::format_to(ctx.out(), "{}", static_cast<unsigned>(value));
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct formatter<terminal::CellLocation>
+struct fmt::formatter<terminal::CellLocation>: formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::CellLocation coord, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::CellLocation coord, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(), "({}, {})", coord.line, coord.column);
+        return formatter<std::string>::format(fmt::format("({}, {})", coord.line, coord.column), ctx);
     }
 };
 
 template <>
-struct formatter<terminal::PageSize>
+struct fmt::formatter<terminal::PageSize>: formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::PageSize value, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::PageSize value, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(), "{}x{}", value.columns, value.lines);
+        return formatter<std::string>::format(fmt::format("{}x{}", value.columns, value.lines), ctx);
     }
 };
 
 template <>
-struct formatter<terminal::GridSize>
+struct fmt::formatter<terminal::GridSize>: formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::GridSize value, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::GridSize value, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(), "{}x{}", value.columns, value.lines);
+        return formatter<std::string>::format(fmt::format("{}x{}", value.columns, value.lines), ctx);
     }
 };
 
 template <>
-struct formatter<terminal::ScreenType>
+struct fmt::formatter<terminal::ScreenType>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(const terminal::ScreenType value, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(const terminal::ScreenType value, FormatContext& ctx)
-    {
+        string_view name;
         switch (value)
         {
-            case terminal::ScreenType::Primary: return fmt::format_to(ctx.out(), "Primary");
-            case terminal::ScreenType::Alternate: return fmt::format_to(ctx.out(), "Alternate");
+            case terminal::ScreenType::Primary: name = "Primary"; break;
+            case terminal::ScreenType::Alternate: name = "Alternate"; break;
         }
-        return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(value));
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct formatter<terminal::PixelCoordinate>
+struct fmt::formatter<terminal::PixelCoordinate>: formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(const terminal::PixelCoordinate coord, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(const terminal::PixelCoordinate coord, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(), "{}:{}", coord.x.value, coord.y.value);
+        return formatter<std::string>::format(fmt::format("{}:{}", coord.x.value, coord.y.value), ctx);
     }
 };
 
 template <>
-struct formatter<terminal::ViMode>
+struct fmt::formatter<terminal::ViMode>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::ViMode mode, FormatContext& ctx)
+    auto format(terminal::ViMode mode, format_context& ctx) -> format_context::iterator
     {
         using terminal::ViMode;
+        string_view name;
         switch (mode)
         {
-            case ViMode::Normal: return fmt::format_to(ctx.out(), "Normal");
-            case ViMode::Insert: return fmt::format_to(ctx.out(), "Insert");
-            case ViMode::Visual: return fmt::format_to(ctx.out(), "Visual");
-            case ViMode::VisualLine: return fmt::format_to(ctx.out(), "VisualLine");
-            case ViMode::VisualBlock: return fmt::format_to(ctx.out(), "VisualBlock");
+            case ViMode::Normal: name = "Normal"; break;
+            case ViMode::Insert: name = "Insert"; break;
+            case ViMode::Visual: name = "Visual"; break;
+            case ViMode::VisualLine: name = "VisualLine"; break;
+            case ViMode::VisualBlock: name = "VisualBlock"; break;
         }
-        return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(mode));
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
-} // namespace fmt
 // }}}

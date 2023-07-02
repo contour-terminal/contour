@@ -80,82 +80,58 @@ constexpr bool operator<(TextStyle a, TextStyle b) noexcept
 } // namespace terminal::rasterizer
 
 // {{{ fmt formatter
-namespace fmt
-{
-
 template <>
-struct formatter<terminal::rasterizer::FontLocatorEngine>
+struct fmt::formatter<terminal::rasterizer::FontLocatorEngine>: fmt::formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::rasterizer::FontLocatorEngine value, format_context& ctx)
+        -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::rasterizer::FontLocatorEngine value, FormatContext& ctx)
-    {
+        string_view name;
         switch (value)
         {
-            case terminal::rasterizer::FontLocatorEngine::CoreText:
-                return fmt::format_to(ctx.out(), "CoreText");
-            case terminal::rasterizer::FontLocatorEngine::DWrite:
-                return fmt::format_to(ctx.out(), "DirectWrite");
-            case terminal::rasterizer::FontLocatorEngine::FontConfig:
-                return fmt::format_to(ctx.out(), "Fontconfig");
-            case terminal::rasterizer::FontLocatorEngine::Mock: return fmt::format_to(ctx.out(), "Mock");
+            case terminal::rasterizer::FontLocatorEngine::CoreText: name = "CoreText"; break;
+            case terminal::rasterizer::FontLocatorEngine::DWrite: name = "DirectWrite"; break;
+            case terminal::rasterizer::FontLocatorEngine::FontConfig: name = "Fontconfig"; break;
+            case terminal::rasterizer::FontLocatorEngine::Mock: name = "Mock"; break;
         }
-        return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(value));
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct formatter<terminal::rasterizer::TextShapingEngine>
+struct fmt::formatter<terminal::rasterizer::TextShapingEngine>: fmt::formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::rasterizer::TextShapingEngine value, format_context& ctx)
+        -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::rasterizer::TextShapingEngine value, FormatContext& ctx)
-    {
+        string_view name;
         switch (value)
         {
-            case terminal::rasterizer::TextShapingEngine::CoreText:
-                return fmt::format_to(ctx.out(), "CoreText");
-            case terminal::rasterizer::TextShapingEngine::DWrite:
-                return fmt::format_to(ctx.out(), "DirectWrite");
-            case terminal::rasterizer::TextShapingEngine::OpenShaper:
-                return fmt::format_to(ctx.out(), "harfbuzz");
+            case terminal::rasterizer::TextShapingEngine::CoreText: name = "CoreText"; break;
+            case terminal::rasterizer::TextShapingEngine::DWrite: name = "DirectWrite"; break;
+            case terminal::rasterizer::TextShapingEngine::OpenShaper: name = "harfbuzz"; break;
         }
-        return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(value));
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct formatter<terminal::rasterizer::FontDescriptions>
+struct fmt::formatter<terminal::rasterizer::FontDescriptions>: fmt::formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::rasterizer::FontDescriptions const& fd, format_context& ctx)
+        -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::rasterizer::FontDescriptions const& fd, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(),
-                              "({}, {}, {}, {}, {}, {}, {}, {})",
-                              fd.size,
-                              fd.dpi,
-                              fd.dpiScale,
-                              fd.regular,
-                              fd.bold,
-                              fd.italic,
-                              fd.boldItalic,
-                              fd.emoji,
-                              fd.renderMode);
+        return formatter<std::string>::format(fmt::format("({}, {}, {}, {}, {}, {}, {}, {})",
+                                                          fd.size,
+                                                          fd.dpi,
+                                                          fd.dpiScale,
+                                                          fd.regular,
+                                                          fd.bold,
+                                                          fd.italic,
+                                                          fd.boldItalic,
+                                                          fd.emoji,
+                                                          fd.renderMode),
+                                              ctx);
     }
 };
-
-} // namespace fmt
 // }}}

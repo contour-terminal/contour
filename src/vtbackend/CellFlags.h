@@ -89,18 +89,11 @@ constexpr bool operator!(CellFlags a) noexcept
 
 } // namespace terminal
 
-namespace fmt // {{{
-{
+// {{{
 template <>
-struct formatter<terminal::CellFlags>
+struct fmt::formatter<terminal::CellFlags>: fmt::formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(const terminal::CellFlags flags, FormatContext& ctx)
+    auto format(const terminal::CellFlags flags, format_context& ctx) -> format_context::iterator
     {
         static const std::array<std::pair<terminal::CellFlags, std::string_view>, 17> nameMap = {
             std::pair { terminal::CellFlags::Bold, std::string_view("Bold") },
@@ -131,7 +124,7 @@ struct formatter<terminal::CellFlags>
                 s += mapping.second;
             }
         }
-        return fmt::format_to(ctx.out(), "{}", s);
+        return formatter<std::string>::format(s, ctx);
     }
 };
-} // namespace fmt
+// }}}

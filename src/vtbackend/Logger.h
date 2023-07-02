@@ -59,19 +59,11 @@ using Logger = std::function<void(LogEvent)>;
 
 } // namespace terminal
 
-namespace fmt
-{
 template <>
-struct formatter<terminal::LogEvent>
+struct fmt::formatter<terminal::LogEvent>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(const terminal::LogEvent& ev, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(const terminal::LogEvent& ev, format_context& ctx) -> format_context::iterator
     {
         using namespace terminal;
         return std::visit(
@@ -101,4 +93,3 @@ struct formatter<terminal::LogEvent>
             ev);
     }
 };
-} // namespace fmt

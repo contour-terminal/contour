@@ -486,18 +486,10 @@ inline bool beginsWith(std::u32string_view text, CompactCell const& cell) noexce
 
 } // namespace terminal
 
-namespace fmt // {{{
-{
 template <>
-struct formatter<terminal::CompactCell>
+struct fmt::formatter<terminal::CompactCell>: fmt::formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::CompactCell const& cell, FormatContext& ctx)
+    auto format(terminal::CompactCell const& cell, format_context& ctx) -> format_context::iterator
     {
         std::string codepoints;
         for (auto const i: crispy::times(cell.codepointCount()))
@@ -506,7 +498,7 @@ struct formatter<terminal::CompactCell>
                 codepoints += ", ";
             codepoints += fmt::format("{:02X}", static_cast<unsigned>(cell.codepoint(i)));
         }
-        return fmt::format_to(ctx.out(), "(chars={}, width={})", codepoints, cell.width());
+        return formatter<std::string>::format(fmt::format("(chars={}, width={})", codepoints, cell.width()),
+                                              ctx);
     }
 };
-} // namespace fmt

@@ -69,20 +69,13 @@ bool operator<(InputBinding<I, O> const& a, InputBinding<I, O> const& b) noexcep
 
 } // namespace terminal
 
-namespace fmt
-{
 template <typename I, typename O>
-struct formatter<terminal::InputBinding<I, O>>
+struct fmt::formatter<terminal::InputBinding<I, O>>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::InputBinding<I, O> const& binding, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(terminal::InputBinding<I, O> const& binding, format_context& ctx)
+        -> format_context::iterator
     {
         return fmt::format_to(ctx.out(), "{} {} {}", binding.modes, binding.modifier, binding.input);
     }
 };
-} // namespace fmt

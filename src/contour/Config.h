@@ -313,10 +313,9 @@ std::string defaultConfigFilePath();
 
 } // namespace contour::config
 
-namespace fmt // {{{
-{
+// {{{ fmtlib custom formatter support
 template <>
-struct formatter<contour::config::Permission>
+struct fmt::formatter<contour::config::Permission>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -337,7 +336,7 @@ struct formatter<contour::config::Permission>
 };
 
 template <>
-struct formatter<contour::config::SelectionAction>
+struct fmt::formatter<contour::config::SelectionAction>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -360,7 +359,7 @@ struct formatter<contour::config::SelectionAction>
 };
 
 template <>
-struct formatter<contour::config::ScrollBarPosition>
+struct fmt::formatter<contour::config::ScrollBarPosition>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -380,5 +379,4 @@ struct formatter<contour::config::ScrollBarPosition>
         return fmt::format_to(ctx.out(), "{}", static_cast<unsigned>(_value));
     }
 };
-
-} // namespace fmt
+// }}}

@@ -267,143 +267,120 @@ class ViInputHandler: public InputHandler
 
 } // namespace terminal
 
-namespace fmt // {{{
-{
-
+// {{{ fmtlib custom formatters
 template <>
-struct formatter<terminal::TextObjectScope>
+struct fmt::formatter<terminal::TextObjectScope>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::TextObjectScope scope, FormatContext& ctx)
+    auto format(terminal::TextObjectScope scope, format_context& ctx) -> format_context::iterator
     {
         using TextObjectScope = terminal::TextObjectScope;
+        string_view name;
         switch (scope)
         {
-            case TextObjectScope::Inner: return fmt::format_to(ctx.out(), "inner");
-            case TextObjectScope::A: return fmt::format_to(ctx.out(), "a");
+            case TextObjectScope::Inner: name = "inner"; break;
+            case TextObjectScope::A: name = "a"; break;
         }
-        return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(scope));
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct formatter<terminal::TextObject>
+struct fmt::formatter<terminal::TextObject>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::TextObject textObject, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::TextObject value, FormatContext& ctx)
-    {
-        using terminal::TextObject;
-        switch (value)
+        using TextObject = terminal::TextObject;
+        string_view name;
+        switch (textObject)
         {
-            case TextObject::AngleBrackets: return fmt::format_to(ctx.out(), "AngleBrackets");
-            case TextObject::BackQuotes: return fmt::format_to(ctx.out(), "BackQuotes");
-            case TextObject::CurlyBrackets: return fmt::format_to(ctx.out(), "CurlyBrackets");
-            case TextObject::DoubleQuotes: return fmt::format_to(ctx.out(), "DoubleQuotes");
-            case TextObject::LineMark: return fmt::format_to(ctx.out(), "LineMark");
-            case TextObject::Paragraph: return fmt::format_to(ctx.out(), "Paragraph");
-            case TextObject::RoundBrackets: return fmt::format_to(ctx.out(), "RoundBrackets");
-            case TextObject::SingleQuotes: return fmt::format_to(ctx.out(), "SingleQuotes");
-            case TextObject::SquareBrackets: return fmt::format_to(ctx.out(), "SquareBrackets");
-            case TextObject::Word: return fmt::format_to(ctx.out(), "Word");
-            case TextObject::BigWord: return fmt::format_to(ctx.out(), "BigWord");
+            case TextObject::AngleBrackets: name = "AngleBrackets"; break;
+            case TextObject::BackQuotes: name = "BackQuotes"; break;
+            case TextObject::CurlyBrackets: name = "CurlyBrackets"; break;
+            case TextObject::DoubleQuotes: name = "DoubleQuotes"; break;
+            case TextObject::LineMark: name = "LineMark"; break;
+            case TextObject::Paragraph: name = "Paragraph"; break;
+            case TextObject::RoundBrackets: name = "RoundBrackets"; break;
+            case TextObject::SingleQuotes: name = "SingleQuotes"; break;
+            case TextObject::SquareBrackets: name = "SquareBrackets"; break;
+            case TextObject::Word: name = "Word"; break;
+            case TextObject::BigWord: name = "BigWord"; break;
         }
-        return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(value));
+        return formatter<string_view>::format(name, ctx);
     }
 };
+
 template <>
-struct formatter<terminal::ViOperator>
+struct fmt::formatter<terminal::ViOperator>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::ViOperator op, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::ViOperator op, FormatContext& ctx)
-    {
+        string_view name;
         using terminal::ViOperator;
         switch (op)
         {
-            case ViOperator::MoveCursor: return fmt::format_to(ctx.out(), "MoveCursor");
-            case ViOperator::Yank: return fmt::format_to(ctx.out(), "Yank");
-            case ViOperator::Paste: return fmt::format_to(ctx.out(), "Paste");
-            case ViOperator::PasteStripped: return fmt::format_to(ctx.out(), "PasteStripped");
-            case ViOperator::ReverseSearchCurrentWord:
-                return fmt::format_to(ctx.out(), "ReverseSearchCurrentWord");
+            case ViOperator::MoveCursor: name = "MoveCursor"; break;
+            case ViOperator::Yank: name = "Yank"; break;
+            case ViOperator::Paste: name = "Paste"; break;
+            case ViOperator::PasteStripped: name = "PasteStripped"; break;
+            case ViOperator::ReverseSearchCurrentWord: name = "ReverseSearchCurrentWord"; break;
         }
-        return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(op));
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct formatter<terminal::ViMotion>
+struct fmt::formatter<terminal::ViMotion>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::ViMotion motion, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::ViMotion motion, FormatContext& ctx)
-    {
+        string_view name;
         using terminal::ViMotion;
         switch (motion)
         {
-            case ViMotion::Explicit: return fmt::format_to(ctx.out(), "Explicit");
-            case ViMotion::Selection: return fmt::format_to(ctx.out(), "Selection");
-            case ViMotion::FullLine: return fmt::format_to(ctx.out(), "FullLine");
-            case ViMotion::CharLeft: return fmt::format_to(ctx.out(), "CharLeft");
-            case ViMotion::CharRight: return fmt::format_to(ctx.out(), "CharRight");
-            case ViMotion::ScreenColumn: return fmt::format_to(ctx.out(), "ScreenColumn");
-            case ViMotion::FileBegin: return fmt::format_to(ctx.out(), "FileBegin");
-            case ViMotion::FileEnd: return fmt::format_to(ctx.out(), "FileEnd");
-            case ViMotion::LineBegin: return fmt::format_to(ctx.out(), "LineBegin");
-            case ViMotion::LineTextBegin: return fmt::format_to(ctx.out(), "LineTextBegin");
-            case ViMotion::LineDown: return fmt::format_to(ctx.out(), "LineDown");
-            case ViMotion::LineEnd: return fmt::format_to(ctx.out(), "LineEnd");
-            case ViMotion::LineUp: return fmt::format_to(ctx.out(), "LineUp");
-            case ViMotion::LinesCenter: return fmt::format_to(ctx.out(), "LinesCenter");
-            case ViMotion::PageDown: return fmt::format_to(ctx.out(), "PageDown");
-            case ViMotion::PageUp: return fmt::format_to(ctx.out(), "PageUp");
-            case ViMotion::PageTop: return fmt::format_to(ctx.out(), "PageTop");
-            case ViMotion::PageBottom: return fmt::format_to(ctx.out(), "PageBottom");
-            case ViMotion::ParagraphBackward: return fmt::format_to(ctx.out(), "ParagraphBackward");
-            case ViMotion::ParagraphForward: return fmt::format_to(ctx.out(), "ParagraphForward");
-            case ViMotion::ParenthesisMatching: return fmt::format_to(ctx.out(), "ParenthesisMatching");
-            case ViMotion::SearchResultBackward: return fmt::format_to(ctx.out(), "SearchResultBackward");
-            case ViMotion::SearchResultForward: return fmt::format_to(ctx.out(), "SearchResultForward");
-            case ViMotion::WordBackward: return fmt::format_to(ctx.out(), "WordBackward");
-            case ViMotion::WordEndForward: return fmt::format_to(ctx.out(), "WordEndForward");
-            case ViMotion::WordForward: return fmt::format_to(ctx.out(), "WordForward");
-            case ViMotion::BigWordBackward: return fmt::format_to(ctx.out(), "BigWordBackward");
-            case ViMotion::BigWordEndForward: return fmt::format_to(ctx.out(), "BigWordEndForward");
-            case ViMotion::BigWordForward: return fmt::format_to(ctx.out(), "BigWordForward");
-            case ViMotion::TillBeforeCharRight: return fmt::format_to(ctx.out(), "TillBeforeCharRight");
-            case ViMotion::TillAfterCharLeft: return fmt::format_to(ctx.out(), "TillAfterCharLeft");
-            case ViMotion::ToCharRight: return fmt::format_to(ctx.out(), "ToCharRight");
-            case ViMotion::ToCharLeft: return fmt::format_to(ctx.out(), "ToCharLeft");
-            case ViMotion::RepeatCharMove: return fmt::format_to(ctx.out(), "RepeatCharMove");
-            case ViMotion::RepeatCharMoveReverse: return fmt::format_to(ctx.out(), "RepeatCharMoveReverse");
-            case ViMotion::GlobalCurlyCloseUp: return fmt::format_to(ctx.out(), "GlobalCurlyCloseUp");
-            case ViMotion::GlobalCurlyCloseDown: return fmt::format_to(ctx.out(), "GlobalCurlyCloseDown");
-            case ViMotion::GlobalCurlyOpenUp: return fmt::format_to(ctx.out(), "GlobalCurlyOpenUp");
-            case ViMotion::GlobalCurlyOpenDown: return fmt::format_to(ctx.out(), "GlobalCurlyOpenDown");
-            case ViMotion::LineMarkUp: return fmt::format_to(ctx.out(), "LineMarkUp");
-            case ViMotion::LineMarkDown: return fmt::format_to(ctx.out(), "LineMarkDown");
+            case ViMotion::Explicit: name = "Explicit"; break;
+            case ViMotion::Selection: name = "Selection"; break;
+            case ViMotion::FullLine: name = "FullLine"; break;
+            case ViMotion::CharLeft: name = "CharLeft"; break;
+            case ViMotion::CharRight: name = "CharRight"; break;
+            case ViMotion::ScreenColumn: name = "ScreenColumn"; break;
+            case ViMotion::FileBegin: name = "FileBegin"; break;
+            case ViMotion::FileEnd: name = "FileEnd"; break;
+            case ViMotion::LineBegin: name = "LineBegin"; break;
+            case ViMotion::LineTextBegin: name = "LineTextBegin"; break;
+            case ViMotion::LineDown: name = "LineDown"; break;
+            case ViMotion::LineEnd: name = "LineEnd"; break;
+            case ViMotion::LineUp: name = "LineUp"; break;
+            case ViMotion::LinesCenter: name = "LinesCenter"; break;
+            case ViMotion::PageDown: name = "PageDown"; break;
+            case ViMotion::PageUp: name = "PageUp"; break;
+            case ViMotion::PageTop: name = "PageTop"; break;
+            case ViMotion::PageBottom: name = "PageBottom"; break;
+            case ViMotion::ParagraphBackward: name = "ParagraphBackward"; break;
+            case ViMotion::ParagraphForward: name = "ParagraphForward"; break;
+            case ViMotion::ParenthesisMatching: name = "ParenthesisMatching"; break;
+            case ViMotion::SearchResultBackward: name = "SearchResultBackward"; break;
+            case ViMotion::SearchResultForward: name = "SearchResultForward"; break;
+            case ViMotion::WordBackward: name = "WordBackward"; break;
+            case ViMotion::WordEndForward: name = "WordEndForward"; break;
+            case ViMotion::WordForward: name = "WordForward"; break;
+            case ViMotion::BigWordBackward: name = "BigWordBackward"; break;
+            case ViMotion::BigWordEndForward: name = "BigWordEndForward"; break;
+            case ViMotion::BigWordForward: name = "BigWordForward"; break;
+            case ViMotion::TillBeforeCharRight: name = "TillBeforeCharRight"; break;
+            case ViMotion::TillAfterCharLeft: name = "TillAfterCharLeft"; break;
+            case ViMotion::ToCharRight: name = "ToCharRight"; break;
+            case ViMotion::ToCharLeft: name = "ToCharLeft"; break;
+            case ViMotion::RepeatCharMove: name = "RepeatCharMove"; break;
+            case ViMotion::RepeatCharMoveReverse: name = "RepeatCharMoveReverse"; break;
+            case ViMotion::GlobalCurlyCloseUp: name = "GlobalCurlyCloseUp"; break;
+            case ViMotion::GlobalCurlyCloseDown: name = "GlobalCurlyCloseDown"; break;
+            case ViMotion::GlobalCurlyOpenUp: name = "GlobalCurlyOpenUp"; break;
+            case ViMotion::GlobalCurlyOpenDown: name = "GlobalCurlyOpenDown"; break;
+            case ViMotion::LineMarkUp: name = "LineMarkUp"; break;
+            case ViMotion::LineMarkDown: name = "LineMarkDown"; break;
         }
-        return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(motion));
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
-} // namespace fmt
 // }}}

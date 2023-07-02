@@ -237,40 +237,27 @@ inline Renderable::TextureAtlas::TileCreateData Renderable::createTileData(atlas
 } // namespace terminal::rasterizer
 
 // {{{ fmt
-namespace fmt
-{
 template <>
-struct formatter<terminal::rasterizer::RenderTileAttributes>
+struct fmt::formatter<terminal::rasterizer::RenderTileAttributes>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::rasterizer::RenderTileAttributes value, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(terminal::rasterizer::RenderTileAttributes value, format_context& ctx)
+        -> format_context::iterator
     {
         return fmt::format_to(ctx.out(), "tile +{}x +{}y", value.x.value, value.y.value);
     }
 };
 
 template <>
-struct formatter<terminal::rasterizer::atlas::TileAttributes<terminal::rasterizer::RenderTileAttributes>>
+struct fmt::formatter<terminal::rasterizer::atlas::TileAttributes<terminal::rasterizer::RenderTileAttributes>>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(
         terminal::rasterizer::atlas::TileAttributes<terminal::rasterizer::RenderTileAttributes> const& value,
-        FormatContext& ctx)
+        format_context& ctx) -> format_context::iterator
     {
         return fmt::format_to(
             ctx.out(), "(location {}; bitmap {}; {})", value.location, value.bitmapSize, value.metadata);
     }
 };
-
-} // namespace fmt
 // }}}

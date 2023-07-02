@@ -98,20 +98,12 @@ constexpr inline bool operator!=(Point const& a, Point const& b) noexcept
 
 } // namespace crispy
 
-namespace fmt
-{
 template <>
-struct formatter<crispy::Point>
+struct fmt::formatter<crispy::Point>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(crispy::Point coord, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(crispy::Point coord, format_context& ctx) -> format_context::iterator
     {
         return fmt::format_to(ctx.out(), "({}, {})", coord.x, coord.y);
     }
 };
-} // namespace fmt

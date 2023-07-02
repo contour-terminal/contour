@@ -118,18 +118,11 @@ constexpr bool operator!=(MatchModes a, MatchModes b) noexcept
 
 } // namespace terminal
 
-namespace fmt
-{ // {{{
+// {{{ fmtlib support
 template <>
-struct formatter<terminal::MatchModes>
+struct fmt::formatter<terminal::MatchModes>: formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::MatchModes m, FormatContext& ctx)
+    auto format(terminal::MatchModes m, format_context& ctx) -> format_context::iterator
     {
         std::string s;
         auto const advance = [&](terminal::MatchModes::Flag cond, std::string_view text) {
@@ -151,8 +144,7 @@ struct formatter<terminal::MatchModes>
         advance(terminal::MatchModes::Trace, "Trace");
         if (s.empty())
             s = "Any";
-        return fmt::format_to(ctx.out(), "{}", s);
+        return formatter<std::string>::format(s, ctx);
     }
 };
-} // namespace fmt
 // }}}

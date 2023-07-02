@@ -482,18 +482,10 @@ inline typename Line<Cell>::InflatedBuffer const& Line<Cell>::inflatedBuffer() c
 
 } // namespace terminal
 
-namespace fmt // {{{
-{
 template <>
-struct formatter<terminal::LineFlags>
+struct fmt::formatter<terminal::LineFlags>: formatter<std::string>
 {
-    template <typename ParseContext>
-    auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(const terminal::LineFlags flags, FormatContext& ctx) const
+    auto format(const terminal::LineFlags flags, format_context& ctx) -> format_context::iterator
     {
         static const std::array<std::pair<terminal::LineFlags, std::string_view>, 3> nameMap = {
             std::pair { terminal::LineFlags::Wrappable, std::string_view("Wrappable") },
@@ -510,7 +502,6 @@ struct formatter<terminal::LineFlags>
                 s += mapping.second;
             }
         }
-        return fmt::format_to(ctx.out(), "{}", s);
+        return formatter<std::string>::format(s, ctx);
     }
 };
-} // namespace fmt

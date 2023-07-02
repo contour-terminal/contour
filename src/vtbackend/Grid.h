@@ -911,38 +911,22 @@ template <typename RendererT>
 } // namespace terminal
 
 // {{{ fmt formatter
-namespace fmt
-{
-
 template <>
-struct formatter<terminal::Margin::Horizontal>
+struct fmt::formatter<terminal::Margin::Horizontal>: fmt::formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(const terminal::Margin::Horizontal range, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(const terminal::Margin::Horizontal range, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(), "{}..{}", range.from, range.to);
+        return formatter<std::string>::format(fmt::format("{}..{}", range.from, range.to), ctx);
     }
 };
 
 template <>
-struct formatter<terminal::Margin::Vertical>
+struct fmt::formatter<terminal::Margin::Vertical>: fmt::formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(const terminal::Margin::Vertical range, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(const terminal::Margin::Vertical range, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(), "{}..{}", range.from, range.to);
+        return formatter<std::string>::format(fmt::format("{}..{}", range.from, range.to), ctx);
     }
 };
 
-} // namespace fmt
 // }}}
