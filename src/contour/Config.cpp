@@ -1602,6 +1602,7 @@ namespace
                      "regular",
                      profile.fonts.regular);
 
+        profile.fonts.bold = profile.fonts.regular;
         profile.fonts.bold.weight = text::font_weight::bold;
         softLoadFont(profile.fonts.textShapingEngine,
                      _usedKeys,
@@ -1610,6 +1611,7 @@ namespace
                      "bold",
                      profile.fonts.bold);
 
+        profile.fonts.italic = profile.fonts.regular;
         profile.fonts.italic.slant = text::font_slant::italic;
         softLoadFont(profile.fonts.textShapingEngine,
                      _usedKeys,
