@@ -11,11 +11,10 @@ profiles:
 
 ```
 
+## Profile configuration
 
-List of values that can be configured inside one profile <br/>
-
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`shell` configuratin section allows you to specify the process to be started inside the terminal. It provides flexibility to override the default login shell and supports logging in to a remote host.
+### `shell`
+configuratin section allows you to specify the process to be started inside the terminal. It provides flexibility to override the default login shell and supports logging in to a remote host.
 ``` yaml
 profiles:
   profile_name:
@@ -24,9 +23,8 @@ profiles:
 ```
 :octicons-horizontal-rule-16: ==arguments== (optional) Allows you to provide additional command-line arguments to the shell executable. These arguments will be passed to the shell when it is started inside the terminal.
 
-
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`escape_sandbox` option in the configuration file allows you to control the sandboxing behavior when the terminal is executed from within Flatpak. This configuration is relevant only if the terminal is running in a Flatpak environment.
+### `escape_sandbox`
+option in the configuration file allows you to control the sandboxing behavior when the terminal is executed from within Flatpak. This configuration is relevant only if the terminal is running in a Flatpak environment.
 ``` yaml
 profiles:
   profile_name:
@@ -34,8 +32,8 @@ profiles:
 ```
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`copy_last_mark_range_offset` configuration option is an advanced setting that is useful when using the CopyPreviousMarkRange feature with multiline prompts. It allows you to specify an offset value that is added to the current cursor's line number minus 1 (i.e., the line above the current cursor).
+### `copy_last_mark_range_offset`
+configuration option is an advanced setting that is useful when using the CopyPreviousMarkRange feature with multiline prompts. It allows you to specify an offset value that is added to the current cursor's line number minus 1 (i.e., the line above the current cursor).
 ``` yaml
 profiles:
   profile_name:
@@ -43,8 +41,8 @@ profiles:
 ```
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`initial_working_directory`: configuration option allows you to specify the initial working directory when a new terminal is spawned. The value specified here determines the directory in which the terminal will be opened.
+### `initial_working_directory`
+configuration option allows you to specify the initial working directory when a new terminal is spawned. The value specified here determines the directory in which the terminal will be opened.
 ``` yaml
 profiles:
   profile_name:
@@ -52,8 +50,8 @@ profiles:
 ```
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`show_title_bar`: configuration option determines whether or not the title bar will be shown when the terminal profile is activated.
+### `show_title_bar`
+configuration option determines whether or not the title bar will be shown when the terminal profile is activated.
 ``` yaml
 profiles:
   profile_name:
@@ -61,8 +59,9 @@ profiles:
 ```
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`fullscreen`: configuration option determines whether the terminal's screen should be put into fullscreen mode when the terminal profile is activated. Fullscreen mode expands the terminal window to occupy the entire screen, providing a distraction-free environment for your terminal sessions.
+
+### `fullscreen`
+configuration option determines whether the terminal's screen should be put into fullscreen mode when the terminal profile is activated. Fullscreen mode expands the terminal window to occupy the entire screen, providing a distraction-free environment for your terminal sessions.
 ``` yaml
 profiles:
   profile_name:
@@ -70,8 +69,9 @@ profiles:
 ```
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`maximized`: configuration option determines whether the terminal window should be maximized when the specified profile is activated. Maximizing a window expands it to fill the entire available space on the screen, excluding the taskbar or other system elements.
+
+### `maximized`
+configuration option determines whether the terminal window should be maximized when the specified profile is activated. Maximizing a window expands it to fill the entire available space on the screen, excluding the taskbar or other system elements.
 ``` yaml
 profiles:
   profile_name:
@@ -79,8 +79,9 @@ profiles:
 ```
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`wm_class`: configuration option defines the class part of the WM_CLASS property of the terminal window. The WM_CLASS property is a standard X11 property used to identify and classify windows by their class and instance.
+
+### `wm_class`
+configuration option defines the class part of the WM_CLASS property of the terminal window. The WM_CLASS property is a standard X11 property used to identify and classify windows by their class and instance.
 ``` yaml
 profiles:
   profile_name:
@@ -88,8 +89,9 @@ profiles:
 ```
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`environment`: configuration option allows you to define environment variables that will be passed to the shell when the terminal is started. Environment variables are used to customize the behavior and configuration of programs running in the terminal.
+
+### `environment`
+configuration option allows you to define environment variables that will be passed to the shell when the terminal is started. Environment variables are used to customize the behavior and configuration of programs running in the terminal.
 ``` yaml
 profiles:
   profile_name:
@@ -101,8 +103,9 @@ profiles:
 :octicons-horizontal-rule-16: ==COLORTERM== The COLORTERM variable is used to indicate support for true color (24-bit color) in the terminal. Setting it to "truecolor" indicates that the terminal supports true color rendering.
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`terminal_id`: configuration option allows you to specify the terminal type that will be advertised by the terminal emulator. The terminal type indicates the set of capabilities and features that the terminal supports, enabling compatibility with different applications and systems.
+
+### `terminal_id`
+configuration option allows you to specify the terminal type that will be advertised by the terminal emulator. The terminal type indicates the set of capabilities and features that the terminal supports, enabling compatibility with different applications and systems.
 ``` yaml
 profiles:
   profile_name:
@@ -110,8 +113,9 @@ profiles:
 ```
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`terminal_size`: configuration option allows you to specify the initial size of the terminal window in terms of the number of columns and lines.
+
+### `terminal_size`
+ configuration option allows you to specify the initial size of the terminal window in terms of the number of columns and lines.
 ``` yaml
 profiles:
   profile_name:
@@ -123,8 +127,9 @@ profiles:
 :octicons-horizontal-rule-16: ==lines== This option specifies the number of lines to be displayed in the terminal window. In the provided example, the value is set to 25. <br/>
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`history`: configuration allows you to customize the behavior and settings related to the terminal's history, including the number of preserved lines, auto-scrolling, and scroll events.
+
+### `history`
+configuration allows you to customize the behavior and settings related to the terminal's history, including the number of preserved lines, auto-scrolling, and scroll events.
 ``` yaml
 profiles:
   profile_name:
@@ -138,8 +143,9 @@ profiles:
 :octicons-horizontal-rule-16: ==scroll_multiplier== This option defines the number of lines to scroll when the ScrollUp or ScrollDown events occur. By default, scrolling up or down moves three lines at a time. You can adjust this value as needed. In the provided example, scroll_multiplier is set to 3. <br/>
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`scrollbar`: configuration allows you to customize the appearance and behavior of the visual scrollbar in the terminal.
+
+### `scrollbar`
+configuration allows you to customize the appearance and behavior of the visual scrollbar in the terminal.
 ``` yaml
 profiles:
   profile_name:
@@ -151,8 +157,9 @@ profiles:
 :octicons-horizontal-rule-16: ==hide_in_alt_screen== This boolean option determines whether the scrollbar should be hidden when the terminal is in the alternate screen mode. If set to true, the scrollbar will be hidden when the terminal switches to the alternate screen. If set to false, the scrollbar will remain visible even in the alternate screen mode. <br/>
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`mouse:` configuration allows you to control the behavior of the mouse in the terminal.
+
+### `mouse`
+configuration allows you to control the behavior of the mouse in the terminal.
 ``` yaml
 profiles:
   profile_name:
@@ -161,8 +168,9 @@ profiles:
 ```
 :octicons-horizontal-rule-16: ==hide_while_typing== This boolean option determines whether the mouse cursor should be hidden while typing in the terminal. When set to true, the mouse cursor will be hidden when you start typing. When set to false, the mouse cursor will remain visible while typing. <br/>
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`permissions`: configuration allows you to control the access permissions for specific VT sequences in the terminal.
+
+### `permissions`
+configuration allows you to control the access permissions for specific VT sequences in the terminal.
 ``` yaml
 profiles:
   profile_name:
@@ -176,8 +184,9 @@ profiles:
 :octicons-horizontal-rule-16: ==display_host_writable_statusline== This option determines the access permission for displaying the "Host Writable Statusline" programmatically using the VT sequence `DECSSDT 2`. The possible values are: allow, deny, ask. <br/>
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`highlight_word_and_matches_on_double_click`:  configuration option enables the highlighting of a word and its matches when double-clicked on the primary screen in the terminal.
+
+### `highlight_word_and_matches_on_double_click`
+configuration option enables the highlighting of a word and its matches when double-clicked on the primary screen in the terminal.
 ``` yaml
 profiles:
   profile_name:
@@ -190,8 +199,9 @@ profiles:
     - You can use the FocusNextSearchMatch and FocusPreviousSearchMatch actions to navigate to the next or previous occurrence of the same word, even if it is outside the current viewport. <br/>
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`font`: section of the configuration allows you to customize the font settings for the terminal.
+
+### `font`
+section of the configuration allows you to customize the font settings for the terminal.
 ``` yaml
 profiles:
   profile_name:
@@ -226,8 +236,9 @@ profiles:
 :octicons-horizontal-rule-16: ==emoji== Specifies the font to be used for displaying Unicode symbols with emoji presentation. The default value is "emoji". <br/>
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`draw_bold_text_with_bright_colors`: Specifies whether bold text should be rendered in bright colors for indexed colors. If disabled, normal colors will be used for bold text. The default value is false.
+
+### `draw_bold_text_with_bright_colors`
+Specifies whether bold text should be rendered in bright colors for indexed colors. If disabled, normal colors will be used for bold text. The default value is false.
 ``` yaml
 profiles:
   profile_name:
@@ -235,8 +246,9 @@ profiles:
 ```
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`cursor` section of the configuration allows you to customize the appearance and behavior of the terminal cursor.
+
+### `cursor`
+section of the configuration allows you to customize the appearance and behavior of the terminal cursor.
 ``` yaml
 profiles:
   profile_name:
@@ -253,8 +265,9 @@ profiles:
 :octicons-horizontal-rule-16: ==blinking== Determines whether the cursor should blink over time. If set to true, the cursor will blink; if set to false, the cursor will remain static. <br/>
 :octicons-horizontal-rule-16: ==blinking_interval== Specifies the blinking interval in milliseconds. This value defines how quickly the cursor alternates between being visible and invisible when blinking is enabled. <br/>
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`normal_mode`: section in the configuration allows you to customize the appearance and behavior of the cursor specifically in vi-like normal mode.
+
+### `normal_mode`
+section in the configuration allows you to customize the appearance and behavior of the cursor specifically in vi-like normal mode.
 ``` yaml
 profiles:
   profile_name:
@@ -266,8 +279,9 @@ profiles:
 ```
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`visual_mode`: section in the configuration allows you to customize the appearance and behavior of the cursor specifically in vi-like normal mode.
+
+### `visual_mode`
+section in the configuration allows you to customize the appearance and behavior of the cursor specifically in vi-like normal mode.
 ``` yaml
 profiles:
   profile_name:
@@ -279,8 +293,9 @@ profiles:
 ```
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`vi_mode_highlight_timeout`: option in the configuration determines the duration in milliseconds for which the yank highlight is shown in vi mode. After yanking (copying) text in vi mode, the yanked text is typically highlighted momentarily to provide visual feedback. This configuration option allows you to specify the duration of this highlight.
+
+### `vi_mode_highlight_timeout`
+option in the configuration determines the duration in milliseconds for which the yank highlight is shown in vi mode. After yanking (copying) text in vi mode, the yanked text is typically highlighted momentarily to provide visual feedback. This configuration option allows you to specify the duration of this highlight.
 ``` yaml
 profiles:
   profile_name:
@@ -288,8 +303,9 @@ profiles:
 ```
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`vi_mode_scrolloff`:  option in the configuration sets the scrolloff value for cursor movements in normal and visual (block) modes. The scrolloff value determines the minimum number of lines to keep visible above and below the cursor when scrolling. In other words, it controls the amount of margin or padding around the cursor during scrolling operations.
+
+### `vi_mode_scrolloff`
+option in the configuration sets the scrolloff value for cursor movements in normal and visual (block) modes. The scrolloff value determines the minimum number of lines to keep visible above and below the cursor when scrolling. In other words, it controls the amount of margin or padding around the cursor during scrolling operations.
 ``` yaml
 profiles:
   profile_name:
@@ -297,8 +313,9 @@ profiles:
 ```
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`status_line`: section in the configuration file allows you to customize the behavior and appearance of the status line in the terminal.
+
+### `status_line`
+section in the configuration file allows you to customize the behavior and appearance of the status line in the terminal.
 ``` yaml
 profiles:
   profile_name:
@@ -312,8 +329,9 @@ profiles:
 :octicons-horizontal-rule-16: ==sync_to_window_title== controls whether the window title should be synchronized with the Host Writable status line. If the Host Writable status line is denied, enabling this option will update the window title accordingly. By default, this option is set to false. <br/>
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`background`: section in the configuration file allows you to customize the background settings for the terminal.
+
+### `background`
+section in the configuration file allows you to customize the background settings for the terminal.
 ``` yaml
 profiles:
   profile_name:
@@ -325,17 +343,17 @@ profiles:
 :octicons-horizontal-rule-16: ==blur== determines whether the transparent background should be blurred on platforms that support it. Currently, only Windows 10 is supported for background blurring. By default, this option is set to false, meaning no background blurring will be applied. <br/>
 
 
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`colors`: section in the configuration file allows you to specify the colorscheme to use for the terminal. Alternatively, you can inline the color definitions within this section.
+
+### `colors`
+section in the configuration file allows you to specify the colorscheme to use for the terminal. Alternatively, you can inline the color definitions within this section.
 ``` yaml
 profiles:
   profile_name:
     colors: "default"
 ```
 
-
-:fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines::fontawesome-solid-grip-lines: <br/>
-`hyperlink_decoration:`: section in the configuration file allows you to configure the styling and colorization of hyperlinks when they are displayed in the terminal and when they are hovered over by the cursor.
+### `hyperlink_decoration:`
+section in the configuration file allows you to configure the styling and colorization of hyperlinks when they are displayed in the terminal and when they are hovered over by the cursor.
 ``` yaml
 profiles:
   profile_name:
@@ -344,7 +362,7 @@ profiles:
       hover: underline
 ```
 
-Default profile:
+## Default profile
 ``` yaml
 profiles:
     main:

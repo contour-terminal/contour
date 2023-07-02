@@ -52,6 +52,8 @@ markdown_extensions:
       anchor_linenums: true
       line_spans: __span
       pygments_lang_class: true
+  - admonition
+  - pymdownx.details
   - pymdownx.inlinehilite
   - pymdownx.snippets
   - pymdownx.superfences
@@ -80,6 +82,8 @@ nav:
     - Installation: install.md
   - Configuration:
     - configuration/index.md
+    - configuration/profiles.md
+    - configuration/colors.md
     #- Images (Advanced) : configuration/advanced/images.md
     #- Mouse (Advanced) : configuration/advanced/images.md
     #- Misc (Advanced) : configuration/advanced/mouse.md
