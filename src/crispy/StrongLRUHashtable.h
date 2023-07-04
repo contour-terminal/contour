@@ -51,18 +51,11 @@ struct LRUHashtableStats
 } // namespace crispy
 
 // {{{ fmt
-namespace fmt
-{
 template <>
-struct formatter<crispy::LRUHashtableStats>
+struct fmt::formatter<crispy::LRUHashtableStats>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(crispy::LRUHashtableStats stats, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(crispy::LRUHashtableStats stats, format_context& ctx) -> format_context::iterator
     {
         return fmt::format_to(
             ctx.out(),
@@ -75,7 +68,6 @@ struct formatter<crispy::LRUHashtableStats>
                 : 0.0);
     }
 };
-} // namespace fmt
 // }}}
 
 namespace crispy

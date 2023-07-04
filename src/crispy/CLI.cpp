@@ -829,7 +829,21 @@ namespace // {{{ helpers
                               HelpElement::HelpText);
 
                 // {{{ append default value, if any
-                auto const defaultValueStr = fmt::format("{}", option.value);
+                // NB: It seems like fmt::format is having problems with
+                //     formatting std::variant<>'s on some systems.'
+                // auto const defaultValueStr = fmt::format("{}", option.value);
+                auto const defaultValueStr = [&]() -> string {
+                    if (holds_alternative<bool>(option.value))
+                        return get<bool>(option.value) ? "true" : "false";
+                    else if (holds_alternative<int>(option.value))
+                        return std::to_string(get<int>(option.value));
+                    else if (holds_alternative<unsigned int>(option.value))
+                        return std::to_string(get<unsigned int>(option.value));
+                    else if (holds_alternative<double>(option.value))
+                        return std::to_string(get<double>(option.value));
+                    else
+                        return get<string>(option.value);
+                }();
                 if ((option.presence == Presence::Optional && !defaultValueStr.empty())
                     || (holds_alternative<bool>(option.value) && get<bool>(option.value)))
                 {

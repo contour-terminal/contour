@@ -76,10 +76,8 @@ constexpr ImageSize operator/(ImageSize a, ImageSize b) noexcept
 
 } // namespace crispy
 
-namespace fmt
-{
 template <>
-struct formatter<crispy::ImageSize>
+struct fmt::formatter<crispy::ImageSize>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -92,4 +90,3 @@ struct formatter<crispy::ImageSize>
         return fmt::format_to(ctx.out(), "{}x{}", value.width, value.height);
     }
 };
-} // namespace fmt

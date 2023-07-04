@@ -429,87 +429,55 @@ constexpr Opacity& operator--(Opacity& value) noexcept
 
 } // namespace terminal
 
-namespace fmt // {{{
-{
+// {{{ fmtlib custom formatter
 template <>
-struct formatter<terminal::Color>
+struct fmt::formatter<terminal::Color>: fmt::formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::Color value, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::Color value, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(), "{}", to_string(value));
+        return formatter<std::string>::format(to_string(value), ctx);
     }
 };
 
 template <>
-struct formatter<terminal::RGBColor>
+struct fmt::formatter<terminal::RGBColor>: fmt::formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::RGBColor value, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::RGBColor value, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(), "{}", to_string(value));
+        return formatter<std::string>::format(to_string(value), ctx);
     }
 };
 
 template <>
-struct formatter<terminal::RGBAColor>
+struct fmt::formatter<terminal::RGBAColor>: fmt::formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
     template <typename FormatContext>
-    auto format(terminal::RGBAColor value, FormatContext& ctx)
+    auto format(terminal::RGBAColor value, format_context& ctx) -> format_context::iterator
     {
-        return fmt::format_to(ctx.out(), "{}", to_string(value));
+        return formatter<std::string>::format(to_string(value), ctx);
     }
 };
 
 template <>
-struct formatter<terminal::CellRGBColor>
+struct fmt::formatter<terminal::CellRGBColor>: fmt::formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::CellRGBColor value, FormatContext& ctx)
+    auto format(terminal::CellRGBColor value, format_context& ctx) -> format_context::iterator
     {
         if (std::holds_alternative<terminal::CellForegroundColor>(value))
-            return fmt::format_to(ctx.out(), "CellForeground");
+            return formatter<std::string>::format("CellForeground", ctx);
         else if (std::holds_alternative<terminal::CellBackgroundColor>(value))
-            return fmt::format_to(ctx.out(), "CellBackground");
+            return formatter<std::string>::format("CellBackground", ctx);
         else
-            return fmt::format_to(ctx.out(), "{}", std::get<terminal::RGBColor>(value));
+            return formatter<std::string>::format(to_string(std::get<terminal::RGBColor>(value)), ctx);
     }
 };
 
 template <>
-struct formatter<terminal::RGBColorPair>
+struct fmt::formatter<terminal::RGBColorPair>: fmt::formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::RGBColorPair value, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::RGBColorPair value, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(), "{}/{}", value.foreground, value.background);
+        return formatter<std::string>::format(fmt::format("{}/{}", value.foreground, value.background), ctx);
     }
 };
-
-} // namespace fmt
 // }}}

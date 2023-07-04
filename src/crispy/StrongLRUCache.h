@@ -254,21 +254,14 @@ void StrongLRUCache<Key, Value, Hasher>::inspect(std::ostream& output) const
 } // namespace crispy
 
 // {{{ fmt
-namespace fmt
-{
 template <typename K, typename V>
-struct formatter<crispy::detail::LRUCacheEntry<K, V>>
+struct fmt::formatter<crispy::detail::LRUCacheEntry<K, V>>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(crispy::detail::LRUCacheEntry<K, V> const& entry, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(crispy::detail::LRUCacheEntry<K, V> const& entry, format_context& ctx)
+        -> format_context::iterator
     {
         return fmt::format_to(ctx.out(), "{}: {}", entry.key, entry.value);
     }
 };
-} // namespace fmt
 // }}}

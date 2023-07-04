@@ -222,105 +222,70 @@ struct TerminalState
 } // namespace terminal
 
 // {{{ fmt formatters
-namespace fmt
-{
-
 template <>
-struct formatter<terminal::AnsiMode>
+struct fmt::formatter<terminal::AnsiMode>: fmt::formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::AnsiMode mode, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::AnsiMode mode, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(), "{}", to_string(mode));
+        return formatter<std::string>::format(to_string(mode), ctx);
     }
 };
 
 template <>
-struct formatter<terminal::DECMode>
+struct fmt::formatter<terminal::DECMode>: fmt::formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::DECMode mode, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::DECMode mode, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(), "{}", to_string(mode));
+        return formatter<std::string>::format(to_string(mode), ctx);
     }
 };
 
 template <>
-struct formatter<terminal::Cursor>
+struct fmt::formatter<terminal::Cursor>: fmt::formatter<terminal::CellLocation>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(const terminal::Cursor cursor, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(const terminal::Cursor cursor, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(), "{}", cursor.position);
+        return formatter<terminal::CellLocation>::format(cursor.position, ctx);
     }
 };
 
 template <>
-struct formatter<terminal::DynamicColorName>
+struct fmt::formatter<terminal::DynamicColorName>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
     template <typename FormatContext>
-    auto format(terminal::DynamicColorName name, FormatContext& ctx)
+    auto format(terminal::DynamicColorName value, FormatContext& ctx)
     {
-        // clang-format off
         using terminal::DynamicColorName;
-        switch (name)
-        {
-        case DynamicColorName::DefaultForegroundColor: return fmt::format_to(ctx.out(), "DefaultForegroundColor");
-        case DynamicColorName::DefaultBackgroundColor: return fmt::format_to(ctx.out(), "DefaultBackgroundColor");
-        case DynamicColorName::TextCursorColor: return fmt::format_to(ctx.out(), "TextCursorColor");
-        case DynamicColorName::MouseForegroundColor: return fmt::format_to(ctx.out(), "MouseForegroundColor");
-        case DynamicColorName::MouseBackgroundColor: return fmt::format_to(ctx.out(), "MouseBackgroundColor");
-        case DynamicColorName::HighlightForegroundColor: return fmt::format_to(ctx.out(), "HighlightForegroundColor");
-        case DynamicColorName::HighlightBackgroundColor: return fmt::format_to(ctx.out(), "HighlightBackgroundColor");
-        }
-        return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(name));
-        // clang-format on
-    }
-};
-
-template <>
-struct formatter<terminal::ExecutionMode>
-{
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::ExecutionMode value, FormatContext& ctx)
-    {
-        // clang-format off
+        string_view name;
         switch (value)
         {
-            case terminal::ExecutionMode::Normal: return fmt::format_to(ctx.out(), "NORMAL");
-            case terminal::ExecutionMode::Waiting: return fmt::format_to(ctx.out(), "WAITING");
-            case terminal::ExecutionMode::SingleStep: return fmt::format_to(ctx.out(), "SINGLE STEP");
-            case terminal::ExecutionMode::BreakAtEmptyQueue: return fmt::format_to(ctx.out(), "BREAK AT EMPTY");
+            case DynamicColorName::DefaultForegroundColor: name = "DefaultForegroundColor"; break;
+            case DynamicColorName::DefaultBackgroundColor: name = "DefaultBackgroundColor"; break;
+            case DynamicColorName::TextCursorColor: name = "TextCursorColor"; break;
+            case DynamicColorName::MouseForegroundColor: name = "MouseForegroundColor"; break;
+            case DynamicColorName::MouseBackgroundColor: name = "MouseBackgroundColor"; break;
+            case DynamicColorName::HighlightForegroundColor: name = "HighlightForegroundColor"; break;
+            case DynamicColorName::HighlightBackgroundColor: name = "HighlightBackgroundColor"; break;
         }
-        // clang-format on
-        return fmt::format_to(ctx.out(), "UNKNOWN");
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
-} // namespace fmt
+template <>
+struct fmt::formatter<terminal::ExecutionMode>: formatter<std::string_view>
+{
+    auto format(terminal::ExecutionMode value, format_context& ctx) -> format_context::iterator
+    {
+        string_view name;
+        switch (value)
+        {
+            case terminal::ExecutionMode::Normal: name = "NORMAL"; break;
+            case terminal::ExecutionMode::Waiting: name = "WAITING"; break;
+            case terminal::ExecutionMode::SingleStep: name = "SINGLE STEP"; break;
+            case terminal::ExecutionMode::BreakAtEmptyQueue: name = "BREAK AT EMPTY"; break;
+        }
+        return formatter<string_view>::format(name, ctx);
+    }
+};
+
 // }}}

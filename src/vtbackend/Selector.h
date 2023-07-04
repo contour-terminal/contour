@@ -193,53 +193,41 @@ void renderSelection(Selection const& selection, Renderer&& render)
 
 } // namespace terminal
 
-namespace fmt // {{{
-{
+// {{{ fmtlib custom formatter support
 template <>
-struct formatter<terminal::Selection::State>
+struct fmt::formatter<terminal::Selection::State>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
     using State = terminal::Selection::State;
-    template <typename FormatContext>
-    auto format(State state, FormatContext& ctx)
+    auto format(State state, format_context& ctx) -> format_context::iterator
     {
+        string_view name;
         switch (state)
         {
-            case State::Waiting: return fmt::format_to(ctx.out(), "Waiting");
-            case State::InProgress: return fmt::format_to(ctx.out(), "InProgress");
-            case State::Complete: return fmt::format_to(ctx.out(), "Complete");
+            case State::Waiting: name = "Waiting"; break;
+            case State::InProgress: name = "InProgress"; break;
+            case State::Complete: name = "Complete"; break;
         }
-        return fmt::format_to(ctx.out(), "{}", static_cast<unsigned>(state));
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct formatter<terminal::Selection>
+struct fmt::formatter<terminal::Selection>: formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(const terminal::Selection& selector, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(const terminal::Selection& selector, FormatContext& ctx)
-    {
-        return fmt::format_to(
-            ctx.out(),
-            "{}({} from {} to {})",
-            dynamic_cast<terminal::WordWiseSelection const*>(&selector)      ? "WordWiseSelection"
-            : dynamic_cast<terminal::FullLineSelection const*>(&selector)    ? "FullLineSelection"
-            : dynamic_cast<terminal::RectangularSelection const*>(&selector) ? "RectangularSelection"
-            : dynamic_cast<terminal::LinearSelection const*>(&selector)      ? "LinearSelection"
-                                                                             : "Selection",
-            selector.state(),
-            selector.from(),
-            selector.to());
+        return formatter<std::string>::format(
+            fmt::format("{}({} from {} to {})",
+                        dynamic_cast<terminal::WordWiseSelection const*>(&selector)   ? "WordWiseSelection"
+                        : dynamic_cast<terminal::FullLineSelection const*>(&selector) ? "FullLineSelection"
+                        : dynamic_cast<terminal::RectangularSelection const*>(&selector)
+                            ? "RectangularSelection"
+                        : dynamic_cast<terminal::LinearSelection const*>(&selector) ? "LinearSelection"
+                                                                                    : "Selection",
+                        selector.state(),
+                        selector.from(),
+                        selector.to()),
+            ctx);
     }
 };
-} // namespace fmt
+// }}}

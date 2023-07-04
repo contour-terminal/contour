@@ -118,18 +118,12 @@ class [[nodiscard]] Process: public Pty
 
 } // namespace terminal
 
-namespace fmt
-{
 template <>
-struct formatter<terminal::Process::ExitStatus>
+struct fmt::formatter<terminal::Process::ExitStatus>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::Process::ExitStatus const& status, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(terminal::Process::ExitStatus const& status, format_context& ctx)
+        -> format_context::iterator
     {
         return std::visit(overloaded { [&](terminal::Process::NormalExit exit) {
                                           return fmt::format_to(ctx.out(), "{} (normal exit)", exit.exitCode);
@@ -150,4 +144,3 @@ struct formatter<terminal::Process::ExitStatus>
                           status);
     }
 };
-} // namespace fmt

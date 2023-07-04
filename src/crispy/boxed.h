@@ -191,31 +191,17 @@ struct numeric_limits<crispy::boxed<A, B>>
 };
 } // namespace std
 
-namespace std // {{{
-{
 template <typename T, typename U>
-struct hash<crispy::boxed<T, U>>
+struct std::hash<crispy::boxed<T, U>>
 {
     constexpr size_t operator()(crispy::boxed<T, U> v) const noexcept { return std::hash<T> {}(v.value); }
 };
-} // namespace std
-// }}}
 
-namespace fmt // {{{
-{
 template <typename A, typename B>
-struct formatter<crispy::boxed<A, B>>: formatter<A>
+struct fmt::formatter<crispy::boxed<A, B>>: formatter<A>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    constexpr auto format(crispy::boxed<A, B> value, FormatContext& ctx)
+    auto format(crispy::boxed<A, B> value, format_context& ctx) -> format_context::iterator
     {
         return formatter<A>::format(value.value, ctx);
     }
 };
-} // namespace fmt
-// }}}

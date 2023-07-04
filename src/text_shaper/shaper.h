@@ -166,18 +166,12 @@ class shaper
 
 } // end namespace text
 
-namespace fmt
-{ // {{{
+// {{{ fmtlib support
 template <>
-struct formatter<text::bitmap_format>
+struct fmt::formatter<text::bitmap_format>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(text::bitmap_format value, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(text::bitmap_format value, format_context& ctx) -> format_context::iterator
     {
         switch (value)
         {
@@ -190,15 +184,10 @@ struct formatter<text::bitmap_format>
 };
 
 template <>
-struct formatter<text::glyph_position>
+struct fmt::formatter<text::glyph_position>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(text::glyph_position const& gpos, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(text::glyph_position const& gpos, format_context& ctx) -> format_context::iterator
     {
         return fmt::format_to(ctx.out(),
                               "({}+{}+{}|{}+{})",
@@ -211,7 +200,7 @@ struct formatter<text::glyph_position>
 };
 
 template <>
-struct formatter<text::rasterized_glyph>
+struct fmt::formatter<text::rasterized_glyph>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -229,4 +218,4 @@ struct formatter<text::rasterized_glyph>
                               glyph.format);
     }
 };
-} // namespace fmt
+// }}}

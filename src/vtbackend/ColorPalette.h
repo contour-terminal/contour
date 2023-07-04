@@ -157,47 +157,35 @@ RGBColor apply(ColorPalette const& colorPalette, Color color, ColorTarget target
 
 } // namespace terminal
 
-namespace fmt // {{{
-{
+// {{{ fmtlib custom formatter support
 template <>
-struct formatter<terminal::ColorMode>
+struct fmt::formatter<terminal::ColorMode>: fmt::formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::ColorMode value, fmt::format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::ColorMode value, FormatContext& ctx)
-    {
+        string_view name;
         switch (value)
         {
-            case terminal::ColorMode::Normal: return fmt::format_to(ctx.out(), "Normal");
-            case terminal::ColorMode::Dimmed: return fmt::format_to(ctx.out(), "Dimmed");
-            case terminal::ColorMode::Bright: return fmt::format_to(ctx.out(), "Bright");
+            case terminal::ColorMode::Normal: name = "Normal"; break;
+            case terminal::ColorMode::Dimmed: name = "Dimmed"; break;
+            case terminal::ColorMode::Bright: name = "Bright"; break;
         }
-        return fmt::format_to(ctx.out(), "{}", (int) value);
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct formatter<terminal::ColorTarget>
+struct fmt::formatter<terminal::ColorTarget>: fmt::formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::ColorTarget value, fmt::format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::ColorTarget value, FormatContext& ctx)
-    {
+        string_view name;
         switch (value)
         {
-            case terminal::ColorTarget::Foreground: return fmt::format_to(ctx.out(), "Foreground");
-            case terminal::ColorTarget::Background: return fmt::format_to(ctx.out(), "Background");
+            case terminal::ColorTarget::Foreground: name = "Foreground"; break;
+            case terminal::ColorTarget::Background: name = "Background"; break;
         }
-        return fmt::format_to(ctx.out(), "{}", (int) value);
+        return formatter<string_view>::format(name, ctx);
     }
 };
-} // namespace fmt
 // }}}

@@ -101,30 +101,22 @@ struct GridMetrics
 
 } // namespace terminal::rasterizer
 
-namespace fmt
-{
 template <>
-struct formatter<terminal::rasterizer::GridMetrics>
+struct fmt::formatter<terminal::rasterizer::GridMetrics>: formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::rasterizer::GridMetrics const& v, fmt::format_context& ctx)
+        -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::rasterizer::GridMetrics const& v, FormatContext& ctx)
-    {
-        return fmt::format_to(
-            ctx.out(),
-            "(pageSize={}, cellSize={}, baseline={}, underline={}@{}, margin=(left={}, bottom={}))",
-            v.pageSize,
-            v.cellSize,
-            v.baseline,
-            v.underline.position,
-            v.underline.thickness,
-            v.pageMargin.left,
-            v.pageMargin.bottom);
+        return formatter<std::string>::format(
+            fmt::format(
+                "(pageSize={}, cellSize={}, baseline={}, underline={}@{}, margin=(left={}, bottom={}))",
+                v.pageSize,
+                v.cellSize,
+                v.baseline,
+                v.underline.position,
+                v.underline.thickness,
+                v.pageMargin.left,
+                v.pageMargin.bottom),
+            ctx);
     }
 };
-
-} // namespace fmt

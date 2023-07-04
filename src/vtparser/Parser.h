@@ -472,57 +472,34 @@ struct numeric_limits<terminal::parser::Action>
 };
 } // namespace std
 
-namespace fmt
-{
-
+// {{{ fmtlib custom formatter specializations
 template <>
-struct formatter<terminal::parser::State>
+struct fmt::formatter<terminal::parser::State>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::parser::State state, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(terminal::parser::State state, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(), "{}", terminal::parser::to_string(state));
+        return formatter<std::string_view>::format(terminal::parser::to_string(state), ctx);
     }
 };
 
 template <>
-struct formatter<terminal::parser::ActionClass>
+struct fmt::formatter<terminal::parser::ActionClass>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::parser::ActionClass value, FormatContext& ctx)
+    auto format(terminal::parser::ActionClass value, format_context& ctx) -> format_context::iterator
     {
         auto constexpr mappings = std::array<std::string_view, 4> { "Enter", "Event", "Leave", "Transition" };
-        return fmt::format_to(ctx.out(), "{}", mappings.at(static_cast<unsigned>(value)));
+        return formatter<std::string_view>::format(mappings.at(static_cast<unsigned>(value)), ctx);
     }
 };
 
 template <>
-struct formatter<terminal::parser::Action>
+struct fmt::formatter<terminal::parser::Action>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::parser::Action value, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::parser::Action value, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(), "{}", terminal::parser::to_string(value));
+        return formatter<std::string_view>::format(terminal::parser::to_string(value), ctx);
     }
 };
-
-} // namespace fmt
 // }}}
 
 namespace terminal::parser

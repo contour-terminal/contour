@@ -410,45 +410,30 @@ inline std::string to_string(InputGenerator::MouseEventType value)
 
 } // namespace terminal
 
-namespace fmt // {{{
-{
+// {{{ fmtlib custom formatter support
 
 template <>
-struct formatter<terminal::MouseProtocol>
+struct fmt::formatter<terminal::MouseProtocol>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::MouseProtocol value, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(terminal::MouseProtocol value, FormatContext& ctx)
-    {
+        string_view name;
         switch (value)
         {
-            case terminal::MouseProtocol::X10: return fmt::format_to(ctx.out(), "X10");
-            case terminal::MouseProtocol::HighlightTracking:
-                return fmt::format_to(ctx.out(), "HighlightTracking");
-            case terminal::MouseProtocol::ButtonTracking: return fmt::format_to(ctx.out(), "ButtonTracking");
-            case terminal::MouseProtocol::NormalTracking: return fmt::format_to(ctx.out(), "NormalTracking");
-            case terminal::MouseProtocol::AnyEventTracking:
-                return fmt::format_to(ctx.out(), "AnyEventTracking");
+            case terminal::MouseProtocol::X10: name = "X10"; break;
+            case terminal::MouseProtocol::HighlightTracking: name = "HighlightTracking"; break;
+            case terminal::MouseProtocol::ButtonTracking: name = "ButtonTracking"; break;
+            case terminal::MouseProtocol::NormalTracking: name = "NormalTracking"; break;
+            case terminal::MouseProtocol::AnyEventTracking: name = "AnyEventTracking"; break;
         }
-        return fmt::format_to(ctx.out(), "{}", unsigned(value));
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct formatter<terminal::Modifier>
+struct fmt::formatter<terminal::Modifier>: formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::Modifier modifier, FormatContext& ctx)
+    auto format(terminal::Modifier modifier, format_context& ctx) -> format_context::iterator
     {
         std::string s;
         auto const advance = [&](bool cond, std::string_view text) {
@@ -464,166 +449,140 @@ struct formatter<terminal::Modifier>
         advance(modifier.meta(), "Meta");
         if (s.empty())
             s = "None";
-        return fmt::format_to(ctx.out(), "{}", s);
+        return formatter<std::string>::format(s, ctx);
     }
 };
 
 template <>
-struct formatter<terminal::InputGenerator::MouseWheelMode>
+struct fmt::formatter<terminal::InputGenerator::MouseWheelMode>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::InputGenerator::MouseWheelMode value, format_context& ctx)
+        -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::InputGenerator::MouseWheelMode value, FormatContext& ctx)
-    {
+        string_view name;
         switch (value)
         {
-            case terminal::InputGenerator::MouseWheelMode::Default:
-                return fmt::format_to(ctx.out(), "Default");
-            case terminal::InputGenerator::MouseWheelMode::NormalCursorKeys:
-                return fmt::format_to(ctx.out(), "NormalCursorKeys");
+            case terminal::InputGenerator::MouseWheelMode::Default: name = "Default"; break;
+            case terminal::InputGenerator::MouseWheelMode::NormalCursorKeys: name = "NormalCursorKeys"; break;
             case terminal::InputGenerator::MouseWheelMode::ApplicationCursorKeys:
-                return fmt::format_to(ctx.out(), "ApplicationCursorKeys");
+                name = "ApplicationCursorKeys";
+                break;
         }
-        return fmt::format_to(ctx.out(), "<{}>", unsigned(value));
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct formatter<terminal::KeyMode>
+struct fmt::formatter<terminal::KeyMode>: public formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::KeyMode value, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::KeyMode value, FormatContext& ctx)
-    {
+        string_view name;
         switch (value)
         {
-            case terminal::KeyMode::Application: return fmt::format_to(ctx.out(), "Application");
-            case terminal::KeyMode::Normal: return fmt::format_to(ctx.out(), "Normal");
+            case terminal::KeyMode::Normal: name = "Normal"; break;
+            case terminal::KeyMode::Application: name = "Application"; break;
         }
-        return fmt::format_to(ctx.out(), "<{}>", unsigned(value));
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct formatter<terminal::MouseButton>
+struct fmt::formatter<terminal::MouseButton>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::MouseButton value, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::MouseButton value, FormatContext& ctx)
-    {
+        string_view name;
         switch (value)
         {
-            case terminal::MouseButton::Left: return fmt::format_to(ctx.out(), "Left");
-            case terminal::MouseButton::Right: return fmt::format_to(ctx.out(), "Right");
-            case terminal::MouseButton::Middle: return fmt::format_to(ctx.out(), "Middle");
-            case terminal::MouseButton::Release: return fmt::format_to(ctx.out(), "Release");
-            case terminal::MouseButton::WheelUp: return fmt::format_to(ctx.out(), "WheelUp");
-            case terminal::MouseButton::WheelDown: return fmt::format_to(ctx.out(), "WheelDown");
+            case terminal::MouseButton::Left: name = "Left"; break;
+            case terminal::MouseButton::Right: name = "Right"; break;
+            case terminal::MouseButton::Middle: name = "Middle"; break;
+            case terminal::MouseButton::Release: name = "Release"; break;
+            case terminal::MouseButton::WheelUp: name = "WheelUp"; break;
+            case terminal::MouseButton::WheelDown: name = "WheelDown"; break;
         }
-        return fmt::format_to(ctx.out(), "<{}>", unsigned(value));
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct formatter<terminal::MouseTransport>
+struct fmt::formatter<terminal::MouseTransport>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::MouseTransport value, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::MouseTransport value, FormatContext& ctx)
-    {
+        string_view name;
         switch (value)
         {
-            case terminal::MouseTransport::Default: return fmt::format_to(ctx.out(), "Default");
-            case terminal::MouseTransport::Extended: return fmt::format_to(ctx.out(), "Extended");
-            case terminal::MouseTransport::SGR: return fmt::format_to(ctx.out(), "SGR");
-            case terminal::MouseTransport::URXVT: return fmt::format_to(ctx.out(), "URXVT");
-            case terminal::MouseTransport::SGRPixels: return fmt::format_to(ctx.out(), "SGR-Pixels");
+            case terminal::MouseTransport::Default: name = "Default"; break;
+            case terminal::MouseTransport::Extended: name = "Extended"; break;
+            case terminal::MouseTransport::SGR: name = "SGR"; break;
+            case terminal::MouseTransport::URXVT: name = "URXVT"; break;
+            case terminal::MouseTransport::SGRPixels: name = "SGR-Pixels"; break;
         }
-        return fmt::format_to(ctx.out(), "<{}>", unsigned(value));
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct formatter<terminal::Key>
+struct fmt::formatter<terminal::Key>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::Key value, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    constexpr auto format(terminal::Key value, FormatContext& ctx) const
-    {
+        string_view name;
         switch (value)
         {
-            case terminal::Key::F1: return fmt::format_to(ctx.out(), "F1");
-            case terminal::Key::F2: return fmt::format_to(ctx.out(), "F2");
-            case terminal::Key::F3: return fmt::format_to(ctx.out(), "F3");
-            case terminal::Key::F4: return fmt::format_to(ctx.out(), "F4");
-            case terminal::Key::F5: return fmt::format_to(ctx.out(), "F5");
-            case terminal::Key::F6: return fmt::format_to(ctx.out(), "F6");
-            case terminal::Key::F7: return fmt::format_to(ctx.out(), "F7");
-            case terminal::Key::F8: return fmt::format_to(ctx.out(), "F8");
-            case terminal::Key::F9: return fmt::format_to(ctx.out(), "F9");
-            case terminal::Key::F10: return fmt::format_to(ctx.out(), "F10");
-            case terminal::Key::F11: return fmt::format_to(ctx.out(), "F11");
-            case terminal::Key::F12: return fmt::format_to(ctx.out(), "F12");
-            case terminal::Key::F13: return fmt::format_to(ctx.out(), "F13");
-            case terminal::Key::F14: return fmt::format_to(ctx.out(), "F14");
-            case terminal::Key::F15: return fmt::format_to(ctx.out(), "F15");
-            case terminal::Key::F16: return fmt::format_to(ctx.out(), "F16");
-            case terminal::Key::F17: return fmt::format_to(ctx.out(), "F17");
-            case terminal::Key::F18: return fmt::format_to(ctx.out(), "F18");
-            case terminal::Key::F19: return fmt::format_to(ctx.out(), "F19");
-            case terminal::Key::F20: return fmt::format_to(ctx.out(), "F20");
-            case terminal::Key::DownArrow: return fmt::format_to(ctx.out(), "DownArrow");
-            case terminal::Key::LeftArrow: return fmt::format_to(ctx.out(), "LeftArrow");
-            case terminal::Key::RightArrow: return fmt::format_to(ctx.out(), "RightArrow");
-            case terminal::Key::UpArrow: return fmt::format_to(ctx.out(), "UpArrow");
-            case terminal::Key::Insert: return fmt::format_to(ctx.out(), "Insert");
-            case terminal::Key::Delete: return fmt::format_to(ctx.out(), "Delete");
-            case terminal::Key::Home: return fmt::format_to(ctx.out(), "Home");
-            case terminal::Key::End: return fmt::format_to(ctx.out(), "End");
-            case terminal::Key::PageUp: return fmt::format_to(ctx.out(), "PageUp");
-            case terminal::Key::PageDown: return fmt::format_to(ctx.out(), "PageDown");
-            case terminal::Key::Numpad_NumLock: return fmt::format_to(ctx.out(), "Numpad_NumLock");
-            case terminal::Key::Numpad_Divide: return fmt::format_to(ctx.out(), "Numpad_Divide");
-            case terminal::Key::Numpad_Multiply: return fmt::format_to(ctx.out(), "Numpad_Multiply");
-            case terminal::Key::Numpad_Subtract: return fmt::format_to(ctx.out(), "Numpad_Subtract");
-            case terminal::Key::Numpad_CapsLock: return fmt::format_to(ctx.out(), "Numpad_CapsLock");
-            case terminal::Key::Numpad_Add: return fmt::format_to(ctx.out(), "Numpad_Add");
-            case terminal::Key::Numpad_Decimal: return fmt::format_to(ctx.out(), "Numpad_Decimal");
-            case terminal::Key::Numpad_Enter: return fmt::format_to(ctx.out(), "Numpad_Enter");
-            case terminal::Key::Numpad_Equal: return fmt::format_to(ctx.out(), "Numpad_Equal");
-            case terminal::Key::Numpad_0: return fmt::format_to(ctx.out(), "Numpad_0");
-            case terminal::Key::Numpad_1: return fmt::format_to(ctx.out(), "Numpad_1");
-            case terminal::Key::Numpad_2: return fmt::format_to(ctx.out(), "Numpad_2");
-            case terminal::Key::Numpad_3: return fmt::format_to(ctx.out(), "Numpad_3");
-            case terminal::Key::Numpad_4: return fmt::format_to(ctx.out(), "Numpad_4");
-            case terminal::Key::Numpad_5: return fmt::format_to(ctx.out(), "Numpad_5");
-            case terminal::Key::Numpad_6: return fmt::format_to(ctx.out(), "Numpad_6");
-            case terminal::Key::Numpad_7: return fmt::format_to(ctx.out(), "Numpad_7");
-            case terminal::Key::Numpad_8: return fmt::format_to(ctx.out(), "Numpad_8");
-            case terminal::Key::Numpad_9: return fmt::format_to(ctx.out(), "Numpad_9");
+            case terminal::Key::F1: name = "F1"; break;
+            case terminal::Key::F2: name = "F2"; break;
+            case terminal::Key::F3: name = "F3"; break;
+            case terminal::Key::F4: name = "F4"; break;
+            case terminal::Key::F5: name = "F5"; break;
+            case terminal::Key::F6: name = "F6"; break;
+            case terminal::Key::F7: name = "F7"; break;
+            case terminal::Key::F8: name = "F8"; break;
+            case terminal::Key::F9: name = "F9"; break;
+            case terminal::Key::F10: name = "F10"; break;
+            case terminal::Key::F11: name = "F11"; break;
+            case terminal::Key::F12: name = "F12"; break;
+            case terminal::Key::F13: name = "F13"; break;
+            case terminal::Key::F14: name = "F14"; break;
+            case terminal::Key::F15: name = "F15"; break;
+            case terminal::Key::F16: name = "F16"; break;
+            case terminal::Key::F17: name = "F17"; break;
+            case terminal::Key::F18: name = "F18"; break;
+            case terminal::Key::F19: name = "F19"; break;
+            case terminal::Key::F20: name = "F20"; break;
+            case terminal::Key::DownArrow: name = "DownArrow"; break;
+            case terminal::Key::LeftArrow: name = "LeftArrow"; break;
+            case terminal::Key::RightArrow: name = "RightArrow"; break;
+            case terminal::Key::UpArrow: name = "UpArrow"; break;
+            case terminal::Key::Insert: name = "Insert"; break;
+            case terminal::Key::Delete: name = "Delete"; break;
+            case terminal::Key::Home: name = "Home"; break;
+            case terminal::Key::End: name = "End"; break;
+            case terminal::Key::PageUp: name = "PageUp"; break;
+            case terminal::Key::PageDown: name = "PageDown"; break;
+            case terminal::Key::Numpad_NumLock: name = "Numpad_NumLock"; break;
+            case terminal::Key::Numpad_Divide: name = "Numpad_Divide"; break;
+            case terminal::Key::Numpad_Multiply: name = "Numpad_Multiply"; break;
+            case terminal::Key::Numpad_Subtract: name = "Numpad_Subtract"; break;
+            case terminal::Key::Numpad_CapsLock: name = "Numpad_CapsLock"; break;
+            case terminal::Key::Numpad_Add: name = "Numpad_Add"; break;
+            case terminal::Key::Numpad_Decimal: name = "Numpad_Decimal"; break;
+            case terminal::Key::Numpad_Enter: name = "Numpad_Enter"; break;
+            case terminal::Key::Numpad_Equal: name = "Numpad_Equal"; break;
+            case terminal::Key::Numpad_0: name = "Numpad_0"; break;
+            case terminal::Key::Numpad_1: name = "Numpad_1"; break;
+            case terminal::Key::Numpad_2: name = "Numpad_2"; break;
+            case terminal::Key::Numpad_3: name = "Numpad_3"; break;
+            case terminal::Key::Numpad_4: name = "Numpad_4"; break;
+            case terminal::Key::Numpad_5: name = "Numpad_5"; break;
+            case terminal::Key::Numpad_6: name = "Numpad_6"; break;
+            case terminal::Key::Numpad_7: name = "Numpad_7"; break;
+            case terminal::Key::Numpad_8: name = "Numpad_8"; break;
+            case terminal::Key::Numpad_9: name = "Numpad_9"; break;
         }
-
-        return fmt::format_to(ctx.out(), "{}", (unsigned) value);
+        return formatter<string_view>::format(name, ctx);
     }
 };
-} // namespace fmt
+// }}}

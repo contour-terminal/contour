@@ -281,61 +281,40 @@ class ImagePool
 
 } // namespace terminal
 
-namespace fmt // {{{
-{
-
+// {{{ fmtlib support
 template <>
-struct formatter<terminal::ImageFormat>
+struct fmt::formatter<terminal::ImageFormat>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::ImageFormat value, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(terminal::ImageFormat value, FormatContext& ctx)
-    {
+        string_view name;
         switch (value)
         {
-            case terminal::ImageFormat::RGB: return fmt::format_to(ctx.out(), "RGB");
-            case terminal::ImageFormat::RGBA: return fmt::format_to(ctx.out(), "RGBA");
+            case terminal::ImageFormat::RGB: name = "RGB"; break;
+            case terminal::ImageFormat::RGBA: name = "RGBA"; break;
         }
-        return fmt::format_to(ctx.out(), "{}", unsigned(value));
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct formatter<terminal::ImageStats>
+struct fmt::formatter<terminal::ImageStats>: formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::ImageStats stats, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(terminal::ImageStats stats, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(),
-                              "{} instances, {} raster, {} fragments",
-                              stats.instances,
-                              stats.rasterized,
-                              stats.fragments);
+        return formatter<std::string>::format(
+            fmt::format(
+                "{} instances, {} raster, {} fragments", stats.instances, stats.rasterized, stats.fragments),
+            ctx);
     }
 };
 
 template <>
-struct formatter<std::shared_ptr<terminal::Image const>>
+struct fmt::formatter<std::shared_ptr<terminal::Image const>>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(std::shared_ptr<terminal::Image const> const& image, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(std::shared_ptr<terminal::Image const> const& image, format_context& ctx)
+        -> format_context::iterator
     {
         if (!image)
             return fmt::format_to(ctx.out(), "nullptr");
@@ -349,90 +328,68 @@ struct formatter<std::shared_ptr<terminal::Image const>>
 };
 
 template <>
-struct formatter<terminal::ImageResize>
+struct fmt::formatter<terminal::ImageResize>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::ImageResize value, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(const terminal::ImageResize value, FormatContext& ctx)
-    {
+        string_view name;
         switch (value)
         {
-            case terminal::ImageResize::NoResize: return fmt::format_to(ctx.out(), "NoResize");
-            case terminal::ImageResize::ResizeToFit: return fmt::format_to(ctx.out(), "ResizeToFit");
-            case terminal::ImageResize::ResizeToFill: return fmt::format_to(ctx.out(), "ResizeToFill");
-            case terminal::ImageResize::StretchToFill: return fmt::format_to(ctx.out(), "StretchToFill");
+            case terminal::ImageResize::NoResize: name = "NoResize"; break;
+            case terminal::ImageResize::ResizeToFit: name = "ResizeToFit"; break;
+            case terminal::ImageResize::ResizeToFill: name = "ResizeToFill"; break;
+            case terminal::ImageResize::StretchToFill: name = "StretchToFill"; break;
         }
-        return fmt::format_to(ctx.out(), "ResizePolicy({})", int(value));
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct formatter<terminal::ImageAlignment>
+struct fmt::formatter<terminal::ImageAlignment>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::ImageAlignment value, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(const terminal::ImageAlignment value, FormatContext& ctx)
-    {
+        string_view name;
         switch (value)
         {
-            case terminal::ImageAlignment::TopStart: return fmt::format_to(ctx.out(), "TopStart");
-            case terminal::ImageAlignment::TopCenter: return fmt::format_to(ctx.out(), "TopCenter");
-            case terminal::ImageAlignment::TopEnd: return fmt::format_to(ctx.out(), "TopEnd");
-            case terminal::ImageAlignment::MiddleStart: return fmt::format_to(ctx.out(), "MiddleStart");
-            case terminal::ImageAlignment::MiddleCenter: return fmt::format_to(ctx.out(), "MiddleCenter");
-            case terminal::ImageAlignment::MiddleEnd: return fmt::format_to(ctx.out(), "MiddleEnd");
-            case terminal::ImageAlignment::BottomStart: return fmt::format_to(ctx.out(), "BottomStart");
-            case terminal::ImageAlignment::BottomCenter: return fmt::format_to(ctx.out(), "BottomCenter");
-            case terminal::ImageAlignment::BottomEnd: return fmt::format_to(ctx.out(), "BottomEnd");
+            case terminal::ImageAlignment::TopStart: name = "TopStart"; break;
+            case terminal::ImageAlignment::TopCenter: name = "TopCenter"; break;
+            case terminal::ImageAlignment::TopEnd: name = "TopEnd"; break;
+            case terminal::ImageAlignment::MiddleStart: name = "MiddleStart"; break;
+            case terminal::ImageAlignment::MiddleCenter: name = "MiddleCenter"; break;
+            case terminal::ImageAlignment::MiddleEnd: name = "MiddleEnd"; break;
+            case terminal::ImageAlignment::BottomStart: name = "BottomStart"; break;
+            case terminal::ImageAlignment::BottomCenter: name = "BottomCenter"; break;
+            case terminal::ImageAlignment::BottomEnd: name = "BottomEnd"; break;
         }
-        return fmt::format_to(ctx.out(), "ImageAlignment({})", int(value));
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct formatter<terminal::RasterizedImage>
+struct fmt::formatter<terminal::RasterizedImage>: formatter<std::string>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::RasterizedImage const& image, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(const terminal::RasterizedImage& image, FormatContext& ctx)
-    {
-        return fmt::format_to(ctx.out(),
-                              "RasterizedImage<{}, {}, {}, {}, {}>",
-                              image.weak_from_this().use_count(),
-                              image.cellSpan(),
-                              image.resizePolicy(),
-                              image.alignmentPolicy(),
-                              image.image());
+        return formatter<std::string>::format(fmt::format("RasterizedImage<{}, {}, {}, {}, {}>",
+                                                          image.weak_from_this().use_count(),
+                                                          image.cellSpan(),
+                                                          image.resizePolicy(),
+                                                          image.alignmentPolicy(),
+                                                          image.imagePointer()),
+                                              ctx);
     }
 };
 
 template <>
-struct formatter<terminal::ImageFragment>
+struct fmt::formatter<terminal::ImageFragment>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-
-    template <typename FormatContext>
-    auto format(const terminal::ImageFragment& fragment, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(const terminal::ImageFragment& fragment, format_context& ctx)
+        -> format_context::iterator
     {
         return fmt::format_to(
             ctx.out(), "ImageFragment<offset={}, {}>", fragment.offset(), fragment.rasterizedImage());
     }
 };
-} // namespace fmt
+// }}}

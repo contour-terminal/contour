@@ -93,7 +93,7 @@ std::string joinHumanReadable(std::vector<T> const& list, std::string_view sep =
     {
         if (i != 0)
             result << sep;
-        result << fmt::format("{}", list[i]);
+        result << fmt::format("{}", T(list[i]));
     }
     return result.str();
 }

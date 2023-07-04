@@ -294,28 +294,20 @@ struct RenderStateManager
 
 } // namespace contour
 
-namespace fmt
-{
 template <>
-struct formatter<contour::RenderState>
+struct fmt::formatter<contour::RenderState>: public fmt::formatter<std::string>
 {
     using State = contour::RenderState;
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    static auto format(State state, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(State state, FormatContext& ctx)
-    {
+        string_view name;
         switch (state)
         {
-            case State::CleanIdle: return fmt::format_to(ctx.out(), "clean-idle");
-            case State::CleanPainting: return fmt::format_to(ctx.out(), "clean-painting");
-            case State::DirtyIdle: return fmt::format_to(ctx.out(), "dirty-idle");
-            case State::DirtyPainting: return fmt::format_to(ctx.out(), "dirty-painting");
+            case State::CleanIdle: name = "clean-idle"; break;
+            case State::CleanPainting: name = "clean-painting"; break;
+            case State::DirtyIdle: name = "dirty-idle"; break;
+            case State::DirtyPainting: name = "dirty-painting"; break;
         }
-        return fmt::format_to(ctx.out(), "Invalid");
+        return fmt::formatter<string_view> {}.format(name, ctx);
     }
 };
-} // namespace fmt

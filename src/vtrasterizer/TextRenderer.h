@@ -26,7 +26,6 @@
 #include <text_shaper/shaper.h>
 
 #include <crispy/FNV.h>
-#include <crispy/LRUCache.h>
 #include <crispy/point.h>
 #include <crispy/size.h>
 

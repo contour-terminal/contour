@@ -309,29 +309,21 @@ Pixmap& Pixmap::segment_bar(int which, More... more)
 
 } // end namespace terminal::rasterizer
 
-namespace fmt // {{{
-{
 template <>
-struct formatter<terminal::rasterizer::Arc>
+struct fmt::formatter<terminal::rasterizer::Arc>: fmt::formatter<string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::rasterizer::Arc value, FormatContext& ctx)
+    auto format(terminal::rasterizer::Arc value, format_context& ctx) -> format_context::iterator
     {
         using terminal::rasterizer::Arc;
+        string_view name;
         switch (value)
         {
-            case Arc::NoArc: return fmt::format_to(ctx.out(), "NoArc");
-            case Arc::TopLeft: return fmt::format_to(ctx.out(), "TopLeft");
-            case Arc::TopRight: return fmt::format_to(ctx.out(), "TopRight");
-            case Arc::BottomLeft: return fmt::format_to(ctx.out(), "BottomLeft");
-            case Arc::BottomRight: return fmt::format_to(ctx.out(), "BottomRight");
+            case Arc::NoArc: name = "NoArc"; break;
+            case Arc::TopLeft: name = "TopLeft"; break;
+            case Arc::TopRight: name = "TopRight"; break;
+            case Arc::BottomLeft: name = "BottomLeft"; break;
+            case Arc::BottomRight: name = "BottomRight"; break;
         }
-        return fmt::format_to(ctx.out(), "?");
+        return formatter<string_view>::format(name, ctx);
     }
 };
-} // namespace fmt

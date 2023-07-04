@@ -311,10 +311,8 @@ struct StrongHasher<std::basic_string_view<U>>
 
 } // namespace crispy
 
-namespace fmt
-{
 template <>
-struct formatter<crispy::StrongHash>
+struct fmt::formatter<crispy::StrongHash>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -327,4 +325,3 @@ struct formatter<crispy::StrongHash>
         return fmt::format_to(ctx.out(), "{}", to_structured_string(hash));
     }
 };
-} // namespace fmt

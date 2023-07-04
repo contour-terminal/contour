@@ -677,52 +677,53 @@ inline FunctionDefinition const* selectOSCommand(int id)
 
 } // namespace terminal
 
-namespace std
-{
 template <>
-struct hash<terminal::FunctionDefinition>
+struct std::hash<terminal::FunctionDefinition>
 {
     /// This is actually perfect hashing.
     constexpr uint32_t operator()(terminal::FunctionDefinition const& fun) const noexcept { return fun.id(); }
 };
-} // namespace std
 
-namespace fmt // {{{
-{
+// {{{ fmtlib support
 template <>
-struct formatter<terminal::FunctionCategory>
+struct fmt::formatter<terminal::FunctionCategory>: fmt::formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(const terminal::FunctionCategory value, FormatContext& ctx)
+    auto format(const terminal::FunctionCategory value, format_context& ctx) -> format_context::iterator
     {
         using terminal::FunctionCategory;
+        string_view name;
         switch (value)
         {
-            case FunctionCategory::C0: return fmt::format_to(ctx.out(), "C0");
-            case FunctionCategory::ESC: return fmt::format_to(ctx.out(), "ESC");
-            case FunctionCategory::CSI: return fmt::format_to(ctx.out(), "CSI");
-            case FunctionCategory::OSC: return fmt::format_to(ctx.out(), "OSC");
-            case FunctionCategory::DCS: return fmt::format_to(ctx.out(), "DCS");
+            case FunctionCategory::C0:
+                name = "C0";
+                break;
+                ;
+            case FunctionCategory::ESC:
+                name = "ESC";
+                break;
+                ;
+            case FunctionCategory::CSI:
+                name = "CSI";
+                break;
+                ;
+            case FunctionCategory::OSC:
+                name = "OSC";
+                break;
+                ;
+            case FunctionCategory::DCS:
+                name = "DCS";
+                break;
+                ;
         }
-        return fmt::format_to(ctx.out(), "({})", static_cast<unsigned>(value));
+        return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct formatter<terminal::FunctionDefinition>
+struct fmt::formatter<terminal::FunctionDefinition>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(const terminal::FunctionDefinition f, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(const terminal::FunctionDefinition f, format_context& ctx) -> format_context::iterator
     {
         switch (f.category)
         {
@@ -769,15 +770,10 @@ struct formatter<terminal::FunctionDefinition>
 };
 
 template <>
-struct formatter<terminal::FunctionSelector>
+struct fmt::formatter<terminal::FunctionSelector>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(const terminal::FunctionSelector f, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(const terminal::FunctionSelector f, format_context& ctx) -> format_context::iterator
     {
         switch (f.category)
         {
@@ -794,4 +790,4 @@ struct formatter<terminal::FunctionSelector>
         }
     }
 };
-} // namespace fmt
+// }}}

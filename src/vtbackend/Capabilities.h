@@ -117,18 +117,11 @@ class StaticDatabase: public Database
 
 } // namespace terminal::capabilities
 
-namespace fmt
-{
 template <>
-struct formatter<terminal::capabilities::Code>
+struct fmt::formatter<terminal::capabilities::Code>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::capabilities::Code value, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(terminal::capabilities::Code value, format_context& ctx) -> format_context::iterator
     {
         if (value.code & 0xFF0000)
             return fmt::format_to(ctx.out(),
@@ -140,4 +133,3 @@ struct formatter<terminal::capabilities::Code>
         return fmt::format_to(ctx.out(), "{}{}", char((value.code >> 8) & 0xFF), char(value.code & 0xFF));
     }
 };
-} // namespace fmt

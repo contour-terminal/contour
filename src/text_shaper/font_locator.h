@@ -86,18 +86,11 @@ class font_locator
 
 } // namespace text
 
-namespace fmt // {{{
-{
 template <>
-struct formatter<text::font_path>
+struct fmt::formatter<text::font_path>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(text::font_path spec, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(text::font_path spec, format_context& ctx) -> format_context::iterator
     {
         auto weightMod = spec.weight ? fmt::format(" {}", spec.weight.value()) : "";
         auto slantMod = spec.slant ? fmt::format(" {}", spec.slant.value()) : "";
@@ -106,30 +99,20 @@ struct formatter<text::font_path>
 };
 
 template <>
-struct formatter<text::font_memory_ref>
+struct fmt::formatter<text::font_memory_ref>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(text::font_memory_ref ref, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(text::font_memory_ref ref, format_context& ctx) -> format_context::iterator
     {
         return fmt::format_to(ctx.out(), "in-memory: {}", ref.identifier);
     }
 };
 
 template <>
-struct formatter<text::font_source>
+struct fmt::formatter<text::font_source>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(text::font_source source, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(text::font_source source, format_context& ctx) -> format_context::iterator
     {
         if (std::holds_alternative<text::font_path>(source))
             return fmt::format_to(ctx.out(), "{}", std::get<text::font_path>(source));
@@ -138,4 +121,3 @@ struct formatter<text::font_source>
         return fmt::format_to(ctx.out(), "UNKNOWN SOURCE");
     }
 };
-} // namespace fmt

@@ -90,54 +90,43 @@ std::string to_params(DeviceAttributes v);
 
 } // namespace terminal
 
-namespace fmt // {{{
-{
+// {{{ fmtlib support
 template <>
-struct formatter<terminal::VTType>
+struct fmt::formatter<terminal::VTType>: fmt::formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(const terminal::VTType id, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(const terminal::VTType id, FormatContext& ctx)
-    {
+        string_view name;
         switch (id)
         {
-            case terminal::VTType::VT100: return fmt::format_to(ctx.out(), "VT100");
-            case terminal::VTType::VT220: return fmt::format_to(ctx.out(), "VT220");
-            case terminal::VTType::VT240: return fmt::format_to(ctx.out(), "VT240");
-            case terminal::VTType::VT320: return fmt::format_to(ctx.out(), "VT320");
-            case terminal::VTType::VT330: return fmt::format_to(ctx.out(), "VT330");
-            case terminal::VTType::VT340: return fmt::format_to(ctx.out(), "VT340");
-            case terminal::VTType::VT420: return fmt::format_to(ctx.out(), "VT420");
-            case terminal::VTType::VT510: return fmt::format_to(ctx.out(), "VT510");
-            case terminal::VTType::VT520: return fmt::format_to(ctx.out(), "VT520");
-            case terminal::VTType::VT525: return fmt::format_to(ctx.out(), "VT525");
+            case terminal::VTType::VT100: name = "VT100"; break;
+            case terminal::VTType::VT220: name = "VT220"; break;
+            case terminal::VTType::VT240: name = "VT240"; break;
+            case terminal::VTType::VT320: name = "VT320"; break;
+            case terminal::VTType::VT330: name = "VT330"; break;
+            case terminal::VTType::VT340: name = "VT340"; break;
+            case terminal::VTType::VT420: name = "VT420"; break;
+            case terminal::VTType::VT510: name = "VT510"; break;
+            case terminal::VTType::VT520: name = "VT520"; break;
+            case terminal::VTType::VT525: name = "VT525"; break;
         }
-        crispy::unreachable();
+        return formatter<string_view>::format(name, ctx);
     }
 };
 template <>
-struct formatter<terminal::VTExtension>
+struct fmt::formatter<terminal::VTExtension>: fmt::formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(const terminal::VTExtension id, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(const terminal::VTExtension id, FormatContext& ctx)
-    {
+        string_view name;
         switch (id)
         {
-            case terminal::VTExtension::None: return fmt::format_to(ctx.out(), "none");
-            case terminal::VTExtension::Unknown: return fmt::format_to(ctx.out(), "unknown");
-            case terminal::VTExtension::XTerm: return fmt::format_to(ctx.out(), "XTerm");
-            case terminal::VTExtension::Contour: return fmt::format_to(ctx.out(), "Contour");
+            case terminal::VTExtension::None: name = "none"; break;
+            case terminal::VTExtension::Unknown: name = "unknown"; break;
+            case terminal::VTExtension::XTerm: name = "XTerm"; break;
+            case terminal::VTExtension::Contour: name = "Contour"; break;
         }
-        crispy::unreachable();
+        return formatter<string_view>::format(name, ctx);
     }
 };
-} // namespace fmt
+// }}}

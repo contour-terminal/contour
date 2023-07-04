@@ -79,10 +79,8 @@ inline std::optional<Decorator> to_decorator(std::string const& value) noexcept
 
 } // namespace terminal::rasterizer
 
-namespace std
-{
 template <>
-struct numeric_limits<terminal::rasterizer::Decorator>
+struct std::numeric_limits<terminal::rasterizer::Decorator>
 {
     using Decorator = terminal::rasterizer::Decorator;
     constexpr static Decorator min() noexcept { return Decorator::Underline; }
@@ -92,26 +90,16 @@ struct numeric_limits<terminal::rasterizer::Decorator>
         return static_cast<size_t>(max()) - static_cast<size_t>(min()) + 1;
     }
 };
-} // namespace std
 
-namespace fmt
-{
 template <>
-struct formatter<terminal::rasterizer::Decorator>
+struct fmt::formatter<terminal::rasterizer::Decorator>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::rasterizer::Decorator value, FormatContext& ctx)
+    auto format(terminal::rasterizer::Decorator value, format_context& ctx) -> format_context::iterator
     {
         auto constexpr mappings = std::array {
             "underline", "double-underline", "curly-underline", "dotted-underline", "dashed-underline",
             "overline",  "crossed-out",      "framed",          "encircle",
         };
-        return fmt::format_to(ctx.out(), "{}", mappings.at(static_cast<size_t>(value)));
+        return formatter<std::string_view>::format(mappings.at(static_cast<size_t>(value)), ctx);
     }
 };
-} // namespace fmt

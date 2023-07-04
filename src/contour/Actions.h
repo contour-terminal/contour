@@ -147,24 +147,19 @@ std::optional<Action> fromString(std::string const& _name);
 } // namespace contour::actions
 
 // {{{ fmtlib custom formatters
-#define DECLARE_ACTION_FMT(T)                                           \
-    namespace fmt                                                       \
-    {                                                                   \
-        template <>                                                     \
-        struct formatter<contour::actions::T>                           \
-        {                                                               \
-            template <typename ParseContext>                            \
-            constexpr auto parse(ParseContext& ctx)                     \
-            {                                                           \
-                return ctx.begin();                                     \
-            }                                                           \
-            template <typename FormatContext>                           \
-            auto format(contour::actions::T const&, FormatContext& ctx) \
-            {                                                           \
-                return fmt::format_to(ctx.out(), "{}", #T);             \
-            }                                                           \
-        };                                                              \
-    }
+#define DECLARE_ACTION_FMT(T)                                                                           \
+    template <>                                                                                         \
+    struct fmt::formatter<contour::actions::T>                                                          \
+    {                                                                                                   \
+        static auto parse(format_parse_context& ctx) -> format_parse_context::iterator                  \
+        {                                                                                               \
+            return ctx.begin();                                                                         \
+        }                                                                                               \
+        static auto format(contour::actions::T const&, format_context& ctx) -> format_context::iterator \
+        {                                                                                               \
+            return fmt::format_to(ctx.out(), "{}", #T);                                                 \
+        }                                                                                               \
+    };
 
 // {{{ declare
 DECLARE_ACTION_FMT(CancelSelection)
@@ -224,18 +219,12 @@ DECLARE_ACTION_FMT(WriteScreen)
         return fmt::format_to(ctx.out(), "{}", a);                             \
     }
 
-namespace fmt
-{
 template <>
-struct formatter<contour::actions::Action>
+struct fmt::formatter<contour::actions::Action>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(contour::actions::Action const& _action, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(contour::actions::Action const& _action, format_context& ctx)
+        -> format_context::iterator
     {
         // {{{ handle
         HANDLE_ACTION(CancelSelection);
@@ -291,7 +280,7 @@ struct formatter<contour::actions::Action>
 };
 
 template <>
-struct formatter<contour::actions::CopyFormat>
+struct fmt::formatter<contour::actions::CopyFormat>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -312,6 +301,5 @@ struct formatter<contour::actions::CopyFormat>
     }
 };
 
-} // namespace fmt
 #undef HANDLE_ACTION
 // ]}}

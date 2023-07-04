@@ -238,18 +238,12 @@ namespace about
 
 } // end namespace crispy::cli
 
-namespace fmt // {{{ type formatters
-{
+// {{{ type formatters
 template <>
-struct formatter<crispy::cli::Value>
+struct fmt::formatter<crispy::cli::Value>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(crispy::cli::Value const& value, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(crispy::cli::Value const& value, format_context& ctx) -> format_context::iterator
     {
         if (std::holds_alternative<bool>(value))
             return fmt::format_to(ctx.out(), "{}", std::get<bool>(value));
@@ -266,4 +260,4 @@ struct formatter<crispy::cli::Value>
         // return fmt::format_to(ctx.out(), "{}..{}", range.from, range.to);
     }
 };
-} // namespace fmt
+// }}} namespace fmt

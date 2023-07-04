@@ -689,55 +689,40 @@ void TextureAtlas<Metadata>::inspect(std::ostream& output) const
 
 } // namespace terminal::rasterizer::atlas
 
-// {{{ fmt
-namespace fmt
-{
+// {{{ fmt support
 template <>
-struct formatter<terminal::rasterizer::atlas::Format>
+struct fmt::formatter<terminal::rasterizer::atlas::Format>: formatter<std::string_view>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
+    auto format(terminal::rasterizer::atlas::Format value, format_context& ctx) -> format_context::iterator
     {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::rasterizer::atlas::Format value, FormatContext& ctx)
-    {
+        std::string_view name;
         switch (value)
         {
-            case terminal::rasterizer::atlas::Format::Red: return fmt::format_to(ctx.out(), "R");
-            case terminal::rasterizer::atlas::Format::RGB: return fmt::format_to(ctx.out(), "RGB");
-            case terminal::rasterizer::atlas::Format::RGBA: return fmt::format_to(ctx.out(), "RGBA");
+            case terminal::rasterizer::atlas::Format::Red: name = "R"; break;
+            case terminal::rasterizer::atlas::Format::RGB: name = "RGB"; break;
+            case terminal::rasterizer::atlas::Format::RGBA: name = "RGBA"; break;
         }
-        return fmt::format_to(ctx.out(), "{}", static_cast<unsigned>(value));
+        return formatter<std::string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct formatter<terminal::rasterizer::atlas::TileLocation>
+struct fmt::formatter<terminal::rasterizer::atlas::TileLocation>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::rasterizer::atlas::TileLocation value, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(terminal::rasterizer::atlas::TileLocation value, format_context& ctx)
+        -> format_context::iterator
     {
         return fmt::format_to(ctx.out(), "Tile {}x+{}y", value.x.value, value.y.value);
     }
 };
 
 template <>
-struct formatter<terminal::rasterizer::atlas::RenderTile>
+struct fmt::formatter<terminal::rasterizer::atlas::RenderTile>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::rasterizer::atlas::RenderTile const& value, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(terminal::rasterizer::atlas::RenderTile const& value, format_context& ctx)
+        -> format_context::iterator
     {
         return fmt::format_to(
             ctx.out(), "RenderTile({}x + {}y, {})", value.x.value, value.y.value, value.tileLocation);
@@ -745,15 +730,11 @@ struct formatter<terminal::rasterizer::atlas::RenderTile>
 };
 
 template <>
-struct formatter<terminal::rasterizer::atlas::AtlasProperties>
+struct fmt::formatter<terminal::rasterizer::atlas::AtlasProperties>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(terminal::rasterizer::atlas::AtlasProperties const& value, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(terminal::rasterizer::atlas::AtlasProperties const& value, format_context& ctx)
+        -> format_context::iterator
     {
         return fmt::format_to(ctx.out(),
                               "tile size {}, format {}, direct-mapped {}",
@@ -762,5 +743,4 @@ struct formatter<terminal::rasterizer::atlas::AtlasProperties>
                               value.directMappingCount);
     }
 };
-} // namespace fmt
 // }}}

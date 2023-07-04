@@ -112,20 +112,12 @@ constexpr Size operator/(Size a, Size b) noexcept
 
 } // end namespace crispy
 
-namespace fmt
-{
 template <>
-struct formatter<crispy::Size>
+struct fmt::formatter<crispy::Size>
 {
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-    template <typename FormatContext>
-    auto format(const crispy::Size& value, FormatContext& ctx)
+    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
+    static auto format(const crispy::Size& value, format_context& ctx) -> format_context::iterator
     {
         return fmt::format_to(ctx.out(), "{}x{}", value.width, value.height);
     }
 };
-} // namespace fmt
