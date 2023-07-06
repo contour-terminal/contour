@@ -215,9 +215,6 @@ class ViInputHandler: public InputHandler
         crispy::unreachable();
     }
 
-    [[nodiscard]] CellLocationRange translateToCellRange(TextObjectScope scope,
-                                                         TextObject textObject) const noexcept;
-
     [[nodiscard]] bool isEditingSearch() const noexcept
     {
         return _searchEditMode != SearchEditMode::Disabled;
