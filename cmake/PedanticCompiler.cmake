@@ -42,6 +42,13 @@ if(${PEDANTIC_COMPILER})
         try_add_compile_options(-Wnewline-eof)
         try_add_compile_options(-Wno-unknown-attributes)
         try_add_compile_options(-Wno-unknown-pragmas)
+        if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
+            # -Wdangling-reference will generate false positives on recent GCC versions.
+            # See https://gcc.gnu.org/git/gitweb.cgi?p=gcc.git;h=6b927b1297e66e26e62e722bf15c921dcbbd25b9
+            try_add_compile_options(-Wno-dangling-reference)
+        else()
+            try_add_compile_options(-Wdangling-reference)
+        endif()
         try_add_compile_options(-Wnull-dereference)
         try_add_compile_options(-Wpessimizing-move)
         try_add_compile_options(-Wredundant-move)
