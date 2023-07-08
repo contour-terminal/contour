@@ -118,18 +118,10 @@ class StaticDatabase: public Database
 } // namespace terminal::capabilities
 
 template <>
-struct fmt::formatter<terminal::capabilities::Code>
+struct fmt::formatter<terminal::capabilities::Code>: fmt::formatter<std::string>
 {
-    static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(terminal::capabilities::Code value, format_context& ctx) -> format_context::iterator
+    auto format(terminal::capabilities::Code value, format_context& ctx) -> format_context::iterator
     {
-        if (value.code & 0xFF0000)
-            return fmt::format_to(ctx.out(),
-                                  "{}{}{}",
-                                  char((value.code >> 16) & 0xFF),
-                                  char((value.code >> 8) & 0xFF),
-                                  char(value.code & 0xFF));
-
-        return fmt::format_to(ctx.out(), "{}{}", char((value.code >> 8) & 0xFF), char(value.code & 0xFF));
+        return formatter<std::string>::format(value.hex(), ctx);
     }
 };
