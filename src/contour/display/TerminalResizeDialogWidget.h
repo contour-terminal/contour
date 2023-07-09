@@ -1,6 +1,5 @@
-#include <QDialog>
-#include <qboxlayout.h>
-#include <qmainwindow.h>
+#include <QtWidgets/QVBoxLayout>
+#include <QtWidgets/QMainWindow>
 #include <QtWidgets/QDialog>
 #include <QtWidgets/QLabel>
 
@@ -10,7 +9,7 @@ class TerminalResizeDialogWidget : public QDialog
 
 public:
     TerminalResizeDialogWidget(QMainWindow *parent);
-    ~TerminalResizeDialogWidget() = default;
+    ~TerminalResizeDialogWidget() override = default;
     void updateSize(const QSize& size);
     void center();
 

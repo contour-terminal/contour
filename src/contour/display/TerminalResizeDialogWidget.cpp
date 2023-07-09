@@ -5,9 +5,6 @@
 #include <QtWidgets/QMainWindow>
 #include <QtCore/QTimer>
 
-#include <iostream>
-#include <qtimer.h>
-
 TerminalResizeDialogWidget::TerminalResizeDialogWidget(QMainWindow* parent): parent_ {parent}
 {
     this->setWindowFlags(Qt::FramelessWindowHint | Qt::WindowStaysOnTopHint);
