@@ -14,6 +14,7 @@ add_library(ContourTerminalDisplay STATIC
     OpenGLRenderer.cpp OpenGLRenderer.h
     ShaderConfig.cpp ShaderConfig.h
     TerminalWidget.cpp TerminalWidget.h
+    TerminalResizeDialogWidget.cpp TerminalResizeDialogWidget.h
     ${QT_RESOURCES}
 )
 set_target_properties(ContourTerminalDisplay PROPERTIES AUTOMOC ON)

@@ -15,6 +15,8 @@
 
 #include <crispy/App.h>
 
+#include <chrono>
+
 namespace contour
 {
 
@@ -27,6 +29,7 @@ class ContourApp: public crispy::App
     ContourApp();
 
     crispy::cli::Command parameterDefinition() const override;
+    std::chrono::time_point<std::chrono::system_clock> startedAt;
 
   private:
     int captureAction();

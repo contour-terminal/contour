@@ -16,6 +16,7 @@
 #include <contour/ContourGuiApp.h>
 #include <contour/TerminalWindow.h>
 #include <contour/helper.h>
+#include <chrono>
 
 #if defined(CONTOUR_SCROLLBAR)
     #include <contour/ScrollableDisplay.h>
@@ -133,6 +134,8 @@ TerminalWindow::TerminalWindow(ContourGuiApp& _app): _app { _app }
     terminalWidget_->setFocus();
 
     // statusBar()->showMessage("blurb");
+
+    resizeDialog = new TerminalResizeDialogWidget(this);
 }
 
 config::TerminalProfile const& TerminalWindow::profile() const
@@ -193,8 +196,12 @@ void TerminalWindow::resizeEvent(QResizeEvent* _event)
                  _event->size().height());
 
     QMainWindow::resizeEvent(_event);
-    // centralWidget()->resize(_event->size());
-    // updatePosition();
+
+    // Wait a bit in order to avoid first implicit resizing when calling `ContourGuiApp::newWindow`
+    auto elapsed = std::chrono::system_clock::now() - _app.startedAt;
+    if (elapsed > std::chrono::seconds(2)) {
+        resizeDialog->updateSize(_event->size());
+    }
 }
 
 bool TerminalWindow::event(QEvent* _event)

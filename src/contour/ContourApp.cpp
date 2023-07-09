@@ -171,6 +171,7 @@ ContourApp::ContourApp(): App("contour", "Contour Terminal Emulator", CONTOUR_VE
     link("contour.generate.config", bind(&ContourApp::configAction, this));
     link("contour.generate.integration", bind(&ContourApp::integrationAction, this));
     link("contour.info.vt", bind(&ContourApp::infoVT, this));
+    startedAt = std::chrono::system_clock::now();
 }
 
 template <typename Callback>

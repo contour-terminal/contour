@@ -18,6 +18,7 @@
 #include <contour/ContourGuiApp.h>
 #include <contour/TerminalSession.h>
 #include <contour/display/TerminalWidget.h>
+#include <contour/display/TerminalResizeDialogWidget.h>
 
 #include <vtbackend/Metrics.h>
 
@@ -81,6 +82,7 @@ class TerminalWindow: public QMainWindow
 #endif
 
     display::TerminalWidget* terminalWidget_ = nullptr;
+    TerminalResizeDialogWidget* resizeDialog = nullptr;
 };
 
 } // namespace contour
