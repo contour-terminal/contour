@@ -1029,7 +1029,7 @@ CellLocation ViCommands::translateToCellLocation(ViMotion motion, unsigned count
                 return result.value() - ColumnOffset(1);
             else
                 return cursorPosition;
-        case ViMotion::TillAfterCharLeft: // T {char} TODO(pr)
+        case ViMotion::TillAfterCharLeft: // T {char}
             if (auto const result = toCharLeft(count); result)
                 return result.value() + ColumnOffset(1);
             else

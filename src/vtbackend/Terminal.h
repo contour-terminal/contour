@@ -403,7 +403,7 @@ class Terminal
 
     [[nodiscard]] SequenceHandler& sequenceHandler() noexcept
     {
-        // TODO(pr) avoid double-switch by introducing a `SequenceHandler& sequenceHandler` member.
+        // TODO: avoid double-switch by introducing a `SequenceHandler& sequenceHandler` member.
         switch (_state.executionMode)
         {
             case ExecutionMode::Normal: return activeDisplay();
