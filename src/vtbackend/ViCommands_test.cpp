@@ -202,7 +202,6 @@ TEST_CASE("vi.motion: b", "[vi]")
     REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 0_columnOffset);
 }
 
-
 TEST_CASE("ViCommands:modeChanged", "[vi]")
 {
     auto mock = setupMockTerminal("Hello\r\n",
