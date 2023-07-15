@@ -271,6 +271,7 @@ void ViCommands::modeChanged(ViMode mode)
             _terminal.setMode(DECMode::VisibleCursor, _lastCursorVisible);
             _terminal.setCursorShape(_lastCursorShape);
             _terminal.viewport().forceScrollToBottom();
+            _terminal.clearSearch();
             _terminal.popStatusDisplay();
             _terminal.screenUpdated();
             break;

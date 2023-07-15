@@ -201,3 +201,16 @@ TEST_CASE("vi.motion: b", "[vi]")
     mock.sendCharPressSequence("b");
     REQUIRE(mock.terminal.state().viCommands.cursorPosition == 0_lineOffset + 0_columnOffset);
 }
+
+TEST_CASE("ViCommands:modeChanged", "[vi]")
+{
+    auto mock = setupMockTerminal("Hello\r\n",
+                                  terminal::PageSize { terminal::LineCount(10), terminal::ColumnCount(40) });
+
+    SECTION("clearSearch() must be invoked when switch to ViMode::Insert")
+    {
+        mock.terminal.setNewSearchTerm(U"search_term", true);
+        mock.terminal.state().inputHandler.setMode(terminal::ViMode::Insert);
+        REQUIRE(mock.terminal.state().searchMode.pattern.empty());
+    }
+}
