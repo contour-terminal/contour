@@ -111,6 +111,7 @@
           <li>Fixes rendering in cases of glyphs with inverted orientation (#1115).</li>
           <li>Adds inheritance of profiles in configuration file based on default profile (#1063).</li>
           <li>Clear search term when switch to insert vi mode (#1135)</li>
+          <li>Delete dpi_scale entry in configuration (#1137)</li>
         </ul>
       </description>
     </release>
