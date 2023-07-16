@@ -763,7 +763,6 @@ void TerminalWidget::onScrollBarValueChanged(int _value)
 
 double TerminalWidget::contentScale() const
 {
-    auto const dpiScale = session_ ? session_->profile().fonts.dpiScale : 1.0;
 
 #if !defined(__APPLE__) && !defined(_WIN32)
     if (auto const kcmFontsFile = kcmFontsFilePath())
@@ -777,7 +776,7 @@ double TerminalWidget::contentScale() const
                 auto const forcedDPI = static_cast<double>(crispy::to_integer(fields[1]).value_or(0.0));
                 if (forcedDPI >= 96.0)
                 {
-                    auto const dpr = (forcedDPI * dpiScale) / 96.0;
+                    auto const dpr = forcedDPI / 96.0;
                     return dpr;
                 }
             }
@@ -785,7 +784,7 @@ double TerminalWidget::contentScale() const
     }
 #endif
 
-    return devicePixelRatio() * dpiScale;
+    return devicePixelRatio();
 }
 
 void TerminalWidget::updateMinimumSize()
