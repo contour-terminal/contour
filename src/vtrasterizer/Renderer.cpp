@@ -187,12 +187,14 @@ void Renderer::configureTextureAtlas()
 {
     Require(_renderTarget);
 
-    auto atlasProperties =
-        atlas::AtlasProperties { atlas::Format::RGBA,
-                                 _gridMetrics.cellSize, // Cell size is used as GPU tile size.
-                                 _atlasHashtableSlotCount,
-                                 _atlasTileCount,
-                                 _directMappingAllocator.currentlyAllocatedCount };
+    // create 2px spacing between elements in Atlas
+    auto const atlasCell =
+        ImageSize { _gridMetrics.cellSize.width + Width(1), _gridMetrics.cellSize.height + Height(1) };
+    auto atlasProperties = atlas::AtlasProperties { atlas::Format::RGBA,
+                                                    atlasCell,
+                                                    _atlasHashtableSlotCount,
+                                                    _atlasTileCount,
+                                                    _directMappingAllocator.currentlyAllocatedCount };
 
     Require(atlasProperties.tileCount.value > 0);
 
