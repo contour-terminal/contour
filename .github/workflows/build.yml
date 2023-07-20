@@ -704,10 +704,6 @@ jobs:
         run: valgrind --error-exitcode=64 ./build/src/vtparser/vtparser_test
       - name: "test: vtbackend (via valgrind)"
         run: valgrind --error-exitcode=64 ./build/src/vtbackend/vtbackend_test
-      - name: "Delete artifact: contour-ubuntu2204-tests"
-        uses: geekyeggo/delete-artifact@v2
-        with:
-          name: contour-ubuntu2204-tests
 
   test_ubuntu2204_bench_headless:
     strategy:
@@ -746,10 +742,6 @@ jobs:
                           valgrind
       - name: "bench-headless: ${{ matrix.test_case }}"
         run: valgrind --error-exitcode=64 ./build/src/vtbackend/bench-headless ${{ matrix.test_case }} size 1
-      - name: "Delete artifact: contour-ubuntu2204-tests"
-        uses: geekyeggo/delete-artifact@v2
-        with:
-          name: contour-ubuntu2204-tests
 
   check_ubuntu2204_matrix_test_matrix:
     if: ${{ always() }}
@@ -771,5 +763,9 @@ jobs:
       - name: Check package_for_Ubuntu matrix status
         if: ${{ needs.package_for_Ubuntu.result != 'success' && needs.package_for_Ubuntu.result != 'skipped' }}
         run: exit 1
+      - name: "Delete artifact: contour-ubuntu2204-tests"
+        uses: geekyeggo/delete-artifact@v2
+        with:
+          name: contour-ubuntu2204-tests
 
   # }}}
