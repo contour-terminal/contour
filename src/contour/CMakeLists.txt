@@ -15,17 +15,17 @@ option(CONTOUR_PERF_STATS "Enables debug printing some performance stats." OFF)
 option(CONTOUR_VT_METRICS "Enables collecting and exit-printing some VT usage metrics." OFF)
 option(CONTOUR_SCROLLBAR "Enables scrollbar in GUI frontend." ON)
 
-set(QtX11Extras)
-if(NOT(WIN32) AND NOT(APPLE) AND (CONTOUR_QT_VERSION EQUAL "5"))
-    set(QtX11Extras X11Extras)
+set(QT_COMPONENTS Core Gui Network Multimedia Widgets)
+if(CONTOUR_QT_VERSION EQUAL 6)
+    list(APPEND QT_COMPONENTS OpenGL OpenGLWidgets)
+endif()
+if(NOT(WIN32) AND NOT(APPLE) AND (CONTOUR_QT_VERSION EQUAL 5))
+    list(APPEND QT_COMPONENTS X11Extras)
 endif()
 
-message(STATUS "Build contour using Qt : ${CONTOUR_QT_VERSION}")
-if(CONTOUR_QT_VERSION EQUAL "6")
-    find_package(Qt6 COMPONENTS Core Gui Network OpenGL OpenGLWidgets Widgets Multimedia ${QtX11Extras} REQUIRED)
-else()
-    find_package(Qt5 COMPONENTS Gui Network Widgets Multimedia ${QtX11Extras} REQUIRED)  # apt install qtbase5-dev libqt5gui5
-endif()
+message(STATUS "Build contour using Qt ${CONTOUR_QT_VERSION}")
+message(STATUS "Qt components: ${QT_COMPONENTS}")
+find_package(Qt${CONTOUR_QT_VERSION} COMPONENTS ${QT_COMPONENTS} REQUIRED)
 
 add_subdirectory(display)
 
@@ -104,6 +104,7 @@ if(WIN32)
 elseif(APPLE)
     set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/Modules" ${CMAKE_MODULE_PATH})
     set_target_properties(contour PROPERTIES
+        OUTPUT_NAME "contour"
         MACOSX_BUNDLE ON
         MACOSX_BUNDLE_BUNDLE_NAME "Contour"
         MACOSX_BUNDLE_INFO_STRING "Contour Terminal Emulator"
@@ -196,6 +197,76 @@ set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/LICENSE.txt")
 set(CPACK_PACKAGE_EXECUTABLES contour "Contour Terminal Emulator")
 set(CPACK_CREATE_DESKTOP_LINKS contour)
 
+# {{{  Qt bundle installation helpers
+set(INSTALLED_QT_VERSION ${CONTOUR_QT_VERSION})
+
+function(_qt_get_plugin_name_with_version target out_var)
+    string(REGEX REPLACE "^Qt::(.+)" "Qt${INSTALLED_QT_VERSION}::\\1" qt_plugin_with_version "${target}")
+    if(TARGET "${qt_plugin_with_version}")
+        set("${out_var}" "${qt_plugin_with_version}" PARENT_SCOPE)
+    else()
+        set("${out_var}" "" PARENT_SCOPE)
+    endif()
+endfunction()
+
+# if(APPLE)
+#    # Required when packaging, and set CMAKE_INSTALL_PREFIX to "/"
+#    set(CPACK_SET_DESTDIR TRUE) 
+#    set(CMAKE_BUNDLE_NAME "contour")
+#    set(CMAKE_BUNDLE_LOCATION "/")
+#    # make sure CMAKE_INSTALL_PREFIX ends in /
+#    set(CMAKE_INSTALL_PREFIX "/${CMAKE_BUNDLE_NAME}.app/Contents")
+# endif(APPLE)
+
+macro(install_qt_plugin _qt_plugin_name _qt_plugins_var)
+    set(_install_prefix "contour.app/Contents/")
+    if(TARGET "${_qt_plugin_name}")
+        get_target_property(_qt_plugin_path "${_qt_plugin_name}" LOCATION)
+    else()
+        _qt_get_plugin_name_with_version("Qt::${_qt_plugin_name}" _qt_plugin_with_version_name)
+        if(TARGET "${_qt_plugin_with_version_name}")
+            get_target_property(_qt_plugin_path "${_qt_plugin_with_version_name}" LOCATION)
+        endif()
+    endif()
+    if(EXISTS "${_qt_plugin_path}")
+        get_filename_component(_qt_plugin_file "${_qt_plugin_path}" NAME)
+        get_filename_component(_qt_plugin_type "${_qt_plugin_path}" PATH)
+        get_filename_component(_qt_plugin_type "${_qt_plugin_type}" NAME)
+        if(APPLE)
+            set(_qt_plugin_dir "PlugIns")
+        elseif(WIN32)
+            set(_qt_plugin_dir "plugins")
+        endif()
+        set(_qt_plugin_dest "${_install_prefix}${_qt_plugin_dir}/${_qt_plugin_type}")
+        install(FILES "${_qt_plugin_path}" DESTINATION "${_qt_plugin_dest}" ${COMPONENT})
+        set(${_qt_plugins_var} "${${_qt_plugins_var}};\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${_qt_plugin_dest}/${_qt_plugin_file}")
+    endif()
+endmacro()
+
+macro(install_qt_plugins _comps _plugins_var)
+    foreach(_qt_comp IN LISTS ${_comps})
+        if(INSTALLED_QT_VERSION VERSION_LESS 6)
+            set(_qt_module_plugins ${Qt${INSTALLED_QT_VERSION}${_qt_comp}_PLUGINS})
+        else()
+            get_target_property(_qt_module_plugins Qt${INSTALLED_QT_VERSION}::${_qt_comp} QT_PLUGINS)
+        endif()
+        foreach(_qt_plugin IN LISTS _qt_module_plugins)
+            if(INSTALLED_QT_VERSION VERSION_GREATER_EQUAL 6)
+                # Qt6 provides the plugins as individual packages that need to be found.
+                find_package(Qt${INSTALLED_QT_VERSION}${_qt_plugin} QUIET PATHS ${Qt${INSTALLED_QT_VERSION}${_qt_comp}_DIR})
+            endif()
+            install_qt_plugin("${_qt_plugin}" "${_plugins_var}")
+        endforeach()
+    endforeach()
+endmacro()
+
+get_property(_Qt_Core_LOCATION TARGET Qt${INSTALLED_QT_VERSION}::Core PROPERTY LOCATION)
+get_filename_component(Qt_BIN_DIR "${_Qt_Core_LOCATION}" PATH)
+if(APPLE)
+  get_filename_component(Qt_BIN_DIR "${Qt_BIN_DIR}" PATH)
+endif()
+# }}}
+
 if(WIN32)
     set(CPACK_PACKAGE_VERSION "${CONTOUR_VERSION}") # XXX: WIX does only allow x.x.x.x patterns.
     set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.ico")
@@ -215,10 +286,24 @@ if(WIN32)
             PATTERN "*.dll"
     )
 elseif(APPLE)
-    # TODO: include(DeployQt)
-    # TODO: macdeployqt(contour)
+    # {{{ NB: This would run macdeployqt after creating contour executable during build stage.
+    # This is currently disabled, because it seems like packaging would not work then,
+    # but instead, we invoke macdeployqt during cpack stage.
+    # 
+    # include(DeployQt)
+    # add_custom_command(
+    #     TARGET contour POST_BUILD
+    #     COMMENT "Running ${MACDEPLOYQT_EXECUTABLE}"
+    #     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+    #     COMMAND ${MACDEPLOYQT_EXECUTABLE} contour.app -always-overwrite -verbose=3 -qmlimport=${CMAKE_CURRENT_SOURCE_DIR}/ui -qmldir=${CMAKE_CURRENT_SOURCE_DIR}/ui
+    #     VERBATIM
+    # )
+    # }}}
+
     include(GNUInstallDirs)
     set(CPACK_PACKAGE_ICON "${CMAKE_CURRENT_SOURCE_DIR}/res/images/contour-logo.icns")
+
+    include(InstallRequiredSystemLibraries)
 
     # See: https://stackoverflow.com/questions/35612687/cmake-macos-x-bundle-with-bundleutiliies-for-qt-application/48035834#48035834
     set(APP_NAME contour)
@@ -226,27 +311,17 @@ elseif(APPLE)
     set(INSTALL_RUNTIME_DIR "${App_Contents}/MacOS")
     set(INSTALL_CMAKE_DIR "${App_Contents}/Resources")
 
-    if(CONTOUR_QT_VERSION EQUAL "5")
-      # based on code from CMake's QtDialog/CMakeLists.txt
-      macro(install_qt5_plugin _qt_plugin_name _qt_plugins_var _prefix)
-          get_target_property(_qt_plugin_path "${_qt_plugin_name}" LOCATION)
-          if(EXISTS "${_qt_plugin_path}")
-              get_filename_component(_qt_plugin_file "${_qt_plugin_path}" NAME)
-              get_filename_component(_qt_plugin_type "${_qt_plugin_path}" PATH)
-              get_filename_component(_qt_plugin_type "${_qt_plugin_type}" NAME)
-              set(_qt_plugin_dest "${_prefix}/PlugIns/${_qt_plugin_type}")
-              install(FILES "${_qt_plugin_path}" DESTINATION "${_qt_plugin_dest}")
-              set(${_qt_plugins_var} "${${_qt_plugins_var}};\$ENV{DEST_DIR}\${CMAKE_INSTALL_PREFIX}/${_qt_plugin_dest}/${_qt_plugin_file}")
-          else()
-              message(FATAL_ERROR "QT plugin ${_qt_plugin_name} not found")
-          endif()
-      endmacro()
-      install_qt5_plugin("Qt5::QCocoaIntegrationPlugin" QT_PLUGINS ${App_Contents})
-    endif()
+    # based on code from CMake's QtDialog/CMakeLists.txt
 
-    # ${_qt_plugin_dir} seems empty anyways, but the target bundle/dmg works.
-    # file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/qt.conf" "[Paths]\nPlugins = ${_qt_plugin_dir}\n")
-    # install(FILES "${CMAKE_CURRENT_BINARY_DIR}/qt.conf" DESTINATION "${INSTALL_CMAKE_DIR}")
+    if(INSTALLED_QT_VERSION VERSION_EQUAL 5)
+        install_qt_plugin("Qt5::QCocoaIntegrationPlugin" QT_PLUGINS)
+        if(TARGET Qt5::QMacStylePlugin)
+            install_qt_plugin("Qt5::QMacStylePlugin" QT_PLUGINS)
+        endif()
+    else()
+        # FIXME: Minimize plugins for Qt6.
+        install_qt_plugins(QT_COMPONENTS QT_PLUGINS)
+    endif()
 
     # Install application icon
     install(FILES "res/images/contour-logo.icns" DESTINATION "${INSTALL_CMAKE_DIR}" RENAME "contour.icns")
@@ -262,8 +337,13 @@ elseif(APPLE)
         RUNTIME DESTINATION "${INSTALL_RUNTIME_DIR}" COMPONENT Runtime
     )
 
-    set(APPS "\${CMAKE_INSTALL_PREFIX}/${APP_NAME}.app")    # Note Mac specific extension .app
-    set(DIRS ${CMAKE_BINARY_DIR})                           # Directories to look for dependencies
+    file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/qt.conf" "[Paths]\nPlugins = PlugIns\n")
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/qt.conf" DESTINATION "${INSTALL_CMAKE_DIR}")
+
+    # {{{ create vars for fixup_bundle call
+    set(BUNDLE_APP "\${CMAKE_INSTALL_PREFIX}/${APP_NAME}.app")        # Note Mac specific extension .app
+    set(DIRS "/usr/local/lib" "/opt/homebrew/lib" "/lib" "/usr/lib" ${CMAKE_BINARY_DIR})  # Directories to look for dependencies
+    list(APPEND DIRS ${Qt_BIN_DIR} ${QT_LIBRARY_DIR} ${QT_BINARY_DIR})
 
     # Path used for searching by FIND_XXX(), with appropriate suffixes added
     if(CMAKE_PREFIX_PATH)
@@ -271,19 +351,28 @@ elseif(APPLE)
             list(APPEND DIRS "${dir}/bin" "${dir}/lib")
         endforeach()
     endif()
+    message(STATUS "BUNDLE_APP : ${BUNDLE_APP}")
+    message(STATUS "QT_PLUGINS : ${QT_PLUGINS}")
+    message(STATUS "DIRS       : ${DIRS}")
+    # }}}
 
-    # Append Qt's lib folder which is two levels above Qt5Widgets_DIR
-    list(APPEND DIRS "${Qt5Widgets_DIR}/../..")
-
-    include(InstallRequiredSystemLibraries)
-
-    message(STATUS "APPS: ${APPS}")
-    message(STATUS "DIRS: ${DIRS}")
-    message(STATUS "QT_PLUGINS: ${QT_PLUGINS}")
-
+    set(CODE_SIGN_CERTIFICATE_ID "-" CACHE STRING "Mac OS/X Code signature ID") # TODO: Use proper ID on CI
+    include(DeployQt)  # Just to get access to ${MACDEPLOYQT_EXECUTABLE}
+    message(STATUS "macdeployqt location : ${MACDEPLOYQT_EXECUTABLE}")
     install(CODE "
+        execute_process(
+            WORKING_DIRECTORY \"${CMAKE_CURRENT_BINARY_DIR}\"
+            COMMAND ${MACDEPLOYQT_EXECUTABLE} contour.app
+                    -always-overwrite
+                    -verbose=1
+                    -qmlimport=${CMAKE_CURRENT_SOURCE_DIR}/ui
+                    -qmldir=${CMAKE_CURRENT_SOURCE_DIR}/ui
+        )
         include(BundleUtilities)
-        fixup_bundle(\"${APPS}\" \"${QT_PLUGINS}\" \"${DIRS}\")
+        fixup_bundle(\"${BUNDLE_APP}\" \"${QT_PLUGINS}\" \"${DIRS}\")
+        execute_process(
+            COMMAND codesign --force --deep --sign \"${CODE_SIGN_CERTIFICATE_ID}\" \"${BUNDLE_APP}\"
+        )
     ")
 else()
     # any other Unix
