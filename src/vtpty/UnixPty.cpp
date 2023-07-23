@@ -227,30 +227,30 @@ UnixPty::Slave::~Slave()
 
 PtySlaveHandle UnixPty::Slave::handle() const noexcept
 {
-    return PtySlaveHandle::cast_from(_slaveFd);
+    return PtySlaveHandle::cast_from(slaveFd);
 }
 
 void UnixPty::Slave::close()
 {
-    detail::saveClose(&_slaveFd);
+    detail::saveClose(&slaveFd);
 }
 
 bool UnixPty::Slave::isClosed() const noexcept
 {
-    return _slaveFd == -1;
+    return slaveFd == -1;
 }
 
 bool UnixPty::Slave::configure() noexcept
 {
-    auto const tio = detail::constructTerminalSettings(_slaveFd);
-    if (tcsetattr(_slaveFd, TCSANOW, &tio) == 0)
-        tcflush(_slaveFd, TCIOFLUSH);
+    auto const tio = detail::constructTerminalSettings(slaveFd);
+    if (tcsetattr(slaveFd, TCSANOW, &tio) == 0)
+        tcflush(slaveFd, TCIOFLUSH);
     return true;
 }
 
 bool UnixPty::Slave::login()
 {
-    if (_slaveFd < 0)
+    if (slaveFd < 0)
         return false;
 
     if (!configure())
@@ -258,37 +258,37 @@ bool UnixPty::Slave::login()
 
     // This is doing what login_tty() is doing, too.
     // But doing it ourselfs allows for a little more flexibility.
-    // return login_tty(_slaveFd) == 0;
+    // return login_tty(slaveFd) == 0;
 
     setsid();
 
 #if defined(TIOCSCTTY)
-    if (ioctl(_slaveFd, TIOCSCTTY, nullptr) == -1)
+    if (ioctl(slaveFd, TIOCSCTTY, nullptr) == -1)
         return false;
 #endif
 
     for (int const fd: { 0, 1, 2 })
     {
-        if (_slaveFd != fd)
+        if (slaveFd != fd)
             ::close(fd);
-        detail::saveDup2(_slaveFd, fd);
+        detail::saveDup2(slaveFd, fd);
     }
 
-    if (_slaveFd > 2)
-        detail::saveClose(&_slaveFd);
+    if (slaveFd > 2)
+        detail::saveClose(&slaveFd);
 
     return true;
 }
 
 int UnixPty::Slave::write(std::string_view text) noexcept
 {
-    if (_slaveFd < 0)
+    if (slaveFd < 0)
     {
         errno = ENODEV;
         return -1;
     }
 
-    auto const rv = ::write(_slaveFd, text.data(), text.size());
+    auto const rv = ::write(slaveFd, text.data(), text.size());
     return static_cast<int>(rv);
 }
 // }}}

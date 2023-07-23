@@ -73,16 +73,16 @@ struct TextSelection
 {
     Screen<T> const* screen;
     string text;
-    ColumnOffset lastColumn_ = ColumnOffset(0);
+    ColumnOffset lastColumn = ColumnOffset(0);
 
     explicit TextSelection(Screen<T> const& s): screen { &s } {}
 
     void operator()(CellLocation const& pos)
     {
         auto const& cell = screen->at(pos);
-        text += pos.column < lastColumn_ ? "\n" : "";
+        text += pos.column < lastColumn ? "\n" : "";
         text += cell.toUtf8();
-        lastColumn_ = pos.column;
+        lastColumn = pos.column;
     }
 };
 template <typename T>

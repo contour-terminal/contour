@@ -42,7 +42,7 @@ struct Settings
     CursorDisplay cursorDisplay = CursorDisplay::Steady;
     CursorShape cursorShape = CursorShape::Block;
 
-    bool usePrivateColorRegisters_ = false;
+    bool usePrivateColorRegisters = false;
 
     std::chrono::milliseconds cursorBlinkInterval = std::chrono::milliseconds { 500 };
     RefreshRate refreshRate = { 30.0 };

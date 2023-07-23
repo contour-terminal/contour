@@ -32,6 +32,7 @@
 #include <array>
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -284,7 +285,7 @@ void OpenGLRenderer::initializeTextureRendering()
     CHECKED_GL(glBindVertexArray(_textVAO));
 
     auto constexpr BufferStride = (3 + 4 + 4) * sizeof(GLfloat);
-    auto constexpr VertexOffset = (void const*) 0;
+    auto constexpr VertexOffset = (void const*) nullptr;
     auto const TexCoordOffset = (void const*) (3 * sizeof(GLfloat));
     auto const ColorOffset = (void const*) (7 * sizeof(GLfloat));
 

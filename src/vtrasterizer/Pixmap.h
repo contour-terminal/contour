@@ -186,37 +186,37 @@ constexpr void drawEllipseArc(PutPixel putpixel, ImageSize imageSize, crispy::Po
 /// Alpha-channel 2D image.
 struct Pixmap
 {
-    atlas::Buffer _buffer {};
-    ImageSize _size {};
-    ImageSize _downsampledSize {};
-    std::function<int(int, int)> _filler = [](int, int) {
+    atlas::Buffer buffer {};
+    ImageSize size {};
+    ImageSize downsampledSize {};
+    std::function<int(int, int)> filler = [](int, int) {
         return 0xFF;
     };
-    int _lineThickness = 1;
-    int _baseLine = 0; // baseline position relative to cell bottom.
+    int lineThickness = 1;
+    int baseLine = 0; // baseline position relative to cell bottom.
 
-    [[nodiscard]] constexpr ImageSize downsampledSize() const noexcept { return _downsampledSize; }
+    [[nodiscard]] constexpr ImageSize getdownsampledSize() const noexcept { return downsampledSize; }
 
     Pixmap& halfFilledCircleLeft();
     Pixmap& halfFilledCircleRight();
-    Pixmap& lineThickness(int n) noexcept
+    Pixmap& getlineThickness(int n) noexcept
     {
-        _lineThickness = n;
+        lineThickness = n;
         return *this;
     }
     Pixmap& baseline(int n) noexcept
     {
-        _baseLine = n;
+        baseLine = n;
         return *this;
     }
     Pixmap& line(Ratio from, Ratio to);
 
     Pixmap& rect(Ratio topLeft, Ratio bottomRight) noexcept
     {
-        auto const top = int(topLeft.y * unbox<double>(_size.height));
-        auto const left = int(topLeft.x * unbox<double>(_size.width));
-        auto const bottom = int(bottomRight.y * unbox<double>(_size.height));
-        auto const right = int(bottomRight.x * unbox<double>(_size.width));
+        auto const top = int(topLeft.y * unbox<double>(size.height));
+        auto const left = int(topLeft.x * unbox<double>(size.width));
+        auto const bottom = int(bottomRight.y * unbox<double>(size.height));
+        auto const right = int(bottomRight.x * unbox<double>(size.width));
 
         for (int y = top; y < bottom; ++y)
             for (int x = left; x < right; ++x)
@@ -229,7 +229,7 @@ struct Pixmap
     template <typename... More>
     Pixmap& segment_bar(int which, More... more);
 
-    Pixmap& fill() { return fill(_filler); }
+    Pixmap& fill() { return fill(filler); }
     template <typename F>
     Pixmap& fill(F const& filler);
 
@@ -255,31 +255,31 @@ template <size_t N, typename F>
 Pixmap blockElement(ImageSize size, F f)
 {
     auto p = blockElement<N>(size);
-    p._filler = f;
+    p.filler = f;
     return p;
 }
 
 // {{{ Pixmap inlines
 inline void Pixmap::paint(int x, int y, uint8_t value)
 {
-    auto const w = unbox<int>(_size.width);
-    auto const h = unbox<int>(_size.height) - 1;
+    auto const w = unbox<int>(size.width);
+    auto const h = unbox<int>(size.height) - 1;
     if (!(0 <= y && y <= h))
         return;
     if (!(0 <= x && x < w))
         return;
-    _buffer.at(static_cast<unsigned>((h - y) * w + x)) = value;
+    buffer.at(static_cast<unsigned>((h - y) * w + x)) = value;
 }
 
 inline void Pixmap::paintOver(int x, int y, uint8_t intensity)
 {
-    auto const w = unbox<int>(_size.width);
-    auto const h = unbox<int>(_size.height) - 1;
+    auto const w = unbox<int>(size.width);
+    auto const h = unbox<int>(size.height) - 1;
     if (!(0 <= y && y <= h))
         return;
     if (!(0 <= x && x < w))
         return;
-    auto& target = _buffer.at(static_cast<unsigned>((h - y) * w + x));
+    auto& target = buffer.at(static_cast<unsigned>((h - y) * w + x));
     target = static_cast<uint8_t>(std::min(static_cast<int>(target) + static_cast<int>(intensity), 255));
 }
 
@@ -293,8 +293,8 @@ inline void Pixmap::paintOverThick(int x, int y, uint8_t intensity, int sx, int 
 template <typename F>
 Pixmap& Pixmap::fill(F const& filler)
 {
-    for (auto const y: ::ranges::views::iota(0, unbox<int>(_size.height)))
-        for (auto const x: ::ranges::views::iota(0, unbox<int>(_size.width)))
+    for (auto const y: ::ranges::views::iota(0, unbox<int>(size.height)))
+        for (auto const x: ::ranges::views::iota(0, unbox<int>(size.width)))
             paint(x, y, static_cast<uint8_t>(filler(x, y)));
     return *this;
 }
