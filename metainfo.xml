@@ -112,7 +112,6 @@
           <li>Adds inheritance of profiles in configuration file based on default profile (#1063).</li>
           <li>Clear search term when switch to insert vi mode (#1135)</li>
           <li>Delete dpi_scale entry in configuration (#1137)</li>
-          <li>Fix glyphs overlap for some fonts(#1022)</li>
         </ul>
       </description>
     </release>
