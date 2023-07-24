@@ -187,11 +187,9 @@ void Renderer::configureTextureAtlas()
 {
     Require(_renderTarget);
 
-    // create 2px spacing between elements in Atlas
-    auto const atlasCell =
-        ImageSize { _gridMetrics.cellSize.width + Width(1), _gridMetrics.cellSize.height + Height(1) };
+    auto const atlasCellSize = _gridMetrics.cellSize;
     auto atlasProperties = atlas::AtlasProperties { atlas::Format::RGBA,
-                                                    atlasCell,
+                                                    atlasCellSize,
                                                     _atlasHashtableSlotCount,
                                                     _atlasTileCount,
                                                     _directMappingAllocator.currentlyAllocatedCount };
