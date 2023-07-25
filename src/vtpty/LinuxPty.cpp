@@ -109,30 +109,30 @@ LinuxPty::Slave::~Slave()
 
 PtySlaveHandle LinuxPty::Slave::handle() const noexcept
 {
-    return PtySlaveHandle::cast_from(slaveFd);
+    return PtySlaveHandle::cast_from(_slaveFd);
 }
 
 void LinuxPty::Slave::close()
 {
-    detail::saveClose(&slaveFd);
+    detail::saveClose(&_slaveFd);
 }
 
 bool LinuxPty::Slave::isClosed() const noexcept
 {
-    return slaveFd == -1;
+    return _slaveFd == -1;
 }
 
 bool LinuxPty::Slave::configure() noexcept
 {
-    auto const tio = detail::constructTerminalSettings(slaveFd);
-    if (tcsetattr(slaveFd, TCSANOW, &tio) == 0)
-        tcflush(slaveFd, TCIOFLUSH);
+    auto const tio = detail::constructTerminalSettings(_slaveFd);
+    if (tcsetattr(_slaveFd, TCSANOW, &tio) == 0)
+        tcflush(_slaveFd, TCIOFLUSH);
     return true;
 }
 
 bool LinuxPty::Slave::login()
 {
-    if (slaveFd < 0)
+    if (_slaveFd < 0)
         return false;
 
     if (!configure())
@@ -152,7 +152,7 @@ bool LinuxPty::Slave::login()
 
     // This is doing what login_tty() is doing, too.
     // But doing it ourselfs allows for a little more flexibility.
-    // return login_tty(slaveFd) == 0;
+    // return login_tty(_slaveFd) == 0;
 
     setsid();
 
@@ -161,33 +161,33 @@ bool LinuxPty::Slave::login()
     // However, Flatpak is having issues with that, so we sadly have to avoid that then.
     if (!Process::isFlatpak())
     {
-        if (ioctl(slaveFd, TIOCSCTTY, nullptr) == -1)
+        if (ioctl(_slaveFd, TIOCSCTTY, nullptr) == -1)
             return false;
     }
 #endif
 
     for (int const fd: { 0, 1, 2 })
     {
-        if (slaveFd != fd)
+        if (_slaveFd != fd)
             ::close(fd);
-        detail::saveDup2(slaveFd, fd);
+        detail::saveDup2(_slaveFd, fd);
     }
 
-    if (slaveFd > 2)
-        detail::saveClose(&slaveFd);
+    if (_slaveFd > 2)
+        detail::saveClose(&_slaveFd);
 
     return true;
 }
 
 int LinuxPty::Slave::write(std::string_view text) noexcept
 {
-    if (slaveFd < 0)
+    if (_slaveFd < 0)
     {
         errno = ENODEV;
         return -1;
     }
 
-    auto const rv = ::write(slaveFd, text.data(), text.size());
+    auto const rv = ::write(_slaveFd, text.data(), text.size());
     return static_cast<int>(rv);
 }
 // }}}

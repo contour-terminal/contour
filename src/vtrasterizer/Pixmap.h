@@ -195,8 +195,6 @@ struct Pixmap
     int lineThickness = 1;
     int baseLine = 0; // baseline position relative to cell bottom.
 
-    [[nodiscard]] constexpr ImageSize getdownsampledSize() const noexcept { return downsampledSize; }
-
     Pixmap& halfFilledCircleLeft();
     Pixmap& halfFilledCircleRight();
     Pixmap& getlineThickness(int n) noexcept

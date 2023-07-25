@@ -31,9 +31,10 @@ class LinuxPty final: public Pty
   private:
     class Slave final: public PtySlave
     {
+        int _slaveFd;
+
       public:
-        int slaveFd;
-        explicit Slave(PtySlaveHandle fd): slaveFd { unbox<int>(fd) } {}
+        explicit Slave(PtySlaveHandle fd): _slaveFd { unbox<int>(fd) } {}
         ~Slave() override;
         [[nodiscard]] PtySlaveHandle handle() const noexcept;
         void close() override;

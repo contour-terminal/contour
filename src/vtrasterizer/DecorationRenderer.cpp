@@ -192,7 +192,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             auto const yBase = h2;
             auto const imageSize = ImageSize { width, height };
             auto block = blockElement(imageSize);
-            return create(block.getdownsampledSize(), [&]() -> atlas::Buffer {
+            return create(block.downsampledSize, [&]() -> atlas::Buffer {
                 auto const thickness_half = max(1, int(ceil(underlineThickness() / 2.0)));
                 for (int x = 0; x < unbox<int>(width); ++x)
                 {
@@ -218,7 +218,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             auto const x0 = 0u;
             auto const x1 = unbox<unsigned>(width) / 2;
             auto block = blockElement(ImageSize { width, height });
-            return create(block.getdownsampledSize(), [&]() -> atlas::Buffer {
+            return create(block.downsampledSize, [&]() -> atlas::Buffer {
                 for (unsigned y = 0; y < dotHeight; ++y)
                 {
                     for (unsigned x = 0; x < dotWidth; ++x)
