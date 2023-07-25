@@ -25,13 +25,14 @@ on:
       - master
 
 concurrency:
-  group: ${{ github.ref }}
+  group: build-${{ github.ref }}
   cancel-in-progress: true
 
 env:
   CTEST_OUTPUT_ON_FAILURE: 1
 
 jobs:
+
   archlinux:
     strategy:
       matrix:
@@ -281,7 +282,6 @@ jobs:
           name: contour-${{ steps.set_vars.outputs.version }}-osx.zip
           path: contour-${{ steps.set_vars.outputs.version }}-osx.zip
           retention-days: 1
-
 
   windows:
     name: "Windows"
@@ -780,3 +780,253 @@ jobs:
           name: contour-ubuntu2204-tests
 
   # }}}
+  # {{{ Build fontconfig
+  build_fontconfig:
+    name: "Build patched fontconfig"
+    runs-on: ubuntu-22.04
+    steps:
+    - uses: actions/checkout@v3
+    - name: "get source"
+      run: |
+        set -ex
+        wget https://www.freedesktop.org/software/fontconfig/release/fontconfig-2.13.1.tar.gz
+        tar xzpf fontconfig-2.13.1.tar.gz
+        # sudo tee -a /etc/apt/sources.list < <(echo "deb-src http://azure.archive.ubuntu.com/ubuntu/ focal main restricted")
+        # sudo apt update
+        # apt source libfontconfig1
+        sudo apt install -y gperf
+        ls -hl
+    - name: "patch it"
+      run: |
+        set -ex
+        cd fontconfig-2.13.1
+        patch --verbose -p1 < ../.github/fontconfig-memleak-fix.patch
+    - name: "configure"
+      run: |
+        set -ex
+        export CFLAGS="-O0 -ggdb3"
+        cd fontconfig-2.13.1
+        mkdir build
+        cd build
+        ../configure --prefix="/home/runner/opt/fontconfig"
+    - name: "build & install"
+      run: |
+        set -ex
+        cd fontconfig-2.13.1/build
+        make -j3
+        make install
+    - name: "Uploading artifact"
+      uses: actions/upload-artifact@v3
+      with:
+        name: "patched-fontconfig"
+        path: "/home/runner/opt/fontconfig"
+        if-no-files-found: error
+        retention-days: 3
+  # }}}
+  # {{{ Build notcurses
+  build_notcurses:
+    name: "Build notcurses"
+    runs-on: ubuntu-22.04
+    steps:
+    - name: "update APT database"
+      run: sudo apt -q update
+    - name: "install dependencies"
+      run: |
+        set -ex
+        sudo apt install -y \
+                    build-essential \
+                    cmake \
+                    doctest-dev \
+                    ffmpeg \
+                    libavcodec-dev \
+                    libavdevice-dev \
+                    libavformat-dev \
+                    libavutil-dev \
+                    libdeflate-dev \
+                    libncurses-dev \
+                    libqrcodegen-dev \
+                    libswscale-dev \
+                    libunistring-dev \
+                    xvfb
+    - name: "git clone"
+      run: git clone https://github.com/dankamongmen/notcurses.git
+    - name: ccache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: ccache-ubuntu_2204-notcurses
+        max-size: 256M
+    - name: "configure cmake"
+      run: |
+        cmake -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_INSTALL_PREFIX=~/opt/notcurses \
+              -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+              -DUSE_CPP=OFF \
+              -DUSE_DEFLATE=OFF \
+              -DUSE_MULTIMEDIA=ffmpeg \
+              -DUSE_PANDOC=OFF \
+              -DUSE_STATIC=ON \
+              -S notcurses \
+              -B notcurses/build
+    - name: "Build notcurses"
+      run: cmake --build notcurses/build/ -- -j3
+    - name: "Install notcurses"
+      run: cmake --build notcurses/build --config Release --target install/strip
+    - name: "Uploading artifact"
+      uses: actions/upload-artifact@v3
+      with:
+        name: "notcurses-install"
+        path: ~/opt/notcurses
+        if-no-files-found: error
+        retention-days: 1
+  # }}}
+  # {{{ external test: notcurses
+  test_notcurses:
+    name: "notcurses-demo ${{ matrix.name }}"
+    runs-on: ubuntu-22.04
+    needs: [package_for_Ubuntu, build_notcurses, build_fontconfig]
+    strategy:
+      fail-fast: false
+      matrix:
+        include: # {{{ (name, id) tuples
+          # ixetunchmdbkywjgarvlsfqzo
+          - name: 'aanimate'
+            id: 'a'
+          - name: 'box'
+            id: 'b'
+          - name: 'chunli'
+            id: 'c'
+          - name: 'dragon'
+            id: 'd'
+          - name: 'eagle'
+            id: 'e'
+          - name: 'fission'
+            id: 'f'
+          - name: 'grid'
+            id: 'g'
+          - name: 'highcon'
+            id: 'h'
+          - name: 'intro'
+            id: 'i'
+          - name: 'jungle'
+            id: 'j'
+          - name: 'keller'
+            id: 'k'
+          - name: 'luigi'
+            id: 'l'
+          - name: 'mojibake'
+            id: 'm'
+          - name: 'normal'
+            id: 'n'
+          - name: 'outro'
+            id: 'o'
+          - name: 'qrcode'
+            id: 'q'
+          - name: 'reel'
+            id: 'r'
+          - name: 'sliders'
+            id: 's'
+          - name: 'trans'
+            id: 't'
+          - name: 'uniblock'
+            id: 'u'
+          - name: 'view'
+            id: 'v'
+          - name: 'whiteout'
+            id: 'w'
+          - name: 'xray'
+            id: 'x'
+          - name: 'yield'
+            id: 'y'
+          - name: 'zoo'
+            id: 'z'
+          # }}}
+    env:
+      LD_LIBRARY_PATH: /home/runner/opt/notcurses/lib:/home/runner/opt/fontconfig/lib
+      # I'm giving up on eliminating all leaks for now.
+      # There are still some deep inside Qt I can't explain myself if it's because of me.
+      ASAN_OPTIONS: detect_leaks=0
+      # Can be used to execute contour within a certain environment, such as valgrind:
+      # Valgrind is much more precise, but 10x slower.
+      CONTOUR_PREFIX: "" # valgrind --leak-check=full --num-callers=64 --error-exitcode=112"
+    steps:
+    - uses: actions/checkout@v3
+    - name: "update APT database"
+      run: sudo apt -q update
+    - name: Installing xmllint for ci-set-vars
+      run: sudo apt -qy install libxml2-utils
+    - name: set environment variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - uses: actions/download-artifact@v3
+      with:
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu22.04-amd64.deb"
+    - uses: actions/download-artifact@v3
+      with:
+        name: "notcurses-install"
+        path: ~/opt/notcurses
+    - uses: actions/download-artifact@v3
+      with:
+        name: "patched-fontconfig"
+        path: "/home/runner/opt/fontconfig"
+    - name: "fix executable bits"
+      run: |
+        chmod 0755 ~/opt/notcurses/bin/*
+        chmod 0755 ~/opt/*/lib/*
+        ls -hlR ~/opt/
+    - name: "install dependencies"
+      run: ./scripts/ci/notcurses-install-deps.sh
+    - name: "install valgrind"
+      run: sudo apt install -y valgrind
+    - name: "Run notcurses-demo -h"
+      timeout-minutes: 1
+      run: ~/opt/notcurses/bin/notcurses-demo -p ~/opt/notcurses/share/notcurses -h
+    - name: "install contour"
+      run: sudo dpkg -i "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu22.04-amd64.deb"
+    - name: "contour executable test"
+      run: |
+        contour version
+        contour help
+        ls -hl ~/opt/notcurses/
+    - name: "create and patch contour.yml config file"
+      run: |
+        set -ex
+        mkdir -p ~/.config/contour/
+        contour generate config to ~/.config/contour/contour.yml
+        sed -i -e 's/locator: native/locator: mock/' ~/.config/contour/contour.yml
+        sed -i -e 's/strict_spacing: true/strict_spacing: false/' ~/.config/contour/contour.yml
+        cat .github/mock-font-locator.yml >> ~/.config/contour/contour.yml
+        cat ~/.config/contour/contour.yml
+    - name: "Run Contour: notcurses-demo ${{ matrix.name }}"
+      timeout-minutes: 20
+      id: Xvfb-contour-notcurses
+      run: |
+        # export LD_LIBRARY_PATH="/home/runner/opt/notcurses/lib:/home/runner/opt/fontconfig/lib"
+        ./scripts/ci/Xvfb-contour-run.sh \
+              "notcurses-demo-dumps/${{ matrix.name }}" \
+              ~/opt/notcurses/bin/notcurses-demo \
+                  -p ~/opt/notcurses/share/notcurses ${{ matrix.id }}
+    - name: "Save dump"
+      uses: actions/upload-artifact@v3
+      with:
+        name: notcurses-contour-dump
+        path: notcurses-demo-dumps
+        if-no-files-found: ignore
+        retention-days: 3
+    - name: "Check result success"
+      run: |
+        exit ${{ steps.Xvfb-contour-notcurses.outputs.exitCode }}
+
+  check_notcurses_test_matrix:
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    name: tests matrix
+    needs: test_notcurses
+    steps:
+    - name: Check build matrix status
+      if: ${{ needs.test_notcurses.result != 'success' }}
+      run: exit 1
+
+  # }}}
+
