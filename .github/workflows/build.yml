@@ -280,37 +280,39 @@ jobs:
             ./build/src/vtbackend/vtbackend_test
             rm -rf _deps build
 
-  osx_qt5:
+  osx:
     name: "OS/X"
     runs-on: macos-11
     steps:
       - uses: actions/checkout@v3
       - name: set variables
         id: set_vars
-        run: ./scripts/ci-set-vars.sh
+        run: |
+          ./scripts/ci-set-vars.sh
+          echo QTVER=5 >> "$GITHUB_OUTPUT"
         env:
           REPOSITORY: ${{ github.event.repository.name }}
       - name: ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          key: ccache-osx_qt5
+          key: ccache-osx_qt${{ steps.set_vars.outputs.QTVER }}
           max-size: 256M
       - name: "Install dependencies"
         run: |
           set -ex
           #brew update
-          ./scripts/install-deps.sh
-          brew install qt${QTVER} openssl
-        env:
-          QTVER: '5'
+          QTVER=${{ steps.set_vars.outputs.QTVER }}
+          QTVER=${QTVER} ./scripts/install-deps.sh
+          brew install qt@${QTVER} openssl
       - name: "Create build directory"
         run: mkdir build
       - name: "Generate build files"
         run: |
+          QTVER=${{ steps.set_vars.outputs.QTVER }}
           cmake . \
                 -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-                -DQt5_DIR="$(brew --prefix qt5)/lib/cmake/Qt5" \
-                -DCONTOUR_QT_VERSION=5 \
+                -DQt${QTVER}_DIR="$(brew --prefix qt@${QTVER})/lib/cmake/Qt${QTVER}" \
+                -DCONTOUR_QT_VERSION=${QTVER} \
                 -B build/
       - name: "Build"
         run: cmake --build build/
@@ -323,17 +325,26 @@ jobs:
       - name: "Create Package(s)"
         run: |
           set -ex
-          cd build
-          sudo cpack -G "DragNDrop"
-          ls -hl
+          cmake --build build --target package
+          ls -hl build/
+          ls -hlR build/src/contour/contour.app
           BASENAME="contour-${{ steps.set_vars.outputs.version }}-osx"
-          mv -vf "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "../${BASENAME}.dmg"
+          mv -vf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.dmg" "${BASENAME}.dmg"
+          mv -vf "build/Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Darwin.zip" "${BASENAME}.zip"
+          unzip -l "${BASENAME}.zip"
       - name: upload to artifact store (DMG)
         uses: actions/upload-artifact@v2
         with:
           name: contour-${{ steps.set_vars.outputs.version }}-osx.dmg
           path: contour-${{ steps.set_vars.outputs.version }}-osx.dmg
           retention-days: 7
+      - name: upload to artifact store (ZIP)
+        uses: actions/upload-artifact@v2
+        with:
+          name: contour-${{ steps.set_vars.outputs.version }}-osx.zip
+          path: contour-${{ steps.set_vars.outputs.version }}-osx.zip
+          retention-days: 1
+
 
   windows:
     name: "Windows"

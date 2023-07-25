@@ -32,14 +32,20 @@ find_package(Qt${DEPLOY_QT_VERSION}Core REQUIRED)
 get_target_property(_qmake_executable Qt${DEPLOY_QT_VERSION}::qmake IMPORTED_LOCATION)
 get_filename_component(_qt_bin_dir "${_qmake_executable}" DIRECTORY)
 
-find_program(WINDEPLOYQT_EXECUTABLE windeployqt HINTS "${_qt_bin_dir}")
-if(WIN32 AND NOT WINDEPLOYQT_EXECUTABLE)
-    message(FATAL_ERROR "windeployqt not found")
+if(WIN32)
+    find_program(WINDEPLOYQT_EXECUTABLE windeployqt HINTS "${_qt_bin_dir}")
+    if(NOT WINDEPLOYQT_EXECUTABLE)
+        message(FATAL_ERROR "windeployqt not found")
+    endif()
+    mark_as_advanced(WINDEPLOYQT_EXECUTABLE)
 endif()
 
-find_program(MACDEPLOYQT_EXECUTABLE macdeployqt HINTS "${_qt_bin_dir}")
-if(APPLE AND NOT MACDEPLOYQT_EXECUTABLE)
-    message(FATAL_ERROR "macdeployqt not found")
+if(APPLE)
+    find_program(MACDEPLOYQT_EXECUTABLE macdeployqt HINTS "${_qt_bin_dir}")
+    if(NOT MACDEPLOYQT_EXECUTABLE)
+        message(FATAL_ERROR "macdeployqt not found")
+    endif()
+    mark_as_advanced(MACDEPLOYQT_EXECUTABLE)
 endif()
 
 # Add commands that copy the required Qt files to the same directory as the
@@ -88,5 +94,3 @@ function(macdeployqt target)
         COMMENT "Deploying Qt..."
     )
 endfunction()
-
-mark_as_advanced(WINDEPLOYQT_EXECUTABLE MACDEPLOYQT_EXECUTABLE)
