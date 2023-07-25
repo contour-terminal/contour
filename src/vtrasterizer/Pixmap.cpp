@@ -57,23 +57,23 @@ namespace
 
 atlas::Buffer Pixmap::take()
 {
-    if (_size != _downsampledSize)
-        return downsample(_buffer, 1, _size, _downsampledSize);
+    if (size != downsampledSize)
+        return downsample(buffer, 1, size, downsampledSize);
     else
-        return std::move(_buffer);
+        return std::move(buffer);
 }
 
 Pixmap& Pixmap::line(Ratio rFrom, Ratio rTo)
 {
     if (rFrom.y > rTo.y)
         swap(rFrom, rTo);
-    auto const from = _size * rFrom;
-    auto const to = _size * rTo;
-    auto const z = max(1, _lineThickness / 2);
+    auto const from = size * rFrom;
+    auto const to = size * rTo;
+    auto const z = max(1, lineThickness / 2);
     if (from.x != to.x)
     {
         auto const f = linearEq(from, to);
-        for (auto const x: ranges::views::iota(0, unbox<int>(_size.width)))
+        for (auto const x: ranges::views::iota(0, unbox<int>(size.width)))
             if (auto const y = f(x); from.y <= y && y <= to.y)
                 for (auto const i: ranges::views::iota(-z, z))
                     paint(x, y + i);
@@ -89,8 +89,8 @@ Pixmap& Pixmap::line(Ratio rFrom, Ratio rTo)
 
 Pixmap& Pixmap::halfFilledCircleLeft()
 {
-    auto const w = unbox<int>(_size.width);
-    auto const h = unbox<int>(_size.height);
+    auto const w = unbox<int>(size.width);
+    auto const h = unbox<int>(size.height);
     auto const putpixel = [&](int x, int y) {
         auto const xf = clamp(x, 0, w - 1);
         auto const yf = clamp(y, 0, h - 1);
@@ -104,15 +104,15 @@ Pixmap& Pixmap::halfFilledCircleLeft()
         putpixel(x, y + h / 2);
     };
     auto const radius = crispy::Point { w, h / 2 };
-    drawEllipseArc(putAbove, _size, radius, Arc::BottomLeft);
-    drawEllipseArc(putBelow, _size, radius, Arc::TopLeft);
+    drawEllipseArc(putAbove, size, radius, Arc::BottomLeft);
+    drawEllipseArc(putBelow, size, radius, Arc::TopLeft);
     return *this;
 }
 
 Pixmap& Pixmap::halfFilledCircleRight()
 {
-    auto const w = unbox<int>(_size.width);
-    auto const h = unbox<int>(_size.height);
+    auto const w = unbox<int>(size.width);
+    auto const h = unbox<int>(size.height);
     auto const putpixel = [&](int x, int y) {
         auto const fx = min(w - 1, x);
         for (int x = 0; x < fx; ++x)
@@ -125,8 +125,8 @@ Pixmap& Pixmap::halfFilledCircleRight()
         putpixel(x, y + h / 2);
     };
     auto const radius = crispy::Point { w, h / 2 };
-    drawEllipseArc(putAbove, _size, radius, Arc::BottomRight);
-    drawEllipseArc(putBelow, _size, radius, Arc::TopRight);
+    drawEllipseArc(putAbove, size, radius, Arc::BottomRight);
+    drawEllipseArc(putBelow, size, radius, Arc::TopRight);
     return *this;
 }
 
@@ -140,13 +140,13 @@ Pixmap& Pixmap::segment_bar(int which)
     //  7     5
     //   --6--
 
-    auto const Z = _lineThickness;
+    auto const Z = lineThickness;
 
     auto const L = 2 * Z;
-    auto const R = unbox<int>(_size.width) - Z;
+    auto const R = unbox<int>(size.width) - Z;
 
-    auto const T = static_cast<int>(ceil(unbox<double>(_size.height) * (1 / 8_th))); // Z;
-    auto const B = unbox<int>(_size.height) - _baseLine - Z / 2;
+    auto const T = static_cast<int>(ceil(unbox<double>(size.height) * (1 / 8_th))); // Z;
+    auto const B = unbox<int>(size.height) - baseLine - Z / 2;
     auto const M = T + (B - T) / 2;
 
     switch (which)

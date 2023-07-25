@@ -195,14 +195,14 @@ namespace detail
             ImageSize size {};
             int underlinePosition = 1;
 
-            Part part_ = Part::Middle;
-            bool filled_ = false;
+            Part part = Part::Middle;
+            bool filledval = false;
 
             // clang-format off
-            constexpr ProgressBar& left() noexcept { part_ = Part::Left; return *this; }
-            constexpr ProgressBar& middle() noexcept { part_ = Part::Middle; return *this; }
-            constexpr ProgressBar& right() noexcept { part_ = Part::Right; return *this; }
-            constexpr ProgressBar& filled() noexcept { filled_ = true; return *this; }
+            constexpr ProgressBar& left() noexcept { part = Part::Left; return *this; }
+            constexpr ProgressBar& middle() noexcept { part = Part::Middle; return *this; }
+            constexpr ProgressBar& right() noexcept { part = Part::Right; return *this; }
+            constexpr ProgressBar& filled() noexcept { filledval = true; return *this; }
             // clang-format on
 
             operator atlas::Buffer() const
@@ -233,26 +233,26 @@ namespace detail
 
                 auto b = blockElement<1>(size);
 
-                switch (part_)
+                switch (part)
                 {
                 case Part::Left:
                     b.rect({ BlockLeft-2*Gap, BlockTop-2*Gap },  { 1,             BlockTop-Gap });      // top line
                     b.rect({ BlockLeft-2*Gap, BlockBottom+Gap }, { 1,             BlockBottom+2*Gap }); // bottom line
                     b.rect({ BlockLeft-2*Gap, BlockTop-2*Gap },  { BlockLeft-Gap, BlockBottom+Gap });   // left bar
-                    if (filled_)
+                    if (filledval)
                         b.rect({ BlockLeft,   BlockTop },        { 1,             BlockBottom });
                     break;
                 case Part::Middle:
                     b.rect({ 0, BlockTop-2*Gap },  { 1, BlockTop-Gap });      // top line
                     b.rect({ 0, BlockBottom+Gap }, { 1, BlockBottom+2*Gap }); // bottom line
-                    if (filled_)
+                    if (filledval)
                         b.rect({ 0,   BlockTop },  { 1, BlockBottom });
                     break;
                 case Part::Right:
                     b.rect({ 0,              BlockTop-2*Gap },  { BlockRight+2*Gap, BlockTop-Gap });      // top line
                     b.rect({ 0,              BlockBottom+Gap }, { BlockRight+2*Gap, BlockBottom+2*Gap }); // bottom line
                     b.rect({ BlockRight+Gap, BlockTop-2*Gap },  { BlockRight+2*Gap, BlockBottom+Gap });   // left bar
-                    if (filled_)
+                    if (filledval)
                         b.rect({ 0,          BlockTop },        { BlockRight,       BlockBottom });
                     break;
                 }
@@ -264,74 +264,74 @@ namespace detail
 
         struct Box
         {
-            Line up_ = NoLine;
-            Line right_ = NoLine;
-            Line down_ = NoLine;
-            Line left_ = NoLine;
-            Diagonal diagonal_ = NoDiagonal;
-            Arc arc_ = NoArc;
+            Line upval = NoLine;
+            Line rightval = NoLine;
+            Line downval = NoLine;
+            Line leftval = NoLine;
+            Diagonal diagonalval = NoDiagonal;
+            Arc arcval = NoArc;
 
             [[nodiscard]] constexpr Box up(Line value = Light)
             {
                 Box b(*this);
-                b.up_ = value;
+                b.upval = value;
                 return b;
             }
             [[nodiscard]] constexpr Box right(Line value = Light)
             {
                 Box b(*this);
-                b.right_ = value;
+                b.rightval = value;
                 return b;
             }
             [[nodiscard]] constexpr Box down(Line value = Light)
             {
                 Box b(*this);
-                b.down_ = value;
+                b.downval = value;
                 return b;
             }
             [[nodiscard]] constexpr Box left(Line value = Light)
             {
                 Box b(*this);
-                b.left_ = value;
+                b.leftval = value;
                 return b;
             }
             [[nodiscard]] constexpr Box diagonal(Diagonal value)
             {
                 Box b(*this);
-                b.diagonal_ = value;
+                b.diagonalval = value;
                 return b;
             }
 
             [[nodiscard]] constexpr Box arc(Arc value)
             {
                 Box b(*this);
-                b.arc_ = value;
+                b.arcval = value;
                 return b;
             }
 
             [[nodiscard]] constexpr optional<pair<uint8_t, Thickness>> get_dashed_horizontal() const noexcept
             {
-                return getDashed(left_, right_);
+                return getDashed(leftval, rightval);
             }
 
             [[nodiscard]] constexpr optional<pair<uint8_t, Thickness>> get_dashed_vertical() const noexcept
             {
-                return getDashed(up_, down_);
+                return getDashed(upval, downval);
             }
 
             [[nodiscard]] constexpr Box vertical(Line value = Light)
             {
                 Box b(*this);
-                b.up_ = value;
-                b.down_ = value;
+                b.upval = value;
+                b.downval = value;
                 return b;
             }
 
             [[nodiscard]] constexpr Box horizontal(Line value = Light)
             {
                 Box b(*this);
-                b.left_ = value;
-                b.right_ = value;
+                b.leftval = value;
+                b.rightval = value;
                 return b;
             }
 
@@ -715,20 +715,20 @@ namespace detail
         template <Dir Direction, Inverted inverted, int DivisorX>
         void fillTriangle(Pixmap& pixmap)
         {
-            auto const p = getTriangleProps<Direction, DivisorX>(pixmap._size);
+            auto const p = getTriangleProps<Direction, DivisorX>(pixmap.size);
             auto const [set, unset] = []() -> pair<uint8_t, uint8_t> {
                 return inverted == Inverted::No ? pair { 0xFF, 0 } : pair { 0, 0xFF };
             }();
 
-            auto const w = unbox<unsigned>(pixmap._size.width);
-            auto const h = unbox<unsigned>(pixmap._size.height) - 1;
+            auto const w = unbox<unsigned>(pixmap.size.width);
+            auto const h = unbox<unsigned>(pixmap.size.height) - 1;
 
-            for (auto const y: ranges::views::iota(0u, unbox<unsigned>(pixmap._size.height)))
+            for (auto const y: ranges::views::iota(0u, unbox<unsigned>(pixmap.size.height)))
             {
-                for (auto const x: ranges::views::iota(0u, unbox<unsigned>(pixmap._size.width)))
+                for (auto const x: ranges::views::iota(0u, unbox<unsigned>(pixmap.size.width)))
                 {
                     auto const [a, b] = p(int(x));
-                    pixmap._buffer[unsigned(h - y) * w + x] = a <= int(y) && int(y) <= b ? set : unset;
+                    pixmap.buffer[unsigned(h - y) * w + x] = a <= int(y) && int(y) <= b ? set : unset;
                 }
             }
         }
@@ -748,19 +748,19 @@ namespace detail
         };
         void diagonalMosaic(Pixmap& pixmap, Ratio ra, Ratio rb, UpperOrLower location) noexcept
         {
-            auto const innerSize = pixmap._size - ImageSize { Width(1), Height(1) };
+            auto const innerSize = pixmap.size - ImageSize { Width(1), Height(1) };
 
             auto const condition =
                 [location, line = linearEq(innerSize * ra, innerSize * rb)](int x, int y) noexcept -> bool {
                 return location == UpperOrLower::Upper ? y <= line(x) : y >= line(x);
             };
 
-            auto const h = pixmap._size.height.as<unsigned>() - 1;
-            auto const w = pixmap._size.width.as<unsigned>();
-            for (auto const y: ranges::views::iota(0u, pixmap._size.height.as<unsigned>()))
-                for (auto const x: ranges::views::iota(0u, pixmap._size.width.as<unsigned>()))
+            auto const h = pixmap.size.height.as<unsigned>() - 1;
+            auto const w = pixmap.size.width.as<unsigned>();
+            for (auto const y: ranges::views::iota(0u, pixmap.size.height.as<unsigned>()))
+                for (auto const x: ranges::views::iota(0u, pixmap.size.width.as<unsigned>()))
                     if (condition(int(x), int(y)))
-                        pixmap._buffer.at(w * (h - y) + x) = 0xFF;
+                        pixmap.buffer.at(w * (h - y) + x) = 0xFF;
         }
 
         inline atlas::Buffer upperDiagonalMosaic(ImageSize size, Ratio ra, Ratio rb)
@@ -784,15 +784,15 @@ namespace detail
 
         atlas::Buffer operator|(Pixmap a, RatioBlock block)
         {
-            fillBlock(a._buffer, a._size, block.from, block.to, a._filler);
-            return std::move(a._buffer);
+            fillBlock(a.buffer, a.size, block.from, block.to, a.filler);
+            return std::move(a.buffer);
         }
 
         atlas::Buffer operator|(Pixmap a, MosaicBlock const& b)
         {
             for (RatioBlock block: b.blocks)
-                fillBlock(a._buffer, a._size, block.from, block.to, a._filler);
-            return std::move(a._buffer);
+                fillBlock(a.buffer, a.size, block.from, block.to, a.filler);
+            return std::move(a.buffer);
         }
 
         inline MosaicBlock operator+(RatioBlock a, RatioBlock b)
@@ -838,7 +838,7 @@ namespace detail
 
         [[maybe_unused]] inline Pixmap operator*(Pixmap&& image, RatioBlock block)
         {
-            fillBlock(image._buffer, image._size, block.from, block.to, image._filler);
+            fillBlock(image.buffer, image.size, block.from, block.to, image.filler);
             return std::move(image);
         }
 
@@ -949,7 +949,7 @@ constexpr inline bool containsNonCanonicalLines(char32_t codepoint)
     if (codepoint < 0x2500 || codepoint > 0x257F)
         return false;
     auto const& box = detail::boxDrawingDefinitions[codepoint - 0x2500];
-    return box.diagonal_ != detail::NoDiagonal || box.arc_ != NoArc;
+    return box.diagonalval != detail::NoDiagonal || box.arcval != NoArc;
 }
 
 auto BoxDrawingRenderer::createTileData(char32_t codepoint, atlas::TileLocation tileLocation)
@@ -1059,7 +1059,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
 #endif
         () {
             auto b = blockElement<2>(size);
-            b.lineThickness(_gridMetrics.underline.thickness);
+            b.getlineThickness(_gridMetrics.underline.thickness);
             return b;
         };
     auto const progressBar =
@@ -1080,7 +1080,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
         () {
             auto constexpr AntiAliasingSamplingFactor = 1;
             return blockElement<AntiAliasingSamplingFactor>(size)
-                .lineThickness(_gridMetrics.underline.thickness)
+                .getlineThickness(_gridMetrics.underline.thickness)
                 .baseline(_gridMetrics.baseline * AntiAliasingSamplingFactor);
         };
 
@@ -1608,8 +1608,8 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
 
     // left & right
     {
-        auto const left = tuple { box.left_, 0u, *width / 2, true };
-        auto const right = tuple { box.right_, *width / 2, *width, false };
+        auto const left = tuple { box.leftval, 0u, *width / 2, true };
+        auto const right = tuple { box.rightval, *width / 2, *width, false };
         auto const offset = horizontalOffset;
         for (auto const& pq: { left, right })
         {
@@ -1669,8 +1669,8 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
     // up & down
     // XXX same as (left & right) but with x/y and w/h coords swapped. can we reuse that?
     {
-        auto const up = tuple { box.down_, 0u, *height / 2, true };
-        auto const down = tuple { box.up_, *height / 2, *height, false };
+        auto const up = tuple { box.downval, 0u, *height / 2, true };
+        auto const down = tuple { box.upval, *height / 2, *height, false };
         auto const offset = verticalOffset;
         for (auto const& pq: { up, down })
         {
@@ -1717,12 +1717,12 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
         }
     }
 
-    if (box.diagonal_ != detail::NoDiagonal)
+    if (box.diagonalval != detail::NoDiagonal)
     {
         auto const a = height.as<double>() / width.as<double>();
         auto const aInv = 1.0 / a;
         using Diagonal = detail::Diagonal;
-        if (unsigned(box.diagonal_) & unsigned(Diagonal::Forward))
+        if (unsigned(box.diagonalval) & unsigned(Diagonal::Forward))
         {
             for (auto const y: iota(0u, height.as<unsigned>()))
             {
@@ -1731,7 +1731,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
                     image[y * *width + (unsigned) max(0, min(x + xi, unbox<int>(width) - 1))] = 0xFF;
             }
         }
-        if (unsigned(box.diagonal_) & unsigned(Diagonal::Backward))
+        if (unsigned(box.diagonalval) & unsigned(Diagonal::Backward))
         {
             for (auto const y: iota(0u, height.as<unsigned>()))
             {
@@ -1742,8 +1742,8 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
         }
     }
 
-    if (box.arc_ != NoArc)
-        detail::drawArc(image, size, lightThickness, box.arc_);
+    if (box.arcval != NoArc)
+        detail::drawArc(image, size, lightThickness, box.arcval);
 
     BoxDrawingLog()("BoxDrawing: build U+{:04X} ({})", static_cast<uint32_t>(codepoint), size);
 

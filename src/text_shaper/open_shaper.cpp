@@ -389,10 +389,10 @@ namespace
 
 struct open_shaper::Private // {{{
 {
-    crispy::finally _ftCleanup;
-    FT_Library _ft {};
-    font_locator* _locator = nullptr;
-    DPI _dpi;
+    crispy::finally ftCleanup;
+    FT_Library ft {};
+    font_locator* locator = nullptr;
+    DPI dpi;
     unordered_map<FontPathAndSize, font_key> fontPathAndSizeToKeyMapping;
     unordered_map<font_key, HbFontInfo> fontKeyToHbFontInfoMapping; // from font_key to FontInfo struct
 
@@ -402,14 +402,14 @@ struct open_shaper::Private // {{{
     // The key (for caching) should be composed out of:
     // (file_path, file_mtime, font_weight, font_slant, pixel_size)
 
-    unordered_map<glyph_key, rasterized_glyph> _glyphs;
-    HbBufferPtr _hb_buf;
-    font_key _nextFontKey;
+    unordered_map<glyph_key, rasterized_glyph> glyphs;
+    HbBufferPtr hb_buf;
+    font_key nextFontKey;
 
     font_key create_font_key()
     {
-        auto result = _nextFontKey;
-        _nextFontKey.value++;
+        auto result = nextFontKey;
+        nextFontKey.value++;
         return result;
     }
 
@@ -428,7 +428,7 @@ struct open_shaper::Private // {{{
         if (ranges::any_of(blacklistedSources, [&](auto const& a) { return a == sourceId; }))
             return nullopt;
 
-        auto ftFacePtrOpt = loadFace(source, fontSize, _dpi, _ft);
+        auto ftFacePtrOpt = loadFace(source, fontSize, dpi, ft);
         if (!ftFacePtrOpt.has_value())
         {
             blacklistedSources.emplace_back(sourceId);
@@ -445,7 +445,7 @@ struct open_shaper::Private // {{{
         fontPathAndSizeToKeyMapping.emplace(pair { FontPathAndSize { sourceId, fontSize }, key });
         fontKeyToHbFontInfoMapping.emplace(pair { key, std::move(fontInfo) });
         LocatorLog()(
-            "Loading font: key={}, id=\"{}\" size={} dpi {} {}", key, sourceId, fontSize, _dpi, metrics(key));
+            "Loading font: key={}, id=\"{}\" size={} dpi {} {}", key, sourceId, fontSize, dpi, metrics(key));
         return key;
     }
 
@@ -469,18 +469,18 @@ struct open_shaper::Private // {{{
     }
 
     Private(DPI dpi, font_locator& locator):
-        _ftCleanup { [this]() {
-            FT_Done_FreeType(_ft);
+        ftCleanup { [this]() {
+            FT_Done_FreeType(ft);
         } },
-        _locator { &locator },
-        _dpi { dpi },
-        _hb_buf(hb_buffer_create(), [](auto p) { hb_buffer_destroy(p); }),
-        _nextFontKey {}
+        locator { &locator },
+        dpi { dpi },
+        hb_buf(hb_buffer_create(), [](auto p) { hb_buffer_destroy(p); }),
+        nextFontKey {}
     {
-        if (auto const ec = FT_Init_FreeType(&_ft); ec != FT_Err_Ok)
+        if (auto const ec = FT_Init_FreeType(&ft); ec != FT_Err_Ok)
             throw runtime_error { "freetype: Failed to initialize. "s + ftErrorStr(ec) };
 
-        if (auto const ec = FT_Library_SetLcdFilter(_ft, FT_LCD_FILTER_DEFAULT); ec != FT_Err_Ok)
+        if (auto const ec = FT_Library_SetLcdFilter(ft, FT_LCD_FILTER_DEFAULT); ec != FT_Err_Ok)
             errorlog()("freetype: Failed to set LCD filter. {}", ftErrorStr(ec));
     }
 
@@ -551,12 +551,12 @@ void open_shaper::set_dpi(DPI dpi)
     if (!dpi)
         return;
 
-    _d->_dpi = dpi;
+    _d->dpi = dpi;
 }
 
 void open_shaper::set_locator(font_locator& locator)
 {
-    _d->_locator = &locator;
+    _d->locator = &locator;
 }
 
 void open_shaper::clear_cache()
@@ -570,7 +570,7 @@ void open_shaper::clear_cache()
 
 optional<font_key> open_shaper::load_font(font_description const& description, font_size size)
 {
-    font_source_list sources = _d->_locator->locate(description);
+    font_source_list sources = _d->locator->locate(description);
     if (sources.empty())
         return nullopt;
 
@@ -648,7 +648,7 @@ void open_shaper::shape(font_key font,
     Require(_d->fontKeyToHbFontInfoMapping.count(font) == 1);
     HbFontInfo& fontInfo = _d->fontKeyToHbFontInfoMapping.at(font);
     hb_font_t* hbFont = fontInfo.hbFont.get();
-    hb_buffer_t* hbBuf = _d->_hb_buf.get();
+    hb_buffer_t* hbBuf = _d->hb_buf.get();
 
     if (TextShapingLog)
     {
@@ -762,7 +762,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
             FT_Bitmap ftBitmap;
             FT_Bitmap_Init(&ftBitmap);
 
-            auto const ec = FT_Bitmap_Convert(_d->_ft, &ftFace->glyph->bitmap, &ftBitmap, 1);
+            auto const ec = FT_Bitmap_Convert(_d->ft, &ftFace->glyph->bitmap, &ftBitmap, 1);
             if (ec != FT_Err_Ok)
                 return nullopt;
 
@@ -778,7 +778,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
                     output.bitmap[i * width.as<size_t>() + j] = min(
                         static_cast<uint8_t>(uint8_t(ftBitmap.buffer[i * pitch + j]) * 255), uint8_t { 255 });
 
-            FT_Bitmap_Done(_d->_ft, &ftBitmap);
+            FT_Bitmap_Done(_d->ft, &ftBitmap);
             break;
         }
         case FT_PIXEL_MODE_GRAY: {
