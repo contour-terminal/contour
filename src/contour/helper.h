@@ -26,7 +26,8 @@
 #include <QtCore/Qt>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QScreen>
-#include <QtWidgets/QWidget>
+#include <QtQml/QQmlApplicationEngine>
+#include <QtQuick/QQuickWindow>
 
 #include <cctype>
 #include <map>
@@ -82,8 +83,6 @@ void postToObject(QObject* obj, F fun)
     QCoreApplication::postEvent(obj, new detail::FunctionCallEvent<F>(std::forward<F>(fun)));
 #endif
 }
-
-QScreen* screenOf(QWidget const* _widget);
 
 constexpr inline bool isModifier(Qt::Key _key)
 {
@@ -155,19 +154,13 @@ bool sendKeyEvent(QKeyEvent* _keyEvent, TerminalSession& _session);
 void sendWheelEvent(QWheelEvent* _event, TerminalSession& _session);
 void sendMousePressEvent(QMouseEvent* _event, TerminalSession& _session);
 void sendMouseMoveEvent(QMouseEvent* _event, TerminalSession& _session);
+void sendMouseMoveEvent(QHoverEvent* _event, TerminalSession& _session);
 void sendMouseReleaseEvent(QMouseEvent* _event, TerminalSession& _session);
 
 void spawnNewTerminal(std::string const& _programPath,
                       std::string const& _configPath,
                       std::string const& _profileName,
                       std::string const& _cwdUrl);
-
-using PermissionCache = std::map<std::string, bool>;
-
-bool requestPermission(PermissionCache& _cache,
-                       QWidget* _parent,
-                       config::Permission _allowedByConfig,
-                       std::string const& _topicText);
 
 terminal::FontDef getFontDefinition(terminal::rasterizer::Renderer& _renderer);
 
@@ -283,13 +276,21 @@ struct RenderStateManager
     }
 };
 
-#define CHECKED_GL(code)                                              \
-    do                                                                \
-    {                                                                 \
-        (code);                                                       \
-        GLenum err {};                                                \
-        while ((err = glGetError()) != GL_NO_ERROR)                   \
-            DisplayLog()("OpenGL error {} for call: {}", err, #code); \
+#define CONSUME_GL_ERRORS()                         \
+    do                                              \
+    {                                               \
+        GLenum err {};                              \
+        while ((err = glGetError()) != GL_NO_ERROR) \
+            ;                                       \
+    } while (0)
+
+#define CHECKED_GL(code)                                            \
+    do                                                              \
+    {                                                               \
+        (code);                                                     \
+        GLenum err {};                                              \
+        while ((err = glGetError()) != GL_NO_ERROR)                 \
+            errorlog()("OpenGL error {} for call: {}", err, #code); \
     } while (0)
 
 } // namespace contour

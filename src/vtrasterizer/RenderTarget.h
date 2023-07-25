@@ -115,9 +115,6 @@ class RenderTarget
 
     virtual atlas::AtlasBackend& textureScheduler() = 0;
 
-    virtual void setBackgroundImage(
-        std::shared_ptr<terminal::BackgroundImage const> const& backgroundImage) = 0;
-
     /// Fills a rectangular area with the given solid color.
     virtual void renderRectangle(int x, int y, Width, Height, RGBAColor color) = 0;
 
@@ -126,9 +123,6 @@ class RenderTarget
 
     /// Schedules taking a screenshot of the current scene and forwards it to the given callback.
     virtual void scheduleScreenshot(ScreenshotCallback callback) = 0;
-
-    /// Clears the target surface with the given fill color.
-    virtual void clear(terminal::RGBAColor fillColor) = 0;
 
     /// Executes all previously scheduled render commands.
     virtual void execute(std::chrono::steady_clock::time_point now) = 0;

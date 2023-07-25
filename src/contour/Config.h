@@ -195,7 +195,6 @@ struct TerminalProfile
     bool backgroundBlur;                 // On Windows 10, this will enable Acrylic Backdrop.
 
     std::optional<display::ShaderConfig> backgroundShader;
-    std::optional<display::ShaderConfig> backgroundImageShader;
     std::optional<display::ShaderConfig> textShader;
 
     struct
@@ -300,6 +299,7 @@ struct Config
 
 FileSystem::path configHome();
 FileSystem::path configHome(std::string const& _programName);
+FileSystem::path configHome();
 
 std::optional<std::string> readConfigFile(std::string const& _filename);
 

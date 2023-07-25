@@ -37,7 +37,6 @@ namespace contour::display
 
 enum class ShaderClass
 {
-    BackgroundImage,
     Background,
     Text
 };
@@ -61,7 +60,6 @@ inline std::string to_string(ShaderClass _shaderClass)
 {
     switch (_shaderClass)
     {
-        case ShaderClass::BackgroundImage: return "background_image";
         case ShaderClass::Background: return "background";
         case ShaderClass::Text: return "text";
     }

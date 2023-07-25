@@ -25,7 +25,9 @@
 #include <QtCore/QUrl>
 #include <QtGui/QGuiApplication>
 #include <QtNetwork/QHostInfo>
-#include <QtWidgets/QMessageBox>
+#include <QtQml/QQmlApplicationEngine>
+#include <QtQml/QQmlEngine>
+#include <QtQuick/QQuickView>
 
 #include <algorithm>
 #include <array>
@@ -62,7 +64,7 @@ namespace contour
 
 namespace
 {
-    terminal::CellLocation makeMouseCellLocation(QMouseEvent* event, TerminalSession const& session) noexcept
+    terminal::CellLocation makeMouseCellLocation(int x, int y, TerminalSession const& session) noexcept
     {
         auto constexpr MarginTop = 0;
         auto constexpr MarginLeft = 0;
@@ -71,8 +73,8 @@ namespace
         auto const cellSize = session.display()->cellSize();
         auto const dpr = session.contentScale();
 
-        auto const sx = int(double(event->pos().x()) * dpr);
-        auto const sy = int(double(event->pos().y()) * dpr);
+        auto const sx = int(double(x) * dpr);
+        auto const sy = int(double(y) * dpr);
 
         auto const row =
             terminal::LineOffset(clamp((sy - MarginTop) / cellSize.height.as<int>(), 0, *pageSize.lines - 1));
@@ -83,23 +85,40 @@ namespace
         return { row, col };
     }
 
+    PixelCoordinate makeMousePixelPosition(QHoverEvent* _event, double dpr) noexcept
+    {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        auto const position = _event->position();
+#else
+        auto const position = _event->pos();
+#endif
+        // TODO: apply margin once supported
+        return PixelCoordinate { PixelCoordinate::X { int(double(position.x()) * dpr) },
+                                 PixelCoordinate::Y { int(double(position.y()) * dpr) } };
+    }
+
     PixelCoordinate makeMousePixelPosition(QMouseEvent* _event, double dpr) noexcept
     {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        auto const position = _event->position();
+#else
+        auto const position = QPointF { static_cast<qreal>(_event->x()), static_cast<qreal>(_event->y()) };
+#endif
         // TODO: apply margin once supported
-        return PixelCoordinate { PixelCoordinate::X { int(double(_event->x()) * dpr) },
-                                 PixelCoordinate::Y { int(double(_event->y()) * dpr) } };
+        return PixelCoordinate { PixelCoordinate::X { int(double(position.x()) * dpr) },
+                                 PixelCoordinate::Y { int(double(position.y()) * dpr) } };
     }
 
     PixelCoordinate makeMousePixelPosition(QWheelEvent* _event, double dpr) noexcept
     {
-        // TODO: apply margin once supported
 #if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-        return PixelCoordinate { PixelCoordinate::X { int(double(_event->position().x()) * dpr) },
-                                 PixelCoordinate::Y { int(double(_event->position().y()) * dpr) } };
+        auto const position = _event->position();
 #else
-        return PixelCoordinate { PixelCoordinate::X { int(double(_event->x()) * dpr) },
-                                 PixelCoordinate::Y { int(double(_event->y()) * dpr) } };
+        auto const position = _event->posF();
 #endif
+        // TODO: apply margin once supported
+        return PixelCoordinate { PixelCoordinate::X { int(double(position.x()) * dpr) },
+                                 PixelCoordinate::Y { int(double(position.y()) * dpr) } };
     }
 
     int mouseWheelDelta(QWheelEvent* _event) noexcept
@@ -135,24 +154,6 @@ namespace
     }
 
 } // namespace
-
-QScreen* screenOf(QWidget const* _widget)
-{
-#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-    return _widget->screen();
-#elif QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
-    // #warning "Using alternative implementation of screenOf() for Qt >= 5.10.0"
-    if (auto topLevel = _widget->window())
-    {
-        if (auto screenByPos = QGuiApplication::screenAt(topLevel->geometry().center()))
-            return screenByPos;
-    }
-    return QGuiApplication::primaryScreen();
-#else
-    // #warning "Using alternative implementation of screenOf() for Qt < 5.10.0"
-    return QGuiApplication::primaryScreen();
-#endif
-}
 
 bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
 {
@@ -276,6 +277,7 @@ void sendWheelEvent(QWheelEvent* _event, TerminalSession& _session)
         auto const pixelPosition = makeMousePixelPosition(_event, _session.contentScale());
 
         _session.sendMousePressEvent(modifier, button, pixelPosition);
+        _event->accept();
     }
 }
 
@@ -298,8 +300,22 @@ void sendMouseReleaseEvent(QMouseEvent* _event, TerminalSession& _session)
 void sendMouseMoveEvent(QMouseEvent* _event, TerminalSession& _session)
 {
     _session.sendMouseMoveEvent(makeModifier(_event->modifiers()),
-                                makeMouseCellLocation(_event, _session),
+                                makeMouseCellLocation(_event->pos().x(), _event->pos().y(), _session),
                                 makeMousePixelPosition(_event, _session.contentScale()));
+    _event->accept();
+}
+
+void sendMouseMoveEvent(QHoverEvent* _event, TerminalSession& _session)
+{
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+    auto const position = _event->position().toPoint();
+#else
+    auto const position = _event->pos();
+#endif
+    _session.sendMouseMoveEvent(makeModifier(_event->modifiers()),
+                                makeMouseCellLocation(position.x(), position.y(), _session),
+                                makeMousePixelPosition(_event, _session.contentScale()));
+    _event->accept();
 }
 
 void spawnNewTerminal(string const& _programPath,
@@ -332,48 +348,6 @@ void spawnNewTerminal(string const& _programPath,
         args << "working-directory" << wd;
 
     QProcess::startDetached(program, args);
-}
-
-bool requestPermission(PermissionCache& _cache,
-                       QWidget* _parent,
-                       config::Permission _allowedByConfig,
-                       std::string const& _topicText)
-{
-    switch (_allowedByConfig)
-    {
-        case config::Permission::Allow:
-            SessionLog()("Permission for {} allowed by configuration.", _topicText);
-            return true;
-        case config::Permission::Deny:
-            SessionLog()("Permission for {} denied by configuration.", _topicText);
-            return false;
-        case config::Permission::Ask: break;
-    }
-
-    // Did we remember a last interactive question?
-    if (auto const i = _cache.find(_topicText); i != _cache.end())
-        return i->second;
-
-    SessionLog()("Permission for {} requires asking user.", _topicText);
-
-    auto const reply =
-        QMessageBox::question(_parent,
-                              fmt::format("{} requested", _topicText).c_str(),
-                              QString::fromStdString(fmt::format(
-                                  "The application has requested for {}. Do you allow this?", _topicText)),
-                              QMessageBox::StandardButton::Yes | QMessageBox::StandardButton::YesToAll
-                                  | QMessageBox::StandardButton::No | QMessageBox::StandardButton::NoToAll,
-                              QMessageBox::StandardButton::NoButton);
-
-    switch (reply)
-    {
-        case QMessageBox::StandardButton::NoToAll: _cache[_topicText] = false; break;
-        case QMessageBox::StandardButton::YesToAll: _cache[_topicText] = true; [[fallthrough]];
-        case QMessageBox::StandardButton::Yes: return true;
-        default: break;
-    }
-
-    return false;
 }
 
 terminal::FontDef getFontDefinition(terminal::rasterizer::Renderer& _renderer)
@@ -463,14 +437,17 @@ void applyResize(terminal::ImageSize _newPixelSize,
     terminal::Terminal& terminal = _session.terminal();
     terminal::ImageSize cellSize = _renderer.gridMetrics().cellSize;
 
+    Require(_renderer.hasRenderTarget());
     _renderer.renderTarget().setRenderSize(_newPixelSize);
     _renderer.setPageSize(newPageSize);
     _renderer.setMargin(computeMargin(_renderer.gridMetrics().cellSize, newPageSize, _newPixelSize));
 
+    auto const viewSize = cellSize * newPageSize;
+    DisplayLog()("Applying resize: {} (new pixel size) {} (view size)", _newPixelSize, viewSize);
+
     if (newPageSize == terminal.pageSize())
         return;
 
-    auto const viewSize = cellSize * newPageSize;
     terminal.resizeScreen(newPageSize, viewSize);
     terminal.clearSelection();
 }

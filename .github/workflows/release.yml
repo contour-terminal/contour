@@ -332,11 +332,12 @@ jobs:
         cp -rvp . ${DISTDIR}
         tar czpf ${PKGNAME}.tar.gz -C "/tmp/dist" .
     - name: disable pedantic compiler if broken GCC
-      if: ${{ matrix.os_version == 38 }}
+      # Generally disable -Werror.
+      #if: ${{ matrix.os_version == 38 || matrix.os_version == 39 }}
       run: |
         set -ex
         sed -i -e "s/PEDANTIC_COMPILER=ON/PEDANTIC_COMPILER=OFF/" .github/fedora/contour.spec
-        sed -i -e "s/PEDANTIC_COMPILER_WERROR=ON/PEDANTIC_COMPILER_WERROR=OFF/" .github/fedora/contour.spec
+        #sed -i -e "s/PEDANTIC_COMPILER_WERROR=ON/PEDANTIC_COMPILER_WERROR=OFF/" .github/fedora/contour.spec
     - name: Build ${{ matrix.arch }} release
       shell: bash
       run: |

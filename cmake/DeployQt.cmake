@@ -52,12 +52,14 @@ endif()
 # target after being built as well as including them in final installation
 function(windeployqt target)
     # Run windeployqt immediately after build
+    get_target_property(target_source_dir ${target} SOURCE_DIR)
     add_custom_command(TARGET ${target} POST_BUILD
         COMMAND "${CMAKE_COMMAND}" -E
             env PATH="${_qt_bin_dir}" "${WINDEPLOYQT_EXECUTABLE}"
                 --no-compiler-runtime
                 --no-translations
                 --no-svg
+                --qmldir "${target_source_dir}"
                 \"$<TARGET_FILE:${target}>\"
         COMMENT "Deploying Qt for target $<TARGET_FILE:${target}> ..."
     )

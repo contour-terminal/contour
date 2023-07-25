@@ -34,15 +34,15 @@
 #include <QtCore/QTimer>
 #include <QtGui/QClipboard>
 #include <QtGui/QDesktopServices>
+#include <QtGui/QGuiApplication>
 #include <QtGui/QKeyEvent>
 #include <QtGui/QScreen>
 #include <QtGui/QWindow>
 #include <QtNetwork/QHostInfo>
-#include <QtWidgets/QApplication>
-#include <QtWidgets/QMessageBox>
 
 #include <algorithm>
 #include <fstream>
+#include <limits>
 
 #if !defined(_WIN32)
     #include <pthread.h>
@@ -135,9 +135,16 @@ namespace
         return settings;
     }
 
+    int createSessionId()
+    {
+        static int nextSessionId = 1;
+        return nextSessionId++;
+    }
+
 } // namespace
 
 TerminalSession::TerminalSession(unique_ptr<Pty> _pty, ContourGuiApp& _app):
+    id_ { createSessionId() },
     startTime_ { steady_clock::now() },
     config_ { _app.config() },
     profileName_ { _app.profileName() },
@@ -165,16 +172,24 @@ TerminalSession::TerminalSession(unique_ptr<Pty> _pty, ContourGuiApp& _app):
 
 TerminalSession::~TerminalSession()
 {
+    SessionLog()("Destroying terminal session.");
     terminating_ = true;
     terminal_.device().wakeupReader();
     if (screenUpdateThread_)
         screenUpdateThread_->join();
 }
 
+void TerminalSession::detachDisplay(display::TerminalWidget& display)
+{
+    SessionLog()("Detaching display from session.");
+    Require(display_ == &display);
+    display_ = nullptr;
+}
+
 void TerminalSession::attachDisplay(display::TerminalWidget& newDisplay)
 {
     SessionLog()("Attaching display.");
-    newDisplay.setSession(*this);
+    // newDisplay.setSession(*this); // NB: we're being called by newDisplay!
     display_ = &newDisplay;
 
     setContentScale(newDisplay.contentScale());
@@ -186,7 +201,6 @@ void TerminalSession::attachDisplay(display::TerminalWidget& newDisplay)
     //                 display_->cellSize().height * boxed_cast<Height>(terminal_.pageSize().lines) };
     terminal_.resizeScreen(terminal_.pageSize(), pixels);
     terminal_.setRefreshRate(display_->refreshRate());
-    configureDisplay();
 }
 
 void TerminalSession::scheduleRedraw()
@@ -235,7 +249,7 @@ void TerminalSession::terminate()
 // {{{ Events implementations
 void TerminalSession::bell()
 {
-    display_->post([this]() { display_->bell(); });
+    emit onBell();
 }
 
 void TerminalSession::bufferChanged(terminal::ScreenType _type)
@@ -243,6 +257,8 @@ void TerminalSession::bufferChanged(terminal::ScreenType _type)
     if (!display_)
         return;
 
+    currentScreenType_ = _type;
+    emit isScrollbarVisibleChanged();
     display_->post([this, _type]() { display_->bufferChanged(_type); });
 }
 
@@ -257,6 +273,12 @@ void TerminalSession::screenUpdated()
 
     if (terminal().hasInput())
         display_->post(bind(&TerminalSession::flushInput, this));
+
+    if (lastHistoryLineCount_ != terminal_.currentScreen().historyLineCount())
+    {
+        lastHistoryLineCount_ = terminal_.currentScreen().historyLineCount();
+        emit historyLineCountChanged(unbox<int>(lastHistoryLineCount_));
+    }
 
     scheduleRedraw();
 }
@@ -276,39 +298,100 @@ void TerminalSession::renderBufferUpdated()
     display_->renderBufferUpdated();
 }
 
+void TerminalSession::executeRole(GuardedRole role, bool allow, bool remember)
+{
+    switch (role)
+    {
+        case GuardedRole::CaptureBuffer: executePendingBufferCapture(allow, remember); break;
+        case GuardedRole::ChangeFont: applyPendingFontChange(allow, remember); break;
+        case GuardedRole::ShowHostWritableStatusLine:
+            executeShowHostWritableStatusLine(allow, remember);
+            break;
+    }
+}
+
+void TerminalSession::requestPermission(config::Permission _allowedByConfig, GuardedRole role)
+{
+    switch (_allowedByConfig)
+    {
+        case config::Permission::Allow:
+            SessionLog()("Permission for {} allowed by configuration.", role);
+            executeRole(role, true, false);
+            return;
+        case config::Permission::Deny:
+            SessionLog()("Permission for {} denied by configuration.", role);
+            executeRole(role, false, false);
+            return;
+        case config::Permission::Ask: {
+            if (auto const i = rememberedPermissions_.find(role); i != rememberedPermissions_.end())
+            {
+                executeRole(role, i->second, false);
+                if (!i->second)
+                    SessionLog()("Permission for {} denied by user for this session.", role);
+                else
+                    SessionLog()("Permission for {} allowed by user for this session.", role);
+            }
+            else
+            {
+                SessionLog()("Permission for {} requires asking user.", role);
+                switch (role)
+                {
+                    // clang-format off
+                    case GuardedRole::ChangeFont: emit requestPermissionForFontChange(); break;
+                    case GuardedRole::CaptureBuffer: emit requestPermissionForBufferCapture(); break;
+                    case GuardedRole::ShowHostWritableStatusLine: emit requestPermissionForShowHostWritableStatusLine(); break;
+                        // clang-format on
+                }
+            }
+            break;
+        }
+    }
+}
+
 void TerminalSession::requestCaptureBuffer(LineCount lines, bool logical)
 {
     if (!display_)
         return;
 
-    display_->post([this, lines, logical]() {
-        if (display_->requestPermission(profile_.permissions.captureBuffer, "capture screen buffer"))
-        {
-            terminal_.primaryScreen().captureBuffer(lines, logical);
-            DisplayLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
-            flushInput();
-        }
-    });
+    pendingBufferCapture_ = CaptureBufferRequest { lines, logical };
+
+    emit requestPermissionForBufferCapture();
+    // display_->post(
+    //     [this]() { requestPermission(profile_.permissions.captureBuffer, GuardedRole::CaptureBuffer); });
 }
 
-void TerminalSession::requestShowHostWritableStatusLine()
+void TerminalSession::executePendingBufferCapture(bool allow, bool remember)
 {
-    if (!display_)
+    if (remember)
+        rememberedPermissions_[GuardedRole::CaptureBuffer] = allow;
+
+    if (!pendingBufferCapture_)
         return;
 
-    display_->post([this]() {
-        if (display_->requestPermission(profile_.permissions.displayHostWritableStatusLine,
-                                        "display host writable statusline"))
-        {
-            terminal_.setStatusDisplay(terminal::StatusDisplayType::HostWritable);
-            DisplayLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
-            flushInput();
-            terminal_.state().syncWindowTitleWithHostWritableStatusDisplay = false;
-        }
-        else
-            terminal_.state().syncWindowTitleWithHostWritableStatusDisplay =
-                terminal_.settings().syncWindowTitleWithHostWritableStatusDisplay;
-    });
+    auto const capture = std::move(pendingBufferCapture_.value());
+    pendingBufferCapture_.reset();
+
+    if (!allow)
+        return;
+
+    terminal_.primaryScreen().captureBuffer(capture.lines, capture.logical);
+
+    DisplayLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
+    flushInput();
+}
+
+void TerminalSession::executeShowHostWritableStatusLine(bool allow, bool remember)
+{
+    if (remember)
+        rememberedPermissions_[GuardedRole::ShowHostWritableStatusLine] = allow;
+
+    if (!allow)
+        return;
+
+    terminal_.setStatusDisplay(terminal::StatusDisplayType::HostWritable);
+    DisplayLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
+    flushInput();
+    terminal_.state().syncWindowTitleWithHostWritableStatusDisplay = false;
 }
 
 terminal::FontDef TerminalSession::getFontDef()
@@ -318,41 +401,58 @@ terminal::FontDef TerminalSession::getFontDef()
 
 void TerminalSession::setFontDef(terminal::FontDef const& _fontDef)
 {
-    display_->post([this, spec = terminal::FontDef(_fontDef)]() {
-        if (!display_->requestPermission(profile_.permissions.changeFont, "changing font"))
-            return;
+    if (!display_)
+        return;
 
-        auto const& currentFonts = profile_.fonts;
-        terminal::rasterizer::FontDescriptions newFonts = currentFonts;
+    pendingFontChange_ = _fontDef;
 
-        if (spec.size != 0.0)
-            newFonts.size = text::font_size { spec.size };
+    display_->post([this]() { requestPermission(profile_.permissions.changeFont, GuardedRole::ChangeFont); });
+}
 
-        if (!spec.regular.empty())
-            newFonts.regular = text::font_description::parse(spec.regular);
+void TerminalSession::applyPendingFontChange(bool allow, bool remember)
+{
+    if (remember)
+        rememberedPermissions_[GuardedRole::ChangeFont] = allow;
 
-        auto const styledFont = [&](string_view _font) -> text::font_description {
-            // if a styled font is "auto" then infer froom regular font"
-            if (_font == "auto"sv)
-                return currentFonts.regular;
-            else
-                return text::font_description::parse(_font);
-        };
+    if (!pendingFontChange_)
+        return;
 
-        if (!spec.bold.empty())
-            newFonts.bold = styledFont(spec.bold);
+    auto const& currentFonts = profile_.fonts;
+    terminal::rasterizer::FontDescriptions newFonts = currentFonts;
 
-        if (!spec.italic.empty())
-            newFonts.italic = styledFont(spec.italic);
+    auto const spec = std::move(pendingFontChange_.value());
+    pendingFontChange_.reset();
 
-        if (!spec.boldItalic.empty())
-            newFonts.boldItalic = styledFont(spec.boldItalic);
+    if (!allow)
+        return;
 
-        if (!spec.emoji.empty() && spec.emoji != "auto"sv)
-            newFonts.emoji = text::font_description::parse(spec.emoji);
+    if (spec.size != 0.0)
+        newFonts.size = text::font_size { spec.size };
 
-        display_->setFonts(newFonts);
-    });
+    if (!spec.regular.empty())
+        newFonts.regular = text::font_description::parse(spec.regular);
+
+    auto const styledFont = [&](string_view _font) -> text::font_description {
+        // if a styled font is "auto" then infer froom regular font"
+        if (_font == "auto"sv)
+            return currentFonts.regular;
+        else
+            return text::font_description::parse(_font);
+    };
+
+    if (!spec.bold.empty())
+        newFonts.bold = styledFont(spec.bold);
+
+    if (!spec.italic.empty())
+        newFonts.italic = styledFont(spec.italic);
+
+    if (!spec.boldItalic.empty())
+        newFonts.boldItalic = styledFont(spec.boldItalic);
+
+    if (!spec.emoji.empty() && spec.emoji != "auto"sv)
+        newFonts.emoji = text::font_description::parse(spec.emoji);
+
+    display_->setFonts(newFonts);
 }
 
 void TerminalSession::copyToClipboard(std::string_view _data)
@@ -375,10 +475,8 @@ void TerminalSession::inspect()
 
 void TerminalSession::notify(string_view _title, string_view _content)
 {
-    if (!display_)
-        return;
-
-    display_->notify(_title, _content);
+    emit showNotification(QString::fromUtf8(_title.data(), static_cast<int>(_title.size())),
+                          QString::fromUtf8(_content.data(), static_cast<int>(_content.size())));
 }
 
 void TerminalSession::onClosed()
@@ -479,6 +577,11 @@ void TerminalSession::requestWindowResize(LineCount _lines, ColumnCount _columns
     display_->post([this, _lines, _columns]() { display_->resizeWindow(_lines, _columns); });
 }
 
+void TerminalSession::requestWindowResize(QJSValue w, QJSValue h)
+{
+    requestWindowResize(Width(w.toInt()), Height(h.toInt()));
+}
+
 void TerminalSession::requestWindowResize(Width _width, Height _height)
 {
     if (!display_)
@@ -490,10 +593,7 @@ void TerminalSession::requestWindowResize(Width _width, Height _height)
 
 void TerminalSession::setWindowTitle(string_view _title)
 {
-    if (!display_)
-        return;
-
-    display_->post([this, terminalTitle = string(_title)]() { display_->setWindowTitle(terminalTitle); });
+    emit titleChanged(QString::fromUtf8(_title.data(), static_cast<int>(_title.size())));
 }
 
 void TerminalSession::setTerminalProfile(string const& _configProfileName)
@@ -637,7 +737,9 @@ void TerminalSession::sendFocusInEvent()
 
     terminal().sendFocusInEvent();
 
-    display_->setBlurBehind(profile().backgroundBlur);
+    if (display_)
+        display_->setBlurBehind(profile_.backgroundBlur);
+
     scheduleRedraw();
 }
 
@@ -746,7 +848,13 @@ bool TerminalSession::operator()(actions::DecreaseOpacity)
         return true;
 
     --profile_.backgroundOpacity;
-    display_->setBackgroundOpacity(profile_.backgroundOpacity);
+
+    emit opacityChanged();
+
+    // Also emit backgroundColorChanged() because the background color is
+    // semi-transparent and thus the opacity change affects the background color.
+    emit backgroundColorChanged();
+
     return true;
 }
 
@@ -789,11 +897,16 @@ bool TerminalSession::operator()(actions::IncreaseFontSize)
 
 bool TerminalSession::operator()(actions::IncreaseOpacity)
 {
-    if (static_cast<uint8_t>(profile_.backgroundOpacity) >= 255)
+    if (static_cast<uint8_t>(profile_.backgroundOpacity) >= std::numeric_limits<uint8_t>::max())
         return true;
-
     ++profile_.backgroundOpacity;
-    display_->setBackgroundOpacity(profile_.backgroundOpacity);
+
+    emit opacityChanged();
+
+    // Also emit backgroundColorChanged() because the background color is
+    // semi-transparent and thus the opacity change affects the background color.
+    emit backgroundColorChanged();
+
     return true;
 }
 
@@ -1050,6 +1163,9 @@ bool TerminalSession::operator()(actions::WriteScreen const& _event)
 // {{{ implementation helpers
 void TerminalSession::setDefaultCursor()
 {
+    if (!display_)
+        return;
+
     using Type = terminal::ScreenType;
     switch (terminal().screenType())
     {
@@ -1128,14 +1244,15 @@ void TerminalSession::spawnNewTerminal(string const& _profileName)
 
     if (config_.spawnNewProcess)
     {
+        SessionLog()("spawning new process");
         ::contour::spawnNewTerminal(
             app_.programPath(), config_.backingFilePath.generic_string(), _profileName, wd);
     }
     else
     {
-        auto config = config_;
-        config.profile(profileName_)->shell.workingDirectory = FileSystem::path(wd);
-        app_.newWindow(config);
+        SessionLog()("spawning new in-process window");
+        app_.config().profile(profileName_)->shell.workingDirectory = FileSystem::path(wd);
+        app_.newWindow();
     }
 }
 
@@ -1204,7 +1321,13 @@ void TerminalSession::configureDisplay()
     SessionLog()("Configuring display.");
     display_->setBlurBehind(profile_.backgroundBlur);
 
-    display_->setBackgroundImage(profile_.colors.backgroundImage);
+    {
+        auto const dpr = display_->contentScale();
+        auto const qActualScreenSize = display_->window()->screen()->size() * dpr;
+        auto const actualScreenSize = ImageSize { Width::cast_from(qActualScreenSize.width()),
+                                                  Height::cast_from(qActualScreenSize.height()) };
+        terminal_.setMaxImageSize(actualScreenSize, actualScreenSize);
+    }
 
     if (profile_.maximized)
         display_->setWindowMaximized();
@@ -1225,9 +1348,7 @@ void TerminalSession::configureDisplay()
 
     display_->setHyperlinkDecoration(profile_.hyperlinkDecoration.normal, profile_.hyperlinkDecoration.hover);
 
-    display_->setWindowTitle(terminal_.windowTitle());
-
-    display_->logDisplayTopInfo();
+    setWindowTitle(terminal_.windowTitle());
 }
 
 uint8_t TerminalSession::matchModeFlags() const
@@ -1352,11 +1473,6 @@ void TerminalSession::followHyperlink(terminal::HyperlinkInfo const& _hyperlink)
         QDesktopServices::openUrl(QString::fromUtf8(_hyperlink.uri.c_str()));
 }
 
-bool TerminalSession::requestPermission(config::Permission _allowedByConfig, string const& _topicText)
-{
-    return display_->requestPermission(_allowedByConfig, _topicText);
-}
-
 void TerminalSession::onConfigReload()
 {
     display_->post([this]() { reloadConfigWithProfile(profileName_); });
@@ -1372,6 +1488,51 @@ void TerminalSession::onConfigReload()
                 SLOT(onConfigReload()));
 }
 
+// }}}
+// {{{ QAbstractItemModel impl
+QModelIndex TerminalSession::index(int row, int column, const QModelIndex& parent) const
+{
+    Require(row == 0);
+    Require(column == 0);
+    // NOTE: if at all, we could expose session attribs like session id, session type
+    // (local process), ...?
+    crispy::ignore_unused(parent);
+    return createIndex(row, column, nullptr);
+}
+
+QModelIndex TerminalSession::parent(const QModelIndex& child) const
+{
+    crispy::ignore_unused(child);
+    return QModelIndex();
+}
+
+int TerminalSession::rowCount(const QModelIndex& parent) const
+{
+    crispy::ignore_unused(parent);
+    return 1;
+}
+
+int TerminalSession::columnCount(const QModelIndex& parent) const
+{
+    crispy::ignore_unused(parent);
+    return 1;
+}
+
+QVariant TerminalSession::data(const QModelIndex& index, int role) const
+{
+    crispy::ignore_unused(index, role);
+    Require(index.row() == 0);
+    Require(index.column() == 0);
+
+    return QVariant(id_);
+}
+
+bool TerminalSession::setData(const QModelIndex& index, const QVariant& value, int role)
+{
+    // NB: Session-Id is read-only.
+    crispy::ignore_unused(index, value, role);
+    return false;
+}
 // }}}
 
 } // namespace contour
