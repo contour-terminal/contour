@@ -138,9 +138,13 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
 
     bool getIsScrollbarVisible() const noexcept
     {
+        if (profile().scrollbarPosition == config::ScrollBarPosition::Hidden)
+            return false;
+
         if ((currentScreenType_ == terminal::ScreenType::Alternate) && profile().hideScrollbarInAltScreen)
             return false;
-        return profile().scrollbarPosition != config::ScrollBarPosition::Hidden;
+
+        return true;
     }
 
     QString title() const { return QString::fromStdString(terminal().windowTitle()); }
