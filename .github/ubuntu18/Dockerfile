@@ -23,11 +23,12 @@ WORKDIR /home/docker
 
 RUN git clone --depth=1  https://github.com/contour-terminal/contour.git
 WORKDIR /home/docker/contour
-RUN SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
+RUN SYSDEP_ASSUME_YES=ON QTVER=5 ./scripts/install-deps.sh
 RUN cmake --version
 RUN g++-10 --version
 RUN cmake -S . -B build -G Ninja \
     -D CMAKE_CXX_STANDARD=20 \
+    -D CONTOUR_QT_VERSION=5 \
     -D CMAKE_CXX_COMPILER=g++-10
 
 RUN cmake --build build -- -j3

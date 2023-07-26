@@ -329,15 +329,11 @@ terminal::PageSize TerminalWidget::windowSize() const noexcept
 
 void TerminalWidget::sizeChanged()
 {
-    if (size().isEmpty() || !session_ || !renderTarget_)
+    if (!session_ || !renderTarget_)
         return;
 
     DisplayLog()(
         "size changed to: {}x{} (session {})", width(), height(), session_ ? "available" : "not attached");
-    if (!session_)
-        return;
-
-    Require(renderTarget_);
 
     auto const qtBaseWidgetSize =
         terminal::ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
