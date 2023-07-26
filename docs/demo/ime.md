@@ -8,3 +8,5 @@ An input method (or input method editor, commonly abbreviated IME) is an operati
 List of emojis from [unicode](http://unicode.org/emoji/charts/full-emoji-list.html)
 
 You can insert any unicode character using ibus IME by pressing Ctrl+Shift+u and then inserting unicode code for the character
+
+![type:video](./ime/demo_ime.mp4)
