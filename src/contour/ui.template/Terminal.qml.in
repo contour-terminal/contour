@@ -52,7 +52,7 @@ ContourTerminal
         anchors.right : session.isScrollbarRight ? parent.right : undefined
         anchors.left : session.isScrollbarRight ? undefined : parent.left
         anchors.bottom: parent.bottom
-        visible : session.isScrollbarVisible ? true : false
+        visible : session.isScrollbarVisible
         orientation: Qt.Vertical
         policy : ScrollBar.AlwaysOn
         minimumSize : 0.1
