@@ -254,8 +254,15 @@ bool Terminal::processInputOnce()
 
     if (!readResult)
     {
+
+#if defined(CONTOUR_TRY_TO_READ_AGAIN)
         if (errno == EINTR || errno == EAGAIN)
+#else
+        if (errno == EINTR)
+#endif
+        {
             return true;
+        }
 
         TerminalLog()("PTY read failed. {}", strerror(errno));
         _pty->close();

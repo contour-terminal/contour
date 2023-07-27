@@ -6,7 +6,7 @@ set -x
 
 LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-true}"
 CONTOUR_BIN=${CONTOUR_BIN:-contour}
-LOG="error,config,pty,gui.session,gui.display,vt.renderer,font.locator" # "all"
+LOG="all"
 DISPLAY=:99
 #CONTOUR_PREFIX=gdb --batch --command=./scripts/test.gdb --args
 

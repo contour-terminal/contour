@@ -92,6 +92,14 @@ target_compile_definitions(vtbackend PRIVATE
     LIBTERMINAL_NAME="${PROJECT_NAME}"
 )
 
+option(CONTOUR_CLOSE_ON_NO_INPUT "close contour if no input is happening after some timeout " OFF)
+if(CONTOUR_CLOSE_ON_NO_INPUT)
+    message(STATUS "Contour will close after some timeout if no input is provided")
+else()
+    target_compile_definitions(vtpty PRIVATE CONTOUR_TRY_TO_READ_AGAIN)
+endif()
+
+
 target_include_directories(vtbackend PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/include>
@@ -107,6 +115,8 @@ target_link_libraries(vtbackend PUBLIC
     vtparser 
     vtpty 
 )
+
+
 
 if(LIBTERMINAL_LOG_TRACE)
     target_compile_definitions(vtbackend PUBLIC LIBTERMINAL_LOG_TRACE=1)

@@ -693,6 +693,94 @@ jobs:
           sudo dpkg --install "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.deb"
           sudo dpkg --install "contour-dbgsym-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu${{ matrix.os_version }}-amd64.ddeb"
 
+  package_for_notcurses_test:
+    name: "Packaging for notcurses test"
+    strategy:
+      fail-fast: false
+      matrix:
+        os_version: ['22.04']
+    runs-on: ubuntu-${{ matrix.os_version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      - name: "update APT database"
+        run: sudo apt -q update
+      - name: Installing xmllint for ci-set-vars
+        run: sudo apt -qy install libxml2-utils
+      - name: set variables
+        id: set_vars
+        run: ./scripts/ci-set-vars.sh
+        env:
+          REPOSITORY: ${{ github.event.repository.name }}
+      - name: ccache
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: "ccache-ubuntu-${{ matrix.os_version }}"
+          max-size: 256M
+      - name: set QTVER
+        id: set_qtver
+        run: |
+          if [[ ${{ matrix.os_version }} = "20.04" ]]; then
+            echo "QTVER=5" >> "$GITHUB_OUTPUT"
+          fi
+      - name: "install dependencies"
+        run: sudo env QTVER="${{ steps.set_qtver.outputs.QTVER }}" ./scripts/install-deps.sh
+      - name: "Post-fix embedded dependency permissions."
+        run: sudo find _deps/sources -exec chown $UID {} \;
+      - name: "create build directory"
+        run: mkdir build
+      - name: CMake version
+        run: cmake --version
+      - name: "cmake"
+        run: |
+          # TODO: turn on -Werror again, that requires some code changes.
+          CMAKE_CXX_STANDARD=20
+          if [[ "${{ matrix.os_version }}" = "20.04" ]]; then
+            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_QT_VERSION=5"
+          else
+          # use Qt6 for 22.04
+            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_QT_VERSION=6"
+          fi
+          BUILD_DIR="build" \
+            CMAKE_BUILD_TYPE=RelWithDebInfo \
+            EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS \
+                               -DCMAKE_CXX_STANDARD=$CMAKE_CXX_STANDARD \
+                               -DCMAKE_INSTALL_PREFIX="/usr" \
+                               -DCONTOUR_INSTALL_TOOLS=ON \
+                               -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON \
+                               -DPEDANTIC_COMPILER=ON \
+                               -DPEDANTIC_COMPILER_WERROR=OFF \
+                               -DCONTOUR_CLOSE_ON_NO_INPUT=ON \
+                               " \
+            ./scripts/ci-prepare-contour.sh
+      - name: "build"
+        run: cmake --build build/ -- -j3
+      - name: "test: crispy"
+        run: ./build/src/crispy/crispy_test
+      - name: "test: vtparser"
+        run: ./build/src/vtparser/vtparser_test
+      - name: "test: vtbackend"
+        run: ./build/src/vtbackend/vtbackend_test
+      - name: "CPack: Creating DEB package"
+        run: |
+          set -ex
+          cd build
+          cpack -G DEB -V
+          OS_VERSION=${{ matrix.os_version }}
+          OS_VERSION=${OS_OVERRIDE/./_}
+          mv -v "Contour-${{ steps.set_vars.outputs.VERSION_STRING }}-Linux-contour.deb" \
+                "../contour-notcurses-test-${{ steps.set_vars.outputs.VERSION_STRING }}-amd64.deb"
+      - name: "Uploading artifact .deb package"
+        uses: actions/upload-artifact@v3
+        with:
+          name: "contour-notcurses-test-${{ steps.set_vars.outputs.VERSION_STRING }}-amd64.deb"
+          path: "contour-notcurses-test-${{ steps.set_vars.outputs.VERSION_STRING }}-amd64.deb"
+          if-no-files-found: error
+          retention-days: 7
+
+
+
+
   test_ubuntu2204_valgrind:
     name: "Run tests via valgrind"
     runs-on: ubuntu-22.04
@@ -895,7 +983,7 @@ jobs:
   test_notcurses:
     name: "notcurses-demo ${{ matrix.name }}"
     runs-on: ubuntu-22.04
-    needs: [package_for_Ubuntu, build_notcurses, build_fontconfig]
+    needs: [package_for_notcurses_test, build_notcurses, build_fontconfig]
     strategy:
       fail-fast: false
       matrix:
@@ -973,7 +1061,7 @@ jobs:
         REPOSITORY: ${{ github.event.repository.name }}
     - uses: actions/download-artifact@v3
       with:
-        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu22.04-amd64.deb"
+        name: "contour-test-notcurses-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu22.04-amd64.deb"
     - uses: actions/download-artifact@v3
       with:
         name: "notcurses-install"
@@ -993,7 +1081,7 @@ jobs:
       timeout-minutes: 1
       run: ~/opt/notcurses/bin/notcurses-demo -p ~/opt/notcurses/share/notcurses -h
     - name: "install contour"
-      run: sudo dpkg -i "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu22.04-amd64.deb"
+      run: sudo dpkg -i "contour-notcurses-test-${{ steps.set_vars.outputs.VERSION_STRING }}-amd64.deb"
     - name: "contour executable test"
       run: |
         contour version
