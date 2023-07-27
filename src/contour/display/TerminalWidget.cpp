@@ -990,8 +990,10 @@ void TerminalWidget::copyToClipboard(std::string_view _data)
 
 void TerminalWidget::inspect()
 {
-    // Ensure we're invoked on GUI thread when calling doDumpState().
+// Ensure we're invoked on GUI thread when calling doDumpState().
+#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
     metaObject()->invokeMethod(this, &TerminalWidget::doDumpState, Qt::QueuedConnection);
+#endif
 }
 
 void TerminalWidget::doDumpState()
