@@ -1,5 +1,19 @@
 FROM ubuntu:18.04
 
+WORKDIR /home/docker
+COPY cmake /home/docker/contour/cmake
+COPY examples /home/docker/contour/examples
+COPY scripts /home/docker/contour/scripts
+COPY src /home/docker/contour/src
+COPY CMakeLists.txt /home/docker/contour
+COPY metainfo.xml /home/docker/contour
+COPY CODE_OF_CONDUCT.md /home/docker/contour
+COPY LICENSE.txt /home/docker/contour
+COPY README.md /home/docker/contour
+
+WORKDIR /home/docker/contour
+RUN ls -la /home/docker/contour
+
 # Install updates to base image
 RUN \
     apt-get update \
@@ -19,15 +33,12 @@ RUN wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/nul
 RUN apt-add-repository 'deb https://apt.kitware.com/ubuntu/ bionic main'
 RUN apt-get install -y cmake
 
-WORKDIR /home/docker
-
-RUN git clone --depth=1  https://github.com/contour-terminal/contour.git
-WORKDIR /home/docker/contour
-RUN SYSDEP_ASSUME_YES=ON ./scripts/install-deps.sh
+RUN SYSDEP_ASSUME_YES=ON QTVER=5 ./scripts/install-deps.sh
 RUN cmake --version
 RUN g++-10 --version
 RUN cmake -S . -B build -G Ninja \
     -D CMAKE_CXX_STANDARD=20 \
+    -D CONTOUR_QT_VERSION=5 \
     -D CMAKE_CXX_COMPILER=g++-10
 
 RUN cmake --build build -- -j3
