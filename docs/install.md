@@ -49,7 +49,8 @@ Contour is available at the Flathub store.
 ## Installing from source
 
 Contour is best installed from supported package managers, but you can build
-from source by following the instruction below.
+from source by following the instruction below. You can Qt 5 or Qt 6,
+by default contour will be compiler with Qt 6, to change Qt version use `QTVER=5 ./scripts/install-deps.sh` to fetch dependencies and cmake flag `-D CONTOUR_QT_VERSION=5`.
 
 ### UNIX-like systems (Linux, FreeBSD, OS/X)
 

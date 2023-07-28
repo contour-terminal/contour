@@ -51,8 +51,9 @@ jobs:
       - name: "Prepare building Contour"
         # Note: Keep this in sync with that in build.yml!
         run: |
-          BUILD_DIR="Build" \
+            BUILD_DIR="Build" \
             CMAKE_BUILD_TYPE="Debug" \
+            EXTRA_CMAKE_FLAGS="-DCONTOUR_QT_VERSION=5" \
             CXX="g++-11" \
             ./scripts/ci-prepare-contour.sh
 
