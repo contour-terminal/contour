@@ -373,6 +373,7 @@ install_deps_arch()
             qt6-base \
             qt6-declarative \
             qt6-multimedia \
+            qt6-shadertools \
             qt6-wayland \
         "
     else
