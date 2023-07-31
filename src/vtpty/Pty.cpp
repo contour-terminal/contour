@@ -28,7 +28,7 @@ using std::unique_ptr;
 namespace terminal
 {
 
-unique_ptr<Pty> createPty(PageSize pageSize, optional<crispy::ImageSize> viewSize)
+unique_ptr<Pty> createPty(PageSize pageSize, optional<crispy::image_size> viewSize)
 {
 #if defined(__linux__)
     return make_unique<terminal::LinuxPty>(pageSize, viewSize);

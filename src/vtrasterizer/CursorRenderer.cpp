@@ -175,7 +175,7 @@ auto CursorRenderer::createTileData(CursorShape cursorShape,
     return {};
 }
 
-void CursorRenderer::render(crispy::Point pos, int columnWidth, RGBColor color)
+void CursorRenderer::render(crispy::point pos, int columnWidth, RGBColor color)
 {
     for (uint32_t i = 0; i < uint32_t(columnWidth); ++i)
     {

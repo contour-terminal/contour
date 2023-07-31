@@ -29,6 +29,8 @@
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
 
+#include "crispy/ImageSize.h"
+
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     #include <QtOpenGL/QOpenGLPixelTransferOptions>
 #else
@@ -196,9 +198,9 @@ namespace
 
 OpenGLRenderer::OpenGLRenderer(ShaderConfig textShaderConfig,
                                ShaderConfig rectShaderConfig,
-                               ImageSize viewSize,
-                               ImageSize targetSurfaceSize,
-                               ImageSize /*textureTileSize*/,
+                               crispy::image_size viewSize,
+                               crispy::image_size targetSurfaceSize,
+                               crispy::image_size /*textureTileSize*/,
                                terminal::rasterizer::PageMargin margin):
     _startTime { chrono::steady_clock::now().time_since_epoch() },
     _viewSize { viewSize },
@@ -210,7 +212,7 @@ OpenGLRenderer::OpenGLRenderer(ShaderConfig textShaderConfig,
     setRenderSize(targetSurfaceSize);
 }
 
-void OpenGLRenderer::setRenderSize(ImageSize targetSurfaceSize)
+void OpenGLRenderer::setRenderSize(crispy::image_size targetSurfaceSize)
 {
     if (_renderTargetSize == targetSurfaceSize)
         return;

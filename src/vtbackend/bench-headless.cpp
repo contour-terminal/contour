@@ -30,6 +30,7 @@
 #include <random>
 #include <thread>
 
+#include "crispy/BufferObject.h"
 #include <libtermbench/termbench.h>
 
 using namespace std;
@@ -111,13 +112,13 @@ int baseBenchmark(Writer&& writer, BenchOptions options, string_view title)
 
 namespace CLI = crispy::cli;
 
-class ContourHeadlessBench: public crispy::App
+class ContourHeadlessBench: public crispy::app
 {
   public:
     ContourHeadlessBench():
-        App("bench-headless", "Contour Headless Benchmark", CONTOUR_VERSION_STRING, "Apache-2.0")
+        app("bench-headless", "Contour Headless Benchmark", CONTOUR_VERSION_STRING, "Apache-2.0")
     {
-        using Project = crispy::cli::about::Project;
+        using Project = crispy::cli::about::project;
         crispy::cli::about::registerProjects(
 #if defined(CONTOUR_BUILD_WITH_MIMALLOC)
             Project { "mimalloc", "", "" },
@@ -135,37 +136,37 @@ class ContourHeadlessBench: public crispy::App
         if (logFilterString)
         {
             logstore::configure(logFilterString);
-            crispy::App::customizeLogStoreOutput();
+            crispy::app::customizeLogStoreOutput();
         }
     }
 
-    [[nodiscard]] crispy::cli::Command parameterDefinition() const override
+    [[nodiscard]] crispy::cli::command parameterDefinition() const override
     {
-        auto const perfOptions = CLI::OptionList {
-            CLI::Option { "size", CLI::Value { 32u }, "Number of megabyte to process per test.", "MB" },
-            CLI::Option { "cat", CLI::Value { false }, "Enable cat-style short-line ASCII stream test." },
-            CLI::Option { "long", CLI::Value { false }, "Enable long-line ASCII stream test." },
-            CLI::Option { "sgr", CLI::Value { false }, "Enable SGR stream test." },
-            CLI::Option { "binary", CLI::Value { false }, "Enable binary stream test." },
+        auto const perfOptions = CLI::option_list {
+            CLI::option { "size", CLI::value { 32u }, "Number of megabyte to process per test.", "MB" },
+            CLI::option { "cat", CLI::value { false }, "Enable cat-style short-line ASCII stream test." },
+            CLI::option { "long", CLI::value { false }, "Enable long-line ASCII stream test." },
+            CLI::option { "sgr", CLI::value { false }, "Enable SGR stream test." },
+            CLI::option { "binary", CLI::value { false }, "Enable binary stream test." },
         };
 
-        return CLI::Command {
+        return CLI::command {
             "bench-headless",
             "Contour Terminal Emulator " CONTOUR_VERSION_STRING
             " - https://github.com/contour-terminal/contour/ ;-)",
-            CLI::OptionList {},
-            CLI::CommandList {
-                CLI::Command { "help", "Shows this help and exits." },
-                CLI::Command { "meta", "Shows some terminal backend meta information and exits." },
-                CLI::Command { "version", "Shows the version and exits." },
-                CLI::Command { "license",
+            CLI::option_list {},
+            CLI::command_list {
+                CLI::command { "help", "Shows this help and exits." },
+                CLI::command { "meta", "Shows some terminal backend meta information and exits." },
+                CLI::command { "version", "Shows the version and exits." },
+                CLI::command { "license",
                                "Shows the license, and project URL of the used projects and Contour." },
-                CLI::Command { "grid",
+                CLI::command { "grid",
                                "Performs performance tests utilizing the full grid including VT parser.",
                                perfOptions },
-                CLI::Command {
+                CLI::command {
                     "parser", "Performs performance tests utilizing the VT parser only.", perfOptions },
-                CLI::Command {
+                CLI::command {
                     "pty",
                     "Performs performance tests utilizing the underlying operating system's PTY only." },
             }
@@ -246,7 +247,7 @@ class ContourHeadlessBench: public crispy::App
         auto& ptySlave = pty.slave();
         (void) ptySlave.configure();
 
-        auto bufferObjectPool = crispy::BufferObjectPool<char>(4llu * 1024 * 1024);
+        auto bufferObjectPool = crispy::buffer_object_pool<char>(4llu * 1024 * 1024);
         auto bufferObject = bufferObjectPool.allocateBufferObject();
 
         auto bytesTransferred = uint64_t { 0 };

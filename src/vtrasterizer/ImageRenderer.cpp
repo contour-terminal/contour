@@ -18,6 +18,8 @@
 
 #include <array>
 
+#include "crispy/StrongHash.h"
+
 using crispy::times;
 
 using std::array;
@@ -45,7 +47,7 @@ void ImageRenderer::setCellSize(ImageSize cellSize)
     // TODO: recompute rasterized images slices here?
 }
 
-void ImageRenderer::renderImage(crispy::Point pos, ImageFragment const& fragment)
+void ImageRenderer::renderImage(crispy::point pos, ImageFragment const& fragment)
 {
     // std::cout << fmt::format("ImageRenderer.renderImage: {}\n", fragment);
 
@@ -103,7 +105,7 @@ Renderable::AtlasTileAttributes const* ImageRenderer::getOrCreateCachedTileAttri
     auto const key = ImageFragmentKey { fragment.rasterizedImage().image().id(),
                                         fragment.offset(),
                                         fragment.rasterizedImage().cellSize() };
-    auto const hash = crispy::StrongHash::compute(key);
+    auto const hash = crispy::strong_hash::compute(key);
 
     return textureAtlas().get_or_try_emplace(
         hash, [&](atlas::TileLocation tileLocation) -> optional<TextureAtlas::TileCreateData> {

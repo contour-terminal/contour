@@ -17,6 +17,8 @@
 
 #include <Windows.h>
 
+#include "crispy/BufferObject.h"
+
 using namespace std;
 
 namespace
@@ -141,7 +143,7 @@ void ConPty::close()
     }
 }
 
-Pty::ReadResult ConPty::read(crispy::BufferObject<char>& buffer,
+Pty::ReadResult ConPty::read(crispy::buffer_object<char>& buffer,
                              std::chrono::milliseconds timeout,
                              size_t size)
 {
@@ -180,7 +182,7 @@ PageSize ConPty::pageSize() const noexcept
     return _size;
 }
 
-void ConPty::resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixels)
+void ConPty::resizeScreen(PageSize cells, std::optional<crispy::image_size> pixels)
 {
     if (!_slave)
         return;

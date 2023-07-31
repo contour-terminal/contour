@@ -91,8 +91,7 @@ ColorPalette::Palette const ColorPalette::defaultColorPalette = []() constexpr {
 void ImageData::updateHash() noexcept
 {
     // clang-format off
-    using crispy::StrongHash;
-    auto hashValue = StrongHash(0, 0, 0, size.width.value)
+    auto hashValue = crispy::strong_hash(0, 0, 0, size.width.value)
                    * static_cast<uint32_t>(size.height.value)
                    * static_cast<uint32_t>(rowAlignment)
                    * static_cast<uint32_t>(format);
@@ -101,7 +100,7 @@ void ImageData::updateHash() noexcept
     auto const pitch = roundUp(scanLineLength, static_cast<size_t>(rowAlignment));
     for (unsigned row = 0; row < size.height.value; ++row)
     {
-        hashValue = hashValue * StrongHash::compute(scanLine, scanLineLength);
+        hashValue = hashValue * crispy::strong_hash::compute(scanLine, scanLineLength);
         scanLine += pitch;
     }
     hash = hashValue;

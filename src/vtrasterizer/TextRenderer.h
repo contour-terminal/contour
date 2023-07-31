@@ -38,6 +38,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "crispy/StrongHash.h"
+#include "crispy/StrongLRUHashtable.h"
 #include <libunicode/convert.h>
 #include <libunicode/run_segmenter.h>
 
@@ -109,12 +111,12 @@ class TextRenderer: public Renderable
     void appendCellTextToClusterGroup(std::u32string_view codepoints, TextStyle style, RGBColor color);
 
     /// Gets the text shaping result of the current text cluster group
-    text::shape_result const& getOrCreateCachedGlyphPositions(crispy::StrongHash hash);
+    text::shape_result const& getOrCreateCachedGlyphPositions(crispy::strong_hash hash);
     text::shape_result createTextShapedGlyphPositions();
     text::shape_result shapeTextRun(unicode::run_segmenter::range const& run);
     void flushTextClusterGroup();
 
-    AtlasTileAttributes const* getOrCreateRasterizedMetadata(crispy::StrongHash const& hash,
+    AtlasTileAttributes const* getOrCreateRasterizedMetadata(crispy::strong_hash const& hash,
                                                              text::glyph_key const& glyphKey,
                                                              unicode::PresentationStyle presentationStyle);
 
@@ -126,7 +128,7 @@ class TextRenderer: public Renderable
         atlas::TileLocation tileLocation,
         text::glyph_key const& glyphKey,
         unicode::PresentationStyle presentation,
-        crispy::StrongHash const& hash);
+        crispy::strong_hash const& hash);
 
     std::optional<TextureAtlas::TileCreateData> createRasterizedGlyph(
         atlas::TileLocation tileLocation,
@@ -135,11 +137,11 @@ class TextRenderer: public Renderable
 
     void restrictToTileSize(TextureAtlas::TileCreateData& tileCreateData);
 
-    crispy::Point applyGlyphPositionToPen(crispy::Point pen,
+    crispy::point applyGlyphPositionToPen(crispy::point pen,
                                           AtlasTileAttributes const& tileAttributes,
                                           text::glyph_position const& gpos) const noexcept;
 
-    void renderRasterizedGlyph(crispy::Point pen, RGBAColor color, AtlasTileAttributes const& attributes);
+    void renderRasterizedGlyph(crispy::point pen, RGBAColor color, AtlasTileAttributes const& attributes);
 
     // general properties
     //
@@ -151,8 +153,8 @@ class TextRenderer: public Renderable
     //
     bool _pressure = false;
 
-    using ShapingResultCache = crispy::StrongLRUHashtable<text::shape_result>;
-    using ShapingResultCachePtr = ShapingResultCache::Ptr;
+    using ShapingResultCache = crispy::strong_lru_hashtable<text::shape_result>;
+    using ShapingResultCachePtr = ShapingResultCache::ptr;
 
     ShapingResultCachePtr _textShapingCache;
     // TODO: make unique_ptr, get owned, export cref for other users in Renderer impl.
@@ -181,7 +183,7 @@ class TextRenderer: public Renderable
     struct TextClusterGroup
     {
         // pen-start position of this text group
-        crispy::Point initialPenPosition {};
+        crispy::point initialPenPosition {};
 
         // uniform text style for this text group
         TextStyle style = TextStyle::Invalid;

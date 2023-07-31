@@ -151,7 +151,7 @@ class CRISPY_PACKED CompactCell
     char32_t _codepoint = 0; /// Primary Unicode codepoint to be displayed.
     Color _foregroundColor = DefaultColor();
     Color _backgroundColor = DefaultColor();
-    crispy::Owned<CellExtra> _extra = {};
+    crispy::owned<CellExtra> _extra = {};
     // TODO(perf) ^^ use CellExtraId = boxed<int24_t> into pre-alloc'ed vector<CellExtra>.
 };
 

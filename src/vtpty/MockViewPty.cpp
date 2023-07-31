@@ -14,6 +14,8 @@
 
 #include <vtpty/MockViewPty.h>
 
+#include "crispy/BufferObject.h"
+
 using std::min;
 using std::optional;
 using std::string_view;
@@ -33,7 +35,7 @@ PtySlave& MockViewPty::slave() noexcept
     return _slave;
 }
 
-optional<tuple<string_view, bool>> MockViewPty::read(crispy::BufferObject<char>& storage,
+optional<tuple<string_view, bool>> MockViewPty::read(crispy::buffer_object<char>& storage,
                                                      std::chrono::milliseconds /*timeout*/,
                                                      size_t size)
 {
@@ -60,7 +62,7 @@ terminal::PageSize MockViewPty::pageSize() const noexcept
     return _pageSize;
 }
 
-void MockViewPty::resizeScreen(terminal::PageSize cells, std::optional<crispy::ImageSize> pixels)
+void MockViewPty::resizeScreen(terminal::PageSize cells, std::optional<crispy::image_size> pixels)
 {
     _pageSize = cells;
     _pixelSize = pixels;

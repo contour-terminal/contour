@@ -25,16 +25,16 @@ namespace crispy
 {
 
 /// General purpose Application main with CLI parameter handling and stuff.
-class App
+class app
 {
   public:
-    App(std::string appName, std::string appTitle, std::string appVersion, std::string appLicense);
-    virtual ~App();
+    app(std::string appName, std::string appTitle, std::string appVersion, std::string appLicense);
+    virtual ~app();
 
-    static App* instance() noexcept { return _instance; }
+    static app* instance() noexcept { return _instance; }
 
-    [[nodiscard]] virtual crispy::cli::Command parameterDefinition() const = 0;
-    [[nodiscard]] cli::FlagStore const& parameters() const noexcept { return _flags.value(); }
+    [[nodiscard]] virtual crispy::cli::command parameterDefinition() const = 0;
+    [[nodiscard]] cli::flag_store const& parameters() const noexcept { return _flags.value(); }
 
     void link(std::string command, std::function<int()> handler);
 
@@ -54,15 +54,15 @@ class App
     int licenseAction();
     int helpAction();
 
-    static App* _instance; // NOLINT(readability-identifier-naming)
+    static app* _instance; // NOLINT(readability-identifier-naming)
 
     std::string _appName;
     std::string _appTitle;
     std::string _appVersion;
     std::string _appLicense;
     FileSystem::path _localStateDir;
-    std::optional<crispy::cli::Command> _syntax;
-    std::optional<crispy::cli::FlagStore> _flags;
+    std::optional<crispy::cli::command> _syntax;
+    std::optional<crispy::cli::flag_store> _flags;
     std::map<std::string, std::function<int()>> _handlers;
 };
 

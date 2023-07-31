@@ -17,6 +17,8 @@
 
 #include <string>
 
+#include "crispy/BufferObject.h"
+
 namespace terminal
 {
 
@@ -28,13 +30,13 @@ class MockPty: public Pty
     ~MockPty() override = default;
 
     PtySlave& slave() noexcept override;
-    [[nodiscard]] ReadResult read(crispy::BufferObject<char>& storage,
+    [[nodiscard]] ReadResult read(crispy::buffer_object<char>& storage,
                                   std::chrono::milliseconds timeout,
                                   size_t size) override;
     void wakeupReader() override;
     int write(std::string_view data, bool blocking) override;
     [[nodiscard]] PageSize pageSize() const noexcept override;
-    void resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixels = std::nullopt) override;
+    void resizeScreen(PageSize cells, std::optional<crispy::image_size> pixels = std::nullopt) override;
 
     void start() override;
     void close() override;
@@ -63,7 +65,7 @@ class MockPty: public Pty
 
   private:
     PageSize _pageSize;
-    std::optional<crispy::ImageSize> _pixelSize;
+    std::optional<crispy::image_size> _pixelSize;
     std::string _inputBuffer;
     std::string _outputBuffer;
     std::size_t _outputReadOffset = 0;

@@ -63,7 +63,7 @@ class ImageRenderer: public Renderable, public TextRendererEvents
     /// Reconfigures the slicing properties of existing images.
     void setCellSize(ImageSize cellSize);
 
-    void renderImage(crispy::Point pos, ImageFragment const& fragment);
+    void renderImage(crispy::point pos, ImageFragment const& fragment);
 
     /// notify underlying cache that this fragment is not going to be rendered anymore, maybe freeing up some
     /// GPU caches.

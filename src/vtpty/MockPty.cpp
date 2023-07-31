@@ -1,5 +1,7 @@
 #include <vtpty/MockPty.h>
 
+#include "crispy/BufferObject.h"
+
 using namespace std::chrono;
 using std::min;
 using std::nullopt;
@@ -19,7 +21,7 @@ PtySlave& MockPty::slave() noexcept
     return _slave;
 }
 
-Pty::ReadResult MockPty::read(crispy::BufferObject<char>& storage,
+Pty::ReadResult MockPty::read(crispy::buffer_object<char>& storage,
                               std::chrono::milliseconds /*timeout*/,
                               size_t size)
 {
@@ -47,7 +49,7 @@ PageSize MockPty::pageSize() const noexcept
     return _pageSize;
 }
 
-void MockPty::resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixels)
+void MockPty::resizeScreen(PageSize cells, std::optional<crispy::image_size> pixels)
 {
     _pageSize = cells;
     _pixelSize = pixels;

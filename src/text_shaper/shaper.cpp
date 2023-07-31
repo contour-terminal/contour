@@ -35,8 +35,8 @@ namespace
 {
     template <std::size_t NumComponents>
     constexpr void scaleDownExplicit(vector<uint8_t> const& inputBitmap,
-                                     crispy::ImageSize inputSize,
-                                     crispy::ImageSize outputSize,
+                                     crispy::image_size inputSize,
+                                     crispy::image_size outputSize,
                                      size_t factor,
                                      vector<uint8_t>& outputBitmap) noexcept
     {
@@ -70,7 +70,7 @@ namespace
 
 } // namespace
 
-tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, crispy::ImageSize boundingBox)
+tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, crispy::image_size boundingBox)
 {
     // NB: We're only supporting down-scaling.
     assert(bitmap.bitmapSize.width >= boundingBox.width);
@@ -83,8 +83,8 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, crispy::Ima
 
     // Adjust new image size to respect ratio.
     auto const newSize =
-        crispy::ImageSize { crispy::Width::cast_from(unbox<double>(bitmap.bitmapSize.width) / ratio),
-                            crispy::Height::cast_from(unbox<double>(bitmap.bitmapSize.height) / ratio) };
+        crispy::image_size { crispy::width::cast_from(unbox<double>(bitmap.bitmapSize.width) / ratio),
+                             crispy::height::cast_from(unbox<double>(bitmap.bitmapSize.height) / ratio) };
 
     RasterizerLog()("scaling {} from {} to {}, ratio {}x{} ({}), factor {}",
                     bitmap.format,

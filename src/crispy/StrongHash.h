@@ -33,7 +33,7 @@
 namespace crispy
 {
 
-struct StrongHash
+struct strong_hash
 {
     // some random seed
     static constexpr std::array<unsigned char, 16> defaultSeed = {
@@ -41,28 +41,28 @@ struct StrongHash
         114, 188, 209, 2, 232, 4, 178, 176, 240, 216, 201, 127, 40, 41, 95, 143,
     };
 
-    StrongHash(uint32_t a, uint32_t b, uint32_t c, uint32_t d) noexcept;
+    strong_hash(uint32_t a, uint32_t b, uint32_t c, uint32_t d) noexcept;
 
 #if defined(STRONGHASH_USE_INTRINSICS)
-    explicit StrongHash(Intrinsics::m128i v) noexcept;
+    explicit strong_hash(Intrinsics::m128i v) noexcept;
 #endif
 
-    StrongHash() = default;
-    StrongHash(StrongHash const&) = default;
-    StrongHash& operator=(StrongHash const&) = default;
-    StrongHash(StrongHash&&) noexcept = default;
-    StrongHash& operator=(StrongHash&&) noexcept = default;
+    strong_hash() = default;
+    strong_hash(strong_hash const&) = default;
+    strong_hash& operator=(strong_hash const&) = default;
+    strong_hash(strong_hash&&) noexcept = default;
+    strong_hash& operator=(strong_hash&&) noexcept = default;
 
     template <typename T>
-    static StrongHash compute(T const& value) noexcept;
+    static strong_hash compute(T const& value) noexcept;
 
     template <typename T>
-    static StrongHash compute(std::basic_string_view<T> text) noexcept;
+    static strong_hash compute(std::basic_string_view<T> text) noexcept;
 
     template <typename T, typename Alloc>
-    static StrongHash compute(std::basic_string<T, Alloc> const& text) noexcept;
+    static strong_hash compute(std::basic_string<T, Alloc> const& text) noexcept;
 
-    static StrongHash compute(void const* data, size_t n) noexcept;
+    static strong_hash compute(void const* data, size_t n) noexcept;
 
     // Retrieves the 4th 32-bit component of the internal representation.
     // TODO: Provide access also to: a, b, c.
@@ -82,10 +82,10 @@ struct StrongHash
 #endif
 };
 
-inline StrongHash::StrongHash(uint32_t a, uint32_t b, uint32_t c, uint32_t d) noexcept:
+inline strong_hash::strong_hash(uint32_t a, uint32_t b, uint32_t c, uint32_t d) noexcept:
 #if defined(STRONGHASH_USE_INTRINSICS)
-    StrongHash(Intrinsics::xor128(Intrinsics::load32(a, b, c, d),
-                                  Intrinsics::loadUnaligned((__m128i const*) defaultSeed.data())))
+    strong_hash(Intrinsics::xor128(Intrinsics::load32(a, b, c, d),
+                                   Intrinsics::loadUnaligned((__m128i const*) defaultSeed.data())))
 #else
     value { a, b, c, d }
 #endif
@@ -93,12 +93,12 @@ inline StrongHash::StrongHash(uint32_t a, uint32_t b, uint32_t c, uint32_t d) no
 }
 
 #if defined(STRONGHASH_USE_INTRINSICS)
-inline StrongHash::StrongHash(__m128i v) noexcept: value { v }
+inline strong_hash::strong_hash(__m128i v) noexcept: value { v }
 {
 }
 #endif
 
-inline bool operator==(StrongHash a, StrongHash b) noexcept
+inline bool operator==(strong_hash a, strong_hash b) noexcept
 {
 #if defined(STRONGHASH_USE_INTRINSICS)
     return Intrinsics::compare(a.value, b.value);
@@ -107,12 +107,12 @@ inline bool operator==(StrongHash a, StrongHash b) noexcept
 #endif
 }
 
-inline bool operator!=(StrongHash a, StrongHash b) noexcept
+inline bool operator!=(strong_hash a, strong_hash b) noexcept
 {
     return !(a == b);
 }
 
-inline StrongHash operator*(StrongHash const& a, StrongHash const& b) noexcept
+inline strong_hash operator*(strong_hash const& a, strong_hash const& b) noexcept
 {
 #if defined(STRONGHASH_USE_INTRINSICS)
     Intrinsics::m128i hashValue = a.value;
@@ -123,47 +123,47 @@ inline StrongHash operator*(StrongHash const& a, StrongHash const& b) noexcept
     hashValue = Intrinsics::aesdec(hashValue, Intrinsics::setzero());
     hashValue = Intrinsics::aesdec(hashValue, Intrinsics::setzero());
 
-    return StrongHash { hashValue };
+    return strong_hash { hashValue };
 #else
-    return StrongHash { FNV<uint32_t, uint32_t>()(a.value[0], b.value[0]),
-                        FNV<uint32_t, uint32_t>()(a.value[1], b.value[1]),
-                        FNV<uint32_t, uint32_t>()(a.value[2], b.value[2]),
-                        FNV<uint32_t, uint32_t>()(a.value[3], b.value[3]) };
+    return strong_hash { fnv<uint32_t, uint32_t>()(a.value[0], b.value[0]),
+                         fnv<uint32_t, uint32_t>()(a.value[1], b.value[1]),
+                         fnv<uint32_t, uint32_t>()(a.value[2], b.value[2]),
+                         fnv<uint32_t, uint32_t>()(a.value[3], b.value[3]) };
 #endif
 }
 
-inline StrongHash operator*(StrongHash a, uint32_t b) noexcept
+inline strong_hash operator*(strong_hash a, uint32_t b) noexcept
 {
-    return a * StrongHash(0, 0, 0, b);
+    return a * strong_hash(0, 0, 0, b);
 }
 
 template <typename T>
-StrongHash StrongHash::compute(std::basic_string_view<T> text) noexcept
+strong_hash strong_hash::compute(std::basic_string_view<T> text) noexcept
 {
     // return compute(value.data(), value.size());
-    auto hash = StrongHash(0, 0, 0, static_cast<uint32_t>(text.size()));
+    auto hash = strong_hash(0, 0, 0, static_cast<uint32_t>(text.size()));
     for (auto const codepoint: text)
         hash = hash * codepoint; // StrongHash(0, 0, 0, static_cast<uint32_t>(codepoint));
     return hash;
 }
 
 template <typename T, typename Alloc>
-StrongHash StrongHash::compute(std::basic_string<T, Alloc> const& text) noexcept
+strong_hash strong_hash::compute(std::basic_string<T, Alloc> const& text) noexcept
 {
     // return compute(value.data(), value.size());
-    auto hash = StrongHash(0, 0, 0, static_cast<uint32_t>(text.size()));
+    auto hash = strong_hash(0, 0, 0, static_cast<uint32_t>(text.size()));
     for (T const codepoint: text)
         hash = hash * static_cast<uint32_t>(codepoint);
     return hash;
 }
 
 template <typename T>
-StrongHash StrongHash::compute(T const& value) noexcept
+strong_hash strong_hash::compute(T const& value) noexcept
 {
     return compute(&value, sizeof(value));
 }
 
-inline StrongHash StrongHash::compute(void const* data, size_t n) noexcept
+inline strong_hash strong_hash::compute(void const* data, size_t n) noexcept
 {
 #if defined(STRONGHASH_USE_INTRINSICS)
     static_assert(sizeof(__m128i) == 16);
@@ -199,27 +199,27 @@ inline StrongHash StrongHash::compute(void const* data, size_t n) noexcept
         hashValue = Intrinsics::aesdec(hashValue, Intrinsics::setzero());
     }
 
-    return StrongHash { hashValue };
+    return strong_hash { hashValue };
 #else
     auto const* i = (uint8_t const*) data;
     auto const* e = i + n;
-    auto const result = FNV<uint8_t, uint64_t>()(i, e);
+    auto const result = fnv<uint8_t, uint64_t>()(i, e);
     auto constexpr a = 0;
     auto constexpr b = 0;
     auto const c = static_cast<uint32_t>((result >> 32) & 0xFFFFFFFFu);
     auto const d = static_cast<uint32_t>(result & 0xFFFFFFFFu);
-    return StrongHash { a, b, c, d };
+    return strong_hash { a, b, c, d };
 #endif
 }
 
-inline std::string to_string(StrongHash const& hash)
+inline std::string to_string(strong_hash const& hash)
 {
     uint32_t u32[4];
     std::memcpy(u32, &hash, sizeof(hash));
     return fmt::format("{:04X}{:04X}{:04X}{:04X}", u32[0], u32[1], u32[2], u32[3]);
 }
 
-inline std::string to_structured_string(StrongHash const& hash)
+inline std::string to_structured_string(strong_hash const& hash)
 {
     uint32_t u32[4];
     std::memcpy(u32, &hash, sizeof(hash));
@@ -235,7 +235,7 @@ inline std::string to_structured_string(StrongHash const& hash)
     return s;
 }
 
-inline int to_integer(StrongHash hash) noexcept
+inline int to_integer(strong_hash hash) noexcept
 {
 #if defined(STRONGHASH_USE_INTRINSICS)
     return Intrinsics::castToInt32(hash.value);
@@ -245,22 +245,22 @@ inline int to_integer(StrongHash hash) noexcept
 }
 
 template <typename T>
-struct StrongHasher
+struct strong_hasher
 {
-    StrongHash operator()(T const&) noexcept; // Specialize and implement me.
+    strong_hash operator()(T const&) noexcept; // Specialize and implement me.
 };
 
 template <>
-struct StrongHasher<uint64_t>
+struct strong_hasher<uint64_t>
 {
-    inline StrongHash operator()(uint64_t v) noexcept
+    inline strong_hash operator()(uint64_t v) noexcept
     {
         auto const c = static_cast<uint32_t>((v >> 32) & 0xFFFFFFFFu);
         auto const d = static_cast<uint32_t>(v & 0xFFFFFFFFu);
 #if defined(STRONGHASH_USE_INTRINSICS)
-        return StrongHash { Intrinsics::load32(0, 0, c, d) };
+        return strong_hash { Intrinsics::load32(0, 0, c, d) };
 #else
-        return StrongHash { 0, 0, c, d };
+        return strong_hash { 0, 0, c, d };
 #endif
     }
 };
@@ -268,51 +268,51 @@ struct StrongHasher<uint64_t>
 namespace detail
 {
     template <typename T>
-    struct StdHash32
+    struct std_hash32
     {
-        inline StrongHash operator()(T v) noexcept
+        inline strong_hash operator()(T v) noexcept
         {
 #if defined(STRONGHASH_USE_INTRINSICS)
-            return StrongHash { Intrinsics::load32(0, 0, 0, v) };
+            return strong_hash { Intrinsics::load32(0, 0, 0, v) };
 #else
-            return StrongHash { 0, 0, 0, static_cast<uint32_t>(v) };
+            return strong_hash { 0, 0, 0, static_cast<uint32_t>(v) };
 #endif
         }
     };
 } // namespace detail
 
 // clang-format off
-template <> struct StrongHasher<char>: public detail::StdHash32<char> { };
-template <> struct StrongHasher<unsigned char>: public detail::StdHash32<char> { };
-template <> struct StrongHasher<int16_t>: public detail::StdHash32<int16_t> { };
-template <> struct StrongHasher<uint16_t>: public detail::StdHash32<uint16_t> { };
-template <> struct StrongHasher<int32_t>: public detail::StdHash32<int32_t> { };
-template <> struct StrongHasher<uint32_t>: public detail::StdHash32<uint32_t> { };
+template <> struct strong_hasher<char>: public detail::std_hash32<char> { };
+template <> struct strong_hasher<unsigned char>: public detail::std_hash32<char> { };
+template <> struct strong_hasher<int16_t>: public detail::std_hash32<int16_t> { };
+template <> struct strong_hasher<uint16_t>: public detail::std_hash32<uint16_t> { };
+template <> struct strong_hasher<int32_t>: public detail::std_hash32<int32_t> { };
+template <> struct strong_hasher<uint32_t>: public detail::std_hash32<uint32_t> { };
 // clang-format on
 // }}}
 
 template <class Char, class Allocator>
-struct StrongHasher<std::basic_string<Char, Allocator>>
+struct strong_hasher<std::basic_string<Char, Allocator>>
 {
-    inline StrongHash operator()(std::basic_string<Char, Allocator> const& v) noexcept
+    inline strong_hash operator()(std::basic_string<Char, Allocator> const& v) noexcept
     {
-        return StrongHasher<int> {}((int) std::hash<std::basic_string<Char, Allocator>> {}(v));
+        return strong_hasher<int> {}((int) std::hash<std::basic_string<Char, Allocator>> {}(v));
     }
 };
 
 template <typename U>
-struct StrongHasher<std::basic_string_view<U>>
+struct strong_hasher<std::basic_string_view<U>>
 {
-    inline StrongHash operator()(std::basic_string_view<U> v) noexcept
+    inline strong_hash operator()(std::basic_string_view<U> v) noexcept
     {
-        return StrongHasher<int> {}((int) std::hash<std::basic_string_view<U>> {}(v));
+        return strong_hasher<int> {}((int) std::hash<std::basic_string_view<U>> {}(v));
     }
 };
 
 } // namespace crispy
 
 template <>
-struct fmt::formatter<crispy::StrongHash>
+struct fmt::formatter<crispy::strong_hash>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -320,7 +320,7 @@ struct fmt::formatter<crispy::StrongHash>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(crispy::StrongHash const& hash, FormatContext& ctx)
+    auto format(crispy::strong_hash const& hash, FormatContext& ctx)
     {
         return fmt::format_to(ctx.out(), "{}", to_structured_string(hash));
     }

@@ -417,6 +417,10 @@ jobs:
       - name: Install Clang
         if: ${{ startsWith(matrix.compiler, 'Clang') }}
         run: sudo apt install -y clang-${{ steps.extract_matrix.outputs.CC_VERSION }}
+      - name: Install Clang-Tidy
+        if: ${{ startsWith(matrix.compiler, 'Clang') }}
+        run: sudo apt install -y clang-tidy-${{ steps.extract_matrix.outputs.CC_VERSION }}
+
       - name: "create build directory"
         run: mkdir build
       - name: CMake version
@@ -427,7 +431,8 @@ jobs:
           CC_VER=$( echo "${{ matrix.compiler }}" | awk '{ print $2; }')
           test "${CC_NAME}" = "clang" && CC_EXE="clang++"
           test "${CC_NAME}" = "gcc"   && CC_EXE="g++"
-          [[ "${{ matrix.compiler }}" = "GCC 8" ]] || EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DPEDANTIC_COMPILER_WERROR=ON"
+          test "${{ matrix.compiler }}" = "GCC 8"  && EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DPEDANTIC_COMPILER_WERROR=ON"
+          test "${{ startsWith(matrix.compiler, 'Clang') }}" = "true" && EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DENABLE_TIDY=ON"
           BUILD_DIR="build" \
             CMAKE_BUILD_TYPE="${{ matrix.build_type }}" \
             CXX="${CC_EXE}-${CC_VER}" \

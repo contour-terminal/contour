@@ -23,9 +23,9 @@ using namespace crispy;
 using namespace std;
 using namespace std::string_view_literals;
 
-TEST_CASE("StrongLRUCache.operator_index", "")
+TEST_CASE("strong_lru_cache.operator_index", "")
 {
-    auto cache = StrongLRUCache<int, string_view>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
+    auto cache = strong_lru_cache<int, string_view>(strong_hashtable_size { 8 }, lru_capacity { 4 });
 
     cache[1] = "1"sv;
     REQUIRE(cache[1] == "1"sv);
@@ -52,9 +52,9 @@ TEST_CASE("StrongLRUCache.operator_index", "")
     REQUIRE(joinHumanReadable(cache.keys()) == "6, 5, 4, 3");
 }
 
-TEST_CASE("StrongLRUCache.at", "")
+TEST_CASE("strong_lru_cache.at", "")
 {
-    auto cache = StrongLRUCache<int, string>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
+    auto cache = strong_lru_cache<int, string>(strong_hashtable_size { 8 }, lru_capacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = std::to_string(i);
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
@@ -63,9 +63,9 @@ TEST_CASE("StrongLRUCache.at", "")
     CHECK_NOTHROW(cache.at(1));
 }
 
-TEST_CASE("StrongLRUCache.clear", "[lrucache]")
+TEST_CASE("strong_lru_cache.clear", "[lrucache]")
 {
-    auto cache = StrongLRUCache<int, string>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
+    auto cache = strong_lru_cache<int, string>(strong_hashtable_size { 8 }, lru_capacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = std::to_string(i);
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
@@ -75,9 +75,9 @@ TEST_CASE("StrongLRUCache.clear", "[lrucache]")
     CHECK(cache.size() == 0);
 }
 
-TEST_CASE("StrongLRUCache.touch", "")
+TEST_CASE("strong_lru_cache.touch", "")
 {
-    auto cache = StrongLRUCache<int, string>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
+    auto cache = strong_lru_cache<int, string>(strong_hashtable_size { 8 }, lru_capacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = std::to_string(i);
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
@@ -99,9 +99,9 @@ TEST_CASE("StrongLRUCache.touch", "")
     REQUIRE(joinHumanReadable(cache.keys()) == "1, 3, 4, 2");
 }
 
-TEST_CASE("StrongLRUCache.contains", "")
+TEST_CASE("strong_lru_cache.contains", "")
 {
-    auto cache = StrongLRUCache<int, string>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
+    auto cache = strong_lru_cache<int, string>(strong_hashtable_size { 8 }, lru_capacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = std::to_string(i);
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
@@ -123,9 +123,9 @@ TEST_CASE("StrongLRUCache.contains", "")
     REQUIRE(joinHumanReadable(cache.keys()) == "1, 3, 4, 2");
 }
 
-TEST_CASE("StrongLRUCache.try_emplace", "")
+TEST_CASE("strong_lru_cache.try_emplace", "")
 {
-    auto cache = StrongLRUCache<int, int>(StrongHashtableSize { 4 }, LRUCapacity { 2 });
+    auto cache = strong_lru_cache<int, int>(strong_hashtable_size { 4 }, lru_capacity { 2 });
 
     auto rv = cache.try_emplace(2, [](auto) { return 4; });
     CHECK(rv);
@@ -145,9 +145,9 @@ TEST_CASE("StrongLRUCache.try_emplace", "")
     CHECK(cache.at(3) == 6);
 }
 
-TEST_CASE("StrongLRUCache.try_get", "")
+TEST_CASE("strong_lru_cache.try_get", "")
 {
-    auto cache = StrongLRUCache<int, string>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
+    auto cache = strong_lru_cache<int, string>(strong_hashtable_size { 8 }, lru_capacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = std::to_string(i);
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
@@ -175,9 +175,9 @@ TEST_CASE("StrongLRUCache.try_get", "")
     REQUIRE(joinHumanReadable(cache.keys()) == "1, 3, 4, 2");
 }
 
-TEST_CASE("StrongLRUCache.get_or_emplace", "[lrucache]")
+TEST_CASE("strong_lru_cache.get_or_emplace", "[lrucache]")
 {
-    auto cache = StrongLRUCache<int, int>(StrongHashtableSize { 4 }, LRUCapacity { 2 });
+    auto cache = strong_lru_cache<int, int>(strong_hashtable_size { 4 }, lru_capacity { 2 });
 
     int& a = cache.get_or_emplace(2, [](auto) { return 4; });
     CHECK(a == 4);
@@ -211,9 +211,9 @@ TEST_CASE("StrongLRUCache.get_or_emplace", "[lrucache]")
     CHECK(cache.size() == 2);
 }
 
-TEST_CASE("StrongLRUCache.remove", "")
+TEST_CASE("strong_lru_cache.remove", "")
 {
-    auto cache = StrongLRUCache<int, string>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
+    auto cache = strong_lru_cache<int, string>(strong_hashtable_size { 8 }, lru_capacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = std::to_string(i);
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
@@ -236,21 +236,22 @@ TEST_CASE("StrongLRUCache.remove", "")
 }
 
 // clang-format off
-struct CollidingHasher
+struct colliding_hasher
 {
-    StrongHash operator()(int v) noexcept
+    strong_hash operator()(int v) noexcept
     {
         // Since the hashtable lookup only looks at the
         // least significant 32 bit, this will always cause
         // a hash-table entry collision.
-        return StrongHash { 0, 0, static_cast<uint32_t>(v), 0 };
+        return strong_hash { 0, 0, static_cast<uint32_t>(v), 0 };
     }
 };
 // clang-format on
 
-TEST_CASE("StrongLRUCache.insert_with_cache_collision", "")
+TEST_CASE("strong_lru_cache.insert_with_cache_collision", "")
 {
-    auto cache = StrongLRUCache<int, int, CollidingHasher>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
+    auto cache =
+        strong_lru_cache<int, int, colliding_hasher>(strong_hashtable_size { 8 }, lru_capacity { 4 });
 
     cache[1] = 1;
     REQUIRE(joinHumanReadable(cache.keys()) == "1");
@@ -265,9 +266,10 @@ TEST_CASE("StrongLRUCache.insert_with_cache_collision", "")
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");
 }
 
-TEST_CASE("StrongLRUCache.remove_with_hashTable_lookup_collision", "")
+TEST_CASE("strong_lru_cache.remove_with_hashTable_lookup_collision", "")
 {
-    auto cache = StrongLRUCache<int, int, CollidingHasher>(StrongHashtableSize { 8 }, LRUCapacity { 4 });
+    auto cache =
+        strong_lru_cache<int, int, colliding_hasher>(strong_hashtable_size { 8 }, lru_capacity { 4 });
     for (int i = 1; i <= 4; ++i)
         cache[i] = 2 * i;
     REQUIRE(joinHumanReadable(cache.keys()) == "4, 3, 2, 1");

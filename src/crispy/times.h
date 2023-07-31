@@ -24,7 +24,7 @@ namespace crispy
 namespace detail
 {
     template <typename I, typename T>
-    struct TimesIterator
+    struct times_iterator
     {
         T start;
         I count;
@@ -34,47 +34,47 @@ namespace detail
         constexpr T operator*() noexcept { return current; }
         constexpr T const& operator*() const noexcept { return current; }
 
-        constexpr TimesIterator<I, T>& operator++() noexcept
+        constexpr times_iterator<I, T>& operator++() noexcept
         {
             current += step;
             --count;
             return *this;
         }
-        constexpr TimesIterator<I, T>& operator++(int) noexcept { return ++*this; }
+        constexpr times_iterator<I, T>& operator++(int) noexcept { return ++*this; }
 
-        constexpr TimesIterator<I, T>& operator--() noexcept
+        constexpr times_iterator<I, T>& operator--() noexcept
         {
             current -= step;
             ++count;
             return *this;
         }
-        constexpr TimesIterator<I, T>& operator--(int) noexcept { return ++*this; }
+        constexpr times_iterator<I, T>& operator--(int) noexcept { return ++*this; }
 
-        constexpr bool operator==(TimesIterator<I, T> const& other) const noexcept
+        constexpr bool operator==(times_iterator<I, T> const& other) const noexcept
         {
             return count == other.count;
         }
-        constexpr bool operator!=(TimesIterator<I, T> const& other) const noexcept
+        constexpr bool operator!=(times_iterator<I, T> const& other) const noexcept
         {
             return count != other.count;
         }
     };
 
     template <typename I, typename T>
-    struct Times
+    struct times
     {
         T start;
         I count;
         T step;
 
-        using iterator = TimesIterator<I, T>;
+        using iterator = times_iterator<I, T>;
 
         [[nodiscard]] constexpr std::size_t size() const noexcept { return count; }
         constexpr T operator[](size_t i) const noexcept { return start + i * step; }
 
         [[nodiscard]] constexpr iterator begin() const noexcept
         {
-            return TimesIterator<I, T> { start, count, step, start };
+            return times_iterator<I, T> { start, count, step, start };
         }
 
         [[nodiscard]] constexpr iterator end() const noexcept
@@ -84,42 +84,42 @@ namespace detail
     };
 
     template <typename I, typename T>
-    Times(T, I, T) -> Times<I, T>;
+    times(T, I, T) -> times<I, T>;
 
     template <typename I, typename T>
-    constexpr auto begin(Times<I, T> const& times) noexcept
+    constexpr auto begin(times<I, T> const& times) noexcept
     {
         return times.begin();
     }
     template <typename I, typename T>
-    constexpr auto end(Times<I, T> const& times) noexcept
+    constexpr auto end(times<I, T> const& times) noexcept
     {
         return times.end();
     }
 
     template <typename I, typename T>
-    constexpr auto begin(Times<I, T>& times) noexcept
+    constexpr auto begin(times<I, T>& times) noexcept
     {
         return times.begin();
     }
     template <typename I, typename T>
-    constexpr auto end(Times<I, T>& times) noexcept
+    constexpr auto end(times<I, T>& times) noexcept
     {
         return times.end();
     }
 
     template <typename I, typename T1, typename T2>
-    struct Times2DIterator
+    struct times_2d_iterator
     {
-        using Outer = Times<I, T1>;
-        using Inner = Times<I, T2>;
+        using outer = times<I, T1>;
+        using inner = times<I, T2>;
 
-        Outer first;
-        Inner second;
-        typename Outer::iterator outerIt;
-        typename Inner::iterator innerIt;
+        outer first;
+        inner second;
+        typename outer::iterator outerIt;
+        typename inner::iterator innerIt;
 
-        constexpr Times2DIterator(Outer outer, Inner inner, bool init) noexcept:
+        constexpr times_2d_iterator(outer outer, inner inner, bool init) noexcept:
             first { std::move(outer) },
             second { std::move(inner) },
             outerIt { init ? std::begin(first) : std::end(first) },
@@ -130,7 +130,7 @@ namespace detail
         using value_type = std::tuple<T1, T2>;
         constexpr value_type operator*() const noexcept { return { *outerIt, *innerIt }; }
 
-        constexpr Times2DIterator<I, T1, T2>& operator++() noexcept
+        constexpr times_2d_iterator<I, T1, T2>& operator++() noexcept
         {
             ++innerIt;
             if (innerIt == std::end(second))
@@ -142,27 +142,27 @@ namespace detail
             return *this;
         }
 
-        constexpr Times2DIterator<I, T1, T2>& operator++(int) noexcept { return *++this; }
+        constexpr times_2d_iterator<I, T1, T2>& operator++(int) noexcept { return *++this; }
 
-        constexpr bool operator==(Times2DIterator<I, T1, T2> const& other) const noexcept
+        constexpr bool operator==(times_2d_iterator<I, T1, T2> const& other) const noexcept
         {
             return innerIt == other.innerIt;
             // return outerIt == other.outerIt && innerIt == other.innerIt;
         }
 
-        constexpr bool operator!=(Times2DIterator<I, T1, T2> const& other) const noexcept
+        constexpr bool operator!=(times_2d_iterator<I, T1, T2> const& other) const noexcept
         {
             return !(*this == other);
         }
     };
 
     template <typename I, typename T1, typename T2>
-    struct Times2D
+    struct times_2d
     {
-        Times<I, T1> first;
-        Times<I, T2> second;
+        times<I, T1> first;
+        times<I, T2> second;
 
-        using iterator = Times2DIterator<I, T1, T2>;
+        using iterator = times_2d_iterator<I, T1, T2>;
 
         [[nodiscard]] constexpr std::size_t size() const noexcept { return first.size() * second.size(); }
         constexpr auto operator[](std::size_t i) const noexcept { return second[i % second.size()]; }
@@ -172,40 +172,40 @@ namespace detail
     };
 
     template <typename I, typename T1, typename T2>
-    constexpr auto begin(detail::Times2D<I, T1, T2> const& times) noexcept
+    constexpr auto begin(detail::times_2d<I, T1, T2> const& times) noexcept
     {
         return times.begin();
     }
 
     template <typename I, typename T1, typename T2>
-    constexpr auto end(detail::Times2D<I, T1, T2> const& times) noexcept
+    constexpr auto end(detail::times_2d<I, T1, T2> const& times) noexcept
     {
         return times.end();
     }
 
     template <typename I, typename T1, typename T2>
-    constexpr auto begin(detail::Times2D<I, T1, T2>& times) noexcept
+    constexpr auto begin(detail::times_2d<I, T1, T2>& times) noexcept
     {
         return times.begin();
     }
 
     template <typename I, typename T1, typename T2>
-    constexpr auto end(detail::Times2D<I, T1, T2>& times) noexcept
+    constexpr auto end(detail::times_2d<I, T1, T2>& times) noexcept
     {
         return times.end();
     }
 
     template <typename I, typename T1, typename T2>
-    constexpr inline detail::Times2D<I, T1, T2> operator*(detail::Times<I, T1> a, detail::Times<I, T2> b)
+    constexpr inline detail::times_2d<I, T1, T2> operator*(detail::times<I, T1> a, detail::times<I, T2> b)
     {
-        return detail::Times2D<I, T1, T2> { std::move(a), std::move(b) };
+        return detail::times_2d<I, T1, T2> { std::move(a), std::move(b) };
     }
 
     template <typename I,
               typename T,
               typename Callable,
               typename std::enable_if_t<std::is_invocable_r_v<void, Callable, T>, int> = 0>
-    constexpr void operator|(detail::Times<I, T> times, Callable callable)
+    constexpr void operator|(detail::times<I, T> times, Callable callable)
     {
         for (auto&& i: times)
             callable(i);
@@ -215,7 +215,7 @@ namespace detail
               typename T,
               typename Callable,
               typename std::enable_if_t<std::is_invocable_r_v<void, Callable>, int> = 0>
-    constexpr void operator|(detail::Times<I, T> times, Callable callable)
+    constexpr void operator|(detail::times<I, T> times, Callable callable)
     {
         for ([[maybe_unused]] auto&& i: times)
             callable();
@@ -228,7 +228,7 @@ namespace detail
               typename T2,
               typename Callable,
               typename std::enable_if_t<std::is_invocable_r_v<void, Callable, T1, T2>, int> = 0>
-    constexpr void operator|(detail::Times2D<I, T1, T2> times, Callable callable)
+    constexpr void operator|(detail::times_2d<I, T1, T2> times, Callable callable)
     {
         for (auto&& [i, j]: times)
             callable(i, j);
@@ -239,21 +239,21 @@ namespace detail
 // TODO: give random access hints to STL algorithms
 
 template <typename I, typename T>
-constexpr inline detail::Times<I, T> times(T start, I count, T step = T(1))
+constexpr inline detail::times<I, T> times(T start, I count, T step = T(1))
 {
-    return detail::Times<I, T> { start, count, step };
+    return detail::times<I, T> { start, count, step };
 }
 
 template <typename T>
-constexpr inline detail::Times<T, T> times(T count)
+constexpr inline detail::times<T, T> times(T count)
 {
-    return detail::Times<T, T> { T(0), count, T(1) };
+    return detail::times<T, T> { T(0), count, T(1) };
 }
 
 template <typename T>
-constexpr inline detail::Times2D<T, T, T> times2D(T a, T b)
+constexpr inline detail::times_2d<T, T, T> times2D(T a, T b)
 {
-    return detail::Times2D<T, T, T> { std::move(a), std::move(b) };
+    return detail::times_2d<T, T, T> { std::move(a), std::move(b) };
 }
 
 } // namespace crispy

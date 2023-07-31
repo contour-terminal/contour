@@ -30,7 +30,7 @@ class Viewport
 {
   public:
 #if defined(CONTOUR_LOG_VIEWPORT)
-    static auto inline const ViewportLog = logstore::Category("vt.viewport", "Logs viewport details.");
+    static auto inline const ViewportLog = logstore::category("vt.viewport", "Logs viewport details.");
 #endif
 
     using ModifyEvent = std::function<void()>;

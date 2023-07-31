@@ -30,92 +30,90 @@
 namespace crispy::cli
 {
 
-using Value = std::variant<int, unsigned int, std::string, double, bool>;
-using Name = std::string;
+using value = std::variant<int, unsigned int, std::string, double, bool>;
+using name = std::string;
 
-enum class Presence
+enum class presence
 {
     Optional,
     Required,
 };
 
-struct OptionName
+struct option_name
 {
     char shortName {};
     std::string_view longName {};
 
-    OptionName(char shortName, std::string_view longName): shortName { shortName }, longName { longName } {}
+    option_name(char shortName, std::string_view longName): shortName { shortName }, longName { longName } {}
 
-    OptionName(std::string_view longName): longName { longName } {}
-    OptionName(char const* longName): longName { longName } {}
+    option_name(std::string_view longName): longName { longName } {}
+    option_name(char const* longName): longName { longName } {}
 
-    OptionName(OptionName const&) = default;
-    OptionName(OptionName&&) = default;
-    OptionName& operator=(OptionName const&) = default;
-    OptionName& operator=(OptionName&&) = default;
-    ~OptionName() = default;
+    option_name(option_name const&) = default;
+    option_name(option_name&&) = default;
+    option_name& operator=(option_name const&) = default;
+    option_name& operator=(option_name&&) = default;
+    ~option_name() = default;
 };
 
-struct Deprecated
+struct deprecated
 {
     std::string_view message;
 };
 
-struct Option
+struct option
 {
-    OptionName name;
-    Value value;
+    option_name name;
+    value v;
     std::string_view helpText = {};
     std::string_view placeholder = {}; // TODO: move right below `Value value{};`
-    Presence presence = Presence::Optional;
-    std::optional<Deprecated> deprecated = std::nullopt;
+    cli::presence presence = presence::Optional;
+    std::optional<cli::deprecated> deprecated = std::nullopt;
 };
 
-using OptionList = std::vector<Option>;
+using option_list = std::vector<option>;
 
-enum class CommandSelect
+enum class command_select
 {
     Explicit,
     Implicit, // only one command at a scope level can be implicit
 };
 
-struct Verbatim
+struct verbatim
 {
     std::string placeholder;
     std::string helpText;
 };
 
-struct Command;
-using CommandList = std::vector<Command>;
-
-struct Command
+struct command
 {
+    using command_list = std::vector<command>;
     std::string_view name;
     std::string_view helpText = {};
-    OptionList options = {};
-    // std::vector<Command> children = {};
-    CommandList children = {};
-    CommandSelect select = CommandSelect::Explicit;
-    std::optional<Verbatim> verbatim = {}; // Unly allowed if no sub commands were specified.
+    option_list options = {};
+    // std::vector<command> children = {};
+    command_list children = {};
+    command_select select = command_select::Explicit;
+    std::optional<cli::verbatim> verbatim = {}; // Unly allowed if no sub commands were specified.
 };
 
-using CommandList = std::vector<Command>;
+using command_list = command::command_list;
 
-enum class OptionStyle
+enum class option_style
 {
     Natural,
     Posix,
 };
 
-class ParserError: public std::runtime_error
+class parser_error: public std::runtime_error
 {
   public:
-    explicit ParserError(std::string const& msg): std::runtime_error(msg) {}
+    explicit parser_error(std::string const& msg): std::runtime_error(msg) {}
 };
 
-struct FlagStore
+struct flag_store
 {
-    std::map<Name, Value> values;
+    std::map<name, value> values;
     std::vector<std::string_view> verbatim;
 
     [[nodiscard]] bool boolean(std::string const& key) const { return std::get<bool>(values.at(key)); }
@@ -137,16 +135,16 @@ struct FlagStore
 /*
  * Validates @p command to be well-formed and throws an exception otherwise.
  */
-// TODO: void validate(Command const& command);
+// TODO: void validate(command const& command);
 
-using StringViewList = std::vector<std::string_view>;
+using string_view_list = std::vector<std::string_view>;
 
 /**
  * Parses the command line arguments with respect to @p command as passed via @p args.
  *
  * @returns a @c FlagStore containing the parsed result or std::nullopt on failure.
  */
-std::optional<FlagStore> parse(Command const& command, StringViewList const& args);
+std::optional<flag_store> parse(command const& command, string_view_list const& args);
 
 /**
  * Parses the command line arguments with respect to @p command as passed via (argc, argv) suitable
@@ -154,9 +152,9 @@ std::optional<FlagStore> parse(Command const& command, StringViewList const& arg
  *
  * @returns a @c FlagStore containing the parsed result or std::nullopt on failure.
  */
-std::optional<FlagStore> parse(Command const& command, int argc, char const* const* argv);
+std::optional<flag_store> parse(command const& command, int argc, char const* const* argv);
 
-enum class HelpElement
+enum class help_element
 {
     Header,
     Braces,
@@ -169,14 +167,14 @@ enum class HelpElement
     HelpText
 };
 
-struct HelpStyle // TODO: maybe call HelpDisplayStyle?
+struct help_display_style
 {
-    using ColorMap = std::map<HelpElement, std::string>;
-    static ColorMap defaultColors();
+    using color_map = std::map<help_element, std::string>;
+    static color_map defaultColors();
 
-    std::optional<ColorMap> colors = defaultColors();
+    std::optional<color_map> colors = defaultColors();
     bool hyperlink = true; // whether or not to enable OSC 8 (Hyperlink).
-    OptionStyle optionStyle = OptionStyle::Natural;
+    option_style optionStyle = option_style::Natural;
 };
 
 /**
@@ -187,8 +185,8 @@ struct HelpStyle // TODO: maybe call HelpDisplayStyle?
  * @param margin       Number of characters to write at most per line.
  * @param cmdPrefix    Some text to prepend in front of each generated line in the output.
  */
-std::string usageText(Command const& command,
-                      HelpStyle const& style,
+std::string usageText(command const& command,
+                      help_display_style const& style,
                       unsigned margin,
                       std::string const& cmdPrefix = {});
 
@@ -199,27 +197,27 @@ std::string usageText(Command const& command,
  * @param style        Determines how to format and colorize the output string.
  * @param margin       Number of characters to write at most per line.
  */
-std::string helpText(Command const& command, HelpStyle const& style, unsigned margin);
+std::string helpText(command const& command, help_display_style const& style, unsigned margin);
 
-// Throw if Command is not well defined.
-void validate(Command const& command);
+// Throw if command is not well defined.
+void validate(command const& command);
 
 namespace about
 {
-    struct Project
+    struct project
     {
         std::string_view title;
         std::string_view license;
         std::string_view url;
     };
 
-    inline std::vector<Project>& store()
+    inline std::vector<project>& store()
     {
-        static std::vector<Project> instance;
+        static std::vector<project> instance;
         return instance;
     }
 
-    inline void registerProjects(Project project)
+    inline void registerProjects(project project)
     {
         store().emplace_back(project);
         using crispy::toLower;
@@ -229,7 +227,7 @@ namespace about
     }
 
     template <typename... Args>
-    void registerProjects(Project&& project0, Args&&... more)
+    void registerProjects(project&& project0, Args&&... more)
     {
         store().emplace_back(project0);
         registerProjects(std::forward<Args>(more)...);
@@ -240,10 +238,10 @@ namespace about
 
 // {{{ type formatters
 template <>
-struct fmt::formatter<crispy::cli::Value>
+struct fmt::formatter<crispy::cli::value>
 {
     static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(crispy::cli::Value const& value, format_context& ctx) -> format_context::iterator
+    static auto format(crispy::cli::value const& value, format_context& ctx) -> format_context::iterator
     {
         if (std::holds_alternative<bool>(value))
             return fmt::format_to(ctx.out(), "{}", std::get<bool>(value));

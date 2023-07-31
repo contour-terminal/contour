@@ -59,14 +59,14 @@ namespace detail
     }
 } // namespace detail
 
-struct EncoderState
+struct encoder_state
 {
     uint8_t modulo = 0;
     uint8_t pending[3] {};
 };
 
-template <typename Alphabet, typename Sink>
-constexpr void encode(uint8_t ch, Alphabet const& alphabet, EncoderState& state, Sink&& sink)
+template <typename Alphabet, typename sink>
+constexpr void encode(uint8_t ch, Alphabet const& alphabet, encoder_state& state, sink&& s)
 {
     state.pending[state.modulo] = ch;
     if (++state.modulo != 3)
@@ -74,14 +74,14 @@ constexpr void encode(uint8_t ch, Alphabet const& alphabet, EncoderState& state,
 
     state.modulo = 0;
     auto const* input = state.pending;
-    sink(alphabet[(input[0] >> 2) & 0x3F],
-         alphabet[static_cast<uint8_t>(((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4))],
-         alphabet[static_cast<uint8_t>(((input[1] & 0x0F) << 2) | ((uint8_t) (input[2] & 0xC0) >> 6))],
-         alphabet[input[2] & 0x3F]);
+    s(alphabet[(input[0] >> 2) & 0x3F],
+      alphabet[static_cast<uint8_t>(((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4))],
+      alphabet[static_cast<uint8_t>(((input[1] & 0x0F) << 2) | ((uint8_t) (input[2] & 0xC0) >> 6))],
+      alphabet[input[2] & 0x3F]);
 }
 
-template <typename Alphabet, typename Sink>
-constexpr void finish(Alphabet const& alphabet, EncoderState& state, Sink&& sink)
+template <typename Alphabet, typename sink>
+constexpr void finish(Alphabet const& alphabet, encoder_state& state, sink&& s)
 {
     if (state.modulo == 0)
         return;
@@ -91,17 +91,16 @@ constexpr void finish(Alphabet const& alphabet, EncoderState& state, Sink&& sink
     switch (state.modulo)
     {
         case 2: {
-            sink(
-                alphabet[(input[0] >> 2) & 0x3F],
-                alphabet[static_cast<uint8_t>(((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4))],
-                alphabet[static_cast<uint8_t>(((input[1] & 0x0F) << 2))],
-                '=');
+            s(alphabet[(input[0] >> 2) & 0x3F],
+              alphabet[static_cast<uint8_t>(((input[0] & 0x03) << 4) | ((uint8_t) (input[1] & 0xF0) >> 4))],
+              alphabet[static_cast<uint8_t>(((input[1] & 0x0F) << 2))],
+              '=');
             state.modulo = 0;
         }
         break;
         case 1: {
             // clang-format off
-        sink(alphabet[(input[0] >> 2) & 0x3F],
+        s(alphabet[(input[0] >> 2) & 0x3F],
               alphabet[static_cast<size_t>(input[0] & 0x03) << 4],
               '=',
               '=');
@@ -113,16 +112,16 @@ constexpr void finish(Alphabet const& alphabet, EncoderState& state, Sink&& sink
     }
 }
 
-template <typename Sink>
-constexpr void encode(uint8_t ch, EncoderState& state, Sink&& sink)
+template <typename sink>
+constexpr void encode(uint8_t ch, encoder_state& state, sink&& s)
 {
-    return encode(ch, detail::Base64Alphabet, state, std::forward<Sink>(sink));
+    return encode(ch, detail::Base64Alphabet, state, std::forward<sink>(s));
 }
 
-template <typename Sink>
-constexpr void finish(EncoderState& state, Sink&& sink)
+template <typename sink>
+constexpr void finish(encoder_state& state, sink&& s)
 {
-    finish(detail::indexmap, state, std::forward<Sink>(sink));
+    finish(detail::indexmap, state, std::forward<sink>(s));
 }
 
 template <typename Iterator, typename Alphabet>
@@ -138,7 +137,7 @@ std::string encode(Iterator begin, Iterator end, Alphabet alphabet)
         output += d;
     };
 
-    auto state = EncoderState {};
+    auto state = encoder_state {};
     for (auto i = begin; i != end; ++i)
         encode(static_cast<uint8_t>(*i), alphabet, state, flusher);
     finish(alphabet, state, flusher);

@@ -51,7 +51,7 @@ class DecorationRenderer: public Renderable
     void renderLine(RenderLine const& line);
 
     void renderDecoration(Decorator decoration,
-                          crispy::Point pos,
+                          crispy::point pos,
                           ColumnCount columnCount,
                           RGBColor const& color);
 

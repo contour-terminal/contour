@@ -24,6 +24,8 @@
 #include <numeric>
 #include <optional>
 
+#include "logstore.h"
+
 #if !defined(_WIN32)
     #include <sys/ioctl.h>
 
@@ -61,11 +63,11 @@ std::string operator*(std::string_view a, size_t n)
     return s;
 }
 
-CLI::HelpStyle helpStyle()
+CLI::help_display_style helpStyle()
 {
-    auto style = CLI::HelpStyle {};
+    auto style = CLI::help_display_style {};
 
-    style.optionStyle = CLI::OptionStyle::Natural;
+    style.optionStyle = CLI::option_style::Natural;
 
 #if !defined(_WIN32)
     if (isatty(STDOUT_FILENO) == 0)
@@ -111,9 +113,9 @@ FileSystem::path xdgStateHome()
 namespace crispy
 {
 
-App* App::_instance = nullptr;
+app* app::_instance = nullptr;
 
-App::App(std::string appName, std::string appTitle, std::string appVersion, std::string appLicense):
+app::app(std::string appName, std::string appTitle, std::string appVersion, std::string appLicense):
     _appName { std::move(appName) },
     _appTitle { std::move(appTitle) },
     _appVersion { std::move(appVersion) },
@@ -128,22 +130,22 @@ App::App(std::string appName, std::string appTitle, std::string appVersion, std:
 
     _instance = this;
 
-    link(_appName + ".help", bind(&App::helpAction, this));
-    link(_appName + ".version", bind(&App::versionAction, this));
-    link(_appName + ".license", bind(&App::licenseAction, this));
+    link(_appName + ".help", bind(&app::helpAction, this));
+    link(_appName + ".version", bind(&app::versionAction, this));
+    link(_appName + ".license", bind(&app::licenseAction, this));
 }
 
-App::~App()
+app::~app()
 {
     _instance = nullptr;
 }
 
-void App::link(std::string command, std::function<int()> handler)
+void app::link(std::string command, std::function<int()> handler)
 {
     _handlers[std::move(command)] = std::move(handler);
 }
 
-void App::listDebugTags()
+void app::listDebugTags()
 {
     auto categories = logstore::get();
     sort(begin(categories), end(categories), [](auto const& a, auto const& b) {
@@ -167,13 +169,13 @@ void App::listDebugTags()
     }
 }
 
-int App::helpAction()
+int app::helpAction()
 {
     std::cout << CLI::helpText(_syntax.value(), helpStyle(), screenWidth());
     return EXIT_SUCCESS;
 }
 
-int App::licenseAction()
+int app::licenseAction()
 {
     auto const& store = crispy::cli::about::store();
     auto const titleWidth = std::accumulate(
@@ -207,14 +209,14 @@ int App::licenseAction()
     return EXIT_SUCCESS;
 }
 
-int App::versionAction()
+int app::versionAction()
 {
     std::cout << fmt::format("{} {}\n\n", _appTitle, _appVersion);
     return EXIT_SUCCESS;
 }
 
 // customize debuglog transform to shorten the file_name output a bit
-int App::run(int argc, char const* argv[])
+int app::run(int argc, char const* argv[])
 {
     try
     {
@@ -222,7 +224,7 @@ int App::run(int argc, char const* argv[])
 
         _syntax = parameterDefinition();
 
-        optional<CLI::FlagStore> flagsOpt = CLI::parse(_syntax.value(), argc, argv);
+        optional<CLI::flag_store> flagsOpt = CLI::parse(_syntax.value(), argc, argv);
         if (!flagsOpt.has_value())
         {
             std::cerr << "Failed to parse command line parameters.\n";
@@ -248,9 +250,9 @@ int App::run(int argc, char const* argv[])
     }
 }
 
-void App::customizeLogStoreOutput()
+void app::customizeLogStoreOutput()
 {
-    logstore::Sink::console().set_enabled(true);
+    logstore::sink::console().set_enabled(true);
 
     // A curated list of colors.
     static const bool colorized =
@@ -262,13 +264,13 @@ void App::customizeLogStoreOutput()
     static constexpr auto colors = std::array<int, 23> {
         2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 150, 155, 159, 165, 170, 175, 180, 185, 190, 195, 200,
     };
-    logstore::set_formatter([](logstore::MessageBuilder const& msg) -> std::string {
+    logstore::set_formatter([](logstore::message_builder const& msg) -> std::string {
         auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string> {
             if (!colorized)
                 return { "", "", "" };
             const auto* const tagStart = "\033[1m";
             auto const colorIndex =
-                colors.at(std::hash<string_view> {}(msg.category().name()) % colors.size());
+                colors.at(std::hash<string_view> {}(msg.get_category().name()) % colors.size());
             auto const msgStart = fmt::format("\033[38;5;{}m", colorIndex);
             auto const resetSGR = fmt::format("\033[m");
             return { tagStart, msgStart, resetSGR };
@@ -300,7 +302,7 @@ void App::customizeLogStoreOutput()
                 result += fmt::format("[{:%Y-%m-%d %H:%M:%S}.{:06}] [{}]",
                                       chrono::system_clock::now(),
                                       micros,
-                                      msg.category().name());
+                                      msg.get_category().name());
                 result += sgrReset;
                 result += ' ';
                 // clang-format on
@@ -315,7 +317,7 @@ void App::customizeLogStoreOutput()
         return result;
     });
 
-    logstore::ErrorLog.set_formatter([](logstore::MessageBuilder const& msg) -> std::string {
+    logstore::ErrorLog.set_formatter([](logstore::message_builder const& msg) -> std::string {
         auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string> {
             if (!colorized)
                 return { "", "", "" };

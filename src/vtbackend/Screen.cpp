@@ -88,10 +88,10 @@ namespace terminal
 
 auto constexpr inline TabWidth = ColumnCount(8);
 
-auto const inline VTCaptureBufferLog = logstore::Category("vt.ext.capturebuffer",
+auto const inline VTCaptureBufferLog = logstore::category("vt.ext.capturebuffer",
                                                           "Capture Buffer debug logging.",
-                                                          logstore::Category::State::Disabled,
-                                                          logstore::Category::Visibility::Hidden);
+                                                          logstore::category::state::Disabled,
+                                                          logstore::category::visibility::Hidden);
 
 namespace // {{{ helper
 {

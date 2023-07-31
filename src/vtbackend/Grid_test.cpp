@@ -21,6 +21,8 @@
 
 #include <iostream>
 
+#include "crispy/BufferObject.h"
+
 using namespace terminal;
 using namespace std::string_literals;
 using namespace std::string_view_literals;
@@ -892,7 +894,7 @@ TEST_CASE("Grid resize", "[grid]")
     auto width = ColumnCount(6);
     auto grid = Grid<Cell>(PageSize { LineCount(2), width }, true, LineCount(0));
     auto text = "abcd"sv;
-    auto pool = crispy::BufferObjectPool<char>(32);
+    auto pool = crispy::buffer_object_pool<char>(32);
     auto bufferObject = pool.allocateBufferObject();
     bufferObject->writeAtEnd(text);
     auto const bufferFragment = bufferObject->ref(0, 4);

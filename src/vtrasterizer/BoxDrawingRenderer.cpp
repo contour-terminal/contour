@@ -38,7 +38,7 @@ using std::sort;
 using std::string_view;
 using std::tuple;
 
-using crispy::Point;
+using crispy::point;
 using ranges::views::filter;
 using ranges::views::iota;
 using ranges::views::zip;
@@ -48,10 +48,10 @@ namespace terminal::rasterizer
 
 namespace
 {
-    auto const inline BoxDrawingLog = logstore::Category("renderer.boxdrawing",
+    auto const inline BoxDrawingLog = logstore::category("renderer.boxdrawing",
                                                          "Logs box drawing debugging.",
-                                                         logstore::Category::State::Disabled,
-                                                         logstore::Category::Visibility::Hidden);
+                                                         logstore::category::state::Disabled,
+                                                         logstore::category::visibility::Hidden);
 
     // TODO: Do not depend on this function but rather construct the pixmaps using the correct Y-coordinates.
     atlas::Buffer invertY(atlas::Buffer const& image, ImageSize cellSize)
@@ -152,7 +152,7 @@ namespace detail
             // inner circle
             drawEllipseArc(putpixel,
                            imageSize,
-                           crispy::Point { // radius
+                           crispy::point { // radius
                                            unbox<int>(imageSize.width) / 2 - int(thickness) / 2,
                                            unbox<int>(imageSize.height) / 2 - int(thickness) / 2 },
                            arc);
@@ -160,7 +160,7 @@ namespace detail
             // outer circle
             drawEllipseArc(putpixel,
                            imageSize,
-                           crispy::Point { // radius
+                           crispy::point { // radius
                                            unbox<int>(imageSize.width) / 2 + int(thickness) / 2 - 1,
                                            unbox<int>(imageSize.height) / 2 + int(thickness) / 2 - 1 },
                            arc);
@@ -621,7 +621,7 @@ namespace detail
         auto getTriangleProps(ImageSize size)
         {
             auto const c =
-                Point { Direction == Dir::Left ? unbox<int>(size.width) / DivisorX
+                point { Direction == Dir::Left ? unbox<int>(size.width) / DivisorX
                                                : unbox<int>(size.width) - unbox<int>(size.width) / DivisorX,
                         unbox<int>(size.height) / 2 };
             auto const w = unbox<int>(size.width) - 1;
@@ -671,7 +671,7 @@ namespace detail
         template <int P>
         auto triChecker(ImageSize size)
         {
-            auto const c = Point { unbox<int>(size.width) / 2, unbox<int>(size.height) / 2 };
+            auto const c = point { unbox<int>(size.width) / 2, unbox<int>(size.height) / 2 };
             auto const w = unbox<int>(size.width) - 1;
 
             auto const f = linearEq({ 0, 0 }, c);
@@ -697,7 +697,7 @@ namespace detail
             auto constexpr set = Inv == Inverted::No ? 255 : 0;
             auto constexpr unset = 255 - set;
 
-            auto const c = Point { unbox<int>(size.width) / 2, unbox<int>(size.height) / 2 };
+            auto const c = point { unbox<int>(size.width) / 2, unbox<int>(size.height) / 2 };
             auto const w = unbox<int>(size.width) - 1;
 
             auto const f = linearEq({ 0, 0 }, c);
@@ -1011,7 +1011,7 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint, atlas::TileLocation 
 Renderable::AtlasTileAttributes const* BoxDrawingRenderer::getOrCreateCachedTileAttributes(char32_t codepoint)
 {
     return textureAtlas().get_or_try_emplace(
-        crispy::StrongHash { 31, 13, 8, static_cast<uint32_t>(codepoint) },
+        crispy::strong_hash { 31, 13, 8, static_cast<uint32_t>(codepoint) },
         [this, codepoint](atlas::TileLocation tileLocation) -> optional<TextureAtlas::TileCreateData> {
             return createTileData(codepoint, tileLocation);
         });

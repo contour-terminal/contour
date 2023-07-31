@@ -11,13 +11,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include "BufferObject.h"
+
 #include <crispy/BufferObject.h>
 
 namespace crispy
 {
 
-template class BufferObject<char>;
+template class buffer_object<char>;
 template class BufferFragment<char>;
-template class BufferObjectPool<char>;
+template class buffer_object_pool<char>;
 
 } // namespace crispy

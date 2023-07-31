@@ -31,8 +31,8 @@ using std::vector;
 namespace terminal
 {
 
-auto const inline GridLog = logstore::Category(
-    "vt.grid", "Grid related", logstore::Category::State::Disabled, logstore::Category::Visibility::Hidden);
+auto const inline GridLog = logstore::category(
+    "vt.grid", "Grid related", logstore::category::state::Disabled, logstore::category::visibility::Hidden);
 
 namespace detail
 {
@@ -967,20 +967,20 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
     CellLocation cursor = currentCursorPos;
 
     // grow/shrink columns
-    using crispy::Comparison;
+    using crispy::comparison;
     switch (crispy::strongCompare(newSize.columns, _pageSize.columns))
     {
-        case Comparison::Greater: cursor += growColumns(newSize.columns); break;
-        case Comparison::Less: cursor = shrinkColumns(newSize.columns, newSize.lines, cursor); break;
-        case Comparison::Equal: break;
+        case comparison::Greater: cursor += growColumns(newSize.columns); break;
+        case comparison::Less: cursor = shrinkColumns(newSize.columns, newSize.lines, cursor); break;
+        case comparison::Equal: break;
     }
 
     // grow/shrink lines
     switch (crispy::strongCompare(newSize.lines, _pageSize.lines))
     {
-        case Comparison::Greater: cursor += growLines(newSize.lines, cursor); break;
-        case Comparison::Less: cursor += shrinkLines(newSize.lines, cursor); break;
-        case Comparison::Equal: break;
+        case comparison::Greater: cursor += growLines(newSize.lines, cursor); break;
+        case comparison::Less: cursor += shrinkLines(newSize.lines, cursor); break;
+        case comparison::Equal: break;
     }
 
     Ensures(_pageSize == newSize);

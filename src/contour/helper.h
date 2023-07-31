@@ -43,10 +43,10 @@ namespace contour
 {
 
 auto inline const DisplayLog =
-    logstore::Category("gui.display", "Logs display driver details (e.g. OpenGL).");
+    logstore::category("gui.display", "Logs display driver details (e.g. OpenGL).");
 auto inline const InputLog =
-    logstore::Category("gui.input", "Logs input driver details (e.g. GUI input events).");
-auto inline const SessionLog = logstore::Category("gui.session", "VT terminal session logs");
+    logstore::category("gui.input", "Logs input driver details (e.g. GUI input events).");
+auto inline const SessionLog = logstore::category("gui.session", "VT terminal session logs");
 
 namespace detail
 {
@@ -171,8 +171,8 @@ terminal::rasterizer::PageMargin computeMargin(terminal::ImageSize _cellSize,
 terminal::rasterizer::FontDescriptions sanitizeFontDescription(terminal::rasterizer::FontDescriptions _fonts,
                                                                text::DPI _screenDPI);
 
-constexpr terminal::PageSize pageSizeForPixels(crispy::ImageSize viewSize,
-                                               crispy::ImageSize cellSize) noexcept
+constexpr terminal::PageSize pageSizeForPixels(crispy::image_size viewSize,
+                                               crispy::image_size cellSize) noexcept
 {
     return terminal::PageSize { boxed_cast<terminal::LineCount>((viewSize / cellSize).height),
                                 boxed_cast<terminal::ColumnCount>((viewSize / cellSize).width) };

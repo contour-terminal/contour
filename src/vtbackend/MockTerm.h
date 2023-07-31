@@ -106,7 +106,7 @@ inline MockTerm<PtyDevice>::MockTerm(PageSize pageSize,
     if (logFilterString)
     {
         logstore::configure(logFilterString);
-        crispy::App::customizeLogStoreOutput();
+        crispy::app::customizeLogStoreOutput();
     }
 }
 

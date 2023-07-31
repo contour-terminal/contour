@@ -232,14 +232,14 @@ struct Config
     // This value is rounted up to a value equal to the power of two.
     //
     // Default: 4096
-    crispy::StrongHashtableSize textureAtlasHashtableSlots = crispy::StrongHashtableSize { 4096 };
+    crispy::strong_hashtable_size textureAtlasHashtableSlots = crispy::strong_hashtable_size { 4096 };
 
     /// Number of tiles that must fit at lest into the texture atlas,
     /// excluding US-ASCII glyphs, cursor shapes and decorations.
     ///
     /// Value must be at least as large as grid cells available in the current view.
     /// This value is automatically adjusted if too small.
-    crispy::LRUCapacity textureAtlasTileCount = crispy::LRUCapacity { 4000 };
+    crispy::lru_capacity textureAtlasTileCount = crispy::lru_capacity { 4000 };
 
     // Configures the size of the PTY read buffer.
     // Changing this value may result in better or worse throughput performance.
@@ -288,7 +288,7 @@ struct Config
     InputMappings inputMappings;
 
     bool spawnNewProcess = false;
-    std::shared_ptr<logstore::Sink> loggingSink;
+    std::shared_ptr<logstore::sink> loggingSink;
 
     bool sixelScrolling = true;
     terminal::ImageSize maxImageSize = {}; // default to runtime system screen size.

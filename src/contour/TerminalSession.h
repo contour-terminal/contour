@@ -429,7 +429,7 @@ struct formatter<contour::GuardedRole>
     {
         switch (value)
         {
-            // clang-format off
+                // clang-format off
             case contour::GuardedRole::ChangeFont: return fmt::format_to(ctx.out(), "Change Font");
             case contour::GuardedRole::CaptureBuffer: return fmt::format_to(ctx.out(), "Capture Buffer");
             case contour::GuardedRole::ShowHostWritableStatusLine:  return fmt::format_to(ctx.out(), "show Host Writable Statusline");

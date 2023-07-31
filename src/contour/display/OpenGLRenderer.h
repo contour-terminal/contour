@@ -23,6 +23,9 @@
 
 #include <QtGui/QMatrix4x4>
 #include <QtGui/QOpenGLExtraFunctions>
+
+#include "crispy/ImageSize.h"
+#include "crispy/StrongHash.h"
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     #include <QtOpenGL/QOpenGLShaderProgram>
     #include <QtOpenGL/QOpenGLTexture>
@@ -68,9 +71,9 @@ class OpenGLRenderer final:
      */
     OpenGLRenderer(ShaderConfig textShaderConfig,
                    ShaderConfig rectShaderConfig,
-                   crispy::ImageSize viewSize,
-                   crispy::ImageSize renderSize,
-                   crispy::ImageSize textureTileSize,
+                   crispy::image_size viewSize,
+                   crispy::image_size renderSize,
+                   crispy::image_size textureTileSize,
                    terminal::rasterizer::PageMargin margin);
 
     ~OpenGLRenderer() override;
@@ -84,9 +87,9 @@ class OpenGLRenderer final:
     void renderTile(RenderTile tile) override;
 
     // RenderTarget implementation
-    void setRenderSize(crispy::ImageSize _size) override;
+    void setRenderSize(crispy::image_size _size) override;
     void setTranslation(float x, float y, float z) noexcept;
-    void setViewSize(crispy::ImageSize size) noexcept { _viewSize = size; }
+    void setViewSize(crispy::image_size size) noexcept { _viewSize = size; }
     void setModelMatrix(QMatrix4x4 matrix) noexcept;
     void setMargin(terminal::rasterizer::PageMargin _margin) noexcept override;
     std::optional<AtlasTextureScreenshot> readAtlas() override;
@@ -95,7 +98,7 @@ class OpenGLRenderer final:
     void renderRectangle(int x, int y, Width, Height, RGBAColor color) override;
     void execute(std::chrono::steady_clock::time_point now) override;
 
-    std::pair<crispy::ImageSize, std::vector<uint8_t>> takeScreenshot();
+    std::pair<crispy::image_size, std::vector<uint8_t>> takeScreenshot();
 
     void clearCache() override;
 
@@ -124,7 +127,7 @@ class OpenGLRenderer final:
     int maxTextureDepth();
     int maxTextureSize();
     int maxTextureUnits();
-    crispy::ImageSize renderBufferSize();
+    crispy::image_size renderBufferSize();
 
     GLuint createAndUploadImage(QSize imageSize,
                                 terminal::ImageFormat format,
@@ -175,8 +178,8 @@ class OpenGLRenderer final:
 
     bool _initialized = false;
     std::chrono::steady_clock::time_point _startTime;
-    crispy::ImageSize _viewSize;
-    crispy::ImageSize _renderTargetSize;
+    crispy::image_size _viewSize;
+    crispy::image_size _renderTargetSize;
     QMatrix4x4 _projectionMatrix;
     QMatrix4x4 _viewMatrix;
     QMatrix4x4 _modelMatrix;
@@ -234,7 +237,7 @@ class OpenGLRenderer final:
         float backgroundImageOpacity = 1.0f;
         bool backgroundImageBlur = false;
         QSize backgroundResolution;
-        crispy::StrongHash backgroundImageHash;
+        crispy::strong_hash backgroundImageHash;
     } _renderStateCache;
 };
 

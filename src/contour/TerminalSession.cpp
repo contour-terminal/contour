@@ -336,7 +336,7 @@ void TerminalSession::requestPermission(config::Permission _allowedByConfig, Gua
                 SessionLog()("Permission for {} requires asking user.", role);
                 switch (role)
                 {
-                    // clang-format off
+                        // clang-format off
                     case GuardedRole::ChangeFont: emit requestPermissionForFontChange(); break;
                     case GuardedRole::CaptureBuffer: emit requestPermissionForBufferCapture(); break;
                     case GuardedRole::ShowHostWritableStatusLine: emit requestPermissionForShowHostWritableStatusLine(); break;

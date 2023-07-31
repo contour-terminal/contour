@@ -10,7 +10,7 @@
 namespace crispy
 {
 
-struct [[nodiscard]] Size
+struct [[nodiscard]] size
 {
     int width;
     int height;
@@ -44,11 +44,11 @@ struct [[nodiscard]] Size
       private:
         int _width;
         int _next;
-        Point _coord { 0, 0 };
+        point _coord { 0, 0 };
 
-        constexpr Point makeCoordinate(int offset) const noexcept
+        constexpr point makeCoordinate(int offset) const noexcept
         {
-            return Point { offset % _width, offset / _width };
+            return point { offset % _width, offset / _width };
         }
     };
 
@@ -56,67 +56,67 @@ struct [[nodiscard]] Size
     [[nodiscard]] constexpr iterator end() const noexcept { return iterator { width, width * height }; }
 };
 
-constexpr Size::iterator begin(Size const& s) noexcept
+constexpr size::iterator begin(size const& s) noexcept
 {
     return s.begin();
 }
-constexpr Size::iterator end(Size const& s) noexcept
+constexpr size::iterator end(size const& s) noexcept
 {
     return s.end();
 }
 
-constexpr int area(Size size) noexcept
+constexpr int area(size size) noexcept
 {
     return size.width * size.height;
 }
 
-constexpr bool operator<(Size a, Size b) noexcept
+constexpr bool operator<(size a, size b) noexcept
 {
     return a.width < b.width || (a.width == b.width && a.height < b.height);
 }
 
-constexpr bool operator==(Size const& a, Size const& b) noexcept
+constexpr bool operator==(size const& a, size const& b) noexcept
 {
     return a.width == b.width && a.height == b.height;
 }
 
-constexpr bool operator!=(Size const& a, Size const& b) noexcept
+constexpr bool operator!=(size const& a, size const& b) noexcept
 {
     return !(a == b);
 }
 
-constexpr Size operator+(Size a, Size b) noexcept
+constexpr size operator+(size a, size b) noexcept
 {
-    return Size { a.width + b.width, a.height + b.height };
+    return size { a.width + b.width, a.height + b.height };
 }
 
-constexpr Size operator-(Size a, Size b) noexcept
+constexpr size operator-(size a, size b) noexcept
 {
-    return Size { a.width - b.width, a.height - b.height };
+    return size { a.width - b.width, a.height - b.height };
 }
 
-constexpr Size operator*(Size a, Size b) noexcept
+constexpr size operator*(size a, size b) noexcept
 {
-    return Size { a.width * b.width, a.height * b.height };
+    return size { a.width * b.width, a.height * b.height };
 }
 
-inline Size operator*(Size a, double scalar) noexcept
+inline size operator*(size a, double scalar) noexcept
 {
-    return Size { int(ceil(double(a.width) * scalar)), int(ceil(double(a.height) * scalar)) };
+    return size { int(ceil(double(a.width) * scalar)), int(ceil(double(a.height) * scalar)) };
 }
 
-constexpr Size operator/(Size a, Size b) noexcept
+constexpr size operator/(size a, size b) noexcept
 {
-    return Size { a.width / b.width, a.height / b.height };
+    return size { a.width / b.width, a.height / b.height };
 }
 
 } // end namespace crispy
 
 template <>
-struct fmt::formatter<crispy::Size>
+struct fmt::formatter<crispy::size>
 {
     static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(const crispy::Size& value, format_context& ctx) -> format_context::iterator
+    static auto format(const crispy::size& value, format_context& ctx) -> format_context::iterator
     {
         return fmt::format_to(ctx.out(), "{}x{}", value.width, value.height);
     }

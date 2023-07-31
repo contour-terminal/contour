@@ -15,6 +15,8 @@
 #include <regex>
 #include <typeinfo>
 
+#include "StackTrace.h"
+
 #if !defined(_WIN32)
     #include <sys/types.h>
     #include <sys/wait.h>
@@ -54,11 +56,11 @@ constexpr size_t MAX_FRAMES { 128 };
 constexpr size_t SKIP_FRAMES { 0 };
 
 #if defined(__linux__) || defined(__APPLE__)
-struct Pipe // {{{
+struct pipe_wrap // {{{
 {
     int pfd[2];
 
-    Pipe(): pfd { -1, -1 }
+    pipe_wrap(): pfd { -1, -1 }
     {
         if (pipe(pfd))
             perror("pipe");
@@ -68,7 +70,7 @@ struct Pipe // {{{
     [[nodiscard]] int reader() noexcept { return pfd[0]; }
     [[nodiscard]] int writer() noexcept { return pfd[1]; }
 
-    ~Pipe() { close(); }
+    ~pipe_wrap() { close(); }
 
     void close()
     {
@@ -81,7 +83,7 @@ struct Pipe // {{{
 // }}}
 #endif
 
-vector<void*> StackTrace::getFrames(size_t skip, size_t max)
+vector<void*> stack_trace::getFrames(size_t skip, size_t max)
 {
     vector<void*> frames;
 
@@ -97,13 +99,13 @@ vector<void*> StackTrace::getFrames(size_t skip, size_t max)
     return frames;
 }
 
-optional<DebugInfo> StackTrace::getDebugInfoForFrame(void const* frameAddress)
+optional<debug_info> stack_trace::getDebugInfoForFrame(void const* frameAddress)
 {
     if (!frameAddress)
         return nullopt;
 
 #if defined(__linux__)
-    auto pipe = Pipe();
+    auto pipe = pipe_wrap();
     if (!pipe.good())
         return nullopt;
     pid_t childPid = fork();
@@ -147,7 +149,7 @@ optional<DebugInfo> StackTrace::getDebugInfoForFrame(void const* frameAddress)
                 --len;
 
             // result on success:
-            DebugInfo info;
+            debug_info info;
     #if 0
             auto static const re = regex(R"(^(.*):\d+$)");
             std::cmatch cm;
@@ -172,7 +174,7 @@ optional<DebugInfo> StackTrace::getDebugInfoForFrame(void const* frameAddress)
 #endif
 }
 
-StackTrace::StackTrace():
+stack_trace::stack_trace():
 #if defined(HAVE_BACKTRACE)
     _frames { SKIP_FRAMES + MAX_FRAMES }
 #else
@@ -184,7 +186,7 @@ StackTrace::StackTrace():
 #endif
 }
 
-string StackTrace::demangleSymbol(const char* symbol)
+string stack_trace::demangleSymbol(const char* symbol)
 {
 #if defined(__linux__) || defined(__APPLE__)
     int status = 0;
@@ -205,7 +207,7 @@ string StackTrace::demangleSymbol(const char* symbol)
 #endif
 }
 
-vector<string> StackTrace::symbols() const
+vector<string> stack_trace::symbols() const
 {
     if (empty())
         return {};

@@ -387,7 +387,7 @@ inline std::string readFileAsString(FileSystem::path const& path)
 template <typename T>
 constexpr auto each_element() noexcept
 {
-    struct Container
+    struct container
     {
         struct iterator // NOLINT(readability-identifier-naming)
         {
@@ -408,7 +408,7 @@ constexpr auto each_element() noexcept
             return iterator { static_cast<T>(static_cast<int>(std::numeric_limits<T>::max()) + 1) };
         }
     };
-    return Container {};
+    return container {};
 }
 
 template <typename T>

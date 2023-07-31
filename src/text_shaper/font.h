@@ -39,7 +39,7 @@
 namespace text
 {
 
-auto const inline LocatorLog = logstore::Category("font.locator", "Logs about font loads.");
+auto const inline LocatorLog = logstore::category("font.locator", "Logs about font loads.");
 
 namespace detail
 {
@@ -329,7 +329,7 @@ struct hash<text::font_description>
 {
     std::size_t operator()(text::font_description const& fd) const noexcept
     {
-        auto fnv = crispy::FNV<char>();
+        auto fnv = crispy::fnv<char>();
         return size_t(
             fnv(fnv(fnv(fnv(fnv(fd.familyName), char(fd.weight)), char(fd.slant)), char(fd.spacing)),
                 char(fd.strict_spacing)));

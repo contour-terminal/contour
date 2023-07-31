@@ -27,6 +27,8 @@
 #include <variant>
 #include <vector>
 
+#include "crispy/BufferObject.h"
+
 namespace terminal
 {
 
@@ -104,11 +106,11 @@ class [[nodiscard]] Process: public Pty
     [[nodiscard]] PtySlave& slave() noexcept override { return pty().slave(); }
     void close() override { pty().close(); }
     [[nodiscard]] bool isClosed() const noexcept override { return pty().isClosed(); }
-    [[nodiscard]] ReadResult read(crispy::BufferObject<char>& storage, std::chrono::milliseconds timeout, size_t n) override { return pty().read(storage, timeout, n); }
+    [[nodiscard]] ReadResult read(crispy::buffer_object<char>& storage, std::chrono::milliseconds timeout, size_t n) override { return pty().read(storage, timeout, n); }
     void wakeupReader() override { return pty().wakeupReader(); }
     [[nodiscard]] int write(std::string_view data, bool blocking) override { return pty().write(data, blocking); }
     [[nodiscard]] PageSize pageSize() const noexcept override { return pty().pageSize(); }
-    void resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixels = std::nullopt) override { pty().resizeScreen(cells, pixels); }
+    void resizeScreen(PageSize cells, std::optional<crispy::image_size> pixels = std::nullopt) override { pty().resizeScreen(cells, pixels); }
     // clang-format on
 
   private:

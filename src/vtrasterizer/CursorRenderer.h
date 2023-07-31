@@ -40,7 +40,7 @@ class CursorRenderer: public Renderable
     [[nodiscard]] CursorShape shape() const noexcept { return _shape; }
     void setShape(CursorShape shape);
 
-    void render(crispy::Point pos, int columnWidth, RGBColor color);
+    void render(crispy::point pos, int columnWidth, RGBColor color);
 
     void inspect(std::ostream& output) const override;
 

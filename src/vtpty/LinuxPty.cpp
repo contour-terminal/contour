@@ -40,6 +40,8 @@
 #include <pwd.h>
 #include <unistd.h>
 
+#include "crispy/BufferObject.h"
+
 #if !defined(FLATPAK)
     #include <utempter.h>
 #endif
@@ -62,7 +64,7 @@ namespace terminal
 
 namespace
 {
-    LinuxPty::PtyHandles createLinuxPty(PageSize const& windowSize, optional<crispy::ImageSize> pixels)
+    LinuxPty::PtyHandles createLinuxPty(PageSize const& windowSize, optional<crispy::image_size> pixels)
     {
         // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
         assert(*windowSize.lines <= numeric_limits<unsigned short>::max());
@@ -70,8 +72,8 @@ namespace
 
         winsize const ws { unbox<unsigned short>(windowSize.lines),
                            unbox<unsigned short>(windowSize.columns),
-                           unbox<unsigned short>(pixels.value_or(crispy::ImageSize {}).width),
-                           unbox<unsigned short>(pixels.value_or(crispy::ImageSize {}).height) };
+                           unbox<unsigned short>(pixels.value_or(crispy::image_size {}).width),
+                           unbox<unsigned short>(pixels.value_or(crispy::image_size {}).height) };
 
 #if defined(__APPLE__)
         winsize* wsa = const_cast<winsize*>(&ws);
@@ -192,7 +194,7 @@ int LinuxPty::Slave::write(std::string_view text) noexcept
 }
 // }}}
 
-LinuxPty::LinuxPty(PageSize pageSize, optional<crispy::ImageSize> pixels):
+LinuxPty::LinuxPty(PageSize pageSize, optional<crispy::image_size> pixels):
     _pageSize { pageSize }, _pixels { pixels }
 {
 }
@@ -356,7 +358,7 @@ int LinuxPty::waitForReadable(std::chrono::milliseconds timeout) noexcept
     }
 }
 
-Pty::ReadResult LinuxPty::read(crispy::BufferObject<char>& storage,
+Pty::ReadResult LinuxPty::read(crispy::buffer_object<char>& storage,
                                std::chrono::milliseconds timeout,
                                size_t size)
 {
@@ -433,7 +435,7 @@ PageSize LinuxPty::pageSize() const noexcept
     return _pageSize;
 }
 
-void LinuxPty::resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixels)
+void LinuxPty::resizeScreen(PageSize cells, std::optional<crispy::image_size> pixels)
 {
     if (_masterFd < 0)
         return;

@@ -21,12 +21,12 @@ namespace contour
 /// Contour TUI application.
 ///
 /// TODO: provide special installable targets in debian packageS (cmake and PPA)
-class ContourApp: public crispy::App
+class ContourApp: public crispy::app
 {
   public:
     ContourApp();
 
-    crispy::cli::Command parameterDefinition() const override;
+    crispy::cli::command parameterDefinition() const override;
 
   private:
     int captureAction();

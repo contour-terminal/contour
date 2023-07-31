@@ -510,7 +510,7 @@ string StaticDatabase::terminfo() const
 
     for (auto const& cap: move(strings) | actions::sort)
         if (!cap.name.empty())
-            output << "    " << cap.name << "=" << crispy::escape(cap.value, crispy::NumericEscape::Octal)
+            output << "    " << cap.name << "=" << crispy::escape(cap.value, crispy::numeric_escape::Octal)
                    << ",\n";
 
     return output.str();

@@ -18,17 +18,17 @@
 namespace terminal
 {
 
-auto const inline TerminalLog = logstore::Category("vt.session", "Logs general terminal events.");
-auto const inline InputLog = logstore::Category("vt.input", "Logs terminal keyboard/mouse input events.");
-auto const inline VTParserLog = logstore::Category("vt.parser",
+auto const inline TerminalLog = logstore::category("vt.session", "Logs general terminal events.");
+auto const inline InputLog = logstore::category("vt.input", "Logs terminal keyboard/mouse input events.");
+auto const inline VTParserLog = logstore::category("vt.parser",
                                                    "Logs terminal parser errors.",
-                                                   logstore::Category::State::Enabled,
-                                                   logstore::Category::Visibility::Hidden);
+                                                   logstore::category::state::Enabled,
+                                                   logstore::category::visibility::Hidden);
 
 #if defined(LIBTERMINAL_LOG_TRACE)
-auto const inline VTTraceSequenceLog = logstore::Category("vt.trace.sequence", "Logs terminal screen trace.");
+auto const inline VTTraceSequenceLog = logstore::category("vt.trace.sequence", "Logs terminal screen trace.");
 #endif
 
-auto const inline RenderBufferLog = logstore::Category("vt.renderbuffer", "Render Buffer Objects");
+auto const inline RenderBufferLog = logstore::category("vt.renderbuffer", "Render Buffer Objects");
 
 } // namespace terminal

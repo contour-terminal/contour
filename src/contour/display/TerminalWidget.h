@@ -231,7 +231,7 @@ class TerminalWidget: public QQuickItem
     void updateSizeProperties();
 
     void statsSummary();
-    void doResize(crispy::Size _size);
+    void doResize(crispy::size _size);
 
     [[nodiscard]] terminal::rasterizer::GridMetrics const& gridMetrics() const noexcept
     {

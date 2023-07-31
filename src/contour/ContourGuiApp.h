@@ -47,7 +47,7 @@ class ContourGuiApp: public QObject, public ContourApp
     static ContourGuiApp* instance() { return static_cast<ContourGuiApp*>(ContourApp::instance()); }
 
     int run(int argc, char const* argv[]) override;
-    crispy::cli::Command parameterDefinition() const override;
+    crispy::cli::command parameterDefinition() const override;
 
     void newWindow();
     void showNotification(std::string_view _title, std::string_view _content);
