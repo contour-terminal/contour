@@ -77,14 +77,14 @@ void initializeResourcesForContourFrontendOpenGL()
 namespace contour::display
 {
 
-using terminal::Height;
-using terminal::ImageSize;
-using terminal::Width;
+using terminal::height;
+using terminal::image_size;
+using terminal::width;
 
 using terminal::ColumnCount;
 using terminal::LineCount;
 using terminal::PageSize;
-using terminal::RGBAColor;
+using terminal::rgba_color;
 
 using text::DPI;
 
@@ -336,7 +336,7 @@ void TerminalWidget::sizeChanged()
         "size changed to: {}x{} (session {})", width(), height(), session_ ? "available" : "not attached");
 
     auto const qtBaseWidgetSize =
-        terminal::ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
+        terminal::image_size { width::cast_from(width()), height::cast_from(height()) };
     auto const newPixelSize = qtBaseWidgetSize * contentScale();
     DisplayLog()("Resizing view to {}x{} virtual ({} actual).", width(), height(), newPixelSize);
     applyResize(newPixelSize, *session_, *renderer_);
@@ -451,7 +451,7 @@ void TerminalWidget::applyFontDPI()
     if (!renderTarget_)
         return;
 
-    auto const newPixelSize = terminal::ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
+    auto const newPixelSize = terminal::image_size { width::cast_from(width()), height::cast_from(height()) };
 
     // Apply resize on same window metrics propagates proper recalculations and repaint.
     applyResize(newPixelSize, *session_, *renderer_);
@@ -469,8 +469,8 @@ void TerminalWidget::logDisplayInfo()
         profile().fonts.size.pt / 72.0) * average(fontDPI())
     ));
     auto const normalScreenSize = crispy::ImageSize {
-        Width::cast_from(window()->screen()->size().width()),
-        Height::cast_from(window()->screen()->size().height())
+        width::cast_from(window()->screen()->size().width()),
+        height::cast_from(window()->screen()->size().height())
     };
     auto const actualScreenSize = normalScreenSize * window()->effectiveDevicePixelRatio();
 #if defined(CONTOUR_BUILD_TYPE)
@@ -533,10 +533,10 @@ void TerminalWidget::synchronize()
     auto const windowSize = window()->size() * dpr;
     Require(width() > 1.0 && height() > 1.0);
 
-    auto const viewSize = ImageSize { Width::cast_from(width() * dpr), Height::cast_from(height() * dpr) };
+    auto const viewSize = image_size { width::cast_from(width() * dpr), height::cast_from(height() * dpr) };
 
     renderTarget_->setRenderSize(
-        ImageSize { Width::cast_from(windowSize.width()), Height::cast_from(windowSize.height()) });
+        image_size { width::cast_from(windowSize.width()), height::cast_from(windowSize.height()) });
     renderTarget_->setModelMatrix(createModelMatrix());
     renderTarget_->setTranslation(float(x() * dpr), float(y() * dpr), float(z() * dpr));
     renderTarget_->setViewSize(viewSize);
@@ -551,13 +551,13 @@ void TerminalWidget::createRenderer()
 
     auto const textureTileSize = gridMetrics().cellSize;
     auto const viewportMargin = terminal::rasterizer::PageMargin {}; // TODO margin
-    auto const precalculatedViewSize = [this]() -> ImageSize {
-        auto const uiSize = ImageSize { Width::cast_from(width()), Height::cast_from(height()) };
+    auto const precalculatedViewSize = [this]() -> image_size {
+        auto const uiSize = image_size { width::cast_from(width()), height::cast_from(height()) };
         return uiSize * contentScale();
     }();
-    auto const precalculatedTargetSize = [this]() -> ImageSize {
+    auto const precalculatedTargetSize = [this]() -> image_size {
         auto const uiSize =
-            ImageSize { Width::cast_from(window()->width()), Height::cast_from(window()->height()) };
+            image_size { width::cast_from(window()->width()), height::cast_from(window()->height()) };
         return uiSize * contentScale();
     }();
 
@@ -565,7 +565,7 @@ void TerminalWidget::createRenderer()
     {
         auto const dpr = contentScale();
         auto const viewSize =
-            ImageSize { Width::cast_from(width() * dpr), Height::cast_from(height() * dpr) };
+            image_size { width::cast_from(width() * dpr), height::cast_from(height() * dpr) };
         auto const windowSize = window()->size() * dpr;
         DisplayLog()("Creating renderer: {}x+{}y+{}z ({} DPR, {} viewSize, {}x{} windowSize)\n",
                      x(),
@@ -613,7 +613,7 @@ void TerminalWidget::createRenderer()
     // {{{ Apply proper grid/pixel sizes to terminal
     {
         auto const qtBaseWidgetSize =
-            ImageSize { terminal::Width::cast_from(width()), terminal::Height::cast_from(height()) };
+            image_size { terminal::width::cast_from(width()), terminal::height::cast_from(height()) };
         renderer_->setMargin(computeMargin(gridMetrics().cellSize, pageSize(), qtBaseWidgetSize));
         // resize widget (same pixels, but adjusted terminal rows/columns and margin)
         auto const actualWidgetSize = qtBaseWidgetSize * contentScale();
@@ -877,7 +877,7 @@ bool TerminalWidget::event(QEvent* _event)
 // {{{ helpers
 void TerminalWidget::onScrollBarValueChanged(int _value)
 {
-    terminal().viewport().scrollTo(terminal::ScrollOffset::cast_from(_value));
+    terminal().viewport().scrollTo(terminal::scroll_offset::cast_from(_value));
     scheduleRedraw();
 }
 
@@ -925,8 +925,8 @@ void TerminalWidget::updateSizeProperties()
     // minimum size
     auto const MinimumGridSize = PageSize { LineCount(5), ColumnCount(10) };
     auto const minSize =
-        ImageSize { Width::cast_from(unbox<int>(gridMetrics().cellSize.width) * *MinimumGridSize.columns),
-                    Height::cast_from(unbox<int>(gridMetrics().cellSize.width) * *MinimumGridSize.columns) };
+        image_size { width::cast_from(unbox<int>(gridMetrics().cellSize.width) * *MinimumGridSize.columns),
+                     height::cast_from(unbox<int>(gridMetrics().cellSize.width) * *MinimumGridSize.columns) };
     auto const scaledMinSize = minSize / dpr;
 
     window()->setMinimumSize(QSize(scaledMinSize.width.as<int>(), scaledMinSize.height.as<int>()));
@@ -958,13 +958,13 @@ bool TerminalWidget::isFullScreen() const
     return window()->visibility() == QQuickWindow::Visibility::FullScreen;
 }
 
-terminal::ImageSize TerminalWidget::pixelSize() const
+terminal::image_size TerminalWidget::pixelSize() const
 {
     assert(session_);
     return gridMetrics().cellSize * session_->terminal().pageSize();
 }
 
-terminal::ImageSize TerminalWidget::cellSize() const
+terminal::image_size TerminalWidget::cellSize() const
 {
     return gridMetrics().cellSize;
 }
@@ -1089,7 +1089,7 @@ void TerminalWidget::notify(std::string_view /*_title*/, std::string_view /*_bod
     // TODO: showNotification callback to Controller?
 }
 
-void TerminalWidget::resizeWindow(terminal::Width _width, terminal::Height _height)
+void TerminalWidget::resizeWindow(terminal::width _width, terminal::height _height)
 {
     Require(session_ != nullptr);
 
@@ -1101,8 +1101,8 @@ void TerminalWidget::resizeWindow(terminal::Width _width, terminal::Height _heig
 
     auto requestedPageSize = terminal().pageSize();
     auto const pixelSize =
-        terminal::ImageSize { terminal::Width(*_width ? *_width : (unsigned) width()),
-                              terminal::Height(*_height ? *_height : (unsigned) height()) };
+        terminal::image_size { terminal::width(*_width ? *_width : (unsigned) width()),
+                               terminal::height(*_height ? *_height : (unsigned) height()) };
     requestedPageSize.columns =
         terminal::ColumnCount(unbox<int>(pixelSize.width) / unbox<int>(gridMetrics().cellSize.width));
     requestedPageSize.lines =
@@ -1112,10 +1112,10 @@ void TerminalWidget::resizeWindow(terminal::Width _width, terminal::Height _heig
     const_cast<config::TerminalProfile&>(profile()).terminalSize = requestedPageSize;
     renderer_->setPageSize(requestedPageSize);
     auto const pixels =
-        terminal::ImageSize { terminal::Width::cast_from(unbox<int>(requestedPageSize.columns)
-                                                         * unbox<int>(gridMetrics().cellSize.width)),
-                              terminal::Height::cast_from(unbox<int>(requestedPageSize.lines)
-                                                          * unbox<int>(gridMetrics().cellSize.height)) };
+        terminal::image_size { terminal::width::cast_from(unbox<int>(requestedPageSize.columns)
+                                                          * unbox<int>(gridMetrics().cellSize.width)),
+                               terminal::height::cast_from(unbox<int>(requestedPageSize.lines)
+                                                           * unbox<int>(gridMetrics().cellSize.height)) };
     terminal().resizeScreen(requestedPageSize, pixels);
 }
 
@@ -1136,9 +1136,9 @@ void TerminalWidget::resizeWindow(terminal::LineCount _lines, terminal::ColumnCo
     // setSizePolicy(QSizePolicy::Policy::Fixed, QSizePolicy::Policy::Fixed);
     const_cast<config::TerminalProfile&>(profile()).terminalSize = requestedPageSize;
     renderer_->setPageSize(requestedPageSize);
-    auto const pixels = terminal::ImageSize {
-        terminal::Width(unbox<unsigned>(requestedPageSize.columns) * *gridMetrics().cellSize.width),
-        terminal::Height(unbox<unsigned>(requestedPageSize.lines) * *gridMetrics().cellSize.height)
+    auto const pixels = terminal::image_size {
+        terminal::width(unbox<unsigned>(requestedPageSize.columns) * *gridMetrics().cellSize.width),
+        terminal::height(unbox<unsigned>(requestedPageSize.lines) * *gridMetrics().cellSize.height)
     };
     terminal().resizeScreen(requestedPageSize, pixels);
 }
@@ -1167,7 +1167,7 @@ bool TerminalWidget::setFontSize(text::font_size _size)
         return false;
 
     auto const qtBaseWidgetSize =
-        ImageSize { terminal::Width::cast_from(width()), terminal::Height::cast_from(height()) };
+        image_size { terminal::width::cast_from(width()), terminal::height::cast_from(height()) };
     renderer_->setMargin(computeMargin(gridMetrics().cellSize, pageSize(), qtBaseWidgetSize));
     // resize widget (same pixels, but adjusted terminal rows/columns and margin)
     auto const actualWidgetSize = qtBaseWidgetSize * contentScale();
@@ -1182,9 +1182,10 @@ bool TerminalWidget::setPageSize(PageSize _newPageSize)
     if (_newPageSize == terminal().pageSize())
         return false;
 
-    auto const viewSize =
-        ImageSize { Width(*gridMetrics().cellSize.width * unbox<unsigned>(profile().terminalSize.columns)),
-                    Height(*gridMetrics().cellSize.width * unbox<unsigned>(profile().terminalSize.columns)) };
+    auto const viewSize = image_size {
+        terminal::width(*gridMetrics().cellSize.width * unbox<unsigned>(profile().terminalSize.columns)),
+        terminal::height(*gridMetrics().cellSize.width * unbox<unsigned>(profile().terminalSize.columns))
+    };
     renderer_->setPageSize(_newPageSize);
     terminal().resizeScreen(_newPageSize, viewSize);
     return true;
@@ -1286,9 +1287,9 @@ void TerminalWidget::onSelectionCompleted()
     }
 }
 
-void TerminalWidget::bufferChanged(terminal::ScreenType _type)
+void TerminalWidget::bufferChanged(terminal::screen_type _type)
 {
-    using Type = terminal::ScreenType;
+    using Type = terminal::screen_type;
     switch (_type)
     {
         case Type::Primary: setCursor(Qt::IBeamCursor); break;

@@ -54,7 +54,7 @@ namespace XtSmGraphics
         ReadLimit = 4
     };
 
-    using Value = std::variant<std::monostate, unsigned, ImageSize>;
+    using Value = std::variant<std::monostate, unsigned, image_size>;
 } // namespace XtSmGraphics
 
 /// TBC - Tab Clear
@@ -101,14 +101,14 @@ enum class RequestStatusString
 struct SixelImage
 { // TODO: this struct is only used internally in Sequencer, make it private
     /// Size in pixels for this image
-    ImageSize size;
+    image_size size;
 
     /// RGBA buffer of the image to be rendered
     Image::Data rgba;
 };
 
 inline std::string setDynamicColorValue(
-    RGBColor const& color) // TODO: yet another helper. maybe SemanticsUtils static class?
+    rgb_color const& color) // TODO: yet another helper. maybe SemanticsUtils static class?
 {
     auto const r = static_cast<unsigned>(static_cast<float>(color.red) / 255.0f * 0xFFFF);
     auto const g = static_cast<unsigned>(static_cast<float>(color.green) / 255.0f * 0xFFFF);

@@ -23,17 +23,18 @@
 namespace terminal::CellUtil
 {
 
-[[nodiscard]] inline RGBColorPair makeColors(ColorPalette const& colorPalette,
-                                             CellFlags cellFlags,
-                                             bool reverseVideo,
-                                             Color foregroundColor,
-                                             Color backgroundColor,
-                                             bool blinkingState,
-                                             bool rapidBlinkState) noexcept
+[[nodiscard]] inline rgb_color_pair makeColors(ColorPalette const& colorPalette,
+                                               cell_flags cellFlags,
+                                               bool reverseVideo,
+                                               color foregroundColor,
+                                               color backgroundColor,
+                                               bool blinkingState,
+                                               bool rapidBlinkState) noexcept
 {
-    auto const fgMode = (cellFlags & CellFlags::Faint)                                    ? ColorMode::Dimmed
-                        : ((cellFlags & CellFlags::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
-                                                                                          : ColorMode::Normal;
+    auto const fgMode = (cellFlags & cell_flags::Faint) ? ColorMode::Dimmed
+                        : ((cellFlags & cell_flags::Bold) && colorPalette.useBrightColors)
+                            ? ColorMode::Bright
+                            : ColorMode::Normal;
 
     auto constexpr bgMode = ColorMode::Normal;
 
@@ -41,42 +42,42 @@ namespace terminal::CellUtil
         reverseVideo ? std::pair { ColorTarget::Background, ColorTarget::Foreground }
                      : std::pair { ColorTarget::Foreground, ColorTarget::Background };
 
-    auto rgbColors = RGBColorPair { apply(colorPalette, foregroundColor, fgColorTarget, fgMode),
-                                    apply(colorPalette, backgroundColor, bgColorTarget, bgMode) };
+    auto rgbColors = rgb_color_pair { apply(colorPalette, foregroundColor, fgColorTarget, fgMode),
+                                      apply(colorPalette, backgroundColor, bgColorTarget, bgMode) };
 
-    if (cellFlags & CellFlags::Inverse)
+    if (cellFlags & cell_flags::Inverse)
         rgbColors = rgbColors.swapped();
 
-    if (cellFlags & CellFlags::Hidden)
+    if (cellFlags & cell_flags::Hidden)
         rgbColors = rgbColors.allBackground();
 
-    if ((cellFlags & CellFlags::Blinking) && !blinkingState)
+    if ((cellFlags & cell_flags::Blinking) && !blinkingState)
         return rgbColors.allBackground();
-    if ((cellFlags & CellFlags::RapidBlinking) && !rapidBlinkState)
+    if ((cellFlags & cell_flags::RapidBlinking) && !rapidBlinkState)
         return rgbColors.allBackground();
 
     return rgbColors;
 }
 
-[[nodiscard]] inline RGBColor makeUnderlineColor(ColorPalette const& colorPalette,
-                                                 RGBColor defaultColor,
-                                                 Color underlineColor,
-                                                 CellFlags cellFlags) noexcept
+[[nodiscard]] inline rgb_color makeUnderlineColor(ColorPalette const& colorPalette,
+                                                  rgb_color defaultColor,
+                                                  color underlineColor,
+                                                  cell_flags cellFlags) noexcept
 {
     if (isDefaultColor(underlineColor))
         return defaultColor;
 
-    auto const mode = (cellFlags & CellFlags::Faint)                                    ? ColorMode::Dimmed
-                      : ((cellFlags & CellFlags::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
-                                                                                        : ColorMode::Normal;
+    auto const mode = (cellFlags & cell_flags::Faint)                                    ? ColorMode::Dimmed
+                      : ((cellFlags & cell_flags::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
+                                                                                         : ColorMode::Normal;
 
     return apply(colorPalette, underlineColor, ColorTarget::Foreground, mode);
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-[[nodiscard]] inline RGBColor
-    makeUnderlineColor(ColorPalette const& colorPalette, RGBColor defaultColor, Cell const& cell) noexcept
+[[nodiscard]] inline rgb_color
+    makeUnderlineColor(ColorPalette const& colorPalette, rgb_color defaultColor, Cell const& cell) noexcept
 {
     return makeUnderlineColor(colorPalette, defaultColor, cell.underlineColor(), cell.flags());
 }
@@ -137,52 +138,54 @@ CRISPY_REQUIRES(CellConcept<Cell>)
     return true;
 }
 
-[[nodiscard]] inline CellFlags makeCellFlags(GraphicsRendition rendition, CellFlags base) noexcept
+[[nodiscard]] inline cell_flags makeCellFlags(graphics_rendition rendition, cell_flags base) noexcept
 {
-    CellFlags flags = base;
+    cell_flags flags = base;
     switch (rendition)
     {
-        case GraphicsRendition::Reset: flags = CellFlags::None; break;
-        case GraphicsRendition::Bold: flags |= CellFlags::Bold; break;
-        case GraphicsRendition::Faint: flags |= CellFlags::Faint; break;
-        case GraphicsRendition::Italic: flags |= CellFlags::Italic; break;
-        case GraphicsRendition::Underline: flags |= CellFlags::Underline; break;
-        case GraphicsRendition::Blinking:
-            flags &= ~CellFlags::RapidBlinking;
-            flags |= CellFlags::Blinking;
+        case graphics_rendition::Reset: flags = cell_flags::None; break;
+        case graphics_rendition::Bold: flags |= cell_flags::Bold; break;
+        case graphics_rendition::Faint: flags |= cell_flags::Faint; break;
+        case graphics_rendition::Italic: flags |= cell_flags::Italic; break;
+        case graphics_rendition::Underline: flags |= cell_flags::Underline; break;
+        case graphics_rendition::Blinking:
+            flags &= ~cell_flags::RapidBlinking;
+            flags |= cell_flags::Blinking;
             break;
-        case GraphicsRendition::RapidBlinking:
-            flags &= ~CellFlags::Blinking;
-            flags |= CellFlags::RapidBlinking;
+        case graphics_rendition::RapidBlinking:
+            flags &= ~cell_flags::Blinking;
+            flags |= cell_flags::RapidBlinking;
             break;
-        case GraphicsRendition::Inverse: flags |= CellFlags::Inverse; break;
-        case GraphicsRendition::Hidden: flags |= CellFlags::Hidden; break;
-        case GraphicsRendition::CrossedOut: flags |= CellFlags::CrossedOut; break;
-        case GraphicsRendition::DoublyUnderlined: flags |= CellFlags::DoublyUnderlined; break;
-        case GraphicsRendition::CurlyUnderlined: flags |= CellFlags::CurlyUnderlined; break;
-        case GraphicsRendition::DottedUnderline: flags |= CellFlags::DottedUnderline; break;
-        case GraphicsRendition::DashedUnderline: flags |= CellFlags::DashedUnderline; break;
-        case GraphicsRendition::Framed: flags |= CellFlags::Framed; break;
-        case GraphicsRendition::Overline: flags |= CellFlags::Overline; break;
-        case GraphicsRendition::Normal: flags &= ~(CellFlags::Bold | CellFlags::Faint); break;
-        case GraphicsRendition::NoItalic: flags &= ~CellFlags::Italic; break;
-        case GraphicsRendition::NoUnderline:
-            flags &= ~(CellFlags::Underline | CellFlags::DoublyUnderlined | CellFlags::CurlyUnderlined
-                       | CellFlags::DottedUnderline | CellFlags::DashedUnderline);
+        case graphics_rendition::Inverse: flags |= cell_flags::Inverse; break;
+        case graphics_rendition::Hidden: flags |= cell_flags::Hidden; break;
+        case graphics_rendition::CrossedOut: flags |= cell_flags::CrossedOut; break;
+        case graphics_rendition::DoublyUnderlined: flags |= cell_flags::DoublyUnderlined; break;
+        case graphics_rendition::CurlyUnderlined: flags |= cell_flags::CurlyUnderlined; break;
+        case graphics_rendition::DottedUnderline: flags |= cell_flags::DottedUnderline; break;
+        case graphics_rendition::DashedUnderline: flags |= cell_flags::DashedUnderline; break;
+        case graphics_rendition::Framed: flags |= cell_flags::Framed; break;
+        case graphics_rendition::Overline: flags |= cell_flags::Overline; break;
+        case graphics_rendition::Normal: flags &= ~(cell_flags::Bold | cell_flags::Faint); break;
+        case graphics_rendition::NoItalic: flags &= ~cell_flags::Italic; break;
+        case graphics_rendition::NoUnderline:
+            flags &= ~(cell_flags::Underline | cell_flags::DoublyUnderlined | cell_flags::CurlyUnderlined
+                       | cell_flags::DottedUnderline | cell_flags::DashedUnderline);
             break;
-        case GraphicsRendition::NoBlinking: flags &= ~(CellFlags::Blinking | CellFlags::RapidBlinking); break;
-        case GraphicsRendition::NoInverse: flags &= ~CellFlags::Inverse; break;
-        case GraphicsRendition::NoHidden: flags &= ~CellFlags::Hidden; break;
-        case GraphicsRendition::NoCrossedOut: flags &= ~CellFlags::CrossedOut; break;
-        case GraphicsRendition::NoFramed: flags &= ~CellFlags::Framed; break;
-        case GraphicsRendition::NoOverline: flags &= ~CellFlags::Overline; break;
+        case graphics_rendition::NoBlinking:
+            flags &= ~(cell_flags::Blinking | cell_flags::RapidBlinking);
+            break;
+        case graphics_rendition::NoInverse: flags &= ~cell_flags::Inverse; break;
+        case graphics_rendition::NoHidden: flags &= ~cell_flags::Hidden; break;
+        case graphics_rendition::NoCrossedOut: flags &= ~cell_flags::CrossedOut; break;
+        case graphics_rendition::NoFramed: flags &= ~cell_flags::Framed; break;
+        case graphics_rendition::NoOverline: flags &= ~cell_flags::Overline; break;
     }
     return flags;
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-inline void applyGraphicsRendition(GraphicsRendition sgr, Cell& cell) noexcept
+inline void applyGraphicsRendition(graphics_rendition sgr, Cell& cell) noexcept
 {
     cell.resetFlags(makeCellFlags(sgr, cell.flags()));
 }

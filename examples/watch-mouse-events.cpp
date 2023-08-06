@@ -279,10 +279,10 @@ struct MouseTracker final: public BasicParserEvents
             else if (_sequence.parameterCount() == 5)
             {
                 selection.mode = _sequence.param(0);
-                selection.from.line = _sequence.param<LineOffset>(1);
-                selection.from.column = _sequence.param<ColumnOffset>(2);
-                selection.to.line = _sequence.param<LineOffset>(3);
-                selection.to.column = _sequence.param<ColumnOffset>(4);
+                selection.from.line = _sequence.param<line_offset>(1);
+                selection.from.column = _sequence.param<column_offset>(2);
+                selection.to.line = _sequence.param<line_offset>(3);
+                selection.to.column = _sequence.param<column_offset>(4);
             }
         }
         _sequence.clear();
@@ -291,8 +291,8 @@ struct MouseTracker final: public BasicParserEvents
     struct
     {
         unsigned mode {};
-        CellLocation from {};
-        CellLocation to {};
+        cell_location from {};
+        cell_location to {};
     } selection;
     std::optional<std::pair<int, int>> _decrpm;
 };

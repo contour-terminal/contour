@@ -48,7 +48,7 @@ class BoxDrawingRenderer: public Renderable
     /// Renders boxdrawing character.
     ///
     /// @param codepoint     the boxdrawing character's codepoint.
-    [[nodiscard]] bool render(LineOffset line, ColumnOffset column, char32_t codepoint, RGBColor color);
+    [[nodiscard]] bool render(line_offset line, column_offset column, char32_t codepoint, rgb_color color);
 
     void inspect(std::ostream& output) const override;
 
@@ -60,7 +60,7 @@ class BoxDrawingRenderer: public Renderable
         char32_t codepoint, atlas::TileLocation tileLocation);
 
     [[nodiscard]] static std::optional<atlas::Buffer> buildBoxElements(char32_t codepoint,
-                                                                       ImageSize size,
+                                                                       image_size size,
                                                                        int lineThickness);
     [[nodiscard]] std::optional<atlas::Buffer> buildElements(char32_t codepoint);
 };

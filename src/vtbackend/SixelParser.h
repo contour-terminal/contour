@@ -60,7 +60,7 @@ class SixelParser: public ParserExtension
         virtual ~Events() = default;
 
         /// Defines a new color at given register index.
-        virtual void setColor(unsigned index, RGBColor const& color) = 0;
+        virtual void setColor(unsigned index, rgb_color const& color) = 0;
 
         /// Uses the given color for future paints
         virtual void useColor(unsigned index) = 0;
@@ -73,7 +73,7 @@ class SixelParser: public ParserExtension
 
         /// Defines the aspect ratio (pan / pad = aspect ratio) and image dimensions in pixels for
         /// the upcoming pixel data.
-        virtual void setRaster(unsigned int pan, unsigned int pad, std::optional<ImageSize> imageSize) = 0;
+        virtual void setRaster(unsigned int pan, unsigned int pad, std::optional<image_size> imageSize) = 0;
 
         /// renders a given sixel at the current sixel-cursor position.
         virtual void render(int8_t sixel) = 0;
@@ -137,11 +137,11 @@ class SixelColorPalette
     [[nodiscard]] unsigned int maxSize() const noexcept { return _maxSize; }
     void setMaxSize(unsigned int value) { _maxSize = value; }
 
-    void setColor(unsigned int index, RGBColor const& color);
-    [[nodiscard]] RGBColor at(unsigned int index) const noexcept;
+    void setColor(unsigned int index, rgb_color const& color);
+    [[nodiscard]] rgb_color at(unsigned int index) const noexcept;
 
   private:
-    std::vector<RGBColor> _palette;
+    std::vector<rgb_color> _palette;
     unsigned int _maxSize;
 };
 
@@ -153,43 +153,43 @@ class SixelImageBuilder: public SixelParser::Events
   public:
     using Buffer = std::vector<uint8_t>;
 
-    SixelImageBuilder(ImageSize maxSize,
+    SixelImageBuilder(image_size maxSize,
                       int aspectVertical,
                       int aspectHorizontal,
-                      RGBAColor backgroundColor,
+                      rgba_color backgroundColor,
                       std::shared_ptr<SixelColorPalette> colorPalette);
 
-    [[nodiscard]] ImageSize maxSize() const noexcept { return _maxSize; }
-    [[nodiscard]] ImageSize size() const noexcept { return _size; }
+    [[nodiscard]] image_size maxSize() const noexcept { return _maxSize; }
+    [[nodiscard]] image_size size() const noexcept { return _size; }
     [[nodiscard]] unsigned int aspectRatio() const noexcept { return _aspectRatio; }
-    [[nodiscard]] RGBColor currentColor() const noexcept { return _colors->at(_currentColor); }
+    [[nodiscard]] rgb_color currentColor() const noexcept { return _colors->at(_currentColor); }
 
-    [[nodiscard]] RGBAColor at(CellLocation coord) const noexcept;
+    [[nodiscard]] rgba_color at(cell_location coord) const noexcept;
 
     [[nodiscard]] Buffer const& data() const noexcept { return _buffer; }
     [[nodiscard]] Buffer& data() noexcept { return _buffer; }
 
-    void clear(RGBAColor fillColor);
+    void clear(rgba_color fillColor);
 
-    void setColor(unsigned index, RGBColor const& color) override;
+    void setColor(unsigned index, rgb_color const& color) override;
     void useColor(unsigned index) override;
     void rewind() override;
     void newline() override;
-    void setRaster(unsigned int pan, unsigned int pad, std::optional<ImageSize> imageSize) override;
+    void setRaster(unsigned int pan, unsigned int pad, std::optional<image_size> imageSize) override;
     void render(int8_t sixel) override;
     void finalize() override;
 
-    [[nodiscard]] CellLocation const& sixelCursor() const noexcept { return _sixelCursor; }
+    [[nodiscard]] cell_location const& sixelCursor() const noexcept { return _sixelCursor; }
 
   private:
-    void write(CellLocation const& coord, RGBColor const& value) noexcept;
+    void write(cell_location const& coord, rgb_color const& value) noexcept;
 
   private:
-    ImageSize const _maxSize;
+    image_size const _maxSize;
     std::shared_ptr<SixelColorPalette> _colors;
-    ImageSize _size;
+    image_size _size;
     Buffer _buffer; /// RGBA buffer
-    CellLocation _sixelCursor {};
+    cell_location _sixelCursor {};
     unsigned _currentColor = 0;
     bool _explicitSize = false;
     // This is an int because vt3xx takes the given ratio pan/pad and rounds up the ratio

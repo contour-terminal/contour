@@ -259,7 +259,7 @@ int ContourApp::configAction()
 int ContourApp::terminfoAction()
 {
     withOutput(parameters(), "contour.generate.terminfo.to", [](auto& _stream) {
-        _stream << terminal::capabilities::StaticDatabase {}.terminfo();
+        _stream << terminal::capabilities::static_database {}.terminfo();
     });
     return EXIT_SUCCESS;
 }

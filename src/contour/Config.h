@@ -133,8 +133,8 @@ std::vector<actions::Action> const* apply(
 
 struct CursorConfig
 {
-    terminal::CursorShape cursorShape { terminal::CursorShape::Block };
-    terminal::CursorDisplay cursorDisplay { terminal::CursorDisplay::Steady };
+    terminal::cursor_shape cursorShape { terminal::cursor_shape::Block };
+    terminal::cursor_display cursorDisplay { terminal::cursor_display::Steady };
     std::chrono::milliseconds cursorBlinkInterval;
 };
 
@@ -151,17 +151,17 @@ struct TerminalProfile
     bool show_title_bar = true;
     bool mouse_hide_while_typing = true;
     terminal::RefreshRate refreshRate = { 0.0 }; // 0=auto
-    terminal::LineOffset copyLastMarkRangeOffset = terminal::LineOffset(0);
+    terminal::line_offset copyLastMarkRangeOffset = terminal::line_offset(0);
 
     std::string wmClass;
 
     terminal::PageSize terminalSize = { terminal::LineCount(10), terminal::ColumnCount(40) };
     terminal::VTType terminalId = terminal::VTType::VT525;
 
-    terminal::MaxHistoryLineCount maxHistoryLineCount;
+    terminal::max_history_line_count maxHistoryLineCount;
     terminal::LineCount historyScrollMultiplier = terminal::LineCount(3);
     ScrollBarPosition scrollbarPosition = ScrollBarPosition::Right;
-    terminal::StatusDisplayPosition statusDisplayPosition = terminal::StatusDisplayPosition::Bottom;
+    terminal::status_display_position statusDisplayPosition = terminal::status_display_position::Bottom;
     bool syncWindowTitleWithHostWritableStatusDisplay = false;
     bool hideScrollbarInAltScreen = true;
 
@@ -189,9 +189,9 @@ struct TerminalProfile
     } inputModes;
     std::chrono::milliseconds highlightTimeout { 300 };
     bool highlightDoubleClickedWord = true;
-    terminal::StatusDisplayType initialStatusDisplayType = terminal::StatusDisplayType::None;
+    terminal::status_display_type initialStatusDisplayType = terminal::status_display_type::None;
 
-    terminal::Opacity backgroundOpacity; // value between 0 (fully transparent) and 0xFF (fully visible).
+    terminal::opacity backgroundOpacity; // value between 0 (fully transparent) and 0xFF (fully visible).
     bool backgroundBlur;                 // On Windows 10, this will enable Acrylic Backdrop.
 
     std::optional<display::ShaderConfig> backgroundShader;
@@ -291,7 +291,7 @@ struct Config
     std::shared_ptr<logstore::Sink> loggingSink;
 
     bool sixelScrolling = true;
-    terminal::ImageSize maxImageSize = {}; // default to runtime system screen size.
+    terminal::image_size maxImageSize = {}; // default to runtime system screen size.
     unsigned maxImageColorRegisters = 4096;
 
     std::set<std::string> experimentalFeatures;

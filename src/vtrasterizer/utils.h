@@ -26,15 +26,15 @@ auto const inline RendererLog =
     logstore::Category("vt.renderer", "Logs general information about VT renderer.");
 auto const inline RasterizerLog = logstore::Category("vt.rasterizer", "Logs details about text rendering.");
 
-std::vector<uint8_t> downsampleRGBA(std::vector<uint8_t> const& bitmap, ImageSize size, ImageSize newSize);
+std::vector<uint8_t> downsampleRGBA(std::vector<uint8_t> const& bitmap, image_size size, image_size newSize);
 
 std::vector<uint8_t> downsample(std::vector<uint8_t> const& sourceBitmap,
-                                ImageSize targetSize,
+                                image_size targetSize,
                                 uint8_t factor);
 
 std::vector<uint8_t> downsample(std::vector<uint8_t> const& bitmap,
                                 uint8_t numComponents,
-                                ImageSize size,
-                                ImageSize newSize);
+                                image_size size,
+                                image_size newSize);
 
 } // namespace terminal::rasterizer

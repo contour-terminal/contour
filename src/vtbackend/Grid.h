@@ -47,15 +47,15 @@ struct Margin
 {
     struct Horizontal
     {
-        ColumnOffset from;
-        ColumnOffset
+        column_offset from;
+        column_offset
             to; // TODO: call it begin and end and have end point to to+1 to avoid unnecessary +1's later
 
         [[nodiscard]] constexpr ColumnCount length() const noexcept
         {
             return unbox<ColumnCount>(to - from) + ColumnCount(1);
         }
-        [[nodiscard]] constexpr bool contains(ColumnOffset value) const noexcept
+        [[nodiscard]] constexpr bool contains(column_offset value) const noexcept
         {
             return from <= value && value <= to;
         }
@@ -68,15 +68,15 @@ struct Margin
 
     struct Vertical
     {
-        LineOffset from;
+        line_offset from;
         // TODO: call it begin and end and have end point to to+1 to avoid unnecessary +1's later
-        LineOffset to;
+        line_offset to;
 
         [[nodiscard]] constexpr LineCount length() const noexcept
         {
             return unbox<LineCount>(to - from) + LineCount(1);
         }
-        [[nodiscard]] constexpr bool contains(LineOffset value) const noexcept
+        [[nodiscard]] constexpr bool contains(line_offset value) const noexcept
         {
             return from <= value && value <= to;
         }
@@ -121,8 +121,8 @@ struct RenderPassHints
 template <typename Cell>
 struct LogicalLine
 {
-    LineOffset top {};
-    LineOffset bottom {};
+    line_offset top {};
+    line_offset bottom {};
     std::vector<std::reference_wrapper<Line<Cell>>> lines {};
 
     [[nodiscard]] Line<Cell> joinWithRightTrimmed() const
@@ -149,8 +149,8 @@ struct LogicalLine
     }
 
     // Searches from left to right, taking into account line wrapping
-    [[nodiscard]] std::optional<terminal::CellLocation> search(std::u32string_view searchText,
-                                                               ColumnOffset startPosition) const
+    [[nodiscard]] std::optional<terminal::cell_location> search(std::u32string_view searchText,
+                                                                column_offset startPosition) const
     {
         auto const lineLength = unbox<size_t>(lines.front().get().size());
         auto i = top;
@@ -167,10 +167,10 @@ struct LogicalLine
                     // Match the remaining text
                     std::u32string_view remainingTextToMatch(searchText.data() + result,
                                                              searchText.size() - result);
-                    if (matchTextAt(remainingTextToMatch, ColumnOffset(0), line + 1))
-                        return CellLocation { i, ColumnOffset(static_cast<int>(lineLength - result)) };
+                    if (matchTextAt(remainingTextToMatch, column_offset(0), line + 1))
+                        return cell_location { i, column_offset(static_cast<int>(lineLength - result)) };
                 }
-                startPosition = ColumnOffset(0);
+                startPosition = column_offset(0);
                 ++i;
             }
             return std::nullopt;
@@ -181,24 +181,24 @@ struct LogicalLine
             if (result.has_value())
             {
                 if (result->partialMatchLength == 0)
-                    return CellLocation { i, result->column };
+                    return cell_location { i, result->column };
                 auto remainingText = searchText;
                 remainingText.remove_prefix(result->partialMatchLength);
-                if (line + 1 != lines.end() && (line + 1)->get().matchTextAt(remainingText, ColumnOffset(0)))
-                    return CellLocation { i,
-                                          ColumnOffset::cast_from(
-                                              static_cast<int>(unbox<size_t>(line->get().size())
-                                                               - result->partialMatchLength)) };
+                if (line + 1 != lines.end() && (line + 1)->get().matchTextAt(remainingText, column_offset(0)))
+                    return cell_location { i,
+                                           column_offset::cast_from(
+                                               static_cast<int>(unbox<size_t>(line->get().size())
+                                                                - result->partialMatchLength)) };
             }
-            startPosition = ColumnOffset(0);
+            startPosition = column_offset(0);
             ++i;
         }
         return std::nullopt;
     }
 
     // Searches from right to left, taking into account line wrapping
-    [[nodiscard]] std::optional<terminal::CellLocation> searchReverse(std::u32string_view searchText,
-                                                                      ColumnOffset startPosition) const
+    [[nodiscard]] std::optional<terminal::cell_location> searchReverse(std::u32string_view searchText,
+                                                                       column_offset startPosition) const
     {
         auto i = bottom;
         auto const lineLength = unbox<size_t>(lines.front().get().size());
@@ -224,7 +224,7 @@ struct LogicalLine
                         return std::nullopt;
 
                     // Column where the remaining text should start at
-                    auto const startCol = ColumnOffset::cast_from(
+                    auto const startCol = column_offset::cast_from(
                         (lineLength - (remainingText.size() % lineLength)) % lineLength);
 
                     // Line where the remaining text should start at
@@ -232,27 +232,27 @@ struct LogicalLine
                         static_cast<double>(remainingText.size()) / static_cast<double>(lineLength)));
 
                     if (matchTextAtReverse(remainingText, startCol, line + startLine))
-                        return CellLocation { LineOffset::cast_from(i.value - startLine), startCol };
+                        return cell_location { line_offset::cast_from(i.value - startLine), startCol };
                 }
-                startPosition = ColumnOffset::cast_from(lineLength - 1);
+                startPosition = column_offset::cast_from(lineLength - 1);
                 --i;
             }
             return std::nullopt;
         }
-        auto const lastColumn = ColumnOffset::cast_from(lineLength);
+        auto const lastColumn = column_offset::cast_from(lineLength);
         for (auto line = lines.rbegin(); line != lines.rend(); ++line)
         {
             auto result = line->get().searchReverse(searchText, startPosition);
             if (result.has_value())
             {
                 if (result->partialMatchLength == 0)
-                    return CellLocation { i, result->column };
+                    return cell_location { i, result->column };
                 auto remainingText = searchText;
                 remainingText.remove_suffix(result->partialMatchLength);
                 if (line + 1 != lines.rend()
                     && (line + 1)->get().matchTextAt(remainingText,
                                                      lastColumn - static_cast<int>(remainingText.size())))
-                    return CellLocation { i - 1, lastColumn - static_cast<int>(remainingText.size()) };
+                    return cell_location { i - 1, lastColumn - static_cast<int>(remainingText.size()) };
             }
             startPosition = lastColumn - 1;
             --i;
@@ -268,7 +268,7 @@ struct LogicalLine
         auto const lineLength = unbox<size_t>(line.size());
         while (!searchText.empty())
         {
-            if (line.matchTextAt(searchText, ColumnOffset(static_cast<int>(lineLength - searchText.size()))))
+            if (line.matchTextAt(searchText, column_offset(static_cast<int>(lineLength - searchText.size()))))
                 return searchText.size();
             searchText.remove_suffix(1);
         }
@@ -281,18 +281,19 @@ struct LogicalLine
     {
         while (!searchText.empty())
         {
-            if (line.matchTextAt(searchText, ColumnOffset(0)))
+            if (line.matchTextAt(searchText, column_offset(0)))
                 return searchText.size();
             searchText.remove_prefix(1);
         }
         return 0;
     }
 
-    [[nodiscard]] auto segmentSearchText(std::u32string_view searchText, ColumnOffset startCol) const noexcept
+    [[nodiscard]] auto segmentSearchText(std::u32string_view searchText,
+                                         column_offset startCol) const noexcept
     {
         std::vector<std::u32string_view> segments;
         auto const lineLength = unbox<size_t>(lines.front().get().size());
-        if (startCol > ColumnOffset(0))
+        if (startCol > column_offset(0))
         {
             segments.emplace_back(searchText.data(), lineLength - unbox<size_t>(startCol));
             searchText.remove_prefix(lineLength - unbox<size_t>(startCol));
@@ -313,7 +314,7 @@ struct LogicalLine
     // Match searchText right to left starting at startCol in line startLine
     template <typename Itr>
     [[nodiscard]] bool matchTextAt(std::u32string_view searchText,
-                                   ColumnOffset startCol,
+                                   column_offset startCol,
                                    Itr startLine) const noexcept
     {
         auto segments = segmentSearchText(searchText, startCol);
@@ -329,7 +330,7 @@ struct LogicalLine
     // Match searchText right to left starting at startCol in line startLine
     template <typename Itr>
     [[nodiscard]] bool matchTextAtReverse(std::u32string_view searchText,
-                                          ColumnOffset startCol,
+                                          column_offset startCol,
                                           Itr startLine) const noexcept
     {
         auto segments = segmentSearchText(searchText, startCol);
@@ -337,7 +338,7 @@ struct LogicalLine
         {
             if (!startLine->get().matchTextAt(i, startCol))
                 return false;
-            startCol = ColumnOffset::cast_from(0);
+            startCol = column_offset::cast_from(0);
             --startLine;
         }
         return true;
@@ -359,23 +360,23 @@ bool operator!=(LogicalLine<Cell> const& a, LogicalLine<Cell> const& b) noexcept
 template <typename Cell>
 struct LogicalLines
 {
-    LineOffset topMostLine;
-    LineOffset bottomMostLine;
+    line_offset topMostLine;
+    line_offset bottomMostLine;
     std::reference_wrapper<Lines<Cell>> lines;
 
     // NOLINTNEXTLINE(readability-identifier-naming)
     struct iterator // {{{
     {
         std::reference_wrapper<Lines<Cell>> lines;
-        LineOffset top;
-        LineOffset next; // index to next logical line's beginning
-        LineOffset bottom;
+        line_offset top;
+        line_offset next; // index to next logical line's beginning
+        line_offset bottom;
         LogicalLine<Cell> current;
 
         iterator(std::reference_wrapper<Lines<Cell>> lines,
-                 LineOffset top,
-                 LineOffset next,
-                 LineOffset bottom):
+                 line_offset top,
+                 line_offset next,
+                 line_offset bottom):
             lines { lines }, top { top }, next { next }, bottom { bottom }
         {
             Require(top <= next);
@@ -397,13 +398,13 @@ struct LogicalLines
 
             // Require(!lines.get()[unbox<int>(next)].wrapped());
 
-            current.top = LineOffset::cast_from(next);
+            current.top = line_offset::cast_from(next);
             current.lines.clear();
             do
                 current.lines.emplace_back(lines.get()[unbox<int>(next++)]);
             while (next <= bottom && lines.get()[unbox<int>(next)].wrapped());
 
-            current.bottom = LineOffset::cast_from(next - 1);
+            current.bottom = line_offset::cast_from(next - 1);
 
             return *this;
         }
@@ -460,23 +461,23 @@ struct LogicalLines
 template <typename Cell>
 struct ReverseLogicalLines
 {
-    LineOffset topMostLine;
-    LineOffset bottomMostLine;
+    line_offset topMostLine;
+    line_offset bottomMostLine;
     std::reference_wrapper<Lines<Cell>> lines;
 
     // NOLINTNEXTLINE(readability-identifier-naming)
     struct iterator // {{{
     {
         std::reference_wrapper<Lines<Cell>> lines;
-        LineOffset top;
-        LineOffset next; // index to next logical line's beginning
-        LineOffset bottom;
+        line_offset top;
+        line_offset next; // index to next logical line's beginning
+        line_offset bottom;
         LogicalLine<Cell> current;
 
         iterator(std::reference_wrapper<Lines<Cell>> lines,
-                 LineOffset top,
-                 LineOffset next,
-                 LineOffset bottom):
+                 line_offset top,
+                 line_offset next,
+                 line_offset bottom):
             lines { lines }, top { top }, next { next }, bottom { bottom }
         {
             Require(top - 1 <= next);
@@ -497,13 +498,13 @@ struct ReverseLogicalLines
 
             Require(!lines.get()[unbox<int>(next)].wrapped());
 
-            current.top = LineOffset::cast_from(next);
+            current.top = line_offset::cast_from(next);
             current.lines.clear();
             do
                 current.lines.emplace_back(lines.get()[unbox<int>(next++)]);
             while (next <= bottom && lines.get()[unbox<int>(next)].wrapped());
 
-            current.bottom = LineOffset::cast_from(next - 1);
+            current.bottom = line_offset::cast_from(next - 1);
 
             return *this;
         }
@@ -592,7 +593,7 @@ class Grid
 {
     // TODO: Rename all "History" to "Scrollback"?
   public:
-    Grid(PageSize pageSize, bool reflowOnResize, MaxHistoryLineCount maxHistoryLineCount);
+    Grid(PageSize pageSize, bool reflowOnResize, max_history_line_count maxHistoryLineCount);
 
     Grid(): Grid(PageSize { LineCount(25), ColumnCount(80) }, false, LineCount(0)) {}
 
@@ -607,7 +608,7 @@ class Grid
             return LineCount::cast_from(_lines.size()) - _pageSize.lines;
     }
 
-    void setMaxHistoryLineCount(MaxHistoryLineCount maxHistoryLineCount);
+    void setMaxHistoryLineCount(max_history_line_count maxHistoryLineCount);
 
     [[nodiscard]] LineCount totalLineCount() const noexcept
     {
@@ -630,32 +631,32 @@ class Grid
     /// @param wrapPending       AutoWrap is on and a wrap is pending
     ///
     /// @returns updated cursor position.
-    [[nodiscard]] CellLocation resize(PageSize newSize, CellLocation currentCursorPos, bool wrapPending);
+    [[nodiscard]] cell_location resize(PageSize newSize, cell_location currentCursorPos, bool wrapPending);
     // }}}
 
     // {{{ Line API
     /// @returns reference to Line at given relative offset @p line.
-    [[nodiscard]] Line<Cell>& lineAt(LineOffset line) noexcept;
-    [[nodiscard]] Line<Cell> const& lineAt(LineOffset line) const noexcept;
+    [[nodiscard]] Line<Cell>& lineAt(line_offset line) noexcept;
+    [[nodiscard]] Line<Cell> const& lineAt(line_offset line) const noexcept;
 
-    [[nodiscard]] gsl::span<Cell const> lineBuffer(LineOffset line) const noexcept
+    [[nodiscard]] gsl::span<Cell const> lineBuffer(line_offset line) const noexcept
     {
         return lineAt(line).cells();
     }
-    [[nodiscard]] gsl::span<Cell const> lineBufferRightTrimmed(LineOffset line) const noexcept;
+    [[nodiscard]] gsl::span<Cell const> lineBufferRightTrimmed(line_offset line) const noexcept;
 
-    [[nodiscard]] std::string lineText(LineOffset line) const;
-    [[nodiscard]] std::string lineTextTrimmed(LineOffset line) const;
+    [[nodiscard]] std::string lineText(line_offset line) const;
+    [[nodiscard]] std::string lineTextTrimmed(line_offset line) const;
     [[nodiscard]] std::string lineText(Line<Cell> const& line) const;
 
-    void setLineText(LineOffset line, std::string_view text);
+    void setLineText(line_offset line, std::string_view text);
 
     // void resetLine(LineOffset line, GraphicsAttributes attribs) noexcept
     // { lineAt(line).reset(attribs); }
 
-    [[nodiscard]] ColumnCount lineLength(LineOffset line) const noexcept { return lineAt(line).size(); }
-    [[nodiscard]] bool isLineBlank(LineOffset line) const noexcept;
-    [[nodiscard]] bool isLineWrapped(LineOffset line) const noexcept;
+    [[nodiscard]] ColumnCount lineLength(line_offset line) const noexcept { return lineAt(line).size(); }
+    [[nodiscard]] bool isLineBlank(line_offset line) const noexcept;
+    [[nodiscard]] bool isLineWrapped(line_offset line) const noexcept;
 
     [[nodiscard]] int computeLogicalLineNumberFromBottom(LineCount n) const noexcept;
 
@@ -663,38 +664,38 @@ class Grid
     // }}}
 
     /// Gets a reference to the cell relative to screen origin (top left, 0:0).
-    [[nodiscard]] Cell& useCellAt(LineOffset line, ColumnOffset column) noexcept;
-    [[nodiscard]] Cell& at(LineOffset line, ColumnOffset column) noexcept;
-    [[nodiscard]] Cell const& at(LineOffset line, ColumnOffset column) const noexcept;
+    [[nodiscard]] Cell& useCellAt(line_offset line, column_offset column) noexcept;
+    [[nodiscard]] Cell& at(line_offset line, column_offset column) noexcept;
+    [[nodiscard]] Cell const& at(line_offset line, column_offset column) const noexcept;
 
     // page view API
-    [[nodiscard]] gsl::span<Line<Cell>> pageAtScrollOffset(ScrollOffset scrollOffset);
-    [[nodiscard]] gsl::span<Line<Cell> const> pageAtScrollOffset(ScrollOffset scrollOffset) const;
+    [[nodiscard]] gsl::span<Line<Cell>> pageAtScrollOffset(scroll_offset scrollOffset);
+    [[nodiscard]] gsl::span<Line<Cell> const> pageAtScrollOffset(scroll_offset scrollOffset) const;
     [[nodiscard]] gsl::span<Line<Cell>> mainPage();
     [[nodiscard]] gsl::span<Line<Cell> const> mainPage() const;
 
     [[nodiscard]] LogicalLines<Cell> logicalLines()
     {
-        return LogicalLines<Cell> { boxed_cast<LineOffset>(-historyLineCount()),
-                                    boxed_cast<LineOffset>(_pageSize.lines - 1),
+        return LogicalLines<Cell> { boxed_cast<line_offset>(-historyLineCount()),
+                                    boxed_cast<line_offset>(_pageSize.lines - 1),
                                     _lines };
     }
 
-    [[nodiscard]] LogicalLines<Cell> logicalLinesFrom(LineOffset offset)
+    [[nodiscard]] LogicalLines<Cell> logicalLinesFrom(line_offset offset)
     {
-        return LogicalLines<Cell> { offset, boxed_cast<LineOffset>(_pageSize.lines - 1), _lines };
+        return LogicalLines<Cell> { offset, boxed_cast<line_offset>(_pageSize.lines - 1), _lines };
     }
 
     [[nodiscard]] ReverseLogicalLines<Cell> logicalLinesReverse()
     {
-        return ReverseLogicalLines<Cell> { boxed_cast<LineOffset>(-historyLineCount()),
-                                           boxed_cast<LineOffset>(_pageSize.lines - 1),
+        return ReverseLogicalLines<Cell> { boxed_cast<line_offset>(-historyLineCount()),
+                                           boxed_cast<line_offset>(_pageSize.lines - 1),
                                            _lines };
     }
 
-    [[nodiscard]] ReverseLogicalLines<Cell> logicalLinesReverseFrom(LineOffset offset)
+    [[nodiscard]] ReverseLogicalLines<Cell> logicalLinesReverseFrom(line_offset offset)
     {
-        return ReverseLogicalLines<Cell> { boxed_cast<LineOffset>(-historyLineCount()), offset, _lines };
+        return ReverseLogicalLines<Cell> { boxed_cast<line_offset>(-historyLineCount()), offset, _lines };
     }
 
     // {{{ buffer manipulation
@@ -730,8 +731,8 @@ class Grid
     template <typename RendererT>
     [[nodiscard]] RenderPassHints render(
         RendererT&& render,
-        ScrollOffset scrollOffset = {},
-        HighlightSearchMatches highlightSearchMatches = HighlightSearchMatches::Yes) const;
+        scroll_offset scrollOffset = {},
+        highlight_search_matches highlightSearchMatches = highlight_search_matches::Yes) const;
 
     /// Takes text-screenshot of the main page.
     [[nodiscard]] std::string renderMainPageText() const;
@@ -749,57 +750,57 @@ class Grid
     void verifyState() const noexcept;
 
     // Retrieves the cell location range of the underlying word at the given cursor position.
-    [[nodiscard]] CellLocationRange wordRangeUnderCursor(CellLocation position,
-                                                         std::u32string_view delimiters) const noexcept;
+    [[nodiscard]] cell_location_range wordRangeUnderCursor(cell_location position,
+                                                           std::u32string_view delimiters) const noexcept;
 
-    [[nodiscard]] bool cellEmptyOrContainsOneOf(CellLocation position,
+    [[nodiscard]] bool cellEmptyOrContainsOneOf(cell_location position,
                                                 std::u32string_view delimiters) const noexcept;
 
     // Lineary extracts the text of a given grid cell range.
-    [[nodiscard]] std::u32string extractText(CellLocationRange range) const noexcept;
+    [[nodiscard]] std::u32string extractText(cell_location_range range) const noexcept;
 
     // Conditionally extends the cell location forward if the grid cell at the given location holds a wide
     // character.
-    [[nodiscard]] CellLocation stretchedColumn(CellLocation coord) const noexcept
+    [[nodiscard]] cell_location stretchedColumn(cell_location coord) const noexcept
     {
-        CellLocation stretched = coord;
+        cell_location stretched = coord;
         if (auto const w = cellWidthAt(coord); w > 1) // wide character
         {
-            stretched.column += ColumnOffset::cast_from(w) - 1;
+            stretched.column += column_offset::cast_from(w) - 1;
             return stretched;
         }
 
         return stretched;
     }
 
-    [[nodiscard]] CellLocation rightMostNonEmptyAt(LineOffset lineOffset) const noexcept
+    [[nodiscard]] cell_location rightMostNonEmptyAt(line_offset lineOffset) const noexcept
     {
         auto const& line = lineAt(lineOffset);
 
         if (line.isTrivialBuffer())
         {
             if (line.empty())
-                return CellLocation { lineOffset, ColumnOffset(0) };
+                return cell_location { lineOffset, column_offset(0) };
 
             auto const& trivial = line.trivialBuffer();
-            auto const columnOffset = ColumnOffset::cast_from(trivial.usedColumns - 1);
-            return CellLocation { lineOffset, columnOffset };
+            auto const columnOffset = column_offset::cast_from(trivial.usedColumns - 1);
+            return cell_location { lineOffset, columnOffset };
         }
 
         auto const& inflatedLine = line.cells();
-        auto columnOffset = ColumnOffset::cast_from(_pageSize.columns - 1);
-        while (columnOffset > ColumnOffset(0) && inflatedLine[unbox<size_t>(columnOffset)].empty())
+        auto columnOffset = column_offset::cast_from(_pageSize.columns - 1);
+        while (columnOffset > column_offset(0) && inflatedLine[unbox<size_t>(columnOffset)].empty())
             --columnOffset;
-        return CellLocation { lineOffset, columnOffset };
+        return cell_location { lineOffset, columnOffset };
     }
 
-    [[nodiscard]] uint8_t cellWidthAt(CellLocation position) const noexcept
+    [[nodiscard]] uint8_t cellWidthAt(cell_location position) const noexcept
     {
         return lineAt(position.line).cellWidthAt(position.column);
     }
 
   private:
-    CellLocation growLines(LineCount newHeight, CellLocation cursor);
+    cell_location growLines(LineCount newHeight, cell_location cursor);
     void appendNewLines(LineCount count, GraphicsAttributes attr);
     void clampHistory();
 
@@ -825,7 +826,7 @@ class Grid
     PageSize _pageSize;
     Margin _margin;
     bool _reflowOnResize = false;
-    MaxHistoryLineCount _historyLimit;
+    max_history_line_count _historyLimit;
 
     // Number of lines is at least the sum of _maxHistoryLineCount + _pageSize.lines,
     // because shrinking the page height does not necessarily
@@ -859,9 +860,9 @@ constexpr LineCount Grid<Cell>::linesUsed() const noexcept
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-bool Grid<Cell>::isLineWrapped(LineOffset line) const noexcept
+bool Grid<Cell>::isLineWrapped(line_offset line) const noexcept
 {
-    return line >= -boxed_cast<LineOffset>(historyLineCount())
+    return line >= -boxed_cast<line_offset>(historyLineCount())
            && boxed_cast<LineCount>(line) < _pageSize.lines && lineAt(line).wrapped();
 }
 
@@ -869,25 +870,25 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 template <typename RendererT>
 [[nodiscard]] RenderPassHints Grid<Cell>::render(RendererT&& render,
-                                                 ScrollOffset scrollOffset,
-                                                 HighlightSearchMatches highlightSearchMatches) const
+                                                 scroll_offset scrollOffset,
+                                                 highlight_search_matches highlightSearchMatches) const
 {
     assert(!scrollOffset || unbox<LineCount>(scrollOffset) <= historyLineCount());
 
-    auto y = LineOffset(0);
+    auto y = line_offset(0);
     auto hints = RenderPassHints {};
     for (int i = -*scrollOffset, e = i + *_pageSize.lines; i != e; ++i, ++y)
     {
-        auto x = ColumnOffset(0);
+        auto x = column_offset(0);
         Line<Cell> const& line = _lines[i];
         // NB: trivial liner rendering only works trivially if we don't do cell-based operations
         // on the text. Therefore, we only move to the trivial fast path here if we don't want to
         // highlight search matches.
-        if (line.isTrivialBuffer() && highlightSearchMatches == HighlightSearchMatches::No)
+        if (line.isTrivialBuffer() && highlightSearchMatches == highlight_search_matches::No)
         {
             auto const cellFlags = line.trivialBuffer().textAttributes.flags;
-            hints.containsBlinkingCells = hints.containsBlinkingCells || (CellFlags::Blinking & cellFlags)
-                                          || (CellFlags::RapidBlinking & cellFlags);
+            hints.containsBlinkingCells = hints.containsBlinkingCells || (cell_flags::Blinking & cellFlags)
+                                          || (cell_flags::RapidBlinking & cellFlags);
             render.renderTrivialLine(line.trivialBuffer(), y);
         }
         else
@@ -896,8 +897,8 @@ template <typename RendererT>
             for (Cell const& cell: line.cells())
             {
                 hints.containsBlinkingCells = hints.containsBlinkingCells
-                                              || (CellFlags::Blinking & cell.flags())
-                                              || (CellFlags::RapidBlinking & cell.flags());
+                                              || (cell_flags::Blinking & cell.flags())
+                                              || (cell_flags::RapidBlinking & cell.flags());
                 render.renderCell(cell, y, x++);
             }
             render.endLine();

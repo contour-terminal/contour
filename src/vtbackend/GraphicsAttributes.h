@@ -25,10 +25,10 @@ namespace terminal
 /// Character graphics rendition information.
 struct GraphicsAttributes
 {
-    Color foregroundColor { DefaultColor() };
-    Color backgroundColor { DefaultColor() };
-    Color underlineColor { DefaultColor() };
-    CellFlags flags {};
+    color foregroundColor { DefaultColor() };
+    color backgroundColor { DefaultColor() };
+    color underlineColor { DefaultColor() };
+    cell_flags flags {};
 };
 
 static_assert(std::is_trivially_copy_assignable_v<GraphicsAttributes>);

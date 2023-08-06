@@ -27,7 +27,7 @@ using std::optional;
 namespace terminal::rasterizer
 {
 
-ImageRenderer::ImageRenderer(GridMetrics const& gridMetrics, ImageSize cellSize):
+ImageRenderer::ImageRenderer(GridMetrics const& gridMetrics, image_size cellSize):
     Renderable { gridMetrics }, _cellSize { cellSize }
 {
 }
@@ -39,7 +39,7 @@ void ImageRenderer::setRenderTarget(RenderTarget& renderTarget,
     clearCache();
 }
 
-void ImageRenderer::setCellSize(ImageSize cellSize)
+void ImageRenderer::setCellSize(image_size cellSize)
 {
     _cellSize = cellSize;
     // TODO: recompute rasterized images slices here?
@@ -56,7 +56,7 @@ void ImageRenderer::renderImage(crispy::Point pos, ImageFragment const& fragment
     // clang-format off
     _pendingRenderTilesAboveText.emplace_back(createRenderTile(atlas::RenderTile::X { pos.x },
                                                                atlas::RenderTile::Y { pos.y },
-                                                               RGBAColor::White, *tileAttributes));
+                                                               RenderTarget::RGBAColor::White, *tileAttributes));
     // clang-format on
 }
 

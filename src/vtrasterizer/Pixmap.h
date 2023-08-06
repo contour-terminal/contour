@@ -58,7 +58,7 @@ constexpr RatioBlock left(double r) noexcept  { return RatioBlock { { 0, 0 },   
 constexpr RatioBlock right(double r) noexcept { return RatioBlock { { 1.f - r, 0.f }, { 1.f, 1.f } }; }
 // clang-format on
 
-constexpr crispy::Point operator*(ImageSize a, Ratio b) noexcept
+constexpr crispy::Point operator*(image_size a, Ratio b) noexcept
 {
     return crispy::Point { static_cast<int>(a.width.as<double>() * b.x),
                            static_cast<int>(a.height.as<double>() * b.y) };
@@ -97,7 +97,7 @@ enum Arc
 };
 
 template <typename F>
-auto makeDraw4WaySymmetric(Arc arc, ImageSize size, F putpixel)
+auto makeDraw4WaySymmetric(Arc arc, image_size size, F putpixel)
 {
     return [=](int x, int y) {
         auto const w = unbox<int>(size.width);
@@ -178,7 +178,7 @@ constexpr void drawEllipse(F doDraw4WaySymmetric, crispy::Point radius)
 }
 
 template <typename PutPixel>
-constexpr void drawEllipseArc(PutPixel putpixel, ImageSize imageSize, crispy::Point radius, Arc arc)
+constexpr void drawEllipseArc(PutPixel putpixel, image_size imageSize, crispy::Point radius, Arc arc)
 {
     drawEllipse(makeDraw4WaySymmetric(arc, imageSize, std::move(putpixel)), radius);
 }
@@ -187,8 +187,8 @@ constexpr void drawEllipseArc(PutPixel putpixel, ImageSize imageSize, crispy::Po
 struct Pixmap
 {
     atlas::Buffer buffer {};
-    ImageSize size {};
-    ImageSize downsampledSize {};
+    image_size size {};
+    image_size downsampledSize {};
     std::function<int(int, int)> filler = [](int, int) {
         return 0xFF;
     };
@@ -241,7 +241,7 @@ struct Pixmap
 };
 
 template <std::size_t SupersamplingFactor = 1>
-inline Pixmap blockElement(ImageSize size)
+inline Pixmap blockElement(image_size size)
 {
     auto const superSize = size * SupersamplingFactor;
     return Pixmap { atlas::Buffer(superSize.width.as<size_t>() * superSize.height.as<size_t>(), 0x00),
@@ -250,7 +250,7 @@ inline Pixmap blockElement(ImageSize size)
 }
 
 template <size_t N, typename F>
-Pixmap blockElement(ImageSize size, F f)
+Pixmap blockElement(image_size size, F f)
 {
     auto p = blockElement<N>(size);
     p.filler = f;

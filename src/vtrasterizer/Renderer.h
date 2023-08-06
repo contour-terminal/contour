@@ -41,10 +41,10 @@ namespace terminal::rasterizer
 struct RenderCursor
 {
     crispy::Point position;
-    CursorShape shape;
+    cursor_shape shape;
     int width;
 
-    RenderCursor(crispy::Point position, CursorShape shape, int width):
+    RenderCursor(crispy::Point position, cursor_shape shape, int width):
         position(position), shape(shape), width(width)
     {
     }
@@ -73,7 +73,7 @@ class Renderer
              Decorator hyperlinkNormal,
              Decorator hyperlinkHover);
 
-    [[nodiscard]] ImageSize cellSize() const noexcept { return _gridMetrics.cellSize; }
+    [[nodiscard]] image_size cellSize() const noexcept { return _gridMetrics.cellSize; }
 
     /// Initializes the render and all render subsystems with the given RenderTarget
     /// and then informs all renderables about the newly created texture atlas.

@@ -65,20 +65,20 @@ class SimpleCell
     [[nodiscard]] uint8_t width() const noexcept;
     void setWidth(uint8_t width) noexcept;
 
-    [[nodiscard]] CellFlags flags() const noexcept;
-    [[nodiscard]] bool isFlagEnabled(CellFlags flags) const noexcept;
-    void resetFlags(CellFlags flags = CellFlags::None) noexcept;
+    [[nodiscard]] cell_flags flags() const noexcept;
+    [[nodiscard]] bool isFlagEnabled(cell_flags flags) const noexcept;
+    void resetFlags(cell_flags flags = cell_flags::None) noexcept;
 
-    void setGraphicsRendition(GraphicsRendition sgr) noexcept;
-    void setForegroundColor(Color color) noexcept;
-    void setBackgroundColor(Color color) noexcept;
-    void setUnderlineColor(Color color) noexcept;
-    [[nodiscard]] Color foregroundColor() const noexcept;
-    [[nodiscard]] Color backgroundColor() const noexcept;
-    [[nodiscard]] Color underlineColor() const noexcept;
+    void setGraphicsRendition(graphics_rendition sgr) noexcept;
+    void setForegroundColor(color color) noexcept;
+    void setBackgroundColor(color color) noexcept;
+    void setUnderlineColor(color color) noexcept;
+    [[nodiscard]] color foregroundColor() const noexcept;
+    [[nodiscard]] color backgroundColor() const noexcept;
+    [[nodiscard]] color underlineColor() const noexcept;
 
     [[nodiscard]] std::shared_ptr<ImageFragment> imageFragment() const noexcept;
-    void setImageFragment(std::shared_ptr<RasterizedImage> image, CellLocation offset);
+    void setImageFragment(std::shared_ptr<RasterizedImage> image, cell_location offset);
 
     [[nodiscard]] HyperlinkId hyperlink() const noexcept;
     void setHyperlink(HyperlinkId hyperlink) noexcept;
@@ -88,7 +88,7 @@ class SimpleCell
   private:
     std::u32string _codepoints {};
     GraphicsAttributes _graphicsAttributes {};
-    CellFlags _flags {};
+    cell_flags _flags {};
     uint8_t _width = 1;
     HyperlinkId _hyperlink {};
     std::shared_ptr<ImageFragment> _imageFragment {};
@@ -203,52 +203,52 @@ inline void SimpleCell::setWidth(uint8_t newWidth) noexcept
     _width = newWidth;
 }
 
-inline CellFlags SimpleCell::flags() const noexcept
+inline cell_flags SimpleCell::flags() const noexcept
 {
     return _flags;
 }
 
-inline bool SimpleCell::isFlagEnabled(CellFlags testFlags) const noexcept
+inline bool SimpleCell::isFlagEnabled(cell_flags testFlags) const noexcept
 {
     return _flags & testFlags;
 }
 
-inline void SimpleCell::resetFlags(CellFlags flags) noexcept
+inline void SimpleCell::resetFlags(cell_flags flags) noexcept
 {
     _flags = flags;
 }
 
-inline void SimpleCell::setGraphicsRendition(GraphicsRendition sgr) noexcept
+inline void SimpleCell::setGraphicsRendition(graphics_rendition sgr) noexcept
 {
     CellUtil::applyGraphicsRendition(sgr, *this);
 }
 
-inline void SimpleCell::setForegroundColor(Color color) noexcept
+inline void SimpleCell::setForegroundColor(color color) noexcept
 {
     _graphicsAttributes.foregroundColor = color;
 }
 
-inline void SimpleCell::setBackgroundColor(Color color) noexcept
+inline void SimpleCell::setBackgroundColor(color color) noexcept
 {
     _graphicsAttributes.backgroundColor = color;
 }
 
-inline void SimpleCell::setUnderlineColor(Color color) noexcept
+inline void SimpleCell::setUnderlineColor(color color) noexcept
 {
     _graphicsAttributes.underlineColor = color;
 }
 
-inline Color SimpleCell::foregroundColor() const noexcept
+inline color SimpleCell::foregroundColor() const noexcept
 {
     return _graphicsAttributes.foregroundColor;
 }
 
-inline Color SimpleCell::backgroundColor() const noexcept
+inline color SimpleCell::backgroundColor() const noexcept
 {
     return _graphicsAttributes.backgroundColor;
 }
 
-inline Color SimpleCell::underlineColor() const noexcept
+inline color SimpleCell::underlineColor() const noexcept
 {
     return _graphicsAttributes.underlineColor;
 }
@@ -259,7 +259,7 @@ inline std::shared_ptr<ImageFragment> SimpleCell::imageFragment() const noexcept
 }
 
 inline void SimpleCell::setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage,
-                                         CellLocation offset)
+                                         cell_location offset)
 {
     _imageFragment = std::make_shared<ImageFragment>(std::move(rasterizedImage), offset);
 }

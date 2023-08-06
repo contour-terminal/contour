@@ -33,11 +33,11 @@
 
 using namespace std;
 using namespace std::chrono_literals;
-using terminal::CellFlags;
+using terminal::cell_flags;
+using terminal::column_offset;
 using terminal::ColumnCount;
-using terminal::ColumnOffset;
+using terminal::line_offset;
 using terminal::LineCount;
-using terminal::LineOffset;
 using terminal::MockTerm;
 using terminal::PageSize;
 
@@ -62,7 +62,7 @@ TEST_CASE("Terminal.BlinkingCursor", "[terminal]")
 {
     auto mc = MockTerm { ColumnCount { 6 }, LineCount { 4 } };
     auto& terminal = mc.terminal;
-    terminal.setCursorDisplay(terminal::CursorDisplay::Blink);
+    terminal.setCursorDisplay(terminal::cursor_display::Blink);
     auto constexpr BlinkInterval = chrono::milliseconds(500);
     terminal.setCursorBlinkingInterval(BlinkInterval);
 
@@ -140,13 +140,13 @@ TEST_CASE("Terminal.DECCARA", "[terminal]")
         for (auto column = left; column <= right; ++column)
         {
             // clang-format off
-            auto const& someCell = mock.terminal.primaryScreen().at(LineOffset(line - 1), ColumnOffset(column - 1));
+            auto const& someCell = mock.terminal.primaryScreen().at(line_offset(line - 1), column_offset(column - 1));
             auto const rgb = someCell.foregroundColor().rgb();
             auto const colorDec = fmt::format("{}/{}/{}", unsigned(rgb.red), unsigned(rgb.green), unsigned(rgb.blue));
             INFO(fmt::format("at line {} column {}, flags {}", line, column, someCell.flags()));
             CHECK(colorDec == "171/178/191");
-            CHECK(someCell.isFlagEnabled(terminal::CellFlags::Bold));
-            CHECK(someCell.isFlagEnabled(terminal::CellFlags::Underline));
+            CHECK(someCell.isFlagEnabled(terminal::cell_flags::Bold));
+            CHECK(someCell.isFlagEnabled(terminal::cell_flags::Underline));
             // clang-format on
         }
 }
@@ -205,13 +205,13 @@ TEST_CASE("Terminal.RIS", "[terminal]")
     mc.terminal.tick(mc.terminal.currentTime() + chrono::milliseconds(500));
     mc.terminal.ensureFreshRenderBuffer();
 
-    mc.terminal.setStatusDisplay(StatusDisplayType::Indicator);
+    mc.terminal.setStatusDisplay(status_display_type::Indicator);
     mc.terminal.tick(mc.terminal.currentTime() + chrono::milliseconds(500));
     mc.terminal.ensureFreshRenderBuffer();
     mc.writeToScreen(RIS);
     mc.terminal.forceRedraw({});
 
-    CHECK(mc.terminal.statusDisplayType() == StatusDisplayType::None);
+    CHECK(mc.terminal.statusDisplayType() == status_display_type::None);
 }
 
 TEST_CASE("Terminal.SynchronizedOutput", "[terminal]")
@@ -368,15 +368,15 @@ TEST_CASE("Terminal.CurlyUnderline", "[terminal]")
 
     auto& screen = mc.terminal.primaryScreen();
 
-    CHECK(screen.at(LineOffset(0), ColumnOffset(0)).isFlagEnabled(CellFlags::CurlyUnderlined));
-    CHECK(screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlags::CurlyUnderlined));
-    CHECK(!screen.at(LineOffset(0), ColumnOffset(2)).isFlagEnabled(CellFlags::CurlyUnderlined));
-    CHECK(!screen.at(LineOffset(0), ColumnOffset(3)).isFlagEnabled(CellFlags::CurlyUnderlined));
+    CHECK(screen.at(line_offset(0), column_offset(0)).isFlagEnabled(cell_flags::CurlyUnderlined));
+    CHECK(screen.at(line_offset(0), column_offset(1)).isFlagEnabled(cell_flags::CurlyUnderlined));
+    CHECK(!screen.at(line_offset(0), column_offset(2)).isFlagEnabled(cell_flags::CurlyUnderlined));
+    CHECK(!screen.at(line_offset(0), column_offset(3)).isFlagEnabled(cell_flags::CurlyUnderlined));
 
-    CHECK(!screen.at(LineOffset(0), ColumnOffset(0)).isFlagEnabled(CellFlags::Italic));
-    CHECK(!screen.at(LineOffset(0), ColumnOffset(1)).isFlagEnabled(CellFlags::Italic));
-    CHECK(!screen.at(LineOffset(0), ColumnOffset(2)).isFlagEnabled(CellFlags::Italic));
-    CHECK(!screen.at(LineOffset(0), ColumnOffset(3)).isFlagEnabled(CellFlags::Italic));
+    CHECK(!screen.at(line_offset(0), column_offset(0)).isFlagEnabled(cell_flags::Italic));
+    CHECK(!screen.at(line_offset(0), column_offset(1)).isFlagEnabled(cell_flags::Italic));
+    CHECK(!screen.at(line_offset(0), column_offset(2)).isFlagEnabled(cell_flags::Italic));
+    CHECK(!screen.at(line_offset(0), column_offset(3)).isFlagEnabled(cell_flags::Italic));
 }
 
 TEST_CASE("Terminal.TextSelection", "[terminal]")
@@ -402,7 +402,7 @@ TEST_CASE("Terminal.TextSelection", "[terminal]")
     // Perform selection
     using namespace terminal;
     auto constexpr uiHandledHint = false;
-    auto constexpr pixelCoordinate = PixelCoordinate {};
+    auto constexpr pixelCoordinate = pixel_coordinate {};
 
     mock.terminal.tick(1s);
     mock.terminal.sendMouseMoveEvent(

@@ -91,10 +91,10 @@ class TextRenderer: public Renderable
     /// transformed into a RenderCell.
     void renderCell(RenderCell const& cell);
 
-    void renderCell(CellLocation position,
+    void renderCell(cell_location position,
                     std::u32string_view graphemeCluster,
                     TextStyle textStyle,
-                    RGBColor foregroundColor);
+                    rgb_color foregroundColor);
 
     void renderLine(RenderLine const& renderLine);
 
@@ -106,7 +106,7 @@ class TextRenderer: public Renderable
 
     /// Puts a sequence of codepoints that belong to the same grid cell at @p _pos
     /// at the end of the currently filled line.
-    void appendCellTextToClusterGroup(std::u32string_view codepoints, TextStyle style, RGBColor color);
+    void appendCellTextToClusterGroup(std::u32string_view codepoints, TextStyle style, rgb_color color);
 
     /// Gets the text shaping result of the current text cluster group
     text::shape_result const& getOrCreateCachedGlyphPositions(crispy::StrongHash hash);
@@ -139,7 +139,7 @@ class TextRenderer: public Renderable
                                           AtlasTileAttributes const& tileAttributes,
                                           text::glyph_position const& gpos) const noexcept;
 
-    void renderRasterizedGlyph(crispy::Point pen, RGBAColor color, AtlasTileAttributes const& attributes);
+    void renderRasterizedGlyph(crispy::Point pen, rgba_color color, AtlasTileAttributes const& attributes);
 
     // general properties
     //
@@ -187,7 +187,7 @@ class TextRenderer: public Renderable
         TextStyle style = TextStyle::Invalid;
 
         // uniform text color for this text group
-        RGBColor color {};
+        rgb_color color {};
 
         // codepoints within this text group with
         // uniform unicode properties (script, language, direction).

@@ -55,9 +55,9 @@ class VTWriter
     void sgrFlush();
     void sgrAdd(unsigned n);
     void sgrRewind();
-    void sgrAdd(GraphicsRendition m);
-    void setForegroundColor(Color color);
-    void setBackgroundColor(Color color);
+    void sgrAdd(graphics_rendition m);
+    void setForegroundColor(color color);
+    void setBackgroundColor(color color);
 
     void sgrAddExplicit(unsigned n);
 
@@ -78,9 +78,9 @@ class VTWriter
     std::vector<unsigned> _sgr;
     std::stringstream _sstr;
     std::vector<unsigned> _lastSGR;
-    Color _currentForegroundColor = DefaultColor();
-    Color _currentUnderlineColor = DefaultColor();
-    Color _currentBackgroundColor = DefaultColor();
+    color _currentForegroundColor = DefaultColor();
+    color _currentUnderlineColor = DefaultColor();
+    color _currentBackgroundColor = DefaultColor();
 };
 
 template <typename... T>

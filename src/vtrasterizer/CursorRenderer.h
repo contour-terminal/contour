@@ -30,29 +30,29 @@ namespace terminal::rasterizer
 class CursorRenderer: public Renderable
 {
   public:
-    CursorRenderer(GridMetrics const& gridMetrics, CursorShape shape);
+    CursorRenderer(GridMetrics const& gridMetrics, cursor_shape shape);
 
     void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
     void setTextureAtlas(TextureAtlas& atlas) override;
 
     void clearCache() override;
 
-    [[nodiscard]] CursorShape shape() const noexcept { return _shape; }
-    void setShape(CursorShape shape);
+    [[nodiscard]] cursor_shape shape() const noexcept { return _shape; }
+    void setShape(cursor_shape shape);
 
-    void render(crispy::Point pos, int columnWidth, RGBColor color);
+    void render(crispy::Point pos, int columnWidth, rgb_color color);
 
     void inspect(std::ostream& output) const override;
 
   private:
     void initializeDirectMapping();
     using Renderable::createTileData;
-    [[nodiscard]] TextureAtlas::TileCreateData createTileData(CursorShape shape,
+    [[nodiscard]] TextureAtlas::TileCreateData createTileData(cursor_shape shape,
                                                               int columnWidth,
                                                               atlas::TileLocation tileLocation);
 
     DirectMapping _directMapping {};
-    CursorShape _shape;
+    cursor_shape _shape;
 };
 
 } // namespace terminal::rasterizer

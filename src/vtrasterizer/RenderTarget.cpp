@@ -33,8 +33,8 @@ void Renderable::setRenderTarget(RenderTarget& renderTarget, DirectMappingAlloca
 auto Renderable::createTileData(atlas::TileLocation tileLocation,
                                 std::vector<uint8_t> bitmap,
                                 atlas::Format bitmapFormat,
-                                ImageSize bitmapSize,
-                                ImageSize renderBitmapSize,
+                                image_size bitmapSize,
+                                image_size renderBitmapSize,
                                 RenderTileAttributes::X x,
                                 RenderTileAttributes::Y y,
                                 uint32_t fragmentShaderSelector) -> TextureAtlas::TileCreateData
@@ -68,8 +68,8 @@ auto Renderable::sliceTileData(Renderable::TextureAtlas::TileCreateData const& c
     auto const colorComponentCount = element_count(bitmapFormat);
     auto const pitch = unbox<uintptr_t>(createData.bitmapSize.width) * colorComponentCount;
 
-    auto const subWidth = Width(sliceIndex.endX - sliceIndex.beginX);
-    auto const subSize = ImageSize { subWidth, createData.bitmapSize.height };
+    auto const subWidth = width(sliceIndex.endX - sliceIndex.beginX);
+    auto const subSize = image_size { subWidth, createData.bitmapSize.height };
     auto const subPitch = unbox<uintptr_t>(subWidth) * colorComponentCount;
     auto bitmap = vector<uint8_t>();
     bitmap.resize(subSize.area() * colorComponentCount);
@@ -93,7 +93,7 @@ auto Renderable::sliceTileData(Renderable::TextureAtlas::TileCreateData const& c
 
 atlas::RenderTile Renderable::createRenderTile(atlas::RenderTile::X x,
                                                atlas::RenderTile::Y y,
-                                               RGBAColor color,
+                                               rgba_color color,
                                                Renderable::AtlasTileAttributes const& attributes)
 {
     auto renderTile = atlas::RenderTile {};
@@ -110,7 +110,7 @@ atlas::RenderTile Renderable::createRenderTile(atlas::RenderTile::X x,
 
 void Renderable::renderTile(atlas::RenderTile::X x,
                             atlas::RenderTile::Y y,
-                            RGBAColor color,
+                            rgba_color color,
                             Renderable::AtlasTileAttributes const& attributes)
 {
     textureScheduler().renderTile(createRenderTile(x, y, color, attributes));

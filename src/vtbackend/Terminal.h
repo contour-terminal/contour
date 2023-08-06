@@ -112,7 +112,7 @@ class Terminal
 
         virtual void requestCaptureBuffer(LineCount /*lines*/, bool /*logical*/) {}
         virtual void bell() {}
-        virtual void bufferChanged(ScreenType) {}
+        virtual void bufferChanged(screen_type) {}
         virtual void renderBufferUpdated() {}
         virtual void screenUpdated() {}
         virtual FontDef getFontDef() { return {}; }
@@ -124,16 +124,16 @@ class Terminal
         virtual void pasteFromClipboard(unsigned /*count*/, bool /*strip*/) {}
         virtual void onSelectionCompleted() {}
         virtual void requestWindowResize(LineCount, ColumnCount) {}
-        virtual void requestWindowResize(Width, Height) {}
+        virtual void requestWindowResize(width, height) {}
         virtual void requestShowHostWritableStatusLine() {}
         virtual void setWindowTitle(std::string_view /*title*/) {}
         virtual void setTerminalProfile(std::string const& /*configProfileName*/) {}
         virtual void discardImage(Image const&) {}
-        virtual void inputModeChanged(ViMode /*mode*/) {}
+        virtual void inputModeChanged(vi_mode /*mode*/) {}
         virtual void updateHighlights() {}
         virtual void playSound(Sequence::Parameters const&) {}
         virtual void cursorPositionChanged() {}
-        virtual void onScrollOffsetChanged(ScrollOffset) {}
+        virtual void onScrollOffsetChanged(scroll_offset) {}
     };
 
     Terminal(Events& eventListener,
@@ -145,66 +145,67 @@ class Terminal
     void start();
 
     void setRefreshRate(RefreshRate refreshRate);
-    void setLastMarkRangeOffset(LineOffset value) noexcept;
+    void setLastMarkRangeOffset(line_offset value) noexcept;
 
-    void setMaxHistoryLineCount(MaxHistoryLineCount maxHistoryLineCount);
+    void setMaxHistoryLineCount(max_history_line_count maxHistoryLineCount);
     LineCount maxHistoryLineCount() const noexcept;
 
     void setTerminalId(VTType id) noexcept { _state.terminalId = id; }
 
-    void setMaxImageSize(ImageSize size) noexcept { _state.effectiveImageCanvasSize = size; }
+    void setMaxImageSize(image_size size) noexcept { _state.effectiveImageCanvasSize = size; }
 
-    void setMaxImageSize(ImageSize effective, ImageSize limit)
+    void setMaxImageSize(image_size effective, image_size limit)
     {
         _state.effectiveImageCanvasSize = effective;
         _settings.maxImageSize = limit;
     }
 
-    bool isModeEnabled(AnsiMode m) const noexcept { return _state.modes.enabled(m); }
-    bool isModeEnabled(DECMode m) const noexcept { return _state.modes.enabled(m); }
-    void setMode(AnsiMode mode, bool enable);
-    void setMode(DECMode mode, bool enable);
+    bool isModeEnabled(ansi_mode m) const noexcept { return _state.modes.enabled(m); }
+    bool isModeEnabled(dec_mode m) const noexcept { return _state.modes.enabled(m); }
+    void setMode(ansi_mode mode, bool enable);
+    void setMode(dec_mode mode, bool enable);
 
-    void setTopBottomMargin(std::optional<LineOffset> top, std::optional<LineOffset> bottom);
-    void setLeftRightMargin(std::optional<ColumnOffset> left, std::optional<ColumnOffset> right);
+    void setTopBottomMargin(std::optional<line_offset> top, std::optional<line_offset> bottom);
+    void setLeftRightMargin(std::optional<column_offset> left, std::optional<column_offset> right);
 
-    void moveCursorTo(LineOffset line, ColumnOffset column);
+    void moveCursorTo(line_offset line, column_offset column);
 
-    void setGraphicsRendition(GraphicsRendition rendition);
-    void setForegroundColor(Color color);
-    void setBackgroundColor(Color color);
-    void setUnderlineColor(Color color);
+    void setGraphicsRendition(graphics_rendition rendition);
+    void setForegroundColor(color color);
+    void setBackgroundColor(color color);
+    void setUnderlineColor(color color);
     void setHighlightRange(HighlightRange range);
 
     // {{{ cursor
     /// Clamps given logical coordinates to margins as used in when DECOM (origin mode) is enabled.
-    [[nodiscard]] CellLocation clampToOrigin(CellLocation coord) const noexcept
+    [[nodiscard]] cell_location clampToOrigin(cell_location coord) const noexcept
     {
-        return { std::clamp(coord.line, LineOffset { 0 }, currentScreen().margin().vertical.to),
-                 std::clamp(coord.column, ColumnOffset { 0 }, currentScreen().margin().horizontal.to) };
+        return { std::clamp(coord.line, line_offset { 0 }, currentScreen().margin().vertical.to),
+                 std::clamp(coord.column, column_offset { 0 }, currentScreen().margin().horizontal.to) };
     }
 
-    [[nodiscard]] LineOffset clampedLine(LineOffset line) const noexcept
+    [[nodiscard]] line_offset clampedLine(line_offset line) const noexcept
     {
-        return std::clamp(line, LineOffset(0), boxed_cast<LineOffset>(_settings.pageSize.lines) - 1);
+        return std::clamp(line, line_offset(0), boxed_cast<line_offset>(_settings.pageSize.lines) - 1);
     }
 
-    [[nodiscard]] ColumnOffset clampedColumn(ColumnOffset column) const noexcept
+    [[nodiscard]] column_offset clampedColumn(column_offset column) const noexcept
     {
-        return std::clamp(column, ColumnOffset(0), boxed_cast<ColumnOffset>(_settings.pageSize.columns) - 1);
+        return std::clamp(
+            column, column_offset(0), boxed_cast<column_offset>(_settings.pageSize.columns) - 1);
     }
 
-    [[nodiscard]] CellLocation clampToScreen(CellLocation coord) const noexcept
+    [[nodiscard]] cell_location clampToScreen(cell_location coord) const noexcept
     {
         return { clampedLine(coord.line), clampedColumn(coord.column) };
     }
 
     // Tests if given coordinate is within the visible screen area.
-    [[nodiscard]] constexpr bool contains(CellLocation coord) const noexcept
+    [[nodiscard]] constexpr bool contains(cell_location coord) const noexcept
     {
-        return LineOffset(0) <= coord.line && coord.line < boxed_cast<LineOffset>(_settings.pageSize.lines)
-               && ColumnOffset(0) <= coord.column
-               && coord.column <= boxed_cast<ColumnOffset>(_settings.pageSize.columns);
+        return line_offset(0) <= coord.line && coord.line < boxed_cast<line_offset>(_settings.pageSize.lines)
+               && column_offset(0) <= coord.column
+               && coord.column <= boxed_cast<column_offset>(_settings.pageSize.columns);
     }
 
     [[nodiscard]] bool isCursorInViewport() const noexcept
@@ -213,8 +214,8 @@ class Terminal
     }
     // }}}
 
-    [[nodiscard]] constexpr ImageSize cellPixelSize() const noexcept { return _state.cellPixelSize; }
-    constexpr void setCellPixelSize(ImageSize cellPixelSize) { _state.cellPixelSize = cellPixelSize; }
+    [[nodiscard]] constexpr image_size cellPixelSize() const noexcept { return _state.cellPixelSize; }
+    constexpr void setCellPixelSize(image_size cellPixelSize) { _state.cellPixelSize = cellPixelSize; }
 
     /// Retrieves the time point this terminal instance has been spawned.
     [[nodiscard]] std::chrono::steady_clock::time_point currentTime() const noexcept { return _currentTime; }
@@ -233,9 +234,9 @@ class Terminal
     {
         switch (_state.statusDisplayType)
         {
-            case StatusDisplayType::None: return LineCount(0);
-            case StatusDisplayType::Indicator: return _indicatorStatusScreen.pageSize().lines;
-            case StatusDisplayType::HostWritable: return _hostWritableStatusLineScreen.pageSize().lines;
+            case status_display_type::None: return LineCount(0);
+            case status_display_type::Indicator: return _indicatorStatusScreen.pageSize().lines;
+            case status_display_type::HostWritable: return _hostWritableStatusLineScreen.pageSize().lines;
         }
         crispy::unreachable();
     }
@@ -243,8 +244,8 @@ class Terminal
     /// Resizes the terminal screen to the given amount of grid cells with their pixel dimensions.
     /// Important! In case a status line is currently visible, the status line count is being
     /// accumulated into the screen size, too.
-    void resizeScreen(PageSize totalPageSize, std::optional<ImageSize> pixels = std::nullopt);
-    void resizeScreenInternal(PageSize totalPageSize, std::optional<ImageSize> pixels);
+    void resizeScreen(PageSize totalPageSize, std::optional<image_size> pixels = std::nullopt);
+    void resizeScreenInternal(PageSize totalPageSize, std::optional<image_size> pixels);
 
     /// Implements semantics for  DECCOLM / DECSCPP.
     void resizeColumns(ColumnCount newColumnCount, bool clear);
@@ -260,15 +261,15 @@ class Terminal
     bool sendCharPressEvent(char32_t ch, Modifier modifier, Timestamp now);
     bool sendMousePressEvent(Modifier modifier,
                              MouseButton button,
-                             PixelCoordinate pixelPosition,
+                             pixel_coordinate pixelPosition,
                              bool uiHandledHint);
     void sendMouseMoveEvent(Modifier modifier,
-                            CellLocation newPosition,
-                            PixelCoordinate pixelPosition,
+                            cell_location newPosition,
+                            pixel_coordinate pixelPosition,
                             bool uiHandledHint);
     bool sendMouseReleaseEvent(Modifier modifier,
                                MouseButton button,
-                               PixelCoordinate pixelPosition,
+                               pixel_coordinate pixelPosition,
                                bool uiHandledHint);
     bool sendFocusInEvent();
     bool sendFocusOutEvent();
@@ -279,7 +280,7 @@ class Terminal
     }
     void sendRawInput(std::string_view text);
 
-    void inputModeChanged(ViMode mode) { _eventListener.inputModeChanged(mode); }
+    void inputModeChanged(vi_mode mode) { _eventListener.inputModeChanged(mode); }
     void updateHighlights() { _eventListener.updateHighlights(); }
     void playSound(terminal::Sequence::Parameters const& params) { _eventListener.playSound(params); }
 
@@ -394,9 +395,9 @@ class Terminal
     {
         switch (_state.activeStatusDisplay)
         {
-            case ActiveStatusDisplay::Main: return _currentScreen.get();
-            case ActiveStatusDisplay::StatusLine: return _hostWritableStatusLineScreen;
-            case ActiveStatusDisplay::IndicatorStatusLine: return _indicatorStatusScreen;
+            case terminal::active_status_display::Main: return _currentScreen.get();
+            case terminal::active_status_display::StatusLine: return _hostWritableStatusLineScreen;
+            case terminal::active_status_display::IndicatorStatusLine: return _indicatorStatusScreen;
         }
         crispy::unreachable();
     }
@@ -414,17 +415,17 @@ class Terminal
         crispy::unreachable();
     }
 
-    bool isPrimaryScreen() const noexcept { return _state.screenType == ScreenType::Primary; }
-    bool isAlternateScreen() const noexcept { return _state.screenType == ScreenType::Alternate; }
-    ScreenType screenType() const noexcept { return _state.screenType; }
-    void setScreen(ScreenType screenType);
+    bool isPrimaryScreen() const noexcept { return _state.screenType == screen_type::Primary; }
+    bool isAlternateScreen() const noexcept { return _state.screenType == screen_type::Alternate; }
+    screen_type screenType() const noexcept { return _state.screenType; }
+    void setScreen(screen_type screenType);
 
-    ScreenBase& screenForType(ScreenType type) noexcept
+    ScreenBase& screenForType(screen_type type) noexcept
     {
         switch (type)
         {
-            case ScreenType::Primary: return _primaryScreen;
-            case ScreenType::Alternate: return _alternateScreen;
+            case screen_type::Primary: return _primaryScreen;
+            case screen_type::Alternate: return _alternateScreen;
         }
         crispy::unreachable();
     }
@@ -443,14 +444,14 @@ class Terminal
     [[nodiscard]] Screen<StatusDisplayCell> const& indicatorStatusLineDisplay() const noexcept { return _indicatorStatusScreen; }
     // clang-format on
 
-    [[nodiscard]] bool isLineWrapped(LineOffset lineNumber) const noexcept
+    [[nodiscard]] bool isLineWrapped(line_offset lineNumber) const noexcept
     {
         return isPrimaryScreen() && _primaryScreen.isLineWrapped(lineNumber);
     }
 
-    [[nodiscard]] CellLocation currentMousePosition() const noexcept { return _currentMousePosition; }
+    [[nodiscard]] cell_location currentMousePosition() const noexcept { return _currentMousePosition; }
 
-    [[nodiscard]] std::optional<CellLocation> currentMouseGridPosition() const noexcept
+    [[nodiscard]] std::optional<cell_location> currentMouseGridPosition() const noexcept
     {
         if (_currentScreen.get().contains(_currentMousePosition))
             return _viewport.translateScreenToGridCoordinate(_currentMousePosition);
@@ -458,18 +459,18 @@ class Terminal
     }
 
     // {{{ cursor management
-    CursorDisplay cursorDisplay() const noexcept { return _settings.cursorDisplay; }
-    void setCursorDisplay(CursorDisplay display);
+    cursor_display cursorDisplay() const noexcept { return _settings.cursorDisplay; }
+    void setCursorDisplay(cursor_display display);
 
-    CursorShape cursorShape() const noexcept { return _settings.cursorShape; }
-    void setCursorShape(CursorShape shape);
+    cursor_shape cursorShape() const noexcept { return _settings.cursorShape; }
+    void setCursorShape(cursor_shape shape);
 
     bool cursorBlinkActive() const noexcept { return _cursorBlinkState; }
 
     bool cursorCurrentlyVisible() const noexcept
     {
-        return isModeEnabled(DECMode::VisibleCursor)
-               && (cursorDisplay() == CursorDisplay::Steady || _cursorBlinkState);
+        return isModeEnabled(dec_mode::VisibleCursor)
+               && (cursorDisplay() == cursor_display::Steady || _cursorBlinkState);
     }
 
     bool isBlinkOnScreen() const noexcept { return _lastRenderPassHints.containsBlinkingCells; }
@@ -504,10 +505,10 @@ class Terminal
 
         if (isPrimaryScreen())
             terminal::renderSelection(*_selection,
-                                      [&](CellLocation pos) { renderTarget(pos, _primaryScreen.at(pos)); });
+                                      [&](cell_location pos) { renderTarget(pos, _primaryScreen.at(pos)); });
         else
-            terminal::renderSelection(*_selection,
-                                      [&](CellLocation pos) { renderTarget(pos, _alternateScreen.at(pos)); });
+            terminal::renderSelection(
+                *_selection, [&](cell_location pos) { renderTarget(pos, _alternateScreen.at(pos)); });
     }
 
     void clearSelection();
@@ -527,19 +528,19 @@ class Terminal
     }
 
     /// Tests whether given absolute coordinate is covered by a current selection.
-    bool isSelected(CellLocation coord) const noexcept
+    bool isSelected(cell_location coord) const noexcept
     {
         return _selection && _selection->state() != Selection::State::Waiting && _selection->contains(coord);
     }
 
     /// Tests whether given line offset is intersecting with selection.
-    bool isSelected(LineOffset line) const noexcept
+    bool isSelected(line_offset line) const noexcept
     {
         return _selection && _selection->state() != Selection::State::Waiting
                && _selection->containsLine(line);
     }
 
-    bool isHighlighted(CellLocation cell) const noexcept;
+    bool isHighlighted(cell_location cell) const noexcept;
     bool blinkState() const noexcept { return _slowBlinker.state; }
     bool rapidBlinkState() const noexcept { return _rapidBlinker.state; }
 
@@ -585,7 +586,7 @@ class Terminal
     void requestCaptureBuffer(LineCount lines, bool logical);
     void requestShowHostWritableStatusLine();
     void bell();
-    void bufferChanged(ScreenType);
+    void bufferChanged(screen_type);
     void scrollbackBufferCleared();
     void screenUpdated();
     void renderBufferUpdated();
@@ -603,10 +604,10 @@ class Terminal
     }
 
     void requestWindowResize(PageSize);
-    void requestWindowResize(ImageSize);
+    void requestWindowResize(image_size);
     void setApplicationkeypadMode(bool enabled);
     void setBracketedPaste(bool enabled);
-    void setCursorStyle(CursorDisplay display, CursorShape shape);
+    void setCursorStyle(cursor_display display, cursor_shape shape);
     void setCursorVisibility(bool visible);
     void setGenerateFocusEvents(bool enabled);
     void setMouseProtocol(MouseProtocol protocol, bool enabled);
@@ -622,8 +623,8 @@ class Terminal
     void hardReset();
     void forceRedraw(std::function<void()> const& artificialSleep);
     void discardImage(Image const&);
-    void markCellDirty(CellLocation position) noexcept;
-    void markRegionDirty(Rect area) noexcept;
+    void markCellDirty(cell_location position) noexcept;
+    void markRegionDirty(rect area) noexcept;
     void synchronizedOutput(bool enabled);
     void onBufferScrolled(LineCount n) noexcept;
 
@@ -641,7 +642,7 @@ class Terminal
     [[nodiscard]] TerminalState const& state() const noexcept { return _state; }
 
     void applyPageSizeToCurrentBuffer();
-    void applyPageSizeToMainDisplay(ScreenType screenType);
+    void applyPageSizeToMainDisplay(screen_type screenType);
 
     [[nodiscard]] crispy::BufferObjectPtr<char> currentPtyBuffer() const noexcept
     {
@@ -663,37 +664,38 @@ class Terminal
     [[nodiscard]] ViInputHandler const& inputHandler() const noexcept { return _state.inputHandler; }
     void resetHighlight();
 
-    StatusDisplayType statusDisplayType() const noexcept { return _state.statusDisplayType; }
-    void setStatusDisplay(StatusDisplayType statusDisplayType);
-    void setActiveStatusDisplay(ActiveStatusDisplay activeDisplay);
+    status_display_type statusDisplayType() const noexcept { return _state.statusDisplayType; }
+    void setStatusDisplay(status_display_type statusDisplayType);
+    void setActiveStatusDisplay(active_status_display activeDisplay);
 
-    void pushStatusDisplay(StatusDisplayType statusDisplayType);
+    void pushStatusDisplay(status_display_type statusDisplayType);
     void popStatusDisplay();
 
-    bool allowInput() const noexcept { return !isModeEnabled(AnsiMode::KeyboardAction); }
+    bool allowInput() const noexcept { return !isModeEnabled(ansi_mode::KeyboardAction); }
 
     void setAllowInput(bool enabled);
 
     // Sets the current search term to the given text and
     // moves the viewport accordingly to make sure the given text is visible,
     // or it will not move at all if the input text was not found.
-    [[nodiscard]] std::optional<CellLocation> searchReverse(std::u32string text, CellLocation searchPosition);
-    [[nodiscard]] std::optional<CellLocation> searchReverse(CellLocation searchPosition);
+    [[nodiscard]] std::optional<cell_location> searchReverse(std::u32string text,
+                                                             cell_location searchPosition);
+    [[nodiscard]] std::optional<cell_location> searchReverse(cell_location searchPosition);
 
     // Searches from current position the next item downwards.
-    [[nodiscard]] std::optional<CellLocation> search(std::u32string text,
-                                                     CellLocation searchPosition,
-                                                     bool initiatedByDoubleClick = false);
-    [[nodiscard]] std::optional<CellLocation> search(CellLocation searchPosition);
+    [[nodiscard]] std::optional<cell_location> search(std::u32string text,
+                                                      cell_location searchPosition,
+                                                      bool initiatedByDoubleClick = false);
+    [[nodiscard]] std::optional<cell_location> search(cell_location searchPosition);
 
     bool setNewSearchTerm(std::u32string text, bool initiatedByDoubleClick);
     void clearSearch();
 
     // Tests if the grid cell at the given location does contain a word delimiter.
-    [[nodiscard]] bool wordDelimited(CellLocation position) const noexcept;
+    [[nodiscard]] bool wordDelimited(cell_location position) const noexcept;
 
-    [[nodiscard]] std::tuple<std::u32string, CellLocationRange> extractWordUnderCursor(
-        CellLocation position) const noexcept;
+    [[nodiscard]] std::tuple<std::u32string, cell_location_range> extractWordUnderCursor(
+        cell_location position) const noexcept;
 
     Settings const& factorySettings() const noexcept { return _factorySettings; }
     Settings const& settings() const noexcept { return _settings; }
@@ -708,7 +710,7 @@ class Terminal
   private:
     void mainLoop();
     void fillRenderBufferInternal(RenderBuffer& output, bool includeSelection);
-    LineCount fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, LineOffset base);
+    LineCount fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, line_offset base);
     void updateIndicatorStatusLine();
     void updateCursorVisibilityState() const noexcept;
     void updateHoveringHyperlinkState();
@@ -719,7 +721,8 @@ class Terminal
     /// @retval false if either no selection is available, selection is complete, or the new pixel position is
     /// not enough into the next grid cell yet
     /// @retval true otherwise
-    bool shouldExtendSelectionByMouse(CellLocation newPosition, PixelCoordinate pixelPosition) const noexcept;
+    bool shouldExtendSelectionByMouse(cell_location newPosition,
+                                      pixel_coordinate pixelPosition) const noexcept;
 
     // Tests if the App mouse protocol is explicitly being bypassed by the user,
     // by pressing a special bypass modifier (usualy Shift).
@@ -778,8 +781,8 @@ class Terminal
     // {{{ mouse related state (helpers for detecting double/tripple clicks)
     std::chrono::steady_clock::time_point _lastClick {};
     unsigned int _speedClicks = 0;
-    terminal::CellLocation _currentMousePosition {}; // current mouse position
-    terminal::PixelCoordinate _lastMousePixelPositionOnLeftClick {};
+    terminal::cell_location _currentMousePosition {}; // current mouse position
+    terminal::pixel_coordinate _lastMousePixelPositionOnLeftClick {};
     bool _leftMouseButtonPressed = false; // tracks left-mouse button pressed state (used for cell selection).
     bool _respectMouseProtocol = true;    // shift-click can disable that, button release sets it back to true
     // }}}
@@ -817,10 +820,10 @@ class Terminal
         Terminal* terminal;
         explicit SelectionHelper(Terminal* self): terminal { self } {}
         [[nodiscard]] PageSize pageSize() const noexcept override;
-        [[nodiscard]] bool wordDelimited(CellLocation pos) const noexcept override;
-        [[nodiscard]] bool wrappedLine(LineOffset line) const noexcept override;
-        [[nodiscard]] bool cellEmpty(CellLocation pos) const noexcept override;
-        [[nodiscard]] int cellWidth(CellLocation pos) const noexcept override;
+        [[nodiscard]] bool wordDelimited(cell_location pos) const noexcept override;
+        [[nodiscard]] bool wrappedLine(line_offset line) const noexcept override;
+        [[nodiscard]] bool cellEmpty(cell_location pos) const noexcept override;
+        [[nodiscard]] int cellWidth(cell_location pos) const noexcept override;
     };
     SelectionHelper _selectionHelper;
     // }}}

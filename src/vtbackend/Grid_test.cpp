@@ -46,8 +46,8 @@ void logGridText(Grid<Cell> const& grid, string const& headline = "")
         UNSCOPED_INFO(
             fmt::format("{:>2}: \"{}\" {}\n",
                         line,
-                        grid.lineText(LineOffset::cast_from(line - grid.historyLineCount().as<int>())),
-                        (unsigned) grid.lineAt(LineOffset::cast_from(line)).flags()));
+                        grid.lineText(line_offset::cast_from(line - grid.historyLineCount().as<int>())),
+                        (unsigned) grid.lineAt(line_offset::cast_from(line)).flags()));
     }
 }
 
@@ -77,7 +77,7 @@ Grid<Cell> setupGrid(PageSize pageSize,
         else
             ++cursor;
 
-        grid.setLineText(LineOffset::cast_from(cursor - 1), line);
+        grid.setLineText(line_offset::cast_from(cursor - 1), line);
 
         logGridText(grid,
                     fmt::format("setup grid at {}x{}x{}: line {}",
@@ -97,15 +97,15 @@ Grid<Cell> setupGrid(PageSize pageSize,
 
 constexpr Margin fullPageMargin(PageSize pageSize)
 {
-    return Margin { Margin::Vertical { LineOffset(0), pageSize.lines.as<LineOffset>() - 1 },
-                    Margin::Horizontal { ColumnOffset(0), pageSize.columns.as<ColumnOffset>() - 1 } };
+    return Margin { Margin::Vertical { line_offset(0), pageSize.lines.as<line_offset>() - 1 },
+                    Margin::Horizontal { column_offset(0), pageSize.columns.as<column_offset>() - 1 } };
 }
 
 [[maybe_unused]] Grid<Cell> setupGrid5x2()
 {
     auto grid = Grid<Cell>(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(10));
-    grid.setLineText(LineOffset { 0 }, "ABCDE");
-    grid.setLineText(LineOffset { 1 }, "abcde");
+    grid.setLineText(line_offset { 0 }, "ABCDE");
+    grid.setLineText(line_offset { 1 }, "abcde");
     logGridText(grid, "setup grid at 5x2");
     return grid;
 }
@@ -114,10 +114,10 @@ constexpr Margin fullPageMargin(PageSize pageSize)
 {
     auto grid = Grid<Cell>(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(2));
     grid.scrollUp(LineCount(2));
-    grid.setLineText(LineOffset { -1 }, "ABCDE");
-    grid.setLineText(LineOffset { 0 }, "FGHIJ");
-    grid.setLineText(LineOffset { 1 }, "KLMNO");
-    grid.setLineText(LineOffset { 2 }, "PQRST");
+    grid.setLineText(line_offset { -1 }, "ABCDE");
+    grid.setLineText(line_offset { 0 }, "FGHIJ");
+    grid.setLineText(line_offset { 1 }, "KLMNO");
+    grid.setLineText(line_offset { 2 }, "PQRST");
     logGridText(grid, "setup grid at 5x2x2");
     return grid;
 }
@@ -125,8 +125,8 @@ constexpr Margin fullPageMargin(PageSize pageSize)
 [[maybe_unused]] Grid<Cell> setupGrid8x2()
 {
     auto grid = Grid<Cell>(PageSize { LineCount(2), ColumnCount(8) }, true, LineCount(10));
-    grid.setLineText(LineOffset { 0 }, "ABCDEFGH");
-    grid.setLineText(LineOffset { 1 }, "abcdefgh");
+    grid.setLineText(line_offset { 0 }, "ABCDEFGH");
+    grid.setLineText(line_offset { 1 }, "abcdefgh");
     logGridText(grid, "setup grid at 5x2");
     return grid;
 }
@@ -149,57 +149,57 @@ Grid<Cell> setupGridForResizeTests2x3a3()
 TEST_CASE("Grid.setup", "[grid]")
 {
     auto grid = Grid<Cell>(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(0));
-    grid.setLineText(LineOffset { 0 }, "ABCDE"sv);
-    grid.setLineText(LineOffset { 1 }, "abcde"sv);
+    grid.setLineText(line_offset { 0 }, "ABCDE"sv);
+    grid.setLineText(line_offset { 1 }, "abcde"sv);
     logGridText(grid, "setup grid at 5x2");
 
-    CHECK(grid.lineText(LineOffset { 0 }) == "ABCDE"sv);
-    CHECK(grid.lineText(LineOffset { 1 }) == "abcde"sv);
+    CHECK(grid.lineText(line_offset { 0 }) == "ABCDE"sv);
+    CHECK(grid.lineText(line_offset { 1 }) == "abcde"sv);
 }
 
 TEST_CASE("Grid.writeAndScrollUp", "[grid]")
 {
     auto grid = Grid<Cell>(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(3));
-    grid.setLineText(LineOffset { 0 }, "ABCDE");
-    grid.setLineText(LineOffset { 1 }, "abcde");
+    grid.setLineText(line_offset { 0 }, "ABCDE");
+    grid.setLineText(line_offset { 1 }, "abcde");
     CHECK(grid.historyLineCount() == LineCount(0));
-    CHECK(grid.lineText(LineOffset(0)) == "ABCDE");
-    CHECK(grid.lineText(LineOffset(1)) == "abcde");
+    CHECK(grid.lineText(line_offset(0)) == "ABCDE");
+    CHECK(grid.lineText(line_offset(1)) == "abcde");
 
     grid.scrollUp(LineCount(1));
-    grid.setLineText(LineOffset(1), "12345");
+    grid.setLineText(line_offset(1), "12345");
 
     CHECK(grid.historyLineCount() == LineCount(1));
-    CHECK(grid.lineText(LineOffset(-1)) == "ABCDE");
-    CHECK(grid.lineText(LineOffset(0)) == "abcde");
-    CHECK(grid.lineText(LineOffset(1)) == "12345");
+    CHECK(grid.lineText(line_offset(-1)) == "ABCDE");
+    CHECK(grid.lineText(line_offset(0)) == "abcde");
+    CHECK(grid.lineText(line_offset(1)) == "12345");
 
     grid.scrollUp(LineCount(1));
     CHECK(grid.historyLineCount() == LineCount(2));
-    CHECK(grid.lineText(LineOffset(-2)) == "ABCDE");
-    CHECK(grid.lineText(LineOffset(-1)) == "abcde");
-    CHECK(grid.lineText(LineOffset(0)) == "12345");
-    CHECK(grid.lineText(LineOffset(1)) == "     ");
+    CHECK(grid.lineText(line_offset(-2)) == "ABCDE");
+    CHECK(grid.lineText(line_offset(-1)) == "abcde");
+    CHECK(grid.lineText(line_offset(0)) == "12345");
+    CHECK(grid.lineText(line_offset(1)) == "     ");
 }
 
 TEST_CASE("iteratorAt", "[grid]")
 {
     auto grid = Grid<Cell>(PageSize { LineCount(3), ColumnCount(3) }, true, LineCount(0));
-    grid.setLineText(LineOffset { 0 }, "ABC"sv);
-    grid.setLineText(LineOffset { 1 }, "DEF"sv);
-    grid.setLineText(LineOffset { 2 }, "GHI"sv);
+    grid.setLineText(line_offset { 0 }, "ABC"sv);
+    grid.setLineText(line_offset { 1 }, "DEF"sv);
+    grid.setLineText(line_offset { 2 }, "GHI"sv);
     logGridText(grid);
 
-    auto* const a00 = &grid.at(LineOffset(0), ColumnOffset(0));
+    auto* const a00 = &grid.at(line_offset(0), column_offset(0));
     CHECK(a00->toUtf8() == "A");
-    auto* const a01 = &grid.at(LineOffset(0), ColumnOffset(1));
+    auto* const a01 = &grid.at(line_offset(0), column_offset(1));
     CHECK(a01->toUtf8() == "B");
-    auto* const a02 = &grid.at(LineOffset(0), ColumnOffset(2));
+    auto* const a02 = &grid.at(line_offset(0), column_offset(2));
     CHECK(a02->toUtf8() == "C");
 
-    auto* const a11 = &grid.at(LineOffset(1), ColumnOffset(1));
+    auto* const a11 = &grid.at(line_offset(1), column_offset(1));
     CHECK(a11->toUtf8() == "E");
-    auto* const a22 = &grid.at(LineOffset(2), ColumnOffset(2));
+    auto* const a22 = &grid.at(line_offset(2), column_offset(2));
     CHECK(a22->toUtf8() == "I");
 }
 
@@ -221,9 +221,9 @@ TEST_CASE("LogicalLines.iterator", "[grid]")
                               "PQR", //  1: wrapped
                           });
 
-    grid.lineAt(LineOffset(-2)).setWrapped(true);
-    grid.lineAt(LineOffset(-1)).setWrapped(true);
-    grid.lineAt(LineOffset(1)).setWrapped(true);
+    grid.lineAt(line_offset(-2)).setWrapped(true);
+    grid.lineAt(line_offset(-1)).setWrapped(true);
+    grid.lineAt(line_offset(1)).setWrapped(true);
     logGridText(grid, "After having set wrapped-flag.");
 
     LogicalLines logicalLines = grid.logicalLines();
@@ -233,22 +233,22 @@ TEST_CASE("LogicalLines.iterator", "[grid]")
     auto line = *lineIt;
     auto const tABC = line.text();
     REQUIRE(tABC == "ABC");
-    CHECK(line.top == LineOffset(-4));
-    CHECK(line.bottom == LineOffset(-4));
+    CHECK(line.top == line_offset(-4));
+    CHECK(line.bottom == line_offset(-4));
 
     // DEF GHI JKL
     line = *++lineIt;
     auto const tDEFGHIJKL = line.text();
     REQUIRE(tDEFGHIJKL == "DEFGHIJKL");
-    CHECK(line.top == LineOffset(-3));
-    CHECK(line.bottom == LineOffset(-1));
+    CHECK(line.top == line_offset(-3));
+    CHECK(line.bottom == line_offset(-1));
 
     // MNO PQR
     line = *++lineIt;
     auto const tMNOPQR = line.text();
     REQUIRE(tMNOPQR == "MNOPQR");
-    CHECK(line.top == LineOffset(0));
-    CHECK(line.bottom == LineOffset(1));
+    CHECK(line.top == line_offset(0));
+    CHECK(line.bottom == line_offset(1));
 
     // <<END>>
     line = *++lineIt;
@@ -291,9 +291,9 @@ TEST_CASE("LogicalLines.reverse_iterator", "[grid]")
                               "PQR", //  1: wrapped
                           });
 
-    grid.lineAt(LineOffset(-2)).setWrapped(true);
-    grid.lineAt(LineOffset(-1)).setWrapped(true);
-    grid.lineAt(LineOffset(1)).setWrapped(true);
+    grid.lineAt(line_offset(-2)).setWrapped(true);
+    grid.lineAt(line_offset(-1)).setWrapped(true);
+    grid.lineAt(line_offset(1)).setWrapped(true);
     logGridText(grid, "After having set wrapped-flag.");
 
     auto logicalLines = grid.logicalLinesReverse();
@@ -345,18 +345,18 @@ TEST_CASE("resize_lines_nr2_with_scrollback_moving_fully_into_page", "[grid]")
     CHECK(grid.maxHistoryLineCount() == LineCount(3));
     CHECK(grid.historyLineCount() == LineCount(2));
 
-    auto const curCursorPos = CellLocation { grid.pageSize().lines.as<LineOffset>() - 1, ColumnOffset(1) };
+    auto const curCursorPos = cell_location { grid.pageSize().lines.as<line_offset>() - 1, column_offset(1) };
     auto const newPageSize = PageSize { LineCount(4), ColumnCount(3) };
-    auto const newCursorPos0 = CellLocation { curCursorPos.line + 2, curCursorPos.column };
-    CellLocation newCursorPos = grid.resize(newPageSize, curCursorPos, false);
+    auto const newCursorPos0 = cell_location { curCursorPos.line + 2, curCursorPos.column };
+    cell_location newCursorPos = grid.resize(newPageSize, curCursorPos, false);
     CHECK(newCursorPos.line == newCursorPos0.line);
     CHECK(newCursorPos.column == newCursorPos0.column);
     CHECK(grid.pageSize() == newPageSize);
     CHECK(grid.historyLineCount() == LineCount(0));
-    CHECK(grid.lineText(LineOffset(0)) == "ABC");
-    CHECK(grid.lineText(LineOffset(1)) == "DEF");
-    CHECK(grid.lineText(LineOffset(2)) == "GHI");
-    CHECK(grid.lineText(LineOffset(3)) == "JKL");
+    CHECK(grid.lineText(line_offset(0)) == "ABC");
+    CHECK(grid.lineText(line_offset(1)) == "DEF");
+    CHECK(grid.lineText(line_offset(2)) == "GHI");
+    CHECK(grid.lineText(line_offset(3)) == "JKL");
 }
 
 TEST_CASE("resize_lines_nr3_with_scrollback_moving_into_page_overflow", "[grid]")
@@ -371,20 +371,20 @@ TEST_CASE("resize_lines_nr3_with_scrollback_moving_into_page_overflow", "[grid]"
     REQUIRE(grid.pageSize().columns == ColumnCount(3));
     REQUIRE(grid.pageSize().lines == LineCount(2));
 
-    auto const curCursorPos = CellLocation { LineOffset(1), ColumnOffset(1) };
+    auto const curCursorPos = cell_location { line_offset(1), column_offset(1) };
     auto const newPageSize = PageSize { LineCount(5), ColumnCount(3) };
     logGridText(grid, "BEFORE");
-    CellLocation newCursorPos = grid.resize(newPageSize, curCursorPos, false);
+    cell_location newCursorPos = grid.resize(newPageSize, curCursorPos, false);
     logGridText(grid, "AFTER");
-    CHECK(newCursorPos.line == LineOffset(3));
+    CHECK(newCursorPos.line == line_offset(3));
     CHECK(newCursorPos.column == curCursorPos.column);
     CHECK(grid.pageSize() == newPageSize);
     CHECK(grid.historyLineCount() == LineCount(0));
-    CHECK(grid.lineText(LineOffset(0)) == "ABC");
-    CHECK(grid.lineText(LineOffset(1)) == "DEF");
-    CHECK(grid.lineText(LineOffset(2)) == "GHI");
-    CHECK(grid.lineText(LineOffset(3)) == "JKL");
-    CHECK(grid.lineText(LineOffset(4)) == "   ");
+    CHECK(grid.lineText(line_offset(0)) == "ABC");
+    CHECK(grid.lineText(line_offset(1)) == "DEF");
+    CHECK(grid.lineText(line_offset(2)) == "GHI");
+    CHECK(grid.lineText(line_offset(3)) == "JKL");
+    CHECK(grid.lineText(line_offset(4)) == "   ");
 }
 
 TEST_CASE("resize_grow_lines_with_history_cursor_no_bottom", "[grid]")
@@ -393,20 +393,20 @@ TEST_CASE("resize_grow_lines_with_history_cursor_no_bottom", "[grid]")
     CHECK(grid.maxHistoryLineCount() == LineCount(3));
     CHECK(grid.historyLineCount() == LineCount(2));
 
-    auto const curCursorPos = CellLocation { LineOffset(0), ColumnOffset(1) };
+    auto const curCursorPos = cell_location { line_offset(0), column_offset(1) };
     logGridText(grid, "before resize");
-    CellLocation newCursorPos = grid.resize(PageSize { LineCount(3), ColumnCount(3) }, curCursorPos, false);
+    cell_location newCursorPos = grid.resize(PageSize { LineCount(3), ColumnCount(3) }, curCursorPos, false);
     logGridText(grid, "after resize");
     CHECK(newCursorPos.line == curCursorPos.line);
     CHECK(newCursorPos.column == curCursorPos.column);
     CHECK(grid.pageSize().columns == ColumnCount(3));
     CHECK(grid.pageSize().lines == LineCount(3));
     CHECK(grid.historyLineCount() == LineCount(2));
-    CHECK(grid.lineText(LineOffset(-2)) == "ABC");
-    CHECK(grid.lineText(LineOffset(-1)) == "DEF");
-    CHECK(grid.lineText(LineOffset(0)) == "GHI");
-    CHECK(grid.lineText(LineOffset(1)) == "JKL");
-    CHECK(grid.lineText(LineOffset(2)) == "   ");
+    CHECK(grid.lineText(line_offset(-2)) == "ABC");
+    CHECK(grid.lineText(line_offset(-1)) == "DEF");
+    CHECK(grid.lineText(line_offset(0)) == "GHI");
+    CHECK(grid.lineText(line_offset(1)) == "JKL");
+    CHECK(grid.lineText(line_offset(2)) == "   ");
 }
 
 TEST_CASE("resize_shrink_lines_with_history", "[grid]")
@@ -414,23 +414,23 @@ TEST_CASE("resize_shrink_lines_with_history", "[grid]")
     auto grid = Grid<Cell>(PageSize { LineCount(2), ColumnCount(3) }, true, LineCount(5));
     auto const gridMargin = fullPageMargin(grid.pageSize());
     grid.scrollUp(LineCount { 1 }, GraphicsAttributes {}, gridMargin);
-    grid.setLineText(LineOffset(-1), "ABC");        // history line
-    grid.setLineText(LineOffset(0), "DEF");         // main page: line 1
-    grid.setLineText(LineOffset(1), "GHI");         // main page: line 2
+    grid.setLineText(line_offset(-1), "ABC");       // history line
+    grid.setLineText(line_offset(0), "DEF");        // main page: line 1
+    grid.setLineText(line_offset(1), "GHI");        // main page: line 2
     CHECK(grid.historyLineCount() == LineCount(1)); // TODO: move line up, below scrollUp()
 
     // shrink by one line (=> move page one line up into scrollback)
     auto const newPageSize = PageSize { LineCount(1), ColumnCount(3) };
-    auto const curCursorPos = CellLocation { LineOffset(1), ColumnOffset(1) };
+    auto const curCursorPos = cell_location { line_offset(1), column_offset(1) };
     logGridText(grid, "BEFORE");
-    CellLocation newCursorPos = grid.resize(newPageSize, curCursorPos, false);
+    cell_location newCursorPos = grid.resize(newPageSize, curCursorPos, false);
     logGridText(grid, "AFTER");
     CHECK(grid.pageSize().columns == ColumnCount(3));
     CHECK(grid.pageSize().lines == LineCount(1));
     CHECK(grid.historyLineCount() == LineCount(2)); // XXX FIXME: test failing
-    CHECK(grid.lineText(LineOffset(-2)) == "ABC");
-    CHECK(grid.lineText(LineOffset(-1)) == "DEF");
-    CHECK(grid.lineText(LineOffset(0)) == "GHI");
+    CHECK(grid.lineText(line_offset(-2)) == "ABC");
+    CHECK(grid.lineText(line_offset(-1)) == "DEF");
+    CHECK(grid.lineText(line_offset(0)) == "GHI");
     CHECK(*newCursorPos.line == 0); // clamped
     CHECK(*newCursorPos.column == 1);
 }
@@ -452,8 +452,8 @@ TEST_CASE("resize_shrink_columns_with_reflow_and_unwrappable", "[grid]")
 
     auto grid = setupGridForResizeTests2x3xN(LineCount(5));
     auto const newPageSize = PageSize { LineCount(2), ColumnCount(2) };
-    auto const curCursorPos = CellLocation { LineOffset(1), ColumnOffset(1) };
-    grid.lineAt(LineOffset(0)).setWrappable(false);
+    auto const curCursorPos = cell_location { line_offset(1), column_offset(1) };
+    grid.lineAt(line_offset(0)).setWrappable(false);
     logGridText(grid, "BEFORE");
     auto const newCursorPos = grid.resize(newPageSize, curCursorPos, false);
     (void) newCursorPos;
@@ -463,21 +463,21 @@ TEST_CASE("resize_shrink_columns_with_reflow_and_unwrappable", "[grid]")
     CHECK(grid.pageSize().columns == ColumnCount(2));
     CHECK(grid.pageSize().lines == LineCount(2));
 
-    CHECK(grid.lineText(LineOffset(-5)) == "AB");
-    CHECK(grid.lineText(LineOffset(-4)) == "C ");
-    CHECK(grid.lineText(LineOffset(-3)) == "DE");
-    CHECK(grid.lineText(LineOffset(-2)) == "F ");
-    CHECK(grid.lineText(LineOffset(-1)) == "GH");
-    CHECK(grid.lineText(LineOffset(0)) == "JK");
-    CHECK(grid.lineText(LineOffset(1)) == "L ");
+    CHECK(grid.lineText(line_offset(-5)) == "AB");
+    CHECK(grid.lineText(line_offset(-4)) == "C ");
+    CHECK(grid.lineText(line_offset(-3)) == "DE");
+    CHECK(grid.lineText(line_offset(-2)) == "F ");
+    CHECK(grid.lineText(line_offset(-1)) == "GH");
+    CHECK(grid.lineText(line_offset(0)) == "JK");
+    CHECK(grid.lineText(line_offset(1)) == "L ");
 
-    CHECK(grid.lineAt(LineOffset(-5)).flags() == LineFlags::Wrappable);
-    CHECK(grid.lineAt(LineOffset(-4)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
-    CHECK(grid.lineAt(LineOffset(-3)).flags() == LineFlags::Wrappable);
-    CHECK(grid.lineAt(LineOffset(-2)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
-    CHECK(grid.lineAt(LineOffset(-1)).flags() == LineFlags::None);
-    CHECK(grid.lineAt(LineOffset(0)).flags() == LineFlags::Wrappable);
-    CHECK(grid.lineAt(LineOffset(1)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
+    CHECK(grid.lineAt(line_offset(-5)).flags() == LineFlags::Wrappable);
+    CHECK(grid.lineAt(line_offset(-4)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
+    CHECK(grid.lineAt(line_offset(-3)).flags() == LineFlags::Wrappable);
+    CHECK(grid.lineAt(line_offset(-2)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
+    CHECK(grid.lineAt(line_offset(-1)).flags() == LineFlags::None);
+    CHECK(grid.lineAt(line_offset(0)).flags() == LineFlags::Wrappable);
+    CHECK(grid.lineAt(line_offset(1)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
 }
 
 TEST_CASE("resize_shrink_columns_with_reflow_grow_lines_and_unwrappable", "[grid]")
@@ -495,28 +495,28 @@ TEST_CASE("resize_shrink_columns_with_reflow_grow_lines_and_unwrappable", "[grid
     // JK
     // L
     auto grid = setupGridForResizeTests2x3xN(LineCount(5));
-    auto const curCursorPos = CellLocation { LineOffset(1), ColumnOffset(1) };
-    grid.lineAt(LineOffset(0)).setWrappable(false);
+    auto const curCursorPos = cell_location { line_offset(1), column_offset(1) };
+    grid.lineAt(line_offset(0)).setWrappable(false);
     // logGridText(grid, "BEFORE");
     auto const newCursorPos = grid.resize(PageSize { LineCount(4), ColumnCount(2) }, curCursorPos, false);
     (void) newCursorPos;
     // logGridText(grid, "AFTER");
 
-    CHECK(grid.lineText(LineOffset(-3)) == "AB");
-    CHECK(grid.lineText(LineOffset(-2)) == "C ");
-    CHECK(grid.lineText(LineOffset(-1)) == "DE");
-    CHECK(grid.lineText(LineOffset(0)) == "F ");
-    CHECK(grid.lineText(LineOffset(1)) == "GH");
-    CHECK(grid.lineText(LineOffset(2)) == "JK");
-    CHECK(grid.lineText(LineOffset(3)) == "L ");
+    CHECK(grid.lineText(line_offset(-3)) == "AB");
+    CHECK(grid.lineText(line_offset(-2)) == "C ");
+    CHECK(grid.lineText(line_offset(-1)) == "DE");
+    CHECK(grid.lineText(line_offset(0)) == "F ");
+    CHECK(grid.lineText(line_offset(1)) == "GH");
+    CHECK(grid.lineText(line_offset(2)) == "JK");
+    CHECK(grid.lineText(line_offset(3)) == "L ");
 
-    CHECK(grid.lineAt(LineOffset(-3)).flags() == LineFlags::Wrappable);
-    CHECK(grid.lineAt(LineOffset(-2)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
-    CHECK(grid.lineAt(LineOffset(-1)).flags() == LineFlags::Wrappable);
-    CHECK(grid.lineAt(LineOffset(0)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
-    CHECK(grid.lineAt(LineOffset(1)).flags() == LineFlags::None);
-    CHECK(grid.lineAt(LineOffset(2)).flags() == LineFlags::Wrappable);
-    CHECK(grid.lineAt(LineOffset(3)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
+    CHECK(grid.lineAt(line_offset(-3)).flags() == LineFlags::Wrappable);
+    CHECK(grid.lineAt(line_offset(-2)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
+    CHECK(grid.lineAt(line_offset(-1)).flags() == LineFlags::Wrappable);
+    CHECK(grid.lineAt(line_offset(0)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
+    CHECK(grid.lineAt(line_offset(1)).flags() == LineFlags::None);
+    CHECK(grid.lineAt(line_offset(2)).flags() == LineFlags::Wrappable);
+    CHECK(grid.lineAt(line_offset(3)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
 }
 // }}}
 
@@ -529,16 +529,16 @@ TEST_CASE("resize_reflow_shrink", "[grid]")
     // Shrink slowly from 5x2 to 4x2 to 3x2 to 2x2.
 
     // 4x2
-    (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation { {}, {} }, false);
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, cell_location { {}, {} }, false);
     logGridText(grid, "after resize 4x2");
 
     CHECK(*grid.historyLineCount() == 2);
-    CHECK(grid.lineText(LineOffset(-2)) == "ABCD");
-    CHECK(grid.lineText(LineOffset(-1)) == "E   ");
+    CHECK(grid.lineText(line_offset(-2)) == "ABCD");
+    CHECK(grid.lineText(line_offset(-1)) == "E   ");
 
     CHECK(grid.pageSize() == PageSize { LineCount(2), ColumnCount(4) });
-    CHECK(grid.lineText(LineOffset(0)) == "abcd");
-    CHECK(grid.lineText(LineOffset(1)) == "e   ");
+    CHECK(grid.lineText(line_offset(0)) == "abcd");
+    CHECK(grid.lineText(line_offset(1)) == "e   ");
 
     // fmt::print("Starting logicalLines test\n");
     auto ll = grid.logicalLines();
@@ -552,28 +552,28 @@ TEST_CASE("resize_reflow_shrink", "[grid]")
 
     // 3x2
     fmt::print("Starting resize to 3x2\n");
-    (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation { {}, {} }, false);
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, cell_location { {}, {} }, false);
     logGridText(grid, "after resize 3x2");
 
     CHECK(*grid.historyLineCount() == 2);
     CHECK(grid.pageSize() == PageSize { LineCount(2), ColumnCount(3) });
-    CHECK(grid.lineText(LineOffset(-2)) == "ABC");
-    CHECK(grid.lineText(LineOffset(-1)) == "DE ");
-    CHECK(grid.lineText(LineOffset(0)) == "abc");
-    CHECK(grid.lineText(LineOffset(1)) == "de ");
+    CHECK(grid.lineText(line_offset(-2)) == "ABC");
+    CHECK(grid.lineText(line_offset(-1)) == "DE ");
+    CHECK(grid.lineText(line_offset(0)) == "abc");
+    CHECK(grid.lineText(line_offset(1)) == "de ");
 
     // 2x2
-    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, CellLocation { {}, {} }, false);
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, cell_location { {}, {} }, false);
     logGridText(grid, "after resize 2x2");
 
     CHECK(grid.pageSize() == PageSize { LineCount(2), ColumnCount(2) });
     CHECK(grid.historyLineCount() == LineCount(4));
-    CHECK(grid.lineText(LineOffset(-4)) == "AB");
-    CHECK(grid.lineText(LineOffset(-3)) == "CD");
-    CHECK(grid.lineText(LineOffset(-2)) == "E ");
-    CHECK(grid.lineText(LineOffset(-1)) == "ab");
-    CHECK(grid.lineText(LineOffset(0)) == "cd");
-    CHECK(grid.lineText(LineOffset(1)) == "e ");
+    CHECK(grid.lineText(line_offset(-4)) == "AB");
+    CHECK(grid.lineText(line_offset(-3)) == "CD");
+    CHECK(grid.lineText(line_offset(-2)) == "E ");
+    CHECK(grid.lineText(line_offset(-1)) == "ab");
+    CHECK(grid.lineText(line_offset(0)) == "cd");
+    CHECK(grid.lineText(line_offset(1)) == "e ");
 }
 
 TEST_CASE("Grid.reflow", "[grid]")
@@ -582,86 +582,86 @@ TEST_CASE("Grid.reflow", "[grid]")
 
     SECTION("resize 4x2")
     {
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation { {}, {} }, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, cell_location { {}, {} }, false);
         logGridText(grid, "after resize");
 
         CHECK(grid.historyLineCount() == LineCount(2));
-        CHECK(grid.lineText(LineOffset(-2)) == "ABCD");
-        CHECK(grid.lineText(LineOffset(-1)) == "E   ");
+        CHECK(grid.lineText(line_offset(-2)) == "ABCD");
+        CHECK(grid.lineText(line_offset(-1)) == "E   ");
 
         CHECK(grid.pageSize() == PageSize { LineCount(2), ColumnCount(4) });
-        CHECK(grid.lineText(LineOffset(0)) == "abcd");
-        CHECK(grid.lineText(LineOffset(1)) == "e   ");
+        CHECK(grid.lineText(line_offset(0)) == "abcd");
+        CHECK(grid.lineText(line_offset(1)) == "e   ");
     }
 
     SECTION("resize 3x2")
     {
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, cell_location {}, false);
         logGridText(grid, "after resize 4x2");
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, cell_location {}, false);
         logGridText(grid, "after resize 3x2");
 
         CHECK(grid.historyLineCount() == LineCount(2));
         CHECK(grid.pageSize() == PageSize { LineCount(2), ColumnCount(3) });
-        CHECK(grid.lineText(LineOffset(-2)) == "ABC");
-        CHECK(grid.lineText(LineOffset(-1)) == "DE ");
-        CHECK(grid.lineText(LineOffset(0)) == "abc");
-        CHECK(grid.lineText(LineOffset(1)) == "de ");
+        CHECK(grid.lineText(line_offset(-2)) == "ABC");
+        CHECK(grid.lineText(line_offset(-1)) == "DE ");
+        CHECK(grid.lineText(line_offset(0)) == "abc");
+        CHECK(grid.lineText(line_offset(1)) == "de ");
     }
 
     SECTION("resize 2x2")
     {
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, cell_location {}, false);
         logGridText(grid, "after resize 4x2");
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, cell_location {}, false);
         logGridText(grid, "after resize 3x2");
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, cell_location {}, false);
         logGridText(grid, "after resize 2x2");
 
         CHECK(grid.pageSize() == PageSize { LineCount(2), ColumnCount(2) });
         CHECK(grid.historyLineCount() == LineCount(4));
-        CHECK(grid.lineText(LineOffset(-4)) == "AB");
-        CHECK(grid.lineText(LineOffset(-3)) == "CD");
-        CHECK(grid.lineText(LineOffset(-2)) == "E ");
-        CHECK(grid.lineText(LineOffset(-1)) == "ab");
-        CHECK(grid.lineText(LineOffset(0)) == "cd");
-        CHECK(grid.lineText(LineOffset(1)) == "e ");
+        CHECK(grid.lineText(line_offset(-4)) == "AB");
+        CHECK(grid.lineText(line_offset(-3)) == "CD");
+        CHECK(grid.lineText(line_offset(-2)) == "E ");
+        CHECK(grid.lineText(line_offset(-1)) == "ab");
+        CHECK(grid.lineText(line_offset(0)) == "cd");
+        CHECK(grid.lineText(line_offset(1)) == "e ");
 
         SECTION("regrow 3x2")
         {
             logGridText(grid, "Before regrow to 3x2");
-            (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, false);
+            (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, cell_location {}, false);
             logGridText(grid, "after regrow to 3x2");
 
             CHECK(grid.pageSize() == PageSize { LineCount(2), ColumnCount(3) });
             CHECK(grid.historyLineCount() == LineCount(2));
-            CHECK(grid.lineText(LineOffset(-2)) == "ABC");
-            CHECK(grid.lineText(LineOffset(-1)) == "DE ");
-            CHECK(grid.lineText(LineOffset(0)) == "abc");
-            CHECK(grid.lineText(LineOffset(1)) == "de ");
+            CHECK(grid.lineText(line_offset(-2)) == "ABC");
+            CHECK(grid.lineText(line_offset(-1)) == "DE ");
+            CHECK(grid.lineText(line_offset(0)) == "abc");
+            CHECK(grid.lineText(line_offset(1)) == "de ");
 
             SECTION("regrow 4x2")
             {
-                (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation {}, false);
+                (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, cell_location {}, false);
                 logGridText(grid, "after regrow 4x2");
 
                 CHECK(grid.historyLineCount() == LineCount(2));
                 CHECK(grid.pageSize() == PageSize { LineCount(2), ColumnCount(4) });
-                CHECK(grid.lineText(LineOffset(-2)) == "ABCD");
-                CHECK(grid.lineText(LineOffset(-1)) == "E   ");
-                CHECK(grid.lineText(LineOffset(0)) == "abcd");
-                CHECK(grid.lineText(LineOffset(1)) == "e   ");
+                CHECK(grid.lineText(line_offset(-2)) == "ABCD");
+                CHECK(grid.lineText(line_offset(-1)) == "E   ");
+                CHECK(grid.lineText(line_offset(0)) == "abcd");
+                CHECK(grid.lineText(line_offset(1)) == "e   ");
             }
 
             SECTION("regrow 5x2")
             {
-                (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, CellLocation {}, false);
+                (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, cell_location {}, false);
                 logGridText(grid, "after regrow 5x2");
 
                 CHECK(grid.historyLineCount() == LineCount(0));
                 CHECK(grid.pageSize() == PageSize { LineCount(2), ColumnCount(5) });
-                CHECK(grid.lineText(LineOffset(0)) == "ABCDE");
-                CHECK(grid.lineText(LineOffset(1)) == "abcde");
+                CHECK(grid.lineText(line_offset(0)) == "ABCDE");
+                CHECK(grid.lineText(line_offset(1)) == "abcde");
             }
         }
     }
@@ -671,53 +671,53 @@ TEST_CASE("Grid.reflow.shrink_many", "[grid]")
 {
     auto grid = setupGrid5x2();
     REQUIRE(grid.pageSize() == PageSize { LineCount(2), ColumnCount(5) });
-    REQUIRE(grid.lineText(LineOffset(0)) == "ABCDE"sv);
-    REQUIRE(grid.lineText(LineOffset(1)) == "abcde"sv);
+    REQUIRE(grid.lineText(line_offset(0)) == "ABCDE"sv);
+    REQUIRE(grid.lineText(line_offset(1)) == "abcde"sv);
 
-    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, CellLocation {}, false);
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, cell_location {}, false);
     logGridText(grid, "after resize 2x2");
 
     CHECK(grid.historyLineCount() == LineCount(4));
     CHECK(grid.pageSize() == PageSize { LineCount(2), ColumnCount(2) });
-    CHECK(grid.lineText(LineOffset(-4)) == "AB");
-    CHECK(grid.lineText(LineOffset(-3)) == "CD");
-    CHECK(grid.lineText(LineOffset(-2)) == "E ");
-    CHECK(grid.lineText(LineOffset(-1)) == "ab");
-    CHECK(grid.lineText(LineOffset(0)) == "cd");
-    CHECK(grid.lineText(LineOffset(1)) == "e ");
+    CHECK(grid.lineText(line_offset(-4)) == "AB");
+    CHECK(grid.lineText(line_offset(-3)) == "CD");
+    CHECK(grid.lineText(line_offset(-2)) == "E ");
+    CHECK(grid.lineText(line_offset(-1)) == "ab");
+    CHECK(grid.lineText(line_offset(0)) == "cd");
+    CHECK(grid.lineText(line_offset(1)) == "e ");
 }
 
 TEST_CASE("Grid.reflow.shrink_many_grow_many", "[grid]")
 {
     auto grid = setupGrid5x2();
 
-    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, CellLocation {}, false);
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, cell_location {}, false);
     logGridText(grid, "after resize 2x2");
 
     SECTION("smooth regrow 2->3->4->5")
     {
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, cell_location {}, false);
         logGridText(grid, "after resize 3x2");
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, cell_location {}, false);
         logGridText(grid, "after resize 4x2");
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, cell_location {}, false);
         logGridText(grid, "after resize 5x2");
 
         CHECK(grid.historyLineCount() == LineCount(0));
         CHECK(grid.pageSize() == PageSize { LineCount(2), ColumnCount(5) });
-        CHECK(grid.lineText(LineOffset(0)) == "ABCDE");
-        CHECK(grid.lineText(LineOffset(1)) == "abcde");
+        CHECK(grid.lineText(line_offset(0)) == "ABCDE");
+        CHECK(grid.lineText(line_offset(1)) == "abcde");
     }
 
     SECTION("hard regrow 2->5")
     {
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, cell_location {}, false);
         logGridText(grid, "after resize 5x2");
 
         CHECK(grid.historyLineCount() == LineCount(0));
         CHECK(grid.pageSize() == PageSize { LineCount(2), ColumnCount(5) });
-        CHECK(grid.lineText(LineOffset(0)) == "ABCDE");
-        CHECK(grid.lineText(LineOffset(1)) == "abcde");
+        CHECK(grid.lineText(line_offset(0)) == "ABCDE");
+        CHECK(grid.lineText(line_offset(1)) == "abcde");
     }
 }
 
@@ -726,126 +726,126 @@ TEST_CASE("Grid.reflow.tripple", "[grid]")
     // Tests reflowing text upon shrink/grow across more than two (e.g. three) wrapped lines.
     auto grid = setupGrid8x2();
 
-    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, CellLocation {}, false);
+    (void) grid.resize(PageSize { LineCount(2), ColumnCount(2) }, cell_location {}, false);
     logGridText(grid, "after resize 3x2");
 
     REQUIRE(grid.historyLineCount() == LineCount(6));
     REQUIRE(grid.pageSize() == PageSize { LineCount(2), ColumnCount(2) });
 
-    REQUIRE(!grid.lineAt(LineOffset(-6)).wrapped());
-    REQUIRE(grid.lineAt(LineOffset(-5)).wrapped());
-    REQUIRE(grid.lineAt(LineOffset(-4)).wrapped());
-    REQUIRE(grid.lineAt(LineOffset(-3)).wrapped());
-    REQUIRE(!grid.lineAt(LineOffset(-2)).wrapped());
-    REQUIRE(grid.lineAt(LineOffset(-1)).wrapped());
-    REQUIRE(grid.lineAt(LineOffset(0)).wrapped());
-    REQUIRE(grid.lineAt(LineOffset(1)).wrapped());
+    REQUIRE(!grid.lineAt(line_offset(-6)).wrapped());
+    REQUIRE(grid.lineAt(line_offset(-5)).wrapped());
+    REQUIRE(grid.lineAt(line_offset(-4)).wrapped());
+    REQUIRE(grid.lineAt(line_offset(-3)).wrapped());
+    REQUIRE(!grid.lineAt(line_offset(-2)).wrapped());
+    REQUIRE(grid.lineAt(line_offset(-1)).wrapped());
+    REQUIRE(grid.lineAt(line_offset(0)).wrapped());
+    REQUIRE(grid.lineAt(line_offset(1)).wrapped());
 
     SECTION("grow from 2x2 to 8x2")
     {
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(8) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(8) }, cell_location {}, false);
         logGridText(grid, "after resize 3x2");
 
         CHECK(grid.historyLineCount() == LineCount(0));
         CHECK(grid.pageSize() == PageSize { LineCount(2), ColumnCount(8) });
 
-        CHECK(!grid.lineAt(LineOffset { 0 }).wrapped());
-        CHECK(grid.lineText(LineOffset(0)) == "ABCDEFGH");
+        CHECK(!grid.lineAt(line_offset { 0 }).wrapped());
+        CHECK(grid.lineText(line_offset(0)) == "ABCDEFGH");
 
-        CHECK(!grid.lineAt(LineOffset { 1 }).wrapped());
-        CHECK(grid.lineText(LineOffset(1)) == "abcdefgh");
+        CHECK(!grid.lineAt(line_offset { 1 }).wrapped());
+        CHECK(grid.lineText(line_offset(1)) == "abcdefgh");
     }
 
     SECTION("grow from 2x2 to 3x2 to ... to 8x2")
     {
         // {{{ 3x2
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(3) }, cell_location {}, false);
         logGridText(grid, "after resize 3x2");
 
         REQUIRE(grid.historyLineCount() == LineCount(4));
         REQUIRE(grid.pageSize() == PageSize { LineCount(2), ColumnCount(3) });
 
-        REQUIRE(grid.lineText(LineOffset(-4)) == "ABC");
-        REQUIRE(grid.lineText(LineOffset(-3)) == "DEF");
-        REQUIRE(grid.lineText(LineOffset(-2)) == "GH ");
-        REQUIRE(grid.lineText(LineOffset(-1)) == "abc");
-        REQUIRE(grid.lineText(LineOffset(0)) == "def");
-        REQUIRE(grid.lineText(LineOffset(1)) == "gh ");
+        REQUIRE(grid.lineText(line_offset(-4)) == "ABC");
+        REQUIRE(grid.lineText(line_offset(-3)) == "DEF");
+        REQUIRE(grid.lineText(line_offset(-2)) == "GH ");
+        REQUIRE(grid.lineText(line_offset(-1)) == "abc");
+        REQUIRE(grid.lineText(line_offset(0)) == "def");
+        REQUIRE(grid.lineText(line_offset(1)) == "gh ");
 
-        REQUIRE(!grid.lineAt(LineOffset(-4)).wrapped());
-        REQUIRE(grid.lineAt(LineOffset(-3)).wrapped());
-        REQUIRE(grid.lineAt(LineOffset(-2)).wrapped());
-        REQUIRE(!grid.lineAt(LineOffset(-1)).wrapped());
-        REQUIRE(grid.lineAt(LineOffset(0)).wrapped());
-        REQUIRE(grid.lineAt(LineOffset(1)).wrapped());
+        REQUIRE(!grid.lineAt(line_offset(-4)).wrapped());
+        REQUIRE(grid.lineAt(line_offset(-3)).wrapped());
+        REQUIRE(grid.lineAt(line_offset(-2)).wrapped());
+        REQUIRE(!grid.lineAt(line_offset(-1)).wrapped());
+        REQUIRE(grid.lineAt(line_offset(0)).wrapped());
+        REQUIRE(grid.lineAt(line_offset(1)).wrapped());
         // }}}
 
         // {{{ 4x2
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(4) }, cell_location {}, false);
         logGridText(grid, "after resize 4x2");
 
         REQUIRE(grid.historyLineCount() == LineCount(2));
         REQUIRE(grid.pageSize() == PageSize { LineCount(2), ColumnCount(4) });
 
-        REQUIRE(grid.lineText(LineOffset(-2)) == "ABCD");
-        REQUIRE(grid.lineText(LineOffset(-1)) == "EFGH");
-        REQUIRE(grid.lineText(LineOffset(0)) == "abcd");
-        REQUIRE(grid.lineText(LineOffset(1)) == "efgh");
+        REQUIRE(grid.lineText(line_offset(-2)) == "ABCD");
+        REQUIRE(grid.lineText(line_offset(-1)) == "EFGH");
+        REQUIRE(grid.lineText(line_offset(0)) == "abcd");
+        REQUIRE(grid.lineText(line_offset(1)) == "efgh");
 
-        REQUIRE(!grid.lineAt(LineOffset(-2)).wrapped());
-        REQUIRE(grid.lineAt(LineOffset(-1)).wrapped());
-        REQUIRE(!grid.lineAt(LineOffset(0)).wrapped());
-        REQUIRE(grid.lineAt(LineOffset(1)).wrapped());
+        REQUIRE(!grid.lineAt(line_offset(-2)).wrapped());
+        REQUIRE(grid.lineAt(line_offset(-1)).wrapped());
+        REQUIRE(!grid.lineAt(line_offset(0)).wrapped());
+        REQUIRE(grid.lineAt(line_offset(1)).wrapped());
         // }}}
 
         // {{{ 5x2
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(5) }, cell_location {}, false);
         logGridText(grid, "after resize 5x2");
 
         REQUIRE(grid.historyLineCount() == LineCount(2));
         REQUIRE(grid.pageSize() == PageSize { LineCount(2), ColumnCount(5) });
 
-        REQUIRE(grid.lineText(LineOffset(-2)) == "ABCDE");
-        REQUIRE(grid.lineText(LineOffset(-1)) == "FGH  ");
-        REQUIRE(grid.lineText(LineOffset(0)) == "abcde");
-        REQUIRE(grid.lineText(LineOffset(1)) == "fgh  ");
+        REQUIRE(grid.lineText(line_offset(-2)) == "ABCDE");
+        REQUIRE(grid.lineText(line_offset(-1)) == "FGH  ");
+        REQUIRE(grid.lineText(line_offset(0)) == "abcde");
+        REQUIRE(grid.lineText(line_offset(1)) == "fgh  ");
 
-        REQUIRE(!grid.lineAt(LineOffset(-2)).wrapped());
-        REQUIRE(grid.lineAt(LineOffset(-1)).wrapped());
-        REQUIRE(!grid.lineAt(LineOffset(0)).wrapped());
-        REQUIRE(grid.lineAt(LineOffset(1)).wrapped());
+        REQUIRE(!grid.lineAt(line_offset(-2)).wrapped());
+        REQUIRE(grid.lineAt(line_offset(-1)).wrapped());
+        REQUIRE(!grid.lineAt(line_offset(0)).wrapped());
+        REQUIRE(grid.lineAt(line_offset(1)).wrapped());
         // }}}
 
         // {{{ 7x2
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(7) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(7) }, cell_location {}, false);
         logGridText(grid, "after resize 7x2");
 
         REQUIRE(grid.historyLineCount() == LineCount(2));
         REQUIRE(grid.pageSize() == PageSize { LineCount(2), ColumnCount(7) });
 
-        REQUIRE(grid.lineText(LineOffset(-2)) == "ABCDEFG");
-        REQUIRE(grid.lineText(LineOffset(-1)) == "H      ");
-        REQUIRE(grid.lineText(LineOffset(0)) == "abcdefg");
-        REQUIRE(grid.lineText(LineOffset(1)) == "h      ");
+        REQUIRE(grid.lineText(line_offset(-2)) == "ABCDEFG");
+        REQUIRE(grid.lineText(line_offset(-1)) == "H      ");
+        REQUIRE(grid.lineText(line_offset(0)) == "abcdefg");
+        REQUIRE(grid.lineText(line_offset(1)) == "h      ");
 
-        REQUIRE(!grid.lineAt(LineOffset(-2)).wrapped());
-        REQUIRE(grid.lineAt(LineOffset(-1)).wrapped());
-        REQUIRE(!grid.lineAt(LineOffset(0)).wrapped());
-        REQUIRE(grid.lineAt(LineOffset(1)).wrapped());
+        REQUIRE(!grid.lineAt(line_offset(-2)).wrapped());
+        REQUIRE(grid.lineAt(line_offset(-1)).wrapped());
+        REQUIRE(!grid.lineAt(line_offset(0)).wrapped());
+        REQUIRE(grid.lineAt(line_offset(1)).wrapped());
         // }}}
 
         // {{{ 8x2
-        (void) grid.resize(PageSize { LineCount(2), ColumnCount(8) }, CellLocation {}, false);
+        (void) grid.resize(PageSize { LineCount(2), ColumnCount(8) }, cell_location {}, false);
         logGridText(grid, "after resize 8x2");
 
         REQUIRE(*grid.historyLineCount() == 0);
         REQUIRE(grid.pageSize() == PageSize { LineCount(2), ColumnCount(8) });
 
-        REQUIRE(grid.lineText(LineOffset(0)) == "ABCDEFGH");
-        REQUIRE(grid.lineText(LineOffset(1)) == "abcdefgh");
+        REQUIRE(grid.lineText(line_offset(0)) == "ABCDEFGH");
+        REQUIRE(grid.lineText(line_offset(1)) == "abcdefgh");
 
-        REQUIRE(!grid.lineAt(LineOffset(0)).wrapped());
-        REQUIRE(!grid.lineAt(LineOffset(1)).wrapped());
+        REQUIRE(!grid.lineAt(line_offset(0)).wrapped());
+        REQUIRE(!grid.lineAt(line_offset(1)).wrapped());
         // }}}
     }
 }
@@ -853,38 +853,38 @@ TEST_CASE("Grid.reflow.tripple", "[grid]")
 TEST_CASE("Grid infinite", "[grid]")
 {
     auto grid_finite = Grid<Cell>(PageSize { LineCount(2), ColumnCount(8) }, true, LineCount(0));
-    grid_finite.setLineText(LineOffset { 0 }, "ABCDEFGH"sv);
-    grid_finite.setLineText(LineOffset { 1 }, "abcdefgh"sv);
+    grid_finite.setLineText(line_offset { 0 }, "ABCDEFGH"sv);
+    grid_finite.setLineText(line_offset { 1 }, "abcdefgh"sv);
     grid_finite.scrollUp(LineCount { 1 });
-    REQUIRE(grid_finite.lineText(LineOffset(0)) == "abcdefgh");
-    REQUIRE(grid_finite.lineText(LineOffset(-1)) == std::string(8, ' '));
+    REQUIRE(grid_finite.lineText(line_offset(0)) == "abcdefgh");
+    REQUIRE(grid_finite.lineText(line_offset(-1)) == std::string(8, ' '));
 
-    auto grid_infinite = Grid<Cell>(PageSize { LineCount(2), ColumnCount(8) }, true, Infinite());
-    grid_infinite.setLineText(LineOffset { 0 }, "ABCDEFGH"sv);
-    grid_infinite.setLineText(LineOffset { 1 }, "abcdefgh"sv);
+    auto grid_infinite = Grid<Cell>(PageSize { LineCount(2), ColumnCount(8) }, true, infinite());
+    grid_infinite.setLineText(line_offset { 0 }, "ABCDEFGH"sv);
+    grid_infinite.setLineText(line_offset { 1 }, "abcdefgh"sv);
     grid_infinite.scrollUp(LineCount { 1 });
-    REQUIRE(grid_infinite.lineText(LineOffset(0)) == "abcdefgh");
-    REQUIRE(grid_infinite.lineText(LineOffset(-1)) == "ABCDEFGH");
+    REQUIRE(grid_infinite.lineText(line_offset(0)) == "abcdefgh");
+    REQUIRE(grid_infinite.lineText(line_offset(-1)) == "ABCDEFGH");
     grid_infinite.scrollUp(LineCount { 97 });
-    REQUIRE(grid_infinite.lineText(LineOffset(-97)) == "abcdefgh");
-    REQUIRE(grid_infinite.lineText(LineOffset(-98)) == "ABCDEFGH");
+    REQUIRE(grid_infinite.lineText(line_offset(-97)) == "abcdefgh");
+    REQUIRE(grid_infinite.lineText(line_offset(-98)) == "ABCDEFGH");
 }
 
 TEST_CASE("Grid resize with wrap", "[grid]")
 {
     auto grid = Grid<Cell>(PageSize { LineCount(3), ColumnCount(5) }, true, LineCount(0));
-    grid.setLineText(LineOffset { 0 }, "1");
-    grid.setLineText(LineOffset { 1 }, "2");
-    grid.setLineText(LineOffset { 2 }, "ABCDE");
-    (void) grid.resize(PageSize { LineCount(3), ColumnCount(3) }, CellLocation {}, false);
-    REQUIRE(grid.lineText(LineOffset(0)) == "2  ");
-    REQUIRE(grid.lineText(LineOffset(1)) == "ABC");
-    REQUIRE(grid.lineText(LineOffset(2)) == "DE ");
-    (void) grid.resize(PageSize { LineCount(3), ColumnCount(5) }, CellLocation {}, false);
+    grid.setLineText(line_offset { 0 }, "1");
+    grid.setLineText(line_offset { 1 }, "2");
+    grid.setLineText(line_offset { 2 }, "ABCDE");
+    (void) grid.resize(PageSize { LineCount(3), ColumnCount(3) }, cell_location {}, false);
+    REQUIRE(grid.lineText(line_offset(0)) == "2  ");
+    REQUIRE(grid.lineText(line_offset(1)) == "ABC");
+    REQUIRE(grid.lineText(line_offset(2)) == "DE ");
+    (void) grid.resize(PageSize { LineCount(3), ColumnCount(5) }, cell_location {}, false);
     REQUIRE(unbox<int>(grid.historyLineCount()) == 0);
-    REQUIRE(grid.lineText(LineOffset(0)) == "1    ");
-    REQUIRE(grid.lineText(LineOffset(1)) == "2    ");
-    REQUIRE(grid.lineText(LineOffset(2)) == "ABCDE");
+    REQUIRE(grid.lineText(line_offset(0)) == "1    ");
+    REQUIRE(grid.lineText(line_offset(1)) == "2    ");
+    REQUIRE(grid.lineText(line_offset(2)) == "ABCDE");
 }
 
 TEST_CASE("Grid resize", "[grid]")
@@ -899,15 +899,15 @@ TEST_CASE("Grid resize", "[grid]")
     auto const sgr = GraphicsAttributes {};
     auto const trivial = TrivialLineBuffer { width, sgr, sgr, HyperlinkId {}, width, bufferFragment };
     auto line_trivial = Line<Cell>(LineFlags::None, trivial);
-    grid.lineAt(LineOffset(0)) = line_trivial;
-    REQUIRE(grid.lineAt(LineOffset(0)).isTrivialBuffer());
-    REQUIRE(grid.lineAt(LineOffset(1)).isTrivialBuffer());
-    (void) grid.resize(PageSize { LineCount(2), width + ColumnCount(1) }, CellLocation {}, false);
-    REQUIRE(grid.lineAt(LineOffset(0)).isTrivialBuffer());
-    REQUIRE(grid.lineAt(LineOffset(1)).isTrivialBuffer());
-    (void) grid.resize(PageSize { LineCount(2), width + ColumnCount(-1) }, CellLocation {}, false);
-    REQUIRE(grid.lineAt(LineOffset(0)).isTrivialBuffer());
-    REQUIRE(grid.lineAt(LineOffset(1)).isTrivialBuffer());
+    grid.lineAt(line_offset(0)) = line_trivial;
+    REQUIRE(grid.lineAt(line_offset(0)).isTrivialBuffer());
+    REQUIRE(grid.lineAt(line_offset(1)).isTrivialBuffer());
+    (void) grid.resize(PageSize { LineCount(2), width + ColumnCount(1) }, cell_location {}, false);
+    REQUIRE(grid.lineAt(line_offset(0)).isTrivialBuffer());
+    REQUIRE(grid.lineAt(line_offset(1)).isTrivialBuffer());
+    (void) grid.resize(PageSize { LineCount(2), width + ColumnCount(-1) }, cell_location {}, false);
+    REQUIRE(grid.lineAt(line_offset(0)).isTrivialBuffer());
+    REQUIRE(grid.lineAt(line_offset(1)).isTrivialBuffer());
 }
 
 // }}}

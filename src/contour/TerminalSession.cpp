@@ -44,6 +44,8 @@
 #include <fstream>
 #include <limits>
 
+#include "vtbackend/primitives.h"
+
 #if !defined(_WIN32)
     #include <pthread.h>
 #endif
@@ -252,7 +254,7 @@ void TerminalSession::bell()
     emit onBell();
 }
 
-void TerminalSession::bufferChanged(terminal::ScreenType _type)
+void TerminalSession::bufferChanged(terminal::screen_type _type)
 {
     if (!display_)
         return;
@@ -268,7 +270,7 @@ void TerminalSession::screenUpdated()
         return;
 
     if (profile_.autoScrollOnUpdate && terminal().viewport().scrolled()
-        && terminal().inputHandler().mode() == ViMode::Insert)
+        && terminal().inputHandler().mode() == vi_mode::Insert)
         terminal().viewport().scrollToBottom();
 
     if (terminal().hasInput())
@@ -336,7 +338,7 @@ void TerminalSession::requestPermission(config::Permission _allowedByConfig, Gua
                 SessionLog()("Permission for {} requires asking user.", role);
                 switch (role)
                 {
-                    // clang-format off
+                        // clang-format off
                     case GuardedRole::ChangeFont: emit requestPermissionForFontChange(); break;
                     case GuardedRole::CaptureBuffer: emit requestPermissionForBufferCapture(); break;
                     case GuardedRole::ShowHostWritableStatusLine: emit requestPermissionForShowHostWritableStatusLine(); break;
@@ -388,7 +390,7 @@ void TerminalSession::executeShowHostWritableStatusLine(bool allow, bool remembe
     if (!allow)
         return;
 
-    terminal_.setStatusDisplay(terminal::StatusDisplayType::HostWritable);
+    terminal_.setStatusDisplay(terminal::status_display_type::HostWritable);
     DisplayLog()("requestCaptureBuffer: Finished. Waking up I/O thread.");
     flushInput();
     terminal_.state().syncWindowTitleWithHostWritableStatusDisplay = false;
@@ -579,10 +581,10 @@ void TerminalSession::requestWindowResize(LineCount _lines, ColumnCount _columns
 
 void TerminalSession::requestWindowResize(QJSValue w, QJSValue h)
 {
-    requestWindowResize(Width(w.toInt()), Height(h.toInt()));
+    requestWindowResize(width(w.toInt()), height(h.toInt()));
 }
 
-void TerminalSession::requestWindowResize(Width _width, Height _height)
+void TerminalSession::requestWindowResize(width _width, height _height)
 {
     if (!display_)
         return;
@@ -612,16 +614,16 @@ void TerminalSession::discardImage(terminal::Image const& _image)
     display_->discardImage(_image);
 }
 
-void TerminalSession::inputModeChanged(terminal::ViMode mode)
+void TerminalSession::inputModeChanged(terminal::vi_mode mode)
 {
-    using terminal::ViMode;
+    using terminal::vi_mode;
     switch (mode)
     {
-        case ViMode::Insert: configureCursor(profile_.inputModes.insert.cursor); break;
-        case ViMode::Normal: configureCursor(profile_.inputModes.normal.cursor); break;
-        case ViMode::Visual:
-        case ViMode::VisualLine:
-        case ViMode::VisualBlock: configureCursor(profile_.inputModes.visual.cursor); break;
+        case vi_mode::Insert: configureCursor(profile_.inputModes.insert.cursor); break;
+        case vi_mode::Normal: configureCursor(profile_.inputModes.normal.cursor); break;
+        case vi_mode::Visual:
+        case vi_mode::VisualLine:
+        case vi_mode::VisualBlock: configureCursor(profile_.inputModes.visual.cursor); break;
     }
 }
 
@@ -673,7 +675,7 @@ void TerminalSession::sendCharPressEvent(char32_t _value, Modifier _modifier, Ti
 
 void TerminalSession::sendMousePressEvent(Modifier _modifier,
                                           MouseButton _button,
-                                          PixelCoordinate _pixelPosition)
+                                          pixel_coordinate _pixelPosition)
 {
     auto const uiHandledHint = false;
     InputLog()("Mouse press received: {} {}\n", _modifier, _button);
@@ -693,8 +695,8 @@ void TerminalSession::sendMousePressEvent(Modifier _modifier,
 }
 
 void TerminalSession::sendMouseMoveEvent(terminal::Modifier _modifier,
-                                         terminal::CellLocation _pos,
-                                         terminal::PixelCoordinate _pixelPosition)
+                                         terminal::cell_location _pos,
+                                         terminal::pixel_coordinate _pixelPosition)
 {
     // NB: This translation depends on the display's margin, so maybe
     //     the display should provide the translation?
@@ -720,7 +722,7 @@ void TerminalSession::sendMouseMoveEvent(terminal::Modifier _modifier,
 
 void TerminalSession::sendMouseReleaseEvent(Modifier _modifier,
                                             MouseButton _button,
-                                            PixelCoordinate _pixelPosition)
+                                            pixel_coordinate _pixelPosition)
 {
     terminal().tick(steady_clock::now());
 
@@ -1098,10 +1100,10 @@ bool TerminalSession::operator()(actions::ToggleInputProtection)
 bool TerminalSession::operator()(actions::ToggleStatusLine)
 {
     auto const _l = scoped_lock { terminal_ };
-    if (terminal().state().statusDisplayType != StatusDisplayType::Indicator)
-        terminal().setStatusDisplay(StatusDisplayType::Indicator);
+    if (terminal().state().statusDisplayType != status_display_type::Indicator)
+        terminal().setStatusDisplay(status_display_type::Indicator);
     else
-        terminal().setStatusDisplay(StatusDisplayType::None);
+        terminal().setStatusDisplay(status_display_type::None);
 
     // `savedStatusDisplayType` holds only a value if the application has been overriding
     // the status display type. But the user now actively requests a given type,
@@ -1147,10 +1149,10 @@ bool TerminalSession::operator()(actions::TraceStep)
 
 bool TerminalSession::operator()(actions::ViNormalMode)
 {
-    if (terminal().inputHandler().mode() == ViMode::Insert)
-        terminal().inputHandler().setMode(ViMode::Normal);
-    else if (terminal().inputHandler().mode() == ViMode::Normal)
-        terminal().inputHandler().setMode(ViMode::Insert);
+    if (terminal().inputHandler().mode() == vi_mode::Insert)
+        terminal().inputHandler().setMode(vi_mode::Normal);
+    else if (terminal().inputHandler().mode() == vi_mode::Normal)
+        terminal().inputHandler().setMode(vi_mode::Insert);
     return true;
 }
 
@@ -1166,7 +1168,7 @@ void TerminalSession::setDefaultCursor()
     if (!display_)
         return;
 
-    using Type = terminal::ScreenType;
+    using Type = terminal::screen_type;
     switch (terminal().screenType())
     {
         case Type::Primary: display_->setMouseCursorShape(MouseCursorShape::IBeam); break;
@@ -1286,7 +1288,7 @@ void TerminalSession::configureTerminal()
     terminal_.setTerminalId(profile_.terminalId);
     terminal_.setMaxImageColorRegisters(config_.maxImageColorRegisters);
     terminal_.setMaxImageSize(config_.maxImageSize);
-    terminal_.setMode(terminal::DECMode::NoSixelScrolling, !config_.sixelScrolling);
+    terminal_.setMode(terminal::dec_mode::NoSixelScrolling, !config_.sixelScrolling);
     terminal_.setStatusDisplay(profile_.initialStatusDisplayType);
     SessionLog()("maxImageSize={}, sixelScrolling={}", config_.maxImageSize, config_.sixelScrolling);
 
@@ -1324,8 +1326,8 @@ void TerminalSession::configureDisplay()
     {
         auto const dpr = display_->contentScale();
         auto const qActualScreenSize = display_->window()->screen()->size() * dpr;
-        auto const actualScreenSize = ImageSize { Width::cast_from(qActualScreenSize.width()),
-                                                  Height::cast_from(qActualScreenSize.height()) };
+        auto const actualScreenSize = image_size { width::cast_from(qActualScreenSize.width()),
+                                                   height::cast_from(qActualScreenSize.height()) };
         terminal_.setMaxImageSize(actualScreenSize, actualScreenSize);
     }
 
@@ -1367,7 +1369,7 @@ uint8_t TerminalSession::matchModeFlags() const
     if (terminal_.selectionAvailable())
         flags |= static_cast<uint8_t>(MatchModes::Flag::Select);
 
-    if (terminal_.inputHandler().mode() == ViMode::Insert)
+    if (terminal_.inputHandler().mode() == vi_mode::Insert)
         flags |= static_cast<uint8_t>(MatchModes::Flag::Insert);
 
     if (!terminal_.state().searchMode.pattern.empty())

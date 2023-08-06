@@ -54,7 +54,7 @@ namespace
                                                          logstore::Category::Visibility::Hidden);
 
     // TODO: Do not depend on this function but rather construct the pixmaps using the correct Y-coordinates.
-    atlas::Buffer invertY(atlas::Buffer const& image, ImageSize cellSize)
+    atlas::Buffer invertY(atlas::Buffer const& image, image_size cellSize)
     {
         atlas::Buffer dest;
         dest.resize(cellSize.area());
@@ -124,7 +124,7 @@ namespace detail
             Crossing = 0x03
         };
 
-        void drawArc(atlas::Buffer& buffer, ImageSize imageSize, unsigned thickness, Arc arc)
+        void drawArc(atlas::Buffer& buffer, image_size imageSize, unsigned thickness, Arc arc)
         {
             // Used to record all the pixel coordinates that have been written to per scanline.
             //
@@ -192,7 +192,7 @@ namespace detail
                 Right
             };
 
-            ImageSize size {};
+            image_size size {};
             int underlinePosition = 1;
 
             Part part = Part::Middle;
@@ -503,7 +503,7 @@ namespace detail
 
         // Arguments from and to are passed as percentage.
         template <typename Container, typename F>
-        constexpr void fillBlock(Container& image, ImageSize size, Ratio from, Ratio to, F const& filler)
+        constexpr void fillBlock(Container& image, image_size size, Ratio from, Ratio to, F const& filler)
         {
             auto const h = unbox<int>(size.height) - 1;
 
@@ -521,7 +521,7 @@ namespace detail
         }
 
         template <size_t N, Inverted Inv>
-        auto checker(ImageSize size)
+        auto checker(image_size size)
         {
             auto const s = unbox<int>(size.width) / int(N);
             auto const t = unbox<int>(size.height) / int(N);
@@ -536,7 +536,7 @@ namespace detail
         }
 
         template <size_t N>
-        auto hbar(ImageSize size)
+        auto hbar(image_size size)
         {
             auto const s = unbox<int>(size.height) / int(N);
             return [s](int /*x*/, int y) {
@@ -545,7 +545,7 @@ namespace detail
         }
 
         template <size_t N>
-        auto right_circ(ImageSize size)
+        auto right_circ(image_size size)
         {
             auto const s = unbox<int>(size.height) / int(N);
             return [s](int /*x*/, int y) {
@@ -554,7 +554,7 @@ namespace detail
         }
 
         template <size_t N>
-        auto dotted(ImageSize size)
+        auto dotted(image_size size)
         {
             auto const s = *size.width / N;
             auto const f = linearEq({ 0, 0 }, { 10, 10 });
@@ -564,7 +564,7 @@ namespace detail
         }
 
         template <size_t N>
-        auto gatter(ImageSize size)
+        auto gatter(image_size size)
         {
             auto const s = *size.width / N;
             auto const f = linearEq({ 0, 0 }, { 10, 10 });
@@ -574,7 +574,7 @@ namespace detail
         }
 
         template <size_t N, int P>
-        auto dbar(ImageSize size)
+        auto dbar(image_size size)
         {
             auto const s = *size.height / N;
             auto const f = linearEq({ 0, 0 }, { unbox<int>(size.width), unbox<int>(size.height) });
@@ -618,7 +618,7 @@ namespace detail
         };
 
         template <Dir Direction, int DivisorX>
-        auto getTriangleProps(ImageSize size)
+        auto getTriangleProps(image_size size)
         {
             auto const c =
                 Point { Direction == Dir::Left ? unbox<int>(size.width) / DivisorX
@@ -669,7 +669,7 @@ namespace detail
         }
 
         template <int P>
-        auto triChecker(ImageSize size)
+        auto triChecker(image_size size)
         {
             auto const c = Point { unbox<int>(size.width) / 2, unbox<int>(size.height) / 2 };
             auto const w = unbox<int>(size.width) - 1;
@@ -692,7 +692,7 @@ namespace detail
         }
 
         template <Inverted Inv>
-        auto dchecker(ImageSize size)
+        auto dchecker(image_size size)
         {
             auto constexpr set = Inv == Inverted::No ? 255 : 0;
             auto constexpr unset = 255 - set;
@@ -734,7 +734,7 @@ namespace detail
         }
 
         template <Dir Direction, Inverted Inv = Inverted::No, int DivisorX = 2>
-        atlas::Buffer triangle(ImageSize size)
+        atlas::Buffer triangle(image_size size)
         {
             auto pixmap = blockElement<2>(size);
             fillTriangle<Direction, Inv, DivisorX>(pixmap);
@@ -748,7 +748,7 @@ namespace detail
         };
         void diagonalMosaic(Pixmap& pixmap, Ratio ra, Ratio rb, UpperOrLower location) noexcept
         {
-            auto const innerSize = pixmap.size - ImageSize { Width(1), Height(1) };
+            auto const innerSize = pixmap.size - image_size { width(1), height(1) };
 
             auto const condition =
                 [location, line = linearEq(innerSize * ra, innerSize * rb)](int x, int y) noexcept -> bool {
@@ -763,14 +763,14 @@ namespace detail
                         pixmap.buffer.at(w * (h - y) + x) = 0xFF;
         }
 
-        inline atlas::Buffer upperDiagonalMosaic(ImageSize size, Ratio ra, Ratio rb)
+        inline atlas::Buffer upperDiagonalMosaic(image_size size, Ratio ra, Ratio rb)
         {
             Pixmap pixmap = blockElement<2>(size);
             diagonalMosaic(pixmap, ra, rb, UpperOrLower::Upper);
             return pixmap.take();
         }
 
-        inline atlas::Buffer lowerDiagonalMosaic(ImageSize size, Ratio ra, Ratio rb)
+        inline atlas::Buffer lowerDiagonalMosaic(image_size size, Ratio ra, Ratio rb)
         {
             Pixmap pixmap = blockElement<2>(size);
             diagonalMosaic(pixmap, ra, rb, UpperOrLower::Lower);
@@ -845,7 +845,7 @@ namespace detail
         // }}}
         // {{{ block sextant construction
         template <typename Container, typename T>
-        constexpr inline void blockSextant(Container& image, ImageSize size, T position)
+        constexpr inline void blockSextant(Container& image, image_size size, T position)
         {
             auto const x0 = (position - 1) % 2;
             auto const y0 = [position]() {
@@ -891,14 +891,14 @@ namespace detail
         }
 
         template <typename Container, typename A, typename... B>
-        constexpr inline void blockSextant(Container& image, ImageSize size, A first, B... others)
+        constexpr inline void blockSextant(Container& image, image_size size, A first, B... others)
         {
             blockSextant(image, size, first);
             blockSextant(image, size, others...);
         }
 
         template <typename... T>
-        inline atlas::Buffer blockSextant(ImageSize size, T... positions)
+        inline atlas::Buffer blockSextant(image_size size, T... positions)
         {
             auto image = atlas::Buffer(size.area(), 0x00);
             blockSextant(image, size, positions...);
@@ -922,7 +922,7 @@ void BoxDrawingRenderer::clearCache()
     // to clear here anything. It's done for us already.
 }
 
-bool BoxDrawingRenderer::render(LineOffset line, ColumnOffset column, char32_t codepoint, RGBColor color)
+bool BoxDrawingRenderer::render(line_offset line, column_offset column, char32_t codepoint, rgb_color color)
 {
     Renderable::AtlasTileAttributes const* data = getOrCreateCachedTileAttributes(codepoint);
     if (!data)
@@ -1543,7 +1543,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildElements(char32_t codepoint)
 }
 
 optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
-                                                             ImageSize size,
+                                                             image_size size,
                                                              int lineThickness)
 {
     if (!(codepoint >= 0x2500 && codepoint <= 0x257F))

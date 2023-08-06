@@ -63,10 +63,10 @@ auto setupMockTerminal(std::string_view text,
         history,
         1024, // ptyReadBufferSize
         [text](auto& mock) {
-            mock.terminal.setStatusDisplay(terminal::StatusDisplayType::Indicator);
+            mock.terminal.setStatusDisplay(terminal::status_display_type::Indicator);
             mock.writeToScreen(text);
             mock.writeToScreen("\033[H");
-            mock.terminal.inputHandler().setMode(terminal::ViMode::Normal);
+            mock.terminal.inputHandler().setMode(terminal::vi_mode::Normal);
             // logScreenTextAlways(mock);
             REQUIRE(mock.terminal.state().viCommands.cursorPosition.line.value == 0);
             REQUIRE(mock.terminal.state().viCommands.cursorPosition.column.value == 0);
@@ -210,7 +210,7 @@ TEST_CASE("ViCommands:modeChanged", "[vi]")
     SECTION("clearSearch() must be invoked when switch to ViMode::Insert")
     {
         mock.terminal.setNewSearchTerm(U"search_term", true);
-        mock.terminal.state().inputHandler.setMode(terminal::ViMode::Insert);
+        mock.terminal.state().inputHandler.setMode(terminal::vi_mode::Insert);
         REQUIRE(mock.terminal.state().searchMode.pattern.empty());
     }
 }

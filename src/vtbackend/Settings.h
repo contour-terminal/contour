@@ -33,14 +33,14 @@ struct Settings
     // some other display is shown along with it (e.g. below the main display).
     PageSize pageSize = PageSize { LineCount(25), ColumnCount(80) };
 
-    MaxHistoryLineCount maxHistoryLineCount;
-    ImageSize maxImageSize { Width(800), Height(600) };
+    max_history_line_count maxHistoryLineCount;
+    image_size maxImageSize { width(800), height(600) };
     unsigned maxImageRegisterCount = 256;
-    StatusDisplayType statusDisplayType = StatusDisplayType::None;
-    StatusDisplayPosition statusDisplayPosition = StatusDisplayPosition::Bottom;
+    status_display_type statusDisplayType = status_display_type::None;
+    status_display_position statusDisplayPosition = status_display_position::Bottom;
     bool syncWindowTitleWithHostWritableStatusDisplay = true;
-    CursorDisplay cursorDisplay = CursorDisplay::Steady;
-    CursorShape cursorShape = CursorShape::Block;
+    cursor_display cursorDisplay = cursor_display::Steady;
+    cursor_shape cursorShape = cursor_shape::Block;
 
     bool usePrivateColorRegisters = false;
 
@@ -59,7 +59,7 @@ struct Settings
     std::u32string wordDelimiters;
     Modifier mouseProtocolBypassModifier = Modifier::Shift;
     Modifier mouseBlockSelectionModifier = Modifier::Control;
-    LineOffset copyLastMarkRangeOffset = LineOffset(0);
+    line_offset copyLastMarkRangeOffset = line_offset(0);
     bool visualizeSelectedWord = true;
     std::chrono::milliseconds highlightTimeout = std::chrono::milliseconds { 150 };
     bool highlightDoubleClickedWord = true;

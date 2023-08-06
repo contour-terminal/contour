@@ -132,8 +132,8 @@ class TerminalWidget: public QQuickItem
     text::DPI fontDPI() const noexcept;
     [[nodiscard]] bool isFullScreen() const;
 
-    [[nodiscard]] terminal::ImageSize pixelSize() const;
-    [[nodiscard]] terminal::ImageSize cellSize() const;
+    [[nodiscard]] terminal::image_size pixelSize() const;
+    [[nodiscard]] terminal::image_size cellSize() const;
 
     // (user requested) actions
     terminal::FontDef getFontDef();
@@ -141,7 +141,7 @@ class TerminalWidget: public QQuickItem
     void inspect();
     void notify(std::string_view /*_title*/, std::string_view /*_body*/);
     void resizeWindow(terminal::LineCount, terminal::ColumnCount);
-    void resizeWindow(terminal::Width, terminal::Height);
+    void resizeWindow(terminal::width, terminal::height);
     void setFonts(terminal::rasterizer::FontDescriptions _fontDescriptions);
     bool setFontSize(text::font_size _size);
     bool setPageSize(terminal::PageSize _newPageSize);
@@ -159,7 +159,7 @@ class TerminalWidget: public QQuickItem
     void scheduleRedraw();
     void renderBufferUpdated();
     void onSelectionCompleted();
-    void bufferChanged(terminal::ScreenType);
+    void bufferChanged(terminal::screen_type);
     void discardImage(terminal::Image const&);
     // }}}
 
@@ -194,7 +194,7 @@ class TerminalWidget: public QQuickItem
     void profileNameChanged();
     void titleChanged(QString const&);
     void sessionChanged(TerminalSession*);
-    void terminalBufferChanged(terminal::ScreenType);
+    void terminalBufferChanged(terminal::screen_type);
     void terminated();
     void showNotification(QString const& _title, QString const& _body);
 

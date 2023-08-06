@@ -32,7 +32,7 @@
 namespace terminal
 {
 
-enum class IndexedColor : uint8_t
+enum class indexed_color : uint8_t
 {
     Black = 0,
     Red = 1,
@@ -47,7 +47,7 @@ enum class IndexedColor : uint8_t
 };
 
 //! Bright colors. As introduced by aixterm, bright versions of standard 3bit colors.
-enum class BrightColor
+enum class bright_color
 {
     Black = 0,
     Red = 1,
@@ -60,15 +60,15 @@ enum class BrightColor
 };
 
 // {{{ RGBColor
-struct RGBColor
+struct rgb_color
 {
     uint8_t red { 0 };
     uint8_t green { 0 };
     uint8_t blue { 0 };
 
-    constexpr RGBColor() = default;
-    constexpr RGBColor(uint8_t r, uint8_t g, uint8_t b): red { r }, green { g }, blue { b } {}
-    constexpr explicit RGBColor(uint32_t rgb):
+    constexpr rgb_color() = default;
+    constexpr rgb_color(uint8_t r, uint8_t g, uint8_t b): red { r }, green { g }, blue { b } {}
+    constexpr explicit rgb_color(uint32_t rgb):
         red { static_cast<uint8_t>((rgb >> 16) & 0xFF) },
         green { static_cast<uint8_t>((rgb >> 8) & 0xFF) },
         blue { static_cast<uint8_t>(rgb & 0xFF) }
@@ -80,36 +80,36 @@ struct RGBColor
         return static_cast<uint32_t>((red << 16) | (green << 8) | blue);
     }
 
-    [[nodiscard]] constexpr RGBColor inverse() const noexcept
+    [[nodiscard]] constexpr rgb_color inverse() const noexcept
     {
-        return RGBColor { uint8_t(255 - red), uint8_t(255 - green), uint8_t(255 - blue) };
+        return rgb_color { uint8_t(255 - red), uint8_t(255 - green), uint8_t(255 - blue) };
     }
 
-    explicit RGBColor(std::string const& hexCode);
+    explicit rgb_color(std::string const& hexCode);
 
-    RGBColor& operator=(std::string const& hexCode);
+    rgb_color& operator=(std::string const& hexCode);
 };
 
-constexpr RGBColor operator*(RGBColor c, float s) noexcept
+constexpr rgb_color operator*(rgb_color c, float s) noexcept
 {
-    return RGBColor { static_cast<uint8_t>(std::clamp(static_cast<float>(c.red) * s, 0.0f, 255.0f)),
-                      static_cast<uint8_t>(std::clamp(static_cast<float>(c.green) * s, 0.0f, 255.0f)),
-                      static_cast<uint8_t>(std::clamp(static_cast<float>(c.blue) * s, 0.0f, 255.0f)) };
+    return rgb_color { static_cast<uint8_t>(std::clamp(static_cast<float>(c.red) * s, 0.0f, 255.0f)),
+                       static_cast<uint8_t>(std::clamp(static_cast<float>(c.green) * s, 0.0f, 255.0f)),
+                       static_cast<uint8_t>(std::clamp(static_cast<float>(c.blue) * s, 0.0f, 255.0f)) };
 }
 
-constexpr RGBColor operator+(RGBColor a, RGBColor b) noexcept
+constexpr rgb_color operator+(rgb_color a, rgb_color b) noexcept
 {
-    return RGBColor { static_cast<uint8_t>(std::clamp<unsigned>(a.red + b.red, 0, 255)),
-                      static_cast<uint8_t>(std::clamp<unsigned>(a.green + b.green, 0, 255)),
-                      static_cast<uint8_t>(std::clamp<unsigned>(a.blue + b.blue, 0, 255)) };
+    return rgb_color { static_cast<uint8_t>(std::clamp<unsigned>(a.red + b.red, 0, 255)),
+                       static_cast<uint8_t>(std::clamp<unsigned>(a.green + b.green, 0, 255)),
+                       static_cast<uint8_t>(std::clamp<unsigned>(a.blue + b.blue, 0, 255)) };
 }
 
-constexpr RGBColor mix(RGBColor a, RGBColor b, float t = 0.5) noexcept
+constexpr rgb_color mix(rgb_color a, rgb_color b, float t = 0.5) noexcept
 {
     return a * t + b * (1.0f - t);
 }
 
-inline double distance(RGBColor e1, RGBColor e2) noexcept
+inline double distance(rgb_color e1, rgb_color e2) noexcept
 {
     auto const rmean = (uint32_t(e1.red) + uint32_t(e2.red)) / 2;
     auto const r = uint32_t(e1.red) - uint32_t(e2.red);
@@ -118,32 +118,32 @@ inline double distance(RGBColor e1, RGBColor e2) noexcept
     return sqrt((((512 + rmean) * r * r) >> 8) + 4 * g * g + (((767 - rmean) * b * b) >> 8));
 }
 
-constexpr RGBColor operator"" _rgb(unsigned long long value)
+constexpr rgb_color operator"" _rgb(unsigned long long value)
 {
-    return RGBColor { static_cast<uint32_t>(value) };
+    return rgb_color { static_cast<uint32_t>(value) };
 }
 
-constexpr bool operator==(RGBColor a, RGBColor b) noexcept
+constexpr bool operator==(rgb_color a, rgb_color b) noexcept
 {
     return a.red == b.red && a.green == b.green && a.blue == b.blue;
 }
 
-constexpr bool operator!=(RGBColor a, RGBColor b) noexcept
+constexpr bool operator!=(rgb_color a, rgb_color b) noexcept
 {
     return !(a == b);
 }
 
-struct RGBColorPair
+struct rgb_color_pair
 {
-    RGBColor foreground;
-    RGBColor background;
+    rgb_color foreground;
+    rgb_color background;
 
     [[nodiscard]] bool isTooSimilar(double threshold = 0.1) const noexcept
     {
         return distance(foreground, background) <= threshold;
     }
 
-    [[nodiscard]] RGBColorPair distinct(double threshold = 0.25) const noexcept
+    [[nodiscard]] rgb_color_pair distinct(double threshold = 0.25) const noexcept
     {
         if (isTooSimilar(threshold))
             return { foreground.inverse(), foreground };
@@ -151,34 +151,34 @@ struct RGBColorPair
             return *this;
     }
 
-    [[nodiscard]] constexpr RGBColorPair constructDefaulted(std::optional<RGBColor> fgOpt,
-                                                            std::optional<RGBColor> bgOpt) const noexcept
+    [[nodiscard]] constexpr rgb_color_pair constructDefaulted(std::optional<rgb_color> fgOpt,
+                                                              std::optional<rgb_color> bgOpt) const noexcept
     {
         return { fgOpt.value_or(foreground), bgOpt.value_or(background) };
     }
 
-    [[nodiscard]] constexpr RGBColorPair swapped() const noexcept
+    [[nodiscard]] constexpr rgb_color_pair swapped() const noexcept
     {
         // Swap fg/bg.
         return { background, foreground };
     }
 
-    [[nodiscard]] constexpr RGBColorPair allForeground() const noexcept
+    [[nodiscard]] constexpr rgb_color_pair allForeground() const noexcept
     {
         // All same color components as foreground.
         return { foreground, foreground };
     }
 
-    [[nodiscard]] constexpr RGBColorPair allBackground() const noexcept
+    [[nodiscard]] constexpr rgb_color_pair allBackground() const noexcept
     {
         // All same color components as foreground.
         return { background, background };
     }
 };
 
-constexpr RGBColorPair mix(RGBColorPair a, RGBColorPair b, float t = 0.5) noexcept
+constexpr rgb_color_pair mix(rgb_color_pair a, rgb_color_pair b, float t = 0.5) noexcept
 {
-    return RGBColorPair {
+    return rgb_color_pair {
         mix(a.foreground, b.foreground, t),
         mix(a.background, b.background, t),
     };
@@ -186,7 +186,7 @@ constexpr RGBColorPair mix(RGBColorPair a, RGBColorPair b, float t = 0.5) noexce
 // }}}
 
 // {{{ RGBAColor
-struct RGBAColor
+struct rgba_color
 {
     uint32_t value { 0 };
 
@@ -204,43 +204,43 @@ struct RGBAColor
     }
     [[nodiscard]] constexpr uint8_t alpha() const noexcept { return static_cast<uint8_t>(value & 0xFF); }
 
-    constexpr RGBAColor() noexcept = default;
-    constexpr RGBAColor(uint32_t value) noexcept: value { value } {}
+    constexpr rgba_color() noexcept = default;
+    constexpr rgba_color(uint32_t value) noexcept: value { value } {}
 
-    constexpr RGBAColor(uint8_t r, uint8_t g, uint8_t b, uint8_t a) noexcept:
+    constexpr rgba_color(uint8_t r, uint8_t g, uint8_t b, uint8_t a) noexcept:
         value { (static_cast<uint32_t>(r) << 24) | (static_cast<uint32_t>(g) << 16)
                 | (static_cast<uint32_t>(b) << 8) | (a) }
     {
     }
 
-    constexpr RGBAColor(RGBColor color) noexcept: RGBAColor { color.red, color.green, color.blue, 0xFF } {}
+    constexpr rgba_color(rgb_color color) noexcept: rgba_color { color.red, color.green, color.blue, 0xFF } {}
 
-    constexpr RGBAColor(RGBColor color, uint8_t alpha) noexcept:
-        RGBAColor { color.red, color.green, color.blue, alpha }
+    constexpr rgba_color(rgb_color color, uint8_t alpha) noexcept:
+        rgba_color { color.red, color.green, color.blue, alpha }
     {
     }
 
-    [[nodiscard]] constexpr RGBColor rgb() const noexcept { return RGBColor(value >> 8); }
+    [[nodiscard]] constexpr rgb_color rgb() const noexcept { return rgb_color(value >> 8); }
 
-    [[nodiscard]] RGBAColor& operator=(std::string const& hexCode);
+    [[nodiscard]] rgba_color& operator=(std::string const& hexCode);
 
     // NOLINTNEXTLINE(readability-identifier-naming)
     constexpr static inline auto White = uint32_t(0xFF'FF'FF'FF);
 };
 
-constexpr bool operator==(RGBAColor a, RGBAColor b) noexcept
+constexpr bool operator==(rgba_color a, rgba_color b) noexcept
 {
     return a.value == b.value;
 }
 
-constexpr bool operator!=(RGBAColor a, RGBAColor b) noexcept
+constexpr bool operator!=(rgba_color a, rgba_color b) noexcept
 {
     return !(a == b);
 }
 // }}}
 
 // {{{ Color
-enum class ColorType : uint8_t
+enum class color_type : uint8_t
 {
     Undefined,
     Default,
@@ -249,7 +249,7 @@ enum class ColorType : uint8_t
     RGB
 };
 
-struct CRISPY_PACKED Color
+struct CRISPY_PACKED color
 {
     // Layout:
     //
@@ -263,43 +263,43 @@ struct CRISPY_PACKED Color
     //
     uint32_t content = 0;
 
-    constexpr Color() noexcept = default;
-    constexpr Color(Color const&) noexcept = default;
-    constexpr Color(Color&&) noexcept = default;
-    constexpr Color& operator=(Color const&) noexcept = default;
-    constexpr Color& operator=(Color&&) noexcept = default;
+    constexpr color() noexcept = default;
+    constexpr color(color const&) noexcept = default;
+    constexpr color(color&&) noexcept = default;
+    constexpr color& operator=(color const&) noexcept = default;
+    constexpr color& operator=(color&&) noexcept = default;
 
-    constexpr Color(BrightColor value) noexcept:
-        content { (unsigned(value) & 0xFF) | (unsigned(ColorType::Bright) << 24) }
+    constexpr color(bright_color value) noexcept:
+        content { (unsigned(value) & 0xFF) | (unsigned(color_type::Bright) << 24) }
     {
     }
-    constexpr Color(IndexedColor value) noexcept:
-        content { (unsigned(value) & 0xFF) | (unsigned(ColorType::Indexed) << 24) }
+    constexpr color(indexed_color value) noexcept:
+        content { (unsigned(value) & 0xFF) | (unsigned(color_type::Indexed) << 24) }
     {
     }
-    constexpr Color(RGBColor rgb) noexcept: content { rgb.value() | (unsigned(ColorType::RGB) << 24) } {}
+    constexpr color(rgb_color rgb) noexcept: content { rgb.value() | (unsigned(color_type::RGB) << 24) } {}
 
-    [[nodiscard]] constexpr ColorType type() const noexcept
+    [[nodiscard]] constexpr color_type type() const noexcept
     {
-        return static_cast<ColorType>((content >> 24) & 0xFF);
+        return static_cast<color_type>((content >> 24) & 0xFF);
     }
     [[nodiscard]] constexpr uint8_t index() const noexcept { return content & 0xFF; }
-    [[nodiscard]] constexpr RGBColor rgb() const noexcept { return RGBColor(content & 0xFFFFFF); }
+    [[nodiscard]] constexpr rgb_color rgb() const noexcept { return rgb_color(content & 0xFFFFFF); }
 
     // NOLINTBEGIN(readability-identifier-naming)
-    [[nodiscard]] constexpr static Color Undefined() noexcept { return Color { ColorType::Undefined, 0 }; }
-    [[nodiscard]] constexpr static Color Default() noexcept { return Color { ColorType::Default, 0 }; }
-    [[nodiscard]] constexpr static Color Bright(uint8_t index) noexcept
+    [[nodiscard]] constexpr static color Undefined() noexcept { return color { color_type::Undefined, 0 }; }
+    [[nodiscard]] constexpr static color Default() noexcept { return color { color_type::Default, 0 }; }
+    [[nodiscard]] constexpr static color Bright(uint8_t index) noexcept
     {
-        return Color { ColorType::Bright, index };
+        return color { color_type::Bright, index };
     }
-    [[nodiscard]] constexpr static Color Indexed(uint8_t index) noexcept
+    [[nodiscard]] constexpr static color Indexed(uint8_t index) noexcept
     {
-        return Color { ColorType::Indexed, index };
+        return color { color_type::Indexed, index };
     }
-    [[nodiscard]] constexpr static Color Indexed(IndexedColor index) noexcept
+    [[nodiscard]] constexpr static color Indexed(indexed_color index) noexcept
     {
-        return Color { ColorType::Indexed, (uint8_t) index };
+        return color { color_type::Indexed, (uint8_t) index };
     }
     // NOLINTEND(readability-identifier-naming)
 
@@ -307,122 +307,122 @@ struct CRISPY_PACKED Color
     // constexpr static Color RGB(RGBColor color) noexcept { return Color{color}; }
 
   private:
-    constexpr Color(ColorType type, uint8_t value) noexcept:
+    constexpr color(color_type type, uint8_t value) noexcept:
         content { (static_cast<uint32_t>(type) << 24) | (static_cast<uint32_t>(value) & 0xFF) }
     {
     }
 };
 
-constexpr bool operator==(Color a, Color b) noexcept
+constexpr bool operator==(color a, color b) noexcept
 {
     return a.content == b.content;
 }
 
-constexpr bool operator!=(Color a, Color b) noexcept
+constexpr bool operator!=(color a, color b) noexcept
 {
     return !(a == b);
 }
 
-constexpr bool isUndefined(Color color) noexcept
+constexpr bool isUndefined(color color) noexcept
 {
-    return color.type() == ColorType::Undefined;
+    return color.type() == color_type::Undefined;
 }
-constexpr bool isDefaultColor(Color color) noexcept
+constexpr bool isDefaultColor(color color) noexcept
 {
-    return color.type() == ColorType::Default;
-}
-
-constexpr bool isIndexedColor(Color color) noexcept
-{
-    return color.type() == ColorType::Indexed;
-}
-constexpr bool isBrightColor(Color color) noexcept
-{
-    return color.type() == ColorType::Bright;
-}
-constexpr bool isRGBColor(Color color) noexcept
-{
-    return color.type() == ColorType::RGB;
+    return color.type() == color_type::Default;
 }
 
-constexpr uint8_t getIndexedColor(Color color) noexcept
+constexpr bool isIndexedColor(color color) noexcept
+{
+    return color.type() == color_type::Indexed;
+}
+constexpr bool isBrightColor(color color) noexcept
+{
+    return color.type() == color_type::Bright;
+}
+constexpr bool isRGBColor(color color) noexcept
+{
+    return color.type() == color_type::RGB;
+}
+
+constexpr uint8_t getIndexedColor(color color) noexcept
 {
     return color.index();
 }
-constexpr uint8_t getBrightColor(Color color) noexcept
+constexpr uint8_t getBrightColor(color color) noexcept
 {
     return color.index();
 }
-constexpr RGBColor getRGBColor(Color color) noexcept
+constexpr rgb_color getRGBColor(color color) noexcept
 {
     return color.rgb();
 }
 
-std::string to_string(Color color);
-std::string to_string(IndexedColor color);
-std::string to_string(BrightColor color);
-std::string to_string(RGBColor c);
-std::string to_string(RGBAColor c);
+std::string to_string(color color);
+std::string to_string(indexed_color color);
+std::string to_string(bright_color color);
+std::string to_string(rgb_color c);
+std::string to_string(rgba_color c);
 
-inline std::ostream& operator<<(std::ostream& os, terminal::Color value)
+inline std::ostream& operator<<(std::ostream& os, terminal::color value)
 {
     return os << to_string(value);
 }
 
-constexpr Color UndefinedColor() noexcept
+constexpr color UndefinedColor() noexcept
 {
-    return Color::Undefined();
+    return color::Undefined();
 }
-constexpr Color DefaultColor() noexcept
+constexpr color DefaultColor() noexcept
 {
-    return Color::Default();
+    return color::Default();
 }
 // }}}
 
-struct CellForegroundColor
+struct cell_foreground_color
 {
 };
-struct CellBackgroundColor
+struct cell_background_color
 {
 };
-using CellRGBColor = std::variant<RGBColor, CellForegroundColor, CellBackgroundColor>;
+using cell_rgb_color = std::variant<rgb_color, cell_foreground_color, cell_background_color>;
 
-struct CellRGBColorPair
+struct cell_rgb_color_pair
 {
-    CellRGBColor foreground;
-    CellRGBColor background;
+    cell_rgb_color foreground;
+    cell_rgb_color background;
 };
 
-struct CellRGBColorAndAlphaPair
+struct cell_rgb_color_and_alpha_pair
 {
-    CellRGBColor foreground;
+    cell_rgb_color foreground;
     float foregroundAlpha = 1.0f;
-    CellRGBColor background;
+    cell_rgb_color background;
     float backgroundAlpha = 1.0f;
 };
 
-struct CursorColor
+struct cursor_color
 {
-    CellRGBColor color = CellForegroundColor {};
-    CellRGBColor textOverrideColor = CellBackgroundColor {};
+    cell_rgb_color color = cell_foreground_color {};
+    cell_rgb_color textOverrideColor = cell_background_color {};
 };
 
 // {{{ Opacity
-enum class Opacity : uint8_t
+enum class opacity : uint8_t
 {
     Transparent = 0x00,
     Opaque = 0xFF
 };
 
-constexpr Opacity& operator++(Opacity& value) noexcept
+constexpr opacity& operator++(opacity& value) noexcept
 {
-    value = static_cast<Opacity>(std::min(static_cast<int>(value) + 15, 0xFF));
+    value = static_cast<opacity>(std::min(static_cast<int>(value) + 15, 0xFF));
     return value;
 }
 
-constexpr Opacity& operator--(Opacity& value) noexcept
+constexpr opacity& operator--(opacity& value) noexcept
 {
-    value = static_cast<Opacity>(std::max(static_cast<int>(value) - 15, 0));
+    value = static_cast<opacity>(std::max(static_cast<int>(value) - 15, 0));
     return value;
 }
 // }}}
@@ -431,51 +431,51 @@ constexpr Opacity& operator--(Opacity& value) noexcept
 
 // {{{ fmtlib custom formatter
 template <>
-struct fmt::formatter<terminal::Color>: fmt::formatter<std::string>
+struct fmt::formatter<terminal::color>: fmt::formatter<std::string>
 {
-    auto format(terminal::Color value, format_context& ctx) -> format_context::iterator
+    auto format(terminal::color value, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(to_string(value), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::RGBColor>: fmt::formatter<std::string>
+struct fmt::formatter<terminal::rgb_color>: fmt::formatter<std::string>
 {
-    auto format(terminal::RGBColor value, format_context& ctx) -> format_context::iterator
+    auto format(terminal::rgb_color value, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(to_string(value), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::RGBAColor>: fmt::formatter<std::string>
+struct fmt::formatter<terminal::rgba_color>: fmt::formatter<std::string>
 {
     template <typename FormatContext>
-    auto format(terminal::RGBAColor value, format_context& ctx) -> format_context::iterator
+    auto format(terminal::rgba_color value, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(to_string(value), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::CellRGBColor>: fmt::formatter<std::string>
+struct fmt::formatter<terminal::cell_rgb_color>: fmt::formatter<std::string>
 {
-    auto format(terminal::CellRGBColor value, format_context& ctx) -> format_context::iterator
+    auto format(terminal::cell_rgb_color value, format_context& ctx) -> format_context::iterator
     {
-        if (std::holds_alternative<terminal::CellForegroundColor>(value))
+        if (std::holds_alternative<terminal::cell_foreground_color>(value))
             return formatter<std::string>::format("CellForeground", ctx);
-        else if (std::holds_alternative<terminal::CellBackgroundColor>(value))
+        else if (std::holds_alternative<terminal::cell_background_color>(value))
             return formatter<std::string>::format("CellBackground", ctx);
         else
-            return formatter<std::string>::format(to_string(std::get<terminal::RGBColor>(value)), ctx);
+            return formatter<std::string>::format(to_string(std::get<terminal::rgb_color>(value)), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::RGBColorPair>: fmt::formatter<std::string>
+struct fmt::formatter<terminal::rgb_color_pair>: fmt::formatter<std::string>
 {
-    auto format(terminal::RGBColorPair value, format_context& ctx) -> format_context::iterator
+    auto format(terminal::rgb_color_pair value, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}/{}", value.foreground, value.background), ctx);
     }

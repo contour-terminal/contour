@@ -18,11 +18,11 @@ class RenderBufferBuilder
   public:
     RenderBufferBuilder(Terminal const& terminal,
                         RenderBuffer& output,
-                        LineOffset base,
+                        line_offset base,
                         bool reverseVideo,
-                        HighlightSearchMatches highlightSearchMatches,
+                        highlight_search_matches highlightSearchMatches,
                         InputMethodData inputMethodData,
-                        std::optional<CellLocation> theCursorPosition,
+                        std::optional<cell_location> theCursorPosition,
                         bool includeSelection);
 
     /// Renders a single grid cell.
@@ -32,8 +32,8 @@ class RenderBufferBuilder
     /// A trivial line is rendered using renderTrivialLine().
     ///
     /// @see renderTrivialLine
-    void renderCell(Cell const& cell, LineOffset line, ColumnOffset column);
-    void startLine(LineOffset line) noexcept;
+    void renderCell(Cell const& cell, line_offset line, column_offset column);
+    void startLine(line_offset line) noexcept;
     void endLine() noexcept;
 
     /// Renders a trivial line.
@@ -44,61 +44,61 @@ class RenderBufferBuilder
     /// with their grid cells are to be rendered using renderCell().
     ///
     /// @see renderCell
-    void renderTrivialLine(TrivialLineBuffer const& lineBuffer, LineOffset lineOffset);
+    void renderTrivialLine(TrivialLineBuffer const& lineBuffer, line_offset lineOffset);
 
     /// This call is guaranteed to be invoked when the the full page has been rendered.
     void finish() noexcept {}
 
   private:
-    [[nodiscard]] bool isCursorLine(LineOffset line) const noexcept;
+    [[nodiscard]] bool isCursorLine(line_offset line) const noexcept;
 
     [[nodiscard]] std::optional<RenderCursor> renderCursor() const;
 
     [[nodiscard]] static RenderCell makeRenderCellExplicit(ColorPalette const& colorPalette,
                                                            std::u32string graphemeCluster,
                                                            ColumnCount width,
-                                                           CellFlags flags,
-                                                           RGBColor fg,
-                                                           RGBColor bg,
-                                                           Color ul,
-                                                           LineOffset line,
-                                                           ColumnOffset column);
+                                                           cell_flags flags,
+                                                           rgb_color fg,
+                                                           rgb_color bg,
+                                                           color ul,
+                                                           line_offset line,
+                                                           column_offset column);
 
     [[nodiscard]] static RenderCell makeRenderCellExplicit(ColorPalette const& colorPalette,
                                                            char32_t codepoint,
-                                                           CellFlags flags,
-                                                           RGBColor fg,
-                                                           RGBColor bg,
-                                                           Color ul,
-                                                           LineOffset line,
-                                                           ColumnOffset column);
+                                                           cell_flags flags,
+                                                           rgb_color fg,
+                                                           rgb_color bg,
+                                                           color ul,
+                                                           line_offset line,
+                                                           column_offset column);
 
     /// Constructs a RenderCell for the given screen Cell.
     [[nodiscard]] static RenderCell makeRenderCell(ColorPalette const& colorPalette,
                                                    HyperlinkStorage const& hyperlinks,
                                                    Cell const& cell,
-                                                   RGBColor fg,
-                                                   RGBColor bg,
-                                                   LineOffset line,
-                                                   ColumnOffset column);
+                                                   rgb_color fg,
+                                                   rgb_color bg,
+                                                   line_offset line,
+                                                   column_offset column);
 
     /// Constructs the final foreground/background colors to be displayed on the screen.
     ///
     /// This call takes cursor-position, hyperlink-states, selection, and reverse-video mode into account.
-    [[nodiscard]] RGBColorPair makeColorsForCell(CellLocation,
-                                                 CellFlags cellFlags,
-                                                 Color foregroundColor,
-                                                 Color backgroundColor) const noexcept;
+    [[nodiscard]] rgb_color_pair makeColorsForCell(cell_location,
+                                                   cell_flags cellFlags,
+                                                   color foregroundColor,
+                                                   color backgroundColor) const noexcept;
 
     [[nodiscard]] RenderLine createRenderLine(TrivialLineBuffer const& lineBuffer,
-                                              LineOffset lineOffset) const;
+                                              line_offset lineOffset) const;
 
     [[nodiscard]] RenderAttributes createRenderAttributes(
-        CellLocation gridPosition, GraphicsAttributes graphicsAttributes) const noexcept;
+        cell_location gridPosition, GraphicsAttributes graphicsAttributes) const noexcept;
 
-    [[nodiscard]] bool tryRenderInputMethodEditor(CellLocation screenPosition, CellLocation gridPosition);
+    [[nodiscard]] bool tryRenderInputMethodEditor(cell_location screenPosition, cell_location gridPosition);
 
-    ColumnCount renderUtf8Text(CellLocation screenPosition,
+    ColumnCount renderUtf8Text(cell_location screenPosition,
                                GraphicsAttributes attributes,
                                std::string_view text,
                                bool allowMatchSearchPattern);
@@ -109,7 +109,7 @@ class RenderBufferBuilder
     /// Tests if the given screen line offset does contain a cursor (either ANSI cursor or vi cursor, if
     /// shown) and returns false otherwise, which guarantees that no cursor is to be rendered
     /// on the given line offset.
-    [[nodiscard]] bool gridLineContainsCursor(LineOffset screenLineOffset) const noexcept;
+    [[nodiscard]] bool gridLineContainsCursor(line_offset screenLineOffset) const noexcept;
 
     // clang-format off
     enum class State { Gap, Sequence };
@@ -117,17 +117,17 @@ class RenderBufferBuilder
 
     RenderBuffer& _output;
     Terminal const& _terminal;
-    std::optional<CellLocation> _cursorPosition;
-    LineOffset _baseLine;
+    std::optional<cell_location> _cursorPosition;
+    line_offset _baseLine;
     bool _reverseVideo;
-    HighlightSearchMatches _highlightSearchMatches;
+    highlight_search_matches _highlightSearchMatches;
     InputMethodData _inputMethodData;
     bool _includeSelection;
     ColumnCount _inputMethodSkipColumns = ColumnCount(0);
 
     int _prevWidth = 0;
     bool _prevHasCursor = false;
-    LineOffset _lineNr = LineOffset(0);
+    line_offset _lineNr = line_offset(0);
     bool _useCursorlineColoring = false;
 
     // Offset into the search pattern that has been already matched.

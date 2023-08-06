@@ -55,23 +55,26 @@ class Terminal;
 class Modes
 {
   public:
-    void set(AnsiMode mode, bool enabled) { _ansi.set(static_cast<size_t>(mode), enabled); }
+    void set(ansi_mode mode, bool enabled) { _ansi.set(static_cast<size_t>(mode), enabled); }
 
-    void set(DECMode mode, bool enabled) { _dec.set(static_cast<size_t>(mode), enabled); }
+    void set(dec_mode mode, bool enabled) { _dec.set(static_cast<size_t>(mode), enabled); }
 
-    [[nodiscard]] bool enabled(AnsiMode mode) const noexcept { return _ansi.test(static_cast<size_t>(mode)); }
-
-    [[nodiscard]] bool enabled(DECMode mode) const noexcept { return _dec.test(static_cast<size_t>(mode)); }
-
-    void save(std::vector<DECMode> const& modes)
+    [[nodiscard]] bool enabled(ansi_mode mode) const noexcept
     {
-        for (DECMode const mode: modes)
+        return _ansi.test(static_cast<size_t>(mode));
+    }
+
+    [[nodiscard]] bool enabled(dec_mode mode) const noexcept { return _dec.test(static_cast<size_t>(mode)); }
+
+    void save(std::vector<dec_mode> const& modes)
+    {
+        for (dec_mode const mode: modes)
             _savedModes[mode].push_back(enabled(mode));
     }
 
-    void restore(std::vector<DECMode> const& modes)
+    void restore(std::vector<dec_mode> const& modes)
     {
-        for (DECMode const mode: modes)
+        for (dec_mode const mode: modes)
         {
             if (auto i = _savedModes.find(mode); i != _savedModes.end() && !i->second.empty())
             {
@@ -85,9 +88,9 @@ class Modes
   private:
     // TODO: make this a vector<bool> by casting from Mode, but that requires ensured small linearity in Mode
     // enum values.
-    std::bitset<32> _ansi;                            // AnsiMode
-    std::bitset<8452 + 1> _dec;                       // DECMode
-    std::map<DECMode, std::vector<bool>> _savedModes; //!< saved DEC modes
+    std::bitset<32> _ansi;                             // AnsiMode
+    std::bitset<8452 + 1> _dec;                        // DECMode
+    std::map<dec_mode, std::vector<bool>> _savedModes; //!< saved DEC modes
 };
 // }}}
 
@@ -97,7 +100,7 @@ class Modes
 /// NB: Take care what to store here, as DECSC/DECRC will save/restore this struct.
 struct Cursor
 {
-    CellLocation position { LineOffset(0), ColumnOffset(0) };
+    cell_location position { line_offset(0), column_offset(0) };
     bool autoWrap = true; // false;
     bool originMode = false;
     bool wrapPending = false;
@@ -113,7 +116,7 @@ struct Cursor
 struct Search
 {
     std::u32string pattern;
-    ScrollOffset initialScrollOffset {};
+    scroll_offset initialScrollOffset {};
     bool initiatedByDoubleClick = false;
 };
 
@@ -163,7 +166,7 @@ struct TerminalState
     std::condition_variable breakCondition;
 
     /// contains the pixel size of a single cell, or area(cellPixelSize_) == 0 if unknown.
-    ImageSize cellPixelSize;
+    image_size cellPixelSize;
 
     ColorPalette defaultColorPalette;
     ColorPalette colorPalette;
@@ -175,25 +178,25 @@ struct TerminalState
     VTType terminalId = VTType::VT525;
 
     Modes modes;
-    std::map<DECMode, std::vector<bool>> savedModes; //!< saved DEC modes
+    std::map<dec_mode, std::vector<bool>> savedModes; //!< saved DEC modes
 
     unsigned maxImageColorRegisters = 256;
-    ImageSize effectiveImageCanvasSize;
+    image_size effectiveImageCanvasSize;
     std::shared_ptr<SixelColorPalette> imageColorPalette;
     ImagePool imagePool;
 
-    std::vector<ColumnOffset> tabs;
+    std::vector<column_offset> tabs;
 
-    ScreenType screenType = ScreenType::Primary;
-    StatusDisplayType statusDisplayType = StatusDisplayType::None;
+    screen_type screenType = screen_type::Primary;
+    status_display_type statusDisplayType = status_display_type::None;
     bool syncWindowTitleWithHostWritableStatusDisplay = false;
-    std::optional<StatusDisplayType> savedStatusDisplayType = std::nullopt;
-    ActiveStatusDisplay activeStatusDisplay = ActiveStatusDisplay::Main;
+    std::optional<status_display_type> savedStatusDisplayType = std::nullopt;
+    active_status_display activeStatusDisplay = active_status_display::Main;
 
     Search searchMode;
 
-    CursorDisplay cursorDisplay = CursorDisplay::Steady;
-    CursorShape cursorShape = CursorShape::Block;
+    cursor_display cursorDisplay = cursor_display::Steady;
+    cursor_shape cursorShape = cursor_shape::Block;
 
     std::string currentWorkingDirectory = {};
 
@@ -223,49 +226,49 @@ struct TerminalState
 
 // {{{ fmt formatters
 template <>
-struct fmt::formatter<terminal::AnsiMode>: fmt::formatter<std::string>
+struct fmt::formatter<terminal::ansi_mode>: fmt::formatter<std::string>
 {
-    auto format(terminal::AnsiMode mode, format_context& ctx) -> format_context::iterator
+    auto format(terminal::ansi_mode mode, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(to_string(mode), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::DECMode>: fmt::formatter<std::string>
+struct fmt::formatter<terminal::dec_mode>: fmt::formatter<std::string>
 {
-    auto format(terminal::DECMode mode, format_context& ctx) -> format_context::iterator
+    auto format(terminal::dec_mode mode, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(to_string(mode), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::Cursor>: fmt::formatter<terminal::CellLocation>
+struct fmt::formatter<terminal::Cursor>: fmt::formatter<terminal::cell_location>
 {
     auto format(const terminal::Cursor cursor, format_context& ctx) -> format_context::iterator
     {
-        return formatter<terminal::CellLocation>::format(cursor.position, ctx);
+        return formatter<terminal::cell_location>::format(cursor.position, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::DynamicColorName>: formatter<std::string_view>
+struct fmt::formatter<terminal::dynamic_color_name>: formatter<std::string_view>
 {
     template <typename FormatContext>
-    auto format(terminal::DynamicColorName value, FormatContext& ctx)
+    auto format(terminal::dynamic_color_name value, FormatContext& ctx)
     {
-        using terminal::DynamicColorName;
+        using terminal::dynamic_color_name;
         string_view name;
         switch (value)
         {
-            case DynamicColorName::DefaultForegroundColor: name = "DefaultForegroundColor"; break;
-            case DynamicColorName::DefaultBackgroundColor: name = "DefaultBackgroundColor"; break;
-            case DynamicColorName::TextCursorColor: name = "TextCursorColor"; break;
-            case DynamicColorName::MouseForegroundColor: name = "MouseForegroundColor"; break;
-            case DynamicColorName::MouseBackgroundColor: name = "MouseBackgroundColor"; break;
-            case DynamicColorName::HighlightForegroundColor: name = "HighlightForegroundColor"; break;
-            case DynamicColorName::HighlightBackgroundColor: name = "HighlightBackgroundColor"; break;
+            case dynamic_color_name::DefaultForegroundColor: name = "DefaultForegroundColor"; break;
+            case dynamic_color_name::DefaultBackgroundColor: name = "DefaultBackgroundColor"; break;
+            case dynamic_color_name::TextCursorColor: name = "TextCursorColor"; break;
+            case dynamic_color_name::MouseForegroundColor: name = "MouseForegroundColor"; break;
+            case dynamic_color_name::MouseBackgroundColor: name = "MouseBackgroundColor"; break;
+            case dynamic_color_name::HighlightForegroundColor: name = "HighlightForegroundColor"; break;
+            case dynamic_color_name::HighlightBackgroundColor: name = "HighlightBackgroundColor"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

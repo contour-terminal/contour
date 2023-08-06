@@ -28,17 +28,17 @@
 namespace terminal::test
 {
 
-constexpr LineOffset operator""_lineOffset(unsigned long long value) noexcept
+constexpr line_offset operator""_lineOffset(unsigned long long value) noexcept
 {
-    return LineOffset::cast_from(value);
+    return line_offset::cast_from(value);
 }
 
-constexpr ColumnOffset operator""_columnOffset(unsigned long long value) noexcept
+constexpr column_offset operator""_columnOffset(unsigned long long value) noexcept
 {
-    return ColumnOffset::cast_from(value);
+    return column_offset::cast_from(value);
 }
 
-constexpr CellLocation operator+(LineOffset line, ColumnOffset column) noexcept
+constexpr cell_location operator+(line_offset line, column_offset column) noexcept
 {
     return { line, column };
 }
@@ -57,7 +57,7 @@ template <typename S>
     std::vector<std::string> lines;
     lines.resize(terminal.pageSize().lines.as<size_t>());
 
-    terminal::CellLocation lastPos = {};
+    terminal::cell_location lastPos = {};
     size_t lastCount = 0;
     for (terminal::RenderCell const& cell: renderBuffer.buffer.cells)
     {
@@ -137,7 +137,7 @@ void logScreenText(Screen<T> const& screen, std::string const& headline = "")
         UNSCOPED_INFO(headline + ":");
 
     for (auto const line: ::ranges::views::iota(0, *screen.pageSize().lines))
-        UNSCOPED_INFO(fmt::format("[{}] \"{}\"", line, screen.grid().lineText(LineOffset::cast_from(line))));
+        UNSCOPED_INFO(fmt::format("[{}] \"{}\"", line, screen.grid().lineText(line_offset::cast_from(line))));
 }
 
 inline void logScreenText(terminal::Terminal const& terminal, std::string const& headline = "")

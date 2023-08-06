@@ -46,7 +46,7 @@ class Viewport
 
     [[nodiscard]] LineCount scrollOff() const noexcept { return _scrollOff; }
 
-    [[nodiscard]] ScrollOffset scrollOffset() const noexcept { return _scrollOffset; }
+    [[nodiscard]] scroll_offset scrollOffset() const noexcept { return _scrollOffset; }
 
     /// Tests if the viewport has been moved(/scrolled) off its main view position.
     ///
@@ -54,7 +54,7 @@ class Viewport
     /// @retval false viewport has NOT been moved/scrolled and is still located at its main view position.
     [[nodiscard]] bool scrolled() const noexcept { return _scrollOffset.value != 0; }
 
-    [[nodiscard]] bool isLineVisible(LineOffset line) const noexcept
+    [[nodiscard]] bool isLineVisible(line_offset line) const noexcept
     {
         auto const a = -_scrollOffset.as<int>();
         auto const b = line.as<int>();
@@ -67,7 +67,7 @@ class Viewport
     bool scrollToTop();
     bool scrollToBottom();
     bool forceScrollToBottom();
-    bool scrollTo(ScrollOffset offset);
+    bool scrollTo(scroll_offset offset);
     bool scrollMarkUp();
     bool scrollMarkDown();
 
@@ -75,32 +75,32 @@ class Viewport
     /// screen's viewport up or down in order to make that line visible.
     ///
     /// If the line is already visible, no scrolling is applied.
-    bool makeVisible(LineOffset line);
+    bool makeVisible(line_offset line);
 
-    bool makeVisibleWithinSafeArea(LineOffset line);
-    bool makeVisibleWithinSafeArea(LineOffset line, LineCount paddingLines);
+    bool makeVisibleWithinSafeArea(line_offset line);
+    bool makeVisibleWithinSafeArea(line_offset line, LineCount paddingLines);
 
     /// Translates a screen coordinate to a Grid-coordinate by applying
     /// the scroll-offset to it.
-    constexpr CellLocation translateScreenToGridCoordinate(CellLocation p) const noexcept
+    constexpr cell_location translateScreenToGridCoordinate(cell_location p) const noexcept
     {
-        return CellLocation {
-            p.line - boxed_cast<LineOffset>(_scrollOffset),
+        return cell_location {
+            p.line - boxed_cast<line_offset>(_scrollOffset),
             p.column,
         };
     }
 
-    constexpr CellLocation translateGridToScreenCoordinate(CellLocation p) const noexcept
+    constexpr cell_location translateGridToScreenCoordinate(cell_location p) const noexcept
     {
-        return CellLocation {
-            p.line + boxed_cast<LineOffset>(_scrollOffset),
+        return cell_location {
+            p.line + boxed_cast<line_offset>(_scrollOffset),
             p.column,
         };
     }
 
-    [[nodiscard]] constexpr LineOffset translateGridToScreenCoordinate(LineOffset p) const noexcept
+    [[nodiscard]] constexpr line_offset translateGridToScreenCoordinate(line_offset p) const noexcept
     {
-        return p + boxed_cast<LineOffset>(_scrollOffset);
+        return p + boxed_cast<line_offset>(_scrollOffset);
     }
 
   private:
@@ -113,7 +113,7 @@ class Viewport
     Terminal& _terminal;
     ModifyEvent _modified;
     //!< scroll offset relative to scroll top (0) or nullopt if not scrolled into history
-    ScrollOffset _scrollOffset;
+    scroll_offset _scrollOffset;
 
     LineCount _scrollOff = LineCount(8);
 };

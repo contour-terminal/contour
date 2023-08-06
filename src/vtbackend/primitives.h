@@ -36,28 +36,28 @@ namespace detail::tags // {{{
 {
     // clang-format off
     // column types
-    struct ColumnOffset {};
-    struct ColumnPosition {};
+    struct column_offset {};
+    struct column_position {};
 
     // line types
-    struct LineOffset {};
-    struct ScrollOffset {};
+    struct line_offset {};
+    struct scroll_offset {};
 
     // misc.
-    struct TabStopCount {};
+    struct tab_stop_count {};
 
     // generic length
-    struct Length {};
+    struct length {};
 
     // range
-    struct From {};
-    struct To {};
+    struct from {};
+    struct to {};
 
     // margin
-    struct Top {};
-    struct Left {};
-    struct Bottom {};
-    struct Right {};
+    struct top {};
+    struct left {};
+    struct bottom {};
+    struct right {};
     // clang-format on
 } // namespace detail::tags
 // }}}
@@ -68,25 +68,25 @@ namespace detail::tags // {{{
 /// (usually the main page unless scrolled upwards).
 ///
 /// A column position starts at 1.
-using ColumnPosition = crispy::boxed<int, detail::tags::ColumnPosition>;
+using column_position = crispy::boxed<int, detail::tags::column_position>;
 
-using ColumnOffset = crispy::boxed<int, detail::tags::ColumnOffset>;
+using column_offset = crispy::boxed<int, detail::tags::column_offset>;
 
 // }}}
 // {{{ Line types
 
 // clang-format off
 /// Special structure for inifinite history of Grid
-struct Infinite {};
+struct infinite {};
 // clang-format on
 /// MaxHistoryLineCount represents type that are used to store number
 /// of lines that can be stored in history
-using MaxHistoryLineCount = std::variant<LineCount, Infinite>;
+using max_history_line_count = std::variant<LineCount, infinite>;
 /// Represents the line offset relative to main-page top.
 ///
 /// *  0  is top-most line on main page
 /// *  -1 is the bottom most line in scrollback
-using LineOffset = crispy::boxed<int, detail::tags::LineOffset>;
+using line_offset = crispy::boxed<int, detail::tags::line_offset>;
 
 /// Represents the number of lines the viewport has been scrolled up into
 /// the scrollback lines history.
@@ -94,7 +94,7 @@ using LineOffset = crispy::boxed<int, detail::tags::LineOffset>;
 /// A value of 0 means that it is not scrolled at all (bottom), and
 /// a value equal to the number of scrollback lines means it is scrolled
 /// to the top.
-using ScrollOffset = crispy::boxed<int, detail::tags::ScrollOffset>;
+using scroll_offset = crispy::boxed<int, detail::tags::scroll_offset>;
 
 constexpr int operator*(LineCount a, ColumnCount b) noexcept
 {
@@ -106,56 +106,56 @@ constexpr int operator*(ColumnCount a, LineCount b) noexcept
 }
 // }}}
 
-struct PixelCoordinate
+struct pixel_coordinate
 {
     // clang-format off
-    struct X { int value; };
-    struct Y { int value; };
+    struct x { int value; };
+    struct y { int value; };
     // clang-format on
 
-    X x {};
-    Y y {};
+    x x {};
+    y y {};
 };
 
-struct [[nodiscard]] CellLocation
+struct [[nodiscard]] cell_location
 {
-    LineOffset line {};
-    ColumnOffset column {};
+    line_offset line {};
+    column_offset column {};
 
-    constexpr CellLocation& operator+=(CellLocation a) noexcept
+    constexpr cell_location& operator+=(cell_location a) noexcept
     {
         line += a.line;
         column += a.column;
         return *this;
     }
 
-    constexpr CellLocation& operator+=(ColumnOffset x) noexcept
+    constexpr cell_location& operator+=(column_offset x) noexcept
     {
         column += x;
         return *this;
     }
-    constexpr CellLocation& operator+=(LineOffset y) noexcept
+    constexpr cell_location& operator+=(line_offset y) noexcept
     {
         line += y;
         return *this;
     }
 };
 
-inline std::ostream& operator<<(std::ostream& os, CellLocation coord)
+inline std::ostream& operator<<(std::ostream& os, cell_location coord)
 {
     return os << fmt::format("({}, {})", coord.line, coord.column);
 }
 
-constexpr bool operator==(CellLocation a, CellLocation b) noexcept
+constexpr bool operator==(cell_location a, cell_location b) noexcept
 {
     return a.line == b.line && a.column == b.column;
 }
-constexpr bool operator!=(CellLocation a, CellLocation b) noexcept
+constexpr bool operator!=(cell_location a, cell_location b) noexcept
 {
     return !(a == b);
 }
 
-constexpr bool operator<(CellLocation a, CellLocation b) noexcept
+constexpr bool operator<(cell_location a, cell_location b) noexcept
 {
     if (a.line < b.line)
         return true;
@@ -166,66 +166,66 @@ constexpr bool operator<(CellLocation a, CellLocation b) noexcept
     return false;
 }
 
-constexpr bool operator<=(CellLocation a, CellLocation b) noexcept
+constexpr bool operator<=(cell_location a, cell_location b) noexcept
 {
     return a < b || a == b;
 }
 
-constexpr bool operator>=(CellLocation a, CellLocation b) noexcept
+constexpr bool operator>=(cell_location a, cell_location b) noexcept
 {
     return !(a < b);
 }
 
-constexpr bool operator>(CellLocation a, CellLocation b) noexcept
+constexpr bool operator>(cell_location a, cell_location b) noexcept
 {
     return !(a == b || a < b);
 }
 
-inline CellLocation operator+(CellLocation a, CellLocation b) noexcept
+inline cell_location operator+(cell_location a, cell_location b) noexcept
 {
     return { a.line + b.line, a.column + b.column };
 }
 
-constexpr CellLocation operator+(CellLocation c, LineOffset y) noexcept
+constexpr cell_location operator+(cell_location c, line_offset y) noexcept
 {
-    return CellLocation { c.line + y, c.column };
+    return cell_location { c.line + y, c.column };
 }
 
-constexpr CellLocation operator-(CellLocation c, LineOffset y) noexcept
+constexpr cell_location operator-(cell_location c, line_offset y) noexcept
 {
-    return CellLocation { c.line - y, c.column };
+    return cell_location { c.line - y, c.column };
 }
 
-constexpr CellLocation operator+(CellLocation c, ColumnOffset x) noexcept
+constexpr cell_location operator+(cell_location c, column_offset x) noexcept
 {
-    return CellLocation { c.line, c.column + x };
+    return cell_location { c.line, c.column + x };
 }
 
-constexpr CellLocation operator-(CellLocation c, ColumnOffset x) noexcept
+constexpr cell_location operator-(cell_location c, column_offset x) noexcept
 {
-    return CellLocation { c.line, c.column - x };
+    return cell_location { c.line, c.column - x };
 }
 // Constructs a top-left and bottom-right coordinate-pair from given input.
-constexpr std::pair<CellLocation, CellLocation> orderedPoints(CellLocation a, CellLocation b) noexcept
+constexpr std::pair<cell_location, cell_location> orderedPoints(cell_location a, cell_location b) noexcept
 {
-    auto const topLeft = CellLocation { std::min(a.line, b.line), std::min(a.column, b.column) };
-    auto const bottomRight = CellLocation { std::max(a.line, b.line), std::max(a.column, b.column) };
+    auto const topLeft = cell_location { std::min(a.line, b.line), std::min(a.column, b.column) };
+    auto const bottomRight = cell_location { std::max(a.line, b.line), std::max(a.column, b.column) };
     return std::pair { topLeft, bottomRight };
 }
 
 /// Tests whether given CellLocation is within the right hand side's PageSize.
-constexpr bool operator<(CellLocation location, PageSize pageSize) noexcept
+constexpr bool operator<(cell_location location, PageSize pageSize) noexcept
 {
-    return location.line < boxed_cast<LineOffset>(pageSize.lines)
-           && location.column < boxed_cast<ColumnOffset>(pageSize.columns);
+    return location.line < boxed_cast<line_offset>(pageSize.lines)
+           && location.column < boxed_cast<column_offset>(pageSize.columns);
 }
 
-struct CellLocationRange
+struct cell_location_range
 {
-    CellLocation first;
-    CellLocation second;
+    cell_location first;
+    cell_location second;
 
-    [[nodiscard]] bool contains(CellLocation location) const noexcept
+    [[nodiscard]] bool contains(cell_location location) const noexcept
     {
         switch (abs(unbox<int>(first.line) - unbox<int>(second.line)))
         {
@@ -245,18 +245,18 @@ struct CellLocationRange
     }
 };
 
-struct ColumnRange
+struct column_range
 {
-    LineOffset line;
-    ColumnOffset fromColumn;
-    ColumnOffset toColumn;
+    line_offset line;
+    column_offset fromColumn;
+    column_offset toColumn;
 
     [[nodiscard]] constexpr ColumnCount length() const noexcept
     {
         return boxed_cast<ColumnCount>(toColumn - fromColumn + 1);
     }
 
-    [[nodiscard]] constexpr bool contains(CellLocation location) const noexcept
+    [[nodiscard]] constexpr bool contains(cell_location location) const noexcept
     {
         return line == location.line && fromColumn <= location.column && location.column <= toColumn;
     }
@@ -266,22 +266,22 @@ struct ColumnRange
 // {{{ Range
 
 /// Represents the first value of a range.
-using From = crispy::boxed<int, detail::tags::From>;
+using from = crispy::boxed<int, detail::tags::from>;
 
 /// Represents the last value of a range (inclusive).
-using To = crispy::boxed<int, detail::tags::To>;
+using to = crispy::boxed<int, detail::tags::to>;
 
 // Range (e.g. a range of lines from X to Y).
-struct Range
+struct range
 {
-    From from;
-    To to;
+    from from;
+    to to;
 
     // So you can do: for (auto const v: Range{3, 5}) { ... }
-    struct ValueTag
+    struct value_tag
     {
     };
-    using iterator = crispy::boxed<int, ValueTag>;
+    using iterator = crispy::boxed<int, value_tag>;
     [[nodiscard]] iterator begin() const { return iterator { from.value }; }
     [[nodiscard]] auto end() const { return iterator { to.value + 1 }; }
     // iterator end() const { return crispy::boxed_cast<iterator>(to) + iterator{1}; }
@@ -292,76 +292,76 @@ struct Range
 
 // Rectangular operations
 //
-using Top = crispy::boxed<int, detail::tags::Top>;
-using Left = crispy::boxed<int, detail::tags::Left>;
-using Bottom = crispy::boxed<int, detail::tags::Bottom>;
-using Right = crispy::boxed<int, detail::tags::Right>;
+using top = crispy::boxed<int, detail::tags::top>;
+using left = crispy::boxed<int, detail::tags::left>;
+using bottom = crispy::boxed<int, detail::tags::bottom>;
+using right = crispy::boxed<int, detail::tags::right>;
 
 // Rectangular screen operations
 //
-struct Rect
+struct rect
 {
-    Top top;
-    Left left;
-    Bottom bottom;
-    Right right;
+    top top;
+    left left;
+    bottom bottom;
+    right right;
 
-    [[nodiscard]] Rect clampTo(PageSize size) const noexcept
+    [[nodiscard]] rect clampTo(PageSize size) const noexcept
     {
-        return Rect { top,
+        return rect { top,
                       left,
-                      std::min(bottom, Bottom::cast_from(size.lines)),
-                      std::min(right, Right::cast_from(size.columns)) };
+                      std::min(bottom, bottom::cast_from(size.lines)),
+                      std::min(right, right::cast_from(size.columns)) };
     }
 };
 
 // Screen's page margin
 //
-struct PageMargin
+struct page_margin
 {
-    Top top;
-    Left left;
-    Bottom bottom;
-    Right right;
+    top top;
+    left left;
+    bottom bottom;
+    right right;
 };
 
-constexpr Range horizontal(PageMargin m) noexcept
+constexpr range horizontal(page_margin m) noexcept
 {
-    return Range { From { *m.top }, To { *m.bottom } };
+    return range { from { *m.top }, to { *m.bottom } };
 }
-constexpr Range vertical(PageMargin m) noexcept
+constexpr range vertical(page_margin m) noexcept
 {
-    return Range { From { *m.left }, To { *m.right } };
+    return range { from { *m.left }, to { *m.right } };
 }
 
 // }}}
 // {{{ Length
 
 // Lengths and Ranges
-using Length = crispy::boxed<int, detail::tags::Length>;
+using length = crispy::boxed<int, detail::tags::length>;
 
 // }}}
 // {{{ Coordinate types
 
 // (0, 0) is home position
-struct ScreenPosition
+struct screen_position
 {
-    LineOffset line;
-    ColumnOffset column;
+    line_offset line;
+    column_offset column;
 };
 
 // }}}
 // {{{ GridSize
 
-struct GridSize
+struct grid_size
 {
     LineCount lines;
     ColumnCount columns;
 
-    struct Offset
+    struct offset
     {
-        LineOffset line;
-        ColumnOffset column;
+        line_offset line;
+        column_offset column;
     };
 
     /// This iterator can be used to iterate through each and every point between (0, 0) and (width, height).
@@ -393,11 +393,11 @@ struct GridSize
       private:
         ColumnCount _width;
         int _next;
-        Offset _offset;
+        offset _offset;
 
-        constexpr Offset makeOffset(int offset) noexcept
+        constexpr offset makeOffset(int offsetValue) noexcept
         {
-            return Offset { LineOffset(offset / *_width), ColumnOffset(offset % *_width) };
+            return offset { line_offset(offsetValue / *_width), column_offset(offsetValue % *_width) };
         }
     };
 
@@ -405,88 +405,88 @@ struct GridSize
     [[nodiscard]] constexpr iterator end() const noexcept { return iterator { columns, *columns * *lines }; }
 };
 
-constexpr CellLocation operator+(CellLocation a, GridSize::Offset b) noexcept
+constexpr cell_location operator+(cell_location a, grid_size::offset b) noexcept
 {
-    return CellLocation { a.line + b.line, a.column + b.column };
+    return cell_location { a.line + b.line, a.column + b.column };
 }
 
-constexpr GridSize::iterator begin(GridSize const& s) noexcept
+constexpr grid_size::iterator begin(grid_size const& s) noexcept
 {
     return s.begin();
 }
-constexpr GridSize::iterator end(GridSize const& s) noexcept
+constexpr grid_size::iterator end(grid_size const& s) noexcept
 {
     return s.end();
 }
 // }}}
 // {{{ misc
 
-using TabStopCount = crispy::boxed<int, detail::tags::TabStopCount>;
+using tab_stop_count = crispy::boxed<int, detail::tags::tab_stop_count>;
 
 // }}}
 // {{{ convenience methods
 
-constexpr Length length(Range range) noexcept
+constexpr length make_length(range range) noexcept
 {
     // assert(range.to.value >= range.from.value);
-    return Length::cast_from(*range.to - *range.from) + Length { 1 };
+    return length::cast_from(*range.to - *range.from) + length { 1 };
 }
 
 // }}}
 // {{{ ImageSize types
 
-using Width = crispy::Width;
-using Height = crispy::Height;
-using ImageSize = crispy::ImageSize;
+using width = crispy::Width;
+using height = crispy::Height;
+using image_size = crispy::ImageSize;
 
 // }}}
 // {{{ Mixed boxed types operator overloads
-constexpr LineCount operator+(LineCount a, LineOffset b) noexcept
+constexpr LineCount operator+(LineCount a, line_offset b) noexcept
 {
     return a + b.value;
 }
-constexpr LineCount operator-(LineCount a, LineOffset b) noexcept
+constexpr LineCount operator-(LineCount a, line_offset b) noexcept
 {
     return a - b.value;
 }
-constexpr LineOffset& operator+=(LineOffset& a, LineCount b) noexcept
+constexpr line_offset& operator+=(line_offset& a, LineCount b) noexcept
 {
     a.value += b.value;
     return a;
 }
-constexpr LineOffset& operator-=(LineOffset& a, LineCount b) noexcept
+constexpr line_offset& operator-=(line_offset& a, LineCount b) noexcept
 {
     a.value -= b.value;
     return a;
 }
 
-constexpr ColumnCount operator+(ColumnCount a, ColumnOffset b) noexcept
+constexpr ColumnCount operator+(ColumnCount a, column_offset b) noexcept
 {
     return a + b.value;
 }
-constexpr ColumnCount operator-(ColumnCount a, ColumnOffset b) noexcept
+constexpr ColumnCount operator-(ColumnCount a, column_offset b) noexcept
 {
     return a - b.value;
 }
-constexpr ColumnOffset& operator+=(ColumnOffset& a, ColumnCount b) noexcept
+constexpr column_offset& operator+=(column_offset& a, ColumnCount b) noexcept
 {
     a.value += b.value;
     return a;
 }
-constexpr ColumnOffset& operator-=(ColumnOffset& a, ColumnCount b) noexcept
+constexpr column_offset& operator-=(column_offset& a, ColumnCount b) noexcept
 {
     a.value -= b.value;
     return a;
 }
 // }}}
 
-enum class HighlightSearchMatches
+enum class highlight_search_matches
 {
     No,
     Yes
 };
 
-enum class ScreenType
+enum class screen_type
 {
     Primary = 0,
     Alternate = 1
@@ -504,13 +504,13 @@ enum class ScreenType
 // - PhysicalCoordinate
 // - ScrollbackCoordinate
 
-enum class CursorDisplay
+enum class cursor_display
 {
     Steady,
     Blink
 };
 
-enum class CursorShape
+enum class cursor_shape
 {
     Block,
     Rectangle,
@@ -518,15 +518,15 @@ enum class CursorShape
     Bar,
 };
 
-CursorShape makeCursorShape(std::string const& name);
+cursor_shape makeCursorShape(std::string const& name);
 
-enum class ControlTransmissionMode
+enum class control_transmission_mode
 {
     S7C1T, // 7-bit controls
     S8C1T, // 8-bit controls
 };
 
-enum class GraphicsRendition
+enum class graphics_rendition
 {
     Reset = 0, //!< Reset any rendition (style as well as foreground / background coloring).
 
@@ -558,7 +558,7 @@ enum class GraphicsRendition
     NoOverline = 55,      //!< Reverses Overline.
 };
 
-enum class StatusDisplayType
+enum class status_display_type
 {
     None,
     Indicator,
@@ -566,7 +566,7 @@ enum class StatusDisplayType
 };
 
 // Mandates the position to show the statusline at.
-enum class StatusDisplayPosition
+enum class status_display_position
 {
     // The status line is classically shown at the bottom of the render target.
     Bottom,
@@ -576,7 +576,7 @@ enum class StatusDisplayPosition
 };
 
 // Selects whether the terminal sends data to the main display or the status line.
-enum class ActiveStatusDisplay
+enum class active_status_display
 {
     // Selects the main display. The terminal sends data to the main display only.
     Main,
@@ -587,7 +587,7 @@ enum class ActiveStatusDisplay
     IndicatorStatusLine,
 };
 
-enum class AnsiMode
+enum class ansi_mode
 {
     KeyboardAction = 2,    // KAM
     Insert = 4,            // IRM
@@ -595,7 +595,7 @@ enum class AnsiMode
     AutomaticNewLine = 20, // LNM
 };
 
-enum class DECMode
+enum class dec_mode
 {
     UseApplicationCursorKeys,
     DesignateCharsetUSASCII,
@@ -706,7 +706,7 @@ enum class DECMode
 };
 
 /// OSC color-setting related commands that can be grouped into one
-enum class DynamicColorName
+enum class dynamic_color_name
 {
     DefaultForegroundColor,
     DefaultBackgroundColor,
@@ -717,7 +717,7 @@ enum class DynamicColorName
     HighlightBackgroundColor,
 };
 
-enum class ViMode
+enum class vi_mode
 {
     /// Vi-like normal-mode.
     Normal, // <Escape>, <C-[>
@@ -735,162 +735,162 @@ enum class ViMode
     VisualBlock, // <C-V>
 };
 
-std::string to_string(GraphicsRendition s);
+std::string to_string(graphics_rendition s);
 
-constexpr unsigned toAnsiModeNum(AnsiMode m)
+constexpr unsigned toAnsiModeNum(ansi_mode m)
 {
     switch (m)
     {
-        case AnsiMode::KeyboardAction: return 2;
-        case AnsiMode::Insert: return 4;
-        case AnsiMode::SendReceive: return 12;
-        case AnsiMode::AutomaticNewLine: return 20;
+        case ansi_mode::KeyboardAction: return 2;
+        case ansi_mode::Insert: return 4;
+        case ansi_mode::SendReceive: return 12;
+        case ansi_mode::AutomaticNewLine: return 20;
     }
     return static_cast<unsigned>(m);
 }
 
 constexpr bool isValidAnsiMode(unsigned int mode) noexcept
 {
-    switch (static_cast<AnsiMode>(mode))
+    switch (static_cast<ansi_mode>(mode))
     {
-        case AnsiMode::KeyboardAction:
-        case AnsiMode::Insert:
-        case AnsiMode::SendReceive:
-        case AnsiMode::AutomaticNewLine: return true;
+        case ansi_mode::KeyboardAction:
+        case ansi_mode::Insert:
+        case ansi_mode::SendReceive:
+        case ansi_mode::AutomaticNewLine: return true;
     }
     return false;
 }
 
-std::string to_string(AnsiMode mode);
-std::string to_string(DECMode mode);
+std::string to_string(ansi_mode mode);
+std::string to_string(dec_mode mode);
 
-constexpr unsigned toDECModeNum(DECMode m)
+constexpr unsigned toDECModeNum(dec_mode m)
 {
     switch (m)
     {
-        case DECMode::UseApplicationCursorKeys: return 1;
-        case DECMode::DesignateCharsetUSASCII: return 2;
-        case DECMode::Columns132: return 3;
-        case DECMode::SmoothScroll: return 4;
-        case DECMode::ReverseVideo: return 5;
-        case DECMode::Origin: return 6;
-        case DECMode::AutoWrap: return 7;
-        case DECMode::MouseProtocolX10: return 9;
-        case DECMode::ShowToolbar: return 10;
-        case DECMode::BlinkingCursor: return 12;
-        case DECMode::PrinterExtend: return 19;
-        case DECMode::VisibleCursor: return 25;
-        case DECMode::ShowScrollbar: return 30;
-        case DECMode::AllowColumns80to132: return 40;
-        case DECMode::DebugLogging: return 46;
-        case DECMode::UseAlternateScreen: return 47;
-        case DECMode::LeftRightMargin: return 69;
-        case DECMode::MouseProtocolNormalTracking: return 1000;
-        case DECMode::MouseProtocolHighlightTracking: return 1001;
-        case DECMode::MouseProtocolButtonTracking: return 1002;
-        case DECMode::MouseProtocolAnyEventTracking: return 1003;
-        case DECMode::SaveCursor: return 1048;
-        case DECMode::ExtendedAltScreen: return 1049;
-        case DECMode::BracketedPaste: return 2004;
-        case DECMode::FocusTracking: return 1004;
-        case DECMode::NoSixelScrolling: return 80;
-        case DECMode::UsePrivateColorRegisters: return 1070;
-        case DECMode::MouseExtended: return 1005;
-        case DECMode::MouseSGR: return 1006;
-        case DECMode::MouseURXVT: return 1015;
-        case DECMode::MouseSGRPixels: return 1016;
-        case DECMode::MouseAlternateScroll: return 1007;
-        case DECMode::MousePassiveTracking: return 2029;
-        case DECMode::ReportGridCellSelection: return 2030;
-        case DECMode::BatchedRendering: return 2026;
-        case DECMode::Unicode: return 2027;
-        case DECMode::TextReflow: return 2028;
-        case DECMode::SixelCursorNextToGraphic: return 8452;
+        case dec_mode::UseApplicationCursorKeys: return 1;
+        case dec_mode::DesignateCharsetUSASCII: return 2;
+        case dec_mode::Columns132: return 3;
+        case dec_mode::SmoothScroll: return 4;
+        case dec_mode::ReverseVideo: return 5;
+        case dec_mode::Origin: return 6;
+        case dec_mode::AutoWrap: return 7;
+        case dec_mode::MouseProtocolX10: return 9;
+        case dec_mode::ShowToolbar: return 10;
+        case dec_mode::BlinkingCursor: return 12;
+        case dec_mode::PrinterExtend: return 19;
+        case dec_mode::VisibleCursor: return 25;
+        case dec_mode::ShowScrollbar: return 30;
+        case dec_mode::AllowColumns80to132: return 40;
+        case dec_mode::DebugLogging: return 46;
+        case dec_mode::UseAlternateScreen: return 47;
+        case dec_mode::LeftRightMargin: return 69;
+        case dec_mode::MouseProtocolNormalTracking: return 1000;
+        case dec_mode::MouseProtocolHighlightTracking: return 1001;
+        case dec_mode::MouseProtocolButtonTracking: return 1002;
+        case dec_mode::MouseProtocolAnyEventTracking: return 1003;
+        case dec_mode::SaveCursor: return 1048;
+        case dec_mode::ExtendedAltScreen: return 1049;
+        case dec_mode::BracketedPaste: return 2004;
+        case dec_mode::FocusTracking: return 1004;
+        case dec_mode::NoSixelScrolling: return 80;
+        case dec_mode::UsePrivateColorRegisters: return 1070;
+        case dec_mode::MouseExtended: return 1005;
+        case dec_mode::MouseSGR: return 1006;
+        case dec_mode::MouseURXVT: return 1015;
+        case dec_mode::MouseSGRPixels: return 1016;
+        case dec_mode::MouseAlternateScroll: return 1007;
+        case dec_mode::MousePassiveTracking: return 2029;
+        case dec_mode::ReportGridCellSelection: return 2030;
+        case dec_mode::BatchedRendering: return 2026;
+        case dec_mode::Unicode: return 2027;
+        case dec_mode::TextReflow: return 2028;
+        case dec_mode::SixelCursorNextToGraphic: return 8452;
     }
     return static_cast<unsigned>(m);
 }
 
 constexpr bool isValidDECMode(unsigned int mode) noexcept
 {
-    switch (static_cast<DECMode>(mode))
+    switch (static_cast<dec_mode>(mode))
     {
-        case DECMode::UseApplicationCursorKeys:
-        case DECMode::DesignateCharsetUSASCII:
-        case DECMode::Columns132:
-        case DECMode::SmoothScroll:
-        case DECMode::ReverseVideo:
-        case DECMode::MouseProtocolX10:
-        case DECMode::MouseProtocolNormalTracking:
-        case DECMode::MouseProtocolHighlightTracking:
-        case DECMode::MouseProtocolButtonTracking:
-        case DECMode::MouseProtocolAnyEventTracking:
-        case DECMode::SaveCursor:
-        case DECMode::ExtendedAltScreen:
-        case DECMode::Origin:
-        case DECMode::AutoWrap:
-        case DECMode::PrinterExtend:
-        case DECMode::LeftRightMargin:
-        case DECMode::ShowToolbar:
-        case DECMode::BlinkingCursor:
-        case DECMode::VisibleCursor:
-        case DECMode::ShowScrollbar:
-        case DECMode::AllowColumns80to132:
-        case DECMode::DebugLogging:
-        case DECMode::UseAlternateScreen:
-        case DECMode::BracketedPaste:
-        case DECMode::FocusTracking:
-        case DECMode::NoSixelScrolling:
-        case DECMode::UsePrivateColorRegisters:
-        case DECMode::MouseExtended:
-        case DECMode::MouseSGR:
-        case DECMode::MouseURXVT:
-        case DECMode::MouseSGRPixels:
-        case DECMode::MouseAlternateScroll:
-        case DECMode::MousePassiveTracking:
-        case DECMode::ReportGridCellSelection:
-        case DECMode::BatchedRendering:
-        case DECMode::Unicode:
-        case DECMode::TextReflow:
-        case DECMode::SixelCursorNextToGraphic:
+        case dec_mode::UseApplicationCursorKeys:
+        case dec_mode::DesignateCharsetUSASCII:
+        case dec_mode::Columns132:
+        case dec_mode::SmoothScroll:
+        case dec_mode::ReverseVideo:
+        case dec_mode::MouseProtocolX10:
+        case dec_mode::MouseProtocolNormalTracking:
+        case dec_mode::MouseProtocolHighlightTracking:
+        case dec_mode::MouseProtocolButtonTracking:
+        case dec_mode::MouseProtocolAnyEventTracking:
+        case dec_mode::SaveCursor:
+        case dec_mode::ExtendedAltScreen:
+        case dec_mode::Origin:
+        case dec_mode::AutoWrap:
+        case dec_mode::PrinterExtend:
+        case dec_mode::LeftRightMargin:
+        case dec_mode::ShowToolbar:
+        case dec_mode::BlinkingCursor:
+        case dec_mode::VisibleCursor:
+        case dec_mode::ShowScrollbar:
+        case dec_mode::AllowColumns80to132:
+        case dec_mode::DebugLogging:
+        case dec_mode::UseAlternateScreen:
+        case dec_mode::BracketedPaste:
+        case dec_mode::FocusTracking:
+        case dec_mode::NoSixelScrolling:
+        case dec_mode::UsePrivateColorRegisters:
+        case dec_mode::MouseExtended:
+        case dec_mode::MouseSGR:
+        case dec_mode::MouseURXVT:
+        case dec_mode::MouseSGRPixels:
+        case dec_mode::MouseAlternateScroll:
+        case dec_mode::MousePassiveTracking:
+        case dec_mode::ReportGridCellSelection:
+        case dec_mode::BatchedRendering:
+        case dec_mode::Unicode:
+        case dec_mode::TextReflow:
+        case dec_mode::SixelCursorNextToGraphic:
             //.
             return true;
     }
     return false;
 }
 
-constexpr DynamicColorName getChangeDynamicColorCommand(unsigned value)
+constexpr dynamic_color_name getChangeDynamicColorCommand(unsigned value)
 {
     switch (value)
     {
-        case 10: return DynamicColorName::DefaultForegroundColor;
-        case 11: return DynamicColorName::DefaultBackgroundColor;
-        case 12: return DynamicColorName::TextCursorColor;
-        case 13: return DynamicColorName::MouseForegroundColor;
-        case 14: return DynamicColorName::MouseBackgroundColor;
-        case 19: return DynamicColorName::HighlightForegroundColor;
-        case 17: return DynamicColorName::HighlightBackgroundColor;
-        default: return DynamicColorName::DefaultForegroundColor;
+        case 10: return dynamic_color_name::DefaultForegroundColor;
+        case 11: return dynamic_color_name::DefaultBackgroundColor;
+        case 12: return dynamic_color_name::TextCursorColor;
+        case 13: return dynamic_color_name::MouseForegroundColor;
+        case 14: return dynamic_color_name::MouseBackgroundColor;
+        case 19: return dynamic_color_name::HighlightForegroundColor;
+        case 17: return dynamic_color_name::HighlightBackgroundColor;
+        default: return dynamic_color_name::DefaultForegroundColor;
     }
 }
 
-constexpr unsigned setDynamicColorCommand(DynamicColorName name)
+constexpr unsigned setDynamicColorCommand(dynamic_color_name name)
 {
     switch (name)
     {
-        case DynamicColorName::DefaultForegroundColor: return 10;
-        case DynamicColorName::DefaultBackgroundColor: return 11;
-        case DynamicColorName::TextCursorColor: return 12;
-        case DynamicColorName::MouseForegroundColor: return 13;
-        case DynamicColorName::MouseBackgroundColor: return 14;
-        case DynamicColorName::HighlightForegroundColor: return 19;
-        case DynamicColorName::HighlightBackgroundColor: return 17;
+        case dynamic_color_name::DefaultForegroundColor: return 10;
+        case dynamic_color_name::DefaultBackgroundColor: return 11;
+        case dynamic_color_name::TextCursorColor: return 12;
+        case dynamic_color_name::MouseForegroundColor: return 13;
+        case dynamic_color_name::MouseBackgroundColor: return 14;
+        case dynamic_color_name::HighlightForegroundColor: return 19;
+        case dynamic_color_name::HighlightBackgroundColor: return 17;
         default: return 0;
     }
 }
 
-struct SearchResult
+struct search_result
 {
-    ColumnOffset column;           // column at the start of match
+    column_offset column;          // column at the start of match
     size_t partialMatchLength = 0; // length of partial match that happens at either end
 };
 
@@ -899,36 +899,36 @@ struct SearchResult
 namespace std
 {
 template <>
-struct numeric_limits<terminal::CursorShape>
+struct numeric_limits<terminal::cursor_shape>
 {
-    constexpr static terminal::CursorShape min() noexcept { return terminal::CursorShape::Block; }
-    constexpr static terminal::CursorShape max() noexcept { return terminal::CursorShape::Bar; }
+    constexpr static terminal::cursor_shape min() noexcept { return terminal::cursor_shape::Block; }
+    constexpr static terminal::cursor_shape max() noexcept { return terminal::cursor_shape::Bar; }
     constexpr static size_t count() noexcept { return 4; }
 };
 } // namespace std
 
 // {{{ fmt formatter
 template <>
-struct fmt::formatter<terminal::CursorShape>: formatter<std::string_view>
+struct fmt::formatter<terminal::cursor_shape>: formatter<std::string_view>
 {
-    auto format(terminal::CursorShape value, format_context& ctx) -> format_context::iterator
+    auto format(terminal::cursor_shape value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::CursorShape::Bar: name = "Bar"; break;
-            case terminal::CursorShape::Block: name = "Block"; break;
-            case terminal::CursorShape::Rectangle: name = "Rectangle"; break;
-            case terminal::CursorShape::Underscore: name = "Underscore"; break;
+            case terminal::cursor_shape::Bar: name = "Bar"; break;
+            case terminal::cursor_shape::Block: name = "Block"; break;
+            case terminal::cursor_shape::Rectangle: name = "Rectangle"; break;
+            case terminal::cursor_shape::Underscore: name = "Underscore"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::CellLocation>: formatter<std::string>
+struct fmt::formatter<terminal::cell_location>: formatter<std::string>
 {
-    auto format(terminal::CellLocation coord, format_context& ctx) -> format_context::iterator
+    auto format(terminal::cell_location coord, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("({}, {})", coord.line, coord.column), ctx);
     }
@@ -944,52 +944,52 @@ struct fmt::formatter<terminal::PageSize>: formatter<std::string>
 };
 
 template <>
-struct fmt::formatter<terminal::GridSize>: formatter<std::string>
+struct fmt::formatter<terminal::grid_size>: formatter<std::string>
 {
-    auto format(terminal::GridSize value, format_context& ctx) -> format_context::iterator
+    auto format(terminal::grid_size value, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}x{}", value.columns, value.lines), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::ScreenType>: formatter<std::string_view>
+struct fmt::formatter<terminal::screen_type>: formatter<std::string_view>
 {
-    auto format(const terminal::ScreenType value, format_context& ctx) -> format_context::iterator
+    auto format(const terminal::screen_type value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::ScreenType::Primary: name = "Primary"; break;
-            case terminal::ScreenType::Alternate: name = "Alternate"; break;
+            case terminal::screen_type::Primary: name = "Primary"; break;
+            case terminal::screen_type::Alternate: name = "Alternate"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::PixelCoordinate>: formatter<std::string>
+struct fmt::formatter<terminal::pixel_coordinate>: formatter<std::string>
 {
-    auto format(const terminal::PixelCoordinate coord, format_context& ctx) -> format_context::iterator
+    auto format(const terminal::pixel_coordinate coord, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}:{}", coord.x.value, coord.y.value), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::ViMode>: formatter<std::string_view>
+struct fmt::formatter<terminal::vi_mode>: formatter<std::string_view>
 {
-    auto format(terminal::ViMode mode, format_context& ctx) -> format_context::iterator
+    auto format(terminal::vi_mode mode, format_context& ctx) -> format_context::iterator
     {
-        using terminal::ViMode;
+        using terminal::vi_mode;
         string_view name;
         switch (mode)
         {
-            case ViMode::Normal: name = "Normal"; break;
-            case ViMode::Insert: name = "Insert"; break;
-            case ViMode::Visual: name = "Visual"; break;
-            case ViMode::VisualLine: name = "VisualLine"; break;
-            case ViMode::VisualBlock: name = "VisualBlock"; break;
+            case vi_mode::Normal: name = "Normal"; break;
+            case vi_mode::Insert: name = "Insert"; break;
+            case vi_mode::Visual: name = "Visual"; break;
+            case vi_mode::VisualLine: name = "VisualLine"; break;
+            case vi_mode::VisualBlock: name = "VisualBlock"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

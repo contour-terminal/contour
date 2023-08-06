@@ -32,10 +32,10 @@ namespace terminal
 
 struct RenderAttributes
 {
-    RGBColor foregroundColor {};
-    RGBColor backgroundColor {};
-    RGBColor decorationColor {};
-    CellFlags flags {};
+    rgb_color foregroundColor {};
+    rgb_color backgroundColor {};
+    rgb_color decorationColor {};
+    cell_flags flags {};
 };
 
 /**
@@ -46,7 +46,7 @@ struct RenderCell
 {
     std::u32string codepoints;
     std::shared_ptr<ImageFragment> image;
-    CellLocation position;
+    cell_location position;
     RenderAttributes attributes;
     uint8_t width = 1;
 
@@ -60,7 +60,7 @@ struct RenderCell
 struct RenderLine
 {
     std::string_view text;
-    LineOffset lineOffset;
+    line_offset lineOffset;
     ColumnCount usedColumns;
     ColumnCount displayWidth;
     RenderAttributes textAttributes;
@@ -69,8 +69,8 @@ struct RenderLine
 
 struct RenderCursor
 {
-    CellLocation position;
-    CursorShape shape;
+    cell_location position;
+    cursor_shape shape;
     int width = 1;
 };
 

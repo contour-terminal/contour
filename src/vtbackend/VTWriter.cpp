@@ -125,12 +125,12 @@ void VTWriter::sgrRewind()
     _sgr.clear();
 }
 
-void VTWriter::sgrAdd(GraphicsRendition m)
+void VTWriter::sgrAdd(graphics_rendition m)
 {
     sgrAdd(static_cast<unsigned>(m));
 }
 
-void VTWriter::setForegroundColor(Color color)
+void VTWriter::setForegroundColor(color color)
 {
     // if (color == _currentForegroundColor)
     //     return;
@@ -138,32 +138,32 @@ void VTWriter::setForegroundColor(Color color)
     _currentForegroundColor = color;
     switch (color.type())
     {
-        case ColorType::Default:
+        case color_type::Default:
             //.
             sgrAdd(39);
             break;
-        case ColorType::Indexed:
+        case color_type::Indexed:
             if (static_cast<unsigned>(color.index()) < 8)
                 sgrAdd(30 + static_cast<unsigned>(color.index()));
             else
                 sgrAdd(38, 5, static_cast<unsigned>(color.index()));
             break;
-        case ColorType::Bright:
+        case color_type::Bright:
             //.
             sgrAdd(90 + static_cast<unsigned>(getBrightColor(color)));
             break;
-        case ColorType::RGB:
+        case color_type::RGB:
             // clang-format off
             sgrAdd(38, 2, static_cast<unsigned>(color.rgb().red),
                           static_cast<unsigned>(color.rgb().green),
                           static_cast<unsigned>(color.rgb().blue));
             // clang-format on
             break;
-        case ColorType::Undefined: break;
+        case color_type::Undefined: break;
     }
 }
 
-void VTWriter::setBackgroundColor(Color color)
+void VTWriter::setBackgroundColor(color color)
 {
     // if (color == _currentBackgroundColor)
     //     return;
@@ -171,8 +171,8 @@ void VTWriter::setBackgroundColor(Color color)
     _currentBackgroundColor = color;
     switch (color.type())
     {
-        case ColorType::Default: sgrAdd(49); break;
-        case ColorType::Indexed:
+        case color_type::Default: sgrAdd(49); break;
+        case color_type::Indexed:
             if (static_cast<unsigned>(color.index()) < 8)
                 sgrAdd(40 + static_cast<unsigned>(color.index()));
             else
@@ -182,18 +182,18 @@ void VTWriter::setBackgroundColor(Color color)
                 sgrAdd(static_cast<unsigned>(color.index()));
             }
             break;
-        case ColorType::Bright:
+        case color_type::Bright:
             //.
             sgrAdd(100 + static_cast<unsigned>(getBrightColor(color)));
             break;
-        case ColorType::RGB:
+        case color_type::RGB:
             sgrAdd(48);
             sgrAdd(2);
             sgrAdd(static_cast<unsigned>(color.rgb().red));
             sgrAdd(static_cast<unsigned>(color.rgb().green));
             sgrAdd(static_cast<unsigned>(color.rgb().blue));
             break;
-        case ColorType::Undefined:
+        case color_type::Undefined:
             //.
             break;
     }
@@ -215,10 +215,10 @@ void VTWriter::write(Line<Cell> const& line)
     {
         for (Cell const& cell: line.inflatedBuffer())
         {
-            if (cell.flags() & CellFlags::Bold)
-                sgrAdd(GraphicsRendition::Bold);
+            if (cell.flags() & cell_flags::Bold)
+                sgrAdd(graphics_rendition::Bold);
             else
-                sgrAdd(GraphicsRendition::Normal);
+                sgrAdd(graphics_rendition::Normal);
 
             setForegroundColor(cell.foregroundColor());
             setBackgroundColor(cell.backgroundColor());
@@ -231,7 +231,7 @@ void VTWriter::write(Line<Cell> const& line)
         }
     }
 
-    sgrAdd(GraphicsRendition::Reset);
+    sgrAdd(graphics_rendition::Reset);
 }
 
 } // namespace terminal

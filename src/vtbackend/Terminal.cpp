@@ -66,15 +66,15 @@ namespace // {{{ helpers
             value.pop_back();
     }
 
-    string_view modeString(ViMode mode) noexcept
+    string_view modeString(vi_mode mode) noexcept
     {
         switch (mode)
         {
-            case ViMode::Normal: return "NORMAL"sv;
-            case ViMode::Insert: return "INSERT"sv;
-            case ViMode::Visual: return "VISUAL"sv;
-            case ViMode::VisualLine: return "VISUAL LINE"sv;
-            case ViMode::VisualBlock: return "VISUAL BLOCK"sv;
+            case vi_mode::Normal: return "NORMAL"sv;
+            case vi_mode::Insert: return "INSERT"sv;
+            case vi_mode::Visual: return "VISUAL"sv;
+            case vi_mode::VisualLine: return "VISUAL LINE"sv;
+            case vi_mode::VisualBlock: return "VISUAL BLOCK"sv;
         }
         crispy::unreachable();
     }
@@ -123,9 +123,9 @@ namespace // {{{ helpers
         return 0;
     }
 
-    constexpr CellLocation raiseToMinimum(CellLocation location, LineOffset minimumLine) noexcept
+    constexpr cell_location raiseToMinimum(cell_location location, line_offset minimumLine) noexcept
     {
-        return CellLocation { std::max(location.line, minimumLine), location.column };
+        return cell_location { std::max(location.line, minimumLine), location.column };
     }
 
 } // namespace
@@ -169,11 +169,11 @@ Terminal::Terminal(Events& eventListener,
 #if 0
     hardReset();
 #else
-    setMode(DECMode::AutoWrap, true);
-    setMode(DECMode::VisibleCursor, true);
-    setMode(DECMode::Unicode, true);
-    setMode(DECMode::TextReflow, true);
-    setMode(DECMode::SixelCursorNextToGraphic, true);
+    setMode(dec_mode::AutoWrap, true);
+    setMode(dec_mode::VisibleCursor, true);
+    setMode(dec_mode::Unicode, true);
+    setMode(dec_mode::TextReflow, true);
+    setMode(dec_mode::SixelCursorNextToGraphic, true);
 #endif
 }
 
@@ -183,7 +183,7 @@ void Terminal::setRefreshRate(RefreshRate refreshRate)
     _refreshInterval = RefreshInterval { refreshRate };
 }
 
-void Terminal::setLastMarkRangeOffset(LineOffset value) noexcept
+void Terminal::setLastMarkRangeOffset(line_offset value) noexcept
 {
     _settings.copyLastMarkRangeOffset = value;
 }
@@ -276,7 +276,7 @@ bool Terminal::processInputOnce()
         _state.parser.parseFragment(buf);
     }
 
-    if (!_state.modes.enabled(DECMode::BatchedRendering))
+    if (!_state.modes.enabled(dec_mode::BatchedRendering))
         screenUpdated();
 
 #if defined(LIBTERMINAL_PASSIVE_RENDER_BUFFER_UPDATE)
@@ -362,28 +362,28 @@ PageSize Terminal::SelectionHelper::pageSize() const noexcept
     return terminal->pageSize();
 }
 
-bool Terminal::SelectionHelper::wordDelimited(CellLocation pos) const noexcept
+bool Terminal::SelectionHelper::wordDelimited(cell_location pos) const noexcept
 {
     return terminal->wordDelimited(pos);
 }
 
-bool Terminal::SelectionHelper::wrappedLine(LineOffset line) const noexcept
+bool Terminal::SelectionHelper::wrappedLine(line_offset line) const noexcept
 {
     return terminal->isLineWrapped(line);
 }
 
-bool Terminal::SelectionHelper::cellEmpty(CellLocation pos) const noexcept
+bool Terminal::SelectionHelper::cellEmpty(cell_location pos) const noexcept
 {
     // Word selection may be off by one
-    pos.column = std::min(pos.column, boxed_cast<ColumnOffset>(terminal->pageSize().columns - 1));
+    pos.column = std::min(pos.column, boxed_cast<column_offset>(terminal->pageSize().columns - 1));
 
     return terminal->currentScreen().isCellEmpty(pos);
 }
 
-int Terminal::SelectionHelper::cellWidth(CellLocation pos) const noexcept
+int Terminal::SelectionHelper::cellWidth(cell_location pos) const noexcept
 {
     // Word selection may be off by one
-    pos.column = std::min(pos.column, boxed_cast<ColumnOffset>(terminal->pageSize().columns - 1));
+    pos.column = std::min(pos.column, boxed_cast<column_offset>(terminal->pageSize().columns - 1));
 
     return terminal->currentScreen().cellWidthAt(pos);
 }
@@ -440,22 +440,22 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
         TerminalLog()("{}: Refreshing render buffer.\n", _lastFrameID.load());
 #endif
 
-    auto baseLine = LineOffset(0);
+    auto baseLine = line_offset(0);
 
-    if (_settings.statusDisplayPosition == StatusDisplayPosition::Top)
-        baseLine += fillRenderBufferStatusLine(output, includeSelection, baseLine).as<LineOffset>();
+    if (_settings.statusDisplayPosition == status_display_position::Top)
+        baseLine += fillRenderBufferStatusLine(output, includeSelection, baseLine).as<line_offset>();
 
     auto const hoveringHyperlinkGuard = ScopedHyperlinkHover { *this, _currentScreen };
-    auto const mainDisplayReverseVideo = isModeEnabled(terminal::DECMode::ReverseVideo);
+    auto const mainDisplayReverseVideo = isModeEnabled(terminal::dec_mode::ReverseVideo);
     auto const highlightSearchMatches =
-        _state.searchMode.pattern.empty() ? HighlightSearchMatches::No : HighlightSearchMatches::Yes;
+        _state.searchMode.pattern.empty() ? highlight_search_matches::No : highlight_search_matches::Yes;
 
     auto const theCursorPosition =
-        optional<CellLocation> { inputHandler().mode() == ViMode::Insert
-                                     ? (isModeEnabled(DECMode::VisibleCursor)
-                                            ? optional<CellLocation> { currentScreen().cursor().position }
-                                            : nullopt)
-                                     : state().viCommands.cursorPosition };
+        optional<cell_location> { inputHandler().mode() == vi_mode::Insert
+                                      ? (isModeEnabled(dec_mode::VisibleCursor)
+                                             ? optional<cell_location> { currentScreen().cursor().position }
+                                             : nullopt)
+                                      : state().viCommands.cursorPosition };
 
     if (isPrimaryScreen())
         _lastRenderPassHints =
@@ -463,7 +463,7 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                                            output,
                                                                            baseLine,
                                                                            mainDisplayReverseVideo,
-                                                                           HighlightSearchMatches::Yes,
+                                                                           highlight_search_matches::Yes,
                                                                            _inputMethodData,
                                                                            theCursorPosition,
                                                                            includeSelection },
@@ -475,51 +475,52 @@ void Terminal::fillRenderBufferInternal(RenderBuffer& output, bool includeSelect
                                                                                output,
                                                                                baseLine,
                                                                                mainDisplayReverseVideo,
-                                                                               HighlightSearchMatches::Yes,
+                                                                               highlight_search_matches::Yes,
                                                                                _inputMethodData,
                                                                                theCursorPosition,
                                                                                includeSelection },
                                     _viewport.scrollOffset(),
                                     highlightSearchMatches);
 
-    if (_settings.statusDisplayPosition == StatusDisplayPosition::Bottom)
+    if (_settings.statusDisplayPosition == status_display_position::Bottom)
     {
-        baseLine += pageSize().lines.as<LineOffset>();
+        baseLine += pageSize().lines.as<line_offset>();
         fillRenderBufferStatusLine(output, includeSelection, baseLine);
     }
 }
 
-LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, LineOffset base)
+LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, line_offset base)
 {
-    auto const mainDisplayReverseVideo = isModeEnabled(terminal::DECMode::ReverseVideo);
+    auto const mainDisplayReverseVideo = isModeEnabled(terminal::dec_mode::ReverseVideo);
     switch (_state.statusDisplayType)
     {
-        case StatusDisplayType::None:
+        case terminal::status_display_type::None:
             //.
             return LineCount(0);
-        case StatusDisplayType::Indicator:
+        case terminal::status_display_type::Indicator:
             updateIndicatorStatusLine();
-            _indicatorStatusScreen.render(RenderBufferBuilder<StatusDisplayCell> { *this,
-                                                                                   output,
-                                                                                   base,
-                                                                                   !mainDisplayReverseVideo,
-                                                                                   HighlightSearchMatches::No,
-                                                                                   InputMethodData {},
-                                                                                   nullopt,
-                                                                                   includeSelection },
-                                          ScrollOffset(0));
+            _indicatorStatusScreen.render(
+                RenderBufferBuilder<StatusDisplayCell> { *this,
+                                                         output,
+                                                         base,
+                                                         !mainDisplayReverseVideo,
+                                                         highlight_search_matches::No,
+                                                         InputMethodData {},
+                                                         nullopt,
+                                                         includeSelection },
+                scroll_offset(0));
             return _indicatorStatusScreen.pageSize().lines;
-        case StatusDisplayType::HostWritable:
+        case terminal::status_display_type::HostWritable:
             _hostWritableStatusLineScreen.render(
                 RenderBufferBuilder<StatusDisplayCell> { *this,
                                                          output,
                                                          base,
                                                          !mainDisplayReverseVideo,
-                                                         HighlightSearchMatches::No,
+                                                         highlight_search_matches::No,
                                                          InputMethodData {},
                                                          nullopt,
                                                          includeSelection },
-                ScrollOffset(0));
+                scroll_offset(0));
             return _hostWritableStatusLineScreen.pageSize().lines;
     }
     crispy::unreachable();
@@ -528,7 +529,7 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
 
 void Terminal::updateIndicatorStatusLine()
 {
-    Require(_state.activeStatusDisplay != ActiveStatusDisplay::IndicatorStatusLine);
+    Require(_state.activeStatusDisplay != active_status_display::IndicatorStatusLine);
 
     auto const _ = crispy::finally { [this, savedActiveStatusDisplay = _state.activeStatusDisplay]() {
         // Cleaning up.
@@ -539,7 +540,7 @@ void Terminal::updateIndicatorStatusLine()
     auto const colors =
         _state.focused ? colorPalette().indicatorStatusLine : colorPalette().indicatorStatusLineInactive;
 
-    setActiveStatusDisplay(ActiveStatusDisplay::IndicatorStatusLine);
+    setActiveStatusDisplay(active_status_display::IndicatorStatusLine);
 
     // Prepare old status line's cursor position and some other flags.
     _indicatorStatusScreen.moveCursorTo({}, {});
@@ -559,18 +560,18 @@ void Terminal::updateIndicatorStatusLine()
 
     if (!allowInput())
     {
-        _indicatorStatusScreen.cursor().graphicsRendition.foregroundColor = BrightColor::Red;
-        _indicatorStatusScreen.cursor().graphicsRendition.flags |= CellFlags::Bold;
+        _indicatorStatusScreen.cursor().graphicsRendition.foregroundColor = bright_color::Red;
+        _indicatorStatusScreen.cursor().graphicsRendition.flags |= cell_flags::Bold;
         _indicatorStatusScreen.writeTextFromExternal(" (PROTECTED)");
         _indicatorStatusScreen.cursor().graphicsRendition.foregroundColor = colors.foreground;
-        _indicatorStatusScreen.cursor().graphicsRendition.flags &= ~CellFlags::Bold;
+        _indicatorStatusScreen.cursor().graphicsRendition.flags &= ~cell_flags::Bold;
     }
 
     if (_state.executionMode != ExecutionMode::Normal)
     {
         _indicatorStatusScreen.writeTextFromExternal(" | ");
-        _indicatorStatusScreen.cursor().graphicsRendition.foregroundColor = BrightColor::Yellow;
-        _indicatorStatusScreen.cursor().graphicsRendition.flags |= CellFlags::Bold;
+        _indicatorStatusScreen.cursor().graphicsRendition.foregroundColor = bright_color::Yellow;
+        _indicatorStatusScreen.cursor().graphicsRendition.flags |= cell_flags::Bold;
         _indicatorStatusScreen.writeTextFromExternal("TRACING");
         if (!_traceHandler.pendingSequences().empty())
             _indicatorStatusScreen.writeTextFromExternal(
@@ -579,14 +580,14 @@ void Terminal::updateIndicatorStatusLine()
                             _traceHandler.pendingSequences().front()));
 
         _indicatorStatusScreen.cursor().graphicsRendition.foregroundColor = colors.foreground;
-        _indicatorStatusScreen.cursor().graphicsRendition.flags &= ~CellFlags::Bold;
+        _indicatorStatusScreen.cursor().graphicsRendition.flags &= ~cell_flags::Bold;
     }
 
     // TODO: Disabled for now, but generally I want that functionality, but configurable somehow.
     auto constexpr indicatorLineShowCodepoints = false;
     if (indicatorLineShowCodepoints)
     {
-        auto const cursorPosition = _state.inputHandler.mode() == ViMode::Insert
+        auto const cursorPosition = _state.inputHandler.mode() == vi_mode::Insert
                                         ? _indicatorStatusScreen.cursor().position
                                         : _state.viCommands.cursorPosition;
         auto const text =
@@ -620,8 +621,8 @@ void Terminal::updateIndicatorStatusLine()
     if (rightString.size() <= static_cast<size_t>(columnsAvailable))
     {
         _indicatorStatusScreen.cursor().position.column =
-            ColumnOffset::cast_from(_indicatorStatusScreen.pageSize().columns)
-            - ColumnOffset::cast_from(rightString.size()) - ColumnOffset(1);
+            column_offset::cast_from(_indicatorStatusScreen.pageSize().columns)
+            - column_offset::cast_from(rightString.size()) - column_offset(1);
         _indicatorStatusScreen.updateCursorIterator();
 
         _indicatorStatusScreen.writeTextFromExternal(rightString);
@@ -637,7 +638,7 @@ bool Terminal::sendKeyPressEvent(Key key, Modifier modifier, Timestamp now)
         return true;
 
     // Early exit if KAM is enabled.
-    if (isModeEnabled(AnsiMode::KeyboardAction))
+    if (isModeEnabled(ansi_mode::KeyboardAction))
         return true;
 
     _viewport.scrollToBottom();
@@ -653,7 +654,7 @@ bool Terminal::sendCharPressEvent(char32_t ch, Modifier modifier, Timestamp now)
     _lastCursorBlink = now;
 
     // Early exit if KAM is enabled.
-    if (isModeEnabled(AnsiMode::KeyboardAction))
+    if (isModeEnabled(ansi_mode::KeyboardAction))
         return true;
 
     if (_state.inputHandler.sendCharPressEvent(ch, modifier))
@@ -668,7 +669,7 @@ bool Terminal::sendCharPressEvent(char32_t ch, Modifier modifier, Timestamp now)
 
 bool Terminal::sendMousePressEvent(Modifier modifier,
                                    MouseButton button,
-                                   PixelCoordinate pixelPosition,
+                                   pixel_coordinate pixelPosition,
                                    bool uiHandledHint)
 {
     if (button == MouseButton::Left)
@@ -688,7 +689,7 @@ bool Terminal::sendMousePressEvent(Modifier modifier,
     // TODO: Ctrl+(Left)Click's should still be catched by the terminal iff there's a hyperlink
     // under the current position
     flushInput();
-    return eventHandledByApp && !isModeEnabled(DECMode::MousePassiveTracking);
+    return eventHandledByApp && !isModeEnabled(dec_mode::MousePassiveTracking);
 }
 
 bool Terminal::handleMouseSelection(Modifier modifier)
@@ -699,12 +700,12 @@ bool Terminal::handleMouseSelection(Modifier modifier)
     _lastClick = _currentTime;
     _speedClicks = (diff_ms >= 0.0 && diff_ms <= 750.0 ? _speedClicks : 0) % 3 + 1;
 
-    auto const startPos = CellLocation {
-        _currentMousePosition.line - boxed_cast<LineOffset>(_viewport.scrollOffset()),
+    auto const startPos = cell_location {
+        _currentMousePosition.line - boxed_cast<line_offset>(_viewport.scrollOffset()),
         _currentMousePosition.column,
     };
 
-    if (_state.inputHandler.mode() != ViMode::Insert)
+    if (_state.inputHandler.mode() != vi_mode::Insert)
         _state.viCommands.cursorPosition = startPos;
 
     switch (_speedClicks)
@@ -763,7 +764,7 @@ void Terminal::clearSelection()
         if (!_leftMouseButtonPressed)
             // Don't clear if in visual mode and mouse wasn't used.
             return;
-        _state.inputHandler.setMode(ViMode::Normal);
+        _state.inputHandler.setMode(vi_mode::Normal);
     }
 
     if (!_selection)
@@ -777,8 +778,8 @@ void Terminal::clearSelection()
     breakLoopAndRefreshRenderBuffer();
 }
 
-bool Terminal::shouldExtendSelectionByMouse(CellLocation newPosition,
-                                            PixelCoordinate pixelPosition) const noexcept
+bool Terminal::shouldExtendSelectionByMouse(cell_location newPosition,
+                                            pixel_coordinate pixelPosition) const noexcept
 {
     if (!selectionAvailable() || selector()->state() == Selection::State::Complete)
         return false;
@@ -811,8 +812,8 @@ bool Terminal::shouldExtendSelectionByMouse(CellLocation newPosition,
 }
 
 void Terminal::sendMouseMoveEvent(Modifier modifier,
-                                  CellLocation newPosition,
-                                  PixelCoordinate pixelPosition,
+                                  cell_location newPosition,
+                                  pixel_coordinate pixelPosition,
                                   bool uiHandledHint)
 {
     // Updates the internal state to remember the current mouse' position.
@@ -849,7 +850,7 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
         if (_state.inputGenerator.generateMouseMove(
                 modifier, relativePos, pixelPosition, uiHandledHint || !selectionAvailable()))
             flushInput();
-        if (!isModeEnabled(DECMode::MousePassiveTracking))
+        if (!isModeEnabled(dec_mode::MousePassiveTracking))
             return;
     }
 
@@ -859,9 +860,9 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
     else if (selector()->state() != Selection::State::Complete && shouldExtendSelection)
     {
         if (currentScreen().isCellEmpty(relativePos) && !currentScreen().compareCellTextAt(relativePos, 0x20))
-            relativePos.column = ColumnOffset { 0 } + *(_settings.pageSize.columns - 1);
+            relativePos.column = column_offset { 0 } + *(_settings.pageSize.columns - 1);
         _state.viCommands.cursorPosition = relativePos;
-        if (_state.inputHandler.mode() != ViMode::Insert)
+        if (_state.inputHandler.mode() != vi_mode::Insert)
             _state.inputHandler.setMode(selector()->viMode());
         if (selector()->extend(relativePos))
             breakLoopAndRefreshRenderBuffer();
@@ -870,7 +871,7 @@ void Terminal::sendMouseMoveEvent(Modifier modifier,
 
 bool Terminal::sendMouseReleaseEvent(Modifier modifier,
                                      MouseButton button,
-                                     PixelCoordinate pixelPosition,
+                                     pixel_coordinate pixelPosition,
                                      bool uiHandledHint)
 {
     verifyState();
@@ -883,7 +884,7 @@ bool Terminal::sendMouseReleaseEvent(Modifier modifier,
             switch (selector()->state())
             {
                 case Selection::State::InProgress:
-                    if (_state.inputHandler.mode() == ViMode::Insert)
+                    if (_state.inputHandler.mode() == vi_mode::Insert)
                         selector()->complete();
                     _eventListener.onSelectionCompleted();
                     break;
@@ -899,7 +900,7 @@ bool Terminal::sendMouseReleaseEvent(Modifier modifier,
     {
         flushInput();
 
-        if (!isModeEnabled(DECMode::MousePassiveTracking))
+        if (!isModeEnabled(dec_mode::MousePassiveTracking))
             return true;
     }
 
@@ -1001,7 +1002,7 @@ void Terminal::writeToScreen(string_view vtStream)
         }
     }
 
-    if (!_state.modes.enabled(DECMode::BatchedRendering))
+    if (!_state.modes.enabled(dec_mode::BatchedRendering))
     {
         screenUpdated();
     }
@@ -1030,7 +1031,7 @@ void Terminal::writeToScreenInternal(std::string_view vtStream)
 
 void Terminal::updateCursorVisibilityState() const noexcept
 {
-    if (_settings.cursorDisplay == CursorDisplay::Steady)
+    if (_settings.cursorDisplay == cursor_display::Steady)
         return;
 
     auto const passed = chrono::duration_cast<chrono::milliseconds>(_currentTime - _lastCursorBlink);
@@ -1057,7 +1058,7 @@ void Terminal::updateHoveringHyperlinkState()
 optional<chrono::milliseconds> Terminal::nextRender() const
 {
     auto nextBlink = chrono::milliseconds::max();
-    if ((isModeEnabled(DECMode::VisibleCursor) && _settings.cursorDisplay == CursorDisplay::Blink)
+    if ((isModeEnabled(dec_mode::VisibleCursor) && _settings.cursorDisplay == cursor_display::Blink)
         || isBlinkOnScreen())
     {
         auto const passedCursor =
@@ -1073,7 +1074,7 @@ optional<chrono::milliseconds> Terminal::nextRender() const
             nextBlink = std::min(nextBlink, _rapidBlinker.interval - passedRapidBlink);
     }
 
-    if (_state.statusDisplayType == StatusDisplayType::Indicator)
+    if (_state.statusDisplayType == status_display_type::Indicator)
     {
         auto const currentSecond =
             chrono::time_point_cast<chrono::seconds>(chrono::system_clock::now()).time_since_epoch().count()
@@ -1104,13 +1105,13 @@ void Terminal::tick(chrono::steady_clock::time_point now) noexcept
     }
 }
 
-void Terminal::resizeScreen(PageSize totalPageSize, optional<ImageSize> pixels)
+void Terminal::resizeScreen(PageSize totalPageSize, optional<image_size> pixels)
 {
     auto const _ = std::lock_guard { *this };
     resizeScreenInternal(totalPageSize, pixels);
 }
 
-void Terminal::resizeScreenInternal(PageSize totalPageSize, std::optional<ImageSize> pixels)
+void Terminal::resizeScreenInternal(PageSize totalPageSize, std::optional<image_size> pixels)
 {
     // NOTE: This will only resize the currently active buffer.
     // Any other buffer will be resized when it is switched to.
@@ -1126,8 +1127,8 @@ void Terminal::resizeScreenInternal(PageSize totalPageSize, std::optional<ImageS
 
     // Reset margin to their default.
     _primaryScreen.margin() =
-        Margin { Margin::Vertical { {}, mainDisplayPageSize.lines.as<LineOffset>() - 1 },
-                 Margin::Horizontal { {}, mainDisplayPageSize.columns.as<ColumnOffset>() - 1 } };
+        Margin { Margin::Vertical { {}, mainDisplayPageSize.lines.as<line_offset>() - 1 },
+                 Margin::Horizontal { {}, mainDisplayPageSize.columns.as<column_offset>() - 1 } };
     _alternateScreen.margin() = _primaryScreen.margin();
 
     applyPageSizeToCurrentBuffer();
@@ -1137,10 +1138,10 @@ void Terminal::resizeScreenInternal(PageSize totalPageSize, std::optional<ImageS
     // Adjust Normal-mode's cursor in order to avoid drift when growing/shrinking in main page line count.
     if (mainDisplayPageSize.lines > oldMainDisplayPageSize.lines)
         _state.viCommands.cursorPosition.line +=
-            boxed_cast<LineOffset>(mainDisplayPageSize.lines - oldMainDisplayPageSize.lines);
+            boxed_cast<line_offset>(mainDisplayPageSize.lines - oldMainDisplayPageSize.lines);
     else if (oldMainDisplayPageSize.lines > mainDisplayPageSize.lines)
         _state.viCommands.cursorPosition.line -=
-            boxed_cast<LineOffset>(oldMainDisplayPageSize.lines - mainDisplayPageSize.lines);
+            boxed_cast<line_offset>(oldMainDisplayPageSize.lines - mainDisplayPageSize.lines);
 
     _state.viCommands.cursorPosition = clampToScreen(_state.viCommands.cursorPosition);
 
@@ -1153,15 +1154,15 @@ void Terminal::resizeColumns(ColumnCount newColumnCount, bool clear)
     if (clear)
     {
         // Sets the left, right, top and bottom scrolling margins to their default positions.
-        setTopBottomMargin({}, unbox<LineOffset>(_settings.pageSize.lines) - LineOffset(1));       // DECSTBM
-        setLeftRightMargin({}, unbox<ColumnOffset>(_settings.pageSize.columns) - ColumnOffset(1)); // DECRLM
+        setTopBottomMargin({}, unbox<line_offset>(_settings.pageSize.lines) - line_offset(1)); // DECSTBM
+        setLeftRightMargin({}, unbox<column_offset>(_settings.pageSize.columns) - column_offset(1)); // DECRLM
 
         // Erases all data in page memory
         clearScreen();
     }
 
     // resets vertical split screen mode (DECLRMM) to unavailable
-    setMode(DECMode::LeftRightMargin, false); // DECSLRM
+    setMode(dec_mode::LeftRightMargin, false); // DECSLRM
 
     // Pre-resize in case the event callback right after is not actually resizing the window
     // (e.g. either by choice or because the window manager does not allow that, such as tiling WMs).
@@ -1194,12 +1195,12 @@ void Terminal::verifyState()
 #endif
 }
 
-void Terminal::setCursorDisplay(CursorDisplay display)
+void Terminal::setCursorDisplay(cursor_display display)
 {
     _settings.cursorDisplay = display;
 }
 
-void Terminal::setCursorShape(CursorShape shape)
+void Terminal::setCursorShape(cursor_shape shape)
 {
     _settings.cursorShape = shape;
 }
@@ -1215,12 +1216,12 @@ namespace
     struct SelectionRenderer
     {
         Terminal const& term;
-        ColumnOffset rightPage;
-        ColumnOffset lastColumn {};
+        column_offset rightPage;
+        column_offset lastColumn {};
         string text {};
         string currentLine {};
 
-        void operator()(CellLocation pos, Cell const& cell)
+        void operator()(cell_location pos, Cell const& cell)
         {
             auto const isNewLine = pos.column < lastColumn || (pos.column == lastColumn && !text.empty());
             bool const touchesRightPage = term.isSelected({ pos.line, rightPage });
@@ -1259,14 +1260,15 @@ string Terminal::extractSelectionText() const
 
     if (isPrimaryScreen())
     {
-        auto se = SelectionRenderer<PrimaryScreenCell> { *this, pageSize().columns.as<ColumnOffset>() - 1 };
-        terminal::renderSelection(*_selection, [&](CellLocation pos) { se(pos, _primaryScreen.at(pos)); });
+        auto se = SelectionRenderer<PrimaryScreenCell> { *this, pageSize().columns.as<column_offset>() - 1 };
+        terminal::renderSelection(*_selection, [&](cell_location pos) { se(pos, _primaryScreen.at(pos)); });
         return se.finish();
     }
     else
     {
-        auto se = SelectionRenderer<AlternateScreenCell> { *this, pageSize().columns.as<ColumnOffset>() - 1 };
-        terminal::renderSelection(*_selection, [&](CellLocation pos) { se(pos, _alternateScreen.at(pos)); });
+        auto se =
+            SelectionRenderer<AlternateScreenCell> { *this, pageSize().columns.as<column_offset>() - 1 };
+        terminal::renderSelection(*_selection, [&](cell_location pos) { se(pos, _alternateScreen.at(pos)); });
         return se.finish();
     }
 }
@@ -1277,7 +1279,7 @@ string Terminal::extractLastMarkRange() const
 
     // -1 because we always want to start extracting one line above the cursor by default.
     auto const bottomLine =
-        _currentScreen.get().cursor().position.line + LineOffset(-1) + _settings.copyLastMarkRangeOffset;
+        _currentScreen.get().cursor().position.line + line_offset(-1) + _settings.copyLastMarkRangeOffset;
 
     auto const marker1 = optional { bottomLine };
 
@@ -1317,7 +1319,7 @@ void Terminal::bell()
     _eventListener.bell();
 }
 
-void Terminal::bufferChanged(ScreenType type)
+void Terminal::bufferChanged(screen_type type)
 {
     clearSelection();
     _viewport.forceScrollToBottom();
@@ -1400,7 +1402,7 @@ void Terminal::requestWindowResize(PageSize size)
     _eventListener.requestWindowResize(size.lines, size.columns);
 }
 
-void Terminal::requestWindowResize(ImageSize size)
+void Terminal::requestWindowResize(image_size size)
 {
     _eventListener.requestWindowResize(size.width, size.height);
 }
@@ -1415,7 +1417,7 @@ void Terminal::setBracketedPaste(bool enabled)
     _state.inputGenerator.setBracketedPaste(enabled);
 }
 
-void Terminal::setCursorStyle(CursorDisplay display, CursorShape shape)
+void Terminal::setCursorStyle(cursor_display display, cursor_shape shape)
 {
     _settings.cursorDisplay = display;
     _settings.cursorShape = shape;
@@ -1483,15 +1485,15 @@ void Terminal::useApplicationCursorKeys(bool enable)
     _state.inputGenerator.setCursorKeysMode(keyMode);
 }
 
-void Terminal::setMode(AnsiMode mode, bool enable)
+void Terminal::setMode(ansi_mode mode, bool enable)
 {
     if (!isValidAnsiMode(static_cast<unsigned int>(mode)))
         return;
 
-    if (mode == AnsiMode::KeyboardAction)
+    if (mode == ansi_mode::KeyboardAction)
     {
         if (enable)
-            pushStatusDisplay(StatusDisplayType::Indicator);
+            pushStatusDisplay(status_display_type::Indicator);
         else
             popStatusDisplay();
     }
@@ -1499,26 +1501,26 @@ void Terminal::setMode(AnsiMode mode, bool enable)
     _state.modes.set(mode, enable);
 }
 
-void Terminal::setMode(DECMode mode, bool enable)
+void Terminal::setMode(dec_mode mode, bool enable)
 {
     if (!isValidDECMode(static_cast<unsigned int>(mode)))
         return;
 
     switch (mode)
     {
-        case DECMode::AutoWrap: _currentScreen.get().cursor().autoWrap = enable; break;
-        case DECMode::LeftRightMargin:
+        case dec_mode::AutoWrap: _currentScreen.get().cursor().autoWrap = enable; break;
+        case dec_mode::LeftRightMargin:
             // Resetting DECLRMM also resets the horizontal margins back to screen size.
             if (!enable)
                 currentScreen().margin().horizontal =
-                    Margin::Horizontal { ColumnOffset(0),
-                                         boxed_cast<ColumnOffset>(_settings.pageSize.columns - 1) };
+                    Margin::Horizontal { column_offset(0),
+                                         boxed_cast<column_offset>(_settings.pageSize.columns - 1) };
             break;
-        case DECMode::Origin: _currentScreen.get().cursor().originMode = enable; break;
-        case DECMode::Columns132:
-            if (!isModeEnabled(DECMode::AllowColumns80to132))
+        case dec_mode::Origin: _currentScreen.get().cursor().originMode = enable; break;
+        case dec_mode::Columns132:
+            if (!isModeEnabled(dec_mode::AllowColumns80to132))
                 break;
-            if (enable != isModeEnabled(DECMode::Columns132))
+            if (enable != isModeEnabled(dec_mode::Columns132))
             {
                 auto const clear = enable != isModeEnabled(mode);
 
@@ -1529,33 +1531,33 @@ void Terminal::setMode(DECMode mode, bool enable)
                 resizeColumns(columns, clear);
             }
             break;
-        case DECMode::BatchedRendering:
-            if (_state.modes.enabled(DECMode::BatchedRendering) != enable)
+        case dec_mode::BatchedRendering:
+            if (_state.modes.enabled(dec_mode::BatchedRendering) != enable)
                 synchronizedOutput(enable);
             break;
-        case DECMode::TextReflow:
+        case dec_mode::TextReflow:
             if (_settings.primaryScreen.allowReflowOnResize && isPrimaryScreen())
             {
                 // Enabling reflow enables every line in the main page area.
                 // Disabling reflow only affects currently line and below.
-                auto const startLine = enable ? LineOffset(0) : currentScreen().cursor().position.line;
-                for (auto line = startLine; line < boxed_cast<LineOffset>(_settings.pageSize.lines); ++line)
+                auto const startLine = enable ? line_offset(0) : currentScreen().cursor().position.line;
+                for (auto line = startLine; line < boxed_cast<line_offset>(_settings.pageSize.lines); ++line)
                     _primaryScreen.grid().lineAt(line).setWrappable(enable);
             }
             break;
-        case DECMode::DebugLogging:
+        case dec_mode::DebugLogging:
             // Since this mode (Xterm extension) does not support finer graind control,
             // we'll be just globally enable/disable all debug logging.
             for (auto& category: logstore::get())
                 category.get().enable(enable);
             break;
-        case DECMode::UseAlternateScreen:
+        case dec_mode::UseAlternateScreen:
             if (enable)
-                setScreen(ScreenType::Alternate);
+                setScreen(screen_type::Alternate);
             else
-                setScreen(ScreenType::Primary);
+                setScreen(screen_type::Primary);
             break;
-        case DECMode::UseApplicationCursorKeys:
+        case dec_mode::UseApplicationCursorKeys:
             useApplicationCursorKeys(enable);
             if (isAlternateScreen())
             {
@@ -1565,63 +1567,63 @@ void Terminal::setMode(DECMode mode, bool enable)
                     setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
             }
             break;
-        case DECMode::BracketedPaste: setBracketedPaste(enable); break;
-        case DECMode::MouseSGR:
+        case dec_mode::BracketedPaste: setBracketedPaste(enable); break;
+        case dec_mode::MouseSGR:
             if (enable)
                 setMouseTransport(MouseTransport::SGR);
             else
                 setMouseTransport(MouseTransport::Default);
             break;
-        case DECMode::MouseExtended: setMouseTransport(MouseTransport::Extended); break;
-        case DECMode::MouseURXVT: setMouseTransport(MouseTransport::URXVT); break;
-        case DECMode::MousePassiveTracking:
+        case dec_mode::MouseExtended: setMouseTransport(MouseTransport::Extended); break;
+        case dec_mode::MouseURXVT: setMouseTransport(MouseTransport::URXVT); break;
+        case dec_mode::MousePassiveTracking:
             _state.inputGenerator.setPassiveMouseTracking(enable);
-            setMode(DECMode::MouseSGR, enable);                    // SGR is required.
-            setMode(DECMode::MouseProtocolButtonTracking, enable); // ButtonTracking is default
+            setMode(dec_mode::MouseSGR, enable);                    // SGR is required.
+            setMode(dec_mode::MouseProtocolButtonTracking, enable); // ButtonTracking is default
             break;
-        case DECMode::MouseSGRPixels:
+        case dec_mode::MouseSGRPixels:
             if (enable)
                 setMouseTransport(MouseTransport::SGRPixels);
             else
                 setMouseTransport(MouseTransport::Default);
             break;
-        case DECMode::MouseAlternateScroll:
+        case dec_mode::MouseAlternateScroll:
             if (enable)
                 setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
             else
                 setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
             break;
-        case DECMode::FocusTracking: setGenerateFocusEvents(enable); break;
-        case DECMode::UsePrivateColorRegisters: _state.usePrivateColorRegisters = enable; break;
-        case DECMode::VisibleCursor: setCursorVisibility(enable); break;
-        case DECMode::MouseProtocolX10: setMouseProtocol(MouseProtocol::X10, enable); break;
-        case DECMode::MouseProtocolNormalTracking:
+        case dec_mode::FocusTracking: setGenerateFocusEvents(enable); break;
+        case dec_mode::UsePrivateColorRegisters: _state.usePrivateColorRegisters = enable; break;
+        case dec_mode::VisibleCursor: setCursorVisibility(enable); break;
+        case dec_mode::MouseProtocolX10: setMouseProtocol(MouseProtocol::X10, enable); break;
+        case dec_mode::MouseProtocolNormalTracking:
             setMouseProtocol(MouseProtocol::NormalTracking, enable);
             break;
-        case DECMode::MouseProtocolHighlightTracking:
+        case dec_mode::MouseProtocolHighlightTracking:
             setMouseProtocol(MouseProtocol::HighlightTracking, enable);
             break;
-        case DECMode::MouseProtocolButtonTracking:
+        case dec_mode::MouseProtocolButtonTracking:
             setMouseProtocol(MouseProtocol::ButtonTracking, enable);
             break;
-        case DECMode::MouseProtocolAnyEventTracking:
+        case dec_mode::MouseProtocolAnyEventTracking:
             setMouseProtocol(MouseProtocol::AnyEventTracking, enable);
             break;
-        case DECMode::SaveCursor:
+        case dec_mode::SaveCursor:
             if (enable)
                 _currentScreen.get().saveCursor();
             else
                 _currentScreen.get().restoreCursor();
             break;
-        case DECMode::ExtendedAltScreen:
+        case dec_mode::ExtendedAltScreen:
             if (enable)
             {
-                setMode(DECMode::UseAlternateScreen, true);
+                setMode(dec_mode::UseAlternateScreen, true);
                 clearScreen();
             }
             else
             {
-                setMode(DECMode::UseAlternateScreen, false);
+                setMode(dec_mode::UseAlternateScreen, false);
                 // NB: The cursor position doesn't need to be restored,
                 // because it's local to the screen buffer.
             }
@@ -1632,10 +1634,10 @@ void Terminal::setMode(DECMode mode, bool enable)
     _state.modes.set(mode, enable);
 }
 
-void Terminal::setTopBottomMargin(optional<LineOffset> top, optional<LineOffset> bottom)
+void Terminal::setTopBottomMargin(optional<line_offset> top, optional<line_offset> bottom)
 {
-    auto const defaultTop = LineOffset(0);
-    auto const defaultBottom = boxed_cast<LineOffset>(_settings.pageSize.lines) - 1;
+    auto const defaultTop = line_offset(0);
+    auto const defaultBottom = boxed_cast<line_offset>(_settings.pageSize.lines) - 1;
     auto const sanitizedTop = std::max(defaultTop, top.value_or(defaultTop));
     auto const sanitizedBottom = std::min(defaultBottom, bottom.value_or(defaultBottom));
 
@@ -1646,12 +1648,12 @@ void Terminal::setTopBottomMargin(optional<LineOffset> top, optional<LineOffset>
     }
 }
 
-void Terminal::setLeftRightMargin(optional<ColumnOffset> left, optional<ColumnOffset> right)
+void Terminal::setLeftRightMargin(optional<column_offset> left, optional<column_offset> right)
 {
-    if (isModeEnabled(DECMode::LeftRightMargin))
+    if (isModeEnabled(dec_mode::LeftRightMargin))
     {
-        auto const defaultLeft = ColumnOffset(0);
-        auto const defaultRight = boxed_cast<ColumnOffset>(_settings.pageSize.columns) - 1;
+        auto const defaultLeft = column_offset(0);
+        auto const defaultRight = boxed_cast<column_offset>(_settings.pageSize.columns) - 1;
         auto const sanitizedRight = std::min(right.value_or(defaultRight), defaultRight);
         auto const sanitizedLeft = std::max(left.value_or(defaultLeft), defaultLeft);
         if (left < right)
@@ -1670,7 +1672,7 @@ void Terminal::clearScreen()
         _alternateScreen.clearScreen();
 }
 
-void Terminal::moveCursorTo(LineOffset line, ColumnOffset column)
+void Terminal::moveCursorTo(line_offset line, column_offset column)
 {
     _currentScreen.get().moveCursorTo(line, column);
 }
@@ -1678,24 +1680,25 @@ void Terminal::moveCursorTo(LineOffset line, ColumnOffset column)
 void Terminal::softReset()
 {
     // https://vt100.net/docs/vt510-rm/DECSTR.html
-    setMode(DECMode::BatchedRendering, false);
-    setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
-    setGraphicsRendition(GraphicsRendition::Reset);    // SGR
-    _currentScreen.get().resetSavedCursorState();      // DECSC (Save cursor state)
-    setMode(DECMode::VisibleCursor, true);             // DECTCEM (Text cursor enable)
-    setMode(DECMode::Origin, false);                   // DECOM
-    setMode(AnsiMode::KeyboardAction, false);          // KAM
-    setMode(DECMode::AutoWrap, false);                 // DECAWM
-    setMode(AnsiMode::Insert, false);                  // IRM
-    setMode(DECMode::UseApplicationCursorKeys, false); // DECCKM (Cursor keys)
-    setTopBottomMargin({}, boxed_cast<LineOffset>(_settings.pageSize.lines) - LineOffset(1));       // DECSTBM
-    setLeftRightMargin({}, boxed_cast<ColumnOffset>(_settings.pageSize.columns) - ColumnOffset(1)); // DECRLM
+    setMode(dec_mode::BatchedRendering, false);
+    setMode(dec_mode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
+    setGraphicsRendition(graphics_rendition::Reset);    // SGR
+    _currentScreen.get().resetSavedCursorState();       // DECSC (Save cursor state)
+    setMode(dec_mode::VisibleCursor, true);             // DECTCEM (Text cursor enable)
+    setMode(dec_mode::Origin, false);                   // DECOM
+    setMode(ansi_mode::KeyboardAction, false);          // KAM
+    setMode(dec_mode::AutoWrap, false);                 // DECAWM
+    setMode(ansi_mode::Insert, false);                  // IRM
+    setMode(dec_mode::UseApplicationCursorKeys, false); // DECCKM (Cursor keys)
+    setTopBottomMargin({}, boxed_cast<line_offset>(_settings.pageSize.lines) - line_offset(1)); // DECSTBM
+    setLeftRightMargin({},
+                       boxed_cast<column_offset>(_settings.pageSize.columns) - column_offset(1)); // DECRLM
 
     _currentScreen.get().cursor().hyperlink = {};
     _state.colorPalette = _state.defaultColorPalette;
 
-    setActiveStatusDisplay(ActiveStatusDisplay::Main);
-    setStatusDisplay(StatusDisplayType::None);
+    setActiveStatusDisplay(active_status_display::Main);
+    setStatusDisplay(status_display_type::None);
 
     // TODO: DECNKM (Numeric keypad)
     // TODO: DECSCA (Select character attribute)
@@ -1707,26 +1710,26 @@ void Terminal::softReset()
     // TODO: DECPCTERM (PCTerm mode)
 }
 
-void Terminal::setGraphicsRendition(GraphicsRendition rendition)
+void Terminal::setGraphicsRendition(graphics_rendition rendition)
 {
-    if (rendition == GraphicsRendition::Reset)
+    if (rendition == graphics_rendition::Reset)
         _currentScreen.get().cursor().graphicsRendition = {};
     else
         _currentScreen.get().cursor().graphicsRendition.flags =
             CellUtil::makeCellFlags(rendition, _currentScreen.get().cursor().graphicsRendition.flags);
 }
 
-void Terminal::setForegroundColor(Color color)
+void Terminal::setForegroundColor(color color)
 {
     _currentScreen.get().cursor().graphicsRendition.foregroundColor = color;
 }
 
-void Terminal::setBackgroundColor(Color color)
+void Terminal::setBackgroundColor(color color)
 {
     _currentScreen.get().cursor().graphicsRendition.backgroundColor = color;
 }
 
-void Terminal::setUnderlineColor(Color color)
+void Terminal::setUnderlineColor(color color)
 {
     _currentScreen.get().cursor().graphicsRendition.underlineColor = color;
 }
@@ -1734,17 +1737,17 @@ void Terminal::setUnderlineColor(Color color)
 void Terminal::hardReset()
 {
     // TODO: make use of _factorySettings
-    setScreen(ScreenType::Primary);
+    setScreen(screen_type::Primary);
 
     // Ensure that the alternate screen buffer is having the correct size, as well.
-    applyPageSizeToMainDisplay(ScreenType::Alternate);
+    applyPageSizeToMainDisplay(screen_type::Alternate);
 
     _state.modes = Modes {};
-    setMode(DECMode::AutoWrap, true);
-    setMode(DECMode::Unicode, true);
-    setMode(DECMode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
-    setMode(DECMode::SixelCursorNextToGraphic, true);
-    setMode(DECMode::VisibleCursor, true);
+    setMode(dec_mode::AutoWrap, true);
+    setMode(dec_mode::Unicode, true);
+    setMode(dec_mode::TextReflow, _settings.primaryScreen.allowReflowOnResize);
+    setMode(dec_mode::SixelCursorNextToGraphic, true);
+    setMode(dec_mode::VisibleCursor, true);
 
     _primaryScreen.hardReset();
     _alternateScreen.hardReset();
@@ -1757,26 +1760,26 @@ void Terminal::hardReset()
     _state.colorPalette = _state.defaultColorPalette;
 
     _hostWritableStatusLineScreen.margin() = Margin {
-        Margin::Vertical { {}, boxed_cast<LineOffset>(_hostWritableStatusLineScreen.pageSize().lines) - 1 },
+        Margin::Vertical { {}, boxed_cast<line_offset>(_hostWritableStatusLineScreen.pageSize().lines) - 1 },
         Margin::Horizontal { {},
-                             boxed_cast<ColumnOffset>(_hostWritableStatusLineScreen.pageSize().columns) - 1 }
+                             boxed_cast<column_offset>(_hostWritableStatusLineScreen.pageSize().columns) - 1 }
     };
     _hostWritableStatusLineScreen.verifyState();
 
-    setActiveStatusDisplay(ActiveStatusDisplay::Main);
+    setActiveStatusDisplay(active_status_display::Main);
     _hostWritableStatusLineScreen.clearScreen();
     _hostWritableStatusLineScreen.updateCursorIterator();
 
     auto const mainDisplayPageSize = _settings.pageSize - statusLineHeight();
 
     _primaryScreen.margin() =
-        Margin { Margin::Vertical { {}, boxed_cast<LineOffset>(mainDisplayPageSize.lines) - 1 },
-                 Margin::Horizontal { {}, boxed_cast<ColumnOffset>(mainDisplayPageSize.columns) - 1 } };
+        Margin { Margin::Vertical { {}, boxed_cast<line_offset>(mainDisplayPageSize.lines) - 1 },
+                 Margin::Horizontal { {}, boxed_cast<column_offset>(mainDisplayPageSize.columns) - 1 } };
     _primaryScreen.verifyState();
 
     _alternateScreen.margin() =
-        Margin { Margin::Vertical { {}, boxed_cast<LineOffset>(mainDisplayPageSize.lines) - 1 },
-                 Margin::Horizontal { {}, boxed_cast<ColumnOffset>(mainDisplayPageSize.columns) - 1 } };
+        Margin { Margin::Vertical { {}, boxed_cast<line_offset>(mainDisplayPageSize.lines) - 1 },
+                 Margin::Horizontal { {}, boxed_cast<column_offset>(mainDisplayPageSize.columns) - 1 } };
     alternateScreen().margin() = _primaryScreen.margin();
     // NB: We do *NOT* verify alternate screen, because the page size would probably fail as it is
     // designed to be adjusted when the given screen is activated.
@@ -1798,20 +1801,20 @@ void Terminal::forceRedraw(std::function<void()> const& artificialSleep)
     resizeScreen(totalPageSize, pageSizeInPixels);
 }
 
-void Terminal::setScreen(ScreenType type)
+void Terminal::setScreen(screen_type type)
 {
     if (type == _state.screenType)
         return;
 
     switch (type)
     {
-        case ScreenType::Primary:
+        case screen_type::Primary:
             _currentScreen = _primaryScreen;
             setMouseWheelMode(InputGenerator::MouseWheelMode::Default);
             break;
-        case ScreenType::Alternate:
+        case screen_type::Alternate:
             _currentScreen = _alternateScreen;
-            if (isModeEnabled(DECMode::MouseAlternateScroll))
+            if (isModeEnabled(dec_mode::MouseAlternateScroll))
                 setMouseWheelMode(InputGenerator::MouseWheelMode::ApplicationCursorKeys);
             else
                 setMouseWheelMode(InputGenerator::MouseWheelMode::NormalCursorKeys);
@@ -1831,27 +1834,27 @@ void Terminal::applyPageSizeToCurrentBuffer()
     applyPageSizeToMainDisplay(screenType());
 }
 
-void Terminal::applyPageSizeToMainDisplay(ScreenType screenType)
+void Terminal::applyPageSizeToMainDisplay(screen_type screenType)
 {
     auto const mainDisplayPageSize = _settings.pageSize - statusLineHeight();
 
     // clang-format off
     switch (screenType)
     {
-        case ScreenType::Primary:
+        case screen_type::Primary:
             _primaryScreen.applyPageSizeToMainDisplay(mainDisplayPageSize);
             break;
-        case ScreenType::Alternate:
+        case screen_type::Alternate:
             _alternateScreen.applyPageSizeToMainDisplay(mainDisplayPageSize);
             break;
     }
 
-    (void) _hostWritableStatusLineScreen.grid().resize(PageSize { LineCount(1), _settings.pageSize.columns }, CellLocation {}, false);
-    (void) _indicatorStatusScreen.grid().resize(PageSize { LineCount(1), _settings.pageSize.columns }, CellLocation {}, false);
+    (void) _hostWritableStatusLineScreen.grid().resize(PageSize { LineCount(1), _settings.pageSize.columns }, cell_location {}, false);
+    (void) _indicatorStatusScreen.grid().resize(PageSize { LineCount(1), _settings.pageSize.columns }, cell_location {}, false);
     // clang-format on
 
     // truncating tabs
-    while (!_state.tabs.empty() && _state.tabs.back() >= unbox<ColumnOffset>(_settings.pageSize.columns))
+    while (!_state.tabs.empty() && _state.tabs.back() >= unbox<column_offset>(_settings.pageSize.columns))
         _state.tabs.pop_back();
 
     // verifyState();
@@ -1862,9 +1865,9 @@ void Terminal::discardImage(Image const& image)
     _eventListener.discardImage(image);
 }
 
-void Terminal::markCellDirty(CellLocation position) noexcept
+void Terminal::markCellDirty(cell_location position) noexcept
 {
-    if (_state.activeStatusDisplay != ActiveStatusDisplay::Main)
+    if (_state.activeStatusDisplay != active_status_display::Main)
         return;
 
     if (!_selection)
@@ -1874,9 +1877,9 @@ void Terminal::markCellDirty(CellLocation position) noexcept
         clearSelection();
 }
 
-void Terminal::markRegionDirty(Rect area) noexcept
+void Terminal::markRegionDirty(rect area) noexcept
 {
-    if (_state.activeStatusDisplay != ActiveStatusDisplay::Main)
+    if (_state.activeStatusDisplay != active_status_display::Main)
         return;
 
     if (!_selection)
@@ -1918,15 +1921,15 @@ void Terminal::onBufferScrolled(LineCount n) noexcept
     if (!_selection)
         return;
 
-    auto const top = -boxed_cast<LineOffset>(_primaryScreen.historyLineCount());
+    auto const top = -boxed_cast<line_offset>(_primaryScreen.historyLineCount());
     if (_selection->from().line > top && _selection->to().line > top)
-        _selection->applyScroll(boxed_cast<LineOffset>(n), _primaryScreen.historyLineCount());
+        _selection->applyScroll(boxed_cast<line_offset>(n), _primaryScreen.historyLineCount());
     else
         clearSelection();
 }
 // }}}
 
-void Terminal::setMaxHistoryLineCount(MaxHistoryLineCount maxHistoryLineCount)
+void Terminal::setMaxHistoryLineCount(max_history_line_count maxHistoryLineCount)
 {
     _primaryScreen.grid().setMaxHistoryLineCount(maxHistoryLineCount);
 }
@@ -1936,7 +1939,7 @@ LineCount Terminal::maxHistoryLineCount() const noexcept
     return _primaryScreen.grid().maxHistoryLineCount();
 }
 
-void Terminal::setStatusDisplay(StatusDisplayType statusDisplayType)
+void Terminal::setStatusDisplay(status_display_type statusDisplayType)
 {
     assert(&_currentScreen.get() != &_indicatorStatusScreen);
 
@@ -1945,15 +1948,15 @@ void Terminal::setStatusDisplay(StatusDisplayType statusDisplayType)
 
     markScreenDirty();
 
-    auto const statusLineVisibleBefore = _state.statusDisplayType != StatusDisplayType::None;
-    auto const statusLineVisibleAfter = statusDisplayType != StatusDisplayType::None;
+    auto const statusLineVisibleBefore = _state.statusDisplayType != status_display_type::None;
+    auto const statusLineVisibleAfter = statusDisplayType != status_display_type::None;
     _state.statusDisplayType = statusDisplayType;
 
     if (statusLineVisibleBefore != statusLineVisibleAfter)
         resizeScreenInternal(_settings.pageSize, nullopt);
 }
 
-void Terminal::setActiveStatusDisplay(ActiveStatusDisplay activeDisplay)
+void Terminal::setActiveStatusDisplay(active_status_display activeDisplay)
 {
     if (_state.activeStatusDisplay == activeDisplay)
         return;
@@ -1963,28 +1966,28 @@ void Terminal::setActiveStatusDisplay(ActiveStatusDisplay activeDisplay)
     // clang-format off
     switch (activeDisplay)
     {
-        case ActiveStatusDisplay::Main:
+        case active_status_display::Main:
             switch (_state.screenType)
             {
-                case ScreenType::Primary:
+                case screen_type::Primary:
                     _currentScreen = _primaryScreen;
                     break;
-                case ScreenType::Alternate:
+                case screen_type::Alternate:
                     _currentScreen = _alternateScreen;
                     break;
             }
             break;
-        case ActiveStatusDisplay::StatusLine:
+        case active_status_display::StatusLine:
             _currentScreen = _hostWritableStatusLineScreen;
             break;
-        case ActiveStatusDisplay::IndicatorStatusLine:
+        case active_status_display::IndicatorStatusLine:
             _currentScreen = _indicatorStatusScreen;
             break;
     }
     // clang-format on
 }
 
-void Terminal::pushStatusDisplay(StatusDisplayType type)
+void Terminal::pushStatusDisplay(status_display_type type)
 {
     // Only remember the outermost saved status display type.
     if (!_state.savedStatusDisplayType)
@@ -2004,7 +2007,7 @@ void Terminal::popStatusDisplay()
 
 void Terminal::setAllowInput(bool enabled)
 {
-    setMode(AnsiMode::KeyboardAction, !enabled);
+    setMode(ansi_mode::KeyboardAction, !enabled);
 }
 
 bool Terminal::setNewSearchTerm(std::u32string text, bool initiatedByDoubleClick)
@@ -2018,7 +2021,7 @@ bool Terminal::setNewSearchTerm(std::u32string text, bool initiatedByDoubleClick
     return true;
 }
 
-optional<CellLocation> Terminal::searchReverse(u32string text, CellLocation searchPosition)
+optional<cell_location> Terminal::searchReverse(u32string text, cell_location searchPosition)
 {
     if (!setNewSearchTerm(std::move(text), false))
         return searchPosition;
@@ -2026,9 +2029,9 @@ optional<CellLocation> Terminal::searchReverse(u32string text, CellLocation sear
     return searchReverse(searchPosition);
 }
 
-optional<CellLocation> Terminal::search(std::u32string text,
-                                        CellLocation searchPosition,
-                                        bool initiatedByDoubleClick)
+optional<cell_location> Terminal::search(std::u32string text,
+                                         cell_location searchPosition,
+                                         bool initiatedByDoubleClick)
 {
     if (!setNewSearchTerm(std::move(text), initiatedByDoubleClick))
         return searchPosition;
@@ -2036,7 +2039,7 @@ optional<CellLocation> Terminal::search(std::u32string text,
     return search(searchPosition);
 }
 
-optional<CellLocation> Terminal::search(CellLocation searchPosition)
+optional<cell_location> Terminal::search(cell_location searchPosition)
 {
     auto const searchText = u32string_view(_state.searchMode.pattern);
     auto const matchLocation = currentScreen().search(searchText, searchPosition);
@@ -2054,10 +2057,10 @@ void Terminal::clearSearch()
     _state.searchMode.initiatedByDoubleClick = false;
 }
 
-bool Terminal::wordDelimited(CellLocation position) const noexcept
+bool Terminal::wordDelimited(cell_location position) const noexcept
 {
     // Word selection may be off by one
-    position.column = std::min(position.column, boxed_cast<ColumnOffset>(pageSize().columns - 1));
+    position.column = std::min(position.column, boxed_cast<column_offset>(pageSize().columns - 1));
 
     if (isPrimaryScreen())
         return _primaryScreen.grid().cellEmptyOrContainsOneOf(position, _settings.wordDelimiters);
@@ -2065,8 +2068,8 @@ bool Terminal::wordDelimited(CellLocation position) const noexcept
         return _alternateScreen.grid().cellEmptyOrContainsOneOf(position, _settings.wordDelimiters);
 }
 
-std::tuple<std::u32string, CellLocationRange> Terminal::extractWordUnderCursor(
-    CellLocation position) const noexcept
+std::tuple<std::u32string, cell_location_range> Terminal::extractWordUnderCursor(
+    cell_location position) const noexcept
 {
     if (isPrimaryScreen())
     {
@@ -2082,7 +2085,7 @@ std::tuple<std::u32string, CellLocationRange> Terminal::extractWordUnderCursor(
     }
 }
 
-optional<CellLocation> Terminal::searchReverse(CellLocation searchPosition)
+optional<cell_location> Terminal::searchReverse(cell_location searchPosition)
 {
     auto const searchText = u32string_view(_state.searchMode.pattern);
     auto const matchLocation = currentScreen().searchReverse(searchText, searchPosition);
@@ -2094,7 +2097,7 @@ optional<CellLocation> Terminal::searchReverse(CellLocation searchPosition)
     return matchLocation;
 }
 
-bool Terminal::isHighlighted(CellLocation cell) const noexcept // NOLINT(bugprone-exception-escape)
+bool Terminal::isHighlighted(cell_location cell) const noexcept // NOLINT(bugprone-exception-escape)
 {
     return _highlightRange.has_value()
            && std::visit(
@@ -2117,7 +2120,7 @@ bool Terminal::isHighlighted(CellLocation cell) const noexcept // NOLINT(bugpron
 
 void Terminal::onSelectionUpdated()
 {
-    if (!isModeEnabled(DECMode::ReportGridCellSelection))
+    if (!isModeEnabled(dec_mode::ReportGridCellSelection))
         return;
 
     if (!_selection)
@@ -2129,10 +2132,10 @@ void Terminal::onSelectionUpdated()
         auto const& selection = *_selection;
 
         auto const to = selection.to();
-        if (to.line < LineOffset(0))
+        if (to.line < line_offset(0))
             return;
 
-        auto const from = raiseToMinimum(selection.from(), LineOffset(0));
+        auto const from = raiseToMinimum(selection.from(), line_offset(0));
         reply("\033[>{};{};{};{};{}M",
               makeSelectionTypeId(selection),
               from.line + 1,

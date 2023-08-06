@@ -33,8 +33,8 @@ namespace terminal::rasterizer
 struct ImageFragmentKey
 {
     ImageId imageId;
-    CellLocation offset;
-    ImageSize size;
+    cell_location offset;
+    image_size size;
 
     bool operator==(ImageFragmentKey const& b) const noexcept
     {
@@ -55,13 +55,13 @@ struct ImageFragmentKey
 class ImageRenderer: public Renderable, public TextRendererEvents
 {
   public:
-    ImageRenderer(GridMetrics const& gridMetrics, ImageSize cellSize);
+    ImageRenderer(GridMetrics const& gridMetrics, image_size cellSize);
 
     void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
     void clearCache() override;
 
     /// Reconfigures the slicing properties of existing images.
-    void setCellSize(ImageSize cellSize);
+    void setCellSize(image_size cellSize);
 
     void renderImage(crispy::Point pos, ImageFragment const& fragment);
 
@@ -83,7 +83,7 @@ class ImageRenderer: public Renderable, public TextRendererEvents
 
     // private data
     //
-    ImageSize _cellSize;
+    image_size _cellSize;
 };
 
 } // namespace terminal::rasterizer

@@ -164,9 +164,9 @@ void spawnNewTerminal(std::string const& _programPath,
 
 terminal::FontDef getFontDefinition(terminal::rasterizer::Renderer& _renderer);
 
-terminal::rasterizer::PageMargin computeMargin(terminal::ImageSize _cellSize,
+terminal::rasterizer::PageMargin computeMargin(terminal::image_size _cellSize,
                                                terminal::PageSize _charCells,
-                                               terminal::ImageSize _pixels) noexcept;
+                                               terminal::image_size _pixels) noexcept;
 
 terminal::rasterizer::FontDescriptions sanitizeFontDescription(terminal::rasterizer::FontDescriptions _fonts,
                                                                text::DPI _screenDPI);
@@ -178,13 +178,13 @@ constexpr terminal::PageSize pageSizeForPixels(crispy::ImageSize viewSize,
                                 boxed_cast<terminal::ColumnCount>((viewSize / cellSize).width) };
 }
 
-void applyResize(terminal::ImageSize _newPixelSize,
+void applyResize(terminal::image_size _newPixelSize,
                  TerminalSession& _session,
                  terminal::rasterizer::Renderer& _renderer);
 
-bool applyFontDescription(terminal::ImageSize _cellSize,
+bool applyFontDescription(terminal::image_size _cellSize,
                           terminal::PageSize _pageSize,
-                          terminal::ImageSize _pixelSize,
+                          terminal::image_size _pixelSize,
                           text::DPI _dpi,
                           terminal::rasterizer::Renderer& _renderer,
                           terminal::rasterizer::FontDescriptions _fontDescriptions);

@@ -171,7 +171,7 @@ class Line
      * @p sgr graphics rendition for the line starting at @c start until the end
      * @p ascii the US-ASCII characters to fill with
      */
-    void fill(ColumnOffset start, GraphicsAttributes const& sgr, std::string_view ascii)
+    void fill(column_offset start, GraphicsAttributes const& sgr, std::string_view ascii)
     {
         auto& buffer = inflatedBuffer();
 
@@ -204,7 +204,7 @@ class Line
 
     [[nodiscard]] gsl::span<Cell const> cells() const noexcept { return inflatedBuffer(); }
 
-    [[nodiscard]] gsl::span<Cell> useRange(ColumnOffset start, ColumnCount count) noexcept
+    [[nodiscard]] gsl::span<Cell> useRange(column_offset start, ColumnCount count) noexcept
     {
 #if defined(__clang__) && __clang_major__ <= 11
         auto const bufferSpan = gsl::span(inflatedBuffer());
@@ -215,26 +215,26 @@ class Line
 #endif
     }
 
-    [[nodiscard]] Cell& useCellAt(ColumnOffset column) noexcept
+    [[nodiscard]] Cell& useCellAt(column_offset column) noexcept
     {
-        Require(ColumnOffset(0) <= column);
-        Require(column <= ColumnOffset::cast_from(size())); // Allow off-by-one for sentinel.
+        Require(column_offset(0) <= column);
+        Require(column <= column_offset::cast_from(size())); // Allow off-by-one for sentinel.
         return inflatedBuffer()[unbox<size_t>(column)];
     }
 
-    [[nodiscard]] uint8_t cellEmptyAt(ColumnOffset column) const noexcept
+    [[nodiscard]] uint8_t cellEmptyAt(column_offset column) const noexcept
     {
         if (isTrivialBuffer())
         {
-            Require(ColumnOffset(0) <= column);
-            Require(column < ColumnOffset::cast_from(size()));
+            Require(column_offset(0) <= column);
+            Require(column < column_offset::cast_from(size()));
             return unbox<size_t>(column) >= trivialBuffer().text.size()
                    || trivialBuffer().text[column.as<size_t>()] == 0x20;
         }
         return inflatedBuffer().at(unbox<size_t>(column)).empty();
     }
 
-    [[nodiscard]] uint8_t cellWidthAt(ColumnOffset column) const noexcept
+    [[nodiscard]] uint8_t cellWidthAt(column_offset column) const noexcept
     {
 #if 0 // TODO: This optimization - but only when we return actual widths and not always 1.
         if (isTrivialBuffer())
@@ -320,7 +320,7 @@ class Line
     void setBuffer(Storage buffer) noexcept { _storage = std::move(buffer); }
 
     // Tests if the given text can be matched in this line at the exact given start column.
-    [[nodiscard]] bool matchTextAt(std::u32string_view text, ColumnOffset startColumn) const noexcept
+    [[nodiscard]] bool matchTextAt(std::u32string_view text, column_offset startColumn) const noexcept
     {
         if (isTrivialBuffer())
         {
@@ -328,7 +328,7 @@ class Line
             TrivialBuffer const& buffer = trivialBuffer();
             if (!buffer.usedColumns)
                 return false;
-            auto const column = std::min(startColumn, boxed_cast<ColumnOffset>(buffer.usedColumns - 1));
+            auto const column = std::min(startColumn, boxed_cast<column_offset>(buffer.usedColumns - 1));
             if (text.size() > static_cast<size_t>(column.value - buffer.usedColumns.value))
                 return false;
             auto const resultIndex = buffer.text.view()
@@ -358,8 +358,8 @@ class Line
     // start of match and partialMatchLength is set to 0, since it's a full match but if a partial
     // match is found at the right end of line it returns startColumn as it is and the partialMatchLength
     // is set equal to match found at the left end of line.
-    [[nodiscard]] std::optional<SearchResult> search(std::u32string_view text,
-                                                     ColumnOffset startColumn) const noexcept
+    [[nodiscard]] std::optional<search_result> search(std::u32string_view text,
+                                                      column_offset startColumn) const noexcept
     {
         if (isTrivialBuffer())
         {
@@ -367,10 +367,10 @@ class Line
             TrivialBuffer const& buffer = trivialBuffer();
             if (!buffer.usedColumns)
                 return std::nullopt;
-            auto const column = std::min(startColumn, boxed_cast<ColumnOffset>(buffer.usedColumns - 1));
+            auto const column = std::min(startColumn, boxed_cast<column_offset>(buffer.usedColumns - 1));
             auto const resultIndex = buffer.text.view().find(std::string_view(u8Text), unbox<size_t>(column));
             if (resultIndex != std::string_view::npos)
-                return SearchResult { ColumnOffset::cast_from(resultIndex) };
+                return search_result { column_offset::cast_from(resultIndex) };
             else
                 return std::nullopt; // Not found, so stay with initial column as result.
         }
@@ -381,17 +381,17 @@ class Line
                 return std::nullopt; // not found: line is smaller than search term
 
             auto baseColumn = startColumn;
-            auto rightMostSearchPosition = ColumnOffset::cast_from(buffer.size());
+            auto rightMostSearchPosition = column_offset::cast_from(buffer.size());
             while (baseColumn < rightMostSearchPosition)
             {
                 if (buffer.size() - unbox<size_t>(baseColumn) < text.size())
                 {
                     text.remove_suffix(text.size() - (unbox<size_t>(size()) - unbox<size_t>(baseColumn)));
                     if (matchTextAt(text, baseColumn))
-                        return SearchResult { startColumn, text.size() };
+                        return search_result { startColumn, text.size() };
                 }
                 else if (matchTextAt(text, baseColumn))
-                    return SearchResult { baseColumn };
+                    return search_result { baseColumn };
                 baseColumn++;
             }
 
@@ -403,8 +403,8 @@ class Line
     // start of match and  partialMatchLength is set to 0, since it's a full match but if a partial
     // match is found at the left end of line it returns startColumn as it is and the partialMatchLength
     // is set equal to match found at the left end of line.
-    [[nodiscard]] std::optional<SearchResult> searchReverse(std::u32string_view text,
-                                                            ColumnOffset startColumn) const noexcept
+    [[nodiscard]] std::optional<search_result> searchReverse(std::u32string_view text,
+                                                             column_offset startColumn) const noexcept
     {
         if (isTrivialBuffer())
         {
@@ -412,11 +412,11 @@ class Line
             TrivialBuffer const& buffer = trivialBuffer();
             if (!buffer.usedColumns)
                 return std::nullopt;
-            auto const column = std::min(startColumn, boxed_cast<ColumnOffset>(buffer.usedColumns - 1));
+            auto const column = std::min(startColumn, boxed_cast<column_offset>(buffer.usedColumns - 1));
             auto const resultIndex =
                 buffer.text.view().rfind(std::string_view(u8Text), unbox<size_t>(column));
             if (resultIndex != std::string_view::npos)
-                return SearchResult { ColumnOffset::cast_from(resultIndex) };
+                return search_result { column_offset::cast_from(resultIndex) };
             else
                 return std::nullopt; // Not found, so stay with initial column as result.
         }
@@ -427,18 +427,18 @@ class Line
                 return std::nullopt; // not found: line is smaller than search term
 
             // reverse search from right@column to left until match is complete.
-            auto baseColumn = std::min(startColumn, ColumnOffset::cast_from(buffer.size() - text.size()));
-            while (baseColumn >= ColumnOffset(0))
+            auto baseColumn = std::min(startColumn, column_offset::cast_from(buffer.size() - text.size()));
+            while (baseColumn >= column_offset(0))
             {
                 if (matchTextAt(text, baseColumn))
-                    return SearchResult { baseColumn };
+                    return search_result { baseColumn };
                 baseColumn--;
             }
-            baseColumn = ColumnOffset::cast_from(text.size() - 1);
+            baseColumn = column_offset::cast_from(text.size() - 1);
             while (!text.empty())
             {
-                if (matchTextAt(text, ColumnOffset(0)))
-                    return SearchResult { startColumn, text.size() };
+                if (matchTextAt(text, column_offset(0)))
+                    return search_result { startColumn, text.size() };
                 baseColumn--;
                 text.remove_prefix(1);
             }

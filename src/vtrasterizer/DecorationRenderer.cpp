@@ -25,6 +25,8 @@
 #include <optional>
 #include <utility>
 
+#include "vtbackend/primitives.h"
+
 using crispy::each_element;
 using crispy::Size;
 
@@ -47,15 +49,15 @@ namespace terminal::rasterizer
 namespace
 {
     auto constexpr CellFlagDecorationMappings = array {
-        pair { CellFlags::Underline, Decorator::Underline },
-        pair { CellFlags::DoublyUnderlined, Decorator::DoubleUnderline },
-        pair { CellFlags::CurlyUnderlined, Decorator::CurlyUnderline },
-        pair { CellFlags::DottedUnderline, Decorator::DottedUnderline },
-        pair { CellFlags::DashedUnderline, Decorator::DashedUnderline },
-        pair { CellFlags::Overline, Decorator::Overline },
-        pair { CellFlags::CrossedOut, Decorator::CrossedOut },
-        pair { CellFlags::Framed, Decorator::Framed },
-        pair { CellFlags::Encircled, Decorator::Encircle },
+        pair { cell_flags::Underline, Decorator::Underline },
+        pair { cell_flags::DoublyUnderlined, Decorator::DoubleUnderline },
+        pair { cell_flags::CurlyUnderlined, Decorator::CurlyUnderline },
+        pair { cell_flags::DottedUnderline, Decorator::DottedUnderline },
+        pair { cell_flags::DashedUnderline, Decorator::DashedUnderline },
+        pair { cell_flags::Overline, Decorator::Overline },
+        pair { cell_flags::CrossedOut, Decorator::CrossedOut },
+        pair { cell_flags::Framed, Decorator::Framed },
+        pair { cell_flags::Encircled, Decorator::Encircle },
     };
 }
 
@@ -108,7 +110,7 @@ void DecorationRenderer::renderLine(RenderLine const& line)
     for (auto const& mapping: CellFlagDecorationMappings)
         if (line.textAttributes.flags & mapping.first)
             renderDecoration(mapping.second,
-                             _gridMetrics.mapBottomLeft(CellLocation { line.lineOffset }),
+                             _gridMetrics.mapBottomLeft(cell_location { line.lineOffset }),
                              line.usedColumns,
                              line.textAttributes.decorationColor);
 }
@@ -134,7 +136,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
     tileData.metadata.x = {};
     tileData.metadata.y = {};
 
-    auto const create = [this, tileLocation](ImageSize bitmapSize,
+    auto const create = [this, tileLocation](image_size bitmapSize,
                                              auto createBitmap) -> TextureAtlas::TileCreateData {
         return createTileData(tileLocation,
                               createBitmap(),
@@ -154,13 +156,13 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             auto const thickness_half = max(1u, unsigned(ceil(underlineThickness() / 2.0)));
             auto const thickness = thickness_half * 2;
             auto const y0 = max(0, (underlinePosition() - static_cast<int>(thickness_half)));
-            auto const height = Height(y0 + thickness);
-            auto const imageSize = ImageSize { width, height };
+            auto const heightValue = height(y0 + thickness);
+            auto const imageSize = image_size { width, heightValue };
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(imageSize.area(), 0);
                 for (unsigned y = 1; y <= thickness; ++y)
                     for (unsigned x = 0; x < unbox<unsigned>(width); ++x)
-                        image[(*height - y0 - y) * *width + x] = 0xFF;
+                        image[(*heightValue - y0 - y) * *width + x] = 0xFF;
                 return image;
             });
         }
@@ -169,28 +171,28 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             auto const y1 = max(0u, underlinePosition() + thickness);
             // y1 - 3 thickness can be negative
             auto const y0 = max(0, static_cast<int>(y1) - 3 * static_cast<int>(thickness));
-            auto const height = Height(y1 + thickness);
-            auto const imageSize = ImageSize { width, height };
+            auto const heightValue = height(y1 + thickness);
+            auto const imageSize = image_size { width, heightValue };
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(imageSize.area(), 0);
                 for (unsigned y = 1; y <= thickness; ++y)
                 {
                     for (unsigned x = 0; x < unbox<unsigned>(width); ++x)
                     {
-                        image[(*height - y1 - y) * *width + x] = 0xFF; // top line
-                        image[(*height - y0 - y) * *width + x] = 0xFF; // bottom line
+                        image[(*heightValue - y1 - y) * *width + x] = 0xFF; // top line
+                        image[(*heightValue - y0 - y) * *width + x] = 0xFF; // bottom line
                     }
                 }
                 return image;
             });
         }
         case Decorator::CurlyUnderline: {
-            auto const height = Height::cast_from(_gridMetrics.baseline);
+            auto const height = height::cast_from(_gridMetrics.baseline);
             auto const h2 = max(unbox<int>(height) / 2, 1);
             auto const yScalar = h2 - 1;
             auto const xScalar = 2 * M_PI / *width;
             auto const yBase = h2;
-            auto const imageSize = ImageSize { width, height };
+            auto const imageSize = image_size { width, height };
             auto block = blockElement(imageSize);
             return create(block.downsampledSize, [&]() -> atlas::Buffer {
                 auto const thickness_half = max(1, int(ceil(underlineThickness() / 2.0)));
@@ -213,11 +215,11 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
         case Decorator::DottedUnderline: {
             auto const dotHeight = (unsigned) _gridMetrics.underline.thickness;
             auto const dotWidth = dotHeight;
-            auto const height = Height::cast_from((unsigned) _gridMetrics.underline.position + dotHeight);
+            auto const height = height::cast_from((unsigned) _gridMetrics.underline.position + dotHeight);
             auto const y0 = (unsigned) _gridMetrics.underline.position - dotHeight;
             auto const x0 = 0u;
             auto const x1 = unbox<unsigned>(width) / 2;
-            auto block = blockElement(ImageSize { width, height });
+            auto block = blockElement(image_size { width, height });
             return create(block.downsampledSize, [&]() -> atlas::Buffer {
                 for (unsigned y = 0; y < dotHeight; ++y)
                 {
@@ -236,21 +238,21 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             auto const thickness_half = max(1u, unsigned(ceil(underlineThickness() / 2.0)));
             auto const thickness = max(1u, thickness_half * 2);
             auto const y0 = max(0, underlinePosition() - static_cast<int>(thickness_half));
-            auto const height = Height(y0 + thickness);
-            auto const imageSize = ImageSize { width, height };
+            auto const heightValue = height(y0 + thickness);
+            auto const imageSize = image_size { width, heightValue };
             return create(imageSize, [&]() -> atlas::Buffer {
-                auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
+                auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(heightValue), 0);
                 for (unsigned y = 1; y <= thickness; ++y)
                     for (unsigned x = 0; x < unbox<unsigned>(width); ++x)
                         if (fabsf(float(x) / float(*width) - 0.5f) >= 0.25f)
-                            image[(*height - y0 - y) * *width + x] = 0xFF;
+                            image[(*heightValue - y0 - y) * *width + x] = 0xFF;
                 return image;
             });
         }
         case Decorator::Framed: {
             auto const cellHeight = _gridMetrics.cellSize.height;
             auto const thickness = max(1u, unsigned(underlineThickness()) / 2);
-            auto const imageSize = ImageSize { width, cellHeight };
+            auto const imageSize = image_size { width, cellHeight };
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(cellHeight), 0);
                 auto const gap = 0; // thickness;
@@ -275,7 +277,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
         case Decorator::Overline: {
             auto const cellHeight = _gridMetrics.cellSize.height;
             auto const thickness = (unsigned) underlineThickness();
-            auto const imageSize = ImageSize { width, cellHeight };
+            auto const imageSize = image_size { width, cellHeight };
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(cellHeight), 0);
                 for (unsigned y = 0; y < thickness; ++y)
@@ -285,11 +287,11 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             });
         }
         case Decorator::CrossedOut: {
-            auto const height = Height(*_gridMetrics.cellSize.height / 2);
+            auto const heightValue = height(*_gridMetrics.cellSize.height / 2);
             auto const thickness = (unsigned) underlineThickness();
-            auto const imageSize = ImageSize { width, height };
+            auto const imageSize = image_size { width, heightValue };
             return create(imageSize, [&]() -> atlas::Buffer {
-                auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
+                auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(heightValue), 0);
                 for (unsigned y = 1; y <= thickness; ++y)
                     for (unsigned x = 0; x < unbox<unsigned>(width); ++x)
                         image[y * *width + x] = 0xFF;
@@ -304,7 +306,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
 void DecorationRenderer::renderDecoration(Decorator decoration,
                                           crispy::Point pos,
                                           ColumnCount columnCount,
-                                          RGBColor const& color)
+                                          rgb_color const& color)
 {
     for (auto i = ColumnCount(0); i < columnCount; ++i)
     {

@@ -40,6 +40,8 @@
 #include <type_traits>
 #include <variant>
 
+#include "vtbackend/Color.h"
+#include "vtbackend/primitives.h"
 #include <libunicode/convert.h>
 #include <libunicode/emoji_segmenter.h>
 #include <libunicode/grapheme_segmenter.h>
@@ -184,22 +186,22 @@ namespace // {{{ helper
 
         // TODO: sgr.styles;
         auto constexpr masks = array {
-            pair { CellFlags::Bold, "1"sv },
-            pair { CellFlags::Faint, "2"sv },
-            pair { CellFlags::Italic, "3"sv },
-            pair { CellFlags::Underline, "4"sv },
-            pair { CellFlags::Blinking, "5"sv },
-            pair { CellFlags::RapidBlinking, "6"sv },
-            pair { CellFlags::Inverse, "7"sv },
-            pair { CellFlags::Hidden, "8"sv },
-            pair { CellFlags::CrossedOut, "9"sv },
-            pair { CellFlags::DoublyUnderlined, "4:2"sv },
-            pair { CellFlags::CurlyUnderlined, "4:3"sv },
-            pair { CellFlags::DottedUnderline, "4:4"sv },
-            pair { CellFlags::DashedUnderline, "4:5"sv },
-            pair { CellFlags::Framed, "51"sv },
-            // TODO(impl or completely remove): pair{CellFlags::Encircled, ""sv},
-            pair { CellFlags::Overline, "53"sv },
+            pair { cell_flags::Bold, "1"sv },
+            pair { cell_flags::Faint, "2"sv },
+            pair { cell_flags::Italic, "3"sv },
+            pair { cell_flags::Underline, "4"sv },
+            pair { cell_flags::Blinking, "5"sv },
+            pair { cell_flags::RapidBlinking, "6"sv },
+            pair { cell_flags::Inverse, "7"sv },
+            pair { cell_flags::Hidden, "8"sv },
+            pair { cell_flags::CrossedOut, "9"sv },
+            pair { cell_flags::DoublyUnderlined, "4:2"sv },
+            pair { cell_flags::CurlyUnderlined, "4:3"sv },
+            pair { cell_flags::DottedUnderline, "4:4"sv },
+            pair { cell_flags::DashedUnderline, "4:5"sv },
+            pair { cell_flags::Framed, "51"sv },
+            // TODO(impl or completely remove): pair{cell_flags::Encircled, ""sv},
+            pair { cell_flags::Overline, "53"sv },
         };
 
         for (auto const& mask: masks)
@@ -248,7 +250,7 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 Screen<Cell>::Screen(Terminal& terminal,
                      PageSize pageSize,
                      bool reflowOnResize,
-                     MaxHistoryLineCount maxHistoryLineCount):
+                     max_history_line_count maxHistoryLineCount):
     _terminal { terminal },
     _settings { terminal.settings() },
     _state { terminal.state() },
@@ -259,7 +261,7 @@ Screen<Cell>::Screen(Terminal& terminal,
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-unsigned Screen<Cell>::numericCapability(capabilities::Code cap) const
+unsigned Screen<Cell>::numericCapability(capabilities::code cap) const
 {
     using namespace capabilities::literals;
 
@@ -268,7 +270,7 @@ unsigned Screen<Cell>::numericCapability(capabilities::Code cap) const
         case "li"_tcap: return unbox<unsigned>(_settings.pageSize.lines);
         case "co"_tcap: return unbox<unsigned>(_settings.pageSize.columns);
         case "it"_tcap: return unbox<unsigned>(TabWidth);
-        default: return StaticDatabase::numericCapability(cap);
+        default: return static_database::numericCapability(cap);
     }
 }
 
@@ -322,12 +324,12 @@ void Screen<Cell>::applyPageSizeToMainDisplay(PageSize mainDisplayPageSize)
     cursorPosition = clampCoordinate(cursorPosition);
 
     auto const margin =
-        Margin { Margin::Vertical { {}, mainDisplayPageSize.lines.as<LineOffset>() - 1 },
-                 Margin::Horizontal { {}, mainDisplayPageSize.columns.as<ColumnOffset>() - 1 } };
+        Margin { Margin::Vertical { {}, mainDisplayPageSize.lines.as<line_offset>() - 1 },
+                 Margin::Horizontal { {}, mainDisplayPageSize.columns.as<column_offset>() - 1 } };
 
     _grid.margin() = margin;
 
-    if (_cursor.position.column < boxed_cast<ColumnOffset>(mainDisplayPageSize.columns))
+    if (_cursor.position.column < boxed_cast<column_offset>(mainDisplayPageSize.columns))
         _cursor.wrapPending = false;
 
     // update (last-)cursor position
@@ -363,7 +365,7 @@ string_view Screen<Cell>::tryEmplaceChars(string_view chars, size_t cellCount) n
     auto const columnsAvailable = pageSize().columns.value - _cursor.position.column.value;
     assert(cellCount <= static_cast<size_t>(columnsAvailable));
 
-    if (!_terminal.isModeEnabled(DECMode::AutoWrap) && cellCount > static_cast<size_t>(columnsAvailable))
+    if (!_terminal.isModeEnabled(dec_mode::AutoWrap) && cellCount > static_cast<size_t>(columnsAvailable))
         // With AutoWrap on, we can only emplace if it fits the line.
         return chars;
 
@@ -566,7 +568,7 @@ void Screen<Cell>::clearAndAdvance(int offset) noexcept
         return;
 
     bool const cursorInsideMargin =
-        _terminal.isModeEnabled(DECMode::LeftRightMargin) && isCursorInsideMargins();
+        _terminal.isModeEnabled(dec_mode::LeftRightMargin) && isCursorInsideMargins();
     auto const cellsAvailable = cursorInsideMargin
                                     ? *(margin().horizontal.to - _cursor.position.column) - 1
                                     : *_settings.pageSize.columns - *_cursor.position.column - 1;
@@ -590,16 +592,16 @@ void Screen<Cell>::clearAndAdvance(int offset) noexcept
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-std::string Screen<Cell>::screenshot(function<string(LineOffset)> const& postLine) const
+std::string Screen<Cell>::screenshot(function<string(line_offset)> const& postLine) const
 {
     auto result = std::stringstream {};
     auto writer = VTWriter(result);
 
     for (int const line: ::ranges::views::iota(0, *_settings.pageSize.lines))
     {
-        writer.write(_grid.lineAt(LineOffset(line)));
+        writer.write(_grid.lineAt(line_offset(line)));
         if (postLine)
-            writer.write(postLine(LineOffset(line)));
+            writer.write(postLine(line_offset(line)));
         writer.crlf();
     }
 
@@ -608,17 +610,17 @@ std::string Screen<Cell>::screenshot(function<string(LineOffset)> const& postLin
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-optional<LineOffset> Screen<Cell>::findMarkerUpwards(LineOffset startLine) const
+optional<line_offset> Screen<Cell>::findMarkerUpwards(line_offset startLine) const
 {
     // XXX startLine is an absolute history line coordinate
-    if (_state.screenType != ScreenType::Primary)
+    if (_state.screenType != screen_type::Primary)
         return nullopt;
     if (*startLine <= -*historyLineCount())
         return nullopt;
 
-    startLine = min(startLine, boxed_cast<LineOffset>(_settings.pageSize.lines - 1));
+    startLine = min(startLine, boxed_cast<line_offset>(_settings.pageSize.lines - 1));
 
-    for (LineOffset i = startLine - 1; i >= -boxed_cast<LineOffset>(historyLineCount()); --i)
+    for (line_offset i = startLine - 1; i >= -boxed_cast<line_offset>(historyLineCount()); --i)
         if (_grid.lineAt(i).marked())
             return { i };
 
@@ -627,18 +629,18 @@ optional<LineOffset> Screen<Cell>::findMarkerUpwards(LineOffset startLine) const
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-optional<LineOffset> Screen<Cell>::findMarkerDownwards(LineOffset startLine) const
+optional<line_offset> Screen<Cell>::findMarkerDownwards(line_offset startLine) const
 {
-    if (_state.screenType != ScreenType::Primary)
+    if (_state.screenType != screen_type::Primary)
         return nullopt;
 
     auto const top = std::clamp(startLine,
-                                -boxed_cast<LineOffset>(historyLineCount()),
-                                +boxed_cast<LineOffset>(_settings.pageSize.lines) - 1);
+                                -boxed_cast<line_offset>(historyLineCount()),
+                                +boxed_cast<line_offset>(_settings.pageSize.lines) - 1);
 
-    auto const bottom = LineOffset(0);
+    auto const bottom = line_offset(0);
 
-    for (LineOffset i = top + 1; i <= bottom; ++i)
+    for (line_offset i = top + 1; i <= bottom; ++i)
         if (_grid.lineAt(i).marked())
             return { i };
 
@@ -659,9 +661,9 @@ void Screen<Cell>::clearTabUnderCursor()
 {
     // populate tabs vector in case of default tab width is used (until now).
     if (_state.tabs.empty() && *TabWidth != 0)
-        for (auto column = boxed_cast<ColumnOffset>(TabWidth);
-             column < boxed_cast<ColumnOffset>(_settings.pageSize.columns);
-             column += boxed_cast<ColumnOffset>(TabWidth))
+        for (auto column = boxed_cast<column_offset>(TabWidth);
+             column < boxed_cast<column_offset>(_settings.pageSize.columns);
+             column += boxed_cast<column_offset>(TabWidth))
             _state.tabs.emplace_back(column - 1);
 
     // erase the specific tab underneath
@@ -687,7 +689,7 @@ void Screen<Cell>::setTabUnderCursor()
 // {{{ others
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::moveCursorTo(LineOffset line, ColumnOffset column)
+void Screen<Cell>::moveCursorTo(line_offset line, column_offset column)
 {
     auto const [originAppliedLine, originAppliedColumn] = [&]() {
         if (!_cursor.originMode)
@@ -703,7 +705,7 @@ void Screen<Cell>::moveCursorTo(LineOffset line, ColumnOffset column)
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::linefeed(ColumnOffset newColumn)
+void Screen<Cell>::linefeed(column_offset newColumn)
 {
     _cursor.wrapPending = false;
     _cursor.position.column = newColumn;
@@ -749,10 +751,10 @@ void Screen<Cell>::scrollDown(LineCount n, Margin margin)
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::setCurrentColumn(ColumnOffset n)
+void Screen<Cell>::setCurrentColumn(column_offset n)
 {
     auto const col = _cursor.originMode ? margin().horizontal.from + n : n;
-    auto const clampedCol = min(col, boxed_cast<ColumnOffset>(_settings.pageSize.columns) - 1);
+    auto const clampedCol = min(col, boxed_cast<column_offset>(_settings.pageSize.columns) - 1);
     _cursor.wrapPending = false;
     _cursor.position.column = clampedCol;
 }
@@ -772,7 +774,7 @@ void Screen<Cell>::linefeed()
 {
     // If coming through stdout-fastpipe, the LF acts like CRLF.
     auto const newColumnOffset =
-        _state.usingStdoutFastPipe || _terminal.isModeEnabled(AnsiMode::AutomaticNewLine)
+        _state.usingStdoutFastPipe || _terminal.isModeEnabled(ansi_mode::AutomaticNewLine)
             ? margin().horizontal.from
             : _cursor.position.column;
     linefeed(newColumnOffset);
@@ -884,7 +886,7 @@ void Screen<Cell>::clearToEndOfScreen()
     for (auto const lineOffset:
          ::ranges::views::iota(unbox<int>(_cursor.position.line) + 1, unbox<int>(_settings.pageSize.lines)))
     {
-        Line<Cell>& line = _grid.lineAt(LineOffset::cast_from(lineOffset));
+        Line<Cell>& line = _grid.lineAt(line_offset::cast_from(lineOffset));
         line.reset(_grid.defaultLineFlags(), _cursor.graphicsRendition);
     }
 }
@@ -897,7 +899,7 @@ void Screen<Cell>::clearToBeginOfScreen()
 
     for (auto const lineOffset: ::ranges::views::iota(0, *_cursor.position.line))
     {
-        Line<Cell>& line = _grid.lineAt(LineOffset::cast_from(lineOffset));
+        Line<Cell>& line = _grid.lineAt(line_offset::cast_from(lineOffset));
         line.reset(_grid.defaultLineFlags(), _cursor.graphicsRendition);
     }
 }
@@ -942,7 +944,7 @@ void Screen<Cell>::selectiveEraseToEndOfLine()
     else
         selectiveErase(_cursor.position.line,
                        _cursor.position.column,
-                       ColumnOffset::cast_from(_settings.pageSize.columns));
+                       column_offset::cast_from(_settings.pageSize.columns));
 }
 
 template <typename Cell>
@@ -952,37 +954,37 @@ void Screen<Cell>::selectiveEraseToBeginOfLine()
     if (isFullHorizontalMargins() && _cursor.position.column.value == _settings.pageSize.columns.value)
         selectiveEraseLine(_cursor.position.line);
     else
-        selectiveErase(_cursor.position.line, ColumnOffset(0), _cursor.position.column + 1);
+        selectiveErase(_cursor.position.line, column_offset(0), _cursor.position.column + 1);
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::selectiveEraseLine(LineOffset line)
+void Screen<Cell>::selectiveEraseLine(line_offset line)
 {
     if (containsProtectedCharacters(
-            line, ColumnOffset(0), ColumnOffset::cast_from(_settings.pageSize.columns)))
+            line, column_offset(0), column_offset::cast_from(_settings.pageSize.columns)))
     {
-        selectiveErase(line, ColumnOffset(0), ColumnOffset::cast_from(_settings.pageSize.columns));
+        selectiveErase(line, column_offset(0), column_offset::cast_from(_settings.pageSize.columns));
         return;
     }
 
     currentLine().reset(_grid.defaultLineFlags(), _cursor.graphicsRendition);
 
-    auto const left = ColumnOffset(0);
-    auto const right = boxed_cast<ColumnOffset>(_settings.pageSize.columns - 1);
-    auto const area = Rect { Top(*line), Left(*left), Bottom(*line), Right(*right) };
+    auto const leftValue = column_offset(0);
+    auto const rightValue = boxed_cast<column_offset>(_settings.pageSize.columns - 1);
+    auto const area = rect { top(*line), left(*leftValue), bottom(*line), right(*rightValue) };
     _terminal.markRegionDirty(area);
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::selectiveErase(LineOffset line, ColumnOffset begin, ColumnOffset end)
+void Screen<Cell>::selectiveErase(line_offset line, column_offset begin, column_offset end)
 {
     Cell* i = &at(line, begin);
     Cell const* e = i + unbox<uintptr_t>(end - begin);
     while (i != e)
     {
-        if (i->isFlagEnabled(CellFlags::CharacterProtected))
+        if (i->isFlagEnabled(cell_flags::CharacterProtected))
         {
             ++i;
             continue;
@@ -991,21 +993,21 @@ void Screen<Cell>::selectiveErase(LineOffset line, ColumnOffset begin, ColumnOff
         ++i;
     }
 
-    auto const left = begin;
-    auto const right = end - 1;
-    auto const area = Rect { Top(*line), Left(*left), Bottom(*line), Right(*right) };
+    auto const leftValue = begin;
+    auto const rightValue = end - 1;
+    auto const area = rect { top(*line), left(*leftValue), bottom(*line), right(*rightValue) };
     _terminal.markRegionDirty(area);
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-bool Screen<Cell>::containsProtectedCharacters(LineOffset line, ColumnOffset begin, ColumnOffset end) const
+bool Screen<Cell>::containsProtectedCharacters(line_offset line, column_offset begin, column_offset end) const
 {
     Cell const* i = &at(line, begin);
     Cell const* e = i + unbox<uintptr_t>(end - begin);
     while (i != e)
     {
-        if (i->isFlagEnabled(CellFlags::CharacterProtected))
+        if (i->isFlagEnabled(cell_flags::CharacterProtected))
             return true;
         ++i;
     }
@@ -1023,7 +1025,7 @@ void Screen<Cell>::selectiveEraseToEndOfScreen()
     auto const lineEnd = unbox<int>(_settings.pageSize.lines);
 
     for (auto const lineOffset: ::ranges::views::iota(lineStart, lineEnd))
-        selectiveEraseLine(LineOffset::cast_from(lineOffset));
+        selectiveEraseLine(line_offset::cast_from(lineOffset));
 }
 
 template <typename Cell>
@@ -1033,7 +1035,7 @@ void Screen<Cell>::selectiveEraseToBeginOfScreen()
     selectiveEraseToBeginOfLine();
 
     for (auto const lineOffset: ::ranges::views::iota(0, *_cursor.position.line))
-        selectiveEraseLine(LineOffset::cast_from(lineOffset));
+        selectiveEraseLine(line_offset::cast_from(lineOffset));
 }
 
 template <typename Cell>
@@ -1041,13 +1043,13 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::selectiveEraseScreen()
 {
     for (auto const lineOffset: ::ranges::views::iota(0, *_settings.pageSize.lines))
-        selectiveEraseLine(LineOffset::cast_from(lineOffset));
+        selectiveEraseLine(line_offset::cast_from(lineOffset));
 }
 // }}}
 // {{{ DECSERA
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::selectiveEraseArea(Rect area)
+void Screen<Cell>::selectiveEraseArea(rect area)
 {
     auto const [top, left, bottom, right] = applyOriginMode(area).clampTo(_settings.pageSize);
     assert(unbox<int>(right) <= unbox<int>(_settings.pageSize.columns));
@@ -1059,11 +1061,11 @@ void Screen<Cell>::selectiveEraseArea(Rect area)
     for (int y = top.value; y <= bottom.value; ++y)
     {
         for (Cell& cell: grid()
-                             .lineAt(LineOffset::cast_from(y))
-                             .useRange(ColumnOffset::cast_from(left),
+                             .lineAt(line_offset::cast_from(y))
+                             .useRange(column_offset::cast_from(left),
                                        ColumnCount::cast_from(right.value - left.value + 1)))
         {
-            if (!cell.isFlagEnabled(CellFlags::CharacterProtected))
+            if (!cell.isFlagEnabled(cell_flags::CharacterProtected))
             {
                 cell.writeTextOnly(L' ', 1);
                 cell.setHyperlink(HyperlinkId(0));
@@ -1093,9 +1095,9 @@ void Screen<Cell>::clearToEndOfLine()
     }
 
     auto const line = _cursor.position.line;
-    auto const left = _cursor.position.column;
-    auto const right = boxed_cast<ColumnOffset>(_settings.pageSize.columns - 1);
-    auto const area = Rect { Top(*line), Left(*left), Bottom(*line), Right(*right) };
+    auto const leftValue = _cursor.position.column;
+    auto const rightValue = boxed_cast<column_offset>(_settings.pageSize.columns - 1);
+    auto const area = rect { top(*line), left(*leftValue), bottom(*line), right(*rightValue) };
     _terminal.markRegionDirty(area);
 }
 
@@ -1103,7 +1105,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::clearToBeginOfLine()
 {
-    Cell* i = &at(_cursor.position.line, ColumnOffset(0));
+    Cell* i = &at(_cursor.position.line, column_offset(0));
     Cell* e = i + unbox<int>(_cursor.position.column) + 1;
     while (i != e)
     {
@@ -1112,9 +1114,9 @@ void Screen<Cell>::clearToBeginOfLine()
     }
 
     auto const line = _cursor.position.line;
-    auto const left = ColumnOffset(0);
-    auto const right = _cursor.position.column;
-    auto const area = Rect { Top(*line), Left(*left), Bottom(*line), Right(*right) };
+    auto const leftValue = column_offset(0);
+    auto const rightValue = _cursor.position.column;
+    auto const area = rect { top(*line), left(*leftValue), bottom(*line), right(*rightValue) };
     _terminal.markRegionDirty(area);
 }
 
@@ -1125,9 +1127,9 @@ void Screen<Cell>::clearLine()
     currentLine().reset(_grid.defaultLineFlags(), _cursor.graphicsRendition);
 
     auto const line = _cursor.position.line;
-    auto const left = ColumnOffset(0);
-    auto const right = boxed_cast<ColumnOffset>(_settings.pageSize.columns - 1);
-    auto const area = Rect { Top(*line), Left(*left), Bottom(*line), Right(*right) };
+    auto const leftValue = column_offset(0);
+    auto const rightValue = boxed_cast<column_offset>(_settings.pageSize.columns - 1);
+    auto const area = rect { top(*line), left(*leftValue), bottom(*line), right(*rightValue) };
     _terminal.markRegionDirty(area);
 }
 // }}}
@@ -1136,15 +1138,15 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorToNextLine(LineCount n)
 {
-    moveCursorTo(logicalCursorPosition().line + n.as<LineOffset>(), ColumnOffset(0));
+    moveCursorTo(logicalCursorPosition().line + n.as<line_offset>(), column_offset(0));
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorToPrevLine(LineCount n)
 {
-    auto const sanitizedN = min(n.as<LineOffset>(), logicalCursorPosition().line);
-    moveCursorTo(logicalCursorPosition().line - sanitizedN, ColumnOffset(0));
+    auto const sanitizedN = min(n.as<line_offset>(), logicalCursorPosition().line);
+    moveCursorTo(logicalCursorPosition().line - sanitizedN, column_offset(0));
 }
 
 template <typename Cell>
@@ -1158,7 +1160,7 @@ void Screen<Cell>::insertCharacters(ColumnCount n)
 /// Inserts @p n characters at given line @p lineNo.
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::insertChars(LineOffset lineOffset, ColumnCount columnsToInsert)
+void Screen<Cell>::insertChars(line_offset lineOffset, ColumnCount columnsToInsert)
 {
     auto const sanitizedN =
         min(*columnsToInsert, *margin().horizontal.to - *logicalCursorPosition().column + 1);
@@ -1170,9 +1172,9 @@ void Screen<Cell>::insertChars(LineOffset lineOffset, ColumnCount columnsToInser
 
     rotate(column0, column1, column2);
 
-    for (Cell& cell:
-         _grid.lineAt(lineOffset)
-             .useRange(boxed_cast<ColumnOffset>(_cursor.position.column), ColumnCount::cast_from(sanitizedN)))
+    for (Cell& cell: _grid.lineAt(lineOffset)
+                         .useRange(boxed_cast<column_offset>(_cursor.position.column),
+                                   ColumnCount::cast_from(sanitizedN)))
     {
         cell.write(_cursor.graphicsRendition, L' ', 1);
     }
@@ -1202,7 +1204,7 @@ void Screen<Cell>::insertColumns(ColumnCount n)
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::copyArea(Rect sourceArea, int page, CellLocation targetTopLeft, int targetPage)
+void Screen<Cell>::copyArea(rect sourceArea, int page, cell_location targetTopLeft, int targetPage)
 {
     (void) page;
     (void) targetPage;
@@ -1236,10 +1238,10 @@ void Screen<Cell>::copyArea(Rect sourceArea, int page, CellLocation targetTopLef
     {
         for (auto x = x0; x != xEnd; x += xInc)
         {
-            Cell const& sourceCell =
-                at(LineOffset::cast_from(*sourceArea.top + y), ColumnOffset::cast_from(sourceArea.left + x));
-            Cell& targetCell = at(LineOffset::cast_from(targetTopLeft.line + y),
-                                  ColumnOffset::cast_from(targetTopLeft.column + x));
+            Cell const& sourceCell = at(line_offset::cast_from(*sourceArea.top + y),
+                                        column_offset::cast_from(sourceArea.left + x));
+            Cell& targetCell = at(line_offset::cast_from(targetTopLeft.line + y),
+                                  column_offset::cast_from(targetTopLeft.column + x));
             targetCell = sourceCell;
         }
     }
@@ -1258,8 +1260,8 @@ void Screen<Cell>::eraseArea(int top, int left, int bottom, int right)
     for (int y = top; y <= bottom; ++y)
     {
         for (Cell& cell: grid()
-                             .lineAt(LineOffset::cast_from(y))
-                             .useRange(ColumnOffset(left), ColumnCount(right - left + 1)))
+                             .lineAt(line_offset::cast_from(y))
+                             .useRange(column_offset(left), ColumnCount(right - left + 1)))
         {
             cell.write(_cursor.graphicsRendition, L' ', 1);
         }
@@ -1279,8 +1281,8 @@ void Screen<Cell>::fillArea(char32_t ch, int top, int left, int bottom, int righ
     {
         for (Cell& cell:
              grid()
-                 .lineAt(LineOffset::cast_from(y))
-                 .useRange(ColumnOffset::cast_from(left), ColumnCount::cast_from(right - left + 1)))
+                 .lineAt(line_offset::cast_from(y))
+                 .useRange(column_offset::cast_from(left), ColumnCount::cast_from(right - left + 1)))
         {
             cell.write(cursor().graphicsRendition, ch, w);
         }
@@ -1309,7 +1311,7 @@ void Screen<Cell>::deleteCharacters(ColumnCount n)
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::deleteChars(LineOffset lineOffset, ColumnOffset column, ColumnCount columnsToDelete)
+void Screen<Cell>::deleteChars(line_offset lineOffset, column_offset column, ColumnCount columnsToDelete)
 {
     auto& line = _grid.lineAt(lineOffset);
     auto lineBuffer = line.cells();
@@ -1390,7 +1392,7 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorUp(LineCount n)
 {
     _cursor.wrapPending = false;
-    auto const sanitizedN = min(n.as<LineOffset>(),
+    auto const sanitizedN = min(n.as<line_offset>(),
                                 logicalCursorPosition().line > margin().vertical.from
                                     ? logicalCursorPosition().line - margin().vertical.from
                                     : logicalCursorPosition().line);
@@ -1406,10 +1408,10 @@ void Screen<Cell>::moveCursorDown(LineCount n)
     _cursor.wrapPending = false;
     auto const currentLineNumber = logicalCursorPosition().line;
     auto const sanitizedN =
-        min(n.as<LineOffset>(),
+        min(n.as<line_offset>(),
             currentLineNumber <= margin().vertical.to
                 ? margin().vertical.to - currentLineNumber
-                : (boxed_cast<LineOffset>(_settings.pageSize.lines) - 1) - currentLineNumber);
+                : (boxed_cast<line_offset>(_settings.pageSize.lines) - 1) - currentLineNumber);
 
     _cursor.position.line += sanitizedN;
     updateCursorIterator();
@@ -1420,7 +1422,7 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorForward(ColumnCount n)
 {
     _cursor.wrapPending = false;
-    _cursor.position.column = min(_cursor.position.column + n.as<ColumnOffset>(), margin().horizontal.to);
+    _cursor.position.column = min(_cursor.position.column + n.as<column_offset>(), margin().horizontal.to);
 }
 
 template <typename Cell>
@@ -1431,13 +1433,13 @@ void Screen<Cell>::moveCursorBackward(ColumnCount n)
     _cursor.wrapPending = false;
 
     // TODO: skip cells that in counting when iterating backwards over a wide cell (such as emoji)
-    auto const sanitizedN = min(n.as<ColumnOffset>(), _cursor.position.column);
+    auto const sanitizedN = min(n.as<column_offset>(), _cursor.position.column);
     setCurrentColumn(_cursor.position.column - sanitizedN);
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::moveCursorToColumn(ColumnOffset column)
+void Screen<Cell>::moveCursorToColumn(column_offset column)
 {
     setCurrentColumn(column);
 }
@@ -1446,12 +1448,12 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::moveCursorToBeginOfLine()
 {
-    setCurrentColumn(ColumnOffset(0));
+    setCurrentColumn(column_offset(0));
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::moveCursorToLine(LineOffset n)
+void Screen<Cell>::moveCursorToLine(line_offset n)
 {
     moveCursorTo(n, _cursor.position.column);
 }
@@ -1510,7 +1512,7 @@ void Screen<Cell>::captureBuffer(LineCount lineCount, bool logicalLines)
     auto const relativeStartLine =
         logicalLines ? _grid.computeLogicalLineNumberFromBottom(LineCount::cast_from(lineCount))
                      : unbox<int>(_settings.pageSize.lines - lineCount);
-    auto const startLine = LineOffset::cast_from(
+    auto const startLine = line_offset::cast_from(
         clamp(relativeStartLine, -unbox<int>(historyLineCount()), unbox<int>(_settings.pageSize.lines)));
 
     VTCaptureBufferLog()("Capture buffer: {} lines {}", lineCount, logicalLines ? "logical" : "actual");
@@ -1532,10 +1534,10 @@ void Screen<Cell>::captureBuffer(LineCount lineCount, bool logicalLines)
         _terminal.reply(data);
         currentChunkSize += data.size();
     };
-    LineOffset const bottomLine = boxed_cast<LineOffset>(_settings.pageSize.lines - 1);
+    line_offset const bottomLine = boxed_cast<line_offset>(_settings.pageSize.lines - 1);
     VTCaptureBufferLog()("Capturing buffer. top: {}, bottom: {}", relativeStartLine, bottomLine);
 
-    for (LineOffset line = startLine; line <= bottomLine; ++line)
+    for (line_offset line = startLine; line <= bottomLine; ++line)
     {
         if (logicalLines && _grid.lineAt(line).wrapped() && !capturedBuffer.empty())
             capturedBuffer.pop_back();
@@ -1569,7 +1571,7 @@ void Screen<Cell>::captureBuffer(LineCount lineCount, bool logicalLines)
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::cursorForwardTab(TabStopCount count)
+void Screen<Cell>::cursorForwardTab(tab_stop_count count)
 {
     for (int i = 0; i < unbox<int>(count); ++i)
         moveCursorToNextTab();
@@ -1577,7 +1579,7 @@ void Screen<Cell>::cursorForwardTab(TabStopCount count)
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::cursorBackwardTab(TabStopCount count)
+void Screen<Cell>::cursorBackwardTab(tab_stop_count count)
 {
     if (!count)
         return;
@@ -1587,7 +1589,7 @@ void Screen<Cell>::cursorBackwardTab(TabStopCount count)
         for (unsigned k = 0; k < unbox<unsigned>(count); ++k)
         {
             auto const i =
-                std::find_if(rbegin(_state.tabs), rend(_state.tabs), [&](ColumnOffset tabPos) -> bool {
+                std::find_if(rbegin(_state.tabs), rend(_state.tabs), [&](column_offset tabPos) -> bool {
                     return tabPos < logicalCursorPosition().column;
                 });
             if (i != rend(_state.tabs))
@@ -1663,28 +1665,28 @@ void Screen<Cell>::forwardIndex()
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::setForegroundColor(Color color)
+void Screen<Cell>::setForegroundColor(color color)
 {
     _cursor.graphicsRendition.foregroundColor = color;
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::setBackgroundColor(Color color)
+void Screen<Cell>::setBackgroundColor(color color)
 {
     _cursor.graphicsRendition.backgroundColor = color;
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::setUnderlineColor(Color color)
+void Screen<Cell>::setUnderlineColor(color color)
 {
     _cursor.graphicsRendition.underlineColor = color;
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::setCursorStyle(CursorDisplay display, CursorShape shape)
+void Screen<Cell>::setCursorStyle(cursor_display display, cursor_shape shape)
 {
     _state.cursorDisplay = display;
     _state.cursorShape = shape;
@@ -1694,7 +1696,7 @@ void Screen<Cell>::setCursorStyle(CursorDisplay display, CursorShape shape)
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::setGraphicsRendition(GraphicsRendition rendition)
+void Screen<Cell>::setGraphicsRendition(graphics_rendition rendition)
 {
     _terminal.setGraphicsRendition(rendition);
 }
@@ -1708,14 +1710,14 @@ void Screen<Cell>::setMark()
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::saveModes(std::vector<DECMode> const& modes)
+void Screen<Cell>::saveModes(std::vector<dec_mode> const& modes)
 {
     _state.modes.save(modes);
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::restoreModes(std::vector<DECMode> const& modes)
+void Screen<Cell>::restoreModes(std::vector<dec_mode> const& modes)
 {
     _state.modes.restore(modes);
 }
@@ -1735,10 +1737,10 @@ void Screen<Cell>::requestAnsiMode(unsigned int mode)
 {
     ModeResponse const modeResponse =
         isValidAnsiMode(mode)
-            ? _terminal.isModeEnabled(static_cast<AnsiMode>(mode)) ? ModeResponse::Set : ModeResponse::Reset
+            ? _terminal.isModeEnabled(static_cast<ansi_mode>(mode)) ? ModeResponse::Set : ModeResponse::Reset
             : ModeResponse::NotRecognized;
 
-    auto const code = toAnsiModeNum(static_cast<AnsiMode>(mode));
+    auto const code = toAnsiModeNum(static_cast<ansi_mode>(mode));
 
     _terminal.reply("\033[{};{}$y", code, static_cast<unsigned>(modeResponse));
 }
@@ -1749,10 +1751,10 @@ void Screen<Cell>::requestDECMode(unsigned int mode)
 {
     ModeResponse const modeResponse =
         isValidDECMode(mode)
-            ? _terminal.isModeEnabled(static_cast<DECMode>(mode)) ? ModeResponse::Set : ModeResponse::Reset
+            ? _terminal.isModeEnabled(static_cast<dec_mode>(mode)) ? ModeResponse::Set : ModeResponse::Reset
             : ModeResponse::NotRecognized;
 
-    auto const code = toDECModeNum(static_cast<DECMode>(mode));
+    auto const code = toDECModeNum(static_cast<dec_mode>(mode));
 
     _terminal.reply("\033[?{};{}$y", code, static_cast<unsigned>(modeResponse));
 }
@@ -1762,10 +1764,10 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::screenAlignmentPattern()
 {
     // sets the margins to the extremes of the page
-    margin().vertical.from = LineOffset(0);
-    margin().vertical.to = boxed_cast<LineOffset>(_settings.pageSize.lines) - LineOffset(1);
-    margin().horizontal.from = ColumnOffset(0);
-    margin().horizontal.to = boxed_cast<ColumnOffset>(_settings.pageSize.columns) - ColumnOffset(1);
+    margin().vertical.from = line_offset(0);
+    margin().vertical.to = boxed_cast<line_offset>(_settings.pageSize.lines) - line_offset(1);
+    margin().horizontal.from = column_offset(0);
+    margin().horizontal.to = boxed_cast<column_offset>(_settings.pageSize.columns) - column_offset(1);
 
     // and moves the cursor to the home position
     moveCursorTo({}, {});
@@ -1803,20 +1805,20 @@ void Screen<Cell>::singleShiftSelect(CharsetTable table)
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::sixelImage(ImageSize pixelSize, Image::Data&& rgbaData)
+void Screen<Cell>::sixelImage(image_size pixelSize, Image::Data&& rgbaData)
 {
     auto const columnCount =
         ColumnCount::cast_from(ceilf(float(*pixelSize.width) / float(*_state.cellPixelSize.width)));
     auto const lineCount =
         LineCount::cast_from(ceilf(float(*pixelSize.height) / float(*_state.cellPixelSize.height)));
-    auto const extent = GridSize { lineCount, columnCount };
-    auto const autoScrollAtBottomMargin = !_terminal.isModeEnabled(DECMode::NoSixelScrolling);
-    auto const topLeft = autoScrollAtBottomMargin ? logicalCursorPosition() : CellLocation {};
+    auto const extent = grid_size { lineCount, columnCount };
+    auto const autoScrollAtBottomMargin = !_terminal.isModeEnabled(dec_mode::NoSixelScrolling);
+    auto const topLeft = autoScrollAtBottomMargin ? logicalCursorPosition() : cell_location {};
 
     auto const alignmentPolicy = ImageAlignment::TopStart;
     auto const resizePolicy = ImageResize::NoResize;
 
-    auto const imageOffset = PixelCoordinate {};
+    auto const imageOffset = pixel_coordinate {};
     auto const imageSize = pixelSize;
 
     shared_ptr<Image const> imageRef = uploadImage(ImageFormat::RGBA, pixelSize, std::move(rgbaData));
@@ -1829,14 +1831,14 @@ void Screen<Cell>::sixelImage(ImageSize pixelSize, Image::Data&& rgbaData)
                 resizePolicy,
                 autoScrollAtBottomMargin);
 
-    if (!_terminal.isModeEnabled(DECMode::SixelCursorNextToGraphic))
+    if (!_terminal.isModeEnabled(dec_mode::SixelCursorNextToGraphic))
         linefeed(topLeft.column);
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 shared_ptr<Image const> Screen<Cell>::uploadImage(ImageFormat format,
-                                                  ImageSize imageSize,
+                                                  image_size imageSize,
                                                   Image::Data&& pixmap)
 {
     return _state.imagePool.create(format, imageSize, std::move(pixmap));
@@ -1845,10 +1847,10 @@ shared_ptr<Image const> Screen<Cell>::uploadImage(ImageFormat format,
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::renderImage(shared_ptr<Image const> image,
-                               CellLocation topLeft,
-                               GridSize gridSize,
-                               PixelCoordinate imageOffset,
-                               ImageSize imageSize,
+                               cell_location topLeft,
+                               grid_size gridSize,
+                               pixel_coordinate imageOffset,
+                               image_size imageSize,
                                ImageAlignment alignmentPolicy,
                                ImageResize resizePolicy,
                                bool autoScroll)
@@ -1861,16 +1863,16 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> image,
     auto const linesToBeRendered = min(gridSize.lines, linesAvailable);
     auto const columnsAvailable = *_settings.pageSize.columns - *topLeft.column;
     auto const columnsToBeRendered = ColumnCount(min(columnsAvailable, *gridSize.columns));
-    auto const gapColor = RGBAColor {}; // TODO: _cursor.graphicsRendition.backgroundColor;
+    auto const gapColor = rgba_color {}; // TODO: _cursor.graphicsRendition.backgroundColor;
 
     // TODO: make use of imageOffset and imageSize
     auto const rasterizedImage = _state.imagePool.rasterize(
         std::move(image), alignmentPolicy, resizePolicy, gapColor, gridSize, _state.cellPixelSize);
     const auto lastSixelBand = imageSize.height.value % 6;
-    const LineOffset offset = [&]() {
+    const line_offset offset = [&]() {
         auto offset =
-            LineOffset::cast_from(std::ceil(static_cast<float>(imageSize.height.value - lastSixelBand)
-                                            / float(*_state.cellPixelSize.height)))
+            line_offset::cast_from(std::ceil(static_cast<float>(imageSize.height.value - lastSixelBand)
+                                             / float(*_state.cellPixelSize.height)))
             - 1 * (lastSixelBand == 0);
         auto const h = imageSize.height.value - 1;
         // VT340 has this behavior where for some heights it text cursor is placed not
@@ -1883,10 +1885,10 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> image,
     }();
     if (*linesToBeRendered)
     {
-        for (GridSize::Offset const offset: GridSize { linesToBeRendered, columnsToBeRendered })
+        for (grid_size::offset const offset: grid_size { linesToBeRendered, columnsToBeRendered })
         {
             Cell& cell = at(topLeft + offset);
-            cell.setImageFragment(rasterizedImage, CellLocation { offset.line, offset.column });
+            cell.setImageFragment(rasterizedImage, cell_location { offset.line, offset.column });
             cell.setHyperlink(_cursor.hyperlink);
         };
         moveCursorTo(topLeft.line + offset, topLeft.column);
@@ -1901,12 +1903,12 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> image,
         for (auto const lineOffset: crispy::times(*remainingLineCount))
         {
             linefeed(topLeft.column);
-            for (auto const columnOffset: crispy::views::iota_as<ColumnOffset>(*columnsToBeRendered))
+            for (auto const columnOffset: crispy::views::iota_as<column_offset>(*columnsToBeRendered))
             {
                 auto const offset =
-                    CellLocation { boxed_cast<LineOffset>(linesToBeRendered) + lineOffset, columnOffset };
+                    cell_location { boxed_cast<line_offset>(linesToBeRendered) + lineOffset, columnOffset };
                 Cell& cell =
-                    at(boxed_cast<LineOffset>(_settings.pageSize.lines - _terminal.statusLineHeight()) - 1,
+                    at(boxed_cast<line_offset>(_settings.pageSize.lines - _terminal.statusLineHeight()) - 1,
                        topLeft.column + columnOffset);
                 cell.setImageFragment(rasterizedImage, offset);
                 cell.setHyperlink(_cursor.hyperlink);
@@ -1919,30 +1921,30 @@ void Screen<Cell>::renderImage(shared_ptr<Image const> image,
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::requestDynamicColor(DynamicColorName name)
+void Screen<Cell>::requestDynamicColor(dynamic_color_name name)
 {
-    auto const color = [&]() -> optional<RGBColor> {
+    auto const color = [&]() -> optional<rgb_color> {
         switch (name)
         {
-            case DynamicColorName::DefaultForegroundColor: return _state.colorPalette.defaultForeground;
-            case DynamicColorName::DefaultBackgroundColor: return _state.colorPalette.defaultBackground;
-            case DynamicColorName::TextCursorColor:
-                if (holds_alternative<CellForegroundColor>(_state.colorPalette.cursor.color))
+            case dynamic_color_name::DefaultForegroundColor: return _state.colorPalette.defaultForeground;
+            case dynamic_color_name::DefaultBackgroundColor: return _state.colorPalette.defaultBackground;
+            case dynamic_color_name::TextCursorColor:
+                if (holds_alternative<cell_foreground_color>(_state.colorPalette.cursor.color))
                     return _state.colorPalette.defaultForeground;
-                else if (holds_alternative<CellBackgroundColor>(_state.colorPalette.cursor.color))
+                else if (holds_alternative<cell_background_color>(_state.colorPalette.cursor.color))
                     return _state.colorPalette.defaultBackground;
                 else
-                    return get<RGBColor>(_state.colorPalette.cursor.color);
-            case DynamicColorName::MouseForegroundColor: return _state.colorPalette.mouseForeground;
-            case DynamicColorName::MouseBackgroundColor: return _state.colorPalette.mouseBackground;
-            case DynamicColorName::HighlightForegroundColor:
-                if (holds_alternative<RGBColor>(_state.colorPalette.selection.foreground))
-                    return get<RGBColor>(_state.colorPalette.selection.foreground);
+                    return get<rgb_color>(_state.colorPalette.cursor.color);
+            case dynamic_color_name::MouseForegroundColor: return _state.colorPalette.mouseForeground;
+            case dynamic_color_name::MouseBackgroundColor: return _state.colorPalette.mouseBackground;
+            case dynamic_color_name::HighlightForegroundColor:
+                if (holds_alternative<rgb_color>(_state.colorPalette.selection.foreground))
+                    return get<rgb_color>(_state.colorPalette.selection.foreground);
                 else
                     return nullopt;
-            case DynamicColorName::HighlightBackgroundColor:
-                if (holds_alternative<RGBColor>(_state.colorPalette.selection.background))
-                    return get<RGBColor>(_state.colorPalette.selection.background);
+            case dynamic_color_name::HighlightBackgroundColor:
+                if (holds_alternative<rgb_color>(_state.colorPalette.selection.background))
+                    return get<rgb_color>(_state.colorPalette.selection.background);
                 else
                     return nullopt;
         }
@@ -2020,21 +2022,21 @@ void Screen<Cell>::requestStatusString(RequestStatusString value)
                     case VTType::VT100: level = 61; break;
                 }
 
-                auto const c1TransmittionMode = ControlTransmissionMode::S7C1T;
-                auto const c1t = c1TransmittionMode == ControlTransmissionMode::S7C1T ? 1 : 0;
+                auto const c1TransmittionMode = control_transmission_mode::S7C1T;
+                auto const c1t = c1TransmittionMode == control_transmission_mode::S7C1T ? 1 : 0;
 
                 return fmt::format("{};{}\"p", level, c1t);
             }
             case RequestStatusString::DECSCUSR: // Set cursor style (DECSCUSR), VT520
             {
-                int const blinkingOrSteady = _state.cursorDisplay == CursorDisplay::Steady ? 1 : 0;
+                int const blinkingOrSteady = _state.cursorDisplay == cursor_display::Steady ? 1 : 0;
                 int const shape = [&]() {
                     switch (_state.cursorShape)
                     {
-                        case CursorShape::Block: return 1;
-                        case CursorShape::Underscore: return 3;
-                        case CursorShape::Bar: return 5;
-                        case CursorShape::Rectangle: return 7;
+                        case cursor_shape::Block: return 1;
+                        case cursor_shape::Underscore: return 3;
+                        case cursor_shape::Bar: return 5;
+                        case cursor_shape::Rectangle: return 7;
                     }
                     return 1;
                 }();
@@ -2058,23 +2060,23 @@ void Screen<Cell>::requestStatusString(RequestStatusString value)
             case RequestStatusString::SGR:
                 return fmt::format("0;{}m", vtSequenceParameterString(_cursor.graphicsRendition));
             case RequestStatusString::DECSCA: {
-                auto const isProtected = _cursor.graphicsRendition.flags & CellFlags::CharacterProtected;
+                auto const isProtected = _cursor.graphicsRendition.flags & cell_flags::CharacterProtected;
                 return fmt::format("{}\"q", isProtected ? 1 : 2);
             }
             case RequestStatusString::DECSASD:
                 switch (_state.activeStatusDisplay)
                 {
-                    case ActiveStatusDisplay::Main: return "0$}";
-                    case ActiveStatusDisplay::StatusLine: return "1$}";
-                    case ActiveStatusDisplay::IndicatorStatusLine: return "2$}"; // XXX This is not standard
+                    case active_status_display::Main: return "0$}";
+                    case active_status_display::StatusLine: return "1$}";
+                    case active_status_display::IndicatorStatusLine: return "2$}"; // XXX This is not standard
                 }
                 break;
             case RequestStatusString::DECSSDT:
                 switch (_state.statusDisplayType)
                 {
-                    case StatusDisplayType::None: return "0$~";
-                    case StatusDisplayType::Indicator: return "1$~";
-                    case StatusDisplayType::HostWritable: return "2$~";
+                    case status_display_type::None: return "0$~";
+                    case status_display_type::Indicator: return "1$~";
+                    case status_display_type::HostWritable: return "2$~";
                 }
                 break;
         }
@@ -2128,7 +2130,7 @@ void Screen<Cell>::requestCapability(std::string_view name)
 {
     if (booleanCapability(name))
         _terminal.reply("\033P1+r{}\033\\", toHexString(name));
-    else if (auto const value = numericCapability(name); value != Database::npos)
+    else if (auto const value = numericCapability(name); value != database::npos)
     {
         auto hexValue = fmt::format("{:X}", value);
         if (hexValue.size() % 2)
@@ -2143,48 +2145,48 @@ void Screen<Cell>::requestCapability(std::string_view name)
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::requestCapability(capabilities::Code code)
+void Screen<Cell>::requestCapability(capabilities::code c)
 {
-    if (booleanCapability(code))
-        _terminal.reply("\033P1+r{}\033\\", code.hex());
-    else if (auto const value = numericCapability(code); value >= 0)
+    if (booleanCapability(c))
+        _terminal.reply("\033P1+r{}\033\\", c.hex());
+    else if (auto const value = numericCapability(c); value >= 0)
     {
         auto hexValue = fmt::format("{:X}", value);
         if (hexValue.size() % 2)
             hexValue.insert(hexValue.begin(), '0');
-        _terminal.reply("\033P1+r{}={}\033\\", code.hex(), hexValue);
+        _terminal.reply("\033P1+r{}={}\033\\", c.hex(), hexValue);
     }
-    else if (auto const value = stringCapability(code); !value.empty())
-        _terminal.reply("\033P1+r{}={}\033\\", code.hex(), asHex(value));
+    else if (auto const value = stringCapability(c); !value.empty())
+        _terminal.reply("\033P1+r{}={}\033\\", c.hex(), asHex(value));
     else
         _terminal.reply("\033P0+r\033\\");
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::resetDynamicColor(DynamicColorName name)
+void Screen<Cell>::resetDynamicColor(dynamic_color_name name)
 {
     switch (name)
     {
-        case DynamicColorName::DefaultForegroundColor:
+        case dynamic_color_name::DefaultForegroundColor:
             _state.colorPalette.defaultForeground = _state.defaultColorPalette.defaultForeground;
             break;
-        case DynamicColorName::DefaultBackgroundColor:
+        case dynamic_color_name::DefaultBackgroundColor:
             _state.colorPalette.defaultBackground = _state.defaultColorPalette.defaultBackground;
             break;
-        case DynamicColorName::TextCursorColor:
+        case dynamic_color_name::TextCursorColor:
             _state.colorPalette.cursor = _state.defaultColorPalette.cursor;
             break;
-        case DynamicColorName::MouseForegroundColor:
+        case dynamic_color_name::MouseForegroundColor:
             _state.colorPalette.mouseForeground = _state.defaultColorPalette.mouseForeground;
             break;
-        case DynamicColorName::MouseBackgroundColor:
+        case dynamic_color_name::MouseBackgroundColor:
             _state.colorPalette.mouseBackground = _state.defaultColorPalette.mouseBackground;
             break;
-        case DynamicColorName::HighlightForegroundColor:
+        case dynamic_color_name::HighlightForegroundColor:
             _state.colorPalette.selection.foreground = _state.defaultColorPalette.selection.foreground;
             break;
-        case DynamicColorName::HighlightBackgroundColor:
+        case dynamic_color_name::HighlightBackgroundColor:
             _state.colorPalette.selection.background = _state.defaultColorPalette.selection.background;
             break;
     }
@@ -2192,19 +2194,19 @@ void Screen<Cell>::resetDynamicColor(DynamicColorName name)
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Screen<Cell>::setDynamicColor(DynamicColorName name, RGBColor color)
+void Screen<Cell>::setDynamicColor(dynamic_color_name name, rgb_color color)
 {
     switch (name)
     {
-        case DynamicColorName::DefaultForegroundColor: _state.colorPalette.defaultForeground = color; break;
-        case DynamicColorName::DefaultBackgroundColor: _state.colorPalette.defaultBackground = color; break;
-        case DynamicColorName::TextCursorColor: _state.colorPalette.cursor.color = color; break;
-        case DynamicColorName::MouseForegroundColor: _state.colorPalette.mouseForeground = color; break;
-        case DynamicColorName::MouseBackgroundColor: _state.colorPalette.mouseBackground = color; break;
-        case DynamicColorName::HighlightForegroundColor:
+        case dynamic_color_name::DefaultForegroundColor: _state.colorPalette.defaultForeground = color; break;
+        case dynamic_color_name::DefaultBackgroundColor: _state.colorPalette.defaultBackground = color; break;
+        case dynamic_color_name::TextCursorColor: _state.colorPalette.cursor.color = color; break;
+        case dynamic_color_name::MouseForegroundColor: _state.colorPalette.mouseForeground = color; break;
+        case dynamic_color_name::MouseBackgroundColor: _state.colorPalette.mouseBackground = color; break;
+        case dynamic_color_name::HighlightForegroundColor:
             _state.colorPalette.selection.foreground = color;
             break;
-        case DynamicColorName::HighlightBackgroundColor:
+        case dynamic_color_name::HighlightBackgroundColor:
             _state.colorPalette.selection.background = color;
             break;
     }
@@ -2254,7 +2256,7 @@ void Screen<Cell>::inspect(std::string const& message, std::ostream& os) const
     os << gridInfoLine(grid());
 
     hline();
-    os << screenshot([this](LineOffset lineNo) -> string {
+    os << screenshot([this](line_offset lineNo) -> string {
         // auto const absoluteLine = _grid.toAbsoluteLine(lineNo);
         return fmt::format("{} {:>4}: {}",
                            _grid.lineAt(lineNo).isTrivialBuffer() ? "|" : ":",
@@ -2315,7 +2317,7 @@ void Screen<Cell>::smGraphics(XtSmGraphics::Item item, XtSmGraphics::Action acti
                                   _terminal.reply(
                                       "\033[?{};{};{}S", NumberOfColorRegistersItem, Success, number);
                               },
-                              [&](ImageSize) {
+                              [&](image_size) {
                                   _terminal.reply("\033[?{};{};{}S", NumberOfColorRegistersItem, Failure, 0);
                               },
                               [&](monostate) {
@@ -2351,9 +2353,9 @@ void Screen<Cell>::smGraphics(XtSmGraphics::Item item, XtSmGraphics::Action acti
                     _state.effectiveImageCanvasSize = _settings.maxImageSize;
                     break;
                 case Action::SetToValue:
-                    if (holds_alternative<ImageSize>(value))
+                    if (holds_alternative<image_size>(value))
                     {
-                        auto size = get<ImageSize>(value);
+                        auto size = get<image_size>(value);
                         size.width = min(size.width, _settings.maxImageSize.width);
                         size.height = min(size.height, _settings.maxImageSize.height);
                         _state.effectiveImageCanvasSize = size;
@@ -2383,7 +2385,7 @@ namespace impl
                 case 2: // (AM) Keyboard Action Mode
                     return ApplyResult::Unsupported;
                 case 4: // (IRM) Insert Mode
-                    term.setMode(AnsiMode::Insert, enable);
+                    term.setMode(ansi_mode::Insert, enable);
                     return ApplyResult::Ok;
                 case 12: // (SRM) Send/Receive Mode
                 case 20: // (LNM) Automatic Newline
@@ -2391,59 +2393,59 @@ namespace impl
             }
         }
 
-        optional<DECMode> toDECMode(unsigned value)
+        optional<dec_mode> toDECMode(unsigned value)
         {
             switch (value)
             {
-                case 1: return DECMode::UseApplicationCursorKeys;
-                case 2: return DECMode::DesignateCharsetUSASCII;
-                case 3: return DECMode::Columns132;
-                case 4: return DECMode::SmoothScroll;
-                case 5: return DECMode::ReverseVideo;
-                case 6: return DECMode::Origin;
-                case 7: return DECMode::AutoWrap;
+                case 1: return dec_mode::UseApplicationCursorKeys;
+                case 2: return dec_mode::DesignateCharsetUSASCII;
+                case 3: return dec_mode::Columns132;
+                case 4: return dec_mode::SmoothScroll;
+                case 5: return dec_mode::ReverseVideo;
+                case 6: return dec_mode::Origin;
+                case 7: return dec_mode::AutoWrap;
                 // TODO: Ps = 8  -> Auto-repeat Keys (DECARM), VT100.
-                case 9: return DECMode::MouseProtocolX10;
-                case 10: return DECMode::ShowToolbar;
-                case 12: return DECMode::BlinkingCursor;
-                case 19: return DECMode::PrinterExtend;
-                case 25: return DECMode::VisibleCursor;
-                case 30: return DECMode::ShowScrollbar;
+                case 9: return dec_mode::MouseProtocolX10;
+                case 10: return dec_mode::ShowToolbar;
+                case 12: return dec_mode::BlinkingCursor;
+                case 19: return dec_mode::PrinterExtend;
+                case 25: return dec_mode::VisibleCursor;
+                case 30: return dec_mode::ShowScrollbar;
                 // TODO: Ps = 3 5  -> Enable font-shifting functions (rxvt).
                 // IGNORE? Ps = 3 8  -> Enter Tektronix Mode (DECTEK), VT240, xterm.
                 // TODO: Ps = 4 0  -> Allow 80 -> 132 Mode, xterm.
-                case 40: return DECMode::AllowColumns80to132;
+                case 40: return dec_mode::AllowColumns80to132;
                 // IGNORE: Ps = 4 1  -> more(1) fix (see curses resource).
                 // TODO: Ps = 4 2  -> Enable National Replacement Character sets (DECNRCM), VT220.
                 // TODO: Ps = 4 4  -> Turn On Margin Bell, xterm.
                 // TODO: Ps = 4 5  -> Reverse-wraparound Mode, xterm.
-                case 46: return DECMode::DebugLogging;
-                case 47: return DECMode::UseAlternateScreen;
+                case 46: return dec_mode::DebugLogging;
+                case 47: return dec_mode::UseAlternateScreen;
                 // TODO: Ps = 6 6  -> Application keypad (DECNKM), VT320.
                 // TODO: Ps = 6 7  -> Backarrow key sends backspace (DECBKM), VT340, VT420.  This sets the
                 // backarrowKey resource to "true".
-                case 69: return DECMode::LeftRightMargin;
-                case 80: return DECMode::NoSixelScrolling;
-                case 1000: return DECMode::MouseProtocolNormalTracking;
-                case 1001: return DECMode::MouseProtocolHighlightTracking;
-                case 1002: return DECMode::MouseProtocolButtonTracking;
-                case 1003: return DECMode::MouseProtocolAnyEventTracking;
-                case 1004: return DECMode::FocusTracking;
-                case 1005: return DECMode::MouseExtended;
-                case 1006: return DECMode::MouseSGR;
-                case 1007: return DECMode::MouseAlternateScroll;
-                case 1015: return DECMode::MouseURXVT;
-                case 1016: return DECMode::MouseSGRPixels;
-                case 1047: return DECMode::UseAlternateScreen;
-                case 1048: return DECMode::SaveCursor;
-                case 1049: return DECMode::ExtendedAltScreen;
-                case 2004: return DECMode::BracketedPaste;
-                case 2026: return DECMode::BatchedRendering;
-                case 2027: return DECMode::Unicode;
-                case 2028: return DECMode::TextReflow;
-                case 2029: return DECMode::MousePassiveTracking;
-                case 2030: return DECMode::ReportGridCellSelection;
-                case 8452: return DECMode::SixelCursorNextToGraphic;
+                case 69: return dec_mode::LeftRightMargin;
+                case 80: return dec_mode::NoSixelScrolling;
+                case 1000: return dec_mode::MouseProtocolNormalTracking;
+                case 1001: return dec_mode::MouseProtocolHighlightTracking;
+                case 1002: return dec_mode::MouseProtocolButtonTracking;
+                case 1003: return dec_mode::MouseProtocolAnyEventTracking;
+                case 1004: return dec_mode::FocusTracking;
+                case 1005: return dec_mode::MouseExtended;
+                case 1006: return dec_mode::MouseSGR;
+                case 1007: return dec_mode::MouseAlternateScroll;
+                case 1015: return dec_mode::MouseURXVT;
+                case 1016: return dec_mode::MouseSGRPixels;
+                case 1047: return dec_mode::UseAlternateScreen;
+                case 1048: return dec_mode::SaveCursor;
+                case 1049: return dec_mode::ExtendedAltScreen;
+                case 2004: return dec_mode::BracketedPaste;
+                case 2026: return dec_mode::BatchedRendering;
+                case 2027: return dec_mode::Unicode;
+                case 2028: return dec_mode::TextReflow;
+                case 2029: return dec_mode::MousePassiveTracking;
+                case 2030: return dec_mode::ReportGridCellSelection;
+                case 8452: return dec_mode::SixelCursorNextToGraphic;
             }
             return nullopt;
         }
@@ -2458,7 +2460,7 @@ namespace impl
             return ApplyResult::Invalid;
         }
 
-        optional<RGBColor> parseColor(string_view const& value)
+        optional<rgb_color> parseColor(string_view const& value)
         {
             try
             {
@@ -2469,7 +2471,7 @@ namespace impl
                     auto const r = crispy::to_integer<16, uint8_t>(value.substr(4, 2));
                     auto const g = crispy::to_integer<16, uint8_t>(value.substr(7, 2));
                     auto const b = crispy::to_integer<16, uint8_t>(value.substr(10, 2));
-                    return RGBColor { r.value(), g.value(), b.value() };
+                    return rgb_color { r.value(), g.value(), b.value() };
                 }
 
                 // "#RRGGBB"
@@ -2478,7 +2480,7 @@ namespace impl
                     auto const r = crispy::to_integer<16, uint8_t>(value.substr(1, 2));
                     auto const g = crispy::to_integer<16, uint8_t>(value.substr(3, 2));
                     auto const b = crispy::to_integer<16, uint8_t>(value.substr(5, 2));
-                    return RGBColor { r.value(), g.value(), b.value() };
+                    return rgb_color { r.value(), g.value(), b.value() };
                 }
 
                 // "#RGB"
@@ -2490,7 +2492,7 @@ namespace impl
                     auto const rr = static_cast<uint8_t>(r.value() << 4);
                     auto const gg = static_cast<uint8_t>(g.value() << 4);
                     auto const bb = static_cast<uint8_t>(b.value() << 4);
-                    return RGBColor { rr, gg, bb };
+                    return rgb_color { rr, gg, bb };
                 }
 
                 return std::nullopt;
@@ -2502,7 +2504,7 @@ namespace impl
             }
         }
 
-        Color parseColor(Sequence const& seq, size_t* pi)
+        color parseColor(Sequence const& seq, size_t* pi)
         {
             // We are at parameter index `i`.
             //
@@ -2529,9 +2531,9 @@ namespace impl
                             if (r <= 255 && g <= 255 && b <= 255)
                             {
                                 *pi += len;
-                                return Color { RGBColor { static_cast<uint8_t>(r),
-                                                          static_cast<uint8_t>(g),
-                                                          static_cast<uint8_t>(b) } };
+                                return color { rgb_color { static_cast<uint8_t>(r),
+                                                           static_cast<uint8_t>(g),
+                                                           static_cast<uint8_t>(b) } };
                             }
                         }
                         break;
@@ -2544,7 +2546,7 @@ namespace impl
                         if (auto const P = seq.subparam(i, 2); P <= 255)
                         {
                             *pi += len;
-                            return static_cast<IndexedColor>(P);
+                            return static_cast<indexed_color>(P);
                         }
                         break;
                     default:
@@ -2567,7 +2569,7 @@ namespace impl
                         if (i <= 255)
                         {
                             *pi = i;
-                            return static_cast<IndexedColor>(value);
+                            return static_cast<indexed_color>(value);
                         }
                         else
                         {
@@ -2588,9 +2590,9 @@ namespace impl
                         if (r <= 255 && g <= 255 && b <= 255)
                         {
                             *pi = i;
-                            return RGBColor { static_cast<uint8_t>(r),
-                                              static_cast<uint8_t>(g),
-                                              static_cast<uint8_t>(b) };
+                            return rgb_color { static_cast<uint8_t>(r),
+                                               static_cast<uint8_t>(g),
+                                               static_cast<uint8_t>(b) };
                         }
                         else
                         {
@@ -2610,7 +2612,7 @@ namespace impl
 
             // failure case, skip this argument
             *pi = i + 1;
-            return Color {};
+            return color {};
         }
 
         template <typename Target>
@@ -2619,7 +2621,7 @@ namespace impl
         {
             if (parameterStart == parameterEnd)
             {
-                target.setGraphicsRendition(GraphicsRendition::Reset);
+                target.setGraphicsRendition(graphics_rendition::Reset);
                 return ApplyResult::Ok;
             }
 
@@ -2627,92 +2629,92 @@ namespace impl
             {
                 switch (seq.param(i))
                 {
-                    case 0: target.setGraphicsRendition(GraphicsRendition::Reset); break;
-                    case 1: target.setGraphicsRendition(GraphicsRendition::Bold); break;
-                    case 2: target.setGraphicsRendition(GraphicsRendition::Faint); break;
-                    case 3: target.setGraphicsRendition(GraphicsRendition::Italic); break;
+                    case 0: target.setGraphicsRendition(graphics_rendition::Reset); break;
+                    case 1: target.setGraphicsRendition(graphics_rendition::Bold); break;
+                    case 2: target.setGraphicsRendition(graphics_rendition::Faint); break;
+                    case 3: target.setGraphicsRendition(graphics_rendition::Italic); break;
                     case 4:
                         if (seq.subParameterCount(i) == 1)
                         {
                             switch (seq.subparam(i, 1))
                             {
-                                case 0: target.setGraphicsRendition(GraphicsRendition::NoUnderline); break;
-                                case 1: target.setGraphicsRendition(GraphicsRendition::Underline); break;
+                                case 0: target.setGraphicsRendition(graphics_rendition::NoUnderline); break;
+                                case 1: target.setGraphicsRendition(graphics_rendition::Underline); break;
                                 case 2:
-                                    target.setGraphicsRendition(GraphicsRendition::DoublyUnderlined);
+                                    target.setGraphicsRendition(graphics_rendition::DoublyUnderlined);
                                     break;
                                 case 3:
-                                    target.setGraphicsRendition(GraphicsRendition::CurlyUnderlined);
+                                    target.setGraphicsRendition(graphics_rendition::CurlyUnderlined);
                                     break;
                                 case 4:
-                                    target.setGraphicsRendition(GraphicsRendition::DottedUnderline);
+                                    target.setGraphicsRendition(graphics_rendition::DottedUnderline);
                                     break;
                                 case 5:
-                                    target.setGraphicsRendition(GraphicsRendition::DashedUnderline);
+                                    target.setGraphicsRendition(graphics_rendition::DashedUnderline);
                                     break;
-                                default: target.setGraphicsRendition(GraphicsRendition::Underline); break;
+                                default: target.setGraphicsRendition(graphics_rendition::Underline); break;
                             }
                             ++i;
                         }
                         else
-                            target.setGraphicsRendition(GraphicsRendition::Underline);
+                            target.setGraphicsRendition(graphics_rendition::Underline);
                         break;
-                    case 5: target.setGraphicsRendition(GraphicsRendition::Blinking); break;
-                    case 6: target.setGraphicsRendition(GraphicsRendition::RapidBlinking); break;
-                    case 7: target.setGraphicsRendition(GraphicsRendition::Inverse); break;
-                    case 8: target.setGraphicsRendition(GraphicsRendition::Hidden); break;
-                    case 9: target.setGraphicsRendition(GraphicsRendition::CrossedOut); break;
-                    case 21: target.setGraphicsRendition(GraphicsRendition::DoublyUnderlined); break;
-                    case 22: target.setGraphicsRendition(GraphicsRendition::Normal); break;
-                    case 23: target.setGraphicsRendition(GraphicsRendition::NoItalic); break;
-                    case 24: target.setGraphicsRendition(GraphicsRendition::NoUnderline); break;
-                    case 25: target.setGraphicsRendition(GraphicsRendition::NoBlinking); break;
-                    case 27: target.setGraphicsRendition(GraphicsRendition::NoInverse); break;
-                    case 28: target.setGraphicsRendition(GraphicsRendition::NoHidden); break;
-                    case 29: target.setGraphicsRendition(GraphicsRendition::NoCrossedOut); break;
-                    case 30: target.setForegroundColor(IndexedColor::Black); break;
-                    case 31: target.setForegroundColor(IndexedColor::Red); break;
-                    case 32: target.setForegroundColor(IndexedColor::Green); break;
-                    case 33: target.setForegroundColor(IndexedColor::Yellow); break;
-                    case 34: target.setForegroundColor(IndexedColor::Blue); break;
-                    case 35: target.setForegroundColor(IndexedColor::Magenta); break;
-                    case 36: target.setForegroundColor(IndexedColor::Cyan); break;
-                    case 37: target.setForegroundColor(IndexedColor::White); break;
+                    case 5: target.setGraphicsRendition(graphics_rendition::Blinking); break;
+                    case 6: target.setGraphicsRendition(graphics_rendition::RapidBlinking); break;
+                    case 7: target.setGraphicsRendition(graphics_rendition::Inverse); break;
+                    case 8: target.setGraphicsRendition(graphics_rendition::Hidden); break;
+                    case 9: target.setGraphicsRendition(graphics_rendition::CrossedOut); break;
+                    case 21: target.setGraphicsRendition(graphics_rendition::DoublyUnderlined); break;
+                    case 22: target.setGraphicsRendition(graphics_rendition::Normal); break;
+                    case 23: target.setGraphicsRendition(graphics_rendition::NoItalic); break;
+                    case 24: target.setGraphicsRendition(graphics_rendition::NoUnderline); break;
+                    case 25: target.setGraphicsRendition(graphics_rendition::NoBlinking); break;
+                    case 27: target.setGraphicsRendition(graphics_rendition::NoInverse); break;
+                    case 28: target.setGraphicsRendition(graphics_rendition::NoHidden); break;
+                    case 29: target.setGraphicsRendition(graphics_rendition::NoCrossedOut); break;
+                    case 30: target.setForegroundColor(indexed_color::Black); break;
+                    case 31: target.setForegroundColor(indexed_color::Red); break;
+                    case 32: target.setForegroundColor(indexed_color::Green); break;
+                    case 33: target.setForegroundColor(indexed_color::Yellow); break;
+                    case 34: target.setForegroundColor(indexed_color::Blue); break;
+                    case 35: target.setForegroundColor(indexed_color::Magenta); break;
+                    case 36: target.setForegroundColor(indexed_color::Cyan); break;
+                    case 37: target.setForegroundColor(indexed_color::White); break;
                     case 38: target.setForegroundColor(parseColor(seq, &i)); break;
                     case 39: target.setForegroundColor(DefaultColor()); break;
-                    case 40: target.setBackgroundColor(IndexedColor::Black); break;
-                    case 41: target.setBackgroundColor(IndexedColor::Red); break;
-                    case 42: target.setBackgroundColor(IndexedColor::Green); break;
-                    case 43: target.setBackgroundColor(IndexedColor::Yellow); break;
-                    case 44: target.setBackgroundColor(IndexedColor::Blue); break;
-                    case 45: target.setBackgroundColor(IndexedColor::Magenta); break;
-                    case 46: target.setBackgroundColor(IndexedColor::Cyan); break;
-                    case 47: target.setBackgroundColor(IndexedColor::White); break;
+                    case 40: target.setBackgroundColor(indexed_color::Black); break;
+                    case 41: target.setBackgroundColor(indexed_color::Red); break;
+                    case 42: target.setBackgroundColor(indexed_color::Green); break;
+                    case 43: target.setBackgroundColor(indexed_color::Yellow); break;
+                    case 44: target.setBackgroundColor(indexed_color::Blue); break;
+                    case 45: target.setBackgroundColor(indexed_color::Magenta); break;
+                    case 46: target.setBackgroundColor(indexed_color::Cyan); break;
+                    case 47: target.setBackgroundColor(indexed_color::White); break;
                     case 48: target.setBackgroundColor(parseColor(seq, &i)); break;
                     case 49: target.setBackgroundColor(DefaultColor()); break;
-                    case 51: target.setGraphicsRendition(GraphicsRendition::Framed); break;
-                    case 53: target.setGraphicsRendition(GraphicsRendition::Overline); break;
-                    case 54: target.setGraphicsRendition(GraphicsRendition::NoFramed); break;
-                    case 55: target.setGraphicsRendition(GraphicsRendition::NoOverline); break;
+                    case 51: target.setGraphicsRendition(graphics_rendition::Framed); break;
+                    case 53: target.setGraphicsRendition(graphics_rendition::Overline); break;
+                    case 54: target.setGraphicsRendition(graphics_rendition::NoFramed); break;
+                    case 55: target.setGraphicsRendition(graphics_rendition::NoOverline); break;
                     // 58 is reserved, but used for setting underline/decoration colors by some other VTEs
                     // (such as mintty, kitty, libvte)
                     case 58: target.setUnderlineColor(parseColor(seq, &i)); break;
-                    case 90: target.setForegroundColor(BrightColor::Black); break;
-                    case 91: target.setForegroundColor(BrightColor::Red); break;
-                    case 92: target.setForegroundColor(BrightColor::Green); break;
-                    case 93: target.setForegroundColor(BrightColor::Yellow); break;
-                    case 94: target.setForegroundColor(BrightColor::Blue); break;
-                    case 95: target.setForegroundColor(BrightColor::Magenta); break;
-                    case 96: target.setForegroundColor(BrightColor::Cyan); break;
-                    case 97: target.setForegroundColor(BrightColor::White); break;
-                    case 100: target.setBackgroundColor(BrightColor::Black); break;
-                    case 101: target.setBackgroundColor(BrightColor::Red); break;
-                    case 102: target.setBackgroundColor(BrightColor::Green); break;
-                    case 103: target.setBackgroundColor(BrightColor::Yellow); break;
-                    case 104: target.setBackgroundColor(BrightColor::Blue); break;
-                    case 105: target.setBackgroundColor(BrightColor::Magenta); break;
-                    case 106: target.setBackgroundColor(BrightColor::Cyan); break;
-                    case 107: target.setBackgroundColor(BrightColor::White); break;
+                    case 90: target.setForegroundColor(bright_color::Black); break;
+                    case 91: target.setForegroundColor(bright_color::Red); break;
+                    case 92: target.setForegroundColor(bright_color::Green); break;
+                    case 93: target.setForegroundColor(bright_color::Yellow); break;
+                    case 94: target.setForegroundColor(bright_color::Blue); break;
+                    case 95: target.setForegroundColor(bright_color::Magenta); break;
+                    case 96: target.setForegroundColor(bright_color::Cyan); break;
+                    case 97: target.setForegroundColor(bright_color::White); break;
+                    case 100: target.setBackgroundColor(bright_color::Black); break;
+                    case 101: target.setBackgroundColor(bright_color::Red); break;
+                    case 102: target.setBackgroundColor(bright_color::Green); break;
+                    case 103: target.setBackgroundColor(bright_color::Yellow); break;
+                    case 104: target.setBackgroundColor(bright_color::Blue); break;
+                    case 105: target.setBackgroundColor(bright_color::Magenta); break;
+                    case 106: target.setBackgroundColor(bright_color::Cyan); break;
+                    case 107: target.setBackgroundColor(bright_color::White); break;
                     default: break; // TODO: logInvalidCSI("Invalid SGR number: {}", seq.param(i));
                 }
             }
@@ -2756,12 +2758,12 @@ namespace impl
                 switch (seq.param_or(0, Sequence::Parameter { 1 }))
                 {
                     case 0:
-                    case 1: screen.setCursorStyle(CursorDisplay::Blink, CursorShape::Block); break;
-                    case 2: screen.setCursorStyle(CursorDisplay::Steady, CursorShape::Block); break;
-                    case 3: screen.setCursorStyle(CursorDisplay::Blink, CursorShape::Underscore); break;
-                    case 4: screen.setCursorStyle(CursorDisplay::Steady, CursorShape::Underscore); break;
-                    case 5: screen.setCursorStyle(CursorDisplay::Blink, CursorShape::Bar); break;
-                    case 6: screen.setCursorStyle(CursorDisplay::Steady, CursorShape::Bar); break;
+                    case 1: screen.setCursorStyle(cursor_display::Blink, cursor_shape::Block); break;
+                    case 2: screen.setCursorStyle(cursor_display::Steady, cursor_shape::Block); break;
+                    case 3: screen.setCursorStyle(cursor_display::Blink, cursor_shape::Underscore); break;
+                    case 4: screen.setCursorStyle(cursor_display::Steady, cursor_shape::Underscore); break;
+                    case 5: screen.setCursorStyle(cursor_display::Blink, cursor_shape::Bar); break;
+                    case 6: screen.setCursorStyle(cursor_display::Steady, cursor_shape::Bar); break;
                     default: return ApplyResult::Invalid;
                 }
                 return ApplyResult::Ok;
@@ -2808,7 +2810,9 @@ namespace impl
         }
 
         template <typename Cell>
-        ApplyResult setOrRequestDynamicColor(Sequence const& seq, Screen<Cell>& screen, DynamicColorName name)
+        ApplyResult setOrRequestDynamicColor(Sequence const& seq,
+                                             Screen<Cell>& screen,
+                                             dynamic_color_name name)
         {
             auto const& value = seq.intermediateCharacters();
             if (value == "?")
@@ -2823,7 +2827,7 @@ namespace impl
 
         bool queryOrSetColorPalette(string_view text,
                                     std::function<void(uint8_t)> queryColor,
-                                    std::function<void(uint8_t, RGBColor)> setColor)
+                                    std::function<void(uint8_t, rgb_color)> setColor)
         {
             // Sequence := [Param (';' Param)*]
             // Param    := Index ';' Query | Set
@@ -2887,7 +2891,7 @@ namespace impl
                                    static_cast<uint16_t>(color.green) << 8 | color.green,
                                    static_cast<uint16_t>(color.blue) << 8 | color.blue);
                 },
-                [&](uint8_t index, RGBColor color) { terminal.colorPalette().palette.at(index) = color; });
+                [&](uint8_t index, rgb_color color) { terminal.colorPalette().palette.at(index) = color; });
 
             return ok ? ApplyResult::Ok : ApplyResult::Invalid;
         }
@@ -3057,9 +3061,9 @@ namespace impl
         template <typename Cell>
         ApplyResult saveDECModes(Sequence const& seq, Screen<Cell>& screen)
         {
-            vector<DECMode> modes;
+            vector<dec_mode> modes;
             for (size_t i = 0; i < seq.parameterCount(); ++i)
-                if (optional<DECMode> mode = toDECMode(seq.param(i)); mode.has_value())
+                if (optional<dec_mode> mode = toDECMode(seq.param(i)); mode.has_value())
                     modes.push_back(mode.value());
             screen.saveModes(modes);
             return ApplyResult::Ok;
@@ -3068,9 +3072,9 @@ namespace impl
         template <typename Cell>
         ApplyResult restoreDECModes(Sequence const& seq, Screen<Cell>& screen)
         {
-            vector<DECMode> modes;
+            vector<dec_mode> modes;
             for (size_t i = 0; i < seq.parameterCount(); ++i)
-                if (optional<DECMode> mode = toDECMode(seq.param(i)); mode.has_value())
+                if (optional<dec_mode> mode = toDECMode(seq.param(i)); mode.has_value())
                     modes.push_back(mode.value());
             screen.restoreModes(modes);
             return ApplyResult::Ok;
@@ -3083,7 +3087,8 @@ namespace impl
                 switch (seq.param(0))
                 {
                     case 4: // resize in pixel units
-                        terminal.requestWindowResize(ImageSize { Width(seq.param(2)), Height(seq.param(1)) });
+                        terminal.requestWindowResize(
+                            image_size { width(seq.param(2)), height(seq.param(1)) });
                         break;
                     case 8: // resize in cell units
                         terminal.requestWindowResize(PageSize { LineCount::cast_from(seq.param(1)),
@@ -3103,7 +3108,7 @@ namespace impl
                     case 8:
                         // this means, resize to full display size
                         // TODO: just create a dedicated callback for fulscreen resize!
-                        terminal.requestWindowResize(ImageSize {});
+                        terminal.requestWindowResize(image_size {});
                         break;
                     case 14:
                         if (seq.parameterCount() == 2 && seq.param(1) == 2)
@@ -3195,7 +3200,7 @@ namespace impl
                     case Action::SetToValue:
                         return *item == XtSmGraphics::Item::NumberOfColorRegisters
                                    ? XtSmGraphics::Value { Pv }
-                                   : XtSmGraphics::Value { ImageSize { Width(Pv), Height(Pu) } };
+                                   : XtSmGraphics::Value { image_size { width(Pv), height(Pu) } };
                 }
                 return std::monostate {};
             }();
@@ -3282,8 +3287,8 @@ void Screen<Cell>::restoreCursor(Cursor const& savedCursor)
 {
     _cursor = savedCursor;
     _cursor.position = clampCoordinate(_cursor.position);
-    _terminal.setMode(DECMode::AutoWrap, savedCursor.autoWrap);
-    _terminal.setMode(DECMode::Origin, savedCursor.originMode);
+    _terminal.setMode(dec_mode::AutoWrap, savedCursor.autoWrap);
+    _terminal.setMode(dec_mode::Origin, savedCursor.originMode);
     updateCursorIterator();
     verifyState();
 }
@@ -3369,11 +3374,11 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         // CSI
         case ANSISYSSC: restoreCursor(); break;
         case CBT:
-            cursorBackwardTab(TabStopCount::cast_from(seq.param_or(0, Sequence::Parameter { 1 })));
+            cursorBackwardTab(tab_stop_count::cast_from(seq.param_or(0, Sequence::Parameter { 1 })));
             break;
-        case CHA: moveCursorToColumn(seq.param_or<ColumnOffset>(0, ColumnOffset { 1 }) - 1); break;
+        case CHA: moveCursorToColumn(seq.param_or<column_offset>(0, column_offset { 1 }) - 1); break;
         case CHT:
-            cursorForwardTab(TabStopCount::cast_from(seq.param_or(0, Sequence::Parameter { 1 })));
+            cursorForwardTab(tab_stop_count::cast_from(seq.param_or(0, Sequence::Parameter { 1 })));
             break;
         case CNL:
             moveCursorToNextLine(LineCount::cast_from(seq.param_or(0, Sequence::Parameter { 1 })));
@@ -3386,8 +3391,8 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case CUD: moveCursorDown(seq.param_or<LineCount>(0, LineCount { 1 })); break;
         case CUF: moveCursorForward(seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
         case CUP:
-            moveCursorTo(LineOffset::cast_from(seq.param_or<int>(0, 1) - 1),
-                         ColumnOffset::cast_from(seq.param_or<int>(1, 1) - 1));
+            moveCursorTo(line_offset::cast_from(seq.param_or<int>(0, 1) - 1),
+                         column_offset::cast_from(seq.param_or<int>(1, 1) - 1));
             break;
         case CUU: moveCursorUp(seq.param_or<LineCount>(0, LineCount { 1 })); break;
         case DA1: sendDeviceAttributes(); break;
@@ -3399,10 +3404,10 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case DCH: deleteCharacters(seq.param_or<ColumnCount>(0, ColumnCount { 1 })); break;
         case DECCARA: {
             auto const origin = this->origin();
-            auto const top = LineOffset(seq.param_or(0, *origin.line + 1) - 1);
-            auto const left = ColumnOffset(seq.param_or(1, *origin.column + 1) - 1);
-            auto const bottom = LineOffset(seq.param_or(2, *pageSize().lines) - 1);
-            auto const right = ColumnOffset(seq.param_or(3, *pageSize().columns) - 1);
+            auto const top = line_offset(seq.param_or(0, *origin.line + 1) - 1);
+            auto const left = column_offset(seq.param_or(1, *origin.column + 1) - 1);
+            auto const bottom = line_offset(seq.param_or(2, *pageSize().lines) - 1);
+            auto const right = column_offset(seq.param_or(3, *pageSize().columns) - 1);
             for (auto row = top; row <= bottom; ++row)
             {
                 for (auto column = left; column <= right; ++column)
@@ -3418,18 +3423,18 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             // The coordinates of the rectangular area are affected by the setting of origin mode (DECOM).
             // DECCRA is not affected by the page margins.
             auto const origin = this->origin();
-            auto const top = Top(seq.param_or(0, *origin.line + 1) - 1);
-            auto const left = Left(seq.param_or(1, *origin.column + 1) - 1);
-            auto const bottom = Bottom(seq.param_or(2, *pageSize().lines) - 1);
-            auto const right = Right(seq.param_or(3, *pageSize().columns) - 1);
+            auto const topValue = top(seq.param_or(0, *origin.line + 1) - 1);
+            auto const leftValue = left(seq.param_or(1, *origin.column + 1) - 1);
+            auto const bottomValue = bottom(seq.param_or(2, *pageSize().lines) - 1);
+            auto const rightValue = right(seq.param_or(3, *pageSize().columns) - 1);
             auto const page = seq.param_or(4, 0);
 
-            auto const targetTop = LineOffset(seq.param_or(5, *origin.line + 1) - 1);
-            auto const targetLeft = ColumnOffset(seq.param_or(6, *origin.column + 1) - 1);
-            auto const targetTopLeft = CellLocation { targetTop, targetLeft };
+            auto const targetTop = line_offset(seq.param_or(5, *origin.line + 1) - 1);
+            auto const targetLeft = column_offset(seq.param_or(6, *origin.column + 1) - 1);
+            auto const targetTopLeft = cell_location { targetTop, targetLeft };
             auto const targetPage = seq.param_or(7, 0);
 
-            copyArea(Rect { top, left, bottom, right }, page, targetTopLeft, targetPage);
+            copyArea(rect { topValue, leftValue, bottomValue, rightValue }, page, targetTopLeft, targetPage);
         }
         break;
         case DECERA: {
@@ -3470,11 +3475,11 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             switch (Pc)
             {
                 case 1:
-                    _cursor.graphicsRendition.flags |= CellFlags::CharacterProtected;
+                    _cursor.graphicsRendition.flags |= cell_flags::CharacterProtected;
                     return ApplyResult::Ok;
                 case 0:
                 case 2:
-                    _cursor.graphicsRendition.flags &= ~CellFlags::CharacterProtected;
+                    _cursor.graphicsRendition.flags &= ~cell_flags::CharacterProtected;
                     return ApplyResult::Ok;
                 default: return ApplyResult::Invalid;
             }
@@ -3490,11 +3495,11 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             return ApplyResult::Ok;
         }
         case DECSERA: {
-            auto const top = seq.param_or(0, Top(1)) - 1;
-            auto const left = seq.param_or(1, Left(1)) - 1;
-            auto const bottom = seq.param_or(2, Bottom::cast_from(_settings.pageSize.lines)) - 1;
-            auto const right = seq.param_or(3, Right::cast_from(_settings.pageSize.columns)) - 1;
-            selectiveEraseArea(Rect { top, left, bottom, right });
+            auto const topValue = seq.param_or(0, top(1)) - 1;
+            auto const leftValue = seq.param_or(1, left(1)) - 1;
+            auto const bottom = seq.param_or(2, bottom::cast_from(_settings.pageSize.lines)) - 1;
+            auto const right = seq.param_or(3, right::cast_from(_settings.pageSize.columns)) - 1;
+            selectiveEraseArea(rect { topValue, leftValue, bottom, right });
             return ApplyResult::Ok;
         }
         case DECSEL: {
@@ -3541,8 +3546,8 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             _terminal.resizeScreen(PageSize { pageSize().lines, seq.param<ColumnCount>(0) });
             return ApplyResult::Ok;
         case DECSLRM: {
-            auto l = decr(seq.param_opt<ColumnOffset>(0));
-            auto r = decr(seq.param_opt<ColumnOffset>(1));
+            auto l = decr(seq.param_opt<column_offset>(0));
+            auto r = decr(seq.param_opt<column_offset>(1));
             _terminal.setLeftRightMargin(l, r);
             moveCursorTo({}, {});
         }
@@ -3556,8 +3561,8 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             return r;
         }
         case DECSTBM:
-            _terminal.setTopBottomMargin(decr(seq.param_opt<LineOffset>(0)),
-                                         decr(seq.param_opt<LineOffset>(1)));
+            _terminal.setTopBottomMargin(decr(seq.param_opt<line_offset>(0)),
+                                         decr(seq.param_opt<line_offset>(1)));
             moveCursorTo({}, {});
             break;
         case DECSTR:
@@ -3590,10 +3595,10 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             }
             break;
         case EL: return impl::EL(seq, *this);
-        case HPA: moveCursorToColumn(seq.param<ColumnOffset>(0) - 1); break;
+        case HPA: moveCursorToColumn(seq.param<column_offset>(0) - 1); break;
         case HPR: moveCursorForward(seq.param<ColumnCount>(0)); break;
         case HVP:
-            moveCursorTo(seq.param_or(0, LineOffset(1)) - 1, seq.param_or(1, ColumnOffset(1)) - 1);
+            moveCursorTo(seq.param_or(0, line_offset(1)) - 1, seq.param_or(1, column_offset(1)) - 1);
             break; // YES, it's like a CUP!
         case ICH: insertCharacters(seq.param_or(0, ColumnCount { 1 })); break;
         case IL: insertLines(seq.param_or(0, LineCount { 1 })); break;
@@ -3631,7 +3636,7 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         }
         case SU: scrollUp(seq.param_or<LineCount>(0, LineCount(1))); break;
         case TBC: return impl::TBC(seq, *this);
-        case VPA: moveCursorToLine(seq.param_or<LineOffset>(0, LineOffset { 1 }) - 1); break;
+        case VPA: moveCursorToLine(seq.param_or<line_offset>(0, line_offset { 1 }) - 1); break;
         case WINMANIP: return impl::WINDOWMANIP(seq, _terminal);
         case XTRESTORE: return impl::restoreDECModes(seq, *this);
         case XTSAVE: return impl::saveDECModes(seq, *this);
@@ -3658,10 +3663,10 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             // Changes the status line display type.
             switch (seq.param_or(0, 0))
             {
-                case 0: _terminal.setStatusDisplay(StatusDisplayType::None); break;
-                case 1: _terminal.setStatusDisplay(StatusDisplayType::Indicator); break;
+                case 0: _terminal.setStatusDisplay(status_display_type::None); break;
+                case 1: _terminal.setStatusDisplay(status_display_type::Indicator); break;
                 case 2:
-                    if (_terminal.statusDisplayType() != StatusDisplayType::HostWritable)
+                    if (_terminal.statusDisplayType() != status_display_type::HostWritable)
                         _terminal.requestShowHostWritableStatusLine();
                     break;
                 default: return ApplyResult::Invalid;
@@ -3673,17 +3678,17 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             switch (seq.param_or(0, 0))
             {
                 case 0:
-                    if (_state.activeStatusDisplay == ActiveStatusDisplay::StatusLine
+                    if (_state.activeStatusDisplay == active_status_display::StatusLine
                         && _state.syncWindowTitleWithHostWritableStatusDisplay)
                     {
                         _terminal.setWindowTitle(crispy::trimRight(
-                            _terminal.hostWritableStatusLineDisplay().grid().lineText(LineOffset(0))));
+                            _terminal.hostWritableStatusLineDisplay().grid().lineText(line_offset(0))));
                         _state.syncWindowTitleWithHostWritableStatusDisplay = false;
                     }
-                    _terminal.setActiveStatusDisplay(ActiveStatusDisplay::Main);
+                    _terminal.setActiveStatusDisplay(active_status_display::Main);
                     break;
 
-                case 1: _terminal.setActiveStatusDisplay(ActiveStatusDisplay::StatusLine); break;
+                case 1: _terminal.setActiveStatusDisplay(active_status_display::StatusLine); break;
                 default: return ApplyResult::Invalid;
             }
             break;
@@ -3703,27 +3708,27 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case HYPERLINK: return impl::HYPERLINK(seq, *this);
         case XTCAPTURE: return impl::CAPTURE(seq, _terminal);
         case COLORFG:
-            return impl::setOrRequestDynamicColor(seq, *this, DynamicColorName::DefaultForegroundColor);
+            return impl::setOrRequestDynamicColor(seq, *this, dynamic_color_name::DefaultForegroundColor);
         case COLORBG:
-            return impl::setOrRequestDynamicColor(seq, *this, DynamicColorName::DefaultBackgroundColor);
+            return impl::setOrRequestDynamicColor(seq, *this, dynamic_color_name::DefaultBackgroundColor);
         case COLORCURSOR:
-            return impl::setOrRequestDynamicColor(seq, *this, DynamicColorName::TextCursorColor);
+            return impl::setOrRequestDynamicColor(seq, *this, dynamic_color_name::TextCursorColor);
         case COLORMOUSEFG:
-            return impl::setOrRequestDynamicColor(seq, *this, DynamicColorName::MouseForegroundColor);
+            return impl::setOrRequestDynamicColor(seq, *this, dynamic_color_name::MouseForegroundColor);
         case COLORMOUSEBG:
-            return impl::setOrRequestDynamicColor(seq, *this, DynamicColorName::MouseBackgroundColor);
+            return impl::setOrRequestDynamicColor(seq, *this, dynamic_color_name::MouseBackgroundColor);
         case SETFONT: return impl::setFont(seq, _terminal);
         case SETFONTALL: return impl::setAllFont(seq, _terminal);
         case CLIPBOARD: return impl::clipboard(seq, _terminal);
         // TODO: case COLORSPECIAL: return impl::setOrRequestDynamicColor(seq, _output,
         // DynamicColorName::HighlightForegroundColor);
-        case RCOLORFG: resetDynamicColor(DynamicColorName::DefaultForegroundColor); break;
-        case RCOLORBG: resetDynamicColor(DynamicColorName::DefaultBackgroundColor); break;
-        case RCOLORCURSOR: resetDynamicColor(DynamicColorName::TextCursorColor); break;
-        case RCOLORMOUSEFG: resetDynamicColor(DynamicColorName::MouseForegroundColor); break;
-        case RCOLORMOUSEBG: resetDynamicColor(DynamicColorName::MouseBackgroundColor); break;
-        case RCOLORHIGHLIGHTFG: resetDynamicColor(DynamicColorName::HighlightForegroundColor); break;
-        case RCOLORHIGHLIGHTBG: resetDynamicColor(DynamicColorName::HighlightBackgroundColor); break;
+        case RCOLORFG: resetDynamicColor(dynamic_color_name::DefaultForegroundColor); break;
+        case RCOLORBG: resetDynamicColor(dynamic_color_name::DefaultBackgroundColor); break;
+        case RCOLORCURSOR: resetDynamicColor(dynamic_color_name::TextCursorColor); break;
+        case RCOLORMOUSEFG: resetDynamicColor(dynamic_color_name::MouseForegroundColor); break;
+        case RCOLORMOUSEBG: resetDynamicColor(dynamic_color_name::MouseBackgroundColor); break;
+        case RCOLORHIGHLIGHTFG: resetDynamicColor(dynamic_color_name::HighlightForegroundColor); break;
+        case RCOLORHIGHLIGHTBG: resetDynamicColor(dynamic_color_name::HighlightBackgroundColor); break;
         case NOTIFY: return impl::NOTIFY(seq, *this);
         case DUMPSTATE: inspect(); break;
 
@@ -3769,7 +3774,7 @@ unique_ptr<ParserExtension> Screen<Cell>::hookSixel(Sequence const& seq)
         _terminal.state().effectiveImageCanvasSize,
         aspectVertical,
         aspectHorizontal,
-        transparentBackground ? RGBAColor { 0, 0, 0, 0 } : _terminal.state().colorPalette.defaultBackground,
+        transparentBackground ? rgba_color { 0, 0, 0, 0 } : _terminal.state().colorPalette.defaultBackground,
         _terminal.state().usePrivateColorRegisters
             ? make_shared<SixelColorPalette>(_terminal.state().maxImageRegisterCount,
                                              clamp(_terminal.state().maxImageRegisterCount, 0u, 16384u))
@@ -3858,7 +3863,7 @@ unique_ptr<ParserExtension> Screen<Cell>::hookDECRQSS(Sequence const& /*seq*/)
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-optional<CellLocation> Screen<Cell>::search(std::u32string_view searchText, CellLocation startPosition)
+optional<cell_location> Screen<Cell>::search(std::u32string_view searchText, cell_location startPosition)
 {
     // TODO use LogicalLines to spawn logical lines for improving the search on wrapped lines.
 
@@ -3876,14 +3881,15 @@ optional<CellLocation> Screen<Cell>::search(std::u32string_view searchText, Cell
         auto result = line.search(searchText, startPosition.column);
         if (result.has_value())
             return result; // new match found
-        startPosition.column = ColumnOffset(0);
+        startPosition.column = column_offset(0);
     }
     return nullopt;
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-optional<CellLocation> Screen<Cell>::searchReverse(std::u32string_view searchText, CellLocation startPosition)
+optional<cell_location> Screen<Cell>::searchReverse(std::u32string_view searchText,
+                                                    cell_location startPosition)
 {
     // TODO use LogicalLinesReverse to spawn logical lines for improving the search on wrapped lines.
 
@@ -3901,7 +3907,7 @@ optional<CellLocation> Screen<Cell>::searchReverse(std::u32string_view searchTex
         auto result = line.searchReverse(searchText, startPosition.column);
         if (result.has_value())
             return result; // new match found
-        startPosition.column = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
+        startPosition.column = boxed_cast<column_offset>(pageSize().columns) - 1;
     }
     return nullopt;
 }
@@ -3911,7 +3917,7 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 bool Screen<Cell>::isCursorInsideMargins() const noexcept
 {
     bool const insideVerticalMargin = margin().vertical.contains(_cursor.position.line);
-    bool const insideHorizontalMargin = !_terminal.isModeEnabled(DECMode::LeftRightMargin)
+    bool const insideHorizontalMargin = !_terminal.isModeEnabled(dec_mode::LeftRightMargin)
                                         || margin().horizontal.contains(_cursor.position.column);
     return insideVerticalMargin && insideHorizontalMargin;
 }

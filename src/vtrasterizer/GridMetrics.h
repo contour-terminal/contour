@@ -49,8 +49,8 @@ struct PageMargin
 /// GridMetrics contains any valuable metrics required to calculate positions on the grid.
 struct GridMetrics
 {
-    PageSize pageSize;  // page size in column- and line count
-    ImageSize cellSize; // grid cell size in pixels
+    PageSize pageSize;   // page size in column- and line count
+    image_size cellSize; // grid cell size in pixels
 
     int baseline = 0; // glyph's baseline position relative to cell bottom.
 
@@ -69,19 +69,19 @@ struct GridMetrics
     /// @param line screen coordinate's line (between 0 and number of screen lines minus 1)
     ///
     /// @return 2D point into the grid cell's top left in drawing system coordinates.
-    constexpr crispy::Point map(LineOffset line, ColumnOffset column) const noexcept
+    constexpr crispy::Point map(line_offset line, column_offset column) const noexcept
     {
         return mapTopLeft(line, column);
     }
 
-    constexpr crispy::Point map(CellLocation pos) const noexcept { return map(pos.line, pos.column); }
+    constexpr crispy::Point map(cell_location pos) const noexcept { return map(pos.line, pos.column); }
 
-    constexpr crispy::Point mapTopLeft(CellLocation pos) const noexcept
+    constexpr crispy::Point mapTopLeft(cell_location pos) const noexcept
     {
         return mapTopLeft(pos.line, pos.column);
     }
 
-    constexpr crispy::Point mapTopLeft(LineOffset line, ColumnOffset column) const noexcept
+    constexpr crispy::Point mapTopLeft(line_offset line, column_offset column) const noexcept
     {
         auto const x = pageMargin.left + *column * cellSize.width.as<int>();
         auto const y = pageMargin.top + *line * cellSize.height.as<int>();
@@ -89,11 +89,11 @@ struct GridMetrics
         return { x, y };
     }
 
-    constexpr crispy::Point mapBottomLeft(CellLocation pos) const noexcept
+    constexpr crispy::Point mapBottomLeft(cell_location pos) const noexcept
     {
         return mapBottomLeft(pos.line, pos.column);
     }
-    constexpr crispy::Point mapBottomLeft(LineOffset line, ColumnOffset column) const noexcept
+    constexpr crispy::Point mapBottomLeft(line_offset line, column_offset column) const noexcept
     {
         return mapTopLeft(line + 1, column);
     }

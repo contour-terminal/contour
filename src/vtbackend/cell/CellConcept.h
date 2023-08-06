@@ -78,24 +78,24 @@ concept CellConcept = requires(T t, T const& u)
     { u.width() } noexcept -> std::convertible_to<uint8_t>;
     { t.setWidth(uint8_t{}) } noexcept;
 
-    { u.flags() } noexcept -> std::same_as<CellFlags>;
-    { u.isFlagEnabled(CellFlags{}) } noexcept -> std::same_as<bool>;
+    { u.flags() } noexcept -> std::same_as<cell_flags>;
+    { u.isFlagEnabled(cell_flags{}) } noexcept -> std::same_as<bool>;
     t.resetFlags();
-    t.resetFlags(CellFlags{});
+    t.resetFlags(cell_flags{});
 
-    t.setGraphicsRendition(GraphicsRendition{});
+    t.setGraphicsRendition(graphics_rendition{});
 
-    t.setForegroundColor(Color{});
-    { u.foregroundColor() } noexcept -> std::same_as<Color>;
+    t.setForegroundColor(color{});
+    { u.foregroundColor() } noexcept -> std::same_as<color>;
 
-    t.setBackgroundColor(Color{});
-    { u.backgroundColor() } noexcept -> std::same_as<Color>;
+    t.setBackgroundColor(color{});
+    { u.backgroundColor() } noexcept -> std::same_as<color>;
 
-    t.setUnderlineColor(Color{});
-    { u.underlineColor() } noexcept -> std::same_as<Color>;
+    t.setUnderlineColor(color{});
+    { u.underlineColor() } noexcept -> std::same_as<color>;
 
     { u.imageFragment() } -> std::same_as<std::shared_ptr<ImageFragment>>;
-    t.setImageFragment(std::shared_ptr<RasterizedImage>{}, CellLocation{} /*offset*/);
+    t.setImageFragment(std::shared_ptr<RasterizedImage>{}, cell_location{} /*offset*/);
 
     { u.hyperlink() } -> std::same_as<HyperlinkId>;
     t.setHyperlink(HyperlinkId{});

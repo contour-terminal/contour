@@ -49,7 +49,7 @@ class OpenGLRenderer final:
 {
     Q_OBJECT
 
-    using ImageSize = terminal::ImageSize;
+    using ImageSize = terminal::image_size;
 
     using AtlasTextureScreenshot = terminal::rasterizer::AtlasTextureScreenshot;
 
@@ -230,7 +230,7 @@ class OpenGLRenderer final:
     // render state cache
     struct
     {
-        terminal::RGBAColor backgroundColor {};
+        terminal::rgba_color backgroundColor {};
         float backgroundImageOpacity = 1.0f;
         bool backgroundImageBlur = false;
         QSize backgroundResolution;

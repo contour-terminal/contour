@@ -51,8 +51,8 @@ namespace
     {
         auto const m = textShaper.metrics(font);
 
-        gm.cellSize.width = Width::cast_from(m.advance);
-        gm.cellSize.height = Height::cast_from(m.line_height);
+        gm.cellSize.width = width::cast_from(m.advance);
+        gm.cellSize.height = height::cast_from(m.line_height);
         gm.baseline = m.line_height - m.ascender;
         gm.underline.position = gm.baseline + m.underline_position;
         gm.underline.thickness = m.underline_thickness;
@@ -143,7 +143,7 @@ Renderer::Renderer(PageSize pageSize,
     _imageRenderer { _gridMetrics, cellSize() },
     _textRenderer { _gridMetrics, *_textShaper, _fontDescriptions, _fonts, _imageRenderer },
     _decorationRenderer { _gridMetrics, hyperlinkNormal, hyperlinkHover },
-    _cursorRenderer { _gridMetrics, CursorShape::Block }
+    _cursorRenderer { _gridMetrics, cursor_shape::Block }
 {
     _textRenderer.updateFontMetrics();
     _imageRenderer.setCellSize(cellSize());
@@ -313,18 +313,18 @@ void Renderer::render(Terminal& terminal, bool pressure)
     _textRenderer.endFrame();
     _imageRenderer.endFrame();
 
-    if (cursorOpt && cursorOpt.value().shape != CursorShape::Block)
+    if (cursorOpt && cursorOpt.value().shape != cursor_shape::Block)
     {
         // Note. Block cursor is implicitly rendered via standard grid cell rendering.
         auto const cursor = *cursorOpt;
         _cursorRenderer.setShape(cursor.shape);
         auto const cursorColor = [&]() {
-            if (holds_alternative<CellForegroundColor>(_colorPalette.cursor.color))
+            if (holds_alternative<cell_foreground_color>(_colorPalette.cursor.color))
                 return _colorPalette.defaultForeground;
-            else if (holds_alternative<CellBackgroundColor>(_colorPalette.cursor.color))
+            else if (holds_alternative<cell_background_color>(_colorPalette.cursor.color))
                 return _colorPalette.defaultBackground;
             else
-                return get<RGBColor>(_colorPalette.cursor.color);
+                return get<rgb_color>(_colorPalette.cursor.color);
         }();
         _cursorRenderer.render(_gridMetrics.map(cursor.position), cursor.width, cursorColor);
     }

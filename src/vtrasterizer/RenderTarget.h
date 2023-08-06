@@ -43,7 +43,7 @@ namespace terminal::rasterizer
 struct AtlasTextureScreenshot
 {
     int atlasInstanceId;
-    ImageSize size;
+    image_size size;
     atlas::Format format;
     atlas::Buffer buffer;
 };
@@ -89,7 +89,7 @@ struct RenderTileAttributes
 
     atlas::NormalizedTileLocation normalizedLocation {};
 
-    ImageSize targetSize {};
+    image_size targetSize {};
 };
 
 /**
@@ -100,7 +100,7 @@ struct RenderTileAttributes
 class RenderTarget
 {
   public:
-    using RGBAColor = terminal::RGBAColor;
+    using RGBAColor = terminal::rgba_color;
     using Width = crispy::Width;
     using Height = crispy::Height;
     using TextureAtlas = terminal::rasterizer::atlas::TextureAtlas<RenderTileAttributes>;
@@ -109,7 +109,7 @@ class RenderTarget
 
     /// Sets the render target's size in pixels.
     /// This is the size that can be rendered to.
-    virtual void setRenderSize(ImageSize size) = 0;
+    virtual void setRenderSize(image_size size) = 0;
 
     virtual void setMargin(PageMargin margin) = 0;
 
@@ -119,7 +119,7 @@ class RenderTarget
     virtual void renderRectangle(int x, int y, Width, Height, RGBAColor color) = 0;
 
     using ScreenshotCallback =
-        std::function<void(std::vector<uint8_t> const& /*_rgbaBuffer*/, ImageSize /*_pixelSize*/)>;
+        std::function<void(std::vector<uint8_t> const& /*_rgbaBuffer*/, image_size /*_pixelSize*/)>;
 
     /// Schedules taking a screenshot of the current scene and forwards it to the given callback.
     virtual void scheduleScreenshot(ScreenshotCallback callback) = 0;
@@ -160,7 +160,7 @@ class Renderable
     [[nodiscard]] TextureAtlas::TileCreateData createTileData(atlas::TileLocation tileLocation,
                                                               std::vector<uint8_t> bitmap,
                                                               atlas::Format bitmapFormat,
-                                                              ImageSize bitmapSize,
+                                                              image_size bitmapSize,
                                                               RenderTileAttributes::X x,
                                                               RenderTileAttributes::Y y,
                                                               uint32_t fragmentShaderSelector);
@@ -168,8 +168,8 @@ class Renderable
     [[nodiscard]] TextureAtlas::TileCreateData createTileData(atlas::TileLocation tileLocation,
                                                               std::vector<uint8_t> bitmap,
                                                               atlas::Format bitmapFormat,
-                                                              ImageSize bitmapSize,
-                                                              ImageSize renderBitmapSize,
+                                                              image_size bitmapSize,
+                                                              image_size renderBitmapSize,
                                                               RenderTileAttributes::X x,
                                                               RenderTileAttributes::Y y,
                                                               uint32_t fragmentShaderSelector);
@@ -182,12 +182,12 @@ class Renderable
     [[nodiscard]] static atlas::RenderTile createRenderTile(
         atlas::RenderTile::X x,
         atlas::RenderTile::Y y,
-        RGBAColor color,
+        rgba_color color,
         Renderable::AtlasTileAttributes const& attributes);
 
     void renderTile(atlas::RenderTile::X x,
                     atlas::RenderTile::Y y,
-                    RGBAColor color,
+                    rgba_color color,
                     Renderable::AtlasTileAttributes const& attributes);
 
     [[nodiscard]] constexpr bool renderTargetAvailable() const noexcept { return _renderTarget; }
@@ -219,7 +219,7 @@ class Renderable
 inline Renderable::TextureAtlas::TileCreateData Renderable::createTileData(atlas::TileLocation tileLocation,
                                                                            std::vector<uint8_t> bitmap,
                                                                            atlas::Format bitmapFormat,
-                                                                           ImageSize bitmapSize,
+                                                                           image_size bitmapSize,
                                                                            RenderTileAttributes::X x,
                                                                            RenderTileAttributes::Y y,
                                                                            uint32_t fragmentShaderSelector)

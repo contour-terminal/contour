@@ -22,9 +22,9 @@ using namespace std;
 namespace terminal
 {
 
-string to_string(Color color)
+string to_string(color color)
 {
-    using Type = ColorType;
+    using Type = color_type;
     switch (color.type())
     {
         case Type::Indexed: return fmt::format("{}", color.index());
@@ -63,81 +63,81 @@ string to_string(Color color)
     return "?";
 }
 
-string to_string(IndexedColor color)
+string to_string(indexed_color color)
 {
     switch (color)
     {
-        case IndexedColor::Black: return "black";
-        case IndexedColor::Red: return "red";
-        case IndexedColor::Green: return "green";
-        case IndexedColor::Yellow: return "yellow";
-        case IndexedColor::Blue: return "blue";
-        case IndexedColor::Magenta: return "magenta";
-        case IndexedColor::Cyan: return "cyan";
-        case IndexedColor::White: return "white";
-        case IndexedColor::Default: return "DEFAULT";
+        case indexed_color::Black: return "black";
+        case indexed_color::Red: return "red";
+        case indexed_color::Green: return "green";
+        case indexed_color::Yellow: return "yellow";
+        case indexed_color::Blue: return "blue";
+        case indexed_color::Magenta: return "magenta";
+        case indexed_color::Cyan: return "cyan";
+        case indexed_color::White: return "white";
+        case indexed_color::Default: return "DEFAULT";
     }
     return fmt::format("IndexedColor:{}", static_cast<unsigned>(color));
 }
 
-string to_string(BrightColor color)
+string to_string(bright_color color)
 {
     switch (color)
     {
-        case BrightColor::Black: return "bright-black";
-        case BrightColor::Red: return "bright-red";
-        case BrightColor::Green: return "bright-Green";
-        case BrightColor::Yellow: return "bright-Yellow";
-        case BrightColor::Blue: return "bright-blue";
-        case BrightColor::Magenta: return "bright-magenta";
-        case BrightColor::Cyan: return "bright-cyan";
-        case BrightColor::White: return "bright-white";
+        case bright_color::Black: return "bright-black";
+        case bright_color::Red: return "bright-red";
+        case bright_color::Green: return "bright-Green";
+        case bright_color::Yellow: return "bright-Yellow";
+        case bright_color::Blue: return "bright-blue";
+        case bright_color::Magenta: return "bright-magenta";
+        case bright_color::Cyan: return "bright-cyan";
+        case bright_color::White: return "bright-white";
     }
     return fmt::format("BrightColor:{}", static_cast<unsigned>(color));
 }
 
-RGBColor::RGBColor(std::string const& hexCode): RGBColor()
+rgb_color::rgb_color(std::string const& hexCode): rgb_color()
 {
     *this = hexCode;
 }
 
-RGBColor& RGBColor::operator=(string const& hexCode)
+rgb_color& rgb_color::operator=(string const& hexCode)
 {
     if (hexCode.size() == 7 && hexCode[0] == '#')
     {
         char* eptr = nullptr;
         auto const value = static_cast<uint32_t>(strtoul(hexCode.c_str() + 1, &eptr, 16));
         if (eptr && *eptr == '\0')
-            *this = RGBColor { value };
+            *this = rgb_color { value };
     }
     if (hexCode.size() >= 3 && hexCode[0] == '0' && hexCode[1] == 'x')
     {
         char* eptr = nullptr;
         auto const value = static_cast<uint32_t>(strtoul(hexCode.c_str() + 2, &eptr, 16));
         if (eptr && *eptr == '\0')
-            *this = RGBColor { value };
+            *this = rgb_color { value };
     }
     return *this;
 }
 
-RGBAColor& RGBAColor::operator=(string const& hexCode)
+rgba_color& rgba_color::operator=(string const& hexCode)
 {
     if (hexCode.size() == 9 && hexCode[0] == '#')
     {
         char* eptr = nullptr;
         auto const value = static_cast<uint32_t>(strtoul(hexCode.c_str() + 1, &eptr, 16));
         if (eptr && *eptr == '\0')
-            *this = RGBAColor { value };
+            *this = rgba_color { value };
     }
     return *this;
 }
 
-string to_string(RGBColor c)
+string to_string(rgb_color c)
 {
     return fmt::format("#{:02X}{:02X}{:02X}", c.red, c.green, c.blue);
 }
 
-string to_string(RGBAColor c)
+string to_string(rgba_color c)
 {
     return fmt::format("#{:02X}{:02X}{:02X}{:02X}", c.red(), c.green(), c.blue(), c.alpha());
 }

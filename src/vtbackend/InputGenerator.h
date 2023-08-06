@@ -304,17 +304,17 @@ class InputGenerator
     void generatePaste(std::string_view const& text);
     bool generateMousePress(Modifier modifier,
                             MouseButton button,
-                            CellLocation pos,
-                            PixelCoordinate pixelPosition,
+                            cell_location pos,
+                            pixel_coordinate pixelPosition,
                             bool uiHandled);
     bool generateMouseMove(Modifier modifier,
-                           CellLocation pos,
-                           PixelCoordinate pixelPosition,
+                           cell_location pos,
+                           pixel_coordinate pixelPosition,
                            bool uiHandled);
     bool generateMouseRelease(Modifier modifier,
                               MouseButton button,
-                              CellLocation pos,
-                              PixelCoordinate pixelPosition,
+                              cell_location pos,
+                              pixel_coordinate pixelPosition,
                               bool uiHandled);
 
     bool generateFocusInEvent();
@@ -356,24 +356,24 @@ class InputGenerator
     bool generateMouse(MouseEventType eventType,
                        Modifier modifier,
                        MouseButton button,
-                       CellLocation pos,
-                       PixelCoordinate pixelPosition,
+                       cell_location pos,
+                       pixel_coordinate pixelPosition,
                        bool uiHandled);
 
     bool mouseTransport(MouseEventType eventType,
                         uint8_t button,
                         uint8_t modifier,
-                        CellLocation pos,
-                        PixelCoordinate pixelPosition,
+                        cell_location pos,
+                        pixel_coordinate pixelPosition,
                         bool uiHandled);
 
-    bool mouseTransportX10(uint8_t button, uint8_t modifier, CellLocation pos);
-    bool mouseTransportExtended(uint8_t button, uint8_t modifier, CellLocation pos);
+    bool mouseTransportX10(uint8_t button, uint8_t modifier, cell_location pos);
+    bool mouseTransportExtended(uint8_t button, uint8_t modifier, cell_location pos);
 
     bool mouseTransportSGR(
         MouseEventType type, uint8_t button, uint8_t modifier, int x, int y, bool uiHandled);
 
-    bool mouseTransportURXVT(MouseEventType type, uint8_t button, uint8_t modifier, CellLocation pos);
+    bool mouseTransportURXVT(MouseEventType type, uint8_t button, uint8_t modifier, cell_location pos);
 
     inline bool append(std::string_view sequence);
     inline bool append(char asciiChar);
@@ -394,7 +394,7 @@ class InputGenerator
     int _consumedBytes {};
 
     std::set<MouseButton> _currentlyPressedMouseButtons {};
-    CellLocation _currentMousePosition {}; // current mouse position
+    cell_location _currentMousePosition {}; // current mouse position
 };
 
 inline std::string to_string(InputGenerator::MouseEventType value)

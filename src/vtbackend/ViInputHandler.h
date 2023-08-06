@@ -142,8 +142,8 @@ enum class TextObjectScope
 };
 
 // clang-format off
-struct LinearHighlight{ CellLocation from; CellLocation to; };
-struct RectangularHighlight { CellLocation from; CellLocation to; };
+struct LinearHighlight{ cell_location from; cell_location to; };
+struct RectangularHighlight { cell_location from; cell_location to; };
 // clang-format on
 
 using HighlightRange = std::variant<LinearHighlight, RectangularHighlight>;
@@ -173,14 +173,14 @@ class ViInputHandler: public InputHandler
         virtual void yank(ViMotion motion) = 0;
         virtual void paste(unsigned count, bool stripped) = 0;
 
-        virtual void modeChanged(ViMode mode) = 0;
+        virtual void modeChanged(vi_mode mode) = 0;
 
         virtual void searchStart() = 0;
         virtual void searchDone() = 0;
         virtual void searchCancel() = 0;
         virtual void updateSearchTerm(std::u32string const& text) = 0;
 
-        virtual void scrollViewport(ScrollOffset delta) = 0;
+        virtual void scrollViewport(scroll_offset delta) = 0;
 
         // Starts searching for the word under the cursor position in reverse order.
         // This is like pressing # in Vi.
@@ -193,24 +193,24 @@ class ViInputHandler: public InputHandler
         virtual void searchCurrentWord() = 0;
     };
 
-    ViInputHandler(Executor& theExecutor, ViMode initialMode);
+    ViInputHandler(Executor& theExecutor, vi_mode initialMode);
 
     bool sendKeyPressEvent(Key key, Modifier modifier) override;
     bool sendCharPressEvent(char32_t ch, Modifier modifier) override;
 
-    void setMode(ViMode mode);
-    void toggleMode(ViMode mode);
-    [[nodiscard]] ViMode mode() const noexcept { return _viMode; }
+    void setMode(vi_mode mode);
+    void toggleMode(vi_mode mode);
+    [[nodiscard]] vi_mode mode() const noexcept { return _viMode; }
 
     [[nodiscard]] bool isVisualMode() const noexcept
     {
         switch (_viMode)
         {
-            case ViMode::Insert:
-            case ViMode::Normal: return false;
-            case ViMode::Visual:
-            case ViMode::VisualBlock:
-            case ViMode::VisualLine: return true;
+            case vi_mode::Insert:
+            case vi_mode::Normal: return false;
+            case vi_mode::Visual:
+            case vi_mode::VisualBlock:
+            case vi_mode::VisualLine: return true;
         }
         crispy::unreachable();
     }
@@ -248,7 +248,7 @@ class ViInputHandler: public InputHandler
     bool handleModeSwitches(char32_t ch, Modifier modifier);
     void startSearch();
 
-    ViMode _viMode = ViMode::Normal;
+    vi_mode _viMode = vi_mode::Normal;
 
     SearchEditMode _searchEditMode = SearchEditMode::Disabled;
     bool _searchExternallyActivated = false;

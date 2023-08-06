@@ -45,6 +45,7 @@
 #include <vector>
 
 #include "contour/Actions.h"
+#include "vtbackend/Color.h"
 #include "vtbackend/ColorPalette.h"
 #include "vtbackend/primitives.h"
 
@@ -68,14 +69,14 @@ using crispy::toLower;
 using crispy::toUpper;
 using crispy::unescape;
 
-using terminal::Height;
-using terminal::ImageSize;
+using terminal::height;
+using terminal::image_size;
 using terminal::Process;
-using terminal::Width;
+using terminal::width;
 
-using terminal::CellRGBColorAndAlphaPair;
+using terminal::cell_rgb_color_and_alpha_pair;
 using terminal::ColumnCount;
-using terminal::Infinite;
+using terminal::infinite;
 using terminal::LineCount;
 using terminal::PageSize;
 
@@ -133,21 +134,21 @@ namespace
         return make_shared<terminal::BackgroundImage const>(std::move(backgroundImage));
     }
 
-    terminal::CellRGBColor parseCellColor(std::string const& _text)
+    terminal::cell_rgb_color parseCellColor(std::string const& _text)
     {
         auto const text = toUpper(_text);
         if (text == "CELLBACKGROUND"sv)
-            return terminal::CellBackgroundColor {};
+            return terminal::cell_background_color {};
         if (text == "CELLFOREGROUND"sv)
-            return terminal::CellForegroundColor {};
-        return terminal::RGBColor(_text);
+            return terminal::cell_foreground_color {};
+        return terminal::rgb_color(_text);
     }
 
-    terminal::CellRGBColor parseCellColor(UsedKeys& usedKeys,
-                                          YAML::Node const& parentNode,
-                                          std::string const& parentPath,
-                                          std::string const& name,
-                                          terminal::CellRGBColor defaultValue)
+    terminal::cell_rgb_color parseCellColor(UsedKeys& usedKeys,
+                                            YAML::Node const& parentNode,
+                                            std::string const& parentPath,
+                                            std::string const& name,
+                                            terminal::cell_rgb_color defaultValue)
     {
         auto colorNode = parentNode[name];
         if (!colorNode || !colorNode.IsScalar())
@@ -156,11 +157,11 @@ namespace
         return parseCellColor(colorNode.as<string>());
     }
 
-    std::optional<terminal::RGBColorPair> parseRGBColorPair(UsedKeys& usedKeys,
-                                                            string const& basePath,
-                                                            YAML::Node const& baseNode,
-                                                            string const& childNodeName,
-                                                            terminal::RGBColorPair defaultPair)
+    std::optional<terminal::rgb_color_pair> parseRGBColorPair(UsedKeys& usedKeys,
+                                                              string const& basePath,
+                                                              YAML::Node const& baseNode,
+                                                              string const& childNodeName,
+                                                              terminal::rgb_color_pair defaultPair)
     {
         auto node = baseNode[childNodeName];
         if (!node || !node.IsMap())
@@ -191,10 +192,10 @@ namespace
     /// Example:
     ///   { foreground: CellColor, foreground_alpha: FLOAT = 1.0,
     ///     background: CellColor, background_alpha: FLOAT = 1.0 }
-    std::optional<CellRGBColorAndAlphaPair> parseCellRGBColorAndAlphaPair(UsedKeys& usedKeys,
-                                                                          string const& basePath,
-                                                                          YAML::Node const& baseNode,
-                                                                          string const& childNodeName)
+    std::optional<cell_rgb_color_and_alpha_pair> parseCellRGBColorAndAlphaPair(UsedKeys& usedKeys,
+                                                                               string const& basePath,
+                                                                               YAML::Node const& baseNode,
+                                                                               string const& childNodeName)
     {
         auto node = baseNode[childNodeName];
         if (!node)
@@ -203,10 +204,10 @@ namespace
         auto const childPath = fmt::format("{}.{}", basePath, childNodeName);
         usedKeys.emplace(childPath);
 
-        auto cellRGBColorAndAlphaPair = CellRGBColorAndAlphaPair {};
+        auto cellRGBColorAndAlphaPair = cell_rgb_color_and_alpha_pair {};
 
         cellRGBColorAndAlphaPair.foreground =
-            parseCellColor(usedKeys, node, childPath, "foreground", terminal::CellForegroundColor {});
+            parseCellColor(usedKeys, node, childPath, "foreground", terminal::cell_foreground_color {});
         if (auto alpha = node["foreground_alpha"]; alpha && alpha.IsScalar())
         {
             usedKeys.emplace(childPath + ".foreground_alpha");
@@ -214,7 +215,7 @@ namespace
         }
 
         cellRGBColorAndAlphaPair.background =
-            parseCellColor(usedKeys, node, childPath, "background", terminal::CellBackgroundColor {});
+            parseCellColor(usedKeys, node, childPath, "background", terminal::cell_background_color {});
         if (auto alpha = node["background_alpha"]; alpha && alpha.IsScalar())
         {
             usedKeys.emplace(childPath + ".background_alpha");
@@ -649,10 +650,10 @@ namespace
         if (!strValue.empty())
             cursorConfig.cursorShape = terminal::makeCursorShape(strValue);
 
-        bool boolValue = cursorConfig.cursorDisplay == terminal::CursorDisplay::Blink;
+        bool boolValue = cursorConfig.cursorDisplay == terminal::cursor_display::Blink;
         tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking", boolValue, errorlog());
         cursorConfig.cursorDisplay =
-            boolValue ? terminal::CursorDisplay::Blink : terminal::CursorDisplay::Steady;
+            boolValue ? terminal::cursor_display::Blink : terminal::cursor_display::Steady;
 
         auto uintValue = cursorConfig.cursorBlinkInterval.count();
         tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking_interval", uintValue, errorlog());
@@ -999,7 +1000,7 @@ namespace
         ;
 
         _usedKeys.emplace(_basePath);
-        using terminal::RGBColor;
+        using terminal::rgb_color;
         if (auto def = _node["default"]; def)
         {
             _usedKeys.emplace(_basePath + ".default");
@@ -1072,7 +1073,7 @@ namespace
                 errorlog()(
                     "Deprecated cursor config colorscheme entry. Please update your colorscheme entry for "
                     "cursor.");
-                colors.cursor.color = RGBColor(cursor.as<string>());
+                colors.cursor.color = rgb_color(cursor.as<string>());
             }
             else
                 errorlog()("Invalid cursor config colorscheme entry.");
@@ -1112,7 +1113,7 @@ namespace
                             if (value[0] == '#')
                                 colors.palette[_offset + _index] = value;
                             else if (value.size() > 2 && value[0] == '0' && value[1] == 'x')
-                                colors.palette[_offset + _index] = RGBColor { nodeValue.as<uint32_t>() };
+                                colors.palette[_offset + _index] = rgb_color { nodeValue.as<uint32_t>() };
                         }
                     }
                 };
@@ -1130,9 +1131,9 @@ namespace
             {
                 for (size_t i = 0; i < node.size() && i < 8; ++i)
                     if (node[i].IsScalar())
-                        colors.palette[i] = RGBColor { node[i].as<uint32_t>() };
+                        colors.palette[i] = rgb_color { node[i].as<uint32_t>() };
                     else
-                        colors.palette[i] = RGBColor { node[i].as<string>() };
+                        colors.palette[i] = rgb_color { node[i].as<string>() };
                 return true;
             }
             return false;
@@ -1650,7 +1651,7 @@ namespace
         tryLoadChildRelative(_usedKeys, _profile, basePath, "history.limit", intValue, _logger);
         // value -1 is used for infinite grid
         if (unbox<int>(intValue) == -1)
-            profile.maxHistoryLineCount = Infinite();
+            profile.maxHistoryLineCount = infinite();
         else if (unbox<int>(intValue) > -1)
             profile.maxHistoryLineCount = LineCount(intValue);
         else
@@ -1699,7 +1700,7 @@ namespace
         float floatValue = 1.0;
         tryLoadChildRelative(_usedKeys, _profile, basePath, "background.opacity", floatValue, _logger);
         profile.backgroundOpacity =
-            (terminal::Opacity)(static_cast<unsigned>(255 * clamp(floatValue, 0.0f, 1.0f)));
+            (terminal::opacity)(static_cast<unsigned>(255 * clamp(floatValue, 0.0f, 1.0f)));
         tryLoadChildRelative(
             _usedKeys, _profile, basePath, "background.blur", profile.backgroundBlur, _logger);
 
@@ -1754,9 +1755,9 @@ namespace
         strValue = "none";
         tryLoadChildRelative(_usedKeys, _profile, basePath, "status_line.display", strValue, _logger);
         if (strValue == "indicator")
-            profile.initialStatusDisplayType = terminal::StatusDisplayType::Indicator;
+            profile.initialStatusDisplayType = terminal::status_display_type::Indicator;
         else if (strValue == "none")
-            profile.initialStatusDisplayType = terminal::StatusDisplayType::None;
+            profile.initialStatusDisplayType = terminal::status_display_type::None;
         else
             _logger("Invalid value for config entry {}: {}", "status_line.display", strValue);
 
@@ -1764,9 +1765,9 @@ namespace
         {
             auto const literal = toLower(strValue);
             if (literal == "bottom")
-                profile.statusDisplayPosition = terminal::StatusDisplayPosition::Bottom;
+                profile.statusDisplayPosition = terminal::status_display_position::Bottom;
             else if (literal == "top")
-                profile.statusDisplayPosition = terminal::StatusDisplayPosition::Top;
+                profile.statusDisplayPosition = terminal::status_display_position::Top;
             else
                 _logger("Invalid value for config entry {}: {}", "status_line.position", strValue);
         }

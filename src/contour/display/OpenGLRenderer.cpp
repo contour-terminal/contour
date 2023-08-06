@@ -56,10 +56,10 @@ using std::shared_ptr;
 using std::string;
 using std::vector;
 
-using terminal::Height;
-using terminal::ImageSize;
-using terminal::RGBAColor;
-using terminal::Width;
+using terminal::height;
+using terminal::image_size;
+using terminal::rgba_color;
+using terminal::width;
 
 using namespace std::string_view_literals;
 
@@ -410,7 +410,7 @@ int OpenGLRenderer::maxTextureSize()
 }
 
 // {{{ AtlasBackend impl
-ImageSize OpenGLRenderer::atlasSize() const noexcept
+image_size OpenGLRenderer::atlasSize() const noexcept
 {
     return _textureAtlas.textureSize;
 }
@@ -506,7 +506,7 @@ void OpenGLRenderer::renderTile(atlas::RenderTile tile)
 // }}}
 
 // {{{ executor impl
-ImageSize OpenGLRenderer::renderBufferSize()
+image_size OpenGLRenderer::renderBufferSize()
 {
 #if 0
     return renderTargetSize_;
@@ -882,7 +882,7 @@ void OpenGLRenderer::scheduleScreenshot(ScreenshotCallback callback)
     _pendingScreenshotCallback = std::move(callback);
 }
 
-pair<ImageSize, vector<uint8_t>> OpenGLRenderer::takeScreenshot()
+pair<image_size, vector<uint8_t>> OpenGLRenderer::takeScreenshot()
 {
     ImageSize const imageSize = renderBufferSize();
 

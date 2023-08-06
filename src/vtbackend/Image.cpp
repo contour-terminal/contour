@@ -61,14 +61,14 @@ ImagePool::ImagePool(OnImageRemove onImageRemove, ImageId nextImageId):
 {
 }
 
-Image::Data RasterizedImage::fragment(CellLocation pos) const
+Image::Data RasterizedImage::fragment(cell_location pos) const
 {
     // TODO: respect alignment hint
     // TODO: respect resize hint
 
     auto const xOffset = pos.column * unbox<int>(_cellSize.width);
     auto const yOffset = pos.line * unbox<int>(_cellSize.height);
-    auto const pixelOffset = CellLocation { yOffset, xOffset };
+    auto const pixelOffset = cell_location { yOffset, xOffset };
 
     Image::Data fragData;
     fragData.resize(_cellSize.area() * 4); // RGBA
@@ -129,7 +129,7 @@ Image::Data RasterizedImage::fragment(CellLocation pos) const
     return fragData;
 }
 
-shared_ptr<Image const> ImagePool::create(ImageFormat format, ImageSize size, Image::Data&& data)
+shared_ptr<Image const> ImagePool::create(ImageFormat format, image_size size, Image::Data&& data)
 {
     // TODO: This operation should be idempotent, i.e. if that image has been created already, return a
     // reference to that.
@@ -142,9 +142,9 @@ shared_ptr<Image const> ImagePool::create(ImageFormat format, ImageSize size, Im
 shared_ptr<RasterizedImage> ImagePool::rasterize(shared_ptr<Image const> image,
                                                  ImageAlignment alignmentPolicy,
                                                  ImageResize resizePolicy,
-                                                 RGBAColor defaultColor,
-                                                 GridSize cellSpan,
-                                                 ImageSize cellSize)
+                                                 rgba_color defaultColor,
+                                                 grid_size cellSpan,
+                                                 image_size cellSize)
 {
     return make_shared<RasterizedImage>(
         std::move(image), alignmentPolicy, resizePolicy, defaultColor, cellSpan, cellSize);

@@ -32,66 +32,66 @@ TerminalState::TerminalState(Terminal& terminal):
     sequencer { terminal },
     parser { std::ref(sequencer) },
     viCommands { terminal },
-    inputHandler { viCommands, ViMode::Insert }
+    inputHandler { viCommands, vi_mode::Insert }
 {
 }
 
 /// Applies a FunctionDefinition to a given context, emitting the respective command.
-std::string to_string(AnsiMode mode)
+std::string to_string(ansi_mode mode)
 {
     switch (mode)
     {
-        case AnsiMode::KeyboardAction: return "KeyboardAction";
-        case AnsiMode::Insert: return "Insert";
-        case AnsiMode::SendReceive: return "SendReceive";
-        case AnsiMode::AutomaticNewLine: return "AutomaticNewLine";
+        case ansi_mode::KeyboardAction: return "KeyboardAction";
+        case ansi_mode::Insert: return "Insert";
+        case ansi_mode::SendReceive: return "SendReceive";
+        case ansi_mode::AutomaticNewLine: return "AutomaticNewLine";
     }
 
     return fmt::format("({})", static_cast<unsigned>(mode));
 }
 
-std::string to_string(DECMode mode)
+std::string to_string(dec_mode mode)
 {
     switch (mode)
     {
-        case DECMode::UseApplicationCursorKeys: return "UseApplicationCursorKeys";
-        case DECMode::DesignateCharsetUSASCII: return "DesignateCharsetUSASCII";
-        case DECMode::Columns132: return "Columns132";
-        case DECMode::SmoothScroll: return "SmoothScroll";
-        case DECMode::ReverseVideo: return "ReverseVideo";
-        case DECMode::MouseProtocolX10: return "MouseProtocolX10";
-        case DECMode::MouseProtocolNormalTracking: return "MouseProtocolNormalTracking";
-        case DECMode::MouseProtocolHighlightTracking: return "MouseProtocolHighlightTracking";
-        case DECMode::MouseProtocolButtonTracking: return "MouseProtocolButtonTracking";
-        case DECMode::MouseProtocolAnyEventTracking: return "MouseProtocolAnyEventTracking";
-        case DECMode::SaveCursor: return "SaveCursor";
-        case DECMode::ExtendedAltScreen: return "ExtendedAltScreen";
-        case DECMode::Origin: return "Origin";
-        case DECMode::AutoWrap: return "AutoWrap";
-        case DECMode::PrinterExtend: return "PrinterExtend";
-        case DECMode::LeftRightMargin: return "LeftRightMargin";
-        case DECMode::ShowToolbar: return "ShowToolbar";
-        case DECMode::BlinkingCursor: return "BlinkingCursor";
-        case DECMode::VisibleCursor: return "VisibleCursor";
-        case DECMode::ShowScrollbar: return "ShowScrollbar";
-        case DECMode::AllowColumns80to132: return "AllowColumns80to132";
-        case DECMode::DebugLogging: return "DebugLogging";
-        case DECMode::UseAlternateScreen: return "UseAlternateScreen";
-        case DECMode::BracketedPaste: return "BracketedPaste";
-        case DECMode::FocusTracking: return "FocusTracking";
-        case DECMode::NoSixelScrolling: return "NoSixelScrolling";
-        case DECMode::UsePrivateColorRegisters: return "UsePrivateColorRegisters";
-        case DECMode::MouseExtended: return "MouseExtended";
-        case DECMode::MouseSGR: return "MouseSGR";
-        case DECMode::MouseURXVT: return "MouseURXVT";
-        case DECMode::MouseSGRPixels: return "MouseSGRPixels";
-        case DECMode::MouseAlternateScroll: return "MouseAlternateScroll";
-        case DECMode::MousePassiveTracking: return "MousePassiveTracking";
-        case DECMode::ReportGridCellSelection: return "ReportGridCellSelection";
-        case DECMode::BatchedRendering: return "BatchedRendering";
-        case DECMode::Unicode: return "Unicode";
-        case DECMode::TextReflow: return "TextReflow";
-        case DECMode::SixelCursorNextToGraphic: return "SixelCursorNextToGraphic";
+        case dec_mode::UseApplicationCursorKeys: return "UseApplicationCursorKeys";
+        case dec_mode::DesignateCharsetUSASCII: return "DesignateCharsetUSASCII";
+        case dec_mode::Columns132: return "Columns132";
+        case dec_mode::SmoothScroll: return "SmoothScroll";
+        case dec_mode::ReverseVideo: return "ReverseVideo";
+        case dec_mode::MouseProtocolX10: return "MouseProtocolX10";
+        case dec_mode::MouseProtocolNormalTracking: return "MouseProtocolNormalTracking";
+        case dec_mode::MouseProtocolHighlightTracking: return "MouseProtocolHighlightTracking";
+        case dec_mode::MouseProtocolButtonTracking: return "MouseProtocolButtonTracking";
+        case dec_mode::MouseProtocolAnyEventTracking: return "MouseProtocolAnyEventTracking";
+        case dec_mode::SaveCursor: return "SaveCursor";
+        case dec_mode::ExtendedAltScreen: return "ExtendedAltScreen";
+        case dec_mode::Origin: return "Origin";
+        case dec_mode::AutoWrap: return "AutoWrap";
+        case dec_mode::PrinterExtend: return "PrinterExtend";
+        case dec_mode::LeftRightMargin: return "LeftRightMargin";
+        case dec_mode::ShowToolbar: return "ShowToolbar";
+        case dec_mode::BlinkingCursor: return "BlinkingCursor";
+        case dec_mode::VisibleCursor: return "VisibleCursor";
+        case dec_mode::ShowScrollbar: return "ShowScrollbar";
+        case dec_mode::AllowColumns80to132: return "AllowColumns80to132";
+        case dec_mode::DebugLogging: return "DebugLogging";
+        case dec_mode::UseAlternateScreen: return "UseAlternateScreen";
+        case dec_mode::BracketedPaste: return "BracketedPaste";
+        case dec_mode::FocusTracking: return "FocusTracking";
+        case dec_mode::NoSixelScrolling: return "NoSixelScrolling";
+        case dec_mode::UsePrivateColorRegisters: return "UsePrivateColorRegisters";
+        case dec_mode::MouseExtended: return "MouseExtended";
+        case dec_mode::MouseSGR: return "MouseSGR";
+        case dec_mode::MouseURXVT: return "MouseURXVT";
+        case dec_mode::MouseSGRPixels: return "MouseSGRPixels";
+        case dec_mode::MouseAlternateScroll: return "MouseAlternateScroll";
+        case dec_mode::MousePassiveTracking: return "MousePassiveTracking";
+        case dec_mode::ReportGridCellSelection: return "ReportGridCellSelection";
+        case dec_mode::BatchedRendering: return "BatchedRendering";
+        case dec_mode::Unicode: return "Unicode";
+        case dec_mode::TextReflow: return "TextReflow";
+        case dec_mode::SixelCursorNextToGraphic: return "SixelCursorNextToGraphic";
     }
     return fmt::format("({})", static_cast<unsigned>(mode));
 }

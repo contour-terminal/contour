@@ -67,13 +67,13 @@ ColorPalette::Palette const ColorPalette::defaultColorPalette = []() constexpr {
         for (unsigned green = 0; green < 6; ++green)
             for (unsigned blue = 0; blue < 6; ++blue)
                 colors[16 + (red * 36) + (green * 6) + blue] =
-                    RGBColor { static_cast<uint8_t>(red ? (red * 40 + 55) : 0),
-                               static_cast<uint8_t>(green ? (green * 40 + 55) : 0),
-                               static_cast<uint8_t>(blue ? (blue * 40 + 55) : 0) };
+                    rgb_color { static_cast<uint8_t>(red ? (red * 40 + 55) : 0),
+                                static_cast<uint8_t>(green ? (green * 40 + 55) : 0),
+                                static_cast<uint8_t>(blue ? (blue * 40 + 55) : 0) };
 
     // colors 232-255 are a grayscale ramp, intentionally leaving out black and white
     for (uint8_t gray = 0, level = uint8_t(gray * 10 + 8); gray < 24; ++gray, level = uint8_t(gray * 10 + 8))
-        colors[size_t(232 + gray)] = RGBColor { level, level, level };
+        colors[size_t(232 + gray)] = rgb_color { level, level, level };
 
     // dim colors
     colors[256 + 0] = 0x000000_rgb; // black
@@ -108,14 +108,14 @@ void ImageData::updateHash() noexcept
     // clang-format on
 }
 
-RGBColor apply(ColorPalette const& colorPalette, Color color, ColorTarget target, ColorMode mode) noexcept
+rgb_color apply(ColorPalette const& colorPalette, color color, ColorTarget target, ColorMode mode) noexcept
 {
     // clang-format off
     switch (color.type())
     {
-        case ColorType::RGB:
+        case color_type::RGB:
             return color.rgb();
-        case ColorType::Indexed:
+        case color_type::Indexed:
         {
             auto const index = static_cast<size_t>(color.index());
             if (mode == ColorMode::Bright && index < 8)
@@ -126,10 +126,10 @@ RGBColor apply(ColorPalette const& colorPalette, Color color, ColorTarget target
                 return colorPalette.indexedColor(index);
             break;
         }
-        case ColorType::Bright:
+        case color_type::Bright:
             return colorPalette.brightColor(static_cast<size_t>(color.index()));
-        case ColorType::Undefined:
-        case ColorType::Default:
+        case color_type::Undefined:
+        case color_type::Default:
             break;
     }
     // clang-format on

@@ -15,6 +15,8 @@
 
 #include <algorithm>
 
+#include "vtbackend/primitives.h"
+
 using std::clamp;
 using std::fill;
 using std::max;
@@ -49,9 +51,9 @@ namespace
         return static_cast<int8_t>(static_cast<int>(value) - 63);
     }
 
-    constexpr RGBColor rgb(uint8_t r, uint8_t g, uint8_t b)
+    constexpr rgb_color rgb(uint8_t r, uint8_t g, uint8_t b)
     {
-        return RGBColor { r, g, b };
+        return rgb_color { r, g, b };
     }
 
     constexpr double hue2rgb(double p, double q, double t) noexcept
@@ -71,21 +73,21 @@ namespace
 
     using NormalizedValue = double; // normalized value between [0, 1]
 
-    constexpr RGBColor hsl2rgb(NormalizedValue h, NormalizedValue s, NormalizedValue l) noexcept
+    constexpr rgb_color hsl2rgb(NormalizedValue h, NormalizedValue s, NormalizedValue l) noexcept
     {
         // See http://en.wikipedia.org/wiki/HSL_color_space.
 
         if (0 == s)
         {
             auto const grayscale = static_cast<uint8_t>(l * 255.);
-            return RGBColor { grayscale, grayscale, grayscale };
+            return rgb_color { grayscale, grayscale, grayscale };
         }
         else
         {
             auto const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
             auto const p = 2 * l - q;
 
-            auto result = RGBColor {};
+            auto result = rgb_color {};
             result.red = static_cast<uint8_t>(hue2rgb(p, q, h + 1. / 3) * 255);
             result.green = static_cast<uint8_t>(hue2rgb(p, q, h) * 255);
             result.blue = static_cast<uint8_t>(hue2rgb(p, q, h - 1. / 3) * 255);
@@ -96,7 +98,7 @@ namespace
 } // namespace
 
 // VT 340 default color palette (https://www.vt100.net/docs/vt3xx-gp/chapter2.html#S2.4)
-constexpr inline std::array<RGBColor, 16> defaultColors = {
+constexpr inline std::array<rgb_color, 16> defaultColors = {
     rgb(0, 0, 0),       //  0: black
     rgb(51, 51, 204),   //  1: blue
     rgb(204, 33, 33),   //  2: red
@@ -135,7 +137,7 @@ void SixelColorPalette::setSize(unsigned int newSize)
     _palette.resize(static_cast<size_t>(max(0u, min(newSize, _maxSize))));
 }
 
-void SixelColorPalette::setColor(unsigned int index, RGBColor const& color)
+void SixelColorPalette::setColor(unsigned int index, rgb_color const& color)
 {
     if (index < _maxSize)
     {
@@ -147,7 +149,7 @@ void SixelColorPalette::setColor(unsigned int index, RGBColor const& color)
     }
 }
 
-RGBColor SixelColorPalette::at(unsigned int index) const noexcept
+rgb_color SixelColorPalette::at(unsigned int index) const noexcept
 {
     return _palette[index % _palette.size()];
 }
@@ -292,7 +294,7 @@ void SixelParser::leaveState()
 
                 auto const imageSize =
                     _params.size() > 2
-                        ? optional<ImageSize> { ImageSize { Width(_params[2]), Height(_params[3]) } }
+                        ? optional<image_size> { image_size { width(_params[2]), height(_params[3]) } }
                         : std::nullopt;
 
                 _events.setRaster(pan, pad, imageSize);
@@ -322,7 +324,7 @@ void SixelParser::leaveState()
                         auto const p1 = convertValue(_params[2]);
                         auto const p2 = convertValue(_params[3]);
                         auto const p3 = convertValue(_params[4]);
-                        auto const color = RGBColor { p1, p2, p3 }; // TODO: convert HSL if requested
+                        auto const color = rgb_color { p1, p2, p3 }; // TODO: convert HSL if requested
                         _events.setColor(index, color);
                         break;
                     }
@@ -360,14 +362,14 @@ void SixelParser::finalize()
 
 // =================================================================================
 
-SixelImageBuilder::SixelImageBuilder(ImageSize maxSize,
+SixelImageBuilder::SixelImageBuilder(image_size maxSize,
                                      int aspectVertical,
                                      int aspectHorizontal,
-                                     RGBAColor backgroundColor,
+                                     rgba_color backgroundColor,
                                      std::shared_ptr<SixelColorPalette> colorPalette):
     _maxSize { maxSize },
     _colors { std::move(colorPalette) },
-    _size { ImageSize { Width { 1 }, Height { 1 } } },
+    _size { image_size { width { 1 }, height { 1 } } },
     _buffer(_maxSize.area() * 4),
     _sixelCursor {},
     _aspectRatio(static_cast<unsigned int>(
@@ -377,7 +379,7 @@ SixelImageBuilder::SixelImageBuilder(ImageSize maxSize,
     clear(backgroundColor);
 }
 
-void SixelImageBuilder::clear(RGBAColor fillColor)
+void SixelImageBuilder::clear(rgba_color fillColor)
 {
     _sixelCursor = {};
 
@@ -392,16 +394,16 @@ void SixelImageBuilder::clear(RGBAColor fillColor)
     }
 }
 
-RGBAColor SixelImageBuilder::at(CellLocation coord) const noexcept
+rgba_color SixelImageBuilder::at(cell_location coord) const noexcept
 {
     auto const line = unbox<unsigned>(coord.line) % unbox<unsigned>(_size.height);
     auto const col = unbox<unsigned>(coord.column) % unbox<unsigned>(_size.width);
     auto const base = line * unbox<unsigned>(_size.width) * 4 + col * 4;
     const auto* const color = &_buffer[base];
-    return RGBAColor { color[0], color[1], color[2], color[3] };
+    return rgba_color { color[0], color[1], color[2], color[3] };
 }
 
-void SixelImageBuilder::write(CellLocation const& coord, RGBColor const& value) noexcept
+void SixelImageBuilder::write(cell_location const& coord, rgb_color const& value) noexcept
 {
     if (unbox<int>(coord.line) >= 0 && unbox<int>(coord.line) < unbox<int>(_maxSize.height)
         && unbox<int>(coord.column) >= 0 && unbox<int>(coord.column) < unbox<int>(_maxSize.width))
@@ -409,9 +411,9 @@ void SixelImageBuilder::write(CellLocation const& coord, RGBColor const& value) 
         if (!_explicitSize)
         {
             if (unbox<int>(coord.line) >= unbox<int>(_size.height))
-                _size.height = Height::cast_from(coord.line.as<unsigned int>() + _aspectRatio);
+                _size.height = height::cast_from(coord.line.as<unsigned int>() + _aspectRatio);
             if (unbox<int>(coord.column) >= unbox<int>(_size.width))
-                _size.width = Width::cast_from(coord.column + 1);
+                _size.width = width::cast_from(coord.column + 1);
         }
 
         for (unsigned int i = 0; i < _aspectRatio; ++i)
@@ -427,7 +429,7 @@ void SixelImageBuilder::write(CellLocation const& coord, RGBColor const& value) 
     }
 }
 
-void SixelImageBuilder::setColor(unsigned index, RGBColor const& color)
+void SixelImageBuilder::setColor(unsigned index, rgb_color const& color)
 {
     _colors->setColor(index, color);
 }
@@ -447,10 +449,10 @@ void SixelImageBuilder::newline()
     _sixelCursor.column = {};
     if (unbox<unsigned int>(_sixelCursor.line) + _sixelBandHeight
         < unbox<unsigned int>(_explicitSize ? _size.height : _maxSize.height))
-        _sixelCursor.line = LineOffset::cast_from(_sixelCursor.line.as<unsigned int>() + _sixelBandHeight);
+        _sixelCursor.line = line_offset::cast_from(_sixelCursor.line.as<unsigned int>() + _sixelBandHeight);
 }
 
-void SixelImageBuilder::setRaster(unsigned int pan, unsigned int pad, optional<ImageSize> imageSize)
+void SixelImageBuilder::setRaster(unsigned int pan, unsigned int pad, optional<image_size> imageSize)
 {
     if (pad != 0)
         _aspectRatio =
@@ -458,9 +460,9 @@ void SixelImageBuilder::setRaster(unsigned int pan, unsigned int pad, optional<I
     _sixelBandHeight = 6 * _aspectRatio;
     if (imageSize)
     {
-        imageSize->height = Height::cast_from(imageSize->height.value * _aspectRatio);
-        _size.width = clamp(imageSize->width, Width(0), _maxSize.width);
-        _size.height = clamp(imageSize->height, Height(0), _maxSize.height);
+        imageSize->height = height::cast_from(imageSize->height.value * _aspectRatio);
+        _size.width = clamp(imageSize->width, width(0), _maxSize.width);
+        _size.height = clamp(imageSize->height, height(0), _maxSize.height);
         _buffer.resize(_size.area() * 4);
         _explicitSize = true;
     }
@@ -475,7 +477,7 @@ void SixelImageBuilder::render(int8_t sixel)
         for (unsigned int i = 0; i < 6; ++i)
         {
             auto const y = _sixelCursor.line + static_cast<int>(i * _aspectRatio);
-            auto const pos = CellLocation { y, x };
+            auto const pos = cell_location { y, x };
             auto const pin = 1 << i;
             auto const pinned = (sixel & pin) != 0;
             if (pinned)
@@ -489,7 +491,7 @@ void SixelImageBuilder::finalize()
 {
     if (unbox<int>(_size.height) == 1)
     {
-        _size.height = Height::cast_from(_sixelCursor.line.as<unsigned int>() * _aspectRatio);
+        _size.height = height::cast_from(_sixelCursor.line.as<unsigned int>() * _aspectRatio);
         _buffer.resize(_size.area() * 4);
         return;
     }

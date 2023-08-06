@@ -23,7 +23,7 @@
 namespace terminal::rasterizer
 {
 
-BackgroundRenderer::BackgroundRenderer(GridMetrics const& gridMetrics, RGBColor const& defaultColor):
+BackgroundRenderer::BackgroundRenderer(GridMetrics const& gridMetrics, rgb_color const& defaultColor):
     Renderable { gridMetrics }, _defaultColor { defaultColor }
 {
 }
@@ -38,29 +38,29 @@ void BackgroundRenderer::renderLine(RenderLine const& line)
 {
     if (line.textAttributes.backgroundColor != _defaultColor)
     {
-        auto const position = CellLocation { line.lineOffset, ColumnOffset(0) };
+        auto const position = cell_location { line.lineOffset, column_offset(0) };
         auto const pos = _gridMetrics.mapTopLeft(position);
-        auto const width = _gridMetrics.cellSize.width * Width::cast_from(line.usedColumns);
+        auto const width = _gridMetrics.cellSize.width * width::cast_from(line.usedColumns);
 
         renderTarget().renderRectangle(pos.x,
                                        pos.y,
                                        width,
                                        _gridMetrics.cellSize.height,
-                                       RGBAColor(line.textAttributes.backgroundColor, _opacity));
+                                       rgba_color(line.textAttributes.backgroundColor, _opacity));
     }
 
     if (line.fillAttributes.backgroundColor != _defaultColor)
     {
-        auto const position = CellLocation { line.lineOffset, boxed_cast<ColumnOffset>(line.usedColumns) };
+        auto const position = cell_location { line.lineOffset, boxed_cast<column_offset>(line.usedColumns) };
         auto const pos = _gridMetrics.mapTopLeft(position);
         auto const width =
-            _gridMetrics.cellSize.width * Width::cast_from(line.displayWidth - line.usedColumns);
+            _gridMetrics.cellSize.width * width::cast_from(line.displayWidth - line.usedColumns);
 
         renderTarget().renderRectangle(pos.x,
                                        pos.y,
                                        width,
                                        _gridMetrics.cellSize.height,
-                                       RGBAColor(line.fillAttributes.backgroundColor, _opacity));
+                                       rgba_color(line.fillAttributes.backgroundColor, _opacity));
     }
 }
 
@@ -73,9 +73,9 @@ void BackgroundRenderer::renderCell(RenderCell const& cell)
 
     renderTarget().renderRectangle(pos.x,
                                    pos.y,
-                                   _gridMetrics.cellSize.width * Width::cast_from(cell.width),
+                                   _gridMetrics.cellSize.width * width::cast_from(cell.width),
                                    _gridMetrics.cellSize.height,
-                                   RGBAColor(cell.attributes.backgroundColor, _opacity));
+                                   rgba_color(cell.attributes.backgroundColor, _opacity));
 }
 
 void BackgroundRenderer::inspect(std::ostream& /*output*/) const

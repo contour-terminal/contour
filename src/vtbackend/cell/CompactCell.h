@@ -52,7 +52,7 @@ struct CellExtra
     std::u32string codepoints = {};
 
     /// Color for underline decoration (such as curly underline).
-    Color underlineColor = DefaultColor();
+    color underlineColor = DefaultColor();
 
     /// With OSC-8 a hyperlink can be associated with a range of terminal cells.
     HyperlinkId hyperlink = {};
@@ -61,7 +61,7 @@ struct CellExtra
     std::shared_ptr<ImageFragment> imageFragment = nullptr;
 
     /// Cell flags.
-    CellFlags flags = CellFlags::None;
+    cell_flags flags = cell_flags::None;
 
     /// In terminals, the Unicode's East asian Width property is used to determine the
     /// number of columns, a graphical character is spanning.
@@ -108,27 +108,27 @@ class CRISPY_PACKED CompactCell
     [[nodiscard]] constexpr uint8_t width() const noexcept;
     void setWidth(uint8_t width) noexcept;
 
-    [[nodiscard]] CellFlags flags() const noexcept;
+    [[nodiscard]] cell_flags flags() const noexcept;
 
-    [[nodiscard]] bool isFlagEnabled(CellFlags testFlags) const noexcept { return flags() & testFlags; }
+    [[nodiscard]] bool isFlagEnabled(cell_flags testFlags) const noexcept { return flags() & testFlags; }
 
     void resetFlags() noexcept
     {
         if (_extra)
-            _extra->flags = CellFlags::None;
+            _extra->flags = cell_flags::None;
     }
 
-    void resetFlags(CellFlags flags) noexcept { extra().flags = flags; }
+    void resetFlags(cell_flags flags) noexcept { extra().flags = flags; }
 
-    [[nodiscard]] Color underlineColor() const noexcept;
-    void setUnderlineColor(Color color) noexcept;
-    [[nodiscard]] Color foregroundColor() const noexcept;
-    void setForegroundColor(Color color) noexcept;
-    [[nodiscard]] Color backgroundColor() const noexcept;
-    void setBackgroundColor(Color color) noexcept;
+    [[nodiscard]] color underlineColor() const noexcept;
+    void setUnderlineColor(color color) noexcept;
+    [[nodiscard]] color foregroundColor() const noexcept;
+    void setForegroundColor(color color) noexcept;
+    [[nodiscard]] color backgroundColor() const noexcept;
+    void setBackgroundColor(color color) noexcept;
 
     [[nodiscard]] std::shared_ptr<ImageFragment> imageFragment() const noexcept;
-    void setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, CellLocation offset);
+    void setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage, cell_location offset);
 
     void setCharacter(char32_t codepoint) noexcept;
     [[nodiscard]] int appendCharacter(char32_t codepoint) noexcept;
@@ -139,7 +139,7 @@ class CRISPY_PACKED CompactCell
 
     [[nodiscard]] bool empty() const noexcept;
 
-    void setGraphicsRendition(GraphicsRendition sgr) noexcept;
+    void setGraphicsRendition(graphics_rendition sgr) noexcept;
 
   private:
     [[nodiscard]] CellExtra& extra() noexcept;
@@ -149,8 +149,8 @@ class CRISPY_PACKED CompactCell
 
     // CompactCell data
     char32_t _codepoint = 0; /// Primary Unicode codepoint to be displayed.
-    Color _foregroundColor = DefaultColor();
-    Color _backgroundColor = DefaultColor();
+    color _foregroundColor = DefaultColor();
+    color _backgroundColor = DefaultColor();
     crispy::Owned<CellExtra> _extra = {};
     // TODO(perf) ^^ use CellExtraId = boxed<int24_t> into pre-alloc'ed vector<CellExtra>.
 };
@@ -183,7 +183,7 @@ inline CompactCell::CompactCell(GraphicsAttributes attributes, HyperlinkId hyper
     if (attributes.underlineColor != DefaultColor() || _extra)
         extra().underlineColor = attributes.underlineColor;
 
-    if (attributes.flags != CellFlags::None || _extra)
+    if (attributes.flags != cell_flags::None || _extra)
         extra().flags = attributes.flags;
 }
 
@@ -221,7 +221,7 @@ inline void CompactCell::reset(GraphicsAttributes const& attributes) noexcept
     _foregroundColor = attributes.foregroundColor;
     _backgroundColor = attributes.backgroundColor;
     _extra.reset();
-    if (attributes.flags != CellFlags::None)
+    if (attributes.flags != cell_flags::None)
         extra().flags = attributes.flags;
     if (attributes.underlineColor != DefaultColor())
         extra().underlineColor = attributes.underlineColor;
@@ -241,7 +241,7 @@ inline void CompactCell::write(GraphicsAttributes const& attributes, char32_t ch
     _foregroundColor = attributes.foregroundColor;
     _backgroundColor = attributes.backgroundColor;
 
-    if (attributes.flags != CellFlags::None || _extra)
+    if (attributes.flags != cell_flags::None || _extra)
         extra().flags = attributes.flags;
 
     if (attributes.underlineColor != DefaultColor())
@@ -263,7 +263,7 @@ inline void CompactCell::write(GraphicsAttributes const& attributes,
     _foregroundColor = attributes.foregroundColor;
     _backgroundColor = attributes.backgroundColor;
 
-    if (attributes.flags != CellFlags::None || _extra || attributes.underlineColor != DefaultColor()
+    if (attributes.flags != cell_flags::None || _extra || attributes.underlineColor != DefaultColor()
         || !!hyperlink)
     {
         CellExtra& ext = extra();
@@ -290,7 +290,7 @@ inline void CompactCell::reset(GraphicsAttributes const& attributes, HyperlinkId
     _extra.reset();
     if (attributes.underlineColor != DefaultColor())
         extra().underlineColor = attributes.underlineColor;
-    if (attributes.flags != CellFlags::None)
+    if (attributes.flags != cell_flags::None)
         extra().flags = attributes.flags;
     if (hyperlink != HyperlinkId())
         extra().hyperlink = hyperlink;
@@ -379,35 +379,35 @@ inline CellExtra& CompactCell::extra() noexcept
     return *_extra;
 }
 
-inline CellFlags CompactCell::flags() const noexcept
+inline cell_flags CompactCell::flags() const noexcept
 {
     if (!_extra)
-        return CellFlags::None;
+        return cell_flags::None;
     else
         return const_cast<CompactCell*>(this)->_extra->flags;
 }
 
-inline Color CompactCell::foregroundColor() const noexcept
+inline color CompactCell::foregroundColor() const noexcept
 {
     return _foregroundColor;
 }
 
-inline void CompactCell::setForegroundColor(Color color) noexcept
+inline void CompactCell::setForegroundColor(color color) noexcept
 {
     _foregroundColor = color;
 }
 
-inline Color CompactCell::backgroundColor() const noexcept
+inline color CompactCell::backgroundColor() const noexcept
 {
     return _backgroundColor;
 }
 
-inline void CompactCell::setBackgroundColor(Color color) noexcept
+inline void CompactCell::setBackgroundColor(color color) noexcept
 {
     _backgroundColor = color;
 }
 
-inline Color CompactCell::underlineColor() const noexcept
+inline color CompactCell::underlineColor() const noexcept
 {
     if (!_extra)
         return DefaultColor();
@@ -415,7 +415,7 @@ inline Color CompactCell::underlineColor() const noexcept
         return _extra->underlineColor;
 }
 
-inline void CompactCell::setUnderlineColor(Color color) noexcept
+inline void CompactCell::setUnderlineColor(color color) noexcept
 {
     if (_extra)
         _extra->underlineColor = color;
@@ -432,7 +432,7 @@ inline std::shared_ptr<ImageFragment> CompactCell::imageFragment() const noexcep
 }
 
 inline void CompactCell::setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage,
-                                          CellLocation offset)
+                                          cell_location offset)
 {
     CellExtra& ext = extra();
     ext.imageFragment = std::make_shared<ImageFragment>(std::move(rasterizedImage), offset);
@@ -459,7 +459,7 @@ inline bool CompactCell::empty() const noexcept
     return CellUtil::empty(*this);
 }
 
-inline void CompactCell::setGraphicsRendition(GraphicsRendition sgr) noexcept
+inline void CompactCell::setGraphicsRendition(graphics_rendition sgr) noexcept
 {
     CellUtil::applyGraphicsRendition(sgr, *this);
 }

@@ -39,7 +39,7 @@ struct ImageData
 {
     terminal::ImageFormat format;
     int rowAlignment = 1;
-    ImageSize size;
+    image_size size;
     std::vector<uint8_t> pixels;
 
     crispy::StrongHash hash;
@@ -63,7 +63,7 @@ struct BackgroundImage
 
 struct ColorPalette
 {
-    using Palette = std::array<RGBColor, 256 + 8>;
+    using Palette = std::array<rgb_color, 256 + 8>;
 
     /// Indicates whether or not bright colors are being allowed
     /// for indexed colors between 0..7 and mode set to ColorMode::Bright.
@@ -80,64 +80,64 @@ struct ColorPalette
 
     Palette palette = defaultColorPalette;
 
-    [[nodiscard]] RGBColor normalColor(size_t index) const noexcept
+    [[nodiscard]] rgb_color normalColor(size_t index) const noexcept
     {
         assert(index < 8);
         return palette.at(index);
     }
 
-    [[nodiscard]] RGBColor brightColor(size_t index) const noexcept
+    [[nodiscard]] rgb_color brightColor(size_t index) const noexcept
     {
         assert(index < 8);
         return palette.at(index + 8);
     }
 
-    [[nodiscard]] RGBColor dimColor(size_t index) const noexcept
+    [[nodiscard]] rgb_color dimColor(size_t index) const noexcept
     {
         assert(index < 8);
         return palette[256 + index];
     }
 
-    [[nodiscard]] RGBColor indexedColor(size_t index) const noexcept
+    [[nodiscard]] rgb_color indexedColor(size_t index) const noexcept
     {
         assert(index < 256);
         return palette.at(index);
     }
 
-    RGBColor defaultForeground = 0xD0D0D0_rgb;
-    RGBColor defaultBackground = 0x000000_rgb;
+    rgb_color defaultForeground = 0xD0D0D0_rgb;
+    rgb_color defaultBackground = 0x000000_rgb;
 
-    CursorColor cursor;
+    cursor_color cursor;
 
-    RGBColor mouseForeground = 0x800000_rgb;
-    RGBColor mouseBackground = 0x808000_rgb;
+    rgb_color mouseForeground = 0x800000_rgb;
+    rgb_color mouseBackground = 0x808000_rgb;
 
     struct
     {
-        RGBColor normal = 0x0070F0_rgb;
-        RGBColor hover = 0xFF0000_rgb;
+        rgb_color normal = 0x0070F0_rgb;
+        rgb_color hover = 0xFF0000_rgb;
     } hyperlinkDecoration;
 
-    RGBColorPair inputMethodEditor = { 0xFFFFFF_rgb, 0xFF0000_rgb };
+    rgb_color_pair inputMethodEditor = { 0xFFFFFF_rgb, 0xFF0000_rgb };
 
     std::shared_ptr<BackgroundImage const> backgroundImage;
 
     // clang-format off
-    CellRGBColorAndAlphaPair yankHighlight { CellForegroundColor {}, 1.0f, 0xffA500_rgb, 0.5f };
+    cell_rgb_color_and_alpha_pair yankHighlight { cell_foreground_color {}, 1.0f, 0xffA500_rgb, 0.5f };
 
-    CellRGBColorAndAlphaPair searchHighlight { CellBackgroundColor {}, 1.0f, CellForegroundColor {}, 1.0f };
-    CellRGBColorAndAlphaPair searchHighlightFocused { CellForegroundColor {}, 1.0f, RGBColor{0xFF, 0x30, 0x30}, 0.5f };
+    cell_rgb_color_and_alpha_pair searchHighlight { cell_background_color {}, 1.0f, cell_foreground_color {}, 1.0f };
+    cell_rgb_color_and_alpha_pair searchHighlightFocused { cell_foreground_color {}, 1.0f, rgb_color{0xFF, 0x30, 0x30}, 0.5f };
 
-    CellRGBColorAndAlphaPair wordHighlight { CellForegroundColor {}, 1.0f, RGBColor{0x30, 0x90, 0x90}, 0.4f };
-    CellRGBColorAndAlphaPair wordHighlightCurrent { CellForegroundColor {}, 1.0f, RGBColor{0x90, 0x90, 0x90}, 0.6f };
+    cell_rgb_color_and_alpha_pair wordHighlight { cell_foreground_color {}, 1.0f, rgb_color{0x30, 0x90, 0x90}, 0.4f };
+    cell_rgb_color_and_alpha_pair wordHighlightCurrent { cell_foreground_color {}, 1.0f, rgb_color{0x90, 0x90, 0x90}, 0.6f };
 
-    CellRGBColorAndAlphaPair selection { CellBackgroundColor {}, 1.0f, CellForegroundColor {}, 1.0f };
+    cell_rgb_color_and_alpha_pair selection { cell_background_color {}, 1.0f, cell_foreground_color {}, 1.0f };
 
-    CellRGBColorAndAlphaPair normalModeCursorline = { 0xFFFFFF_rgb, 0.2f, 0x808080_rgb, 0.8f };
+    cell_rgb_color_and_alpha_pair normalModeCursorline = { 0xFFFFFF_rgb, 0.2f, 0x808080_rgb, 0.8f };
     // clang-format on
 
-    RGBColorPair indicatorStatusLine = { 0x000000_rgb, 0x808080_rgb };
-    RGBColorPair indicatorStatusLineInactive = { 0x000000_rgb, 0x808080_rgb };
+    rgb_color_pair indicatorStatusLine = { 0x000000_rgb, 0x808080_rgb };
+    rgb_color_pair indicatorStatusLineInactive = { 0x000000_rgb, 0x808080_rgb };
 };
 
 enum class ColorTarget
@@ -153,7 +153,7 @@ enum class ColorMode
     Bright
 };
 
-RGBColor apply(ColorPalette const& colorPalette, Color color, ColorTarget target, ColorMode mode) noexcept;
+rgb_color apply(ColorPalette const& colorPalette, color color, ColorTarget target, ColorMode mode) noexcept;
 
 } // namespace terminal
 

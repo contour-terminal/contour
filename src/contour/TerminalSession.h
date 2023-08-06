@@ -106,7 +106,7 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     }
     QColor getBackgroundColor() const noexcept
     {
-        auto color = terminal().isModeEnabled(terminal::DECMode::ReverseVideo)
+        auto color = terminal().isModeEnabled(terminal::dec_mode::ReverseVideo)
                          ? profile_.colors.defaultForeground
                          : profile_.colors.defaultBackground;
         return QColor(color.red, color.green, color.blue, static_cast<uint8_t>(profile_.backgroundOpacity));
@@ -138,7 +138,7 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
 
     bool getIsScrollbarVisible() const noexcept
     {
-        if ((currentScreenType_ == terminal::ScreenType::Alternate) && profile().hideScrollbarInAltScreen)
+        if ((currentScreenType_ == terminal::screen_type::Alternate) && profile().hideScrollbarInAltScreen)
             return false;
         return profile().scrollbarPosition != config::ScrollBarPosition::Hidden;
     }
@@ -153,10 +153,10 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     int scrollOffset() const noexcept { return unbox<int>(terminal().viewport().scrollOffset()); }
     void setScrollOffset(int value)
     {
-        terminal().viewport().scrollTo(terminal::ScrollOffset::cast_from(value));
+        terminal().viewport().scrollTo(terminal::scroll_offset::cast_from(value));
     }
 
-    void onScrollOffsetChanged(terminal::ScrollOffset value) override
+    void onScrollOffsetChanged(terminal::scroll_offset value) override
     {
         emit scrollOffsetChanged(unbox<int>(value));
     }
@@ -197,7 +197,7 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     terminal::Pty& pty() noexcept { return terminal_.device(); }
     terminal::Terminal& terminal() noexcept { return terminal_; }
     terminal::Terminal const& terminal() const noexcept { return terminal_; }
-    terminal::ScreenType currentScreenType() const noexcept { return currentScreenType_; }
+    terminal::screen_type currentScreenType() const noexcept { return currentScreenType_; }
 
     display::TerminalWidget* display() noexcept { return display_; }
     display::TerminalWidget const* display() const noexcept { return display_; }
@@ -214,7 +214,7 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     //
     void requestCaptureBuffer(terminal::LineCount lineCount, bool logical) override;
     void bell() override;
-    void bufferChanged(terminal::ScreenType) override;
+    void bufferChanged(terminal::screen_type) override;
     void renderBufferUpdated() override;
     void screenUpdated() override;
     terminal::FontDef getFontDef() override;
@@ -226,11 +226,11 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     void pasteFromClipboard(unsigned count, bool strip) override;
     void onSelectionCompleted() override;
     void requestWindowResize(terminal::LineCount, terminal::ColumnCount) override;
-    void requestWindowResize(terminal::Width, terminal::Height) override;
+    void requestWindowResize(terminal::width, terminal::height) override;
     void setWindowTitle(std::string_view _title) override;
     void setTerminalProfile(std::string const& _configProfileName) override;
     void discardImage(terminal::Image const&) override;
-    void inputModeChanged(terminal::ViMode mode) override;
+    void inputModeChanged(terminal::vi_mode mode) override;
     void updateHighlights() override;
     void playSound(terminal::Sequence::Parameters const& params_) override;
     void cursorPositionChanged() override;
@@ -242,13 +242,13 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
 
     void sendMousePressEvent(terminal::Modifier _modifier,
                              terminal::MouseButton _button,
-                             terminal::PixelCoordinate _pixelPosition);
+                             terminal::pixel_coordinate _pixelPosition);
     void sendMouseMoveEvent(terminal::Modifier _modifier,
-                            terminal::CellLocation _pos,
-                            terminal::PixelCoordinate _pixelPosition);
+                            terminal::cell_location _pos,
+                            terminal::pixel_coordinate _pixelPosition);
     void sendMouseReleaseEvent(terminal::Modifier _modifier,
                                terminal::MouseButton _button,
-                               terminal::PixelCoordinate _pixelPosition);
+                               terminal::pixel_coordinate _pixelPosition);
 
     void sendFocusInEvent();
     void sendFocusOutEvent();
@@ -386,8 +386,8 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
 
     // state vars
     //
-    terminal::ScreenType currentScreenType_ = terminal::ScreenType::Primary;
-    terminal::CellLocation currentMousePosition_ = terminal::CellLocation {};
+    terminal::screen_type currentScreenType_ = terminal::screen_type::Primary;
+    terminal::cell_location currentMousePosition_ = terminal::cell_location {};
     bool allowKeyMappings_ = true;
     Audio audio;
     std::vector<int> musicalNotesBuffer_;
@@ -425,7 +425,7 @@ struct formatter<contour::GuardedRole>
     {
         switch (value)
         {
-            // clang-format off
+                // clang-format off
             case contour::GuardedRole::ChangeFont: return fmt::format_to(ctx.out(), "Change Font");
             case contour::GuardedRole::CaptureBuffer: return fmt::format_to(ctx.out(), "Capture Buffer");
             case contour::GuardedRole::ShowHostWritableStatusLine:  return fmt::format_to(ctx.out(), "show Host Writable Statusline");

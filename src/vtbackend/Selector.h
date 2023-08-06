@@ -33,10 +33,10 @@ struct SelectionHelper
 {
     virtual ~SelectionHelper() = default;
     [[nodiscard]] virtual PageSize pageSize() const noexcept = 0;
-    [[nodiscard]] virtual bool wordDelimited(CellLocation pos) const noexcept = 0;
-    [[nodiscard]] virtual bool wrappedLine(LineOffset line) const noexcept = 0;
-    [[nodiscard]] virtual bool cellEmpty(CellLocation pos) const noexcept = 0;
-    [[nodiscard]] virtual int cellWidth(CellLocation pos) const noexcept = 0;
+    [[nodiscard]] virtual bool wordDelimited(cell_location pos) const noexcept = 0;
+    [[nodiscard]] virtual bool wrappedLine(line_offset line) const noexcept = 0;
+    [[nodiscard]] virtual bool cellEmpty(cell_location pos) const noexcept = 0;
+    [[nodiscard]] virtual int cellWidth(cell_location pos) const noexcept = 0;
 };
 
 /**
@@ -76,13 +76,13 @@ class Selection
     };
 
     /// Defines a columnar range at a given line.
-    using Range = ColumnRange;
+    using Range = column_range;
 
     using OnSelectionUpdated = std::function<void()>;
 
     Selection(SelectionHelper const& helper,
-              ViMode viMode,
-              CellLocation start,
+              vi_mode viMode,
+              cell_location start,
               OnSelectionUpdated onSelectionUpdated):
         _helper { helper },
         _viMode { viMode },
@@ -94,22 +94,22 @@ class Selection
 
     virtual ~Selection() = default;
 
-    constexpr CellLocation from() const noexcept { return _from; }
-    constexpr CellLocation to() const noexcept { return _to; }
+    constexpr cell_location from() const noexcept { return _from; }
+    constexpr cell_location to() const noexcept { return _to; }
 
     /// @returns boolean indicating whether or not given absolute coordinate is within the range of the
     /// selection.
-    [[nodiscard]] virtual bool contains(CellLocation coord) const noexcept;
-    [[nodiscard]] bool containsLine(LineOffset line) const noexcept;
-    [[nodiscard]] virtual bool intersects(Rect area) const noexcept;
+    [[nodiscard]] virtual bool contains(cell_location coord) const noexcept;
+    [[nodiscard]] bool containsLine(line_offset line) const noexcept;
+    [[nodiscard]] virtual bool intersects(rect area) const noexcept;
 
-    [[nodiscard]] ViMode viMode() const noexcept { return _viMode; }
+    [[nodiscard]] vi_mode viMode() const noexcept { return _viMode; }
 
     /// Tests whether the a selection is currently in progress.
     [[nodiscard]] constexpr State state() const noexcept { return _state; }
 
     /// Extends the selection to the given coordinate.
-    [[nodiscard]] virtual bool extend(CellLocation to);
+    [[nodiscard]] virtual bool extend(cell_location to);
 
     /// Constructs a vector of ranges for this selection.
     [[nodiscard]] virtual std::vector<Range> ranges() const;
@@ -118,65 +118,67 @@ class Selection
     void complete();
 
     /// Applies any scroll action to the line offsets.
-    void applyScroll(LineOffset value, LineCount historyLineCount);
+    void applyScroll(line_offset value, LineCount historyLineCount);
 
-    static CellLocation stretchedColumn(SelectionHelper const& gridHelper, CellLocation coord) noexcept;
+    static cell_location stretchedColumn(SelectionHelper const& gridHelper, cell_location coord) noexcept;
 
   protected:
     State _state = State::Waiting;
     SelectionHelper const& _helper;
-    ViMode _viMode;
+    vi_mode _viMode;
     OnSelectionUpdated _onSelectionUpdated;
-    CellLocation _from;
-    CellLocation _to;
+    cell_location _from;
+    cell_location _to;
 };
 
 class RectangularSelection: public Selection
 {
   public:
     RectangularSelection(SelectionHelper const& helper,
-                         CellLocation start,
+                         cell_location start,
                          OnSelectionUpdated onSelectionUpdated);
-    [[nodiscard]] bool contains(CellLocation coord) const noexcept override;
-    [[nodiscard]] bool intersects(Rect area) const noexcept override;
+    [[nodiscard]] bool contains(cell_location coord) const noexcept override;
+    [[nodiscard]] bool intersects(rect area) const noexcept override;
     [[nodiscard]] std::vector<Range> ranges() const override;
 };
 
 class LinearSelection final: public Selection
 {
   public:
-    LinearSelection(SelectionHelper const& helper, CellLocation start, OnSelectionUpdated onSelectionUpdated);
+    LinearSelection(SelectionHelper const& helper,
+                    cell_location start,
+                    OnSelectionUpdated onSelectionUpdated);
 };
 
 class WordWiseSelection final: public Selection
 {
   public:
     WordWiseSelection(SelectionHelper const& helper,
-                      CellLocation start,
+                      cell_location start,
                       OnSelectionUpdated onSelectionUpdated);
 
-    bool extend(CellLocation to) override;
+    bool extend(cell_location to) override;
 
-    [[nodiscard]] CellLocation extendSelectionBackward(CellLocation pos) const noexcept;
-    [[nodiscard]] CellLocation extendSelectionForward(CellLocation pos) const noexcept;
+    [[nodiscard]] cell_location extendSelectionBackward(cell_location pos) const noexcept;
+    [[nodiscard]] cell_location extendSelectionForward(cell_location pos) const noexcept;
 };
 
 class FullLineSelection final: public Selection
 {
   public:
     explicit FullLineSelection(SelectionHelper const& helper,
-                               CellLocation start,
+                               cell_location start,
                                OnSelectionUpdated onSelectionUpdated);
-    bool extend(CellLocation to) override;
+    bool extend(cell_location to) override;
 };
 
 template <typename Renderer>
 void renderSelection(Selection const& selection, Renderer&& render);
 
 // {{{ impl
-inline void Selection::applyScroll(LineOffset value, LineCount historyLineCount)
+inline void Selection::applyScroll(line_offset value, LineCount historyLineCount)
 {
-    auto const n = -boxed_cast<LineOffset>(historyLineCount);
+    auto const n = -boxed_cast<line_offset>(historyLineCount);
 
     _from.line = std::max(_from.line - value, n);
     _to.line = std::max(_to.line - value, n);
@@ -187,7 +189,7 @@ void renderSelection(Selection const& selection, Renderer&& render)
 {
     for (Selection::Range const& range: selection.ranges())
         for (auto const col: crispy::times(*range.fromColumn, *range.length()))
-            render(CellLocation { range.line, ColumnOffset::cast_from(col) });
+            render(cell_location { range.line, column_offset::cast_from(col) });
 }
 // }}}
 

@@ -70,7 +70,7 @@ namespace
     }
 } // namespace
 
-ViInputHandler::ViInputHandler(Executor& theExecutor, ViMode initialMode):
+ViInputHandler::ViInputHandler(Executor& theExecutor, vi_mode initialMode):
     _viMode { initialMode }, _executor { theExecutor }
 {
     registerAllCommands();
@@ -156,8 +156,8 @@ void ViInputHandler::registerAllCommands()
             registerCommand(
                 modeSelect, motionChar, [this, motion = motion]() { _executor.moveCursor(motion, count()); });
 
-        registerCommand(modeSelect, "J", [this]() { _executor.scrollViewport(ScrollOffset(-1)); _executor.moveCursor(ViMotion::LineDown, 1);});
-        registerCommand(modeSelect, "K", [this]() { _executor.scrollViewport(ScrollOffset(+1)); _executor.moveCursor(ViMotion::LineUp, 1);});
+        registerCommand(modeSelect, "J", [this]() { _executor.scrollViewport(scroll_offset(-1)); _executor.moveCursor(ViMotion::LineDown, 1);});
+        registerCommand(modeSelect, "K", [this]() { _executor.scrollViewport(scroll_offset(+1)); _executor.moveCursor(ViMotion::LineUp, 1);});
 
         registerCommand(modeSelect, "t.", [this]() { _executor.moveCursor(ViMotion::TillBeforeCharRight, count(), _lastChar); });
         registerCommand(modeSelect, "T.", [this]() { _executor.moveCursor(ViMotion::TillAfterCharLeft, count(), _lastChar); });
@@ -167,12 +167,12 @@ void ViInputHandler::registerAllCommands()
         registerCommand(modeSelect, ",", [this]() { _executor.moveCursor(ViMotion::RepeatCharMoveReverse, count()); });
     }
 
-    registerCommand(ModeSelect::Normal, "a", [this]() { setMode(ViMode::Insert); });
-    registerCommand(ModeSelect::Normal, "i", [this]() { setMode(ViMode::Insert); });
-    registerCommand(ModeSelect::Normal, "<Insert>", [this]() { setMode(ViMode::Insert); });
-    registerCommand(ModeSelect::Normal, "v", [this]() { toggleMode(ViMode::Visual); });
-    registerCommand(ModeSelect::Normal, "V", [this]() { toggleMode(ViMode::VisualLine); });
-    registerCommand(ModeSelect::Normal, "C-V", [this]() { toggleMode(ViMode::VisualBlock); });
+    registerCommand(ModeSelect::Normal, "a", [this]() { setMode(vi_mode::Insert); });
+    registerCommand(ModeSelect::Normal, "i", [this]() { setMode(vi_mode::Insert); });
+    registerCommand(ModeSelect::Normal, "<Insert>", [this]() { setMode(vi_mode::Insert); });
+    registerCommand(ModeSelect::Normal, "v", [this]() { toggleMode(vi_mode::Visual); });
+    registerCommand(ModeSelect::Normal, "V", [this]() { toggleMode(vi_mode::VisualLine); });
+    registerCommand(ModeSelect::Normal, "C-V", [this]() { toggleMode(vi_mode::VisualBlock); });
     registerCommand(ModeSelect::Normal, "/", [this]() { startSearch(); });
     registerCommand(ModeSelect::Normal, "#", [this]() { _executor.reverseSearchCurrentWord(); });
     registerCommand(ModeSelect::Normal, "mm", [this]() { _executor.toggleLineMark(); });
@@ -205,10 +205,10 @@ void ViInputHandler::registerAllCommands()
     registerCommand(ModeSelect::Visual, "y", [this]() {
         _executor.execute(ViOperator::Yank, ViMotion::Selection, count());
     });
-    registerCommand(ModeSelect::Visual, "v", [this]() { toggleMode(ViMode::Normal); });
-    registerCommand(ModeSelect::Visual, "V", [this]() { toggleMode(ViMode::VisualLine); });
-    registerCommand(ModeSelect::Visual, "C-V", [this]() { toggleMode(ViMode::VisualBlock); });
-    registerCommand(ModeSelect::Visual, "<ESC>", [this]() { setMode(ViMode::Normal); });
+    registerCommand(ModeSelect::Visual, "v", [this]() { toggleMode(vi_mode::Normal); });
+    registerCommand(ModeSelect::Visual, "V", [this]() { toggleMode(vi_mode::VisualLine); });
+    registerCommand(ModeSelect::Visual, "C-V", [this]() { toggleMode(vi_mode::VisualBlock); });
+    registerCommand(ModeSelect::Visual, "<ESC>", [this]() { setMode(vi_mode::Normal); });
     for (auto const& [scopeChar, scope]: scopeMappings)
         for (auto const& [objectChar, obj]: textObjectMappings)
             registerCommand(ModeSelect::Visual,
@@ -297,7 +297,7 @@ void ViInputHandler::clearPendingInput()
     _pendingInput.clear();
 }
 
-void ViInputHandler::setMode(ViMode theMode)
+void ViInputHandler::setMode(vi_mode theMode)
 {
     if (_viMode == theMode)
         return;
@@ -321,12 +321,12 @@ bool ViInputHandler::sendKeyPressEvent(Key key, Modifier modifier)
     // clang-format off
     switch (_viMode)
     {
-        case ViMode::Insert:
+        case vi_mode::Insert:
             return false;
-        case ViMode::Normal:
-        case ViMode::Visual:
-        case ViMode::VisualLine:
-        case ViMode::VisualBlock:
+        case vi_mode::Normal:
+        case vi_mode::Visual:
+        case vi_mode::VisualLine:
+        case vi_mode::VisualBlock:
             break;
     }
     // clang-format on
@@ -362,12 +362,12 @@ void ViInputHandler::startSearchExternally()
     _searchTerm.clear();
     _executor.searchStart();
 
-    if (_viMode != ViMode::Insert)
+    if (_viMode != vi_mode::Insert)
         _searchEditMode = SearchEditMode::Enabled;
     else
     {
         _searchEditMode = SearchEditMode::ExternallyEnabled;
-        setMode(ViMode::Normal);
+        setMode(vi_mode::Normal);
         // ^^^ So that we can see the statusline (which contains the search edit field),
         // AND it's weird to be in insert mode while typing in the search term anyways.
     }
@@ -382,13 +382,13 @@ bool ViInputHandler::handleSearchEditor(char32_t ch, Modifier modifier)
         case '\x1B'_key:
             _searchTerm.clear();
             if (_searchEditMode == SearchEditMode::ExternallyEnabled)
-                setMode(ViMode::Insert);
+                setMode(vi_mode::Insert);
             _searchEditMode = SearchEditMode::Disabled;
             _executor.searchCancel();
             break;
         case '\x0D'_key:
             if (_searchEditMode == SearchEditMode::ExternallyEnabled)
-                setMode(ViMode::Insert);
+                setMode(vi_mode::Insert);
             _searchEditMode = SearchEditMode::Disabled;
             _executor.searchDone();
             break;
@@ -425,13 +425,13 @@ bool ViInputHandler::sendCharPressEvent(char32_t ch, Modifier modifier)
     if (_searchEditMode != SearchEditMode::Disabled)
         return handleSearchEditor(ch, modifier);
 
-    if (_viMode == ViMode::Insert)
+    if (_viMode == vi_mode::Insert)
         return false;
 
     if (ch == 033 && modifier.none())
     {
         clearPendingInput();
-        setMode(ViMode::Normal);
+        setMode(vi_mode::Normal);
         return true;
     }
 
@@ -488,9 +488,9 @@ void ViInputHandler::startSearch()
     _executor.searchStart();
 }
 
-void ViInputHandler::toggleMode(ViMode newMode)
+void ViInputHandler::toggleMode(vi_mode newMode)
 {
-    setMode(newMode != _viMode ? newMode : ViMode::Normal);
+    setMode(newMode != _viMode ? newMode : vi_mode::Normal);
 }
 
 } // namespace terminal

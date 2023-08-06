@@ -248,13 +248,13 @@ namespace
         return 0;
     }
 
-    constexpr TextStyle makeTextStyle(CellFlags mask)
+    constexpr TextStyle makeTextStyle(cell_flags mask)
     {
-        if (contains_all(mask, CellFlags::Bold | CellFlags::Italic))
+        if (contains_all(mask, cell_flags::Bold | cell_flags::Italic))
             return TextStyle::BoldItalic;
-        if (mask & CellFlags::Bold)
+        if (mask & cell_flags::Bold)
             return TextStyle::Bold;
-        if (mask & CellFlags::Italic)
+        if (mask & cell_flags::Italic)
             return TextStyle::Italic;
         return TextStyle::Regular;
     }
@@ -368,7 +368,7 @@ void TextRenderer::restrictToTileSize(TextureAtlas::TileCreateData& tileCreateDa
     auto const colorComponentCount = atlas::element_count(bitmapFormat);
 
     auto const subWidth = _textureAtlas->tileSize().width;
-    auto const subSize = ImageSize { subWidth, tileCreateData.bitmapSize.height };
+    auto const subSize = image_size { subWidth, tileCreateData.bitmapSize.height };
     auto const subPitch = unbox<uintptr_t>(subSize.width) * colorComponentCount;
     auto const xOffset = 0;
     auto const sourcePitch = unbox<uintptr_t>(tileCreateData.bitmapSize.width) * colorComponentCount;
@@ -462,7 +462,7 @@ void TextRenderer::beginFrame()
     Require(_textClusterGroup.codepoints.empty());
     Require(_textClusterGroup.clusters.empty());
 
-    auto constexpr DefaultColor = RGBColor {};
+    auto constexpr DefaultColor = rgb_color {};
     _textClusterGroup.style = TextStyle::Invalid;
     _textClusterGroup.color = DefaultColor;
 }
@@ -475,24 +475,24 @@ void TextRenderer::renderLine(RenderLine const& renderLine)
     auto const textStyle = makeTextStyle(renderLine.textAttributes.flags);
 
     auto graphemeClusterSegmenter = unicode::utf8_grapheme_segmenter(renderLine.text);
-    auto columnOffset = ColumnOffset(0);
+    auto columnOffset = column_offset(0);
 
     _textClusterGroup.initialPenPosition =
-        _gridMetrics.mapBottomLeft(CellLocation { renderLine.lineOffset, columnOffset });
+        _gridMetrics.mapBottomLeft(cell_location { renderLine.lineOffset, columnOffset });
 
     for (u32string const& graphemeCluster: graphemeClusterSegmenter)
     {
-        auto const gridPosition = CellLocation { renderLine.lineOffset, columnOffset };
+        auto const gridPosition = cell_location { renderLine.lineOffset, columnOffset };
         auto const width = graphemeClusterWidth(graphemeCluster);
         renderCell(gridPosition, graphemeCluster, textStyle, renderLine.textAttributes.foregroundColor);
 
         for (int i = 1; i < width; ++i)
-            renderCell(CellLocation { gridPosition.line, columnOffset + i },
+            renderCell(cell_location { gridPosition.line, columnOffset + i },
                        U" ",
                        textStyle,
                        renderLine.textAttributes.foregroundColor);
 
-        columnOffset += ColumnOffset::cast_from(width);
+        columnOffset += column_offset::cast_from(width);
     }
 
     if (!_textClusterGroup.codepoints.empty())
@@ -513,10 +513,10 @@ void TextRenderer::renderCell(RenderCell const& cell)
         flushTextClusterGroup();
 }
 
-void TextRenderer::renderCell(CellLocation position,
+void TextRenderer::renderCell(cell_location position,
                               std::u32string_view graphemeCluster,
                               TextStyle textStyle,
-                              RGBColor foregroundColor)
+                              rgb_color foregroundColor)
 {
     if (_updateInitialPenPosition)
     {
@@ -586,7 +586,7 @@ Point TextRenderer::applyGlyphPositionToPen(Point pen,
  *
  */
 void TextRenderer::renderRasterizedGlyph(crispy::Point pen,
-                                         RGBAColor color,
+                                         rgba_color color,
                                          AtlasTileAttributes const& attributes)
 {
     // clang-format off
@@ -610,7 +610,7 @@ void TextRenderer::renderRasterizedGlyph(crispy::Point pen,
     // clang-format on
 }
 
-void TextRenderer::appendCellTextToClusterGroup(u32string_view codepoints, TextStyle style, RGBColor color)
+void TextRenderer::appendCellTextToClusterGroup(u32string_view codepoints, TextStyle style, rgb_color color)
 {
     bool const attribsChanged = color != _textClusterGroup.color || style != _textClusterGroup.style;
     bool const hasText = !codepoints.empty() && codepoints[0] != 0x20;
@@ -748,8 +748,8 @@ auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
             [this, xOffset, tileWidth, &createData, colorComponentCount, bitmapFormat, pitch](
                 atlas::TileLocation tileLocation) {
                 auto const xNext = min(xOffset + tileWidth, unbox<uintptr_t>(createData.bitmapSize.width));
-                auto const subWidth = Width::cast_from(xNext - xOffset);
-                auto const subSize = ImageSize { subWidth, createData.bitmapSize.height };
+                auto const subWidth = width::cast_from(xNext - xOffset);
+                auto const subSize = image_size { subWidth, createData.bitmapSize.height };
                 auto const subPitch = unbox<uintptr_t>(subWidth) * colorComponentCount;
 
                 auto bitmap = vector<uint8_t>(subSize.area() * colorComponentCount);
@@ -775,7 +775,7 @@ auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
     // Construct head-tile
     // cut off bitmap to first tile
     auto const headWidth = textureAtlas().tileSize().width;
-    auto const headSize = ImageSize { headWidth, createData.bitmapSize.height };
+    auto const headSize = image_size { headWidth, createData.bitmapSize.height };
     auto const headPitch = unbox<uintptr_t>(headWidth) * colorComponentCount;
     auto headBitmap = vector<uint8_t>(headSize.area() * colorComponentCount);
     for (uintptr_t rowIndex = 0; rowIndex < unbox<uintptr_t>(headSize.height); ++rowIndex)
@@ -815,12 +815,12 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
 
     // Scale bitmap down overflowing in diemensions
     auto const emojiBoundingBox =
-        ImageSize { Width(_gridMetrics.cellSize.width.value * numCells),
-                    Height::cast_from(unbox<int>(_gridMetrics.cellSize.height) - _gridMetrics.baseline) };
+        image_size { width(_gridMetrics.cellSize.width.value * numCells),
+                     height::cast_from(unbox<int>(_gridMetrics.cellSize.height) - _gridMetrics.baseline) };
     if (glyph.format == text::bitmap_format::rgba)
     {
-        if (glyph.bitmapSize.height > Height::cast_from(unbox<double>(emojiBoundingBox.height) * 1.1)
-            || glyph.bitmapSize.width > Width::cast_from(unbox<double>(emojiBoundingBox.width) * 1.5))
+        if (glyph.bitmapSize.height > height::cast_from(unbox<double>(emojiBoundingBox.height) * 1.1)
+            || glyph.bitmapSize.width > width::cast_from(unbox<double>(emojiBoundingBox.width) * 1.5))
         {
             if (RasterizerLog)
                 RasterizerLog()(
@@ -863,7 +863,7 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
             rowCount * unbox<size_t>(glyph.bitmapSize.width) * text::pixel_size(glyph.format);
         Require(0 < pixelCount && static_cast<size_t>(pixelCount) <= glyph.bitmap.size());
         RasterizerLog()("Cropping {} underflowing bitmap rows.", rowCount);
-        glyph.bitmapSize.height += Height::cast_from(yMin);
+        glyph.bitmapSize.height += height::cast_from(yMin);
         auto& data = glyph.bitmap;
         data.erase(begin(data), next(begin(data), (int) pixelCount)); // XXX asan hit (size = -2)
         Guarantee(glyph.valid());
@@ -872,9 +872,9 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
 
     if (RasterizerLog)
     {
-        auto const boundingBox =
-            ImageSize { Width(_gridMetrics.cellSize.width.value * numCells),
-                        Height::cast_from(unbox<int>(_gridMetrics.cellSize.height) - _gridMetrics.baseline) };
+        auto const boundingBox = image_size { width(_gridMetrics.cellSize.width.value * numCells),
+                                              height::cast_from(unbox<int>(_gridMetrics.cellSize.height)
+                                                                - _gridMetrics.baseline) };
         // clang-format off
         RasterizerLog()("Inserting {} (bbox {}, numCells {}) id {} render mode {} {} yOverflow {} yMin {}.",
                         glyph,

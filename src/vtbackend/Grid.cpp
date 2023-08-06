@@ -121,10 +121,10 @@ namespace detail
 // {{{ Grid impl
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-Grid<Cell>::Grid(PageSize pageSize, bool reflowOnResize, MaxHistoryLineCount maxHistoryLineCount):
+Grid<Cell>::Grid(PageSize pageSize, bool reflowOnResize, max_history_line_count maxHistoryLineCount):
     _pageSize { pageSize },
-    _margin { Margin::Vertical { {}, _pageSize.lines.as<LineOffset>() - LineOffset(1) },
-              Margin::Horizontal { {}, _pageSize.columns.as<ColumnOffset>() - ColumnOffset(1) } },
+    _margin { Margin::Vertical { {}, _pageSize.lines.as<line_offset>() - line_offset(1) },
+              Margin::Horizontal { {}, _pageSize.columns.as<column_offset>() - column_offset(1) } },
     _reflowOnResize { reflowOnResize },
     _historyLimit { maxHistoryLineCount },
     _lines { detail::createLines<Cell>(
@@ -144,7 +144,7 @@ Grid<Cell>::Grid(PageSize pageSize, bool reflowOnResize, MaxHistoryLineCount max
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Grid<Cell>::setMaxHistoryLineCount(MaxHistoryLineCount maxHistoryLineCount)
+void Grid<Cell>::setMaxHistoryLineCount(max_history_line_count maxHistoryLineCount)
 {
     verifyState();
     rezeroBuffers();
@@ -181,7 +181,7 @@ std::string Grid<Cell>::renderAllText() const
     std::string text;
     text.reserve(unbox<size_t>(historyLineCount() + _pageSize.lines) * unbox<size_t>(_pageSize.columns + 1));
 
-    for (auto y = LineOffset(0); y < LineOffset::cast_from(_lines.size()); ++y)
+    for (auto y = line_offset(0); y < line_offset::cast_from(_lines.size()); ++y)
     {
         text += lineText(y);
         text += '\n';
@@ -196,7 +196,7 @@ std::string Grid<Cell>::renderMainPageText() const
 {
     std::string text;
 
-    for (auto line = LineOffset(0); line < unbox<LineOffset>(_pageSize.lines); ++line)
+    for (auto line = line_offset(0); line < unbox<line_offset>(_pageSize.lines); ++line)
     {
         text += lineText(line);
         text += '\n';
@@ -207,7 +207,7 @@ std::string Grid<Cell>::renderMainPageText() const
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-Line<Cell>& Grid<Cell>::lineAt(LineOffset line) noexcept
+Line<Cell>& Grid<Cell>::lineAt(line_offset line) noexcept
 {
     // Require(*line < *_pageSize.lines);
     return _lines[unbox<long>(line)];
@@ -215,7 +215,7 @@ Line<Cell>& Grid<Cell>::lineAt(LineOffset line) noexcept
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-Line<Cell> const& Grid<Cell>::lineAt(LineOffset line) const noexcept
+Line<Cell> const& Grid<Cell>::lineAt(line_offset line) const noexcept
 {
     // Require(*line < *_pageSize.lines);
     return const_cast<Grid&>(*this).lineAt(line);
@@ -223,28 +223,28 @@ Line<Cell> const& Grid<Cell>::lineAt(LineOffset line) const noexcept
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-Cell& Grid<Cell>::at(LineOffset line, ColumnOffset column) noexcept
+Cell& Grid<Cell>::at(line_offset line, column_offset column) noexcept
 {
     return useCellAt(line, column);
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-Cell& Grid<Cell>::useCellAt(LineOffset line, ColumnOffset column) noexcept
+Cell& Grid<Cell>::useCellAt(line_offset line, column_offset column) noexcept
 {
     return lineAt(line).useCellAt(column);
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-Cell const& Grid<Cell>::at(LineOffset line, ColumnOffset column) const noexcept
+Cell const& Grid<Cell>::at(line_offset line, column_offset column) const noexcept
 {
     return const_cast<Grid&>(*this).at(line, column);
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-gsl::span<Line<Cell>> Grid<Cell>::pageAtScrollOffset(ScrollOffset scrollOffset)
+gsl::span<Line<Cell>> Grid<Cell>::pageAtScrollOffset(scroll_offset scrollOffset)
 {
     Require(unbox<LineCount>(scrollOffset) <= historyLineCount());
 
@@ -257,7 +257,7 @@ gsl::span<Line<Cell>> Grid<Cell>::pageAtScrollOffset(ScrollOffset scrollOffset)
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-gsl::span<Line<Cell> const> Grid<Cell>::pageAtScrollOffset(ScrollOffset scrollOffset) const
+gsl::span<Line<Cell> const> Grid<Cell>::pageAtScrollOffset(scroll_offset scrollOffset) const
 {
     Require(unbox<LineCount>(scrollOffset) <= historyLineCount());
 
@@ -285,14 +285,14 @@ gsl::span<Line<Cell>> Grid<Cell>::mainPage()
 // {{{ Grid impl: Line access
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-gsl::span<Cell const> Grid<Cell>::lineBufferRightTrimmed(LineOffset line) const noexcept
+gsl::span<Cell const> Grid<Cell>::lineBufferRightTrimmed(line_offset line) const noexcept
 {
     return detail::trimRight(lineBuffer(line));
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-std::string Grid<Cell>::lineText(LineOffset lineOffset) const
+std::string Grid<Cell>::lineText(line_offset lineOffset) const
 {
     std::string line;
     line.reserve(unbox<size_t>(_pageSize.columns));
@@ -308,7 +308,7 @@ std::string Grid<Cell>::lineText(LineOffset lineOffset) const
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-std::string Grid<Cell>::lineTextTrimmed(LineOffset lineOffset) const
+std::string Grid<Cell>::lineTextTrimmed(line_offset lineOffset) const
 {
     std::string output = lineText(lineOffset);
     while (!output.empty() && isspace(output.back()))
@@ -333,16 +333,16 @@ std::string Grid<Cell>::lineText(Line<Cell> const& line) const
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-void Grid<Cell>::setLineText(LineOffset line, std::string_view text)
+void Grid<Cell>::setLineText(line_offset line, std::string_view text)
 {
     size_t i = 0;
     for (auto const ch: unicode::convert_to<char32_t>(text))
-        useCellAt(line, ColumnOffset::cast_from(i++)).setCharacter(ch);
+        useCellAt(line, column_offset::cast_from(i++)).setCharacter(ch);
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-bool Grid<Cell>::isLineBlank(LineOffset line) const noexcept
+bool Grid<Cell>::isLineBlank(line_offset line) const noexcept
 {
     auto const is_blank = [](auto const& cell) noexcept {
         return CellUtil::empty(cell);
@@ -394,7 +394,7 @@ LineCount Grid<Cell>::scrollUp(LineCount linesCountToScrollUp, GraphicsAttribute
     // Number of lines in the ring buffer that are not yet
     // used by the grid system.
     auto const linesAvailable = LineCount::cast_from(_lines.size() - unbox<size_t>(_linesUsed));
-    if (std::holds_alternative<Infinite>(_historyLimit) && linesAvailable < linesCountToScrollUp)
+    if (std::holds_alternative<infinite>(_historyLimit) && linesAvailable < linesCountToScrollUp)
     {
         auto const linesToAllocate = unbox<int>(linesCountToScrollUp - linesAvailable);
 
@@ -411,8 +411,8 @@ LineCount Grid<Cell>::scrollUp(LineCount linesCountToScrollUp, GraphicsAttribute
         rotateBuffersLeft(linesCountToScrollUp);
 
         // Initialize (/reset) new lines.
-        for (auto y = boxed_cast<LineOffset>(_pageSize.lines - linesCountToScrollUp);
-             y < boxed_cast<LineOffset>(_pageSize.lines);
+        for (auto y = boxed_cast<line_offset>(_pageSize.lines - linesCountToScrollUp);
+             y < boxed_cast<line_offset>(_pageSize.lines);
              ++y)
             lineAt(y).reset(defaultLineFlags(), defaultAttributes);
 
@@ -441,8 +441,8 @@ LineCount Grid<Cell>::scrollUp(LineCount linesCountToScrollUp, GraphicsAttribute
             rotateBuffersLeft(incrementCount);
 
             // Initialize (/reset) new lines.
-            for (auto y = boxed_cast<LineOffset>(_pageSize.lines - linesCountToScrollUp);
-                 y < boxed_cast<LineOffset>(_pageSize.lines);
+            for (auto y = boxed_cast<line_offset>(_pageSize.lines - linesCountToScrollUp);
+                 y < boxed_cast<line_offset>(_pageSize.lines);
                  ++y)
                 lineAt(y).reset(defaultLineFlags(), defaultAttributes);
         }
@@ -462,9 +462,9 @@ LineCount Grid<Cell>::scrollUp(LineCount n, GraphicsAttributes defaultAttributes
     // so not even this needs to be computed for the general case.
     auto const fullHorizontal =
         margin.horizontal
-        == Margin::Horizontal { ColumnOffset { 0 }, unbox<ColumnOffset>(_pageSize.columns) - 1 };
+        == Margin::Horizontal { column_offset { 0 }, unbox<column_offset>(_pageSize.columns) - 1 };
     auto const fullVertical =
-        margin.vertical == Margin::Vertical { LineOffset(0), unbox<LineOffset>(_pageSize.lines) - 1 };
+        margin.vertical == Margin::Vertical { line_offset(0), unbox<line_offset>(_pageSize.lines) - 1 };
 
     if (fullHorizontal)
     {
@@ -499,7 +499,7 @@ LineCount Grid<Cell>::scrollUp(LineCount n, GraphicsAttributes defaultAttributes
         auto const bottomTargetLineOffset = margin.vertical.to - *n2;
         auto const columnsToMove = unbox<size_t>(margin.horizontal.length());
 
-        for (LineOffset targetLineOffset = topTargetLineOffset; targetLineOffset <= bottomTargetLineOffset;
+        for (line_offset targetLineOffset = topTargetLineOffset; targetLineOffset <= bottomTargetLineOffset;
              ++targetLineOffset)
         {
             auto const sourceLineOffset = targetLineOffset + *n2;
@@ -508,7 +508,7 @@ LineCount Grid<Cell>::scrollUp(LineCount n, GraphicsAttributes defaultAttributes
             std::copy_n(s, columnsToMove, t);
         }
 
-        for (LineOffset line = margin.vertical.to - *n2 + 1; line <= margin.vertical.to; ++line)
+        for (line_offset line = margin.vertical.to - *n2 + 1; line <= margin.vertical.to; ++line)
         {
             auto a = &useCellAt(line, margin.horizontal.from);
             auto b = a + unbox<int>(margin.horizontal.length());
@@ -534,11 +534,11 @@ void Grid<Cell>::scrollDown(LineCount vN, GraphicsAttributes const& defaultAttri
     // so not even this needs to be computed for the general case.
     auto const fullHorizontal =
         margin.horizontal
-        == Margin::Horizontal { ColumnOffset { 0 },
-                                unbox<ColumnOffset>(_pageSize.columns) - ColumnOffset(1) };
+        == Margin::Horizontal { column_offset { 0 },
+                                unbox<column_offset>(_pageSize.columns) - column_offset(1) };
     auto const fullVertical =
         margin.vertical
-        == Margin::Vertical { LineOffset(0), unbox<LineOffset>(_pageSize.lines) - LineOffset(1) };
+        == Margin::Vertical { line_offset(0), unbox<line_offset>(_pageSize.lines) - line_offset(1) };
 
     auto const n = std::min(vN, margin.vertical.length());
 
@@ -572,14 +572,14 @@ void Grid<Cell>::scrollDown(LineCount vN, GraphicsAttributes const& defaultAttri
         // a full "inside" scroll-down
         if (n <= margin.vertical.length())
         {
-            for (LineOffset line = margin.vertical.to; line >= margin.vertical.to - *n; --line)
+            for (line_offset line = margin.vertical.to; line >= margin.vertical.to - *n; --line)
             {
                 auto s = &at(line - *n, margin.horizontal.from);
                 auto t = &at(line, margin.horizontal.from);
                 std::copy_n(s, unbox<size_t>(margin.horizontal.length()), t);
             }
 
-            for (LineOffset line = margin.vertical.from; line < margin.vertical.from + *n; ++line)
+            for (line_offset line = margin.vertical.from; line < margin.vertical.from + *n; ++line)
             {
                 auto a = &at(line, margin.horizontal.from);
                 auto b = &at(line, margin.horizontal.to + 1);
@@ -597,7 +597,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Grid<Cell>::scrollLeft(GraphicsAttributes defaultAttributes, Margin margin) noexcept
 {
-    for (LineOffset lineNo = margin.vertical.from; lineNo <= margin.vertical.to; ++lineNo)
+    for (line_offset lineNo = margin.vertical.from; lineNo <= margin.vertical.to; ++lineNo)
     {
         auto& line = lineAt(lineNo);
         auto column0 = line.inflatedBuffer().begin() + *margin.horizontal.from;
@@ -626,7 +626,7 @@ void Grid<Cell>::reset()
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-CellLocation Grid<Cell>::growLines(LineCount newHeight, CellLocation cursor)
+cell_location Grid<Cell>::growLines(LineCount newHeight, cell_location cursor)
 {
     // Grow line count by splicing available lines from history back into buffer, if available,
     // or create new ones until _pageSize.lines == newHeight.
@@ -635,7 +635,7 @@ CellLocation Grid<Cell>::growLines(LineCount newHeight, CellLocation cursor)
     // _lines.reserve(unbox<size_t>(_maxHistoryLineCount + newHeight));
 
     // Pull down from history if cursor is at bottom and if scrollback available.
-    CellLocation cursorMove {};
+    cell_location cursorMove {};
     if (*cursor.line + 1 == *_pageSize.lines)
     {
         auto const totalLinesToExtend = newHeight - _pageSize.lines;
@@ -644,7 +644,7 @@ CellLocation Grid<Cell>::growLines(LineCount newHeight, CellLocation cursor)
         Require(*linesToTakeFromSavedLines >= 0);
         rotateBuffersRight(linesToTakeFromSavedLines);
         _pageSize.lines += linesToTakeFromSavedLines;
-        cursorMove.line += boxed_cast<LineOffset>(linesToTakeFromSavedLines);
+        cursorMove.line += boxed_cast<line_offset>(linesToTakeFromSavedLines);
     }
 
     auto const wrappableFlag = _lines.back().wrappableFlag();
@@ -671,7 +671,7 @@ CellLocation Grid<Cell>::growLines(LineCount newHeight, CellLocation cursor)
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos, bool wrapPending)
+cell_location Grid<Cell>::resize(PageSize newSize, cell_location currentCursorPos, bool wrapPending)
 {
     if (_pageSize == newSize)
         return currentCursorPos;
@@ -685,7 +685,7 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
     // the top lines into the scrollback area.
 
     // {{{ helper methods
-    auto const shrinkLines = [this](LineCount newHeight, CellLocation cursor) -> CellLocation {
+    auto const shrinkLines = [this](LineCount newHeight, cell_location cursor) -> cell_location {
         // Shrink existing line count to newSize.lines
         // by splicing the number of lines to be shrinked by into savedLines bottom.
 
@@ -730,14 +730,14 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
             _pageSize.lines -= numLinesToPushUp;
             clampHistory();
             verifyState();
-            return CellLocation { -boxed_cast<LineOffset>(numLinesToPushUp), {} };
+            return cell_location { -boxed_cast<line_offset>(numLinesToPushUp), {} };
         }
 
         verifyState();
-        return CellLocation {};
+        return cell_location {};
     };
 
-    auto const growColumns = [this, wrapPending](ColumnCount newColumnCount) -> CellLocation {
+    auto const growColumns = [this, wrapPending](ColumnCount newColumnCount) -> cell_location {
         using LineBuffer = typename Line<Cell>::InflatedBuffer;
 
         if (!_reflowOnResize)
@@ -747,7 +747,7 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
                     line.resize(newColumnCount);
             _pageSize.columns = newColumnCount;
             verifyState();
-            return CellLocation { LineOffset(0), ColumnOffset(wrapPending ? 1 : 0) };
+            return cell_location { line_offset(0), column_offset(wrapPending ? 1 : 0) };
         }
         else
         {
@@ -847,12 +847,13 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
             rotateBuffersLeft(newHistoryLineCount);
 
             verifyState();
-            return CellLocation { -boxed_cast<LineOffset>(cy), ColumnOffset(wrapPending ? 1 : 0) };
+            return cell_location { -boxed_cast<line_offset>(cy), column_offset(wrapPending ? 1 : 0) };
         }
     };
 
-    auto const shrinkColumns =
-        [this](ColumnCount newColumnCount, LineCount /*newLineCount*/, CellLocation cursor) -> CellLocation {
+    auto const shrinkColumns = [this](ColumnCount newColumnCount,
+                                      LineCount /*newLineCount*/,
+                                      cell_location cursor) -> cell_location {
         using LineBuffer = typename Line<Cell>::InflatedBuffer;
 
         if (!_reflowOnResize)
@@ -863,7 +864,7 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
                     line.resize(newColumnCount);
             });
             verifyState();
-            return cursor + std::min(cursor.column, boxed_cast<ColumnOffset>(newColumnCount));
+            return cursor + std::min(cursor.column, boxed_cast<column_offset>(newColumnCount));
         }
         else
         {
@@ -964,7 +965,7 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
     };
     // }}}
 
-    CellLocation cursor = currentCursorPos;
+    cell_location cursor = currentCursorPos;
 
     // grow/shrink columns
     using crispy::Comparison;
@@ -1041,11 +1042,11 @@ std::ostream& dumpGrid(std::ostream& os, Grid<Cell> const& grid)
     for (int const lineOffset:
          ranges::views::iota(-unbox<int>(grid.historyLineCount()), unbox<int>(grid.pageSize().lines)))
     {
-        terminal::Line<Cell> const& lineAttribs = grid.lineAt(LineOffset(lineOffset));
+        terminal::Line<Cell> const& lineAttribs = grid.lineAt(line_offset(lineOffset));
 
         os << fmt::format("[{:>2}] \"{}\" | {}\n",
                           lineOffset,
-                          grid.lineText(LineOffset::cast_from(lineOffset)),
+                          grid.lineText(line_offset::cast_from(lineOffset)),
                           (unsigned) lineAttribs.flags());
     }
 
@@ -1063,8 +1064,8 @@ std::string dumpGrid(Grid<Cell> const& grid)
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-CellLocationRange Grid<Cell>::wordRangeUnderCursor(CellLocation position,
-                                                   u32string_view wordDelimiters) const noexcept
+cell_location_range Grid<Cell>::wordRangeUnderCursor(cell_location position,
+                                                     u32string_view wordDelimiters) const noexcept
 {
     auto const left = [this, wordDelimiters, position]() {
         auto last = position;
@@ -1079,7 +1080,7 @@ CellLocationRange Grid<Cell>::wordRangeUnderCursor(CellLocation position,
             else if (*current.line > 0 || wrapIntoPreviousLine)
             {
                 current.line--;
-                current.column = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
+                current.column = boxed_cast<column_offset>(pageSize().columns) - 1;
             }
             else
                 break;
@@ -1102,18 +1103,18 @@ CellLocationRange Grid<Cell>::wordRangeUnderCursor(CellLocation position,
                 && isLineWrapped(current.line))
             {
                 current.line++;
-                current.column = ColumnOffset(0);
-                current = stretchedColumn(CellLocation { current.line, current.column + 1 });
+                current.column = column_offset(0);
+                current = stretchedColumn(cell_location { current.line, current.column + 1 });
             }
 
             if (*current.column + 1 < *pageSize().columns)
             {
-                current = stretchedColumn(CellLocation { current.line, current.column + 1 });
+                current = stretchedColumn(cell_location { current.line, current.column + 1 });
             }
             else if (*current.line + 1 < *pageSize().lines)
             {
                 current.line++;
-                current.column = ColumnOffset(0);
+                current.column = column_offset(0);
             }
             else
                 break;
@@ -1130,10 +1131,10 @@ CellLocationRange Grid<Cell>::wordRangeUnderCursor(CellLocation position,
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-bool Grid<Cell>::cellEmptyOrContainsOneOf(CellLocation position, u32string_view delimiters) const noexcept
+bool Grid<Cell>::cellEmptyOrContainsOneOf(cell_location position, u32string_view delimiters) const noexcept
 {
     // Word selection may be off by one
-    position.column = min(position.column, boxed_cast<ColumnOffset>(pageSize().columns - 1));
+    position.column = min(position.column, boxed_cast<column_offset>(pageSize().columns - 1));
 
     auto const& cell = at(position.line, position.column);
     return CellUtil::empty(cell) || delimiters.find(cell.codepoint(0)) != std::u32string_view::npos;
@@ -1141,7 +1142,7 @@ bool Grid<Cell>::cellEmptyOrContainsOneOf(CellLocation position, u32string_view 
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-u32string Grid<Cell>::extractText(CellLocationRange range) const noexcept
+u32string Grid<Cell>::extractText(cell_location_range range) const noexcept
 {
     if (range.first.line > range.second.line)
         std::swap(range.first, range.second);
@@ -1150,27 +1151,27 @@ u32string Grid<Cell>::extractText(CellLocationRange range) const noexcept
 
     assert(range.first.line == range.second.line);
 
-    auto const rightMargin = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
+    auto const rightMargin = boxed_cast<column_offset>(pageSize().columns) - 1;
     auto const numLines = LineCount::cast_from(range.second.line - range.first.line + 1);
-    auto ranges = vector<ColumnRange> {};
+    auto ranges = vector<column_range> {};
 
     switch (numLines.value)
     {
         case 1:
             ranges.emplace_back(
-                ColumnRange { range.first.line, range.first.column, min(range.second.column, rightMargin) });
+                column_range { range.first.line, range.first.column, min(range.second.column, rightMargin) });
             break;
         case 2:
-            ranges.emplace_back(ColumnRange { range.first.line, range.first.column, rightMargin });
+            ranges.emplace_back(column_range { range.first.line, range.first.column, rightMargin });
             ranges.emplace_back(
-                ColumnRange { range.first.line, ColumnOffset(0), min(range.second.column, rightMargin) });
+                column_range { range.first.line, column_offset(0), min(range.second.column, rightMargin) });
             break;
         default:
-            ranges.emplace_back(ColumnRange { range.first.line, range.first.column, rightMargin });
+            ranges.emplace_back(column_range { range.first.line, range.first.column, rightMargin });
             for (auto j = range.first.line + 1; j < range.second.line; ++j)
-                ranges.emplace_back(ColumnRange { j, ColumnOffset(0), rightMargin });
+                ranges.emplace_back(column_range { j, column_offset(0), rightMargin });
             ranges.emplace_back(
-                ColumnRange { range.second.line, ColumnOffset(0), min(range.second.column, rightMargin) });
+                column_range { range.second.line, column_offset(0), min(range.second.column, rightMargin) });
             break;
     }
 

@@ -25,7 +25,7 @@ using std::transform;
 namespace terminal
 {
 
-CursorShape makeCursorShape(string const& name)
+cursor_shape makeCursorShape(string const& name)
 {
     auto const lowerName = [](auto const& input) -> std::string {
         string output;
@@ -34,13 +34,13 @@ CursorShape makeCursorShape(string const& name)
     }(name);
 
     if (lowerName == "block")
-        return CursorShape::Block;
+        return cursor_shape::Block;
     else if (lowerName == "rectangle")
-        return CursorShape::Rectangle;
+        return cursor_shape::Rectangle;
     else if (lowerName == "underscore")
-        return CursorShape::Underscore;
+        return cursor_shape::Underscore;
     else if (lowerName == "bar")
-        return CursorShape::Bar;
+        return cursor_shape::Bar;
     else
         throw invalid_argument { "Invalid cursor shape: " + name };
 }

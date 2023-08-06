@@ -24,17 +24,17 @@ using crispy::fromHexString;
 
 TEST_CASE("Capabilities.codeFromName")
 {
-    terminal::capabilities::StaticDatabase tcap;
+    terminal::capabilities::static_database tcap;
     auto const capName = fromHexString("62656c"sv).value();
     auto const tn = tcap.codeFromName(capName);
     REQUIRE(tn.has_value());
-    CHECK(tn.value().code == 0x626c);
+    CHECK(tn.value().c == 0x626c);
     CHECK(tn.value().hex() == "626C");
 }
 
 TEST_CASE("Capabilities.get")
 {
-    terminal::capabilities::StaticDatabase tcap;
+    terminal::capabilities::static_database tcap;
     auto const rgb = tcap.stringCapability("RGB");
     REQUIRE(rgb == "8/8/8");
 

@@ -23,7 +23,7 @@ namespace terminal::rasterizer
 
 using namespace std;
 
-vector<uint8_t> downsampleRGBA(vector<uint8_t> const& bitmap, ImageSize size, ImageSize newSize)
+vector<uint8_t> downsampleRGBA(vector<uint8_t> const& bitmap, image_size size, image_size newSize)
 {
     assert(size.width >= newSize.width);
     assert(size.height >= newSize.height);
@@ -78,8 +78,8 @@ vector<uint8_t> downsampleRGBA(vector<uint8_t> const& bitmap, ImageSize size, Im
 
 vector<uint8_t> downsample(vector<uint8_t> const& bitmap,
                            uint8_t numComponents,
-                           ImageSize size,
-                           ImageSize newSize)
+                           image_size size,
+                           image_size newSize)
 {
     assert(size.width >= newSize.width);
     assert(size.height >= newSize.height);
@@ -128,7 +128,7 @@ vector<uint8_t> downsample(vector<uint8_t> const& bitmap,
     return dest;
 }
 
-vector<uint8_t> downsample(vector<uint8_t> const& sourceBitmap, ImageSize targetSize, uint8_t factor)
+vector<uint8_t> downsample(vector<uint8_t> const& sourceBitmap, image_size targetSize, uint8_t factor)
 {
     vector<uint8_t> targetBitmap(*targetSize.width * *targetSize.height, 0);
 

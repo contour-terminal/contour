@@ -19,26 +19,26 @@ using namespace terminal;
 
 TEST_CASE("Color.Bright", "[Color]")
 {
-    Color const c = Color(BrightColor::Cyan);
+    color const c = color(bright_color::Cyan);
     REQUIRE(isBrightColor(c));
-    REQUIRE(getBrightColor(c) == int(BrightColor::Cyan));
+    REQUIRE(getBrightColor(c) == int(bright_color::Cyan));
 }
 
 TEST_CASE("Color.Indexed", "[Color]")
 {
-    Color const c = Color(IndexedColor::Blue);
+    color const c = color(indexed_color::Blue);
     REQUIRE(isIndexedColor(c));
-    REQUIRE(getIndexedColor(c) == int(IndexedColor::Blue));
+    REQUIRE(getIndexedColor(c) == int(indexed_color::Blue));
 }
 
 TEST_CASE("Color.RGB", "[Color]")
 {
-    RGBColor rgb0 = RGBColor { 0x12, 0x34, 0x56 };
+    rgb_color rgb0 = rgb_color { 0x12, 0x34, 0x56 };
     CHECK(rgb0.red == 0x12);
     CHECK(rgb0.green == 0x34);
     CHECK(rgb0.blue == 0x56);
 
-    Color const c = Color(RGBColor { 0x12, 0x34, 0x56 });
+    color const c = color(rgb_color { 0x12, 0x34, 0x56 });
     REQUIRE(isRGBColor(c));
     auto const rgb = getRGBColor(c);
     CHECK(rgb.red == 0x12);

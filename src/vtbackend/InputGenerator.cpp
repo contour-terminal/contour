@@ -541,8 +541,8 @@ namespace
 bool InputGenerator::generateMouse(MouseEventType eventType,
                                    Modifier modifier,
                                    MouseButton button,
-                                   CellLocation pos,
-                                   PixelCoordinate pixelPosition,
+                                   cell_location pos,
+                                   pixel_coordinate pixelPosition,
                                    bool uiHandled)
 {
     if (!_mouseProtocol.has_value())
@@ -610,8 +610,8 @@ bool InputGenerator::generateMouse(MouseEventType eventType,
 bool InputGenerator::mouseTransport(MouseEventType eventType,
                                     uint8_t button,
                                     uint8_t modifier,
-                                    CellLocation pos,
-                                    PixelCoordinate pixelPosition,
+                                    cell_location pos,
+                                    pixel_coordinate pixelPosition,
                                     bool uiHandled)
 {
     if (pos.line.value < 0 || pos.column.value < 0)
@@ -639,7 +639,7 @@ bool InputGenerator::mouseTransport(MouseEventType eventType,
     return false;
 }
 
-bool InputGenerator::mouseTransportExtended(uint8_t button, uint8_t modifier, CellLocation pos)
+bool InputGenerator::mouseTransportExtended(uint8_t button, uint8_t modifier, cell_location pos)
 {
     constexpr auto SkipCount = uint8_t { 0x20 }; // TODO std::numeric_limits<ControlCode>::max();
     constexpr auto MaxCoordValue = 2015;
@@ -659,7 +659,7 @@ bool InputGenerator::mouseTransportExtended(uint8_t button, uint8_t modifier, Ce
         return false;
 }
 
-bool InputGenerator::mouseTransportX10(uint8_t button, uint8_t modifier, CellLocation pos)
+bool InputGenerator::mouseTransportX10(uint8_t button, uint8_t modifier, cell_location pos)
 {
     constexpr uint8_t SkipCount = 0x20; // TODO std::numeric_limits<ControlCode>::max();
     constexpr uint8_t MaxCoordValue = std::numeric_limits<uint8_t>::max() - SkipCount;
@@ -703,7 +703,7 @@ bool InputGenerator::mouseTransportSGR(
 bool InputGenerator::mouseTransportURXVT(MouseEventType eventType,
                                          uint8_t button,
                                          uint8_t modifier,
-                                         CellLocation pos)
+                                         cell_location pos)
 {
     if (eventType == MouseEventType::Press)
     {
@@ -719,7 +719,7 @@ bool InputGenerator::mouseTransportURXVT(MouseEventType eventType,
 }
 
 bool InputGenerator::generateMousePress(
-    Modifier modifier, MouseButton button, CellLocation pos, PixelCoordinate pixelPosition, bool uiHandled)
+    Modifier modifier, MouseButton button, cell_location pos, pixel_coordinate pixelPosition, bool uiHandled)
 {
     auto const logged = [=](bool success) -> bool {
         if (success)
@@ -766,7 +766,7 @@ bool InputGenerator::generateMousePress(
 }
 
 bool InputGenerator::generateMouseRelease(
-    Modifier modifier, MouseButton button, CellLocation pos, PixelCoordinate pixelPosition, bool uiHandled)
+    Modifier modifier, MouseButton button, cell_location pos, pixel_coordinate pixelPosition, bool uiHandled)
 {
     auto const logged = [=](bool success) -> bool {
         if (success)
@@ -784,8 +784,8 @@ bool InputGenerator::generateMouseRelease(
 }
 
 bool InputGenerator::generateMouseMove(Modifier modifier,
-                                       CellLocation pos,
-                                       PixelCoordinate pixelPosition,
+                                       cell_location pos,
+                                       pixel_coordinate pixelPosition,
                                        bool uiHandled)
 {
     if (pos == _currentMousePosition && _mouseTransport != MouseTransport::SGRPixels)

@@ -33,7 +33,7 @@ class BackgroundRenderer: public Renderable
     /// @param gridMetrics
     /// @param defaultColor
     /// @param renderTarget
-    BackgroundRenderer(GridMetrics const& gridMetrics, RGBColor const& defaultColor);
+    BackgroundRenderer(GridMetrics const& gridMetrics, rgb_color const& defaultColor);
 
     void setRenderTarget(RenderTarget& renderTarget, DirectMappingAllocator& directMappingAllocator) override;
 
@@ -51,7 +51,7 @@ class BackgroundRenderer: public Renderable
 
   private:
     // private data
-    RGBColor const& _defaultColor;
+    rgb_color const& _defaultColor;
     uint8_t _opacity = 255;
 };
 
