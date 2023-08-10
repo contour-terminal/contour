@@ -891,9 +891,76 @@ jobs:
         if-no-files-found: error
         retention-days: 1
   # }}}
-  # {{{ external test: notcurses
+  # {{{ GUI: test: contour quick shell exit
+  test_quick_exit:
+    name: "GUI: Quick Shell Exit"
+    runs-on: ubuntu-22.04
+    needs: [package_for_Ubuntu, build_fontconfig]
+    env:
+      LD_LIBRARY_PATH: /home/runner/opt/fontconfig/lib
+      # I'm giving up on eliminating all leaks for now.
+      # There are still some deep inside Qt I can't explain myself if it's because of me.
+      ASAN_OPTIONS: detect_leaks=0
+      # Can be used to execute contour within a certain environment, such as valgrind:
+      # Valgrind is much more precise, but 10x slower.
+      CONTOUR_PREFIX: "" # valgrind --leak-check=full --num-callers=64 --error-exitcode=112"
+    steps:
+    - uses: actions/checkout@v3
+    - name: "update APT database"
+      run: sudo apt -q update
+    - name: Installing xmllint for ci-set-vars
+      run: sudo apt -qy install libxml2-utils
+    - name: set environment variables
+      id: set_vars
+      run: ./scripts/ci-set-vars.sh
+      env:
+        REPOSITORY: ${{ github.event.repository.name }}
+    - uses: actions/download-artifact@v3
+      with:
+        name: "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu22.04-amd64.deb"
+    - uses: actions/download-artifact@v3
+      with:
+        name: "patched-fontconfig"
+        path: "/home/runner/opt/fontconfig"
+    - name: "install dependencies"
+      run: ./scripts/ci/notcurses-install-deps.sh
+    - name: "install contour"
+      run: sudo dpkg -i "contour-${{ steps.set_vars.outputs.VERSION_STRING }}-ubuntu22.04-amd64.deb"
+    - name: "contour executable test"
+      run: |
+        contour version
+        contour help
+    - name: "create and patch contour.yml config file"
+      run: |
+        set -ex
+        mkdir -p ~/.config/contour/
+        contour generate config to ~/.config/contour/contour.yml
+        sed -i -e 's/locator: native/locator: mock/' ~/.config/contour/contour.yml
+        sed -i -e 's/strict_spacing: true/strict_spacing: false/' ~/.config/contour/contour.yml
+        cat .github/mock-font-locator.yml >> ~/.config/contour/contour.yml
+        cat ~/.config/contour/contour.yml
+    - name: "Run Contour: quick exit"
+      timeout-minutes: 5
+      id: Xvfb-contour
+      run: |
+        # export LD_LIBRARY_PATH="/home/runner/opt/fontconfig/lib"
+        ./scripts/ci/Xvfb-contour-run.sh \
+              "quick-exit-dumps/${{ matrix.name }}" \
+              true
+    - name: "Save dump"
+      uses: actions/upload-artifact@v3
+      with:
+        name: quick-exit-contour-dump
+        path: quick-exit-dumps
+        if-no-files-found: ignore
+        retention-days: 3
+    - name: "Check result success"
+      run: |
+        exit ${{ steps.Xvfb-contour.outputs.exitCode }}
+  # }}}
+  # {{{ GUI: external test: notcurses
   test_notcurses:
-    name: "notcurses-demo ${{ matrix.name }}"
+    name: "GUI: notcurses-demo ${{ matrix.name }}"
     runs-on: ubuntu-22.04
     needs: [package_for_Ubuntu, build_notcurses, build_fontconfig]
     strategy:
