@@ -356,7 +356,7 @@ void TerminalWidget::handleWindowChanged(QQuickWindow* newWindow)
         connect(newWindow,
                 &QQuickWindow::beforeSynchronizing,
                 this,
-                &TerminalWidget::synchronize,
+                &TerminalWidget::onBeforeSynchronize,
                 Qt::DirectConnection);
 
         connect(newWindow,
@@ -521,7 +521,7 @@ void TerminalWidget::onSceneGrapheInitialized()
 #endif
 }
 
-void TerminalWidget::synchronize()
+void TerminalWidget::onBeforeSynchronize()
 {
     if (!session_)
         return;
