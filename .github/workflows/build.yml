@@ -1076,7 +1076,7 @@ jobs:
         cat .github/mock-font-locator.yml >> ~/.config/contour/contour.yml
         cat ~/.config/contour/contour.yml
     - name: "Run Contour: notcurses-demo ${{ matrix.name }}"
-      timeout-minutes: 20
+      timeout-minutes: 5
       id: Xvfb-contour-notcurses
       run: |
         # export LD_LIBRARY_PATH="/home/runner/opt/notcurses/lib:/home/runner/opt/fontconfig/lib"
