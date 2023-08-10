@@ -527,7 +527,15 @@ void TerminalWidget::onBeforeSynchronize()
         return;
 
     if (!renderTarget_)
+    {
+        // This is the first call, so create the renderer (on demand) now.
         createRenderer();
+
+        // Also check if the terminal terminated faster than the frontend needed to render the first frame.
+        if (terminal().device().isClosed())
+            // Then we inform the session about it.
+            session_->onClosed();
+    }
 
     auto const dpr = contentScale();
     auto const windowSize = window()->size() * dpr;
