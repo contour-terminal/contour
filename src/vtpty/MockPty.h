@@ -15,9 +15,9 @@
 
 #include <vtpty/Pty.h>
 
-#include <string>
+#include <crispy/BufferObject.h>
 
-#include "crispy/BufferObject.h"
+#include <string>
 
 namespace terminal
 {

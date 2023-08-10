@@ -14,7 +14,7 @@
 
 #include <vtpty/MockViewPty.h>
 
-#include "crispy/BufferObject.h"
+#include <crispy/BufferObject.h>
 
 using std::min;
 using std::optional;

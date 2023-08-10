@@ -15,12 +15,12 @@
 
 #include <vtpty/Pty.h>
 
+#include <crispy/BufferObject.h>
+
 #include <array>
 #include <memory>
 #include <optional>
 #include <vector>
-
-#include "crispy/BufferObject.h"
 
 #if defined(__APPLE__)
     #include <util.h>

@@ -11,6 +11,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+#include <crispy/StrongHash.h>
 #include <crispy/StrongLRUHashtable.h>
 #include <crispy/utils.h>
 
@@ -18,9 +19,6 @@
 
 #include <iostream>
 #include <string_view>
-
-#include "StrongHash.h"
-#include "StrongLRUHashtable.h"
 
 using namespace crispy;
 using namespace std;
@@ -88,7 +86,7 @@ TEST_CASE("strong_hash", "")
     REQUIRE(a != f);
 }
 
-TEST_CASE("StrongLRUHashtable.operator_index", "")
+TEST_CASE("strong_lru_hashtable.operator_index", "")
 {
     auto cachePtr = strong_lru_hashtable<int>::create(strong_hashtable_size { 8 }, lru_capacity { 4 });
     auto& cache = *cachePtr;
@@ -118,7 +116,7 @@ TEST_CASE("StrongLRUHashtable.operator_index", "")
     REQUIRE(joinHumanReadable(cache.hashes()) == sh(6, 5, 4, 3));
 }
 
-TEST_CASE("StrongLRUHashtable.at", "")
+TEST_CASE("strong_lru_hashtable.at", "")
 {
     auto cachePtr = strong_lru_hashtable<int>::create(strong_hashtable_size { 8 }, lru_capacity { 4 });
     auto& cache = *cachePtr;
@@ -130,7 +128,7 @@ TEST_CASE("StrongLRUHashtable.at", "")
     CHECK_NOTHROW(cache.at(h(1)));
 }
 
-TEST_CASE("StrongLRUHashtable.clear", "[lrucache]")
+TEST_CASE("strong_lru_hashtable.clear", "[lrucache]")
 {
     auto cachePtr = strong_lru_hashtable<int>::create(strong_hashtable_size { 8 }, lru_capacity { 4 });
     auto& cache = *cachePtr;
@@ -143,7 +141,7 @@ TEST_CASE("StrongLRUHashtable.clear", "[lrucache]")
     CHECK(cache.size() == 0);
 }
 
-TEST_CASE("StrongLRUHashtable.touch", "")
+TEST_CASE("strong_lru_hashtable.touch", "")
 {
     auto cachePtr = strong_lru_hashtable<int>::create(strong_hashtable_size { 8 }, lru_capacity { 4 });
     auto& cache = *cachePtr;
@@ -168,7 +166,7 @@ TEST_CASE("StrongLRUHashtable.touch", "")
     REQUIRE(joinHumanReadable(cache.hashes()) == sh(1, 3, 4, 2));
 }
 
-TEST_CASE("StrongLRUHashtable.contains", "")
+TEST_CASE("strong_lru_hashtable.contains", "")
 {
     auto cachePtr = strong_lru_hashtable<int>::create(strong_hashtable_size { 8 }, lru_capacity { 4 });
     auto& cache = *cachePtr;
@@ -193,7 +191,7 @@ TEST_CASE("StrongLRUHashtable.contains", "")
     REQUIRE(joinHumanReadable(cache.hashes()) == sh(1, 3, 4, 2));
 }
 
-TEST_CASE("StrongLRUHashtable.try_emplace", "")
+TEST_CASE("strong_lru_hashtable.try_emplace", "")
 {
     auto cachePtr = strong_lru_hashtable<int>::create(strong_hashtable_size { 4 }, lru_capacity { 2 });
     auto& cache = *cachePtr;
@@ -216,7 +214,7 @@ TEST_CASE("StrongLRUHashtable.try_emplace", "")
     CHECK(cache.at(h(3)) == 6);
 }
 
-TEST_CASE("StrongLRUHashtable.try_get", "")
+TEST_CASE("strong_lru_hashtable.try_get", "")
 {
     auto cachePtr = strong_lru_hashtable<int>::create(strong_hashtable_size { 8 }, lru_capacity { 4 });
     auto& cache = *cachePtr;
@@ -247,7 +245,7 @@ TEST_CASE("StrongLRUHashtable.try_get", "")
     REQUIRE(joinHumanReadable(cache.hashes()) == sh(1, 3, 4, 2));
 }
 
-TEST_CASE("StrongLRUHashtable.get_or_try_emplace.recursive", "[lrucache]")
+TEST_CASE("strong_lru_hashtable.get_or_try_emplace.recursive", "[lrucache]")
 {
     auto cachePtr = strong_lru_hashtable<int>::create(strong_hashtable_size { 4 }, lru_capacity { 2 });
     auto& cache = *cachePtr;
@@ -265,7 +263,7 @@ TEST_CASE("StrongLRUHashtable.get_or_try_emplace.recursive", "[lrucache]")
     CHECK(*b == -2);
 }
 
-TEST_CASE("StrongLRUHashtable.get_or_try_emplace", "[lrucache]")
+TEST_CASE("strong_lru_hashtable.get_or_try_emplace", "[lrucache]")
 {
     auto cachePtr = strong_lru_hashtable<int>::create(strong_hashtable_size { 4 }, lru_capacity { 2 });
     auto& cache = *cachePtr;
@@ -303,7 +301,7 @@ TEST_CASE("StrongLRUHashtable.get_or_try_emplace", "[lrucache]")
     CHECK(joinHumanReadable(cache.hashes()) == sh(4, 3));
 }
 
-TEST_CASE("StrongLRUHashtable.get_or_emplace", "[lrucache]")
+TEST_CASE("strong_lru_hashtable.get_or_emplace", "[lrucache]")
 {
     auto cachePtr = strong_lru_hashtable<int>::create(strong_hashtable_size { 4 }, lru_capacity { 2 });
     auto& cache = *cachePtr;
@@ -340,7 +338,7 @@ TEST_CASE("StrongLRUHashtable.get_or_emplace", "[lrucache]")
     CHECK(cache.size() == 2);
 }
 
-TEST_CASE("StrongLRUHashtable.remove", "")
+TEST_CASE("strong_lru_hashtable.remove", "")
 {
     auto cachePtr = strong_lru_hashtable<int>::create(strong_hashtable_size { 8 }, lru_capacity { 4 });
     auto& cache = *cachePtr;
@@ -365,7 +363,7 @@ TEST_CASE("StrongLRUHashtable.remove", "")
     REQUIRE(joinHumanReadable(cache.hashes()).empty());
 }
 
-TEST_CASE("StrongLRUHashtable.insert_with_cache_collision", "")
+TEST_CASE("strong_lru_hashtable.insert_with_cache_collision", "")
 {
     auto cachePtr = strong_lru_hashtable<int>::create(strong_hashtable_size { 8 }, lru_capacity { 4 });
     auto& cache = *cachePtr;
@@ -386,7 +384,7 @@ TEST_CASE("StrongLRUHashtable.insert_with_cache_collision", "")
     // cache.inspect(cout);
 }
 
-TEST_CASE("StrongLRUHashtable.remove_with_hashTable_lookup_collision", "")
+TEST_CASE("strong_lru_hashtable.remove_with_hashTable_lookup_collision", "")
 {
     auto cachePtr = strong_lru_hashtable<int>::create(strong_hashtable_size { 8 }, lru_capacity { 4 });
     auto& cache = *cachePtr;
@@ -411,7 +409,7 @@ TEST_CASE("StrongLRUHashtable.remove_with_hashTable_lookup_collision", "")
     REQUIRE(joinHumanReadable(cache.hashes()).empty());
 }
 
-TEST_CASE("StrongLRUHashtable.peek", "")
+TEST_CASE("strong_lru_hashtable.peek", "")
 {
     auto cachePtr = strong_lru_hashtable<int>::create(strong_hashtable_size { 8 }, lru_capacity { 4 });
     auto& cache = *cachePtr;

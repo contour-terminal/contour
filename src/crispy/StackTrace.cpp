@@ -56,11 +56,11 @@ constexpr size_t MAX_FRAMES { 128 };
 constexpr size_t SKIP_FRAMES { 0 };
 
 #if defined(__linux__) || defined(__APPLE__)
-struct pipe_wrap // {{{
+struct system_wrap // {{{
 {
     int pfd[2];
 
-    pipe_wrap(): pfd { -1, -1 }
+    system_wrap(): pfd { -1, -1 }
     {
         if (pipe(pfd))
             perror("pipe");
@@ -70,7 +70,7 @@ struct pipe_wrap // {{{
     [[nodiscard]] int reader() noexcept { return pfd[0]; }
     [[nodiscard]] int writer() noexcept { return pfd[1]; }
 
-    ~pipe_wrap() { close(); }
+    ~system_wrap() { close(); }
 
     void close()
     {
@@ -105,7 +105,7 @@ optional<debug_info> stack_trace::getDebugInfoForFrame(void const* frameAddress)
         return nullopt;
 
 #if defined(__linux__)
-    auto pipe = pipe_wrap();
+    auto pipe = system_wrap();
     if (!pipe.good())
         return nullopt;
     pid_t childPid = fork();

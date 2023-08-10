@@ -80,7 +80,7 @@ struct strong_hashtable_size
     uint32_t value;
 };
 
-// Number of entries the LRU StrongLRUHashtable can store at most.
+// Number of entries the LRU strong_lru_hashtable can store at most.
 struct lru_capacity
 {
     uint32_t value;

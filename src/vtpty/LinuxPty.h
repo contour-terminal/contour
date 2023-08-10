@@ -16,14 +16,14 @@
 #include <vtpty/Pty.h>
 #include <vtpty/UnixPty.h> // UnixPipe (TODO: move somewhere else)
 
+#include <crispy/BufferObject.h>
+
 #include <array>
 #include <memory>
 #include <optional>
 #include <vector>
 
 #include <pty.h>
-
-#include "crispy/BufferObject.h"
 
 namespace terminal
 {

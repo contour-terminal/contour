@@ -1,6 +1,6 @@
 #include <vtpty/MockPty.h>
 
-#include "crispy/BufferObject.h"
+#include <crispy/BufferObject.h>
 
 using namespace std::chrono;
 using std::min;

@@ -28,6 +28,12 @@
 #include <string_view>
 #include <vector>
 
+#if defined __has_include
+    #if __cpp_lib_source_location
+        #include <source_location>
+    #endif
+#endif
+
 // NB: Don't do that now. It seems to only cause problems, such as
 // __has_include reports presense and in can in fact be included, but it's
 // not giving us the expected std::...source_location, wow.
@@ -45,10 +51,10 @@ namespace logstore
 class category;
 class sink;
 
-class source_location
+class source_location_custom
 {
   public:
-    source_location(char const* filename, int line, char const* functionName) noexcept:
+    source_location_custom(char const* filename, int line, char const* functionName) noexcept:
         _fileName { filename }, _line { line }, _functionName { functionName }
     {
     }
@@ -57,9 +63,9 @@ class source_location
     [[nodiscard]] int line() const noexcept { return _line; }
     [[nodiscard]] char const* function_name() const noexcept { return _functionName; }
 
-    static source_location current() noexcept
+    static source_location_custom current() noexcept
     {
-        return source_location(__builtin_FILE(), __builtin_LINE(), __builtin_FUNCTION());
+        return source_location_custom(__builtin_FILE(), __builtin_LINE(), __builtin_FUNCTION());
     }
 
   private:
@@ -67,6 +73,14 @@ class source_location
     int _line;
     char const* _functionName;
 };
+
+#if defined __has_include
+    #if defined __cpp_lib_source_location
+using source_location = std::source_location;
+    #else
+using source_location = source_location_custom;
+    #endif
+#endif
 
 class message_builder
 {

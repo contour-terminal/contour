@@ -75,7 +75,7 @@ inline std::string unescape(std::string_view escapedText)
     std::string out;
     out.reserve(escapedText.size());
 
-    enum class state
+    enum class state_type
     {
         Text,
         Escape,
@@ -84,91 +84,91 @@ inline std::string unescape(std::string_view escapedText)
         Hex1,
         Hex2
     };
-    state stateText = state::Text;
+    state_type state = state_type::Text;
     char buf[3] = {};
 
     for (char const ch: escapedText)
     {
-        switch (stateText)
+        switch (state)
         {
-            case state::Text:
+            case state_type::Text:
                 if (ch == '\\')
-                    stateText = state::Escape;
+                    state = state_type::Escape;
                 else
                     out.push_back(ch);
                 break;
-            case state::Escape:
+            case state_type::Escape:
                 switch (ch)
                 {
                     case '0':
                         //.
-                        stateText = state::Octal1;
+                        state = state_type::Octal1;
                         break;
                     case 'x':
                         //.
-                        stateText = state::Hex1;
+                        state = state_type::Hex1;
                         break;
                     case 'e':
-                        stateText = state::Text;
+                        state = state_type::Text;
                         out.push_back('\033');
                         break;
                     case 'a':
                         out.push_back(0x07);
-                        stateText = state::Text;
+                        state = state_type::Text;
                         break;
                     case 'b':
                         out.push_back(0x08);
-                        stateText = state::Text;
+                        state = state_type::Text;
                         break;
                     case 't':
                         out.push_back(0x09);
-                        stateText = state::Text;
+                        state = state_type::Text;
                         break;
                     case 'n':
                         out.push_back(0x0A);
-                        stateText = state::Text;
+                        state = state_type::Text;
                         break;
                     case 'v':
                         out.push_back(0x0B);
-                        stateText = state::Text;
+                        state = state_type::Text;
                         break;
                     case 'f':
                         out.push_back(0x0C);
-                        stateText = state::Text;
+                        state = state_type::Text;
                         break;
                     case 'r':
                         out.push_back(0x0D);
-                        stateText = state::Text;
+                        state = state_type::Text;
                         break;
                     case '\\':
                         out.push_back('\\');
-                        stateText = state::Text;
+                        state = state_type::Text;
                         break;
                     default:
                         // Unknown escape sequence, so just continue as text.
                         out.push_back('\\');
                         out.push_back(ch);
-                        stateText = state::Text;
+                        state = state_type::Text;
                         break;
                 }
                 break;
-            case state::Octal1:
+            case state_type::Octal1:
                 buf[0] = ch;
-                stateText = state::Octal2;
+                state = state_type::Octal2;
                 break;
-            case state::Octal2:
+            case state_type::Octal2:
                 buf[1] = ch;
                 out.push_back(static_cast<char>(strtoul(buf, nullptr, 8)));
-                stateText = state::Text;
+                state = state_type::Text;
                 break;
-            case state::Hex1:
+            case state_type::Hex1:
                 buf[0] = ch;
-                stateText = state::Hex2;
+                state = state_type::Hex2;
                 break;
-            case state::Hex2:
+            case state_type::Hex2:
                 buf[1] = ch;
                 out.push_back(static_cast<char>(strtoul(buf, nullptr, 16)));
-                stateText = state::Text;
+                state = state_type::Text;
                 break;
         }
     }

@@ -21,11 +21,11 @@
 #include <vtrasterizer/RenderTarget.h>
 #include <vtrasterizer/TextureAtlas.h>
 
+#include <crispy/ImageSize.h>
+#include <crispy/StrongHash.h>
+
 #include <QtGui/QMatrix4x4>
 #include <QtGui/QOpenGLExtraFunctions>
-
-#include "crispy/ImageSize.h"
-#include "crispy/StrongHash.h"
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     #include <QtOpenGL/QOpenGLShaderProgram>
     #include <QtOpenGL/QOpenGLTexture>

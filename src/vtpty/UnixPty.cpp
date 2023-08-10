@@ -14,6 +14,7 @@
 #include <vtpty/UnixPty.h>
 #include <vtpty/UnixUtils.h>
 
+#include <crispy/BufferObject.h>
 #include <crispy/deferred.h>
 #include <crispy/escape.h>
 #include <crispy/logstore.h>
@@ -26,8 +27,6 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
-
-#include "crispy/BufferObject.h"
 
 #if defined(__APPLE__)
     #include <util.h>

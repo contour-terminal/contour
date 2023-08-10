@@ -21,6 +21,7 @@
 #include <vtparser/Parser.h>
 
 #include <crispy/App.h>
+#include <crispy/CLI.h>
 #include <crispy/StackTrace.h>
 #include <crispy/utils.h>
 
@@ -35,8 +36,6 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
-
-#include "crispy/CLI.h"
 
 #if !defined(_WIN32)
     #include <sys/ioctl.h>

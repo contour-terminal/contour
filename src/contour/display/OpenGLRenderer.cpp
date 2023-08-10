@@ -18,6 +18,7 @@
 
 #include <vtrasterizer/TextureAtlas.h>
 
+#include <crispy/ImageSize.h>
 #include <crispy/algorithm.h>
 #include <crispy/assert.h>
 #include <crispy/defines.h>
@@ -28,8 +29,6 @@
 #include <QtCore/QtGlobal>
 #include <QtGui/QGuiApplication>
 #include <QtGui/QImage>
-
-#include "crispy/ImageSize.h"
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     #include <QtOpenGL/QOpenGLPixelTransferOptions>

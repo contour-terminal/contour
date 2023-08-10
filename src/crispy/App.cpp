@@ -24,8 +24,6 @@
 #include <numeric>
 #include <optional>
 
-#include "logstore.h"
-
 #if !defined(_WIN32)
     #include <sys/ioctl.h>
 

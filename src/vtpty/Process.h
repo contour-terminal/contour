@@ -15,6 +15,7 @@
 
 #include <vtpty/Pty.h>
 
+#include <crispy/BufferObject.h>
 #include <crispy/overloaded.h>
 #include <crispy/stdfs.h>
 
@@ -26,8 +27,6 @@
 #include <string>
 #include <variant>
 #include <vector>
-
-#include "crispy/BufferObject.h"
 
 namespace terminal
 {

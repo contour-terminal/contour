@@ -20,6 +20,7 @@
 
 #include <text_shaper/mock_font_locator.h>
 
+#include <crispy/StrongHash.h>
 #include <crispy/escape.h>
 #include <crispy/logstore.h>
 #include <crispy/overloaded.h>
@@ -45,7 +46,6 @@
 #include <vector>
 
 #include "contour/Actions.h"
-#include "crispy/StrongHash.h"
 #include "vtbackend/ColorPalette.h"
 #include "vtbackend/primitives.h"
 

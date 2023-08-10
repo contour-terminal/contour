@@ -19,8 +19,6 @@
 #include <exception>
 #include <iostream>
 
-#include "TrieMap.h"
-
 TEST_CASE("trie_map.simple")
 {
     auto m = crispy::trie_map<std::string, int> {};
