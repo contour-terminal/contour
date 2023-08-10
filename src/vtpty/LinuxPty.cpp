@@ -281,7 +281,11 @@ optional<string_view> LinuxPty::readSome(int fd, char* target, size_t n) noexcep
 {
     auto const rv = static_cast<int>(::read(fd, target, n));
     if (rv < 0)
+    {
+        if (errno != EAGAIN && errno != EINTR)
+            errorlog()("{} read failed: {}", fd == _masterFd ? "master" : "stdout-fastpipe", strerror(errno));
         return nullopt;
+    }
 
     if (PtyInLog)
         PtyInLog()("{} received: \"{}\"",
