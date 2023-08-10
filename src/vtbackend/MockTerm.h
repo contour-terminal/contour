@@ -51,7 +51,7 @@ class MockTerm: public Terminal::Events
 
     // Convenience method to type into stdin a sequence of characters.
     void sendCharPressSequence(std::string_view sequence,
-                               Modifier modifier = Modifier::None,
+                               modifier modifier = modifier::None,
                                Terminal::Timestamp now = std::chrono::steady_clock::now())
     {
         auto const codepoints = unicode::convert_to<char32_t>(sequence);

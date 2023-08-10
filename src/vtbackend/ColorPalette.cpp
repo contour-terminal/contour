@@ -39,8 +39,8 @@ namespace
     }
 } // namespace
 
-ColorPalette::Palette const ColorPalette::defaultColorPalette = []() constexpr {
-    ColorPalette::Palette colors;
+color_palette::palette_type const color_palette::defaultColorPalette = []() constexpr {
+    color_palette::palette_type colors;
 
     // normal colors
     colors[0] = 0x000000_rgb; // black
@@ -88,7 +88,7 @@ ColorPalette::Palette const ColorPalette::defaultColorPalette = []() constexpr {
     return colors;
 }();
 
-void ImageData::updateHash() noexcept
+void image_data::updateHash() noexcept
 {
     // clang-format off
     using crispy::StrongHash;
@@ -108,7 +108,7 @@ void ImageData::updateHash() noexcept
     // clang-format on
 }
 
-rgb_color apply(ColorPalette const& colorPalette, color color, ColorTarget target, ColorMode mode) noexcept
+rgb_color apply(color_palette const& colorPalette, color color, color_target target, color_mode mode) noexcept
 {
     // clang-format off
     switch (color.type())
@@ -118,9 +118,9 @@ rgb_color apply(ColorPalette const& colorPalette, color color, ColorTarget targe
         case color_type::Indexed:
         {
             auto const index = static_cast<size_t>(color.index());
-            if (mode == ColorMode::Bright && index < 8)
+            if (mode == color_mode::Bright && index < 8)
                 return colorPalette.brightColor(index);
-            else if (mode == ColorMode::Dimmed && index < 8)
+            else if (mode == color_mode::Dimmed && index < 8)
                 return colorPalette.dimColor(index);
             else
                 return colorPalette.indexedColor(index);
@@ -134,8 +134,8 @@ rgb_color apply(ColorPalette const& colorPalette, color color, ColorTarget targe
     }
     // clang-format on
     auto const defaultColor =
-        target == ColorTarget::Foreground ? colorPalette.defaultForeground : colorPalette.defaultBackground;
-    return mode == ColorMode::Dimmed ? defaultColor * 0.75 : defaultColor;
+        target == color_target::Foreground ? colorPalette.defaultForeground : colorPalette.defaultBackground;
+    return mode == color_mode::Dimmed ? defaultColor * 0.75 : defaultColor;
 }
 
 } // namespace terminal

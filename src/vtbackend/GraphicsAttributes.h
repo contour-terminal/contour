@@ -23,7 +23,7 @@ namespace terminal
 {
 
 /// Character graphics rendition information.
-struct GraphicsAttributes
+struct graphics_attributes
 {
     color foregroundColor { DefaultColor() };
     color backgroundColor { DefaultColor() };
@@ -31,15 +31,15 @@ struct GraphicsAttributes
     cell_flags flags {};
 };
 
-static_assert(std::is_trivially_copy_assignable_v<GraphicsAttributes>);
+static_assert(std::is_trivially_copy_assignable_v<graphics_attributes>);
 
-constexpr bool operator==(GraphicsAttributes const& a, GraphicsAttributes const& b) noexcept
+constexpr bool operator==(graphics_attributes const& a, graphics_attributes const& b) noexcept
 {
     return a.backgroundColor == b.backgroundColor && a.foregroundColor == b.foregroundColor
            && a.flags == b.flags && a.underlineColor == b.underlineColor;
 }
 
-constexpr bool operator!=(GraphicsAttributes const& a, GraphicsAttributes const& b) noexcept
+constexpr bool operator!=(graphics_attributes const& a, graphics_attributes const& b) noexcept
 {
     return !(a == b);
 }

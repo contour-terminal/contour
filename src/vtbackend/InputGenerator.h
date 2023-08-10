@@ -33,7 +33,7 @@ namespace terminal
 {
 
 /// Mutualy exclusive mouse protocls.
-enum class MouseProtocol
+enum class mouse_protocol
 {
     /// Old X10 mouse protocol
     X10 = 9,
@@ -47,10 +47,10 @@ enum class MouseProtocol
     AnyEventTracking = 1003,
 };
 
-class Modifier
+class modifier
 {
   public:
-    enum Key : unsigned
+    enum key : unsigned
     {
         None = 0,
         Shift = 1,
@@ -59,13 +59,13 @@ class Modifier
         Meta = 8,
     };
 
-    constexpr Modifier(Key key): _mask { static_cast<unsigned>(key) } {}
+    constexpr modifier(key key): _mask { static_cast<unsigned>(key) } {}
 
-    constexpr Modifier() = default;
-    constexpr Modifier(Modifier&&) = default;
-    constexpr Modifier(Modifier const&) = default;
-    constexpr Modifier& operator=(Modifier&&) = default;
-    constexpr Modifier& operator=(Modifier const&) = default;
+    constexpr modifier() = default;
+    constexpr modifier(modifier&&) = default;
+    constexpr modifier(modifier const&) = default;
+    constexpr modifier& operator=(modifier&&) = default;
+    constexpr modifier& operator=(modifier const&) = default;
 
     [[nodiscard]] constexpr unsigned value() const noexcept { return _mask; }
 
@@ -80,78 +80,78 @@ class Modifier
 
     [[nodiscard]] constexpr bool any() const noexcept { return _mask != 0; }
 
-    constexpr Modifier& operator|=(Modifier const& other) noexcept
+    constexpr modifier& operator|=(modifier const& other) noexcept
     {
         _mask |= other._mask;
         return *this;
     }
 
-    [[nodiscard]] constexpr Modifier with(Modifier const& other) const noexcept
+    [[nodiscard]] constexpr modifier with(modifier const& other) const noexcept
     {
-        return Modifier(static_cast<Key>(_mask | other._mask));
+        return modifier(static_cast<key>(_mask | other._mask));
     }
 
-    [[nodiscard]] constexpr Modifier without(Modifier const& other) const noexcept
+    [[nodiscard]] constexpr modifier without(modifier const& other) const noexcept
     {
-        return Modifier(static_cast<Key>(_mask & ~other._mask));
+        return modifier(static_cast<key>(_mask & ~other._mask));
     }
 
-    [[nodiscard]] bool contains(Modifier const& other) const noexcept
+    [[nodiscard]] bool contains(modifier const& other) const noexcept
     {
         return (_mask & other._mask) == other._mask;
     }
 
-    constexpr void enable(Key key) noexcept { _mask |= key; }
+    constexpr void enable(key key) noexcept { _mask |= key; }
 
-    constexpr void disable(Key key) noexcept { _mask &= ~static_cast<unsigned>(key); }
+    constexpr void disable(key key) noexcept { _mask &= ~static_cast<unsigned>(key); }
 
   private:
     unsigned _mask = 0;
 };
 
-constexpr Modifier operator|(Modifier a, Modifier b) noexcept
+constexpr modifier operator|(modifier a, modifier b) noexcept
 {
-    return Modifier(static_cast<Modifier::Key>(a.value() | b.value()));
+    return modifier(static_cast<modifier::key>(a.value() | b.value()));
 }
 
-constexpr bool operator<(Modifier lhs, Modifier rhs) noexcept
+constexpr bool operator<(modifier lhs, modifier rhs) noexcept
 {
     return lhs.value() < rhs.value();
 }
 
-constexpr bool operator==(Modifier lhs, Modifier rhs) noexcept
+constexpr bool operator==(modifier lhs, modifier rhs) noexcept
 {
     return lhs.value() == rhs.value();
 }
 
-std::optional<Modifier::Key> parseModifierKey(std::string const& key);
+std::optional<modifier::key> parseModifierKey(std::string const& key);
 
-constexpr bool operator!(Modifier modifier) noexcept
+constexpr bool operator!(modifier modifier) noexcept
 {
     return modifier.none();
 }
 
-constexpr bool operator==(Modifier lhs, Modifier::Key rhs) noexcept
+constexpr bool operator==(modifier lhs, modifier::key rhs) noexcept
 {
-    return static_cast<Modifier::Key>(lhs.value()) == rhs;
+    return static_cast<modifier::key>(lhs.value()) == rhs;
 }
 
-constexpr Modifier operator+(Modifier::Key lhs, Modifier::Key rhs) noexcept
+constexpr modifier operator+(modifier::key lhs, modifier::key rhs) noexcept
 {
-    return Modifier(static_cast<Modifier::Key>(static_cast<unsigned>(lhs) | static_cast<unsigned>(rhs)));
+    return modifier(static_cast<modifier::key>(static_cast<unsigned>(lhs) | static_cast<unsigned>(rhs)));
 }
 
 /// @returns CSI parameter for given function key modifier
-constexpr size_t makeVirtualTerminalParam(Modifier modifier) noexcept
+constexpr size_t makeVirtualTerminalParam(modifier modifier) noexcept
 {
     return 1 + modifier.value();
 }
 
-std::string to_string(Modifier modifier);
+std::string to_string(modifier modifier);
 
 // }}}
 // {{{ KeyInputEvent, Key
-enum class Key
+enum class key
 {
     // function keys
     F1,
@@ -213,16 +213,16 @@ enum class Key
     // NOLINTEND(readability-identifier-naming)
 };
 
-std::string to_string(Key key);
+std::string to_string(key key);
 
-enum class KeyMode
+enum class key_mode
 {
     Normal,
     Application
 };
 // }}}
 // {{{ Mouse
-enum class MouseButton
+enum class mouse_button
 {
     Left,
     Right,
@@ -232,9 +232,9 @@ enum class MouseButton
     WheelDown,
 };
 
-std::string to_string(MouseButton button);
+std::string to_string(mouse_button button);
 
-enum class MouseTransport
+enum class mouse_transport
 {
     // CSI M Cb Cx Cy, with Cb, Cx, Cy incremented by 0x20
     Default,
@@ -250,36 +250,36 @@ enum class MouseTransport
 };
 // }}}
 
-class InputGenerator
+class input_generator
 {
   public:
-    using Sequence = std::vector<char>;
+    using sequence = std::vector<char>;
 
     /// Changes the input mode for cursor keys.
-    void setCursorKeysMode(KeyMode mode);
+    void setCursorKeysMode(key_mode mode);
 
     /// Changes the input mode for numpad keys.
-    void setNumpadKeysMode(KeyMode mode);
+    void setNumpadKeysMode(key_mode mode);
 
     void setApplicationKeypadMode(bool enable);
 
-    [[nodiscard]] bool normalCursorKeys() const noexcept { return _cursorKeysMode == KeyMode::Normal; }
+    [[nodiscard]] bool normalCursorKeys() const noexcept { return _cursorKeysMode == key_mode::Normal; }
     [[nodiscard]] bool applicationCursorKeys() const noexcept { return !normalCursorKeys(); }
 
-    [[nodiscard]] bool numericKeypad() const noexcept { return _numpadKeysMode == KeyMode::Normal; }
+    [[nodiscard]] bool numericKeypad() const noexcept { return _numpadKeysMode == key_mode::Normal; }
     [[nodiscard]] bool applicationKeypad() const noexcept { return !numericKeypad(); }
 
     [[nodiscard]] bool bracketedPaste() const noexcept { return _bracketedPaste; }
     void setBracketedPaste(bool enable) { _bracketedPaste = enable; }
 
-    void setMouseProtocol(MouseProtocol mouseProtocol, bool enabled);
-    [[nodiscard]] std::optional<MouseProtocol> mouseProtocol() const noexcept { return _mouseProtocol; }
+    void setMouseProtocol(mouse_protocol mouseProtocol, bool enabled);
+    [[nodiscard]] std::optional<mouse_protocol> mouseProtocol() const noexcept { return _mouseProtocol; }
 
     // Sets mouse event transport protocol (default, extended, xgr, urxvt)
-    void setMouseTransport(MouseTransport mouseTransport);
-    [[nodiscard]] MouseTransport mouseTransport() const noexcept { return _mouseTransport; }
+    void setMouseTransport(mouse_transport mouseTransport);
+    [[nodiscard]] mouse_transport mouseTransport() const noexcept { return _mouseTransport; }
 
-    enum class MouseWheelMode
+    enum class mouse_wheel_mode
     {
         // mouse wheel generates mouse wheel events as determined by mouse protocol + transport.
         Default,
@@ -289,8 +289,8 @@ class InputGenerator
         ApplicationCursorKeys
     };
 
-    void setMouseWheelMode(MouseWheelMode mode) noexcept;
-    [[nodiscard]] MouseWheelMode mouseWheelMode() const noexcept { return _mouseWheelMode; }
+    void setMouseWheelMode(mouse_wheel_mode mode) noexcept;
+    [[nodiscard]] mouse_wheel_mode mouseWheelMode() const noexcept { return _mouseWheelMode; }
 
     void setGenerateFocusEvents(bool enable) noexcept { _generateFocusEvents = enable; }
     [[nodiscard]] bool generateFocusEvents() const noexcept { return _generateFocusEvents; }
@@ -298,21 +298,21 @@ class InputGenerator
     void setPassiveMouseTracking(bool v) noexcept { _passiveMouseTracking = v; }
     [[nodiscard]] bool passiveMouseTracking() const noexcept { return _passiveMouseTracking; }
 
-    bool generate(char32_t characterEvent, Modifier modifier);
-    bool generate(std::u32string const& characterEvent, Modifier modifier);
-    bool generate(Key key, Modifier modifier);
+    bool generate(char32_t characterEvent, modifier modifier);
+    bool generate(std::u32string const& characterEvent, modifier modifier);
+    bool generate(key key, modifier modifier);
     void generatePaste(std::string_view const& text);
-    bool generateMousePress(Modifier modifier,
-                            MouseButton button,
+    bool generateMousePress(modifier modifier,
+                            mouse_button button,
                             cell_location pos,
                             pixel_coordinate pixelPosition,
                             bool uiHandled);
-    bool generateMouseMove(Modifier modifier,
+    bool generateMouseMove(modifier modifier,
                            cell_location pos,
                            pixel_coordinate pixelPosition,
                            bool uiHandled);
-    bool generateMouseRelease(Modifier modifier,
-                              MouseButton button,
+    bool generateMouseRelease(modifier modifier,
+                              mouse_button button,
                               cell_location pos,
                               pixel_coordinate pixelPosition,
                               bool uiHandled);
@@ -342,7 +342,7 @@ class InputGenerator
         }
     }
 
-    enum class MouseEventType
+    enum class mouse_event_type
     {
         Press,
         Drag,
@@ -353,14 +353,14 @@ class InputGenerator
     void reset();
 
   private:
-    bool generateMouse(MouseEventType eventType,
-                       Modifier modifier,
-                       MouseButton button,
+    bool generateMouse(mouse_event_type eventType,
+                       modifier modifier,
+                       mouse_button button,
                        cell_location pos,
                        pixel_coordinate pixelPosition,
                        bool uiHandled);
 
-    bool mouseTransport(MouseEventType eventType,
+    bool mouseTransport(mouse_event_type eventType,
                         uint8_t button,
                         uint8_t modifier,
                         cell_location pos,
@@ -371,9 +371,9 @@ class InputGenerator
     bool mouseTransportExtended(uint8_t button, uint8_t modifier, cell_location pos);
 
     bool mouseTransportSGR(
-        MouseEventType type, uint8_t button, uint8_t modifier, int x, int y, bool uiHandled);
+        mouse_event_type type, uint8_t button, uint8_t modifier, int x, int y, bool uiHandled);
 
-    bool mouseTransportURXVT(MouseEventType type, uint8_t button, uint8_t modifier, cell_location pos);
+    bool mouseTransportURXVT(mouse_event_type type, uint8_t button, uint8_t modifier, cell_location pos);
 
     inline bool append(std::string_view sequence);
     inline bool append(char asciiChar);
@@ -382,28 +382,28 @@ class InputGenerator
 
     // private fields
     //
-    KeyMode _cursorKeysMode = KeyMode::Normal;
-    KeyMode _numpadKeysMode = KeyMode::Normal;
+    key_mode _cursorKeysMode = key_mode::Normal;
+    key_mode _numpadKeysMode = key_mode::Normal;
     bool _bracketedPaste = false;
     bool _generateFocusEvents = false;
-    std::optional<MouseProtocol> _mouseProtocol = std::nullopt;
+    std::optional<mouse_protocol> _mouseProtocol = std::nullopt;
     bool _passiveMouseTracking = false;
-    MouseTransport _mouseTransport = MouseTransport::Default;
-    MouseWheelMode _mouseWheelMode = MouseWheelMode::Default;
-    Sequence _pendingSequence {};
+    mouse_transport _mouseTransport = mouse_transport::Default;
+    mouse_wheel_mode _mouseWheelMode = mouse_wheel_mode::Default;
+    sequence _pendingSequence {};
     int _consumedBytes {};
 
-    std::set<MouseButton> _currentlyPressedMouseButtons {};
+    std::set<mouse_button> _currentlyPressedMouseButtons {};
     cell_location _currentMousePosition {}; // current mouse position
 };
 
-inline std::string to_string(InputGenerator::MouseEventType value)
+inline std::string to_string(input_generator::mouse_event_type value)
 {
     switch (value)
     {
-        case InputGenerator::MouseEventType::Press: return "Press";
-        case InputGenerator::MouseEventType::Drag: return "Drag";
-        case InputGenerator::MouseEventType::Release: return "Release";
+        case input_generator::mouse_event_type::Press: return "Press";
+        case input_generator::mouse_event_type::Drag: return "Drag";
+        case input_generator::mouse_event_type::Release: return "Release";
     }
     return "???";
 }
@@ -413,27 +413,27 @@ inline std::string to_string(InputGenerator::MouseEventType value)
 // {{{ fmtlib custom formatter support
 
 template <>
-struct fmt::formatter<terminal::MouseProtocol>: formatter<std::string_view>
+struct fmt::formatter<terminal::mouse_protocol>: formatter<std::string_view>
 {
-    auto format(terminal::MouseProtocol value, format_context& ctx) -> format_context::iterator
+    auto format(terminal::mouse_protocol value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::MouseProtocol::X10: name = "X10"; break;
-            case terminal::MouseProtocol::HighlightTracking: name = "HighlightTracking"; break;
-            case terminal::MouseProtocol::ButtonTracking: name = "ButtonTracking"; break;
-            case terminal::MouseProtocol::NormalTracking: name = "NormalTracking"; break;
-            case terminal::MouseProtocol::AnyEventTracking: name = "AnyEventTracking"; break;
+            case terminal::mouse_protocol::X10: name = "X10"; break;
+            case terminal::mouse_protocol::HighlightTracking: name = "HighlightTracking"; break;
+            case terminal::mouse_protocol::ButtonTracking: name = "ButtonTracking"; break;
+            case terminal::mouse_protocol::NormalTracking: name = "NormalTracking"; break;
+            case terminal::mouse_protocol::AnyEventTracking: name = "AnyEventTracking"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::Modifier>: formatter<std::string>
+struct fmt::formatter<terminal::modifier>: formatter<std::string>
 {
-    auto format(terminal::Modifier modifier, format_context& ctx) -> format_context::iterator
+    auto format(terminal::modifier modifier, format_context& ctx) -> format_context::iterator
     {
         std::string s;
         auto const advance = [&](bool cond, std::string_view text) {
@@ -454,17 +454,19 @@ struct fmt::formatter<terminal::Modifier>: formatter<std::string>
 };
 
 template <>
-struct fmt::formatter<terminal::InputGenerator::MouseWheelMode>: formatter<std::string_view>
+struct fmt::formatter<terminal::input_generator::mouse_wheel_mode>: formatter<std::string_view>
 {
-    auto format(terminal::InputGenerator::MouseWheelMode value, format_context& ctx)
+    auto format(terminal::input_generator::mouse_wheel_mode value, format_context& ctx)
         -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::InputGenerator::MouseWheelMode::Default: name = "Default"; break;
-            case terminal::InputGenerator::MouseWheelMode::NormalCursorKeys: name = "NormalCursorKeys"; break;
-            case terminal::InputGenerator::MouseWheelMode::ApplicationCursorKeys:
+            case terminal::input_generator::mouse_wheel_mode::Default: name = "Default"; break;
+            case terminal::input_generator::mouse_wheel_mode::NormalCursorKeys:
+                name = "NormalCursorKeys";
+                break;
+            case terminal::input_generator::mouse_wheel_mode::ApplicationCursorKeys:
                 name = "ApplicationCursorKeys";
                 break;
         }
@@ -473,114 +475,114 @@ struct fmt::formatter<terminal::InputGenerator::MouseWheelMode>: formatter<std::
 };
 
 template <>
-struct fmt::formatter<terminal::KeyMode>: public formatter<std::string_view>
+struct fmt::formatter<terminal::key_mode>: public formatter<std::string_view>
 {
-    auto format(terminal::KeyMode value, format_context& ctx) -> format_context::iterator
+    auto format(terminal::key_mode value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::KeyMode::Normal: name = "Normal"; break;
-            case terminal::KeyMode::Application: name = "Application"; break;
+            case terminal::key_mode::Normal: name = "Normal"; break;
+            case terminal::key_mode::Application: name = "Application"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::MouseButton>: formatter<std::string_view>
+struct fmt::formatter<terminal::mouse_button>: formatter<std::string_view>
 {
-    auto format(terminal::MouseButton value, format_context& ctx) -> format_context::iterator
+    auto format(terminal::mouse_button value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::MouseButton::Left: name = "Left"; break;
-            case terminal::MouseButton::Right: name = "Right"; break;
-            case terminal::MouseButton::Middle: name = "Middle"; break;
-            case terminal::MouseButton::Release: name = "Release"; break;
-            case terminal::MouseButton::WheelUp: name = "WheelUp"; break;
-            case terminal::MouseButton::WheelDown: name = "WheelDown"; break;
+            case terminal::mouse_button::Left: name = "Left"; break;
+            case terminal::mouse_button::Right: name = "Right"; break;
+            case terminal::mouse_button::Middle: name = "Middle"; break;
+            case terminal::mouse_button::Release: name = "Release"; break;
+            case terminal::mouse_button::WheelUp: name = "WheelUp"; break;
+            case terminal::mouse_button::WheelDown: name = "WheelDown"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::MouseTransport>: formatter<std::string_view>
+struct fmt::formatter<terminal::mouse_transport>: formatter<std::string_view>
 {
-    auto format(terminal::MouseTransport value, format_context& ctx) -> format_context::iterator
+    auto format(terminal::mouse_transport value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::MouseTransport::Default: name = "Default"; break;
-            case terminal::MouseTransport::Extended: name = "Extended"; break;
-            case terminal::MouseTransport::SGR: name = "SGR"; break;
-            case terminal::MouseTransport::URXVT: name = "URXVT"; break;
-            case terminal::MouseTransport::SGRPixels: name = "SGR-Pixels"; break;
+            case terminal::mouse_transport::Default: name = "Default"; break;
+            case terminal::mouse_transport::Extended: name = "Extended"; break;
+            case terminal::mouse_transport::SGR: name = "SGR"; break;
+            case terminal::mouse_transport::URXVT: name = "URXVT"; break;
+            case terminal::mouse_transport::SGRPixels: name = "SGR-Pixels"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::Key>: formatter<std::string_view>
+struct fmt::formatter<terminal::key>: formatter<std::string_view>
 {
-    auto format(terminal::Key value, format_context& ctx) -> format_context::iterator
+    auto format(terminal::key value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::Key::F1: name = "F1"; break;
-            case terminal::Key::F2: name = "F2"; break;
-            case terminal::Key::F3: name = "F3"; break;
-            case terminal::Key::F4: name = "F4"; break;
-            case terminal::Key::F5: name = "F5"; break;
-            case terminal::Key::F6: name = "F6"; break;
-            case terminal::Key::F7: name = "F7"; break;
-            case terminal::Key::F8: name = "F8"; break;
-            case terminal::Key::F9: name = "F9"; break;
-            case terminal::Key::F10: name = "F10"; break;
-            case terminal::Key::F11: name = "F11"; break;
-            case terminal::Key::F12: name = "F12"; break;
-            case terminal::Key::F13: name = "F13"; break;
-            case terminal::Key::F14: name = "F14"; break;
-            case terminal::Key::F15: name = "F15"; break;
-            case terminal::Key::F16: name = "F16"; break;
-            case terminal::Key::F17: name = "F17"; break;
-            case terminal::Key::F18: name = "F18"; break;
-            case terminal::Key::F19: name = "F19"; break;
-            case terminal::Key::F20: name = "F20"; break;
-            case terminal::Key::DownArrow: name = "DownArrow"; break;
-            case terminal::Key::LeftArrow: name = "LeftArrow"; break;
-            case terminal::Key::RightArrow: name = "RightArrow"; break;
-            case terminal::Key::UpArrow: name = "UpArrow"; break;
-            case terminal::Key::Insert: name = "Insert"; break;
-            case terminal::Key::Delete: name = "Delete"; break;
-            case terminal::Key::Home: name = "Home"; break;
-            case terminal::Key::End: name = "End"; break;
-            case terminal::Key::PageUp: name = "PageUp"; break;
-            case terminal::Key::PageDown: name = "PageDown"; break;
-            case terminal::Key::Numpad_NumLock: name = "Numpad_NumLock"; break;
-            case terminal::Key::Numpad_Divide: name = "Numpad_Divide"; break;
-            case terminal::Key::Numpad_Multiply: name = "Numpad_Multiply"; break;
-            case terminal::Key::Numpad_Subtract: name = "Numpad_Subtract"; break;
-            case terminal::Key::Numpad_CapsLock: name = "Numpad_CapsLock"; break;
-            case terminal::Key::Numpad_Add: name = "Numpad_Add"; break;
-            case terminal::Key::Numpad_Decimal: name = "Numpad_Decimal"; break;
-            case terminal::Key::Numpad_Enter: name = "Numpad_Enter"; break;
-            case terminal::Key::Numpad_Equal: name = "Numpad_Equal"; break;
-            case terminal::Key::Numpad_0: name = "Numpad_0"; break;
-            case terminal::Key::Numpad_1: name = "Numpad_1"; break;
-            case terminal::Key::Numpad_2: name = "Numpad_2"; break;
-            case terminal::Key::Numpad_3: name = "Numpad_3"; break;
-            case terminal::Key::Numpad_4: name = "Numpad_4"; break;
-            case terminal::Key::Numpad_5: name = "Numpad_5"; break;
-            case terminal::Key::Numpad_6: name = "Numpad_6"; break;
-            case terminal::Key::Numpad_7: name = "Numpad_7"; break;
-            case terminal::Key::Numpad_8: name = "Numpad_8"; break;
-            case terminal::Key::Numpad_9: name = "Numpad_9"; break;
+            case terminal::key::F1: name = "F1"; break;
+            case terminal::key::F2: name = "F2"; break;
+            case terminal::key::F3: name = "F3"; break;
+            case terminal::key::F4: name = "F4"; break;
+            case terminal::key::F5: name = "F5"; break;
+            case terminal::key::F6: name = "F6"; break;
+            case terminal::key::F7: name = "F7"; break;
+            case terminal::key::F8: name = "F8"; break;
+            case terminal::key::F9: name = "F9"; break;
+            case terminal::key::F10: name = "F10"; break;
+            case terminal::key::F11: name = "F11"; break;
+            case terminal::key::F12: name = "F12"; break;
+            case terminal::key::F13: name = "F13"; break;
+            case terminal::key::F14: name = "F14"; break;
+            case terminal::key::F15: name = "F15"; break;
+            case terminal::key::F16: name = "F16"; break;
+            case terminal::key::F17: name = "F17"; break;
+            case terminal::key::F18: name = "F18"; break;
+            case terminal::key::F19: name = "F19"; break;
+            case terminal::key::F20: name = "F20"; break;
+            case terminal::key::DownArrow: name = "DownArrow"; break;
+            case terminal::key::LeftArrow: name = "LeftArrow"; break;
+            case terminal::key::RightArrow: name = "RightArrow"; break;
+            case terminal::key::UpArrow: name = "UpArrow"; break;
+            case terminal::key::Insert: name = "Insert"; break;
+            case terminal::key::Delete: name = "Delete"; break;
+            case terminal::key::Home: name = "Home"; break;
+            case terminal::key::End: name = "End"; break;
+            case terminal::key::PageUp: name = "PageUp"; break;
+            case terminal::key::PageDown: name = "PageDown"; break;
+            case terminal::key::Numpad_NumLock: name = "Numpad_NumLock"; break;
+            case terminal::key::Numpad_Divide: name = "Numpad_Divide"; break;
+            case terminal::key::Numpad_Multiply: name = "Numpad_Multiply"; break;
+            case terminal::key::Numpad_Subtract: name = "Numpad_Subtract"; break;
+            case terminal::key::Numpad_CapsLock: name = "Numpad_CapsLock"; break;
+            case terminal::key::Numpad_Add: name = "Numpad_Add"; break;
+            case terminal::key::Numpad_Decimal: name = "Numpad_Decimal"; break;
+            case terminal::key::Numpad_Enter: name = "Numpad_Enter"; break;
+            case terminal::key::Numpad_Equal: name = "Numpad_Equal"; break;
+            case terminal::key::Numpad_0: name = "Numpad_0"; break;
+            case terminal::key::Numpad_1: name = "Numpad_1"; break;
+            case terminal::key::Numpad_2: name = "Numpad_2"; break;
+            case terminal::key::Numpad_3: name = "Numpad_3"; break;
+            case terminal::key::Numpad_4: name = "Numpad_4"; break;
+            case terminal::key::Numpad_5: name = "Numpad_5"; break;
+            case terminal::key::Numpad_6: name = "Numpad_6"; break;
+            case terminal::key::Numpad_7: name = "Numpad_7"; break;
+            case terminal::key::Numpad_8: name = "Numpad_8"; break;
+            case terminal::key::Numpad_9: name = "Numpad_9"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

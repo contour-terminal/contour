@@ -109,43 +109,43 @@ constexpr inline char32_t makeChar(Qt::Key _key, Qt::KeyboardModifiers _mods)
     return 0;
 }
 
-constexpr inline terminal::Modifier makeModifier(Qt::KeyboardModifiers _mods)
+constexpr inline terminal::modifier makeModifier(Qt::KeyboardModifiers _mods)
 {
-    using terminal::Modifier;
+    using terminal::modifier;
 
-    Modifier mods {};
+    modifier mods {};
 
     if (_mods & Qt::AltModifier)
-        mods |= Modifier::Alt;
+        mods |= modifier::Alt;
     if (_mods & Qt::ShiftModifier)
-        mods |= Modifier::Shift;
+        mods |= modifier::Shift;
 #if defined(__APPLE__)
     // XXX https://doc.qt.io/qt-5/qt.html#KeyboardModifier-enum
     //     "Note: On macOS, the ControlModifier value corresponds to the Command keys on the keyboard,
     //      and the MetaModifier value corresponds to the Control keys."
     if (_mods & Qt::MetaModifier)
-        mods |= Modifier::Control;
+        mods |= modifier::Control;
     if (_mods & Qt::ControlModifier)
-        mods |= Modifier::Meta;
+        mods |= modifier::Meta;
 #else
     if (_mods & Qt::ControlModifier)
-        mods |= Modifier::Control;
+        mods |= modifier::Control;
     if (_mods & Qt::MetaModifier)
-        mods |= Modifier::Meta;
+        mods |= modifier::Meta;
 #endif
 
     return mods;
 }
 
-constexpr inline terminal::MouseButton makeMouseButton(Qt::MouseButton _button)
+constexpr inline terminal::mouse_button makeMouseButton(Qt::MouseButton _button)
 {
     switch (_button)
     {
-        case Qt::MouseButton::RightButton: return terminal::MouseButton::Right;
-        case Qt::MiddleButton: return terminal::MouseButton::Middle;
+        case Qt::MouseButton::RightButton: return terminal::mouse_button::Right;
+        case Qt::MiddleButton: return terminal::mouse_button::Middle;
         case Qt::LeftButton: [[fallthrough]];
         default: // d'oh
-            return terminal::MouseButton::Left;
+            return terminal::mouse_button::Left;
     }
 }
 

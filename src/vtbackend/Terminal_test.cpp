@@ -91,7 +91,7 @@ TEST_CASE("Terminal.BlinkingCursor", "[terminal]")
 
         // type something into the terminal
         auto const clockAtInputEvent = clockBase + BlinkInterval + chrono::milliseconds(10);
-        terminal.sendCharPressEvent('x', terminal::Modifier {}, clockAtInputEvent);
+        terminal.sendCharPressEvent('x', terminal::modifier {}, clockAtInputEvent);
 
         // now the cursor is visible before the interval has passed
         terminal.tick(clockBeforeTurn);
@@ -248,7 +248,7 @@ TEST_CASE("Terminal.XTPUSHCOLORS_and_XTPOPCOLORS", "[terminal]")
 
     auto const originalPalette = vtState.colorPalette;
 
-    auto modifiedPalette = ColorPalette {};
+    auto modifiedPalette = color_palette {};
     modifiedPalette.palette[0] = 0xFF6600_rgb;
 
     SECTION("pop on empty")
@@ -406,11 +406,11 @@ TEST_CASE("Terminal.TextSelection", "[terminal]")
 
     mock.terminal.tick(1s);
     mock.terminal.sendMouseMoveEvent(
-        Modifier::None, 1_lineOffset + 1_columnOffset, pixelCoordinate, uiHandledHint);
+        modifier::None, 1_lineOffset + 1_columnOffset, pixelCoordinate, uiHandledHint);
 
     mock.terminal.tick(1s);
     auto const appHandledMouse =
-        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, pixelCoordinate, uiHandledHint);
+        mock.terminal.sendMousePressEvent(modifier::None, mouse_button::Left, pixelCoordinate, uiHandledHint);
 
     // We want to ensure that this call is returning false if the app has not explicitly requested
     // to listen on mouse events (without passive mode being on).
@@ -424,16 +424,16 @@ TEST_CASE("Terminal.TextSelection", "[terminal]")
 
     mock.terminal.tick(1s);
     mock.terminal.sendMouseMoveEvent(
-        Modifier::None, 2_lineOffset + 2_columnOffset, pixelCoordinate, uiHandledHint);
+        modifier::None, 2_lineOffset + 2_columnOffset, pixelCoordinate, uiHandledHint);
     CHECK(mock.terminal.extractSelectionText() == "7890\nABC");
 
     mock.terminal.tick(1s);
-    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, pixelCoordinate, uiHandledHint);
+    mock.terminal.sendMouseReleaseEvent(modifier::None, mouse_button::Left, pixelCoordinate, uiHandledHint);
     CHECK(mock.terminal.extractSelectionText() == "7890\nABC");
 
     // Clear selection by simply left-clicking.
     mock.terminal.tick(1s);
-    mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, pixelCoordinate, uiHandledHint);
-    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, pixelCoordinate, uiHandledHint);
+    mock.terminal.sendMousePressEvent(modifier::None, mouse_button::Left, pixelCoordinate, uiHandledHint);
+    mock.terminal.sendMouseReleaseEvent(modifier::None, mouse_button::Left, pixelCoordinate, uiHandledHint);
     CHECK(mock.terminal.extractSelectionText().empty());
 }

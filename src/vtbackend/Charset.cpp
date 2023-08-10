@@ -16,9 +16,9 @@
 namespace terminal
 {
 
-constexpr CharsetMap usasciiCharset() noexcept
+constexpr charset_map usasciiCharset() noexcept
 {
-    CharsetMap result {};
+    charset_map result {};
 
     for (char ch = 0; ch < 127; ++ch)
         result[static_cast<size_t>(ch)] = static_cast<char32_t>(ch);
@@ -29,7 +29,7 @@ constexpr CharsetMap usasciiCharset() noexcept
 /// British:
 ///     ESC (A
 ///     Reference: http://vt100.net/docs/vt220-rm/table2-5.html
-constexpr CharsetMap createBritishCharset() noexcept
+constexpr charset_map createBritishCharset() noexcept
 {
     auto result = usasciiCharset();
     result['#'] = 0x00A3; // U'£';
@@ -38,7 +38,7 @@ constexpr CharsetMap createBritishCharset() noexcept
 
 /// German:
 ///     ESC ( K
-constexpr CharsetMap createGermanCharset() noexcept
+constexpr charset_map createGermanCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -57,7 +57,7 @@ constexpr CharsetMap createGermanCharset() noexcept
 /// DEC Special Character and Line Drawing Set.
 ///
 /// Reference: http://vt100.net/docs/vt102-ug/table5-13.html
-constexpr CharsetMap createSpecialCharset() noexcept
+constexpr charset_map createSpecialCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -99,7 +99,7 @@ constexpr CharsetMap createSpecialCharset() noexcept
 /// Dutch:
 ///     ESC ( 4
 ///
-constexpr CharsetMap createDutchCharset() noexcept
+constexpr charset_map createDutchCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -119,7 +119,7 @@ constexpr CharsetMap createDutchCharset() noexcept
 /// Finnish:
 ///     ESC ( C
 ///     ESC ( 5
-constexpr CharsetMap createFinnishCharset() noexcept
+constexpr charset_map createFinnishCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -138,7 +138,7 @@ constexpr CharsetMap createFinnishCharset() noexcept
 
 /// French:
 ///     ESC ( R
-constexpr CharsetMap createFrenchCharset() noexcept
+constexpr charset_map createFrenchCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -157,7 +157,7 @@ constexpr CharsetMap createFrenchCharset() noexcept
 
 /// French Canadian:
 ///     ESC ( Q
-constexpr CharsetMap createFrenchCanadianCharset() noexcept
+constexpr charset_map createFrenchCanadianCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -178,7 +178,7 @@ constexpr CharsetMap createFrenchCanadianCharset() noexcept
 /// Norwegian/Danich:
 ///     ESC ( E
 ///     ESC ( 6
-constexpr CharsetMap createNorwegianDanishCharset() noexcept
+constexpr charset_map createNorwegianDanishCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -198,7 +198,7 @@ constexpr CharsetMap createNorwegianDanishCharset() noexcept
 
 /// Spanish:
 ///     ESC ( Z
-constexpr CharsetMap createSpanishCharset() noexcept
+constexpr charset_map createSpanishCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -217,7 +217,7 @@ constexpr CharsetMap createSpanishCharset() noexcept
 /// Swedish:
 ///     ESC ( H
 ///     ESC ( 7
-constexpr CharsetMap createSwedishCharset() noexcept
+constexpr charset_map createSwedishCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -237,7 +237,7 @@ constexpr CharsetMap createSwedishCharset() noexcept
 
 /// Swiss:
 ///     ESC ( =
-constexpr CharsetMap createSwissCharset() noexcept
+constexpr charset_map createSwissCharset() noexcept
 {
     auto result = usasciiCharset();
 
@@ -257,7 +257,7 @@ constexpr CharsetMap createSwissCharset() noexcept
     return result;
 }
 
-CharsetMap const* charsetMap(CharsetId id) noexcept
+charset_map const* charsetMap(charset_id id) noexcept
 {
     static auto const british = createBritishCharset();
     static auto const dutch = createDutchCharset();
@@ -274,18 +274,18 @@ CharsetMap const* charsetMap(CharsetId id) noexcept
 
     switch (id)
     {
-        case CharsetId::British: return &british;
-        case CharsetId::Dutch: return &dutch;
-        case CharsetId::Finnish: return &finish;
-        case CharsetId::French: return &french;
-        case CharsetId::FrenchCanadian: return &frenchCanadian;
-        case CharsetId::German: return &german;
-        case CharsetId::NorwegianDanish: return &norweigianDanish;
-        case CharsetId::Spanish: return &spanish;
-        case CharsetId::Special: return &special;
-        case CharsetId::Swedish: return &swedish;
-        case CharsetId::Swiss: return &swiss;
-        case CharsetId::USASCII: return &usascii;
+        case charset_id::British: return &british;
+        case charset_id::Dutch: return &dutch;
+        case charset_id::Finnish: return &finish;
+        case charset_id::French: return &french;
+        case charset_id::FrenchCanadian: return &frenchCanadian;
+        case charset_id::German: return &german;
+        case charset_id::NorwegianDanish: return &norweigianDanish;
+        case charset_id::Spanish: return &spanish;
+        case charset_id::Special: return &special;
+        case charset_id::Swedish: return &swedish;
+        case charset_id::Swiss: return &swiss;
+        case charset_id::USASCII: return &usascii;
     }
 
     return nullptr;

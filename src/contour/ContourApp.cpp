@@ -36,6 +36,8 @@
 #include <iostream>
 #include <memory>
 
+#include "vtbackend/VTType.h"
+
 #if !defined(_WIN32)
     #include <sys/ioctl.h>
 
@@ -191,9 +193,9 @@ auto withOutput(crispy::cli::FlagStore const& _flags, std::string const& _name, 
 
 int ContourApp::infoVT()
 {
-    using Category = terminal::FunctionCategory;
+    using Category = terminal::function_category;
     using std::pair;
-    using terminal::VTExtension;
+    using terminal::vt_extension;
     using namespace std::string_view_literals;
 
     for (auto const& [category, headline]: { pair { Category::C0, "Control Codes"sv },
@@ -210,8 +212,8 @@ int ContourApp::infoVT()
             if (fn.category != category)
                 continue;
 
-            auto const level = fn.extension == VTExtension::None ? fmt::format("{}", fn.conformanceLevel)
-                                                                 : fmt::format("{}", fn.extension);
+            auto const level = fn.extension == vt_extension::None ? fmt::format("{}", fn.conformanceLevel)
+                                                                  : fmt::format("{}", fn.extension);
 
             // This could be much more improved in good looking and informationally.
             // We can also print short/longer description, minimum required VT level,

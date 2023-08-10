@@ -67,9 +67,9 @@ enum class SelectionAction
 };
 
 using ActionList = std::vector<actions::Action>;
-using KeyInputMapping = terminal::InputBinding<terminal::Key, ActionList>;
+using KeyInputMapping = terminal::InputBinding<terminal::key, ActionList>;
 using CharInputMapping = terminal::InputBinding<char32_t, ActionList>;
-using MouseInputMapping = terminal::InputBinding<terminal::MouseButton, ActionList>;
+using MouseInputMapping = terminal::InputBinding<terminal::mouse_button, ActionList>;
 
 struct InputMappings
 {
@@ -117,7 +117,7 @@ template <typename Input>
 std::vector<actions::Action> const* apply(
     std::vector<terminal::InputBinding<Input, ActionList>> const& _mappings,
     Input _input,
-    terminal::Modifier _modifier,
+    terminal::modifier _modifier,
     uint8_t _actualModeFlags)
 {
     for (terminal::InputBinding<Input, ActionList> const& mapping: _mappings)
@@ -156,7 +156,7 @@ struct TerminalProfile
     std::string wmClass;
 
     terminal::PageSize terminalSize = { terminal::LineCount(10), terminal::ColumnCount(40) };
-    terminal::VTType terminalId = terminal::VTType::VT525;
+    terminal::vt_type terminalId = terminal::vt_type::VT525;
 
     terminal::max_history_line_count maxHistoryLineCount;
     terminal::LineCount historyScrollMultiplier = terminal::LineCount(3);
@@ -177,7 +177,7 @@ struct TerminalProfile
     } permissions;
 
     bool drawBoldTextWithBrightColors = false;
-    terminal::ColorPalette colors {};
+    terminal::color_palette colors {};
 
     terminal::LineCount modalCursorScrollOff { 8 };
 
@@ -254,7 +254,7 @@ struct Config
 
     bool reflowOnResize = true;
 
-    std::unordered_map<std::string, terminal::ColorPalette> colorschemes;
+    std::unordered_map<std::string, terminal::color_palette> colorschemes;
     std::unordered_map<std::string, TerminalProfile> profiles;
     std::string defaultProfileName;
 
@@ -280,9 +280,9 @@ struct Config
 
     // selection
     std::string wordDelimiters;
-    terminal::Modifier bypassMouseProtocolModifier = terminal::Modifier::Shift;
+    terminal::modifier bypassMouseProtocolModifier = terminal::modifier::Shift;
     SelectionAction onMouseSelection = SelectionAction::CopyToSelectionClipboard;
-    terminal::Modifier mouseBlockSelectionModifier = terminal::Modifier::Control;
+    terminal::modifier mouseBlockSelectionModifier = terminal::modifier::Control;
 
     // input mapping
     InputMappings inputMappings;

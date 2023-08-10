@@ -45,7 +45,7 @@ namespace
     struct InputMatch
     {
         // ViMode mode; // TODO: ideally we also would like to match on input Mode
-        Modifier modifier;
+        modifier modifier;
         char32_t ch;
 
         [[nodiscard]] constexpr uint32_t code() const noexcept
@@ -61,12 +61,12 @@ namespace
 
     constexpr InputMatch operator"" _key(char ch)
     {
-        return InputMatch { Modifier::None, static_cast<char32_t>(ch) };
+        return InputMatch { modifier::None, static_cast<char32_t>(ch) };
     }
 
-    constexpr InputMatch operator|(Modifier::Key modifier, char ch) noexcept
+    constexpr InputMatch operator|(modifier::key mod, char ch) noexcept
     {
-        return InputMatch { Modifier { modifier }, (char32_t) ch };
+        return InputMatch { modifier { mod }, (char32_t) ch };
     }
 } // namespace
 
@@ -248,7 +248,7 @@ void ViInputHandler::registerCommand(ModeSelect modes, std::string_view command,
     }
 }
 
-void ViInputHandler::appendModifierToPendingInput(Modifier modifier)
+void ViInputHandler::appendModifierToPendingInput(modifier modifier)
 {
     if (modifier.meta())
         _pendingInput += "M-";
@@ -308,13 +308,13 @@ void ViInputHandler::setMode(vi_mode theMode)
     _executor.modeChanged(theMode);
 }
 
-bool ViInputHandler::sendKeyPressEvent(Key key, Modifier modifier)
+bool ViInputHandler::sendKeyPressEvent(key k, modifier modifier)
 {
     if (_searchEditMode != SearchEditMode::Disabled)
     {
         // Do we want to do anything in here?
         // TODO: support cursor movements.
-        errorlog()("ViInputHandler: Ignoring key input {}+{}.", modifier, key);
+        errorlog()("ViInputHandler: Ignoring key input {}+{}.", modifier, k);
         return true;
     }
 
@@ -334,21 +334,21 @@ bool ViInputHandler::sendKeyPressEvent(Key key, Modifier modifier)
     if (modifier.any())
         return true;
 
-    auto const keyMappings = std::array<std::pair<Key, std::string_view>, 10> { {
-        { Key::DownArrow, "<Down>" },
-        { Key::LeftArrow, "<Left>" },
-        { Key::RightArrow, "<Right>" },
-        { Key::UpArrow, "<Up>" },
-        { Key::Insert, "<Insert>" },
-        { Key::Delete, "<Delete>" },
-        { Key::Home, "<Home>" },
-        { Key::End, "<End>" },
-        { Key::PageUp, "<PageUp>" },
-        { Key::PageDown, "<PageDown>" },
+    auto const keyMappings = std::array<std::pair<key, std::string_view>, 10> { {
+        { key::DownArrow, "<Down>" },
+        { key::LeftArrow, "<Left>" },
+        { key::RightArrow, "<Right>" },
+        { key::UpArrow, "<Up>" },
+        { key::Insert, "<Insert>" },
+        { key::Delete, "<Delete>" },
+        { key::Home, "<Home>" },
+        { key::End, "<End>" },
+        { key::PageUp, "<PageUp>" },
+        { key::PageDown, "<PageDown>" },
     } };
 
     for (auto const& [mappedKey, mappedText]: keyMappings)
-        if (key == mappedKey)
+        if (k == mappedKey)
         {
             _pendingInput += mappedText;
             break;
@@ -373,7 +373,7 @@ void ViInputHandler::startSearchExternally()
     }
 }
 
-bool ViInputHandler::handleSearchEditor(char32_t ch, Modifier modifier)
+bool ViInputHandler::handleSearchEditor(char32_t ch, modifier modifier)
 {
     assert(_searchEditMode != SearchEditMode::Disabled);
 
@@ -398,15 +398,15 @@ bool ViInputHandler::handleSearchEditor(char32_t ch, Modifier modifier)
                 _searchTerm.resize(_searchTerm.size() - 1);
             _executor.updateSearchTerm(_searchTerm);
             break;
-        case Modifier::Control | 'L':
-        case Modifier::Control | 'U':
+        case modifier::Control | 'L':
+        case modifier::Control | 'U':
             _searchTerm.clear();
             _executor.updateSearchTerm(_searchTerm);
             break;
-        case Modifier::Control | 'A': // TODO: move cursor to BOL
-        case Modifier::Control | 'E': // TODO: move cursor to EOL
+        case modifier::Control | 'A': // TODO: move cursor to BOL
+        case modifier::Control | 'E': // TODO: move cursor to EOL
         default:
-            if (ch >= 0x20 && modifier.without(Modifier::Shift).none())
+            if (ch >= 0x20 && modifier.without(modifier::Shift).none())
             {
                 _searchTerm += ch;
                 _executor.updateSearchTerm(_searchTerm);
@@ -420,7 +420,7 @@ bool ViInputHandler::handleSearchEditor(char32_t ch, Modifier modifier)
     return true;
 }
 
-bool ViInputHandler::sendCharPressEvent(char32_t ch, Modifier modifier)
+bool ViInputHandler::sendCharPressEvent(char32_t ch, modifier modifier)
 {
     if (_searchEditMode != SearchEditMode::Disabled)
         return handleSearchEditor(ch, modifier);
@@ -438,7 +438,7 @@ bool ViInputHandler::sendCharPressEvent(char32_t ch, Modifier modifier)
     if (parseCount(ch, modifier))
         return true;
 
-    appendModifierToPendingInput(ch > 0x20 ? modifier.without(Modifier::Shift) : modifier);
+    appendModifierToPendingInput(ch > 0x20 ? modifier.without(modifier::Shift) : modifier);
 
     if (ch == '\033')
         _pendingInput += "<ESC>";
@@ -455,7 +455,7 @@ bool ViInputHandler::sendCharPressEvent(char32_t ch, Modifier modifier)
     return false;
 }
 
-bool ViInputHandler::parseCount(char32_t ch, Modifier modifier)
+bool ViInputHandler::parseCount(char32_t ch, modifier modifier)
 {
     if (!modifier.none())
         return false;

@@ -121,7 +121,7 @@ namespace
 
 Renderer::Renderer(PageSize pageSize,
                    FontDescriptions fontDescriptions,
-                   terminal::ColorPalette const& colorPalette,
+                   terminal::color_palette const& colorPalette,
                    crispy::StrongHashtableSize atlasHashtableSlotCount,
                    crispy::LRUCapacity atlasTileCount,
                    bool atlasDirectMapping,
@@ -206,7 +206,7 @@ void Renderer::configureTextureAtlas()
         renderable.get().setTextureAtlas(*_textureAtlas);
 }
 
-void Renderer::discardImage(Image const& image)
+void Renderer::discardImage(image const& image)
 {
     // Defer rendering into the renderer thread & render stage, as this call might have
     // been coming out of bounds from another thread (e.g. the terminal's screen update thread)

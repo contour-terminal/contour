@@ -34,23 +34,23 @@ namespace terminal
 ///
 /// This means, only a fixed amount of cells should be living without the need
 /// of scrollback buffer and ideally fast access to all relevant properties.
-class SimpleCell
+class simple_cell
 {
   public:
-    explicit SimpleCell(GraphicsAttributes attributes, HyperlinkId hyperlink = {}) noexcept;
-    SimpleCell() = default;
-    ~SimpleCell() = default;
-    SimpleCell(SimpleCell&&) = default;
-    SimpleCell(SimpleCell const&) = default;
-    SimpleCell& operator=(SimpleCell&&) = default;
-    SimpleCell& operator=(SimpleCell const&) = default;
+    explicit simple_cell(graphics_attributes attributes, hyperlink_id hyperlink = {}) noexcept;
+    simple_cell() = default;
+    ~simple_cell() = default;
+    simple_cell(simple_cell&&) = default;
+    simple_cell(simple_cell const&) = default;
+    simple_cell& operator=(simple_cell&&) = default;
+    simple_cell& operator=(simple_cell const&) = default;
 
     void reset();
-    void reset(GraphicsAttributes sgr);
-    void reset(GraphicsAttributes sgr, HyperlinkId hyperlink);
+    void reset(graphics_attributes sgr);
+    void reset(graphics_attributes sgr, hyperlink_id hyperlink);
 
-    void write(GraphicsAttributes sgr, char32_t codepoint, uint8_t width);
-    void write(GraphicsAttributes sgr, char32_t codepoint, uint8_t width, HyperlinkId hyperlink);
+    void write(graphics_attributes sgr, char32_t codepoint, uint8_t width);
+    void write(graphics_attributes sgr, char32_t codepoint, uint8_t width, hyperlink_id hyperlink);
     void writeTextOnly(char32_t codepoint, uint8_t width);
 
     [[nodiscard]] std::u32string codepoints() const noexcept;
@@ -77,48 +77,48 @@ class SimpleCell
     [[nodiscard]] color backgroundColor() const noexcept;
     [[nodiscard]] color underlineColor() const noexcept;
 
-    [[nodiscard]] std::shared_ptr<ImageFragment> imageFragment() const noexcept;
-    void setImageFragment(std::shared_ptr<RasterizedImage> image, cell_location offset);
+    [[nodiscard]] std::shared_ptr<image_fragment> imageFragment() const noexcept;
+    void setImageFragment(std::shared_ptr<rasterized_image> image, cell_location offset);
 
-    [[nodiscard]] HyperlinkId hyperlink() const noexcept;
-    void setHyperlink(HyperlinkId hyperlink) noexcept;
+    [[nodiscard]] hyperlink_id hyperlink() const noexcept;
+    void setHyperlink(hyperlink_id hyperlink) noexcept;
 
     [[nodiscard]] bool empty() const noexcept { return CellUtil::empty(*this); }
 
   private:
     std::u32string _codepoints {};
-    GraphicsAttributes _graphicsAttributes {};
+    graphics_attributes _graphicsAttributes {};
     cell_flags _flags {};
     uint8_t _width = 1;
-    HyperlinkId _hyperlink {};
-    std::shared_ptr<ImageFragment> _imageFragment {};
+    hyperlink_id _hyperlink {};
+    std::shared_ptr<image_fragment> _imageFragment {};
 };
 
 // {{{ implementation
-inline SimpleCell::SimpleCell(GraphicsAttributes attributes, HyperlinkId hyperlink) noexcept:
+inline simple_cell::simple_cell(graphics_attributes attributes, hyperlink_id hyperlink) noexcept:
     _graphicsAttributes { attributes }, _hyperlink { hyperlink }
 {
 }
 
-inline void SimpleCell::reset()
+inline void simple_cell::reset()
 {
     *this = {};
 }
 
-inline void SimpleCell::reset(GraphicsAttributes sgr)
+inline void simple_cell::reset(graphics_attributes sgr)
 {
     *this = {};
     _graphicsAttributes = sgr;
 }
 
-inline void SimpleCell::reset(GraphicsAttributes sgr, HyperlinkId hyperlink)
+inline void simple_cell::reset(graphics_attributes sgr, hyperlink_id hyperlink)
 {
     *this = {};
     _graphicsAttributes = sgr;
     _hyperlink = hyperlink;
 }
 
-inline void SimpleCell::write(GraphicsAttributes sgr, char32_t codepoint, uint8_t width)
+inline void simple_cell::write(graphics_attributes sgr, char32_t codepoint, uint8_t width)
 {
     _graphicsAttributes = sgr;
     _codepoints.clear();
@@ -127,10 +127,10 @@ inline void SimpleCell::write(GraphicsAttributes sgr, char32_t codepoint, uint8_
     _width = width;
 }
 
-inline void SimpleCell::write(GraphicsAttributes sgr,
-                              char32_t codepoint,
-                              [[maybe_unused]] uint8_t width,
-                              [[maybe_unused]] HyperlinkId hyperlink)
+inline void simple_cell::write(graphics_attributes sgr,
+                               char32_t codepoint,
+                               [[maybe_unused]] uint8_t width,
+                               [[maybe_unused]] hyperlink_id hyperlink)
 {
     _graphicsAttributes = sgr;
     _codepoints.clear();
@@ -139,19 +139,19 @@ inline void SimpleCell::write(GraphicsAttributes sgr,
     _hyperlink = hyperlink;
 }
 
-inline void SimpleCell::writeTextOnly(char32_t codepoint, uint8_t width)
+inline void simple_cell::writeTextOnly(char32_t codepoint, uint8_t width)
 {
     _codepoints.clear();
     _codepoints.push_back(codepoint);
     _width = width;
 }
 
-inline std::u32string SimpleCell::codepoints() const noexcept
+inline std::u32string simple_cell::codepoints() const noexcept
 {
     return _codepoints;
 }
 
-inline char32_t SimpleCell::codepoint(size_t index) const noexcept
+inline char32_t simple_cell::codepoint(size_t index) const noexcept
 {
     if (index < _codepoints.size())
         return _codepoints[index];
@@ -159,12 +159,12 @@ inline char32_t SimpleCell::codepoint(size_t index) const noexcept
         return 0;
 }
 
-inline size_t SimpleCell::codepointCount() const noexcept
+inline size_t simple_cell::codepointCount() const noexcept
 {
     return _codepoints.size();
 }
 
-inline void SimpleCell::setCharacter(char32_t codepoint)
+inline void simple_cell::setCharacter(char32_t codepoint)
 {
     _codepoints.clear();
     _imageFragment = {};
@@ -177,7 +177,7 @@ inline void SimpleCell::setCharacter(char32_t codepoint)
         setWidth(1);
 }
 
-inline int SimpleCell::appendCharacter(char32_t codepoint)
+inline int simple_cell::appendCharacter(char32_t codepoint)
 {
     _codepoints.push_back(codepoint);
 
@@ -188,88 +188,88 @@ inline int SimpleCell::appendCharacter(char32_t codepoint)
     return diff;
 }
 
-inline std::string SimpleCell::toUtf8() const
+inline std::string simple_cell::toUtf8() const
 {
     return unicode::convert_to<char>(std::u32string_view(_codepoints.data(), _codepoints.size()));
 }
 
-inline uint8_t SimpleCell::width() const noexcept
+inline uint8_t simple_cell::width() const noexcept
 {
     return _width;
 }
 
-inline void SimpleCell::setWidth(uint8_t newWidth) noexcept
+inline void simple_cell::setWidth(uint8_t newWidth) noexcept
 {
     _width = newWidth;
 }
 
-inline cell_flags SimpleCell::flags() const noexcept
+inline cell_flags simple_cell::flags() const noexcept
 {
     return _flags;
 }
 
-inline bool SimpleCell::isFlagEnabled(cell_flags testFlags) const noexcept
+inline bool simple_cell::isFlagEnabled(cell_flags testFlags) const noexcept
 {
     return _flags & testFlags;
 }
 
-inline void SimpleCell::resetFlags(cell_flags flags) noexcept
+inline void simple_cell::resetFlags(cell_flags flags) noexcept
 {
     _flags = flags;
 }
 
-inline void SimpleCell::setGraphicsRendition(graphics_rendition sgr) noexcept
+inline void simple_cell::setGraphicsRendition(graphics_rendition sgr) noexcept
 {
     CellUtil::applyGraphicsRendition(sgr, *this);
 }
 
-inline void SimpleCell::setForegroundColor(color color) noexcept
+inline void simple_cell::setForegroundColor(color color) noexcept
 {
     _graphicsAttributes.foregroundColor = color;
 }
 
-inline void SimpleCell::setBackgroundColor(color color) noexcept
+inline void simple_cell::setBackgroundColor(color color) noexcept
 {
     _graphicsAttributes.backgroundColor = color;
 }
 
-inline void SimpleCell::setUnderlineColor(color color) noexcept
+inline void simple_cell::setUnderlineColor(color color) noexcept
 {
     _graphicsAttributes.underlineColor = color;
 }
 
-inline color SimpleCell::foregroundColor() const noexcept
+inline color simple_cell::foregroundColor() const noexcept
 {
     return _graphicsAttributes.foregroundColor;
 }
 
-inline color SimpleCell::backgroundColor() const noexcept
+inline color simple_cell::backgroundColor() const noexcept
 {
     return _graphicsAttributes.backgroundColor;
 }
 
-inline color SimpleCell::underlineColor() const noexcept
+inline color simple_cell::underlineColor() const noexcept
 {
     return _graphicsAttributes.underlineColor;
 }
 
-inline std::shared_ptr<ImageFragment> SimpleCell::imageFragment() const noexcept
+inline std::shared_ptr<image_fragment> simple_cell::imageFragment() const noexcept
 {
     return _imageFragment;
 }
 
-inline void SimpleCell::setImageFragment(std::shared_ptr<RasterizedImage> rasterizedImage,
-                                         cell_location offset)
+inline void simple_cell::setImageFragment(std::shared_ptr<rasterized_image> rasterizedImage,
+                                          cell_location offset)
 {
-    _imageFragment = std::make_shared<ImageFragment>(std::move(rasterizedImage), offset);
+    _imageFragment = std::make_shared<image_fragment>(std::move(rasterizedImage), offset);
 }
 
-inline HyperlinkId SimpleCell::hyperlink() const noexcept
+inline hyperlink_id simple_cell::hyperlink() const noexcept
 {
     return _hyperlink;
 }
 
-inline void SimpleCell::setHyperlink(HyperlinkId hyperlink) noexcept
+inline void simple_cell::setHyperlink(hyperlink_id hyperlink) noexcept
 {
     _hyperlink = hyperlink;
 }
@@ -279,7 +279,7 @@ inline void SimpleCell::setHyperlink(HyperlinkId hyperlink) noexcept
 // {{{ Optimized version for helpers from CellUtil
 namespace CellUtil
 {
-    inline bool beginsWith(std::u32string_view text, SimpleCell const& cell) noexcept
+    inline bool beginsWith(std::u32string_view text, simple_cell const& cell) noexcept
     {
         assert(!text.empty());
         return text == cell.codepoints();

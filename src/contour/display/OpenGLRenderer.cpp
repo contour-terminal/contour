@@ -140,12 +140,12 @@ namespace
         return mat;
     }
 
-    GLenum glFormat(terminal::ImageFormat format)
+    GLenum glFormat(terminal::image_format format)
     {
         switch (format)
         {
-            case terminal::ImageFormat::RGB: return GL_RGB;
-            case terminal::ImageFormat::RGBA: return GL_RGBA;
+            case terminal::image_format::RGB: return GL_RGB;
+            case terminal::image_format::RGBA: return GL_RGBA;
         }
         Guarantee(false);
         crispy::unreachable();
@@ -915,7 +915,7 @@ struct CRISPY_PACKED BackgroundShaderParams
 };
 
 GLuint OpenGLRenderer::createAndUploadImage(QSize imageSize,
-                                            terminal::ImageFormat format,
+                                            terminal::image_format format,
                                             int rowAlignment,
                                             uint8_t const* pixels)
 {

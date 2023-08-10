@@ -53,17 +53,17 @@ namespace terminal
 template <typename T>
 concept CellConcept = requires(T t, T const& u)
 {
-    T(GraphicsAttributes {});
-    T(GraphicsAttributes {}, HyperlinkId {});
+    T(graphics_attributes {});
+    T(graphics_attributes {}, hyperlink_id {});
 
     t.reset();
-    t.reset(GraphicsAttributes{});
-    t.reset(GraphicsAttributes{}, HyperlinkId{});
+    t.reset(graphics_attributes{});
+    t.reset(graphics_attributes{}, hyperlink_id{});
 
     { u.empty() } noexcept -> std::same_as<bool>;
 
-    t.write(GraphicsAttributes{}, char32_t{}, uint8_t{});
-    t.write(GraphicsAttributes{}, char32_t{}, uint8_t{}, HyperlinkId{});
+    t.write(graphics_attributes{}, char32_t{}, uint8_t{});
+    t.write(graphics_attributes{}, char32_t{}, uint8_t{}, hyperlink_id{});
     t.writeTextOnly(char32_t{}, uint8_t{});
 
     { u.codepoints() } -> std::convertible_to<std::u32string>;
@@ -94,11 +94,11 @@ concept CellConcept = requires(T t, T const& u)
     t.setUnderlineColor(color{});
     { u.underlineColor() } noexcept -> std::same_as<color>;
 
-    { u.imageFragment() } -> std::same_as<std::shared_ptr<ImageFragment>>;
-    t.setImageFragment(std::shared_ptr<RasterizedImage>{}, cell_location{} /*offset*/);
+    { u.imageFragment() } -> std::same_as<std::shared_ptr<image_fragment>>;
+    t.setImageFragment(std::shared_ptr<rasterized_image>{}, cell_location{} /*offset*/);
 
-    { u.hyperlink() } -> std::same_as<HyperlinkId>;
-    t.setHyperlink(HyperlinkId{});
+    { u.hyperlink() } -> std::same_as<hyperlink_id>;
+    t.setHyperlink(hyperlink_id{});
 };
 
 

@@ -31,7 +31,7 @@
 
 namespace terminal
 {
-struct BackgroundImage;
+struct background_image;
 }
 
 namespace terminal::rasterizer

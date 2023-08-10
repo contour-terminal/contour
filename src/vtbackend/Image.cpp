@@ -30,29 +30,29 @@ using crispy::StrongHashtableSize;
 namespace terminal
 {
 
-ImageStats& ImageStats::get()
+image_stats& image_stats::get()
 {
-    static ImageStats stats {};
+    static image_stats stats {};
     return stats;
 }
 
-Image::~Image()
+image::~image()
 {
-    --ImageStats::get().instances;
+    --image_stats::get().instances;
     _onImageRemove(this);
 }
 
-RasterizedImage::~RasterizedImage()
+rasterized_image::~rasterized_image()
 {
-    --ImageStats::get().rasterized;
+    --image_stats::get().rasterized;
 }
 
-ImageFragment::~ImageFragment()
+image_fragment::~image_fragment()
 {
-    --ImageStats::get().fragments;
+    --image_stats::get().fragments;
 }
 
-ImagePool::ImagePool(OnImageRemove onImageRemove, ImageId nextImageId):
+image_pool::image_pool(on_image_remove onImageRemove, image_id nextImageId):
     _nextImageId { nextImageId },
     _imageNameToImageCache { StrongHashtableSize { 1024 },
                              LRUCapacity { 100 },
@@ -61,7 +61,7 @@ ImagePool::ImagePool(OnImageRemove onImageRemove, ImageId nextImageId):
 {
 }
 
-Image::Data RasterizedImage::fragment(cell_location pos) const
+image::data rasterized_image::fragment(cell_location pos) const
 {
     // TODO: respect alignment hint
     // TODO: respect resize hint
@@ -70,7 +70,7 @@ Image::Data RasterizedImage::fragment(cell_location pos) const
     auto const yOffset = pos.line * unbox<int>(_cellSize.height);
     auto const pixelOffset = cell_location { yOffset, xOffset };
 
-    Image::Data fragData;
+    image::data fragData;
     fragData.resize(_cellSize.area() * 4); // RGBA
     auto const availableWidth =
         min(unbox<int>(_image->width()) - *pixelOffset.column, unbox<int>(_cellSize.width));
@@ -104,7 +104,7 @@ Image::Data RasterizedImage::fragment(cell_location pos) const
     {
         auto const startOffset = static_cast<size_t>(
             ((*pixelOffset.line + y) * unbox<int>(_image->width()) + *pixelOffset.column) * 4);
-        const auto* const source = &_image->data()[startOffset];
+        const auto* const source = &_image->get_data()[startOffset];
         target = copy(source, source + static_cast<ptrdiff_t>(availableWidth) * 4, target);
 
         // fill vertical gap on right
@@ -129,33 +129,33 @@ Image::Data RasterizedImage::fragment(cell_location pos) const
     return fragData;
 }
 
-shared_ptr<Image const> ImagePool::create(ImageFormat format, image_size size, Image::Data&& data)
+shared_ptr<image const> image_pool::create(image_format format, image_size size, image::data&& data)
 {
     // TODO: This operation should be idempotent, i.e. if that image has been created already, return a
     // reference to that.
     auto const id = _nextImageId++;
-    return make_shared<Image>(id, format, std::move(data), size, _onImageRemove);
+    return make_shared<image>(id, format, std::move(data), size, _onImageRemove);
 }
 
 // TODO: Why on earth does this function exist if it's not relevant to ImagePool? Fix this mess.
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-shared_ptr<RasterizedImage> ImagePool::rasterize(shared_ptr<Image const> image,
-                                                 ImageAlignment alignmentPolicy,
-                                                 ImageResize resizePolicy,
-                                                 rgba_color defaultColor,
-                                                 grid_size cellSpan,
-                                                 image_size cellSize)
+shared_ptr<rasterized_image> image_pool::rasterize(shared_ptr<image const> image,
+                                                   image_alignment alignmentPolicy,
+                                                   image_resize resizePolicy,
+                                                   rgba_color defaultColor,
+                                                   grid_size cellSpan,
+                                                   image_size cellSize)
 {
-    return make_shared<RasterizedImage>(
+    return make_shared<rasterized_image>(
         std::move(image), alignmentPolicy, resizePolicy, defaultColor, cellSpan, cellSize);
 }
 
-void ImagePool::link(string const& name, shared_ptr<Image const> imageRef)
+void image_pool::link(string const& name, shared_ptr<image const> imageRef)
 {
     _imageNameToImageCache.emplace(name, std::move(imageRef));
 }
 
-shared_ptr<Image const> ImagePool::findImageByName(string const& name) const noexcept
+shared_ptr<image const> image_pool::findImageByName(string const& name) const noexcept
 {
     if (auto const* imageRef = _imageNameToImageCache.try_get(name))
         return *imageRef;
@@ -163,20 +163,20 @@ shared_ptr<Image const> ImagePool::findImageByName(string const& name) const noe
     return {};
 }
 
-void ImagePool::unlink(string const& name)
+void image_pool::unlink(string const& name)
 {
     _imageNameToImageCache.remove(name);
 }
 
-void ImagePool::clear()
+void image_pool::clear()
 {
     _imageNameToImageCache.clear();
 }
 
-void ImagePool::inspect(ostream& os) const
+void image_pool::inspect(ostream& os) const
 {
     os << "Image pool:\n";
-    os << fmt::format("global image stats: {}\n", ImageStats::get());
+    os << fmt::format("global image stats: {}\n", image_stats::get());
     _imageNameToImageCache.inspect(os);
 }
 

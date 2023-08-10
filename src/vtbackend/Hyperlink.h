@@ -24,7 +24,7 @@
 namespace terminal
 {
 
-enum class HyperlinkState
+enum class hyperlink_state
 {
     /// Default hyperlink state.
     Inactive,
@@ -36,20 +36,20 @@ enum class HyperlinkState
     // Active,
 };
 
-using URI = std::string;
+using uri = std::string;
 
-struct HyperlinkInfo
+struct hyperlink_info
 {                       // TODO: rename to Hyperlink
     std::string userId; //!< application provied ID
-    URI uri;
-    mutable HyperlinkState state = HyperlinkState::Inactive;
+    uri uri;
+    mutable hyperlink_state state = hyperlink_state::Inactive;
 
     bool isLocal() const noexcept { return uri.size() >= 7 && uri.substr(0, 7) == "file://"; }
 
     [[nodiscard]] std::string_view host() const noexcept
     {
-        if (auto const i = uri.find("://"); i != terminal::URI::npos)
-            if (auto const j = uri.find('/', i + 3); j != terminal::URI::npos)
+        if (auto const i = uri.find("://"); i != terminal::uri::npos)
+            if (auto const j = uri.find('/', i + 3); j != terminal::uri::npos)
                 return std::string_view { uri.data() + i + 3, j - i - 3 };
 
         return "";
@@ -57,8 +57,8 @@ struct HyperlinkInfo
 
     [[nodiscard]] std::string_view path() const noexcept
     {
-        if (auto const i = uri.find("://"); i != terminal::URI::npos)
-            if (auto const j = uri.find('/', i + 3); j != terminal::URI::npos)
+        if (auto const i = uri.find("://"); i != terminal::uri::npos)
+            if (auto const j = uri.find('/', i + 3); j != terminal::uri::npos)
                 return std::string_view { uri.data() + j };
 
         return "";
@@ -66,7 +66,7 @@ struct HyperlinkInfo
 
     [[nodiscard]] std::string_view scheme() const noexcept
     {
-        if (auto const i = uri.find("://"); i != terminal::URI::npos)
+        if (auto const i = uri.find("://"); i != terminal::uri::npos)
             return std::string_view { uri.data(), i };
         else
             return {};
@@ -75,22 +75,22 @@ struct HyperlinkInfo
 
 namespace detail
 {
-    struct HyperlinkTag
+    struct hyperlink_tag
     {
     };
 } // namespace detail
-using HyperlinkId = crispy::boxed<uint16_t, detail::HyperlinkTag>;
+using hyperlink_id = crispy::boxed<uint16_t, detail::hyperlink_tag>;
 
-bool is_local(HyperlinkInfo const& hyperlink);
+bool is_local(hyperlink_info const& hyperlink);
 
-using HyperlinkCache = crispy::LRUCache<HyperlinkId, std::shared_ptr<HyperlinkInfo>>;
+using hyperlink_cache = crispy::LRUCache<hyperlink_id, std::shared_ptr<hyperlink_info>>;
 
-struct HyperlinkStorage
+struct hyperlink_storage
 {
-    HyperlinkCache cache { 1024 };
-    HyperlinkId nextHyperlinkId = HyperlinkId(1);
+    hyperlink_cache cache { 1024 };
+    hyperlink_id nextHyperlinkId = hyperlink_id(1);
 
-    std::shared_ptr<HyperlinkInfo> hyperlinkById(HyperlinkId id) noexcept
+    std::shared_ptr<hyperlink_info> hyperlinkById(hyperlink_id id) noexcept
     {
         if (!!id)
             if (auto* href = cache.try_get(id))
@@ -98,7 +98,7 @@ struct HyperlinkStorage
         return {};
     }
 
-    std::shared_ptr<HyperlinkInfo const> hyperlinkById(HyperlinkId id) const noexcept
+    std::shared_ptr<hyperlink_info const> hyperlinkById(hyperlink_id id) const noexcept
     {
         if (!!id)
             if (auto* href = cache.try_get(id))
@@ -106,7 +106,7 @@ struct HyperlinkStorage
         return {};
     }
 
-    HyperlinkId hyperlinkIdByUserId(std::string const& id) noexcept
+    hyperlink_id hyperlinkIdByUserId(std::string const& id) noexcept
     {
         for (auto& href: cache)
         {
@@ -116,7 +116,7 @@ struct HyperlinkStorage
                 return href.key;
             }
         }
-        return HyperlinkId {};
+        return hyperlink_id {};
     }
 };
 

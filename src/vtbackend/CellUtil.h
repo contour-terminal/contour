@@ -23,7 +23,7 @@
 namespace terminal::CellUtil
 {
 
-[[nodiscard]] inline rgb_color_pair makeColors(ColorPalette const& colorPalette,
+[[nodiscard]] inline rgb_color_pair makeColors(color_palette const& colorPalette,
                                                cell_flags cellFlags,
                                                bool reverseVideo,
                                                color foregroundColor,
@@ -31,16 +31,16 @@ namespace terminal::CellUtil
                                                bool blinkingState,
                                                bool rapidBlinkState) noexcept
 {
-    auto const fgMode = (cellFlags & cell_flags::Faint) ? ColorMode::Dimmed
+    auto const fgMode = (cellFlags & cell_flags::Faint) ? color_mode::Dimmed
                         : ((cellFlags & cell_flags::Bold) && colorPalette.useBrightColors)
-                            ? ColorMode::Bright
-                            : ColorMode::Normal;
+                            ? color_mode::Bright
+                            : color_mode::Normal;
 
-    auto constexpr bgMode = ColorMode::Normal;
+    auto constexpr bgMode = color_mode::Normal;
 
     auto const [fgColorTarget, bgColorTarget] =
-        reverseVideo ? std::pair { ColorTarget::Background, ColorTarget::Foreground }
-                     : std::pair { ColorTarget::Foreground, ColorTarget::Background };
+        reverseVideo ? std::pair { color_target::Background, color_target::Foreground }
+                     : std::pair { color_target::Foreground, color_target::Background };
 
     auto rgbColors = rgb_color_pair { apply(colorPalette, foregroundColor, fgColorTarget, fgMode),
                                       apply(colorPalette, backgroundColor, bgColorTarget, bgMode) };
@@ -59,7 +59,7 @@ namespace terminal::CellUtil
     return rgbColors;
 }
 
-[[nodiscard]] inline rgb_color makeUnderlineColor(ColorPalette const& colorPalette,
+[[nodiscard]] inline rgb_color makeUnderlineColor(color_palette const& colorPalette,
                                                   rgb_color defaultColor,
                                                   color underlineColor,
                                                   cell_flags cellFlags) noexcept
@@ -67,17 +67,17 @@ namespace terminal::CellUtil
     if (isDefaultColor(underlineColor))
         return defaultColor;
 
-    auto const mode = (cellFlags & cell_flags::Faint)                                    ? ColorMode::Dimmed
-                      : ((cellFlags & cell_flags::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
-                                                                                         : ColorMode::Normal;
+    auto const mode = (cellFlags & cell_flags::Faint)                                    ? color_mode::Dimmed
+                      : ((cellFlags & cell_flags::Bold) && colorPalette.useBrightColors) ? color_mode::Bright
+                                                                                         : color_mode::Normal;
 
-    return apply(colorPalette, underlineColor, ColorTarget::Foreground, mode);
+    return apply(colorPalette, underlineColor, color_target::Foreground, mode);
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 [[nodiscard]] inline rgb_color
-    makeUnderlineColor(ColorPalette const& colorPalette, rgb_color defaultColor, Cell const& cell) noexcept
+    makeUnderlineColor(color_palette const& colorPalette, rgb_color defaultColor, Cell const& cell) noexcept
 {
     return makeUnderlineColor(colorPalette, defaultColor, cell.underlineColor(), cell.flags());
 }

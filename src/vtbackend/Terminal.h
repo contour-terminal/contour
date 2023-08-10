@@ -67,13 +67,13 @@ struct InputMethodData
 // In case of single-step, only one sequence will be handled and the execution mode put to suspend mode,
 // and in case of break-at-frame, the execution will conditionally break iff the currently
 // pending VT sequence indicates a frame start.
-class TraceHandler: public SequenceHandler
+class TraceHandler: public sequence_handler
 {
   public:
     explicit TraceHandler(Terminal& terminal);
 
     void executeControlCode(char controlCode) override;
-    void processSequence(Sequence const& sequence) override;
+    void processSequence(sequence const& sequence) override;
     void writeText(char32_t codepoint) override;
     void writeText(std::string_view codepoints, size_t cellCount) override;
 
@@ -82,7 +82,7 @@ class TraceHandler: public SequenceHandler
         std::string_view text;
         size_t cellCount;
     };
-    using PendingSequence = std::variant<char32_t, CodepointSequence, Sequence>;
+    using PendingSequence = std::variant<char32_t, CodepointSequence, sequence>;
     using PendingSequenceQueue = std::deque<PendingSequence>;
 
     [[nodiscard]] PendingSequenceQueue const& pendingSequences() const noexcept { return _pendingSequences; }
@@ -128,10 +128,10 @@ class Terminal
         virtual void requestShowHostWritableStatusLine() {}
         virtual void setWindowTitle(std::string_view /*title*/) {}
         virtual void setTerminalProfile(std::string const& /*configProfileName*/) {}
-        virtual void discardImage(Image const&) {}
+        virtual void discardImage(image const&) {}
         virtual void inputModeChanged(vi_mode /*mode*/) {}
         virtual void updateHighlights() {}
-        virtual void playSound(Sequence::Parameters const&) {}
+        virtual void playSound(sequence::parameters const&) {}
         virtual void cursorPositionChanged() {}
         virtual void onScrollOffsetChanged(scroll_offset) {}
     };
@@ -150,7 +150,7 @@ class Terminal
     void setMaxHistoryLineCount(max_history_line_count maxHistoryLineCount);
     LineCount maxHistoryLineCount() const noexcept;
 
-    void setTerminalId(VTType id) noexcept { _state.terminalId = id; }
+    void setTerminalId(vt_type id) noexcept { _state.terminalId = id; }
 
     void setMaxImageSize(image_size size) noexcept { _state.effectiveImageCanvasSize = size; }
 
@@ -180,8 +180,8 @@ class Terminal
     /// Clamps given logical coordinates to margins as used in when DECOM (origin mode) is enabled.
     [[nodiscard]] cell_location clampToOrigin(cell_location coord) const noexcept
     {
-        return { std::clamp(coord.line, line_offset { 0 }, currentScreen().margin().vertical.to),
-                 std::clamp(coord.column, column_offset { 0 }, currentScreen().margin().horizontal.to) };
+        return { std::clamp(coord.line, line_offset { 0 }, currentScreen().getMargin().vert.to),
+                 std::clamp(coord.column, column_offset { 0 }, currentScreen().getMargin().hori.to) };
     }
 
     [[nodiscard]] line_offset clampedLine(line_offset line) const noexcept
@@ -210,7 +210,7 @@ class Terminal
 
     [[nodiscard]] bool isCursorInViewport() const noexcept
     {
-        return viewport().isLineVisible(currentScreen().cursor().position.line);
+        return get_viewport().isLineVisible(currentScreen().cursor().position.line);
     }
     // }}}
 
@@ -252,23 +252,23 @@ class Terminal
 
     void clearScreen();
 
-    void setMouseProtocolBypassModifier(Modifier value) { _settings.mouseProtocolBypassModifier = value; }
-    void setMouseBlockSelectionModifier(Modifier value) { _settings.mouseBlockSelectionModifier = value; }
+    void setMouseProtocolBypassModifier(modifier value) { _settings.mouseProtocolBypassModifier = value; }
+    void setMouseBlockSelectionModifier(modifier value) { _settings.mouseBlockSelectionModifier = value; }
 
     // {{{ input proxy
     using Timestamp = std::chrono::steady_clock::time_point;
-    bool sendKeyPressEvent(Key key, Modifier modifier, Timestamp now);
-    bool sendCharPressEvent(char32_t ch, Modifier modifier, Timestamp now);
-    bool sendMousePressEvent(Modifier modifier,
-                             MouseButton button,
+    bool sendKeyPressEvent(key key, modifier modifier, Timestamp now);
+    bool sendCharPressEvent(char32_t ch, modifier modifier, Timestamp now);
+    bool sendMousePressEvent(modifier modifier,
+                             mouse_button button,
                              pixel_coordinate pixelPosition,
                              bool uiHandledHint);
-    void sendMouseMoveEvent(Modifier modifier,
+    void sendMouseMoveEvent(modifier modifier,
                             cell_location newPosition,
                             pixel_coordinate pixelPosition,
                             bool uiHandledHint);
-    bool sendMouseReleaseEvent(Modifier modifier,
-                               MouseButton button,
+    bool sendMouseReleaseEvent(modifier modifier,
+                               mouse_button button,
                                pixel_coordinate pixelPosition,
                                bool uiHandledHint);
     bool sendFocusInEvent();
@@ -282,7 +282,7 @@ class Terminal
 
     void inputModeChanged(vi_mode mode) { _eventListener.inputModeChanged(mode); }
     void updateHighlights() { _eventListener.updateHighlights(); }
-    void playSound(terminal::Sequence::Parameters const& params) { _eventListener.playSound(params); }
+    void playSound(terminal::sequence::parameters const& params) { _eventListener.playSound(params); }
 
     bool applicationCursorKeys() const noexcept { return _state.inputGenerator.applicationCursorKeys(); }
     bool applicationKeypad() const noexcept { return _state.inputGenerator.applicationKeypad(); }
@@ -300,8 +300,8 @@ class Terminal
     void writeToScreenInternal(std::string_view vtStream);
 
     // viewport management
-    [[nodiscard]] Viewport& viewport() noexcept { return _viewport; }
-    [[nodiscard]] Viewport const& viewport() const noexcept { return _viewport; }
+    [[nodiscard]] viewport& get_viewport() noexcept { return _viewport; }
+    [[nodiscard]] viewport const& get_viewport() const noexcept { return _viewport; }
 
     // {{{ Screen Render Proxy
     std::optional<std::chrono::milliseconds> nextRender() const;
@@ -380,9 +380,9 @@ class Terminal
         _innerLock.unlock();
     }
 
-    [[nodiscard]] ColorPalette const& colorPalette() const noexcept { return _state.colorPalette; }
-    [[nodiscard]] ColorPalette& colorPalette() noexcept { return _state.colorPalette; }
-    [[nodiscard]] ColorPalette& defaultColorPalette() noexcept { return _state.defaultColorPalette; }
+    [[nodiscard]] color_palette const& colorPalette() const noexcept { return _state.colorPalette; }
+    [[nodiscard]] color_palette& colorPalette() noexcept { return _state.colorPalette; }
+    [[nodiscard]] color_palette& defaultColorPalette() noexcept { return _state.defaultColorPalette; }
 
     void pushColorPalette(size_t slot);
     void popColorPalette(size_t slot);
@@ -402,7 +402,7 @@ class Terminal
         crispy::unreachable();
     }
 
-    [[nodiscard]] SequenceHandler& sequenceHandler() noexcept
+    [[nodiscard]] sequence_handler& sequenceHandler() noexcept
     {
         // TODO: avoid double-switch by introducing a `SequenceHandler& sequenceHandler` member.
         switch (_state.executionMode)
@@ -565,7 +565,7 @@ class Terminal
 
     /// Retrieves the HyperlinkInfo that is currently behing hovered by the mouse, if so,
     /// or a nothing otherwise.
-    [[nodiscard]] std::shared_ptr<HyperlinkInfo const> tryGetHoveringHyperlink() const noexcept
+    [[nodiscard]] std::shared_ptr<hyperlink_info const> tryGetHoveringHyperlink() const noexcept
     {
         if (auto const gridPosition = currentMouseGridPosition())
             return _currentScreen.get().hyperlinkAt(*gridPosition);
@@ -610,9 +610,9 @@ class Terminal
     void setCursorStyle(cursor_display display, cursor_shape shape);
     void setCursorVisibility(bool visible);
     void setGenerateFocusEvents(bool enabled);
-    void setMouseProtocol(MouseProtocol protocol, bool enabled);
-    void setMouseTransport(MouseTransport transport);
-    void setMouseWheelMode(InputGenerator::MouseWheelMode mode);
+    void setMouseProtocol(mouse_protocol protocol, bool enabled);
+    void setMouseTransport(mouse_transport transport);
+    void setMouseWheelMode(input_generator::mouse_wheel_mode mode);
     void setWindowTitle(std::string_view title);
     [[nodiscard]] std::string const& windowTitle() const noexcept;
     void saveWindowTitle();
@@ -622,7 +622,7 @@ class Terminal
     void softReset();
     void hardReset();
     void forceRedraw(std::function<void()> const& artificialSleep);
-    void discardImage(Image const&);
+    void discardImage(image const&);
     void markCellDirty(cell_location position) noexcept;
     void markRegionDirty(rect area) noexcept;
     void synchronizedOutput(bool enabled);
@@ -714,7 +714,7 @@ class Terminal
     void updateIndicatorStatusLine();
     void updateCursorVisibilityState() const noexcept;
     void updateHoveringHyperlinkState();
-    bool handleMouseSelection(Modifier modifier);
+    bool handleMouseSelection(modifier modifier);
 
     /// Tests if the text selection should be extended by the given mouse position or not.
     ///
@@ -726,13 +726,13 @@ class Terminal
 
     // Tests if the App mouse protocol is explicitly being bypassed by the user,
     // by pressing a special bypass modifier (usualy Shift).
-    bool allowBypassAppMouseGrabViaModifier(Modifier modifier) const noexcept
+    bool allowBypassAppMouseGrabViaModifier(modifier modifier) const noexcept
     {
-        return _settings.mouseProtocolBypassModifier != Modifier::None
+        return _settings.mouseProtocolBypassModifier != modifier::None
                && modifier.contains(_settings.mouseProtocolBypassModifier);
     }
 
-    bool allowPassMouseEventToApp(Modifier currentlyPressedModifier) const noexcept
+    bool allowPassMouseEventToApp(modifier currentlyPressedModifier) const noexcept
     {
         return _state.inputGenerator.mouseProtocol().has_value() && allowInput()
                && !allowBypassAppMouseGrabViaModifier(currentlyPressedModifier);
@@ -808,7 +808,7 @@ class Terminal
     Screen<StatusDisplayCell> _hostWritableStatusLineScreen;
     Screen<StatusDisplayCell> _indicatorStatusScreen;
     std::reference_wrapper<ScreenBase> _currentScreen;
-    Viewport _viewport;
+    viewport _viewport;
     TraceHandler _traceHandler;
     // clang-format on
     // }}}
@@ -839,7 +839,7 @@ class Terminal
     // }}}
 
     InputMethodData _inputMethodData {};
-    std::atomic<HyperlinkId> _hoveringHyperlinkId = HyperlinkId {};
+    std::atomic<hyperlink_id> _hoveringHyperlinkId = hyperlink_id {};
     std::atomic<bool> _renderBufferUpdateEnabled = true; // for "Synchronized Updates" feature
     std::optional<HighlightRange> _highlightRange = std::nullopt;
 };
@@ -853,7 +853,7 @@ struct fmt::formatter<terminal::TraceHandler::PendingSequence>
     static auto format(terminal::TraceHandler::PendingSequence const& pendingSequence, format_context& ctx)
         -> format_context::iterator
     {
-        if (auto const* p = std::get_if<terminal::Sequence>(&pendingSequence))
+        if (auto const* p = std::get_if<terminal::sequence>(&pendingSequence))
             return fmt::format_to(ctx.out(), "{}", p->text());
         else if (auto const* p = std::get_if<terminal::TraceHandler::CodepointSequence>(&pendingSequence))
             return fmt::format_to(ctx.out(), "\"{}\"", crispy::escape(p->text));

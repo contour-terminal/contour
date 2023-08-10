@@ -45,7 +45,7 @@ void ImageRenderer::setCellSize(image_size cellSize)
     // TODO: recompute rasterized images slices here?
 }
 
-void ImageRenderer::renderImage(crispy::Point pos, ImageFragment const& fragment)
+void ImageRenderer::renderImage(crispy::Point pos, image_fragment const& fragment)
 {
     // std::cout << fmt::format("ImageRenderer.renderImage: {}\n", fragment);
 
@@ -93,7 +93,7 @@ void ImageRenderer::endFrame()
 }
 
 Renderable::AtlasTileAttributes const* ImageRenderer::getOrCreateCachedTileAttributes(
-    ImageFragment const& fragment)
+    image_fragment const& fragment)
 {
     // using crispy::StrongHash;
     // auto const hash = StrongHash::compute(fragment.rasterizedImage().image().id().value)
@@ -118,7 +118,7 @@ Renderable::AtlasTileAttributes const* ImageRenderer::getOrCreateCachedTileAttri
         });
 }
 
-void ImageRenderer::discardImage(ImageId /*imageId*/)
+void ImageRenderer::discardImage(image_id /*imageId*/)
 {
     // We currently don't really discard.
     // Because the GPU texture atlas is resource-guarded by an LRU hashtable.

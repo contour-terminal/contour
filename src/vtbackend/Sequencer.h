@@ -104,7 +104,7 @@ struct SixelImage
     image_size size;
 
     /// RGBA buffer of the image to be rendered
-    Image::Data rgba;
+    image::data rgba;
 };
 
 inline std::string setDynamicColorValue(
@@ -177,11 +177,11 @@ class Sequencer
     // private data
     //
     Terminal& _terminal;
-    Sequence _sequence {};
-    SequenceParameterBuilder _parameterBuilder;
+    sequence _sequence {};
+    sequence_parameter_builder _parameterBuilder;
 
     std::unique_ptr<ParserExtension> _hookedParser;
-    std::unique_ptr<SixelImageBuilder> _sixelImageBuilder;
+    std::unique_ptr<sixel_image_builder> _sixelImageBuilder;
 };
 
 // {{{ inlines
@@ -235,7 +235,7 @@ struct fmt::formatter<terminal::RequestStatusString>: formatter<std::string_view
 };
 
 template <>
-struct fmt::formatter<terminal::Sequence>
+struct fmt::formatter<terminal::sequence>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -243,7 +243,7 @@ struct fmt::formatter<terminal::Sequence>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(terminal::Sequence const& seq, FormatContext& ctx)
+    auto format(terminal::sequence const& seq, FormatContext& ctx)
     {
         return fmt::format_to(ctx.out(), "{}", seq.text());
     }

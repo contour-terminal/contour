@@ -35,10 +35,10 @@ namespace terminal
 /// that must be done by the parent parser.
 ///
 /// TODO: make this parser O(1) with state table lookup tables, just like the VT parser.
-class SixelParser: public ParserExtension
+class sixel_parser: public ParserExtension
 {
   public:
-    enum class State
+    enum class state
     {
         Ground,           // Sixel data
         RasterSettings,   // '"', configuring the raster
@@ -47,17 +47,17 @@ class SixelParser: public ParserExtension
         ColorParam        // color parameter
     };
 
-    enum class Colorspace
+    enum class colorspace
     {
         RGB,
         HSL
     };
 
     /// SixelParser's event handler
-    class Events
+    class events
     {
       public:
-        virtual ~Events() = default;
+        virtual ~events() = default;
 
         /// Defines a new color at given register index.
         virtual void setColor(unsigned index, rgb_color const& color) = 0;
@@ -82,8 +82,8 @@ class SixelParser: public ParserExtension
         virtual void finalize() = 0;
     };
 
-    using OnFinalize = std::function<void()>;
-    explicit SixelParser(Events& events, OnFinalize finalizer = {});
+    using on_finalize = std::function<void()>;
+    explicit sixel_parser(events& events, on_finalize finalizer = {});
 
     using iterator = char const*;
 
@@ -98,9 +98,9 @@ class SixelParser: public ParserExtension
     void parse(char value);
     void done();
 
-    static void parse(std::string_view range, Events& events)
+    static void parse(std::string_view range, events& events)
     {
-        auto parser = SixelParser { events };
+        auto parser = sixel_parser { events };
         parser.parseFragment(range.data(), range.data() + range.size());
         parser.done();
     }
@@ -111,23 +111,23 @@ class SixelParser: public ParserExtension
 
   private:
     void paramShiftAndAddDigit(unsigned value);
-    void transitionTo(State newState);
+    void transitionTo(state newState);
     void enterState();
     void leaveState();
     void fallback(char value);
 
   private:
-    State _state = State::Ground;
+    state _state = state::Ground;
     std::vector<unsigned> _params;
 
-    Events& _events;
-    OnFinalize _finalizer;
+    events& _events;
+    on_finalize _finalizer;
 };
 
-class SixelColorPalette
+class sixel_color_palette
 {
   public:
-    SixelColorPalette(unsigned int size, unsigned int maxSize);
+    sixel_color_palette(unsigned int size, unsigned int maxSize);
 
     void reset();
 
@@ -148,16 +148,16 @@ class SixelColorPalette
 /// Sixel Image Builder API
 ///
 /// Implements the SixelParser::Events event listener to construct a Sixel image.
-class SixelImageBuilder: public SixelParser::Events
+class sixel_image_builder: public sixel_parser::events
 {
   public:
-    using Buffer = std::vector<uint8_t>;
+    using buffer = std::vector<uint8_t>;
 
-    SixelImageBuilder(image_size maxSize,
-                      int aspectVertical,
-                      int aspectHorizontal,
-                      rgba_color backgroundColor,
-                      std::shared_ptr<SixelColorPalette> colorPalette);
+    sixel_image_builder(image_size maxSize,
+                        int aspectVertical,
+                        int aspectHorizontal,
+                        rgba_color backgroundColor,
+                        std::shared_ptr<sixel_color_palette> colorPalette);
 
     [[nodiscard]] image_size maxSize() const noexcept { return _maxSize; }
     [[nodiscard]] image_size size() const noexcept { return _size; }
@@ -166,8 +166,8 @@ class SixelImageBuilder: public SixelParser::Events
 
     [[nodiscard]] rgba_color at(cell_location coord) const noexcept;
 
-    [[nodiscard]] Buffer const& data() const noexcept { return _buffer; }
-    [[nodiscard]] Buffer& data() noexcept { return _buffer; }
+    [[nodiscard]] buffer const& data() const noexcept { return _buffer; }
+    [[nodiscard]] buffer& data() noexcept { return _buffer; }
 
     void clear(rgba_color fillColor);
 
@@ -186,9 +186,9 @@ class SixelImageBuilder: public SixelParser::Events
 
   private:
     image_size const _maxSize;
-    std::shared_ptr<SixelColorPalette> _colors;
+    std::shared_ptr<sixel_color_palette> _colors;
     image_size _size;
-    Buffer _buffer; /// RGBA buffer
+    buffer _buffer; /// RGBA buffer
     cell_location _sixelCursor {};
     unsigned _currentColor = 0;
     bool _explicitSize = false;

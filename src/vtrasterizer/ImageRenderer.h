@@ -32,7 +32,7 @@ namespace terminal::rasterizer
 // NB: Ensure this struct does NOT contain padding (or adapt strong hash creation).
 struct ImageFragmentKey
 {
-    ImageId imageId;
+    image_id imageId;
     cell_location offset;
     image_size size;
 
@@ -63,11 +63,11 @@ class ImageRenderer: public Renderable, public TextRendererEvents
     /// Reconfigures the slicing properties of existing images.
     void setCellSize(image_size cellSize);
 
-    void renderImage(crispy::Point pos, ImageFragment const& fragment);
+    void renderImage(crispy::Point pos, image_fragment const& fragment);
 
     /// notify underlying cache that this fragment is not going to be rendered anymore, maybe freeing up some
     /// GPU caches.
-    void discardImage(ImageId imageId);
+    void discardImage(image_id imageId);
 
     void inspect(std::ostream& output) const override;
 
@@ -78,7 +78,7 @@ class ImageRenderer: public Renderable, public TextRendererEvents
     void onAfterRenderingText() override;
 
   private:
-    AtlasTileAttributes const* getOrCreateCachedTileAttributes(ImageFragment const& fragment);
+    AtlasTileAttributes const* getOrCreateCachedTileAttributes(image_fragment const& fragment);
     std::vector<atlas::RenderTile> _pendingRenderTilesAboveText;
 
     // private data

@@ -24,11 +24,11 @@ namespace terminal
 
 string to_string(color color)
 {
-    using Type = color_type;
+    using type = color_type;
     switch (color.type())
     {
-        case Type::Indexed: return fmt::format("{}", color.index());
-        case Type::Bright:
+        case type::Indexed: return fmt::format("{}", color.index());
+        case type::Bright:
             switch (color.index())
             {
                 case 0: return "bright-black";
@@ -42,7 +42,7 @@ string to_string(color color)
                 case 8: return "bright-DEFAULT";
             }
             return "?";
-        case Type::Default:
+        case type::Default:
             switch (color.index())
             {
                 case 0: return "black";
@@ -56,9 +56,9 @@ string to_string(color color)
                 case 8: return "DEFAULT";
             }
             return "?";
-        case Type::RGB:
+        case type::RGB:
             return fmt::format("#{:02X}{:02X}{:02X}", color.rgb().red, color.rgb().green, color.rgb().blue);
-        case Type::Undefined: break;
+        case type::Undefined: break;
     }
     return "?";
 }

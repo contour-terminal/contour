@@ -21,7 +21,7 @@ using namespace std;
 namespace terminal
 {
 
-string to_string(DeviceAttributes v)
+string to_string(device_attributes v)
 {
     string s;
 
@@ -31,18 +31,18 @@ string to_string(DeviceAttributes v)
         s += v;
     };
 
-    auto constexpr mappings = array<pair<DeviceAttributes, string_view>, 11> {
-        pair { DeviceAttributes::AnsiColor, "AnsiColor" },
-        pair { DeviceAttributes::AnsiTextLocator, "AnsiTextLocator" },
-        pair { DeviceAttributes::Columns132, "Columns132" },
-        pair { DeviceAttributes::NationalReplacementCharacterSets, "NationalReplacementCharacterSets" },
-        pair { DeviceAttributes::Printer, "Printer" },
-        pair { DeviceAttributes::RectangularEditing, "RectangularEditing" },
-        pair { DeviceAttributes::SelectiveErase, "SelectiveErase" },
-        pair { DeviceAttributes::SixelGraphics, "SixelGraphics" },
-        pair { DeviceAttributes::TechnicalCharacters, "TechnicalCharacters" },
-        pair { DeviceAttributes::UserDefinedKeys, "UserDefinedKeys" },
-        pair { DeviceAttributes::Windowing, "Windowing" },
+    auto constexpr mappings = array<pair<device_attributes, string_view>, 11> {
+        pair { device_attributes::AnsiColor, "AnsiColor" },
+        pair { device_attributes::AnsiTextLocator, "AnsiTextLocator" },
+        pair { device_attributes::Columns132, "Columns132" },
+        pair { device_attributes::NationalReplacementCharacterSets, "NationalReplacementCharacterSets" },
+        pair { device_attributes::Printer, "Printer" },
+        pair { device_attributes::RectangularEditing, "RectangularEditing" },
+        pair { device_attributes::SelectiveErase, "SelectiveErase" },
+        pair { device_attributes::SixelGraphics, "SixelGraphics" },
+        pair { device_attributes::TechnicalCharacters, "TechnicalCharacters" },
+        pair { device_attributes::UserDefinedKeys, "UserDefinedKeys" },
+        pair { device_attributes::Windowing, "Windowing" },
     };
 
     for (auto const& mapping: mappings)
@@ -52,7 +52,7 @@ string to_string(DeviceAttributes v)
     return s;
 }
 
-string to_params(DeviceAttributes v)
+string to_params(device_attributes v)
 {
     string s;
 
@@ -62,19 +62,19 @@ string to_params(DeviceAttributes v)
         s += v;
     };
 
-    auto constexpr mappings = array<pair<DeviceAttributes, string_view>, 12> {
-        pair { DeviceAttributes::AnsiColor, "22" },
-        pair { DeviceAttributes::AnsiTextLocator, "29" },
-        pair { DeviceAttributes::CaptureScreenBuffer, "314" },
-        pair { DeviceAttributes::Columns132, "1" },
-        pair { DeviceAttributes::NationalReplacementCharacterSets, "9" },
-        pair { DeviceAttributes::Printer, "2" },
-        pair { DeviceAttributes::RectangularEditing, "28" },
-        pair { DeviceAttributes::SelectiveErase, "6" },
-        pair { DeviceAttributes::SixelGraphics, "4" },
-        pair { DeviceAttributes::TechnicalCharacters, "15" },
-        pair { DeviceAttributes::UserDefinedKeys, "8" },
-        pair { DeviceAttributes::Windowing, "18" },
+    auto constexpr mappings = array<pair<device_attributes, string_view>, 12> {
+        pair { device_attributes::AnsiColor, "22" },
+        pair { device_attributes::AnsiTextLocator, "29" },
+        pair { device_attributes::CaptureScreenBuffer, "314" },
+        pair { device_attributes::Columns132, "1" },
+        pair { device_attributes::NationalReplacementCharacterSets, "9" },
+        pair { device_attributes::Printer, "2" },
+        pair { device_attributes::RectangularEditing, "28" },
+        pair { device_attributes::SelectiveErase, "6" },
+        pair { device_attributes::SixelGraphics, "4" },
+        pair { device_attributes::TechnicalCharacters, "15" },
+        pair { device_attributes::UserDefinedKeys, "8" },
+        pair { device_attributes::Windowing, "18" },
     };
 
     for (auto const& mapping: mappings)

@@ -45,7 +45,7 @@ class VTWriter
 
     // Writes the given Line<> to the output stream without the trailing newline.
     template <typename Cell>
-    void write(Line<Cell> const& line);
+    void write(line<Cell> const& line);
 
     template <typename... T>
     void write(fmt::format_string<T...> fmt, T&&... args);

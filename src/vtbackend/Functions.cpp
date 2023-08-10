@@ -44,7 +44,7 @@ using std::stringstream;
 namespace terminal
 {
 
-FunctionDefinition const* select(FunctionSelector const& selector) noexcept
+function_definition const* select(function_selector const& selector) noexcept
 {
     auto static const& funcs = functions();
 

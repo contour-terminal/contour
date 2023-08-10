@@ -15,6 +15,8 @@
 #include <vtbackend/Terminal.h>
 #include <vtbackend/TerminalState.h>
 
+#include "vtbackend/SixelParser.h"
+
 namespace terminal
 {
 
@@ -24,11 +26,12 @@ TerminalState::TerminalState(Terminal& terminal):
     settings { terminal.settings() },
     cellPixelSize {},
     effectiveImageCanvasSize { settings.maxImageSize },
-    imageColorPalette { std::make_shared<SixelColorPalette>(maxImageColorRegisters, maxImageColorRegisters) },
-    imagePool { [te = &terminal](Image const* image) {
+    imageColorPalette { std::make_shared<sixel_color_palette>(maxImageColorRegisters,
+                                                              maxImageColorRegisters) },
+    imagePool { [te = &terminal](image const* image) {
         te->discardImage(*image);
     } },
-    hyperlinks { HyperlinkCache { 1024 } },
+    hyperlinks { hyperlink_cache { 1024 } },
     sequencer { terminal },
     parser { std::ref(sequencer) },
     viCommands { terminal },

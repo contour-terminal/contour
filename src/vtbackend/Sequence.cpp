@@ -14,17 +14,17 @@ using std::stringstream;
 namespace terminal
 {
 
-std::string Sequence::raw() const
+std::string sequence::raw() const
 {
     stringstream sstr;
 
     switch (_category)
     {
-        case FunctionCategory::C0: break;
-        case FunctionCategory::ESC: sstr << "\033"; break;
-        case FunctionCategory::CSI: sstr << "\033["; break;
-        case FunctionCategory::DCS: sstr << "\033P"; break;
-        case FunctionCategory::OSC: sstr << "\033]"; break;
+        case function_category::C0: break;
+        case function_category::ESC: sstr << "\033"; break;
+        case function_category::CSI: sstr << "\033["; break;
+        case function_category::DCS: sstr << "\033P"; break;
+        case function_category::OSC: sstr << "\033]"; break;
     }
 
     // if (parameterCount() > 1 || (parameterCount() == 1 && _parameters.at(0) != 0))
@@ -51,11 +51,11 @@ std::string Sequence::raw() const
     return sstr.str();
 }
 
-string Sequence::text() const
+string sequence::text() const
 {
     stringstream sstr;
 
-    if (_category == FunctionCategory::C0)
+    if (_category == function_category::C0)
     {
         sstr << to_short_string(ControlCode::C0(_finalChar));
         return sstr.str();

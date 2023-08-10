@@ -45,7 +45,7 @@ struct RenderAttributes
 struct RenderCell
 {
     std::u32string codepoints;
-    std::shared_ptr<ImageFragment> image;
+    std::shared_ptr<image_fragment> image;
     cell_location position;
     RenderAttributes attributes;
     uint8_t width = 1;

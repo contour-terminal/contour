@@ -195,8 +195,8 @@ class ViInputHandler: public InputHandler
 
     ViInputHandler(Executor& theExecutor, vi_mode initialMode);
 
-    bool sendKeyPressEvent(Key key, Modifier modifier) override;
-    bool sendCharPressEvent(char32_t ch, Modifier modifier) override;
+    bool sendKeyPressEvent(key key, modifier modifier) override;
+    bool sendCharPressEvent(char32_t ch, modifier modifier) override;
 
     void setMode(vi_mode mode);
     void toggleMode(vi_mode mode);
@@ -237,15 +237,15 @@ class ViInputHandler: public InputHandler
     void registerCommand(ModeSelect modes,
                          std::vector<std::string_view> const& commands,
                          CommandHandler const& handler);
-    void appendModifierToPendingInput(Modifier modifier);
+    void appendModifierToPendingInput(modifier modifier);
     [[nodiscard]] bool handlePendingInput();
     void clearPendingInput();
     [[nodiscard]] unsigned count() const noexcept { return _count ? _count : 1; }
 
-    bool parseCount(char32_t ch, Modifier modifier);
-    bool parseTextObject(char32_t ch, Modifier modifier);
-    bool handleSearchEditor(char32_t ch, Modifier modifier);
-    bool handleModeSwitches(char32_t ch, Modifier modifier);
+    bool parseCount(char32_t ch, modifier modifier);
+    bool parseTextObject(char32_t ch, modifier modifier);
+    bool handleSearchEditor(char32_t ch, modifier modifier);
+    bool handleModeSwitches(char32_t ch, modifier modifier);
     void startSearch();
 
     vi_mode _viMode = vi_mode::Normal;

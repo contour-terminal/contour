@@ -31,7 +31,7 @@
 namespace terminal
 {
 
-class SequenceParameterBuilder;
+class sequence_parameter_builder;
 
 /**
  * CSI parameter API.
@@ -40,10 +40,10 @@ class SequenceParameterBuilder;
  *
  * @note Use SequenceParameterBuilder for filling a SequenceParameters object.
  */
-class SequenceParameters
+class sequence_parameters
 {
   public:
-    using Storage = std::array<uint16_t, 16>;
+    using storage = std::array<uint16_t, 16>;
 
     [[nodiscard]] constexpr uint16_t at(size_t index) const noexcept { return _values[index]; }
 
@@ -111,8 +111,8 @@ class SequenceParameters
     }
 
   private:
-    friend class SequenceParameterBuilder;
-    Storage _values {};
+    friend class sequence_parameter_builder;
+    storage _values {};
     uint16_t _subParameterTest = 0;
     size_t _count = 0;
 };
@@ -124,12 +124,12 @@ class SequenceParameters
  *
  * @see SequenceParameters
  */
-class SequenceParameterBuilder
+class sequence_parameter_builder
 {
   public:
-    using Storage = SequenceParameters::Storage;
+    using storage = sequence_parameters::storage;
 
-    explicit SequenceParameterBuilder(SequenceParameters& p):
+    explicit sequence_parameter_builder(sequence_parameters& p):
         _parameters { p }, _currentParameter { p._values.begin() }
     {
     }
@@ -182,7 +182,7 @@ class SequenceParameterBuilder
     [[nodiscard]] constexpr size_t count() const noexcept
     {
         auto const result =
-            std::distance(const_cast<SequenceParameterBuilder*>(this)->_parameters._values.begin(),
+            std::distance(const_cast<sequence_parameter_builder*>(this)->_parameters._values.begin(),
                           _currentParameter)
             + 1;
         if (!(result == 1 && _parameters._values[0] == 0))
@@ -198,37 +198,37 @@ class SequenceParameterBuilder
     }
 
   private:
-    SequenceParameters& _parameters;
-    Storage::iterator _currentParameter;
+    sequence_parameters& _parameters;
+    storage::iterator _currentParameter;
 };
 
 /**
  * Helps constructing VT functions as they're being parsed by the VT parser.
  */
-class Sequence
+class sequence
 {
   public:
     size_t constexpr static MaxOscLength = 512; // NOLINT(readability-identifier-naming)
 
-    using Parameter = uint16_t;
-    using Intermediaries = std::string;
-    using DataString = std::string;
-    using Parameters = SequenceParameters;
+    using parameter = uint16_t;
+    using intermediaries = std::string;
+    using data_string = std::string;
+    using parameters = sequence_parameters;
 
   private:
-    FunctionCategory _category = {};
+    function_category _category = {};
     char _leaderSymbol = 0;
-    Parameters _parameters;
-    Intermediaries _intermediateCharacters;
+    parameters _parameters;
+    intermediaries _intermediateCharacters;
     char _finalChar = 0;
-    DataString _dataString;
+    data_string _dataString;
 
   public:
     // parameter accessors
     //
 
-    [[nodiscard]] Parameters& parameters() noexcept { return _parameters; }
-    [[nodiscard]] Parameters const& parameters() const noexcept { return _parameters; }
+    [[nodiscard]] parameters& getParameters() noexcept { return _parameters; }
+    [[nodiscard]] parameters const& getParameters() const noexcept { return _parameters; }
 
     [[nodiscard]] size_t parameterCount() const noexcept { return _parameters.count(); }
     [[nodiscard]] size_t subParameterCount(size_t i) const noexcept
@@ -246,20 +246,20 @@ class Sequence
 
     void clearExceptParameters()
     {
-        _category = FunctionCategory::C0;
+        _category = function_category::C0;
         _leaderSymbol = 0;
         _intermediateCharacters.clear();
         _finalChar = 0;
         _dataString.clear();
     }
 
-    void setCategory(FunctionCategory cat) noexcept { _category = cat; }
+    void setCategory(function_category cat) noexcept { _category = cat; }
     void setLeader(char ch) noexcept { _leaderSymbol = ch; }
-    [[nodiscard]] Intermediaries& intermediateCharacters() noexcept { return _intermediateCharacters; }
+    [[nodiscard]] intermediaries& intermediateCharacters() noexcept { return _intermediateCharacters; }
     void setFinalChar(char ch) noexcept { _finalChar = ch; }
 
-    [[nodiscard]] DataString const& dataString() const noexcept { return _dataString; }
-    [[nodiscard]] DataString& dataString() noexcept { return _dataString; }
+    [[nodiscard]] data_string const& dataString() const noexcept { return _dataString; }
+    [[nodiscard]] data_string& dataString() noexcept { return _dataString; }
 
     /// @returns this VT-sequence into a human readable string form.
     [[nodiscard]] std::string text() const;
@@ -267,16 +267,19 @@ class Sequence
     /// @returns the raw VT-sequence string.
     [[nodiscard]] std::string raw() const;
 
-    [[nodiscard]] FunctionDefinition const* functionDefinition() const noexcept { return select(selector()); }
+    [[nodiscard]] function_definition const* functionDefinition() const noexcept
+    {
+        return select(selector());
+    }
 
     /// Converts a FunctionSpinto a FunctionSelector, applicable for finding the corresponding
     /// FunctionDefinition.
-    [[nodiscard]] FunctionSelector selector() const noexcept
+    [[nodiscard]] function_selector selector() const noexcept
     {
         switch (_category)
         {
-            case FunctionCategory::OSC:
-                return FunctionSelector {
+            case function_category::OSC:
+                return function_selector {
                     _category, 0, static_cast<int>(parameterCount() ? param(0) : 0), 0, 0
                 };
             default: {
@@ -285,7 +288,7 @@ class Sequence
                                               ? static_cast<char>(_intermediateCharacters[0])
                                               : char {};
 
-                return FunctionSelector {
+                return function_selector {
                     _category, _leaderSymbol, static_cast<int>(parameterCount()), intermediate, _finalChar
                 };
             }
@@ -294,8 +297,8 @@ class Sequence
 
     // accessors
     //
-    [[nodiscard]] FunctionCategory category() const noexcept { return _category; }
-    [[nodiscard]] Intermediaries const& intermediateCharacters() const noexcept
+    [[nodiscard]] function_category category() const noexcept { return _category; }
+    [[nodiscard]] intermediaries const& intermediateCharacters() const noexcept
     {
         return _intermediateCharacters;
     }
@@ -361,13 +364,13 @@ class Sequence
     }
 };
 
-class SequenceHandler
+class sequence_handler
 {
   public:
-    virtual ~SequenceHandler() = default;
+    virtual ~sequence_handler() = default;
 
     virtual void executeControlCode(char controlCode) = 0;
-    virtual void processSequence(Sequence const& sequence) = 0;
+    virtual void processSequence(sequence const& sequence) = 0;
     virtual void writeText(char32_t codepoint) = 0;
     virtual void writeText(std::string_view codepoints, size_t cellCount) = 0;
 };

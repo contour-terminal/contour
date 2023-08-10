@@ -35,9 +35,9 @@
 namespace terminal
 {
 
-struct ImageData
+struct image_data
 {
-    terminal::ImageFormat format;
+    terminal::image_format format;
     int rowAlignment = 1;
     image_size size;
     std::vector<uint8_t> pixels;
@@ -47,13 +47,13 @@ struct ImageData
     void updateHash() noexcept;
 };
 
-using ImageDataPtr = std::shared_ptr<ImageData const>;
+using image_data_ptr = std::shared_ptr<image_data const>;
 
-struct BackgroundImage
+struct background_image
 {
-    using Location = std::variant<FileSystem::path, ImageDataPtr>;
+    using location = std::variant<FileSystem::path, image_data_ptr>;
 
-    Location location;
+    location loc;
     crispy::StrongHash hash;
 
     // image configuration
@@ -61,9 +61,9 @@ struct BackgroundImage
     bool blur = false;
 };
 
-struct ColorPalette
+struct color_palette
 {
-    using Palette = std::array<rgb_color, 256 + 8>;
+    using palette_type = std::array<rgb_color, 256 + 8>;
 
     /// Indicates whether or not bright colors are being allowed
     /// for indexed colors between 0..7 and mode set to ColorMode::Bright.
@@ -76,9 +76,9 @@ struct ColorPalette
     /// TODO: And even the naming sounds wrong. Better would be makeIndexedColorsBrightForBoldText or similar.
     bool useBrightColors = false;
 
-    static Palette const defaultColorPalette;
+    static palette_type const defaultColorPalette;
 
-    Palette palette = defaultColorPalette;
+    palette_type palette = defaultColorPalette;
 
     [[nodiscard]] rgb_color normalColor(size_t index) const noexcept
     {
@@ -120,7 +120,7 @@ struct ColorPalette
 
     rgb_color_pair inputMethodEditor = { 0xFFFFFF_rgb, 0xFF0000_rgb };
 
-    std::shared_ptr<BackgroundImage const> backgroundImage;
+    std::shared_ptr<background_image const> backgroundImage;
 
     // clang-format off
     cell_rgb_color_and_alpha_pair yankHighlight { cell_foreground_color {}, 1.0f, 0xffA500_rgb, 0.5f };
@@ -140,50 +140,53 @@ struct ColorPalette
     rgb_color_pair indicatorStatusLineInactive = { 0x000000_rgb, 0x808080_rgb };
 };
 
-enum class ColorTarget
+enum class color_target
 {
     Foreground,
     Background,
 };
 
-enum class ColorMode
+enum class color_mode
 {
     Dimmed,
     Normal,
     Bright
 };
 
-rgb_color apply(ColorPalette const& colorPalette, color color, ColorTarget target, ColorMode mode) noexcept;
+rgb_color apply(color_palette const& colorPalette,
+                color color,
+                color_target target,
+                color_mode mode) noexcept;
 
 } // namespace terminal
 
 // {{{ fmtlib custom formatter support
 template <>
-struct fmt::formatter<terminal::ColorMode>: fmt::formatter<std::string_view>
+struct fmt::formatter<terminal::color_mode>: fmt::formatter<std::string_view>
 {
-    auto format(terminal::ColorMode value, fmt::format_context& ctx) -> format_context::iterator
+    auto format(terminal::color_mode value, fmt::format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::ColorMode::Normal: name = "Normal"; break;
-            case terminal::ColorMode::Dimmed: name = "Dimmed"; break;
-            case terminal::ColorMode::Bright: name = "Bright"; break;
+            case terminal::color_mode::Normal: name = "Normal"; break;
+            case terminal::color_mode::Dimmed: name = "Dimmed"; break;
+            case terminal::color_mode::Bright: name = "Bright"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::ColorTarget>: fmt::formatter<std::string_view>
+struct fmt::formatter<terminal::color_target>: fmt::formatter<std::string_view>
 {
-    auto format(terminal::ColorTarget value, fmt::format_context& ctx) -> format_context::iterator
+    auto format(terminal::color_target value, fmt::format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::ColorTarget::Foreground: name = "Foreground"; break;
-            case terminal::ColorTarget::Background: name = "Background"; break;
+            case terminal::color_target::Foreground: name = "Foreground"; break;
+            case terminal::color_target::Background: name = "Background"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

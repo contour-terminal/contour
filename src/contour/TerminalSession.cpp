@@ -269,9 +269,9 @@ void TerminalSession::screenUpdated()
     if (!display_)
         return;
 
-    if (profile_.autoScrollOnUpdate && terminal().viewport().scrolled()
+    if (profile_.autoScrollOnUpdate && terminal().get_viewport().scrolled()
         && terminal().inputHandler().mode() == vi_mode::Insert)
-        terminal().viewport().scrollToBottom();
+        terminal().get_viewport().scrollToBottom();
 
     if (terminal().hasInput())
         display_->post(bind(&TerminalSession::flushInput, this));
@@ -606,7 +606,7 @@ void TerminalSession::setTerminalProfile(string const& _configProfileName)
     display_->post([this, name = string(_configProfileName)]() { activateProfile(name); });
 }
 
-void TerminalSession::discardImage(terminal::Image const& _image)
+void TerminalSession::discardImage(terminal::image const& _image)
 {
     if (!display_)
         return;
@@ -629,7 +629,7 @@ void TerminalSession::inputModeChanged(terminal::vi_mode mode)
 
 // }}}
 // {{{ Input Events
-void TerminalSession::sendKeyPressEvent(Key _key, Modifier _modifier, Timestamp _now)
+void TerminalSession::sendKeyPressEvent(key _key, modifier _modifier, Timestamp _now)
 {
     InputLog()("Key press event received: {} {}", _modifier, _key);
 
@@ -649,7 +649,7 @@ void TerminalSession::sendKeyPressEvent(Key _key, Modifier _modifier, Timestamp 
         terminal().sendKeyPressEvent(_key, _modifier, _now);
 }
 
-void TerminalSession::sendCharPressEvent(char32_t _value, Modifier _modifier, Timestamp _now)
+void TerminalSession::sendCharPressEvent(char32_t _value, modifier _modifier, Timestamp _now)
 {
     InputLog()("Character press event received: {} {}",
                _modifier,
@@ -673,8 +673,8 @@ void TerminalSession::sendCharPressEvent(char32_t _value, Modifier _modifier, Ti
         terminal().sendCharPressEvent(_value, _modifier, _now); // TODO: get rid of Event{} struct here, too!
 }
 
-void TerminalSession::sendMousePressEvent(Modifier _modifier,
-                                          MouseButton _button,
+void TerminalSession::sendMousePressEvent(modifier _modifier,
+                                          mouse_button _button,
                                           pixel_coordinate _pixelPosition)
 {
     auto const uiHandledHint = false;
@@ -694,7 +694,7 @@ void TerminalSession::sendMousePressEvent(Modifier _modifier,
         executeAllActions(*actions);
 }
 
-void TerminalSession::sendMouseMoveEvent(terminal::Modifier _modifier,
+void TerminalSession::sendMouseMoveEvent(terminal::modifier _modifier,
                                          terminal::cell_location _pos,
                                          terminal::pixel_coordinate _pixelPosition)
 {
@@ -720,8 +720,8 @@ void TerminalSession::sendMouseMoveEvent(terminal::Modifier _modifier,
     }
 }
 
-void TerminalSession::sendMouseReleaseEvent(Modifier _modifier,
-                                            MouseButton _button,
+void TerminalSession::sendMouseReleaseEvent(modifier _modifier,
+                                            mouse_button _button,
                                             pixel_coordinate _pixelPosition)
 {
     terminal().tick(steady_clock::now());
@@ -763,7 +763,7 @@ void TerminalSession::onHighlightUpdate()
     terminal_.resetHighlight();
 }
 
-void TerminalSession::playSound(terminal::Sequence::Parameters const& params_)
+void TerminalSession::playSound(terminal::sequence::parameters const& params_)
 {
     auto range = params_.range();
     musicalNotesBuffer_.clear();
@@ -863,7 +863,7 @@ bool TerminalSession::operator()(actions::DecreaseOpacity)
 bool TerminalSession::operator()(actions::FocusNextSearchMatch)
 {
     if (terminal_.state().viCommands.jumpToNextMatch(1))
-        terminal_.viewport().makeVisibleWithinSafeArea(terminal_.state().viCommands.cursorPosition.line);
+        terminal_.get_viewport().makeVisibleWithinSafeArea(terminal_.state().viCommands.cursorPosition.line);
     // TODO why didn't the makeVisibleWithinSafeArea() call from inside jumpToNextMatch not work?
     return true;
 }
@@ -871,7 +871,7 @@ bool TerminalSession::operator()(actions::FocusNextSearchMatch)
 bool TerminalSession::operator()(actions::FocusPreviousSearchMatch)
 {
     if (terminal_.state().viCommands.jumpToPreviousMatch(1))
-        terminal_.viewport().makeVisibleWithinSafeArea(terminal_.state().viCommands.cursorPosition.line);
+        terminal_.get_viewport().makeVisibleWithinSafeArea(terminal_.state().viCommands.cursorPosition.line);
     // TODO why didn't the makeVisibleWithinSafeArea() call from inside jumpToPreviousMatch not work?
     return true;
 }
@@ -1001,63 +1001,63 @@ bool TerminalSession::operator()(actions::ScreenshotVT)
 
 bool TerminalSession::operator()(actions::ScrollDown)
 {
-    terminal().viewport().scrollDown(profile_.historyScrollMultiplier);
+    terminal().get_viewport().scrollDown(profile_.historyScrollMultiplier);
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollMarkDown)
 {
-    terminal().viewport().scrollMarkDown();
+    terminal().get_viewport().scrollMarkDown();
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollMarkUp)
 {
-    terminal().viewport().scrollMarkUp();
+    terminal().get_viewport().scrollMarkUp();
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollOneDown)
 {
-    terminal().viewport().scrollDown(LineCount(1));
+    terminal().get_viewport().scrollDown(LineCount(1));
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollOneUp)
 {
-    terminal().viewport().scrollUp(LineCount(1));
+    terminal().get_viewport().scrollUp(LineCount(1));
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollPageDown)
 {
     auto const stepSize = terminal().pageSize().lines / LineCount(2);
-    terminal().viewport().scrollDown(stepSize);
+    terminal().get_viewport().scrollDown(stepSize);
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollPageUp)
 {
     auto const stepSize = terminal().pageSize().lines / LineCount(2);
-    terminal().viewport().scrollUp(stepSize);
+    terminal().get_viewport().scrollUp(stepSize);
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollToBottom)
 {
-    terminal().viewport().scrollToBottom();
+    terminal().get_viewport().scrollToBottom();
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollToTop)
 {
-    terminal().viewport().scrollToTop();
+    terminal().get_viewport().scrollToTop();
     return true;
 }
 
 bool TerminalSession::operator()(actions::ScrollUp)
 {
-    terminal().viewport().scrollUp(profile_.historyScrollMultiplier);
+    terminal().get_viewport().scrollUp(profile_.historyScrollMultiplier);
     return true;
 }
 
@@ -1301,7 +1301,7 @@ void TerminalSession::configureTerminal()
     terminal_.defaultColorPalette() = profile_.colors;
     terminal_.setMaxHistoryLineCount(profile_.maxHistoryLineCount);
     terminal_.setHighlightTimeout(profile_.highlightTimeout);
-    terminal_.viewport().setScrollOff(profile_.modalCursorScrollOff);
+    terminal_.get_viewport().setScrollOff(profile_.modalCursorScrollOff);
 }
 
 void TerminalSession::configureCursor(config::CursorConfig const& cursorConfig)
@@ -1445,7 +1445,7 @@ bool TerminalSession::resetConfig()
     return reloadConfig(defaultConfig, defaultConfig.defaultProfileName);
 }
 
-void TerminalSession::followHyperlink(terminal::HyperlinkInfo const& _hyperlink)
+void TerminalSession::followHyperlink(terminal::hyperlink_info const& _hyperlink)
 {
     auto const fileInfo = QFileInfo(QString::fromStdString(string(_hyperlink.path())));
     auto const isLocal =

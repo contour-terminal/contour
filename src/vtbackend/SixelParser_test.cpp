@@ -25,9 +25,9 @@ using namespace terminal;
 namespace
 {
 
-SixelImageBuilder sixelImageBuilder(image_size size, rgba_color defaultColor)
+sixel_image_builder sixelImageBuilder(image_size size, rgba_color defaultColor)
 {
-    auto ib = SixelImageBuilder(size, 1, 1, defaultColor, std::make_shared<SixelColorPalette>(16, 256));
+    auto ib = sixel_image_builder(size, 1, 1, defaultColor, std::make_shared<sixel_color_palette>(16, 256));
     ib.setRaster(1, 1, size);
     return ib;
 }
@@ -40,7 +40,7 @@ TEST_CASE("SixelParser.ground_000000", "[sixel]")
     auto constexpr pinColor = rgb_color { 0xFF, 0xFF, 0x42 };
 
     auto ib = sixelImageBuilder(image_size { width(4), height(10) }, defaultColor);
-    auto sp = SixelParser { ib };
+    auto sp = sixel_parser { ib };
 
     REQUIRE(ib.sixelCursor() == cell_location { {}, {} });
 
@@ -65,7 +65,7 @@ TEST_CASE("SixelParser.ground_111111", "[sixel]")
     auto constexpr pinColor = rgb_color { 0x10, 0x20, 0x40 };
 
     auto ib = sixelImageBuilder(image_size { width(2), height(8) }, defaultColor);
-    auto sp = SixelParser { ib };
+    auto sp = sixel_parser { ib };
 
     REQUIRE(ib.sixelCursor() == cell_location { line_offset(0), column_offset(0) });
 
@@ -96,7 +96,7 @@ TEST_CASE("SixelParser.ground_000001", "[sixel]")
     auto constexpr pinColor = rgb_color { 0xFF, 0xFF, 0x42 };
 
     auto ib = sixelImageBuilder(image_size { width(4), height(10) }, defaultColor);
-    auto sp = SixelParser { ib };
+    auto sp = sixel_parser { ib };
 
     REQUIRE(ib.sixelCursor() == cell_location { line_offset(0), column_offset(0) });
 
@@ -127,7 +127,7 @@ TEST_CASE("SixelParser.ground_010101", "[sixel]")
     auto constexpr pinColor = rgb_color { 0xFF, 0xFF, 0x42 };
 
     auto ib = sixelImageBuilder(image_size { width(2), height(8) }, defaultColor);
-    auto sp = SixelParser { ib };
+    auto sp = sixel_parser { ib };
 
     REQUIRE(ib.sixelCursor() == cell_location { line_offset(0), column_offset(0) });
 
@@ -158,7 +158,7 @@ TEST_CASE("SixelParser.ground_101010", "[sixel]")
     auto constexpr pinColor = rgb_color { 0xFF, 0xFF, 0x42 };
 
     auto ib = sixelImageBuilder(image_size { width(2), height(8) }, defaultColor);
-    auto sp = SixelParser { ib };
+    auto sp = sixel_parser { ib };
 
     REQUIRE(ib.sixelCursor() == cell_location { line_offset(0), column_offset(0) });
 
@@ -187,7 +187,7 @@ TEST_CASE("SixelParser.raster", "[sixel]")
 {
     auto constexpr defaultColor = rgba_color { 0, 0, 0, 0xFF };
     auto ib = sixelImageBuilder(image_size { width(640), height(480) }, defaultColor);
-    auto sp = SixelParser { ib };
+    auto sp = sixel_parser { ib };
 
     REQUIRE(ib.sixelCursor() == cell_location { line_offset(0), column_offset(0) });
 
@@ -225,7 +225,7 @@ TEST_CASE("SixelParser.rep", "[sixel]")
     auto constexpr defaultColor = rgba_color { 0, 0, 0, 0xFF };
     auto constexpr pinColor = rgb_color { 0x10, 0x20, 0x30 };
     auto ib = sixelImageBuilder(image_size { width(14), height(8) }, defaultColor);
-    auto sp = SixelParser { ib };
+    auto sp = sixel_parser { ib };
 
     REQUIRE(ib.sixelCursor() == cell_location { line_offset(0), column_offset(0) });
 
@@ -259,7 +259,7 @@ TEST_CASE("SixelParser.setAndUseColor", "[sixel]")
 
     auto constexpr defaultColor = rgba_color { 0, 0, 0, 0xFF };
     auto ib = sixelImageBuilder(image_size { width(5), height(6) }, defaultColor);
-    auto sp = SixelParser { ib };
+    auto sp = sixel_parser { ib };
 
     sp.parseFragment("#1;2;100;0;0");
     sp.parseFragment("#2;2;0;100;0");
@@ -299,7 +299,7 @@ TEST_CASE("SixelParser.rewind", "[sixel]")
 
     auto constexpr defaultColor = pinColors[0];
     auto ib = sixelImageBuilder(image_size { width(4), height(6) }, defaultColor);
-    auto sp = SixelParser { ib };
+    auto sp = sixel_parser { ib };
 
     sp.parseFragment("#1;2;100;100;0");
     sp.parseFragment("#2;2;0;100;100");
@@ -334,7 +334,7 @@ TEST_CASE("SixelParser.newline", "[sixel]")
 
     auto constexpr defaultColor = pinColors[0];
     auto ib = sixelImageBuilder(image_size { width(5), height(13) }, defaultColor);
-    auto sp = SixelParser { ib };
+    auto sp = sixel_parser { ib };
 
     sp.parseFragment("#1;2;100;100;0");
     sp.parseFragment("#2;2;0;100;100");
@@ -364,9 +364,9 @@ TEST_CASE("SixelParser.newline", "[sixel]")
 TEST_CASE("SixelParser.vertical_cursor_advance", "[sixel]")
 {
     auto constexpr defaultColor = rgba_color { 0, 0, 0, 255 };
-    SixelImageBuilder ib(
-        { width(5), height(30) }, 1, 1, defaultColor, std::make_shared<SixelColorPalette>(16, 256));
-    auto sp = SixelParser { ib };
+    sixel_image_builder ib(
+        { width(5), height(30) }, 1, 1, defaultColor, std::make_shared<sixel_color_palette>(16, 256));
+    auto sp = sixel_parser { ib };
 
     sp.parseFragment("$-$-$-$-");
     sp.done();

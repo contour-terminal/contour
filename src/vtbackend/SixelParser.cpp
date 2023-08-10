@@ -71,9 +71,9 @@ namespace
         return p;
     }
 
-    using NormalizedValue = double; // normalized value between [0, 1]
+    using normalized_value = double; // normalized value between [0, 1]
 
-    constexpr rgb_color hsl2rgb(NormalizedValue h, NormalizedValue s, NormalizedValue l) noexcept
+    constexpr rgb_color hsl2rgb(normalized_value h, normalized_value s, normalized_value l) noexcept
     {
         // See http://en.wikipedia.org/wiki/HSL_color_space.
 
@@ -118,7 +118,7 @@ constexpr inline std::array<rgb_color, 16> defaultColors = {
 };
 
 // {{{ SixelColorPalette
-SixelColorPalette::SixelColorPalette(unsigned int size, unsigned int maxSize): _maxSize { maxSize }
+sixel_color_palette::sixel_color_palette(unsigned int size, unsigned int maxSize): _maxSize { maxSize }
 {
     if (size > 0)
         _palette.resize(size);
@@ -126,18 +126,18 @@ SixelColorPalette::SixelColorPalette(unsigned int size, unsigned int maxSize): _
     reset();
 }
 
-void SixelColorPalette::reset()
+void sixel_color_palette::reset()
 {
     for (size_t i = 0; i < min(static_cast<size_t>(size()), defaultColors.size()); ++i)
         _palette[i] = defaultColors[i];
 }
 
-void SixelColorPalette::setSize(unsigned int newSize)
+void sixel_color_palette::setSize(unsigned int newSize)
 {
     _palette.resize(static_cast<size_t>(max(0u, min(newSize, _maxSize))));
 }
 
-void SixelColorPalette::setColor(unsigned int index, rgb_color const& color)
+void sixel_color_palette::setColor(unsigned int index, rgb_color const& color)
 {
     if (index < _maxSize)
     {
@@ -149,24 +149,24 @@ void SixelColorPalette::setColor(unsigned int index, rgb_color const& color)
     }
 }
 
-rgb_color SixelColorPalette::at(unsigned int index) const noexcept
+rgb_color sixel_color_palette::at(unsigned int index) const noexcept
 {
     return _palette[index % _palette.size()];
 }
 // }}}
 
-SixelParser::SixelParser(Events& events, OnFinalize finalizer):
+sixel_parser::sixel_parser(events& events, on_finalize finalizer):
     _events { events }, _finalizer { std::move(finalizer) }
 {
 }
 
-void SixelParser::parse(char value)
+void sixel_parser::parse(char value)
 {
     switch (_state)
     {
-        case State::Ground: fallback(value); break;
+        case state::Ground: fallback(value); break;
 
-        case State::RepeatIntroducer:
+        case state::RepeatIntroducer:
             // '!' NUMBER BYTE
             if (isDigit(value))
                 paramShiftAndAddDigit(toDigit(value));
@@ -175,23 +175,23 @@ void SixelParser::parse(char value)
                 auto const sixel = toSixel(value);
                 for (unsigned i = 0; i < _params[0]; ++i)
                     _events.render(sixel);
-                transitionTo(State::Ground);
+                transitionTo(state::Ground);
             }
             else
                 fallback(value);
             break;
 
-        case State::ColorIntroducer:
+        case state::ColorIntroducer:
             if (isDigit(value))
             {
                 paramShiftAndAddDigit(toDigit(value));
-                transitionTo(State::ColorParam);
+                transitionTo(state::ColorParam);
             }
             else
                 fallback(value);
             break;
 
-        case State::ColorParam:
+        case state::ColorParam:
             if (isDigit(value))
                 paramShiftAndAddDigit(toDigit(value));
             else if (value == ';')
@@ -200,7 +200,7 @@ void SixelParser::parse(char value)
                 fallback(value);
             break;
 
-        case State::RasterSettings:
+        case state::RasterSettings:
             if (isDigit(value))
                 paramShiftAndAddDigit(toDigit(value));
             else if (value == ';')
@@ -211,28 +211,28 @@ void SixelParser::parse(char value)
     }
 }
 
-void SixelParser::fallback(char value)
+void sixel_parser::fallback(char value)
 {
     if (value == '#')
-        transitionTo(State::ColorIntroducer);
+        transitionTo(state::ColorIntroducer);
     else if (value == '!')
-        transitionTo(State::RepeatIntroducer);
+        transitionTo(state::RepeatIntroducer);
     else if (value == '"')
-        transitionTo(State::RasterSettings);
+        transitionTo(state::RasterSettings);
     else if (value == '$')
     {
-        transitionTo(State::Ground);
+        transitionTo(state::Ground);
         _events.rewind();
     }
     else if (value == '-')
     {
-        transitionTo(State::Ground);
+        transitionTo(state::Ground);
         _events.newline();
     }
     else
     {
-        if (_state != State::Ground)
-            transitionTo(State::Ground);
+        if (_state != state::Ground)
+            transitionTo(state::Ground);
 
         if (isSixel(value))
             _events.render(toSixel(value));
@@ -241,52 +241,52 @@ void SixelParser::fallback(char value)
     // ignore any other input value
 }
 
-void SixelParser::done()
+void sixel_parser::done()
 {
-    transitionTo(State::Ground); // this also ensures current state's leave action is invoked
+    transitionTo(state::Ground); // this also ensures current state's leave action is invoked
     _events.finalize();
     if (_finalizer)
         _finalizer();
 }
 
-void SixelParser::paramShiftAndAddDigit(unsigned value)
+void sixel_parser::paramShiftAndAddDigit(unsigned value)
 {
     unsigned& number = _params.back();
     number = number * 10 + value;
 }
 
-void SixelParser::transitionTo(State newState)
+void sixel_parser::transitionTo(state newState)
 {
     leaveState();
     _state = newState;
     enterState();
 }
 
-void SixelParser::enterState()
+void sixel_parser::enterState()
 {
     switch (_state)
     {
-        case State::ColorIntroducer:
-        case State::RepeatIntroducer:
-        case State::RasterSettings:
+        case state::ColorIntroducer:
+        case state::RepeatIntroducer:
+        case state::RasterSettings:
             _params.clear();
             _params.push_back(0);
             break;
 
-        case State::Ground:
-        case State::ColorParam: break;
+        case state::Ground:
+        case state::ColorParam: break;
     }
 }
 
-void SixelParser::leaveState()
+void sixel_parser::leaveState()
 {
     switch (_state)
     {
-        case State::Ground:
-        case State::ColorIntroducer:
-        case State::RepeatIntroducer: break;
+        case state::Ground:
+        case state::ColorIntroducer:
+        case state::RepeatIntroducer: break;
 
-        case State::RasterSettings:
+        case state::RasterSettings:
             if (_params.size() > 1 && _params.size() < 5)
             {
                 auto const pan = _params[0];
@@ -298,11 +298,11 @@ void SixelParser::leaveState()
                         : std::nullopt;
 
                 _events.setRaster(pan, pad, imageSize);
-                _state = State::Ground;
+                _state = state::Ground;
             }
             break;
 
-        case State::ColorParam:
+        case state::ColorParam:
             if (_params.size() == 1)
             {
                 auto const index = _params[0];
@@ -317,10 +317,10 @@ void SixelParser::leaveState()
                         static_cast<int>((static_cast<float>(value) * 255.0f) / 100.0f) % 256);
                 };
                 auto const index = _params[0];
-                auto const colorSpace = _params[1] == 2 ? Colorspace::RGB : Colorspace::HSL;
+                auto const colorSpace = _params[1] == 2 ? colorspace::RGB : colorspace::HSL;
                 switch (colorSpace)
                 {
-                    case Colorspace::RGB: {
+                    case colorspace::RGB: {
                         auto const p1 = convertValue(_params[2]);
                         auto const p2 = convertValue(_params[3]);
                         auto const p3 = convertValue(_params[4]);
@@ -328,7 +328,7 @@ void SixelParser::leaveState()
                         _events.setColor(index, color);
                         break;
                     }
-                    case Colorspace::HSL: {
+                    case colorspace::HSL: {
                         // HLS Values
                         // Px 	0 to 360 degrees 	Hue angle
                         // Py 	0 to 100 percent 	Lightness
@@ -350,23 +350,23 @@ void SixelParser::leaveState()
     }
 }
 
-void SixelParser::pass(char ch)
+void sixel_parser::pass(char ch)
 {
     parse(ch);
 }
 
-void SixelParser::finalize()
+void sixel_parser::finalize()
 {
     done();
 }
 
 // =================================================================================
 
-SixelImageBuilder::SixelImageBuilder(image_size maxSize,
-                                     int aspectVertical,
-                                     int aspectHorizontal,
-                                     rgba_color backgroundColor,
-                                     std::shared_ptr<SixelColorPalette> colorPalette):
+sixel_image_builder::sixel_image_builder(image_size maxSize,
+                                         int aspectVertical,
+                                         int aspectHorizontal,
+                                         rgba_color backgroundColor,
+                                         std::shared_ptr<sixel_color_palette> colorPalette):
     _maxSize { maxSize },
     _colors { std::move(colorPalette) },
     _size { image_size { width { 1 }, height { 1 } } },
@@ -379,7 +379,7 @@ SixelImageBuilder::SixelImageBuilder(image_size maxSize,
     clear(backgroundColor);
 }
 
-void SixelImageBuilder::clear(rgba_color fillColor)
+void sixel_image_builder::clear(rgba_color fillColor)
 {
     _sixelCursor = {};
 
@@ -394,7 +394,7 @@ void SixelImageBuilder::clear(rgba_color fillColor)
     }
 }
 
-rgba_color SixelImageBuilder::at(cell_location coord) const noexcept
+rgba_color sixel_image_builder::at(cell_location coord) const noexcept
 {
     auto const line = unbox<unsigned>(coord.line) % unbox<unsigned>(_size.height);
     auto const col = unbox<unsigned>(coord.column) % unbox<unsigned>(_size.width);
@@ -403,7 +403,7 @@ rgba_color SixelImageBuilder::at(cell_location coord) const noexcept
     return rgba_color { color[0], color[1], color[2], color[3] };
 }
 
-void SixelImageBuilder::write(cell_location const& coord, rgb_color const& value) noexcept
+void sixel_image_builder::write(cell_location const& coord, rgb_color const& value) noexcept
 {
     if (unbox<int>(coord.line) >= 0 && unbox<int>(coord.line) < unbox<int>(_maxSize.height)
         && unbox<int>(coord.column) >= 0 && unbox<int>(coord.column) < unbox<int>(_maxSize.width))
@@ -429,22 +429,22 @@ void SixelImageBuilder::write(cell_location const& coord, rgb_color const& value
     }
 }
 
-void SixelImageBuilder::setColor(unsigned index, rgb_color const& color)
+void sixel_image_builder::setColor(unsigned index, rgb_color const& color)
 {
     _colors->setColor(index, color);
 }
 
-void SixelImageBuilder::useColor(unsigned index)
+void sixel_image_builder::useColor(unsigned index)
 {
     _currentColor = index % _colors->size();
 }
 
-void SixelImageBuilder::rewind()
+void sixel_image_builder::rewind()
 {
     _sixelCursor.column = {};
 }
 
-void SixelImageBuilder::newline()
+void sixel_image_builder::newline()
 {
     _sixelCursor.column = {};
     if (unbox<unsigned int>(_sixelCursor.line) + _sixelBandHeight
@@ -452,7 +452,7 @@ void SixelImageBuilder::newline()
         _sixelCursor.line = line_offset::cast_from(_sixelCursor.line.as<unsigned int>() + _sixelBandHeight);
 }
 
-void SixelImageBuilder::setRaster(unsigned int pan, unsigned int pad, optional<image_size> imageSize)
+void sixel_image_builder::setRaster(unsigned int pan, unsigned int pad, optional<image_size> imageSize)
 {
     if (pad != 0)
         _aspectRatio =
@@ -468,7 +468,7 @@ void SixelImageBuilder::setRaster(unsigned int pan, unsigned int pad, optional<i
     }
 }
 
-void SixelImageBuilder::render(int8_t sixel)
+void sixel_image_builder::render(int8_t sixel)
 {
     // TODO: respect aspect ratio!
     auto const x = _sixelCursor.column;
@@ -487,7 +487,7 @@ void SixelImageBuilder::render(int8_t sixel)
     }
 }
 
-void SixelImageBuilder::finalize()
+void sixel_image_builder::finalize()
 {
     if (unbox<int>(_size.height) == 1)
     {
@@ -497,7 +497,7 @@ void SixelImageBuilder::finalize()
     }
     if (!_explicitSize)
     {
-        Buffer tempBuffer(static_cast<size_t>(_size.height.value * _size.width.value) * 4);
+        buffer tempBuffer(static_cast<size_t>(_size.height.value * _size.width.value) * 4);
         for (auto i = 0; i < unbox<int>(_size.height); ++i)
         {
             for (auto j = 0; j < unbox<int>(_size.width); ++j)

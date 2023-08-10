@@ -43,10 +43,10 @@ using namespace terminal;
 
 struct BasicParserEvents: public NullParserEvents // {{{
 {
-    Sequence _sequence {};
-    SequenceParameterBuilder _parameterBuilder;
+    sequence _sequence {};
+    sequence_parameter_builder _parameterBuilder;
 
-    BasicParserEvents(): _parameterBuilder(_sequence.parameters()) {}
+    BasicParserEvents(): _parameterBuilder(_sequence.getParameters()) {}
 
     void collect(char ch) override { _sequence.intermediateCharacters().push_back(ch); }
 
@@ -96,30 +96,30 @@ struct BasicParserEvents: public NullParserEvents // {{{
 
     void dispatchESC(char finalChar) override
     {
-        _sequence.setCategory(FunctionCategory::ESC);
+        _sequence.setCategory(function_category::ESC);
         _sequence.setFinalChar(finalChar);
         executeSequenceHandler();
     }
 
     void dispatchCSI(char finalChar) override
     {
-        _sequence.setCategory(FunctionCategory::CSI);
+        _sequence.setCategory(function_category::CSI);
         _sequence.setFinalChar(finalChar);
         executeSequenceHandler();
     }
 
-    void startOSC() override { _sequence.setCategory(FunctionCategory::OSC); }
+    void startOSC() override { _sequence.setCategory(function_category::OSC); }
 
     void putOSC(char ch) override
     {
-        if (_sequence.intermediateCharacters().size() + 1 < Sequence::MaxOscLength)
+        if (_sequence.intermediateCharacters().size() + 1 < sequence::MaxOscLength)
             _sequence.intermediateCharacters().push_back(ch);
     }
 
     void dispatchOSC() override
     {
         auto const [code, skipCount] = parser::extractCodePrefix(_sequence.intermediateCharacters());
-        _parameterBuilder.set(static_cast<Sequence::Parameter>(code));
+        _parameterBuilder.set(static_cast<sequence::parameter>(code));
         _sequence.intermediateCharacters().erase(0, skipCount);
         executeSequenceHandler();
         clear();
@@ -127,7 +127,7 @@ struct BasicParserEvents: public NullParserEvents // {{{
 
     void hook(char finalChar) override
     {
-        _sequence.setCategory(FunctionCategory::DCS);
+        _sequence.setCategory(function_category::DCS);
         _sequence.setFinalChar(finalChar);
         executeSequenceHandler();
     }

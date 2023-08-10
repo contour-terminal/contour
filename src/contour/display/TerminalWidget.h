@@ -160,7 +160,7 @@ class TerminalWidget: public QQuickItem
     void renderBufferUpdated();
     void onSelectionCompleted();
     void bufferChanged(terminal::screen_type);
-    void discardImage(terminal::Image const&);
+    void discardImage(terminal::image const&);
     // }}}
 
     [[nodiscard]] double contentScale() const;

@@ -36,7 +36,7 @@
 namespace terminal
 {
 
-enum class LineFlags : uint8_t
+enum class line_flags : uint8_t
 {
     None = 0x0000,
     Wrappable = 0x0001,
@@ -55,17 +55,17 @@ template <typename T> struct OptionalProperty<T, true> { T value; };
 /**
  * Line storage with call columns sharing the same SGR attributes.
  */
-struct TrivialLineBuffer
+struct trivial_line_buffer
 {
     ColumnCount displayWidth;
-    GraphicsAttributes textAttributes;
-    GraphicsAttributes fillAttributes = textAttributes;
-    HyperlinkId hyperlink {};
+    graphics_attributes textAttributes;
+    graphics_attributes fillAttributes = textAttributes;
+    hyperlink_id hyperlink {};
 
     ColumnCount usedColumns {};
     crispy::BufferFragment<char> text {};
 
-    void reset(GraphicsAttributes attributes) noexcept
+    void reset(graphics_attributes attributes) noexcept
     {
         textAttributes = attributes;
         fillAttributes = attributes;
@@ -76,14 +76,14 @@ struct TrivialLineBuffer
 };
 
 template <typename Cell>
-using InflatedLineBuffer = std::vector<Cell>;
+using inflated_line_buffer = std::vector<Cell>;
 
 /// Unpacks a TrivialLineBuffer into an InflatedLineBuffer<Cell>.
 template <typename Cell>
-InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input);
+inflated_line_buffer<Cell> inflate(trivial_line_buffer const& input);
 
 template <typename Cell>
-using LineStorage = std::variant<TrivialLineBuffer, InflatedLineBuffer<Cell>>;
+using line_storage = std::variant<trivial_line_buffer, inflated_line_buffer<Cell>>;
 
 /**
  * Line<Cell> API.
@@ -92,50 +92,50 @@ using LineStorage = std::variant<TrivialLineBuffer, InflatedLineBuffer<Cell>>;
  * TODO: Make the line optimization work.
  */
 template <typename Cell>
-class Line
+class line
 {
   public:
-    Line() = default;
-    Line(Line const&) = default;
-    Line(Line&&) noexcept = default;
-    Line& operator=(Line const&) = default;
-    Line& operator=(Line&&) noexcept = default;
+    line() = default;
+    line(line const&) = default;
+    line(line&&) noexcept = default;
+    line& operator=(line const&) = default;
+    line& operator=(line&&) noexcept = default;
 
-    using TrivialBuffer = TrivialLineBuffer;
-    using InflatedBuffer = InflatedLineBuffer<Cell>;
-    using Storage = LineStorage<Cell>;
+    using trivial_buffer = trivial_line_buffer;
+    using inflated_buffer = inflated_line_buffer<Cell>;
+    using storage = line_storage<Cell>;
     using value_type = Cell;
-    using iterator = typename InflatedBuffer::iterator;
-    using reverse_iterator = typename InflatedBuffer::reverse_iterator;
-    using const_iterator = typename InflatedBuffer::const_iterator;
+    using iterator = typename inflated_buffer::iterator;
+    using reverse_iterator = typename inflated_buffer::reverse_iterator;
+    using const_iterator = typename inflated_buffer::const_iterator;
 
-    Line(LineFlags flags, TrivialBuffer buffer):
+    line(line_flags flags, trivial_buffer buffer):
         _storage { std::move(buffer) }, _flags { static_cast<unsigned>(flags) }
     {
     }
 
-    Line(LineFlags flags, InflatedBuffer buffer):
+    line(line_flags flags, inflated_buffer buffer):
         _storage { std::move(buffer) }, _flags { static_cast<unsigned>(flags) }
     {
     }
 
-    void reset(LineFlags flags, GraphicsAttributes attributes) noexcept
+    void reset(line_flags flags, graphics_attributes attributes) noexcept
     {
         _flags = static_cast<unsigned>(flags);
         if (isTrivialBuffer())
             trivialBuffer().reset(attributes);
         else
-            setBuffer(TrivialBuffer { ColumnCount::cast_from(inflatedBuffer().size()), attributes });
+            setBuffer(trivial_buffer { ColumnCount::cast_from(inflatedBuffer().size()), attributes });
     }
 
-    void reset(LineFlags flags, GraphicsAttributes attributes, ColumnCount count) noexcept
+    void reset(line_flags flags, graphics_attributes attributes, ColumnCount count) noexcept
     {
         _flags = static_cast<unsigned>(flags);
-        setBuffer(TrivialBuffer { count, attributes });
+        setBuffer(trivial_buffer { count, attributes });
     }
 
-    void fill(LineFlags flags,
-              GraphicsAttributes const& attributes,
+    void fill(line_flags flags,
+              graphics_attributes const& attributes,
               char32_t codepoint,
               uint8_t width) noexcept
     {
@@ -171,7 +171,7 @@ class Line
      * @p sgr graphics rendition for the line starting at @c start until the end
      * @p ascii the US-ASCII characters to fill with
      */
-    void fill(column_offset start, GraphicsAttributes const& sgr, std::string_view ascii)
+    void fill(column_offset start, graphics_attributes const& sgr, std::string_view ascii)
     {
         auto& buffer = inflatedBuffer();
 
@@ -247,37 +247,37 @@ class Line
         return inflatedBuffer().at(unbox<size_t>(column)).width();
     }
 
-    [[nodiscard]] LineFlags flags() const noexcept { return static_cast<LineFlags>(_flags); }
+    [[nodiscard]] line_flags flags() const noexcept { return static_cast<line_flags>(_flags); }
 
-    [[nodiscard]] bool marked() const noexcept { return isFlagEnabled(LineFlags::Marked); }
-    void setMarked(bool enable) { setFlag(LineFlags::Marked, enable); }
+    [[nodiscard]] bool marked() const noexcept { return isFlagEnabled(line_flags::Marked); }
+    void setMarked(bool enable) { setFlag(line_flags::Marked, enable); }
 
-    [[nodiscard]] bool wrapped() const noexcept { return isFlagEnabled(LineFlags::Wrapped); }
-    void setWrapped(bool enable) { setFlag(LineFlags::Wrapped, enable); }
+    [[nodiscard]] bool wrapped() const noexcept { return isFlagEnabled(line_flags::Wrapped); }
+    void setWrapped(bool enable) { setFlag(line_flags::Wrapped, enable); }
 
-    [[nodiscard]] bool wrappable() const noexcept { return isFlagEnabled(LineFlags::Wrappable); }
-    void setWrappable(bool enable) { setFlag(LineFlags::Wrappable, enable); }
+    [[nodiscard]] bool wrappable() const noexcept { return isFlagEnabled(line_flags::Wrappable); }
+    void setWrappable(bool enable) { setFlag(line_flags::Wrappable, enable); }
 
-    [[nodiscard]] LineFlags wrappableFlag() const noexcept
+    [[nodiscard]] line_flags wrappableFlag() const noexcept
     {
-        return wrappable() ? LineFlags::Wrappable : LineFlags::None;
+        return wrappable() ? line_flags::Wrappable : line_flags::None;
     }
-    [[nodiscard]] LineFlags wrappedFlag() const noexcept
+    [[nodiscard]] line_flags wrappedFlag() const noexcept
     {
-        return marked() ? LineFlags::Wrapped : LineFlags::None;
+        return marked() ? line_flags::Wrapped : line_flags::None;
     }
-    [[nodiscard]] LineFlags markedFlag() const noexcept
+    [[nodiscard]] line_flags markedFlag() const noexcept
     {
-        return marked() ? LineFlags::Marked : LineFlags::None;
-    }
-
-    [[nodiscard]] LineFlags inheritableFlags() const noexcept
-    {
-        auto constexpr Inheritables = unsigned(LineFlags::Wrappable) | unsigned(LineFlags::Marked);
-        return static_cast<LineFlags>(_flags & Inheritables);
+        return marked() ? line_flags::Marked : line_flags::None;
     }
 
-    void setFlag(LineFlags flag, bool enable) noexcept
+    [[nodiscard]] line_flags inheritableFlags() const noexcept
+    {
+        auto constexpr Inheritables = unsigned(line_flags::Wrappable) | unsigned(line_flags::Marked);
+        return static_cast<line_flags>(_flags & Inheritables);
+    }
+
+    void setFlag(line_flags flag, bool enable) noexcept
     {
         if (enable)
             _flags |= static_cast<unsigned>(flag);
@@ -285,12 +285,12 @@ class Line
             _flags &= ~static_cast<unsigned>(flag);
     }
 
-    [[nodiscard]] bool isFlagEnabled(LineFlags flag) const noexcept
+    [[nodiscard]] bool isFlagEnabled(line_flags flag) const noexcept
     {
         return (_flags & static_cast<unsigned>(flag)) != 0;
     }
 
-    [[nodiscard]] InflatedBuffer reflow(ColumnCount newColumnCount);
+    [[nodiscard]] inflated_buffer reflow(ColumnCount newColumnCount);
     [[nodiscard]] std::string toUtf8() const;
     [[nodiscard]] std::string toUtf8Trimmed() const;
     [[nodiscard]] std::string toUtf8Trimmed(bool stripLeadingSpaces, bool stripTrailingSpaces) const;
@@ -299,25 +299,25 @@ class Line
     //
     // If this line has been stored in an optimized state, then
     // the line will be first unpacked into a vector of grid cells.
-    [[nodiscard]] InflatedBuffer& inflatedBuffer();
-    [[nodiscard]] InflatedBuffer const& inflatedBuffer() const;
+    [[nodiscard]] inflated_buffer& inflatedBuffer();
+    [[nodiscard]] inflated_buffer const& inflatedBuffer() const;
 
-    [[nodiscard]] TrivialBuffer& trivialBuffer() noexcept { return std::get<TrivialBuffer>(_storage); }
-    [[nodiscard]] TrivialBuffer const& trivialBuffer() const noexcept
+    [[nodiscard]] trivial_buffer& trivialBuffer() noexcept { return std::get<trivial_buffer>(_storage); }
+    [[nodiscard]] trivial_buffer const& trivialBuffer() const noexcept
     {
-        return std::get<TrivialBuffer>(_storage);
+        return std::get<trivial_buffer>(_storage);
     }
 
     [[nodiscard]] bool isTrivialBuffer() const noexcept
     {
-        return std::holds_alternative<TrivialBuffer>(_storage);
+        return std::holds_alternative<trivial_buffer>(_storage);
     }
     [[nodiscard]] bool isInflatedBuffer() const noexcept
     {
-        return !std::holds_alternative<TrivialBuffer>(_storage);
+        return !std::holds_alternative<trivial_buffer>(_storage);
     }
 
-    void setBuffer(Storage buffer) noexcept { _storage = std::move(buffer); }
+    void setBuffer(storage buffer) noexcept { _storage = std::move(buffer); }
 
     // Tests if the given text can be matched in this line at the exact given start column.
     [[nodiscard]] bool matchTextAt(std::u32string_view text, column_offset startColumn) const noexcept
@@ -325,7 +325,7 @@ class Line
         if (isTrivialBuffer())
         {
             auto const u8Text = unicode::convert_to<char>(text);
-            TrivialBuffer const& buffer = trivialBuffer();
+            trivial_buffer const& buffer = trivialBuffer();
             if (!buffer.usedColumns)
                 return false;
             auto const column = std::min(startColumn, boxed_cast<column_offset>(buffer.usedColumns - 1));
@@ -339,7 +339,7 @@ class Line
         else
         {
             auto const u8Text = unicode::convert_to<char>(text);
-            InflatedBuffer const& cells = inflatedBuffer();
+            inflated_buffer const& cells = inflatedBuffer();
             if (text.size() > unbox<size_t>(size()) - unbox<size_t>(startColumn))
                 return false;
             auto const baseColumn = unbox<size_t>(startColumn);
@@ -364,7 +364,7 @@ class Line
         if (isTrivialBuffer())
         {
             auto const u8Text = unicode::convert_to<char>(text);
-            TrivialBuffer const& buffer = trivialBuffer();
+            trivial_buffer const& buffer = trivialBuffer();
             if (!buffer.usedColumns)
                 return std::nullopt;
             auto const column = std::min(startColumn, boxed_cast<column_offset>(buffer.usedColumns - 1));
@@ -376,7 +376,7 @@ class Line
         }
         else
         {
-            InflatedBuffer const& buffer = inflatedBuffer();
+            inflated_buffer const& buffer = inflatedBuffer();
             if (buffer.size() < text.size())
                 return std::nullopt; // not found: line is smaller than search term
 
@@ -409,7 +409,7 @@ class Line
         if (isTrivialBuffer())
         {
             auto const u8Text = unicode::convert_to<char>(text);
-            TrivialBuffer const& buffer = trivialBuffer();
+            trivial_buffer const& buffer = trivialBuffer();
             if (!buffer.usedColumns)
                 return std::nullopt;
             auto const column = std::min(startColumn, boxed_cast<column_offset>(buffer.usedColumns - 1));
@@ -422,7 +422,7 @@ class Line
         }
         else
         {
-            InflatedBuffer const& buffer = inflatedBuffer();
+            inflated_buffer const& buffer = inflatedBuffer();
             if (buffer.size() < text.size())
                 return std::nullopt; // not found: line is smaller than search term
 
@@ -447,55 +447,55 @@ class Line
     }
 
   private:
-    Storage _storage;
+    storage _storage;
     unsigned _flags = 0;
 };
 
-constexpr LineFlags operator|(LineFlags a, LineFlags b) noexcept
+constexpr line_flags operator|(line_flags a, line_flags b) noexcept
 {
-    return LineFlags(unsigned(a) | unsigned(b));
+    return line_flags(unsigned(a) | unsigned(b));
 }
 
-constexpr LineFlags operator~(LineFlags a) noexcept
+constexpr line_flags operator~(line_flags a) noexcept
 {
-    return LineFlags(~unsigned(a));
+    return line_flags(~unsigned(a));
 }
 
-constexpr LineFlags operator&(LineFlags a, LineFlags b) noexcept
+constexpr line_flags operator&(line_flags a, line_flags b) noexcept
 {
-    return LineFlags(unsigned(a) & unsigned(b));
-}
-
-template <typename Cell>
-inline typename Line<Cell>::InflatedBuffer& Line<Cell>::inflatedBuffer()
-{
-    if (std::holds_alternative<TrivialBuffer>(_storage))
-        _storage = inflate<Cell>(std::get<TrivialBuffer>(_storage));
-    return std::get<InflatedBuffer>(_storage);
+    return line_flags(unsigned(a) & unsigned(b));
 }
 
 template <typename Cell>
-inline typename Line<Cell>::InflatedBuffer const& Line<Cell>::inflatedBuffer() const
+inline typename line<Cell>::inflated_buffer& line<Cell>::inflatedBuffer()
 {
-    return const_cast<Line<Cell>*>(this)->inflatedBuffer();
+    if (std::holds_alternative<trivial_buffer>(_storage))
+        _storage = inflate<Cell>(std::get<trivial_buffer>(_storage));
+    return std::get<inflated_buffer>(_storage);
+}
+
+template <typename Cell>
+inline typename line<Cell>::inflated_buffer const& line<Cell>::inflatedBuffer() const
+{
+    return const_cast<line<Cell>*>(this)->inflatedBuffer();
 }
 
 } // namespace terminal
 
 template <>
-struct fmt::formatter<terminal::LineFlags>: formatter<std::string>
+struct fmt::formatter<terminal::line_flags>: fmt::formatter<std::string>
 {
-    auto format(const terminal::LineFlags flags, format_context& ctx) -> format_context::iterator
+    auto format(const terminal::line_flags flags, format_context& ctx) -> format_context::iterator
     {
-        static const std::array<std::pair<terminal::LineFlags, std::string_view>, 3> nameMap = {
-            std::pair { terminal::LineFlags::Wrappable, std::string_view("Wrappable") },
-            std::pair { terminal::LineFlags::Wrapped, std::string_view("Wrapped") },
-            std::pair { terminal::LineFlags::Marked, std::string_view("Marked") },
+        static const std::array<std::pair<terminal::line_flags, std::string_view>, 3> nameMap = {
+            std::pair { terminal::line_flags::Wrappable, std::string_view("Wrappable") },
+            std::pair { terminal::line_flags::Wrapped, std::string_view("Wrapped") },
+            std::pair { terminal::line_flags::Marked, std::string_view("Marked") },
         };
         std::string s;
         for (auto const& mapping: nameMap)
         {
-            if ((mapping.first & flags) != terminal::LineFlags::None)
+            if ((mapping.first & flags) != terminal::line_flags::None)
             {
                 if (!s.empty())
                     s += ",";

@@ -104,9 +104,9 @@ struct Cursor
     bool autoWrap = true; // false;
     bool originMode = false;
     bool wrapPending = false;
-    GraphicsAttributes graphicsRendition {};
-    CharsetMapping charsets {};
-    HyperlinkId hyperlink {};
+    graphics_attributes graphicsRendition {};
+    charset_mapping charsets {};
+    hyperlink_id hyperlink {};
     // TODO: selective erase attribute
     // TODO: SS2/SS3 states
     // TODO: CharacterSet for GL and GR
@@ -168,22 +168,22 @@ struct TerminalState
     /// contains the pixel size of a single cell, or area(cellPixelSize_) == 0 if unknown.
     image_size cellPixelSize;
 
-    ColorPalette defaultColorPalette;
-    ColorPalette colorPalette;
-    std::vector<ColorPalette> savedColorPalettes;
+    color_palette defaultColorPalette;
+    color_palette colorPalette;
+    std::vector<color_palette> savedColorPalettes;
     size_t lastSavedColorPalette = 0;
 
     bool focused = true;
 
-    VTType terminalId = VTType::VT525;
+    vt_type terminalId = vt_type::VT525;
 
     Modes modes;
     std::map<dec_mode, std::vector<bool>> savedModes; //!< saved DEC modes
 
     unsigned maxImageColorRegisters = 256;
     image_size effectiveImageCanvasSize;
-    std::shared_ptr<SixelColorPalette> imageColorPalette;
-    ImagePool imagePool;
+    std::shared_ptr<sixel_color_palette> imageColorPalette;
+    image_pool imagePool;
 
     std::vector<column_offset> tabs;
 
@@ -207,7 +207,7 @@ struct TerminalState
 
     // Hyperlink related
     //
-    HyperlinkStorage hyperlinks {};
+    hyperlink_storage hyperlinks {};
 
     std::string windowTitle {};
     std::stack<std::string> savedWindowTitles {};
@@ -216,7 +216,7 @@ struct TerminalState
     parser::Parser<Sequencer, false> parser;
     uint64_t instructionCounter = 0;
 
-    InputGenerator inputGenerator {};
+    input_generator inputGenerator {};
 
     ViCommands viCommands;
     ViInputHandler inputHandler;

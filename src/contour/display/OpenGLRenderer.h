@@ -127,7 +127,7 @@ class OpenGLRenderer final:
     crispy::ImageSize renderBufferSize();
 
     GLuint createAndUploadImage(QSize imageSize,
-                                terminal::ImageFormat format,
+                                terminal::image_format format,
                                 int rowAlignment,
                                 uint8_t const* pixels);
 

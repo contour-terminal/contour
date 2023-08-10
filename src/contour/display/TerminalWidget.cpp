@@ -877,7 +877,7 @@ bool TerminalWidget::event(QEvent* _event)
 // {{{ helpers
 void TerminalWidget::onScrollBarValueChanged(int _value)
 {
-    terminal().viewport().scrollTo(terminal::scroll_offset::cast_from(_value));
+    terminal().get_viewport().scrollTo(terminal::scroll_offset::cast_from(_value));
     scheduleRedraw();
 }
 
@@ -1299,7 +1299,7 @@ void TerminalWidget::bufferChanged(terminal::screen_type _type)
     // scheduleRedraw();
 }
 
-void TerminalWidget::discardImage(terminal::Image const& _image)
+void TerminalWidget::discardImage(terminal::image const& _image)
 {
     renderer_->discardImage(_image);
 }

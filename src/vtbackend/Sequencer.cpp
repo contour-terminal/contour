@@ -30,7 +30,8 @@ using namespace std::string_view_literals;
 namespace terminal
 {
 
-Sequencer::Sequencer(Terminal& terminal): _terminal { terminal }, _parameterBuilder { _sequence.parameters() }
+Sequencer::Sequencer(Terminal& terminal):
+    _terminal { terminal }, _parameterBuilder { _sequence.getParameters() }
 {
 }
 
@@ -94,33 +95,33 @@ void Sequencer::param(char ch) noexcept
 
 void Sequencer::dispatchESC(char finalChar)
 {
-    _sequence.setCategory(FunctionCategory::ESC);
+    _sequence.setCategory(function_category::ESC);
     _sequence.setFinalChar(finalChar);
     handleSequence();
 }
 
 void Sequencer::dispatchCSI(char finalChar)
 {
-    _sequence.setCategory(FunctionCategory::CSI);
+    _sequence.setCategory(function_category::CSI);
     _sequence.setFinalChar(finalChar);
     handleSequence();
 }
 
 void Sequencer::startOSC()
 {
-    _sequence.setCategory(FunctionCategory::OSC);
+    _sequence.setCategory(function_category::OSC);
 }
 
 void Sequencer::putOSC(char ch)
 {
-    if (_sequence.intermediateCharacters().size() + 1 < Sequence::MaxOscLength)
+    if (_sequence.intermediateCharacters().size() + 1 < sequence::MaxOscLength)
         _sequence.intermediateCharacters().push_back(ch);
 }
 
 void Sequencer::dispatchOSC()
 {
     auto const [code, skipCount] = parser::extractCodePrefix(_sequence.intermediateCharacters());
-    _parameterBuilder.set(static_cast<Sequence::Parameter>(code));
+    _parameterBuilder.set(static_cast<sequence::parameter>(code));
     _sequence.intermediateCharacters().erase(0, skipCount);
     handleSequence();
     clear();
@@ -129,7 +130,7 @@ void Sequencer::dispatchOSC()
 void Sequencer::hook(char finalChar)
 {
     _terminal.state().instructionCounter++;
-    _sequence.setCategory(FunctionCategory::DCS);
+    _sequence.setCategory(function_category::DCS);
     _sequence.setFinalChar(finalChar);
 
     handleSequence();
@@ -160,7 +161,7 @@ size_t Sequencer::maxBulkTextSequenceWidth() const noexcept
 
     assert(_terminal.currentScreen().margin().horizontal.to
            >= _terminal.currentScreen().cursor().position.column);
-    return unbox<size_t>(_terminal.currentScreen().margin().horizontal.to
+    return unbox<size_t>(_terminal.currentScreen().getMargin().hori.to
                          - _terminal.currentScreen().cursor().position.column);
 }
 

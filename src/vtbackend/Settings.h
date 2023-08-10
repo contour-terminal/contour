@@ -25,8 +25,8 @@ struct RefreshInterval
 /// Terminal settings, enabling hardware reset to be easier implemented.
 struct Settings
 {
-    VTType terminalId = VTType::VT525;
-    ColorPalette colorPalette; // NB: The default color palette can be taken from the factory settings.
+    vt_type terminalId = vt_type::VT525;
+    color_palette colorPalette; // NB: The default color palette can be taken from the factory settings.
 
     // total page size available to this terminal.
     // This page size may differ from the main displays (primary/alternate screen) page size If
@@ -57,8 +57,8 @@ struct Settings
     // This value must be integer-devisable by 16.
     size_t ptyReadBufferSize = 4096;
     std::u32string wordDelimiters;
-    Modifier mouseProtocolBypassModifier = Modifier::Shift;
-    Modifier mouseBlockSelectionModifier = Modifier::Control;
+    modifier mouseProtocolBypassModifier = modifier::Shift;
+    modifier mouseBlockSelectionModifier = modifier::Control;
     line_offset copyLastMarkRangeOffset = line_offset(0);
     bool visualizeSelectedWord = true;
     std::chrono::milliseconds highlightTimeout = std::chrono::milliseconds { 150 };

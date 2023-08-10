@@ -23,7 +23,7 @@
 namespace terminal
 {
 
-class Image;
+class image;
 
 struct FontDef
 {
@@ -58,9 +58,9 @@ class ScreenEvents
     virtual void setCursorStyle(cursor_display, cursor_shape) {}
     virtual void setCursorVisibility(bool /*_visible*/) {}
     virtual void setGenerateFocusEvents(bool /*_enabled*/) {}
-    virtual void setMouseProtocol(MouseProtocol, bool) {}
-    virtual void setMouseTransport(MouseTransport) {}
-    virtual void setMouseWheelMode(InputGenerator::MouseWheelMode) {}
+    virtual void setMouseProtocol(mouse_protocol, bool) {}
+    virtual void setMouseTransport(mouse_transport) {}
+    virtual void setMouseWheelMode(input_generator::mouse_wheel_mode) {}
     virtual void setWindowTitle(std::string_view /*_title*/) {}
     virtual void useApplicationCursorKeys(bool /*_enabled*/) {}
     virtual void hardReset() {}
@@ -70,7 +70,7 @@ class ScreenEvents
     virtual void onBufferScrolled(LineCount /*_n*/) noexcept {}
 
     // Invoked by screen buffer when an image is not being referenced by any grid cell anymore.
-    virtual void discardImage(Image const&) {}
+    virtual void discardImage(image const&) {}
 
     /// Invoked upon `DCS $ p <profile-name> ST` to change terminal's currently active profile name.
     virtual void setTerminalProfile(std::string const& /*_configProfileName*/) {}

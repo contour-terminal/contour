@@ -71,8 +71,8 @@ namespace // {{{
 std::string const chessBoard =
     R"=(P0;0;0q"1;1;100;100#0;2;0;0;0#1;2;100;100;100#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-#0!10N!10o!10N!10o!10N!10o!10N!10o!10N!10o$#1!10o!10N!10o!10N!10o!10N!10o!10N!10o!10N-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10{!10B!10{!10B!10{!10B!10{!10B!10{!10B$#1!10B!10{!10B!10{!10B!10{!10B!10{!10B!10{-#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10o!10N!10o!10N!10o!10N!10o!10N!10o!10N$#1!10N!10o!10N!10o!10N!10o!10N!10o!10N!10o-#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-#0!10B!10{!10B!10{!10B!10{!10B!10{!10B!10{$#1!10{!10B!10{!10B!10{!10B!10{!10B!10{!10B-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-#0!10N!10o!10N!10o!10N!10o!10N!10o!10N!10o$#1!10o!10N!10o!10N!10o!10N!10o!10N!10o!10N-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-!10{!10B!10{!10B!10{!10B!10{!10B!10{!10B$#1!10B!10{!10B!10{!10B!10{!10B!10{!10B!10{-#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~-!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~#1!10~#0!10~-#1!10N#0!10N#1!10N#0!10N#1!10N#0!10N#1!10N#0!10N#1!10N#0!10N-\)=";
 
-Image::Data const black10x10 = [] {
-    Image::Data ret(100 * 4, 0);
+image::data const black10x10 = [] {
+    image::data ret(100 * 4, 0);
     for (size_t i = 3; i < ret.size(); i += 4)
     {
         ret[i] = 255;
@@ -80,7 +80,7 @@ Image::Data const black10x10 = [] {
     return ret;
 }();
 
-Image::Data const white10x10(100 * 4, 255);
+image::data const white10x10(100 * 4, 255);
 
 struct TextRenderBuilder
 {
@@ -89,7 +89,7 @@ struct TextRenderBuilder
     void startLine(line_offset lineOffset);
     void renderCell(PrimaryScreenCell const& cell, line_offset lineOffset, column_offset columnOffset);
     void endLine();
-    void renderTrivialLine(TrivialLineBuffer const& lineBuffer, line_offset lineOffset);
+    void renderTrivialLine(trivial_line_buffer const& lineBuffer, line_offset lineOffset);
     void finish();
 };
 
@@ -99,7 +99,7 @@ void TextRenderBuilder::startLine(line_offset lineOffset)
         text.clear();
 }
 
-void TextRenderBuilder::renderCell(CompactCell const& cell, line_offset, column_offset)
+void TextRenderBuilder::renderCell(compact_cell const& cell, line_offset, column_offset)
 {
     text += cell.toUtf8();
 }
@@ -109,7 +109,7 @@ void TextRenderBuilder::endLine()
     text += '\n';
 }
 
-void TextRenderBuilder::renderTrivialLine(TrivialLineBuffer const& lineBuffer, line_offset lineOffset)
+void TextRenderBuilder::renderTrivialLine(trivial_line_buffer const& lineBuffer, line_offset lineOffset)
 {
     if (!*lineOffset)
         text.clear();
@@ -678,7 +678,7 @@ TEST_CASE("Screen.isLineVisible", "[screen]")
 {
     auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(2) }, LineCount(5) };
     auto& screen = mock.terminal.primaryScreen();
-    auto viewport = terminal::Viewport { mock.terminal };
+    auto viewport = terminal::viewport { mock.terminal };
 
     mock.writeToScreen("10203040");
     logScreenText(screen);
@@ -2331,8 +2331,8 @@ TEST_CASE("ScreenAlignmentPattern", "[screen]")
 
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(4), column_offset(4) });
 
-    REQUIRE(1 == *screen.margin().vertical.from);
-    REQUIRE(3 == *screen.margin().vertical.to);
+    REQUIRE(1 == *screen.getMargin().vert.from);
+    REQUIRE(3 == *screen.getMargin().vert.to);
 
     SECTION("test")
     {
@@ -2341,10 +2341,10 @@ TEST_CASE("ScreenAlignmentPattern", "[screen]")
 
         REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(0) });
 
-        REQUIRE(0 == *screen.margin().horizontal.from);
-        REQUIRE(4 == *screen.margin().horizontal.to);
-        REQUIRE(0 == *screen.margin().vertical.from);
-        REQUIRE(4 == *screen.margin().vertical.to);
+        REQUIRE(0 == *screen.getMargin().hori.from);
+        REQUIRE(4 == *screen.getMargin().hori.to);
+        REQUIRE(0 == *screen.getMargin().vert.from);
+        REQUIRE(4 == *screen.getMargin().vert.to);
     }
 }
 
@@ -3656,25 +3656,28 @@ TEST_CASE("LS1 and LS0", "[screen]")
         logScreenText(mock.terminal.primaryScreen(), fmt::format("writeTickAndRender: {}", e(text)));
     };
 
-    REQUIRE(mock.terminal.primaryScreen().cursor().charsets.isSelected(CharsetTable::G0, CharsetId::USASCII));
-    REQUIRE(mock.terminal.primaryScreen().cursor().charsets.isSelected(CharsetTable::G1, CharsetId::USASCII));
+    REQUIRE(
+        mock.terminal.primaryScreen().cursor().charsets.isSelected(charset_table::G0, charset_id::USASCII));
+    REQUIRE(
+        mock.terminal.primaryScreen().cursor().charsets.isSelected(charset_table::G1, charset_id::USASCII));
     writeTickAndRender("ab");
     REQUIRE(trimmedTextScreenshot(mock) == "ab");
 
     // Set G1 to Special
     mock.writeToScreen("\033)0");
-    REQUIRE(mock.terminal.primaryScreen().cursor().charsets.isSelected(CharsetTable::G1, CharsetId::Special));
+    REQUIRE(
+        mock.terminal.primaryScreen().cursor().charsets.isSelected(charset_table::G1, charset_id::Special));
 
     // LS1: load G1 into GL
     mock.writeToScreen("\x0E");
-    REQUIRE(mock.terminal.primaryScreen().cursor().charsets.isSelected(CharsetId::Special));
+    REQUIRE(mock.terminal.primaryScreen().cursor().charsets.isSelected(charset_id::Special));
 
     writeTickAndRender("ab");
     REQUIRE(trimmedTextScreenshot(mock) == "ab▒␉");
 
     // LS0: load G0 into GL
     mock.writeToScreen("\x0F");
-    REQUIRE(mock.terminal.primaryScreen().cursor().charsets.isSelected(CharsetId::USASCII));
+    REQUIRE(mock.terminal.primaryScreen().cursor().charsets.isSelected(charset_id::USASCII));
 
     writeTickAndRender("ab");
     REQUIRE(trimmedTextScreenshot(mock) == "ab▒␉ab");

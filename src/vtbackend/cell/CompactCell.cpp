@@ -16,7 +16,7 @@
 namespace terminal
 {
 
-std::u32string CompactCell::codepoints() const
+std::u32string compact_cell::codepoints() const
 {
     std::u32string s;
     if (_codepoint)
@@ -33,7 +33,7 @@ std::u32string CompactCell::codepoints() const
     return s;
 }
 
-std::string CompactCell::toUtf8() const
+std::string compact_cell::toUtf8() const
 {
     if (!_codepoint)
         return {};

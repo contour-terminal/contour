@@ -66,7 +66,7 @@ class Renderer
      */
     Renderer(PageSize pageSize,
              FontDescriptions fontDescriptions,
-             ColorPalette const& colorPalette,
+             color_palette const& colorPalette,
              crispy::StrongHashtableSize atlasHashtableSlotCount,
              crispy::LRUCapacity atlasTileCount,
              bool atlasDirectMapping,
@@ -116,7 +116,7 @@ class Renderer
      */
     void render(Terminal& terminal, bool pressureHint);
 
-    void discardImage(Image const& image);
+    void discardImage(image const& image);
 
     void clearCache();
 
@@ -157,10 +157,10 @@ class Renderer
 
     GridMetrics _gridMetrics;
 
-    ColorPalette const& _colorPalette;
+    color_palette const& _colorPalette;
 
-    std::mutex _imageDiscardLock;            //!< Lock guard for accessing _discardImageQueue.
-    std::vector<ImageId> _discardImageQueue; //!< List of images to be discarded.
+    std::mutex _imageDiscardLock;             //!< Lock guard for accessing _discardImageQueue.
+    std::vector<image_id> _discardImageQueue; //!< List of images to be discarded.
 
     BackgroundRenderer _backgroundRenderer;
     ImageRenderer _imageRenderer;

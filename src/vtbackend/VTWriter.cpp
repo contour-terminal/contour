@@ -200,11 +200,11 @@ void VTWriter::setBackgroundColor(color color)
 }
 
 template <typename Cell>
-void VTWriter::write(Line<Cell> const& line)
+void VTWriter::write(line<Cell> const& line)
 {
     if (line.isTrivialBuffer())
     {
-        TrivialLineBuffer const& lineBuffer = line.trivialBuffer();
+        trivial_line_buffer const& lineBuffer = line.trivialBuffer();
         setForegroundColor(lineBuffer.textAttributes.foregroundColor);
         setBackgroundColor(lineBuffer.textAttributes.backgroundColor);
         // TODO: hyperlinks, underlineColor and other flags (curly underline etc.)
@@ -237,7 +237,7 @@ void VTWriter::write(Line<Cell> const& line)
 } // namespace terminal
 
 #include <vtbackend/cell/CompactCell.h>
-template void terminal::VTWriter::write<terminal::CompactCell>(Line<CompactCell> const&);
+template void terminal::VTWriter::write<terminal::compact_cell>(line<compact_cell> const&);
 
 #include <vtbackend/cell/SimpleCell.h>
-template void terminal::VTWriter::write<terminal::SimpleCell>(Line<SimpleCell> const&);
+template void terminal::VTWriter::write<terminal::simple_cell>(line<simple_cell> const&);

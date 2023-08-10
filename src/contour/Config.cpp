@@ -113,9 +113,9 @@ namespace
         }
     };
 
-    std::shared_ptr<terminal::BackgroundImage const> loadImage(string const& fileName,
-                                                               float opacity,
-                                                               bool blur)
+    std::shared_ptr<terminal::background_image const> loadImage(string const& fileName,
+                                                                float opacity,
+                                                                bool blur)
     {
         auto const resolvedFileName = homeResolvedPath(fileName, Process::homeDirectory());
 
@@ -125,13 +125,13 @@ namespace
             return nullptr;
         }
 
-        auto backgroundImage = terminal::BackgroundImage {};
-        backgroundImage.location = resolvedFileName;
+        auto backgroundImage = terminal::background_image {};
+        backgroundImage.loc = resolvedFileName;
         backgroundImage.hash = crispy::StrongHash::compute(resolvedFileName.string());
         backgroundImage.opacity = opacity;
         backgroundImage.blur = blur;
 
-        return make_shared<terminal::BackgroundImage const>(std::move(backgroundImage));
+        return make_shared<terminal::background_image const>(std::move(backgroundImage));
     }
 
     terminal::cell_rgb_color parseCellColor(std::string const& _text)
@@ -538,50 +538,50 @@ namespace
         return paths;
     }
 
-    optional<terminal::Key> parseKey(string const& _name)
+    optional<terminal::key> parseKey(string const& _name)
     {
-        using terminal::Key;
-        auto static constexpr mappings = array { pair { "F1"sv, Key::F1 },
-                                                 pair { "F2"sv, Key::F2 },
-                                                 pair { "F3"sv, Key::F3 },
-                                                 pair { "F4"sv, Key::F4 },
-                                                 pair { "F5"sv, Key::F5 },
-                                                 pair { "F6"sv, Key::F6 },
-                                                 pair { "F7"sv, Key::F7 },
-                                                 pair { "F8"sv, Key::F8 },
-                                                 pair { "F9"sv, Key::F9 },
-                                                 pair { "F10"sv, Key::F10 },
-                                                 pair { "F11"sv, Key::F11 },
-                                                 pair { "F12"sv, Key::F12 },
-                                                 pair { "DownArrow"sv, Key::DownArrow },
-                                                 pair { "LeftArrow"sv, Key::LeftArrow },
-                                                 pair { "RightArrow"sv, Key::RightArrow },
-                                                 pair { "UpArrow"sv, Key::UpArrow },
-                                                 pair { "Insert"sv, Key::Insert },
-                                                 pair { "Delete"sv, Key::Delete },
-                                                 pair { "Home"sv, Key::Home },
-                                                 pair { "End"sv, Key::End },
-                                                 pair { "PageUp"sv, Key::PageUp },
-                                                 pair { "PageDown"sv, Key::PageDown },
-                                                 pair { "Numpad_NumLock"sv, Key::Numpad_NumLock },
-                                                 pair { "Numpad_Divide"sv, Key::Numpad_Divide },
-                                                 pair { "Numpad_Multiply"sv, Key::Numpad_Multiply },
-                                                 pair { "Numpad_Subtract"sv, Key::Numpad_Subtract },
-                                                 pair { "Numpad_CapsLock"sv, Key::Numpad_CapsLock },
-                                                 pair { "Numpad_Add"sv, Key::Numpad_Add },
-                                                 pair { "Numpad_Decimal"sv, Key::Numpad_Decimal },
-                                                 pair { "Numpad_Enter"sv, Key::Numpad_Enter },
-                                                 pair { "Numpad_Equal"sv, Key::Numpad_Equal },
-                                                 pair { "Numpad_0"sv, Key::Numpad_0 },
-                                                 pair { "Numpad_1"sv, Key::Numpad_1 },
-                                                 pair { "Numpad_2"sv, Key::Numpad_2 },
-                                                 pair { "Numpad_3"sv, Key::Numpad_3 },
-                                                 pair { "Numpad_4"sv, Key::Numpad_4 },
-                                                 pair { "Numpad_5"sv, Key::Numpad_5 },
-                                                 pair { "Numpad_6"sv, Key::Numpad_6 },
-                                                 pair { "Numpad_7"sv, Key::Numpad_7 },
-                                                 pair { "Numpad_8"sv, Key::Numpad_8 },
-                                                 pair { "Numpad_9"sv, Key::Numpad_9 } };
+        using terminal::key;
+        auto static constexpr mappings = array { pair { "F1"sv, key::F1 },
+                                                 pair { "F2"sv, key::F2 },
+                                                 pair { "F3"sv, key::F3 },
+                                                 pair { "F4"sv, key::F4 },
+                                                 pair { "F5"sv, key::F5 },
+                                                 pair { "F6"sv, key::F6 },
+                                                 pair { "F7"sv, key::F7 },
+                                                 pair { "F8"sv, key::F8 },
+                                                 pair { "F9"sv, key::F9 },
+                                                 pair { "F10"sv, key::F10 },
+                                                 pair { "F11"sv, key::F11 },
+                                                 pair { "F12"sv, key::F12 },
+                                                 pair { "DownArrow"sv, key::DownArrow },
+                                                 pair { "LeftArrow"sv, key::LeftArrow },
+                                                 pair { "RightArrow"sv, key::RightArrow },
+                                                 pair { "UpArrow"sv, key::UpArrow },
+                                                 pair { "Insert"sv, key::Insert },
+                                                 pair { "Delete"sv, key::Delete },
+                                                 pair { "Home"sv, key::Home },
+                                                 pair { "End"sv, key::End },
+                                                 pair { "PageUp"sv, key::PageUp },
+                                                 pair { "PageDown"sv, key::PageDown },
+                                                 pair { "Numpad_NumLock"sv, key::Numpad_NumLock },
+                                                 pair { "Numpad_Divide"sv, key::Numpad_Divide },
+                                                 pair { "Numpad_Multiply"sv, key::Numpad_Multiply },
+                                                 pair { "Numpad_Subtract"sv, key::Numpad_Subtract },
+                                                 pair { "Numpad_CapsLock"sv, key::Numpad_CapsLock },
+                                                 pair { "Numpad_Add"sv, key::Numpad_Add },
+                                                 pair { "Numpad_Decimal"sv, key::Numpad_Decimal },
+                                                 pair { "Numpad_Enter"sv, key::Numpad_Enter },
+                                                 pair { "Numpad_Equal"sv, key::Numpad_Equal },
+                                                 pair { "Numpad_0"sv, key::Numpad_0 },
+                                                 pair { "Numpad_1"sv, key::Numpad_1 },
+                                                 pair { "Numpad_2"sv, key::Numpad_2 },
+                                                 pair { "Numpad_3"sv, key::Numpad_3 },
+                                                 pair { "Numpad_4"sv, key::Numpad_4 },
+                                                 pair { "Numpad_5"sv, key::Numpad_5 },
+                                                 pair { "Numpad_6"sv, key::Numpad_6 },
+                                                 pair { "Numpad_7"sv, key::Numpad_7 },
+                                                 pair { "Numpad_8"sv, key::Numpad_8 },
+                                                 pair { "Numpad_9"sv, key::Numpad_9 } };
 
         auto const name = toLower(_name);
 
@@ -592,7 +592,7 @@ namespace
         return nullopt;
     }
 
-    optional<variant<terminal::Key, char32_t>> parseKeyOrChar(string const& _name)
+    optional<variant<terminal::key, char32_t>> parseKeyOrChar(string const& _name)
     {
         using namespace terminal::ControlCode;
 
@@ -660,18 +660,18 @@ namespace
         cursorConfig.cursorBlinkInterval = chrono::milliseconds(uintValue);
     }
 
-    optional<terminal::Modifier::Key> parseModifierKey(string const& _key)
+    optional<terminal::modifier::key> parseModifierKey(string const& _key)
     {
-        using terminal::Modifier;
+        using terminal::modifier;
         auto const key = toUpper(_key);
         if (key == "ALT")
-            return Modifier::Key::Alt;
+            return modifier::key::Alt;
         if (key == "CONTROL")
-            return Modifier::Key::Control;
+            return modifier::key::Control;
         if (key == "SHIFT")
-            return Modifier::Key::Shift;
+            return modifier::key::Shift;
         if (key == "META")
-            return Modifier::Key::Meta;
+            return modifier::key::Meta;
         return nullopt;
     }
 
@@ -732,11 +732,11 @@ namespace
         return matchModes;
     }
 
-    optional<terminal::Modifier> parseModifier(UsedKeys& _usedKeys,
+    optional<terminal::modifier> parseModifier(UsedKeys& _usedKeys,
                                                string const& _prefix,
                                                YAML::Node const& _node)
     {
-        using terminal::Modifier;
+        using terminal::modifier;
         if (!_node)
             return nullopt;
         _usedKeys.emplace(_prefix);
@@ -745,7 +745,7 @@ namespace
         if (!_node.IsSequence())
             return nullopt;
 
-        terminal::Modifier mods;
+        terminal::modifier mods;
         for (const auto& i: _node)
         {
             if (!i.IsScalar())
@@ -763,7 +763,7 @@ namespace
     template <typename Input>
     void appendOrCreateBinding(vector<terminal::InputBinding<Input, ActionList>>& _bindings,
                                terminal::MatchModes _modes,
-                               terminal::Modifier _modifier,
+                               terminal::modifier _modifier,
                                Input _input,
                                Action _action)
     {
@@ -782,7 +782,7 @@ namespace
 
     bool tryAddKey(InputMappings& _inputMappings,
                    terminal::MatchModes _modes,
-                   terminal::Modifier _modifier,
+                   terminal::modifier _modifier,
                    YAML::Node const& _node,
                    Action _action)
     {
@@ -796,12 +796,12 @@ namespace
         if (!input.has_value())
             return false;
 
-        if (holds_alternative<terminal::Key>(*input))
+        if (holds_alternative<terminal::key>(*input))
         {
             appendOrCreateBinding(_inputMappings.keyMappings,
                                   _modes,
                                   _modifier,
-                                  get<terminal::Key>(*input),
+                                  get<terminal::key>(*input),
                                   std::move(_action));
         }
         else if (holds_alternative<char32_t>(*input))
@@ -815,7 +815,7 @@ namespace
         return true;
     }
 
-    optional<terminal::MouseButton> parseMouseButton(YAML::Node const& _node)
+    optional<terminal::mouse_button> parseMouseButton(YAML::Node const& _node)
     {
         if (!_node)
             return nullopt;
@@ -824,11 +824,11 @@ namespace
             return nullopt;
 
         auto constexpr static mappings = array {
-            pair { "WHEELUP"sv, terminal::MouseButton::WheelUp },
-            pair { "WHEELDOWN"sv, terminal::MouseButton::WheelDown },
-            pair { "LEFT"sv, terminal::MouseButton::Left },
-            pair { "MIDDLE"sv, terminal::MouseButton::Middle },
-            pair { "RIGHT"sv, terminal::MouseButton::Right },
+            pair { "WHEELUP"sv, terminal::mouse_button::WheelUp },
+            pair { "WHEELDOWN"sv, terminal::mouse_button::WheelDown },
+            pair { "LEFT"sv, terminal::mouse_button::Left },
+            pair { "MIDDLE"sv, terminal::mouse_button::Middle },
+            pair { "RIGHT"sv, terminal::mouse_button::Right },
         };
         auto const name = toUpper(_node.as<string>());
         for (auto const& mapping: mappings)
@@ -839,7 +839,7 @@ namespace
 
     bool tryAddMouse(vector<MouseInputMapping>& _bindings,
                      terminal::MatchModes _modes,
-                     terminal::Modifier _modifier,
+                     terminal::modifier _modifier,
                      YAML::Node const& _node,
                      Action _action)
     {
@@ -989,7 +989,7 @@ namespace
         }
     }
 
-    void updateColorScheme(terminal::ColorPalette& colors,
+    void updateColorScheme(terminal::color_palette& colors,
                            UsedKeys& _usedKeys,
                            string const& _basePath,
                            YAML::Node const& _node)
@@ -1162,12 +1162,12 @@ namespace
             colors.backgroundImage = loadImage(fileName, opacityValue, imageBlur);
     }
 
-    terminal::ColorPalette loadColorScheme(UsedKeys& _usedKeys,
-                                           string const& _basePath,
-                                           YAML::Node const& _node)
+    terminal::color_palette loadColorScheme(UsedKeys& _usedKeys,
+                                            string const& _basePath,
+                                            YAML::Node const& _node)
     {
 
-        terminal::ColorPalette colors;
+        terminal::color_palette colors;
         updateColorScheme(colors, _usedKeys, _basePath, _node);
         return colors;
     }
@@ -1290,10 +1290,10 @@ namespace
         return false;
     }
 
-    optional<terminal::VTType> stringToVTType(std::string const& _value)
+    optional<terminal::vt_type> stringToVTType(std::string const& _value)
     {
-        using Type = terminal::VTType;
-        auto constexpr static mappings = array<tuple<string_view, terminal::VTType>, 10> {
+        using Type = terminal::vt_type;
+        auto constexpr static mappings = array<tuple<string_view, terminal::vt_type>, 10> {
             tuple { "VT100"sv, Type::VT100 }, tuple { "VT220"sv, Type::VT220 },
             tuple { "VT240"sv, Type::VT240 }, tuple { "VT330"sv, Type::VT330 },
             tuple { "VT340"sv, Type::VT340 }, tuple { "VT320"sv, Type::VT320 },
@@ -1311,7 +1311,7 @@ namespace
                                YAML::Node const& _profile,
                                std::string const& _parentPath,
                                std::string const& _profileName,
-                               unordered_map<string, terminal::ColorPalette> const& _colorschemes,
+                               unordered_map<string, terminal::color_palette> const& _colorschemes,
                                logstore::MessageBuilder _logger)
     {
 
@@ -1782,7 +1782,7 @@ namespace
                                         YAML::Node const& _profile,
                                         std::string const& _parentPath,
                                         std::string const& _profileName,
-                                        unordered_map<string, terminal::ColorPalette> const& _colorschemes)
+                                        unordered_map<string, terminal::color_palette> const& _colorschemes)
     {
         auto profile = TerminalProfile {}; // default profile
         updateTerminalProfile(

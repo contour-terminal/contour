@@ -26,20 +26,20 @@
 #include <libunicode/convert.h>
 
 using namespace std;
-using terminal::InputGenerator;
-using terminal::Modifier;
-using Buffer = terminal::InputGenerator::Sequence;
+using terminal::input_generator;
+using terminal::modifier;
+using buffer = terminal::input_generator::sequence;
 using crispy::escape;
 
-TEST_CASE("InputGenerator.Modifier.encodings")
+TEST_CASE("input_generator.Modifier.encodings")
 {
     // Ensures we can construct the correct values that are needed
     // as parameters for input events in the VT protocol.
 
-    auto constexpr alt = Modifier(Modifier::Alt);
-    auto constexpr shift = Modifier(Modifier::Shift);
-    auto constexpr control = Modifier(Modifier::Control);
-    auto constexpr meta = Modifier(Modifier::Meta);
+    auto constexpr alt = modifier(modifier::Alt);
+    auto constexpr shift = modifier(modifier::Shift);
+    auto constexpr control = modifier(modifier::Control);
+    auto constexpr meta = modifier(modifier::Meta);
 
     CHECK((1 + shift.value()) == 2);
     CHECK((1 + alt.value()) == 3);
@@ -58,10 +58,10 @@ TEST_CASE("InputGenerator.Modifier.encodings")
     CHECK((1 + (meta | control | alt | shift).value()) == 16);
 }
 
-TEST_CASE("InputGenerator.consume")
+TEST_CASE("input_generator.consume")
 {
     auto received = string {};
-    auto input = InputGenerator {};
+    auto input = input_generator {};
     input.generateRaw("ABCDEF"sv);
     REQUIRE(input.peek() == "ABCDEF"sv);
     input.consume(2);
@@ -75,76 +75,76 @@ TEST_CASE("InputGenerator.consume")
     REQUIRE(input.peek() == ""sv);
 }
 
-TEST_CASE("InputGenerator.Ctrl+Space", "[terminal,input]")
+TEST_CASE("input_generator.Ctrl+Space", "[terminal,input]")
 {
-    auto input = InputGenerator {};
-    input.generate(L' ', Modifier::Control);
+    auto input = input_generator {};
+    input.generate(L' ', modifier::Control);
     CHECK(escape(input.peek()) == "\\x00");
 }
 
-TEST_CASE("InputGenerator.Ctrl+A", "[terminal,input]")
+TEST_CASE("input_generator.Ctrl+A", "[terminal,input]")
 {
-    auto input = InputGenerator {};
-    input.generate('A', Modifier::Control);
+    auto input = input_generator {};
+    input.generate('A', modifier::Control);
     auto const c0 = string(1, static_cast<char>(0x01));
     REQUIRE(escape(input.peek()) == escape(c0));
 }
 
-TEST_CASE("InputGenerator.Ctrl+D", "[terminal,input]")
+TEST_CASE("input_generator.Ctrl+D", "[terminal,input]")
 {
-    auto input = InputGenerator {};
-    input.generate('D', Modifier::Control);
+    auto input = input_generator {};
+    input.generate('D', modifier::Control);
     auto const c0 = string(1, static_cast<char>(0x04));
     REQUIRE(escape(input.peek()) == escape(c0));
 }
 
-TEST_CASE("InputGenerator.Ctrl+[", "[terminal,input]")
+TEST_CASE("input_generator.Ctrl+[", "[terminal,input]")
 {
-    auto input = InputGenerator {};
-    input.generate('[', Modifier::Control);
+    auto input = input_generator {};
+    input.generate('[', modifier::Control);
     auto const c0 = string(1, static_cast<char>(0x1b)); // 27
     REQUIRE(escape(input.peek()) == escape(c0));
 }
 
-TEST_CASE("InputGenerator.Ctrl+\\", "[terminal,input]")
+TEST_CASE("input_generator.Ctrl+\\", "[terminal,input]")
 {
-    auto input = InputGenerator {};
-    input.generate('\\', Modifier::Control);
+    auto input = input_generator {};
+    input.generate('\\', modifier::Control);
     auto const c0 = string(1, static_cast<char>(0x1c)); // 28
     REQUIRE(escape(input.peek()) == escape(c0));
 }
 
-TEST_CASE("InputGenerator.Ctrl+]", "[terminal,input]")
+TEST_CASE("input_generator.Ctrl+]", "[terminal,input]")
 {
-    auto input = InputGenerator {};
-    input.generate(']', Modifier::Control);
+    auto input = input_generator {};
+    input.generate(']', modifier::Control);
     auto const c0 = string(1, static_cast<char>(0x1d)); // 29
     REQUIRE(escape(input.peek()) == escape(c0));
 }
 
-TEST_CASE("InputGenerator.Ctrl+^", "[terminal,input]")
+TEST_CASE("input_generator.Ctrl+^", "[terminal,input]")
 {
-    auto input = InputGenerator {};
-    input.generate('^', Modifier::Control);
+    auto input = input_generator {};
+    input.generate('^', modifier::Control);
     auto const c0 = string(1, static_cast<char>(0x1e)); // 30
     REQUIRE(escape(input.peek()) == escape(c0));
 }
 
-TEST_CASE("InputGenerator.Ctrl+_", "[terminal,input]")
+TEST_CASE("input_generator.Ctrl+_", "[terminal,input]")
 {
-    auto input = InputGenerator {};
-    input.generate('_', Modifier::Control);
+    auto input = input_generator {};
+    input.generate('_', modifier::Control);
     auto const c0 = string(1, static_cast<char>(0x1f)); // 31
     REQUIRE(escape(input.peek()) == escape(c0));
 }
 
-TEST_CASE("InputGenerator.all(Ctrl + A..Z)", "[terminal,input]")
+TEST_CASE("input_generator.all(Ctrl + A..Z)", "[terminal,input]")
 {
     for (char ch = 'A'; ch <= 'Z'; ++ch)
     {
         INFO(fmt::format("Testing Ctrl+{}", ch));
-        auto input = InputGenerator {};
-        input.generate(static_cast<char32_t>(ch), Modifier::Control);
+        auto input = input_generator {};
+        input.generate(static_cast<char32_t>(ch), modifier::Control);
         auto const c0 = string(1, static_cast<char>(ch - 'A' + 1));
         REQUIRE(escape(input.peek()) == escape(c0));
     }

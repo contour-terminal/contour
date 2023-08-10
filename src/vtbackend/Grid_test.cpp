@@ -95,10 +95,11 @@ Grid<Cell> setupGrid(PageSize pageSize,
     return grid;
 }
 
-constexpr Margin fullPageMargin(PageSize pageSize)
+constexpr terminal::margin fullPageMargin(PageSize pageSize)
 {
-    return Margin { Margin::Vertical { line_offset(0), pageSize.lines.as<line_offset>() - 1 },
-                    Margin::Horizontal { column_offset(0), pageSize.columns.as<column_offset>() - 1 } };
+    return terminal::margin { margin::vertical { line_offset(0), pageSize.lines.as<line_offset>() - 1 },
+                              margin::horizontal { column_offset(0),
+                                                   pageSize.columns.as<column_offset>() - 1 } };
 }
 
 [[maybe_unused]] Grid<Cell> setupGrid5x2()
@@ -413,7 +414,7 @@ TEST_CASE("resize_shrink_lines_with_history", "[grid]")
 {
     auto grid = Grid<Cell>(PageSize { LineCount(2), ColumnCount(3) }, true, LineCount(5));
     auto const gridMargin = fullPageMargin(grid.pageSize());
-    grid.scrollUp(LineCount { 1 }, GraphicsAttributes {}, gridMargin);
+    grid.scrollUp(LineCount { 1 }, graphics_attributes {}, gridMargin);
     grid.setLineText(line_offset(-1), "ABC");       // history line
     grid.setLineText(line_offset(0), "DEF");        // main page: line 1
     grid.setLineText(line_offset(1), "GHI");        // main page: line 2
@@ -471,13 +472,13 @@ TEST_CASE("resize_shrink_columns_with_reflow_and_unwrappable", "[grid]")
     CHECK(grid.lineText(line_offset(0)) == "JK");
     CHECK(grid.lineText(line_offset(1)) == "L ");
 
-    CHECK(grid.lineAt(line_offset(-5)).flags() == LineFlags::Wrappable);
-    CHECK(grid.lineAt(line_offset(-4)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
-    CHECK(grid.lineAt(line_offset(-3)).flags() == LineFlags::Wrappable);
-    CHECK(grid.lineAt(line_offset(-2)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
-    CHECK(grid.lineAt(line_offset(-1)).flags() == LineFlags::None);
-    CHECK(grid.lineAt(line_offset(0)).flags() == LineFlags::Wrappable);
-    CHECK(grid.lineAt(line_offset(1)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
+    CHECK(grid.lineAt(line_offset(-5)).flags() == line_flags::Wrappable);
+    CHECK(grid.lineAt(line_offset(-4)).flags() == (line_flags::Wrappable | line_flags::Wrapped));
+    CHECK(grid.lineAt(line_offset(-3)).flags() == line_flags::Wrappable);
+    CHECK(grid.lineAt(line_offset(-2)).flags() == (line_flags::Wrappable | line_flags::Wrapped));
+    CHECK(grid.lineAt(line_offset(-1)).flags() == line_flags::None);
+    CHECK(grid.lineAt(line_offset(0)).flags() == line_flags::Wrappable);
+    CHECK(grid.lineAt(line_offset(1)).flags() == (line_flags::Wrappable | line_flags::Wrapped));
 }
 
 TEST_CASE("resize_shrink_columns_with_reflow_grow_lines_and_unwrappable", "[grid]")
@@ -510,13 +511,13 @@ TEST_CASE("resize_shrink_columns_with_reflow_grow_lines_and_unwrappable", "[grid
     CHECK(grid.lineText(line_offset(2)) == "JK");
     CHECK(grid.lineText(line_offset(3)) == "L ");
 
-    CHECK(grid.lineAt(line_offset(-3)).flags() == LineFlags::Wrappable);
-    CHECK(grid.lineAt(line_offset(-2)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
-    CHECK(grid.lineAt(line_offset(-1)).flags() == LineFlags::Wrappable);
-    CHECK(grid.lineAt(line_offset(0)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
-    CHECK(grid.lineAt(line_offset(1)).flags() == LineFlags::None);
-    CHECK(grid.lineAt(line_offset(2)).flags() == LineFlags::Wrappable);
-    CHECK(grid.lineAt(line_offset(3)).flags() == (LineFlags::Wrappable | LineFlags::Wrapped));
+    CHECK(grid.lineAt(line_offset(-3)).flags() == line_flags::Wrappable);
+    CHECK(grid.lineAt(line_offset(-2)).flags() == (line_flags::Wrappable | line_flags::Wrapped));
+    CHECK(grid.lineAt(line_offset(-1)).flags() == line_flags::Wrappable);
+    CHECK(grid.lineAt(line_offset(0)).flags() == (line_flags::Wrappable | line_flags::Wrapped));
+    CHECK(grid.lineAt(line_offset(1)).flags() == line_flags::None);
+    CHECK(grid.lineAt(line_offset(2)).flags() == line_flags::Wrappable);
+    CHECK(grid.lineAt(line_offset(3)).flags() == (line_flags::Wrappable | line_flags::Wrapped));
 }
 // }}}
 
@@ -896,9 +897,9 @@ TEST_CASE("Grid resize", "[grid]")
     auto bufferObject = pool.allocateBufferObject();
     bufferObject->writeAtEnd(text);
     auto const bufferFragment = bufferObject->ref(0, 4);
-    auto const sgr = GraphicsAttributes {};
-    auto const trivial = TrivialLineBuffer { width, sgr, sgr, HyperlinkId {}, width, bufferFragment };
-    auto line_trivial = Line<Cell>(LineFlags::None, trivial);
+    auto const sgr = graphics_attributes {};
+    auto const trivial = trivial_line_buffer { width, sgr, sgr, hyperlink_id {}, width, bufferFragment };
+    auto line_trivial = line<Cell>(line_flags::None, trivial);
     grid.lineAt(line_offset(0)) = line_trivial;
     REQUIRE(grid.lineAt(line_offset(0)).isTrivialBuffer());
     REQUIRE(grid.lineAt(line_offset(1)).isTrivialBuffer());

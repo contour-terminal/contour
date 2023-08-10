@@ -43,9 +43,9 @@ namespace terminal
 {
 
 // {{{ Margin
-struct Margin
+struct margin
 {
-    struct Horizontal
+    struct horizontal
     {
         column_offset from;
         column_offset
@@ -59,14 +59,14 @@ struct Margin
         {
             return from <= value && value <= to;
         }
-        [[nodiscard]] constexpr bool operator==(Horizontal rhs) const noexcept
+        [[nodiscard]] constexpr bool operator==(horizontal rhs) const noexcept
         {
             return from == rhs.from && to == rhs.to;
         }
-        [[nodiscard]] constexpr bool operator!=(Horizontal rhs) const noexcept { return !(*this == rhs); }
+        [[nodiscard]] constexpr bool operator!=(horizontal rhs) const noexcept { return !(*this == rhs); }
     };
 
-    struct Vertical
+    struct vertical
     {
         line_offset from;
         // TODO: call it begin and end and have end point to to+1 to avoid unnecessary +1's later
@@ -80,34 +80,34 @@ struct Margin
         {
             return from <= value && value <= to;
         }
-        [[nodiscard]] constexpr bool operator==(Vertical const& rhs) const noexcept
+        [[nodiscard]] constexpr bool operator==(vertical const& rhs) const noexcept
         {
             return from == rhs.from && to == rhs.to;
         }
-        [[nodiscard]] constexpr bool operator!=(Vertical const& rhs) const noexcept
+        [[nodiscard]] constexpr bool operator!=(vertical const& rhs) const noexcept
         {
             return !(*this == rhs);
         }
     };
 
-    Vertical vertical {};     // top-bottom
-    Horizontal horizontal {}; // left-right
+    vertical vert {};   // top-bottom
+    horizontal hori {}; // left-right
 };
 
-constexpr bool operator==(Margin const& a, PageSize b) noexcept
+constexpr bool operator==(margin const& a, PageSize b) noexcept
 {
-    return a.horizontal.from.value == 0 && a.horizontal.to.value + 1 == b.columns.value
-           && a.vertical.from.value == 0 && a.vertical.to.value + 1 == b.lines.value;
+    return a.hori.from.value == 0 && a.hori.to.value + 1 == b.columns.value && a.vert.from.value == 0
+           && a.vert.to.value + 1 == b.lines.value;
 }
 
-constexpr bool operator!=(Margin const& a, PageSize b) noexcept
+constexpr bool operator!=(margin const& a, PageSize b) noexcept
 {
     return !(a == b);
 }
 // }}}
 
 template <typename Cell>
-using Lines = crispy::ring<Line<Cell>>;
+using lines = crispy::ring<line<Cell>>;
 
 struct RenderPassHints
 {
@@ -119,25 +119,25 @@ struct RenderPassHints
  * an explicit linefeed, triggering an auto-wrap.
  */
 template <typename Cell>
-struct LogicalLine
+struct logical_line
 {
     line_offset top {};
     line_offset bottom {};
-    std::vector<std::reference_wrapper<Line<Cell>>> lines {};
+    std::vector<std::reference_wrapper<line<Cell>>> lines {};
 
-    [[nodiscard]] Line<Cell> joinWithRightTrimmed() const
+    [[nodiscard]] line<Cell> joinWithRightTrimmed() const
     {
         // TODO: determine final line's column count and pass it to ctor.
-        typename Line<Cell>::Buffer output;
+        typename line<Cell>::Buffer output;
         auto lineFlags = lines.front().get().flags();
-        for (Line<Cell> const& line: lines)
+        for (line<Cell> const& line: lines)
             for (Cell const& cell: line.cells())
                 output.emplace_back(cell);
 
         while (!output.empty() && output.back().empty())
             output.pop_back();
 
-        return Line<Cell>(output, lineFlags);
+        return line<Cell>(output, lineFlags);
     }
 
     [[nodiscard]] std::string text() const
@@ -263,7 +263,7 @@ struct LogicalLine
   private:
     // Finds the maximum number of charecters of searchText that can be matched from right end of line
     [[nodiscard]] size_t searchPartialMatch(std::u32string_view searchText,
-                                            const Line<Cell>& line) const noexcept
+                                            const line<Cell>& line) const noexcept
     {
         auto const lineLength = unbox<size_t>(line.size());
         while (!searchText.empty())
@@ -277,7 +277,7 @@ struct LogicalLine
 
     // Finds the maximum number of charecters of searchText that can be matched from left end of line
     [[nodiscard]] size_t searchPartialMatchReverse(std::u32string_view searchText,
-                                                   const Line<Cell>& line) const noexcept
+                                                   const line<Cell>& line) const noexcept
     {
         while (!searchText.empty())
         {
@@ -346,13 +346,13 @@ struct LogicalLine
 };
 
 template <typename Cell>
-bool operator==(LogicalLine<Cell> const& a, LogicalLine<Cell> const& b) noexcept
+bool operator==(logical_line<Cell> const& a, logical_line<Cell> const& b) noexcept
 {
     return a.top == b.top && a.bottom == b.bottom;
 }
 
 template <typename Cell>
-bool operator!=(LogicalLine<Cell> const& a, LogicalLine<Cell> const& b) noexcept
+bool operator!=(logical_line<Cell> const& a, logical_line<Cell> const& b) noexcept
 {
     return !(a == b);
 }
@@ -362,18 +362,18 @@ struct LogicalLines
 {
     line_offset topMostLine;
     line_offset bottomMostLine;
-    std::reference_wrapper<Lines<Cell>> lines;
+    std::reference_wrapper<lines<Cell>> lines;
 
     // NOLINTNEXTLINE(readability-identifier-naming)
     struct iterator // {{{
     {
-        std::reference_wrapper<Lines<Cell>> lines;
+        std::reference_wrapper<terminal::lines<Cell>> lines;
         line_offset top;
         line_offset next; // index to next logical line's beginning
         line_offset bottom;
-        LogicalLine<Cell> current;
+        logical_line<Cell> current;
 
-        iterator(std::reference_wrapper<Lines<Cell>> lines,
+        iterator(std::reference_wrapper<terminal::lines<Cell>> lines,
                  line_offset top,
                  line_offset next,
                  line_offset bottom):
@@ -384,8 +384,8 @@ struct LogicalLines
             ++*this;
         }
 
-        LogicalLine<Cell> const& operator*() const noexcept { return current; }
-        LogicalLine<Cell> const* operator->() const noexcept { return &current; }
+        logical_line<Cell> const& operator*() const noexcept { return current; }
+        logical_line<Cell> const* operator->() const noexcept { return &current; }
 
         iterator& operator++()
         {
@@ -463,18 +463,18 @@ struct ReverseLogicalLines
 {
     line_offset topMostLine;
     line_offset bottomMostLine;
-    std::reference_wrapper<Lines<Cell>> lines;
+    std::reference_wrapper<lines<Cell>> lines;
 
     // NOLINTNEXTLINE(readability-identifier-naming)
     struct iterator // {{{
     {
-        std::reference_wrapper<Lines<Cell>> lines;
+        std::reference_wrapper<terminal::lines<Cell>> lines;
         line_offset top;
         line_offset next; // index to next logical line's beginning
         line_offset bottom;
-        LogicalLine<Cell> current;
+        logical_line<Cell> current;
 
-        iterator(std::reference_wrapper<Lines<Cell>> lines,
+        iterator(std::reference_wrapper<terminal::lines<Cell>> lines,
                  line_offset top,
                  line_offset next,
                  line_offset bottom):
@@ -485,7 +485,7 @@ struct ReverseLogicalLines
             ++*this;
         }
 
-        LogicalLine<Cell> const& operator*() const noexcept { return current; }
+        logical_line<Cell> const& operator*() const noexcept { return current; }
 
         iterator& operator--()
         {
@@ -621,8 +621,8 @@ class Grid
     void setReflowOnResize(bool enabled) { _reflowOnResize = enabled; }
 
     [[nodiscard]] PageSize pageSize() const noexcept { return _pageSize; }
-    [[nodiscard]] Margin margin() const noexcept { return _margin; }
-    [[nodiscard]] Margin& margin() noexcept { return _margin; }
+    [[nodiscard]] margin getMargin() const noexcept { return _margin; }
+    [[nodiscard]] margin& getMargin() noexcept { return _margin; }
 
     /// Resizes the main page area of the grid and adapts the scrollback area's width accordingly.
     ///
@@ -636,8 +636,8 @@ class Grid
 
     // {{{ Line API
     /// @returns reference to Line at given relative offset @p line.
-    [[nodiscard]] Line<Cell>& lineAt(line_offset line) noexcept;
-    [[nodiscard]] Line<Cell> const& lineAt(line_offset line) const noexcept;
+    [[nodiscard]] line<Cell>& lineAt(line_offset line) noexcept;
+    [[nodiscard]] line<Cell> const& lineAt(line_offset line) const noexcept;
 
     [[nodiscard]] gsl::span<Cell const> lineBuffer(line_offset line) const noexcept
     {
@@ -647,7 +647,7 @@ class Grid
 
     [[nodiscard]] std::string lineText(line_offset line) const;
     [[nodiscard]] std::string lineTextTrimmed(line_offset line) const;
-    [[nodiscard]] std::string lineText(Line<Cell> const& line) const;
+    [[nodiscard]] std::string lineText(line<Cell> const& line) const;
 
     void setLineText(line_offset line, std::string_view text);
 
@@ -669,10 +669,10 @@ class Grid
     [[nodiscard]] Cell const& at(line_offset line, column_offset column) const noexcept;
 
     // page view API
-    [[nodiscard]] gsl::span<Line<Cell>> pageAtScrollOffset(scroll_offset scrollOffset);
-    [[nodiscard]] gsl::span<Line<Cell> const> pageAtScrollOffset(scroll_offset scrollOffset) const;
-    [[nodiscard]] gsl::span<Line<Cell>> mainPage();
-    [[nodiscard]] gsl::span<Line<Cell> const> mainPage() const;
+    [[nodiscard]] gsl::span<line<Cell>> pageAtScrollOffset(scroll_offset scrollOffset);
+    [[nodiscard]] gsl::span<line<Cell> const> pageAtScrollOffset(scroll_offset scrollOffset) const;
+    [[nodiscard]] gsl::span<line<Cell>> mainPage();
+    [[nodiscard]] gsl::span<line<Cell> const> mainPage() const;
 
     [[nodiscard]] LogicalLines<Cell> logicalLines()
     {
@@ -710,20 +710,20 @@ class Grid
     /// @param margin the margin coordinates to perform the scrolling action into.
     ///
     /// @return Number of lines the main page has been scrolled.
-    LineCount scrollUp(LineCount n, GraphicsAttributes defaultAttributes, Margin margin) noexcept;
+    LineCount scrollUp(LineCount n, graphics_attributes defaultAttributes, margin margin) noexcept;
 
     /// Scrolls up main page by @p n lines and re-initializes grid cells with @p defaultAttributes.
-    LineCount scrollUp(LineCount linesCountToScrollUp, GraphicsAttributes defaultAttributes = {}) noexcept;
+    LineCount scrollUp(LineCount linesCountToScrollUp, graphics_attributes defaultAttributes = {}) noexcept;
 
     /// Scrolls down by @p n lines within the given margin.
     ///
     /// @param n number of lines to scroll down within the given margin.
     /// @param defaultAttributes SGR attributes the newly created grid cells will be initialized with.
     /// @param margin the margin coordinates to perform the scrolling action into.
-    void scrollDown(LineCount n, GraphicsAttributes const& defaultAttributes, Margin const& margin);
+    void scrollDown(LineCount n, graphics_attributes const& defaultAttributes, margin const& margin);
 
     // Scrolls the data within the margins to the left filling the new space on the right with empty cells.
-    void scrollLeft(GraphicsAttributes defaultAttributes, Margin margin) noexcept;
+    void scrollLeft(graphics_attributes defaultAttributes, margin margin) noexcept;
     // }}}
 
     // {{{ Rendering API
@@ -743,7 +743,7 @@ class Grid
     [[nodiscard]] std::string renderAllText() const;
     // }}}
 
-    [[nodiscard]] constexpr LineFlags defaultLineFlags() const noexcept;
+    [[nodiscard]] constexpr line_flags defaultLineFlags() const noexcept;
 
     [[nodiscard]] constexpr LineCount linesUsed() const noexcept;
 
@@ -801,7 +801,7 @@ class Grid
 
   private:
     cell_location growLines(LineCount newHeight, cell_location cursor);
-    void appendNewLines(LineCount count, GraphicsAttributes attr);
+    void appendNewLines(LineCount count, graphics_attributes attr);
     void clampHistory();
 
     // {{{ buffer helpers
@@ -824,14 +824,14 @@ class Grid
     // private fields
     //
     PageSize _pageSize;
-    Margin _margin;
+    margin _margin;
     bool _reflowOnResize = false;
     max_history_line_count _historyLimit;
 
     // Number of lines is at least the sum of _maxHistoryLineCount + _pageSize.lines,
     // because shrinking the page height does not necessarily
     // have to resize the array (as optimization).
-    Lines<Cell> _lines;
+    lines<Cell> _lines;
 
     // Number of lines used in the Lines buffer.
     LineCount _linesUsed;
@@ -846,9 +846,9 @@ std::string dumpGrid(Grid<Cell> const& grid);
 // {{{ impl
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-constexpr LineFlags Grid<Cell>::defaultLineFlags() const noexcept
+constexpr line_flags Grid<Cell>::defaultLineFlags() const noexcept
 {
-    return _reflowOnResize ? LineFlags::Wrappable : LineFlags::None;
+    return _reflowOnResize ? line_flags::Wrappable : line_flags::None;
 }
 
 template <typename Cell>
@@ -880,7 +880,7 @@ template <typename RendererT>
     for (int i = -*scrollOffset, e = i + *_pageSize.lines; i != e; ++i, ++y)
     {
         auto x = column_offset(0);
-        Line<Cell> const& line = _lines[i];
+        line<Cell> const& line = _lines[i];
         // NB: trivial liner rendering only works trivially if we don't do cell-based operations
         // on the text. Therefore, we only move to the trivial fast path here if we don't want to
         // highlight search matches.
@@ -913,18 +913,18 @@ template <typename RendererT>
 
 // {{{ fmt formatter
 template <>
-struct fmt::formatter<terminal::Margin::Horizontal>: fmt::formatter<std::string>
+struct fmt::formatter<terminal::margin::horizontal>: fmt::formatter<std::string>
 {
-    auto format(const terminal::Margin::Horizontal range, format_context& ctx) -> format_context::iterator
+    auto format(const terminal::margin::horizontal range, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}..{}", range.from, range.to), ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::Margin::Vertical>: fmt::formatter<std::string>
+struct fmt::formatter<terminal::margin::vertical>: fmt::formatter<std::string>
 {
-    auto format(const terminal::Margin::Vertical range, format_context& ctx) -> format_context::iterator
+    auto format(const terminal::margin::vertical range, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(fmt::format("{}..{}", range.from, range.to), ctx);
     }

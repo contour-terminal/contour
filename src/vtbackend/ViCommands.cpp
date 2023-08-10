@@ -183,9 +183,9 @@ ViCommands::ViCommands(Terminal& theTerminal): _terminal { theTerminal }
 void ViCommands::scrollViewport(scroll_offset delta)
 {
     if (delta.value < 0)
-        _terminal.viewport().scrollDown(boxed_cast<LineCount>(-delta));
+        _terminal.get_viewport().scrollDown(boxed_cast<LineCount>(-delta));
     else
-        _terminal.viewport().scrollUp(boxed_cast<LineCount>(delta));
+        _terminal.get_viewport().scrollUp(boxed_cast<LineCount>(delta));
 }
 
 void ViCommands::searchStart()
@@ -270,7 +270,7 @@ void ViCommands::modeChanged(vi_mode mode)
             // Force re-render as viewport & cursor might have changed.
             _terminal.setMode(dec_mode::VisibleCursor, _lastCursorVisible);
             _terminal.setCursorShape(_lastCursorShape);
-            _terminal.viewport().forceScrollToBottom();
+            _terminal.get_viewport().forceScrollToBottom();
             _terminal.clearSearch();
             _terminal.popStatusDisplay();
             _terminal.screenUpdated();
@@ -327,7 +327,7 @@ void ViCommands::toggleLineMark()
 {
     auto const currentLineFlags = _terminal.currentScreen().lineFlagsAt(cursorPosition.line);
     _terminal.currentScreen().enableLineFlags(
-        cursorPosition.line, LineFlags::Marked, !unsigned(currentLineFlags & LineFlags::Marked));
+        cursorPosition.line, line_flags::Marked, !unsigned(currentLineFlags & line_flags::Marked));
 }
 
 void ViCommands::searchCurrentWord()
@@ -603,14 +603,14 @@ cell_location_range ViCommands::translateToCellRange(TextObjectScope scope,
             // Walk the line upwards until we find a marked line.
             while (
                 a.line > gridTop
-                && !(unsigned(_terminal.currentScreen().lineFlagsAt(a.line)) & unsigned(LineFlags::Marked)))
+                && !(unsigned(_terminal.currentScreen().lineFlagsAt(a.line)) & unsigned(line_flags::Marked)))
                 --a.line;
             if (scope == TextObjectScope::Inner && a != cursorPosition)
                 ++a.line;
             // Walk the line downwards until we find a marked line.
             while (
                 b.line < gridBottom
-                && !(unsigned(_terminal.currentScreen().lineFlagsAt(b.line)) & unsigned(LineFlags::Marked)))
+                && !(unsigned(_terminal.currentScreen().lineFlagsAt(b.line)) & unsigned(line_flags::Marked)))
                 ++b.line;
             if (scope == TextObjectScope::Inner && b != cursorPosition)
                 --b.line;
@@ -792,13 +792,13 @@ cell_location ViCommands::translateToCellLocation(ViMotion motion, unsigned coun
         case ViMotion::FileEnd: // G
             return snapToCell({ _terminal.pageSize().lines.as<line_offset>() - 1, column_offset(0) });
         case ViMotion::PageTop: // <S-H>
-            return snapToCell({ boxed_cast<line_offset>(-_terminal.viewport().scrollOffset())
-                                    + *_terminal.viewport().scrollOff(),
+            return snapToCell({ boxed_cast<line_offset>(-_terminal.get_viewport().scrollOffset())
+                                    + *_terminal.get_viewport().scrollOff(),
                                 column_offset(0) });
         case ViMotion::PageBottom: // <S-L>
-            return snapToCell({ boxed_cast<line_offset>(-_terminal.viewport().scrollOffset())
+            return snapToCell({ boxed_cast<line_offset>(-_terminal.get_viewport().scrollOffset())
                                     + boxed_cast<line_offset>(_terminal.pageSize().lines
-                                                              - *_terminal.viewport().scrollOff() - 1),
+                                                              - *_terminal.get_viewport().scrollOff() - 1),
                                 column_offset(0) });
         case ViMotion::LineBegin: // 0
             return { cursorPosition.line, column_offset(0) };
@@ -822,7 +822,7 @@ cell_location ViCommands::translateToCellLocation(ViMotion motion, unsigned coun
                      cursorPosition.column };
         case ViMotion::LinesCenter: // M
             return { line_offset::cast_from(_terminal.pageSize().lines / 2 - 1)
-                         - boxed_cast<line_offset>(_terminal.viewport().scrollOffset()),
+                         - boxed_cast<line_offset>(_terminal.get_viewport().scrollOffset()),
                      cursorPosition.column };
         case ViMotion::PageDown:
             return { min(cursorPosition.line + line_offset::cast_from(_terminal.pageSize().lines / 2),
@@ -865,10 +865,10 @@ cell_location ViCommands::translateToCellLocation(ViMotion motion, unsigned coun
             while (count > 0)
             {
                 if (result.line > gridTop
-                    && _terminal.currentScreen().isLineFlagEnabledAt(result.line, LineFlags::Marked))
+                    && _terminal.currentScreen().isLineFlagEnabledAt(result.line, line_flags::Marked))
                     --result.line;
                 while (result.line > gridTop
-                       && !_terminal.currentScreen().isLineFlagEnabledAt(result.line, LineFlags::Marked))
+                       && !_terminal.currentScreen().isLineFlagEnabledAt(result.line, line_flags::Marked))
                     --result.line;
                 --count;
             }
@@ -885,7 +885,7 @@ cell_location ViCommands::translateToCellLocation(ViMotion motion, unsigned coun
                 while (result.line < pageBottom)
                 {
                     if (unsigned(_terminal.currentScreen().lineFlagsAt(result.line))
-                        & unsigned(LineFlags::Marked))
+                        & unsigned(line_flags::Marked))
                         break;
                     ++result.line;
                 }
@@ -1122,7 +1122,7 @@ void ViCommands::moveCursorTo(cell_location position)
 {
     cursorPosition = position;
 
-    _terminal.viewport().makeVisibleWithinSafeArea(cursorPosition.line);
+    _terminal.get_viewport().makeVisibleWithinSafeArea(cursorPosition.line);
 
     switch (_terminal.inputHandler().mode())
     {

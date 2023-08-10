@@ -97,7 +97,7 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     }
     QString pathToBackground() const
     {
-        if (const auto& p = std::get_if<FileSystem::path>(&(profile().colors.backgroundImage->location)))
+        if (const auto& p = std::get_if<FileSystem::path>(&(profile().colors.backgroundImage->loc)))
         {
             return QString("file:") + QString(p->string().c_str());
         }
@@ -150,10 +150,10 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
 
     int historyLineCount() const noexcept { return unbox<int>(terminal_.currentScreen().historyLineCount()); }
 
-    int scrollOffset() const noexcept { return unbox<int>(terminal().viewport().scrollOffset()); }
+    int scrollOffset() const noexcept { return unbox<int>(terminal().get_viewport().scrollOffset()); }
     void setScrollOffset(int value)
     {
-        terminal().viewport().scrollTo(terminal::scroll_offset::cast_from(value));
+        terminal().get_viewport().scrollTo(terminal::scroll_offset::cast_from(value));
     }
 
     void onScrollOffsetChanged(terminal::scroll_offset value) override
@@ -229,25 +229,25 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     void requestWindowResize(terminal::width, terminal::height) override;
     void setWindowTitle(std::string_view _title) override;
     void setTerminalProfile(std::string const& _configProfileName) override;
-    void discardImage(terminal::Image const&) override;
+    void discardImage(terminal::image const&) override;
     void inputModeChanged(terminal::vi_mode mode) override;
     void updateHighlights() override;
-    void playSound(terminal::Sequence::Parameters const& params_) override;
+    void playSound(terminal::sequence::parameters const& params_) override;
     void cursorPositionChanged() override;
 
     // Input Events
     using Timestamp = std::chrono::steady_clock::time_point;
-    void sendKeyPressEvent(terminal::Key _key, terminal::Modifier _modifier, Timestamp _now);
-    void sendCharPressEvent(char32_t _value, terminal::Modifier _modifier, Timestamp _now);
+    void sendKeyPressEvent(terminal::key _key, terminal::modifier _modifier, Timestamp _now);
+    void sendCharPressEvent(char32_t _value, terminal::modifier _modifier, Timestamp _now);
 
-    void sendMousePressEvent(terminal::Modifier _modifier,
-                             terminal::MouseButton _button,
+    void sendMousePressEvent(terminal::modifier _modifier,
+                             terminal::mouse_button _button,
                              terminal::pixel_coordinate _pixelPosition);
-    void sendMouseMoveEvent(terminal::Modifier _modifier,
+    void sendMouseMoveEvent(terminal::modifier _modifier,
                             terminal::cell_location _pos,
                             terminal::pixel_coordinate _pixelPosition);
-    void sendMouseReleaseEvent(terminal::Modifier _modifier,
-                               terminal::MouseButton _button,
+    void sendMouseReleaseEvent(terminal::modifier _modifier,
+                               terminal::mouse_button _button,
                                terminal::pixel_coordinate _pixelPosition);
 
     void sendFocusInEvent();
@@ -355,7 +355,7 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     void activateProfile(std::string const& _newProfileName);
     bool reloadConfigWithProfile(std::string const& _profileName);
     bool resetConfig();
-    void followHyperlink(terminal::HyperlinkInfo const& _hyperlink);
+    void followHyperlink(terminal::hyperlink_info const& _hyperlink);
     void setFontSize(text::font_size _size);
     void setDefaultCursor();
     void configureTerminal();

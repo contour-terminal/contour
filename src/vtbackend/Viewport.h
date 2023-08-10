@@ -26,16 +26,16 @@ namespace terminal
 
 // #define CONTOUR_LOG_VIEWPORT 1
 
-class Viewport
+class viewport
 {
   public:
 #if defined(CONTOUR_LOG_VIEWPORT)
     static auto inline const ViewportLog = logstore::Category("vt.viewport", "Logs viewport details.");
 #endif
 
-    using ModifyEvent = std::function<void()>;
+    using modify_event = std::function<void()>;
 
-    explicit Viewport(Terminal& term, ModifyEvent onModify = {}):
+    explicit viewport(Terminal& term, modify_event onModify = {}):
         _terminal { term }, _modified { onModify ? std::move(onModify) : []() {
         } }
     {
@@ -111,7 +111,7 @@ class Viewport
     // private fields
     //
     Terminal& _terminal;
-    ModifyEvent _modified;
+    modify_event _modified;
     //!< scroll offset relative to scroll top (0) or nullopt if not scrolled into history
     scroll_offset _scrollOffset;
 

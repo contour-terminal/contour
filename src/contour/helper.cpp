@@ -156,43 +156,43 @@ namespace
 
 bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
 {
-    using terminal::Key;
-    using terminal::Modifier;
+    using terminal::key;
+    using terminal::modifier;
 
     auto const now = steady_clock::now();
 
     static auto constexpr keyMappings = array {
         // {{{
-        pair { Qt::Key_Insert, Key::Insert },
-        pair { Qt::Key_Delete, Key::Delete },
-        pair { Qt::Key_Right, Key::RightArrow },
-        pair { Qt::Key_Left, Key::LeftArrow },
-        pair { Qt::Key_Down, Key::DownArrow },
-        pair { Qt::Key_Up, Key::UpArrow },
-        pair { Qt::Key_PageDown, Key::PageDown },
-        pair { Qt::Key_PageUp, Key::PageUp },
-        pair { Qt::Key_Home, Key::Home },
-        pair { Qt::Key_End, Key::End },
-        pair { Qt::Key_F1, Key::F1 },
-        pair { Qt::Key_F2, Key::F2 },
-        pair { Qt::Key_F3, Key::F3 },
-        pair { Qt::Key_F4, Key::F4 },
-        pair { Qt::Key_F5, Key::F5 },
-        pair { Qt::Key_F6, Key::F6 },
-        pair { Qt::Key_F7, Key::F7 },
-        pair { Qt::Key_F8, Key::F8 },
-        pair { Qt::Key_F9, Key::F9 },
-        pair { Qt::Key_F10, Key::F10 },
-        pair { Qt::Key_F11, Key::F11 },
-        pair { Qt::Key_F12, Key::F12 },
-        pair { Qt::Key_F13, Key::F13 },
-        pair { Qt::Key_F14, Key::F14 },
-        pair { Qt::Key_F15, Key::F15 },
-        pair { Qt::Key_F16, Key::F16 },
-        pair { Qt::Key_F17, Key::F17 },
-        pair { Qt::Key_F18, Key::F18 },
-        pair { Qt::Key_F19, Key::F19 },
-        pair { Qt::Key_F20, Key::F20 },
+        pair { Qt::Key_Insert, key::Insert },
+        pair { Qt::Key_Delete, key::Delete },
+        pair { Qt::Key_Right, key::RightArrow },
+        pair { Qt::Key_Left, key::LeftArrow },
+        pair { Qt::Key_Down, key::DownArrow },
+        pair { Qt::Key_Up, key::UpArrow },
+        pair { Qt::Key_PageDown, key::PageDown },
+        pair { Qt::Key_PageUp, key::PageUp },
+        pair { Qt::Key_Home, key::Home },
+        pair { Qt::Key_End, key::End },
+        pair { Qt::Key_F1, key::F1 },
+        pair { Qt::Key_F2, key::F2 },
+        pair { Qt::Key_F3, key::F3 },
+        pair { Qt::Key_F4, key::F4 },
+        pair { Qt::Key_F5, key::F5 },
+        pair { Qt::Key_F6, key::F6 },
+        pair { Qt::Key_F7, key::F7 },
+        pair { Qt::Key_F8, key::F8 },
+        pair { Qt::Key_F9, key::F9 },
+        pair { Qt::Key_F10, key::F10 },
+        pair { Qt::Key_F11, key::F11 },
+        pair { Qt::Key_F12, key::F12 },
+        pair { Qt::Key_F13, key::F13 },
+        pair { Qt::Key_F14, key::F14 },
+        pair { Qt::Key_F15, key::F15 },
+        pair { Qt::Key_F16, key::F16 },
+        pair { Qt::Key_F17, key::F17 },
+        pair { Qt::Key_F18, key::F18 },
+        pair { Qt::Key_F19, key::F19 },
+        pair { Qt::Key_F20, key::F20 },
     }; // }}}
 
     static auto constexpr charMappings = array {
@@ -228,7 +228,7 @@ bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
 
     if (key == Qt::Key_Backtab)
     {
-        _session.sendCharPressEvent(U'\t', modifiers.with(Modifier::Shift), now);
+        _session.sendCharPressEvent(U'\t', modifiers.with(modifier::Shift), now);
         return true;
     }
 
@@ -272,7 +272,7 @@ void sendWheelEvent(QWheelEvent* _event, TerminalSession& _session)
     if (yDelta)
     {
         auto const modifier = makeModifier(_event->modifiers());
-        auto const button = yDelta > 0 ? terminal::MouseButton::WheelUp : terminal::MouseButton::WheelDown;
+        auto const button = yDelta > 0 ? terminal::mouse_button::WheelUp : terminal::mouse_button::WheelDown;
         auto const pixelPosition = makeMousePixelPosition(_event, _session.contentScale());
 
         _session.sendMousePressEvent(modifier, button, pixelPosition);

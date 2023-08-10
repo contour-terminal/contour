@@ -44,7 +44,7 @@ class RenderBufferBuilder
     /// with their grid cells are to be rendered using renderCell().
     ///
     /// @see renderCell
-    void renderTrivialLine(TrivialLineBuffer const& lineBuffer, line_offset lineOffset);
+    void renderTrivialLine(trivial_line_buffer const& lineBuffer, line_offset lineOffset);
 
     /// This call is guaranteed to be invoked when the the full page has been rendered.
     void finish() noexcept {}
@@ -54,7 +54,7 @@ class RenderBufferBuilder
 
     [[nodiscard]] std::optional<RenderCursor> renderCursor() const;
 
-    [[nodiscard]] static RenderCell makeRenderCellExplicit(ColorPalette const& colorPalette,
+    [[nodiscard]] static RenderCell makeRenderCellExplicit(color_palette const& colorPalette,
                                                            std::u32string graphemeCluster,
                                                            ColumnCount width,
                                                            cell_flags flags,
@@ -64,7 +64,7 @@ class RenderBufferBuilder
                                                            line_offset line,
                                                            column_offset column);
 
-    [[nodiscard]] static RenderCell makeRenderCellExplicit(ColorPalette const& colorPalette,
+    [[nodiscard]] static RenderCell makeRenderCellExplicit(color_palette const& colorPalette,
                                                            char32_t codepoint,
                                                            cell_flags flags,
                                                            rgb_color fg,
@@ -74,8 +74,8 @@ class RenderBufferBuilder
                                                            column_offset column);
 
     /// Constructs a RenderCell for the given screen Cell.
-    [[nodiscard]] static RenderCell makeRenderCell(ColorPalette const& colorPalette,
-                                                   HyperlinkStorage const& hyperlinks,
+    [[nodiscard]] static RenderCell makeRenderCell(color_palette const& colorPalette,
+                                                   hyperlink_storage const& hyperlinks,
                                                    Cell const& cell,
                                                    rgb_color fg,
                                                    rgb_color bg,
@@ -90,16 +90,16 @@ class RenderBufferBuilder
                                                    color foregroundColor,
                                                    color backgroundColor) const noexcept;
 
-    [[nodiscard]] RenderLine createRenderLine(TrivialLineBuffer const& lineBuffer,
+    [[nodiscard]] RenderLine createRenderLine(trivial_line_buffer const& lineBuffer,
                                               line_offset lineOffset) const;
 
     [[nodiscard]] RenderAttributes createRenderAttributes(
-        cell_location gridPosition, GraphicsAttributes graphicsAttributes) const noexcept;
+        cell_location gridPosition, graphics_attributes graphicsAttributes) const noexcept;
 
     [[nodiscard]] bool tryRenderInputMethodEditor(cell_location screenPosition, cell_location gridPosition);
 
     ColumnCount renderUtf8Text(cell_location screenPosition,
-                               GraphicsAttributes attributes,
+                               graphics_attributes attributes,
                                std::string_view text,
                                bool allowMatchSearchPattern);
 

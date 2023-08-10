@@ -29,7 +29,7 @@ namespace terminal
  *
  * The integer representational values match the one for DA2's first response parameter.
  */
-enum class VTType
+enum class vt_type
 {
     VT100 = 0,
     VT220 = 1,
@@ -43,7 +43,7 @@ enum class VTType
     VT525 = 65,
 };
 
-enum class VTExtension
+enum class vt_extension
 {
     None,
     Unknown,
@@ -56,7 +56,7 @@ enum class VTExtension
  *
  * Used in response to SendDeviceAttributes.
  */
-enum class DeviceAttributes : uint16_t
+enum class device_attributes : uint16_t
 {
     Columns132 = (1 << 0),
     Printer = (1 << 1),
@@ -72,59 +72,59 @@ enum class DeviceAttributes : uint16_t
     CaptureScreenBuffer = (1 << 11),
 };
 
-constexpr DeviceAttributes operator|(DeviceAttributes a, DeviceAttributes b)
+constexpr device_attributes operator|(device_attributes a, device_attributes b)
 {
-    return static_cast<DeviceAttributes>(static_cast<unsigned>(a) | static_cast<unsigned>(b));
+    return static_cast<device_attributes>(static_cast<unsigned>(a) | static_cast<unsigned>(b));
 }
 
-constexpr bool operator&(DeviceAttributes a, DeviceAttributes b)
+constexpr bool operator&(device_attributes a, device_attributes b)
 {
     return (static_cast<unsigned>(a) & static_cast<unsigned>(b)) != 0;
 }
 
 //! Generates human readable string of comma seperated list of attribute names.
-std::string to_string(DeviceAttributes v);
+std::string to_string(device_attributes v);
 
 //! Generates a parameter list that can be used to generate the CSI response.
-std::string to_params(DeviceAttributes v);
+std::string to_params(device_attributes v);
 
 } // namespace terminal
 
 // {{{ fmtlib support
 template <>
-struct fmt::formatter<terminal::VTType>: fmt::formatter<std::string_view>
+struct fmt::formatter<terminal::vt_type>: fmt::formatter<std::string_view>
 {
-    auto format(const terminal::VTType id, format_context& ctx) -> format_context::iterator
+    auto format(const terminal::vt_type id, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (id)
         {
-            case terminal::VTType::VT100: name = "VT100"; break;
-            case terminal::VTType::VT220: name = "VT220"; break;
-            case terminal::VTType::VT240: name = "VT240"; break;
-            case terminal::VTType::VT320: name = "VT320"; break;
-            case terminal::VTType::VT330: name = "VT330"; break;
-            case terminal::VTType::VT340: name = "VT340"; break;
-            case terminal::VTType::VT420: name = "VT420"; break;
-            case terminal::VTType::VT510: name = "VT510"; break;
-            case terminal::VTType::VT520: name = "VT520"; break;
-            case terminal::VTType::VT525: name = "VT525"; break;
+            case terminal::vt_type::VT100: name = "VT100"; break;
+            case terminal::vt_type::VT220: name = "VT220"; break;
+            case terminal::vt_type::VT240: name = "VT240"; break;
+            case terminal::vt_type::VT320: name = "VT320"; break;
+            case terminal::vt_type::VT330: name = "VT330"; break;
+            case terminal::vt_type::VT340: name = "VT340"; break;
+            case terminal::vt_type::VT420: name = "VT420"; break;
+            case terminal::vt_type::VT510: name = "VT510"; break;
+            case terminal::vt_type::VT520: name = "VT520"; break;
+            case terminal::vt_type::VT525: name = "VT525"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 template <>
-struct fmt::formatter<terminal::VTExtension>: fmt::formatter<std::string_view>
+struct fmt::formatter<terminal::vt_extension>: fmt::formatter<std::string_view>
 {
-    auto format(const terminal::VTExtension id, format_context& ctx) -> format_context::iterator
+    auto format(const terminal::vt_extension id, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (id)
         {
-            case terminal::VTExtension::None: name = "none"; break;
-            case terminal::VTExtension::Unknown: name = "unknown"; break;
-            case terminal::VTExtension::XTerm: name = "XTerm"; break;
-            case terminal::VTExtension::Contour: name = "Contour"; break;
+            case terminal::vt_extension::None: name = "none"; break;
+            case terminal::vt_extension::Unknown: name = "unknown"; break;
+            case terminal::vt_extension::XTerm: name = "XTerm"; break;
+            case terminal::vt_extension::Contour: name = "Contour"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

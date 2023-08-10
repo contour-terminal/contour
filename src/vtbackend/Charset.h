@@ -20,9 +20,9 @@
 namespace terminal
 {
 
-using CharsetMap = std::array<char32_t, 127>;
+using charset_map = std::array<char32_t, 127>;
 
-enum class CharsetId
+enum class charset_id
 {
     Special, // Special Character and Line Drawing Set
 
@@ -39,7 +39,7 @@ enum class CharsetId
     USASCII
 };
 
-enum class CharsetTable
+enum class charset_table
 {
     G0 = 0,
     G1 = 1,
@@ -48,20 +48,20 @@ enum class CharsetTable
 };
 
 /// @returns the charset
-CharsetMap const* charsetMap(CharsetId id) noexcept;
+charset_map const* charsetMap(charset_id id) noexcept;
 
 /// Charset mapping API for tables G0, G1, G2, and G3.
 ///
 /// Relevant VT sequences are: SCS, SS2, SS3.
-class CharsetMapping
+class charset_mapping
 {
   public:
-    CharsetMapping() noexcept:
+    charset_mapping() noexcept:
         _tables {
-            charsetMap(CharsetId::USASCII),
-            charsetMap(CharsetId::USASCII),
-            charsetMap(CharsetId::USASCII),
-            charsetMap(CharsetId::USASCII),
+            charsetMap(charset_id::USASCII),
+            charsetMap(charset_id::USASCII),
+            charsetMap(charset_id::USASCII),
+            charsetMap(charset_id::USASCII),
         }
     {
     }
@@ -85,41 +85,41 @@ class CharsetMapping
         }
     }
 
-    [[nodiscard]] char32_t map(CharsetTable table, char code) const noexcept
+    [[nodiscard]] char32_t map(charset_table table, char code) const noexcept
     {
         return (*_tables[static_cast<size_t>(table)])[static_cast<uint8_t>(code)];
     }
 
-    constexpr void singleShift(CharsetTable table) noexcept { _tableForNextGraphic = table; }
+    constexpr void singleShift(charset_table table) noexcept { _tableForNextGraphic = table; }
 
-    constexpr void lockingShift(CharsetTable table) noexcept
+    constexpr void lockingShift(charset_table table) noexcept
     {
         _selectedTable = table;
         _tableForNextGraphic = table;
     }
 
-    [[nodiscard]] bool isSelected(CharsetTable table, CharsetId id) const noexcept
+    [[nodiscard]] bool isSelected(charset_table table, charset_id id) const noexcept
     {
         return _tables[static_cast<size_t>(table)] == charsetMap(id);
     }
 
-    [[nodiscard]] bool isSelected(CharsetId id) const noexcept
+    [[nodiscard]] bool isSelected(charset_id id) const noexcept
     {
         return isSelected(_tableForNextGraphic, id);
     }
 
     // Selects a given designated character set into the table G0, G1, G2, or G3.
-    void select(CharsetTable table, CharsetId id) noexcept
+    void select(charset_table table, charset_id id) noexcept
     {
         _tables[static_cast<size_t>(table)] = charsetMap(id);
     }
 
   private:
-    CharsetTable _tableForNextGraphic = CharsetTable::G0;
-    CharsetTable _selectedTable = CharsetTable::G0;
+    charset_table _tableForNextGraphic = charset_table::G0;
+    charset_table _selectedTable = charset_table::G0;
 
-    using Tables = std::array<CharsetMap const*, 4>;
-    Tables _tables;
+    using tables = std::array<charset_map const*, 4>;
+    tables _tables;
 };
 
 } // namespace terminal

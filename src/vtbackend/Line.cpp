@@ -27,7 +27,7 @@ namespace terminal
 {
 
 template <typename Cell>
-typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount newColumnCount)
+typename line<Cell>::inflated_buffer line<Cell>::reflow(ColumnCount newColumnCount)
 {
     using crispy::Comparison;
     if (isTrivialBuffer())
@@ -64,7 +64,7 @@ typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount newColumnCoun
                     return std::tuple { reflowStart, reflowEnd };
                 }();
 
-                auto removedColumns = InflatedBuffer(reflowStart, reflowEnd);
+                auto removedColumns = inflated_buffer(reflowStart, reflowEnd);
                 buffer.erase(reflowStart, buffer.end());
                 assert(size() == newColumnCount);
 #if 0
@@ -92,14 +92,14 @@ typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount newColumnCoun
 }
 
 template <typename Cell>
-inline void Line<Cell>::resize(ColumnCount count)
+inline void line<Cell>::resize(ColumnCount count)
 {
     assert(*count >= 0);
     if (1) // constexpr (Optimized)
     {
         if (isTrivialBuffer())
         {
-            TrivialBuffer& buffer = trivialBuffer();
+            trivial_buffer& buffer = trivialBuffer();
             buffer.displayWidth = count;
             return;
         }
@@ -108,7 +108,7 @@ inline void Line<Cell>::resize(ColumnCount count)
 }
 
 template <typename Cell>
-gsl::span<Cell const> Line<Cell>::trim_blank_right() const noexcept
+gsl::span<Cell const> line<Cell>::trim_blank_right() const noexcept
 {
     auto i = inflatedBuffer().data();
     auto e = inflatedBuffer().data() + inflatedBuffer().size();
@@ -120,7 +120,7 @@ gsl::span<Cell const> Line<Cell>::trim_blank_right() const noexcept
 }
 
 template <typename Cell>
-std::string Line<Cell>::toUtf8() const
+std::string line<Cell>::toUtf8() const
 {
     if (isTrivialBuffer())
     {
@@ -143,13 +143,13 @@ std::string Line<Cell>::toUtf8() const
 }
 
 template <typename Cell>
-std::string Line<Cell>::toUtf8Trimmed() const
+std::string line<Cell>::toUtf8Trimmed() const
 {
     return toUtf8Trimmed(true, true);
 }
 
 template <typename Cell>
-std::string Line<Cell>::toUtf8Trimmed(bool stripLeadingSpaces, bool stripTrailingSpaces) const
+std::string line<Cell>::toUtf8Trimmed(bool stripLeadingSpaces, bool stripTrailingSpaces) const
 {
     std::string output = toUtf8();
 
@@ -169,11 +169,11 @@ std::string Line<Cell>::toUtf8Trimmed(bool stripLeadingSpaces, bool stripTrailin
 }
 
 template <typename Cell>
-InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
+inflated_line_buffer<Cell> inflate(trivial_line_buffer const& input)
 {
     static constexpr char32_t ReplacementCharacter { 0xFFFD };
 
-    auto columns = InflatedLineBuffer<Cell> {};
+    auto columns = inflated_line_buffer<Cell> {};
     columns.reserve(unbox<size_t>(input.displayWidth));
 
     auto lastChar = char32_t { 0 };
@@ -236,7 +236,7 @@ InflatedLineBuffer<Cell> inflate(TrivialLineBuffer const& input)
 } // end namespace terminal
 
 #include <vtbackend/cell/CompactCell.h>
-template class terminal::Line<terminal::CompactCell>;
+template class terminal::line<terminal::compact_cell>;
 
 #include <vtbackend/cell/SimpleCell.h>
-template class terminal::Line<terminal::SimpleCell>;
+template class terminal::line<terminal::simple_cell>;
