@@ -261,7 +261,6 @@ class TerminalWidget: public QQuickItem
     bool renderingPressure_ = false;
     display::OpenGLRenderer* renderTarget_ = nullptr;
     bool maximizedState_ = false;
-    bool framelessWidget_ = false;
 
     // update() timer used to animate the blinking cursor.
     QTimer updateTimer_;

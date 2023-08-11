@@ -297,7 +297,7 @@ void TerminalWidget::setSession(TerminalSession* newSession)
 
     session_->start();
 
-    framelessWidget_ = !profile().show_title_bar;
+    window()->setFlag(Qt::FramelessWindowHint, !profile().show_title_bar);
 
     renderer_ = make_unique<terminal::rasterizer::Renderer>(
         newSession->profile().terminalSize,
