@@ -65,6 +65,12 @@ markdown_extensions:
       emoji_generator: !!python/name:materialx.emoji.to_svg
 
 plugins:
+  - mkdocs-video:
+      is_video: True
+      video_muted: True
+      video_controls: True
+      css_style:
+        width: "100%"
   - glightbox
   - exclude:
       glob:
@@ -92,6 +98,7 @@ nav:
     - List of features: features.md
     - Font liagatures: demo/font-ligatures.md
     - Images: demo/images.md
+    - Input method editor (IME): demo/ime.md
     - Line marks: demo/line-marks.md
     - Status line: demo/statusline.md
     - Input modes: input-modes.md
