@@ -81,6 +81,11 @@ inline bool setFileFlags(int fd, int flags) noexcept
     return true;
 }
 
+inline void setFileBlocking(int fd, bool blocking) noexcept
+{
+    setFileFlags(fd, blocking ? 0 : O_NONBLOCK);
+}
+
 inline void saveClose(int* fd) noexcept
 {
     if (fd && *fd != -1)

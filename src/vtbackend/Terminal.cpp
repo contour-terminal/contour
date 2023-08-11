@@ -33,6 +33,7 @@
 
 #include <chrono>
 #include <csignal>
+#include <cstdlib>
 #include <iostream>
 #include <utility>
 #include <variant>
@@ -973,14 +974,14 @@ bool Terminal::hasInput() const noexcept
     return !_state.inputGenerator.peek().empty();
 }
 
-void Terminal::flushInput()
+void Terminal::flushInput(bool blocking)
 {
     if (_state.inputGenerator.peek().empty())
         return;
 
     // XXX Should be the only location that does write to the PTY's stdin to avoid race conditions.
     auto const input = _state.inputGenerator.peek();
-    auto const rv = _pty->write(input.data(), input.size());
+    auto const rv = _pty->write(input, blocking);
     if (rv > 0)
         _state.inputGenerator.consume(rv);
 }
@@ -1393,6 +1394,11 @@ void Terminal::reply(string_view text)
     // the actual input events.
     // TODO: introduce new mutex to guard terminal writes.
     _state.inputGenerator.generateRaw(text);
+
+    auto const* syncReply = getenv("CONTOUR_SYNC_PTY_OUTPUT");
+
+    if (syncReply && *syncReply != '0')
+        flushInput(true);
 }
 
 void Terminal::requestWindowResize(PageSize size)

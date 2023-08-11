@@ -287,7 +287,7 @@ class Terminal
     bool applicationKeypad() const noexcept { return _state.inputGenerator.applicationKeypad(); }
 
     bool hasInput() const noexcept;
-    void flushInput();
+    void flushInput(bool blocking = false);
 
     std::string_view peekInput() const noexcept { return _state.inputGenerator.peek(); }
     // }}}

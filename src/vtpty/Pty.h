@@ -104,11 +104,11 @@ class Pty
 
     /// Writes to the PTY device, so the other end can read from it.
     ///
-    /// @param buf    Buffer of data to be written.
-    /// @param size   Number of bytes in @p buf to write.
+    /// @param buf      Buffer of data to be written.
+    /// @param blocking If false, the data will be sent in non-blocking mode, blocking otherwise.
     ///
     /// @returns Number of bytes written or -1 on error.
-    [[nodiscard]] virtual int write(char const* buf, size_t size) = 0;
+    [[nodiscard]] virtual int write(std::string_view buf, bool blocking) = 0;
 
     /// @returns current underlying window size in characters width and height.
     [[nodiscard]] virtual PageSize pageSize() const noexcept = 0;

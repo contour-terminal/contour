@@ -365,7 +365,11 @@ optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
 {
     auto const rv = static_cast<int>(::read(fd, target, n));
     if (rv < 0)
+    {
+        if (errno != EAGAIN && errno != EINTR)
+            errorlog()("{} read failed: {}", fd == _masterFd ? "master" : "stdout-fastpipe", strerror(errno));
         return nullopt;
+    }
 
     if (PtyInLog)
         PtyInLog()("{} received: \"{}\"",
@@ -397,8 +401,21 @@ Pty::ReadResult UnixPty::read(crispy::BufferObject<char>& storage,
     return nullopt;
 }
 
-int UnixPty::write(char const* buf, size_t size)
+int UnixPty::write(std::string_view data, bool blocking)
 {
+    auto const* buf = data.data();
+    auto const size = data.size();
+
+    if (blocking)
+    {
+        detail::setFileBlocking(_masterFd, true);
+        auto const rv = ::write(_masterFd, buf, size);
+        detail::setFileBlocking(_masterFd, false);
+        if (PtyOutLog)
+            PtyOutLog()("Sending bytes: \"{}\"", crispy::escape(buf, buf + rv));
+        return static_cast<int>(rv);
+    }
+
     timeval tv {};
     tv.tv_sec = 1;
     tv.tv_usec = 0;

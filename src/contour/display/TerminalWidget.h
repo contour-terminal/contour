@@ -174,7 +174,7 @@ class TerminalWidget: public QQuickItem
 
   public Q_SLOTS:
     void onSceneGrapheInitialized();
-    void synchronize();
+    void onBeforeSynchronize();
     void onBeforeRendering();
     void paint();
 
