@@ -163,8 +163,11 @@ void ConPty::wakeupReader()
     // How can we make ReadFile() return early? We could maybe WriteFile() to it?
 }
 
-int ConPty::write(char const* buf, size_t size)
+int ConPty::write(std::string_view data, bool /*blocking*/)
 {
+    auto const* buf = data.data();
+    auto const size = data.size();
+
     DWORD nwritten {};
     if (WriteFile(_output, buf, static_cast<DWORD>(size), &nwritten, nullptr))
         return static_cast<int>(nwritten);

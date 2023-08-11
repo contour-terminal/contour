@@ -35,11 +35,11 @@ void MockPty::wakeupReader()
     // No-op. as we're a mock-pty.
 }
 
-int MockPty::write(char const* buf, size_t size)
+int MockPty::write(std::string_view data, bool /*blocking*/)
 {
     // Writing into stdin.
-    _inputBuffer += std::string_view(buf, size);
-    return static_cast<int>(size);
+    _inputBuffer += std::string_view(data.data(), data.size());
+    return static_cast<int>(data.size());
 }
 
 PageSize MockPty::pageSize() const noexcept

@@ -28,6 +28,8 @@ sleep 3
 
 ldd `which $CONTOUR_BIN`
 
+export CONTOUR_SYNC_PTY_OUTPUT=1
+
 $CONTOUR_PREFIX \
     $CONTOUR_BIN terminal \
         debug "$LOG" \
