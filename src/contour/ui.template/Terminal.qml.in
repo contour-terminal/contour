@@ -54,7 +54,7 @@ ContourTerminal
         anchors.bottom: parent.bottom
         visible : session.isScrollbarVisible
         orientation: Qt.Vertical
-        policy : ScrollBar.AlwaysOn
+        policy: session.isScrollbarVisible ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
         minimumSize : 0.1
         size : vtWidget.session.pageLineCount / (vtWidget.session.pageLineCount + vtWidget.session.historyLineCount)
         stepSize : 1.0 / (vtWidget.session.pageLineCount + vtWidget.session.historyLineCount)
