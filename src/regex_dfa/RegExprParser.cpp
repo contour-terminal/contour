@@ -63,7 +63,7 @@ int RegExprParser::currentChar() const
     if (currentChar_ != input_.end())
         return *currentChar_;
     else
-        return -1;
+        return std::char_traits<char>::eof();
 }
 
 bool RegExprParser::consumeIf(int ch)
@@ -78,7 +78,7 @@ bool RegExprParser::consumeIf(int ch)
 int RegExprParser::consume()
 {
     if (currentChar_ == input_.end())
-        return -1;
+        return std::char_traits<char>::eof();
 
     int ch = *currentChar_;
     if (ch == '\n')
@@ -105,9 +105,9 @@ void RegExprParser::consume(int expected)
     }
 }
 
-RegExpr RegExprParser::parse(string_view expr, int line, int column)
+RegExpr RegExprParser::parse(string_view expr, unsigned line, unsigned column)
 {
-    input_ = move(expr);
+    input_ = expr;
     currentChar_ = input_.begin();
     line_ = line;
     column_ = column;
@@ -128,7 +128,7 @@ RegExpr RegExprParser::parseLookAheadExpr()
     {
         consume();
         RegExpr rhs = parseAlternation();
-        lhs = LookAheadExpr { make_unique<RegExpr>(move(lhs)), make_unique<RegExpr>(move(rhs)) };
+        lhs = LookAheadExpr { make_unique<RegExpr>(std::move(lhs)), make_unique<RegExpr>(std::move(rhs)) };
     }
 
     return lhs;
@@ -142,7 +142,7 @@ RegExpr RegExprParser::parseAlternation()
     {
         consume();
         RegExpr rhs = parseConcatenation();
-        lhs = AlternationExpr { make_unique<RegExpr>(move(lhs)), make_unique<RegExpr>(move(rhs)) };
+        lhs = AlternationExpr { make_unique<RegExpr>(std::move(lhs)), make_unique<RegExpr>(std::move(rhs)) };
     }
 
     return lhs;
@@ -154,10 +154,11 @@ RegExpr RegExprParser::parseConcatenation()
     static const string_view follow = "/|)";
     RegExpr lhs = parseClosure();
 
-    while (!eof() && follow.find(currentChar()) == follow.npos)
+    while (!eof() && follow.find(currentChar()) == std::string_view::npos)
     {
         RegExpr rhs = parseClosure();
-        lhs = ConcatenationExpr { make_unique<RegExpr>(move(lhs)), make_unique<RegExpr>(move(rhs)) };
+        lhs =
+            ConcatenationExpr { make_unique<RegExpr>(std::move(lhs)), make_unique<RegExpr>(std::move(rhs)) };
     }
 
     return lhs;
@@ -169,9 +170,9 @@ RegExpr RegExprParser::parseClosure()
 
     switch (currentChar())
     {
-        case '?': consume(); return ClosureExpr { make_unique<RegExpr>(move(subExpr)), 0, 1 };
-        case '*': consume(); return ClosureExpr { make_unique<RegExpr>(move(subExpr)), 0 };
-        case '+': consume(); return ClosureExpr { make_unique<RegExpr>(move(subExpr)), 1 };
+        case '?': consume(); return ClosureExpr { make_unique<RegExpr>(std::move(subExpr)), 0, 1 };
+        case '*': consume(); return ClosureExpr { make_unique<RegExpr>(std::move(subExpr)), 0 };
+        case '+': consume(); return ClosureExpr { make_unique<RegExpr>(std::move(subExpr)), 1 };
         case '{': {
             consume();
             unsigned int m = parseInt();
@@ -180,12 +181,12 @@ RegExpr RegExprParser::parseClosure()
                 consume();
                 unsigned int n = parseInt();
                 consume('}');
-                return ClosureExpr { make_unique<RegExpr>(move(subExpr)), m, n };
+                return ClosureExpr { make_unique<RegExpr>(std::move(subExpr)), m, n };
             }
             else
             {
                 consume('}');
-                return ClosureExpr { make_unique<RegExpr>(move(subExpr)), m, m };
+                return ClosureExpr { make_unique<RegExpr>(std::move(subExpr)), m, m };
             }
         }
         default: return subExpr;
@@ -212,7 +213,7 @@ RegExpr RegExprParser::parseAtom()
 
     switch (currentChar())
     {
-        case -1: // EOF
+        case std::char_traits<char>::eof(): // EOF
         case ')': return EmptyExpr {};
         case '<':
             consume();
@@ -235,7 +236,8 @@ RegExpr RegExprParser::parseAtom()
             while (!eof() && currentChar() != '"')
             {
                 RegExpr rhs = CharacterExpr { consume() };
-                lhs = ConcatenationExpr { make_unique<RegExpr>(move(lhs)), make_unique<RegExpr>(move(rhs)) };
+                lhs = ConcatenationExpr { make_unique<RegExpr>(std::move(lhs)),
+                                          make_unique<RegExpr>(std::move(rhs)) };
             }
             consume('"');
             return lhs;
@@ -262,7 +264,7 @@ RegExpr RegExprParser::parseCharacterClass()
         ss.complement();
 
     consume(']');
-    return CharacterClassExpr { move(ss) };
+    return CharacterClassExpr { std::move(ss) };
 }
 
 void RegExprParser::parseNamedCharacterClass(SymbolSet& ss)

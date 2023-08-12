@@ -24,22 +24,24 @@ namespace regex_dfa
 //! input symbol as used for transitions
 using Symbol = int;
 
-std::string prettySymbol(Symbol input);
-std::string prettyCharRange(Symbol ymin, Symbol ymax);
-std::string groupCharacterClassRanges(const std::vector<bool>& syms);
-std::string groupCharacterClassRanges(std::vector<Symbol> syms);
+[[nodiscard]] std::string prettySymbol(Symbol input);
+[[nodiscard]] std::string prettyCharRange(Symbol ymin, Symbol ymax);
+[[nodiscard]] std::string groupCharacterClassRanges(const std::vector<bool>& syms);
+[[nodiscard]] std::string groupCharacterClassRanges(std::vector<Symbol> syms);
 
 // new way of wrapping up Symbols
 struct Symbols
 {
+    // NOLINTBEGIN(readability-identifier-naming)
     constexpr static Symbol Epsilon = -1;
     constexpr static Symbol Error = -2;
     constexpr static Symbol BeginOfLine = -3;
     constexpr static Symbol EndOfLine = -4;
     constexpr static Symbol EndOfFile = -5;
     constexpr static Symbol Character(char ch) { return Symbol(ch); }
+    // NOLINTEND(readability-identifier-naming)
 
-    constexpr static bool isSpecial(Symbol s)
+    [[nodiscard]] constexpr static bool isSpecial(Symbol s)
     {
         switch (s)
         {
@@ -72,8 +74,8 @@ class SymbolSet
         std::for_each(list.begin(), list.end(), [this](Symbol s) { insert(s); });
     }
 
-    bool empty() const noexcept { return size_ == 0; }
-    size_t size() const noexcept { return size_; }
+    [[nodiscard]] bool empty() const noexcept { return size_ == 0; }
+    [[nodiscard]] size_t size() const noexcept { return size_; }
 
     //! Transforms into the complement set.
     void complement();
@@ -99,28 +101,28 @@ class SymbolSet
     }
 
     //! @returns whether or not given Symbol @p s is in this set.
-    bool contains(Symbol s) const
+    [[nodiscard]] bool contains(Symbol s) const
     {
         assert(s >= 0 && s <= 255 && "Only ASCII allowed.");
         return set_[(size_t) s];
     }
 
     //! Tests whether or not this SymbolSet can be represented as dot (.), i.e. all but \n.
-    bool isDot() const noexcept;
+    [[nodiscard]] bool isDot() const noexcept;
 
     //! @returns a human readable representation of this set
-    std::string to_string() const;
+    [[nodiscard]] std::string to_string() const;
 
     bool operator==(const SymbolSet& rhs) const noexcept { return hash_ == rhs.hash_ && set_ == rhs.set_; }
     bool operator!=(const SymbolSet& rhs) const noexcept { return !(*this == rhs); }
 
-    class const_iterator
-    { // {{{
+    class const_iterator // NOLINT(readability-identifier-naming)
+    {                    // {{{
       public:
         const_iterator(std::vector<bool>::const_iterator beg,
                        std::vector<bool>::const_iterator end,
                        size_t n):
-            beg_ { std::move(beg) }, end_ { std::move(end) }, offset_ { n }
+            beg_ { beg }, end_ { end }, offset_ { n }
         {
             while (beg_ != end_ && !*beg_)
             {
@@ -160,10 +162,10 @@ class SymbolSet
         size_t offset_;
     }; // }}}
 
-    const_iterator begin() const { return const_iterator(set_.begin(), set_.end(), 0); }
-    const_iterator end() const { return const_iterator(set_.end(), set_.end(), set_.size()); }
+    [[nodiscard]] const_iterator begin() const { return const_iterator(set_.begin(), set_.end(), 0); }
+    [[nodiscard]] const_iterator end() const { return const_iterator(set_.end(), set_.end(), set_.size()); }
 
-    size_t hash() const noexcept { return hash_; }
+    [[nodiscard]] size_t hash() const noexcept { return hash_; }
 
   private:
     void recalculateHash();
@@ -191,7 +193,7 @@ struct formatter<regex_dfa::SymbolSet>
     template <typename FormatContext>
     constexpr auto format(const regex_dfa::SymbolSet& v, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "{}", v.to_string());
+        return fmt::format_to(ctx.out(), "{}", v.to_string());
     }
 };
 } // namespace fmt

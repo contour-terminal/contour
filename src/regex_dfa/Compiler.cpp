@@ -27,12 +27,12 @@ namespace regex_dfa
 
 void Compiler::parse(string text)
 {
-    parse(make_unique<stringstream>(move(text)));
+    parse(make_unique<stringstream>(std::move(text)));
 }
 
 void Compiler::parse(unique_ptr<istream> stream)
 {
-    declareAll(RuleParser { move(stream) }.parseRules());
+    declareAll(RuleParser { std::move(stream) }.parseRules());
 }
 
 void Compiler::declareAll(RuleList rules)
@@ -81,7 +81,7 @@ void Compiler::declareAll(RuleList rules)
         else
             names_[rule.tag] = rule.name;
 
-        rules_.emplace_back(move(rule));
+        rules_.emplace_back(std::move(rule));
     }
 }
 
@@ -118,7 +118,7 @@ MultiDFA Compiler::compileMultiDFA(OvershadowMap* overshadows)
     for (const auto& fa: fa_)
         dfaMap[fa.first] = DFABuilder { fa.second.clone() }.construct(overshadows);
 
-    return constructMultiDFA(move(dfaMap));
+    return constructMultiDFA(std::move(dfaMap));
 }
 
 DFA Compiler::compileDFA(OvershadowMap* overshadows)
@@ -134,7 +134,7 @@ DFA Compiler::compileMinimalDFA()
 
 LexerDef Compiler::compile()
 {
-    return generateTables(compileMinimalDFA(), containsBeginOfLine_, move(names_));
+    return generateTables(compileMinimalDFA(), containsBeginOfLine_, std::move(names_));
 }
 
 LexerDef Compiler::compileMulti(OvershadowMap* overshadows)
@@ -144,7 +144,7 @@ LexerDef Compiler::compileMulti(OvershadowMap* overshadows)
     return generateTables(multiDFA, containsBeginOfLine_, names());
 }
 
-LexerDef Compiler::generateTables(const DFA& dfa, bool requiresBeginOfLine, const map<Tag, string>& names)
+LexerDef Compiler::generateTables(const DFA& dfa, bool requiresBeginOfLine, map<Tag, string> names)
 {
     const Alphabet alphabet = dfa.alphabet();
     TransitionMap transitionMap;
@@ -161,15 +161,13 @@ LexerDef Compiler::generateTables(const DFA& dfa, bool requiresBeginOfLine, cons
     // TODO: many initial states !
     return LexerDef { { { "INITIAL", dfa.initialState() } },
                       requiresBeginOfLine,
-                      move(transitionMap),
-                      move(acceptStates),
+                      std::move(transitionMap),
+                      std::move(acceptStates),
                       dfa.backtracking(),
-                      move(names) };
+                      std::move(names) };
 }
 
-LexerDef Compiler::generateTables(const MultiDFA& multiDFA,
-                                  bool requiresBeginOfLine,
-                                  const map<Tag, string>& names)
+LexerDef Compiler::generateTables(const MultiDFA& multiDFA, bool requiresBeginOfLine, map<Tag, string> names)
 {
     const Alphabet alphabet = multiDFA.dfa.alphabet();
     TransitionMap transitionMap;
@@ -184,8 +182,8 @@ LexerDef Compiler::generateTables(const MultiDFA& multiDFA,
         acceptStates.emplace(s, *multiDFA.dfa.acceptTag(s));
 
     // TODO: many initial states !
-    return LexerDef { multiDFA.initialStates, requiresBeginOfLine,         move(transitionMap),
-                      move(acceptStates),     multiDFA.dfa.backtracking(), move(names) };
+    return LexerDef { multiDFA.initialStates,  requiresBeginOfLine,         std::move(transitionMap),
+                      std::move(acceptStates), multiDFA.dfa.backtracking(), std::move(names) };
 }
 
 } // namespace regex_dfa

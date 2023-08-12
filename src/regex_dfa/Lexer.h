@@ -39,25 +39,25 @@ struct TokenInfo
 };
 
 template <typename Token>
-inline Token token(const TokenInfo<Token>& it)
+[[nodiscard]] inline Token token(const TokenInfo<Token>& it)
 {
     return it.token;
 }
 
 template <typename Token>
-inline size_t offset(const TokenInfo<Token>& it)
+[[nodiscard]] inline size_t offset(const TokenInfo<Token>& it)
 {
     return it.offset;
 }
 
 template <typename Token>
-inline const std::string& literal(const TokenInfo<Token>& it)
+[[nodiscard]] inline const std::string& literal(const TokenInfo<Token>& it)
 {
     return it.literal;
 }
 
 template <typename Token>
-inline const std::string& to_string(const TokenInfo<Token>& info) noexcept
+[[nodiscard]] inline const std::string& to_string(const TokenInfo<Token>& info) noexcept
 {
     return info.literal;
 }
@@ -97,27 +97,30 @@ class Lexer
     /**
      * Recognizes one token (ignored patterns are skipped).
      */
-    TokenInfo recognize();
+    [[nodiscard]] TokenInfo recognize();
 
     /**
      * Recognizes one token, regardless of it is to be ignored or not.
      */
-    Token recognizeOne();
+    [[nodiscard]] Token recognizeOne();
 
     //! the underlying word of the currently recognized token
-    const std::string& word() const { return word_; }
+    [[nodiscard]] const std::string& word() const { return word_; }
 
     //! @returns the absolute offset of the file the lexer is currently reading from.
-    std::pair<unsigned, unsigned> offset() const noexcept { return std::make_pair(oldOffset_, offset_); }
+    [[nodiscard]] std::pair<unsigned, unsigned> offset() const noexcept
+    {
+        return std::make_pair(oldOffset_, offset_);
+    }
 
     //! @returns the last recognized token.
-    Token token() const noexcept { return token_; }
+    [[nodiscard]] Token token() const noexcept { return token_; }
 
     //! @returns the name of the current token.
-    const std::string& name() const { return name(token_); }
+    [[nodiscard]] const std::string& name() const { return name(token_); }
 
     //! @returns the name of the token represented by Token @p t.
-    const std::string& name(Token t) const
+    [[nodiscard]] const std::string& name(Token t) const
     {
         auto i = def_.tagNames.find(static_cast<Tag>(t));
         assert(i != def_.tagNames.end());
@@ -132,7 +135,7 @@ class Lexer
      * state.
      * @returns the next state to transition to.
      */
-    inline StateId delta(StateId currentState, Symbol inputSymbol) const;
+    [[nodiscard]] inline StateId delta(StateId currentState, Symbol inputSymbol) const;
 
     /**
      * Sets the active deterministic finite automaton to use for recognizing words.
@@ -141,14 +144,16 @@ class Lexer
      */
     Machine setMachine(Machine machine)
     {
+        auto const oldMachine = initialStateId_;
         // since Machine is a 1:1 mapping into the State's ID, we can simply cast here.
         initialStateId_ = static_cast<StateId>(machine);
+        return oldMachine;
     }
 
     /**
      * Retrieves the default DFA machine that is used to recognize words.
      */
-    Machine defaultMachine() const
+    [[nodiscard]] Machine defaultMachine() const
     {
         auto i = def_.initialStates.find("INITIAL");
         assert(i != def_.initialStates.end());
@@ -160,16 +165,16 @@ class Lexer
      */
     struct LexerError: public std::runtime_error
     {
-        LexerError(unsigned int _offset):
-            std::runtime_error { fmt::format("[{}] Failed to lexically recognize a word.", _offset) },
-            offset { _offset }
+        LexerError(unsigned int offset):
+            std::runtime_error { fmt::format("[{}] Failed to lexically recognize a word.", offset) },
+            offset { offset }
         {
         }
 
         unsigned int offset;
     };
 
-    struct iterator
+    struct iterator // NOLINT(readability-identifier-naming)
     {
         Lexer& lx;
         int end;
@@ -200,9 +205,9 @@ class Lexer
 
     iterator end() { return iterator { *this, 2, TokenInfo { 0, "" } }; }
 
-    bool eof() const { return !stream_->good(); }
+    [[nodiscard]] bool eof() const { return !stream_->good(); }
 
-    size_t fileSize() const noexcept { return fileSize_; }
+    [[nodiscard]] size_t fileSize() const noexcept { return fileSize_; }
 
   private:
     template <typename... Args>
@@ -213,24 +218,24 @@ class Lexer
                 debug_(fmt::format(msg, args...));
     }
 
-    Symbol nextChar();
+    [[nodiscard]] Symbol nextChar();
     void rollback();
-    StateId getInitialState() const noexcept;
-    bool isAcceptState(StateId state) const;
-    static std::string stateName(StateId s, const std::string_view& n = "n");
+    [[nodiscard]] StateId getInitialState() const noexcept;
+    [[nodiscard]] bool isAcceptState(StateId state) const noexcept;
+    [[nodiscard]] static std::string stateName(StateId s, std::string_view n = "n");
     static constexpr StateId BadState = 101010;
-    std::string toString(const std::deque<StateId>& stack);
+    [[nodiscard]] std::string toString(const std::deque<StateId>& stack);
 
-    int currentChar() const noexcept { return currentChar_; }
+    [[nodiscard]] int currentChar() const noexcept { return currentChar_; }
 
-    Token token(StateId s) const
+    [[nodiscard]] Token token(StateId s) const
     {
         auto i = def_.acceptStates.find(s);
         assert(i != def_.acceptStates.end());
         return static_cast<Token>(i->second);
     }
 
-    size_t getFileSize();
+    [[nodiscard]] size_t getFileSize();
 
   private:
     const LexerDef& def_;
@@ -277,7 +282,7 @@ struct formatter<regex_dfa::TokenInfo<Token>>
     template <typename FormatContext>
     constexpr auto format(const TokenInfo& v, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "{}", v.literal);
+        return fmt::format_to(ctx.out(), "{}", v.literal);
     }
 };
 } // namespace fmt

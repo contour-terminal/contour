@@ -21,7 +21,9 @@ target_include_directories(regex_dfa PUBLIC ${PROJECT_SOURCE_DIR}/src ${CMAKE_SO
 target_link_libraries(regex_dfa PUBLIC fmt::fmt-header-only)
 
 # ----------------------------------------------------------------------------
-if(TESTS)
+option(REGEX_DFA_TESTING "Enables building of unittests for regex_dfa library [default: ON]" ON)
+if(REGEX_DFA_TESTING)
+    enable_testing()
     add_executable(regex_dfa_test
         regex_dfa_test.cpp
         DFABuilder_test.cpp
@@ -33,9 +35,9 @@ if(TESTS)
         State_test.cpp
         Symbols_test.cpp
         util/iterator_test.cpp
-        util/testing.cpp
     )
 
     target_link_libraries(regex_dfa_test PUBLIC regex_dfa)
+    target_link_libraries(regex_dfa_test PUBLIC Catch2::Catch2)
     target_link_libraries(regex_dfa_test PUBLIC fmt::fmt-header-only)
-endif(TESTS)
+endif(REGEX_DFA_TESTING)

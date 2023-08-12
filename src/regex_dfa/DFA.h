@@ -57,16 +57,16 @@ class DFA
     }
 
     //! Retrieves the alphabet of this finite automaton.
-    Alphabet alphabet() const;
+    [[nodiscard]] Alphabet alphabet() const;
 
     //! Retrieves the initial state.
-    StateId initialState() const { return initialState_; }
+    [[nodiscard]] StateId initialState() const { return initialState_; }
 
     //! Retrieves the list of available states.
-    const StateVec& states() const { return states_; }
-    StateVec& states() { return states_; }
+    [[nodiscard]] const StateVec& states() const { return states_; }
+    [[nodiscard]] StateVec& states() { return states_; }
 
-    StateIdVec stateIds() const
+    [[nodiscard]] StateIdVec stateIds() const
     {
         StateIdVec v;
         v.reserve(states_.size());
@@ -76,7 +76,7 @@ class DFA
     }
 
     //! Retrieves the list of accepting states.
-    std::vector<StateId> acceptStates() const;
+    [[nodiscard]] std::vector<StateId> acceptStates() const;
 
     /**
      * Traverses all states and edges in this NFA and calls @p visitor for each state & edge.
@@ -89,7 +89,7 @@ class DFA
 
     void setInitialState(StateId state);
 
-    const TransitionMap& stateTransitions(StateId id) const
+    [[nodiscard]] const TransitionMap& stateTransitions(StateId id) const
     {
         return states_[static_cast<size_t>(id)].transitions;
     }
@@ -97,7 +97,7 @@ class DFA
     // {{{ backtracking (for lookahead)
     void setBacktrack(StateId from, StateId to) { backtrackStates_[from] = to; }
 
-    std::optional<StateId> backtrack(StateId acceptState) const
+    [[nodiscard]] std::optional<StateId> backtrack(StateId acceptState) const
     {
         if (auto i = backtrackStates_.find(acceptState); i != backtrackStates_.end())
             return i->second;
@@ -105,15 +105,15 @@ class DFA
         return std::nullopt;
     }
 
-    const BacktrackingMap& backtracking() const noexcept { return backtrackStates_; }
+    [[nodiscard]] const BacktrackingMap& backtracking() const noexcept { return backtrackStates_; }
     // }}}
 
     //! Flags given state as accepting-state with given Tag @p acceptTag.
     void setAccept(StateId state, Tag acceptTag) { acceptTags_[state] = acceptTag; }
 
-    bool isAccepting(StateId s) const { return acceptTags_.find(s) != acceptTags_.end(); }
+    [[nodiscard]] bool isAccepting(StateId s) const { return acceptTags_.find(s) != acceptTags_.end(); }
 
-    std::optional<Tag> acceptTag(StateId s) const
+    [[nodiscard]] std::optional<Tag> acceptTag(StateId s) const
     {
         if (auto i = acceptTags_.find(s); i != acceptTags_.end())
             return i->second;
@@ -121,7 +121,7 @@ class DFA
         return std::nullopt;
     }
 
-    std::optional<StateId> delta(StateId state, Symbol symbol) const
+    [[nodiscard]] std::optional<StateId> delta(StateId state, Symbol symbol) const
     {
         const auto& T = states_[state].transitions;
         if (auto i = T.find(symbol); i != T.end())
@@ -133,7 +133,7 @@ class DFA
     void setTransition(StateId from, Symbol symbol, StateId to);
     void removeTransition(StateId from, Symbol symbol);
 
-    StateIdVec nonAcceptStates() const
+    [[nodiscard]] StateIdVec nonAcceptStates() const
     {
         StateIdVec result;
         result.reserve(
@@ -146,9 +146,9 @@ class DFA
         return result;
     }
 
-    bool isAcceptor(Tag t) const
+    [[nodiscard]] bool isAcceptor(Tag t) const
     {
-        for (const std::pair<StateId, Tag>& p: acceptTags_)
+        for (std::pair<StateId, Tag> p: acceptTags_)
             if (p.second == t)
                 return true;
 

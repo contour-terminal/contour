@@ -33,8 +33,8 @@ class NFABuilder
   public:
     explicit NFABuilder(): fa_ {} {}
 
-    NFA construct(const RegExpr& re, Tag tag);
-    NFA construct(const RegExpr& re);
+    [[nodiscard]] NFA construct(const RegExpr& re, Tag tag);
+    [[nodiscard]] NFA construct(const RegExpr& re);
     void operator()(const LookAheadExpr& lookaheadExpr);
     void operator()(const ConcatenationExpr& concatenationExpr);
     void operator()(const AlternationExpr& alternationExpr);

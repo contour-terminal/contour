@@ -23,13 +23,13 @@ NFA NFABuilder::construct(const RegExpr& re, Tag tag)
     else
         fa_.setAccept(tag);
 
-    return move(fa_);
+    return std::move(fa_);
 }
 
 NFA NFABuilder::construct(const RegExpr& re)
 {
     visit(*this, re);
-    return move(fa_);
+    return std::move(fa_);
 }
 
 void NFABuilder::operator()(const LookAheadExpr& lookaheadExpr)
@@ -37,24 +37,24 @@ void NFABuilder::operator()(const LookAheadExpr& lookaheadExpr)
     // fa_ = move(construct(lookaheadExpr.leftExpr()).lookahead(construct(lookaheadExpr.rightExpr())));
     NFA lhs = construct(*lookaheadExpr.left);
     NFA rhs = construct(*lookaheadExpr.right);
-    lhs.lookahead(move(rhs));
-    fa_ = move(lhs);
+    lhs.lookahead(std::move(rhs));
+    fa_ = std::move(lhs);
 }
 
 void NFABuilder::operator()(const AlternationExpr& alternationExpr)
 {
     NFA lhs = construct(*alternationExpr.left);
     NFA rhs = construct(*alternationExpr.right);
-    lhs.alternate(move(rhs));
-    fa_ = move(lhs);
+    lhs.alternate(std::move(rhs));
+    fa_ = std::move(lhs);
 }
 
 void NFABuilder::operator()(const ConcatenationExpr& concatenationExpr)
 {
     NFA lhs = construct(*concatenationExpr.left);
     NFA rhs = construct(*concatenationExpr.right);
-    lhs.concatenate(move(rhs));
-    fa_ = move(lhs);
+    lhs.concatenate(std::move(rhs));
+    fa_ = std::move(lhs);
 }
 
 void NFABuilder::operator()(const CharacterExpr& characterExpr)
@@ -74,15 +74,15 @@ void NFABuilder::operator()(const ClosureExpr& closureExpr)
     constexpr unsigned Infinity = numeric_limits<unsigned>::max();
 
     if (xmin == 0 && xmax == 1)
-        fa_ = move(construct(*closureExpr.subExpr).optional());
+        fa_ = std::move(construct(*closureExpr.subExpr).optional());
     else if (xmin == 0 && xmax == Infinity)
-        fa_ = move(construct(*closureExpr.subExpr).recurring());
+        fa_ = std::move(construct(*closureExpr.subExpr).recurring());
     else if (xmin == 1 && xmax == Infinity)
-        fa_ = move(construct(*closureExpr.subExpr).positive());
+        fa_ = std::move(construct(*closureExpr.subExpr).positive());
     else if (xmin < xmax)
-        fa_ = move(construct(*closureExpr.subExpr).repeat(xmin, xmax));
+        fa_ = std::move(construct(*closureExpr.subExpr).repeat(xmin, xmax));
     else if (xmin == xmax)
-        fa_ = move(construct(*closureExpr.subExpr).times(xmin));
+        fa_ = std::move(construct(*closureExpr.subExpr).times(xmin));
     else
         throw invalid_argument { "closureExpr" };
 }
@@ -92,21 +92,21 @@ void NFABuilder::operator()(const BeginOfLineExpr&)
     fa_ = NFA { Symbols::Epsilon };
 }
 
-void NFABuilder::operator()(const EndOfLineExpr& eolExpr)
+void NFABuilder::operator()(const EndOfLineExpr&)
 {
     // NFA lhs;
     // NFA rhs{'\n'};
     // lhs.lookahead(move(rhs));
     // fa_ = move(lhs);
-    fa_ = move(NFA {}.lookahead(NFA { '\n' }));
+    fa_ = std::move(NFA {}.lookahead(NFA { '\n' }));
 }
 
-void NFABuilder::operator()(const EndOfFileExpr& eofExpr)
+void NFABuilder::operator()(const EndOfFileExpr&)
 {
     fa_ = NFA { Symbols::EndOfFile };
 }
 
-void NFABuilder::operator()(const DotExpr& dotExpr)
+void NFABuilder::operator()(const DotExpr&)
 {
     // any character except LF
     fa_ = NFA { '\t' };
@@ -116,7 +116,7 @@ void NFABuilder::operator()(const DotExpr& dotExpr)
     }
 }
 
-void NFABuilder::operator()(const EmptyExpr& emptyExpr)
+void NFABuilder::operator()(const EmptyExpr&)
 {
     fa_ = NFA { Symbols::Epsilon };
 }

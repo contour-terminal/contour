@@ -215,6 +215,7 @@ jobs:
             cmake -DCMAKE_BUILD_TYPE=Debug -DLIBTERMINAL_BUILD_BENCH_HEADLESS=ON -DCONTOUR_QT_VERSION=6 -S . -B build
             cmake --build build/ -j2
             ./build/src/crispy/crispy_test
+            ./build/src/regex_dfa/regex_dfa_test
             ./build/src/vtparser/vtparser_test
             ./build/src/vtbackend/vtbackend_test
             rm -rf _deps build
@@ -257,6 +258,8 @@ jobs:
         run: cmake --build build/
       - name: "test: crispy"
         run: ./build/src/crispy/crispy_test
+      - name: "test: regex_dfa"
+        run: ./build/src/regex_dfa/regex_dfa_test
       - name: "test: vtparser"
         run: ./build/src/vtparser/vtparser_test
       - name: "test: vtbackend"
@@ -326,6 +329,8 @@ jobs:
         run: cmake --build build/ --config Release
       - name: "test: crispy"
         run: .\build\src\crispy\Release\crispy_test.exe
+      - name: "test: regex_dfa"
+        run: .\build\src\regex_dfa\Release\regex_dfa_test.exe
       - name: "test: vtparser"
         run: .\build\src\vtparser\Release\vtparser_test.exe
       - name: "test: vtbackend"
@@ -450,6 +455,8 @@ jobs:
         run: cmake --build build/ -- -j3
       - name: "test: crispy"
         run: ./build/src/crispy/crispy_test
+      - name: "test: regex_dfa"
+        run: ./build/src/regex_dfa/regex_dfa_test
       - name: "test: vtparser"
         run: ./build/src/vtparser/vtparser_test
       - name: "test: vtbackend"
@@ -461,6 +468,7 @@ jobs:
           name: contour-ubuntu2204-tests
           path: |
             build/src/crispy/crispy_test
+            build/src/regex_dfa/regex_dfa_test
             build/src/vtparser/vtparser_test
             build/src/vtbackend/vtbackend_test
             build/src/vtbackend/bench-headless
@@ -516,6 +524,8 @@ jobs:
   #       run: cmake --build build/ -- -j3
   #     - name: "test: crispy"
   #       run: ./build/src/crispy/crispy_test
+  #     - name: "test: regex_dfa"
+  #       run: ./build/src/regex_dfa/regex_dfa_test
   #     - name: "test: vtparser"
   #       run: ./build/src/vtparser/vtparser_test
   #     - name: "test: vtbackend"
@@ -664,6 +674,8 @@ jobs:
         run: cmake --build build/ -- -j3
       - name: "test: crispy"
         run: ./build/src/crispy/crispy_test
+      - name: "test: regex_dfa"
+        run: ./build/src/regex_dfa/regex_dfa_test
       - name: "test: vtparser"
         run: ./build/src/vtparser/vtparser_test
       - name: "test: vtbackend"
@@ -728,6 +740,8 @@ jobs:
                           valgrind
       - name: "test: crispy (via valgrind)"
         run: valgrind --error-exitcode=64 ./build/src/crispy/crispy_test
+      - name: "test: regex_dfa"
+        run: valgrind --error-exitcode=64 ./build/src/regex_dfa/regex_dfa_test
       - name: "test: vtparser (via valgrind)"
         run: valgrind --error-exitcode=64 ./build/src/vtparser/vtparser_test
       - name: "test: vtbackend (via valgrind)"

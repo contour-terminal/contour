@@ -35,18 +35,18 @@ class DFAMinimizer
     using PartitionVec = std::list<StateIdVec>;
 
     void constructPartitions();
-    StateIdVec nonAcceptStates() const;
-    bool containsInitialState(const StateIdVec& S) const;
-    bool isMultiInitialState(StateId s) const;
-    PartitionVec::iterator findGroup(StateId s);
-    int partitionId(StateId s) const;
-    PartitionVec split(const StateIdVec& S) const;
-    DFA constructFromPartitions(const PartitionVec& P) const;
-    std::optional<StateId> containsBacktrackState(const StateIdVec& Q) const;
+    [[nodiscard]] StateIdVec nonAcceptStates() const;
+    [[nodiscard]] bool containsInitialState(const StateIdVec& S) const;
+    [[nodiscard]] bool isMultiInitialState(StateId s) const;
+    [[nodiscard]] PartitionVec::iterator findGroup(StateId s);
+    [[nodiscard]] int partitionId(StateId s) const;
+    [[nodiscard]] PartitionVec split(const StateIdVec& S) const;
+    [[nodiscard]] DFA constructFromPartitions(const PartitionVec& P) const;
+    [[nodiscard]] std::optional<StateId> containsBacktrackState(const StateIdVec& Q) const;
 
     static void dumpGroups(const PartitionVec& T);
 
-    StateId targetStateId(StateId oldId) const
+    [[nodiscard]] StateId targetStateId(StateId oldId) const
     {
         auto i = targetStateIdMap_.find(oldId);
         assert(i != targetStateIdMap_.end());

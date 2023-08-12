@@ -10,14 +10,14 @@
 #include <regex_dfa/DFABuilder.h>
 #include <regex_dfa/MultiDFA.h>
 
+#include <catch2/catch.hpp>
+
 #include <memory>
 #include <sstream>
 
-#include <klex/util/testing.h>
-
 using namespace regex_dfa;
 
-TEST(regex_DFABuilder, shadowing)
+TEST_CASE("regex_DFABuilder.shadowing")
 {
     Compiler cc;
     cc.parse(std::make_unique<std::stringstream>(R"(
@@ -27,7 +27,7 @@ TEST(regex_DFABuilder, shadowing)
     // rule 2 is overshadowed by rule 1
     Compiler::OvershadowMap overshadows;
     DFA dfa = cc.compileDFA(&overshadows);
-    ASSERT_EQ(1, overshadows.size());
-    EXPECT_EQ(2, overshadows[0].first);  // overshadowee
-    EXPECT_EQ(1, overshadows[0].second); // overshadower
+    REQUIRE(1 == overshadows.size());
+    CHECK(2 == overshadows[0].first);  // overshadowee
+    CHECK(1 == overshadows[0].second); // overshadower
 }

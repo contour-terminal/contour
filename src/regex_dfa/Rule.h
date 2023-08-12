@@ -29,9 +29,9 @@ struct Rule
     std::string pattern;
     std::unique_ptr<RegExpr> regexpr = nullptr;
 
-    bool isIgnored() const noexcept { return tag == IgnoreTag; }
+    [[nodiscard]] bool isIgnored() const noexcept { return tag == IgnoreTag; }
 
-    Rule clone() const
+    [[nodiscard]] Rule clone() const
     {
         return regexpr ? Rule { line,
                                 column,
@@ -45,20 +45,20 @@ struct Rule
 
     Rule() = default;
 
-    Rule(unsigned _line,
-         unsigned _column,
-         Tag _tag,
-         std::vector<std::string> _conditions,
-         std::string _name,
-         std::string _pattern,
-         std::unique_ptr<RegExpr> _regexpr = nullptr):
-        line { _line },
-        column { _column },
-        tag { _tag },
-        conditions { _conditions },
-        name { _name },
-        pattern { _pattern },
-        regexpr { std::move(_regexpr) }
+    Rule(unsigned line,
+         unsigned column,
+         Tag tag,
+         std::vector<std::string> conditions,
+         std::string name,
+         std::string pattern,
+         std::unique_ptr<RegExpr> regexpr = nullptr):
+        line { line },
+        column { column },
+        tag { tag },
+        conditions { std::move(conditions) },
+        name { std::move(name) },
+        pattern { std::move(pattern) },
+        regexpr { std::move(regexpr) }
     {
     }
 
@@ -120,18 +120,18 @@ struct formatter<regex_dfa::Rule>
     {
         if (!v.conditions.empty())
         {
-            format_to(ctx.out(), "<");
+            fmt::format_to(ctx.out(), "<");
             for (size_t i = 0; i < v.conditions.size(); ++i)
                 if (i != 0)
-                    format_to(ctx.out(), ", {}", v.conditions[i]);
+                    fmt::format_to(ctx.out(), ", {}", v.conditions[i]);
                 else
-                    format_to(ctx.out(), "{}", v.conditions[i]);
-            format_to(ctx.out(), ">");
+                    fmt::format_to(ctx.out(), "{}", v.conditions[i]);
+            fmt::format_to(ctx.out(), ">");
         }
         if (v.tag == regex_dfa::IgnoreTag)
-            return format_to(ctx.out(), "{}({}) ::= {}", v.name, "ignore", v.pattern);
+            return fmt::format_to(ctx.out(), "{}({}) ::= {}", v.name, "ignore", v.pattern);
         else
-            return format_to(ctx.out(), "{}({}) ::= {}", v.name, v.tag, v.pattern);
+            return fmt::format_to(ctx.out(), "{}({}) ::= {}", v.name, v.tag, v.pattern);
     }
 };
 } // namespace fmt

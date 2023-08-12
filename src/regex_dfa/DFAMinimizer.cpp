@@ -101,9 +101,9 @@ DFAMinimizer::PartitionVec DFAMinimizer::split(const StateIdVec& S) const
         {
             DEBUG("split: {} on character '{}' into {} sets", to_string(S), (char) c, t_i.size());
             PartitionVec result;
-            for (const pair<int, StateIdVec>& t: t_i)
+            for (auto&& t: t_i)
             {
-                result.emplace_back(move(t.second));
+                result.emplace_back(std::move(t.second));
                 DEBUG(" partition {}: {}", t.first, t.second);
             }
             return result;
@@ -125,7 +125,7 @@ DFAMinimizer::PartitionVec DFAMinimizer::split(const StateIdVec& S) const
                 main.emplace_back(s);
 
             if (!main.empty())
-                result.emplace_back(move(main));
+                result.emplace_back(std::move(main));
         }
     }
 
@@ -136,7 +136,7 @@ DFAMinimizer::PartitionVec DFAMinimizer::split(const StateIdVec& S) const
 void DFAMinimizer::dumpGroups(const PartitionVec& T)
 {
     DEBUG("dumping groups ({})", T.size());
-    int groupNr = 0;
+    [[maybe_unused]] int groupNr = 0;
     for (const auto& t: T)
     {
         stringstream sstr;
@@ -176,7 +176,7 @@ MultiDFA DFAMinimizer::constructMultiDFA()
         dfamin.setTransition(dfamin.initialState(), static_cast<Symbol>(t), t);
     }
 
-    return MultiDFA { move(initialStates), move(dfamin) };
+    return MultiDFA { std::move(initialStates), std::move(dfamin) };
 }
 
 void DFAMinimizer::constructPartitions()
@@ -253,9 +253,9 @@ DFA DFAMinimizer::constructFromPartitions(const PartitionVec& P) const
     for (const StateIdVec& p: P)
     {
         const StateId s = *p.begin();
-        for (const pair<Symbol, StateId>& transition: dfa_.stateTransitions(s))
+        for (pair<Symbol, StateId> const transition: dfa_.stateTransitions(s))
         {
-            const int t_i = partitionId(transition.second);
+            auto const t_i = partitionId(transition.second);
             DEBUG("map p{} --({})--> p{}", p_i, prettySymbol(transition.first), t_i);
             dfamin.setTransition(p_i, transition.first, t_i);
         }

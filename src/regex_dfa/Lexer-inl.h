@@ -17,17 +17,6 @@
 namespace regex_dfa
 {
 
-static inline std::string quoted(char ch)
-{
-    if (ch < 0)
-        return "<<EOF>>";
-    if (ch == '\n')
-        return "\\n";
-    if (ch == ' ')
-        return "\\s";
-    return fmt::format("{}", ch);
-}
-
 static inline std::string quotedString(const std::string& s)
 {
     std::stringstream sstr;
@@ -115,8 +104,7 @@ inline size_t Lexer<Token, Machine, RequiresBeginOfLine, Debug>::getFileSize()
 }
 
 template <typename Token, typename Machine, const bool RequiresBeginOfLine, const bool Debug>
-inline std::string Lexer<Token, Machine, RequiresBeginOfLine, Debug>::stateName(StateId s,
-                                                                                const std::string_view& n)
+inline std::string Lexer<Token, Machine, RequiresBeginOfLine, Debug>::stateName(StateId s, std::string_view n)
 {
     switch (s)
     {
@@ -247,7 +235,7 @@ inline Token Lexer<Token, Machine, RequiresBeginOfLine, Debug>::recognizeOne()
                oldOffset_,
                offset_,
                quotedString(word_),
-               quoted(currentChar_));
+               prettySymbol(currentChar_));
 
     if (!isAcceptState(state))
         throw LexerError { offset_ };
@@ -286,9 +274,9 @@ inline StateId Lexer<Token, Machine, RequiresBeginOfLine, Debug>::delta(StateId 
 }
 
 template <typename Token, typename Machine, const bool RequiresBeginOfLine, const bool Debug>
-inline bool Lexer<Token, Machine, RequiresBeginOfLine, Debug>::isAcceptState(StateId id) const
+inline bool Lexer<Token, Machine, RequiresBeginOfLine, Debug>::isAcceptState(StateId state) const noexcept
 {
-    return def_.acceptStates.find(id) != def_.acceptStates.end();
+    return def_.acceptStates.find(state) != def_.acceptStates.end();
 }
 
 template <typename Token, typename Machine, const bool RequiresBeginOfLine, const bool Debug>

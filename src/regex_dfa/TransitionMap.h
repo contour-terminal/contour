@@ -45,17 +45,17 @@ class TransitionMap
      *
      * @returns the transition from (currentState, charCat) to (nextState) or ErrorState if not defined.
      */
-    StateId apply(StateId currentState, Symbol charCat) const;
+    [[nodiscard]] StateId apply(StateId currentState, Symbol charCat) const;
 
     /**
      * Retrieves a list of all available states.
      */
-    std::vector<StateId> states() const;
+    [[nodiscard]] std::vector<StateId> states() const;
 
     /**
      * Retrieves a map of all transitions from given state @p inputState.
      */
-    std::map<Symbol, StateId> map(StateId inputState) const;
+    [[nodiscard]] std::map<Symbol, StateId> map(StateId inputState) const;
 
   private:
     Container mapping_;

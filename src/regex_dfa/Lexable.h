@@ -29,9 +29,9 @@ namespace regex_dfa
 //! Runtime exception that is getting thrown when a word could not be recognized.
 struct LexerError: public std::runtime_error
 {
-    explicit LexerError(unsigned int _offset):
-        std::runtime_error { fmt::format("[{}] Failed to lexically recognize a word.", _offset) },
-        offset { _offset }
+    explicit LexerError(unsigned int offset):
+        std::runtime_error { fmt::format("[{}] Failed to lexically recognize a word.", offset) },
+        offset { offset }
     {
     }
 
@@ -72,7 +72,7 @@ class LexerIterator
     /**
      * Retrieves the default DFA machine that is used to recognize words.
      */
-    Machine defaultMachine() const noexcept;
+    [[nodiscard]] Machine defaultMachine() const noexcept;
 
     /**
      * Sets the active deterministic finite automaton to use for recognizing words.
@@ -82,29 +82,29 @@ class LexerIterator
      */
     Machine setMachine(Machine machine);
 
-    const TokenInfo& operator*() const noexcept { return currentToken_; }
-    auto offset() const noexcept { return currentToken_.offset; }
-    auto literal() const noexcept -> const std::string& { return currentToken_.literal; }
-    auto token() const noexcept { return currentToken_.token; }
-    auto name() const noexcept { return name(token()); }
+    [[nodiscard]] const TokenInfo& operator*() const noexcept { return currentToken_; }
+    [[nodiscard]] auto offset() const noexcept { return currentToken_.offset; }
+    [[nodiscard]] auto literal() const noexcept -> const std::string& { return currentToken_.literal; }
+    [[nodiscard]] auto token() const noexcept { return currentToken_.token; }
+    [[nodiscard]] auto name() const noexcept { return name(token()); }
 
-    bool operator==(const LexerIterator& rhs) const noexcept;
-    bool operator!=(const LexerIterator& rhs) const noexcept;
+    [[nodiscard]] bool operator==(const LexerIterator& rhs) const noexcept;
+    [[nodiscard]] bool operator!=(const LexerIterator& rhs) const noexcept;
 
     LexerIterator& operator++();
     LexerIterator& operator++(int);
 
   private:
     void recognize();
-    Token recognizeOne();
+    [[nodiscard]] Token recognizeOne();
 
     // ---------------------------------------------------------------------------------
     // state helpers
 
     static constexpr StateId BadState = std::numeric_limits<StateId>::max();
 
-    StateId getInitialState() const noexcept;
-    bool isAcceptState(StateId state) const;
+    [[nodiscard]] StateId getInitialState() const noexcept;
+    [[nodiscard]] bool isAcceptState(StateId state) const;
 
     /**
      * Retrieves the next state for given input state and input symbol.
@@ -114,13 +114,13 @@ class LexerIterator
      * state.
      * @returns the next state to transition to.
      */
-    StateId delta(StateId currentState, Symbol inputSymbol) const;
+    [[nodiscard]] StateId delta(StateId currentState, Symbol inputSymbol) const;
 
     // ---------------------------------------------------------------------------------
     // stream helpers
 
-    int currentChar() const noexcept { return currentChar_; }
-    bool eof() const noexcept { return !source_->good(); }
+    [[nodiscard]] int currentChar() const noexcept { return currentChar_; }
+    [[nodiscard]] bool eof() const noexcept { return !source_->good(); }
     Symbol nextChar();
     void rollback();
 
@@ -128,13 +128,13 @@ class LexerIterator
     // debugging helpers
 
     template <typename... Args>
-    void tracef(const char* msg, Args&&... args) const;
+    void tracef(fmt::format_string<Args...> msg, Args&&... args) const;
 
-    const std::string& name(Token t) const;
+    [[nodiscard]] const std::string& name(Token t) const;
 
-    std::string toString(const std::deque<StateId>& stack);
-    Token token(StateId s) const;
-    static std::string stateName(StateId s);
+    [[nodiscard]] std::string toString(const std::deque<StateId>& stack);
+    [[nodiscard]] Token token(StateId s) const;
+    [[nodiscard]] static std::string stateName(StateId s);
 
   private:
     const LexerDef* def_ = nullptr;
@@ -243,7 +243,7 @@ template <typename Token, typename Machine, const bool RequiresBeginOfLine, cons
 LexerIterator<Token, Machine, RequiresBeginOfLine, Trace>::LexerIterator(const LexerDef& ld,
                                                                          std::istream& source,
                                                                          TraceFn trace):
-    def_ { &ld }, trace_ { trace }, source_ { &source }
+    def_ { &ld }, trace_ { std::move(trace) }, source_ { &source }
 {
     recognize();
 }
@@ -322,7 +322,7 @@ inline Token LexerIterator<Token, Machine, RequiresBeginOfLine, Trace>::recogniz
     stack.push_back(BadState);
 
     if constexpr (Trace)
-        tracef("recognize: startState {}, offset {} {}",
+        tracef("recognizeOne: startState {}, offset {} {}",
                stateName(state),
                offset_,
                isBeginOfLine_ ? "BOL" : "no-BOL");
@@ -344,7 +344,7 @@ inline Token LexerIterator<Token, Machine, RequiresBeginOfLine, Trace>::recogniz
     while (state != BadState && !isAcceptState(state))
     {
         if constexpr (Trace)
-            tracef("recognize: backtrack: current state {} {}; stack: {}",
+            tracef("recognizeOne: backtrack: current state {} {}; stack: {}",
                    stateName(state),
                    isAcceptState(state) ? "accepting" : "non-accepting",
                    toString(stack));
@@ -391,7 +391,7 @@ inline Token LexerIterator<Token, Machine, RequiresBeginOfLine, Trace>::recogniz
                currentToken_.offset,
                offset_,
                quotedString(currentToken_.literal),
-               quoted(currentChar_));
+               prettySymbol(currentChar_));
 
     if (!isAcceptState(state))
         throw LexerError { offset_ };
@@ -451,7 +451,7 @@ inline Symbol LexerIterator<Token, Machine, RequiresBeginOfLine, Trace>::nextCha
         currentChar_ = ch;
         buffered_.resize(buffered_.size() - 1);
         if constexpr (Trace)
-            tracef("Lexer:{}: advance '{}'", offset_, prettySymbol(ch));
+            tracef("Lexer:{}: advance (buffered) '{}'", offset_, prettySymbol(ch));
         offset_++;
         return ch;
     }
@@ -459,7 +459,7 @@ inline Symbol LexerIterator<Token, Machine, RequiresBeginOfLine, Trace>::nextCha
     if (!source_->good())
     { // EOF or I/O error
         if constexpr (Trace)
-            tracef("Lexer:{}: advance '{}'", offset_, "EOF");
+            tracef("Lexer:{}: advance '<<{}>>'", offset_, "EOF");
         return Symbols::EndOfFile;
     }
 
@@ -487,7 +487,8 @@ inline void LexerIterator<Token, Machine, RequiresBeginOfLine, Trace>::rollback(
     if (currentToken_.literal.back() != -1)
     {
         offset_--;
-        buffered_.push_back(currentToken_.literal.back());
+        buffered_.push_back(static_cast<int>(static_cast<signed char>(currentToken_.literal.back())));
+        tracef("Lexer:{}: rollback '{}'", offset_, prettySymbol(buffered_.back()));
     }
 }
 
@@ -495,7 +496,7 @@ inline void LexerIterator<Token, Machine, RequiresBeginOfLine, Trace>::rollback(
 
 template <typename Token, typename Machine, const bool RequiresBeginOfLine, const bool Trace>
 template <typename... Args>
-inline void LexerIterator<Token, Machine, RequiresBeginOfLine, Trace>::tracef(const char* msg,
+inline void LexerIterator<Token, Machine, RequiresBeginOfLine, Trace>::tracef(fmt::format_string<Args...> msg,
                                                                               Args&&... args) const
 {
     if constexpr (Trace)
@@ -584,7 +585,7 @@ struct formatter<regex_dfa::LexerIterator<Token, Machine, RequiresBeginOfLine, T
     template <typename FormatContext>
     constexpr auto format(const LexerIterator& v, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "{} ({})", v.literal(), v.name());
+        return fmt::format_to(ctx.out(), "{} ({})", v.literal(), v.name());
     }
 };
 } // namespace fmt

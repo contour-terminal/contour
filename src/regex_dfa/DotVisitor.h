@@ -17,7 +17,7 @@ namespace regex_dfa
 class DotVisitor
 {
   public:
-    virtual ~DotVisitor() {}
+    virtual ~DotVisitor() = default;
 
     virtual void start(StateId initialState) = 0;
     virtual void visitNode(StateId number, bool start, bool accept) = 0;

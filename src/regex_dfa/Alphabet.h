@@ -25,17 +25,17 @@ class Alphabet
     using set_type = std::set<Symbol>;
     using iterator = set_type::iterator;
 
-    size_t size() const noexcept { return alphabet_.size(); }
+    [[nodiscard]] size_t size() const noexcept { return _alphabet.size(); }
 
     void insert(Symbol ch);
 
-    std::string to_string() const;
+    [[nodiscard]] std::string to_string() const;
 
-    const iterator begin() const { return alphabet_.begin(); }
-    const iterator end() const { return alphabet_.end(); }
+    [[nodiscard]] iterator begin() const { return _alphabet.begin(); }
+    [[nodiscard]] iterator end() const { return _alphabet.end(); }
 
   private:
-    set_type alphabet_;
+    set_type _alphabet;
 };
 
 } // namespace regex_dfa
@@ -54,7 +54,7 @@ struct formatter<regex_dfa::Alphabet>
     template <typename FormatContext>
     constexpr auto format(const regex_dfa::Alphabet& v, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "{}", v.to_string());
+        return fmt::format_to(ctx.out(), "{}", v.to_string());
     }
 };
 } // namespace fmt

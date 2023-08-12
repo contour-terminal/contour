@@ -32,10 +32,10 @@ namespace regex_dfa
 
 void Alphabet::insert(Symbol ch)
 {
-    if (alphabet_.find(ch) == alphabet_.end())
+    if (_alphabet.find(ch) == _alphabet.end())
     {
         DEBUG("Alphabet: insert '{:}'", prettySymbol(ch));
-        alphabet_.insert(ch);
+        _alphabet.insert(ch);
     }
 }
 
@@ -45,7 +45,7 @@ string Alphabet::to_string() const
 
     sstr << '{';
 
-    for (Symbol c: alphabet_)
+    for (Symbol c: _alphabet)
         sstr << prettySymbol(c);
 
     sstr << '}';

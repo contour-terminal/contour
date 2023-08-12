@@ -40,7 +40,7 @@ Alphabet NFA::alphabet() const
 
     for (const TransitionMap& transitions: states_)
     {
-        for (const pair<Symbol, StateIdVec>& t: transitions)
+        for (auto const& t: transitions)
         {
             switch (t.first)
             {
@@ -96,9 +96,9 @@ StateIdVec NFA::epsilonTransitions(StateId s) const
     StateIdVec t;
 
     const TransitionMap& transitions = stateTransitions(s);
-    for (const pair<Symbol, StateIdVec>& p: transitions)
-        if (p.first == Symbols::Epsilon)
-            t.insert(t.end(), p.second.begin(), p.second.end());
+    for (auto&& [p, q]: transitions)
+        if (p == Symbols::Epsilon)
+            t.insert(t.end(), q.begin(), q.end());
 
     return t;
 }
@@ -170,12 +170,12 @@ void NFA::prepareStateIds(StateId baseId)
     AcceptMap remapped;
     for (auto& a: acceptTags_)
         remapped[baseId + a.first] = a.second;
-    acceptTags_ = move(remapped);
+    acceptTags_ = std::move(remapped);
 
     BacktrackingMap backtracking;
     for (const auto& bt: backtrackStates_)
         backtracking[baseId + bt.first] = baseId + bt.second;
-    backtrackStates_ = move(backtracking);
+    backtrackStates_ = std::move(backtracking);
 }
 
 NFA NFA::join(const map<string, NFA>& mappings)
@@ -186,7 +186,7 @@ NFA NFA::join(const map<string, NFA>& mappings)
     NFA multi;
 
     for (size_t i = 0; i <= mappings.size(); ++i)
-        multi.createState();
+        (void) multi.createState();
 
     Symbol transitionSymbol = 0;
     for (const auto& mapping: mappings)
@@ -212,7 +212,7 @@ NFA& NFA::lookahead(NFA&& rhs)
 {
     if (empty())
     {
-        *this = move(rhs);
+        *this = std::move(rhs);
         backtrackStates_[acceptState_] = initialState_;
     }
     else
@@ -301,7 +301,7 @@ NFA& NFA::recurring()
 
 NFA& NFA::positive()
 {
-    return concatenate(move(clone().recurring()));
+    return concatenate(std::move(clone().recurring()));
 }
 
 NFA& NFA::times(unsigned factor)
@@ -328,7 +328,7 @@ NFA& NFA::repeat(unsigned minimum, unsigned maximum)
         times(minimum);
 
     for (unsigned n = minimum + 1; n <= maximum; n++)
-        alternate(move(factor.clone().times(n)));
+        alternate(std::move(factor.clone().times(n)));
 
     if (minimum == 0)
         optional();
@@ -357,11 +357,11 @@ void NFA::visit(DotVisitor& v) const
     for (StateId sourceState = 0, sE = size(); sourceState != sE; ++sourceState)
     {
         map<StateId, vector<Symbol>> reversed;
-        for (const pair<Symbol, StateIdVec>& transitions: states_[sourceState])
+        for (pair<Symbol, StateIdVec> transitions: states_[sourceState])
             for (StateId targetState: transitions.second)
                 reversed[targetState].push_back(transitions.first /* symbol */);
 
-        for (const pair<StateId, vector<Symbol>>& tr: reversed)
+        for (pair<StateId, vector<Symbol>> tr: reversed)
         {
             StateId targetState = tr.first;
             const vector<Symbol>& T = tr.second;

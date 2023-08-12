@@ -29,7 +29,7 @@ using AcceptMap = std::map<StateId, Tag>;
 /**
  * Returns a human readable string of @p S, such as "{n0, n1, n2}".
  */
-std::string to_string(const StateIdVec& S, std::string_view stateLabelPrefix = "n");
+[[nodiscard]] std::string to_string(const StateIdVec& S, std::string_view stateLabelPrefix = "n");
 
 } // namespace regex_dfa
 
@@ -47,7 +47,7 @@ struct formatter<regex_dfa::StateIdVec>
     template <typename FormatContext>
     constexpr auto format(const regex_dfa::StateIdVec& v, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "{}", regex_dfa::to_string(v));
+        return fmt::format_to(ctx.out(), "{}", regex_dfa::to_string(v));
     }
 };
 } // namespace fmt

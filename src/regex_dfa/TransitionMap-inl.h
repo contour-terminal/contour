@@ -37,10 +37,10 @@ inline std::vector<StateId> TransitionMap::states() const
     return v;
 }
 
-inline std::map<Symbol, StateId> TransitionMap::map(StateId s) const
+inline std::map<Symbol, StateId> TransitionMap::map(StateId inputState) const
 {
     std::map<Symbol, StateId> m;
-    if (auto mapping = mapping_.find(s); mapping != mapping_.end())
+    if (auto mapping = mapping_.find(inputState); mapping != mapping_.end())
         for (const auto& i: mapping->second)
             m[i.first] = i.second;
     return m;

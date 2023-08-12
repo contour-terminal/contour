@@ -21,7 +21,7 @@ MultiDFA constructMultiDFA(map<string, DFA> many)
     StateId q0 = 1;
     for (pair<const string, DFA>& p: many)
     {
-        multiDFA.dfa.append(move(p.second), q0);
+        multiDFA.dfa.append(std::move(p.second), q0);
         multiDFA.initialStates[p.first] = q0;
         multiDFA.dfa.setTransition(0, static_cast<Symbol>(q0), q0);
         q0++;

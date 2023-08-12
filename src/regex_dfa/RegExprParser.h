@@ -24,9 +24,9 @@ class RegExprParser
   public:
     RegExprParser();
 
-    RegExpr parse(std::string_view expr, int line, int column);
+    [[nodiscard]] RegExpr parse(std::string_view expr, unsigned line, unsigned column);
 
-    RegExpr parse(std::string_view expr) { return parse(std::move(expr), 1, 1); }
+    [[nodiscard]] RegExpr parse(std::string_view expr) { return parse(expr, 1, 1); }
 
     class UnexpectedToken: public std::runtime_error
     {
@@ -44,15 +44,17 @@ class RegExprParser
         UnexpectedToken(unsigned int line, unsigned int column, int actual, int expected):
             UnexpectedToken { line,
                               column,
-                              actual == -1 ? "EOF" : fmt::format("{}", static_cast<char>(actual)),
+                              std::char_traits<char>::eq(actual, std::char_traits<char>::eof())
+                                  ? "EOF"
+                                  : fmt::format("{}", static_cast<char>(actual)),
                               std::string(1, static_cast<char>(expected)) }
         {
         }
 
-        unsigned int line() const noexcept { return line_; }
-        unsigned int column() const noexcept { return column_; }
-        const std::string& actual() const noexcept { return actual_; }
-        const std::string& expected() const noexcept { return expected_; }
+        [[nodiscard]] unsigned int line() const noexcept { return line_; }
+        [[nodiscard]] unsigned int column() const noexcept { return column_; }
+        [[nodiscard]] const std::string& actual() const noexcept { return actual_; }
+        [[nodiscard]] const std::string& expected() const noexcept { return expected_; }
 
       private:
         unsigned int line_;
@@ -62,24 +64,27 @@ class RegExprParser
     };
 
   private:
-    int currentChar() const;
-    bool eof() const noexcept { return currentChar() == -1; }
-    bool consumeIf(int ch);
+    [[nodiscard]] int currentChar() const;
+    [[nodiscard]] bool eof() const noexcept
+    {
+        return std::char_traits<char>::eq(currentChar(), std::char_traits<char>::eof());
+    }
+    [[nodiscard]] bool consumeIf(int ch);
     void consume(int ch);
     int consume();
-    unsigned parseInt();
+    [[nodiscard]] unsigned parseInt();
 
-    RegExpr parse();                                 // expr
-    RegExpr parseExpr();                             // lookahead
-    RegExpr parseLookAheadExpr();                    // alternation ('/' alternation)?
-    RegExpr parseAlternation();                      // concatenation ('|' concatenation)*
-    RegExpr parseConcatenation();                    // closure (closure)*
-    RegExpr parseClosure();                          // atom ['*' | '?' | '{' NUM [',' NUM] '}']
-    RegExpr parseAtom();                             // character | characterClass | '(' expr ')'
-    RegExpr parseCharacterClass();                   // '[' characterClassFragment+ ']'
+    [[nodiscard]] RegExpr parse();                   // expr
+    [[nodiscard]] RegExpr parseExpr();               // lookahead
+    [[nodiscard]] RegExpr parseLookAheadExpr();      // alternation ('/' alternation)?
+    [[nodiscard]] RegExpr parseAlternation();        // concatenation ('|' concatenation)*
+    [[nodiscard]] RegExpr parseConcatenation();      // closure (closure)*
+    [[nodiscard]] RegExpr parseClosure();            // atom ['*' | '?' | '{' NUM [',' NUM] '}']
+    [[nodiscard]] RegExpr parseAtom();               // character | characterClass | '(' expr ')'
+    [[nodiscard]] RegExpr parseCharacterClass();     // '[' characterClassFragment+ ']'
     void parseCharacterClassFragment(SymbolSet& ss); // namedClass | character | character '-' character
     void parseNamedCharacterClass(SymbolSet& ss);    // '[' ':' NAME ':' ']'
-    Symbol parseSingleCharacter();
+    [[nodiscard]] Symbol parseSingleCharacter();
 
   private:
     std::string_view input_;

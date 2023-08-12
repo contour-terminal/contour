@@ -9,10 +9,10 @@
 
 #include <fmt/format.h>
 
-#include <klex/util/testing.h>
+#include <catch2/catch.hpp>
 
-TEST(regex_State, to_string)
+TEST_CASE("regex_State.to_string")
 {
     regex_dfa::StateIdVec v { 1, 2, 3 };
-    EXPECT_EQ("{n1, n2, n3}", fmt::format("{}", v));
+    CHECK("{n1, n2, n3}" == fmt::format("{}", v));
 }

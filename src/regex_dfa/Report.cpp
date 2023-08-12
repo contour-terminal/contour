@@ -5,10 +5,10 @@
 // file except in compliance with the License. You may obtain a copy of
 // the License at: http://opensource.org/licenses/MIT
 
+#include <regex_dfa/Report.h>
+
 #include <iostream>
 #include <sstream>
-
-#include <regex_dfa/Report.h>
 
 using namespace std;
 using namespace regex_dfa;
@@ -43,7 +43,7 @@ void ConsoleReport::onMessage(Message&& message)
 // {{{ BufferedReport
 void BufferedReport::onMessage(Message&& msg)
 {
-    messages_.emplace_back(move(msg));
+    messages_.emplace_back(std::move(msg));
 }
 
 void BufferedReport::clear()

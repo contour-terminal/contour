@@ -93,7 +93,7 @@ DFA DFABuilder::construct(OvershadowMap* overshadows)
     while (!workList.empty())
     {
         const StateIdVec q =
-            move(workList.front()); // each set q represents a valid configuration from the NFA
+            std::move(workList.front()); // each set q represents a valid configuration from the NFA
         workList.pop_front();
         const StateId q_i = *configurationNumber(Q, q);
 
@@ -109,7 +109,7 @@ DFA DFABuilder::construct(OvershadowMap* overshadows)
                     Q.emplace_back(eclosure);
                     t_i = StateId { Q.size() - 1 }; // equal to configurationNumber(Q, eclosure);
                     T.insert(q_i, c, *t_i);         // T[q][c] = eclosure;
-                    workList.emplace_back(move(eclosure));
+                    workList.emplace_back(std::move(eclosure));
                 }
                 eclosure.clear();
             }
@@ -166,7 +166,7 @@ DFA DFABuilder::constructDFA(const vector<StateIdVec>& Q,
 
     // observe mapping from q_i to d_i
     for (auto const& [q_i, branch]: T.transitions)
-        for (auto const [c, t_i]: branch)
+        for (auto&& [c, t_i]: branch)
             dfa.setTransition(q_i, c, t_i);
 
     // q_0 becomes d_0 (initial state)

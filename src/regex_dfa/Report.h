@@ -7,6 +7,8 @@
 
 #pragma once
 
+#include <regex_dfa/SourceLocation.h>
+
 #include <fmt/format.h>
 
 #include <algorithm>
@@ -14,8 +16,6 @@
 #include <string>
 #include <system_error>
 #include <vector>
-
-#include <regex_dfa/SourceLocation.h>
 
 namespace regex_dfa
 {
@@ -196,7 +196,7 @@ struct formatter<regex_dfa::SourceLocation>
     template <typename FormatContext>
     constexpr auto format(const regex_dfa::SourceLocation& sloc, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "{} ({}-{})", sloc.filename, sloc.offset, sloc.offset + sloc.count);
+        return fmt::format_to(ctx.out(), "{} ({}-{})", sloc.filename, sloc.offset, sloc.offset + sloc.count);
     }
 };
 } // namespace fmt
@@ -217,7 +217,7 @@ struct formatter<regex_dfa::Report::Message>
     template <typename FormatContext>
     constexpr auto format(const Message& v, FormatContext& ctx)
     {
-        return format_to(ctx.out(), "{}", v.to_string());
+        return fmt::format_to(ctx.out(), "{}", v.to_string());
     }
 };
 } // namespace fmt

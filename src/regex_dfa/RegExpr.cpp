@@ -45,7 +45,7 @@ std::string to_string(const RegExpr& re)
 {
     return visit(
         overloaded {
-            [&](const ClosureExpr& e) {
+            [&](ClosureExpr const& e) {
                 stringstream sstr;
                 sstr << embrace(re, *e.subExpr);
                 if (e.minimumOccurrences == 0 && e.maximumOccurrences == 1)
@@ -62,12 +62,12 @@ std::string to_string(const RegExpr& re)
             [&](const ConcatenationExpr& e) { return embrace(re, *e.left) + embrace(re, *e.right); },
             [&](const LookAheadExpr& e) { return embrace(re, *e.left) + "/" + embrace(re, *e.right); },
             [](const CharacterExpr& e) { return string(1, e.value); },
-            [](const EndOfFileExpr& e) { return string { "<<EOF>>" }; },
-            [](const BeginOfLineExpr& e) { return string { "^" }; },
-            [](const EndOfLineExpr& e) { return string { "$" }; },
-            [](const CharacterClassExpr& e) { return e.symbols.to_string(); },
-            [](const DotExpr& e) { return string { "." }; },
-            [](const EmptyExpr& e) { return string {}; },
+            [](EndOfFileExpr) { return string { "<<EOF>>" }; },
+            [](BeginOfLineExpr) { return string { "^" }; },
+            [](EndOfLineExpr) { return string { "$" }; },
+            [](CharacterClassExpr const& e) { return e.symbols.to_string(); },
+            [](DotExpr) { return string { "." }; },
+            [](EmptyExpr) { return string {}; },
         },
         re);
 }
@@ -75,17 +75,17 @@ std::string to_string(const RegExpr& re)
 int precedence(const RegExpr& regex)
 {
     return visit(overloaded {
-                     [](const AlternationExpr& e) { return 1; },
-                     [](const BeginOfLineExpr& e) { return 4; },
-                     [](const CharacterClassExpr& e) { return 4; },
-                     [](const CharacterExpr& e) { return 4; },
-                     [](const ClosureExpr& e) { return 3; },
-                     [](const ConcatenationExpr& e) { return 2; },
-                     [](const DotExpr& e) { return 4; },
-                     [](const EmptyExpr& e) { return 4; },
-                     [](const EndOfFileExpr& e) { return 4; },
-                     [](const EndOfLineExpr& e) { return 4; },
-                     [](const LookAheadExpr& e) { return 0; },
+                     [](const AlternationExpr&) { return 1; },
+                     [](const BeginOfLineExpr&) { return 4; },
+                     [](const CharacterClassExpr&) { return 4; },
+                     [](const CharacterExpr&) { return 4; },
+                     [](const ClosureExpr&) { return 3; },
+                     [](const ConcatenationExpr&) { return 2; },
+                     [](const DotExpr&) { return 4; },
+                     [](const EmptyExpr&) { return 4; },
+                     [](const EndOfFileExpr&) { return 4; },
+                     [](const EndOfLineExpr&) { return 4; },
+                     [](const LookAheadExpr&) { return 0; },
                  },
                  regex);
 }
@@ -96,17 +96,17 @@ bool containsBeginOfLine(const RegExpr& regex)
                      [](const AlternationExpr& e) {
                          return containsBeginOfLine(*e.left) || containsBeginOfLine(*e.right);
                      },
-                     [](const BeginOfLineExpr& e) { return true; },
-                     [](const CharacterClassExpr& e) { return false; },
-                     [](const CharacterExpr& e) { return false; },
+                     [](const BeginOfLineExpr&) { return true; },
+                     [](const CharacterClassExpr&) { return false; },
+                     [](const CharacterExpr&) { return false; },
                      [](const ClosureExpr& e) { return containsBeginOfLine(*e.subExpr); },
                      [](const ConcatenationExpr& e) {
                          return containsBeginOfLine(*e.left) || containsBeginOfLine(*e.right);
                      },
-                     [](const DotExpr& e) { return false; },
-                     [](const EmptyExpr& e) { return false; },
-                     [](const EndOfFileExpr& e) { return false; },
-                     [](const EndOfLineExpr& e) { return false; },
+                     [](const DotExpr&) { return false; },
+                     [](const EmptyExpr&) { return false; },
+                     [](const EndOfFileExpr&) { return false; },
+                     [](const EndOfLineExpr&) { return false; },
                      [](const LookAheadExpr& e) {
                          return containsBeginOfLine(*e.left) || containsBeginOfLine(*e.right);
                      },

@@ -32,19 +32,20 @@ class DFABuilder
      * @param overshadows if not nullptr, it will be used to store semantic information about
      *                    which rule tags have been overshadowed by which.
      */
-    DFA construct(OvershadowMap* overshadows = nullptr);
+    [[nodiscard]] DFA construct(OvershadowMap* overshadows = nullptr);
 
   private:
     struct TransitionTable;
 
-    DFA constructDFA(const std::vector<StateIdVec>& Q,
-                     const TransitionTable& T,
-                     OvershadowMap* overshadows) const;
+    [[nodiscard]] DFA constructDFA(const std::vector<StateIdVec>& Q,
+                                   const TransitionTable& T,
+                                   OvershadowMap* overshadows) const;
 
     /**
      * Finds @p t in @p Q and returns its offset (aka configuration number) or -1 if not found.
      */
-    static std::optional<StateId> configurationNumber(const std::vector<StateIdVec>& Q, const StateIdVec& t);
+    [[nodiscard]] static std::optional<StateId> configurationNumber(const std::vector<StateIdVec>& Q,
+                                                                    const StateIdVec& t);
 
     /**
      * Determines the tag to use for the deterministic state representing @p q from non-deterministic FA @p
@@ -54,7 +55,7 @@ class DFABuilder
      *
      * @returns the determined tag or std::nullopt if none
      */
-    std::optional<Tag> determineTag(const StateIdVec& q, std::map<Tag, Tag>* overshadows) const;
+    [[nodiscard]] std::optional<Tag> determineTag(const StateIdVec& q, std::map<Tag, Tag>* overshadows) const;
 
   private:
     const NFA nfa_;

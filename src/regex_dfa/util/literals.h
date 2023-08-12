@@ -11,7 +11,8 @@
 #include <sstream>
 #include <string>
 
-namespace regex_dfa::util::literals {
+namespace regex_dfa::util::literals
+{
 
 /**
  * Strips a multiline string's indentation prefix.
@@ -27,47 +28,48 @@ namespace regex_dfa::util::literals {
  *
  * This prints three lines: @c "line one\nline two\nline three\n"
  */
-inline std::string operator""_multiline(const char* text, size_t size)
+inline std::string operator""_multiline(const char* text, size_t /*size*/)
 {
-	if (!*text)
-		return {};
+    if (!*text)
+        return {};
 
-	enum class State {
-		LineData,
-		SkipUntilPrefix,
-	};
+    enum class State
+    {
+        LineData,
+        SkipUntilPrefix,
+    };
 
-	constexpr char LF = '\n';
-	State state = State::LineData;
-	std::stringstream sstr;
-	char sep = *text++;
+    constexpr char LF = '\n';
+    State state = State::LineData;
+    std::stringstream sstr;
+    char sep = *text++;
 
-	while (*text)
-	{
-		switch (state)
-		{
-			case State::LineData:
-				if (*text == LF)
-				{
-					state = State::SkipUntilPrefix;
-					sstr << *text++;
-				}
-				else
-					sstr << *text++;
-				break;
-			case State::SkipUntilPrefix:
-				if (*text == sep)
-				{
-					state = State::LineData;
-					text++;
-				}
-				else
-					text++;
-				break;
-		}
-	}
+    while (*text)
+    {
+        switch (state)
+        {
+            case State::LineData:
+                if (*text == LF)
+                {
+                    state = State::SkipUntilPrefix;
+                    sstr << *text++;
+                }
+                else
+                    sstr << *text++;
+                break;
+            case State::SkipUntilPrefix:
+                if (*text == sep)
+                {
+                    state = State::LineData;
+                    text++;
+                }
+                else
+                    text++;
+                break;
+        }
+    }
 
-	return sstr.str();
+    return sstr.str();
 }
 
-}  // namespace regex_dfa::util::literals
+} // namespace regex_dfa::util::literals

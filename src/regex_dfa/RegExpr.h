@@ -73,30 +73,21 @@ struct CharacterExpr
 {
     Symbol value;
 };
-
 struct CharacterClassExpr
 {
     SymbolSet symbols;
 };
 
-struct DotExpr
-{
-};
-struct BeginOfLineExpr
-{
-};
-struct EndOfLineExpr
-{
-};
-struct EndOfFileExpr
-{
-};
-struct EmptyExpr
-{
-};
+// clang-format off
+struct DotExpr {};
+struct BeginOfLineExpr {};
+struct EndOfLineExpr {};
+struct EndOfFileExpr {};
+struct EmptyExpr {};
+// clang-format on
 
-std::string to_string(const RegExpr& regex);
-int precedence(const RegExpr& regex);
-bool containsBeginOfLine(const RegExpr& regex);
+[[nodiscard]] std::string to_string(const RegExpr& regex);
+[[nodiscard]] int precedence(const RegExpr& regex);
+[[nodiscard]] bool containsBeginOfLine(const RegExpr& regex);
 
 } // namespace regex_dfa

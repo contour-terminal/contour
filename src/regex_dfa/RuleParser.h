@@ -46,41 +46,41 @@ class RuleParser
     void consumeSP();
     void consumeAssoc();
     void consumeSpace();
-    char currentChar() const noexcept;
+    [[nodiscard]] char currentChar() const noexcept;
     char consumeChar(char ch);
     char consumeChar();
-    bool eof() const noexcept;
-    std::string replaceRefs(const std::string& pattern);
+    [[nodiscard]] bool eof() const noexcept;
+    [[nodiscard]] std::string replaceRefs(const std::string& pattern);
 
   private:
-    std::unique_ptr<std::istream> stream_;
-    std::map<std::string, Rule> refRules_;
-    Rule* lastParsedRule_;
-    bool lastParsedRuleIsRef_;
-    char currentChar_;
-    unsigned int line_;
-    unsigned int column_;
-    unsigned int offset_;
-    int nextTag_;
+    std::unique_ptr<std::istream> _stream;
+    std::map<std::string, Rule> _refRules;
+    Rule* _lastParsedRule;
+    bool _lastParsedRuleIsRef;
+    char _currentChar;
+    unsigned int _line;
+    unsigned int _column;
+    unsigned int _offset;
+    int _nextTag;
 };
 
 class RuleParser::InvalidRefRuleWithConditions: public std::runtime_error
 {
   public:
-    InvalidRefRuleWithConditions(unsigned line, unsigned column, Rule&& rule):
+    InvalidRefRuleWithConditions(unsigned line, unsigned column, Rule rule):
         std::runtime_error { fmt::format(
             "{}:{}: Invalid rule \"{}\". Reference rules must not be labelled with conditions.",
             line,
             column,
             rule.name) },
-        rule_ { std::move(rule) }
+        _rule { std::move(rule) }
     {
     }
 
-    const Rule& rule() const noexcept { return rule_; }
+    [[nodiscard]] Rule const& rule() const noexcept { return _rule; }
 
   private:
-    const Rule rule_;
+    Rule _rule;
 };
 
 class RuleParser::DuplicateRule: public std::runtime_error
@@ -94,17 +94,17 @@ class RuleParser::DuplicateRule: public std::runtime_error
             duplicate.name,
             other.line,
             other.column) },
-        duplicate_ { std::move(duplicate) },
-        other_ { other }
+        _duplicate { std::move(duplicate) },
+        _other { other }
     {
     }
 
-    const Rule& duplicate() const noexcept { return duplicate_; }
-    const Rule& other() const noexcept { return other_; }
+    [[nodiscard]] Rule const& duplicate() const noexcept { return _duplicate; }
+    [[nodiscard]] Rule const& other() const noexcept { return _other; }
 
   private:
-    const Rule duplicate_;
-    const Rule& other_;
+    Rule _duplicate;
+    Rule const& _other;
 };
 
 class RuleParser::UnexpectedToken: public std::runtime_error
@@ -113,20 +113,20 @@ class RuleParser::UnexpectedToken: public std::runtime_error
     UnexpectedToken(unsigned offset, char actual, std::string expected):
         std::runtime_error { fmt::format(
             "{}: Unexpected token {}, expected <{}> instead.", offset, actual, expected) },
-        offset_ { offset },
-        actual_ { std::move(actual) },
-        expected_ { std::move(expected) }
+        _offset { offset },
+        _actual { actual },
+        _expected { std::move(expected) }
     {
     }
 
-    unsigned offset() const noexcept { return offset_; }
-    char actual() const noexcept { return actual_; }
-    const std::string& expected() const noexcept { return expected_; }
+    [[nodiscard]] unsigned offset() const noexcept { return _offset; }
+    [[nodiscard]] char actual() const noexcept { return _actual; }
+    [[nodiscard]] const std::string& expected() const noexcept { return _expected; }
 
   private:
-    unsigned offset_;
-    char actual_;
-    std::string expected_;
+    unsigned _offset;
+    char _actual;
+    std::string _expected;
 };
 
 class RuleParser::UnexpectedChar: public std::runtime_error
@@ -138,32 +138,32 @@ class RuleParser::UnexpectedChar: public std::runtime_error
                                          column,
                                          quoted(actual),
                                          quoted(expected)) },
-        line_ { line },
-        column_ { column },
-        actual_ { actual },
-        expected_ { expected }
+        _line { line },
+        _column { column },
+        _actual { actual },
+        _expected { expected }
     {
     }
 
-    unsigned int line() const noexcept { return line_; }
-    unsigned int column() const noexcept { return column_; }
-    char actual() const noexcept { return actual_; }
-    char expected() const noexcept { return expected_; }
+    [[nodiscard]] unsigned int line() const noexcept { return _line; }
+    [[nodiscard]] unsigned int column() const noexcept { return _column; }
+    [[nodiscard]] char actual() const noexcept { return _actual; }
+    [[nodiscard]] char expected() const noexcept { return _expected; }
 
   private:
     static std::string quoted(char ch)
     {
-        if (ch < 0)
+        if (std::char_traits<char>::eq(ch, std::char_traits<char>::eof()))
             return "<<EOF>>";
         else
-            return fmt::format("'{}'", ch);
+            return fmt::format("'{}'", static_cast<char>(ch));
     }
 
   private:
-    unsigned int line_;
-    unsigned int column_;
-    char actual_;
-    char expected_;
+    unsigned int _line;
+    unsigned int _column;
+    char _actual;
+    char _expected;
 };
 
 class RuleParser::InvalidRuleOption: public std::runtime_error
@@ -171,17 +171,17 @@ class RuleParser::InvalidRuleOption: public std::runtime_error
   public:
     InvalidRuleOption(unsigned offset, std::string option):
         std::runtime_error { fmt::format("{}: Invalid rule option \"{}\".", offset, option) },
-        offset_ { offset },
-        option_ { option }
+        _offset { offset },
+        _option { option }
     {
     }
 
-    unsigned offset() const noexcept { return offset_; }
-    const std::string& option() const noexcept { return option_; }
+    [[nodiscard]] unsigned offset() const noexcept { return _offset; }
+    [[nodiscard]] const std::string& option() const noexcept { return _option; }
 
   private:
-    unsigned offset_;
-    std::string option_;
+    unsigned _offset;
+    std::string _option;
 };
 
 } // namespace regex_dfa

@@ -7,14 +7,14 @@
 
 #include <regex_dfa/DotWriter.h>
 
-#include <sstream>
+#include <catch2/catch.hpp>
 
-#include <klex/util/testing.h>
+#include <sstream>
 
 using namespace std;
 using namespace regex_dfa;
 
-TEST(regex_DotWriter, simple)
+TEST_CASE("regex_DotWriter.simple")
 {
     stringstream sstr;
     DotWriter dw(sstr, "n");
@@ -33,12 +33,11 @@ TEST(regex_DotWriter, simple)
     dw.endVisitEdge(1, 1);
     dw.end();
 
-    log(sstr.str());
-    ASSERT_TRUE(!sstr.str().empty());
+    REQUIRE(!sstr.str().empty());
     // just make sure it processes
 }
 
-TEST(regex_DotWriter, multidfa_simple)
+TEST_CASE("regex_DotWriter.multidfa_simple")
 {
     stringstream sstr;
     const MultiDFA::InitialStateMap mis { { "foo", 1 }, { "bar", 2 } };
@@ -63,7 +62,6 @@ TEST(regex_DotWriter, multidfa_simple)
 
     dw.end();
 
-    log(sstr.str());
-    ASSERT_TRUE(!sstr.str().empty());
+    REQUIRE(!sstr.str().empty());
     // just make sure it processes
 }

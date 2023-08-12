@@ -8,292 +8,302 @@
 #include <regex_dfa/RegExpr.h>
 #include <regex_dfa/RegExprParser.h>
 
-#include <memory>
+#include <catch2/catch.hpp>
 
-#include <klex/util/testing.h>
+#include <memory>
 
 using namespace std;
 using namespace regex_dfa;
 
-TEST(regex_RegExprParser, namedCharacterClass_graph)
+namespace
 {
-    RegExpr re = RegExprParser {}.parse("[[:graph:]]");
-    ASSERT_TRUE(holds_alternative<CharacterClassExpr>(re));
-    EXPECT_EQ("!-~", to_string(re));
+
+RegExpr parseRegExpr(string const& s)
+{
+    return RegExprParser {}.parse(s);
 }
 
-TEST(regex_RegExprParser, whitespaces_concatination)
+} // namespace
+
+TEST_CASE("regex_RegExprParser.namedCharacterClass_graph")
 {
-    RegExpr re = RegExprParser {}.parse("a b");
-    ASSERT_TRUE(holds_alternative<ConcatenationExpr>(re));
-    EXPECT_EQ("ab", to_string(re));
+    RegExpr re = parseRegExpr("[[:graph:]]");
+    REQUIRE(holds_alternative<CharacterClassExpr>(re));
+    CHECK("!-~" == to_string(re));
 }
 
-TEST(regex_RegExprParser, whitespaces_alternation)
+TEST_CASE("regex_RegExprParser.whitespaces_concatination")
 {
-    RegExpr re = RegExprParser {}.parse("a | b");
-    ASSERT_TRUE(holds_alternative<ConcatenationExpr>(re));
-    EXPECT_EQ("a|b", to_string(re));
+    RegExpr re = parseRegExpr("a b");
+    REQUIRE(holds_alternative<ConcatenationExpr>(re));
+    CHECK("ab" == to_string(re));
 }
 
-TEST(regex_RegExprParser, namedCharacterClass_digit)
+TEST_CASE("regex_RegExprParser.whitespaces_alternation")
 {
-    RegExpr re = RegExprParser {}.parse("[[:digit:]]");
-    ASSERT_TRUE(holds_alternative<CharacterClassExpr>(re));
-    EXPECT_EQ("0-9", to_string(re));
+    RegExpr re = parseRegExpr("a | b");
+    REQUIRE(holds_alternative<ConcatenationExpr>(re));
+    CHECK("a|b" == to_string(re));
 }
 
-TEST(regex_RegExprParser, namedCharacterClass_alnum)
+TEST_CASE("regex_RegExprParser.namedCharacterClass_digit")
 {
-    RegExpr re = RegExprParser {}.parse("[[:alnum:]]");
-    ASSERT_TRUE(holds_alternative<CharacterClassExpr>(re));
-    EXPECT_EQ("0-9A-Za-z", to_string(re));
+    RegExpr re = parseRegExpr("[[:digit:]]");
+    REQUIRE(holds_alternative<CharacterClassExpr>(re));
+    CHECK("0-9" == to_string(re));
 }
 
-TEST(regex_RegExprParser, namedCharacterClass_alpha)
+TEST_CASE("regex_RegExprParser.namedCharacterClass_alnum")
 {
-    RegExpr re = RegExprParser {}.parse("[[:alpha:]]");
-    ASSERT_TRUE(holds_alternative<CharacterClassExpr>(re));
-    EXPECT_EQ("A-Za-z", to_string(re));
+    RegExpr re = parseRegExpr("[[:alnum:]]");
+    REQUIRE(holds_alternative<CharacterClassExpr>(re));
+    CHECK("0-9A-Za-z" == to_string(re));
 }
 
-TEST(regex_RegExprParser, namedCharacterClass_blank)
+TEST_CASE("regex_RegExprParser.namedCharacterClass_alpha")
 {
-    RegExpr re = RegExprParser {}.parse("[[:blank:]]");
-    ASSERT_TRUE(holds_alternative<CharacterClassExpr>(re));
-    EXPECT_EQ("\\t\\s", to_string(re));
+    RegExpr re = parseRegExpr("[[:alpha:]]");
+    REQUIRE(holds_alternative<CharacterClassExpr>(re));
+    CHECK("A-Za-z" == to_string(re));
 }
 
-TEST(regex_RegExprParser, namedCharacterClass_cntrl)
+TEST_CASE("regex_RegExprParser.namedCharacterClass_blank")
 {
-    RegExpr re = RegExprParser {}.parse("[[:cntrl:]]");
-    ASSERT_TRUE(holds_alternative<CharacterClassExpr>(re));
-    EXPECT_EQ("\\0-\\x1f\\x7f", to_string(re));
+    RegExpr re = parseRegExpr("[[:blank:]]");
+    REQUIRE(holds_alternative<CharacterClassExpr>(re));
+    CHECK("\\t\\s" == to_string(re));
 }
 
-TEST(regex_RegExprParser, namedCharacterClass_print)
+TEST_CASE("regex_RegExprParser.namedCharacterClass_cntrl")
 {
-    RegExpr re = RegExprParser {}.parse("[[:print:]]");
-    ASSERT_TRUE(holds_alternative<CharacterClassExpr>(re));
-    EXPECT_EQ("\\s-~", to_string(re));
+    RegExpr re = parseRegExpr("[[:cntrl:]]");
+    REQUIRE(holds_alternative<CharacterClassExpr>(re));
+    CHECK("\\0-\\x1f\\x7f" == to_string(re));
 }
 
-TEST(regex_RegExprParser, namedCharacterClass_punct)
+TEST_CASE("regex_RegExprParser.namedCharacterClass_print")
 {
-    RegExpr re = RegExprParser {}.parse("[[:punct:]]");
-    ASSERT_TRUE(holds_alternative<CharacterClassExpr>(re));
-    EXPECT_EQ("!-/:-@[-`{-~", to_string(re));
+    RegExpr re = parseRegExpr("[[:print:]]");
+    REQUIRE(holds_alternative<CharacterClassExpr>(re));
+    CHECK("\\s-~" == to_string(re));
 }
 
-TEST(regex_RegExprParser, namedCharacterClass_space)
+TEST_CASE("regex_RegExprParser.namedCharacterClass_punct")
 {
-    RegExpr re = RegExprParser {}.parse("[[:space:]]");
-    ASSERT_TRUE(holds_alternative<CharacterClassExpr>(re));
-    EXPECT_EQ("\\0\\t-\\r", to_string(re));
+    RegExpr re = parseRegExpr("[[:punct:]]");
+    REQUIRE(holds_alternative<CharacterClassExpr>(re));
+    CHECK("!-/:-@[-`{-~" == to_string(re));
 }
 
-TEST(regex_RegExprParser, namedCharacterClass_unknown)
+TEST_CASE("regex_RegExprParser.namedCharacterClass_space")
 {
-    EXPECT_THROW(RegExprParser {}.parse("[[:unknown:]]"), RegExprParser::UnexpectedToken);
+    RegExpr re = parseRegExpr("[[:space:]]");
+    REQUIRE(holds_alternative<CharacterClassExpr>(re));
+    CHECK("\\0\\t-\\r" == to_string(re));
 }
 
-TEST(regex_RegExprParser, namedCharacterClass_upper)
+TEST_CASE("regex_RegExprParser.namedCharacterClass_unknown")
 {
-    RegExpr re = RegExprParser {}.parse("[[:upper:]]");
-    ASSERT_TRUE(holds_alternative<CharacterClassExpr>(re));
-    EXPECT_EQ("A-Z", to_string(re));
+    CHECK_THROWS_AS(parseRegExpr("[[:unknown:]]"), RegExprParser::UnexpectedToken);
 }
 
-TEST(regex_RegExprParser, namedCharacterClass_mixed)
+TEST_CASE("regex_RegExprParser.namedCharacterClass_upper")
 {
-    RegExpr re = RegExprParser {}.parse("[[:lower:]0-9]");
-    ASSERT_TRUE(holds_alternative<CharacterClassExpr>(re));
-    EXPECT_EQ("0-9a-z", to_string(re));
+    RegExpr re = parseRegExpr("[[:upper:]]");
+    REQUIRE(holds_alternative<CharacterClassExpr>(re));
+    CHECK("A-Z" == to_string(re));
 }
 
-TEST(regex_RegExprParser, characterClass_complement)
+TEST_CASE("regex_RegExprParser.namedCharacterClass_mixed")
 {
-    RegExpr re = RegExprParser {}.parse("[^\\n]");
-    ASSERT_TRUE(holds_alternative<CharacterClassExpr>(re));
-    EXPECT_TRUE(get<CharacterClassExpr>(re).symbols.isDot());
-    EXPECT_EQ(".", get<CharacterClassExpr>(re).symbols.to_string());
+    RegExpr re = parseRegExpr("[[:lower:]0-9]");
+    REQUIRE(holds_alternative<CharacterClassExpr>(re));
+    CHECK("0-9a-z" == to_string(re));
 }
 
-TEST(regex_RegExprParser, escapeSequences_invalid)
+TEST_CASE("regex_RegExprParser.characterClass_complement")
 {
-    EXPECT_THROW(RegExprParser {}.parse("[\\z]"), RegExprParser::UnexpectedToken);
+    RegExpr re = parseRegExpr("[^\\n]");
+    REQUIRE(holds_alternative<CharacterClassExpr>(re));
+    CHECK(get<CharacterClassExpr>(re).symbols.isDot());
+    CHECK("." == get<CharacterClassExpr>(re).symbols.to_string());
 }
 
-TEST(regex_RegExprParser, escapeSequences_abfnrstv)
+TEST_CASE("regex_RegExprParser.escapeSequences_invalid")
 {
-    EXPECT_EQ("\\a", to_string(RegExprParser {}.parse("[\\a]")));
-    EXPECT_EQ("\\b", to_string(RegExprParser {}.parse("[\\b]")));
-    EXPECT_EQ("\\f", to_string(RegExprParser {}.parse("[\\f]")));
-    EXPECT_EQ("\\n", to_string(RegExprParser {}.parse("[\\n]")));
-    EXPECT_EQ("\\r", to_string(RegExprParser {}.parse("[\\r]")));
-    EXPECT_EQ("\\s", to_string(RegExprParser {}.parse("[\\s]")));
-    EXPECT_EQ("\\t", to_string(RegExprParser {}.parse("[\\t]")));
-    EXPECT_EQ("\\v", to_string(RegExprParser {}.parse("[\\v]")));
+    CHECK_THROWS_AS(parseRegExpr("[\\z]"), RegExprParser::UnexpectedToken);
 }
 
-TEST(regex_RegExprParser, newline)
+TEST_CASE("regex_RegExprParser.escapeSequences_abfnrstv")
 {
-    RegExpr re = RegExprParser {}.parse("\n");
-    ASSERT_TRUE(holds_alternative<CharacterExpr>(re));
-    EXPECT_EQ('\n', get<CharacterExpr>(re).value);
+    CHECK("\\a" == to_string(parseRegExpr("[\\a]")));
+    CHECK("\\b" == to_string(parseRegExpr("[\\b]")));
+    CHECK("\\f" == to_string(parseRegExpr("[\\f]")));
+    CHECK("\\n" == to_string(parseRegExpr("[\\n]")));
+    CHECK("\\r" == to_string(parseRegExpr("[\\r]")));
+    CHECK("\\s" == to_string(parseRegExpr("[\\s]")));
+    CHECK("\\t" == to_string(parseRegExpr("[\\t]")));
+    CHECK("\\v" == to_string(parseRegExpr("[\\v]")));
 }
 
-TEST(regex_RegExprParser, escapeSequences_hex)
+TEST_CASE("regex_RegExprParser.newline")
 {
-    RegExpr re = RegExprParser {}.parse("[\\x20]");
-    ASSERT_TRUE(holds_alternative<CharacterClassExpr>(re));
-    EXPECT_EQ("\\s", get<CharacterClassExpr>(re).symbols.to_string());
-
-    EXPECT_THROW(RegExprParser {}.parse("[\\xZZ]"), RegExprParser::UnexpectedToken);
-    EXPECT_THROW(RegExprParser {}.parse("[\\xAZ]"), RegExprParser::UnexpectedToken);
-    EXPECT_THROW(RegExprParser {}.parse("[\\xZA]"), RegExprParser::UnexpectedToken);
+    RegExpr re = parseRegExpr("\n");
+    REQUIRE(holds_alternative<CharacterExpr>(re));
+    CHECK('\n' == get<CharacterExpr>(re).value);
 }
 
-TEST(regex_RegExprParser, escapeSequences_nul)
+TEST_CASE("regex_RegExprParser.escapeSequences_hex")
 {
-    RegExpr re = RegExprParser {}.parse("[\\0]");
-    ASSERT_TRUE(holds_alternative<CharacterClassExpr>(re));
-    EXPECT_EQ("\\0", get<CharacterClassExpr>(re).symbols.to_string());
+    RegExpr re = parseRegExpr("[\\x20]");
+    REQUIRE(holds_alternative<CharacterClassExpr>(re));
+    CHECK("\\s" == get<CharacterClassExpr>(re).symbols.to_string());
+
+    CHECK_THROWS_AS(parseRegExpr("[\\xZZ]"), RegExprParser::UnexpectedToken);
+    CHECK_THROWS_AS(parseRegExpr("[\\xAZ]"), RegExprParser::UnexpectedToken);
+    CHECK_THROWS_AS(parseRegExpr("[\\xZA]"), RegExprParser::UnexpectedToken);
 }
 
-TEST(regex_RegExprParser, escapeSequences_octal)
+TEST_CASE("regex_RegExprParser.escapeSequences_nul")
+{
+    RegExpr re = parseRegExpr("[\\0]");
+    REQUIRE(holds_alternative<CharacterClassExpr>(re));
+    CHECK("\\0" == get<CharacterClassExpr>(re).symbols.to_string());
+}
+
+TEST_CASE("regex_RegExprParser.escapeSequences_octal")
 {
     // with leading zero
-    RegExpr re = RegExprParser {}.parse("[\\040]");
-    ASSERT_TRUE(holds_alternative<CharacterClassExpr>(re));
-    EXPECT_EQ("\\s", get<CharacterClassExpr>(re).symbols.to_string());
+    RegExpr re = parseRegExpr("[\\040]");
+    REQUIRE(holds_alternative<CharacterClassExpr>(re));
+    CHECK("\\s" == get<CharacterClassExpr>(re).symbols.to_string());
 
     // with leading non-zero
-    re = RegExprParser {}.parse("[\\172]");
-    ASSERT_TRUE(holds_alternative<CharacterClassExpr>(re));
-    EXPECT_EQ("z", get<CharacterClassExpr>(re).symbols.to_string());
+    re = parseRegExpr("[\\172]");
+    REQUIRE(holds_alternative<CharacterClassExpr>(re));
+    CHECK("z" == get<CharacterClassExpr>(re).symbols.to_string());
 
     // invalids
-    EXPECT_THROW(RegExprParser {}.parse("[\\822]"), RegExprParser::UnexpectedToken);
-    EXPECT_THROW(RegExprParser {}.parse("[\\282]"), RegExprParser::UnexpectedToken);
-    EXPECT_THROW(RegExprParser {}.parse("[\\228]"), RegExprParser::UnexpectedToken);
-    EXPECT_THROW(RegExprParser {}.parse("[\\082]"), RegExprParser::UnexpectedToken);
-    EXPECT_THROW(RegExprParser {}.parse("[\\028]"), RegExprParser::UnexpectedToken);
+    CHECK_THROWS_AS(parseRegExpr("[\\822]"), RegExprParser::UnexpectedToken);
+    CHECK_THROWS_AS(parseRegExpr("[\\282]"), RegExprParser::UnexpectedToken);
+    CHECK_THROWS_AS(parseRegExpr("[\\228]"), RegExprParser::UnexpectedToken);
+    CHECK_THROWS_AS(parseRegExpr("[\\082]"), RegExprParser::UnexpectedToken);
+    CHECK_THROWS_AS(parseRegExpr("[\\028]"), RegExprParser::UnexpectedToken);
 }
 
-TEST(regex_RegExprParser, doubleQuote)
+TEST_CASE("regex_RegExprParser.doubleQuote")
 {
     // as concatenation character
-    RegExpr re = RegExprParser {}.parse(R"(\")");
-    ASSERT_TRUE(holds_alternative<CharacterExpr>(re));
-    EXPECT_EQ('"', get<CharacterExpr>(re).value);
+    RegExpr re = parseRegExpr(R"(\")");
+    REQUIRE(holds_alternative<CharacterExpr>(re));
+    CHECK('"' == get<CharacterExpr>(re).value);
 
     // as character class
-    re = RegExprParser {}.parse(R"([\"])");
-    ASSERT_TRUE(holds_alternative<CharacterClassExpr>(re));
-    EXPECT_EQ(R"(")", get<CharacterClassExpr>(re).symbols.to_string());
+    re = parseRegExpr(R"([\"])");
+    REQUIRE(holds_alternative<CharacterClassExpr>(re));
+    CHECK(R"(")" == get<CharacterClassExpr>(re).symbols.to_string());
 }
 
-TEST(regex_RegExprParser, dot)
+TEST_CASE("regex_RegExprParser.dot")
 {
-    RegExpr re = RegExprParser {}.parse(".");
-    ASSERT_TRUE(holds_alternative<DotExpr>(re));
-    EXPECT_EQ(".", to_string(re));
+    RegExpr re = parseRegExpr(".");
+    REQUIRE(holds_alternative<DotExpr>(re));
+    CHECK("." == to_string(re));
 }
 
-TEST(regex_RegExprParser, optional)
+TEST_CASE("regex_RegExprParser.optional")
 {
-    RegExpr re = RegExprParser {}.parse("a?");
-    ASSERT_TRUE(holds_alternative<ClosureExpr>(re));
-    EXPECT_EQ("a?", to_string(re));
+    RegExpr re = parseRegExpr("a?");
+    REQUIRE(holds_alternative<ClosureExpr>(re));
+    CHECK("a?" == to_string(re));
 }
 
-TEST(regex_RegExprParser, bol)
+TEST_CASE("regex_RegExprParser.bol")
 {
-    RegExpr re = RegExprParser {}.parse("^a");
-    ASSERT_TRUE(holds_alternative<ConcatenationExpr>(re));
+    RegExpr re = parseRegExpr("^a");
+    REQUIRE(holds_alternative<ConcatenationExpr>(re));
     const ConcatenationExpr& cat = get<ConcatenationExpr>(re);
 
-    ASSERT_TRUE(holds_alternative<BeginOfLineExpr>(*cat.left));
-    EXPECT_EQ("^", to_string(*cat.left));
-    EXPECT_EQ("a", to_string(*cat.right));
+    REQUIRE(holds_alternative<BeginOfLineExpr>(*cat.left));
+    CHECK("^" == to_string(*cat.left));
+    CHECK("a" == to_string(*cat.right));
 }
 
-TEST(regex_RegExprParser, eol)
+TEST_CASE("regex_RegExprParser.eol")
 {
-    RegExpr re = RegExprParser {}.parse("a$");
-    ASSERT_TRUE(holds_alternative<ConcatenationExpr>(re));
+    RegExpr re = parseRegExpr("a$");
+    REQUIRE(holds_alternative<ConcatenationExpr>(re));
     const ConcatenationExpr& cat = get<ConcatenationExpr>(re);
 
-    ASSERT_TRUE(holds_alternative<EndOfLineExpr>(*cat.right));
-    EXPECT_EQ("a$", to_string(re));
+    REQUIRE(holds_alternative<EndOfLineExpr>(*cat.right));
+    CHECK("a$" == to_string(re));
 }
 
-TEST(regex_RegExprParser, eof)
+TEST_CASE("regex_RegExprParser.eof")
 {
-    RegExpr re = RegExprParser {}.parse("<<EOF>>");
-    ASSERT_TRUE(holds_alternative<EndOfFileExpr>(re));
-    EXPECT_EQ("<<EOF>>", to_string(re));
+    RegExpr re = parseRegExpr("<<EOF>>");
+    REQUIRE(holds_alternative<EndOfFileExpr>(re));
+    CHECK("<<EOF>>" == to_string(re));
 }
 
-TEST(regex_RegExprParser, alternation)
+TEST_CASE("regex_RegExprParser.alternation")
 {
-    EXPECT_EQ("a|b", to_string(RegExprParser {}.parse("a|b")));
-    EXPECT_EQ("(a|b)c", to_string(RegExprParser {}.parse("(a|b)c")));
-    EXPECT_EQ("a(b|c)", to_string(RegExprParser {}.parse("a(b|c)")));
+    CHECK("a|b" == to_string(parseRegExpr("a|b")));
+    CHECK("(a|b)c" == to_string(parseRegExpr("(a|b)c")));
+    CHECK("a(b|c)" == to_string(parseRegExpr("a(b|c)")));
 }
 
-TEST(regex_RegExprParser, lookahead)
+TEST_CASE("regex_RegExprParser.lookahead")
 {
-    RegExpr re = RegExprParser {}.parse("ab/cd");
-    ASSERT_TRUE(holds_alternative<LookAheadExpr>(re));
-    EXPECT_EQ("ab/cd", to_string(re));
-    EXPECT_EQ("(a/b)|b", to_string(RegExprParser {}.parse("(a/b)|b")));
-    EXPECT_EQ("a|(b/c)", to_string(RegExprParser {}.parse("a|(b/c)")));
+    RegExpr re = parseRegExpr("ab/cd");
+    REQUIRE(holds_alternative<LookAheadExpr>(re));
+    CHECK("ab/cd" == to_string(re));
+    CHECK("(a/b)|b" == to_string(parseRegExpr("(a/b)|b")));
+    CHECK("a|(b/c)" == to_string(parseRegExpr("a|(b/c)")));
 }
 
-TEST(regex_RegExprParser, closure)
+TEST_CASE("regex_RegExprParser.closure")
 {
-    RegExpr re = RegExprParser {}.parse("(abc)*");
-    ASSERT_TRUE(holds_alternative<ClosureExpr>(re));
+    RegExpr re = parseRegExpr("(abc)*");
+    REQUIRE(holds_alternative<ClosureExpr>(re));
     const ClosureExpr& e = get<ClosureExpr>(re);
-    EXPECT_EQ(0, e.minimumOccurrences);
-    EXPECT_EQ(numeric_limits<unsigned>::max(), e.maximumOccurrences);
-    EXPECT_EQ("(abc)*", to_string(re));
+    CHECK(0 == e.minimumOccurrences);
+    CHECK(numeric_limits<unsigned>::max() == e.maximumOccurrences);
+    CHECK("(abc)*" == to_string(re));
 }
 
-TEST(regex_RegExprParser, positive)
+TEST_CASE("regex_RegExprParser.positive")
 {
-    auto re = RegExprParser {}.parse("(abc)+");
-    ASSERT_TRUE(holds_alternative<ClosureExpr>(re));
+    auto re = parseRegExpr("(abc)+");
+    REQUIRE(holds_alternative<ClosureExpr>(re));
     const ClosureExpr& e = get<ClosureExpr>(re);
-    EXPECT_EQ(1, e.minimumOccurrences);
-    EXPECT_EQ(numeric_limits<unsigned>::max(), e.maximumOccurrences);
-    EXPECT_EQ("(abc)+", to_string(re));
+    CHECK(1 == e.minimumOccurrences);
+    CHECK(numeric_limits<unsigned>::max() == e.maximumOccurrences);
+    CHECK("(abc)+" == to_string(re));
 }
 
-TEST(regex_RegExprParser, closure_range)
+TEST_CASE("regex_RegExprParser.closure_range")
 {
-    auto re = RegExprParser {}.parse("a{2,4}");
-    ASSERT_TRUE(holds_alternative<ClosureExpr>(re));
+    auto re = parseRegExpr("a{2,4}");
+    REQUIRE(holds_alternative<ClosureExpr>(re));
     const ClosureExpr& e = get<ClosureExpr>(re);
-    EXPECT_EQ(2, e.minimumOccurrences);
-    EXPECT_EQ(4, e.maximumOccurrences);
-    EXPECT_EQ("a{2,4}", to_string(re));
+    CHECK(2 == e.minimumOccurrences);
+    CHECK(4 == e.maximumOccurrences);
+    CHECK("a{2,4}" == to_string(re));
 }
 
-TEST(regex_RegExprParser, empty)
+TEST_CASE("regex_RegExprParser.empty")
 {
-    auto re = RegExprParser {}.parse("(a|)");
-    EXPECT_EQ("a|", to_string(re)); // grouping '(' & ')' is not preserved as node in the parse tree.
+    auto re = parseRegExpr("(a|)");
+    CHECK("a|" == to_string(re)); // grouping '(' & ')' is not preserved as node in the parse tree.
 }
 
-TEST(regex_RegExprParser, UnexpectedToken_grouping)
+TEST_CASE("regex_RegExprParser.UnexpectedToken_grouping")
 {
-    EXPECT_THROW(RegExprParser {}.parse("(a"), RegExprParser::UnexpectedToken);
+    CHECK_THROWS_AS(parseRegExpr("(a"), RegExprParser::UnexpectedToken);
 }
 
-TEST(regex_RegExprParser, UnexpectedToken_literal)
+TEST_CASE("regex_RegExprParser.UnexpectedToken_literal")
 {
-    EXPECT_THROW(RegExprParser {}.parse("\"a"), RegExprParser::UnexpectedToken);
+    CHECK_THROWS_AS(parseRegExpr("\"a"), RegExprParser::UnexpectedToken);
 }

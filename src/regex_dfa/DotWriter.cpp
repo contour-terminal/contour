@@ -65,7 +65,7 @@ void DotWriter::visitNode(StateId number, bool start, bool accept)
     }
 }
 
-void DotWriter::visitEdge(StateId from, StateId to, Symbol s)
+void DotWriter::visitEdge(StateId /*from*/, StateId to, Symbol s)
 {
     transitionGroups_[to].push_back(s);
 }
@@ -95,7 +95,7 @@ void DotWriter::endVisitEdge(StateId from, StateId to)
         }
         else
         {
-            string label = groupCharacterClassRanges(move(tgroup));
+            string label = groupCharacterClassRanges(std::move(tgroup));
             stream_ << fmt::format("  {}{} -> {}{} [label=\"{}\"];\n",
                                    stateLabelPrefix_,
                                    from,

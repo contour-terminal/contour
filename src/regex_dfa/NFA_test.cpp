@@ -9,76 +9,77 @@
 #include <regex_dfa/NFA.h>
 #include <regex_dfa/State.h>
 
-#include <klex/util/testing.h>
+#include <catch2/catch.hpp>
 
 using namespace std;
 using namespace regex_dfa;
 
-TEST(regex_NFA, emptyCtor)
+TEST_CASE("regex_NFA.emptyCtor")
 {
     const NFA nfa;
-    ASSERT_EQ(0, nfa.size());
-    ASSERT_TRUE(nfa.empty());
+    REQUIRE(0 == nfa.size());
+    REQUIRE(nfa.empty());
 }
 
-TEST(regex_NFA, characterCtor)
+TEST_CASE("regex_NFA.characterCtor")
 {
     const NFA nfa { 'a' };
-    ASSERT_EQ(2, nfa.size());
-    ASSERT_EQ(0, nfa.initialStateId());
-    ASSERT_EQ(1, nfa.acceptStateId());
-    ASSERT_EQ(StateIdVec { 1 }, nfa.delta(StateIdVec { 0 }, 'a'));
+    REQUIRE(2 == nfa.size());
+    REQUIRE(0 == nfa.initialStateId());
+    REQUIRE(1 == nfa.acceptStateId());
+    REQUIRE(StateIdVec { 1 } == nfa.delta(StateIdVec { 0 }, 'a'));
 }
 
-TEST(regex_NFA, concatenate)
+TEST_CASE("regex_NFA.concatenate")
 {
-    const NFA ab = move(NFA { 'a' }.concatenate(NFA { 'b' }));
-    ASSERT_EQ(4, ab.size());
-    ASSERT_EQ(0, ab.initialStateId());
-    ASSERT_EQ(3, ab.acceptStateId());
+    const NFA ab = std::move(NFA { 'a' }.concatenate(NFA { 'b' }));
+    REQUIRE(4 == ab.size());
+    REQUIRE(0 == ab.initialStateId());
+    REQUIRE(3 == ab.acceptStateId());
 
     // TODO: check ab.initial == A.initial
     // TODO: check A.accept == B.initial
     // TODO: check ab.accept == B.accept
 }
 
-TEST(regex_NFA, alternate)
+TEST_CASE("regex_NFA.alternate")
 {
-    const NFA ab = move(NFA { 'a' }.alternate(NFA { 'b' }));
-    ASSERT_EQ(6, ab.size());
-    ASSERT_EQ(2, ab.initialStateId());
-    ASSERT_EQ(3, ab.acceptStateId());
+    const NFA ab = std::move(NFA { 'a' }.alternate(NFA { 'b' }));
+    REQUIRE(6 == ab.size());
+    REQUIRE(2 == ab.initialStateId());
+    REQUIRE(3 == ab.acceptStateId());
 
     // TODO: check acceptState transitions to A and B
     // TODO: check A and B's outgoing edges to final acceptState
 }
 
-TEST(regex_NFA, epsilonClosure)
+TEST_CASE("regex_NFA.epsilonClosure")
 {
     const NFA nfa { 'a' };
-    ASSERT_EQ(0, nfa.initialStateId());
-    ASSERT_EQ(1, nfa.acceptStateId());
-    ASSERT_EQ(StateIdVec { 0 }, nfa.epsilonClosure(StateIdVec { 0 }));
+    REQUIRE(0 == nfa.initialStateId());
+    REQUIRE(1 == nfa.acceptStateId());
+    REQUIRE(StateIdVec { 0 } == nfa.epsilonClosure(StateIdVec { 0 }));
 
-    const NFA abc = move(NFA { 'a' }.concatenate(move(NFA { 'b' }.alternate(NFA { 'c' }).recurring())));
-    ASSERT_EQ(StateIdVec { 0 }, abc.epsilonClosure(StateIdVec { 0 }));
+    const NFA abc =
+        std::move(NFA { 'a' }.concatenate(std::move(NFA { 'b' }.alternate(NFA { 'c' }).recurring())));
+    REQUIRE(StateIdVec { 0 } == abc.epsilonClosure(StateIdVec { 0 }));
 
     const StateIdVec e1 { 1, 2, 4, 6, 8, 9 };
-    ASSERT_EQ(e1, abc.epsilonClosure(StateIdVec { 1 }));
+    REQUIRE(e1 == abc.epsilonClosure(StateIdVec { 1 }));
 }
 
-TEST(regex_NFA, delta)
+TEST_CASE("regex_NFA.delta")
 {
     const NFA nfa { 'a' };
-    ASSERT_EQ(0, nfa.initialStateId());
-    ASSERT_EQ(1, nfa.acceptStateId());
-    ASSERT_EQ(StateIdVec { 1 }, nfa.delta(StateIdVec { 0 }, 'a'));
+    REQUIRE(0 == nfa.initialStateId());
+    REQUIRE(1 == nfa.acceptStateId());
+    REQUIRE(StateIdVec { 1 } == nfa.delta(StateIdVec { 0 }, 'a'));
 }
 
-TEST(regex_NFA, alphabet)
+TEST_CASE("regex_NFA.alphabet")
 {
-    ASSERT_EQ("{}", NFA {}.alphabet().to_string());
-    ASSERT_EQ("{a}", NFA { 'a' }.alphabet().to_string());
-    ASSERT_EQ("{ab}", NFA { 'a' }.concatenate(NFA { 'b' }).alphabet().to_string());
-    ASSERT_EQ("{abc}", NFA { 'a' }.concatenate(NFA { 'b' }).alternate(NFA { 'c' }).alphabet().to_string());
+    REQUIRE("{}" == NFA {}.alphabet().to_string());
+    REQUIRE("{a}" == NFA { 'a' }.alphabet().to_string());
+    REQUIRE("{ab}" == NFA { 'a' }.concatenate(NFA { 'b' }).alphabet().to_string());
+    REQUIRE("{abc}" == NFA { 'a' }.concatenate(NFA { 'b' }).alternate(NFA { 'c' }).alphabet().to_string());
 }

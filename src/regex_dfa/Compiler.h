@@ -48,9 +48,9 @@ class Compiler
      */
     void declareAll(RuleList rules);
 
-    const RuleList& rules() const noexcept { return rules_; }
-    const TagNameMap& names() const noexcept { return names_; }
-    size_t size() const;
+    [[nodiscard]] const RuleList& rules() const noexcept { return rules_; }
+    [[nodiscard]] const TagNameMap& names() const noexcept { return names_; }
+    [[nodiscard]] size_t size() const;
 
     /**
      * Compiles all previousely parsed rules into a DFA.
@@ -81,12 +81,12 @@ class Compiler
      *
      * @see Lexer
      */
-    static LexerDef generateTables(const DFA& dfa, bool requiresBeginOfLine, const TagNameMap& names);
-    static LexerDef generateTables(const MultiDFA& dfa, bool requiresBeginOfLine, const TagNameMap& names);
+    static LexerDef generateTables(const DFA& dfa, bool requiresBeginOfLine, TagNameMap names);
+    static LexerDef generateTables(const MultiDFA& dfa, bool requiresBeginOfLine, TagNameMap names);
 
-    const std::map<std::string, NFA>& automata() const { return fa_; }
+    [[nodiscard]] const std::map<std::string, NFA>& automata() const { return fa_; }
 
-    bool containsBeginOfLine() const noexcept { return containsBeginOfLine_; }
+    [[nodiscard]] bool containsBeginOfLine() const noexcept { return containsBeginOfLine_; }
 
   private:
     /**

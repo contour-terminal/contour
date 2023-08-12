@@ -37,7 +37,7 @@ Alphabet DFA::alphabet() const
 {
     Alphabet alphabet;
     for (const State& state: states_)
-        for (const pair<Symbol, StateId>& t: state.transitions)
+        for (pair<Symbol, StateId> const t: state.transitions)
             alphabet.insert(t.first);
 
     return alphabet;
@@ -118,12 +118,12 @@ void DFA::prepareStateIds(StateId baseId, StateId q0)
     AcceptMap remapped;
     for (auto& a: acceptTags_)
         remapped[transformId(a.first)] = a.second;
-    acceptTags_ = move(remapped);
+    acceptTags_ = std::move(remapped);
 
     BacktrackingMap backtracking;
     for (const auto& bt: backtrackStates_)
         backtracking[transformId(bt.first)] = transformId(bt.second);
-    backtrackStates_ = move(backtracking);
+    backtrackStates_ = std::move(backtracking);
 
     initialState_ = q0;
 }
