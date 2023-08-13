@@ -1776,6 +1776,10 @@ namespace
         if (tryLoadChildRelative(
                 _usedKeys, _profile, basePath, "status_line.sync_to_window_title", boolValue, _logger))
             profile.syncWindowTitleWithHostWritableStatusDisplay = boolValue;
+
+        strValue = "default";
+        if (tryLoadChildRelative(_usedKeys, _profile, basePath, "bell", strValue, _logger))
+            profile.bell = strValue;
     }
 
     TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,

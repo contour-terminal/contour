@@ -60,9 +60,16 @@ ContourTerminal
         stepSize : 1.0 / (vtWidget.session.pageLineCount + vtWidget.session.historyLineCount)
     }
 
-    SoundEffect {
+    AudioOutput {
+        id: bellAudioOutput
+        objectName: "BellAudioOutput"
+    }
+
+    MediaPlayer {
         id: bellSoundEffect
-        source: vtWidget.bellSoundSource
+        objectName: "Bell"
+        source: "qrc:/contour/bell.wav"
+        audioOutput: bellAudioOutput
     }
 
     RequestPermission {
@@ -146,11 +153,17 @@ ContourTerminal
         Window.window.close(); // https://stackoverflow.com/a/53829662/386670
     }
 
+    function playBell() {
+        if(bellSoundEffect.playbackState === MediaPlayer.PlayingState)
+            bellSoundEffect.stop()
+        bellSoundEffect.play()
+    }
+
     onSessionChanged: (s) => {
         let vt = vtWidget.session;
 
         // Connect bell control code with an actual sound effect.
-        vt.onBell.connect(bellSoundEffect.play);
+        vt.onBell.connect(playBell);
 
         // Link showNotification signal.
         vt.onShowNotification.connect(vtWidget.showNotification);

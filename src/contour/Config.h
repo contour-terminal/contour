@@ -202,6 +202,8 @@ struct TerminalProfile
         terminal::rasterizer::Decorator normal = terminal::rasterizer::Decorator::DottedUnderline;
         terminal::rasterizer::Decorator hover = terminal::rasterizer::Decorator::Underline;
     } hyperlinkDecoration;
+
+    std::string bell = "default";
 };
 
 enum class RenderingBackend
