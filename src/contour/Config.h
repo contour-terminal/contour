@@ -31,6 +31,7 @@
 #include <text_shaper/mock_font_locator.h>
 
 #include <crispy/StrongLRUHashtable.h>
+#include <crispy/assert.h>
 #include <crispy/size.h>
 #include <crispy/stdfs.h>
 
@@ -262,7 +263,7 @@ struct Config
 
     TerminalProfile* profile(std::string const& _name)
     {
-        assert(_name != "");
+        assert(!_name.empty());
         if (auto i = profiles.find(_name); i != profiles.end())
             return &i->second;
         assert(false && "Profile not found.");
@@ -271,14 +272,25 @@ struct Config
 
     TerminalProfile const* profile(std::string const& _name) const
     {
+        assert(!_name.empty());
         if (auto i = profiles.find(_name); i != profiles.end())
             return &i->second;
         assert(false && "Profile not found.");
         return nullptr;
     }
 
-    TerminalProfile& profile() noexcept { return *profile(defaultProfileName); }
-    TerminalProfile const& profile() const noexcept { return *profile(defaultProfileName); }
+    TerminalProfile& profile() noexcept
+    {
+        if (auto* prof = profile(defaultProfileName); prof)
+            return *prof;
+        crispy::unreachable();
+    }
+    TerminalProfile const& profile() const noexcept
+    {
+        if (auto const* prof = profile(defaultProfileName); prof)
+            return *prof;
+        crispy::unreachable();
+    }
 
     // selection
     std::string wordDelimiters;
@@ -301,7 +313,6 @@ struct Config
 
 FileSystem::path configHome();
 FileSystem::path configHome(std::string const& _programName);
-FileSystem::path configHome();
 
 std::optional<std::string> readConfigFile(std::string const& _filename);
 

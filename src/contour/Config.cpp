@@ -2050,8 +2050,6 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 
     tryLoadValue(usedKeys, doc, "reflow_on_resize", _config.reflowOnResize, logger);
 
-    // TODO: If there is only one profile, prefill default_profile with that name.
-    // TODO: If there are more than one profile, prefill with the top-most one.
     tryLoadValue(usedKeys, doc, "default_profile", _config.defaultProfileName, logger);
 
     if (auto profiles = doc["profiles"])
@@ -2060,6 +2058,18 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 
         usedKeys.emplace("profiles");
         usedKeys.emplace(fmt::format("{}.{}", parentPath, _config.defaultProfileName));
+        auto const& defaultProfileNode = profiles[_config.defaultProfileName];
+        if (!defaultProfileNode)
+        {
+            errorlog()("default_profile \"{}\" not found in profiles list."
+                       " Using the first available profile",
+                       escape(_config.defaultProfileName));
+
+            if (profiles.begin() != profiles.end())
+                _config.defaultProfileName = profiles.begin()->first.as<std::string>();
+            else
+                throw std::runtime_error("No profile is defined in config, exiting contour.");
+        }
         _config.profiles[_config.defaultProfileName] =
             loadTerminalProfile(usedKeys,
                                 profiles[_config.defaultProfileName],
