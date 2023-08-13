@@ -55,7 +55,7 @@ namespace
                || (192 <= codepoint && codepoint <= 255);
     }
 
-    enum class WordSkipClass
+    enum class word_skip_class
     {
         Word,
         Keyword,
@@ -63,38 +63,38 @@ namespace
         Other
     };
 
-    [[maybe_unused]] std::string_view str(WordSkipClass value)
+    [[maybe_unused]] std::string_view str(word_skip_class value)
     {
         switch (value)
         {
-            case WordSkipClass::Word: return "Word";
-            case WordSkipClass::Keyword: return "Keyword";
-            case WordSkipClass::Whitespace: return "Whitespace";
-            case WordSkipClass::Other: return "Other";
+            case word_skip_class::Word: return "Word";
+            case word_skip_class::Keyword: return "Keyword";
+            case word_skip_class::Whitespace: return "Whitespace";
+            case word_skip_class::Other: return "Other";
         }
         return "Wow";
     }
 
-    constexpr WordSkipClass wordSkipClass(char32_t codepoint) noexcept
+    constexpr word_skip_class wordSkipClass(char32_t codepoint) noexcept
     {
         if (isWord(codepoint))
-            return WordSkipClass::Word;
+            return word_skip_class::Word;
         else if (isKeyword(codepoint))
-            return WordSkipClass::Keyword;
+            return word_skip_class::Keyword;
         else if (codepoint == ' ' || codepoint == '\t' || codepoint == 0)
-            return WordSkipClass::Whitespace;
+            return word_skip_class::Whitespace;
         else
-            return WordSkipClass::Other;
+            return word_skip_class::Other;
     }
 
-    WordSkipClass wordSkipClass(std::string text) noexcept
+    word_skip_class wordSkipClass(std::string text) noexcept
     {
         auto const s32 = unicode::convert_to<char32_t>(std::string_view(text.data(), text.size()));
         switch (s32.size())
         {
-            case 0: return WordSkipClass::Whitespace;
+            case 0: return word_skip_class::Whitespace;
             case 1: return wordSkipClass(s32[0]);
-            default: return WordSkipClass::Other;
+            default: return word_skip_class::Other;
         }
     }
 
@@ -107,13 +107,14 @@ namespace
     //     return result;
     // }
 
-    constexpr bool shouldSkipForUntilWordBegin(WordSkipClass current, WordSkipClass& initial) noexcept
+    constexpr bool shouldSkipForUntilWordBegin(word_skip_class current, word_skip_class& initial) noexcept
     {
-        bool const result = current == initial
-                            || (current == WordSkipClass::Whitespace && initial != WordSkipClass::Whitespace);
+        bool const result =
+            current == initial
+            || (current == word_skip_class::Whitespace && initial != word_skip_class::Whitespace);
 
-        if (current == WordSkipClass::Whitespace && initial != WordSkipClass::Whitespace)
-            initial = WordSkipClass::Whitespace;
+        if (current == word_skip_class::Whitespace && initial != word_skip_class::Whitespace)
+            initial = word_skip_class::Whitespace;
 
         return result;
     }
@@ -146,28 +147,28 @@ namespace
         return std::nullopt;
     }
 
-    constexpr bool isValidCharMove(std::optional<ViMotion> motion) noexcept
+    constexpr bool isValidCharMove(std::optional<vi_motion> motion) noexcept
     {
         if (!motion.has_value())
             return false;
         switch (*motion)
         {
-            case ViMotion::TillBeforeCharRight:
-            case ViMotion::TillAfterCharLeft:
-            case ViMotion::ToCharRight:
-            case ViMotion::ToCharLeft: return true;
+            case vi_motion::TillBeforeCharRight:
+            case vi_motion::TillAfterCharLeft:
+            case vi_motion::ToCharRight:
+            case vi_motion::ToCharLeft: return true;
             default: return false;
         }
     }
 
-    constexpr ViMotion invertCharMove(ViMotion motion) noexcept
+    constexpr vi_motion invertCharMove(vi_motion motion) noexcept
     {
         switch (motion)
         {
-            case ViMotion::TillBeforeCharRight: return ViMotion::TillAfterCharLeft;
-            case ViMotion::TillAfterCharLeft: return ViMotion::TillBeforeCharRight;
-            case ViMotion::ToCharRight: return ViMotion::ToCharLeft;
-            case ViMotion::ToCharLeft: return ViMotion::ToCharRight;
+            case vi_motion::TillBeforeCharRight: return vi_motion::TillAfterCharLeft;
+            case vi_motion::TillAfterCharLeft: return vi_motion::TillBeforeCharRight;
+            case vi_motion::ToCharRight: return vi_motion::ToCharLeft;
+            case vi_motion::ToCharLeft: return vi_motion::ToCharRight;
             default: return motion;
         }
     }
@@ -176,11 +177,11 @@ namespace
 
 using namespace std;
 
-ViCommands::ViCommands(Terminal& theTerminal): _terminal { theTerminal }
+vi_commands::vi_commands(Terminal& theTerminal): _terminal { theTerminal }
 {
 }
 
-void ViCommands::scrollViewport(scroll_offset delta)
+void vi_commands::scrollViewport(scroll_offset delta)
 {
     if (delta.value < 0)
         _terminal.get_viewport().scrollDown(boxed_cast<LineCount>(-delta));
@@ -188,23 +189,23 @@ void ViCommands::scrollViewport(scroll_offset delta)
         _terminal.get_viewport().scrollUp(boxed_cast<LineCount>(delta));
 }
 
-void ViCommands::searchStart()
+void vi_commands::searchStart()
 {
     _terminal.screenUpdated();
 }
 
-void ViCommands::searchDone()
+void vi_commands::searchDone()
 {
     _terminal.screenUpdated();
 }
 
-void ViCommands::searchCancel()
+void vi_commands::searchCancel()
 {
     _terminal.state().searchMode.pattern.clear();
     _terminal.screenUpdated();
 }
 
-bool ViCommands::jumpToNextMatch(unsigned count)
+bool vi_commands::jumpToNextMatch(unsigned count)
 {
     for (unsigned i = 0; i < count; ++i)
     {
@@ -226,7 +227,7 @@ bool ViCommands::jumpToNextMatch(unsigned count)
     return true;
 }
 
-bool ViCommands::jumpToPreviousMatch(unsigned count)
+bool vi_commands::jumpToPreviousMatch(unsigned count)
 {
     for (unsigned i = 0; i < count; ++i)
     {
@@ -248,13 +249,13 @@ bool ViCommands::jumpToPreviousMatch(unsigned count)
     return true;
 }
 
-void ViCommands::updateSearchTerm(std::u32string const& text)
+void vi_commands::updateSearchTerm(std::u32string const& text)
 {
     if (auto const newLocation = _terminal.searchReverse(text, cursorPosition))
         moveCursorTo(newLocation.value());
 }
 
-void ViCommands::modeChanged(vi_mode mode)
+void vi_commands::modeChanged(vi_mode mode)
 {
     auto _ = crispy::finally { [this, mode]() {
         _lastMode = mode;
@@ -312,7 +313,7 @@ void ViCommands::modeChanged(vi_mode mode)
     _terminal.inputModeChanged(mode);
 }
 
-void ViCommands::reverseSearchCurrentWord()
+void vi_commands::reverseSearchCurrentWord()
 {
     // auto const oldPos = cursorPosition;
     auto const [wordUnderCursor, range] = _terminal.extractWordUnderCursor(cursorPosition);
@@ -323,14 +324,14 @@ void ViCommands::reverseSearchCurrentWord()
     jumpToPreviousMatch(1);
 }
 
-void ViCommands::toggleLineMark()
+void vi_commands::toggleLineMark()
 {
     auto const currentLineFlags = _terminal.currentScreen().lineFlagsAt(cursorPosition.line);
     _terminal.currentScreen().enableLineFlags(
         cursorPosition.line, line_flags::Marked, !unsigned(currentLineFlags & line_flags::Marked));
 }
 
-void ViCommands::searchCurrentWord()
+void vi_commands::searchCurrentWord()
 {
     auto const [wordUnderCursor, range] = _terminal.extractWordUnderCursor(cursorPosition);
     assert(range.contains(cursorPosition));
@@ -339,18 +340,18 @@ void ViCommands::searchCurrentWord()
     jumpToNextMatch(1);
 }
 
-void ViCommands::executeYank(ViMotion motion, unsigned count)
+void vi_commands::executeYank(vi_motion motion, unsigned count)
 {
     switch (motion)
     {
-        case ViMotion::Selection: {
+        case vi_motion::Selection: {
             assert(_terminal.selector());
             if (_lastMode == vi_mode::VisualBlock)
                 _terminal.setHighlightRange(
-                    RectangularHighlight { _terminal.selector()->from(), _terminal.selector()->to() });
+                    rectangular_highlight { _terminal.selector()->from(), _terminal.selector()->to() });
             else
                 _terminal.setHighlightRange(
-                    LinearHighlight { _terminal.selector()->from(), _terminal.selector()->to() });
+                    linear_highlight { _terminal.selector()->from(), _terminal.selector()->to() });
             _terminal.copyToClipboard(_terminal.extractSelectionText());
             _terminal.inputHandler().setMode(vi_mode::Normal);
             break;
@@ -363,7 +364,7 @@ void ViCommands::executeYank(ViMotion motion, unsigned count)
     }
 }
 
-void ViCommands::executeYank(cell_location from, cell_location to)
+void vi_commands::executeYank(cell_location from, cell_location to)
 {
     assert(_terminal.inputHandler().mode() == vi_mode::Normal);
     assert(!_terminal.selector());
@@ -380,21 +381,21 @@ void ViCommands::executeYank(cell_location from, cell_location to)
     auto const text = _terminal.extractSelectionText();
     _terminal.copyToClipboard(text);
     _terminal.clearSelection();
-    _terminal.setHighlightRange(LinearHighlight { from, to });
+    _terminal.setHighlightRange(linear_highlight { from, to });
     _terminal.inputHandler().setMode(vi_mode::Normal);
     _terminal.screenUpdated();
 }
 
-void ViCommands::execute(ViOperator op, ViMotion motion, unsigned count, char32_t lastChar)
+void vi_commands::execute(vi_operator op, vi_motion motion, unsigned count, char32_t lastChar)
 {
     InputLog()("{}: Executing: {} {} {}\n", _terminal.inputHandler().mode(), count, op, motion);
     switch (op)
     {
-        case ViOperator::MoveCursor:
+        case vi_operator::MoveCursor:
             //.
             moveCursor(motion, count);
             break;
-        case ViOperator::Yank:
+        case vi_operator::Yank:
             //.
             if (isValidCharMove(motion))
             {
@@ -403,21 +404,21 @@ void ViCommands::execute(ViOperator op, ViMotion motion, unsigned count, char32_
             }
             executeYank(motion, count);
             break;
-        case ViOperator::Paste:
+        case vi_operator::Paste:
             //.
             _terminal.sendPasteFromClipboard(count, false);
             break;
-        case ViOperator::PasteStripped:
+        case vi_operator::PasteStripped:
             //.
             _terminal.sendPasteFromClipboard(count, true);
             break;
-        case ViOperator::ReverseSearchCurrentWord: // TODO: Does this even make sense to have?
+        case vi_operator::ReverseSearchCurrentWord: // TODO: Does this even make sense to have?
             break;
     }
     _terminal.screenUpdated();
 }
 
-void ViCommands::select(TextObjectScope scope, TextObject textObject)
+void vi_commands::select(text_object_scope scope, text_object textObject)
 {
     auto const [from, to] = translateToCellRange(scope, textObject);
     cursorPosition = to;
@@ -433,7 +434,7 @@ void ViCommands::select(TextObjectScope scope, TextObject textObject)
     _terminal.screenUpdated();
 }
 
-void ViCommands::yank(TextObjectScope scope, TextObject textObject)
+void vi_commands::yank(text_object_scope scope, text_object textObject)
 {
     auto const [from, to] = translateToCellRange(scope, textObject);
     cursorPosition = from;
@@ -442,7 +443,7 @@ void ViCommands::yank(TextObjectScope scope, TextObject textObject)
     _terminal.screenUpdated();
 }
 
-void ViCommands::yank(ViMotion motion)
+void vi_commands::yank(vi_motion motion)
 {
     auto const [from, to] = translateToCellRange(motion, 1);
     cursorPosition = from;
@@ -451,12 +452,12 @@ void ViCommands::yank(ViMotion motion)
     _terminal.screenUpdated();
 }
 
-void ViCommands::paste(unsigned count, bool stripped)
+void vi_commands::paste(unsigned count, bool stripped)
 {
     _terminal.sendPasteFromClipboard(count, stripped);
 }
 
-cell_location ViCommands::prev(cell_location location) const noexcept
+cell_location vi_commands::prev(cell_location location) const noexcept
 {
     if (location.column.value > 0)
         return { location.line, location.column - 1 };
@@ -474,7 +475,7 @@ cell_location ViCommands::prev(cell_location location) const noexcept
     return location;
 }
 
-cell_location ViCommands::next(cell_location location) const noexcept
+cell_location vi_commands::next(cell_location location) const noexcept
 {
     auto const rightMargin = _terminal.pageSize().columns.as<column_offset>() - 1;
     if (location.column < rightMargin)
@@ -492,7 +493,7 @@ cell_location ViCommands::next(cell_location location) const noexcept
     return location;
 }
 
-cell_location ViCommands::findMatchingPairFrom(cell_location location) const noexcept
+cell_location vi_commands::findMatchingPairFrom(cell_location location) const noexcept
 {
     auto const& cell = _terminal.primaryScreen().at(cursorPosition);
     if (cell.codepointCount() != 1)
@@ -510,7 +511,7 @@ cell_location ViCommands::findMatchingPairFrom(cell_location location) const noe
         return findMatchingPairLeft(b, a, 0);
 }
 
-cell_location ViCommands::findMatchingPairLeft(char left, char right, int initialDepth) const noexcept
+cell_location vi_commands::findMatchingPairLeft(char left, char right, int initialDepth) const noexcept
 {
     auto a = cursorPosition;
     auto depth = initialDepth;
@@ -538,7 +539,7 @@ cell_location ViCommands::findMatchingPairLeft(char left, char right, int initia
     return a;
 }
 
-cell_location ViCommands::findMatchingPairRight(char left, char right, int initialDepth) const noexcept
+cell_location vi_commands::findMatchingPairRight(char left, char right, int initialDepth) const noexcept
 {
     auto depth = initialDepth;
     auto b = cursorPosition;
@@ -567,14 +568,14 @@ cell_location ViCommands::findMatchingPairRight(char left, char right, int initi
     return b;
 }
 
-cell_location_range ViCommands::expandMatchingPair(TextObjectScope scope,
-                                                   char left,
-                                                   char right) const noexcept
+cell_location_range vi_commands::expandMatchingPair(text_object_scope scope,
+                                                    char left,
+                                                    char right) const noexcept
 {
     auto a = findMatchingPairLeft(left, right, left != right ? 1 : -1);
     auto b = findMatchingPairRight(left, right, left != right ? 1 : -1);
 
-    if (scope == TextObjectScope::Inner)
+    if (scope == text_object_scope::Inner)
     {
         if (compareCellTextAt(a, left))
             a = next(a);
@@ -585,8 +586,8 @@ cell_location_range ViCommands::expandMatchingPair(TextObjectScope scope,
     return { a, b };
 }
 
-cell_location_range ViCommands::translateToCellRange(TextObjectScope scope,
-                                                     TextObject textObject) const noexcept
+cell_location_range vi_commands::translateToCellRange(text_object_scope scope,
+                                                      text_object textObject) const noexcept
 {
     auto const gridTop = -_terminal.currentScreen().historyLineCount().as<line_offset>();
     auto const gridBottom = _terminal.pageSize().lines.as<line_offset>() - 1;
@@ -595,44 +596,44 @@ cell_location_range ViCommands::translateToCellRange(TextObjectScope scope,
     auto b = cursorPosition;
     switch (textObject)
     {
-        case TextObject::AngleBrackets: return expandMatchingPair(scope, '<', '>');
-        case TextObject::BackQuotes: return expandMatchingPair(scope, '`', '`');
-        case TextObject::CurlyBrackets: return expandMatchingPair(scope, '{', '}');
-        case TextObject::DoubleQuotes: return expandMatchingPair(scope, '"', '"');
-        case TextObject::LineMark:
+        case text_object::AngleBrackets: return expandMatchingPair(scope, '<', '>');
+        case text_object::BackQuotes: return expandMatchingPair(scope, '`', '`');
+        case text_object::CurlyBrackets: return expandMatchingPair(scope, '{', '}');
+        case text_object::DoubleQuotes: return expandMatchingPair(scope, '"', '"');
+        case text_object::LineMark:
             // Walk the line upwards until we find a marked line.
             while (
                 a.line > gridTop
                 && !(unsigned(_terminal.currentScreen().lineFlagsAt(a.line)) & unsigned(line_flags::Marked)))
                 --a.line;
-            if (scope == TextObjectScope::Inner && a != cursorPosition)
+            if (scope == text_object_scope::Inner && a != cursorPosition)
                 ++a.line;
             // Walk the line downwards until we find a marked line.
             while (
                 b.line < gridBottom
                 && !(unsigned(_terminal.currentScreen().lineFlagsAt(b.line)) & unsigned(line_flags::Marked)))
                 ++b.line;
-            if (scope == TextObjectScope::Inner && b != cursorPosition)
+            if (scope == text_object_scope::Inner && b != cursorPosition)
                 --b.line;
             // Span the range from left most column to right most column.
             a.column = column_offset(0);
             b.column = rightMargin;
             break;
-        case TextObject::Paragraph:
+        case text_object::Paragraph:
             while (a.line > gridTop && !_terminal.currentScreen().isLineEmpty(a.line - 1))
                 --a.line;
             while (b.line < gridBottom && !_terminal.currentScreen().isLineEmpty(b.line))
                 ++b.line;
             break;
-        case TextObject::RoundBrackets: return expandMatchingPair(scope, '(', ')');
-        case TextObject::SingleQuotes: return expandMatchingPair(scope, '\'', '\'');
-        case TextObject::SquareBrackets: return expandMatchingPair(scope, '[', ']');
-        case TextObject::Word: {
-            a = findBeginOfWordAt(a, JumpOver::No);
-            b = findEndOfWordAt(b, JumpOver::No);
+        case text_object::RoundBrackets: return expandMatchingPair(scope, '(', ')');
+        case text_object::SingleQuotes: return expandMatchingPair(scope, '\'', '\'');
+        case text_object::SquareBrackets: return expandMatchingPair(scope, '[', ']');
+        case text_object::Word: {
+            a = findBeginOfWordAt(a, jump_over::No);
+            b = findEndOfWordAt(b, jump_over::No);
             break;
         }
-        case TextObject::BigWord: {
+        case text_object::BigWord: {
             while (a.column.value > 0 && !_terminal.currentScreen().isCellEmpty(prev(a)))
                 a = prev(a);
             while (b.column < rightMargin && !_terminal.currentScreen().isCellEmpty(next(b)))
@@ -643,11 +644,11 @@ cell_location_range ViCommands::translateToCellRange(TextObjectScope scope,
     return { a, b };
 }
 
-cell_location_range ViCommands::translateToCellRange(ViMotion motion, unsigned count) const noexcept
+cell_location_range vi_commands::translateToCellRange(vi_motion motion, unsigned count) const noexcept
 {
     switch (motion)
     {
-        case ViMotion::FullLine:
+        case vi_motion::FullLine:
             return { cursorPosition - cursorPosition.column,
                      { cursorPosition.line, _terminal.pageSize().columns.as<column_offset>() - 1 } };
         default:
@@ -656,7 +657,7 @@ cell_location_range ViCommands::translateToCellRange(ViMotion motion, unsigned c
     }
 }
 
-cell_location ViCommands::findBeginOfWordAt(cell_location location, JumpOver jumpOver) const noexcept
+cell_location vi_commands::findBeginOfWordAt(cell_location location, jump_over jumpOver) const noexcept
 {
     auto const firstAddressableLocation =
         cell_location { -line_offset::cast_from(_terminal.currentScreen().historyLineCount()),
@@ -666,25 +667,25 @@ cell_location ViCommands::findBeginOfWordAt(cell_location location, JumpOver jum
     auto leftLocation = prev(current);
     auto leftClass = wordSkipClass(_terminal.currentScreen().cellTextAt(leftLocation));
     auto continuationClass =
-        jumpOver == JumpOver::Yes ? leftClass : wordSkipClass(_terminal.currentScreen().cellTextAt(current));
+        jumpOver == jump_over::Yes ? leftClass : wordSkipClass(_terminal.currentScreen().cellTextAt(current));
 
     while (current != firstAddressableLocation && leftClass == continuationClass)
     {
         current = leftLocation;
         leftLocation = prev(current);
         leftClass = wordSkipClass(_terminal.currentScreen().cellTextAt(leftLocation));
-        if (continuationClass == WordSkipClass::Whitespace && leftClass != WordSkipClass::Whitespace)
+        if (continuationClass == word_skip_class::Whitespace && leftClass != word_skip_class::Whitespace)
             continuationClass = leftClass;
     }
 
     return current;
 }
 
-cell_location ViCommands::findEndOfWordAt(cell_location location, JumpOver jumpOver) const noexcept
+cell_location vi_commands::findEndOfWordAt(cell_location location, jump_over jumpOver) const noexcept
 {
     auto const rightMargin = _terminal.pageSize().columns.as<column_offset>();
     auto leftOfCurrent = location;
-    if (leftOfCurrent.column + 1 < rightMargin && jumpOver == JumpOver::Yes)
+    if (leftOfCurrent.column + 1 < rightMargin && jumpOver == jump_over::Yes)
         leftOfCurrent.column++;
     auto current = leftOfCurrent;
     while (current.column + 1 < rightMargin
@@ -696,7 +697,7 @@ cell_location ViCommands::findEndOfWordAt(cell_location location, JumpOver jumpO
     return leftOfCurrent;
 }
 
-cell_location ViCommands::snapToCell(cell_location location) const noexcept
+cell_location vi_commands::snapToCell(cell_location location) const noexcept
 {
     while (location.column > column_offset(0) && compareCellTextAt(location, '\0'))
         --location.column;
@@ -704,7 +705,7 @@ cell_location ViCommands::snapToCell(cell_location location) const noexcept
     return location;
 }
 
-cell_location ViCommands::snapToCellRight(cell_location location) const noexcept
+cell_location vi_commands::snapToCellRight(cell_location location) const noexcept
 {
     auto const rightMargin = column_offset::cast_from(_terminal.pageSize().columns - 1);
     while (location.column < rightMargin && compareCellTextAt(location, '\0'))
@@ -712,12 +713,12 @@ cell_location ViCommands::snapToCellRight(cell_location location) const noexcept
     return location;
 }
 
-bool ViCommands::compareCellTextAt(cell_location position, char codepoint) const noexcept
+bool vi_commands::compareCellTextAt(cell_location position, char codepoint) const noexcept
 {
     return _terminal.currentScreen().compareCellTextAt(position, codepoint);
 }
 
-cell_location ViCommands::globalCharUp(cell_location location, char ch, unsigned count) const noexcept
+cell_location vi_commands::globalCharUp(cell_location location, char ch, unsigned count) const noexcept
 {
     auto const pageTop = -_terminal.currentScreen().historyLineCount().as<line_offset>();
     auto result = cell_location { location.line, column_offset(0) };
@@ -737,7 +738,7 @@ cell_location ViCommands::globalCharUp(cell_location location, char ch, unsigned
     return result;
 }
 
-cell_location ViCommands::globalCharDown(cell_location location, char ch, unsigned count) const noexcept
+cell_location vi_commands::globalCharDown(cell_location location, char ch, unsigned count) const noexcept
 {
     auto const pageBottom = _terminal.pageSize().lines.as<line_offset>() - 1;
     auto result = cell_location { location.line, column_offset(0) };
@@ -757,11 +758,11 @@ cell_location ViCommands::globalCharDown(cell_location location, char ch, unsign
     return result;
 }
 
-cell_location ViCommands::translateToCellLocation(ViMotion motion, unsigned count) const noexcept
+cell_location vi_commands::translateToCellLocation(vi_motion motion, unsigned count) const noexcept
 {
     switch (motion)
     {
-        case ViMotion::CharLeft: // h
+        case vi_motion::CharLeft: // h
         {
             auto resultPosition = cursorPosition;
             while (count)
@@ -771,7 +772,7 @@ cell_location ViCommands::translateToCellLocation(ViMotion motion, unsigned coun
             }
             return resultPosition;
         }
-        case ViMotion::CharRight: // l
+        case vi_motion::CharRight: // l
         {
             auto resultPosition = cursorPosition;
             while (count)
@@ -781,28 +782,28 @@ cell_location ViCommands::translateToCellLocation(ViMotion motion, unsigned coun
             }
             return resultPosition;
         }
-        case ViMotion::ScreenColumn: // |
+        case vi_motion::ScreenColumn: // |
             return snapToCell({ cursorPosition.line,
                                 min(column_offset::cast_from(count - 1),
                                     _terminal.pageSize().columns.as<column_offset>() - 1) });
-        case ViMotion::FileBegin: // gg
+        case vi_motion::FileBegin: // gg
             return snapToCell(
                 { line_offset::cast_from(-_terminal.currentScreen().historyLineCount().as<int>()),
                   column_offset(0) });
-        case ViMotion::FileEnd: // G
+        case vi_motion::FileEnd: // G
             return snapToCell({ _terminal.pageSize().lines.as<line_offset>() - 1, column_offset(0) });
-        case ViMotion::PageTop: // <S-H>
+        case vi_motion::PageTop: // <S-H>
             return snapToCell({ boxed_cast<line_offset>(-_terminal.get_viewport().scrollOffset())
                                     + *_terminal.get_viewport().scrollOff(),
                                 column_offset(0) });
-        case ViMotion::PageBottom: // <S-L>
+        case vi_motion::PageBottom: // <S-L>
             return snapToCell({ boxed_cast<line_offset>(-_terminal.get_viewport().scrollOffset())
                                     + boxed_cast<line_offset>(_terminal.pageSize().lines
                                                               - *_terminal.get_viewport().scrollOff() - 1),
                                 column_offset(0) });
-        case ViMotion::LineBegin: // 0
+        case vi_motion::LineBegin: // 0
             return { cursorPosition.line, column_offset(0) };
-        case ViMotion::LineTextBegin: // ^
+        case vi_motion::LineTextBegin: // ^
         {
             auto result = cell_location { cursorPosition.line, column_offset(0) };
             while (result.column < _terminal.pageSize().columns.as<column_offset>() - 1
@@ -810,31 +811,31 @@ cell_location ViCommands::translateToCellLocation(ViMotion motion, unsigned coun
                 ++result.column;
             return result;
         }
-        case ViMotion::LineDown: // j
+        case vi_motion::LineDown: // j
             return { min(cursorPosition.line + line_offset::cast_from(count),
                          _terminal.pageSize().lines.as<line_offset>() - 1),
                      cursorPosition.column };
-        case ViMotion::LineEnd: // $
+        case vi_motion::LineEnd: // $
             return getRightMostNonEmptyCellLocation(_terminal, cursorPosition.line);
-        case ViMotion::LineUp: // k
+        case vi_motion::LineUp: // k
             return { max(cursorPosition.line - line_offset::cast_from(count),
                          -_terminal.currentScreen().historyLineCount().as<line_offset>()),
                      cursorPosition.column };
-        case ViMotion::LinesCenter: // M
+        case vi_motion::LinesCenter: // M
             return { line_offset::cast_from(_terminal.pageSize().lines / 2 - 1)
                          - boxed_cast<line_offset>(_terminal.get_viewport().scrollOffset()),
                      cursorPosition.column };
-        case ViMotion::PageDown:
+        case vi_motion::PageDown:
             return { min(cursorPosition.line + line_offset::cast_from(_terminal.pageSize().lines / 2),
                          _terminal.pageSize().lines.as<line_offset>() - 1),
                      cursorPosition.column };
-        case ViMotion::PageUp:
+        case vi_motion::PageUp:
             return { max(cursorPosition.line - line_offset::cast_from(_terminal.pageSize().lines / 2),
                          -_terminal.currentScreen().historyLineCount().as<line_offset>()),
                      cursorPosition.column };
             return cursorPosition
                    - min(cursorPosition.line, line_offset::cast_from(_terminal.pageSize().lines) / 2);
-        case ViMotion::ParagraphBackward: // {
+        case vi_motion::ParagraphBackward: // {
         {
             auto const pageTop = -_terminal.currentScreen().historyLineCount().as<line_offset>();
             auto prev = cell_location { cursorPosition.line, column_offset(0) };
@@ -850,15 +851,15 @@ cell_location ViCommands::translateToCellLocation(ViMotion motion, unsigned coun
             }
             return snapToCell(current);
         }
-        case ViMotion::GlobalCurlyOpenUp: // [[
+        case vi_motion::GlobalCurlyOpenUp: // [[
             return globalCharUp(cursorPosition, '{', count);
-        case ViMotion::GlobalCurlyOpenDown: // ]]
+        case vi_motion::GlobalCurlyOpenDown: // ]]
             return globalCharDown(cursorPosition, '{', count);
-        case ViMotion::GlobalCurlyCloseUp: // []
+        case vi_motion::GlobalCurlyCloseUp: // []
             return globalCharUp(cursorPosition, '}', count);
-        case ViMotion::GlobalCurlyCloseDown: // ][
+        case vi_motion::GlobalCurlyCloseDown: // ][
             return globalCharDown(cursorPosition, '}', count);
-        case ViMotion::LineMarkUp: // [m
+        case vi_motion::LineMarkUp: // [m
         {
             auto const gridTop = -_terminal.currentScreen().historyLineCount().as<line_offset>();
             auto result = cell_location { cursorPosition.line, column_offset(0) };
@@ -874,7 +875,7 @@ cell_location ViCommands::translateToCellLocation(ViMotion motion, unsigned coun
             }
             return result;
         }
-        case ViMotion::LineMarkDown: // ]m
+        case vi_motion::LineMarkDown: // ]m
         {
             auto const pageBottom = _terminal.pageSize().lines.as<line_offset>() - 1;
             auto result = cell_location { cursorPosition.line, column_offset(0) };
@@ -893,7 +894,7 @@ cell_location ViCommands::translateToCellLocation(ViMotion motion, unsigned coun
             }
             return result;
         }
-        case ViMotion::ParagraphForward: // }
+        case vi_motion::ParagraphForward: // }
         {
             auto const pageBottom = _terminal.pageSize().lines.as<line_offset>() - 1;
             auto prev = cell_location { cursorPosition.line, column_offset(0) };
@@ -909,9 +910,9 @@ cell_location ViCommands::translateToCellLocation(ViMotion motion, unsigned coun
             }
             return snapToCell(current);
         }
-        case ViMotion::ParenthesisMatching: // % TODO
+        case vi_motion::ParenthesisMatching: // % TODO
             return findMatchingPairFrom(cursorPosition);
-        case ViMotion::SearchResultBackward: // N TODO
+        case vi_motion::SearchResultBackward: // N TODO
         {
             auto startPosition = cursorPosition;
             for (unsigned i = 0; i < count; ++i)
@@ -925,7 +926,7 @@ cell_location ViCommands::translateToCellLocation(ViMotion motion, unsigned coun
             }
             return startPosition;
         }
-        case ViMotion::SearchResultForward: // n
+        case vi_motion::SearchResultForward: // n
         {
             auto startPosition = cursorPosition;
             for (unsigned i = 0; i < count; ++i)
@@ -938,22 +939,22 @@ cell_location ViCommands::translateToCellLocation(ViMotion motion, unsigned coun
             }
             return startPosition;
         }
-        case ViMotion::WordBackward: // b
+        case vi_motion::WordBackward: // b
         {
             auto current = cursorPosition;
             for (unsigned i = 0; i < count; ++i)
-                current = findBeginOfWordAt(current, JumpOver::Yes);
+                current = findBeginOfWordAt(current, jump_over::Yes);
 
             return current;
         }
-        case ViMotion::WordEndForward: // e
+        case vi_motion::WordEndForward: // e
         {
             auto current = cursorPosition;
             for (unsigned i = 0; i < count; ++i)
-                current = findEndOfWordAt(cursorPosition, JumpOver::Yes);
+                current = findEndOfWordAt(cursorPosition, jump_over::Yes);
             return current;
         }
-        case ViMotion::BigWordForward: // W
+        case vi_motion::BigWordForward: // W
         {
             auto const rightMargin = _terminal.pageSize().columns.as<column_offset>();
             auto prev = cursorPosition;
@@ -969,7 +970,7 @@ cell_location ViCommands::translateToCellLocation(ViMotion motion, unsigned coun
             }
             return current;
         }
-        case ViMotion::BigWordEndForward: // E
+        case vi_motion::BigWordEndForward: // E
         {
             auto const rightMargin = _terminal.pageSize().columns.as<column_offset>();
             auto prev = cursorPosition;
@@ -985,7 +986,7 @@ cell_location ViCommands::translateToCellLocation(ViMotion motion, unsigned coun
             }
             return prev;
         }
-        case ViMotion::BigWordBackward: // B
+        case vi_motion::BigWordBackward: // B
         {
             auto prev = cursorPosition;
             if (prev.column.value > 0)
@@ -1004,7 +1005,7 @@ cell_location ViCommands::translateToCellLocation(ViMotion motion, unsigned coun
             else
                 return prev;
         }
-        case ViMotion::WordForward: // w
+        case vi_motion::WordForward: // w
         {
             auto const lastAddressableLocation =
                 cell_location { line_offset::cast_from(_terminal.pageSize().lines - 1),
@@ -1023,29 +1024,29 @@ cell_location ViCommands::translateToCellLocation(ViMotion motion, unsigned coun
 
             return result;
         }
-        case ViMotion::Explicit:  // <special for explicit operations>
-        case ViMotion::Selection: // <special for visual modes>
-        case ViMotion::FullLine:  // <special for full-line operations>
+        case vi_motion::Explicit:  // <special for explicit operations>
+        case vi_motion::Selection: // <special for visual modes>
+        case vi_motion::FullLine:  // <special for full-line operations>
             return snapToCell(cursorPosition);
-        case ViMotion::TillBeforeCharRight: // t {char}
+        case vi_motion::TillBeforeCharRight: // t {char}
             if (auto const result = toCharRight(count); result)
                 return result.value() - column_offset(1);
             else
                 return cursorPosition;
-        case ViMotion::TillAfterCharLeft: // T {char}
+        case vi_motion::TillAfterCharLeft: // T {char}
             if (auto const result = toCharLeft(count); result)
                 return result.value() + column_offset(1);
             else
                 return cursorPosition;
-        case ViMotion::ToCharRight: // f {char}
+        case vi_motion::ToCharRight: // f {char}
             return toCharRight(count).value_or(cursorPosition);
-        case ViMotion::ToCharLeft: // F {char}
+        case vi_motion::ToCharLeft: // F {char}
             return toCharLeft(count).value_or(cursorPosition);
-        case ViMotion::RepeatCharMove:
+        case vi_motion::RepeatCharMove:
             if (isValidCharMove(_lastCharMotion))
                 return translateToCellLocation(*_lastCharMotion, count);
             return cursorPosition;
-        case ViMotion::RepeatCharMoveReverse:
+        case vi_motion::RepeatCharMoveReverse:
             if (isValidCharMove(_lastCharMotion))
                 return translateToCellLocation(invertCharMove(*_lastCharMotion), count);
             return cursorPosition;
@@ -1053,7 +1054,7 @@ cell_location ViCommands::translateToCellLocation(ViMotion motion, unsigned coun
     crispy::unreachable();
 }
 
-optional<cell_location> ViCommands::toCharRight(cell_location startPosition) const noexcept
+optional<cell_location> vi_commands::toCharRight(cell_location startPosition) const noexcept
 {
     auto result = next(startPosition);
 
@@ -1067,7 +1068,7 @@ optional<cell_location> ViCommands::toCharRight(cell_location startPosition) con
     }
 }
 
-optional<cell_location> ViCommands::toCharLeft(cell_location startPosition) const noexcept
+optional<cell_location> vi_commands::toCharLeft(cell_location startPosition) const noexcept
 {
     auto result = prev(startPosition);
 
@@ -1081,7 +1082,7 @@ optional<cell_location> ViCommands::toCharLeft(cell_location startPosition) cons
     }
 }
 
-optional<cell_location> ViCommands::toCharRight(unsigned count) const noexcept
+optional<cell_location> vi_commands::toCharRight(unsigned count) const noexcept
 {
     auto result = optional { cursorPosition };
     while (count > 0 && result.has_value())
@@ -1092,7 +1093,7 @@ optional<cell_location> ViCommands::toCharRight(unsigned count) const noexcept
     return result;
 }
 
-optional<cell_location> ViCommands::toCharLeft(unsigned count) const noexcept
+optional<cell_location> vi_commands::toCharLeft(unsigned count) const noexcept
 {
     auto result = optional { cursorPosition };
     while (count > 0 && result.has_value())
@@ -1103,7 +1104,7 @@ optional<cell_location> ViCommands::toCharLeft(unsigned count) const noexcept
     return result;
 }
 
-void ViCommands::moveCursor(ViMotion motion, unsigned count, char32_t lastChar)
+void vi_commands::moveCursor(vi_motion motion, unsigned count, char32_t lastChar)
 {
     Require(_terminal.inputHandler().mode() != vi_mode::Insert);
 
@@ -1118,7 +1119,7 @@ void ViCommands::moveCursor(ViMotion motion, unsigned count, char32_t lastChar)
     moveCursorTo(nextPosition);
 }
 
-void ViCommands::moveCursorTo(cell_location position)
+void vi_commands::moveCursorTo(cell_location position)
 {
     cursorPosition = position;
 

@@ -25,7 +25,7 @@ namespace terminal
 {
 
 template <typename PtyDevice = MockPty>
-class MockTerm: public Terminal::Events
+class MockTerm: public Terminal::events
 {
   public:
     MockTerm(ColumnCount columns, LineCount lines): MockTerm { PageSize { lines, columns } } {}
@@ -52,7 +52,7 @@ class MockTerm: public Terminal::Events
     // Convenience method to type into stdin a sequence of characters.
     void sendCharPressSequence(std::string_view sequence,
                                modifier modifier = modifier::None,
-                               Terminal::Timestamp now = std::chrono::steady_clock::now())
+                               Terminal::timestamp now = std::chrono::steady_clock::now())
     {
         auto const codepoints = unicode::convert_to<char32_t>(sequence);
         for (auto const codepoint: codepoints)

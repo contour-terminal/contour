@@ -2946,7 +2946,7 @@ namespace impl
                 auto const italic = string(param(3));
                 auto const boldItalic = string(param(4));
                 auto const emoji = string(param(5));
-                terminal.setFontDef(FontDef { size, regular, bold, italic, boldItalic, emoji });
+                terminal.setFontDef(font_def { size, regular, bold, italic, boldItalic, emoji });
             }
             return ApplyResult::Ok;
         }
@@ -2961,7 +2961,7 @@ namespace impl
 
             if (splits[0] != "?"sv)
             {
-                auto fontDef = FontDef {};
+                auto fontDef = font_def {};
                 fontDef.regular = splits[0];
                 terminal.setFontDef(fontDef);
             }
@@ -3220,7 +3220,7 @@ void Screen<Cell>::executeControlCode(char controlCode)
 #if defined(LIBTERMINAL_LOG_TRACE)
     if (VTTraceSequenceLog)
         VTTraceSequenceLog()(
-            "control U+{:02X} ({})", controlCode, to_string(static_cast<ControlCode::C0>(controlCode)));
+            "control U+{:02X} ({})", controlCode, to_string(static_cast<ControlCode::c0>(controlCode)));
 #endif
 
     _terminal.state().instructionCounter++;

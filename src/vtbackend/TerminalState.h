@@ -218,8 +218,8 @@ struct TerminalState
 
     input_generator inputGenerator {};
 
-    ViCommands viCommands;
-    ViInputHandler inputHandler;
+    vi_commands viCommands;
+    vi_input_handler inputHandler;
 };
 
 } // namespace terminal

@@ -52,7 +52,7 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 class Screen;
 
 /// Helping information to visualize IME text that has not been comitted yet.
-struct InputMethodData
+struct input_method_data
 {
     // If this string is non-empty, the IME is active and the given data
     // shall be displayed at the cursor's location.
@@ -67,33 +67,36 @@ struct InputMethodData
 // In case of single-step, only one sequence will be handled and the execution mode put to suspend mode,
 // and in case of break-at-frame, the execution will conditionally break iff the currently
 // pending VT sequence indicates a frame start.
-class TraceHandler: public sequence_handler
+class trace_handlert: public sequence_handler
 {
   public:
-    explicit TraceHandler(Terminal& terminal);
+    explicit trace_handlert(Terminal& terminal);
 
     void executeControlCode(char controlCode) override;
     void processSequence(sequence const& sequence) override;
     void writeText(char32_t codepoint) override;
     void writeText(std::string_view codepoints, size_t cellCount) override;
 
-    struct CodepointSequence
+    struct codepoint_sequence
     {
         std::string_view text;
         size_t cellCount;
     };
-    using PendingSequence = std::variant<char32_t, CodepointSequence, sequence>;
-    using PendingSequenceQueue = std::deque<PendingSequence>;
+    using pending_sequence = std::variant<char32_t, codepoint_sequence, sequence>;
+    using pending_sequence_queue = std::deque<pending_sequence>;
 
-    [[nodiscard]] PendingSequenceQueue const& pendingSequences() const noexcept { return _pendingSequences; }
+    [[nodiscard]] pending_sequence_queue const& pendingSequences() const noexcept
+    {
+        return _pendingSequences;
+    }
 
     void flushAllPending();
     void flushOne();
 
   private:
-    void flushOne(PendingSequence const& pendingSequence);
+    void flushOne(pending_sequence const& pendingSequence);
     Terminal& _terminal;
-    PendingSequenceQueue _pendingSequences = {};
+    pending_sequence_queue _pendingSequences = {};
 };
 
 /// Terminal API to manage input and output devices of a pseudo terminal, such as keyboard, mouse, and screen.
@@ -105,18 +108,18 @@ class TraceHandler: public sequence_handler
 class Terminal
 {
   public:
-    class Events
+    class events
     {
       public:
-        virtual ~Events() = default;
+        virtual ~events() = default;
 
         virtual void requestCaptureBuffer(LineCount /*lines*/, bool /*logical*/) {}
         virtual void bell() {}
         virtual void bufferChanged(screen_type) {}
         virtual void renderBufferUpdated() {}
         virtual void screenUpdated() {}
-        virtual FontDef getFontDef() { return {}; }
-        virtual void setFontDef(FontDef const& /*fontSpec*/) {}
+        virtual font_def getFontDef() { return {}; }
+        virtual void setFontDef(font_def const& /*fontSpec*/) {}
         virtual void copyToClipboard(std::string_view /*data*/) {}
         virtual void inspect() {}
         virtual void notify(std::string_view /*title*/, std::string_view /*body*/) {}
@@ -136,7 +139,7 @@ class Terminal
         virtual void onScrollOffsetChanged(scroll_offset) {}
     };
 
-    Terminal(Events& eventListener,
+    Terminal(events& eventListener,
              std::unique_ptr<Pty> pty,
              Settings factorySettings,
              std::chrono::steady_clock::time_point now /* = std::chrono::steady_clock::now()*/);
@@ -174,7 +177,7 @@ class Terminal
     void setForegroundColor(color color);
     void setBackgroundColor(color color);
     void setUnderlineColor(color color);
-    void setHighlightRange(HighlightRange range);
+    void setHighlightRange(highlight_range range);
 
     // {{{ cursor
     /// Clamps given logical coordinates to margins as used in when DECOM (origin mode) is enabled.
@@ -256,9 +259,9 @@ class Terminal
     void setMouseBlockSelectionModifier(modifier value) { _settings.mouseBlockSelectionModifier = value; }
 
     // {{{ input proxy
-    using Timestamp = std::chrono::steady_clock::time_point;
-    bool sendKeyPressEvent(key key, modifier modifier, Timestamp now);
-    bool sendCharPressEvent(char32_t ch, modifier modifier, Timestamp now);
+    using timestamp = std::chrono::steady_clock::time_point;
+    bool sendKeyPressEvent(key key, modifier modifier, timestamp now);
+    bool sendCharPressEvent(char32_t ch, modifier modifier, timestamp now);
     bool sendMousePressEvent(modifier modifier,
                              mouse_button button,
                              pixel_coordinate pixelPosition,
@@ -590,8 +593,8 @@ class Terminal
     void scrollbackBufferCleared();
     void screenUpdated();
     void renderBufferUpdated();
-    [[nodiscard]] FontDef getFontDef();
-    void setFontDef(FontDef const& fontDef);
+    [[nodiscard]] font_def getFontDef();
+    void setFontDef(font_def const& fontDef);
     void copyToClipboard(std::string_view data);
     void inspect();
     void notify(std::string_view title, std::string_view body);
@@ -660,8 +663,8 @@ class Terminal
 
     void onSelectionUpdated();
 
-    [[nodiscard]] ViInputHandler& inputHandler() noexcept { return _state.inputHandler; }
-    [[nodiscard]] ViInputHandler const& inputHandler() const noexcept { return _state.inputHandler; }
+    [[nodiscard]] vi_input_handler& inputHandler() noexcept { return _state.inputHandler; }
+    [[nodiscard]] vi_input_handler const& inputHandler() const noexcept { return _state.inputHandler; }
     void resetHighlight();
 
     status_display_type statusDisplayType() const noexcept { return _state.statusDisplayType; }
@@ -757,7 +760,7 @@ class Terminal
     // private data
     //
 
-    Events& _eventListener;
+    events& _eventListener;
 
     // configuration state
     Settings _factorySettings;
@@ -790,13 +793,13 @@ class Terminal
     // {{{ blinking state helpers
     mutable std::chrono::steady_clock::time_point _lastCursorBlink;
     mutable unsigned _cursorBlinkState = 1;
-    struct BlinkerState
+    struct binker_state
     {
         bool state = false;
         std::chrono::milliseconds const interval; // NOLINT(readability-identifier-naming)
     };
-    mutable BlinkerState _slowBlinker { false, std::chrono::milliseconds { 500 } };
-    mutable BlinkerState _rapidBlinker { false, std::chrono::milliseconds { 300 } };
+    mutable binker_state _slowBlinker { false, std::chrono::milliseconds { 500 } };
+    mutable binker_state _rapidBlinker { false, std::chrono::milliseconds { 300 } };
     mutable std::chrono::steady_clock::time_point _lastBlink;
     mutable std::chrono::steady_clock::time_point _lastRapidBlink;
     // }}}
@@ -809,23 +812,23 @@ class Terminal
     Screen<StatusDisplayCell> _indicatorStatusScreen;
     std::reference_wrapper<ScreenBase> _currentScreen;
     viewport _viewport;
-    TraceHandler _traceHandler;
+    trace_handlert _traceHandler;
     // clang-format on
     // }}}
 
     // {{{ selection states
     std::unique_ptr<Selection> _selection;
-    struct SelectionHelper: public terminal::SelectionHelper
+    struct selection_helper: public terminal::SelectionHelper
     {
         Terminal* terminal;
-        explicit SelectionHelper(Terminal* self): terminal { self } {}
+        explicit selection_helper(Terminal* self): terminal { self } {}
         [[nodiscard]] PageSize pageSize() const noexcept override;
         [[nodiscard]] bool wordDelimited(cell_location pos) const noexcept override;
         [[nodiscard]] bool wrappedLine(line_offset line) const noexcept override;
         [[nodiscard]] bool cellEmpty(cell_location pos) const noexcept override;
         [[nodiscard]] int cellWidth(cell_location pos) const noexcept override;
     };
-    SelectionHelper _selectionHelper;
+    selection_helper _selectionHelper;
     // }}}
 
     // {{{ Render buffer state
@@ -838,24 +841,24 @@ class Terminal
     RenderPassHints _lastRenderPassHints {};
     // }}}
 
-    InputMethodData _inputMethodData {};
+    input_method_data _inputMethodData {};
     std::atomic<hyperlink_id> _hoveringHyperlinkId = hyperlink_id {};
     std::atomic<bool> _renderBufferUpdateEnabled = true; // for "Synchronized Updates" feature
-    std::optional<HighlightRange> _highlightRange = std::nullopt;
+    std::optional<highlight_range> _highlightRange = std::nullopt;
 };
 
 } // namespace terminal
 
 template <>
-struct fmt::formatter<terminal::TraceHandler::PendingSequence>
+struct fmt::formatter<terminal::trace_handlert::pending_sequence>
 {
     static auto parse(format_parse_context& ctx) -> format_parse_context::iterator { return ctx.begin(); }
-    static auto format(terminal::TraceHandler::PendingSequence const& pendingSequence, format_context& ctx)
+    static auto format(terminal::trace_handlert::pending_sequence const& pendingSequence, format_context& ctx)
         -> format_context::iterator
     {
         if (auto const* p = std::get_if<terminal::sequence>(&pendingSequence))
             return fmt::format_to(ctx.out(), "{}", p->text());
-        else if (auto const* p = std::get_if<terminal::TraceHandler::CodepointSequence>(&pendingSequence))
+        else if (auto const* p = std::get_if<terminal::trace_handlert::codepoint_sequence>(&pendingSequence))
             return fmt::format_to(ctx.out(), "\"{}\"", crispy::escape(p->text));
         else if (auto const* p = std::get_if<char32_t>(&pendingSequence))
             return fmt::format_to(ctx.out(), "'{}'", unicode::convert_to<char>(*p));

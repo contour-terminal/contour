@@ -603,10 +603,10 @@ namespace
         if (text.size() == 1)
             return static_cast<char32_t>(toupper(static_cast<int>(text[0])));
 
-        auto constexpr namedChars = array { pair { "ENTER"sv, (char) C0::CR },
-                                            pair { "BACKSPACE"sv, (char) C0::BS },
-                                            pair { "TAB"sv, (char) C0::HT },
-                                            pair { "ESCAPE"sv, (char) C0::ESC },
+        auto constexpr namedChars = array { pair { "ENTER"sv, (char) c0::CR },
+                                            pair { "BACKSPACE"sv, (char) c0::BS },
+                                            pair { "TAB"sv, (char) c0::HT },
+                                            pair { "ESCAPE"sv, (char) c0::ESC },
 
                                             pair { "LESS"sv, '<' },
                                             pair { "GREATER"sv, '>' },

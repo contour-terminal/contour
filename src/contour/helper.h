@@ -162,7 +162,7 @@ void spawnNewTerminal(std::string const& _programPath,
                       std::string const& _profileName,
                       std::string const& _cwdUrl);
 
-terminal::FontDef getFontDefinition(terminal::rasterizer::Renderer& _renderer);
+terminal::font_def getFontDefinition(terminal::rasterizer::Renderer& _renderer);
 
 terminal::rasterizer::PageMargin computeMargin(terminal::image_size _cellSize,
                                                terminal::PageSize _charCells,

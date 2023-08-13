@@ -136,7 +136,7 @@ class TerminalWidget: public QQuickItem
     [[nodiscard]] terminal::image_size cellSize() const;
 
     // (user requested) actions
-    terminal::FontDef getFontDef();
+    terminal::font_def getFontDef();
     void copyToClipboard(std::string_view /*_data*/);
     void inspect();
     void notify(std::string_view /*_title*/, std::string_view /*_body*/);

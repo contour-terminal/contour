@@ -349,7 +349,7 @@ void spawnNewTerminal(string const& _programPath,
     QProcess::startDetached(program, args);
 }
 
-terminal::FontDef getFontDefinition(terminal::rasterizer::Renderer& _renderer)
+terminal::font_def getFontDefinition(terminal::rasterizer::Renderer& _renderer)
 {
     auto const fontByStyle = [&](text::font_weight _weight,
                                  text::font_slant _slant) -> text::font_description const& {

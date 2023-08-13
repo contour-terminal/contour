@@ -36,7 +36,7 @@ namespace terminal
 
 namespace mappings
 {
-    struct KeyMapping
+    struct key_mapping
     {
         key key;
         std::string_view mapping {};
@@ -52,117 +52,117 @@ namespace mappings
 #define SS3 "\x1BO"
 
     // the modifier parameter is going to be replaced via fmt::format()
-    array<KeyMapping, 30> const functionKeysWithModifiers {
+    array<key_mapping, 30> const functionKeysWithModifiers {
         // clang-format off
         // Note, that F1..F4 is using CSI too instead of ESC when used with modifier keys.
         // XXX: Maybe I am blind when reading ctlseqs.txt, but F1..F4 with "1;{}P".. seems not to
         // match what other terminal emulators send out with modifiers and I don't see how to match
         // xterm's behaviour along with getting for example vim working to bind to these.
-        KeyMapping { key::F1, ESC "O{}P" }, // "1;{}P"
-        KeyMapping { key::F2, ESC "O{}Q" }, // "1;{}Q"
-        KeyMapping { key::F3, ESC "O{}R" }, // "1;{}R"
-        KeyMapping { key::F4, ESC "O{}S" }, // "1;{}S"
-        KeyMapping { key::F5, CSI "15;{}~" },
-        KeyMapping { key::F6, CSI "17;{}~" },
-        KeyMapping { key::F7, CSI "18;{}~" },
-        KeyMapping { key::F8, CSI "19;{}~" },
-        KeyMapping { key::F9, CSI "20;{}~" },
-        KeyMapping { key::F10, CSI "21;{}~" },
-        KeyMapping { key::F11, CSI "23;{}~" },
-        KeyMapping { key::F12, CSI "24;{}~" },
-        KeyMapping { key::F13, CSI "25;{}~" },
-        KeyMapping { key::F14, CSI "26;{}~" },
-        KeyMapping { key::F15, CSI "28;{}~" },
-        KeyMapping { key::F16, CSI "29;{}~" },
-        KeyMapping { key::F17, CSI "31;{}~" },
-        KeyMapping { key::F18, CSI "32;{}~" },
-        KeyMapping { key::F19, CSI "33;{}~" },
-        KeyMapping { key::F20, CSI "34;{}~" },
+        key_mapping { key::F1, ESC "O{}P" }, // "1;{}P"
+        key_mapping { key::F2, ESC "O{}Q" }, // "1;{}Q"
+        key_mapping { key::F3, ESC "O{}R" }, // "1;{}R"
+        key_mapping { key::F4, ESC "O{}S" }, // "1;{}S"
+        key_mapping { key::F5, CSI "15;{}~" },
+        key_mapping { key::F6, CSI "17;{}~" },
+        key_mapping { key::F7, CSI "18;{}~" },
+        key_mapping { key::F8, CSI "19;{}~" },
+        key_mapping { key::F9, CSI "20;{}~" },
+        key_mapping { key::F10, CSI "21;{}~" },
+        key_mapping { key::F11, CSI "23;{}~" },
+        key_mapping { key::F12, CSI "24;{}~" },
+        key_mapping { key::F13, CSI "25;{}~" },
+        key_mapping { key::F14, CSI "26;{}~" },
+        key_mapping { key::F15, CSI "28;{}~" },
+        key_mapping { key::F16, CSI "29;{}~" },
+        key_mapping { key::F17, CSI "31;{}~" },
+        key_mapping { key::F18, CSI "32;{}~" },
+        key_mapping { key::F19, CSI "33;{}~" },
+        key_mapping { key::F20, CSI "34;{}~" },
 
         // cursor keys
-        KeyMapping { key::UpArrow, CSI "1;{}A" },
-        KeyMapping { key::DownArrow, CSI "1;{}B" },
-        KeyMapping { key::RightArrow, CSI "1;{}C" },
-        KeyMapping { key::LeftArrow, CSI "1;{}D" },
+        key_mapping { key::UpArrow, CSI "1;{}A" },
+        key_mapping { key::DownArrow, CSI "1;{}B" },
+        key_mapping { key::RightArrow, CSI "1;{}C" },
+        key_mapping { key::LeftArrow, CSI "1;{}D" },
 
         // 6-key editing pad
-        KeyMapping { key::Insert, CSI "2;{}~" },
-        KeyMapping { key::Delete, CSI "3;{}~" },
-        KeyMapping { key::Home, CSI "1;{}H" },
-        KeyMapping { key::End, CSI "1;{}F" },
-        KeyMapping { key::PageUp, CSI "5;{}~" },
-        KeyMapping { key::PageDown, CSI "6;{}~" },
+        key_mapping { key::Insert, CSI "2;{}~" },
+        key_mapping { key::Delete, CSI "3;{}~" },
+        key_mapping { key::Home, CSI "1;{}H" },
+        key_mapping { key::End, CSI "1;{}F" },
+        key_mapping { key::PageUp, CSI "5;{}~" },
+        key_mapping { key::PageDown, CSI "6;{}~" },
         // clang-format on
     };
 
-    array<KeyMapping, 22> const standard {
+    array<key_mapping, 22> const standard {
         // clang-format off
         // cursor keys
-        KeyMapping { key::UpArrow, CSI "A" },
-        KeyMapping { key::DownArrow, CSI "B" },
-        KeyMapping { key::RightArrow, CSI "C" },
-        KeyMapping { key::LeftArrow, CSI "D" },
+        key_mapping { key::UpArrow, CSI "A" },
+        key_mapping { key::DownArrow, CSI "B" },
+        key_mapping { key::RightArrow, CSI "C" },
+        key_mapping { key::LeftArrow, CSI "D" },
 
         // 6-key editing pad
-        KeyMapping { key::Insert, CSI "2~" },
-        KeyMapping { key::Delete, CSI "3~" },
-        KeyMapping { key::Home, CSI "H" },
-        KeyMapping { key::End, CSI "F" },
-        KeyMapping { key::PageUp, CSI "5~" },
-        KeyMapping { key::PageDown, CSI "6~" },
+        key_mapping { key::Insert, CSI "2~" },
+        key_mapping { key::Delete, CSI "3~" },
+        key_mapping { key::Home, CSI "H" },
+        key_mapping { key::End, CSI "F" },
+        key_mapping { key::PageUp, CSI "5~" },
+        key_mapping { key::PageDown, CSI "6~" },
 
         // function keys
-        KeyMapping { key::F1, ESC "OP" },
-        KeyMapping { key::F2, ESC "OQ" },
-        KeyMapping { key::F3, ESC "OR" },
-        KeyMapping { key::F4, ESC "OS" },
-        KeyMapping { key::F5, CSI "15~" },
-        KeyMapping { key::F6, CSI "17~" },
-        KeyMapping { key::F7, CSI "18~" },
-        KeyMapping { key::F8, CSI "19~" },
-        KeyMapping { key::F9, CSI "20~" },
-        KeyMapping { key::F10, CSI "21~" },
-        KeyMapping { key::F11, CSI "23~" },
-        KeyMapping { key::F12, CSI "24~" },
+        key_mapping { key::F1, ESC "OP" },
+        key_mapping { key::F2, ESC "OQ" },
+        key_mapping { key::F3, ESC "OR" },
+        key_mapping { key::F4, ESC "OS" },
+        key_mapping { key::F5, CSI "15~" },
+        key_mapping { key::F6, CSI "17~" },
+        key_mapping { key::F7, CSI "18~" },
+        key_mapping { key::F8, CSI "19~" },
+        key_mapping { key::F9, CSI "20~" },
+        key_mapping { key::F10, CSI "21~" },
+        key_mapping { key::F11, CSI "23~" },
+        key_mapping { key::F12, CSI "24~" },
         // clang-format on
     };
 
     /// (DECCKM) Cursor key mode: mappings in when cursor key application mode is set.
-    array<KeyMapping, 6> const applicationCursorKeys {
+    array<key_mapping, 6> const applicationCursorKeys {
         // clang-format off
-        KeyMapping { key::UpArrow, SS3 "A" },
-        KeyMapping { key::DownArrow, SS3 "B" },
-        KeyMapping { key::RightArrow, SS3 "C" },
-        KeyMapping { key::LeftArrow, SS3 "D" },
-        KeyMapping { key::Home, SS3 "H" },
-        KeyMapping { key::End, SS3 "F" },
+        key_mapping { key::UpArrow, SS3 "A" },
+        key_mapping { key::DownArrow, SS3 "B" },
+        key_mapping { key::RightArrow, SS3 "C" },
+        key_mapping { key::LeftArrow, SS3 "D" },
+        key_mapping { key::Home, SS3 "H" },
+        key_mapping { key::End, SS3 "F" },
         // clang-format on
     };
 
-    array<KeyMapping, 21> const applicationKeypad
+    array<key_mapping, 21> const applicationKeypad
     {
         // clang-format off
-        KeyMapping { key::Numpad_NumLock, SS3 "P" },
-        KeyMapping { key::Numpad_Divide, SS3 "Q" },
-        KeyMapping { key::Numpad_Multiply, SS3 "Q" },
-        KeyMapping { key::Numpad_Subtract, SS3 "Q" },
-        KeyMapping { key::Numpad_CapsLock, SS3 "m" },
-        KeyMapping { key::Numpad_Add, SS3 "l" },
-        KeyMapping { key::Numpad_Decimal, SS3 "n" },
-        KeyMapping { key::Numpad_Enter, SS3 "M" },
-        KeyMapping { key::Numpad_Equal, SS3 "X" },
-        KeyMapping { key::Numpad_0, SS3 "p" },
-        KeyMapping { key::Numpad_1, SS3 "q" },
-        KeyMapping { key::Numpad_2, SS3 "r" },
-        KeyMapping { key::Numpad_3, SS3 "s" },
-        KeyMapping { key::Numpad_4, SS3 "t" },
-        KeyMapping { key::Numpad_5, SS3 "u" },
-        KeyMapping { key::Numpad_6, SS3 "v" },
-        KeyMapping { key::Numpad_7, SS3 "w" },
-        KeyMapping { key::Numpad_8, SS3 "x" },
-        KeyMapping { key::Numpad_9, SS3 "y" },
-        KeyMapping { key::PageUp, CSI "5~" },
-        KeyMapping { key::PageDown, CSI "6~" },
+        key_mapping { key::Numpad_NumLock, SS3 "P" },
+        key_mapping { key::Numpad_Divide, SS3 "Q" },
+        key_mapping { key::Numpad_Multiply, SS3 "Q" },
+        key_mapping { key::Numpad_Subtract, SS3 "Q" },
+        key_mapping { key::Numpad_CapsLock, SS3 "m" },
+        key_mapping { key::Numpad_Add, SS3 "l" },
+        key_mapping { key::Numpad_Decimal, SS3 "n" },
+        key_mapping { key::Numpad_Enter, SS3 "M" },
+        key_mapping { key::Numpad_Equal, SS3 "X" },
+        key_mapping { key::Numpad_0, SS3 "p" },
+        key_mapping { key::Numpad_1, SS3 "q" },
+        key_mapping { key::Numpad_2, SS3 "r" },
+        key_mapping { key::Numpad_3, SS3 "s" },
+        key_mapping { key::Numpad_4, SS3 "t" },
+        key_mapping { key::Numpad_5, SS3 "u" },
+        key_mapping { key::Numpad_6, SS3 "v" },
+        key_mapping { key::Numpad_7, SS3 "w" },
+        key_mapping { key::Numpad_8, SS3 "x" },
+        key_mapping { key::Numpad_9, SS3 "y" },
+        key_mapping { key::PageUp, CSI "5~" },
+        key_mapping { key::PageDown, CSI "6~" },
 #if 0 // TODO
         KeyMapping{Key::Space,    SS3 " "}, // TODO
         KeyMapping{Key::Tab,      SS3 "I"},
@@ -175,15 +175,15 @@ namespace mappings
 #undef CSI
 #undef SS3
 
-    constexpr bool operator==(KeyMapping const& km, key key) noexcept
+    constexpr bool operator==(key_mapping const& km, key key) noexcept
     {
         return km.key == key;
     }
 
     template <size_t N>
-    optional<string_view> tryMap(array<KeyMapping, N> const& mappings, key key) noexcept
+    optional<string_view> tryMap(array<key_mapping, N> const& mappings, key key) noexcept
     {
-        for (KeyMapping const& km: mappings)
+        for (key_mapping const& km: mappings)
             if (km.key == key)
                 return { km.mapping };
 

@@ -70,7 +70,7 @@ using PermissionCache = std::map<GuardedRole, bool>;
  * - text based displays (think of TMUX client)
  * - headless-mode (think of TMUX server)
  */
-class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Events
+class TerminalSession: public QAbstractItemModel, public terminal::Terminal::events
 {
     Q_OBJECT
     Q_PROPERTY(int id READ id)
@@ -217,8 +217,8 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     void bufferChanged(terminal::screen_type) override;
     void renderBufferUpdated() override;
     void screenUpdated() override;
-    terminal::FontDef getFontDef() override;
-    void setFontDef(terminal::FontDef const& _fontSpec) override;
+    terminal::font_def getFontDef() override;
+    void setFontDef(terminal::font_def const& _fontSpec) override;
     void copyToClipboard(std::string_view _data) override;
     void inspect() override;
     void notify(std::string_view _title, std::string_view _body) override;
@@ -400,7 +400,7 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
         bool logical;
     };
     std::optional<CaptureBufferRequest> pendingBufferCapture_;
-    std::optional<terminal::FontDef> pendingFontChange_;
+    std::optional<terminal::font_def> pendingFontChange_;
     PermissionCache rememberedPermissions_;
 };
 

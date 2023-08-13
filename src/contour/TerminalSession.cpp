@@ -396,12 +396,12 @@ void TerminalSession::executeShowHostWritableStatusLine(bool allow, bool remembe
     terminal_.state().syncWindowTitleWithHostWritableStatusDisplay = false;
 }
 
-terminal::FontDef TerminalSession::getFontDef()
+terminal::font_def TerminalSession::getFontDef()
 {
     return display_->getFontDef();
 }
 
-void TerminalSession::setFontDef(terminal::FontDef const& _fontDef)
+void TerminalSession::setFontDef(terminal::font_def const& _fontDef)
 {
     if (!display_)
         return;

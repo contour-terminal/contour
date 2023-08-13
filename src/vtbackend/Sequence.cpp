@@ -57,7 +57,7 @@ string sequence::text() const
 
     if (_category == function_category::C0)
     {
-        sstr << to_short_string(ControlCode::C0(_finalChar));
+        sstr << to_short_string(ControlCode::c0(_finalChar));
         return sstr.str();
     }
 

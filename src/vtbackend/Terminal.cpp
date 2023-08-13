@@ -131,7 +131,7 @@ namespace // {{{ helpers
 } // namespace
 // }}}
 
-Terminal::Terminal(Events& eventListener,
+Terminal::Terminal(events& eventListener,
                    std::unique_ptr<Pty> pty,
                    Settings factorySettings,
                    chrono::steady_clock::time_point now):
@@ -357,22 +357,22 @@ bool Terminal::ensureFreshRenderBuffer(bool locked)
     return true;
 }
 
-PageSize Terminal::SelectionHelper::pageSize() const noexcept
+PageSize Terminal::selection_helper::pageSize() const noexcept
 {
     return terminal->pageSize();
 }
 
-bool Terminal::SelectionHelper::wordDelimited(cell_location pos) const noexcept
+bool Terminal::selection_helper::wordDelimited(cell_location pos) const noexcept
 {
     return terminal->wordDelimited(pos);
 }
 
-bool Terminal::SelectionHelper::wrappedLine(line_offset line) const noexcept
+bool Terminal::selection_helper::wrappedLine(line_offset line) const noexcept
 {
     return terminal->isLineWrapped(line);
 }
 
-bool Terminal::SelectionHelper::cellEmpty(cell_location pos) const noexcept
+bool Terminal::selection_helper::cellEmpty(cell_location pos) const noexcept
 {
     // Word selection may be off by one
     pos.column = std::min(pos.column, boxed_cast<column_offset>(terminal->pageSize().columns - 1));
@@ -380,7 +380,7 @@ bool Terminal::SelectionHelper::cellEmpty(cell_location pos) const noexcept
     return terminal->currentScreen().isCellEmpty(pos);
 }
 
-int Terminal::SelectionHelper::cellWidth(cell_location pos) const noexcept
+int Terminal::selection_helper::cellWidth(cell_location pos) const noexcept
 {
     // Word selection may be off by one
     pos.column = std::min(pos.column, boxed_cast<column_offset>(terminal->pageSize().columns - 1));
@@ -505,7 +505,7 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
                                                          base,
                                                          !mainDisplayReverseVideo,
                                                          highlight_search_matches::No,
-                                                         InputMethodData {},
+                                                         input_method_data {},
                                                          nullopt,
                                                          includeSelection },
                 scroll_offset(0));
@@ -517,7 +517,7 @@ LineCount Terminal::fillRenderBufferStatusLine(RenderBuffer& output, bool includ
                                                          base,
                                                          !mainDisplayReverseVideo,
                                                          highlight_search_matches::No,
-                                                         InputMethodData {},
+                                                         input_method_data {},
                                                          nullopt,
                                                          includeSelection },
                 scroll_offset(0));
@@ -630,7 +630,7 @@ void Terminal::updateIndicatorStatusLine()
     }
 }
 
-bool Terminal::sendKeyPressEvent(key key, modifier modifier, Timestamp now)
+bool Terminal::sendKeyPressEvent(key key, modifier modifier, timestamp now)
 {
     _cursorBlinkState = 1;
     _lastCursorBlink = now;
@@ -649,7 +649,7 @@ bool Terminal::sendKeyPressEvent(key key, modifier modifier, Timestamp now)
     return success;
 }
 
-bool Terminal::sendCharPressEvent(char32_t ch, modifier modifier, Timestamp now)
+bool Terminal::sendCharPressEvent(char32_t ch, modifier modifier, timestamp now)
 {
     _cursorBlinkState = 1;
     _lastCursorBlink = now;
@@ -1364,12 +1364,12 @@ void Terminal::renderBufferUpdated()
     _eventListener.renderBufferUpdated();
 }
 
-FontDef Terminal::getFontDef()
+font_def Terminal::getFontDef()
 {
     return _eventListener.getFontDef();
 }
 
-void Terminal::setFontDef(FontDef const& fontDef)
+void Terminal::setFontDef(font_def const& fontDef)
 {
     _eventListener.setFontDef(fontDef);
 }
@@ -2104,7 +2104,7 @@ bool Terminal::isHighlighted(cell_location cell) const noexcept // NOLINT(bugpro
            && std::visit(
                [cell](auto&& highlightRange) {
                    using T = std::decay_t<decltype(highlightRange)>;
-                   if constexpr (std::is_same_v<T, LinearHighlight>)
+                   if constexpr (std::is_same_v<T, linear_highlight>)
                    {
                        return crispy::ascending(highlightRange.from, cell, highlightRange.to)
                               || crispy::ascending(highlightRange.to, cell, highlightRange.from);
@@ -2152,13 +2152,13 @@ void Terminal::resetHighlight()
     _eventListener.screenUpdated();
 }
 
-void Terminal::setHighlightRange(HighlightRange highlightRange)
+void Terminal::setHighlightRange(highlight_range highlightRange)
 {
-    if (std::holds_alternative<RectangularHighlight>(highlightRange))
+    if (std::holds_alternative<rectangular_highlight>(highlightRange))
     {
-        auto range = std::get<RectangularHighlight>(highlightRange);
+        auto range = std::get<rectangular_highlight>(highlightRange);
         auto points = orderedPoints(range.from, range.to);
-        range = RectangularHighlight { points.first, points.second };
+        range = rectangular_highlight { points.first, points.second };
     }
     _highlightRange = highlightRange;
     _eventListener.updateHighlights();
@@ -2206,11 +2206,11 @@ void Terminal::popColorPalette(size_t slot)
 }
 
 // {{{ TraceHandler
-TraceHandler::TraceHandler(Terminal& terminal): _terminal { terminal }
+trace_handlert::trace_handlert(Terminal& terminal): _terminal { terminal }
 {
 }
 
-void TraceHandler::executeControlCode(char controlCode)
+void trace_handlert::executeControlCode(char controlCode)
 {
     auto seq = sequence {};
     seq.setCategory(function_category::C0);
@@ -2218,29 +2218,29 @@ void TraceHandler::executeControlCode(char controlCode)
     _pendingSequences.emplace_back(std::move(seq));
 }
 
-void TraceHandler::processSequence(sequence const& sequence)
+void trace_handlert::processSequence(sequence const& sequence)
 {
     _pendingSequences.emplace_back(sequence);
 }
 
-void TraceHandler::writeText(char32_t codepoint)
+void trace_handlert::writeText(char32_t codepoint)
 {
     _pendingSequences.emplace_back(codepoint);
 }
 
-void TraceHandler::writeText(std::string_view codepoints, size_t cellCount)
+void trace_handlert::writeText(std::string_view codepoints, size_t cellCount)
 {
-    _pendingSequences.emplace_back(CodepointSequence { codepoints, cellCount });
+    _pendingSequences.emplace_back(codepoint_sequence { codepoints, cellCount });
 }
 
-void TraceHandler::flushAllPending()
+void trace_handlert::flushAllPending()
 {
     for (auto const& pendingSequence: _pendingSequences)
         flushOne(pendingSequence);
     _pendingSequences.clear();
 }
 
-void TraceHandler::flushOne()
+void trace_handlert::flushOne()
 {
     if (!_pendingSequences.empty())
     {
@@ -2249,7 +2249,7 @@ void TraceHandler::flushOne()
     }
 }
 
-void TraceHandler::flushOne(PendingSequence const& pendingSequence)
+void trace_handlert::flushOne(pending_sequence const& pendingSequence)
 {
     if (auto const* seq = std::get_if<sequence>(&pendingSequence))
     {
@@ -2267,7 +2267,7 @@ void TraceHandler::flushOne(PendingSequence const& pendingSequence)
         fmt::print("\t'{}'\n", unicode::convert_to<char>(*codepoint));
         _terminal.activeDisplay().writeText(*codepoint);
     }
-    else if (auto const* codepoints = std::get_if<CodepointSequence>(&pendingSequence))
+    else if (auto const* codepoints = std::get_if<codepoint_sequence>(&pendingSequence))
     {
         fmt::print("\t\"{}\"   ; {} cells\n", codepoints->text, codepoints->cellCount);
         _terminal.activeDisplay().writeText(codepoints->text, codepoints->cellCount);

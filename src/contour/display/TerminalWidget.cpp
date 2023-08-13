@@ -976,7 +976,7 @@ void TerminalWidget::post(std::function<void()> _fn)
     postToObject(this, std::move(_fn));
 }
 
-terminal::FontDef TerminalWidget::getFontDef()
+terminal::font_def TerminalWidget::getFontDef()
 {
     Require(renderer_);
     return getFontDefinition(*renderer_);

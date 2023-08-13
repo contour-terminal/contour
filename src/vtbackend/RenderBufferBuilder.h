@@ -21,7 +21,7 @@ class RenderBufferBuilder
                         line_offset base,
                         bool reverseVideo,
                         highlight_search_matches highlightSearchMatches,
-                        InputMethodData inputMethodData,
+                        input_method_data inputMethodData,
                         std::optional<cell_location> theCursorPosition,
                         bool includeSelection);
 
@@ -121,7 +121,7 @@ class RenderBufferBuilder
     line_offset _baseLine;
     bool _reverseVideo;
     highlight_search_matches _highlightSearchMatches;
-    InputMethodData _inputMethodData;
+    input_method_data _inputMethodData;
     bool _includeSelection;
     ColumnCount _inputMethodSkipColumns = ColumnCount(0);
 

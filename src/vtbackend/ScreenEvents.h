@@ -25,7 +25,7 @@ namespace terminal
 
 class image;
 
-struct FontDef
+struct font_def
 {
     double size;
     std::string regular;
@@ -35,18 +35,18 @@ struct FontDef
     std::string emoji;
 };
 
-class ScreenEvents
+class screen_events
 {
   public:
-    virtual ~ScreenEvents() = default;
+    virtual ~screen_events() = default;
 
     virtual void requestCaptureBuffer(int /*_absoluteStartLine*/, int /*_lineCount*/) {}
     virtual void bell() {}
     virtual void bufferChanged(screen_type) {}
     virtual void scrollbackBufferCleared() {}
     virtual void screenUpdated() {}
-    virtual FontDef getFontDef() { return {}; }
-    virtual void setFontDef(FontDef const& /*_fontDef*/) {}
+    virtual font_def getFontDef() { return {}; }
+    virtual void setFontDef(font_def const& /*_fontDef*/) {}
     virtual void copyToClipboard(std::string_view /*_data*/) {}
     virtual void inspect() {}
     virtual void notify(std::string_view /*_title*/, std::string_view /*_body*/) {}
@@ -76,7 +76,7 @@ class ScreenEvents
     virtual void setTerminalProfile(std::string const& /*_configProfileName*/) {}
 };
 
-class MockScreenEvents: public ScreenEvents
+class mock_screen_events: public screen_events
 {
   public:
     void reply(std::string_view response) override { replyData += response; }

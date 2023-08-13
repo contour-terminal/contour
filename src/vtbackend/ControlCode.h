@@ -19,7 +19,7 @@
 namespace terminal::ControlCode
 {
 
-enum class C0 : char
+enum class c0 : char
 {
     NUL = 0x00, //!< Null
     SOH = 0x01, //!< Start of Heading
@@ -139,86 +139,86 @@ enum class C1_8bit
 };
 // NOLINTEND(readability-identifier-naming)
 
-constexpr std::string_view to_short_string(C0 code)
+constexpr std::string_view to_short_string(c0 code)
 {
     switch (code)
     {
-        case C0::NUL: return "NUL";
-        case C0::SOH: return "SOH";
-        case C0::STX: return "STX";
-        case C0::ETX: return "ETX";
-        case C0::EOT: return "EOT";
-        case C0::ENQ: return "ENQ";
-        case C0::ACK: return "ACK";
-        case C0::BEL: return "BEL";
-        case C0::BS: return "BS";
-        case C0::HT: return "HT";
-        case C0::LF: return "LF";
-        case C0::VT: return "VT";
-        case C0::FF: return "FF";
-        case C0::CR: return "CR";
-        case C0::SO: return "SO";
-        case C0::SI: return "SI";
-        case C0::DLE: return "DLE";
-        case C0::DC1: return "DC1";
-        case C0::DC2: return "DC2";
-        case C0::DC3: return "DC3";
-        case C0::DC4: return "DC4";
-        case C0::NAK: return "NAK";
-        case C0::SYN: return "SYN";
-        case C0::ETB: return "ETB";
-        case C0::CAN: return "CAN";
-        case C0::EM: return "EM";
-        case C0::SUB: return "SUB";
-        case C0::ESC: return "ESC";
-        case C0::FS: return "FS";
-        case C0::GS: return "GS";
-        case C0::RS: return "RS";
-        case C0::US: return "US";
-        case C0::SP: return "SP";
-        case C0::DEL: return "DEL";
+        case c0::NUL: return "NUL";
+        case c0::SOH: return "SOH";
+        case c0::STX: return "STX";
+        case c0::ETX: return "ETX";
+        case c0::EOT: return "EOT";
+        case c0::ENQ: return "ENQ";
+        case c0::ACK: return "ACK";
+        case c0::BEL: return "BEL";
+        case c0::BS: return "BS";
+        case c0::HT: return "HT";
+        case c0::LF: return "LF";
+        case c0::VT: return "VT";
+        case c0::FF: return "FF";
+        case c0::CR: return "CR";
+        case c0::SO: return "SO";
+        case c0::SI: return "SI";
+        case c0::DLE: return "DLE";
+        case c0::DC1: return "DC1";
+        case c0::DC2: return "DC2";
+        case c0::DC3: return "DC3";
+        case c0::DC4: return "DC4";
+        case c0::NAK: return "NAK";
+        case c0::SYN: return "SYN";
+        case c0::ETB: return "ETB";
+        case c0::CAN: return "CAN";
+        case c0::EM: return "EM";
+        case c0::SUB: return "SUB";
+        case c0::ESC: return "ESC";
+        case c0::FS: return "FS";
+        case c0::GS: return "GS";
+        case c0::RS: return "RS";
+        case c0::US: return "US";
+        case c0::SP: return "SP";
+        case c0::DEL: return "DEL";
         default: return "?";
     }
 }
 
-constexpr std::string_view to_string(C0 code)
+constexpr std::string_view to_string(c0 code)
 {
     switch (code)
     {
-        case C0::NUL: return "Null";
-        case C0::SOH: return "Start of Heading";
-        case C0::STX: return "Start of Text";
-        case C0::ETX: return "End of Text";
-        case C0::EOT: return "End of Transmission";
-        case C0::ENQ: return "Enquiry";
-        case C0::ACK: return "Acknowledge";
-        case C0::BEL: return "Bell, Alert";
-        case C0::BS: return "Backspace";
-        case C0::HT: return "Horizontal Tab";
-        case C0::LF: return "Line Feed";
-        case C0::VT: return "Vertical Tab";
-        case C0::FF: return "Form Feed";
-        case C0::CR: return "Carriage Return";
-        case C0::SO: return "Shift Out";
-        case C0::SI: return "Shift In";
-        case C0::DLE: return "Data Link Escape";
-        case C0::DC1: return "Device Control One";
-        case C0::DC2: return "Device Control Two";
-        case C0::DC3: return "Device Control Three";
-        case C0::DC4: return "Device Control Four";
-        case C0::NAK: return "Negative Acknowledge";
-        case C0::SYN: return "Synchronous Idle";
-        case C0::ETB: return "End of Transmission Block";
-        case C0::CAN: return "Cancel";
-        case C0::EM: return "End of Medium";
-        case C0::SUB: return "Substitute";
-        case C0::ESC: return "Escape";
-        case C0::FS: return "File Separator";
-        case C0::GS: return "Group Separator";
-        case C0::RS: return "Record Separator";
-        case C0::US: return "Unit Separator";
-        case C0::SP: return "Space";
-        case C0::DEL: return "Delete";
+        case c0::NUL: return "Null";
+        case c0::SOH: return "Start of Heading";
+        case c0::STX: return "Start of Text";
+        case c0::ETX: return "End of Text";
+        case c0::EOT: return "End of Transmission";
+        case c0::ENQ: return "Enquiry";
+        case c0::ACK: return "Acknowledge";
+        case c0::BEL: return "Bell, Alert";
+        case c0::BS: return "Backspace";
+        case c0::HT: return "Horizontal Tab";
+        case c0::LF: return "Line Feed";
+        case c0::VT: return "Vertical Tab";
+        case c0::FF: return "Form Feed";
+        case c0::CR: return "Carriage Return";
+        case c0::SO: return "Shift Out";
+        case c0::SI: return "Shift In";
+        case c0::DLE: return "Data Link Escape";
+        case c0::DC1: return "Device Control One";
+        case c0::DC2: return "Device Control Two";
+        case c0::DC3: return "Device Control Three";
+        case c0::DC4: return "Device Control Four";
+        case c0::NAK: return "Negative Acknowledge";
+        case c0::SYN: return "Synchronous Idle";
+        case c0::ETB: return "End of Transmission Block";
+        case c0::CAN: return "Cancel";
+        case c0::EM: return "End of Medium";
+        case c0::SUB: return "Substitute";
+        case c0::ESC: return "Escape";
+        case c0::FS: return "File Separator";
+        case c0::GS: return "Group Separator";
+        case c0::RS: return "Record Separator";
+        case c0::US: return "Unit Separator";
+        case c0::SP: return "Space";
+        case c0::DEL: return "Delete";
         default: return "?";
     }
 }
@@ -314,7 +314,7 @@ namespace std
 {
 
 template <>
-struct numeric_limits<terminal::ControlCode::C0>
+struct numeric_limits<terminal::ControlCode::c0>
 {
     static constexpr size_t min() noexcept { return 0x00; }
     static constexpr size_t max() noexcept { return 0x1F; }

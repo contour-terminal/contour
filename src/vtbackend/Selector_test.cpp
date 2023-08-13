@@ -94,7 +94,7 @@ TextSelection(Screen<T> const&) -> TextSelection<T>;
 
 TEST_CASE("Selector.Linear", "[selector]")
 {
-    auto screenEvents = ScreenEvents {};
+    auto screenEvents = screen_events {};
     auto term = MockTerm(PageSize { LineCount(3), ColumnCount(11) }, LineCount(5));
     auto& screen = term.terminal.primaryScreen();
     auto selectionHelper = TestSelectionHelper(screen);

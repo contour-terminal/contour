@@ -122,7 +122,7 @@ RenderBufferBuilder<Cell>::RenderBufferBuilder(Terminal const& terminal,
                                                line_offset base,
                                                bool theReverseVideo,
                                                highlight_search_matches highlightSearchMatches,
-                                               InputMethodData inputMethodData,
+                                               input_method_data inputMethodData,
                                                optional<cell_location> theCursorPosition,
                                                bool includeSelection):
     _output { output },
