@@ -69,19 +69,19 @@ struct GridMetrics
     /// @param line screen coordinate's line (between 0 and number of screen lines minus 1)
     ///
     /// @return 2D point into the grid cell's top left in drawing system coordinates.
-    constexpr crispy::Point map(LineOffset line, ColumnOffset column) const noexcept
+    constexpr crispy::point map(LineOffset line, ColumnOffset column) const noexcept
     {
         return mapTopLeft(line, column);
     }
 
-    constexpr crispy::Point map(CellLocation pos) const noexcept { return map(pos.line, pos.column); }
+    constexpr crispy::point map(CellLocation pos) const noexcept { return map(pos.line, pos.column); }
 
-    constexpr crispy::Point mapTopLeft(CellLocation pos) const noexcept
+    constexpr crispy::point mapTopLeft(CellLocation pos) const noexcept
     {
         return mapTopLeft(pos.line, pos.column);
     }
 
-    constexpr crispy::Point mapTopLeft(LineOffset line, ColumnOffset column) const noexcept
+    constexpr crispy::point mapTopLeft(LineOffset line, ColumnOffset column) const noexcept
     {
         auto const x = pageMargin.left + *column * cellSize.width.as<int>();
         auto const y = pageMargin.top + *line * cellSize.height.as<int>();
@@ -89,11 +89,11 @@ struct GridMetrics
         return { x, y };
     }
 
-    constexpr crispy::Point mapBottomLeft(CellLocation pos) const noexcept
+    constexpr crispy::point mapBottomLeft(CellLocation pos) const noexcept
     {
         return mapBottomLeft(pos.line, pos.column);
     }
-    constexpr crispy::Point mapBottomLeft(LineOffset line, ColumnOffset column) const noexcept
+    constexpr crispy::point mapBottomLeft(LineOffset line, ColumnOffset column) const noexcept
     {
         return mapTopLeft(line + 1, column);
     }

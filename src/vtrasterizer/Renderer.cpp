@@ -18,6 +18,8 @@
 #include <text_shaper/font_locator.h>
 #include <text_shaper/open_shaper.h>
 
+#include "crispy/StrongLRUHashtable.h"
+
 #if defined(_WIN32)
     #include <text_shaper/directwrite_shaper.h>
 #endif
@@ -122,8 +124,8 @@ namespace
 Renderer::Renderer(PageSize pageSize,
                    FontDescriptions fontDescriptions,
                    terminal::ColorPalette const& colorPalette,
-                   crispy::StrongHashtableSize atlasHashtableSlotCount,
-                   crispy::LRUCapacity atlasTileCount,
+                   crispy::strong_hashtable_size atlasHashtableSlotCount,
+                   crispy::lru_capacity atlasTileCount,
                    bool atlasDirectMapping,
                    Decorator hyperlinkNormal,
                    Decorator hyperlinkHover):

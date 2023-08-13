@@ -19,6 +19,7 @@
 
 #include <variant>
 
+#include "crispy/TrieMap.h"
 #include <libunicode/convert.h>
 
 using std::nullopt;
@@ -268,16 +269,16 @@ bool ViInputHandler::handlePendingInput()
 
     CommandHandlerMap const& mapping = isVisualMode() ? _visualMode : _normalMode;
     auto const mappingResult = mapping.search(_pendingInput, TrieMapAllowWildcardDot);
-    if (std::holds_alternative<crispy::ExactMatch<CommandHandler>>(mappingResult))
+    if (std::holds_alternative<crispy::exact_match<CommandHandler>>(mappingResult))
     {
         InputLog()("Executing handler for: {}{}", _count ? fmt::format("{} ", _count) : "", _pendingInput);
         _lastChar =
             unicode::convert_to<char32_t>(std::string_view(_pendingInput.data(), _pendingInput.size()))
                 .back();
-        std::get<crispy::ExactMatch<CommandHandler>>(mappingResult).value();
+        std::get<crispy::exact_match<CommandHandler>>(mappingResult).value();
         clearPendingInput();
     }
-    else if (std::holds_alternative<crispy::NoMatch>(mappingResult))
+    else if (std::holds_alternative<crispy::no_match>(mappingResult))
     {
         InputLog()("Invalid command: {}", _pendingInput);
         clearPendingInput();

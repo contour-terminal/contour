@@ -44,6 +44,8 @@
 #include <type_traits>
 #include <vector>
 
+#include "crispy/BufferObject.h"
+
 namespace terminal
 {
 
@@ -643,7 +645,7 @@ class Terminal
     void applyPageSizeToCurrentBuffer();
     void applyPageSizeToMainDisplay(ScreenType screenType);
 
-    [[nodiscard]] crispy::BufferObjectPtr<char> currentPtyBuffer() const noexcept
+    [[nodiscard]] crispy::buffer_object_ptr<char> currentPtyBuffer() const noexcept
     {
         return _currentPtyBuffer;
     }
@@ -769,8 +771,8 @@ class Terminal
     std::chrono::steady_clock::time_point _currentTime;
 
     // {{{ PTY and PTY read buffer management
-    crispy::BufferObjectPool<char> _ptyBufferPool;
-    crispy::BufferObjectPtr<char> _currentPtyBuffer;
+    crispy::buffer_object_pool<char> _ptyBufferPool;
+    crispy::buffer_object_ptr<char> _currentPtyBuffer;
     size_t _ptyReadBufferSize;
     std::unique_ptr<Pty> _pty;
     // }}}

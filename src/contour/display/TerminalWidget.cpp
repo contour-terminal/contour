@@ -468,7 +468,7 @@ void TerminalWidget::logDisplayInfo()
     auto const fontSizeInPx = static_cast<int>(ceil((
         profile().fonts.size.pt / 72.0) * average(fontDPI())
     ));
-    auto const normalScreenSize = crispy::ImageSize {
+    auto const normalScreenSize = crispy::image_size {
         Width::cast_from(window()->screen()->size().width()),
         Height::cast_from(window()->screen()->size().height())
     };
@@ -1026,7 +1026,7 @@ void TerminalWidget::doDumpState()
     Require(renderer_);
 
     // clang-format off
-    auto const targetBaseDir = session_->app().dumpStateAtExit().value_or(crispy::App::instance()->localStateDir() / "dump");
+    auto const targetBaseDir = session_->app().dumpStateAtExit().value_or(crispy::app::instance()->localStateDir() / "dump");
     auto const workDirName = FileSystem::path(fmt::format("contour-dump-{:%Y-%m-%d-%H-%M-%S}", chrono::system_clock::now()));
     auto const targetDir = targetBaseDir / workDirName;
     auto const latestDirName = FileSystem::path("latest");

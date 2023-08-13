@@ -50,15 +50,15 @@ constexpr bool operator!=(PageSize a, PageSize b) noexcept
     return !(a == b);
 }
 
-constexpr crispy::ImageSize operator*(crispy::ImageSize a, PageSize b) noexcept
+constexpr crispy::image_size operator*(crispy::image_size a, PageSize b) noexcept
 {
-    return crispy::ImageSize { a.width * boxed_cast<crispy::Width>(b.columns),
-                               a.height * boxed_cast<crispy::Height>(b.lines) };
+    return crispy::image_size { a.width * boxed_cast<crispy::width>(b.columns),
+                                a.height * boxed_cast<crispy::height>(b.lines) };
 }
 
-constexpr crispy::ImageSize operator/(crispy::ImageSize a, PageSize s) noexcept
+constexpr crispy::image_size operator/(crispy::image_size a, PageSize s) noexcept
 {
-    return { crispy::Width::cast_from(unbox<unsigned>(a.width) / unbox<unsigned>(s.columns)),
-             crispy::Height::cast_from(unbox<unsigned>(a.height) / unbox<unsigned>(s.lines)) };
+    return { crispy::width::cast_from(unbox<unsigned>(a.width) / unbox<unsigned>(s.columns)),
+             crispy::height::cast_from(unbox<unsigned>(a.height) / unbox<unsigned>(s.lines)) };
 }
 } // namespace terminal

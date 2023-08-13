@@ -435,9 +435,9 @@ constexpr Length length(Range range) noexcept
 // }}}
 // {{{ ImageSize types
 
-using Width = crispy::Width;
-using Height = crispy::Height;
-using ImageSize = crispy::ImageSize;
+using Width = crispy::width;
+using Height = crispy::height;
+using ImageSize = crispy::image_size;
 
 // }}}
 // {{{ Mixed boxed types operator overloads

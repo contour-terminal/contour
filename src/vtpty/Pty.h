@@ -90,7 +90,7 @@ class Pty
     /// @returns A view to the consumed buffer. The boolean in the ReadResult
     ///          indicates whether or not this data was coming through
     ///          the stdout-fastpipe.
-    [[nodiscard]] virtual ReadResult read(crispy::BufferObject<char>& storage,
+    [[nodiscard]] virtual ReadResult read(crispy::buffer_object<char>& storage,
                                           std::chrono::milliseconds timeout,
                                           size_t size) = 0;
 
@@ -114,13 +114,13 @@ class Pty
     [[nodiscard]] virtual PageSize pageSize() const noexcept = 0;
 
     /// Resizes underlying window buffer by given character width and height.
-    virtual void resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixels = std::nullopt) = 0;
+    virtual void resizeScreen(PageSize cells, std::optional<crispy::image_size> pixels = std::nullopt) = 0;
 };
 
-[[nodiscard]] std::unique_ptr<Pty> createPty(PageSize pageSize, std::optional<crispy::ImageSize> viewSize);
+[[nodiscard]] std::unique_ptr<Pty> createPty(PageSize pageSize, std::optional<crispy::image_size> viewSize);
 
-auto const inline PtyLog = logstore::Category("pty", "Logs general PTY informations.");
-auto const inline PtyInLog = logstore::Category("pty.input", "Logs PTY raw input.");
-auto const inline PtyOutLog = logstore::Category("pty.output", "Logs PTY raw output.");
+auto const inline PtyLog = logstore::category("pty", "Logs general PTY informations.");
+auto const inline PtyInLog = logstore::category("pty.input", "Logs PTY raw input.");
+auto const inline PtyOutLog = logstore::category("pty.output", "Logs PTY raw output.");
 
 } // namespace terminal

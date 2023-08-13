@@ -30,7 +30,7 @@
 #include <libunicode/convert.h>
 
 using crispy::escape;
-using crispy::Size;
+using crispy::size;
 using namespace terminal;
 using namespace terminal::test;
 using namespace std;

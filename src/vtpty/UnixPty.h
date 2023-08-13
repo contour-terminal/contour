@@ -15,6 +15,8 @@
 
 #include <vtpty/Pty.h>
 
+#include <crispy/BufferObject.h>
+
 #include <array>
 #include <memory>
 #include <optional>
@@ -76,7 +78,7 @@ class UnixPty final: public Pty
         PtySlaveHandle slave;
     };
 
-    UnixPty(PageSize pageSize, std::optional<crispy::ImageSize> pixels);
+    UnixPty(PageSize pageSize, std::optional<crispy::image_size> pixels);
     ~UnixPty() override;
 
     PtySlave& slave() noexcept override;
@@ -86,12 +88,12 @@ class UnixPty final: public Pty
     void close() override;
     [[nodiscard]] bool isClosed() const noexcept override;
     void wakeupReader() noexcept override;
-    [[nodiscard]] ReadResult read(crispy::BufferObject<char>& storage,
+    [[nodiscard]] ReadResult read(crispy::buffer_object<char>& storage,
                                   std::chrono::milliseconds timeout,
                                   size_t size) override;
     int write(std::string_view data, bool blocking) override;
     [[nodiscard]] PageSize pageSize() const noexcept override;
-    void resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixels = std::nullopt) override;
+    void resizeScreen(PageSize cells, std::optional<crispy::image_size> pixels = std::nullopt) override;
 
     UnixPipe& stdoutFastPipe() noexcept { return _stdoutFastPipe; }
 
@@ -104,7 +106,7 @@ class UnixPty final: public Pty
     std::array<int, 2> _pipe = { -1, -1 };
     UnixPipe _stdoutFastPipe;
     PageSize _pageSize;
-    std::optional<crispy::ImageSize> _pixels;
+    std::optional<crispy::image_size> _pixels;
     std::unique_ptr<Slave> _slave;
 };
 

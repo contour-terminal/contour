@@ -21,6 +21,8 @@
 
 #include <Windows.h>
 
+#include "crispy/BufferObject.h"
+
 namespace terminal
 {
 
@@ -35,13 +37,13 @@ class ConPty: public Pty
     void close() override;
     [[nodiscard]] bool isClosed() const noexcept override;
 
-    [[nodiscard]] ReadResult read(crispy::BufferObject<char>& storage,
+    [[nodiscard]] ReadResult read(crispy::buffer_object<char>& storage,
                                   std::chrono::milliseconds timeout,
                                   size_t size) override;
     void wakeupReader() override;
     int write(std::string_view data, bool blocking) override;
     [[nodiscard]] PageSize pageSize() const noexcept override;
-    void resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixels = std::nullopt) override;
+    void resizeScreen(PageSize cells, std::optional<crispy::image_size> pixels = std::nullopt) override;
 
     PtySlave& slave() noexcept override;
     HPCON master() const noexcept { return _master; }

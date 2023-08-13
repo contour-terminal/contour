@@ -17,7 +17,7 @@
 
 #include <catch2/catch.hpp>
 
-using crispy::Size;
+using crispy::size;
 using namespace std;
 using namespace std::placeholders;
 using namespace terminal;

@@ -9,5 +9,7 @@ CheckOptions:
     value: lower_case
   - key:   readability-identifier-naming.ClassCase
     value: lower_case
+  - key:   readability-identifier-naming.StructCase
+    value: lower_case
   - key:   readability-identifier-naming.TypeAliasCase
     value: lower_case

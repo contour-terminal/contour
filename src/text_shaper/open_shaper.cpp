@@ -97,7 +97,7 @@ struct hash<FontPathAndSize>
 {
     size_t operator()(FontPathAndSize const& fd) const noexcept
     {
-        auto fnv = crispy::FNV<char>();
+        auto fnv = crispy::fnv<char>();
         return size_t(fnv(fnv(fd.path), to_string(fd.size.pt))); // SSO should kick in.
     }
 };
@@ -106,9 +106,9 @@ struct hash<FontPathAndSize>
 namespace text
 {
 
-using HbBufferPtr = unique_ptr<hb_buffer_t, void (*)(hb_buffer_t*)>;
-using HbFontPtr = unique_ptr<hb_font_t, void (*)(hb_font_t*)>;
-using FtFacePtr = unique_ptr<FT_FaceRec_, void (*)(FT_FaceRec_*)>;
+using hb_buffer_ptr = unique_ptr<hb_buffer_t, void (*)(hb_buffer_t*)>;
+using hb_font_ptr = unique_ptr<hb_font_t, void (*)(hb_font_t*)>;
+using ft_face_ptr = unique_ptr<FT_FaceRec_, void (*)(FT_FaceRec_*)>;
 
 auto constexpr MissingGlyphId = 0xFFFDu;
 
@@ -117,8 +117,8 @@ struct HbFontInfo // NOLINT(readability-identifier-naming)
     font_source primary;
     font_source_list fallbacks;
     font_size size;
-    FtFacePtr ftFace;
-    HbFontPtr hbFont;
+    ft_face_ptr ftFace;
+    hb_font_ptr hbFont;
     std::optional<font_metrics> metrics {};
     font_description description {};
 };
@@ -232,7 +232,7 @@ namespace
         return best;
     }
 
-    optional<FtFacePtr> loadFace(font_source const& source, font_size fontSize, DPI dpi, FT_Library ft)
+    optional<ft_face_ptr> loadFace(font_source const& source, font_size fontSize, DPI dpi, FT_Library ft)
     {
         FT_Face ftFace = nullptr;
 
@@ -299,7 +299,7 @@ namespace
             }
         }
 
-        return optional<FtFacePtr> { FtFacePtr(ftFace, [](FT_Face p) { FT_Done_Face(p); }) };
+        return optional<ft_face_ptr> { ft_face_ptr(ftFace, [](FT_Face p) { FT_Done_Face(p); }) };
     }
 
     void replaceMissingGlyphs(FT_Face ftFace, shape_result& result)
@@ -403,7 +403,7 @@ struct open_shaper::Private // {{{
     // (file_path, file_mtime, font_weight, font_slant, pixel_size)
 
     unordered_map<glyph_key, rasterized_glyph> glyphs;
-    HbBufferPtr hb_buf;
+    hb_buffer_ptr hb_buf;
     font_key nextFontKey;
 
     font_key create_font_key()
@@ -437,7 +437,7 @@ struct open_shaper::Private // {{{
 
         auto ftFacePtr = std::move(ftFacePtrOpt.value());
         auto hbFontPtr =
-            HbFontPtr(hb_ft_font_create_referenced(ftFacePtr.get()), [](auto p) { hb_font_destroy(p); });
+            hb_font_ptr(hb_ft_font_create_referenced(ftFacePtr.get()), [](auto p) { hb_font_destroy(p); });
 
         auto fontInfo = HbFontInfo { source, {}, fontSize, std::move(ftFacePtr), std::move(hbFontPtr) };
 
@@ -628,7 +628,7 @@ optional<glyph_position> open_shaper::shape(font_key font, char32_t codepoint)
     gpos.glyph.text = std::u32string(1, codepoint);
 #endif
     gpos.advance.x = this->metrics(font).advance;
-    gpos.offset = crispy::Point {}; // TODO (load from glyph metrics. Is this needed?)
+    gpos.offset = crispy::point {}; // TODO (load from glyph metrics. Is this needed?)
 
     return gpos;
 }
@@ -747,8 +747,8 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
     }
 
     auto output = rasterized_glyph {};
-    output.bitmapSize.width = crispy::Width::cast_from(ftFace->glyph->bitmap.width);
-    output.bitmapSize.height = crispy::Height::cast_from(ftFace->glyph->bitmap.rows);
+    output.bitmapSize.width = crispy::width::cast_from(ftFace->glyph->bitmap.width);
+    output.bitmapSize.height = crispy::height::cast_from(ftFace->glyph->bitmap.rows);
     output.position.x = ftFace->glyph->bitmap_left;
     output.position.y = ftFace->glyph->bitmap_top;
 
@@ -804,7 +804,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
 
             output.format = bitmap_format::rgb; // LCD
             output.bitmap.resize(static_cast<size_t>(ftBitmap.width) * static_cast<size_t>(ftBitmap.rows));
-            output.bitmapSize.width /= crispy::Width(3);
+            output.bitmapSize.width /= crispy::width(3);
 
             auto const* s = ftBitmap.buffer;
             auto* t = output.bitmap.data();

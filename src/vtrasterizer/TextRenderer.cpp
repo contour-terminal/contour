@@ -133,6 +133,10 @@ Making use of reserved glyph slots
 #include <text_shaper/fontconfig_locator.h>
 #include <text_shaper/mock_font_locator.h>
 
+#include "crispy/StrongHash.h"
+#include "crispy/StrongLRUHashtable.h"
+#include "crispy/point.h"
+
 #if defined(_WIN32)
     #include <text_shaper/directwrite_locator.h>
 #endif
@@ -156,8 +160,8 @@ Making use of reserved glyph slots
 #include <libunicode/convert.h>
 #include <libunicode/utf8_grapheme_segmenter.h>
 
-using crispy::Point;
-using crispy::StrongHash;
+using crispy::point;
+using crispy::strong_hash;
 
 using unicode::out;
 
@@ -190,22 +194,22 @@ namespace
     constexpr auto LastReservedChar = char32_t { 0x7E };
     constexpr auto DirectMappedCharsCount = LastReservedChar - FirstReservedChar + 1;
 
-    StrongHash hashGlyphKeyAndPresentation(text::glyph_key const& glyphKey,
-                                           unicode::PresentationStyle presentation) noexcept
+    strong_hash hashGlyphKeyAndPresentation(text::glyph_key const& glyphKey,
+                                            unicode::PresentationStyle presentation) noexcept
     {
         // return StrongHash::compute(key) * static_cast<uint32_t>(presentation);
         // clang-format off
-        return StrongHash::compute(glyphKey.font.value)
+        return strong_hash::compute(glyphKey.font.value)
                * static_cast<uint32_t>(glyphKey.index.value)
-               * StrongHash::compute(glyphKey.size.pt)
+               * strong_hash::compute(glyphKey.size.pt)
                * static_cast<uint32_t>(presentation)
                ;
         // clang-format on
     }
 
-    StrongHash hashTextAndStyle(u32string_view text, TextStyle style) noexcept
+    strong_hash hashTextAndStyle(u32string_view text, TextStyle style) noexcept
     {
-        return StrongHash::compute(text) * static_cast<uint32_t>(style);
+        return strong_hash::compute(text) * static_cast<uint32_t>(style);
     }
 
     text::font_key getFontForStyle(FontKeys const& fonts, TextStyle style)
@@ -312,8 +316,8 @@ TextRenderer::TextRenderer(GridMetrics const& gridMetrics,
     _textRendererEvents { eventHandler },
     _fontDescriptions { fontDescriptions },
     _fonts { fontKeys },
-    _textShapingCache { ShapingResultCache::create(crispy::StrongHashtableSize { 16384 },
-                                                   crispy::LRUCapacity { TextShapingCacheSize },
+    _textShapingCache { ShapingResultCache::create(crispy::strong_hashtable_size { 16384 },
+                                                   crispy::lru_capacity { TextShapingCacheSize },
                                                    "Text shaping cache") },
     _textShaper { textShaper },
     _boxDrawingRenderer { gridMetrics }
@@ -548,7 +552,7 @@ void TextRenderer::endFrame()
     flushTextClusterGroup();
 }
 
-Point TextRenderer::applyGlyphPositionToPen(Point pen,
+point TextRenderer::applyGlyphPositionToPen(point pen,
                                             AtlasTileAttributes const& tileAttributes,
                                             text::glyph_position const& gpos) const noexcept
 {
@@ -573,7 +577,7 @@ Point TextRenderer::applyGlyphPositionToPen(Point pen,
     //            tileAttributes.bitmapSize.height,
     //            gpos.presentation);
 
-    return Point { x, y };
+    return point { x, y };
 }
 
 /**
@@ -585,7 +589,7 @@ Point TextRenderer::applyGlyphPositionToPen(Point pen,
  * @param _glyphPos     glyph positioning relative to the pen's baseline pos (cachable)
  *
  */
-void TextRenderer::renderRasterizedGlyph(crispy::Point pen,
+void TextRenderer::renderRasterizedGlyph(crispy::point pen,
                                          RGBAColor color,
                                          AtlasTileAttributes const& attributes)
 {
@@ -650,7 +654,7 @@ void TextRenderer::flushTextClusterGroup()
             u32string_view(_textClusterGroup.codepoints.data(), _textClusterGroup.codepoints.size()),
             _textClusterGroup.style);
         text::shape_result const& glyphPositions = getOrCreateCachedGlyphPositions(hash);
-        crispy::Point pen = _textClusterGroup.initialPenPosition;
+        crispy::point pen = _textClusterGroup.initialPenPosition;
         auto const advanceX = *_gridMetrics.cellSize.width;
 
         for (text::glyph_position const& glyphPosition: glyphPositions)
@@ -701,7 +705,7 @@ void TextRenderer::flushTextClusterGroup()
 }
 
 Renderable::AtlasTileAttributes const* TextRenderer::getOrCreateRasterizedMetadata(
-    StrongHash const& hash, text::glyph_key const& glyphKey, unicode::PresentationStyle presentationStyle)
+    strong_hash const& hash, text::glyph_key const& glyphKey, unicode::PresentationStyle presentationStyle)
 {
     // clang-format off
     return textureAtlas().get_or_try_emplace(
@@ -718,7 +722,7 @@ Renderable::AtlasTileAttributes const* TextRenderer::getOrCreateRasterizedMetada
 auto TextRenderer::createSlicedRasterizedGlyph(atlas::TileLocation tileLocation,
                                                text::glyph_key const& glyphKey,
                                                unicode::PresentationStyle presentation,
-                                               StrongHash const& hash)
+                                               strong_hash const& hash)
     -> optional<TextureAtlas::TileCreateData>
 {
     auto result = createRasterizedGlyph(tileLocation, glyphKey, presentation);
@@ -897,7 +901,7 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
                             toFragmentShaderSelector(glyph.format)) };
 }
 
-text::shape_result const& TextRenderer::getOrCreateCachedGlyphPositions(StrongHash hash)
+text::shape_result const& TextRenderer::getOrCreateCachedGlyphPositions(strong_hash hash)
 {
     return _textShapingCache->get_or_emplace(hash, [this](auto) { return createTextShapedGlyphPositions(); });
 }

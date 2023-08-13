@@ -20,6 +20,7 @@
 
 #include <text_shaper/mock_font_locator.h>
 
+#include <crispy/StrongHash.h>
 #include <crispy/escape.h>
 #include <crispy/logstore.h>
 #include <crispy/overloaded.h>
@@ -88,7 +89,7 @@ namespace contour::config
 
 namespace
 {
-    auto const ConfigLog = logstore::Category("config", "Logs configuration file loading.");
+    auto const ConfigLog = logstore::category("config", "Logs configuration file loading.");
 
     string processIdAsString()
     {
@@ -126,7 +127,7 @@ namespace
 
         auto backgroundImage = terminal::BackgroundImage {};
         backgroundImage.location = resolvedFileName;
-        backgroundImage.hash = crispy::StrongHash::compute(resolvedFileName.string());
+        backgroundImage.hash = crispy::strong_hash::compute(resolvedFileName.string());
         backgroundImage.opacity = opacity;
         backgroundImage.blur = blur;
 
@@ -307,7 +308,7 @@ namespace
                               vector<string_view> const& _keys,
                               size_t _offset,
                               T& _store,
-                              logstore::MessageBuilder const& _logger)
+                              logstore::message_builder const& _logger)
     {
         string parentKey = _basePath;
         for (size_t i = 0; i < _offset; ++i)
@@ -351,7 +352,7 @@ namespace
                       vector<string_view> const& _keys,
                       size_t _offset,
                       T& _store,
-                      logstore::MessageBuilder _logger)
+                      logstore::message_builder _logger)
     {
         string parentKey;
         for (size_t i = 0; i < _offset; ++i)
@@ -394,7 +395,7 @@ namespace
                       vector<string_view> const& _keys,
                       size_t _offset,
                       crispy::boxed<T, U>& _store,
-                      logstore::MessageBuilder const& _logger)
+                      logstore::message_builder const& _logger)
     {
         return tryLoadValue(_usedKeys, _root, _keys, _offset, _store.value, _logger);
     }
@@ -404,7 +405,7 @@ namespace
                       YAML::Node const& _root,
                       string const& _path,
                       T& _store,
-                      logstore::MessageBuilder const& _logger)
+                      logstore::message_builder& _logger)
     {
         auto const keys = crispy::split(_path, '.');
         _usedKeys.emplace(_path);
@@ -416,7 +417,7 @@ namespace
                       YAML::Node const& _root,
                       string const& _path,
                       crispy::boxed<T, U>& _store,
-                      logstore::MessageBuilder const& _logger)
+                      logstore::message_builder const& _logger)
     {
         return tryLoadValue(_usedKeys, _root, _path, _store.value, _logger);
     }
@@ -427,7 +428,7 @@ namespace
                       string const& _parentPath,
                       string const& _key,
                       T& _store,
-                      logstore::MessageBuilder const& _logger)
+                      logstore::message_builder const& _logger)
     {
         auto const path = fmt::format("{}.{}", _parentPath, _key);
         return tryLoadValue(_usedKeys, _doc, path, _store, _logger);
@@ -439,7 +440,7 @@ namespace
                               string const& _parentPath,
                               string const& _childKeyPath,
                               T& _store,
-                              logstore::MessageBuilder const& _logger)
+                              logstore::message_builder const& _logger)
     {
         // return tryLoadValue(_usedKeys, _node, _childKeyPath, _store); // XXX _parentPath
         auto const keys = crispy::split(_childKeyPath, '.');
@@ -458,7 +459,7 @@ namespace
                       string const& _parentPath,
                       string const& _key,
                       crispy::boxed<T, U>& _store,
-                      logstore::MessageBuilder const& _logger)
+                      logstore::message_builder const& _logger)
     {
         return tryLoadChild(_usedKeys, _doc, _parentPath, _key, _store.value, _logger);
     }
@@ -1311,7 +1312,7 @@ namespace
                                std::string const& _parentPath,
                                std::string const& _profileName,
                                unordered_map<string, terminal::ColorPalette> const& _colorschemes,
-                               logstore::MessageBuilder _logger)
+                               logstore::message_builder _logger)
     {
 
         if (auto colors = _profile["colors"]; colors) // {{{
@@ -1829,7 +1830,7 @@ std::string defaultConfigString()
 
 error_code createDefaultConfig(FileSystem::path const& _path)
 {
-    FileSystemError ec;
+    file_system_error ec;
     if (!_path.parent_path().empty())
     {
         FileSystem::create_directories(_path.parent_path(), ec);
@@ -1959,7 +1960,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 
         if (!logFilePath.empty())
         {
-            _config.loggingSink = make_shared<logstore::Sink>(logEnabled, make_shared<ofstream>(logFilePath));
+            _config.loggingSink = make_shared<logstore::sink>(logEnabled, make_shared<ofstream>(logFilePath));
             logstore::set_sink(*_config.loggingSink);
         }
     }
@@ -2067,7 +2068,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
             errorlog()("default_profile \"{}\" not found in profiles list.",
                        escape(_config.defaultProfileName));
         }
-        auto dummy = logstore::Category("dymmy", "empty logger", logstore::Category::State::Disabled);
+        auto dummy = logstore::category("dymmy", "empty logger", logstore::category::state::Disabled);
 
         for (auto i = profiles.begin(); i != profiles.end(); ++i)
         {

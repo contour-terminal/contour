@@ -16,35 +16,35 @@
 namespace logstore
 {
 
-Sink::Sink(bool enabled, Writer writer): _enabled { enabled }, _writer { std::move(writer) }
+sink::sink(bool enabled, writer wr): _enabled { enabled }, _writer { std::move(wr) }
 {
 }
 
-Sink::Sink(bool enabled, std::ostream& output):
-    Sink(enabled, [out = &output](std::string_view text) {
+sink::sink(bool enabled, std::ostream& output):
+    sink(enabled, [out = &output](std::string_view text) {
         *out << text;
         out->flush();
     })
 {
 }
 
-Sink::Sink(bool enabled, std::shared_ptr<std::ostream> f):
-    Sink(enabled, [f = std::move(f)](std::string_view text) {
+sink::sink(bool enabled, std::shared_ptr<std::ostream> f):
+    sink(enabled, [f = std::move(f)](std::string_view text) {
         *f << text;
         f->flush();
     })
 {
 }
 
-Sink& Sink::console()
+sink& sink::console()
 {
-    static auto instance = Sink(false, std::cout);
+    static auto instance = sink(false, std::cout);
     return instance;
 }
 
-Sink& Sink::error_console() // NOLINT(readability-identifier-naming)
+sink& sink::error_console() // NOLINT(readability-identifier-naming)
 {
-    static auto instance = Sink(true, std::cerr);
+    static auto instance = sink(true, std::cerr);
     return instance;
 }
 

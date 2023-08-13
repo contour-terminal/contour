@@ -107,7 +107,7 @@ inline void set_fail_handler(fail_handler_t handler)
                                logstore::source_location location = logstore::source_location::current())
 {
     auto static FatalLog =
-        logstore::Category("fatal", "Fatal error Logger", logstore::Category::State::Enabled);
+        logstore::category("fatal", "Fatal error Logger", logstore::category::state::Enabled);
 
     if (!message.empty())
         FatalLog(location)("Fatal error. {}", message);

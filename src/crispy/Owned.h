@@ -23,20 +23,20 @@ namespace crispy
  * used within packed structs.
  */
 template <typename T>
-struct CRISPY_PACKED Owned
+struct CRISPY_PACKED owned
 {
   public:
-    ~Owned() { reset(); }
-    Owned() noexcept = default;
-    Owned(Owned&& v) noexcept: _ptr { v.release() } {}
-    Owned& operator=(Owned&& v) noexcept
+    ~owned() { reset(); }
+    owned() noexcept = default;
+    owned(owned&& v) noexcept: _ptr { v.release() } {}
+    owned& operator=(owned&& v) noexcept
     {
         _ptr = v.release();
         return *this;
     }
 
-    Owned(Owned const& v) noexcept = delete;
-    Owned& operator=(Owned const& v) = delete;
+    owned(owned const& v) noexcept = delete;
+    owned& operator=(owned const& v) = delete;
 
     [[nodiscard]] T* get() noexcept { return _ptr; }
     [[nodiscard]] T const* get() const noexcept { return _ptr; }

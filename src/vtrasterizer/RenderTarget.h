@@ -29,6 +29,8 @@
 #include <optional>
 #include <vector>
 
+#include "crispy/ImageSize.h"
+
 namespace terminal
 {
 struct BackgroundImage;
@@ -101,8 +103,8 @@ class RenderTarget
 {
   public:
     using RGBAColor = terminal::RGBAColor;
-    using Width = crispy::Width;
-    using Height = crispy::Height;
+    using Width = crispy::width;
+    using Height = crispy::height;
     using TextureAtlas = terminal::rasterizer::atlas::TextureAtlas<RenderTileAttributes>;
 
     virtual ~RenderTarget() = default;
@@ -160,7 +162,7 @@ class Renderable
     [[nodiscard]] TextureAtlas::TileCreateData createTileData(atlas::TileLocation tileLocation,
                                                               std::vector<uint8_t> bitmap,
                                                               atlas::Format bitmapFormat,
-                                                              ImageSize bitmapSize,
+                                                              crispy::image_size bitmapSize,
                                                               RenderTileAttributes::X x,
                                                               RenderTileAttributes::Y y,
                                                               uint32_t fragmentShaderSelector);
@@ -168,8 +170,8 @@ class Renderable
     [[nodiscard]] TextureAtlas::TileCreateData createTileData(atlas::TileLocation tileLocation,
                                                               std::vector<uint8_t> bitmap,
                                                               atlas::Format bitmapFormat,
-                                                              ImageSize bitmapSize,
-                                                              ImageSize renderBitmapSize,
+                                                              crispy::image_size bitmapSize,
+                                                              crispy::image_size renderBitmapSize,
                                                               RenderTileAttributes::X x,
                                                               RenderTileAttributes::Y y,
                                                               uint32_t fragmentShaderSelector);
@@ -219,7 +221,7 @@ class Renderable
 inline Renderable::TextureAtlas::TileCreateData Renderable::createTileData(atlas::TileLocation tileLocation,
                                                                            std::vector<uint8_t> bitmap,
                                                                            atlas::Format bitmapFormat,
-                                                                           ImageSize bitmapSize,
+                                                                           crispy::image_size bitmapSize,
                                                                            RenderTileAttributes::X x,
                                                                            RenderTileAttributes::Y y,
                                                                            uint32_t fragmentShaderSelector)

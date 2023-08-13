@@ -30,7 +30,7 @@ namespace terminal::parser
 {
 
 auto const inline VTTraceParserLog =
-    logstore::Category("vt.trace.parser", "Logs terminal parser instruction trace.");
+    logstore::category("vt.trace.parser", "Logs terminal parser instruction trace.");
 
 namespace
 {

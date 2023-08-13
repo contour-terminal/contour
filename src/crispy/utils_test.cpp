@@ -130,7 +130,7 @@ TEST_CASE("fromHexString")
     CHECK(crispy::fromHexString("4162"sv).value() == "Ab"sv);
 }
 
-struct VariableCollector
+struct variable_collector
 {
     auto operator()(string_view name) const { return fmt::format("({})", name); }
 };
@@ -138,12 +138,12 @@ struct VariableCollector
 TEST_CASE("replaceVariables")
 {
     // clang-format off
-    CHECK(""sv == crispy::replaceVariables("", VariableCollector()));
-    CHECK("()"sv == crispy::replaceVariables("${}", VariableCollector()));
-    CHECK("(Hello)"sv == crispy::replaceVariables("${Hello}", VariableCollector()));
-    CHECK("(Hello) World"sv == crispy::replaceVariables("${Hello} World", VariableCollector()));
-    CHECK("Hello, (World)!"sv == crispy::replaceVariables("Hello, ${World}!", VariableCollector()));
-    CHECK("(one), (two), (three)"sv == crispy::replaceVariables("${one}, ${two}, ${three}", VariableCollector()));
+    CHECK(""sv == crispy::replaceVariables("", variable_collector()));
+    CHECK("()"sv == crispy::replaceVariables("${}", variable_collector()));
+    CHECK("(Hello)"sv == crispy::replaceVariables("${Hello}", variable_collector()));
+    CHECK("(Hello) World"sv == crispy::replaceVariables("${Hello} World", variable_collector()));
+    CHECK("Hello, (World)!"sv == crispy::replaceVariables("Hello, ${World}!", variable_collector()));
+    CHECK("(one), (two), (three)"sv == crispy::replaceVariables("${one}, ${two}, ${three}", variable_collector()));
     // clang-format on
 }
 

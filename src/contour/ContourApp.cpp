@@ -21,6 +21,7 @@
 #include <vtparser/Parser.h>
 
 #include <crispy/App.h>
+#include <crispy/CLI.h>
 #include <crispy/StackTrace.h>
 #include <crispy/utils.h>
 
@@ -73,7 +74,7 @@ namespace
             << "Stack Trace:\r\n"
             << "------------\r\n";
 
-        auto stackTrace = crispy::StackTrace();
+        auto stackTrace = crispy::stack_trace();
         auto symbols = stackTrace.symbols();
         for (auto const& symbol: symbols)
             out << symbol << "\r\n";
@@ -126,9 +127,9 @@ namespace
 } // namespace
 // }}}
 
-ContourApp::ContourApp(): App("contour", "Contour Terminal Emulator", CONTOUR_VERSION_STRING, "Apache-2.0")
+ContourApp::ContourApp(): app("contour", "Contour Terminal Emulator", CONTOUR_VERSION_STRING, "Apache-2.0")
 {
-    using Project = crispy::cli::about::Project;
+    using Project = crispy::cli::about::project;
     crispy::cli::about::registerProjects(
 #if defined(CONTOUR_BUILD_WITH_MIMALLOC)
         Project { "mimalloc", "", "" },
@@ -144,7 +145,7 @@ ContourApp::ContourApp(): App("contour", "Contour Terminal Emulator", CONTOUR_VE
         Project { "fmt", "MIT", "https://github.com/fmtlib/fmt" });
 
 #if defined(__linux__)
-    auto crashLogDirPath = crispy::App::instance()->localStateDir() / "crash";
+    auto crashLogDirPath = crispy::app::instance()->localStateDir() / "crash";
     FileSystem::create_directories(crashLogDirPath);
     crashLogDir = crashLogDirPath.string();
     // signal(SIGSEGV, segvHandler);
@@ -174,7 +175,7 @@ ContourApp::ContourApp(): App("contour", "Contour Terminal Emulator", CONTOUR_VE
 }
 
 template <typename Callback>
-auto withOutput(crispy::cli::FlagStore const& _flags, std::string const& _name, Callback _callback)
+auto withOutput(crispy::cli::flag_store const& _flags, std::string const& _name, Callback _callback)
 {
     std::ostream* out = &cout;
 
@@ -191,16 +192,16 @@ auto withOutput(crispy::cli::FlagStore const& _flags, std::string const& _name, 
 
 int ContourApp::infoVT()
 {
-    using Category = terminal::FunctionCategory;
+    using category = terminal::FunctionCategory;
     using std::pair;
     using terminal::VTExtension;
     using namespace std::string_view_literals;
 
-    for (auto const& [category, headline]: { pair { Category::C0, "Control Codes"sv },
-                                             pair { Category::ESC, "Escape Sequences"sv },
-                                             pair { Category::CSI, "Control Sequences"sv },
-                                             pair { Category::OSC, "Operating System Commands"sv },
-                                             pair { Category::DCS, "Device Control Sequences"sv } })
+    for (auto const& [category, headline]: { pair { category::C0, "Control Codes"sv },
+                                             pair { category::ESC, "Escape Sequences"sv },
+                                             pair { category::CSI, "Control Sequences"sv },
+                                             pair { category::OSC, "Operating System Commands"sv },
+                                             pair { category::DCS, "Device Control Sequences"sv } })
     {
         fmt::print("{}\n", headline);
         fmt::print("{}\n\n", string(headline.size(), '='));
@@ -301,105 +302,105 @@ int ContourApp::profileAction()
     return EXIT_SUCCESS;
 }
 
-crispy::cli::Command ContourApp::parameterDefinition() const
+crispy::cli::command ContourApp::parameterDefinition() const
 {
-    return CLI::Command {
+    return CLI::command {
         "contour",
         "Contour Terminal Emulator " CONTOUR_VERSION_STRING
         " - https://github.com/contour-terminal/contour/ ;-)",
-        CLI::OptionList {},
-        CLI::CommandList {
-            CLI::Command { "help", "Shows this help and exits." },
-            CLI::Command { "version", "Shows the version and exits." },
-            CLI::Command { "license",
+        CLI::option_list {},
+        CLI::command_list {
+            CLI::command { "help", "Shows this help and exits." },
+            CLI::command { "version", "Shows the version and exits." },
+            CLI::command { "license",
                            "Shows the license, and project URL of the used projects and Contour." },
-            CLI::Command { "list-debug-tags", "Lists all available debug tags and exits." },
-            CLI::Command {
+            CLI::command { "list-debug-tags", "Lists all available debug tags and exits." },
+            CLI::command {
                 "info",
                 "General informational outputs.",
-                CLI::OptionList {},
-                CLI::CommandList {
-                    CLI::Command { "vt", "Prints general information about supported VT sequences." },
+                CLI::option_list {},
+                CLI::command_list {
+                    CLI::command { "vt", "Prints general information about supported VT sequences." },
                 } },
-            CLI::Command {
+            CLI::command {
                 "generate",
                 "Generation utilities.",
-                CLI::OptionList {},
-                CLI::CommandList {
-                    CLI::Command { "parser-table",
+                CLI::option_list {},
+                CLI::command_list {
+                    CLI::command { "parser-table",
                                    "Dumps VT parser's state machine in dot-file format to stdout." },
-                    CLI::Command {
+                    CLI::command {
                         "terminfo",
                         "Generates the terminfo source file that will reflect the features of this version "
                         "of contour. Using - as value will write to stdout instead.",
                         {
-                            CLI::Option { "to",
-                                          CLI::Value { ""s },
+                            CLI::option { "to",
+                                          CLI::value { ""s },
                                           "Output file name to store the screen capture to. If - (dash) is "
                                           "given, the output will be written to standard output.",
                                           "FILE",
-                                          CLI::Presence::Required },
+                                          CLI::presence::Required },
                         } },
-                    CLI::Command {
+                    CLI::command {
                         "config",
                         "Generates configuration file with the default configuration.",
-                        CLI::OptionList {
-                            CLI::Option { "to",
-                                          CLI::Value { ""s },
+                        CLI::option_list {
+                            CLI::option { "to",
+                                          CLI::value { ""s },
                                           "Output file name to store the config file to. If - (dash) is "
                                           "given, the output will be written to standard output.",
                                           "FILE",
-                                          CLI::Presence::Required },
+                                          CLI::presence::Required },
                         } },
-                    CLI::Command {
+                    CLI::command {
                         "integration",
                         "Generates shell integration script.",
-                        CLI::OptionList {
-                            CLI::Option { "shell",
-                                          CLI::Value { ""s },
+                        CLI::option_list {
+                            CLI::option { "shell",
+                                          CLI::value { ""s },
                                           "Shell name to create the integration for. "
                                           "Supported shells: fish, zsh, tcsh",
                                           "SHELL",
-                                          CLI::Presence::Required },
-                            CLI::Option { "to",
-                                          CLI::Value { ""s },
+                                          CLI::presence::Required },
+                            CLI::option { "to",
+                                          CLI::value { ""s },
                                           "Output file name to store the shell integration file to. If - "
                                           "(dash) is given, the output will be written to standard output.",
                                           "FILE",
-                                          CLI::Presence::Required },
+                                          CLI::presence::Required },
                         } } } },
-            CLI::Command {
+            CLI::command {
                 "capture",
                 "Captures the screen buffer of the currently running terminal.",
                 {
-                    CLI::Option { "logical",
-                                  CLI::Value { false },
+                    CLI::option { "logical",
+                                  CLI::value { false },
                                   "Tells the terminal to use logical lines for counting and capturing." },
-                    CLI::Option { "words",
-                                  CLI::Value { false },
+                    CLI::option { "words",
+                                  CLI::value { false },
                                   "Splits each line into words and outputs only one word per line." },
-                    CLI::Option { "timeout",
-                                  CLI::Value { 1.0 },
+                    CLI::option { "timeout",
+                                  CLI::value { 1.0 },
                                   "Sets timeout seconds to wait for terminal to respond.",
                                   "SECONDS" },
-                    CLI::Option { "lines", CLI::Value { 0u }, "The number of lines to capture", "COUNT" },
-                    CLI::Option { "to",
-                                  CLI::Value { ""s },
+                    CLI::option { "lines", CLI::value { 0u }, "The number of lines to capture", "COUNT" },
+                    CLI::option { "to",
+                                  CLI::value { ""s },
                                   "Output file name to store the screen capture to. If - (dash) is given, "
                                   "the capture will be written to standard output.",
                                   "FILE",
-                                  CLI::Presence::Required },
+                                  CLI::presence::Required },
                 } },
-            CLI::Command {
+            CLI::command {
                 "set",
                 "Sets various aspects of the connected terminal.",
-                CLI::OptionList {},
-                CLI::CommandList { CLI::Command {
+                CLI::option_list {},
+                CLI::command_list { CLI::command {
                     "profile",
                     "Changes the terminal profile of the currently attached terminal to the given value.",
-                    CLI::OptionList {
-                        CLI::Option { "to",
-                                      CLI::Value { ""s },
+                    CLI::option_list {
+                        CLI::option { "to",
+                                      CLI::value { ""s },
                                       "Profile name to activate in the currently connected terminal.",
                                       "NAME" } } } } } }
     };

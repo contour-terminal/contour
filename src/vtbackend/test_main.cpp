@@ -23,7 +23,7 @@ int main(int argc, char const* argv[])
     if (logFilterString)
     {
         logstore::configure(logFilterString);
-        crispy::App::customizeLogStoreOutput();
+        crispy::app::customizeLogStoreOutput();
     }
     int const result = Catch::Session().run(argc, argv);
 

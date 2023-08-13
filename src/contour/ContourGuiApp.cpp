@@ -32,6 +32,8 @@
 #include <iostream>
 #include <vector>
 
+#include "crispy/CLI.h"
+
 using std::bind;
 using std::cerr;
 using std::get;
@@ -65,24 +67,24 @@ int ContourGuiApp::run(int argc, char const* argv[])
     return ContourApp::run(argc, argv);
 }
 
-crispy::cli::Command ContourGuiApp::parameterDefinition() const
+crispy::cli::command ContourGuiApp::parameterDefinition() const
 {
     auto command = ContourApp::parameterDefinition();
 
     command.children.insert(
         command.children.begin(),
-        CLI::Command {
+        CLI::command {
             "font-locator",
             "Inspects font locator service.",
-            CLI::OptionList {
-                CLI::Option { "config",
-                              CLI::Value { contour::config::defaultConfigFilePath() },
+            CLI::option_list {
+                CLI::option { "config",
+                              CLI::value { contour::config::defaultConfigFilePath() },
                               "Path to configuration file to load at startup.",
                               "FILE" },
-                CLI::Option {
-                    "profile", CLI::Value { ""s }, "Terminal Profile to load (overriding config).", "NAME" },
-                CLI::Option { "debug",
-                              CLI::Value { ""s },
+                CLI::option {
+                    "profile", CLI::value { ""s }, "Terminal Profile to load (overriding config).", "NAME" },
+                CLI::option { "debug",
+                              CLI::value { ""s },
                               "Enables debug logging, using a comma (,) seperated list of tags.",
                               "TAGS" },
             },
@@ -90,60 +92,60 @@ crispy::cli::Command ContourGuiApp::parameterDefinition() const
 
     command.children.insert(
         command.children.begin(),
-        CLI::Command {
+        CLI::command {
             "terminal",
             "Spawns a new terminal application.",
-            CLI::OptionList {
-                CLI::Option { "config",
-                              CLI::Value { contour::config::defaultConfigFilePath() },
+            CLI::option_list {
+                CLI::option { "config",
+                              CLI::value { contour::config::defaultConfigFilePath() },
                               "Path to configuration file to load at startup.",
                               "FILE" },
-                CLI::Option {
-                    "profile", CLI::Value { ""s }, "Terminal Profile to load (overriding config).", "NAME" },
-                CLI::Option { "debug",
-                              CLI::Value { ""s },
+                CLI::option {
+                    "profile", CLI::value { ""s }, "Terminal Profile to load (overriding config).", "NAME" },
+                CLI::option { "debug",
+                              CLI::value { ""s },
                               "Enables debug logging, using a comma (,) seperated list of tags.",
                               "TAGS" },
-                CLI::Option { "live-config", CLI::Value { false }, "Enables live config reloading." },
-                CLI::Option {
+                CLI::option { "live-config", CLI::value { false }, "Enables live config reloading." },
+                CLI::option {
                     "dump-state-at-exit",
-                    CLI::Value { ""s },
+                    CLI::value { ""s },
                     "Dumps internal state at exit into the given directory. This is for debugging contour.",
                     "PATH" },
-                CLI::Option { "early-exit-threshold",
-                              CLI::Value { 6u },
+                CLI::option { "early-exit-threshold",
+                              CLI::value { 6u },
                               "If the spawned process exits earlier than the given threshold seconds, an "
                               "error message will be printed and the window not closed immediately." },
-                CLI::Option { "working-directory",
-                              CLI::Value { ""s },
+                CLI::option { "working-directory",
+                              CLI::value { ""s },
                               "Sets initial working directory (overriding config).",
                               "DIRECTORY" },
-                CLI::Option {
+                CLI::option {
                     "class",
-                    CLI::Value { ""s },
+                    CLI::value { ""s },
                     "Sets the class part of the WM_CLASS property for the window (overriding config).",
                     "WM_CLASS" },
-                CLI::Option {
-                    "platform", CLI::Value { ""s }, "Sets the QPA platform.", "PLATFORM[:OPTIONS]" },
-                CLI::Option { "session",
-                              CLI::Value { ""s },
+                CLI::option {
+                    "platform", CLI::value { ""s }, "Sets the QPA platform.", "PLATFORM[:OPTIONS]" },
+                CLI::option { "session",
+                              CLI::value { ""s },
                               "Sets the sessioni ID used for resuming a prior session.",
                               "SESSION_ID" },
 #if defined(__linux__)
-                CLI::Option {
-                    "display", CLI::Value { ""s }, "Sets the X11 display to connect to.", "DISPLAY_ID" },
+                CLI::option {
+                    "display", CLI::value { ""s }, "Sets the X11 display to connect to.", "DISPLAY_ID" },
 #endif
-                CLI::Option {
-                    CLI::OptionName { 'e', "execute" },
-                    CLI::Value { ""s },
+                CLI::option {
+                    CLI::option_name { 'e', "execute" },
+                    CLI::value { ""s },
                     "DEPRECATED: Program to execute instead of running the shell as configured.",
                     "PROGRAM",
-                    CLI::Presence::Optional,
-                    CLI::Deprecated { "Only supported for compatibility with very old KDE desktops." } },
+                    CLI::presence::Optional,
+                    CLI::deprecated { "Only supported for compatibility with very old KDE desktops." } },
             },
-            CLI::CommandList {},
-            CLI::CommandSelect::Implicit,
-            CLI::Verbatim { "PROGRAM ARGS...",
+            CLI::command_list {},
+            CLI::command_select::Implicit,
+            CLI::verbatim { "PROGRAM ARGS...",
                             "Executes given program instead of the one provided in the configuration." } });
 
     return command;

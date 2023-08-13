@@ -173,19 +173,19 @@ template <typename A, typename B>
 struct numeric_limits<crispy::boxed<A, B>>
 {
     using value_type = A;
-    using Boxed = crispy::boxed<A, B>;
+    using boxed = crispy::boxed<A, B>;
 
     // clang-format off
     // NOLINTBEGIN(readability-identifier-naming)
-    static Boxed min() noexcept { return Boxed { std::numeric_limits<A>::min() }; }
-    static Boxed max() noexcept { return Boxed { std::numeric_limits<A>::max() }; }
-    static Boxed lowest() noexcept { return Boxed { std::numeric_limits<A>::lowest() }; }
-    static Boxed epsilon() noexcept { return Boxed { std::numeric_limits<A>::epsilon() }; }
-    static Boxed round_error() noexcept { return Boxed { std::numeric_limits<A>::round_error() }; }
-    static Boxed infinity() noexcept { return Boxed { std::numeric_limits<A>::infinity() }; }
-    static Boxed quiet_NaN() noexcept { return Boxed { std::numeric_limits<A>::quiet_NaN() }; }
-    static Boxed signaling_NaN() noexcept { return Boxed { std::numeric_limits<A>::signaling_NaNinfinity() }; }
-    static Boxed denorm_min() noexcept { return Boxed { std::numeric_limits<A>::denorm_min() }; }
+    static boxed min() noexcept { return boxed { std::numeric_limits<A>::min() }; }
+    static boxed max() noexcept { return boxed { std::numeric_limits<A>::max() }; }
+    static boxed lowest() noexcept { return boxed { std::numeric_limits<A>::lowest() }; }
+    static boxed epsilon() noexcept { return boxed { std::numeric_limits<A>::epsilon() }; }
+    static boxed round_error() noexcept { return boxed { std::numeric_limits<A>::round_error() }; }
+    static boxed infinity() noexcept { return boxed { std::numeric_limits<A>::infinity() }; }
+    static boxed quiet_NaN() noexcept { return boxed { std::numeric_limits<A>::quiet_NaN() }; }
+    static boxed signaling_NaN() noexcept { return boxed { std::numeric_limits<A>::signaling_NaNinfinity() }; }
+    static boxed denorm_min() noexcept { return boxed { std::numeric_limits<A>::denorm_min() }; }
     // NOLINTEND(readability-identifier-naming)
     // clang-format on
 };

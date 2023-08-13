@@ -16,6 +16,8 @@
 #include <algorithm>
 #include <memory>
 
+#include "crispy/StrongLRUHashtable.h"
+
 using std::copy;
 using std::make_shared;
 using std::min;
@@ -23,9 +25,6 @@ using std::move;
 using std::ostream;
 using std::shared_ptr;
 using std::string;
-
-using crispy::LRUCapacity;
-using crispy::StrongHashtableSize;
 
 namespace terminal
 {
@@ -54,8 +53,8 @@ ImageFragment::~ImageFragment()
 
 ImagePool::ImagePool(OnImageRemove onImageRemove, ImageId nextImageId):
     _nextImageId { nextImageId },
-    _imageNameToImageCache { StrongHashtableSize { 1024 },
-                             LRUCapacity { 100 },
+    _imageNameToImageCache { crispy::strong_hashtable_size { 1024 },
+                             crispy::lru_capacity { 100 },
                              "ImagePool name-to-image mappings" },
     _onImageRemove { std::move(onImageRemove) }
 {

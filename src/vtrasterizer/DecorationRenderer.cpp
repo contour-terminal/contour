@@ -26,7 +26,7 @@
 #include <utility>
 
 using crispy::each_element;
-using crispy::Size;
+using crispy::size;
 
 using std::array;
 using std::ceil;
@@ -302,7 +302,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
 }
 
 void DecorationRenderer::renderDecoration(Decorator decoration,
-                                          crispy::Point pos,
+                                          crispy::point pos,
                                           ColumnCount columnCount,
                                           RGBColor const& color)
 {

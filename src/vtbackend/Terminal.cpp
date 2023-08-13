@@ -40,7 +40,7 @@
 
 #include <libunicode/convert.h>
 
-using crispy::Size;
+using crispy::size;
 using std::nullopt;
 using std::optional;
 using std::string;

@@ -14,11 +14,11 @@ namespace crispy
  * @see http://en.wikipedia.org/wiki/Fowler-Noll-Vo_hash_function
  */
 template <typename T, typename U = size_t>
-class FNV
+class fnv
 {
   public:
-    constexpr FNV() noexcept: _basis { 2166136261llu }, _prime { 16777619llu } {}
-    constexpr FNV(U prime, U basis) noexcept: _basis(basis), _prime(prime) {}
+    constexpr fnv() noexcept: _basis { 2166136261llu }, _prime { 16777619llu } {}
+    constexpr fnv(U prime, U basis) noexcept: _basis(basis), _prime(prime) {}
 
     [[nodiscard]] constexpr U prime() const noexcept { return _prime; }
     [[nodiscard]] constexpr U basis() const noexcept { return _basis; }

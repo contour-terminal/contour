@@ -28,6 +28,12 @@
 #include <string_view>
 #include <vector>
 
+#if defined __has_include
+    #if __cpp_lib_source_location
+        #include <source_location>
+    #endif
+#endif
+
 // NB: Don't do that now. It seems to only cause problems, such as
 // __has_include reports presense and in can in fact be included, but it's
 // not giving us the expected std::...source_location, wow.
@@ -42,13 +48,13 @@
 namespace logstore
 {
 
-class Category;
-class Sink;
+class category;
+class sink;
 
-class SourceLocation
+class source_location_custom
 {
   public:
-    SourceLocation(char const* filename, int line, char const* functionName) noexcept:
+    source_location_custom(char const* filename, int line, char const* functionName) noexcept:
         _fileName { filename }, _line { line }, _functionName { functionName }
     {
     }
@@ -57,9 +63,9 @@ class SourceLocation
     [[nodiscard]] int line() const noexcept { return _line; }
     [[nodiscard]] char const* function_name() const noexcept { return _functionName; }
 
-    static SourceLocation current() noexcept
+    static source_location_custom current() noexcept
     {
-        return SourceLocation(__builtin_FILE(), __builtin_LINE(), __builtin_FUNCTION());
+        return source_location_custom(__builtin_FILE(), __builtin_LINE(), __builtin_FUNCTION());
     }
 
   private:
@@ -68,49 +74,49 @@ class SourceLocation
     char const* _functionName;
 };
 
-// #if __has_include(<source_location>) && !defined(_WIN32)
-// using source_location = std::source_location;
-// #elif __has_include(<experimental/source_location>)
-// using source_location = std::experimental::source_location;
-// #else
-using source_location = SourceLocation;
-// #endif
+#if defined __has_include
+    #if defined __cpp_lib_source_location
+using source_location = std::source_location;
+    #else
+using source_location = source_location_custom;
+    #endif
+#endif
 
-class MessageBuilder
+class message_builder
 {
   private:
-    Category const& _category;
+    category const& _category;
     source_location _location;
     std::string _buffer;
 
   public:
-    explicit MessageBuilder(Category const& cat, source_location loc = source_location::current());
+    explicit message_builder(category const& cat, source_location loc = source_location::current());
 
-    [[nodiscard]] Category const& category() const noexcept { return _category; }
+    [[nodiscard]] category const& get_category() const noexcept { return _category; }
     [[nodiscard]] source_location const& location() const noexcept { return _location; }
 
     [[nodiscard]] std::string const& text() const noexcept { return _buffer; }
 
-    MessageBuilder& append(std::string_view msg)
+    message_builder& append(std::string_view msg)
     {
         _buffer += msg;
         return *this;
     }
 
     template <typename... T>
-    MessageBuilder& append(fmt::format_string<T...> fmt, T&&... args)
+    message_builder& append(fmt::format_string<T...> fmt, T&&... args)
     {
         _buffer += fmt::vformat(fmt, fmt::make_format_args(args...));
         return *this;
     }
 
-    MessageBuilder& operator()(std::string const& msg)
+    message_builder& operator()(std::string const& msg)
     {
         _buffer += msg;
         return *this;
     }
     template <typename... T>
-    MessageBuilder& operator()(fmt::format_string<T...> fmt, T&&... args)
+    message_builder& operator()(fmt::format_string<T...> fmt, T&&... args)
     {
         _buffer += fmt::vformat(fmt, fmt::make_format_args(args...));
         return *this;
@@ -118,114 +124,114 @@ class MessageBuilder
 
     [[nodiscard]] std::string message() const;
 
-    ~MessageBuilder();
+    ~message_builder();
 };
 
-/// Defines a logging Category, such as: error, warning, metrics, vt.backend, or renderer.
+/// Defines a logging category, such as: error, warning, metrics, vt.backend, or renderer.
 ///
 /// A program can have multiple logging categories, all pointing to the same
 /// or each to an individual logging sink.
-class Category
+class category
 {
   public:
-    using Formatter = std::function<std::string(MessageBuilder const&)>;
-    enum class State
+    using formatter = std::function<std::string(message_builder const&)>;
+    enum class state
     {
         Enabled,
         Disabled
     };
-    enum class Visibility
+    enum class visibility
     {
         Public,
         Hidden
     };
 
-    Category(std::string_view name,
+    category(std::string_view name,
              std::string_view desc,
-             State state = State::Disabled,
-             Visibility visibility = Visibility::Public) noexcept;
-    ~Category();
+             state state = state::Disabled,
+             visibility visibility = visibility::Public) noexcept;
+    ~category();
 
     [[nodiscard]] std::string_view name() const noexcept { return _name; }
     [[nodiscard]] std::string_view description() const noexcept { return _description; }
 
-    [[nodiscard]] bool is_enabled() const noexcept { return _state == State::Enabled; }
-    void enable(bool enabled = true) noexcept { _state = enabled ? State::Enabled : State::Disabled; }
-    void disable() noexcept { _state = State::Disabled; }
+    [[nodiscard]] bool is_enabled() const noexcept { return _state == state::Enabled; }
+    void enable(bool enabled = true) noexcept { _state = enabled ? state::Enabled : state::Disabled; }
+    void disable() noexcept { _state = state::Disabled; }
 
-    [[nodiscard]] bool visible() const noexcept { return _visibility == Visibility::Public; }
-    void set_visible(bool visible) { _visibility = visible ? Visibility::Public : Visibility::Hidden; }
+    [[nodiscard]] bool visible() const noexcept { return _visibility == visibility::Public; }
+    void set_visible(bool visible) { _visibility = visible ? visibility::Public : visibility::Hidden; }
 
     operator bool() const noexcept { return is_enabled(); }
 
-    [[nodiscard]] Formatter const& formatter() const { return _formatter; }
-    void set_formatter(Formatter formatter) { _formatter = std::move(formatter); }
+    [[nodiscard]] formatter const& get_formatter() const { return _formatter; }
+    void set_formatter(formatter formatter) { _formatter = std::move(formatter); }
 
-    void set_sink(logstore::Sink& s) { _sink = s; }
-    [[nodiscard]] logstore::Sink& sink() const noexcept { return _sink.get(); }
+    void set_sink(logstore::sink& s) { _sink = s; }
+    [[nodiscard]] logstore::sink& sink() const noexcept { return _sink.get(); }
 
-    [[nodiscard]] MessageBuilder build(source_location location = source_location::current()) const
+    [[nodiscard]] message_builder build(source_location location = source_location::current()) const
     {
-        return MessageBuilder(*this, location);
+        return message_builder(*this, location);
     }
 
-    [[nodiscard]] MessageBuilder operator()(source_location location = source_location::current()) const
+    [[nodiscard]] message_builder operator()(source_location location = source_location::current()) const
     {
-        return MessageBuilder(*this, location);
+        return message_builder(*this, location);
     }
 
-    static std::string defaultFormatter(MessageBuilder const& message);
+    static std::string defaultFormatter(message_builder const& message);
 
   private:
     std::string_view _name;
     std::string_view _description;
-    State _state;
-    Visibility _visibility;
-    Formatter _formatter;
-    std::reference_wrapper<logstore::Sink> _sink;
+    state _state;
+    visibility _visibility;
+    formatter _formatter;
+    std::reference_wrapper<logstore::sink> _sink;
 };
 
-/// Logging Sink API.
+/// Logging sink API.
 ///
 /// Such as the console, a log file, or UDP endpoint.
-class Sink
+class sink
 {
   public:
-    using Writer = std::function<void(std::string_view const&)>;
+    using writer = std::function<void(std::string_view const&)>;
 
-    Sink(bool enabled, Writer writer);
-    Sink(bool enabled, std::ostream& output);
-    Sink(bool enabled, std::shared_ptr<std::ostream> f);
+    sink(bool enabled, writer writer);
+    sink(bool enabled, std::ostream& output);
+    sink(bool enabled, std::shared_ptr<std::ostream> f);
 
-    void set_writer(Writer writer);
+    void set_writer(writer writer);
 
     /// Writes given built message to this sink.
-    void write(MessageBuilder const& message);
+    void write(message_builder const& message);
 
     void set_enabled(bool enabled) { _enabled = enabled; }
 
     /// Retrieves reference to standard debug-logging sink.
-    static Sink& console();
-    static Sink& error_console(); // NOLINT(readability-identifier-naming)
+    static sink& console();
+    static sink& error_console(); // NOLINT(readability-identifier-naming)
 
   private:
     bool _enabled;
-    Writer _writer;
+    writer _writer;
 };
 
-std::vector<std::reference_wrapper<Category>>& get();
-Category* get(std::string_view categoryName);
-void set_sink(Sink& sink);
-void set_formatter(Category::Formatter const& f);
+std::vector<std::reference_wrapper<category>>& get();
+category* get(std::string_view categoryName);
+void set_sink(sink& sink);
+void set_formatter(category::formatter const& f);
 void enable(std::string_view categoryName, bool enabled = true);
 void disable(std::string_view categoryName);
 void configure(std::string_view filterString);
 
 // {{{ implementation
-inline std::string MessageBuilder::message() const
+inline std::string message_builder::message() const
 {
-    if (_category.formatter())
-        return _category.formatter()(*this);
+    if (_category.get_formatter())
+        return _category.get_formatter()(*this);
     else if (!_buffer.empty() && _buffer.back() == '\n')
         return _buffer;
     else if (!_buffer.empty())
@@ -234,13 +240,13 @@ inline std::string MessageBuilder::message() const
         return "";
 }
 
-inline std::vector<std::reference_wrapper<Category>>& get()
+inline std::vector<std::reference_wrapper<category>>& get()
 {
-    static std::vector<std::reference_wrapper<Category>> logStore;
+    static std::vector<std::reference_wrapper<category>> logStore;
     return logStore;
 }
 
-inline Category* get(std::string_view categoryName)
+inline category* get(std::string_view categoryName)
 {
     for (auto const& cat: get())
         if (cat.get().name() == categoryName)
@@ -248,13 +254,13 @@ inline Category* get(std::string_view categoryName)
     return nullptr;
 }
 
-inline void set_sink(Sink& s)
+inline void set_sink(sink& s)
 {
     for (auto const& cat: get())
         cat.get().set_sink(s);
 }
 
-inline void set_formatter(Category::Formatter const& f)
+inline void set_formatter(category::formatter const& f)
 {
     for (auto const& cat: get())
         cat.get().set_formatter(f);
@@ -296,31 +302,31 @@ inline void configure(std::string_view filterString)
     }
 }
 
-inline MessageBuilder::MessageBuilder(logstore::Category const& cat, source_location location):
+inline message_builder::message_builder(logstore::category const& cat, source_location location):
     _category { cat }, _location { location }
 {
 }
 
-inline MessageBuilder::~MessageBuilder()
+inline message_builder::~message_builder()
 {
     _category.sink().write(*this);
 }
 
-inline Category::Category(std::string_view name,
+inline category::category(std::string_view name,
                           std::string_view desc,
-                          State state,
-                          Visibility visibility) noexcept:
+                          state state,
+                          visibility visibility) noexcept:
     _name { name },
     _description { desc },
     _state { state },
     _visibility { visibility },
-    _sink { logstore::Sink::console() }
+    _sink { logstore::sink::console() }
 {
-    assert(std::none_of(get().begin(), get().end(), [&](Category const& x) { return x.name() == _name; }));
+    assert(std::none_of(get().begin(), get().end(), [&](category const& x) { return x.name() == _name; }));
     get().emplace_back(*this);
 }
 
-inline Category::~Category()
+inline category::~category()
 {
     for (auto i = get().begin(), e = get().end(); i != e; ++i)
     {
@@ -332,28 +338,28 @@ inline Category::~Category()
     }
 }
 
-inline std::string Category::defaultFormatter(MessageBuilder const& message)
+inline std::string category::defaultFormatter(message_builder const& message)
 {
     return fmt::format("[{}:{}:{}]: {}\n",
-                       message.category().name(),
+                       message.get_category().name(),
                        message.location().file_name(),
                        message.location().line(),
                        message.text());
 }
 
-inline void Sink::write(MessageBuilder const& message)
+inline void sink::write(message_builder const& message)
 {
-    if (_enabled && message.category().is_enabled())
+    if (_enabled && message.get_category().is_enabled())
         _writer(message.message());
 }
 
-inline void Sink::set_writer(Writer writer)
+inline void sink::set_writer(writer writer)
 {
     _writer = std::move(writer);
 }
 // }}}
 
-auto inline ErrorLog = logstore::Category("error", "Error Logger", Category::State::Enabled);
+auto inline ErrorLog = logstore::category("error", "Error Logger", category::state::Enabled);
 
 #define errorlog() (::logstore::ErrorLog())
 

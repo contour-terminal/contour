@@ -49,8 +49,8 @@ using std::variant;
 using std::vector;
 using std::chrono::steady_clock;
 
-using crispy::Point;
-using crispy::Size;
+using crispy::point;
+using crispy::size;
 using crispy::Zero;
 
 using terminal::Height;

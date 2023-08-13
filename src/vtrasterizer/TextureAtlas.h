@@ -116,10 +116,10 @@ struct AtlasProperties
     // Number of hashtable slots to map to the texture tiles.
     // Larger values may increase performance, but too large may also decrease.
     // This value is rounted up to a value equal to the power of two.
-    crispy::StrongHashtableSize hashCount {};
+    crispy::strong_hashtable_size hashCount {};
 
     // Number of tiles the texture atlas must be able to store at least.
-    crispy::LRUCapacity tileCount {};
+    crispy::lru_capacity tileCount {};
 
     // Number of direct-mapped tile slots.
     //
@@ -135,7 +135,7 @@ struct AtlasProperties
 struct ConfigureAtlas
 {
     // Texture atlas size in pixels.
-    crispy::ImageSize size {};
+    crispy::image_size size {};
 
     AtlasProperties properties {};
 };
@@ -252,7 +252,7 @@ class TextureAtlas
     [[nodiscard]] ImageSize tileSize() const noexcept { return _atlasProperties.tileSize; }
 
     // Tests in LRU-cache if the tile
-    [[nodiscard]] constexpr bool contains(crispy::StrongHash const& id) const noexcept;
+    [[nodiscard]] constexpr bool contains(crispy::strong_hash const& id) const noexcept;
 
     // Return type for in-place tile-construction callback.
     struct TileCreateData
@@ -276,20 +276,20 @@ class TextureAtlas
     /// Always returns either the existing item by the given key, if found,
     /// or a newly created one by invoking constructValue().
     template <typename CreateTileDataFn>
-    [[nodiscard]] TileAttributes<Metadata>& get_or_emplace(crispy::StrongHash const& key,
+    [[nodiscard]] TileAttributes<Metadata>& get_or_emplace(crispy::strong_hash const& key,
                                                            CreateTileDataFn constructValue);
 
-    [[nodiscard]] TileAttributes<Metadata> const* try_get(crispy::StrongHash const& key);
+    [[nodiscard]] TileAttributes<Metadata> const* try_get(crispy::strong_hash const& key);
 
     template <typename CreateTileDataFn>
-    [[nodiscard]] TileAttributes<Metadata> const* get_or_try_emplace(crispy::StrongHash const& key,
+    [[nodiscard]] TileAttributes<Metadata> const* get_or_try_emplace(crispy::strong_hash const& key,
                                                                      CreateTileDataFn constructValue);
 
     /// Explicitly create or overwrites a tile for the given hash key.
     template <typename CreateTileDataFn>
-    void emplace(crispy::StrongHash const& key, CreateTileDataFn constructValue);
+    void emplace(crispy::strong_hash const& key, CreateTileDataFn constructValue);
 
-    void remove(crispy::StrongHash key);
+    void remove(crispy::strong_hash key);
 
     // Uploads tile data to a direct-mapped slot in the texture atlas
     // bypassing the LRU cache.
@@ -315,8 +315,8 @@ class TextureAtlas
     [[nodiscard]] uint32_t tilesInY() const noexcept { return _tilesInY; }
 
   private:
-    using TileCache = crispy::StrongLRUHashtable<TileAttributes<Metadata>>;
-    using TileCachePtr = typename TileCache::Ptr;
+    using TileCache = crispy::strong_lru_hashtable<TileAttributes<Metadata>>;
+    using TileCachePtr = typename TileCache::ptr;
 
     template <typename CreateTileDataFn>
     std::optional<TileAttributes<Metadata>> constructTile(CreateTileDataFn createTileData,
@@ -501,11 +501,11 @@ TextureAtlas<Metadata>::TextureAtlas(AtlasBackend& backend, AtlasProperties atla
     }() },
     _tileCache { TileCache::create(
         atlasProperties.hashCount,
-        crispy::LRUCapacity { // The LRU entry capacity is the number of total tiles availabe,
-                              // minus the number of reserved tiles for direct-mapping, and
-                              // minus one for the LRU-sentinel entry (which is why entryIndex
-                              // is between 1 and capacity inclusive)
-                              _tilesInX * _tilesInY - _atlasProperties.directMappingCount - 1 },
+        crispy::lru_capacity { // The LRU entry capacity is the number of total tiles availabe,
+                               // minus the number of reserved tiles for direct-mapping, and
+                               // minus one for the LRU-sentinel entry (which is why entryIndex
+                               // is between 1 and capacity inclusive)
+                               _tilesInX * _tilesInY - _atlasProperties.directMappingCount - 1 },
         "LRU cache for texture atlas") },
     _tileLocations { static_cast<size_t>(_tilesInX * _tilesInY) }
 {
@@ -544,7 +544,7 @@ TextureAtlas<Metadata>::TextureAtlas(AtlasBackend& backend, AtlasProperties atla
 }
 
 template <typename Metadata>
-constexpr bool TextureAtlas<Metadata>::contains(crispy::StrongHash const& id) const noexcept
+constexpr bool TextureAtlas<Metadata>::contains(crispy::strong_hash const& id) const noexcept
 {
     return _tileCache->contains(id);
 }
@@ -583,7 +583,7 @@ auto TextureAtlas<Metadata>::constructTile(CreateTileDataFn createTileData, uint
 
 template <typename Metadata>
 template <typename CreateTileDataFn>
-TileAttributes<Metadata>& TextureAtlas<Metadata>::get_or_emplace(crispy::StrongHash const& key,
+TileAttributes<Metadata>& TextureAtlas<Metadata>::get_or_emplace(crispy::strong_hash const& key,
                                                                  CreateTileDataFn constructValue)
 {
     return _tileCache->get_or_emplace(key,
@@ -593,7 +593,7 @@ TileAttributes<Metadata>& TextureAtlas<Metadata>::get_or_emplace(crispy::StrongH
 }
 
 template <typename Metadata>
-TileAttributes<Metadata> const* TextureAtlas<Metadata>::try_get(crispy::StrongHash const& key)
+TileAttributes<Metadata> const* TextureAtlas<Metadata>::try_get(crispy::strong_hash const& key)
 {
     return _tileCache->try_get(key);
 }
@@ -601,7 +601,7 @@ TileAttributes<Metadata> const* TextureAtlas<Metadata>::try_get(crispy::StrongHa
 template <typename Metadata>
 template <typename CreateTileDataFn>
 [[nodiscard]] TileAttributes<Metadata> const* TextureAtlas<Metadata>::get_or_try_emplace(
-    crispy::StrongHash const& key, CreateTileDataFn constructValue)
+    crispy::strong_hash const& key, CreateTileDataFn constructValue)
 {
     return _tileCache->get_or_try_emplace(
         key, [&](uint32_t entryIndex) -> std::optional<TileAttributes<Metadata>> {
@@ -611,7 +611,7 @@ template <typename CreateTileDataFn>
 
 template <typename Metadata>
 template <typename CreateTileDataFn>
-void TextureAtlas<Metadata>::emplace(crispy::StrongHash const& key, CreateTileDataFn constructValue)
+void TextureAtlas<Metadata>::emplace(crispy::strong_hash const& key, CreateTileDataFn constructValue)
 {
     // clang-format off
     _tileCache->emplace(
@@ -632,7 +632,7 @@ void TextureAtlas<Metadata>::emplace(crispy::StrongHash const& key, CreateTileDa
 }
 
 template <typename Metadata>
-void TextureAtlas<Metadata>::remove(crispy::StrongHash key)
+void TextureAtlas<Metadata>::remove(crispy::strong_hash key)
 {
     _tileCache->remove(key);
 }

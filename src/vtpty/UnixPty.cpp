@@ -14,6 +14,7 @@
 #include <vtpty/UnixPty.h>
 #include <vtpty/UnixUtils.h>
 
+#include <crispy/BufferObject.h>
 #include <crispy/deferred.h>
 #include <crispy/escape.h>
 #include <crispy/logstore.h>
@@ -144,7 +145,7 @@ namespace
         }
     }
 
-    UnixPty::PtyHandles createUnixPty(PageSize const& windowSize, optional<crispy::ImageSize> pixels)
+    UnixPty::PtyHandles createUnixPty(PageSize const& windowSize, optional<crispy::image_size> pixels)
     {
         // See https://code.woboq.org/userspace/glibc/login/forkpty.c.html
         assert(*windowSize.lines <= numeric_limits<unsigned short>::max());
@@ -152,8 +153,8 @@ namespace
 
         winsize const ws { unbox<unsigned short>(windowSize.lines),
                            unbox<unsigned short>(windowSize.columns),
-                           unbox<unsigned short>(pixels.value_or(crispy::ImageSize {}).width),
-                           unbox<unsigned short>(pixels.value_or(crispy::ImageSize {}).height) };
+                           unbox<unsigned short>(pixels.value_or(crispy::image_size {}).width),
+                           unbox<unsigned short>(pixels.value_or(crispy::image_size {}).height) };
 
 #if defined(__APPLE__)
         auto* wsa = const_cast<winsize*>(&ws);
@@ -293,7 +294,7 @@ int UnixPty::Slave::write(std::string_view text) noexcept
 }
 // }}}
 
-UnixPty::UnixPty(PageSize pageSize, optional<crispy::ImageSize> pixels):
+UnixPty::UnixPty(PageSize pageSize, optional<crispy::image_size> pixels):
     _pageSize { pageSize }, _pixels { pixels }
 {
 }
@@ -387,7 +388,7 @@ optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
     return string_view { target, static_cast<size_t>(rv) };
 }
 
-Pty::ReadResult UnixPty::read(crispy::BufferObject<char>& storage,
+Pty::ReadResult UnixPty::read(crispy::buffer_object<char>& storage,
                               std::chrono::milliseconds timeout,
                               size_t size)
 {
@@ -464,7 +465,7 @@ PageSize UnixPty::pageSize() const noexcept
     return _pageSize;
 }
 
-void UnixPty::resizeScreen(PageSize cells, std::optional<crispy::ImageSize> pixels)
+void UnixPty::resizeScreen(PageSize cells, std::optional<crispy::image_size> pixels)
 {
     if (_masterFd < 0)
         return;

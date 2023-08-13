@@ -40,8 +40,8 @@
 namespace text
 {
 
-auto const inline RasterizerLog = logstore::Category("font.render", "Logs details about rendering glyphs.");
-auto const inline TextShapingLog = logstore::Category("font.textshaping", "Logs details about text shaping.");
+auto const inline RasterizerLog = logstore::category("font.render", "Logs details about rendering glyphs.");
+auto const inline TextShapingLog = logstore::category("font.textshaping", "Logs details about text shaping.");
 
 // NOLINTBEGIN(readability-identifier-naming)
 enum class bitmap_format
@@ -66,8 +66,8 @@ constexpr size_t pixel_size(bitmap_format format) noexcept
 struct rasterized_glyph
 {
     glyph_index index;
-    crispy::ImageSize bitmapSize; // Glyph bitmap size in pixels.
-    crispy::Point position;       // top-left position of the bitmap, relative to the basline's origin.
+    crispy::image_size bitmapSize; // Glyph bitmap size in pixels.
+    crispy::point position;        // top-left position of the bitmap, relative to the basline's origin.
     bitmap_format format;
     std::vector<uint8_t> bitmap;
 
@@ -79,13 +79,13 @@ struct rasterized_glyph
     }
 };
 
-std::tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, crispy::ImageSize boundingBox);
+std::tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, crispy::image_size boundingBox);
 
 struct glyph_position
 {
     glyph_key glyph;
-    crispy::Point offset;
-    crispy::Point advance;
+    crispy::point offset;
+    crispy::point advance;
 
     unicode::PresentationStyle presentation {};
 };

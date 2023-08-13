@@ -35,16 +35,18 @@
 #include <utility>
 #include <vector>
 
+#include "crispy/StrongLRUHashtable.h"
+
 namespace terminal::rasterizer
 {
 
 struct RenderCursor
 {
-    crispy::Point position;
+    crispy::point position;
     CursorShape shape;
     int width;
 
-    RenderCursor(crispy::Point position, CursorShape shape, int width):
+    RenderCursor(crispy::point position, CursorShape shape, int width):
         position(position), shape(shape), width(width)
     {
     }
@@ -67,8 +69,8 @@ class Renderer
     Renderer(PageSize pageSize,
              FontDescriptions fontDescriptions,
              ColorPalette const& colorPalette,
-             crispy::StrongHashtableSize atlasHashtableSlotCount,
-             crispy::LRUCapacity atlasTileCount,
+             crispy::strong_hashtable_size atlasHashtableSlotCount,
+             crispy::lru_capacity atlasTileCount,
              bool atlasDirectMapping,
              Decorator hyperlinkNormal,
              Decorator hyperlinkHover);
@@ -142,8 +144,8 @@ class Renderer
     void renderLines(std::vector<RenderLine> const& renderableLines);
     void executeImageDiscards();
 
-    crispy::StrongHashtableSize _atlasHashtableSlotCount;
-    crispy::LRUCapacity _atlasTileCount;
+    crispy::strong_hashtable_size _atlasHashtableSlotCount;
+    crispy::lru_capacity _atlasTileCount;
     bool _atlasDirectMapping;
 
     RenderTarget* _renderTarget = nullptr;

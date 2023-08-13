@@ -2,7 +2,7 @@
 option(ENABLE_TIDY "Enable clang-tidy [default: OFF]" OFF)
 if(ENABLE_TIDY)
     find_program(CLANG_TIDY_EXE
-        NAMES clang-tidy-9 clang-tidy-8 clang-tidy-7 clang-tidy
+        NAMES clang-tidy
         DOC "Path to clang-tidy executable")
     if(NOT CLANG_TIDY_EXE)
         message(STATUS "[clang-tidy] Not found.")

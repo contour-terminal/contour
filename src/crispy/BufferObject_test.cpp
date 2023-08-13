@@ -16,7 +16,7 @@
 
 #include <catch2/catch.hpp>
 
-TEST_CASE("BufferObject", "[BufferObject]")
+TEST_CASE("buffer_object", "[buffer_object]")
 {
     // TODO
 }

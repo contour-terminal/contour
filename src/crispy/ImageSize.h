@@ -7,25 +7,25 @@ namespace crispy
 
 namespace detail::tags
 {
-    struct Width
+    struct width
     {
     };
-    struct Height
+    struct height
     {
     };
 } // namespace detail::tags
 
 /// Representsthe width in pixels of an image (see ImageSize).
-using Width = crispy::boxed<unsigned, detail::tags::Width>;
+using width = crispy::boxed<unsigned, detail::tags::width>;
 
 /// Representsthe height in pixels of an image (see ImageSize).
-using Height = crispy::boxed<unsigned, detail::tags::Height>;
+using height = crispy::boxed<unsigned, detail::tags::height>;
 
 /// ImageSize represents the 2-dimensional size of an image (pixmap).
-struct ImageSize
+struct image_size
 {
-    Width width;
-    Height height;
+    crispy::width width;
+    crispy::height height;
 
     [[nodiscard]] constexpr size_t area() const noexcept
     {
@@ -33,51 +33,51 @@ struct ImageSize
     }
 };
 
-constexpr bool operator==(ImageSize a, ImageSize b) noexcept
+constexpr bool operator==(image_size a, image_size b) noexcept
 {
     return a.width == b.width && a.height == b.height;
 }
-constexpr bool operator!=(ImageSize a, ImageSize b) noexcept
+constexpr bool operator!=(image_size a, image_size b) noexcept
 {
     return !(a == b);
 }
 
-constexpr bool operator<(ImageSize a, ImageSize b) noexcept
+constexpr bool operator<(image_size a, image_size b) noexcept
 {
     return a.width < b.width || (a.width == b.width && a.height < b.height);
 }
 
-inline ImageSize operator+(ImageSize a, ImageSize b) noexcept
+inline image_size operator+(image_size a, image_size b) noexcept
 {
-    return ImageSize { a.width + b.width, a.height + b.height };
+    return image_size { a.width + b.width, a.height + b.height };
 }
 
-inline ImageSize operator-(ImageSize a, ImageSize b) noexcept
+inline image_size operator-(image_size a, image_size b) noexcept
 {
-    return ImageSize { a.width - b.width, a.height - b.height };
+    return image_size { a.width - b.width, a.height - b.height };
 }
 
-inline ImageSize operator*(ImageSize a, double scalar) noexcept
+inline image_size operator*(image_size a, double scalar) noexcept
 {
-    return ImageSize { Width::cast_from(ceil(double(*a.width) * scalar)),
-                       Height::cast_from(ceil(double(*a.height) * scalar)) };
+    return image_size { width::cast_from(ceil(double(*a.width) * scalar)),
+                        height::cast_from(ceil(double(*a.height) * scalar)) };
 }
 
-inline ImageSize operator/(ImageSize a, double scalar) noexcept
+inline image_size operator/(image_size a, double scalar) noexcept
 {
-    return ImageSize { Width::cast_from(ceil(double(*a.width) / scalar)),
-                       Height::cast_from(ceil(double(*a.height) / scalar)) };
+    return image_size { width::cast_from(ceil(double(*a.width) / scalar)),
+                        height::cast_from(ceil(double(*a.height) / scalar)) };
 }
 
-constexpr ImageSize operator/(ImageSize a, ImageSize b) noexcept
+constexpr image_size operator/(image_size a, image_size b) noexcept
 {
-    return ImageSize { a.width / b.width, a.height / b.height };
+    return image_size { a.width / b.width, a.height / b.height };
 }
 
 } // namespace crispy
 
 template <>
-struct fmt::formatter<crispy::ImageSize>
+struct fmt::formatter<crispy::image_size>
 {
     template <typename ParseContext>
     constexpr auto parse(ParseContext& ctx)
@@ -85,7 +85,7 @@ struct fmt::formatter<crispy::ImageSize>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(crispy::ImageSize value, FormatContext& ctx)
+    auto format(crispy::image_size value, FormatContext& ctx)
     {
         return fmt::format_to(ctx.out(), "{}x{}", value.width, value.height);
     }

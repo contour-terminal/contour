@@ -29,23 +29,23 @@ namespace terminal
 template <typename Cell>
 typename Line<Cell>::InflatedBuffer Line<Cell>::reflow(ColumnCount newColumnCount)
 {
-    using crispy::Comparison;
+    using crispy::comparison;
     if (isTrivialBuffer())
     {
         switch (crispy::strongCompare(newColumnCount, ColumnCount::cast_from(trivialBuffer().text.size())))
         {
-            case Comparison::Greater: trivialBuffer().displayWidth = newColumnCount; return {};
-            case Comparison::Equal: return {};
-            case Comparison::Less:;
+            case comparison::Greater: trivialBuffer().displayWidth = newColumnCount; return {};
+            case comparison::Equal: return {};
+            case comparison::Less:;
         }
     }
     auto& buffer = inflatedBuffer();
     // TODO: Efficiently handle TrivialBuffer-case.
     switch (crispy::strongCompare(newColumnCount, size()))
     {
-        case Comparison::Equal: break;
-        case Comparison::Greater: buffer.resize(unbox<size_t>(newColumnCount)); break;
-        case Comparison::Less: {
+        case comparison::Equal: break;
+        case comparison::Greater: buffer.resize(unbox<size_t>(newColumnCount)); break;
+        case comparison::Less: {
             // TODO: properly handle wide character cells
             // - when cutting in the middle of a wide char, the wide char gets wrapped and an empty
             //   cell needs to be injected to match the expected column width.

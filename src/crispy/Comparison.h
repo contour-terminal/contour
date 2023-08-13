@@ -16,7 +16,7 @@
 namespace crispy
 {
 
-enum class Comparison
+enum class comparison
 {
     Less,
     Equal,
@@ -24,14 +24,14 @@ enum class Comparison
 };
 
 template <typename T>
-constexpr Comparison strongCompare(T const& a, T const& b)
+constexpr comparison strongCompare(T const& a, T const& b)
 {
     if (a < b)
-        return Comparison::Less;
+        return comparison::Less;
     else if (a == b)
-        return Comparison::Equal;
+        return comparison::Equal;
     else
-        return Comparison::Greater;
+        return comparison::Greater;
 }
 
 } // namespace crispy
