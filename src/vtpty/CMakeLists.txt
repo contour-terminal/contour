@@ -40,9 +40,11 @@ endif()
 
 if(UNIX)
     list(APPEND vtpty_LIBRARIES util)
-    list(APPEND vtpty_SOURCES UnixPty.cpp UnixUtils.h)
+    list(APPEND vtpty_SOURCES UnixPty.cpp UnixUtils.cpp)
+    list(APPEND vtpty_SOURCES UnixPty.h UnixUtils.h)
 else()
     list(APPEND vtpty_SOURCES ConPty.cpp)
+    list(APPEND vtpty_HEADERS ConPty.h)
     #TODO: list(APPEND vtpty_SOURCES WinPty.cpp)
 endif()
 
