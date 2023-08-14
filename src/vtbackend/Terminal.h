@@ -49,7 +49,7 @@ namespace terminal
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-class Screen;
+class screen;
 
 /// Helping information to visualize IME text that has not been comitted yet.
 struct input_method_data
@@ -141,13 +141,13 @@ class Terminal
 
     Terminal(events& eventListener,
              std::unique_ptr<Pty> pty,
-             Settings factorySettings,
+             settings factorySettings,
              std::chrono::steady_clock::time_point now /* = std::chrono::steady_clock::now()*/);
     ~Terminal() = default;
 
     void start();
 
-    void setRefreshRate(RefreshRate refreshRate);
+    void setRefreshRate(refresh_rate refreshRate);
     void setLastMarkRangeOffset(line_offset value) noexcept;
 
     void setMaxHistoryLineCount(max_history_line_count maxHistoryLineCount);
@@ -213,7 +213,7 @@ class Terminal
 
     [[nodiscard]] bool isCursorInViewport() const noexcept
     {
-        return get_viewport().isLineVisible(currentScreen().cursor().position.line);
+        return get_viewport().isLineVisible(currentScreen().getCursor().position.line);
     }
     // }}}
 
@@ -362,9 +362,9 @@ class Terminal
     ///
     /// @see ensureFreshRenderBuffer()
     /// @see refreshRenderBuffer()
-    [[nodiscard]] RenderBufferRef renderBuffer() const { return _renderBuffer.frontBuffer(); }
+    [[nodiscard]] render_buffer_ref renderBuffer() const { return _renderBuffer.frontBuffer(); }
 
-    [[nodiscard]] RenderBufferState renderBufferState() const noexcept { return _renderBuffer.state; }
+    [[nodiscard]] render_buffer_state renderBufferState() const noexcept { return _renderBuffer.state; }
 
     /// Updates the IME preedit-string to be rendered when IME is composing a new input.
     /// Passing an empty string effectively disables IME rendering.
@@ -391,10 +391,10 @@ class Terminal
     void popColorPalette(size_t slot);
     void reportColorPaletteStack();
 
-    [[nodiscard]] ScreenBase& currentScreen() noexcept { return _currentScreen.get(); }
-    [[nodiscard]] ScreenBase const& currentScreen() const noexcept { return _currentScreen.get(); }
+    [[nodiscard]] screen_base& currentScreen() noexcept { return _currentScreen.get(); }
+    [[nodiscard]] screen_base const& currentScreen() const noexcept { return _currentScreen.get(); }
 
-    [[nodiscard]] ScreenBase& activeDisplay() noexcept
+    [[nodiscard]] screen_base& activeDisplay() noexcept
     {
         switch (_state.activeStatusDisplay)
         {
@@ -410,10 +410,10 @@ class Terminal
         // TODO: avoid double-switch by introducing a `SequenceHandler& sequenceHandler` member.
         switch (_state.executionMode)
         {
-            case ExecutionMode::Normal: return activeDisplay();
-            case ExecutionMode::BreakAtEmptyQueue:
-            case ExecutionMode::Waiting: [[fallthrough]];
-            case ExecutionMode::SingleStep: return _traceHandler;
+            case execution_mode::Normal: return activeDisplay();
+            case execution_mode::BreakAtEmptyQueue:
+            case execution_mode::Waiting: [[fallthrough]];
+            case execution_mode::SingleStep: return _traceHandler;
         }
         crispy::unreachable();
     }
@@ -423,7 +423,7 @@ class Terminal
     screen_type screenType() const noexcept { return _state.screenType; }
     void setScreen(screen_type screenType);
 
-    ScreenBase& screenForType(screen_type type) noexcept
+    screen_base& screenForType(screen_type type) noexcept
     {
         switch (type)
         {
@@ -439,12 +439,12 @@ class Terminal
     }
 
     // clang-format off
-    [[nodiscard]] Screen<PrimaryScreenCell> const& primaryScreen() const noexcept { return _primaryScreen; }
-    [[nodiscard]] Screen<PrimaryScreenCell>& primaryScreen() noexcept { return _primaryScreen; }
-    [[nodiscard]] Screen<AlternateScreenCell> const& alternateScreen() const noexcept { return _alternateScreen; }
-    [[nodiscard]] Screen<AlternateScreenCell>& alternateScreen() noexcept { return _alternateScreen; }
-    [[nodiscard]] Screen<StatusDisplayCell> const& hostWritableStatusLineDisplay() const noexcept { return _hostWritableStatusLineScreen; }
-    [[nodiscard]] Screen<StatusDisplayCell> const& indicatorStatusLineDisplay() const noexcept { return _indicatorStatusScreen; }
+    [[nodiscard]] screen<primary_screen_cell> const& primaryScreen() const noexcept { return _primaryScreen; }
+    [[nodiscard]] screen<primary_screen_cell>& primaryScreen() noexcept { return _primaryScreen; }
+    [[nodiscard]] screen<alternate_screen_cell> const& alternateScreen() const noexcept { return _alternateScreen; }
+    [[nodiscard]] screen<alternate_screen_cell>& alternateScreen() noexcept { return _alternateScreen; }
+    [[nodiscard]] screen<status_display_cell> const& hostWritableStatusLineDisplay() const noexcept { return _hostWritableStatusLineScreen; }
+    [[nodiscard]] screen<status_display_cell> const& indicatorStatusLineDisplay() const noexcept { return _indicatorStatusScreen; }
     // clang-format on
 
     [[nodiscard]] bool isLineWrapped(line_offset lineNumber) const noexcept
@@ -496,8 +496,8 @@ class Terminal
     void setWordDelimiters(std::string const& wordDelimiters);
     std::u32string const& wordDelimiters() const noexcept { return _settings.wordDelimiters; }
 
-    Selection const* selector() const noexcept { return _selection.get(); }
-    Selection* selector() noexcept { return _selection.get(); }
+    selection const* selector() const noexcept { return _selection.get(); }
+    selection* selector() noexcept { return _selection.get(); }
     std::chrono::milliseconds highlightTimeout() const noexcept { return _settings.highlightTimeout; }
 
     template <typename RenderTarget>
@@ -519,27 +519,28 @@ class Terminal
     /// Tests whether some area has been selected.
     bool isSelectionAvailable() const noexcept
     {
-        return _selection && _selection->state() != Selection::State::Waiting;
+        return _selection && _selection->getState() != selection::state::Waiting;
     }
     bool isSelectionInProgress() const noexcept
     {
-        return _selection && _selection->state() != Selection::State::Complete;
+        return _selection && _selection->getState() != selection::state::Complete;
     }
     bool isSelectionComplete() const noexcept
     {
-        return _selection && _selection->state() == Selection::State::Complete;
+        return _selection && _selection->getState() == selection::state::Complete;
     }
 
     /// Tests whether given absolute coordinate is covered by a current selection.
     bool isSelected(cell_location coord) const noexcept
     {
-        return _selection && _selection->state() != Selection::State::Waiting && _selection->contains(coord);
+        return _selection && _selection->getState() != selection::state::Waiting
+               && _selection->contains(coord);
     }
 
     /// Tests whether given line offset is intersecting with selection.
     bool isSelected(line_offset line) const noexcept
     {
-        return _selection && _selection->state() != Selection::State::Waiting
+        return _selection && _selection->getState() != selection::state::Waiting
                && _selection->containsLine(line);
     }
 
@@ -548,7 +549,7 @@ class Terminal
     bool rapidBlinkState() const noexcept { return _rapidBlinker.state; }
 
     /// Sets or resets to a new selection.
-    void setSelector(std::unique_ptr<Selection> selector);
+    void setSelector(std::unique_ptr<selection> selector);
 
     /// Tests whether or not some grid cells are selected.
     bool selectionAvailable() const noexcept { return !!_selection; }
@@ -575,8 +576,8 @@ class Terminal
         return {};
     }
 
-    [[nodiscard]] ExecutionMode executionMode() const noexcept { return _state.executionMode; }
-    void setExecutionMode(ExecutionMode mode);
+    [[nodiscard]] execution_mode executionMode() const noexcept { return _state.executionMode; }
+    void setExecutionMode(execution_mode mode);
 
     bool processInputOnce();
 
@@ -641,8 +642,8 @@ class Terminal
 
     void verifyState();
 
-    [[nodiscard]] TerminalState& state() noexcept { return _state; }
-    [[nodiscard]] TerminalState const& state() const noexcept { return _state; }
+    [[nodiscard]] terminal_state& state() noexcept { return _state; }
+    [[nodiscard]] terminal_state const& state() const noexcept { return _state; }
 
     void applyPageSizeToCurrentBuffer();
     void applyPageSizeToMainDisplay(screen_type screenType);
@@ -652,9 +653,9 @@ class Terminal
         return _currentPtyBuffer;
     }
 
-    [[nodiscard]] terminal::SelectionHelper& selectionHelper() noexcept { return _selectionHelper; }
+    [[nodiscard]] terminal::selection_helper& selectionHelper() noexcept { return _selectionHelper; }
 
-    [[nodiscard]] Selection::OnSelectionUpdated selectionUpdatedHelper()
+    [[nodiscard]] selection::on_selection_updated selectionUpdatedHelper()
     {
         return [this]() {
             onSelectionUpdated();
@@ -700,20 +701,20 @@ class Terminal
     [[nodiscard]] std::tuple<std::u32string, cell_location_range> extractWordUnderCursor(
         cell_location position) const noexcept;
 
-    Settings const& factorySettings() const noexcept { return _factorySettings; }
-    Settings const& settings() const noexcept { return _settings; }
-    Settings& settings() noexcept { return _settings; }
+    settings const& factorySettings() const noexcept { return _factorySettings; }
+    settings const& getSettings() const noexcept { return _settings; }
+    settings& getSettings() noexcept { return _settings; }
 
     // Renders current visual terminal state to the render buffer.
     //
     // @param output target render buffer to write the current visual state to.
     // @param includeSelection boolean to indicate whether or not to include colorize selection.
-    void fillRenderBuffer(RenderBuffer& output, bool includeSelection); // <- acquires the lock
+    void fillRenderBuffer(render_buffer& output, bool includeSelection); // <- acquires the lock
 
   private:
     void mainLoop();
-    void fillRenderBufferInternal(RenderBuffer& output, bool includeSelection);
-    LineCount fillRenderBufferStatusLine(RenderBuffer& output, bool includeSelection, line_offset base);
+    void fillRenderBufferInternal(render_buffer& output, bool includeSelection);
+    LineCount fillRenderBufferStatusLine(render_buffer& output, bool includeSelection, line_offset base);
     void updateIndicatorStatusLine();
     void updateCursorVisibilityState() const noexcept;
     void updateHoveringHyperlinkState();
@@ -731,7 +732,7 @@ class Terminal
     // by pressing a special bypass modifier (usualy Shift).
     bool allowBypassAppMouseGrabViaModifier(modifier modifier) const noexcept
     {
-        return _settings.mouseProtocolBypassModifier != modifier::None
+        return _settings.mouseProtocolBypassModifier != modifier::none
                && modifier.contains(_settings.mouseProtocolBypassModifier);
     }
 
@@ -763,9 +764,9 @@ class Terminal
     events& _eventListener;
 
     // configuration state
-    Settings _factorySettings;
-    Settings _settings;
-    TerminalState _state;
+    settings _factorySettings;
+    settings _settings;
+    terminal_state _state;
 
     // synchronization
     std::mutex mutable _outerLock;
@@ -806,19 +807,19 @@ class Terminal
 
     // {{{ Displays this terminal manages
     // clang-format off
-    Screen<PrimaryScreenCell> _primaryScreen;
-    Screen<AlternateScreenCell> _alternateScreen;
-    Screen<StatusDisplayCell> _hostWritableStatusLineScreen;
-    Screen<StatusDisplayCell> _indicatorStatusScreen;
-    std::reference_wrapper<ScreenBase> _currentScreen;
+    screen<primary_screen_cell> _primaryScreen;
+    screen<alternate_screen_cell> _alternateScreen;
+    screen<status_display_cell> _hostWritableStatusLineScreen;
+    screen<status_display_cell> _indicatorStatusScreen;
+    std::reference_wrapper<screen_base> _currentScreen;
     viewport _viewport;
     trace_handlert _traceHandler;
     // clang-format on
     // }}}
 
     // {{{ selection states
-    std::unique_ptr<Selection> _selection;
-    struct selection_helper: public terminal::SelectionHelper
+    std::unique_ptr<selection> _selection;
+    struct selection_helper: public terminal::selection_helper
     {
         Terminal* terminal;
         explicit selection_helper(Terminal* self): terminal { self } {}
@@ -835,10 +836,10 @@ class Terminal
     /// Boolean, indicating whether the terminal's screen buffer contains updates to be rendered.
     mutable std::atomic<uint64_t> _changes { 0 };
     bool _screenDirty = false; // TODO: just inc _changes and delete this instead.
-    RefreshInterval _refreshInterval;
-    RenderDoubleBuffer _renderBuffer {};
+    refresh_interval _refreshInterval;
+    render_double_buffer _renderBuffer {};
     std::atomic<uint64_t> _lastFrameID = 0;
-    RenderPassHints _lastRenderPassHints {};
+    render_pass_hints _lastRenderPassHints {};
     // }}}
 
     input_method_data _inputMethodData {};

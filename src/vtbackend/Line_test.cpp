@@ -24,7 +24,7 @@ using namespace terminal;
 using namespace crispy;
 
 // Default cell type for testing.
-using Cell = PrimaryScreenCell;
+using cell = primary_screen_cell;
 
 TEST_CASE("Line.BufferFragment", "[Line]")
 {
@@ -53,7 +53,7 @@ TEST_CASE("Line.resize", "[Line]")
     auto const trivial =
         trivial_line_buffer { DisplayWidth, sgr, sgr, hyperlink_id {}, DisplayWidth, bufferFragment };
     CHECK(trivial.text.view() == string_view(text.data()));
-    auto line_trivial = line<Cell>(line_flags::None, trivial);
+    auto line_trivial = line<cell>(line_flags::None, trivial);
     CHECK(line_trivial.isTrivialBuffer());
 
     line_trivial.resize(ColumnCount(10));
@@ -80,7 +80,7 @@ TEST_CASE("Line.reflow", "[Line]")
     auto const trivial =
         trivial_line_buffer { DisplayWidth, sgr, sgr, hyperlink_id {}, DisplayWidth, bufferFragment };
     CHECK(trivial.text.view() == string_view(text.data()));
-    auto line_trivial = line<Cell>(line_flags::None, trivial);
+    auto line_trivial = line<cell>(line_flags::None, trivial);
     CHECK(line_trivial.isTrivialBuffer());
 
     (void) line_trivial.reflow(ColumnCount(5));
@@ -106,7 +106,7 @@ TEST_CASE("Line.inflate", "[Line]")
     auto const trivial =
         trivial_line_buffer { ColumnCount(10), sgr, sgr, hyperlink_id {}, ColumnCount(10), bufferFragment };
 
-    auto const inflated = inflate<Cell>(trivial);
+    auto const inflated = inflate<cell>(trivial);
 
     CHECK(inflated.size() == 10);
     for (size_t i = 0; i < inflated.size(); ++i)
@@ -142,7 +142,7 @@ TEST_CASE("Line.inflate.Unicode", "[Line]")
     auto const trivial =
         trivial_line_buffer { DisplayWidth, sgr, sgr, hyperlink_id {}, DisplayWidth, bufferFragment };
 
-    auto const inflated = inflate<Cell>(trivial);
+    auto const inflated = inflate<cell>(trivial);
 
     CHECK(inflated.size() == unbox<size_t>(DisplayWidth));
     for (size_t i = 0, k = 0; i < inflated.size();)
@@ -199,7 +199,7 @@ TEST_CASE("Line.inflate.Unicode.FamilyEmoji", "[Line]")
     auto const trivial =
         trivial_line_buffer { DisplayWidth, sgr, fillSGR, hyperlink_id {}, UsedColumnCount, bufferFragment };
 
-    auto const inflated = inflate<Cell>(trivial);
+    auto const inflated = inflate<cell>(trivial);
 
     CHECK(inflated.size() == unbox<size_t>(DisplayWidth));
 

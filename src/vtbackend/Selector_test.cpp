@@ -26,10 +26,10 @@ namespace
 {
 
 template <typename T>
-struct TestSelectionHelper: public terminal::SelectionHelper
+struct test_selection_helper: public terminal::selection_helper
 {
-    Screen<T>* screen;
-    explicit TestSelectionHelper(Screen<T>& self): screen { &self } {}
+    screen<T>* screen;
+    explicit test_selection_helper(terminal::screen<T>& self): screen { &self } {}
 
     [[nodiscard]] PageSize pageSize() const noexcept override { return screen->pageSize(); }
     [[nodiscard]] bool wordDelimited(cell_location /*pos*/) const noexcept override { return true; } // TODO
@@ -45,7 +45,7 @@ struct TestSelectionHelper: public terminal::SelectionHelper
 };
 
 template <typename T>
-TestSelectionHelper(Screen<T>&) -> TestSelectionHelper<T>;
+test_selection_helper(screen<T>&) -> test_selection_helper<T>;
 
 } // namespace
 
@@ -60,7 +60,7 @@ TestSelectionHelper(Screen<T>&) -> TestSelectionHelper<T>;
 namespace
 {
 template <typename T>
-[[maybe_unused]] void logScreenTextAlways(Screen<T> const& screen, string const& headline = "")
+[[maybe_unused]] void logScreenTextAlways(screen<T> const& screen, string const& headline = "")
 {
     fmt::print("{}: ZI={} cursor={} HM={}..{}\n",
                headline.empty() ? "screen dump"s : headline,
@@ -72,13 +72,13 @@ template <typename T>
 }
 
 template <typename T>
-struct TextSelection
+struct text_selection
 {
-    Screen<T> const* screen;
+    screen<T> const* screen;
     string text;
     column_offset lastColumn = column_offset(0);
 
-    explicit TextSelection(Screen<T> const& s): screen { &s } {}
+    explicit text_selection(terminal::screen<T> const& s): screen { &s } {}
 
     void operator()(cell_location const& pos)
     {
@@ -89,41 +89,41 @@ struct TextSelection
     }
 };
 template <typename T>
-TextSelection(Screen<T> const&) -> TextSelection<T>;
+text_selection(screen<T> const&) -> text_selection<T>;
 } // namespace
 
 TEST_CASE("Selector.Linear", "[selector]")
 {
     auto screenEvents = screen_events {};
-    auto term = MockTerm(PageSize { LineCount(3), ColumnCount(11) }, LineCount(5));
+    auto term = mock_term(PageSize { LineCount(3), ColumnCount(11) }, LineCount(5));
     auto& screen = term.terminal.primaryScreen();
-    auto selectionHelper = TestSelectionHelper(screen);
+    auto selectionHelper = test_selection_helper(screen);
     term.writeToScreen(
         //       0123456789A
         /* 0 */ "12345,67890"s +
         /* 1 */ "ab,cdefg,hi"s +
         /* 2 */ "12345,67890"s);
 
-    REQUIRE(screen.grid().lineText(line_offset(0)) == "12345,67890");
-    REQUIRE(screen.grid().lineText(line_offset(1)) == "ab,cdefg,hi");
-    REQUIRE(screen.grid().lineText(line_offset(2)) == "12345,67890");
+    REQUIRE(screen.getGrid().lineText(line_offset(0)) == "12345,67890");
+    REQUIRE(screen.getGrid().lineText(line_offset(1)) == "ab,cdefg,hi");
+    REQUIRE(screen.getGrid().lineText(line_offset(2)) == "12345,67890");
 
     SECTION("single-cell")
     { // "b"
         auto const pos = cell_location { line_offset(1), column_offset(1) };
-        auto selector = LinearSelection(selectionHelper, pos, []() {});
+        auto selector = linear_selection(selectionHelper, pos, []() {});
         (void) selector.extend(pos);
         selector.complete();
 
-        vector<Selection::Range> const selection = selector.ranges();
+        vector<selection::range> const selection = selector.ranges();
         REQUIRE(selection.size() == 1);
-        Selection::Range const& r1 = selection[0];
+        selection::range const& r1 = selection[0];
         CHECK(r1.line == pos.line);
         CHECK(r1.fromColumn == pos.column);
         CHECK(r1.toColumn == pos.column);
         CHECK(r1.length() == ColumnCount(1));
 
-        auto selectedText = TextSelection { screen };
+        auto selectedText = text_selection { screen };
         renderSelection(selector, selectedText);
         CHECK(selectedText.text == "b");
     }
@@ -131,19 +131,19 @@ TEST_CASE("Selector.Linear", "[selector]")
     SECTION("forward single-line")
     { // "b,c"
         auto const pos = cell_location { line_offset(1), column_offset(1) };
-        auto selector = LinearSelection(selectionHelper, pos, []() {});
+        auto selector = linear_selection(selectionHelper, pos, []() {});
         (void) selector.extend(cell_location { line_offset(1), column_offset(3) });
         selector.complete();
 
-        vector<Selection::Range> const selection = selector.ranges();
+        vector<selection::range> const selection = selector.ranges();
         REQUIRE(selection.size() == 1);
-        Selection::Range const& r1 = selection[0];
+        selection::range const& r1 = selection[0];
         CHECK(r1.line == line_offset(1));
         CHECK(r1.fromColumn == column_offset(1));
         CHECK(r1.toColumn == column_offset(3));
         CHECK(r1.length() == ColumnCount(3));
 
-        auto selectedText = TextSelection { screen };
+        auto selectedText = text_selection { screen };
         renderSelection(selector, selectedText);
         CHECK(selectedText.text == "b,c");
     }
@@ -151,26 +151,26 @@ TEST_CASE("Selector.Linear", "[selector]")
     SECTION("forward multi-line")
     { // "b,cdefg,hi\n1234"
         auto const pos = cell_location { line_offset(1), column_offset(1) };
-        auto selector = LinearSelection(selectionHelper, pos, []() {});
+        auto selector = linear_selection(selectionHelper, pos, []() {});
         (void) selector.extend(cell_location { line_offset(2), column_offset(3) });
         selector.complete();
 
-        vector<Selection::Range> const selection = selector.ranges();
+        vector<selection::range> const selection = selector.ranges();
         REQUIRE(selection.size() == 2);
 
-        Selection::Range const& r1 = selection[0];
+        selection::range const& r1 = selection[0];
         CHECK(r1.line == line_offset(1));
         CHECK(r1.fromColumn == column_offset(1));
         CHECK(r1.toColumn == column_offset(10));
         CHECK(r1.length() == ColumnCount(10));
 
-        Selection::Range const& r2 = selection[1];
+        selection::range const& r2 = selection[1];
         CHECK(r2.line == line_offset(2));
         CHECK(r2.fromColumn == column_offset(0));
         CHECK(r2.toColumn == column_offset(3));
         CHECK(r2.length() == ColumnCount(4));
 
-        auto selectedText = TextSelection { screen };
+        auto selectedText = text_selection { screen };
         renderSelection(selector, selectedText);
         CHECK(selectedText.text == "b,cdefg,hi\n1234");
     }
@@ -188,26 +188,26 @@ TEST_CASE("Selector.Linear", "[selector]")
         */
 
         auto selector =
-            LinearSelection(selectionHelper, cell_location { line_offset(-2), column_offset(6) }, []() {});
+            linear_selection(selectionHelper, cell_location { line_offset(-2), column_offset(6) }, []() {});
         (void) selector.extend(cell_location { line_offset(-1), column_offset(2) });
         selector.complete();
 
-        vector<Selection::Range> const selection = selector.ranges();
+        vector<selection::range> const selection = selector.ranges();
         REQUIRE(selection.size() == 2);
 
-        Selection::Range const& r1 = selection[0];
+        selection::range const& r1 = selection[0];
         CHECK(r1.line == line_offset(-2));
         CHECK(r1.fromColumn == column_offset(6));
         CHECK(r1.toColumn == column_offset(10));
         CHECK(r1.length() == ColumnCount(5));
 
-        Selection::Range const& r2 = selection[1];
+        selection::range const& r2 = selection[1];
         CHECK(r2.line == line_offset(-1));
         CHECK(r2.fromColumn == column_offset(0));
         CHECK(r2.toColumn == column_offset(2));
         CHECK(r2.length() == ColumnCount(3));
 
-        auto selectedText = TextSelection { screen };
+        auto selectedText = text_selection { screen };
         renderSelection(selector, selectedText);
         CHECK(selectedText.text == "fg,hi\n123");
     }
@@ -225,32 +225,32 @@ TEST_CASE("Selector.Linear", "[selector]")
         */
 
         auto selector =
-            LinearSelection(selectionHelper, cell_location { line_offset(-2), column_offset(8) }, []() {});
+            linear_selection(selectionHelper, cell_location { line_offset(-2), column_offset(8) }, []() {});
         (void) selector.extend(cell_location { line_offset(0), column_offset(1) });
         selector.complete();
 
-        vector<Selection::Range> const selection = selector.ranges();
+        vector<selection::range> const selection = selector.ranges();
         REQUIRE(selection.size() == 3);
 
-        Selection::Range const& r1 = selection[0];
+        selection::range const& r1 = selection[0];
         CHECK(r1.line == line_offset(-2));
         CHECK(r1.fromColumn == column_offset(8));
         CHECK(r1.toColumn == column_offset(10));
         CHECK(r1.length() == ColumnCount(3));
 
-        Selection::Range const& r2 = selection[1];
+        selection::range const& r2 = selection[1];
         CHECK(r2.line == line_offset(-1));
         CHECK(r2.fromColumn == column_offset(0));
         CHECK(r2.toColumn == column_offset(10));
         CHECK(r2.length() == ColumnCount(11));
 
-        Selection::Range const& r3 = selection[2];
+        selection::range const& r3 = selection[2];
         CHECK(r3.line == line_offset(0));
         CHECK(r3.fromColumn == column_offset(0));
         CHECK(r3.toColumn == column_offset(1));
         CHECK(r3.length() == ColumnCount(2));
 
-        auto selectedText = TextSelection { screen };
+        auto selectedText = text_selection { screen };
         renderSelection(selector, selectedText);
         CHECK(selectedText.text == ",hi\n12345,67890\nfo");
     }

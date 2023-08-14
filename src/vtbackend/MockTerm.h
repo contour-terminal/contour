@@ -25,17 +25,17 @@ namespace terminal
 {
 
 template <typename PtyDevice = MockPty>
-class MockTerm: public Terminal::events
+class mock_term: public Terminal::events
 {
   public:
-    MockTerm(ColumnCount columns, LineCount lines): MockTerm { PageSize { lines, columns } } {}
+    mock_term(ColumnCount columns, LineCount lines): mock_term { PageSize { lines, columns } } {}
 
-    explicit MockTerm(PageSize size, LineCount maxHistoryLineCount = {}, size_t ptyReadBufferSize = 1024);
+    explicit mock_term(PageSize size, LineCount maxHistoryLineCount = {}, size_t ptyReadBufferSize = 1024);
 
     template <typename Init>
-    MockTerm(
-        PageSize size, LineCount hist, size_t ptyReadBufferSize, Init init = [](MockTerm&) {}):
-        MockTerm { size, hist, ptyReadBufferSize }
+    mock_term(
+        PageSize size, LineCount hist, size_t ptyReadBufferSize, Init init = [](mock_term&) {}):
+        mock_term { size, hist, ptyReadBufferSize }
     {
         init(*this);
     }
@@ -51,7 +51,7 @@ class MockTerm: public Terminal::events
 
     // Convenience method to type into stdin a sequence of characters.
     void sendCharPressSequence(std::string_view sequence,
-                               modifier modifier = modifier::None,
+                               modifier modifier = modifier::none,
                                Terminal::timestamp now = std::chrono::steady_clock::now())
     {
         auto const codepoints = unicode::convert_to<char32_t>(sequence);
@@ -74,11 +74,11 @@ class MockTerm: public Terminal::events
     // Events overrides
     void setWindowTitle(std::string_view title) override { windowTitle = title; }
 
-    static terminal::Settings createSettings(PageSize pageSize,
+    static terminal::settings createSettings(PageSize pageSize,
                                              LineCount maxHistoryLineCount,
                                              size_t ptyReadBufferSize)
     {
-        auto settings = terminal::Settings {};
+        auto settings = terminal::settings {};
         settings.pageSize = pageSize;
         settings.maxHistoryLineCount = maxHistoryLineCount;
         settings.ptyReadBufferSize = ptyReadBufferSize;
@@ -94,9 +94,9 @@ class MockTerm: public Terminal::events
 };
 
 template <typename PtyDevice>
-inline MockTerm<PtyDevice>::MockTerm(PageSize pageSize,
-                                     LineCount maxHistoryLineCount,
-                                     size_t ptyReadBufferSize):
+inline mock_term<PtyDevice>::mock_term(PageSize pageSize,
+                                       LineCount maxHistoryLineCount,
+                                       size_t ptyReadBufferSize):
     terminal { *this,
                std::make_unique<PtyDevice>(pageSize),
                createSettings(pageSize, maxHistoryLineCount, ptyReadBufferSize),

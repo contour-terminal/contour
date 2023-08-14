@@ -105,7 +105,7 @@ void DecorationRenderer::inspect(std::ostream& /*output*/) const
 {
 }
 
-void DecorationRenderer::renderLine(RenderLine const& line)
+void DecorationRenderer::renderLine(render_line const& line)
 {
     for (auto const& mapping: CellFlagDecorationMappings)
         if (line.textAttributes.flags & mapping.first)
@@ -115,7 +115,7 @@ void DecorationRenderer::renderLine(RenderLine const& line)
                              line.textAttributes.decorationColor);
 }
 
-void DecorationRenderer::renderCell(RenderCell const& cell)
+void DecorationRenderer::renderCell(render_cell const& cell)
 {
     for (auto const& mapping: CellFlagDecorationMappings)
         if (cell.attributes.flags & mapping.first)

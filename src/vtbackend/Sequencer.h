@@ -39,14 +39,14 @@ namespace terminal
 // CSI ? Pi ; Pa ; Pv S
 namespace XtSmGraphics
 {
-    enum class Item
+    enum class item
     {
         NumberOfColorRegisters = 1,
         SixelGraphicsGeometry = 2,
         ReGISGraphicsGeometry = 3,
     };
 
-    enum class Action
+    enum class action
     {
         Read = 1,
         ResetToDefault = 2,
@@ -54,13 +54,13 @@ namespace XtSmGraphics
         ReadLimit = 4
     };
 
-    using Value = std::variant<std::monostate, unsigned, image_size>;
+    using value = std::variant<std::monostate, unsigned, image_size>;
 } // namespace XtSmGraphics
 
 /// TBC - Tab Clear
 ///
 /// This control function clears tab stops.
-enum class HorizontalTabClear
+enum class horizontal_tab_clear
 {
     /// Ps = 0 (default)
     AllTabs,
@@ -74,7 +74,7 @@ enum class HorizontalTabClear
 ///  Input: CSI 14 t (for text area size)
 ///  Input: CSI 14; 2 t (for full window size)
 /// Output: CSI 14 ; width ; height ; t
-enum class RequestPixelSize // TODO: rename RequestPixelSize to RequestArea?
+enum class request_pixel_size // TODO: rename RequestPixelSize to RequestArea?
 {
     CellArea,
     TextArea,
@@ -82,7 +82,7 @@ enum class RequestPixelSize // TODO: rename RequestPixelSize to RequestArea?
 };
 
 /// DECRQSS - Request Status String
-enum class RequestStatusString
+enum class request_status_string
 {
     SGR,
     DECSCL,
@@ -98,7 +98,7 @@ enum class RequestStatusString
 };
 
 /// DECSIXEL - Sixel Graphics Image.
-struct SixelImage
+struct sixel_image
 { // TODO: this struct is only used internally in Sequencer, make it private
     /// Size in pixels for this image
     image_size size;
@@ -116,7 +116,7 @@ inline std::string setDynamicColorValue(
     return fmt::format("rgb:{:04X}/{:04X}/{:04X}", r, g, b);
 }
 
-enum class ApplyResult
+enum class apply_result
 {
     Ok,
     Invalid,
@@ -130,11 +130,11 @@ class Terminal;
 ///
 /// Sequencer implements the translation from VT parser events, forming a higher level Sequence,
 /// that can be matched against actions to perform on the target Screen.
-class Sequencer
+class sequencer
 {
   public:
     /// Constructs the sequencer stage.
-    explicit Sequencer(Terminal& terminal);
+    explicit sequencer(Terminal& terminal);
 
     // ParserEvents
     //
@@ -185,23 +185,23 @@ class Sequencer
 };
 
 // {{{ inlines
-inline void Sequencer::clear() noexcept
+inline void sequencer::clear() noexcept
 {
     _sequence.clearExceptParameters();
     _parameterBuilder.reset();
 }
 
-inline void Sequencer::paramDigit(char ch) noexcept
+inline void sequencer::paramDigit(char ch) noexcept
 {
     _parameterBuilder.multiplyBy10AndAdd(static_cast<uint8_t>(ch - '0'));
 }
 
-inline void Sequencer::paramSeparator() noexcept
+inline void sequencer::paramSeparator() noexcept
 {
     _parameterBuilder.nextParameter();
 }
 
-inline void Sequencer::paramSubSeparator() noexcept
+inline void sequencer::paramSubSeparator() noexcept
 {
     _parameterBuilder.nextSubParameter();
 }
@@ -211,24 +211,25 @@ inline void Sequencer::paramSubSeparator() noexcept
 
 // {{{ fmt formatter
 template <>
-struct fmt::formatter<terminal::RequestStatusString>: formatter<std::string_view>
+struct fmt::formatter<terminal::request_status_string>: formatter<std::string_view>
 {
-    auto format(terminal::RequestStatusString value, format_context& ctx) noexcept -> format_context::iterator
+    auto format(terminal::request_status_string value, format_context& ctx) noexcept
+        -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::RequestStatusString::SGR: name = "SGR"; break;
-            case terminal::RequestStatusString::DECSCL: name = "DECSCL"; break;
-            case terminal::RequestStatusString::DECSCUSR: name = "DECSCUSR"; break;
-            case terminal::RequestStatusString::DECSCA: name = "DECSCA"; break;
-            case terminal::RequestStatusString::DECSTBM: name = "DECSTBM"; break;
-            case terminal::RequestStatusString::DECSLRM: name = "DECSLRM"; break;
-            case terminal::RequestStatusString::DECSLPP: name = "DECSLPP"; break;
-            case terminal::RequestStatusString::DECSCPP: name = "DECSCPP"; break;
-            case terminal::RequestStatusString::DECSNLS: name = "DECSNLS"; break;
-            case terminal::RequestStatusString::DECSASD: name = "DECSASD"; break;
-            case terminal::RequestStatusString::DECSSDT: name = "DECSSDT"; break;
+            case terminal::request_status_string::SGR: name = "SGR"; break;
+            case terminal::request_status_string::DECSCL: name = "DECSCL"; break;
+            case terminal::request_status_string::DECSCUSR: name = "DECSCUSR"; break;
+            case terminal::request_status_string::DECSCA: name = "DECSCA"; break;
+            case terminal::request_status_string::DECSTBM: name = "DECSTBM"; break;
+            case terminal::request_status_string::DECSLRM: name = "DECSLRM"; break;
+            case terminal::request_status_string::DECSLPP: name = "DECSLPP"; break;
+            case terminal::request_status_string::DECSCPP: name = "DECSCPP"; break;
+            case terminal::request_status_string::DECSNLS: name = "DECSNLS"; break;
+            case terminal::request_status_string::DECSASD: name = "DECSASD"; break;
+            case terminal::request_status_string::DECSSDT: name = "DECSSDT"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

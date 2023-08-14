@@ -110,10 +110,10 @@ namespace
         return output;
     }
 
-    terminal::Settings createSettingsFromConfig(config::Config const& config,
+    terminal::settings createSettingsFromConfig(config::Config const& config,
                                                 config::TerminalProfile const& profile)
     {
-        auto settings = terminal::Settings {};
+        auto settings = terminal::settings {};
 
         settings.ptyBufferObjectSize = config.ptyBufferObjectSize;
         settings.ptyReadBufferSize = config.ptyReadBufferSize;
@@ -1358,25 +1358,25 @@ uint8_t TerminalSession::matchModeFlags() const
     uint8_t flags = 0;
 
     if (terminal_.isAlternateScreen())
-        flags |= static_cast<uint8_t>(MatchModes::Flag::AlternateScreen);
+        flags |= static_cast<uint8_t>(match_modes::flag::alternate_screen);
 
     if (terminal_.applicationCursorKeys())
-        flags |= static_cast<uint8_t>(MatchModes::Flag::AppCursor);
+        flags |= static_cast<uint8_t>(match_modes::flag::app_cursor);
 
     if (terminal_.applicationKeypad())
-        flags |= static_cast<uint8_t>(MatchModes::Flag::AppKeypad);
+        flags |= static_cast<uint8_t>(match_modes::flag::app_keypad);
 
     if (terminal_.selectionAvailable())
-        flags |= static_cast<uint8_t>(MatchModes::Flag::Select);
+        flags |= static_cast<uint8_t>(match_modes::flag::select);
 
     if (terminal_.inputHandler().mode() == vi_mode::Insert)
-        flags |= static_cast<uint8_t>(MatchModes::Flag::Insert);
+        flags |= static_cast<uint8_t>(match_modes::flag::insert);
 
     if (!terminal_.state().searchMode.pattern.empty())
-        flags |= static_cast<uint8_t>(MatchModes::Flag::Search);
+        flags |= static_cast<uint8_t>(match_modes::flag::search);
 
     if (terminal_.executionMode() != ExecutionMode::Normal)
-        flags |= static_cast<uint8_t>(MatchModes::Flag::Trace);
+        flags |= static_cast<uint8_t>(match_modes::flag::trace);
 
     return flags;
 }

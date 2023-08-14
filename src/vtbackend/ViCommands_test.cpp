@@ -56,7 +56,7 @@ auto setupMockTerminal(std::string_view text,
                                                                           terminal::ColumnCount(40) },
                        terminal::LineCount history = terminal::LineCount(0))
 {
-    return terminal::MockTerm<terminal::MockPty> {
+    return terminal::mock_term<terminal::MockPty> {
         terminal::PageSize { // increment line count by one for indicator statusline.
                              pageSize.lines + 1,
                              pageSize.columns },
@@ -128,7 +128,7 @@ TEST_CASE("vi.motions: text objects", "[vi]")
         mock.sendCharPressSequence("vi("); // cursor is now placed at the end of the selection
         CHECK(mock.terminal.state().viCommands.cursorPosition == 4_lineOffset + 33_columnOffset);
         REQUIRE(mock.terminal.selector() != nullptr);
-        terminal::Selection const& selection = *mock.terminal.selector();
+        terminal::selection const& selection = *mock.terminal.selector();
         CHECK(selection.from() == 3_lineOffset + 17_columnOffset);
         CHECK(selection.to() == 4_lineOffset + 33_columnOffset);
     }
@@ -141,7 +141,7 @@ TEST_CASE("vi.motions: text objects", "[vi]")
         mock.sendCharPressSequence("vi)"); // cursor is now placed at the end of the selection
         CHECK(mock.terminal.state().viCommands.cursorPosition == 4_lineOffset + 33_columnOffset);
         REQUIRE(mock.terminal.selector() != nullptr);
-        terminal::Selection const& selection = *mock.terminal.selector();
+        terminal::selection const& selection = *mock.terminal.selector();
         CHECK(selection.from() == 3_lineOffset + 17_columnOffset);
         CHECK(selection.to() == 4_lineOffset + 33_columnOffset);
     }

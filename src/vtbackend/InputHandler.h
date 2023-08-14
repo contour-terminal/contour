@@ -24,10 +24,10 @@ namespace terminal
  * @see ViInputHandler
  * @see Terminal
  */
-class InputHandler
+class input_handler
 {
   public:
-    virtual ~InputHandler() = default;
+    virtual ~input_handler() = default;
     virtual bool sendKeyPressEvent(key key, modifier modifier) = 0;
     virtual bool sendCharPressEvent(char32_t codepoint, modifier modifier) = 0;
 };

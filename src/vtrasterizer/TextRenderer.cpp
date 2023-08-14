@@ -467,7 +467,7 @@ void TextRenderer::beginFrame()
     _textClusterGroup.color = DefaultColor;
 }
 
-void TextRenderer::renderLine(RenderLine const& renderLine)
+void TextRenderer::renderLine(render_line const& renderLine)
 {
     if (renderLine.text.empty())
         return;
@@ -499,7 +499,7 @@ void TextRenderer::renderLine(RenderLine const& renderLine)
         flushTextClusterGroup();
 }
 
-void TextRenderer::renderCell(RenderCell const& cell)
+void TextRenderer::renderCell(render_cell const& cell)
 {
     if (cell.groupStart)
         _updateInitialPenPosition = true;

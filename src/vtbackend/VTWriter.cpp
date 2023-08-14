@@ -24,25 +24,25 @@ namespace terminal
 
 // TODO: compare with old sgr value set instead to be more generic in reusing stuff
 
-VTWriter::VTWriter(Writer writer): _writer { std::move(writer) }
+vt_writer::vt_writer(writer writer): _writer { std::move(writer) }
 {
 }
 
-VTWriter::VTWriter(std::ostream& output):
-    VTWriter { [&](char const* d, size_t n) {
+vt_writer::vt_writer(std::ostream& output):
+    vt_writer { [&](char const* d, size_t n) {
         output.write(d, static_cast<std::streamsize>(n));
     } }
 {
 }
 
-VTWriter::VTWriter(std::vector<char>& output):
-    VTWriter { [&](char const* d, size_t n) {
+vt_writer::vt_writer(std::vector<char>& output):
+    vt_writer { [&](char const* d, size_t n) {
         output.insert(output.end(), d, d + n);
     } }
 {
 }
 
-void VTWriter::write(char32_t v)
+void vt_writer::write(char32_t v)
 {
     sgrFlush();
     char buf[4];
@@ -51,13 +51,13 @@ void VTWriter::write(char32_t v)
     write(string_view(buf, static_cast<size_t>(count)));
 }
 
-void VTWriter::write(string_view s)
+void vt_writer::write(string_view s)
 {
     sgrFlush();
     _writer(s.data(), s.size());
 }
 
-void VTWriter::sgrFlush()
+void vt_writer::sgrFlush()
 {
     if (_sgr.empty())
         return;
@@ -69,7 +69,7 @@ void VTWriter::sgrFlush()
     sgrRewind();
 }
 
-string VTWriter::sgrFlush(vector<unsigned> const& sgr)
+string vt_writer::sgrFlush(vector<unsigned> const& sgr)
 {
     if (sgr.empty())
         return "";
@@ -85,7 +85,7 @@ string VTWriter::sgrFlush(vector<unsigned> const& sgr)
     return fmt::format("\033[{}m", params);
 }
 
-void VTWriter::sgrAddExplicit(unsigned n)
+void vt_writer::sgrAddExplicit(unsigned n)
 {
     if (n == 0)
     {
@@ -97,7 +97,7 @@ void VTWriter::sgrAddExplicit(unsigned n)
     _sgr.push_back(n);
 }
 
-void VTWriter::sgrAdd(unsigned n)
+void vt_writer::sgrAdd(unsigned n)
 {
     if (n == 0)
     {
@@ -119,18 +119,18 @@ void VTWriter::sgrAdd(unsigned n)
     }
 }
 
-void VTWriter::sgrRewind()
+void vt_writer::sgrRewind()
 {
     swap(_lastSGR, _sgr);
     _sgr.clear();
 }
 
-void VTWriter::sgrAdd(graphics_rendition m)
+void vt_writer::sgrAdd(graphics_rendition m)
 {
     sgrAdd(static_cast<unsigned>(m));
 }
 
-void VTWriter::setForegroundColor(color color)
+void vt_writer::setForegroundColor(color color)
 {
     // if (color == _currentForegroundColor)
     //     return;
@@ -163,7 +163,7 @@ void VTWriter::setForegroundColor(color color)
     }
 }
 
-void VTWriter::setBackgroundColor(color color)
+void vt_writer::setBackgroundColor(color color)
 {
     // if (color == _currentBackgroundColor)
     //     return;
@@ -200,7 +200,7 @@ void VTWriter::setBackgroundColor(color color)
 }
 
 template <typename Cell>
-void VTWriter::write(line<Cell> const& line)
+void vt_writer::write(line<Cell> const& line)
 {
     if (line.isTrivialBuffer())
     {
@@ -237,7 +237,7 @@ void VTWriter::write(line<Cell> const& line)
 } // namespace terminal
 
 #include <vtbackend/cell/CompactCell.h>
-template void terminal::VTWriter::write<terminal::compact_cell>(line<compact_cell> const&);
+template void terminal::vt_writer::write<terminal::compact_cell>(line<compact_cell> const&);
 
 #include <vtbackend/cell/SimpleCell.h>
-template void terminal::VTWriter::write<terminal::simple_cell>(line<simple_cell> const&);
+template void terminal::vt_writer::write<terminal::simple_cell>(line<simple_cell> const&);

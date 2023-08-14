@@ -30,16 +30,16 @@ namespace terminal
 {
 
 // Serializes text and SGR attributes into a valid VT stream.
-class VTWriter
+class vt_writer
 {
   public:
-    using Writer = std::function<void(char const*, size_t)>;
+    using writer = std::function<void(char const*, size_t)>;
 
     static constexpr inline auto maxParameterCount = 16;
 
-    explicit VTWriter(Writer writer);
-    explicit VTWriter(std::ostream& output);
-    explicit VTWriter(std::vector<char>& output);
+    explicit vt_writer(writer writer);
+    explicit vt_writer(std::ostream& output);
+    explicit vt_writer(std::vector<char>& output);
 
     void crlf();
 
@@ -74,7 +74,7 @@ class VTWriter
   private:
     static std::string sgrFlush(std::vector<unsigned> const& sgr);
 
-    Writer _writer;
+    writer _writer;
     std::vector<unsigned> _sgr;
     std::stringstream _sstr;
     std::vector<unsigned> _lastSGR;
@@ -84,12 +84,12 @@ class VTWriter
 };
 
 template <typename... T>
-inline void VTWriter::write(fmt::format_string<T...> fmt, T&&... args)
+inline void vt_writer::write(fmt::format_string<T...> fmt, T&&... args)
 {
     write(fmt::vformat(fmt, fmt::make_format_args(args...)));
 }
 
-inline void VTWriter::crlf()
+inline void vt_writer::crlf()
 {
     write("\r\n");
 }

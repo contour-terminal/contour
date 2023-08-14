@@ -38,7 +38,7 @@ using terminal::column_offset;
 using terminal::ColumnCount;
 using terminal::line_offset;
 using terminal::LineCount;
-using terminal::MockTerm;
+using terminal::mock_term;
 using terminal::PageSize;
 
 using namespace terminal::test;
@@ -60,7 +60,7 @@ using namespace terminal::test;
 
 TEST_CASE("Terminal.BlinkingCursor", "[terminal]")
 {
-    auto mc = MockTerm { ColumnCount { 6 }, LineCount { 4 } };
+    auto mc = mock_term { ColumnCount { 6 }, LineCount { 4 } };
     auto& terminal = mc.terminal;
     terminal.setCursorDisplay(terminal::cursor_display::Blink);
     auto constexpr BlinkInterval = chrono::milliseconds(500);
@@ -102,7 +102,7 @@ TEST_CASE("Terminal.BlinkingCursor", "[terminal]")
 
 TEST_CASE("Terminal.DECCARA", "[terminal]")
 {
-    auto mock = MockTerm { ColumnCount(5), LineCount(5) };
+    auto mock = mock_term { ColumnCount(5), LineCount(5) };
     auto constexpr ClockBase = chrono::steady_clock::time_point();
     mock.terminal.tick(ClockBase);
     mock.terminal.ensureFreshRenderBuffer();
@@ -158,7 +158,7 @@ TEST_CASE("Terminal.CaptureScreenBuffer")
     auto constexpr NumberOfLinesToCapture = 7;
     auto constexpr MaxHistoryLineCount = LineCount(20);
 
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) }, MaxHistoryLineCount };
+    auto mock = mock_term { PageSize { LineCount(5), ColumnCount(5) }, MaxHistoryLineCount };
 
     logScreenText(mock.terminal, "init");
 
@@ -199,7 +199,7 @@ TEST_CASE("Terminal.RIS", "[terminal]")
 
     constexpr auto RIS = "\033c"sv;
 
-    auto mc = MockTerm { ColumnCount(20), LineCount(5) };
+    auto mc = mock_term { ColumnCount(20), LineCount(5) };
     mc.terminal.ensureFreshRenderBuffer();
 
     mc.terminal.tick(mc.terminal.currentTime() + chrono::milliseconds(500));
@@ -220,7 +220,7 @@ TEST_CASE("Terminal.SynchronizedOutput", "[terminal]")
     constexpr auto BatchOff = "\033[?2026l"sv;
 
     auto const now = chrono::steady_clock::now();
-    auto mc = MockTerm { ColumnCount(20), LineCount(1) };
+    auto mc = mock_term { ColumnCount(20), LineCount(1) };
 
     mc.writeToScreen(BatchOn);
     mc.writeToScreen("Hello ");
@@ -243,7 +243,7 @@ TEST_CASE("Terminal.XTPUSHCOLORS_and_XTPOPCOLORS", "[terminal]")
 {
     using namespace terminal;
 
-    auto mc = MockTerm { ColumnCount(20), LineCount(1) };
+    auto mc = mock_term { ColumnCount(20), LineCount(1) };
     auto& vtState = mc.terminal.state();
 
     auto const originalPalette = vtState.colorPalette;
@@ -359,7 +359,7 @@ TEST_CASE("Terminal.XTPUSHCOLORS_and_XTPOPCOLORS", "[terminal]")
 TEST_CASE("Terminal.CurlyUnderline", "[terminal]")
 {
     auto const now = chrono::steady_clock::now();
-    auto mc = MockTerm { ColumnCount(20), LineCount(1) };
+    auto mc = mock_term { ColumnCount(20), LineCount(1) };
 
     mc.writeToScreen("\033[4:3mAB\033[mCD");
     mc.terminal.tick(now);
@@ -382,7 +382,7 @@ TEST_CASE("Terminal.CurlyUnderline", "[terminal]")
 TEST_CASE("Terminal.TextSelection", "[terminal]")
 {
     // Create empty TE
-    auto mock = MockTerm { ColumnCount(5), LineCount(5) };
+    auto mock = mock_term { ColumnCount(5), LineCount(5) };
     auto constexpr ClockBase = chrono::steady_clock::time_point();
     mock.terminal.tick(ClockBase);
     mock.terminal.ensureFreshRenderBuffer();
@@ -406,17 +406,17 @@ TEST_CASE("Terminal.TextSelection", "[terminal]")
 
     mock.terminal.tick(1s);
     mock.terminal.sendMouseMoveEvent(
-        modifier::None, 1_lineOffset + 1_columnOffset, pixelCoordinate, uiHandledHint);
+        modifier::none, 1_lineOffset + 1_columnOffset, pixelCoordinate, uiHandledHint);
 
     mock.terminal.tick(1s);
     auto const appHandledMouse =
-        mock.terminal.sendMousePressEvent(modifier::None, mouse_button::Left, pixelCoordinate, uiHandledHint);
+        mock.terminal.sendMousePressEvent(modifier::none, mouse_button::Left, pixelCoordinate, uiHandledHint);
 
     // We want to ensure that this call is returning false if the app has not explicitly requested
     // to listen on mouse events (without passive mode being on).
     REQUIRE(appHandledMouse == false);
 
-    CHECK(mock.terminal.selector()->state() == Selection::State::Waiting);
+    CHECK(mock.terminal.selector()->getState() == selection::state::Waiting);
 
     // Mouse is pressed, but we did not start selecting (by moving the mouse) yet,
     // so any text extraction shall be empty.
@@ -424,16 +424,16 @@ TEST_CASE("Terminal.TextSelection", "[terminal]")
 
     mock.terminal.tick(1s);
     mock.terminal.sendMouseMoveEvent(
-        modifier::None, 2_lineOffset + 2_columnOffset, pixelCoordinate, uiHandledHint);
+        modifier::none, 2_lineOffset + 2_columnOffset, pixelCoordinate, uiHandledHint);
     CHECK(mock.terminal.extractSelectionText() == "7890\nABC");
 
     mock.terminal.tick(1s);
-    mock.terminal.sendMouseReleaseEvent(modifier::None, mouse_button::Left, pixelCoordinate, uiHandledHint);
+    mock.terminal.sendMouseReleaseEvent(modifier::none, mouse_button::Left, pixelCoordinate, uiHandledHint);
     CHECK(mock.terminal.extractSelectionText() == "7890\nABC");
 
     // Clear selection by simply left-clicking.
     mock.terminal.tick(1s);
-    mock.terminal.sendMousePressEvent(modifier::None, mouse_button::Left, pixelCoordinate, uiHandledHint);
-    mock.terminal.sendMouseReleaseEvent(modifier::None, mouse_button::Left, pixelCoordinate, uiHandledHint);
+    mock.terminal.sendMousePressEvent(modifier::none, mouse_button::Left, pixelCoordinate, uiHandledHint);
+    mock.terminal.sendMouseReleaseEvent(modifier::none, mouse_button::Left, pixelCoordinate, uiHandledHint);
     CHECK(mock.terminal.extractSelectionText().empty());
 }

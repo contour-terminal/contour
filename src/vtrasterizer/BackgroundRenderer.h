@@ -43,9 +43,9 @@ class BackgroundRenderer: public Renderable
     // because there is no need to detect bg/fg color more than once per grid cell!
 
     /// Queues up a render with given background
-    void renderCell(RenderCell const& cell);
+    void renderCell(render_cell const& cell);
 
-    void renderLine(RenderLine const& line);
+    void renderLine(render_line const& line);
 
     void inspect(std::ostream& output) const override;
 

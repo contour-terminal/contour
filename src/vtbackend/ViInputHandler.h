@@ -158,7 +158,7 @@ enum class search_edit_mode
 /**
  * ViInputHandler provides Vi-input handling.
  */
-class vi_input_handler: public InputHandler
+class vi_input_handler: public input_handler
 {
   public:
     class executor

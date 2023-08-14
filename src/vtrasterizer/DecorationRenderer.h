@@ -47,8 +47,8 @@ class DecorationRenderer: public Renderable
         _hyperlinkHover = hover;
     }
 
-    void renderCell(RenderCell const& cell);
-    void renderLine(RenderLine const& line);
+    void renderCell(render_cell const& cell);
+    void renderLine(render_line const& line);
 
     void renderDecoration(Decorator decoration,
                           crispy::Point pos,

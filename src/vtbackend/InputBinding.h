@@ -24,14 +24,14 @@ namespace terminal
 template <typename Input, typename Binding>
 struct InputBinding
 {
-    MatchModes modes;
+    match_modes modes;
     modifier modifier;
     Input input;
     Binding binding;
 };
 
 template <typename Input, typename Binding>
-bool match(InputBinding<Input, Binding> const& binding, MatchModes modes, modifier modifier, Input input)
+bool match(InputBinding<Input, Binding> const& binding, match_modes modes, modifier modifier, Input input)
 {
     return binding.modes == modes && binding.modifier == modifier && binding.input == input;
 }

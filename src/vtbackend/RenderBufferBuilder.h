@@ -13,17 +13,17 @@ namespace terminal
  * RenderBufferBuilder<Cell> renders the current screen state into a RenderBuffer.
  */
 template <typename Cell>
-class RenderBufferBuilder
+class render_buffer_builder
 {
   public:
-    RenderBufferBuilder(Terminal const& terminal,
-                        RenderBuffer& output,
-                        line_offset base,
-                        bool reverseVideo,
-                        highlight_search_matches highlightSearchMatches,
-                        input_method_data inputMethodData,
-                        std::optional<cell_location> theCursorPosition,
-                        bool includeSelection);
+    render_buffer_builder(Terminal const& terminal,
+                          render_buffer& output,
+                          line_offset base,
+                          bool reverseVideo,
+                          highlight_search_matches highlightSearchMatches,
+                          input_method_data inputMethodData,
+                          std::optional<cell_location> theCursorPosition,
+                          bool includeSelection);
 
     /// Renders a single grid cell.
     /// This call is guaranteed to be invoked sequencially, from top line
@@ -52,35 +52,35 @@ class RenderBufferBuilder
   private:
     [[nodiscard]] bool isCursorLine(line_offset line) const noexcept;
 
-    [[nodiscard]] std::optional<RenderCursor> renderCursor() const;
+    [[nodiscard]] std::optional<render_cursor> renderCursor() const;
 
-    [[nodiscard]] static RenderCell makeRenderCellExplicit(color_palette const& colorPalette,
-                                                           std::u32string graphemeCluster,
-                                                           ColumnCount width,
-                                                           cell_flags flags,
-                                                           rgb_color fg,
-                                                           rgb_color bg,
-                                                           color ul,
-                                                           line_offset line,
-                                                           column_offset column);
+    [[nodiscard]] static render_cell makeRenderCellExplicit(color_palette const& colorPalette,
+                                                            std::u32string graphemeCluster,
+                                                            ColumnCount width,
+                                                            cell_flags flags,
+                                                            rgb_color fg,
+                                                            rgb_color bg,
+                                                            color ul,
+                                                            line_offset line,
+                                                            column_offset column);
 
-    [[nodiscard]] static RenderCell makeRenderCellExplicit(color_palette const& colorPalette,
-                                                           char32_t codepoint,
-                                                           cell_flags flags,
-                                                           rgb_color fg,
-                                                           rgb_color bg,
-                                                           color ul,
-                                                           line_offset line,
-                                                           column_offset column);
+    [[nodiscard]] static render_cell makeRenderCellExplicit(color_palette const& colorPalette,
+                                                            char32_t codepoint,
+                                                            cell_flags flags,
+                                                            rgb_color fg,
+                                                            rgb_color bg,
+                                                            color ul,
+                                                            line_offset line,
+                                                            column_offset column);
 
     /// Constructs a RenderCell for the given screen Cell.
-    [[nodiscard]] static RenderCell makeRenderCell(color_palette const& colorPalette,
-                                                   hyperlink_storage const& hyperlinks,
-                                                   Cell const& cell,
-                                                   rgb_color fg,
-                                                   rgb_color bg,
-                                                   line_offset line,
-                                                   column_offset column);
+    [[nodiscard]] static render_cell makeRenderCell(color_palette const& colorPalette,
+                                                    hyperlink_storage const& hyperlinks,
+                                                    Cell const& cell,
+                                                    rgb_color fg,
+                                                    rgb_color bg,
+                                                    line_offset line,
+                                                    column_offset column);
 
     /// Constructs the final foreground/background colors to be displayed on the screen.
     ///
@@ -90,10 +90,10 @@ class RenderBufferBuilder
                                                    color foregroundColor,
                                                    color backgroundColor) const noexcept;
 
-    [[nodiscard]] RenderLine createRenderLine(trivial_line_buffer const& lineBuffer,
-                                              line_offset lineOffset) const;
+    [[nodiscard]] render_line createRenderLine(trivial_line_buffer const& lineBuffer,
+                                               line_offset lineOffset) const;
 
-    [[nodiscard]] RenderAttributes createRenderAttributes(
+    [[nodiscard]] render_attributes createRenderAttributes(
         cell_location gridPosition, graphics_attributes graphicsAttributes) const noexcept;
 
     [[nodiscard]] bool tryRenderInputMethodEditor(cell_location screenPosition, cell_location gridPosition);
@@ -112,10 +112,10 @@ class RenderBufferBuilder
     [[nodiscard]] bool gridLineContainsCursor(line_offset screenLineOffset) const noexcept;
 
     // clang-format off
-    enum class State { Gap, Sequence };
+    enum class state { Gap, Sequence };
     // clang-format on
 
-    RenderBuffer& _output;
+    render_buffer& _output;
     Terminal const& _terminal;
     std::optional<cell_location> _cursorPosition;
     line_offset _baseLine;

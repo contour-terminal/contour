@@ -20,12 +20,12 @@ namespace terminal
 {
 
 /// Type of cell to be used with the primary screen.
-using PrimaryScreenCell = compact_cell;
+using primary_screen_cell = compact_cell;
 
 /// Type of cell to be used with the alternate screen.
-using AlternateScreenCell = compact_cell;
+using alternate_screen_cell = compact_cell;
 
 /// The Cell to be used with the indicator (and host writable) status line.
-using StatusDisplayCell = simple_cell;
+using status_display_cell = simple_cell;
 
 } // namespace terminal

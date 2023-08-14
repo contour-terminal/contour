@@ -82,34 +82,34 @@ image::data const black10x10 = [] {
 
 image::data const white10x10(100 * 4, 255);
 
-struct TextRenderBuilder
+struct text_render_builder
 {
     std::string text;
 
     void startLine(line_offset lineOffset);
-    void renderCell(PrimaryScreenCell const& cell, line_offset lineOffset, column_offset columnOffset);
+    void renderCell(primary_screen_cell const& cell, line_offset lineOffset, column_offset columnOffset);
     void endLine();
     void renderTrivialLine(trivial_line_buffer const& lineBuffer, line_offset lineOffset);
     void finish();
 };
 
-void TextRenderBuilder::startLine(line_offset lineOffset)
+void text_render_builder::startLine(line_offset lineOffset)
 {
     if (!*lineOffset)
         text.clear();
 }
 
-void TextRenderBuilder::renderCell(compact_cell const& cell, line_offset, column_offset)
+void text_render_builder::renderCell(compact_cell const& cell, line_offset, column_offset)
 {
     text += cell.toUtf8();
 }
 
-void TextRenderBuilder::endLine()
+void text_render_builder::endLine()
 {
     text += '\n';
 }
 
-void TextRenderBuilder::renderTrivialLine(trivial_line_buffer const& lineBuffer, line_offset lineOffset)
+void text_render_builder::renderTrivialLine(trivial_line_buffer const& lineBuffer, line_offset lineOffset)
 {
     if (!*lineOffset)
         text.clear();
@@ -118,29 +118,29 @@ void TextRenderBuilder::renderTrivialLine(trivial_line_buffer const& lineBuffer,
     text += '\n';
 }
 
-void TextRenderBuilder::finish()
+void text_render_builder::finish()
 {
 }
 
-MockTerm<MockPty> screenForDECRA()
+mock_term<MockPty> screenForDECRA()
 {
-    return MockTerm<MockPty> { PageSize { LineCount(5), ColumnCount(6) }, {}, 1024, [](auto& mock) {
-                                  mock.writeToScreen("ABCDEF\r\n"
-                                                     "abcdef\r\n"
-                                                     "123456\r\n");
-                                  mock.writeToScreen("\033[43m");
-                                  mock.writeToScreen("GHIJKL\r\n"
-                                                     "ghijkl");
-                                  mock.writeToScreen("\033[0m");
+    return mock_term<MockPty> { PageSize { LineCount(5), ColumnCount(6) }, {}, 1024, [](auto& mock) {
+                                   mock.writeToScreen("ABCDEF\r\n"
+                                                      "abcdef\r\n"
+                                                      "123456\r\n");
+                                   mock.writeToScreen("\033[43m");
+                                   mock.writeToScreen("GHIJKL\r\n"
+                                                      "ghijkl");
+                                   mock.writeToScreen("\033[0m");
 
-                                  auto const* const initialText = "ABCDEF\n"
-                                                                  "abcdef\n"
-                                                                  "123456\n"
-                                                                  "GHIJKL\n"
-                                                                  "ghijkl\n";
+                                   auto const* const initialText = "ABCDEF\n"
+                                                                   "abcdef\n"
+                                                                   "123456\n"
+                                                                   "GHIJKL\n"
+                                                                   "ghijkl\n";
 
-                                  CHECK(mock.terminal.primaryScreen().renderMainPageText() == initialText);
-                              } };
+                                   CHECK(mock.terminal.primaryScreen().renderMainPageText() == initialText);
+                               } };
 }
 
 } // namespace
@@ -150,133 +150,133 @@ MockTerm<MockPty> screenForDECRA()
 // AutoWrap disabled: text length is less then available columns in line.
 TEST_CASE("writeText.bulk.A.1", "[screen]")
 {
-    auto mock = MockTerm(PageSize { LineCount(3), ColumnCount(5) }, LineCount(2));
+    auto mock = mock_term(PageSize { LineCount(3), ColumnCount(5) }, LineCount(2));
     auto& screen = mock.terminal.primaryScreen();
     mock.terminal.setMode(dec_mode::AutoWrap, false);
     mock.writeToScreen("a");
     mock.writeToScreen("b");
     logScreenText(screen, "initial state");
-    REQUIRE(screen.cursor().position == cell_location { line_offset(0), column_offset(2) });
+    REQUIRE(screen.getCursor().position == cell_location { line_offset(0), column_offset(2) });
     mock.writeToScreen("CD");
     logScreenText(screen, "final state");
-    CHECK(screen.grid().lineText(line_offset(0)) == "abCD ");
-    CHECK(screen.grid().lineText(line_offset(1)) == "     ");
-    CHECK(screen.cursor().position == cell_location { line_offset(0), column_offset(4) });
+    CHECK(screen.getGrid().lineText(line_offset(0)) == "abCD ");
+    CHECK(screen.getGrid().lineText(line_offset(1)) == "     ");
+    CHECK(screen.getCursor().position == cell_location { line_offset(0), column_offset(4) });
 }
 
 // AutoWrap disabled: text length equals available columns in line.
 TEST_CASE("writeText.bulk.A.2", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) }, LineCount(2) };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(5) }, LineCount(2) };
     auto& screen = mock.terminal.primaryScreen();
     mock.terminal.setMode(dec_mode::AutoWrap, false);
     mock.writeToScreen("a");
     mock.writeToScreen("b");
     logScreenText(screen, "initial state");
-    REQUIRE(screen.cursor().position == cell_location { line_offset(0), column_offset(2) });
+    REQUIRE(screen.getCursor().position == cell_location { line_offset(0), column_offset(2) });
     mock.writeToScreen("CDE");
     logScreenText(screen, "final state");
-    CHECK(screen.grid().lineText(line_offset(0)) == "abCDE");
-    CHECK(screen.grid().lineText(line_offset(1)) == "     ");
-    CHECK(screen.cursor().position == cell_location { line_offset(0), column_offset(4) });
+    CHECK(screen.getGrid().lineText(line_offset(0)) == "abCDE");
+    CHECK(screen.getGrid().lineText(line_offset(1)) == "     ");
+    CHECK(screen.getCursor().position == cell_location { line_offset(0), column_offset(4) });
 }
 
 // AutoWrap disabled: text length exceeds available columns in line.
 TEST_CASE("writeText.bulk.A.3", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) }, LineCount(2) };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(5) }, LineCount(2) };
     auto& screen = mock.terminal.primaryScreen();
     mock.terminal.setMode(dec_mode::AutoWrap, false);
     mock.writeToScreen("a");
     mock.writeToScreen("b");
     logScreenText(screen, "initial state");
-    REQUIRE(screen.cursor().position == cell_location { line_offset(0), column_offset(2) });
+    REQUIRE(screen.getCursor().position == cell_location { line_offset(0), column_offset(2) });
     mock.writeToScreen("CDEF");
     logScreenText(screen, "final state");
-    CHECK(screen.grid().lineText(line_offset(0)) == "abCDF");
-    CHECK(screen.grid().lineText(line_offset(1)) == "     ");
-    CHECK(screen.cursor().position == cell_location { line_offset(0), column_offset(4) });
+    CHECK(screen.getGrid().lineText(line_offset(0)) == "abCDF");
+    CHECK(screen.getGrid().lineText(line_offset(1)) == "     ");
+    CHECK(screen.getCursor().position == cell_location { line_offset(0), column_offset(4) });
 }
 
 // Text does not fully fill current line.
 TEST_CASE("writeText.bulk.B", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) }, LineCount(2) };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(5) }, LineCount(2) };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("a");
     mock.writeToScreen("b");
     logScreenText(screen, "initial state");
-    REQUIRE(screen.cursor().position == cell_location { line_offset(0), column_offset(2) });
+    REQUIRE(screen.getCursor().position == cell_location { line_offset(0), column_offset(2) });
     mock.writeToScreen("CD");
     logScreenText(screen, "final state");
-    CHECK(screen.grid().lineText(line_offset(0)) == "abCD ");
-    CHECK(screen.cursor().position == cell_location { line_offset(0), column_offset(4) });
+    CHECK(screen.getGrid().lineText(line_offset(0)) == "abCD ");
+    CHECK(screen.getCursor().position == cell_location { line_offset(0), column_offset(4) });
 }
 
 // Text spans current line exactly.
 TEST_CASE("writeText.bulk.C", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) }, LineCount(2) };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(5) }, LineCount(2) };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("a");
     mock.writeToScreen("b");
     logScreenText(screen, "initial state");
-    REQUIRE(screen.cursor().position == cell_location { line_offset(0), column_offset(2) });
+    REQUIRE(screen.getCursor().position == cell_location { line_offset(0), column_offset(2) });
     mock.writeToScreen("CDE");
     logScreenText(screen, "final state");
-    CHECK(screen.grid().lineText(line_offset(0)) == "abCDE");
-    CHECK(screen.grid().lineText(line_offset(1)) == "     ");
-    CHECK(screen.cursor().position == cell_location { line_offset(0), column_offset(4) });
+    CHECK(screen.getGrid().lineText(line_offset(0)) == "abCDE");
+    CHECK(screen.getGrid().lineText(line_offset(1)) == "     ");
+    CHECK(screen.getCursor().position == cell_location { line_offset(0), column_offset(4) });
     // Now, verify AutoWrap works by writing one char more.
     mock.writeToScreen("F");
     logScreenText(screen, "AutoWrap-around");
-    CHECK(screen.grid().lineText(line_offset(0)) == "abCDE");
-    CHECK(screen.grid().lineText(line_offset(1)) == "F    ");
-    CHECK(screen.cursor().position == cell_location { line_offset(1), column_offset(1) });
+    CHECK(screen.getGrid().lineText(line_offset(0)) == "abCDE");
+    CHECK(screen.getGrid().lineText(line_offset(1)) == "F    ");
+    CHECK(screen.getCursor().position == cell_location { line_offset(1), column_offset(1) });
 }
 
 // Text spans this line and some of the next.
 TEST_CASE("writeText.bulk.D", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) }, LineCount(2) };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(5) }, LineCount(2) };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("a");
     mock.writeToScreen("b");
     logScreenText(screen, "initial state");
-    REQUIRE(screen.cursor().position == cell_location { line_offset(0), column_offset(2) });
+    REQUIRE(screen.getCursor().position == cell_location { line_offset(0), column_offset(2) });
     mock.writeToScreen("CDEF");
     logScreenText(screen, "final state");
-    CHECK(screen.grid().lineText(line_offset(0)) == "abCDE");
-    CHECK(screen.grid().lineText(line_offset(1)) == "F    ");
-    CHECK(screen.cursor().position == cell_location { line_offset(1), column_offset(1) });
+    CHECK(screen.getGrid().lineText(line_offset(0)) == "abCDE");
+    CHECK(screen.getGrid().lineText(line_offset(1)) == "F    ");
+    CHECK(screen.getCursor().position == cell_location { line_offset(1), column_offset(1) });
 }
 
 // Text spans full main page exactly.
 TEST_CASE("writeText.bulk.E", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(2) };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(10) }, LineCount(2) };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("0123456789"
                        "abcdefghij"
                        "ABCDEFGHIJ");
     logScreenText(screen, "final state");
-    CHECK(screen.grid().lineText(line_offset(0)) == "0123456789");
-    CHECK(screen.grid().lineText(line_offset(1)) == "abcdefghij");
-    CHECK(screen.grid().lineText(line_offset(2)) == "ABCDEFGHIJ");
-    REQUIRE(screen.cursor().position == cell_location { line_offset(2), column_offset(9) });
+    CHECK(screen.getGrid().lineText(line_offset(0)) == "0123456789");
+    CHECK(screen.getGrid().lineText(line_offset(1)) == "abcdefghij");
+    CHECK(screen.getGrid().lineText(line_offset(2)) == "ABCDEFGHIJ");
+    REQUIRE(screen.getCursor().position == cell_location { line_offset(2), column_offset(9) });
 
     // now check if AutoWrap is triggered
     mock.writeToScreen("X");
-    CHECK(screen.grid().lineText(line_offset(-1)) == "0123456789");
-    CHECK(screen.grid().lineText(line_offset(0)) == "abcdefghij");
-    CHECK(screen.grid().lineText(line_offset(1)) == "ABCDEFGHIJ");
-    CHECK(screen.grid().lineText(line_offset(2)) == "X         ");
+    CHECK(screen.getGrid().lineText(line_offset(-1)) == "0123456789");
+    CHECK(screen.getGrid().lineText(line_offset(0)) == "abcdefghij");
+    CHECK(screen.getGrid().lineText(line_offset(1)) == "ABCDEFGHIJ");
+    CHECK(screen.getGrid().lineText(line_offset(2)) == "X         ");
 }
 
 // Text spans 3 lines.
 TEST_CASE("writeText.bulk.F", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(1) };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(10) }, LineCount(1) };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("a");
     mock.writeToScreen("b");
@@ -284,16 +284,16 @@ TEST_CASE("writeText.bulk.F", "[screen]")
                        "ABcdefghij"
                        "01234");
     logScreenText(screen, "final state");
-    CHECK(screen.grid().lineText(line_offset(0)) == "abCDEFGHIJ");
-    CHECK(screen.grid().lineText(line_offset(1)) == "ABcdefghij");
-    CHECK(screen.grid().lineText(line_offset(2)) == "01234     ");
-    CHECK(screen.cursor().position == cell_location { line_offset(2), column_offset(5) });
+    CHECK(screen.getGrid().lineText(line_offset(0)) == "abCDEFGHIJ");
+    CHECK(screen.getGrid().lineText(line_offset(1)) == "ABcdefghij");
+    CHECK(screen.getGrid().lineText(line_offset(2)) == "01234     ");
+    CHECK(screen.getCursor().position == cell_location { line_offset(2), column_offset(5) });
 }
 
 // Text spans 4 lines with one line being scrolled up.
 TEST_CASE("writeText.bulk.G", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) }, LineCount(1) };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(10) }, LineCount(1) };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("a");
     mock.writeToScreen("b");
@@ -302,17 +302,17 @@ TEST_CASE("writeText.bulk.G", "[screen]")
                        "abcdefghij"
                        "01234");
     logScreenText(screen, "final state");
-    CHECK(screen.grid().lineText(line_offset(-1)) == "abCDEFGHIJ");
-    CHECK(screen.grid().lineText(line_offset(0)) == "ABCDEFGHIJ");
-    CHECK(screen.grid().lineText(line_offset(1)) == "abcdefghij");
-    CHECK(screen.grid().lineText(line_offset(2)) == "01234     ");
-    CHECK(screen.cursor().position == cell_location { line_offset(2), column_offset(5) });
+    CHECK(screen.getGrid().lineText(line_offset(-1)) == "abCDEFGHIJ");
+    CHECK(screen.getGrid().lineText(line_offset(0)) == "ABCDEFGHIJ");
+    CHECK(screen.getGrid().lineText(line_offset(1)) == "abcdefghij");
+    CHECK(screen.getGrid().lineText(line_offset(2)) == "01234     ");
+    CHECK(screen.getCursor().position == cell_location { line_offset(2), column_offset(5) });
 }
 
 // Text spans more lines than totally available.
 TEST_CASE("writeText.bulk.H", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(10) }, LineCount(1) };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(10) }, LineCount(1) };
     auto& screen = mock.terminal.primaryScreen();
 
     mock.writeToScreen("ABCDEFGHIJ"
@@ -321,10 +321,10 @@ TEST_CASE("writeText.bulk.H", "[screen]")
                        "0123456789");
 
     logScreenText(screen, "final state");
-    CHECK(screen.grid().lineText(line_offset(-1)) == "KLMNOPQRST");
-    CHECK(screen.grid().lineText(line_offset(0)) == "abcdefghij");
-    CHECK(screen.grid().lineText(line_offset(1)) == "0123456789");
-    CHECK(screen.cursor().position == cell_location { line_offset(1), column_offset(9) });
+    CHECK(screen.getGrid().lineText(line_offset(-1)) == "KLMNOPQRST");
+    CHECK(screen.getGrid().lineText(line_offset(0)) == "abcdefghij");
+    CHECK(screen.getGrid().lineText(line_offset(1)) == "0123456789");
+    CHECK(screen.getCursor().position == cell_location { line_offset(1), column_offset(9) });
 }
 
 // TODO: Test spanning writes over all history and then reusing old lines.
@@ -334,47 +334,47 @@ TEST_CASE("writeText.bulk.H", "[screen]")
 
 TEST_CASE("AppendChar", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(3) }, LineCount(1) };
+    auto mock = mock_term { PageSize { LineCount(1), ColumnCount(3) }, LineCount(1) };
     auto& screen = mock.terminal.primaryScreen();
     REQUIRE(screen.historyLineCount() == LineCount(0));
     REQUIRE(screen.pageSize().lines == LineCount(1));
-    REQUIRE("   " == screen.grid().lineText(line_offset(0)));
+    REQUIRE("   " == screen.getGrid().lineText(line_offset(0)));
 
     mock.terminal.setMode(dec_mode::AutoWrap, false);
 
     mock.writeToScreen("A");
-    REQUIRE("A  " == screen.grid().lineText(line_offset(0)));
+    REQUIRE("A  " == screen.getGrid().lineText(line_offset(0)));
 
     mock.writeToScreen("B");
-    REQUIRE("AB " == screen.grid().lineText(line_offset(0)));
+    REQUIRE("AB " == screen.getGrid().lineText(line_offset(0)));
 
     mock.writeToScreen("C");
-    REQUIRE("ABC" == screen.grid().lineText(line_offset(0)));
+    REQUIRE("ABC" == screen.getGrid().lineText(line_offset(0)));
 
     mock.writeToScreen("D");
-    REQUIRE("ABD" == screen.grid().lineText(line_offset(0)));
+    REQUIRE("ABD" == screen.getGrid().lineText(line_offset(0)));
 
     logScreenText(screen, "with AutoWrap off (before switching on)");
     mock.terminal.setMode(dec_mode::AutoWrap, true);
 
     mock.writeToScreen("E");
-    REQUIRE("ABE" == screen.grid().lineText(line_offset(0)));
+    REQUIRE("ABE" == screen.getGrid().lineText(line_offset(0)));
 
     mock.writeToScreen("F");
-    CHECK("F  " == screen.grid().lineText(line_offset(0)));
-    CHECK("ABE" == screen.grid().lineText(line_offset(-1)));
+    CHECK("F  " == screen.getGrid().lineText(line_offset(0)));
+    CHECK("ABE" == screen.getGrid().lineText(line_offset(-1)));
 }
 
 TEST_CASE("AppendChar_CR_LF", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
-    REQUIRE("   " == screen.grid().lineText(line_offset(0)));
+    REQUIRE("   " == screen.getGrid().lineText(line_offset(0)));
 
     mock.terminal.setMode(dec_mode::AutoWrap, false);
 
     mock.writeToScreen("ABC");
-    REQUIRE("ABC" == screen.grid().lineText(line_offset(0)));
+    REQUIRE("ABC" == screen.getGrid().lineText(line_offset(0)));
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(2) });
 
     mock.writeToScreen("\r");
@@ -388,7 +388,7 @@ TEST_CASE("AppendChar_CR_LF", "[screen]")
 
 TEST_CASE("AppendChar.emoji_exclamationmark", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(1), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
 
     screen.setBackgroundColor(indexed_color::Blue);
@@ -408,7 +408,7 @@ TEST_CASE("AppendChar.emoji_exclamationmark", "[screen]")
 
 TEST_CASE("AppendChar.emoji_VS15_smiley", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+    auto mock = mock_term { PageSize { LineCount(1), ColumnCount(4) } };
     auto& screen = mock.terminal.primaryScreen();
 
     // print letter-like symbol copyright sign with forced emoji presentation style.
@@ -444,7 +444,7 @@ TEST_CASE("AppendChar.emoji_VS15_smiley", "[screen]")
 
 TEST_CASE("AppendChar.emoji_VS16_copyright_sign", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(4) } };
+    auto mock = mock_term { PageSize { LineCount(1), ColumnCount(4) } };
     auto& screen = mock.terminal.primaryScreen();
     auto const& c0 = screen.at(line_offset(0), column_offset(0));
     auto const& c1 = screen.at(line_offset(0), column_offset(1));
@@ -452,16 +452,16 @@ TEST_CASE("AppendChar.emoji_VS16_copyright_sign", "[screen]")
     auto const& c3 = screen.at(line_offset(0), column_offset(3));
 
     // print letter-like symbol copyright sign with forced emoji presentation style.
-    REQUIRE(screen.cursor().position.column.value == 0);
+    REQUIRE(screen.getCursor().position.column.value == 0);
     mock.writeToScreen(U"\u00A9");
-    REQUIRE(screen.cursor().position.column.value == 1);
+    REQUIRE(screen.getCursor().position.column.value == 1);
     CHECK(c0.codepointCount() == 1);
     CHECK(c0.width() == 1);
     mock.writeToScreen(U"\uFE0F");
     CHECK(c0.codepointCount() == 2);
-    REQUIRE(screen.cursor().position.column.value == 1);
+    REQUIRE(screen.getCursor().position.column.value == 1);
     mock.writeToScreen("X");
-    REQUIRE(screen.cursor().position.column.value == 2);
+    REQUIRE(screen.getCursor().position.column.value == 2);
 
     // double-width emoji with VS16
     CHECK(c0.codepoints() == U"\u00A9\uFE0F");
@@ -480,20 +480,20 @@ TEST_CASE("AppendChar.emoji_VS16_copyright_sign", "[screen]")
 
 TEST_CASE("AppendChar.emoji_VS16_i", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(1), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     auto const& c0 = screen.at(line_offset(0), column_offset(0));
 
     // print letter-like symbol `i` with forced emoji presentation style.
     mock.writeToScreen(U"\u2139");
-    REQUIRE(screen.cursor().position.column.value == 1);
+    REQUIRE(screen.getCursor().position.column.value == 1);
     CHECK(c0.codepoints() == U"\u2139");
     CHECK(c0.width() == 1);
 
     // append into last cell
     mock.writeToScreen(U"\uFE0F");
     // XXX ^^^ later on U+FE0F *will* ensure width 2 if respective mode is enabled.
-    REQUIRE(screen.cursor().position.column.value == 1);
+    REQUIRE(screen.getCursor().position.column.value == 1);
     CHECK(c0.codepoints() == U"\u2139\uFE0F");
     CHECK(c0.width() == 1);
 
@@ -518,7 +518,7 @@ TEST_CASE("AppendChar.emoji_VS16_i", "[screen]")
 
 TEST_CASE("AppendChar.emoji_family", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(1), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     auto const& c0 = screen.at(line_offset(0), column_offset(0));
 
@@ -561,7 +561,7 @@ TEST_CASE("AppendChar.emoji_family", "[screen]")
 
 TEST_CASE("AppendChar.emoji_zwj_1", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(1), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
 
     mock.terminal.setMode(dec_mode::AutoWrap, false);
@@ -580,7 +580,7 @@ TEST_CASE("AppendChar.emoji_zwj_1", "[screen]")
     CHECK(screen.at(line_offset(0), column_offset(3)).empty());
     CHECK(screen.at(line_offset(0), column_offset(4)).empty());
 
-    auto const s8 = screen.grid().lineText(line_offset(0));
+    auto const s8 = screen.getGrid().lineText(line_offset(0));
     auto const s32 = unicode::from_utf8(s8);
     CHECK(U"\U0001F926\U0001F3FC\u200D\u2642\uFE0F" == c0.codepoints());
     CHECK(U"\U0001F926\U0001F3FC\u200D\u2642\uFE0F    " == s32);
@@ -588,7 +588,7 @@ TEST_CASE("AppendChar.emoji_zwj_1", "[screen]")
 
 TEST_CASE("AppendChar.emoji_1", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(1), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
 
     mock.writeToScreen(U"\U0001F600");
@@ -615,7 +615,7 @@ TEST_CASE("AppendChar.emoji_1", "[screen]")
 
 TEST_CASE("AppendChar_WideChar", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.terminal.setMode(dec_mode::AutoWrap, true);
     mock.writeToScreen(U"\U0001F600");
@@ -624,41 +624,41 @@ TEST_CASE("AppendChar_WideChar", "[screen]")
 
 TEST_CASE("AppendChar_AutoWrap", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.terminal.setMode(dec_mode::AutoWrap, true);
 
     mock.writeToScreen("ABC");
-    REQUIRE("ABC" == screen.grid().lineText(line_offset(0)));
-    REQUIRE("   " == screen.grid().lineText(line_offset(1)));
+    REQUIRE("ABC" == screen.getGrid().lineText(line_offset(0)));
+    REQUIRE("   " == screen.getGrid().lineText(line_offset(1)));
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(2) });
 
     mock.writeToScreen("D");
-    REQUIRE("ABC" == screen.grid().lineText(line_offset(0)));
-    REQUIRE("D  " == screen.grid().lineText(line_offset(1)));
+    REQUIRE("ABC" == screen.getGrid().lineText(line_offset(0)));
+    REQUIRE("D  " == screen.getGrid().lineText(line_offset(1)));
 
     mock.writeToScreen("EF");
-    REQUIRE("ABC" == screen.grid().lineText(line_offset(0)));
-    REQUIRE("DEF" == screen.grid().lineText(line_offset(1)));
+    REQUIRE("ABC" == screen.getGrid().lineText(line_offset(0)));
+    REQUIRE("DEF" == screen.getGrid().lineText(line_offset(1)));
 
     logScreenText(screen);
     mock.writeToScreen("G");
     logScreenText(screen);
-    REQUIRE("DEF" == screen.grid().lineText(line_offset(0)));
-    REQUIRE("G  " == screen.grid().lineText(line_offset(1)));
+    REQUIRE("DEF" == screen.getGrid().lineText(line_offset(0)));
+    REQUIRE("G  " == screen.getGrid().lineText(line_offset(1)));
 }
 
 TEST_CASE("AppendChar_AutoWrap_LF", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.terminal.setMode(dec_mode::AutoWrap, true);
 
     INFO("write ABC");
     mock.writeToScreen("ABC");
     logScreenText(screen);
-    REQUIRE("ABC" == screen.grid().lineText(line_offset(0)));
-    REQUIRE("   " == screen.grid().lineText(line_offset(1)));
+    REQUIRE("ABC" == screen.getGrid().lineText(line_offset(0)));
+    REQUIRE("   " == screen.getGrid().lineText(line_offset(1)));
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(2) });
 
     INFO("write CRLF");
@@ -669,23 +669,23 @@ TEST_CASE("AppendChar_AutoWrap_LF", "[screen]")
     INFO("write 'D'");
     mock.writeToScreen("D");
     logScreenText(screen);
-    REQUIRE("ABC" == screen.grid().lineText(line_offset(0)));
-    REQUIRE("D  " == screen.grid().lineText(line_offset(1)));
+    REQUIRE("ABC" == screen.getGrid().lineText(line_offset(0)));
+    REQUIRE("D  " == screen.getGrid().lineText(line_offset(1)));
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(1), column_offset(1) });
 }
 
 TEST_CASE("Screen.isLineVisible", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(2) }, LineCount(5) };
+    auto mock = mock_term { PageSize { LineCount(1), ColumnCount(2) }, LineCount(5) };
     auto& screen = mock.terminal.primaryScreen();
     auto viewport = terminal::viewport { mock.terminal };
 
     mock.writeToScreen("10203040");
     logScreenText(screen);
-    CHECK(screen.grid().lineText(line_offset(0)) == "40");
-    CHECK(screen.grid().lineText(line_offset(-1)) == "30");
-    CHECK(screen.grid().lineText(line_offset(-2)) == "20");
-    CHECK(screen.grid().lineText(line_offset(-3)) == "10");
+    CHECK(screen.getGrid().lineText(line_offset(0)) == "40");
+    CHECK(screen.getGrid().lineText(line_offset(-1)) == "30");
+    CHECK(screen.getGrid().lineText(line_offset(-2)) == "20");
+    CHECK(screen.getGrid().lineText(line_offset(-3)) == "10");
 
     CHECK(viewport.isLineVisible(line_offset { 0 }));
     CHECK_FALSE(viewport.isLineVisible(line_offset { -1 }));
@@ -717,66 +717,66 @@ TEST_CASE("Screen.isLineVisible", "[screen]")
 
 TEST_CASE("Backspace", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(0) });
 
     mock.writeToScreen("12");
-    CHECK("12 " == screen.grid().lineText(line_offset(0)));
+    CHECK("12 " == screen.getGrid().lineText(line_offset(0)));
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(2) });
 
     mock.writeToScreen("\b");
-    CHECK("12 " == screen.grid().lineText(line_offset(0)));
+    CHECK("12 " == screen.getGrid().lineText(line_offset(0)));
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(1) });
 
     mock.writeToScreen("\b");
-    CHECK("12 " == screen.grid().lineText(line_offset(0)));
+    CHECK("12 " == screen.getGrid().lineText(line_offset(0)));
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(0) });
 
     mock.writeToScreen("\b");
-    CHECK("12 " == screen.grid().lineText(line_offset(0)));
+    CHECK("12 " == screen.getGrid().lineText(line_offset(0)));
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(0) });
 }
 
 TEST_CASE("Linefeed", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(2) } };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(2) } };
     auto& screen = mock.terminal.primaryScreen();
     SECTION("with scroll-up")
     {
         INFO("init:");
-        INFO(fmt::format("  line 1: '{}'", screen.grid().lineText(line_offset(0))));
-        INFO(fmt::format("  line 2: '{}'", screen.grid().lineText(line_offset(1))));
+        INFO(fmt::format("  line 1: '{}'", screen.getGrid().lineText(line_offset(0))));
+        INFO(fmt::format("  line 2: '{}'", screen.getGrid().lineText(line_offset(1))));
 
         mock.writeToScreen("1\r\n2");
 
         INFO("after writing '1\\n2':");
-        INFO(fmt::format("  line 1: '{}'", screen.grid().lineText(line_offset(0))));
-        INFO(fmt::format("  line 2: '{}'", screen.grid().lineText(line_offset(1))));
+        INFO(fmt::format("  line 1: '{}'", screen.getGrid().lineText(line_offset(0))));
+        INFO(fmt::format("  line 2: '{}'", screen.getGrid().lineText(line_offset(1))));
 
-        REQUIRE("1 " == screen.grid().lineText(line_offset(0)));
-        REQUIRE("2 " == screen.grid().lineText(line_offset(1)));
+        REQUIRE("1 " == screen.getGrid().lineText(line_offset(0)));
+        REQUIRE("2 " == screen.getGrid().lineText(line_offset(1)));
 
         mock.writeToScreen("\r\n3"); // line 3
 
         INFO("After writing '\\n3':");
-        INFO(fmt::format("  line 1: '{}'", screen.grid().lineText(line_offset(0))));
-        INFO(fmt::format("  line 2: '{}'", screen.grid().lineText(line_offset(1))));
+        INFO(fmt::format("  line 1: '{}'", screen.getGrid().lineText(line_offset(0))));
+        INFO(fmt::format("  line 2: '{}'", screen.getGrid().lineText(line_offset(1))));
 
-        REQUIRE("2 " == screen.grid().lineText(line_offset(0)));
-        REQUIRE("3 " == screen.grid().lineText(line_offset(1)));
+        REQUIRE("2 " == screen.getGrid().lineText(line_offset(0)));
+        REQUIRE("3 " == screen.getGrid().lineText(line_offset(1)));
     }
 }
 
 TEST_CASE("ClearToEndOfScreen", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("ABC\r\nDEF\r\nGHI");
 
-    REQUIRE("ABC" == screen.grid().lineText(line_offset(0)));
-    REQUIRE("DEF" == screen.grid().lineText(line_offset(1)));
-    REQUIRE("GHI" == screen.grid().lineText(line_offset(2)));
+    REQUIRE("ABC" == screen.getGrid().lineText(line_offset(0)));
+    REQUIRE("DEF" == screen.getGrid().lineText(line_offset(1)));
+    REQUIRE("GHI" == screen.getGrid().lineText(line_offset(2)));
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(2), column_offset(2) });
 
     logScreenText(screen);
@@ -784,82 +784,82 @@ TEST_CASE("ClearToEndOfScreen", "[screen]")
     screen.clearToEndOfScreen();
     logScreenText(screen);
 
-    CHECK("ABC" == screen.grid().lineText(line_offset(0)));
-    CHECK("D  " == screen.grid().lineText(line_offset(1)));
-    CHECK("   " == screen.grid().lineText(line_offset(2)));
+    CHECK("ABC" == screen.getGrid().lineText(line_offset(0)));
+    CHECK("D  " == screen.getGrid().lineText(line_offset(1)));
+    CHECK("   " == screen.getGrid().lineText(line_offset(2)));
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(1), column_offset(1) });
 }
 
 TEST_CASE("ClearToBeginOfScreen", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("ABC\r\nDEF\r\nGHI");
 
-    REQUIRE("ABC" == screen.grid().lineText(line_offset(0)));
-    REQUIRE("DEF" == screen.grid().lineText(line_offset(1)));
-    REQUIRE("GHI" == screen.grid().lineText(line_offset(2)));
+    REQUIRE("ABC" == screen.getGrid().lineText(line_offset(0)));
+    REQUIRE("DEF" == screen.getGrid().lineText(line_offset(1)));
+    REQUIRE("GHI" == screen.getGrid().lineText(line_offset(2)));
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(2), column_offset(2) });
 
     screen.moveCursorTo(line_offset(1), column_offset(1));
     screen.clearToBeginOfScreen();
 
-    CHECK("   " == screen.grid().lineText(line_offset(0)));
-    CHECK("  F" == screen.grid().lineText(line_offset(1)));
-    CHECK("GHI" == screen.grid().lineText(line_offset(2)));
+    CHECK("   " == screen.getGrid().lineText(line_offset(0)));
+    CHECK("  F" == screen.getGrid().lineText(line_offset(1)));
+    CHECK("GHI" == screen.getGrid().lineText(line_offset(2)));
     CHECK(screen.logicalCursorPosition() == cell_location { line_offset(1), column_offset(1) });
 }
 
 TEST_CASE("ClearScreen", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(2) } };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(2) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("AB\r\nC");
     screen.clearScreen();
-    CHECK("  " == screen.grid().lineText(line_offset(0)));
-    CHECK("  " == screen.grid().lineText(line_offset(1)));
+    CHECK("  " == screen.getGrid().lineText(line_offset(0)));
+    CHECK("  " == screen.getGrid().lineText(line_offset(1)));
 }
 
 TEST_CASE("ClearToEndOfLine", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(1), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("ABC");
-    REQUIRE("ABC" == screen.grid().lineText(line_offset(0)));
+    REQUIRE("ABC" == screen.getGrid().lineText(line_offset(0)));
 
     screen.moveCursorToColumn(column_offset(1));
     screen.clearToEndOfLine();
-    CHECK("A  " == screen.grid().lineText(line_offset(0)));
+    CHECK("A  " == screen.getGrid().lineText(line_offset(0)));
 }
 
 TEST_CASE("ClearToBeginOfLine", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(1), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.terminal.setMode(dec_mode::AutoWrap, false);
     mock.writeToScreen("ABC");
-    REQUIRE("ABC" == screen.grid().lineText(line_offset(0)));
+    REQUIRE("ABC" == screen.getGrid().lineText(line_offset(0)));
 
     screen.moveCursorToColumn(column_offset(1));
     screen.clearToBeginOfLine();
-    CHECK("  C" == screen.grid().lineText(line_offset(0)));
+    CHECK("  C" == screen.getGrid().lineText(line_offset(0)));
 }
 
 TEST_CASE("ClearLine", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(1), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(1), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.terminal.setMode(dec_mode::AutoWrap, false);
     mock.writeToScreen("ABC");
-    REQUIRE("ABC" == screen.grid().lineText(line_offset(0)));
+    REQUIRE("ABC" == screen.getGrid().lineText(line_offset(0)));
 
     screen.clearLine();
-    CHECK("   " == screen.grid().lineText(line_offset(0)));
+    CHECK("   " == screen.getGrid().lineText(line_offset(0)));
 }
 
 TEST_CASE("DECFI", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     mock.terminal.setMode(dec_mode::LeftRightMargin, true);
@@ -909,7 +909,7 @@ TEST_CASE("DECFI", "[screen]")
 TEST_CASE("InsertColumns", "[screen]")
 {
     // "DECIC has no effect outside the scrolling margins."
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
 
@@ -983,7 +983,7 @@ TEST_CASE("InsertColumns", "[screen]")
 
 TEST_CASE("InsertCharacters.NoMargins", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("123\r\n456");
     mock.writeToScreen("\033[2;2H");
@@ -1039,7 +1039,7 @@ TEST_CASE("InsertCharacters.NoMargins", "[screen]")
 
 TEST_CASE("InsertCharacters.Margins", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n678");
     mock.writeToScreen("90");
@@ -1095,33 +1095,33 @@ TEST_CASE("InsertCharacters.Margins", "[screen]")
 
 TEST_CASE("InsertLines", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(4) } };
+    auto mock = mock_term { PageSize { LineCount(6), ColumnCount(4) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("1234\r\n5678\r\nABCD\r\nEFGH\r\nIJKL\r\nMNOP");
     REQUIRE("1234\n5678\nABCD\nEFGH\nIJKL\nMNOP\n" == screen.renderMainPageText());
 
     SECTION("old")
     {
-        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(2) } };
+        auto mock = mock_term { PageSize { LineCount(3), ColumnCount(2) } };
         auto& screen = mock.terminal.primaryScreen();
 
         mock.writeToScreen("AB\r\nCD");
-        REQUIRE("AB" == screen.grid().lineText(line_offset(0)));
-        REQUIRE("CD" == screen.grid().lineText(line_offset(1)));
-        REQUIRE("  " == screen.grid().lineText(line_offset(2)));
+        REQUIRE("AB" == screen.getGrid().lineText(line_offset(0)));
+        REQUIRE("CD" == screen.getGrid().lineText(line_offset(1)));
+        REQUIRE("  " == screen.getGrid().lineText(line_offset(2)));
 
         logScreenText(screen, "A");
         screen.insertLines(LineCount(1));
         logScreenText(screen, "B");
-        CHECK("AB" == screen.grid().lineText(line_offset(0)));
-        CHECK("  " == screen.grid().lineText(line_offset(1)));
-        CHECK("CD" == screen.grid().lineText(line_offset(2)));
+        CHECK("AB" == screen.getGrid().lineText(line_offset(0)));
+        CHECK("  " == screen.getGrid().lineText(line_offset(1)));
+        CHECK("CD" == screen.getGrid().lineText(line_offset(2)));
 
         screen.moveCursorTo(line_offset { 0 }, column_offset { 0 });
         screen.insertLines(LineCount(1));
-        CHECK("  " == screen.grid().lineText(line_offset(0)));
-        CHECK("AB" == screen.grid().lineText(line_offset(1)));
-        CHECK("  " == screen.grid().lineText(line_offset(2)));
+        CHECK("  " == screen.getGrid().lineText(line_offset(0)));
+        CHECK("AB" == screen.getGrid().lineText(line_offset(1)));
+        CHECK("  " == screen.getGrid().lineText(line_offset(2)));
     }
     // TODO: test with (top/bottom and left/right) margins enabled
 }
@@ -1133,50 +1133,50 @@ TEST_CASE("DECSEL-0", "[screen]")
     for (auto const param: { "0"sv, ""sv })
     {
         INFO(fmt::format("param: \"{}\"", param));
-        auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(6) } };
+        auto mock = mock_term { PageSize { LineCount(2), ColumnCount(6) } };
         auto& screen = mock.terminal.primaryScreen();
         mock.writeToScreen(
             fmt::format("AB{on}CDE{off}F", fmt::arg("on", "\033[1\"q"), fmt::arg("off", "\033[2\"q")));
-        REQUIRE("ABCDEF" == screen.grid().lineText(line_offset(0)));
+        REQUIRE("ABCDEF" == screen.getGrid().lineText(line_offset(0)));
         mock.writeToScreen("\033[1;2H");
         mock.writeToScreen(fmt::format("\033[?{}K", param));
-        REQUIRE("A CDE " == screen.grid().lineText(line_offset(0)));
+        REQUIRE("A CDE " == screen.getGrid().lineText(line_offset(0)));
     }
 }
 
 TEST_CASE("DECSEL-1", "[screen]")
 {
     // Erasing from the cursor position backwards to the beginning of the current line.
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(6) } };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(6) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen(
         fmt::format("A{on}BCD{off}EF", fmt::arg("on", "\033[1\"q"), fmt::arg("off", "\033[2\"q")));
-    REQUIRE("ABCDEF" == screen.grid().lineText(line_offset(0)));
+    REQUIRE("ABCDEF" == screen.getGrid().lineText(line_offset(0)));
 
     mock.writeToScreen("\033[1;5H");
     mock.writeToScreen("\033[?1K");
-    REQUIRE(" BCD F" == screen.grid().lineText(line_offset(0)));
+    REQUIRE(" BCD F" == screen.getGrid().lineText(line_offset(0)));
 }
 
 TEST_CASE("DECSEL-2", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(4) } };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(4) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("ABCD");
-    REQUIRE("ABCD" == screen.grid().lineText(line_offset(0)));
+    REQUIRE("ABCD" == screen.getGrid().lineText(line_offset(0)));
 
     mock.writeToScreen(
         fmt::format("\ra{on}bc{off}d\r", fmt::arg("on", "\033[1\"q"), fmt::arg("off", "\033[2\"q")));
-    REQUIRE("abcd" == screen.grid().lineText(line_offset(0)));
+    REQUIRE("abcd" == screen.getGrid().lineText(line_offset(0)));
 
     mock.writeToScreen("\033[?2K");
-    REQUIRE(" bc " == screen.grid().lineText(line_offset(0)));
+    REQUIRE(" bc " == screen.getGrid().lineText(line_offset(0)));
 
     mock.writeToScreen(fmt::format(
         "\r{on}A{off}BC{on}D", fmt::arg("on", "\033[1\"q"), fmt::arg("off", "\033[2\"q"))); // DECSCA 2
-    REQUIRE("ABCD" == screen.grid().lineText(line_offset(0)));
+    REQUIRE("ABCD" == screen.getGrid().lineText(line_offset(0)));
     mock.writeToScreen("\033[?2K");
-    REQUIRE("A  D" == screen.grid().lineText(line_offset(0)));
+    REQUIRE("A  D" == screen.getGrid().lineText(line_offset(0)));
 }
 // }}}
 
@@ -1185,7 +1185,7 @@ TEST_CASE("DECSED-0", "[screen]")
 {
     for (auto const param: { "0"sv, ""sv })
     {
-        auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+        auto mock = mock_term { PageSize { LineCount(3), ColumnCount(3) } };
         auto& screen = mock.terminal.primaryScreen();
 
         mock.writeToScreen(fmt::format("{on}A{off}B{on}C{off}\r\n"
@@ -1204,7 +1204,7 @@ TEST_CASE("DECSED-0", "[screen]")
 
 TEST_CASE("DECSED-1", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
 
     mock.writeToScreen(fmt::format("{on}A{off}B{on}C{off}\r\n"
@@ -1222,7 +1222,7 @@ TEST_CASE("DECSED-1", "[screen]")
 
 TEST_CASE("DECSED-2", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
 
     mock.writeToScreen(fmt::format("{on}A{off}B{on}C{off}\r\n"
@@ -1242,7 +1242,7 @@ TEST_CASE("DECSED-2", "[screen]")
 // {{{ DECSERA
 TEST_CASE("DECSERA-all-defaults", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
 
     mock.writeToScreen(fmt::format("{on}A{off}B{on}C{off}\r\n"
@@ -1259,7 +1259,7 @@ TEST_CASE("DECSERA-all-defaults", "[screen]")
 
 TEST_CASE("DECSERA", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
 
     mock.writeToScreen(fmt::format("{on}A{off}B{on}C{off}\r\n"
@@ -1277,14 +1277,14 @@ TEST_CASE("DECSERA", "[screen]")
 
 TEST_CASE("DeleteLines", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(2) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(2) } };
     auto& screen = mock.terminal.primaryScreen();
 
     mock.writeToScreen("AB\r\nCD\r\nEF");
     logScreenText(screen, "initial");
-    REQUIRE("AB" == screen.grid().lineText(line_offset(0)));
-    REQUIRE("CD" == screen.grid().lineText(line_offset(1)));
-    REQUIRE("EF" == screen.grid().lineText(line_offset(2)));
+    REQUIRE("AB" == screen.getGrid().lineText(line_offset(0)));
+    REQUIRE("CD" == screen.getGrid().lineText(line_offset(1)));
+    REQUIRE("EF" == screen.getGrid().lineText(line_offset(2)));
 
     screen.moveCursorTo(line_offset(1), column_offset(0));
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(1), column_offset(0) });
@@ -1292,9 +1292,9 @@ TEST_CASE("DeleteLines", "[screen]")
     SECTION("no-op")
     {
         screen.deleteLines(LineCount(0));
-        CHECK("AB" == screen.grid().lineText(line_offset(0)));
-        CHECK("CD" == screen.grid().lineText(line_offset(1)));
-        CHECK("EF" == screen.grid().lineText(line_offset(2)));
+        CHECK("AB" == screen.getGrid().lineText(line_offset(0)));
+        CHECK("CD" == screen.getGrid().lineText(line_offset(1)));
+        CHECK("EF" == screen.getGrid().lineText(line_offset(2)));
     }
 
     SECTION("in-range")
@@ -1302,9 +1302,9 @@ TEST_CASE("DeleteLines", "[screen]")
         logScreenText(screen, "After EL(1) - 1");
         screen.deleteLines(LineCount(1));
         logScreenText(screen, "After EL(1)");
-        CHECK("AB" == screen.grid().lineText(line_offset(0)));
-        CHECK("EF" == screen.grid().lineText(line_offset(1)));
-        CHECK("  " == screen.grid().lineText(line_offset(2)));
+        CHECK("AB" == screen.getGrid().lineText(line_offset(0)));
+        CHECK("EF" == screen.getGrid().lineText(line_offset(1)));
+        CHECK("  " == screen.getGrid().lineText(line_offset(2)));
     }
 
     SECTION("clamped")
@@ -1312,15 +1312,15 @@ TEST_CASE("DeleteLines", "[screen]")
         screen.moveCursorTo(line_offset(1), column_offset(1));
         screen.deleteLines(LineCount(5));
         // logScreenText(screen, "After clamped EL(5)");
-        CHECK("AB" == screen.grid().lineText(line_offset(0)));
-        CHECK("  " == screen.grid().lineText(line_offset(1)));
-        CHECK("  " == screen.grid().lineText(line_offset(2)));
+        CHECK("AB" == screen.getGrid().lineText(line_offset(0)));
+        CHECK("  " == screen.getGrid().lineText(line_offset(1)));
+        CHECK("  " == screen.getGrid().lineText(line_offset(2)));
     }
 }
 
 TEST_CASE("FillArea", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
 
@@ -1330,7 +1330,7 @@ TEST_CASE("FillArea", "[screen]")
 
 TEST_CASE("DeleteColumns", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     mock.terminal.setMode(dec_mode::LeftRightMargin, true);
@@ -1376,7 +1376,7 @@ TEST_CASE("DeleteColumns", "[screen]")
 
 TEST_CASE("DeleteCharacters", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\033[1;2H");
     REQUIRE("12345\n67890\n" == screen.renderMainPageText());
@@ -1452,21 +1452,21 @@ TEST_CASE("DeleteCharacters", "[screen]")
 
 TEST_CASE("ClearScrollbackBuffer", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) }, LineCount(1) };
+    auto mock = mock_term { PageSize { LineCount(5), ColumnCount(5) }, LineCount(1) };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO\r\nPQRST\033[H");
     REQUIRE("67890\nABCDE\nFGHIJ\nKLMNO\nPQRST\n" == screen.renderMainPageText());
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(0) });
     REQUIRE(screen.historyLineCount() == LineCount(1));
-    REQUIRE("12345" == screen.grid().lineText(line_offset(-1)));
+    REQUIRE("12345" == screen.getGrid().lineText(line_offset(-1)));
 
-    screen.grid().clearHistory();
+    screen.getGrid().clearHistory();
     REQUIRE(screen.historyLineCount() == LineCount(0));
 }
 
 TEST_CASE("EraseCharacters", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO\033[H");
     logScreenText(screen, "AFTER POPULATE");
@@ -1519,7 +1519,7 @@ TEST_CASE("EraseCharacters", "[screen]")
 
 TEST_CASE("ScrollUp.WithMargins", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     logScreenText(screen, "init");
@@ -1586,7 +1586,7 @@ TEST_CASE("ScrollUp.WithMargins", "[screen]")
 
 TEST_CASE("ScrollUp", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("ABC\r\n");
     mock.writeToScreen("DEF\r\n");
@@ -1628,7 +1628,7 @@ TEST_CASE("ScrollUp", "[screen]")
 
 TEST_CASE("ScrollDown", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
@@ -1761,7 +1761,7 @@ TEST_CASE("ScrollDown", "[screen]")
 
 TEST_CASE("MoveCursorUp", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
@@ -1816,7 +1816,7 @@ TEST_CASE("MoveCursorUp", "[screen]")
 
 TEST_CASE("MoveCursorDown", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(2) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(2) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("A");
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(1) });
@@ -1836,7 +1836,7 @@ TEST_CASE("MoveCursorDown", "[screen]")
 
 TEST_CASE("MoveCursorForward", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(0) });
 
@@ -1867,7 +1867,7 @@ TEST_CASE("MoveCursorForward", "[screen]")
 
 TEST_CASE("MoveCursorBackward", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("ABC");
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(2) });
@@ -1886,7 +1886,7 @@ TEST_CASE("MoveCursorBackward", "[screen]")
 
 TEST_CASE("HorizontalPositionAbsolute", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(0) });
 
@@ -1908,7 +1908,7 @@ TEST_CASE("HorizontalPositionAbsolute", "[screen]")
 
 TEST_CASE("HorizontalPositionRelative", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(0) });
 
@@ -1939,7 +1939,7 @@ TEST_CASE("HorizontalPositionRelative", "[screen]")
 
 TEST_CASE("MoveCursorToColumn", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(0) });
 
@@ -1969,7 +1969,7 @@ TEST_CASE("MoveCursorToColumn", "[screen]")
 
 TEST_CASE("MoveCursorToLine", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(0) });
 
@@ -1991,7 +1991,7 @@ TEST_CASE("MoveCursorToLine", "[screen]")
 
 TEST_CASE("MoveCursorToBeginOfLine", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
 
     mock.writeToScreen("\r\nAB");
@@ -2003,7 +2003,7 @@ TEST_CASE("MoveCursorToBeginOfLine", "[screen]")
 
 TEST_CASE("MoveCursorTo", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     REQUIRE("12345\n67890\nABCDE\nFGHIJ\nKLMNO\n" == screen.renderMainPageText());
@@ -2054,7 +2054,7 @@ TEST_CASE("MoveCursorTo", "[screen]")
 TEST_CASE("MoveCursorToNextTab", "[screen]")
 {
     auto constexpr TabWidth = 8;
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(20) } };
     auto& screen = mock.terminal.primaryScreen();
     screen.moveCursorToNextTab();
     REQUIRE(screen.logicalCursorPosition()
@@ -2090,10 +2090,10 @@ TEST_CASE("MoveCursorToNextTab", "[screen]")
 
 TEST_CASE("SaveCursor and RestoreCursor", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(3) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.terminal.setMode(dec_mode::AutoWrap, false);
-    mock.terminal.currentScreen().saveCursor();
+    mock.terminal.currentScreen().savegetCursor();
 
     // mutate the cursor's position, autowrap and origin flags
     screen.moveCursorTo(line_offset { 2 }, column_offset { 2 });
@@ -2101,7 +2101,7 @@ TEST_CASE("SaveCursor and RestoreCursor", "[screen]")
     mock.terminal.setMode(dec_mode::Origin, true);
 
     // restore cursor and see if the changes have been reverted
-    mock.terminal.currentScreen().restoreCursor();
+    mock.terminal.currentScreen().restoregetCursor();
     CHECK(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(0) });
     CHECK_FALSE(mock.terminal.isModeEnabled(dec_mode::AutoWrap));
     CHECK_FALSE(mock.terminal.isModeEnabled(dec_mode::Origin));
@@ -2109,7 +2109,7 @@ TEST_CASE("SaveCursor and RestoreCursor", "[screen]")
 
 TEST_CASE("Index_outside_margin", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(4) } };
+    auto mock = mock_term { PageSize { LineCount(6), ColumnCount(4) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("1234\r\n5678\r\nABCD\r\nEFGH\r\nIJKL\r\nMNOP");
     logScreenText(screen, "initial");
@@ -2139,7 +2139,7 @@ TEST_CASE("Index_outside_margin", "[screen]")
 
 TEST_CASE("Index_inside_margin", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(6), ColumnCount(2) } };
+    auto mock = mock_term { PageSize { LineCount(6), ColumnCount(2) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("11\r\n22\r\n33\r\n44\r\n55\r\n66");
     logScreenText(screen, "initial setup");
@@ -2155,7 +2155,7 @@ TEST_CASE("Index_inside_margin", "[screen]")
 
 TEST_CASE("Index_at_bottom_margin", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     logScreenText(screen, "initial setup");
@@ -2189,7 +2189,7 @@ TEST_CASE("Index_at_bottom_margin", "[screen]")
 
 TEST_CASE("ReverseIndex_without_custom_margins", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     logScreenText(screen, "initial");
@@ -2222,7 +2222,7 @@ TEST_CASE("ReverseIndex_without_custom_margins", "[screen]")
 
 TEST_CASE("ReverseIndex_with_vertical_margin", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     logScreenText(screen, "initial");
@@ -2276,7 +2276,7 @@ TEST_CASE("ReverseIndex_with_vertical_margin", "[screen]")
 
 TEST_CASE("ReverseIndex_with_vertical_and_horizontal_margin", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     logScreenText(screen, "initial");
@@ -2323,7 +2323,7 @@ TEST_CASE("ReverseIndex_with_vertical_and_horizontal_margin", "[screen]")
 
 TEST_CASE("ScreenAlignmentPattern", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     mock.terminal.setTopBottomMargin(line_offset { 1 }, line_offset { 3 });
@@ -2350,7 +2350,7 @@ TEST_CASE("ScreenAlignmentPattern", "[screen]")
 
 TEST_CASE("CursorNextLine", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     screen.moveCursorTo(line_offset { 1 }, column_offset { 2 });
@@ -2410,7 +2410,7 @@ TEST_CASE("CursorNextLine", "[screen]")
 
 TEST_CASE("CursorPreviousLine", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
 
@@ -2463,7 +2463,7 @@ TEST_CASE("CursorPreviousLine", "[screen]")
 
 TEST_CASE("ReportCursorPosition", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     screen.moveCursorTo(line_offset { 1 }, column_offset { 2 });
@@ -2493,7 +2493,7 @@ TEST_CASE("ReportCursorPosition", "[screen]")
 
 TEST_CASE("ReportExtendedCursorPosition", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
     screen.moveCursorTo(line_offset { 1 }, column_offset { 2 });
@@ -2523,7 +2523,7 @@ TEST_CASE("ReportExtendedCursorPosition", "[screen]")
 
 TEST_CASE("RequestMode", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(5), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(5), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
 
     SECTION("ANSI modes: enabled")
@@ -2577,7 +2577,7 @@ TEST_CASE("RequestMode", "[screen]")
 
 TEST_CASE("peek into history", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(3) }, LineCount { 5 } };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(3) }, LineCount { 5 } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("123\r\n456\r\nABC\r\nDEF");
 
@@ -2585,17 +2585,17 @@ TEST_CASE("peek into history", "[screen]")
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(1), column_offset(2) });
 
     // first line in history
-    auto const m1 = screen.grid().lineText(line_offset(-2));
-    CHECK(screen.grid().lineText(line_offset(-2)) == "123");
+    auto const m1 = screen.getGrid().lineText(line_offset(-2));
+    CHECK(screen.getGrid().lineText(line_offset(-2)) == "123");
 
     // second line in history
-    CHECK(screen.grid().lineText(line_offset(-1)) == "456");
+    CHECK(screen.getGrid().lineText(line_offset(-1)) == "456");
 
     // first line on screen buffer
-    CHECK(screen.grid().lineText(line_offset(0)) == "ABC");
+    CHECK(screen.getGrid().lineText(line_offset(0)) == "ABC");
 
     // second line on screen buffer
-    CHECK(screen.grid().lineText(line_offset(1)) == "DEF");
+    CHECK(screen.getGrid().lineText(line_offset(1)) == "DEF");
 
     // out-of-range corner cases
     // CHECK_THROWS(screen.at(line_offset(2), ColumnOffset(0)));
@@ -2606,7 +2606,7 @@ TEST_CASE("peek into history", "[screen]")
 
 TEST_CASE("captureBuffer", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(5) }, LineCount { 5 } };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(5) }, LineCount { 5 } };
     auto& screen = mock.terminal.primaryScreen();
 
     //           [...      history ...  ...][main page area]
@@ -2661,7 +2661,7 @@ TEST_CASE("captureBuffer", "[screen]")
 
 TEST_CASE("render into history", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(5) }, LineCount { 5 } };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(5) }, LineCount { 5 } };
     auto& screen = mock.terminal.primaryScreen();
     mock.writeToScreen("12345\r\n67890\r\nABCDE\r\nFGHIJ\r\nKLMNO");
 
@@ -2669,7 +2669,7 @@ TEST_CASE("render into history", "[screen]")
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(1), column_offset(4) });
     REQUIRE(screen.historyLineCount() == LineCount { 3 });
 
-    auto renderer = TextRenderBuilder {};
+    auto renderer = text_render_builder {};
     string& renderedText = renderer.text;
 
     // main area
@@ -2695,34 +2695,34 @@ TEST_CASE("render into history", "[screen]")
 
 TEST_CASE("HorizontalTabClear.AllTabs", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(5) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(5) } };
     auto& screen = mock.terminal.primaryScreen();
-    screen.horizontalTabClear(HorizontalTabClear::AllTabs);
+    screen.horizontalTabClear(horizontal_tab_clear::AllTabs);
 
     screen.writeText('X');
     screen.moveCursorToNextTab();
     screen.writeText('Y');
-    REQUIRE("X   Y" == screen.grid().lineText(line_offset(0)));
+    REQUIRE("X   Y" == screen.getGrid().lineText(line_offset(0)));
 
     screen.moveCursorToNextTab();
     screen.writeText('Z');
-    REQUIRE("X   Y" == screen.grid().lineText(line_offset(0)));
-    REQUIRE("Z    " == screen.grid().lineText(line_offset(1)));
+    REQUIRE("X   Y" == screen.getGrid().lineText(line_offset(0)));
+    REQUIRE("Z    " == screen.getGrid().lineText(line_offset(1)));
 
     screen.moveCursorToNextTab();
     screen.writeText('A');
-    REQUIRE("X   Y" == screen.grid().lineText(line_offset(0)));
-    REQUIRE("Z   A" == screen.grid().lineText(line_offset(1)));
+    REQUIRE("X   Y" == screen.getGrid().lineText(line_offset(0)));
+    REQUIRE("Z   A" == screen.getGrid().lineText(line_offset(1)));
 }
 
 TEST_CASE("HorizontalTabClear.UnderCursor", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(20) } };
     auto& screen = mock.terminal.primaryScreen();
 
     // clear tab at column 4
     screen.moveCursorTo(line_offset { 0 }, column_offset { 7 });
-    screen.horizontalTabClear(HorizontalTabClear::UnderCursor);
+    screen.horizontalTabClear(horizontal_tab_clear::UnderCursor);
 
     screen.moveCursorTo({}, {});
     screen.writeText('A');
@@ -2730,21 +2730,21 @@ TEST_CASE("HorizontalTabClear.UnderCursor", "[screen]")
     screen.writeText('B');
 
     //      "12345678901234567890"
-    REQUIRE("A              B    " == screen.grid().lineText(line_offset(0)));
-    REQUIRE("                    " == screen.grid().lineText(line_offset(1)));
+    REQUIRE("A              B    " == screen.getGrid().lineText(line_offset(0)));
+    REQUIRE("                    " == screen.getGrid().lineText(line_offset(1)));
 
     screen.moveCursorToNextTab();
     screen.writeText('C');
     //    "12345678901234567890"
-    CHECK("A              B   C" == screen.grid().lineText(line_offset(0)));
-    CHECK("                    " == screen.grid().lineText(line_offset(1)));
+    CHECK("A              B   C" == screen.getGrid().lineText(line_offset(0)));
+    CHECK("                    " == screen.getGrid().lineText(line_offset(1)));
 }
 
 TEST_CASE("HorizontalTabSet", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(10) } };
     auto& screen = mock.terminal.primaryScreen();
-    screen.horizontalTabClear(HorizontalTabClear::AllTabs);
+    screen.horizontalTabClear(horizontal_tab_clear::AllTabs);
 
     screen.moveCursorToColumn(column_offset(2));
     screen.horizontalTabSet();
@@ -2771,26 +2771,26 @@ TEST_CASE("HorizontalTabSet", "[screen]")
     screen.moveCursorToNextTab(); // capped
     screen.writeText('A');        // writes B at right margin, flags for autowrap
 
-    REQUIRE("1 3 5  8 A" == screen.grid().lineText(line_offset(0)));
+    REQUIRE("1 3 5  8 A" == screen.getGrid().lineText(line_offset(0)));
 
     screen.moveCursorToNextTab(); // wrapped
     screen.writeText('B');        // writes B at left margin
 
     //       1234567890
-    REQUIRE("1 3 5  8 A" == screen.grid().lineText(line_offset(0)));
+    REQUIRE("1 3 5  8 A" == screen.getGrid().lineText(line_offset(0)));
     screen.moveCursorToNextTab(); // 1 -> 3 (overflow)
     screen.moveCursorToNextTab(); // 3 -> 5
     screen.moveCursorToNextTab(); // 5 -> 8
     screen.writeText('C');
 
     //     1234567890
-    CHECK("1 3 5  8 A" == screen.grid().lineText(line_offset(0)));
-    CHECK("B      C  " == screen.grid().lineText(line_offset(1)));
+    CHECK("1 3 5  8 A" == screen.getGrid().lineText(line_offset(0)));
+    CHECK("B      C  " == screen.getGrid().lineText(line_offset(1)));
 }
 
 TEST_CASE("CursorBackwardTab.fixedTabWidth", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(20) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(20) } };
     auto& screen = mock.terminal.primaryScreen();
 
     screen.writeText('a');
@@ -2802,7 +2802,7 @@ TEST_CASE("CursorBackwardTab.fixedTabWidth", "[screen]")
     screen.writeText('c'); // -> 17
 
     //      "12345678901234567890"
-    REQUIRE("a       b       c   " == screen.grid().lineText(line_offset(0)));
+    REQUIRE("a       b       c   " == screen.getGrid().lineText(line_offset(0)));
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(17) });
 
     SECTION("no op")
@@ -2817,7 +2817,7 @@ TEST_CASE("CursorBackwardTab.fixedTabWidth", "[screen]")
         CHECK(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(16) });
         screen.writeText('X');
         //    "12345678901234567890"
-        CHECK("a       b       X   " == screen.grid().lineText(line_offset(0)));
+        CHECK("a       b       X   " == screen.getGrid().lineText(line_offset(0)));
     }
 
     SECTION("inside 2")
@@ -2826,7 +2826,7 @@ TEST_CASE("CursorBackwardTab.fixedTabWidth", "[screen]")
         CHECK(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(8) });
         screen.writeText('X');
         //    "12345678901234567890"
-        CHECK("a       X       c   " == screen.grid().lineText(line_offset(0)));
+        CHECK("a       X       c   " == screen.getGrid().lineText(line_offset(0)));
     }
 
     SECTION("exact")
@@ -2835,7 +2835,7 @@ TEST_CASE("CursorBackwardTab.fixedTabWidth", "[screen]")
         CHECK(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(0) });
         screen.writeText('X');
         //    "12345678901234567890"
-        CHECK("X       b       c   " == screen.grid().lineText(line_offset(0)));
+        CHECK("X       b       c   " == screen.getGrid().lineText(line_offset(0)));
     }
 
     SECTION("oveflow")
@@ -2844,13 +2844,13 @@ TEST_CASE("CursorBackwardTab.fixedTabWidth", "[screen]")
         CHECK(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(0) });
         screen.writeText('X');
         //    "12345678901234567890"
-        CHECK("X       b       c   " == screen.grid().lineText(line_offset(0)));
+        CHECK("X       b       c   " == screen.getGrid().lineText(line_offset(0)));
     }
 }
 
 TEST_CASE("CursorBackwardTab.manualTabs", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(10) } };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(10) } };
     auto& screen = mock.terminal.primaryScreen();
 
     screen.moveCursorToColumn(column_offset(4));
@@ -2869,14 +2869,14 @@ TEST_CASE("CursorBackwardTab.manualTabs", "[screen]")
 
     //      "1234567890"
     REQUIRE(screen.logicalCursorPosition().column.value == 9);
-    REQUIRE("a   b   c " == screen.grid().lineText(line_offset(0)));
+    REQUIRE("a   b   c " == screen.getGrid().lineText(line_offset(0)));
 
     SECTION("oveflow")
     {
         screen.cursorBackwardTab(tab_stop_count(4));
         CHECK(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(0) });
         screen.writeText('X');
-        CHECK("X   b   c " == screen.grid().lineText(line_offset(0)));
+        CHECK("X   b   c " == screen.getGrid().lineText(line_offset(0)));
     }
 
     SECTION("exact")
@@ -2885,7 +2885,7 @@ TEST_CASE("CursorBackwardTab.manualTabs", "[screen]")
         CHECK(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(0) });
         screen.writeText('X');
         //    "1234567890"
-        CHECK("X   b   c " == screen.grid().lineText(line_offset(0)));
+        CHECK("X   b   c " == screen.getGrid().lineText(line_offset(0)));
     }
 
     SECTION("inside 2")
@@ -2894,7 +2894,7 @@ TEST_CASE("CursorBackwardTab.manualTabs", "[screen]")
         CHECK(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(4) });
         screen.writeText('X');
         //    "1234567890"
-        CHECK("a   X   c " == screen.grid().lineText(line_offset(0)));
+        CHECK("a   X   c " == screen.getGrid().lineText(line_offset(0)));
     }
 
     SECTION("inside 1")
@@ -2903,7 +2903,7 @@ TEST_CASE("CursorBackwardTab.manualTabs", "[screen]")
         CHECK(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(8) });
         screen.writeText('X');
         //    "1234567890"
-        CHECK("a   b   X " == screen.grid().lineText(line_offset(0)));
+        CHECK("a   b   X " == screen.getGrid().lineText(line_offset(0)));
     }
 
     SECTION("no op")
@@ -2915,7 +2915,7 @@ TEST_CASE("CursorBackwardTab.manualTabs", "[screen]")
 
 TEST_CASE("searchReverse", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(4) }, LineCount(10) };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(4) }, LineCount(10) };
     mock.writeToScreen("1abc"); // -3: +
     mock.writeToScreen("2def"); // -2: | history
     mock.writeToScreen("3ghi"); // -1: +
@@ -2924,7 +2924,7 @@ TEST_CASE("searchReverse", "[screen]")
     mock.writeToScreen("6pqr"); //  2: +
 
     auto& screen = mock.terminal.primaryScreen();
-    auto const cursorPosition = screen.cursor().position;
+    auto const cursorPosition = screen.getCursor().position;
 
     INFO(fmt::format("cursor pos {}", cursorPosition));
 
@@ -2934,10 +2934,10 @@ TEST_CASE("searchReverse", "[screen]")
         INFO(fmt::format("Perform tests via {}", inflate ? "inflated buffer" : "trivial buffer"));
         if (inflate)
             for (auto lineOffset = line_offset(-3); lineOffset < line_offset(3); ++lineOffset)
-                (void) screen.grid().lineAt(lineOffset).inflatedBuffer();
+                (void) screen.getGrid().lineAt(lineOffset).inflatedBuffer();
         else
             for (auto lineOffset = line_offset(-3); lineOffset < line_offset(3); ++lineOffset)
-                REQUIRE(screen.grid().lineAt(lineOffset).isTrivialBuffer());
+                REQUIRE(screen.getGrid().lineAt(lineOffset).isTrivialBuffer());
 
         // Find "qr" right at in front of the cursor.
         optional<cell_location> const qr = screen.searchReverse(U"qr", cursorPosition);
@@ -2958,19 +2958,19 @@ TEST_CASE("searchReverse", "[screen]")
         mock.writeToScreen("7abcd");
 
         // Find text that got wrapped
-        optional<cell_location> const cd = screen.searchReverse(U"cd", screen.cursor().position);
+        optional<cell_location> const cd = screen.searchReverse(U"cd", screen.getCursor().position);
         REQUIRE(cd.value() == cell_location { line_offset(1), column_offset(3) });
 
         // Find text larger than the line length
         optional<cell_location> const longSearch =
-            screen.searchReverse(U"6pqr7abcd", screen.cursor().position);
+            screen.searchReverse(U"6pqr7abcd", screen.getCursor().position);
         REQUIRE(longSearch.value() == cell_location { line_offset(0), column_offset(0) });
     }
 }
 
 TEST_CASE("findMarkerDownwards", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(4) }, LineCount(10) };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(4) }, LineCount(10) };
     auto& screen = mock.terminal.primaryScreen();
     REQUIRE_FALSE(screen.findMarkerDownwards(line_offset(0)).has_value());
     REQUIRE_FALSE(screen.findMarkerDownwards(line_offset(1)).has_value()); // history bottom
@@ -3025,13 +3025,13 @@ TEST_CASE("findMarkerDownwards", "[screen]")
         mock.writeToScreen("6pqr");
 
         // {{{ pre-expectations
-        REQUIRE(screen.grid().lineText(line_offset(-3)) == "1abc");
-        REQUIRE(screen.grid().lineText(line_offset(-2)) == "2def");
-        REQUIRE(screen.grid().lineText(line_offset(-1)) == "3ghi");
+        REQUIRE(screen.getGrid().lineText(line_offset(-3)) == "1abc");
+        REQUIRE(screen.getGrid().lineText(line_offset(-2)) == "2def");
+        REQUIRE(screen.getGrid().lineText(line_offset(-1)) == "3ghi");
 
-        REQUIRE(screen.grid().lineText(line_offset(0)) == "4jkl");
-        REQUIRE(screen.grid().lineText(line_offset(1)) == "5mno");
-        REQUIRE(screen.grid().lineText(line_offset(2)) == "6pqr");
+        REQUIRE(screen.getGrid().lineText(line_offset(0)) == "4jkl");
+        REQUIRE(screen.getGrid().lineText(line_offset(1)) == "5mno");
+        REQUIRE(screen.getGrid().lineText(line_offset(2)) == "6pqr");
         // }}}
 
         // ======================================================
@@ -3056,7 +3056,7 @@ TEST_CASE("findMarkerDownwards", "[screen]")
 
 TEST_CASE("findMarkerUpwards", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(3), ColumnCount(4) }, LineCount(10) };
+    auto mock = mock_term { PageSize { LineCount(3), ColumnCount(4) }, LineCount(10) };
     auto& screen = mock.terminal.primaryScreen();
     REQUIRE_FALSE(screen.findMarkerUpwards(line_offset(-1)).has_value()); // peak into history
     REQUIRE_FALSE(screen.findMarkerUpwards(line_offset(0)).has_value());
@@ -3112,13 +3112,13 @@ TEST_CASE("findMarkerUpwards", "[screen]")
         mock.writeToScreen("6pqr");
 
         // {{{ pre-checks
-        REQUIRE(screen.grid().lineText(line_offset(-3)) == "1abc"); // marked
-        REQUIRE(screen.grid().lineText(line_offset(-2)) == "2def");
-        REQUIRE(screen.grid().lineText(line_offset(-1)) == "3ghi"); // marked
+        REQUIRE(screen.getGrid().lineText(line_offset(-3)) == "1abc"); // marked
+        REQUIRE(screen.getGrid().lineText(line_offset(-2)) == "2def");
+        REQUIRE(screen.getGrid().lineText(line_offset(-1)) == "3ghi"); // marked
 
-        REQUIRE(screen.grid().lineText(line_offset(0)) == "4jkl"); // marked
-        REQUIRE(screen.grid().lineText(line_offset(1)) == "5mno");
-        REQUIRE(screen.grid().lineText(line_offset(2)) == "6pqr"); // marked
+        REQUIRE(screen.getGrid().lineText(line_offset(0)) == "4jkl"); // marked
+        REQUIRE(screen.getGrid().lineText(line_offset(1)) == "5mno");
+        REQUIRE(screen.getGrid().lineText(line_offset(2)) == "6pqr"); // marked
         // }}}
 
         // ======================================================
@@ -3144,7 +3144,7 @@ TEST_CASE("findMarkerUpwards", "[screen]")
 
 TEST_CASE("DECTABSR", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(35) } };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(35) } };
     auto& screen = mock.terminal.primaryScreen();
 
     SECTION("default tabstops")
@@ -3155,14 +3155,14 @@ TEST_CASE("DECTABSR", "[screen]")
 
     SECTION("cleared tabs")
     {
-        screen.horizontalTabClear(HorizontalTabClear::AllTabs);
+        screen.horizontalTabClear(horizontal_tab_clear::AllTabs);
         screen.requestTabStops();
         CHECK(e(mock.terminal.peekInput()) == e("\033P2$u1/9/17/25/33\033\\"));
     }
 
     SECTION("custom tabstops")
     {
-        screen.horizontalTabClear(HorizontalTabClear::AllTabs);
+        screen.horizontalTabClear(horizontal_tab_clear::AllTabs);
 
         screen.moveCursorToColumn(column_offset(1));
         screen.horizontalTabSet();
@@ -3183,7 +3183,7 @@ TEST_CASE("DECTABSR", "[screen]")
 
 TEST_CASE("save_restore_DEC_modes", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(2) } };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(2) } };
     auto& screen = mock.terminal.primaryScreen();
 
     mock.terminal.setMode(dec_mode::MouseProtocolHighlightTracking, false);
@@ -3198,7 +3198,7 @@ TEST_CASE("save_restore_DEC_modes", "[screen]")
 
 TEST_CASE("OSC.2.Unicode")
 {
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(2) } };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(2) } };
 
     auto const u32title = u32string_view(U"\U0001F600");
     auto const title = unicode::convert_to<char>(u32title);
@@ -3210,7 +3210,7 @@ TEST_CASE("OSC.2.Unicode")
 
 TEST_CASE("OSC.4")
 {
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(2) } };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(2) } };
 
     SECTION("query")
     {
@@ -3246,7 +3246,7 @@ TEST_CASE("OSC.4")
 
 TEST_CASE("XTGETTCAP")
 {
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(2) } };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(2) } };
     auto const queryStr = fmt::format("\033P+q{:02X}{:02X}{:02X}\033\\", 'R', 'G', 'B');
     mock.writeToScreen(queryStr);
     INFO(fmt::format("Reply data: {}", mock.terminal.peekInput()));
@@ -3257,9 +3257,9 @@ TEST_CASE("XTGETTCAP")
 TEST_CASE("setMaxHistoryLineCount", "[screen]")
 {
     // from zero to something
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(2) }, LineCount(0) };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(2) }, LineCount(0) };
     auto& screen = mock.terminal.primaryScreen();
-    screen.grid().setReflowOnResize(false);
+    screen.getGrid().setReflowOnResize(false);
     mock.writeToScreen("AB\r\nCD");
     REQUIRE("AB\nCD\n" == screen.renderMainPageText());
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(1), column_offset(1) });
@@ -3271,9 +3271,9 @@ TEST_CASE("setMaxHistoryLineCount", "[screen]")
 // TODO: resize test (should be in Grid_test.cpp?)
 TEST_CASE("resize", "[screen]")
 {
-    auto mock = MockTerm { PageSize { LineCount(2), ColumnCount(2) }, LineCount(10) };
+    auto mock = mock_term { PageSize { LineCount(2), ColumnCount(2) }, LineCount(10) };
     auto& screen = mock.terminal.primaryScreen();
-    screen.grid().setReflowOnResize(false);
+    screen.getGrid().setReflowOnResize(false);
     mock.writeToScreen("AB\r\nCD");
     REQUIRE("AB\nCD\n" == screen.renderMainPageText());
     REQUIRE(screen.logicalCursorPosition() == cell_location { line_offset(1), column_offset(1) });
@@ -3306,7 +3306,7 @@ TEST_CASE("resize", "[screen]")
     {
         mock.terminal.resizeScreen({ LineCount(1), ColumnCount(2) });
         CHECK("CD\n" == screen.renderMainPageText());
-        CHECK("AB" == screen.grid().lineAt(line_offset(-1)).toUtf8());
+        CHECK("AB" == screen.getGrid().lineAt(line_offset(-1)).toUtf8());
         CHECK(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(1) });
     }
 
@@ -3507,7 +3507,7 @@ TEST_CASE("DECCRA.Left.intersecting", "[screen]")
 TEST_CASE("Screen.tcap.string", "[screen, tcap]")
 {
     using namespace terminal;
-    auto mock = MockTerm(PageSize { LineCount(3), ColumnCount(5) }, LineCount(2));
+    auto mock = mock_term(PageSize { LineCount(3), ColumnCount(5) }, LineCount(2));
     mock.writeToScreen("\033P+q687061\033\\"); // HPA
     REQUIRE(e(mock.terminal.peekInput()) == e("\033P1+r687061=1B5B2569257031256447\033\\"));
 }
@@ -3515,13 +3515,13 @@ TEST_CASE("Screen.tcap.string", "[screen, tcap]")
 TEST_CASE("Sixel.simple", "[screen]")
 {
     auto const pageSize = PageSize { LineCount(11), ColumnCount(11) };
-    auto mock = MockTerm { pageSize, LineCount(11) };
+    auto mock = mock_term { pageSize, LineCount(11) };
     mock.terminal.setCellPixelSize(image_size { width(10), height(10) });
 
     mock.writeToScreen(chessBoard);
 
-    CHECK(mock.terminal.primaryScreen().cursor().position.column.value == column_offset(0).value);
-    CHECK(mock.terminal.primaryScreen().cursor().position.line.value == line_offset(10).value);
+    CHECK(mock.terminal.primaryScreen().getCursor().position.column.value == column_offset(0).value);
+    CHECK(mock.terminal.primaryScreen().getCursor().position.line.value == line_offset(10).value);
 
     for (auto line = line_offset(0); line < boxed_cast<line_offset>(pageSize.lines); ++line)
     {
@@ -3553,14 +3553,14 @@ TEST_CASE("Sixel.AutoScroll-1", "[screen]")
 {
     // Create a 11x9x10 grid and render a 10x10 image causing a line-scroll by one.
     auto const pageSize = PageSize { LineCount(9), ColumnCount(10) };
-    auto mock = MockTerm { pageSize, LineCount(11) };
+    auto mock = mock_term { pageSize, LineCount(11) };
     mock.terminal.setCellPixelSize(image_size { width(10), height(10) });
     mock.terminal.setMode(dec_mode::NoSixelScrolling, false);
 
     mock.writeToScreen(chessBoard);
 
-    CHECK(mock.terminal.primaryScreen().cursor().position.column == column_offset(0));
-    CHECK(mock.terminal.primaryScreen().cursor().position.line == line_offset(8));
+    CHECK(mock.terminal.primaryScreen().getCursor().position.column == column_offset(0));
+    CHECK(mock.terminal.primaryScreen().getCursor().position.line == line_offset(8));
 
     for (auto line = line_offset(-1); line < boxed_cast<line_offset>(pageSize.lines); ++line)
     {
@@ -3593,14 +3593,14 @@ TEST_CASE("Sixel.status_line", "[screen]")
 {
     // Test for #1050
     auto const pageSize = PageSize { LineCount(5), ColumnCount(11) };
-    auto mock = MockTerm { pageSize, LineCount(12) };
+    auto mock = mock_term { pageSize, LineCount(12) };
     mock.terminal.setCellPixelSize(image_size { width(10), height(10) });
     mock.terminal.setStatusDisplay(status_display_type::Indicator);
 
     mock.writeToScreen(chessBoard);
 
-    CHECK(mock.terminal.primaryScreen().cursor().position.column.value == column_offset(0).value);
-    CHECK(mock.terminal.primaryScreen().cursor().position.line.value == line_offset(3).value);
+    CHECK(mock.terminal.primaryScreen().getCursor().position.column.value == column_offset(0).value);
+    CHECK(mock.terminal.primaryScreen().getCursor().position.line.value == line_offset(3).value);
 
     auto const lastLine = boxed_cast<line_offset>(pageSize.lines - mock.terminal.statusLineHeight());
     for (auto line = line_offset(-6); line < lastLine; ++line)
@@ -3633,13 +3633,13 @@ TEST_CASE("DECSTR", "[screen]")
 {
     // Create a 10x3x5 grid and render a 7x5 image causing one a line-scroll by one.
     auto const pageSize = PageSize { LineCount(4), ColumnCount(10) };
-    auto mock = MockTerm { pageSize, LineCount(5) };
+    auto mock = mock_term { pageSize, LineCount(5) };
     mock.writeToScreen("ABCD\r\nDEFG\r\n");
-    CHECK(mock.terminal.primaryScreen().cursor().position.line == line_offset(2));
-    CHECK(mock.terminal.primaryScreen().cursor().position.column == column_offset(0));
+    CHECK(mock.terminal.primaryScreen().getCursor().position.line == line_offset(2));
+    CHECK(mock.terminal.primaryScreen().getCursor().position.column == column_offset(0));
 
     mock.writeToScreen("\033[!p");
-    REQUIRE(mock.terminal.primaryScreen().cursor().position
+    REQUIRE(mock.terminal.primaryScreen().getCursor().position
             == cell_location { line_offset(2), column_offset(0) });
     REQUIRE(mock.terminal.primaryScreen().savedCursorState().position
             == cell_location { line_offset(0), column_offset(0) });
@@ -3647,7 +3647,7 @@ TEST_CASE("DECSTR", "[screen]")
 
 TEST_CASE("LS1 and LS0", "[screen]")
 {
-    auto mock = MockTerm { ColumnCount(8), LineCount(4) };
+    auto mock = mock_term { ColumnCount(8), LineCount(4) };
 
     auto const writeTickAndRender = [&](auto text) {
         mock.writeToScreen(text);
@@ -3656,28 +3656,28 @@ TEST_CASE("LS1 and LS0", "[screen]")
         logScreenText(mock.terminal.primaryScreen(), fmt::format("writeTickAndRender: {}", e(text)));
     };
 
-    REQUIRE(
-        mock.terminal.primaryScreen().cursor().charsets.isSelected(charset_table::G0, charset_id::USASCII));
-    REQUIRE(
-        mock.terminal.primaryScreen().cursor().charsets.isSelected(charset_table::G1, charset_id::USASCII));
+    REQUIRE(mock.terminal.primaryScreen().getCursor().charsets.isSelected(charset_table::G0,
+                                                                          charset_id::USASCII));
+    REQUIRE(mock.terminal.primaryScreen().getCursor().charsets.isSelected(charset_table::G1,
+                                                                          charset_id::USASCII));
     writeTickAndRender("ab");
     REQUIRE(trimmedTextScreenshot(mock) == "ab");
 
     // Set G1 to Special
     mock.writeToScreen("\033)0");
-    REQUIRE(
-        mock.terminal.primaryScreen().cursor().charsets.isSelected(charset_table::G1, charset_id::Special));
+    REQUIRE(mock.terminal.primaryScreen().getCursor().charsets.isSelected(charset_table::G1,
+                                                                          charset_id::Special));
 
     // LS1: load G1 into GL
     mock.writeToScreen("\x0E");
-    REQUIRE(mock.terminal.primaryScreen().cursor().charsets.isSelected(charset_id::Special));
+    REQUIRE(mock.terminal.primaryScreen().getCursor().charsets.isSelected(charset_id::Special));
 
     writeTickAndRender("ab");
     REQUIRE(trimmedTextScreenshot(mock) == "ab▒␉");
 
     // LS0: load G0 into GL
     mock.writeToScreen("\x0F");
-    REQUIRE(mock.terminal.primaryScreen().cursor().charsets.isSelected(charset_id::USASCII));
+    REQUIRE(mock.terminal.primaryScreen().getCursor().charsets.isSelected(charset_id::USASCII));
 
     writeTickAndRender("ab");
     REQUIRE(trimmedTextScreenshot(mock) == "ab▒␉ab");

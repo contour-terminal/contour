@@ -52,14 +52,14 @@ template <typename S>
 /// Takes a textual screenshot using the terminals render buffer.
 [[nodiscard]] inline std::vector<std::string> textScreenshot(terminal::Terminal const& terminal)
 {
-    terminal::RenderBufferRef renderBuffer = terminal.renderBuffer();
+    terminal::render_buffer_ref renderBuffer = terminal.renderBuffer();
 
     std::vector<std::string> lines;
     lines.resize(terminal.pageSize().lines.as<size_t>());
 
     terminal::cell_location lastPos = {};
     size_t lastCount = 0;
-    for (terminal::RenderCell const& cell: renderBuffer.buffer.cells)
+    for (terminal::render_cell const& cell: renderBuffer.buffer.cells)
     {
         auto const gap = (cell.position.column + static_cast<int>(lastCount) - 1) - lastPos.column;
         auto& currentLine = lines.at(unbox<size_t>(cell.position.line));
@@ -70,7 +70,7 @@ template <typename S>
         lastPos = cell.position;
         lastCount = 1;
     }
-    for (terminal::RenderLine const& line: renderBuffer.buffer.lines)
+    for (terminal::render_line const& line: renderBuffer.buffer.lines)
     {
         auto& currentLine = lines.at(unbox<size_t>(line.lineOffset));
         currentLine = line.text;
@@ -99,19 +99,19 @@ template <typename S>
 }
 
 template <typename T>
-[[nodiscard]] std::string trimmedTextScreenshot(MockTerm<T> const& mt)
+[[nodiscard]] std::string trimmedTextScreenshot(mock_term<T> const& mt)
 {
     return trimRight(join(textScreenshot(mt.terminal)));
 }
 
 template <typename T>
-[[nodiscard]] std::string mainPageText(Screen<T> const& screen)
+[[nodiscard]] std::string mainPageText(screen<T> const& screen)
 {
     return screen.renderMainPageText();
 }
 
 template <typename T>
-void logScreenTextAlways(Screen<T> const& screen, std::string const& headline = "")
+void logScreenTextAlways(screen<T> const& screen, std::string const& headline = "")
 {
     fmt::print("{}: ZI={} cursor={} HM={}..{}\n",
                headline.empty() ? "screen dump" : headline,
@@ -123,13 +123,13 @@ void logScreenTextAlways(Screen<T> const& screen, std::string const& headline = 
 }
 
 template <typename T>
-void logScreenTextAlways(MockTerm<T> const& mock, std::string const& headline = "")
+void logScreenTextAlways(mock_term<T> const& mock, std::string const& headline = "")
 {
     logScreenTextAlways(mock.terminal.primaryScreen(), headline);
 }
 
 template <typename T>
-void logScreenText(Screen<T> const& screen, std::string const& headline = "")
+void logScreenText(screen<T> const& screen, std::string const& headline = "")
 {
     if (headline.empty())
         UNSCOPED_INFO("dump:");
@@ -137,7 +137,8 @@ void logScreenText(Screen<T> const& screen, std::string const& headline = "")
         UNSCOPED_INFO(headline + ":");
 
     for (auto const line: ::ranges::views::iota(0, *screen.pageSize().lines))
-        UNSCOPED_INFO(fmt::format("[{}] \"{}\"", line, screen.grid().lineText(line_offset::cast_from(line))));
+        UNSCOPED_INFO(
+            fmt::format("[{}] \"{}\"", line, screen.getGrid().lineText(line_offset::cast_from(line))));
 }
 
 inline void logScreenText(terminal::Terminal const& terminal, std::string const& headline = "")

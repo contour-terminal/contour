@@ -116,9 +116,9 @@ constexpr inline terminal::modifier makeModifier(Qt::KeyboardModifiers _mods)
     modifier mods {};
 
     if (_mods & Qt::AltModifier)
-        mods |= modifier::Alt;
+        mods |= modifier::alt;
     if (_mods & Qt::ShiftModifier)
-        mods |= modifier::Shift;
+        mods |= modifier::shift;
 #if defined(__APPLE__)
     // XXX https://doc.qt.io/qt-5/qt.html#KeyboardModifier-enum
     //     "Note: On macOS, the ControlModifier value corresponds to the Command keys on the keyboard,
@@ -129,9 +129,9 @@ constexpr inline terminal::modifier makeModifier(Qt::KeyboardModifiers _mods)
         mods |= modifier::Meta;
 #else
     if (_mods & Qt::ControlModifier)
-        mods |= modifier::Control;
+        mods |= modifier::control;
     if (_mods & Qt::MetaModifier)
-        mods |= modifier::Meta;
+        mods |= modifier::meta;
 #endif
 
     return mods;

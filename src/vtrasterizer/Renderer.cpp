@@ -300,12 +300,12 @@ void Renderer::render(Terminal& terminal, bool pressure)
     terminal.refreshRenderBuffer();
 #endif // }}}
 
-    optional<terminal::RenderCursor> cursorOpt;
+    optional<terminal::render_cursor> cursorOpt;
     _imageRenderer.beginFrame();
     _textRenderer.beginFrame();
     _textRenderer.setPressure(pressure && terminal.isPrimaryScreen());
     {
-        RenderBufferRef const renderBuffer = terminal.renderBuffer();
+        render_buffer_ref const renderBuffer = terminal.renderBuffer();
         cursorOpt = renderBuffer.get().cursor;
         renderCells(renderBuffer.get().cells);
         renderLines(renderBuffer.get().lines);
@@ -332,9 +332,9 @@ void Renderer::render(Terminal& terminal, bool pressure)
     _renderTarget->execute(terminal.currentTime());
 }
 
-void Renderer::renderCells(vector<RenderCell> const& renderableCells)
+void Renderer::renderCells(vector<render_cell> const& renderableCells)
 {
-    for (RenderCell const& cell: renderableCells)
+    for (render_cell const& cell: renderableCells)
     {
         _backgroundRenderer.renderCell(cell);
         _decorationRenderer.renderCell(cell);
@@ -344,9 +344,9 @@ void Renderer::renderCells(vector<RenderCell> const& renderableCells)
     }
 }
 
-void Renderer::renderLines(vector<RenderLine> const& renderableLines)
+void Renderer::renderLines(vector<render_line> const& renderableLines)
 {
-    for (RenderLine const& line: renderableLines)
+    for (render_line const& line: renderableLines)
     {
         _backgroundRenderer.renderLine(line);
         _decorationRenderer.renderLine(line);

@@ -81,35 +81,35 @@ struct InputMappings
 namespace helper
 {
     inline bool testMatchMode(uint8_t _actualModeFlags,
-                              terminal::MatchModes _expected,
-                              terminal::MatchModes::Flag _testFlag)
+                              terminal::match_modes _expected,
+                              terminal::match_modes::flag _testFlag)
     {
-        using MatchModes = terminal::MatchModes;
+        using MatchModes = terminal::match_modes;
         switch (_expected.status(_testFlag))
         {
-            case MatchModes::Status::Enabled:
+            case MatchModes::tatus::Enabled:
                 if (!(_actualModeFlags & _testFlag))
                     return false;
                 break;
-            case MatchModes::Status::Disabled:
+            case MatchModes::tatus::Disabled:
                 if ((_actualModeFlags & _testFlag))
                     return false;
                 break;
-            case MatchModes::Status::Any: break;
+            case MatchModes::tatus::Any: break;
         }
         return true;
     }
 
-    inline bool testMatchMode(uint8_t _actualModeFlags, terminal::MatchModes _expected)
+    inline bool testMatchMode(uint8_t _actualModeFlags, terminal::match_modes _expected)
     {
-        using Flag = terminal::MatchModes::Flag;
-        return testMatchMode(_actualModeFlags, _expected, Flag::AlternateScreen)
-               && testMatchMode(_actualModeFlags, _expected, Flag::AppCursor)
-               && testMatchMode(_actualModeFlags, _expected, Flag::AppKeypad)
-               && testMatchMode(_actualModeFlags, _expected, Flag::Select)
-               && testMatchMode(_actualModeFlags, _expected, Flag::Insert)
-               && testMatchMode(_actualModeFlags, _expected, Flag::Search)
-               && testMatchMode(_actualModeFlags, _expected, Flag::Trace);
+        using Flag = terminal::match_modes::flag;
+        return testMatchMode(_actualModeFlags, _expected, Flag::alternate_screen)
+               && testMatchMode(_actualModeFlags, _expected, Flag::app_cursor)
+               && testMatchMode(_actualModeFlags, _expected, Flag::app_keypad)
+               && testMatchMode(_actualModeFlags, _expected, Flag::select)
+               && testMatchMode(_actualModeFlags, _expected, Flag::insert)
+               && testMatchMode(_actualModeFlags, _expected, Flag::search)
+               && testMatchMode(_actualModeFlags, _expected, Flag::trace);
     }
 } // namespace helper
 
@@ -150,7 +150,7 @@ struct TerminalProfile
     bool fullscreen = false;
     bool show_title_bar = true;
     bool mouse_hide_while_typing = true;
-    terminal::RefreshRate refreshRate = { 0.0 }; // 0=auto
+    terminal::refresh_rate refreshRate = { 0.0 }; // 0=auto
     terminal::line_offset copyLastMarkRangeOffset = terminal::line_offset(0);
 
     std::string wmClass;
@@ -280,9 +280,9 @@ struct Config
 
     // selection
     std::string wordDelimiters;
-    terminal::modifier bypassMouseProtocolModifier = terminal::modifier::Shift;
+    terminal::modifier bypassMouseProtocolModifier = terminal::modifier::shift;
     SelectionAction onMouseSelection = SelectionAction::CopyToSelectionClipboard;
-    terminal::modifier mouseBlockSelectionModifier = terminal::modifier::Control;
+    terminal::modifier mouseBlockSelectionModifier = terminal::modifier::control;
 
     // input mapping
     InputMappings inputMappings;

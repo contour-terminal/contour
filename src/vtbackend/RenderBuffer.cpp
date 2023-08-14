@@ -20,7 +20,7 @@
 namespace terminal
 {
 
-bool RenderDoubleBuffer::swapBuffers(std::chrono::steady_clock::time_point now) noexcept
+bool render_double_buffer::swapBuffers(std::chrono::steady_clock::time_point now) noexcept
 {
     // If the terminal thread (writer) cannot try_lock (w/o wait time)
     // the front buffer, it'll just flush back buffer instead of swapping
@@ -41,7 +41,7 @@ bool RenderDoubleBuffer::swapBuffers(std::chrono::steady_clock::time_point now) 
     }
 
     lastUpdate = now;
-    state = RenderBufferState::WaitingForRefresh;
+    state = render_buffer_state::WaitingForRefresh;
     return true;
 }
 

@@ -89,14 +89,14 @@ class TextRenderer: public Renderable
 
     /// Renders a given terminal's grid cell that has been
     /// transformed into a RenderCell.
-    void renderCell(RenderCell const& cell);
+    void renderCell(render_cell const& cell);
 
     void renderCell(cell_location position,
                     std::u32string_view graphemeCluster,
                     TextStyle textStyle,
                     rgb_color foregroundColor);
 
-    void renderLine(RenderLine const& renderLine);
+    void renderLine(render_line const& renderLine);
 
     /// Must be invoked when rendering the terminal's text has finished for this frame.
     void endFrame();

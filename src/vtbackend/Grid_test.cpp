@@ -28,11 +28,11 @@ using std::string;
 using std::string_view;
 
 // Default cell type for testing.
-using Cell = PrimaryScreenCell;
+using cell = primary_screen_cell;
 
 namespace
 {
-void logGridText(Grid<Cell> const& grid, string const& headline = "")
+void logGridText(grid<cell> const& grid, string const& headline = "")
 {
     UNSCOPED_INFO(fmt::format("Grid.dump(hist {}, max hist {}, size {}, ZI {}): {}",
                               grid.historyLineCount(),
@@ -51,7 +51,7 @@ void logGridText(Grid<Cell> const& grid, string const& headline = "")
     }
 }
 
-[[maybe_unused]] void logGridTextAlways(Grid<Cell> const& grid, string const& headline = "")
+[[maybe_unused]] void logGridTextAlways(grid<cell> const& grid, string const& headline = "")
 {
     fmt::print("Grid.dump(hist {}, max hist {}, size {}, ZI {}): {}\n",
                grid.historyLineCount(),
@@ -62,12 +62,12 @@ void logGridText(Grid<Cell> const& grid, string const& headline = "")
     fmt::print("{}\n", dumpGrid(grid));
 }
 
-Grid<Cell> setupGrid(PageSize pageSize,
+grid<cell> setupGrid(PageSize pageSize,
                      bool reflowOnResize,
                      LineCount maxHistoryLineCount,
                      std::initializer_list<std::string_view> init)
 {
-    auto grid = Grid<Cell>(pageSize, reflowOnResize, maxHistoryLineCount);
+    auto grid = terminal::grid<cell>(pageSize, reflowOnResize, maxHistoryLineCount);
 
     int cursor = 0;
     for (string_view line: init)
@@ -102,18 +102,18 @@ constexpr terminal::margin fullPageMargin(PageSize pageSize)
                                                    pageSize.columns.as<column_offset>() - 1 } };
 }
 
-[[maybe_unused]] Grid<Cell> setupGrid5x2()
+[[maybe_unused]] grid<cell> setupGrid5x2()
 {
-    auto grid = Grid<Cell>(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(10));
+    auto grid = terminal::grid<cell>(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(10));
     grid.setLineText(line_offset { 0 }, "ABCDE");
     grid.setLineText(line_offset { 1 }, "abcde");
     logGridText(grid, "setup grid at 5x2");
     return grid;
 }
 
-[[maybe_unused]] Grid<Cell> setupGrid5x2x2()
+[[maybe_unused]] grid<cell> setupGrid5x2x2()
 {
-    auto grid = Grid<Cell>(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(2));
+    auto grid = terminal::grid<cell>(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(2));
     grid.scrollUp(LineCount(2));
     grid.setLineText(line_offset { -1 }, "ABCDE");
     grid.setLineText(line_offset { 0 }, "FGHIJ");
@@ -123,16 +123,16 @@ constexpr terminal::margin fullPageMargin(PageSize pageSize)
     return grid;
 }
 
-[[maybe_unused]] Grid<Cell> setupGrid8x2()
+[[maybe_unused]] grid<cell> setupGrid8x2()
 {
-    auto grid = Grid<Cell>(PageSize { LineCount(2), ColumnCount(8) }, true, LineCount(10));
+    auto grid = terminal::grid<cell>(PageSize { LineCount(2), ColumnCount(8) }, true, LineCount(10));
     grid.setLineText(line_offset { 0 }, "ABCDEFGH");
     grid.setLineText(line_offset { 1 }, "abcdefgh");
     logGridText(grid, "setup grid at 5x2");
     return grid;
 }
 
-Grid<Cell> setupGridForResizeTests2x3xN(LineCount maxHistoryLineCount)
+grid<cell> setupGridForResizeTests2x3xN(LineCount maxHistoryLineCount)
 {
     auto constexpr reflowOnResize = true;
     auto constexpr pageSize = PageSize { LineCount(2), ColumnCount(3) };
@@ -140,7 +140,7 @@ Grid<Cell> setupGridForResizeTests2x3xN(LineCount maxHistoryLineCount)
     return setupGrid(pageSize, reflowOnResize, maxHistoryLineCount, { "ABC", "DEF", "GHI", "JKL" });
 }
 
-Grid<Cell> setupGridForResizeTests2x3a3()
+grid<cell> setupGridForResizeTests2x3a3()
 {
     return setupGridForResizeTests2x3xN(LineCount(3));
 }
@@ -149,7 +149,7 @@ Grid<Cell> setupGridForResizeTests2x3a3()
 
 TEST_CASE("Grid.setup", "[grid]")
 {
-    auto grid = Grid<Cell>(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(0));
+    auto grid = terminal::grid<cell>(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(0));
     grid.setLineText(line_offset { 0 }, "ABCDE"sv);
     grid.setLineText(line_offset { 1 }, "abcde"sv);
     logGridText(grid, "setup grid at 5x2");
@@ -160,7 +160,7 @@ TEST_CASE("Grid.setup", "[grid]")
 
 TEST_CASE("Grid.writeAndScrollUp", "[grid]")
 {
-    auto grid = Grid<Cell>(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(3));
+    auto grid = terminal::grid<cell>(PageSize { LineCount(2), ColumnCount(5) }, true, LineCount(3));
     grid.setLineText(line_offset { 0 }, "ABCDE");
     grid.setLineText(line_offset { 1 }, "abcde");
     CHECK(grid.historyLineCount() == LineCount(0));
@@ -185,7 +185,7 @@ TEST_CASE("Grid.writeAndScrollUp", "[grid]")
 
 TEST_CASE("iteratorAt", "[grid]")
 {
-    auto grid = Grid<Cell>(PageSize { LineCount(3), ColumnCount(3) }, true, LineCount(0));
+    auto grid = terminal::grid<cell>(PageSize { LineCount(3), ColumnCount(3) }, true, LineCount(0));
     grid.setLineText(line_offset { 0 }, "ABC"sv);
     grid.setLineText(line_offset { 1 }, "DEF"sv);
     grid.setLineText(line_offset { 2 }, "GHI"sv);
@@ -227,7 +227,7 @@ TEST_CASE("LogicalLines.iterator", "[grid]")
     grid.lineAt(line_offset(1)).setWrapped(true);
     logGridText(grid, "After having set wrapped-flag.");
 
-    LogicalLines logicalLines = grid.logicalLines();
+    logical_lines logicalLines = grid.logicalLines();
     auto lineIt = logicalLines.begin();
 
     // ABC
@@ -412,7 +412,7 @@ TEST_CASE("resize_grow_lines_with_history_cursor_no_bottom", "[grid]")
 
 TEST_CASE("resize_shrink_lines_with_history", "[grid]")
 {
-    auto grid = Grid<Cell>(PageSize { LineCount(2), ColumnCount(3) }, true, LineCount(5));
+    auto grid = terminal::grid<cell>(PageSize { LineCount(2), ColumnCount(3) }, true, LineCount(5));
     auto const gridMargin = fullPageMargin(grid.pageSize());
     grid.scrollUp(LineCount { 1 }, graphics_attributes {}, gridMargin);
     grid.setLineText(line_offset(-1), "ABC");       // history line
@@ -853,14 +853,14 @@ TEST_CASE("Grid.reflow.tripple", "[grid]")
 
 TEST_CASE("Grid infinite", "[grid]")
 {
-    auto grid_finite = Grid<Cell>(PageSize { LineCount(2), ColumnCount(8) }, true, LineCount(0));
+    auto grid_finite = grid<cell>(PageSize { LineCount(2), ColumnCount(8) }, true, LineCount(0));
     grid_finite.setLineText(line_offset { 0 }, "ABCDEFGH"sv);
     grid_finite.setLineText(line_offset { 1 }, "abcdefgh"sv);
     grid_finite.scrollUp(LineCount { 1 });
     REQUIRE(grid_finite.lineText(line_offset(0)) == "abcdefgh");
     REQUIRE(grid_finite.lineText(line_offset(-1)) == std::string(8, ' '));
 
-    auto grid_infinite = Grid<Cell>(PageSize { LineCount(2), ColumnCount(8) }, true, infinite());
+    auto grid_infinite = grid<cell>(PageSize { LineCount(2), ColumnCount(8) }, true, infinite());
     grid_infinite.setLineText(line_offset { 0 }, "ABCDEFGH"sv);
     grid_infinite.setLineText(line_offset { 1 }, "abcdefgh"sv);
     grid_infinite.scrollUp(LineCount { 1 });
@@ -873,7 +873,7 @@ TEST_CASE("Grid infinite", "[grid]")
 
 TEST_CASE("Grid resize with wrap", "[grid]")
 {
-    auto grid = Grid<Cell>(PageSize { LineCount(3), ColumnCount(5) }, true, LineCount(0));
+    auto grid = terminal::grid<cell>(PageSize { LineCount(3), ColumnCount(5) }, true, LineCount(0));
     grid.setLineText(line_offset { 0 }, "1");
     grid.setLineText(line_offset { 1 }, "2");
     grid.setLineText(line_offset { 2 }, "ABCDE");
@@ -891,7 +891,7 @@ TEST_CASE("Grid resize with wrap", "[grid]")
 TEST_CASE("Grid resize", "[grid]")
 {
     auto width = ColumnCount(6);
-    auto grid = Grid<Cell>(PageSize { LineCount(2), width }, true, LineCount(0));
+    auto grid = terminal::grid<cell>(PageSize { LineCount(2), width }, true, LineCount(0));
     auto text = "abcd"sv;
     auto pool = crispy::BufferObjectPool<char>(32);
     auto bufferObject = pool.allocateBufferObject();
@@ -899,7 +899,7 @@ TEST_CASE("Grid resize", "[grid]")
     auto const bufferFragment = bufferObject->ref(0, 4);
     auto const sgr = graphics_attributes {};
     auto const trivial = trivial_line_buffer { width, sgr, sgr, hyperlink_id {}, width, bufferFragment };
-    auto line_trivial = line<Cell>(line_flags::None, trivial);
+    auto line_trivial = line<cell>(line_flags::None, trivial);
     grid.lineAt(line_offset(0)) = line_trivial;
     REQUIRE(grid.lineAt(line_offset(0)).isTrivialBuffer());
     REQUIRE(grid.lineAt(line_offset(1)).isTrivialBuffer());

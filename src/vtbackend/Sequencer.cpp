@@ -30,51 +30,51 @@ using namespace std::string_view_literals;
 namespace terminal
 {
 
-Sequencer::Sequencer(Terminal& terminal):
+sequencer::sequencer(Terminal& terminal):
     _terminal { terminal }, _parameterBuilder { _sequence.getParameters() }
 {
 }
 
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
-void Sequencer::error(std::string_view errorString)
+void sequencer::error(std::string_view errorString)
 {
     if (VTParserLog)
         VTParserLog()("Parser error: {}", errorString);
 }
 
-void Sequencer::print(char32_t codepoint)
+void sequencer::print(char32_t codepoint)
 {
     _terminal.state().instructionCounter++;
     _terminal.sequenceHandler().writeText(codepoint);
 }
 
-size_t Sequencer::print(string_view chars, size_t cellCount)
+size_t sequencer::print(string_view chars, size_t cellCount)
 {
     assert(!chars.empty());
 
     _terminal.state().instructionCounter += chars.size();
     _terminal.sequenceHandler().writeText(chars, cellCount);
 
-    return _terminal.settings().pageSize.columns.as<size_t>()
-           - _terminal.currentScreen().cursor().position.column.as<size_t>();
+    return _terminal.getSettings().pageSize.columns.as<size_t>()
+           - _terminal.currentScreen().getCursor().position.column.as<size_t>();
 }
 
-void Sequencer::execute(char controlCode)
+void sequencer::execute(char controlCode)
 {
     _terminal.sequenceHandler().executeControlCode(controlCode);
 }
 
-void Sequencer::collect(char ch)
+void sequencer::collect(char ch)
 {
     _sequence.intermediateCharacters().push_back(ch);
 }
 
-void Sequencer::collectLeader(char leader) noexcept
+void sequencer::collectLeader(char leader) noexcept
 {
     _sequence.setLeader(leader);
 }
 
-void Sequencer::param(char ch) noexcept
+void sequencer::param(char ch) noexcept
 {
     switch (ch)
     {
@@ -93,32 +93,32 @@ void Sequencer::param(char ch) noexcept
     }
 }
 
-void Sequencer::dispatchESC(char finalChar)
+void sequencer::dispatchESC(char finalChar)
 {
     _sequence.setCategory(function_category::ESC);
     _sequence.setFinalChar(finalChar);
     handleSequence();
 }
 
-void Sequencer::dispatchCSI(char finalChar)
+void sequencer::dispatchCSI(char finalChar)
 {
     _sequence.setCategory(function_category::CSI);
     _sequence.setFinalChar(finalChar);
     handleSequence();
 }
 
-void Sequencer::startOSC()
+void sequencer::startOSC()
 {
     _sequence.setCategory(function_category::OSC);
 }
 
-void Sequencer::putOSC(char ch)
+void sequencer::putOSC(char ch)
 {
     if (_sequence.intermediateCharacters().size() + 1 < sequence::MaxOscLength)
         _sequence.intermediateCharacters().push_back(ch);
 }
 
-void Sequencer::dispatchOSC()
+void sequencer::dispatchOSC()
 {
     auto const [code, skipCount] = parser::extractCodePrefix(_sequence.intermediateCharacters());
     _parameterBuilder.set(static_cast<sequence::parameter>(code));
@@ -127,7 +127,7 @@ void Sequencer::dispatchOSC()
     clear();
 }
 
-void Sequencer::hook(char finalChar)
+void sequencer::hook(char finalChar)
 {
     _terminal.state().instructionCounter++;
     _sequence.setCategory(function_category::DCS);
@@ -136,13 +136,13 @@ void Sequencer::hook(char finalChar)
     handleSequence();
 }
 
-void Sequencer::put(char ch)
+void sequencer::put(char ch)
 {
     if (_hookedParser)
         _hookedParser->pass(ch);
 }
 
-void Sequencer::unhook()
+void sequencer::unhook()
 {
     if (_hookedParser)
     {
@@ -151,7 +151,7 @@ void Sequencer::unhook()
     }
 }
 
-size_t Sequencer::maxBulkTextSequenceWidth() const noexcept
+size_t sequencer::maxBulkTextSequenceWidth() const noexcept
 {
     if (!_terminal.isPrimaryScreen())
         return 0;
@@ -162,10 +162,10 @@ size_t Sequencer::maxBulkTextSequenceWidth() const noexcept
     assert(_terminal.currentScreen().margin().horizontal.to
            >= _terminal.currentScreen().cursor().position.column);
     return unbox<size_t>(_terminal.currentScreen().getMargin().hori.to
-                         - _terminal.currentScreen().cursor().position.column);
+                         - _terminal.currentScreen().getCursor().position.column);
 }
 
-void Sequencer::handleSequence()
+void sequencer::handleSequence()
 {
     _parameterBuilder.fixiate();
     _terminal.sequenceHandler().processSequence(_sequence);

@@ -22,8 +22,8 @@ namespace terminal
 
 class Terminal;
 
-TerminalState::TerminalState(Terminal& terminal):
-    settings { terminal.settings() },
+terminal_state::terminal_state(Terminal& terminal):
+    settings { terminal.getSettings() },
     cellPixelSize {},
     effectiveImageCanvasSize { settings.maxImageSize },
     imageColorPalette { std::make_shared<sixel_color_palette>(maxImageColorRegisters,

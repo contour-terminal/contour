@@ -200,13 +200,13 @@ string to_string(modifier modifier)
         out += s;
     };
 
-    if (modifier.shift())
+    if (modifier.isShift())
         append("Shift");
-    if (modifier.alt())
+    if (modifier.isAlt())
         append("Alt");
-    if (modifier.control())
+    if (modifier.isControlt())
         append("Control");
-    if (modifier.meta())
+    if (modifier.isMeta())
         append("Meta");
 
     return out;
@@ -332,7 +332,7 @@ bool input_generator::generate(char32_t characterEvent, modifier modifier)
     char const chr = static_cast<char>(characterEvent);
 
     // See section "Alt and Meta Keys" in ctlseqs.txt from xterm.
-    if (modifier.alt())
+    if (modifier.isAlt())
         // NB: There are other modes in xterm to send Alt+Key options or even send ESC on Meta key instead.
         append("\033");
 
@@ -341,29 +341,29 @@ bool input_generator::generate(char32_t characterEvent, modifier modifier)
     // - Ctrl+Backspace is emitting 0x08
     if (characterEvent == 0x08)
     {
-        if (!modifier.control())
+        if (!modifier.isControlt())
             return append("\x7f");
         else
             return append("\x08");
     }
 
-    if (modifier == modifier::Shift && characterEvent == 0x09)
+    if (modifier == modifier::shift && characterEvent == 0x09)
         return append("\033[Z"); // introduced by linux_console in 1995, adopted by xterm in 2002
 
     // raw C0 code
-    if (modifier == modifier::Control && characterEvent < 32)
+    if (modifier == modifier::control && characterEvent < 32)
         return append(static_cast<uint8_t>(characterEvent));
 
-    if (modifier == modifier::Control && characterEvent == L' ')
+    if (modifier == modifier::control && characterEvent == L' ')
         return append('\x00');
 
-    if (modifier == modifier::Control && crispy::ascending('A', chr, 'Z'))
+    if (modifier == modifier::control && crispy::ascending('A', chr, 'Z'))
         return append(static_cast<char>(chr - 'A' + 1));
 
-    if (modifier == modifier::Control && characterEvent >= '[' && characterEvent <= '_')
+    if (modifier == modifier::control && characterEvent >= '[' && characterEvent <= '_')
         return append(static_cast<char>(chr - 'A' + 1)); // remaining C0 characters 0x1B .. 0x1F
 
-    if (modifier.without(modifier::Alt).none() || modifier == modifier::Shift)
+    if (modifier.without(modifier::alt).isNone() || modifier == modifier::shift)
         return append(unicode::convert_to<char>(characterEvent));
 
     if (characterEvent < 0x7F)
@@ -499,11 +499,11 @@ namespace
     constexpr uint8_t modifierBits(modifier modifier) noexcept
     {
         uint8_t mods = 0;
-        if (modifier.shift())
+        if (modifier.isShift())
             mods |= 4;
-        if (modifier.meta())
+        if (modifier.isMeta())
             mods |= 8;
-        if (modifier.control())
+        if (modifier.isControlt())
             mods |= 16;
         return mods;
     }

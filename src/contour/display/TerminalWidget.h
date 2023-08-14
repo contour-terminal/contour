@@ -128,7 +128,7 @@ class TerminalWidget: public QQuickItem
     void post(std::function<void()> _fn);
 
     // Attributes
-    [[nodiscard]] terminal::RefreshRate refreshRate() const;
+    [[nodiscard]] terminal::refresh_rate refreshRate() const;
     text::DPI fontDPI() const noexcept;
     [[nodiscard]] bool isFullScreen() const;
 

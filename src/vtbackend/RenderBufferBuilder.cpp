@@ -19,6 +19,7 @@
 
 #include <crispy/utils.h>
 
+#include "vtbackend/RenderBuffer.h"
 #include "vtbackend/primitives.h"
 #include <libunicode/convert.h>
 #include <libunicode/utf8_grapheme_segmenter.h>
@@ -117,14 +118,14 @@ namespace
 } // namespace
 
 template <typename Cell>
-RenderBufferBuilder<Cell>::RenderBufferBuilder(Terminal const& terminal,
-                                               RenderBuffer& output,
-                                               line_offset base,
-                                               bool theReverseVideo,
-                                               highlight_search_matches highlightSearchMatches,
-                                               input_method_data inputMethodData,
-                                               optional<cell_location> theCursorPosition,
-                                               bool includeSelection):
+render_buffer_builder<Cell>::render_buffer_builder(Terminal const& terminal,
+                                                   render_buffer& output,
+                                                   line_offset base,
+                                                   bool theReverseVideo,
+                                                   highlight_search_matches highlightSearchMatches,
+                                                   input_method_data inputMethodData,
+                                                   optional<cell_location> theCursorPosition,
+                                                   bool includeSelection):
     _output { output },
     _terminal { terminal },
     _cursorPosition { theCursorPosition },
@@ -141,7 +142,7 @@ RenderBufferBuilder<Cell>::RenderBufferBuilder(Terminal const& terminal,
 }
 
 template <typename Cell>
-optional<RenderCursor> RenderBufferBuilder<Cell>::renderCursor() const
+optional<render_cursor> render_buffer_builder<Cell>::renderCursor() const
 {
     if (!_cursorPosition || !_terminal.cursorCurrentlyVisible()
         || !_terminal.get_viewport().isLineVisible(_cursorPosition->line))
@@ -159,21 +160,21 @@ optional<RenderCursor> RenderBufferBuilder<Cell>::renderCursor() const
 
     auto const cellWidth = _terminal.currentScreen().cellWidthAt(*_cursorPosition);
 
-    return RenderCursor { cursorScreenPosition, shape, cellWidth };
+    return render_cursor { cursorScreenPosition, shape, cellWidth };
 }
 
 template <typename Cell>
-RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(color_palette const& colorPalette,
-                                                             u32string graphemeCluster,
-                                                             ColumnCount width,
-                                                             cell_flags flags,
-                                                             rgb_color fg,
-                                                             rgb_color bg,
-                                                             color ul,
-                                                             line_offset line,
-                                                             column_offset column)
+render_cell render_buffer_builder<Cell>::makeRenderCellExplicit(color_palette const& colorPalette,
+                                                                u32string graphemeCluster,
+                                                                ColumnCount width,
+                                                                cell_flags flags,
+                                                                rgb_color fg,
+                                                                rgb_color bg,
+                                                                color ul,
+                                                                line_offset line,
+                                                                column_offset column)
 {
-    auto renderCell = RenderCell {};
+    auto renderCell = render_cell {};
     renderCell.attributes.backgroundColor = bg;
     renderCell.attributes.foregroundColor = fg;
     renderCell.attributes.decorationColor = CellUtil::makeUnderlineColor(colorPalette, fg, ul, flags);
@@ -186,16 +187,16 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(color_palette const
 }
 
 template <typename Cell>
-RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(color_palette const& colorPalette,
-                                                             char32_t codepoint,
-                                                             cell_flags flags,
-                                                             rgb_color fg,
-                                                             rgb_color bg,
-                                                             color ul,
-                                                             line_offset line,
-                                                             column_offset column)
+render_cell render_buffer_builder<Cell>::makeRenderCellExplicit(color_palette const& colorPalette,
+                                                                char32_t codepoint,
+                                                                cell_flags flags,
+                                                                rgb_color fg,
+                                                                rgb_color bg,
+                                                                color ul,
+                                                                line_offset line,
+                                                                column_offset column)
 {
-    RenderCell renderCell;
+    render_cell renderCell;
     renderCell.attributes.backgroundColor = bg;
     renderCell.attributes.foregroundColor = fg;
     renderCell.attributes.decorationColor = CellUtil::makeUnderlineColor(colorPalette, fg, ul, flags);
@@ -209,15 +210,15 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCellExplicit(color_palette const
 }
 
 template <typename Cell>
-RenderCell RenderBufferBuilder<Cell>::makeRenderCell(color_palette const& colorPalette,
-                                                     hyperlink_storage const& hyperlinks,
-                                                     Cell const& screenCell,
-                                                     rgb_color fg,
-                                                     rgb_color bg,
-                                                     line_offset line,
-                                                     column_offset column)
+render_cell render_buffer_builder<Cell>::makeRenderCell(color_palette const& colorPalette,
+                                                        hyperlink_storage const& hyperlinks,
+                                                        Cell const& screenCell,
+                                                        rgb_color fg,
+                                                        rgb_color bg,
+                                                        line_offset line,
+                                                        column_offset column)
 {
-    RenderCell renderCell;
+    render_cell renderCell;
     renderCell.attributes.backgroundColor = bg;
     renderCell.attributes.foregroundColor = fg;
     renderCell.attributes.decorationColor = CellUtil::makeUnderlineColor(colorPalette, fg, screenCell);
@@ -251,10 +252,10 @@ RenderCell RenderBufferBuilder<Cell>::makeRenderCell(color_palette const& colorP
 }
 
 template <typename Cell>
-rgb_color_pair RenderBufferBuilder<Cell>::makeColorsForCell(cell_location gridPosition,
-                                                            cell_flags cellFlags,
-                                                            color foregroundColor,
-                                                            color backgroundColor) const noexcept
+rgb_color_pair render_buffer_builder<Cell>::makeColorsForCell(cell_location gridPosition,
+                                                              cell_flags cellFlags,
+                                                              color foregroundColor,
+                                                              color backgroundColor) const noexcept
 {
     auto const hasCursor = _cursorPosition && gridPosition == *_cursorPosition;
 
@@ -286,14 +287,14 @@ rgb_color_pair RenderBufferBuilder<Cell>::makeColorsForCell(cell_location gridPo
 }
 
 template <typename Cell>
-RenderAttributes RenderBufferBuilder<Cell>::createRenderAttributes(
+render_attributes render_buffer_builder<Cell>::createRenderAttributes(
     cell_location gridPosition, graphics_attributes graphicsAttributes) const noexcept
 {
     auto const [fg, bg] = makeColorsForCell(gridPosition,
                                             graphicsAttributes.flags,
                                             graphicsAttributes.foregroundColor,
                                             graphicsAttributes.backgroundColor);
-    auto renderAttributes = RenderAttributes {};
+    auto renderAttributes = render_attributes {};
     renderAttributes.foregroundColor = fg;
     renderAttributes.backgroundColor = bg;
     renderAttributes.decorationColor = CellUtil::makeUnderlineColor(
@@ -303,12 +304,12 @@ RenderAttributes RenderBufferBuilder<Cell>::createRenderAttributes(
 }
 
 template <typename Cell>
-RenderLine RenderBufferBuilder<Cell>::createRenderLine(trivial_line_buffer const& lineBuffer,
-                                                       line_offset lineOffset) const
+render_line render_buffer_builder<Cell>::createRenderLine(trivial_line_buffer const& lineBuffer,
+                                                          line_offset lineOffset) const
 {
     auto const pos = cell_location { lineOffset, column_offset(0) };
     auto const gridPosition = _terminal.get_viewport().translateScreenToGridCoordinate(pos);
-    auto renderLine = RenderLine {};
+    auto renderLine = render_line {};
     renderLine.lineOffset = lineOffset;
     renderLine.usedColumns = lineBuffer.usedColumns;
     renderLine.displayWidth = _terminal.pageSize().columns;
@@ -320,9 +321,9 @@ RenderLine RenderBufferBuilder<Cell>::createRenderLine(trivial_line_buffer const
 }
 
 template <typename Cell>
-bool RenderBufferBuilder<Cell>::gridLineContainsCursor(line_offset lineOffset) const noexcept
+bool render_buffer_builder<Cell>::gridLineContainsCursor(line_offset lineOffset) const noexcept
 {
-    if (_terminal.currentScreen().cursor().position.line == lineOffset)
+    if (_terminal.currentScreen().getCursor().position.line == lineOffset)
         return true;
 
     if (_cursorPosition && _terminal.state().inputHandler.mode() != vi_mode::Insert)
@@ -336,8 +337,8 @@ bool RenderBufferBuilder<Cell>::gridLineContainsCursor(line_offset lineOffset) c
 }
 
 template <typename Cell>
-void RenderBufferBuilder<Cell>::renderTrivialLine(trivial_line_buffer const& lineBuffer,
-                                                  line_offset lineOffset)
+void render_buffer_builder<Cell>::renderTrivialLine(trivial_line_buffer const& lineBuffer,
+                                                    line_offset lineOffset)
 {
     // if (lineBuffer.text.size())
     //     fmt::print("Rendering trivial line {:2} 0..{}/{} ({} bytes): \"{}\"\n",
@@ -409,7 +410,7 @@ void RenderBufferBuilder<Cell>::renderTrivialLine(trivial_line_buffer const& lin
 
 template <typename Cell>
 template <typename T>
-void RenderBufferBuilder<Cell>::matchSearchPattern(T const& cellText)
+void render_buffer_builder<Cell>::matchSearchPattern(T const& cellText)
 {
     if (_highlightSearchMatches == highlight_search_matches::No)
         return;
@@ -492,7 +493,7 @@ void RenderBufferBuilder<Cell>::matchSearchPattern(T const& cellText)
 }
 
 template <typename Cell>
-void RenderBufferBuilder<Cell>::startLine(line_offset line) noexcept
+void render_buffer_builder<Cell>::startLine(line_offset line) noexcept
 {
     _lineNr = line;
     _prevWidth = 0;
@@ -502,7 +503,7 @@ void RenderBufferBuilder<Cell>::startLine(line_offset line) noexcept
 }
 
 template <typename Cell>
-bool RenderBufferBuilder<Cell>::isCursorLine(line_offset line) const noexcept
+bool render_buffer_builder<Cell>::isCursorLine(line_offset line) const noexcept
 {
     return _terminal.inputHandler().mode() != vi_mode::Insert && _cursorPosition
            && line
@@ -512,7 +513,7 @@ bool RenderBufferBuilder<Cell>::isCursorLine(line_offset line) const noexcept
 }
 
 template <typename Cell>
-void RenderBufferBuilder<Cell>::endLine() noexcept
+void render_buffer_builder<Cell>::endLine() noexcept
 {
     if (!_output.cells.empty())
     {
@@ -521,10 +522,10 @@ void RenderBufferBuilder<Cell>::endLine() noexcept
 }
 
 template <typename Cell>
-ColumnCount RenderBufferBuilder<Cell>::renderUtf8Text(cell_location screenPosition,
-                                                      graphics_attributes textAttributes,
-                                                      std::string_view text,
-                                                      bool allowMatchSearchPattern)
+ColumnCount render_buffer_builder<Cell>::renderUtf8Text(cell_location screenPosition,
+                                                        graphics_attributes textAttributes,
+                                                        std::string_view text,
+                                                        bool allowMatchSearchPattern)
 {
     auto columnCountRendered = ColumnCount(0);
 
@@ -582,8 +583,8 @@ ColumnCount RenderBufferBuilder<Cell>::renderUtf8Text(cell_location screenPositi
 }
 
 template <typename Cell>
-bool RenderBufferBuilder<Cell>::tryRenderInputMethodEditor(cell_location screenPosition,
-                                                           cell_location gridPosition)
+bool render_buffer_builder<Cell>::tryRenderInputMethodEditor(cell_location screenPosition,
+                                                             cell_location gridPosition)
 {
     // Render IME preeditString if available and screen position matches cursor position.
     if (_cursorPosition && gridPosition == *_cursorPosition && !_inputMethodData.preeditString.empty())
@@ -616,7 +617,7 @@ bool RenderBufferBuilder<Cell>::tryRenderInputMethodEditor(cell_location screenP
 }
 
 template <typename Cell>
-void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, line_offset line, column_offset column)
+void render_buffer_builder<Cell>::renderCell(Cell const& screenCell, line_offset line, column_offset column)
 {
     auto const screenPosition = cell_location { line, column };
     auto const gridPosition = _terminal.get_viewport().translateScreenToGridCoordinate(screenPosition);
@@ -647,7 +648,7 @@ void RenderBufferBuilder<Cell>::renderCell(Cell const& screenCell, line_offset l
 } // namespace terminal
 
 #include <vtbackend/cell/CompactCell.h>
-template class terminal::RenderBufferBuilder<terminal::compact_cell>;
+template class terminal::render_buffer_builder<terminal::compact_cell>;
 
 #include <vtbackend/cell/SimpleCell.h>
-template class terminal::RenderBufferBuilder<terminal::simple_cell>;
+template class terminal::render_buffer_builder<terminal::simple_cell>;

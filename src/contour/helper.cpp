@@ -228,11 +228,11 @@ bool sendKeyEvent(QKeyEvent* _event, TerminalSession& _session)
 
     if (key == Qt::Key_Backtab)
     {
-        _session.sendCharPressEvent(U'\t', modifiers.with(modifier::Shift), now);
+        _session.sendCharPressEvent(U'\t', modifiers.with(modifier::shift), now);
         return true;
     }
 
-    if (modifiers.control() && key >= 0x20 && key < 0x80)
+    if (modifiers.isControlt() && key >= 0x20 && key < 0x80)
     {
         _session.sendCharPressEvent(static_cast<char32_t>(key), modifiers, now);
         return true;

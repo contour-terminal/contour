@@ -61,7 +61,7 @@ namespace
 
     constexpr input_match operator"" _key(char ch)
     {
-        return input_match { modifier::None, static_cast<char32_t>(ch) };
+        return input_match { modifier::none, static_cast<char32_t>(ch) };
     }
 
     constexpr input_match operator|(modifier::key mod, char ch) noexcept
@@ -250,13 +250,13 @@ void vi_input_handler::registerCommand(mode_select modes, std::string_view comma
 
 void vi_input_handler::appendModifierToPendingInput(modifier modifier)
 {
-    if (modifier.meta())
+    if (modifier.isMeta())
         _pendingInput += "M-";
-    if (modifier.alt())
+    if (modifier.isAlt())
         _pendingInput += "A-";
-    if (modifier.shift())
+    if (modifier.isShift())
         _pendingInput += "S-";
-    if (modifier.control())
+    if (modifier.isControlt())
         _pendingInput += "C-";
 }
 
@@ -398,15 +398,15 @@ bool vi_input_handler::handleSearchEditor(char32_t ch, modifier modifier)
                 _searchTerm.resize(_searchTerm.size() - 1);
             _executor.updateSearchTerm(_searchTerm);
             break;
-        case modifier::Control | 'L':
-        case modifier::Control | 'U':
+        case modifier::control | 'L':
+        case modifier::control | 'U':
             _searchTerm.clear();
             _executor.updateSearchTerm(_searchTerm);
             break;
-        case modifier::Control | 'A': // TODO: move cursor to BOL
-        case modifier::Control | 'E': // TODO: move cursor to EOL
+        case modifier::control | 'A': // TODO: move cursor to BOL
+        case modifier::control | 'E': // TODO: move cursor to EOL
         default:
-            if (ch >= 0x20 && modifier.without(modifier::Shift).none())
+            if (ch >= 0x20 && modifier.without(modifier::shift).isNone())
             {
                 _searchTerm += ch;
                 _executor.updateSearchTerm(_searchTerm);
@@ -428,7 +428,7 @@ bool vi_input_handler::sendCharPressEvent(char32_t ch, modifier modifier)
     if (_viMode == vi_mode::Insert)
         return false;
 
-    if (ch == 033 && modifier.none())
+    if (ch == 033 && modifier.isNone())
     {
         clearPendingInput();
         setMode(vi_mode::Normal);
@@ -438,7 +438,7 @@ bool vi_input_handler::sendCharPressEvent(char32_t ch, modifier modifier)
     if (parseCount(ch, modifier))
         return true;
 
-    appendModifierToPendingInput(ch > 0x20 ? modifier.without(modifier::Shift) : modifier);
+    appendModifierToPendingInput(ch > 0x20 ? modifier.without(modifier::shift) : modifier);
 
     if (ch == '\033')
         _pendingInput += "<ESC>";
@@ -457,7 +457,7 @@ bool vi_input_handler::sendCharPressEvent(char32_t ch, modifier modifier)
 
 bool vi_input_handler::parseCount(char32_t ch, modifier modifier)
 {
-    if (!modifier.none())
+    if (!modifier.isNone())
         return false;
 
     switch (ch)

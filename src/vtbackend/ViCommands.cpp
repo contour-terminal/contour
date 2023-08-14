@@ -122,9 +122,9 @@ namespace
     cell_location getRightMostNonEmptyCellLocation(Terminal const& terminal, line_offset lineOffset) noexcept
     {
         if (terminal.isPrimaryScreen())
-            return terminal.primaryScreen().grid().rightMostNonEmptyAt(lineOffset);
+            return terminal.primaryScreen().getGrid().rightMostNonEmptyAt(lineOffset);
         else
-            return terminal.alternateScreen().grid().rightMostNonEmptyAt(lineOffset);
+            return terminal.alternateScreen().getGrid().rightMostNonEmptyAt(lineOffset);
     }
 
     constexpr std::optional<std::pair<char, bool>> matchingPairOfChar(char input) noexcept
@@ -282,27 +282,27 @@ void vi_commands::modeChanged(vi_mode mode)
             _terminal.setMode(dec_mode::VisibleCursor, true);
 
             if (_lastMode == vi_mode::Insert)
-                cursorPosition = _terminal.currentScreen().cursor().position;
+                cursorPosition = _terminal.currentScreen().getCursor().position;
             if (_terminal.selectionAvailable())
                 _terminal.clearSelection();
             _terminal.pushStatusDisplay(status_display_type::Indicator);
             _terminal.screenUpdated();
             break;
         case vi_mode::Visual:
-            _terminal.setSelector(make_unique<LinearSelection>(
+            _terminal.setSelector(make_unique<linear_selection>(
                 _terminal.selectionHelper(), selectFrom, _terminal.selectionUpdatedHelper()));
             (void) _terminal.selector()->extend(cursorPosition);
             _terminal.pushStatusDisplay(status_display_type::Indicator);
             break;
         case vi_mode::VisualLine:
-            _terminal.setSelector(make_unique<FullLineSelection>(
+            _terminal.setSelector(make_unique<full_line_selection>(
                 _terminal.selectionHelper(), selectFrom, _terminal.selectionUpdatedHelper()));
             (void) _terminal.selector()->extend(cursorPosition);
             _terminal.pushStatusDisplay(status_display_type::Indicator);
             _terminal.screenUpdated();
             break;
         case vi_mode::VisualBlock:
-            _terminal.setSelector(make_unique<RectangularSelection>(
+            _terminal.setSelector(make_unique<rectangular_selection>(
                 _terminal.selectionHelper(), selectFrom, _terminal.selectionUpdatedHelper()));
             (void) _terminal.selector()->extend(cursorPosition);
             _terminal.pushStatusDisplay(status_display_type::Indicator);
@@ -376,7 +376,7 @@ void vi_commands::executeYank(cell_location from, cell_location to)
     // has happened and that it can now either be instantly destroyed
     // or delayed (N msecs, configurable),
     _terminal.setSelector(
-        make_unique<LinearSelection>(_terminal.selectionHelper(), from, _terminal.selectionUpdatedHelper()));
+        make_unique<linear_selection>(_terminal.selectionHelper(), from, _terminal.selectionUpdatedHelper()));
     (void) _terminal.selector()->extend(to);
     auto const text = _terminal.extractSelectionText();
     _terminal.copyToClipboard(text);
@@ -429,7 +429,7 @@ void vi_commands::select(text_object_scope scope, text_object textObject)
                from,
                to);
     _terminal.setSelector(
-        make_unique<LinearSelection>(_terminal.selectionHelper(), from, _terminal.selectionUpdatedHelper()));
+        make_unique<linear_selection>(_terminal.selectionHelper(), from, _terminal.selectionUpdatedHelper()));
     (void) _terminal.selector()->extend(to);
     _terminal.screenUpdated();
 }

@@ -55,15 +55,15 @@
 namespace terminal
 {
 
-class ScreenBase: public sequence_handler
+class screen_base: public sequence_handler
 {
   public:
     virtual void verifyState() const = 0;
     virtual void fail(std::string const& message) const = 0;
 
-    [[nodiscard]] Cursor& cursor() noexcept { return _cursor; }
-    [[nodiscard]] Cursor const& cursor() const noexcept { return _cursor; }
-    [[nodiscard]] Cursor const& savedCursorState() const noexcept { return _savedCursor; }
+    [[nodiscard]] cursor& getCursor() noexcept { return _cursor; }
+    [[nodiscard]] cursor const& getCursor() const noexcept { return _cursor; }
+    [[nodiscard]] cursor const& savedCursorState() const noexcept { return _savedCursor; }
     void resetSavedCursorState() { _savedCursor = {}; }
     virtual void saveCursor() = 0;
     virtual void restoreCursor() = 0;
@@ -96,8 +96,8 @@ class ScreenBase: public sequence_handler
                                                                      cell_location startPosition) = 0;
 
   protected:
-    Cursor _cursor {};
-    Cursor _savedCursor {};
+    cursor _cursor {};
+    cursor _savedCursor {};
 };
 
 /**
@@ -110,7 +110,7 @@ class ScreenBase: public sequence_handler
  */
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-class Screen final: public ScreenBase, public capabilities::static_database
+class screen final: public screen_base, public capabilities::static_database
 {
   public:
     /// @param terminal            reference to the terminal this display belongs to.
@@ -118,16 +118,16 @@ class Screen final: public ScreenBase, public capabilities::static_database
     ///                            need to match the terminal's main display page size.
     /// @param reflowOnResize      whether or not to perform virtual line text reflow on resuze.
     /// @param maxHistoryLineCount maximum number of lines that are can be scrolled back to via Viewport.
-    Screen(Terminal& terminal,
+    screen(Terminal& terminal,
            PageSize pageSize,
            bool reflowOnResize,
            max_history_line_count maxHistoryLineCount);
 
-    Screen(Screen const&) = delete;
-    Screen& operator=(Screen const&) = delete;
-    Screen(Screen&&) noexcept = default;
-    Screen& operator=(Screen&&) noexcept = default;
-    ~Screen() override = default;
+    screen(screen const&) = delete;
+    screen& operator=(screen const&) = delete;
+    screen(screen&&) noexcept = default;
+    screen& operator=(screen&&) noexcept = default;
+    ~screen() override = default;
 
     using static_database::numericCapability;
     [[nodiscard]] unsigned numericCapability(capabilities::code cap) const override;
@@ -143,7 +143,7 @@ class Screen final: public ScreenBase, public capabilities::static_database
 
     /// Renders the full screen by passing every grid cell to the callback.
     template <typename Renderer>
-    RenderPassHints render(
+    render_pass_hints render(
         Renderer&& render,
         scroll_offset scrollOffset = {},
         highlight_search_matches highlightSearchMatches = highlight_search_matches::Yes) const
@@ -223,11 +223,11 @@ class Screen final: public ScreenBase, public capabilities::static_database
     void moveCursorToPrevLine(LineCount n);                             // CPL
     void moveCursorUp(LineCount n);                                     // CUU
 
-    void cursorBackwardTab(tab_stop_count count);      // CBT
-    void cursorForwardTab(tab_stop_count count);       // CHT
-    void backspace();                                  // BS
-    void horizontalTabClear(HorizontalTabClear which); // TBC
-    void horizontalTabSet();                           // HTS
+    void cursorBackwardTab(tab_stop_count count);        // CBT
+    void cursorForwardTab(tab_stop_count count);         // CHT
+    void backspace();                                    // BS
+    void horizontalTabClear(horizontal_tab_clear which); // TBC
+    void horizontalTabSet();                             // HTS
 
     void index();        // IND
     void reverseIndex(); // RI
@@ -260,15 +260,15 @@ class Screen final: public ScreenBase, public capabilities::static_database
     void applicationKeypadMode(bool enable);
     void designateCharset(charset_table table, charset_id charset);
     void singleShiftSelect(charset_table table);
-    void requestPixelSize(RequestPixelSize area);
-    void requestCharacterSize(RequestPixelSize area);
+    void requestPixelSize(request_pixel_size area);
+    void requestCharacterSize(request_pixel_size area);
     void sixelImage(image_size pixelSize, image::data&& rgbaData);
-    void requestStatusString(RequestStatusString value);
+    void requestStatusString(request_status_string value);
     void requestTabStops();
     void resetDynamicColor(dynamic_color_name name);
     void setDynamicColor(dynamic_color_name name, rgb_color color);
     void inspect();
-    void smGraphics(XtSmGraphics::Item item, XtSmGraphics::Action action, XtSmGraphics::Value value);
+    void smGraphics(XtSmGraphics::item item, XtSmGraphics::action action, XtSmGraphics::value value);
     // }}}
 
     std::shared_ptr<image const> uploadImage(image_format format, image_size imageSize, image::data&& pixmap);
@@ -497,8 +497,8 @@ class Screen final: public ScreenBase, public capabilities::static_database
 
     void verifyState() const override;
 
-    [[nodiscard]] Grid<Cell> const& grid() const noexcept { return _grid; }
-    [[nodiscard]] Grid<Cell>& grid() noexcept { return _grid; }
+    [[nodiscard]] grid<Cell> const& getGrid() const noexcept { return _grid; }
+    [[nodiscard]] grid<Cell>& getGrid() noexcept { return _grid; }
 
     /// @returns true iff given absolute line number is wrapped, false otherwise.
     [[nodiscard]] bool isLineWrapped(line_offset lineNumber) const noexcept
@@ -592,7 +592,7 @@ class Screen final: public ScreenBase, public capabilities::static_database
     }
 
     void applyAndLog(function_definition const& function, sequence const& seq);
-    [[nodiscard]] ApplyResult apply(function_definition const& function, sequence const& seq);
+    [[nodiscard]] apply_result apply(function_definition const& function, sequence const& seq);
 
     void fail(std::string const& message) const override;
 
@@ -601,7 +601,7 @@ class Screen final: public ScreenBase, public capabilities::static_database
 
     void saveCursor() override;
     void restoreCursor() override;
-    void restoreCursor(Cursor const& savedCursor);
+    void restoreCursor(cursor const& savedCursor);
 
   private:
     void writeTextInternal(char32_t codepoint);
@@ -640,9 +640,9 @@ class Screen final: public ScreenBase, public capabilities::static_database
     [[nodiscard]] std::unique_ptr<ParserExtension> hookXTGETTCAP(sequence const& seq);
 
     Terminal& _terminal;
-    Settings& _settings;
-    TerminalState& _state;
-    Grid<Cell> _grid;
+    settings& _settings;
+    terminal_state& _state;
+    grid<Cell> _grid;
 
     cell_location _lastCursorPosition {};
 
@@ -654,14 +654,14 @@ class Screen final: public ScreenBase, public capabilities::static_database
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-inline void Screen<Cell>::scrollUp(LineCount n, margin margin)
+inline void screen<Cell>::scrollUp(LineCount n, margin margin)
 {
-    scrollUp(n, cursor().graphicsRendition, margin);
+    scrollUp(n, getCursor().graphicsRendition, margin);
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-inline bool Screen<Cell>::isContiguousToCurrentLine(std::string_view continuationChars) const noexcept
+inline bool screen<Cell>::isContiguousToCurrentLine(std::string_view continuationChars) const noexcept
 {
     auto const& line = currentLine();
     return line.isTrivialBuffer() && line.trivialBuffer().text.view().end() == continuationChars.begin();

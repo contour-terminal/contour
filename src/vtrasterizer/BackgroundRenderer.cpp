@@ -34,7 +34,7 @@ void BackgroundRenderer::setRenderTarget(RenderTarget& renderTarget,
     Renderable::setRenderTarget(renderTarget, directMappingAllocator);
 }
 
-void BackgroundRenderer::renderLine(RenderLine const& line)
+void BackgroundRenderer::renderLine(render_line const& line)
 {
     if (line.textAttributes.backgroundColor != _defaultColor)
     {
@@ -64,7 +64,7 @@ void BackgroundRenderer::renderLine(RenderLine const& line)
     }
 }
 
-void BackgroundRenderer::renderCell(RenderCell const& cell)
+void BackgroundRenderer::renderCell(render_cell const& cell)
 {
     if (cell.attributes.backgroundColor == _defaultColor)
         return;

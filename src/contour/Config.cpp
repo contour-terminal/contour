@@ -665,23 +665,23 @@ namespace
         using terminal::modifier;
         auto const key = toUpper(_key);
         if (key == "ALT")
-            return modifier::key::Alt;
+            return modifier::key::alt;
         if (key == "CONTROL")
-            return modifier::key::Control;
+            return modifier::key::control;
         if (key == "SHIFT")
-            return modifier::key::Shift;
+            return modifier::key::shift;
         if (key == "META")
-            return modifier::key::Meta;
+            return modifier::key::meta;
         return nullopt;
     }
 
-    optional<terminal::MatchModes> parseMatchModes(UsedKeys& _usedKeys,
-                                                   string const& _prefix,
-                                                   YAML::Node const& _node)
+    optional<terminal::match_modes> parseMatchModes(UsedKeys& _usedKeys,
+                                                    string const& _prefix,
+                                                    YAML::Node const& _node)
     {
-        using terminal::MatchModes;
+        using terminal::match_modes;
         if (!_node)
-            return terminal::MatchModes {};
+            return terminal::match_modes {};
         _usedKeys.emplace(_prefix);
         if (!_node.IsScalar())
             return nullopt;
@@ -701,22 +701,22 @@ namespace
                 arg.remove_prefix(1);
             }
 
-            MatchModes::Flag flag = MatchModes::Flag::Default;
+            MatchModes::flag flag = MatchModes::flag::default_flag;
             string const upperArg = toUpper(arg);
             if (upperArg == "ALT"sv)
-                flag = MatchModes::AlternateScreen;
+                flag = MatchModes::alternate_screen;
             else if (upperArg == "APPCURSOR")
-                flag = MatchModes::AppCursor;
+                flag = MatchModes::app_cursor;
             else if (upperArg == "APPKEYPAD")
-                flag = MatchModes::AppKeypad;
+                flag = MatchModes::app_keypad;
             else if (upperArg == "INSERT")
-                flag = MatchModes::Insert;
+                flag = MatchModes::insert;
             else if (upperArg == "SELECT")
-                flag = MatchModes::Select;
+                flag = MatchModes::select;
             else if (upperArg == "SEARCH")
-                flag = MatchModes::Search;
+                flag = MatchModes::search;
             else if (upperArg == "TRACE")
-                flag = MatchModes::Trace;
+                flag = MatchModes::trace;
             else
             {
                 errorlog()("Unknown input_mapping mode: {}", arg);
@@ -762,7 +762,7 @@ namespace
 
     template <typename Input>
     void appendOrCreateBinding(vector<terminal::InputBinding<Input, ActionList>>& _bindings,
-                               terminal::MatchModes _modes,
+                               terminal::match_modes _modes,
                                terminal::modifier _modifier,
                                Input _input,
                                Action _action)
@@ -781,7 +781,7 @@ namespace
     }
 
     bool tryAddKey(InputMappings& _inputMappings,
-                   terminal::MatchModes _modes,
+                   terminal::match_modes _modes,
                    terminal::modifier _modifier,
                    YAML::Node const& _node,
                    Action _action)
@@ -838,7 +838,7 @@ namespace
     }
 
     bool tryAddMouse(vector<MouseInputMapping>& _bindings,
-                     terminal::MatchModes _modes,
+                     terminal::match_modes _modes,
                      terminal::modifier _modifier,
                      YAML::Node const& _node,
                      Action _action)

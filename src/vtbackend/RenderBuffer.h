@@ -30,7 +30,7 @@
 namespace terminal
 {
 
-struct RenderAttributes
+struct render_attributes
 {
     rgb_color foregroundColor {};
     rgb_color backgroundColor {};
@@ -42,12 +42,12 @@ struct RenderAttributes
  * Renderable representation of a grid cell with color-altering pre-applied and
  * additional information for cell ranges that can be text-shaped together.
  */
-struct RenderCell
+struct render_cell
 {
     std::u32string codepoints;
     std::shared_ptr<image_fragment> image;
     cell_location position;
-    RenderAttributes attributes;
+    render_attributes attributes;
     uint8_t width = 1;
 
     bool groupStart = false;
@@ -57,28 +57,28 @@ struct RenderCell
 /**
  * Renderable representation of a grid line with monochrome SGR styling.
  */
-struct RenderLine
+struct render_line
 {
     std::string_view text;
     line_offset lineOffset;
     ColumnCount usedColumns;
     ColumnCount displayWidth;
-    RenderAttributes textAttributes;
-    RenderAttributes fillAttributes;
+    render_attributes textAttributes;
+    render_attributes fillAttributes;
 };
 
-struct RenderCursor
+struct render_cursor
 {
     cell_location position;
     cursor_shape shape;
     int width = 1;
 };
 
-struct RenderBuffer
+struct render_buffer
 {
-    std::vector<RenderCell> cells {};
-    std::vector<RenderLine> lines {};
-    std::optional<RenderCursor> cursor {};
+    std::vector<render_cell> cells {};
+    std::vector<render_line> lines {};
+    std::optional<render_cursor> cursor {};
     uint64_t frameID {};
 
     void clear()
@@ -92,57 +92,57 @@ struct RenderBuffer
 /// Lock-guarded handle to a read-only RenderBuffer object.
 ///
 /// @see RenderBuffer
-struct RenderBufferRef
+struct render_buffer_ref
 {
-    RenderBuffer const& buffer;
+    render_buffer const& buffer;
     std::mutex& guard;
 
-    [[nodiscard]] RenderBuffer const& get() const noexcept { return buffer; }
+    [[nodiscard]] render_buffer const& get() const noexcept { return buffer; }
 
-    RenderBufferRef(RenderBuffer const& buf, std::mutex& lock): buffer { buf }, guard { lock }
+    render_buffer_ref(render_buffer const& buf, std::mutex& lock): buffer { buf }, guard { lock }
     {
         guard.lock();
     }
 
-    ~RenderBufferRef() { guard.unlock(); }
+    ~render_buffer_ref() { guard.unlock(); }
 };
 
 /// Reflects the current state of a RenderDoubleBuffer object.
 ///
-enum class RenderBufferState
+enum class render_buffer_state
 {
     WaitingForRefresh,
     RefreshBuffersAndTrySwap,
     TrySwapBuffers
 };
 
-constexpr std::string_view to_string(RenderBufferState state) noexcept
+constexpr std::string_view to_string(render_buffer_state state) noexcept
 {
     switch (state)
     {
-        case RenderBufferState::WaitingForRefresh: return "WaitingForRefresh";
-        case RenderBufferState::RefreshBuffersAndTrySwap: return "RefreshBuffersAndTrySwap";
-        case RenderBufferState::TrySwapBuffers: return "TrySwapBuffers";
+        case render_buffer_state::WaitingForRefresh: return "WaitingForRefresh";
+        case render_buffer_state::RefreshBuffersAndTrySwap: return "RefreshBuffersAndTrySwap";
+        case render_buffer_state::TrySwapBuffers: return "TrySwapBuffers";
     }
     return "INVALID";
 }
 
-struct RenderDoubleBuffer
+struct render_double_buffer
 {
     std::mutex mutable readerLock;
     std::atomic<size_t> currentBackBufferIndex = 0;
-    std::array<RenderBuffer, 2> buffers {};
-    std::atomic<RenderBufferState> state = RenderBufferState::WaitingForRefresh;
+    std::array<render_buffer, 2> buffers {};
+    std::atomic<render_buffer_state> state = render_buffer_state::WaitingForRefresh;
     std::chrono::steady_clock::time_point lastUpdate {};
 
-    RenderBuffer& backBuffer() noexcept { return buffers[currentBackBufferIndex]; }
+    render_buffer& backBuffer() noexcept { return buffers[currentBackBufferIndex]; }
 
-    RenderBufferRef frontBuffer() const
+    render_buffer_ref frontBuffer() const
     {
         // if (state == RenderBufferState::TrySwapBuffers)
         //     const_cast<RenderDoubleBuffer*>(this)->swapBuffers(lastUpdate);
-        RenderBuffer const& frontBuffer = buffers.at((currentBackBufferIndex + 1) % 2);
-        return RenderBufferRef(frontBuffer, readerLock);
+        render_buffer const& frontBuffer = buffers.at((currentBackBufferIndex + 1) % 2);
+        return render_buffer_ref(frontBuffer, readerLock);
     }
 
     void clear() { backBuffer().clear(); }

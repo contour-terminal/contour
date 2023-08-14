@@ -20,58 +20,58 @@
 namespace terminal
 {
 
-class MatchModes
+class match_modes
 {
   public:
-    enum Flag : uint8_t
+    enum flag : uint8_t
     {
-        Default = 0x00,
-        AlternateScreen = 0x01,
-        AppCursor = 0x02,
-        AppKeypad = 0x04,
-        Insert = 0x08, // vi-like insert mode
-        Select = 0x10, // visual / visual-line / visual-block
-        Search = 0x20, // something's in the search buffer
-        Trace = 0x40,
+        default_flag = 0x00,
+        alternate_screen = 0x01,
+        app_cursor = 0x02,
+        app_keypad = 0x04,
+        insert = 0x08, // vi-like insert mode
+        select = 0x10, // visual / visual-line / visual-block
+        search = 0x20, // something's in the search buffer
+        trace = 0x40,
     };
 
-    enum class Status
+    enum class status
     {
         Any,
         Enabled,
         Disabled
     };
 
-    [[nodiscard]] constexpr Status status(Flag flag) const noexcept
+    [[nodiscard]] constexpr status getStatus(flag flag) const noexcept
     {
         if (_enabled & static_cast<uint8_t>(flag))
-            return Status::Enabled;
+            return status::Enabled;
         if (_disabled & static_cast<uint8_t>(flag))
-            return Status::Disabled;
-        return Status::Any;
+            return status::Disabled;
+        return status::Any;
     }
 
     [[nodiscard]] constexpr unsigned enabled() const noexcept { return _enabled; }
     [[nodiscard]] constexpr unsigned disabled() const noexcept { return _disabled; }
 
-    constexpr void enable(Flag flag) noexcept
+    constexpr void enable(flag flag) noexcept
     {
         _enabled |= static_cast<uint8_t>(flag);
         _disabled = (uint8_t) (_disabled & ~static_cast<uint8_t>(flag));
     }
 
-    constexpr void disable(Flag flag) noexcept
+    constexpr void disable(flag flag) noexcept
     {
         _enabled = (uint8_t) (_enabled & ~static_cast<uint8_t>(flag));
         _disabled |= static_cast<uint8_t>(flag);
     }
 
-    [[nodiscard]] constexpr bool has_value(Flag flag) const noexcept
+    [[nodiscard]] constexpr bool has_value(flag flag) const noexcept
     {
         return _enabled & static_cast<uint8_t>(flag) || _disabled & static_cast<uint8_t>(flag);
     }
 
-    constexpr void clear(Flag flag) noexcept
+    constexpr void clear(flag flag) noexcept
     {
         _enabled = (uint8_t) (_enabled & ~static_cast<uint8_t>(flag));
         _disabled = (uint8_t) (_disabled & ~static_cast<uint8_t>(flag));
@@ -90,13 +90,13 @@ class MatchModes
         return static_cast<uint16_t>(_enabled << 8 | _disabled);
     }
 
-    constexpr MatchModes() noexcept = default;
-    constexpr MatchModes(MatchModes const&) noexcept = default;
-    constexpr MatchModes(MatchModes&&) noexcept = default;
-    constexpr MatchModes& operator=(MatchModes const&) noexcept = default;
-    constexpr MatchModes& operator=(MatchModes&&) noexcept = default;
+    constexpr match_modes() noexcept = default;
+    constexpr match_modes(match_modes const&) noexcept = default;
+    constexpr match_modes(match_modes&&) noexcept = default;
+    constexpr match_modes& operator=(match_modes const&) noexcept = default;
+    constexpr match_modes& operator=(match_modes&&) noexcept = default;
 
-    constexpr MatchModes(uint8_t enabled, uint8_t disabled) noexcept:
+    constexpr match_modes(uint8_t enabled, uint8_t disabled) noexcept:
         _enabled { enabled }, _disabled { disabled }
     {
     }
@@ -106,12 +106,12 @@ class MatchModes
     uint8_t _disabled = 0;
 };
 
-constexpr bool operator==(MatchModes a, MatchModes b) noexcept
+constexpr bool operator==(match_modes a, match_modes b) noexcept
 {
     return a.hashcode() == b.hashcode();
 }
 
-constexpr bool operator!=(MatchModes a, MatchModes b) noexcept
+constexpr bool operator!=(match_modes a, match_modes b) noexcept
 {
     return !(a == b);
 }
@@ -120,28 +120,28 @@ constexpr bool operator!=(MatchModes a, MatchModes b) noexcept
 
 // {{{ fmtlib support
 template <>
-struct fmt::formatter<terminal::MatchModes>: formatter<std::string>
+struct fmt::formatter<terminal::match_modes>: formatter<std::string>
 {
-    auto format(terminal::MatchModes m, format_context& ctx) -> format_context::iterator
+    auto format(terminal::match_modes m, format_context& ctx) -> format_context::iterator
     {
         std::string s;
-        auto const advance = [&](terminal::MatchModes::Flag cond, std::string_view text) {
-            auto const status = m.status(cond);
-            if (status == terminal::MatchModes::Status::Any)
+        auto const advance = [&](terminal::match_modes::flag cond, std::string_view text) {
+            auto const status = m.getStatus(cond);
+            if (status == terminal::match_modes::status::Any)
                 return;
             if (!s.empty())
                 s += '|';
-            if (status == terminal::MatchModes::Status::Disabled)
+            if (status == terminal::match_modes::status::Disabled)
                 s += "~";
             s += text;
         };
-        advance(terminal::MatchModes::AppCursor, "AppCursor");
-        advance(terminal::MatchModes::AppKeypad, "AppKeypad");
-        advance(terminal::MatchModes::AlternateScreen, "AltScreen");
-        advance(terminal::MatchModes::Insert, "Insert");
-        advance(terminal::MatchModes::Select, "Select");
-        advance(terminal::MatchModes::Search, "Search");
-        advance(terminal::MatchModes::Trace, "Trace");
+        advance(terminal::match_modes::app_cursor, "AppCursor");
+        advance(terminal::match_modes::app_keypad, "AppKeypad");
+        advance(terminal::match_modes::alternate_screen, "AltScreen");
+        advance(terminal::match_modes::insert, "Insert");
+        advance(terminal::match_modes::select, "Select");
+        advance(terminal::match_modes::search, "Search");
+        advance(terminal::match_modes::trace, "Trace");
         if (s.empty())
             s = "Any";
         return formatter<std::string>::format(s, ctx);

@@ -934,14 +934,14 @@ void TerminalWidget::updateSizeProperties()
 // }}}
 
 // {{{ TerminalDisplay: attributes
-terminal::RefreshRate TerminalWidget::refreshRate() const
+terminal::refresh_rate TerminalWidget::refreshRate() const
 {
     auto const screen = window()->screen();
     if (!screen)
         return { profile().refreshRate.value != 0.0 ? profile().refreshRate
-                                                    : terminal::RefreshRate { 30.0 } };
+                                                    : terminal::refresh_rate { 30.0 } };
 
-    auto const systemRefreshRate = terminal::RefreshRate { static_cast<double>(screen->refreshRate()) };
+    auto const systemRefreshRate = terminal::refresh_rate { static_cast<double>(screen->refreshRate()) };
     if (1.0 < profile().refreshRate.value && profile().refreshRate.value < systemRefreshRate.value)
         return profile().refreshRate;
     else

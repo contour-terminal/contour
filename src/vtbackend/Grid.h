@@ -109,7 +109,7 @@ constexpr bool operator!=(margin const& a, PageSize b) noexcept
 template <typename Cell>
 using lines = crispy::ring<line<Cell>>;
 
-struct RenderPassHints
+struct render_pass_hints
 {
     bool containsBlinkingCells = false;
 };
@@ -358,7 +358,7 @@ bool operator!=(logical_line<Cell> const& a, logical_line<Cell> const& b) noexce
 }
 
 template <typename Cell>
-struct LogicalLines
+struct logical_lines
 {
     line_offset topMostLine;
     line_offset bottomMostLine;
@@ -459,7 +459,7 @@ struct LogicalLines
 };
 
 template <typename Cell>
-struct ReverseLogicalLines
+struct reverse_logical_lines
 {
     line_offset topMostLine;
     line_offset bottomMostLine;
@@ -589,13 +589,13 @@ struct ReverseLogicalLines
  */
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-class Grid
+class grid
 {
     // TODO: Rename all "History" to "Scrollback"?
   public:
-    Grid(PageSize pageSize, bool reflowOnResize, max_history_line_count maxHistoryLineCount);
+    grid(PageSize pageSize, bool reflowOnResize, max_history_line_count maxHistoryLineCount);
 
-    Grid(): Grid(PageSize { LineCount(25), ColumnCount(80) }, false, LineCount(0)) {}
+    grid(): grid(PageSize { LineCount(25), ColumnCount(80) }, false, LineCount(0)) {}
 
     void reset();
 
@@ -674,28 +674,28 @@ class Grid
     [[nodiscard]] gsl::span<line<Cell>> mainPage();
     [[nodiscard]] gsl::span<line<Cell> const> mainPage() const;
 
-    [[nodiscard]] LogicalLines<Cell> logicalLines()
+    [[nodiscard]] logical_lines<Cell> logicalLines()
     {
-        return LogicalLines<Cell> { boxed_cast<line_offset>(-historyLineCount()),
-                                    boxed_cast<line_offset>(_pageSize.lines - 1),
-                                    _lines };
+        return logical_lines<Cell> { boxed_cast<line_offset>(-historyLineCount()),
+                                     boxed_cast<line_offset>(_pageSize.lines - 1),
+                                     _lines };
     }
 
-    [[nodiscard]] LogicalLines<Cell> logicalLinesFrom(line_offset offset)
+    [[nodiscard]] logical_lines<Cell> logicalLinesFrom(line_offset offset)
     {
-        return LogicalLines<Cell> { offset, boxed_cast<line_offset>(_pageSize.lines - 1), _lines };
+        return logical_lines<Cell> { offset, boxed_cast<line_offset>(_pageSize.lines - 1), _lines };
     }
 
-    [[nodiscard]] ReverseLogicalLines<Cell> logicalLinesReverse()
+    [[nodiscard]] reverse_logical_lines<Cell> logicalLinesReverse()
     {
-        return ReverseLogicalLines<Cell> { boxed_cast<line_offset>(-historyLineCount()),
-                                           boxed_cast<line_offset>(_pageSize.lines - 1),
-                                           _lines };
+        return reverse_logical_lines<Cell> { boxed_cast<line_offset>(-historyLineCount()),
+                                             boxed_cast<line_offset>(_pageSize.lines - 1),
+                                             _lines };
     }
 
-    [[nodiscard]] ReverseLogicalLines<Cell> logicalLinesReverseFrom(line_offset offset)
+    [[nodiscard]] reverse_logical_lines<Cell> logicalLinesReverseFrom(line_offset offset)
     {
-        return ReverseLogicalLines<Cell> { boxed_cast<line_offset>(-historyLineCount()), offset, _lines };
+        return reverse_logical_lines<Cell> { boxed_cast<line_offset>(-historyLineCount()), offset, _lines };
     }
 
     // {{{ buffer manipulation
@@ -729,7 +729,7 @@ class Grid
     // {{{ Rendering API
     /// Renders the full screen by passing every grid cell to the callback.
     template <typename RendererT>
-    [[nodiscard]] RenderPassHints render(
+    [[nodiscard]] render_pass_hints render(
         RendererT&& render,
         scroll_offset scrollOffset = {},
         highlight_search_matches highlightSearchMatches = highlight_search_matches::Yes) const;
@@ -838,29 +838,29 @@ class Grid
 };
 
 template <typename Cell>
-std::ostream& dumpGrid(std::ostream& os, Grid<Cell> const& grid);
+std::ostream& dumpGrid(std::ostream& os, grid<Cell> const& grid);
 
 template <typename Cell>
-std::string dumpGrid(Grid<Cell> const& grid);
+std::string dumpGrid(grid<Cell> const& grid);
 
 // {{{ impl
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-constexpr line_flags Grid<Cell>::defaultLineFlags() const noexcept
+constexpr line_flags grid<Cell>::defaultLineFlags() const noexcept
 {
     return _reflowOnResize ? line_flags::Wrappable : line_flags::None;
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-constexpr LineCount Grid<Cell>::linesUsed() const noexcept
+constexpr LineCount grid<Cell>::linesUsed() const noexcept
 {
     return _linesUsed;
 }
 
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
-bool Grid<Cell>::isLineWrapped(line_offset line) const noexcept
+bool grid<Cell>::isLineWrapped(line_offset line) const noexcept
 {
     return line >= -boxed_cast<line_offset>(historyLineCount())
            && boxed_cast<LineCount>(line) < _pageSize.lines && lineAt(line).wrapped();
@@ -869,14 +869,14 @@ bool Grid<Cell>::isLineWrapped(line_offset line) const noexcept
 template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 template <typename RendererT>
-[[nodiscard]] RenderPassHints Grid<Cell>::render(RendererT&& render,
-                                                 scroll_offset scrollOffset,
-                                                 highlight_search_matches highlightSearchMatches) const
+[[nodiscard]] render_pass_hints grid<Cell>::render(RendererT&& render,
+                                                   scroll_offset scrollOffset,
+                                                   highlight_search_matches highlightSearchMatches) const
 {
     assert(!scrollOffset || unbox<LineCount>(scrollOffset) <= historyLineCount());
 
     auto y = line_offset(0);
-    auto hints = RenderPassHints {};
+    auto hints = render_pass_hints {};
     for (int i = -*scrollOffset, e = i + *_pageSize.lines; i != e; ++i, ++y)
     {
         auto x = column_offset(0);

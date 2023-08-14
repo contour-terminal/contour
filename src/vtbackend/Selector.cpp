@@ -27,10 +27,10 @@ namespace terminal
 namespace // {{{ helper
 {
 
-    tuple<vector<Selection::Range>, cell_location const, cell_location const> prepare(
-        Selection const& selection)
+    tuple<vector<selection::range>, cell_location const, cell_location const> prepare(
+        selection const& selection)
     {
-        vector<Selection::Range> result;
+        vector<selection::range> result;
 
         auto const [from, to] = [&]() {
             if (selection.from() <= selection.to())
@@ -48,23 +48,23 @@ namespace // {{{ helper
 // }}}
 
 // {{{ Selection
-bool Selection::extend(cell_location to)
+bool selection::extend(cell_location to)
 {
     assert(_state != State::Complete
            && "In order extend a selection, the selector must be active (started).");
-    _state = State::InProgress;
+    _state = state::InProgress;
     _to = to;
     _onSelectionUpdated();
     return true;
 }
 
-void Selection::complete()
+void selection::complete()
 {
-    if (_state == State::InProgress)
-        _state = State::Complete;
+    if (_state == state::InProgress)
+        _state = state::Complete;
 }
 
-cell_location Selection::stretchedColumn(SelectionHelper const& gridHelper, cell_location coord) noexcept
+cell_location selection::stretchedColumn(selection_helper const& gridHelper, cell_location coord) noexcept
 {
     cell_location stretched = coord;
     if (auto const w = gridHelper.cellWidth(coord); w > 1) // wide character
@@ -76,17 +76,17 @@ cell_location Selection::stretchedColumn(SelectionHelper const& gridHelper, cell
     return stretched;
 }
 
-bool Selection::contains(cell_location coord) const noexcept
+bool selection::contains(cell_location coord) const noexcept
 {
     return crispy::ascending(_from, coord, _to) || crispy::ascending(_to, coord, _from);
 }
 
-bool Selection::containsLine(line_offset line) const noexcept
+bool selection::containsLine(line_offset line) const noexcept
 {
     return crispy::ascending(_from.line, line, _to.line) || crispy::ascending(_to.line, line, _from.line);
 }
 
-bool Selection::intersects(rect area) const noexcept
+bool selection::intersects(rect area) const noexcept
 {
     // TODO: make me more efficient
     for (auto line = area.top.as<line_offset>(); line <= area.bottom.as<line_offset>(); ++line)
@@ -97,7 +97,7 @@ bool Selection::intersects(rect area) const noexcept
     return false;
 }
 
-std::vector<Selection::Range> Selection::ranges() const
+std::vector<selection::range> selection::ranges() const
 {
     auto [result, from, to] = prepare(*this);
 
@@ -105,23 +105,23 @@ std::vector<Selection::Range> Selection::ranges() const
 
     switch (result.size())
     {
-        case 1: result[0] = Range { from.line, from.column, min(to.column, rightMargin) }; break;
+        case 1: result[0] = range { from.line, from.column, min(to.column, rightMargin) }; break;
         case 2:
             // Render first line partial from selected column to end.
-            result[0] = Range { from.line, from.column, rightMargin };
+            result[0] = range { from.line, from.column, rightMargin };
             // Render last (second) line partial from beginning to last selected column.
-            result[1] = Range { to.line, column_offset(0), min(to.column, rightMargin) };
+            result[1] = range { to.line, column_offset(0), min(to.column, rightMargin) };
             break;
         default:
             // Render first line partial from selected column to end.
-            result[0] = Range { from.line, from.column, rightMargin };
+            result[0] = range { from.line, from.column, rightMargin };
 
             // Render inner full.
             for (size_t n = 1; n < result.size(); ++n)
-                result[n] = Range { from.line + line_offset::cast_from(n), column_offset(0), rightMargin };
+                result[n] = range { from.line + line_offset::cast_from(n), column_offset(0), rightMargin };
 
             // Render last (second) line partial from beginning to last selected column.
-            result[result.size() - 1] = Range { to.line, column_offset(0), min(to.column, rightMargin) };
+            result[result.size() - 1] = range { to.line, column_offset(0), min(to.column, rightMargin) };
             break;
     }
 
@@ -129,24 +129,24 @@ std::vector<Selection::Range> Selection::ranges() const
 }
 // }}}
 // {{{ LinearSelection
-LinearSelection::LinearSelection(SelectionHelper const& helper,
-                                 cell_location start,
-                                 OnSelectionUpdated onSelectionUpdated):
-    Selection(helper, vi_mode::Visual, start, std::move(onSelectionUpdated))
+linear_selection::linear_selection(selection_helper const& helper,
+                                   cell_location start,
+                                   on_selection_updated onSelectionUpdated):
+    selection(helper, vi_mode::Visual, start, std::move(onSelectionUpdated))
 {
 }
 // }}}
 // {{{ WordWiseSelection
-WordWiseSelection::WordWiseSelection(SelectionHelper const& helper,
-                                     cell_location start,
-                                     OnSelectionUpdated onSelectionUpdated):
-    Selection(helper, vi_mode::Visual, start, std::move(onSelectionUpdated))
+word_wise_selection::word_wise_selection(selection_helper const& helper,
+                                         cell_location start,
+                                         on_selection_updated onSelectionUpdated):
+    selection(helper, vi_mode::Visual, start, std::move(onSelectionUpdated))
 {
     _from = extendSelectionBackward(_from);
     extend(extendSelectionForward(_to));
 }
 
-cell_location WordWiseSelection::extendSelectionBackward(cell_location pos) const noexcept
+cell_location word_wise_selection::extendSelectionBackward(cell_location pos) const noexcept
 {
     auto last = pos;
     auto current = last;
@@ -172,7 +172,7 @@ cell_location WordWiseSelection::extendSelectionBackward(cell_location pos) cons
     return last;
 }
 
-cell_location WordWiseSelection::extendSelectionForward(cell_location pos) const noexcept
+cell_location word_wise_selection::extendSelectionForward(cell_location pos) const noexcept
 {
     auto last = pos;
     auto current = last;
@@ -206,29 +206,29 @@ cell_location WordWiseSelection::extendSelectionForward(cell_location pos) const
     return stretchedColumn(_helper, last);
 }
 
-bool WordWiseSelection::extend(cell_location to)
+bool word_wise_selection::extend(cell_location to)
 {
     if (to >= _from) // extending to the right
     {
         _from = extendSelectionBackward(_from);
-        return Selection::extend(extendSelectionForward(to));
+        return selection::extend(extendSelectionForward(to));
     }
     else // extending to the left
     {
         _from = extendSelectionForward(_from);
-        return Selection::extend(extendSelectionBackward(to));
+        return selection::extend(extendSelectionBackward(to));
     }
 }
 // }}}
 // {{{ RectangularSelection
-RectangularSelection::RectangularSelection(SelectionHelper const& helper,
-                                           cell_location start,
-                                           OnSelectionUpdated onSelectionUpdated):
-    Selection(helper, vi_mode::VisualBlock, start, std::move(onSelectionUpdated))
+rectangular_selection::rectangular_selection(selection_helper const& helper,
+                                             cell_location start,
+                                             on_selection_updated onSelectionUpdated):
+    selection(helper, vi_mode::VisualBlock, start, std::move(onSelectionUpdated))
 {
 }
 
-bool RectangularSelection::contains(cell_location coord) const noexcept
+bool rectangular_selection::contains(cell_location coord) const noexcept
 {
     auto const [from, to] = orderedPoints(_from, _to);
 
@@ -236,7 +236,7 @@ bool RectangularSelection::contains(cell_location coord) const noexcept
            && crispy::ascending(from.column, coord.column, to.column);
 }
 
-bool RectangularSelection::intersects(rect area) const noexcept
+bool rectangular_selection::intersects(rect area) const noexcept
 {
     auto const [from, to] = orderedPoints(_from, _to);
 
@@ -260,11 +260,11 @@ bool RectangularSelection::intersects(rect area) const noexcept
     return area.top.as<line_offset>() < from.line && to.line < area.bottom.as<line_offset>();
 }
 
-vector<Selection::Range> RectangularSelection::ranges() const
+vector<selection::range> rectangular_selection::ranges() const
 {
     auto const [from, to] = orderedPoints(_from, _to);
 
-    vector<Selection::Range> result;
+    vector<selection::range> result;
     auto const numLines = to.line - from.line + 1;
     result.resize(numLines.as<size_t>());
 
@@ -273,23 +273,23 @@ vector<Selection::Range> RectangularSelection::ranges() const
         auto const line = from.line + line_offset::cast_from(i);
         auto const left = from.column;
         auto const right = stretchedColumn(_helper, cell_location { line, to.column }).column;
-        result[i] = Range { line, left, right };
+        result[i] = range { line, left, right };
     }
 
     return result;
 }
 // }}}
 // {{{ FullLineSelection
-FullLineSelection::FullLineSelection(SelectionHelper const& helper,
-                                     cell_location start,
-                                     OnSelectionUpdated onSelectionUpdated):
-    Selection(helper, vi_mode::VisualLine, start, std::move(onSelectionUpdated))
+full_line_selection::full_line_selection(selection_helper const& helper,
+                                         cell_location start,
+                                         on_selection_updated onSelectionUpdated):
+    selection(helper, vi_mode::VisualLine, start, std::move(onSelectionUpdated))
 {
     _from.column = column_offset(0);
     extend(cell_location { _to.line, boxed_cast<column_offset>(_helper.pageSize().columns - 1) });
 }
 
-bool FullLineSelection::extend(cell_location to)
+bool full_line_selection::extend(cell_location to)
 {
     if (to.line >= _from.line)
     {
@@ -309,7 +309,7 @@ bool FullLineSelection::extend(cell_location to)
             --to.line;
     }
 
-    return Selection::extend(to);
+    return selection::extend(to);
 }
 // }}}
 

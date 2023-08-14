@@ -10,20 +10,20 @@
 namespace terminal
 {
 
-struct RefreshRate
+struct refresh_rate
 {
     double value;
 };
 
-struct RefreshInterval
+struct refresh_interval
 {
     std::chrono::milliseconds value;
 
-    explicit RefreshInterval(RefreshRate rate): value { static_cast<long long>(1000.0 / rate.value) } {}
+    explicit refresh_interval(refresh_rate rate): value { static_cast<long long>(1000.0 / rate.value) } {}
 };
 
 /// Terminal settings, enabling hardware reset to be easier implemented.
-struct Settings
+struct settings
 {
     vt_type terminalId = vt_type::VT525;
     color_palette colorPalette; // NB: The default color palette can be taken from the factory settings.
@@ -45,7 +45,7 @@ struct Settings
     bool usePrivateColorRegisters = false;
 
     std::chrono::milliseconds cursorBlinkInterval = std::chrono::milliseconds { 500 };
-    RefreshRate refreshRate = { 30.0 };
+    refresh_rate refreshRate = { 30.0 };
 
     // Size in bytes per PTY Buffer Object.
     //
@@ -57,19 +57,19 @@ struct Settings
     // This value must be integer-devisable by 16.
     size_t ptyReadBufferSize = 4096;
     std::u32string wordDelimiters;
-    modifier mouseProtocolBypassModifier = modifier::Shift;
-    modifier mouseBlockSelectionModifier = modifier::Control;
+    modifier mouseProtocolBypassModifier = modifier::shift;
+    modifier mouseBlockSelectionModifier = modifier::control;
     line_offset copyLastMarkRangeOffset = line_offset(0);
     bool visualizeSelectedWord = true;
     std::chrono::milliseconds highlightTimeout = std::chrono::milliseconds { 150 };
     bool highlightDoubleClickedWord = true;
     // TODO: ^^^ make also use of it. probably rename to how VScode has named it.
 
-    struct PrimaryScreen
+    struct primary_screen
     {
         bool allowReflowOnResize = true;
     };
-    PrimaryScreen primaryScreen;
+    primary_screen primaryScreen;
 
     // TODO: we could configure also the number of lines of the host writable statusline and indicator
     // statusline.

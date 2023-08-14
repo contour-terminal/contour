@@ -52,7 +52,7 @@ class Terminal;
 /// API for setting/querying terminal modes.
 ///
 /// This abstracts away the actual implementation for more intuitive use and easier future adaptability.
-class Modes
+class modes
 {
   public:
     void set(ansi_mode mode, bool enabled) { _ansi.set(static_cast<size_t>(mode), enabled); }
@@ -98,7 +98,7 @@ class Modes
 /// Terminal cursor data structure.
 ///
 /// NB: Take care what to store here, as DECSC/DECRC will save/restore this struct.
-struct Cursor
+struct cursor
 {
     cell_location position { line_offset(0), column_offset(0) };
     bool autoWrap = true; // false;
@@ -113,7 +113,7 @@ struct Cursor
 };
 // }}}
 
-struct Search
+struct search
 {
     std::u32string pattern;
     scroll_offset initialScrollOffset {};
@@ -122,7 +122,7 @@ struct Search
 
 // Mandates what execution mode the terminal will take to process VT sequences.
 //
-enum class ExecutionMode
+enum class execution_mode
 {
     // Normal execution mode, with no tracing enabled.
     Normal,
@@ -140,7 +140,7 @@ enum class ExecutionMode
     // TODO: BreakAtFrame,
 };
 
-enum class WrapPending
+enum class wrap_pending
 {
     Yes,
     No,
@@ -155,13 +155,13 @@ enum class WrapPending
  * TODO: Let's move all shared data into one place,
  * ultimatively ending up in Terminal (or keep TerminalState).
  */
-struct TerminalState
+struct terminal_state
 {
-    explicit TerminalState(Terminal& terminal);
+    explicit terminal_state(Terminal& terminal);
 
-    Settings& settings;
+    settings& settings;
 
-    std::atomic<ExecutionMode> executionMode = ExecutionMode::Normal;
+    std::atomic<execution_mode> executionMode = execution_mode::Normal;
     std::mutex breakMutex;
     std::condition_variable breakCondition;
 
@@ -177,7 +177,7 @@ struct TerminalState
 
     vt_type terminalId = vt_type::VT525;
 
-    Modes modes;
+    modes modes;
     std::map<dec_mode, std::vector<bool>> savedModes; //!< saved DEC modes
 
     unsigned maxImageColorRegisters = 256;
@@ -193,7 +193,7 @@ struct TerminalState
     std::optional<status_display_type> savedStatusDisplayType = std::nullopt;
     active_status_display activeStatusDisplay = active_status_display::Main;
 
-    Search searchMode;
+    search searchMode;
 
     cursor_display cursorDisplay = cursor_display::Steady;
     cursor_shape cursorShape = cursor_shape::Block;
@@ -212,8 +212,8 @@ struct TerminalState
     std::string windowTitle {};
     std::stack<std::string> savedWindowTitles {};
 
-    Sequencer sequencer;
-    parser::Parser<Sequencer, false> parser;
+    sequencer sequencer;
+    parser::Parser<terminal::sequencer, false> parser;
     uint64_t instructionCounter = 0;
 
     input_generator inputGenerator {};
@@ -244,9 +244,9 @@ struct fmt::formatter<terminal::dec_mode>: fmt::formatter<std::string>
 };
 
 template <>
-struct fmt::formatter<terminal::Cursor>: fmt::formatter<terminal::cell_location>
+struct fmt::formatter<terminal::cursor>: fmt::formatter<terminal::cell_location>
 {
-    auto format(const terminal::Cursor cursor, format_context& ctx) -> format_context::iterator
+    auto format(const terminal::cursor cursor, format_context& ctx) -> format_context::iterator
     {
         return formatter<terminal::cell_location>::format(cursor.position, ctx);
     }
@@ -275,17 +275,17 @@ struct fmt::formatter<terminal::dynamic_color_name>: formatter<std::string_view>
 };
 
 template <>
-struct fmt::formatter<terminal::ExecutionMode>: formatter<std::string_view>
+struct fmt::formatter<terminal::execution_mode>: formatter<std::string_view>
 {
-    auto format(terminal::ExecutionMode value, format_context& ctx) -> format_context::iterator
+    auto format(terminal::execution_mode value, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (value)
         {
-            case terminal::ExecutionMode::Normal: name = "NORMAL"; break;
-            case terminal::ExecutionMode::Waiting: name = "WAITING"; break;
-            case terminal::ExecutionMode::SingleStep: name = "SINGLE STEP"; break;
-            case terminal::ExecutionMode::BreakAtEmptyQueue: name = "BREAK AT EMPTY"; break;
+            case terminal::execution_mode::Normal: name = "NORMAL"; break;
+            case terminal::execution_mode::Waiting: name = "WAITING"; break;
+            case terminal::execution_mode::SingleStep: name = "SINGLE STEP"; break;
+            case terminal::execution_mode::BreakAtEmptyQueue: name = "BREAK AT EMPTY"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }

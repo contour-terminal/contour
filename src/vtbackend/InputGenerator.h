@@ -52,11 +52,11 @@ class modifier
   public:
     enum key : unsigned
     {
-        None = 0,
-        Shift = 1,
-        Alt = 2,
-        Control = 4,
-        Meta = 8,
+        none = 0,
+        shift = 1,
+        alt = 2,
+        control = 4,
+        meta = 8,
     };
 
     constexpr modifier(key key): _mask { static_cast<unsigned>(key) } {}
@@ -69,12 +69,12 @@ class modifier
 
     [[nodiscard]] constexpr unsigned value() const noexcept { return _mask; }
 
-    [[nodiscard]] constexpr bool none() const noexcept { return value() == 0; }
-    [[nodiscard]] constexpr bool some() const noexcept { return value() != 0; }
-    [[nodiscard]] constexpr bool shift() const noexcept { return value() & Shift; }
-    [[nodiscard]] constexpr bool alt() const noexcept { return value() & Alt; }
-    [[nodiscard]] constexpr bool control() const noexcept { return value() & Control; }
-    [[nodiscard]] constexpr bool meta() const noexcept { return value() & Meta; }
+    [[nodiscard]] constexpr bool isNone() const noexcept { return value() == 0; }
+    [[nodiscard]] constexpr bool isSome() const noexcept { return value() != 0; }
+    [[nodiscard]] constexpr bool isShift() const noexcept { return value() & shift; }
+    [[nodiscard]] constexpr bool isAlt() const noexcept { return value() & alt; }
+    [[nodiscard]] constexpr bool isControlt() const noexcept { return value() & control; }
+    [[nodiscard]] constexpr bool isMeta() const noexcept { return value() & meta; }
 
     constexpr operator unsigned() const noexcept { return _mask; }
 
@@ -128,7 +128,7 @@ std::optional<modifier::key> parseModifierKey(std::string const& key);
 
 constexpr bool operator!(modifier modifier) noexcept
 {
-    return modifier.none();
+    return modifier.isNone();
 }
 
 constexpr bool operator==(modifier lhs, modifier::key rhs) noexcept
@@ -443,10 +443,10 @@ struct fmt::formatter<terminal::modifier>: formatter<std::string>
                 s += ',';
             s += text;
         };
-        advance(modifier.alt(), "Alt");
-        advance(modifier.shift(), "Shift");
-        advance(modifier.control(), "Control");
-        advance(modifier.meta(), "Meta");
+        advance(modifier.isAlt(), "Alt");
+        advance(modifier.isShift(), "Shift");
+        advance(modifier.isControlt(), "Control");
+        advance(modifier.isMeta(), "Meta");
         if (s.empty())
             s = "None";
         return formatter<std::string>::format(s, ctx);

@@ -29,9 +29,9 @@
 namespace terminal
 {
 
-struct SelectionHelper
+struct selection_helper
 {
-    virtual ~SelectionHelper() = default;
+    virtual ~selection_helper() = default;
     [[nodiscard]] virtual PageSize pageSize() const noexcept = 0;
     [[nodiscard]] virtual bool wordDelimited(cell_location pos) const noexcept = 0;
     [[nodiscard]] virtual bool wrappedLine(line_offset line) const noexcept = 0;
@@ -62,10 +62,10 @@ struct SelectionHelper
  * Third mouse press AND on same coordinate as prior mouse presses -> reselects line
  * Mouse moves -> resets last recorded mouse press coordinate
  */
-class Selection
+class selection
 {
   public:
-    enum class State
+    enum class state
     {
         /// Inactive, but waiting for the selection to be started (by moving the cursor).
         Waiting,
@@ -76,14 +76,14 @@ class Selection
     };
 
     /// Defines a columnar range at a given line.
-    using Range = column_range;
+    using range = column_range;
 
-    using OnSelectionUpdated = std::function<void()>;
+    using on_selection_updated = std::function<void()>;
 
-    Selection(SelectionHelper const& helper,
+    selection(selection_helper const& helper,
               vi_mode viMode,
               cell_location start,
-              OnSelectionUpdated onSelectionUpdated):
+              on_selection_updated onSelectionUpdated):
         _helper { helper },
         _viMode { viMode },
         _onSelectionUpdated { std::move(onSelectionUpdated) },
@@ -92,7 +92,7 @@ class Selection
     {
     }
 
-    virtual ~Selection() = default;
+    virtual ~selection() = default;
 
     constexpr cell_location from() const noexcept { return _from; }
     constexpr cell_location to() const noexcept { return _to; }
@@ -106,13 +106,13 @@ class Selection
     [[nodiscard]] vi_mode viMode() const noexcept { return _viMode; }
 
     /// Tests whether the a selection is currently in progress.
-    [[nodiscard]] constexpr State state() const noexcept { return _state; }
+    [[nodiscard]] constexpr state getState() const noexcept { return _state; }
 
     /// Extends the selection to the given coordinate.
     [[nodiscard]] virtual bool extend(cell_location to);
 
     /// Constructs a vector of ranges for this selection.
-    [[nodiscard]] virtual std::vector<Range> ranges() const;
+    [[nodiscard]] virtual std::vector<range> ranges() const;
 
     /// Marks the selection as completed.
     void complete();
@@ -120,42 +120,42 @@ class Selection
     /// Applies any scroll action to the line offsets.
     void applyScroll(line_offset value, LineCount historyLineCount);
 
-    static cell_location stretchedColumn(SelectionHelper const& gridHelper, cell_location coord) noexcept;
+    static cell_location stretchedColumn(selection_helper const& gridHelper, cell_location coord) noexcept;
 
   protected:
-    State _state = State::Waiting;
-    SelectionHelper const& _helper;
+    state _state = state::Waiting;
+    selection_helper const& _helper;
     vi_mode _viMode;
-    OnSelectionUpdated _onSelectionUpdated;
+    on_selection_updated _onSelectionUpdated;
     cell_location _from;
     cell_location _to;
 };
 
-class RectangularSelection: public Selection
+class rectangular_selection: public selection
 {
   public:
-    RectangularSelection(SelectionHelper const& helper,
-                         cell_location start,
-                         OnSelectionUpdated onSelectionUpdated);
+    rectangular_selection(selection_helper const& helper,
+                          cell_location start,
+                          on_selection_updated onSelectionUpdated);
     [[nodiscard]] bool contains(cell_location coord) const noexcept override;
     [[nodiscard]] bool intersects(rect area) const noexcept override;
-    [[nodiscard]] std::vector<Range> ranges() const override;
+    [[nodiscard]] std::vector<range> ranges() const override;
 };
 
-class LinearSelection final: public Selection
+class linear_selection final: public selection
 {
   public:
-    LinearSelection(SelectionHelper const& helper,
-                    cell_location start,
-                    OnSelectionUpdated onSelectionUpdated);
+    linear_selection(selection_helper const& helper,
+                     cell_location start,
+                     on_selection_updated onSelectionUpdated);
 };
 
-class WordWiseSelection final: public Selection
+class word_wise_selection final: public selection
 {
   public:
-    WordWiseSelection(SelectionHelper const& helper,
-                      cell_location start,
-                      OnSelectionUpdated onSelectionUpdated);
+    word_wise_selection(selection_helper const& helper,
+                        cell_location start,
+                        on_selection_updated onSelectionUpdated);
 
     bool extend(cell_location to) override;
 
@@ -163,20 +163,20 @@ class WordWiseSelection final: public Selection
     [[nodiscard]] cell_location extendSelectionForward(cell_location pos) const noexcept;
 };
 
-class FullLineSelection final: public Selection
+class full_line_selection final: public selection
 {
   public:
-    explicit FullLineSelection(SelectionHelper const& helper,
-                               cell_location start,
-                               OnSelectionUpdated onSelectionUpdated);
+    explicit full_line_selection(selection_helper const& helper,
+                                 cell_location start,
+                                 on_selection_updated onSelectionUpdated);
     bool extend(cell_location to) override;
 };
 
 template <typename Renderer>
-void renderSelection(Selection const& selection, Renderer&& render);
+void renderSelection(selection const& selection, Renderer&& render);
 
 // {{{ impl
-inline void Selection::applyScroll(line_offset value, LineCount historyLineCount)
+inline void selection::applyScroll(line_offset value, LineCount historyLineCount)
 {
     auto const n = -boxed_cast<line_offset>(historyLineCount);
 
@@ -185,9 +185,9 @@ inline void Selection::applyScroll(line_offset value, LineCount historyLineCount
 }
 
 template <typename Renderer>
-void renderSelection(Selection const& selection, Renderer&& render)
+void renderSelection(selection const& selection, Renderer&& render)
 {
-    for (Selection::Range const& range: selection.ranges())
+    for (selection::range const& range: selection.ranges())
         for (auto const col: crispy::times(*range.fromColumn, *range.length()))
             render(cell_location { range.line, column_offset::cast_from(col) });
 }
@@ -197,36 +197,36 @@ void renderSelection(Selection const& selection, Renderer&& render)
 
 // {{{ fmtlib custom formatter support
 template <>
-struct fmt::formatter<terminal::Selection::State>: formatter<std::string_view>
+struct fmt::formatter<terminal::selection::state>: formatter<std::string_view>
 {
-    using State = terminal::Selection::State;
-    auto format(State state, format_context& ctx) -> format_context::iterator
+    using state = terminal::selection::state;
+    auto format(state state, format_context& ctx) -> format_context::iterator
     {
         string_view name;
         switch (state)
         {
-            case State::Waiting: name = "Waiting"; break;
-            case State::InProgress: name = "InProgress"; break;
-            case State::Complete: name = "Complete"; break;
+            case state::Waiting: name = "Waiting"; break;
+            case state::InProgress: name = "InProgress"; break;
+            case state::Complete: name = "Complete"; break;
         }
         return formatter<string_view>::format(name, ctx);
     }
 };
 
 template <>
-struct fmt::formatter<terminal::Selection>: formatter<std::string>
+struct fmt::formatter<terminal::selection>: formatter<std::string>
 {
-    auto format(const terminal::Selection& selector, format_context& ctx) -> format_context::iterator
+    auto format(const terminal::selection& selector, format_context& ctx) -> format_context::iterator
     {
         return formatter<std::string>::format(
             fmt::format("{}({} from {} to {})",
-                        dynamic_cast<terminal::WordWiseSelection const*>(&selector)   ? "WordWiseSelection"
-                        : dynamic_cast<terminal::FullLineSelection const*>(&selector) ? "FullLineSelection"
-                        : dynamic_cast<terminal::RectangularSelection const*>(&selector)
+                        dynamic_cast<terminal::word_wise_selection const*>(&selector)   ? "WordWiseSelection"
+                        : dynamic_cast<terminal::full_line_selection const*>(&selector) ? "FullLineSelection"
+                        : dynamic_cast<terminal::rectangular_selection const*>(&selector)
                             ? "RectangularSelection"
-                        : dynamic_cast<terminal::LinearSelection const*>(&selector) ? "LinearSelection"
-                                                                                    : "Selection",
-                        selector.state(),
+                        : dynamic_cast<terminal::linear_selection const*>(&selector) ? "LinearSelection"
+                                                                                     : "Selection",
+                        selector.getState(),
                         selector.from(),
                         selector.to()),
             ctx);
