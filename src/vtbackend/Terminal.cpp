@@ -1639,11 +1639,11 @@ void Terminal::setMode(DECMode mode, bool enable)
 void Terminal::setTopBottomMargin(optional<LineOffset> top, optional<LineOffset> bottom)
 {
     auto const defaultTop = LineOffset(0);
-    auto const defaultBottom = boxed_cast<LineOffset>(_settings.pageSize.lines) - 1;
+    auto const defaultBottom = boxed_cast<LineOffset>(pageSize().lines) - 1;
     auto const sanitizedTop = std::max(defaultTop, top.value_or(defaultTop));
     auto const sanitizedBottom = std::min(defaultBottom, bottom.value_or(defaultBottom));
 
-    if (top < bottom)
+    if (sanitizedTop < sanitizedBottom)
     {
         currentScreen().margin().vertical.from = sanitizedTop;
         currentScreen().margin().vertical.to = sanitizedBottom;
@@ -1655,10 +1655,10 @@ void Terminal::setLeftRightMargin(optional<ColumnOffset> left, optional<ColumnOf
     if (isModeEnabled(DECMode::LeftRightMargin))
     {
         auto const defaultLeft = ColumnOffset(0);
-        auto const defaultRight = boxed_cast<ColumnOffset>(_settings.pageSize.columns) - 1;
+        auto const defaultRight = boxed_cast<ColumnOffset>(pageSize().columns) - 1;
         auto const sanitizedRight = std::min(right.value_or(defaultRight), defaultRight);
         auto const sanitizedLeft = std::max(left.value_or(defaultLeft), defaultLeft);
-        if (left < right)
+        if (sanitizedLeft < sanitizedRight)
         {
             currentScreen().margin().horizontal.from = sanitizedLeft;
             currentScreen().margin().horizontal.to = sanitizedRight;

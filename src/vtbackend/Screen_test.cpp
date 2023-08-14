@@ -1568,6 +1568,10 @@ TEST_CASE("ScrollUp.WithMargins", "[screen]")
                 "KLMNO\n"
                 == screen.renderMainPageText());
     }
+    mock.writeToScreen("\033[r");
+    mock.writeToScreen("\033[s");
+    REQUIRE(screen.margin().vertical == Margin::Vertical { LineOffset(0), LineOffset(4) });
+    REQUIRE(screen.margin().horizontal == Margin::Horizontal { ColumnOffset(0), ColumnOffset(4) });
 }
 
 TEST_CASE("ScrollUp", "[screen]")
