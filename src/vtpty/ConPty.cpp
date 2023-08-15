@@ -165,7 +165,7 @@ void ConPty::wakeupReader()
     // How can we make ReadFile() return early? We could maybe WriteFile() to it?
 }
 
-int ConPty::write(std::string_view data, bool /*blocking*/)
+int ConPty::write(std::string_view data)
 {
     auto const* buf = data.data();
     auto const size = data.size();

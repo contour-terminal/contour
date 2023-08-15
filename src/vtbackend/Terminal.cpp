@@ -974,14 +974,14 @@ bool Terminal::hasInput() const noexcept
     return !_state.inputGenerator.peek().empty();
 }
 
-void Terminal::flushInput(bool blocking)
+void Terminal::flushInput()
 {
     if (_state.inputGenerator.peek().empty())
         return;
 
     // XXX Should be the only location that does write to the PTY's stdin to avoid race conditions.
     auto const input = _state.inputGenerator.peek();
-    auto const rv = _pty->write(input, blocking);
+    auto const rv = _pty->write(input);
     if (rv > 0)
         _state.inputGenerator.consume(rv);
 }
@@ -1398,7 +1398,7 @@ void Terminal::reply(string_view text)
     auto const* syncReply = getenv("CONTOUR_SYNC_PTY_OUTPUT");
 
     if (syncReply && *syncReply != '0')
-        flushInput(true);
+        flushInput();
 }
 
 void Terminal::requestWindowResize(PageSize size)

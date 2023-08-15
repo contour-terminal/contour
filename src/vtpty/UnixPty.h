@@ -70,7 +70,7 @@ class UnixPty final: public Pty
     [[nodiscard]] ReadResult read(crispy::buffer_object<char>& storage,
                                   std::chrono::milliseconds timeout,
                                   size_t size) override;
-    int write(std::string_view data, bool blocking) override;
+    int write(std::string_view data) override;
     [[nodiscard]] PageSize pageSize() const noexcept override;
     void resizeScreen(PageSize cells, std::optional<crispy::image_size> pixels = std::nullopt) override;
 

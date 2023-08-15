@@ -372,43 +372,10 @@ Pty::ReadResult LinuxPty::read(crispy::buffer_object<char>& storage,
     return nullopt;
 }
 
-int LinuxPty::write(string_view data, bool blocking)
+int LinuxPty::write(string_view data)
 {
     auto const* buf = data.data();
     auto const size = data.size();
-
-    if (blocking)
-    {
-        detail::setFileBlocking(_masterFd, true);
-        auto const rv = ::write(_masterFd, buf, size);
-        detail::setFileBlocking(_masterFd, false);
-        if (PtyOutLog)
-            PtyOutLog()("Sending bytes: \"{}\"", crispy::escape(buf, buf + rv));
-        return static_cast<int>(rv);
-    }
-
-    timeval tv {};
-    tv.tv_sec = 1;
-    tv.tv_usec = 0;
-
-    fd_set rfd;
-    fd_set wfd;
-    fd_set efd;
-    FD_ZERO(&rfd);
-    FD_ZERO(&wfd);
-    FD_ZERO(&efd);
-    FD_SET(_masterFd, &wfd);
-    FD_SET(_eventFd, &rfd);
-    auto const nfds = 1 + max(_masterFd, _eventFd);
-
-    if (select(nfds, &rfd, &wfd, &efd, &tv) < 0)
-        return -1;
-
-    if (!FD_ISSET(_masterFd, &wfd))
-    {
-        PtyOutLog()("PTY write of {} bytes timed out.\n", size);
-        return 0;
-    }
 
     ssize_t rv = ::write(_masterFd, buf, size);
     if (PtyOutLog)
@@ -425,6 +392,17 @@ int LinuxPty::write(string_view data, bool blocking)
                         rv,
                         size - static_cast<size_t>(rv));
         // clang-format on
+    }
+
+    if (0 <= rv && static_cast<size_t>(rv) < size)
+    {
+        // This was a partial write. Let's try again, but this time blocking, for the remaining bytes.
+        detail::setFileBlocking(_masterFd, true);
+        auto const rv2 = ::write(_masterFd, buf + rv, size - rv);
+        detail::setFileBlocking(_masterFd, false);
+        if (PtyOutLog)
+            PtyOutLog()("Sending final bytes: \"{}\"", crispy::escape(buf + rv, buf + rv + rv2));
+        return static_cast<int>(rv + rv2);
     }
 
     return static_cast<int>(rv);
