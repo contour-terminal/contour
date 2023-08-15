@@ -14,6 +14,7 @@
 #pragma once
 
 #include <vtpty/Pty.h>
+#include <vtpty/UnixUtils.h>
 
 #include <crispy/BufferObject.h>
 
@@ -30,28 +31,6 @@
 
 namespace terminal
 {
-
-struct UnixPipe
-{
-    int pfd[2];
-
-    UnixPipe();
-    UnixPipe(UnixPipe&&) noexcept;
-    UnixPipe& operator=(UnixPipe&&) noexcept;
-    UnixPipe(UnixPipe const&) = delete;
-    UnixPipe& operator=(UnixPipe const&) = delete;
-    ~UnixPipe();
-
-    [[nodiscard]] bool good() const noexcept { return pfd[0] != -1 && pfd[1] != -1; }
-
-    [[nodiscard]] int reader() noexcept { return pfd[0]; }
-    [[nodiscard]] int writer() noexcept { return pfd[1]; }
-
-    void closeReader() noexcept;
-    void closeWriter() noexcept;
-
-    void close();
-};
 
 class UnixPty final: public Pty
 {

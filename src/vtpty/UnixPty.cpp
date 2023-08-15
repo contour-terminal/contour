@@ -175,51 +175,6 @@ namespace
 
 } // namespace
 
-// {{{ UnixPipe
-UnixPipe::UnixPipe(): pfd { -1, -1 }
-{
-    if (pipe(pfd))
-        perror("pipe");
-}
-
-UnixPipe::UnixPipe(UnixPipe&& v) noexcept: pfd { v.pfd[0], v.pfd[1] }
-{
-    v.pfd[0] = -1;
-    v.pfd[1] = -1;
-}
-
-UnixPipe& UnixPipe::operator=(UnixPipe&& v) noexcept
-{
-    close();
-    pfd[0] = v.pfd[0];
-    pfd[1] = v.pfd[1];
-    v.pfd[0] = -1;
-    v.pfd[1] = -1;
-    return *this;
-}
-
-UnixPipe::~UnixPipe()
-{
-    close();
-}
-
-void UnixPipe::close()
-{
-    closeReader();
-    closeWriter();
-}
-
-void UnixPipe::closeReader() noexcept
-{
-    detail::saveClose(&pfd[0]);
-}
-
-void UnixPipe::closeWriter() noexcept
-{
-    detail::saveClose(&pfd[1]);
-}
-// }}}
-
 // {{{ UnixPty::Slave
 UnixPty::Slave::~Slave()
 {
