@@ -85,17 +85,17 @@ namespace helper
                               terminal::match_modes::flag _testFlag)
     {
         using MatchModes = terminal::match_modes;
-        switch (_expected.status(_testFlag))
+        switch (_expected.getStatus(_testFlag))
         {
-            case MatchModes::tatus::Enabled:
+            case MatchModes::status::Enabled:
                 if (!(_actualModeFlags & _testFlag))
                     return false;
                 break;
-            case MatchModes::tatus::Disabled:
+            case MatchModes::status::Disabled:
                 if ((_actualModeFlags & _testFlag))
                     return false;
                 break;
-            case MatchModes::tatus::Any: break;
+            case MatchModes::status::Any: break;
         }
         return true;
     }

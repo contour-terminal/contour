@@ -47,6 +47,7 @@
 #include "contour/Actions.h"
 #include "vtbackend/Color.h"
 #include "vtbackend/ColorPalette.h"
+#include "vtbackend/MatchModes.h"
 #include "vtbackend/primitives.h"
 
 #if defined(_WIN32)
@@ -679,14 +680,13 @@ namespace
                                                     string const& _prefix,
                                                     YAML::Node const& _node)
     {
-        using terminal::match_modes;
         if (!_node)
             return terminal::match_modes {};
         _usedKeys.emplace(_prefix);
         if (!_node.IsScalar())
             return nullopt;
 
-        auto matchModes = MatchModes {};
+        auto matchModes = terminal::match_modes {};
 
         auto const modeStr = _node.as<string>();
         auto const args = crispy::split(modeStr, '|');
@@ -701,22 +701,22 @@ namespace
                 arg.remove_prefix(1);
             }
 
-            MatchModes::flag flag = MatchModes::flag::default_flag;
+            terminal::match_modes::flag flag = terminal::match_modes::flag::default_flag;
             string const upperArg = toUpper(arg);
             if (upperArg == "ALT"sv)
-                flag = MatchModes::alternate_screen;
+                flag = terminal::match_modes::alternate_screen;
             else if (upperArg == "APPCURSOR")
-                flag = MatchModes::app_cursor;
+                flag = terminal::match_modes::app_cursor;
             else if (upperArg == "APPKEYPAD")
-                flag = MatchModes::app_keypad;
+                flag = terminal::match_modes::app_keypad;
             else if (upperArg == "INSERT")
-                flag = MatchModes::insert;
+                flag = terminal::match_modes::insert;
             else if (upperArg == "SELECT")
-                flag = MatchModes::select;
+                flag = terminal::match_modes::select;
             else if (upperArg == "SEARCH")
-                flag = MatchModes::search;
+                flag = terminal::match_modes::search;
             else if (upperArg == "TRACE")
-                flag = MatchModes::trace;
+                flag = terminal::match_modes::trace;
             else
             {
                 errorlog()("Unknown input_mapping mode: {}", arg);

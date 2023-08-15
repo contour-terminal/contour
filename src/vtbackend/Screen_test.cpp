@@ -2093,7 +2093,7 @@ TEST_CASE("SaveCursor and RestoreCursor", "[screen]")
     auto mock = mock_term { PageSize { LineCount(3), ColumnCount(3) } };
     auto& screen = mock.terminal.primaryScreen();
     mock.terminal.setMode(dec_mode::AutoWrap, false);
-    mock.terminal.currentScreen().savegetCursor();
+    mock.terminal.currentScreen().saveCursor();
 
     // mutate the cursor's position, autowrap and origin flags
     screen.moveCursorTo(line_offset { 2 }, column_offset { 2 });
@@ -2101,7 +2101,7 @@ TEST_CASE("SaveCursor and RestoreCursor", "[screen]")
     mock.terminal.setMode(dec_mode::Origin, true);
 
     // restore cursor and see if the changes have been reverted
-    mock.terminal.currentScreen().restoregetCursor();
+    mock.terminal.currentScreen().restoreCursor();
     CHECK(screen.logicalCursorPosition() == cell_location { line_offset(0), column_offset(0) });
     CHECK_FALSE(mock.terminal.isModeEnabled(dec_mode::AutoWrap));
     CHECK_FALSE(mock.terminal.isModeEnabled(dec_mode::Origin));

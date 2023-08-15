@@ -1124,25 +1124,25 @@ bool TerminalSession::operator()(actions::ToggleTitleBar)
 // {{{ Trace debug mode
 bool TerminalSession::operator()(actions::TraceBreakAtEmptyQueue)
 {
-    terminal_.setExecutionMode(ExecutionMode::BreakAtEmptyQueue);
+    terminal_.setExecutionMode(execution_mode::BreakAtEmptyQueue);
     return true;
 }
 
 bool TerminalSession::operator()(actions::TraceEnter)
 {
-    terminal_.setExecutionMode(ExecutionMode::Waiting);
+    terminal_.setExecutionMode(execution_mode::Waiting);
     return true;
 }
 
 bool TerminalSession::operator()(actions::TraceLeave)
 {
-    terminal_.setExecutionMode(ExecutionMode::Normal);
+    terminal_.setExecutionMode(execution_mode::Normal);
     return true;
 }
 
 bool TerminalSession::operator()(actions::TraceStep)
 {
-    terminal_.setExecutionMode(ExecutionMode::SingleStep);
+    terminal_.setExecutionMode(execution_mode::SingleStep);
     return true;
 }
 // }}}
@@ -1375,7 +1375,7 @@ uint8_t TerminalSession::matchModeFlags() const
     if (!terminal_.state().searchMode.pattern.empty())
         flags |= static_cast<uint8_t>(match_modes::flag::search);
 
-    if (terminal_.executionMode() != ExecutionMode::Normal)
+    if (terminal_.executionMode() != execution_mode::Normal)
         flags |= static_cast<uint8_t>(match_modes::flag::trace);
 
     return flags;
