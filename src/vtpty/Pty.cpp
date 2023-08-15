@@ -13,9 +13,7 @@
  */
 #include <vtpty/Pty.h>
 
-#if defined(__linux__)
-    #include <vtpty/LinuxPty.h>
-#elif defined(_MSC_VER)
+#if defined(_MSC_VER)
     #include <vtpty/ConPty.h>
 #else
     #include <vtpty/UnixPty.h>
@@ -30,9 +28,7 @@ namespace terminal
 
 unique_ptr<Pty> createPty(PageSize pageSize, optional<crispy::image_size> viewSize)
 {
-#if defined(__linux__)
-    return make_unique<terminal::LinuxPty>(pageSize, viewSize);
-#elif defined(_MSC_VER)
+#if defined(_MSC_VER)
     return make_unique<terminal::ConPty>(pageSize /*TODO: , viewSize*/);
 #else
     return make_unique<terminal::UnixPty>(pageSize, viewSize);

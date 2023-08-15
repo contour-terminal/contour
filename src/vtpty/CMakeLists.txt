@@ -31,8 +31,6 @@ set(vtpty_HEADERS
 )
 
 if(LINUX)
-    set(vtpty_HEADERS ${vtpty_HEADERS} LinuxPty.h)
-    set(vtpty_SOURCES ${vtpty_SOURCES} LinuxPty.cpp)
     if(NOT FLATPAK)
         set(vtpty_LIBRARIES ${vtpty_LIBRARIES} utempter)
     endif()

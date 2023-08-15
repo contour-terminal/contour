@@ -48,6 +48,10 @@
 #include <pwd.h>
 #include <unistd.h>
 
+#if defined(__linux__) && !defined(FLATPAK)
+    #include <utempter.h>
+#endif
+
 using std::make_unique;
 using std::max;
 using std::min;
@@ -173,6 +177,16 @@ namespace
         return { PtyMasterHandle::cast_from(masterFd), PtySlaveHandle::cast_from(slaveFd) };
     }
 
+#if defined(__linux__) && !defined(FLATPAK)
+    char const* hostnameForUtmp()
+    {
+        for (auto const* env: { "DISPLAY", "WAYLAND_DISPLAY" })
+            if (auto const* value = std::getenv(env))
+                return value;
+
+        return nullptr;
+    }
+#endif
 } // namespace
 
 // {{{ UnixPty::Slave
@@ -266,23 +280,17 @@ void UnixPty::start()
     detail::setFileFlags(_stdoutFastPipe.reader(), O_NONBLOCK);
     PtyLog()("stdout fastpipe: reader {}, writer {}", _stdoutFastPipe.reader(), _stdoutFastPipe.writer());
 
-#if defined(__linux__)
-    if (pipe2(_pipe.data(), O_NONBLOCK /* | O_CLOEXEC | O_NONBLOCK*/) < 0)
-        throw runtime_error { "Failed to create PTY pipe. "s + strerror(errno) };
-#else
-    if (pipe(_pipe.data()) < 0)
-        throw runtime_error { "Failed to create PTY pipe. "s + strerror(errno) };
-    for (auto const fd: _pipe)
-        if (!detail::setFileFlags(fd, O_CLOEXEC | O_NONBLOCK))
-            break;
+    _readSelector.want_read(_masterFd);
+    _readSelector.want_read(_stdoutFastPipe.reader());
+
+#if defined(__linux__) && !defined(FLATPAK)
+    utempter_add_record(_masterFd, hostnameForUtmp());
 #endif
 }
 
 UnixPty::~UnixPty()
 {
     PtyLog()("PTY destroying master (file descriptor {}).", _masterFd);
-    detail::saveClose(&_pipe.at(0));
-    detail::saveClose(&_pipe.at(1));
     detail::saveClose(&_masterFd);
 }
 
@@ -311,10 +319,7 @@ bool UnixPty::isClosed() const noexcept
 
 void UnixPty::wakeupReader() noexcept
 {
-    // TODO(Linux): Using eventfd() instead could lower potential abuse.
-    char dummy {};
-    auto const rv = ::write(_pipe[1], &dummy, sizeof(dummy));
-    (void) rv;
+    _readSelector.wakeup();
 }
 
 optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
@@ -347,11 +352,11 @@ Pty::ReadResult UnixPty::read(crispy::buffer_object<char>& storage,
                               std::chrono::milliseconds timeout,
                               size_t size)
 {
-    if (int fd = waitForReadable(_masterFd, _stdoutFastPipe.reader(), _pipe[0], timeout); fd != -1)
+    if (auto const fd = _readSelector.wait_one(timeout); fd.has_value())
     {
         auto const _l = scoped_lock { storage };
-        if (auto x = readSome(fd, storage.hotEnd(), min(size, storage.bytesAvailable())))
-            return { tuple { x.value(), fd == _stdoutFastPipe.reader() } };
+        if (auto x = readSome(*fd, storage.hotEnd(), min(size, storage.bytesAvailable())))
+            return { tuple { x.value(), *fd == _stdoutFastPipe.reader() } };
     }
 
     return nullopt;

@@ -17,6 +17,7 @@
 #include <vtpty/UnixUtils.h>
 
 #include <crispy/BufferObject.h>
+#include <crispy/read_selector.h>
 
 #include <array>
 #include <memory>
@@ -82,8 +83,8 @@ class UnixPty final: public Pty
     [[nodiscard]] bool started() const noexcept { return _masterFd != -1; }
 
     int _masterFd = -1;
-    std::array<int, 2> _pipe = { -1, -1 };
     UnixPipe _stdoutFastPipe;
+    crispy::read_selector _readSelector;
     PageSize _pageSize;
     std::optional<crispy::image_size> _pixels;
     std::unique_ptr<Slave> _slave;
