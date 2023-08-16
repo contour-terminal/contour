@@ -126,3 +126,15 @@ CheckOptions:
     value:           ''
   - key:             readability-identifier-naming.ScopedEnumConstantCase
     value:           CamelCase
+  - key:             readability-identifier-naming.VariableCase
+    value:           camelBack
+  - key:             readability-identifier-naming.VariableCasePrefix
+    value:           ''
+  - key:             readability-identifier-naming.ConstexprVariableCase
+    value:           CamelCase
+  - key:             readability-identifier-naming.ConstexprVariableCasePrefix
+    value:           ''
+  - key:             readability-identifier-naming.ConstantCase
+    value:           camelCase
+  - key:             readability-identifier-naming.ConstantCasePrefix
+    value:           ''
