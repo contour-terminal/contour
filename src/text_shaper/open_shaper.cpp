@@ -243,7 +243,7 @@ namespace
             if (!ftFace)
             {
                 // clang-format off
-                errorlog()("Failed to load font from path {}. {}", sourcePath.value, ftErrorStr(ec));
+                errorLog()("Failed to load font from path {}. {}", sourcePath.value, ftErrorStr(ec));
                 // clang-format on
                 return nullopt;
             }
@@ -256,18 +256,18 @@ namespace
                 ft, memory.data.data(), static_cast<FT_Long>(memory.data.size()), faceIndex, &ftFace);
             if (!ftFace)
             {
-                errorlog()("Failed to load font from memory. {}", ftErrorStr(ec));
+                errorLog()("Failed to load font from memory. {}", ftErrorStr(ec));
                 return nullopt;
             }
         }
         else
         {
-            errorlog()("Unsupported font_source type.");
+            errorLog()("Unsupported font_source type.");
             return nullopt;
         }
 
         if (FT_Error const ec = FT_Select_Charmap(ftFace, FT_ENCODING_UNICODE); ec != FT_Err_Ok)
-            errorlog()("FT_Select_Charmap failed. Ignoring; {}", ftErrorStr(ec));
+            errorLog()("FT_Select_Charmap failed. Ignoring; {}", ftErrorStr(ec));
 
         if (FT_HAS_COLOR(ftFace))
         {
@@ -276,7 +276,7 @@ namespace
 
             FT_Error const ec = FT_Select_Size(ftFace, strikeIndex);
             if (ec != FT_Err_Ok)
-                errorlog()(
+                errorLog()(
                     "Failed to FT_Select_Size(index={}, source {}): {}", strikeIndex, source, ftErrorStr(ec));
         }
         else
@@ -287,7 +287,7 @@ namespace
                     ftFace, 0, size, static_cast<FT_UInt>(dpi.x), static_cast<FT_UInt>(dpi.y));
                 ec != FT_Err_Ok)
             {
-                errorlog()("Failed to FT_Set_Char_Size(size={}, dpi {}, source {}): {}\n",
+                errorLog()("Failed to FT_Set_Char_Size(size={}, dpi {}, source {}): {}\n",
                            size,
                            dpi,
                            source,
@@ -444,7 +444,7 @@ struct open_shaper::Private // {{{
         auto key = create_font_key();
         fontPathAndSizeToKeyMapping.emplace(pair { FontPathAndSize { sourceId, fontSize }, key });
         fontKeyToHbFontInfoMapping.emplace(pair { key, std::move(fontInfo) });
-        LocatorLog()(
+        locatorLog()(
             "Loading font: key={}, id=\"{}\" size={} dpi {} {}", key, sourceId, fontSize, dpi, metrics(key));
         return key;
     }
@@ -481,7 +481,7 @@ struct open_shaper::Private // {{{
             throw runtime_error { "freetype: Failed to initialize. "s + ftErrorStr(ec) };
 
         if (auto const ec = FT_Library_SetLcdFilter(ft, FT_LCD_FILTER_DEFAULT); ec != FT_Err_Ok)
-            errorlog()("freetype: Failed to set LCD filter. {}", ftErrorStr(ec));
+            errorLog()("freetype: Failed to set LCD filter. {}", ftErrorStr(ec));
     }
 
     bool tryShapeWithFallback(font_key font,
@@ -521,7 +521,7 @@ struct open_shaper::Private // {{{
             Require(fontKeyToHbFontInfoMapping.count(fallbackKeyOpt.value()) == 1);
             HbFontInfo& fallbackFontInfo = fontKeyToHbFontInfoMapping.at(fallbackKeyOpt.value());
             // clang-format off
-            TextShapingLog()("Try fallbacks font key:{}, source: {}",
+            textShapingLog()("Try fallbacks font key:{}, source: {}",
                              fallbackKeyOpt.value(),
                              fallbackFontInfo.primary);
             // clang-format on
@@ -561,7 +561,7 @@ void open_shaper::set_locator(font_locator& locator)
 
 void open_shaper::clear_cache()
 {
-    LocatorLog()("Clearing cache ({} keys, {} font infos).",
+    locatorLog()("Clearing cache ({} keys, {} font infos).",
                  _d->fontPathAndSizeToKeyMapping.size(),
                  _d->fontKeyToHbFontInfoMapping.size());
     _d->fontPathAndSizeToKeyMapping.clear();
@@ -595,7 +595,7 @@ font_metrics open_shaper::metrics(font_key key) const
         return fontInfo.metrics.value();
 
     fontInfo.metrics = _d->metrics(key);
-    LocatorLog()("Calculating font metrics for {}: {}", fontInfo.description, *fontInfo.metrics);
+    locatorLog()("Calculating font metrics for {}: {}", fontInfo.description, *fontInfo.metrics);
     return fontInfo.metrics.value();
 }
 
@@ -641,18 +641,18 @@ void open_shaper::shape(font_key font,
                         shape_result& result)
 {
     assert(clusters.size() == codepoints.size());
-    TextShapingLog()("Shaping using font key: {}, text: \"{}\"", font, unicode::convert_to<char>(codepoints));
+    textShapingLog()("Shaping using font key: {}, text: \"{}\"", font, unicode::convert_to<char>(codepoints));
     if (!_d->fontKeyToHbFontInfoMapping.count(font))
-        TextShapingLog()("Font not found? {}", font);
+        textShapingLog()("Font not found? {}", font);
 
     Require(_d->fontKeyToHbFontInfoMapping.count(font) == 1);
     HbFontInfo& fontInfo = _d->fontKeyToHbFontInfoMapping.at(font);
     hb_font_t* hbFont = fontInfo.hbFont.get();
     hb_buffer_t* hbBuf = _d->hb_buf.get();
 
-    if (TextShapingLog)
+    if (textShapingLog)
     {
-        auto logMessage = TextShapingLog();
+        auto logMessage = textShapingLog();
         logMessage.append("Shaping codepoints (");
         // clang-format off
         logMessage.append([=]() { auto s = ostringstream(); s << presentation; return s.str(); }());
@@ -668,7 +668,7 @@ void open_shaper::shape(font_key font,
             font, fontInfo, hbBuf, hbFont, script, presentation, codepoints, clusters, result))
         return;
 
-    TextShapingLog()("Shaping failed.");
+    textShapingLog()("Shaping failed.");
 
     // Reshape each cluster individually.
     result.clear();
@@ -726,8 +726,8 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
 
         if (ec != FT_Err_Ok)
         {
-            if (LocatorLog)
-                LocatorLog()("Error loading glyph index {} for font {} {}. {}",
+            if (locatorLog)
+                locatorLog()("Error loading glyph index {} for font {} {}. {}",
                              glyphIndex.value,
                              ftFace->family_name,
                              ftFace->style_name,
@@ -741,7 +741,7 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
     {
         if (FT_Render_Glyph(ftFace->glyph, ftRenderMode(mode)) != FT_Err_Ok)
         {
-            RasterizerLog()("Failed to rasterize glyph {}.", glyph);
+            rasterizerLog()("Failed to rasterize glyph {}.", glyph);
             return nullopt;
         }
     }
@@ -851,15 +851,15 @@ optional<rasterized_glyph> open_shaper::rasterize(glyph_key glyph, render_mode m
             break;
         }
         default:
-            RasterizerLog()("Glyph requested that has an unsupported pixel_mode:{}",
+            rasterizerLog()("Glyph requested that has an unsupported pixel_mode:{}",
                             ftFace->glyph->bitmap.pixel_mode);
             return nullopt;
     }
 
     Ensures(output.valid());
 
-    if (RasterizerLog)
-        RasterizerLog()("rasterize {} to {}", glyph, output);
+    if (rasterizerLog)
+        rasterizerLog()("rasterize {} to {}", glyph, output);
 
     return output;
 }

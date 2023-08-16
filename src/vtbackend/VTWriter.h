@@ -35,7 +35,7 @@ class VTWriter
   public:
     using Writer = std::function<void(char const*, size_t)>;
 
-    static constexpr inline auto maxParameterCount = 16;
+    static constexpr inline auto MaxParameterCount = 16;
 
     explicit VTWriter(Writer writer);
     explicit VTWriter(std::ostream& output);
@@ -64,7 +64,7 @@ class VTWriter
     template <typename... Args>
     void sgrAdd(unsigned n, Args... values)
     {
-        if (_sgr.size() + sizeof...(values) > maxParameterCount)
+        if (_sgr.size() + sizeof...(values) > MaxParameterCount)
             sgrFlush();
 
         sgrAddExplicit(n);

@@ -1013,12 +1013,12 @@ void TerminalWidget::doDumpState()
 
     if (!QOpenGLContext::currentContext())
     {
-        errorlog()("Cannot dump state: no OpenGL context available");
+        errorLog()("Cannot dump state: no OpenGL context available");
         return;
     }
     if (!QOpenGLContext::currentContext()->makeCurrent(window()))
     {
-        errorlog()("Cannot dump state: cannot make current");
+        errorLog()("Cannot dump state: cannot make current");
         return;
     }
 

@@ -86,7 +86,7 @@ tuple<rasterized_glyph, float> scale(rasterized_glyph const& bitmap, crispy::ima
         crispy::image_size { crispy::width::cast_from(unbox<double>(bitmap.bitmapSize.width) / ratio),
                              crispy::height::cast_from(unbox<double>(bitmap.bitmapSize.height) / ratio) };
 
-    RasterizerLog()("scaling {} from {} to {}, ratio {}x{} ({}), factor {}",
+    rasterizerLog()("scaling {} from {} to {}, ratio {}x{} ({}), factor {}",
                     bitmap.format,
                     bitmap.bitmapSize,
                     newSize,

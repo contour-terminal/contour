@@ -49,7 +49,7 @@ namespace
         }
     }
 
-    auto constexpr fontWeightMappings = std::array<std::pair<font_weight, int>, 12> { {
+    auto constexpr FontWeightMappings = std::array<std::pair<font_weight, int>, 12> { {
         { font_weight::thin, FC_WEIGHT_THIN },
         { font_weight::extra_light, FC_WEIGHT_EXTRALIGHT },
         { font_weight::light, FC_WEIGHT_LIGHT },
@@ -65,7 +65,7 @@ namespace
     } };
 
     // clang-format off
-    auto constexpr fontSlantMappings = std::array<std::pair<font_slant, int>, 3>{ {
+    auto constexpr FontSlantMappings = std::array<std::pair<font_slant, int>, 3>{ {
         { font_slant::italic, FC_SLANT_ITALIC },
         { font_slant::oblique, FC_SLANT_OBLIQUE },
         { font_slant::normal, FC_SLANT_ROMAN }
@@ -74,7 +74,7 @@ namespace
 
     constexpr optional<font_weight> fcToFontWeight(int value) noexcept
     {
-        for (auto const& mapping: fontWeightMappings)
+        for (auto const& mapping: FontWeightMappings)
             if (mapping.second == value)
                 return mapping.first;
         return nullopt;
@@ -82,7 +82,7 @@ namespace
 
     constexpr optional<font_slant> fcToFontSlant(int value) noexcept
     {
-        for (auto const& mapping: fontSlantMappings)
+        for (auto const& mapping: FontSlantMappings)
             if (mapping.second == value)
                 return mapping.first;
         return nullopt;
@@ -90,7 +90,7 @@ namespace
 
     int fcWeight(font_weight weight) noexcept
     {
-        for (auto const& mapping: fontWeightMappings)
+        for (auto const& mapping: FontWeightMappings)
             if (mapping.first == weight)
                 return mapping.second;
         crispy::fatal("Implementation error. font weight cannot be mapped.");
@@ -98,7 +98,7 @@ namespace
 
     constexpr int fcSlant(font_slant slant) noexcept
     {
-        for (auto const& mapping: fontSlantMappings)
+        for (auto const& mapping: FontSlantMappings)
             if (mapping.first == slant)
                 return mapping.second;
         return FC_SLANT_ROMAN;
@@ -152,7 +152,7 @@ struct fontconfig_locator::Private
 
     ~Private()
     {
-        LocatorLog()("~fontconfig_locator.dtor");
+        locatorLog()("~fontconfig_locator.dtor");
         FcConfigDestroy(ftConfig);
         FcFini();
     }
@@ -167,7 +167,7 @@ fontconfig_locator::fontconfig_locator():
 
 font_source_list fontconfig_locator::locate(font_description const& description)
 {
-    LocatorLog()("Locating font chain for: {}", description);
+    locatorLog()("Locating font chain for: {}", description);
     auto pat =
         unique_ptr<FcPattern, void (*)(FcPattern*)>(FcPatternCreate(), [](auto p) { FcPatternDestroy(p); });
 
@@ -254,7 +254,7 @@ font_source_list fontconfig_locator::locate(font_description const& description)
                 && ((description.spacing == font_spacing::proportional && spacing < FC_PROPORTIONAL)
                     || (description.spacing == font_spacing::mono && spacing < FC_MONO)))
             {
-                LocatorLog()("Skipping font: {} ({} < {}).",
+                locatorLog()("Skipping font: {} ({} < {}).",
                              (char const*) (file),
                              fcSpacingStr(spacing),
                              fcSpacingStr(FC_DUAL));
@@ -275,7 +275,7 @@ font_source_list fontconfig_locator::locate(font_description const& description)
             slant = fcToFontSlant(integerValue);
 
         output.emplace_back(font_path { string { (char const*) (file) }, ttcIndex, weight, slant });
-        LocatorLog()("Font {} (ttc index {}, weight {}, slant {}, spacing {}) in chain: {}",
+        locatorLog()("Font {} (ttc index {}, weight {}, slant {}, spacing {}) in chain: {}",
                      output.size(),
                      ttcIndex,
                      weight.has_value() ? fmt::format("{}", *weight) : "NONE",
@@ -368,7 +368,7 @@ font_source_list fontconfig_locator::all()
         if (spacing < FC_DUAL)
             continue;
 
-        LocatorLog()("font({}, {}, {})", fcWeightStr(weight), fcSlantStr(slant), (char*) family);
+        locatorLog()("font({}, {}, {})", fcWeightStr(weight), fcSlantStr(slant), (char*) family);
         output.emplace_back(font_path { (char const*) filename });
     }
 

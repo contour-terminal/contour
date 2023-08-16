@@ -140,28 +140,28 @@ Pixmap& Pixmap::segment_bar(int which)
     //  7     5
     //   --6--
 
-    auto const Z = lineThickness;
+    auto const z = lineThickness;
 
-    auto const L = 2 * Z;
-    auto const R = unbox<int>(size.width) - Z;
+    auto const l = 2 * z;
+    auto const r = unbox<int>(size.width) - z;
 
-    auto const T = static_cast<int>(ceil(unbox<double>(size.height) * (1 / 8_th))); // Z;
-    auto const B = unbox<int>(size.height) - baseLine - Z / 2;
-    auto const M = T + (B - T) / 2;
+    auto const t = static_cast<int>(ceil(unbox<double>(size.height) * (1 / 8_th))); // Z;
+    auto const b = unbox<int>(size.height) - baseLine - z / 2;
+    auto const m = t + (b - t) / 2;
 
     switch (which)
     {
-        case 1: return segment_line(*this, Orientation::Horizontal, BaseOffset { T }, From { L }, To { R });
+        case 1: return segment_line(*this, Orientation::Horizontal, BaseOffset { t }, From { l }, To { r });
         case 2:
-            return segment_line(*this, Orientation::Vertical, BaseOffset { R }, From { T + Z }, To { M - Z });
-        case 3: return segment_line(*this, Orientation::Horizontal, BaseOffset { M }, From { L }, To { R });
+            return segment_line(*this, Orientation::Vertical, BaseOffset { r }, From { t + z }, To { m - z });
+        case 3: return segment_line(*this, Orientation::Horizontal, BaseOffset { m }, From { l }, To { r });
         case 4:
-            return segment_line(*this, Orientation::Vertical, BaseOffset { L }, From { T + Z }, To { M - Z });
+            return segment_line(*this, Orientation::Vertical, BaseOffset { l }, From { t + z }, To { m - z });
         case 5:
-            return segment_line(*this, Orientation::Vertical, BaseOffset { R }, From { M + Z }, To { B - Z });
-        case 6: return segment_line(*this, Orientation::Horizontal, BaseOffset { B }, From { L }, To { R });
+            return segment_line(*this, Orientation::Vertical, BaseOffset { r }, From { m + z }, To { b - z });
+        case 6: return segment_line(*this, Orientation::Horizontal, BaseOffset { b }, From { l }, To { r });
         case 7:
-            return segment_line(*this, Orientation::Vertical, BaseOffset { L }, From { M + Z }, To { B - Z });
+            return segment_line(*this, Orientation::Vertical, BaseOffset { l }, From { m + z }, To { b - z });
     }
 
     assert(false);

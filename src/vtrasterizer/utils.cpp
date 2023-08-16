@@ -91,7 +91,7 @@ vector<uint8_t> downsample(vector<uint8_t> const& bitmap,
 
     std::vector<uint8_t> dest(*newSize.width * *newSize.height * numComponents, 0);
 
-    RasterizerLog()("downsample from {} to {}, ratio {}x{} ({}), factor {}",
+    rasterizerLog()("downsample from {} to {}, ratio {}x{} ({}), factor {}",
                     size,
                     newSize,
                     ratioX,
@@ -133,7 +133,7 @@ vector<uint8_t> downsample(vector<uint8_t> const& sourceBitmap, ImageSize target
     vector<uint8_t> targetBitmap(*targetSize.width * *targetSize.height, 0);
 
     auto const sourceWidth = factor * *targetSize.width;
-    auto const average_intensity_in_src = [&](unsigned destX, unsigned destY) -> unsigned {
+    auto const averageIntensityInSrc = [&](unsigned destX, unsigned destY) -> unsigned {
         auto sourceY = destY * factor;
         auto sourceX = destX * factor;
         auto total = 0u;
@@ -151,7 +151,7 @@ vector<uint8_t> downsample(vector<uint8_t> const& sourceBitmap, ImageSize target
         auto const offset = *targetSize.width * y;
         for (auto const x: ::ranges::views::iota(0u, *targetSize.width))
             targetBitmap[offset + x] =
-                (uint8_t) min(255u, unsigned(targetBitmap[offset + x]) + average_intensity_in_src(x, y));
+                (uint8_t) min(255u, unsigned(targetBitmap[offset + x]) + averageIntensityInSrc(x, y));
     }
 
     return targetBitmap;

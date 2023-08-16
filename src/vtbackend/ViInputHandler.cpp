@@ -79,11 +79,11 @@ ViInputHandler::ViInputHandler(Executor& theExecutor, ViMode initialMode):
 
 void ViInputHandler::registerAllCommands()
 {
-    auto constexpr scopeMappings =
+    auto constexpr ScopeMappings =
         std::array<std::pair<char, TextObjectScope>, 2> { { std::pair { 'i', TextObjectScope::Inner },
                                                             std::pair { 'a', TextObjectScope::A } } };
 
-    auto constexpr motionMappings = std::array<std::pair<std::string_view, ViMotion>, 43> { {
+    auto constexpr MotionMappings = std::array<std::pair<std::string_view, ViMotion>, 43> { {
         // clang-format off
         { "$", ViMotion::LineEnd },
         { "%", ViMotion::ParenthesisMatching },
@@ -131,7 +131,7 @@ void ViInputHandler::registerAllCommands()
         // clang-format on
     } };
 
-    auto constexpr textObjectMappings = std::array<std::pair<char, TextObject>, 15> { {
+    auto constexpr TextObjectMappings = std::array<std::pair<char, TextObject>, 15> { {
         { '"', TextObject::DoubleQuotes },
         { 'm', TextObject::LineMark },
         { '(', TextObject::RoundBrackets },
@@ -153,7 +153,7 @@ void ViInputHandler::registerAllCommands()
     // clang-format off
     for (auto const modeSelect: { ModeSelect::Normal, ModeSelect::Visual })
     {
-        for (auto const& [motionChar, motion]: motionMappings)
+        for (auto const& [motionChar, motion]: MotionMappings)
             registerCommand(
                 modeSelect, motionChar, [this, motion = motion]() { _executor.moveCursor(motion, count()); });
 
@@ -195,8 +195,8 @@ void ViInputHandler::registerAllCommands()
     registerCommand(ModeSelect::Normal, "yF.", [this]() { _executor.execute(ViOperator::Yank, ViMotion::ToCharLeft, count(), _lastChar); });
     // clang-format on
 
-    for (auto const& [scopeChar, scope]: scopeMappings)
-        for (auto const& [objectChar, obj]: textObjectMappings)
+    for (auto const& [scopeChar, scope]: ScopeMappings)
+        for (auto const& [objectChar, obj]: TextObjectMappings)
             registerCommand(ModeSelect::Normal,
                             fmt::format("y{}{}", scopeChar, objectChar),
                             [this, scope = scope, obj = obj]() { _executor.yank(scope, obj); });
@@ -210,8 +210,8 @@ void ViInputHandler::registerAllCommands()
     registerCommand(ModeSelect::Visual, "V", [this]() { toggleMode(ViMode::VisualLine); });
     registerCommand(ModeSelect::Visual, "C-V", [this]() { toggleMode(ViMode::VisualBlock); });
     registerCommand(ModeSelect::Visual, "<ESC>", [this]() { setMode(ViMode::Normal); });
-    for (auto const& [scopeChar, scope]: scopeMappings)
-        for (auto const& [objectChar, obj]: textObjectMappings)
+    for (auto const& [scopeChar, scope]: ScopeMappings)
+        for (auto const& [objectChar, obj]: TextObjectMappings)
             registerCommand(ModeSelect::Visual,
                             fmt::format("{}{}", scopeChar, objectChar),
                             [this, scope = scope, obj = obj]() { _executor.select(scope, obj); });
@@ -234,13 +234,13 @@ void ViInputHandler::registerCommand(ModeSelect modes, std::string_view command,
     switch (modes)
     {
         case ModeSelect::Normal: {
-            InputLog()("Registering normal mode command: {}", command);
+            inputLog()("Registering normal mode command: {}", command);
             Require(!_normalMode.contains(commandStr));
             _normalMode.insert(commandStr, std::move(handler));
             break;
         }
         case ModeSelect::Visual: {
-            InputLog()("Registering visual mode command: {}", command);
+            inputLog()("Registering visual mode command: {}", command);
             Require(!_visualMode.contains(commandStr));
             _visualMode.insert(commandStr, std::move(handler));
             break;
@@ -271,7 +271,7 @@ bool ViInputHandler::handlePendingInput()
     auto const mappingResult = mapping.search(_pendingInput, TrieMapAllowWildcardDot);
     if (std::holds_alternative<crispy::exact_match<CommandHandler>>(mappingResult))
     {
-        InputLog()("Executing handler for: {}{}", _count ? fmt::format("{} ", _count) : "", _pendingInput);
+        inputLog()("Executing handler for: {}{}", _count ? fmt::format("{} ", _count) : "", _pendingInput);
         _lastChar =
             unicode::convert_to<char32_t>(std::string_view(_pendingInput.data(), _pendingInput.size()))
                 .back();
@@ -280,12 +280,12 @@ bool ViInputHandler::handlePendingInput()
     }
     else if (std::holds_alternative<crispy::no_match>(mappingResult))
     {
-        InputLog()("Invalid command: {}", _pendingInput);
+        inputLog()("Invalid command: {}", _pendingInput);
         clearPendingInput();
     }
     else
     {
-        InputLog()("Incomplete input: {}", _pendingInput);
+        inputLog()("Incomplete input: {}", _pendingInput);
     }
 
     return true;
@@ -293,7 +293,7 @@ bool ViInputHandler::handlePendingInput()
 
 void ViInputHandler::clearPendingInput()
 {
-    InputLog()("Resetting pending input: {}", _pendingInput);
+    inputLog()("Resetting pending input: {}", _pendingInput);
     _count = 0;
     _pendingInput.clear();
 }
@@ -315,7 +315,7 @@ bool ViInputHandler::sendKeyPressEvent(Key key, Modifier modifier)
     {
         // Do we want to do anything in here?
         // TODO: support cursor movements.
-        errorlog()("ViInputHandler: Ignoring key input {}+{}.", modifier, key);
+        errorLog()("ViInputHandler: Ignoring key input {}+{}.", modifier, key);
         return true;
     }
 
@@ -413,7 +413,7 @@ bool ViInputHandler::handleSearchEditor(char32_t ch, Modifier modifier)
                 _executor.updateSearchTerm(_searchTerm);
             }
             else
-                errorlog()("ViInputHandler: Receiving control code {}+0x{:02X} in search mode. Ignoring.",
+                errorLog()("ViInputHandler: Receiving control code {}+0x{:02X} in search mode. Ignoring.",
                            modifier,
                            (unsigned) ch);
     }

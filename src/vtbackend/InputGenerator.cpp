@@ -300,13 +300,13 @@ void InputGenerator::reset()
 
 void InputGenerator::setCursorKeysMode(KeyMode mode)
 {
-    InputLog()("set cursor keys mode: {}", mode);
+    inputLog()("set cursor keys mode: {}", mode);
     _cursorKeysMode = mode;
 }
 
 void InputGenerator::setNumpadKeysMode(KeyMode mode)
 {
-    InputLog()("set numpad keys mode: {}", mode);
+    inputLog()("set numpad keys mode: {}", mode);
     _numpadKeysMode = mode;
 }
 
@@ -317,7 +317,7 @@ void InputGenerator::setApplicationKeypadMode(bool enable)
     else
         _numpadKeysMode = KeyMode::Normal; // aka. Numeric
 
-    InputLog()("set application keypad mode: {} -> {}", enable, _numpadKeysMode);
+    inputLog()("set application keypad mode: {} -> {}", enable, _numpadKeysMode);
 }
 
 bool InputGenerator::generate(u32string const& characterEvent, Modifier modifier)
@@ -371,7 +371,7 @@ bool InputGenerator::generate(char32_t characterEvent, Modifier modifier)
     else
         append(unicode::convert_to<char>(characterEvent));
 
-    InputLog()("Sending {} \"{}\".", modifier, crispy::escape(unicode::convert_to<char>(characterEvent)));
+    inputLog()("Sending {} \"{}\".", modifier, crispy::escape(unicode::convert_to<char>(characterEvent)));
     return true;
 }
 
@@ -379,7 +379,7 @@ bool InputGenerator::generate(Key key, Modifier modifier)
 {
     auto const logged = [key, modifier](bool success) -> bool {
         if (success)
-            InputLog()("Sending {} {}.", modifier, key);
+            inputLog()("Sending {} {}.", modifier, key);
         return success;
     };
 
@@ -405,7 +405,7 @@ bool InputGenerator::generate(Key key, Modifier modifier)
 
 void InputGenerator::generatePaste(std::string_view const& text)
 {
-    InputLog()("Sending paste of {} bytes.", text.size());
+    inputLog()("Sending paste of {} bytes.", text.size());
 
     if (text.empty())
         return;
@@ -449,7 +449,7 @@ bool InputGenerator::generateFocusInEvent()
     if (generateFocusEvents())
     {
         append("\033[I");
-        InputLog()("Sending focus-in event.");
+        inputLog()("Sending focus-in event.");
         return true;
     }
     return false;
@@ -460,7 +460,7 @@ bool InputGenerator::generateFocusOutEvent()
     if (generateFocusEvents())
     {
         append("\033[O");
-        InputLog()("Sending focus-out event.");
+        inputLog()("Sending focus-out event.");
         return true;
     }
     return true;
@@ -723,7 +723,7 @@ bool InputGenerator::generateMousePress(
 {
     auto const logged = [=](bool success) -> bool {
         if (success)
-            InputLog()("Sending mouse press {} {} at {}.", button, modifier, pos);
+            inputLog()("Sending mouse press {} {} at {}.", button, modifier, pos);
         return success;
     };
 
@@ -770,7 +770,7 @@ bool InputGenerator::generateMouseRelease(
 {
     auto const logged = [=](bool success) -> bool {
         if (success)
-            InputLog()("Sending mouse release {} {} at {}.", button, modifier, pos);
+            inputLog()("Sending mouse release {} {} at {}.", button, modifier, pos);
         return success;
     };
 
@@ -795,7 +795,7 @@ bool InputGenerator::generateMouseMove(Modifier modifier,
     auto const logged = [&](bool success) -> bool {
         if (success)
         {
-            InputLog()("[{}:{}] Sending mouse move at {} ({}:{}).",
+            inputLog()("[{}:{}] Sending mouse move at {} ({}:{}).",
                        _mouseProtocol.value(),
                        _mouseTransport,
                        pos,

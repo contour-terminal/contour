@@ -96,7 +96,7 @@ namespace
 } // namespace
 
 // VT 340 default color palette (https://www.vt100.net/docs/vt3xx-gp/chapter2.html#S2.4)
-constexpr inline std::array<RGBColor, 16> defaultColors = {
+constexpr inline std::array<RGBColor, 16> DefaultColors = {
     rgb(0, 0, 0),       //  0: black
     rgb(51, 51, 204),   //  1: blue
     rgb(204, 33, 33),   //  2: red
@@ -126,8 +126,8 @@ SixelColorPalette::SixelColorPalette(unsigned int size, unsigned int maxSize): _
 
 void SixelColorPalette::reset()
 {
-    for (size_t i = 0; i < min(static_cast<size_t>(size()), defaultColors.size()); ++i)
-        _palette[i] = defaultColors[i];
+    for (size_t i = 0; i < min(static_cast<size_t>(size()), DefaultColors.size()); ++i)
+        _palette[i] = DefaultColors[i];
 }
 
 void SixelColorPalette::setSize(unsigned int newSize)
@@ -309,7 +309,7 @@ void SixelParser::leaveState()
             }
             else if (_params.size() == 5)
             {
-                auto constexpr convertValue = [](unsigned value) {
+                auto constexpr ConvertValue = [](unsigned value) {
                     // converts a color from range 0..100 to 0..255
                     return static_cast<uint8_t>(
                         static_cast<int>((static_cast<float>(value) * 255.0f) / 100.0f) % 256);
@@ -319,9 +319,9 @@ void SixelParser::leaveState()
                 switch (colorSpace)
                 {
                     case Colorspace::RGB: {
-                        auto const p1 = convertValue(_params[2]);
-                        auto const p2 = convertValue(_params[3]);
-                        auto const p3 = convertValue(_params[4]);
+                        auto const p1 = ConvertValue(_params[2]);
+                        auto const p2 = ConvertValue(_params[3]);
+                        auto const p3 = ConvertValue(_params[4]);
                         auto const color = RGBColor { p1, p2, p3 }; // TODO: convert HSL if requested
                         _events.setColor(index, color);
                         break;
@@ -334,10 +334,10 @@ void SixelParser::leaveState()
                         //
                         // (Hue angle seems to be shifted by 120 deg in other Sixel implementations.)
                         auto const h = static_cast<double>(_params[2]) - 120.0;
-                        auto const H = (h < 0 ? 360 + h : h) / 360.0;
-                        auto const S = static_cast<double>(_params[3]) / 100.0;
-                        auto const L = static_cast<double>(_params[3]) / 100.0;
-                        auto const rgb = hsl2rgb(H, S, L);
+                        auto const hc = (h < 0 ? 360 + h : h) / 360.0;
+                        auto const sc = static_cast<double>(_params[3]) / 100.0;
+                        auto const ls = static_cast<double>(_params[3]) / 100.0;
+                        auto const rgb = hsl2rgb(hc, sc, ls);
                         _events.setColor(index, rgb);
                         break;
                     }

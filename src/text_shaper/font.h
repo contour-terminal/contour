@@ -39,7 +39,7 @@
 namespace text
 {
 
-auto const inline LocatorLog = logstore::category("font.locator", "Logs about font loads.");
+auto const inline locatorLog = logstore::category("font.locator", "Logs about font loads.");
 
 namespace detail
 {
@@ -267,9 +267,9 @@ struct glyph_key
 
 #if defined(GLYPH_KEY_DEBUG)
     std::u32string text = {};
-    static constexpr inline bool debug = true;
+    static constexpr inline bool Debug = true;
 #else
-    static constexpr inline bool debug = false;
+    static constexpr inline bool Debug = false;
 #endif
 };
 

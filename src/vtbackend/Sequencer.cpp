@@ -37,8 +37,8 @@ Sequencer::Sequencer(Terminal& terminal): _terminal { terminal }, _parameterBuil
 // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
 void Sequencer::error(std::string_view errorString)
 {
-    if (VTParserLog)
-        VTParserLog()("Parser error: {}", errorString);
+    if (vtParserLog)
+        vtParserLog()("Parser error: {}", errorString);
 }
 
 void Sequencer::print(char32_t codepoint)

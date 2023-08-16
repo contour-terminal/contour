@@ -40,7 +40,7 @@ void mock_font_locator::configure(std::vector<font_description_and_source> regis
 
 font_source_list mock_font_locator::locate(font_description const& description)
 {
-    LocatorLog()("Locating font chain for: {}", description);
+    locatorLog()("Locating font chain for: {}", description);
 
     font_source_list output;
 

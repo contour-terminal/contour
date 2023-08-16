@@ -31,7 +31,7 @@ using std::vector;
 namespace terminal
 {
 
-auto const inline GridLog = logstore::category(
+auto const inline gridLog = logstore::category(
     "vt.grid", "Grid related", logstore::category::state::Disabled, logstore::category::visibility::Hidden);
 
 namespace detail
@@ -344,12 +344,12 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 bool Grid<Cell>::isLineBlank(LineOffset line) const noexcept
 {
-    auto const is_blank = [](auto const& cell) noexcept {
+    auto const isBlank = [](auto const& cell) noexcept {
         return CellUtil::empty(cell);
     };
 
     auto const theLineBuffer = lineBuffer(line);
-    return std::all_of(theLineBuffer.begin(), theLineBuffer.end(), is_blank);
+    return std::all_of(theLineBuffer.begin(), theLineBuffer.end(), isBlank);
 }
 
 /**
@@ -676,7 +676,7 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
     if (_pageSize == newSize)
         return currentCursorPos;
 
-    GridLog()("resize {} -> {} (cursor {})", _pageSize, newSize, currentCursorPos);
+    gridLog()("resize {} -> {} (cursor {})", _pageSize, newSize, currentCursorPos);
 
     // Growing in line count with scrollback lines present will move
     // the scrollback lines into the visible area.
@@ -700,7 +700,7 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
         auto const numLinesToPushUp = numLinesToShrink - cutoffCount;
         auto const numLinesToPushUpCapped = min(numLinesToPushUp, maxHistoryLineCount());
 
-        GridLog()(" -> shrink lines: numLinesToShrink {}, linesAvailableBelowCursorBeforeShrink {}, "
+        gridLog()(" -> shrink lines: numLinesToShrink {}, linesAvailableBelowCursorBeforeShrink {}, "
                   "cutoff {}, pushUp "
                   "{}/{}",
                   numLinesToShrink,
@@ -724,7 +724,7 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
         Require(newHeight <= _pageSize.lines);
         if (*numLinesToPushUp)
         {
-            GridLog()(" -> numLinesToPushUp {}", numLinesToPushUp);
+            gridLog()(" -> numLinesToPushUp {}", numLinesToPushUp);
             Require(*cursor.line + 1 == *_pageSize.lines);
             rotateBuffersLeft(numLinesToPushUp);
             _pageSize.lines -= numLinesToPushUp;
@@ -780,7 +780,7 @@ CellLocation Grid<Cell>::resize(PageSize newSize, CellLocation currentCursorPos,
             [[maybe_unused]] auto const logLogicalLine =
                 [&logicalLineBuffer]([[maybe_unused]] LineFlags lineFlags,
                                      [[maybe_unused]] std::string_view msg) {
-                    GridLog()("{} |> \"{}\"", msg, Line<Cell>(lineFlags, logicalLineBuffer).toUtf8());
+                    gridLog()("{} |> \"{}\"", msg, Line<Cell>(lineFlags, logicalLineBuffer).toUtf8());
                 };
 
             for (int i = -*historyLineCount(); i < *_pageSize.lines; ++i)

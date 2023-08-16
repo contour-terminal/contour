@@ -184,9 +184,9 @@ int app::licenseAction()
     auto const urlWidth = std::accumulate(
         store.begin(), store.end(), 0u, [](size_t a, auto const& b) { return std::max(a, b.url.size()); });
 
-    auto const Horiz = "\u2550"sv;
-    auto const Vert = "\u2502"sv;
-    auto const Cross = "\u256A"sv;
+    auto const horiz = "\u2550"sv;
+    auto const vert = "\u2502"sv;
+    auto const cross = "\u256A"sv;
 
     cout << endl
          << _appTitle << ' ' << _appVersion << endl
@@ -194,15 +194,15 @@ int app::licenseAction()
          << "\u2550"sv * (_appTitle.size() + _appVersion.size() + 1) << endl
          << endl;
 
-    cout << setw((int) titleWidth) << "Project" << ' ' << Vert << ' ' << setw((int) licenseWidth) << "License"
-         << ' ' << Vert << ' ' << "Project URL" << endl;
+    cout << setw((int) titleWidth) << "Project" << ' ' << vert << ' ' << setw((int) licenseWidth) << "License"
+         << ' ' << vert << ' ' << "Project URL" << endl;
 
-    cout << Horiz * titleWidth << Horiz << Cross << Horiz << Horiz * licenseWidth << Horiz << Cross << Horiz
-         << Horiz * urlWidth << endl;
+    cout << horiz * titleWidth << horiz << cross << horiz << horiz * licenseWidth << horiz << cross << horiz
+         << horiz * urlWidth << endl;
 
     for (auto const& project: crispy::cli::about::store())
-        cout << setw((int) titleWidth) << project.title << ' ' << Vert << ' ' << setw((int) licenseWidth)
-             << project.license << ' ' << Vert << ' ' << project.url << endl;
+        cout << setw((int) titleWidth) << project.title << ' ' << vert << ' ' << setw((int) licenseWidth)
+             << project.license << ' ' << vert << ' ' << project.url << endl;
 
     return EXIT_SUCCESS;
 }
@@ -259,7 +259,7 @@ void app::customizeLogStoreOutput()
 #else
         true;
 #endif
-    static constexpr auto colors = std::array<int, 23> {
+    static constexpr auto Colors = std::array<int, 23> {
         2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14, 15, 150, 155, 159, 165, 170, 175, 180, 185, 190, 195, 200,
     };
     logstore::set_formatter([](logstore::message_builder const& msg) -> std::string {
@@ -268,7 +268,7 @@ void app::customizeLogStoreOutput()
                 return { "", "", "" };
             const auto* const tagStart = "\033[1m";
             auto const colorIndex =
-                colors.at(std::hash<string_view> {}(msg.get_category().name()) % colors.size());
+                Colors.at(std::hash<string_view> {}(msg.get_category().name()) % Colors.size());
             auto const msgStart = fmt::format("\033[38;5;{}m", colorIndex);
             auto const resetSGR = fmt::format("\033[m");
             return { tagStart, msgStart, resetSGR };
@@ -315,7 +315,7 @@ void app::customizeLogStoreOutput()
         return result;
     });
 
-    logstore::ErrorLog.set_formatter([](logstore::message_builder const& msg) -> std::string {
+    logstore::errorLog.set_formatter([](logstore::message_builder const& msg) -> std::string {
         auto const [sgrTag, sgrMessage, sgrReset] = [&]() -> std::tuple<string, string, string> {
             if (!colorized)
                 return { "", "", "" };

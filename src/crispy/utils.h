@@ -55,20 +55,20 @@ constexpr bool ascending(T low, T val, T high) noexcept
 
 constexpr unsigned long strntoul(char const* data, size_t count, char const** eptr, unsigned base = 10)
 {
-    constexpr auto values = std::string_view { "0123456789ABCDEF" };
-    constexpr auto lowerLetters = std::string_view { "abcdef" };
+    constexpr auto Values = std::string_view { "0123456789ABCDEF" };
+    constexpr auto LowerLetters = std::string_view { "abcdef" };
 
     unsigned long result = 0;
     while (count != 0)
     {
-        if (auto const i = values.find(*data); i != std::string_view::npos && i < base)
+        if (auto const i = Values.find(*data); i != std::string_view::npos && i < base)
         {
             result *= base;
             result += static_cast<unsigned long>(i);
             ++data;
             --count;
         }
-        else if (auto const i = lowerLetters.find(*data); i != std::string_view::npos && base == 16)
+        else if (auto const i = LowerLetters.find(*data); i != std::string_view::npos && base == 16)
         {
             result *= base;
             result += static_cast<unsigned long>(i);
@@ -158,13 +158,13 @@ inline std::unordered_map<std::string_view, std::string_view> splitKeyValuePairs
 
     std::unordered_map<std::string_view, std::string_view> params;
 
-    size_t i_beg = 0;
+    size_t iBeg = 0;
     size_t i = text.find(delimiter);
 
     // e.g.: foo=bar::foo2=bar2:....
     while (i != std::string_view::npos)
     {
-        std::string_view param(text.data() + i_beg, i - i_beg);
+        std::string_view param(text.data() + iBeg, i - iBeg);
         if (auto const k = param.find('='); k != std::string_view::npos)
         {
             auto const key = param.substr(0, k);
@@ -172,11 +172,11 @@ inline std::unordered_map<std::string_view, std::string_view> splitKeyValuePairs
             if (!key.empty())
                 params[key] = val;
         }
-        i_beg = i + 1;
-        i = text.find(delimiter, i_beg);
+        iBeg = i + 1;
+        i = text.find(delimiter, iBeg);
     }
 
-    std::string_view param(text.data() + i_beg);
+    std::string_view param(text.data() + iBeg);
     if (auto const k = param.find('='); k != std::string_view::npos)
     {
         auto const key = param.substr(0, k);
@@ -443,30 +443,30 @@ inline std::string replaceVariables(std::string_view text, VariableReplacer repl
     using namespace std::string_view_literals;
 
     auto output = std::string {};
-    auto constexpr npos = std::string_view::npos;
+    auto constexpr Npos = std::string_view::npos;
     auto i = std::string_view::size_type { 0 };
 
-    auto constexpr markerStart = "${"sv;
-    auto constexpr markerEnd = "}"sv;
+    auto constexpr MarkerStart = "${"sv;
+    auto constexpr MarkerEnd = "}"sv;
 
-    while (i != npos)
+    while (i != Npos)
     {
-        auto const markerStartOffset = text.find(markerStart, i);
-        if (markerStartOffset == npos)
+        auto const markerStartOffset = text.find(MarkerStart, i);
+        if (markerStartOffset == Npos)
             break;
 
         auto const gapText = text.substr(i, markerStartOffset - i);
         output += gapText;
 
-        auto const markerEndOffset = text.find(markerEnd, markerStartOffset + markerStart.size());
-        if (markerEndOffset == npos)
+        auto const markerEndOffset = text.find(MarkerEnd, markerStartOffset + MarkerStart.size());
+        if (markerEndOffset == Npos)
             break; // Invalid variable format. Closing variable marker not found.
 
-        auto const nameLength = markerEndOffset - (markerStartOffset + markerStart.size());
-        auto const name = text.substr(markerStartOffset + markerStart.size(), nameLength);
+        auto const nameLength = markerEndOffset - (markerStartOffset + MarkerStart.size());
+        auto const name = text.substr(markerStartOffset + MarkerStart.size(), nameLength);
         output += replace(name);
 
-        i = markerEndOffset + markerEnd.size();
+        i = markerEndOffset + MarkerEnd.size();
     }
     output += text.substr(i);
 

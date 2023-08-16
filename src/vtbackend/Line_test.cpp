@@ -28,10 +28,10 @@ using Cell = PrimaryScreenCell;
 
 TEST_CASE("Line.BufferFragment", "[Line]")
 {
-    auto constexpr testText = "0123456789ABCDEF"sv;
+    auto constexpr TestText = "0123456789ABCDEF"sv;
     auto pool = buffer_object_pool<char>(16);
     auto bufferObject = pool.allocateBufferObject();
-    bufferObject->writeAtEnd(testText);
+    bufferObject->writeAtEnd(TestText);
     auto const bufferFragment = bufferObject->ref(0, 10);
 
     auto const externalView = string_view(bufferObject->data(), 10);
@@ -53,17 +53,17 @@ TEST_CASE("Line.resize", "[Line]")
     auto const trivial =
         TrivialLineBuffer { DisplayWidth, sgr, sgr, HyperlinkId {}, DisplayWidth, bufferFragment };
     CHECK(trivial.text.view() == string_view(text.data()));
-    auto line_trivial = Line<Cell>(LineFlags::None, trivial);
-    CHECK(line_trivial.isTrivialBuffer());
+    auto lineTrivial = Line<Cell>(LineFlags::None, trivial);
+    CHECK(lineTrivial.isTrivialBuffer());
 
-    line_trivial.resize(ColumnCount(10));
-    CHECK(line_trivial.isTrivialBuffer());
+    lineTrivial.resize(ColumnCount(10));
+    CHECK(lineTrivial.isTrivialBuffer());
 
-    line_trivial.resize(ColumnCount(5));
-    CHECK(line_trivial.isTrivialBuffer());
+    lineTrivial.resize(ColumnCount(5));
+    CHECK(lineTrivial.isTrivialBuffer());
 
-    line_trivial.resize(ColumnCount(3));
-    CHECK(line_trivial.isTrivialBuffer());
+    lineTrivial.resize(ColumnCount(3));
+    CHECK(lineTrivial.isTrivialBuffer());
 }
 
 TEST_CASE("Line.reflow", "[Line]")
@@ -80,22 +80,22 @@ TEST_CASE("Line.reflow", "[Line]")
     auto const trivial =
         TrivialLineBuffer { DisplayWidth, sgr, sgr, HyperlinkId {}, DisplayWidth, bufferFragment };
     CHECK(trivial.text.view() == string_view(text.data()));
-    auto line_trivial = Line<Cell>(LineFlags::None, trivial);
-    CHECK(line_trivial.isTrivialBuffer());
+    auto lineTrivial = Line<Cell>(LineFlags::None, trivial);
+    CHECK(lineTrivial.isTrivialBuffer());
 
-    (void) line_trivial.reflow(ColumnCount(5));
-    CHECK(line_trivial.isTrivialBuffer());
+    (void) lineTrivial.reflow(ColumnCount(5));
+    CHECK(lineTrivial.isTrivialBuffer());
 
-    (void) line_trivial.reflow(ColumnCount(3));
-    CHECK(line_trivial.isInflatedBuffer());
+    (void) lineTrivial.reflow(ColumnCount(3));
+    CHECK(lineTrivial.isInflatedBuffer());
 }
 
 TEST_CASE("Line.inflate", "[Line]")
 {
-    auto constexpr testText = "0123456789ABCDEF"sv;
+    auto constexpr TestText = "0123456789ABCDEF"sv;
     auto pool = buffer_object_pool<char>(16);
     auto bufferObject = pool.allocateBufferObject();
-    bufferObject->writeAtEnd(testText);
+    bufferObject->writeAtEnd(TestText);
     auto const bufferFragment = bufferObject->ref(0, 10);
 
     auto sgr = GraphicsAttributes {};
@@ -117,15 +117,15 @@ TEST_CASE("Line.inflate", "[Line]")
         CHECK(cell.backgroundColor() == sgr.backgroundColor);
         CHECK(cell.underlineColor() == sgr.underlineColor);
         CHECK(cell.codepointCount() == 1);
-        CHECK(char(cell.codepoint(0)) == testText[i]);
+        CHECK(char(cell.codepoint(0)) == TestText[i]);
     }
 }
 
 TEST_CASE("Line.inflate.Unicode", "[Line]")
 {
     auto constexpr DisplayWidth = ColumnCount(10);
-    auto constexpr testTextUtf32 = U"0\u2705123456789ABCDEF"sv;
-    auto const testTextUtf8 = unicode::convert_to<char>(testTextUtf32);
+    auto constexpr TestTextUtf32 = U"0\u2705123456789ABCDEF"sv;
+    auto const testTextUtf8 = unicode::convert_to<char>(TestTextUtf32);
 
     auto pool = buffer_object_pool<char>(32);
     auto bufferObject = pool.allocateBufferObject();
@@ -150,7 +150,7 @@ TEST_CASE("Line.inflate.Unicode", "[Line]")
         auto const& cell = inflated[i];
         INFO(fmt::format("column {}, k {}, codepoint U+{:X}", i, k, (unsigned) cell.codepoint(0)));
         REQUIRE(cell.codepointCount() == 1);
-        REQUIRE(cell.codepoint(0) == testTextUtf32[k]);
+        REQUIRE(cell.codepoint(0) == TestTextUtf32[k]);
         REQUIRE(cell.foregroundColor() == sgr.foregroundColor);
         REQUIRE(cell.backgroundColor() == sgr.backgroundColor);
         REQUIRE(cell.underlineColor() == sgr.underlineColor);
@@ -174,8 +174,8 @@ TEST_CASE("Line.inflate.Unicode.FamilyEmoji", "[Line]")
 
     auto constexpr DisplayWidth = ColumnCount(5);
     auto constexpr UsedColumnCount = ColumnCount(4);
-    auto constexpr testTextUtf32 = U"A\U0001F468\u200D\U0001F468\u200D\U0001F467B"sv;
-    auto const testTextUtf8 = unicode::convert_to<char>(testTextUtf32);
+    auto constexpr TestTextUtf32 = U"A\U0001F468\u200D\U0001F468\u200D\U0001F467B"sv;
+    auto const testTextUtf8 = unicode::convert_to<char>(TestTextUtf32);
     auto const familyEmojiUtf8 = unicode::convert_to<char>(U"\U0001F468\u200D\U0001F468\u200D\U0001F467"sv);
 
     auto pool = buffer_object_pool<char>(32);

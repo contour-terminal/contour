@@ -135,6 +135,6 @@ CheckOptions:
   - key:             readability-identifier-naming.ConstexprVariableCasePrefix
     value:           ''
   - key:             readability-identifier-naming.ConstantCase
-    value:           camelCase
+    value:           camelBack
   - key:             readability-identifier-naming.ConstantCasePrefix
     value:           ''

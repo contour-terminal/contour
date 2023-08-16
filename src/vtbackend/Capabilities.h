@@ -65,9 +65,9 @@ struct Def
 };
 
 // {{{ variable names
-constexpr auto inline auto_left_margin = Def { Code { "am" }, "am" };
-constexpr auto inline can_change = Def { Code { "cc" }, "ccc" };
-constexpr auto inline eat_newline_glitch = Def { Code { "xn" }, "xenl" };
+constexpr auto inline AutoLeftMargin = Def { Code { "am" }, "am" };
+constexpr auto inline CanChange = Def { Code { "cc" }, "ccc" };
+constexpr auto inline EatNewlineGlitch = Def { Code { "xn" }, "xenl" };
 // TODO ... (all the rest that is at least needed by us)
 // }}}
 
@@ -82,7 +82,7 @@ namespace literals
 class Database
 {
   public:
-    constexpr static inline unsigned npos = unsigned(-1);
+    constexpr static inline unsigned Npos = unsigned(-1);
 
     virtual ~Database() = default;
 

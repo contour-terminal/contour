@@ -22,9 +22,9 @@
 namespace terminal::rasterizer
 {
 
-auto const inline RendererLog =
+auto const inline rendererLog =
     logstore::category("vt.renderer", "Logs general information about VT renderer.");
-auto const inline RasterizerLog = logstore::category("vt.rasterizer", "Logs details about text rendering.");
+auto const inline rasterizerLog = logstore::category("vt.rasterizer", "Logs details about text rendering.");
 
 std::vector<uint8_t> downsampleRGBA(std::vector<uint8_t> const& bitmap, ImageSize size, ImageSize newSize);
 

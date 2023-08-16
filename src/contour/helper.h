@@ -290,7 +290,7 @@ struct RenderStateManager
         (code);                                                     \
         GLenum err {};                                              \
         while ((err = glGetError()) != GL_NO_ERROR)                 \
-            errorlog()("OpenGL error {} for call: {}", err, #code); \
+            errorLog()("OpenGL error {} for call: {}", err, #code); \
     } while (0)
 
 } // namespace contour

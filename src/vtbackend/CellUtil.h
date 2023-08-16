@@ -35,14 +35,14 @@ namespace terminal::CellUtil
                         : ((cellFlags & CellFlags::Bold) && colorPalette.useBrightColors) ? ColorMode::Bright
                                                                                           : ColorMode::Normal;
 
-    auto constexpr bgMode = ColorMode::Normal;
+    auto constexpr BgMode = ColorMode::Normal;
 
     auto const [fgColorTarget, bgColorTarget] =
         reverseVideo ? std::pair { ColorTarget::Background, ColorTarget::Foreground }
                      : std::pair { ColorTarget::Foreground, ColorTarget::Background };
 
     auto rgbColors = RGBColorPair { apply(colorPalette, foregroundColor, fgColorTarget, fgMode),
-                                    apply(colorPalette, backgroundColor, bgColorTarget, bgMode) };
+                                    apply(colorPalette, backgroundColor, bgColorTarget, BgMode) };
 
     if (cellFlags & CellFlags::Inverse)
         rgbColors = rgbColors.swapped();

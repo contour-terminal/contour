@@ -55,8 +55,8 @@ FunctionDefinition const* select(FunctionSelector const& selector) noexcept
     while (a <= b)
     {
         auto const i = (a + b) / 2;
-        auto const& I = funcs[i];
-        auto const rel = compare(selector, I);
+        auto const& fui = funcs[i];
+        auto const rel = compare(selector, fui);
         // std::cout << fmt::format(" - a:{:>2} b:{:>2} i:{} rel:{} I: {}\n", a, b, i, rel < 0 ? '<' : rel > 0
         // ? '>' : '=', I);
         if (rel > 0)
@@ -68,7 +68,7 @@ FunctionDefinition const* select(FunctionSelector const& selector) noexcept
             b = i - 1;
         }
         else
-            return &I;
+            return &fui;
     }
     return nullptr;
 }

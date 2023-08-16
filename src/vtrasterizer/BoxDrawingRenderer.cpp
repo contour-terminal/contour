@@ -48,7 +48,7 @@ namespace terminal::rasterizer
 
 namespace
 {
-    auto const inline BoxDrawingLog = logstore::category("renderer.boxdrawing",
+    auto const inline boxDrawingLog = logstore::category("renderer.boxdrawing",
                                                          "Logs box drawing debugging.",
                                                          logstore::category::state::Disabled,
                                                          logstore::category::visibility::Hidden);
@@ -229,7 +229,7 @@ namespace detail
                 auto constexpr BlockLeft = 3 / 12_th;
                 auto constexpr BlockRight = 9 / 12_th;
                 auto constexpr BlockTop = 3 / 12_th;
-                auto const BlockBottom = 1.0 - (double(underlinePosition) / unbox<double>(size.height)) - 2 * Gap;
+                auto const blockBottom = 1.0 - (double(underlinePosition) / unbox<double>(size.height)) - 2 * Gap;
 
                 auto b = blockElement<1>(size);
 
@@ -237,23 +237,23 @@ namespace detail
                 {
                 case Part::Left:
                     b.rect({ BlockLeft-2*Gap, BlockTop-2*Gap },  { 1,             BlockTop-Gap });      // top line
-                    b.rect({ BlockLeft-2*Gap, BlockBottom+Gap }, { 1,             BlockBottom+2*Gap }); // bottom line
-                    b.rect({ BlockLeft-2*Gap, BlockTop-2*Gap },  { BlockLeft-Gap, BlockBottom+Gap });   // left bar
+                    b.rect({ BlockLeft-2*Gap, blockBottom+Gap }, { 1,             blockBottom+2*Gap }); // bottom line
+                    b.rect({ BlockLeft-2*Gap, BlockTop-2*Gap },  { BlockLeft-Gap, blockBottom+Gap });   // left bar
                     if (filledval)
-                        b.rect({ BlockLeft,   BlockTop },        { 1,             BlockBottom });
+                        b.rect({ BlockLeft,   BlockTop },        { 1,             blockBottom });
                     break;
                 case Part::Middle:
                     b.rect({ 0, BlockTop-2*Gap },  { 1, BlockTop-Gap });      // top line
-                    b.rect({ 0, BlockBottom+Gap }, { 1, BlockBottom+2*Gap }); // bottom line
+                    b.rect({ 0, blockBottom+Gap }, { 1, blockBottom+2*Gap }); // bottom line
                     if (filledval)
-                        b.rect({ 0,   BlockTop },  { 1, BlockBottom });
+                        b.rect({ 0,   BlockTop },  { 1, blockBottom });
                     break;
                 case Part::Right:
                     b.rect({ 0,              BlockTop-2*Gap },  { BlockRight+2*Gap, BlockTop-Gap });      // top line
-                    b.rect({ 0,              BlockBottom+Gap }, { BlockRight+2*Gap, BlockBottom+2*Gap }); // bottom line
-                    b.rect({ BlockRight+Gap, BlockTop-2*Gap },  { BlockRight+2*Gap, BlockBottom+Gap });   // left bar
+                    b.rect({ 0,              blockBottom+Gap }, { BlockRight+2*Gap, blockBottom+2*Gap }); // bottom line
+                    b.rect({ BlockRight+Gap, BlockTop-2*Gap },  { BlockRight+2*Gap, blockBottom+Gap });   // left bar
                     if (filledval)
-                        b.rect({ 0,          BlockTop },        { BlockRight,       BlockBottom });
+                        b.rect({ 0,          BlockTop },        { BlockRight,       blockBottom });
                     break;
                 }
                 // clang-format on
@@ -357,7 +357,7 @@ namespace detail
 
         // U+2500 .. U+257F (128 box drawing characters)
 
-        constexpr auto boxDrawingDefinitions = std::array<Box, 0x80> // {{{
+        constexpr auto BoxDrawingDefinitions = std::array<Box, 0x80> // {{{
             {
                 Box {}.horizontal(Light),        // U+2500
                 Box {}.horizontal(Heavy),        // U+2501
@@ -497,7 +497,7 @@ namespace detail
             };
         // }}}
 
-        static_assert(boxDrawingDefinitions.size() == 0x80);
+        static_assert(BoxDrawingDefinitions.size() == 0x80);
 
         // {{{ block element construction
 
@@ -526,12 +526,12 @@ namespace detail
             auto const s = unbox<int>(size.width) / int(N);
             auto const t = unbox<int>(size.height) / int(N);
             return [s, t](int x, int y) {
-                auto constexpr set = Inv == Inverted::No ? 255 : 0;
-                auto constexpr unset = 255 - set;
+                auto constexpr Set = Inv == Inverted::No ? 255 : 0;
+                auto constexpr Unset = 255 - Set;
                 if ((y / t) % 2)
-                    return (x / s) % 2 != 0 ? set : unset;
+                    return (x / s) % 2 != 0 ? Set : Unset;
                 else
-                    return (x / s) % 2 == 0 ? set : unset;
+                    return (x / s) % 2 == 0 ? Set : Unset;
             };
         }
 
@@ -694,8 +694,8 @@ namespace detail
         template <Inverted Inv>
         auto dchecker(ImageSize size)
         {
-            auto constexpr set = Inv == Inverted::No ? 255 : 0;
-            auto constexpr unset = 255 - set;
+            auto constexpr Set = Inv == Inverted::No ? 255 : 0;
+            auto constexpr Unset = 255 - Set;
 
             auto const c = point { unbox<int>(size.width) / 2, unbox<int>(size.height) / 2 };
             auto const w = unbox<int>(size.width) - 1;
@@ -706,9 +706,9 @@ namespace detail
             return [=](int x, int y) {
                 auto const [a, b] = pair { f(x), g(x) };
                 if (x <= c.x)
-                    return a <= y && y <= b ? set : unset;
+                    return a <= y && y <= b ? Set : Unset;
                 else
-                    return b <= y && y <= a ? set : unset;
+                    return b <= y && y <= a ? Set : Unset;
             };
         }
 
@@ -948,7 +948,7 @@ constexpr inline bool containsNonCanonicalLines(char32_t codepoint)
 {
     if (codepoint < 0x2500 || codepoint > 0x257F)
         return false;
-    auto const& box = detail::boxDrawingDefinitions[codepoint - 0x2500];
+    auto const& box = detail::BoxDrawingDefinitions[codepoint - 0x2500];
     return box.diagonalval != detail::NoDiagonal || box.arcval != NoArc;
 }
 
@@ -972,10 +972,10 @@ auto BoxDrawingRenderer::createTileData(char32_t codepoint, atlas::TileLocation 
     if (antialiasing)
     {
         auto const supersamplingFactor = []() {
-            auto constexpr envName = "SSA_FACTOR";
-            if (!getenv(envName))
+            auto constexpr EnvName = "SSA_FACTOR";
+            if (!getenv(EnvName))
                 return 2;
-            auto const val = atoi(getenv(envName));
+            auto const val = atoi(getenv(EnvName));
             if (!(val >= 1 && val <= 8))
                 return 1;
             return val;
@@ -1549,7 +1549,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
     if (!(codepoint >= 0x2500 && codepoint <= 0x257F))
         return nullopt;
 
-    auto box = detail::boxDrawingDefinitions[codepoint - 0x2500];
+    auto box = detail::BoxDrawingDefinitions[codepoint - 0x2500];
 
     auto const height = size.height;
     auto const width = size.width;
@@ -1574,9 +1574,9 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
         auto x0 = round(p / 2.0);
         for ([[maybe_unused]] auto const _: iota(0u, dashCount))
         {
-            auto const x0_ = static_cast<int>(round(x0));
+            auto const x0l = static_cast<int>(round(x0));
             for (auto const y: iota(y0, y0 + w))
-                for (auto const x: iota(x0_, x0_ + static_cast<int>(p)))
+                for (auto const x: iota(x0l, x0l + static_cast<int>(p)))
                     image[y * *width + unsigned(x)] = 0xFF;
             x0 += unbox<double>(width) / static_cast<double>(dashCount);
         }
@@ -1596,8 +1596,8 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
         auto y0 = round(p / 2.0);
         for ([[maybe_unused]] auto const i: iota(0u, dashCount))
         {
-            auto const y0_ = static_cast<unsigned>(round(y0));
-            for (auto const y: iota(y0_, y0_ + static_cast<unsigned>(p)))
+            auto const y0l = static_cast<unsigned>(round(y0));
+            for (auto const y: iota(y0l, y0l + static_cast<unsigned>(p)))
                 for (auto const x: iota(x0, x0 + w))
                     image[y * *width + unsigned(x)] = 0xFF;
             y0 += unbox<double>(height) / static_cast<double>(dashCount);
@@ -1745,7 +1745,7 @@ optional<atlas::Buffer> BoxDrawingRenderer::buildBoxElements(char32_t codepoint,
     if (box.arcval != NoArc)
         detail::drawArc(image, size, lightThickness, box.arcval);
 
-    BoxDrawingLog()("BoxDrawing: build U+{:04X} ({})", static_cast<uint32_t>(codepoint), size);
+    boxDrawingLog()("BoxDrawing: build U+{:04X} ({})", static_cast<uint32_t>(codepoint), size);
 
     return image;
 }

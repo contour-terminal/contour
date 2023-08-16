@@ -118,8 +118,8 @@ class Pty
 
 [[nodiscard]] std::unique_ptr<Pty> createPty(PageSize pageSize, std::optional<crispy::image_size> viewSize);
 
-auto const inline PtyLog = logstore::category("pty", "Logs general PTY informations.");
-auto const inline PtyInLog = logstore::category("pty.input", "Logs PTY raw input.");
-auto const inline PtyOutLog = logstore::category("pty.output", "Logs PTY raw output.");
+auto const inline ptyLog = logstore::category("pty", "Logs general PTY informations.");
+auto const inline ptyInLog = logstore::category("pty.input", "Logs PTY raw input.");
+auto const inline ptyOutLog = logstore::category("pty.output", "Logs PTY raw output.");
 
 } // namespace terminal

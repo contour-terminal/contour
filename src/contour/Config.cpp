@@ -121,7 +121,7 @@ namespace
 
         if (!FileSystem::exists(resolvedFileName))
         {
-            errorlog()("Background image path not found: {}", resolvedFileName.string());
+            errorLog()("Background image path not found: {}", resolvedFileName.string());
             return nullptr;
         }
 
@@ -478,7 +478,7 @@ namespace
                     continue;
                 if (crispy::startsWith(string_view(prefix), "x-"sv))
                     continue;
-                errorlog()("Superfluous config key found: {}", escape(prefix));
+                errorLog()("Superfluous config key found: {}", escape(prefix));
             }
         }
         else if (_root.IsSequence())
@@ -646,17 +646,17 @@ namespace
             return;
 
         std::string strValue;
-        tryLoadChildRelative(usedKeys, rootNode, basePath, "shape", strValue, errorlog());
+        tryLoadChildRelative(usedKeys, rootNode, basePath, "shape", strValue, errorLog());
         if (!strValue.empty())
             cursorConfig.cursorShape = terminal::makeCursorShape(strValue);
 
         bool boolValue = cursorConfig.cursorDisplay == terminal::CursorDisplay::Blink;
-        tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking", boolValue, errorlog());
+        tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking", boolValue, errorLog());
         cursorConfig.cursorDisplay =
             boolValue ? terminal::CursorDisplay::Blink : terminal::CursorDisplay::Steady;
 
         auto uintValue = cursorConfig.cursorBlinkInterval.count();
-        tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking_interval", uintValue, errorlog());
+        tryLoadChildRelative(usedKeys, rootNode, basePath, "blinking_interval", uintValue, errorLog());
         cursorConfig.cursorBlinkInterval = chrono::milliseconds(uintValue);
     }
 
@@ -719,7 +719,7 @@ namespace
                 flag = MatchModes::Trace;
             else
             {
-                errorlog()("Unknown input_mapping mode: {}", arg);
+                errorLog()("Unknown input_mapping mode: {}", arg);
                 continue;
             }
 
@@ -860,7 +860,7 @@ namespace
         auto actionOpt = actions::fromString(actionName);
         if (!actionOpt)
         {
-            errorlog()("Unknown action '{}'.", _parent["action"].as<string>());
+            errorLog()("Unknown action '{}'.", _parent["action"].as<string>());
             return nullopt;
         }
 
@@ -931,7 +931,7 @@ namespace
                 {
                     return actions::CopySelection { p->second };
                 }
-                errorlog()("Invalid format '{}' in CopySelection action. Defaulting to 'text'.",
+                errorLog()("Invalid format '{}' in CopySelection action. Defaulting to 'text'.",
                            node.as<string>());
                 return actions::CopySelection { actions::CopyFormat::Text };
             }
@@ -1070,13 +1070,13 @@ namespace
             }
             else if (cursor.IsScalar())
             {
-                errorlog()(
+                errorLog()(
                     "Deprecated cursor config colorscheme entry. Please update your colorscheme entry for "
                     "cursor.");
                 colors.cursor.color = RGBColor(cursor.as<string>());
             }
             else
-                errorlog()("Invalid cursor config colorscheme entry.");
+                errorLog()("Invalid cursor config colorscheme entry.");
         }
 
         if (auto hyperlink = _node["hyperlink_decoration"]; hyperlink)
@@ -1152,13 +1152,13 @@ namespace
 
         float opacityValue = 1.0;
         tryLoadChildRelative(
-            _usedKeys, _node, _basePath, "background_image.opacity", opacityValue, errorlog());
+            _usedKeys, _node, _basePath, "background_image.opacity", opacityValue, errorLog());
 
         bool imageBlur = false;
-        tryLoadChildRelative(_usedKeys, _node, _basePath, "background_image.blur", imageBlur, errorlog());
+        tryLoadChildRelative(_usedKeys, _node, _basePath, "background_image.blur", imageBlur, errorLog());
 
         string fileName;
-        if (tryLoadChildRelative(_usedKeys, _node, _basePath, "background_image.path", fileName, errorlog()))
+        if (tryLoadChildRelative(_usedKeys, _node, _basePath, "background_image.path", fileName, errorLog()))
             colors.backgroundImage = loadImage(fileName, opacityValue, imageBlur);
     }
 
@@ -1215,7 +1215,7 @@ namespace
                     auto const featureNode = i;
                     if (!featureNode.IsScalar())
                     {
-                        errorlog()("Invalid font feature \"{}\".", featureNode.as<string>());
+                        errorLog()("Invalid font feature \"{}\".", featureNode.as<string>());
                         continue;
                     }
 
@@ -1234,7 +1234,7 @@ namespace
 
                     if (tag.size() != 4)
                     {
-                        errorlog()(
+                        errorLog()(
                             "Invalid font feature \"{}\". Font features are denoted as 4-letter codes.",
                             featureNode.as<string>());
                         continue;
@@ -1272,7 +1272,7 @@ namespace
                     case TextShapingEngine::CoreText:
                     case TextShapingEngine::DWrite:
                         // TODO: Implement font feature settings handling for these engines.
-                        errorlog()("The configured text shaping engine {} does not yet support font feature "
+                        errorLog()("The configured text shaping engine {} does not yet support font feature "
                                    "settings. Ignoring.",
                                    _textShapingEngine);
                 }
@@ -1786,7 +1786,7 @@ namespace
     {
         auto profile = TerminalProfile {}; // default profile
         updateTerminalProfile(
-            profile, _usedKeys, _profile, _parentPath, _profileName, _colorschemes, errorlog());
+            profile, _usedKeys, _profile, _parentPath, _profileName, _colorschemes, errorLog());
         return profile;
     }
 
@@ -1865,7 +1865,7 @@ Config loadConfigFromFile(FileSystem::path const& _fileName)
  */
 void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 {
-    auto logger = errorlog();
+    auto logger = errorLog();
     ConfigLog()("Loading configuration from file: {}", _fileName.string());
     _config.backingFilePath = _fileName;
     createFileIfNotExists(_config.backingFilePath);
@@ -1877,7 +1877,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
     }
     catch (exception const& e)
     {
-        errorlog()("Configuration file is corrupted. {}", e.what());
+        errorLog()("Configuration file is corrupted. {}", e.what());
         auto newfileName = _fileName;
         newfileName.replace_filename("default_contour.yml");
         createDefaultConfig(newfileName);
@@ -1914,7 +1914,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
                 break;
             }
         if (!found)
-            errorlog()("Invalid action specified for on_mouse_select: {}.", value);
+            errorLog()("Invalid action specified for on_mouse_select: {}.", value);
     }
 
     auto constexpr KnownExperimentalFeatures = array<string_view, 0> {
@@ -1929,7 +1929,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
             auto const key = x.first.as<string>();
             if (crispy::count(KnownExperimentalFeatures, key) == 0)
             {
-                errorlog()("Unknown experimental feature tag: {}.", key);
+                errorLog()("Unknown experimental feature tag: {}.", key);
                 continue;
             }
 
@@ -1937,7 +1937,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
             if (!x.second.as<bool>())
                 continue;
 
-            errorlog()("Enabling experimental feature {}.", key);
+            errorLog()("Enabling experimental feature {}.", key);
             _config.experimentalFeatures.insert(key);
         }
     }
@@ -2003,7 +2003,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         else if (renderingBackendStr == "SOFTWARE"sv)
             _config.renderingBackend = RenderingBackend::Software;
         else if (renderingBackendStr != ""sv && renderingBackendStr != "DEFAULT"sv)
-            errorlog()("Unknown renderer: {}.", renderingBackendStr);
+            errorLog()("Unknown renderer: {}.", renderingBackendStr);
     }
 
     tryLoadValue(
@@ -2065,7 +2065,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 
         if (!_config.defaultProfileName.empty() && _config.profile(_config.defaultProfileName) == nullptr)
         {
-            errorlog()("default_profile \"{}\" not found in profiles list.",
+            errorLog()("default_profile \"{}\" not found in profiles list.",
                        escape(_config.defaultProfileName));
         }
         auto dummy = logstore::category("dymmy", "empty logger", logstore::category::state::Disabled);

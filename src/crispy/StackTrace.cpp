@@ -52,8 +52,8 @@ using std::vector;
 namespace crispy
 {
 
-constexpr size_t MAX_FRAMES { 128 };
-constexpr size_t SKIP_FRAMES { 0 };
+constexpr size_t MAX_FRAMES { 128 }; // NOLINT
+constexpr size_t SKIP_FRAMES { 0 };  // NOLINT
 
 #if defined(__linux__) || defined(__APPLE__)
 struct system_wrap // {{{

@@ -3393,16 +3393,16 @@ TEST_CASE("DECCRA.DownLeft.intersecting", "[screen]")
                                     "ghijkl\n";
     CHECK(screen.renderMainPageText() == initialText);
 
-    auto constexpr page = 0;
+    auto constexpr Page = 0;
 
-    auto constexpr sTop = 4;
-    auto constexpr sLeft = 3;
+    auto constexpr STop = 4;
+    auto constexpr SLeft = 3;
 
-    auto constexpr sBottom = 5;
-    auto constexpr sRight = 6;
+    auto constexpr SBottom = 5;
+    auto constexpr SRightt = 6;
 
-    auto constexpr tTop = 3;
-    auto constexpr tLeft = 2;
+    auto constexpr TTop = 3;
+    auto constexpr TLeftt = 2;
 
     auto const* const expectedText = "ABCDEF\n"
                                      "abcdef\n" // .3456.
@@ -3413,8 +3413,8 @@ TEST_CASE("DECCRA.DownLeft.intersecting", "[screen]")
     // copy up by one line (4 to 3), 2 lines
     // copy left by one column (3 to 2), 2 columns
 
-    auto const deccraSeq =
-        fmt::format("\033[{};{};{};{};{};{};{};{}$v", sTop, sLeft, sBottom, sRight, page, tTop, tLeft, page);
+    auto const deccraSeq = fmt::format(
+        "\033[{};{};{};{};{};{};{};{}$v", STop, SLeft, SBottom, SRightt, Page, TTop, TLeftt, Page);
     mock.writeToScreen(deccraSeq);
 
     auto const resultText = screen.renderMainPageText();
@@ -3439,20 +3439,20 @@ TEST_CASE("DECCRA.Right.intersecting", "[screen]")
                                "GHHIJL\n"
                                "ghijkl\n";
 
-    auto constexpr page = 0;
-    auto constexpr sTopLeft = CellLocation { LineOffset(1), ColumnOffset(1) };
-    auto constexpr sBottomRight = CellLocation { LineOffset(3), ColumnOffset(3) };
-    auto constexpr tTopLeft = CellLocation { LineOffset(1), ColumnOffset(2) };
+    auto constexpr Page = 0;
+    auto constexpr STopLeft = CellLocation { LineOffset(1), ColumnOffset(1) };
+    auto constexpr SBottomRight = CellLocation { LineOffset(3), ColumnOffset(3) };
+    auto constexpr TTopLeft = CellLocation { LineOffset(1), ColumnOffset(2) };
 
     auto const deccraSeq = fmt::format("\033[{};{};{};{};{};{};{};{}$v",
-                                       sTopLeft.line + 1,
-                                       sTopLeft.column + 1,
-                                       sBottomRight.line + 1,
-                                       sBottomRight.column + 1,
-                                       page,
-                                       tTopLeft.line + 1,
-                                       tTopLeft.column + 1,
-                                       page);
+                                       STopLeft.line + 1,
+                                       STopLeft.column + 1,
+                                       SBottomRight.line + 1,
+                                       SBottomRight.column + 1,
+                                       Page,
+                                       TTopLeft.line + 1,
+                                       TTopLeft.column + 1,
+                                       Page);
     mock.writeToScreen(deccraSeq);
 
     auto const resultText = screen.renderMainPageText();
@@ -3477,20 +3477,20 @@ TEST_CASE("DECCRA.Left.intersecting", "[screen]")
                                      "GHIJKL\n"
                                      "ghijkl\n";
 
-    auto constexpr page = 0;
-    auto constexpr sTopLeft = CellLocation { LineOffset(1), ColumnOffset(3) };
-    auto constexpr sBottomRight = CellLocation { LineOffset(2), ColumnOffset(5) };
-    auto constexpr tTopLeft = CellLocation { LineOffset(1), ColumnOffset(2) };
+    auto constexpr Page = 0;
+    auto constexpr STopLeft = CellLocation { LineOffset(1), ColumnOffset(3) };
+    auto constexpr SBottomRight = CellLocation { LineOffset(2), ColumnOffset(5) };
+    auto constexpr TTopLeft = CellLocation { LineOffset(1), ColumnOffset(2) };
 
     auto const deccraSeq = fmt::format("\033[{};{};{};{};{};{};{};{}$v",
-                                       sTopLeft.line + 1,
-                                       sTopLeft.column + 1,
-                                       sBottomRight.line + 1,
-                                       sBottomRight.column + 1,
-                                       page,
-                                       tTopLeft.line + 1,
-                                       tTopLeft.column + 1,
-                                       page);
+                                       STopLeft.line + 1,
+                                       STopLeft.column + 1,
+                                       SBottomRight.line + 1,
+                                       SBottomRight.column + 1,
+                                       Page,
+                                       TTopLeft.line + 1,
+                                       TTopLeft.column + 1,
+                                       Page);
     mock.writeToScreen(deccraSeq);
 
     auto const resultText = screen.renderMainPageText();
