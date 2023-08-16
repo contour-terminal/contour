@@ -48,6 +48,10 @@
 #include <pwd.h>
 #include <unistd.h>
 
+#if defined(__linux__) && !defined(FLATPAK)
+    #include <utempter.h>
+#endif
+
 using std::make_unique;
 using std::max;
 using std::min;
@@ -173,6 +177,16 @@ namespace
         return { PtyMasterHandle::cast_from(masterFd), PtySlaveHandle::cast_from(slaveFd) };
     }
 
+#if defined(__linux__) && !defined(FLATPAK)
+    char const* hostnameForUtmp()
+    {
+        for (auto const* env: { "DISPLAY", "WAYLAND_DISPLAY" })
+            if (auto const* value = std::getenv(env))
+                return value;
+
+        return nullptr;
+    }
+#endif
 } // namespace
 
 // {{{ UnixPty::Slave
@@ -266,23 +280,17 @@ void UnixPty::start()
     detail::setFileFlags(_stdoutFastPipe.reader(), O_NONBLOCK);
     PtyLog()("stdout fastpipe: reader {}, writer {}", _stdoutFastPipe.reader(), _stdoutFastPipe.writer());
 
-#if defined(__linux__)
-    if (pipe2(_pipe.data(), O_NONBLOCK /* | O_CLOEXEC | O_NONBLOCK*/) < 0)
-        throw runtime_error { "Failed to create PTY pipe. "s + strerror(errno) };
-#else
-    if (pipe(_pipe.data()) < 0)
-        throw runtime_error { "Failed to create PTY pipe. "s + strerror(errno) };
-    for (auto const fd: _pipe)
-        if (!detail::setFileFlags(fd, O_CLOEXEC | O_NONBLOCK))
-            break;
+    _readSelector.want_read(_masterFd);
+    _readSelector.want_read(_stdoutFastPipe.reader());
+
+#if defined(__linux__) && !defined(FLATPAK)
+    utempter_add_record(_masterFd, hostnameForUtmp());
 #endif
 }
 
 UnixPty::~UnixPty()
 {
     PtyLog()("PTY destroying master (file descriptor {}).", _masterFd);
-    detail::saveClose(&_pipe.at(0));
-    detail::saveClose(&_pipe.at(1));
     detail::saveClose(&_masterFd);
 }
 
@@ -311,10 +319,7 @@ bool UnixPty::isClosed() const noexcept
 
 void UnixPty::wakeupReader() noexcept
 {
-    // TODO(Linux): Using eventfd() instead could lower potential abuse.
-    char dummy {};
-    auto const rv = ::write(_pipe[1], &dummy, sizeof(dummy));
-    (void) rv;
+    _readSelector.wakeup();
 }
 
 optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
@@ -347,53 +352,20 @@ Pty::ReadResult UnixPty::read(crispy::buffer_object<char>& storage,
                               std::chrono::milliseconds timeout,
                               size_t size)
 {
-    if (int fd = waitForReadable(_masterFd, _stdoutFastPipe.reader(), _pipe[0], timeout); fd != -1)
+    if (auto const fd = _readSelector.wait_one(timeout); fd.has_value())
     {
         auto const _l = scoped_lock { storage };
-        if (auto x = readSome(fd, storage.hotEnd(), min(size, storage.bytesAvailable())))
-            return { tuple { x.value(), fd == _stdoutFastPipe.reader() } };
+        if (auto x = readSome(*fd, storage.hotEnd(), min(size, storage.bytesAvailable())))
+            return { tuple { x.value(), *fd == _stdoutFastPipe.reader() } };
     }
 
     return nullopt;
 }
 
-int UnixPty::write(std::string_view data, bool blocking)
+int UnixPty::write(std::string_view data)
 {
     auto const* buf = data.data();
     auto const size = data.size();
-
-    if (blocking)
-    {
-        detail::setFileBlocking(_masterFd, true);
-        auto const rv = ::write(_masterFd, buf, size);
-        detail::setFileBlocking(_masterFd, false);
-        if (PtyOutLog)
-            PtyOutLog()("Sending bytes: \"{}\"", crispy::escape(buf, buf + rv));
-        return static_cast<int>(rv);
-    }
-
-    timeval tv {};
-    tv.tv_sec = 1;
-    tv.tv_usec = 0;
-
-    fd_set rfd;
-    fd_set wfd;
-    fd_set efd;
-    FD_ZERO(&rfd);
-    FD_ZERO(&wfd);
-    FD_ZERO(&efd);
-    FD_SET(_masterFd, &wfd);
-    FD_SET(_pipe[0], &rfd);
-    auto const nfds = 1 + max(_masterFd, _pipe[0]);
-
-    if (select(nfds, &rfd, &wfd, &efd, &tv) < 0)
-        return -1;
-
-    if (!FD_ISSET(_masterFd, &wfd))
-    {
-        PtyOutLog()("PTY write of {} bytes timed out.\n", size);
-        return 0;
-    }
 
     ssize_t rv = ::write(_masterFd, buf, size);
     if (PtyOutLog)
@@ -410,6 +382,19 @@ int UnixPty::write(std::string_view data, bool blocking)
                         rv,
                         size - static_cast<size_t>(rv));
         // clang-format on
+    }
+
+    if (0 <= rv && static_cast<size_t>(rv) < size)
+    {
+        detail::setFileBlocking(_masterFd, true);
+        auto const rv2 = ::write(_masterFd, buf + rv, size - rv);
+        detail::setFileBlocking(_masterFd, false);
+        if (rv2 >= 0)
+        {
+            if (PtyOutLog)
+                PtyOutLog()("Sending bytes: \"{}\"", crispy::escape(buf + rv, buf + rv + rv2));
+            return static_cast<int>(rv + rv2);
+        }
     }
 
     return static_cast<int>(rv);

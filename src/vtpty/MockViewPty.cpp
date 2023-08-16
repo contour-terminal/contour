@@ -50,7 +50,7 @@ void MockViewPty::wakeupReader()
     // No-op. as we're a mock-pty.
 }
 
-int MockViewPty::write(std::string_view data, bool /*blocking*/)
+int MockViewPty::write(std::string_view data)
 {
     // Writing into stdin.
     _inputBuffer += std::string_view(data.data(), data.size());

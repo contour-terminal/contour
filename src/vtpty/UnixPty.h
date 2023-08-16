@@ -17,6 +17,7 @@
 #include <vtpty/UnixUtils.h>
 
 #include <crispy/BufferObject.h>
+#include <crispy/read_selector.h>
 
 #include <array>
 #include <memory>
@@ -70,7 +71,7 @@ class UnixPty final: public Pty
     [[nodiscard]] ReadResult read(crispy::buffer_object<char>& storage,
                                   std::chrono::milliseconds timeout,
                                   size_t size) override;
-    int write(std::string_view data, bool blocking) override;
+    int write(std::string_view data) override;
     [[nodiscard]] PageSize pageSize() const noexcept override;
     void resizeScreen(PageSize cells, std::optional<crispy::image_size> pixels = std::nullopt) override;
 
@@ -82,8 +83,8 @@ class UnixPty final: public Pty
     [[nodiscard]] bool started() const noexcept { return _masterFd != -1; }
 
     int _masterFd = -1;
-    std::array<int, 2> _pipe = { -1, -1 };
     UnixPipe _stdoutFastPipe;
+    crispy::read_selector _readSelector;
     PageSize _pageSize;
     std::optional<crispy::image_size> _pixels;
     std::unique_ptr<Slave> _slave;
