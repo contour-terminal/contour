@@ -46,7 +46,7 @@ if(MSVC)
     target_compile_definitions(crispy-core PUBLIC NOMINMAX)
 endif()
 
-set(CRISPY_CORE_LIBS range-v3::range-v3 fmt::fmt-header-only unicode Microsoft.GSL::GSL)
+set(CRISPY_CORE_LIBS range-v3::range-v3 fmt::fmt-header-only unicode Microsoft.GSL::GSL boxed-cpp)
 if(${USING_BOOST_FILESYSTEM})
     target_compile_definitions(crispy-core PUBLIC USING_BOOST_FILESYSTEM=1)
     list(APPEND CRISPY_CORE_LIBS Boost::filesystem)

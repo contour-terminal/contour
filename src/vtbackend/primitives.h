@@ -16,7 +16,6 @@
 #include <vtpty/PageSize.h>
 
 #include <crispy/ImageSize.h>
-#include <crispy/boxed.h>
 
 #include <cassert>
 #include <cstdint>
@@ -24,6 +23,8 @@
 #include <ostream>
 #include <type_traits>
 #include <variant>
+
+#include <boxed-cpp/boxed.hpp>
 
 // TODO
 // - [ ] rename all History to Scrollback
@@ -68,9 +69,9 @@ namespace detail::tags // {{{
 /// (usually the main page unless scrolled upwards).
 ///
 /// A column position starts at 1.
-using ColumnPosition = crispy::boxed<int, detail::tags::ColumnPosition>;
+using ColumnPosition = boxed::boxed<int, detail::tags::ColumnPosition>;
 
-using ColumnOffset = crispy::boxed<int, detail::tags::ColumnOffset>;
+using ColumnOffset = boxed::boxed<int, detail::tags::ColumnOffset>;
 
 // }}}
 // {{{ Line types
@@ -86,7 +87,7 @@ using MaxHistoryLineCount = std::variant<LineCount, Infinite>;
 ///
 /// *  0  is top-most line on main page
 /// *  -1 is the bottom most line in scrollback
-using LineOffset = crispy::boxed<int, detail::tags::LineOffset>;
+using LineOffset = boxed::boxed<int, detail::tags::LineOffset>;
 
 /// Represents the number of lines the viewport has been scrolled up into
 /// the scrollback lines history.
@@ -94,7 +95,7 @@ using LineOffset = crispy::boxed<int, detail::tags::LineOffset>;
 /// A value of 0 means that it is not scrolled at all (bottom), and
 /// a value equal to the number of scrollback lines means it is scrolled
 /// to the top.
-using ScrollOffset = crispy::boxed<int, detail::tags::ScrollOffset>;
+using ScrollOffset = boxed::boxed<int, detail::tags::ScrollOffset>;
 
 constexpr int operator*(LineCount a, ColumnCount b) noexcept
 {
@@ -227,7 +228,7 @@ struct CellLocationRange
 
     [[nodiscard]] bool contains(CellLocation location) const noexcept
     {
-        switch (abs(unbox<int>(first.line) - unbox<int>(second.line)))
+        switch (abs(unbox(first.line) - unbox(second.line)))
         {
             case 0: // range is single line
                 return location.line == first.line && first.column <= location.column
@@ -266,10 +267,10 @@ struct ColumnRange
 // {{{ Range
 
 /// Represents the first value of a range.
-using From = crispy::boxed<int, detail::tags::From>;
+using From = boxed::boxed<int, detail::tags::From>;
 
 /// Represents the last value of a range (inclusive).
-using To = crispy::boxed<int, detail::tags::To>;
+using To = boxed::boxed<int, detail::tags::To>;
 
 // Range (e.g. a range of lines from X to Y).
 struct Range
@@ -281,10 +282,10 @@ struct Range
     struct ValueTag
     {
     };
-    using iterator = crispy::boxed<int, ValueTag>;
+    using iterator = boxed::boxed<int, ValueTag>;
     [[nodiscard]] iterator begin() const { return iterator { from.value }; }
     [[nodiscard]] auto end() const { return iterator { to.value + 1 }; }
-    // iterator end() const { return crispy::boxed_cast<iterator>(to) + iterator{1}; }
+    // iterator end() const { return boxed::boxed_cast<iterator>(to) + iterator{1}; }
 };
 
 // }}}
@@ -292,10 +293,10 @@ struct Range
 
 // Rectangular operations
 //
-using Top = crispy::boxed<int, detail::tags::Top>;
-using Left = crispy::boxed<int, detail::tags::Left>;
-using Bottom = crispy::boxed<int, detail::tags::Bottom>;
-using Right = crispy::boxed<int, detail::tags::Right>;
+using Top = boxed::boxed<int, detail::tags::Top>;
+using Left = boxed::boxed<int, detail::tags::Left>;
+using Bottom = boxed::boxed<int, detail::tags::Bottom>;
+using Right = boxed::boxed<int, detail::tags::Right>;
 
 // Rectangular screen operations
 //
@@ -338,7 +339,7 @@ constexpr Range vertical(PageMargin m) noexcept
 // {{{ Length
 
 // Lengths and Ranges
-using Length = crispy::boxed<int, detail::tags::Length>;
+using Length = boxed::boxed<int, detail::tags::Length>;
 
 // }}}
 // {{{ Coordinate types
@@ -421,7 +422,7 @@ constexpr GridSize::iterator end(GridSize const& s) noexcept
 // }}}
 // {{{ misc
 
-using TabStopCount = crispy::boxed<int, detail::tags::TabStopCount>;
+using TabStopCount = boxed::boxed<int, detail::tags::TabStopCount>;
 
 // }}}
 // {{{ convenience methods

@@ -37,6 +37,12 @@ $ThirdParties =
         URI     = "https://github.com/contour-terminal/termbench-pro/archive/a4feadd3a698e4fe2d9dd5b03d5f941534a25a91.zip";
         Macro   = "termbench_pro"
     }
+    [ThirdParty]@{
+        Folder  = "boxed-cpp-daa702e22e71f3da3eef838e4946b6c3df1f16b1";
+        Archive = "boxed-cpp-daa702e22e71f3da3eef838e4946b6c3df1f16b1.zip";
+        URI     = "https://github.com/contour-terminal/boxed-cpp/archive/daa702e22e71f3da3eef838e4946b6c3df1f16b1.zip";
+        Macro   = "boxed_cpp"
+    }
 )
 
 function Fetch-And-Add {

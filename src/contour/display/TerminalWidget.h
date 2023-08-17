@@ -203,14 +203,14 @@ class TerminalWidget: public QQuickItem
     {
         if (!session_)
             return 1;
-        return unbox<int>(terminal().pageSize().lines);
+        return unbox(terminal().pageSize().lines);
     }
 
     Q_INVOKABLE [[nodiscard]] int historyLineCount() const noexcept
     {
         if (!session_)
             return 0;
-        return unbox<int>(terminal().currentScreen().historyLineCount());
+        return unbox(terminal().currentScreen().historyLineCount());
     }
 
   private:

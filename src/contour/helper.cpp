@@ -385,8 +385,8 @@ terminal::rasterizer::PageMargin computeMargin(ImageSize _cellSize,
                                                PageSize _charCells,
                                                ImageSize _pixels) noexcept
 {
-    auto const usedHeight = unbox<int>(_charCells.lines) * unbox<int>(_cellSize.height);
-    auto const freeHeight = unbox<int>(_pixels.height) - usedHeight;
+    auto const usedHeight = unbox(_charCells.lines) * unbox(_cellSize.height);
+    auto const freeHeight = unbox(_pixels.height) - usedHeight;
     auto const bottomMargin = freeHeight;
     auto const topMargin = 0;
 
@@ -394,7 +394,7 @@ terminal::rasterizer::PageMargin computeMargin(ImageSize _cellSize,
     // auto const freeWidth = _pixels.width - usedWidth;
     auto constexpr leftMargin = 0;
 
-    return { leftMargin, topMargin, bottomMargin };
+    return { leftMargin, topMargin, static_cast<int>(bottomMargin) };
 }
 
 terminal::rasterizer::FontDescriptions sanitizeFontDescription(terminal::rasterizer::FontDescriptions _fonts,

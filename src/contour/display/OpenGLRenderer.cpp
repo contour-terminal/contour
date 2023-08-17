@@ -657,8 +657,8 @@ void OpenGLRenderer::executeRenderTextures()
 
 void OpenGLRenderer::executeConfigureAtlas(atlas::ConfigureAtlas const& param)
 {
-    Require(isPowerOfTwo(unbox<uint32_t>(param.size.width)));
-    Require(isPowerOfTwo(unbox<uint32_t>(param.size.height)));
+    Require(isPowerOfTwo(unbox(param.size.width)));
+    Require(isPowerOfTwo(unbox(param.size.height)));
     Require(param.properties.format == atlas::Format::RGBA);
 
     // Already initialized.

@@ -210,7 +210,7 @@ namespace // {{{ helper
     }
 
     template <typename T, typename U>
-    std::optional<crispy::boxed<T, U>> decr(std::optional<crispy::boxed<T, U>> v)
+    std::optional<boxed::boxed<T, U>> decr(std::optional<boxed::boxed<T, U>> v)
     {
         if (v.has_value())
             --*v;
@@ -882,7 +882,7 @@ void Screen<Cell>::clearToEndOfScreen()
     clearToEndOfLine();
 
     for (auto const lineOffset:
-         ::ranges::views::iota(unbox<int>(_cursor.position.line) + 1, unbox<int>(_settings.pageSize.lines)))
+         ::ranges::views::iota(unbox(_cursor.position.line) + 1, unbox(_settings.pageSize.lines)))
     {
         Line<Cell>& line = _grid.lineAt(LineOffset::cast_from(lineOffset));
         line.reset(_grid.defaultLineFlags(), _cursor.graphicsRendition);
@@ -1019,8 +1019,8 @@ void Screen<Cell>::selectiveEraseToEndOfScreen()
 {
     selectiveEraseToEndOfLine();
 
-    auto const lineStart = unbox<int>(_cursor.position.line) + 1;
-    auto const lineEnd = unbox<int>(_settings.pageSize.lines);
+    auto const lineStart = unbox(_cursor.position.line) + 1;
+    auto const lineEnd = unbox(_settings.pageSize.lines);
 
     for (auto const lineOffset: ::ranges::views::iota(lineStart, lineEnd))
         selectiveEraseLine(LineOffset::cast_from(lineOffset));
@@ -1050,8 +1050,8 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::selectiveEraseArea(Rect area)
 {
     auto const [top, left, bottom, right] = applyOriginMode(area).clampTo(_settings.pageSize);
-    assert(unbox<int>(right) <= unbox<int>(_settings.pageSize.columns));
-    assert(unbox<int>(bottom) <= unbox<int>(_settings.pageSize.lines));
+    assert(unbox(right) <= unbox(_settings.pageSize.columns));
+    assert(unbox(bottom) <= unbox(_settings.pageSize.lines));
 
     if (top.value > bottom.value || left.value > right.value)
         return;
@@ -1085,7 +1085,7 @@ void Screen<Cell>::clearToEndOfLine()
     }
 
     Cell* i = &at(_cursor.position);
-    Cell* e = i + unbox<int>(_settings.pageSize.columns) - unbox<int>(_cursor.position.column);
+    Cell* e = i + unbox(_settings.pageSize.columns) - unbox(_cursor.position.column);
     while (i != e)
     {
         i->reset(_cursor.graphicsRendition);
@@ -1104,7 +1104,7 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::clearToBeginOfLine()
 {
     Cell* i = &at(_cursor.position.line, ColumnOffset(0));
-    Cell* e = i + unbox<int>(_cursor.position.column) + 1;
+    Cell* e = i + unbox(_cursor.position.column) + 1;
     while (i != e)
     {
         i->reset(_cursor.graphicsRendition);
@@ -1249,8 +1249,8 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::eraseArea(int top, int left, int bottom, int right)
 {
-    assert(right <= unbox<int>(_settings.pageSize.columns));
-    assert(bottom <= unbox<int>(_settings.pageSize.lines));
+    assert(right <= unbox(_settings.pageSize.columns));
+    assert(bottom <= unbox(_settings.pageSize.lines));
 
     if (top > bottom || left > right)
         return;
@@ -1509,9 +1509,9 @@ void Screen<Cell>::captureBuffer(LineCount lineCount, bool logicalLines)
     // TODO: when capturing lineCount < screenSize.lines, start at the lowest non-empty line.
     auto const relativeStartLine =
         logicalLines ? _grid.computeLogicalLineNumberFromBottom(LineCount::cast_from(lineCount))
-                     : unbox<int>(_settings.pageSize.lines - lineCount);
+                     : unbox(_settings.pageSize.lines - lineCount);
     auto const startLine = LineOffset::cast_from(
-        clamp(relativeStartLine, -unbox<int>(historyLineCount()), unbox<int>(_settings.pageSize.lines)));
+        clamp(relativeStartLine, -unbox(historyLineCount()), unbox(_settings.pageSize.lines)));
 
     vtCaptureBufferLog()("Capture buffer: {} lines {}", lineCount, logicalLines ? "logical" : "actual");
 
@@ -1571,7 +1571,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::cursorForwardTab(TabStopCount count)
 {
-    for (int i = 0; i < unbox<int>(count); ++i)
+    for (int i = 0; i < unbox(count); ++i)
         moveCursorToNextTab();
 }
 
@@ -1635,7 +1635,7 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::reverseIndex()
 {
-    if (unbox<int>(realCursorPosition().line) == unbox<int>(margin().vertical.from))
+    if (unbox(realCursorPosition().line) == unbox(margin().vertical.from))
         scrollDown(LineCount(1));
     else
         moveCursorUp(LineCount(1));
@@ -3441,8 +3441,8 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
             // If the value of Pt, Pl, Pb, or Pr exceeds the width or height of the active page, then the
             // value is treated as the width or height of that page.
             auto const size = pageSize();
-            auto const bottom = min(seq.param_or(2, unbox<int>(size.lines)), unbox<int>(size.lines)) - 1;
-            auto const right = min(seq.param_or(3, unbox<int>(size.columns)), unbox<int>(size.columns)) - 1;
+            auto const bottom = min(seq.param_or(2, unbox(size.lines)), unbox(size.lines)) - 1;
+            auto const right = min(seq.param_or(3, unbox(size.columns)), unbox(size.columns)) - 1;
 
             eraseArea(top, left, bottom, right);
         }

@@ -394,7 +394,7 @@ namespace
                       YAML::Node const& _root,
                       vector<string_view> const& _keys,
                       size_t _offset,
-                      crispy::boxed<T, U>& _store,
+                      boxed::boxed<T, U>& _store,
                       logstore::message_builder const& _logger)
     {
         return tryLoadValue(_usedKeys, _root, _keys, _offset, _store.value, _logger);
@@ -416,7 +416,7 @@ namespace
     bool tryLoadValue(UsedKeys& _usedKeys,
                       YAML::Node const& _root,
                       string const& _path,
-                      crispy::boxed<T, U>& _store,
+                      boxed::boxed<T, U>& _store,
                       logstore::message_builder const& _logger)
     {
         return tryLoadValue(_usedKeys, _root, _path, _store.value, _logger);
@@ -458,7 +458,7 @@ namespace
                       YAML::Node const& _doc,
                       string const& _parentPath,
                       string const& _key,
-                      crispy::boxed<T, U>& _store,
+                      boxed::boxed<T, U>& _store,
                       logstore::message_builder const& _logger)
     {
         return tryLoadChild(_usedKeys, _doc, _parentPath, _key, _store.value, _logger);
@@ -1650,9 +1650,9 @@ namespace
         auto intValue = LineCount();
         tryLoadChildRelative(_usedKeys, _profile, basePath, "history.limit", intValue, _logger);
         // value -1 is used for infinite grid
-        if (unbox<int>(intValue) == -1)
+        if (unbox(intValue) == -1)
             profile.maxHistoryLineCount = Infinite();
-        else if (unbox<int>(intValue) > -1)
+        else if (unbox(intValue) > -1)
             profile.maxHistoryLineCount = LineCount(intValue);
         else
             profile.maxHistoryLineCount = LineCount(0);

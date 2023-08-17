@@ -1,6 +1,8 @@
 #pragma once
 
-#include <crispy/boxed.h>
+#include <cmath>
+
+#include <boxed-cpp/boxed.hpp>
 
 namespace crispy
 {
@@ -16,10 +18,10 @@ namespace detail::tags
 } // namespace detail::tags
 
 /// Representsthe width in pixels of an image (see ImageSize).
-using width = crispy::boxed<unsigned, detail::tags::width>;
+using width = boxed::boxed<unsigned, detail::tags::width>;
 
 /// Representsthe height in pixels of an image (see ImageSize).
-using height = crispy::boxed<unsigned, detail::tags::height>;
+using height = boxed::boxed<unsigned, detail::tags::height>;
 
 /// ImageSize represents the 2-dimensional size of an image (pixmap).
 struct image_size
@@ -59,14 +61,14 @@ inline image_size operator-(image_size a, image_size b) noexcept
 
 inline image_size operator*(image_size a, double scalar) noexcept
 {
-    return image_size { width::cast_from(ceil(double(*a.width) * scalar)),
-                        height::cast_from(ceil(double(*a.height) * scalar)) };
+    return image_size { width::cast_from(std::ceil(double(*a.width) * scalar)),
+                        height::cast_from(std::ceil(double(*a.height) * scalar)) };
 }
 
 inline image_size operator/(image_size a, double scalar) noexcept
 {
-    return image_size { width::cast_from(ceil(double(*a.width) / scalar)),
-                        height::cast_from(ceil(double(*a.height) / scalar)) };
+    return image_size { width::cast_from(std::ceil(double(*a.width) / scalar)),
+                        height::cast_from(std::ceil(double(*a.height) / scalar)) };
 }
 
 constexpr image_size operator/(image_size a, image_size b) noexcept

@@ -677,14 +677,14 @@ void TextRenderer::flushTextClusterGroup()
                 auto const pen1 = applyGlyphPositionToPen(pen, *attributes, glyphPosition);
                 renderRasterizedGlyph(pen1, _textClusterGroup.color, *attributes);
 
-                auto xOffset = unbox<uint32_t>(textureAtlas().tileSize().width);
+                auto xOffset = unbox(textureAtlas().tileSize().width);
                 while (AtlasTileAttributes const* subAttribs = textureAtlas().try_get(hash * xOffset))
                 {
                     renderTile(atlas::RenderTile::X { pen1.x + int(xOffset) },
                                atlas::RenderTile::Y { pen1.y },
                                _textClusterGroup.color,
                                *subAttribs);
-                    xOffset += unbox<uint32_t>(textureAtlas().tileSize().width);
+                    xOffset += unbox(textureAtlas().tileSize().width);
                 }
             }
 
@@ -862,7 +862,7 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     if (yMin < 0)
     {
         auto const rowCount = (unsigned) -yMin;
-        Require(rowCount <= unbox<unsigned>(glyph.bitmapSize.height));
+        Require(rowCount <= unbox(glyph.bitmapSize.height));
         auto const pixelCount =
             rowCount * unbox<size_t>(glyph.bitmapSize.width) * text::pixel_size(glyph.format);
         Require(0 < pixelCount && static_cast<size_t>(pixelCount) <= glyph.bitmap.size());

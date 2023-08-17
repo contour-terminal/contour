@@ -883,7 +883,7 @@ TEST_CASE("Grid resize with wrap", "[grid]")
     REQUIRE(grid.lineText(LineOffset(1)) == "ABC");
     REQUIRE(grid.lineText(LineOffset(2)) == "DE ");
     (void) grid.resize(PageSize { LineCount(3), ColumnCount(5) }, CellLocation {}, false);
-    REQUIRE(unbox<int>(grid.historyLineCount()) == 0);
+    REQUIRE(unbox(grid.historyLineCount()) == 0);
     REQUIRE(grid.lineText(LineOffset(0)) == "1    ");
     REQUIRE(grid.lineText(LineOffset(1)) == "2    ");
     REQUIRE(grid.lineText(LineOffset(2)) == "ABCDE");
