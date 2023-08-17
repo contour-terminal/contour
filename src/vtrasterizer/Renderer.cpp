@@ -95,7 +95,7 @@ namespace
         {
             case TextShapingEngine::DWrite:
 #if defined(_WIN32)
-                RendererLog()("Using DirectWrite text shaping engine.");
+                rendererLog()("Using DirectWrite text shaping engine.");
                 // TODO: do we want to use custom font locator here?
                 return make_unique<text::directwrite_shaper>(dpi, locator);
 #else
@@ -105,7 +105,7 @@ namespace
 
             case TextShapingEngine::CoreText:
 #if defined(__APPLE__)
-                RendererLog()("CoreText not yet implemented.");
+                rendererLog()("CoreText not yet implemented.");
                 break;
 #else
                 rendererLog()("CoreText not available on this platform.");

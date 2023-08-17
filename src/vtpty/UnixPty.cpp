@@ -291,8 +291,6 @@ void UnixPty::start()
 UnixPty::~UnixPty()
 {
     ptyLog()("PTY destroying master (file descriptor {}).", _masterFd);
-    detail::saveClose(&_pipe.at(0));
-    detail::saveClose(&_pipe.at(1));
     detail::saveClose(&_masterFd);
 }
 
@@ -369,39 +367,6 @@ int UnixPty::write(std::string_view data)
     auto const* buf = data.data();
     auto const size = data.size();
 
-    if (blocking)
-    {
-        detail::setFileBlocking(_masterFd, true);
-        auto const rv = ::write(_masterFd, buf, size);
-        detail::setFileBlocking(_masterFd, false);
-        if (ptyOutLog)
-            ptyOutLog()("Sending bytes: \"{}\"", crispy::escape(buf, buf + rv));
-        return static_cast<int>(rv);
-    }
-
-    timeval tv {};
-    tv.tv_sec = 1;
-    tv.tv_usec = 0;
-
-    fd_set rfd;
-    fd_set wfd;
-    fd_set efd;
-    FD_ZERO(&rfd);
-    FD_ZERO(&wfd);
-    FD_ZERO(&efd);
-    FD_SET(_masterFd, &wfd);
-    FD_SET(_pipe[0], &rfd);
-    auto const nfds = 1 + max(_masterFd, _pipe[0]);
-
-    if (select(nfds, &rfd, &wfd, &efd, &tv) < 0)
-        return -1;
-
-    if (!FD_ISSET(_masterFd, &wfd))
-    {
-        ptyOutLog()("PTY write of {} bytes timed out.\n", size);
-        return 0;
-    }
-
     ssize_t rv = ::write(_masterFd, buf, size);
     if (ptyOutLog)
     {
@@ -426,8 +391,8 @@ int UnixPty::write(std::string_view data)
         detail::setFileBlocking(_masterFd, false);
         if (rv2 >= 0)
         {
-            if (PtyOutLog)
-                PtyOutLog()("Sending bytes: \"{}\"", crispy::escape(buf + rv, buf + rv + rv2));
+            if (ptyOutLog)
+                ptyOutLog()("Sending bytes: \"{}\"", crispy::escape(buf + rv, buf + rv + rv2));
             return static_cast<int>(rv + rv2);
         }
     }

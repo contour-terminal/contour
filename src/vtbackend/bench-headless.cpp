@@ -238,7 +238,7 @@ class ContourHeadlessBench: public crispy::app
         auto constexpr WritesPerLoop = 1;
         auto constexpr PtyWriteSize = 4096;
         auto constexpr PtyReadSize = 4096;
-        auto const BenchTime = chrono::seconds(10);
+        auto const benchTime = chrono::seconds(10);
 
         // Setup benchmark
         std::string const text = createText(PtyWriteSize);
@@ -274,7 +274,7 @@ class ContourHeadlessBench: public crispy::app
         fmt::print("Running PTY benchmark ...\n");
         auto const startTime = steady_clock::now();
         auto stopTime = startTime;
-        while (stopTime - startTime < BenchTime)
+        while (stopTime - startTime < benchTime)
         {
             for (int i = 0; i < WritesPerLoop; ++i)
                 (void) ptySlave.write(text);

@@ -239,7 +239,7 @@ font_source_list fontconfig_locator::locate(font_description const& description)
 // FcPatternGetInteger(font, FC_COLOR, 0, &color);
 // if (color && !color)
 // {
-//     LocatorLog()("Skipping font (contains color). {}", (char const*) file);
+//     locatorLog()("Skipping font (contains color). {}", (char const*) file);
 //     continue;
 // }
 #endif

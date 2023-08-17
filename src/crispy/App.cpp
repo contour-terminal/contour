@@ -184,9 +184,9 @@ int app::licenseAction()
     auto const urlWidth = std::accumulate(
         store.begin(), store.end(), 0u, [](size_t a, auto const& b) { return std::max(a, b.url.size()); });
 
-    auto const horiz = "\u2550"sv;
-    auto const vert = "\u2502"sv;
-    auto const cross = "\u256A"sv;
+    constexpr auto Horiz = "\u2550"sv;
+    constexpr auto Vert = "\u2502"sv;
+    constexpr auto Cross = "\u256A"sv;
 
     cout << endl
          << _appTitle << ' ' << _appVersion << endl
@@ -194,15 +194,15 @@ int app::licenseAction()
          << "\u2550"sv * (_appTitle.size() + _appVersion.size() + 1) << endl
          << endl;
 
-    cout << setw((int) titleWidth) << "Project" << ' ' << vert << ' ' << setw((int) licenseWidth) << "License"
-         << ' ' << vert << ' ' << "Project URL" << endl;
+    cout << setw((int) titleWidth) << "Project" << ' ' << Vert << ' ' << setw((int) licenseWidth) << "License"
+         << ' ' << Vert << ' ' << "Project URL" << endl;
 
-    cout << horiz * titleWidth << horiz << cross << horiz << horiz * licenseWidth << horiz << cross << horiz
-         << horiz * urlWidth << endl;
+    cout << Horiz * titleWidth << Horiz << Cross << Horiz << Horiz * licenseWidth << Horiz << Cross << Horiz
+         << Horiz * urlWidth << endl;
 
     for (auto const& project: crispy::cli::about::store())
-        cout << setw((int) titleWidth) << project.title << ' ' << vert << ' ' << setw((int) licenseWidth)
-             << project.license << ' ' << vert << ' ' << project.url << endl;
+        cout << setw((int) titleWidth) << project.title << ' ' << Vert << ' ' << setw((int) licenseWidth)
+             << project.license << ' ' << Vert << ' ' << project.url << endl;
 
     return EXIT_SUCCESS;
 }

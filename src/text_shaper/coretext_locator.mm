@@ -85,7 +85,7 @@ namespace text
 
     font_source_list coretext_locator::locate(font_description const& _fd)
     {
-        LocatorLog()("Locating font chain for: {}", _fd);
+        locatorLog()("Locating font chain for: {}", _fd);
 
         font_source_list output;
 
@@ -103,7 +103,7 @@ namespace text
 
         if (fonts == nil)
         {
-            LocatorLog()("No fonts found. Falling back to font family: Menlo.");
+            locatorLog()("No fonts found. Falling back to font family: Menlo.");
             fonts = [_d->fm availableMembersOfFontFamily:@"Menlo"];
         }
 
