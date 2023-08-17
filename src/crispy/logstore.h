@@ -359,8 +359,8 @@ inline void sink::set_writer(writer writer)
 }
 // }}}
 
-auto inline ErrorLog = logstore::category("error", "Error Logger", category::state::Enabled);
+auto inline errorLog = logstore::category("error", "Error Logger", category::state::Enabled);
 
-#define errorlog() (::logstore::ErrorLog())
+#define errorLog() (::logstore::errorLog())
 
 } // namespace logstore

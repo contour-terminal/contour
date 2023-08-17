@@ -57,7 +57,7 @@ std::optional<Decorator> to_decorator(std::string const& value) noexcept;
 inline std::optional<Decorator> to_decorator(std::string const& value) noexcept
 {
     using std::pair;
-    auto constexpr mappings = std::array {
+    auto constexpr Mappings = std::array {
         pair { "underline", Decorator::Underline },
         pair { "dotted-underline", Decorator::DottedUnderline },
         pair { "double-underline", Decorator::DoubleUnderline },
@@ -69,7 +69,7 @@ inline std::optional<Decorator> to_decorator(std::string const& value) noexcept
         pair { "encircle", Decorator::Encircle },
     };
 
-    for (auto const& mapping: mappings)
+    for (auto const& mapping: Mappings)
         if (mapping.first == value)
             return { mapping.second };
 
@@ -96,10 +96,10 @@ struct fmt::formatter<terminal::rasterizer::Decorator>: formatter<std::string_vi
 {
     auto format(terminal::rasterizer::Decorator value, format_context& ctx) -> format_context::iterator
     {
-        auto constexpr mappings = std::array {
+        auto constexpr Mappings = std::array {
             "underline", "double-underline", "curly-underline", "dotted-underline", "dashed-underline",
             "overline",  "crossed-out",      "framed",          "encircle",
         };
-        return formatter<std::string_view>::format(mappings.at(static_cast<size_t>(value)), ctx);
+        return formatter<std::string_view>::format(Mappings.at(static_cast<size_t>(value)), ctx);
     }
 };

@@ -31,7 +31,7 @@ string to_string(DeviceAttributes v)
         s += v;
     };
 
-    auto constexpr mappings = array<pair<DeviceAttributes, string_view>, 11> {
+    auto constexpr Mappings = array<pair<DeviceAttributes, string_view>, 11> {
         pair { DeviceAttributes::AnsiColor, "AnsiColor" },
         pair { DeviceAttributes::AnsiTextLocator, "AnsiTextLocator" },
         pair { DeviceAttributes::Columns132, "Columns132" },
@@ -45,7 +45,7 @@ string to_string(DeviceAttributes v)
         pair { DeviceAttributes::Windowing, "Windowing" },
     };
 
-    for (auto const& mapping: mappings)
+    for (auto const& mapping: Mappings)
         if (v & mapping.first)
             append(mapping.second);
 
@@ -62,7 +62,7 @@ string to_params(DeviceAttributes v)
         s += v;
     };
 
-    auto constexpr mappings = array<pair<DeviceAttributes, string_view>, 12> {
+    auto constexpr Mappings = array<pair<DeviceAttributes, string_view>, 12> {
         pair { DeviceAttributes::AnsiColor, "22" },
         pair { DeviceAttributes::AnsiTextLocator, "29" },
         pair { DeviceAttributes::CaptureScreenBuffer, "314" },
@@ -77,7 +77,7 @@ string to_params(DeviceAttributes v)
         pair { DeviceAttributes::Windowing, "18" },
     };
 
-    for (auto const& mapping: mappings)
+    for (auto const& mapping: Mappings)
         if (v & mapping.first)
             append(mapping.second);
 

@@ -48,7 +48,7 @@ using buffer_object_release = std::function<void(buffer_object<T>*)>;
 template <typename T>
 using buffer_object_ptr = std::shared_ptr<buffer_object<T>>;
 
-auto const inline BufferObjectLog = logstore::category("BufferObject",
+auto const inline bufferObjectLog = logstore::category("BufferObject",
                                                        "Logs buffer object pool activity.",
                                                        logstore::category::state::Disabled,
                                                        logstore::category::visibility::Hidden);
@@ -231,15 +231,15 @@ buffer_object<T>::buffer_object(size_t capacity) noexcept:
 #if defined(BUFFER_OBJECT_INLINE)
     new (data()) T[capacity];
 #endif
-    if (BufferObjectLog)
-        BufferObjectLog()("Creating BufferObject: {}..{}.", (void*) data(), (void*) end());
+    if (bufferObjectLog)
+        bufferObjectLog()("Creating BufferObject: {}..{}.", (void*) data(), (void*) end());
 }
 
 template <typename T>
 buffer_object<T>::~buffer_object()
 {
-    if (BufferObjectLog)
-        BufferObjectLog()("Destroying BufferObject: {}..{}.", (void*) data(), (void*) end());
+    if (bufferObjectLog)
+        bufferObjectLog()("Destroying BufferObject: {}..{}.", (void*) data(), (void*) end());
 #if defined(BUFFER_OBJECT_INLINE)
     std::destroy_n(data(), capacity());
 #else
@@ -349,7 +349,7 @@ inline std::size_t BufferFragment<T>::endOffset() const noexcept
 template <typename T>
 buffer_object_pool<T>::buffer_object_pool(size_t bufferSize): _bufferSize { bufferSize }
 {
-    BufferObjectLog()("Creating BufferObject pool with chunk size {}",
+    bufferObjectLog()("Creating BufferObject pool with chunk size {}",
                       crispy::humanReadableBytes(bufferSize));
 }
 
@@ -380,8 +380,8 @@ buffer_object_ptr<T> buffer_object_pool<T>::allocateBufferObject()
         return buffer_object<T>::create(_bufferSize, [this](auto p) { release(p); });
 
     buffer_object_ptr<T> buffer = std::move(_unusedBuffers.front());
-    if (BufferObjectLog)
-        BufferObjectLog()("Recycling BufferObject from pool: @{}.", (void*) buffer.get());
+    if (bufferObjectLog)
+        bufferObjectLog()("Recycling BufferObject from pool: @{}.", (void*) buffer.get());
     _unusedBuffers.pop_front();
     return buffer;
 }
@@ -391,8 +391,8 @@ void buffer_object_pool<T>::release(buffer_object<T>* ptr)
 {
     if (_reuseBuffers)
     {
-        if (BufferObjectLog)
-            BufferObjectLog()("Releasing BufferObject from pool: @{}", (void*) ptr);
+        if (bufferObjectLog)
+            bufferObjectLog()("Releasing BufferObject from pool: @{}", (void*) ptr);
         ptr->reset();
         _unusedBuffers.emplace_back(ptr, [this](auto p) { release(p); });
     }

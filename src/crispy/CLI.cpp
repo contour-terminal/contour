@@ -160,9 +160,9 @@ namespace // {{{ helper
             if (name == option.name.longName || (name.size() == 1 && name[0] == option.name.shortName))
             {
                 if (option.deprecated)
-                    logstore::ErrorLog()("Deprecated option \"{}\" used. {}",
-                                         option.name.longName,
-                                         option.deprecated.value().message);
+                    errorLog()("Deprecated option \"{}\" used. {}",
+                               option.name.longName,
+                               option.deprecated.value().message);
                 return &option;
             }
         return nullptr;
@@ -846,12 +846,12 @@ namespace // {{{ helpers
                 if ((option.presence == presence::Optional && !defaultValueStr.empty())
                     || (holds_alternative<bool>(option.v) && get<bool>(option.v)))
                 {
-                    auto const DefaultTextPrefix = string("default:");
-                    auto const defaultText = stylize("[", help_element::Braces) + DefaultTextPrefix + " "
+                    auto const defaultTextPrefix = string("default:");
+                    auto const defaultText = stylize("[", help_element::Braces) + defaultTextPrefix + " "
                                              + stylize(defaultValueStr, help_element::OptionValue)
                                              + stylize("]", help_element::Braces);
                     auto const defaultTextLength =
-                        1 + DefaultTextPrefix.size() + 1 + defaultValueStr.size() + 1;
+                        1 + defaultTextPrefix.size() + 1 + defaultValueStr.size() + 1;
                     if (cursor + defaultTextLength > margin)
                         os << "\n" << spaces(columnWidth) << defaultText;
                     else

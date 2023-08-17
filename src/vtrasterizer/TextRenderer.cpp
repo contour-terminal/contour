@@ -186,7 +186,7 @@ using namespace std::string_view_literals;
 namespace terminal::rasterizer
 {
 
-using text::LocatorLog;
+using text::locatorLog;
 
 namespace
 {
@@ -283,14 +283,14 @@ text::font_locator& createFontLocator(FontLocatorEngine engine)
 #if defined(_WIN32)
             return text::font_locator_provider::get().directwrite();
 #else
-            LocatorLog()("Font locator DirectWrite not supported on this platform.");
+            locatorLog()("Font locator DirectWrite not supported on this platform.");
 #endif
             break;
         case FontLocatorEngine::CoreText:
 #if defined(__APPLE__)
             return text::font_locator_provider::get().coretext();
 #else
-            LocatorLog()("Font locator CoreText not supported on this platform.");
+            locatorLog()("Font locator CoreText not supported on this platform.");
 #endif
             break;
 
@@ -299,7 +299,7 @@ text::font_locator& createFontLocator(FontLocatorEngine engine)
             break;
     }
 
-    LocatorLog()("Using font locator: fontconfig.");
+    locatorLog()("Using font locator: fontconfig.");
     return text::font_locator_provider::get().fontconfig();
 }
 
@@ -379,8 +379,8 @@ void TextRenderer::restrictToTileSize(TextureAtlas::TileCreateData& tileCreateDa
 
     auto slicedBitmap = vector<uint8_t>(subSize.area() * colorComponentCount);
 
-    if (RasterizerLog)
-        RasterizerLog()("Cutting off oversized {} tile from {} down to {}.",
+    if (rasterizerLog)
+        rasterizerLog()("Cutting off oversized {} tile from {} down to {}.",
                         tileCreateData.bitmapFormat,
                         tileCreateData.bitmapSize,
                         _textureAtlas->tileSize());
@@ -826,8 +826,8 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
         if (glyph.bitmapSize.height > Height::cast_from(unbox<double>(emojiBoundingBox.height) * 1.1)
             || glyph.bitmapSize.width > Width::cast_from(unbox<double>(emojiBoundingBox.width) * 1.5))
         {
-            if (RasterizerLog)
-                RasterizerLog()(
+            if (rasterizerLog)
+                rasterizerLog()(
                     "Scaling oversized glyph of {}+{} down to bounding box {} (expected cell count {}).",
                     glyph.bitmapSize,
                     glyph.position,
@@ -836,7 +836,7 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
             auto [scaledGlyph, scaleFactor] = text::scale(glyph, emojiBoundingBox);
 
             glyph = std::move(scaledGlyph);
-            RasterizerLog()(" ==> scaled: {}/{}, factor {}", scaledGlyph, emojiBoundingBox, scaleFactor);
+            rasterizerLog()(" ==> scaled: {}/{}, factor {}", scaledGlyph, emojiBoundingBox, scaleFactor);
         }
     }
 
@@ -845,7 +845,7 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
 
     if (yMax < 0)
     {
-        RasterizerLog()("Encountered glyph with inverted direction, swaping to normal");
+        rasterizerLog()("Encountered glyph with inverted direction, swaping to normal");
         yMax = std::abs(yMax);
     }
 
@@ -866,7 +866,7 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
         auto const pixelCount =
             rowCount * unbox<size_t>(glyph.bitmapSize.width) * text::pixel_size(glyph.format);
         Require(0 < pixelCount && static_cast<size_t>(pixelCount) <= glyph.bitmap.size());
-        RasterizerLog()("Cropping {} underflowing bitmap rows.", rowCount);
+        rasterizerLog()("Cropping {} underflowing bitmap rows.", rowCount);
         glyph.bitmapSize.height += Height::cast_from(yMin);
         auto& data = glyph.bitmap;
         data.erase(begin(data), next(begin(data), (int) pixelCount)); // XXX asan hit (size = -2)
@@ -874,13 +874,13 @@ auto TextRenderer::createRasterizedGlyph(atlas::TileLocation tileLocation,
     }
     // }}}
 
-    if (RasterizerLog)
+    if (rasterizerLog)
     {
         auto const boundingBox =
             ImageSize { Width(_gridMetrics.cellSize.width.value * numCells),
                         Height::cast_from(unbox<int>(_gridMetrics.cellSize.height) - _gridMetrics.baseline) };
         // clang-format off
-        RasterizerLog()("Inserting {} (bbox {}, numCells {}) id {} render mode {} {} yOverflow {} yMin {}.",
+        rasterizerLog()("Inserting {} (bbox {}, numCells {}) id {} render mode {} {} yOverflow {} yMin {}.",
                         glyph,
                         boundingBox,
                         numCells,
@@ -948,9 +948,9 @@ text::shape_result TextRenderer::shapeTextRun(unicode::run_segmenter::range cons
                       presentationStyle, // get<unicode::PresentationStyle>(run.properties),
                       glyphPosition);
 
-    if (RasterizerLog && !glyphPosition.empty())
+    if (rasterizerLog && !glyphPosition.empty())
     {
-        auto msg = RasterizerLog();
+        auto msg = rasterizerLog();
         // clang-format off
         msg.append("Shaped codepoints ({}): {}",
                    [=](){ auto s = std::ostringstream(); s << presentationStyle; return s.str(); }(),

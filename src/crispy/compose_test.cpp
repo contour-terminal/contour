@@ -17,29 +17,29 @@
 
 TEST_CASE("compose.simple")
 {
-    auto constexpr doubled = [](int v) {
+    auto constexpr Doubled = [](int v) {
         return v + v;
     };
-    auto constexpr squared = [](int v) {
+    auto constexpr Squared = [](int v) {
         return v * v;
     };
-    auto constexpr a0 = 1;
-    auto constexpr res = a0 >> compose(doubled) >> compose(squared);
-    static_assert(res == 4);
+    auto constexpr A0 = 1;
+    auto constexpr Res = A0 >> compose(Doubled) >> compose(Squared);
+    static_assert(Res == 4);
 }
 
 TEST_CASE("compose.withArgs")
 {
-    auto constexpr a0 = 1;
-    auto constexpr a1 = [](int c, int v) {
+    auto constexpr A0 = 1;
+    auto constexpr A1 = [](int c, int v) {
         return c + v;
     };
-    auto constexpr a2 = [](int c1, int c2, int v) {
+    auto constexpr A2 = [](int c1, int c2, int v) {
         return c1 + c2 + v;
     };
-    auto constexpr a3 = [](int c1, int c2, int c3, int v) {
+    auto constexpr A3 = [](int c1, int c2, int c3, int v) {
         return c1 + c2 + c3 + v;
     };
-    auto constexpr res = a0 >> compose(a1, 2) >> compose(a2, 3, 4) >> compose(a3, 5, 6, 7);
-    static_assert(28 == res);
+    auto constexpr Res = A0 >> compose(A1, 2) >> compose(A2, 3, 4) >> compose(A3, 5, 6, 7);
+    static_assert(28 == Res);
 }

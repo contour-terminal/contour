@@ -133,13 +133,13 @@ auto CursorRenderer::createTileData(CursorShape cursorShape,
             return create(defaultBitmapSize, [&]() {
                 auto const height = Height::cast_from(baseline);
                 auto const thickness = (unsigned) max(LineThickness * baseline / 3, 1);
-                auto const base_y = max((*height - thickness) / 2, 0u);
+                auto const baseY = max((*height - thickness) / 2, 0u);
                 auto image = atlas::Buffer(defaultBitmapSize.area(), 0);
 
                 assert(thickness <= static_cast<size_t>(baseline));
                 for (auto y = size_t(0); y <= static_cast<size_t>(thickness); ++y)
                     for (size_t x = 0; x < *width; ++x)
-                        image[(defaultBitmapSize.height.as<size_t>() - 1 - base_y - unsigned(y))
+                        image[(defaultBitmapSize.height.as<size_t>() - 1 - baseY - unsigned(y))
                                   * unbox<size_t>(width)
                               + x] = 0xFF;
                 return image;

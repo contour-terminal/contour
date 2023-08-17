@@ -28,7 +28,7 @@ namespace detail
                                                               "0123456789+/" };
 
     // clang-format off
-    char unsigned constexpr inline indexmap[256] = {
+    char unsigned constexpr inline IndexMap[256] = {
         /* ASCII table */
         64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, //   0..15
         64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, //  16..31
@@ -121,7 +121,7 @@ constexpr void encode(uint8_t ch, encoder_state& state, sink&& s)
 template <typename sink>
 constexpr void finish(encoder_state& state, sink&& s)
 {
-    finish(detail::indexmap, state, std::forward<sink>(s));
+    finish(detail::IndexMap, state, std::forward<sink>(s));
 }
 
 template <typename Iterator, typename Alphabet>
@@ -176,7 +176,7 @@ size_t decodeLength(Iterator begin, Iterator end, IndexTable const& index)
 template <typename Iterator>
 size_t decodeLength(Iterator begin, Iterator end)
 {
-    return decodeLength(begin, end, detail::indexmap);
+    return decodeLength(begin, end, detail::IndexMap);
 }
 
 inline size_t decodeLength(const std::string_view& value)
@@ -237,7 +237,7 @@ size_t decode(Iterator begin, Iterator end, const IndexTable& indexmap, Output o
 template <typename Iterator, typename Output>
 size_t decode(Iterator begin, Iterator end, Output output)
 {
-    return decode(begin, end, detail::indexmap, output);
+    return decode(begin, end, detail::IndexMap, output);
 }
 
 template <typename Output>

@@ -76,7 +76,7 @@ ConPty::ConPty(PageSize const& windowSize): _size { windowSize }
 
 ConPty::~ConPty()
 {
-    PtyLog()("~ConPty()");
+    ptyLog()("~ConPty()");
     close();
 }
 
@@ -87,7 +87,7 @@ bool ConPty::isClosed() const noexcept
 
 void ConPty::start()
 {
-    PtyLog()("Starting ConPTY");
+    ptyLog()("Starting ConPTY");
     assert(!_slave);
 
     _slave = make_unique<ConPtySlave>(_output);
@@ -121,7 +121,7 @@ void ConPty::start()
 
 void ConPty::close()
 {
-    PtyLog()("ConPty.close()");
+    ptyLog()("ConPty.close()");
     auto const _ = std::lock_guard { _mutex };
 
     if (_master != INVALID_HANDLE_VALUE)

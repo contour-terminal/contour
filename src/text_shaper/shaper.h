@@ -40,8 +40,8 @@
 namespace text
 {
 
-auto const inline RasterizerLog = logstore::category("font.render", "Logs details about rendering glyphs.");
-auto const inline TextShapingLog = logstore::category("font.textshaping", "Logs details about text shaping.");
+auto const inline rasterizerLog = logstore::category("font.render", "Logs details about rendering glyphs.");
+auto const inline textShapingLog = logstore::category("font.textshaping", "Logs details about text shaping.");
 
 // NOLINTBEGIN(readability-identifier-naming)
 enum class bitmap_format

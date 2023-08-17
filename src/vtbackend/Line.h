@@ -177,7 +177,7 @@ class Line
 
         assert(unbox<size_t>(start) + ascii.size() <= buffer.size());
 
-        auto constexpr ASCII_Width = 1;
+        auto constexpr ASCII_Width = 1; // NOLINT
         auto const* s = ascii.data();
 
         Cell* i = &buffer[unbox<size_t>(start)];

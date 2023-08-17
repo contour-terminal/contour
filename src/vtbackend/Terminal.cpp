@@ -200,8 +200,8 @@ Pty::ReadResult Terminal::readFromPty()
     // store a single text line.
     if (_currentPtyBuffer->bytesAvailable() < unbox<size_t>(_settings.pageSize.columns))
     {
-        if (PtyInLog)
-            PtyInLog()("Only {} bytes left in TBO. Allocating new buffer from pool.",
+        if (ptyInLog)
+            ptyInLog()("Only {} bytes left in TBO. Allocating new buffer from pool.",
                        _currentPtyBuffer->bytesAvailable());
         _currentPtyBuffer = _ptyBufferPool.allocateBufferObject();
     }
@@ -258,7 +258,7 @@ bool Terminal::processInputOnce()
         if (errno == EINTR || errno == EAGAIN)
             return true;
 
-        TerminalLog()("PTY read failed. {}", strerror(errno));
+        terminalLog()("PTY read failed. {}", strerror(errno));
         _pty->close();
         return false;
     }
@@ -267,7 +267,7 @@ bool Terminal::processInputOnce()
 
     if (buf.empty())
     {
-        TerminalLog()("PTY read returned with zero bytes. Closing PTY.");
+        terminalLog()("PTY read returned with zero bytes. Closing PTY.");
         _pty->close();
         return true;
     }
@@ -584,8 +584,8 @@ void Terminal::updateIndicatorStatusLine()
     }
 
     // TODO: Disabled for now, but generally I want that functionality, but configurable somehow.
-    auto constexpr indicatorLineShowCodepoints = false;
-    if (indicatorLineShowCodepoints)
+    auto constexpr IndicatorLineShowCodepoints = false;
+    if (IndicatorLineShowCodepoints)
     {
         auto const cursorPosition = _state.inputHandler.mode() == ViMode::Insert
                                         ? _indicatorStatusScreen.cursor().position
@@ -696,9 +696,9 @@ bool Terminal::handleMouseSelection(Modifier modifier)
 {
     verifyState();
 
-    double const diff_ms = chrono::duration<double, std::milli>(_currentTime - _lastClick).count();
+    double const diffMs = chrono::duration<double, std::milli>(_currentTime - _lastClick).count();
     _lastClick = _currentTime;
-    _speedClicks = (diff_ms >= 0.0 && diff_ms <= 750.0 ? _speedClicks : 0) % 3 + 1;
+    _speedClicks = (diffMs >= 0.0 && diffMs <= 750.0 ? _speedClicks : 0) % 3 + 1;
 
     auto const startPos = CellLocation {
         _currentMousePosition.line - boxed_cast<LineOffset>(_viewport.scrollOffset()),
@@ -753,7 +753,7 @@ bool Terminal::handleMouseSelection(Modifier modifier)
 void Terminal::setSelector(std::unique_ptr<Selection> selector)
 {
     Require(selector.get() != nullptr);
-    InputLog()("Creating cell selector: {}", *selector);
+    inputLog()("Creating cell selector: {}", *selector);
     _selection = std::move(selector);
 }
 
@@ -770,7 +770,7 @@ void Terminal::clearSelection()
     if (!_selection)
         return;
 
-    InputLog()("Clearing selection.");
+    inputLog()("Clearing selection.");
     _selection.reset();
 
     onSelectionUpdated();
@@ -958,13 +958,13 @@ void Terminal::sendRawInput(string_view text)
 
     if (_state.inputHandler.isEditingSearch())
     {
-        InputLog()("Sending raw input to search input: {}", crispy::escape(text));
+        inputLog()("Sending raw input to search input: {}", crispy::escape(text));
         _state.searchMode.pattern += unicode::convert_to<char32_t>(text);
         screenUpdated();
         return;
     }
 
-    InputLog()("Sending raw input to stdin: {}", crispy::escape(text));
+    inputLog()("Sending raw input to stdin: {}", crispy::escape(text));
     _state.inputGenerator.generateRaw(text);
     flushInput();
 }

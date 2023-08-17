@@ -135,10 +135,10 @@ constexpr Margin fullPageMargin(PageSize pageSize)
 
 Grid<Cell> setupGridForResizeTests2x3xN(LineCount maxHistoryLineCount)
 {
-    auto constexpr reflowOnResize = true;
-    auto constexpr pageSize = PageSize { LineCount(2), ColumnCount(3) };
+    auto constexpr ReflowOnResize = true;
+    auto constexpr PageSize = terminal::PageSize { LineCount(2), ColumnCount(3) };
 
-    return setupGrid(pageSize, reflowOnResize, maxHistoryLineCount, { "ABC", "DEF", "GHI", "JKL" });
+    return setupGrid(PageSize, ReflowOnResize, maxHistoryLineCount, { "ABC", "DEF", "GHI", "JKL" });
 }
 
 Grid<Cell> setupGridForResizeTests2x3a3()
@@ -207,13 +207,13 @@ TEST_CASE("iteratorAt", "[grid]")
 
 TEST_CASE("LogicalLines.iterator", "[grid]")
 {
-    auto constexpr reflowOnResize = true;
-    auto constexpr maxHistoryLineCount = LineCount(5);
-    auto constexpr pageSize = PageSize { LineCount(2), ColumnCount(3) };
+    auto constexpr ReflowOnResize = true;
+    auto constexpr MaxHistoryLineCount = LineCount(5);
+    auto constexpr PageSize = terminal::PageSize { LineCount(2), ColumnCount(3) };
 
-    auto grid = setupGrid(pageSize,
-                          reflowOnResize,
-                          maxHistoryLineCount,
+    auto grid = setupGrid(PageSize,
+                          ReflowOnResize,
+                          MaxHistoryLineCount,
                           {
                               "ABC", // -4:
                               "DEF", // -3:
@@ -277,13 +277,13 @@ TEST_CASE("LogicalLines.iterator", "[grid]")
 
 TEST_CASE("LogicalLines.reverse_iterator", "[grid]")
 {
-    auto constexpr reflowOnResize = true;
-    auto constexpr maxHistoryLineCount = LineCount(5);
-    auto constexpr pageSize = PageSize { LineCount(2), ColumnCount(3) };
+    auto constexpr ReflowOnResize = true;
+    auto constexpr MaxHistoryLineCount = LineCount(5);
+    auto constexpr PageSize = terminal::PageSize { LineCount(2), ColumnCount(3) };
 
-    auto grid = setupGrid(pageSize,
-                          reflowOnResize,
-                          maxHistoryLineCount,
+    auto grid = setupGrid(PageSize,
+                          ReflowOnResize,
+                          MaxHistoryLineCount,
                           {
                               "ABC", // -4:
                               "DEF", // -3:
@@ -854,22 +854,22 @@ TEST_CASE("Grid.reflow.tripple", "[grid]")
 
 TEST_CASE("Grid infinite", "[grid]")
 {
-    auto grid_finite = Grid<Cell>(PageSize { LineCount(2), ColumnCount(8) }, true, LineCount(0));
-    grid_finite.setLineText(LineOffset { 0 }, "ABCDEFGH"sv);
-    grid_finite.setLineText(LineOffset { 1 }, "abcdefgh"sv);
-    grid_finite.scrollUp(LineCount { 1 });
-    REQUIRE(grid_finite.lineText(LineOffset(0)) == "abcdefgh");
-    REQUIRE(grid_finite.lineText(LineOffset(-1)) == std::string(8, ' '));
+    auto gridFinite = Grid<Cell>(PageSize { LineCount(2), ColumnCount(8) }, true, LineCount(0));
+    gridFinite.setLineText(LineOffset { 0 }, "ABCDEFGH"sv);
+    gridFinite.setLineText(LineOffset { 1 }, "abcdefgh"sv);
+    gridFinite.scrollUp(LineCount { 1 });
+    REQUIRE(gridFinite.lineText(LineOffset(0)) == "abcdefgh");
+    REQUIRE(gridFinite.lineText(LineOffset(-1)) == std::string(8, ' '));
 
-    auto grid_infinite = Grid<Cell>(PageSize { LineCount(2), ColumnCount(8) }, true, Infinite());
-    grid_infinite.setLineText(LineOffset { 0 }, "ABCDEFGH"sv);
-    grid_infinite.setLineText(LineOffset { 1 }, "abcdefgh"sv);
-    grid_infinite.scrollUp(LineCount { 1 });
-    REQUIRE(grid_infinite.lineText(LineOffset(0)) == "abcdefgh");
-    REQUIRE(grid_infinite.lineText(LineOffset(-1)) == "ABCDEFGH");
-    grid_infinite.scrollUp(LineCount { 97 });
-    REQUIRE(grid_infinite.lineText(LineOffset(-97)) == "abcdefgh");
-    REQUIRE(grid_infinite.lineText(LineOffset(-98)) == "ABCDEFGH");
+    auto gridInfinite = Grid<Cell>(PageSize { LineCount(2), ColumnCount(8) }, true, Infinite());
+    gridInfinite.setLineText(LineOffset { 0 }, "ABCDEFGH"sv);
+    gridInfinite.setLineText(LineOffset { 1 }, "abcdefgh"sv);
+    gridInfinite.scrollUp(LineCount { 1 });
+    REQUIRE(gridInfinite.lineText(LineOffset(0)) == "abcdefgh");
+    REQUIRE(gridInfinite.lineText(LineOffset(-1)) == "ABCDEFGH");
+    gridInfinite.scrollUp(LineCount { 97 });
+    REQUIRE(gridInfinite.lineText(LineOffset(-97)) == "abcdefgh");
+    REQUIRE(gridInfinite.lineText(LineOffset(-98)) == "ABCDEFGH");
 }
 
 TEST_CASE("Grid resize with wrap", "[grid]")
@@ -900,8 +900,8 @@ TEST_CASE("Grid resize", "[grid]")
     auto const bufferFragment = bufferObject->ref(0, 4);
     auto const sgr = GraphicsAttributes {};
     auto const trivial = TrivialLineBuffer { width, sgr, sgr, HyperlinkId {}, width, bufferFragment };
-    auto line_trivial = Line<Cell>(LineFlags::None, trivial);
-    grid.lineAt(LineOffset(0)) = line_trivial;
+    auto lineTrivial = Line<Cell>(LineFlags::None, trivial);
+    grid.lineAt(LineOffset(0)) = lineTrivial;
     REQUIRE(grid.lineAt(LineOffset(0)).isTrivialBuffer());
     REQUIRE(grid.lineAt(LineOffset(1)).isTrivialBuffer());
     (void) grid.resize(PageSize { LineCount(2), width + ColumnCount(1) }, CellLocation {}, false);

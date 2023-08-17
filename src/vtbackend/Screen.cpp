@@ -88,7 +88,7 @@ namespace terminal
 
 auto constexpr inline TabWidth = ColumnCount(8);
 
-auto const inline VTCaptureBufferLog = logstore::category("vt.ext.capturebuffer",
+auto const inline vtCaptureBufferLog = logstore::category("vt.ext.capturebuffer",
                                                           "Capture Buffer debug logging.",
                                                           logstore::category::state::Disabled,
                                                           logstore::category::visibility::Hidden);
@@ -183,7 +183,7 @@ namespace // {{{ helper
         }
 
         // TODO: sgr.styles;
-        auto constexpr masks = array {
+        auto constexpr Masks = array {
             pair { CellFlags::Bold, "1"sv },
             pair { CellFlags::Faint, "2"sv },
             pair { CellFlags::Italic, "3"sv },
@@ -202,7 +202,7 @@ namespace // {{{ helper
             pair { CellFlags::Overline, "53"sv },
         };
 
-        for (auto const& mask: masks)
+        for (auto const& mask: Masks)
             if (sgr.flags & mask.first)
                 sgrAddStr(mask.second);
 
@@ -449,8 +449,8 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::writeText(string_view text, size_t cellCount)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
-    if (VTTraceSequenceLog)
-        VTTraceSequenceLog()("text({} bytes, {} cells): \"{}\"", text.size(), cellCount, escape(text));
+    if (vtTraceSequenceLog)
+        vtTraceSequenceLog()("text({} bytes, {} cells): \"{}\"", text.size(), cellCount, escape(text));
 #endif
     assert(cellCount <= static_cast<size_t>(pageSize().columns.value - _cursor.position.column.value));
 
@@ -471,8 +471,8 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::writeTextFromExternal(std::string_view text)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
-    if (VTTraceSequenceLog)
-        VTTraceSequenceLog()("external text: \"{}\"", text);
+    if (vtTraceSequenceLog)
+        vtTraceSequenceLog()("external text: \"{}\"", text);
 #endif
 
     for (char32_t const ch: unicode::convert_to<char32_t>(text))
@@ -497,8 +497,8 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::writeText(char32_t codepoint)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
-    if (VTTraceSequenceLog)
-        VTTraceSequenceLog()("char: \'{}\'", unicode::convert_to<char>(codepoint));
+    if (vtTraceSequenceLog)
+        vtTraceSequenceLog()("char: \'{}\'", unicode::convert_to<char>(codepoint));
 #endif
 
     return writeTextInternal(codepoint);
@@ -861,7 +861,7 @@ void Screen<Cell>::sendTerminalId()
     // It requests for the terminalID
 
     // terminal protocol type
-    auto const Pp = static_cast<unsigned>(_state.terminalId);
+    auto const pp = static_cast<unsigned>(_state.terminalId);
 
     // version number
     // TODO: (PACKAGE_VERSION_MAJOR * 100 + PACKAGE_VERSION_MINOR) * 100 + PACKAGE_VERSION_MICRO
@@ -871,7 +871,7 @@ void Screen<Cell>::sendTerminalId()
     // ROM cardridge registration number (always 0)
     auto constexpr Pc = 0;
 
-    _terminal.reply("\033[>{};{};{}c", Pp, Pv, Pc);
+    _terminal.reply("\033[>{};{};{}c", pp, Pv, Pc);
 }
 
 // {{{ ED
@@ -1513,7 +1513,7 @@ void Screen<Cell>::captureBuffer(LineCount lineCount, bool logicalLines)
     auto const startLine = LineOffset::cast_from(
         clamp(relativeStartLine, -unbox<int>(historyLineCount()), unbox<int>(_settings.pageSize.lines)));
 
-    VTCaptureBufferLog()("Capture buffer: {} lines {}", lineCount, logicalLines ? "logical" : "actual");
+    vtCaptureBufferLog()("Capture buffer: {} lines {}", lineCount, logicalLines ? "logical" : "actual");
 
     size_t constexpr MaxChunkSize = 4096;
     size_t currentChunkSize = 0;
@@ -1524,7 +1524,7 @@ void Screen<Cell>::captureBuffer(LineCount lineCount, bool logicalLines)
             _terminal.reply("\033^{};", CaptureBufferCode);
         else if (currentChunkSize + data.size() >= MaxChunkSize)
         {
-            VTCaptureBufferLog()("Transferred chunk of {} bytes.", currentChunkSize);
+            vtCaptureBufferLog()("Transferred chunk of {} bytes.", currentChunkSize);
             _terminal.reply("\033\\"); // ST
             _terminal.reply("\033^{};", CaptureBufferCode);
             currentChunkSize = 0;
@@ -1533,7 +1533,7 @@ void Screen<Cell>::captureBuffer(LineCount lineCount, bool logicalLines)
         currentChunkSize += data.size();
     };
     LineOffset const bottomLine = boxed_cast<LineOffset>(_settings.pageSize.lines - 1);
-    VTCaptureBufferLog()("Capturing buffer. top: {}, bottom: {}", relativeStartLine, bottomLine);
+    vtCaptureBufferLog()("Capturing buffer. top: {}, bottom: {}", relativeStartLine, bottomLine);
 
     for (LineOffset line = startLine; line <= bottomLine; ++line)
     {
@@ -1544,7 +1544,7 @@ void Screen<Cell>::captureBuffer(LineCount lineCount, bool logicalLines)
         auto lineCellsTrimmed = lineBuffer.trim_blank_right();
         if (lineCellsTrimmed.empty())
         {
-            VTCaptureBufferLog()("Skipping blank line {}", line);
+            vtCaptureBufferLog()("Skipping blank line {}", line);
             continue;
         }
         auto const tl = lineCellsTrimmed.size();
@@ -1556,14 +1556,14 @@ void Screen<Cell>::captureBuffer(LineCount lineCount, bool logicalLines)
                 pushContent(cell.toUtf8());
             lineCellsTrimmed = lineCellsTrimmed.subspan(n);
         }
-        VTCaptureBufferLog()("NL ({} len)", tl);
+        vtCaptureBufferLog()("NL ({} len)", tl);
         pushContent("\n"sv);
     }
 
     if (currentChunkSize != 0)
         _terminal.reply("\033\\"); // ST
 
-    VTCaptureBufferLog()("Capturing buffer finished.");
+    vtCaptureBufferLog()("Capturing buffer finished.");
     _terminal.reply("\033^{};\033\\", CaptureBufferCode); // mark the end
 }
 
@@ -2045,7 +2045,7 @@ void Screen<Cell>::requestStatusString(RequestStatusString value)
                 // xterm adapts this by resizing its window.
                 if (*_settings.pageSize.lines >= 24)
                     return fmt::format("{}t", _settings.pageSize.lines);
-                errorlog()("Requesting device status for {} not with line count < 24 is undefined.");
+                errorLog()("Requesting device status for {} not with line count < 24 is undefined.");
                 return nullopt;
             case RequestStatusString::DECSTBM:
                 return fmt::format("{};{}r", 1 + *margin().vertical.from, *margin().vertical.to);
@@ -2128,7 +2128,7 @@ void Screen<Cell>::requestCapability(std::string_view name)
 {
     if (booleanCapability(name))
         _terminal.reply("\033P1+r{}\033\\", toHexString(name));
-    else if (auto const value = numericCapability(name); value != Database::npos)
+    else if (auto const value = numericCapability(name); value != Database::Npos)
     {
         auto hexValue = fmt::format("{:X}", value);
         if (hexValue.size() % 2)
@@ -2541,10 +2541,10 @@ namespace impl
                         *pi += len;
                         break;
                     case 5: // ":5:P"
-                        if (auto const P = seq.subparam(i, 2); P <= 255)
+                        if (auto const p = seq.subparam(i, 2); p <= 255)
                         {
                             *pi += len;
-                            return static_cast<IndexedColor>(P);
+                            return static_cast<IndexedColor>(p);
                         }
                         break;
                     default:
@@ -3151,13 +3151,13 @@ namespace impl
         template <typename Cell>
         ApplyResult XTSMGRAPHICS(Sequence const& seq, Screen<Cell>& screen)
         {
-            auto const Pi = seq.param<unsigned>(0);
-            auto const Pa = seq.param<unsigned>(1);
-            auto const Pv = seq.param_or<unsigned>(2, 0);
-            auto const Pu = seq.param_or<unsigned>(3, 0);
+            auto const pi = seq.param<unsigned>(0);
+            auto const pa = seq.param<unsigned>(1);
+            auto const pv = seq.param_or<unsigned>(2, 0);
+            auto const pu = seq.param_or<unsigned>(3, 0);
 
             auto const item = [&]() -> optional<XtSmGraphics::Item> {
-                switch (Pi)
+                switch (pi)
                 {
                     case 1: return XtSmGraphics::Item::NumberOfColorRegisters;
                     case 2: return XtSmGraphics::Item::SixelGraphicsGeometry;
@@ -3169,7 +3169,7 @@ namespace impl
                 return ApplyResult::Invalid;
 
             auto const action = [&]() -> optional<XtSmGraphics::Action> {
-                switch (Pa)
+                switch (pa)
                 {
                     case 1: return XtSmGraphics::Action::Read;
                     case 2: return XtSmGraphics::Action::ResetToDefault;
@@ -3182,7 +3182,7 @@ namespace impl
                 return ApplyResult::Invalid;
 
             if (*item != XtSmGraphics::Item::NumberOfColorRegisters
-                && *action == XtSmGraphics::Action::SetToValue && (!Pv || !Pu))
+                && *action == XtSmGraphics::Action::SetToValue && (!pv || !pu))
                 return ApplyResult::Invalid;
 
             auto const value = [&]() -> XtSmGraphics::Value {
@@ -3194,8 +3194,8 @@ namespace impl
                     case Action::ReadLimit: return std::monostate {};
                     case Action::SetToValue:
                         return *item == XtSmGraphics::Item::NumberOfColorRegisters
-                                   ? XtSmGraphics::Value { Pv }
-                                   : XtSmGraphics::Value { ImageSize { Width(Pv), Height(Pu) } };
+                                   ? XtSmGraphics::Value { pv }
+                                   : XtSmGraphics::Value { ImageSize { Width(pv), Height(pu) } };
                 }
                 return std::monostate {};
             }();
@@ -3213,8 +3213,8 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::executeControlCode(char controlCode)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
-    if (VTTraceSequenceLog)
-        VTTraceSequenceLog()(
+    if (vtTraceSequenceLog)
+        vtTraceSequenceLog()(
             "control U+{:02X} ({})", controlCode, to_string(static_cast<ControlCode::C0>(controlCode)));
 #endif
 
@@ -3293,8 +3293,8 @@ CRISPY_REQUIRES(CellConcept<Cell>)
 void Screen<Cell>::processSequence(Sequence const& seq)
 {
 #if defined(LIBTERMINAL_LOG_TRACE)
-    if (VTTraceSequenceLog)
-        VTTraceSequenceLog()("Handle VT sequence: {}", seq);
+    if (vtTraceSequenceLog)
+        vtTraceSequenceLog()("Handle VT sequence: {}", seq);
 #endif
 
     // std::cerr << fmt::format("\t{} \t; {}\n", seq,
@@ -3303,8 +3303,8 @@ void Screen<Cell>::processSequence(Sequence const& seq)
     _terminal.state().instructionCounter++;
     if (FunctionDefinition const* funcSpec = seq.functionDefinition(); funcSpec != nullptr)
         applyAndLog(*funcSpec, seq);
-    else if (VTParserLog)
-        VTParserLog()("Unknown VT sequence: {}", seq);
+    else if (vtParserLog)
+        vtParserLog()("Unknown VT sequence: {}", seq);
 }
 
 template <typename Cell>
@@ -3315,11 +3315,11 @@ void Screen<Cell>::applyAndLog(FunctionDefinition const& function, Sequence cons
     switch (result)
     {
         case ApplyResult::Invalid: {
-            VTParserLog()("Invalid VT sequence: {}", seq);
+            vtParserLog()("Invalid VT sequence: {}", seq);
             break;
         }
         case ApplyResult::Unsupported: {
-            VTParserLog()("Unsupported VT sequence: {}", seq);
+            vtParserLog()("Unsupported VT sequence: {}", seq);
             break;
         }
         case ApplyResult::Ok: {
@@ -3466,8 +3466,8 @@ ApplyResult Screen<Cell>::apply(FunctionDefinition const& function, Sequence con
         case DECDC: deleteColumns(seq.param_or(0, ColumnCount(1))); break;
         case DECIC: insertColumns(seq.param_or(0, ColumnCount(1))); break;
         case DECSCA: {
-            auto const Pc = seq.param_or(0, 0);
-            switch (Pc)
+            auto const pc = seq.param_or(0, 0);
+            switch (pc)
             {
                 case 1:
                     _cursor.graphicsRendition.flags |= CellFlags::CharacterProtected;
@@ -3742,8 +3742,8 @@ template <typename Cell>
 CRISPY_REQUIRES(CellConcept<Cell>)
 unique_ptr<ParserExtension> Screen<Cell>::hookSixel(Sequence const& seq)
 {
-    auto const Pa = seq.param_or(0, 1);
-    auto const Pb = seq.param_or(1, 2);
+    auto const pa = seq.param_or(0, 1);
+    auto const pb = seq.param_or(1, 2);
 
     auto const aspectVertical = [](int pA) {
         switch (pA)
@@ -3760,10 +3760,10 @@ unique_ptr<ParserExtension> Screen<Cell>::hookSixel(Sequence const& seq)
             case 0: return 2;
             default: return 1;
         }
-    }(Pa);
+    }(pa);
 
     auto const aspectHorizontal = 1;
-    auto const transparentBackground = Pb == 1;
+    auto const transparentBackground = pb == 1;
 
     _sixelImageBuilder = make_unique<SixelImageBuilder>(
         _terminal.state().effectiveImageCanvasSize,

@@ -401,16 +401,16 @@ TEST_CASE("Terminal.TextSelection", "[terminal]")
 
     // Perform selection
     using namespace terminal;
-    auto constexpr uiHandledHint = false;
-    auto constexpr pixelCoordinate = PixelCoordinate {};
+    auto constexpr UiHandledHint = false;
+    auto constexpr PixelCoordinate = terminal::PixelCoordinate {};
 
     mock.terminal.tick(1s);
     mock.terminal.sendMouseMoveEvent(
-        Modifier::None, 1_lineOffset + 1_columnOffset, pixelCoordinate, uiHandledHint);
+        Modifier::None, 1_lineOffset + 1_columnOffset, PixelCoordinate, UiHandledHint);
 
     mock.terminal.tick(1s);
     auto const appHandledMouse =
-        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, pixelCoordinate, uiHandledHint);
+        mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
 
     // We want to ensure that this call is returning false if the app has not explicitly requested
     // to listen on mouse events (without passive mode being on).
@@ -424,16 +424,16 @@ TEST_CASE("Terminal.TextSelection", "[terminal]")
 
     mock.terminal.tick(1s);
     mock.terminal.sendMouseMoveEvent(
-        Modifier::None, 2_lineOffset + 2_columnOffset, pixelCoordinate, uiHandledHint);
+        Modifier::None, 2_lineOffset + 2_columnOffset, PixelCoordinate, UiHandledHint);
     CHECK(mock.terminal.extractSelectionText() == "7890\nABC");
 
     mock.terminal.tick(1s);
-    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, pixelCoordinate, uiHandledHint);
+    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
     CHECK(mock.terminal.extractSelectionText() == "7890\nABC");
 
     // Clear selection by simply left-clicking.
     mock.terminal.tick(1s);
-    mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, pixelCoordinate, uiHandledHint);
-    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, pixelCoordinate, uiHandledHint);
+    mock.terminal.sendMousePressEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
+    mock.terminal.sendMouseReleaseEvent(Modifier::None, MouseButton::Left, PixelCoordinate, UiHandledHint);
     CHECK(mock.terminal.extractSelectionText().empty());
 }

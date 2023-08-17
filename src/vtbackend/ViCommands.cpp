@@ -128,14 +128,14 @@ namespace
 
     constexpr std::optional<std::pair<char, bool>> matchingPairOfChar(char input) noexcept
     {
-        auto constexpr pairs = std::array {
+        auto constexpr Pairs = std::array {
             std::pair { '(', ')' },
             std::pair { '[', ']' },
             std::pair { '{', '}' },
             std::pair { '<', '>' },
         };
 
-        for (auto const& pair: pairs)
+        for (auto const& pair: Pairs)
         {
             if (input == pair.first)
                 return { { pair.second, true } };
@@ -260,7 +260,7 @@ void ViCommands::modeChanged(ViMode mode)
         _lastMode = mode;
     } };
 
-    InputLog()("mode changed to {}\n", mode);
+    inputLog()("mode changed to {}\n", mode);
 
     auto const selectFrom = _terminal.selector() ? _terminal.selector()->from() : cursorPosition;
 
@@ -387,7 +387,7 @@ void ViCommands::executeYank(CellLocation from, CellLocation to)
 
 void ViCommands::execute(ViOperator op, ViMotion motion, unsigned count, char32_t lastChar)
 {
-    InputLog()("{}: Executing: {} {} {}\n", _terminal.inputHandler().mode(), count, op, motion);
+    inputLog()("{}: Executing: {} {} {}\n", _terminal.inputHandler().mode(), count, op, motion);
     switch (op)
     {
         case ViOperator::MoveCursor:
@@ -421,7 +421,7 @@ void ViCommands::select(TextObjectScope scope, TextObject textObject)
 {
     auto const [from, to] = translateToCellRange(scope, textObject);
     cursorPosition = to;
-    InputLog()("{}: Executing: select {} {} [{} .. {}]\n",
+    inputLog()("{}: Executing: select {} {} [{} .. {}]\n",
                _terminal.inputHandler().mode(),
                scope,
                textObject,
@@ -437,7 +437,7 @@ void ViCommands::yank(TextObjectScope scope, TextObject textObject)
 {
     auto const [from, to] = translateToCellRange(scope, textObject);
     cursorPosition = from;
-    InputLog()("{}: Executing: yank {} {}\n", _terminal.inputHandler().mode(), scope, textObject);
+    inputLog()("{}: Executing: yank {} {}\n", _terminal.inputHandler().mode(), scope, textObject);
     executeYank(from, to);
     _terminal.screenUpdated();
 }
@@ -446,7 +446,7 @@ void ViCommands::yank(ViMotion motion)
 {
     auto const [from, to] = translateToCellRange(motion, 1);
     cursorPosition = from;
-    InputLog()("{}: Executing: motion-yank {}\n", _terminal.inputHandler().mode(), motion);
+    inputLog()("{}: Executing: motion-yank {}\n", _terminal.inputHandler().mode(), motion);
     executeYank(from, to);
     _terminal.screenUpdated();
 }
@@ -1112,7 +1112,7 @@ void ViCommands::moveCursor(ViMotion motion, unsigned count, char32_t lastChar)
     }
 
     auto const nextPosition = translateToCellLocation(motion, count);
-    InputLog()("Move cursor: {} to {}\n", motion, nextPosition);
+    inputLog()("Move cursor: {} to {}\n", motion, nextPosition);
     moveCursorTo(nextPosition);
 }
 

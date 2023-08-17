@@ -36,15 +36,15 @@ SixelImageBuilder sixelImageBuilder(ImageSize size, RGBAColor defaultColor)
 
 TEST_CASE("SixelParser.ground_000000", "[sixel]")
 {
-    auto constexpr defaultColor = RGBAColor { 0x10, 0x20, 0x30, 0xFF };
-    auto constexpr pinColor = RGBColor { 0xFF, 0xFF, 0x42 };
+    auto constexpr DefaultColor = RGBAColor { 0x10, 0x20, 0x30, 0xFF };
+    auto constexpr PinColor = RGBColor { 0xFF, 0xFF, 0x42 };
 
-    auto ib = sixelImageBuilder(ImageSize { Width(4), Height(10) }, defaultColor);
+    auto ib = sixelImageBuilder(ImageSize { Width(4), Height(10) }, DefaultColor);
     auto sp = SixelParser { ib };
 
     REQUIRE(ib.sixelCursor() == CellLocation { {}, {} });
 
-    ib.setColor(0, pinColor);
+    ib.setColor(0, PinColor);
     sp.parseFragment("?");
 
     CHECK(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(1) });
@@ -54,22 +54,22 @@ TEST_CASE("SixelParser.ground_000000", "[sixel]")
         for (int y = 0; y < ib.size().height.as<int>(); ++y)
         {
             auto const& actualColor = ib.at(CellLocation { LineOffset(y), ColumnOffset(x) });
-            CHECK(actualColor == defaultColor);
+            CHECK(actualColor == DefaultColor);
         }
     }
 }
 
 TEST_CASE("SixelParser.ground_111111", "[sixel]")
 {
-    auto constexpr defaultColor = RGBAColor { 0, 0, 0, 0xFF };
-    auto constexpr pinColor = RGBColor { 0x10, 0x20, 0x40 };
+    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
+    auto constexpr PinColor = RGBColor { 0x10, 0x20, 0x40 };
 
-    auto ib = sixelImageBuilder(ImageSize { Width(2), Height(8) }, defaultColor);
+    auto ib = sixelImageBuilder(ImageSize { Width(2), Height(8) }, DefaultColor);
     auto sp = SixelParser { ib };
 
     REQUIRE(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
-    ib.setColor(0, pinColor);
+    ib.setColor(0, PinColor);
 
     sp.parseFragment("~"); // 0b111111 + 63 == 126 == '~'
 
@@ -83,24 +83,24 @@ TEST_CASE("SixelParser.ground_111111", "[sixel]")
             auto const pinned = x == 0 && y >= 0 && y <= 5;
             INFO(fmt::format("x={}, y={}, {}", x, y, pinned ? "pinned" : ""));
             if (pinned)
-                CHECK(actualColor.rgb() == pinColor);
+                CHECK(actualColor.rgb() == PinColor);
             else
-                CHECK(actualColor == defaultColor);
+                CHECK(actualColor == DefaultColor);
         }
     }
 }
 
 TEST_CASE("SixelParser.ground_000001", "[sixel]")
 {
-    auto constexpr defaultColor = RGBAColor { 0x10, 0x20, 0x30, 0xFF };
-    auto constexpr pinColor = RGBColor { 0xFF, 0xFF, 0x42 };
+    auto constexpr DefaultColor = RGBAColor { 0x10, 0x20, 0x30, 0xFF };
+    auto constexpr PinColor = RGBColor { 0xFF, 0xFF, 0x42 };
 
-    auto ib = sixelImageBuilder(ImageSize { Width(4), Height(10) }, defaultColor);
+    auto ib = sixelImageBuilder(ImageSize { Width(4), Height(10) }, DefaultColor);
     auto sp = SixelParser { ib };
 
     REQUIRE(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
-    ib.setColor(0, pinColor);
+    ib.setColor(0, PinColor);
 
     sp.parseFragment("@");
 
@@ -114,24 +114,24 @@ TEST_CASE("SixelParser.ground_000001", "[sixel]")
             auto const& actualColor = ib.at(CellLocation { LineOffset(y), ColumnOffset(x) });
             auto const pinned = x == 0 && y == 0;
             if (pinned)
-                CHECK(actualColor.rgb() == pinColor);
+                CHECK(actualColor.rgb() == PinColor);
             else
-                CHECK(actualColor == defaultColor);
+                CHECK(actualColor == DefaultColor);
         }
     }
 }
 
 TEST_CASE("SixelParser.ground_010101", "[sixel]")
 {
-    auto constexpr defaultColor = RGBAColor { 0x10, 0x20, 0x30, 0xFF };
-    auto constexpr pinColor = RGBColor { 0xFF, 0xFF, 0x42 };
+    auto constexpr DefaultColor = RGBAColor { 0x10, 0x20, 0x30, 0xFF };
+    auto constexpr PinColor = RGBColor { 0xFF, 0xFF, 0x42 };
 
-    auto ib = sixelImageBuilder(ImageSize { Width(2), Height(8) }, defaultColor);
+    auto ib = sixelImageBuilder(ImageSize { Width(2), Height(8) }, DefaultColor);
     auto sp = SixelParser { ib };
 
     REQUIRE(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
-    ib.setColor(0, pinColor);
+    ib.setColor(0, PinColor);
 
     sp.parseFragment("T"); // 0b010101 + 63 == 'T'
 
@@ -145,24 +145,24 @@ TEST_CASE("SixelParser.ground_010101", "[sixel]")
             auto const& actualColor = ib.at(CellLocation { LineOffset(y), ColumnOffset(x) });
             auto const pinned = x == 0 && (y < 6 && y % 2 == 0);
             if (pinned)
-                CHECK(actualColor.rgb() == pinColor);
+                CHECK(actualColor.rgb() == PinColor);
             else
-                CHECK(actualColor == defaultColor);
+                CHECK(actualColor == DefaultColor);
         }
     }
 }
 
 TEST_CASE("SixelParser.ground_101010", "[sixel]")
 {
-    auto constexpr defaultColor = RGBAColor { 0x10, 0x20, 0x30, 0xFF };
-    auto constexpr pinColor = RGBColor { 0xFF, 0xFF, 0x42 };
+    auto constexpr DefaultColor = RGBAColor { 0x10, 0x20, 0x30, 0xFF };
+    auto constexpr PinColor = RGBColor { 0xFF, 0xFF, 0x42 };
 
-    auto ib = sixelImageBuilder(ImageSize { Width(2), Height(8) }, defaultColor);
+    auto ib = sixelImageBuilder(ImageSize { Width(2), Height(8) }, DefaultColor);
     auto sp = SixelParser { ib };
 
     REQUIRE(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
-    ib.setColor(0, pinColor);
+    ib.setColor(0, PinColor);
 
     sp.parseFragment("i"); // 0b101010 + 63 == 'i'
 
@@ -176,17 +176,17 @@ TEST_CASE("SixelParser.ground_101010", "[sixel]")
             auto const& actualColor = ib.at(CellLocation { LineOffset(y), ColumnOffset(x) });
             auto const pinned = x == 0 && (y < 6 && y % 2 != 0);
             if (pinned)
-                CHECK(actualColor.rgb() == pinColor);
+                CHECK(actualColor.rgb() == PinColor);
             else
-                CHECK(actualColor == defaultColor);
+                CHECK(actualColor == DefaultColor);
         }
     }
 }
 
 TEST_CASE("SixelParser.raster", "[sixel]")
 {
-    auto constexpr defaultColor = RGBAColor { 0, 0, 0, 0xFF };
-    auto ib = sixelImageBuilder(ImageSize { Width(640), Height(480) }, defaultColor);
+    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
+    auto ib = sixelImageBuilder(ImageSize { Width(640), Height(480) }, DefaultColor);
     auto sp = SixelParser { ib };
 
     REQUIRE(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
@@ -222,14 +222,14 @@ TEST_CASE("SixelParser.raster", "[sixel]")
 
 TEST_CASE("SixelParser.rep", "[sixel]")
 {
-    auto constexpr defaultColor = RGBAColor { 0, 0, 0, 0xFF };
-    auto constexpr pinColor = RGBColor { 0x10, 0x20, 0x30 };
-    auto ib = sixelImageBuilder(ImageSize { Width(14), Height(8) }, defaultColor);
+    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
+    auto constexpr PinColor = RGBColor { 0x10, 0x20, 0x30 };
+    auto ib = sixelImageBuilder(ImageSize { Width(14), Height(8) }, DefaultColor);
     auto sp = SixelParser { ib };
 
     REQUIRE(ib.sixelCursor() == CellLocation { LineOffset(0), ColumnOffset(0) });
 
-    ib.setColor(0, pinColor);
+    ib.setColor(0, PinColor);
 
     sp.parseFragment("!12~");
 
@@ -242,23 +242,23 @@ TEST_CASE("SixelParser.rep", "[sixel]")
             auto const& actualColor = ib.at(CellLocation { LineOffset(y), ColumnOffset(x) });
             auto const pinned = x < 12 && y < 6;
             if (pinned)
-                CHECK(actualColor.rgb() == pinColor);
+                CHECK(actualColor.rgb() == PinColor);
             else
-                CHECK(actualColor == defaultColor);
+                CHECK(actualColor == DefaultColor);
         }
     }
 }
 
 TEST_CASE("SixelParser.setAndUseColor", "[sixel]")
 {
-    auto constexpr pinColors = std::array<RGBAColor, 5> { RGBAColor { 255, 255, 255, 255 },
+    auto constexpr PinColors = std::array<RGBAColor, 5> { RGBAColor { 255, 255, 255, 255 },
                                                           RGBAColor { 255, 0, 0, 255 },
                                                           RGBAColor { 0, 255, 0, 255 },
                                                           RGBAColor { 0, 0, 255, 255 },
                                                           RGBAColor { 255, 255, 255, 255 } };
 
-    auto constexpr defaultColor = RGBAColor { 0, 0, 0, 0xFF };
-    auto ib = sixelImageBuilder(ImageSize { Width(5), Height(6) }, defaultColor);
+    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 0xFF };
+    auto ib = sixelImageBuilder(ImageSize { Width(5), Height(6) }, DefaultColor);
     auto sp = SixelParser { ib };
 
     sp.parseFragment("#1;2;100;0;0");
@@ -279,7 +279,7 @@ TEST_CASE("SixelParser.setAndUseColor", "[sixel]")
          crispy::times(ib.size().width.as<int>()) * crispy::times(ib.size().height.as<int>()))
     {
         auto const& expectedColor =
-            x < 5 && y < 6 ? pinColors.at(static_cast<size_t>(x ? x : 4)) : defaultColor;
+            x < 5 && y < 6 ? PinColors.at(static_cast<size_t>(x ? x : 4)) : DefaultColor;
         auto const& actualColor = ib.at(CellLocation { LineOffset(y), ColumnOffset(x) });
         // INFO(fmt::format("at {}, expect {}, actual {}",
         //                  CellLocation { LineOffset(y), ColumnOffset(x) },
@@ -291,14 +291,14 @@ TEST_CASE("SixelParser.setAndUseColor", "[sixel]")
 
 TEST_CASE("SixelParser.rewind", "[sixel]")
 {
-    auto constexpr pinColors = std::array<RGBAColor, 4> {
+    auto constexpr PinColors = std::array<RGBAColor, 4> {
         RGBAColor { 0, 0, 0, 255 },
         RGBAColor { 255, 255, 0, 255 },
         RGBAColor { 0, 255, 255, 255 },
     };
 
-    auto constexpr defaultColor = pinColors[0];
-    auto ib = sixelImageBuilder(ImageSize { Width(4), Height(6) }, defaultColor);
+    auto constexpr DefaultColor = PinColors[0];
+    auto ib = sixelImageBuilder(ImageSize { Width(4), Height(6) }, DefaultColor);
     auto sp = SixelParser { ib };
 
     sp.parseFragment("#1;2;100;100;0");
@@ -315,7 +315,7 @@ TEST_CASE("SixelParser.rewind", "[sixel]")
     {
         for (int x = 0; x < 4; ++x)
         {
-            auto const expectedColor = x < 2 ? pinColors[2] : pinColors[1];
+            auto const expectedColor = x < 2 ? PinColors[2] : PinColors[1];
             auto const pos = CellLocation { LineOffset(y), ColumnOffset(x) };
             auto const actualColor = ib.at(pos);
 
@@ -326,14 +326,14 @@ TEST_CASE("SixelParser.rewind", "[sixel]")
 
 TEST_CASE("SixelParser.newline", "[sixel]")
 {
-    auto constexpr pinColors = std::array<RGBAColor, 4> {
+    auto constexpr PinColors = std::array<RGBAColor, 4> {
         RGBAColor { 0, 0, 0, 255 },
         RGBAColor { 255, 255, 0, 255 },
         RGBAColor { 0, 255, 255, 255 },
     };
 
-    auto constexpr defaultColor = pinColors[0];
-    auto ib = sixelImageBuilder(ImageSize { Width(5), Height(13) }, defaultColor);
+    auto constexpr DefaultColor = PinColors[0];
+    auto ib = sixelImageBuilder(ImageSize { Width(5), Height(13) }, DefaultColor);
     auto sp = SixelParser { ib };
 
     sp.parseFragment("#1;2;100;100;0");
@@ -350,9 +350,9 @@ TEST_CASE("SixelParser.newline", "[sixel]")
     {
         for (int x = 0; x < ib.size().width.as<int>(); ++x)
         {
-            auto const expectedColor = y < 6 && x < 4    ? pinColors[1]
-                                       : y < 12 && x < 4 ? pinColors[2]
-                                                         : pinColors[0];
+            auto const expectedColor = y < 6 && x < 4    ? PinColors[1]
+                                       : y < 12 && x < 4 ? PinColors[2]
+                                                         : PinColors[0];
             auto const pos = CellLocation { LineOffset(y), ColumnOffset(x) };
             auto const actualColor = ib.at(pos);
 
@@ -363,9 +363,9 @@ TEST_CASE("SixelParser.newline", "[sixel]")
 
 TEST_CASE("SixelParser.vertical_cursor_advance", "[sixel]")
 {
-    auto constexpr defaultColor = RGBAColor { 0, 0, 0, 255 };
+    auto constexpr DefaultColor = RGBAColor { 0, 0, 0, 255 };
     SixelImageBuilder ib(
-        { Width(5), Height(30) }, 1, 1, defaultColor, std::make_shared<SixelColorPalette>(16, 256));
+        { Width(5), Height(30) }, 1, 1, DefaultColor, std::make_shared<SixelColorPalette>(16, 256));
     auto sp = SixelParser { ib };
 
     sp.parseFragment("$-$-$-$-");

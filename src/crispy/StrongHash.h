@@ -36,7 +36,7 @@ namespace crispy
 struct strong_hash
 {
     // some random seed
-    static constexpr std::array<unsigned char, 16> defaultSeed = {
+    static constexpr std::array<unsigned char, 16> DefaultSeed = {
         // NOLINT(readability-identifier-naming)
         114, 188, 209, 2, 232, 4, 178, 176, 240, 216, 201, 127, 40, 41, 95, 143,
     };
@@ -204,11 +204,11 @@ inline strong_hash strong_hash::compute(void const* data, size_t n) noexcept
     auto const* i = (uint8_t const*) data;
     auto const* e = i + n;
     auto const result = fnv<uint8_t, uint64_t>()(i, e);
-    auto constexpr a = 0;
-    auto constexpr b = 0;
+    auto constexpr A = 0;
+    auto constexpr B = 0;
     auto const c = static_cast<uint32_t>((result >> 32) & 0xFFFFFFFFu);
     auto const d = static_cast<uint32_t>(result & 0xFFFFFFFFu);
-    return strong_hash { a, b, c, d };
+    return strong_hash { A, B, c, d };
 #endif
 }
 

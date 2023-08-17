@@ -487,8 +487,8 @@ struct fmt::formatter<terminal::parser::ActionClass>: formatter<std::string_view
 {
     auto format(terminal::parser::ActionClass value, format_context& ctx) -> format_context::iterator
     {
-        auto constexpr mappings = std::array<std::string_view, 4> { "Enter", "Event", "Leave", "Transition" };
-        return formatter<std::string_view>::format(mappings.at(static_cast<unsigned>(value)), ctx);
+        auto constexpr Mappings = std::array<std::string_view, 4> { "Enter", "Event", "Leave", "Transition" };
+        return formatter<std::string_view>::format(Mappings.at(static_cast<unsigned>(value)), ctx);
     }
 };
 

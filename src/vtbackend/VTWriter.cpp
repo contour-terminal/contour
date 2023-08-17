@@ -112,7 +112,7 @@ void VTWriter::sgrAdd(unsigned n)
         if (_sgr.empty() || _sgr.back() != n)
             _sgr.push_back(n);
 
-        if (_sgr.size() == maxParameterCount)
+        if (_sgr.size() == MaxParameterCount)
         {
             sgrFlush();
         }

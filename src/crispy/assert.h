@@ -106,13 +106,13 @@ inline void set_fail_handler(fail_handler_t handler)
 [[noreturn]] inline void fatal(std::string_view message,
                                logstore::source_location location = logstore::source_location::current())
 {
-    auto static FatalLog =
+    auto static fatalLog =
         logstore::category("fatal", "Fatal error Logger", logstore::category::state::Enabled);
 
     if (!message.empty())
-        FatalLog(location)("Fatal error. {}", message);
+        fatalLog(location)("Fatal error. {}", message);
     else
-        FatalLog(location)("Fatal error.");
+        fatalLog(location)("Fatal error.");
     std::abort();
 }
 

@@ -29,7 +29,7 @@
 namespace terminal::parser
 {
 
-auto const inline VTTraceParserLog =
+auto const inline vtTraceParserLog =
     logstore::category("vt.trace.parser", "Logs terminal parser instruction trace.");
 
 namespace
@@ -364,17 +364,17 @@ template <typename EventListener, bool TraceStateChanges>
 void Parser<EventListener, TraceStateChanges>::processOnceViaStateMachine(uint8_t ch)
 {
     auto const s = static_cast<size_t>(_state);
-    ParserTable static constexpr table = ParserTable::get();
+    ParserTable static constexpr Table = ParserTable::get();
 
-    if (auto const t = table.transitions[s][static_cast<uint8_t>(ch)]; t != State::Undefined)
+    if (auto const t = Table.transitions[s][static_cast<uint8_t>(ch)]; t != State::Undefined)
     {
         // fmt::print("VTParser: Transitioning from {} to {}", _state, t);
-        handle(ActionClass::Leave, table.exitEvents[s], ch);
-        handle(ActionClass::Transition, table.events[s][static_cast<size_t>(ch)], ch);
+        handle(ActionClass::Leave, Table.exitEvents[s], ch);
+        handle(ActionClass::Transition, Table.events[s][static_cast<size_t>(ch)], ch);
         _state = t;
-        handle(ActionClass::Enter, table.entryEvents[static_cast<size_t>(t)], ch);
+        handle(ActionClass::Enter, Table.entryEvents[static_cast<size_t>(t)], ch);
     }
-    else if (Action const a = table.events[s][ch]; a != Action::Undefined)
+    else if (Action const a = Table.events[s][ch]; a != Action::Undefined)
         handle(ActionClass::Event, a, ch);
     else
         _eventListener.error("Parser error: Unknown action for state/input pair.");
@@ -411,8 +411,8 @@ auto Parser<EventListener, TraceStateChanges>::parseBulkText(char const* begin, 
     assert(next <= chunk.data() + chunk.size());
 
 #if defined(LIBTERMINAL_LOG_TRACE)
-    if (VTTraceParserLog)
-        VTTraceParserLog()(
+    if (vtTraceParserLog)
+        vtTraceParserLog()(
             "[Unicode] Scanned text: maxCharCount {}; cells {}; bytes {}; UTF-8 ({}/{}): \"{}\"",
             maxCharCount,
             cellCount,
@@ -475,8 +475,8 @@ void Parser<EventListener, TraceStateChanges>::handle(ActionClass actionClass,
 
 #if defined(LIBTERMINAL_LOG_TRACE)
     if constexpr (TraceStateChanges)
-        if (VTTraceParserLog && action != Action::Ignore && action != Action::Undefined)
-            VTTraceParserLog()(
+        if (vtTraceParserLog && action != Action::Ignore && action != Action::Undefined)
+            vtTraceParserLog()(
                 "handle: {} {} {} {}", _state, actionClass, action, crispy::escape(static_cast<uint8_t>(ch)));
 #endif
 

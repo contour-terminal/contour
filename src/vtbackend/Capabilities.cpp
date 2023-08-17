@@ -86,7 +86,7 @@ namespace
         return std::array<T, 1 + sizeof...(Ts)>({ element, elements... });
     }
 
-    constexpr inline auto booleanCaps = defineCapabilities(
+    constexpr inline auto BooleanCaps = defineCapabilities(
         Boolean { "Su"_tcap, "Su"sv, true },    // supports extended underline styling (such as undercurl)
         Boolean { "am"_tcap, "am"sv, true },    // terminal has automatic margins
         Boolean { "hs"_tcap, "hs"sv, true },    // has extra status line (has_status_line)
@@ -103,7 +103,7 @@ namespace
         Boolean { "Tc"_tcap, "Tc"sv, true }     // RGB color support (introduced by Tmux in 2016)
     );
 
-    constexpr inline auto numericalCaps = defineCapabilities(
+    constexpr inline auto NumericalCaps = defineCapabilities(
         Numeric { "co"_tcap, "cols"sv, 80 },     // number of columns in a line
         Numeric { "it"_tcap, "it"sv, 8 },        // tabs initially every # spaces
         Numeric { "Co"_tcap, "colors"sv, 256 },  // maximum number of colors on screen
@@ -113,7 +113,7 @@ namespace
 
     constexpr auto inline Undefined = Code {};
     // clang-format off
-    constexpr inline auto stringCaps = defineCapabilities( // {{{
+    constexpr inline auto StringCaps = defineCapabilities( // {{{
         String { "TN"_tcap, ""sv, "xterm-256color"sv },    // termcap/terminfo name (xterm extension)
         String { "ac"_tcap, "acsc"sv, "``aaffggiijjkkllmmnnooppqqrrssttuuvvwwxxyyzz{{||}}~~"sv }, // graphics charset pairs, based on vt100
         String { "bl"_tcap, "bel"sv, "^G"sv },                               // The audible bell character
@@ -412,7 +412,7 @@ namespace
 
 bool StaticDatabase::booleanCapability(Code code) const
 {
-    for (auto const& cap: booleanCaps)
+    for (auto const& cap: BooleanCaps)
         if (cap.code.code == code.code)
             return cap.value;
 
@@ -421,16 +421,16 @@ bool StaticDatabase::booleanCapability(Code code) const
 
 unsigned StaticDatabase::numericCapability(Code code) const
 {
-    for (auto const& cap: numericalCaps)
+    for (auto const& cap: NumericalCaps)
         if (cap.code.code == code.code)
             return cap.value;
 
-    return npos;
+    return Npos;
 }
 
 string_view StaticDatabase::stringCapability(Code code) const
 {
-    for (auto const& cap: stringCaps)
+    for (auto const& cap: StringCaps)
         if (cap.code.code == code.code)
             return cap.value;
 
@@ -439,7 +439,7 @@ string_view StaticDatabase::stringCapability(Code code) const
 
 bool StaticDatabase::booleanCapability(string_view name) const
 {
-    for (auto const tcap: booleanCaps)
+    for (auto const tcap: BooleanCaps)
         if (tcap.name == name || tcap.code == name)
             return tcap.value;
 
@@ -448,16 +448,16 @@ bool StaticDatabase::booleanCapability(string_view name) const
 
 unsigned StaticDatabase::numericCapability(string_view name) const
 {
-    for (auto const tcap: numericalCaps)
+    for (auto const tcap: NumericalCaps)
         if (tcap.name == name || tcap.code == name)
             return tcap.value;
 
-    return npos;
+    return Npos;
 }
 
 string_view StaticDatabase::stringCapability(string_view name) const
 {
-    for (auto const tcap: stringCaps)
+    for (auto const tcap: StringCaps)
         if (tcap.name == name || tcap.code == name)
             return tcap.value;
 
@@ -466,15 +466,15 @@ string_view StaticDatabase::stringCapability(string_view name) const
 
 optional<Code> StaticDatabase::codeFromName(string_view name) const
 {
-    for (auto const& cap: numericalCaps)
+    for (auto const& cap: NumericalCaps)
         if (cap.name == name)
             return cap.code;
 
-    for (auto const& cap: booleanCaps)
+    for (auto const& cap: BooleanCaps)
         if (cap.name == name)
             return cap.code;
 
-    for (auto const& cap: stringCaps)
+    for (auto const& cap: StringCaps)
         if (cap.name == name)
             return cap.code;
 
@@ -492,9 +492,9 @@ string StaticDatabase::terminfo() const
 {
     using namespace ranges;
 
-    auto booleans = copy(booleanCaps);
-    auto numbers = copy(numericalCaps);
-    auto strings = copy(stringCaps);
+    auto booleans = copy(BooleanCaps);
+    auto numbers = copy(NumericalCaps);
+    auto strings = copy(StringCaps);
 
     std::stringstream output;
 

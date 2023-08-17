@@ -59,7 +59,7 @@ namespace
         gm.underline.position = gm.baseline + m.underline_position;
         gm.underline.thickness = m.underline_thickness;
 
-        RendererLog()("Loading grid metrics {}", gm);
+        rendererLog()("Loading grid metrics {}", gm);
     }
 
     GridMetrics loadGridMetrics(text::font_key font, PageSize pageSize, text::shaper& textShaper)
@@ -95,27 +95,27 @@ namespace
         {
             case TextShapingEngine::DWrite:
 #if defined(_WIN32)
-                RendererLog()("Using DirectWrite text shaping engine.");
+                rendererLog()("Using DirectWrite text shaping engine.");
                 // TODO: do we want to use custom font locator here?
                 return make_unique<text::directwrite_shaper>(dpi, locator);
 #else
-                RendererLog()("DirectWrite not available on this platform.");
+                rendererLog()("DirectWrite not available on this platform.");
                 break;
 #endif
 
             case TextShapingEngine::CoreText:
 #if defined(__APPLE__)
-                RendererLog()("CoreText not yet implemented.");
+                rendererLog()("CoreText not yet implemented.");
                 break;
 #else
-                RendererLog()("CoreText not available on this platform.");
+                rendererLog()("CoreText not available on this platform.");
                 break;
 #endif
 
             case TextShapingEngine::OpenShaper: break;
         }
 
-        RendererLog()("Using OpenShaper text shaping engine.");
+        rendererLog()("Using OpenShaper text shaping engine.");
         return make_unique<text::open_shaper>(dpi, locator);
     }
 
@@ -152,11 +152,11 @@ Renderer::Renderer(PageSize pageSize,
 
     // clang-format off
     if (_atlasTileCount.value > atlasTileCount.value)
-        RendererLog()("Increasing atlas tile count configuration to {} to satisfy worst-case rendering scenario.",
+        rendererLog()("Increasing atlas tile count configuration to {} to satisfy worst-case rendering scenario.",
                               _atlasTileCount.value);
 
     if (_atlasHashtableSlotCount.value > atlasHashtableSlotCount.value)
-        RendererLog()("Increasing atlas hashtable slot count configuration to the next power of two: {}.",
+        rendererLog()("Increasing atlas hashtable slot count configuration to the next power of two: {}.",
                               _atlasHashtableSlotCount.value);
     // clang-format on
 }
@@ -196,12 +196,12 @@ void Renderer::configureTextureAtlas()
     _textureAtlas = make_unique<Renderable::TextureAtlas>(_renderTarget->textureScheduler(), atlasProperties);
 
     // clang-format off
-    RendererLog()("Configuring texture atlas.\n", atlasProperties);
-    RendererLog()("- Atlas properties     : {}\n", atlasProperties);
-    RendererLog()("- Atlas texture size   : {} pixels\n", _textureAtlas->atlasSize());
-    RendererLog()("- Atlas hashtable      : {} slots\n", _atlasHashtableSlotCount.value);
-    RendererLog()("- Atlas tile count     : {} = {}x * {}y\n", _textureAtlas->capacity(), _textureAtlas->tilesInX(), _textureAtlas->tilesInY());
-    RendererLog()("- Atlas direct mapping : {} (for text rendering)", _atlasDirectMapping ? "enabled" : "disabled");
+    rendererLog()("Configuring texture atlas.\n", atlasProperties);
+    rendererLog()("- Atlas properties     : {}\n", atlasProperties);
+    rendererLog()("- Atlas texture size   : {} pixels\n", _textureAtlas->atlasSize());
+    rendererLog()("- Atlas hashtable      : {} slots\n", _atlasHashtableSlotCount.value);
+    rendererLog()("- Atlas tile count     : {} = {}x * {}y\n", _textureAtlas->capacity(), _textureAtlas->tilesInX(), _textureAtlas->tilesInY());
+    rendererLog()("- Atlas direct mapping : {} (for text rendering)", _atlasDirectMapping ? "enabled" : "disabled");
     // clang-format on
 
     for (reference_wrapper<Renderable>& renderable: renderables())
@@ -212,13 +212,13 @@ void Renderer::discardImage(Image const& image)
 {
     // Defer rendering into the renderer thread & render stage, as this call might have
     // been coming out of bounds from another thread (e.g. the terminal's screen update thread)
-    auto _l = scoped_lock { _imageDiscardLock };
+    auto l = scoped_lock { _imageDiscardLock };
     _discardImageQueue.emplace_back(image.id());
 }
 
 void Renderer::executeImageDiscards()
 {
-    auto _l = scoped_lock { _imageDiscardLock };
+    auto l = scoped_lock { _imageDiscardLock };
 
     for (auto const imageId: _discardImageQueue)
         _imageRenderer.discardImage(imageId);
@@ -275,7 +275,7 @@ bool Renderer::setFontSize(text::font_size fontSize)
 
 void Renderer::updateFontMetrics()
 {
-    RendererLog()("Updating grid metrics: {}", _gridMetrics);
+    rendererLog()("Updating grid metrics: {}", _gridMetrics);
 
     _gridMetrics = loadGridMetrics(_fonts.regular, _gridMetrics.pageSize, *_textShaper);
 

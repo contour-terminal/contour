@@ -56,7 +56,7 @@ Audio::Audio()
 
     if (!info.isFormatSupported(f))
     {
-        errorlog()("Default output device doesn't support 16 Bit signed integer PCM");
+        errorLog()("Default output device doesn't support 16 Bit signed integer PCM");
         return;
     }
 
@@ -116,7 +116,7 @@ void Audio::handleStateChanged(QAudio::State state)
         case QAudio::StoppedState:
             if (audio->error() != QAudio::NoError)
             {
-                errorlog()("Audio playback stopped: {}", static_cast<int>(audio->error()));
+                errorLog()("Audio playback stopped: {}", static_cast<int>(audio->error()));
             }
             break;
         default: break;

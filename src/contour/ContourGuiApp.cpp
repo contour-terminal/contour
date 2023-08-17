@@ -314,7 +314,7 @@ int ContourGuiApp::terminalGuiAction()
     auto const* profile = _config.profile(profileName());
     if (!profile)
     {
-        errorlog()("Could not access configuration profile.");
+        errorLog()("Could not access configuration profile.");
         return EXIT_FAILURE;
     }
     auto appName = QString::fromStdString(profile->wmClass);

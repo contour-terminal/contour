@@ -38,7 +38,7 @@ namespace helper
 // }}}
 
 template <typename T>
-constexpr bool is_boxed = helper::is_boxed<T>::value;
+constexpr bool IsBoxed = helper::is_boxed<T>::value;
 
 /**
  * Wrapper to provide strong typing on primitive types.
@@ -76,7 +76,7 @@ struct boxed
     template <typename To>
     [[nodiscard]] constexpr auto as() const noexcept
     {
-        if constexpr (is_boxed<To>)
+        if constexpr (IsBoxed<To>)
             return To { static_cast<typename To::element_type>(value) };
         else
             return static_cast<To>(value);
@@ -86,7 +86,7 @@ struct boxed
     // NOLINTNEXTLINE(readability-identifier-naming)
     [[nodiscard]] constexpr static boxed<T, Tag> cast_from(Source value)
     {
-        if constexpr (is_boxed<Source>)
+        if constexpr (IsBoxed<Source>)
             return boxed<T, Tag> { static_cast<T>(value.value) };
         else
             return boxed<T, Tag>(static_cast<T>(value));

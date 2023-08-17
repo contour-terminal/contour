@@ -112,9 +112,9 @@ std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderCo
     auto [vertexLocation, vertexSource] = extractShaderSource(_shaderConfig.vertexShader);
     if (!shader->addShaderFromSourceCode(QOpenGLShader::Vertex, vertexSource.c_str()))
     {
-        errorlog()("Compiling vertex shader {} failed.", vertexLocation);
-        errorlog()("Shader source: {}", vertexSource);
-        errorlog()("Shader log: {}", shader->log().toStdString());
+        errorLog()("Compiling vertex shader {} failed.", vertexLocation);
+        errorLog()("Shader source: {}", vertexSource);
+        errorLog()("Shader log: {}", shader->log().toStdString());
         qDebug() << shader->log();
         return {};
     }
@@ -122,14 +122,14 @@ std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderCo
     auto [fragmentLocation, fragmentSource] = extractShaderSource(_shaderConfig.fragmentShader);
     if (!shader->addShaderFromSourceCode(QOpenGLShader::Fragment, fragmentSource.c_str()))
     {
-        errorlog()("Compiling fragment shader {} failed. {}", fragmentLocation, shader->log().toStdString());
+        errorLog()("Compiling fragment shader {} failed. {}", fragmentLocation, shader->log().toStdString());
         qDebug() << shader->log();
         return {};
     }
 
     if (!shader->link())
     {
-        errorlog()("Linking shaders {} & {} failed. {}",
+        errorLog()("Linking shaders {} & {} failed. {}",
                    vertexLocation,
                    fragmentLocation,
                    shader->log().toStdString());

@@ -77,8 +77,8 @@ namespace
     {
         if (ptyMaster < 0)
         {
-            if (PtyInLog)
-                PtyInLog()("read() called with closed PTY master.");
+            if (ptyInLog)
+                ptyInLog()("read() called with closed PTY master.");
             errno = ENODEV;
             return -1;
         }
@@ -119,7 +119,7 @@ namespace
 
             if (rv < 0)
             {
-                PtyInLog()("PTY read() failed. {}", strerror(errno));
+                ptyInLog()("PTY read() failed. {}", strerror(errno));
                 return -1;
             }
 
@@ -172,7 +172,7 @@ namespace
         if (openpty(&masterFd, &slaveFd, nullptr, /*&term*/ nullptr, (winsize*) wsa) < 0)
             throw runtime_error { "Failed to open PTY. "s + strerror(errno) };
 
-        PtyLog()("PTY opened. master={}, slave={}", masterFd, slaveFd);
+        ptyLog()("PTY opened. master={}, slave={}", masterFd, slaveFd);
 
         return { PtyMasterHandle::cast_from(masterFd), PtySlaveHandle::cast_from(slaveFd) };
     }
@@ -278,7 +278,7 @@ void UnixPty::start()
         throw runtime_error { "Failed to configure PTY. "s + strerror(errno) };
 
     detail::setFileFlags(_stdoutFastPipe.reader(), O_NONBLOCK);
-    PtyLog()("stdout fastpipe: reader {}, writer {}", _stdoutFastPipe.reader(), _stdoutFastPipe.writer());
+    ptyLog()("stdout fastpipe: reader {}, writer {}", _stdoutFastPipe.reader(), _stdoutFastPipe.writer());
 
     _readSelector.want_read(_masterFd);
     _readSelector.want_read(_stdoutFastPipe.reader());
@@ -290,7 +290,7 @@ void UnixPty::start()
 
 UnixPty::~UnixPty()
 {
-    PtyLog()("PTY destroying master (file descriptor {}).", _masterFd);
+    ptyLog()("PTY destroying master (file descriptor {}).", _masterFd);
     detail::saveClose(&_masterFd);
 }
 
@@ -307,7 +307,7 @@ PtyMasterHandle UnixPty::handle() const noexcept
 
 void UnixPty::close()
 {
-    PtyLog()("PTY closing master (file descriptor {}).", _masterFd);
+    ptyLog()("PTY closing master (file descriptor {}).", _masterFd);
     detail::saveClose(&_masterFd);
     wakeupReader();
 }
@@ -328,18 +328,18 @@ optional<string_view> UnixPty::readSome(int fd, char* target, size_t n) noexcept
     if (rv < 0)
     {
         if (errno != EAGAIN && errno != EINTR)
-            errorlog()("{} read failed: {}", fd == _masterFd ? "master" : "stdout-fastpipe", strerror(errno));
+            errorLog()("{} read failed: {}", fd == _masterFd ? "master" : "stdout-fastpipe", strerror(errno));
         return nullopt;
     }
 
-    if (PtyInLog)
-        PtyInLog()("{} received: \"{}\"",
+    if (ptyInLog)
+        ptyInLog()("{} received: \"{}\"",
                    fd == _masterFd ? "master" : "stdout-fastpipe",
                    crispy::escape(target, target + rv));
 
     if (rv == 0 && fd == _stdoutFastPipe.reader())
     {
-        PtyInLog()("Closing stdout-fastpipe.");
+        ptyInLog()("Closing stdout-fastpipe.");
         _stdoutFastPipe.closeReader();
         errno = EAGAIN;
         return nullopt;
@@ -354,7 +354,7 @@ Pty::ReadResult UnixPty::read(crispy::buffer_object<char>& storage,
 {
     if (auto const fd = _readSelector.wait_one(timeout); fd.has_value())
     {
-        auto const _l = scoped_lock { storage };
+        auto const l = scoped_lock { storage };
         if (auto x = readSome(*fd, storage.hotEnd(), min(size, storage.bytesAvailable())))
             return { tuple { x.value(), *fd == _stdoutFastPipe.reader() } };
     }
@@ -368,17 +368,17 @@ int UnixPty::write(std::string_view data)
     auto const size = data.size();
 
     ssize_t rv = ::write(_masterFd, buf, size);
-    if (PtyOutLog)
+    if (ptyOutLog)
     {
         if (rv >= 0)
-            PtyOutLog()("Sending bytes: \"{}\"", crispy::escape(buf, buf + rv));
+            ptyOutLog()("Sending bytes: \"{}\"", crispy::escape(buf, buf + rv));
 
         if (rv < 0)
             // errorlog()("PTY write failed: {}", strerror(errno));
-            PtyOutLog()("PTY write of {} bytes failed. {}\n", size, strerror(errno));
+            ptyOutLog()("PTY write of {} bytes failed. {}\n", size, strerror(errno));
         else if (0 <= rv && static_cast<size_t>(rv) < size)
             // clang-format off
-            PtyOutLog()("Partial write. {} bytes written and {} bytes left.",
+            ptyOutLog()("Partial write. {} bytes written and {} bytes left.",
                         rv,
                         size - static_cast<size_t>(rv));
         // clang-format on
@@ -391,8 +391,8 @@ int UnixPty::write(std::string_view data)
         detail::setFileBlocking(_masterFd, false);
         if (rv2 >= 0)
         {
-            if (PtyOutLog)
-                PtyOutLog()("Sending bytes: \"{}\"", crispy::escape(buf + rv, buf + rv + rv2));
+            if (ptyOutLog)
+                ptyOutLog()("Sending bytes: \"{}\"", crispy::escape(buf + rv, buf + rv + rv2));
             return static_cast<int>(rv + rv2);
         }
     }

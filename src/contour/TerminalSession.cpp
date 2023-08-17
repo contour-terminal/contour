@@ -820,7 +820,7 @@ bool TerminalSession::operator()(actions::CopySelection copySelection)
             // TODO: Construct VT escape sequences.
         case actions::CopyFormat::PNG:
             // TODO: Copy to clipboard as rendered PNG for the selected area.
-            errorlog()("CopySelection format {} is not yet supported.", copySelection.format);
+            errorLog()("CopySelection format {} is not yet supported.", copySelection.format);
             return false;
     }
     return true;
@@ -925,7 +925,7 @@ bool TerminalSession::operator()(actions::NoSearchHighlight)
 bool TerminalSession::operator()(actions::OpenConfiguration)
 {
     if (!QDesktopServices::openUrl(QUrl(QString::fromUtf8(config_.backingFilePath.string().c_str()))))
-        errorlog()("Could not open configuration file \"{}\".", config_.backingFilePath.generic_string());
+        errorLog()("Could not open configuration file \"{}\".", config_.backingFilePath.generic_string());
 
     return true;
 }
@@ -935,7 +935,7 @@ bool TerminalSession::operator()(actions::OpenFileManager)
     auto const _l = scoped_lock { terminal() };
     auto const& cwd = terminal().currentWorkingDirectory();
     if (!QDesktopServices::openUrl(QUrl(QString::fromUtf8(cwd.c_str()))))
-        errorlog()("Could not open file \"{}\".", cwd);
+        errorLog()("Could not open file \"{}\".", cwd);
 
     return true;
 }
@@ -1399,19 +1399,19 @@ bool TerminalSession::reloadConfigWithProfile(string const& _profileName)
     catch (exception const& e)
     {
         // TODO: logger_.error(e.what());
-        errorlog()("Configuration failure. {}", unhandledExceptionMessage(__PRETTY_FUNCTION__, e));
+        errorLog()("Configuration failure. {}", unhandledExceptionMessage(__PRETTY_FUNCTION__, e));
         ++configFailures;
     }
 
     if (!newConfig.profile(_profileName))
     {
-        errorlog()(fmt::format("Currently active profile with name '{}' gone.", _profileName));
+        errorLog()(fmt::format("Currently active profile with name '{}' gone.", _profileName));
         ++configFailures;
     }
 
     if (configFailures)
     {
-        errorlog()("Failed to load configuration.");
+        errorLog()("Failed to load configuration.");
         return false;
     }
 
@@ -1423,7 +1423,7 @@ bool TerminalSession::resetConfig()
     auto const ec = config::createDefaultConfig(config_.backingFilePath);
     if (ec)
     {
-        errorlog()("Failed to load default config at {}; ({}) {}",
+        errorLog()("Failed to load default config at {}; ({}) {}",
                    config_.backingFilePath.string(),
                    ec.category().name(),
                    ec.message());

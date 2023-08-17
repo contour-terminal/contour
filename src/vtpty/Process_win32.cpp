@@ -221,7 +221,7 @@ void Process::start()
     auto const cwd = _d->cwd.generic_string();
     auto const cwdPtr = !cwd.empty() ? cwd.c_str() : nullptr;
 
-    PtyLog()("Creating process for command line: {}", cmd);
+    ptyLog()("Creating process for command line: {}", cmd);
 
     BOOL success = CreateProcess(nullptr,                        // No module name - use Command Line
                                  const_cast<LPSTR>(cmd.c_str()), // Command Line
@@ -255,7 +255,7 @@ void Process::start()
 
     _d->exitWatcher = std::thread([this]() {
         (void) wait();
-        PtyLog()("Process terminated with exit code {}.", checkStatus().value());
+        ptyLog()("Process terminated with exit code {}.", checkStatus().value());
         _d->pty->close();
     });
 }

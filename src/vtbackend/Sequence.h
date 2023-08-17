@@ -307,7 +307,7 @@ class Sequence
     {
         if (parameterIndex < _parameters.count())
         {
-            if constexpr (crispy::is_boxed<T>)
+            if constexpr (crispy::IsBoxed<T>)
                 return { T::cast_from(_parameters.at(parameterIndex)) };
             else
                 return { static_cast<T>(_parameters.at(parameterIndex)) };
@@ -326,7 +326,7 @@ class Sequence
     [[nodiscard]] T param(size_t parameterIndex) const noexcept
     {
         assert(parameterIndex < _parameters.count());
-        if constexpr (crispy::is_boxed<T>)
+        if constexpr (crispy::IsBoxed<T>)
             return T::cast_from(_parameters.at(parameterIndex));
         else
             return static_cast<T>(_parameters.at(parameterIndex));
@@ -347,7 +347,7 @@ class Sequence
     [[nodiscard]] bool containsParameter(T value) const noexcept
     {
         for (size_t i = 0; i < parameterCount(); ++i)
-            if constexpr (crispy::is_boxed<T>)
+            if constexpr (crispy::IsBoxed<T>)
             {
                 if (T::cast_from(_parameters.at(i)) == value)
                     return true;

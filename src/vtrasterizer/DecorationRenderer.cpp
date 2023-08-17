@@ -151,9 +151,9 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             // TODO (default to Underline for now)
             [[fallthrough]];
         case Decorator::Underline: {
-            auto const thickness_half = max(1u, unsigned(ceil(underlineThickness() / 2.0)));
-            auto const thickness = thickness_half * 2;
-            auto const y0 = max(0, (underlinePosition() - static_cast<int>(thickness_half)));
+            auto const thicknessHalf = max(1u, unsigned(ceil(underlineThickness() / 2.0)));
+            auto const thickness = thicknessHalf * 2;
+            auto const y0 = max(0, (underlinePosition() - static_cast<int>(thicknessHalf)));
             auto const height = Height(y0 + thickness);
             auto const imageSize = ImageSize { width, height };
             return create(imageSize, [&]() -> atlas::Buffer {
@@ -193,7 +193,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             auto const imageSize = ImageSize { width, height };
             auto block = blockElement(imageSize);
             return create(block.downsampledSize, [&]() -> atlas::Buffer {
-                auto const thickness_half = max(1, int(ceil(underlineThickness() / 2.0)));
+                auto const thicknessHalf = max(1, int(ceil(underlineThickness() / 2.0)));
                 for (int x = 0; x < unbox<int>(width); ++x)
                 {
                     // Using Wu's antialiasing algorithm to paint the curved line.
@@ -204,8 +204,8 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
                     auto const intensity = static_cast<uint8_t>(255 * fabs(y - y1));
                     // block.paintOver(x, yBase + y1, 255 - intensity);
                     // block.paintOver(x, yBase + y2, intensity);
-                    block.paintOverThick(x, yBase + y1, uint8_t(255 - intensity), thickness_half, 0);
-                    block.paintOverThick(x, yBase + y2, intensity, thickness_half, 0);
+                    block.paintOverThick(x, yBase + y1, uint8_t(255 - intensity), thicknessHalf, 0);
+                    block.paintOverThick(x, yBase + y2, intensity, thicknessHalf, 0);
                 }
                 return block.take();
             });
@@ -233,9 +233,9 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
         case Decorator::DashedUnderline: {
             // Devides a grid cell's underline in three sub-ranges and only renders first and third one,
             // whereas the middle one is being skipped.
-            auto const thickness_half = max(1u, unsigned(ceil(underlineThickness() / 2.0)));
-            auto const thickness = max(1u, thickness_half * 2);
-            auto const y0 = max(0, underlinePosition() - static_cast<int>(thickness_half));
+            auto const thicknessHalf = max(1u, unsigned(ceil(underlineThickness() / 2.0)));
+            auto const thickness = max(1u, thicknessHalf * 2);
+            auto const y0 = max(0, underlinePosition() - static_cast<int>(thicknessHalf));
             auto const height = Height(y0 + thickness);
             auto const imageSize = ImageSize { width, height };
             return create(imageSize, [&]() -> atlas::Buffer {
