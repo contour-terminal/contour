@@ -113,6 +113,7 @@
           <li>Clear search term when switch to insert vi mode (#1135)</li>
           <li>Delete dpi_scale entry in configuration (#1137)</li>
           <li>Fixes `show_title_bar` config option (#1153)</li>
+          <li>Adds config option `profile.*.bell` to adjust BEL behavior and fixes (#1162) and (#1163).</li>
         </ul>
       </description>
     </release>

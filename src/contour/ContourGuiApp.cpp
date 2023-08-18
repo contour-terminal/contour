@@ -389,6 +389,19 @@ int ContourGuiApp::terminalGuiAction()
     // Spawn initial window.
     newWindow();
 
+    if (auto const& bell = config().profile().bell; bell == "off")
+    {
+        if (auto* bellAudioOutput = qmlEngine_->rootObjects().first()->findChild<QObject*>("BellAudioOutput");
+            bellAudioOutput)
+            bellAudioOutput->setProperty("muted", true);
+    }
+    else if (bell != "default")
+    {
+        QUrl const path(bell.c_str());
+        if (auto* bellObject = qmlEngine_->rootObjects().first()->findChild<QObject*>("Bell"); bellObject)
+            bellObject->setProperty("source", path);
+    }
+
     auto rv = app.exec();
 
     if (_exitStatus.has_value())
