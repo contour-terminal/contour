@@ -2061,7 +2061,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
         auto const& defaultProfileNode = profiles[_config.defaultProfileName];
         if (!defaultProfileNode)
         {
-            errorlog()("default_profile \"{}\" not found in profiles list."
+            errorLog()("default_profile \"{}\" not found in profiles list."
                        " Using the first available profile",
                        escape(_config.defaultProfileName));
 
