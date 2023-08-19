@@ -14,12 +14,13 @@
 #pragma once
 
 #include <crispy/LRUCache.h>
-#include <crispy/boxed.h>
 
 #include <list>
 #include <memory>
 #include <string>
 #include <unordered_map>
+
+#include <boxed-cpp/boxed.hpp>
 
 namespace terminal
 {
@@ -79,7 +80,7 @@ namespace detail
     {
     };
 } // namespace detail
-using HyperlinkId = crispy::boxed<uint16_t, detail::HyperlinkTag>;
+using HyperlinkId = boxed::boxed<uint16_t, detail::HyperlinkTag>;
 
 bool is_local(HyperlinkInfo const& hyperlink);
 

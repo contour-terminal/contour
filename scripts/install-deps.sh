@@ -108,6 +108,16 @@ fetch_and_unpack_termbenchpro()
         termbench_pro
 }
 
+fetch_and_unpack_boxed()
+{
+    local boxed_cpp_git_sha="daa702e22e71f3da3eef838e4946b6c3df1f16b1"
+    fetch_and_unpack \
+        boxed-cpp-$boxed_cpp_git_sha \
+        boxed-cpp-$boxed_cpp_git_sha.tar.gz \
+        https://github.com/contour-terminal/boxed-cpp/archive/$boxed_cpp_git_sha.tar.gz \
+        boxed_cpp
+}
+
 fetch_and_unpack_libunicode()
 {
     if test x$LIBUNICODE_SRC_DIR = x; then
@@ -561,6 +571,7 @@ main()
             ;;
     esac
 
+    fetch_and_unpack_boxed
     fetch_and_unpack_termbenchpro
 }
 

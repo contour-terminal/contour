@@ -1,7 +1,8 @@
 #pragma once
 
 #include <crispy/ImageSize.h>
-#include <crispy/boxed.h>
+
+#include <boxed-cpp/boxed.hpp>
 
 namespace terminal
 {
@@ -17,10 +18,10 @@ namespace detail::tags
 } // namespace detail::tags
 
 /// ColumnCount simply represents a number of columns.
-using ColumnCount = crispy::boxed<int, detail::tags::ColumnCount>;
+using ColumnCount = boxed::boxed<int, detail::tags::ColumnCount>;
 
 /// LineCount represents a number of lines.
-using LineCount = crispy::boxed<int, detail::tags::LineCount>;
+using LineCount = boxed::boxed<int, detail::tags::LineCount>;
 
 struct PageSize
 {
@@ -58,7 +59,7 @@ constexpr crispy::image_size operator*(crispy::image_size a, PageSize b) noexcep
 
 constexpr crispy::image_size operator/(crispy::image_size a, PageSize s) noexcept
 {
-    return { crispy::width::cast_from(unbox<unsigned>(a.width) / unbox<unsigned>(s.columns)),
-             crispy::height::cast_from(unbox<unsigned>(a.height) / unbox<unsigned>(s.lines)) };
+    return { crispy::width::cast_from(unbox(a.width) / unbox(s.columns)),
+             crispy::height::cast_from(unbox(a.height) / unbox(s.lines)) };
 }
 } // namespace terminal

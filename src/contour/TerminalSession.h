@@ -150,11 +150,11 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     QString title() const { return QString::fromStdString(terminal().windowTitle()); }
     void setTitle(QString const& value) { terminal().setWindowTitle(value.toStdString()); }
 
-    int pageLineCount() const noexcept { return unbox<int>(terminal_.pageSize().lines); }
+    int pageLineCount() const noexcept { return unbox(terminal_.pageSize().lines); }
 
-    int historyLineCount() const noexcept { return unbox<int>(terminal_.currentScreen().historyLineCount()); }
+    int historyLineCount() const noexcept { return unbox(terminal_.currentScreen().historyLineCount()); }
 
-    int scrollOffset() const noexcept { return unbox<int>(terminal().viewport().scrollOffset()); }
+    int scrollOffset() const noexcept { return unbox(terminal().viewport().scrollOffset()); }
     void setScrollOffset(int value)
     {
         terminal().viewport().scrollTo(terminal::ScrollOffset::cast_from(value));
@@ -162,7 +162,7 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
 
     void onScrollOffsetChanged(terminal::ScrollOffset value) override
     {
-        emit scrollOffsetChanged(unbox<int>(value));
+        emit scrollOffsetChanged(unbox(value));
     }
     // }}}
 

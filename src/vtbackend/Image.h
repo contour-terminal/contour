@@ -45,7 +45,7 @@ enum class ImageFormat
 
 // clang-format off
 namespace detail { struct ImageId {}; }
-using ImageId = crispy::boxed<uint32_t, detail::ImageId>; // unique numerical image identifier
+using ImageId = boxed::boxed<uint32_t, detail::ImageId>; // unique numerical image identifier
 // clang-format on
 
 struct ImageStats
@@ -216,7 +216,7 @@ namespace detail
 {
     struct ImageFragmentId;
 }
-using ImageFragmentId = crispy::boxed<uint16_t, detail::ImageFragmentId>;
+using ImageFragmentId = boxed::boxed<uint16_t, detail::ImageFragmentId>;
 
 inline bool operator==(ImageFragment const& a, ImageFragment const& b) noexcept
 {

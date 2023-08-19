@@ -159,7 +159,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(imageSize.area(), 0);
                 for (unsigned y = 1; y <= thickness; ++y)
-                    for (unsigned x = 0; x < unbox<unsigned>(width); ++x)
+                    for (unsigned x = 0; x < unbox(width); ++x)
                         image[(*height - y0 - y) * *width + x] = 0xFF;
                 return image;
             });
@@ -175,7 +175,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
                 auto image = atlas::Buffer(imageSize.area(), 0);
                 for (unsigned y = 1; y <= thickness; ++y)
                 {
-                    for (unsigned x = 0; x < unbox<unsigned>(width); ++x)
+                    for (unsigned x = 0; x < unbox(width); ++x)
                     {
                         image[(*height - y1 - y) * *width + x] = 0xFF; // top line
                         image[(*height - y0 - y) * *width + x] = 0xFF; // bottom line
@@ -216,7 +216,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             auto const height = Height::cast_from((unsigned) _gridMetrics.underline.position + dotHeight);
             auto const y0 = (unsigned) _gridMetrics.underline.position - dotHeight;
             auto const x0 = 0u;
-            auto const x1 = unbox<unsigned>(width) / 2;
+            auto const x1 = unbox(width) / 2;
             auto block = blockElement(ImageSize { width, height });
             return create(block.downsampledSize, [&]() -> atlas::Buffer {
                 for (unsigned y = 0; y < dotHeight; ++y)
@@ -241,7 +241,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
                 for (unsigned y = 1; y <= thickness; ++y)
-                    for (unsigned x = 0; x < unbox<unsigned>(width); ++x)
+                    for (unsigned x = 0; x < unbox(width); ++x)
                         if (fabsf(float(x) / float(*width) - 0.5f) >= 0.25f)
                             image[(*height - y0 - y) * *width + x] = 0xFF;
                 return image;
@@ -256,14 +256,14 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
                 auto const gap = 0; // thickness;
                 // Draws the top and bottom horizontal lines
                 for (unsigned y = gap; y < thickness + gap; ++y)
-                    for (unsigned x = gap; x < unbox<unsigned>(width) - gap; ++x)
+                    for (unsigned x = gap; x < unbox(width) - gap; ++x)
                     {
                         image[y * *width + x] = 0xFF;
                         image[(*cellHeight - 1 - y) * *width + x] = 0xFF;
                     }
 
                 // Draws the left and right vertical lines
-                for (unsigned y = gap; y < unbox<unsigned>(cellHeight) - gap; y++)
+                for (unsigned y = gap; y < unbox(cellHeight) - gap; y++)
                     for (unsigned x = gap; x < thickness + gap; ++x)
                     {
                         image[y * *width + x] = 0xFF;
@@ -279,7 +279,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(cellHeight), 0);
                 for (unsigned y = 0; y < thickness; ++y)
-                    for (unsigned x = 0; x < unbox<unsigned>(width); ++x)
+                    for (unsigned x = 0; x < unbox(width); ++x)
                         image[y * *width + x] = 0xFF;
                 return image;
             });
@@ -291,7 +291,7 @@ auto DecorationRenderer::createTileData(Decorator decoration, atlas::TileLocatio
             return create(imageSize, [&]() -> atlas::Buffer {
                 auto image = atlas::Buffer(unbox<size_t>(width) * unbox<size_t>(height), 0);
                 for (unsigned y = 1; y <= thickness; ++y)
-                    for (unsigned x = 0; x < unbox<unsigned>(width); ++x)
+                    for (unsigned x = 0; x < unbox(width); ++x)
                         image[y * *width + x] = 0xFF;
                 return image;
             });
@@ -312,7 +312,7 @@ void DecorationRenderer::renderDecoration(Decorator decoration,
         auto const tileLocation = _textureAtlas->tileLocation(tileIndex);
         TextureAtlas::TileCreateData tileData = createTileData(decoration, tileLocation);
         AtlasTileAttributes const& tileAttributes = _textureAtlas->directMapped(tileIndex);
-        renderTile({ pos.x + unbox<int>(i) * unbox<int>(_gridMetrics.cellSize.width) },
+        renderTile({ pos.x + unbox(i) * unbox<int>(_gridMetrics.cellSize.width) },
                    { pos.y - unbox<int>(tileAttributes.bitmapSize.height) },
                    color,
                    tileAttributes);

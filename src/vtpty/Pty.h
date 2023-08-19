@@ -17,12 +17,13 @@
 
 #include <crispy/BufferObject.h>
 #include <crispy/ImageSize.h>
-#include <crispy/boxed.h>
 #include <crispy/logstore.h>
 
 #include <chrono>
 #include <optional>
 #include <string_view>
+
+#include <boxed-cpp/boxed.hpp>
 
 namespace terminal
 {
@@ -35,8 +36,8 @@ namespace detail
     // clang-format on
 } // namespace detail
 
-using PtyMasterHandle = crispy::boxed<std::uintptr_t, detail::PtyMasterHandle>;
-using PtySlaveHandle = crispy::boxed<std::uintptr_t, detail::PtySlaveHandle>;
+using PtyMasterHandle = boxed::boxed<std::uintptr_t, detail::PtyMasterHandle>;
+using PtySlaveHandle = boxed::boxed<std::uintptr_t, detail::PtySlaveHandle>;
 using PtyHandle = std::uintptr_t;
 
 class PtySlave

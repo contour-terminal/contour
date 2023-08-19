@@ -1120,9 +1120,9 @@ void TerminalWidget::resizeWindow(terminal::Width _width, terminal::Height _heig
     const_cast<config::TerminalProfile&>(profile()).terminalSize = requestedPageSize;
     renderer_->setPageSize(requestedPageSize);
     auto const pixels =
-        terminal::ImageSize { terminal::Width::cast_from(unbox<int>(requestedPageSize.columns)
+        terminal::ImageSize { terminal::Width::cast_from(unbox(requestedPageSize.columns)
                                                          * unbox<int>(gridMetrics().cellSize.width)),
-                              terminal::Height::cast_from(unbox<int>(requestedPageSize.lines)
+                              terminal::Height::cast_from(unbox(requestedPageSize.lines)
                                                           * unbox<int>(gridMetrics().cellSize.height)) };
     terminal().resizeScreen(requestedPageSize, pixels);
 }

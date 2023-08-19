@@ -58,7 +58,7 @@ class Viewport
     {
         auto const a = -_scrollOffset.as<int>();
         auto const b = line.as<int>();
-        auto const c = unbox<int>(screenLineCount()) - _scrollOffset.as<int>();
+        auto const c = unbox(screenLineCount()) - _scrollOffset.as<int>();
         return a <= b && b < c;
     }
 

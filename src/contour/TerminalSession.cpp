@@ -277,7 +277,7 @@ void TerminalSession::screenUpdated()
     if (lastHistoryLineCount_ != terminal_.currentScreen().historyLineCount())
     {
         lastHistoryLineCount_ = terminal_.currentScreen().historyLineCount();
-        emit historyLineCountChanged(unbox<int>(lastHistoryLineCount_));
+        emit historyLineCountChanged(unbox(lastHistoryLineCount_));
     }
 
     scheduleRedraw();

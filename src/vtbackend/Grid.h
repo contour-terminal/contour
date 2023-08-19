@@ -400,8 +400,8 @@ struct LogicalLines
             current.top = LineOffset::cast_from(next);
             current.lines.clear();
             do
-                current.lines.emplace_back(lines.get()[unbox<int>(next++)]);
-            while (next <= bottom && lines.get()[unbox<int>(next)].wrapped());
+                current.lines.emplace_back(lines.get()[unbox(next++)]);
+            while (next <= bottom && lines.get()[unbox(next)].wrapped());
 
             current.bottom = LineOffset::cast_from(next - 1);
 
@@ -420,7 +420,7 @@ struct LogicalLines
             auto const bottomMost = next - 1;
             do
                 --next;
-            while (lines.get()[unbox<int>(next)].wrapped());
+            while (lines.get()[unbox(next)].wrapped());
             auto const topMost = next;
 
             current.top = topMost;
@@ -428,7 +428,7 @@ struct LogicalLines
 
             current.lines.clear();
             for (auto i = topMost; i <= bottomMost; ++i)
-                current.lines.emplace_back(lines.get()[unbox<int>(i)]);
+                current.lines.emplace_back(lines.get()[unbox(i)]);
 
             return *this;
         }
@@ -495,13 +495,13 @@ struct ReverseLogicalLines
                 return *this;
             }
 
-            Require(!lines.get()[unbox<int>(next)].wrapped());
+            Require(!lines.get()[unbox(next)].wrapped());
 
             current.top = LineOffset::cast_from(next);
             current.lines.clear();
             do
-                current.lines.emplace_back(lines.get()[unbox<int>(next++)]);
-            while (next <= bottom && lines.get()[unbox<int>(next)].wrapped());
+                current.lines.emplace_back(lines.get()[unbox(next++)]);
+            while (next <= bottom && lines.get()[unbox(next)].wrapped());
 
             current.bottom = LineOffset::cast_from(next - 1);
 
@@ -518,7 +518,7 @@ struct ReverseLogicalLines
             }
 
             auto const bottomMost = next;
-            while (lines.get()[unbox<int>(next)].wrapped())
+            while (lines.get()[unbox(next)].wrapped())
                 --next;
             auto const topMost = next;
             --next; // jump to next logical line's bottom line above the current logical one
@@ -528,7 +528,7 @@ struct ReverseLogicalLines
 
             current.lines.clear();
             for (auto i = topMost; i <= bottomMost; ++i)
-                current.lines.emplace_back(lines.get()[unbox<int>(i)]);
+                current.lines.emplace_back(lines.get()[unbox(i)]);
 
             return *this;
         }

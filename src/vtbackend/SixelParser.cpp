@@ -394,30 +394,30 @@ void SixelImageBuilder::clear(RGBAColor fillColor)
 
 RGBAColor SixelImageBuilder::at(CellLocation coord) const noexcept
 {
-    auto const line = unbox<unsigned>(coord.line) % unbox<unsigned>(_size.height);
-    auto const col = unbox<unsigned>(coord.column) % unbox<unsigned>(_size.width);
-    auto const base = line * unbox<unsigned>(_size.width) * 4 + col * 4;
+    auto const line = unbox(coord.line) % unbox(_size.height);
+    auto const col = unbox(coord.column) % unbox(_size.width);
+    auto const base = line * unbox(_size.width) * 4 + col * 4;
     const auto* const color = &_buffer[base];
     return RGBAColor { color[0], color[1], color[2], color[3] };
 }
 
 void SixelImageBuilder::write(CellLocation const& coord, RGBColor const& value) noexcept
 {
-    if (unbox<int>(coord.line) >= 0 && unbox<int>(coord.line) < unbox<int>(_maxSize.height)
-        && unbox<int>(coord.column) >= 0 && unbox<int>(coord.column) < unbox<int>(_maxSize.width))
+    if (unbox(coord.line) >= 0 && unbox(coord.line) < unbox(_maxSize.height) && unbox(coord.column) >= 0
+        && unbox(coord.column) < unbox(_maxSize.width))
     {
         if (!_explicitSize)
         {
-            if (unbox<int>(coord.line) >= unbox<int>(_size.height))
+            if (unbox(coord.line) >= unbox(_size.height))
                 _size.height = Height::cast_from(coord.line.as<unsigned int>() + _aspectRatio);
-            if (unbox<int>(coord.column) >= unbox<int>(_size.width))
+            if (unbox(coord.column) >= unbox(_size.width))
                 _size.width = Width::cast_from(coord.column + 1);
         }
 
         for (unsigned int i = 0; i < _aspectRatio; ++i)
         {
             auto const base = (coord.line.as<unsigned int>() + i)
-                                  * unbox<unsigned int>((_explicitSize ? _size.width : _maxSize.width)) * 4u
+                                  * unbox((_explicitSize ? _size.width : _maxSize.width)) * 4u
                               + unbox<unsigned int>(coord.column) * 4u;
             _buffer[base + 0] = value.red;
             _buffer[base + 1] = value.green;
@@ -446,7 +446,7 @@ void SixelImageBuilder::newline()
 {
     _sixelCursor.column = {};
     if (unbox<unsigned int>(_sixelCursor.line) + _sixelBandHeight
-        < unbox<unsigned int>(_explicitSize ? _size.height : _maxSize.height))
+        < unbox(_explicitSize ? _size.height : _maxSize.height))
         _sixelCursor.line = LineOffset::cast_from(_sixelCursor.line.as<unsigned int>() + _sixelBandHeight);
 }
 
@@ -470,7 +470,7 @@ void SixelImageBuilder::render(int8_t sixel)
 {
     // TODO: respect aspect ratio!
     auto const x = _sixelCursor.column;
-    if (unbox<int>(x) < unbox<int>((_explicitSize ? _size.width : _maxSize.width)))
+    if (unbox(x) < unbox((_explicitSize ? _size.width : _maxSize.width)))
     {
         for (unsigned int i = 0; i < 6; ++i)
         {
@@ -487,7 +487,7 @@ void SixelImageBuilder::render(int8_t sixel)
 
 void SixelImageBuilder::finalize()
 {
-    if (unbox<int>(_size.height) == 1)
+    if (unbox(_size.height) == 1)
     {
         _size.height = Height::cast_from(_sixelCursor.line.as<unsigned int>() * _aspectRatio);
         _buffer.resize(_size.area() * 4);
@@ -496,9 +496,9 @@ void SixelImageBuilder::finalize()
     if (!_explicitSize)
     {
         Buffer tempBuffer(static_cast<size_t>(_size.height.value * _size.width.value) * 4);
-        for (auto i = 0; i < unbox<int>(_size.height); ++i)
+        for (auto i = 0; i < unbox(_size.height); ++i)
         {
-            for (auto j = 0; j < unbox<int>(_size.width); ++j)
+            for (auto j = 0; j < unbox(_size.width); ++j)
             {
                 std::copy_n(_buffer.begin() + i * unbox<long>(_maxSize.width) * 4,
                             _size.width.value * 4,

@@ -19,12 +19,13 @@
 #include <crispy/StrongHash.h>
 #include <crispy/StrongLRUHashtable.h>
 #include <crispy/assert.h>
-#include <crispy/boxed.h>
 
 #include <fmt/format.h>
 
 #include <variant> // monostate
 #include <vector>
+
+#include <boxed-cpp/boxed.hpp>
 
 namespace terminal::rasterizer::atlas
 {
@@ -418,24 +419,24 @@ constexpr auto sliced(Width tileWidth, uint32_t offsetX, ImageSize bitmapSize)
             {
                 value.sliceIndex++;
                 value.beginX = value.endX;
-                value.endX += unbox<uint32_t>(tileWidth);
+                value.endX += unbox(tileWidth);
                 return *this;
             }
         };
 
         [[nodiscard]] constexpr uint32_t offsetForEndX() const noexcept
         {
-            auto const c = unbox<uint32_t>(bitmapSize.width) % unbox<uint32_t>(tileWidth);
-            return unbox<uint32_t>(bitmapSize.width) + c;
+            auto const c = unbox(bitmapSize.width) % unbox(tileWidth);
+            return unbox(bitmapSize.width) + c;
         }
 
         [[nodiscard]] constexpr iterator begin() noexcept
         {
             return iterator { tileWidth,
                               TileSliceIndex {
-                                  0,                         // index
-                                  offsetX,                   // begin
-                                  unbox<uint32_t>(tileWidth) // end
+                                  0,               // index
+                                  offsetX,         // begin
+                                  unbox(tileWidth) // end
                               } };
         }
 
@@ -464,9 +465,9 @@ inline ImageSize computeAtlasSize(AtlasProperties const& atlasProperties) noexce
     //auto const totalTileCount = atlasProperties.tileCount.value + atlasProperties.directMappingCount;
     auto const squareEdgeCount = static_cast<uint32_t>(ceil(sqrt(totalTileCount)));
     auto const width = Width::cast_from(crispy::nextPowerOfTwo(static_cast<uint32_t>(
-        squareEdgeCount * unbox<uint32_t>(atlasProperties.tileSize.width))));
+        squareEdgeCount * unbox(atlasProperties.tileSize.width))));
     auto const height = Height::cast_from(crispy::nextPowerOfTwo(static_cast<uint32_t>(
-        squareEdgeCount * unbox<uint32_t>(atlasProperties.tileSize.height))));
+        squareEdgeCount * unbox(atlasProperties.tileSize.height))));
     // clang-format on
 
     // fmt::print("computeAtlasSize: tiles {}+{}={} -> texture size {}x{} (tile size {})\n",
@@ -486,16 +487,14 @@ TextureAtlas<Metadata>::TextureAtlas(AtlasBackend& backend, AtlasProperties atla
     _atlasProperties { atlasProperties },
     _atlasSize { computeAtlasSize(_atlasProperties) },
     _tilesInX { [&]() {
-        Require(unbox<uint32_t>(_atlasProperties.tileSize.width) != 0);
-        auto const tilesInX =
-            unbox<uint32_t>(_atlasSize.width) / unbox<uint32_t>(_atlasProperties.tileSize.width);
+        Require(unbox(_atlasProperties.tileSize.width) != 0);
+        auto const tilesInX = unbox(_atlasSize.width) / unbox(_atlasProperties.tileSize.width);
         Require(tilesInX != 0);
         return tilesInX;
     }() },
     _tilesInY { [&]() {
-        Require(unbox<uint32_t>(_atlasProperties.tileSize.height) != 0);
-        auto const tilesInY =
-            unbox<uint32_t>(_atlasSize.height) / unbox<uint32_t>(_atlasProperties.tileSize.height);
+        Require(unbox(_atlasProperties.tileSize.height) != 0);
+        auto const tilesInY = unbox(_atlasSize.height) / unbox(_atlasProperties.tileSize.height);
         Require(tilesInY != 0);
         return tilesInY;
     }() },
@@ -534,8 +533,8 @@ TextureAtlas<Metadata>::TextureAtlas(AtlasBackend& backend, AtlasProperties atla
         auto const xBase =
             static_cast<uint16_t>((tileIndex % _tilesInX) * _atlasProperties.tileSize.width.value);
 
-        auto const yBase = static_cast<uint16_t>((tileIndex / _tilesInX)
-                                                 * unbox<uint32_t>(_atlasProperties.tileSize.height));
+        auto const yBase =
+            static_cast<uint16_t>((tileIndex / _tilesInX) * unbox(_atlasProperties.tileSize.height));
 
         _tileLocations[tileIndex] = TileLocation({ xBase }, { yBase });
     }

@@ -396,7 +396,7 @@ LineCount Grid<Cell>::scrollUp(LineCount linesCountToScrollUp, GraphicsAttribute
     auto const linesAvailable = LineCount::cast_from(_lines.size() - unbox<size_t>(_linesUsed));
     if (std::holds_alternative<Infinite>(_historyLimit) && linesAvailable < linesCountToScrollUp)
     {
-        auto const linesToAllocate = unbox<int>(linesCountToScrollUp - linesAvailable);
+        auto const linesToAllocate = unbox(linesCountToScrollUp - linesAvailable);
 
         for ([[maybe_unused]] auto const _: ranges::views::iota(0, linesToAllocate))
         {
@@ -511,7 +511,7 @@ LineCount Grid<Cell>::scrollUp(LineCount n, GraphicsAttributes defaultAttributes
         for (LineOffset line = margin.vertical.to - *n2 + 1; line <= margin.vertical.to; ++line)
         {
             auto a = &useCellAt(line, margin.horizontal.from);
-            auto b = a + unbox<int>(margin.horizontal.length());
+            auto b = a + unbox(margin.horizontal.length());
             while (a != b)
             {
                 a->reset(defaultAttributes);
@@ -619,7 +619,7 @@ void Grid<Cell>::reset()
 {
     _linesUsed = _pageSize.lines;
     _lines.rotate_right(_lines.zero_index());
-    for (int i = 0; i < unbox<int>(_pageSize.lines); ++i)
+    for (int i = 0; i < unbox(_pageSize.lines); ++i)
         _lines[i].reset(defaultLineFlags(), GraphicsAttributes {});
     verifyState();
 }
@@ -1007,7 +1007,7 @@ void Grid<Cell>::appendNewLines(LineCount count, GraphicsAttributes attr)
         // We've reached to history line count limit already.
         // Rotate lines that would fall off down to the bottom again in a clean state.
         // We do save quite some overhead due to avoiding unnecessary memory allocations.
-        for (int i = 0; i < unbox<int>(count); ++i)
+        for (int i = 0; i < unbox(count); ++i)
         {
             auto line = std::move(_lines.front());
             _lines.pop_front();
@@ -1039,7 +1039,7 @@ std::ostream& dumpGrid(std::ostream& os, Grid<Cell> const& grid)
         grid.zero_index());
 
     for (int const lineOffset:
-         ranges::views::iota(-unbox<int>(grid.historyLineCount()), unbox<int>(grid.pageSize().lines)))
+         ranges::views::iota(-unbox(grid.historyLineCount()), unbox(grid.pageSize().lines)))
     {
         terminal::Line<Cell> const& lineAttribs = grid.lineAt(LineOffset(lineOffset));
 

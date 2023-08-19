@@ -138,8 +138,8 @@ namespace detail
             GapFills gaps;
             gaps.resize(unbox<size_t>(imageSize.height));
 
-            auto const w = unbox<unsigned>(imageSize.width);
-            auto const h = unbox<unsigned>(imageSize.height);
+            auto const w = unbox(imageSize.width);
+            auto const h = unbox(imageSize.height);
 
             // fmt::print("{}.drawArc: size={}\n", arc, imageSize);
             auto const putpixel = [&](int x, int y, uint8_t alpha = 0xFFu) {
@@ -720,12 +720,12 @@ namespace detail
                 return inverted == Inverted::No ? pair { 0xFF, 0 } : pair { 0, 0xFF };
             }();
 
-            auto const w = unbox<unsigned>(pixmap.size.width);
-            auto const h = unbox<unsigned>(pixmap.size.height) - 1;
+            auto const w = unbox(pixmap.size.width);
+            auto const h = unbox(pixmap.size.height) - 1;
 
-            for (auto const y: ranges::views::iota(0u, unbox<unsigned>(pixmap.size.height)))
+            for (auto const y: ranges::views::iota(0u, unbox(pixmap.size.height)))
             {
-                for (auto const x: ranges::views::iota(0u, unbox<unsigned>(pixmap.size.width)))
+                for (auto const x: ranges::views::iota(0u, unbox(pixmap.size.width)))
                 {
                     auto const [a, b] = p(int(x));
                     pixmap.buffer[unsigned(h - y) * w + x] = a <= int(y) && int(y) <= b ? set : unset;
