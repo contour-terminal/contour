@@ -1779,7 +1779,14 @@ namespace
 
         strValue = "default";
         if (tryLoadChildRelative(_usedKeys, _profile, basePath, "bell", strValue, _logger))
-            profile.bell = strValue;
+        {
+            if (!strValue.empty())
+            {
+                if (strValue != "off" && strValue != "default")
+                    strValue = "file:" + strValue;
+                profile.bell = strValue;
+            }
+        }
     }
 
     TerminalProfile loadTerminalProfile(UsedKeys& _usedKeys,
