@@ -1,5 +1,3 @@
-include(FilesystemResolver)
-
 set(AppId "org.contourterminal.Contour")
 
 if(${CMAKE_SYSTEM_NAME} MATCHES "FreeBSD")
@@ -159,10 +157,6 @@ target_link_libraries(contour vtbackend yaml-cpp)
 if(FREEBSD)
     # FreeBSD does not find yaml-cpp in /usr/local but weirdly everything else.
     target_link_directories(contour PUBLIC "/usr/local/lib")
-endif()
-if(Boost_FILESYSTEM_FOUND)
-    target_include_directories(contour PRIVATE ${Boost_INCLUDE_DIRS})
-    target_link_libraries(contour ${Boost_LIBRARIES})
 endif()
 
 if(CONTOUR_FRONTEND_GUI)

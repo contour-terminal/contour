@@ -97,12 +97,6 @@ add_subdirectory(examples)
 # ----------------------------------------------------------------------------
 # Summary
 
-if(${USING_BOOST_FILESYSTEM})
-    set(USING_FILESYSTEM_API_STRING "boost::filesystem")
-else()
-    set(USING_FILESYSTEM_API_STRING "C++fs")
-endif()
-
 if("${CCACHE}" STREQUAL "")
     set(USING_CCACHE_STRING "OFF")
 else()
