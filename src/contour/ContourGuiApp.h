@@ -9,6 +9,7 @@
 
 #include <QtQml/QQmlApplicationEngine>
 
+#include <filesystem>
 #include <list>
 #include <memory>
 #include <optional>
@@ -44,7 +45,7 @@ class ContourGuiApp: public QObject, public ContourApp
 
     std::optional<terminal::Process::ExitStatus> exitStatus() const noexcept { return _exitStatus; }
 
-    std::optional<FileSystem::path> dumpStateAtExit() const;
+    std::optional<std::filesystem::path> dumpStateAtExit() const;
 
     void onExit(TerminalSession& _session);
 

@@ -10,7 +10,6 @@
 #include <vtrasterizer/shared_defines.h>
 
 #include <crispy/size.h>
-#include <crispy/stdfs.h>
 
 #include <array>
 #include <memory>

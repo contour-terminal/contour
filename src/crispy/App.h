@@ -2,8 +2,8 @@
 #pragma once
 
 #include <crispy/CLI.h>
-#include <crispy/stdfs.h>
 
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <optional>
@@ -30,7 +30,7 @@ class app
 
     [[nodiscard]] std::string const& appName() const noexcept { return _appName; }
     [[nodiscard]] std::string const& appVersion() const noexcept { return _appVersion; }
-    [[nodiscard]] FileSystem::path const& localStateDir() const noexcept { return _localStateDir; }
+    [[nodiscard]] std::filesystem::path const& localStateDir() const noexcept { return _localStateDir; }
 
     static void customizeLogStoreOutput();
 
@@ -48,7 +48,7 @@ class app
     std::string _appTitle;
     std::string _appVersion;
     std::string _appLicense;
-    FileSystem::path _localStateDir;
+    std::filesystem::path _localStateDir;
     std::optional<crispy::cli::command> _syntax;
     std::optional<crispy::cli::flag_store> _flags;
     std::map<std::string, std::function<int()>> _handlers;

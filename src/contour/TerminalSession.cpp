@@ -29,6 +29,7 @@
 #include <QtNetwork/QHostInfo>
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 
@@ -49,6 +50,8 @@
 using std::chrono::steady_clock;
 using namespace std;
 using namespace terminal;
+
+namespace fs = std::filesystem;
 
 namespace contour
 {
@@ -1239,7 +1242,7 @@ void TerminalSession::spawnNewTerminal(string const& _profileName)
     else
     {
         SessionLog()("spawning new in-process window");
-        app_.config().profile(profileName_)->shell.workingDirectory = FileSystem::path(wd);
+        app_.config().profile(profileName_)->shell.workingDirectory = fs::path(wd);
         app_.newWindow();
     }
 }

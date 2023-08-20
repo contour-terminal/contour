@@ -12,7 +12,6 @@
 
 #include <crispy/assert.h>
 #include <crispy/escape.h>
-#include <crispy/stdfs.h>
 #include <crispy/utils.h>
 
 #include <fmt/chrono.h>

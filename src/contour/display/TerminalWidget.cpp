@@ -13,7 +13,6 @@
 
 #include <crispy/App.h>
 #include <crispy/logstore.h>
-#include <crispy/stdfs.h>
 #include <crispy/utils.h>
 
 #include <fmt/chrono.h>
@@ -40,11 +39,14 @@
 
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <stdexcept>
 #include <string_view>
 #include <tuple>
 #include <vector>
+
+namespace fs = std::filesystem;
 
 // Temporarily disabled (I think it was OS/X that didn't like glDebugMessageCallback).
 // #define CONTOUR_DEBUG_OPENGL 1
@@ -208,12 +210,12 @@ namespace
     }
 
     // Returns the config file containing the user-configured DPI setting for KDE desktops.
-    [[maybe_unused]] std::optional<FileSystem::path> kcmFontsFilePath()
+    [[maybe_unused]] std::optional<fs::path> kcmFontsFilePath()
     {
 #if !defined(__APPLE__) && !defined(_WIN32)
         auto const xdgConfigHome = config::configHome("");
         auto const kcmFontsFile = xdgConfigHome / "kcmfonts";
-        if (FileSystem::exists(kcmFontsFile))
+        if (fs::exists(kcmFontsFile))
             return { kcmFontsFile };
 #endif
 
@@ -1015,17 +1017,17 @@ void TerminalWidget::doDumpState()
 
     // clang-format off
     auto const targetBaseDir = session_->app().dumpStateAtExit().value_or(crispy::app::instance()->localStateDir() / "dump");
-    auto const workDirName = FileSystem::path(fmt::format("contour-dump-{:%Y-%m-%d-%H-%M-%S}", chrono::system_clock::now()));
+    auto const workDirName = fs::path(fmt::format("contour-dump-{:%Y-%m-%d-%H-%M-%S}", chrono::system_clock::now()));
     auto const targetDir = targetBaseDir / workDirName;
-    auto const latestDirName = FileSystem::path("latest");
+    auto const latestDirName = fs::path("latest");
     // clang-format on
 
-    FileSystem::create_directories(targetDir);
+    fs::create_directories(targetDir);
 
-    if (FileSystem::exists(targetBaseDir / latestDirName))
-        FileSystem::remove(targetBaseDir / latestDirName);
+    if (fs::exists(targetBaseDir / latestDirName))
+        fs::remove(targetBaseDir / latestDirName);
 
-    FileSystem::create_symlink(workDirName, targetBaseDir / latestDirName);
+    fs::create_symlink(workDirName, targetBaseDir / latestDirName);
 
     DisplayLog()("Dumping state into directory: {}", targetDir.generic_string());
 

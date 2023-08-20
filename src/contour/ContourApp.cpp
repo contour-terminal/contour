@@ -134,7 +134,7 @@ ContourApp::ContourApp(): app("contour", "Contour Terminal Emulator", CONTOUR_VE
 
 #if defined(__linux__)
     auto crashLogDirPath = crispy::app::instance()->localStateDir() / "crash";
-    FileSystem::create_directories(crashLogDirPath);
+    std::filesystem::create_directories(crashLogDirPath);
     crashLogDir = crashLogDirPath.string();
     // signal(SIGSEGV, segvHandler);
     signal(SIGABRT, segvHandler);

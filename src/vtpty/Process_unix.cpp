@@ -4,7 +4,6 @@
 #include <vtpty/UnixPty.h>
 
 #include <crispy/overloaded.h>
-#include <crispy/stdfs.h>
 #include <crispy/utils.h>
 
 #include <fmt/format.h>
@@ -14,6 +13,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <numeric>
@@ -45,6 +45,8 @@
 using namespace std;
 using namespace std::string_view_literals;
 using crispy::trimRight;
+
+namespace fs = std::filesystem;
 
 namespace terminal
 {
@@ -87,7 +89,7 @@ struct Process::Private
 {
     string path;
     vector<string> args;
-    FileSystem::path cwd;
+    fs::path cwd;
     Environment env;
     bool escapeSandbox;
 
@@ -101,7 +103,7 @@ struct Process::Private
 
 Process::Process(string const& path,
                  vector<string> const& args,
-                 FileSystem::path const& cwd,
+                 fs::path const& cwd,
                  Environment const& env,
                  bool escapeSandbox,
                  unique_ptr<Pty> pty):
@@ -111,7 +113,7 @@ Process::Process(string const& path,
 
 bool Process::isFlatpak()
 {
-    static bool check = FileSystem::exists("/.flatpak-info");
+    static bool check = fs::exists("/.flatpak-info");
     return check;
 }
 
@@ -344,12 +346,12 @@ vector<string> Process::loginShell(bool escapeSandbox)
         return { "/bin/sh"s };
 }
 
-FileSystem::path Process::homeDirectory()
+fs::path Process::homeDirectory()
 {
     if (passwd const* pw = getpwuid(getuid()); pw != nullptr)
-        return FileSystem::path(pw->pw_dir);
+        return fs::path(pw->pw_dir);
     else
-        return FileSystem::path("/");
+        return fs::path("/");
 }
 
 string Process::workingDirectory() const
@@ -357,8 +359,8 @@ string Process::workingDirectory() const
 #if defined(__linux__)
     try
     {
-        auto const path = FileSystem::path { fmt::format("/proc/{}/cwd", _d->pid) };
-        auto const cwd = FileSystem::read_symlink(path);
+        auto const path = fs::path { fmt::format("/proc/{}/cwd", _d->pid) };
+        auto const cwd = fs::read_symlink(path);
         return cwd.string();
     }
     catch (...)

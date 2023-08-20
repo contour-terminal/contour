@@ -18,6 +18,7 @@
 #include <QtQml/QJSValue>
 
 #include <cstdint>
+#include <filesystem>
 #include <functional>
 #include <thread>
 #include <variant>
@@ -85,7 +86,7 @@ class TerminalSession: public QAbstractItemModel, public terminal::Terminal::Eve
     }
     QString pathToBackground() const
     {
-        if (const auto& p = std::get_if<FileSystem::path>(&(profile().colors.backgroundImage->location)))
+        if (const auto& p = std::get_if<std::filesystem::path>(&(profile().colors.backgroundImage->location)))
         {
             return QString("file:") + QString(p->string().c_str());
         }
