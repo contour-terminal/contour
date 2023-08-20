@@ -5,7 +5,6 @@
 
 #include <crispy/assert.h>
 #include <crispy/overloaded.h>
-#include <crispy/stdfs.h>
 
 #include <fmt/format.h>
 
@@ -14,6 +13,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <numeric>
@@ -26,6 +26,8 @@
 #include <errno.h>
 
 using namespace std;
+
+namespace fs = std::filesystem;
 
 namespace terminal
 {
@@ -143,7 +145,7 @@ struct Process::Private
 {
     string path;
     vector<string> args;
-    FileSystem::path cwd;
+    fs::path cwd;
     Environment env;
     std::unique_ptr<Pty> pty {};
 
@@ -160,7 +162,7 @@ struct Process::Private
 
 Process::Process(string const& path,
                  vector<string> const& args,
-                 FileSystem::path const& cwd,
+                 fs::path const& cwd,
                  Environment const& env,
                  bool escapeSandbox,
                  std::unique_ptr<Pty> pty):
@@ -316,12 +318,12 @@ vector<string> Process::loginShell(bool escapeSandbox)
     return { "powershell.exe"s }; // TODO: Find out what the user's default shell is.
 }
 
-FileSystem::path Process::homeDirectory()
+fs::path Process::homeDirectory()
 {
     if (char const* p = getenv("USERPROFILE"); p && *p)
-        return FileSystem::path(p);
+        return fs::path(p);
 
-    return FileSystem::path("/");
+    return fs::path("/");
 }
 
 string Process::workingDirectory() const

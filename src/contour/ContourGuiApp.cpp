@@ -7,6 +7,7 @@
 
 #include <text_shaper/font_locator.h>
 
+#include <crispy/CLI.h>
 #include <crispy/logstore.h>
 #include <crispy/utils.h>
 
@@ -17,10 +18,9 @@
 #include <QtQml/QQmlContext>
 #include <QtWidgets/QApplication>
 
+#include <filesystem>
 #include <iostream>
 #include <vector>
-
-#include "crispy/CLI.h"
 
 using std::bind;
 using std::cerr;
@@ -35,6 +35,8 @@ using std::vector;
 using terminal::Process;
 
 using namespace std::string_literals;
+
+namespace fs = std::filesystem;
 
 namespace CLI = crispy::cli;
 
@@ -158,12 +160,12 @@ string ContourGuiApp::profileName() const
     return ""s;
 }
 
-std::optional<FileSystem::path> ContourGuiApp::dumpStateAtExit() const
+std::optional<fs::path> ContourGuiApp::dumpStateAtExit() const
 {
     auto const path = parameters().get<std::string>("contour.terminal.dump-state-at-exit");
     if (path.empty())
         return std::nullopt;
-    return FileSystem::path(path);
+    return fs::path(path);
 }
 
 void ContourGuiApp::onExit(TerminalSession& _session)
@@ -177,13 +179,13 @@ void ContourGuiApp::onExit(TerminalSession& _session)
 
 QUrl ContourGuiApp::resolveResource(std::string_view path) const
 {
-    auto const localPath = config::configHome() / FileSystem::path(path.data());
-    if (FileSystem::exists(localPath))
+    auto const localPath = config::configHome() / fs::path(path.data());
+    if (fs::exists(localPath))
         return QUrl::fromLocalFile(QString::fromStdString(localPath.generic_string()));
 
 #if !defined(NDEBUG) && defined(CONTOUR_GUI_SOURCE_DIR)
-    auto const devPath = FileSystem::path(CONTOUR_GUI_SOURCE_DIR) / FileSystem::path(path.data());
-    if (FileSystem::exists(devPath))
+    auto const devPath = fs::path(CONTOUR_GUI_SOURCE_DIR) / fs::path(path.data());
+    if (fs::exists(devPath))
         return QUrl::fromLocalFile(QString::fromStdString(devPath.generic_string()));
 #endif
 
@@ -227,7 +229,7 @@ bool ContourGuiApp::loadConfig(string const& target)
     }
 
     if (auto const wd = flags.get<string>("contour.terminal.working-directory"); !wd.empty())
-        _config.profile(profileName())->shell.workingDirectory = FileSystem::path(wd);
+        _config.profile(profileName())->shell.workingDirectory = fs::path(wd);
 
     config::TerminalProfile* profile = _config.profile(profileName());
     if (!profile)
@@ -414,12 +416,12 @@ void ContourGuiApp::ensureTermInfoFile()
 
     auto const hostTerminfoBaseDirectory =
         Process::homeDirectory() / ".var/app/org.contourterminal.Contour/terminfo/c";
-    if (!FileSystem::is_directory(hostTerminfoBaseDirectory))
-        FileSystem::create_directories(hostTerminfoBaseDirectory);
+    if (!fs::is_directory(hostTerminfoBaseDirectory))
+        fs::create_directories(hostTerminfoBaseDirectory);
 
-    auto const sandboxTerminfoFile = FileSystem::path("/app/share/terminfo/c/contour");
-    if (!FileSystem::is_regular_file(hostTerminfoBaseDirectory / "contour"))
-        FileSystem::copy_file(sandboxTerminfoFile, hostTerminfoBaseDirectory / "contour");
+    auto const sandboxTerminfoFile = fs::path("/app/share/terminfo/c/contour");
+    if (!fs::is_regular_file(hostTerminfoBaseDirectory / "contour"))
+        fs::copy_file(sandboxTerminfoFile, hostTerminfoBaseDirectory / "contour");
 }
 
 void ContourGuiApp::newWindow()

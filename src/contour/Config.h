@@ -21,9 +21,9 @@
 #include <crispy/StrongLRUHashtable.h>
 #include <crispy/assert.h>
 #include <crispy/size.h>
-#include <crispy/stdfs.h>
 
 #include <chrono>
+#include <filesystem>
 #include <optional>
 #include <set>
 #include <string>
@@ -205,7 +205,7 @@ enum class RenderingBackend
 // NB: All strings in here must be UTF8-encoded.
 struct Config
 {
-    FileSystem::path backingFilePath;
+    std::filesystem::path backingFilePath;
 
     bool live = false;
 
@@ -299,17 +299,17 @@ struct Config
     std::set<std::string> experimentalFeatures;
 };
 
-FileSystem::path configHome();
-FileSystem::path configHome(std::string const& _programName);
+std::filesystem::path configHome();
+std::filesystem::path configHome(std::string const& _programName);
 
 std::optional<std::string> readConfigFile(std::string const& _filename);
 
-void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName);
-Config loadConfigFromFile(FileSystem::path const& _fileName);
+void loadConfigFromFile(Config& _config, std::filesystem::path const& _fileName);
+Config loadConfigFromFile(std::filesystem::path const& _fileName);
 Config loadConfig();
 
 std::string defaultConfigString();
-std::error_code createDefaultConfig(FileSystem::path const& _path);
+std::error_code createDefaultConfig(std::filesystem::path const& _path);
 std::string defaultConfigFilePath();
 
 } // namespace contour::config

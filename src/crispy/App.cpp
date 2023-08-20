@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <filesystem>
 #include <iomanip>
 #include <numeric>
 #include <optional>
@@ -36,6 +37,7 @@ using std::chrono::duration_cast;
 using namespace std::string_view_literals;
 
 namespace chrono = std::chrono;
+namespace fs = std::filesystem;
 
 namespace CLI = crispy::cli;
 
@@ -79,20 +81,20 @@ unsigned screenWidth()
     return DefaultWidth;
 }
 
-FileSystem::path xdgStateHome()
+fs::path xdgStateHome()
 {
     if (auto const* p = getenv("XDG_STATE_HOME"); (p != nullptr) && (*p != '\0'))
-        return FileSystem::path(p);
+        return fs::path(p);
 
 #if defined(_WIN32)
     if (auto const* p = getenv("LOCALAPPDATA"); p && *p)
-        return FileSystem::path(p);
+        return fs::path(p);
 #else
     if (passwd const* pw = getpwuid(getuid()); (pw != nullptr) && (pw->pw_dir != nullptr))
-        return FileSystem::path(pw->pw_dir) / ".local" / "state";
+        return fs::path(pw->pw_dir) / ".local" / "state";
 #endif
 
-    return FileSystem::temp_directory_path();
+    return fs::temp_directory_path();
 }
 } // namespace
 
@@ -263,7 +265,7 @@ void app::customizeLogStoreOutput()
         }();
 
 #if 1
-        auto const fileName = FileSystem::path(msg.location().file_name()).filename().string();
+        auto const fileName = fs::path(msg.location().file_name()).filename().string();
 #else
         // fileName with path to file relative to project root
         auto const srcIndex = string_view(msg.location().file_name()).find("src");

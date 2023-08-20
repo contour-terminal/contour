@@ -1,7 +1,6 @@
 #pragma once
 
 #include <crispy/escape.h>
-#include <crispy/stdfs.h>
 
 #include <fmt/format.h>
 
@@ -9,6 +8,7 @@
 #include <range/v3/view/transform.hpp>
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <optional>
@@ -369,9 +369,9 @@ inline std::basic_string<T> toUpper(std::basic_string<T> const& value)
     return toUpper<T>(std::basic_string_view<T>(value));
 }
 
-inline std::string readFileAsString(FileSystem::path const& path)
+inline std::string readFileAsString(std::filesystem::path const& path)
 {
-    auto const fileSize = FileSystem::file_size(path);
+    auto const fileSize = std::filesystem::file_size(path);
     auto text = std::string();
     text.resize(fileSize);
     std::ifstream in(path.string());
@@ -425,16 +425,16 @@ inline std::string replace(std::string_view text, std::string_view pattern, T&& 
     return os.str();
 }
 
-inline FileSystem::path homeResolvedPath(std::string input, const FileSystem::path& homeDirectory)
+inline std::filesystem::path homeResolvedPath(std::string input, const std::filesystem::path& homeDirectory)
 {
     if (!input.empty() && input[0] == '~')
     {
         bool const pathSepFound = input.size() >= 2 && (input[1] == '/' || input[1] == '\\');
         auto subPath = input.substr(pathSepFound ? 2 : 1);
-        return homeDirectory / FileSystem::path(subPath);
+        return homeDirectory / std::filesystem::path(subPath);
     }
 
-    return FileSystem::path(input);
+    return std::filesystem::path(input);
 }
 
 template <typename VariableReplacer>

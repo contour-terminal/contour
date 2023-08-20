@@ -12,7 +12,6 @@
 #include <crispy/escape.h>
 #include <crispy/logstore.h>
 #include <crispy/overloaded.h>
-#include <crispy/stdfs.h>
 #include <crispy/utils.h>
 
 #include <yaml-cpp/node/detail/iterator_fwd.h>
@@ -24,6 +23,7 @@
 
 #include <algorithm>
 #include <array>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <set>
@@ -72,6 +72,8 @@ using contour::actions::Action;
 
 using UsedKeys = set<string>;
 
+namespace fs = std::filesystem;
+
 namespace contour::config
 {
 
@@ -107,7 +109,7 @@ namespace
     {
         auto const resolvedFileName = homeResolvedPath(fileName, Process::homeDirectory());
 
-        if (!FileSystem::exists(resolvedFileName))
+        if (!fs::exists(resolvedFileName))
         {
             errorLog()("Background image path not found: {}", resolvedFileName.string());
             return nullptr;
@@ -220,9 +222,9 @@ namespace
     // - [ ] Do we want to report when no color schemes are defined? (at least warn about?)
     // - [ ] Do we want to report when no input mappings are defined? (at least warn about?)
 
-    vector<FileSystem::path> getTermInfoDirs(optional<FileSystem::path> const& _appTerminfoDir)
+    vector<fs::path> getTermInfoDirs(optional<fs::path> const& _appTerminfoDir)
     {
-        auto locations = vector<FileSystem::path>();
+        auto locations = vector<fs::path>();
 
         if (_appTerminfoDir.has_value())
             locations.emplace_back(_appTerminfoDir.value().string());
@@ -238,7 +240,7 @@ namespace
         return locations;
     }
 
-    string getDefaultTERM(optional<FileSystem::path> const& _appTerminfoDir)
+    string getDefaultTERM(optional<fs::path> const& _appTerminfoDir)
     {
 #if defined(_WIN32)
         return "contour";
@@ -281,9 +283,9 @@ namespace
         return nullopt;
     }
 
-    void createFileIfNotExists(FileSystem::path const& _path)
+    void createFileIfNotExists(fs::path const& _path)
     {
-        if (!FileSystem::is_regular_file(_path))
+        if (!fs::is_regular_file(_path))
             if (auto const ec = createDefaultConfig(_path); ec)
                 throw runtime_error { fmt::format(
                     "Could not create directory {}. {}", _path.parent_path().string(), ec.message()) };
@@ -492,35 +494,34 @@ namespace
         checkForSuperfluousKeys(_root, "", _usedKeys);
     }
 
-    optional<std::string> readFile(FileSystem::path const& _path)
+    optional<std::string> readFile(fs::path const& _path)
     {
-        if (!FileSystem::exists(_path))
+        if (!fs::exists(_path))
             return nullopt;
 
         auto ifs = ifstream(_path.string());
         if (!ifs.good())
             return nullopt;
 
-        auto const size = FileSystem::file_size(_path);
+        auto const size = fs::file_size(_path);
         auto text = string {};
         text.resize(size);
         ifs.read(text.data(), static_cast<std::streamsize>(size));
         return { text };
     }
 
-    std::vector<FileSystem::path> configHomes(string const& _programName)
+    std::vector<fs::path> configHomes(string const& _programName)
     {
-        std::vector<FileSystem::path> paths;
+        std::vector<fs::path> paths;
 
 #if defined(CONTOUR_PROJECT_SOURCE_DIR) && !defined(NDEBUG)
-        paths.emplace_back(FileSystem::path(CONTOUR_PROJECT_SOURCE_DIR) / "src" / "contour" / "display"
-                           / "shaders");
+        paths.emplace_back(fs::path(CONTOUR_PROJECT_SOURCE_DIR) / "src" / "contour" / "display" / "shaders");
 #endif
 
         paths.emplace_back(configHome(_programName));
 
 #if defined(__unix__) || defined(__APPLE__)
-        paths.emplace_back(FileSystem::path("/etc") / _programName);
+        paths.emplace_back(fs::path("/etc") / _programName);
 #endif
 
         return paths;
@@ -1317,7 +1318,7 @@ namespace
             else if (colors.IsScalar())
             {
                 bool found = false;
-                for (FileSystem::path const& prefix: configHomes("contour"))
+                for (fs::path const& prefix: configHomes("contour"))
                 {
                     auto const filePath = prefix / "colorschemes" / (colors.as<string>() + ".yml");
                     auto fileContents = readFile(filePath);
@@ -1385,7 +1386,7 @@ namespace
         std::string strValue;
         tryLoadChildRelative(_usedKeys, _profile, basePath, "initial_working_directory", strValue, _logger);
         if (!strValue.empty())
-            profile.shell.workingDirectory = FileSystem::path(strValue);
+            profile.shell.workingDirectory = fs::path(strValue);
 
         profile.shell.workingDirectory =
             homeResolvedPath(profile.shell.workingDirectory.generic_string(), Process::homeDirectory());
@@ -1395,15 +1396,15 @@ namespace
             fmt::format("{}.{}.{}", CONTOUR_VERSION_MAJOR, CONTOUR_VERSION_MINOR, CONTOUR_VERSION_PATCH);
         profile.shell.env["TERMINAL_VERSION_STRING"] = CONTOUR_VERSION_STRING;
 
-        std::optional<FileSystem::path> appTerminfoDir;
+        std::optional<fs::path> appTerminfoDir;
 #if defined(__APPLE__)
         {
             char buf[1024];
             uint32_t len = sizeof(buf);
             if (_NSGetExecutablePath(buf, &len) == 0)
             {
-                auto p = FileSystem::path(buf).parent_path().parent_path() / "Resources" / "terminfo";
-                if (FileSystem::is_directory(p))
+                auto p = fs::path(buf).parent_path().parent_path() / "Resources" / "terminfo";
+                if (fs::is_directory(p))
                 {
                     appTerminfoDir = p;
                     profile.shell.env["TERMINFO_DIRS"] = p.string();
@@ -1792,13 +1793,13 @@ namespace
 } // namespace
 // }}}
 
-FileSystem::path configHome(string const& _programName)
+fs::path configHome(string const& _programName)
 {
 #if defined(__unix__) || defined(__APPLE__)
     if (auto const* value = getenv("XDG_CONFIG_HOME"); value && *value)
-        return FileSystem::path { value } / _programName;
+        return fs::path { value } / _programName;
     else if (auto const* value = getenv("HOME"); value && *value)
-        return FileSystem::path { value } / ".config" / _programName;
+        return fs::path { value } / ".config" / _programName;
 #endif
 
 #if defined(_WIN32)
@@ -1808,14 +1809,14 @@ FileSystem::path configHome(string const& _programName)
         std::vector<char> buf;
         buf.resize(size);
         GetEnvironmentVariableA("LOCALAPPDATA", &buf[0], size);
-        return FileSystem::path { &buf[0] } / _programName;
+        return fs::path { &buf[0] } / _programName;
     }
 #endif
 
     throw runtime_error { "Could not find config home folder." };
 }
 
-FileSystem::path configHome()
+fs::path configHome()
 {
     return configHome("contour");
 }
@@ -1827,12 +1828,12 @@ std::string defaultConfigString()
     return file.readAll().toStdString();
 }
 
-error_code createDefaultConfig(FileSystem::path const& _path)
+error_code createDefaultConfig(fs::path const& _path)
 {
-    file_system_error ec;
+    std::error_code ec;
     if (!_path.parent_path().empty())
     {
-        FileSystem::create_directories(_path.parent_path(), ec);
+        fs::create_directories(_path.parent_path(), ec);
         if (ec)
             return ec;
     }
@@ -1852,7 +1853,7 @@ Config loadConfig()
     return loadConfigFromFile(defaultConfigFilePath());
 }
 
-Config loadConfigFromFile(FileSystem::path const& _fileName)
+Config loadConfigFromFile(fs::path const& _fileName)
 {
     Config config {};
     loadConfigFromFile(config, _fileName);
@@ -1862,7 +1863,7 @@ Config loadConfigFromFile(FileSystem::path const& _fileName)
 /**
  * @return success or failure of loading the config file.
  */
-void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
+void loadConfigFromFile(Config& _config, fs::path const& _fileName)
 {
     auto logger = errorLog();
     ConfigLog()("Loading configuration from file: {}", _fileName.string());
@@ -2108,7 +2109,7 @@ void loadConfigFromFile(Config& _config, FileSystem::path const& _fileName)
 
 optional<std::string> readConfigFile(std::string const& _filename)
 {
-    for (FileSystem::path const& prefix: configHomes("contour"))
+    for (fs::path const& prefix: configHomes("contour"))
         if (auto text = readFile(prefix / _filename); text.has_value())
             return text;
 

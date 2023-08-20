@@ -5,7 +5,6 @@
 #include <vtbackend/Image.h>
 
 #include <crispy/StrongHash.h>
-#include <crispy/stdfs.h>
 
 #include <fmt/format.h>
 
@@ -13,6 +12,7 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <filesystem>
 #include <initializer_list>
 #include <optional>
 #include <ostream>
@@ -39,7 +39,7 @@ using ImageDataPtr = std::shared_ptr<ImageData const>;
 
 struct BackgroundImage
 {
-    using Location = std::variant<FileSystem::path, ImageDataPtr>;
+    using Location = std::variant<std::filesystem::path, ImageDataPtr>;
 
     Location location;
     crispy::strong_hash hash;

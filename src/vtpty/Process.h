@@ -5,10 +5,10 @@
 
 #include <crispy/BufferObject.h>
 #include <crispy/overloaded.h>
-#include <crispy/stdfs.h>
 
 #include <fmt/format.h>
 
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <optional>
@@ -37,7 +37,7 @@ class [[nodiscard]] Process: public Pty
     {
         std::string program;
         std::vector<std::string> arguments;
-        FileSystem::path workingDirectory;
+        std::filesystem::path workingDirectory;
         Environment env;
         bool escapeSandbox = true;
     };
@@ -45,7 +45,7 @@ class [[nodiscard]] Process: public Pty
     //! Returns login shell of current user.
     static std::vector<std::string> loginShell(bool escapeSandbox);
 
-    static FileSystem::path homeDirectory();
+    static std::filesystem::path homeDirectory();
 
     Process(ExecInfo const& exe, std::unique_ptr<Pty> pty):
         Process(exe.program, exe.arguments, exe.workingDirectory, exe.env, exe.escapeSandbox, std::move(pty))
@@ -54,7 +54,7 @@ class [[nodiscard]] Process: public Pty
 
     Process(const std::string& path,
             std::vector<std::string> const& args,
-            FileSystem::path const& cwd,
+            std::filesystem::path const& cwd,
             Environment const& env,
             bool escapeSandbox,
             std::unique_ptr<Pty> pty);
