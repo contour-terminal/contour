@@ -26,6 +26,10 @@ BUILD_DIR="${ROOTDIR}/target/$(uname -m)-$(uname -s)-${CXX_NAME}-${BUILD_TYPE}"
 
 EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DLIBUNICODE_UCD_BASE_DIR=$ROOTDIR/_ucd"
 
+if test x$QTVER = x; then
+    QTVER=6
+fi
+
 if test v$QTVER = v6; then
     EXTRA_CMAKE_FLAGS="${EXTRA_CMAKE_FLAGS} -DCONTOUR_QT_VERSION=6"
 else
