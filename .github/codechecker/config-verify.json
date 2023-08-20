@@ -19,6 +19,12 @@
     "--checker-config", "clang-tidy:readability-identifier-naming.PrivateMemberPrefix='_'",
     "--checker-config", "clang-tidy:readability-identifier-naming.PublicMemberPrefix=\"\"",
     "--checker-config", "clang-tidy:readability-identifier-naming.ScopedEnumConstantCase=CamelCase"
+    "--checker-config", "clang-tidy:readability-identifier-naming.VariableCase=camelBack",
+    "--checker-config", "clang-tidy:readability-identifier-naming.VariableCasePrefix=\"\"",
+    "--checker-config", "clang-tidy:readability-identifier-naming.ConstexprVariableCase=CamelCase"
+    "--checker-config", "clang-tidy:readability-identifier-naming.ConstexprVariableCasePrefix=\"\"",
+    "--checker-config", "clang-tidy:readability-identifier-naming.ConstantCase=camelBack",
+    "--checker-config", "clang-tidy:readability-identifier-naming.ConstantCasePrefix=\"\"",
   ],
   "parse": [
     "--skip=.github/codechecker/skipfile.txt"
