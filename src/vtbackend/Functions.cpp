@@ -32,18 +32,15 @@ using std::stringstream;
 namespace terminal
 {
 
-FunctionDefinition const* select(FunctionSelector const& selector) noexcept
+FunctionDefinition const* select(FunctionSelector const& selector,
+                                 gsl::span<FunctionDefinition const> availableDefinitions) noexcept
 {
-    auto static const& funcs = functions();
-
-    // std::cout << fmt::format("select: {}\n", selector);
-
     auto a = size_t { 0 };
-    auto b = funcs.size() - 1;
+    auto b = availableDefinitions.size() - 1;
     while (a <= b)
     {
         auto const i = (a + b) / 2;
-        auto const& fui = funcs[i];
+        auto const& fui = availableDefinitions[i];
         auto const rel = compare(selector, fui);
         // std::cout << fmt::format(" - a:{:>2} b:{:>2} i:{} rel:{} I: {}\n", a, b, i, rel < 0 ? '<' : rel > 0
         // ? '>' : '=', I);

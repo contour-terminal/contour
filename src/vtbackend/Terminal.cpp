@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <vtbackend/ControlCode.h>
+#include <vtbackend/Functions.h>
 #include <vtbackend/InputGenerator.h>
 #include <vtbackend/RenderBuffer.h>
 #include <vtbackend/RenderBufferBuilder.h>
@@ -163,6 +164,7 @@ Terminal::Terminal(Events& eventListener,
     setMode(DECMode::TextReflow, true);
     setMode(DECMode::SixelCursorNextToGraphic, true);
 #endif
+    setMode(DECMode::LeftRightMargin, false);
 }
 
 void Terminal::setRefreshRate(RefreshRate refreshRate)
@@ -1503,9 +1505,18 @@ void Terminal::setMode(DECMode mode, bool enable)
         case DECMode::LeftRightMargin:
             // Resetting DECLRMM also resets the horizontal margins back to screen size.
             if (!enable)
+            {
                 currentScreen().margin().horizontal =
                     Margin::Horizontal { ColumnOffset(0),
                                          boxed_cast<ColumnOffset>(_settings.pageSize.columns - 1) };
+                _supportedVTSequences.enableSequence(SCOSC);
+                _supportedVTSequences.disableSequence(DECSLRM);
+            }
+            else
+            {
+                _supportedVTSequences.enableSequence(DECSLRM);
+                _supportedVTSequences.disableSequence(SCOSC);
+            }
             break;
         case DECMode::Origin: _currentScreen.get().cursor().originMode = enable; break;
         case DECMode::Columns132:
@@ -1929,6 +1940,12 @@ LineCount Terminal::maxHistoryLineCount() const noexcept
     return _primaryScreen.grid().maxHistoryLineCount();
 }
 
+void Terminal::setTerminalId(VTType id) noexcept
+{
+    _state.terminalId = id;
+    _supportedVTSequences.reset(id);
+}
+
 void Terminal::setStatusDisplay(StatusDisplayType statusDisplayType)
 {
     assert(&_currentScreen.get() != &_indicatorStatusScreen);
@@ -2242,7 +2259,7 @@ void TraceHandler::flushOne(PendingSequence const& pendingSequence)
 {
     if (auto const* seq = std::get_if<Sequence>(&pendingSequence))
     {
-        if (auto const* functionDefinition = seq->functionDefinition())
+        if (auto const* functionDefinition = seq->functionDefinition(_terminal.activeSequences()))
             fmt::print("\t{:<20} ; {:<18} ; {}\n",
                        seq->text(),
                        functionDefinition->mnemonic,

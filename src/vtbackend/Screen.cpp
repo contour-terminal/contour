@@ -3289,7 +3289,8 @@ void Screen<Cell>::processSequence(Sequence const& seq)
     //         seq.functionDefinition() ? seq.functionDefinition()->comment : ""sv);
 
     _terminal.state().instructionCounter++;
-    if (FunctionDefinition const* funcSpec = seq.functionDefinition(); funcSpec != nullptr)
+    if (FunctionDefinition const* funcSpec = seq.functionDefinition(_terminal.activeSequences());
+        funcSpec != nullptr)
         applyAndLog(*funcSpec, seq);
     else if (vtParserLog)
         vtParserLog()("Unknown VT sequence: {}", seq);

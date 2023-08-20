@@ -140,7 +140,7 @@ class Terminal
     void setMaxHistoryLineCount(MaxHistoryLineCount maxHistoryLineCount);
     LineCount maxHistoryLineCount() const noexcept;
 
-    void setTerminalId(VTType id) noexcept { _state.terminalId = id; }
+    void setTerminalId(VTType id) noexcept;
 
     void setMaxImageSize(ImageSize size) noexcept { _state.effectiveImageCanvasSize = size; }
 
@@ -695,6 +695,11 @@ class Terminal
     // @param includeSelection boolean to indicate whether or not to include colorize selection.
     void fillRenderBuffer(RenderBuffer& output, bool includeSelection); // <- acquires the lock
 
+    gsl::span<FunctionDefinition const> activeSequences() const noexcept
+    {
+        return _supportedVTSequences.activeSequences();
+    }
+
   private:
     void mainLoop();
     void fillRenderBufferInternal(RenderBuffer& output, bool includeSelection);
@@ -829,6 +834,7 @@ class Terminal
     std::atomic<HyperlinkId> _hoveringHyperlinkId = HyperlinkId {};
     std::atomic<bool> _renderBufferUpdateEnabled = true; // for "Synchronized Updates" feature
     std::optional<HighlightRange> _highlightRange = std::nullopt;
+    SupportedSequences _supportedVTSequences;
 };
 
 } // namespace terminal

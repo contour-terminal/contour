@@ -194,7 +194,7 @@ int ContourApp::infoVT()
         fmt::print("{}\n", headline);
         fmt::print("{}\n\n", string(headline.size(), '='));
 
-        for (auto const& fn: terminal::functions())
+        for (auto const& fn: terminal::allFunctions())
         {
             if (fn.category != category)
                 continue;
