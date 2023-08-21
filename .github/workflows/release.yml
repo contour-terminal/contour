@@ -78,7 +78,7 @@ jobs:
       - name: "create build directory"
         run: mkdir build
       - name: "Generate build files"
-        run: cmake -DCMAKE_BUILD_TYPE=Release -DCONTOUR_QT_VERSION=5 -DCMAKE_CXX_STANDARD=17 -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=OFF -DLIBUNICODE_TESTING=OFF -B build .
+        run: cmake -DCMAKE_BUILD_TYPE=Release -DCONTOUR_QT_VERSION=5 -DCMAKE_CXX_STANDARD=20 -DCMAKE_TOOLCHAIN_FILE="${{ runner.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows -DLIBTERMINAL_TESTING=OFF -DLIBUNICODE_TESTING=OFF -B build .
       - name: "Build"
         run: cmake --build build/ --config Release
       - name: "Create Package(s)"
@@ -497,7 +497,7 @@ jobs:
           # TODO: turn on -Werror again, that requires some code changes.
           CMAKE_CXX_STANDARD=20
           if [[ "${{ matrix.os_version }}" = "18.04" ]]; then
-            CMAKE_CXX_STANDARD=17
+            CMAKE_CXX_STANDARD=20
             EXTRA_CMAKE_FLAGS="$EXTRA_CMAKE_FLAGS -DCONTOUR_INSTALL_TOOLS=ON"
             export CXX="g++-10"
           fi
