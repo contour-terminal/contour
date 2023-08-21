@@ -30,11 +30,11 @@ class Renderer;
 namespace contour
 {
 
-auto inline const DisplayLog =
+auto inline const displayLog =
     logstore::category("gui.display", "Logs display driver details (e.g. OpenGL).");
-auto inline const InputLog =
+auto inline const inputLog =
     logstore::category("gui.input", "Logs input driver details (e.g. GUI input events).");
-auto inline const SessionLog = logstore::category("gui.session", "VT terminal session logs");
+auto inline const sessionLog = logstore::category("gui.session", "VT terminal session logs");
 
 namespace detail
 {
@@ -43,12 +43,12 @@ namespace detail
     {
       private:
         using Fun = typename std::decay<F>::type;
-        Fun fun;
+        Fun _fun;
 
       public:
-        FunctionCallEvent(Fun&& fun): QEvent(QEvent::None), fun(std::move(fun)) {}
-        FunctionCallEvent(Fun const& fun): QEvent(QEvent::None), fun(fun) {}
-        ~FunctionCallEvent() override { fun(); }
+        FunctionCallEvent(Fun&& fun): QEvent(QEvent::None), _fun(std::move(fun)) {}
+        FunctionCallEvent(Fun const& fun): QEvent(QEvent::None), _fun(fun) {}
+        ~FunctionCallEvent() override { _fun(); }
     };
 } // namespace detail
 
@@ -72,9 +72,9 @@ void postToObject(QObject* obj, F fun)
 #endif
 }
 
-constexpr inline bool isModifier(Qt::Key _key)
+constexpr inline bool isModifier(Qt::Key key)
 {
-    switch (_key)
+    switch (key)
     {
         case Qt::Key_Alt:
         case Qt::Key_Control:
@@ -84,12 +84,12 @@ constexpr inline bool isModifier(Qt::Key _key)
     }
 }
 
-constexpr inline char32_t makeChar(Qt::Key _key, Qt::KeyboardModifiers _mods)
+constexpr inline char32_t makeChar(Qt::Key key, Qt::KeyboardModifiers mods)
 {
-    auto const value = static_cast<int>(_key);
+    auto const value = static_cast<int>(key);
     if (value >= 'A' && value <= 'Z')
     {
-        if (_mods & Qt::ShiftModifier)
+        if (mods & Qt::ShiftModifier)
             return static_cast<char32_t>(value);
         else
             return static_cast<char32_t>(std::tolower(value));
@@ -97,37 +97,37 @@ constexpr inline char32_t makeChar(Qt::Key _key, Qt::KeyboardModifiers _mods)
     return 0;
 }
 
-constexpr inline terminal::Modifier makeModifier(Qt::KeyboardModifiers _mods)
+constexpr inline terminal::Modifier makeModifier(Qt::KeyboardModifiers qtModifiers)
 {
     using terminal::Modifier;
 
-    Modifier mods {};
+    Modifier modifiers {};
 
-    if (_mods & Qt::AltModifier)
-        mods |= Modifier::Alt;
-    if (_mods & Qt::ShiftModifier)
-        mods |= Modifier::Shift;
+    if (qtModifiers & Qt::AltModifier)
+        modifiers |= Modifier::Alt;
+    if (qtModifiers & Qt::ShiftModifier)
+        modifiers |= Modifier::Shift;
 #if defined(__APPLE__)
     // XXX https://doc.qt.io/qt-5/qt.html#KeyboardModifier-enum
     //     "Note: On macOS, the ControlModifier value corresponds to the Command keys on the keyboard,
     //      and the MetaModifier value corresponds to the Control keys."
-    if (_mods & Qt::MetaModifier)
-        mods |= Modifier::Control;
-    if (_mods & Qt::ControlModifier)
-        mods |= Modifier::Meta;
+    if (qtModifiers & Qt::MetaModifier)
+        modifiers |= Modifier::Control;
+    if (qtModifiers & Qt::ControlModifier)
+        modifiers |= Modifier::Meta;
 #else
-    if (_mods & Qt::ControlModifier)
-        mods |= Modifier::Control;
-    if (_mods & Qt::MetaModifier)
-        mods |= Modifier::Meta;
+    if (qtModifiers & Qt::ControlModifier)
+        modifiers |= Modifier::Control;
+    if (qtModifiers & Qt::MetaModifier)
+        modifiers |= Modifier::Meta;
 #endif
 
-    return mods;
+    return modifiers;
 }
 
-constexpr inline terminal::MouseButton makeMouseButton(Qt::MouseButton _button)
+constexpr inline terminal::MouseButton makeMouseButton(Qt::MouseButton button)
 {
-    switch (_button)
+    switch (button)
     {
         case Qt::MouseButton::RightButton: return terminal::MouseButton::Right;
         case Qt::MiddleButton: return terminal::MouseButton::Middle;
@@ -138,26 +138,26 @@ constexpr inline terminal::MouseButton makeMouseButton(Qt::MouseButton _button)
 }
 
 class TerminalSession;
-bool sendKeyEvent(QKeyEvent* _keyEvent, TerminalSession& _session);
-void sendWheelEvent(QWheelEvent* _event, TerminalSession& _session);
-void sendMousePressEvent(QMouseEvent* _event, TerminalSession& _session);
-void sendMouseMoveEvent(QMouseEvent* _event, TerminalSession& _session);
-void sendMouseMoveEvent(QHoverEvent* _event, TerminalSession& _session);
-void sendMouseReleaseEvent(QMouseEvent* _event, TerminalSession& _session);
+bool sendKeyEvent(QKeyEvent* keyEvent, TerminalSession& session);
+void sendWheelEvent(QWheelEvent* event, TerminalSession& session);
+void sendMousePressEvent(QMouseEvent* event, TerminalSession& session);
+void sendMouseMoveEvent(QMouseEvent* event, TerminalSession& session);
+void sendMouseMoveEvent(QHoverEvent* event, TerminalSession& session);
+void sendMouseReleaseEvent(QMouseEvent* event, TerminalSession& session);
 
-void spawnNewTerminal(std::string const& _programPath,
-                      std::string const& _configPath,
-                      std::string const& _profileName,
-                      std::string const& _cwdUrl);
+void spawnNewTerminal(std::string const& programPath,
+                      std::string const& configPath,
+                      std::string const& profileName,
+                      std::string const& cwdUrl);
 
-terminal::FontDef getFontDefinition(terminal::rasterizer::Renderer& _renderer);
+terminal::FontDef getFontDefinition(terminal::rasterizer::Renderer& renderer);
 
-terminal::rasterizer::PageMargin computeMargin(terminal::ImageSize _cellSize,
-                                               terminal::PageSize _charCells,
-                                               terminal::ImageSize _pixels) noexcept;
+terminal::rasterizer::PageMargin computeMargin(terminal::ImageSize cellSize,
+                                               terminal::PageSize charCells,
+                                               terminal::ImageSize pixels) noexcept;
 
-terminal::rasterizer::FontDescriptions sanitizeFontDescription(terminal::rasterizer::FontDescriptions _fonts,
-                                                               text::DPI _screenDPI);
+terminal::rasterizer::FontDescriptions sanitizeFontDescription(terminal::rasterizer::FontDescriptions fonts,
+                                                               text::DPI screenDPI);
 
 constexpr terminal::PageSize pageSizeForPixels(crispy::image_size viewSize,
                                                crispy::image_size cellSize) noexcept
@@ -166,20 +166,20 @@ constexpr terminal::PageSize pageSizeForPixels(crispy::image_size viewSize,
                                 boxed_cast<terminal::ColumnCount>((viewSize / cellSize).width) };
 }
 
-void applyResize(terminal::ImageSize _newPixelSize,
-                 TerminalSession& _session,
-                 terminal::rasterizer::Renderer& _renderer);
+void applyResize(terminal::ImageSize newPixelSize,
+                 TerminalSession& session,
+                 terminal::rasterizer::Renderer& renderer);
 
-bool applyFontDescription(terminal::ImageSize _cellSize,
-                          terminal::PageSize _pageSize,
-                          terminal::ImageSize _pixelSize,
-                          text::DPI _dpi,
-                          terminal::rasterizer::Renderer& _renderer,
-                          terminal::rasterizer::FontDescriptions _fontDescriptions);
+bool applyFontDescription(terminal::ImageSize cellSize,
+                          terminal::PageSize pageSize,
+                          terminal::ImageSize pixelSize,
+                          text::DPI dpi,
+                          terminal::rasterizer::Renderer& renderer,
+                          terminal::rasterizer::FontDescriptions fontDescriptions);
 
-constexpr Qt::CursorShape toQtMouseShape(MouseCursorShape _shape)
+constexpr Qt::CursorShape toQtMouseShape(MouseCursorShape shape)
 {
-    switch (_shape)
+    switch (shape)
     {
         case contour::MouseCursorShape::Hidden: return Qt::CursorShape::BlankCursor;
         case contour::MouseCursorShape::Arrow: return Qt::CursorShape::ArrowCursor;

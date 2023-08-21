@@ -69,19 +69,19 @@ struct InputMappings
 
 namespace helper
 {
-    inline bool testMatchMode(uint8_t _actualModeFlags,
-                              terminal::MatchModes _expected,
-                              terminal::MatchModes::Flag _testFlag)
+    inline bool testMatchMode(uint8_t actualModeFlags,
+                              terminal::MatchModes expected,
+                              terminal::MatchModes::Flag testFlag)
     {
         using MatchModes = terminal::MatchModes;
-        switch (_expected.status(_testFlag))
+        switch (expected.status(testFlag))
         {
             case MatchModes::Status::Enabled:
-                if (!(_actualModeFlags & _testFlag))
+                if (!(actualModeFlags & testFlag))
                     return false;
                 break;
             case MatchModes::Status::Disabled:
-                if ((_actualModeFlags & _testFlag))
+                if ((actualModeFlags & testFlag))
                     return false;
                 break;
             case MatchModes::Status::Any: break;
@@ -89,30 +89,30 @@ namespace helper
         return true;
     }
 
-    inline bool testMatchMode(uint8_t _actualModeFlags, terminal::MatchModes _expected)
+    inline bool testMatchMode(uint8_t actualModeFlags, terminal::MatchModes expected)
     {
         using Flag = terminal::MatchModes::Flag;
-        return testMatchMode(_actualModeFlags, _expected, Flag::AlternateScreen)
-               && testMatchMode(_actualModeFlags, _expected, Flag::AppCursor)
-               && testMatchMode(_actualModeFlags, _expected, Flag::AppKeypad)
-               && testMatchMode(_actualModeFlags, _expected, Flag::Select)
-               && testMatchMode(_actualModeFlags, _expected, Flag::Insert)
-               && testMatchMode(_actualModeFlags, _expected, Flag::Search)
-               && testMatchMode(_actualModeFlags, _expected, Flag::Trace);
+        return testMatchMode(actualModeFlags, expected, Flag::AlternateScreen)
+               && testMatchMode(actualModeFlags, expected, Flag::AppCursor)
+               && testMatchMode(actualModeFlags, expected, Flag::AppKeypad)
+               && testMatchMode(actualModeFlags, expected, Flag::Select)
+               && testMatchMode(actualModeFlags, expected, Flag::Insert)
+               && testMatchMode(actualModeFlags, expected, Flag::Search)
+               && testMatchMode(actualModeFlags, expected, Flag::Trace);
     }
 } // namespace helper
 
 template <typename Input>
 std::vector<actions::Action> const* apply(
-    std::vector<terminal::InputBinding<Input, ActionList>> const& _mappings,
-    Input _input,
-    terminal::Modifier _modifier,
-    uint8_t _actualModeFlags)
+    std::vector<terminal::InputBinding<Input, ActionList>> const& mappings,
+    Input input,
+    terminal::Modifier modifier,
+    uint8_t actualModeFlags)
 {
-    for (terminal::InputBinding<Input, ActionList> const& mapping: _mappings)
+    for (terminal::InputBinding<Input, ActionList> const& mapping: mappings)
     {
-        if (mapping.modifier == _modifier && mapping.input == _input
-            && helper::testMatchMode(_actualModeFlags, mapping.modes))
+        if (mapping.modifier == modifier && mapping.input == input
+            && helper::testMatchMode(actualModeFlags, mapping.modes))
         {
             return &mapping.binding;
         }
@@ -249,19 +249,19 @@ struct Config
     std::unordered_map<std::string, TerminalProfile> profiles;
     std::string defaultProfileName;
 
-    TerminalProfile* profile(std::string const& _name)
+    TerminalProfile* profile(std::string const& name)
     {
-        assert(!_name.empty());
-        if (auto i = profiles.find(_name); i != profiles.end())
+        assert(!name.empty());
+        if (auto i = profiles.find(name); i != profiles.end())
             return &i->second;
         assert(false && "Profile not found.");
         return nullptr;
     }
 
-    TerminalProfile const* profile(std::string const& _name) const
+    TerminalProfile const* profile(std::string const& name) const
     {
-        assert(!_name.empty());
-        if (auto i = profiles.find(_name); i != profiles.end())
+        assert(!name.empty());
+        if (auto i = profiles.find(name); i != profiles.end())
             return &i->second;
         assert(false && "Profile not found.");
         return nullptr;
@@ -300,16 +300,16 @@ struct Config
 };
 
 std::filesystem::path configHome();
-std::filesystem::path configHome(std::string const& _programName);
+std::filesystem::path configHome(std::string const& programName);
 
-std::optional<std::string> readConfigFile(std::string const& _filename);
+std::optional<std::string> readConfigFile(std::string const& filename);
 
-void loadConfigFromFile(Config& _config, std::filesystem::path const& _fileName);
-Config loadConfigFromFile(std::filesystem::path const& _fileName);
+void loadConfigFromFile(Config& config, std::filesystem::path const& fileName);
+Config loadConfigFromFile(std::filesystem::path const& fileName);
 Config loadConfig();
 
 std::string defaultConfigString();
-std::error_code createDefaultConfig(std::filesystem::path const& _path);
+std::error_code createDefaultConfig(std::filesystem::path const& path);
 std::string defaultConfigFilePath();
 
 } // namespace contour::config
@@ -324,15 +324,15 @@ struct fmt::formatter<contour::config::Permission>
         return ctx.begin();
     }
     template <typename FormatContext>
-    auto format(contour::config::Permission const& _perm, FormatContext& ctx)
+    auto format(contour::config::Permission const& perm, FormatContext& ctx)
     {
-        switch (_perm)
+        switch (perm)
         {
             case contour::config::Permission::Allow: return fmt::format_to(ctx.out(), "allow");
             case contour::config::Permission::Deny: return fmt::format_to(ctx.out(), "deny");
             case contour::config::Permission::Ask: return fmt::format_to(ctx.out(), "ask");
         }
-        return fmt::format_to(ctx.out(), "({})", unsigned(_perm));
+        return fmt::format_to(ctx.out(), "({})", unsigned(perm));
     }
 };
 
@@ -346,16 +346,16 @@ struct fmt::formatter<contour::config::SelectionAction>
     }
     using SelectionAction = contour::config::SelectionAction;
     template <typename FormatContext>
-    auto format(SelectionAction _value, FormatContext& ctx)
+    auto format(SelectionAction value, FormatContext& ctx)
     {
-        switch (_value)
+        switch (value)
         {
             case SelectionAction::CopyToClipboard: return fmt::format_to(ctx.out(), "CopyToClipboard");
             case SelectionAction::CopyToSelectionClipboard:
                 return fmt::format_to(ctx.out(), "CopyToSelectionClipboard");
             case SelectionAction::Nothing: return fmt::format_to(ctx.out(), "Waiting");
         }
-        return fmt::format_to(ctx.out(), "{}", static_cast<unsigned>(_value));
+        return fmt::format_to(ctx.out(), "{}", static_cast<unsigned>(value));
     }
 };
 
@@ -369,15 +369,15 @@ struct fmt::formatter<contour::config::ScrollBarPosition>
     }
     using ScrollBarPosition = contour::config::ScrollBarPosition;
     template <typename FormatContext>
-    auto format(ScrollBarPosition _value, FormatContext& ctx)
+    auto format(ScrollBarPosition value, FormatContext& ctx)
     {
-        switch (_value)
+        switch (value)
         {
             case ScrollBarPosition::Hidden: return fmt::format_to(ctx.out(), "Hidden");
             case ScrollBarPosition::Left: return fmt::format_to(ctx.out(), "Left");
             case ScrollBarPosition::Right: return fmt::format_to(ctx.out(), "Right");
         }
-        return fmt::format_to(ctx.out(), "{}", static_cast<unsigned>(_value));
+        return fmt::format_to(ctx.out(), "{}", static_cast<unsigned>(value));
     }
 };
 // }}}

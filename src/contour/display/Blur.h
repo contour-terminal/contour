@@ -46,36 +46,36 @@ class Blur: protected QOpenGLExtraFunctions
     QImage blurDualKawase(QImage imageToBlur, int offset, int iterations);
     QImage blurGaussian(QImage imageToBlur);
 
-    float getGPUTime();
-    float getCPUTime();
+    [[nodiscard]] float getGPUTime() const noexcept;
+    [[nodiscard]] float getCPUTime() const noexcept;
 
   private:
     void renderToFBO(QOpenGLFramebufferObject* targetFBO, GLuint sourceTexture, QOpenGLShaderProgram* shader);
     void initFBOTextures();
 
     //.
-    QOpenGLContext* m_context;
-    QOffscreenSurface* m_surface;
-    QOpenGLShaderProgram* m_gaussianBlur = nullptr;
-    QOpenGLShaderProgram* m_shaderKawaseUp = nullptr;
-    QOpenGLShaderProgram* m_shaderKawaseDown = nullptr;
+    QOpenGLContext* _context;
+    QOffscreenSurface* _surface;
+    QOpenGLShaderProgram* _gaussianBlur = nullptr;
+    QOpenGLShaderProgram* _shaderKawaseUp = nullptr;
+    QOpenGLShaderProgram* _shaderKawaseDown = nullptr;
     //.
 
-    QVector<QOpenGLFramebufferObject*> m_FBO_vector;
-    QOpenGLTexture* m_textureToBlur = nullptr;
+    QVector<QOpenGLFramebufferObject*> _FBO_vector;
+    QOpenGLTexture* _textureToBlur = nullptr;
 
-    QOpenGLVertexArrayObject m_VertexArrayObject;
-    QOpenGLBuffer m_vertexBuffer;
+    QOpenGLVertexArrayObject _VertexArrayObject;
+    QOpenGLBuffer _vertexBuffer;
 
-    int m_iterations = -1;
-    QImage m_imageToBlur;
+    int _iterations = -1;
+    QImage _imageToBlur;
 
     // GPU timer
-    GLuint64 GPUtimerElapsedTime {};
+    GLuint64 _GPUtimerElapsedTime {};
 
     // CPU timer
-    QElapsedTimer CPUTimer;
-    quint64 CPUTimerElapsedTime {};
+    QElapsedTimer _CPUTimer;
+    quint64 _CPUTimerElapsedTime {};
 };
 
 } // namespace contour::display

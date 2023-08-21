@@ -391,14 +391,14 @@ RGBAColor SixelImageBuilder::at(CellLocation coord) const noexcept
 
 void SixelImageBuilder::write(CellLocation const& coord, RGBColor const& value) noexcept
 {
-    if (unbox(coord.line) >= 0 && unbox(coord.line) < unbox(_maxSize.height) && unbox(coord.column) >= 0
-        && unbox(coord.column) < unbox(_maxSize.width))
+    if (unbox(coord.line) >= 0 && unbox(coord.line) < unbox<int>(_maxSize.height) && unbox(coord.column) >= 0
+        && unbox(coord.column) < unbox<int>(_maxSize.width))
     {
         if (!_explicitSize)
         {
-            if (unbox(coord.line) >= unbox(_size.height))
+            if (unbox(coord.line) >= unbox<int>(_size.height))
                 _size.height = Height::cast_from(coord.line.as<unsigned int>() + _aspectRatio);
-            if (unbox(coord.column) >= unbox(_size.width))
+            if (unbox(coord.column) >= unbox<int>(_size.width))
                 _size.width = Width::cast_from(coord.column + 1);
         }
 
@@ -458,7 +458,7 @@ void SixelImageBuilder::render(int8_t sixel)
 {
     // TODO: respect aspect ratio!
     auto const x = _sixelCursor.column;
-    if (unbox(x) < unbox((_explicitSize ? _size.width : _maxSize.width)))
+    if (unbox(x) < unbox<int>((_explicitSize ? _size.width : _maxSize.width)))
     {
         for (unsigned int i = 0; i < 6; ++i)
         {
@@ -484,9 +484,9 @@ void SixelImageBuilder::finalize()
     if (!_explicitSize)
     {
         Buffer tempBuffer(static_cast<size_t>(_size.height.value * _size.width.value) * 4);
-        for (auto i = 0; i < unbox(_size.height); ++i)
+        for (auto i = 0u; i < unbox(_size.height); ++i)
         {
-            for (auto j = 0; j < unbox(_size.width); ++j)
+            for (auto j = 0u; j < unbox(_size.width); ++j)
             {
                 std::copy_n(_buffer.begin() + i * unbox<long>(_maxSize.width) * 4,
                             _size.width.value * 4,

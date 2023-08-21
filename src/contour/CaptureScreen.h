@@ -18,6 +18,6 @@ struct CaptureSettings
     terminal::LineCount lineCount = terminal::LineCount { 0 }; // (use terminal default)
 };
 
-bool captureScreen(CaptureSettings const& _settings);
+bool captureScreen(CaptureSettings const& settings);
 
 } // namespace contour

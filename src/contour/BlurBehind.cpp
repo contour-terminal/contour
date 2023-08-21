@@ -48,7 +48,7 @@ namespace
         if (!qApp)
             return nullptr;
 
-        auto native = qApp->nativeInterface<QNativeInterface::QX11Application>();
+        auto* native = qApp->nativeInterface<QNativeInterface::QX11Application>();
         if (!native)
             return nullptr;
 
@@ -121,7 +121,7 @@ namespace
 } // namespace
 #endif
 
-void setEnabled(QWindow* window, bool enable, QRegion region)
+void setEnabled(QWindow* window, bool enable, QRegion const& region)
 {
     crispy::ignore_unused(region);
 

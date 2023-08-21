@@ -20,13 +20,13 @@ namespace contour::actions
 namespace
 {
     template <typename T>
-    inline auto mapAction(string_view _name)
+    inline constexpr auto mapAction(string_view name) noexcept
     {
-        return pair { _name, Action { T {} } };
+        return pair { name, Action { T {} } };
     }
 } // namespace
 
-optional<Action> fromString(string const& _name)
+optional<Action> fromString(string const& name)
 {
     // NB: If we change that variable declaration to `static`,
     // then MSVC will not finish compiling. Yes. That's not a joke.
@@ -80,9 +80,9 @@ optional<Action> fromString(string const& _name)
         mapAction<actions::WriteScreen>("WriteScreen"),
     };
 
-    auto const name = toLower(_name);
+    auto const lowerCaseName = toLower(name);
     for (auto const& mapping: mappings)
-        if (name == toLower(mapping.first))
+        if (lowerCaseName == toLower(mapping.first))
             return { mapping.second };
 
     return nullopt;

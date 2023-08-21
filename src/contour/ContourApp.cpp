@@ -163,11 +163,11 @@ ContourApp::ContourApp(): app("contour", "Contour Terminal Emulator", CONTOUR_VE
 }
 
 template <typename Callback>
-auto withOutput(crispy::cli::flag_store const& _flags, std::string const& _name, Callback _callback)
+auto withOutput(crispy::cli::flag_store const& flags, std::string const& name, Callback callback)
 {
     std::ostream* out = &cout;
 
-    auto const& outputFileName = _flags.get<string>(_name); // TODO: support string_view
+    auto const& outputFileName = flags.get<string>(name); // TODO: support string_view
     auto ownedOutput = unique_ptr<std::ostream> {};
     if (outputFileName != "-")
     {
@@ -175,7 +175,7 @@ auto withOutput(crispy::cli::flag_store const& _flags, std::string const& _name,
         out = ownedOutput.get();
     }
 
-    return _callback(*out);
+    return callback(*out);
 }
 
 int ContourApp::infoVT()
@@ -215,7 +215,7 @@ int ContourApp::infoVT()
 
 int ContourApp::integrationAction()
 {
-    return withOutput(parameters(), "contour.generate.integration.to", [&](auto& _stream) {
+    return withOutput(parameters(), "contour.generate.integration.to", [&](auto& stream) {
         auto const shell = parameters().get<string>("contour.generate.integration.shell");
         QFile file;
         if (shell == "zsh")
@@ -232,23 +232,23 @@ int ContourApp::integrationAction()
         }
         file.open(QFile::ReadOnly);
         auto const contents = file.readAll();
-        _stream.write(contents.constData(), contents.size());
+        stream.write(contents.constData(), contents.size());
         return EXIT_SUCCESS;
     });
 }
 
 int ContourApp::configAction()
 {
-    withOutput(parameters(), "contour.generate.config.to", [](auto& _stream) {
-        _stream << config::defaultConfigString();
+    withOutput(parameters(), "contour.generate.config.to", [](auto& stream) {
+        stream << config::defaultConfigString();
     });
     return EXIT_SUCCESS;
 }
 
 int ContourApp::terminfoAction()
 {
-    withOutput(parameters(), "contour.generate.terminfo.to", [](auto& _stream) {
-        _stream << terminal::capabilities::StaticDatabase {}.terminfo();
+    withOutput(parameters(), "contour.generate.terminfo.to", [](auto& stream) {
+        stream << terminal::capabilities::StaticDatabase {}.terminfo();
     });
     return EXIT_SUCCESS;
 }

@@ -6,6 +6,6 @@
 namespace BlurBehind
 {
 
-void setEnabled(QWindow* window, bool enabled, QRegion region = QRegion());
+void setEnabled(QWindow* window, bool enabled, QRegion const& region = QRegion());
 
 }

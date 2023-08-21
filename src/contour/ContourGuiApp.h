@@ -39,7 +39,7 @@ class ContourGuiApp: public QObject, public ContourApp
     crispy::cli::command parameterDefinition() const override;
 
     void newWindow();
-    void showNotification(std::string_view _title, std::string_view _content);
+    static void showNotification(std::string_view title, std::string_view content);
 
     std::string profileName() const;
 
@@ -47,13 +47,13 @@ class ContourGuiApp: public QObject, public ContourApp
 
     std::optional<std::filesystem::path> dumpStateAtExit() const;
 
-    void onExit(TerminalSession& _session);
+    void onExit(TerminalSession& session);
 
     config::Config& config() noexcept { return _config; }
     config::Config const& config() const noexcept { return _config; }
     config::TerminalProfile const& profile() const noexcept
     {
-        if (auto profile = config().profile(profileName()))
+        if (const auto* const profile = config().profile(profileName()))
             return *profile;
         fmt::print("Failed to access config profile.\n");
         Require(false);
@@ -67,10 +67,10 @@ class ContourGuiApp: public QObject, public ContourApp
 
     std::string programPath() const { return _argv[0]; }
 
-    [[nodiscard]] QUrl resolveResource(std::string_view path) const;
+    [[nodiscard]] static QUrl resolveResource(std::string_view path);
 
   private:
-    void ensureTermInfoFile();
+    static void ensureTermInfoFile();
     bool loadConfig(std::string const& target);
     int terminalGuiAction();
     int fontConfigAction();
@@ -82,7 +82,7 @@ class ContourGuiApp: public QObject, public ContourApp
     char const** _argv = nullptr;
     std::optional<terminal::Process::ExitStatus> _exitStatus;
 
-    std::unique_ptr<QQmlApplicationEngine> qmlEngine_;
+    std::unique_ptr<QQmlApplicationEngine> _qmlEngine;
 };
 
 } // namespace contour

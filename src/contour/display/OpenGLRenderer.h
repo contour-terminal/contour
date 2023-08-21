@@ -60,7 +60,7 @@ class OpenGLRenderer final:
     OpenGLRenderer(ShaderConfig textShaderConfig,
                    ShaderConfig rectShaderConfig,
                    crispy::image_size viewSize,
-                   crispy::image_size renderSize,
+                   crispy::image_size targetSurfaceSize,
                    crispy::image_size textureTileSize,
                    terminal::rasterizer::PageMargin margin);
 
@@ -69,20 +69,20 @@ class OpenGLRenderer final:
     void setWindow(QQuickWindow* window) { _window = window; }
 
     // AtlasBackend implementation
-    ImageSize atlasSize() const noexcept override;
+    [[nodiscard]] ImageSize atlasSize() const noexcept override;
     void configureAtlas(ConfigureAtlas atlas) override;
     void uploadTile(UploadTile tile) override;
     void renderTile(RenderTile tile) override;
 
     // RenderTarget implementation
-    void setRenderSize(crispy::image_size _size) override;
+    void setRenderSize(crispy::image_size targetSurfaceSize) override;
     void setTranslation(float x, float y, float z) noexcept;
     void setViewSize(crispy::image_size size) noexcept { _viewSize = size; }
     void setModelMatrix(QMatrix4x4 matrix) noexcept;
-    void setMargin(terminal::rasterizer::PageMargin _margin) noexcept override;
+    void setMargin(terminal::rasterizer::PageMargin margin) noexcept override;
     std::optional<AtlasTextureScreenshot> readAtlas() override;
     AtlasBackend& textureScheduler() override;
-    void scheduleScreenshot(ScreenshotCallback _callback) override;
+    void scheduleScreenshot(ScreenshotCallback callback) override;
     void renderRectangle(int x, int y, Width, Height, RGBAColor color) override;
     void execute(std::chrono::steady_clock::time_point now) override;
 
@@ -123,11 +123,11 @@ class OpenGLRenderer final:
                                 uint8_t const* pixels);
 
     void executeRenderTextures();
-    void executeConfigureAtlas(ConfigureAtlas const& _param);
-    void executeUploadTile(UploadTile const& _param);
-    void executeRenderTile(RenderTile const& _param);
+    void executeConfigureAtlas(ConfigureAtlas const& param);
+    void executeUploadTile(UploadTile const& param);
+    void executeRenderTile(RenderTile const& param);
 
-    //? void renderRectangle(int _x, int _y, int _width, int _height, QVector4D const& _color);
+    //? void renderRectangle(int _x, int _y, int width, int height, QVector4D const& color);
 
     // -------------------------------------------------------------------------------------------
     // private data members
@@ -225,7 +225,7 @@ class OpenGLRenderer final:
         float backgroundImageOpacity = 1.0f;
         bool backgroundImageBlur = false;
         QSize backgroundResolution;
-        crispy::strong_hash backgroundImageHash;
+        crispy::strong_hash backgroundImageHash {};
     } _renderStateCache;
 };
 

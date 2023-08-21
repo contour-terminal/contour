@@ -19,7 +19,7 @@ using namespace std::string_literals;
 namespace contour::display
 {
 
-auto const ShaderLog = logstore::category("gui.shader", "Logs shader configuration");
+auto const shaderLog = logstore::category("gui.shader", "Logs shader configuration");
 
 namespace
 {
@@ -89,7 +89,7 @@ ShaderConfig builtinShaderConfig(ShaderClass shaderClass)
     return makeConfig(shaderClass);
 }
 
-std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderConfig)
+std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& shaderConfig)
 {
     auto shader = std::make_unique<QOpenGLShaderProgram>();
 
@@ -97,7 +97,7 @@ std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderCo
         return { source.location.toStdString(), source.contents.toStdString() };
     };
 
-    auto [vertexLocation, vertexSource] = extractShaderSource(_shaderConfig.vertexShader);
+    auto [vertexLocation, vertexSource] = extractShaderSource(shaderConfig.vertexShader);
     if (!shader->addShaderFromSourceCode(QOpenGLShader::Vertex, vertexSource.c_str()))
     {
         errorLog()("Compiling vertex shader {} failed.", vertexLocation);
@@ -107,7 +107,7 @@ std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderCo
         return {};
     }
 
-    auto [fragmentLocation, fragmentSource] = extractShaderSource(_shaderConfig.fragmentShader);
+    auto [fragmentLocation, fragmentSource] = extractShaderSource(shaderConfig.fragmentShader);
     if (!shader->addShaderFromSourceCode(QOpenGLShader::Fragment, fragmentSource.c_str()))
     {
         errorLog()("Compiling fragment shader {} failed. {}", fragmentLocation, shader->log().toStdString());
@@ -125,7 +125,7 @@ std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderCo
     }
 
     if (auto const logString = shader->log().toStdString(); !logString.empty())
-        ShaderLog()("{}", logString);
+        shaderLog()("{}", logString);
 
     Guarantee(shader->isLinked());
     return shader;

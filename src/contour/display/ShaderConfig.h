@@ -44,9 +44,9 @@ struct ShaderConfig
 bool useOpenGLES() noexcept;
 QSurfaceFormat createSurfaceFormat();
 
-inline std::string to_string(ShaderClass _shaderClass)
+inline std::string to_string(ShaderClass shaderClass)
 {
-    switch (_shaderClass)
+    switch (shaderClass)
     {
         case ShaderClass::Background: return "background";
         case ShaderClass::Text: return "text";
@@ -57,6 +57,6 @@ inline std::string to_string(ShaderClass _shaderClass)
 
 ShaderConfig builtinShaderConfig(ShaderClass shaderClass);
 
-std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& _shaderConfig);
+std::unique_ptr<QOpenGLShaderProgram> createShader(ShaderConfig const& shaderConfig);
 
 } // namespace contour::display

@@ -7,13 +7,20 @@
 #include <qbuffer.h>
 #include <qthread.h>
 
-#if QT_VERSION >= 0x060000
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
     #include <QtMultimedia/QAudioSink>
 #else
     #include <QtMultimedia/QAudioOutput>
 #endif
 namespace contour
 {
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+using QtAudioSink = QAudioSink;
+#else
+using QtAudioSink = QAudioOutput;
+#endif
+
 class Audio: public QObject
 {
     Q_OBJECT
@@ -29,15 +36,11 @@ class Audio: public QObject
 
   private:
     void fillBuffer(int volume, int duration, gsl::span<const int> notes);
-    std::vector<std::int16_t> createMusicalNote(double volume, int duration, int note_) noexcept;
+    static std::vector<std::int16_t> createMusicalNote(double volume, int duration, int note) noexcept;
 
-    QByteArray byteArray_;
-    QBuffer audioBuffer_;
-    QThread soundThread_;
-#if QT_VERSION >= 0x060000
-    std::unique_ptr<QAudioSink> audio;
-#else
-    std::unique_ptr<QAudioOutput> audio;
-#endif
+    QByteArray _byteArray;
+    QBuffer _audioBuffer;
+    QThread _soundThread;
+    std::unique_ptr<QtAudioSink> _audioSink;
 };
 } // namespace contour
