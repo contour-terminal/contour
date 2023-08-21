@@ -104,6 +104,7 @@ target_link_libraries(vtbackend PUBLIC
     range-v3::range-v3 
     ${LIBUNICODE_LIBS}  
     regex_dfa
+    ctre::ctre
     vtparser 
     vtpty 
 )
