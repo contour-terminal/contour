@@ -49,7 +49,7 @@ for everyday use. It is aiming for power users with a modern feature mindset.
 sudo dnf install contour-terminal
 ```
 
- - `Arch` use AUR [package](https://aur.archlinux.org/packages/contour-git)
+ - `Arch` use AUR [package](https://aur.archlinux.org/packages/contour)
 
 ### Installing via Flatpak
 

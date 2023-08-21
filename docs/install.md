@@ -22,7 +22,7 @@ sudo dnf install contour-terminal
 
 ## Arch Linux
 
-Please use the AUR, at [https://aur.archlinux.org/packages/contour-git](https://aur.archlinux.org/packages/contour-git).
+Please use the AUR, at [https://aur.archlinux.org/packages/contour-git](https://aur.archlinux.org/packages/contour).
 
 ## Ubuntu Linux
 
